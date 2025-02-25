@@ -42,6 +42,28 @@ sub new {
 
 ### Instance Methods {{{
 
+# get_authorized_user - returns the authorized user for the PAT {{{
+sub get_authorized_user {
+	my ($self) = @_;
+	return unless $self->{creds};
+	if ($self->{creds} =~ /^Bearer (.+)$/ || $self->{creds} =~ /^([^:]+):(.+)$/) {
+		my ($code,$msg,$data) = curl(
+			"GET", $self->base_url . "/user",
+			undef, undef, 0, $self->{creds}
+		);
+		bail("Failed to retrieve user information from Github: %s", $code)
+			unless $code == 200;
+		my $user_info = undef;
+		eval {
+			$user_info = load_json($data); 1
+		} or bail("Failed to read user information from Github: %s", $@);
+		return $user_info->{login};
+	} else {
+		return '';
+	}
+}
+
+# }}}
 # check - checks the availability of this provider {{{
 sub check {
 	my ($self, $url, $ref) = @_;

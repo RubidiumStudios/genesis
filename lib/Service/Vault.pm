@@ -543,6 +543,26 @@ sub status {
 }
 
 # }}}
+# token_info - return the token information for the active user token {{{
+sub token_info {
+	my $self = shift;
+	my ($out,$rc, $err) = $self->query('vault', 'token', 'lookup', '-format=json');
+	return read_json_from($out) if $rc == 0;
+	debug(
+		"#R{[ERROR]} Could not get token information from vault at #M{%s}",
+		$self->{url}
+	);
+	return {};
+}
+
+# }}}
+# sub user - return the user information for the active user token {{{
+sub user {
+	my $self = shift;
+	my $token_info = $self->token_info;
+	return $token_info->{data}{meta}{username} || $token_info->{data}{display_name};
+}
+
 # env - return the environment variables needed to directly access the vault {{{
 sub env {
 	my $self = shift;
