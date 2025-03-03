@@ -399,6 +399,26 @@ sub set {
 }
 
 # }}}
+# clear - remove all keys under a given path {{{
+sub clear {
+	my ($self, $path, $recursive) = @_;
+	my ($out,$rc,$err) = ('',0,'');
+	if ($recursive) {
+		debug("Clearing #C{%s} and all subpaths in vault at #M{%s}", $path, $self->{url});
+		($out,$rc,$err) = $self->query('rm', '-rf', $path);
+	} elsif (!$self->has($path)) {
+		debug("Path #C{%s} does not exist in vault at #M{%s} - no need to clear", $path, $self->{url});
+		return;
+	} else {
+		debug("Clearing #C{%s} in vault at #M{%s}", $path, $self->{url});
+		($out,$rc,$err) = $self->query('rm', '-f', $path);
+	}
+	bail(
+		"Could not clear #C{%s} in vault at #M{%s}:\n%s",
+		$path,$self->{url},$out.$err
+	) unless $rc == 0;
+}
+
 # set_path - writes a set of key value pairs to the vault {{{
 sub set_path {
 	my ($self, $path, $data, %opts) = @_;
@@ -407,31 +427,14 @@ sub set_path {
 	my $clear = $opts{clear} // 0;
 	if ($flatten) {
 		$data = Genesis::flatten({},'',$data);
-		$data->{__flattened__} = 1;
+		$data->{__flattened__} = JSON::PP::true;
 	}
 
-	if ($clear) {
-		my ($out,$rc,$err) = ('',0,'');
-		if ($flatten) {
-			# Just clear the leaf, not the whole tree
-			if ($self->has($path)) {
-				debug("Clearing #C{%s} in vault at #M{%s}", $path, $self->{url});
-				($out,$rc,$err) = $self->query('rm', '-f', $path);
-			}
-		} else {
-			if ($self->paths($path)) {
-				debug("Clearing #C{%s} and all subpaths in vault at #M{%s}", $path, $self->{url});
-				($out,$rc,$err) = $self->query('rm', '-rf', $path);
-			}
-		}
-		bail(
-			"Could not clear #C{%s} in vault at #M{%s}:\n%s",
-			$path,$self->{url},$out.$err
-		) unless $rc == 0;
-	}
+	$self->clear($path, !$flatten) if ($clear);
 
 	my @set_data = ();
-	while (my ($key,$value) = each %$data) {
+	for my $key (sort keys %$data) {
+		my $value = $data->{$key};
 
 		if (ref($value) eq 'HASH') {
 			$self->set_path("$path/$key", $value);
@@ -462,6 +465,7 @@ sub set_path {
 		}
 	}
 
+  return $data unless scalar(@set_data);
 	my ($out,$rc) = $self->query('set', $path, @set_data);
 	bail(
 		"Could not write #C{%s} to vault at #M{%s}:\n%s",
