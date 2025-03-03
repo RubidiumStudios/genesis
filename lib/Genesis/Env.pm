@@ -2716,6 +2716,61 @@ sub check {
 }
 
 # }}}
+# deployment_cache_setup - create the deployment cache directory {{{
+sub deployment_cache_setup {
+	my ($self) = @_;
+	# This won't survive post-process cleanup; maybe we should move it under
+	# $self->top->path('.genesis/deploy-cache'), and clean that up post-deploy?
+	my $deploy_cache = $self->workpath('deploy-cache');
+	$self->deployment_cache_cleanup;
+	mkdir_or_fail($deploy_cache);
+
+	# TODO: This should be done more programatically:
+	# - split by _
+	# pop last item off as the type
+	# join the rest (sorted alphabetically) with -
+	# switch on type, build the path.
+	$self->{__deployment_cache_files} = {
+		manifest => $deploy_cache."/".$self->name.".yml",
+		unpruned_manifest => $deploy_cache."/".$self->name."-unpruned.yml",
+		redacted_manifest => $deploy_cache."/".$self->name."-redacted.yml",
+		vars => $deploy_cache."/".$self->name.".vars",
+		redacted_vars => $deploy_cache."/".$self->name."-redacted.vars",
+		state => $deploy_cache."/".$self->name."-state.json",
+		store => $deploy_cache."/".$self->name."-store.yml",
+		deploy_log => $deploy_cache."/".$self->name."-output.log",
+	};
+}
+
+# }}}
+# deployment_cache_cleanup - remove the deployment cache {{{
+sub deployment_cache_cleanup {
+	my ($self) = @_;
+	my $deploy_cache = $self->workpath('deploy-cache');
+	if (-d $deploy_cache) {
+		info("Cleaning up deployment cache...");
+		rmtree($deploy_cache);
+	}
+}
+
+# }}}
+# deployment_cache_path_lookup - return the path to a file in the deployment cache {{{
+sub deployment_cache_path_lookup {
+	my ($self, $descriptor) = @_;
+	bug(
+		"Deployment cache not set up; run deployment_cache_setup first"
+	) unless defined $self->{__deployment_cache_files};
+
+	my $deploy_cache = $self->workpath('deploy-cache');
+	return $deploy_cache unless $descriptor;
+
+	my $files = $self->{__deployment_cache_files};
+	return $files if $descriptor eq 'all';
+	bug("Invalid deployment cache path: %s", $descriptor) unless exists($files->{$descriptor});
+	return $files->{$descriptor};
+}
+
+# }}}
 # deploy - deploy the environment {{{
 sub deploy {
 	my ($self, %opts) = @_;
@@ -2733,19 +2788,17 @@ sub deploy {
 		"Preflight checks failed; deployment operation halted."
 	) unless $self->check('confirm_release_overrides' => $confirm);
 
-	my $deploy_cache = $self->workpath('deploy-cache'); # This won't survive post-process cleanup
-										#$self->top->path('.genesis/deploy-cache');
-	mkdir_or_fail($deploy_cache) unless -d $deploy_cache;
+  $self->deployment_cache_setup;
 
 	my $pruned_deploy_manifest = $self->manifest_provider->deployment(subset=>'pruned',notify=>1);
 	my $unpruned_deploy_manifest = $self->manifest_provider->deployment(notify=>0);
-	my $manifest_path = $deploy_cache."/".$self->name.".yml";
+	my $manifest_path = $self->deployment_cache_path_lookup('manifest');
 	$pruned_deploy_manifest->write_to($manifest_path);
-	my $unpruned_manifest_path = $deploy_cache."/".$self->name."-unpruned.yml";
+	my $unpruned_manifest_path = $self->deployment_cache_path_lookup('unpruned_manifest');
 	$unpruned_deploy_manifest->write_to($unpruned_manifest_path);
 
 	my ($ok, $predeploy_data,$data_fn) = ();
-	my $vars_path = $self->vars_file(0,$deploy_cache."/".$self->name.".vars");
+	my $vars_path = $self->vars_file(0, $self->deployment_cache_path_lookup('vars'));
 	if ($self->has_hook('pre-deploy')) {
 		($ok, $predeploy_data) = $self->run_hook(
 			'pre-deploy',
@@ -2806,15 +2859,15 @@ sub deploy {
 
 	my $cached_manifest_path = $manifest_path;
 	my $cached_vars_path = $vars_path;
-	my $cached_redacted_manifest_path = $deploy_cache."/".$self->name."-redacted.yml";
-	my $cached_redacted_vars_path = $deploy_cache."/".$self->name."-redacted.vars";
+	my $cached_redacted_manifest_path = $self->deployment_cache_path_lookup('redacted_manifest');
+	my $cached_redacted_vars_path = $self->deployment_cache_path_lookup('redacted_vars');
 	$self->manifest_provider->deployment->redacted->write_to($cached_redacted_manifest_path);
 	$self->vars_file('redacted', $cached_redacted_vars_path);
 
 	# Only used by create-env deployments, but need to reference them if they
 	# exist when caching the results.
-	my $state_path = $deploy_cache."/".$self->name."-state.json";
-	my $store_path = $deploy_cache."/".$self->name."-store.yml";
+	my $state_path = $self->deployment_cache_path_lookup('state');
+	my $store_path = $self->deployment_cache_path_lookup('store');
 
 	# DEPLOY!!!
 	$self->notify("all systems #G{ok}, initiating BOSH deploy...");
@@ -2986,11 +3039,12 @@ sub deploy {
 					if -e $cached_redacted_vars_path;
 			};
 			warning("Failed to copy manifest to repository: $@") if ($@);
-			for ('state.json', 'store.yml') {
-				my $file = $self->name."-$_";
-				next unless -f "$deploy_cache/$file";
+			for ('state', 'store') {
+				my $cached_file = $self->deployment_cache_path_lookup($_);
+				next unless -f $cached_file;
+				my $file = basename($cached_file);
 				eval {
-					copy_or_fail("$deploy_cache/$file", $self->path(".genesis/manifests/$file"));
+					copy_or_fail("$cached_file", $self->path(".genesis/manifests/$file"));
 				};
 				warning("Failed to copy $file to repository: $@") if ($@);
 			}
@@ -3100,6 +3154,8 @@ sub deploy {
 		}, @exodus_cmds
 	);
 	$self->_reset_last_deployed_manifest;
+	# Clean up the deployment cache
+	$self->deployment_cache_cleanup;
 
 	if ($manifest_store eq 'exodus') {
 		# Remove any lingering manifest files from the repo
