@@ -1263,6 +1263,9 @@ sub is_vaultified {
 		} $self->kit_files;
 		push (@files, $self->actual_environment_files);
 		for my $file (@files) {
+			# Make sure we're using the top path for relative files
+			$file = $self->path($file) unless ($file =~ m#^/#);
+
 			my $content = slurp($file) =~ s/\A---\n//r;
 			my @pages = split(/\n---\n/,$content);
 			for my $page (@pages) {
