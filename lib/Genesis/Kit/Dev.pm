@@ -34,6 +34,10 @@ sub version {
 	return "latest";
 }
 
+sub is_dev {
+	return 1;
+}
+
 sub extract {
 	my ($self) = @_;
 	return if $self->{root};

@@ -738,6 +738,11 @@ sub _dereference_param {
 }
 
 # }}}
+
+# is_dev - return true if this is a dev kit {{{
+sub is_dev {
+	return 0;
+}
 # }}}
 
 1;
