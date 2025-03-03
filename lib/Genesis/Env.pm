@@ -3760,7 +3760,7 @@ exodus:
   deployer:       (( grab \$CONCOURSE_USERNAME || \$USER || "unknown" ))
   kit_name:       ${\($self->kit->metadata->{name} || 'unknown')}
   kit_version:    ${\($self->kit->metadata->{version} || '0.0.0-rc0')}
-  kit_is_dev:     ${\(ref($self->kit) eq "Genesis::Kit::Dev" ? 'true' : 'false')}
+  kit_is_dev:     ${\($self->kit->is_dev ? 'true' : 'false')}
   vault_base:     (( grab meta.vault ))
   bosh:           $bosh_target
   iaas:           ${\($self->iaas)}
