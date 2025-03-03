@@ -85,6 +85,7 @@ our @EXPORT = qw/
 	struct_lookup
 	flatten
 	unflatten
+	deep_merge
 	in_array
 	index_of
 	compare_arrays
@@ -1142,6 +1143,39 @@ sub unflatten {
 }
 
 # }}}
+# deep_merge - merge hash references {{{
+sub deep_merge {
+	my ($base, @overlays) = @_;
+	my $flatten = 0;
+	my $flat_base = flatten($base);
+	for my $removed_key (grep {not defined $flat_base->{$_}} keys %$flat_base) {
+		delete $flat_base->{$removed_key};
+	}
+	while (my $overlay = shift @overlays) {
+		if (ref($overlay) eq 'HASH') {
+			my $flat_overlay = flatten($overlay);
+			for my $removed_key (grep {not defined $flat_overlay->{$_}} keys %$flat_overlay) {
+				delete $flat_base->{$removed_key};
+				delete $flat_overlay->{$removed_key};
+			}
+			$flat_base = { %$flat_base, %$flat_overlay };
+		} elsif (ref($overlay) eq '') {
+			if (!defined($overlay)) {
+				$flatten = 1;
+			} elsif($overlay =~ /^(un)?flatten(ed)?$/) {
+				$flatten = defined($1) ? 0 : 1;
+			} elsif($overlay =~ /^(?:flatten=)?([01])$/) {
+				$flatten = $1;
+			} else {
+				bug("deep_merge: unknown overlay value: %s - expecting either '(un)flatten(ed)' or 'flattened=1|0'", $overlay);
+			}
+		} else {
+			bug("deep_merge: unknown overlay type: %s", ref($overlay));
+		}
+	}
+	return $flatten ? $flat_base : unflatten($flat_base);
+}
+
 
 sub uniq {
 	my (@items,%check);
