@@ -621,6 +621,16 @@ sub deployment_name {
 }
 
 # }}}
+# sub manifest_store - returns the type of manifest store: exodus, hybrid, or repository {{{
+sub manifest_store {
+	# If the environment supports a version of Genesis lower than 3.1.0-rc20, then
+	# the manifest store is always 'repository' because earlier versions of Genesis
+	# cannot update the exodus deployment audit data.
+	return 'repository' unless $_[0]->feature_compatibility("3.1.0-rc20");
+	shift->top->config->get('manifest_store','hybrid');
+}
+
+# }}}
 # is_bosh_director - returns true if the environment represents a BOSH director deployment {{{
 sub is_bosh_director {
 	my $self = shift;
@@ -2184,12 +2194,11 @@ sub last_deployed_manifest {
 	my $pruned = !exists($opts{pruned}) || $opts{pruned} || 0;
 	my $include_contents = !exists($opts{contents}) || $opts{contents} || 0;
 
-	my $manifest_store = $self->top->config->get('manifest_store', 'hybrid');
 	my $results = undef;
 	my $start = gettimeofday;
 	my @errors;
 	while (1) {
-		if ($manifest_store ne 'repository') {
+		if ($self->manifest_store ne 'repository') {
 			my $deploy_date = $self->exodus_lookup('dated');
 			info({pending => 1},
 				"  - looking for cached manifest..."
