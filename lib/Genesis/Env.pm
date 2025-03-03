@@ -30,6 +30,7 @@ use IO::Uncompress::Gunzip qw/gunzip $GunzipError/;
 use JSON::PP qw/encode_json decode_json/;
 use MIME::Base64 qw/encode_base64 decode_base64/;
 use POSIX qw/strftime/;
+use Time::Piece;
 use Time::Seconds;
 use Time::HiRes qw/gettimeofday/;
 
@@ -631,6 +632,22 @@ sub manifest_store {
 }
 
 # }}}
+# deployment_state - returns the status of the deployment {{{
+sub deployment_state {
+	my $self = shift;
+	my $exodus = $self->exodus_lookup();
+	my $latest_deploy = $self->deployment_lookup('latest');
+	return 'undeployed' unless $latest_deploy || $exodus;
+	if (!defined $exodus->{sequence}) {
+		return 'terminated' if ($latest_deploy->{state}//'') eq 'terminated';
+		$latest_deploy = $self->_backfill_deployment_audit_data($exodus, $latest_deploy);
+	} elsif ($exodus->{sequence} != ($latest_deploy->{sequence}//0)) {
+		$latest_deploy = $self->_backfill_deployment_audit_data($exodus, $latest_deploy);
+	}
+	return $latest_deploy->{state};
+}
+
+# }}}
 # is_bosh_director - returns true if the environment represents a BOSH director deployment {{{
 sub is_bosh_director {
 	my $self = shift;
@@ -974,6 +991,7 @@ sub last_deployed_lookup {
 # exodus_lookup - lookup Exodus data from the last deployment of this (or named) deployment {{{
 sub exodus_lookup {
 	my ($self, $key, $default,$for) = @_;
+	$key //= '.';
 	$for ||= $self->exodus_slug;
 	my $path =  $self->exodus_mount().$for;
 	debug "Checking if $path path exists...";
@@ -1071,6 +1089,9 @@ sub deployment_lookup {
 	}
 
 	my $manifest_data = $self->vault->get($self->exodus_mount.$self->exodus_slug."/deployments/$timestamp");
+	if (delete($manifest_data->{__flattened__})) {
+		$manifest_data = unflatten($manifest_data);
+	}
 	$manifest_data->{timestamp} = $timestamp;
 	return $manifest_data;
 }
@@ -2771,6 +2792,39 @@ sub deployment_cache_path_lookup {
 }
 
 # }}}
+# get_next_deployment_sequence_number - get the next deployment sequence number {{{
+sub get_next_deployment_sequence_number {
+	my ($self) = @_;
+
+	my $old_exodus = $self->exodus_lookup(".",{});
+	my $sequence = $old_exodus->{sequence};
+	return $sequence + 1 if defined($sequence);
+
+	# If sequence is not found, then an older version of Genesis was used and we
+	# need to figure out if we need to backfill the deployment audit data
+
+	# If the manifest store is the repository, then we can't backfill the
+	# deployment audit data because that isn't supported, so just assume 1;
+	return 1 if ($self->manifest_store eq 'repository');
+
+	# If there were no deployment audits, then we can start at 1
+	my $last_deployment = $self->deployment_lookup('latest');
+	return 1 unless $last_deployment;
+
+	# If the last deployment was terminated, then we can start at one more than
+	# the termination sequence number
+	return $last_deployment->{sequence} + 1
+		if ($last_deployment->{state}//'deployed') eq 'terminated'
+		&& defined($last_deployment->{sequence});
+
+	# If the last deployment was not terminated, then we need to backfill the
+	# deployment audit data to ensure that the sequence numbers are correct
+	$last_deployment = $self->_backfill_deployment_audit_data(
+		$old_exodus, $last_deployment
+	);
+	return $last_deployment->{sequence} + 1;
+}
+
 # deploy - deploy the environment {{{
 sub deploy {
 	my ($self, %opts) = @_;
@@ -2920,7 +2974,6 @@ sub deploy {
 			}
 		}
 
-		my $old_exodus = $self->exodus_lookup("",{});
 		if ($last_manifest_path) {
 			bail(
 				"Cannot find state file for previous deployment; cannot proceed with create-env."
@@ -2946,7 +2999,7 @@ sub deploy {
 					"spruce", "diff", $last_manifest_path, $manifest_path
 			));
 			$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/smr;
-			
+
 			bail(
 				"Failed to diff the last deployed manifest with the current manifest: %s",
 				$err//$out
@@ -3035,7 +3088,7 @@ sub deploy {
 			mkdir_or_fail($self->path(".genesis/manifests")) unless -d $self->path(".genesis/manifests");
 			eval {
 				copy_or_fail($cached_redacted_manifest_path, $self->path(".genesis/manifests/$self->{name}.yml"));
-				copy_or_fail($cached_redacted_vars_path, $self->path(".genesis/manifests/$self->{name}.vars")) 
+				copy_or_fail($cached_redacted_vars_path, $self->path(".genesis/manifests/$self->{name}.vars"))
 					if -e $cached_redacted_vars_path;
 			};
 			warning("Failed to copy manifest to repository: $@") if ($@);
@@ -3075,85 +3128,33 @@ sub deploy {
 		exit 0;
 	}
 
-	# track exodus data in the vault 
+	mkfile_or_fail(
+		$self->deployment_cache_path_lookup('deploy_log'), decode_utf8($results[0])
+	) unless $manifest_store eq 'repository';
+
+	# track exodus data in the vault
 	$self->notify("Preparing metadata for export...");
-	$self->vault->authenticate unless $self->vault->authenticated;
-	my $exodus = $self->exodus;
 
-	if ($manifest_store ne 'exodus') {
-		# Repository-based exodus data (also used in hybrid mode)
-		$exodus = {
-			%$exodus,
-			manifest_sha1 => digest_file_hex($manifest_path, 'SHA-1'),
-			manifest_type => $self->manifest_provider->deployment->redacted->type,
-		};
-	}
-
-	my @exodus_cmds = (
-		'rm',  $self->exodus_base, "-f", '--',
-		'set', $self->exodus_base, map { "$_=$exodus->{$_}" } grep {defined($exodus->{$_})} keys %$exodus,
+	my @skip_drains = @{$opts{'skip-drain'}};
+	my $opt_flags = join(', ', grep {$_} (
+		$opts{yes} ? 'non-blocking' : undef,
+		$disable_reactions ? 'disable-reactions' : undef,
+		$opts{recreate} ? 'recreate' : undef,
+		scalar(@skip_drains) ?
+			scalar(grep {$_ eq ''} @skip_drains)
+			? 'skip-drain'
+			: 'skip-drain['.join(',',@skip_drains).']' : undef,
+		$opts{'fix'} ? 'fix' : undef,
+		$opts{'fix-releases'} ? 'fix-releases' : undef,
+		$opts{'canaries'} ? "canaries=$opts{'canaries'}" : undef,
+		$opts{'max-in-flight'} ? "max-in-flight=$opts{'max-in-flight'}" : undef,
+	));
+	$self->update_deployment_exodus(
+		'deployed',
+		reason => %opts{reason},
+		flags => $opt_flags
 	);
 
-	if ($manifest_store ne 'repository') {
-		my $output_path = $deploy_cache."/".$self->name."-output.log";
-		mkfile_or_fail($output_path, decode_utf8($results[0]));
-
-		# TODO: Grab the credhub variables used, and a diff of the dev kit compared
-		#       to the version the dev kit was initiated with, if dev kit is used,
-		#       or maybe just tar-up the whole dev directory...?
-
-		my $exodus_deployment = {
-			manifest_sha2 => digest_file_hex($manifest_path, 'SHA-256'),
-			manifest_type => $pruned_deploy_manifest->type,
-			deployer      => $exodus->{deployer},
-			kit_id        => $self->kit->id,
-			kit_is_dev    => $exodus->{kit_is_dev},
-			kit_features  => $exodus->{features},
-		};
-
-		# Compress and base64 encode the manifest data for storage in the vault
-		my %artifacts = (
-			log => $output_path,
-			manifest => $manifest_path,
-			unpruned => $unpruned_manifest_path,
-			vars => $vars_path,
-			state => $state_path,
-			store => $store_path,
-		);
-
-		my $tar = Archive::Tar->new;
-		for my $artifact (keys %artifacts) {
-			next unless $artifacts{$artifact} && -f $artifacts{$artifact};
-			$tar->add_data(basename($artifacts{$artifact}), slurp($artifacts{$artifact}));
-		}
-
-		my $compressed_data;
-		open(my $data_fh, '>', \$compressed_data);
-		$tar->write(IO::Compress::Gzip->new($data_fh, Level => 9, Append => 0, AutoClose => 1))
-			or bail("Failed to compress manifest artifacts");
-
-		my $encoded_artifacts = encode_base64($compressed_data);
-		my ($deployment_time) = map {
-			my $time = Time::Piece->strptime($exodus->{$_}, "%Y-%m-%d %H:%M:%S %z");
-			$time->gmtime($time->epoch)->strftime("%Y%m%d%H%M%S");
-		} ('dated');
-		my $artifact_file = $self->workpath("exodus-$deployment_time.tgz.b64");
-		mkfile_or_fail($artifact_file, $encoded_artifacts);
-
-		push @exodus_cmds, (
-			'--', 'set', $self->exodus_base."/deployments/$deployment_time", "artifacts\@$artifact_file", map { "$_=$exodus_deployment->{$_}" } keys %$exodus_deployment
-		);
-	}
-
-	debug("setting exodus data in the Vault, for use later by other deployments");
-	$self->vault->authenticate->query(
-		{ onfailure => "#R{Failed to export $self->{name} metadata.}\n".
-		               "Deployment was still successful, but metadata used by addons and other kits is outdated.\n".
-		               "This may be resolved by deploying again, or it may be a permissions issue while trying to\n".
-		               "write to vault path '".$self->exodus_base."'\n"
-		}, @exodus_cmds
-	);
-	$self->_reset_last_deployed_manifest;
 	# Clean up the deployment cache
 	$self->deployment_cache_cleanup;
 
@@ -3186,8 +3187,8 @@ sub deploy {
 }
 
 # }}}
-#	 exodus - get the populated exodus data generated in the manifest {{{
-sub exodus {
+#	 extract_manifest_exodus - get the populated exodus data generated in the manifest {{{
+sub extract_manifest_exodus {
 	my ($self) = @_;
 	# FIXME: May need to use an unentombed manifest...
 	my $exodus = flatten({}, undef, scalar($self->manifest_lookup('exodus', {})));
@@ -3223,7 +3224,139 @@ sub exodus {
 }
 
 # }}}
+# update_deployment_exodus - update the exodus data in the vault {{{
+sub update_deployment_exodus {
+	my ($self, $state, %deployment_details) = @_;
 
+	# Authenticate to the vault
+	$self->vault->authenticate unless $self->vault->authenticated;
+
+	my $exodus_overrides = delete $deployment_details{exodus_overrides} // {};
+
+	# Get the completed timestamp from overrides, or use the current time
+	my $timestamp = $deployment_details{completed} || Time::Piece->new->strftime('%Y-%m-%d %H:%M:%S %z');
+
+	# Determine the sequence number
+	my $sequence = $self->get_next_deployment_sequence_number();
+
+	# Build the base exodus data (manifest data and legacy deployment data)
+	my $exodus = {};
+	my @exodus_cmds = ();
+	if ($sequence > 1 && $self->vault->has($self->exodus_base)) {
+		push @exodus_cmds, ('rm', $self->exodus_base, "-f");
+	}
+
+	if ($state eq 'deployed') {
+		# if the state is 'deployed', generate the exodus data from the manifest
+		# using $self->exodus, as well as the standard deployment exodus data
+		$exodus = {
+			$self->extract_manifest_exodus->%*,
+			completed => $timestamp,
+			sequence => $sequence
+		};
+		$exodus = {
+			%$exodus,
+			manifest_sha1 => digest_file_hex(
+				$self->deployment_cache_path_lookup('redacted_manifest'), 'SHA-1'
+			),
+			manifest_type => $self->manifest_provider->deployment->redacted->type,
+		} if ($self->manifest_store ne 'exodus');
+
+		# Special case for the started timestamp
+		if ($deployment_details{started}) {
+			$exodus->{dated} = $deployment_details{started};
+		}
+	} elsif ($state ne 'terminated') {
+		# TODO: Support 'pending' as an state, for when the deployment has started,
+		# then move it to 'deployed' when it's done
+		bug(
+			"Invalid state for deployment exodus: %s - expected 'deployed' or 'terminated'",
+			$state
+		)
+	}
+
+	# Build the exodus set commands as an array
+	$exodus = deep_merge($exodus, $exodus_overrides);
+	if (keys %$exodus) {
+		push(@exodus_cmds, '--') if @exodus_cmds && $exodus_cmds[-1] ne '--';
+		push @exodus_cmds, (
+			'set', $self->exodus_base, map {
+				"$_=$exodus->{$_}"
+			} grep {$exodus->{$_}} keys %$exodus
+		);
+	}
+
+	# If the manifest store is not 'repository', build the deployment audit data
+	if ($self->manifest_store ne 'repository') {
+		my $deployment_time = $timestamp =~ s/\+.*$//r =~ s/[^0-9]//gr; # YYYYMMDDHHMMSS
+		my $artifact_file = $self->workpath("exodus-$deployment_time.tgz.b64");
+		if ($state eq 'deployed') {
+			$self->_build_deployment_artifacts(
+				$artifact_file,
+				log      => $self->deployment_cache_path_lookup('deploy_log'),
+				manifest => $self->deployment_cache_path_lookup('manifest'),
+				unpruned => $self->deployment_cache_path_lookup('unpruned_manifest'),
+				vars     => $self->deployment_cache_path_lookup('vars'),
+				state    => $self->deployment_cache_path_lookup('state'),
+				store    => $self->deployment_cache_path_lookup('store'),
+				secrets  => [keys($self->manifest_provider->vault_paths->%*)],
+				# TODO: add the dev kit, the ops directory and the env and its ancestors.
+			);
+			$deployment_details{manifest} = {
+				type => $self->manifest_provider->deployment->type,
+				sha2 => digest_file_hex(
+					$self->deployment_cache_path_lookup('manifest'), 'SHA-256'
+				),
+			};
+		}
+
+		my $deployment_data = $self->_build_deployment_audit_data(
+			$state, $sequence, $timestamp,
+			started => ($exodus->{dated} || $timestamp),
+			%deployment_details
+		);
+
+		# Add the deployment audit data to the exodus commands
+		push(@exodus_cmds, '--') if @exodus_cmds && $exodus_cmds[-1] ne '--';
+		push @exodus_cmds, (
+			'set', $self->exodus_base."/deployments/$deployment_time",
+			'__flattened__=1',
+			map {
+				"$_=$deployment_data->{$_}"
+			} keys %$deployment_data
+		);
+		push(
+			@exodus_cmds, "artifacts\@$artifact_file"
+		) if -f $artifact_file;
+	}
+
+
+	# Set the exodus data in the vault
+	debug("setting exodus data in the Vault, for use later by other deployments");
+	my $failure_msg = sprintf(
+		"#R{Failed to export %s metadata.}\n".
+		"Environment was still successfully %s, but metadata used by addons and ".
+		"other kits is outdated.\n%s",
+		$self->{name}, $state,
+		$state eq 'deployed'
+			? "\nThis may be resolved by deploying again, or it may be a permissions issue while trying to ".
+			  "write to vault path '".$self->exodus_base."'\n"
+			: '\nThis may be resolved by terminating again, or it may be a permissions issue while trying to '.
+			  "write to vault path '".$self->exodus_base."'\n"
+	);
+	$self->vault->authenticate->query(
+		{ redact => 1, onfailure => $failure_msg},
+		@exodus_cmds
+	);
+
+	# Reset the last deployed manifest
+	$self->_reset_last_deployed_manifest;
+	return 1;
+}
+
+# }}}
+
+# }}}
 
 # Secrets Processing
 # add_secrets - add any secrets missing from the environment {{{
@@ -3804,6 +3937,179 @@ sub _reset_last_deployed_manifest {
 	my $self = shift;
 	undef($self->{__last_deployed_lookup_manifest});
 }
+
 # }}}
+# _build_deployment_audit_data - build the audit data for a deployment (or termination) {{{
+sub _build_deployment_audit_data {
+	my ($self, $state, $sequence, $timestamp, @overrides) = @_;
+
+	my $flatten = 'flatten';
+	$flatten = shift(@overrides) if ($overrides[0] =~ /^(un)?flatten(ed)?$/);
+	my %overrides = @overrides;
+
+	my $deployment_data = {
+		state           => $state,
+		started         => $timestamp,
+		completed       => $timestamp,
+		sequence        => $sequence,
+		genesis_version => $Genesis::VERSION,
+		reason          => 'unspecified',
+
+		kit => {
+			id            => $self->kit->id,
+			name          => $self->kit->name,
+			version       => $self->kit->version,
+			is_dev        => $self->kit->is_dev ? JSON::PP::true : JSON::PP->false,
+			features      => join(',',$self->features),
+		},
+
+		user => {
+			shell         => $ENV{USER},
+			git           => $self->top->kit_provider->remote->get_authorized_user,
+			vault         => $self->vault->user,
+			concourse     => $ENV{CONCOURSE_USERNAME},
+		},
+	};
+
+	# Apply any overrides
+	$deployment_data = deep_merge($deployment_data, \%overrides, $flatten);
+	return $deployment_data;
+}
+
+# }}}
+# _build_deployment_artifacts - build the deployment artifacts tarball {{{
+sub _build_deployment_artifacts {
+	my ($self, $artifact_file, %artifacts) = @_;
+
+	# Secrets aren't a file, but a collection of vault paths, so we need to
+	# handle them separately
+	my $secrets = delete($artifacts{secrets});
+
+	my $tar = Archive::Tar->new;
+
+	# Add in all the artifacts
+	# TODO: Support directories or list of files so dev kits, or even the whole deployment repo can be included
+	for my $artifact (keys %artifacts) {
+		next unless $artifacts{$artifact} && -f $artifacts{$artifact};
+		$tar->add_data(basename($artifacts{$artifact}), slurp($artifacts{$artifact}));
+	}
+
+	# Add in all secrets used by the manifest
+	if (defined $secrets && ref($secrets) eq 'ARRAY') {
+		my @paths = uniq map {$_ =~ s/:.*//r} ($secrets->@*); # can't export individual keys
+		my $content = @paths
+			? $self->vault->query({redact => 1}, 'export', @paths)
+			: '{}';
+		$tar->add_data('secrets.json', $content);
+	}
+
+	# Compress and base64 encode the artifacts into a tarball
+	my $compressed_data;
+	open(my $data_fh, '>', \$compressed_data);
+	$tar->write(IO::Compress::Gzip->new($data_fh, Level => 9, Append => 0, AutoClose => 1))
+		or bail("Failed to compress manifest artifacts");
+
+	my $encoded_artifacts = encode_base64($compressed_data);
+	mkfile_or_fail($artifact_file, $encoded_artifacts);
+
+	return {
+		artifact => $artifact_file,
+		artifacts     => \%artifacts,
+		secrets       => $secrets,
+	};
+
+}
+
+# }}}
+# _backfill_deployment_audit_data - backfill the audit data for a missing deployment or termination {{{
+sub _backfill_deployment_audit_data {
+	my ($self, $old_exodus, $last_deployment) = @_;
+
+	# Get last deployments sequence number
+	$last_deployment //= $self->deployment_lookup('latest') // {};
+	bug{
+		"last_deployment is not a hashref: %s",
+		$last_deployment
+	} unless ref($last_deployment) eq 'HASH';
+
+	return undef unless keys %$last_deployment || keys %$old_exodus; # no prior deployments
+	my $sequence = (
+		$last_deployment->{sequence} //
+		scalar(keys $self->exodus_lookup('/deployments', {})->%*)
+	) + 1;
+
+	# Case 1: We have no data in exodus, so it must have been terminated
+	if (!keys %$old_exodus) {
+		return $last_deployment if $last_deployment->{state} eq 'terminated';
+
+		# Create an artificial termination date halfway between the last
+		# deployment and now
+		my $now = Time::Piece->new;
+		my $termination_time = Time::Piece->strptime(
+			$last_deployment->{completed} || $last_deployment->{dated} || now->strftime("%Y-%m-%dT%H:%M:%SZ"),
+			"%Y-%m-%dT%H:%M:%SZ"
+		);
+		my $termination_ts = $termination_time + ($now - $termination_time) / 2;
+		$termination_ts = $termination_ts->strftime("%Y%m%d%H%M%S");
+
+		my $placeholder = {
+			state => 'terminated',
+			started => $termination_time->strftime("%Y-%m-%dT%H:%M:%SZ"),
+			completed => $now->strftime("%Y-%m-%dT%H:%M:%SZ"),
+			sequence => $sequence,
+			reason => 'Terminated via unknown means after last recorded deployment (time unknown)',
+		};
+		$self->vault->set_path($self->exodus_base."/deployments/$termination_ts", $placeholder, flatten => 1);
+
+	# Case 2: We have data in exodus, but no sequence number, so we need to
+	# backfill the deployment audit data
+	} else {
+
+		# Sanity check: if exodus has a sequence number, then we don't need to
+		# backfill the deployment audit data
+		if (defined($old_exodus->{sequence})) {
+			return $last_deployment if $old_exodus->{sequence} == $last_deployment->{sequence};
+			bail(
+				"Sequence number in exodus (%s) does not match the last deployment sequence number (%s) - contact support",
+				$old_exodus->{sequence}, $last_deployment->{sequence}
+			);
+		};
+
+		my $deployment_ts = $old_exodus->{dated};
+		my $genesis_version = $old_exodus->{version}//'(unknown version)';
+		my $reason = $old_exodus->{reason}//'Unknown reason';
+		$reason .= " (legacy deployment by Genesis $genesis_version - there may have been others between this and the previous archived deployment)";
+		my $deployment_data = $self->_build_deployment_audit_data(
+			'deployed', $sequence, $deployment_ts, 'unflattened',
+			kit => {
+				name => $old_exodus->{kit_name},
+				version => $old_exodus->{kit_version},
+				is_dev => $old_exodus->{kit_is_dev},
+				features => $old_exodus->{features},
+			},
+			user => {
+				shell => $old_exodus->{deployer},
+				vault => 'unknown',
+				git => 'unknown',
+				concourse => 'unknown',
+			},
+			manifest => {
+				storage => 'repository',
+				type => $old_exodus->{manifest_type},
+				sha1 => $old_exodus->{manifest_sha1},
+			},
+			reason => $reason,
+			genesis_version => $genesis_version,
+		);
+		$self->vault->set_path($self->exodus_base."/deployments/$deployment_ts", $deployment_data, flatten => 1);
+
+		# Update exodus with the new sequence number
+		$self->vault->set($self->exodus_base, "sequence", $sequence);
+	}
+	return $self->deployment_lookup('latest');
+}
+
+# }}}
+
 1;
 # vim: fdm=marker:foldlevel=1:noet
