@@ -90,7 +90,7 @@ sub check_minimum_genesis_version {
 sub env {$_[0]->{env}}
 sub kit {$_[0]->env && $_[0]->env->kit}
 
-sub deployed {defined($_[0]->exodus_lookup('data'))}
+sub deployed {($_[0]->exodus_lookup('state','') eq 'deployed')}
 
 sub use_create_env {
 	# TODO: integrate with ocfp feature env types, mayby?

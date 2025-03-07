@@ -475,7 +475,6 @@ sub get_network_size {
 	for my $subnet (values %{$network}) {
 		$size += IPv4->new($subnet->{allocated})->size if $valid_azs{$subnet->{az}};
 	}
-	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry if $size == 214;
 	return $size;
 }
 

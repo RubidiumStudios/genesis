@@ -18,6 +18,7 @@ use JSON::PP       qw/encode_json/;
 
 sub information {
 	# TODO: Make use of terminal_width and wrap to make this look better
+	# FIXME: Make compatible with new (and existing) exodus data, including the deployment audit log
 
 	command_usage(1) if @_ != 1;
 
@@ -32,7 +33,7 @@ sub information {
 		"=" x terminal_width, uc($env->type), $env->name
 	);
 
-	my $exodus = $env->exodus_lookup("",{});
+	my $exodus = $env->exodus_lookup(".",{});
 	my $unknown = csprintf("#YI{unknown}");
 	if ($exodus->{dated}) {
 		$out .= sprintf(

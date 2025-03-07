@@ -1148,7 +1148,7 @@ sub deep_merge {
 	my ($base, @overlays) = @_;
 	my $flatten = 0;
 	my $flat_base = flatten($base);
-	for my $removed_key (grep {not defined $flat_base->{$_}} keys %$flat_base) {
+	for my $removed_key (grep {! defined $flat_base->{$_}} keys %$flat_base) {
 		delete $flat_base->{$removed_key};
 	}
 	while (my $overlay = shift @overlays) {
