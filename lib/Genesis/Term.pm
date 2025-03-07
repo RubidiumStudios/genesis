@@ -25,6 +25,7 @@ our @EXPORT = qw/
 	process_markdown_block
 	render_markdown
 	elipses
+	string_to_hex
 	$ansi_reset_line
 	$ansi_clear_to_eol
 	$ansi_cursor_up
@@ -792,6 +793,39 @@ sub elipses {
 	my ($str, $len) = @_;
 	return $str if length($str) <= $len;
 	return substr($str, 0, $len-3) . '...';
+}
+
+sub get_control_picture {
+	my $byte = shift;
+	return csprintf("#Y{%s}", chr(0x2400 + $byte)) if $byte < 32;
+	return chr($byte) if ($byte <= 126);
+	return csprintf("#y{%s}", chr(0x2421 + $byte)) if ($byte == 127);
+	return csprintf("#R{%s}", chr(0x2420 + $byte));
+}
+
+sub string_to_hex {
+	my ($str) = @_;
+	my $printable = '';
+	
+	my $offset = 0;
+	while ($str) {
+		my $block = substr($str, 0, 16, '');     # Take 16 bytes worth
+		my $hex = '';
+		my $printable = '';
+		my @bytes = unpack('C*', $block);
+		for my $byte (@bytes) {
+			$hex .= sprintf("%02x ", $byte);
+			$printable = get_control_picture($byte);
+		}
+	
+		# Format in columns
+		printf("%04x  %-48s |%s|\n", 
+			$offset, 
+			$hex, 
+			$printable,
+		);
+		$offset += 16;
+	}
 }
 
 # TODO:
