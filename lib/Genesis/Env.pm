@@ -3195,9 +3195,11 @@ sub deploy {
 sub extract_manifest_exodus {
 	my ($self) = @_;
 	# FIXME: May need to use an unentombed manifest...
-	my $exodus = flatten({}, undef, scalar($self->manifest_lookup('exodus', {})));
+	my $exodus = scalar($self->manifest_lookup('exodus', {}));
 	my $vars_file = $self->vars_file;
 	return $exodus unless ($vars_file || $self->kit->uses_credhub); ## May be redundant if vaultifying credhub secrets...?
+
+	$exodus = flatten($exodus);
 
 	#interpolate bosh vars first
 	if ($vars_file) {
@@ -3224,7 +3226,7 @@ sub extract_manifest_exodus {
 			$exodus->{$target} = $out;
 		}
 	}
-	return $exodus;
+	return unflatten($exodus);
 }
 
 # }}}
@@ -3235,7 +3237,7 @@ sub update_deployment_exodus {
 	# Authenticate to the vault
 	$self->vault->authenticate unless $self->vault->authenticated;
 
-	my $exodus_overrides = delete $deployment_details{exodus_overrides} // {};
+	my $exodus_overrides = delete($deployment_details{exodus_overrides}) // {};
 
 	# Get the completed timestamp from overrides, or use the current time
 	my $timestamp = $deployment_details{completed} || Time::Piece->new->strftime('%Y-%m-%d %H:%M:%S %z');
@@ -3252,7 +3254,7 @@ sub update_deployment_exodus {
 
 	if ($state eq 'deployed') {
 		# if the state is 'deployed', generate the exodus data from the manifest
-		# using $self->exodus, as well as the standard deployment exodus data
+		# using $self->extract_manifest_exodus, as well as the standard deployment exodus data
 		$exodus = {
 			$self->extract_manifest_exodus->%*,
 			completed => $timestamp,
