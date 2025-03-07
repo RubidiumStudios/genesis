@@ -605,6 +605,13 @@ sub remove_secrets {
 }
 
 # }}}
+# reset_secrets - reset the loaded secrets in the local store {{{
+sub reset_secrets {
+	my ($self,%opts) = @_;
+	$self->store->empty($self->secrets);
+}
+
+# }}}
 # notify - callback for notifying user with processing updates {{{
 sub notify {
 	my $self = shift;
@@ -1267,6 +1274,7 @@ sub _remove_secrets {
 				$self->notify('remove', 'done-item', result => 'aborted', secret_label => $label);
 				my $results = $self->notify('remove', 'completed', msg => "$label removed");
 
+				$self->store->clear_data;
 				return ({
 					abort => 1,
 					skipped => $self->{__update_notifications__total} - $self->{__update_notifications__idx} + 1 + scalar(@{$self->{__update_notifications__items}{skipped}//[]}),
@@ -1299,6 +1307,7 @@ sub _remove_secrets {
 				"Interactive removal of secrets is not yet supported"
 			) if $cmd_interactive;
 			($out, $rc) = $secret->process_command_output('remove', $self->store->service->query(@command));
+			$secret->reset;
 		} else {
 			bug "Unknown secret type for removal";
 		}
@@ -1310,6 +1319,7 @@ sub _remove_secrets {
 		}
 		last if ($rc);
 	}
+	$self->store->clear_data;
 	return $self->notify('remove', 'completed', msg => sprintf(
 		"$label%s removed", scalar(@$selected_secrets) == 1 ? '' : 's')
 	);

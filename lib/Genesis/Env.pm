@@ -3519,6 +3519,8 @@ sub remove_secrets {
 		}
 		output {pending => 1}, "Deleting existing secrets under '#C{%s}'...", $store->base;
 		my ($out,$rc) = $store->service->query('rm', '-rf', $store->base);
+		$self->secrets_plan->reset_secrets;
+
 		return ({error => 1}, $out) if ($rc);
 		return ({success => 1}, "#G{All applicable secrets removed.}");;
 	}

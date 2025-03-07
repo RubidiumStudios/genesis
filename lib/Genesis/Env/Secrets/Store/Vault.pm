@@ -224,6 +224,12 @@ sub fill  {
 	return;
 }
 
+sub empty {
+	my ($self, @secrets) = @_;
+	$_->reset for @secrets;
+	return;
+}
+
 sub check {
 	my ($self, $secret) = @_;
 	my $ok = $self->get($secret) unless $secret->has_value;

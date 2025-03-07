@@ -78,6 +78,19 @@ sub exists {
 	$self->plan->store->exists($self);
 }
 
+sub reset {
+	my ($self) = @_;
+	delete($self->{value});
+	delete($self->{stored_value});
+	$self->{loaded} = 0;
+}
+
+sub remove {
+	my ($self) = @_;
+	$self->plan->store->clear($self);
+	$self->reset;
+}
+
 sub reject {
 	my ($class_or_ref,$subject,$errors,$path,$args) = @_;
 	if (ref($class_or_ref) && $class_or_ref->isa(__PACKAGE__)) {
