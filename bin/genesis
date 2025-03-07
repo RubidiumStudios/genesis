@@ -23,7 +23,7 @@ $ENV{GENESIS_LIB}          ||= $FindBin::Bin.'/lib';
 $ENV{GENESIS_CALLBACK_BIN} ||= $FindBin::Bin.'/'.$FindBin::Script;
 
 use Genesis qw/bail trace debug logger/;
-use Genesis::State qw/envset in_callback under_test/;
+use Genesis::State qw/envset in_callback/;
 use Genesis::Config;
 use Genesis::Term;
 use Genesis::Commands;
@@ -1984,5 +1984,5 @@ END {
 	$? = $rc; # Have to set the exit code again before leaving...
 }
 
-main(@ARGV) unless under_test;
+main(@ARGV) unless caller; # Don't run main if we're being required
 # vim: fdm=marker:foldlevel=1:noet
