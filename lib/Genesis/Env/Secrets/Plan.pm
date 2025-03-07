@@ -154,7 +154,7 @@ sub filter {
 					my $check =
 						($key eq 'path') ? $_->path :
 						($key eq 'type') ? $_->type :
-					  $_->has($key)    ? $_->get($key) : undef;
+						$_->has($key)    ? $_->get($key) : undef;
 
 					if (!defined($check) && ($re || !$negate)) {
 						#if $check is not defined and the filter is a regex or a equality, there can't be a match
@@ -643,11 +643,13 @@ sub notify {
 			'remove/missing'   => '#B{not present}',
 			missing            => '#R{missing!}'
 		};
-		push(@{$self->{__update_notifications__items}{$args{result}} ||= []},
-				 $self->{__update_notifications__item});
+		push(
+			@{$self->{__update_notifications__items}{$args{result}} ||= []},
+			$self->{__update_notifications__item}
+		);
 
 		if ("$action/$args{result}" eq 'remove/aborted') {
-			info({pending => 1}, "\r[2K");
+			info({pending => 1}, $ansi_reset_line);
 			my @updates = @{$self->{__update_notifications__last_start}};
 			$updates[0] .= $map->{"$action/$args{result}"};
 			info(@updates);
@@ -662,7 +664,10 @@ sub notify {
 			info("%s%s", $indent_pad, join("\n$indent_pad", @lines)) if @lines;
 			info("") if $level eq 'full' || scalar @lines;
 		}
-		info({pending => 1}, "\r[2K") unless $level eq 'full';
+		info(
+			{pending => 1},
+			$ansi_reset_line
+		) unless $level eq 'full';
 
 	} elsif ($state eq 'start-item') {
 		$self->{__update_notifications__idx}++;
@@ -705,7 +710,10 @@ sub notify {
 			pretty_duration(gettimeofday - $self->{__update_notifications__startwait},0,0,'',' - ','Ki')
 		) if ($args{result} && ($args{result} eq 'error' || $level eq 'full'));
 		error("Encountered error: %s", $args{msg}) if ($args{result} eq 'error');
-		info {pending => 1}, "\r[2K" unless $level eq 'full';
+		info(
+			{pending => 1},
+			$ansi_reset_line
+		) unless $level eq 'full';
 
 	} elsif ($state eq 'completed') {
 		my @extra_errors = @{$args{errors} || []};
@@ -765,14 +773,24 @@ sub notify {
 			"terminal.  Use #C{-y|--no-prompt} option to provide confirmation to ".
 			"bypass this limitation."
 		);
-		print "[s\n[u[B[A[s"; # make sure there is room for a newline, then restore and save the current cursor
+		# make sure there is room for a newline, then restore and save the current cursor
+		printf(
+			"%s\n%s",
+			$ansi_save_cursor,
+			$ansi_restore_cursor.$ansi_cursor_down.$ansi_cursor_up.$ansi_save_cursor
+		);
 		my $response = Genesis::UI::__prompt_for_line($args{prompt}, $args{validation}, $args{err_msg}, $args{default}, !$args{default});
-		print "[u[0K" unless $args{noclear};
+		print $ansi_restore_cursor.$ansi_clear_to_eol unless $args{noclear};
 		return $response;
 	} elsif ($state eq 'prompt') {
 		my $title = '';
 		if ($args{class}) {
-			$title = sprintf("\r[2K\n#%s{[%s]} ", $args{class} eq 'warning' ? "Y" : '-', uc($args{class}));
+			$title = sprintf(
+				"%s\n#%s{[%s]} ",
+				$ansi_reset_line,
+				$args{class} eq 'warning' ? "Y" : '-',
+				uc($args{class})
+			);
 		}
 		info "%s%s", $title, $args{msg};
 		die_unless_controlling_terminal(

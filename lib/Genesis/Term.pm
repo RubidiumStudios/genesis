@@ -26,18 +26,24 @@ our @EXPORT = qw/
 	render_markdown
 	elipses
 	$ansi_reset_line
+	$ansi_clear_to_eol
 	$ansi_cursor_up
 	$ansi_cursor_down
 	$ansi_hide_cursor
 	$ansi_show_cursor
+	$ansi_save_cursor
+	$ansi_restore_cursor
 /;
 
 # ANSI control sequences
 our $ansi_reset_line = "\r\e[2K";
+our $ansi_clear_to_eol = "\e[0K";
 our $ansi_cursor_up = "\e[A";
 our $ansi_cursor_down = "\e[B";
 our $ansi_hide_cursor = "\e[?25l";
 our $ansi_show_cursor = "\e[?25h";
+our $ansi_save_cursor = "\e[s";
+our $ansi_restore_cursor = "\e[u";
 
 my $has_tput = $ENV{TERM} ? undef : 0; # tput doesn't work if $TERM isn't defined
 sub terminal_width {
