@@ -2,7 +2,9 @@ package Service::BOSH;
 
 use File::Temp qw/tempfile/;
 
-use Genesis;
+use Genesis qw/
+	trace debug bail run slurp new_enough logger dump_var humanize_path dryrun
+/;
 use Genesis::State qw/envset/;
 
 ## Class Variables {{{
@@ -139,13 +141,37 @@ sub execute {
 		if ($results[0] =~ s/\nScript done.*\[COMMAND_EXIT_CODE="(.*)"]$//m) {
 			$results[1] = $1;  # Linux stores command exit code in the script output
 		}
-		$Genesis::Log::Logger->dump_var("bosh results" => \@results);
+		logger->dump_var("bosh results" => \@results);
 	}
 	return !$results[1] if $opts->{passfail};
 	return wantarray ? @results : $results[1];
 }
 
 # }}}
+
+# dryrun_of - execute a bosh command in dry-run mode {{{
+sub dryrun_of {
+	my ($self, @cmd) = @_;
+	my $opts;
+	my $execute = 0;
+	my $interactive = undef;
+	if (ref($cmd[0]) eq 'HASH') {
+		$opts = shift @cmd;
+		$execute = delete($opts->{execute}) || 0;
+		$interactive = delete($opts->{interactive});
+	}
+	$interactive = 1 if $execute && !defined($interactive);
+
+	dryrun(
+		"\nwould execute #G{%s}%s",
+		join(' ', map {$_ =~ /\s/ ? "'$_'" : $_} (humanize_path(scalar($self->command)), @cmd)),
+		$execute ? ", resulting in:" : ""
+	);
+	return 1 unless $execute;
+	$execute = [qw/--dry-run/] unless ref($execute) eq 'ARRAY';
+	@cmd = (@$execute, @cmd);
+	return $self->execute({%$opts, interactive => $interactive}, @cmd);
+}
 # }}}
 1
 # vim: fdm=marker:foldlevel=1:noet
