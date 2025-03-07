@@ -870,6 +870,7 @@ EOF
     $out =~ s/\e\[2K/<clear-line>/g;
     $out =~ s/\r\n/\n/g;
     $out =~ s/\r/<cr>\n/g;
+		$out =~ s/\e\[[ABsu]//gm; # Remove any ansi cursor movements
     matches_utf8 $out, <<EOF, "genesis rotate-secrets rotates filtered secrets";
  yes
 

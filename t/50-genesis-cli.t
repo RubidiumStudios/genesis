@@ -29,7 +29,7 @@ subtest 'bin/genesis' => sub {
 };
 
 subtest 'genesis terminate' => sub {
-	plan tests => 44;
+	plan tests => 59;
 
 	ok(has_command('terminate'), "Terminate command is registered");
 
@@ -44,11 +44,12 @@ subtest 'genesis terminate' => sub {
 	is(command_properties('terminate')->{option_group}, Genesis::Commands::ENV_OPTIONS, "Terminate command uses ENV_OPTIONS");
 
 	my %terminate_opts = command_properties('terminate')->{options}->@*;
-	ok(exists $terminate_opts{'keep-secrets|k'}, "terminate has keep-secrets option");
+	ok(exists $terminate_opts{'keep-secrets|S'}, "terminate has keep-secrets option");
+	ok(exists $terminate_opts{'keep-resources|R'}, "terminate has keep-resources option");
 	ok(exists $terminate_opts{'force|f'}, "terminate has force option");
 	ok(exists $terminate_opts{'yes|y'}, "terminate has yes (no-prompt) option");
 	ok(exists $terminate_opts{'dry-run|n'}, "terminate has dry-run option");
-	is(scalar(keys %terminate_opts), 4, "terminate only has the 4 options above");
+	is(scalar(keys %terminate_opts), 5, "terminate only has the 5 options above");
 
 	my %terminate_args = command_properties('terminate')->{arguments}->@*;
 	is(scalar(keys %terminate_args), 1, "terminate has one argument");
@@ -65,13 +66,17 @@ subtest 'genesis terminate' => sub {
 	}, "terminate command subroutine has the correct closed-over variables");
 
 	# Setup a dry-run terminate command
-	prepare_command('terminate', 'my-env','-f','-k','--dry-run','--yes','reason');
+	prepare_command('terminate', 'my-env','-f','-SR','--dry-run','--yes','reason');
 	build_command_environment
 
 	my @args = get_args();
 	$args[0] = mock 'Genesis::Env' => {
 		name => 'my-env',
 		type => 'my-type',
+		notify => sub {
+			my ($self, $msg) = @_;
+			info("[my-env/my-type] ".$msg);
+		},
 		terminate => sub {
 			my ($self, %opts) = @_;
 			
@@ -79,8 +84,9 @@ subtest 'genesis terminate' => sub {
 			is($opts{reason}, 'reason', "terminate called with correct reason");
 			ok($opts{force},"terminate called with force");
 			ok($opts{'keep-secrets'}, "terminate called with keep-secrets");
+			ok($opts{'keep-resources'}, "terminate called with keep-resources");
 			ok($opts{'dry-run'}, "terminate called with dry-run");
-			ok($opts{yes}, "terminate called with yes");
+			not_ok($opts{yes}, "terminate called with yes (should be stripped)");
 
 			return 1;
 		},
@@ -89,6 +95,10 @@ subtest 'genesis terminate' => sub {
 	my ($stdout, $stderr) = output_from {
 		exits_zero { $subref->(@args) } "terminate dry-run command exits with 0";
 	};
+	like($stderr, qr/\[my-env\/my-type] This would terminate this deployment/, "terminate dry-run command prints dry-run message");
+	like($stderr, qr/- all its VMs and persistent disks would be destroyed/, "terminate dry-run command prints VM and disk destruction message");
+	like($stderr, qr/- this environment's secrets would be left in place/, "terminate dry-run command prints secret retention message (--keep-secrets)");
+	like($stderr, qr/- all unused resources would be left in place/, "terminate dry-run command prints resource retention message (--keep-resources)");
 	like($stderr, qr/my-env\/my-type termination dry-run completed/, "terminate dry-run command prints termination message");
 	is($stdout, '', "terminate dry-run command prints nothing to stdout");
 
@@ -100,14 +110,19 @@ subtest 'genesis terminate' => sub {
 	$args[0] = mock 'Genesis::Env' => {
 		name => 'my-env',
 		type => 'my-type',
+		notify => sub {
+			my ($self, $msg) = @_;
+			info("[my-env/my-type] ".$msg);
+		},
 		terminate => sub {
 			my ($self, %opts) = @_;
 			
 			is($opts{reason}, undef, "terminate called with no reason");
 			ok($opts{force},"terminate called with force");
 			not_ok($opts{'keep-secrets'}, "terminate called without keep-secrets");
+			not_ok($opts{'keep-resources'}, "terminate called without keep-resources");
 			not_ok($opts{'dry-run'}, "terminate called without dry-run");
-			ok($opts{yes}, "terminate called with yes");
+			not_ok($opts{yes}, "terminate called with yes (should be stripped)");
 
 			return 1;
 		},
@@ -115,35 +130,89 @@ subtest 'genesis terminate' => sub {
 	($stdout, $stderr) = output_from {
 		exits_zero { $subref->(@args) } "terminate command exits with 0";
 	};
+
+	like($stderr, qr/\[my-env\/my-type] This will terminate this deployment/, "terminate dry-run command prints dry-run message");
+	like($stderr, qr/- all its VMs and persistent disks will be destroyed/, "terminate dry-run command prints VM and disk destruction message");
+	like($stderr, qr/- this environment's secrets will be removed \(use --keep-secrets to skip\)/, "terminate dry-run command prints secret destruction message");
+	like($stderr, qr/- all unused resources will be removed from the BOSH director \(use\n\s*--keep-resources to skip\)/, "terminate dry-run command prints resource destruction message");
 	like($stderr, qr/my-env\/my-type terminated successfully/, "terminate command prints successful termination message");
 	is($stdout, '', "terminate successful command prints nothing to stdout");
-	
-	# Run a failing terminate command
+
+	# Run a terminal command with prompt, but abort
 	prepare_command('terminate', 'my-env', 'trying to do something bad');
 	build_command_environment;
 
+	my $return_value = 1;
 	@args = get_args();
 	$args[0] = mock 'Genesis::Env' => {
 		name => 'my-env',
 		type => 'my-type',
+		notify => sub {
+			my ($self, $msg) = @_;
+			info("[my-env/my-type] ".$msg);
+		},
 		terminate => sub {
 			my ($self, %opts) = @_;
 			
 			is($opts{reason}, 'trying to do something bad', "terminate called with correct reason");
 			not_ok($opts{force},"terminate called without force");
 			not_ok($opts{'keep-secrets'}, "terminate called without keep-secrets");
+			not_ok($opts{'keep-resources'}, "terminate called without keep-resources");
 			not_ok($opts{'dry-run'}, "terminate called without dry-run");
 			not_ok($opts{yes}, "terminate called without yes");
 
-			return 0;
+			return $return_value;
 		},
 	};
+	# Redirect STDIN to answer 'n' to the prompt
+	set_stdin("n\n");
 	$ENV{GENESIS_IGNORE_EVAL} = 1; # Prevent the eval from catching the exit
 	($stdout, $stderr) = output_from {
 		exits_nonzero { $subref->(@args) } "terminate command exits with non-zero";
 	};
-	like($stderr, qr/\[FATAL\] my-env\/my-type termination failed/, "terminate command prints fatal termination message");
-	is($stdout, '', "terminate failed command prints nothing to stdout"); 
+	# Clean up the STDIN redirection
+	reset_stdin;
+
+	is($stdout, '', "terminate failed command prints nothing to stdout");
+	$stderr =~ s/\e\[\?25h$//; # Strip ANSI show cursor code
+	eq_or_diff($stderr, <<'EOF', "terminate failed command prints failure message");
+[my-env/my-type] This will terminate this deployment:
+  - all its VMs and persistent disks will be destroyed
+  - this environment's secrets will be removed (use --keep-secrets to skip)
+  - all unused resources will be removed from the BOSH director (use
+    --keep-resources to skip)
+
+[WARNING] This action is irreversible and cannot be undone!
+
+Are you sure you want to terminate my-env/my-type deployment? [y|N] > 
+[FATAL] Aborted by user!
+
+EOF
+
+	# Run a failing terminate command with --yes, don't abort
+	$return_value = 0;
+	set_stdin("y\n");
+	$ENV{GENESIS_IGNORE_EVAL} = 1; # Prevent the eval from catching the exit
+	($stdout, $stderr) = output_from {
+		exits_nonzero { $subref->(@args) } "terminate command exits with non-zero";
+	};
+	reset_stdin;
+
+	is($stdout, '', "terminate failed command prints nothing to stdout");
+	$stderr =~ s/\e\[\?25h$//; # Strip ANSI show cursor code
+	eq_or_diff($stderr, <<'EOF', "terminate failed command prints failure message");
+[my-env/my-type] This will terminate this deployment:
+  - all its VMs and persistent disks will be destroyed
+  - this environment's secrets will be removed (use --keep-secrets to skip)
+  - all unused resources will be removed from the BOSH director (use
+    --keep-resources to skip)
+
+[WARNING] This action is irreversible and cannot be undone!
+
+Are you sure you want to terminate my-env/my-type deployment? [y|N] > 
+[FATAL] my-env/my-type termination failed!
+
+EOF
 
 };
 

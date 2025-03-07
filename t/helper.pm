@@ -808,6 +808,21 @@ sub expect_ok {
 		]);
 }
 
+sub cp_kit {
+	my ($src, $top) = @_;
+	my $dst = $top->path('dev');
+	my $err = qx(rm -rf $dst 2>&1) if -d $dst;
+	$err = qx(cp -a $TOPDIR/$src $dst 2>&1) unless $err;
+	if ($? != 0) {
+		diag "failed to copy the $src kit to $dst:";
+		diag "-----------------------------------------------";
+		diag $err ? $err : '(no output)';
+		diag "-----------------------------------------------";
+		diag "";
+		exit 1;
+	}
+}
+
 sub mock {
 	my ($mock_class, $definition) = @_;
 

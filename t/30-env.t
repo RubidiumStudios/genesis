@@ -12,6 +12,7 @@ use Test::More;
 use Test::Output;
 use Test::Differences;
 use Cwd qw/cwd abs_path/;
+use File::Path qw/rmtree/;
 
 use_ok 'Genesis::Config';
 $Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
@@ -796,7 +797,7 @@ EOF
 	my $env = $top->load_env('standalone')->use_config($top->path('.cloud.yml'));
 	quietly {$env->manifest_provider->reset->set_deployment('unredacted')->deployment->data()};
 	quietly {
-		cmp_deeply($env->exodus, {
+		cmp_deeply(flatten($env->extract_manifest_exodus), {
 			version        => ignore,
 			dated          => re(qr/\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d/),
 			deployer       => ignore,
@@ -967,6 +968,7 @@ EOF
 	$ENV{USER} ||= 'unknown';
 	cmp_deeply($exodus, {
 				dated => re(qr/\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d \+0000/),
+				completed => re(qr/\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d \+0000/),
 				deployer => $ENV{USER},
 				kit_name => "fancy",
 				kit_version => "0.0.0-rc0",
@@ -976,6 +978,7 @@ EOF
 				is_director => 0,
 				manifest_sha1 => $sha,
 				manifest_type => $manifest_type,
+				sequence => 1,
 				use_create_env => 0,
 				vault_base => "/secret/standalone/thing",
 				version => '(development)',
@@ -1011,8 +1014,9 @@ EOF
 		is($env->last_deployed_lookup("fancy.status","none"), "online", "Cached manifest contains non-redacted params");
 		is($env->last_deployed_lookup("genesis.env","none"), "standalone", "Cached manifest contains pruned params");
 	};
-	cmp_deeply(scalar($env->exodus_lookup("",{})), {
+	cmp_deeply(scalar($env->exodus_lookup(".",{})), {
 				dated => $exodus->{dated},
+				completed => $exodus->{completed},
 				deployer => $ENV{USER},
 				bosh => "standalone",
 				is_director => 0,
@@ -1023,6 +1027,7 @@ EOF
 				features => '',
 				manifest_sha1 => $sha,
 				manifest_type => $manifest_type,
+				sequence => 1,
 				vault_base => "/secret/standalone/thing",
 				version => '(development)',
 				hello => {
@@ -1143,7 +1148,6 @@ subtest 'new env and check' => sub{
 
 	my $env;
 	local $ENV{NOCOLOR} = "yes";
-	local $ENV{PRY} = "1";
 	my ($director1) = fake_bosh_directors(
 		{alias => $name},
 	);
@@ -1907,17 +1911,21 @@ EOF
 	my $env = $top->load_env('predeploy-reaction-fail');
 	$env->use_config($top->path(".cloud.yml"));
 
-	my ($stdout,$stderr,$err) = (
-		output_from {dies_ok {$env->deploy()} 'deploy exits when invalid reactions defined'},
-		$@
-	);
-	eq_or_diff($err, <<EOF, "deploy error should specify incorrect reactions");
+	{
+		no Carp::Always;
+		my ($stdout,$stderr,$err) = (
+			output_from {
+				dies_ok {$env->deploy()} 'deploy exits when invalid reactions defined'
+			},
+			$@
+		);
+		eq_or_diff($err, <<EOF, "deploy error should specify incorrect reactions");
 
 [FATAL] Unexpected reactions specified under genesis.reactions: post, pre
         Valid values: pre-deploy, post-deploy
 
 EOF
-
+	}
 	put_file $top->path("predeploy-reaction-fail.yml"), <<EOF;
 ---
 kit:
@@ -1938,19 +1946,23 @@ EOF
 	$env->use_config($top->path(".cloud.yml"));
 
 	run('rm "'. $env->kit->path('hooks/addon') . '"');
-
-	($stdout,$stderr,$err) = (
-		output_from {dies_ok {$env->deploy()} "deploy exits when specified addon hook doesn't exist"},
-		$@
-	);
-	eq_or_diff($err, <<EOF, "deploy error should specify incorrect reactions");
+	{
+		no Carp::Always;
+		my ($stdout,$stderr,$err) = (
+			output_from {
+				dies_ok {$env->deploy()} "deploy exits when specified addon hook doesn't exist"
+			},
+			$@
+		);
+		eq_or_diff($err, <<EOF, "deploy error should specify incorrect reactions");
 
 [FATAL] Kit reactions/in-development (dev) does not provide an addon hook!
 
 EOF
+	}
 
 	reset_kit($env->kit);
-	($stdout,$stderr,$err) = (
+	my ($stdout,$stderr,$err) = (
 		output_from {dies_ok {$env->deploy()} "deploy exits when specified addon hook fails"},
 		$@
 	);
@@ -1979,6 +1991,9 @@ EOF
 		output_from {dies_ok {$env->deploy()} "deploy exits when specified addon hook doesn't exist"},
 		$@
 	);
+
+	my $cache_dir = $env->workpath('deploy-cache');
+	rmtree $cache_dir if -d $cache_dir;
 
 	put_file $top->path("postdeploy-reaction-fail.yml"), <<EOF;
 ---

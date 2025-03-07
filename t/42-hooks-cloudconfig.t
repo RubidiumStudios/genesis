@@ -501,7 +501,6 @@ EOF
 			}}, 'Subnet data is correct');
 
 			#my ($available, $reserved) = $cc_hook->_get_subnet_ranges($subnet0);
-			# `cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 			# TODO: Test _get_subnet_ranges for subnet1 and subnet2 as well, because they contain reserved ranges, and overlapping ranges.
 		}; # existing network definition from director
 
