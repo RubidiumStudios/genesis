@@ -25,6 +25,7 @@ use Digest::SHA qw/sha1_hex sha256_hex/;
 use Digest::file qw/digest_file_hex/;
 use Encode qw/decode_utf8/;
 use File::Basename qw/basename dirname/;
+use File::Path qw/rmtree/;
 use IO::Compress::Gzip qw/gzip $GzipError/;
 use IO::Uncompress::Gunzip qw/gunzip $GunzipError/;
 use JSON::PP qw/encode_json decode_json/;
@@ -2742,12 +2743,12 @@ sub check {
 # }}}
 # deployment_cache_setup - create the deployment cache directory {{{
 sub deployment_cache_setup {
-	my ($self) = @_;
+	my ($self, $preserve) = @_;
 	# This won't survive post-process cleanup; maybe we should move it under
 	# $self->top->path('.genesis/deploy-cache'), and clean that up post-deploy?
 	my $deploy_cache = $self->workpath('deploy-cache');
-	$self->deployment_cache_cleanup;
-	mkdir_or_fail($deploy_cache);
+	$self->deployment_cache_cleanup unless $preserve;
+	mkdir_or_fail($deploy_cache) unless -d $deploy_cache;
 
 	# TODO: This should be done more programatically:
 	# - split by _
@@ -2772,7 +2773,7 @@ sub deployment_cache_cleanup {
 	my ($self) = @_;
 	my $deploy_cache = $self->workpath('deploy-cache');
 	if (-d $deploy_cache) {
-		info("Cleaning up deployment cache...");
+		debug("cleaning up deployment cache...");
 		rmtree($deploy_cache);
 	}
 }
