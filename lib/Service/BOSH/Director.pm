@@ -5,8 +5,13 @@ use warnings;
 use utf8;
 
 use base 'Service::BOSH';
-use Genesis;
-use Genesis::State;
+use Genesis qw(
+    trace debug info error bail bug dump_stack dump_var
+    run lines read_json_from load_yaml_file
+		save_to_yaml_file mkfile_or_fail
+    is_valid_uri tcp_listening workdir
+);
+use Genesis::State qw/in_callback envset/;
 use Service::Vault;
 
 ### Class Methods {{{
@@ -163,7 +168,7 @@ sub deployment {
 	my $self = shift;
 	$self->{deployment} = shift if @_;
 	bug("Too many arguments to Service::BOSH::Director#deployment: expecting at most 1, got extra: ".join(', ',@_))
-	  if @_;
+		if @_;
 	return $self->{deployment};
 }
 
@@ -438,6 +443,46 @@ sub vault {
 }
 
 # }}}
+# delete_deployment - delete the deployment from the BOSH director {{{
+sub delete_deployment {
+	my ($self, %opts) = @_;
+
+	my $deployment = $self->deployment or
+		bug("No deployment name provided for BOSH Director in call to delete()");
+
+	my @cmd = ('delete-deployment');
+	push @cmd, '--force' if $opts{force};
+	push @cmd, '-d', $deployment;
+
+	if ($opts{dryrun}) {
+		$self->dryrun_of(@cmd);
+		return wantarray ? (undef, 0, undef) : 1;
+	} 
+
+	my ($out, $rc, $err) = $self->execute({interactive => 1}, @cmd);
+	return wantarray ? ($out, $rc, $err) : !$rc;
+}
+
+# }}}
+# cleanup - cleanup the BOSH director {{{
+sub cleanup {
+	my ($self, %opts) = @_;
+
+	bug("No deployment name provided for BOSH Director in call to cleanup()")
+		unless $self->deployment;
+
+	my @cmd = ('clean-up');
+	push @cmd, '--all' if $opts{all};
+	push @cmd, '--keep-orphaned-disks' if $opts{'keep-orphaned-disks'};
+
+	if ($opts{dryrun}) {
+		my ($out, $rc, $err) =  $self->dryrun_of({execute => 1}, @cmd);
+		return wantarray ? ($out, $rc, $err) : !$rc;
+	}
+
+	my ($out, $rc, $err) = $self->execute({interactive => 1},@cmd);
+	return wantarray ? ($out, $rc, $err) : !$rc;
+}
 # }}}
 1
 # vim: fdm=marker:foldlevel=1:noet
