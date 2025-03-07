@@ -3361,6 +3361,162 @@ sub update_deployment_exodus {
 }
 
 # }}}
+# terminate - terminate the environment {{{
+sub terminate {
+	my ($self, %opts) = @_;
+
+	my $keep_secrets = delete($opts{'keep-secrets'})//0;
+	my $keep_resources = delete($opts{'keep-resources'})//0;
+	my $dry_run = delete($opts{'dry-run'})//0;
+	# TODO: Do we want to support a full reset where all exodus data and secrets are removed?
+	#my $full_reset = delete($opts{'full-reset'})//0;
+	#if ($full_reset && $keep_secrets) {
+	#	bail("Cannot perform a full reset and keep secrets at the same time.");
+	#}
+
+	my $ok = undef;
+
+	my $deployment_state = $self->deployment_state();
+	if ($deployment_state eq 'undeployed') {
+		warning(
+			"No exodus data found for #C{%s}; may not exist.%s",
+			$self->name,
+			$opts{force} ? '': "\n\nCowardly refusing to terminate.  Use --force to attempt anyway."
+		);
+		return 0 unless $opts{force};
+
+	} elsif ($deployment_state eq 'terminated') {
+		my $last_deployment = $self->deployment_lookup('latest');
+		my ($date, $time) = $last_deployment->{completed} =~ m{^(\d{4}-\d{2}-\d{2}).(\d{2}:\d{2}:\d{2})};
+		# FIXME: Parse with Time::Piece, then present in local time
+
+		warning(
+			"Environment #C{%s} has already been terminated%s on %s at %s UTC%s\n\n%s",
+			$self->name,
+			$last_deployment->{user}{shell} ? ' by #B{'.$last_deployment->{user}{shell}.'}' : '',
+			$date, $time,
+			$last_deployment->{reason} ? " for reason: '#Y{".$last_deployment->{reason}."}'" : '',
+			$opts{force} ? 'Forcing termination anyway...' : 'Cowardly refusing to terminate.  Use --force to attempt anyway.'
+		);
+		return 0 unless $opts{force};
+	}
+
+	my $start = Time::Piece->new();
+
+	if ($self->has_hook('terminate')) {
+		$self->notify(
+			'running %s termination hooks before deployment is terminated...%s',
+			$self->kit->id,
+			$dry_run ? ' (dry-run)' : '',
+		);
+		$ok = $self->run_hook('terminate', env => $self, %opts, dry_run => $dry_run, mode => 'before');
+		return unless $ok;
+	}
+
+	$self->notify(
+		"terminating %s environment...%s",
+		$self->use_create_env ? 'create-env' : 'deployed',
+		$dry_run ? ' #i{(dry run)}' : ''
+	);
+	if ($self->use_create_env) {
+		$self->notify("deleting create-env environment...");
+		$ok = $self->bosh->delete_env(env => $self, dryrun => $dry_run);
+	} else {
+		$self->notify("deleting deployment...");
+		$ok = $self->bosh->delete_deployment(%opts, dryrun => $dry_run);
+		if ($ok) {
+			if ($keep_resources) {
+				dryrun("\nwould keep any unused resources on the #M{%s} BOSH director.", $self->bosh->{alias}) if $dry_run;
+			} else {
+				$self->notify("cleaning up any unused resources...");
+				$ok = $self->bosh->cleanup(env => $self, dryrun => $dry_run, all => 1) ? 1 : 2;
+			}
+		}
+	}
+
+	if ($self->has_hook('terminate')) {
+		$self->notify(
+			'running %s termination hooks after deployment terminated...%s',
+			$self->kit->id,
+			$dry_run ? ' (dry-run)' : '',
+		);
+		$ok = $self->run_hook('terminate', env => $self, %opts, dry_run => $dry_run, mode => 'after');
+		return unless $ok;
+	}
+
+	if ($dry_run) {
+		if ($keep_secrets) {
+			dryrun("\nwould keep existing secrets.");
+		} else {
+			my @secrets =
+				sort
+				map {csprintf('  #@{*} #c{%s}#c{%s}',$self->secrets_store->base,$_->path)}
+				grep {$_->exists}
+				$self->secrets_plan->secrets;
+			if (!@secrets) {
+				dryrun("\nno secrets found to remove.");
+			} else {
+				dryrun(
+					"\nwould remove the following secrets:\n%s",
+					join("\n", @secrets)
+				);
+			}
+		}
+		return 1;
+	}
+
+	if ($keep_secrets) {
+		$self->notify("keeping existing secrets...");
+	} else {
+		$self->notify("removing secrets...");
+		my ($results, $msg) = $self->remove_secrets(all => 1, 'no-prompt' => 1);
+		if ($results->{error}) {
+			info("#r{error!}");
+			error("Failed to remove secrets: %s", $msg);
+			return 0;
+		} else {
+			info("#g{done.}");
+		}
+	}
+
+	# Update deployment archive with new exodus data indicating the deployment has been terminated
+	#if ($full_reset) {
+	#	$self->vault->authenticate->clear($self->exodus_base, 1);
+	#} els ...
+	if ($self->manifest_store =~ /^(?:exodus|hybrid)$/) {
+		# If the manifest_store uses exodus, then we need to update the exodus
+		# deployment audit data to indicate the deployment has been terminated
+		# Set exodus data to indicate the deployment has been terminated
+		my $term_flags = join(',', grep {$_} (
+			$opts{force} ? 'force' : undef,
+			$keep_secrets ? 'keep-secrets' : undef,
+			$keep_resources ? 'keep-resources' : undef,
+		));
+		$self->vault->authenticate;
+		$self->update_deployment_exodus(
+			'terminated',
+			reason  => $opts{reason},
+			flags   => $term_flags,
+			success => ['failure','success','cleanup-failed']->[$ok//0],
+			started => $start,
+		);
+	} else {
+		# No exodus deployment audit data to update, so just remove the base exodus data
+		$self->vault->authenticate->clear($self->exodus_base);
+	}
+
+	if ($self->manifest_store ne 'exodus') {
+		# Remove any lingering manifest files from the repo
+		unlink $_ for grep {-f $_} (
+			$self->path(".genesis/manifests/".$self->name.".yml"),
+			$self->path(".genesis/manifests/".$self->name.".vars"),
+			$self->path(".genesis/manifests/".$self->name."-state.yml"),
+			$self->path(".genesis/manifests/".$self->name."-state.json"),
+			$self->path(".genesis/manifests/".$self->name."-store.yml")
+		);
+	}
+	return 1;
+}
 
 # }}}
 
