@@ -5,7 +5,7 @@ use utf8;
 
 use base 'Genesis::Base'; # for _memoize
 
-use Genesis;
+use Genesis; # TODO: specify exact imports to not pollute namespace
 use Genesis::State;
 use Genesis::Term;
 use Genesis::UI;
@@ -3155,7 +3155,7 @@ sub deploy {
 	));
 	$self->update_deployment_exodus(
 		'deployed',
-		reason => %opts{reason},
+		reason => $opts{reason},
 		flags => $opt_flags
 	);
 
@@ -3271,6 +3271,8 @@ sub update_deployment_exodus {
 		# Special case for the started timestamp
 		if ($deployment_details{started}) {
 			$exodus->{dated} = $deployment_details{started};
+		} else {
+			$deployment_details{started} = $exodus->{dated} // $timestamp;
 		}
 	} elsif ($state ne 'terminated') {
 		# TODO: Support 'pending' as an state, for when the deployment has started,
@@ -3282,13 +3284,13 @@ sub update_deployment_exodus {
 	}
 
 	# Build the exodus set commands as an array
-	$exodus = deep_merge($exodus, $exodus_overrides);
+	$exodus = deep_merge($exodus, $exodus_overrides, 'flatten');
 	if (keys %$exodus) {
 		push(@exodus_cmds, '--') if @exodus_cmds && $exodus_cmds[-1] ne '--';
 		push @exodus_cmds, (
 			'set', $self->exodus_base, map {
 				"$_=$exodus->{$_}"
-			} grep {$exodus->{$_}} keys %$exodus
+			} grep {defined $exodus->{$_}} keys %$exodus
 		);
 	}
 
@@ -3318,7 +3320,6 @@ sub update_deployment_exodus {
 
 		my $deployment_data = $self->_build_deployment_audit_data(
 			$state, $sequence, $timestamp,
-			started => ($exodus->{dated} || $timestamp),
 			%deployment_details
 		);
 
@@ -3679,7 +3680,10 @@ sub remove_secrets {
 		my ($out,$rc) = $store->service->query('rm', '-rf', $store->base);
 		$self->secrets_plan->reset_secrets;
 
-		return ({error => 1}, $out) if ($rc);
+		if ($rc) {
+			my $msg = "Failed to remove secrets under '#C{%s}':\n%s";
+			return ({error => 1}, sprintf($msg, $store->base, $out));
+		}
 		return ({success => 1}, "#G{All applicable secrets removed.}");;
 	}
 
@@ -4129,7 +4133,7 @@ sub _build_deployment_audit_data {
 
 		user => {
 			shell         => $ENV{USER},
-			git           => $self->top->kit_provider->remote->get_authorized_user,
+			repo          => $self->top->kit_provider->remote->get_authorized_user, # FIXME: only works for git-based kit providers
 			vault         => $self->vault->user,
 			concourse     => $ENV{CONCOURSE_USERNAME},
 		},

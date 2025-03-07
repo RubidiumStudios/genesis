@@ -782,6 +782,7 @@ sub terminate {
 		prompt_for_boolean($msg, 0) or bail "Aborted by user!";
 	}
 
+	$ENV{BOSH_NON_INTERACTIVE} = 'true' if $no_prompt;
 	my $ok = $env->terminate(%options, reason => $reason);
 	if ($options{'dry-run'}) {
 		notice("\n#M{%s}/#c{%s} termination dry-run completed.\n", $env->name, $env->type);

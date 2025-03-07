@@ -22,7 +22,7 @@ use lib $ENV{GENESIS_LIB}  ||  $FindBin::Bin.'/lib';
 $ENV{GENESIS_LIB}          ||= $FindBin::Bin.'/lib';
 $ENV{GENESIS_CALLBACK_BIN} ||= $FindBin::Bin.'/'.$FindBin::Script;
 
-use Genesis qw/bail trace debug logger/;
+use Genesis qw/bail trace debug logger new_enough/;
 use Genesis::State qw/envset in_callback/;
 use Genesis::Config;
 use Genesis::Term;
