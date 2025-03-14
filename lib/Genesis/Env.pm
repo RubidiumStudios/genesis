@@ -415,7 +415,8 @@ sub exists {
 	my ($ref,%args) = @_;
 	unless (ref($ref)) {
 		# called on the class, need a instance
-		return undef if _env_name_errors($args{name});
+		my $err = _env_name_errors($args{name});
+		bail("Bad environment name '%s': %s", $args{name}, $err) if $err;
 		return undef unless $args{top};
 		eval{ $ref = $ref->new(%args) };
 		bug ("Failed to check existence of Genesis Environment: %s", $@) if $@;
@@ -562,7 +563,7 @@ sub _env_name_errors {
 	push(@errors,"names must not contain whitespace.\n")
 		if $name =~ m/\s/;
 
-	push(@errors,"names can only contain lowercase letters, numbers, and hyphens.\n")
+	push(@errors,"names can only contain lowercase letters, numbers, underscores and hyphens.\n")
 		if $name !~ m/^[a-z0-9_-]+$/;
 
 	push(@errors,"names must start with a (lowercase) letter.\n")

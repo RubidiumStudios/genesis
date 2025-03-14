@@ -77,6 +77,38 @@ subtest 'explicit inheritance' => sub {
 EOF
 };
 
+subtest 'genesis.inherits behaviour' => sub {
+	reprovision kit => 'omega-v2.7.0';
+
+	put_file "base.yml", "--- {}";
+	put_file "adjacent.yml", "--- {}";
+	put_file "intermediate.yml", "--- {genesis: {inherits: [base]}}";
+	put_file "final.yml", "--- {genesis: {env: final, inherits: [adjacent, intermediate]}}";
+
+	output_ok "genesis yamls final.yml --config cloud=cloud.yml", <<EOF, "yaml ordering is correct for inherited files";
+./adjacent.yml
+./base.yml
+./intermediate.yml
+./final.yml
+EOF
+
+	put_file "multi_inherit.yml", "--- {genesis: {env: multi_inherit,inherits: [base, intermediate]}}";
+
+	output_ok "genesis yamls multi_inherit.yml --config cloud=cloud.yml", <<EOF, "yaml ordering is correct for multiple inheritance";
+./base.yml
+./intermediate.yml
+./multi_inherit.yml
+EOF
+
+	put_file "circular1.yml", "--- {genesis: {env: circular1, inherits: [circular2]}}";
+	put_file "circular2.yml", "--- {genesis: {env: circular2, inherits: [circular1]}}";
+
+	output_ok "genesis yamls circular1.yml --config cloud=cloud.yml", <<EOF, "yaml ordering handles circular inheritance";
+./circular2.yml
+./circular1.yml
+EOF
+};
+
 chdir $TOPDIR;
 teardown_vault;
 done_testing;
