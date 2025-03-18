@@ -154,22 +154,26 @@ sub dryrun_of {
 	my ($self, @cmd) = @_;
 	my $opts;
 	my $execute = 0;
+	my $exec_msg = "";
 	my $interactive = undef;
 	if (ref($cmd[0]) eq 'HASH') {
 		$opts = shift @cmd;
 		$execute = delete($opts->{execute}) || 0;
 		$interactive = delete($opts->{interactive});
+		if (defined($opts->{exec_msg})) {
+			$exec_msg = " ".delete($opts->{exec_msg});
+		}
 	}
 	$interactive = 1 if $execute && !defined($interactive);
 
 	dryrun(
 		"\nwould execute #G{%s}%s",
 		join(' ', map {$_ =~ /\s/ ? "'$_'" : $_} (humanize_path(scalar($self->command)), @cmd)),
-		$execute ? ", resulting in:" : ""
+		$execute ? ", resulting in$exec_msg:" : ""
 	);
 	return 1 unless $execute;
 	$execute = [qw/--dry-run/] unless ref($execute) eq 'ARRAY';
-	@cmd = (@$execute, @cmd);
+	@cmd = (@cmd, @$execute);
 	return $self->execute({%$opts, interactive => $interactive}, @cmd);
 }
 # }}}

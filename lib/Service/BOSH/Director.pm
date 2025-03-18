@@ -10,6 +10,7 @@ use Genesis qw(
     run lines read_json_from load_yaml_file
 		save_to_yaml_file mkfile_or_fail
     is_valid_uri tcp_listening workdir
+		parse_fixed_width_table by_semver
 );
 use Genesis::State qw/in_callback envset/;
 use Service::Vault;
@@ -488,8 +489,85 @@ sub cleanup {
 	push @cmd, '--keep-orphaned-disks' if $opts{'keep-orphaned-disks'};
 
 	if ($opts{dryrun}) {
-		my ($out, $rc, $err) =  $self->dryrun_of({execute => 1}, @cmd);
-		return wantarray ? ($out, $rc, $err) : !$rc;
+		my ($out, $rc, $err) =  $self->dryrun_of(
+			{
+				exec_msg => 'the removal of the following resources',
+				execute => [qw/--dry-run --tty/],
+				interactive => 0
+			}, @cmd
+		);
+
+		# Parse the output into something more consumable
+		my $new_output = '';
+		my $blocks = [split(/\n\n/, $out)];
+		my $unused_releases = {};
+		shift @$blocks if $blocks->[0] !~ /^Unused/; # RISK: Assumes the first usable block starts with 'Unused'
+		while (@$blocks) {
+			my $category = shift @$blocks;
+			last if $category eq 'Succeeded';
+			my $contents = [split(/\n/, shift @$blocks)];
+			my $header = shift @$contents;
+			my $table = parse_fixed_width_table($header, @$contents);
+			next unless @$table;
+
+			my %results = ();
+			my $last_name = '';
+			my $name_length = 0;
+			$new_output .= "\n#Wku{$category:}\n";
+			if ($category =~ /^Unused (Releases|Stemcells)$/) {
+				for my $release (@$table) {
+					my $name = $release->{Name};
+					if ($name eq '~') {
+						$name = $last_name;
+					} else {
+						$last_name = $name;
+						$name_length = length($name) if length($name) > $name_length;
+					}
+					push @{$results{$name}}, $release->{Version};
+				}
+				$name_length += 2; # for the ': '
+				for my $name (sort keys %results) {
+					my $versions = $results{$name};
+					my $version_string = join(', ', sort by_semver @$versions);
+					$new_output .= sprintf(
+						"[[  #c{%-${name_length}s}>>%s\n", "$name: ", $version_string
+					);
+				}
+			} elsif ($category =~ /^Unused Compiled Packages$/) {
+				for my $release (@$table) {
+					my $name = $release->{Name};
+					if ($name eq '~') {
+						$name = $last_name;
+					} else {
+						$last_name = $name;
+						$name_length = length($name) if length($name) > $name_length;
+					}
+					push @{$results{$name}{$release->{'Stemcell OS'}}}, $release->{'Stemcell Version'}; 
+				}
+
+				$name_length += 2; # for the ': '
+				for my $name (sort keys %results) {
+					my $stemcells = $results{$name};
+					my @stemcell_blocks = ();
+					for my $stemcell (sort keys %$stemcells) {
+						my $versions = $stemcells->{$stemcell};
+						my $version_string = join(', ', sort by_semver @$versions);
+						push @stemcell_blocks, sprintf(
+							"#m{%s} #Ki{(%s)}", $stemcell, $version_string
+						);
+					}
+					$new_output .= sprintf(
+						"[[  #c{%-${name_length}s}>>%s\n",
+						$name.': ',
+						join("; ", @stemcell_blocks)
+					);
+				}
+			} else {
+				$new_output .= "  $header\n".join("\n", map { "  $_" } @$contents)."\n";
+			}
+		}
+		info $new_output;
+		return wantarray ? ($new_output, $rc, $err) : !$rc;
 	}
 
 	my ($out, $rc, $err) = $self->execute({interactive => 1},@cmd);

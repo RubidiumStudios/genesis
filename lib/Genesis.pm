@@ -92,6 +92,7 @@ our @EXPORT = qw/
 	index_of
 	compare_arrays
 	sentence_join
+	parse_fixed_width_table
 	uniq
 	get_opts
 
@@ -1304,6 +1305,33 @@ sub count_nouns {
 	return "$value${noun}$1es" if $noun =~ /[aeiou]([sz])$/;
 	return "$value${1}ies" if $noun =~ /^(.*[^aeiou])y$/;
 	return "$value${noun}s";
+}
+
+sub parse_fixed_width_table {
+	my ($header, @rows) = @_;
+	
+	# Get column names and their positions
+	my @cols = split(/\s{2,}/, $header);
+	my @positions = (0);
+	push @positions, pos($header)
+		while ($header =~ /(?:\S+)(\s{2,})/g);
+    
+	# Create array of column ranges
+	my @ranges = map {
+		[$positions[$_], $positions[$_+1] - $positions[$_]]
+	} (0..$#cols-1);
+	push @ranges,	[$positions[$#cols], -1];
+    
+	# Parse each row into a hash
+	my @results;
+	for my $row (@rows) {
+		my %hash;
+		$hash{$cols[$_]} = 
+			substr($row, $ranges[$_][0], $ranges[$_][1]) =~ s/^\s+|\s+$//gr
+				for (0..$#cols);
+		push @results, \%hash;
+	}
+  return wantarray ? @results : \@results;
 }
 
 1;
