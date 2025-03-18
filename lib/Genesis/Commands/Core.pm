@@ -39,14 +39,7 @@ sub version {
 		$version{is_dev} = $JSON::PP::false;
 	}
 
-	my $tz = $ENV{ORIG_TZ};
-	if (-l '/etc/localtime') {
-		($tz = readlink '/etc/localtime') =~ s#.*zoneinfo/##;
-	} elsif (-f '/etc/timezone') {
-		$tz = `cat /etc/timezone`
-	}
-
-	$ENV{TZ} = $tz;
+	$ENV{TZ} = get_real_local_timezone();
 	POSIX::tzset();
 	@version{qw[major minor patch rc]} = map {defined($_) ? $_+0 : $_} $version{semver} =~ m/^(\d+)\.(\d+)\.(\d+)(?:-rc(?:\.)?(\d+))?$/;
 	$version{is_rc} = defined($version{rc}) ? $JSON::PP::true : $JSON::PP::false,

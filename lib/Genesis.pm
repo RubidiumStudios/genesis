@@ -58,6 +58,8 @@ our @EXPORT = qw/
 	is_valid_uri
 
 	strfuzzytime
+	get_real_local_timezone
+	local_strftime
 	pretty_duration
 	ordify
 	count_nouns
@@ -461,6 +463,26 @@ sub strfuzzytime {
 		$fuzzy = join($fuzzy, map {strftime($_, @lt)} split(/%~/, $output_format))
 	}
 	return $fuzzy;
+}
+
+sub get_real_local_timezone {
+	my $tz = $ENV{ORIG_TZ};
+	if (-l '/etc/localtime') {
+		($tz = readlink '/etc/localtime') =~ s#.*zoneinfo/##;
+	} elsif (-f '/etc/timezone') {
+		$tz = `cat /etc/timezone`
+	}
+	$tz
+}
+
+sub local_strftime {
+	my $time = shift;
+	$ENV{TZ} = get_real_local_timezone();
+	POSIX::tzset();
+	my $out = localtime($time)->strftime(@_);
+	$ENV{TZ} = "UTC";
+	POSIX::tzset();
+	return $out;
 }
 
 our %ord_suffix = (11 => 'th', 12 => 'th', 13 => 'th', 1 => 'st', 2 => 'nd', 3 => 'rd');
