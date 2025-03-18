@@ -35,6 +35,11 @@ use Time::Piece;
 use Time::Seconds;
 use Time::HiRes qw/gettimeofday/;
 
+use constant {
+	EXODUS_TIME_FORMAT => "%Y-%m-%d %H:%M:%S %z",
+	EXODUS_TIME_FORMAT_SHORT => "%Y%m%d%H%M%S",
+};
+
 ### Class Methods {{{
 
 # new - create a raw Genesis::Env object {{{
@@ -653,7 +658,7 @@ sub deployment_state {
 sub is_bosh_director {
 	my $self = shift;
 	$self->kit->id =~ /^bosh\// || $self->kit->metadata->{is_bosh_director};
-	# TODO: This is very fragile, rework for better diagnosis
+	# RISK: This is very fragile, rework for better diagnosis
 }
 
 # }}}
@@ -1073,8 +1078,8 @@ sub deployment_lookup {
 		my ($cp, $ty, $tm, $td, $tH, $tM, $tS, $tz) = ($1//'', $2, $3, $4, $5, $6, $7, $8//'+0000');
 
 		use Time::Piece;
-		my $ts = Time::Piece->strptime("$ty-$tm-$td $tH:$tM:$tS $tz", "%Y-%m-%d %H:%M:%S %z");
-		$timestamp = $ts->gmtime($ts->epoch)->strftime("%Y%m%d%H%M%S");
+		my $ts = Time::Piece->strptime("$ty-$tm-$td $tH:$tM:$tS $tz", EXODUS_TIME_FORMAT);
+		$timestamp = $ts->gmtime($ts->epoch)->strftime(EXODUS_TIME_FORMAT_SHORT);
 
 		if ($cp eq '<=') {
 			$timestamp = (sort {$b cmp $a} grep {$_ le $timestamp} @deployments)[0];
@@ -1823,6 +1828,11 @@ sub bosh {
 }
 # }}}
 # get_target_bosh - determine the correct BOSH to target for this environment {{{
+
+# REFACTOR: We need an internal method for being able to get the bosh director
+#           that this environment is, rather than the director that deloys this
+#           environment.  The below does this, but its has too much user-facing
+#           output that wouldn't apply to internal usage.
 sub get_target_bosh {
 	my ($self, $options) = @_;
 	my $target;
@@ -3240,7 +3250,7 @@ sub update_deployment_exodus {
 	my $exodus_overrides = delete($deployment_details{exodus_overrides}) // {};
 
 	# Get the completed timestamp from overrides, or use the current time
-	my $timestamp = $deployment_details{completed} || Time::Piece->new->strftime('%Y-%m-%d %H:%M:%S %z');
+	my $timestamp = $deployment_details{completed} || Time::Piece->new->strftime(EXODUS_TIME_FORMAT);
 
 	# Determine the sequence number
 	my $sequence = $self->get_next_deployment_sequence_number();
@@ -3320,7 +3330,8 @@ sub update_deployment_exodus {
 
 		my $deployment_data = $self->_build_deployment_audit_data(
 			$state, $sequence, $timestamp,
-			%deployment_details
+			%deployment_details,
+			'flatten'
 		);
 
 		# Add the deployment audit data to the exodus commands
@@ -3366,13 +3377,13 @@ sub update_deployment_exodus {
 sub terminate {
 	my ($self, %opts) = @_;
 
-	my $keep_secrets = delete($opts{'keep-secrets'})//0;
-	my $keep_resources = delete($opts{'keep-resources'})//0;
+	my %clean_up = %{delete($opts{'clean_up'})//{}};
 	my $dry_run = delete($opts{'dry-run'})//0;
+	my $force = delete($opts{'force'})//0;
 	# TODO: Do we want to support a full reset where all exodus data and secrets are removed?
-	#my $full_reset = delete($opts{'full-reset'})//0;
-	#if ($full_reset && $keep_secrets) {
-	#	bail("Cannot perform a full reset and keep secrets at the same time.");
+	#my $full_reset = delete($opts{'deployment-history'})//0;
+	#if ($full_reset && !$clean_up{secrets} && !$clean_up{user_secrets}) {
+	#	bail("Cannot perform a full reset and keep any secrets at the same time.");
 	#}
 
 	my $ok = undef;
@@ -3382,9 +3393,9 @@ sub terminate {
 		warning(
 			"No exodus data found for #C{%s}; may not exist.%s",
 			$self->name,
-			$opts{force} ? '': "\n\nCowardly refusing to terminate.  Use --force to attempt anyway."
+			$force ? '': "\n\nCowardly refusing to terminate.  Use --force to attempt anyway."
 		);
-		return 0 unless $opts{force};
+		return 0 unless $force;
 
 	} elsif ($deployment_state eq 'terminated') {
 		my $last_deployment = $self->deployment_lookup('latest');
@@ -3397,9 +3408,9 @@ sub terminate {
 			$last_deployment->{user}{shell} ? ' by #B{'.$last_deployment->{user}{shell}.'}' : '',
 			$date, $time,
 			$last_deployment->{reason} ? " for reason: '#Y{".$last_deployment->{reason}."}'" : '',
-			$opts{force} ? 'Forcing termination anyway...' : 'Cowardly refusing to terminate.  Use --force to attempt anyway.'
+			$force ? 'Forcing termination anyway...' : 'Cowardly refusing to terminate.  Use --force to attempt anyway.'
 		);
-		return 0 unless $opts{force};
+		return 0 unless $force;
 	}
 
 	my $start = Time::Piece->new();
@@ -3426,11 +3437,16 @@ sub terminate {
 		$self->notify("deleting deployment...");
 		$ok = $self->bosh->delete_deployment(%opts, dryrun => $dry_run);
 		if ($ok) {
-			if ($keep_resources) {
-				dryrun("\nwould keep any unused resources on the #M{%s} BOSH director.", $self->bosh->{alias}) if $dry_run;
-			} else {
+			if ($clean_up{resources}) {
 				$self->notify("cleaning up any unused resources...");
 				$ok = $self->bosh->cleanup(env => $self, dryrun => $dry_run, all => 1) ? 1 : 2;
+				warning("\n".
+					"The contents above is a summary of the resources currently unused ".
+					"by any deployment. Further resources may become unused once this ".
+					"environment is actually terminated."
+				) if $dry_run;
+			} else {
+				dryrun("\nwould keep any unused resources on the #M{%s} BOSH director.", $self->bosh->{alias}) if $dry_run;
 			}
 		}
 	}
@@ -3441,36 +3457,155 @@ sub terminate {
 			$self->kit->id,
 			$dry_run ? ' (dry-run)' : '',
 		);
-		$ok = $self->run_hook('terminate', env => $self, %opts, dry_run => $dry_run, mode => 'after');
-		return unless $ok;
+		my $hook_ok = $self->run_hook(
+			'terminate', %opts,
+			env => $self,
+			dry_run => $dry_run,
+			mode => $ok ? 'after' : 'failed'
+		);
+		$ok = 0 unless $hook_ok;
 	}
+	return unless $ok;
 
-	if ($dry_run) {
-		if ($keep_secrets) {
-			dryrun("\nwould keep existing secrets.");
-		} else {
-			my @secrets =
-				sort
-				map {csprintf('  #@{*} #c{%s}#c{%s}',$self->secrets_store->base,$_->path)}
-				grep {$_->exists}
-				$self->secrets_plan->secrets;
-			if (!@secrets) {
-				dryrun("\nno secrets found to remove.");
-			} else {
-				dryrun(
-					"\nwould remove the following secrets:\n%s",
-					join("\n", @secrets)
-				);
+	my $claims = {};
+	my $configs = {};	
+	my (@kept_secrets, @removed_secrets) = ();
+
+	if (! $self->use_create_env) {
+		# TODO: kits may have multiple config files of a given type, so in the
+		#       future, we'll ask the kit for the list of config file names,
+		#       and then iterate over them to get the list of existing configs.
+		my $config_name = sprintf('%s.%s', $self->name, $self->type);
+		for my $config_type (qw{cloud runtime cpi}) {
+			push(@{$configs->{$config_type}}, $config_name)
+				if $self->bosh->has_config($config_type, $config_name);
+		}
+		my $network_claims = $self->get_network_claims();
+		if (scalar keys $network_claims->%*) {
+			for my $network (keys $network_claims->%*) {
+				$claims->{$network}{description} = sprintf("\n  #Cu{%s}:", $network);
+				for my $subnet (sort keys $network_claims->{$network}->%*) {
+					my $subnet_info = {
+						'path' => $network_claims->{$network}{$subnet}{path},
+						'range' => $network_claims->{$network}{$subnet}{ips},
+						'description' => sprintf(
+							"  - #i{%s:} #c{%s}", $subnet, $network_claims->{$network}{$subnet}{ips})
+					};
+					push $claims->{$network}{subnets}->@*, $subnet_info;
+				}
 			}
 		}
+	}
+
+	# Dry-run output
+	if ($dry_run) {
+		if (scalar(keys $claims->{claims}->%*)) {
+			my $claim_descriptions = [];
+			for my $network (sort keys $claims->{claims}->%*) {
+				my $block = $claims->{claims}{$network}{description};
+				$block .= "\n".$_ for $claims->{claims}{$network}{subnets}->@*;
+				push(@$claim_descriptions, $block);
+			}
+			dryrun("\nwould #%s{%s} the following network claims:\n%s",
+				$clean_up{networks} ? ("r",'release') : ('G','keep'),
+				join("\n", $claim_descriptions->@*)
+			);
+		} else {
+			dryrun("\nno network claims found to release.");
+		}
+
+		if (scalar keys $configs->%*) {
+			my $config_descriptions = [];
+			for my $config_type (sort keys $configs->%*) {
+				push(@$config_descriptions, sprintf(
+					"would remove the following %s config files:\n%s",
+					$config_type, join("\n", $configs->{$config_type}->@*)
+				));
+			}
+			dryrun("\n%s", join("\n", $config_descriptions->@*));
+		} else {
+			dryrun("\nno config files found to remove.");
+		}
+
+		my @all_secrets = $self->secrets_plan->secrets;
+		my @generated_secrets =
+			grep {$_->exists}
+			grep {!$_->isa('Genesis::Vault::Secret::UserProvided')}
+			@all_secrets;
+		my @user_secrets =
+			grep {$_->exists}
+			grep {$_->isa('Genesis::Vault::Secret::UserProvided')}
+			@all_secrets;
+
+		push(@{$clean_up{secrets} ? \@removed_secrets : \@kept_secrets}, @generated_secrets);
+		push(@{$clean_up{user_secrets} ? \@removed_secrets : \@kept_secrets}, @user_secrets);
+
+		dryrun(
+			"\nwould #G{keep} the following #G{%s} secrets:\n%s",
+			join(" and ", ($clean_up{secrets} ? () : 'generated'), ($clean_up{user_secrets} ? () : 'user-provided')),
+			join("\n", map {csprintf('  #@{*} #c{%s}#c{%s}',$self->secrets_store->base,$_->path)} @kept_secrets)
+		) if (scalar @kept_secrets);
+
+		dryrun(
+			"\nwould #r{remove} the following #r{%s} secrets:\n%s",
+			join(" and ", ($clean_up{secrets} ? 'generated' : ()), ($clean_up{user_secrets} ? 'user-provided' : ())),
+			join("\n", map {csprintf('  #@{*} #c{%s}#c{%s}',$self->secrets_store->base,$_->path)} @removed_secrets)
+		) if (scalar @removed_secrets);
+
 		return 1;
 	}
 
-	if ($keep_secrets) {
-		$self->notify("keeping existing secrets...");
-	} else {
-		$self->notify("removing secrets...");
-		my ($results, $msg) = $self->remove_secrets(all => 1, 'no-prompt' => 1);
+	# Actual cleanup
+	if (scalar $configs->%*) {
+		$self->notify("removing BOSH config files...");
+		for my $config_type (sort keys $configs->%*) {
+			for my $config_name ($configs->{$config_type}->@*) {
+				my $start = Time::Piece->new();
+				info({pending => 1}, "  - removing %s config file %s...", $config_type, $config_name);
+				my ($out, $rc, $err) = $self->bosh->delete_config($config_type, $config_name);
+				info(
+					'%s%s',
+					$rc ? "#R{failed}": "#G{done.}",
+					$rc ? "\n\n$err" : pretty_duration(Time::Piece->new - $start)
+				)
+			}
+		}
+	}
+
+	if (scalar $claims->%*) {
+		if ($clean_up{networks}) {
+			$self->notify("releasing network claims...");
+			for my $network (sort keys $claims->{claims}->%*) {
+				my $start = Time::Piece->new();
+				info({pending => 1}, "  - releasing network claims for %s...", $network);
+				my $ok = 1;
+				for my $subnet (sort keys $claims->{claims}{$network}{subnets}->@*) {
+					info({pending => 1}, " #Ki{%s}", $subnet);
+					$ok = $self->bosh->vault->clear($claims->{claims}{$network}{subnets}{$subnet}{path});
+					last unless $ok;
+				}
+				info(
+					'%s%s',
+					$ok ? " #G{done.}" : " #R{failed}",
+					$ok ? pretty_duration(Time::Piece->new - $start) : '' # TODO: capture bail message and print it here
+				)
+			}
+		} else {
+			$self->notify("keeping network claims for this environment");
+		}
+	}
+
+	if (scalar @removed_secrets) {
+		$self->notify(
+			"removing #r{%s} secrets...",
+			join(" and ", ($clean_up{secrets} ? 'generated' : ()), ($clean_up{user_secrets} ? 'user-provided' : ())),
+		);
+		my ($results, $msg) = $self->secrets_plan->_remove_secrets(
+			@removed_secrets,
+			verbose => 1,
+			confirm => 0,
+			%opts
+		);
 		if ($results->{error}) {
 			info("#r{error!}");
 			error("Failed to remove secrets: %s", $msg);
@@ -3478,6 +3613,19 @@ sub terminate {
 		} else {
 			info("#g{done.}");
 		}
+	}
+
+	# Remove old credhub and entombed secrets
+	if ($clean_up{credhub}) {
+		$self->notify("removing credhub secrets...");
+		my $credhub = $self->credhub;
+		my $start = Time::Piece->new();
+		my $ok = $credhub->delete_old_secrets($self->name);
+		info(
+			'%s%s',
+			$ok ? " #G{done.}" : " #R{failed}",
+			$ok ? pretty_duration(Time::Piece->new - $start) : '' # TODO: capture bail message and print it here
+		);
 	}
 
 	# Update deployment archive with new exodus data indicating the deployment has been terminated
@@ -3488,18 +3636,14 @@ sub terminate {
 		# If the manifest_store uses exodus, then we need to update the exodus
 		# deployment audit data to indicate the deployment has been terminated
 		# Set exodus data to indicate the deployment has been terminated
-		my $term_flags = join(',', grep {$_} (
-			$opts{force} ? 'force' : undef,
-			$keep_secrets ? 'keep-secrets' : undef,
-			$keep_resources ? 'keep-resources' : undef,
-		));
+		my $term_flags = $opts{flags}//'<unspecified>';
 		$self->vault->authenticate;
 		$self->update_deployment_exodus(
 			'terminated',
 			reason  => $opts{reason},
 			flags   => $term_flags,
 			success => ['failure','success','cleanup-failed']->[$ok//0],
-			started => $start,
+			started => $start->strftime(EXODUS_TIME_FORMAT),
 		);
 	} else {
 		# No exodus deployment audit data to update, so just remove the base exodus data
@@ -3897,7 +4041,7 @@ sub _cap_yaml_file {
 	my $type       = $self->type;
 	my $cap_file  = $self->workpath("fin.yml");
 
-	my $now = strftime("%Y-%m-%d %H:%M:%S +0000", gmtime());
+	my $now = strftime(EXODUS_TIME_FORMAT, gmtime());
 	my $bosh_target = $self->use_create_env ? "~" : $self->bosh_env->{description};
 	mkfile_or_fail($cap_file, 0644, <<EOF);
 ---
@@ -4111,7 +4255,7 @@ sub _reset_last_deployed_manifest {
 sub _build_deployment_audit_data {
 	my ($self, $state, $sequence, $timestamp, @overrides) = @_;
 
-	my $flatten = 'flatten';
+	my $flatten = 'unflattened';
 	$flatten = shift(@overrides) if ($overrides[0] =~ /^(un)?flatten(ed)?$/);
 	my %overrides = @overrides;
 
@@ -4214,16 +4358,16 @@ sub _backfill_deployment_audit_data {
 		# deployment and now
 		my $now = Time::Piece->new;
 		my $termination_time = Time::Piece->strptime(
-			$last_deployment->{completed} || $last_deployment->{dated} || now->strftime("%Y-%m-%dT%H:%M:%SZ"),
-			"%Y-%m-%dT%H:%M:%SZ"
+			$last_deployment->{completed} || $last_deployment->{dated} || now->strftime(EXODUS_TIME_FORMAT),
+			EXODUS_TIME_FORMAT
 		);
 		my $termination_ts = $termination_time + ($now - $termination_time) / 2;
-		$termination_ts = $termination_ts->strftime("%Y%m%d%H%M%S");
+		$termination_ts = $termination_ts->strftime(EXODUS_TIME_FORMAT_SHORT);
 
 		my $placeholder = {
 			state => 'terminated',
-			started => $termination_time->strftime("%Y-%m-%dT%H:%M:%SZ"),
-			completed => $now->strftime("%Y-%m-%dT%H:%M:%SZ"),
+			started => $termination_time->strftime(EXODUS_TIME_FORMAT),
+			completed => $now->strftime(EXODUS_TIME_FORMAT),
 			sequence => $sequence,
 			reason => 'Terminated via unknown means after last recorded deployment (time unknown)',
 		};
@@ -4243,12 +4387,15 @@ sub _backfill_deployment_audit_data {
 			);
 		};
 
-		my $deployment_ts = $old_exodus->{dated};
+		my $deployment_time = Time::Piece->strptime($old_exodus->{dated}, EXODUS_TIME_FORMAT);
+		my $deployment_ts = $deployment_time->strftime(EXODUS_TIME_FORMAT_SHORT);
+		my $last_deployment_ts = $last_deployment->{timestamp};
 		my $genesis_version = $old_exodus->{version}//'(unknown version)';
 		my $reason = $old_exodus->{reason}//'Unknown reason';
 		$reason .= " (legacy deployment by Genesis $genesis_version - there may have been others between this and the previous archived deployment)";
 		my $deployment_data = $self->_build_deployment_audit_data(
-			'deployed', $sequence, $deployment_ts, 'unflattened',
+			'deployed', $sequence,
+			$deployment_time->strftime(EXODUS_TIME_FORMAT),
 			kit => {
 				name => $old_exodus->{kit_name},
 				version => $old_exodus->{kit_version},
@@ -4269,7 +4416,11 @@ sub _backfill_deployment_audit_data {
 			reason => $reason,
 			genesis_version => $genesis_version,
 		);
-		$self->vault->set_path($self->exodus_base."/deployments/$deployment_ts", $deployment_data, flatten => 1);
+		$self->vault->set_path(
+			$self->exodus_base."/deployments/$deployment_ts",
+			$deployment_data,
+			flatten => 1
+		);
 
 		# Update exodus with the new sequence number
 		$self->vault->set($self->exodus_base, "sequence", $sequence);
@@ -4278,6 +4429,22 @@ sub _backfill_deployment_audit_data {
 }
 
 # }}}
+# get_network_claims - get the network claims for the environment {{{
+sub get_network_claims {
+	my ($self) = @_;
+	my @network_keys = $self->bosh->vault->keys($self->bosh->exodus_path.'/network');
+	my $claims = {};
+	my $name = $self->name;
+	my $type = $self->type;
+	for my $claim (grep {/:subnets\..*\.claims\.$name~$type~/} @network_keys) {
+		my ($path, $key, $subnet, $network) = $claim =~ m/^([^:]*):(subnets\.(.*?)\.claims\.(?:.*)~net-([^~]*))$/;
+		next unless $subnet && $path && $key && $network; # TODO: This should probably issue a warning at least
+		# RISK: Assumes one claim per network/subnet, this may be naive
+		$claims->{$network}{$subnet}{ips} = $self->bosh->vault->get($path,$key);
+		$claims->{$network}{$subnet}{path} = $path;
+	}
+	return $claims;
+}
 
 1;
 # vim: fdm=marker:foldlevel=1:noet

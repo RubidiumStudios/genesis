@@ -752,25 +752,60 @@ sub terminate {
 	$env = Genesis::Top->new('.')->load_env($env)->with_vault()->with_bosh()
 		unless $env->isa('Genesis::Env');
 
+	my $flags = join(", ", map {
+		if ($_ =~ m/(resources|secrets|user-secrets|credhub|networks)/) {
+			$options{$_} ? "--$_" : "--no-$_";
+		} else {
+			"--$_";
+		}
+	} (keys %options));
+
+	my %clean_up = ();
+	my $default_cleanup = delete($options{'no-cleanup'}) ? 0 : 1;
+	for my $opt (qw/resources secrets user-secrets credhub networks/) {
+		$clean_up{$opt =~ s/-/_/gr} = exists($options{$opt})
+			? (delete($options{$opt}) ? 1 : 0)
+			: $default_cleanup;
+	}
+
 	my $no_prompt = delete($options{'yes'})//0;
-	my $keep_secrets = $options{'keep-secrets'}//0;
+	# FIXME: It is suppose to prompt the user if they want to keep the secrets,
+	#        resources, etc. if the options aren't explicitly set and -y isn't
+	#        passed.  However, the prompt_for_boolean function hasn't been 
+	#        implemented yet.
+
 	my $dry_run = $options{'dry-run'}//0;
-	my $clean_up = !($options{'keep-resources'}//0);
 
 	my $action_desc = $dry_run ? 'would' : 'will';
 	my $msg = (
 		"This $action_desc #R{terminate} this deployment:\n".
 		"[[  - >>#R{all its VMs and persistent disks} $action_desc be #R{destroyed}"
 	).(
-		$keep_secrets
-		? "\n[[  - >>#G{this environment's secrets} $action_desc be left in place"
-		: "\n[[  - >>#R{this environment's secrets} $action_desc be #R{removed} (use --keep-secrets to skip)"
+		$clean_up{secrets}
+		? "\n[[  - >>#R{this environment's generated secrets} $action_desc be #R{removed} (use --no-secrets to skip)"
+		: "\n[[  - >>#G{this environment's generated secrets} $action_desc be left in place"
 	).(
-		$clean_up
-		? "\n[[  - >>#R{all unused resources} $action_desc be #R{removed} from the BOSH director (use --keep-resources to skip)"
-		: "\n[[  - >>#G{all unused resources} $action_desc be left in place on the BOSH director"
+		$clean_up{user_secrets}
+		? "\n[[  - >>#R{this environment's user-provided secrets} $action_desc be #R{removed} (use --no-user-secrets to skip)"
+		: "\n[[  - >>#G{this environment's user-provided secrets} $action_desc be left in place"
 	);
-
+	$msg .= (
+		(
+			$clean_up{credhub}
+			? "\n[[  - >>#R{this environment's credhub secrets} $action_desc be #R{removed} (use --no-credhub to skip)"
+			: "\n[[  - >>#G{this environment's credhub secrets} $action_desc be left in place"
+		).(
+			$clean_up{resources}
+			? "\n[[  - >>#R{all unused resources} $action_desc be #R{removed} from the BOSH director (use --no-resources to skip)"
+			: "\n[[  - >>#G{all unused resources} $action_desc be left in place on the BOSH director"
+		).(
+			$clean_up{networks}
+			? "\n[[  - >>#R{all claimed networks} $action_desc be #R{removed} from the BOSH director (use --no-resources to skip)"
+			: "\n[[  - >>#G{all claimed networks} $action_desc be left in place on the BOSH director"
+		).(
+		"\n[[  - >>#R{all associated BOSH configs on its deploying director} $action_desc be #R{destroyed}"
+		)
+	) unless $env->use_create_env;
 	$env->notify($msg);
 
 	if (!$dry_run && !$no_prompt) {
@@ -783,7 +818,7 @@ sub terminate {
 	}
 
 	$ENV{BOSH_NON_INTERACTIVE} = 'true' if $no_prompt;
-	my $ok = $env->terminate(%options, reason => $reason);
+	my $ok = $env->terminate(%options, reason => $reason, clean_up => \%clean_up, flags => $flags);
 	if ($options{'dry-run'}) {
 		notice("\n#M{%s}/#c{%s} termination dry-run completed.\n", $env->name, $env->type);
 		exit($ok ? 0 : 1);
