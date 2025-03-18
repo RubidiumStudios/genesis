@@ -157,7 +157,7 @@ sub _emojify {
 		'tmyn' => "\x{1F320}",
 		'notice' => "\x{1FAA7} ",
 		'megaphone' => "\x{1F4E3}",
-		'noentry' => "\x{26D4}\x{FE0F} ",
+		'noentry' => "\x{26D4}\x{FE0F}",
 	);
 	return '' if envset('GENESIS_NO_UTF8');
 	return $emojis{$emoji} // '';
