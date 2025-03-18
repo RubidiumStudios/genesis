@@ -390,6 +390,18 @@ sub upload_config_from_file {
 	return 1;
 }
 
+sub delete_config {
+	my ($self, $type, $name) = @_;
+	my @commands = ('delete-config', "-n", "--type=$type", "--name=$name");
+	my ($out, $rc, $err) = $self->execute({interactive => 0}, @commands);
+	bail(
+		"Failed to delete %s configuration from '#M{%s}' BOSH director: %s",
+		$name, $self->alias, $err
+	) if $rc;
+	return 1;
+}
+
+
 # }}}
 # deploy - deploy the given manifest as the deployment {{{
 sub deploy {
