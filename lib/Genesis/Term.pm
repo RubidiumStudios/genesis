@@ -815,7 +815,7 @@ sub string_to_hex {
 		my @bytes = unpack('C*', $block);
 		for my $byte (@bytes) {
 			$hex .= sprintf("%02x ", $byte);
-			$printable = get_control_picture($byte);
+			$printable .= get_control_picture($byte);
 		}
 	
 		# Format in columns
