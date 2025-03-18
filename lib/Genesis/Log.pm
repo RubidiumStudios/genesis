@@ -67,7 +67,7 @@ sub configure_log {
 		if (!-d $dir) {
 			printf STDERR wrap( # Have to use printf because logs aren't set up yet
 				csprintf(
-					"[[#B{[#E{%s}NOTICE]} >>Creating missing log directory for log #c{%s}\n\n",
+					"[[#BK{[#E{%s}NOTICE]} >>Creating missing log directory for log #c{%s}\n\n",
 					$Genesis::RC->get('output_style','plain') eq 'fun' ? 'megaphone' : '',
 					$log
 				),
@@ -158,8 +158,8 @@ sub log_styles {
 		output    => {colors => "kC", pri => 6, emoji => 'printer'},
 		info      => {colors => "Wc", pri => 6, emoji => 'information'},
 		debug     => {colors => "Wm", emoji => 'crystal-ball'},
-		warning   => {colors => "ky", pri => 4, emoji => 'warning'},
-		notice    => {colors => "BK", pri => 4, emoji => 'notice'},
+		warning   => {colors => "yk", pri => 4, emoji => 'warning'},
+		notice    => {colors => "wb", pri => 4, emoji => 'megaphone'},
 		error     => {colors => "WR", pri => 3, emoji => 'collision'},
 		fatal     => {colors => "Yr", pri => 0, emoji => 'stop-sign'},
 		trace     => {colors => "WG", emoji => 'detective', show_stack => 'current'},
@@ -308,11 +308,13 @@ sub flush_logs {
 					$colors = '';
 				} elsif ($config->{style} eq 'fun') {
 					my $fg = substr($colors,1,1);
-					$prefix = sprintf("#%s{[}#E{%s}#%s{%s] }",$fg,$emoji,$fg,$label);
+					my $bg = substr($colors,0,1);
+					$prefix = sprintf("#%s{[#E{%s}%s]} ",$fg.$bg,$emoji,$label);
 					$prefix = "#K{$ts} $prefix" if $config->{timestamp};
 				} elsif ($config->{style} eq 'plain') {
 					my $fg = substr($colors,1,1);
-					$prefix = "#${fg}{[$label]} ";
+					my $bg = substr($colors,0,1);
+					$prefix = "#${fg$bg}{[$label]} ";
 					$prefix = "#K{$ts} $prefix" if $config->{timestamp};
 				} elsif ($config->{style} eq 'rfc-5424') {
 					$priority += 8; # See https://datatracker.ietf.org/doc/html/rfc5424#section-6.2.1
