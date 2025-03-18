@@ -91,7 +91,7 @@ subtest 'genesis terminate' => sub {
 				ok($opts{force},"terminate called with force");
 				ok($opts{'dry-run'}, "terminate called with dry-run");
 				ok($opts{yes}, "terminate called with yes");
-				eq_or_diff($opts{flags}, '--credhub, --dry-run, --force, --no-cleanup, --yes', "terminate called with correct flags");
+				eq_or_diff($opts{flags}, '--credhub --dry-run --force --no-cleanup --yes', "terminate called with correct flags");
 				cmp_deeply($opts{clean_up}, {
 					resources => 0,
 					secrets => 0,
@@ -140,7 +140,7 @@ subtest 'genesis terminate' => sub {
 				ok($opts{force},"terminate called with force");
 				not_ok($opts{'dry-run'}, "terminate called without dry-run");
 				ok($opts{yes}, "terminate called with yes");
-				eq_or_diff($opts{flags}, '--force, --yes', "terminate called with correct flags");
+				eq_or_diff($opts{flags}, '--force --yes', "terminate called with correct flags");
 				cmp_deeply($opts{clean_up}, {
 					resources => 1,
 					secrets => 1,

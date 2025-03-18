@@ -752,7 +752,7 @@ sub terminate {
 	$env = Genesis::Top->new('.')->load_env($env)->with_vault()->with_bosh()
 		unless $env->isa('Genesis::Env');
 
-	my $flags = join(", ", map {
+	my $flags = join(" ", map {
 		if ($_ =~ m/(resources|secrets|user-secrets|credhub|networking)/) {
 			$options{$_} ? "--$_" : "--no-$_";
 		} else {
