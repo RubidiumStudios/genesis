@@ -3507,10 +3507,10 @@ sub terminate {
 				push(@$claim_descriptions, $block);
 			}
 			dryrun("\nwould #%s{%s} the following network claims:\n%s",
-				$clean_up{networks} ? ("r",'release') : ('G','keep'),
+				$clean_up{networking} ? ("r",'release') : ('G','keep'),
 				join("\n", $claim_descriptions->@*)
 			);
-		} else {
+		} elsif (!$self->use_create_env) {
 			dryrun("\nno network claims found to release.");
 		}
 
@@ -3523,7 +3523,7 @@ sub terminate {
 				));
 			}
 			dryrun("\n%s", join("\n", $config_descriptions->@*));
-		} else {
+		} elsif (!$self->use_create_env) {
 			dryrun("\nno config files found to remove.");
 		}
 
@@ -3539,6 +3539,8 @@ sub terminate {
 
 		push(@{$clean_up{secrets} ? \@removed_secrets : \@kept_secrets}, @generated_secrets);
 		push(@{$clean_up{user_secrets} ? \@removed_secrets : \@kept_secrets}, @user_secrets);
+
+		# TODO: Add the credhub secrets to the list of secrets to remove if not using create-env
 
 		dryrun(
 			"\nwould #G{keep} the following #G{%s} secrets:\n%s",
@@ -3573,7 +3575,7 @@ sub terminate {
 	}
 
 	if (scalar $claims->%*) {
-		if ($clean_up{networks}) {
+		if ($clean_up{networking}) {
 			$self->notify("releasing network claims...");
 			for my $network (sort keys $claims->{claims}->%*) {
 				my $start = Time::Piece->new();
@@ -3616,7 +3618,7 @@ sub terminate {
 	}
 
 	# Remove old credhub and entombed secrets
-	if ($clean_up{credhub}) {
+	if ($clean_up{credhub} && !$self->use_create_env) {
 		$self->notify("removing credhub secrets...");
 		my $credhub = $self->credhub;
 		my $start = Time::Piece->new();
