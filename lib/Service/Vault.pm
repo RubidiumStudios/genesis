@@ -417,6 +417,7 @@ sub clear {
 		"Could not clear #C{%s} in vault at #M{%s}:\n%s",
 		$path,$self->{url},$out.$err
 	) unless $rc == 0;
+	return 1;
 }
 
 # set_path - writes a set of key value pairs to the vault {{{
