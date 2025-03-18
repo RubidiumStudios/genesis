@@ -314,7 +314,7 @@ sub flush_logs {
 				} elsif ($config->{style} eq 'plain') {
 					my $fg = substr($colors,1,1);
 					my $bg = substr($colors,0,1);
-					$prefix = "#${fg$bg}{[$label]} ";
+					$prefix = "#${fg}${bg}{[$label]} ";
 					$prefix = "#K{$ts} $prefix" if $config->{timestamp};
 				} elsif ($config->{style} eq 'rfc-5424') {
 					$priority += 8; # See https://datatracker.ietf.org/doc/html/rfc5424#section-6.2.1
