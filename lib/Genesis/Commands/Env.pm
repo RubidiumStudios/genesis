@@ -753,57 +753,62 @@ sub terminate {
 		unless $env->isa('Genesis::Env');
 
 	my $flags = join(", ", map {
-		if ($_ =~ m/(resources|secrets|user-secrets|credhub|networks)/) {
+		if ($_ =~ m/(resources|secrets|user-secrets|credhub|networking)/) {
 			$options{$_} ? "--$_" : "--no-$_";
 		} else {
 			"--$_";
 		}
-	} (keys %options));
+	} (sort keys %options));
 
 	my %clean_up = ();
 	my $default_cleanup = delete($options{'no-cleanup'}) ? 0 : 1;
-	for my $opt (qw/resources secrets user-secrets credhub networks/) {
+	for my $opt (qw/resources secrets user-secrets credhub networking/) {
 		$clean_up{$opt =~ s/-/_/gr} = exists($options{$opt})
 			? (delete($options{$opt}) ? 1 : 0)
 			: $default_cleanup;
 	}
 
-	my $no_prompt = delete($options{'yes'})//0;
-	# FIXME: It is suppose to prompt the user if they want to keep the secrets,
-	#        resources, etc. if the options aren't explicitly set and -y isn't
-	#        passed.  However, the prompt_for_boolean function hasn't been 
-	#        implemented yet.
-
+	my $no_prompt = $options{'yes'}//0;
 	my $dry_run = $options{'dry-run'}//0;
 
 	my $action_desc = $dry_run ? 'would' : 'will';
 	my $msg = (
 		"This $action_desc #R{terminate} this deployment:\n".
-		"[[  - >>#R{all its VMs and persistent disks} $action_desc be #R{destroyed}"
+		"[[  - >>#R{all its VMs and persistent disks} $action_desc be #R{destroyed}."
 	).(
 		$clean_up{secrets}
-		? "\n[[  - >>#R{this environment's generated secrets} $action_desc be #R{removed} (use --no-secrets to skip)"
-		: "\n[[  - >>#G{this environment's generated secrets} $action_desc be left in place"
+		? "\n[[  - >>#R{this environment's generated secrets} $action_desc be #R{removed}".
+			($default_cleanup ? " (use --no-secrets to keep)." : ".")
+		: "\n[[  - >>#G{this environment's generated secrets} $action_desc be left in place".
+			($default_cleanup ? "." : " (use --secrets to remove).")
 	).(
 		$clean_up{user_secrets}
-		? "\n[[  - >>#R{this environment's user-provided secrets} $action_desc be #R{removed} (use --no-user-secrets to skip)"
-		: "\n[[  - >>#G{this environment's user-provided secrets} $action_desc be left in place"
+		? "\n[[  - >>#R{this environment's user-provided secrets} $action_desc be #R{removed}".
+			($default_cleanup ? " (use --no-user-secrets to keep)." : ".")
+		: "\n[[  - >>#G{this environment's user-provided secrets} $action_desc be left in place".
+			($default_cleanup ? "." : " (use --user-secrets to remove).")
 	);
 	$msg .= (
 		(
 			$clean_up{credhub}
-			? "\n[[  - >>#R{this environment's credhub secrets} $action_desc be #R{removed} (use --no-credhub to skip)"
-			: "\n[[  - >>#G{this environment's credhub secrets} $action_desc be left in place"
+			? "\n[[  - >>#R{this environment's credhub secrets} $action_desc be #R{removed}".
+				($default_cleanup ? " (use --no-credhub to keep)." : ".")
+			: "\n[[  - >>#G{this environment's credhub secrets} $action_desc be left in place".
+				($default_cleanup ? "." : " (use --credhub to remove).")
 		).(
 			$clean_up{resources}
-			? "\n[[  - >>#R{all unused resources} $action_desc be #R{removed} from the BOSH director (use --no-resources to skip)"
-			: "\n[[  - >>#G{all unused resources} $action_desc be left in place on the BOSH director"
+			? "\n[[  - >>#R{all unused resources} $action_desc be #R{removed} from its BOSH director".
+				($default_cleanup ? " (use --no-resources to keep)." : ".")
+			: "\n[[  - >>#G{all unused resources} $action_desc be left in place on its BOSH director".
+				($default_cleanup ? "." : " (use --resources to remove).")
 		).(
-			$clean_up{networks}
-			? "\n[[  - >>#R{all claimed networks} $action_desc be #R{removed} from the BOSH director (use --no-resources to skip)"
-			: "\n[[  - >>#G{all claimed networks} $action_desc be left in place on the BOSH director"
+			$clean_up{networking}
+			? "\n[[  - >>#R{all claimed networks} $action_desc be #R{removed} from its BOSH director".
+				($default_cleanup ? " (use --no-networking to keep)." : ".")
+			: "\n[[  - >>#G{all claimed networks} $action_desc be left in place on its BOSH director".
+				($default_cleanup ? "." : " (use --networking to remove).")
 		).(
-		"\n[[  - >>#R{all associated BOSH configs on its deploying director} $action_desc be #R{destroyed}"
+		"\n[[  - >>#R{all associated BOSH configs on its BOSH director} $action_desc be #R{removed}."
 		)
 	) unless $env->use_create_env;
 	$env->notify($msg);

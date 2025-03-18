@@ -18,7 +18,7 @@ use Genesis;
 
 # Initialize the Genesis environment
 $ENV{NOCOLOR} = 1;
-$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 
 subtest 'bin/genesis' => sub {
 
@@ -29,7 +29,7 @@ subtest 'bin/genesis' => sub {
 };
 
 subtest 'genesis terminate' => sub {
-	plan tests => 59;
+	plan tests => 55;
 
 	ok(has_command('terminate'), "Terminate command is registered");
 
@@ -44,12 +44,16 @@ subtest 'genesis terminate' => sub {
 	is(command_properties('terminate')->{option_group}, Genesis::Commands::ENV_OPTIONS, "Terminate command uses ENV_OPTIONS");
 
 	my %terminate_opts = command_properties('terminate')->{options}->@*;
-	ok(exists $terminate_opts{'keep-secrets|S'}, "terminate has keep-secrets option");
-	ok(exists $terminate_opts{'keep-resources|R'}, "terminate has keep-resources option");
+	ok(exists $terminate_opts{'resources!'}, "terminate has toggleable resources option");
+	ok(exists $terminate_opts{'secrets!'}, "terminate has toggleable secrets option");
+	ok(exists $terminate_opts{'user-secrets!'}, "terminate has toggleable user-secrets option");
+	ok(exists $terminate_opts{'credhub!'}, "terminate has toggleable credhub option");
+	ok(exists $terminate_opts{'networking!'}, "terminate has toggleable networking option");
+	ok(exists $terminate_opts{'no-cleanup|K'}, "terminate has no-cleanup option");
 	ok(exists $terminate_opts{'force|f'}, "terminate has force option");
 	ok(exists $terminate_opts{'yes|y'}, "terminate has yes (no-prompt) option");
 	ok(exists $terminate_opts{'dry-run|n'}, "terminate has dry-run option");
-	is(scalar(keys %terminate_opts), 5, "terminate only has the 5 options above");
+	is(scalar(keys %terminate_opts), 9, "terminate only has the 5 options above");
 
 	my %terminate_args = command_properties('terminate')->{arguments}->@*;
 	is(scalar(keys %terminate_args), 1, "terminate has one argument");
@@ -66,7 +70,7 @@ subtest 'genesis terminate' => sub {
 	}, "terminate command subroutine has the correct closed-over variables");
 
 	# Setup a dry-run terminate command
-	prepare_command('terminate', 'my-env','-f','-SR','--dry-run','--yes','reason');
+	prepare_command('terminate', 'my-env','-f','--no-cleanup', '--credhub', '--dry-run','--yes','reason');
 	build_command_environment
 
 	my @args = get_args();
@@ -77,17 +81,25 @@ subtest 'genesis terminate' => sub {
 			my ($self, $msg) = @_;
 			info("[my-env/my-type] ".$msg);
 		},
+		use_create_env => 0,
 		terminate => sub {
 			my ($self, %opts) = @_;
-			
-			is($self->name, 'my-env', "terminate called with correct environment name");
-			is($opts{reason}, 'reason', "terminate called with correct reason");
-			ok($opts{force},"terminate called with force");
-			ok($opts{'keep-secrets'}, "terminate called with keep-secrets");
-			ok($opts{'keep-resources'}, "terminate called with keep-resources");
-			ok($opts{'dry-run'}, "terminate called with dry-run");
-			not_ok($opts{yes}, "terminate called with yes (should be stripped)");
-
+			subtest "terminate call validation (dryrun, no cleanup)" => sub {
+				plan tests => 7;
+				is($self->name, 'my-env', "terminate called with correct environment name");
+				is($opts{reason}, 'reason', "terminate called with correct reason");
+				ok($opts{force},"terminate called with force");
+				ok($opts{'dry-run'}, "terminate called with dry-run");
+				ok($opts{yes}, "terminate called with yes");
+				eq_or_diff($opts{flags}, '--credhub, --dry-run, --force, --no-cleanup, --yes', "terminate called with correct flags");
+				cmp_deeply($opts{clean_up}, {
+					resources => 0,
+					secrets => 0,
+					user_secrets => 0,
+					credhub => 1,
+					networking => 0
+				}, "terminate called with correct cleanup options");
+			};
 			return 1;
 		},
 	};
@@ -95,10 +107,14 @@ subtest 'genesis terminate' => sub {
 	my ($stdout, $stderr) = output_from {
 		exits_zero { $subref->(@args) } "terminate dry-run command exits with 0";
 	};
-	like($stderr, qr/\[my-env\/my-type] This would terminate this deployment/, "terminate dry-run command prints dry-run message");
-	like($stderr, qr/- all its VMs and persistent disks would be destroyed/, "terminate dry-run command prints VM and disk destruction message");
-	like($stderr, qr/- this environment's secrets would be left in place/, "terminate dry-run command prints secret retention message (--keep-secrets)");
-	like($stderr, qr/- all unused resources would be left in place/, "terminate dry-run command prints resource retention message (--keep-resources)");
+	like($stderr, qr/\[my-env\/my-type] This would terminate this deployment:/, "terminate dry-run command prints dry-run message");
+	like($stderr, qr/- all its VMs and persistent disks would be destroyed\.$/m, "terminate dry-run command prints VM and disk destruction message");
+	like($stderr, qr/- this environment's generated secrets would be left in place \(use --secrets to remove\)\.$/m, "terminate dry-run command prints generated secret retention message (--no-cleanup)");
+	like($stderr, qr/- this environment's user-provided secrets would be left in place \(use --user-secrets to remove\)\.$/m, "terminate dry-run command prints user secret retention message (--no-cleanup)");
+	like($stderr, qr/- this environment's credhub secrets would be removed\.$/m, "terminate dry-run command prints credhub secret retention message (--credhub)");
+	like($stderr, qr/- all unused resources would be left in place on its BOSH director \(use --resources to remove\)\.$/m, "terminate dry-run command prints resource retention message (--no-cleanup)");
+	like($stderr, qr/- all claimed networks would be left in place on its BOSH director \(use --networking to remove\)\.$/m, "terminate dry-run command prints network retention message (--no-cleanup)");
+	like($stderr, qr/- all associated BOSH configs on its BOSH director would be removed\.$/m, "terminate dry-run command prints BOSH config removal message");
 	like($stderr, qr/my-env\/my-type termination dry-run completed/, "terminate dry-run command prints termination message");
 	is($stdout, '', "terminate dry-run command prints nothing to stdout");
 
@@ -114,16 +130,25 @@ subtest 'genesis terminate' => sub {
 			my ($self, $msg) = @_;
 			info("[my-env/my-type] ".$msg);
 		},
+		use_create_env => 0,
 		terminate => sub {
 			my ($self, %opts) = @_;
-			
-			is($opts{reason}, undef, "terminate called with no reason");
-			ok($opts{force},"terminate called with force");
-			not_ok($opts{'keep-secrets'}, "terminate called without keep-secrets");
-			not_ok($opts{'keep-resources'}, "terminate called without keep-resources");
-			not_ok($opts{'dry-run'}, "terminate called without dry-run");
-			not_ok($opts{yes}, "terminate called with yes (should be stripped)");
-
+			subtest "terminate call validation (default cleanup, no-dryrun)" => sub {
+				plan tests => 7;
+				is($self->name, 'my-env', "terminate called with correct environment name");
+				is($opts{reason}, undef, "terminate called with no reason");
+				ok($opts{force},"terminate called with force");
+				not_ok($opts{'dry-run'}, "terminate called without dry-run");
+				ok($opts{yes}, "terminate called with yes");
+				eq_or_diff($opts{flags}, '--force, --yes', "terminate called with correct flags");
+				cmp_deeply($opts{clean_up}, {
+					resources => 1,
+					secrets => 1,
+					user_secrets => 1,
+					credhub => 1,
+					networking => 1
+				}, "terminate called with correct cleanup options");
+			};
 			return 1;
 		},
 	};
@@ -131,15 +156,19 @@ subtest 'genesis terminate' => sub {
 		exits_zero { $subref->(@args) } "terminate command exits with 0";
 	};
 
-	like($stderr, qr/\[my-env\/my-type] This will terminate this deployment/, "terminate dry-run command prints dry-run message");
-	like($stderr, qr/- all its VMs and persistent disks will be destroyed/, "terminate dry-run command prints VM and disk destruction message");
-	like($stderr, qr/- this environment's secrets will be removed \(use --keep-secrets to skip\)/, "terminate dry-run command prints secret destruction message");
-	like($stderr, qr/- all unused resources will be removed from the BOSH director \(use\n\s*--keep-resources to skip\)/, "terminate dry-run command prints resource destruction message");
+	like($stderr, qr/\[my-env\/my-type] This will terminate this deployment:$/m, "terminate command prints dry-run message");
+	like($stderr, qr/- all its VMs and persistent disks will be destroyed\.$/m, "terminate command prints VM and disk destruction message");
+	like($stderr, qr/- this environment's generated secrets will be removed \(use --no-secrets to keep\)\.$/m, "terminate command prints secret destruction message");
+	like($stderr, qr/- this environment's user-provided secrets will be removed \(use --no-user-secrets to keep\)\.$/m, "terminate command prints user secret destruction message");
+	like($stderr, qr/- this environment's credhub secrets will be removed \(use --no-credhub to keep\)\.$/m, "terminate command prints credhub destruction message");
+	like($stderr, qr/- all unused resources will be removed from its BOSH director \(use --no-resources to keep\)\.$/m, "terminate command prints resource destruction message");
+	like($stderr, qr/- all claimed networks will be removed from its BOSH director \(use --no-networking to keep\)\.$/m, "terminate command prints network destruction message");
+	like($stderr, qr/- all associated BOSH configs on its BOSH director will be removed\.$/m, "terminate dry-run command prints BOSH config removal message");
 	like($stderr, qr/my-env\/my-type terminated successfully/, "terminate command prints successful termination message");
 	is($stdout, '', "terminate successful command prints nothing to stdout");
 
-	# Run a terminal command with prompt, but abort
-	prepare_command('terminate', 'my-env', 'trying to do something bad');
+	# Run a terminal command with prompt, but abort on a create_env environment
+	prepare_command('terminate', 'my-env', '--no-user-secrets', 'trying to do something bad');
 	build_command_environment;
 
 	my $return_value = 1;
@@ -151,16 +180,25 @@ subtest 'genesis terminate' => sub {
 			my ($self, $msg) = @_;
 			info("[my-env/my-type] ".$msg);
 		},
+		use_create_env => 1,
 		terminate => sub {
 			my ($self, %opts) = @_;
-			
-			is($opts{reason}, 'trying to do something bad', "terminate called with correct reason");
-			not_ok($opts{force},"terminate called without force");
-			not_ok($opts{'keep-secrets'}, "terminate called without keep-secrets");
-			not_ok($opts{'keep-resources'}, "terminate called without keep-resources");
-			not_ok($opts{'dry-run'}, "terminate called without dry-run");
-			not_ok($opts{yes}, "terminate called without yes");
-
+			subtest "terminate call validation (prompt, create_env, no-user-secrets)" => sub {
+				plan tests => 7;
+				is($self->name, 'my-env', "terminate called with correct environment name");
+				is($opts{reason}, 'trying to do something bad', "terminate called with correct reason");
+				not_ok($opts{force},"terminate called without force");
+				not_ok($opts{'dry-run'}, "terminate called without dry-run");
+				not_ok($opts{yes}, "terminate called without yes");
+				eq_or_diff($opts{flags}, '--no-user-secrets', "terminate called with correct flags");
+				cmp_deeply($opts{clean_up}, {
+					resources => 1,
+					secrets => 1,
+					user_secrets => 0,
+					credhub => 1,
+					networking => 1
+				}, "terminate called with correct cleanup options");
+			};
 			return $return_value;
 		},
 	};
@@ -177,10 +215,9 @@ subtest 'genesis terminate' => sub {
 	$stderr =~ s/\e\[\?25h$//; # Strip ANSI show cursor code
 	eq_or_diff($stderr, <<'EOF', "terminate failed command prints failure message");
 [my-env/my-type] This will terminate this deployment:
-  - all its VMs and persistent disks will be destroyed
-  - this environment's secrets will be removed (use --keep-secrets to skip)
-  - all unused resources will be removed from the BOSH director (use
-    --keep-resources to skip)
+  - all its VMs and persistent disks will be destroyed.
+  - this environment's generated secrets will be removed (use --no-secrets to keep).
+  - this environment's user-provided secrets will be left in place.
 
 [WARNING] This action is irreversible and cannot be undone!
 
@@ -202,10 +239,9 @@ EOF
 	$stderr =~ s/\e\[\?25h$//; # Strip ANSI show cursor code
 	eq_or_diff($stderr, <<'EOF', "terminate failed command prints failure message");
 [my-env/my-type] This will terminate this deployment:
-  - all its VMs and persistent disks will be destroyed
-  - this environment's secrets will be removed (use --keep-secrets to skip)
-  - all unused resources will be removed from the BOSH director (use
-    --keep-resources to skip)
+  - all its VMs and persistent disks will be destroyed.
+  - this environment's generated secrets will be removed (use --no-secrets to keep).
+  - this environment's user-provided secrets will be left in place.
 
 [WARNING] This action is irreversible and cannot be undone!
 
