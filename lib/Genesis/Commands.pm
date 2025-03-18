@@ -315,7 +315,7 @@ sub parse_options { # {{{
 	@COMMAND_ARGS = (@$args);
 
 	# Extract Core options
-	$ENV{NOCOLOR}        = 'y' if !delete($COMMAND_OPTIONS->{color});
+	$ENV{NOCOLOR}        = 'y' if defined($COMMAND_OPTIONS->{color}) && !delete($COMMAND_OPTIONS->{color});
 	$ENV{QUIET}          = 'y' if  delete($COMMAND_OPTIONS->{quiet});
 
 	# Remove workaround options
@@ -700,7 +700,7 @@ sub set_logging_state { # {{{
 	$ENV{GENESIS_TRACE}  = 'y' if Genesis::Log::meets_level($log_level, 'TRACE');
 
 	my $stack_trace = delete($COMMAND_OPTIONS->{'show-stack'});
-	$ENV{GENESIS_STACK_TRACE} = "y" if delete($COMMAND_OPTIONS->{'show-stack'});
+	$ENV{GENESIS_STACK_TRACE} = $stack_trace if defined($stack_trace);
 
 	$Logger->configure_log(
 		level => $log_level,
