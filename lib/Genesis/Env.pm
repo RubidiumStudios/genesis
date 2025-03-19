@@ -3348,7 +3348,6 @@ sub update_deployment_exodus {
 		) if -f $artifact_file;
 	}
 
-
 	# Set the exodus data in the vault
 	debug("setting exodus data in the Vault, for use later by other deployments");
 	my $failure_msg = sprintf(
@@ -3403,7 +3402,7 @@ sub terminate {
 		# FIXME: Parse with Time::Piece, then present in local time
 
 		warning(
-			"Environment #C{%s} has already been terminated%s on %s at %s UTC%s\n\n%s",
+			"\nEnvironment #C{%s} has already been terminated%s on %s at %s UTC%s\n\n%s",
 			$self->name,
 			$last_deployment->{user}{shell} ? ' by #B{'.$last_deployment->{user}{shell}.'}' : '',
 			$date, $time,
