@@ -3425,13 +3425,19 @@ sub terminate {
 			env => $self, force => $force, dryrun => $dryrun, mode => 'before'
 		);
 		return unless $ok;
-	} elsif ($self->is_bosh_director && ! $force) {
+	} elsif ($self->is_bosh_director) {
 		bail(
 			"Cowardly refusing to terminate a BOSH director environment without a ".
 			"termination hook.  Please upgrade your kit to a version that supports ".
 			"termination hooks, or use --force to terminate anyway (this will ".
-			"likely leave orphaned resources on your IaaS)."
-		)
+			"likely leave orphaned resources on your IaaS unless you manually ".
+			"cleaned it up first)."
+		) unless $force;
+		warning(
+			"\nTerminating a BOSH director environment without a termination hook.  ".
+			"This will likely leave orphaned resources on your IaaS unless you ".
+			"manually cleaned it up first."
+		);
 	}
 
 	$self->notify(
