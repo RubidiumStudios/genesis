@@ -278,9 +278,9 @@ EOF
 
 	debug ("Running #C{$hook_name} hook now in ".$self->path);
 	if ($hook_module) {
-		eval {require $hook_file};
-		$module_options{file} = $opts{$hook_file};
+		$module_options{file} = $hook_file;
 		$module_options{label} = $hook_name =~ s/^hook\/addon '([^'])'.*/$1/r =~ s{/}{|}r;
+		eval {require $hook_file};
 		bail(
 			"Could not load Perl module %s to run hook %s in kit %s: %s",
 			$hook_file, $hook_name, $self->id, $@
