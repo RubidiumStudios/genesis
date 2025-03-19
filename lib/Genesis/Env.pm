@@ -1362,7 +1362,7 @@ sub get_environment_variables {
 
 	my $env_ref = $self->name;
 	if ($env{GENESIS_PREFIX_TYPE} eq 'search') {
-		$env_ref = "$env{GENESIS_PREFIX_SEARCH}";
+		$env_ref = "$ENV{GENESIS_PREFIX_SEARCH}";
 	} else {
 		$env_ref .= '.yml' if (grep {$_ eq $self->name} known_commands);
 		$env_ref = humanize_path($self->path)."/$env_ref" if $is_alt_path;
