@@ -4286,8 +4286,8 @@ sub _build_deployment_audit_data {
 
 		user => {
 			shell         => $ENV{USER},
-			repo          => $self->top->kit_provider->remote->get_authorized_user, # FIXME: only works for git-based kit providers
-			vault         => $self->vault->user,
+			repo          => scalar($self->top->kit_provider->remote->get_authorized_user), # FIXME: only works for git-based kit providers
+			vault         => scalar($self->vault->user),
 			concourse     => $ENV{CONCOURSE_USERNAME},
 		},
 	};
@@ -4401,7 +4401,6 @@ sub _backfill_deployment_audit_data {
 		my $last_deployment_ts = $last_deployment->{timestamp};
 		my $genesis_version = $old_exodus->{version}//'(unknown version)';
 		my $reason = $old_exodus->{reason}//'Unknown reason';
-		$reason .= " (legacy deployment by Genesis $genesis_version - there may have been others between this and the previous archived deployment)";
 		my $deployment_data = $self->_build_deployment_audit_data(
 			'deployed', $sequence,
 			$deployment_time->strftime(EXODUS_TIME_FORMAT),
