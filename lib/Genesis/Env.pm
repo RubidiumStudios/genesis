@@ -3474,12 +3474,18 @@ sub terminate {
 	return unless $ok;
 
 	# Determine existing claims, configs and secrets
+	my $start_cleanup = Time::Piece->new();
+	$self->notify({pending => 1},
+		"gathering list of associated items for cleanup..."
+	);
 	my (@kept_secrets, @removed_secrets) = ();
-	my @all_secrets = $self->secrets_plan->secrets;
+	$self->manifest_provider->{suppress_notification} = 1; # Suppress notifications
+	my @all_secrets = $self->secrets_plan(silent => 1)->secrets;
 	my @generated_secrets = grep {$_->exists} grep {$_->type ne 'userprovided'} @all_secrets;
 	my @user_secrets = grep {$_->exists} grep {$_->type eq 'userprovided'} @all_secrets;
 	push(@{$clean_up{secrets} ? \@removed_secrets : \@kept_secrets}, @generated_secrets);
 	push(@{$clean_up{user_secrets} ? \@removed_secrets : \@kept_secrets}, @user_secrets);
+	$self->secrets_plan->verbose(1);
 
 	my $claims = {};
 	my $configs = {};	
@@ -3501,13 +3507,14 @@ sub terminate {
 						'path' => $network_claims->{$network}{$subnet}{path},
 						'range' => $network_claims->{$network}{$subnet}{ips},
 						'description' => sprintf(
-							"  - #i{%s:} #c{%s}", $subnet, $network_claims->{$network}{$subnet}{ips})
+							"%s#i{%s:} #c{%s}", bullet(''), $subnet, $network_claims->{$network}{$subnet}{ips})
 					};
 					push $claims->{$network}{subnets}->@*, $subnet_info;
 				}
 			}
 		}
 	}
+	info(" #G{done} %s", pretty_duration(Time::Piece->new - $start_cleanup));
 
 	# Dry-run output
 	if ($dryrun) {
@@ -3530,8 +3537,8 @@ sub terminate {
 			my $config_descriptions = [];
 			for my $config_type (sort keys $configs->%*) {
 				push(@$config_descriptions, sprintf(
-					"would remove the following %s config files:\n%s",
-					$config_type, join("\n", $configs->{$config_type}->@*)
+					"would #r{remove} the following #r{%s config} files:\n%s",
+					$config_type, join("\n", map {bullet("#c{$_}")} $configs->{$config_type}->@*)
 				));
 			}
 			dryrun("\n%s", join("\n", $config_descriptions->@*));
