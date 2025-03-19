@@ -1232,7 +1232,7 @@ sub _remove_secrets {
 		);
 		info('');
 		return ({abort => 1}, "Quit!\n") if ($proceed ne 'yes');
-	} else {
+	} elsif (!$opts{no_header}) {
 		$self->env->notify($header);
 	}
 

@@ -75,6 +75,7 @@ sub reset_secrets {
 
 	$env->{__secrets_plan} = undef;
 	$env->{__secrets_store} = undef;
+  $env->vault->set($env->secrets_base.'super_secrets','password', 'super-secret-password');
 	quietly {$env->add_secrets()};
 }
 
@@ -107,6 +108,14 @@ kit:
         test_cred:
           username: uuid
           password: random 40
+    provided:
+      base:
+        super_secrets:
+          type: generic
+          keys:
+            password:
+              prompt: "Enter the super secret password"
+              type: string
 
 genesis:
   env: termination-test
@@ -127,7 +136,8 @@ EOF
 	# Setup secrets in the vault
 	quietly {
 		lives_ok {
-			$env->add_secrets()
+			$env->vault->set($env->secrets_base.'super_secrets', 'password', 'super-secret-password');
+			$env->add_secrets();
 		} "secrets added to vault";
 	};
 
@@ -222,10 +232,16 @@ EOF
 		my ($out) = combined_from {
 			lives_ok {
 				local $ENV{GENESIS_NO_UTF8} = 1;
-				$env->terminate('dry-run' => 1)
+				$env->terminate('dry-run' => 1, 'clean_up' => {
+					'resources' => 1,
+					'secrets' => 1,
+					'user_secrets' => 1,
+					'credhub' => 1,
+					'networking' => 1,
+				}, flags => '--dry-run')
 			} "genesis terminate command executed successfully";
 		};
-		$out =~ s/$ENV{GENESIS_BOSH_COMMAND}/<test-bosh>/g;
+		$out =~ s/\s+$ENV{GENESIS_BOSH_COMMAND}\s+/ <test-bosh> /msg;
 		$out =~ s/\r//g; # bosh mock output has \r\n line endings... for some reason???
 
 		eq_or_diff($out, <<'EOF',"genesis terminate output is correct (dryrun, cleanup secrets and resources)");
@@ -234,22 +250,28 @@ EOF
 
 [termination-test/terminate-test] deleting deployment...
 
-[DRYRUN] would execute
-         <test-bosh>
-         delete-deployment -d termination-test-terminate-test
+[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test
 
 [termination-test/terminate-test] cleaning up any unused resources...
 
-[DRYRUN] would execute
-         <test-bosh>
-         clean-up --all, resulting in:
+[DRYRUN] would execute <test-bosh> clean-up --all, resulting in the removal of the following resources:
 bosh
 -n
---dry-run
 clean-up
 --all
+--dry-run
+--tty
 
-[DRYRUN] would remove the following secrets:
+[WARNING] The contents above is a summary of the resources currently unused by
+          any deployment. Further resources may become unused once this
+          environment is actually terminated.
+
+[DRYRUN] no network claims found to release.
+
+[DRYRUN] no config files found to remove.
+
+[DRYRUN] would remove the following generated and user-provided secrets:
+           * /secret/termination/test/terminate-test/super_secrets:password
            * /secret/termination/test/terminate-test/test_cert/ca
            * /secret/termination/test/terminate-test/test_cert/server
            * /secret/termination/test/terminate-test/test_cred:password
@@ -258,19 +280,26 @@ EOF
 
 		# Confirm the secrets did not get removed from the vault
 		my @secrets = map {$_->path} grep {$_->exists} $env->secrets_plan->secrets;
-		is(scalar(@secrets), 4, "all secrets still in from vault");
+		is(scalar(@secrets), 5, "all secrets still in from vault");
 		is(scalar($env->deployment_lookup), 1, "no new deployment entry was created");
 		is($env->deployment_state, 'deployed', "deployment status is still 'deployed'");
 		cmp_deeply(scalar($env->exodus_lookup()), $original_exodus, "exodus entry was not modified");
 
-		# Dry-run with keep secrets and resources
+		# Dry-run with keep user secrets and resources
+    #`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 		($out) = combined_from {
 			lives_ok {
 				local $ENV{GENESIS_NO_UTF8} = 1;
-				$env->terminate('dry-run' => 1, 'keep-secrets' => 1, 'keep-resources' => 1)
+				$env->terminate('dry-run' => 1, 'clean_up' => {
+					'resources' => 0,
+					'secrets' => 1,
+					'user_secrets' => 0,
+					'credhub' => 1,
+					'networking' => 0,
+				}, flags => '--dry-run --no-user-secrets --no-resources --no-networking');
 			} "genesis terminate command executed successfully";
 		};
-		$out =~ s/$ENV{GENESIS_BOSH_COMMAND}/<test-bosh>/g;
+		$out =~ s/\s+$ENV{GENESIS_BOSH_COMMAND}\s+/ <test-bosh> /msg;
 		$out =~ s/\r//g; # bosh mock output has \r\n line endings... for some reason???
 
 		eq_or_diff($out, <<'EOF',"genesis terminate output is correct (dryrun, keep secrets and resources)");
@@ -279,13 +308,22 @@ EOF
 
 [termination-test/terminate-test] deleting deployment...
 
-[DRYRUN] would execute
-         <test-bosh>
-         delete-deployment -d termination-test-terminate-test
+[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test
 
 [DRYRUN] would keep any unused resources on the standalone BOSH director.
 
-[DRYRUN] would keep existing secrets.
+[DRYRUN] no network claims found to release.
+
+[DRYRUN] no config files found to remove.
+
+[DRYRUN] would keep the following user-provided secrets:
+           * /secret/termination/test/terminate-test/super_secrets:password
+
+[DRYRUN] would remove the following generated secrets:
+           * /secret/termination/test/terminate-test/test_cert/ca
+           * /secret/termination/test/terminate-test/test_cert/server
+           * /secret/termination/test/terminate-test/test_cred:password
+           * /secret/termination/test/terminate-test/test_cred:username
 EOF
 
 		is(scalar($env->deployment_lookup), 1, "no new deployment entry was created");
@@ -295,7 +333,7 @@ EOF
 	};
 
 	subtest "terminating a deployed environment" => sub {
-		plan tests => 6;
+		plan tests => 7;
 
 		reset_exodus_data($env);
 		reset_secrets($env);
@@ -304,7 +342,17 @@ EOF
 		my ($out) = combined_from {
 			lives_ok {
 				local $ENV{GENESIS_NO_UTF8} = 1;
-				$env->terminate('force' => 1, 'yes' => 1)
+				$env->terminate(
+					'force' => 1, 'yes' => 1,
+					'reason' => 'forced termination',
+					'flags' => '--force --no-user-secrets --yes',
+					clean_up => {
+						'resources' => 1,
+						'secrets' => 1,
+						'user_secrets' => 0,
+						'credhub' => 1,
+						'networking' => 1,
+					});
 			} "genesis terminate command executed successfully";
 		};
 		$out =~ s/\r//g; # bosh mock output has \r\n line endings... for some reason???
@@ -327,20 +375,49 @@ bosh
 clean-up
 --all
 
-[termination-test/terminate-test] removing secrets...
-Deleting existing secrets under '/secret/termination/test/terminate-test/'...
+[termination-test/terminate-test] removing generated secrets...
+  - removing 4 secrets under path '/secret/termination/test/terminate-test/':
+  [1/4] test_cert/ca X.509 certificate - CA, self-signed ... done.
+  [2/4] test_cert/server X.509 certificate - signed by 'test_cert/ca' ... done.
+  [3/4] test_cred:password Random - 40 bytes ... done.
+  [4/4] test_cred:username UUID - random:system RNG based (v4) ... done.
+  completed [4 removed/0 skipped/0 errors]
 done.
 EOF
 
 		# Confirm the secrets got removed from the vault
 		my @secrets = map {$_->path} grep {$_->exists} $env->secrets_plan->secrets;
-		is(scalar(@secrets), 0, "all secrets removed from vault");
+		is(scalar(@secrets), 1, "all generated secrets removed from vault");
 
 		# Confirm the environment is reported terminated in exodus
 		is(scalar($env->deployment_lookup), 2, "new terminated deployment entry was created");
 		is($env->deployment_state, 'terminated', "deployment status is now 'terminated'");
 		cmp_deeply(scalar($env->exodus_lookup()), undef, "exodus entry was cleared");
-	}
+		my $latest = $env->deployment_lookup('latest');
+		cmp_deeply($latest, {
+			'started' => re(qr/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+\d{4}/),
+			'completed' => re(qr/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+\d{4}/),
+			'reason' => 'forced termination',
+			'sequence' => 2,
+			'state' => 'terminated',
+			'success' => 'success',
+			'flags' => '--force --no-user-secrets --yes',
+			'genesis_version' => $Genesis::VERSION,
+			'kit' => {
+				name => 'dev',
+				version => 'latest',
+				id => 'simple/in-development (dev)',
+				is_dev => 1,
+				features => ''
+			},
+			'user' => {
+				'shell' => $ENV{USER},
+				'vault' => 'root',
+				'repo' => ignore
+			},
+			'timestamp' => $latest->{completed} =~ s/ \+\d{4}//r =~s/[^\d]//gr, 
+		}, "deployment audit entry was added correctly");
+	};
 };
 
 teardown_vault;

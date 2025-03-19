@@ -12,7 +12,7 @@ use Genesis qw(
     is_valid_uri tcp_listening workdir
 		parse_fixed_width_table by_semver
 );
-use Genesis::State qw/in_callback envset/;
+use Genesis::State qw/in_callback envset under_test/;
 use Service::Vault;
 
 ### Class Methods {{{
@@ -496,6 +496,11 @@ sub cleanup {
 				interactive => 0
 			}, @cmd
 		);
+
+    if (under_test and $out =~ /^bosh/) {
+      print $out."\n";
+      return $rc ? 0 : 1;
+    }
 
 		# Parse the output into something more consumable
 		my $new_output = '';

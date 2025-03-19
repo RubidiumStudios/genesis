@@ -3329,9 +3329,8 @@ sub update_deployment_exodus {
 		}
 
 		my $deployment_data = $self->_build_deployment_audit_data(
-			$state, $sequence, $timestamp,
-			%deployment_details,
-			'flatten'
+			$state, $sequence, $timestamp, 'flatten',
+			%deployment_details
 		);
 
 		# Add the deployment audit data to the exodus commands
@@ -3421,7 +3420,9 @@ sub terminate {
 			$self->kit->id,
 			$dry_run ? ' (dry-run)' : '',
 		);
-		$ok = $self->run_hook('terminate', env => $self, %opts, dry_run => $dry_run, mode => 'before');
+		$ok = $self->run_hook('terminate',
+			env => $self, force => $force, dry_run => $dry_run, mode => 'before'
+		);
 		return unless $ok;
 	}
 
@@ -3435,9 +3436,9 @@ sub terminate {
 		$ok = $self->bosh->delete_env(env => $self, dryrun => $dry_run);
 	} else {
 		$self->notify("deleting deployment...");
-		$ok = $self->bosh->delete_deployment(%opts, dryrun => $dry_run);
+		$ok = $self->bosh->delete_deployment(force => $force, dryrun => $dry_run);
 		if ($ok) {
-			if ($clean_up{resources}) {
+			if ($clean_up{resources} ) {
 				$self->notify("cleaning up any unused resources...");
 				$ok = $self->bosh->cleanup(env => $self, dryrun => $dry_run, all => 1) ? 1 : 2;
 				warning("\n".
@@ -3457,20 +3458,24 @@ sub terminate {
 			$self->kit->id,
 			$dry_run ? ' (dry-run)' : '',
 		);
-		my $hook_ok = $self->run_hook(
-			'terminate', %opts,
-			env => $self,
-			dry_run => $dry_run,
+		my $hook_ok = $self->run_hook('terminate',
+			env => $self, force => $force, dry_run => $dry_run,
 			mode => $ok ? 'after' : 'failed'
 		);
 		$ok = 0 unless $hook_ok;
 	}
 	return unless $ok;
 
+	# Determine existing claims, configs and secrets
+	my (@kept_secrets, @removed_secrets) = ();
+	my @all_secrets = $self->secrets_plan->secrets;
+	my @generated_secrets = grep {$_->exists} grep {$_->type ne 'userprovided'} @all_secrets;
+	my @user_secrets = grep {$_->exists} grep {$_->type eq 'userprovided'} @all_secrets;
+	push(@{$clean_up{secrets} ? \@removed_secrets : \@kept_secrets}, @generated_secrets);
+	push(@{$clean_up{user_secrets} ? \@removed_secrets : \@kept_secrets}, @user_secrets);
+
 	my $claims = {};
 	my $configs = {};	
-	my (@kept_secrets, @removed_secrets) = ();
-
 	if (! $self->use_create_env) {
 		# TODO: kits may have multiple config files of a given type, so in the
 		#       future, we'll ask the kit for the list of config file names,
@@ -3527,31 +3532,18 @@ sub terminate {
 			dryrun("\nno config files found to remove.");
 		}
 
-		my @all_secrets = $self->secrets_plan->secrets;
-		my @generated_secrets =
-			grep {$_->exists}
-			grep {!$_->isa('Genesis::Vault::Secret::UserProvided')}
-			@all_secrets;
-		my @user_secrets =
-			grep {$_->exists}
-			grep {$_->isa('Genesis::Vault::Secret::UserProvided')}
-			@all_secrets;
-
-		push(@{$clean_up{secrets} ? \@removed_secrets : \@kept_secrets}, @generated_secrets);
-		push(@{$clean_up{user_secrets} ? \@removed_secrets : \@kept_secrets}, @user_secrets);
-
 		# TODO: Add the credhub secrets to the list of secrets to remove if not using create-env
 
 		dryrun(
 			"\nwould #G{keep} the following #G{%s} secrets:\n%s",
 			join(" and ", ($clean_up{secrets} ? () : 'generated'), ($clean_up{user_secrets} ? () : 'user-provided')),
-			join("\n", map {csprintf('  #@{*} #c{%s}#c{%s}',$self->secrets_store->base,$_->path)} @kept_secrets)
+			join("\n", map {csprintf('  #@{*} #c{%s}#c{%s}',$self->secrets_store->base,$_->path)} sort {$a->path cmp $b->path} @kept_secrets)
 		) if (scalar @kept_secrets);
 
 		dryrun(
 			"\nwould #r{remove} the following #r{%s} secrets:\n%s",
 			join(" and ", ($clean_up{secrets} ? 'generated' : ()), ($clean_up{user_secrets} ? 'user-provided' : ())),
-			join("\n", map {csprintf('  #@{*} #c{%s}#c{%s}',$self->secrets_store->base,$_->path)} @removed_secrets)
+			join("\n", map {csprintf('  #@{*} #c{%s}#c{%s}',$self->secrets_store->base,$_->path)} sort {$a->path cmp $b->path} @removed_secrets)
 		) if (scalar @removed_secrets);
 
 		return 1;
@@ -3603,9 +3595,10 @@ sub terminate {
 			join(" and ", ($clean_up{secrets} ? 'generated' : ()), ($clean_up{user_secrets} ? 'user-provided' : ())),
 		);
 		my ($results, $msg) = $self->secrets_plan->_remove_secrets(
-			@removed_secrets,
+			\@removed_secrets,
 			verbose => 1,
 			confirm => 0,
+			no_header => 1,
 			%opts
 		);
 		if ($results->{error}) {
@@ -3617,12 +3610,12 @@ sub terminate {
 		}
 	}
 
-	# Remove old credhub and entombed secrets
-	if ($clean_up{credhub} && !$self->use_create_env) {
+	# TODO: Remove old credhub and entombed secrets
+	if (0 && $clean_up{credhub} && !$self->use_create_env) {
 		$self->notify("removing credhub secrets...");
 		my $credhub = $self->credhub;
 		my $start = Time::Piece->new();
-		my $ok = $credhub->delete_old_secrets($self->name);
+		my $ok = $credhub->delete_old_secrets($self->name); # This function doesn't exist...
 		info(
 			'%s%s',
 			$ok ? " #G{done.}" : " #R{failed}",
