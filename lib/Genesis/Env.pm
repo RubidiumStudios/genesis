@@ -630,10 +630,11 @@ sub deployment_name {
 # }}}
 # sub manifest_store - returns the type of manifest store: exodus, hybrid, or repository {{{
 sub manifest_store {
-	# If the environment supports a version of Genesis lower than 3.1.0-rc20, then
+	# If the environment supports a version of Genesis lower than 3.1.0-rc9, then
 	# the manifest store is always 'repository' because earlier versions of Genesis
 	# cannot update the exodus deployment audit data.
-	return 'repository' unless $_[0]->feature_compatibility("3.1.0-rc20");
+	# FIXME: This should be 3.1.0 when released
+	return 'repository' unless $_[0]->feature_compatibility("3.1.0-rc9");
 	shift->top->config->get('manifest_store','hybrid');
 }
 
