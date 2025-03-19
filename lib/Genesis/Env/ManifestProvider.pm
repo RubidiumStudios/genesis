@@ -282,7 +282,7 @@ sub kit_files {
 			unless $self->{suppress_notification};
 		my $tstart = gettimeofday;
 		my $files = [$self->env->kit_files('absolute')];
-		info("#G{done}".pretty_duration(gettimeofday-$tstart,0.5,2));
+		info("#G{done}".pretty_duration(gettimeofday-$tstart,0.5,2)) unless $self->{suppress_notification};
 		return $files;
 	})};
 }
