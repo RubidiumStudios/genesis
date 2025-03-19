@@ -62,20 +62,6 @@ sub help {
 	}
 }
 
-sub exodus_data {
-	my $self = shift;
-	return $self->{__exodus_data} ||= $self->env->exodus_lookup('.',{});
-}
-
-sub bosh {
-	my $self = shift;
-	return $self->{__bosh} ||= sub {
-		my $bosh = $_[0]->env->bosh;
-		$bosh->connect_and_validate();
-		$bosh;
-	}->($self);
-}
-
 use Getopt::Long qw(GetOptionsFromArray);
 sub parse_options {
 	my ($self, $opt_defn) = @_;
@@ -86,11 +72,6 @@ sub parse_options {
 	return wantarray ? %opts : \%opts;
 }
 
-sub read_json_from_bosh {
-	my ($self, @args) = @_;
-	my $data = read_json_from($self->bosh->execute(@args, '--json'));
-	return $data->{Tables}[0]{Rows};
-}
 
 sub vault {
 	my $self = shift;
