@@ -3377,7 +3377,7 @@ sub terminate {
 	my ($self, %opts) = @_;
 
 	my %clean_up = %{delete($opts{'clean_up'})//{}};
-	my $dry_run = delete($opts{'dry-run'})//0;
+	my $dryrun = delete($opts{'dry-run'})//0;
 	my $force = delete($opts{'force'})//0;
 	# TODO: Do we want to support a full reset where all exodus data and secrets are removed?
 	#my $full_reset = delete($opts{'deployment-history'})//0;
@@ -3418,10 +3418,10 @@ sub terminate {
 		$self->notify(
 			'running %s termination hooks before deployment is terminated...%s',
 			$self->kit->id,
-			$dry_run ? ' (dry-run)' : '',
+			$dryrun ? ' (dry-run)' : '',
 		);
 		$ok = $self->run_hook('terminate',
-			env => $self, force => $force, dry_run => $dry_run, mode => 'before'
+			env => $self, force => $force, dryrun => $dryrun, mode => 'before'
 		);
 		return unless $ok;
 	} elsif ($self->is_bosh_director && ! $force) {
@@ -3436,25 +3436,25 @@ sub terminate {
 	$self->notify(
 		"terminating %s environment...%s",
 		$self->use_create_env ? 'create-env' : 'deployed',
-		$dry_run ? ' #i{(dry run)}' : ''
+		$dryrun ? ' #i{(dry-run)}' : ''
 	);
 	if ($self->use_create_env) {
 		$self->notify("deleting create-env environment...");
-		$ok = $self->bosh->delete_env(env => $self, dryrun => $dry_run);
+		$ok = $self->bosh->delete_env(env => $self, dryrun => $dryrun);
 	} else {
 		$self->notify("deleting deployment...");
-		$ok = $self->bosh->delete_deployment(force => $force, dryrun => $dry_run);
+		$ok = $self->bosh->delete_deployment(force => $force, dryrun => $dryrun);
 		if ($ok) {
 			if ($clean_up{resources} ) {
 				$self->notify("cleaning up any unused resources...");
-				$ok = $self->bosh->cleanup(env => $self, dryrun => $dry_run, all => 1) ? 1 : 2;
+				$ok = $self->bosh->cleanup(env => $self, dryrun => $dryrun, all => 1) ? 1 : 2;
 				warning("\n".
 					"The contents above is a summary of the resources currently unused ".
 					"by any deployment. Further resources may become unused once this ".
 					"environment is actually terminated."
-				) if $dry_run;
+				) if $dryrun;
 			} else {
-				dryrun("\nwould keep any unused resources on the #M{%s} BOSH director.", $self->bosh->{alias}) if $dry_run;
+				dryrun("\nwould keep any unused resources on the #M{%s} BOSH director.", $self->bosh->{alias}) if $dryrun;
 			}
 		}
 	}
@@ -3463,10 +3463,10 @@ sub terminate {
 		$self->notify(
 			'running %s termination hooks after deployment terminated...%s',
 			$self->kit->id,
-			$dry_run ? ' (dry-run)' : '',
+			$dryrun ? ' (dry-run)' : '',
 		);
 		my $hook_ok = $self->run_hook('terminate',
-			env => $self, force => $force, dry_run => $dry_run,
+			env => $self, force => $force, dryrun => $dryrun,
 			mode => $ok ? 'after' : 'failed'
 		);
 		$ok = 0 unless $hook_ok;
@@ -3510,7 +3510,7 @@ sub terminate {
 	}
 
 	# Dry-run output
-	if ($dry_run) {
+	if ($dryrun) {
 		if (scalar(keys $claims->{claims}->%*)) {
 			my $claim_descriptions = [];
 			for my $network (sort keys $claims->{claims}->%*) {
