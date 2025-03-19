@@ -3519,6 +3519,19 @@ sub terminate {
 
 	# Dry-run output
 	if ($dryrun) {
+		if (scalar keys $configs->%*) {
+			my $config_descriptions = [];
+			for my $config_type (sort keys $configs->%*) {
+				push(@$config_descriptions, sprintf(
+					"would #r{remove} the following #r{%s config} files:\n%s",
+					$config_type, join("\n", map {bullet("#c{$_}")} $configs->{$config_type}->@*)
+				));
+			}
+			dryrun("\n%s", join("\n", $config_descriptions->@*));
+		} elsif (!$self->use_create_env) {
+			dryrun("\nno config files found to remove.");
+		}
+
 		if (scalar(keys $claims->%*)) {
 			my $claim_descriptions = [];
 			for my $network (sort keys $claims->%*) {
@@ -3532,19 +3545,6 @@ sub terminate {
 			);
 		} elsif (!$self->use_create_env) {
 			dryrun("\nno network claims found to release.");
-		}
-
-		if (scalar keys $configs->%*) {
-			my $config_descriptions = [];
-			for my $config_type (sort keys $configs->%*) {
-				push(@$config_descriptions, sprintf(
-					"would #r{remove} the following #r{%s config} files:\n%s",
-					$config_type, join("\n", map {bullet("#c{$_}")} $configs->{$config_type}->@*)
-				));
-			}
-			dryrun("\n%s", join("\n", $config_descriptions->@*));
-		} elsif (!$self->use_create_env) {
-			dryrun("\nno config files found to remove.");
 		}
 
 		# TODO: Add the credhub secrets to the list of secrets to remove if not using create-env
@@ -3584,13 +3584,13 @@ sub terminate {
 	if (scalar $claims->%*) {
 		if ($clean_up{networking}) {
 			$self->notify("releasing network claims...");
-			for my $network (sort keys $claims->{claims}->%*) {
+			for my $network (sort keys $claims->%*) {
 				my $start = Time::Piece->new();
-				info({pending => 1}, "  - releasing network claims for %s...", $network);
+				info("  releasing claims for the #C{%s} network...", $network);
 				my $ok = 1;
-				for my $subnet (sort keys $claims->{claims}{$network}{subnets}->@*) {
-					info({pending => 1}, " #Ki{%s}", $subnet);
-					$ok = $self->bosh->vault->clear($claims->{claims}{$network}{subnets}{$subnet}{path});
+				for my $subnet ($claims->{$network}{subnets}->@*) {
+					info("%s", $subnet->{description});
+					$ok = $self->bosh->vault->clear($subnet->{path});
 					last unless $ok;
 				}
 				info(
@@ -4451,7 +4451,7 @@ sub get_network_claims {
 		next unless $subnet && $path && $key && $network; # TODO: This should probably issue a warning at least
 		# RISK: Assumes one claim per network/subnet, this may be naive
 		$claims->{$network}{$subnet}{ips} = $self->bosh->vault->get($path,$key);
-		$claims->{$network}{$subnet}{path} = $path;
+		$claims->{$network}{$subnet}{path} = "$path:$key";
 	}
 	return $claims;
 }
