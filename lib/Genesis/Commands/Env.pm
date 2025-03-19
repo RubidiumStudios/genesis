@@ -634,8 +634,11 @@ sub manifest {
 sub deploy {
 	option_defaults(
 		redact   => ! -t STDOUT,
+		reactions => 1,
 	);
-	command_usage(1) if @_ != 1;
+	command_usage(1) if @_ < 1 || @_ > 2;
+	my ($env_name, $reason) = @_;
+	$reason ||= '<unspecified>';
 
 	# TODO: Check if there's a deployment cache directory and tell the user to
 	#       run `genesis deploy --resume` to finish the deployment, or `genesis
@@ -645,7 +648,7 @@ sub deploy {
 	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix dry-run/);
 
 	$options{'disable-reactions'} = ! delete($options{reactions});
-	my $env = Genesis::Top->new('.')->load_env($_[0])->with_vault()->with_bosh();
+	my $env = Genesis::Top->new('.')->load_env($env_name)->with_vault()->with_bosh();
 
 	if (scalar(grep {$_} ($options{fix}, $options{recreate}, $options{'dry-run'})) > 1) {
 		command_usage(1,"Can only specify one of --dry-run, --fix or --recreate");
@@ -734,7 +737,7 @@ sub deploy {
 		$env ->download_required_configs('deploy');
 	}
 
-	my $ok = $env->deploy(%options, network_map => $network_map);
+	my $ok = $env->deploy(%options, network_map => $network_map, reason => $reason);
 
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;

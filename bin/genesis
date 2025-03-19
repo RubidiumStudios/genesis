@@ -353,7 +353,7 @@ define_command("manifest", {
 # genesis deploy - Pull in Cloud Config, Generate a manifest, deploy {{{
 define_command("deploy", {
 	summary => "Generate the manifest for the environment and deploy it to the BOSH director.",
-	usage => '<env> deploy [<options...>]',
+	usage => '<env> deploy [<options...>] [reason]',
 	alias => 'd',
 	description =>
 		"Deploy the environment to BOSH director or via create-env command.\n".
@@ -409,7 +409,12 @@ define_command("deploy", {
 
 		'max-in-flight=i' =>
 			"Override the default number of maximum VMs in flight per instance group.",
-	]
+	],
+	args => {
+		'reason' =>
+			"An optional reason for deploying the environment.  This will be ".
+			"recorded in the exodus data for the deployment."
+	}
 });
 
 # }}}
