@@ -3518,11 +3518,11 @@ sub terminate {
 
 	# Dry-run output
 	if ($dryrun) {
-		if (scalar(keys $claims->{claims}->%*)) {
+		if (scalar(keys $claims->%*)) {
 			my $claim_descriptions = [];
-			for my $network (sort keys $claims->{claims}->%*) {
-				my $block = $claims->{claims}{$network}{description};
-				$block .= "\n".$_ for $claims->{claims}{$network}{subnets}->@*;
+			for my $network (sort keys $claims->%*) {
+				my $block = $claims->{$network}{description};
+				$block .= "\n".$_->{description} for $claims->{$network}{subnets}->@*;
 				push(@$claim_descriptions, $block);
 			}
 			dryrun("\nwould #%s{%s} the following network claims:\n%s",
