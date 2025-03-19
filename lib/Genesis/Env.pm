@@ -3151,9 +3151,9 @@ sub deploy {
 	$self->notify("Preparing metadata for export...");
 
 	my @skip_drains = @{$opts{'skip-drain'}};
-	my $opt_flags = join(', ', grep {$_} (
-		$opts{yes} ? 'non-blocking' : undef,
-		$disable_reactions ? 'disable-reactions' : undef,
+	my $opt_flags = join(' ', map {'--'.$_} sort grep {$_} (
+		envset('BOSH_NON_INTERACTIVE') ? 'yes' : undef,
+		$disable_reactions ? 'no-reactions' : undef,
 		$opts{recreate} ? 'recreate' : undef,
 		scalar(@skip_drains) ?
 			scalar(grep {$_ eq ''} @skip_drains)
@@ -3166,7 +3166,7 @@ sub deploy {
 	));
 	$self->update_deployment_exodus(
 		'deployed',
-		reason => $opts{reason},
+		reason => $opts{reason} // 'unspecified',
 		flags => $opt_flags
 	);
 
@@ -4282,7 +4282,7 @@ sub _build_deployment_audit_data {
 			name          => $self->kit->name,
 			version       => $self->kit->version,
 			is_dev        => $self->kit->is_dev ? JSON::PP::true : JSON::PP->false,
-			features      => join(',',$self->features),
+			features      => join(',', $self->params->{kit}{features}->@*),
 		},
 
 		user => {
@@ -4295,6 +4295,7 @@ sub _build_deployment_audit_data {
 
 	# Apply any overrides
 	$deployment_data = deep_merge($deployment_data, \%overrides, $flatten);
+	$deployment_data->{reason} //= 'unspecified';
 	return $deployment_data;
 }
 
