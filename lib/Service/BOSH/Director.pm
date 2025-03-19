@@ -481,9 +481,6 @@ sub delete_deployment {
 sub cleanup {
 	my ($self, %opts) = @_;
 
-	bug("No deployment name provided for BOSH Director in call to cleanup()")
-		unless $self->deployment;
-
 	my @cmd = ('clean-up');
 	push @cmd, '--all' if $opts{all};
 	push @cmd, '--keep-orphaned-disks' if $opts{'keep-orphaned-disks'};
