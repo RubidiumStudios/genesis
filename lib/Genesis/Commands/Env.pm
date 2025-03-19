@@ -814,6 +814,11 @@ sub terminate {
 	$env->notify($msg);
 
 	if (!$dry_run && !$no_prompt) {
+		notice(
+		"\nYou can run this command with the #Y{--dry-run} option to see exactly what ".
+		"would be removed without actually terminating the deployment or removing ".
+		"any asscoiated items."
+		);
 		warning "\nThis action is #R{irreversible} and #R{cannot be undone}!";
 		my $msg = sprintf(
 			"Are you sure you want to terminate #M{%s}/#c{%s} deployment? [y|n]",
