@@ -107,7 +107,10 @@ sub run_hook {
 
 	bug("Unrecognized hook '$hook'\n") unless grep {
 		$_ eq $hook
-	} qw/new blueprint secrets info addon check prereqs pre-deploy post-deploy cloud-config features shell edit/;
+	} qw/
+		new blueprint secrets info addon check prereqs pre-deploy post-deploy
+		cloud-config features shell edit terminate
+	/;
 
 	if ($opts{env}) {
 		my %env_vars = $opts{env}->get_environment_variables($hook);
@@ -125,7 +128,7 @@ sub run_hook {
 		}
 	} else {
 		bug("The 'env' option to run_hook is required for the '$hook' hook!!")
-			if (grep { $_ eq $hook } qw/new secrets info addon check blueprint pre-deploy post-deploy cloud-config features/);
+			if (grep { $_ eq $hook } qw/new secrets info addon check blueprint pre-deploy post-deploy cloud-config features terminate/);
 	}
 
 	my (@args, %module_options);
@@ -156,6 +159,13 @@ sub run_hook {
 		$ENV{GENESIS_CLOUD_CONFIG_SUBTYPE} = $opts{purpose};
 		# TODO: add support for multiple cpi boshes
 		%module_options = ();
+
+	} elsif ($hook eq 'terminate') {
+		%module_options = (
+			mode => $opts{mode},
+			dry_run => $opts{dry_run}//0,
+			force => $opts{force}//0,
+		);
 
 	} elsif ($hook eq 'check') {
 		# Nothing special needed

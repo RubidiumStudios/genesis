@@ -174,5 +174,12 @@ sub check_for_required_args {
 	return 1;
 }
 
+sub require_hook_lib {
+	my ($caller_package, $filename, $line) = caller();
+	use File::Basename qw(dirname);
+	use Cwd qw(abs_path);
+	eval "use lib dirname(abs_path(\$filename)).'/lib';";
+}
+
 1;
 # vim: fdm=marker:ts=2:sw=2:sts=2:noet:cc=80
