@@ -68,8 +68,10 @@ sub done {
 		my $results = shift;
 		$self->{results} = $results;
 		$self->{complete} = defined($results) ? 1 : 0;
+		return $results;
 	} else {
 		$self->{complete} = 1;
+		return 1;
 	}
 }
 
