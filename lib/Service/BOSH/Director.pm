@@ -213,6 +213,28 @@ sub connect_and_validate {
 		$waiting=1;
 	}
 
+	my ($status, $msg) = $self->status()->@{qw(status msg)};
+	if ($status->{status} ne 'ok') {
+		error("#R{%s - %s!}\n", $status, $msg) if $waiting;
+		dump_stack;
+		bail(
+			"Unable to connect to #M{%s} BOSH director:\n%s - %s",
+			$self->{alias}, $status, $msg
+		) if $status =~ /error|unreachable/;
+		bail(
+			"Unable to connect to #M{%s} BOSH director: no active session.  ".
+			"Please log in and try again.",
+			$self->{alias}
+		) if $status eq 'unauthorized';
+	}
+	info("#G{%s} - %s", $status, $msg) if $waiting;
+	return $self;
+}
+
+# }}}
+# status - check the status of the BOSH director {{{
+sub status {
+	my ($self) = @_;
 	my ($out, $rc, $err);
 	if ($ENV{BOSH_ALL_PROXY}) {
 		my $timeout = $ENV{GENESIS_NETWORK_TIMEOUT} || 10;
@@ -223,35 +245,23 @@ sub connect_and_validate {
 			alarm 0;
 		};
 		my $err = $@ if $@;
-		die "Timed out after $timeout seconds\n" if $@ && $@ eq "timeout\n";
+		return {
+			status => 'unreachable',
+			msg => $err eq "timeout\n" ? "timeout after $timeout seconds" : $err
+		} if ($err);
 	} else {
 		my $status = tcp_listening($self->{host},$self->{port});
-		unless ($status eq 'ok') {
-			error "#R{unreachable - $status!}\n" if $waiting;
-			dump_stack;
-			bail("Unable to connect to #M{%s} BOSH director...", $self->{alias});
-		}
+		return {status => 'unreachable', msg => $status} unless ($status eq 'ok');
 		($out,$rc,$err) = eval{$self->execute('env')};
 	}
 
 	($err,$rc) = ($@,70)if ($@); # 70 is EX_SOFTWARE in sysexits.h,denoting internal software error
-	if ($rc) {
-		error "#R{error!}" if $waiting;
-		bail("Unable to connect to #M{%s} BOSH director:\n%s", $self->{alias},$err);
-	}
-	if ($out =~ /\(not logged in\)/) {
-		error "#R{unauthorized!}" if $waiting;
-		bail(
-			"Unable to connect to #M{%s} BOSH director: no active session.  ".
-			"Please log in and try again.",
-			$self->{alias}
-		)
-	}
+	return {status => 'error', msg => $err} if ($rc);
+	return {status => 'unauthorized', msg => 'not logged in'} if ($out =~ /\(not logged in\)/);
 	($self->{user}) = $out =~ /^(.*)\z/m;
-	info "#G{ok} - authorized as #g{$self->{user}}" if $waiting;
 	$self->{validated} = 1;
 	$ENV{GENESIS_BOSH_VERIFIED} = $self->{alias};
-	return $self;
+	return {status => 'ok', msg => 'authorized as '.$self->{user}};
 }
 
 # }}}
@@ -568,7 +578,11 @@ sub cleanup {
 				$new_output .= "  $header\n".join("\n", map { "  $_" } @$contents)."\n";
 			}
 		}
-		info $new_output;
+		if ($new_output) {
+			info $new_output;
+		} else {
+			info "\n#Gi{No unused resources found!}";
+		}
 		return wantarray ? ($new_output, $rc, $err) : !$rc;
 	}
 
