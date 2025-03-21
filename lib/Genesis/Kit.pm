@@ -163,8 +163,9 @@ sub run_hook {
 	} elsif ($hook eq 'terminate') {
 		%module_options = (
 			mode => $opts{mode},
-			dry_run => $opts{dry_run}//0,
+			dryrun => $opts{dryrun}//0,
 			force => $opts{force}//0,
+			noprompt => $opts{noprompt}//0,
 		);
 
 	} elsif ($hook eq 'check') {
