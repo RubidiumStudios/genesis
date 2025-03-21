@@ -1309,6 +1309,14 @@ sub count_nouns {
 
 sub parse_fixed_width_table {
 	my ($header, @rows) = @_;
+
+	my $opts = {};
+	if (ref($header) eq 'HASH') {
+		$opts = $header;
+		$header = shift @rows;
+	}
+
+	return [] unless $header;
 	
 	# Get column names and their positions
 	my @cols = split(/\s{2,}/, $header);
@@ -1320,17 +1328,19 @@ sub parse_fixed_width_table {
 	my @ranges = map {
 		[$positions[$_], $positions[$_+1] - $positions[$_]]
 	} (0..$#cols-1);
-	push @ranges,	[$positions[$#cols], -1];
-    
+	push @ranges,	[$positions[$#cols], 999999]; # RISK: 999999 allows for a wide table, but not infinite
+
 	# Parse each row into a hash
 	my @results;
 	for my $row (@rows) {
 		my %hash;
-		$hash{$cols[$_]} = 
+		$row = sprintf("%-*s", $positions[-1], $row); # Make sure row is long enough
+		$hash{$cols[$_]} =
 			substr($row, $ranges[$_][0], $ranges[$_][1]) =~ s/^\s+|\s+$//gr
 				for (0..$#cols);
-		push @results, \%hash;
+		push @results, ($opts->{array_rows} ? [@hash{@cols}] : \%hash);
 	}
+	unshift @results, \@cols if $opts->{array_rows};
   return wantarray ? @results : \@results;
 }
 
