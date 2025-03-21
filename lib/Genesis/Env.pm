@@ -4274,6 +4274,12 @@ sub _build_deployment_audit_data {
 	$flatten = shift(@overrides) if ($overrides[0] =~ /^(un)?flatten(ed)?$/);
 	my %overrides = @overrides;
 
+	my $user_data = parse_fixed_width_table({array_rows => 1},
+		lines(run({stderr => '/dev/null'},'whdo', '-mH'))
+	)->[1];
+	my $user = $user_data->[0] // $ENV{USER};
+	$user .= " ".($user_data->[3]) if $user_data->[3];
+
 	my $deployment_data = {
 		state           => $state,
 		started         => $timestamp,
@@ -4291,7 +4297,7 @@ sub _build_deployment_audit_data {
 		},
 
 		user => {
-			shell         => $ENV{USER},
+			shell         => $user,
 			repo          => scalar($self->top->kit_provider->remote->get_authorized_user), # FIXME: only works for git-based kit providers
 			vault         => scalar($self->vault->user),
 			concourse     => $ENV{CONCOURSE_USERNAME},
