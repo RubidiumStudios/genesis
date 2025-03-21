@@ -771,8 +771,13 @@ sub terminate {
 			: $default_cleanup;
 	}
 
-	my $no_prompt = $options{'yes'}//0;
-	my $dry_run = $options{'dry-run'}//0;
+	my $no_prompt = delete($options{'yes'})//0;
+	my $dry_run = delete($options{'dry-run'})//0;
+
+	bug(
+		"Undefined options passed in from the Genesis command handler: %s",
+		join(", ", sort keys %options)
+	) if keys %options;
 
 	my $action_desc = $dry_run ? 'would' : 'will';
 	my $msg = (
@@ -831,9 +836,19 @@ sub terminate {
 	}
 
 	$ENV{BOSH_NON_INTERACTIVE} = 'true' if $no_prompt;
-	my $ok = $env->terminate(%options, reason => $reason, clean_up => \%clean_up, flags => $flags);
-	if ($options{'dry-run'}) {
-		notice("\n#M{%s}/#c{%s} termination dry-run completed.\n", $env->name, $env->type);
+	my $ok = $env->terminate(
+		dryrun    => $dry_run,
+		noprompt  => $no_prompt,
+		reason    => $reason,
+		$flags    => $flags,
+		%clean_up
+	);
+	if ($dry_run) {
+		notice(
+			"\n#M{%s}/#c{%s} termination dry-run completed %s.\n",
+			$env->name, $env->type,
+			$ok ? "#g{successfully}" : "with #r{errors}"
+		);
 		exit($ok ? 0 : 1);
 	}
 	if ($ok) {

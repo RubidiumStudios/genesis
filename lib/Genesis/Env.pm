@@ -3376,9 +3376,14 @@ sub update_deployment_exodus {
 sub terminate {
 	my ($self, %opts) = @_;
 
-	my %clean_up = %{delete($opts{'clean_up'})//{}};
-	my $dryrun = delete($opts{'dry-run'})//0;
-	my $force = delete($opts{'force'})//0;
+	my $dryrun =   $opts{dryrun}   //= 0;
+	my $force =    $opts{force}    //= 0;
+	my $noprompt = $opts{noprompt} //= 0;
+
+	my $reason =     delete($opts{reason}) // 'unspecified';
+	my $term_flags = delete($opts{flags})  // '<unspecified>';
+	my %clean_up =   delete(%opts{qw/resources secrets user_secrets networking credhub/});
+
 	# TODO: Do we want to support a full reset where all exodus data and secrets are removed?
 	#my $full_reset = delete($opts{'deployment-history'})//0;
 	#if ($full_reset && !$clean_up{secrets} && !$clean_up{user_secrets}) {
@@ -3420,9 +3425,7 @@ sub terminate {
 			$self->kit->id,
 			$dryrun ? ' (dry-run)' : '',
 		);
-		$ok = $self->run_hook('terminate',
-			env => $self, force => $force, dryrun => $dryrun, mode => 'before'
-		);
+		$ok = $self->run_hook('terminate', %opts, env => $self, mode => 'before');
 		return unless $ok;
 	} elsif ($self->is_bosh_director) {
 		bail(
@@ -3446,14 +3449,14 @@ sub terminate {
 	);
 	if ($self->use_create_env) {
 		$self->notify("deleting create-env environment...");
-		$ok = $self->bosh->delete_env(env => $self, dryrun => $dryrun);
+		$ok = $self->bosh->delete_env(%opts, env => $self);
 	} else {
 		$self->notify("deleting deployment...");
-		$ok = $self->bosh->delete_deployment(force => $force, dryrun => $dryrun);
+		$ok = $self->bosh->delete_deployment(%opts);
 		if ($ok) {
 			if ($clean_up{resources} ) {
 				$self->notify("cleaning up any unused resources...");
-				$ok = $self->bosh->cleanup(env => $self, dryrun => $dryrun, all => 1) ? 1 : 2;
+				$ok = $self->bosh->cleanup(%opts, env => $self, all => 1) ? 1 : 2;
 				warning("\n".
 					"The contents above is a summary of the resources currently unused ".
 					"by any deployment. Further resources may become unused once this ".
@@ -3471,9 +3474,8 @@ sub terminate {
 			$self->kit->id,
 			$dryrun ? ' (dry-run)' : '',
 		);
-		my $hook_ok = $self->run_hook('terminate',
-			env => $self, force => $force, dryrun => $dryrun,
-			mode => $ok ? 'after' : 'failed'
+		my $hook_ok = $self->run_hook(
+			'terminate', %opts, env => $self, mode => $ok ? 'after' : 'failed'
 		);
 		$ok = 0 unless $hook_ok;
 	}
@@ -3617,9 +3619,8 @@ sub terminate {
 		my ($results, $msg) = $self->secrets_plan->_remove_secrets(
 			\@removed_secrets,
 			verbose => 1,
-			confirm => 0,
+			confirm => 'none',
 			no_header => 1,
-			%opts
 		);
 		if ($results->{error}) {
 			info("#r{error!}");
@@ -3651,7 +3652,6 @@ sub terminate {
 		# If the manifest_store uses exodus, then we need to update the exodus
 		# deployment audit data to indicate the deployment has been terminated
 		# Set exodus data to indicate the deployment has been terminated
-		my $term_flags = $opts{flags}//'<unspecified>';
 		$self->vault->authenticate;
 		$self->update_deployment_exodus(
 			'terminated',
