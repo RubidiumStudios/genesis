@@ -773,6 +773,7 @@ sub terminate {
 
 	my $no_prompt = delete($options{'yes'})//0;
 	my $dry_run = delete($options{'dry-run'})//0;
+	my $force = delete($options{'force'})//0;
 
 	bug(
 		"Undefined options passed in from the Genesis command handler: %s",
@@ -839,8 +840,9 @@ sub terminate {
 	my $ok = $env->terminate(
 		dryrun    => $dry_run,
 		noprompt  => $no_prompt,
+		force     => $force,
 		reason    => $reason,
-		$flags    => $flags,
+		flags     => $flags,
 		%clean_up
 	);
 	if ($dry_run) {

@@ -3166,7 +3166,7 @@ sub deploy {
 	));
 	$self->update_deployment_exodus(
 		'deployed',
-		reason => $opts{reason} // 'unspecified',
+		reason => $opts{reason},
 		flags => $opt_flags
 	);
 
@@ -3380,7 +3380,7 @@ sub terminate {
 	my $force =    $opts{force}    //= 0;
 	my $noprompt = $opts{noprompt} //= 0;
 
-	my $reason =     delete($opts{reason}) // 'unspecified';
+	my $reason =     delete($opts{reason}) // '<unspecified>';
 	my $term_flags = delete($opts{flags})  // '<unspecified>';
 	my %clean_up =   delete(%opts{qw/resources secrets user_secrets networking credhub/});
 
@@ -3522,7 +3522,7 @@ sub terminate {
 			}
 		}
 	}
-	info(" #G{done} %s", pretty_duration(Time::Piece->new - $start_cleanup));
+	info(" #G{done}".pretty_duration(Time::Piece->new - $start_cleanup));
 
 	# Dry-run output
 	if ($dryrun) {
@@ -3655,7 +3655,7 @@ sub terminate {
 		$self->vault->authenticate;
 		$self->update_deployment_exodus(
 			'terminated',
-			reason  => $opts{reason},
+			reason  => $reason,
 			flags   => $term_flags,
 			success => ['failure','success','cleanup-failed']->[$ok//0],
 			started => $start->strftime(EXODUS_TIME_FORMAT),
