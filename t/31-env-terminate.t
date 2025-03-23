@@ -79,7 +79,7 @@ sub reset_secrets {
 	quietly {$env->add_secrets()};
 }
 
-subtest 'genesis terminate' => sub {
+subtest 'simple bosh-deployed genesis terminate' => sub {
 	plan tests => 6;
 
 	my $vault_target = vault_ok;
@@ -152,7 +152,7 @@ EOF
 		# Test that a nonexistent deployment warns and exits
 		my ($stdout,$stderr) = output_from {
 			not_ok(
-				$env->terminate('force' => 0, 'yes' => 1), "terminate exits when no prior deployment found"
+				$env->terminate('force' => 0, 'nopronmpt' => 1), "terminate exits when no prior deployment found"
 			)
 		};
 		like($stderr, qr/No exodus data found for termination-test; may not exist./, "terminate warns when no prior deployment found");
@@ -182,7 +182,7 @@ EOF
 		# Test that a terminated deployment warns and exits
 		($stdout,$stderr) = output_from {
 			not_ok(
-				$env->terminate('force' => 0, 'yes' => 1),
+				$env->terminate('force' => 0, 'noprompt' => 1),
 				"terminate exits when prior deployment is terminated"
 			);
 		};
@@ -197,7 +197,7 @@ EOF
 		($stdout,$stderr) = output_from {
 			ok(
 				$env->terminate(
-					force => 1, yes => 1, reason => 'forced termination'
+					force => 1, noprompt => 1, reason => 'forced termination'
 				), "terminate command executed successfully"
 			);
 		};
@@ -232,13 +232,14 @@ EOF
 		my ($out) = combined_from {
 			lives_ok {
 				local $ENV{GENESIS_NO_UTF8} = 1;
-				$env->terminate('dry-run' => 1, 'clean_up' => {
+				$env->terminate('dryrun' => 1,
 					'resources' => 1,
 					'secrets' => 1,
 					'user_secrets' => 1,
 					'credhub' => 1,
 					'networking' => 1,
-				}, flags => '--dry-run')
+					flags => '--dry-run'
+				)
 			} "genesis terminate command executed successfully";
 		};
 		$out =~ s/\s+$ENV{GENESIS_BOSH_COMMAND}\s+/ <test-bosh> /msg;
@@ -246,15 +247,17 @@ EOF
 
 		eq_or_diff($out, <<'EOF',"genesis terminate output is correct (dryrun, cleanup secrets and resources)");
 
-[termination-test/terminate-test] terminating deployed environment... (dry run)
+[termination-test/terminate-test] terminating deployed environment... (dry-run)
 
 [termination-test/terminate-test] deleting deployment...
 
-[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test
+[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test on standalone
+         BOSH director.
 
 [termination-test/terminate-test] cleaning up any unused resources...
 
-[DRYRUN] would execute <test-bosh> clean-up --all, resulting in the removal of the following resources:
+[DRYRUN] would execute <test-bosh> clean-up --all on standalone BOSH director, resulting in the removal
+         of the following resources:
 bosh
 -n
 clean-up
@@ -266,9 +269,12 @@ clean-up
           any deployment. Further resources may become unused once this
           environment is actually terminated.
 
-[DRYRUN] no network claims found to release.
+[termination-test/terminate-test] gathering list of associated items for
+cleanup... done
 
 [DRYRUN] no config files found to remove.
+
+[DRYRUN] no network claims found to release.
 
 [DRYRUN] would remove the following generated and user-provided secrets:
            * /secret/termination/test/terminate-test/super_secrets:password
@@ -286,17 +292,18 @@ EOF
 		cmp_deeply(scalar($env->exodus_lookup()), $original_exodus, "exodus entry was not modified");
 
 		# Dry-run with keep user secrets and resources
-    #`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 		($out) = combined_from {
 			lives_ok {
 				local $ENV{GENESIS_NO_UTF8} = 1;
-				$env->terminate('dry-run' => 1, 'clean_up' => {
+				$env->terminate(
+					'dryrun' => 1,
 					'resources' => 0,
 					'secrets' => 1,
 					'user_secrets' => 0,
 					'credhub' => 1,
 					'networking' => 0,
-				}, flags => '--dry-run --no-user-secrets --no-resources --no-networking');
+					flags => '--dry-run --no-user-secrets --no-resources --no-networking'
+				);
 			} "genesis terminate command executed successfully";
 		};
 		$out =~ s/\s+$ENV{GENESIS_BOSH_COMMAND}\s+/ <test-bosh> /msg;
@@ -304,17 +311,21 @@ EOF
 
 		eq_or_diff($out, <<'EOF',"genesis terminate output is correct (dryrun, keep secrets and resources)");
 
-[termination-test/terminate-test] terminating deployed environment... (dry run)
+[termination-test/terminate-test] terminating deployed environment... (dry-run)
 
 [termination-test/terminate-test] deleting deployment...
 
-[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test
+[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test on standalone
+         BOSH director.
 
 [DRYRUN] would keep any unused resources on the standalone BOSH director.
 
-[DRYRUN] no network claims found to release.
+[termination-test/terminate-test] gathering list of associated items for
+cleanup... done
 
 [DRYRUN] no config files found to remove.
+
+[DRYRUN] no network claims found to release.
 
 [DRYRUN] would keep the following user-provided secrets:
            * /secret/termination/test/terminate-test/super_secrets:password
@@ -343,16 +354,15 @@ EOF
 			lives_ok {
 				local $ENV{GENESIS_NO_UTF8} = 1;
 				$env->terminate(
-					'force' => 1, 'yes' => 1,
+					'force' => 1, 'noprompt' => 1,
 					'reason' => 'forced termination',
 					'flags' => '--force --no-user-secrets --yes',
-					clean_up => {
-						'resources' => 1,
-						'secrets' => 1,
-						'user_secrets' => 0,
-						'credhub' => 1,
-						'networking' => 1,
-					});
+					'resources' => 1,
+					'secrets' => 1,
+					'user_secrets' => 0,
+					'credhub' => 1,
+					'networking' => 1,
+					);
 			} "genesis terminate command executed successfully";
 		};
 		$out =~ s/\r//g; # bosh mock output has \r\n line endings... for some reason???
@@ -374,6 +384,9 @@ bosh
 -n
 clean-up
 --all
+
+[termination-test/terminate-test] gathering list of associated items for
+cleanup... done
 
 [termination-test/terminate-test] removing generated secrets...
   - removing 4 secrets under path '/secret/termination/test/terminate-test/':
@@ -419,6 +432,32 @@ EOF
 		}, "deployment audit entry was added correctly");
 	};
 };
+=norun
+subtest "terminating a create_env deployment with a hook" => sub {
+	plan tests => 7;
+
+	my $vault_target = vault_ok;
+	Service::Vault->clear_all();
+
+	my $top = Genesis::Top->create(workdir, 'pseudobosh', vault => $VAULT_URL);
+	cp_kit('t/src/bosh-hooks', $top);
+	put_file $top->path("my-mgmt.yml"), <<EOF;
+---
+kit:
+	name:   dev
+	version: latest
+	features: []
+	iaas: openstack
+	scale: dev
+
+genesis:
+	env: my-mgmt
+	use_create_env: true
+	min_version: 3.1.0-rc.20
+
+EOF
+};
+=cut
 
 teardown_vault;
 done_testing;

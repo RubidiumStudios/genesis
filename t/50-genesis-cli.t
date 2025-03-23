@@ -88,11 +88,11 @@ subtest 'genesis terminate' => sub {
 				plan tests => 7;
 				is($self->name, 'my-env', "terminate called with correct environment name");
 				is($opts{reason}, 'reason', "terminate called with correct reason");
-				ok($opts{force},"terminate called with force");
-				ok($opts{'dry-run'}, "terminate called with dry-run");
-				ok($opts{yes}, "terminate called with yes");
+				ok($opts{force},"terminate called with --force");
+				ok($opts{dryrun}, "terminate called with --dry-run");
+				ok($opts{noprompt}, "terminate called with --yes");
 				eq_or_diff($opts{flags}, '--credhub --dry-run --force --no-cleanup --yes', "terminate called with correct flags");
-				cmp_deeply($opts{clean_up}, {
+				cmp_deeply({%opts{qw/resources secrets user_secrets credhub networking/}}, {
 					resources => 0,
 					secrets => 0,
 					user_secrets => 0,
@@ -137,11 +137,11 @@ subtest 'genesis terminate' => sub {
 				plan tests => 7;
 				is($self->name, 'my-env', "terminate called with correct environment name");
 				is($opts{reason}, undef, "terminate called with no reason");
-				ok($opts{force},"terminate called with force");
-				not_ok($opts{'dry-run'}, "terminate called without dry-run");
-				ok($opts{yes}, "terminate called with yes");
+				ok($opts{force},"terminate called with --force");
+				not_ok($opts{dryrun}, "terminate called without --dry-run");
+				ok($opts{noprompt}, "terminate called with --yes");
 				eq_or_diff($opts{flags}, '--force --yes', "terminate called with correct flags");
-				cmp_deeply($opts{clean_up}, {
+				cmp_deeply({%opts{qw/resources secrets user_secrets credhub networking/}}, {
 					resources => 1,
 					secrets => 1,
 					user_secrets => 1,
@@ -187,11 +187,11 @@ subtest 'genesis terminate' => sub {
 				plan tests => 7;
 				is($self->name, 'my-env', "terminate called with correct environment name");
 				is($opts{reason}, 'trying to do something bad', "terminate called with correct reason");
-				not_ok($opts{force},"terminate called without force");
-				not_ok($opts{'dry-run'}, "terminate called without dry-run");
-				not_ok($opts{yes}, "terminate called without yes");
+				not_ok($opts{force},"terminate called without --force");
+				not_ok($opts{dryrun}, "terminate called without --dry-run");
+				not_ok($opts{noprompt}, "terminate called without --yes");
 				eq_or_diff($opts{flags}, '--no-user-secrets', "terminate called with correct flags");
-				cmp_deeply($opts{clean_up}, {
+				cmp_deeply({%opts{qw/resources secrets user_secrets credhub networking/}}, {
 					resources => 1,
 					secrets => 1,
 					user_secrets => 0,
@@ -219,6 +219,8 @@ subtest 'genesis terminate' => sub {
   - this environment's generated secrets will be removed (use --no-secrets to keep).
   - this environment's user-provided secrets will be left in place.
 
+[NOTICE] You can run this command with the --dry-run option to see exactly what would be removed without actually terminating the deployment or removing any asscoiated items.
+
 [WARNING] This action is irreversible and cannot be undone!
 
 Are you sure you want to terminate my-env/my-type deployment? [y|N] > 
@@ -242,6 +244,8 @@ EOF
   - all its VMs and persistent disks will be destroyed.
   - this environment's generated secrets will be removed (use --no-secrets to keep).
   - this environment's user-provided secrets will be left in place.
+
+[NOTICE] You can run this command with the --dry-run option to see exactly what would be removed without actually terminating the deployment or removing any asscoiated items.
 
 [WARNING] This action is irreversible and cannot be undone!
 
