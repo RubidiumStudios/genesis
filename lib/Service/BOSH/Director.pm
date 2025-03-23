@@ -214,7 +214,7 @@ sub connect_and_validate {
 	}
 
 	my ($status, $msg) = $self->status()->@{qw(status msg)};
-	if ($status->{status} ne 'ok') {
+	if ($status ne 'ok') {
 		error("#R{%s - %s!}\n", $status, $msg) if $waiting;
 		dump_stack;
 		bail(
@@ -463,6 +463,29 @@ sub stemcells {
 # vault - returns the vault object used to fetch exodus data {{{
 sub vault {
 	return $_[0]->{exodus_vault};
+}
+
+# }}}
+# deployments - list the deployments on the BOSH director {{{
+sub deployments {
+	my $deployment_rows = read_json_from($_[0]->execute('deployments','--json'))->{Tables}[0]{Rows};
+	my $deployments = {};
+	for my $deployment (@$deployment_rows) {
+		# Clean up 
+		my $name = $deployment->{name};
+		$deployments->{$name} = {
+			releases  => [split(/\n/, $deployment->{release_s} // '')],
+			stemcells => [split(/\n/, $deployment->{stemcell_s} // '')],
+			teams     => [split(/\n/, $deployment->{team_s} // '')],
+		}
+	}
+	return $deployments
+}
+
+sub has_deployment {
+	my ($self, $deployment) = @_;
+	my $deployments = $self->deployments;
+	return exists $deployments->{$deployment};
 }
 
 # }}}
