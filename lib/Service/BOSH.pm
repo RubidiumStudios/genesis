@@ -167,10 +167,10 @@ sub dryrun_of {
 	$interactive = 1 if $execute && !defined($interactive);
 
 	dryrun(
-		"\nwould execute #G{%s} on #M{%s}%s",
+		"\nwould execute #G{%s} on #M{%s} BOSH director%s",
 		join(' ', map {$_ =~ /\s/ ? "'$_'" : $_} (humanize_path(scalar($self->command)), @cmd)),
 		$self->{alias} || $self->{host},
-		$execute ? ", resulting in$exec_msg:" : ""
+		$execute ? ", resulting in$exec_msg:" : "."
 	);
 	return 1 unless $execute;
 	$execute = [qw/--dry-run/] unless ref($execute) eq 'ARRAY';
