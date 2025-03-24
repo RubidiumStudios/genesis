@@ -158,7 +158,7 @@ sub run_hook {
 	} elsif ($hook eq 'cloud-config') {
 		$ENV{GENESIS_CLOUD_CONFIG_SUBTYPE} = $opts{purpose};
 		# TODO: add support for multiple cpi boshes
-		%module_options = ();
+		%module_options = (purpose => $opts{purpose});
 
 	} elsif ($hook eq 'terminate') {
 		%module_options = (
