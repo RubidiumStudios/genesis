@@ -3,7 +3,7 @@
 use Digest::SHA qw/sha1_hex/;
 
 use Genesis qw/info bail read_json_from lines/;
-use Genesis::Term qw/terminal_width wrap/;
+use Genesis::Term qw/terminal_width wrap csprintf/;
 
 use Service::Vault::Local;
 use Service::Credhub;
