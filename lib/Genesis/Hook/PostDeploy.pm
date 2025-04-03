@@ -5,6 +5,7 @@ use warnings;
 use parent qw(Genesis::Hook);
 
 use Genesis;
+use Genesis::Term qw/in_controlling_terminal/;
 use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
 
@@ -147,6 +148,89 @@ sub upload_director_cpi_config {
 	}	
 }
 
+sub upload_stemcells {
+	# This will upload the stemcells to the director.  If non-interactive, it will upload the latest stemcell
+	# for the IaaS.  If interactive, it will ask the user to select a stemcell to upload.
+
+	# RISK: This assumes that the kit is a bosh director, but doesn't verify it.
+
+	my ($self, %opts) = @_;
+	return unless $self->deploy_successful;
+
+	my $env = $self->env;
+	my $bosh = $env->get_target_bosh({self => 1});
+
+	$env->notify("checking for stemcells on the BOSH director");
+	my @stemcells = $bosh->stemcells();
+	if (@stemcells) {
+		info("[[  - >>found %s stemcells on the BOSH director", scalar @stemcells);
+		return 1;
+	}
+
+	# If interactive, ask the user if they want to upload a stemcell
+	if (in_controlling_terminal && $opts{interactive}) {
+		my $answer = prompt_for_boolean(
+			"[[  - >>no stemcells found on the BOSH director. Do you want to upload a stemcell? [y|n] ",
+			1
+		);
+		return unless $answer;
+	}
+	
+	# Otherwise, use the Service::BOSH::Stemcell module to upload a suitable stemcell
+	my $tstart = gettimeofday;
+	info({pending => 1}, "[[  - >>determining available stemcells...");
+	my $type_filter = $self->env->lookup('bosh-configs.stemcells.type',undef);
+	my @available_stemcells = $bosh->available_stemcells(
+		env => $env,
+		all => 1,
+		type => $type_filter,
+	);
+
+	if (!@available_stemcells) {
+		info("#R{failed}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+		error("No available stemcells found for the IaaS %s", $env->iaas);
+		return 0;
+	}
+	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+
+	my $selected_stemcell;
+	if ($self->{interactive}) {
+		require Service::BOSH::Stemcell;
+		$selected_stemcell = Service::BOSH::Stemcell->select_stemcell(
+			stemcells => \@available_stemcells,
+			type => $type_filter
+		);
+	} else {
+		# Select the latest available stemcell
+		$selected_stemcell = $available_stemcells[0]; # Latest is always first
+	}
+
+	info("[[  - >>uploading first stemcell to BOSH director:");
+	
+	eval {
+		$selected_stemcell->upload(
+			$bosh,
+			dryrun => $opts{dryrun},
+		);
+	};
+
+	if ($@) {
+		error("Failed to upload stemcells: $@\n");
+		return 0;
+	}
+	
+	notice(
+		"\nTo add more stemcells later, run:\n".
+		"  #G{%s do upload-stemcells [--os <os>] <version>[... <versionN>]}\n".
+		"#Ki{(or run with no arguments to be provided with a list to chose from)}\n",
+		scalar $self->env->get_call_path_with_env,
+	);
+	return 1;
+}
+
+sub upload_runtime_configs {
+	# This will upload the runtime configs to the director.
+}
 
 sub results {
 	return 1;
