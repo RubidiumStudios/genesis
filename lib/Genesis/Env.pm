@@ -2270,7 +2270,7 @@ sub last_deployed_manifest {
 			my $deployment_details = $self->deployment_lookup('latest');
 			info("#G{done}" . pretty_duration(gettimeofday - $start));
 			$start = gettimeofday;
-			if ($deployment_details) {
+			if ($deployment_details && $deployment_details->{state} eq 'deployed') {
 				info({pending => 1},
 					"  - found manifest in exodus/deployments - retrieving..."
 				);
@@ -2370,9 +2370,9 @@ sub last_deployed_manifest {
 				my $type = $self->exodus_lookup('manifest_type');
 				my $sha1 = $self->exodus_lookup('manifest_sha1');
 				info("#G{done}".pretty_duration(gettimeofday - $start));
-				$start = gettimeofday;
 
 				if ($manifest_data) {
+					$start = gettimeofday;
 					info({pending => 1},
 						"  - found manifest in exodus - retrieving..."
 					);
@@ -2462,6 +2462,7 @@ sub last_deployed_manifest {
 						$results->{$_}{data} = ($_ eq 'manifest' ? $data : slurp($files{$_}))
 							if ($include_contents);
 					}
+					info("#G{done}".pretty_duration(gettimeofday - $start));
 					last;
 				}
 			}
@@ -2518,8 +2519,7 @@ sub last_deployed_manifest {
 			}
 			last;
 		} else {
-			info("  - no previously deployed manifest found.");
-			$results = $just_return  ? [undef, undef, undef, undef] : {};
+			$results = $just_return  ? [undef, undef, undef, undef] : {not_found => 1};
 			unless ($opts{fail_on_error}) {
 				push(@errors, "No previously deployed manifest found.");
 				last;
@@ -2544,7 +2544,6 @@ sub last_deployed_manifest {
 		}
 	}
 
-	info("#G{done}".pretty_duration(gettimeofday - $start));
 	if (scalar(@errors)) {
 		push @$results, \@errors if ref($results) eq 'ARRAY';
 		$results->{errors} = \@errors if ref($results) eq 'HASH';
@@ -2975,16 +2974,20 @@ sub deploy {
 		# Check for differences between the last deployed manifest and the current one
 		debug("deploying this environment via `bosh create-env`, locally");
 		my $last_manifest = $self->last_deployed_manifest(files => 1, contents => 0);
-		if ($last_manifest->{errors}) {
-			bail("Errors encountered while retrieving last deployed manifest: %s",
-				join("\n", @{$last_manifest->{errors}})
-			);
-		}
-		my $last_manifest_path = ($last_manifest->{manifest}{path});
-		my $last_manifest_sha1 = $last_manifest->{manifest_sha1};
-		my $local_mismatch = 0;
 
-		if (($last_manifest->{source}||'') ne 'exodus-deployments' && $last_manifest_path) {
+		my $local_mismatch = 0;
+		my ($last_manifest_path, $last_manifest_sha1);
+		unless ($last_manifest->{not_found}) {
+			if ($last_manifest->{errors}) {
+				bail("Errors encountered while retrieving last deployed manifest: %s",
+					join("\n", @{$last_manifest->{errors}})
+				);
+			}
+			$last_manifest_path = ($last_manifest->{manifest}{path});
+			$last_manifest_sha1 = $last_manifest->{manifest_sha1};
+		}
+
+		if ($last_manifest_path && ($last_manifest->{source}||'') ne 'exodus-deployments') {
 			# Legacy method of storing state files, and possibly manifests
 			my $last_state_path = $last_manifest->{state}{path};
 			my $last_manifest_repo_path = $last_state_path =~ s/-state\.yml$/.yml/r; # FIXME: This seems sus... but it seems to work for now.
