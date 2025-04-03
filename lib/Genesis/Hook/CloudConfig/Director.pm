@@ -21,12 +21,11 @@ sub init {
 		"Purpose must be 'director' - %s",
 		$opts{purpose} ? "got '$opts{purpose}'" : "no purpose provided"
 	) unless ($opts{purpose}//'') eq 'director';
-	my $az_prefix = delete($opts{az_prefix}) // 'z';
 	my $obj = $class->SUPER::init(%opts, network => {});
 	
 	# Set the azs and subnets
 	# FIXME: Check if az prefix set in environment config
-	$obj->_set_network_azs(prefix => $az_prefix);
+	$obj->_set_network_azs();
 	$obj->_set_network_subnets();
 
 	return $obj;
@@ -72,10 +71,7 @@ sub build_az_definitions {
 	my $azs = $self->get_available_azs;
 	for my $az (keys %$azs) {
 		next unless $azs->{$az}{name};
-		my $config = {};
-		$config->{name} = $azs->{$az}{name};
-		$config->{cloud_properties} = JSON::PP->new->decode($azs->{$az}{cloud_properties})
-			unless ($options{virtual});
+		my $config = $self->_az_definition_for($azs->{$az}, %options);
 		push @azs, $config;
 	}
 	my @results = uniq sort {$a->{name} cmp $b->{name}} @azs;
@@ -148,6 +144,7 @@ sub compilation_definition {
 sub _set_network_azs {
 	my ($self, %opts) = @_;
 	if ($self->env->is_ocfp) {
+		my $prefix = $self->{az_prefix};
 		my $azs = $self->env->ocfp_config_lookup('vpc.azs');
 		my %azs = map {
 			my $az_name = $_;
@@ -164,7 +161,7 @@ sub _set_network_azs {
 				$cloud_properties = '{}';
 			}
 			($az_name, {
-					name => $opts{prefix} . $idx,
+					name => $prefix . $idx,
 					cloud_properties => $cloud_properties,
 			});
 		} sort keys %{scalar $azs};

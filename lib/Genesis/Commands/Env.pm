@@ -667,9 +667,96 @@ sub deploy {
 		info "  - to '#M{%s}' BOSH director at #c{%s}.", $env->bosh->{alias}, $env->bosh->{url};
 	}
 
-	my ($cloud_config, $network_map) = (undef, undef);
+	my ($cloud_config, $network_map, $cpi_config, $credhub_secrets, $cpi_err) = ();
 	if (! $env->use_create_env) {
 		# TODO: refactor to clean this up a bit
+
+		if ($env->cpi_enabled) {
+			if ($env->has_hook('cpi-config')) {
+				$env->notify("Generating CPI config for #C{%s} deployment...", $env->name);
+				($cpi_config, $network_map, $cpi_err) = $env->run_hook('cpi-config');
+				bail("Error generating CPI config: %s", $cpi_err ) if $cpi_err;
+				info "[[  - >>CPI config synthesized.";
+
+				# Compare to existing, upload if different
+				my $cpi_config_name = $env->cpi_name;
+				my $cpi_config_dir = $env->workpath('cloud-configs');
+				my $new_path = "$cpi_config_dir/${cpi_config_name}.yml";
+
+				mkdir($cpi_config_dir) unless -d $cpi_config_dir;
+				mkfile_or_fail($new_path, 0644, $cpi_config);
+				info "[[  - >>checking for existing CPI config on #M{%s} BOSH director...", $env->bosh->{alias};
+				my $updated = 1;
+				if ($env->bosh->has_config('cpi',$cpi_config_name)) {
+					my $old_path = "$cpi_config_dir/current-${cpi_config_name}.yml";
+					info "[[  - >>comparing generated CPI config with existing CPI config...";
+					$env->bosh->download_configs($old_path,'cpi',$cpi_config_name);
+					my ($out, $rc, $err) = run(
+						fake_tty("$cpi_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path)
+					);
+					bail "Error comparing CPI configs: %s", $err if $rc;
+
+					$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/mrs;
+					if ($out) {
+						$out =~ s/\(root level\)/<root>/m;
+						info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
+						if (in_controlling_terminal || !$options{'yes'}) {
+							prompt_for_boolean(
+								"Upload the new CPI config to the BOSH director ('no' will cancel deploy)? [y|n]",
+								1
+							) or bail "Aborted by user!";
+						}
+						info(
+							"Uploading new CPI config to #M{%s} BOSH director...",
+							$env->bosh->{alias}
+						);
+						$env->bosh->upload_config_from_file($new_path,'cpi',$cpi_config_name);
+						info "[[  - >>CPI config for #C{%s} deployment has been updated.\n", $env->name;
+
+					} else {
+						info "[[  - >>no changes detected in CPI config; proceeding with deploy.\n";
+						$updated = 0;
+					}
+				} else {
+					info(
+						"[[  - >>uploading new CPI config to #M{%s} BOSH director...",
+						$env->bosh->{alias}
+					);
+					$env->bosh->upload_config_from_file($new_path,'cpi',$cpi_config_name);
+					info "[[  - >>CPI config for #C{%s} deployment has been created.\n", $env->name;
+				}
+
+				if ($updated && $credhub_secrets) {
+					# Commit credhub secrets to the BOSH director
+					info(
+						"[[  - >>uploading new credhub secrets to #M{%s} BOSH director...",
+						$env->bosh->{alias}
+					);
+					my $credhub = $env->bosh->credhub;
+					for my $credhub_path (keys %$credhub_secrets) {
+						$credhub->set($credhub_path, $credhub_secrets->{$credhub_path});
+					}
+					info(
+						"[[  - >> %s credhub secrets for #C{%s} CPI have been created.\n",
+						scalar keys %$credhub_secrets,
+						$env->cpi_name
+					);
+				}
+
+			} else {
+				warning(
+					"Kit %s does not provide a cpi-config hook, so CPI configs will ".
+					"not be generated.  Ensure that the BOSH director has the necessary ".
+					"CPI config in place, if needed.",
+				);
+			}
+		} else {
+			warning(
+				"CPI config will not be generated for this deployment.  ".
+				"Ensure that the BOSH director has the necessary CPI config in place."
+			);
+		}
+
 		if ($env->can_build_cloud_configs) {
 			if ($env->has_hook('cloud-config')) {
 				$env->notify("Generating cloud configs for #C{%s} deployment...", $env->name);

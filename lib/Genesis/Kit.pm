@@ -109,7 +109,7 @@ sub run_hook {
 		$_ eq $hook
 	} qw/
 		new blueprint secrets info addon check prereqs pre-deploy post-deploy
-		cloud-config features shell edit terminate
+		cloud-config features shell edit terminate cpi-config
 	/;
 
 	if ($opts{env}) {
@@ -128,7 +128,7 @@ sub run_hook {
 		}
 	} else {
 		bug("The 'env' option to run_hook is required for the '$hook' hook!!")
-			if (grep { $_ eq $hook } qw/new secrets info addon check blueprint pre-deploy post-deploy cloud-config features terminate/);
+			if (grep { $_ eq $hook } qw/new secrets info addon check blueprint pre-deploy post-deploy cloud-config cpi-config features terminate/);
 	}
 
 	my (@args, %module_options);
@@ -159,6 +159,12 @@ sub run_hook {
 		$ENV{GENESIS_CLOUD_CONFIG_SUBTYPE} = $opts{purpose};
 		# TODO: add support for multiple cpi boshes
 		%module_options = (purpose => $opts{purpose});
+
+	} elsif ($hook eq 'cpi-config') {
+		%module_options = (
+			credhub_prefix => $opts{credhub_prefix}
+		);
+		# TODO: do we need anything other than env and kit?
 
 	} elsif ($hook eq 'terminate') {
 		%module_options = (

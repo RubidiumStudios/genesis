@@ -5,6 +5,7 @@ use warnings;
 use parent qw(Genesis::Hook);
 
 use Genesis;
+use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
 
 sub init {
@@ -30,7 +31,7 @@ sub update_director_network_config {
 	return unless $env->can_build_cloud_configs;
 
 	# Run the director-cloud-config hook to generate and apply the cloud-config
-	$env->notify("Generating the Network space for the BOSH Director");
+	$env->notify("generating the Network space for the BOSH Director");
 	info({pending => 1}, "[[  - >>building director cloud-config...");
 	my $tstart = gettimeofday;
 	my ($config, $network) = $env->run_hook('cloud-config', purpose => 'director');
@@ -108,7 +109,74 @@ sub help {
 	}
 }
 
+sub upload_director_cpi_config {
+	# This will setup the default director config for the environment.
+	my $self = shift;
+	my $credhub_prefix = "/cpi-config/properties/";
+	if ($self->cpi_enabled && $self->env->has_hook('cpi-config')) {
+		info({pending => 1}, "[[  - >>building director cpi-config...");
+		my $tstart = gettimeofday;
+		my ($config, $secrets, $errors) = $self->env->run_hook(
+			'cpi-config', credhub_prefix => $credhub_prefix
+		);
+		if ($errors) {
+			info("#G{failed}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+			error("Errors were found in the cpi-config: %s", $errors);
+			return 0;
+		}
+		info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+
+		# FIXME: Determine if there is already a cpi and show differences
+
+		my $bosh = $self->env->get_target_bosh({self => 1});
+		my $config_name = join('.',$self->env->cpi_name, 'director');
+		info({pending => 1},
+			"[[  - >>uploading base CPI config to #M{%s} bosh director...",
+			$self->env->name
+		);
+		$tstart = gettimeofday;
+		eval {$bosh->upload_config($config, 'cpi', $config_name) };
+		if ($@) {
+			info("#G{failed}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+			error("Failed to upload the cpi-config: %s", $@);
+			return 0;
+		}
+		info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+
+		$self->_commit_config_credhub_secrets($secrets);
+	}	
+}
+
+
 sub results {
 	return 1;
 }
+
+sub _commit_config_credhub_secrets {
+	my ($self, $secrets) = @_;
+	my @paths = keys %{$secrets || {}};
+	return 1 unless @paths;
+
+	my $bosh = $self->env->get_target_bosh({self => 1});
+	my $credhub = Service::Credhub->from_bosh($bosh);
+	my $start = gettimeofday;
+	info({pending => 1},
+		"[[  - >>entombing %s secrets into #M{%s} BOSH director's credhub...",
+		scalar @paths,
+		$self->env->name
+	);
+	for my $path (@paths) {
+		my $secret = $secrets->{$path};
+		eval {$credhub->set($path, $secrets->{$path})};
+		my $err = $@;
+		if ($err) {
+			info("#G{failed}" . pretty_duration(gettimeofday - $start, 2, 5));
+			error("Failed to entomb the secret %s: %s", $path, $err);
+			return 0;
+		}
+	}
+	info("#G{done}" . pretty_duration(gettimeofday - $start, 2, 5));
+	return 1
+}
+
 1;
