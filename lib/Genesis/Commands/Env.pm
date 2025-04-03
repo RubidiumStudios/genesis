@@ -858,7 +858,7 @@ sub terminate {
 			: $default_cleanup;
 	}
 
-	my $no_prompt = delete($options{'yes'})//0;
+	my $noprompt = delete($options{'yes'})//0;
 	my $dry_run = delete($options{'dry-run'})//0;
 	my $force = delete($options{'force'})//0;
 
@@ -909,7 +909,7 @@ sub terminate {
 	) unless $env->use_create_env;
 	$env->notify($msg);
 
-	if (!$dry_run && !$no_prompt) {
+	if (!$dry_run && !$noprompt) {
 		notice(
 		"\nYou can run this command with the #Y{--dry-run} option to see exactly what ".
 		"would be removed without actually terminating the deployment or removing ".
@@ -923,10 +923,9 @@ sub terminate {
 		prompt_for_boolean($msg, 0) or bail "Aborted by user!";
 	}
 
-	$ENV{BOSH_NON_INTERACTIVE} = 'true' if $no_prompt;
 	my $ok = $env->terminate(
 		dryrun    => $dry_run,
-		noprompt  => $no_prompt,
+		noprompt  => $noprompt,
 		force     => $force,
 		reason    => $reason,
 		flags     => $flags,
