@@ -653,7 +653,7 @@ sub deploy {
 	if (scalar(grep {$_} ($options{fix}, $options{recreate}, $options{'dry-run'})) > 1) {
 		command_usage(1,"Can only specify one of --dry-run, --fix or --recreate");
 	}
-	$ENV{BOSH_NON_INTERACTIVE} = 'true' if delete $options{yes};
+	$ENV{BOSH_NON_INTERACTIVE} = 'true' if $options{yes};
 
 	bail(
 		"The following options cannot be specified for #M{create-env}: %s",

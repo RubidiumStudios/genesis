@@ -2876,8 +2876,8 @@ sub deploy {
 		push @hooks, grep {$self->kit->has_hook($_)} qw(pre-deploy post-deploy);
 		$self->download_required_configs(@hooks);
 	}
-
-	my $confirm = $opts{yes} ? 'never' : $Genesis::RC->get(
+	my $noprompt = delete(%opts{yes});
+	my $confirm = $noprompt ? 'never' : $Genesis::RC->get(
 		'confirm_release_overrides' => $self->top->config->{'confirm_release_overrides'} // 'outdated'
 	);
 	bail(
@@ -3005,7 +3005,7 @@ sub deploy {
 			}
 			if ($issue) {
 				$issue .= "  #R{This may mean your state file is also out of date!}";
-				if (in_controlling_terminal || envset('BOSH_NON_INTERACTIVE')) {
+				if (in_controlling_terminal || !$noprompt) {
 					warning("\n".$issue);
 					prompt_for_boolean(
 						"Proceed with BOSH create-env for the #C{${\($self->name)}} anyways? [y|n] ",
@@ -3069,7 +3069,7 @@ sub deploy {
 			info "[[  - >>no previous deployment of this environment found in the deployment archive.";
 		}
 
-		if (in_controlling_terminal && !envset('BOSH_NON_INTERACTIVE')) {
+		if (in_controlling_terminal && !$noprompt) {
 			prompt_for_boolean(
 				"Proceed with BOSH create-env for the #C{${\($self->name)}}? [y|n] ",1
 			) or bail "Aborted!\n";
@@ -3183,7 +3183,7 @@ sub deploy {
 
 	my @skip_drains = @{$opts{'skip-drain'}};
 	my $opt_flags = join(' ', map {'--'.$_} sort grep {$_} (
-		envset('BOSH_NON_INTERACTIVE') ? 'yes' : undef,
+		$noprompt ? 'yes' : undef,
 		$disable_reactions ? 'no-reactions' : undef,
 		$opts{recreate} ? 'recreate' : undef,
 		scalar(@skip_drains) ?
@@ -3226,7 +3226,7 @@ sub deploy {
 		}
 	}
 
-	$self->run_hook('post-deploy', rc => ($ok ? 0 : 1), data => $predeploy_data)
+	$self->run_hook('post-deploy', rc => ($ok ? 0 : 1), data => $predeploy_data, interactive => !$noprompt)
 		if $self->has_hook('post-deploy');
 
 	return $ok;
