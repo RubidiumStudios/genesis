@@ -788,6 +788,37 @@ sub feature_compatibility {
 }
 
 # }}}
+# get_call_path - returns the path to the genesis binary {{{
+sub get_call_path {
+	my ($self) = @_;
+	return $self->_memoize(sub {
+		my $bin = $ENV{GENESIS_CALL_BIN} || humanize_bin();
+		$bin = "'$bin'" if $bin =~ / \(\)!\*\?/;
+		return $bin;
+	});
+}
+
+# }}}
+# get_call_path_with_env - returns the path to the genesis binary and the environment name {{{
+sub get_call_path_with_env {
+	my ($self) = @_;
+	my $bits = $self->_memoize(sub {
+		my $bin = $self->get_call_path();
+		my $is_alt_path = defined($ENV{GENESIS_CALLER_DIR}) && $self->path ne $ENV{GENESIS_CALLER_DIR};
+
+		my $env_ref = $self->name;
+		if (($ENV{GENESIS_PREFIX_TYPE}//'') eq 'search') {
+			$env_ref = "$ENV{GENESIS_PREFIX_SEARCH}";
+		} else {
+			$env_ref .= '.yml' if (grep {$_ eq $self->name} known_commands);
+			$env_ref = humanize_path($self->path)."/$env_ref" if $is_alt_path;
+		}
+		$env_ref = "'$env_ref'" if $env_ref =~ / \(\)!\*\?/;
+		return [$bin, $env_ref];
+	});
+	return wantarray ? @$bits : join(' ', @$bits);
+}
+
 # workpath - provide the path to the temporary file storage for this envionment {{{
 sub workpath {
 	my ($self, $relative) = @_;
@@ -1344,33 +1375,17 @@ sub get_environment_variables {
 	$hook //= '';
 
 	my %env;
-	my $is_alt_path = defined($ENV{GENESIS_CALLER_DIR}) && $self->path ne $ENV{GENESIS_CALLER_DIR};
 
-	$env{GENESIS_ROOT}         = $self->path;
-	$env{GENESIS_ENVIRONMENT}  = $self->name;
-	$env{GENESIS_TYPE}         = $self->type;
-	$env{GENESIS_CALL_BIN}     = $ENV{GENESIS_CALL_BIN} || humanize_bin();
+	$env{GENESIS_ROOT}        = $self->path;
+	$env{GENESIS_ENVIRONMENT} = $self->name;
+	$env{GENESIS_TYPE}        = $self->type;
+	$env{GENESIS_PREFIX_TYPE} = $ENV{GENESIS_PREFIX_TYPE} || 'none';
 
-	# Deprecated, use GENESIS_CALL_ENV instead, but drop the $GENESIS_ENVIRONMENT after the command
-	$env{GENESIS_CALL}         = $env{GENESIS_CALL_BIN};
-	$env{GENESIS_PREFIX_TYPE}  = $ENV{GENESIS_PREFIX_TYPE} || 'none';
-	if ($env{GENESIS_PREFIX_TYPE} eq 'search') {
-		$env{GENESIS_CALL} .= " '$ENV{GENESIS_PREFIX_SEARCH}'";
-	} elsif ($is_alt_path) {
-		$env{GENESIS_CALL} .= sprintf(" -C '%s'", humanize_path($self->path));
-	}
-
-	my $env_ref = $self->name;
-	if ($env{GENESIS_PREFIX_TYPE} eq 'search') {
-		$env_ref = "$ENV{GENESIS_PREFIX_SEARCH}";
-	} else {
-		$env_ref .= '.yml' if (grep {$_ eq $self->name} known_commands);
-		$env_ref = humanize_path($self->path)."/$env_ref" if $is_alt_path;
-	}
-	$env_ref = "'$env_ref'" if $env_ref =~ / \(\)!\*\?/;
-
-	$env{GENESIS_ENV_REF}  = $env_ref;
-	$env{GENESIS_CALL_ENV} = "$env{GENESIS_CALL_BIN} $env_ref";
+	my ($bin, $env_ref)       = $self->get_call_path_with_env();
+	$env{GENESIS_CALL}        =
+	$env{GENESIS_CALL_BIN}    = $bin;
+	$env{GENESIS_ENV_REF}     = $env_ref;
+	$env{GENESIS_CALL_ENV}    = join(' ', $bin, $env_ref);
 
 	if ($ENV{GENESIS_COMMAND}) {
 		$env{GENESIS_CALL_PREFIX} = sprintf("%s %s %s", $env{GENESIS_CALL_BIN}, $env_ref, $ENV{GENESIS_COMMAND});
