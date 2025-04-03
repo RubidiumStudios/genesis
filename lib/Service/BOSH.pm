@@ -135,12 +135,12 @@ sub execute {
 	dump_var("bosh command" => \@cmd);
 	my @results = run($opts, @cmd);
 
-	if ($opts->{interactive} && ! $opts->{passfail} && $file) {
+	if ($opts->{interactive} && $file) {
 		$results[0] = slurp($file);
-		$results[0] =~ s/^Script [^\n]+\n//m; # remove script header (linux)
 		if ($results[0] =~ s/\nScript done.*\[COMMAND_EXIT_CODE="(.*)"]$//m) {
 			$results[1] = $1;  # Linux stores command exit code in the script output
 		}
+		$results[0] =~ s/^Script [^\n]+\n//m; # remove script header (linux)
 		logger->dump_var("bosh results" => \@results);
 	}
 	return !$results[1] if $opts->{passfail};
