@@ -1095,14 +1095,27 @@ sub director_exodus_lookup {
 # deployment_lookup - lookup deployment details for a given timestamp, or list of deployments timestamps {{{
 sub deployment_lookup {
 	my ($self, $timestamp) = @_;
-	my @deployments = map {s{.*/deployments/}{}r} $self->vault->paths($self->exodus_mount.$self->exodus_slug.'/deployments');
+	my @deployments = map {s{.*/deployments/}{}r} $self->vault->paths($self->exodus_base.'/deployments');
 	return @deployments if (!defined($timestamp));
 
 	return unless @deployments;
 
 	# Standardize the timestamp
-	if ($timestamp eq 'latest') {
-		$timestamp = (sort {$b cmp $a} @deployments)[0];
+	if ($timestamp =~ /^latest(?:-(\w+))?$/) {
+		my $state = $1;
+		bug(
+			"Invalid state '%s' specified for latest deployment lookup: expected ".
+			"one of 'deployed', 'failed', or 'terminated'.",
+			$state
+		) if $state && $state !~ /^(deployed|failed|terminated)$/;
+		my @ordered_timestamps = sort {$b cmp $a} @deployments;
+		while ($timestamp = shift @ordered_timestamps) {
+			last unless $state;
+			last if $self->vault->get($self->exodus_base."/deployments/$timestamp","state") eq $state;
+		}
+		if (!defined($timestamp)) {
+			bail("No deployments found with state '$state' for environment '%s'", $self->name);
+		}
 	} elsif ($timestamp < 0) {
 		$timestamp = (sort {$a cmp $b} @deployments)[$timestamp];
 		return unless $timestamp;
