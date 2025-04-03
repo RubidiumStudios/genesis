@@ -43,6 +43,10 @@ sub new {
 	return bless($director, $class);
 }
 
+sub has_director {
+	return 1;
+}
+
 # }}}
 # from_exodus - create a new BOSH director object based on exodus data {{{
 sub from_exodus {

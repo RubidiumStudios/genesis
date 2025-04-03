@@ -68,6 +68,10 @@ sub set_command {
 }
 
 # }}}
+
+sub has_director {
+	return 0;
+}
 # }}}
 
 ## Instance Methods {{{
@@ -166,12 +170,20 @@ sub dryrun_of {
 	}
 	$interactive = 1 if $execute && !defined($interactive);
 
-	dryrun(
-		"\nwould execute #G{%s} on #M{%s} BOSH director%s",
-		join(' ', map {$_ =~ /\s/ ? "'$_'" : $_} (humanize_path(scalar($self->command)), @cmd)),
-		$self->{alias} || $self->{host},
-		$execute ? ", resulting in$exec_msg:" : "."
-	);
+	my $command = join(' ', map {$_ =~ /\s/ ? "'$_'" : $_} (humanize_path(scalar($self->command)), @cmd));
+	if ($has_director) {
+		dryrun(
+			"\nwould execute #G{%s} on #M{%s} BOSH director%s",
+			$self-$self->{alias} || $self->{host},
+			$execute ? ", resulting in$exec_msg:" : "."
+		);
+	} else {
+		dryrun(
+			"\nwould execute #G{%s}%s",
+			$command,
+			$execute ? ", resulting in$exec_msg:" : "."
+		);
+	}
 	return 1 unless $execute;
 	$execute = [qw/--dry-run/] unless ref($execute) eq 'ARRAY';
 	@cmd = (@cmd, @$execute);
