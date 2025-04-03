@@ -1257,6 +1257,44 @@ sub ocfp_config_lookup {
 
 # }}}
 
+# CPI Stuff
+
+# The CPI config is defined in the environment under the bosh-configs.cpi key.
+# The contents of this key are defined as a hash, with the following keys:
+#  - enabled: true/false
+#  - based-on: 'parent' | <arbitrary name> # TBD: not sure if needed, or how to implement
+#  - <arbitrary name>: <cpi config> - whatever the CPI needs to be configured
+
+# Note: If using OCFP, the CPI is always enabled, but can be disabled by setting
+# the 'enabled' key to false in the OCFP configuration.
+
+# The current intent is to just apply this to the BOSH director deployments, but
+# it could be extended to other deployments in the future (ie we don't know it
+# _won't_ work for other deployments).
+
+sub cpi_enabled {
+	my $self = shift;
+	return $self->cpi_config->{enabled}//$self->is_ocfp
+}
+
+sub cpi_config {
+	my $self = shift;
+	return $self->lookup('bosh-configs.cpi', {});
+}
+
+sub cpi_name {
+	my $self = shift;
+	# TODO: Allow env file to override this?
+	return join('.', $self->name, $self->iaas, $self->type);
+}
+
+sub cpi_credhub_base {
+	my $self = shift;
+	my $base = $self->lookup('bosh-configs.cpi.credhub_base', '/cpi');
+
+
+}
+
 # Bosh Config stuff - TODO: sort later
 # bosh_config_names - returns a hash of bosh config names proved by the environment {{{
 sub bosh_config_names {

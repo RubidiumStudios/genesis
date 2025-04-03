@@ -43,11 +43,14 @@ sub init {
 	my $basename = $opts{basename} // join('.', $env->name, $env->type);
 	my $id = join('@', $purpose ? ($basename, $purpose) : ($basename));
 
+	# Set the AZ prefix for the environment (if needed)
+	my $az_prefix = $env->name . '-z';
+
 	# Return cached object if it exists
 	return $cloud_configs{$id} if ($cloud_configs{$id});
 
 	my $obj = $class->SUPER::init(
-		%opts, basename => $basename, id => $id, contents => {}
+		%opts, basename => $basename, id => $id, az_prefix => $az_prefix, contents => {}
 	);
 
 	$obj->{overrides} = {
@@ -82,7 +85,7 @@ sub done {
 	}
 	$contents = unflatten($flat_contents);
 
-	my $filename = $self->env->workdir . "/cloud-config-$self->{id}.yml";
+	my $filename = $self->env->workdir . "/cloud-config-".$self->{id}.".yml";
 	save_to_yaml_file($contents, $filename);
 	$self->{contents} = slurp($filename)
 		=~ s/\b${sort_name_first}:/name:/gr 
@@ -165,6 +168,39 @@ sub build_cloud_config {
 	# so that if post-processing is needed, it can be done here without changing
 	# the kits.
 	return $config;
+}
+
+# }}}
+# build_cpi_azs - Builds the cpi-specific AZs for the environment {{{
+sub build_cpi_azs {
+	my ($self, %options) = @_;
+	# This will build the cpi-specific AZs for environments that have a custom CPI
+	# enabled.  Each AZ will be a shadow of the parent's base AZs but will use
+	# the deployment names and the deployment's CPI.
+
+	return () unless $self->env->cpi_enabled;
+
+	my $parent_azs = $self->get_available_azs;
+	my @azs = ();
+	for my $az_name (sort keys %$parent_azs) {
+		my $az_defn = $parent_azs->{$az_name};
+		my $idx = $parent_azs->{index} // ($az_name =~ m/[^0-9]([0-9]*)$/)[0];
+		my $config = $self->_az_definition_for(
+			$az_defn, %options, name => $self->{az_prefix} . $idx
+		);
+		push @azs, $config;
+		$self->_add_cpi_to_network_az($az_name, $config->{name});
+	}
+
+	return (azs => \@azs);
+}
+
+# }}}
+# _az_definition_for - Returns the definition for a given AZ {{{
+sub _add_cpi_to_network_az {
+	my ($self, $az_name, $cpi_az_name) = @_;
+	my $network = $self->network;
+	$network->{azs}{$az_name}{for_cpi}{$self->cpi_name} = $cpi_az_name
 }
 
 # }}}
@@ -425,13 +461,19 @@ sub lookup_az {
 	) unless keys %{$self->network->{azs}};
 	# This code is autoviving the azs hash, so we need to check for the key
 	# TBD: Should we check for the full name as well in all the existing azs?
-	my $az_name = undef;
-	if (exists $self->network->{azs}{$az}) {
-		$az_name = $self->network->{azs}{$az}{name};
-	} else {
-		$az_name = $az if grep {$_->{name} eq $az} values %{$self->network->{azs}};
+	my $base_az = $az;
+	if (! exists $self->network->{azs}{$az}) {
+		# Find the base_az that contains the given az as a name
+		$base_az = (grep {$_->{name} eq $az} values %{$self->network->{azs}})[0];
+		bail(
+			"Availability zone %s not found in the available AZs for the network",
+			$az
+		) unless $base_az;
 	}
-	return $az_name;
+
+	my $az_name = $self->network->{azs}{$base_az}{for_cpi}{$self->cpi_name}
+		if $self->cpi_enabled;
+	return $az_name//$self->network->{azs}{$base_az}{name}; # Director cpi is default
 }
 
 # }}}
@@ -855,11 +897,9 @@ sub _calculate_subnet_allocation {
 	# the available range.
 
 	# FIXME: How are we handling shrinking the size of the allocation?  One quirk of the IPv4 spans is that adding a negative number will shrink the range from the first ip up, which may cause a problem.  Also, you can't just add a number of ips to a range, but specific spans.	We need to handle this better.
-	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME} . "/.replyrc";
-	use Pry;
-	pry if $needed < 0;
-	bug("Negative IP allocation for network '%s' allocation", $target)
-	if $needed < 0;
+	bug(
+		"Negative IP allocation for network '%s' allocation", $target
+	) if $needed < 0;
 
 	if ($needed > 0) {
 		bail(
@@ -926,6 +966,19 @@ sub _filter_subnets {
 	}
 
 	return $selected_subnets;
+}
+
+# }}}
+
+# _az_definition_for - Returns the definition for a given availability zone {{{
+sub _az_definition_for {
+	my ($self, $az, %options) = @_;
+	my $config = {
+		name => $options{name} // $az->{name}, # Support CPI Shadow naming
+	};
+	$config->{cloud_properties} = JSON::PP->new->decode($az->{cloud_properties}) unless $options{virtual};
+	$config->{cpi} = $self->cpi_name if ($self->cpi_enabled);
+	return $config;
 }
 
 # }}}

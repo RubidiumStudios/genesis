@@ -120,6 +120,8 @@ sub wants_feature {$_[0]->want_feature($_[1])} # alias
 sub iaas {$_[0]->env && $_[0]->env->iaas}
 sub scale {$_[0]->env && $_[0]->env->scale}
 sub is_ocfp {$_[0]->env && $_[0]->env->is_ocfp}
+sub cpi_name {$_[0]->env && $_[0]->env->cpi_name}
+sub cpi_enabled {$_[0]->env && $_[0]->env->cpi_enabled}
 # }}}
 
 sub set_features {
