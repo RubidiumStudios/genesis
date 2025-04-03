@@ -463,6 +463,12 @@ sub stemcells {
 	));
 }
 
+sub upload_stemcell {
+	my ($self, $stemcell, %opts) = @_;
+	bug("No stemcell provided in call to upload_stemcell()") unless $stemcell;
+	return $stemcell->upload($self, %opts);
+}
+
 # }}}
 # vault - returns the vault object used to fetch exodus data {{{
 sub vault {

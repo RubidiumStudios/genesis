@@ -72,6 +72,32 @@ sub set_command {
 sub has_director {
 	return 0;
 }
+
+# available_stemcells - get a list of available stemcells from bosh.io {{{
+sub available_stemcells {
+	require Service::BOSH::Stemcell;
+	my ($class, %opts) = @_;
+	my ($iaas, $os, $type) = @opts{qw/iaas os type/};
+	if ($opts{env}) {
+		my $env = $opts{env};
+		$iaas //= $env->iaas;
+		$os //= ($env->manifest_lookup('stemcells',[])->[0]//{})->{os};
+		$type //= $env->lookup('bosh-configs.stemcells.type', undef);
+	}
+	$os //= 'ubuntu-jammy';
+	bail(
+		"No IaaS specified for stemcell lookup"
+	) unless $iaas;
+
+	my $stemcells = Service::BOSH::Stemcell->available_stemcells(
+		iaas => $iaas,
+		os => $os,
+		all => 1,
+		type => $type,
+	);
+
+	return wantarray ? @$stemcells : $stemcells;
+}
 # }}}
 
 ## Instance Methods {{{
