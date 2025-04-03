@@ -3407,6 +3407,10 @@ sub update_deployment_exodus {
 sub terminate {
 	my ($self, %opts) = @_;
 
+	# FIXME: Need to be able to handle deleting the vault deployment without erroring out.
+	# Vault kit should offer a backup of the vault contents to file or to running local vault.
+	# May be generic enough to use a --backup-vault-to option that takes a file or url.
+
 	my $dryrun =   $opts{dryrun}   //= 0;
 	my $force =    $opts{force}    //= 0;
 	my $noprompt = $opts{noprompt} //= 0;
@@ -3447,6 +3451,9 @@ sub terminate {
 		);
 		return 0 unless $force;
 	}
+
+	# All the pronmpting has already been done in the Command phase
+	$ENV{BOSH_NON_INTERACTIVE} = 'true';
 
 	my $start = Time::Piece->new();
 
