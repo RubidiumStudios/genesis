@@ -183,6 +183,7 @@ sub run_hook {
 		$ENV{GENESIS_PREDEPLOY_DATAFILE} = $fn;
 		$module_options{rc} = $ENV{GENESIS_DEPLOY_RC};
 		$module_options{data} = $opts{data} if ($opts{data});
+		$module_options{interactive} = $opts{interactive} if ($opts{interactive});
 
 	} elsif ($hook eq 'features') {
 		bug("The 'features' option to run_hook is required for the '$hook' hook!!")
