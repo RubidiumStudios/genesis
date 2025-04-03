@@ -662,9 +662,9 @@ sub deploy {
 
 	info "\nPreparing to deploy #C{%s}:\n  - based on kit #c{%s}\n  - using Genesis #c{%s}", $env->name, $env->kit->id, $Genesis::VERSION;
 	if ($env->use_create_env) {
-		info "  - as a #M{create-env} deployment\n";
+		info "  - as a #M{create-env} deployment.";
 	} else {
-		info "  - to '#M{%s}' BOSH director at #c{%s}.\n", $env->bosh->{alias}, $env->bosh->{url};
+		info "  - to '#M{%s}' BOSH director at #c{%s}.", $env->bosh->{alias}, $env->bosh->{url};
 	}
 
 	my ($cloud_config, $network_map) = (undef, undef);
