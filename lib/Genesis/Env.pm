@@ -3179,7 +3179,7 @@ sub deploy {
 	) unless $manifest_store eq 'repository';
 
 	# track exodus data in the vault
-	$self->notify("Preparing metadata for export...");
+	$self->notify("preparing metadata for export...");
 
 	my @skip_drains = @{$opts{'skip-drain'}//[]};
 	my $opt_flags = join(' ', map {'--'.$_} sort grep {$_} (
@@ -3970,6 +3970,11 @@ sub notify {
 		: ("info","[","]");
 	my $opts = ref($_[0]) eq 'HASH' ? shift : {};
 	my $msg = shift;
+	bug(
+		"Invalid message argument to '%s' - expected a string, got undefined value: [%s]",
+		$msg,
+		join(", ", map {$_//'<undef>'} @_)
+	) if grep {!defined} (@_);
 	$msg = sprintf($msg, @_) if scalar(@_);
 
 	$self->can($target)->($opts, "\n%s#M{%s}/#c{%s}%s %s", $prefix, $self->name, $self->type, $postfix, $msg);
