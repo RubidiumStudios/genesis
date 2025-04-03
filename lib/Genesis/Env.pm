@@ -3486,8 +3486,63 @@ sub terminate {
 		$dryrun ? ' #i{(dry-run)}' : ''
 	);
 	if ($self->use_create_env) {
+		$self->notify("preparing to delete a create-env environment...");
+		# Gather all the files needed to send to delete-env
+		my $files = {};
+		$self->deployment_cache_setup;
+		if ($self->manifest_store eq 'repository') {
+			info(
+				"[[  - >>Regenerating the unredacted manifest and vars files as needed for `bosh delete-env`.\n".
+				"[[  - >>Using the state file from the local repository."
+			);
+			# We can use the state file in the repo, but have to generate
+			# the manifest and vars files from scratch.
+			$self->manifest_provider->unredacted->write_to($self->deployment_cache_path_lookup('manifest'));
+			$self->manifest_provider->unredacted(subset=>'bosh_vars')->write_to($self->deployment_cache_path_lookup('vars'));
+			my $state_path = grep {-f $_} map {$self->path(".genesis/manifests/".$self->name."-state.$_")} (qw/json yml/);
+			bail(
+				"Cannot find state file for previous deployment; cannot proceed with delete-env."
+			) unless -f $state_path;
+			copy_or_fail($state_path, $self->deployment_cache_path_lookup('state'));
+			my $store = grep {-f $_} map {$self->path(".genesis/manifests/".$self->name."-store.$_")} (qw/yml json/);
+			copy_or_fail($store, $self->deployment_cache_path_lookup('store'))
+				if $store;
+		} else {
+			# We can pull the full manifest, vars and state files from the
+			# deployment artifacts in the vault.
+			info(
+				"[[  - >>Using the unredacted manifest, vars and state file from the deployment archive."
+			);
+			my $last_deployment = $self->deployment_lookup('latest-deployed');
+			bail(
+				"Cannot find artifacts for previous deployment; cannot proceed with delete-env."
+			) unless $last_deployment->{artifacts};
+			my $contents = $self->_unpack_deployment_artifacts($last_deployment->{artifacts});
+			for my $filetype (qw/manifest vars state store/) {
+				my $path = $self->deployment_cache_path_lookup($filetype);
+				my $key = basename($path);
+				if ($contents->{$key}) {
+					mkfile_or_fail($path, $contents->{$key});
+				} elsif ($key =~ /^(manifest|state)$/) {
+					# We need the manifest and state files to delete the environment
+					# but we don't need the vars or store files.
+					bail(
+						"Cannot find %s file for previous deployment; cannot proceed with delete-env.",
+						$key
+					);
+				}
+			}
+		}
 		$self->notify("deleting create-env environment...");
-		$ok = $self->bosh->delete_env(%opts, env => $self);
+		my $rc = $self->bosh->delete_env(
+			$self->deployment_cache_path_lookup('manifest'),
+			%opts,
+			vars_file => $self->deployment_cache_path_lookup('vars'),
+			state => $self->deployment_cache_path_lookup('state'),
+			store => $self->deployment_cache_path_lookup('store'),
+		);
+		$self->deployment_cache_cleanup;
+		$ok = ($rc == 0);
 	} else {
 		$self->notify("deleting deployment...");
 		$ok = $self->bosh->delete_deployment(%opts);
@@ -4390,6 +4445,31 @@ sub _build_deployment_artifacts {
 		secrets       => $secrets,
 	};
 
+}
+
+# }}}
+
+# _unpack_deployment_artifacts - unpack the deployment artifacts tarball {{{
+sub _unpack_deployment_artifacts {
+	my ($self, $artifacts_data) = @_;
+
+	my $tar = Archive::Tar->new;
+	my $compressed_data = decode_base64($artifacts_data);
+	$tar->read(IO::Uncompress::Gunzip->new(\$compressed_data))
+		or bail("Failed to decompress manifest artifacts");
+
+	# Extract the files from the tarball
+	my $contents = {};
+	for my $file ($tar->list_files) {
+		my $data = $tar->get_content($file);
+		if ($file eq 'secrets.json') {
+			$contents->{secrets} = decode_json($data);
+		} else {
+			$contents->{$file} = $data;
+		}
+	}
+
+	return $contents;
 }
 
 # }}}
