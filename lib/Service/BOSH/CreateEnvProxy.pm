@@ -26,12 +26,37 @@ sub create_env {
 
 	$opts{flags} ||= [];
 	push(@{$opts{flags}}, '--state', $opts{state});
-	push(@{$opts{flags}}, '--vars-store', $opts{store}) if $opts{store};
-	push(@{$opts{flags}}, '-l', $opts{vars_file}) if ($opts{vars_file});
+	push(@{$opts{flags}}, '--vars-store', $opts{store}) if $opts{store} && -f $opts{store};
+	push(@{$opts{flags}}, '-l', $opts{vars_file}) if ($opts{vars_file} && -f $opts{vars_file});
 
 	return $self->execute( { interactive => 1},
 		'create-env', @{$opts{flags}}, $manifest
 	);
+}
+
+# }}}
+# delete_env - delete the environment for the given manifest {{{
+sub delete_env {
+	my ($self, $manifest, %opts) = @_;
+	bug("Missing deployment manifest in call to delete_env()!!")
+		unless $manifest;
+	bug("Missing 'state' option in call to delete_env()!!")
+		unless $opts{state};
+
+	$opts{flags} ||= [];
+	push(@{$opts{flags}}, '--state', $opts{state});
+	push(@{$opts{flags}}, '--vars-store', $opts{store}) if $opts{store};
+	push(@{$opts{flags}}, '-l', $opts{vars_file}) if ($opts{vars_file});
+
+	if ($opts{dryrun}) {
+		$self->dryrun_of('delete-env', @{$opts{flags}}, $manifest);
+		return wantarray ? (undef, 0, undef) : 1;
+	}
+
+	my $result = $self->execute( { interactive => 1},
+		'delete-env', @{$opts{flags}}, $manifest
+	);
+	return $result;
 }
 
 # }}}
