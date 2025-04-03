@@ -3181,7 +3181,7 @@ sub deploy {
 	# track exodus data in the vault
 	$self->notify("Preparing metadata for export...");
 
-	my @skip_drains = @{$opts{'skip-drain'}};
+	my @skip_drains = @{$opts{'skip-drain'}//[]};
 	my $opt_flags = join(' ', map {'--'.$_} sort grep {$_} (
 		$noprompt ? 'yes' : undef,
 		$disable_reactions ? 'no-reactions' : undef,
