@@ -5,6 +5,7 @@ use warnings;
 use Genesis qw/trace bug bail trace new_enough semver pushd popd run humanize_path read_json_from/;
 use Data::Dumper ();
 use JSON::PP;
+use Digest::SHA qw(sha1_hex);
 
 sub init {
 	my ($class, %ops) = @_;
@@ -203,6 +204,12 @@ sub read_json_from_bosh {
 	my ($self, @args) = @_;
 	my $data = read_json_from($self->bosh->execute(@args, '--json'));
 	return $data->{Tables}[0]{Rows};
+}
+sub get_credhub_variable {
+	my ($self, $prefix, $path, $key, $value) = @_;
+	my $secret_sha = substr(sha1_hex("$path--$key--".$value),0,8);
+	my $cred_name = "$prefix$path--$key--$secret_sha";
+	return $cred_name;
 }
 
 1;
