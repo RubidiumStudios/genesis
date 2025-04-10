@@ -64,9 +64,10 @@ sub help {
 
 use Getopt::Long qw(GetOptionsFromArray);
 sub parse_options {
-	my ($self, $opt_defn) = @_;
-	my %opts;
-	GetOptionsFromArray($self->{args}, \%opts, @$opt_defn);
+	my ($self, $opt_defn, %opts) = @_;
+
+	GetOptionsFromArray($self->{args}, \%opts, @$opt_defn)
+		or bail("Error parsing command line arguments");
 	my $bad_opts = join(", ", grep {/^-/} @{$self->{args}});
 	bail("Unknown option(s) passed to %s: %s", $self->label, $bad_opts) if $bad_opts;
 	return wantarray ? %opts : \%opts;
