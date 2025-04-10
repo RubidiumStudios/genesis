@@ -92,7 +92,8 @@ sub init {
 			debug("Kit: using local kit file $kit_file");
 			my $target = $top->path(".genesis/kits");
 			mkdir_or_fail($target);
-			copy_or_fail($kit_file, $target);
+			my $abs_src = $kit_file =~ m#^/# ? $kit_file : abs_path($ENV{GENESIS_CALLER_DIR}."/".$kit_file);
+			copy_or_fail($abs_src, $target);
 			$kit_desc = "\n - using locally provided compiled kit #C{$kit_file}.";
 
 		} elsif ($options{kit}) {
