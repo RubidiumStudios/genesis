@@ -24,6 +24,15 @@ sub add_files {
 	push(@{$self->{files}}, @_);
 }
 
+sub remove_files {
+	my $self = shift;
+	my @files = @_;
+	($self->{files}) = compare_arrays(
+		$self->{files},
+		\@files
+	);
+}
+
 sub results {
 	bail(
 		"Blueprint hook could not be run"
