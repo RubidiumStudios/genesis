@@ -380,7 +380,7 @@ sub download_configs {
 # }}}
 # upload_config - upload a configuration to the BOSH director {{{
 sub upload_config {
-	my ($self, $config, $type, $name) = @_;
+	my ($self, $config, $type, $name, $confirm) = @_;
 	$name ||= 'default';
 	my $path = workdir() . "/$name-$type.yml";
 	if (ref($config)) {
@@ -388,27 +388,31 @@ sub upload_config {
 	} else {
 		mkfile_or_fail($path, $config);
 	}
-	$self->upload_config_from_file($path, $type, $name);
+	$self->upload_config_from_file($path, $type, $name, $confirm);
 }
 
 sub upload_config_from_file {
-	my ($self, $path, $type, $name) = @_;
+	my ($self, $path, $type, $name, $confirm) = @_;
 	$name ||= 'default';
+  local $ENV{BOSH_NON_INTERACTIVE} = undef;
 	my @commands = (
-		'update-config', "-n", "--type=$type", "--name=$name", $path
+		'update-config', "--type=$type", "--name=$name", $path
 	);
-	my ($out, $rc, $err) = $self->execute({interactive => 0}, @commands);
+	push @commands, '-n' unless $confirm;
+	my ($out, $rc, $err) = $self->execute({interactive => $confirm}, @commands);
 	bail(
 		"Failed to upload %s configuration to '#M{%s}' BOSH director: %s",
 		$name, $self->alias, $err
-	) if $rc;
-	return 1;
+	) if $rc && !wantarray;
+	return wantarray ? ($out, $rc, $err) : $rc ? 0 : 1;
 }
 
 sub delete_config {
-	my ($self, $type, $name) = @_;
-	my @commands = ('delete-config', "-n", "--type=$type", "--name=$name");
-	my ($out, $rc, $err) = $self->execute({interactive => 0}, @commands);
+	my ($self, $type, $name, $confirm) = @_;
+	local $ENV{BOSH_NON_INTERACTIVE} = undef;
+	my @commands = ('delete-config', "--type=$type", "--name=$name");
+	push @commands, '-n' unless $confirm;
+	my ($out, $rc, $err) = $self->execute({interactive => $confirm}, @commands);
 	bail(
 		"Failed to delete %s configuration from '#M{%s}' BOSH director: %s",
 		$name, $self->alias, $err

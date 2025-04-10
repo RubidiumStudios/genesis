@@ -136,10 +136,10 @@ sub upload_director_cpi_config {
 			$self->env->name
 		);
 		$tstart = gettimeofday;
-		eval {$bosh->upload_config($config, 'cpi', $config_name) };
-		if ($@) {
+		my ($out, $rc, $err) = $bosh->upload_config($config, 'cpi', $config_name);
+		if ($rc) {
 			info("#G{failed}" . pretty_duration(gettimeofday - $tstart, 2, 5));
-			error("Failed to upload the cpi-config: %s", $@);
+			error("Failed to upload the cpi-config: %s", $err);
 			return 0;
 		}
 		info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
