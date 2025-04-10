@@ -115,11 +115,12 @@ sub gather_properties {
 		$default //= '';
 		my @lookups = ($key, (split /,/, $alts//''));
 		my $value = undef;
+		my $iaas = $self->iaas;
 		for my $lookup (@lookups) {
 			# FIXME: Cannot delete a value by putting null in the env to delete it
 			$value =
 				$self->env->lookup("bosh-configs.cpi.$lookup") //
-				$self->env->ocfp_config_lookup("cpi.properties.$lookup", undef);
+				$self->env->ocfp_config_lookup("cpi.$iaas.$lookup", undef);
 			last if defined $value;
 		}
 		if (!defined $value) {
