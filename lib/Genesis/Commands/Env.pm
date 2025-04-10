@@ -744,11 +744,8 @@ sub deploy {
 				}
 
 			} else {
-				warning(
-					"Kit %s does not provide a cpi-config hook, so CPI configs will ".
-					"not be generated.  Ensure that the BOSH director has the necessary ".
-					"CPI config in place, if needed.",
-				);
+				# CPI hooks are not common (only on BOSH so far), so a warning is
+				# probably causing more confusion than it's worth.
 			}
 		} else {
 			warning(
