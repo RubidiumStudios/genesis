@@ -1425,94 +1425,101 @@ sub get_environment_variables {
 	my ($self, $hook) = @_;
 	$hook //= '';
 
-	my %env;
+	my $env = $self->_memoize(sub {
+		my $self = shift;
+		# Set up the environment variables
 
-	$env{GENESIS_ROOT}        = $self->path;
-	$env{GENESIS_ENVIRONMENT} = $self->name;
-	$env{GENESIS_TYPE}        = $self->type;
-	$env{GENESIS_PREFIX_TYPE} = $ENV{GENESIS_PREFIX_TYPE} || 'none';
+		my %env;
 
-	my ($bin, $env_ref)       = $self->get_call_path_with_env();
-	$env{GENESIS_CALL}        =
-	$env{GENESIS_CALL_BIN}    = $bin;
-	$env{GENESIS_ENV_REF}     = $env_ref;
-	$env{GENESIS_CALL_ENV}    = join(' ', $bin, $env_ref);
+		$env{GENESIS_ROOT}        = $self->path;
+		$env{GENESIS_ENVIRONMENT} = $self->name;
+		$env{GENESIS_TYPE}        = $self->type;
+		$env{GENESIS_PREFIX_TYPE} = $ENV{GENESIS_PREFIX_TYPE} || 'none';
 
-	if ($ENV{GENESIS_COMMAND}) {
-		$env{GENESIS_CALL_PREFIX} = sprintf("%s %s %s", $env{GENESIS_CALL_BIN}, $env_ref, $ENV{GENESIS_COMMAND});
-		$env{GENESIS_CALL_FULL} = $env{GENESIS_PREFIX_TYPE} =~ /(^search|file)$/
-			? $env{GENESIS_CALL_PREFIX}
-			: sprintf("%s %s '%s'", $env{GENESIS_CALL},$ENV{GENESIS_COMMAND}, $self->name);
-	}
+		my ($bin, $env_ref)       = $self->get_call_path_with_env();
+		$env{GENESIS_CALL}        =
+		$env{GENESIS_CALL_BIN}    = $bin;
+		$env{GENESIS_ENV_REF}     = $env_ref;
+		$env{GENESIS_CALL_ENV}    = join(' ', $bin, $env_ref);
 
-	# Full param json to reconstitution by from_envvars method.
-	$env{GENESIS_ENVIRONMENT_PARAMS} = encode_json($self->params);
-
-	# Genesis minimum version (if specified)
-	my $min_version = $self->lookup('genesis.min_version');
-	$env{GENESIS_MIN_VERSION} = $min_version if $min_version;
-
-	# Vault ENV VARS
-	if (my $descriptor = $self->lookup('genesis.vault')) {
-		$env{GENESIS_ENV_VAULT_DESCRIPTOR} = $descriptor;
-	}
-	$env{GENESIS_TARGET_VAULT} = $env{SAFE_TARGET} = $self->vault->ref;
-	$env{GENESIS_VERIFY_VAULT} = $self->vault->connect_and_validate->verify || "";
-
-	# Kit ENV VARS
-	$env{GENESIS_KIT_NAME}                 = $self->kit->name;
-	$env{GENESIS_KIT_VERSION}              = $self->kit->version;
-	$env{GENESIS_KIT_PATH}                 = $self->kit->path;
-  $env{GENESIS_MIN_VERSION_FOR_KIT}      = $self->kit->genesis_version_min();
-	if ($self->exists) {
-		$env{GENESIS_ENV_IAAS}               = $self->iaas();
-		$env{GENESIS_ENV_SCALE}              = $self->scale();
-		$env{GENESIS_ENV_KIT_OVERRIDE_FILES} = join(' ', $self->kit->env_override_files);
-	}
-
-	# Genesis v2.7.0 Secrets management
-	# This provides GENESIS_{SECRETS,EXODUS,CI}_{MOUNT,BASE}
-	# as well as GENESIS_{SECRETS,EXODUS,CI}_MOUNT_OVERRIDE
-	for my $target (qw/secrets exodus ci/) {
-		for my $target_type (qw/mount base/) {
-			my $method = "${target}_${target_type}";
-			$env{uc("GENESIS_${target}_${target_type}")} = $self->$method();
+		if ($ENV{GENESIS_COMMAND}) {
+			$env{GENESIS_CALL_PREFIX} = sprintf("%s %s %s", $env{GENESIS_CALL_BIN}, $env_ref, $ENV{GENESIS_COMMAND});
+			$env{GENESIS_CALL_FULL} = $env{GENESIS_PREFIX_TYPE} =~ /(^search|file)$/
+				? $env{GENESIS_CALL_PREFIX}
+				: sprintf("%s %s '%s'", $env{GENESIS_CALL},$ENV{GENESIS_COMMAND}, $self->name);
 		}
-		my $method = "${target}_mount";
-		my $default_method = "default_$method";
-		$env{uc("GENESIS_${target}_MOUNT_OVERRIDE")} = ($self->$method ne $self->$default_method) ? "true" : "";
-	}
-	$env{GENESIS_VAULT_ENV_SLUG} = $self->env_vault_slug;
-	$env{GENESIS_VAULT_PREFIX} = # deprecated in v2.7.0
-	$env{GENESIS_SECRETS_PATH} = # deprecated in v2.7.0
-	$env{GENESIS_SECRETS_SLUG} = $self->secrets_slug;
-	$env{GENESIS_SECRETS_SLUG_OVERRIDE} = $self->secrets_slug ne $self->default_secrets_slug ? "true" : "";
-	$env{GENESIS_ROOT_CA_PATH} = $self->root_ca_path;
 
-	unless (grep { $_ eq ($hook) } qw/new features/) {
-		$env{GENESIS_REQUESTED_FEATURES} = join(' ', $self->features);
-	}
+		# Full param json to reconstitution by from_envvars method.
+		$env{GENESIS_ENVIRONMENT_PARAMS} = encode_json($self->params);
 
-	# Credhub support
-	my %credhub_env = $self->credhub_connection_env;
-	$env{$_} = $credhub_env{$_} for keys %credhub_env;
+		# Genesis minimum version (if specified)
+		my $min_version = $self->lookup('genesis.min_version');
+		$env{GENESIS_MIN_VERSION} = $min_version if $min_version;
 
-	# BOSH support
-	if ($self->use_create_env) {
-		$env{GENESIS_USE_CREATE_ENV} = $self->use_create_env eq 'unknown' ? 'unknown' : 'true';
-		for my $bosh_env (qw/ALIAS ENVIRONMENT CA_CERT CLIENT CLIENT_SECRET DEPLOYMENT/) {
-			$env{"BOSH_$bosh_env"}=undef; # clear out any bosh variables
+		# Vault ENV VARS
+		if (my $descriptor = $self->lookup('genesis.vault')) {
+			$env{GENESIS_ENV_VAULT_DESCRIPTOR} = $descriptor;
 		}
-	} else {
-		$env{GENESIS_USE_CREATE_ENV} = "false";
-		$env{BOSH_ALIAS} = $self->bosh_alias;
-		if ($self->{__bosh} || grep {$_ eq 'bosh'} ($self->kit->required_connectivity($hook))) {
-			my %bosh_env = $self->bosh->environment_variables;
-			$env{$_} = $bosh_env{$_} for keys %bosh_env;
+		$env{GENESIS_TARGET_VAULT} = $env{SAFE_TARGET} = $self->vault->ref;
+		$env{GENESIS_VERIFY_VAULT} = $self->vault->connect_and_validate->verify || "";
+
+		# Kit ENV VARS
+		$env{GENESIS_KIT_NAME}                 = $self->kit->name;
+		$env{GENESIS_KIT_VERSION}              = $self->kit->version;
+		$env{GENESIS_KIT_PATH}                 = $self->kit->path;
+		$env{GENESIS_MIN_VERSION_FOR_KIT}      = $self->kit->genesis_version_min();
+		if ($self->exists) {
+			$env{GENESIS_ENV_IAAS}               = $self->iaas();
+			$env{GENESIS_ENV_SCALE}              = $self->scale();
+			$env{GENESIS_ENV_KIT_OVERRIDE_FILES} = join(' ', $self->kit->env_override_files);
 		}
+
+		# Genesis v2.7.0 Secrets management
+		# This provides GENESIS_{SECRETS,EXODUS,CI}_{MOUNT,BASE}
+		# as well as GENESIS_{SECRETS,EXODUS,CI}_MOUNT_OVERRIDE
+		for my $target (qw/secrets exodus ci/) {
+			for my $target_type (qw/mount base/) {
+				my $method = "${target}_${target_type}";
+				$env{uc("GENESIS_${target}_${target_type}")} = $self->$method();
+			}
+			my $method = "${target}_mount";
+			my $default_method = "default_$method";
+			$env{uc("GENESIS_${target}_MOUNT_OVERRIDE")} = ($self->$method ne $self->$default_method) ? "true" : "";
+		}
+		$env{GENESIS_VAULT_ENV_SLUG} = $self->env_vault_slug;
+		$env{GENESIS_VAULT_PREFIX} = # deprecated in v2.7.0
+		$env{GENESIS_SECRETS_PATH} = # deprecated in v2.7.0
+		$env{GENESIS_SECRETS_SLUG} = $self->secrets_slug;
+		$env{GENESIS_SECRETS_SLUG_OVERRIDE} = $self->secrets_slug ne $self->default_secrets_slug ? "true" : "";
+		$env{GENESIS_ROOT_CA_PATH} = $self->root_ca_path;
+
+		# Credhub support
+		my %credhub_env = $self->credhub_connection_env;
+		$env{$_} = $credhub_env{$_} for keys %credhub_env;
+
+		# BOSH support
+		if ($self->use_create_env) {
+			$env{GENESIS_USE_CREATE_ENV} = $self->use_create_env eq 'unknown' ? 'unknown' : 'true';
+			for my $bosh_env (qw/ALIAS ENVIRONMENT CA_CERT CLIENT CLIENT_SECRET DEPLOYMENT/) {
+				$env{"BOSH_$bosh_env"}=undef; # clear out any bosh variables
+			}
+		} else {
+			$env{GENESIS_USE_CREATE_ENV} = "false";
+			$env{BOSH_ALIAS} = $self->bosh_alias;
+			if ($self->{__bosh} || grep {$_ eq 'bosh'} ($self->kit->required_connectivity($hook))) {
+				my %bosh_env = $self->bosh->environment_variables;
+				$env{$_} = $bosh_env{$_} for keys %bosh_env;
+			}
+		}
+
+		return \%env;
+	});
+
+	if ($hook ne 'new' && $hook ne 'features' && !defined($env->{GENESIS_REQUESTED_FEATURES})) {
+		$env->{GENESIS_REQUESTED_FEATURES} = join(' ', $self->features);
 	}
 
-	return %env
+	return %$env
 }
 
 # }}}
