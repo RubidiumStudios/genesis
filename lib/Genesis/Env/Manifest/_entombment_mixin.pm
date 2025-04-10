@@ -155,10 +155,10 @@ sub _entomb_secret_for_vault {
 sub _entomb_secret {
   return shift->_entomb_secret_for_vault(@_) if scalar(@_) > 6; # Backwards compatibility
 	my ($self, $credhub, $path, $key, $value, $prefix) = @_;
-	$entombment_prefix //= 'genesis-entombed/';
+	$prefix //= 'genesis-entombed/';
 	# REFACTOR: Extract this out to a helper (used here and in CpiConfig.pm)
 	my $secret_sha = substr(sha1_hex("$cred_path--$key--".$value),0,8);
-	my $cred_name = "$entombment_prefix$cred_path--$key--$secret_sha";
+	my $cred_name = "$prefix$cred_path--$key--$secret_sha";
 	# end REFACTOR
 	my $credhub_var = "(($cred_name))";
 	my $existing = $credhub->get($cred_name);
