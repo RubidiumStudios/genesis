@@ -1257,7 +1257,13 @@ sub ocfp_config_lookup {
 
 # }}}
 
-# CPI Stuff
+# BOSH config stuff - Generic
+
+sub bosh_config_name {
+	return $_[0]->name.'.'.$_[0]->type;
+}
+
+# BOSH config stuff - CPI
 
 # The CPI config is defined in the environment under the bosh-configs.cpi key.
 # The contents of this key are defined as a hash, with the following keys:
@@ -2245,7 +2251,7 @@ sub deployment_manifest_type {
 sub prunable_keys {
 	return @{$_[0]->_memoize( sub {
 		my @keys = (qw(
-			meta pipeline params bosh-variables kit genesis exodus compilation
+			meta pipeline params bosh-variables bosh-configs kit genesis exodus compilation
 		));
 		if (!$_[0]->use_create_env) {
 			# bosh create-env needs these, so we only prune them
