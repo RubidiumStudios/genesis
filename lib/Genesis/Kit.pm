@@ -149,10 +149,13 @@ sub run_hook {
 
 	} elsif ($hook eq 'addon') {
 		$ENV{GENESIS_ADDON_SCRIPT} = $opts{script};
-		@args = @{$opts{args} || []};
+		my $args = $opts{args} || [];
+		my @help_opt = (qw (--help -h));
+		($args, my $want_help) = compare_arrays($args, \@help_opt);
 		%module_options = (
 			script => $opts{script},
-			args => \@args,
+			args => $args,
+			help => scalar(@$want_help) ? 1 : 0,
 		);
 
 	} elsif ($hook eq 'cloud-config') {
@@ -302,7 +305,7 @@ EOF
 		}
 
 		# TODO: wrap in an eval, give better error messages
-		my $ok = $hook =~ /^addon/ && scalar(grep {$_ =~ /^(?:-h|--help)$/} @args)
+		my $ok = $module_options{help} && $hook_obj->can('help')
 			? $hook_obj->help()
 			: $hook_obj->perform();
 
