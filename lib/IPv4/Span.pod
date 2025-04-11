@@ -6,14 +6,17 @@ IPv4::Span - A module for handling spans of IPv4 addresses.
 
   use IPv4::Span;
 
-  # Create a new IPv4::Span object
+  # Create a new span
   my $span = IPv4::Span->new('192.168.1.1-192.168.1.10');
+  my $cidr = IPv4::Span->new('192.168.1.0/24');
 
-  # Get the size of the span
-  my $size = $span->size();
-  print "Size: $size\n"; # prints '10'
+  # Get information about the span
+  print "Range: ", $span->range(), "\n";    # Range: 192.168.1.1-192.168.1.10
+  print "Size: ", $span->size(), "\n";      # Size: 10
+  print "Start: ", $span->start(), "\n";    # Start: 192.168.1.1
+  print "End: ", $span->end(), "\n";        # End: 192.168.1.10
 
-  # Get the range of the span
+# Get the range of the span
   my $range = $span->range();
   print "Range: $range\n"; # prints '192.168.1.1-192.168.1.10'
 
@@ -23,18 +26,38 @@ IPv4::Span - A module for handling spans of IPv4 addresses.
 
   # Reset the iteration
   $span->reset();
+	
+  # NetAddr::IP style methods
+  print "Network: ", $cidr->network(), "\n";       # Network: 192.168.1.0
+  print "Broadcast: ", $cidr->broadcast(), "\n";   # Broadcast: 192.168.1.255
+  print "First host: ", $cidr->first(), "\n";      # First host: 192.168.1.1
+  print "Last host: ", $cidr->last(), "\n";        # Last host: 192.168.1.254
+  my $usable = $cidr->usable_hosts();
+  print "Usable hosts: ", $usable->range(), "\n";  # Usable hosts: 192.168.1.1-192.168.1.254
+
+  # Get a slice of the span
+  my $slice = $span->slice(3);              # 192.168.1.1-192.168.1.3
+  my $offset_slice = $span->slice(3, 2);    # 192.168.1.3-192.168.1.5
+  my $negative_offset = $span->slice(3, -1); # 192.168.1.8-192.168.1.10
 
   # Get all addresses in the span
   my @addresses = $span->addresses();
   print "Addresses: ".join(' ', @addresses)."\n";
 
-  # Get a slice of the span
-  my $slice = $span->slice(3);
-  print "Slice: ", $slice->range(), "\n"; # prints 'Slice: 192.168.1.1-192.168.1.3'
+  # Check if the span contains an address or another span
+  if ($span->contains('192.168.1.5')) {
+    print "Span contains 192.168.1.5\n";
+  }
+
+  # Perform operations on spans
+  my $span2 = IPv4::Span->new('192.168.1.8-192.168.1.15');
+  my $union = $span + $span2;
+  my $difference = $span - $span2;
 
   # Get the CIDR blocks for the span
   my @cidrs = $span->cidrs();
-  print "CIDR blocks: ".join(', ',@cidrs)."\n"; 192.168.1.1/32, 192.168.1.2/31, 192.168.4/30, 192.168.8/31, 192.168.10/32
+  print "CIDRs: ", join(', ', @cidrs), "\n";
+	# >  192.168.1.1/32, 192.168.1.2/31, 192.168.4/30, 192.168.8/31, 192.168.10/32
 
 =head1 DESCRIPTION
 
@@ -129,6 +152,12 @@ Checks if the span contains the given address.
   my $address = IPv4::Address->new('192.168.1.5');
   my $bool = $span->contains($address);
   print "Contains: $bool\n"; # prints '1'
+
+  my $bool = $span->contains($addr);
+  my $bool = $span->contains($other_span);
+  my $bool = $span->contains($range);
+
+Determines if the span contains the given address, span, or range.
 
 =head2 cmp
 
@@ -346,6 +375,70 @@ Returns an array containing the span itself. This method exists for compatibilit
   my @spans = $span->spans();
   print "Number of spans: ", scalar(@spans), "\n"; # prints '1'
   print "First span: ", $spans[0]->range(), "\n"; # prints '192.168.1.1-192.168.1.10'
+
+=head2 network
+
+  my $addr = $span->network();
+
+Returns the network address (the first address in the span). Similar to NetAddr::IP's network() method.
+
+  # Example
+  my $span = IPv4::Span->new('192.168.1.0/24');
+  print $span->network(); # prints '192.168.1.0'
+
+=head2 broadcast
+
+  my $addr = $span->broadcast();
+
+Returns the broadcast address (the last address in the span). Similar to NetAddr::IP's broadcast() method.
+
+  # Example
+  my $span = IPv4::Span->new('192.168.1.0/24');
+  print $span->broadcast(); # prints '192.168.1.255'
+
+=head2 first
+
+  my $addr = $span->first();
+
+Returns the first usable host address in the span (typically network address + 1). 
+Similar to NetAddr::IP's first() method.
+
+  # Example
+  my $span = IPv4::Span->new('192.168.1.0/24');
+  print $span->first(); # prints '192.168.1.1'
+
+  my $small = IPv4::Span->new('192.168.1.1');
+  print $small->first(); # prints '192.168.1.1' (no increment for single IP spans)
+
+=head2 last
+
+  my $addr = $span->last();
+
+Returns the last usable host address in the span (typically broadcast address - 1).
+Similar to NetAddr::IP's last() method.
+
+  # Example
+  my $span = IPv4::Span->new('192.168.1.0/24');
+  print $span->last(); # prints '192.168.1.254'
+
+  my $small = IPv4::Span->new('192.168.1.1');
+  print $small->last(); # prints '192.168.1.1' (no decrement for single IP spans)
+
+=head2 usable_hosts
+
+  my $usable_range = $span->usable_hosts();
+
+Returns a new range containing only the usable host addresses (excludes network and broadcast addresses if span size > 1).
+Similar to iterating through usable addresses with NetAddr::IP's nth() method.
+
+  # Example
+  my $span = IPv4::Span->new('192.168.1.0/24');
+  my $usable = $span->usable_hosts();
+  print $usable->range(); # prints '192.168.1.1-192.168.1.254'
+
+  my $small = IPv4::Span->new('192.168.1.1');
+  my $empty = $small->usable_hosts();
+  print $empty->size(); # prints '0' (no usable hosts in a single-IP span)
 
 =head2 _plus (Internal)
 
