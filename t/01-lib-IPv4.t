@@ -187,7 +187,7 @@ subtest 'IPv4::Address' => sub {
 
   # Test calculation methods
   subtest 'calculation methods' => sub {
-    plan tests => 36;
+    plan tests => 41;
     my $ip1 = IPv4::Address->new(3232235777); # 192.168.1.1
     is($ip1->add(256)->range, '192.168.2.1', 'add() adds correct number of addresses');
     is($ip1->subtract(258)->range, '192.167.255.255', 'subtract() subtracts correct number of addresses');
@@ -197,6 +197,19 @@ subtest 'IPv4::Address' => sub {
     dies_ok { $ip1->diff(4) } 'diff() with non-IPv4::Address dies';
     like($@, qr/Cannot diff an address with an integer/i, 'diff() with non-IPv4::Address dies with correct message');
 
+    # Test direct subtraction of one IPv4::Address from another (tests line 182 of IPv4::Address.pm)
+    is($ip2 - $ip1, 12, 'direct subtraction of one IPv4::Address from another returns correct integer difference');
+    
+    # Test direct subtraction of a span from an address (tests line 183 of IPv4::Address.pm)
+    my $span1 = IPv4::Span->new('192.168.1.5-192.168.1.8');
+    my $result = $ip1 - $span1;
+    isa_ok($result, 'IPv4::Address', 'direct subtraction of a span from an address returns an IPv4::Address object');
+    is($result->range, '192.168.1.1', 'direct subtraction of a span not containing the address being subtracted returns the address itself');
+		$span1 = IPv4::Span->new('192.168.1.0-192.168.1.8');
+		$result = $ip1 - $span1;
+		isa_ok($result, 'IPv4::Range', 'direct subtraction of a span from an address returns an IPv4::Range object');
+		is($result->size, 0, 'direct subtraction of a span containing address from that address returns and empty range');
+    
     is($ip1->cmp($ip2), -1, 'cmp() returns correct comparison result');
     is($ip1->cmp('192.168.0.0'), 1, 'cmp() returns correct comparison result (string)');
     is('192.168.0.0' cmp $ip1, -1, 'overloaded cmp returns correct comparison result (string - swapped positions)');
@@ -322,7 +335,7 @@ subtest 'IPv4::Address' => sub {
 
 
 subtest 'IPv4::Span' => sub {
-  plan tests => 13;
+  plan tests => 14;
   subtest 'new constructor' => sub {
     plan tests => 30;
     my $span1 = IPv4::Span->new('192.168.1.1-192.168.1.10');
@@ -764,6 +777,60 @@ subtest 'IPv4::Span' => sub {
       '192.168.1.124/31',
       '192.168.1.126/32'
     ], 'CIDR block calculation handles non-aligned end address');
+  };
+
+  subtest 'NetAddr::IP-like methods' => sub {
+    plan tests => 19;
+    
+    # Test with a standard network (CIDR block)
+    my $span = IPv4::Span->new('192.168.1.0/24');
+    
+    # Test network() method
+    my $network = $span->network();
+    isa_ok($network, 'IPv4::Address', 'network() returns IPv4::Address object');
+    is($network->address, '192.168.1.0', 'network() returns correct network address');
+    
+    # Test broadcast() method
+    my $broadcast = $span->broadcast();
+    isa_ok($broadcast, 'IPv4::Address', 'broadcast() returns IPv4::Address object');
+    is($broadcast->address, '192.168.1.255', 'broadcast() returns correct broadcast address');
+    
+    # Test first() method
+    my $first = $span->first();
+    isa_ok($first, 'IPv4::Address', 'first() returns IPv4::Address object');
+    is($first->address, '192.168.1.1', 'first() returns correct first usable address');
+    
+    # Test last() method
+    my $last = $span->last();
+    isa_ok($last, 'IPv4::Address', 'last() returns IPv4::Address object');
+    is($last->address, '192.168.1.254', 'last() returns correct last usable address');
+    
+    # Test usable_hosts() method
+    my $usable = $span->usable_hosts();
+    isa_ok($usable, 'IPv4::Range', 'usable_hosts() returns IPv4::Range object');
+    is($usable->size, 254, 'usable_hosts() returns correct number of usable hosts');
+    is($usable->range, '192.168.1.1-192.168.1.254', 'usable_hosts() returns correct range of usable hosts');
+    
+    # Test with a single IP address
+    my $single_ip = IPv4::Span->new('10.0.0.1');
+    
+    # For a single IP, network and broadcast are the same IP
+    is($single_ip->network()->address, '10.0.0.1', 'network() returns the IP itself for single-IP span');
+    is($single_ip->broadcast()->address, '10.0.0.1', 'broadcast() returns the IP itself for single-IP span');
+    
+    # For a single IP, first and last are the same IP (no increment/decrement)
+    is($single_ip->first()->address, '10.0.0.1', 'first() returns the IP itself for single-IP span');
+    is($single_ip->last()->address, '10.0.0.1', 'last() returns the IP itself for single-IP span');
+    
+    # For a single IP, there are no usable hosts (since network and broadcast use the single IP)
+    my $single_usable = $single_ip->usable_hosts();
+    is($single_usable->size, 0, 'usable_hosts() returns empty range for single-IP span');
+    
+    # Test with a point-to-point network (/30 - only 2 usable IPs)
+    my $p2p = IPv4::Span->new('10.0.0.0/30');
+    is($p2p->first()->address, '10.0.0.1', 'first() returns correct first usable address for /30');
+    is($p2p->last()->address, '10.0.0.2', 'last() returns correct last usable address for /30');
+    is($p2p->usable_hosts()->range, '10.0.0.1-10.0.0.2', 'usable_hosts() returns correct range for /30');
   };
 };
 

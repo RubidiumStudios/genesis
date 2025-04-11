@@ -122,6 +122,51 @@ sub contains($self, $obj) {
 	return $self->start le $obj->start && $self->end ge $obj->end;
 }
 
+# Returns the network address (first address in the span)
+# Similar to NetAddr::IP's network() method
+sub network($self) {
+	return $self->start;
+}
+
+# Returns the broadcast address (last address in the span)
+# Similar to NetAddr::IP's broadcast() method
+sub broadcast($self) {
+	return $self->end;
+}
+
+# Returns the first usable host address in the span
+# (typically network address + 1)
+# Similar to NetAddr::IP's first() method
+sub first($self) {
+	my $first = $self->start->clone;
+	# For standard networks, the first IP is reserved for the network address
+	$first += 1 if $self->size > 1;
+	return $first;
+}
+
+# Returns the last usable host address in the span
+# (typically broadcast address - 1)
+# Similar to NetAddr::IP's last() method
+sub last($self) {
+	my $last = $self->end->clone;
+	# For standard networks, the last IP is reserved for the broadcast address
+	$last -= 1 if $self->size > 1;
+	return $last;
+}
+
+# Returns a range containing only the usable host addresses
+# (excludes network and broadcast addresses if span size > 1)
+# Similar to NetAddr::IP's nth() behavior when iterating usable addresses
+sub usable_hosts($self) {
+	# If we have a single IP or empty range, there are no usable hosts
+	return IPv4->range() if $self->size <= 1;
+	
+	# Create a new range from first usable to last usable
+	my $first = $self->first;
+	my $last = $self->last;
+	return IPv4->range("$first-$last");
+}
+
 sub cmp($self, $other, $swap = 0) {
 	my $result = 0;
 	$other = IPv4::__autovivify($other);
