@@ -154,17 +154,22 @@ sub last($self) {
 	return $last;
 }
 
+# Returns the nth address in the span, where n is 0-based.
+# If n is negative, it counts from the end of the span
+# Similar to NetAddr::IP's nth() method
+sub nth($self, $index, $include_reserved = 0) {
+	return $self->first->to($self->last)->nth($index, 1) unless $include_reserved;
+
+	# Check if the index is negative, and convert it to a positive index (if possible)
+	$index = $self->size + $index if ($index < 0);
+	return undef if ($index < 0 || $index >= $self->size);
+	return $self->start + $index;
+}
+
 # Returns a range containing only the usable host addresses
 # (excludes network and broadcast addresses if span size > 1)
-# Similar to NetAddr::IP's nth() behavior when iterating usable addresses
 sub usable_hosts($self) {
-	# If we have a single IP or empty range, there are no usable hosts
-	return IPv4->range() if $self->size <= 1;
-	
-	# Create a new range from first usable to last usable
-	my $first = $self->first;
-	my $last = $self->last;
-	return IPv4->range("$first-$last");
+	return $self->size <= 1 ? IPv4->range() : $self->first->to($self->last);
 }
 
 sub cmp($self, $other, $swap = 0) {

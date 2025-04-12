@@ -780,7 +780,7 @@ subtest 'IPv4::Span' => sub {
   };
 
   subtest 'NetAddr::IP-like methods' => sub {
-    plan tests => 19;
+    plan tests => 31;
     
     # Test with a standard network (CIDR block)
     my $span = IPv4::Span->new('192.168.1.0/24');
@@ -805,9 +805,42 @@ subtest 'IPv4::Span' => sub {
     isa_ok($last, 'IPv4::Address', 'last() returns IPv4::Address object');
     is($last->address, '192.168.1.254', 'last() returns correct last usable address');
     
+    # Test nth() method - similar to NetAddr::IP nth method
+    # Test with positive offsets
+    my $second = $span->nth(1);
+    isa_ok($second, 'IPv4::Address', 'nth() returns IPv4::Address object');
+    is($second->address, '192.168.1.2', 'nth(1) returns correct address (skipping network/broadcast)');
+    
+    my $middle = $span->nth(127);
+    is($middle->address, '192.168.1.128', 'nth(127) returns correct address');
+    
+    # Test with negative offsets
+    my $last_minus_one = $span->nth(-2);
+    is($last_minus_one->address, '192.168.1.253', 'nth(-2) returns correct address');
+    
+    # Test with $include_reserved = true (include network and broadcast)
+    my $network_addr = $span->nth(0, 1);
+    is($network_addr->address, '192.168.1.0', 'nth(0, 1) returns network address when include_reserved=true');
+    
+    my $broadcast_addr = $span->nth(-1, 1);
+    is($broadcast_addr->address, '192.168.1.255', 'nth(-1, 1) returns broadcast address when include_reserved=true');
+    
+    my $first_host_included = $span->nth(1, 1);
+    is($first_host_included->address, '192.168.1.1', 'nth(1, 1) returns first host address when include_reserved=true');
+    
+    # Test out of bounds
+    is($span->nth(500), undef, 'nth() returns undef for out of bounds index');
+    is($span->nth(-500), undef, 'nth() returns undef for negative out of bounds index');
+    
+    # Test nth() on a /31 network (point-to-point, no network/broadcast reserved)
+    my $p2p = IPv4::Span->new('10.0.0.0/31');
+    is($p2p->nth(0)->address, '10.0.0.0', 'nth(0) on /31 returns first address (no reserved addresses)');
+    is($p2p->nth(1)->address, '10.0.0.1', 'nth(1) on /31 returns second address (no reserved addresses)');
+    is($p2p->nth(0, 1)->address, '10.0.0.0', 'nth(0, 1) on /31 returns same as nth(0) (no reserved addresses)');
+    
     # Test usable_hosts() method
     my $usable = $span->usable_hosts();
-    isa_ok($usable, 'IPv4::Range', 'usable_hosts() returns IPv4::Range object');
+    isa_ok($usable, 'IPv4::Span', 'usable_hosts() returns IPv4::Span object');
     is($usable->size, 254, 'usable_hosts() returns correct number of usable hosts');
     is($usable->range, '192.168.1.1-192.168.1.254', 'usable_hosts() returns correct range of usable hosts');
     
@@ -827,7 +860,7 @@ subtest 'IPv4::Span' => sub {
     is($single_usable->size, 0, 'usable_hosts() returns empty range for single-IP span');
     
     # Test with a point-to-point network (/30 - only 2 usable IPs)
-    my $p2p = IPv4::Span->new('10.0.0.0/30');
+    $p2p = IPv4::Span->new('10.0.0.0/30');
     is($p2p->first()->address, '10.0.0.1', 'first() returns correct first usable address for /30');
     is($p2p->last()->address, '10.0.0.2', 'last() returns correct last usable address for /30');
     is($p2p->usable_hosts()->range, '10.0.0.1-10.0.0.2', 'usable_hosts() returns correct range for /30');
