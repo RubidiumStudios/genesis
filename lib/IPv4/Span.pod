@@ -440,6 +440,40 @@ Similar to iterating through usable addresses with NetAddr::IP's nth() method.
   my $empty = $small->usable_hosts();
   print $empty->size(); # prints '0' (no usable hosts in a single-IP span)
 
+=head2 nth($index [, $include_reserved])
+
+Returns the IPv4::Address at the specified index within the span, or undef if the
+index is out of range. This method is similar to the nth() method in NetAddr::IP.
+
+If called without the optional $include_reserved parameter (or with a false value),
+it will skip the network and broadcast addresses in standard networks (/30 or larger).
+In this case, index 0 refers to the first usable host address (typically network+1).
+
+If called with $include_reserved set to a true value, it will include network and
+broadcast addresses, and index 0 will refer to the network address.
+
+Negative indices count from the end of the span (with -1 representing the last address).
+If $include_reserved is false, this will be the last usable host address rather than
+the broadcast address.
+
+Examples:
+
+  my $subnet = IPv4::Span->new('192.168.1.0/24');
+  
+  # Without $include_reserved (default)
+  my $first_host = $subnet->nth(0);      # Returns 192.168.1.1
+  my $last_host = $subnet->nth(-1);      # Returns 192.168.1.254
+  
+  # With $include_reserved set to true
+  my $network = $subnet->nth(0, 1);      # Returns 192.168.1.0
+  my $broadcast = $subnet->nth(-1, 1);   # Returns 192.168.1.255
+  my $first_host_incl = $subnet->nth(1, 1); # Returns 192.168.1.1
+  
+  # For point-to-point networks (/31), all addresses are included
+  my $p2p = IPv4::Span->new('10.0.0.0/31');
+  my $p2p_first = $p2p->nth(0);          # Returns 10.0.0.0
+  my $p2p_second = $p2p->nth(1);         # Returns 10.0.0.1
+
 =head2 _plus (Internal)
 
   my $result = $span->__plus($other, $swap);
