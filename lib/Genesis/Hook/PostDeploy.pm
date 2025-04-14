@@ -251,12 +251,12 @@ sub _commit_config_credhub_secrets {
 	);
 	for my $path (@paths) {
 		my $secret = $secrets->{$path};
+		bail("No value specified for the secret %s", $path) unless $secret;
 		eval {$credhub->set($path, $secrets->{$path})};
 		my $err = $@;
 		if ($err) {
 			info("#G{failed}" . pretty_duration(gettimeofday - $start, 2, 5));
-			error("Failed to entomb the secret %s: %s", $path, $err);
-			return 0;
+			bail("Failed to entomb the secret %s: %s", $path, $err);
 		}
 	}
 	info("#G{done}" . pretty_duration(gettimeofday - $start, 2, 5));
