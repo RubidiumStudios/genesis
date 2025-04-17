@@ -3506,7 +3506,7 @@ sub terminate {
 	# All the pronmpting has already been done in the Command phase
 	$ENV{BOSH_NON_INTERACTIVE} = 'true';
 
-	my $start = Time::Piece->new();
+	my $start = gettimeofday();
 
 	if ($self->has_hook('terminate')) {
 		$self->notify(
@@ -3626,7 +3626,7 @@ sub terminate {
 	return unless $ok;
 
 	# Determine existing claims, configs and secrets
-	my $start_cleanup = Time::Piece->new();
+	my $start_cleanup = gettimeofday();
 	$self->notify({pending => 1},
 		"gathering list of associated items for cleanup..."
 	);
@@ -3666,7 +3666,7 @@ sub terminate {
 			}
 		}
 	}
-	info(" #G{done}".pretty_duration(Time::Piece->new - $start_cleanup));
+	info(" #G{done}".pretty_duration(gettimeofday() - $start_cleanup));
 
 	# Dry-run output
 	if ($dryrun) {
@@ -3720,13 +3720,13 @@ sub terminate {
 		$self->notify("removing BOSH config files...");
 		for my $config_type (sort keys $configs->%*) {
 			for my $config_name ($configs->{$config_type}->@*) {
-				my $start = Time::Piece->new();
+				my $start = gettimeofday();
 				info({pending => 1}, "  - removing %s config file %s...", $config_type, $config_name);
 				my ($out, $rc, $err) = $self->bosh->delete_config($config_type, $config_name);
 				info(
 					'%s%s',
 					$rc ? "#R{failed}": "#G{done.}",
-					$rc ? "\n\n$err" : pretty_duration(Time::Piece->new - $start)
+					$rc ? "\n\n$err" : pretty_duration(gettimeofday() - $start)
 				)
 			}
 		}
@@ -3736,7 +3736,7 @@ sub terminate {
 		if ($clean_up{networking}) {
 			$self->notify("releasing network claims...");
 			for my $network (sort keys $claims->%*) {
-				my $start = Time::Piece->new();
+				my $start = gettimeofday();
 				info("  releasing claims for the #C{%s} network...", $network);
 				my $ok = 1;
 				for my $subnet ($claims->{$network}{subnets}->@*) {
@@ -3747,7 +3747,7 @@ sub terminate {
 				info(
 					'%s%s',
 					$ok ? " #G{done.}" : " #R{failed}",
-					$ok ? pretty_duration(Time::Piece->new - $start) : '' # TODO: capture bail message and print it here
+					$ok ? pretty_duration(gettimeofday() - $start) : '' # TODO: capture bail message and print it here
 				)
 			}
 		} else {
@@ -3779,12 +3779,12 @@ sub terminate {
 	if (0 && $clean_up{credhub} && !$self->use_create_env) {
 		$self->notify("removing credhub secrets...");
 		my $credhub = $self->credhub;
-		my $start = Time::Piece->new();
+		my $start = gettimeofday();
 		my $ok = $credhub->delete_old_secrets($self->name); # This function doesn't exist...
 		info(
 			'%s%s',
 			$ok ? " #G{done.}" : " #R{failed}",
-			$ok ? pretty_duration(Time::Piece->new - $start) : '' # TODO: capture bail message and print it here
+			$ok ? pretty_duration(gettimeofday() - $start) : '' # TODO: capture bail message and print it here
 		);
 	}
 
@@ -4552,7 +4552,7 @@ sub _backfill_deployment_audit_data {
 
 		# Create an artificial termination date halfway between the last
 		# deployment and now
-		my $now = Time::Piece->new;
+		my $now = gettimeofday();
 		my $termination_time = Time::Piece->strptime(
 			$last_deployment->{completed} || $last_deployment->{dated} || now->strftime(EXODUS_TIME_FORMAT),
 			EXODUS_TIME_FORMAT
