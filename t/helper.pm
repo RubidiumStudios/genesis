@@ -272,7 +272,7 @@ $output
 varfail=0
 $var_checks
 [[ "\$@" == "$expect" && \$varfail == 0 ]] && exit 0;
-if [[  "\$@" == "$expect" ]] ; then
+if [[  "\$@" != "$expect" ]] ; then
   echo >&2 "Output:"
   echo >&2 "got  '\$@\'"
   echo >&2 "want '$expect'"
