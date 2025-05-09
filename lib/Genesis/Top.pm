@@ -299,7 +299,7 @@ sub search_for_repo_path {
 				my $fmt_section;
 				my $target_path = $root_map->{$section} =~ s{^$ENV{HOME}/}{~/}r;
 				my $is_current = $root_map->{$section} eq $ENV{GENESIS_ORIGINATING_DIR};
-				my $flag = $ENV{GENESIS_NO_UFT8}
+				my $flag = $ENV{GENESIS_NO_UTF8}
 					? ''
 					: $is_current ? "\x{1F4C2} " : "\x{1F4C1} ";
 				if ($section eq '@current') {

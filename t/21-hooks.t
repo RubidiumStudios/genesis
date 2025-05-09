@@ -330,7 +330,7 @@ EOF
 
 	$s = 'secret/snw/lab/dev/thing/env';
 	is secret("$s:GENESIS_KIT_NAME"),      'dev',               'check:GENESIS_KIT_NAME';
-	is secret("$s:GENESIS_KIT_VERSION"),   'latest',            'check:GENESIS_KIT_VERISON';
+	is secret("$s:GENESIS_KIT_VERSION"),   'latest',            'check:GENESIS_KIT_VERSION';
 	is secret("$s:GENESIS_ROOT"),          $top->path,          'check:GENESIS_ROOT';
 	is secret("$s:GENESIS_ENVIRONMENT"),   'snw-lab-dev',       'check:GENESIS_ENVIRONMENT';
 	is secret("$s:GENESIS_VAULT_PREFIX"),  'snw/lab/dev/thing', 'check:GENESIS_VAULT_PREFIX';
@@ -351,7 +351,7 @@ EOF
 
 	$s = 'secret/snw/lab/dev/thing/env';
 	is secret("$s:GENESIS_KIT_NAME"),      'dev',               'add:GENESIS_KIT_NAME';
-	is secret("$s:GENESIS_KIT_VERSION"),   'latest',            'add:GENESIS_KIT_VERISON';
+	is secret("$s:GENESIS_KIT_VERSION"),   'latest',            'add:GENESIS_KIT_VERSION';
 	is secret("$s:GENESIS_ROOT"),          $top->path,          'add:GENESIS_ROOT';
 	is secret("$s:GENESIS_ENVIRONMENT"),   'snw-lab-dev',       'add:GENESIS_ENVIRONMENT';
 	is secret("$s:GENESIS_VAULT_PREFIX"),  'snw/lab/dev/thing', 'add:GENESIS_VAULT_PREFIX';
@@ -378,7 +378,7 @@ EOF
 
 	$s = 'secret/snw/lab/dev/thing/env';
 	is secret("$s:GENESIS_KIT_NAME"),      'dev',               'rotate:GENESIS_KIT_NAME';
-	is secret("$s:GENESIS_KIT_VERSION"),   'latest',            'rotate:GENESIS_KIT_VERISON';
+	is secret("$s:GENESIS_KIT_VERSION"),   'latest',            'rotate:GENESIS_KIT_VERSION';
 	is secret("$s:GENESIS_ROOT"),          $top->path,          'rotate:GENESIS_ROOT';
 	is secret("$s:GENESIS_ENVIRONMENT"),   'snw-lab-dev',       'rotate:GENESIS_ENVIRONMENT';
 	is secret("$s:GENESIS_VAULT_PREFIX"),  'snw/lab/dev/thing', 'rotate:GENESIS_VAULT_PREFIX';
@@ -592,7 +592,7 @@ EOF
 
 	my @manifests;
 
-	
+
 	lives_ok {@manifests = @{$fancy->run_hook('blueprint',env=>$fun_times)}} "[fancy] blueprint hook works with derived features";
 	cmp_deeply([@manifests], [
 		"base.yml",
