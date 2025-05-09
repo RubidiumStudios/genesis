@@ -1321,8 +1321,8 @@ sub _u2d {
 }
 
 sub pretty_duration {
-	my ($duration, $good, $bad, $wrap, $prefix, $style) = @_;
-	return '' unless $ENV{GENESIS_SHOW_DURATION};
+	my ($duration, $good, $bad, $wrap, $prefix, $style, $force) = @_;
+	return '' unless $ENV{GENESIS_SHOW_DURATION} || $force;
 	$wrap //= '()';
 	$prefix //= ' ';
 	$style //= '-';
