@@ -530,17 +530,17 @@ sub run {
 
 	my $prog = shift @args;
 	if ($prog !~ /\$\{?[\@0-9]/ && scalar(@args) > 0) {
-		$prog .= ' "$@"'; # old style of passing in args as array, need to wrap for shell call
+		$prog .= ' "${@}"'; # old style of passing in args as array, need to wrap for shell call
 	}
 
 	local %ENV = %ENV; # To get local scope for duration of this call
 	my $tracemsg = "";
 	if (scalar(keys %{$opts{env} || {}})) {
 		$tracemsg = "#M{Setting environment values:}";
-		for (keys %{$opts{env} || {}}) {
+		for (sort keys %{$opts{env} || {}}) {
 			if (defined($opts{env}{$_})) {
 				$ENV{$_} = $opts{env}{$_};
-				$tracemsg .= $opts{redact_env}
+				$tracemsg .= $opts{redact_env} # FIXME: This should also allow for a hash of keys to redact for fine-grained control
 					? csprintf("\n#B{%s}='#Ci{<redacted>}'",$_)
 					: csprintf("\n#B{%s}='#C{%s}'",$_,$ENV{$_});
 			} else {
@@ -567,9 +567,11 @@ sub run {
 		my $cmd_arg = $args[$i];
 		my $trace_arg = undef;
 		if (ref($cmd_arg) eq 'HASH' && (scalar(keys %{$cmd_arg}) eq 1) && defined($cmd_arg->{redact})) {
-			$trace_arg = "<redacted>";
+			my $size = length($cmd_arg->{redact}//'');
+			$trace_arg = "<redacted:$size bytes>";
 			$cmd_arg = $cmd_arg->{redact};
 		}
+		# FIXME: How to handle undefined values
 		$cmd_arg =~ s/(?<!\\)\$(?:{([^\}]+)}|([A-Za-z0-9_]*))/my $v = $ENV{$1||$2}; defined($v) ? $v : ""/eg;
 
 		# Normal flow, assume arg is string-equivalent as before
