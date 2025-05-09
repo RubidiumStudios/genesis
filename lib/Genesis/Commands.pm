@@ -349,10 +349,19 @@ sub get_args { # {{{
 } # }}}
 
 sub has_option { # {{{
-	my ($option,$test) = @_;
-	return 0 unless defined($COMMAND_OPTIONS->{$option});
-	return 1 unless defined($test);
-	if (ref($test) eq "Regexp") {
+	# Returns 0 if the option does not exists
+	# Returns 1 if it does and no test is provided
+	# Compares the content of the option to the test if provided, 
+	# which can be undef (returns true if the option is also undef),
+	# a string (returns true if the option is equal to the string),
+	# or a regex (returns true if the option matches the regex).
+	my $option = shift;
+	return 0 unless exists($COMMAND_OPTIONS->{$option});
+	return 1 unless @_;
+	my $test = shift;
+	if (!defined($COMMAND_OPTIONS->{$option}) || !defined($test)) {
+		return !defined($COMMAND_OPTIONS->{$option}) && !defined($test) 
+	} elsif (ref($test) eq "Regexp") {
 		return $COMMAND_OPTIONS->{$option} =~ $test ? 1 : 0;
 	} else {
 		return $COMMAND_OPTIONS->{$option} eq $test ? 1 : 0;
