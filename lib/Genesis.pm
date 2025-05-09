@@ -16,6 +16,7 @@ use Genesis::State;
 
 use Cwd ();
 use Data::Dumper;
+use Encode qw/decode_utf8/;
 use File::Basename qw/basename dirname/;
 use File::Find ();
 use File::Temp qw/tempdir tempfile/;
@@ -63,6 +64,8 @@ our @EXPORT = qw/
 	pretty_duration
 	ordify
 	count_nouns
+
+	spruce_diff
 
 	run lines curl fake_tty
 	read_json_from
@@ -714,6 +717,61 @@ sub curl {
 	return  $status, $status_line, join($/, @header_data, @data)
 		if ($header_opt eq 'I');
 	return $status, $status_line, join($/, @data), join($/, @header_data);
+}
+
+sub spruce_diff {
+	# Diff two yaml files, and return the diff as a colored string
+	bug("spruce diff requires two files") unless @_ == 2;
+	my $scratchdir = workdir('spruce-diff');
+
+	# TODO: DRY up the following code so it loops over the two inputs instead of
+	#       having two almost identical code blocks.
+	my ($first, $second) = @_;
+	if (ref($first) eq 'HASH') {
+		my $tmpfile = "$scratchdir/".($first->{label} ? $first->{label} : "spruce-diff")."-".int(rand(1000000)).".yml";
+		if ($first->{file}) {
+			$first = $first->{file};
+		} elsif ($first->{object}) {
+			# write object to a temp file
+			save_to_yaml_file($first->{object}, $tmpfile);
+			$first = $tmpfile;
+		} elsif ($first->{content}) {
+			# write string content verbatim to a temp file
+			mkfile_or_fail($tmpfile, 0644, $first->{content});
+			$first = $tmpfile;
+		} else {
+			bug("first hashref must contain a 'file', 'object', or 'content' key");
+		}
+	}
+
+	if (ref($second) eq 'HASH') {
+		my $tmpfile = "$scratchdir/".($second->{label} ? $second->{label} : "spruce-diff")."-".int(rand(1000000)).".yml";
+		if ($second->{file}) {
+			$second = $second->{file};
+		} elsif ($second->{object}) {
+			# write object to a temp file
+			save_to_yaml_file($second->{object}, $tmpfile);
+			$second = $tmpfile;
+		} elsif ($second->{content}) {
+			# write string content verbatim to a temp file
+			mkfile_or_fail($tmpfile, 0644, $second->{content});
+			$second = $tmpfile;
+		} else {
+			bug("second hashref must contain a 'file', 'object', or 'content' key");
+		}
+	}
+
+	my $out_file = "$scratchdir/out.diff";
+	my (undef,$rc,$err) = run({redact => 1}, fake_tty($out_file, "spruce", "diff", $first, $second));
+	my $out = slurp($out_file);
+	if ($out =~ s/\nScript done.*\[COMMAND_EXIT_CODE="(.*)"]$//m) {
+		$rc = $1;  # Linux stores command exit code in the script output
+	}
+	$out =~ s/^Script [^\n]+\n//m; # remove script header (linux)
+
+	# FIXME: diff between failed diff vs diff with differences
+	$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/smr;
+	return ($out, $rc, $err);
 }
 
 sub slurp {
