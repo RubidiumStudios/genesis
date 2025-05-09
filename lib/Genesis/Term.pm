@@ -46,18 +46,24 @@ our $ansi_show_cursor = "\e[?25h";
 our $ansi_save_cursor = "\e[s";
 our $ansi_restore_cursor = "\e[u";
 
-my $has_tput = $ENV{TERM} ? undef : 0; # tput doesn't work if $TERM isn't defined
+sub has_tput {
+	return 0 unless $ENV{TERM};
+	my $out = `/bin/bash -c "type -p tput"`;
+	my $rc = $? >> 8;
+	return ($rc == 0) ? 1 : 0;
+}
+
 sub terminal_width {
 	return $ENV{GENESIS_OUTPUT_COLUMNS} if $ENV{GENESIS_OUTPUT_COLUMNS};
-	unless (defined($has_tput)) {
-		my $out = `/bin/bash -c "type -p tput"`;
-		my $rc = $? >> 8;
-		$has_tput = ($rc == 0) ? 1 : 0;
-	}
-
-	return ($ENV{GENESIS_OUTPUT_COLUMNS} || 80) unless $has_tput;
+	return ($ENV{GENESIS_OUTPUT_COLUMNS} || 80) unless has_tput();
 	return (grep {/^[0-9]*$/} split("\n",`tput cols`))[0] || $ENV{GENESIS_OUTPUT_COLUMNS} || 80;
 }
+sub terminal_height {
+	return $ENV{GENESIS_OUTPUT_LINES} if $ENV{GENESIS_OUTPUT_LINES};
+	return ($ENV{GENESIS_OUTPUT_LINES} || 24) unless has_tput();
+	return (grep {/^[0-9]*$/} split("\n",`tput lines`))[0] || $ENV{GENESIS_OUTPUT_LINES} || 24;
+}
+
 my $__is_highcolour = $ENV{TERM} && $ENV{TERM} =~ /256color/;
 sub _color {
 	my ($fg,$bg) = @_;
