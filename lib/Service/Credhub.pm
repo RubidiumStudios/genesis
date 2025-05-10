@@ -4,6 +4,7 @@ use warnings;
 
 use Genesis;
 use Genesis::Term;
+use Genesis::State qw/envset/;
 use Genesis::UI;
 use JSON::PP qw/decode_json encode_json/;
 use UUID::Tiny ();
@@ -100,7 +101,7 @@ sub preload {
 			map {($_->{Name} =~ s/$self->{base}\///r, $_->{Value})} @{$data->{Credentials}}
 		)};
 	}
-	return;
+	return $self;
 }
 
 sub is_preloaded {
@@ -213,9 +214,9 @@ sub set {
 
 	} elsif ($type eq 'value') {
 		bail(
-			"You must specify a HASH or an ARRAY as the value when creating a CredHub ".
-			"json value"
-		) unless defined($value) and ref($value) eq '';
+			"You must specify a non-empty string when creating a CredHub ".
+			"'value' value"
+		) unless defined($value) and ref($value) eq '' && $value ne '';
 		$value =~ s/\$/\${__dollar_symbol__}/g if $value =~ /\$/;
 		push @args, '-v', {redact => $value};
 
@@ -237,6 +238,8 @@ sub set {
 		},
 		'credhub', 'set', '-j', @args
 	);
+	return ($out, $rc, $err) if wantarray;
+
 	bail(
 		"Could not create the Credhub %s value:\n%s\n[Exit Code: %s]",
 		$type,$out,$rc
@@ -251,7 +254,7 @@ sub paths {
 	my @filter = ();
 	if (!  defined($filter)) {
 		push(@filter, '-n', $self->{base}.'/');
-	} elsif ($filter && ref($filter) ne "") {
+	} elsif ($filter && ref($filter) eq "") {
 		push(@filter, '-n', $self->_full_path($filter));
 	}
 
