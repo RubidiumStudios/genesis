@@ -299,6 +299,18 @@ sub has_config {
 	    && ($config_raw->{Tables}[0]{Rows}[0]{id}||'') =~ m/^\d+\*?$/;
 }
 # }}}
+
+# get_config - get the configuration of the given type and name {{{
+sub get_config {
+	my ($self, $type, $name) = @_;
+	my $config_raw = read_json_from(
+		$self->execute({interactive => 0}, 'config', "--type=$type", "--name=$name", '--json')
+	);
+	return $config_raw->{Tables}[0]{Rows}[0]{content} if $config_raw->{Tables}[0]{Rows}[0];
+	return undef;
+}
+
+# }}}
 # download_confgs - download configuration(s) of the given type (and optional name) {{{
 sub download_configs {
 	my ($self, $path, $type, $name) = @_;
