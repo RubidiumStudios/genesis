@@ -950,7 +950,7 @@ sub check_prereqs { # {{{
 
 	my @errors = grep {$_} map {
 		my $err = check_version(@$_);
-		error $err if $err;
+		debug $err if $err;
 		$err
 	} @$reqs;
 
