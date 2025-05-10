@@ -8,12 +8,15 @@ our @EXPORT = qw/
 	prompt_for_line
 	prompt_for_list
 	prompt_for_block
+	new_prompt_for_choice
 /;
 
 # FIXME: This entire module uses print instead of the logging system (output, error, etc)
 
 use Genesis;
 use Genesis::Term;
+
+use POSIX qw//;
 
 sub __prompt_for_line {
 	my ($prompt,$validation,$err_msg,$default,$allow_blank) = @_;
@@ -322,8 +325,339 @@ sub prompt_for_block {
 	return __prompt_for_block(@_);
 }
 
+# prompt_for_choice - Allows selecting a single option from a list of choices
+#
+# This function can be called in two ways:
+#
+# 1. Traditional (backwards compatibility):
+#    prompt_for_choice($prompt, $choices, $default, $labels, $err_msg, $object_description)
+#
+# 2. Options-based:
+#    prompt_for_choice(
+#       header => "Header text",            # Prompt text displayed above choices
+#       choices => $choices,                # Array of choices (strings or hashrefs)
+#                                           # If hashrefs, expected keys:
+#                                           #  - value: The return value (required, unless separator/section)
+#                                           #  - label: Display text in menu (will use value if not provided)
+#                                           #  - summary: Text displayed after selection (will use label if not provided)
+#                                           #  - section: Section header (string - optional)
+#                                           #  - separator: Separator line (boolean - optional)
+#       default => $default,                # Default choice (value or index)
+#       error => "Custom error message",    # Error message on invalid input
+#       description => "item",              # Object type in prompt (default: "choice")
+#       compact => 1,                       # Display choices in columns (default: 0)
+#       paginate => 1,                      # Enable pagination with N/P commands (default: 0)
+#       none => 1,                          # Allow no selection (default: 0)
+#     )
+#
+sub new_prompt_for_choice {
+	my %options = ();
+	my @valid_options = qw(
+		header choices default error description compact paginate
+	);
+	
+	# Handle backward compatibility - the first argument must be one of the valid options
+	# because we are expecting a hash (not a hashref)
+	if (!grep {ref($_[0]) eq $_} @valid_options && ref($_[1]) eq 'ARRAY') {
+		# Backwards compatibility mode
+		%options = __process_legacy_prompt_for_choice_args(@_);
+	} else {
+		my $raw_opts = {@_};
+		%options = delete($raw_opts->%{@valid_options});
+		bug(
+			"Invalid options passed to prompt_for_choice: %s", join(", ", keys %$raw_opts)
+		) if keys %$raw_opts; # TODO: Should this be a bug report?
 
+		# Convert choices to hashrefs if they are not already
+		$options{choices} = [map {ref($_) eq 'HASH' ? $_ : {value => $_}} $options{choices}->@*];
+	}
+	
+	# Ensure we have required parameters
+	my $choices = $options{choices};
+	bug("prompt_for_choice requires 'choices' parameter and it must be an arrayref") 
+		unless $choices && ref($choices) eq 'ARRAY';
+	
+	# Set defaults for missing parameters
+	$options{description} //= "choice";
+	$options{header} //= sprintf("Select one of the following %s:", count_nouns(2, $options{description}, suppress_count => 1));
+	$options{compact} //= 0;
+	$options{paginate} //= 0;
+	
+	# Deal with default choice
+	my $num_choices = scalar(@$choices);
+	my $iw = length($num_choices); # max item width
+	my $default_idx = undef;
+	if (defined $options{default}) {
+		$default_idx = $options{default} =~ m/^\d+$/
+			? ($options{default} > 0 ? $options{default} : $num_choices + $options{default})
+			: (grep {$choices->[$_]->{value} eq $options{default}} 0 .. $num_choices - 1)[0];
+		if (defined $default_idx) {
+			$choices->[$default_idx]{label} //= $choices->[$default_idx]{value};
+			$choices->[$default_idx]{summary} //= $choices->[$default_idx]{label};
+			$choices->[$default_idx]{label} .= " #G{(default)}";
 
+		} else {
+			bug("Invalid default choice: %s", $options{default});
+		}
+	}
+
+	# Handle compact display
+	# The option numbers need to go down then across, so we need to figure out how many we can get across
+	# the screen.  We will use the longest label to determine how many we can fit.
+	my $columns = 1;
+	my $col_width = terminal_width() - 4; # 2 character padding on each side
+	my @section_headers = ('');
+	my $sections = {'' => []};
+	if ($options{compact}) {
+		my $max_label_len = 0;
+		my $max_number_width = length($num_choices) + 2; #  "..#) ";
+		my $max_width = terminal_width - 4; # 2 character padding on each side
+		for my $choice (@$choices) {
+			# Deal with section headers or separators
+			# If section changes, then we need separate by sections
+			if ($choice->{section}) {
+				push @section_headers, $choice->{section};
+				next;
+			} elsif ($choice->{separator}) {
+				push @section_headers, sprintf("---%s---", scalar(@section_headers)+1);
+				next;
+			}
+			my $label = $choice->{label} // $choice->{value};
+			$max_label_len = max($max_label_len, length($label)+ $max_number_width + 2); # 2 for column separator 
+			push @{$sections{$section_headers[-1] //= []}}, $choice;
+		}
+		$columns = int($max_width / $max_label_len);
+		$col_width = int($max_width / $columns);
+	}
+
+	# Handle pagination
+	# FIXME: skip for now - adding column support should be enough to reduce
+	# the number of rows needed to display the choices.
+	#
+	# Once pagination is supported, we will reserve the first N rows + 1 for the
+	# header, where N is the number of rows the header takes up, and the last
+	# three rows for the footer.  The rest of the rows will be used for the
+	# choices, and the number of rows will determine the pages required, as well
+	# as the actual number of choices per column.  Without paginate option, we 
+	# will treat the terminal as infinite size, and just display the choices
+	# in the order they are given.
+	#
+	# Also have to deal with section headers and separators -- do we want to
+	# support "Section header (continued)" or "Section header (continued 1/2)",
+	# or keep separate pages for each section (if they fit on the page)?
+	my $current_page = 0;
+	my $page_size = 0; #$options{paginate} ? terminal_height : 0;
+	my $total_pages = 1; #$options{paginate} ?  POSIX::ceil(($num_choices - 1) / $options{page_size}) : 1;
+
+	# Display header
+	print csprintf("\n%s\n", $options{header});
+
+	# Handle user input
+	my $display_choices = sub {
+
+		for my $section_header (@section_headers) {
+			if ($section_header) {
+				if ($section_header =~ /^---\d+---$/) {
+					# blank line separator
+					print csprintf("\n");
+				} else {
+					# section header
+					print csprintf("\n  #Wku{%s}\n", $section_header);
+				}
+			}
+			my $section_choices = $sections{$section_header};
+		};
+		
+		# Calculate item ranges for pagination
+		my ($start_idx, $end_idx) = (0, $num_choices - 1);
+		if ($options{paginate}) {
+			$start_idx = $current_page * $options{page_size};
+			$end_idx = min($start_idx + $options{page_size} - 1, $num_choices - 1);
+		}
+		
+		if ($options{compact}) {
+			# Find the longest label for proper column calculation
+			my $max_label_len = 0;
+			for my $i ($start_idx .. $end_idx) {
+				my $label = $choices->[$i]->{label};
+				next if $label =~ /^---.*---$/;  # Skip section headers
+				$max_label_len = max($max_label_len, length($label) + $iw + 4); # num) label
+			}
+			
+			# Calculate number of columns that fit
+			my $cols = max(1, int($terminal_width / ($max_label_len + 2)));
+			
+			# Display items in columns
+			my $col = 0;
+			for my $i ($start_idx .. $end_idx) {
+				my $label = $choices->[$i]->{label};
+				my $value = $choices->[$i]->{value};
+				
+				# Handle section headers
+				if ($label =~ /^---(.*)---$/) {
+					my $section_header = $1;
+					$section_offset += 1;
+					print csprintf("\n\n  %s", $section_header);
+					$col = 0;
+					next;
+				} elsif ($label eq '---') {
+					my $section_header = '';
+					$section_offset += 1;
+					print csprintf("\n");
+					$col = 0;
+					next;
+				}
+				
+				$selection_map{$i} = $choices->[$i]->{summary} && bug(
+					"prompt_for_choice: selection_map needs fixing in compact mode: see traditional mode for details"
+				);
+				
+				# Format the choice with number and optional default marker
+				my $choice_text = sprintf("%*s) %s", $iw, ($i+1), $label);
+				if (defined $options{default} && 
+					(($options{default} eq $value) || 
+					 ($options{default} == $i+1))) {
+					$choice_text .= csprintf(" #G{(default)}");
+					$default_choice = $i+1 && bug(
+						"prompt_for_choice: default_choice needs fixing in compact mode: see traditional mode for details"
+					);
+				}
+				
+				# Start a new line if we're at the beginning of a row
+				print "\n  " if $col == 0;
+				
+				# Print the choice with proper padding
+				printf("%-*s", $max_label_len, $choice_text);
+				
+				# Update column counter
+				$col = ($col + 1) % $cols;
+			}
+		} else {
+			# Traditional vertical display
+			my $choice_map = {};
+			for my $i ($start_idx .. $end_idx) {
+
+				# Handle separator and section headers
+				if ($choices->[$i]->{separator} || $choices->[$i]->{label} eq '---') {
+					$section_offset += 1;
+					print csprintf("\n");
+					next;
+				}
+				if ($choices->[$i]->{section} || $choices->[$i]->{label} =~ /^---(.*)---$/) {
+					my $section = $choices->[$i]->{section} || $1;
+					$section_offset += 1;
+					print csprintf("\n\n  #Wku{%s}\n", $choices->[$i]->{section});
+					next;
+				}
+
+				my $choice = $i+1-$section_offset;
+				$selection_map{$choice} = $choices->[$i];
+				print csprintf("\n  %*s) %s", $iw, $choice, $choices->[$i]{label});
+				$default_choice = $choice if $i == $default_idx;
+			}
+		}
+		
+		# Add pagination footer if enabled
+		if ($options{paginate} && $total_pages > 1) {
+			print csprintf("\n\n  Page %d of %d [N)ext P)revious]", 
+				$current_page + 1, $total_pages);
+		}
+		
+		print "\n\n";
+		return \%selection_map;
+	};
+	
+	# Helper function to get max value
+	sub max {
+		my ($a, $b) = @_;
+		return $a > $b ? $a : $b;
+	}
+	
+	# Helper function to get min value
+	sub min {
+		my ($a, $b) = @_;
+		return $a < $b ? $a : $b;
+	}
+	
+	# Display choices and get selection
+	while (1) {
+		my $selection_map = $display_choices->();
+		
+		my $validation = "1-$num_choices";
+		if ($options{paginate}) {
+			$validation = qr/^(?:[1-9][0-9]*|[nNpP])$/;
+		}
+		
+		my $c = __prompt_for_line(
+			"Select $options{description}",
+			$validation,
+			$options{error} || "Enter a number between 1 and $num_choices" . 
+				($options{paginate} ? ", or N/P for pagination" : ""),
+			$default_choice
+		);
+
+		# Handle pagination commands
+		if ($options{paginate} && $c =~ /^[nNpP]$/i) {
+			if ($c =~ /^[nN]$/i) {
+				$current_page = ($current_page + 1) % $total_pages;
+			} else {
+				$current_page = ($current_page + $total_pages - 1) % $total_pages;
+			}
+			next;
+		}
+		
+		# Convert input to integer for consistency
+		$c = int($c);
+		
+		# Return the selected choice
+		my $selection_summary = $selection_map->{$c}{summary} // $selection_map->{$c}{label};
+		print(csprintf("\e[1ASelect %s > #C{%s}\n", $options{description}, $selection_summary));
+		return $selection_map->{$c}{value};
+	}
+}
+
+sub __process_legacy_prompt_for_choice_args {
+	my ($prompt, $old_choices, $old_default, $labels, $err_msg, $object_description) = @_;
+	
+	# Convert traditional arguments to options hash
+	my %options = (
+		header => $prompt,
+		default => $old_default,
+		error => $err_msg,
+		description => $object_description
+	);
+	
+	# Convert old choices and labels format to new choices format
+	$choices = [];
+	my $label_offset = 0;
+	for my $i (0 .. $#{$old_choices}) {
+		my $j = $i + $label_offset;
+		my $choice = {
+			value => $old_choices->[$i],
+		};
+		
+		# Handle labels if provided
+		if (ref($labels) eq 'ARRAY' && defined $labels->[$i]) {
+			my ($label, $summary) = (ref($labels->[$i]) eq 'ARRAY')
+				? @{$labels->[$i]}
+				: ($labels->[$i]);
+			if ($label =~ /^---(.*)---$/) {
+				push @$choices, {section => $1};
+				$label_offset += 1;
+				redo;
+			} elsif ($label eq '---') {
+				push @$choices, {separator => 1};
+				$label_offset += 1;
+				redo;
+			}
+			$choice->{label} = $label;
+			$choice->{summary} = $summary if defined $summary;
+		}
+		push @$choices, $choice;
+	}
+	$options{choices} = $choices;
+	return %options;
+}
 1;
 
 =head1 NAME
