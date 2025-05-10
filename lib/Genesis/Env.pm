@@ -1289,16 +1289,34 @@ sub cpi_config {
 }
 
 sub cpi_name {
+	# REFACTOR: We need a way to determine the name of the cpi for the
+	# environment.  In most cases, it will be whatever the director
+	# is using, but in some cases, it may be different.  For example,
+	# another BOSH deployment will use its own cpi name, and provide
+	# its own cpi config.  This is already implmenented, but other cases
+	# might need to be considered in the future:
+	#
+	# A currently unsupported reason for selecting a different cpi name is to
+	# support multicloud deployments, where the cpi name is used to determine
+	# which cloud is being targeted.
 	my $self = shift;
-	# TODO: Allow env file to override this?
+	return undef unless $self->cpi_enabled;
+	if ($self->has_hook('cpi-config')) {
+		# TODO: Should the kit specify if it wants its own cpi name?
 	return join('.', $self->name, $self->iaas, $self->type);
+	}
+	# Return the base cpi name of the director (now provided by exodus)
+	#my $bosh_env = $self->bosh_env;
+	#return join('.', $bosh_env->{name}, $self->iaas, $bosh_env->{dep_type}//'bosh')
+	return $self->director_exodus_lookup('default_cpi_name', undef);
 }
 
 sub cpi_credhub_base {
+	# This is the location that the cpi credhub secrets will be uploaded to when
+	# the environment is not uploading a director default CPI config.
 	my $self = shift;
-	my $base = $self->lookup('bosh-configs.cpi.credhub_base', '/cpi');
-
-
+	my $base = $self->lookup('bosh-configs.cpi.credhub_base');
+	return $base // ($self->credhub->base."genesis-entombed/");
 }
 
 # Bosh Config stuff - TODO: sort later
