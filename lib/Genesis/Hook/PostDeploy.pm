@@ -161,9 +161,9 @@ sub upload_stemcells {
 	my $bosh = $env->get_target_bosh({self => 1});
 
 	$env->notify("checking for stemcells on the BOSH director");
-	my @stemcells = $bosh->stemcells();
+	my @stemcells = values $bosh->stemcells()->%*;
 	if (@stemcells) {
-		info("[[  - >>found %s stemcells on the BOSH director", scalar @stemcells);
+		info("[[  - >>found %s on the BOSH director", count_nouns(scalar @stemcells, 'existing stemcell'));
 		return 1;
 	}
 
