@@ -354,11 +354,11 @@ sub generate_secrets {
 # regenerate_secrets - create new versions of existing secrets {{{
 sub regenerate_secrets {
 	my ($self,%opts) = @_;
-	my @update_args = ('rotate', {%opts{qw/level invalid indent/}, indent => '    '});
+	my @update_args = ($opts{action}//'rotate', {%opts{qw/level invalid indent/}, indent => '    '});
 	my ($no_prompt,$interactive) = delete(@opts{qw/no_prompt interactive/});
 	my $severity = ['','invalid','problem']->[delete($opts{invalid})||0];
 
-	$self->env->notify("rotating environment secrets...");
+	$self->env->notify($opts{notice}//"rotating environment secrets...");
 	info({pending => 1}, "[[  - >>loading existing secrets from source...");
 	my $t = time_exec(sub {
 			$self->store->fill($self->secrets);
@@ -393,8 +393,9 @@ sub regenerate_secrets {
 	if (!$no_prompt && !$interactive) {
 		my $permission = $self->notify(@update_args, 'prompt',
 			msg => sprintf(
-				"[[  - >>the following secrets under path '#C{%s}' will be rotated:\n%s",
+				"[[  - >>the following secrets under path '#C{%s}' will be %s:\n%s",
 				$self->store->base,
+				$opts{action} || 'rotated',
 				join("\n",
 					map {bullet($_, inline => 1, indent => 4)}
 					map {
@@ -642,6 +643,7 @@ sub notify {
 			'validate/warn'    => '#Y{warning!}',
 			ok                 => '#G{done.}',
 			'rotate/skipped'   => '#Y{skipped}',
+			'repair/skipped'   => '#Y{ok}',
 			'remove/skipped'   => '#Y{skipped}',
 			'remove/aborted'   => "#R{aborted} - #Yi{all remaining ${secret_label}s skipped}",
 			'add/imported'     => '#C{imported}',
@@ -680,7 +682,7 @@ sub notify {
 		$self->{__update_notifications__idx}++;
 		my $w = length($self->{__update_notifications__total});
 		my $long_warning='';
-		if ($args{label} eq "Diffie-Hellman key exchange parameters" && $action =~ /^(add|rotate)$/) {
+		if ($args{label} eq "Diffie-Hellman key exchange parameters" && $action =~ /^(add|rotate|repair)$/) {
 			$long_warning = ($level eq 'line' ? " - " : "; ")."#Yi{may take a very long time}"
 		}
 		$self->{__update_notifications__last_start} = [
