@@ -911,7 +911,7 @@ sub format_yaml_files {
 		my $kit_label   = $options{'kit-label'} || "#G{".$self->kit->id.":} ";
 		$local_label = sprintf("%*s", length($kit_label), "#C{local:} ");
 		my $env_path = $self->path();
-		for ($self->kit_files) {
+		for ($options{kit_files} ? $options{kit_files}->@* : $self->kit_files) {
 			if ($_ =~ qr/^$env_path\/(.*)$/) {
 				push @files, "$padding$local_label$1";
 			} else {
