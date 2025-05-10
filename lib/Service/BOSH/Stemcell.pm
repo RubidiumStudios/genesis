@@ -17,6 +17,7 @@ use constant {
 };
 
 # Class methods
+# FIXME: References to CPI should be replaced with IaaS
 sub available_stemcells {
 	# List available stemcells for a given OS and CPI
 	my ($class, %opts) = @_;
@@ -131,6 +132,27 @@ sub select_stemcell {
 	}
 }
 
+sub find {
+	# Find a stemcell by name and version
+	my ($class, $iaas, $os, $version, $type) = @_;
+	my $stemcells = $class->available_stemcells(iaas => $iaas, os => $os, all => 1, type => $type);
+	my ($major, $latest) = $version =~ m/^(?:(\d+)\.)?(latest)$/;
+
+	if ($latest) {
+		if (defined $major) {
+			$version = ([
+				grep { $_->{version} =~ m/^$major\./ } @$stemcells
+			]->[0]//{})->{version};
+		} else {
+			$version = ($stemcells->[0]//{})->{version};
+		}
+	}
+	return undef unless $version;
+
+	my @matches = grep { $_->{version} eq $version } @$stemcells;
+	return $matches[0];
+}
+
 # Constructor
 sub new {
   my ($class, %description) = @_;
@@ -195,8 +217,8 @@ sub upload {
 		return wantarray ? (undef, 0, undef) : 1;
 	}
 
-	my $out = $bosh->execute({interactive => 1}, @cmd);
-	return $out;
+	my ($out, $rc, $err) = $bosh->execute({interactive => ($opts{silent} ? 0 : 1)}, @cmd);
+	return wantarray ? ($out, $rc, $err) : $rc ? 0 : 1;
 }
 
 sub description {
