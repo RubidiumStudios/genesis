@@ -53,10 +53,10 @@ sub delete_env {
 		return wantarray ? (undef, 0, undef) : 1;
 	}
 
-	my $result = $self->execute( { interactive => 1},
+	my ($out, $rc) = $self->execute( { interactive => 1},
 		'delete-env', @{$opts{flags}}, $manifest
 	);
-	return $result;
+	return wantarray ? ($out, $rc, undef) : $rc ? 0 : 1;
 }
 
 # }}}
