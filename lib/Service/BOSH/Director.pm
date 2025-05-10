@@ -344,9 +344,9 @@ sub download_configs {
 
 		if ($rc || $json_err) {
 			my $msg = $err;
-			$msg = "#R{$json_err:}\n\n[36m$out[0m" if ($json_err && !$msg);
-			$msg ||= join("\n", grep {$_ !~ /^Exit code/} grep {$_ !~ /^Using environment/} @{$json->{Lines}});
-			$msg ||= "Could not understand 'BOSH config' json output:\n\n[36m$out[0m";
+			$msg = "#R{$json_err:}\n\n\e[36m$out\e[0m" if ($json_err && !$msg);
+			$msg ||= join("\n", grep {$_ !~ /^Exit code/} grep {$_ !~ /^using environment/} @{$json->{Lines}});
+			$msg ||= "Could not understand 'BOSH config' json output:\n\n\e[36m$out\e[0m";
 			$msg = "No $_->{label} found" if $msg eq 'No config';
 			bail $msg;
 		}
@@ -462,9 +462,25 @@ sub run_errand {
 # }}}
 # stemcells - list the present stemcells on the BOSH director {{{
 sub stemcells {
-	return lines($_[0]->execute(
-		q<bosh stemcells --json | jq -r '.Tables[0].Rows[] | "\(.os)@\(.version)" | sub("[^0-9]+$";"")'>,
-	));
+	my %stemcells;
+	my $stemcell_rows = read_json_from(
+		$_[0]->execute('stemcells', '--json')
+	)->{Tables}[0]{Rows};
+	for my $stemcell (@$stemcell_rows) {
+		my $id = sprintf('%s@%s', $stemcell->{os}, $stemcell->{version}) =~ s/\*$//r;
+		my $cpi = $stemcell->{cpi} // '<default>';
+		$stemcells{$id} //= {
+			id => $id,
+			name => $stemcell->{name},
+			version => $stemcell->{version} =~ s/^([0-9\.]+).*/$1/r,
+			active => $stemcell->{version} =~ m/\*/ ? 1 : 0,
+			os => $stemcell->{os},
+			cpis => []
+		};
+		push @{$stemcells{$id}{cpis}}, $cpi if $cpi;
+	}
+
+	return wantarray ? %stemcells : \%stemcells;
 }
 
 sub upload_stemcell {
