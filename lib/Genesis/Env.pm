@@ -86,7 +86,7 @@ sub load {
 		)) unless -f $env->path($env->{file});
 		last if @errors;
 
-		$env->notify("Using environment file #M{%s}", humanize_path($env->path($env->{file})))
+		$env->notify("using environment file #M{%s}", humanize_path($env->path($env->{file})))
 			if ($ENV{GENESIS_PREFIX_TYPE}//'none') eq "search";
 
 		push(@errors, "#ci{kit.subkits} has been superceeded by #ci{kit.features}")
@@ -1076,6 +1076,7 @@ sub director_exodus_lookup {
 	if (exists($self->{__director_exodus_cache}{$ext_path//''})) {
 		$bosh_exodus = $self->{__director_exodus_cache}{$ext_path//''};
 	} else {
+		# FIXME: This assumes the bosh deployment is of type 'bosh' -- we need to pass in options to override this if needed.
 		my $path = $self->bosh->exodus_path; # changed fromn ${bosh_exodus_mount}${bosh_alias}/$bosh_dep_type";
 		my $out;
 		if ($ext_path) {
@@ -1303,7 +1304,7 @@ sub cpi_name {
 	return undef unless $self->cpi_enabled;
 	if ($self->has_hook('cpi-config')) {
 		# TODO: Should the kit specify if it wants its own cpi name?
-	return join('.', $self->name, $self->iaas, $self->type);
+		return join('.', $self->name, $self->iaas, $self->type);
 	}
 	# Return the base cpi name of the director (now provided by exodus)
 	#my $bosh_env = $self->bosh_env;
@@ -2672,61 +2673,36 @@ sub vars_file {
 # Deployment
 # check - check the environment {{{
 sub check {
-	# TODO: compare to genesis#check_environment
+	# TODO: should be moved to Genesis::Commands::Env::check
 	my ($self,%opts) = @_;
 
+	# FIXME: Check CPI exists if custom cpi is in use (not create-env)
+
+	# FIXME: Check if cloud config exists if cloud-config hook exists (not create-env) 
+
 	my $ok = 1;
-	my $checks = "environmental parameters";
-	$checks = "BOSH configs and $checks" if scalar($self->configs);
+	my $env_check = $self->_check_environment_viability();
+	bail("%s", $env_check->{message}) if $env_check->{fatal};
+	$ok = 0 unless $env_check->{status} eq 'ok';
+	my $kit_files = $env_check->{kit_files};
 
-	if ($self->has_hook('check')) {
-		$self->notify("running $checks checks...");
-		$self->run_hook('check') or $ok = 0;
-	} else {
-		$self->notify("#Y{%s does not define a 'check' hook; $checks checks will be skipped.}", $self->kit->id);
+	# TODO: Detect 'fix-secrets' option and run it against invalid or missing secrets, then run the check
+	if (!exists($opts{check_secrets}) || $opts{check_secrets}) {
+		my $secrets_check = $self->_check_secrets();
+		my $msg_type = $secrets_check->{status};
+		$msg_type = '%s' if $msg_type eq 'ok';
+
+		$self->notify($msg_type => $secrets_check->{msg});
+		$ok = 0 unless $secrets_check->{status} =~ /^(ok|warning)$/;
 	}
 
-	if ($ok) {
-		my $kit_files = $self->manifest_provider->kit_files(); # pre-warm the cache
-
-		if (!exists($opts{check_secrets}) || $opts{check_secrets}) {
-			$self->notify("running secrets checks...");
-			my %check_opts=(indent => '  ', validate => ! envset("GENESIS_TESTING_CHECK_SECRETS_PRESENCE_ONLY"));
-			my ($secrets_results, $secrets_msg) = $self->check_secrets(%check_opts);
-			if ($secrets_results) {
-				if ($secrets_results->{error}) {
-					$self->notify(error => "- invalid secrets detected.\n");
-					$ok = 0;
-				} elsif ($secrets_results->{missing}) {
-					my $msg = "- missing secrets detected";
-					if ($self->is_vaultified && grep {$_->{source} eq 'manifest'} ($self->secrets_plan->secrets)) {
-						my $env_path = $ENV{GENESIS_PREFIX_TYPE} eq 'search'
-							? $ENV{GENESIS_PREFIX_SEARCH}
-							: humanize_path($self->file);
-
-						$msg .= csprintf(
-							" (you may need to run '#g{%s} #M{%s} #g{add-secrets} #Y{--import}' to import them from credhub)"
-							, humanize_bin, $env_path
-						);
-					}
-					$self->notify(error => "$msg\n");
-					$ok = 0;
-				} elsif ($secrets_results->{warn}) {
-					$self->notify(warning => "- all secrets valid, but warnings were encountered.\n");
-				}
-			}
-		}
-	}
-
-	if ($ok) {
-		if (envset("GENESIS_CHECK_YAML_ON_DEPLOY") || $opts{check_yamls}) {
-			if ($self->missing_required_configs('blueprint')) {
-				$self->notify("#Y{Required BOSH configs not provided - can't check manifest viability}");
-			} else {
-				$self->notify("inspecting YAML files used to build manifest...");
-				my @yaml_files = $self->format_yaml_files('include-kit' => 1, padding => '  ');
-				info join("\n",@yaml_files)."\n";
-			}
+	if ($opts{check_yamls}) {
+		if ($self->missing_required_configs('blueprint')) {
+			$self->notify("#Y{Required BOSH configs not provided - can't check manifest viability}");
+		} else {
+			$self->notify("inspecting YAML files used to build manifest...");
+			my @yaml_files = $self->format_yaml_files('include-kit' => 1, padding => '  ', kit_files => $kit_files);
+			info join("\n",@yaml_files)."\n";
 		}
 	}
 
@@ -2740,110 +2716,21 @@ sub check {
 	}
 
 	# Check for release overrides in the environment file.
-	if ($ok) {
-		if (!exists($opts{check_releases}) || $opts{check_releases}) {
-			$self->notify("checking for release overrides...");
-
-			my @overrides = ();
-			my @outdated = ();
-			my $env_releases = $self->manifest_provider->partial_environment(subset=>'releases')->data;
-			if (ref($env_releases) eq 'ARRAY' && scalar(@$env_releases)) {
-
-				my $kit_releases = scalar(load_yaml(scalar(run(
-					'spruce','merge',
-					'--skip-eval','--go-patch','-m',
-					'--cherry-pick', 'releases',
-					map { $_ =~ m{^/} ? $_ : $self->kit->path($_)} $self->kit_files)))
-				)->{releases} // [];
-
-				# Step through each override sorted by release name
-				for my $override (sort {$a->{name} cmp $b->{name}} @$env_releases) {
-					my ($release) = grep {$_->{name} eq $override->{name}} @$kit_releases;
-					push @overrides, [$override->{name}, $override->{version}, $release ? $release->{version} : undef]
-						if !$release || $release->{version} ne $override->{version};
-				}
-			}
-
-			if (@overrides) {
-				@outdated = grep {!new_enough($_->[1],$_->[2])} @overrides;
-				info "[[  #E{warning}>>#y{Environment overrides the following releases:}";
-				for my $override (@overrides) {
-					my ($name, $env_version, $kit_version) = @$override;
-					if ($kit_version) {
-						info(
-							"[[     %s#C{%s} #y{v%s} => #%s{v%s}",
-							bullet('', '>>', indent => 0),
-							$name, $kit_version,
-							new_enough($env_version,$kit_version) ? 'G' : 'R', $env_version
-						);
-					} else {
-						info(
-							"[[    >>#C{%s} #G{v%s} added",
-							$name, $env_version
-						);
-					}
-				}
-				if (
-					$opts{confirm_release_overrides} eq 'always' || (
-					$opts{confirm_release_overrides} eq 'outdated' && @outdated)
-				) {
-					my $confirm = prompt_for_boolean(
-						"Proceed with release version overrides? [y|n]",
-						1
-					);
-					$ok = 0 unless $confirm;
-				}
-			}
-		}
+	if (!exists($opts{check_releases}) || $opts{check_releases}) {
+		my $release_override_check = $self->check_release_overrides();
+		# Really nothing to do here, just check the status
 	}
-
 
 	# TODO: secrets check for Credhub (post manifest generation)
+if ((!exists($opts{check_stemcells}) || $opts{check_stemcells}) && !$self->use_create_env) {
+		my $stemcells_check = $self->_check_stemcells();
+		my $msg_type = $stemcells_check->{status};
+		$msg_type = '%s' if $msg_type eq 'ok';
 
-	if ($ok && (!exists($opts{check_stemcells}) || $opts{check_stemcells}) && !$self->use_create_env) {
-
-		$self->notify("running stemcell checks...");
-		my @stemcells = $self->bosh->stemcells;
-		my $required = $self->manifest_lookup('stemcells');
-		my @missing;
-		for my $stemcell_info (@$required) {
-			my ($alias, $os, $version) = @$stemcell_info{qw/alias os version/};
-			my ($wants_latest,$major_version) = $version =~ /^((?:(\d+)\.)?latest)$/;
-			if ($wants_latest) {
-				($version) = map {$_ =~ /\./ ? "$_" : "$_.0"} # Make sure Major.Minor format in case where minor is 0
-				             reverse sort by_semver
-				             map {$_->[1]}
-				             grep {!$major_version || $major_version eq int($_->[1])}
-				             grep {$_->[0] eq $os}
-				             map {[split('@', $_)]} @stemcells;
-			}
-			$version ||= ''; # in case nothing was found
-			my $found = grep {$_ eq "$os\@$version"} @stemcells;
-			info(
-				"%sStemcell #C{%s} (%s/%s) %s",
-				bullet($found ? 'good' : 'bad', '', box => 1),
-				$alias, $os, $wants_latest ? $wants_latest : "v$version",
-				$wants_latest ? (
-					$found ? "#G{will use v$version}" : '#R{ - no stemcells available!}'
-				) : (
-					$found ? '#G{present.}' : '#R{missing!}'
-				)
-			);
-			push(@missing, "$os@".($wants_latest || $version)) unless $found;
-		}
-		$ok = 0 if scalar(@missing);
-		if (!$ok) {
-			#TODO: if exodus data for bosh deployment indicates a version of the kit where
-			#      https://github.com/genesis-community/bosh-genesis-kit/issues/70 is resolved,
-			#      spit out the commands that allow the user to upload the specific missing verions:
-			#      genesis -C path/to/bosh-env-file.yml do upload-stemcells os1/version1 os2/version2 ...
-			info "\n".
-				"  Missing stemcells can be uploaded (if using BOSH kit v1.15.2 or higher):\n".
-				"  #G{genesis -C <path/to/bosh-env-file.yml> do upload-stemcells %s}",
-				join(' ',@missing);
-		}
+		$self->notify($msg_type => $stemcells_check->{msg});
+		$self->_advise_stemcell_updates($stemcells_check->{fix_data}) unless $stemcells_check->{status} eq 'ok';
+		$ok = 0 unless $stemcells_check->{status} =~ /^(ok|warning)$/;
 	}
-
 	return $ok;
 }
 
@@ -2939,19 +2826,7 @@ sub get_next_deployment_sequence_number {
 # deploy - deploy the environment {{{
 sub deploy {
 	my ($self, %opts) = @_;
-
-	unless ($self->use_create_env) {
-		my @hooks = qw(blueprint manifest check);
-		push @hooks, grep {$self->kit->has_hook($_)} qw(pre-deploy post-deploy);
-		$self->download_required_configs(@hooks);
-	}
 	my $noprompt = delete(%opts{yes});
-	my $confirm = $noprompt ? 'never' : $Genesis::RC->get(
-		'confirm_release_overrides' => $self->top->config->{'confirm_release_overrides'} // 'outdated'
-	);
-	bail(
-		"Preflight checks failed; deployment operation halted."
-	) unless $self->check('confirm_release_overrides' => $confirm);
 
   $self->deployment_cache_setup;
 
@@ -3038,6 +2913,7 @@ sub deploy {
 	$self->notify("all systems #G{ok}, initiating BOSH deploy...");
 
 	my @results;
+	my $deploy_started;
 	if ($self->use_create_env) {
 		# Todo: Show spruce diff of the manifest in non-create-env deployments too
 		# Check for differences between the last deployed manifest and the current one
@@ -3156,6 +3032,7 @@ sub deploy {
 		push @bosh_opts, "--$_" for grep { $opts{$_} } qw/recreate skip-drain/;
 
 		# TODO: Can we run this non-blocking to get a Task ID, then connect to the task ID in case we get disconnected?
+		$deploy_started = gettimeofday;
 		@results = $self->bosh->create_env(
 			$manifest_path,
 			flags => \@bosh_opts,
@@ -3177,6 +3054,7 @@ sub deploy {
 
 		debug("deploying this environment to our BOSH director");
 		# TODO: Can we run this non-blocking to get a Task ID, then connect to the task ID in case we get disconnected?
+		$deploy_started = gettimeofday;
 		@results = $self->bosh->deploy(
 			$manifest_path,
 			vars_file => $vars_path,
@@ -3184,6 +3062,11 @@ sub deploy {
 		);
 	}
 	$ok = !$results[1];
+	my $deploy_completed = gettimeofday;
+	$self->notify(
+		"BOSH deployment completed in %s",
+		pretty_duration($deploy_completed - $deploy_started, undef,undef, '','','-',1)
+	);
 
 	$self->notify("#G{Deployment successful.}") if $ok;
 
@@ -3195,6 +3078,10 @@ sub deploy {
 	}
 
 	my $manifest_store = $self->top->config->get('manifest_store','hybrid');
+	mkfile_or_fail(
+		$self->deployment_cache_path_lookup('deploy_log'), decode_utf8($results[0])
+	) unless $manifest_store eq 'repository';
+
 
 	# Don't do post-deploy stuff if just doing a dry run
 	unless ($opts{"dry-run"}) {
@@ -3227,25 +3114,28 @@ sub deploy {
 			$self->run_hook('post-deploy', rc => $results[1], data => $predeploy_data)
 		}
 		my $last_bits_of_output = join "\n", map {decolorize($_)} (split(/\r?\n/,$results[0]))[-5..-1];
+		my $msg;
 		if ($last_bits_of_output =~ /Continue\?[^\n]*: [^\n]*[nN]o?\r?\n\s*Stopped\s*Exit code 1/sm) {
-			bail "User canceled deployment when prompted to continue."
-		} elsif ($last_bits_of_output =~ /Continue\?[^\n]*: [^\n]\s*Asking for confirmation:\s*  EOF\s*Exit code 1/sm) {
-			bail "User interrupted deployment at continue prompt."
+			$msg = "User canceled deployment when prompted to continue."
+		} elsif ($last_bits_of_output =~ /Continue\?[^\n]*:\s*Asking for confirmation:\s*  EOF\s*Exit code 1/sm) {
+			$msg = "User interrupted deployment at continue prompt."
 		} elsif ($last_bits_of_output =~ /\^C$/m) {
-			bail "User interrupted deployment (Ctrl-C)"
+			$msg = "User interrupted deployment (Ctrl-C)"
 		} else {
-			bail "Deployment failed."
+			$msg = "Deployment failed."
 		}
+		$self->_create_deployment_audit_log(
+			'deploy' => 'failed',
+			reason => $msg,
+			flags => $opts{flags} || '',
+			bails_with => $msg
+		);
 	}
 
 	if ($opts{"dry-run"}) {
 		$self->notify("dry-run deployment complete; post-deployment activities will be skipped.");
 		exit 0;
 	}
-
-	mkfile_or_fail(
-		$self->deployment_cache_path_lookup('deploy_log'), decode_utf8($results[0])
-	) unless $manifest_store eq 'repository';
 
 	# track exodus data in the vault
 	$self->notify("preparing metadata for export...");
@@ -3264,10 +3154,15 @@ sub deploy {
 		$opts{'canaries'} ? "canaries=$opts{'canaries'}" : undef,
 		$opts{'max-in-flight'} ? "max-in-flight=$opts{'max-in-flight'}" : undef,
 	));
+	my $exodus_overrides = {};
+	if ($self->is_bosh_director && $self->cpi_enabled) {
+		$exodus_overrides->{default_cpi_config} = $self->cpi_name;
+	}
 	$self->update_deployment_exodus(
 		'deployed',
 		reason => $opts{reason},
-		flags => $opt_flags
+		flags => $opt_flags,
+		exodus_overrides => $exodus_overrides
 	);
 
 	# Clean up the deployment cache
@@ -3302,6 +3197,7 @@ sub deploy {
 }
 
 # }}}
+
 #	 extract_manifest_exodus - get the populated exodus data generated in the manifest {{{
 sub extract_manifest_exodus {
 	my ($self) = @_;
@@ -3345,6 +3241,27 @@ sub extract_manifest_exodus {
 sub update_deployment_exodus {
 	my ($self, $state, %deployment_details) = @_;
 
+	# FIXME: Support failed deployments and terminations
+	# - leave the current base exodus data as-is, but update the
+	#   deployment audit data with the new state and details
+
+	# TBD: The state currently captures the state of the environment, not the last
+	#      action performed on it.  This should be updated to reflect the last
+	#      action performed instead.  However, how do we capture the state of
+	#      the environment after the last action?  One way is to pass in the
+	#      $state as a hashref of {action => $result}, and then add the action
+	#      and result as fields to the audit data, leaving the state as-is unless
+	#      the result is 'success', in which case the state is updated to the action.
+	#
+	#      When reading the previous audit logs that don't have action and result,
+	#      we can assume the action is the listed state, and the result is
+	#      'success'.
+	#
+	#      Should this be refactored to separate out as _create_deployment_audit_log? (Y)
+	#
+	#      UPDATE: This may hae been implemented, but need to check it against all
+	#              the expectations above
+
 	# Authenticate to the vault
 	$self->vault->authenticate unless $self->vault->authenticated;
 
@@ -3362,6 +3279,13 @@ sub update_deployment_exodus {
 	if ($sequence > 1 && $self->vault->has($self->exodus_base)) {
 		push @exodus_cmds, ('rm', $self->exodus_base, "-f");
 	}
+
+	my $notify = !delete($deployment_details{quiet});
+	my $started = gettimeofday;
+	info({pending => 1},
+		"[[  - >>storing %s metadata in exodus...",
+		$state eq 'deployed' ? 'deployment' : 'termination'
+	) if $notify;
 
 	if ($state eq 'deployed') {
 		# if the state is 'deployed', generate the exodus data from the manifest
@@ -3405,69 +3329,52 @@ sub update_deployment_exodus {
 		);
 	}
 
-	# If the manifest store is not 'repository', build the deployment audit data
-	if ($self->manifest_store ne 'repository') {
-		my $deployment_time = $timestamp =~ s/\+.*$//r =~ s/[^0-9]//gr; # YYYYMMDDHHMMSS
-		my $artifact_file = $self->workpath("exodus-$deployment_time.tgz.b64");
-		if ($state eq 'deployed') {
-			$self->_build_deployment_artifacts(
-				$artifact_file,
-				log      => $self->deployment_cache_path_lookup('deploy_log'),
-				manifest => $self->deployment_cache_path_lookup('manifest'),
-				unpruned => $self->deployment_cache_path_lookup('unpruned_manifest'),
-				vars     => $self->deployment_cache_path_lookup('vars'),
-				state    => $self->deployment_cache_path_lookup('state'),
-				store    => $self->deployment_cache_path_lookup('store'),
-				secrets  => [keys($self->manifest_provider->vault_paths->%*)],
-				# TODO: add the dev kit, the ops directory and the env and its ancestors.
-			);
-			$deployment_details{manifest} = {
-				type => $self->manifest_provider->deployment->type,
-				sha2 => digest_file_hex(
-					$self->deployment_cache_path_lookup('manifest'), 'SHA-256'
-				),
-			};
-		}
-
-		my $deployment_data = $self->_build_deployment_audit_data(
-			$state, $sequence, $timestamp, 'flatten',
-			%deployment_details
-		);
-
-		# Add the deployment audit data to the exodus commands
-		push(@exodus_cmds, '--') if @exodus_cmds && $exodus_cmds[-1] ne '--';
-		push @exodus_cmds, (
-			'set', $self->exodus_base."/deployments/$deployment_time",
-			'__flattened__=1',
-			map {
-				"$_=$deployment_data->{$_}"
-			} keys %$deployment_data
-		);
-		push(
-			@exodus_cmds, "artifacts\@$artifact_file"
-		) if -f $artifact_file;
-	}
-
 	# Set the exodus data in the vault
 	debug("setting exodus data in the Vault, for use later by other deployments");
-	my $failure_msg = sprintf(
-		"#R{Failed to export %s metadata.}\n".
-		"Environment was still successfully %s, but metadata used by addons and ".
-		"other kits is outdated.\n%s",
-		$self->{name}, $state,
-		$state eq 'deployed'
-			? "\nThis may be resolved by deploying again, or it may be a permissions issue while trying to ".
-			  "write to vault path '".$self->exodus_base."'\n"
-			: '\nThis may be resolved by terminating again, or it may be a permissions issue while trying to '.
-			  "write to vault path '".$self->exodus_base."'\n"
-	);
-	$self->vault->authenticate->query(
-		{ redact => 1, onfailure => $failure_msg},
-		@exodus_cmds
-	);
+	my @errors = ();
+	eval {
+		$self->vault->authenticate;
+	};
+	my $err = $@;
+	if ($err) {
+		push @errors, "Failed to authenticate to vault: $err";
+	} else {
+		my ($out, $rc, $err) = $self->vault->query({ redact => 1}, @exodus_cmds);
+		push @errors, "Failed to set exodus data in vault: $err" if $rc;
+
+		# If the manifest store is not 'repository', build the deployment audit data
+		if ($self->manifest_store ne 'repository') {
+			my $action = $state eq 'deployed' ? 'deploy' : 'terminate';
+			eval {
+				$self->_create_deployment_audit_log(
+					$action => 'success',
+					%deployment_details,
+					sequence => $sequence,
+				);
+			};
+			push @errors, fix_wrap($@) if ($@);
+		}
+	}
+	if (@errors) {
+		my $error_msg = join("\n", @errors);
+		bail(
+			"#R{Failed to export %s metadata.}\n\nError(s):%s\n\n".
+			"Environment was still successfully %s, but metadata used by addons and ".
+			"other kits is outdated.\n%s",
+			$self->{name},
+			join("\n[[  - >>", '', @errors),
+			$state,
+			$state eq 'deployed'
+				? "\nThis may be resolved by deploying again, or it may be a permissions issue while trying to ".
+					"write to vault path '".$self->exodus_base."'\n"
+				: '\nThis may be resolved by terminating again, or it may be a permissions issue while trying to '.
+					"write to vault path '".$self->exodus_base."'\n"
+		);
+	}
 
 	# Reset the last deployed manifest
 	$self->_reset_last_deployed_manifest;
+	info(" #G{done.}%s", pretty_duration(gettimeofday - $started)) if $notify;
 	return 1;
 }
 
@@ -3487,6 +3394,13 @@ sub terminate {
 	my $reason =     delete($opts{reason}) // '<unspecified>';
 	my $term_flags = delete($opts{flags})  // '<unspecified>';
 	my %clean_up =   delete(%opts{qw/resources secrets user_secrets networking credhub/});
+
+	my $start_time = Time::Piece->new->strftime(EXODUS_TIME_FORMAT);
+	my %audit_data = (
+		'started' => $start_time,
+		'flags'   => $term_flags,
+		'reason'  => $reason,
+	);
 
 	# TODO: Do we want to support a full reset where all exodus data and secrets are removed?
 	#my $full_reset = delete($opts{'deployment-history'})//0;
@@ -3535,13 +3449,20 @@ sub terminate {
 		$ok = $self->run_hook('terminate', %opts, env => $self, mode => 'before');
 		return unless $ok;
 	} elsif ($self->is_bosh_director) {
-		bail(
-			"Cowardly refusing to terminate a BOSH director environment without a ".
-			"termination hook.  Please upgrade your kit to a version that supports ".
-			"termination hooks, or use --force to terminate anyway (this will ".
-			"likely leave orphaned resources on your IaaS unless you manually ".
-			"cleaned it up first)."
-		) unless $force;
+		$self->_create_deployment_audit_log(
+			'terminate' => 'failed',
+			reason => "Aborted due to unsupported BOSH director kit (no terminate hook) - no --force specified",
+			started => $start_time,
+			flags => $opts{flags} || '',
+			bails_with => [
+				"Cowardly refusing to terminate a BOSH director environment without a ".
+				"termination hook.  Please upgrade your kit to a version that supports ".
+				"termination hooks, or use --force to terminate anyway (this will ".
+				"likely leave orphaned resources on your IaaS unless you manually ".
+				"cleaned it up first)."
+			]
+		 ) unless $force;
+
 		warning(
 			"\nTerminating a BOSH director environment without a termination hook.  ".
 			"This will likely leave orphaned resources on your IaaS unless you ".
@@ -3554,6 +3475,7 @@ sub terminate {
 		$self->use_create_env ? 'create-env' : 'deployed',
 		$dryrun ? ' #i{(dry-run)}' : ''
 	);
+	my $results = {};
 	if ($self->use_create_env) {
 		$self->notify("preparing to delete a create-env environment...");
 		# Gather all the files needed to send to delete-env
@@ -3603,7 +3525,7 @@ sub terminate {
 			}
 		}
 		$self->notify("deleting create-env environment...");
-		my $rc = $self->bosh->delete_env(
+		my ($out, $rc) = $self->bosh->delete_env(
 			$self->deployment_cache_path_lookup('manifest'),
 			%opts,
 			vars_file => $self->deployment_cache_path_lookup('vars'),
@@ -3612,9 +3534,13 @@ sub terminate {
 		);
 		$self->deployment_cache_cleanup;
 		$ok = ($rc == 0);
+		$results->{delete_env} = $out;
 	} else {
 		$self->notify("deleting deployment...");
-		$ok = $self->bosh->delete_deployment(%opts);
+		my ($out, $rc) = $self->bosh->delete_deployment(%opts);
+		$ok = ($rc == 0);
+		$results->{delete_deployment} = $out;
+		$results->{delete_deployment_rc} = $rc;
 		if ($ok) {
 			if ($clean_up{resources} ) {
 				$self->notify("cleaning up any unused resources...");
@@ -3636,12 +3562,21 @@ sub terminate {
 			$self->kit->id,
 			$dryrun ? ' (dry-run)' : '',
 		);
-		my $hook_ok = $self->run_hook(
+		$opts{results} = $results;
+		my $hook_results = $self->run_hook(
 			'terminate', %opts, env => $self, mode => $ok ? 'after' : 'failed'
 		);
-		$ok = 0 unless $hook_ok;
+		# FIXME: The results of the hook should be analyzed instead of just assuming its a boolean.
+		$results->{hook} = $hook_results;
+		$ok = 0 unless (ref($hook_results) eq 'HASH' ? $hook_results->{success} : $hook_results);
 	}
-	return unless $ok;
+
+	return $self->_create_deployment_audit_log(
+		'terminate' => 'failed',
+		%audit_data,
+		reason => sub {
+		}->($self,$reason),
+	) unless $ok;
 
 	# Determine existing claims, configs and secrets
 	my $start_cleanup = gettimeofday();
@@ -3820,7 +3755,7 @@ sub terminate {
 			reason  => $reason,
 			flags   => $term_flags,
 			success => ['failure','success','cleanup-failed']->[$ok//0],
-			started => $start->strftime(EXODUS_TIME_FORMAT),
+			started => Time::Piece->new($start)->strftime(EXODUS_TIME_FORMAT),
 		);
 	} else {
 		# No exodus deployment audit data to update, so just remove the base exodus data
@@ -3917,7 +3852,7 @@ sub rotate_secrets {
 		"Kits with secrets hook are no longer supported. Check for an upgraded version."
 	) if ($self->has_hook('secrets'));
 
-	return $plan->regenerate_secrets(
+	my %regen_opts = (
 		regen_x509_keys => $opts{'regen-x509-keys'},
 		update_subject  => $opts{'update-subjects'},
 		no_prompt       => $opts{'no-prompt'},
@@ -3925,6 +3860,10 @@ sub rotate_secrets {
 		interactive     => $opts{interactive},
 		level           => $opts{verbose}?'full':'line'
 	);
+	$regen_opts{notice} = $opts{notice} if $opts{notice};
+	$regen_opts{action} = $opts{action} if $opts{action};
+
+	return $plan->regenerate_secrets(%regen_opts);
 }
 
 # }}}
@@ -4046,6 +3985,12 @@ sub notify {
 	) if grep {!defined} (@_);
 	$msg = sprintf($msg, @_) if scalar(@_);
 
+	# Check for custom prefix
+	if (ref($self->{notify_prefix_overrides}) eq 'HASH' && defined $self->{notify_prefix_overrides}{$msg}) {
+		$prefix = delete($self->{notify_prefix_overrides}{$msg});
+		return $self->can($target)->($opts, "%s%s", $prefix, $msg);
+	}
+
 	$self->can($target)->($opts, "\n%s#M{%s}/#c{%s}%s %s", $prefix, $self->name, $self->type, $postfix, $msg);
 }
 
@@ -4149,6 +4094,712 @@ sub bosh_logs {
 # }}}
 
 ### Private Instance Methods {{{
+
+sub _check_environment_viability {
+	my ($self) = @_;
+
+	my $checks = "environmental parameters";
+	$checks = "BOSH configs and $checks" if scalar($self->configs);
+	my $ok = 1;
+
+	if ($self->has_hook('check')) {
+		$self->notify("running %s checks...", $checks);
+		$self->run_hook('check') or $ok = 0;
+	} else {
+		$self->notify("#Y{%s does not define a 'check' hook; $checks checks will be skipped.}", $self->kit->id);
+	}
+
+	my $kit_files = eval {
+		$self->manifest_provider->kit_files(); # pre-warm the cache
+	};
+	if ($@) {
+		info("[[  >>manifest blueprint [#R{FAILED}]");
+		return {
+			state => 'error',
+			fatal => 1,
+			msg   => "Kit files could not be generated -- cannot continue with further checks."
+		};
+	}
+	info("[[  >>manifest blueprint [#G{OK}]");
+	return {
+		state     => $ok ? 'ok' : 'error',
+		msg       => $ok ? "environmental is viable" : "environmental is not viable",
+		kit_files => $kit_files,
+	}
+}
+
+sub _check_cpi_config {
+	# Check that the cpi config is available and unchanged on the director.
+	# Returns a hash:
+	#  state => 'ok' | 'changed' | 'missing'
+	#  fatal => 1 | 0
+	#  fix_data => {
+	#    cpi_config => <yaml config string>,
+	#    name => <name of the config>,
+	#    director => <bosh director>
+	#  }
+	#  msg => <message to display>
+	my ($self) = @_;
+
+	return {
+		state => 'ok', msg => "using create-env, no CPI config needed."
+	} if $self->use_create_env; # No cpi check needed
+
+	my $cpi_name = $self->cpi_name;
+	my $director = $self->bosh;
+
+	# FIXME: Need to deal with the "default" config that doesn't show up in the
+	# list of configs.  This is the default config that the director uses if
+	# it doesn't explicitly have a cpi config.
+	# FIXME: inform user that we're checking the cpi config on the director
+	my $current_config = $director->get_config('cpi', $cpi_name);
+	my $has_hook = $self->has_hook('cpi-config');
+	unless ($current_config) {
+		return $has_hook ? {
+			state => 'missing',
+			msg   => sprintf("missing CPI config"),
+			fix_data => { name => $cpi_name, director => $director },
+		} : {
+			state => 'missing',
+			fatal => 1,
+			msg   => sprintf("missing CPI config - kit does not provide a cpi-config hook"),
+		};
+	}
+
+	return {
+		state => 'ok',
+		msg   => sprintf("CPI config #m{%s} is provided by the BOSH director #M{%s}.", $cpi_name, $director->alias),
+	} unless $has_hook;
+
+	# Check if the config is up-to-date
+	my $cpi_config = $self->run_hook(
+		'cpi-config',
+		credhub_prefix => $self->cpi_credhub_base
+	);
+	info("[[  - >>CPI config synthesized.");
+
+	my ($diff,$is_diff) = spruce_diff(
+		{content => $current_config,        label => 'current'},
+		{content => $cpi_config->{content}, label => 'new'}
+	);
+
+	if ($is_diff) {
+		info(
+			"[[  - >>required CPI config #m{%s} is different from the one currently on the BOSH director:\n\n%s",
+			$cpi_name, $diff
+		);
+		return {
+			state    => 'changed',
+			fix_data => {
+				cpi_config => $cpi_config,
+				name       => $cpi_name,
+				director   => $director,
+			},
+			msg      => sprintf("CPI config #m{%s} is different from the one currently on the BOSH director.", $cpi_name),
+		};
+	} else {
+		info("[[  - >>current CPI config #m{%s} is up-to-date.", $cpi_name);
+	}
+
+	# Check if any entombed secrets are empty or missing
+	my @secrets = sort keys %{$cpi_config->{credhub_secrets}};
+
+	my @empty = grep {
+		($cpi_config->{credhub_secrets}{$_}//'') eq ''
+	} @secrets;
+
+	if (@empty) {
+		my $credhub_base = $self->credhub->base;
+		info(
+			"[[  - >>%d missing secret values:\n%s",
+			scalar(@empty),
+			join("\n", map {sprintf("[[  %s>>#R{%s}",bullet(''), $_ =~ s#.*--(.*)--.*#$1#r)} @empty)
+		);
+		return {
+			state    => 'error',
+			fatal    => 1,
+			msg      => sprintf(
+				"CPI config #m{%s} references secrets that have no value!%s",
+				$cpi_name,
+				$self->is_ocfp ? "\n\n#yi{This may be due to missing value in the OCFP config.}" : ''
+			),
+		};
+	}
+
+	my @missing_secrets = grep {
+		!$self->credhub->has($_)
+	} @secrets;
+
+	if (@missing_secrets) {
+		my $credhub_base = $self->credhub->base;
+		info(
+			"[[  - >>missing %d entombed secrets under #c{%s}:\n%s",
+			scalar(@missing_secrets), $self->credhub->base,
+			join("\n", map {sprintf("[[  %s>>#R{%s}",bullet(''), $_ =~ s#$credhub_base##r)} @missing_secrets)
+		);
+		return {
+			state    => 'missing secrets',
+			fix_data => {
+				cpi_config => $cpi_config,
+				name       => $cpi_name,
+				director   => $director,
+			},
+			msg      => sprintf("CPI config #m{%s} is missing %d entombed secrets.", $cpi_name, scalar(@missing_secrets)),
+		};
+	}	
+
+	return {
+		state => 'ok',
+		msg  => sprintf("CPI config is up-to-date"),
+	};
+}
+
+# }}}
+# _fix_cpi_config - fix the cpi config on the director {{{
+sub _fix_cpi_config {
+	my ($self, $state, $fix_data, %opts) = @_;
+
+	# If no fix_data is provided, generate it using the cpi-config hook
+	unless ($fix_data) {
+		bail("Cannot fix CPI config without a valid cpi-config hook")
+			unless $self->has_hook('cpi-config');
+		$fix_data = {};
+	}
+
+	my $cpi_config = $fix_data->{cpi_config} // scalar($self->run_hook(
+			'cpi-config',
+			credhub_prefix => $self->cpi_credhub_base
+		));
+	my $cpi_name   = $fix_data->{name} // $self->cpi_name;
+	my $director   = $fix_data->{director} // $self->bosh;
+	my $indent     = $opts{indent} // "  - ";
+	my $noprompt   = $opts{noprompt} // $ENV{BOSH_NON_INTERACTIVE} // 0;
+
+	if ($state eq 'ok') {
+		info("[[  - >>#G{CPI config is already up-to-date}");
+		return {
+			result => 'ok',
+			msg    => sprintf("CPI config is up-to-date"),
+		};
+	}
+
+	# Upload the CPI config to the BOSH director
+	my $start = gettimeofday();
+	if ($state ne 'missing secrets') {
+		if (in_controlling_terminal && !$noprompt) {
+			prompt_for_boolean(
+				"Upload the new CPI config to the BOSH director ('no' will cancel ".$Genesis::Commands::COMMAND.")? [y|n]",
+				1
+			) or bail "Aborted by user!";
+		}
+
+		info({pending => 1}, # ??? $noprompt},
+			"[[%s>>uploading CPI config #m{%s} to BOSH director #M{%s}...",
+			$indent, $cpi_name, $director->alias
+		);
+		my ($out, $rc, $err) = $director->upload_config(
+			$cpi_config->{content}, 'cpi', $cpi_name, !$noprompt
+		);
+		if ($rc) {
+			info("#R{failed}".pretty_duration(gettimeofday() - $start));
+			return {
+				result => 'error',
+				msg    => sprintf(
+					"failed to upload CPI config: %s",
+					$err ? $err : $out
+				),
+			}
+		}
+		info("#G{done}".pretty_duration(gettimeofday() - $start));
+	}
+
+	# Generate any missing CredHub secrets
+	if ($cpi_config->{credhub_secrets} && ref($cpi_config->{credhub_secrets}) eq 'HASH') {
+		my $count = scalar keys %{$cpi_config->{credhub_secrets}};
+		info(
+			"[[%s>>generating %d missing CredHub secrets used by CPI config #m{%s}...",
+			$indent, $count, $cpi_name
+		) if $count;
+		my $credhub = $self->credhub;
+		my %existing_secrets = eval {map {$_, 1} $credhub->paths($self->cpi_credhub_base)};
+		my $idx = 0;
+		my $width = length($count);
+		my $prefix = $indent =~ s/./ /gr;
+
+		my $failed = 0;
+		for my $secret (sort keys %{$cpi_config->{credhub_secrets}}) {
+			my ($name,$sha1) = $secret =~ m{/[^/]+--([^/]+)--([^/]+)$};
+			info({pending => 1},
+				"[[%s[%*s] >>#m{%s} #Ki{(sha: %s)}...",
+				$prefix, $width, ++$idx, $name, $sha1
+			);
+
+			# Only upload the secret if it doesn't exist
+			if ($existing_secrets{$secret} || $credhub->has($secret)) {
+				info("#B{exists}");
+				next;
+			}
+
+			my $value = $cpi_config->{credhub_secrets}{$secret};
+			if (!defined($value)) {
+				info("#R{invalid value}");
+				$failed = 1;
+				next;
+			}
+
+			my ($out, $err) = $credhub->set($secret, $value);
+			if ($err) {
+				info("#R{failed}");
+				$failed = 1;
+			} else {
+				info("created");
+			}
+		}
+
+		if ($failed) {
+			info("[[  - >>#R{failed to create some secrets}");
+			return {
+				result => 'error',
+				msg    => sprintf("failed to create some secrets"),
+			};
+		}
+	}
+
+	return {
+		result => 'ok',
+		msg    => sprintf("successfully uploaded CPI config"),
+	};
+}
+
+# _check_cloud_config - check the cloud config {{{
+sub _check_cloud_config {
+	my ($self) = @_;
+	bug(
+		"Cloud config check is not implemented yet"
+	);
+}
+
+# }}}
+# _fix_cloud_config - fix the cloud config on the director {{{
+sub _fix_cloud_config {
+	my ($self, $fix_data, %opts) = @_;
+	bug(
+		"Cloud config fix is not implemented yet"
+	);
+}
+
+# }}}
+# _check_secrets - check the secrets {{{
+sub _check_secrets {
+	my ($self) = @_;
+
+	my %check_opts=(indent => '  ', validate => ! envset("GENESIS_TESTING_CHECK_SECRETS_PRESENCE_ONLY"));
+
+	# FIXME: Revisit the _check_secrets(this ui wrapper) vs check_secrets (thing that
+	# actually does the work) - this is a bit confusing and thus error-prone.
+	my ($secrets_results, $secrets_msg) = $self->check_secrets(%check_opts);
+	if ($secrets_results) {
+		return {
+			state => 'error',
+			msg   => '#R{invalid secrets detected}',
+		}	if ($secrets_results->{error});
+
+		if ($secrets_results->{missing}) {
+			my $msg = "#{missing secrets detected}";
+			if ($self->is_vaultified && grep {$_->{source} eq 'manifest'} ($self->secrets_plan->secrets)) {
+				$msg .= csprintf(
+					" (you may need to run '#g{%s add-secrets} #Y{--import}' to import them from credhub)",
+					$self->get_call_path_with_env
+				);
+			}
+			return {
+				state => 'error',
+				msg   => $msg,
+			};
+		}
+		return {
+			state => 'warning',
+			msg   => "#y{all secrets valid, but warnings were encountered.}",
+		}	if ($secrets_results->{warn});
+		return {
+			state => 'ok',	
+			msg   => "#G{all secrets valid}",
+		}
+	}
+}
+# }}}
+# _fix_secrets - fix the secrets {{{
+sub _fix_secrets {
+	my ($self, %opts) = @_;
+	my $ok = 1;
+
+	# FIXME: Find a way to check if secrets are in the manifest (ie credhub
+	# secrets), and import them if they're not in the vault but are in credhub
+	# (does import skip secrets already in vault?)
+	if ($self->is_vaultified && grep {$_->{source} eq 'manifest'} ($self->secrets_plan->secrets)) {
+		bail(
+			"Cannot safely fix secrets in vaultified environment with manifest ".
+			"secrets, as they may already exist in credhub.  Please use the ".
+			"'#g{%s add-secrets} #Y{--import}' to import them from ".
+			"credhub manually, then add-secrets again without the #Y{--import} ".
+			"option to add any missing secrets not found in credhub.",
+			$self->get_call_path_with_env
+		);
+	}
+
+	my ($rotate_results, $rotate_msg) = $self->rotate_secrets(
+		notice      => "checking secrets, and repairing if necessary...",
+		action      => 'repair',
+		'no-prompt' => $opts{noprompt},
+		invalid     => 1,
+		interactive => 0,
+		level       => 'line', # Maybe support full in 'verbose' mode (which is not yet implemented)?
+	);
+	if (ref($rotate_results) eq 'HASH') {
+		return {
+			result => 'ok',
+			msg    => "#G{no invalid secrets detected.}",
+		} if $rotate_results->{empty};
+		return {
+			result => 'error',
+			fatal  => 1,
+			msg    => "#r{could not successfully rotate secrets.}"
+		} if $rotate_results->{error};
+		return {
+			result => 'abort',
+			fatal  => 1,
+			msg    => "#R{user aborted secret rotation.}"
+		} if $rotate_results->{abort};
+		return {
+			result => 'warn',
+			msg    => "#y{all secrets valid, but warnings were encountered.}"
+		} if $rotate_results->{warn};
+		return {
+			result => 'ok',
+			msg    => "#G{secrets successfully rotated.}"
+		}
+	}
+	
+	require Data::Dumper;
+	bug(
+		"#R{invalid return from rotate_secrets: %s}",
+		Data::Dumper::Dumper($rotate_results)
+	);
+}
+
+# }}}
+# _check_release_overrides - check the release overrides {{{
+sub _check_release_overrides {
+	my ($self) = @_;
+	$self->notify("checking for release overrides...");
+
+	my @overrides = ();
+	my @outdated = ();
+	my $env_releases = $self->manifest_provider->partial_environment(subset=>'releases')->data;
+	if (ref($env_releases) eq 'ARRAY' && scalar(@$env_releases)) {
+
+		my $kit_releases = scalar(load_yaml(scalar(run(
+			'spruce','merge',
+			'--skip-eval','--go-patch','-m',
+			'--cherry-pick', 'releases',
+			map { $_ =~ m{^/} ? $_ : $self->kit->path($_)} $self->kit_files)))
+		)->{releases} // [];
+
+		# Step through each override sorted by release name
+		for my $override (sort {$a->{name} cmp $b->{name}} @$env_releases) {
+			my ($release) = grep {$_->{name} eq $override->{name}} @$kit_releases;
+			push @overrides, [$override->{name}, $override->{version}, $release ? $release->{version} : undef]
+				if !$release || $release->{version} ne $override->{version};
+		}
+	}
+	if (!@overrides) {
+		info("[[  - >>#G{No release overrides found}");
+		return {
+			state => 'ok',
+			msg   => "no release overrides found",
+		}
+	}
+
+	info "[[  #E{warning}>>#y{environment overrides the following releases:}";
+	for my $override (@overrides) {
+		my ($name, $env_version, $kit_version) = @$override;
+		if ($kit_version) {
+			info(
+				"[[     %s#C{%s} #y{v%s} => #%s{v%s}",
+				bullet('', '>>', indent => 0),
+				$name, $kit_version,
+				new_enough($env_version,$kit_version) ? 'G' : 'R', $env_version
+			);
+		} else {
+			info(
+				"[[    >>#C{%s} #G{v%s} added (not found in kit)",
+				$name, $env_version
+			);
+		}
+	}
+	@outdated = grep {!new_enough($_->[1],$_->[2])} @overrides;
+	return {
+		state => @outdated ? 'outdated' : 'overridden',
+		msg   => sprintf(
+			"environment overrides %d releases, %d of which are outdated",
+			scalar(@overrides), scalar(@outdated)
+		),
+	};
+}
+
+# }}}
+# _check_stemcells - check the stemcells {{{
+sub _check_stemcells {
+	my ($self) = @_;
+
+	if ($self->use_create_env) {
+		$self->notify("#Y{create-env environment detected - skipping stemcell checks}"); # TODO: Move this out to caller for customization
+		return {
+			state => 'ok',
+			msg   => "using create-env, no stemcell needed."
+		};
+	}
+
+	$self->notify("running stemcell checks...");
+	my @stemcell_status = $self->_get_stemcell_status(1);
+
+	my (@missing, @alt) = ();
+	for my $stemcell_info (@stemcell_status) {
+		if ($stemcell_info->{found}) {
+			my $wants_latest = $stemcell_info->{latest};
+			my %details = $stemcell_info->{found}->%*;
+			info(
+				"[[%s>>Stemcell #C{%s} (%s/%s) %s%s",
+				bullet('good', '', box => 1),
+				$stemcell_info->{alias}, $details{os},
+				$stemcell_info->{search_term},
+				$wants_latest ? "#G{will use v$details{version}}" : '#G{present}',
+				$self->cpi_enabled ? " for CPI #C{".$stemcell_info->{cpi}."}" : "",
+			);
+
+			# Warn if alternative stemcell is found
+			if ($stemcell_info->{alt}) {
+				info(
+					"[[       #Y{Warning:} >>#C{v%s} would be used, but does not support the #m{%s} CPI",
+					$stemcell_info->{version},
+					$stemcell_info->{cpi} eq '<default>' ? 'default' : $stemcell_info->{cpi}
+				);
+				push @alt, $stemcell_info;
+			}
+			next;
+		}
+
+		# Deal with missing stemcells
+		info(
+			"[[%s>>Stemcell #C{%s} (%s/%s) %s%s#R{!}",
+			bullet('bad', '', box => 1),
+			$stemcell_info->{alias}, $stemcell_info->{os},
+			$stemcell_info->{search_term},
+			$stemcell_info->{latest} ? "#R{- no matching stemcells available}" : '#R{missing}',
+			$self->cpi_enabled ? "#R{ for CPI }#ri{".$stemcell_info->{cpi}."}":"",
+		);
+		push(@missing, $stemcell_info);
+	}
+
+	if (@missing) {
+		# Some stemcells are missing, while others have preferred alternatives
+		my @unknown = grep {!defined($_->{alt})} @missing;
+		return {
+			state => 'error',
+			fatal => 1,
+			msg   => "required stemcells source unknown - requires manual upload:\n- #R{".join("\n- ", map {$_->{os}."@".$_->{search_term}} @unknown)."}",
+		} if @unknown;
+		
+		return {
+			state => 'error',
+			msg   => "missing required or preferred stemcells",
+			fix_data => {
+				missing => \@missing,
+				alt     => \@alt,
+			}
+		}
+	} elsif (@alt) {
+		# No stemcells missing, but there are preferred alternatives
+		return {
+			state => 'degraded',
+			msg   => "missing preferred stemcells",
+			fix_data => {
+				missing => \@missing,
+				alt     => \@alt,
+			},
+		}
+	} else {
+		return {
+			state => 'ok',
+			msg   => "all required stemcells are present and curent",
+		}
+	}
+}
+
+# }}}
+# _fix_stemcells - fix the stemcells on the director {{{
+sub _fix_stemcells {
+	my ($self, $fix_data, %opts) = @_;
+
+	unless ($fix_data) {
+		bail("Cannot fix stemcells without a valid fix_data");
+		# Todo: should this just call _check_stemcells() to get the fix_data if missing?
+	}
+
+	my ($missing, $alt) = $fix_data->@{qw/missing alt/};
+	my @unknown = grep {!defined($_->{alt})} (@$missing, @$alt);
+	bail (
+		"Required stemcells source unknown - requires manual upload:\n- #R{%s}",
+		join("\n- ", map {$_->{os}."@".$_->{search_term}} @unknown)
+	) if @unknown;
+
+	my @downloadable = grep {$_->{alt}} (@$missing, @$alt);
+	my $noprompt = $opts{noprompt} // $ENV{BOSH_NON_INTERACTIVE} // 0;
+
+	return {
+		result => 'ok',
+		msg    => "all required stemcells are present and current"
+	} unless @downloadable;
+	my $type = 'missing and preferred';
+
+	if (!$noprompt) {
+		bail(
+			"\nCannot prompt for confirmation to upload stemcells outside a controlling terminal.  ".
+			"Use #Y{-y|--yes} option to provide confirmation to bypass this limitation outside a controlling terminal."
+		) unless in_controlling_terminal;
+
+		my $selection = new_prompt_for_choice(
+			header => "Upload all missing and preferred stemcells, or just the required ones?",
+			choices => [
+				{value => 'all',      label => "Upload all missing and preferred stemcells"},
+				{value => 'required', label => "Upload only the required stemcells"},
+				{separator => 1},
+				{value => 'abort',    label => "Abort and do not upload any stemcells"},
+			],
+			default => 'all',
+		);
+
+		bail "Aborted by user!" if $selection eq 'abort';
+		$type = 'required' if $selection eq 'required';
+		@downloadable = grep {
+			$selection eq 'all' || !$_->{found}
+		} @downloadable;
+	}
+
+	if ($type eq 'required' && @downloadable == 0) {
+		$self->notify("#G{No required stemcells to upload}");
+		return {
+			result => 'ok',
+			msg    => "no missing required stemcells",
+		};
+	}
+
+	my @failed_required = ();
+	$self->notify("uploading $type stemcells:");
+	my %uploaded = ();
+	my $indent = $opts{indent} // 4;;
+	for my $stemcell (uniq(@downloadable)) {
+		my $alias = $stemcell->{alias};
+		my $id = $stemcell->{os}.'@'.$stemcell->{alt}{version};
+		my $required = $stemcell->{found} ? 0 : 1;
+		info({pending => 1},
+			"[[%*s>>%s#C{%s} stemcell (%s/%s) ...",
+			$indent,
+			bullet(''),
+			$type eq 'required' ? '': $required ? "#R{required} " : "#B{preferred} ",
+			$alias, $stemcell->{os},
+			$stemcell->{alt}{version}
+		);
+
+		if ($uploaded{$id}) {
+			# This really shouldn't happen, but just in case
+			info("#y{already uploaded!}");
+		} else {
+			local $ENV{BOSH_NON_INTERACTIVE} = 1;
+			my $upload_start = gettimeofday();
+			my $bosh = $self->get_target_bosh({parent => 1});
+			my ($out, $rc, $err) = $stemcell->{alt}->upload(
+				$bosh, fix => 1, silent => 1
+			);
+			if ($rc) {
+				info("#R{failed}".pretty_duration(gettimeofday - $upload_start));
+				error(
+					"\nFailed to upload stemcell: #r{%s}\n",
+					join("\n", $out, $err)
+				);
+				push @failed_required, $stemcell;
+
+				bail(
+					"Cannot continue without required stemcells - aborting!\n".
+					"Please upload the stemcells manually and re-run the command.",
+				) if $required;
+			} else {
+				info("#G{done}".pretty_duration(gettimeofday - $upload_start));
+				$uploaded{$id} = 1;
+			}
+		}
+	}
+	return {
+		result => 'warning',
+		msg    => sprintf(
+			"failed to upload %d preferred stemcells",
+			scalar(@failed_required)
+		),
+		failed => \@failed_required,
+	} if @failed_required;
+
+	return {
+		result => 'ok',
+		msg    => sprintf(
+			"successfully uploaded %d stemcells",
+			scalar(@downloadable)
+		),
+	};
+}
+
+sub _advise_stemcell_updates {
+	my ($self, $fix_data) = @_;
+	unless ($fix_data) {
+		bail("Cannot fix stemcells without a valid fix_data");
+		# Todo: should this just call _check_stemcells() to get the fix_data if missing?
+	}
+
+	my ($missing, $alt) = $fix_data->@{qw/missing alt/};
+	my @downloadable = grep {$_->{alt}} (@$missing, @$alt);
+
+	my $msg = "\n#Y{The following stemcells are available for download:}";
+	my @stemcell_ids = ();
+	for my $stemcell_info (@downloadable) {
+		my $required = $stemcell_info->{found} ? 0 : 1;
+		$msg .= sprintf(
+			"\n[[%s>>%s#C{%s} stemcell (%s/%s)",
+			bullet(''),
+			$required ? "#R{required} " : "#B{preferred} ",
+			$stemcell_info->{alias}, $stemcell_info->{os},
+			$stemcell_info->{alt}{version}
+		);
+		push @stemcell_ids, sprintf("%s@%s", $stemcell_info->{alt}{os}, $stemcell_info->{alt}{version});
+	}
+
+	my $cmd = Genesis::Commands->current_command;
+	my $fix_opt = $cmd eq 'deploy'
+		? '--fix-stemcells|--fix-checks|-F'
+		: '';
+
+	$msg .= "\n\nThese can be downloaded by running the following command:\n";
+	$msg .= "[[  > >>#G{%s do upload-stemcells %s}";
+	$msg .= (
+		"\n\n#Yu{Note:} You can also use the #Y{%s} argument to the #G{%s} command ".
+		"to automatically fetch and upload stemcells.\n\n"
+	) if $fix_opt;
+
+	info(
+		$msg,
+		join(' ', $self->get_call_path, '<parent-bosh-director-env>'),
+		join(' ', map {"'$_'"} @stemcell_ids),
+		$fix_opt ? ($fix_opt, $cmd) : (),
+	);
+}
 
 # _genesis_inherits - return the list of inherited files (recursive) {{{
 sub _genesis_inherits {
@@ -4435,7 +5086,7 @@ sub _reset_last_deployed_manifest {
 # }}}
 # _build_deployment_audit_data - build the audit data for a deployment (or termination) {{{
 sub _build_deployment_audit_data {
-	my ($self, $state, $sequence, $timestamp, @overrides) = @_;
+	my ($self, $action, $result, $sequence, $timestamp, @overrides) = @_;
 
 	my $flatten = 'unflattened';
 	$flatten = shift(@overrides) if ($overrides[0] =~ /^(un)?flatten(ed)?$/);
@@ -4448,7 +5099,8 @@ sub _build_deployment_audit_data {
 	$user .= " ".($user_data->[3]) if $user_data->[3];
 
 	my $deployment_data = {
-		state           => $state,
+		action          => $action,
+		result          => $result,
 		started         => $timestamp,
 		completed       => $timestamp,
 		sequence        => $sequence,
@@ -4570,9 +5222,9 @@ sub _backfill_deployment_audit_data {
 
 		# Create an artificial termination date halfway between the last
 		# deployment and now
-		my $now = gettimeofday();
+		my $now = Time::Piece->new;
 		my $termination_time = Time::Piece->strptime(
-			$last_deployment->{completed} || $last_deployment->{dated} || now->strftime(EXODUS_TIME_FORMAT),
+			$last_deployment->{completed} || $last_deployment->{dated} || $now->strftime(EXODUS_TIME_FORMAT),
 			EXODUS_TIME_FORMAT
 		);
 		my $termination_ts = $termination_time + ($now - $termination_time) / 2;
@@ -4607,12 +5259,12 @@ sub _backfill_deployment_audit_data {
 		my $genesis_version = $old_exodus->{version}//'(unknown version)';
 		my $reason = $old_exodus->{reason}//'Unknown reason';
 		my $deployment_data = $self->_build_deployment_audit_data(
-			'deployed', $sequence,
+			'deploy', 'success', $sequence,
 			$deployment_time->strftime(EXODUS_TIME_FORMAT),
 			kit => {
 				name => $old_exodus->{kit_name},
 				version => $old_exodus->{kit_version},
-				is_dev => $old_exodus->{kit_is_dev},
+				is_dev => $old_exodus->{kit_is_dev} ? JSON::PP::true : JSON::PP->false,
 				features => $old_exodus->{features},
 			},
 			user => {
@@ -4639,6 +5291,192 @@ sub _backfill_deployment_audit_data {
 		$self->vault->set($self->exodus_base, "sequence", $sequence);
 	}
 	return $self->deployment_lookup('latest');
+}
+
+# }}}
+
+# _create_deployment_audit_log - create the audit log for the environment deployments and terminations {{{
+sub _create_deployment_audit_log {
+	my ($self, $action, $result, %audit_data) = @_;
+	my $bails_with = delete($audit_data{bails_with});
+	$bails_with = ['%s', $bails_with] if $bails_with && ref($bails_with) ne 'ARRAY';
+	my $returns = delete($audit_data{returns});
+
+	my $timestamp = $audit_data{completed} || Time::Piece->new->strftime(EXODUS_TIME_FORMAT);
+	my $deployment_time = $timestamp =~ s/\+.*$//r =~ s/[^0-9]//gr; # YYYYMMDDHHMMSS
+
+	my $artifact_file = $self->workpath("artifacts-$deployment_time.tar.gz");
+	# TODO: Support untarred version of the artifacts
+	if ($action eq 'deploy') {
+		$self->_build_deployment_artifacts(
+			$artifact_file,
+			log      => $self->deployment_cache_path_lookup('deploy_log'),
+			manifest => $self->deployment_cache_path_lookup('manifest'),
+			unpruned => $self->deployment_cache_path_lookup('unpruned_manifest'),
+			vars     => $self->deployment_cache_path_lookup('vars'),
+			state    => $self->deployment_cache_path_lookup('state'),
+			store    => $self->deployment_cache_path_lookup('store'),
+			secrets  => [keys($self->manifest_provider->vault_paths(notify => 0)->%*)],
+			# TODO: add the dev kit, the ops directory and the env and its ancestors.
+		);
+		$audit_data{manifest} = {
+			type => $self->manifest_provider->deployment->type,
+			sha2 => digest_file_hex(
+				$self->deployment_cache_path_lookup('manifest'), 'SHA-256'
+			),
+		};
+	} elsif ($action eq 'terminate') {
+		$self->_build_deployment_artifacts(
+			$artifact_file,
+			log      => $self->deployment_cache_path_lookup('deploy_log'),
+			# manifest => $self->deployment_cache_path_lookup('manifest'),
+			# unpruned => $self->deployment_cache_path_lookup('unpruned_manifest'),
+			# vars     => $self->deployment_cache_path_lookup('vars'),
+			# state    => $self->deployment_cache_path_lookup('state'),
+			# store    => $self->deployment_cache_path_lookup('store'),
+			# secrets  => [keys($self->manifest_provider->vault_paths(notify => 0)->%*)],
+		);
+	} else {
+		bail("Invalid action: %s", $action);
+	}
+
+	my $sequence = delete($audit_data{sequence}) // $self->get_next_deployment_sequence_number();
+	my $deployment_data = $self->_build_deployment_audit_data(
+		$action, $result, $sequence, $timestamp, 'flatten',
+		%audit_data,
+	);
+
+	# Add the deployment audit data to the exodus commands
+	my @exodus_cmds = ();
+	push @exodus_cmds, (
+		'set', $self->exodus_base."/deployments/$deployment_time",
+		'__flattened__=1',
+		map {
+			"$_=$deployment_data->{$_}"
+		} keys %$deployment_data
+	);
+	push(
+		@exodus_cmds, "artifacts\@$artifact_file"
+	) if -f $artifact_file;
+
+	my ($out, $rc, $err) = $self->vault->authenticate->query(
+		{ redact => 1 },
+		@exodus_cmds
+	);
+	if ($rc) {
+		bail(
+			"Failed to set deployment audit data in exodus: %s\n%s",
+			$out, $err
+		);
+	}
+
+	bail(@$bails_with) if $bails_with;
+	return $returns
+		? (ref($returns) eq 'CODE' ? $returns->($self, $out, $rc, $err) : $returns)
+		: 1;
+}
+
+# }}}
+# _get_stemcell_status - get the status of the stemcells {{{
+sub _get_stemcell_status {
+	# This will return an array of stemcell statuses (in the order given)
+	# that will contain a hash of the following keys:
+	#  - alias: the alias of the stemcell (specified in the manifest)
+	#  - found: the stemcell that satisfies the request, or undef if not found
+	#  - alt: the recommended stemcell to use if cpi not found
+	#  - latest: true if searching for the latest.
+	#  - cpi: the cpi name (or <default> if not specified)
+	#  - search_type: exact, latest, or latest-minor
+	#  - search_term: the stemcell version requested
+
+	my ($self, $recalculate) = @_;
+
+	$self->{__stemcell_status} = undef if $recalculate;
+	return wantarray ? @{$self->{__stemcell_status}} : $self->{__stemcell_status}
+		if defined $self->{__stemcell_status};
+
+	my $stemcells_to_check = $self->partial_manifest_lookup('stemcells');
+	my %available = $self->bosh->stemcells;
+	my %newest_by_os = ();
+	for my $key (reverse sort {by_semver($available{$a}{version}, $available{$b}{version})} keys %available) {
+		my ($os, $version) = split('@', $key, 2);
+		push @{$newest_by_os{$os}}, $key;
+	}
+	my $cpi = $self->cpi_enabled ? $self->cpi_name : '<default>';
+	my @results = ();
+
+	for my $stemcell_info (@$stemcells_to_check) {
+		my ($alias, $os, $version) = @$stemcell_info{qw/alias os version/};
+		$alias //= "stemcell-$os-$version";
+		my $newest = $newest_by_os{$os}->[0];
+		my $result = {alias => $alias, os => $os, search_term => $version, cpi => $cpi};
+		my ($wants_latest,$major_version) = $version =~ /^((?:(\d+)\.)?latest)$/;
+
+		# Finding "latest" stemcells is a bit tricky, because we need to
+		# ballance latest known version vs latest available version for
+		# the CPI.  We also support getting the latest minor version of a
+		# major version, so we need to check for that too.
+
+		# TODO:  Should latest check for latest available upstream, or just local (current behavior)?
+		if ($wants_latest) {
+			$result->{latest} = 1;
+			$result->{search_type} = 'latest';
+			my @targets = ($newest_by_os{$os}->@*);
+			my $latest_major_version = int($available{$targets[0]}{version});
+			if (defined($major_version) && $major_version != $latest_major_version) {
+				$result->{search_type} = 'latest-minor';
+				@targets = (
+					grep {$major_version == int($available{$_}{version})}
+					@targets
+				);
+			}
+			# There exists one or more stemcells that match the desired latest version
+			if (@targets) {
+				# Check if the latest version is available for the desired CPI
+				my @cpi_targets = grep {
+					in_array($cpi, $available{$_}{cpis}->@*)
+				} @targets;
+				if (@cpi_targets) {
+					$result->{found} = $available{$cpi_targets[0]};
+				}
+				if (!@cpi_targets || $cpi_targets[0] ne $targets[0]) {
+					require Service::BOSH::Stemcell;
+					$result->{alt} = Service::BOSH::Stemcell->find(
+						$self->iaas, $available{$targets[0]}->@{qw/os version/},
+						scalar($self->lookup('bosh-configs.stemcells.type',undef))
+					);
+					$result->{alt_existing_cpis} = $available{$targets[0]}->{cpis};
+				}
+			} else {
+				# No stemcells available for the desired os
+				require Service::BOSH::Stemcell;
+				$result->{alt} = Service::Bosh::Stemcell->find(
+					$os,
+					$version
+				);
+				$result->{alt_existing_cpis} = $available{$newest}{cpis};
+			}
+
+				# If using a non-default CPI, check if the latest version is available for it
+
+		} else {
+			$result->{search_type} = 'exact';
+			my $key = "$os\@$version";
+			my $match = $available{$key};
+			if (in_array($cpi, $match->{cpis}->@*)) {
+				$result->{found} = $match;
+			} else {
+				$result->{alt} = Service::BOSH::Stemcell->find(
+					$os,
+					$version
+				);
+				$result->{alt_existing_cpis} = ($available{$key}//{})->{cpis};
+			}
+		}
+		push @results, $result;
+	}
+	$self->{__stemcell_status} = \@results;
+	return wantarray ? @results : \@results;
 }
 
 # }}}
