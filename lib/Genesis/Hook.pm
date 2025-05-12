@@ -29,6 +29,17 @@ sub init {
 	return $hook;
 }
 
+sub tempfile {
+	my ($self, $file) = @_;
+	$file = $self->env->workpath($file);
+	return $file;
+}
+sub tempdir {
+	my ($self, $dir) = @_;
+	$dir = $self->env->workpath($dir);
+	return $dir;
+}
+
 sub load_hook_module {
 	my ($class, $file, $kit) = @_;
 
