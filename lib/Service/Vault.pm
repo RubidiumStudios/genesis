@@ -378,6 +378,11 @@ sub get_path {
 sub set {
 	my ($self, $path, $key, $value) = @_;
 	$path =~ s/\/{2,}/\//g; # Clean up any double slashes from joins
+	# FIXME: If the path contains a :<key>, then the content of $key
+	#        should be moved to $value and $path and $key should be split
+	#        from the path.  This allows users to call set with an already
+	#        joined path:key pair.  This should not impact existing code
+	#        because currently passing in a path:key pair results in an error.
 	if (defined($value)) {
 		my ($out,$rc) = $self->query('set', $path, "${key}=${value}");
 		bail(
