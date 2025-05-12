@@ -148,8 +148,32 @@ sub gather_properties {
 		$config{$path} = $value;
 	}
 
-	# FIXME: We need to handle when the user has specified a property that is 
-	#        not in the passed-in list.
+	# Now we need to add in any manual overrides for keys that don't exist in
+	# in the kit, but the environment wants to set.
+	my $overrides = $self->env->lookup_unevaled('bosh-configs.cpi');
+	for my $override (keys %$overrides) {
+		
+		# If we already got this value, skip it
+		next if exists $config{$override};
+
+		my $value = $overrides->{$override};
+		# FIXME: Need to handle hashes that may contain vault references
+		if (!ref($value) && $value =~ /^\(\( ?vault ([^"]* )?"(.*)" ?\)\)$/) {
+			# This is a vault reference, so we need to entomb it
+			my $vault_base = $1; # TODO: Do we need to resolve this or is the relative path sufficient?
+			my $rel_path = $2;
+			my $value = $self->env->lookup("bosh-configs.cpi.$override");
+			my $path = $self->credhub_entombment_path_for($override,$value);
+			$self->{credhub_secrets}{$path} = $value;
+			$value = "(($vault_base $path))";
+		}
+
+		if (defined $value) {
+			$config{$override} = $value;
+		} else {
+			delete($config{$override});
+		}
+	}
 
 	# Finally, unflatten the config hash
 	return unflatten(\%config);
@@ -157,7 +181,15 @@ sub gather_properties {
 
 sub cpi_entombment_path_for {
 	my ($self, $key, $value) = @_;
-	my $prefix = $self->{credhub_prefix} // "genesis-entombments/";
+	# This is different between being deployed as a director's default cpi config
+	# and a child cpi config.  They always have to be absolute paths, so we need
+	# to prefix them with the credhub prefix.
+
+	# The PostDeploy hook, which calls this for deploying a director's cpi will
+	# always pass in the prefix, whch is '/cpi-config/properties/'.
+	# The child cpi config will not have the prefix, so we need to add it based
+	# on the environment's credhub prefix.
+	my $prefix = $self->{credhub_prefix} // $self->env->cpi_credhub_base;
 	my $stub = 'cpi-config-property';
 	my $secret_sha = substr(sha1_hex("$stub--$key--".$value),0,8);
 	return "$prefix$stub--$key--$secret_sha";
