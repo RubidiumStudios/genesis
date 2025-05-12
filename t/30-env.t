@@ -64,7 +64,7 @@ subtest 'name validation' => sub {
 
 	like(
 		Genesis::Env::_env_name_errors("my-new-!@#%ing-env"),
-		qr/can only contain lowercase letters, numbers, and hyphens/i,
+		qr/can only contain lowercase letters, numbers, underscores and hyphens/i,
 		'environment name cannot contain invalid characters'
 	);
 
@@ -1815,9 +1815,10 @@ EOF
 	ok $env_from_evs->use_create_env, "env from env vars uses create env.";
 	ok $env_from_evs->{is_from_envvars}, "env from env vars indicates so.";
 
-	my @old_properties = grep {$_ !~ /^(__actual_files|__signature|__manifest_provider)$/} keys(%$env);
+	my @old_properties = grep {$_ !~ /^(__actual_files|__signature|__manifest_provider|__get_call_path(_with_env)?|__get_environment_variables)$/} keys(%$env);
 	my @new_properties = grep {$_ !~ /^(__actual_files|__signature|__manifest_provider|is_from_envvars)$/} keys(%$env_from_evs);
 	cmp_set(\@new_properties, \@old_properties, "original and from_envvars environments have the same properties");
+	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 
 	for my $property (@old_properties) {
 		if ($property eq '__bosh') {

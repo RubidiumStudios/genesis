@@ -65,6 +65,7 @@ EOF
 };
 
 subtest 'bosh create-env' => sub {
+	pushd $ENV{HOME};
 	local $ENV{GENESIS_BOSH_COMMAND};
 	my ($out, $rc);
 	bosh_runs_as("create-env --state state.json manifest.yml");
@@ -82,6 +83,12 @@ subtest 'bosh create-env' => sub {
 			qr/missing 'state' option/i;
 	};
 
+	mkdir_or_fail('path/to');
+	mkfile_or_fail('path/to/vars-file.yml', <<'EOF');
+---
+name: some-name
+version: some-version
+EOF
 	bosh_runs_as("create-env --state state.json -l path/to/vars-file.yml manifest.yml");
 	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
 	($out, $rc) = $bosh->create_env("manifest.yml", state => "state.json", vars_file => "path/to/vars-file.yml");
@@ -91,7 +98,9 @@ subtest 'bosh create-env' => sub {
 	bosh_runs_as("-n create-env --state state.json manifest.yml");
 	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
 	($out,$rc) = $bosh->create_env("manifest.yml", state => "state.json");
+	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 	ok !$rc, "create_env honors BOSH_NON_INTERACTIVE";
+	popd;
 };
 
 subtest 'bosh cloud-config' => sub {
