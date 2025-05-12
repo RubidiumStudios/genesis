@@ -115,6 +115,7 @@ sub upload_director_cpi_config {
 	my $self = shift;
 	my $credhub_prefix = "/cpi-config/properties/";
 	if ($self->cpi_enabled && $self->env->has_hook('cpi-config')) {
+		$self->env->notify("providing custom cpi-config to the BOSH director");
 		info({pending => 1}, "[[  - >>building director cpi-config...");
 		my $tstart = gettimeofday;
 		my ($config, $secrets, $errors) = $self->env->run_hook(
@@ -207,15 +208,13 @@ sub upload_stemcells {
 
 	info("[[  - >>uploading first stemcell to BOSH director:");
 	
-	eval {
-		$selected_stemcell->upload(
-			$bosh,
-			dryrun => $opts{dryrun},
-		);
-	};
+	my $ok = $selected_stemcell->upload(
+		$bosh,
+		dryrun => $opts{dryrun},
+	);
 
-	if ($@) {
-		error("Failed to upload stemcells: $@\n");
+	if (!$ok) {
+		error("Failed to upload stemcells!");
 		return 0;
 	}
 	
@@ -229,6 +228,13 @@ sub upload_stemcells {
 }
 
 sub upload_runtime_configs {
+	my ($self, %opts) = @_;
+	# TBD: This is a placeholder for the runtime config upload process.
+	# Options will consist of the following:
+	#   hooks => [hashref1, hashref2, ...] - a list of hashes that describee hook-based runtime config deployments, with each containing
+	#		 - name: the name of the runtime config
+	#		 - args: a list of arguments to pass to the hook
+	#		 - TBD: How to tell if the hook should run or not, or if a given option should be used.
 	# This will upload the runtime configs to the director.
 }
 
@@ -252,6 +258,8 @@ sub _commit_config_credhub_secrets {
 	for my $path (@paths) {
 		my $secret = $secrets->{$path};
 		bail("No value specified for the secret %s", $path) unless $secret;
+		# FIXME: set supports ($out, $rc, $err) model so we can check for errors
+		# directly instead of capturing bails in an eval block.
 		eval {$credhub->set($path, $secrets->{$path})};
 		my $err = $@;
 		if ($err) {
