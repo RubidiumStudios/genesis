@@ -11,11 +11,13 @@ use Data::Dumper;
 use File::Basename qw/basename dirname/;
 use File::Find ();
 use IO::Socket;
+use POSIX qw(floor ceil);
 
 use base 'Exporter';
 our @EXPORT = qw/
 	terminal_width
-	wrap fix_wrap
+	terminal_height
+	wrap fix_wrap box_wrap
 	in_controlling_terminal
 	csprintf csize
 	bullet checkbox
@@ -62,6 +64,37 @@ sub terminal_height {
 	return $ENV{GENESIS_OUTPUT_LINES} if $ENV{GENESIS_OUTPUT_LINES};
 	return ($ENV{GENESIS_OUTPUT_LINES} || 24) unless has_tput();
 	return (grep {/^[0-9]*$/} split("\n",`tput lines`))[0] || $ENV{GENESIS_OUTPUT_LINES} || 24;
+}
+
+sub save_screen {
+    print "\e[?1049h";  # Switch to alternate screen buffer
+    return 1;
+}
+
+sub restore_screen {
+    print "\e[?1049l";  # Return to main screen buffer
+    return 1;
+}
+
+sub position_cursor {
+	my ($x, $y) = @_;
+	return unless defined $x;
+	$x = 1 if $x < 1;
+	if (!defined $y) {
+		# Just position the cursor at the x column of the current row
+		print "\e[${x}G";
+	} else {
+		$y = 1 if $y < 1;
+		print "\e[${y};${x}H";
+	}
+}
+
+sub clear_screen {
+	print "\e[2J\e[H"; # clear screen, move cursor to home position
+}
+
+sub clear_line {
+	print "\e[0G\e[0K"; # move cursor to column 0, clear to end of line
 }
 
 my $__is_highcolour = $ENV{TERM} && $ENV{TERM} =~ /256color/;
@@ -170,24 +203,48 @@ sub _emojify {
 }
 
 sub boxify {
-	my ($line,$position) = @_;
+	my ($line,$position,$charset) = @_;
 	return '' unless $line =~ /^(top|line|mid|bot)$/ && $position =~ /^(left|right|span|div)$/;
+	$charset ||= 'heavy';
 
 	my %box_glyphs;
-	if (envset('GENESIS_NO_UTF8') || envset('GENESIS_NO_BOXES')) {
+	if (envset('GENESIS_NO_UTF8') || envset('GENESIS_NO_BOXES') || $charset eq 'ascii') {
 		%box_glyphs = (
 			top  => ["+", "+", "-", "+"],
 			line => ["|", "|", " ", "|"],
 			mid  => ["+", "+", "-", "+"],
 			bot  => ["+", "+", "-", "+"],
 		);
-	} else {
+	} elsif ($charset eq 'heavy') {
 		%box_glyphs = (
 			top  => ["\x{250F}", "\x{2513}", "\x{2501}", "\x{2533}"], # ┏ ┓ ━ ┳
 			line => ["\x{2503}", "\x{2503}", " ",        "\x{2503}"], # ┃ ┃   ┃
 			mid  => ["\x{2523}", "\x{252B}", "\x{2501}", "\x{254B}"], # ┣ ┫ ━ ╋
 			bot  => ["\x{2517}", "\x{251B}", "\x{2501}", "\x{253B}"], # ┗ ┛ ━ ┻
 		);
+	} elsif ($charset eq 'double') {
+		%box_glyphs = (
+			top  => ["\x{2554}", "\x{2557}", "\x{2550}", "\x{2566}"], # ╔ ╗ ═ ╦
+			line => ["\x{2551}", "\x{2551}", " ",        "\x{2551}"], # ║ ║   ║
+			mid  => ["\x{2560}", "\x{2563}", "\x{2550}", "\x{256C}"], # ╠ ╣ ═ ╬
+			bot  => ["\x{255A}", "\x{255D}", "\x{2550}", "\x{2569}"], # ╚ ╝ ═ ╩
+		);
+	} elsif ($charset eq 'round') {
+		%box_glyphs = (
+			top  => ["\x{256D}", "\x{256E}", "\x{2500}", "\x{252C}"], # ╭ ╮ ─ ┬
+			line => ["\x{2502}", "\x{2502}", " ",        "\x{2502}"], # │ │   │
+			mid  => ["\x{251C}", "\x{2524}", "\x{2500}", "\x{253C}"], # ├ ┤ ─ ┼
+			bot  => ["\x{2570}", "\x{256F}", "\x{2500}", "\x{2534}"], # ╰ ╯ ─ ┴
+		);
+	} elsif ($charset eq 'light') {
+		%box_glyphs = (
+			top  => ["\x{250C}", "\x{2510}", "\x{2500}", "\x{252C}"], # ┌ ┐ ─ ┬
+			line => ["\x{2502}", "\x{2502}", " ",        "\x{2502}"], # │ │   │
+			mid  => ["\x{251C}", "\x{2524}", "\x{2500}", "\x{253C}"], # ├ ┤ ─ ┼
+			bot  => ["\x{2514}", "\x{2518}", "\x{2500}", "\x{2534}"], # └ ┘ ─ ┴
+		);
+	} else {
+		die "Unknown box charset: $charset";
 	}
 	return $box_glyphs{$line}[{left=>0,right=>1,span=>2,div=>3}->{$position}];
 }
@@ -293,6 +350,53 @@ sub wrap {
 	chop $results;
 	$results = substr($results,$init_col) if $init_col;
 	return $results;
+}
+
+sub box_wrap {
+	my ($text, %opts) = @_;
+
+	# Wrap a text block in a box
+	# Takes the following options:
+	#   - width: The width of the box (default: terminal width)
+	#   - full_height: If true, the box will take up the full height of the terminal (default: false)
+	#   - margin: The margin around the box (default: 0 - 1 if floating the title)
+	#   - padding: The padding inside the box (default: 0)
+	#   - color: The color of the box (default: '-', which means default terminal color)
+	#   - charrset: The charset to use for the box (default: 'heavy')
+	#   - title: The title of the box (default: none)
+	#   - title_full_width: If true, the title will take up the full width of the box (default: false)
+	#   - title_color: The color of the title (default: same as box color)
+	#   - title_float: if true, the title will appear to float above the box (default: false - title will appear as a header box)
+	#
+	# Color format is "<box-fg>[<box-bg>[<interior-fg>[<interior-bg>]]]]".  Values not specified are
+	# assumed to be the default terminal color.  To skip a color, use a dash (-) in its place.
+
+	my $out = '';
+	my $width = $opts{width} || terminal_width();
+	my $charset = $opts{charset} || 'heavy';
+	if ($opts{title}) {
+		my $title = $opts{title};
+		my $title_color = substr(($opts{title_color} || $opts{color} || '').'----', 0, 4);
+		my ($title_box_color, $title_content_color) = $title_color =~ /^(..)(..)$/;
+
+		my $title_width = $opts{title_full_width} ? $width : $opts{title_width} || (length($title)+4);
+		my $title_float = $opts{title_float} || 0;
+		my $margin = $opts{margin} || ($title_float ? 1 : 0);
+		my $padding = $opts{padding} || 1;
+		my $title_padding = $opts{title_padding} || 0;
+		my $title_align = $opts{title_align} || $opts{title_float} ? 'center' : 'left';
+
+		if ($title_float) {
+			my $top_line = sprintf(
+				"#%s{%s%s%s}",
+				$title_box_color,
+				boxify(top => 'left', $charset),
+				boxify(top => 'span', $charset) x ($title_width - 2),
+				boxify(top => 'right', $charset)
+			);
+		}
+	}
+	bug("Not yet implemented");
 }
 
 sub fix_wrap {
