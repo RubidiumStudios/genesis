@@ -288,9 +288,7 @@ sub check {
 	command_usage(1) if @_ != 1;
 
 	option_defaults(
-		secrets => 0,
 		manifest => 1,
-		stemcells => 0,
 	);
 	my $env = Genesis::Top->new('.')->load_env($_[0]);
 	$env->with_vault() if get_options->{secrets} || get_options->{manifest};
@@ -306,7 +304,11 @@ sub check {
 		$env->download_required_configs(@hooks);
 	}
 
-	my $ok = $env->check(map {("check_$_" => has_option($_,1))} qw/manifest secrets stemcells/);
+	get_options->{$_} //= 0 for qw/secrets stemcells/;
+
+	my $ok = $env->check(
+		(map {("check_$_" => has_option($_,1))} qw/manifest secrets stemcells/)
+	);
 	if ($ok) {
 		info "\n[#M{%s}] #G{All Checks Succeeded}", $env->name;
 		exit 0;
