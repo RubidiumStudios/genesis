@@ -640,14 +640,14 @@ sub deploy {
 	);
 	command_usage(1) if @_ < 1 || @_ > 2;
 	my ($env_name, $reason) = @_;
-	$reason ||= '<unspecified>';
+	$reason ||= '<unspecified>'; # TODO: add repo option to always require a reason
 
 	# TODO: Check if there's a deployment cache directory and tell the user to
 	#       run `genesis deploy --resume` to finish the deployment, or `genesis
 	#       deploy --clean` to start over.
 
 	my %options = %{get_options()};
-	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix dry-run/);
+	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix dry-run fix-stemcells/);
 
 	$options{'disable-reactions'} = ! delete($options{reactions});
 	my $env = Genesis::Top->new('.')->load_env($env_name)->with_vault()->with_bosh();
@@ -655,12 +655,19 @@ sub deploy {
 	if (scalar(grep {$_} ($options{fix}, $options{recreate}, $options{'dry-run'})) > 1) {
 		command_usage(1,"Can only specify one of --dry-run, --fix or --recreate");
 	}
-	$ENV{BOSH_NON_INTERACTIVE} = 'true' if $options{yes};
+	my $noprompt = $options{yes} // 0;
+	$ENV{BOSH_NON_INTERACTIVE} = 'true' if $noprompt;
+	my $dryrun = $options{'dry-run'} // 0;
 
 	bail(
 		"The following options cannot be specified for #M{create-env}: %s",
 		join(", ", @invalid_create_env_opts)
 	) if $env->use_create_env && @invalid_create_env_opts;
+
+	if (delete $options{'fix-checks'}) {
+		$options{'fix-stemcells'} = 1 unless $env->use_create_env;
+		$options{'fix-secrets'} = 1;
+	}
 
 	info "\nPreparing to deploy #C{%s}:\n  - based on kit #c{%s}\n  - using Genesis #c{%s}", $env->name, $env->kit->id, $Genesis::VERSION;
 	if ($env->use_create_env) {
@@ -670,95 +677,54 @@ sub deploy {
 	}
 
 	my ($cloud_config, $network_map, $cpi_config, $credhub_secrets, $cpi_err) = ();
+	my $ok = 1;
 	if (! $env->use_create_env) {
 		# TODO: refactor to clean this up a bit
 
 		if ($env->cpi_enabled) {
 			if ($env->has_hook('cpi-config')) {
-				$env->notify("Generating CPI config for #C{%s} deployment...", $env->name);
-				($cpi_config, $network_map, $cpi_err) = $env->run_hook('cpi-config');
-				bail("Error generating CPI config: %s", $cpi_err ) if $cpi_err;
-				info "[[  - >>CPI config synthesized.";
+				$env->notify("checking CPI config for #C{%s} deployment...", $env->name); #FIXME: move this into the _check_cpi_config method
+				my $check_result = $env->_check_cpi_config();
 
-				# Compare to existing, upload if different
-				my $cpi_config_name = $env->cpi_name;
-				my $cpi_config_dir = $env->workpath('cloud-configs');
-				my $new_path = "$cpi_config_dir/${cpi_config_name}.yml";
+				bail(
+					"Cannot provide the required CPI config: %s",
+					$check_result->{msg}
+				) if $check_result->{fatal}; # Should we just set a flag instead, and skip to next check?
 
-				mkdir($cpi_config_dir) unless -d $cpi_config_dir;
-				mkfile_or_fail($new_path, 0644, $cpi_config);
-				info "[[  - >>checking for existing CPI config on #M{%s} BOSH director...", $env->bosh->{alias};
-				my $updated = 1;
-				if ($env->bosh->has_config('cpi',$cpi_config_name)) {
-					my $old_path = "$cpi_config_dir/current-${cpi_config_name}.yml";
-					info "[[  - >>comparing generated CPI config with existing CPI config...";
-					$env->bosh->download_configs($old_path,'cpi',$cpi_config_name);
-					my ($out, $rc, $err) = run(
-						fake_tty("$cpi_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path)
-					);
-					bail "Error comparing CPI configs: %s", $err if $rc;
-
-					$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/mrs;
-					if ($out) {
-						$out =~ s/\(root level\)/<root>/m;
-						info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
-						if (in_controlling_terminal || !$options{'yes'}) {
-							prompt_for_boolean(
-								"Upload the new CPI config to the BOSH director ('no' will cancel deploy)? [y|n]",
-								1
-							) or bail "Aborted by user!";
-						}
-						info(
-							"Uploading new CPI config to #M{%s} BOSH director...",
-							$env->bosh->{alias}
+				if ($check_result->{state} ne 'ok') {
+					if ($dryrun) {
+						dryrun(
+							"CPI config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
+							$check_result->{msg}	
 						);
-						$env->bosh->upload_config_from_file($new_path,'cpi',$cpi_config_name);
-						info "[[  - >>CPI config for #C{%s} deployment has been updated.\n", $env->name;
-
 					} else {
-						info "[[  - >>no changes detected in CPI config; proceeding with deploy.\n";
-						$updated = 0;
+						# Just going to force the fix for now
+						my $fix_result = $env->_fix_cpi_config(
+							$check_result->{state},
+							$check_result->{fix_data},
+							noprompt => 1,
+						);
+						bail(
+							"Could not update required CPI config: %s",
+							$fix_result->{msg}
+						) unless $fix_result->{result} eq 'ok';
 					}
-				} else {
-					info(
-						"[[  - >>uploading new CPI config to #M{%s} BOSH director...",
-						$env->bosh->{alias}
-					);
-					$env->bosh->upload_config_from_file($new_path,'cpi',$cpi_config_name);
-					info "[[  - >>CPI config for #C{%s} deployment has been created.\n", $env->name;
 				}
-
-				if ($updated && $credhub_secrets) {
-					# Commit credhub secrets to the BOSH director
-					info(
-						"[[  - >>uploading new credhub secrets to #M{%s} BOSH director...",
-						$env->bosh->{alias}
-					);
-					my $credhub = $env->bosh->credhub;
-					for my $credhub_path (keys %$credhub_secrets) {
-						$credhub->set($credhub_path, $credhub_secrets->{$credhub_path});
-					}
-					info(
-						"[[  - >> %s credhub secrets for #C{%s} CPI have been created.\n",
-						scalar keys %$credhub_secrets,
-						$env->cpi_name
-					);
-				}
-
-			} else {
-				# CPI hooks are not common (only on BOSH so far), so a warning is
-				# probably causing more confusion than it's worth.
 			}
 		} else {
-			warning(
-				"CPI config will not be generated for this deployment.  ".
-				"Ensure that the BOSH director has the necessary CPI config in place."
+			# Use the cpi config provided by the director (via exodus data)
+			$env->notify(
+				"Using %s CPI config from #M{%s} BOSH director...",
+				$env->director_exodus_lookup('default_cpi_config','default'),
+				$env->bosh->{alias}
 			);
+			last;
 		}
 
 		if ($env->can_build_cloud_configs) {
+			# Refactor this to use _check_cloud_config and _fix_cloud_config like the cpi stuff above
 			if ($env->has_hook('cloud-config')) {
-				$env->notify("Generating cloud configs for #C{%s} deployment...", $env->name);
+				$env->notify("checking cloud configs for #C{%s} deployment...", $env->name);
 				($cloud_config, $network_map) = $env->run_hook('cloud-config');
 
 				# TODO: Support multiple cloud configs
@@ -783,21 +749,32 @@ sub deploy {
 					if ($out) {
 						$out =~ s/\(root level\)/<root>/m;
 						info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
-						if (in_controlling_terminal || !$options{'yes'}) {
-							prompt_for_boolean(
-								"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
-								1
-							) or bail "Aborted by user!";
+						if ($dryrun) {
+							dryrun(
+								"Cloud config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
+								$out
+							);
+						} else {
+							if (in_controlling_terminal || !$options{'yes'}) {
+								prompt_for_boolean(
+									"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
+									1
+								) or bail "Aborted by user!";
+							}
+							info(
+								"Uploading new cloud config to #M{%s} BOSH director...",
+								$env->bosh->{alias}
+							);
+							$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
+							info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
 						}
-						info(
-							"Uploading new cloud config to #M{%s} BOSH director...",
-							$env->bosh->{alias}
-						);
-						$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
-						info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
 					} else {
-						info "[[  - >>no changes detected in cloud config; proceeding with deploy.\n";
+						info "[[  - >>no changes required in cloud config; proceeding with deploy.\n";
 					}
+				} elsif ($dryrun) {
+					dryrun(
+						"Cloud config missing.  This would be created and uploaded if not in dry-run mode.",
+					);
 				} else {
 					info(
 						"[[  - >>uploading new cloud config to #M{%s} BOSH director...",
@@ -820,10 +797,125 @@ sub deploy {
 				"Ensure that the BOSH director has the necessary cloud config in place."
 			);
 		}
-		$env ->download_required_configs('deploy');
+		my @hooks = qw(blueprint manifest deploy);
+		push @hooks, grep {$env->kit->has_hook($_)} qw(check pre-deploy post-deploy);
+		$env->download_required_configs(@hooks);
+	} # end if ! $env->use_create_env
+
+	# Check environment for viability
+	$env->{notify_prefix_overrides}{'determining manifest fragments for merging...'} = sprintf(
+		"\n  #C{[Checking manifest components]}\n[[  - >>",
+	);
+	my $env_check = $env->_check_environment_viability();
+	bail("%s", $env_check->{msg}) if $env_check->{fatal};
+	$ok = 0 unless $env_check->{state} eq 'ok';
+	my $kit_files = $env_check->{kit_files};
+
+	# Check or fix secrets for required items
+	my $fix_secrets = delete($options{'fix-secrets'}) || $Genesis::RC->get('fix_on_deploy') ne 'never';
+	if ($fix_secrets && !$dryrun) {
+		my $secret_fixes = $env->_fix_secrets(noprompt => $options{noprompt});
+		bail(
+			"Failed to fix secrets: %s",
+			$secret_fixes->{msg}
+		) if $secret_fixes->{fatal};
+		$env->notify("%s", $secret_fixes->{msg});
+		$ok = 0 unless $secret_fixes->{result} =~ /^(ok|warning)$/;
+
+	} else {
+		my $secrets_check = $env->_check_secrets();
+		my $msg_type = $secrets_check->{state};
+		$msg_type = '%s' if $msg_type eq 'ok';
+
+		$env->notify($msg_type => $secrets_check->{msg});
+		if ($secrets_check->{state} !~ /^(ok|warning)$/) {
+			dryrun(
+				"Secrets would be automatically fixed if not in dry-run mode."
+			) if $fix_secrets;
+			$ok = 0;
+		}
 	}
 
-	my $ok = $env->deploy(%options, network_map => $network_map, reason => $reason);
+	# Checking yaml files - more of a visual dump than a validation
+	if (envset("GENESIS_CHECK_YAML_ON_DEPLOY")) {
+		if ($env->missing_required_configs('blueprint')) {
+			$env->notify("#Y{Required BOSH configs not provided - can't check manifest viability}");
+		} else {
+			$env->notify("inspecting YAML files used to build manifest...");
+			my @yaml_files = $env->format_yaml_files('include-kit' => 1, padding => '  ', kit_files => $kit_files);
+			info join("\n",@yaml_files)."\n";
+		}
+	}
+
+	# Check manifest validation
+	if ($ok) {
+		if ($env->missing_required_configs('manifest')) {
+			$env->notify("#Y{Required BOSH configs not provided - can't check manifest viability}");
+		} else {
+			$env->notify("running manifest viability checks...");
+			$env->manifest_provider->unredacted->validate or $ok = 0;
+		}
+	}
+
+	# Check for release overrides
+	my $release_check = $env->_check_release_overrides();
+	my $confirm = $noprompt ? 'never' : $Genesis::RC->get(
+		'confirm_release_overrides' => $env->top->config->{'confirm_release_overrides'} // 'outdated'
+	);
+	if ($release_check->{state} ne 'ok' && !$dryrun) {
+		if ($confirm eq 'always' || ($confirm eq 'outdated' && $release_check->{state} eq 'outdated')) {
+			bail(
+				"Cannot prompt user for confirmation of release version overrides - ".
+				"not in a controlling terminal.  Please specify #Y{-y|--yes} to bypass this prompt."
+			) unless in_controlling_terminal;
+
+			$ok = 0 unless prompt_for_boolean(
+				"Release version overrides detected.  Proceed with release version overrides? [y|n]",
+				1
+			);
+		}
+	}
+
+	# Check for and potentially fix stemcell availability
+	# FIXME: This won't be accurate if there is a missing CPI config for this env
+	if (!$env->use_create_env) {
+		my $stemcell_check_result = $env->_check_stemcells();
+		if ($stemcell_check_result->{state} ne 'ok') {
+			if ($options{'fix-stemcells'}) {
+				if ($dryrun) {
+					dryrun(
+						"\nStemcell check failed: %s\n\nThis would be fixed if not in dry-run mode.",
+						$stemcell_check_result->{msg}
+					);
+				} else {
+					my $stemcell_fix = $env->_fix_stemcells(
+						$stemcell_check_result->{fix_data},
+						noprompt => $options{noprompt},
+					);
+					bail(
+						"Failed to fix stemcells: %s",
+						$stemcell_fix->{msg}
+					) if $stemcell_fix->{fatal};
+					$env->notify("%s", $stemcell_fix->{msg}); # Check if this makes sense or is reduntant
+				}
+			} else {
+				$env->_advise_stemcell_updates(
+					$stemcell_check_result->{fix_data},
+				);
+				bail(
+					"Stemcell check failed: %s",
+					$stemcell_check_result->{msg}
+				);
+			}
+			$ok = 0;
+		}
+	}
+
+	bail(
+		"Preflight checks failed; deployment operation halted."
+	) unless $ok;
+
+	$ok = $env->deploy(%options, network_map => $network_map, reason => $reason);
 
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;

@@ -114,6 +114,7 @@ sub Init {
 		output_style             => { type => 'enum',    default => 'plain',  values => [qw/plain fun pointer/]},
 		show_duration            => { type => 'boolean', default => 0,                                               envvar => 'GENESIS_SHOW_DURATION' },
 		automatic_config_upgrade => { type => 'enum',    default => 'no',     values => [qw/no yes silent/],         envvar => 'GENESIS_CONFIG_AUTOMATIC_UPGRADE' },
+		fix_on_deploy            => { type => 'enum',    default => 'never',  values => [qw/always ask never/],      envvar => 'GENESIS_FIX_ON_DEPLOY' },
 		confirm_release_overrides=> { type => 'enum',                         values => [qw/always outdated never/], envvar => 'GENESIS_CONFIRM_RELEASE_OVERRIDES' },
 		spec_cache_dir           => { type => 'string',  default => "",                                              envvar => 'GENESIS_SPEC_CACHE_DIR'},
 		bosh_logs_path           => { type => 'string',  default => "<DEPLOYMENT_ROOT>/bosh_logs",                   envvar => 'GENESIS_DEPLOYMENT_LOGS_PATH'},
