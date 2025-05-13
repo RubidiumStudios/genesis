@@ -43,7 +43,7 @@ A typical hook lifecycle follows these steps:
 The base `Genesis::Hook` class provides these key methods:
 
 ```perl
-# Initialize the hook with required parameters
+# All hooks should init:
 sub init {
   my $class = shift;
   my $obj = $class->SUPER::init(@_);
@@ -51,21 +51,15 @@ sub init {
   return $obj;
 }
 
-# Main execution method (must be implemented by subclasses)
+# All hooks need a perform.
 sub perform {
   # This is defined by specific hook implementations
   return $self->done($results); # results is optional and can be anything
 }
 
-# Mark the hook as completed
-cmd_details {
+# This is used for addon hooks only:
+sub cmd_details {
   return "Description of hook, including its purpose and usage.";
-}
-
-# Retrieve the hook's results
-sub results {
-  my ($self) = @_;
-  # Returns the hook's output if completed
 }
 1;
 ```
@@ -111,7 +105,7 @@ sub perform {
   my ($self) = @_;
   # Example options parsing
 	my %options = $self->parse_options([
-		'json',           # Output in JSON format
+		'json', # Output in JSON format
 	],
 	);
 
