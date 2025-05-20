@@ -117,6 +117,12 @@ sub features {
 	return @{$self->{features}}
 }
 
+sub set_features {
+	my $self = shift;
+	delete($self->{__wanted_features});
+	$self->{features} = [@_];
+}
+
 sub want_feature {
 	my ($self, $feature) = @_;
 	unless (defined($self->{__wanted_features})) {
@@ -124,7 +130,15 @@ sub want_feature {
 			map {($_, 1)} ($self->features)
 		}
 	}
-	return $self->{__wanted_features}{$feature};
+	if(ref($feature) eq 'Regexp') {
+		return scalar(
+			grep {$_ =~ $feature}
+			grep {$self->{__wanted_features}{$_}}
+			keys $self->{__wanted_features}->%*
+		) ? 1 : 0;
+	} else {
+		return $self->{__wanted_features}{$feature};
+	}
 }
 sub wants_feature {$_[0]->want_feature($_[1])} # alias
 
@@ -135,12 +149,6 @@ sub is_ocfp {$_[0]->env && $_[0]->env->is_ocfp}
 sub cpi_name {$_[0]->env && $_[0]->env->cpi_name}
 sub cpi_enabled {$_[0]->env && $_[0]->env->cpi_enabled}
 # }}}
-
-sub set_features {
-	my $self = shift;
-	delete($self->{__wanted_features});
-	$self->{features} = [@_];
-}
 
 sub relative_env_path {
 	my $self = shift;
