@@ -1309,7 +1309,7 @@ sub cpi_name {
 	# Return the base cpi name of the director (now provided by exodus)
 	#my $bosh_env = $self->bosh_env;
 	#return join('.', $bosh_env->{name}, $self->iaas, $bosh_env->{dep_type}//'bosh')
-	return $self->director_exodus_lookup('default_cpi_name', undef);
+	return $self->director_exodus_lookup('default_cpi_config', undef);
 }
 
 sub cpi_credhub_base {
@@ -2177,6 +2177,28 @@ sub config_file {
 		$env_var .= "_$name";
 	}
 	return $self->{__configs}{$label} || $ENV{$env_var} || '';
+}
+
+sub config_contents {
+	my ($self, %opts) = @_;
+	my $type = $opts{type} // 'cloud';
+	my $name = $opts{name};
+	my $to_s = $opts{to_s} // 0;
+	my $content = undef;
+	# Bug in cloud config download causes all the cloud configs to point at the same file
+	# which is already merged together: commenting out the following code for now..
+	# if (!defined($name) || $name eq '*') {
+	# 	# We need to merge all the configs together for the given type
+	# 	my $file_ids = grep { /$type(\@.*)?$/ } $self->configs;
+	# 	$name = $self->config_file($type);
+	# } else {
+	# 	$content = slurp($self->config_file($type,$name));
+	# }
+	if ($to_s) {
+		return slurp($self->config_file($type,$name));
+	} else {
+		return load_yaml_file($self->config_file($type,$name))
+	}
 }
 
 # }}}
