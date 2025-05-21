@@ -41,7 +41,7 @@ provide a `dev` kit, which is a development version of the kit that can be used 
   - `post-deploy` - runs after the environment is deployed, and is used to perform any necessary process after the deployment is started.  It is provided the result of the deployment, so it can also be used to check what went wrong if the deployment failed.
   - `addon*` - special hooks that add functionality to genesis that is specific to the kit, such as logging into the environment deployed, or performing specific maintenance tasks outside the scope of Genesis.  These are not run by default, but can be run using the `genesis <env> do <task>` command. It can be provided as a single hook with a case statement to determine which task to run (the BASH way) or a `addon-<task>~<shorthand>.pm` hook (the Perl way).
 
-  All Perl hooks have a parent that is `Genesis::Hook` or a specialized derived class, and contain `init` and `process` methods.  The `process` method must return the result from `$self->done(<result>)`, to be considered completed.  The `addon` hooks have an extra method called `cmd_details` which returns a string that describes the command, used by `genesis <env> do list` to display the available commands.
+  All Perl hooks have a parent that is `Genesis::Hook` or a specialized derived class, and contain `init` and `perform` methods.  The `perform` method must return the result from `$self->done(<result>)`, to be considered completed.  The `addon` hooks have an extra method called `cmd_details` which returns a string that describes the command, used by `genesis <env> do list` to display the available commands.
 
 ## Directory Overview
 
@@ -114,13 +114,17 @@ Furthermore, the Genesis project provides a suite of tests to ensure the functio
 - **`t/4x-`**: Tests for hook support, as provided by Genesis::Hook and its derived classes.
 - **`t/5x-`**: Tests for the Genesis binary CLI and the Genesis::Command class and its derived classes.
 
-- Tests withour a numeric prefix are considered 'system tests', and run as calls against the `genesis` binary, or under Test::Expect.  These are mostly legacy in origin, but still provide useful test coverage, albeit very slowly (especially `t/secrets.t`).
+- Tests without a numeric prefix are considered 'system tests', and run as calls against the `genesis` binary, or under Test::Expect.  These are mostly legacy in origin, but still provide useful test coverage, albeit very slowly (especially `t/secrets.t`).
 
 ## Coding Standards
 
 - Uses tab characters for indentation, with a tab size of 2 spaces.
 - Uses `strict`, `warnings`, and `520` pragmas.
-- Only uses core Perl modules, and the libraries under `lib/` - NO external CPAN dependencies.
+- All modules should have a vim config commentline at the bottom of the file, stating:
+```
+# vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1:
+```
+- Only uses core Perl modules, and the libraries under `lib/` - NO external CPAN dependencies. Tests are the exception to this rule, as they are not part of the core functionality of the project.
 - In the case of a single command that is conditionally executed, prefer
 ```
 call(
