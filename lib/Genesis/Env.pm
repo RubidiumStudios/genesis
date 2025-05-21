@@ -4135,14 +4135,14 @@ sub _check_environment_viability {
 		$self->manifest_provider->kit_files(); # pre-warm the cache
 	};
 	if ($@) {
-		info("[[  >>manifest blueprint [#R{FAILED}]");
+		info("[[  - >>manifest blueprint #R{failed}");
 		return {
 			state => 'error',
 			fatal => 1,
 			msg   => "Kit files could not be generated -- cannot continue with further checks."
 		};
 	}
-	info("[[  >>manifest blueprint [#G{OK}]");
+	info("[[  - >>manifest blueprint #G{passed}");
 	return {
 		state     => $ok ? 'ok' : 'error',
 		msg       => $ok ? "environmental is viable" : "environmental is not viable",

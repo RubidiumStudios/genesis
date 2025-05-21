@@ -16,7 +16,7 @@ sub init {
 
 sub start_check {
 	my ($self, $type) = @_;
-	info("[[  >>#C{checking %s...", $type =~ s/[-_]/ /gr);
+	info("[[  - >>checking %s...", $type =~ s/[-_]/ /gr);
 }
 
 sub check_result {
@@ -34,7 +34,7 @@ sub check_result {
 	$result = 'passed' if $result eq 'ok' || $result eq 'passed' || $result eq '1';
 
 	info(
-		"[[  - >>#C{%s} #%s{%s}%s]]",
+		"[[  - >>#C{%s} #%s{%s}%s",
 		$config =~ s/[-_]/ /gr,
 		$result eq 'passed' ? 'G' : $result eq 'error' ? 'R' : 'Y',
 		$result,

@@ -804,7 +804,7 @@ sub deploy {
 
 	# Check environment for viability
 	$env->{notify_prefix_overrides}{'determining manifest fragments for merging...'} = sprintf(
-		"\n  #C{[Checking manifest components]}\n[[  - >>",
+		"[[  - >>checking manifest components...\n[[  - >>",
 	);
 	my $env_check = $env->_check_environment_viability();
 	bail("%s", $env_check->{msg}) if $env_check->{fatal};
