@@ -107,8 +107,7 @@ sub kit {$_[0]->env && $_[0]->env->kit}
 sub deployed {($_[0]->exodus_lookup('state','') eq 'deployed')}
 
 sub use_create_env {
-	# TODO: integrate with ocfp feature env types, mayby?
-	$ENV{GENESIS_USE_CREATE_ENV}||'false' eq 'true';
+	return $_[0]->env && $_[0]->env->use_create_env;
 }
 
 sub features {
