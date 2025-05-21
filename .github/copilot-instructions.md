@@ -116,18 +116,19 @@ Furthermore, the Genesis project provides a suite of tests to ensure the functio
 
 - Tests withour a numeric prefix are considered 'system tests', and run as calls against the `genesis` binary, or under Test::Expect.  These are mostly legacy in origin, but still provide useful test coverage, albeit very slowly (especially `t/secrets.t`).
 
-## Coding standards
+## Coding Standards
 
 - Uses tab characters for indentation, with a tab size of 2 spaces.
 - Uses `strict`, `warnings`, and `520` pragmas.
-- Prefers
+- Only uses core Perl modules, and the libraries under `lib/` - NO external CPAN dependencies.
+- In the case of a single command that is conditionally executed, prefer
 ```
 call(
   args,
   ...
 ) if|unless $condition;
 ```
-rather than
+over
 ```
 if ($condition) {
   call(
@@ -138,7 +139,7 @@ if ($condition) {
 ```
 - The `info`, `warning`, `error`, `notice`, `bail` and `bug` methods take the same arguments as `printf`, and are used to log messages to the console.  The `info` method is used for informational messages, the `warning` method is used for warning messages, the `error` method is used for error messages, the `notice` method is used for notice messages, the `bail` method is used to bail out of a command with an error message, and the `bug` method is used to log bug reports.
 
-- Perl-based hooks are in a package `Genesis::Hook::HookType::KitType[::HookSubtype]`, where `HookType` is the type of hook (e.g., `Blueprint`, `CloudConfig`, etc.) and `KitType` is the type of kit (e.g., `BOSH`, `CF`, `Prometheus`, etc.).  The `HookSubType` is optional, most often used for the specific task of an `Addon` hook.
+- Perl-based hooks for kits are placed in a package `Genesis::Hook::HookType::KitType[::HookSubtype]`, where `HookType` is the type of hook (e.g., `Blueprint`, `CloudConfig`, etc.) and `KitType` is the type of kit (e.g., `BOSH`, `CF`, `Prometheus`, etc.).  The `HookSubType` is optional, most often used for the specific task of an `Addon` hook.
 
 - Perl-based hooks always contain 
 ```
