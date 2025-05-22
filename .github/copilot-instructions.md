@@ -141,7 +141,17 @@ if ($condition) {
   );
 }
 ```
-- The `info`, `warning`, `error`, `notice`, `bail` and `bug` methods take the same arguments as `printf`, and are used to log messages to the console.  The `info` method is used for informational messages, the `warning` method is used for warning messages, the `error` method is used for error messages, the `notice` method is used for notice messages, the `bail` method is used to bail out of a command with an error message, and the `bug` method is used to log bug reports.
+- When using `Genesis::Env` lookup* methods, prefer to use // to provide the default value instead of the second argument to the method.  This is because // is a short-circuit operator, whereas the second argument to the method is always evaluated, even if the first argument is defined.  This is important for performance reasons, as the second argument may be a complex expression that takes a long time to evaluate.  The exception to this is when you want to use the list context of the method, in which case you should use the second argument to the method.  Even then, you can analize the result and use //= to set the value if not defined.
+
+- The `info`, `warning`, `error`, `notice`, `bail` and `bug` methods take the same arguments as `printf`, and are used to log messages to the console.  The `info` method is used for informational messages, the `warning` method is used for warning messages, the `error` method is used for error messages, the `notice` method is used for notice messages, the `bail` method is used to bail out of a command with an error message, and the `bug` method is used to log bug reports.  These are provided by `Genesis` and are never method calls on an object.
+
+- When including any non-OOP Genesis package, such as `Genesis`, `Genesis::Term`, `Genesis::UI`, etc., an explicit list of methods to import should be used instead of importing all exported methods into the namespace, such as:
+```
+use Genesis::Term qw/wrap colorize bullet/;
+```
+
+- When using any non-ASCII characters in output, such as `✓`, `✗`, `✔`, `✘`, etc., the `Genesis::Term` module should be used to provide a consistent output across different terminal types.  The "#\@{x}" syntax is interpreted by the `colorize` method to replace with a UTF-8 glyph for the given ascii character (ie '*' => "\x{2022}" (a bullet), or '[ ]' => "\x{25FB}" (a white square), etc.).  This is used to provide a consistent output across different terminal types, and to provide a consistent look and feel for the Genesis project.  `colorize` is used by all the other methods in `Genesis::Term`, and the `Genesis::Log` methods, such as `info`, `warning`, `error`, `notice`, `bail` and `bug`, so it is not needed to be called explicitly when using these methods.
+```
 
 - Perl-based hooks for kits are placed in a package `Genesis::Hook::HookType::KitType[::HookSubtype]`, where `HookType` is the type of hook (e.g., `Blueprint`, `CloudConfig`, etc.) and `KitType` is the type of kit (e.g., `BOSH`, `CF`, `Prometheus`, etc.).  The `HookSubType` is optional, most often used for the specific task of an `Addon` hook.
 
