@@ -15,6 +15,21 @@ sub init {
 	return $obj
 }
 
+# REFACTOR:  The virtual_features functionality is not actually functional
+#            because there is no distiction between + prefixed features when
+#            adding to the list and the lookup.  Revisit this to see
+#            if we can make it work.
+#
+#            The origin of this code, and it does function, is so that
+#            if we have virtual features (prefixed with +) that we need
+#            users to specify in their feature list (without the +), they
+#            can be converted to the virtual feature when building the
+#            features list.  This is useful for things like when they
+#            have the ocfp feature but want to use the internal blobstore,
+#            which is normally a virtual feature, but not the default
+#            when ocfp is specified.
+
+
 sub add_feature {
 	my ($self, $feature, $set) = @_;
 	$set = 1 if (@_) < 3;
@@ -49,6 +64,17 @@ sub build_features_list {
 		}
 	}
 	return @results;
+}
+
+sub done {
+	my $self = shift;
+	my $features = (@_)
+		? @_ == 1 && ref($_[0]) eq 'ARRAY'
+			? $_[0]
+			: [@_]
+		: [$self->build_features_list()];
+	$self->{results} = $features;
+	$self->{complete} = 1;
 }
 
 1;
