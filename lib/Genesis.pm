@@ -86,6 +86,7 @@ our @EXPORT = qw/
 	copy_or_fail
 	copy_tree_or_fail
 	expand_path
+	absolute_path
 	humanize_path
 	humanize_bin
 
@@ -920,6 +921,17 @@ sub chmod_or_fail {
 	-e $path or bail "$path: $!";
 	chmod $mode, $path
 		or bail "Could not change mode of $path: $!";
+}
+
+sub absolute_path {
+	my ($path, $base_path) = @_;
+	$path =~ s{^~}{$ENV{HOME}} if substr($path,0,2) eq '~/';
+	$path =~ s{^~([^/]+)}{dirname($ENV{HOME})."/$1"}e if substr($path,0,1) eq '~';
+	return $path if $path =~ m{^/};
+	pushd($base_path) if $base_path;
+	$path = Cwd::abs_path($path);
+	popd() if $base_path;
+	return $path;
 }
 
 our %path_cache = ();
