@@ -419,11 +419,26 @@ sub strfuzzytime {
 	my ($datestring,$output_format, $input_format) = @_;
 	$input_format ||= "%Y-%m-%d %H:%M:%S %z";
 
-	my $time = Time::Piece->strptime($datestring,$input_format);
-	my $delta = Time::Piece->new() - $time;
-	my $fuzzy;
-	my $past = ($delta >= 0);
-	$delta = - $delta unless $past;
+	my ($delta,$fuzzy,$past,$time);
+	if ($input_format eq 'seconds') {
+		if (ref($datestring) eq 'Time::Seconds') {
+			$delta = $datestring;
+			$time = $delta->seconds;
+		} elsif ($datestring->can('seconds')) {
+			$time = $datestring->seconds;
+			$delta = Time::Seconds->new($time);
+		} elsif (ref($datestring) eq '' && $datestring =~ /^\d+$/) {
+			$time = $datestring;
+			$delta = Time::Seconds->new($datestring);
+		} else {
+			bug("Invalid input for 'seconds' format: %s", ref($datestring) || $datestring);
+		}
+	} else {
+		$time = Time::Piece->strptime($datestring,$input_format);
+		$delta = Time::Piece->new() - $time;
+		$past = ($delta >= 0);
+		$delta = - $delta unless $past;
+	}
 
 	# Adapted from rails' distance_of_time_in_words
 	if ($delta->minutes < 2) {
@@ -455,17 +470,26 @@ sub strfuzzytime {
 	} elsif ($delta->months < 1.5) {
 		$fuzzy = "more than a month";
 	} elsif ($delta->months < 22) {
-		my $aproach = (int($delta->months) == int($delta->months + 0.5)) ? "just over" : "almost";
-		$fuzzy = sprintf("%s %d months", $aproach, $delta->months + 0.5);
+		my $approach = (int($delta->months) == int($delta->months + 0.5)) ? "just over" : "almost";
+		$fuzzy = sprintf("%s %d months", $approach, $delta->months + 0.5);
 	} elsif ($delta->months < 25) {
 		$fuzzy = "about 2 years";
 	} else {
-		$fuzzy = sprintf("more than %d years", $delta->years );
+		my $half = (int($delta->years) == int($delta->years + 0.5)) ? "" : " and a half";
+		$fuzzy = sprintf("more than %d%s years", $delta->years, $half );
 	}
 	$fuzzy = $past ? "$fuzzy ago" : "in $fuzzy";
 	if ($output_format) {
-		my @lt = localtime($time->epoch); # Convert to localtime
-		$fuzzy = join($fuzzy, map {strftime($_, @lt)} split(/%~/, $output_format))
+		if ($input_format eq 'seconds') {
+			# ie "%s seconds - %~"
+			$fuzzy = sprintf(
+				join($fuzzy, split(/%~/, $output_format)),
+				$time
+			)
+		} else {
+			my @lt = localtime($time->epoch); # Convert to localtime
+			$fuzzy = join($fuzzy, map {strftime($_, @lt)} split(/%~/, $output_format))
+		}
 	}
 	return $fuzzy;
 }
