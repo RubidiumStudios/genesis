@@ -30,6 +30,11 @@ use Time::Seconds;
 
 use utf8;
 
+use constant {
+	EXODUS_TIME_FORMAT => "%Y-%m-%d %H:%M:%S %z",
+	EXODUS_TIME_FORMAT_SHORT => "%Y%m%d%H%M%S",
+};
+
 # Timezone hackage to workaround keeping local TZ;
 unless ($ENV{ORIG_TZ}) {
 	POSIX::tzset();
@@ -40,6 +45,9 @@ unless ($ENV{ORIG_TZ}) {
 
 use base 'Exporter';
 our @EXPORT = qw/
+	EXODUS_TIME_FORMAT
+	EXODUS_TIME_FORMAT_SHORT
+
 	in_repo_dir in_kit_dir
 
 	logger
