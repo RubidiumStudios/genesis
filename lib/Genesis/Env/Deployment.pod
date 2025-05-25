@@ -1,0 +1,103 @@
+=pod
+=head1 NAME
+Genesis::Env::Deployment - Genesis deployment audit class
+
+=head1 SYNOPSIS
+Use this class to create and manage deployment audits in Genesis environments.
+
+=head1 DESCRIPTION
+This class provides methods to create a new deployment audit, or instantiate one to represent
+a deployment audit that has already been created. It can handle flattened and deep hashes.
+
+=head1 METHODS
+=head2 new
+Creates a new Genesis::Env::Deployment object based on the provided data.
+=head3 Parameters
+=over
+=item $env - The Genesis::Env object this deployment belongs to
+=item %data - Hash of deployment data with the following required fields:
+=over
+=item action - The action being performed (deploy or terminate)
+=item result - The result of the action (success, failed, pending, post-failed)
+=item started - The timestamp when the deployment started
+=item completed - The timestamp when the deployment completed
+=item sequence - The sequence number of this deployment
+=item genesis_version - The version of Genesis used for this deployment
+=item reason - The reason for this deployment
+=item kit - Hash containing kit information (id, name, version, is_dev, features)
+=item user - Hash containing user information (shell, repo, vault)
+=item artifacts - Optional artifacts data (as hash of local files or gzipped base64 string)
+=back
+=back
+
+=head2 lookup
+Gets a specific field from the deployment data.
+=head3 Parameters
+=over
+=item $field - The field to look up (can use dot notation for nested fields)
+=back
+
+=head2 timestamp
+Returns the timestamp for this deployment.
+
+=head2 env
+Returns the Genesis::Env object this deployment belongs to.
+
+=head2 committed
+Returns true if the deployment has been committed to exodus.
+
+=head2 commit
+Saves the deployment audit to the environment's vault.
+Returns true on success, bails on failure.
+
+=head2 available_artifacts
+Returns a list of artifact names available in this deployment.
+
+=head2 get_artifact
+Gets the content of a specific artifact.
+=head3 Parameters
+=over
+=item $artifact - The name of the artifact to retrieve
+=back
+
+=head2 get_artifacts
+Gets the contents of one or more artifacts (or all if none specified).
+=head3 Parameters
+=over
+=item @artifacts - Optional list of specific artifacts to retrieve
+=back
+
+=head2 extract_artifacts_to
+Extracts deployment artifacts to the specified directory.
+=head3 Parameters
+=over
+=item $path - The path to extract artifacts to
+=item @artifacts - Optional list of specific artifacts to extract (defaults to all)
+=back
+
+=head1 EXAMPLE
+	use Genesis::Env::Deployment;
+	my $deployment = Genesis::Env::Deployment->new(
+		env => $env,
+		action => 'deploy',
+		result => 'success',
+		started => time,
+		completed => time,
+		sequence => 1,
+		genesis_version => '3.0.0',
+		reason => 'Initial deployment',
+		artifacts => [],
+		kit => {
+			id => 'my-kit',
+			name => 'My Kit',
+			version => '1.0.0',
+			is_dev => 0,
+			features => [],
+		},
+		user => {
+			shell => '/bin/bash',
+			repo => 'my-repo',
+			vault => 'my-vault',
+		},
+	);
+=cut
