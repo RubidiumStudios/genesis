@@ -152,6 +152,7 @@ sub run_hook {
 		my $args = $opts{args} || [];
 		my @help_opt = (qw (--help -h));
 		($args, my $want_help) = compare_arrays($args, \@help_opt);
+		@args = @$args; # For the shell script
 		%module_options = (
 			script => $opts{script},
 			args => $args,
