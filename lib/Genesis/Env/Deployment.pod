@@ -1,103 +1,285 @@
 =pod
 =head1 NAME
-Genesis::Env::Deployment - Genesis deployment audit class
+
+Genesis::Env::Deployment - Class representing a deployment audit for a Genesis environment
 
 =head1 SYNOPSIS
-Use this class to create and manage deployment audits in Genesis environments.
+
+  # Create a new deployment audit object
+  my $deployment = Genesis::Env::Deployment->new($env,
+    action         => 'deploy',
+    result         => 'success',
+    reason         => 'User initiated deployment',
+    started        => $start_time,
+    completed      => $end_time,
+    genesis_version => $GENESIS_VERSION,
+    kit            => {
+      id          => $kit->id,
+      name        => $kit->name,
+      version     => $kit->version,
+      is_dev      => $kit->is_dev,
+      features    => $kit->requested_features
+    },
+    user          => {
+      shell       => $ENV{SHELL},
+      repo        => $ENV{GENESIS_REPO} // 'unknown',
+      vault       => $env->vault->url
+    },
+    manifest      => {
+      type        => $manifest->type,
+      sha2        => $manifest_sha2
+    },
+    artifacts     => {
+      manifest     => $env->manifest_file,
+      log          => $env->workpath('output.log'),
+      secrets      => $vault_paths
+    }
+  );
+  
+  # Commit the deployment audit
+  $deployment->commit;
+  
+  # Check if deployment has been committed
+  if ($deployment->committed) {
+    # Access deployment information
+    say "Deployment action: " . $deployment->action;
+    say "Deployment result: " . $deployment->result;
+    
+    # Access artifact types
+    my @types = $deployment->artifact_types;
+    
+    # Get contents of a specific artifact
+    my $manifest = $deployment->artifact('manifest');
+    
+    # Extract artifacts to a directory
+    my $files = $deployment->extract_artifacts_to('/tmp/artifacts');
+  }
 
 =head1 DESCRIPTION
-This class provides methods to create a new deployment audit, or instantiate one to represent
-a deployment audit that has already been created. It can handle flattened and deep hashes.
 
-=head1 METHODS
-=head2 new
+Genesis::Env::Deployment represents a deployment audit for a Genesis environment. 
+It records metadata about deployments, including the action performed (deploy or 
+terminate), the result, timestamps, and associated artifacts.
+
+This class provides methods for creating, committing, and retrieving deployment 
+audits, as well as accessing and extracting deployment artifacts such as manifests,
+logs, state files, and secrets.
+
+=head1 CLASS CONSTANTS
+
+=over
+
+=item action_succeeded
+
+Constant value: 'success'
+
+=item action_failed
+
+Constant value: 'failed'
+
+=item action_pending
+
+Constant value: 'pending'
+
+=item action_post_failed
+
+Constant value: 'post-failed'
+
+=item artifact_map_file
+
+Constant value: '_artifact_map.json'
+
+=back
+
+=head1 CLASS METHODS
+
+=head2 new($env, %data)
+
 Creates a new Genesis::Env::Deployment object based on the provided data.
-=head3 Parameters
+
+Required fields in %data:
+
 =over
-=item $env - The Genesis::Env object this deployment belongs to
-=item %data - Hash of deployment data with the following required fields:
-=over
-=item action - The action being performed (deploy or terminate)
-=item result - The result of the action (success, failed, pending, post-failed)
-=item started - The timestamp when the deployment started
-=item completed - The timestamp when the deployment completed
-=item sequence - The sequence number of this deployment
-=item genesis_version - The version of Genesis used for this deployment
-=item reason - The reason for this deployment
-=item kit - Hash containing kit information (id, name, version, is_dev, features)
-=item user - Hash containing user information (shell, repo, vault)
-=item artifacts - Optional artifacts data (as hash of local files or gzipped base64 string)
-=back
+
+=item action
+
+The action performed (deploy or terminate).
+
+=item result 
+
+The result of the action (success, failed, pending, post-failed).
+
+=item started
+
+When the action started (Time::Piece object or string in EXODUS_TIME_FORMAT).
+
+=item completed
+
+When the action completed (Time::Piece object or string in EXODUS_TIME_FORMAT).
+
+=item genesis_version
+
+The version of Genesis used for the deployment.
+
+=item reason
+
+The reason for the deployment.
+
+=item kit
+
+A hashref containing kit information with these keys:
+  - id: The kit identifier
+  - name: The kit name
+  - version: The kit version
+  - is_dev: Whether the kit is a development kit
+  - features: An array of features enabled for the kit
+
+=item user
+
+A hashref containing user information with these keys:
+  - shell: The user's shell
+  - repo (optional): The repository path
+  - vault (optional): The vault URL
+
+=item manifest
+
+A hashref containing manifest information with these keys:
+  - type: The manifest type
+  - sha2: The SHA-256 hash of the manifest
+
+=item artifacts (optional)
+
+Either:
+  - A hashref mapping artifact types to file paths
+  - A base64 gzipped string containing artifact contents
+
 =back
 
-=head2 lookup
-Gets a specific field from the deployment data.
-=head3 Parameters
-=over
-=item $field - The field to look up (can use dot notation for nested fields)
-=back
+=head1 INSTANCE METHODS
 
-=head2 timestamp
+=head2 action()
+
+Returns the action performed (deploy or terminate).
+
+=head2 result()
+
+Returns the result of the action (success, failed, pending, post-failed).
+
+=head2 started()
+
+Returns the Time::Piece object representing when the action started.
+
+=head2 completed()
+
+Returns the Time::Piece object representing when the action completed.
+
+=head2 duration()
+
+Returns the duration of the action (completed - started) in seconds.
+
+=head2 reason()
+
+Returns the reason for the deployment.
+
+=head2 lookup(@keys)
+
+Looks up a value in the deployment data using struct_lookup.
+
+=head2 timestamp()
+
 Returns the timestamp for this deployment.
 
-=head2 env
-Returns the Genesis::Env object this deployment belongs to.
+=head2 env()
 
-=head2 committed
+Returns the Genesis::Env object associated with this deployment.
+
+=head2 committed()
+
 Returns true if the deployment has been committed to exodus.
 
-=head2 commit
-Saves the deployment audit to the environment's vault.
-Returns true on success, bails on failure.
+=head2 commit()
 
-=head2 available_artifacts
-Returns a list of artifact names available in this deployment.
+Saves the deployment audit to the environment's vault under the exodus path.
+Throws an error if the deployment has already been committed.
 
-=head2 get_artifact
-Gets the content of a specific artifact.
-=head3 Parameters
+=head2 artifact_types()
+
+Returns a sorted list of artifact types available in this deployment.
+
+=head2 artifact_filenames()
+
+Returns a sorted list of artifact filenames available in this deployment.
+
+=head2 artifact($artifact)
+
+Returns the contents of a specific artifact by type or filename.
+Throws an error if the artifact is not found.
+
+=head2 artifacts(@artifacts)
+
+Returns a hashref mapping artifact types or filenames to their contents.
+If no arguments are provided, returns all artifacts.
+Throws an error if any of the requested artifacts are not found.
+
+=head2 extract_artifacts_to($path, @artifacts)
+
+Extracts the specified artifacts to the given path.
+If no artifacts are specified, extracts all artifacts.
+Returns a hashref mapping artifact names to their extracted file paths.
+Throws an error if the path is not a directory or if any artifacts are not found.
+
+=head1 INTERNAL METHODS
+
+These methods are used internally and are not meant to be called directly:
+
 =over
-=item $artifact - The name of the artifact to retrieve
+
+=item _get_artifact_hash(@artifacts)
+
+Internal helper to get all artifacts as a hash. Handles both local-file-hash and 
+b64-gzipped artifact formats.
+
+=item _build_artifacts_file($artifact_file, %artifacts)
+
+Builds a tarball of deployment artifacts, compresses it with gzip, and base64 encodes it.
+Also includes secrets from Vault if specified.
+
+=item _get_artifact_tarball()
+
+Gets the artifact tarball for this deployment by decoding and decompressing the b64-gzipped data.
+
+=item _artifact_map()
+
+Returns the artifact map for this deployment. If the map doesn't exist, it builds one based 
+on the artifacts format (local-file-hash or b64-gzipped).
+
+=item _is_artifact_type($ref)
+
+Checks if the given reference is an artifact type in the artifact map.
+
+=item _is_artifact_filename($ref)
+
+Checks if the given reference is an artifact filename in the artifact map.
+
+=item _get_artifact_type($ref)
+
+Returns the artifact type for the given reference. If the reference is a filename,
+it returns the corresponding type.
+
+=item _get_artifact_filename($ref)
+
+Returns the artifact filename for the given reference. If the reference is a type,
+it returns the corresponding filename.
+
+=item _is_base64_gzipped($data)
+
+Determines if a string is base64-encoded gzipped data by checking for base64 characters
+and the gzip magic number.
+
 =back
 
-=head2 get_artifacts
-Gets the contents of one or more artifacts (or all if none specified).
-=head3 Parameters
-=over
-=item @artifacts - Optional list of specific artifacts to retrieve
-=back
+=head1 AUTHOR
 
-=head2 extract_artifacts_to
-Extracts deployment artifacts to the specified directory.
-=head3 Parameters
-=over
-=item $path - The path to extract artifacts to
-=item @artifacts - Optional list of specific artifacts to extract (defaults to all)
-=back
+Dennis Bell E<lt>dennis.j.bell@gmail.comE<gt>
 
-=head1 EXAMPLE
-	use Genesis::Env::Deployment;
-	my $deployment = Genesis::Env::Deployment->new(
-		env => $env,
-		action => 'deploy',
-		result => 'success',
-		started => time,
-		completed => time,
-		sequence => 1,
-		genesis_version => '3.0.0',
-		reason => 'Initial deployment',
-		artifacts => [],
-		kit => {
-			id => 'my-kit',
-			name => 'My Kit',
-			version => '1.0.0',
-			is_dev => 0,
-			features => [],
-		},
-		user => {
-			shell => '/bin/bash',
-			repo => 'my-repo',
-			vault => 'my-vault',
-		},
-	);
 =cut

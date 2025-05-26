@@ -27,6 +27,7 @@ use constant {
 	action_failed => 'failed',
 	action_pending => 'pending',
 	action_post_failed => 'post-failed',
+	artifact_map_file => '_artifact_map.json',
 };
 
 ### Class Methods
@@ -262,65 +263,31 @@ sub commit {
 
 # }}}
 
-# REFATOR:  Deployments prior to being committed have a different set of keys
-# for the artifacts.  While committed deployments have artifacts known by their base
-# filename, uncommitted deployments have artifacts known by their type:
-#  log, manifest, unpruned, vars, state, store, and secrets
-#
-# Ideally we need to track both the type and the name of the artifact, so we can ask
-# for the artifact by either name or type.  We could do this by using a name of
-# type/filename in the tarball, but that's not backwards compatible.  Alternatively,
-# we could have a _map file in the tarball that maps the filename to the type, which
-# also isn't backwards compatible.
-#
-# One backwards compatible solution is to glean the type from the filename:
-# log -> /-output\.log$/,
-# secrets -> /secrets\.json$/,
-# vars -> /\.vars$/,
-# state -> /-state\.(json|yml)$/,
-# store -> /-store\.(json|yml)$/,
-# unpruned -> /-unpruned\.yml$/,
-# manifest -> /<$env->name>.yml$/
-#
-# These values are based on the deployment_cache_path_lookup() method in
-# Genesis::Env. The problem with this is that it imposes a fragility based on
-# the the current implementation of the deployment_cache_path_lookup() method.
-
-# available_artifacts - Return the list of artifact files for this deployment {{{
-sub available_artifacts {
+# artifact_types - Return the list of artifact types for this deployment {{{
+sub artifact_types {
 	my ($self) = @_;
-	
-	# Return undef if no artifacts
-	return undef unless $self->{artifacts};
-
-	if ($self->{artifacts}{format} eq 'local-file-hash') {
-		# If the artifact is a local file hash, return its keys
-		my @artifacts = keys %{$self->{artifacts}{data}};
-		# Add 'secrets.json' if 'secrets' is available
-		push @artifacts, 'secrets.json' if (grep {$_ eq 'secrets'} @artifacts);
-		return sort @artifacts;
-
-	} elsif ($self->{artifacts}{format} eq 'b64-gzipped') {
-		# If the artifact is a gzipped base64 string, extract file list from tarball
-		my $artifact_tarball = $self->_get_artifact_tarball();
-		my @filelist = $artifact_tarball->list_files();
-		
-		# If secrets.json is available, add both secrets.json and secrets to the list
-		my @artifacts = @filelist;
-		push @artifacts, 'secrets' if grep {$_ eq 'secrets.json'} @filelist;
-		return sort @artifacts;
-	} 
-	
-	bug("Unknown artifact format: " . ($self->{artifacts}{format} || 'undefined'));
+	my $artifact_map = $self->_artifact_map();
+	return sort keys %$artifact_map;
 }
+
+# }}}
+# artifact_filenames - Return the list of artifact filenames for this deployment {{{
+sub artifact_filenames {
+	my ($self) = @_;
+	# Return the list of artifact filenames for this deployment
+	my $artifact_map = $self->_artifact_map();
+	return sort values %$artifact_map;
+}
+
 # }}}
 
-# get_artifact - Get the artifact data for a specific artifact {{{
-sub get_artifact {
+# artifact - return the contents of a specific artifact by type or filename {{{
+sub artifact {
 	my ($self, $artifact) = @_;
 
 	bail("Artifact name is required") unless $artifact;
-	my $artifact_hash = $self->get_artifacts($artifact);
+	my $artifact_hash = $self->artifacts($artifact);
+
 	bail(
 		"artifact '$artifact' not found in deployment"
 	) unless ref($artifact_hash) eq 'HASH' && exists $artifact_hash->{$artifact};
@@ -328,29 +295,14 @@ sub get_artifact {
 }
 # }}}
 
-# get_artifacts - Get the artifacts contents for one or more artifacts (default is all) {{{
-sub get_artifacts {
+# artifacts - Get the artifacts contents for one or more artifacts (default is all) {{{
+sub artifacts {
 	my ($self, @artifacts) = @_;
 	
 	# Make sure we have artifacts
 	return {} unless $self->{artifacts};
 	
-	# If 'secrets' is requested, we need to handle it specially
-	my $secrets_requested = grep {$_ eq 'secrets'} @artifacts;
-	my $secrets_json_requested = grep {$_ eq 'secrets.json'} @artifacts;
 	my $contents = $self->_get_artifact_hash(@artifacts);
-	
-	# If secrets.json exists and secrets was requested, add it under the 'secrets' key
-	if (exists($contents->{'secrets.json'})) {
-		my $secrets_json = $contents->{'secrets.json'};
-		
-		# If 'secrets' was explicitly requested, decode JSON and add as 'secrets'
-		if ($secrets_requested) {
-			$contents->{secrets} = $secrets_json ? decode_json($secrets_json) : {};
-			delete $contents->{'secrets.json'} unless ($secrets_json_requested)
-		}
-	}
-	
 	return $contents;
 }
 # }}}
@@ -368,7 +320,7 @@ sub extract_artifacts_to {
 	# No artifacts to extract
 	if (!$self->{artifacts}) {
 		debug("No artifacts available for deployment %s", $self->timestamp);
-		return 0;
+		return {};
 	}
 
 	# Get all artifacts
@@ -378,21 +330,24 @@ sub extract_artifacts_to {
 	my $artifacts_hash = $self->_get_artifact_hash(@artifacts);
 	
 	# Write each artifact to the specified path
-	my $count = 0;
+	my %artifact_files = ();
 	for my $artifact (keys %$artifacts_hash) {
+		my $fileref = $self->_get_artifact_filename($artifact);
 			# Artifact names cannot contain paths as they are committed with the basename of the file
 		bail(
-			"Invalid artifact name '%s' - artifact names cannot contain path separators", 
-			$artifact
-		) if $artifact =~ m{/};
+			"Invalid artifact filename '#B{%s}'%s - artifact names cannot contain path separators", 
+			$fileref,
+			$artifact eq $fileref ? '' : " for artifact #M{$artifact}"
+		) if $fileref =~ m{/};
 		
 		# Write the artifact to the file
-		my $output_path = "$target_path/$artifact";
+		my $output_path = "$target_path/$fileref";
 		mkfile_or_fail($output_path, 0644, $artifacts_hash->{$artifact});
-		$count++;
+		debug("Extracted artifact '%s' to %s", $artifact, $output_path);
+		$artifact_files{$artifact} = $output_path;
 	}
 	
-	return $count; # Return the number of artifacts extracted
+	return \%artifact_files;
 }
 
 # }}}
@@ -403,67 +358,72 @@ sub extract_artifacts_to {
 sub _get_artifact_hash {
 	my ($self, @artifacts) = @_;
 	
-	my %artifacts_hash = ();
+	my %results = ();
+
+	if (!@artifacts) {
+		# If no artifacts are specified, return all available artifacts
+		@artifacts = $self->artifact_types();
+	} else {
+		# Validate the requested artifacts
+		my @invalid_artifacts;
+		for my $ref (@artifacts) {
+			next if $self->_is_artifact_type($ref);
+			next if $self->_is_artifact_filename($ref);
+			push @invalid_artifacts, $ref;
+		}
+		bail(
+			"Invalid artifacts requested: %s",
+			join(', ', @invalid_artifacts)
+		) if @invalid_artifacts;
+	}
 	
-	# First convert all 'secrets' requests to 'secrets.json' for internal processing
-	my $requested_secrets = grep {$_ eq 'secrets'} @artifacts;
-	my $requested_secrets_json = grep {$_ eq 'secrets.json'} @artifacts;
-	@artifacts = uniq map {$_ eq 'secrets' ? 'secrets.json' : $_} @artifacts;
-	
-	my @available_artifacts = grep {$_ ne 'secrets'} $self->available_artifacts();
-	my ($invalid_artifacts) = compare_arrays(\@artifacts, \@available_artifacts);
-	bail(
-		"Invalid artifacts requested: %s",
-		join(', ', map {
-			($_ eq 'secrets.json' && $requested_secrets)
-				? $requested_secrets_json
-					? qw/secrets secrets.json/
-					: qw/secrets/
-				: $_
-		} @$invalid_artifacts)
-	) if @$invalid_artifacts;
-	
-	@artifacts = @available_artifacts if !@artifacts;
-	
+	my $artifacts_map = $self->_artifact_map();
 	if ($self->{artifacts}{format} eq 'local-file-hash') {
-		# Handle local file hash format
+		# Handle local file hash format - this uses type as the key, but it doesn't
+		# have a secrets.json file, but rather a secrets key that contains the vault paths
+		my $requested_secrets = grep {$_ eq 'secrets'} @artifacts;
+		my $requested_secrets_json = grep {$_ eq 'secrets.json'} @artifacts;
 
 		# Process all non-secrets artifacts
-		foreach my $artifact (grep {$_ ne 'secrets.json'} @artifacts) {
-			my $file = $self->{artifacts}{data}{$artifact};
-			bail("Artifact '$artifact' file not found") unless $file && -f $file;
-			$artifacts_hash{$artifact} = slurp($file);
+		foreach my $artifact (grep {$_ !~ /^secrets(\.json)?$/} @artifacts) {
+
+			my $key = $self->_get_artifact_type($artifact);
+			my $fileref = $artifacts_map->{$key} // $artifact;
+			my $file = $self->{artifacts}{data}{$key};
+			bail("artifact '$artifact' file not found") unless $file && -f $file;
+			$results{$artifact} = slurp($file);
 		}
 		
 		# Handle secrets separately if needed
 		if ($requested_secrets || $requested_secrets_json) {
-			if (exists $self->{artifacts}{data}{secrets}) {
-				if (! @{$self->{artifacts}{data}{secrets}||[]}) {
-					$artifacts_hash{'secrets.json'} = '{}';
-				} else {
-					my $secrets = $self->env->vault->query({redact => 1},
-						'export', 'secrets',
-						$self->{artifacts}{data}{secrets}
-					);
-					$artifacts_hash{'secrets.json'} = $secrets;
-				}
+			# Already validated that secrets is a valid artifact type
+
+			my $contents;
+			if (@{$self->{artifacts}{data}{secrets}||[]}) {
+				$contents = $self->env->vault->query({redact => 1},
+					'export', 'secrets',
+					$self->{artifacts}{data}{secrets}->@*
+				);
 			} else {
-				bail("Artifact 'secrets.json' not found in deployment");
+				$contents = '{}';
 			}
+			$results{'secrets'} = $contents if $requested_secrets;
+			$results{'secrets.json'} = $contents if $requested_secrets_json;
 		}
-	}
-	elsif ($self->{artifacts}{format} eq 'b64-gzipped') {
-		# Handle gzipped base64 format
+
+	}	elsif ($self->{artifacts}{format} eq 'b64-gzipped') {
+		# Handle gzipped base64 format - this uses the filename as the key
 		my $artifact_tarball = $self->_get_artifact_tarball();
 		
 		# Load each artifact
-		foreach my $file (@artifacts) {
-			my $content = $artifact_tarball->get_content($file);
-			bail("Failed to extract artifact '$file' from archive") unless defined($content);
-			$artifacts_hash{$file} = $content;
+		foreach my $ref (@artifacts) {
+			my $fileref = $artifacts_map->{$ref} // $ref;
+			my $content = $artifact_tarball->get_content($fileref);
+			bail("Failed to extract artifact '$ref' from archive") unless defined($content);
+			$results{$ref} = $content;
 		}
 	}
-	return \%artifacts_hash;
+	return \%results;
 }
 
 # }}}
@@ -484,6 +444,11 @@ sub _build_artifacts_file {
 		# Use the basename so when it is extracted, it matches the original file name
 		$tar->add_data(basename($artifacts{$artifact}), slurp($artifacts{$artifact}));
 	}
+
+	# Add in the artifact map
+	my $artifact_map = $self->_artifact_map();
+	$tar->add_data(artifact_map_file, encode_json($artifact_map))
+		if $artifact_map && keys %$artifact_map;
 
 	# Add in all secrets used by the manifest
 	if (defined $secrets && ref($secrets) eq 'ARRAY') {
@@ -529,6 +494,92 @@ sub _get_artifact_tarball {
 
 # }}}
 
+# _artifact_map - return the artifact map for this deployment {{{
+sub _artifact_map {
+	my ($self) = @_;
+
+	return undef unless $self->{artifacts};
+	return $self->{artifacts}{map} if $self->{artifacts}{map};
+
+	my %artifact_map = ();
+	if ($self->{artifacts}{format} eq 'local-file-hash') {
+		# If the artifacts are a local file hash, let's build a map from the hash
+		%artifact_map = map {
+			$_ => basename($self->{artifacts}{data}{$_})
+		} grep {$_ ne 'secrets'} keys %{$self->{artifacts}{data}};
+		if (exists $self->{artifacts}{data}{secrets}) {
+			# Add 'secrets.json' if 'secrets' is available
+			$artifact_map{secrets} = 'secrets.json'; # FIXME: Shouldn't be hardcoded
+		}
+	} elsif ($self->{artifacts}{format} eq 'b64-gzipped') {
+		# If the artifacts are gzipped base64, we need to extract the artifact map from the tarball
+		my $artifact_tarball = $self->_get_artifact_tarball();
+		if ($artifact_tarball->contains_file(artifact_map_file)) {
+			my $artifact_map_content = $artifact_tarball->get_content(artifact_map_file);
+			# RISK: This will fail if the artifact map is not valid JSON
+			return $self->{artifacts}{map} = decode_json($artifact_map_content)
+				if $artifact_map_content;
+		}
+		# Tarball does not contain an artifact map, so we need to build it
+		my $env_name = $self->env->name;
+		my $artifact_regex_map = {
+			log       => qr/^${env_name}-output\.log$/,
+			secrets   => qr/^secrets\.json$/,
+			vars      => qr/^${env_name}\.vars$/,
+			state     => qr/^${env_name}-state\.(json|yml)$/,
+			store     => qr/^${env_name}-store\.(json|yml)$/,
+			unpruned  => qr/^${env_name}-unpruned\.yml$/,
+			manifest  => qr/^${env_name}\.yml$/
+		};
+		my @tarball_files = $artifact_tarball->list_files();
+		for my $filename (grep {$_ ne artifact_map_file} @tarball_files) {
+			my $matched = 0;
+			for my $key (keys %$artifact_regex_map) {
+				if ($filename =~ $artifact_regex_map->{$key}) {
+					$artifact_map{$key} = $filename;
+					$matched = 1;
+					last;
+				}
+			}
+			# If we didn't find a match, use the filename as the key
+			if (!$matched) {
+				$artifact_map{$filename} = $filename;
+			}
+		}
+	}
+	return $self->{artifacts}{map} = \%artifact_map;
+}
+
+# }}}
+# _is_artifact_type - Check if the given artifact is a type {{{
+sub _is_artifact_type {
+	return exists $_[0]->_artifact_map->{$_[1]} ? 1 : 0;
+}
+
+# }}}
+# _is_artifact_filename - Check if the given artifact is a filename {{{
+sub _is_artifact_filename {
+	my ($self, $ref) = @_;
+	return (grep {$_ eq $ref} values $self->_artifact_map->%*) ? 1 : 0;
+}
+
+sub _get_artifact_type {
+	my ($self, $ref) = @_;
+	# Get the artifact type for the given reference
+	my $artifact_map = $self->_artifact_map();
+	return $ref if exists $artifact_map->{$ref};
+	return (grep {$artifact_map->{$_} eq $ref} keys %$artifact_map)[0];
+}
+
+sub _get_artifact_filename {
+	my ($self, $ref) = @_;
+	# Get the artifact filename for the given reference
+	my $artifact_map = $self->_artifact_map();
+	return $artifact_map->{$ref} if exists $artifact_map->{$ref};
+	return (grep {$_ eq $ref} values %$artifact_map)[0];
+}
+
+# }}}
 # _is_base64_gzipped - Determines if a string is base64-encoded gzipped data {{{
 sub _is_base64_gzipped {
 	my ($base64_data) = @_;

@@ -221,6 +221,7 @@ sub create {
 	);
 	
 	# Store artifacts if provided
+	# TODO: Should we build this here, or allow the caller to pass it in?
 	if ($options{artifacts}) {
 		$data{artifacts} = $options{artifacts};
 	}
