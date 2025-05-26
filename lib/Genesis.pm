@@ -426,7 +426,9 @@ sub new_enough {
 
 sub strfuzzytime {
 	my ($datestring,$output_format, $input_format) = @_;
-	$input_format ||= "%Y-%m-%d %H:%M:%S %z";
+	$input_format //= ref($datestring) eq 'Time::Seconds'
+		? 'seconds'
+		: "%Y-%m-%d %H:%M:%S %z";
 
 	my ($delta,$fuzzy,$past,$time);
 	if ($input_format eq 'seconds') {
@@ -487,15 +489,15 @@ sub strfuzzytime {
 		my $half = (int($delta->years) == int($delta->years + 0.5)) ? "" : " and a half";
 		$fuzzy = sprintf("more than %d%s years", $delta->years, $half );
 	}
-	$fuzzy = $past ? "$fuzzy ago" : "in $fuzzy";
-	if ($output_format) {
-		if ($input_format eq 'seconds') {
+	if ($input_format eq 'seconds') {
+		$fuzzy = sprintf(
 			# ie "%s seconds - %~"
-			$fuzzy = sprintf(
-				join($fuzzy, split(/%~/, $output_format)),
-				$time
-			)
-		} else {
+			join($fuzzy, split(/%~/, $output_format)),
+			$time
+		) if $output_format;
+	} else {
+		$fuzzy = $past ? "$fuzzy ago" : "in $fuzzy";
+		if ($output_format) {
 			my @lt = localtime($time->epoch); # Convert to localtime
 			$fuzzy = join($fuzzy, map {strftime($_, @lt)} split(/%~/, $output_format))
 		}
