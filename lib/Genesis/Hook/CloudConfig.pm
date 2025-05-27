@@ -716,70 +716,248 @@ sub _cloud_properties_for_iaas {
 
 # }}}
 # _process_config_overrides - Applies overrides to a given config based on the environment and bosh {{{
+#
+# This method applies configuration overrides from multiple sources to cloud config definitions.
+# It supports deep merging of configuration structures and can add new properties not present
+# in the original configuration.
+#
+# Override sources (in order of priority):
+# 1. Ops files (future feature): $GENESIS_ROOT/ops/cloud/${type}s/${target}.yml
+# 2. Environment specific overrides: bosh-configs.cloud.${type}s.${target}
+# 3. Environment default overrides: bosh-configs.cloud.${type}_defaults
+# 4. Exodus overrides (future feature): /secret/<bosh-env>/<bosh-type>/configs/cloud/${type}/${path}
+#
+# Parameters:
+#   $type   - The type of config (vm_type, vm_extension, disk_type, network)
+#   $target - The specific target name (e.g., 'small' for vm_type)
+#   $config - The configuration structure to apply overrides to
+#   $path   - The current path in the configuration tree (used for recursion)
+#
+# Returns:
+#   The configuration with all applicable overrides applied
+#
 sub _process_config_overrides {
 	my ($self, $type, $target, $config, $path) = @_;
 
-	# Recursively process each key or array element in the config, keeping track
-	# of the path to determine where the overrides can be found.  Locations for
-	# the overides are:
-	# - environment file:
-	#  - bosh-configs.cloud.${type}_defaults.${path}
-	#  - bosh-configs.cloud.${type}s.$name.${path}
-	# - exodus:
-	#   /secret/<bosh-env-name>/<bosh-type>/configs/cloud/${type}/${path} TODO:  This is not implemented yet
-	#
-	# If the key is an array reference, the key is the first element, and the
-	# lookup path is the second element.
-	#
-	# FIXME:  This only detects overrides for known config properties.  We need
-	# to track the overrides that aren't applied, and just apply them at the end.
-	# Alternatively, we lookup all the overrides first, and apply them as we go
-	# for any matching paths.
-	if (ref($config) eq 'HASH') {
-		foreach my $key (keys %$config) {
-			my $value    = delete($config->{$key});
-			my $new_path = $path ? "$path.$key" : $key;
+	# Short-circuit for non-override types
+	return $config unless ref($config) || defined($config);
 
-			$config->{$key} = $self->_process_config_overrides(
-				$type, $target, $value, $new_path
-			);
-			delete($config->{$key}) unless defined($config->{$key});
-		}
+	# Handle special reference types first
+	if (ref($config) eq 'Genesis::Hook::CloudConfig::LookupRef') {
+		# LookupRef objects return their default value when no override found
+		return $config->default;
+	}
 
-		# Apply overrides for non-processed items here...
-	} elsif (ref($config) eq 'ARRAY') {
-		foreach my $i (0..$#{$config}) {
-			my $element  = $config->[$i];
-			my $new_path = $path ? "${path}[$i]" : ".[$i]";
-			$config->[$i] = $self->_process_config_overrides(
-				$type, $target, $element, $new_path
-			);
-		}
+	# Collect all applicable overrides upfront
+	my $overrides = $self->_collect_overrides($type, $target);
 
-		# Apply overrides for non-processed items here... (not likely to happen for arrays)
-	} elsif (ref($config) eq 'Genesis::Hook::CloudConfig::LookupRef') {
-		# This is a lookup referrence, with optional defaults
-		$config = $config->default;
-	} else {
-		my ($override, $src) = $self->env->lookup([
-			"bosh-configs.cloud.".count_nouns(2,$type, suppress_count => 1).".$target.$path",
-			"bosh-configs.cloud.${type}_defaults.$path"
-		]);
+	# Apply overrides recursively
+	my $result = $self->_apply_overrides_recursive($config, $overrides, $path, $type, $target);
 
-		# Unimplemented in upstream deployments so far, so disabling for now
-		#($override, $src) = $self->_bosh_exodus_lookup( # This will be cached so don't fetch exodus data for each lookup
-		#	"/configs/cloud/$type/$path" =~ s/\./\//gr,
-		#) unless defined($override);
+	# Apply any remaining overrides not matched during traversal
+	$result = $self->_apply_unmatched_overrides($result, $overrides, $path);
 
-		if ($override) {
-			trace(
-				"Applying override for %s %s %s: %s (from %s)",
-				$type, $target, $path, JSON::PP->new->allow_nonref->encode($override), $src
-			);
-			$config = $override;
+	return $result;
+}
+
+# }}}
+# _collect_overrides - Collects all applicable overrides from various sources {{{
+sub _collect_overrides {
+	my ($self, $type, $target) = @_;
+
+	# Cache key for performance
+	my $cache_key = "_overrides_${type}_${target}";
+	return $self->{$cache_key} if exists $self->{$cache_key};
+
+	my $overrides = {
+		defaults => {},
+		specific => {},
+		unmatched => {}
+	};
+
+	# Step 1: Environment file overrides
+	my $type_plural = $self->_pluralize_type($type);
+
+	# Get all overrides at once to minimize lookups
+	my ($defaults) = $self->env->lookup("bosh-configs.cloud.${type}_defaults");
+	my ($specific) = $self->env->lookup("bosh-configs.cloud.${type_plural}.$target");
+
+	$overrides->{defaults} = flatten({}, '', $defaults) if $defaults;
+	$overrides->{specific} = flatten({}, '', $specific) if $specific;
+
+	# Step 2: Future ops file support hook
+	if ($self->_ops_files_enabled()) {
+		my $ops_overrides = $self->_load_ops_file_overrides($type, $target);
+		if ($ops_overrides) {
+			$overrides->{ops} = flatten({}, '', $ops_overrides);
 		}
 	}
+
+	return $self->{$cache_key} = $overrides;
+}
+
+# }}}
+# _apply_overrides_recursive - Recursively applies overrides to config structure {{{
+sub _apply_overrides_recursive {
+	my ($self, $config, $overrides, $path, $type, $target) = @_;
+
+	# Base case: scalar values
+	unless (ref($config)) {
+		my $override_value = $self->_find_override_value($overrides, $path);
+		if (defined $override_value) {
+			trace(
+				"Applying override for %s %s %s: %s",
+				$type, $target, $path, 
+				JSON::PP->new->allow_nonref->encode($override_value)
+			);
+			# Mark this path as matched
+			$self->_mark_override_matched($overrides, $path);
+			return $override_value;
+		}
+		return $config;
+	}
+
+	# Handle hashes
+	if (ref($config) eq 'HASH') {
+		my $result = {};
+
+		# Process existing keys
+		for my $key (keys %$config) {
+			my $new_path = $path ? "$path.$key" : $key;
+			$result->{$key} = $self->_apply_overrides_recursive(
+				$config->{$key}, $overrides, $new_path, $type, $target
+			);
+			# Remove undefined values
+			delete $result->{$key} unless defined $result->{$key};
+		}
+
+		# Check for new keys from overrides at this level
+		my $path_prefix = $path ? "$path." : "";
+		for my $override_path (keys %{$overrides->{specific}}, 
+		                       keys %{$overrides->{defaults}},
+		                       keys %{$overrides->{ops} // {}}) {
+			if ($override_path =~ /^\Q$path_prefix\E([^.\[]+)$/) {
+				my $key = $1;
+				unless (exists $result->{$key}) {
+					my $new_path = "$path_prefix$key";
+					my $value = $self->_find_override_value($overrides, $new_path);
+					if (defined $value) {
+						trace(
+							"Adding new property from override: %s %s %s = %s",
+							$type, $target, $new_path,
+							JSON::PP->new->allow_nonref->encode($value)
+						);
+						$result->{$key} = $value;
+						$self->_mark_override_matched($overrides, $new_path);
+					}
+				}
+			}
+		}
+
+		return $result;
+	}
+
+	# Handle arrays
+	if (ref($config) eq 'ARRAY') {
+		my $result = [];
+		for my $i (0..$#$config) {
+			my $new_path = $path ? "${path}[$i]" : "[$i]";
+			$result->[$i] = $self->_apply_overrides_recursive(
+				$config->[$i], $overrides, $new_path, $type, $target
+			);
+		}
+		return $result;
+	}
+
+	# Other ref types pass through
 	return $config;
+}
+
+# }}}
+# _apply_unmatched_overrides - Applies any overrides that didn't match during traversal {{{
+sub _apply_unmatched_overrides {
+	my ($self, $config, $overrides, $base_path) = @_;
+
+	# Collect all unmatched override paths
+	my %unmatched;
+	for my $source (qw(ops specific defaults)) {
+		next unless exists $overrides->{$source};
+		for my $path (keys %{$overrides->{$source}}) {
+			$unmatched{$path} = $overrides->{$source}{$path};
+		}
+	}
+
+	return $config unless %unmatched;
+
+	# Convert config to flat structure
+	my $flat_config = flatten({}, '', $config);
+
+	# Add unmatched overrides
+	for my $path (keys %unmatched) {
+		unless (exists $flat_config->{$path}) {
+			trace(
+				"Adding unmatched override: %s = %s",
+				$path, JSON::PP->new->allow_nonref->encode($unmatched{$path})
+			);
+			$flat_config->{$path} = $unmatched{$path};
+		}
+	}
+
+	# Convert back to nested structure
+	return unflatten($flat_config);
+}
+
+# }}}
+# _find_override_value - Finds override value from all sources with priority {{{
+sub _find_override_value {
+	my ($self, $overrides, $path) = @_;
+
+	# Priority: ops > specific > defaults
+	for my $source (qw(ops specific defaults)) {
+		next unless exists $overrides->{$source};
+		if (exists $overrides->{$source}{$path}) {
+			return $overrides->{$source}{$path};
+		}
+	}
+
+	return undef;
+}
+
+# }}}
+# _mark_override_matched - Marks an override as matched for tracking {{{
+sub _mark_override_matched {
+	my ($self, $overrides, $path) = @_;
+	for my $source (qw(ops specific defaults)) {
+		delete $overrides->{$source}{$path} if exists $overrides->{$source}{$path};
+	}
+}
+
+# }}}
+# _ops_files_enabled - Checks if ops files feature is enabled {{{
+sub _ops_files_enabled {
+	return 0; # Disabled for now, can be enabled via env var or config
+}
+
+# }}}
+# _load_ops_file_overrides - Loads overrides from ops files (future feature) {{{
+sub _load_ops_file_overrides {
+	my ($self, $type, $target) = @_;
+	
+	# Future implementation will check for ops files in:
+	# - $GENESIS_ROOT/ops/cloud/${type}s/default.yml
+	# - $GENESIS_ROOT/ops/cloud/${type}s/${target}.yml
+	# - $GENESIS_ROOT/ops/cpi/${type}s/default.yml  (if CPI-specific)
+	# - $GENESIS_ROOT/ops/cpi/${type}s/${target}.yml (if CPI-specific)
+	#
+	# For now, this is a stub that returns undef
+	return undef;
+}
+
+# }}}
+# _pluralize_type - Helper to pluralize type names for lookup {{{
+sub _pluralize_type {
+	my ($self, $type) = @_;
+	return $type =~ s/_?(type|extension)$//r . 's';
 }
 
 # }}}
