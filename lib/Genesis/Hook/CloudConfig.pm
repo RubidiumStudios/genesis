@@ -92,7 +92,8 @@ sub done {
 		=~ s/\b${sort_cloud_properties_last}:/cloud_properties:/gr
 		=~ s/\n([^ -])/\n\n$1/gmr;
 	unlink($filename);
-	$self->SUPER::done($contents);
+	$self->{contents} = $contents;
+	$self->SUPER::done();
 }
 
 # }}}

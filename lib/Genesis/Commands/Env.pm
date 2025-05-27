@@ -677,7 +677,7 @@ sub deploy {
 	}
 	# Specify the environment iaas and scale
 	info(
-		"  - to a #Y{%s}-scaled #C{%s} IaaS target",
+		"  - to a #Y{%s}-scale #G{%s} IaaS target",
 		$env->scale, $env->iaas
 	);
 
@@ -779,7 +779,15 @@ sub deploy {
 								"Uploading new cloud config to #M{%s} BOSH director...",
 								$env->bosh->{alias}
 							);
-							$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
+							eval {
+								# Upload the new cloud config
+								$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
+							} or bail(
+								"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
+								$cloud_config_name,
+								fix_wrap($@),
+								slurp($new_path)
+							);
 							info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
 						}
 					} else {
@@ -794,7 +802,14 @@ sub deploy {
 						"[[  - >>uploading new cloud config to #M{%s} BOSH director...",
 						$env->bosh->{alias}
 					);
-					$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
+					eval {
+						$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
+					} or bail(
+						"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
+						$cloud_config_name,
+						fix_wrap($@),
+						slurp($new_path)
+					);
 					info "[[  - >>cloud config for #C{%s} deployment has been created.\n", $env->name;
 				}
 
