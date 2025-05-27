@@ -675,6 +675,20 @@ sub deploy {
 	} else {
 		info "  - to '#M{%s}' BOSH director at #c{%s}.", $env->bosh->{alias}, $env->bosh->{url};
 	}
+	# Specify the environment iaas and scale
+	info(
+		"  - to a #Y{%s}-scaled #C{%s} IaaS target",
+		$env->scale, $env->iaas
+	);
+
+	# Check if the kit supports the environment's IaaS
+	if (my $supported_iaas = $env->kit->metadata('supports')) {
+		bail(
+			"Genesis kit #C{%s} does not support the IaaS type #C{%s} - ".
+			"you will need to use a different kit/version.",
+			$env->kit->id, $env->iaas
+		) unless in_array($env->iaas, @$supported_iaas);
+	}
 
 	my ($cloud_config, $network_map, $cpi_config, $credhub_secrets, $cpi_err) = ();
 	my $ok = 1;
