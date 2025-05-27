@@ -1,0 +1,306 @@
+=pod
+
+=head1 NAME
+
+Genesis::Env::DeploymentManager - Manager for deployment audits in Genesis environments
+
+=head1 SYNOPSIS
+
+  # Create a new deployment manager for an environment
+  my $deployment_manager = Genesis::Env::DeploymentManager->new($env);
+  
+  # Get all deployment audits
+  my @all_deployments = $deployment_manager->all();
+  
+  # Find specific deployments with filters
+  my @successful_deploys = $deployment_manager->find(
+    action => 'deploy',
+    result => 'success'
+  );
+  
+  # Get deployments within a date range
+  my @recent = $deployment_manager->find(
+    range => '>20240101',
+    limit => 10
+  );
+  
+  # Get the latest deployment
+  my $latest = $deployment_manager->latest();
+  
+  # Get the latest successful deployment
+  my $latest_successful = $deployment_manager->latest_successful();
+  
+  # Check current deployment state
+  my $state = $deployment_manager->current_state(); # 'deployed', 'terminated', or 'undeployed'
+  
+  # Build a new deployment audit
+  my $deployment = $deployment_manager->build(
+    'deploy', 'success',
+    reason => 'User initiated deployment',
+    started => Time::Piece->new,
+    completed => Time::Piece->new + 300
+  );
+  
+  # Commit the deployment audit
+  $deployment->commit();
+  
+  # Reset cached deployments
+  $deployment_manager->reset();
+
+=head1 DESCRIPTION
+
+Genesis::Env::DeploymentManager provides comprehensive management of deployment 
+audits for Genesis environments. It handles the lifecycle of deployment records,
+including creation, retrieval, filtering, and state management.
+
+This class maintains a cache of deployment audits retrieved from Vault and 
+provides various methods to query and filter these deployments based on 
+different criteria such as action type, result status, timestamps, and more.
+
+=head1 CONSTRUCTOR
+
+=head2 new($env)
+
+Creates a new deployment manager for the given Genesis environment.
+
+=over
+
+=item $env
+
+A Genesis::Env object representing the environment to manage deployments for.
+
+=back
+
+Returns a new Genesis::Env::DeploymentManager instance.
+
+=head1 METHODS
+
+=head2 all()
+
+Retrieves all deployment audits for the environment, sorted by timestamp 
+(newest first). Results are cached for performance.
+
+Returns an array of Genesis::Env::Deployment objects.
+
+=head2 reset()
+
+Clears the cached deployment audits, forcing a fresh retrieval from Vault 
+on the next access.
+
+=head2 find(%options)
+
+Finds deployment audits matching the specified criteria. This is the most 
+flexible method for querying deployments.
+
+Valid options:
+
+=over
+
+=item action
+
+Filter by action type ('deploy' or 'terminate').
+
+=item result
+
+Filter by result status ('success', 'failed', 'pending', 'post-failed').
+
+=item all
+
+Include pending and failed deployments. By default, only successful 
+deployments are returned unless a specific result is requested.
+
+=item timestamps_only
+
+Return only timestamps instead of full deployment objects.
+
+=item limit
+
+Limit the number of deployments returned (latest N deployments).
+
+=item range
+
+Filter by timestamp range. Supports multiple formats:
+  - [<|>|<=|>=]<timestamp> - Compare with timestamp
+  - <timestamp>[<|<=]x[<|<=]<timestamp> - Between timestamps  
+  - N[...M] - Integer offsets (negative for reverse)
+
+Where <timestamp> format is: YYYY[-?MM[-?DD[T| ][HH[:?MM[:?SS[Z| ][+-]HHMM]]]]]
+
+=back
+
+Returns an array of Genesis::Env::Deployment objects or timestamps.
+
+=head2 at($timestamp)
+
+Retrieves the deployment audit at a specific timestamp.
+
+=over
+
+=item $timestamp
+
+The timestamp string of the deployment to retrieve.
+
+=back
+
+Returns a Genesis::Env::Deployment object or undef if not found.
+
+=head2 latest(%options)
+
+Gets the most recent deployment audit, optionally filtered by criteria.
+
+Valid options:
+
+=over
+
+=item action
+
+Filter by action type ('deploy' or 'terminate').
+
+=item result
+
+Filter by result status.
+
+=item include_failed
+
+Include failed deployments in the search.
+
+=back
+
+Returns a Genesis::Env::Deployment object or undef if none found.
+
+=head2 latest_successful(%options)
+
+Gets the latest successful deployment. This is a convenience method that 
+calls find() with a limit of 1, which by default only returns successful 
+deployments.
+
+Accepts the same options as find().
+
+Returns a Genesis::Env::Deployment object or undef.
+
+=head2 current_state()
+
+Determines the current deployment state of the environment by examining 
+the latest successful deployment.
+
+Returns one of:
+  - 'deployed' - Environment is currently deployed
+  - 'terminated' - Environment has been terminated  
+  - 'undeployed' - Environment has never been deployed
+
+=head2 build($action, $result, %options)
+
+Builds a new deployment audit object with the specified action and result,
+merging in additional options with base deployment content.
+
+=over
+
+=item $action
+
+The deployment action ('deploy' or 'terminate').
+
+=item $result  
+
+The deployment result ('success', 'failed', 'pending', 'post-failed').
+
+=item %options
+
+Additional deployment data to merge with the base content.
+
+=back
+
+Returns a new Genesis::Env::Deployment object ready for committing.
+
+=head2 next_sequence_number($action)
+
+Calculates the next sequence number for deployments. This ensures proper 
+ordering and tracking of deployment history.
+
+=over
+
+=item $action
+
+The deployment action (currently unused but reserved for future use).
+
+=back
+
+Returns the next sequence number as an integer.
+
+=head2 env()
+
+Returns the Genesis::Env object this deployment manager is associated with.
+
+=head1 PRIVATE METHODS
+
+=head2 _base_deployment_content($action, $result)
+
+Generates the base deployment audit content including kit information, 
+user details, artifacts, and manifest data.
+
+=head2 _base_artifacts($action)
+
+Returns a hashref of artifacts based on the deployment action. For deploy 
+actions, includes logs, manifests, vars, state, store, and secrets. For 
+terminate actions, includes logs and state only.
+
+=head1 PRIVATE FUNCTIONS
+
+=head2 _get_last_day_of_month($year, $month)
+
+Utility function to calculate the last day of a given month, accounting 
+for leap years.
+
+=head2 _parse_into_timestamp_cmp($timestamp, $comparison_operator)
+
+Parses a timestamp string and comparison operator into a normalized 
+timestamp string suitable for range comparisons.
+
+=head1 CACHING
+
+The deployment manager implements intelligent caching to improve performance:
+
+=over
+
+=item *
+
+Deployment audits are cached after the first retrieval from Vault
+
+=item *
+
+Cache is automatically invalidated when deployments are committed  
+
+=item *
+
+Manual cache clearing is available via the reset() method
+
+=back
+
+=head1 ERROR HANDLING
+
+The class follows Genesis error handling conventions:
+
+=over
+
+=item *
+
+Uses bail() for user-facing errors with helpful messages
+
+=item *
+
+Uses bug() for internal consistency errors
+
+=item *
+
+Validates all input parameters and options
+
+=item *
+
+Gracefully handles missing or malformed deployment data
+
+=back
+
+=head1 AUTHOR
+
+Genesis Team E<lt>genesis@starkandwayne.comE<gt>
+
+=cut

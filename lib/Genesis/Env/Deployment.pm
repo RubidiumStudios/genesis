@@ -8,7 +8,7 @@ use 5.20.0;
 use Genesis qw/
 	bail debug bug
 	unflatten flatten struct_lookup uniq compare_arrays
-	absolute_path mkfile_or_fail slurp
+	absolute_path mkfile_or_fail slurp in_array
 	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
 /;
 use Genesis::Term qw/wrap/;
@@ -16,31 +16,46 @@ use Genesis::Term qw/wrap/;
 use Archive::Tar;
 use IO::Compress::Gzip qw/gzip $GzipError/;
 use IO::Uncompress::Gunzip qw/gunzip $GunzipError/;
-use JSON::PP qw/decode_json/;
+use JSON::PP qw/decode_json encode_json/;
 use File::Basename qw/basename/;
 use MIME::Base64 qw/encode_base64 decode_base64/;
 use Time::Piece;
 
 ## Class Constants
 use constant {
-	action_succeeded => 'success',
-	action_failed => 'failed',
-	action_pending => 'pending',
+	action_succeeded   => 'success',
+	action_failed      => 'failed',
+	action_pending     => 'pending',
 	action_post_failed => 'post-failed',
-	artifact_map_file => '_artifact_map.json',
+	action_assumed     => 'assumed',
+
+	artifact_map_file  => '_artifact_map.json',
 };
 
 ### Class Methods
 # new - create a new Genesis::Env::Deployment object based on the provided data {{{
+sub is_a_successful_result {
+	my ($result) = @_;
+	return in_array($result, action_succeeded, action_post_failed);
+}
+sub is_a_failed_result {
+	my ($result) = @_;
+	return in_array($result, action_failed);
+}
+
 sub new {
 	my ($class, $env, %data) = @_;
+
+	# Validate that env is a Genesis::Env object
+	bug("Expected Genesis::Env object, got %s", ref($env) || 'undefined')
+		unless ref($env) && $env->isa('Genesis::Env');
 
 	# Unflatten the data if it contains dot notation
 	%data = unflatten(\%data) if grep {$_ =~ /\./} keys %data;
 
 	# Lets do some sanitizing before we validate the data for older dev versions
-	if (my $state = delete($data{state}) && !defined($data{action})) {
-		$data{action} = $state eq 'deployed' ? 'deploy' : 'terminate';
+	if (my $state = delete($data{state})) {
+		$data{action} = $state eq 'deployed' ? 'deploy' : 'terminate' unless defined($data{action});
 		$data{result} = action_succeeded;
 		$data{genesis_version} //= 'unknown';
 		$data{kit} //= {
@@ -80,6 +95,8 @@ sub new {
 		type sha2
 	);
 
+	# TODO: Should we validate against unknown fields, or just allow them?
+
 	bug(
 		"Missing required fields for $timestamp deployment audit: " . join(', ', @missing)
 	) if @missing;
@@ -87,7 +104,7 @@ sub new {
 	# Validate the action and result fields
 	my @valid_actions = qw(deploy terminate);
 	my @valid_results = (
-		action_succeeded, action_failed, action_pending, action_post_failed
+		action_succeeded, action_failed, action_pending, action_post_failed, action_assumed
 	);
 	bug(
 		"Invalid action '%s' for deployment audit - must be one of: %s",
@@ -151,6 +168,10 @@ sub action {
 
 sub result {
 	return $_[0]->{data}{result};
+}
+
+sub succeeded {
+	return is_a_successful_result($_[0]->{data}{result});
 }
 
 sub started {
@@ -230,7 +251,8 @@ sub commit {
 	# Create the deployment audit
 	my $deployment_data = flatten({
 		$self->{data}->%*,
-		timestamp => $self->timestamp(),
+		sequence => $self->env->deployments->next_sequence_number(),
+		timestamp => $self->_get_ts_string($self->{data}{completed}),
 	});
 
 	# Convert the timestamps into EXODUS_TIME_FORMAT strings if they are Time::Piece objects
@@ -242,7 +264,7 @@ sub commit {
 	# Build a vault command set to store the deployment audit
 	my @cmds = (
 		'set',
-		$self->env->exodus_base . '/deployments/' . $self->timestamp(),
+		$self->env->exodus_base . '/deployments/' . $deployment_data->{timestamp},
 		'__flattened__=1',
 		map {
 			"$_=$deployment_data->{$_}"
@@ -254,6 +276,8 @@ sub commit {
 		{ redact => 1 },
 		@cmds
 	);
+	$self->env->deployments->reset; # FIXME: This should be more surgical.
+	return ($out, $rc, $err) if wantarray;
 	bail(
 		"Failed to set deployment audit data in exodus: %s\n%s",
 		$out, $err
@@ -563,6 +587,9 @@ sub _is_artifact_filename {
 	return (grep {$_ eq $ref} values $self->_artifact_map->%*) ? 1 : 0;
 }
 
+# }}}
+
+# _get_artifact_type - Get the artifact type for the given reference {{{
 sub _get_artifact_type {
 	my ($self, $ref) = @_;
 	# Get the artifact type for the given reference
@@ -571,6 +598,8 @@ sub _get_artifact_type {
 	return (grep {$artifact_map->{$_} eq $ref} keys %$artifact_map)[0];
 }
 
+# }}}
+# _get_artifact_filename - Get the artifact filename for the given reference {{{
 sub _get_artifact_filename {
 	my ($self, $ref) = @_;
 	# Get the artifact filename for the given reference
@@ -597,6 +626,18 @@ sub _is_base64_gzipped {
 }
 
 # }}}
+
+# _ts_string - Make a timestamp string from a Time::Piece object or a string {{{
+sub _get_ts_string {
+	my ($ts) = @_;
+	$ts //= Time::Piece->new;  # Default to current time if not provided
+	return $ts->strftime(EXODUS_TIME_FORMAT_SHORT) if ref($ts) eq 'Time::Piece';
+	return (
+		$ts =~ s/[Z ]?[+-]0000$//r =~ s/[^0-9]+//gr
+	) if $ts =~ /^\d{4}-?\d{2}-?\d{2}[T ]?\d{2}:?\d{2}:?\d{2}([Z ]?[+-]0000)?$/;
+	# FIXME: Support non-UTC timestamps with timezone offsets?
+	bail("Invalid timestamp format: $ts");
+}
 
 1;
 # vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1:

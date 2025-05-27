@@ -1,4 +1,5 @@
 =pod
+
 =head1 NAME
 
 Genesis::Env::Deployment - Class representing a deployment audit for a Genesis environment
@@ -25,14 +26,13 @@ Genesis::Env::Deployment - Class representing a deployment audit for a Genesis e
       repo        => $ENV{GENESIS_REPO} // 'unknown',
       vault       => $env->vault->url
     },
-    manifest      => {
+    manifest       => {
       type        => $manifest->type,
       sha2        => $manifest_sha2
     },
-    artifacts     => {
+    artifacts      => {
       manifest     => $env->manifest_file,
-      log          => $env->workpath('output.log'),
-      secrets      => $vault_paths
+      log          => $env->workpath('output.log')
     }
   );
   
@@ -44,12 +44,22 @@ Genesis::Env::Deployment - Class representing a deployment audit for a Genesis e
     # Access deployment information
     say "Deployment action: " . $deployment->action;
     say "Deployment result: " . $deployment->result;
+    say "Deployment reason: " . $deployment->reason;
+    say "Started at: " . $deployment->started;
+    say "Completed at: " . $deployment->completed;
+    say "Duration: " . $deployment->duration;
     
     # Access artifact types
     my @types = $deployment->artifact_types;
     
+    # Access artifact filenames
+    my @filenames = $deployment->artifact_filenames;
+    
     # Get contents of a specific artifact
     my $manifest = $deployment->artifact('manifest');
+    
+    # Get multiple artifacts
+    my $artifacts = $deployment->artifacts('manifest', 'log');
     
     # Extract artifacts to a directory
     my $files = $deployment->extract_artifacts_to('/tmp/artifacts');
@@ -62,8 +72,7 @@ It records metadata about deployments, including the action performed (deploy or
 terminate), the result, timestamps, and associated artifacts.
 
 This class provides methods for creating, committing, and retrieving deployment 
-audits, as well as accessing and extracting deployment artifacts such as manifests,
-logs, state files, and secrets.
+audits, as well as accessing and extracting deployment artifacts.
 
 =head1 CLASS CONSTANTS
 
@@ -155,6 +164,14 @@ Either:
 
 =back
 
+=head2 is_a_successful_result($result)
+
+Returns true if the given result is considered successful (success or post-failed).
+
+=head2 is_a_failed_result($result)
+
+Returns true if the given result is considered failed.
+
 =head1 INSTANCE METHODS
 
 =head2 action()
@@ -180,6 +197,10 @@ Returns the duration of the action (completed - started) in seconds.
 =head2 reason()
 
 Returns the reason for the deployment.
+
+=head2 succeeded()
+
+Returns true if the deployment result was successful.
 
 =head2 lookup(@keys)
 
@@ -236,50 +257,44 @@ These methods are used internally and are not meant to be called directly:
 
 =item _get_artifact_hash(@artifacts)
 
-Internal helper to get all artifacts as a hash. Handles both local-file-hash and 
-b64-gzipped artifact formats.
+Internal helper to get all artifacts as a hash.
 
 =item _build_artifacts_file($artifact_file, %artifacts)
 
-Builds a tarball of deployment artifacts, compresses it with gzip, and base64 encodes it.
-Also includes secrets from Vault if specified.
+Builds a tarball of deployment artifacts.
 
 =item _get_artifact_tarball()
 
-Gets the artifact tarball for this deployment by decoding and decompressing the b64-gzipped data.
+Gets the artifact tarball for this deployment.
 
 =item _artifact_map()
 
-Returns the artifact map for this deployment. If the map doesn't exist, it builds one based 
-on the artifacts format (local-file-hash or b64-gzipped).
+Returns the artifact map for this deployment.
 
 =item _is_artifact_type($ref)
 
-Checks if the given reference is an artifact type in the artifact map.
+Checks if the given reference is an artifact type.
 
 =item _is_artifact_filename($ref)
 
-Checks if the given reference is an artifact filename in the artifact map.
+Checks if the given reference is an artifact filename.
 
 =item _get_artifact_type($ref)
 
-Returns the artifact type for the given reference. If the reference is a filename,
-it returns the corresponding type.
+Returns the artifact type for the given reference.
 
 =item _get_artifact_filename($ref)
 
-Returns the artifact filename for the given reference. If the reference is a type,
-it returns the corresponding filename.
+Returns the artifact filename for the given reference.
 
 =item _is_base64_gzipped($data)
 
-Determines if a string is base64-encoded gzipped data by checking for base64 characters
-and the gzip magic number.
+Determines if a string is base64-encoded gzipped data.
 
 =back
 
 =head1 AUTHOR
 
-Dennis Bell E<lt>dennis.j.bell@gmail.comE<gt>
+Genesis Team E<lt>genesis@starkandwayne.comE<gt>
 
 =cut
