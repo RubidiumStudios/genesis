@@ -25,38 +25,22 @@ sub new {
 	my ($class, $env) = @_;
 	return bless {
 		env => $env,
-		deployments_cache => undef
+		__all_deployments => undef
 	}, $class;
 }
 # }}}
 
-# all - get all deployment audits (returns array) {{{
+# all - return an array of all deployment audits, sorted latest-first {{{
 sub all {
+	# Only return array context to protect against accidental modification
 	my ($self) = @_;
-	my $env = $self->{env};
-	return @{$self->{deployments_cache}} if $self->{deployments_cache};
-
-	# Get list of deployments from vault
-	my $deployments = $env->vault->get_path($env->exodus_base.'/deployments');
-	return () unless $deployments && %$deployments;
-
-	# Create a new deployment object for each deployment
-	my @deployments = map {
-		Genesis::Env::Deployment->new(
-			$env,
-			timestamp => $_,
-			%{$deployments->{$_}}
-		)
-	} sort {$b cmp $a} keys %{$deployments};
-
-	$self->{deployments_cache} = \@deployments;
-	return @deployments;
+	my @all = $self->_all(); # Forces array context
+	return @all;
 }
-# }}}
 
 # reset - reset the cached deployments {{{
 sub reset {
-	$_[0]->{deployments_cache} = undef;
+	$_[0]->{__all_deployments} = undef;
 }
 # }}}
 
@@ -74,63 +58,15 @@ sub find {
 	) if @invalid_options;
 	$options{all} = 1 if $options{result}; # If result is specified, include all deployments
 	
-	# Get list of deployments
+	# Get list of deployment - Don't get by ref, because we're likely going to modify it
 	my @all_deployments = $self->all();
 	return () unless @all_deployments;
 
 	# Filter by range if specified
-	my $picks = undef;
-	if ($options{range}) {
-		my $range = $options{range}; # See POD for valid formats
-		if ($range =~ /^(-?\d+)(?:\.\.\.(-?\d+))?$/) {
-			my ($start, $end) = ($1, $2);
-			$end //= $start;
-			# This gets applied after all the other filters, just store it for now
-			$picks = $start < $end ? [$start..$end] : [reverse($end..$start)];
-		} else {
-			my ($before, $after) = ();
-			if ($range =~ /^(.*?)(<(?:=?)x<(?:=?))(.*?)$/) {
-				# Format: <timestamp><x<timestamp> or <timestamp><=x<=timestamp>
-				my ($low, $separator, $high) = ($1, $2, $3);
-				my ($loweql, $higheql) = $separator =~ /<(=?)x<(=?)/;
-				$after = _parse_into_timestamp_cmp($low, '>'.$loweql);
-				$before = _parse_into_timestamp_cmp($high, '<'.$higheql);
-			} elsif ($range =~ /^([<>])(=?)(\d.*)$/) {
-				my ($cmp, $eq, $ts) = ($1, $2, $3);
-				if ($cmp eq '<') {
-					$before = _parse_into_timestamp_cmp($ts, '<'.$eq);
-				} elsif ($cmp eq '>') {
-					$after = _parse_into_timestamp_cmp($ts, '>'.$eq);
-				}
-			} else {
-				bail(
-					"Invalid range format: %s",
-					$range
-				)
-			}
-
-			# Step through the deployments until you reach the before, then stop after the after
-			my @deployments_in_range = ();
-			my $idx = 0;
-
-			# Step through the deployments until you reach the before if before is given
-			while ($before) {
-				last unless $idx < @all_deployments; # We're done if there are no more deployments
-				last if $all_deployments[$idx]->timestamp lt $before; # Stop skipping if we are now before the before
-				$idx++;
-			}
-
-			# Now step through the deployments until you reach the after or the end
-			while (1) {
-				last unless $idx < @all_deployments; # We're done if there are no more deployments
-				last if $after && $all_deployments[$idx]->timestamp gt $after; # Stop if we are now after the after
-				push @deployments_in_range, $all_deployments[$idx]; # This is in range
-				$idx++;
-			}
-			@all_deployments = @deployments_in_range;
-		}
-	}
-
+	my $deferred_range = $self->_filter_by_range(
+		\@all_deployments,
+		$options{range}
+	) if $options{range};
 	# Filter by action if specified
 	@all_deployments = grep {
 		$_->lookup('action') eq $options{action}
@@ -148,8 +84,8 @@ sub find {
 
 	# Filter by picks if given
 	@all_deployments = reverse(
-		(reverse @all_deployments)[@$picks]
-	) if ($picks);
+		(reverse @all_deployments)[@$deferred_range]
+	) if ($deferred_range && @$deferred_range);
 
 	# Limit the number of deployments if specified
 	@all_deployments = splice(
@@ -165,23 +101,23 @@ sub find {
 # at - get a deployment audit at a specific timestamp {{{
 sub at {
 	my ($self, $timestamp) = @_;
-	my @deployments = $self->all();
-	return undef unless @deployments;
+	my $deployments = $self->_all();
+	return undef unless $deployments && @$deployments;
 
 	my ($ts_deployment) = grep {
 		$_->{timestamp} eq $timestamp;
-	} @deployments;
-	return $ts_deployment;
+	} $deployments->@*;
+	return $ts_deployment; # Will be undef if not found
 }
 # }}}
 
 # latest - get most recent deployment audit {{{
 sub latest {
 	my ($self, %options) = @_;
-	my @deployments = $self->all();
-	return undef unless @deployments;
+	my $deployments = $self->_all();
+	return undef unless $deployments && @$deployments;
 	
-	for my $deployment (@deployments) {
+	for my $deployment ($deployments->@*) {
 		next if $options{action} && $deployment->lookup('action') ne $options{action};
 		next if $options{result} && $deployment->lookup('result') ne $options{result};
 		next if !$options{include_failed} && $deployment->lookup('result') eq $deployment->action_failed;
@@ -367,12 +303,39 @@ sub _backfill_deployment_audit_data {
 # }}}
 =cut
 
-# env - return the environment associated with this deployment manager
+# env - return the environment associated with this deployment manager {{{
 sub env {
 	return $_[0]->{env};
 }
+# }}}
 
 ### Private Instance Methods
+
+# _all - get all deployment audits in list or scalar context - for internal use only
+sub _all {
+	my ($self) = @_;
+	my $env = $self->{env};
+	unless ($self->{__all_deployments}) {
+		# Get list of deployments from vault
+		my $deployments = $env->vault->get_path($env->exodus_base.'/deployments');
+		return () unless $deployments && %$deployments; # FIXME: Should we cache 'no deployments'?
+
+		# Create a new deployment object for each deployment
+		my @deployments = map {
+			Genesis::Env::Deployment->new(
+				$env,
+				timestamp => $_,
+				%{$deployments->{$_}}
+			)
+		} sort {$b cmp $a} keys %{$deployments};
+
+		$self->{__all_deployments} = \@deployments;
+	}
+	return wantarray
+		? @{$self->{__all_deployments}}
+		: $self->{__all_deployments}; # return ref for efficiency if requested
+}
+# }}}
 
 # _base_deployment_content - generates base deployment audit content {{{
 sub _base_deployment_content {
@@ -450,6 +413,76 @@ sub _base_artifacts {
 }
 # }}}
 
+# filter_by_range - filter deployments by a given range {{{
+sub _filter_by_range {
+	my ($self, $deployments, $range) = @_;
+
+	# Quick sanity check that the deployments are sorted by timestamp in latest-first order
+	$self->_confirm_deployments_sorted($deployments);
+
+	if ($range =~ /^(-?\d+)(?:\.\.\.(-?\d+))?$/) {
+		my ($start, $end) = ($1, $2);
+		$end //= $start;
+		# This gets applied after all the other filters, just store it for now
+		return $start < $end ? [$start..$end] : [reverse($end..$start)];
+	} else {
+		my ($before, $after) = ();
+		if ($range =~ /^(.*?)(<(?:=?)x<(?:=?))(.*?)$/) {
+			# Format: <timestamp><x<timestamp> or <timestamp><=x<=timestamp>
+			my ($low, $separator, $high) = ($1, $2, $3);
+			my ($loweql, $higheql) = $separator =~ /<(=?)x<(=?)/;
+			$after = _parse_into_timestamp_gt_cmp($low, '>'.$loweql);
+			$before = _parse_into_timestamp_gt_cmp($high, '<'.$higheql);
+		} elsif ($range =~ /^([<>])(=?)(\d.*)$/) {
+			my ($cmp, $eq, $ts) = ($1, $2, $3);
+			if ($cmp eq '<') {
+				$before = _parse_into_timestamp_gt_cmp($ts, '<'.$eq);
+			} elsif ($cmp eq '>') {
+				$after = _parse_into_timestamp_gt_cmp($ts, '>'.$eq);
+			}
+		} else {
+			bail(
+				"Invalid range format: %s",
+				$range
+			)
+		}
+
+		# Pop off the first deployment that is after the `before` timestamp
+		shift @$deployments while (@$deployments && defined($before) && $deployments->[0]->timestamp gt $before);
+
+		# Now step through the deployments until you reach the `after` limit or the end
+		return unless defined($after); # If no after limit, just return the deployments
+		my $idx = 0;
+		$idx++ while ($idx < @$deployments && $deployments->[$idx]->timestamp gt $after);
+
+		# Clear any deployments that are after the `after` timestamp idx
+		splice(@$deployments, $idx) if $idx < @$deployments - 1;
+	}
+	return undef; # No deferred range, and we altered the deployments array passed in in place.
+}
+
+# }}}
+
+# _confirm_deployments_sorted - check if deployments are sorted by timestamp in latest-first order {{{
+sub _confirm_deployments_sorted {
+	my ($self, $deployments) = @_;
+	# Check if the deployments are sorted by timestamp in latest-first order
+	$deployments //= $self->_all();
+	return 1 if @$deployments <= 1; # An array with 1 or 0 elements is considered sorted
+	my $idx = 1;
+	$idx++ while (
+		$idx < @$deployments &&
+		$deployments->[$idx]->timestamp le $deployments->[$idx - 1]->timestamp
+	);
+	bug(
+		"Deployments are not sorted by timestamp in latest-first order!\n\nDeployment %s at index %s is after Deployment %s at index %s",
+		$deployments->[$idx]->timestamp, $idx,
+		$deployments->[$idx - 1]->timestamp, $idx - 1
+	) if $idx < @$deployments;
+	return 1;
+}
+# }}}
+
 ### Private Package Functions
 
 # _get_last_day_of_month - utility function to calculate the last day of a given month {{{
@@ -464,7 +497,7 @@ sub _get_last_day_of_month {
 # }}}
 
 # _parse_into_timestamp_cmp - parse a timestamp string into a comparable timestamp {{{
-sub _parse_into_timestamp_cmp {
+sub _parse_into_timestamp_gt_cmp {
 	my ($ts, $cmp_op) = @_;
 	my ($ty,$tm,$td,$tH,$tM,$tS,$tz) = (
 		$ts =~ /(\d{4})(?:-?(\d{2})(?:-?(\d{2})(?:[T ]?(\d{2})(?::?(\d{2})(?::?(\d{2})(?:[Z ]?([+-]\d{4}))?)?)?)?)?)?$/
@@ -481,7 +514,10 @@ sub _parse_into_timestamp_cmp {
 		),
 		EXODUS_TIME_FORMAT
 	);
-	$time += $eq ? ($gt ? -1 : 1) : 0;
+
+	# Alter the timestamp to be a greater than comparison
+	$time -=1 if $gt xor $eq; # If gt or eq, subtract 1 second, but not both
+
 	my $ts_str = $time->gmtime($time->epoch)->strftime(EXODUS_TIME_FORMAT_SHORT);
 	return $ts_str;
 }
