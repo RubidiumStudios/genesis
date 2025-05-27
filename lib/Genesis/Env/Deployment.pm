@@ -67,7 +67,7 @@ sub new {
 		};
 		$data{user} //= {
 			shell => 'unknown',
-			repo => 'unknown',
+			repo  => 'unknown',
 			vault => 'unknown',
 		};
 		$data{manifest} //= {
@@ -87,13 +87,13 @@ sub new {
 	# Kit and user are hashrefs with their own required fields
 	push @missing, map { "kit.$_" } grep {ref($data{kit}) eq 'HASH' && !exists $data{kit}{$_}} qw(
 		id name version is_dev features
-	);
+	) if $data{action} eq 'deploy';
 	push @missing, map { "user.$_" } grep {ref($data{user}) eq 'HASH' && !exists $data{user}{$_}} qw(
 		shell
 	);
 	push @missing, map { "manifest.$_" } grep {ref($data{manifest}) eq 'HASH' && !exists $data{manifest}{$_}} qw(
 		type sha2
-	);
+	) if $data{action} eq 'deploy';
 
 	# TODO: Should we validate against unknown fields, or just allow them?
 
@@ -175,11 +175,25 @@ sub succeeded {
 }
 
 sub started {
-	return $_[0]->{data}{started};
+	my ($self,$strf_format) = @_;
+	return $self->{data}{started} unless $strf_format;
+	return $self->{data}{started}->strftime($strf_format)
+		if ref($self->{data}{started}) eq 'Time::Piece';
+	bail(
+		"Cannot format started timestamp '%s' - not a Time::Piece object",
+		$self->{data}{started}
+	)
 }
 
 sub completed {
-	return $_[0]->{data}{completed};
+	my ($self,$strf_format) = @_;
+	return $self->{data}{completed} unless $strf_format;
+	return $self->{data}{completed}->strftime($strf_format)
+		if ref($self->{data}{completed}) eq 'Time::Piece';
+	bail(
+		"Cannot format completed timestamp '%s' - not a Time::Piece object",
+		$self->{data}{completed}
+	)
 }
 
 sub duration {
