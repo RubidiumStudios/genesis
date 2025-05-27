@@ -5,13 +5,28 @@ use utf8;
 
 use base 'Genesis::Base'; # for _memoize
 
-use Genesis; # TODO: specify exact imports to not pollute namespace
-use Genesis::State;
-use Genesis::Term;
-use Genesis::UI;
+use Genesis qw/
+	error bail bug fatal warning info output success notice dryrun
+	debug trace dump_stack dump_var 
+	pretty_duration
+	pushd popd
+	humanize_path humanize_bin
+	run lines
+	workdir tmpfile
+	copy_or_fail mkfile_or_fail mkdir_or_fail save_to_yaml_file
+	slurp load_json load_yaml load_yaml_file
+	deep_merge in_array uniq get_opts struct_lookup flatten unflatten
+	new_enough by_semver
+	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
+/;
+use Genesis::State qw/envset under_test in_callback/;
+use Genesis::Term qw/csprintf wrap decolorize in_controlling_terminal bullet/;
+use Genesis::UI qw/prompt_for_boolean prompt_for_line/;
 use Genesis::Commands qw/current_command known_commands/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
+
+use Genesis::Env::Deployment qw/is_a_successful_result is_a_failed_result/;
 
 use Service::BOSH::Director;
 use Service::BOSH::CreateEnvProxy;
@@ -34,11 +49,6 @@ use POSIX qw/strftime/;
 use Time::Piece;
 use Time::Seconds;
 use Time::HiRes qw/gettimeofday/;
-
-use constant {
-	EXODUS_TIME_FORMAT => "%Y-%m-%d %H:%M:%S %z",
-	EXODUS_TIME_FORMAT_SHORT => "%Y%m%d%H%M%S",
-};
 
 ### Class Methods {{{
 
@@ -640,18 +650,9 @@ sub manifest_store {
 
 # }}}
 # deployment_state - returns the status of the deployment {{{
+# DEPRECATED: use deployments->current_state instead
 sub deployment_state {
-	my $self = shift;
-	my $exodus = $self->exodus_lookup();
-	my $latest_deploy = $self->deployment_lookup('latest');
-	return 'undeployed' unless $latest_deploy || $exodus;
-	if (!defined $exodus->{sequence}) {
-		return 'terminated' if ($latest_deploy->{state}//'') eq 'terminated';
-		$latest_deploy = $self->_backfill_deployment_audit_data($exodus, $latest_deploy);
-	} elsif ($exodus->{sequence} != ($latest_deploy->{sequence}//0)) {
-		$latest_deploy = $self->_backfill_deployment_audit_data($exodus, $latest_deploy);
-	}
-	return $latest_deploy->{state};
+	return $_[0]->deployments->current_state;
 }
 
 # }}}
@@ -1092,62 +1093,6 @@ sub director_exodus_lookup {
 	return $bosh_exodus unless defined($key);
 	return struct_lookup($bosh_exodus, $key, $default);
 }
-# }}}
-# deployment_lookup - lookup deployment details for a given timestamp, or list of deployments timestamps {{{
-sub deployment_lookup {
-	my ($self, $timestamp) = @_;
-	my @deployments = map {s{.*/deployments/}{}r} $self->vault->paths($self->exodus_base.'/deployments');
-	return @deployments if (!defined($timestamp));
-
-	return unless @deployments;
-
-	# Standardize the timestamp
-	if ($timestamp =~ /^latest(?:-(\w+))?$/) {
-		my $state = $1;
-		bug(
-			"Invalid state '%s' specified for latest deployment lookup: expected ".
-			"one of 'deployed', 'failed', or 'terminated'.",
-			$state
-		) if $state && $state !~ /^(deployed|failed|terminated)$/;
-		my @ordered_timestamps = sort {$b cmp $a} @deployments;
-		while ($timestamp = shift @ordered_timestamps) {
-			last unless $state;
-			last if $self->vault->get($self->exodus_base."/deployments/$timestamp","state") eq $state;
-		}
-		if (!defined($timestamp)) {
-			bail("No deployments found with state '$state' for environment '%s'", $self->name);
-		}
-	} elsif ($timestamp < 0) {
-		$timestamp = (sort {$a cmp $b} @deployments)[$timestamp];
-		return unless $timestamp;
-	} elsif ($timestamp =~ /([<>]=?)?(20\d{2})-?(\d{2})-?(\d{2})[T ]?(\d{2}):?(\d{2}):?(\d{2})(?:[Z ]?([+-]\d{4}))?/) {
-		my ($cp, $ty, $tm, $td, $tH, $tM, $tS, $tz) = ($1//'', $2, $3, $4, $5, $6, $7, $8//'+0000');
-
-		use Time::Piece;
-		my $ts = Time::Piece->strptime("$ty-$tm-$td $tH:$tM:$tS $tz", EXODUS_TIME_FORMAT);
-		$timestamp = $ts->gmtime($ts->epoch)->strftime(EXODUS_TIME_FORMAT_SHORT);
-
-		if ($cp eq '<=') {
-			$timestamp = (sort {$b cmp $a} grep {$_ le $timestamp} @deployments)[0];
-		} elsif ($cp eq '>=') {
-			$timestamp = (sort {$a cmp $b} grep {$_ ge $timestamp} @deployments)[0];
-		} elsif ($cp eq '<') {
-			$timestamp = (sort {$b cmp $a} grep {$_ lt $timestamp} @deployments)[0];
-		} elsif ($cp eq '>') {
-			$timestamp = (sort {$a cmp $b} grep {$_ gt $timestamp} @deployments)[0];
-		} elsif ($cp) {
-			bail("Invalid comparison operator '$cp' in timestamp '$timestamp': must be '<', '>', '<=', or '>='");
-		}
-	}
-
-	my $manifest_data = $self->vault->get($self->exodus_mount.$self->exodus_slug."/deployments/$timestamp");
-	if (delete($manifest_data->{__flattened__})) {
-		$manifest_data = unflatten($manifest_data);
-	}
-	$manifest_data->{timestamp} = $timestamp;
-	return $manifest_data;
-}
-
 # }}}
 # dereferenced_kit_metadata - get kit metadata that been filled with environment references {{{
 sub dereferenced_kit_metadata {
@@ -2339,6 +2284,12 @@ sub last_deployed_manifest {
 	# - contents => 1 to include the contents of the files in the results (default
 	#   is true, set to 0 to not include the contents)
 
+	# REFACTOR:  Now that we have Env::Deployments, we should use that unified
+	#            interface to retrieve deployment data, including files, and for
+	#            legacy deployments, manufacture a local-file-hash formatted
+	#            deployment object that can be used to retrieve the manifest
+	#            and other files.
+
 	$self->notify('retrieving previously deployed manifest data:');
 
 	my $just_return = $opts{just} || '';
@@ -2359,64 +2310,38 @@ sub last_deployed_manifest {
 			info({pending => 1},
 				"  - looking for cached manifest..."
 			);
-			my $deployment_details = $self->deployment_lookup('latest');
+			my $deployment = $self->deployments->latest;
 			info("#G{done}" . pretty_duration(gettimeofday - $start));
 			$start = gettimeofday;
-			if ($deployment_details && $deployment_details->{state} eq 'deployed') {
+			if ($deployment->action eq 'deploy') {
 				info({pending => 1},
 					"  - found manifest in exodus/deployments - retrieving..."
 				);
-				my $manifest_artifacts = $deployment_details->{artifacts};
-				my $type = $deployment_details->{manifest_type};
-				my $sha2 = $deployment_details->{manifest_sha2};
+				my $type = $deployment->lookup(['manifest.type', 'manifest_type']);
+				my $sha2 = $deployment->lookup(['manifest.sha2', 'manifest_sha2']);
 				my $source = 'exodus-deployments';
 
 				# Extract the artifiacts
-				my $data = decode_base64($manifest_artifacts);
-				unless ($data) {
-					push(@errors, "Failed to decode base64 encoded manifest artifacts");
-					last
-				}
-
-				open(my $scalar_data, '<', \$data);
-				my $uncompressed_data = IO::Uncompress::Gunzip->new($scalar_data);
-				unless ($uncompressed_data) {
-					push(@errors, "Failed to uncompress manifest artifacts");
+				my @artifacts = $deployment->artifact_types();
+				my $manifest_target = $pruned ? 'manifest' : 'unpruned';
+				unless (in_array($manifest_target, @artifacts)) {
+					push(@errors, sprintf(
+						"Manifest for %s %s is not in the tarball of deployment artifacts",
+						$pruned ? 'pruned' : 'unpruned',
+						$self->name
+					));
 					last;
 				}
-
-				my $tar = Archive::Tar->new;
-				unless ($tar->read($uncompressed_data)) {
-					push(@errors, "Failed to read tarball of manifest artifacts");
-					last;
-				}
-
-				my $file = $pruned ? $self->name.".yml" : $self->name."-unpruned.yml";
 				if ($just_return eq 'contents') {
-					unless ($tar->contains_file($file)) {
-						push(@errors, sprintf(
-							"Manifest for %s %s is not in the tarball of manifest artifacts",
-							$pruned ? 'pruned' : 'unpruned',
-							$self->name
-						));
-						last;
-					}
-					my $manifest = $tar->get_content($file);
+					my $manifest = $deployment->artifact($manifest_target);
 					$results = wantarray ? [$manifest, $type, $sha2, $source] : $manifest;
 					last
 				}
+				mkdir_or_fail($self->workpath('manifests')) unless -d $self->workpath('manifests');
 				if ($just_return eq 'file') {
-					unless ($tar->contains_file($file)) {
-						push(@errors, sprintf(
-							"Manifest file for %s %s is not in the tarball of manifest artifacts",
-							$pruned ? 'pruned' : 'unpruned',
-							$self->name
-						));
-						last;
-					}
-					my $manifest_file = $self->workpath("manifests/$file");
-					mkdir_or_fail(dirname($manifest_file)) unless -d dirname($manifest_file);
-					mkfile_or_fail($manifest_file, $tar->get_content($file));
+					my ($manifest_file) = $deployment->extract_artifacts_to(
+						$self->workpath("manifests/"), $manifest_target
+					);
 					$results = wantarray ? [$manifest_file, $type, $sha2, $source] : $manifest_file;
 					last;
 				}
@@ -2424,14 +2349,13 @@ sub last_deployed_manifest {
 				$results = {
 					manifest_type => $type,
 					manifest_sha2 => $sha2,
-					dated => $deploy_date,
-					deployer => $deployment_details->{deployer},
-					timestamp => $deployment_details->{timestamp},
-					source => $source,
-					artifacts => []
+					dated         => $deploy_date,
+					deployer      => $deployment->user,
+					timestamp     => $deployment->timestamp,
+					source        => $source,
+					artifacts     => []
 				};
-				mkdir_or_fail($self->workpath('manifests')) unless -d $self->workpath('manifests');
-				for my $file ($tar->get_files) {
+				for my $file ($deployment->artifact_filenames()) {
 					my $name = $file->name;
 					my $file_type =
 						$name eq $self->name.".yml" ? 'manifest' :
@@ -2443,13 +2367,14 @@ sub last_deployed_manifest {
 
 					push(@{$results->{artifacts}}, $file_type);
 					$results->{$file_type}{source} = $source;
-					$results->{$file_type}{sha2} = sha256_hex($file->data);
+					$results->{$file_type}{sha2} = sha256_hex($deployment->artifact($file));
 					if ($include_files) {
-						my $path = $self->workpath('manifests/'.$name);
-						mkfile_or_fail($path, $file->data);
+						my ($path) = $deployment->extract_artifacts_to(
+							$self->workpath('manifests/'), $file_type
+						);
 						$results->{$file_type}{path} = $path;
 					}
-					$results->{$file_type}{data} = $file->data if ($include_contents);
+					$results->{$file_type}{data} = $deployment->artifact($file) if ($include_contents);
 				}
 				last;
 
@@ -2812,39 +2737,6 @@ sub deployment_cache_path_lookup {
 }
 
 # }}}
-# get_next_deployment_sequence_number - get the next deployment sequence number {{{
-sub get_next_deployment_sequence_number {
-	my ($self) = @_;
-
-	my $old_exodus = $self->exodus_lookup(".",{});
-	my $sequence = $old_exodus->{sequence};
-	return $sequence + 1 if defined($sequence);
-
-	# If sequence is not found, then an older version of Genesis was used and we
-	# need to figure out if we need to backfill the deployment audit data
-
-	# If the manifest store is the repository, then we can't backfill the
-	# deployment audit data because that isn't supported, so just assume 1;
-	return 1 if ($self->manifest_store eq 'repository');
-
-	# If there were no deployment audits, then we can start at 1
-	my $last_deployment = $self->deployment_lookup('latest');
-	return 1 unless $last_deployment;
-
-	# If the last deployment was terminated, then we can start at one more than
-	# the termination sequence number
-	return $last_deployment->{sequence} + 1
-		if ($last_deployment->{state}//'deployed') eq 'terminated'
-		&& defined($last_deployment->{sequence});
-
-	# If the last deployment was not terminated, then we need to backfill the
-	# deployment audit data to ensure that the sequence numbers are correct
-	$last_deployment = $self->_backfill_deployment_audit_data(
-		$old_exodus, $last_deployment
-	);
-	return $last_deployment->{sequence} + 1;
-}
-
 # deploy - deploy the environment {{{
 sub deploy {
 	my ($self, %opts) = @_;
@@ -3101,40 +2993,37 @@ sub deploy {
 
 	my $manifest_store = $self->top->config->get('manifest_store','hybrid');
 	mkfile_or_fail(
-		$self->deployment_cache_path_lookup('deploy_log'), decode_utf8($results[0])
+		$self->deployment_cache_path_lookup('deploy_log'),
+		decode_utf8($results[0]//'No output received')
 	) unless $manifest_store eq 'repository';
 
-
-	# Don't do post-deploy stuff if just doing a dry run
-	unless ($opts{"dry-run"}) {
-		if ($ok && $manifest_store ne 'exodus') {
-			# deployment succeeded; update the cache (Legacy manifest store)
-			mkdir_or_fail($self->path(".genesis/manifests")) unless -d $self->path(".genesis/manifests");
+	if ($ok && $manifest_store ne 'exodus' && !$opts{"dry-run"}) {
+		# deployment succeeded; update the cache (Legacy manifest store)
+		mkdir_or_fail($self->path(".genesis/manifests")) unless -d $self->path(".genesis/manifests");
+		eval {
+			copy_or_fail($cached_redacted_manifest_path, $self->path(".genesis/manifests/$self->{name}.yml"));
+			copy_or_fail($cached_redacted_vars_path, $self->path(".genesis/manifests/$self->{name}.vars"))
+				if -e $cached_redacted_vars_path;
+		};
+		warning("Failed to copy manifest to repository: $@") if ($@);
+		for ('state', 'store') {
+			my $cached_file = $self->deployment_cache_path_lookup($_);
+			next unless -f $cached_file;
+			my $file = basename($cached_file);
 			eval {
-				copy_or_fail($cached_redacted_manifest_path, $self->path(".genesis/manifests/$self->{name}.yml"));
-				copy_or_fail($cached_redacted_vars_path, $self->path(".genesis/manifests/$self->{name}.vars"))
-					if -e $cached_redacted_vars_path;
+				copy_or_fail("$cached_file", $self->path(".genesis/manifests/$file"));
 			};
-			warning("Failed to copy manifest to repository: $@") if ($@);
-			for ('state', 'store') {
-				my $cached_file = $self->deployment_cache_path_lookup($_);
-				next unless -f $cached_file;
-				my $file = basename($cached_file);
-				eval {
-					copy_or_fail("$cached_file", $self->path(".genesis/manifests/$file"));
-				};
-				warning("Failed to copy $file to repository: $@") if ($@);
-			}
+			warning("Failed to copy $file to repository: $@") if ($@);
 		}
 	}
 
 	# bail out early if the deployment failed;
-	# don't update the cached manifests
-	if ($results[1] && $results[0]) {
+	if (!$ok) {
 		if (!$opts{"dry-run"} && $self->has_hook('post-deploy')) {
 			# Call post-deploy hook with the pre-deploy data in case of cleanup on failure
 			$self->run_hook('post-deploy', rc => $results[1], data => $predeploy_data)
 		}
+		$results[0] //= '';
 		my $last_bits_of_output = join "\n", map {decolorize($_)} (split(/\r?\n/,$results[0]))[-5..-1];
 		my $msg;
 		if ($last_bits_of_output =~ /Continue\?[^\n]*: [^\n]*[nN]o?\r?\n\s*Stopped\s*Exit code 1/sm) {
@@ -3147,7 +3036,7 @@ sub deploy {
 			$msg = "Deployment failed."
 		}
 		$self->_create_deployment_audit_log(
-			'deploy' => 'failed',
+			'deploy' => Genesis::Env::Deployment::action_succeeded,
 			reason => $msg,
 			flags => $opts{flags} || '',
 			bails_with => $msg
@@ -3181,7 +3070,7 @@ sub deploy {
 		$exodus_overrides->{default_cpi_config} = $self->cpi_name;
 	}
 	$self->update_deployment_exodus(
-		'deployed',
+		'deploy' => Genesis::Env::Deployment::action_succeeded,
 		reason => $opts{reason},
 		flags => $opt_flags,
 		exodus_overrides => $exodus_overrides
@@ -3212,8 +3101,12 @@ sub deploy {
 		}
 	}
 
-	$self->run_hook('post-deploy', rc => ($ok ? 0 : 1), data => $predeploy_data, interactive => !$noprompt)
-		if $self->has_hook('post-deploy');
+	$self->run_hook(
+		'post-deploy',
+		rc => $results[1],
+		data => $predeploy_data,
+		interactive => !$noprompt
+	) if $self->has_hook('post-deploy');
 
 	return $ok;
 }
@@ -3261,28 +3154,7 @@ sub extract_manifest_exodus {
 # }}}
 # update_deployment_exodus - update the exodus data in the vault {{{
 sub update_deployment_exodus {
-	my ($self, $state, %deployment_details) = @_;
-
-	# FIXME: Support failed deployments and terminations
-	# - leave the current base exodus data as-is, but update the
-	#   deployment audit data with the new state and details
-
-	# TBD: The state currently captures the state of the environment, not the last
-	#      action performed on it.  This should be updated to reflect the last
-	#      action performed instead.  However, how do we capture the state of
-	#      the environment after the last action?  One way is to pass in the
-	#      $state as a hashref of {action => $result}, and then add the action
-	#      and result as fields to the audit data, leaving the state as-is unless
-	#      the result is 'success', in which case the state is updated to the action.
-	#
-	#      When reading the previous audit logs that don't have action and result,
-	#      we can assume the action is the listed state, and the result is
-	#      'success'.
-	#
-	#      Should this be refactored to separate out as _create_deployment_audit_log? (Y)
-	#
-	#      UPDATE: This may hae been implemented, but need to check it against all
-	#              the expectations above
+	my ($self, $action, $result, %deployment_details) = @_;
 
 	# Authenticate to the vault
 	$self->vault->authenticate unless $self->vault->authenticated;
@@ -3292,51 +3164,56 @@ sub update_deployment_exodus {
 	# Get the completed timestamp from overrides, or use the current time
 	my $timestamp = $deployment_details{completed} || Time::Piece->new->strftime(EXODUS_TIME_FORMAT);
 
-	# Determine the sequence number
-	my $sequence = $self->get_next_deployment_sequence_number();
-
 	# Build the base exodus data (manifest data and legacy deployment data)
 	my $exodus = {};
 	my @exodus_cmds = ();
-	if ($sequence > 1 && $self->vault->has($self->exodus_base)) {
-		push @exodus_cmds, ('rm', $self->exodus_base, "-f");
-	}
 
 	my $notify = !delete($deployment_details{quiet});
 	my $started = gettimeofday;
 	info({pending => 1},
 		"[[  - >>storing %s metadata in exodus...",
-		$state eq 'deployed' ? 'deployment' : 'termination'
+		$action eq 'deploy' ? 'deployment' : 'termination'
 	) if $notify;
 
-	if ($state eq 'deployed') {
-		# if the state is 'deployed', generate the exodus data from the manifest
-		# using $self->extract_manifest_exodus, as well as the standard deployment exodus data
-		$exodus = {
-			$self->extract_manifest_exodus->%*,
-			completed => $timestamp,
-			sequence => $sequence
-		};
-		$exodus = {
-			%$exodus,
-			manifest_sha1 => digest_file_hex(
-				$self->deployment_cache_path_lookup('redacted_manifest'), 'SHA-1'
-			),
-			manifest_type => $self->manifest_provider->deployment->redacted->type,
-		} if ($self->manifest_store ne 'exodus');
+	if ($action eq 'deploy') {
+		if (is_a_successful_result($result)) {
+			# if a successful deploy, generate the exodus data from the manifest using
+			# $self->extract_manifest_exodus, as well as the standard deployment exodus
+			# data
+			$exodus = {
+				$self->extract_manifest_exodus->%*,
+				completed => $timestamp,
+			};
 
-		# Special case for the started timestamp
-		if ($deployment_details{started}) {
-			$exodus->{dated} = $deployment_details{started};
+			$exodus = {
+				%$exodus,
+				manifest_sha1 => digest_file_hex(
+					$self->deployment_cache_path_lookup('redacted_manifest'), 'SHA-1'
+				),
+				manifest_type => $self->manifest_provider->deployment->redacted->type,
+			} if ($self->manifest_store ne 'exodus');
+
+			# Special case for the started timestamp
+			if ($deployment_details{started}) {
+				$exodus->{dated} = $deployment_details{started};
+			} else {
+				$deployment_details{started} = $exodus->{dated} // $timestamp;
+			}
+			push @exodus_cmds, ('rm', $self->exodus_base, "-f");
 		} else {
-			$deployment_details{started} = $exodus->{dated} // $timestamp;
+			# Don't change exodus on a failed deploy
+			$exodus = {};
+			$exodus_overrides = {};
 		}
-	} elsif ($state ne 'terminated') {
-		# TODO: Support 'pending' as an state, for when the deployment has started,
-		# then move it to 'deployed' when it's done
+	} elsif ($action eq 'terminate') {
+		push @exodus_cmds, ('rm', $self->exodus_base, "-f") if Genesis::Env::DeploymentManager::is_a_successful_result($result);
+		# FIXME: Handle unsuccessful termination
+	} else {
+		# TODO: Support 'pending' as an result, for when the deployment has started,
+		# then move it to success or failure when it's done
 		bug(
-			"Invalid state for deployment exodus: %s - expected 'deployed' or 'terminated'",
-			$state
+			"Invalid action for deployment exodus: %s - expected 'deploy' or 'terminate'",
+			$action
 		)
 	}
 
@@ -3352,31 +3229,41 @@ sub update_deployment_exodus {
 	}
 
 	# Set the exodus data in the vault
-	debug("setting exodus data in the Vault, for use later by other deployments");
 	my @errors = ();
-	eval {
-		$self->vault->authenticate;
-	};
-	my $err = $@;
-	if ($err) {
-		push @errors, "Failed to authenticate to vault: $err";
+	if (is_a_successful_result($result)) {
+		debug("$action failed, not updating exodus in vault");
 	} else {
-		my ($out, $rc, $err) = $self->vault->query({ redact => 1}, @exodus_cmds);
-		push @errors, "Failed to set exodus data in vault: $err" if $rc;
-
-		# If the manifest store is not 'repository', build the deployment audit data
-		if ($self->manifest_store ne 'repository') {
-			my $action = $state eq 'deployed' ? 'deploy' : 'terminate';
-			eval {
-				$self->_create_deployment_audit_log(
-					$action => 'success',
-					%deployment_details,
-					sequence => $sequence,
-				);
-			};
-			push @errors, fix_wrap($@) if ($@);
+		debug("setting exodus data in the Vault, for use later by other deployments");
+		eval {
+			$self->vault->authenticate;
+		};
+		my $err = $@;
+		if ($err) {
+			push @errors, "Failed to authenticate to vault: $err";
+		} else {
+			my ($out, $rc, $err) = $self->vault->query({ redact => 1}, @exodus_cmds);
+			push @errors, "Failed to set exodus data in vault: $err" if $rc;
 		}
 	}
+
+	# If the manifest store is not 'repository', build the deployment audit data
+	if ($self->manifest_store ne 'repository' && !@errors) {
+		eval {
+			$self->_create_deployment_audit_log(
+				$action => $result,
+				%deployment_details,
+			);
+		};
+		push @errors, fix_wrap($@) if ($@);
+		
+		unless (@errors) {
+			my $latest_deployment = $self->deployments->latest;
+			$self->vault->set(
+				$self->exodus_base, 'sequence' => $latest_deployment->sequence,
+			) if ($latest_deployment->succeeded && $latest_deployment->sequence);
+		}
+	}
+
 	if (@errors) {
 		my $error_msg = join("\n", @errors);
 		bail(
@@ -3385,8 +3272,8 @@ sub update_deployment_exodus {
 			"other kits is outdated.\n%s",
 			$self->{name},
 			join("\n[[  - >>", '', @errors),
-			$state,
-			$state eq 'deployed'
+			$action eq 'deploy' ? 'deployed' : 'terminated',
+			$action eq 'deploy'
 				? "\nThis may be resolved by deploying again, or it may be a permissions issue while trying to ".
 					"write to vault path '".$self->exodus_base."'\n"
 				: '\nThis may be resolved by terminating again, or it may be a permissions issue while trying to '.
@@ -3394,8 +3281,6 @@ sub update_deployment_exodus {
 		);
 	}
 
-	# Reset the last deployed manifest
-	$self->_reset_last_deployed_manifest;
 	info(" #G{done.}%s", pretty_duration(gettimeofday - $started)) if $notify;
 	return 1;
 }
@@ -3442,8 +3327,8 @@ sub terminate {
 		return 0 unless $force;
 
 	} elsif ($deployment_state eq 'terminated') {
-		my $last_deployment = $self->deployment_lookup('latest');
-		my ($date, $time) = $last_deployment->{completed} =~ m{^(\d{4}-\d{2}-\d{2}).(\d{2}:\d{2}:\d{2})};
+		my $last_deployment = $self->deployments->latest_successful;
+		my ($date, $time) = $last_deployment->completed(EXODUS_TIME_FORMAT) =~ m{^(\d{4}-\d{2}-\d{2}).(\d{2}:\d{2}:\d{2})};
 		# FIXME: Parse with Time::Piece, then present in local time
 
 		warning(
@@ -3472,7 +3357,7 @@ sub terminate {
 		return unless $ok;
 	} elsif ($self->is_bosh_director) {
 		$self->_create_deployment_audit_log(
-			'terminate' => 'failed',
+			'terminate' => Genesis::Env::Deployment::action_failed,
 			reason => "Aborted due to unsupported BOSH director kit (no terminate hook) - no --force specified",
 			started => $start_time,
 			flags => $opts{flags} || '',
@@ -3483,7 +3368,7 @@ sub terminate {
 				"likely leave orphaned resources on your IaaS unless you manually ".
 				"cleaned it up first)."
 			]
-		 ) unless $force;
+		) unless $force;
 
 		warning(
 			"\nTerminating a BOSH director environment without a termination hook.  ".
@@ -3526,25 +3411,18 @@ sub terminate {
 			info(
 				"[[  - >>Using the unredacted manifest, vars and state file from the deployment archive."
 			);
-			my $last_deployment = $self->deployment_lookup('latest-deployed');
+			my $last_deployment = $self->deployments->latest(action => 'deploy');
 			bail(
 				"Cannot find artifacts for previous deployment; cannot proceed with delete-env."
-			) unless $last_deployment->{artifacts};
-			my $contents = $self->_unpack_deployment_artifacts($last_deployment->{artifacts});
-			for my $filetype (qw/manifest vars state store/) {
-				my $path = $self->deployment_cache_path_lookup($filetype);
-				my $key = basename($path);
-				if ($contents->{$key}) {
-					mkfile_or_fail($path, $contents->{$key});
-				} elsif ($key =~ /^(manifest|state)$/) {
-					# We need the manifest and state files to delete the environment
-					# but we don't need the vars or store files.
-					bail(
-						"Cannot find %s file for previous deployment; cannot proceed with delete-env.",
-						$key
-					);
-				}
-			}
+			) unless $last_deployment && $last_deployment->artifact_types();
+			my ($optional_artifacts) = compare_arrays(
+				[$last_deployment->artifact_types()],
+				[qw/vars store/]
+			);
+			$last_deployment->extract_artifacts_to(
+				$self->deployment_cache_path_lookup(),
+				'manifest', 'state', @$optional_artifacts
+			);
 		}
 		$self->notify("deleting create-env environment...");
 		my ($out, $rc) = $self->bosh->delete_env(
@@ -3594,7 +3472,7 @@ sub terminate {
 	}
 
 	return $self->_create_deployment_audit_log(
-		'terminate' => 'failed',
+		'terminate' => Genesis::Env::Deployment::action_failed,
 		%audit_data,
 		reason => sub {
 		}->($self,$reason),
@@ -3713,6 +3591,7 @@ sub terminate {
 			for my $network (sort keys $claims->%*) {
 				my $start = gettimeofday();
 				info("  releasing claims for the #C{%s} network...", $network);
+				# FIXME: Need to revisit the short-circuiting here... (also let's not reuse the $ok variable in local scope as its confusing)
 				my $ok = 1;
 				for my $subnet ($claims->{$network}{subnets}->@*) {
 					info("%s", $subnet->{description});
@@ -3772,11 +3651,15 @@ sub terminate {
 		# deployment audit data to indicate the deployment has been terminated
 		# Set exodus data to indicate the deployment has been terminated
 		$self->vault->authenticate;
+		my $result = [
+			Genesis::Env::Deployment::action_failed,
+			Genesis::Env::Deployment::action_succeeded,
+			Genesis::Env::Deployment::action_post_failed,
+		]->[$ok//0];
 		$self->update_deployment_exodus(
-			'terminated',
+			'terminate' => $result,
 			reason  => $reason,
 			flags   => $term_flags,
-			success => ['failure','success','cleanup-failed']->[$ok//0],
 			started => Time::Piece->new($start)->strftime(EXODUS_TIME_FORMAT),
 		);
 	} else {
@@ -3798,6 +3681,18 @@ sub terminate {
 }
 
 # }}}
+
+# Deployment Audits
+# deployments - the deployment audit manager for this environment {{{
+sub deployments {
+	my ($self) = @_;
+	return $self->_memoize(sub {
+		require Genesis::Env::DeploymentManager;
+		return Genesis::Env::DeploymentManager->new({
+			env => $self,
+		});
+	})
+}
 
 # Secrets Processing
 # add_secrets - add any secrets missing from the environment {{{
@@ -3911,8 +3806,8 @@ sub remove_secrets {
 			warning(
 				"\nThis will delete the following %s secrets under '#C{%s}', which may".
 				"include non-generated values set by 'genesis new' or manually created:\n",
-				 scalar(@paths), $self->secrets_base
-			 );
+				scalar(@paths), $self->secrets_base
+			);
 			my $prefix = $store->base =~ s/^\///r;
 			my $plan = $self->secrets_plan(%opts);
 			for my $full_path (sort @paths) {
@@ -5099,224 +4994,6 @@ sub _parse_bosh_env {
 }
 
 # }}}
-# _reset_last_deployed_manifest - clear the cache of last deployed manifest used by last_deployed_lookup {{{
-sub _reset_last_deployed_manifest {
-	my $self = shift;
-	undef($self->{__last_deployed_lookup_manifest});
-}
-
-# }}}
-# _build_deployment_audit_data - build the audit data for a deployment (or termination) {{{
-sub _build_deployment_audit_data {
-	my ($self, $action, $result, $sequence, $timestamp, @overrides) = @_;
-
-	my $flatten = 'unflattened';
-	$flatten = shift(@overrides) if ($overrides[0] =~ /^(un)?flatten(ed)?$/);
-	my %overrides = @overrides;
-
-	my $user_data = parse_fixed_width_table({array_rows => 1},
-		lines(run({stderr => '/dev/null'},'whdo', '-mH'))
-	)->[1];
-	my $user = $user_data->[0] // $ENV{USER};
-	$user .= " ".($user_data->[3]) if $user_data->[3];
-
-	my $deployment_data = {
-		action          => $action,
-		result          => $result,
-		started         => $timestamp,
-		completed       => $timestamp,
-		sequence        => $sequence,
-		genesis_version => $Genesis::VERSION,
-		reason          => 'unspecified',
-
-		kit => {
-			id            => $self->kit->id,
-			name          => $self->kit->name,
-			version       => $self->kit->version,
-			is_dev        => $self->kit->is_dev ? JSON::PP::true : JSON::PP->false,
-			features      => join(',', $self->params->{kit}{features}->@*),
-		},
-
-		user => {
-			shell         => $user,
-			repo          => scalar($self->top->kit_provider->remote->get_authorized_user), # FIXME: only works for git-based kit providers
-			vault         => scalar($self->vault->user),
-			concourse     => $ENV{CONCOURSE_USERNAME},
-		},
-	};
-
-	# Apply any overrides
-	$deployment_data = deep_merge($deployment_data, \%overrides, $flatten);
-	$deployment_data->{reason} //= 'unspecified';
-	return $deployment_data;
-}
-
-# }}}
-# _build_deployment_artifacts - build the deployment artifacts tarball {{{
-sub _build_deployment_artifacts {
-	my ($self, $artifact_file, %artifacts) = @_;
-
-	# Secrets aren't a file, but a collection of vault paths, so we need to
-	# handle them separately
-	my $secrets = delete($artifacts{secrets});
-
-	my $tar = Archive::Tar->new;
-
-	# Add in all the artifacts
-	# TODO: Support directories or list of files so dev kits, or even the whole deployment repo can be included
-	for my $artifact (keys %artifacts) {
-		next unless $artifacts{$artifact} && -f $artifacts{$artifact};
-		$tar->add_data(basename($artifacts{$artifact}), slurp($artifacts{$artifact}));
-	}
-
-	# Add in all secrets used by the manifest
-	if (defined $secrets && ref($secrets) eq 'ARRAY') {
-		my @paths = uniq map {$_ =~ s/:.*//r} ($secrets->@*); # can't export individual keys
-		my $content = @paths
-			? $self->vault->query({redact => 1}, 'export', @paths)
-			: '{}';
-		$tar->add_data('secrets.json', $content);
-	}
-
-	# Compress and base64 encode the artifacts into a tarball
-	my $compressed_data;
-	open(my $data_fh, '>', \$compressed_data);
-	$tar->write(IO::Compress::Gzip->new($data_fh, Level => 9, Append => 0, AutoClose => 1))
-		or bail("Failed to compress manifest artifacts");
-
-	my $encoded_artifacts = encode_base64($compressed_data);
-	mkfile_or_fail($artifact_file, $encoded_artifacts);
-
-	return {
-		artifact => $artifact_file,
-		artifacts     => \%artifacts,
-		secrets       => $secrets,
-	};
-
-}
-
-# }}}
-
-# _unpack_deployment_artifacts - unpack the deployment artifacts tarball {{{
-sub _unpack_deployment_artifacts {
-	my ($self, $artifacts_data) = @_;
-
-	my $tar = Archive::Tar->new;
-	my $compressed_data = decode_base64($artifacts_data);
-	$tar->read(IO::Uncompress::Gunzip->new(\$compressed_data))
-		or bail("Failed to decompress manifest artifacts");
-
-	# Extract the files from the tarball
-	my $contents = {};
-	for my $file ($tar->list_files) {
-		my $data = $tar->get_content($file);
-		if ($file eq 'secrets.json') {
-			$contents->{secrets} = decode_json($data);
-		} else {
-			$contents->{$file} = $data;
-		}
-	}
-
-	return $contents;
-}
-
-# }}}
-# _backfill_deployment_audit_data - backfill the audit data for a missing deployment or termination {{{
-sub _backfill_deployment_audit_data {
-	my ($self, $old_exodus, $last_deployment) = @_;
-
-	# Get last deployments sequence number
-	$last_deployment //= $self->deployment_lookup('latest') // {};
-	bug{
-		"last_deployment is not a hashref: %s",
-		$last_deployment
-	} unless ref($last_deployment) eq 'HASH';
-
-	return undef unless keys %$last_deployment || keys %$old_exodus; # no prior deployments
-	my $sequence = (
-		$last_deployment->{sequence} //
-		scalar(keys $self->exodus_lookup('/deployments', {})->%*)
-	) + 1;
-
-	# Case 1: We have no data in exodus, so it must have been terminated
-	if (!keys %$old_exodus) {
-		return $last_deployment if $last_deployment->{state} eq 'terminated';
-
-		# Create an artificial termination date halfway between the last
-		# deployment and now
-		my $now = Time::Piece->new;
-		my $termination_time = Time::Piece->strptime(
-			$last_deployment->{completed} || $last_deployment->{dated} || $now->strftime(EXODUS_TIME_FORMAT),
-			EXODUS_TIME_FORMAT
-		);
-		my $termination_ts = $termination_time + ($now - $termination_time) / 2;
-		$termination_ts = $termination_ts->strftime(EXODUS_TIME_FORMAT_SHORT);
-
-		my $placeholder = {
-			state => 'terminated',
-			started => $termination_time->strftime(EXODUS_TIME_FORMAT),
-			completed => $now->strftime(EXODUS_TIME_FORMAT),
-			sequence => $sequence,
-			reason => 'Terminated via unknown means after last recorded deployment (time unknown)',
-		};
-		$self->vault->set_path($self->exodus_base."/deployments/$termination_ts", $placeholder, flatten => 1);
-
-	# Case 2: We have data in exodus, but no sequence number, so we need to
-	# backfill the deployment audit data
-	} else {
-
-		# Sanity check: if exodus has a sequence number, then we don't need to
-		# backfill the deployment audit data
-		if (defined($old_exodus->{sequence})) {
-			return $last_deployment if $old_exodus->{sequence} == $last_deployment->{sequence};
-			bail(
-				"Sequence number in exodus (%s) does not match the last deployment sequence number (%s) - contact support",
-				$old_exodus->{sequence}, $last_deployment->{sequence}
-			);
-		};
-
-		my $deployment_time = Time::Piece->strptime($old_exodus->{dated}, EXODUS_TIME_FORMAT);
-		my $deployment_ts = $deployment_time->strftime(EXODUS_TIME_FORMAT_SHORT);
-		my $last_deployment_ts = $last_deployment->{timestamp};
-		my $genesis_version = $old_exodus->{version}//'(unknown version)';
-		my $reason = $old_exodus->{reason}//'Unknown reason';
-		my $deployment_data = $self->_build_deployment_audit_data(
-			'deploy', 'success', $sequence,
-			$deployment_time->strftime(EXODUS_TIME_FORMAT),
-			kit => {
-				name => $old_exodus->{kit_name},
-				version => $old_exodus->{kit_version},
-				is_dev => $old_exodus->{kit_is_dev} ? JSON::PP::true : JSON::PP->false,
-				features => $old_exodus->{features},
-			},
-			user => {
-				shell => $old_exodus->{deployer},
-				vault => 'unknown',
-				git => 'unknown',
-				concourse => 'unknown',
-			},
-			manifest => {
-				storage => 'repository',
-				type => $old_exodus->{manifest_type},
-				sha1 => $old_exodus->{manifest_sha1},
-			},
-			reason => $reason,
-			genesis_version => $genesis_version,
-		);
-		$self->vault->set_path(
-			$self->exodus_base."/deployments/$deployment_ts",
-			$deployment_data,
-			flatten => 1
-		);
-
-		# Update exodus with the new sequence number
-		$self->vault->set($self->exodus_base, "sequence", $sequence);
-	}
-	return $self->deployment_lookup('latest');
-}
-
-# }}}
-
 # _create_deployment_audit_log - create the audit log for the environment deployments and terminations {{{
 sub _create_deployment_audit_log {
 	my ($self, $action, $result, %audit_data) = @_;
@@ -5324,75 +5001,25 @@ sub _create_deployment_audit_log {
 	$bails_with = ['%s', $bails_with] if $bails_with && ref($bails_with) ne 'ARRAY';
 	my $returns = delete($audit_data{returns});
 
-	my $timestamp = $audit_data{completed} || Time::Piece->new->strftime(EXODUS_TIME_FORMAT);
-	my $deployment_time = $timestamp =~ s/\+.*$//r =~ s/[^0-9]//gr; # YYYYMMDDHHMMSS
+	# Validate the action
+	my @valid_actions = qw/deploy terminate/;
+	bail(
+		"Invalid action: %s.  Valid actions are: %s",
+		$action, join(', ', @valid_actions)
+	) unless in_array($action, @valid_actions);
 
-	my $artifact_file = $self->workpath("artifacts-$deployment_time.tar.gz");
-	# TODO: Support untarred version of the artifacts
-	if ($action eq 'deploy') {
-		$self->_build_deployment_artifacts(
-			$artifact_file,
-			log      => $self->deployment_cache_path_lookup('deploy_log'),
-			manifest => $self->deployment_cache_path_lookup('manifest'),
-			unpruned => $self->deployment_cache_path_lookup('unpruned_manifest'),
-			vars     => $self->deployment_cache_path_lookup('vars'),
-			state    => $self->deployment_cache_path_lookup('state'),
-			store    => $self->deployment_cache_path_lookup('store'),
-			secrets  => [keys($self->manifest_provider->vault_paths(notify => 0)->%*)],
-			# TODO: add the dev kit, the ops directory and the env and its ancestors.
-		);
-		$audit_data{manifest} = {
-			type => $self->manifest_provider->deployment->type,
-			sha2 => digest_file_hex(
-				$self->deployment_cache_path_lookup('manifest'), 'SHA-256'
-			),
-		};
-	} elsif ($action eq 'terminate') {
-		$self->_build_deployment_artifacts(
-			$artifact_file,
-			log      => $self->deployment_cache_path_lookup('deploy_log'),
-			# manifest => $self->deployment_cache_path_lookup('manifest'),
-			# unpruned => $self->deployment_cache_path_lookup('unpruned_manifest'),
-			# vars     => $self->deployment_cache_path_lookup('vars'),
-			# state    => $self->deployment_cache_path_lookup('state'),
-			# store    => $self->deployment_cache_path_lookup('store'),
-			# secrets  => [keys($self->manifest_provider->vault_paths(notify => 0)->%*)],
-		);
-	} else {
-		bail("Invalid action: %s", $action);
-	}
-
-	my $sequence = delete($audit_data{sequence}) // $self->get_next_deployment_sequence_number();
-	my $deployment_data = $self->_build_deployment_audit_data(
-		$action, $result, $sequence, $timestamp, 'flatten',
+	my ($out,$rc,$err) = $self->deployments->build(
+		$action, $result,
 		%audit_data,
-	);
+	)->commit();
 
-	# Add the deployment audit data to the exodus commands
-	my @exodus_cmds = ();
-	push @exodus_cmds, (
-		'set', $self->exodus_base."/deployments/$deployment_time",
-		'__flattened__=1',
-		map {
-			"$_=$deployment_data->{$_}"
-		} keys %$deployment_data
-	);
-	push(
-		@exodus_cmds, "artifacts\@$artifact_file"
-	) if -f $artifact_file;
-
-	my ($out, $rc, $err) = $self->vault->authenticate->query(
-		{ redact => 1 },
-		@exodus_cmds
-	);
-	if ($rc) {
-		bail(
-			"Failed to set deployment audit data in exodus: %s\n%s",
-			$out, $err
-		);
-	}
+	bail(
+		"Failed to set deployment audit data in exodus: %s\n%s",
+		$out, $err
+	) if $rc;
 
 	bail(@$bails_with) if $bails_with;
+	$self->deployments->reset;
 	return $returns
 		? (ref($returns) eq 'CODE' ? $returns->($self, $out, $rc, $err) : $returns)
 		: 1;
