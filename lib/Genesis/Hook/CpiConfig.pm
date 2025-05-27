@@ -32,9 +32,8 @@ sub done {
 	} else {
 		$self->{contents} = undef;
 	}
-	$self->{complete} = 1;
 	$self->{error} = $error || undef;
-	return $self->{complete};
+	return $self->{complete} = 1;
 }
 
 sub results {

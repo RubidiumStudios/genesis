@@ -87,17 +87,18 @@ sub done {
 
 	my $filename = $self->env->workdir . "/cloud-config-".$self->{id}.".yml";
 	save_to_yaml_file($contents, $filename);
-	$self->{contents} = slurp($filename)
+	$contents = slurp($filename)
 		=~ s/\b${sort_name_first}:/name:/gr 
 		=~ s/\b${sort_cloud_properties_last}:/cloud_properties:/gr
 		=~ s/\n([^ -])/\n\n$1/gmr;
 	unlink($filename);
-	$self->SUPER::done;
+	$self->SUPER::done($contents);
 }
 
 # }}}
 # results - Returns the contents of the cloud config {{{
 sub results {
+	trace('called results before hook completed') unless $_[0]->completed;
 	return undef unless $_[0]->completed; # Should this be an error?
 	return wantarray
 		? ($_[0]->{contents}, $_[0]->{network})
@@ -635,7 +636,12 @@ sub _subnet_definition {
 	) if exists $fields->{static};
 
 	if (exists $fields->{cloud_properties_for_iaas}) {
-		my $cloud_properties = flatten({},'',$fields->{cloud_properties_for_iaas});
+		my $cloud_properties = flatten(
+			$fields->{cloud_properties_for_iaas}{$self->iaas} //
+			# TODO: Support glob-style matching for IaaS
+			$fields->{cloud_properties_for_iaas}{'*'} //
+			{}
+		);
 		for my $key (keys %$cloud_properties) {
 			my $value = $cloud_properties->{$key};
 			if (ref($value) eq "Genesis::Hook::CloudConfig::LookupSubnetRef") {
@@ -651,7 +657,7 @@ sub _subnet_definition {
 			}
 		}
 		$base_config->{cloud_properties} = $self->_network_cloud_properties_for_iaas(
-			$target, $subnet_id, %{unflatten($cloud_properties)}
+			$target, $subnet_id, $self->iaas => unflatten($cloud_properties)
 		);
 	}
 
@@ -703,11 +709,7 @@ sub _cloud_properties_for_iaas {
 	my $map_key = (grep {$_ eq $self->iaas} keys %map)[0]
 		// (grep {$_ =~ /(?:^|\|)$self->iaas(?:\||$)/} keys %map)[0]
 		// '*';
-	my $cloud_properties = $map{$map_key}; #TODO: allow glob-style matching
-	$self->env->kit->kit_bug(
-		"Unsupported #R{%s} IaaS for building #C{%s} definitions in #M{%s}",
-		$self->iaas, $type, $self->env->kit->id
-	) unless ($cloud_properties);
+	my $cloud_properties = $map{$map_key} // {}; #TODO: allow glob-style matching
 
 	return $self->_process_config_overrides(
 		$type, $target, $cloud_properties, 'cloud_properties'

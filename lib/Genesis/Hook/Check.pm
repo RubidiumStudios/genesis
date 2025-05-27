@@ -119,15 +119,4 @@ sub has_environment_entry {
 	}
 }
 
-sub done {
-	my $self = shift;
-	my $features = (@_)
-		? @_ == 1 && ref($_[0]) eq 'ARRAY'
-			? $_[0]
-			: [@_]
-		: [$self->build_features_list()];
-	$self->{results} = $features;
-	$self->{complete} = 1;
-}
-
 1;

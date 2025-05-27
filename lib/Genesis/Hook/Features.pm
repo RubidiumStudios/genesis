@@ -68,13 +68,13 @@ sub build_features_list {
 
 sub done {
 	my $self = shift;
+	return SUPER::done($self, $_[0]) if @_ == 1 and !$_[0];
 	my $features = (@_)
 		? @_ == 1 && ref($_[0]) eq 'ARRAY'
 			? $_[0]
 			: [@_]
 		: [$self->build_features_list()];
-	$self->{results} = $features;
-	$self->{complete} = 1;
+	return SUPER::done($self, $features);
 }
 
 1;
