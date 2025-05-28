@@ -32,17 +32,24 @@ use constant {
 	artifact_map_file  => '_artifact_map.json',
 };
 
-### Class Methods
-# new - create a new Genesis::Env::Deployment object based on the provided data {{{
+# Class Helper Functions
+# is_a_successful_result - Check if the result is a successful deployment result {{{
 sub is_a_successful_result {
 	my ($result) = @_;
 	return in_array($result, action_succeeded, action_post_failed);
 }
+
+# }}}
+# is_a_failed_result - Check if the result is a failed deployment result {{{
 sub is_a_failed_result {
 	my ($result) = @_;
 	return in_array($result, action_failed);
 }
 
+# }}}
+
+### Class Methods
+# new - create a new Genesis::Env::Deployment object based on the provided data {{{
 sub new {
 	my ($class, $env, %data) = @_;
 
@@ -78,10 +85,11 @@ sub new {
 
 	# Get the timestamp from the data if provided.
 	my $timestamp = delete($data{timestamp});  # TODO: Should we default to current time?
+	$timestamp //= _get_ts_string($data{completed}//Time::Piece->new);
 
 	# Validate the input data has all the required fields
 	my @missing = grep { !exists $data{$_} } qw(
-		action result started completed genesis_version reason
+		action result genesis_version reason
 		kit user manifest
 	);
 	# Kit and user are hashrefs with their own required fields
@@ -218,6 +226,30 @@ sub timestamp {
 }
 
 # }}}
+# sequence - Get the sequence number for this deployment {{{
+sub sequence {
+	return $_[0]->{data}{sequence};
+}
+
+sub user_description {
+	my $self = shift;
+	
+	# Add in any known user roles from the users hash
+	my $user_info = $self->{data}{user} // {};
+	my @extra_roles = ();
+	for my $role (grep {$_ ne 'shell'} keys %$user_info) {
+		next unless $user_info->{$role} && $user_info->{$role} ne 'unknown';
+		push @extra_roles, "$role: $user_info->{$role}";
+	}
+
+	return sprintf(
+		"%s%s",
+		$self->{data}{user}{shell} // 'unknown',
+		@extra_roles ? ' [' . join(', ', @extra_roles) . ']' : ''
+	);
+}
+
+# }}}
 # env - Accessor for the environment {{{
 sub env {
 	return $_[0]->{env};
@@ -227,6 +259,7 @@ sub env {
 # committed - true if the deployment has been committed to exodus {{{
 sub committed {
 	my $self = shift;
+	return 0 unless $self->timestamp();
 	return $self->env->vault->has(
 		'deployments/' . $self->timestamp()
 	);
@@ -243,6 +276,14 @@ sub commit {
 
 	# Get the deployment data
 	my $data = $self->{data};
+
+	# If not present, determine the started, completed, and timestamp values
+	my $commit_time = Time::Piece->new;
+	my $timestamp_time = $self->{timestamp} 
+		? Time::Piece->strptime($self->{timestamp}, EXODUS_TIME_FORMAT_SHORT)
+		: $data->{completed} // $commit_time;
+	$data->{completed} //= $timestamp_time;
+	$data->{started} //= $timestamp_time;
 
 	# Process the artifacts
 	my $artifacts = $self->{artifacts};
@@ -266,7 +307,7 @@ sub commit {
 	my $deployment_data = flatten({
 		$self->{data}->%*,
 		sequence => $self->env->deployments->next_sequence_number(),
-		timestamp => $self->_get_ts_string($self->{data}{completed}),
+		timestamp => _get_ts_string($timestamp_time),
 	});
 
 	# Convert the timestamps into EXODUS_TIME_FORMAT strings if they are Time::Piece objects
@@ -284,7 +325,7 @@ sub commit {
 			"$_=$deployment_data->{$_}"
 		} keys %$deployment_data
 	);
-	push @cmds, "artifacts@$artifact_file" if $artifact_file && -f $artifact_file;
+	push @cmds, "artifacts\@$artifact_file" if $artifact_file && -f $artifact_file;
 
 	my ($out, $rc, $err) = $self->env->vault->authenticate->query(
 		{ redact => 1 },
@@ -361,10 +402,6 @@ sub extract_artifacts_to {
 		return {};
 	}
 
-	# Get all artifacts
-	bail(
-		"Cannot extract secrets to a file - use 'secrets.json' instead"
-	) if grep {$_ eq 'secrets'} @artifacts;
 	my $artifacts_hash = $self->_get_artifact_hash(@artifacts);
 	
 	# Write each artifact to the specified path
@@ -435,16 +472,8 @@ sub _get_artifact_hash {
 		# Handle secrets separately if needed
 		if ($requested_secrets || $requested_secrets_json) {
 			# Already validated that secrets is a valid artifact type
+			my $contents = $self->_get_artifact_type('secrets');
 
-			my $contents;
-			if (@{$self->{artifacts}{data}{secrets}||[]}) {
-				$contents = $self->env->vault->query({redact => 1},
-					'export', 'secrets',
-					$self->{artifacts}{data}{secrets}->@*
-				);
-			} else {
-				$contents = '{}';
-			}
 			$results{'secrets'} = $contents if $requested_secrets;
 			$results{'secrets.json'} = $contents if $requested_secrets_json;
 		}
@@ -485,17 +514,16 @@ sub _build_artifacts_file {
 
 	# Add in the artifact map
 	my $artifact_map = $self->_artifact_map();
-	$tar->add_data(artifact_map_file, encode_json($artifact_map))
-		if $artifact_map && keys %$artifact_map;
+	$tar->add_data(
+		artifact_map_file,
+		encode_json($artifact_map)
+	) if $artifact_map && keys %$artifact_map;
 
 	# Add in all secrets used by the manifest
-	if (defined $secrets && ref($secrets) eq 'ARRAY') {
-		my @paths = uniq map {$_ =~ s/:.*//r} (@$secrets); # can't export individual keys
-		my $content = @paths
-			? $self->env->vault->query({redact => 1}, 'export', @paths)
-			: '{}';
-		$tar->add_data('secrets.json', $content);
-	}
+	$tar->add_data(
+		'secrets.json',
+		$self->_collect_secrets_from_paths(@$secrets)
+	)	if (defined $secrets && ref($secrets) eq 'ARRAY');
 
 	# Compress and base64 encode the artifacts into a tarball
 	my $compressed_data;
@@ -507,6 +535,35 @@ sub _build_artifacts_file {
 	mkfile_or_fail($artifact_file, $encoded_artifacts);
 
 	return 1;
+}
+
+# }}}
+
+# _collect_secrets_from_paths - Collect secrets from vault paths {{{
+sub _collect_secrets_from_paths {
+	my ($self, @paths) = @_;
+
+	# We cannot use vault export because it gets EVERYTHING under that path,
+	# including subpaths, which we don't want.  We need to step through each
+	# path and collect the secrets individually.
+
+	my $struct = {};
+	for my $path (@paths) {
+		# Check if we want a path:key or a path
+		my ($p,$key) = $path =~ m{^(.+?)(?::([^/]+))?$};
+
+		#my $struct_key = $p =~ s{^/}{.}; -- in case we want to have a deep structure
+		if ($key) {
+			# Get the value at the path and key
+			$struct->{"$p.$key"} = $self->env->vault->get($p, $key, {redact => 1});
+		} else {
+			# Get the value at the path
+			$struct->{$p} = $self->env->vault->get_path($p, {redact => 1});
+		}
+	}
+
+	my $secrets = encode_json(unflatten($struct));
+	return $secrets if $secrets;
 }
 
 # }}}
@@ -544,6 +601,8 @@ sub _artifact_map {
 		# If the artifacts are a local file hash, let's build a map from the hash
 		%artifact_map = map {
 			$_ => basename($self->{artifacts}{data}{$_})
+		} grep { # Only include files that exist
+			$self->{artifacts}{data}{$_} && -f $self->{artifacts}{data}{$_}
 		} grep {$_ ne 'secrets'} keys %{$self->{artifacts}{data}};
 		if (exists $self->{artifacts}{data}{secrets}) {
 			# Add 'secrets.json' if 'secrets' is available
@@ -555,6 +614,7 @@ sub _artifact_map {
 		if ($artifact_tarball->contains_file(artifact_map_file)) {
 			my $artifact_map_content = $artifact_tarball->get_content(artifact_map_file);
 			# RISK: This will fail if the artifact map is not valid JSON
+			# FIXME: Do we need to filter out any files that don't exist?
 			return $self->{artifacts}{map} = decode_json($artifact_map_content)
 				if $artifact_map_content;
 		}
@@ -643,13 +703,16 @@ sub _is_base64_gzipped {
 
 # _ts_string - Make a timestamp string from a Time::Piece object or a string {{{
 sub _get_ts_string {
-	my ($ts) = @_;
+	my $ts = shift;
+	$ts = shift if ref($ts) eq 'Genesis::Env::Deployment';
+	
 	$ts //= Time::Piece->new;  # Default to current time if not provided
 	return $ts->strftime(EXODUS_TIME_FORMAT_SHORT) if ref($ts) eq 'Time::Piece';
 	return (
 		$ts =~ s/[Z ]?[+-]0000$//r =~ s/[^0-9]+//gr
 	) if $ts =~ /^\d{4}-?\d{2}-?\d{2}[T ]?\d{2}:?\d{2}:?\d{2}([Z ]?[+-]0000)?$/;
 	# FIXME: Support non-UTC timestamps with timezone offsets?
+	use Pry; pry;
 	bail("Invalid timestamp format: $ts");
 }
 

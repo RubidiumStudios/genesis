@@ -48,7 +48,7 @@ sub reset {
 sub find {
 	my ($self, %options) = @_; # See POD for valid options
 	
-	my $env = $self->{env};
+	my $env = $self->env;
 
 	# Validate options
 	my @invalid_options = grep { !/^(action|result|all|timestamps_only|limit|range)$/ } keys %options;
@@ -154,7 +154,7 @@ sub current_state {
 # build - build a new deployment audit object {{{
 sub build {
 	my ($self, $action, $result, %options) = @_;
-	my $env = $self->{env};
+	my $env = $self->env;
 
 	# TODO: Do we strip the timestamp and sequence number from the options,
 	#       as they are set on commit?  Or should they (or at least the timestamp)
@@ -309,12 +309,71 @@ sub env {
 }
 # }}}
 
+# synthesize_from_exodus - synthesize a deployment audit from the exodus data {{{
+sub synthesize_from_exodus {
+	my ($self, $exodus_data) = @_;
+	# Synthesize a deployment audit from the exodus data
+	# This is used to create a deployment audit from the exodus data
+	# when the environment has been deployed prior to Genesis supporting
+	# deployment audits
+	my $env = $self->env;
+	$exodus_data //= $env->exodus_lookup('.', {});
+
+	if (! keys %$exodus_data) {
+		# The environment is either undeployed or terminated, but with no data,
+		# assume never deployed.
+		return undef;
+	}
+
+	# TODO: Incorporate the artifacts from the repo into the synthesized deployment
+	# audit, if they exist.
+
+	# Create a new deployment object with the exodus data
+	return Genesis::Env::Deployment->new(
+		$env,
+		action => 'deploy',
+		result => Genesis::Env::Deployment::action_succeeded,
+		reason => $exodus_data->{reason} // 'unknown - synthesized from previous exodus data',
+		started => $exodus_data->{dated},
+		completed => $exodus_data->{completed} // $exodus_data->{dated},
+		genesis_version => $exodus_data->{version} // 'unknown',
+		create_env => $exodus_data->{use_create_env} ? JSON::PP::true : JSON::PP->false,
+		bosh_target => {
+			name => $exodus_data->{bosh}
+		},
+		kit => {
+			id => $exodus_data->{kit_id} // sprintf(
+				"%s/%s%s",
+				$exodus_data->{kit_name},
+				$exodus_data->{kit_version},
+				$exodus_data->{kit_is_dev} ? ' (dev)' : ''
+			),
+			name => $exodus_data->{kit_name},
+			version => $exodus_data->{kit_version},
+			is_dev => $exodus_data->{kit_is_dev} ? JSON::PP::true : JSON::PP->false,
+			features => $exodus_data->{features} // '',
+		},
+		user => {
+			shell => $exodus_data->{deployer} // 'unknown',
+			vault => 'unknown',
+			git => 'unknown',
+			concourse => 'unknown',
+			bosh => 'unknown',
+		},
+		manifest => {
+			type => $exodus_data->{manifest_type} // 'unknown',
+			sha2 => $exodus_data->{manifest_sha1} // 'unknown',
+			using_sha1 => 1, # Exodus uses sha1 instead of sha2
+		},
+	);
+}
+
 ### Private Instance Methods
 
 # _all - get all deployment audits in list or scalar context - for internal use only
 sub _all {
 	my ($self) = @_;
-	my $env = $self->{env};
+	my $env = $self->env;
 	unless ($self->{__all_deployments}) {
 		# Get list of deployments from vault
 		my $deployments = $env->vault->get_path($env->exodus_base.'/deployments');
@@ -340,7 +399,7 @@ sub _all {
 # _base_deployment_content - generates base deployment audit content {{{
 sub _base_deployment_content {
 	my ($self, $action, $result) = @_;
-	my $env = $self->{env};
+	my $env = $self->env;
 
 	my $base = {
 		action          => $action,
@@ -350,12 +409,15 @@ sub _base_deployment_content {
 	};
 
 	unless ($result eq 'assumed') { # TODO: Handles backfilling of assumed deployments and terminations
+
 		$base->{kit} = {
 			id            => $env->kit->id,
 			name          => $env->kit->name,
 			version       => $env->kit->version,
 			is_dev        => $env->kit->is_dev ? JSON::PP::true : JSON::PP->false,
-			features      => join(',', $env->params->{kit}{features}->@*),
+			features      => join(',', $env->lookup('kit.features', [])->@*),
+			bosh_target   => { map { $_ => $env->bosh_env->{$_} } grep { defined $env->bosh_env->{$_} } keys %{$env->bosh_env} },
+			create_env    => $env->use_create_env ? JSON::PP::true : JSON::PP->false,
 		};
 
 		my $user_data = parse_fixed_width_table({array_rows => 1},
@@ -374,12 +436,19 @@ sub _base_deployment_content {
 		$base->{artifacts} = $self->_base_artifacts($action);
 
 		if ($action eq 'deploy') {
+			$base->{parameters} = {
+				iaas         => $env->iaas,
+				cloud_config => $env->can_build_cloud_configs ? JSON::PP::true : JSON::PP->false,
+				cpi          => $env->cpi_name,
+				scale        => $env->scale,
+				is_ocfp      => $env->is_ocfp ? JSON::PP::true : JSON::PP->false,
+			};
 			$base->{manifest} = {
 				type => $env->manifest_provider->deployment->type,
 				sha2 => digest_file_hex(
 					$env->deployment_cache_path_lookup('manifest'), 'SHA-256'
 				)
-			}
+			};
 		}
 	};
 	return $base;
@@ -389,7 +458,7 @@ sub _base_deployment_content {
 # _base_artifacts - return a hashref of artifacts based on the action {{{
 sub _base_artifacts {
 	my ($self, $action) = @_;
-	my $env = $self->{env};
+	my $env = $self->env;
 	# Return a hashref of artifacts based on the action
 	if ($action eq 'deploy') {
 		return {
