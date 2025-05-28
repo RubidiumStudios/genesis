@@ -70,7 +70,7 @@ sub load_hook_module {
 sub perform {
 	$_[0]->kit->kit_bug(
 		"Expect kit %s %s hook (perl module) to provide a 'perform' method",
-		$_[0]->kit, $_[0]->type
+		$_[0]->kit->id, $ENV{GENESIS_KIT_HOOK}
 	)
 }
 
