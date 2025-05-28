@@ -20,13 +20,19 @@ use Genesis qw/
 	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
 /;
 use Genesis::State qw/envset under_test in_callback/;
-use Genesis::Term qw/csprintf wrap decolorize in_controlling_terminal bullet/;
-use Genesis::UI qw/prompt_for_boolean prompt_for_line/;
+use Genesis::Term qw/csprintf wrap fix_wrap decolorize in_controlling_terminal bullet/;
+use Genesis::UI qw/prompt_for_boolean prompt_for_line new_prompt_for_choice/;
 use Genesis::Commands qw/current_command known_commands/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
 
-use Genesis::Env::Deployment qw/is_a_successful_result is_a_failed_result/;
+# REFACTOR:  Importing from a non-Expporter module is a bit odd.  It seems we have
+#            to explicitly import the functions, but also have to use fully
+#            qualified names to use them.  We need a better way to handle this.
+use Genesis::Env::Deployment qw/
+	is_a_successful_result
+	action_succeeded action_failed action_post_failed
+/;
 
 use Service::BOSH::Director;
 use Service::BOSH::CreateEnvProxy;
@@ -1254,7 +1260,7 @@ sub cpi_name {
 	# Return the base cpi name of the director (now provided by exodus)
 	#my $bosh_env = $self->bosh_env;
 	#return join('.', $bosh_env->{name}, $self->iaas, $bosh_env->{dep_type}//'bosh')
-	return $self->director_exodus_lookup('default_cpi_config', undef);
+	return scalar $self->director_exodus_lookup('default_cpi_config', undef);
 }
 
 sub cpi_credhub_base {
@@ -2350,31 +2356,32 @@ sub last_deployed_manifest {
 					manifest_type => $type,
 					manifest_sha2 => $sha2,
 					dated         => $deploy_date,
-					deployer      => $deployment->user,
+					deployer      => $deployment->user_description,
 					timestamp     => $deployment->timestamp,
 					source        => $source,
 					artifacts     => []
 				};
-				for my $file ($deployment->artifact_filenames()) {
-					my $name = $file->name;
+				for my $name ($deployment->artifact_filenames()) {
 					my $file_type =
 						$name eq $self->name.".yml" ? 'manifest' :
 						$name eq $self->name.'.vars' ? 'vars' :
 						$name eq $self->name.'-state.json' ? 'state' :
 						$name eq $self->name.'-store.yml' ? 'store' :
 						$name eq $self->name.'-unpruned.yml' ? 'unpruned' :
+						$name eq $self->name.'-output.log' ? 'log' :
 						"other/$name";
 
+					use Pry; pry;
 					push(@{$results->{artifacts}}, $file_type);
 					$results->{$file_type}{source} = $source;
-					$results->{$file_type}{sha2} = sha256_hex($deployment->artifact($file));
+					$results->{$file_type}{sha2} = sha256_hex($deployment->artifact($name));
 					if ($include_files) {
 						my ($path) = $deployment->extract_artifacts_to(
-							$self->workpath('manifests/'), $file_type
+							$self->workpath('manifests/'), $name
 						);
 						$results->{$file_type}{path} = $path;
 					}
-					$results->{$file_type}{data} = $deployment->artifact($file) if ($include_contents);
+					$results->{$file_type}{data} = $deployment->artifact($name) if ($include_contents);
 				}
 				last;
 
@@ -3170,13 +3177,10 @@ sub update_deployment_exodus {
 
 	my $notify = !delete($deployment_details{quiet});
 	my $started = gettimeofday;
-	info({pending => 1},
-		"[[  - >>storing %s metadata in exodus...",
-		$action eq 'deploy' ? 'deployment' : 'termination'
-	) if $notify;
 
+	my $info_msg = '';
 	if ($action eq 'deploy') {
-		if (is_a_successful_result($result)) {
+		if (Genesis::Env::Deployment::is_a_successful_result($result)) {
 			# if a successful deploy, generate the exodus data from the manifest using
 			# $self->extract_manifest_exodus, as well as the standard deployment exodus
 			# data
@@ -3200,14 +3204,20 @@ sub update_deployment_exodus {
 				$deployment_details{started} = $exodus->{dated} // $timestamp;
 			}
 			push @exodus_cmds, ('rm', $self->exodus_base, "-f");
+			$info_msg = "updating exodus data for this deployment";
 		} else {
+			$info_msg = "retaining any previous exodus data (deployment failed)";
 			# Don't change exodus on a failed deploy
 			$exodus = {};
 			$exodus_overrides = {};
 		}
 	} elsif ($action eq 'terminate') {
-		push @exodus_cmds, ('rm', $self->exodus_base, "-f") if Genesis::Env::DeploymentManager::is_a_successful_result($result);
-		# FIXME: Handle unsuccessful termination
+		if (Genesis::Env::Deployment::is_a_successful_result($result)) {
+			$info_msg = "removing previous exodus data";
+			push @exodus_cmds, ('rm', $self->exodus_base, "-f")
+		} else {
+			$info_msg = "retaining any previous exodus data (termination failed)";
+		}
 	} else {
 		# TODO: Support 'pending' as an result, for when the deployment has started,
 		# then move it to success or failure when it's done
@@ -3227,12 +3237,13 @@ sub update_deployment_exodus {
 			} grep {defined $exodus->{$_}} keys %$exodus
 		);
 	}
-
 	# Set the exodus data in the vault
 	my @errors = ();
-	if (is_a_successful_result($result)) {
-		debug("$action failed, not updating exodus in vault");
-	} else {
+	info(
+		"[[  - >>%s",
+		$info_msg
+	) if $notify;
+	if (Genesis::Env::Deployment::is_a_successful_result($result)) {
 		debug("setting exodus data in the Vault, for use later by other deployments");
 		eval {
 			$self->vault->authenticate;
@@ -3244,10 +3255,17 @@ sub update_deployment_exodus {
 			my ($out, $rc, $err) = $self->vault->query({ redact => 1}, @exodus_cmds);
 			push @errors, "Failed to set exodus data in vault: $err" if $rc;
 		}
+	} else {
+		debug("$action failed, not updating exodus in vault");
 	}
 
 	# If the manifest store is not 'repository', build the deployment audit data
 	if ($self->manifest_store ne 'repository' && !@errors) {
+		info(
+			"[[  - >>creating deployment audit log for %s %s",
+			Genesis::Env::Deployment::is_a_successful_result($result) ? 'successful' : 'failed',
+			$action eq 'deploy' ? 'deployment' : 'termination'
+		) if $notify;
 		eval {
 			$self->_create_deployment_audit_log(
 				$action => $result,
@@ -3688,9 +3706,9 @@ sub deployments {
 	my ($self) = @_;
 	return $self->_memoize(sub {
 		require Genesis::Env::DeploymentManager;
-		return Genesis::Env::DeploymentManager->new({
-			env => $self,
-		});
+		return Genesis::Env::DeploymentManager->new(
+			$self,
+		);
 	})
 }
 
