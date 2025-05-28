@@ -445,7 +445,9 @@ sub strfuzzytime {
 			bug("Invalid input for 'seconds' format: %s", ref($datestring) || $datestring);
 		}
 	} else {
-		$time = Time::Piece->strptime($datestring,$input_format);
+		$time = ref($datestring) eq 'Time::Piece'
+			? $datestring
+			: Time::Piece->strptime($datestring, $input_format);
 		$delta = Time::Piece->new() - $time;
 		$past = ($delta >= 0);
 		$delta = - $delta unless $past;
