@@ -138,6 +138,14 @@ sub for_scale {
 }
 
 # }}}
+# for_iaas - Returns the value for a given IaaS from a map, or a default value if not found {{{
+sub for_iaas {
+	my ($self, $map, $default) = @_;
+	my $iaas = $self->iaas;
+	return $map->{$iaas} // $default;
+}
+
+# }}}
 # lookup_ref - Returns a lookup reference for a given path {{{
 sub lookup_ref {
 	my ($self, $paths, $default) = @_;
@@ -147,19 +155,15 @@ sub lookup_ref {
 # }}}
 # subnet_reference - Returns a reference to a subnet value that can be retrived per subnet {{{
 sub network_reference {
-	my ($self, $property, $lookup_method) = @_;
-	return Genesis::Hook::CloudConfig::LookupNetworkRef->new(
-		$property, $lookup_method//undef
-	);
+	my $self = shift;
+	return Genesis::Hook::CloudConfig::LookupNetworkRef->new(@_);
 }
 
 # }}}
 # subnet_reference - Returns a reference to a subnet value that can be retrived per subnet {{{
 sub subnet_reference {
-	my ($self, $property, $lookup_method) = @_;
-	return Genesis::Hook::CloudConfig::LookupSubnetRef->new(
-		$property, $lookup_method//undef
-	);
+	my $self = shift;
+	return Genesis::Hook::CloudConfig::LookupSubnetRef->new(@_);
 }
 
 # }}}
