@@ -318,6 +318,10 @@ sub download_configs {
 
 	my @configs;
 	if ($name eq '*') {
+		# FIXME:
+		# There is a bug here that all the cloud config names are pointing to the same merged file.  It would
+		# be better if each separate cloud config got its own file, and then also provide a .../merged-cloud.yml
+		# file that contains the merged contents of all the cloud configs.
 		my ($out,$rc,$err) = $self->execute({interactive => 0},
 			'configs -r=1 --type="$1" --json | jq -r \'.Tables[0].Rows[]| {"type": .type, "name": .name}\' | jq -sMc',
 			$type
