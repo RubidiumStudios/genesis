@@ -859,6 +859,8 @@ sub _validate_config {
 					alias        => {type => 'string'}
 				}
 			},
+			force_deployment_reason   => {type => 'boolean', default => Genesis::Config::FALSE},
+			force_user_bosh_creds			=> {type => 'boolean', default => Genesis::Config::FALSE},
 			allow_oversized_secrets   => {type => 'boolean'},
 			confirm_release_overrides => {type => 'enum', values => [qw/always outdated never/], envvar => 'GENESIS_CONFIRM_RELEASE_OVERRIDES' },
 		});

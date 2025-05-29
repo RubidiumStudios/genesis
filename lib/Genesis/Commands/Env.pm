@@ -640,6 +640,15 @@ sub deploy {
 	);
 	command_usage(1) if @_ < 1 || @_ > 2;
 	my ($env_name, $reason) = @_;
+
+	# Check if the user is compelled to provide a reason for the deployment
+	if ($Genesis::RC->get('force_deploy_reason', 0)) {
+		bail(
+			"Cannot deploy environment #C{%s} without a reason. ".
+			"Please provide a reason after any options on the command line",
+			$env_name
+		) unless $reason;
+	}
 	$reason ||= '<unspecified>'; # TODO: add repo option to always require a reason
 
 	# TODO: Check if there's a deployment cache directory and tell the user to
@@ -957,6 +966,15 @@ sub deploy {
 sub terminate {
 	my ($env, $reason, @extras) = @_;
 	command_usage(1) if @extras || !defined($env);
+
+	# Check if the user is compelled to provide a reason for the deployment
+	if ($Genesis::RC->get('force_deploy_reason', 0)) {
+		bail(
+			"Cannot terminate environment #C{%s} without a reason. ".
+			"Please provide a reason after any options on the command line",
+			$env->name
+		) unless $reason;
+	}
 
 	my %options = %{get_options()};
 	$env = Genesis::Top->new('.')->load_env($env)->with_vault()->with_bosh()
