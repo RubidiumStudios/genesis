@@ -11,6 +11,7 @@ use Genesis::State;
 use Genesis::Term;
 use Genesis::Commands;
 use Genesis::Top;
+use Genesis::Env::Deployment;
 
 use Cwd            qw/getcwd abs_path/;
 use File::Basename qw/basename/;
@@ -34,105 +35,121 @@ sub information {
 	);
 
 	my $exodus = $env->exodus_lookup(".",{});
+
+	# If we have deployment audit entries, use those, otherwise "build" one based on
+	# the current exodus data.
+	my $last_deployment = $env->deployments->latest_successful;
+	unless ($last_deployment) {
+		# Synthesize a last deployment based on the current exodus data
+		$last_deployment = $env->deployments->synthesize_from_exodus($exodus)
+	}
+
+
 	my $unknown = csprintf("#YI{unknown}");
-	if ($exodus->{dated}) {
+	if ($last_deployment) {
 		$out .= sprintf(
-			"[[  #I{Last deployed} >>%s\n".
+			"[[  #I{%13s} >>%s\n".
 			"[[  #I{           by} >>#C{%s}\n",
-			strfuzzytime($exodus->{dated}, "#C{%~} #K{(%I:%M%p on %b %d, %Y %Z)}"),
-			$exodus->{deployer} || $unknown
+			$last_deployment->action eq 'deploy' ? 'Deployed' : 'Terminated',
+			strfuzzytime($last_deployment->completed, "#C{%~} #K{(%I:%M%p on %b %d, %Y %Z)}"),
+			$last_deployment->user_description =~ s/ \[/\} #ki\{[/r || $unknown
 		);
-		if ($exodus->{bosh}) {
-			if ($exodus->{bosh} eq "(none)" || $exodus->{bosh} eq '~' || $exodus->{use_create_env}) {
-				$out .= sprintf(
-					"[[  #I{     %s BOSH} >>#CI{create-env}\n",
-					(defined($exodus->{as_director}) && !$exodus->{as_director}) ? 'via' : ' as'
-				);
-			} else {
-				$out .= sprintf("[[  #I{      to BOSH} >>#CI{%s}\n",$exodus->{bosh});
-			}
+
+		# TODO: Handle standalone create-env deployments that aren't BOSH deployments
+		if ($last_deployment->lookup('create_env')) {
+			$out .= sprintf(
+				"[[  #I{     via BOSH} >>#CI{create-env}\n"
+			);
+		} elsif ($last_deployment->lookup('bosh_target')) {
+			$out .= sprintf(
+				"[[  #I{      on BOSH} >>#CI{%s}\n",
+				$last_deployment->lookup('bosh_target.name')
+			);
 		}
+
 		$out .= sprintf(
-			"[[  #I{ based on kit} >>#C{%s}#C{/%s}%s%s\n",
-			$exodus->{kit_name}||$unknown,
-			$exodus->{kit_version}||$unknown,
-			($exodus->{kit_is_dev} ? " #y{(dev)}" : ''),
-			($env->kit->version ne $exodus->{kit_version}||'' ? " #E{warning}#Y{local file specifies ${\($env->kit->id)}!}" : '')
-		);
+			"[[  #I{ based on kit} >>#C{%s}%s%s\n",
+			$last_deployment->lookup('kit.id') =~ s/ \(.*\)//r, # Remove the @dev suffix if present
+			($last_deployment->lookup('kit.is_dev') ? " #y{(dev)}" : ''),
+			($env->kit->version ne $last_deployment->lookup('kit.version','')
+				? " #E{warning}#Y{local file specifies ${\($env->kit->id)}!}"
+				: ''
+			)
+		) if $last_deployment->action eq 'deploy';
+
 		$out .= sprintf(
 			"[[  #I{        using}>> #C{Genesis v%s}\n",
-			$exodus->{version} ||$unknown
+			$last_deployment->lookup('genesis_version', 'unknown')
 		);
 
-		my $deployed_manifest = $env->last_deployed_manifest(files => 1);
-		my $pwd = Cwd::abs_path(Cwd::getcwd);
-		my $manifest_path = $deployed_manifest->{manifest}{path};
-		my $sha1 = '';
-		$manifest_path =~ s#^$pwd/##;
-		if ($manifest_path && -f $manifest_path) {
-			if ($deployed_manifest->{source} eq 'repo') {
-				if (!$deployed_manifest->{manifest_sha1}) {
-					info $out;
-					$out = '';
-					error(
-						"\nCannot confirm local cached deployment manifest pertains to this ".
-						"deployment -- perform another deployment to correct this problem."
-					);
-				} elsif ($deployed_manifest->{manifest}{sha1} ne $deployed_manifest->{manifest_sha1}) {
-					info $out;
-					$out = '';
-					warning(
-						"\nLatest deployment does not match the local cached deployment ".
-						"manifest, perhaps you need to perform a #C{git pull}."
-					)
-				}
-			} elsif ($deployed_manifest->{source} eq 'exodus' && !$deployed_manifest->{manifest_sha1}) {
-				info $out;
-				$out = '';
-				error(
-					"\nCannot confirm local cached deployment manifest pertains to this ".
-					"deployment -- perform another deployment to correct this problem."
-				);
-			}
-			if ($out ne '') {
-				my $manifest_source = $deployed_manifest->{manifest}{source};
-				if ($manifest_source eq 'repo') {
-					$out .= sprintf(
-						"[[  #I{with manifest} >>#C{%s} #K{(%s)}\n",
-						$manifest_path, $deployed_manifest->{manifest_type} // 'redacted'
-					);
-
-				} elsif ($manifest_source eq 'exodus') {
-					$out .= sprintf(
-						"[[  #I{with manifest} >>#C{%s} - #c{sha1: %s} #K{(%s)}\n",
-						'stored in exodus',
-						$deployed_manifest->{manifest_sha1},
-						$deployed_manifest->{manifest_type} // 'redacted'
-					);
-				} elsif ($manifest_source eq 'exodus-deployments') {
-					$out .= sprintf(
-						"[[  #I{with manifest} >>#C{%s} - #g{sha2: %s} #K{(%s)}\n",
-						'in exodus deployments/' . $deployed_manifest->{timestamp},
-						$deployed_manifest->{manifest_sha2},
-						$deployed_manifest->{manifest_type}
-					);
-				}
-			}
-		} else {
-			info $out;
-			$out = '';
-			warning(
-				"\nNo local cashed deployment manifest found for this environment, ".
-				"perhaps you need to perform a #C{git pull}."
+		# TODO: Restore manifest validation status for 'repository' manifests
+		if ($env->manifest_store eq 'repository') {
+			# Do the manifest validation status here...
+			bail(
+				"Currently Genesis does not support manifest validation for ".
+				"environments that store manifests in the repository.  Please set ".
+				"#C{manifest_store} in the environment's #C{.genesis/config} to ".
+				"#C{exodus} or #C{hybrid} to enable manifest validation."	
 			)
 		}
+
 		if (defined($exodus->{features})) {
 			my @features = split(',',$exodus->{features});
-			$out .= "\n[[       #I{Features} >>";
+			$out .= "\n[[      #Wku{Features:} >>";
 			if (@features) {
 				$out .= "#C{".join("}\n[[                >>#C{",@features)."}\n";
 			} else {
 				$out .= "#Ci{None}\n";
+			}
+		}
+
+		if ($env->manifest_store ne 'repository') {
+			# All the manifests are stored in exodus, so we can get the details from
+			# the last successful deployment.
+			$out .= sprintf("\n#Wku{Archived Files:}\n");
+			if (my @archived_types = $last_deployment->artifact_types) {
+				my @standard_types = qw(manifest unpruned redacted vars redacted_vars state store secrets log);
+				my (undef, $common, $extra) = compare_arrays(\@standard_types, \@archived_types); # Sort common first then any others
+				my @details = $last_deployment->details_for_artifacts(@$common, @$extra);
+				for my $artifact (@details) {
+					$out .= sprintf(
+						"[[  #I{%13.13s} >>#g{%s} #Ki{(%s b, SHA2: %s)}\n",
+						$artifact->{type},
+						$artifact->{filename},
+						$artifact->{size},
+						$artifact->{sha2} ? $artifact->{sha2} =~ s/^([a-f0-9]{6}).*([a-f0-9]{6})$/$1...$2/ir : 'n/a'
+					);
+				}
+			}
+		}
+
+		if (get_options->{history}) {
+			# Show the history of deployments
+			my @deployments = $env->deployments->all;
+			if (@deployments > 1) {
+				my $prefix = "\n[[       #Wku{History:} >>";
+				my @roles = ();
+				for my $deployment (@deployments) {
+					my ($roles_string, @used_roles) = $deployment->user_colorized_roles;
+					@roles = uniq (@roles, @used_roles);
+					$out .= sprintf(
+						"%s#k{[%s]} #%s{%s %s} - %s - #Ki{%s}\n",
+						$prefix,
+						$deployment->completed("%Y/%m/%d %H:%M"),
+						$deployment->succeeded ? 'G' : 'R',
+						$deployment->action eq 'deploy' ? ' deployment' : 'termination',
+						$deployment->succeeded ? 'succeeded' : 'failed   ',
+						$roles_string,
+						$deployment->lookup('kit.id')
+					);
+					$prefix = "[[                >>";
+					$out .= sprintf(
+						"%s[[           #i{Reason:} >>%s\n\n",
+						$prefix,
+						$deployment->reason
+					) if $deployment->has_reason;
+				}
+				$out .=     "\n[[   #I{user legend:} >>".Genesis::Env::Deployment::user_colorized_legend(@roles)."\n";
 			}
 		}
 
@@ -148,7 +165,6 @@ sub information {
 
 	info "$out\n#c{%s}\n", "=" x terminal_width;
 }
-
 
 sub lookup {
 	command_usage(1) if @_ < 2 or @_ > 3;

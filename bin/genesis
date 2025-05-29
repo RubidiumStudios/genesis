@@ -695,6 +695,11 @@ define_command("info", {
 	function_group => Genesis::Commands::INFO,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
+	options => [
+		'history|H' =>
+			"Print the deployment history for the environment, if available.  ",
+		# TODO: Add a way to dump artifacts to a directory (all or nothing? or give a list of artifacts to dump?)
+	]
 }, "Genesis::Commands::Info::information"); # info method already taken, so can't use default
 
 # }}}

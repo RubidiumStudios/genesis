@@ -49,10 +49,16 @@ Genesis::Env::Deployment - Class representing a deployment audit for a Genesis e
     say "Completed at: " . $deployment->completed;
     say "Duration: " . $deployment->duration;
     
-    # Access artifact types
-    my @types = $deployment->artifact_types;
+    # Check if deployment succeeded
+    say "Success: " . ($deployment->succeeded ? 'Yes' : 'No');
     
-    # Access artifact filenames
+    # Get user information
+    say "User: " . $deployment->user_description;
+    my $colorized_roles = $deployment->user_colorized_roles;
+    my $legend = Genesis::Env::Deployment::user_colorized_legend();
+    
+    # Access artifact types and filenames
+    my @types = $deployment->artifact_types;
     my @filenames = $deployment->artifact_filenames;
     
     # Get contents of a specific artifact
@@ -60,6 +66,9 @@ Genesis::Env::Deployment - Class representing a deployment audit for a Genesis e
     
     # Get multiple artifacts
     my $artifacts = $deployment->artifacts('manifest', 'log');
+    
+    # Get detailed artifact information
+    my @details = $deployment->details_for_artifacts('manifest', 'log');
     
     # Extract artifacts to a directory
     my $files = $deployment->extract_artifacts_to('/tmp/artifacts');
@@ -94,11 +103,30 @@ Constant value: 'pending'
 
 Constant value: 'post-failed'
 
+=item action_assumed
+
+Constant value: 'assumed'
+
 =item artifact_map_file
 
 Constant value: '_artifact_map.json'
 
 =back
+
+=head1 CLASS HELPER FUNCTIONS
+
+=head2 is_a_successful_result($result)
+
+Returns true if the given result represents a successful deployment (success or post-failed).
+
+=head2 is_a_failed_result($result)
+
+Returns true if the given result represents a failed deployment.
+
+=head2 user_colorized_legend(@roles)
+
+Class method that returns a colorized legend for user roles. If no roles are provided,
+returns a legend for all known roles. The legend uses Genesis Term color codes.
 
 =head1 CLASS METHODS
 
@@ -116,7 +144,7 @@ The action performed (deploy or terminate).
 
 =item result 
 
-The result of the action (success, failed, pending, post-failed).
+The result of the action (success, failed, pending, post-failed, assumed).
 
 =item started
 
@@ -164,14 +192,6 @@ Either:
 
 =back
 
-=head2 is_a_successful_result($result)
-
-Returns true if the given result is considered successful (success or post-failed).
-
-=head2 is_a_failed_result($result)
-
-Returns true if the given result is considered failed.
-
 =head1 INSTANCE METHODS
 
 =head2 action()
@@ -180,15 +200,21 @@ Returns the action performed (deploy or terminate).
 
 =head2 result()
 
-Returns the result of the action (success, failed, pending, post-failed).
+Returns the result of the action (success, failed, pending, post-failed, assumed).
 
-=head2 started()
+=head2 succeeded()
+
+Returns true if the deployment was successful (result is either 'success' or 'post-failed').
+
+=head2 started([$strftime_format])
 
 Returns the Time::Piece object representing when the action started.
+If $strftime_format is provided, returns the formatted string instead.
 
-=head2 completed()
+=head2 completed([$strftime_format])
 
 Returns the Time::Piece object representing when the action completed.
+If $strftime_format is provided, returns the formatted string instead.
 
 =head2 duration()
 
@@ -196,11 +222,12 @@ Returns the duration of the action (completed - started) in seconds.
 
 =head2 reason()
 
-Returns the reason for the deployment.
+Returns the reason for the deployment. Returns 'unknown' if no reason is set.
 
-=head2 succeeded()
+=head2 has_reason()
 
-Returns true if the deployment result was successful.
+Returns true if the deployment has a meaningful reason (not 'unknown', '<unspecified>', 
+'none', 'null', or undefined).
 
 =head2 lookup(@keys)
 
@@ -208,7 +235,22 @@ Looks up a value in the deployment data using struct_lookup.
 
 =head2 timestamp()
 
-Returns the timestamp for this deployment.
+Returns the timestamp for this deployment in EXODUS_TIME_FORMAT_SHORT format.
+
+=head2 sequence()
+
+Returns the sequence number for this deployment.
+
+=head2 user_description()
+
+Returns a formatted string describing the user who performed the deployment,
+including any additional roles (repo, vault, concourse, bosh).
+
+=head2 user_colorized_roles()
+
+Returns a colorized string of user roles using Genesis Term color codes.
+In list context, returns both the colorized string and an array of role names.
+If no roles are found, returns '#ki{unknown}'.
 
 =head2 env()
 
@@ -242,10 +284,23 @@ Returns a hashref mapping artifact types or filenames to their contents.
 If no arguments are provided, returns all artifacts.
 Throws an error if any of the requested artifacts are not found.
 
+=head2 details_for_artifacts(@artifacts)
+
+Returns detailed information about the specified artifacts (or all if none specified).
+Each detail entry is a hashref containing:
+  - type: The artifact type
+  - filename: The artifact filename
+  - sha2: The SHA-256 hash of the content (undef if empty)
+  - size: The size of the content in bytes
+  - content: The actual content
+
+Returns an array in list context, arrayref in scalar context.
+
 =head2 extract_artifacts_to($path, @artifacts)
 
 Extracts the specified artifacts to the given path.
 If no artifacts are specified, extracts all artifacts.
+The path can be relative (resolved against GENESIS_CALLER_DIR) or absolute.
 Returns a hashref mapping artifact names to their extracted file paths.
 Throws an error if the path is not a directory or if any artifacts are not found.
 
@@ -261,15 +316,20 @@ Internal helper to get all artifacts as a hash.
 
 =item _build_artifacts_file($artifact_file, %artifacts)
 
-Builds a tarball of deployment artifacts.
+Builds a tarball of deployment artifacts and stores it as a base64-encoded file.
+
+=item _collect_secrets_from_paths(@paths)
+
+Collects secrets from the specified vault paths and returns them as JSON.
+Cannot use vault export as it gets everything under the path including subpaths.
 
 =item _get_artifact_tarball()
 
-Gets the artifact tarball for this deployment.
+Gets the artifact tarball for this deployment (for b64-gzipped format).
 
 =item _artifact_map()
 
-Returns the artifact map for this deployment.
+Returns the artifact map for this deployment, mapping types to filenames.
 
 =item _is_artifact_type($ref)
 
@@ -289,7 +349,13 @@ Returns the artifact filename for the given reference.
 
 =item _is_base64_gzipped($data)
 
-Determines if a string is base64-encoded gzipped data.
+Determines if a string is base64-encoded gzipped data by checking for base64
+format and gzip magic number.
+
+=item _get_ts_string($timestamp)
+
+Converts a timestamp to EXODUS_TIME_FORMAT_SHORT string format. Accepts
+Time::Piece objects or properly formatted timestamp strings.
 
 =back
 

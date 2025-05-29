@@ -14,6 +14,7 @@ use Genesis qw/
 use Genesis::Term qw/wrap/;
 
 use Archive::Tar;
+use Digest::SHA qw/sha256_hex/;
 use IO::Compress::Gzip qw/gzip $GzipError/;
 use IO::Uncompress::Gunzip qw/gunzip $GunzipError/;
 use JSON::PP qw/decode_json encode_json/;
@@ -170,20 +171,27 @@ sub new {
 
 ### Instance Methods
 
+# action - Return the action performed {{{
 sub action {
 	return $_[0]->{data}{action};
 }
 
+# }}}
+# result - Return the result of the action {{{
 sub result {
 	return $_[0]->{data}{result};
 }
 
+# }}}
+# succeeded - Return true if the deployment was successful {{{
 sub succeeded {
 	return is_a_successful_result($_[0]->{data}{result});
 }
 
+# }}}
+# started - Return the started timestamp, optionally formatted {{{
 sub started {
-	my ($self,$strf_format) = @_;
+	my ($self, $strf_format) = @_;
 	return $self->{data}{started} unless $strf_format;
 	return $self->{data}{started}->strftime($strf_format)
 		if ref($self->{data}{started}) eq 'Time::Piece';
@@ -193,8 +201,10 @@ sub started {
 	)
 }
 
+# }}}
+# completed - Return the completed timestamp, optionally formatted {{{
 sub completed {
-	my ($self,$strf_format) = @_;
+	my ($self, $strf_format) = @_;
 	return $self->{data}{completed} unless $strf_format;
 	return $self->{data}{completed}->strftime($strf_format)
 		if ref($self->{data}{completed}) eq 'Time::Piece';
@@ -204,15 +214,29 @@ sub completed {
 	)
 }
 
+# }}}
+# duration - Return the duration of the deployment {{{
 sub duration {
 	my ($self) = @_;
 	return $self->{data}{completed} - $self->{data}{started};
 }
 
+# }}}
+# reason - Return the reason for the deployment {{{
 sub reason {
 	return $_[0]->{data}{reason} // 'unknown';
 }
 
+# }}}
+# has_reason - Return true if the deployment has a meaningful reason {{{
+sub has_reason {
+	my ($self) = @_;
+	return 0 unless exists $self->{data}{reason} && defined $self->{data}{reason};
+	return 0 if in_array($self->{data}{reason}, 'unknown', '<unspecified>', 'none', 'null');
+	return 1;
+}
+
+# }}}
 # lookup - Explicit method to access internal data fields {{{
 sub lookup {
 	my $self = shift;
@@ -231,8 +255,10 @@ sub sequence {
 	return $_[0]->{data}{sequence};
 }
 
+# }}}
+# user_description - Return a description of the user who performed the deployment {{{
 sub user_description {
-	my $self = shift;
+	my ($self) = @_;
 	
 	# Add in any known user roles from the users hash
 	my $user_info = $self->{data}{user} // {};
@@ -250,12 +276,70 @@ sub user_description {
 }
 
 # }}}
+# user_colorized_description - Return a colorized description of the user who performed the deployment {{{
+our $user_color_map = {
+	shell => 'y',     # shell is sh-yell-ow
+	repo  => 'r',     # repo is red
+	vault => 'm',     # vault is violet (magenta)
+	concourse => 'c', # concourse is cyan
+	bosh => 'B',      # bosh is blue
+};
+our @sorted_roles = qw/shell bosh vault repo concourse/;
+
+# user_colorized_roles - Return a colorized string of user roles {{{
+sub user_colorized_roles {
+	my ($self) = @_;
+	
+	# Add in any known user roles from the users hash
+	my $user_info = $self->{data}{user} // {};
+	my @used_roles = grep {
+		$user_info->{$_} && $user_info->{$_} ne 'unknown'
+	} @sorted_roles;
+	my @roles = map {
+		sprintf(
+			"#%s{%s}",
+			$user_color_map->{$_} // 'y', # Default to yellow if not defined
+			$user_info->{$_}
+		)
+	}	@used_roles;
+
+	if (@roles) {
+		my $role_str = join('|', @roles);
+		return wantarray ? ($role_str, @used_roles) : $role_str;
+	}
+	return '#ki{unknown}';
+}
+
+# }}}
+# user_colorized_legend - Return a colorized legend for the user roles {{{
+sub user_colorized_legend {
+	my (@roles) = @_;
+	if (!@roles) {
+		@roles = @sorted_roles;
+	} else {
+		my (undef, $common, $unknown) = compare_arrays(\@sorted_roles, \@roles);
+		@roles = @$common;
+	}
+	# Return a colorized legend for the user roles
+	return join(
+		',',
+		map {
+			sprintf(
+				"#%s{%s}",
+				$user_color_map->{$_} // 'y', # Default to yellow if not defined
+				$_,
+			)
+		} @roles
+	);
+}
+# }}}
+
 # env - Accessor for the environment {{{
 sub env {
 	return $_[0]->{env};
 }
-
 # }}}
+
 # committed - true if the deployment has been committed to exodus {{{
 sub committed {
 	my $self = shift;
@@ -341,7 +425,6 @@ sub commit {
 }
 
 # }}}
-
 # artifact_types - Return the list of artifact types for this deployment {{{
 sub artifact_types {
 	my ($self) = @_;
@@ -359,7 +442,6 @@ sub artifact_filenames {
 }
 
 # }}}
-
 # artifact - return the contents of a specific artifact by type or filename {{{
 sub artifact {
 	my ($self, $artifact) = @_;
@@ -372,8 +454,8 @@ sub artifact {
 	) unless ref($artifact_hash) eq 'HASH' && exists $artifact_hash->{$artifact};
 	return $artifact_hash->{$artifact};
 }
-# }}}
 
+# }}}
 # artifacts - Get the artifacts contents for one or more artifacts (default is all) {{{
 sub artifacts {
 	my ($self, @artifacts) = @_;
@@ -384,8 +466,38 @@ sub artifacts {
 	my $contents = $self->_get_artifact_hash(@artifacts);
 	return $contents;
 }
-# }}}
 
+# }}}
+# details_for_artifacts - Get the details for one or more artifacts (default is all) {{{
+sub details_for_artifacts {
+	my ($self, @artifacts) = @_;
+	
+	# If no artifacts are specified, return all available artifacts by type
+	@artifacts = sort $self->artifact_types() unless @artifacts;
+	
+	my @details = ();
+	my $artifacts_hash = $self->_get_artifact_hash(@artifacts);
+	
+	for my $artifact (@artifacts) {
+		my $content = $artifacts_hash->{$artifact}//'';
+		
+		my $type = $self->_get_artifact_type($artifact);
+		my $filename = $self->_get_artifact_filename($artifact);
+		my $size = length($content);
+		
+		push @details, {
+			type => $type,
+			filename => $filename,
+			sha2 => $size ? sha256_hex($content) : undef,
+			size => $size,
+			content => $content,
+		};
+	}
+	
+	return wantarray ? @details : \@details;
+}
+
+# }}}
 # extract_artifacts_to - Extract the artifacts from the deployment to the given path {{{
 sub extract_artifacts_to {
 	my ($self, $path, @artifacts) = @_;
@@ -538,7 +650,6 @@ sub _build_artifacts_file {
 }
 
 # }}}
-
 # _collect_secrets_from_paths - Collect secrets from vault paths {{{
 sub _collect_secrets_from_paths {
 	my ($self, @paths) = @_;
@@ -567,7 +678,6 @@ sub _collect_secrets_from_paths {
 }
 
 # }}}
-
 # _get_artifact_tarball - Get the artifact tarball for this deployment {{{
 sub _get_artifact_tarball {
 	my ($self) = @_;
@@ -588,7 +698,6 @@ sub _get_artifact_tarball {
 }
 
 # }}}
-
 # _artifact_map - return the artifact map for this deployment {{{
 sub _artifact_map {
 	my ($self) = @_;
@@ -662,7 +771,6 @@ sub _is_artifact_filename {
 }
 
 # }}}
-
 # _get_artifact_type - Get the artifact type for the given reference {{{
 sub _get_artifact_type {
 	my ($self, $ref) = @_;
@@ -700,10 +808,9 @@ sub _is_base64_gzipped {
 }
 
 # }}}
-
-# _ts_string - Make a timestamp string from a Time::Piece object or a string {{{
+# _get_ts_string - Make a timestamp string from a Time::Piece object or a string {{{
 sub _get_ts_string {
-	my $ts = shift;
+	my ($ts) = @_;
 	$ts = shift if ref($ts) eq 'Genesis::Env::Deployment';
 	
 	$ts //= Time::Piece->new;  # Default to current time if not provided
@@ -712,7 +819,6 @@ sub _get_ts_string {
 		$ts =~ s/[Z ]?[+-]0000$//r =~ s/[^0-9]+//gr
 	) if $ts =~ /^\d{4}-?\d{2}-?\d{2}[T ]?\d{2}:?\d{2}:?\d{2}([Z ]?[+-]0000)?$/;
 	# FIXME: Support non-UTC timestamps with timezone offsets?
-	use Pry; pry;
 	bail("Invalid timestamp format: $ts");
 }
 
