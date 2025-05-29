@@ -118,6 +118,10 @@ Furthermore, the Genesis project provides a suite of tests to ensure the functio
 
 ## Coding Standards
 
+- Before performing any code changes, ensure that any code you're checking has bee indexed correctly and is not out of date.  Assume any pending copilot code changes are completed, with any changes not kept are dropped.	This is to ensure that the code you're working on is up to date and that any changes you make are based on the latest version of the code.
+
+- When performing a code review, perform static analysis to confirm that any methods called are defined for the object being called on, and that the arguments passed to the method are of the correct type and format.
+
 - Uses tab characters for indentation, with a tab size of 2 spaces.
 - Uses `strict`, `warnings`, and `520` pragmas.
 - All modules should have a vim config commentline at the bottom of the file, stating:
@@ -125,6 +129,18 @@ Furthermore, the Genesis project provides a suite of tests to ensure the functio
 # vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1:
 ```
 - Only uses core Perl modules, and the libraries under `lib/` - NO external CPAN dependencies. Tests are the exception to this rule, as they are not part of the core functionality of the project.
+
+- All methods should have a discriptive fold comment at the start of the method, such as:
+```perl
+# method_name - brief description of what the method does {{{
+sub method_name {
+	...
+}
+
+# }}}
+```
+  The closing `# }}}` comment should be on its own line, after a blank line after the end of the method, but no blank line before the next method's fold comment.  This is to allow the method to be folded in editors that support folding, such as vim, and to provide a consistent look and feel for the code.
+
 - In the case of a single command that is conditionally executed, prefer
 ```
 call(
@@ -141,6 +157,7 @@ if ($condition) {
   );
 }
 ```
+
 - When using `Genesis::Env` lookup* methods, prefer to use // to provide the default value instead of the second argument to the method.  This is because // is a short-circuit operator, whereas the second argument to the method is always evaluated, even if the first argument is defined.  This is important for performance reasons, as the second argument may be a complex expression that takes a long time to evaluate.  The exception to this is when you want to use the list context of the method, in which case you should use the second argument to the method.  Even then, you can analize the result and use //= to set the value if not defined.
 
 - The `info`, `warning`, `error`, `notice`, `bail` and `bug` methods take the same arguments as `printf`, and are used to log messages to the console.  The `info` method is used for informational messages, the `warning` method is used for warning messages, the `error` method is used for error messages, the `notice` method is used for notice messages, the `bail` method is used to bail out of a command with an error message, and the `bug` method is used to log bug reports.  These are provided by `Genesis` and are never method calls on an object.
@@ -152,6 +169,8 @@ use Genesis::Term qw/wrap colorize bullet/;
 
 - When using any non-ASCII characters in output, such as `✓`, `✗`, `✔`, `✘`, etc., the `Genesis::Term` module should be used to provide a consistent output across different terminal types.  The "#\@{x}" syntax is interpreted by the `colorize` method to replace with a UTF-8 glyph for the given ascii character (ie '*' => "\x{2022}" (a bullet), or '[ ]' => "\x{25FB}" (a white square), etc.).  This is used to provide a consistent output across different terminal types, and to provide a consistent look and feel for the Genesis project.  `colorize` is used by all the other methods in `Genesis::Term`, and the `Genesis::Log` methods, such as `info`, `warning`, `error`, `notice`, `bail` and `bug`, so it is not needed to be called explicitly when using these methods.
 ```
+
+## Hooks
 
 - Perl-based hooks for kits are placed in a package `Genesis::Hook::HookType::KitType[::HookSubtype]`, where `HookType` is the type of hook (e.g., `Blueprint`, `CloudConfig`, etc.) and `KitType` is the type of kit (e.g., `BOSH`, `CF`, `Prometheus`, etc.).  The `HookSubType` is optional, most often used for the specific task of an `Addon` hook.
 
