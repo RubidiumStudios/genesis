@@ -342,7 +342,7 @@ sub env {
 
 # committed - true if the deployment has been committed to exodus {{{
 sub committed {
-	my $self = shift;
+	my ($self) = @_;
 	return 0 unless $self->timestamp();
 	return $self->env->vault->has(
 		'deployments/' . $self->timestamp()
@@ -352,7 +352,7 @@ sub committed {
 # }}}
 # commit - Save the deployment audit to the environment {{{
 sub commit {
-	my $self = shift;
+	my ($self) = @_;
 
 	bail(
 		"Cannot commit a deployment that already exists!"
@@ -584,7 +584,7 @@ sub _get_artifact_hash {
 		# Handle secrets separately if needed
 		if ($requested_secrets || $requested_secrets_json) {
 			# Already validated that secrets is a valid artifact type
-			my $contents = $self->_get_artifact_type('secrets');
+			my $contents = $self->_collect_secrets_from_paths(@{$self->{artifacts}{data}{secrets}});
 
 			$results{'secrets'} = $contents if $requested_secrets;
 			$results{'secrets.json'} = $contents if $requested_secrets_json;
@@ -674,7 +674,7 @@ sub _collect_secrets_from_paths {
 	}
 
 	my $secrets = encode_json(unflatten($struct));
-	return $secrets if $secrets;
+	return $secrets // '{}'; # Return empty JSON object if no secrets found
 }
 
 # }}}
@@ -760,7 +760,8 @@ sub _artifact_map {
 # }}}
 # _is_artifact_type - Check if the given artifact is a type {{{
 sub _is_artifact_type {
-	return exists $_[0]->_artifact_map->{$_[1]} ? 1 : 0;
+	my ($self, $ref) = @_;
+	return exists $self->_artifact_map->{$ref} ? 1 : 0;
 }
 
 # }}}
