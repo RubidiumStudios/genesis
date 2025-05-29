@@ -2319,7 +2319,7 @@ sub last_deployed_manifest {
 			my $deployment = $self->deployments->latest;
 			info("#G{done}" . pretty_duration(gettimeofday - $start));
 			$start = gettimeofday;
-			if ($deployment->action eq 'deploy') {
+			if ($deployment && $deployment->action eq 'deploy') {
 				info({pending => 1},
 					"  - found manifest in exodus/deployments - retrieving..."
 				);

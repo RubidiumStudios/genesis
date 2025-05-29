@@ -377,7 +377,7 @@ sub _all {
 	unless ($self->{__all_deployments}) {
 		# Get list of deployments from vault
 		my $deployments = $env->vault->get_path($env->exodus_base.'/deployments');
-		return () unless $deployments && %$deployments; # FIXME: Should we cache 'no deployments'?
+		return (wantarray ? () : []) unless $deployments && keys %$deployments; # FIXME: Should we cache 'no deployments'?
 
 		# Create a new deployment object for each deployment
 		my @deployments = map {
