@@ -3041,7 +3041,7 @@ sub deploy {
 			$msg = "Deployment failed."
 		}
 		$self->_create_deployment_audit_log(
-			'deploy' => Genesis::Env::Deployment::action_succeeded,
+			'deploy' => Genesis::Env::Deployment::action_failed,
 			reason => $msg,
 			flags => $opts{flags} || '',
 			bails_with => $msg
