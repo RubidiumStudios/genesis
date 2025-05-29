@@ -11,7 +11,7 @@ use Genesis qw/
 	pretty_duration
 	pushd popd
 	humanize_path humanize_bin
-	run lines
+	run lines fake_tty
 	workdir tmpfile
 	copy_or_fail mkfile_or_fail mkdir_or_fail save_to_yaml_file
 	slurp load_json load_yaml load_yaml_file spruce_diff
@@ -2371,15 +2371,14 @@ sub last_deployed_manifest {
 						$name eq $self->name.'-output.log' ? 'log' :
 						"other/$name";
 
-					use Pry; pry;
 					push(@{$results->{artifacts}}, $file_type);
 					$results->{$file_type}{source} = $source;
 					$results->{$file_type}{sha2} = sha256_hex($deployment->artifact($name));
 					if ($include_files) {
-						my ($path) = $deployment->extract_artifacts_to(
-							$self->workpath('manifests/'), $name
+						my $artifact_path_map = $deployment->extract_artifacts_to(
+							$self->workpath('manifests'), $name
 						);
-						$results->{$file_type}{path} = $path;
+						$results->{$file_type}{path} = $artifact_path_map->{$name} if ($artifact_path_map->{$name});
 					}
 					$results->{$file_type}{data} = $deployment->artifact($name) if ($include_contents);
 				}
