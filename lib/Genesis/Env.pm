@@ -11,7 +11,7 @@ use Genesis qw/
 	pretty_duration
 	pushd popd
 	humanize_path humanize_bin
-	run lines fake_tty
+	run lines fake_tty 
 	workdir tmpfile
 	copy_or_fail mkfile_or_fail mkdir_or_fail save_to_yaml_file
 	slurp load_json load_yaml load_yaml_file spruce_diff
@@ -2905,11 +2905,10 @@ sub deploy {
 					"will not be accurate for this deployment compared to what was last deployed.}"
 				);
 			}
-			my ($out, $rc, $err) = run({redact => 1}, fake_tty(
-					$self->workpath('spruce-predeploy-manifest.diff'), # fake_tty() needs a tmp file
-					"spruce", "diff", $last_manifest_path, $manifest_path
-			));
-			$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/smr;
+			my ($out, $rc, $err) = spruce_diff(
+					{file => $last_manifest_path, label => 'last-deployed'},
+					{file => $manifest_path,      label => 'current'}
+			);
 
 			bail(
 				"Failed to diff the last deployed manifest with the current manifest: %s",

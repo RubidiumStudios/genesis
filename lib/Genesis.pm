@@ -759,48 +759,62 @@ sub curl {
 	return $status, $status_line, join($/, @data), join($/, @header_data);
 }
 
+# spruce_diff - diff two yaml files, and return the diff as a colored string.
 sub spruce_diff {
-	# Diff two yaml files, and return the diff as a colored string
-	bug("spruce diff requires two files") unless @_ == 2;
-	my $scratchdir = workdir('spruce-diff');
-
-	# TODO: DRY up the following code so it loops over the two inputs instead of
-	#       having two almost identical code blocks.
 	my ($first, $second) = @_;
-	if (ref($first) eq 'HASH') {
-		my $tmpfile = "$scratchdir/".($first->{label} ? $first->{label} : "spruce-diff")."-".int(rand(1000000)).".yml";
-		if ($first->{file}) {
-			$first = $first->{file};
-		} elsif ($first->{object}) {
-			# write object to a temp file
-			save_to_yaml_file($first->{object}, $tmpfile);
-			$first = $tmpfile;
-		} elsif ($first->{content}) {
-			# write string content verbatim to a temp file
-			mkfile_or_fail($tmpfile, 0644, $first->{content});
-			$first = $tmpfile;
-		} else {
-			bug("first hashref must contain a 'file', 'object', or 'content' key");
-		}
-	}
+	bug("spruce diff requires two files") unless @_ == 2;
+	
+	my $scratchdir = workdir('spruce-diff');
+	
+	# Helper function to process arguments consistently
+	my $process_arg = sub {
+		my ($arg, $arg_id) = @_;
+		
+		# If the argument is a file, just return it
+		return $arg if (ref($arg) eq '' && $arg && -f $arg);
 
-	if (ref($second) eq 'HASH') {
-		my $tmpfile = "$scratchdir/".($second->{label} ? $second->{label} : "spruce-diff")."-".int(rand(1000000)).".yml";
-		if ($second->{file}) {
-			$second = $second->{file};
-		} elsif ($second->{object}) {
-			# write object to a temp file
-			save_to_yaml_file($second->{object}, $tmpfile);
-			$second = $tmpfile;
-		} elsif ($second->{content}) {
-			# write string content verbatim to a temp file
-			mkfile_or_fail($tmpfile, 0644, $second->{content});
-			$second = $tmpfile;
-		} else {
-			bug("second hashref must contain a 'file', 'object', or 'content' key");
-		}
-	}
+		if (ref($arg) eq 'HASH') {
+			bug(
+				"Can only specify one of 'file', 'object', or 'content' in the %s argument hashref",
+				$arg_id
+			) if (grep {in_array($_, qw/file object content/)} keys %$arg) > 1;
 
+			# If we have a file and no label, just use the given file directly
+			return $arg->{file} if ($arg->{file} && !$arg->{label});
+
+			# Sanitize the label to make sure it is a valid file name
+			my $label = $arg->{label} // "spruce-diff-$arg_id";
+			$label =~ s/[^\w]+/_/g; # replace non-word characters with underscores
+			my $tmpfile;
+			while (1) {
+				$tmpfile = sprintf(
+					"%s/%s-%06.6d.yml",
+					$scratchdir,
+					$label,
+					int(rand(1000000))
+				);
+				last unless -e $tmpfile; # make sure the file does not already exist
+			}
+			trace("Creating temporary file %s for %s argument", $tmpfile, $arg_id);
+
+			copy_or_fail($arg->{file}, $tmpfile) if $arg->{file};
+			save_to_yaml_file($arg->{object}, $tmpfile) if $arg->{object};
+			mkfile_or_fail($tmpfile, 0644, $arg->{content}) if $arg->{content};
+
+			return $tmpfile if -f $tmpfile;
+			bug("$arg_id argument hashref must contain a 'file', 'object', or 'content' key");
+		}
+
+		bug(
+			"Invalid %s argument type '%s', expected a file path, or a hashref with 'file', 'object', or 'content' key, or a string",
+			$arg_id, ref($arg) ? lc(ref($arg)) : defined $arg ? 'scalar' : 'undef'
+		)
+	};
+	
+	# Process both arguments using the helper function
+	$first = $process_arg->($first, "first");
+	$second = $process_arg->($second, "second");
+	
 	my $out_file = "$scratchdir/out.diff";
 	my (undef,$rc,$err) = run({redact => 1}, fake_tty($out_file, "spruce", "diff", $first, $second));
 	my $out = slurp($out_file);
