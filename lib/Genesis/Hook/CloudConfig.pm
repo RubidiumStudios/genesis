@@ -243,12 +243,11 @@ sub network_definition {
 	# the existing allocations, and the static values (which can be outside the
 	# allocation mask-generated range(s)).
 
-	my ($self, $target, %options) = @_;
-	my $strategy = delete($options{strategy}) // 'generic';
+	my ($self, $target, %rules) = @_;
+	my $strategy = delete($rules{strategy}) // 'generic';
 
 	# FIXME: Should this just die if the strategy does not match?
 	if (($strategy eq 'ocfp') xor $self->env->is_ocfp) {
-
 		# This is an ocfp deployment, but the network is not an ocfp network (or vice versa)
 		return ();
 	}
@@ -258,146 +257,16 @@ sub network_definition {
 		name => $network_id,
 		type => 'manual',
 	};
+	# FIXME: We also need to support 'VIP' networks.
 
-	if ($options{dynamic_subnets}) {
-		bail(
-			'Dynamic subnets are not supported for network definitions using the %s '.
-			'strategy.  Consult the kit documentation or author.',
-			$strategy
-		) if ($strategy ne 'ocfp');
-
-		my $definition = $options{dynamic_subnets};
-
-		# OCFP Network Range Calculations
-		# *-mgmt -
-		#   - Owns .0 to .31 of each subnet
-		#   - bosh is deployed to 5th
-		#   - vault is deployed to 6th
-		#   - jumpbox is deployed to 7th
-		#   - concourse web is 8th ip
-		#   - prometheus is 9th ip
-		#   - shield is 10th ip
-		#   - doomsday/ocfp-ui is 11th ip
-		#   - everything else is dynamic
-		#
-		#   To Facilitate this, we need the following in ocfp config:
-		#   - vpc.subnets.<subnet>.reserved-offsets ie '0-5,7-10'
-		#   - vpc.subnets.<subnet>.available-offsets: ie '12-254' or '31-n' n means
-		#     last in cidr block -- if not supplied, will assume all available
-		#     that are not reserved (generally we do NOT want this)
-		#     we technically only need one of these, but both are supported
-		#
-		# *-ocfp - Owns .32 to .last of each subnet
-
-		# This option assumes ocfp, and will dynamically determine the subnets based
-		# on the ocfp configuration in vault, under
-		# /secrets/{params.ocfp_config_path}.{env-name}/{mgmt|ocfp}/bosh/iaas/subnets/<name>/<id>
-		# with `...ips.[mgmt|ocfp].reserved` for the reserved list.
-
-		my $subnets = $self->_filter_subnets($definition->{subnets});
-		$config->{subnets} = [];
-
-		my $allocation = delete($definition->{allocation});
-
-		my $vm_count = $allocation->{size} // 0;
-		$vm_count = 2**(32 - $1) if $vm_count =~ m#^/(\d+)$#;
-		my $statics = $allocation->{statics} // 0; # Does not include the reserved ips based on network name (ie bosh_ip, vault_a, vault_b, etc)
-		$statics = 2**(32 - $1) if $statics =~ m#^/(\d+)$#;
-
-		bail(
-			'More static IPs requested (%d) than the allocation for the subnet for '.
-			'network %s allows (%d)',
-			$statics, $target, $vm_count
-		) if ($statics > $vm_count);
-
-		# Get existing allocations from exodus data
-		my $existing_allocations = $self->_get_existing_allocations(); # Different for director and non-drector deployments; prototyping in director
-
-		# We only use the ocfp-* subnets for the network definition
-		my $ocfp_subnet_prefix = $self->env->ocfp_subnet_prefix;
-		my @ocfp_subnet_names = sort grep {/^${ocfp_subnet_prefix}-/} keys %$subnets;
-		bail(
-			'No ocfp-* subnets found in the ocfp configuration for network %s',
-			$target
-		) unless @ocfp_subnet_names;
-
-		for my $subnet_name (@ocfp_subnet_names) {
-			my $subnet = $subnets->{$subnet_name};
-			my $full_range = IPv4->new($subnet->{cidr_block});
-			my ($available, $reserved) = $self->_get_subnet_ranges($subnet);
-
-			# Remove existing allocations from available range that are not for the
-			# target network
-			for my $claiming_network (keys %$existing_allocations) {
-				next if ($network_id eq $claiming_network);
-				my $alloc = $existing_allocations->{$claiming_network}{$subnet_name};
-				$available -= $alloc if ($alloc);
-			}
-
-			# Find any existing allocations, but ignore those explicitly reserved
-			my $existing = $existing_allocations->{$network_id}{$subnet_name} // IPv4->new();
-			$existing -= $reserved if $existing && $reserved;
-
-			# Compare existing and desired allocations, and adjust as needed
-			my $allocated_range = $self->_calculate_subnet_allocation(
-				$target,
-				$available,
-				$existing,
-				$vm_count
-			);  
-			$reserved += $full_range->subtract($allocated_range);
-
-			# TODO: We currently just shove statics into the front of the range, but
-			# this doesn't account for ips already in use.  We can either actively
-			# check for ips in the network range against the bosh deployments, or we
-			# allow users to override the statics with a list of offsets to use
-			# rather than just a count or mask.(ie 0-3,9) maybe even negative for
-			# adding to the end? (-1--3)
-			my $static_range = $self->_calculate_static_allocation(
-				$target,
-				$allocated_range,
-				$statics
-			);
-
-			# Check for reserved_ips and "unreserve" them from the reserved range
-			# and put them into the static list
-			my $reserved_ips = IPv4->new(
-				map  {$subnet->{'reserved-ips'}{$_}}
-				grep {$_ =~ m/${target}_ip/}
-				keys %{$subnet->{'reserved-ips'}//{}}
-			);
-			while (<$reserved_ips>) {
-				$static_range += $_;
-				$reserved     -= $_;
-			}
-
-			my $fields = {
-				az => $self->lookup_az($subnet->{az}), # TODO: Needs to change if we support multiple AZs
-				range => $subnet->{cidr_block},
-				gateway => $subnet->{gateway},
-				dns => [$subnet->{dns}], # TODO: Support multiple DNS servers
-				reserved => [map {$_->range} $reserved->spans],
-				cloud_properties_for_iaas => $definition->{cloud_properties_for_iaas},
-				($static_range->size
-					? (static => [map {$_->range} $static_range->spans])
-					: ()
-				)
-			};
-			my $subnet_config = $self->_subnet_definition($target, $subnet_name, $fields, $strategy);
-
-			# TODO: Apply overrides to the subnet config
-			push @{$config->{subnets}}, $subnet_config
-				if $full_range->size > $reserved->size;
-		}
-	} elsif ($options{subnets}) {
-		bug(
-			"Subnets are not implemented for network definitions using the %s strategy",
-			$strategy
-		);
+	# This allows kit-provided strategies to be provided.
+	my $strategy_method = "_build_${strategy}_network_definition";
+	if ($self->can($strategy_method)) {
+		# $config is passed by reference, so it can get modified
+		$self->$strategy_method($target, $config, %rules);
 	} else {
-		# This is a non-subnetted network
-		bug(
-			"Single Subnet is not implemented for network definitions using the %s strategy",
+		bail(
+			'Network definition strategy %s is not supported by the cloud config hook',
 			$strategy
 		);
 	}
@@ -407,7 +276,257 @@ sub network_definition {
 	$self->update_network($target, $config);
 
 	return $config;
+}
 
+# }}}
+# _build_generic_network_definition - Builds a generic network definition {{{
+sub _build_generic_network_definition {
+	my ($self, $target, $config, %options) = @_;
+	# This is the generic network definition, which is used for classic Genesis deployments
+	# that do not use OCFP, and do not have any special network requirements.
+	bug(
+		"Generic network definition building is not yet implemented"
+	);
+}
+
+# }}}
+# _available_ocfp_network_models - Returns the available OCFP network models {{{
+sub _available_ocfp_network_models {
+	# Overridable in hook files to allow kits to provide their own
+	return qw(dynamic_subnets subnets);
+}
+
+# }}}
+# _build_ocfp_network_definition - Builds an OCFP network definition {{{
+sub _build_ocfp_network_definition {
+	my ($self, $target, $config, %options) = @_;
+	# This is the OCFP network definition, which is used for OCFP deployments.
+
+	my $strategy = 'ocfp';
+
+	# OCFP supports dynamic subnets as a network model substrategy, and may
+	# support others in the future.  Lets make sure we only have one (although
+	# we could support multiple (ie for VIP networks), it would be a bit more
+	# complex).
+	my @requested_network_models = grep {exists $options{$_}} $self->_available_ocfp_network_models;
+	bail(
+		'Network definition for %s can only have one network model, but found %d: %s',
+		$target, scalar(@requested_network_models), join(', ', @requested_network_models)
+	) if (scalar(@requested_network_models) > 1);
+	bail(
+		'Network definition for %s must have one of the following network models: %s',
+		$target, join(', ', $self->_available_ocfp_network_models)
+	) unless @requested_network_models;
+
+	my $network_model_builder = "_build_${strategy}_network_model_"
+		. $requested_network_models[0];
+	bug(
+		"Network model %s is not supported for OCFP network definitions",
+		$requested_network_models[0]
+	) unless $self->can($network_model_builder);
+
+	# Call the network model builder to build the network definition
+	return $self->$network_model_builder(
+		$target, $config, %options
+	);
+}
+
+# }}}
+# _build_ocfp_network_model_dynamic_subnets - Builds an OCFP network definition with dynamic subnets {{{
+sub _build_ocfp_network_model_dynamic_subnets {
+	my ($self, $target, $config, %options) = @_;
+
+	my $definition = $options{dynamic_subnets};
+
+	# OCFP Network Range Calculations
+	# *-mgmt -
+	#   - Owns .0 to .31 of each subnet
+	#   - bosh is deployed to 5th
+	#   - vault is deployed to 6th
+	#   - jumpbox is deployed to 7th
+	#   - concourse web is 8th ip
+	#   - prometheus is 9th ip
+	#   - shield is 10th ip
+	#   - doomsday/ocfp-ui is 11th ip
+	#   - everything else is dynamic
+	#
+	#   To Facilitate this, we need the following in ocfp config:
+	#   - vpc.subnets.<subnet>.reserved-offsets ie '0-5,7-10'
+	#   - vpc.subnets.<subnet>.available-offsets: ie '12-254' or '31-n' n means
+	#     last in cidr block -- if not supplied, will assume all available
+	#     that are not reserved (generally we do NOT want this)
+	#     we technically only need one of these, but both are supported
+	#
+	# *-ocfp - Owns .32 to .last of each subnet
+
+	# This will dynamically determine the subnets based on the ocfp
+	# configuration in vault, under
+	# /secrets/{params.ocfp_config_path}.{env-name}/{mgmt|ocfp}/bosh/iaas/subnets/<name>/<id>
+	# with `...ips.[mgmt|ocfp].reserved` for the reserved list.
+
+	# Additional OCFP feature under Dynamic Subnets: Logical Subnet Amalgamation
+	#  - If subnets have the same range (which is not allowed by BOSH), we will
+	#    combine them into a single subnet with the same range, and allocate each
+	#    subnet's static IPs from the same range, dynamically determining the reserved
+	#    IP ranges.
+	#  - The subnets that use the same range must also have the same gateway, and amalgamate
+	#    the DNS servers into a single list with no duplicates.
+	#  - The AZ calculation has to also take joined subnets into account, and cannot use different subnet ids,
+	#    (we ignore the subnet id, and just use the network id).  
+
+	my $strategy = 'ocfp:dynamic_subnets';
+	my $network_id = $config->{name};
+	my $subnets = $self->subnets; # Don't filter yet - defer until after LSA creation
+	$config->{subnets} = [];
+
+	my $allocation = delete($definition->{allocation});
+
+	my $vm_count = $allocation->{size} // 0;
+	$vm_count = 2**(32 - $1) if $vm_count =~ m#^/(\d+)$#;
+	my $statics = $allocation->{statics} // 0; # Does not include the reserved ips based on network name (ie bosh_ip, vault_a, vault_b, etc)
+	$statics = 2**(32 - $1) if $statics =~ m#^/(\d+)$#;
+
+	bail(
+		'More static IPs requested (%d) than the allocation for the subnet for '.
+		'network %s allows (%d)',
+		$statics, $target, $vm_count
+	) if ($statics > $vm_count);
+
+	# Get existing allocations from exodus data
+	my $existing_allocations = $self->_get_existing_allocations(); # Different for director and non-drector deployments; prototyping in director
+
+	# We only use the ocfp-* subnets for the network definition
+	my $ocfp_subnet_prefix = $self->env->ocfp_subnet_prefix;
+	my @ocfp_subnet_names = sort grep {/^${ocfp_subnet_prefix}-/} keys %$subnets;
+	bail(
+		'No ocfp-* subnets found in the ocfp configuration for network %s',
+		$target
+	) unless @ocfp_subnet_names;
+
+	# Collect subnet configurations grouped by range for LSA processing
+	my %subnets_by_range = ();
+
+	for my $subnet_name (@ocfp_subnet_names) {
+		my $subnet = $subnets->{$subnet_name};
+		my $full_range = IPv4->new($subnet->{cidr_block});
+		my ($available, $reserved) = $self->_get_subnet_ranges($subnet);
+
+		# Remove existing allocations from available range that are not for the
+		# target network
+		for my $claiming_network (keys %$existing_allocations) {
+			next if ($network_id eq $claiming_network);
+			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name};
+			$available -= $alloc if ($alloc);
+		}
+
+		# Find any existing allocations, but ignore those explicitly reserved
+		my $existing = $existing_allocations->{$network_id}{$subnet_name} // IPv4->new();
+		$existing -= $reserved if $existing && $reserved;
+
+		# Compare existing and desired allocations, and adjust as needed
+		my $allocated_range = $self->_calculate_subnet_allocation(
+			$target,
+			$available,
+			$existing,
+			$vm_count
+		);  
+		$reserved += $full_range->subtract($allocated_range);
+
+		# TODO: We currently just shove statics into the front of the range, but
+		# this doesn't account for ips already in use.  We can either actively
+		# check for ips in the network range against the bosh deployments, or we
+		# allow users to override the statics with a list of offsets to use
+		# rather than just a count or mask.(ie 0-3,9) maybe even negative for
+		# adding to the end? (-1--3)
+		my $static_range = $self->_calculate_static_allocation(
+			$target,
+			$allocated_range,
+			$statics
+		);
+
+		# Check for reserved_ips and "unreserve" them from the reserved range
+		# and put them into the static list
+		my $reserved_ips = IPv4->new(
+			map  {$subnet->{'reserved-ips'}{$_}}
+			grep {$_ =~ m/${target}_ip/}
+			keys %{$subnet->{'reserved-ips'}//{}}
+		);
+		while (<$reserved_ips>) {
+			$static_range += $_;
+			$reserved     -= $_;
+		}
+
+		# Standardize the range using IPv4 library for consistent CIDR expression
+		# Range must be one cohesive CIDR block.
+		my $range = IPv4->new($subnet->{cidr_block});
+		my @spans = $range->spans;
+		bail(
+			"Subnet %s for network %s is not a single CIDR block, but has multiple ranges: %s",
+			$subnet_name, $target, join(', ', map {"$_"} @spans)
+		) if @spans > 1;
+		my @cidrs = $spans[0]->cidrs;
+		bail(
+			"Subnet %s for network %s is not a single CIDR block, but has multiple CIDRs: %s",
+			$subnet_name, $target, join(', ', map {"$_"} @cidrs)
+		) if @cidrs > 1;
+		my $standardized_range_cidr = $cidrs[0];
+
+		my $fields = {
+			az => $self->lookup_az($subnet->{az}), # TODO: Needs to change if we support multiple AZs
+			range => $standardized_range_cidr,
+			gateway => $subnet->{gateway},
+			dns => ref($subnet->{dns}) eq 'ARRAY' ? $subnet->{dns} : [$subnet->{dns}],
+			reserved => [map {$_->range} $reserved->spans],
+			cloud_properties_for_iaas => $definition->{cloud_properties_for_iaas},
+			($static_range->size
+				? (static => [map {$_->range} $static_range->spans])
+				: ()
+			)
+		};
+
+		# Store in placeholder hash grouped by standardized range for LSA processing
+		push @{$subnets_by_range{$standardized_range_cidr}}, $self->_subnet_definition(
+			$target, $subnet_name, $fields, $strategy
+		);
+	}
+
+	# Process each range group
+	for my $range (keys %subnets_by_range) {
+		my @subnet_configs = @{$subnets_by_range{$range}};
+		
+		if (@subnet_configs == 1) {
+			# Single subnet, use as-is
+			my $subnet_config = $subnet_configs[0];
+			my $full_range = IPv4->new($subnet_config->{range});
+			my $reserved = IPv4->new(@{$subnet_config->{reserved}});
+			
+			push @{$config->{subnets}}, $subnet_config
+				if $full_range->size > $reserved->size;
+		} else {
+			# Multiple subnets with same range - create LSA
+			my $lsa_config = $self->_build_logical_subnet_amalgamation(
+				$target, \@subnet_configs,
+#				$target, \@subnet_names, \%subnet_configs_hash, $subnets, $strategy
+			);
+			
+			if ($lsa_config) {
+				push @{$config->{subnets}}, $lsa_config;
+			}
+		}
+	}
+
+	# Apply subnet filtering after LSA creation
+	if (defined($definition->{subnets})) {
+		my $built_subnets = map {$_->{name}} @{$config->{subnets}};
+		my @used_subnets = map {
+			$self->get_subnet_ref($_, $built_subnets)
+		} @{$definition->{subnets}};
+		
+		my ($unused, $used) = compare_arrays($built_subnets, \@used_subnets);
+		delete $config->{subnets}{$_} for @$unused;
+
+		return 1;
+	}
 }
 
 # }}}
@@ -989,6 +1108,94 @@ sub _az_definition_for {
 }
 
 # }}}
+# _build_logical_subnet_amalgamation - Builds a logical subnet amalgamation for subnets with the same range {{{
+sub _build_logical_subnet_amalgamation {
+	my ($self, $target, $subnet_configs) = @_;
+
+	# Short-circuit if only one subnet
+	return $subnet_configs->[0] unless 
+	my @subnet_names = sort map {$_->{name}} @$subnet_configs;
+	my %subnet_configs_hash = map {$_->{name} => $_} @$subnet_configs;
+
+	# Validate that all subnets have the same range and gateway
+	my (%ranges, %gateways) = ();
+	for my $subnet_name (@subnet_names) {
+		push @{$ranges{$subnet_configs_hash{$subnet_name}->{range}}}, $subnet_name;
+		push @{$gateways{$subnet_configs_hash{$subnet_name}->{gateway}}}, $subnet_name;
+	}
+	bail(
+		'Cannot create LSA for subnets with different ranges:\n%s',
+		join("\n", map {"%s: %s" } map {$_ => join(', ', @{$ranges{$_}})} keys %ranges)
+	) if keys(%ranges) > 1;
+	bail(
+		'Cannot create LSA for subnets with different gateways:\n%s',
+		join("\n", map {"%s: %s" } map {$_ => join(', ', @{$gateways{$_}})} keys %gateways)
+	) if keys(%gateways) > 1;
+
+	my ($range) = keys %ranges;
+	my ($gateway) = keys %gateways;
+
+	my $lsa_name = 'LSA|' . join('|', sort @subnet_names);
+
+	# Deduplicate and merge AZs and DNS entries
+	my @azs = uniq sort map {$_->{az}} @$subnet_configs;
+	my @dns_servers = uniq sort map { @{$_->{dns} // []} } @$subnet_configs;
+
+	# Build amalgamated configuration
+	my $lsa_config = {
+		name => $lsa_name,
+		range => $range,
+		gateway => $gateway,
+		azs => \@azs,
+		dns => \@dns_servers,
+	};
+
+	# Calculate amalgamated reserved ranges - easiest way to do this is to
+	# convert reserved ranges into available ranges for each subnet,
+	# add them together, then subtract from the full range.
+
+	my $range_span = IPv4->span($range);
+	my $reserved = $range_span - IPv4->new(
+		map {$range_span - IPv4->new($_->reserved->@*)} @$subnet_configs
+	);
+	$lsa_config->{reserved} = [map {"$_"} $reserved->spans];
+
+	# Calculate amalgamated static ranges - these should be unique across
+	# all subnets, so we can just merge them together and simplify.
+	$lsa_config->{static} = [
+		map {($_->static->@*)} grep {$_->{static}} @$subnet_configs
+	];
+
+	# Use cloud properties from first subnet (they should be similar for same range)
+	# FIXME: We should validate that all subnets have the same cloud properties
+	if ($subnet_configs->[0]{cloud_properties}) {
+		$lsa_config->{cloud_properties} = $$subnet_configs->[0]{cloud_properties};
+	}
+
+	# Check if LSA has any available IPs (not all reserved)
+	return $range_span->size > $reserved->size ? $lsa_config : undef;
+}
+
+# }}}
+# _get_subnet_ref - Returns the subnet reference for a given name {{{
+sub _get_subnet_ref {
+	my ($self, $name, $all_subnets) = @_;
+	# If $all_subnets is not given, get them from $self->network->{subnets}
+	$all_subnets //= [keys $self->network->{subnets}->%*];
+	return $name if grep {$_ eq $name} @$all_subnets;
+
+	# Check for an LSA (Logical Subnet Amalgamation) containing the name
+	my @lsas = grep {$_ =~ /^LSA\|/} @$all_subnets;
+	for my $lsa (@lsas) {
+		my @subnets = split(/\|/, $lsa);
+		return $lsa if grep {$_ eq $name} @subnets;
+	}
+	bail(
+		"Subnet %s not found in the available subnets: %s",
+		$name, join(', ', @$all_subnets)
+	);
+}
+
 # }}}
 1;
 
