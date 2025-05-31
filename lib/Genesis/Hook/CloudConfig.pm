@@ -377,6 +377,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 	my $strategy = 'ocfp:dynamic_subnets';
 	my $network_id = $config->{name};
 	my $subnets = $self->subnets; # Don't filter yet - defer until after LSA creation
+	my $subnet_filter = $definition->{subnets} // [];
 	$config->{subnets} = [];
 
 	my $allocation = delete($definition->{allocation});
@@ -517,9 +518,10 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 	# Apply subnet filtering after LSA creation
 	if (defined($definition->{subnets})) {
-		my $built_subnets = map {$_->{name}} @{$config->{subnets}};
+		my $built_subnets = [map {$_->{name}} @{$config->{subnets}}];
 		my @used_subnets = map {
-			$self->get_subnet_ref($_, $built_subnets)
+
+			$self->_get_subnet_ref($_, $built_subnets)
 		} @{$definition->{subnets}};
 		
 		my ($unused, $used) = compare_arrays($built_subnets, \@used_subnets);
@@ -616,7 +618,7 @@ sub get_available_azs_in_network {
 		->get_allocated_networks
 		->{$self->name_for('net',$target)};
 	return [
-		(uniq sort map {$allocated_subnets->{$_}{az}} keys %$allocated_subnets)
+		(uniq sort map {$allocated_subnets->{$_}{az}//($allocated_subnets->{$_}{azs}->@*)} keys %$allocated_subnets)
 	];
 }
 
@@ -769,12 +771,12 @@ sub _subnet_definition {
 		for my $key (keys %$cloud_properties) {
 			my $value = $cloud_properties->{$key};
 			if (ref($value) eq "Genesis::Hook::CloudConfig::LookupSubnetRef") {
-				my $data = $strategy eq 'ocfp'
+				my $data = $strategy =~ /^ocfp(:.*)?$/
 					? scalar $self->env->ocfp_config_lookup("vpc.subnets.$subnet_id")
 					: bail "LookupSubnetRef not implemented for strategy $strategy";
 				$cloud_properties->{$key} = $value->resolve($self, $data);
 			} elsif (ref($value) eq "Genesis::Hook::CloudConfig::LookupNetworkRef") {
-				my $data = $strategy eq 'ocfp'
+				my $data = $strategy =~ /^ocfp(:.*)?$/
 					? scalar $self->env->ocfp_config_lookup('vpc')
 					: bail "LookupNetworkRef not implemented for strategy $strategy";
 				$cloud_properties->{$key} = $value->resolve($self, $data);
@@ -1156,20 +1158,20 @@ sub _build_logical_subnet_amalgamation {
 
 	my $range_span = IPv4->span($range);
 	my $reserved = $range_span - IPv4->new(
-		map {$range_span - IPv4->new($_->reserved->@*)} @$subnet_configs
+		map {$range_span - IPv4->new($_->{reserved}->@*)} @$subnet_configs
 	);
 	$lsa_config->{reserved} = [map {"$_"} $reserved->spans];
 
 	# Calculate amalgamated static ranges - these should be unique across
 	# all subnets, so we can just merge them together and simplify.
 	$lsa_config->{static} = [
-		map {($_->static->@*)} grep {$_->{static}} @$subnet_configs
+		map {($_->{static}->@*)} grep {$_->{static}} @$subnet_configs
 	];
 
 	# Use cloud properties from first subnet (they should be similar for same range)
 	# FIXME: We should validate that all subnets have the same cloud properties
 	if ($subnet_configs->[0]{cloud_properties}) {
-		$lsa_config->{cloud_properties} = $$subnet_configs->[0]{cloud_properties};
+		$lsa_config->{cloud_properties} = $subnet_configs->[0]{cloud_properties};
 	}
 
 	# Check if LSA has any available IPs (not all reserved)
