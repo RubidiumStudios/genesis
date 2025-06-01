@@ -632,12 +632,14 @@ sub run {
 		system @cmd;
 	} else {
 		open my $pipe, "-|", @cmd
-		  or bail("Could not open pipe to run #C{%s}", join(' ',@cmd));
+			or bail("Could not open pipe to run #C{%s}", join(' ',@cmd));
 		$out = do { local $/; <$pipe> };
 		$out =~ s/\s+$//;
 		close $pipe;
 	}
-	qtrace("command duration: %s", Time::Seconds->new(sprintf ("%0.3f", gettimeofday() - $start_time))->pretty());
+
+my $duration = gettimeofday() - $start_time;
+qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',undef,1));	
 
 	my $err = slurp($err_file) if ($err_file && -f $err_file);
 	my $rc = $? >>8;
