@@ -1401,7 +1401,7 @@ sub get_environment_variables {
 	my ($self, $hook) = @_;
 	$hook //= '';
 
-	my $env = $self->_memoize(sub {
+	my $env = $self->_memoize("__env_vars_for_".$hook, sub {
 		my $self = shift;
 		# Set up the environment variables
 
