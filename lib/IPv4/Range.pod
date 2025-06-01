@@ -327,6 +327,36 @@ Checks if the range contains the given address, span, or range.
   my $other = IPv4::Range->new('192.168.1.4-192.168.1.6');
   print $range->contains($other);            # prints '1'
 
+=head2 cidrs
+
+  my @cidrs = $range->cidrs();
+
+Returns a list of all CIDR notation strings that represent the constituent spans in this range.
+
+  # Example
+  my $range = IPv4::Range->new('192.168.1.0/24', '10.0.0.0/8');
+  my @cidrs = $range->cidrs();
+  print "CIDRs: @cidrs\n"; # prints 'CIDRs: 192.168.1.0/24 10.0.0.0/8'
+
+This method aggregates the CIDR representations from all spans in the range.
+
+=head2 cidr
+
+  my $cidr = $range->cidr();
+
+Returns the range as a single CIDR notation string if the range represents exactly one CIDR block, otherwise returns undef.
+
+  # Example
+  my $range1 = IPv4::Range->new('192.168.1.0/24');
+  my $cidr1 = $range1->cidr();
+  print "CIDR: $cidr1\n"; # prints 'CIDR: 192.168.1.0/24'
+  
+  my $range2 = IPv4::Range->new('192.168.1.0/24', '192.168.2.0/24');
+  my $cidr2 = $range2->cidr();
+  print "CIDR: ", defined($cidr2) ? $cidr2 : "undef", "\n"; # prints 'CIDR: undef'
+
+This method is useful for determining if a range can be represented as a single CIDR block, which is important for network configuration and routing.
+
 =head1 OVERLOADED OPERATORS
 
 =over 4

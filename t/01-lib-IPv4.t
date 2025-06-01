@@ -72,7 +72,7 @@ subtest 'IPv4' => sub {
 };
 
 subtest 'IPv4::Address' => sub {
-  plan tests => 5;
+  plan tests => 6;
   subtest 'new constructor' => sub {
     plan tests => 25;
     # Test new constructor with integer input
@@ -331,11 +331,48 @@ subtest 'IPv4::Address' => sub {
 
     dies_ok { IPv4::Address->all_for_host('invalid.hostname') } 'all_for_host() with invalid hostname dies';
   };
+
+  # Test cidr and cidrs methods
+  subtest 'cidr and cidrs methods' => sub {
+    plan tests => 9;
+    
+    my $addr = IPv4::Address->new('192.168.1.1');
+    
+    # Test cidr method
+    my $cidr = $addr->cidr();
+    is($cidr, '192.168.1.1/32', 'cidr() returns correct CIDR notation with /32 suffix');
+    
+    # Test cidrs method in list context
+    my @cidrs = $addr->cidrs();
+    is(scalar @cidrs, 1, 'cidrs() returns single-element array');
+    is($cidrs[0], '192.168.1.1/32', 'cidrs() returns correct CIDR notation');
+    
+    # Test cidrs method in scalar context
+    my $cidr_count = $addr->cidrs();
+    is($cidr_count, 1, 'cidrs() in scalar context returns count of 1 for single address');
+    
+    # Test with different address
+    my $addr2 = IPv4::Address->new('10.0.0.1');
+    is($addr2->cidr(), '10.0.0.1/32', 'cidr() works with different address');
+    
+    my @cidrs2 = $addr2->cidrs();
+    is_deeply(\@cidrs2, ['10.0.0.1/32'], 'cidrs() returns correct array for different address');
+    
+    # Test scalar context for different address
+    my $cidr_count2 = $addr2->cidrs();
+    is($cidr_count2, 1, 'cidrs() in scalar context returns count of 1 for different address');
+    
+    # Test that cidrs and cidr return consistent results
+    is($addr->cidr(), ($addr->cidrs())[0], 'cidr() and cidrs() return consistent results');
+    
+    # Test that scalar and list context are consistent
+    is(scalar($addr->cidrs()), scalar @cidrs, 'cidrs() scalar and list context return consistent counts');
+  };
 };
 
 
 subtest 'IPv4::Span' => sub {
-  plan tests => 14;
+  plan tests => 15;
   subtest 'new constructor' => sub {
     plan tests => 30;
     my $span1 = IPv4::Span->new('192.168.1.1-192.168.1.10');
@@ -779,6 +816,56 @@ subtest 'IPv4::Span' => sub {
     ], 'CIDR block calculation handles non-aligned end address');
   };
 
+  subtest 'cidr method' => sub {
+    plan tests => 12;
+    
+    # Single CIDR block
+    my $span = IPv4::Span->new('192.168.1.0/24');
+    my $cidr = $span->cidr();
+    is($cidr, '192.168.1.0/24', 'cidr() returns correct CIDR for exact CIDR block');
+    
+    # Single IP address
+    $span = IPv4::Span->new('192.168.1.1');
+    $cidr = $span->cidr();
+    is($cidr, '192.168.1.1/32', 'cidr() returns correct CIDR for single IP');
+    
+    # Range that is NOT a CIDR block
+    $span = IPv4::Span->new('192.168.1.1-192.168.1.5');
+    $cidr = $span->cidr();
+    is($cidr, undef, 'cidr() returns undef for non-CIDR range');
+    
+    # Range that forms multiple CIDR blocks
+    $span = IPv4::Span->new('192.168.1.0-192.168.1.128');
+    $cidr = $span->cidr();
+    is($cidr, undef, 'cidr() returns undef for range requiring multiple CIDR blocks');
+    
+    # Different CIDR sizes
+    $span = IPv4::Span->new('10.0.0.0/16');
+    $cidr = $span->cidr();
+    is($cidr, '10.0.0.0/16', 'cidr() works with different CIDR sizes');
+    
+    $span = IPv4::Span->new('172.16.0.0/12');
+    $cidr = $span->cidr();
+    is($cidr, '172.16.0.0/12', 'cidr() works with /12 CIDR');
+    
+    # Test consistency between cidr and cidrs for single CIDR blocks
+    $span = IPv4::Span->new('192.168.1.0/24');
+    my @cidrs = $span->cidrs();
+    is($span->cidr(), $cidrs[0], 'cidr() and cidrs() consistent for single CIDR block');
+    is(scalar @cidrs, 1, 'cidrs() returns single element for exact CIDR block');
+    
+    # Test cidrs() in scalar context for single CIDR block
+    my $cidr_count = $span->cidrs();
+    is($cidr_count, 1, 'cidrs() in scalar context returns count of 1 for single CIDR block');
+    
+    # Test cidrs() in scalar context for non-CIDR range requiring multiple blocks
+    $span = IPv4::Span->new('192.168.1.1-192.168.1.5');
+    @cidrs = $span->cidrs();
+    $cidr_count = $span->cidrs();
+    is($cidr_count, scalar @cidrs, 'cidrs() scalar context returns correct count for non-CIDR range');
+    cmp_ok($cidr_count, '>', 1, 'cidrs() scalar context returns count greater than 1 for non-CIDR range');
+  };
+
   subtest 'NetAddr::IP-like methods' => sub {
     plan tests => 31;
     
@@ -879,7 +966,7 @@ subtest 'IPv4::Span' => sub {
 # - Test comparison of IPv4 ranges
 # - Test manipulation of IPv4 ranges
 subtest 'IPv4::Range' => sub {
-  plan tests => 13;
+  plan tests => 14;
 
   subtest 'new constructor' => sub {
     plan tests => 24;
@@ -1259,6 +1346,90 @@ subtest 'IPv4::Range' => sub {
     ok(!$range->contains('192.168.1.11'), 'contains() returns false for address outside range');
     ok(!$range->contains('192.168.1.0-192.168.1.12'), 'contains() returns false for span outside range');
     ok(!$range->contains('192.168.1.0-192.168.1.12,192.168.2.0'), 'contains() returns false for range outside range');
+  };
+
+  subtest 'cidr and cidrs methods' => sub {
+    plan tests => 20;
+    
+    # Single CIDR block range
+    my $range = IPv4::Range->new('192.168.1.0/24');
+    my $cidr = $range->cidr();
+    is($cidr, '192.168.1.0/24', 'cidr() returns correct CIDR for single CIDR block range');
+    
+    my @cidrs = $range->cidrs();
+    is_deeply(\@cidrs, ['192.168.1.0/24'], 'cidrs() returns correct array for single CIDR block range');
+    
+    # Test cidrs() in scalar context for single CIDR block
+    my $cidr_count = $range->cidrs();
+    is($cidr_count, 1, 'cidrs() in scalar context returns count of 1 for single CIDR block range');
+    
+    # Single IP address range
+    $range = IPv4::Range->new('192.168.1.1');
+    $cidr = $range->cidr();
+    is($cidr, '192.168.1.1/32', 'cidr() returns correct CIDR for single IP range');
+    
+    @cidrs = $range->cidrs();
+    is_deeply(\@cidrs, ['192.168.1.1/32'], 'cidrs() returns correct array for single IP range');
+    
+    # Test cidrs() in scalar context for single IP range
+    $cidr_count = $range->cidrs();
+    is($cidr_count, 1, 'cidrs() in scalar context returns count of 1 for single IP range');
+    
+    # Multiple CIDR blocks range
+    $range = IPv4::Range->new('192.168.1.0/24', '192.168.2.0/24');
+    $cidr = $range->cidr();
+    is($cidr, undef, 'cidr() returns undef for range with multiple CIDR blocks');
+    
+    @cidrs = $range->cidrs();
+    is_deeply(\@cidrs, ['192.168.1.0/24', '192.168.2.0/24'], 'cidrs() returns correct array for multiple CIDR blocks');
+    
+    # Test cidrs() in scalar context for multiple CIDR blocks
+    $cidr_count = $range->cidrs();
+    is($cidr_count, 2, 'cidrs() in scalar context returns count of 2 for multiple CIDR blocks');
+    
+    # Range with non-CIDR spans
+    $range = IPv4::Range->new('192.168.1.1-192.168.1.5', '192.168.2.10-192.168.2.15');
+    $cidr = $range->cidr();
+    is($cidr, undef, 'cidr() returns undef for range with non-CIDR spans');
+    
+    @cidrs = $range->cidrs();
+    my $expected_cidrs = [
+      '192.168.1.1/32', '192.168.1.2/31', '192.168.1.4/31',  # First span CIDRs
+      '192.168.2.10/31', '192.168.2.12/30'                   # Second span CIDRs
+    ];
+    is_deeply(\@cidrs, $expected_cidrs, 'cidrs() returns correct CIDRs for non-CIDR spans');
+    
+    # Test cidrs() in scalar context for non-CIDR spans
+    $cidr_count = $range->cidrs();
+    is($cidr_count, scalar @cidrs, 'cidrs() in scalar context returns correct count for non-CIDR spans');
+    is($cidr_count, 5, 'cidrs() in scalar context returns count of 5 for non-CIDR spans');
+    
+    # Mixed CIDR and non-CIDR spans
+    $range = IPv4::Range->new('192.168.1.0/24', '192.168.2.1-192.168.2.5');
+    $cidr = $range->cidr();
+    is($cidr, undef, 'cidr() returns undef for mixed CIDR and non-CIDR spans');
+    
+    @cidrs = $range->cidrs();
+    $expected_cidrs = [
+      '192.168.1.0/24',                                       # First span CIDR
+      '192.168.2.1/32', '192.168.2.2/31', '192.168.2.4/31'  # Second span CIDRs
+    ];
+    is_deeply(\@cidrs, $expected_cidrs, 'cidrs() returns correct CIDRs for mixed spans');
+    
+    # Test cidrs() in scalar context for mixed spans
+    $cidr_count = $range->cidrs();
+    is($cidr_count, scalar @cidrs, 'cidrs() in scalar context returns correct count for mixed spans');
+    is($cidr_count, 4, 'cidrs() in scalar context returns count of 4 for mixed spans');
+    
+    # Test consistency between cidr and cidrs for single CIDR block
+    $range = IPv4::Range->new('10.0.0.0/16');
+    is($range->cidr(), ($range->cidrs())[0], 'cidr() and cidrs() consistent for single CIDR block range');
+    
+    # Test empty range
+    $range = IPv4::Range->new();
+    @cidrs = $range->cidrs();
+    $cidr_count = $range->cidrs();
+    is($cidr_count, 0, 'cidrs() in scalar context returns count of 0 for empty range');
   };
 };
 

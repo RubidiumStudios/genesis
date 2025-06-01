@@ -109,6 +109,16 @@ sub range($self) {
   return $self->{address};
 }
 
+# cidr - Returns the address as a CIDR notation with /32 suffix {{{
+sub cidr($self) {
+	return $self->{address} . '/32';
+}
+
+sub cidrs($self) {
+	return ($self->cidr());
+}
+
+# }}}
 sub start($self) {
 	return $self;
 }

@@ -278,16 +278,33 @@ If there is not enough space in the span to accommodate the requested size and o
 
   my @cidrs = $span->cidrs();
 
-Returns the CIDR blocks for the span.
+Returns a list of CIDR notation strings that represent the span. If the span represents a single CIDR block, returns a single-element list. If the span covers multiple non-contiguous CIDR blocks, returns multiple CIDR strings.
 
   # Example
-  my $span = IPv4::Span->new('192.168.1.0', '192.168.1.255');
-  my @cidrs = $span->cidrs();
-  print "CIDR blocks: @cidrs\n"; # prints '192.168.1.0/24'
+  my $span1 = IPv4::Span->new('192.168.1.0/24');
+  my @cidrs1 = $span1->cidrs();
+  print "CIDRs: @cidrs1\n"; # prints 'CIDRs: 192.168.1.0/24'
+  
+  my $span2 = IPv4::Span->new('192.168.1.1-192.168.1.5');  
+  my @cidrs2 = $span2->cidrs();
+  print "CIDRs: @cidrs2\n"; # prints multiple CIDR blocks
 
-  $span = IPv4::Span->new('192.168.1.0', '192.168.1.63');
-  @cidrs = $span->cidrs();
-  print "CIDR blocks: @cidrs\n"; # prints '192.168.1.0/26'
+=head2 cidr
+
+  my $cidr = $span->cidr();
+
+Returns the span as a single CIDR notation string if the span represents exactly one CIDR block, otherwise returns undef.
+
+  # Example
+  my $span1 = IPv4::Span->new('192.168.1.0/24');
+  my $cidr1 = $span1->cidr();
+  print "CIDR: $cidr1\n"; # prints 'CIDR: 192.168.1.0/24'
+  
+  my $span2 = IPv4::Span->new('192.168.1.1-192.168.1.5');  
+  my $cidr2 = $span2->cidr();
+  print "CIDR: ", defined($cidr2) ? $cidr2 : "undef", "\n"; # prints 'CIDR: undef'
+
+This method is useful for determining if a span can be represented as a single CIDR block, which is important for network configuration and routing.
 
 =head2 add
 

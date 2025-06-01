@@ -337,6 +337,28 @@ Returns true if this address equals the given address.
   print $address->contains('192.168.0.1'); # prints '1'
   print $address->contains('192.168.0.2'); # prints '0'
 
+=head2 cidr
+
+  my $cidr = $address->cidr();
+
+Returns the address in CIDR notation with a /32 suffix, since individual addresses are always considered as /32 CIDR blocks.
+
+  # Example
+  my $addr = IPv4::Address->new('192.168.1.1');
+  my $cidr = $addr->cidr();
+  print "CIDR: $cidr\n"; # prints 'CIDR: 192.168.1.1/32'
+
+=head2 cidrs
+
+  my @cidrs = $address->cidrs();
+
+Returns an array containing the address in CIDR notation. For individual addresses, this always returns a single-element array containing the address with a /32 suffix.
+
+  # Example
+  my $addr = IPv4::Address->new('192.168.1.1');
+  my @cidrs = $addr->cidrs();
+  print "CIDRs: @cidrs\n"; # prints 'CIDRs: 192.168.1.1/32'
+
 =head1 INTERNAL METHODS
 
 Private methods used internally and for overloading support. These should not be called directly.

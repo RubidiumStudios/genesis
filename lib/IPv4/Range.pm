@@ -234,6 +234,19 @@ sub numeric_cmp($self, $other, $swap = 0) {
 	return ($self->size <=> $other) * ($swap ? -1 : 1);
 }
 
+sub cidrs($self) {
+	my @cidrs = ();
+	push @cidrs, $_->cidrs for $self->spans;
+	return @cidrs;
+}
+
+# cidr - Returns the range as a CIDR notation if it represents a single CIDR block, otherwise undef {{{
+sub cidr($self) {
+	my @cidrs = $self->cidrs;
+	return (scalar(@cidrs) == 1) ? $cidrs[0] : undef;
+}
+
+# }}}
 sub contains($self, $obj) {
 	$obj = IPv4::__autovivify($obj);
 	my @other_spans = $obj->spans;

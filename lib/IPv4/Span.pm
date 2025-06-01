@@ -363,6 +363,12 @@ sub cidrs($self) {
 	return @cidrs;
 }
 
+# cidr - Returns the span as a CIDR notation if it represents a single CIDR block, otherwise undef
+sub cidr($self) {
+	my @cidrs = $self->cidrs;
+	return (scalar(@cidrs) == 1) ? $cidrs[0] : undef;
+}
+
 # Given an address and a mask, return the starting end ending addresses of the
 # CIDR block.  Note that the starting address of the block is not necessarily
 # the same as the address passed in.
