@@ -8,6 +8,7 @@ use Genesis::Term;
 
 use Genesis::UI;
 use JSON::PP qw/decode_json/;
+use Time::HiRes qw/gettimeofday/;
 use UUID::Tiny ();
 
 ### Class Variables {{{
@@ -321,7 +322,8 @@ sub get {
 		);
 		return undef;
 	}
-	my ($json,$rc,$err) = read_json_from($self->query({stderr => 0, redact_output => 1}, 'export', $path));
+	my $start = gettimeofday();
+	my ($yaml,$rc,$err) = $self->query({stderr => 0, redact_output => 1}, 'get', $path);
 	if ($rc || $err) {
 		debug(
 			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}:%s\nexit code: %s",
@@ -329,17 +331,16 @@ sub get {
 		);
 		return {};
 	}
-	$path =~ s/^\///; # Trim leading / as safe doesn't honour it
-	return $json->{$path} if (ref($json) eq 'HASH');
-
-	# Safe 1.1.0 is backwards compatible, but leaving this in for futureproofing
-	if (ref($json) eq "ARRAY" and scalar(@$json) == 1) {
-		if ($json->[0]{export_version}||0 == 2) {
-			return $json->[0]{data}{$path}{versions}[-1]{value};
-		}
-	}
-	bail "Safe version incompatibility - cannot export path $path";
-
+	my $values = load_yaml($yaml);
+	bail(
+		"Expected #C{%s} to return a hash of key/value pairs, but got a %s",
+		$path, ref($values)
+	) unless ref($values) eq 'HASH';
+	trace(
+		"Exported %s key/value pairs from #C{%s} in vault at #M{%s} in %.3f seconds",
+		scalar(CORE::keys %$values), $path, $self->{url}, gettimeofday() - $start
+	);
+	return $values;
 }
 
 # }}}
