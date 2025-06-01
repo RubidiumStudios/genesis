@@ -71,6 +71,22 @@ sub init {
 sub done {
 	my ($self, $contents) = @_;
 
+	# Validate that we received a proper config hashref
+	bail(
+		"CloudConfig hook must return a hashref containing the cloud config - got %s",
+		ref($contents) || 'scalar value'
+	) unless ref($contents) eq 'HASH';
+
+	# Check validity of the network config, upgrading multiple subnets using a
+	# single CIDR range into a Logical Subnet Amalgamation (LSA) definition if
+	# needed.
+
+	# RISK: This will change the network config, so if any hook perform method
+	#       does stuff with the network config after calling `done`, the subnets
+	#       will have been converted to LSAs, and the hook will not be able to
+	#       access the original subnets.
+	$self->_process_network_subnets($contents->{networks});
+
 	# Force name to be sorted first
 	my $sort_name_first = FIRST_SORT_TOKEN.'name'.FIRST_SORT_TOKEN;
 	my $sort_cloud_properties_last = LAST_SORT_TOKEN.'cloud_properties'.LAST_SORT_TOKEN;
@@ -93,7 +109,8 @@ sub done {
 		=~ s/\n([^ -])/\n\n$1/gmr;
 	unlink($filename);
 	$self->{contents} = $contents;
-	$self->SUPER::done();
+
+	return $self->SUPER::done();
 }
 
 # }}}
@@ -376,8 +393,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 	my $strategy = 'ocfp:dynamic_subnets';
 	my $network_id = $config->{name};
-	my $subnets = $self->subnets; # Don't filter yet - defer until after LSA creation
-	my $subnet_filter = $definition->{subnets} // [];
+	my $subnets = $self->_filter_subnets($definition->{subnets});
 	$config->{subnets} = [];
 
 	my $allocation = delete($definition->{allocation});
@@ -403,9 +419,6 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		'No ocfp-* subnets found in the ocfp configuration for network %s',
 		$target
 	) unless @ocfp_subnet_names;
-
-	# Collect subnet configurations grouped by range for LSA processing
-	my %subnets_by_range = ();
 
 	for my $subnet_name (@ocfp_subnet_names) {
 		my $subnet = $subnets->{$subnet_name};
@@ -485,50 +498,14 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			)
 		};
 
-		# Store in placeholder hash grouped by standardized range for LSA processing
-		push @{$subnets_by_range{$standardized_range_cidr}}, $self->_subnet_definition(
+		my $subnet_config = $self->_subnet_definition(
 			$target, $subnet_name, $fields, $strategy
 		);
+
+		push @{$config->{subnets}}, $subnet_config if $full_range->size > $reserved->size;
 	}
 
-	# Process each range group
-	for my $range (keys %subnets_by_range) {
-		my @subnet_configs = @{$subnets_by_range{$range}};
-		
-		if (@subnet_configs == 1) {
-			# Single subnet, use as-is
-			my $subnet_config = $subnet_configs[0];
-			my $full_range = IPv4->new($subnet_config->{range});
-			my $reserved = IPv4->new(@{$subnet_config->{reserved}});
-			
-			push @{$config->{subnets}}, $subnet_config
-				if $full_range->size > $reserved->size;
-		} else {
-			# Multiple subnets with same range - create LSA
-			my $lsa_config = $self->_build_logical_subnet_amalgamation(
-				$target, \@subnet_configs,
-#				$target, \@subnet_names, \%subnet_configs_hash, $subnets, $strategy
-			);
-			
-			if ($lsa_config) {
-				push @{$config->{subnets}}, $lsa_config;
-			}
-		}
-	}
-
-	# Apply subnet filtering after LSA creation
-	if (defined($definition->{subnets})) {
-		my $built_subnets = [map {$_->{name}} @{$config->{subnets}}];
-		my @used_subnets = map {
-
-			$self->_get_subnet_ref($_, $built_subnets)
-		} @{$definition->{subnets}};
-		
-		my ($unused, $used) = compare_arrays($built_subnets, \@used_subnets);
-		delete $config->{subnets}{$_} for @$unused;
-
-		return 1;
-	}
+	return 1;
 }
 
 # }}}
@@ -553,7 +530,7 @@ sub update_network {
 
 	# Calculate and store the new allocations
 	for my $subnet (@{$config->{subnets}}) {
-		my $subnet_id = delete($subnet->{name});
+		my $subnet_id = $subnet->{name};
 		my $range     = $subnet->{range};
 		$self->network->{subnets}{$subnet_id}{claims}{$network} = IPv4
 			->new($range)
@@ -1110,12 +1087,53 @@ sub _az_definition_for {
 }
 
 # }}}
+# _process_network_subnets - Processes the network subnets to match what BOSH needs {{{
+sub _process_network_subnets {
+	my ($self, $networks) = @_;
+	return unless ref($networks) eq 'ARRAY';
+
+	# This will make the subnets in the networks be compatible with BOSH's expectations for
+	# network definitions in cloud config.  To do this, we will:
+	# - Remove the `name` property from the subnets, as BOSH does not use it.
+	# - Transform any subnets that have the same CIDR range into a Logical Subnet Amalgamation (LSA).
+
+	for my $network (@$networks) {
+		bail(
+			"Network definition is not a hashref: %s", $network
+		) unless ref($network) eq 'HASH' && exists $network->{subnets};
+
+		my $subnets = delete($network->{subnets});
+		my %subnets_by_range = ();
+		push(@{$subnets_by_range{$_->{range}}}, $_) for (@$subnets);
+	
+		my @lsa_subnets = ();
+		for my $range (keys %subnets_by_range) {
+			my @subnet_configs = @{$subnets_by_range{$range}};
+			if (@subnet_configs > 1) {
+				# Build a logical subnet amalgamation (LSA) for this range
+				my $lsa = $self->_build_logical_subnet_amalgamation(
+					$network->{name}, \@subnet_configs
+				);
+				push @lsa_subnets, $lsa if $lsa;
+			} else {
+				# Single subnet, remove the name and keep it as is
+				delete($subnet_configs[0]->{name});
+				push @lsa_subnets, $subnet_configs[0];
+			}
+		}
+		# Replace the subnets with the LSAs
+		$network->{subnets} = \@lsa_subnets;
+	}
+	return 1;
+}
+# }}}
 # _build_logical_subnet_amalgamation - Builds a logical subnet amalgamation for subnets with the same range {{{
 sub _build_logical_subnet_amalgamation {
 	my ($self, $target, $subnet_configs) = @_;
 
 	# Short-circuit if only one subnet
-	return $subnet_configs->[0] unless 
+	return $subnet_configs->[0] unless ref($subnet_configs) eq 'ARRAY' && @$subnet_configs > 1;
+
 	my @subnet_names = sort map {$_->{name}} @$subnet_configs;
 	my %subnet_configs_hash = map {$_->{name} => $_} @$subnet_configs;
 
@@ -1137,15 +1155,12 @@ sub _build_logical_subnet_amalgamation {
 	my ($range) = keys %ranges;
 	my ($gateway) = keys %gateways;
 
-	my $lsa_name = 'LSA|' . join('|', sort @subnet_names);
-
 	# Deduplicate and merge AZs and DNS entries
 	my @azs = uniq sort map {$_->{az}} @$subnet_configs;
 	my @dns_servers = uniq sort map { @{$_->{dns} // []} } @$subnet_configs;
 
 	# Build amalgamated configuration
 	my $lsa_config = {
-		name => $lsa_name,
 		range => $range,
 		gateway => $gateway,
 		azs => \@azs,
@@ -1199,6 +1214,57 @@ sub _get_subnet_ref {
 }
 
 # }}}
+
+=old-lsa-code
+
+
+	# We need to detect if there are multiple subnets with the same range, and
+	# amalgamate them into a single logical subnet amalgamation (LSA) if so.
+	# The network map (as created by `update_network`) will have the nominal
+	# subnet name as the key, but the networks defined in the config will need
+	# to use the LSAs instead (the name doesn't matter because it doesn't show
+	# up anywhere, but it does need to be unique in the hash).
+
+	# Process each range group
+	for my $range (keys %subnets_by_range) {
+		my @subnet_configs = @{$subnets_by_range{$range}};
+		
+		if (@subnet_configs == 1) {
+			# Single subnet, use as-is
+			my $subnet_config = $subnet_configs[0];
+			my $full_range = IPv4->new($subnet_config->{range});
+			my $reserved = IPv4->new(@{$subnet_config->{reserved}});
+			
+			push @{$config->{subnets}}, $subnet_config
+				if $full_range->size > $reserved->size;
+		} else {
+			# Multiple subnets with same range - create LSA
+			my $lsa_config = $self->_build_logical_subnet_amalgamation(
+				$target, \@subnet_configs,
+#				$target, \@subnet_names, \%subnet_configs_hash, $subnets, $strategy
+			);
+			
+			if ($lsa_config) {
+				push @{$config->{subnets}}, $lsa_config;
+			}
+		}
+	}
+
+	# Apply subnet filtering after LSA creation
+	if (defined($definition->{subnets})) {
+		my $built_subnets = [map {$_->{name}} @{$config->{subnets}}];
+		my @used_subnets = map {
+
+			$self->_get_subnet_ref($_, $built_subnets)
+		} @{$definition->{subnets}};
+		
+		my ($unused, $used) = compare_arrays($built_subnets, \@used_subnets);
+		delete $config->{subnets}{$_} for @$unused;
+
+		return 1;
+	}
+
+=cut
 1;
 
 # vim - fdm=marker:foldlevel=1:ts=2:sts=2:sw=2:noet
