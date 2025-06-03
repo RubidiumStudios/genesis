@@ -354,7 +354,8 @@ sub generate_secrets {
 # regenerate_secrets - create new versions of existing secrets {{{
 sub regenerate_secrets {
 	my ($self,%opts) = @_;
-	my @update_args = ($opts{action}//'rotate', {%opts{qw/level invalid indent/}, indent => '    '});
+	$opts{action} //= 'rotate';
+	my @update_args = ($opts{action}, {%opts{qw/level invalid indent/}, indent => '    '});
 	my ($no_prompt,$interactive) = delete(@opts{qw/no_prompt interactive/});
 	my $severity = ['','invalid','problem']->[delete($opts{invalid})||0];
 
@@ -395,7 +396,7 @@ sub regenerate_secrets {
 			msg => sprintf(
 				"[[  - >>the following secrets under path '#C{%s}' will be %s:\n%s",
 				$self->store->base,
-				$opts{action} =~ s/e?$/ed/r =~ s/yed$/ied/r || 'rotated',
+				($opts{action} =~ s/e?$/ed/r =~ s/yed$/ied/r),
 				join("\n",
 					map {bullet($_, inline => 1, indent => 4)}
 					map {
