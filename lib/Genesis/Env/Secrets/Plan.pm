@@ -395,7 +395,7 @@ sub regenerate_secrets {
 			msg => sprintf(
 				"[[  - >>the following secrets under path '#C{%s}' will be %s:\n%s",
 				$self->store->base,
-				$opts{action} || 'rotated',
+				$opts{action} =~ s/e?$/ed/r =~ s/yed$/ied/r || 'rotated',
 				join("\n",
 					map {bullet($_, inline => 1, indent => 4)}
 					map {
@@ -413,7 +413,7 @@ sub regenerate_secrets {
 					@selected_secrets
 				)
 			),
-			prompt => "    Type 'yes' to rotate these secrets"
+			prompt => "    Type 'yes' to $opts{action} these secrets"
 		);
 		return ({abort => 1}) if $permission ne 'yes';
 		info "";
