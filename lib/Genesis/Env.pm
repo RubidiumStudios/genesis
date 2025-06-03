@@ -3182,6 +3182,12 @@ sub update_deployment_exodus {
 	my $notify = !delete($deployment_details{quiet});
 	my $started = gettimeofday;
 
+	my @rm_exodus_cmds = ();
+	if (keys $self->vault->get($self->exodus_base)->%*) {
+		# If the exodus data already exists, we need to remove it first
+		push @rm_exodus_cmds, ('rm', $self->exodus_base, "-f");
+	}
+
 	my $info_msg = '';
 	if ($action eq 'deploy') {
 		if (Genesis::Env::Deployment::is_a_successful_result($result)) {
@@ -3207,7 +3213,7 @@ sub update_deployment_exodus {
 			} else {
 				$deployment_details{started} = $exodus->{dated} // $timestamp;
 			}
-			push @exodus_cmds, ('rm', $self->exodus_base, "-f");
+			push @exodus_cmds, @rm_exodus_cmds;
 			$info_msg = "updating exodus data for this deployment";
 		} else {
 			$info_msg = "retaining any previous exodus data (deployment failed)";
@@ -3216,9 +3222,9 @@ sub update_deployment_exodus {
 			$exodus_overrides = {};
 		}
 	} elsif ($action eq 'terminate') {
-		if (Genesis::Env::Deployment::is_a_successful_result($result)) {
+		if (Genesis::Env::Deployment::is_a_successful_result($result) && @rm_exodus_cmds) {
 			$info_msg = "removing previous exodus data";
-			push @exodus_cmds, ('rm', $self->exodus_base, "-f")
+			push @exodus_cmds, @rm_exodus_cmds;
 		} else {
 			$info_msg = "retaining any previous exodus data (termination failed)";
 		}
