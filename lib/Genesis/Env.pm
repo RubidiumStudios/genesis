@@ -992,6 +992,7 @@ sub defines {
 # lookup - look up a value from the heirarchal evironment {{{
 sub lookup {
 	my ($self, $key, $default) = @_;
+	$key //= '.';
 	return struct_lookup($self->params, $key, $default);
 }
 
@@ -999,6 +1000,7 @@ sub lookup {
 # lookup_unevaled - look up a value from the heirarchal evironment without evaluating operators {{{
 sub lookup_unevaled {
 	my ($self, $key, $default) = @_;
+	$key //= '.';
 	return $default unless $self->actual_environment_files();
 	return struct_lookup($self->manifest_provider->unevaluated_environment->data, $key, $default);
 }
@@ -1007,6 +1009,7 @@ sub lookup_unevaled {
 # partial_manifest_lookup - look up a value from a best-effort merged manifest for this environment {{{
 sub partial_manifest_lookup {
 	my ($self, $key, $default) = @_;
+	$key //= '.';
 	return struct_lookup($self->manifest_provider->partial->data, $key, $default);
 }
 
@@ -1014,6 +1017,7 @@ sub partial_manifest_lookup {
 # manifest_lookup - look up a value from a completely merged manifest for this environment {{{
 sub manifest_lookup {
 	my ($self, $key, $default) = @_;
+	$key //= '.';
 	return struct_lookup($self->manifest_provider->base_manifest->data, $key, $default);
 }
 
@@ -1021,6 +1025,7 @@ sub manifest_lookup {
 # last_deployed_lookup - look up values from the last deployment of this environment {{{
 sub last_deployed_lookup {
 	my ($self, $key, $default) = @_;
+	$key //= '.';
 	my $last_manifest = $self->{__last_deployed_lookup_manifest};
 	unless ($last_manifest) {
 		my $last_manifest_file = $self->last_deployed_manifest(just => 'file');
@@ -1067,6 +1072,7 @@ sub exodus_lookup {
 # director_exodus_lookup - lookup Exodus data from the director that deploys this environment {{{
 sub director_exodus_lookup {
 	my ($self, $key) = (shift, shift);
+	$key //= '.';
 	my $default = shift if scalar(@_) % 2 == 1;
 	my %opts = @_;
 
