@@ -726,15 +726,14 @@ sub _deref_metadata {
 # _dereference_param - derefernce a referenced parameter {{{
 sub _dereference_param {
 	my ($self,$lookup,$key,$default) = @_;
+	my $maybe = $key =~ s/^maybe:// ? 1 : 0;
 	trace "Dereferencing kit param: %s [default: %s]", $key, defined($default) ? $default : 'null';
 	if (defined(($self->{__deref_cache}||{})->{$key})) {
 		trace "Genesis::Kit->_dereference_param: cache hit '%s'=>'%s'", $key, $self->{__deref_cache}{$key};
 		return $self->{__deref_cache}{$key};
 	}
-	if ($key =~ m/^maybe:/) {
-		$key =~ s/^maybe://;
-		$default = bless({},"missing_value");
-	}
+	$default = bless({},"missing_value") if $maybe;
+
 	my $val = $lookup->($key, $default);
 	die "metadata not found\n" if (ref($val) eq "missing_value");
 	while (defined($val) && $val =~ /\(\( grab \s*(\S*?)(?:\s*\|\|\s*(.*?))?\s*\)\)/) {
@@ -754,6 +753,10 @@ sub _dereference_param {
 		push @{($self->{__deref_miss}||=[])}, $key;
 		return "\${$key}"
 	}
+	bail(
+		"Cannnot dereference kit parameter '%s' to a value because it has an unresolved vault lookup:\n[[  >>%s",
+		$key, $val
+	) if defined($val) && $val =~ /\(\( vault /;
 	trace "Dereference: got %s", $val;
 	($self->{__deref_cache}||={})->{$key} = $val;
 	return $val; # TODO: maybe change unquoted ~ to undef, and remove quotes from default
