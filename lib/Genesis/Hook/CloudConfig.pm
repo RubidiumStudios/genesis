@@ -60,7 +60,7 @@ sub init {
 
 	$obj->{network} //= $obj->_get_bosh_network_data();
 	if ($env->is_ocfp) {
-		$obj->{ocfp_config} = $env->ocfp_config_lookup('vpc');
+		$obj->{ocfp_config} = $env->ocfp_config_lookup(['net','vpc']);
 	}
 
 	return $cloud_configs{$id} = $obj;
@@ -374,6 +374,9 @@ sub _build_ocfp_network_model_dynamic_subnets {
 	#     that are not reserved (generally we do NOT want this)
 	#     we technically only need one of these, but both are supported
 	#
+	#   Note: The 'vpc' path was later changed to 'net' in later versions of the
+	#	  OCFP configuration, so we support both paths for backwards compatibility.
+	#
 	# *-ocfp - Owns .32 to .last of each subnet
 
 	# This will dynamically determine the subnets based on the ocfp
@@ -628,7 +631,7 @@ sub get_network_size {
 # subnets - Returns the subnets for the network {{{
 sub subnets {
 	my ($self) = @_;
-	return $self->{subnets} ||= $self->env->ocfp_config_lookup('vpc.subnets');
+	return $self->{subnets} ||= $self->env->ocfp_config_lookup(['net.subnets','vpc.subnets']);
 }
 
 # }}}
@@ -749,12 +752,12 @@ sub _subnet_definition {
 			my $value = $cloud_properties->{$key};
 			if (ref($value) eq "Genesis::Hook::CloudConfig::LookupSubnetRef") {
 				my $data = $strategy =~ /^ocfp(:.*)?$/
-					? scalar $self->env->ocfp_config_lookup("vpc.subnets.$subnet_id")
+					? scalar $self->env->ocfp_config_lookup(["net.subnets.$subnet_id","vpc.subnets.$subnet_id"])
 					: bail "LookupSubnetRef not implemented for strategy $strategy";
 				$cloud_properties->{$key} = $value->resolve($self, $data);
 			} elsif (ref($value) eq "Genesis::Hook::CloudConfig::LookupNetworkRef") {
 				my $data = $strategy =~ /^ocfp(:.*)?$/
-					? scalar $self->env->ocfp_config_lookup('vpc')
+					? scalar $self->env->ocfp_config_lookup(['net','vpc'])
 					: bail "LookupNetworkRef not implemented for strategy $strategy";
 				$cloud_properties->{$key} = $value->resolve($self, $data);
 			}

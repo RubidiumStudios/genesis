@@ -48,7 +48,7 @@ sub build_az_definitions {
 
 	# This will build the availability zone definitions for all available AZs in
 	# the config provided in vault under $ENV{GENESIS_OCFP_CONFIG_MOUNT}, with
-	# the relative path of '/<env>/<ocfp-type>/vpc/azs/<name> for each named AZ.
+	# the relative path of '<env>/<ocfp-type>/(net|vpc)/azs/<name> for each named AZ.
 	# The keys that will be available under each AZ are:
 	# - index: The index of the AZ in the list of AZs
 	# - id (optional): The id of the AZ in the cloud provider
@@ -145,7 +145,7 @@ sub _set_network_azs {
 	my ($self, %opts) = @_;
 	if ($self->env->is_ocfp) {
 		my $prefix = $self->{az_prefix};
-		my $azs = $self->env->ocfp_config_lookup('vpc.azs');
+		my $azs = $self->env->ocfp_config_lookup(['net.azs','vpc.azs']);
 		my %azs = map {
 			my $az_name = $_;
 			my $data = $azs->{$az_name};
@@ -182,7 +182,7 @@ sub _set_network_azs {
 sub _set_network_subnets {
 	my ($self) = @_;
 	if ($self->env->is_ocfp) {
-		my $subnets = $self->env->ocfp_config_lookup('vpc.subnets');
+		my $subnets = $self->env->ocfp_config_lookup(['net.subnets','vpc.subnets']);
 		my %subnets = map {
 			my $subnet_name = $_;
 			my $data = $subnets->{$subnet_name};
