@@ -139,7 +139,7 @@ sub information {
 						$deployment->succeeded ? 'G' : 'R',
 						$deployment->action eq 'deploy' ? ' deployment' : 'termination',
 						$deployment->succeeded ? 'succeeded' : 'failed   ',
-						$roles_string,
+						$roles_string =~ s/%/%%/gr, # Escape % signs in the roles string
 						$deployment->lookup('kit.id')
 					);
 					$prefix = "[[                >>";

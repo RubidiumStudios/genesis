@@ -268,9 +268,12 @@ sub user_description {
 		push @extra_roles, "$role: $user_info->{$role}";
 	}
 
+	my $shell = $user_info->{shell} // 'unknown';
+	$shell =~ s/ \(tmux\(\d*\)[^\)]*\)//; # Remove tmux session info if present
+
 	return sprintf(
 		"%s%s",
-		$self->{data}{user}{shell} // 'unknown',
+		$shell,
 		@extra_roles ? ' [' . join(', ', @extra_roles) . ']' : ''
 	);
 }
@@ -299,7 +302,7 @@ sub user_colorized_roles {
 		sprintf(
 			"#%s{%s}",
 			$user_color_map->{$_} // 'y', # Default to yellow if not defined
-			$user_info->{$_}
+			$user_info->{$_} =~ s/ \(tmux\(\d*\)[^\)]*\)//gr
 		)
 	}	@used_roles;
 

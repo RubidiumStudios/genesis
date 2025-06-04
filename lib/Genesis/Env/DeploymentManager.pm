@@ -424,6 +424,7 @@ sub _base_deployment_content {
 			lines(run({stderr => '/dev/null'},'who', '-mH'))
 		)->[1];
 		my $user = $user_data->[0] // $ENV{USER};
+		delete($user_data->[3]) if $user_data->[3] =~ /^tmux\(/; # Remove tmux session name if present)'
 		$user .= (" ".$user_data->[3]) if $user_data->[3];
 		$base->{user} = {
 			shell         => $user,
