@@ -458,7 +458,7 @@ sub regenerate_secrets {
 			}
 			if (@command) {
 				$self->notify(@update_args, 'notify', msg=> "\nsaving user input ... ", nonl => 1) if ! $interactive;
-				my ($out,$rc) = $secret->process_command_output('rotate', $self->query({interactive => $interactive}, @command));
+				my ($out,$rc) = $secret->process_command_output('rotate', $self->store->service->query({interactive => $interactive}, @command));
 				$self->notify(@update_args, 'notify', msg=> "\nsaving user input ... ", nonl => 1) if $interactive;
 				$self->notify(@update_args, 'done-item', result => ($rc ? 'error': 'ok'));
 				last if $rc;
