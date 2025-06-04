@@ -11,7 +11,7 @@ use Time::HiRes qw/gettimeofday/;
 
 sub init {
 	my ($class, %ops) = @_;
-	my @missing = grep {!defined($ops{$_})} qw/env rc/;
+	my @missing = grep {!defined($ops{$_})} qw/env rc data/;
 	bug(
 		"Missing required arguments for a perl-based kit hook call: %s",
 		join(", ", @missing)
