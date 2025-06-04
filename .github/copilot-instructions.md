@@ -174,7 +174,19 @@ use Genesis::Term qw/wrap colorize bullet/;
 
 - Perl-based hooks for kits are placed in a package `Genesis::Hook::HookType::KitType[::HookSubtype]`, where `HookType` is the type of hook (e.g., `Blueprint`, `CloudConfig`, etc.) and `KitType` is the type of kit (e.g., `BOSH`, `CF`, `Prometheus`, etc.).  The `HookSubType` is optional, most often used for the specific task of an `Addon` hook.
 
-- Perl-based hooks always contain 
+- Perl-based hooks should not use a shebang line, but be structured as such:
+  - package line, as described above
+	- use pragma for `v5.20` and `warnings` : `strict` and `520` pragmas should be removed.
+	- a blank line followed by the dev support line (see below) and the `use parent` statement.  Any existing `use lib` line can be removed.
+	- a blank line followed by the `use` statements for any Genesis modules (modules found under ./lib/ in the genesis project).
+	- a blank line followed by the `use` statements for any core Perl modules (such as `File::Basename`, `File::Path`, etc.), arranged alphabetically. Non-core Perl modules should not be used, as the Genesis project is designed to be self-contained and not rely on external CPAN modules.
+	- a blank line followed by the init method.
+	- a blank line followed by the `perform` method, which is the main method that is called when the hook is executed.
+	- perform methods should always return the result of `$self->done(<arg>)`, where `<arg>` is dependent on the Hook subtype parent.
+	- any further methods that are called by the `perform` method should be defined after it, with a blank line before each method definition.
+  - a blank line, followed by a `1;` and then the vim config commentline at the bottom of the file.
+
+- Perl-based hooks always contain a dev-support line as such:
 ```
 # Only needed for development
 BEGIN {push @INC, $ENV{GENESIS_LIB} ? $ENV{GENESIS_LIB} : $ENV{HOME}.'/.genesis/lib'}
