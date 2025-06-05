@@ -103,8 +103,14 @@ sub check_minimum_genesis_version {
 
 sub env {$_[0]->{env}}
 sub kit {$_[0]->env && $_[0]->env->kit}
+sub kit_bug {
+	my ($self, $msg, @args) = @_;
+	$self->kit->kit_bug($msg, @args) if $self->kit;
+}
 
-sub deployed {($_[0]->exodus_lookup('state','') eq 'deployed')}
+sub deployed {
+	($_[0]->env->deployments->current_state eq 'deployed') ? 1 : 0
+}
 
 sub use_create_env {
 	return $_[0]->env && $_[0]->env->use_create_env;
@@ -148,6 +154,11 @@ sub is_ocfp {$_[0]->env && $_[0]->env->is_ocfp}
 sub cpi_name {$_[0]->env && $_[0]->env->cpi_name}
 sub cpi_enabled {$_[0]->env && $_[0]->env->cpi_enabled}
 # }}}
+
+sub supports_iaas {
+	my ($self) = @_;
+	return in_array($self->iaas, $self->env->kit->metadata->{supports}->@*);
+}
 
 sub relative_env_path {
 	my $self = shift;
