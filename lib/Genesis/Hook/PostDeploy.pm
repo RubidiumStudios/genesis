@@ -11,7 +11,7 @@ use Time::HiRes qw/gettimeofday/;
 
 sub init {
 	my ($class, %ops) = @_;
-	my @missing = grep {!defined($ops{$_})} qw/env rc data/;
+	my @missing = grep {!defined($ops{$_})} qw/env rc/;
 	bug(
 		"Missing required arguments for a perl-based kit hook call: %s",
 		join(", ", @missing)
@@ -23,6 +23,10 @@ sub init {
 
 sub deploy_successful {
 	return $_[0]->{rc} == 0;
+}
+
+sub data {
+	return $_[0]->{data} ||= {};
 }
 
 sub update_director_network_config {
