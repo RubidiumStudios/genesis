@@ -33,6 +33,16 @@ sub remove_files {
 	);
 }
 
+sub exchange_files {
+	my ($self, %exchange) = @_;
+	# Exchange in place any files that match the keys with the values
+	for my $i (0 .. $#{$self->{files}}) {
+		$self->{files}[$i] = delete $exchange{$self->{files}[$i]}
+			if (exists $exchange{$self->{files}[$i]});
+		last if (scalar(keys %exchange) == 0);
+	}
+}
+
 sub results {
 	bail(
 		"Blueprint hook could not be run"
