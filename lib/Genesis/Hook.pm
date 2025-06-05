@@ -102,11 +102,6 @@ sub check_minimum_genesis_version {
 
 
 sub env {$_[0]->{env}}
-sub kit {$_[0]->env && $_[0]->env->kit}
-sub kit_bug {
-	my ($self, $msg, @args) = @_;
-	$self->kit->kit_bug($msg, @args) if $self->kit;
-}
 
 sub deployed {
 	($_[0]->env->deployments->current_state eq 'deployed') ? 1 : 0
@@ -154,6 +149,22 @@ sub is_ocfp {$_[0]->env && $_[0]->env->is_ocfp}
 sub cpi_name {$_[0]->env && $_[0]->env->cpi_name}
 sub cpi_enabled {$_[0]->env && $_[0]->env->cpi_enabled}
 # }}}
+
+sub kit {$_[0]->env && $_[0]->env->kit}
+
+sub kit_bug {
+	my ($self, $msg, @args) = @_;
+	bail(
+		"Kit bug detected, but cannot determine kit for %s/%s",
+		$self->env->name, $self->env->type
+	) unless $self->kit;
+	$self->kit->kit_bug($msg, @args);
+}
+
+sub kit_has_file {
+	my ($self, $file) = @_;
+	return -f $self->kit->path($file);
+}
 
 sub supports_iaas {
 	my ($self) = @_;
