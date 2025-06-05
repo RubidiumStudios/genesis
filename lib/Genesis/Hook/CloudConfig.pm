@@ -1004,10 +1004,17 @@ sub _calculate_subnet_allocation {
 	# but for MVP, we will assume that the existing allocations are within
 	# the available range.
 
-	# FIXME: How are we handling shrinking the size of the allocation?  One quirk of the IPv4 spans is that adding a negative number will shrink the range from the first ip up, which may cause a problem.  Also, you can't just add a number of ips to a range, but specific spans.	We need to handle this better.
-	bug(
-		"Negative IP allocation for network '%s' allocation", $target
-	) if $needed < 0;
+	if ($needed < 0) {
+		# We remove from the highest end of the existing allocation.
+		my $new_span = IPv4->range($existing)->slice(0,$existing->size+$needed);
+		# See if we removed enough to handle the negatie need.
+		$needed = $existing->size - $new_span->size + $needed;
+		bug(
+			"Negative IP allocation for network '%s' allocation - not enough allocated IPs to remove",
+			$target
+		) if $needed < 0;
+		$existing = $new_span->simplify;
+	}
 
 	if ($needed > 0) {
 		bail(
