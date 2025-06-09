@@ -17,47 +17,47 @@ The configuration file should be located at:
 
 ### BOSH Target Configuration
 
-#### `default_bosh_target`
-Controls the default BOSH director targeting behavior when multiple options are available.
+| Option | Type | Default | Values | Environment Variable |
+|--------|------|---------|--------|---------------------|
+| `default_bosh_target` | enum | `ask` | `ask`, `self`, `parent` | `GENESIS_DEFAULT_BOSH_TARGET` |
 
-**Type:** enum  
-**Default:** `ask`  
-**Values:** `ask`, `self`, `parent`  
-**Environment Variable:** `GENESIS_DEFAULT_BOSH_TARGET`
+**Description:** Controls the default BOSH director targeting behavior when multiple options are available.
 
-```yaml
-default_bosh_target: ask
-```
-
+**Values:**
 - `ask`: Prompt the user to select a BOSH director
 - `self`: Use the current environment as the BOSH director
 - `parent`: Use the BOSH director that deployed the current environment
 
-***Note:*** BOSH environments that use create-env will always use `self` regardless of this setting, because they have no parent.  Likewise, non-BOSH director environments will always use `parent` because they aren't a BOSH director.
+**Example:**
+```yaml
+default_bosh_target: ask
+```
+
+***Note:*** BOSH environments that use create-env will always use `self` regardless of this setting, because they have no parent. Likewise, non-BOSH director environments will always use `parent` because they aren't a BOSH director.
 
 ### Repository Configuration
 
+| Option | Type | Default | Values | Environment Variable |
+|--------|------|---------|--------|---------------------|
+| `legacy_repo_suffix` | boolean | `false` | `true`, `false` | `GENESIS_LEGACY_REPO_SUFFIX` |
+| `deployment_roots` | array | `[]` | string or hasharray | `GENESIS_DEPLOYMENT_ROOTS` |
+
 #### `legacy_repo_suffix`
-Enable support for legacy repository naming conventions.
+**Description:** Enable support for legacy repository naming conventions.
 
-**Type:** boolean  
-**Default:** `false`  
-**Environment Variable:** `GENESIS_LEGACY_REPO_SUFFIX`
-
+**Example:**
 ```yaml
 legacy_repo_suffix: false
 ```
 
 #### `deployment_roots`
-Configure deployment root directories for organizing Genesis repositories. This supports both simple string paths and labeled path mappings.
+**Description:** Configure deployment root directories for organizing Genesis repositories. This supports both simple string paths and labeled path mappings.
 
-**Type:** array  
-**Default:** `[]`  
 **Subtype:** `string||hasharray` (can be a string or a hash of label => path)  
-**Environment Variable:** `GENESIS_DEPLOYMENT_ROOTS`  
-**Environment Splitting:** Uses `:` to separate multiple entries specified in the environment variable.
+**Environment Splitting:** Uses `:` to separate multiple entries specified in the environment variable.  
 **Environment Conversion:** Supports both simple paths and `label=path` pairs separated by `;` in the environment variable.
 
+**Example:**
 ```yaml
 deployment_roots:
   - /home/user/deployments
@@ -65,124 +65,124 @@ deployment_roots:
   - staging: /opt/genesis/staging
 ```
 
+**Environment Variable Example:**
 ```bash
 export GENESIS_DEPLOYMENT_ROOTS="/home/user/deployments;production=/opt/genesis/prod;staging=/opt/genesis/staging"
 ```
 
 ### Genesis Behavior
 
+| Option | Type | Default | Values | Environment Variable |
+|--------|------|---------|--------|---------------------|
+| `embedded_genesis` | enum | `ignore` | `ignore`, `check`, `warn` | - |
+| `automatic_config_upgrade` | enum | `no` | `no`, `yes`, `silent` | `GENESIS_CONFIG_AUTOMATIC_UPGRADE` |
+
 #### `embedded_genesis`
-Control behavior when Genesis detects an embedded Genesis installation.
+**Description:** Control behavior when Genesis detects an embedded Genesis installation.
 
-**Type:** enum  
-**Default:** `ignore`  
-**Values:** `ignore`, `check`, `warn`
-
-```yaml
-embedded_genesis: ignore
-```
-
+**Values:**
 - `ignore`: Don't check for embedded Genesis
 - `check`: Check for embedded Genesis but don't warn
 - `warn`: Check and warn about embedded Genesis
 
-#### `automatic_config_upgrade`
-Control automatic upgrading of configuration files.
-
-**Type:** enum  
-**Default:** `no`  
-**Values:** `no`, `yes`, `silent`  
-**Environment Variable:** `GENESIS_CONFIG_AUTOMATIC_UPGRADE`
-
+**Example:**
 ```yaml
-automatic_config_upgrade: no
+embedded_genesis: ignore
 ```
 
+#### `automatic_config_upgrade`
+**Description:** Control automatic upgrading of configuration files.
+
+**Values:**
 - `no`: Never automatically upgrade configuration
 - `yes`: Upgrade configuration with user confirmation
 - `silent`: Upgrade configuration without prompting
 
-### Display Configuration
-
-#### `output_style`
-Configure the visual style of Genesis output.
-
-**Type:** enum  
-**Default:** `plain`  
-**Values:** `plain`, `fun`, `pointer`
-
+**Example:**
 ```yaml
-output_style: plain
+automatic_config_upgrade: no
 ```
 
+### Display Configuration
+
+| Option | Type | Default | Values | Environment Variable |
+|--------|------|---------|--------|---------------------|
+| `output_style` | enum | `plain` | `plain`, `fun`, `pointer` | - |
+| `show_duration` | boolean | `false` | `true`, `false` | `GENESIS_SHOW_DURATION` |
+
+#### `output_style`
+**Description:** Configure the visual style of Genesis output.
+
+**Values:**
 - `plain`: Simple text output without decorations
 - `fun`: Enhanced output with emojis and visual elements
 - `pointer`: Output with pointer-style indicators
 
+**Example:**
+```yaml
+output_style: plain
+```
+
 #### `show_duration`
-Display command execution duration information.
+**Description:** Display command execution duration information.
 
-**Type:** boolean  
-**Default:** `false`  
-**Environment Variable:** `GENESIS_SHOW_DURATION`
-
+**Example:**
 ```yaml
 show_duration: true
 ```
 
 ### Deployment Behavior
 
+| Option | Type | Default | Values | Environment Variable |
+|--------|------|---------|--------|---------------------|
+| `fix_on_deploy` | enum | `never` | `always`, `ask`, `never` | `GENESIS_FIX_ON_DEPLOY` |
+| `confirm_release_overrides` | enum | - | `always`, `outdated`, `never` | `GENESIS_CONFIRM_RELEASE_OVERRIDES` |
+
 #### `fix_on_deploy`
-Control whether Genesis should attempt to fix issues during deployment.
+**Description:** Control whether Genesis should attempt to fix issues during deployment.
 
-**Type:** enum  
-**Default:** `never`  
-**Values:** `always`, `ask`, `never`  
-**Environment Variable:** `GENESIS_FIX_ON_DEPLOY`
-
-```yaml
-fix_on_deploy: ask
-```
-
+**Values:**
 - `always`: Automatically fix issues without prompting
 - `ask`: Prompt before fixing issues
 - `never`: Never attempt to fix issues automatically
 
-#### `confirm_release_overrides`
-Control when to confirm BOSH release overrides.
-
-**Type:** enum  
-**Values:** `always`, `outdated`, `never`  
-**Environment Variable:** `GENESIS_CONFIRM_RELEASE_OVERRIDES`
-
+**Example:**
 ```yaml
-confirm_release_overrides: outdated
+fix_on_deploy: ask
 ```
 
+#### `confirm_release_overrides`
+**Description:** Control when to confirm BOSH release overrides.
+
+**Values:**
 - `always`: Always confirm release overrides
 - `outdated`: Only confirm when releases are outdated
 - `never`: Never confirm release overrides
 
+**Example:**
+```yaml
+confirm_release_overrides: outdated
+```
+
 ### Cache and Storage
 
+| Option | Type | Default | Values | Environment Variable |
+|--------|------|---------|--------|---------------------|
+| `spec_cache_dir` | string | `""` | any path | `GENESIS_SPEC_CACHE_DIR` |
+| `bosh_logs_path` | string | `<DEPLOYMENT_ROOT>/bosh_logs` | any path template | `GENESIS_DEPLOYMENT_LOGS_PATH` |
+
 #### `spec_cache_dir`
-Directory for caching specification files.
+**Description:** Directory for caching specification files.
 
-**Type:** string  
-**Default:** `""`  
-**Environment Variable:** `GENESIS_SPEC_CACHE_DIR`
-
+**Example:**
 ```yaml
 spec_cache_dir: "/tmp/genesis-cache"
 ```
 
 #### `bosh_logs_path`
-Path template for storing BOSH deployment logs. The `<DEPLOYMENT_ROOT>` placeholder will be replaced with the actual deployment root path.
+**Description:** Path template for storing BOSH deployment logs. The `<DEPLOYMENT_ROOT>` placeholder will be replaced with the actual deployment root path.
 
-**Type:** string  
-**Default:** `<DEPLOYMENT_ROOT>/bosh_logs`  
-**Environment Variable:** `GENESIS_DEPLOYMENT_LOGS_PATH`
-
+**Example:**
 ```yaml
 bosh_logs_path: "/var/log/genesis/bosh_logs"
 ```
@@ -194,6 +194,12 @@ Configure which warnings to suppress. This is a hash with its own schema for spe
 
 **Type:** hash
 
+| Option | Type | Default | Environment Variable |
+|--------|------|---------|---------------------|
+| `oversized_secrets` | boolean | `false` | `GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING` |
+| `bosh_target` | boolean | `false` | `GENESIS_SUPPRESS_BOSH_TARGET_WARNING` |
+
+**Example:**
 ```yaml
 suppress_warnings:
   oversized_secrets: false
@@ -201,18 +207,10 @@ suppress_warnings:
 ```
 
 ##### `oversized_secrets`
-Suppress warnings about secrets that are larger than expected.
-
-**Type:** boolean  
-**Default:** `false`  
-**Environment Variable:** `GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING`
+**Description:** Suppress warnings about secrets that are larger than expected.
 
 ##### `bosh_target`
-Suppress warnings about BOSH target selection.
-
-**Type:** boolean  
-**Default:** `false`  
-**Environment Variable:** `GENESIS_SUPPRESS_BOSH_TARGET_WARNING`
+**Description:** Suppress warnings about BOSH target selection.
 
 ### Logging Configuration
 
@@ -238,15 +236,18 @@ logs:
 
 Each log entry supports the following schema:
 
+| Option | Type | Default | Values | Required |
+|--------|------|---------|--------|----------|
+| `file` | string | - | any path | ✓ |
+| `level` | enum | `INFO` | `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `OUTPUT` | |
+| `show_stack` | enum | `default` | `default`, `none`, `full`, `current`, `fatal` | |
+| `style` | enum | `plain` | `plain`, `fun`, `pointer`, `rfc-5424` | |
+| `timestamp` | boolean | `false` | `true`, `false` | |
+
 ##### `file`
-**Type:** string  
-**Required:** `true`  
 Path to the log file where messages will be written.
 
 ##### `level`
-**Type:** enum  
-**Default:** `INFO`  
-**Values:** `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `OUTPUT`  
 Minimum log level to record. Messages at this level and above will be logged.
 
 - `TRACE`: Most verbose, includes all internal operations
@@ -257,9 +258,6 @@ Minimum log level to record. Messages at this level and above will be logged.
 - `OUTPUT`: Only capture command output
 
 ##### `show_stack`
-**Type:** enum  
-**Default:** `default`  
-**Values:** `default`, `none`, `full`, `current`, `fatal`  
 Controls when and how stack traces are displayed in log messages.
 
 - `default`: Show stack traces based on log level defaults
@@ -269,9 +267,6 @@ Controls when and how stack traces are displayed in log messages.
 - `fatal`: Only show stack traces for fatal errors
 
 ##### `style`
-**Type:** enum  
-**Default:** `plain`  
-**Values:** `plain`, `fun`, `pointer`, `rfc-5424`  
 Log message formatting style.
 
 - `plain`: Simple text format
@@ -280,23 +275,22 @@ Log message formatting style.
 - `rfc-5424`: Standard RFC-5424 syslog format
 
 ##### `timestamp`
-**Type:** boolean  
-**Default:** `false`  
 Whether to include timestamps in log entries.
 
 #### Future Logging Options - not yet implemented
 
 These future options are currently placeholders and will be implemented in future releases.  They have no effect, but they will not cause errors if included in the configuration file.
 
+| Option | Type | Default | Values |
+|--------|------|---------|--------|
+| `truncate` | boolean | `false` | `true`, `false` |
+| `lifespan` | enum | `forever` | `forever`, `current`, `N days` |
+
 ##### `truncate`
-**Type:** boolean  
-**Default:** `false`  (Currently defaults to `true` in effect, as this is not implemented yet)
 Whether to truncate (clear) the log file when Genesis starts up.
+*(Currently defaults to `true` in effect, as this is not implemented yet)*
 
 ##### `lifespan`
-**Type:** enum  
-**Default:** `forever`  
-**Values:** `forever`, `current`, `N days`
 How long to retain log entries.
 
 - `forever`: Keep log entries indefinitely
