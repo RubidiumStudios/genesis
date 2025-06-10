@@ -21,7 +21,7 @@ use Genesis qw/
 /;
 use Genesis::State qw/envset under_test in_callback/;
 use Genesis::Term qw/csprintf wrap fix_wrap decolorize in_controlling_terminal bullet/;
-use Genesis::UI qw/prompt_for_boolean prompt_for_line new_prompt_for_choice/;
+use Genesis::UI qw/prompt_for_boolean prompt_for_line prompt_for_choice new_prompt_for_choice/;
 use Genesis::Commands qw/current_command known_commands/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
