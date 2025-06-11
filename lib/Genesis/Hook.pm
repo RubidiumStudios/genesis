@@ -2,7 +2,7 @@ package Genesis::Hook;
 use strict;
 use warnings;
 
-use Genesis qw/trace bug bail trace new_enough semver pushd popd run humanize_path read_json_from/;
+use Genesis qw/trace bug bail trace in_array new_enough semver pushd popd run humanize_path read_json_from/;
 use Data::Dumper ();
 use JSON::PP;
 use Digest::SHA qw(sha1_hex);
