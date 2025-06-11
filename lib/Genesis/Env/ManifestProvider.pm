@@ -76,6 +76,13 @@ sub known_subsets {
 sub env {$_[0]->{env}}
 
 # }}}
+# yaml_cli - get the YAML CLI for this environment {{{
+sub yaml_cli {
+	my $self = shift;
+	return Genesis::yaml_cli($self->env->top);
+}
+
+# }}}
 # set_deployment - set the default deployment manifest {{{
 sub set_deployment {
 	my ($self,$type) = @_;
@@ -169,12 +176,13 @@ sub merge {
 			"%s manifest for %s/%s environment",
 			$manifest->type, $self->env->name, $self->env->type
 		);
-		($out,my $rc,my $err) = run({
+		my $yaml = $self->yaml_cli;
+		($out,my $rc,my $err) = $yaml->merge({
 				onfailure => "Unable to merge $descriptor",
 				stderr => "&1",
 				env => $env_vars
 			},
-			'spruce', 'merge', @merge_opts, @$sources
+			@merge_opts, @$sources
 		);
 		if ($rc) {
 			$errors = $err;
@@ -232,22 +240,23 @@ sub get_subset {
 		my $src = $src_manifest->file;
 		my $file = $manifest->_generate_file_name();
 		pushd $self->env->path;
+		my $cli = $self->yaml_cli->cli;
 		my @cmd = undef;
 		if ($operator eq 'include') {
 			@cmd = (
-				'fin="$1";fout="$2"; shift 2; spruce merge --skip-eval "$@" "$fin" > "$fout"',
+				"fin=\"\$1\";fout=\"\$2\"; shift 2; $cli merge --skip-eval \"\$@\" \"\$fin\" > \"\$fout\"",
 				$src, $file, map {('--cherry-pick', $_)} @{$selection}
 			);
 		} elsif ($operator eq 'exclude') {
 			@cmd = (
-				'fin="$1";fout="$2"; shift 2; spruce merge --skip-eval "$@" "$fin" > "$fout"',
+				"fin=\"\$1\";fout=\"\$2\"; shift 2; $cli merge --skip-eval \"\$@\" \"\$fin\" > \"\$fout\"",
 				$src, $file, map {('--prune', $_)} @{$selection}
 			);
 		} elsif ($operator eq 'fetch') {
 			@cmd = (
 				sprintf(
-					'spruce json "$1" | jq \'."%s"//%s\' | spruce merge --skip-eval > "$2"',
-					$selection->{key}, JSON::PP->new->allow_nonref->encode($selection->{default})
+					'%s json "$1" | jq \'."%s"//%s\' | %s merge --skip-eval > "$2"',
+					$cli, $selection->{key}, JSON::PP->new->allow_nonref->encode($selection->{default}), $cli
 				), $src, $file
 			);
 		} else {
@@ -354,6 +363,7 @@ sub vault_paths {
 		)->file;
 	}
 	pushd $self->env->path;
+	my $cli = $self->yaml_cli->cli;
 	my $json = read_json_from(run({
 			onfailure => "Unable to determine vault paths from ".$self->env->name." manifest",
 			stderr => "&1",
@@ -361,12 +371,12 @@ sub vault_paths {
 				$self->env->get_environment_variables
 			}
 		},
-		'spruce vaultinfo "$1" | spruce json', $file
+		"$cli vaultinfo \"\$1\" | $cli json", $file
 	));
 	popd;
 
 	bail(
-		"Expecting spruce vaultinfo to return an array of secrets, got this instead:\n\n".
+		"Expecting $cli vaultinfo to return an array of secrets, got this instead:\n\n".
 		Dumper($json)
 	) unless ref($json) eq 'HASH' && ref($json->{secrets}) eq 'ARRAY' ;
 
@@ -399,7 +409,8 @@ sub _adaptive_merge {
 	my %opts = ref($_[0]) eq 'HASH' ? %{shift()} : ();
 	my @files = (@_);
 
-	my ($out,$rc,$err) = run({stderr=>0, %opts}, 'spruce merge --multi-doc --go-patch "$@"', @files);
+	my $cli = $self->yaml_cli->cli;
+	my ($out,$rc,$err) = run({stderr=>0, %opts}, "$cli merge --multi-doc --go-patch \"\$@\"", @files);
 	return (wantarray ? ($out,$err) : $out) unless $rc;
 
 	my $orig_errors = join("\n", grep {$_ !~ /^\s*$/} lines($err));
@@ -411,7 +422,7 @@ sub _adaptive_merge {
 	}
 	my $uneval = read_json_from(run(
 		{ onfailure => "Unable to merge files without evaluation", stderr => undef, %opts },
-		'spruce merge --multi-doc --go-patch --skip-eval "$@" | spruce json', @files
+		"$cli merge --multi-doc --go-patch --skip-eval \"\$@\" | $cli json", @files
 	));
 
 	my $attempt=0;
@@ -471,7 +482,7 @@ sub _adaptive_merge {
 			}
 		}
 		my $premerge = mkfile_or_fail($self->env->workpath('premerge.yml'),$contents);
-		($out,$rc,$err) = run({stderr => 0, %opts }, 'spruce merge --multi-doc --go-patch "$1"', $premerge);
+		($out,$rc,$err) = run({stderr => 0, %opts }, "$cli merge --multi-doc --go-patch \"\$1\"", $premerge);
 	}
 
 	bail(

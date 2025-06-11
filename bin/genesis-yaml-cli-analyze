@@ -1,0 +1,323 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use File::Find;
+use File::Basename;
+use Getopt::Long;
+
+# Genesis YAML CLI Dual Mode Analysis Tool
+# This tool analyzes the logs created by dual mode to compare spruce and graft behavior
+
+my $help = 0;
+my $summary = 0;
+my $differences = 0;
+my $errors = 0;
+my $session;
+my $verbose = 0;
+
+GetOptions(
+	'help|h'        => \$help,
+	'summary|s'     => \$summary,
+	'differences|d' => \$differences,
+	'errors|e'      => \$errors,
+	'session=s'     => \$session,
+	'verbose|v'     => \$verbose,
+) or usage(1);
+
+usage(0) if $help;
+
+my $log_dir = "$ENV{HOME}/.genesis/logs/yaml-cli";
+
+unless (-d $log_dir) {
+	print "No dual mode logs found at $log_dir\n";
+	exit 0;
+}
+
+# If no specific analysis requested, show summary
+$summary = 1 unless ($differences || $errors);
+
+if ($session) {
+	analyze_session($session);
+} else {
+	list_sessions();
+}
+
+sub usage {
+	my ($exit_code) = @_;
+	print <<EOF;
+Usage: genesis-yaml-cli-analyze [OPTIONS]
+
+Analyze dual mode YAML CLI logs to compare spruce and graft behavior.
+
+OPTIONS:
+  -h, --help          Show this help message
+  -s, --summary       Show summary of all operations (default)
+  -d, --differences   Show only operations with different outputs
+  -e, --errors        Show only operations with errors
+  --session SESSION   Analyze specific session (YYYYMMDD-HHMMSS-PID format)
+  -v, --verbose       Show detailed output
+
+Without --session, lists all available sessions.
+
+EOF
+	exit $exit_code;
+}
+
+sub list_sessions {
+	print "Available dual mode sessions:\n\n";
+	
+	my @sessions;
+	opendir(my $dh, $log_dir) or die "Cannot read $log_dir: $!\n";
+	while (my $entry = readdir($dh)) {
+		next if $entry =~ /^\./;
+		next unless -d "$log_dir/$entry";
+		next unless -f "$log_dir/$entry/session.info";
+		push @sessions, $entry;
+	}
+	closedir($dh);
+	
+	unless (@sessions) {
+		print "  No sessions found.\n";
+		return;
+	}
+	
+	# Sort by timestamp (newest first)
+	@sessions = sort { $b cmp $a } @sessions;
+	
+	for my $session (@sessions) {
+		my $info = read_session_info($session);
+		printf "  %-25s %s\n", $session, $info->{started} || 'Unknown start time';
+		
+		# Count operations
+		my $op_count = count_operations($session);
+		print "    Operations: $op_count\n" if $verbose;
+	}
+	
+	print "\nUse --session SESSION to analyze a specific session.\n";
+}
+
+sub analyze_session {
+	my ($session_id) = @_;
+	
+	my $session_dir = "$log_dir/$session_id";
+	unless (-d $session_dir) {
+		die "Session $session_id not found\n";
+	}
+	
+	print "Analyzing session: $session_id\n";
+	print "=" x 50 . "\n\n";
+	
+	# Read session info
+	my $info = read_session_info($session_id);
+	print "Started: $info->{started}\n" if $info->{started};
+	print "Genesis Version: $info->{version}\n" if $info->{version};
+	print "\n";
+	
+	# Analyze operations
+	my @operations = find_operations($session_id);
+	my $total = scalar(@operations);
+	my $identical = 0;
+	my $different = 0;
+	my $errors = 0;
+	my %error_details;
+	my %diff_by_command;
+	
+	for my $op (@operations) {
+		my $analysis = analyze_operation($op);
+		
+		if ($analysis->{has_errors}) {
+			$errors++;
+			push @{$error_details{$analysis->{command}}}, $analysis;
+		} elsif ($analysis->{identical}) {
+			$identical++;
+		} else {
+			$different++;
+			push @{$diff_by_command{$analysis->{command}}}, $analysis;
+		}
+	}
+	
+	# Summary
+	if ($summary) {
+		print "Summary:\n";
+		print "  Total operations: $total\n";
+		print "  Identical output: $identical\n";
+		print "  Different output: $different\n";
+		print "  Errors: $errors\n";
+		print "\n";
+		
+		if ($different > 0) {
+			print "Commands with differences:\n";
+			for my $cmd (sort keys %diff_by_command) {
+				printf "  %-12s %d operations\n", $cmd, scalar(@{$diff_by_command{$cmd}});
+			}
+			print "\n";
+		}
+	}
+	
+	# Show differences
+	if ($differences && $different > 0) {
+		print "Operations with different outputs:\n";
+		print "-" x 50 . "\n";
+		
+		for my $cmd (sort keys %diff_by_command) {
+			for my $analysis (@{$diff_by_command{$cmd}}) {
+				print_operation_details($analysis);
+			}
+		}
+	}
+	
+	# Show errors
+	if ($errors && $errors > 0) {
+		print "Operations with errors:\n";
+		print "-" x 50 . "\n";
+		
+		for my $cmd (sort keys %error_details) {
+			for my $analysis (@{$error_details{$cmd}}) {
+				print_operation_details($analysis);
+			}
+		}
+	}
+}
+
+sub read_session_info {
+	my ($session_id) = @_;
+	my $info_file = "$log_dir/$session_id/session.info";
+	my %info;
+	
+	if (open my $fh, '<', $info_file) {
+		while (<$fh>) {
+			chomp;
+			if (/^Session Started:\s*(.+)$/) {
+				$info{started} = $1;
+			} elsif (/^Genesis Version:\s*(.+)$/) {
+				$info{version} = $1;
+			} elsif (/^PID:\s*(.+)$/) {
+				$info{pid} = $1;
+			}
+		}
+		close $fh;
+	}
+	
+	return \%info;
+}
+
+sub count_operations {
+	my ($session_id) = @_;
+	my $session_dir = "$log_dir/$session_id";
+	my $count = 0;
+	
+	opendir(my $dh, $session_dir) or return 0;
+	while (my $entry = readdir($dh)) {
+		$count++ if -d "$session_dir/$entry" && $entry !~ /^\./;
+	}
+	closedir($dh);
+	
+	return $count;
+}
+
+sub find_operations {
+	my ($session_id) = @_;
+	my $session_dir = "$log_dir/$session_id";
+	my @operations;
+	
+	opendir(my $dh, $session_dir) or return @operations;
+	while (my $entry = readdir($dh)) {
+		next if $entry =~ /^\./;
+		my $op_dir = "$session_dir/$entry";
+		next unless -d $op_dir;
+		next unless -f "$op_dir/comparison.log";
+		push @operations, $op_dir;
+	}
+	closedir($dh);
+	
+	return sort @operations;
+}
+
+sub analyze_operation {
+	my ($op_dir) = @_;
+	my $op_id = basename($op_dir);
+	
+	my %analysis = (
+		id => $op_id,
+		dir => $op_dir,
+		command => 'unknown',
+		identical => 0,
+		has_errors => 0,
+	);
+	
+	# Extract command from op_id
+	if ($op_id =~ /^\d+-\d+-(\w+)-/) {
+		$analysis{command} = $1;
+	}
+	
+	# Read comparison log
+	if (open my $fh, '<', "$op_dir/comparison.log") {
+		while (<$fh>) {
+			if (/^\s*Spruce:\s*(\d+)/) {
+				$analysis{spruce_rc} = $1;
+			} elsif (/^\s*Graft:\s*(\d+)/) {
+				$analysis{graft_rc} = $1;
+			} elsif (/^\s*Content:\s*(\w+)/) {
+				$analysis{identical} = 1 if $1 eq 'IDENTICAL';
+			}
+		}
+		close $fh;
+	}
+	
+	# Check for errors
+	$analysis{has_errors} = 1 if ($analysis{spruce_rc} && $analysis{spruce_rc} != 0) ||
+	                             ($analysis{graft_rc} && $analysis{graft_rc} != 0);
+	
+	# Read timing info
+	for my $proc (qw(spruce graft)) {
+		if (open my $fh, '<', "$op_dir/$proc.meta") {
+			while (<$fh>) {
+				if (/^Execution Time:\s*([\d.]+)s/) {
+					$analysis{"${proc}_time"} = $1;
+				}
+			}
+			close $fh;
+		}
+	}
+	
+	return \%analysis;
+}
+
+sub print_operation_details {
+	my ($analysis) = @_;
+	
+	print "\nOperation: $analysis->{id}\n";
+	print "Command: $analysis->{command}\n";
+	
+	if ($analysis->{has_errors}) {
+		print "Status: ERROR\n";
+		print "  Spruce exit code: " . ($analysis->{spruce_rc} // 'N/A') . "\n";
+		print "  Graft exit code: " . ($analysis->{graft_rc} // 'N/A') . "\n";
+	} else {
+		print "Status: " . ($analysis->{identical} ? "IDENTICAL" : "DIFFERENT") . "\n";
+	}
+	
+	if ($verbose) {
+		print "Timing:\n";
+		print "  Spruce: " . ($analysis->{spruce_time} // 'N/A') . "s\n" if $analysis->{spruce_time};
+		print "  Graft: " . ($analysis->{graft_time} // 'N/A') . "s\n" if $analysis->{graft_time};
+		
+		print "Directory: $analysis->{dir}\n";
+		
+		# Show diff preview if available
+		if (!$analysis->{identical} && -f "$analysis->{dir}/output.diff") {
+			print "\nDiff preview:\n";
+			if (open my $fh, '<', "$analysis->{dir}/output.diff") {
+				my $lines = 0;
+				while (<$fh>) {
+					print "  $_";
+					last if ++$lines >= 10 && !$verbose;
+				}
+				close $fh;
+				print "  [...truncated...]\n" if $lines >= 10 && !$verbose;
+			}
+		}
+	}
+	
+	print "\n";
+}

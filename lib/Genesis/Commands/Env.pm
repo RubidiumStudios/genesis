@@ -763,8 +763,9 @@ sub deploy {
 					my $old_path = "$cloud_config_dir/current-${cloud_config_name}.yml";
 					info "[[  - >>comparing generated cloud config with existing cloud config...";
 					$env->bosh->download_configs($old_path,'cloud',$cloud_config_name);
+					my $cli = Genesis::yaml_cli()->cli;
 					my ($out, $rc, $err) = run(
-						fake_tty("$cloud_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path)
+						fake_tty("$cloud_config_dir/spruce-out.txt",$cli,'diff',$old_path, $new_path)
 					);
 					bail "Error comparing cloud configs: %s", $err if $rc;
 

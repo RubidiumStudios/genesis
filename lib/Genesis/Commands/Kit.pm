@@ -713,8 +713,9 @@ sub compare_kits {
 				}	else {
 					my $added = $added_specs->{jobs}{$job};
 					my $removed = $removed_specs->{jobs}{$job};
+					my $cli = Genesis::yaml_cli()->cli;
 					my ($diff, $rc, $error) = run({interactive => 0},
-						fake_tty(workdir('spec-diffs').'/diff', 'spruce', 'diff', $removed, $added)
+						fake_tty(workdir('spec-diffs').'/diff', $cli, 'diff', $removed, $added)
 					);
 					if ($rc > 1) { # Error
 						output(
@@ -813,19 +814,18 @@ sub _get_kit_releases {
 	my @new_spruce_files = grep {
 		$_ !~ m{/(.git|spec)/} && /\.yml/
 	} lines(run('grep', '-rl', '^releases', $kit_path));
+	my $yaml = Genesis::yaml_cli();
 	my @src_spruce_blocks = map {
-		my ($out, $rc, $err) = run(
-			'spruce', 'merge', '--skip-eval', '-m', '--go-patch', '--cherry-pick', 'releases', $_
+		my ($out, $rc, $err) = $yaml->merge(
+			'--skip-eval', '-m', '--go-patch', '--cherry-pick', 'releases', $_
 		);
 		if ($rc == 0 && $out =~ /\(\( concat/) {
 			# Need to spruce merge the releases block
-			$out = run(
-				'spruce', 'merge',  $out
-			);
+			$out = scalar($yaml->merge($out));
 		}
-		my $yaml = scalar( load_yaml($out, $rc, $err));
+		my $data = scalar( load_yaml($out, $rc, $err));
 		my $src = $_ =~ s{^$kit_path/}{}r;
-		my @data = @{$yaml->{releases}//[]};
+		my @data = @{$data->{releases}//[]};
 		map {{%{$_}, __src => $src, __type => 'merge'}} @data
 	} @new_spruce_files;
 

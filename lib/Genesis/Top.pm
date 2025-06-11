@@ -863,6 +863,7 @@ sub _validate_config {
 			force_user_bosh_creds			=> {type => 'boolean', default => Genesis::Config::FALSE},
 			allow_oversized_secrets   => {type => 'boolean'},
 			confirm_release_overrides => {type => 'enum', values => [qw/always outdated never/], envvar => 'GENESIS_CONFIRM_RELEASE_OVERRIDES' },
+			yaml_cli                  => {type => 'enum', values => [qw/spruce graft dual/], default => 'spruce', envvar => 'GENESIS_YAML_CLI'},
 		});
 	} else {
 		bail "Genesis deployment repo configuration version $config_version is not supported";

@@ -377,9 +377,10 @@ sub download_configs {
 	}
 	my $config;
 	if (scalar(@config_contents) > 1) {
+		my $cli = $ENV{GENESIS_YAML_CLI} || 'spruce';
 		($config, my $rc, my $err) = run(
 			{interactive => 0, stderr=>0},
-			'spruce merge --multi-doc --go-patch --fallback-append <(echo "$1")',
+			"$cli merge --multi-doc --go-patch --fallback-append <(echo \"\$1\")",
 			join("\n---\n", @config_contents)
 		);
 		bail("Failed to converge the active $type configurations: $err") if $rc;

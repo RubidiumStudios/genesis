@@ -236,7 +236,7 @@ new_manifest="$(cat ${3})"
 vars_file="$4"
 new_configs="$(bosh curl /configs \
 						 | jq -r 'map(select(.type != "cpi") | .content) | join("\n---\n")' \
-						 | spruce merge --multi-doc -)"
+						 | ${GENESIS_YAML_CLI:-spruce} merge --multi-doc -)"
 new_variables="$(echo "credhub_variables:" \
 							 ; bosh curl "/deployments/${deployment}/variables" \
 							 | jq -r 'map(.name)[]' \
@@ -248,13 +248,13 @@ current_configs="$(bosh curl /deployment_configs\?deployment=${deployment} \
 								 | jq 'map(.config.id)[]' \
 								 | xargs -L1 sh -c 'bosh curl "/configs/${1}"' sh \
 								 | jq -r '.content' \
-								 | spruce merge --multi-doc -)"
+								 | ${GENESIS_YAML_CLI:-spruce} merge --multi-doc -)"
 current_variables="$(bosh int <(bosh curl "/deployments/${deployment}/variables" \
 									 | jq 'map("\(.name)@\(.id)") | {credhub_variables: .}'))"
 
 bosh diff-config --json \
-		 --from-content <(bosh int <(spruce merge --fallback-append <(echo "${current_configs}") <(echo "${current_manifest}") <(echo "${current_variables}"))) \
-		 --to-content <(bosh int <(spruce merge --fallback-append <(echo "${new_configs}") <(echo "${new_manifest}") <(echo "${new_variables}")) -l ${vars_file}) \
+		 --from-content <(bosh int <(${GENESIS_YAML_CLI:-spruce} merge --fallback-append <(echo "${current_configs}") <(echo "${current_manifest}") <(echo "${current_variables}"))) \
+		 --to-content <(bosh int <(${GENESIS_YAML_CLI:-spruce} merge --fallback-append <(echo "${new_configs}") <(echo "${new_manifest}") <(echo "${new_variables}")) -l ${vars_file}) \
 		 | jq -r '.Tables[0].Rows[0] | if (.diff == "" ) then "[32;1mNo differences found.[0m" else .diff end'
 EOF
 

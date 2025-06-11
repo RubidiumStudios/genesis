@@ -438,8 +438,9 @@ sub fake_bosh_director {
 
 sub spruce_fmt($$) {
 	my ($yaml, $file) = @_;
-	open my $fh, "|-", "spruce merge - >$file"
-		or die "Failed to reformat YAML via spruce: $!\n";
+	my $yaml_cli = $ENV{GENESIS_YAML_CLI} || 'spruce';
+	open my $fh, "|-", "$yaml_cli merge - >$file"
+		or die "Failed to reformat YAML via $yaml_cli: $!\n";
 	print $fh $yaml;
 	close $fh;
 }

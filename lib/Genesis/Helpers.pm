@@ -66,6 +66,9 @@ once, without issue.
 
 __DATA__
 
+# Set YAML CLI to use (defaults to spruce)
+YAML_CLI="${GENESIS_YAML_CLI:-spruce}"
+
 if [[ "${GENESIS_TRACE}" == "y" ]] ; then
   echo >&2 "TRACE> Helper script environment variables:"
   export >&2
@@ -156,7 +159,7 @@ exodus() {
   fi
   if [[ "$__key" == "--all" ]] ; then
     if safe exists "${GENESIS_EXODUS_MOUNT}${__env}"; then
-      safe get ${GENESIS_EXODUS_MOUNT}${__env} | spruce json | jq -r .
+      safe get ${GENESIS_EXODUS_MOUNT}${__env} | $YAML_CLI json | jq -r .
     fi
   else
     if safe exists "${GENESIS_EXODUS_MOUNT}${__env}:${__key}"; then
@@ -363,7 +366,7 @@ cloud_config_needs() {
     local __count=${1:?cloud_config_needs(static_ips) - must supply static_ip count} ; shift
 
     local __ips __sum=0 __f __x __l
-    __ips=$(spruce json "$GENESIS_CLOUD_CONFIG" | \
+    __ips=$($YAML_CLI json "$GENESIS_CLOUD_CONFIG" | \
       jq -r --arg network "$__network" '.networks[]| select(.name == $network) | .subnets[] | .static[]')
 
     while read -r __range ; do
@@ -414,7 +417,7 @@ cloud_config_needs() {
     __token="$__name:$__want"
     if ! (IFS=$'\n'; echo "${__checked_cloud_config[*]}") | grep '^'$__token'$' >/dev/null 2>&1 ; then
       __checked_cloud_config+=("$__token")
-      __have=$(spruce json "$GENESIS_CLOUD_CONFIG" | \
+      __have=$($YAML_CLI json "$GENESIS_CLOUD_CONFIG" | \
         jq -r "if ((.${__type}//[])[] | select(.name == \"$__want\")) then 1 else 0 end")
       if [[ -z "$__have" ]]; then
         __cloud_config_ok=no
@@ -464,7 +467,7 @@ cloud_config_has() {
             "                      'vm_type', 'vm_extension', 'disk_type', or 'az'" ;;
   esac
 
-  __have=$(spruce json "$GENESIS_CLOUD_CONFIG" | \
+  __have=$($YAML_CLI json "$GENESIS_CLOUD_CONFIG" | \
     jq -r "if (.(${__type}//[])[] | select(.name == \"$__want\")) then 1 else 0 end")
   if [[ -n "$__have" ]]; then
     return 0
@@ -477,7 +480,7 @@ export -f cloud_config_has
 export __cc_data=
 ccq() {
   [[ -z "${GENESIS_CLOUD_CONFIG+x}" ]] && bail "Cloud config contents not available - cannot continue"
-  [[ -z "${__cc_data}" ]] && __cc_data="$(spruce json "$GENESIS_CLOUD_CONFIG")"
+  [[ -z "${__cc_data}" ]] && __cc_data="$($YAML_CLI json "$GENESIS_CLOUD_CONFIG")"
   echo "$__cc_data" | jq -r "$@"
 }
 export -f ccq
@@ -485,7 +488,7 @@ export -f ccq
 export __rc_data=
 rcq() {
   [[ -z "${GENESIS_RUNTIME_CONFIG+x}" ]] && bail "Runtime config contents not available - cannot continue"
-  [[ -z "${__rc_data}" ]] && __rc_data="$(spruce json "$GENESIS_RUNTIME_CONFIG")"
+  [[ -z "${__rc_data}" ]] && __rc_data="$($YAML_CLI json "$GENESIS_RUNTIME_CONFIG")"
   echo "$__rc_data" | jq -r "$@"
 }
 export -f rcq

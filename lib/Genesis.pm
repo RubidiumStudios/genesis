@@ -818,7 +818,8 @@ sub spruce_diff {
 	$second = $process_arg->($second, "second");
 	
 	my $out_file = "$scratchdir/out.diff";
-	my (undef,$rc,$err) = run({redact => 1}, fake_tty($out_file, "spruce", "diff", $first, $second));
+	my $cli = yaml_cli()->cli;
+	my (undef,$rc,$err) = run({redact => 1}, fake_tty($out_file, $cli, "diff", $first, $second));
 	my $out = slurp($out_file);
 	if ($out =~ s/\nScript done.*\[COMMAND_EXIT_CODE="(.*)"]$//m) {
 		$rc = $1;  # Linux stores command exit code in the script output
@@ -1074,7 +1075,8 @@ sub save_to_yaml_file {
 	my $i=1; while (-f "$file.$i.json") {$i++};
 	my $tmpfile = "$file.$i.json";
 	save_to_json_file($data,$tmpfile);
-	run('spruce merge --skip-eval "$1" | perl -I$GENESIS_LIB -MGenesis -e \'my $c=do{local $/;<STDIN>};$c=~s/\s*\z/\n/ms;print $c\' > $2; rm "$1"', $tmpfile, $file);
+	my $cli = yaml_cli()->cli;
+	run("$cli merge --skip-eval \"\$1\" | perl -I\$GENESIS_LIB -MGenesis -e 'my \$c=do{local \$/;<STDIN>};\$c=~s/\\s*\\z/\\n/ms;print \$c' > \$2; rm \"\$1\"", $tmpfile, $file);
 }
 
 my @DIRSTACK;
@@ -1843,4 +1845,29 @@ last call to C<pushd>.  This is similarly to shell pushd / popd builtins.
 
 
 =cut
+
+# yaml_cli - returns singleton YAML CLI instance
+our $_yaml_cli;
+sub yaml_cli {
+	my ($top) = @_;
+	unless (defined $_yaml_cli) {
+		require Genesis::YAMLCLI;
+		# Priority order:
+		# 1. Command line option (via GENESIS_YAML_CLI env var)
+		# 2. Repo config (if $top is provided)
+		# 3. User global config
+		# 4. Default (handled in YAMLCLI->new)
+		my $processor = $ENV{GENESIS_YAML_CLI};
+		$processor ||= $top->config->get('yaml_cli') if $top && $top->can('config');
+		$processor ||= $Genesis::RC->get('yaml_cli');
+		$_yaml_cli = Genesis::YAMLCLI->new(processor => $processor);
+	}
+	return $_yaml_cli;
+}
+
+sub config {
+	return $Genesis::RC;
+}
+
+1;
 # vim: fdm=marker:foldlevel=1:noet

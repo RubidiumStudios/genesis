@@ -144,7 +144,12 @@ our @global_options = ( # {{{
 		"cpi=s" =>
 			"Specify the CPI explicitly.  Normally, this is determined from the BOSH ".
 			"director, but can be specified using this option if the BOSH director ".
-			"is not available."
+			"is not available.",
+
+		"yaml-cli=s" =>
+			"Use NAME (spruce, graft, or dual) for YAML processing.  Defaults to spruce, ".
+			"with automatic fallback to the alternate processor if the preferred ".
+			"one is not available. 'dual' mode runs both processors for comparison."
 
 	]
 ); # }}}
@@ -738,6 +743,9 @@ sub build_command_environment  { # {{{
 
 	# Set BOSH CPI for debugging/testing purposes - name is due to legacy usage by testkit Golang library
 	$ENV{GENESIS_TESTING_BOSH_CPI} = delete($COMMAND_OPTIONS->{'cpi'}) if $COMMAND_OPTIONS->{'cpi'};
+
+	# Set YAML CLI processor preference
+	$ENV{GENESIS_YAML_CLI} = delete($COMMAND_OPTIONS->{'yaml-cli'}) if $COMMAND_OPTIONS->{'yaml-cli'};
 
 	if ($COMMAND_OPTIONS->{config} && ref($COMMAND_OPTIONS->{config}) eq 'ARRAY') {
 		my %configs;

@@ -198,8 +198,9 @@ sub spruce_merge {
 	my ($self, @args) = @_;
 	my $opts = ref($args[0]) eq 'HASH' ? shift @args : {};
 	# TODO: make this support passing in json/yaml directly
-	my ($out, $err, $res) = run($opts, 'spruce','merge', @args);
-	bail "Failed to merge spruce files: %s", $err if $res;
+	my $yaml = Genesis::yaml_cli($self->env->top);
+	my ($out, $err, $res) = $yaml->merge($opts, @args);
+	bail "Failed to merge YAML files: %s", $err if $res;
 	return $out;
 }
 

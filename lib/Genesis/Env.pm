@@ -1400,6 +1400,13 @@ sub secrets_plan {
 }
 
 # }}}
+# yaml_cli - get the YAML CLI for this environment {{{
+sub yaml_cli {
+	my $self = shift;
+	return Genesis::yaml_cli($self->top);
+}
+
+# }}}
 
 # Environment Variables
 # get_environment_variables - returns a hash of all environment variables pertaining to this Genesis::Env object {{{
@@ -1455,6 +1462,9 @@ sub get_environment_variables {
 			$env{GENESIS_ENV_SCALE}              = $self->scale();
 			$env{GENESIS_ENV_KIT_OVERRIDE_FILES} = join(' ', $self->kit->env_override_files);
 		}
+
+		# YAML CLI
+		$env{GENESIS_YAML_CLI} = $self->yaml_cli->cli;
 
 		# Genesis v2.7.0 Secrets management
 		# This provides GENESIS_{SECRETS,EXODUS,CI}_{MOUNT,BASE}
@@ -2418,8 +2428,9 @@ sub last_deployed_manifest {
 					my $is_pruned = ! grep {/^genesis:/} split /\n/, $data;
 					if ($pruned && !$is_pruned) {
 						my $file_sha1 = sha1_hex($data);
+						my $cli = $self->yaml_cli->cli;
 						my ($pruned_data, $rc, $err) = run(
-							'fin=$1; shift 1; echo "$fin" | spruce merge "$@" -',
+							"fin=\$1; shift 1; echo \"\$fin\" | $cli merge \"\$@\" -",
 							$data,
 							map {('--prune',$_)} $self->prunable_keys
 						);
@@ -4443,8 +4454,8 @@ sub _check_release_overrides {
 	my $env_releases = $self->manifest_provider->partial_environment(subset=>'releases')->data;
 	if (ref($env_releases) eq 'ARRAY' && scalar(@$env_releases)) {
 
-		my $kit_releases = scalar(load_yaml(scalar(run(
-			'spruce','merge',
+		my $yaml = $self->yaml_cli;
+		my $kit_releases = scalar(load_yaml(scalar($yaml->merge(
 			'--skip-eval','--go-patch','-m',
 			'--cherry-pick', 'releases',
 			map { $_ =~ m{^/} ? $_ : $self->kit->path($_)} $self->kit_files)))
@@ -4749,7 +4760,8 @@ sub _advise_stemcell_updates {
 # _genesis_inherits - return the list of inherited files (recursive) {{{
 sub _genesis_inherits {
 	my ($self,$file, @files) = @_;
-	my ($out,$rc,$err) = run({stderr => 0},'cat "$1" | spruce merge --skip-eval --go-patch --multi-doc | spruce json', $self->path($file));
+	my $cli = $self->yaml_cli->cli;
+	my ($out,$rc,$err) = run({stderr => 0},"cat \"\$1\" | $cli merge --skip-eval --go-patch --multi-doc | $cli json", $self->path($file));
 	bail "Error processing json in $file!:\n$err" if $rc;
 	my @contents = map {load_json($_)} lines($out);
 

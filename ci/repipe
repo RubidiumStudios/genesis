@@ -160,7 +160,19 @@ fi
 [[ -z "${GENESIS_CI_DIR:-""}" ]] && GENESIS_CI_DIR="$(dirname "${BASH_SOURCE[0]}")"
 cd "$GENESIS_CI_DIR"
 echo >&2 "Working in $(pwd)"
-need_command spruce "https://github.com/geofffranks/spruce/releases"
+# Check for YAML CLI (spruce or graft)
+YAML_CLI="${GENESIS_YAML_CLI:-spruce}"
+if ! command -v "$YAML_CLI" &>/dev/null; then
+  if [[ "$YAML_CLI" == "graft" ]] && command -v spruce &>/dev/null; then
+    echo >&2 "WARNING: graft not found, falling back to spruce"
+    YAML_CLI="spruce"
+  elif [[ "$YAML_CLI" == "spruce" ]] && command -v graft &>/dev/null; then
+    echo >&2 "WARNING: spruce not found, falling back to graft"
+    YAML_CLI="graft"
+  else
+    error "Neither spruce nor graft found. Please install one of them."
+  fi
+fi
 need_command jq
 
 if [[ -z "$fly" ]] ; then
@@ -180,21 +192,21 @@ echo >&2 "Using settings found in ${settings_file}"
 # --  Extract pipeline target information and compare -------------------------
 set -e
 trap "rm -f .deploy.yml" QUIT TERM EXIT INT
-config="$(spruce merge --fallback-append pipeline/base.yml pipeline/*/*.yml "${settings_file}")"
-meta="$(spruce merge --skip-eval --cherry-pick meta <<<"$config" | spruce json)"
-spruce merge --skip-eval --prune meta <<<"$config" > .deploy.yml
+config="$($YAML_CLI merge --fallback-append pipeline/base.yml pipeline/*/*.yml "${settings_file}")"
+meta="$($YAML_CLI merge --skip-eval --cherry-pick meta <<<"$config" | $YAML_CLI json)"
+$YAML_CLI merge --skip-eval --prune meta <<<"$config" > .deploy.yml
 target=$(jq -r --arg t "${CONCOURSE_TARGET:-}" '.meta.target // $t' <<<"$meta")
 [[ -n "${target:-}" ]] || error "Settings file missing meta.target value"
 [[ -n "${CONCOURSE_TARGET:-}" && "$CONCOURSE_TARGET" != "$target" ]] && \
   error "Target '$target' from settings file conflicts with CONCOURSE_TARGET env var ('$CONCOURSE_TARGET')"
 
 pipeline_url="$(jq -r '.meta.url // ""' <<<"$meta")"
-target_url="$(spruce json ~/.flyrc | jq -r --arg t "$target" '.targets[$t].api')"
+target_url="$($YAML_CLI json ~/.flyrc | jq -r --arg t "$target" '.targets[$t].api')"
 [[ -n "${pipeline_url:-}" && "$pipeline_url" != "$target_url" ]] && \
   error "Target '$target' does not match the url specified in the pipeline: found '$target_url', got '$pipeline_url'"
 
 pipeline_team="$(jq -r '.meta.team // ""' <<<"$meta")"
-target_team="$(spruce json ~/.flyrc | jq -r --arg t "$target" '.targets[$t].team')"
+target_team="$($YAML_CLI json ~/.flyrc | jq -r --arg t "$target" '.targets[$t].team')"
 [[ -n "${pipeline_team:-}" && "$pipeline_team" != "$target_team" ]] && \
   error "Target '$target' does not match the team specified in the pipeline: found '$target_team', got '$pipeline_team'"
 
