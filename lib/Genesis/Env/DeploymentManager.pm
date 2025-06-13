@@ -140,9 +140,18 @@ sub latest_successful {
 # current_state - determine the current deployment state of the environment {{{
 sub current_state {
 	my ($self) = @_;
-	# FIXME: Need to handle exodus-only based deployment definitions if we're not using audits
+
+	my @deployments = $self->find();
+	if (!@deployments) {
+		# Check if there is exodus data - we're not checking if the manifest store is the repository,
+		# because we may have just changed it to hybrid or exodus, but the old data is still there.
+		my $exodus_data = $self->env->exodus_lookup('.', {});
+		return 'deployed' if (keys %$exodus_data);
+		return 'undeployed';
+	}
+	
 	# FIXME: Cache, and clear on reset;
-	for my $deployment ($self->find()) {
+	for my $deployment (@deployments) {
 		if ($deployment->succeeded) {
 			return $deployment->action eq 'deploy' ? 'deployed' : 'terminated';
 		}
