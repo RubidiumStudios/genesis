@@ -399,22 +399,6 @@ sub _build_ocfp_network_model_dynamic_subnets {
 	my $subnets = $self->_filter_subnets($definition->{subnets});
 	$config->{subnets} = [];
 
-	my $allocation = delete($definition->{allocation});
-
-	my $vm_count = $allocation->{size} // 0;
-	$vm_count = 2**(32 - $1) if $vm_count =~ m#^/(\d+)$#;
-	my $statics = $allocation->{statics} // 0; # Does not include the reserved ips based on network name (ie bosh_ip, vault_a, vault_b, etc)
-	$statics = 2**(32 - $1) if $statics =~ m#^/(\d+)$#;
-
-	bail(
-		'More static IPs requested (%d) than the allocation for the subnet for '.
-		'network %s allows (%d)',
-		$statics, $target, $vm_count
-	) if ($statics > $vm_count);
-
-	# Get existing allocations from exodus data
-	my $existing_allocations = $self->_get_existing_allocations(); # Different for director and non-drector deployments; prototyping in director
-
 	# We only use the ocfp-* subnets for the network definition
 	my $ocfp_subnet_prefix = $self->env->ocfp_subnet_prefix;
 	my @ocfp_subnet_names = sort grep {/^${ocfp_subnet_prefix}-/} keys %$subnets;
@@ -423,8 +407,33 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		$target
 	) unless @ocfp_subnet_names;
 
+	my $allocation = delete($definition->{allocation});
+	my %vms_per_subnet = ();
+	if (defined $allocation->{total_size}) {
+		my $vm_count = $allocation->{total_size};
+		my $total_subnets = scalar(@ocfp_subnet_names);
+		my $per_subnet_count = round($vm_count / $total_subnets);
+		my $remaining = $vm_count % $total_subnets;
+		for my $subnet_name (@ocfp_subnet_names) {
+			$vms_per_subnet{$subnet_name} = $per_subnet_count;
+			$vms_per_subnet{$subnet_name}++ if $remaining-- > 0;
+		}
+	} else {
+		my $vm_count = $allocation->{size} // 0;
+		$vm_count = 2**(32 - $1) if $vm_count =~ m#^/(\d+)$#;
+		for my $subnet_name (@ocfp_subnet_names) {
+			$vms_per_subnet{$subnet_name} = $vm_count;
+		}
+	}
+	my $statics = $allocation->{statics} // 0; # Does not include the reserved ips based on network name (ie bosh_ip, vault_a, vault_b, etc)
+	$statics = 2**(32 - $1) if $statics =~ m#^/(\d+)$#;
+
+	# Get existing allocations from exodus data
+	my $existing_allocations = $self->_get_existing_allocations(); # Different for director and non-drector deployments; prototyping in director
+
 	for my $subnet_name (@ocfp_subnet_names) {
 		my $subnet = $subnets->{$subnet_name};
+		my $vm_count = $vms_per_subnet{$subnet_name} // 0;
 		my $full_range = IPv4->new($subnet->{cidr_block});
 		my ($available, $reserved) = $self->_get_subnet_ranges($subnet);
 
@@ -455,6 +464,12 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		# allow users to override the statics with a list of offsets to use
 		# rather than just a count or mask.(ie 0-3,9) maybe even negative for
 		# adding to the end? (-1--3)
+		bail(
+			'More static IPs requested (%d) than the allocation for the %s subnet for '.
+			'network %s allows (%d)',
+			$statics, $subnet_name, $target, $vm_count
+		) if ($statics > $vm_count);
+	
 		my $static_range = $self->_calculate_static_allocation(
 			$target,
 			$allocated_range,
