@@ -17,6 +17,7 @@ use Genesis qw/
 	slurp load_json load_yaml load_yaml_file spruce_diff
 	deep_merge in_array uniq get_opts struct_lookup flatten unflatten
 	new_enough by_semver
+	is_valid_uri
 	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
 /;
 use Genesis::State qw/envset under_test in_callback/;
