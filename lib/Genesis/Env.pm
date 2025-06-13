@@ -4085,12 +4085,13 @@ sub _check_environment_viability {
 	my $kit_files = eval {
 		$self->manifest_provider->kit_files(); # pre-warm the cache
 	};
-	if ($@) {
+	my $err = $@;
+	if ($err) {
 		info("[[  - >>manifest blueprint #R{failed}");
 		return {
 			state => 'error',
 			fatal => 1,
-			msg   => "Kit files could not be generated -- cannot continue with further checks."
+			msg   => "Kit files could not be generated -- cannot continue with further checks:\n\n".fix_wrap($err),
 		};
 	}
 	info("[[  - >>manifest blueprint #G{passed}");
