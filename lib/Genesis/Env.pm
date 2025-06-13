@@ -1186,15 +1186,31 @@ sub is_ocfp {
 sub ocfp_type {
 	my $self = shift;
 	return '' unless $self->is_ocfp;
-	my ($type) = $self->name =~ m/^.*-(mgmt|ocf)$/;
-	return $type || 'unknown';
+	my $name = $self->name;
+	# Match -mgmt/-ocf at end or in middle, or mgmt-/ocf- at beginning
+	if ($name =~ /-(mgmt|ocf)(?:-|$)/ || $name =~ /^(mgmt|ocf)-/) {
+		return $1;
+	}
+	return 'unknown';
 }
 
 # }}}
 # ocfp_env - returns the OCFP environment name used in vault {{{
 sub ocfp_env {
 	my $self = shift;
-	$self->name =~ s/^(.*)-(mgmt|ocf)/$1\/$2/r;
+	my $name = $self->name;
+	# If -mgmt/-ocf is at the end, replace dash with slash: foo-mgmt -> foo/mgmt
+	if ($name =~ /^(.*)-(mgmt|ocf)$/) {
+		return "$1/$2";
+	}
+	# If -mgmt/-ocf is in the middle or mgmt-/ocf- at the beginning, append at end
+	# Examples: ocfp-aws-mgmt-us-east-1 -> ocfp-aws-mgmt-us-east-1/mgmt
+	#           mgmt-production -> mgmt-production/mgmt
+	elsif ($name =~ /-(mgmt|ocf)-/ || $name =~ /^(mgmt|ocf)-/) {
+		my $type = $1;
+		return "$name/$type";
+	}
+	return $name;
 }
 
 # }}}
@@ -1743,7 +1759,18 @@ sub ocfp_config_mount {
 sub ocfp_config_slug {
 	my $param_ocfp_config_slug = $_[0]->lookup('params.ocfp_vault_config_slug');
 	return $param_ocfp_config_slug if $param_ocfp_config_slug;
-	sprintf("%s/%s", $_[0]->name =~ m/^(.*)-(mgmt|ocf)$/);
+	
+	my $name = $_[0]->name;
+	# If -mgmt/-ocf is at the end: foo-mgmt -> foo/mgmt
+	if ($name =~ /^(.*)-(mgmt|ocf)$/) {
+		return "$1/$2";
+	}
+	# If -mgmt/-ocf is in the middle or mgmt-/ocf- at the beginning: append at end
+	elsif ($name =~ /-(mgmt|ocf)-/ || $name =~ /^(mgmt|ocf)-/) {
+		my $type = $1;
+		return "$name/$type";
+	}
+	return $name;
 }
 
 # }}}
