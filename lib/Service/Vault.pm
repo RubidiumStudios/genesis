@@ -347,6 +347,7 @@ sub get {
 # get_path - get all the keys under a given path, including subpaths {{{
 sub get_path {
 	my ($self, $path) = @_;
+	$path =~ s{(^/*|/*$)}{}; # Trim preceeding and trailing / as safe doesn't honour it
 	my ($data,$rc,$err) = read_json_from($self->query({stderr => 0, redact_output => 1}, 'export', $path));
 	if ($rc || $err) {
 		debug(
@@ -357,11 +358,10 @@ sub get_path {
 	}
 
 	my $results = {};
-	$path =~ s/^\///; # Trim leading / as safe doesn't honour it
 	for my $subpath (sort keys %$data) {
 		if ($subpath eq $path) {
 			$results = delete($data->{$subpath}{__flattened__})
-			  ? Genesis::unflatten($data->{$subpath})
+				? Genesis::unflatten($data->{$subpath})
 				: $data->{$subpath};
 			next;
 		}
