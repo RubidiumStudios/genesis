@@ -1029,7 +1029,7 @@ sub last_deployed_lookup {
 	$key //= '.';
 	my $last_manifest = $self->{__last_deployed_lookup_manifest};
 	unless ($last_manifest) {
-		my $last_manifest_file = $self->last_deployed_manifest(just => 'file');
+		my $last_manifest_file = scalar($self->last_deployed_manifest(just => 'file'));
 		die "No successfully deployed manifest found for $self->{name} environment"
 			unless $last_manifest_file;
 		$last_manifest = load_yaml_file($last_manifest_file);
@@ -2374,15 +2374,17 @@ sub last_deployed_manifest {
 				}
 				if ($just_return eq 'contents') {
 					my $manifest = $deployment->artifact($manifest_target);
+					info("#G{done}".pretty_duration(gettimeofday - $start));
 					$results = wantarray ? [$manifest, $type, $sha2, $source] : $manifest;
 					last
 				}
 				mkdir_or_fail($self->workpath('manifests')) unless -d $self->workpath('manifests');
 				if ($just_return eq 'file') {
-					my ($manifest_file) = $deployment->extract_artifacts_to(
+					my $manifest_file = $deployment->extract_artifacts_to(
 						$self->workpath("manifests/"), $manifest_target
 					);
-					$results = wantarray ? [$manifest_file, $type, $sha2, $source] : $manifest_file;
+					info("#G{done}".pretty_duration(gettimeofday - $start));
+					$results = wantarray ? [$manifest_file, $type, $sha2, $source] : $manifest_file->{manifest};
 					last;
 				}
 
@@ -2585,7 +2587,7 @@ sub last_deployed_manifest {
 	}
 
 	# Check if we have to try harder to find a state file
-	if ($self->use_create_env && !exists($results->{state})) {
+	if ($self->use_create_env && ref($results) eq 'HASH' && !exists($results->{state})) {
 		# No state file found in the exodus-deployments data, so check
 		# repository for it.
 		my $local_path = $self->path(".genesis/manifests/".$self->name."-state.json");
@@ -3060,7 +3062,7 @@ sub deploy {
 	if (!$ok) {
 		if (!$opts{"dry-run"} && $self->has_hook('post-deploy')) {
 			# Call post-deploy hook with the pre-deploy data in case of cleanup on failure
-			$self->run_hook('post-deploy', rc => $results[1], data => $predeploy_data)
+			$self->run_hook('post-deploy', rc => $results[1], interactive => !$noprompt, data => $predeploy_data)
 		}
 		$results[0] //= '';
 		my $last_bits_of_output = join "\n", map {decolorize($_)} (split(/\r?\n/,$results[0]))[-5..-1];
