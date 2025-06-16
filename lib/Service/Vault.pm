@@ -313,6 +313,9 @@ sub query {
 sub get {
 	my ($self, $path, $key) = @_;
 	$path =~ s/\/{2,}/\//g; # Clean up any double slashes from joins
+	if (!defined($key) && $path =~ /:/) {
+		($path, $key) = $path =~ m/^(.*?)(?::([^:]*))?$/;
+	}
 	if (defined($key)) {
 		my ($out,$rc) = $self->query({redact_output => 1}, 'get', "$path:$key");
 		return $out if $rc == 0;
