@@ -92,6 +92,7 @@ our @EXPORT = qw/
 
 	load_json load_json_file save_to_json_file
 	load_yaml load_yaml_file save_to_yaml_file
+	to_yaml
 
 	pushd popd
 
@@ -1075,6 +1076,16 @@ sub save_to_yaml_file {
 	my $tmpfile = "$file.$i.json";
 	save_to_json_file($data,$tmpfile);
 	run('spruce merge --skip-eval "$1" | perl -I$GENESIS_LIB -MGenesis -e \'my $c=do{local $/;<STDIN>};$c=~s/\s*\z/\n/ms;print $c\' > $2; rm "$1"', $tmpfile, $file);
+}
+
+sub to_yaml {
+	my ($data) = @_;
+	my $json = JSON::PP->new->allow_nonref->encode($data);
+	my $tmp = tempfile;
+	mkfile_or_fail($tmp, 0644, $json);
+	my ($out,$rc,$err) = run({ stderr => 0 }, qw/spruce merge --skip-eval/, $tmp);
+	bail("Error converting data to YAML: $err") if $rc;
+	return $out if $out;
 }
 
 my @DIRSTACK;
