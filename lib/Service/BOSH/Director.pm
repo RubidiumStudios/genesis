@@ -191,6 +191,15 @@ sub url {
 }
 
 # }}}
+# host - return the host of the BOSH director {{{
+sub host {
+	my $self = shift;
+	# TODO: should we use bosh env command to get this, or is that just a
+	# reflection of the url we already have?
+	return $self->{host}; 
+}
+
+# }}}
 # environment_variables - retrieve BOSH environment variables for this BOSH director {{{
 sub environment_variables {
 	my ($self) = @_;
