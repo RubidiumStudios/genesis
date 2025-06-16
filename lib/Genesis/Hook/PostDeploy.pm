@@ -159,7 +159,7 @@ sub upload_stemcells {
 
 	# RISK: This assumes that the kit is a bosh director, but doesn't verify it.
 
-	my ($self, %opts) = @_;
+	my ($self) = @_;
 	return unless $self->deploy_successful;
 
 	my $env = $self->env;
@@ -173,7 +173,7 @@ sub upload_stemcells {
 	}
 
 	# If interactive, ask the user if they want to upload a stemcell
-	if (in_controlling_terminal && $opts{interactive}) {
+	if (in_controlling_terminal && $self->{interactive}) {
 		my $answer = prompt_for_boolean(
 			"[[  - >>no stemcells found on the BOSH director. Do you want to upload a stemcell? [y|n] ",
 			1
@@ -214,7 +214,7 @@ sub upload_stemcells {
 	
 	my $ok = $selected_stemcell->upload(
 		$bosh,
-		dryrun => $opts{dryrun},
+		dryrun => 0, # Post-deploy hook is not run in dry-run mode
 	);
 
 	if (!$ok) {
@@ -232,14 +232,85 @@ sub upload_stemcells {
 }
 
 sub upload_runtime_configs {
-	my ($self, %opts) = @_;
-	# TBD: This is a placeholder for the runtime config upload process.
-	# Options will consist of the following:
-	#   hooks => [hashref1, hashref2, ...] - a list of hashes that describee hook-based runtime config deployments, with each containing
-	#		 - name: the name of the runtime config
-	#		 - args: a list of arguments to pass to the hook
-	#		 - TBD: How to tell if the hook should run or not, or if a given option should be used.
-	# This will upload the runtime configs to the director.
+	my ($self) = @_;
+	my $runtime_opts = $self->env->lookup('bosh-configs.runtime', undef);
+	return if !$runtime_opts;
+
+	if (ref $runtime_opts ne 'HASH') {
+		$runtime_opts = {$self->env->type => $runtime_opts};
+	}
+
+	my $env = $self->env;
+
+	# Bosh deployments always target themselves, other deployments target the BOSH director
+	my $bosh = $env->is_director
+		? $env->get_target_bosh({self => 1})
+		: $env->bosh;
+
+	my @types = (sort {
+		$a eq $env->type ? -1 : # Ensure the current environment type is first
+		$b eq $env->type ? 1 : # Ensure the current environment type is first
+		$a cmp $b
+	} keys %$runtime_opts);
+	my $max_length = (sort map {length $_} @types)[-1] // 0;
+
+	$env->notify("uploading runtime configs to the BOSH director");
+	my $tstart = gettimeofday;
+	for my $type (@types) {
+		my $configs = $runtime_opts->{$type};
+
+		# TODO: Support running bosh runtime configs on other environments
+		if ($type ne $env->type) {
+			# If the type is not the current environment type, we skip it for now
+			info(
+				"[[#-B{%*s}>> #Y{runtime configs from other kits are not supported yet}",
+				$max_length, $type
+			);	
+			next;
+		}
+
+		my $args = ref($configs) eq 'ARRAY'
+			? $configs
+			: ref($configs) eq 'HASH'
+			? $configs->{args} || []
+			: $configs eq JSON::PP::true
+			? []
+			: [split(/\s+/, $configs)];
+
+		# Find out if there is a runtime config hook, or a addon hook that can handle this
+		if ($env->has_hook('runtime-config')) {
+			# If the runtime config hook is present, we will run it
+			info(
+				"[[#-B{%*s}>> #G{runtime config hook with arguments: %s}]\n",
+				$max_length, $type, join(", ", @$args)
+			);
+			# FIXME: When we support other environments, we'll need different '$env' here...
+			my ($out, $rc, $err) = $env->run_hook('runtime-config', args => $args, interactive => $self->{interactive});
+			# TODO: Do we need to handle failed runtime config hooks?
+		} elsif ($env->has_hook("addon-runtime-config~rc")) {
+			# If the runtime config hook is not present, we will run the addon hook
+			info(
+				"[[#-B{%*s}>> #G{addon runtime config with arguments: %s}]\n",
+				$max_length, $type, join(", ", @$args)
+			);
+			my ($out, $rc, $err) = $env->run_hook("addon-runtime-config~rc", args => $args, interactive => $self->{interactive});
+			if ($rc) {
+				error("Failed to run addon runtime config hook: %s", $err);
+				return 0;
+			}
+		} else {
+			info(
+				"[[#-B{%*s}>> #R{no runtime config hook found for type %s}]",
+				$max_length, $type
+			);
+			next;
+		}
+
+		info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+	}
+	# TODO: Support running bosh runtime configs on other environments
+
+
 }
 
 sub results {

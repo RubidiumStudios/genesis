@@ -5,11 +5,13 @@ use warnings;
 
 use parent qw(Genesis::Hook);
 
-use Genesis qw/bail bug info notice error warning count_nouns pretty_duration spruce_diff/;
-use Genesis::Term qw/in_controlling_terminal terminal_width/;
+use Genesis qw/bail bug info notice error warning count_nouns pretty_duration spruce_diff in_array success to_yaml read_json_from/;
+use Genesis::Term qw/in_controlling_terminal terminal_width wrap bullet/;
 use Genesis::UI qw/prompt_for_boolean/;
+use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
 
+# init - Initialize the runtime config hook {{{
 sub init {
 	my ($class, %ops) = @_;
 	my @required_opts = qw/env rc/;
@@ -38,13 +40,32 @@ sub init {
 	return $obj;
 }
 
+# }}}
+# dryrun - Get dryrun flag {{{
 sub dryrun {return $_[0]->{dryrun} // 0}
+
+# }}}
+# interactive - Get interactive flag {{{
 sub interactive {return $_[0]->{interactive} // 0}
+
+# }}}
+# print - Get print flag {{{
 sub print {return $_[0]->{print} // 0}
+
+# }}}
+# remove - Get remove flag {{{
 sub remove {return $_[0]->{remove} // 0}
 
+# }}}
+# bosh - Get BOSH object {{{
 sub bosh {return $_[0]->{bosh}}
+
+# }}}
+# credhub - Get Credhub object {{{
 sub credhub {return $_[0]->{credhub}}
+
+# }}}
+# credhub_base - Get Credhub base path {{{
 sub credhub_base {
 	my ($self) = @_;
 	return undef unless $self->env->feature_compatibility('3.0.0-rc.1')
@@ -52,26 +73,27 @@ sub credhub_base {
 	return $self->credhub->base if $self->credhub && $self->credhub->base;
 }
 
-# Default perform method -- kits just have to implement the build_*_runtime methods
+# }}}
+# perform - Default perform method, so kits just have to implement the build_*_runtime methods {{{
 sub perform {
 	my $self = shift;
 	my $env = $self->env;
 
 	$env->notify(
 		"%s runtime config(s): %s %s", 
-		$self->remove ? "removing" : "generating",
+		$self->remove ? "removing" : "generating", # Fixme vv
 		join(", ", $self->{builds}->@*),
 		$self->dryrun ? " (dry-run)" : ""
 	);
 
 	return $self->remove_configs() if ($self->remove);
 
-	for my $config (keys $self->{builds}->%*) {
+	for my $config ($self->{requests}->@*) {
 		my $config_name = $env->bosh_config_name.".$config";
 		my $config_data = $self->build($config, $config_name);
 		next unless $config_data; # If the build failed or was skipped, continue to the next config
 		if ($self->print) {
-			$self->print_config($config,$config_data, $config_name);
+			$self->print_config($config_data, $config_name);
 			next;
 		}
 
@@ -89,6 +111,8 @@ sub perform {
 	return $self->done();
 }
 
+# }}}
+# register_runtime_config_builds - Register available runtime config builds {{{
 sub register_runtime_config_builds {
 	my ($self, @names) = @_;
 	bail("No builds specified for registration") unless @names;
@@ -106,8 +130,8 @@ sub register_runtime_config_builds {
 
 		my $build_method = sprintf('build_%s_runtime', $name =~ s/-/_/gr);
 		if ($self->can($build_method)) {
-			$self->{builds}->{$name}{method} = $build_method;
-			$self->{builds}->{$name}{description} = $description;
+			$self->{builds}{$name}{method} = $build_method;
+			$self->{builds}{$name}{description} = $description;
 		} else {
 			$self->kit_bug("Cannot find build method '%s' for runtime config", $build_method);
 		}
@@ -115,9 +139,17 @@ sub register_runtime_config_builds {
 	return $self;
 }
 
+# }}}
+# validate_runtime_config_requests - Validate requested runtime configs exist {{{
 sub validate_runtime_config_requests {
-	my ($self, @requests) = @_;
-	bail("No runtime config requests specified") unless @requests;
+	my ($self) = @_;
+	my @requests = $self->{args};
+	if (!@requests) {
+		# If no requests are specified, we assume all runtime configs are requested
+		# (and they are valid by definition)
+		$self->{requests} = keys %{$self->{builds}};
+		return 1;
+	}
 	my @invalid_requests = grep {!exists $self->{builds}->{$_}} @requests;
 	my $padding = (sort map {length($_)} keys %{$self->{builds}})[-1];
 	bail(
@@ -130,16 +162,21 @@ sub validate_runtime_config_requests {
 			$_.':',
 			ucfirst($self->action),
 			$self->{builds}->{$_}{description} // $_
-		)} sort keys %{$self->{__builds}}),
+		)} sort keys %{$self->{builds}}),
 	) if @invalid_requests;
+	$self->{requests} = [@requests];
 	return 1;
 }
 
+# }}}
+# action - Get current action description {{{
 sub action {
 	my ($self) = @_;
 	return $self->{remove} ? "remove" : $self->{dryrun} ? "generate" : "generate and upload";
 }
 
+# }}}
+# build - Build a specific runtime config {{{
 sub build {
 	my ($self, $build) = @_;
 	bail("No runtime config name specified") unless $build;
@@ -174,6 +211,8 @@ sub build {
 	return $config_data;
 }
 
+# }}}
+# print_config - Print runtime config contents {{{
 sub print_config {
 	my ($self, $config_data, $config_name) = @_;
 	bail("No runtime config contents given") unless $config_data;
@@ -187,6 +226,8 @@ sub print_config {
 	return 1;
 }
 
+# }}}
+# compare_configs - Compare existing vs generated config {{{
 sub compare_configs {
 	my ($self, $build, $config_data, $config_name) = @_;
 	my $description = $self->{builds}->{$build}{description} // $build;
@@ -211,6 +252,8 @@ sub compare_configs {
 	return 1;
 }
 
+# }}}
+# upload_runtime_config - Upload runtime config to BOSH {{{
 sub upload_runtime_config {
 	my ($self, $build, $config_name, $config_data) = @_;
 	my $description = $self->{builds}->{$build}{description} // $build;
@@ -222,7 +265,7 @@ sub upload_runtime_config {
 			"Not in a controlling terminal, cannot prompt for confirmation to upload ".
 			"runtime config. Please use #y{%s} to skip the confirmation prompt.",
 			$self->{yes_option} // '--yes'
-		);
+		) unless in_controlling_terminal;
 
 		# If we're in interactive mode, we can prompt the user to confirm the upload
 		my $prompt = wrap(sprintf(
@@ -250,6 +293,8 @@ sub upload_runtime_config {
 	return 1;
 }
 
+# }}}
+# remove_configs - Remove runtime configs from BOSH {{{
 sub remove_configs {
 	my ($self) = @_;
 
@@ -261,8 +306,7 @@ sub remove_configs {
 		})
 	} @{$self->_get_runtime_configs()};
 
-	my @configs = map {$self->env->bosh_config_name.".".$_} $self->{builds}->@*;
-	for my $config (@configs) {
+	for my $config ($self->{requests}->@*) {
 		if (!exists $existing{$config}) {
 			info("  - runtime config #g{%s} does not exist", $config);
 			next;
@@ -296,6 +340,8 @@ sub remove_configs {
 	return 1;
 }
 
+# }}}
+# store_secrets - Store secrets to Credhub {{{
 sub store_secrets {
 	my ($self) = @_;
 
@@ -335,19 +381,22 @@ sub store_secrets {
 		}
 	}
 }
+
+# }}}
+# _get_secret - Get secret from vault or credhub {{{
 sub _get_secret {
 	my ($self, $secret) = @_;
-	my $config = $self->{__config};
+	my $config = $self->{__current_config};
 	my ($path, $key) = split(/:/, $secret, 2);
 	my $original_path = $path;
 	my $base_path = $self->env->secrets_store->base;
 	$path = $base_path.$path unless $path =~ m#^/#;
 	my $value = $self->vault->get($path,$key);
-	return $value unless $self->{credhub_base};
+	return $value unless $self->credhub_base;
 
 	$original_path = "_$original_path" if $original_path =~ m#^/#;
 	my $credhub_var = $self->get_credhub_variable(
-		$self->{credhub_base}.'runtime-configs/genesis-entombments/',
+		$self->credhub_base.'runtime-configs/genesis-entombments/',
 		$original_path,
 		$key,
 		$value
@@ -356,6 +405,8 @@ sub _get_secret {
 	return "(($credhub_var))";
 }
 
+# }}}
+# _get_runtime_configs - Get runtime configs from BOSH {{{
 sub _get_runtime_configs {
 	my ($self, $name) = @_;
 	my @cmd = ('configs', '--type=runtime', '--json');
@@ -365,4 +416,7 @@ sub _get_runtime_configs {
 	return $data->{Tables}[0]{Rows};
 }
 
+# }}}
+
 1;
+# vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1:

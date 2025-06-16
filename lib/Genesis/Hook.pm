@@ -8,9 +8,9 @@ use JSON::PP;
 use Digest::SHA qw(sha1_hex);
 
 sub init {
-	my ($class, %ops) = @_;
-	$class->check_for_required_args(\%ops, qw/env/);
-	my $hook = bless({%ops, complete => 0, type => $ENV{GENESIS_KIT_HOOK}},$class);
+	my ($class, %opts) = @_;
+	$class->check_for_required_args(\%opts, qw/env/);
+	my $hook = bless({%opts, complete => 0, type => $ENV{GENESIS_KIT_HOOK}},$class);
 
 	trace({raw => 1},
 		"%senvironmental variables:\n%s",
@@ -68,7 +68,7 @@ sub load_hook_module {
 }
 
 sub perform {
-	$_[0]->kit->kit_bug(
+	$_[0]->kit_bug(
 		"Expect kit %s %s hook (perl module) to provide a 'perform' method",
 		$_[0]->kit->id, $ENV{GENESIS_KIT_HOOK}
 	)
