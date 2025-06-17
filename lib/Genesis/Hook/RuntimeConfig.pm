@@ -6,7 +6,7 @@ use warnings;
 use parent qw(Genesis::Hook);
 
 use Genesis qw/bail bug info notice error warning count_nouns pretty_duration spruce_diff in_array success to_yaml read_json_from/;
-use Genesis::Term qw/in_controlling_terminal terminal_width wrap bullet/;
+use Genesis::Term qw/in_controlling_terminal terminal_width wrap bullet render_markdown/;
 use Genesis::UI qw/prompt_for_boolean/;
 use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
@@ -118,6 +118,7 @@ sub register_runtime_config_builds {
 	my ($self, @names) = @_;
 	bail("No builds specified for registration") unless @names;
 	$self->{builds} = {}; # Reset builds to an empty hash, just in case this is reapplied
+	my $i = 0; # Order of the builds, so we can sort them later
 	for my $info (@names) {
 		my ($name,$description) = ();
 		if (ref($info) eq 'ARRAY') {
@@ -133,6 +134,7 @@ sub register_runtime_config_builds {
 		if ($self->can($build_method)) {
 			$self->{builds}{$name}{method} = $build_method;
 			$self->{builds}{$name}{description} = $description;
+			$self->{builds}{$name}{order} = $i++;
 		} else {
 			$self->kit_bug("Cannot find build method '%s' for runtime config", $build_method);
 		}
@@ -148,9 +150,12 @@ sub validate_runtime_config_requests {
 	if (!@requests) {
 		# If no requests are specified, we assume all runtime configs are requested
 		# (and they are valid by definition)
-		$self->{requests} = [keys %{$self->{builds}}];
+		$self->{requests} = [sort {
+			$self->{builds}->{$a}{order} <=> $self->{builds}->{$b}{order}
+		} keys %{$self->{builds}}];
 		return 1;
 	}
+	# TODO: Support {not => [ 'dns', 'ops-access' ]} syntax for excluding builds
 	my @invalid_requests = grep {!exists $self->{builds}->{$_}} @requests;
 	my $padding = (sort {$a <=> $b} map {length($_)} keys %{$self->{builds}})[-1];
 
@@ -278,7 +283,7 @@ sub upload_runtime_config {
 			"[[  - >>upload #m{%s} runtime config #c{%s} to BOSH director #M{%s}? [y|n]",
 			$description, $config_name, $self->bosh->alias || $self->bosh->host
 		), terminal_width - 2);
-		if (prompt_for_boolean($prompt, 0, 1)) {
+		if (prompt_for_boolean($prompt, 1, 1)) {
 			info("[[  - >>#y{skipped}\n");
 			return undef;
 		}
