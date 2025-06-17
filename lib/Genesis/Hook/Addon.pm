@@ -22,34 +22,64 @@ sub help {
 	my ($self, %addons) = @_;
 
 	if ($self->can('cmd_details')) {
-		info (
-			"\n#Gu{%s}\n[[  >>%s\n",
-			$self->{label}, join("\n[[  >>", split("\n",$self->cmd_details()))
-		);
-		return 1;
+		my $cmd_details = $self->cmd_details();
+		if (ref $cmd_details eq 'HASH') {
+			$self->kit_bug(
+				"This kit has incorrectly defined multiple commands in %s - hooks/addon.pm ".
+				"is the only addon that can define multiple commands.",
+				$self->{file} =~ s{^.*(hooks/addon.*pm)$}{$1}r
+			) unless $self->{file} =~ /hooks\/addon\.pm$/;
+			$addons{$_} = $cmd_details->{$_} for keys %$cmd_details;
+		} else {
+			info (
+				"\n#Gu{%s}\n[[  >>%s\n",
+				$self->{label}, join("\n[[  >>", split("\n",$self->cmd_details()))
+			);
+			return 1;
+		}
 	}
 
-	# FIXME: The code below is not being called yes, so may contain errors:
-	# - the passed in %addons does not seem compatible with the code below
-	#   due to the includsion of $addons{$cmd} already containing the help
-	#   output.
-
 	# Loook for any extended addon hooks
-	my @module_files = glob($self->kit->path("hooks/addon-*.pm"));
+	my @module_files = 
+		map {substr($_,length($self->kit->path())+1)}
+		grep { /\/addon-[^.]*(.pm?)$/ } # ignore disabled or other invalidly named files
+		glob($self->kit->path("hooks/addon-*"));
+
 	foreach my $file (@module_files) {
-		my $class = $self->load_hook_module($file, $self->kit);
-		next unless $class && $class->can('cmd_details');
-		my ($cmd) = $file =~ m{addon-(.*)\.pm};
-		$addons{"$cmd"} = $class->cmd_details() // 'No help available';
+		my $cmd = $file =~ s{^.*hooks/addon-(.*)\.pm$}{$1}r;
+		my $long_cmd = $cmd =~ s/([^~]*)(~(.*))?/$1/r;
+		if ($file !~ /\.pm$/) {
+			next if in_array($file.'.pm', @module_files); # prefer perl modules over other files
+			# run the help command on the bash script
+			my ($out, $rc, $err) = run({
+				interactive => 0, stderr => undef
+			},
+			'cd "$1"; source .helper; hook=$2; shift 2; $hook "$@"',
+			$self->path, $file, 'help'
+			);
+			trace("Failed to run addon help command for %s (rc: %s): %s", $file, $rc, $err) if $rc;;
+			$addons{$cmd} = $out unless $rc;
+		} else {
+			eval {
+				my $class = $self->load_hook_module($file, $self->kit);
+				next unless $class && $class->can('cmd_details');
+				my ($cmd) = $file =~ m{addon-(.*)\.pm};
+				$addons{"$cmd"} = $class->cmd_details() // 'No help available';
+			};
+			trace("Failed to load addon module %s: %s", $file, $@) if $@;
+		}
 	}
 
 	unless (keys %addons) {
-		info "No addons are defined for the %s kit.", $self->env->kit->id;
+		info(
+			"No addons are defined for the %s kit.",
+			$self->env->kit->id
+		);
 		return 0
 	}
 
 	my ($label, $short, $msg);
-	info "The following addons are defined for the %s kit:", $self->env->kit->id;
+	info "The following addons are defined for the #C{%s} kit:", $self->env->kit->id;
 
 	foreach my $cmd (sort keys %addons) {
 		$label = $cmd =~ s/([^~]*).*/$1/r;
