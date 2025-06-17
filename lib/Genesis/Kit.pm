@@ -69,6 +69,8 @@ sub has_hook {
 	trace("checking the kit for a(n) '$hook' hook");
 	my $hook_path = $self->path("hooks/$hook");
 	my @allowed_exts = ('');
+	# FIXME: We need to support addon-<long>~<short>(.pm) and addon-<long>(.pm)
+	# Right now there has to be an addon(.pm) hook for the addon to work
 	push @allowed_exts, '.pm' unless envset('GENESIS_NO_MODULE_HOOKS');
 	for my $ext (@allowed_exts) {
 		$self->{__hook_check}{$hook} = "$hook_path$ext" if (-f "$hook_path$ext");
@@ -152,6 +154,7 @@ sub run_hook {
 		my $args = $opts{args} || [];
 		my @help_opt = (qw (--help -h));
 		($args, my $want_help) = compare_arrays($args, \@help_opt);
+		push @$want_help, 'list' if $opts{script} eq 'list';
 		@args = @$args; # For the shell script
 		%module_options = (
 			script => $opts{script},
@@ -248,6 +251,11 @@ EOF
 					"[1ARunning #G{%s} addon for #C{%s} #M{%s} deployment",
 					$addon_label, $opts{env}->name, $self->id
 				);
+
+			# Check if there's a addon.pm perl module
+			} elsif (-f $self->path("hooks/addon.pm")) {
+				$hook_file = $self->path("hooks/addon.pm");
+				$hook_name = "hook/addon '$opts{script}'";
 			} else {
 				$hook_file = $self->path("hooks/addon.sh");
 				$hook_name = "hook/addon '$opts{script}'";
