@@ -285,7 +285,7 @@ sub upload_runtime_configs {
 				$max_length, $type, join(", ", @$args)
 			);
 			# FIXME: When we support other environments, we'll need different '$env' here...
-			my ($out, $rc, $err) = $env->run_hook('runtime-config', args => $args, interactive => $self->{interactive});
+			my ($out, $rc, $err) = $env->run_hook('runtime-config', args => $args, interactive => $self->{interactive}, rc => $type);
 			# TODO: Do we need to handle failed runtime config hooks?
 		} elsif ($env->has_hook("addon-runtime-config~rc")) {
 			# If the runtime config hook is not present, we will run the addon hook
@@ -293,7 +293,7 @@ sub upload_runtime_configs {
 				"[[#-B{%*s}>> #G{addon runtime config with arguments: %s}]\n",
 				$max_length, $type, join(", ", @$args)
 			);
-			my ($out, $rc, $err) = $env->run_hook("addon-runtime-config~rc", args => $args, interactive => $self->{interactive});
+			my ($out, $rc, $err) = $env->run_hook("addon-runtime-config~rc", args => $args, interactive => $self->{interactive}, rc => $type);
 			if ($rc) {
 				error("Failed to run addon runtime config hook: %s", $err);
 				return 0;
