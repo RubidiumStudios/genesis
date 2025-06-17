@@ -43,27 +43,15 @@ sub tempdir {
 sub load_hook_module {
 	my ($class, $file, $kit) = @_;
 
-	my $hook_module;
-
-	if (-f $file) {
-		open my $fh, '<', $file;
-		my $line = <$fh>;
-		$line = <$fh> while ($line =~/^\s*(#.*)?$/);
-		close $fh;
-
-		if ($line =~ /^package (Genesis::Hook::[^ ]*)/) {
-			$hook_module = $1;
-		}
-	} else {
-		bail(
-			"Hook module %s does not exist for kit %s",
-			$file, $kit->id
-		);
-	}
+	$file = $kit->path($file) unless $file =~ m{^/};
+	my $hook_module = $kit->get_hook_module($file);
+	bail(
+		"Hook module %s does not exist for kit %s",
+		$file, $kit->id
+	) unless $hook_module;
 
 	eval {require $file};
 	bail "Failed to load hook module %s: %s", $file, $@ if $@;
-
 	return $hook_module;
 }
 

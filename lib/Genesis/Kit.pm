@@ -79,6 +79,22 @@ sub has_hook {
 }
 
 # }}}
+# get_hook_module - {{{
+sub get_hook_module {
+	my ($self, $hook_file) = @_;
+	$hook_file = $self->path($hook_file) unless $hook_file =~ m{^/};
+	open my $fh, '<', $hook_file;
+	my $line = <$fh>;
+	$line = <$fh> while ($line =~/^\s*(#.*)?$/);
+	close $fh;
+
+	if ($line =~ /^package (Genesis::Hook::[^;\s]*)/) {
+		return $1;
+	}
+	return undef;
+}
+
+# }}}
 # run_hook - {{{
 sub run_hook {
 
@@ -279,16 +295,8 @@ EOF
 			$hook_name = "hook/$hook";
 		}
 
-		if (-f $hook_file && !envset('GENESIS_NO_MODULE_HOOKS')) {
-			open my $fh, '<', $hook_file;
-			my $line = <$fh>;
-			$line = <$fh> while ($line =~/^\s*(#.*)?$/);
-			close $fh;
-
-			if ($line =~ /^package (Genesis::Hook::[^;\s]*)/) {
-				$hook_module = $1;
-			}
-		}
+		$hook_module = $self->get_hook_module($hook_file)
+			if (-f $hook_file && !envset('GENESIS_NO_MODULE_HOOKS'));
 
 		unless ($hook_module) {
 			$hook_file = $self->path("hooks/$hook");

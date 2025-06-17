@@ -27,7 +27,7 @@ sub help {
 			$self->kit_bug(
 				"This kit has incorrectly defined multiple commands in %s - hooks/addon.pm ".
 				"is the only addon that can define multiple commands.",
-				$self->{file} =~ s{^.*(hooks/addon.*pm)$}{$1}r
+				$self->{file} =~ s{^.*(hooks/addon\.pm)$}{$1}r
 			) unless $self->{file} =~ /hooks\/addon\.pm$/;
 			$addons{$_} = $cmd_details->{$_} for keys %$cmd_details;
 		} else {
@@ -42,12 +42,11 @@ sub help {
 	# Loook for any extended addon hooks
 	my @module_files = 
 		map {substr($_,length($self->kit->path())+1)}
-		grep { /\/addon-[^.]*(.pm?)$/ } # ignore disabled or other invalidly named files
+		grep { /\/addon-[^.]*(.pm)?$/ } # ignore disabled or other invalidly named files
 		glob($self->kit->path("hooks/addon-*"));
 
 	foreach my $file (@module_files) {
-		my $cmd = $file =~ s{^.*hooks/addon-(.*)\.pm$}{$1}r;
-		my $long_cmd = $cmd =~ s/([^~]*)(~(.*))?/$1/r;
+		my $cmd = $file =~ s{^.*hooks/addon-(.*?)(\.pm)?$}{$1}r;
 		if ($file !~ /\.pm$/) {
 			next if in_array($file.'.pm', @module_files); # prefer perl modules over other files
 			# run the help command on the bash script
@@ -55,7 +54,7 @@ sub help {
 				interactive => 0, stderr => undef
 			},
 			'cd "$1"; source .helper; hook=$2; shift 2; $hook "$@"',
-			$self->path, $file, 'help'
+			$self->kit->path, $file, 'help'
 			);
 			trace("Failed to run addon help command for %s (rc: %s): %s", $file, $rc, $err) if $rc;;
 			$addons{$cmd} = $out unless $rc;
@@ -64,7 +63,10 @@ sub help {
 				my $class = $self->load_hook_module($file, $self->kit);
 				next unless $class && $class->can('cmd_details');
 				my ($cmd) = $file =~ m{addon-(.*)\.pm};
-				$addons{"$cmd"} = $class->cmd_details() // 'No help available';
+				# FIXME: Initializing the subcommand addons with the current env is a hack,
+				# 			but it is needed to ensure that the addon's cmd_details method
+				# 			can access the environment variables and other context.
+				$addons{"$cmd"} = $class->init(%$self)->cmd_details() // 'No help available';
 			};
 			trace("Failed to load addon module %s: %s", $file, $@) if $@;
 		}
@@ -79,17 +81,17 @@ sub help {
 	}
 
 	my ($label, $short, $msg);
-	info "The following addons are defined for the #C{%s} kit:", $self->env->kit->id;
+	info "\nThe following addons are defined for the #C{%s} kit:", $self->env->kit->id;
 
 	foreach my $cmd (sort keys %addons) {
-		$label = $cmd =~ s/([^~]*).*/$1/r;
-		$short = $cmd =~ s/([^~]*)(~(.*))?/$3/r;
-		$short = "|$short" if $short;
+		$label = $cmd =~ s/~/\|/r;
 		info(
-			"\n  #Gu{%s%s}\n[[    >>%s",
-			$label, $short, join("\n[[    >>", split("\n",$addons{$cmd}))
+			"\n  #Gu{%s}\n[[    >>%s",
+			$label, join("\n[[    >>", split("\n",$addons{$cmd}))
 		);
 	}
+	print STDERR "\n";
+	return $self->done(1);
 }
 
 use Getopt::Long qw(GetOptionsFromArray);
