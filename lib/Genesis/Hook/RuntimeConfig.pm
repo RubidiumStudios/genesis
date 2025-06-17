@@ -79,10 +79,11 @@ sub perform {
 	my $self = shift;
 	my $env = $self->env;
 
+	# FIXME: May need to revisit this output when called through post-deploy as it looks redundant
 	$env->notify(
 		"%s runtime config(s): %s %s",
 		$self->remove ? "removing" : "generating", # Fixme vv
-		join(", ", $self->{builds}->@*),
+		join(", ", $self->{requests}->@*),
 		$self->dryrun ? " (dry-run)" : ""
 	);
 
@@ -147,15 +148,15 @@ sub validate_runtime_config_requests {
 	if (!@requests) {
 		# If no requests are specified, we assume all runtime configs are requested
 		# (and they are valid by definition)
-		$self->{requests} = keys %{$self->{builds}};
+		$self->{requests} = [keys %{$self->{builds}}];
 		return 1;
 	}
 	my @invalid_requests = grep {!exists $self->{builds}->{$_}} @requests;
-	my $padding = (sort map {length($_)} keys %{$self->{builds}})[-1];
+	my $padding = (sort {$a <=> $b} map {length($_)} keys %{$self->{builds}})[-1];
 
 	bail(
 		"Invalid runtime config requests: %s\n\nExpecting one or more of the following:\n%s\n\n".
-		"[[#Yi{Note: }>>No arguments is the same as requesting all runtime configs.\n",
+		"[[#Yi{Note:}>> No arguments is the same as requesting all runtime configs.\n",
 		join(", ", @invalid_requests),
 		join("\n", map {sprintf(
 			"[[  #C{%-*s}>> %s %s runtime config",
@@ -186,7 +187,7 @@ sub build {
 
 	my $build_method = $self->{builds}->{$build}{method};
 	my $description = $self->{builds}->{$build}{description};
-	info({pending => 1}, "  - synthesizing %s runtime config...", $description);
+	info({pending => 1}, "\n  - synthesizing #m{%s} runtime config...", $description);
 	my $start_time = gettimeofday();
 
 	$self->{__current_config} = $build; # This is so the _get_secrets knows which config its for
@@ -242,13 +243,17 @@ sub compare_configs {
 			{content => $config_data,    label => 'generated'}
 		);
 		if ($is_diff) {
-			info("  - found the following changes between existing and generated %s runtime config:\n\n%s", $description, $diff);
+			info("  - found the following changes between existing and generated #m{%s} runtime config:\n\n%s", $description, $diff);
 		} else {
-			info("  - existing %s runtime config is already up to date", $description);
+			info("  - existing #m{%s} runtime config is already up to date", $description);
 			return undef;
 		}
 	} else {
-		info("  - no existing %s runtime config found, generated the following:\n\n%s", $description, $config_data);
+		info(
+			"  - no existing #m{%s} runtime config found, generated the following:\n\n%s",
+			$description,
+			render_markdown("```yaml\n$config_data\n```")
+		);
 	}
 	return 1;
 }
@@ -256,7 +261,7 @@ sub compare_configs {
 # }}}
 # upload_runtime_config - Upload runtime config to BOSH {{{
 sub upload_runtime_config {
-	my ($self, $build, $config_name, $config_data) = @_;
+	my ($self, $build, $config_data, $config_name) = @_;
 	my $description = $self->{builds}->{$build}{description} // $build;
 
 	# Determine if we can upload the config
@@ -270,27 +275,27 @@ sub upload_runtime_config {
 
 		# If we're in interactive mode, we can prompt the user to confirm the upload
 		my $prompt = wrap(sprintf(
-			"[[  - >>upload %s runtime config #c{%s} to BOSH director #M{%s}?",
+			"[[  - >>upload #m{%s} runtime config #c{%s} to BOSH director #M{%s}? [y|n]",
 			$description, $config_name, $self->bosh->alias || $self->bosh->host
 		), terminal_width - 2);
-		if (!prompt_for_boolean($prompt, 0, 1)) {
+		if (prompt_for_boolean($prompt, 0, 1)) {
 			info("[[  - >>#y{skipped}\n");
 			return undef;
 		}
 	}
 
 	my $start_time = gettimeofday();
-	info({pending => 1}, "[[  - >>uploading %s runtime config...", $description);
+	info({pending => 1}, "[[  - >>uploading #m{%s} runtime config...", $description);
 	local $ENV{BOSH_NON_INTERACTIVE} = 1; # We do interactive outside of bosh commands
-	my ($out, $rc) = $self->bosh->upload_config($config_data, 'runtime', $config_name);
+	my ($out, $rc, $err) = $self->bosh->upload_config($config_data, 'runtime', $config_name);
 	if ($rc) {
 		info("#R{failed}".pretty_duration(gettimeofday() - $start_time));
-		error("Failed to upload %s runtime config: %s", $description, $out);
+		error("Failed to upload %s runtime config: %s", $description, $err||$out);
 		delete $self->{secrets}{$build};
 		return undef;
 	}
 	info("#G{done}".pretty_duration(gettimeofday() - $start_time));
-	info("  - #G{runtime config upload complete}\n");
+	info("[[  - >>#G{runtime config upload complete}\n");
 	return 1;
 }
 
@@ -392,7 +397,7 @@ sub _get_secret {
 	my $original_path = $path;
 	my $base_path = $self->env->secrets_store->base;
 	$path = $base_path.$path unless $path =~ m#^/#;
-	my $value = $self->vault->get($path,$key);
+	my $value = $self->env->vault->get($path,$key);
 	return $value unless $self->credhub_base;
 
 	$original_path = "_$original_path" if $original_path =~ m#^/#;

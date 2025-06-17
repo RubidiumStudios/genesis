@@ -194,6 +194,7 @@ sub run_hook {
 		$module_options{rc} = $ENV{GENESIS_DEPLOY_RC};
 		$module_options{data} = $opts{data}//undef;
 		$module_options{interactive} = $opts{interactive} if ($opts{interactive});
+		$module_options{flags} = $opts{flags} if ($opts{flags});
 
 	} elsif ($hook eq 'features') {
 		bug("The 'features' option to run_hook is required for the '$hook' hook!!")

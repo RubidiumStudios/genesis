@@ -3146,7 +3146,8 @@ sub deploy {
 		'post-deploy',
 		rc => $results[1],
 		data => $predeploy_data,
-		interactive => !$noprompt
+		interactive => !$noprompt,
+		flags => $opt_flags,
 	) if $self->has_hook('post-deploy');
 
 	return $ok;

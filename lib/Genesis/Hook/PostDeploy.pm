@@ -8,6 +8,7 @@ use Genesis;
 use Genesis::Term qw/in_controlling_terminal/;
 use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
+use JSON::PP;
 
 sub init {
 	my ($class, %ops) = @_;
@@ -285,7 +286,7 @@ sub upload_runtime_configs {
 				$max_length, $type, join(", ", @$args)
 			);
 			# FIXME: When we support other environments, we'll need different '$env' here...
-			my ($out, $rc, $err) = $env->run_hook('runtime-config', args => $args, interactive => $self->{interactive}, rc => $type);
+			my ($out, $rc, $err) = $env->run_hook('runtime-config', args => $args, interactive => $self->{interactive});
 			# TODO: Do we need to handle failed runtime config hooks?
 		} elsif ($env->has_hook("addon-runtime-config~rc")) {
 			# If the runtime config hook is not present, we will run the addon hook
