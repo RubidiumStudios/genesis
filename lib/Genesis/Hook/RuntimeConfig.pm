@@ -119,9 +119,9 @@ sub register_runtime_config_builds {
 	$self->{builds} = {}; # Reset builds to an empty hash, just in case this is reapplied
 	for my $info (@names) {
 		my ($name,$description) = ();
-		if (ref($name) eq 'ARRAY') {
-			$description = $name->[1] // '';
-			$name = $name->[0];
+		if (ref($info) eq 'ARRAY') {
+			$description = $info->[1] // '';
+			$name = $info->[0];
 		} else {
 			$name = $info;
 			$description = join(' ', map {ucfirst} split(/[_-]/, $name));
