@@ -200,6 +200,14 @@ sub run_hook {
 			unless $opts{features};
 		$module_options{features} = $opts{features};
 		$ENV{GENESIS_REQUESTED_FEATURES} = join(" ", @{ $opts{features} });
+
+	} elsif ($hook eq 'runtime-config') {
+		%module_options = (
+			rc => $opts{rc},
+			args => $opts{args} || [],
+			interactive => $opts{interactive} || 0,
+		);
+		@args = @{$opts{args} || []};
 	}
 
 	# Detect Perl-based hooks and psuedo-hooks
