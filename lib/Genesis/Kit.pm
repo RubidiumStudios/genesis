@@ -205,7 +205,7 @@ sub run_hook {
 		%module_options = (
 			args => $opts{args} || [], # These are the runtime's to build (or remove), empty means all
 			interactive => $opts{interactive} || 0, # whether to run the hook interactively or not
-			dry_run => $opts{dry_run} || 0, # whether to run the hook in dry-run mode
+			dryrun => $opts{dryrun} || 0, # whether to run the hook in dry-run mode
 			remove => $opts{remove} || 0, # whether to remove the runtime configs
 			print => $opts{print} || 0, # whether to show the runtime configs
 		);
