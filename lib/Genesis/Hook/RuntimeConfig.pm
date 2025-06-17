@@ -13,22 +13,22 @@ use Time::HiRes qw/gettimeofday/;
 
 # init - Initialize the runtime config hook {{{
 sub init {
-	my ($class, %ops) = @_;
-	my @required_opts = qw/env rc/;
-	my @optional_opts = qw/interactive dryrun print remove args/;
-	my @missing = grep {!defined($ops{$_})} qw/env rc/;
+	my ($class, %opts) = @_;
+	my @required_opts = qw/env kit/;
+	my @optional_opts = qw/interactive dryrun print remove args file label/;
+	my @missing = grep {!defined($opts{$_})} @required_opts;
 	bug(
 		"Missing required arguments for a perl-based runtime-config hook call: %s",
 		join(", ", @missing)
 	) if @missing;
 	# Check for optional arguments
-	my @invalid_opts = grep {!in_array($_, @required_opts, @optional_opts)} keys %ops;
+	my @invalid_opts = grep {!in_array($_, @required_opts, @optional_opts)} keys %opts;
 	bug(
 		"Invalid optional arguments for a perl-based runtime-config hook call: %s",
 		join(", ", @invalid_opts)
 	) if @invalid_opts;
 
-	my $obj = $class->SUPER::init(%ops);
+	my $obj = $class->SUPER::init(%opts);
 	$obj->{args} //= [];
 	$obj->{builds} = {};
 	$obj->{bosh} = $obj->env->is_bosh_director
