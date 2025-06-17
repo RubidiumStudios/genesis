@@ -32,6 +32,7 @@ our @EXPORT = qw/
 	equivalent_commands
 	command_help
 	command_usage
+	show_global_options
 	command_properties
 	get_args
 	get_options
@@ -83,6 +84,15 @@ our @global_options = ( # {{{
 	[
 		"help|h" =>
 			"Show this help screen.",
+		
+		"help-full" =>
+			"Show help screen with all available options including global options.",
+		
+		"helpful" =>
+			"Show help screen with all available options including global options (same as --help-full, but more fun!).",
+		
+		"globals" =>
+			"Show only the global options available to all commands.",
 	],
 	[
 		"color!" =>
@@ -486,7 +496,7 @@ sub command_help { # {{{
 } # }}}
 
 sub command_usage { # {{{
-	my ($rc, $msg) = @_;
+	my ($rc, $msg, $show_global) = @_;
 	my $called = $CALLED;
 	my $command = $GENESIS_COMMANDS{$called};
 
@@ -541,8 +551,12 @@ sub command_usage { # {{{
 		[vars    => $PROPS{$COMMAND}{variables} || [], 'Environmental Variable'],
 		[command =>$PROPS{$COMMAND}{options} || [], 'Option'],
 		[legacy  => $PROPS{$COMMAND}{deprecated_options} || []],
-		[global  => [(map {@$_} @global_options[0..$PROPS{$COMMAND}{option_group}])]],
 	);
+	
+	# Only add global options if explicitly requested or if we're checking help from command line
+	if ($show_global || (!defined($show_global) && get_options->{help})) {
+		push @sources, [global  => [(map {@$_} @global_options[0..$PROPS{$COMMAND}{option_group}])]];
+	}
 	my (%options_desc, %options_def, %options_order);
 	my $opt_width=0;
 
@@ -626,6 +640,12 @@ sub command_usage { # {{{
 		}
 	}
 
+	# Add notice about global options if they're not being shown
+	if (!$show_global && defined($show_global)) {
+		$out .= "\n#i{To see all options including global ones, use }#g{${\(humanize_bin)}} #G{$command} #y{--help-full}#i{ or }#y{--helpful}\n";
+		$out .= "#i{To see only global options, use }#g{${\(humanize_bin)}} #y{--globals}\n";
+	}
+
 	# TODO: Integrate extended usage better than just dumping it at the end
 	if (ref($PROPS{$command}{extended_usage}) eq "CODE") {
 		my $extended_usage = $PROPS{$command}{extended_usage}->();
@@ -638,6 +658,78 @@ sub command_usage { # {{{
 
 	info {raw => 1}, $out."\n$ver$hr\n";
 	exit ($rc || 0);
+} # }}}
+
+sub show_global_options { # {{{
+	my $hr = "#K\{" . ("=" x terminal_width) ."}";
+	my $bc = $Genesis::BUILD =~ /\+\)/ ? 'R' : 'G';
+	my $ver = "#gi{genesis v$Genesis::VERSION}#${bc}i{$Genesis::BUILD}\n";
+
+	info "\n$hr";
+	my $out = "";
+	$out .= wrap("#G{Global Options} - Available to all Genesis commands", terminal_width)."\n\n";
+	$out .= wrap("#g{${\(humanize_bin)}} [<global options...>] #G{<command>} [<command options and args...>]",terminal_width,"#Wku{Usage:} ", 7)."\n";
+	
+	my (%options_desc, %options_def, %options_order);
+	my $section = 0;
+	for my $global_opt_group (@global_options) {
+		my @options = @$global_opt_group;
+		while (my ($opt_def, $opt_desc) = splice(@options,0,2)) {
+			if ($opt_def eq '-section-break-') {
+				my $sec = '-'.$section++.'-';
+				push @{$options_order{global}}, $sec;
+				$options_desc{$sec} = "$opt_desc";
+				next;
+			}
+			push @{$options_order{global}}, $opt_def;
+			$options_desc{$opt_def} = $opt_desc;
+
+			$opt_def =~ /\^?(~?[\|a-zA-Z0-9_-]*)([\?!\+=:].*)?$/;
+			bug "Global option definition invalid: $opt_def" unless $1;
+			my ($ext,@flags) = ($2 || '', split(/\|/,$1));
+
+			my @short_flags = grep {/^.$/} @flags;
+			my @long_flags = grep {$_ !~ /^~/} grep {/^../} @flags;
+
+			if ($ext eq '!') {
+				$options_def{$opt_def} = "    #y{--[no-]$long_flags[0]}";
+				next;
+			}
+
+			my $opt_label = scalar(@short_flags) ? "-${\(shift @short_flags)}, " : "    ";
+			$opt_label .= "--${\(shift @long_flags)}" if scalar(@long_flags);
+			$opt_label =~ s/, $//; # trim comma if no long option
+			my $opt_arg = "";
+			if ($ext =~ /^=([si])\@?$/) {
+				$opt_arg = $1 eq 's' ? " <str>" : " <N>";
+			} elsif ($ext =~ /^:([si])$/) {
+				$opt_arg = $1 eq 's' ? "[=<str>]" : "[=<N>]";
+			} elsif ($ext eq '+') {
+				$opt_arg = ""; # TODO: find out how to indicate multiple flags allowed
+			}
+			$options_def{$opt_def} = "#y{$opt_label}#B{$opt_arg}";
+		}
+	}
+	
+	my $def_width = (sort {$b <=> $a} map {csize($_)} values(%options_def))[0] + 4;
+	
+	if (defined $options_order{global}) {
+		$out .= "\n#Wku{Global Options}\n";
+		for (@{$options_order{global}}) {
+			if ($_ =~ /^-\d+-$/) {
+				if ($options_desc{$_}) {
+					$out .= "\n#i{".wrap($options_desc{$_},terminal_width)."}\n";
+				} else {
+					$out .= "\n";
+				}
+				next;
+			}
+			$out .= "\n".wrap($options_desc{$_}, terminal_width, "  ".$options_def{$_}, $def_width)."\n";
+		}
+	}
+
+	info {raw => 1}, $out."\n$ver$hr\n";
+	exit 0;
 } # }}}
 
 sub set_top_path { # {{{
