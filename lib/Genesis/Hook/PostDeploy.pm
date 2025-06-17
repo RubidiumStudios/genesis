@@ -16,7 +16,7 @@ sub init {
 		"Missing required arguments for a perl-based kit hook call: %s",
 		join(", ", @missing)
 	) if @missing;
-	
+
 	my $obj = $class->SUPER::init(%ops);
 	return $obj;
 }
@@ -53,7 +53,7 @@ sub update_director_network_config {
 	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
 
 	# Check if network has changes, and if so, show them and store them in exodus
-	
+
 	info({pending => 1}, "[[  - >>storing director network details in exodus...");
 	$tstart = gettimeofday;
 	$env->vault->set_path($env->exodus_base.'/network', $network, flatten => 1, clear => 1);
@@ -150,7 +150,7 @@ sub upload_director_cpi_config {
 		info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
 
 		$self->_commit_config_credhub_secrets($secrets);
-	}	
+	}
 }
 
 sub upload_stemcells {
@@ -180,7 +180,7 @@ sub upload_stemcells {
 		);
 		return unless $answer;
 	}
-	
+
 	# Otherwise, use the Service::BOSH::Stemcell module to upload a suitable stemcell
 	my $tstart = gettimeofday;
 	info({pending => 1}, "[[  - >>determining available stemcells...");
@@ -211,7 +211,7 @@ sub upload_stemcells {
 	}
 
 	info("[[  - >>uploading first stemcell to BOSH director:");
-	
+
 	my $ok = $selected_stemcell->upload(
 		$bosh,
 		dryrun => 0, # Post-deploy hook is not run in dry-run mode
@@ -221,7 +221,7 @@ sub upload_stemcells {
 		error("Failed to upload stemcells!");
 		return 0;
 	}
-	
+
 	notice(
 		"\nTo add more stemcells later, run:\n".
 		"  #G{%s do upload-stemcells [--os <os>] <version>[... <versionN>]}\n".
@@ -243,7 +243,7 @@ sub upload_runtime_configs {
 	my $env = $self->env;
 
 	# Bosh deployments always target themselves, other deployments target the BOSH director
-	my $bosh = $env->is_director
+	my $bosh = $env->is_bosh_director
 		? $env->get_target_bosh({self => 1})
 		: $env->bosh;
 
@@ -265,7 +265,7 @@ sub upload_runtime_configs {
 			info(
 				"[[#-B{%*s}>> #Y{runtime configs from other kits are not supported yet}",
 				$max_length, $type
-			);	
+			);
 			next;
 		}
 

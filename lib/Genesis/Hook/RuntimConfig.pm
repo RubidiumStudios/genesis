@@ -27,11 +27,11 @@ sub init {
 		"Invalid optional arguments for a perl-based runtime-config hook call: %s",
 		join(", ", @invalid_opts)
 	) if @invalid_opts;
-	
+
 	my $obj = $class->SUPER::init(%ops);
 	$obj->{args} //= [];
 	$obj->{builds} = {};
-	$obj->{bosh} = $obj->env->is_director
+	$obj->{bosh} = $obj->env->is_bosh_director
 		? $obj->env->get_target_bosh({self => 1})
 		: $obj->env->bosh;
 	my $vault = $obj->{bosh}->{exodus_vault}//$obj->{env}->vault; # I don't think we need to store this in the obj...
@@ -80,7 +80,7 @@ sub perform {
 	my $env = $self->env;
 
 	$env->notify(
-		"%s runtime config(s): %s %s", 
+		"%s runtime config(s): %s %s",
 		$self->remove ? "removing" : "generating", # Fixme vv
 		join(", ", $self->{builds}->@*),
 		$self->dryrun ? " (dry-run)" : ""
