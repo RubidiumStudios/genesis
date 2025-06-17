@@ -109,7 +109,7 @@ sub run_hook {
 		$_ eq $hook
 	} qw/
 		new blueprint secrets info addon check prereqs pre-deploy post-deploy
-		cloud-config features shell edit terminate cpi-config
+		cloud-config features shell edit terminate cpi-config runtime-config
 	/;
 
 	if ($opts{env}) {
