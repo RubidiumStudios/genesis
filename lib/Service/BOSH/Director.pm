@@ -420,9 +420,9 @@ sub upload_config_from_file {
 	my ($self, $path, $type, $name, $confirm) = @_;
 	$name ||= 'default';
   local $ENV{BOSH_NON_INTERACTIVE} = undef;
-	my @commands = (
-		'update-config', "--type=$type", "--name=$name", $path
-	);
+	my @commands = $type eq 'runtime'
+		? ('update-runtime-config', "--name=$name", $path) # runtime configs needs to do it this ways to upload releases
+		: ('update-config', "--type=$type", "--name=$name", $path);
 	push @commands, '-n' unless $confirm;
 	my ($out, $rc, $err) = $self->execute({interactive => $confirm}, @commands);
 	bail(
