@@ -281,7 +281,7 @@ sub upload_runtime_configs {
 		if ($env->has_hook('runtime-config')) {
 			# If the runtime config hook is present, we will run it
 			info(
-				"[[#-B{%*s}>> #G{runtime config hook with arguments: %s}]\n",
+				"\n[[#-B{[%-*s]}>> #G{runtime config hook with arguments:} [%s]",
 				$max_length, $type, join(", ", @$args)
 			);
 			# FIXME: When we support other environments, we'll need different '$env' here...

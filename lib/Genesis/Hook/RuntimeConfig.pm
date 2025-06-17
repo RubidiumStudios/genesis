@@ -143,7 +143,7 @@ sub register_runtime_config_builds {
 # validate_runtime_config_requests - Validate requested runtime configs exist {{{
 sub validate_runtime_config_requests {
 	my ($self) = @_;
-	my @requests = $self->{args};
+	my @requests = @{$self->{args}//[]};
 	if (!@requests) {
 		# If no requests are specified, we assume all runtime configs are requested
 		# (and they are valid by definition)
@@ -152,12 +152,13 @@ sub validate_runtime_config_requests {
 	}
 	my @invalid_requests = grep {!exists $self->{builds}->{$_}} @requests;
 	my $padding = (sort map {length($_)} keys %{$self->{builds}})[-1];
+
 	bail(
 		"Invalid runtime config requests: %s\n\nExpecting one or more of the following:\n%s\n\n".
 		"[[#Yi{Note: }>>No arguments is the same as requesting all runtime configs.\n",
 		join(", ", @invalid_requests),
 		join("\n", map {sprintf(
-			"  [[  #C{%-*s}>> %s %s runtime config",
+			"[[  #C{%-*s}>> %s %s runtime config",
 			$padding+1,
 			$_.':',
 			ucfirst($self->action),
