@@ -2706,8 +2706,16 @@ sub check {
 
 	# Check for release overrides in the environment file.
 	if (!exists($opts{check_releases}) || $opts{check_releases}) {
-		my $release_override_check = $self->check_release_overrides();
+		my $release_override_check = $self->_check_release_overrides();
 		# Really nothing to do here, just check the status
+	}
+
+	# Check that HTTP/HTTPS release URLs have SHA1 checksums
+	if (!exists($opts{check_release_sha1}) || $opts{check_release_sha1}) {
+		my $release_sha1_check = $self->_check_release_url_sha1();
+		if ($release_sha1_check->{state} eq 'error') {
+			$ok = 0;
+		}
 	}
 
 	# TODO: secrets check for Credhub (post manifest generation)
@@ -4465,6 +4473,64 @@ sub _fix_secrets {
 }
 
 # }}}
+# _check_release_url_sha1 - check that HTTP/HTTPS release URLs have SHA1 checksums {{{
+sub _check_release_url_sha1 {
+	my ($self) = @_;
+	$self->notify("checking release URLs for SHA1 checksums...");
+
+	my @missing_sha1 = ();
+	my $releases = $self->manifest_provider->deployment(subset=>'releases')->data;
+	
+	if (ref($releases) eq 'ARRAY' && scalar(@$releases)) {
+		for my $release (@$releases) {
+			# Check if the release has a URL and if it's HTTP/HTTPS
+			if (defined($release->{url}) && $release->{url} =~ m{^https?://}) {
+				# Check if SHA1 is missing
+				unless (defined($release->{sha1}) && $release->{sha1} ne '') {
+					push @missing_sha1, {
+						name => $release->{name},
+						version => $release->{version},
+						url => $release->{url}
+					};
+				}
+			}
+		}
+	}
+
+	if (!@missing_sha1) {
+		info("[[  - >>#G{All HTTP/HTTPS release URLs have SHA1 checksums}");
+		return {
+			state => 'ok',
+			msg   => "all HTTP/HTTPS release URLs have SHA1 checksums",
+		}
+	}
+
+	error "[[  - >>#R{The following releases are missing SHA1 checksums:}";
+	for my $release (@missing_sha1) {
+		error(
+			"[[       %s #C{%s} v#M{%s}\n[[         URL: #y{%s}",
+			bullet('bad', '>>', indent => 0),
+			$release->{name},
+			$release->{version} || 'unknown',
+			$release->{url}
+		);
+	}
+	error "\n[[  - >>BOSH requires SHA1 checksums for all HTTP/HTTPS release URLs.";
+	error "[[  - >>Please add a 'sha1' field to each release definition above.";
+	
+	return {
+		state => 'error',
+		msg   => sprintf(
+			"%d release%s missing SHA1 checksum%s for HTTP/HTTPS URL%s",
+			scalar(@missing_sha1),
+			scalar(@missing_sha1) == 1 ? ' is' : 's are',
+			scalar(@missing_sha1) == 1 ? '' : 's',
+			scalar(@missing_sha1) == 1 ? '' : 's'
+		),
+	};
+}
+
+# }}}
 # _check_release_overrides - check the release overrides {{{
 sub _check_release_overrides {
 	my ($self) = @_;
@@ -4486,7 +4552,7 @@ sub _check_release_overrides {
 		for my $override (sort {$a->{name} cmp $b->{name}} @$env_releases) {
 			my ($release) = grep {$_->{name} eq $override->{name}} @$kit_releases;
 			push @overrides, [$override->{name}, $override->{version}, $release ? $release->{version} : undef]
-				if !$release || $release->{version} ne $override->{version};
+				if !$release || !defined($release->{version}) || $release->{version} ne $override->{version};
 		}
 	}
 	if (!@overrides) {
@@ -4500,7 +4566,7 @@ sub _check_release_overrides {
 	info "[[  #E{warning}>>#y{environment overrides the following releases:}";
 	for my $override (@overrides) {
 		my ($name, $env_version, $kit_version) = @$override;
-		if ($kit_version) {
+		if (defined $kit_version) {
 			info(
 				"[[     %s#C{%s} #y{v%s} => #%s{v%s}",
 				bullet('', '>>', indent => 0),

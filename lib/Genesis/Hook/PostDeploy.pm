@@ -6,6 +6,7 @@ use parent qw(Genesis::Hook);
 
 use Genesis;
 use Genesis::Term qw/in_controlling_terminal/;
+use Genesis::UI qw/prompt_for_boolean/;
 use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
 use JSON::PP;

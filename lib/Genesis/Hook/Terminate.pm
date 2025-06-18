@@ -15,7 +15,7 @@ sub init {
 	# If dry_run was passed in, it should be renamed to dryrun
 	$args{dryrun} = delete $args{dry_run} if exists $args{dry_run};
 	$class->check_for_required_args({%args}, qw/env kit mode dryrun force noprompt/);
-	my $obj = $class->SUPER::init(@_);
+	my $obj = $class->SUPER::init(%args);
 	
 	# Validate the mode
 	bug(
