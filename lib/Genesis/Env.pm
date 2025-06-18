@@ -4552,7 +4552,7 @@ sub _check_release_overrides {
 		for my $override (sort {$a->{name} cmp $b->{name}} @$env_releases) {
 			my ($release) = grep {$_->{name} eq $override->{name}} @$kit_releases;
 			push @overrides, [$override->{name}, $override->{version}, $release ? $release->{version} : undef]
-				if !$release || !defined($release->{version}) || $release->{version} ne $override->{version};
+				if !$release || !defined($release->{version}) || !defined($override->{version}) || $release->{version} ne $override->{version};
 		}
 	}
 	if (!@overrides) {
@@ -4567,20 +4567,28 @@ sub _check_release_overrides {
 	for my $override (@overrides) {
 		my ($name, $env_version, $kit_version) = @$override;
 		if (defined $kit_version) {
-			info(
-				"[[     %s#C{%s} #y{v%s} => #%s{v%s}",
-				bullet('', '>>', indent => 0),
-				$name, $kit_version,
-				new_enough($env_version,$kit_version) ? 'G' : 'R', $env_version
-			);
+			if (defined $env_version) {
+				info(
+					"[[     %s#C{%s} #y{v%s} => #%s{v%s}",
+					bullet('', '>>', indent => 0),
+					$name, $kit_version,
+					(defined($env_version) && defined($kit_version) && new_enough($env_version,$kit_version)) ? 'G' : 'R', $env_version
+				);
+			} else {
+				info(
+					"[[     %s#C{%s} #y{v%s} => #R{undefined version}",
+					bullet('', '>>', indent => 0),
+					$name, $kit_version
+				);
+			}
 		} else {
 			info(
 				"[[    >>#C{%s} #G{v%s} added (not found in kit)",
-				$name, $env_version
+				$name, $env_version // 'undefined'
 			);
 		}
 	}
-	@outdated = grep {!new_enough($_->[1],$_->[2])} @overrides;
+	@outdated = grep {defined($_->[1]) && defined($_->[2]) && !new_enough($_->[1],$_->[2])} @overrides;
 	return {
 		state => @outdated ? 'outdated' : 'overridden',
 		msg   => sprintf(
