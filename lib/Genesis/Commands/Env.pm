@@ -852,7 +852,7 @@ sub deploy {
 	# Check or fix secrets for required items
 	my $fix_secrets = delete($options{'fix-secrets'}) || $Genesis::RC->get('fix_on_deploy') ne 'never';
 	if ($fix_secrets && !$dryrun) {
-		my $secret_fixes = $env->_fix_secrets(noprompt => $options{noprompt});
+		my $secret_fixes = $env->_fix_secrets(noprompt => $noprompt);
 		bail(
 			"Failed to fix secrets: %s",
 			$secret_fixes->{msg}
@@ -928,7 +928,7 @@ sub deploy {
 				} else {
 					my $stemcell_fix = $env->_fix_stemcells(
 						$stemcell_check_result->{fix_data},
-						noprompt => $options{noprompt},
+						noprompt => $noprompt,
 					);
 					bail(
 						"Failed to fix stemcells: %s",
