@@ -7,14 +7,23 @@ use Genesis;
 
 # new - create a new Service::BOSH::CreateEnvProxy object {{{
 sub new {
-	my ($class) = @_;
-	return bless({}, $class);
+	my ($class, $env) = @_;
+	my $self = bless({}, $class);
+	$self->{alias} = $env ? $env->name : 'create-env';
+	return $self;
 }
 
 # }}}
 # }}}
 
 ### Instance Methods {{{
+
+# alias - specify the name of the bosh director {{{
+sub alias {
+	return $_[0]->{alias} || 'create-env';
+}
+
+# }}}
 
 # create_env - create the environment for the given manifest {{{
 sub create_env {

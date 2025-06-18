@@ -197,10 +197,11 @@ sub dryrun_of {
 	$interactive = 1 if $execute && !defined($interactive);
 
 	my $command = join(' ', map {$_ =~ /\s/ ? "'$_'" : $_} (humanize_path(scalar($self->command)), @cmd));
-	if ($has_director) {
+	if (ref($self)->has_director) {
 		dryrun(
 			"\nwould execute #G{%s} on #M{%s} BOSH director%s",
-			$self-$self->{alias} || $self->{host},
+			$command,
+			$self->{alias} || $self->{host},
 			$execute ? ", resulting in$exec_msg:" : "."
 		);
 	} else {
