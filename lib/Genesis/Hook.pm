@@ -71,6 +71,7 @@ sub done {
 		return $results;
 	} else {
 		$self->{complete} = 1;
+		$self->{results} = 1;
 		return 1;
 	}
 }
