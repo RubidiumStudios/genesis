@@ -3481,17 +3481,47 @@ sub terminate {
 				"[[  - >>Using the unredacted manifest, vars and state file from the deployment archive."
 			);
 			my $last_deployment = $self->deployments->latest(action => 'deploy');
-			bail(
-				"Cannot find artifacts for previous deployment; cannot proceed with delete-env."
-			) unless $last_deployment && $last_deployment->artifact_types();
-			my ($optional_artifacts) = compare_arrays(
-				[$last_deployment->artifact_types()],
-				[qw/vars store/]
-			);
-			$last_deployment->extract_artifacts_to(
-				$self->deployment_cache_path_lookup(),
-				'manifest', 'state', @$optional_artifacts
-			);
+			
+			# If we can't find artifacts, try to fall back to repository files if they exist
+			if (!$last_deployment || !$last_deployment->artifact_types()) {
+				warning(
+					"Cannot find artifacts for previous deployment in vault; attempting to use local repository files."
+				);
+				
+				# Check if we have local state file
+				my $state_path = grep {-f $_} map {$self->path(".genesis/manifests/".$self->name."-state.$_")} (qw/json yml/);
+				
+				if (-f $state_path) {
+					# We found a state file, let's try to regenerate the manifest
+					info("[[  - >>Found local state file; regenerating manifest and vars files.");
+					$self->manifest_provider->unredacted->write_to($self->deployment_cache_path_lookup('manifest'));
+					$self->manifest_provider->unredacted(subset=>'bosh_vars')->write_to($self->deployment_cache_path_lookup('vars'));
+					copy_or_fail($state_path, $self->deployment_cache_path_lookup('state'));
+					
+					# Also copy store file if it exists
+					my $store = grep {-f $_} map {$self->path(".genesis/manifests/".$self->name."-store.$_")} (qw/yml json/);
+					copy_or_fail($store, $self->deployment_cache_path_lookup('store'))
+						if $store;
+				} else {
+					# No state file found, we can't proceed
+					bail(
+						"Cannot find artifacts for previous deployment in vault, and no local state file found; cannot proceed with delete-env.\n\n".
+						"If the BOSH VM still exists but state is missing, you may need to manually delete it using:\n".
+						"  - Cloud provider's management console/CLI\n".
+						"  - Or recreate the state file manually if you know the instance details"
+					);
+				}
+			} else {
+				# We have deployment artifacts, extract them normally
+				my ($optional_artifacts) = compare_arrays(
+					[$last_deployment->artifact_types()],
+					[qw/vars store/]
+				);
+				$last_deployment->extract_artifacts_to(
+					$self->deployment_cache_path_lookup(),
+					'manifest', 'state', @$optional_artifacts
+				);
+			}
 		}
 		$self->notify("deleting create-env environment...");
 		my ($out, $rc) = $self->bosh->delete_env(
