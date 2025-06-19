@@ -741,7 +741,6 @@ sub deploy {
 				$env->director_exodus_lookup('default_cpi_config','default'),
 				$env->bosh->{alias}
 			);
-			last;
 		}
 
 		if ($env->can_build_cloud_configs) {
