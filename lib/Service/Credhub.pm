@@ -241,8 +241,12 @@ sub set {
 	return ($out, $rc, $err) if wantarray;
 
 	bail(
-		"Could not create the Credhub %s value:\n%s\n[Exit Code: %s]",
-		$type,$out,$rc
+		"Could not create the Credhub %s value for path #c{%s}:%s%s\n\n[Exit Code: %s]",
+		$type eq 'value' ? 'secret' : $type,
+		$path,
+		$out ? "\n\n#wui{STDOUT:}\n$out" : '',
+		$err ? "\n\n#rui{STDERR:}\n$err" : '',
+		$rc
 	) if $rc;
 	my $result = read_json_from($out, $rc, $err);
 	# TODO: update cache if it exists
