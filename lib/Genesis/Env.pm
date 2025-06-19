@@ -3300,7 +3300,7 @@ sub update_deployment_exodus {
 		my $err = $@;
 		if ($err) {
 			push @errors, "Failed to authenticate to vault: $err";
-		} else {
+		} elsif (@exodus_cmds) {
 			my ($out, $rc, $err) = $self->vault->query({ redact => 1}, @exodus_cmds);
 			push @errors, "Failed to set exodus data in vault: $err" if $rc;
 		}
@@ -3375,6 +3375,9 @@ sub terminate {
 		'flags'   => $term_flags,
 		'reason'  => $reason,
 	);
+
+	# Set up deployment cache early so it's available for all termination paths
+	$self->deployment_cache_setup;
 
 	# TODO: Do we want to support a full reset where all exodus data and secrets are removed?
 	#my $full_reset = delete($opts{'deployment-history'})//0;
@@ -3454,7 +3457,6 @@ sub terminate {
 		$self->notify("preparing to delete a create-env environment...");
 		# Gather all the files needed to send to delete-env
 		my $files = {};
-		$self->deployment_cache_setup;
 		if ($self->manifest_store eq 'repository') {
 			info(
 				"[[  - >>Regenerating the unredacted manifest and vars files as needed for `bosh delete-env`.\n".
