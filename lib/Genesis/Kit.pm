@@ -254,9 +254,10 @@ EOF
 	} else {
 		if ($hook eq 'addon') {
 			# Check if its a perl module
-			($hook_file) =
-				grep {/(\/addon-$opts{script}(~.*)?|~$opts{script})\.pm$/}
-				glob($self->path('hooks/addon*'));
+			($hook_file) = grep {
+				/(\/addon-$opts{script}(~.*)?|~$opts{script})\.pm$/
+			} glob($self->path('hooks/addon*'));
+
 			if (
 				($hook_file//'') =~ m/\/addon-([^~]*)(?:~(.*))?\.pm$/
 				&& ! envset('GENESIS_NO_MODULE_HOOKS')
@@ -272,8 +273,15 @@ EOF
 			} elsif (-f $self->path("hooks/addon.pm")) {
 				$hook_file = $self->path("hooks/addon.pm");
 				$hook_name = "hook/addon '$opts{script}'";
+			} elsif ($opts{help}) {
+				# Deal with getting the list when no addon.pm file is present
+				# We need a dummy module so that it can be initiated and help run on it.
+				# Since the base Addon hook module doesn't define cmd_details, but does
+				# have a functional init method, this will work.
+				$hook_module = "Genesis::Hook::Addon";
+				$hook_name = "addon help"
 			} else {
-				$hook_file = $self->path("hooks/addon.sh");
+				$hook_file = $self->path("hooks/addon");
 				$hook_name = "hook/addon '$opts{script}'";
 			}
 		} elsif ($hook eq 'cloud-config') {
@@ -295,13 +303,13 @@ EOF
 			$hook_name = "hook/$hook";
 		}
 
-		$hook_module = $self->get_hook_module($hook_file)
+		$hook_module //= $self->get_hook_module($hook_file)
 			if (-f $hook_file && !envset('GENESIS_NO_MODULE_HOOKS'));
 
 		unless ($hook_module) {
+			# Implement tracing for bash scripts - not applicable to Perl modules
 			$hook_file = $self->path("hooks/$hook");
 			if (envset('GENESIS_TRACE')) {
-				# Enable bash tracing for the hook (if it's a bash script)
 				open my $file, '<', $hook_file;
 				my $firstLine = <$file>;
 				close $file;
