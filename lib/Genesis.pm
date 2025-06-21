@@ -708,22 +708,45 @@ sub read_json_from {
 }
 
 sub curl {
-	my ($method, $url, $headers, $data, $skip_verify, $creds) = @_;
-	$headers ||= {};
+	my ($url, $args);
+	if (ref($_[0]) eq 'HASH') {
+		($args, $url) = @_;
+		$args->{method} ||= 'GET';
+		$args->{headers} ||= {};
+	} else {
+		$args = {};
+		$args->{method} = shift // 'GET';
+		$url = shift;
+		$args->{headers} = shift || {};
+		$args->{data} = shift if @_;
+		$args->{skip_verify} = shift if @_;
+		$args->{creds} = shift if @_;
+	}
+
+	unless (ref($args) eq 'HASH') {
+		bug("Internal error: \$args is not a hash reference, got %s", ref($args) || 'scalar');
+	}
+
+	my ($method, $headers, $data, $skip_verify, $creds) = $args->@{qw/method headers data skip_verify creds/};
+	my $file = $args->{file};
 
 	bug("No url provided to Genesis::curl") unless $url;
-	bug("No methhod provided to Genesis::curl") unless $method;
+	bug("No method provided to Genesis::curl") unless $method;
+	bail(
+		"Invalid method '%s' provided to Genesis::curl.  Must be one of GET, POST, PUT, DELETE, HEAD",
+		$method
+	) unless !ref($method) && $method =~ m/^(GET|POST|PUT|DELETE|HEAD)$/i;
 
-	my $header_opt = "i";
+	my $header_opt = "";
 	my @flags = ("-X", $method);
 	if ($method eq "HEAD") {
 		$header_opt = 'I';
-	} elsif ($method eq "POST") {
-		push @flags, qw/--post301 --post302/;
 	}
+	push (@flags, "-D", "/dev/stderr")      if  $method ne "HEAD";
+	push @flags, qw/--post301 --post302/    if  $method eq "POST";
 	push @flags, "-H", "$_: $headers->{$_}" for (keys %$headers);
 	push @flags, "-d", $data                if  $data;
-	push @flags, "-k"                       if  ($skip_verify);
+	push @flags, "-k"                       if  $skip_verify;
 	if ($creds) {
 		if ($creds =~ "^Bearer ") {
 			push @flags, "-H", "Authorization: $creds"
@@ -732,6 +755,7 @@ sub curl {
 		}
 	}
 	push @flags, "-v"                       if  (envset('GENESIS_DEBUG'));
+	push @flags, "-o", $file                if  $file;
 
 	my $status = "";
 	my $status_line = "";
@@ -740,11 +764,13 @@ sub curl {
 	my ($out, $rc, $err) = run({ stderr => 0 }, 'curl', '-'.$header_opt.'sSL', $url, @flags);
 	return (599, "Error executing curl command", $err) if ($rc);
 
-	my @data = lines($out,$rc);
+	my @data = lines($out, $rc);
+	my @err_data = lines($err, $rc);
 	my $in_header;
 	my @header_data;
 	my $line;
-	while ($line = shift @data) {
+
+	while ($line = shift @err_data) {
 		if ($line =~ m/^HTTP\/\d+(?:\.\d)?\s+((\d+)(\s+.*)?)$/) {
 			$in_header = 1;
 			chomp($status_line = $1);
@@ -752,14 +778,14 @@ sub curl {
 		}
 		last unless $in_header;
 		push @header_data, $line;
-		$in_header=0 if ($line =~ /^\s+$/);
+		$in_header = 0 if ($line =~ /^\s+$/);
 	}
-	unshift @data, $line if defined($line);
+	unshift @err_data, $line if defined($line);
 
 	dump_var header => join($/,@header_data);
-	return  $status, $status_line, join($/, @header_data, @data)
+	return  $status, $status_line, join($/, @header_data, @data, @err_data)
 		if ($header_opt eq 'I');
-	return $status, $status_line, join($/, @data), join($/, @header_data);
+	return $status, $status_line, $file ? $file : join($/, @data), join($/, @header_data), join($/, @err_data);
 }
 
 # spruce_diff - diff two yaml files, and return the diff as a colored string.
