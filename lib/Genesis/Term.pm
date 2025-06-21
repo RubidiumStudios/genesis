@@ -298,7 +298,7 @@ sub wrap {
 sub fix_wrap {
 	my @msg = @_;
 	my $fmt = "%s";
-	$fmt = shift(@msg) if $#msg > 0;
+	$fmt = shift(@msg) if @msg > 1;
 
 	my $msg = sprintf($fmt,@msg);
 	$msg =~ s/^(\n*)(.*?)\n*\z/$2/s;
