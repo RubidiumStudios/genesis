@@ -1218,8 +1218,8 @@ sub ocfp_env {
 #	ocfp_config - returns the OCFP configuration for the environment {{{
 sub ocfp_config {
 	my ($self,$path) = @_;
-	my $config= $self->_memoize(sub {
-		my $ocfp_config = $self->vault->get_path($self->ocfp_config_base);
+	return $self->_memoize(sub {
+		return $self->vault->get_path($self->ocfp_config_base);
 	});
 }
 
