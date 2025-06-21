@@ -146,19 +146,83 @@ sub register_runtime_config_builds {
 # validate_runtime_config_requests - Validate requested runtime configs exist {{{
 sub validate_runtime_config_requests {
 	my ($self) = @_;
-	my @requests = @{$self->{args}//[]};
-	if (!@requests) {
-		# If no requests are specified, we assume all runtime configs are requested
-		# (and they are valid by definition)
-		$self->{requests} = [sort {
-			$self->{builds}->{$a}{order} <=> $self->{builds}->{$b}{order}
-		} keys %{$self->{builds}}];
+	my $args = $self->{args};
+
+	# Step 0: Short circuit if no args are specified or if the args are 'true'
+	if (!($args || (ref($args) eq 'JSON::PP::Boolean' && $args))) {
+		# If no args are specified or the argument is 'true', we assume all valid
+		# runtime configs are requested with default options (short-circuit the rest
+		# of the function)
+		$self->{requests} = [$self->get_req_names('*')];
+		$self->{request_options} = {};
 		return 1;
+	} 
+	
+	# Step 1: Standardize the requests to a hash of request names with options
+	if (!ref($args) && $args =~ /^\w+$/) {
+		# If its a string, promote it to a hash with no options
+		$args = {$args => {}};
+	
+	} elsif (ref($args) eq 'ARRAY') {
+		# If the args are an array, promote to a joined string (to preserve order)
+		# RISK: If the world builds a better idiot who puts a comma in the
+		# request name, or includes the special '*' character, this will break.
+		# We reserve the right to publicly shame those that engage in such folly.
+		$args = {join(',', @$args) => {}};
+	} elsif (!ref($args) || ref($args) ne 'HASH') {
+		# Invalid argument type, bail out
+		bail(
+			"Invalid runtime config request arguments: expecting a #C{true}, a ",
+			"string, array of strings, or a hash of runtime build with options ".
+			"or boolean got %s",
+			ref($args)
+				? "a ".ref($args)." value"
+				: defined $args
+				? "'#C{$args}'"
+				: '#y{<undef>}'
+		);
 	}
-	# TODO: Support {not => [ 'dns', 'ops-access' ]} syntax for excluding builds
+
+	# Step 2: Convert the now-unified hash args to a list of requests and their options
+
+	# It will merge options for any series of matches, specifically in the
+	# case where you set a common set of options using '*' or a
+	# comma-separated list.  Note that because hashes are unordered, any merging should
+	# NOT count of the order of processing.
+	my @requests = ();
+	my %req_opts = ();
+	my @excluded_reqs = ();
+
+	for my $req_id (keys %{$self->{args}}) {
+		my @names = $self->_get_req_names($req_id);
+		my $opts = $self->{args}->{$req_id};
+		if (ref($opts) eq 'JSON::PP::Boolean') {
+			# Boolean options are reserved for inclusion/exclusion of requests
+			push(@{$opts ? \@requests : \@excluded_reqs}, @names);
+		} elsif (ref($opts) eq 'HASH') {
+			# Any hashes are merged - leaving validation to the build_*_runtime methods
+			push(@requests, @names);
+			# Merge if they already exist
+			$req_opts{$_} = {%{$req_opts{$_} // {}}, %$opts} for @names;
+		} else {
+			# Invalid option type, bail out
+			bail(
+				"Invalid runtime config request options for '%s': expecting a hash or boolean, got %s",
+				$req_id, ref($opts) || $opts || '#y{<undef>}'
+			);
+		}
+	}
+
+	# Step 3: Handle excluded requests
+	if (@excluded_reqs) {
+		# If there are any excluded requests, we remove them from the requests list
+		# (defaults to all builds)
+		@requests = grep {!in_array($_, @excluded_reqs)} @requests//$self->get_req_names('*');
+	}
+
+	# Step 4: Validate the requests
 	my @invalid_requests = grep {!exists $self->{builds}->{$_}} @requests;
 	my $padding = (sort {$a <=> $b} map {length($_)} keys %{$self->{builds}})[-1];
-
 	bail(
 		"Invalid runtime config requests: %s\n\nExpecting one or more of the following:\n%s\n\n".
 		"[[#Yi{Note:}>> No arguments is the same as requesting all runtime configs.\n",
@@ -171,7 +235,9 @@ sub validate_runtime_config_requests {
 			$self->{builds}->{$_}{description} // $_
 		)} sort keys %{$self->{builds}}),
 	) if @invalid_requests;
-	$self->{requests} = [@requests];
+
+	$self->{requests} = \@requests;
+	$self->{request_options} = \%req_opts;
 	return 1;
 }
 
@@ -428,6 +494,22 @@ sub _get_runtime_configs {
 }
 
 # }}}
+# _get_req_names - Get the runtime build name from a request identifier {{{
+sub _get_req_names {
+	# Names can be a single name, a comma-separated list of names, or '*'
+	my ($self, $req_id) = @_;
+	if ($req_id eq '*') {
+		# If the request is '*', we return all registered builds, sorted by their
+		# registration order
+		return sort {
+			$self->{builds}->{$a}{order} <=> $self->{builds}->{$b}{order}
+		} keys %{$self->{builds}};
+	}
+	return split(/,/, $req_id);
+}
+
+# }}}
+
 
 1;
 # vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1:
