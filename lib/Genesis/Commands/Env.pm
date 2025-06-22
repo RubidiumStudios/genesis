@@ -944,7 +944,6 @@ sub deploy {
 					$stemcell_check_result->{msg}
 				);
 			}
-			$ok = 0;
 		}
 	}
 

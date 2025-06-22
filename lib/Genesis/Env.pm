@@ -4256,6 +4256,7 @@ sub _check_cpi_config {
 		);
 		return {
 			state    => 'missing secrets',
+			fatal    => 1,
 			fix_data => {
 				cpi_config => $cpi_config,
 				name       => $cpi_name,
@@ -4321,6 +4322,7 @@ sub _fix_cpi_config {
 			info("#R{failed}".pretty_duration(gettimeofday() - $start));
 			return {
 				result => 'error',
+				fatal  => 1,
 				msg    => sprintf(
 					"failed to upload CPI config: %s",
 					$err ? $err : $out
@@ -4377,6 +4379,7 @@ sub _fix_cpi_config {
 			info("[[  - >>#R{failed to create some secrets}");
 			return {
 				result => 'error',
+				fatal  => 1,
 				msg    => sprintf("failed to create some secrets"),
 			};
 		}
