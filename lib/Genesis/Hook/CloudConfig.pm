@@ -207,7 +207,9 @@ sub build_cpi_azs {
 	my @azs = ();
 	for my $az_name (sort keys %$parent_azs) {
 		my $az_defn = $parent_azs->{$az_name};
-		my $idx = $parent_azs->{index} // ($az_name =~ m/[^0-9]([0-9]*)$/)[0];
+		my $idx = $az_defn->{index} # This is the index of the az, we currently do not populate it
+			// ($az_name =~ m/[^0-9]([0-9]*)$/)[0]
+			|| ($az_defn->{name} =~ m/[^0-9]([0-9]*)$/)[0];
 		my $config = $self->_az_definition_for(
 			$az_defn, %options, name => $self->{az_prefix} . $idx
 		);
@@ -522,6 +524,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 		push @{$config->{subnets}}, $subnet_config if $full_range->size > $reserved->size;
 	}
+	
 
 	return 1;
 }

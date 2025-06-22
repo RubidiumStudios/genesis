@@ -161,7 +161,8 @@ sub _set_network_azs {
 				$cloud_properties = '{}';
 			}
 			($az_name, {
-					name => $prefix . $idx,
+					index => $idx,
+					name  => $prefix . $idx,
 					cloud_properties => $cloud_properties,
 			});
 		} sort keys %{scalar $azs};

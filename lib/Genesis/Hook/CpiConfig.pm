@@ -96,7 +96,8 @@ sub gather_properties {
 	# The default_value is used if the property is not found.  The default will
 	# be used verbatim, so true, false and null will be their yaml equivalents,
 	# so if you want them to be strings, you need to quote them.  Basically,
-	# the default value should be a valid JSON value.
+	# the default value should be a valid JSON value.  Alternatively, if you only
+	# want to include that property if it is set, you can use a '?'
 	#
 	# The config_path is used to specify the path in the CPI configuration that
 	# the property should be placed.  This is useful for nested properties, or
