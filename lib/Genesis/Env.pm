@@ -5205,6 +5205,7 @@ sub _get_stemcell_status {
 	#  - search_term: the stemcell version requested
 
 	my ($self, $recalculate) = @_;
+	require Service::BOSH::Stemcell;
 
 	$self->{__stemcell_status} = undef if $recalculate;
 	return wantarray ? @{$self->{__stemcell_status}} : $self->{__stemcell_status}
@@ -5255,7 +5256,6 @@ sub _get_stemcell_status {
 					$result->{found} = $available{$cpi_targets[0]};
 				}
 				if (!@cpi_targets || $cpi_targets[0] ne $targets[0]) {
-					require Service::BOSH::Stemcell;
 					$result->{alt} = Service::BOSH::Stemcell->find(
 						$self->iaas, $available{$targets[0]}->@{qw/os version/},
 						scalar($self->lookup('bosh-configs.stemcells.type',undef))
@@ -5264,8 +5264,8 @@ sub _get_stemcell_status {
 				}
 			} else {
 				# No stemcells available for the desired os
-				require Service::BOSH::Stemcell;
 				$result->{alt} = Service::Bosh::Stemcell->find(
+					$self->iaas,
 					$os,
 					$version
 				);
@@ -5282,6 +5282,7 @@ sub _get_stemcell_status {
 				$result->{found} = $match;
 			} else {
 				$result->{alt} = Service::BOSH::Stemcell->find(
+					$self->iaas,
 					$os,
 					$version
 				);
