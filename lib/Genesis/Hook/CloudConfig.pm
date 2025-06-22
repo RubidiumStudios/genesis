@@ -1132,8 +1132,16 @@ sub _process_network_subnets {
 		push(@{$subnets_by_range{$_->{range}}}, $_) for (@$subnets);
 	
 		my @lsa_subnets = ();
-		for my $range (keys %subnets_by_range) {
+		my %processed_ranges = ();
+		
+		# Process subnets in original order to maintain ordering
+		for my $subnet (@$subnets) {
+			my $range = $subnet->{range};
+			next if $processed_ranges{$range}; # Skip if we already processed this range
+			
+			$processed_ranges{$range} = 1;
 			my @subnet_configs = @{$subnets_by_range{$range}};
+			
 			if (@subnet_configs > 1) {
 				# Build a logical subnet amalgamation (LSA) for this range
 				my $lsa = $self->_build_logical_subnet_amalgamation(
