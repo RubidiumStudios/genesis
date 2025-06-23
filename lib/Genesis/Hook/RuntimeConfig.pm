@@ -193,9 +193,9 @@ sub validate_runtime_config_requests {
 	my %req_opts = ();
 	my @excluded_reqs = ();
 
-	for my $req_id (keys %{$self->{args}}) {
+	for my $req_id (keys %{$args}) {
 		my @names = $self->_get_req_names($req_id);
-		my $opts = $self->{args}->{$req_id};
+		my $opts = $args->{$req_id};
 		if (ref($opts) eq 'JSON::PP::Boolean') {
 			# Boolean options are reserved for inclusion/exclusion of requests
 			push(@{$opts ? \@requests : \@excluded_reqs}, @names);
