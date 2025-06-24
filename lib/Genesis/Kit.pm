@@ -65,17 +65,43 @@ sub has_hook {
 	if ($hook eq 'cloud-config') {
 		$hook = "cloud-config-$opts{purpose}" if ($opts{purpose});
 	}
+	if ($hook eq 'addon') {
+		my $script = $opts{script} || '';
+		return $self->{__hook_check}{$hook}{$script} if exists($self->{__hook_check}{$hook}{$script});
+		my $filename = $self->get_addon_hook_file($script);
+		return $self->{__hook_check}{$hook}{$script} = $filename;
+	}
+
 	return $self->{__hook_check}{$hook} if exists($self->{__hook_check}{$hook});
 	trace("checking the kit for a(n) '$hook' hook");
 	my $hook_path = $self->path("hooks/$hook");
-	my @allowed_exts = ('');
-	# FIXME: We need to support addon-<long>~<short>(.pm) and addon-<long>(.pm)
-	# Right now there has to be an addon(.pm) hook for the addon to work
+	my @allowed_exts = ('','.sh');
 	push @allowed_exts, '.pm' unless envset('GENESIS_NO_MODULE_HOOKS');
 	for my $ext (@allowed_exts) {
 		$self->{__hook_check}{$hook} = "$hook_path$ext" if (-f "$hook_path$ext");
 	}
 	return $self->{__hook_check}{$hook};
+}
+
+# }}}
+# get_addon_hook_file	- {{{
+
+sub get_addon_hook_file {
+	my ($self, $script) = @_;
+	return $self->{__addon_for_script_hook}{$script}
+		if exists($self->{__addon_for_script_hook}{$script});
+
+	# Do  we have an explicit script using long or short name?
+	my @files =  glob($self->path('hooks/addon*'));
+	my @scripts = grep {/(\/addon-$script(~.*)?|~$script)(\.pm)?$/} @files;
+	@scripts = grep {/\/addon(\.pm)?$/} @files unless @scripts;
+
+	# sort the scripts by length, so that the longest name is first unless $GENESIS_NO_MODULE_HOOKS is set, in which case sorter first.
+	@scripts = sort {
+	 length($a) <=> length($b) * (envset('GENESIS_NO_MODULE_HOOKS') ? -1 : 1)
+	} @scripts;
+
+	return $self->{__addon_for_script_hook}{$script} = $scripts[0] if @scripts;
 }
 
 # }}}
@@ -253,37 +279,33 @@ EOF
 
 	} else {
 		if ($hook eq 'addon') {
-			# Check if its a perl module
-			($hook_file) = grep {
-				/(\/addon-$opts{script}(~.*)?|~$opts{script})\.pm$/
-			} glob($self->path('hooks/addon*'));
-
-			if (
-				($hook_file//'') =~ m/\/addon-([^~]*)(?:~(.*))?\.pm$/
-				&& ! envset('GENESIS_NO_MODULE_HOOKS')
-			) {
-				$hook_name = "hook/addon ".($2 ? "'$1/$2'" : "'$1'");
+			my $script = $opts{script} || '';
+			$hook_file = $self->get_addon_hook_file($script) // '';
+			if ($hook_file =~ m{/addon-([^~]*)(?:~(.*))?(\.pm)?$}) {
 				my $addon_label = $2 ? "$1/$2" : $1;
+				$hook_name = "hook/addon '$addon_label'";
 				info(
 					"[1ARunning #G{%s} addon for #C{%s} #M{%s} deployment",
 					$addon_label, $opts{env}->name, $self->id
 				);
 
 			# Check if there's a addon.pm perl module
-			} elsif (-f $self->path("hooks/addon.pm")) {
-				$hook_file = $self->path("hooks/addon.pm");
-				$hook_name = "hook/addon '$opts{script}'";
+			} elsif ($hook_file =~ m{hooks/addon.pm$}) {
+				$hook_name = "hook/addon '$script'";
+
 			} elsif ($opts{help}) {
 				# Deal with getting the list when no addon.pm file is present
 				# We need a dummy module so that it can be initiated and help run on it.
 				# Since the base Addon hook module doesn't define cmd_details, but does
-				# have a functional init method, this will work.
+				# have a functional init method, this will work. This will also support
+				# non-perl addon if present.
 				$hook_module = "Genesis::Hook::Addon";
 				$hook_name = "addon help"
 			} else {
 				$hook_file = $self->path("hooks/addon");
 				$hook_name = "hook/addon '$opts{script}'";
 			}
+
 		} elsif ($hook eq 'cloud-config') {
 			if ($ENV{GENESIS_CLOUD_CONFIG_SUBTYPE}) {
 				$hook_file = $self->path("hooks/cloud-config-$ENV{GENESIS_CLOUD_CONFIG_SUBTYPE}.pm");

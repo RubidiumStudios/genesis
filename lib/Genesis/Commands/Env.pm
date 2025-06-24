@@ -1092,7 +1092,7 @@ sub addon {
 	$env->kit->check_prereqs($env)
 		or bail "Cannot use the kit specified by %s.\n", $env->name;
 
-	$env->has_hook('addon')
+	$env->has_hook('addon') || $env->kit->has_hook('addon', $script)
 		or bail "#R{Kit %s does not provide an addon hook!}", $env->kit->id;
 
 	$env->download_required_configs('addon', "addon-$script");
