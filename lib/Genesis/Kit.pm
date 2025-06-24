@@ -91,6 +91,8 @@ sub get_addon_hook_file {
 	return $self->{__addon_for_script_hook}{$script}
 		if exists($self->{__addon_for_script_hook}{$script});
 
+	# Special case for the addon hook help/list/blank script
+	return '@Genesis::Hook::Addon' if $script =~ /^(list|help|)$/ && !envset('GENESIS_NO_MODULE_HOOKS');
 	# Do  we have an explicit script using long or short name?
 	my @files =  glob($self->path('hooks/addon*'));
 	my @scripts = grep {/(\/addon-$script(~.*)?|~$script)(\.pm)?$/} @files;
@@ -134,7 +136,8 @@ sub run_hook {
 		$hook=$opts{hook}||'shell';
 	} elsif ($is_edit) {
 		$opts{editor} ||= $ENV{EDITOR}||'vim';
-	} elsif (! $self->has_hook($hook)) {
+	} elsif (! $hook eq 'addon' && !$self->has_hook($hook)) {
+		# Addon is a special case, it can be missing
 		bail("No '$hook' hook script found")
 	}
 
@@ -196,8 +199,8 @@ sub run_hook {
 		my $args = $opts{args} || [];
 		my @help_opt = (qw (--help -h));
 		($args, my $want_help) = compare_arrays($args, \@help_opt);
-		push @$want_help, 'list' if $opts{script} eq 'list';
-		@args = @$args; # For the shell script
+		push @$want_help, 'list' if !$opts{script} || $opts{script} =~ /^(list|help)$/;
+		@args = @$args; # For bash addon hooks
 		%module_options = (
 			script => $opts{script},
 			args => $args,
@@ -279,7 +282,7 @@ EOF
 
 	} else {
 		if ($hook eq 'addon') {
-			my $script = $opts{script} || '';
+			my $script = $module_options{script} || '';
 			$hook_file = $self->get_addon_hook_file($script) // '';
 			if ($hook_file =~ m{/addon-([^~]*)(?:~(.*))?(\.pm)?$}) {
 				my $addon_label = $2 ? "$1/$2" : $1;
@@ -293,7 +296,7 @@ EOF
 			} elsif ($hook_file =~ m{hooks/addon.pm$}) {
 				$hook_name = "hook/addon '$script'";
 
-			} elsif ($opts{help}) {
+			} elsif ($module_options{help}) {
 				# Deal with getting the list when no addon.pm file is present
 				# We need a dummy module so that it can be initiated and help run on it.
 				# Since the base Addon hook module doesn't define cmd_details, but does
@@ -305,6 +308,11 @@ EOF
 				$hook_file = $self->path("hooks/addon");
 				$hook_name = "hook/addon '$opts{script}'";
 			}
+
+			bail(
+				"Could not find addon hook for '%s' script in kit %s",
+				$opts{script}, $self->id
+			) unless -f $hook_file || $hook_module;
 
 		} elsif ($hook eq 'cloud-config') {
 			if ($ENV{GENESIS_CLOUD_CONFIG_SUBTYPE}) {
