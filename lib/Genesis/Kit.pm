@@ -284,7 +284,15 @@ EOF
 		if ($hook eq 'addon') {
 			my $script = $module_options{script} || '';
 			$hook_file = $self->get_addon_hook_file($script) // '';
-			if ($hook_file =~ m{/addon-([^~]*)(?:~(.*))?(\.pm)?$}) {
+
+			# Special case for the addon hook help/list/blank script
+			if ($hook_file =~ s/^@// && $script =~ /^(list|help|)$/) {
+				$hook_module = $hook_file;
+				$hook_file   = $ENV{GENESIS_LIB}.'/'.($hook_file =~ s{::}{/}rg).'.pm';
+				$hook_name   = $module_options{label} = "addon help";
+
+			# named addon perl script
+			} elsif ($hook_file =~ m{/addon-([^~]*)(?:~(.*))?(\.pm)?$}) {
 				my $addon_label = $2 ? "$1/$2" : $1;
 				$hook_name = "hook/addon '$addon_label'";
 				info(
@@ -296,14 +304,6 @@ EOF
 			} elsif ($hook_file =~ m{hooks/addon.pm$}) {
 				$hook_name = "hook/addon '$script'";
 
-			} elsif ($module_options{help}) {
-				# Deal with getting the list when no addon.pm file is present
-				# We need a dummy module so that it can be initiated and help run on it.
-				# Since the base Addon hook module doesn't define cmd_details, but does
-				# have a functional init method, this will work. This will also support
-				# non-perl addon if present.
-				$hook_module = "Genesis::Hook::Addon";
-				$hook_name = "addon help"
 			} else {
 				$hook_file = $self->path("hooks/addon");
 				$hook_name = "hook/addon '$opts{script}'";
@@ -356,8 +356,8 @@ EOF
 	debug ("Running #C{$hook_name} hook now in ".$self->path);
 	if ($hook_module) {
 		$module_options{file} = $hook_file;
-		$module_options{label} = $hook_name =~ s/^hook\/addon '([^'])'.*/$1/r =~ s{/}{|}r;
-		eval {require $hook_file};
+		$module_options{label} //= $hook_name =~ s/^hook\/addon '([^'])'.*/$1/r =~ s{/}{|}r;
+		eval {require $hook_file unless $hook_module->can('init')};
 		bail(
 			"Could not load Perl module %s to run hook %s in kit %s: %s",
 			$hook_file, $hook_name, $self->id, $@

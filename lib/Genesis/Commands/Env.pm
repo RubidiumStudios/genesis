@@ -1084,20 +1084,24 @@ sub terminate {
 }
 
 sub addon {
-	command_usage(1) if @_ < 2;
+	command_usage(1) if @_ < 1;
 
 	my ($name, $script, @args) = @_;
+	$script = 'help' if !$script || $script eq '--help' || $script eq '-h';
 	my $env = Genesis::Top->new('.')->load_env($name)->with_vault();
 
 	$env->kit->check_prereqs($env)
 		or bail "Cannot use the kit specified by %s.\n", $env->name;
 
-	$env->has_hook('addon') || $env->kit->has_hook('addon', $script)
+	$env->has_hook('addon', $script)
 		or bail "#R{Kit %s does not provide an addon hook!}", $env->kit->id;
 
 	$env->download_required_configs('addon', "addon-$script");
 
-	info "Running #G{%s} addon for #C{%s} #M{%s} deployment", $script, $env->name, $env->type;
+	info(
+		"Running #G{%s} addon for #C{%s} #M{%s} deployment",
+		$script, $env->name, $env->type
+	) unless $script eq 'help';
 
 	$env->run_hook('addon', script => $script, args => \@args)
 		or exit 1;

@@ -172,6 +172,7 @@ sub titleize {map { s/([\\w']+)/\\u\\L\$1/gr } @_}
 
 sub label {
 	my $self = shift;
+	return $self->{label} if $self->{label};
 	$self->kit->kit_bug(
 		"Invalid Genesis Hook module: %s -- expected Genesis::Hook::<type>::<kit-name>[::<subcommand>]",
 		ref($self)
