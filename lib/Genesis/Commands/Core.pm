@@ -210,22 +210,104 @@ sub hack {
 		}
 	}
 
-	if ($cmd eq 'pry') {
+	if (!$cmd || $cmd eq 'pry') {
 		eval {require 'Pry.pm'};
 		bail("Attempted to load Pry, but encountered error: %s", $@) if $@;
 		Pry->pry;
 		exit 0;
 	}
 
-	if ($cmd =~ /^\$top->/) {
-		$cmd =~ s/^\$top->//;
-		my $result = $top->$cmd(@args);
-		Genesis::dump_var({level => 1}, result => $result);
-	} elsif ($cmd =~ /^\$env->/) {
-		$cmd =~ s/^\$env->//;
-		my $result = $env->$cmd(@args);
-		Genesis::dump_var({level => 1}, result => $result);
+	if ($cmd =~ /^(\$[^-]+)(->.*)?$/) {
+		unshift @args, $2 if $2;
+		my $obj = eval($1);
+		if ($@) {
+			bail("Attempted to evaluate Perl expression, but encountered error: %s", $@);
+		}
+		Genesis::dump_var({level => 1}, result => $obj) unless @args;
+
+		# Build the chain based on '(' opening arguments acceptance, ')' closing arguments acceptance, and '->' for chaining calls. First chain the -> is optional.
+		unshift @args, '->' unless $args[0] && $args[0] =~ /^->/;
+		my $method_name = undef;
+		my @method_args = ();
+		my $waiting_for = '-> operator';
+		my $call_ready = 0;
+		while (@args) {
+			debug("Status - waiting_for: %s, call_ready: %s, method_name: %s, method_args: %s, object: %s",
+				$waiting_for, $call_ready ? 'yes' : 'no', $method_name // 'undef', join(', ', @method_args), ref($obj) ? ref($obj) : $obj ? $obj : 'undef'
+			);
+			my ($closing, $calling, $arg, $opening, $next) = shift(@args) =~ /^(\))?(->)?(.+?)?(?:(\()|(->.*))?$/;
+			debug(
+				"Processing: closing=%s, calling=%s, arg=%s, opening=%s, next=%s",
+
+				$closing ? 'yes' : 'no',
+				$calling ? 'yes' : 'no',
+				$arg // 'undef',
+				$opening ? 'yes' : 'no',
+				$next // 'undef'
+			);
+			unshift @args, $next if $next;
+			debug("Args left: %s", join(', ', @args)) if @args;
+			if ($closing) {
+				unshift @args, ($calling//'').($arg//'').($opening//'') if $calling || $arg || $opening;
+				bail(
+					"Improperly formatted expression: no method specified for call",
+				) unless $method_name;
+				($calling, $arg, $opening) = (undef, undef, undef);
+				$call_ready = 1;
+			} elsif ($calling) {
+				# TODO: support internal calls like $obj->method($top->method($arg));
+				bail(
+					"Improperly formatted expression: expecting a -> operator, but found '%s'",
+				) unless $waiting_for =~ /->/;
+				$waiting_for = 'method';
+			}
+			if ($arg) {
+				if ($waiting_for eq 'method') {
+					# If we have an argument, we need to add it to the method arguments
+					$method_name = $arg;
+					$waiting_for = 'open parenthesis or -> operator';
+				} elsif ($waiting_for eq 'arg') {
+					push @method_args, $arg;
+				} else {
+					bail(
+						"Improperly formatted expression: unexpected argument '%s' while waiting for %s",
+						$arg, $waiting_for ? $waiting_for : 'nothing'
+					);
+				}
+			}
+			if ($opening) {
+				bail(
+					"Improperly formatted expression: unexpected opening parenthesis while waiting for %s",
+					$waiting_for ? $waiting_for : 'nothing'
+				) if ($waiting_for eq 'method');
+				bail(
+					"Improperly formatted expression: unexpected opening parenthesis while waiting for argment",
+				) if ($waiting_for eq 'arg');
+				$waiting_for = 'arg';	
+				my $obj = $obj->$method_name(@method_args);
+				$call_ready = 0;
+			}
+			$call_ready = 1 if ($waiting_for !~ /^(method|arg)$/) && (!@args || $args[0] =~ /^->/);
+			if ($call_ready) {
+				if ($method_name eq 'pry') {
+					# If the method is 'pry', we want to enter a Pry session
+					eval {require 'Pry.pm'};
+					bail("Attempted to load Pry, but encountered error: %s", $@) if $@;
+					notice('\n\nYou can access your result under $obj');
+					Pry->pry;
+					return 1;
+				}
+				debug("Calling method '%s' on %s with arguments: %s", $method_name, ref($obj)||$obj||'undef>', join(', ', @method_args));
+				$obj = $obj->$method_name(@method_args);
+				$waiting_for = '-> operator';
+				$method_name = undef;
+				$call_ready = 0;
+			}
+		}
+		Genesis::dump_var({level => 1}, result => $obj);
+		return defined($obj)
 	} else {
+		# Move this into the upper conditional
 		my ($module,$op,$cmd) = $cmd =~ /(.*)(::|->)([^:]*)$/;
 		if ($module) {
 			my $module_name = $module =~ s/::/\//gr;
@@ -234,9 +316,10 @@ sub hack {
 		}
 		no strict 'refs';
 		my $result = $op eq '::'
-		 ? &{$module.'::'.$cmd}(@args)
-		 : $module->$cmd(@args);
+			? &{$module.'::'.$cmd}(@args)
+			: $module->$cmd(@args);
 		Genesis::dump_var({level => 1}, result => $result);
+		return 1
 	}
 }
 
