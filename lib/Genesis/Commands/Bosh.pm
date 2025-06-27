@@ -247,7 +247,7 @@ sub bosh_configs_list {
 	my ($env, $bosh, %options) = @_;
 	print "Genesis::Commands::Bosh::bosh_configs_list called - TO BE IMPLEMENTED\n";
 	my %configs = $bosh->configs;
-	use Pry; pry();
+	require Pry; Pry->pry();
 	return 1;
 }
 

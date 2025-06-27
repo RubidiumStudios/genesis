@@ -3008,10 +3008,8 @@ sub deploy {
 		if ($alternative_state_file) {
 			copy_or_fail($alternative_state_file, $state_path);
 			notice("Using Custom state file: %s", humanize_path($alternative_state_file));
-			output({raw=>1}, slurp($alternative_state_file));
 
 		} elsif ($last_manifest->{state}{path}) {
-			use Pry; pry;
 			copy_or_fail($last_manifest->{state}{path}, $state_path)
 		}
 		copy_or_fail($last_manifest->{store}{path}, $store_path)
