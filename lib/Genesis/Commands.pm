@@ -72,6 +72,7 @@ use constant { # {{{
 	UTILITY     => {order => -1, module => "Utility",    label => "Script Callback Helper"},
 	DEPRECATED  => {order => -2, module => "Deprecated", label => "Deprecated"},
 	DEV         => {order => -3, module => "Core",       label => "Development"},
+  WIP         => {order => -4, module => "Wip",        label => "Work in Progress"},
 
 	# Option Groups
 	BLANK_OPTIONS => 0,
@@ -109,6 +110,8 @@ our @global_options = ( # {{{
 			"Enable debugging, printing helpful message about what Genesis is doing, ".
 			"to standard error.\n\n".
 			"Deprecated; use --log=DEBUG instead.",
+
+		# REFACTOR: Remove debug and trace, but ensure if used, they provide an infomative message
 
 		"trace|T" =>
 			"Deeper level of debugging.  Any trace commands within the Genesis ".

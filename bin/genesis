@@ -610,7 +610,7 @@ define_command("bosh-configs", {
 		"uploaded, view the current config already uploaded, compare the current ".
 		"config with the one you would upload, or delete the config already ".
 		"uploaded.",
-	function_group => Genesis::Commands::BOSH,
+	function_group => Genesis::Commands::WIP,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	arguments => [
@@ -624,7 +624,7 @@ define_command("bosh-configs", {
 			"and cpi.",
 		# TBD: Add options for the various actions as needed
 	]
-});
+}, "Genesis::Commands::BOSH::bosh_configs");
 
 # }}}
 # genesis credhub - run a credhub command on the Credhub server for the specified environment {{{
@@ -742,7 +742,7 @@ define_command("deployments", {
 		"List the history of deployments for the given environment.  This requires ".
 		"that the deployment history is stored in exodus, by way of setting ".
 		"#y{manifest_store} to #C{exodus} or #C{hybrid} in the environment file.",
-	function_group => Genesis::Commands::INFO,
+	function_group => Genesis::Commands::WIP,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
@@ -755,7 +755,8 @@ define_command("deployments", {
 		'details|d' =>
 			"Show the details of each deployment."
 	]
-});
+}, "Genesis::Commands::Info::deployments"); # can remove this once functional group is no longer WIP, but Info
+
 # genesis lookup - Find a key set in environment manifests. {{{
 define_command("lookup", {
 	summary => "Look up values from an environment's file, manifest, deployment, exodus or env state.",
