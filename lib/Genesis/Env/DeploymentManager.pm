@@ -385,6 +385,7 @@ sub _all {
 	my $env = $self->env;
 	unless ($self->{__all_deployments}) {
 		# Get list of deployments from vault
+		# REFACTOR: Would like to lazy load artifacts, but can't do that with a massive export
 		my $deployments = $env->vault->get_path($env->exodus_base.'/deployments');
 		return (wantarray ? () : []) unless $deployments && keys %$deployments; # FIXME: Should we cache 'no deployments'?
 
@@ -499,7 +500,7 @@ sub _filter_by_range {
 	# Quick sanity check that the deployments are sorted by timestamp in latest-first order
 	$self->_confirm_deployments_sorted($deployments);
 
-	if ($range =~ /^(-?\d+)(?:\.\.\.(-?\d+))?$/) {
+	if ($range =~ /^(-?\d{1,3})(?:\.\.\.(-?\d{1,3}))?$/) {
 		my ($start, $end) = ($1, $2);
 		$end //= $start;
 		# This gets applied after all the other filters, just store it for now
@@ -516,9 +517,14 @@ sub _filter_by_range {
 			my ($cmp, $eq, $ts) = ($1, $2, $3);
 			if ($cmp eq '<') {
 				$before = _parse_into_timestamp_gt_cmp($ts, '<'.$eq);
-			} elsif ($cmp eq '>') {
+			}
+			if ($cmp eq '>') {
 				$after = _parse_into_timestamp_gt_cmp($ts, '>'.$eq);
 			}
+		} elsif ($range =~ /^(=?)(\d.*)$/) {
+			my ($eq, $ts) = ($1, $2);
+			$before = _parse_into_timestamp_gt_cmp($ts, '>=');
+			$after = _parse_into_timestamp_gt_cmp($ts, '<=');
 		} else {
 			bail(
 				"Invalid range format: %s",
@@ -531,6 +537,7 @@ sub _filter_by_range {
 
 		# Now step through the deployments until you reach the `after` limit or the end
 		return unless defined($after); # If no after limit, just return the deployments
+
 		my $idx = 0;
 		$idx++ while ($idx < @$deployments && $deployments->[$idx]->timestamp gt $after);
 

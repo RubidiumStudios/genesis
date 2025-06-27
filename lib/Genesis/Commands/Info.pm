@@ -10,6 +10,7 @@ use Genesis;
 use Genesis::State;
 use Genesis::Term;
 use Genesis::Commands;
+use Genesis::UI qw/prompt_for_boolean new_prompt_for_choice/;
 use Genesis::Top;
 use Genesis::Env::Deployment;
 
@@ -21,65 +22,181 @@ sub information {
 	# TODO: Make use of terminal_width and wrap to make this look better
 	# FIXME: Make compatible with new (and existing) exodus data, including the deployment audit log
 
-	command_usage(1) if @_ != 1;
+	command_usage(1) if @_ < 0 || @_ > 2;
 
-	my ($name) = @_;
+	my ($name,$timestamp) = @_;
 	my $env = Genesis::Top->new('.')->load_env($name)->with_vault();
 
-	my @hooks = grep {$env->kit->has_hook($_)} qw(info);
-	$env->download_required_configs(@hooks);
+	# Timestamp is only valid if the environment has deployment audit logs
+	if ($timestamp) {
+		bail(
+			"Cannot use timestamp arguement with environments that do not have ".
+			"deployment audit logs.  Please ensure the environment file specifies ".
+			"#C{genesis.minimum_version} of at least #B{3.1.0}, and that the ".
+			"#C{manifest_store} is set to #B{exodus} or #B{hybrid} in the ".
+			"#c{<repo>/.genesis/config} file.",
+		) if $env->manifest_store eq 'repository';
+	} else {
+		my @hooks = grep {$env->kit->has_hook($_)} qw(info);
+		$env->download_required_configs(@hooks);
+	}
 
 	my $out = sprintf(
 		"\n#c{%s}\n\n#C{%s Deployment for Environment '}#M{%s}#C{'}\n\n",
 		"=" x terminal_width, uc($env->type), $env->name
 	);
 
-	my $exodus = $env->exodus_lookup(".",{});
+	my $deployment = undef;
+	if ($timestamp) {
+		my $trimmed_ts = $timestamp =~ s/[ \/:T]+//gr; # TODO: Handle converting to UTC if another timezone is specified
+		my @deployments = $env->deployments->find(all => 1, range => $trimmed_ts);
+		if (@deployments <= 1 && !defined($deployments[0]) ) {
+			bail(
+				"Could not find a deployment with timestamp matching ".
+				"#C{%s} in environment #M{%s}.  Please ensure the timestamp is correct.",
+				$timestamp, $env->name
+			);
+		} elsif (scalar(@deployments) > 1) {
+			# If we found multiple deployments with the timestamp descriptor, prompt the user to chose one from a list we provide using new_prompt_for_choice
+			my $choice = new_prompt_for_choice(
+				header => sprintf(
+					"Multiple deployments found with timestamp matching #C{%s} in environment #M{%s}.  Please select one:",
+					$timestamp, $env->name
+				),
+				choices => [(map {{
+					value => $_,
+					label => sprintf(
+						"%s - %s %s - #y{%s}",
+						$_->completed('%Y/%m/%d %H:%M:%S'),
+						$_->action eq 'deploy' ? 'deployment' : 'termination',
+						$_->result,
+						$_->user_description =~ s/ \[/\} #ki\{[/r || '#YI{unknown}'
+					),
+				}}	@deployments), {separator => 1}, {value => 'Cancel'}],
+				default => $deployments[0]
+			);
 
-	# If we have deployment audit entries, use those, otherwise "build" one based on
-	# the current exodus data.
-	my $last_deployment = $env->deployments->latest_successful;
-	unless ($last_deployment) {
-		# Synthesize a last deployment based on the current exodus data
-		$last_deployment = $env->deployments->synthesize_from_exodus($exodus)
+			bail(
+				"Aborted!"
+			) if $choice eq 'Cancel';
+			$deployment = $choice;
+		} else {
+			$deployment = $deployments[0];
+		}
+	} else {
+		$deployment = $env->deployments->latest_successful;
+		unless ($deployment) {
+			# Synthesize a last deployment based on the current exodus data
+			my $exodus = $env->exodus_lookup(".",{});
+			$deployment = $env->deployments->synthesize_from_exodus($exodus)
+		}
 	}
 
+	if (my $artifact = get_options->{'print-artifact'}) {
+		# If the user specified an artifact to print, we will print it
+		# and exit.
+		my $artifact_content = $deployment->artifact($artifact);
+		bail(
+			"Artifact '%s' not found in deployment %s.  Please confirm the artifact exists.",
+			$artifact, $deployment->timestamp
+		) unless ($artifact_content);
+
+		my $output_target = get_io_target;
+		my $target_msg = ($output_target eq 'terminal')
+			? ":\n"
+			: " written to #C{$output_target}";
+		info(
+			"Contents of artifact '%s' for deployment %s%s\n",
+			$artifact,
+			$deployment->timestamp,
+			$target_msg
+		);
+		output {raw => 1}, $artifact_content;
+		exit 0;
+	}
+
+	if (my $path = get_options->{'fetch-artifacts-to'}) {
+		# If the user specified a path to fetch artifacts to, we will
+		# fetch all artifacts and write them to the specified path.
+		my @artifact_types = $deployment->artifact_types;
+		bail(
+			"Deployment #%d has no artifacts to fetch.",
+			$deployment->sequence
+		) unless scalar(@artifact_types);
+
+		# Normalize the path in reference to the calling directory
+		$path = Genesis::absolute_path($path, $ENV{GENESIS_CALLER_DIR});
+		my $path_label = humanize_path($path);
+
+		mkdir_or_fail($path) unless -d $path;
+
+		# Check if there are any existing files in the path
+		my @existing_files = map {s/^$path\///r} glob("$path/*");
+		if (@existing_files) {
+			prompt_for_boolean(
+				wrap(
+					"Path '$path_label' is not empty.  Continuing may overwrite some files - proceed? [y|n]",
+					terminal_width
+				),
+				0,
+			) or bail('Aborted!');
+		}
+
+		info(
+			"Fetching artifacts for deployment #%s to '%s'...\n",
+			$deployment->timestamp, $path_label
+		);
+		for my $artifact_type (@artifact_types) {
+			next if $artifact_type eq 'secrets' && !get_options->{'INCLULDE-SECRETS-ARTIFACT'};
+			info({pending => 1}, "[[  - >>fetching artifact type #M{%s} ... ", $artifact_type);
+			my $output = $deployment->extract_artifacts_to($path, $artifact_type);
+			my $file = $output->{$artifact_type};
+			if ($file) {
+				info("done: #C{%s}", humanize_path($file));
+			} else {
+				error("failed to fetch artifact type '%s' for deployment #%d", $artifact_type, $deployment->sequence);
+				exit 1;
+			}
+		}
+		success("\nDone!\n");
+		exit 0;
+	}
 
 	my $unknown = csprintf("#YI{unknown}");
-	if ($last_deployment) {
+	if ($deployment) {
 		$out .= sprintf(
 			"[[  #I{%13s} >>%s\n".
 			"[[  #I{           by} >>#C{%s}\n",
-			$last_deployment->action eq 'deploy' ? 'Deployed' : 'Terminated',
-			strfuzzytime($last_deployment->completed, "#C{%~} #K{(%I:%M%p on %b %d, %Y %Z)}"),
-			$last_deployment->user_description =~ s/ \[/\} #ki\{[/r || $unknown
+			$deployment->action eq 'deploy' ? 'Deployed' : 'Terminated',
+			strfuzzytime($deployment->completed, "#C{%~} #-K{(%I:%M%p on %b %d, %Y %Z)}"),
+			$deployment->user_description =~ s/ \[/\} #ki\{[/r || $unknown
 		);
 
 		# TODO: Handle standalone create-env deployments that aren't BOSH deployments
-		if ($last_deployment->lookup('create_env')) {
+		if ($deployment->lookup('create_env')) {
 			$out .= sprintf(
 				"[[  #I{     via BOSH} >>#CI{create-env}\n"
 			);
-		} elsif ($last_deployment->lookup('bosh_target')) {
+		} elsif ($deployment->lookup('bosh_target')) {
 			$out .= sprintf(
 				"[[  #I{      on BOSH} >>#CI{%s}\n",
-				$last_deployment->lookup('bosh_target.name')
+				$deployment->lookup('bosh_target.name')
 			);
 		}
 
 		$out .= sprintf(
 			"[[  #I{ based on kit} >>#C{%s}%s%s\n",
-			$last_deployment->lookup('kit.id') =~ s/ \(.*\)//r, # Remove the @dev suffix if present
-			($last_deployment->lookup('kit.is_dev') ? " #y{(dev)}" : ''),
-			($env->kit->version ne $last_deployment->lookup('kit.version','')
+			$deployment->lookup('kit.id') =~ s/ \(.*\)//r, # Remove the @dev suffix if present
+			($deployment->lookup('kit.is_dev') ? " #y{(dev)}" : ''),
+			($env->kit->version ne $deployment->lookup('kit.version','')
 				? " #E{warning}#Y{local file specifies ${\($env->kit->id)}!}"
 				: ''
 			)
-		) if $last_deployment->action eq 'deploy';
+		) if $deployment->action eq 'deploy';
 
 		$out .= sprintf(
 			"[[  #I{        using}>> #C{Genesis v%s}\n",
-			$last_deployment->lookup('genesis_version', 'unknown')
+			$deployment->lookup('genesis_version', 'unknown')
 		);
 
 		# TODO: Restore manifest validation status for 'repository' manifests
@@ -93,9 +210,9 @@ sub information {
 			)
 		}
 
-		if (defined($exodus->{features})) {
-			my @features = split(',',$exodus->{features});
-			$out .= "\n[[      #Wku{Features:} >>";
+		if ($deployment->{kit}{features}) {
+			my @features = split(',', $deployment->{kit}{features});
+			$out .= "\n[[      #Wku{Kit Features:} >>";
 			if (@features) {
 				$out .= "#C{".join("}\n[[                >>#C{",@features)."}\n";
 			} else {
@@ -107,10 +224,10 @@ sub information {
 			# All the manifests are stored in exodus, so we can get the details from
 			# the last successful deployment.
 			$out .= sprintf("\n#Wku{Archived Files:}\n");
-			if (my @archived_types = $last_deployment->artifact_types) {
+			if (my @archived_types = $deployment->artifact_types) {
 				my @standard_types = qw(manifest unpruned redacted vars redacted_vars state store secrets log);
 				my (undef, $common, $extra) = compare_arrays(\@standard_types, \@archived_types); # Sort common first then any others
-				my @details = $last_deployment->details_for_artifacts(@$common, @$extra);
+				my @details = $deployment->details_for_artifacts(@$common, @$extra);
 				for my $artifact (@details) {
 					$out .= sprintf(
 						"[[  #I{%13.13s} >>#g{%s} #Ki{(%s b, SHA2: %s)}\n",
@@ -133,12 +250,12 @@ sub information {
 					my ($roles_string, @used_roles) = $deployment->user_colorized_roles;
 					@roles = uniq (@roles, @used_roles);
 					$out .= sprintf(
-						"%s#k{[%s]} #%s{%s %s} - %s - #Ki{%s}\n",
+						"%s#-K{[%s]} #%s{%-22s} - %s - #Ki{%s}\n",
 						$prefix,
 						$deployment->completed("%Y/%m/%d %H:%M"),
 						$deployment->succeeded ? 'G' : 'R',
-						$deployment->action eq 'deploy' ? ' deployment' : 'termination',
-						$deployment->succeeded ? 'succeeded' : 'failed   ',
+						($deployment->action eq 'deploy' ? 'deployment ' : 'termination ').
+						($deployment->succeeded ? 'succeeded' : 'failed   '),
 						$roles_string =~ s/%/%%/gr, # Escape % signs in the roles string
 						$deployment->lookup('kit.id')
 					);
@@ -147,13 +264,13 @@ sub information {
 						"%s[[           #i{Reason:} >>%s\n\n",
 						$prefix,
 						$deployment->reason
-					) if $deployment->has_reason;
+					) if $deployment->has_reason && $deployment->reason ne 'Deployment failed.';
 				}
 				$out .=     "\n[[   #I{user legend:} >>".Genesis::Env::Deployment::user_colorized_legend(@roles)."\n";
 			}
 		}
 
-		if ($env->has_hook('info')) {
+		if ($env->has_hook('info') && !$timestamp && !get_options->{history}) {
 			info "$out\n#c{%s}\n", "-" x terminal_width;
 			$out = '';
 			$env->run_hook('info');
@@ -281,8 +398,6 @@ sub deployments {
 
 	# Get the list of deployments in exodus from the paths under deployments
 	my $deployment_entries = map {$_ =~ /-(\d+)$/} $env->vault->paths($env->exodus_base.'/deployments/');
-
-	use Pry; pry;
 }
 
 

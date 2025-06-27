@@ -17,6 +17,7 @@ our @EXPORT = qw/
 	terminal_width
 	wrap fix_wrap
 	in_controlling_terminal
+	get_io_target
 	csprintf csize
 	bullet checkbox
 	decolorize
@@ -360,6 +361,32 @@ sub checkbox {
 sub in_controlling_terminal {
 	-t STDIN && -t STDOUT;
 }
+
+sub get_io_target {
+	my ($target) = shift//\*STDOUT;
+	return 'terminal' if -t $target;
+	return 'pipe' if -p $target;
+	if (-f $target) {
+		# Try to determine the actual file path
+		require File::stat;
+		my $stat = File::stat::stat($target);
+		my $dev = $stat->dev;
+		my $ino = $stat->ino;
+		opendir my $dh, '/proc/self/fd' or return 'file';
+		while (my $file = readdir $dh) {
+			next if $file =~ /^\.\.?$/; # skip . and ..
+			my $link = readlink("/proc/self/fd/$file");
+			next unless defined $link;
+			my $link_stat = File::stat::stat($link);
+			next unless $link_stat->dev == $dev && $link_stat->ino == $ino;
+			closedir($dh);
+			return $link;
+		}
+		closedir($dh);
+		return 'file';
+	}
+	return 'unknown device';
+}	
 
 sub build_markdown_table {
 	# Convert a markdown table to a table with automatic column widths

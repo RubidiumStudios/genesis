@@ -718,7 +718,7 @@ define_command("broadcast", {
 # genesis info - get deployment environment information from  a kit{{{
 define_command("info", {
 	summary => "Prints out kit-specific information for a given environment.",
-	usage => "<env> info [<options...>]",
+	usage => "<env> info [<options...>] [<args>]",
 	alias => 'i',
 	description =>
 		"Get details for the current deployment of the given environment.",
@@ -728,8 +728,30 @@ define_command("info", {
 	options => [
 		'history|H' =>
 			"Print the deployment history for the environment, if available.  ",
-		# TODO: Add a way to dump artifacts to a directory (all or nothing? or give a list of artifacts to dump?)
-	]
+		'print-artifact|p=s' =>
+			"Print the contents of the specified artifact to STDOUT.",
+		'fetch-artifacts-to=s' =>
+			"Fetch the artifacts for the environment and save them to the specified ".
+			"directory.  If the directory does not exist, it will be created.  If ".
+			"the directory exists and is not empty, it will prompt you if it can be ".
+			"overwritten.",
+		'INCLUDE-SECRETS-ARTIFACT' =>
+			"Include the secrets artifact in the artifacts fetched.  This is only ".
+			"applicable if the --fetch-artifacts-to option is specified.  If not ".
+			"specified, the secrets artifact will not be fetched, as it is not ".
+			"usually needed.",
+	],
+	arguments => [
+		"timestamp" =>
+			"If specified, will print the information for the environment at the ".
+			"given timestamp.  This is useful for getting information about a ".
+			"previous deployment, especially when retrieving artifacts.".
+			"\n".
+			"[[#{y}Note: >>The kit portion of the environment information (the part ".
+			"after the horizontal line) will not be printed, as it only reflects ".
+			"the current exodus data for the last good deployment."
+	],
+
 }, "Genesis::Commands::Info::information"); # info method already taken, so can't use default
 
 # }}}

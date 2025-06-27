@@ -450,8 +450,7 @@ sub new_prompt_for_choice {
 	my $total_pages = 1; #$options{paginate} ?  POSIX::ceil(($num_choices - 1) / $options{page_size}) : 1;
 
 	# Display header
-	print csprintf("\n%s\n", $options{header});
-
+	my $form = $options{header}."\n";
 	# Handle user input
 	my $display_choices = sub {
 
@@ -459,10 +458,10 @@ sub new_prompt_for_choice {
 			if ($section_header) {
 				if ($section_header =~ /^---\d+---$/) {
 					# blank line separator
-					print csprintf("\n");
+					$form .= "\n";
 				} else {
 					# section header
-					print csprintf("\n  #Wku{%s}\n", $section_header);
+					$form .= csprintf("\n  #Wku{%s}\n", $section_header);
 				}
 			}
 			my $section_choices = $sections{$section_header};
@@ -479,7 +478,7 @@ sub new_prompt_for_choice {
 			# Find the longest label for proper column calculation
 			my $max_label_len = 0;
 			for my $i ($start_idx .. $end_idx) {
-				my $label = $choices->[$i]->{label};
+				my $label = $choices->[$i]->{label} //= $choices->[$i]->{value};
 				next if $label =~ /^---.*---$/;  # Skip section headers
 				$max_label_len = max($max_label_len, length($label) + $iw + 4); # num) label
 			}
@@ -497,13 +496,13 @@ sub new_prompt_for_choice {
 				if ($label =~ /^---(.*)---$/) {
 					my $section_header = $1;
 					$section_offset += 1;
-					print csprintf("\n\n  %s", $section_header);
+					$form .= csprintf("\n\n  %s", $section_header);
 					$col = 0;
 					next;
 				} elsif ($label eq '---') {
 					my $section_header = '';
 					$section_offset += 1;
-					print csprintf("\n");
+					$form .= csprintf("\n");
 					$col = 0;
 					next;
 				}
@@ -524,10 +523,10 @@ sub new_prompt_for_choice {
 				}
 				
 				# Start a new line if we're at the beginning of a row
-				print "\n  " if $col == 0;
+				$form .= "\n  " if $col == 0;
 				
 				# Print the choice with proper padding
-				printf("%-*s", $max_label_len, $choice_text);
+				$form .= sprintf("%-*s", $max_label_len, $choice_text);
 				
 				# Update column counter
 				$col = ($col + 1) % $cols;
@@ -536,34 +535,35 @@ sub new_prompt_for_choice {
 			# Traditional vertical display
 			my $choice_map = {};
 			for my $i ($start_idx .. $end_idx) {
+				$choices->[$i]{label} //= $choices->[$i]{value};
 
 				# Handle separator and section headers
 				if ($choices->[$i]->{separator} || $choices->[$i]->{label} eq '---') {
 					$section_offset += 1;
-					print csprintf("\n");
+					$form .= "\n";
 					next;
 				}
 				if ($choices->[$i]->{section} || $choices->[$i]->{label} =~ /^---(.*)---$/) {
 					my $section = $choices->[$i]->{section} || $1;
 					$section_offset += 1;
-					print csprintf("\n\n  #Wku{%s}\n", $choices->[$i]->{section});
+					$form .= csprintf("\n\n  #Wku{%s}\n", $choices->[$i]->{section});
 					next;
 				}
 
 				my $choice = $i+1-$section_offset;
 				$selection_map{$choice} = $choices->[$i];
-				print csprintf("\n  %*s) %s", $iw, $choice, $choices->[$i]{label});
+				$form .= csprintf("\n  %*s) %s", $iw, $choice, $choices->[$i]{label});
 				$default_choice = $choice if $i == $default_idx;
 			}
 		}
 		
 		# Add pagination footer if enabled
 		if ($options{paginate} && $total_pages > 1) {
-			print csprintf("\n\n  Page %d of %d [N)ext P)revious]", 
+			$form .= csprintf("\n\n  Page %d of %d [N)ext P)revious]", 
 				$current_page + 1, $total_pages);
 		}
 		
-		print "\n\n";
+		info("\n%s\n",$form);
 		return \%selection_map;
 	};
 	
@@ -611,7 +611,7 @@ sub new_prompt_for_choice {
 		
 		# Return the selected choice
 		my $selection_summary = $selection_map->{$c}{summary} // $selection_map->{$c}{label};
-		print(csprintf("\e[1ASelect %s > #C{%s}\n", $options{description}, $selection_summary));
+		info("\e[1ASelect %s > #C{%s}\n", $options{description}, $selection_summary);
 		return $selection_map->{$c}{value};
 	}
 }
