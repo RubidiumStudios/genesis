@@ -449,6 +449,14 @@ define_command("deploy", {
 
 		'max-in-flight=i' =>
 			"Override the default number of maximum VMs in flight per instance group.",
+
+		'STATE-FILE-PATH=s' =>
+			"Normally the previously deployment's state file is fetched from exodus ".
+			"deployment audit logs (or .genesis/manifests if not using exodus).  ".
+			"However, it may be necessary to fetch and alter the state file manually,".
+			"specifically in the case of a failed partial deployments.\n\n".
+			"This option will allow you to specify a specfic state file to use for ".
+			"the deploy. You can use the `info` command to retrieve the state file",
 	],
 	args => {
 		'reason' =>

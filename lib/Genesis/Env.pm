@@ -10,7 +10,7 @@ use Genesis qw/
 	debug trace dump_stack dump_var 
 	pretty_duration
 	pushd popd
-	humanize_path humanize_bin
+	humanize_path humanize_bin absolute_path
 	run lines fake_tty 
 	workdir tmpfile
 	copy_or_fail mkfile_or_fail mkdir_or_fail save_to_yaml_file
@@ -2802,6 +2802,7 @@ sub deploy {
 
   $self->deployment_cache_setup;
 
+	# Generate and store the deployment manifest (pruned and unpruned versions)
 	my $pruned_deploy_manifest = $self->manifest_provider->deployment(subset=>'pruned',notify=>1);
 	my $unpruned_deploy_manifest = $self->manifest_provider->deployment(notify=>0);
 	my $manifest_path = $self->deployment_cache_path_lookup('manifest');
@@ -2904,6 +2905,15 @@ sub deploy {
 			$last_manifest_sha1 = $last_manifest->{manifest_sha1};
 		}
 
+		my $alternative_state_file = $opts{'STATE-FILE-PATH'};
+		if ($alternative_state_file) {
+			$alternative_state_file = absolute_path($alternative_state_file,$ENV{GENESIS_CALLER_DIR});
+			bail(
+				"Alternative state file option specified, but does not appear to be valid file: %s",
+				humanize_path($alternative_state_file)
+			) if $alternative_state_file && !-f $alternative_state_file;
+		}
+
 		if ($last_manifest_path && ($last_manifest->{source}||'') ne 'exodus-deployments') {
 			# Legacy method of storing state files, and possibly manifests
 			my $last_state_path = $last_manifest->{state}{path};
@@ -2937,6 +2947,7 @@ sub deploy {
 			}
 		}
 
+		## FIXME: Need to also diff bosh variables files. (or the unpruned manifest?)
 		if ($last_manifest_path) {
 			bail(
 				"Cannot find state file for previous deployment; cannot proceed with create-env."
@@ -2994,8 +3005,15 @@ sub deploy {
 			print "\n";
 		}
 
-		copy_or_fail($last_manifest->{state}{path}, $state_path)
-			if $last_manifest->{state}{path};
+		if ($alternative_state_file) {
+			copy_or_fail($alternative_state_file, $state_path);
+			notice("Using Custom state file: %s", humanize_path($alternative_state_file));
+			output({raw=>1}, slurp($alternative_state_file));
+
+		} elsif ($last_manifest->{state}{path}) {
+			use Pry; pry;
+			copy_or_fail($last_manifest->{state}{path}, $state_path)
+		}
 		copy_or_fail($last_manifest->{store}{path}, $store_path)
 			if $last_manifest->{store}{path};
 
