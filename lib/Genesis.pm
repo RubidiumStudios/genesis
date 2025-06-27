@@ -723,12 +723,14 @@ sub curl {
 		$args->{creds} = shift if @_;
 	}
 
-	unless (ref($args) eq 'HASH') {
-		bug("Internal error: \$args is not a hash reference, got %s", ref($args) || 'scalar');
-	}
+	# TODO: Validate args to ensure invalid keys are not passed
 
-	my ($method, $headers, $data, $skip_verify, $creds) = $args->@{qw/method headers data skip_verify creds/};
-	my $file = $args->{file};
+
+	bug(
+		"Internal error: \$args is not a hash reference, got %s", ref($args) || 'scalar'
+	)	unless (ref($args) eq 'HASH');
+
+	my ($method, $headers, $data, $skip_verify, $creds, $file) = $args->@{qw/method headers data skip_verify creds file/};
 
 	bug("No url provided to Genesis::curl") unless $url;
 	bug("No method provided to Genesis::curl") unless $method;
@@ -770,7 +772,8 @@ sub curl {
 	my @header_data;
 	my $line;
 
-	while ($line = shift @err_data) {
+	my $header_src = $method eq 'HEAD' ? \@data : \@err_data;
+	while ($line = shift @$header_src) {
 		if ($line =~ m/^HTTP\/\d+(?:\.\d)?\s+((\d+)(\s+.*)?)$/) {
 			$in_header = 1;
 			chomp($status_line = $1);
@@ -780,7 +783,7 @@ sub curl {
 		push @header_data, $line;
 		$in_header = 0 if ($line =~ /^\s+$/);
 	}
-	unshift @err_data, $line if defined($line);
+	unshift @$header_src, $line if defined($line);
 
 	dump_var header => join($/,@header_data);
 	return  $status, $status_line, join($/, @header_data, @data, @err_data)
