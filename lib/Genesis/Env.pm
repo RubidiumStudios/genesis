@@ -7,11 +7,11 @@ use base 'Genesis::Base'; # for _memoize
 
 use Genesis qw/
 	error bail bug fatal warning info output success notice dryrun
-	debug trace dump_stack dump_var 
+	debug trace dump_stack dump_var
 	pretty_duration
 	pushd popd
 	humanize_path humanize_bin absolute_path
-	run lines fake_tty 
+	run lines fake_tty
 	workdir tmpfile
 	copy_or_fail mkfile_or_fail mkdir_or_fail save_to_yaml_file
 	slurp load_json load_yaml load_yaml_file spruce_diff
@@ -654,7 +654,7 @@ sub manifest_store {
 	my $min_version = '3.1.0';
 	return $self->top->config->get('manifest_store','hybrid')
 		if ($self->feature_compatibility($min_version));
-	
+
 	debug(
 		"Using 'repository' manifest store because enviroment does ".
 		"not specify a genesis.minimum_version of %s or greater",
@@ -1768,7 +1768,7 @@ sub ocfp_config_mount {
 sub ocfp_config_slug {
 	my $param_ocfp_config_slug = $_[0]->lookup('params.ocfp_vault_config_slug');
 	return $param_ocfp_config_slug if $param_ocfp_config_slug;
-	
+
 	my $name = $_[0]->name;
 	# If -mgmt/-ocf is at the end: foo-mgmt -> foo/mgmt
 	if ($name =~ /^(.*)-(mgmt|ocf)$/) {
@@ -2018,9 +2018,18 @@ sub get_target_bosh {
 		$bosh_exodus_path=$self->exodus_base;
 		my $exodus_data = eval {$self->vault->get($bosh_exodus_path)};
 		if ($exodus_data->{url} && $exodus_data->{admin_password}) {
-			$bosh = Service::BOSH::Director->from_exodus($self->name, exodus_data => $exodus_data);
+			$bosh = Service::BOSH::Director->from_exodus(
+				$self->name,
+				exodus_data => $exodus_data,
+				exodus_path => $bosh_exodus_path,
+				vault => $self->vault
+			);
 		} else {
-			$bosh = Service::BOSH::Director->from_alias($self->name);
+			$bosh = Service::BOSH::Director->from_alias(
+				$self->name,
+				exodus_path => $bosh_exodus_path,
+				vault => $self->vault
+			);
 		}
 	} else {
 		$bosh = $self->bosh;
@@ -2675,7 +2684,7 @@ sub check {
 
 	# FIXME: Check CPI exists if custom cpi is in use (not create-env)
 
-	# FIXME: Check if cloud config exists if cloud-config hook exists (not create-env) 
+	# FIXME: Check if cloud config exists if cloud-config hook exists (not create-env)
 
 	my $ok = 1;
 	my $env_check = $self->_check_environment_viability();
@@ -3346,7 +3355,7 @@ sub update_deployment_exodus {
 			);
 		};
 		push @errors, fix_wrap($@) if ($@);
-		
+
 		unless (@errors) {
 			my $latest_deployment = $self->deployments->latest;
 			$self->vault->set(
@@ -3505,23 +3514,23 @@ sub terminate {
 				"[[  - >>Using the unredacted manifest, vars and state file from the deployment archive."
 			);
 			my $last_deployment = $self->deployments->latest(action => 'deploy');
-			
+
 			# If we can't find artifacts, try to fall back to repository files if they exist
 			if (!$last_deployment || !$last_deployment->artifact_types()) {
 				warning(
 					"Cannot find artifacts for previous deployment in vault; attempting to use local repository files."
 				);
-				
+
 				# Check if we have local state file
 				my $state_path = grep {-f $_} map {$self->path(".genesis/manifests/".$self->name."-state.$_")} (qw/json yml/);
-				
+
 				if (-f $state_path) {
 					# We found a state file, let's try to regenerate the manifest
 					info("[[  - >>Found local state file; regenerating manifest and vars files.");
 					$self->manifest_provider->unredacted->write_to($self->deployment_cache_path_lookup('manifest'));
 					$self->manifest_provider->unredacted(subset=>'bosh_vars')->write_to($self->deployment_cache_path_lookup('vars'));
 					copy_or_fail($state_path, $self->deployment_cache_path_lookup('state'));
-					
+
 					# Also copy store file if it exists
 					my $store = grep {-f $_} map {$self->path(".genesis/manifests/".$self->name."-store.$_")} (qw/yml json/);
 					copy_or_fail($store, $self->deployment_cache_path_lookup('store'))
@@ -4288,7 +4297,7 @@ sub _check_cpi_config {
 			},
 			msg      => sprintf("CPI config #m{%s} is missing %d entombed secrets.", $cpi_name, scalar(@missing_secrets)),
 		};
-	}	
+	}
 
 	return {
 		state => 'ok',
@@ -4466,7 +4475,7 @@ sub _check_secrets {
 			msg   => "#y{all secrets valid, but warnings were encountered.}",
 		}	if ($secrets_results->{warn});
 		return {
-			state => 'ok',	
+			state => 'ok',
 			msg   => "#G{all secrets valid}",
 		}
 	}
@@ -4523,7 +4532,7 @@ sub _fix_secrets {
 			msg    => "#G{secrets successfully rotated.}"
 		}
 	}
-	
+
 	require Data::Dumper;
 	bug(
 		"#R{invalid return from rotate_secrets: %s}",
@@ -4539,7 +4548,7 @@ sub _check_release_url_sha1 {
 
 	my @missing_sha1 = ();
 	my $releases = $self->manifest_provider->deployment(subset=>'releases')->data;
-	
+
 	if (ref($releases) eq 'ARRAY' && scalar(@$releases)) {
 		for my $release (@$releases) {
 			# Check if the release has a URL and if it's HTTP/HTTPS
@@ -4576,7 +4585,7 @@ sub _check_release_url_sha1 {
 	}
 	error "\n[[  - >>BOSH requires SHA1 checksums for all HTTP/HTTPS release URLs.";
 	error "[[  - >>Please add a 'sha1' field to each release definition above.";
-	
+
 	return {
 		state => 'error',
 		msg   => sprintf(
@@ -4719,7 +4728,7 @@ sub _check_stemcells {
 			fatal => 1,
 			msg   => "required stemcells source unknown - requires manual upload:\n- #R{".join("\n- ", map {$_->{os}."@".$_->{search_term}} @unknown)."}",
 		} if @unknown;
-		
+
 		return {
 			state => 'error',
 			msg   => "missing required or preferred stemcells",
