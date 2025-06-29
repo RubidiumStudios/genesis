@@ -174,6 +174,13 @@ sub from_environment {
 }
 
 # }}}
+# exodus_vault - return the exodus vault from which the connection details will be read {{{
+sub exodus_vault {
+	bail("No exodus vault set for BOSH director") unless $_[0]->{exodus_vault};
+	return $_[0]->{exodus_vault};
+}
+
+# }}}
 # exodus_path - return the exodus path from which the connection details will be read {{{
 sub exodus_path {
 	bail("No exodus path set for BOSH director") unless $_[0]->{exodus_path};
