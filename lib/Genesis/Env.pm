@@ -1772,20 +1772,7 @@ sub ocfp_config_mount {
 # }}}
 # ocfp_config_slug - returns the component of the Vault path under the ocfp_config mount for this evironments ocfp_config data {{{
 sub ocfp_config_slug {
-	my $param_ocfp_config_slug = $_[0]->lookup('params.ocfp_vault_config_slug');
-	return $param_ocfp_config_slug if $param_ocfp_config_slug;
-
-	my $name = $_[0]->name;
-	# If -mgmt/-ocf is at the end: foo-mgmt -> foo/mgmt
-	if ($name =~ /^(.*)-(mgmt|ocf)$/) {
-		return "$1/$2";
-	}
-	# If -mgmt/-ocf is in the middle or mgmt-/ocf- at the beginning: append at end
-	elsif ($name =~ /-(mgmt|ocf)-/ || $name =~ /^(mgmt|ocf)-/) {
-		my $type = $1;
-		return "$name/$type";
-	}
-	return $name;
+	return $_[0]->lookup('params.ocfp_vault_config_slug')//$_[0]->ocfp_env;
 }
 
 # }}}
