@@ -1199,6 +1199,9 @@ sub ocfp_type {
 	# Match -mgmt/-ocf at end or in middle, or mgmt-/ocf- at beginning
 	if ($name =~ /-(mgmt|ocf)(?:-|$)/ || $name =~ /^(mgmt|ocf)-/) {
 		return $1;
+	} else {
+		# If it doesn't match, assume it's an OCF environment
+		return 'ocf';
 	}
 	return 'unknown';
 }
@@ -1218,6 +1221,9 @@ sub ocfp_env {
 	elsif ($name =~ /-(mgmt|ocf)-/ || $name =~ /^(mgmt|ocf)-/) {
 		my $type = $1;
 		return "$name/$type";
+	} else {
+		# mgmt is mgmt, anything else is ocf
+		return "$name/ocf";
 	}
 	return $name;
 }
