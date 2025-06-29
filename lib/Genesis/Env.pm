@@ -1875,12 +1875,16 @@ sub bosh {
 
 		$bosh = Service::BOSH::Director->from_exodus(
 			$bosh_alias,
-			vault => $bosh_vault,
-			exodus_mount => $bosh_exodus_mount || $self->exodus_mount,
+			$self,
+			exodus_vault => $bosh_vault,
+			exodus_mount => $bosh_exodus_mount,
 			bosh_deployment_type => $bosh_dep_type,
 			deployment => $self->deployment_name,
-		) || Service::BOSH::Director->from_alias(
+			rel_to_env => 'parent',
+		) || Service::BOSH::Director->from_alias(  # FIXME: Need to pass in vault and mount/path if this ever gets used...
 			$bosh_alias,
+			$self,
+			rel_to_env => 'parent',
 			deployment => $self->deployment_name
 		);
 		bail(
@@ -1926,114 +1930,98 @@ sub bosh {
 #           environment.  The below does this, but its has too much user-facing
 #           output that wouldn't apply to internal usage.
 sub get_target_bosh {
-	my ($self, $options) = @_;
-	my $target;
+	my $self = shift;
+	my $options = ref($_[0]) eq 'HASH' ? shift : {@_}; # allow for explicit or implicit option hash
 	my $bosh;
 	my $bosh_exodus_path;
 
+	my $is_director = $self->is_bosh_director;
+	my $is_create_env = $self->use_create_env;
+
+	# Handle invalid option combinations first
 	bail(
 		"Cannot use the #y{--self} and #y{--parent} options together."
 	) if ($options->{self} && $options->{parent});
+	my $target = (grep {$_} qw/self parent/)[0]; # default to self
 
-	if ($self->is_bosh_director && !$self->use_create_env) {
-		if ($options->{self}) {
-			$target = 'self'
-		} elsif ($options->{parent}) {
-			$target = 'parent'
-		} else {
-			$target = $Genesis::RC->get('default_bosh_target' => 'ask');
-			if ($target eq 'ask') {
-				bail(
-					"Environment #C{%s} is a BOSH director deployed by another BOSH ".
-					"director.  You must specify either #y{--self} or #y{--parent} option ".
-					"to target it or its deploying director respectively.",
-					$self->name
-				) unless in_controlling_terminal;
-
-				my $self_name = $self->name;
-				my $bosh_alias = $self->bosh_alias;
-				$target = prompt_for_choice(
-					"Which BOSH director do you want to target?",
-					['self', 'parent'],
-					'self',
-					[ map {[ $_, s/: .*//r ]} map {csprintf("%s", $_)} (
-						"#C{$self_name}: this environment",
-						"#C{$bosh_alias}: the BOSH director that deployed this environment"
-					) ]
-				);
-			}
-		}
-	} elsif (!$self->is_bosh_director && $self->use_create_env) {
+	if ($is_create_env && $target eq 'parent') {
+		bail(
+			"Environment %s is a #M{create-env} deployment, so the #y{--parent} option is invalid.",
+			$self->name
+		);
+	}
+	if (!$is_director && $target eq 'self') {
+		bail(
+			"Environment %s is not a BOSH director, so the #y{--self} option is invalid.",
+			$self->name
+		);
+	}
+	if (!$is_director && $is_create_env) {
 		bail(
 			"Environment %s is a #M{create-env} deployment, but not a BOSH director, ".
 			"so there is no BOSH director to target.",
 			$self->name
 		);
-	} elsif (!$self->is_bosh_director) {
-		bail(
-			"Environment %s is not a BOSH director, so the #y{--self} option is invalid.",
-			$self->name
-		) if $options->{self};
-		warning(
-			"\n\aEnvironment %s is not a BOSH director, so the #y{--parent} option is unnecessary.\n",
-			$self->name
-		) if $options->{parent} && !$Genesis::RC->get('suppress_warnings.bosh_target' => 0);
-		$target = 'parent';
-	} elsif ($self->use_create_env) {
-		bail(
-			"Environment %s is a #M{create-env} deployment, so the #y{--parent} option is invalid.",
-			$self->name
-		) if $options->{parent};
-		warning(
-			"\n\aEnvironment %s is a #M{create-env} deployment, so the #y{--self} option is unnecessary.\n",
-			$self->name
-		) if $options->{self} && !$Genesis::RC->get('suppress_warnings.bosh_target' => 0);
-		$target = 'self';
 	}
 
-	elsif ($options->{self} || $options->{parent}) {
-		if ($self->use_create_env) {
-			bail(
-				"Environment %s is a #M{create-env} deployment, so the #y{--self} is ".
-				"unnecessary and the #y{--parent} is invalid.",
-				$self->name
-			);
-		} elsif (!$self->is_bosh_director) {
-			bail(
-				"Environment %s is not a BOSH director, so the #y{--self} is invalid ".
-				"and #y{--parent} is unnecessary.",
-				$self->name
-			) ;
-		} else {
-			bug(
-				"Somehow, the environment %s is not a BOSH director, but is also not a ".
-				"#M{create-env} deployment.  This should not be possible.",
-			);
-		}
-	} else {
-		$target = $self->is_bosh_director ? 'self' : 'parent';
+	# Issue warnings for unnecessary options
+	unless ($Genesis::RC->get('suppress_warnings.bosh_target' => 0)) {
+		warning(
+			"\nEnvironment %s is a create-env BOSH director, so the #y{--self} option is unnecessary.\n",
+			$self->name
+		) if ($is_director && $is_create_env && $target eq 'self');
+		warning(
+			"\nEnvironment %s is not a BOSH director, so the #y{--parent} option is unnecessary.\n",
+			$self->name
+		) if (!$is_director && $target eq 'parent');
+	}
+
+	# Determine target
+	$target //= 'self' if $is_director && $is_create_env;
+	$target //= 'parent' if !$is_director;
+	$target //= $Genesis::RC->get('default_bosh_target' => 'ask');
+
+	if ($target eq 'ask') {
+		# BOSH director deployed by another director - need to ask
+		bail(
+			"Environment #C{%s} is a BOSH director deployed by another BOSH ".
+			"director.  You must specify either #y{--self} or #y{--parent} option ".
+			"to target it or its deploying director respectively.",
+			$self->name
+		) unless in_controlling_terminal;
+
+		my $self_name = $self->name;
+		my $bosh_alias = $self->bosh_alias;
+		$target = prompt_for_choice(
+			"Which BOSH director do you want to target?",
+			['self', 'parent'],
+			'self',
+			[ map {[ $_, s/: .*//r ]} map {csprintf("%s", $_)} (
+				"#C{$self_name}: this environment",
+				"#C{$bosh_alias}: the BOSH director that deployed this environment"
+			) ]
+		);
 	}
 
 	if ($target eq 'self') {
 		$bosh_exodus_path=$self->exodus_base;
 		my $exodus_data = eval {$self->vault->get($bosh_exodus_path)};
 		if ($exodus_data->{url} && $exodus_data->{admin_password}) {
-			$bosh = Service::BOSH::Director->from_exodus(
-				$self->name,
+			$bosh = Service::BOSH::Director->from_exodus($self->name, $self,
 				exodus_data => $exodus_data,
+				exodus_vault => $self->vault,
 				exodus_path => $bosh_exodus_path,
-				vault => $self->vault
+				rel_to_env => 'self'
 			);
 		} else {
-			$bosh = Service::BOSH::Director->from_alias(
-				$self->name,
-				exodus_path => $bosh_exodus_path,
-				vault => $self->vault
-			);
+			# FIXME: If the environment uses BOSH aliases (ie due to requiring users to log in),
+			#        then we will need to update the from_alias method and call to resolve bosh
+			#        connection details from the vault and exodus path -- see above.
+			$bosh = Service::BOSH::Director->from_alias($self->name, $self, rel_to_env => 'self');
 		}
 	} else {
 		$bosh = $self->bosh;
-		$bosh_exodus_path = $self->exodus_base;
+		$bosh_exodus_path = $bosh->exodus_path;
 	}
 	bail(
 		"No BOSH connection details found.  This may be due to not having read ".
@@ -4956,7 +4944,6 @@ sub _init_yaml_file {
 	my $vault_path = $self->secrets_base =~ s#/?$##r; # backwards compatibility
 	my $type       = $self->type;
 	my $init_file  = $self->workpath("init.yml");
-
 
 	if ($self->kit->feature_compatibility('2.6.13')) {
 		mkfile_or_fail($init_file, 0644, <<EOF);

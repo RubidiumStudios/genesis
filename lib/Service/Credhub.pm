@@ -23,16 +23,17 @@ sub new {
 		ca_cert  => $ca_cert,
 	}, $class)
 }
+
 # }}}
 # from_bosh - create a credhub object from the BOSH director details {{{
 sub from_bosh {
 	my ($class, $bosh, %opts) = @_;
 	my ($exodus, $exodus_source);
 
-	$opts{vault} ||= (Service::Vault->current || Service::Vault->default);
+	my $exodus_vault = $opts{exodus_vault} || $bosh->exodus_vault || Service::Vault->current || Service::Vault->default;
 	my $exodus_path = $opts{exodus_path} || $bosh->exodus_path;
-	$exodus = $opts{vault}->get($exodus_path);
-	$exodus_source = csprintf("under #C{%s} on vault #M{%s}", $exodus_path, $opts{vault}->name);
+	$exodus = $exodus_vault->get($exodus_path);
+	$exodus_source = csprintf("under #C{%s} on vault #M{%s}", $exodus_path, $exodus_vault->name);
 	unless ($exodus) {
 		my $msg = "No exodus data found under $exodus_source";
 		bail($msg) unless $opts{return_on_error};
@@ -303,7 +304,7 @@ sub delete_all {
 
 sub query {
 	my ($self,$path,%params) = @_;
-	
+
 	my @args;
 	push @args, '-X', uc(delete($params{_method}))
 		if defined $params{_method};

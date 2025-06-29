@@ -32,10 +32,10 @@ sub init {
 	$obj->{args} //= [];
 	$obj->{builds} = {};
 	$obj->{bosh} = $obj->env->is_bosh_director
-		? $obj->env->get_target_bosh({self => 1})
+		? $obj->env->get_target_bosh(self => 1)
 		: $obj->env->bosh;
 	my $vault = $obj->{bosh}->{exodus_vault}//$obj->{env}->vault; # I don't think we need to store this in the obj...
-	$obj->{credhub} = Service::Credhub->from_bosh($obj->{bosh}, vault => $vault);
+	$obj->{credhub} = Service::Credhub->from_bosh($obj->{bosh});
 	$obj->{secrets} = {};
 	return $obj;
 }
@@ -156,13 +156,13 @@ sub validate_runtime_config_requests {
 		$self->{requests} = [$self->get_req_names('*')];
 		$self->{request_options} = {};
 		return 1;
-	} 
-	
+	}
+
 	# Step 1: Standardize the requests to a hash of request names with options
 	if (!ref($args) && $args =~ /^\w+$/) {
 		# If its a string, promote it to a hash with no options
 		$args = {$args => {}};
-	
+
 	} elsif (ref($args) eq 'ARRAY') {
 		# If the args are an array, promote to a joined string (to preserve order)
 		# RISK: If the world builds a better idiot who puts a comma in the

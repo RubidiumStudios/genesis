@@ -29,6 +29,7 @@ sub new {
 		host => $host,
 		port => $port || 25555,
 		url => $opts{url},
+		env => $opts{env},
 		ca_cert => $opts{ca_cert},
 		client => $opts{client},
 		secret => $opts{secret},
@@ -36,8 +37,9 @@ sub new {
 		deployment => $opts{deployment},
 		use_local_config => $opts{use_local_config},
 		validated => ($ENV{GENESIS_BOSH_VERIFIED}||"") eq $alias,
-		exodus_vault => $opts{vault} // (Service::Vault->current || Service::Vault->default),
-		exodus_path => $opts{exodus_path}//$class->exodus_path($alias, %opts)
+		exodus_vault => $opts{exodus_vault} // (Service::Vault->current || Service::Vault->default),
+		exodus_path => $opts{exodus_path},
+		rel_to_env => $opts{target} || 'parent',
 	};
 
 	return bless($director, $class);
@@ -50,23 +52,35 @@ sub has_director {
 # }}}
 # from_exodus - create a new BOSH director object based on exodus data {{{
 sub from_exodus {
-	my ($class, $alias, %opts) = @_;
-	my ($exodus, $exodus_source);
-	if ($opts{exodus_data}) {
-		$exodus = $opts{exodus_data};
-		$exodus_source = 'provided';
-	} else {
-		$opts{vault} ||= (Service::Vault->current || Service::Vault->default);
-		if (!$opts{exodus_path}) {
-			$opts{exodus_path} =
-				($opts{exodus_mount} || '/secret/exodus/').
-				$alias.'/'.
-				($opts{bosh_deployment_type} || 'bosh');
+	my ($class, $alias, $env, %opts) = @_;
+	my ($exodus, $exodus_path, $exodus_mount, $exodus_vault, $rel_to_env)
+		= @opts{qw(exodus_data exodus_path exodus_mount exodus_vault rel_to_env)};
+
+	bail(
+		"Require an env object - was not passed in",
+	) unless $env && ref($env) eq 'Genesis::Env';
+
+	my $bosh_env = $env->bosh_env;
+	if (!defined($exodus_path)) {
+		if ($rel_to_env eq 'self') {
+			$exodus_vault //= $env->exodus_vault;
+		} else { # default is parent
+			$exodus_mount //= $bosh_env->{exodus_mount} || $env->exodus_mount;
+			$exodus_path = $exodus_mount . $alias.'/'.($opts{bosh_deployment_type} || 'bosh');
 		}
-		$opts{vault}->connect_and_validate();
-		trace("Trying to fetch BOSH director exodus data for '$opts{exodus_path}'");
-		$exodus = $opts{vault}->get($opts{exodus_path});
-		$exodus_source = sprintf("under #C{%s} on vault #M{%s}", $opts{exodus_path}, $opts{vault}->name);
+	}
+	if (!defined($exodus_vault)) {
+		$exodus_vault = $rel_to_env eq 'self'
+			? $env->vault
+			: ($bosh_env->{exodus_vault} || $env->vault);
+	}
+
+	my $exodus_source //= 'provided';
+	if (!$exodus) {
+		$exodus_vault->connect_and_validate();
+		trace("Trying to fetch BOSH director exodus data for '$exodus_path'");
+		$exodus = $exodus_vault->get($exodus_path);
+		$exodus_source = sprintf("under #C{%s} on vault #M{%s}", $exodus_path, $exodus_vault->name);
 		unless ($exodus) {
 			trace("#R{[ERROR]} No exodus data found %s", $exodus_source);
 			return;
@@ -96,20 +110,21 @@ sub from_exodus {
 	}
 
 	return $class->new($alias,
+		env     => $env,
 		url     => $exodus->{url},
 		client  => $exodus->{admin_username},
 		secret  => $exodus->{admin_password},
 		ca_cert => $exodus->{ca_cert},
 		deployment => $opts{deployment},
-		exodus_path => $opts{exodus_path},
-		exodus_vault => $opts{vault},
+		exodus_path => $exodus_path,
+		exodus_vault => $exodus_vault,
 	);
 }
 
 # }}}
 # from_alias - create a BOSH director object that uses a local config alias {{{
 sub from_alias {
-	my ($class, $alias, %opts) = @_;
+	my ($class, $alias, $env, %opts) = @_;
 
 	my $config_home = $opts{config_home} || "$ENV{HOME}/.bosh/config";
 	return undef unless -f $config_home;
@@ -120,6 +135,7 @@ sub from_alias {
 	for my $e (@{ $bosh->{environments} || []  }) {
 		return $class->new(
 			$alias,
+			env => $env,
 			url => $e->{url},
 			ca_cert => $e->{ca_cert},
 			use_local_config => 1,
@@ -136,9 +152,16 @@ sub from_alias {
 sub from_environment {
 	my $class = shift;
 
+	# REFACTOR: FOR THIS TO BE EFFECTIVE:
+	# 1. We need to export variables that will allow us to create the env object that bosh needs
+	#    We have GENESIS_ROOT and GENESIS_ENVIRONMENT, so that should allow us to create the env object
+	#
+	# 2. We need to indicate if we want the self or parent BOSH director
+
 	if (is_valid_uri($ENV{BOSH_ENVIRONMENT}) && $ENV{BOSH_CLIENT}) {
 		return $class->new(
 			$ENV{BOSH_ALIAS},
+			undef,
 			url => $ENV{BOSH_ENVIRONMENT},
 			client => $ENV{BOSH_CLIENT},
 			secret => $ENV{BOSH_CLIENT_SECRET},
@@ -153,15 +176,8 @@ sub from_environment {
 # }}}
 # exodus_path - return the exodus path from which the connection details will be read {{{
 sub exodus_path {
-	my ($class, $alias, %opts) = @_;
-	if (ref($class) && $class->isa(__PACKAGE__)) {
-		return $class->{exodus_path};
-	}
-	return $opts{exodus_path} || (
-		($opts{exodus_mount} || '/secret/exodus/').
-		$alias.'/'.
-		($opts{bosh_deployment_type} || 'bosh')
-	);
+	bail("No exodus path set for BOSH director") unless $_[0]->{exodus_path};
+	return $_[0]->{exodus_path};
 }
 # }}}
 # }}}
@@ -196,7 +212,7 @@ sub host {
 	my $self = shift;
 	# TODO: should we use bosh env command to get this, or is that just a
 	# reflection of the url we already have?
-	return $self->{host}; 
+	return $self->{host};
 }
 
 # }}}
@@ -209,6 +225,9 @@ sub environment_variables {
 		BOSH_CA_CERT       => $self->{ca_cert},
 		BOSH_CLIENT        => $self->{client},
 		BOSH_CLIENT_SECRET => $self->{secret},
+		BOSH_EXODUS_PATH   => $self->exodus_path,
+		BOSH_EXODUS_VAULT  => $self->exodus_vault->build_descriptor,
+		BOSH_REL_TO_ENV    => $self->{rel_to_env} || 'parent',
 	);
 	$envs{BOSH_DEPLOYMENT} = $self->{deployment} if $self->{deployment};
 	return %envs;
@@ -526,7 +545,7 @@ sub deployments {
 	my $deployment_rows = read_json_from($_[0]->execute('deployments','--json'))->{Tables}[0]{Rows};
 	my $deployments = {};
 	for my $deployment (@$deployment_rows) {
-		# Clean up 
+		# Clean up
 		my $name = $deployment->{name};
 		$deployments->{$name} = {
 			releases  => [split(/\n/, $deployment->{release_s} // '')],
@@ -558,7 +577,7 @@ sub delete_deployment {
 	if ($opts{dryrun}) {
 		$self->dryrun_of(@cmd);
 		return wantarray ? (undef, 0, undef) : 1;
-	} 
+	}
 
 	my ($out, $rc, $err) = $self->execute({interactive => 1}, @cmd);
 	return wantarray ? ($out, $rc, $err) : !$rc;
@@ -632,7 +651,7 @@ sub cleanup {
 						$last_name = $name;
 						$name_length = length($name) if length($name) > $name_length;
 					}
-					push @{$results{$name}{$release->{'Stemcell OS'}}}, $release->{'Stemcell Version'}; 
+					push @{$results{$name}{$release->{'Stemcell OS'}}}, $release->{'Stemcell Version'};
 				}
 
 				$name_length += 2; # for the ': '
@@ -667,6 +686,11 @@ sub cleanup {
 	my ($out, $rc, $err) = $self->execute({interactive => 1},@cmd);
 	return wantarray ? ($out, $rc, $err) : !$rc;
 }
+
+sub env {
+	return $_[0]->{env};
+}
+
 # }}}
-1
+1;
 # vim: fdm=marker:foldlevel=1:noet
