@@ -63,7 +63,7 @@ sub from_exodus {
 	my $bosh_env = $env->bosh_env;
 	if (!defined($exodus_path)) {
 		if ($rel_to_env eq 'self') {
-			$exodus_vault //= $env->exodus_vault;
+			$exodus_path //= $env->exodus_base;
 		} else { # default is parent
 			$exodus_mount //= $bosh_env->{exodus_mount} || $env->exodus_mount;
 			$exodus_path = $exodus_mount . $alias.'/'.($bosh_env->{dep_type} || 'bosh');
