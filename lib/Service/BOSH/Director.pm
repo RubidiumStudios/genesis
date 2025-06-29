@@ -66,7 +66,7 @@ sub from_exodus {
 			$exodus_path //= $env->exodus_base;
 		} else { # default is parent
 			$exodus_mount //= $bosh_env->{exodus_mount} || $env->exodus_mount;
-			$exodus_path = $exodus_mount . $alias.'/'.($bosh_env->{dep_type} || 'bosh');
+			$exodus_path = $exodus_mount . $alias.'/'.($opts{bosh_deployment_type} || $bosh_env->{dep_type} || 'bosh');
 		}
 	}
 	if (!defined($exodus_vault)) {
