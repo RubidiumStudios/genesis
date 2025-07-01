@@ -109,7 +109,7 @@ sub gather_properties {
 	# storage locations.
 	my (%config,%secrets) = ();
 	for my $property (@properties) {
-		my ($is_secret, $key, $alts, $default, $optional, $path) = 
+		my ($is_secret, $key, $alts, $default, $optional, $path) =
 			$property =~ /^(!?)([^\@:\?\>]+)(?:\@([^:\?\>]+))?(?:(?::([^>]+))|(\?))?(?:>(.+))?$/;
 		$path //= $key;
 		$default //= '';
@@ -117,11 +117,19 @@ sub gather_properties {
 		my $value = undef;
 		my $iaas = $self->iaas;
 		for my $lookup (@lookups) {
-			# FIXME: Cannot delete a value by putting null in the env to delete it
-			$value =
-				$self->env->lookup("bosh-configs.cpi.$lookup") //
-				$self->env->ocfp_config_lookup("cpi.$iaas.$lookup", undef);
-			last if defined $value;
+			($value, my $src) = $self->env->lookup("bosh-configs.cpi.$lookup");
+			last if $src;
+			if (!defined $value) {
+				# If we didn't find it in the environment, lets try the OCFP config
+				my ($json,$src) = $self->env->ocfp_config_lookup("cpi.$iaas.$lookup",undef);
+				next unless $src;
+				$value = eval {
+					# If the value is a JSON string, decode it
+					JSON::PP->new->utf8->allow_nonref->decode($json);
+				};
+				$value = $json if $@;
+				last;
+			}
 		}
 		if (!defined $value) {
 			next if ($optional);
@@ -152,7 +160,7 @@ sub gather_properties {
 	# in the kit, but the environment wants to set.
 	my $overrides = $self->env->lookup_unevaled('bosh-configs.cpi');
 	for my $override (keys %$overrides) {
-		
+
 		# If we already got this value, skip it
 		next if exists $config{$override};
 
