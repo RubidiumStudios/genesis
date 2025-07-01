@@ -1935,27 +1935,23 @@ sub get_target_bosh {
 	bail(
 		"Cannot use the #y{--self} and #y{--parent} options together."
 	) if ($options->{self} && $options->{parent});
-	my $target = (grep {$_} qw/self parent/)[0]; # default to self
+	my $target = (grep {$options->{$_}} qw/self parent/)[0];
 
-	if ($is_create_env && $target eq 'parent') {
-		bail(
-			"Environment %s is a #M{create-env} deployment, so the #y{--parent} option is invalid.",
-			$self->name
-		);
-	}
-	if (!$is_director && $target eq 'self') {
-		bail(
-			"Environment %s is not a BOSH director, so the #y{--self} option is invalid.",
-			$self->name
-		);
-	}
-	if (!$is_director && $is_create_env) {
-		bail(
-			"Environment %s is a #M{create-env} deployment, but not a BOSH director, ".
-			"so there is no BOSH director to target.",
-			$self->name
-		);
-	}
+	bail(
+		"Environment %s is a #M{create-env} deployment, so the #y{--parent} option is invalid.",
+		$self->name
+	) if ($is_create_env && $target eq 'parent');
+
+	bail(
+		"Environment %s is not a BOSH director, so the #y{--self} option is invalid.",
+		$self->name
+	) if (!$is_director && $target eq 'self');
+
+	bail(
+		"Environment %s is a #M{create-env} deployment, but not a BOSH director, ".
+		"so there is no BOSH director to target.",
+		$self->name
+	) if (!$is_director && $is_create_env);
 
 	# Issue warnings for unnecessary options
 	unless ($Genesis::RC->get('suppress_warnings.bosh_target' => 0)) {
