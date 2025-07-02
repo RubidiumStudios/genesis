@@ -3523,7 +3523,7 @@ sub terminate {
 				}
 			} else {
 				# We have deployment artifacts, extract them normally
-				my ($optional_artifacts) = compare_arrays(
+				my (undef, $optional_artifacts) = compare_arrays(
 					[$last_deployment->artifact_types()],
 					[qw/vars store/]
 				);
@@ -3534,12 +3534,15 @@ sub terminate {
 			}
 		}
 		$self->notify("deleting create-env environment...");
+
 		my ($out, $rc) = $self->bosh->delete_env(
 			$self->deployment_cache_path_lookup('manifest'),
 			%opts,
 			vars_file => $self->deployment_cache_path_lookup('vars'),
 			state => $self->deployment_cache_path_lookup('state'),
-			store => $self->deployment_cache_path_lookup('store'),
+			store => -f $self->deployment_cache_path_lookup('store')
+				? $self->deployment_cache_path_lookup('store')
+				: undef,
 		);
 		$self->deployment_cache_cleanup;
 		$ok = ($rc == 0);

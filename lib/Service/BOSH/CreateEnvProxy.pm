@@ -54,8 +54,8 @@ sub delete_env {
 
 	$opts{flags} ||= [];
 	push(@{$opts{flags}}, '--state', $opts{state});
-	push(@{$opts{flags}}, '--vars-store', $opts{store}) if $opts{store};
-	push(@{$opts{flags}}, '-l', $opts{vars_file}) if ($opts{vars_file});
+	push(@{$opts{flags}}, '--vars-store', $opts{store}) if $opts{store} && -f $opts{store};
+	push(@{$opts{flags}}, '-l', $opts{vars_file}) if $opts{vars_file} && -f $opts{vars_file};
 
 	if ($opts{dryrun}) {
 		$self->dryrun_of('delete-env', @{$opts{flags}}, $manifest);

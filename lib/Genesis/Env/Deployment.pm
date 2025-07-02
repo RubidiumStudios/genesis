@@ -259,7 +259,7 @@ sub sequence {
 # user_description - Return a description of the user who performed the deployment {{{
 sub user_description {
 	my ($self) = @_;
-	
+
 	# Add in any known user roles from the users hash
 	my $user_info = $self->{data}{user} // {};
 	my @extra_roles = ();
@@ -292,7 +292,7 @@ our @sorted_roles = qw/shell bosh vault repo concourse/;
 # user_colorized_roles - Return a colorized string of user roles {{{
 sub user_colorized_roles {
 	my ($self) = @_;
-	
+
 	# Add in any known user roles from the users hash
 	my $user_info = $self->{data}{user} // {};
 	my @used_roles = grep {
@@ -366,7 +366,7 @@ sub commit {
 
 	# If not present, determine the started, completed, and timestamp values
 	my $commit_time = Time::Piece->new;
-	my $timestamp_time = $self->{timestamp} 
+	my $timestamp_time = $self->{timestamp}
 		? Time::Piece->strptime($self->{timestamp}, EXODUS_TIME_FORMAT_SHORT)
 		: $data->{completed} // $commit_time;
 	$data->{completed} //= $timestamp_time;
@@ -432,7 +432,8 @@ sub commit {
 sub artifact_types {
 	my ($self) = @_;
 	my $artifact_map = $self->_artifact_map();
-	return sort keys %$artifact_map;
+	my @types = sort keys %$artifact_map;
+	return @types;
 }
 
 # }}}
@@ -441,7 +442,8 @@ sub artifact_filenames {
 	my ($self) = @_;
 	# Return the list of artifact filenames for this deployment
 	my $artifact_map = $self->_artifact_map();
-	return sort values %$artifact_map;
+	my @filenames = sort values %$artifact_map;
+	return @filenames;
 }
 
 # }}}
@@ -462,10 +464,10 @@ sub artifact {
 # artifacts - Get the artifacts contents for one or more artifacts (default is all) {{{
 sub artifacts {
 	my ($self, @artifacts) = @_;
-	
+
 	# Make sure we have artifacts
 	return {} unless $self->{artifacts};
-	
+
 	my $contents = $self->_get_artifact_hash(@artifacts);
 	return $contents;
 }
@@ -474,20 +476,20 @@ sub artifacts {
 # details_for_artifacts - Get the details for one or more artifacts (default is all) {{{
 sub details_for_artifacts {
 	my ($self, @artifacts) = @_;
-	
+
 	# If no artifacts are specified, return all available artifacts by type
 	@artifacts = sort $self->artifact_types() unless @artifacts;
-	
+
 	my @details = ();
 	my $artifacts_hash = $self->_get_artifact_hash(@artifacts);
-	
+
 	for my $artifact (@artifacts) {
 		my $content = $artifacts_hash->{$artifact}//'';
-		
+
 		my $type = $self->_get_artifact_type($artifact);
 		my $filename = $self->_get_artifact_filename($artifact);
 		my $size = length($content);
-		
+
 		push @details, {
 			type => $type,
 			filename => $filename,
@@ -496,7 +498,7 @@ sub details_for_artifacts {
 			content => $content,
 		};
 	}
-	
+
 	return wantarray ? @details : \@details;
 }
 
@@ -504,7 +506,7 @@ sub details_for_artifacts {
 # extract_artifacts_to - Extract the artifacts from the deployment to the given path {{{
 sub extract_artifacts_to {
 	my ($self, $path, @artifacts) = @_;
-	
+
 	# If path is not absolute, make it relative to the directory the user called genesis from
 	my $target_path = absolute_path($path, $ENV{GENESIS_CALLER_DIR});
 	bail(
@@ -518,25 +520,25 @@ sub extract_artifacts_to {
 	}
 
 	my $artifacts_hash = $self->_get_artifact_hash(@artifacts);
-	
+
 	# Write each artifact to the specified path
 	my %artifact_files = ();
 	for my $artifact (keys %$artifacts_hash) {
 		my $fileref = $self->_get_artifact_filename($artifact);
 			# Artifact names cannot contain paths as they are committed with the basename of the file
 		bail(
-			"Invalid artifact filename '#B{%s}'%s - artifact names cannot contain path separators", 
+			"Invalid artifact filename '#B{%s}'%s - artifact names cannot contain path separators",
 			$fileref,
 			$artifact eq $fileref ? '' : " for artifact #M{$artifact}"
 		) if $fileref =~ m{/};
-		
+
 		# Write the artifact to the file
 		my $output_path = "$target_path/$fileref";
 		mkfile_or_fail($output_path, 0644, $artifacts_hash->{$artifact});
 		debug("Extracted artifact '%s' to %s", $artifact, $output_path);
 		$artifact_files{$artifact} = $output_path;
 	}
-	
+
 	return \%artifact_files;
 }
 
@@ -547,7 +549,7 @@ sub extract_artifacts_to {
 # _get_artifact_hash - Internal helper to get all artifacts as a hash {{{
 sub _get_artifact_hash {
 	my ($self, @artifacts) = @_;
-	
+
 	my %results = ();
 
 	if (!@artifacts) {
@@ -566,7 +568,7 @@ sub _get_artifact_hash {
 			join(', ', @invalid_artifacts)
 		) if @invalid_artifacts;
 	}
-	
+
 	my $artifacts_map = $self->_artifact_map();
 	if ($self->{artifacts}{format} eq 'local-file-hash') {
 		# Handle local file hash format - this uses type as the key, but it doesn't
@@ -583,7 +585,7 @@ sub _get_artifact_hash {
 			bail("artifact '$artifact' file not found") unless $file && -f $file;
 			$results{$artifact} = slurp($file);
 		}
-		
+
 		# Handle secrets separately if needed
 		if ($requested_secrets || $requested_secrets_json) {
 			# Already validated that secrets is a valid artifact type
@@ -596,7 +598,7 @@ sub _get_artifact_hash {
 	}	elsif ($self->{artifacts}{format} eq 'b64-gzipped') {
 		# Handle gzipped base64 format - this uses the filename as the key
 		my $artifact_tarball = $self->_get_artifact_tarball();
-		
+
 		# Load each artifact
 		foreach my $ref (@artifacts) {
 			my $fileref = $artifacts_map->{$ref} // $ref;
@@ -798,7 +800,7 @@ sub _get_artifact_filename {
 # _is_base64_gzipped - Determines if a string is base64-encoded gzipped data {{{
 sub _is_base64_gzipped {
 	my ($base64_data) = @_;
-	
+
 	# Ensure we have data and it looks like base64
 	return 0 unless $base64_data && length($base64_data) >= 12;
 
@@ -816,7 +818,7 @@ sub _is_base64_gzipped {
 sub _get_ts_string {
 	my ($ts) = @_;
 	$ts = shift if ref($ts) eq 'Genesis::Env::Deployment';
-	
+
 	$ts //= Time::Piece->new;  # Default to current time if not provided
 	return $ts->strftime(EXODUS_TIME_FORMAT_SHORT) if ref($ts) eq 'Time::Piece';
 	return (
