@@ -111,61 +111,15 @@ our @EXPORT = qw/
 
 	tcp_listening
 	die_unless_controlling_terminal
+
+	validate_global_config global_config_schema
 /;
 
 sub Init {
 	my $version = shift // $Genesis::VERSION;
 	$Genesis::RC = Genesis::Config->new($ENV{HOME}."/.genesis/config");
 	# FIXME: If command is ping, don't error out, but print validation errors
-	$Genesis::RC->validate({
-		default_bosh_target      => { type => 'enum',    default => 'ask',    values => [qw/ask self parent/],       envvar => 'GENESIS_DEFAULT_BOSH_TARGET' },
-		legacy_repo_suffix       => { type => 'boolean', default => 0,                                               envvar => 'GENESIS_LEGACY_REPO_SUFFIX' },
-		embedded_genesis         => { type => 'enum',    default => 'ignore', values => [qw/ignore check warn/]},
-		output_style             => { type => 'enum',    default => 'plain',  values => [qw/plain fun pointer/]},
-		show_duration            => { type => 'boolean', default => 0,                                               envvar => 'GENESIS_SHOW_DURATION' },
-		automatic_config_upgrade => { type => 'enum',    default => 'no',     values => [qw/no yes silent/],         envvar => 'GENESIS_CONFIG_AUTOMATIC_UPGRADE' },
-		fix_on_deploy            => { type => 'enum',    default => 'never',  values => [qw/always ask never/],      envvar => 'GENESIS_FIX_ON_DEPLOY' },
-		confirm_release_overrides=> { type => 'enum',                         values => [qw/always outdated never/], envvar => 'GENESIS_CONFIRM_RELEASE_OVERRIDES' },
-		spec_cache_dir           => { type => 'string',  default => "",                                              envvar => 'GENESIS_SPEC_CACHE_DIR'},
-		bosh_logs_path           => { type => 'string',  default => "<DEPLOYMENT_ROOT>/bosh_logs",                   envvar => 'GENESIS_DEPLOYMENT_LOGS_PATH'},
-		deployment_roots  => {
-			type => 'array',
-			default => [],
-			subtype => 'string||hasharray', # Can be a string or a hash of label => path
-			envvar => 'GENESIS_DEPLOYMENT_ROOTS', # Comma-separated list of path strings or label=path pairs
-			envsplit => ':',
-			envconvert => [
-				{ type => 'hasharray', pair_split => ';', kv_split => '=', key_type => 'string', value_type => 'string' },
-				{ type => 'string' }
-			]
-		},
-
-		suppress_warnings => {
-			type => 'hash',
-			schema => {
-				oversized_secrets => { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING'},
-				bosh_target =>       { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPPRESS_BOSH_TARGET_WARNING'},
-			}
-		},
-
-		# To be implemented:
-		# executable_environments  => { type => 'boolean', default => 0 },
-		# fix_secrets_on_deploy    => { type => 'boolean', default => 0 },
-
-		logs => {
-			type => 'array',
-			subtype => 'hash',
-			schema => {
-				file => { type => 'string', required => 1 },
-				level => { type => 'enum', default => 'INFO', values => [qw/TRACE DEBUG INFO WARN ERROR OUTPUT/]},
-				show_stack => { type => 'enum', default => 'default', values => [qw/default none full current fatal/]},
-				truncate => { type => 'boolean', default => 0 },
-				style => { type => 'enum', default => 'plain', values => [qw/plain fun pointer rfc-5424/]},
-				lifespan => { type => 'enum', default => 'forever', values => [qw/forever current/]},
-				timestamp => { type => 'boolean', default => 0 },
-			}
-		}
-	});
+	validate_global_config($Genesis::RC);
 	Genesis::Log->setup_from_configs($Genesis::RC->get("logs",[]));
 
 	our $USER_AGENT_STRING = "genesis/$Genesis::VERSION";
@@ -180,7 +134,6 @@ sub Init {
 	$ENV{GENESIS_ORIGINATING_DIR}= Cwd::getcwd;
 	$ENV{GENESIS_CALL_BIN}       = humanize_bin();
 	$ENV{GENESIS_FULL_CALL}      = join(" ", map {$_ =~ / / ? "\"$_\"" : $_} ($ENV{GENESIS_CALL_BIN}, @ARGV));
-
 }
 
 sub deployment_roots_map {
@@ -640,7 +593,7 @@ sub run {
 	}
 
 my $duration = gettimeofday() - $start_time;
-qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',undef,1));	
+qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',undef,1));
 
 	my $err = slurp($err_file) if ($err_file && -f $err_file);
 	my $rc = $? >>8;
@@ -795,13 +748,13 @@ sub curl {
 sub spruce_diff {
 	my ($first, $second) = @_;
 	bug("spruce diff requires two files") unless @_ == 2;
-	
+
 	my $scratchdir = workdir('spruce-diff');
-	
+
 	# Helper function to process arguments consistently
 	my $process_arg = sub {
 		my ($arg, $arg_id) = @_;
-		
+
 		# If the argument is a file, just return it
 		return $arg if (ref($arg) eq '' && $arg && -f $arg);
 
@@ -842,11 +795,11 @@ sub spruce_diff {
 			$arg_id, ref($arg) ? lc(ref($arg)) : defined $arg ? 'scalar' : 'undef'
 		)
 	};
-	
+
 	# Process both arguments using the helper function
 	$first = $process_arg->($first, "first");
 	$second = $process_arg->($second, "second");
-	
+
 	my $out_file = "$scratchdir/out.diff";
 	my (undef,$rc,$err) = run({redact => 1}, fake_tty($out_file, "spruce", "diff", $first, $second));
 	my $out = slurp($out_file);
@@ -1482,13 +1435,13 @@ sub parse_fixed_width_table {
 	}
 
 	return [] unless $header;
-	
+
 	# Get column names and their positions
 	my @cols = split(/\s{2,}/, $header);
 	my @positions = (0);
 	push @positions, pos($header)
 		while ($header =~ /(?:\S+)(\s{2,})/g);
-    
+
 	# Create array of column ranges
 	my @ranges = map {
 		[$positions[$_], $positions[$_+1] - $positions[$_]]
@@ -1509,6 +1462,158 @@ sub parse_fixed_width_table {
   return wantarray ? @results : \@results;
 }
 
+# validate_global_config - validate global configuration {{{
+sub validate_global_config {
+	my ($config_obj) = @_;
+	$config_obj->validate(global_config_schema());
+}
+
+# }}}
+# global_config_schema - return the global configuration validation schema {{{
+sub global_config_schema {
+	return {
+		default_bosh_target => {
+			type          => 'enum',
+			default       => 'ask',
+			values        => [qw/ask self parent/],
+			envvar        => 'GENESIS_DEFAULT_BOSH_TARGET',
+			description   => 'Default BOSH target selection behavior'
+		},
+		legacy_repo_suffix => {
+			type          => 'boolean',
+			default       => 0,
+			envvar        => 'GENESIS_LEGACY_REPO_SUFFIX',
+			description   => 'Use legacy "-deployments" suffix for new repositories'
+		},
+		embedded_genesis => {
+			type          => 'enum',
+			default       => 'ignore',
+			values        => [qw/ignore check warn/],
+			description   => 'How to handle embedded genesis versions'
+		},
+		output_style => {
+			type          => 'enum',
+			default       => 'plain',
+			values        => [qw/plain fun pointer/],
+			description   => 'CLI output style'
+		},
+		show_duration => {
+			type          => 'boolean',
+			default       => 0,
+			envvar        => 'GENESIS_SHOW_DURATION',
+			description   => 'Show command execution duration'
+		},
+		automatic_config_upgrade => {
+			type          => 'enum',
+			default       => 'no',
+			values        => [qw/no yes silent/],
+			envvar        => 'GENESIS_CONFIG_AUTOMATIC_UPGRADE',
+			description   => 'Automatically upgrade configuration files'
+		},
+		fix_on_deploy => {
+			type          => 'enum',
+			default       => 'never',
+			values        => [qw/always ask never/],
+			envvar        => 'GENESIS_FIX_ON_DEPLOY',
+			description   => 'Automatically fix issues during deployment'
+		},
+		confirm_release_overrides => {
+			type          => 'enum',
+			values        => [qw/always outdated never/],
+			envvar        => 'GENESIS_CONFIRM_RELEASE_OVERRIDES',
+			description   => 'Confirm release overrides'
+		},
+		spec_cache_dir => {
+			type          => 'string',
+			default       => "",
+			envvar        => 'GENESIS_SPEC_CACHE_DIR',
+			description   => 'Directory for caching kit specifications'
+		},
+		bosh_logs_path => {
+			type          => 'string',
+			default       => "<DEPLOYMENT_ROOT>/bosh_logs",
+			envvar        => 'GENESIS_DEPLOYMENT_LOGS_PATH',
+			description   => 'Path for storing BOSH logs'
+		},
+		deployment_roots  => {
+			type          => 'array',
+			default       => [],
+			subtype       => 'string||hasharray', # Can be a string or a hash of label => path
+			envvar        => 'GENESIS_DEPLOYMENT_ROOTS', # Comma-separated list of path strings or label=path pairs
+			envsplit      => ':',
+			envconvert    => [
+			                   { type => 'hasharray', pair_split => ';', kv_split => '=', key_type => 'string', value_type => 'string' },
+			                   { type => 'string' }
+			],
+			str_format    => \*Genesis::deployment_roots_str_format,
+			description   => 'List of deployment root directories',
+		},
+
+		suppress_warnings => {
+			type   => 'hash',
+			schema => {
+				oversized_secrets => { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING'},
+				bosh_target =>       { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPPRESS_BOSH_TARGET_WARNING'},
+			}
+		},
+
+		logs => {
+			type => 'array',
+			subtype => 'hash',
+			schema => {
+				file => {
+					type        => 'string',
+					required    => 1,
+					description => 'File path for the log file'
+				},
+				level => {
+					type => 'enum',
+					default => 'INFO',
+					values => [qw/TRACE DEBUG INFO WARN ERROR OUTPUT/],
+					description => 'Log level for the file'
+				},
+				show_stack => {
+					type => 'enum',
+					default => 'default',
+					values => [qw/default none full current fatal/],
+					description => 'Stack trace visibility',
+				},
+				truncate => {
+					type => 'boolean',
+					default => 1,
+					description => 'Truncate the log file on startup',
+				},
+				style => {
+					type => 'enum',
+					default => 'plain',
+					values => [qw/plain fun pointer rfc-5424/],
+					description => 'Log output style',
+				},
+				lifespan => {
+					type => 'enum',
+					default => 'current',
+					values => [qw/forever current/],
+					description => 'Log file lifespan',
+				},
+				timestamp => {
+					type => 'boolean',
+					default => 0,
+					description => 'Include timestamps in log entries',
+				},
+			}
+		}
+	};
+}
+
+# }}}
+# deployment_roots_str_format - format for deployment roots in config {{{
+sub deployment_roots_str_format {
+	my ($root) = @_;
+	return $root unless ref($root);
+	return "#Y[$root->{label}] #m{$root->{path}}";
+}
+
+# }}}
 1;
 
 =head1 NAME
@@ -1761,7 +1866,7 @@ generally don't need to set this unless you are doing something strange.
 A shell-specific redirection destination for standard error.  This gets
 appended to the idiom "2>".  Normally, standard error is redirected back
 into standard output.  If you pass this explicitly as C<undef>, standard
-error will B<not> be redirected for you, at all, and will be written directly
+error will be B<not> be redirected for you, at all, and will be written directly
 to the terminal.
 
 As a special case, if you specify 0 instead, stderr will be returned as a

@@ -833,38 +833,7 @@ sub _validate_config {
 		$self->_upgrade_config_to_v2($config_version, $upgrade_automatically);
 
 	} elsif ($config_version == 2){
-		$self->config->validate({
-			deployment_type  => {type => 'string', required => 1},
-			version          => {type => '"2"', required => 1},
-			creator_version  => {type => 'semver||"(development)"||"Unknown"', required => 1},
-			updater_version  => {type => 'semver||"(development)"'},
-			minimum_version  => {type => 'semver'},
-			manifest_store   => {type => 'enum', values => ['repository','hybrid','exodus'], default => 'hybrid'},
-			kit_provider     => {
-				type => 'hash',
-				schema => {
-					type         => {type => 'enum', values => ['github','genesis-community']}, # absences means genesis-community
-					organization => {type => 'string'},
-					label        => {type => 'string'},
-					tls          => {type => 'boolean'},
-					domain       => {type => 'string'},
-				}
-			},
-			secrets_provider => {
-				type           => 'hash',
-				schema         => {
-					url          => {type => 'string', required => 1},
-					insecure     => {type => 'boolean', default => Genesis::Config::TRUE},
-					strongbox    => {type => 'boolean', default => Genesis::Config::TRUE},
-					namespace    => {type => 'string'},
-					alias        => {type => 'string'}
-				}
-			},
-			force_deployment_reason   => {type => 'boolean', default => Genesis::Config::FALSE},
-			force_user_bosh_creds			=> {type => 'boolean', default => Genesis::Config::FALSE},
-			allow_oversized_secrets   => {type => 'boolean'},
-			confirm_release_overrides => {type => 'enum', values => [qw/always outdated never/], envvar => 'GENESIS_CONFIRM_RELEASE_OVERRIDES' },
-		});
+		$self->config->validate($self->_repo_config_schema());
 	} else {
 		bail "Genesis deployment repo configuration version $config_version is not supported";
 	}
@@ -933,6 +902,85 @@ sub _upgrade_config_to_v2 {
 	} else {
 		bail "Genesis deployment repo configuration upgrade to v2 aborted";
 	}
+}
+
+# }}}
+# _repo_config_schema - return the repository configuration validation schema {{{
+sub _repo_config_schema {
+	my ($self) = @_;
+	return {
+		deployment_type => {
+			type           => 'string',
+			required       => 1,
+			description    => 'Type of deployment this repository manages'
+		},
+		version => {
+			type           => '"2"',
+			required       => 1,
+			description    => 'Configuration schema version'
+		},
+		creator_version => {
+			type           => 'semver||"(development)"||"Unknown"',
+			required       => 1,
+			description    => 'Genesis version that created this repository'
+		},
+		updater_version => {
+			type           => 'semver||"(development)"',
+			description    => 'Genesis version that last updated this repository'
+		},
+		minimum_version => {
+			type           => 'semver',
+			description    => 'Minimum Genesis version required for this repository'
+		},
+		manifest_store => {
+			type           => 'enum',
+			values         => ['repository','hybrid','exodus'],
+			default        => 'hybrid',
+			description    => 'Where to store manifests'
+		},
+		kit_provider => {
+			type           => 'hash',
+			description    => 'Configuration for kit provider',
+			schema => {
+				type         => {type => 'enum', values => ['github','genesis-community']},
+				organization => {type => 'string'},
+				label        => {type => 'string'},
+				tls          => {type => 'boolean'},
+				domain       => {type => 'string'},
+			}
+		},
+		secrets_provider => {
+			type           => 'hash',
+			description    => 'Configuration for secrets provider (Vault)',
+			schema => {
+				url          => {type => 'string', required => 1},
+				insecure     => {type => 'boolean', default => Genesis::Config::FALSE},
+				strongbox    => {type => 'boolean', default => Genesis::Config::TRUE},
+				namespace    => {type => 'string'},
+				alias        => {type => 'string'}
+			}
+		},
+		force_deployment_reason => {
+			type           => 'boolean',
+			default        => Genesis::Config::FALSE,
+			description    => 'Require deployment reason'
+		},
+		force_user_bosh_creds => {
+			type           => 'boolean',
+			default        => Genesis::Config::FALSE,
+			description    => 'Force user to provide BOSH credentials'
+		},
+		allow_oversized_secrets => {
+			type           => 'boolean',
+			description    => 'Allow secrets larger than recommended size'
+		},
+		confirm_release_overrides => {
+			type           => 'enum',
+			values         => [qw/always outdated never/],
+			envvar         => 'GENESIS_CONFIRM_RELEASE_OVERRIDES',
+			description    => 'Confirm release overrides'
+		},
+	};
 }
 
 # }}}
