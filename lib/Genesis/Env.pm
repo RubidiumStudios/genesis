@@ -2007,7 +2007,7 @@ sub get_target_bosh {
 	bail(
 		"Cannot use the #y{--self} and #y{--parent} options together."
 	) if ($options->{self} && $options->{parent});
-	my $target = (grep {$options->{$_}} qw/self parent/)[0];
+	my $target = (grep {$options->{$_}} qw/self parent/)[0]//'';
 
 	bail(
 		"Environment %s is a #M{create-env} deployment, so the #y{--parent} option is invalid.",
@@ -2038,9 +2038,9 @@ sub get_target_bosh {
 	}
 
 	# Determine target
-	$target //= 'self' if $is_director && $is_create_env;
-	$target //= 'parent' if !$is_director;
-	$target //= $Genesis::RC->get('default_bosh_target' => 'ask');
+	$target ||= 'self' if $is_director && $is_create_env;
+	$target ||= 'parent' if !$is_director;
+	$target ||= $Genesis::RC->get('default_bosh_target' => 'ask');
 
 	if ($target eq 'ask') {
 		# BOSH director deployed by another director - need to ask
@@ -3025,7 +3025,7 @@ sub deploy {
 					"will not be accurate for this deployment compared to what was last deployed.}"
 				);
 			}
-			$self->notify("\ncomparing against the last deployed manifest...");
+			info("  - comparing against the last deployed manifest...");
 			my ($out, $rc, $err) = spruce_diff(
 					{file => $last_manifest_path, label => 'last-deployed'},
 					{file => $manifest_path,      label => 'current'}
