@@ -2996,7 +2996,6 @@ sub deploy {
 						"Proceed with BOSH create-env for the #C{${\($self->name)}} anyways? [y|n] ",
 						0
 					) or bail "Aborted!\n";
-					$self->notify("\ncomparing against the last deployed manifest...");
 				} else {
 					bail(
 						"$issue\n\nRefusing to deploy to protect integrity of the environment."
@@ -3026,29 +3025,47 @@ sub deploy {
 					"will not be accurate for this deployment compared to what was last deployed.}"
 				);
 			}
+			$self->notify("\ncomparing against the last deployed manifest...");
 			my ($out, $rc, $err) = spruce_diff(
 					{file => $last_manifest_path, label => 'last-deployed'},
 					{file => $manifest_path,      label => 'current'}
 			);
 
+			my ($vars_out, $vars_rc, $vars_err) = ('',0,'');
+			if ($vars_path && -f $vars_path) {
+				# Diff the vars file too, if it exists
+				($vars_out, $vars_rc, $vars_err) = spruce_diff(
+					{file => $last_manifest->{vars}{path}, label => 'last-deployed-vars'},
+					{file => $vars_path, label => 'current-vars'}
+				);
+			}
+
 			bail(
 				"Failed to diff the last deployed manifest with the current manifest: %s",
 				$err//$out
 			) if $rc > 1;
+			bail(
+				"Failed to diff the last deployed vars file with the current vars file: %s",
+				$vars_err//$vars_out
+			) if ($vars_rc > 1);
 
-			if ($out) {
-				$local_mismatch = 1;
+			if (!$out && !$vars_out) {
 				info(
-					"[[  - >>#y{found differences between last deployed and current manifest:}\n\n%s%s",
-					$out,
-					($last_manifest->{manifest}{source} eq 'repository'
-						? "\n\n#y{NOTE}: values from vault have been redacted, so differences are not shown."
-						: '')
+					"[[  - >>#G{no differences found between last deployed and current manifest or bosh variables.}"
 				);
 			} else {
+				$local_mismatch = 1;
 				info(
-					"[[  - >>#G{no differences found between last deployed and current manifest.}"
-				);
+					"[[  - >>#y{found differences between last deployed and current manifest:}\n\n%s",
+					$out,
+				) if $out;
+				info(
+					"[[  - >>#y{found differences between last deployed and current bosh variables:}\n\n%s",
+					$vars_out
+				) if $vars_out;
+				warning(
+					"\n#y{NOTE}: values from vault have been redacted, so differences are not shown."
+				) if $last_manifest->{manifest}{source} eq 'repository';
 			}
 		} else {
 			info "[[  - >>no previous deployment of this environment found in the deployment archive.";
