@@ -3025,7 +3025,7 @@ sub deploy {
 					"will not be accurate for this deployment compared to what was last deployed.}"
 				);
 			}
-			info("  - comparing against the last deployed manifest...");
+			info("\n[[  - >>comparing against the last deployed manifest...");
 			my ($out, $rc, $err) = spruce_diff(
 					{file => $last_manifest_path, label => 'last-deployed'},
 					{file => $manifest_path,      label => 'current'}
