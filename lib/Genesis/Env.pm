@@ -802,7 +802,7 @@ sub can_build_cloud_configs {
 sub minimum_genesis_version {
 	my ($self) = @_;
 	return $self->_memoize('__effective_minimum_genesis_version', sub {
-		my $env_min = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], undef) =~ s/^v//ri;
+		my $env_min = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], '') =~ s/^v//ri;
 		my $repo_min = $self->top->config->get('minimum_version') =~ s/^v//ri;
 
 		# Environment minimum takes precedence if specified
@@ -2737,8 +2737,8 @@ sub check {
 
 	my $ok = 1;
 	my $env_check = $self->_check_environment_viability();
-	bail("%s", $env_check->{message}) if $env_check->{fatal};
-	$ok = 0 unless $env_check->{status} eq 'ok';
+	bail("%s", $env_check->{msg}) if $env_check->{fatal};
+	$ok = 0 unless $env_check->{state} eq 'ok';
 	my $kit_files = $env_check->{kit_files};
 
 	# TODO: Detect 'fix-secrets' option and run it against invalid or missing secrets, then run the check
