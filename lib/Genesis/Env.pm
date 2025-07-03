@@ -802,8 +802,8 @@ sub can_build_cloud_configs {
 sub minimum_genesis_version {
 	my ($self) = @_;
 	return $self->_memoize('__effective_minimum_genesis_version', sub {
-		my $env_min = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], undef) =~ s/^v//i;
-		my $repo_min = $self->top->config->get('minimum_version') =~ s/^v//i;
+		my $env_min = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], undef) =~ s/^v//ri;
+		my $repo_min = $self->top->config->get('minimum_version') =~ s/^v//ri;
 
 		# Environment minimum takes precedence if specified
 		return $env_min if $env_min;
