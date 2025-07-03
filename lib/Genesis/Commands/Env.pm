@@ -115,12 +115,10 @@ sub edit {
 	my $use_manual = defined(get_options->{manual}) ? (get_options->{manual} ? 1 : 0) : undef;
 	my $prompt_for_kit = 0;
 
-	push(@warnings,
-		"Genesis version #Y{$Genesis::VERSION} does not meet the environment's ".
-		"minimum required version #R{$min_genesis_version} - you will need to ".
-		"upgrade Genesis or alter the environment file to manage this environment ".
-		"with this version of Genesis."
-	) if $min_genesis_version && !new_enough($Genesis::VERSION, $min_genesis_version);
+		# Validate Genesis version requirements
+	my $version_check = $env->validate_genesis_version_requirements();
+	push @warnings, @{$version_check->{warnings}} if @{$version_check->{warnings}};
+	push @warnings, @{$version_check->{errors}} if @{$version_check->{errors}};
 
 	bail(
 		"Cannot specify #Y{--manual} unless the editor is vi-based (vi,vim,mvim,".
@@ -718,7 +716,7 @@ sub deploy {
 					if ($dryrun) {
 						dryrun(
 							"CPI config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
-							$check_result->{msg}	
+							$check_result->{msg}
 						);
 					} else {
 						# Just going to force the fix for now

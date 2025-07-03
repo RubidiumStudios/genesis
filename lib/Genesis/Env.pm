@@ -127,15 +127,17 @@ sub load {
 			$env->{__params}{genesis}{bosh_env} = delete($env->{__params}{params}{bosh});
 		}
 
-		(my $min_version = $env->lookup(['genesis.min_version','genesis.minimum_version'],'')) =~ s/^v//i;
-		if ($min_version) {
+		my $version_check = $env->validate_genesis_version_requirements();
+		if ($version_check->{effective_minimum}) {
+			my $min_version = $version_check->{effective_minimum};
 			if ($Genesis::VERSION eq "(development)") {
-				push(@config_warnings, "using development version of Genesis, cannot confirm it meets minimum version of #ci{$min_version}");
-			} elsif (! new_enough($Genesis::VERSION, $min_version)) {
-				push(@errors, "genesis #Ri{v$Genesis::VERSION} does not meet minimum version of #ci{$min_version}");
+				my $version_min_source = $version_check->{source};
+				push(@config_warnings, "using development version of Genesis, cannot confirm it meets minimum version #ci{$min_version} required by the $version_min_source");
+			} else {
+				push(@errors, @{$version_check->{errors}}) if @{$version_check->{errors}};
+				push(@config_warnings, @{$version_check->{warnings}}) if @{$version_check->{warnings}}
 			}
 		}
-		$env->{__min_version} = $min_version || '0.0.0';
 
 		my $kit_name = $env->lookup('kit.name');
 		my $kit_version = $env->lookup('kit.version');
@@ -251,7 +253,6 @@ sub from_envvars {
 			) unless (under_test && !envset 'GENESIS_TESTING_DEV_VERSION_DETECTION');
 		}
 	}
-	$env->{__min_version} = $min_version || '0.0.0';
 
 	# features
 	$env->{'__features'} = [split(' ',$ENV{GENESIS_REQUESTED_FEATURES})]
@@ -796,11 +797,82 @@ sub can_build_cloud_configs {
 }
 
 # }}}
+
+# minimum_genesis_version - returns the effective minimum genesis version for this environment {{{
+sub minimum_genesis_version {
+	my ($self) = @_;
+	return $self->_memoize('__effective_minimum_genesis_version', sub {
+		my $env_min = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], undef) =~ s/^v//i;
+		my $repo_min = $self->top->config->get('minimum_version') =~ s/^v//i;
+
+		# Environment minimum takes precedence if specified
+		return $env_min if $env_min;
+
+		# Fall back to repository minimum
+		return $repo_min if $repo_min;
+
+		# No minimum specified
+		return'0.0.0';
+	});
+}
+
+# }}}
 # feature_compatibility - returns true if the min version for the environment meets or exceeds the specified version {{{
 sub feature_compatibility {
 	my ($self,$version) = @_;
-	trace("Comparing %s environment specified version (%s) to %s feature base", $self->name, $self->{__min_version}, $version);
-	return new_enough($self->{__min_version},$version);
+	trace("Comparing %s environment specified version (%s) to %s feature base", $self->name, $self->minimum_genesis_version, $version);
+	return new_enough($self->minimum_genesis_version,$version);
+}
+
+# }}}
+# validate_genesis_version_requirements - checks if the environment's minimum genesis version is compatible with the given version {{{
+sub validate_genesis_version_requirements {
+	my ($self) = @_;
+
+	my $running_version = $Genesis::VERSION;
+	my $env_min = $self->lookup('genesis.min_version');
+	my $repo_min = $self->top->config->get('minimum_version');
+	my $effective_min = $self->minimum_genesis_version();
+
+	my @warnings = ();
+	my @errors = ();
+
+	# Check running version against effective minimum
+	if ($effective_min && !new_enough($running_version, $effective_min)) {
+		my $source = $env_min ? "environment file" : "repository configuration";
+		push @errors, sprintf(
+			"Genesis version %s does not meet the minimum required version %s ".
+			"specified in the %s",
+			$running_version, $effective_min, $source
+		);
+	}
+
+	# Check for conflicts between env and repo minimums
+	if ($env_min && $repo_min && $env_min ne $repo_min) {
+		if (new_enough($env_min, $repo_min)) {
+			# Environment requires newer version than repo - this is fine
+			push @warnings, sprintf(
+				"Environment requires Genesis %s, which is newer than the ".
+				"repository minimum of %s",
+				$env_min, $repo_min
+			);
+		} else {
+			# Environment allows older version than repo requires - problematic
+			push @errors, sprintf(
+				"Environment specifies minimum Genesis version %s, but repository ".
+				"requires %s. Please update the environment file to meet repository requirements",
+				$env_min, $repo_min
+			);
+		}
+	}
+
+	return {
+		errors => \@errors,
+		warnings => \@warnings,
+		effective_minimum => $effective_min,
+		running_version => $running_version,
+		source => $env_min ? 'environment file' : $repo_min ? 'repository configuration' : undef,
+	};
 }
 
 # }}}
