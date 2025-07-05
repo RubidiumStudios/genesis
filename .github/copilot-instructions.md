@@ -4,12 +4,12 @@ Welcome to the Genesis Project! This document provides guidelines and instructio
 
 ## Core Concepts
 
-The Genesis project is a Perl package-based OOP-style software project designed to manage and deploy BOSH-based environments, specifically for the Cloud Foundry ecosystem.  It provides a command-line interface (CLI) for managing various components of the environment, such as initializing deployment repositories, creating new environments, editing these environments, managing secrets, and deploying them to BOSH.  It also includes a set of generic libraries for managing services used by the CLI, such as Vault, Credhub, BOSH, and Github, which are accessed through system calls to their respective CLIs.  The project is designed to be modular and extensible, allowing for easy integration with other tools and services.
+The Genesis project is a Perl package-based OOP-style software project designed to manage and deploy BOSH-based environments, specifically for the Cloud Foundry ecosystem. It provides a command-line interface (CLI) for managing various components of the environment, such as initializing deployment repositories, creating new environments, editing these environments, managing secrets, and deploying them to BOSH. It also includes a set of generic libraries for managing services used by the CLI, such as Vault, Credhub, BOSH, and Github, which are accessed through system calls to their respective CLIs. The project is designed to be modular and extensible, allowing for easy integration with other tools and services.
 
 ### Genesis Components
-In order to deploy a BOSH-based environment, several components need to work together.  These components include:
+In order to deploy a BOSH-based environment, several components need to work together. These components include:
 
-- The **repository (or repo for short)**, which is a collection of environments for a specific kit type.  Each repo contains a set of environments, each of which is a separate deployment of the kit.  The repo is managed by the `genesis` CLI and is used to create, edit, and deploy environments.
+- The **repository (or repo for short)**, which is a collection of environments for a specific kit type. Each repo contains a set of environments, each of which is a separate deployment of the kit. The repo is managed by the `genesis` CLI and is used to create, edit, and deploy environments.
 
   The repo is represented by the `Genesis::Top` class, which manages the repo and access to the environments within it.  Genesis CLI commands that target repositories expect to be run from within the repo directory, or have a directory as its first argument.  Commands that operate on the repo are identified by containing the `repo` keyword in the the `scope` key (as a string, or in an arrayref) as part of the `define_command` method specified in `bin/genesis`.
 
@@ -118,19 +118,24 @@ Furthermore, the Genesis project provides a suite of tests to ensure the functio
 
 ## Coding Standards
 
-- Before performing any code changes, ensure that any code you're checking has bee indexed correctly and is not out of date.  Assume any pending copilot code changes are completed, with any changes not kept are dropped.	This is to ensure that the code you're working on is up to date and that any changes you make are based on the latest version of the code.
+- Before performing any code changes, ensure that any code you're checking has been indexed correctly and is not out of date.  Assume any pending copilot code changes are completed, with any changes not kept are dropped. This is to ensure that the code you're working on is up to date and that any changes you make are based on the latest version of the code.
 
 - When performing a code review, perform static analysis to confirm that any methods called are defined for the object being called on, and that the arguments passed to the method are of the correct type and format.
 
 - Uses tab characters for indentation, with a tab size of 2 spaces.
-- Uses `strict`, `warnings`, and `520` pragmas.
+
+- **Pragma Usage**:
+  - **For files under `lib/`**: Uses `v5.20`, and `warnings` (no `strict` pragma, as is implied by `use v5.20`).
+  - **Signature Feature**: Files outside `lib/Genesis/` are allowed and encouraged to use `use feature 'signatures'` and `no warnings 'experimental::signatures'`
+
 - All modules should have a vim config commentline at the bottom of the file, stating:
 ```
-# vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1:
+# vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu list
 ```
+
 - Only uses core Perl modules, and the libraries under `lib/` - NO external CPAN dependencies. Tests are the exception to this rule, as they are not part of the core functionality of the project.
 
-- All methods should have a discriptive fold comment at the start of the method, such as:
+- All methods should have a descriptive fold comment at the start of the method, such as:
 ```perl
 # method_name - brief description of what the method does {{{
 sub method_name {
@@ -158,26 +163,25 @@ if ($condition) {
 }
 ```
 
-- When using `Genesis::Env` lookup* methods, prefer to use // to provide the default value instead of the second argument to the method.  This is because // is a short-circuit operator, whereas the second argument to the method is always evaluated, even if the first argument is defined.  This is important for performance reasons, as the second argument may be a complex expression that takes a long time to evaluate.  The exception to this is when you want to use the list context of the method, in which case you should use the second argument to the method.  Even then, you can analize the result and use //= to set the value if not defined.
+- When using `Genesis::Env` lookup* methods, prefer to use // to provide the default value instead of the second argument to the method.  This is because // is a short-circuit operator, whereas the second argument to the method is always evaluated, even if the first argument is defined. This is important for performance reasons, as the second argument may be a complex expression that takes a long time to evaluate.  The exception to this is when you want to use the list context of the method, in which case you should use the second argument to the method. Even then, you can analyze the result and use //= to set the value if not defined.
 
-- The `info`, `warning`, `error`, `notice`, `bail` and `bug` methods take the same arguments as `printf`, and are used to log messages to the console.  The `info` method is used for informational messages, the `warning` method is used for warning messages, the `error` method is used for error messages, the `notice` method is used for notice messages, the `bail` method is used to bail out of a command with an error message, and the `bug` method is used to log bug reports.  These are provided by `Genesis` and are never method calls on an object.
+- The `info`, `warning`, `error`, `notice`, `bail` and `bug` methods take the same arguments as `printf`, and are used to log messages to the console. The `info` method is used for informational messages, the `warning` method is used for warning messages, the `error` method is used for error messages, the `notice` method is used for notice messages, the `bail` method is used to bail out of a command with an error message, and the `bug` method is used to log bug reports. These are provided by `Genesis` and are never method calls on an object.
 
 - When including any non-OOP Genesis package, such as `Genesis`, `Genesis::Term`, `Genesis::UI`, etc., an explicit list of methods to import should be used instead of importing all exported methods into the namespace, such as:
 ```
 use Genesis::Term qw/wrap colorize bullet/;
 ```
 
-- When using any non-ASCII characters in output, such as `✓`, `✗`, `✔`, `✘`, etc., the `Genesis::Term` module should be used to provide a consistent output across different terminal types.  The "#\@{x}" syntax is interpreted by the `colorize` method to replace with a UTF-8 glyph for the given ascii character (ie '*' => "\x{2022}" (a bullet), or '[ ]' => "\x{25FB}" (a white square), etc.).  This is used to provide a consistent output across different terminal types, and to provide a consistent look and feel for the Genesis project.  `colorize` is used by all the other methods in `Genesis::Term`, and the `Genesis::Log` methods, such as `info`, `warning`, `error`, `notice`, `bail` and `bug`, so it is not needed to be called explicitly when using these methods.
-```
+- When using any non-ASCII characters in output, such as `✓`, `✗`, `✔`, `✘`, etc., the `Genesis::Term` module should be used to provide a consistent output across different terminal types. The "#\@{x}" syntax is interpreted by the `colorize` method to replace with a UTF-8 glyph for the given ascii character (ie '*' => "\x{2022}" (a bullet), or '[ ]' => "\x{25FB}" (a white square), etc.). This is used to provide a consistent output across different terminal types, and to provide a consistent look and feel for the Genesis project. `colorize` is used by all the other methods in `Genesis::Term`, and the `Genesis::Log` methods, such as `info`, `warning`, `error`, `notice`, `bail` and `bug`, so it is not needed to be called explicitly when using these methods.
 
 ## Hooks
 
-- Perl-based hooks for kits are placed in a package `Genesis::Hook::HookType::KitType[::HookSubtype]`, where `HookType` is the type of hook (e.g., `Blueprint`, `CloudConfig`, etc.) and `KitType` is the type of kit (e.g., `BOSH`, `CF`, `Prometheus`, etc.).  The `HookSubType` is optional, most often used for the specific task of an `Addon` hook.
+- Perl-based hooks for kits are placed in a package `Genesis::Hook::HookType::KitType[::HookSubtype]`, where `HookType` is the type of hook (e.g., `Blueprint`, `CloudConfig`, etc.) and `KitType` is the type of kit (e.g., `BOSH`, `CF`, `Prometheus`, etc.). The `HookSubType` is optional, most often used for the specific task of an `Addon` hook.
 
 - Perl-based hooks should not use a shebang line, but be structured as such:
   - package line, as described above
 	- use pragma for `v5.20` and `warnings` : `strict` and `520` pragmas should be removed.
-	- a blank line followed by the dev support line (see below) and the `use parent` statement.  Any existing `use lib` line can be removed.
+	- a blank line followed by the dev support line (see below) and the `use parent` statement. Any existing `use lib` line can be removed.
 	- a blank line followed by the `use` statements for any Genesis modules (modules found under ./lib/ in the genesis project).
 	- a blank line followed by the `use` statements for any core Perl modules (such as `File::Basename`, `File::Path`, etc.), arranged alphabetically. Non-core Perl modules should not be used, as the Genesis project is designed to be self-contained and not rely on external CPAN modules.
 	- a blank line followed by the init method.
@@ -191,4 +195,4 @@ use Genesis::Term qw/wrap colorize bullet/;
 # Only needed for development
 BEGIN {push @INC, $ENV{GENESIS_LIB} ? $ENV{GENESIS_LIB} : $ENV{HOME}.'/.genesis/lib'}
 ```
-before the `use parent` statement, to ensure Language Server Protocol (LSP) support in your IDE.  This is not needed for the actual hook execution, as the `GENESIS_LIB` environment variable is set by the `genesis` binary to point to the `lib/` directory of the repo.
+before the `use parent` statement, to ensure Language Server Protocol (LSP) support in your IDE. This is not needed for the actual hook execution, as the `GENESIS_LIB` environment variable is set by the `genesis` binary to point to the `lib/` directory of the repo.
