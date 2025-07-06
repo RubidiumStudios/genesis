@@ -216,6 +216,30 @@ sub require_hook_lib {
 	eval "use lib dirname(abs_path(\$filename)).'/lib';";
 }
 
+sub get_config_override {
+	my ($self, $key, $default) = @_;
+	my $base = 'bosh-configs';
+	if ($key =~ m/^(cloud|runtime|cpi)\.(.+)$/) {
+		# If the key starts with cloud, runtime, or cpi, its good as-is
+	} elsif ($self->isa('Genesis::Hook::CloudConfig')) {
+		$base .= '.cloud';
+	} elsif ($self->isa('Genesis::Hook::RuntimeConfig')) {
+		$base .= '.runtime';
+	} elsif ($self->isa('Genesis::Hook::CpiConfig')) {
+		$base .= '.cpi';
+	} else {
+		require mro;
+		my @parents = mro::get_linear_isa(ref($self));
+		my $parent_class = $parents[1] if @parents > 1;
+		bail(
+			"%s hooks must specify the bosh_config type as the first part of the lookup key",
+			$parent_class // ref($self)
+		);
+	}
+	my $value = $self->env->lookup("$base.$key", $default);
+	return $value;
+}
+
 sub exodus_data {
 	my $self = shift;
 	return $self->{__exodus_data} ||= $self->env->exodus_lookup('.',{});
