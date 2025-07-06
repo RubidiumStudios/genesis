@@ -19,7 +19,10 @@ sub resolve {
 	my ($self, $config, $network_data) = @_;
 	my $ref = $self->{ref};
 	my $lookup_method = $self->{lookup_method};
-	if ($lookup_method && $config->can($lookup_method)) {
+	if (ref($lookup_method) eq 'CODE') {
+		# If lookup_method is a code reference, call it with the provided arguments
+		return $lookup_method->($config, $network_data, $ref, @{$self->{lookup_args}});
+	} elsif ($lookup_method && $config->can($lookup_method)) {
 		return $config->$lookup_method($network_data, $ref, @{$self->{lookup_args}});
 	} elsif (exists($network_data->{$ref})) {
 		return $network_data->{$ref};

@@ -104,7 +104,7 @@ sub done {
 	my $filename = $self->env->workdir . "/cloud-config-".$self->{id}.".yml";
 	save_to_yaml_file($contents, $filename);
 	$contents = slurp($filename)
-		=~ s/\b${sort_name_first}:/name:/gr 
+		=~ s/\b${sort_name_first}:/name:/gr
 		=~ s/\b${sort_cloud_properties_last}:/cloud_properties:/gr
 		=~ s/\n([^ -])/\n\n$1/gmr;
 	unlink($filename);
@@ -185,7 +185,7 @@ sub subnet_reference {
 
 # }}}
 # build_cloud_config - Builds the cloud config for the environment {{{
-sub build_cloud_config { 
+sub build_cloud_config {
 	my ($self,$config) = @_;
 	# this is just a wrapper as the config is already assembled, but is included
 	# so that if post-processing is needed, it can be done here without changing
@@ -394,7 +394,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 	#  - The subnets that use the same range must also have the same gateway, and amalgamate
 	#    the DNS servers into a single list with no duplicates.
 	#  - The AZ calculation has to also take joined subnets into account, and cannot use different subnet ids,
-	#    (we ignore the subnet id, and just use the network id).  
+	#    (we ignore the subnet id, and just use the network id).
 
 	my $strategy = 'ocfp:dynamic_subnets';
 	my $network_id = $config->{name};
@@ -457,7 +457,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			$available,
 			$existing,
 			$vm_count
-		);  
+		);
 		$reserved += $full_range->subtract($allocated_range);
 
 		# TODO: We currently just shove statics into the front of the range, but
@@ -471,7 +471,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			'network %s allows (%d)',
 			$statics, $subnet_name, $target, $vm_count
 		) if ($statics > $vm_count);
-	
+
 		my $static_range = $self->_calculate_static_allocation(
 			$target,
 			$allocated_range,
@@ -524,7 +524,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 		push @{$config->{subnets}}, $subnet_config if $full_range->size > $reserved->size;
 	}
-	
+
 
 	return 1;
 }
@@ -577,6 +577,23 @@ sub get_allocated_networks {
 	return $network_allocations;
 }
 
+# }}}
+# get_network_security_groups - Returns the network security groups for the environment {{{
+sub get_network_security_groups {
+	my ($self, $type, @names) = @_;
+	return $self->network_reference('sgs', sub {
+		my ($self, $network_data, $ref, $type, @names) = @_;
+		my $sgs = $network_data->{sgs} || {};
+		my @values = uniq map {
+			$sgs->{$_}{$type//'id'}
+		} grep {
+			!@names || in_array($sgs->{$_}{name}, @names)
+		} keys %$sgs;
+		return \@values;
+	}, $type, @names);
+}
+
+# }}}
 sub lookup_az {
 	my ($self, $az) = @_;
 	bail(
@@ -667,8 +684,21 @@ sub vm_type_definition {
 # }}}
 # vm_extension_definition - Returns the definition for a given vm extension {{{
 sub vm_extension_definition {
-	return shift->_config_definition(VM_EXTENSION, 'vmx', @_);
+	my ($self, $name, $data) = @_;
+	return () unless exists($data->{$self->env->iaas});
+	my $iaas_data = $data->{$self->env->iaas} || {};
+	return {name => $name} unless keys %$iaas_data; # Create vmx without cloud properties
+
+	my $cloud_properties = $data->{$self->env->iaas};
+	return {
+		name => $name,
+		cloud_properties => $self->_process_config_overrides(
+			Genesis::Hook::CloudConfig::VM_EXTENSION, $name, $cloud_properties, 'cloud_properties'
+		),
+	};
 }
+
+# }}}
 
 # }}}
 # disk_type_definition - Returns the definition for a given disk type {{{
@@ -1133,18 +1163,18 @@ sub _process_network_subnets {
 		my $subnets = delete($network->{subnets});
 		my %subnets_by_range = ();
 		push(@{$subnets_by_range{$_->{range}}}, $_) for (@$subnets);
-	
+
 		my @lsa_subnets = ();
 		my %processed_ranges = ();
-		
+
 		# Process subnets in original order to maintain ordering
 		for my $subnet (@$subnets) {
 			my $range = $subnet->{range};
 			next if $processed_ranges{$range}; # Skip if we already processed this range
-			
+
 			$processed_ranges{$range} = 1;
 			my @subnet_configs = @{$subnets_by_range{$range}};
-			
+
 			if (@subnet_configs > 1) {
 				# Build a logical subnet amalgamation (LSA) for this range
 				my $lsa = $self->_build_logical_subnet_amalgamation(
@@ -1264,13 +1294,13 @@ sub _get_subnet_ref {
 	# Process each range group
 	for my $range (keys %subnets_by_range) {
 		my @subnet_configs = @{$subnets_by_range{$range}};
-		
+
 		if (@subnet_configs == 1) {
 			# Single subnet, use as-is
 			my $subnet_config = $subnet_configs[0];
 			my $full_range = IPv4->new($subnet_config->{range});
 			my $reserved = IPv4->new(@{$subnet_config->{reserved}});
-			
+
 			push @{$config->{subnets}}, $subnet_config
 				if $full_range->size > $reserved->size;
 		} else {
@@ -1279,7 +1309,7 @@ sub _get_subnet_ref {
 				$target, \@subnet_configs,
 #				$target, \@subnet_names, \%subnet_configs_hash, $subnets, $strategy
 			);
-			
+
 			if ($lsa_config) {
 				push @{$config->{subnets}}, $lsa_config;
 			}
@@ -1293,7 +1323,7 @@ sub _get_subnet_ref {
 
 			$self->_get_subnet_ref($_, $built_subnets)
 		} @{$definition->{subnets}};
-		
+
 		my ($unused, $used) = compare_arrays($built_subnets, \@used_subnets);
 		delete $config->{subnets}{$_} for @$unused;
 
