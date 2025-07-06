@@ -3184,9 +3184,10 @@ sub deploy {
 			$msg = "Deployment failed."
 		}
 		$self->_create_deployment_audit_log(
-			'deploy' => Genesis::Env::Deployment::action_failed,
-			reason => $msg,
-			flags => $opts{flags} || '',
+			'deploy'   => Genesis::Env::Deployment::action_failed,
+			reason     => $opts{reason},
+			error      => $msg,
+			flags      => $opts{flags} || '',
 			bails_with => $msg
 		);
 	}
@@ -3527,10 +3528,11 @@ sub terminate {
 	} elsif ($self->is_bosh_director) {
 		$self->_create_deployment_audit_log(
 			'terminate' => Genesis::Env::Deployment::action_failed,
-			reason => "Aborted due to unsupported BOSH director kit (no terminate hook) - no --force specified",
-			started => $start_time,
-			flags => $opts{flags} || '',
-			bails_with => [
+			reason      => $reason,
+			error       => "Aborted due to unsupported BOSH director kit (no terminate hook) - no --force specified",
+			started     => $start_time,
+			flags       => $opts{flags} || '',
+			bails_with  => [
 				"Cowardly refusing to terminate a BOSH director environment without a ".
 				"termination hook.  Please upgrade your kit to a version that supports ".
 				"termination hooks, or use --force to terminate anyway (this will ".
@@ -3635,13 +3637,18 @@ sub terminate {
 		);
 		$self->deployment_cache_cleanup;
 		$ok = ($rc == 0);
-		$results->{delete_env} = $out;
+		$results->{delete_env} = {
+			msg => $out,
+			rc  => $rc
+		};
 	} else {
 		$self->notify("deleting deployment...");
 		my ($out, $rc) = $self->bosh->delete_deployment(%opts);
 		$ok = ($rc == 0);
-		$results->{delete_deployment} = $out;
-		$results->{delete_deployment_rc} = $rc;
+		$results->{delete_deployment} = {
+			msg => $out,
+			rc => $rc
+		};
 		if ($ok) {
 			if ($clean_up{resources} ) {
 				$self->notify("cleaning up any unused resources...");
@@ -3675,8 +3682,48 @@ sub terminate {
 	return $self->_create_deployment_audit_log(
 		'terminate' => Genesis::Env::Deployment::action_failed,
 		%audit_data,
-		reason => sub {
-		}->($self,$reason),
+		error => sub {
+			my ($env, $results) = @_;
+			my $error_message = "Deployment failed with the following issues:\n";
+
+			# Analyze the results hash to determine the error sources
+			# $results keys and their contents:
+			# - delete_env: Hash containing output and return code from `bosh delete-env` command
+			#   - msg: Output from the command (string)
+			#   - rc: Return code from the command (integer)
+			# - delete_deployment: Hash containing output and return code from `bosh delete-deployment` command
+			#   - msg: Output from the command (string)
+			#   - rc: Return code from the command (integer)
+			# - hook: Hash containing results from running termination hooks
+			#   - success: Boolean indicating if the hook succeeded
+			#   - error: Error message if the hook failed (string)
+			# --or--
+			# - hook: Boolean indicating if the hook succeeded (true) or failed (false)
+
+			if ($results->{delete_env} && ref($results->{delete_env}) eq 'HASH' && !$results->{delete_env}{rc}) {
+				$error_message .= sprintf(
+					"  - Error during `bosh delete-env`: %s\n",
+					$results->{delete_env}{msg}
+				);
+			}
+
+			if ($results->{delete_deployment} && ref($results->{delete_deployment}) eq 'HASH' && !defined($results->{delete_deployment_rc})) {
+				$error_message .= sprintf(
+					"  - Error during `bosh delete-deployment`: %s\n",
+					$results->{delete_deployment}
+				);
+			}
+
+			if ($results->{hook} && ref($results->{hook}) eq 'HASH') {
+				$error_message .= sprintf(
+					"  - Termination hook failed: %s\n",
+					$results->{hook}{error} // 'See above for details'
+				) unless $results->{hook}{success};
+			} elsif (defined($results->{hook}) && !$results->{hook}) {
+				$error_message .= "  - Termination hook failed: See above for details\n";
+			}
+			return $error_message;
+		}->($self,$results)
 	) unless $ok;
 
 	# Determine existing claims, configs and secrets
