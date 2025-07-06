@@ -128,18 +128,6 @@ sub compilation_definition {
 # }}}
 
 # Private Methods {{{
-## _get_bosh_network_data - Returns the network data for the BOSH director (self) {{{
-#sub _get_bosh_network_data {
-#	my ($self) = @_;
-#	my $data = $self->env->vault->get_path($self->env->exodus_mount.join('/',
-#		$self->env->name,
-#		$self->env->type,
-#		'networks',
-#	));
-#	return $data;
-#}
-#
-# }}}
 # _set_network_azs - Set (and validate?) the network azs for the environment {{{
 sub _set_network_azs {
 	my ($self, %opts) = @_;
@@ -167,7 +155,18 @@ sub _set_network_azs {
 			});
 		} sort keys %{scalar $azs};
 
-		# FIXME: What if this has changed (ie there is already network data)?
+		# We need to check if there's already network data for the environment and
+		# if so, we need to preserve the for_cpi data (that's the only thing that is
+		# added outside of the director hook)
+		my $network_data = $self->_get_bosh_network_data;
+		if ($network_data && ref($network_data) eq 'HASH' && exists $network_data->{azs}) {
+			my $existing_azs = $network_data->{azs};
+			for my $az_name (keys %azs) {
+				if (exists $existing_azs->{$az_name}) {
+					$azs{$az_name}{for_cpi} = $existing_azs->{$az_name}{for_cpi};
+				}
+			}
+		}
 		$self->{network}{azs} = \%azs;
 
 	} else {
@@ -195,7 +194,18 @@ sub _set_network_subnets {
 			);
 		} sort grep {$_ =~ /^ocfp-/} keys %{scalar $subnets};
 
-		# FIXME: Validate the subnets against any existing definitions
+		# We need to check if there's already network subnet data for the environment,
+		# and if so, we need to preserve the existing claims data (that's the only
+		# thing that is added outside of the director hook)
+		my $network_data = $self->_get_bosh_network_data;
+		if ($network_data && ref($network_data) eq 'HASH' && exists $network_data->{subnets}) {
+			my $existing_subnets = $network_data->{subnets};
+			for my $subnet_name (keys %subnets) {
+				if (exists $existing_subnets->{$subnet_name} && $existing_subnets->{$subnet_name}{claims}) {
+					$subnets{$subnet_name}{claims} = $existing_subnets->{$subnet_name}{claims};
+				}
+			}
+		}
 		$self->{network}{subnets} = \%subnets;
 	} else {
 		bug(
