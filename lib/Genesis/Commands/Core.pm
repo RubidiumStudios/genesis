@@ -197,7 +197,7 @@ sub hack {
 	my ($cmd, @args) = @_;
 
 	my ($top, $env);
-	if (-d './.genesis/kits/') {
+	if (-d './.genesis/kits' || -d './dev') {
 		require Genesis::Top;
 		$top = Genesis::Top->new('.');
 		if (-f $top->path($cmd =~ s/(.yml)?$/.yml/r)) {
@@ -283,8 +283,7 @@ sub hack {
 				bail(
 					"Improperly formatted expression: unexpected opening parenthesis while waiting for argment",
 				) if ($waiting_for eq 'arg');
-				$waiting_for = 'arg';	
-				my $obj = $obj->$method_name(@method_args);
+				$waiting_for = 'arg';
 				$call_ready = 0;
 			}
 			$call_ready = 1 if ($waiting_for !~ /^(method|arg)$/) && (!@args || $args[0] =~ /^->/);
@@ -297,7 +296,7 @@ sub hack {
 					Pry->pry;
 					return 1;
 				}
-				debug("Calling method '%s' on %s with arguments: %s", $method_name, ref($obj)||$obj||'undef>', join(', ', @method_args));
+				notice("Calling method '%s' on %s with arguments: %s", $method_name, ref($obj)||$obj||'undef>', join(', ', @method_args));
 				$obj = $obj->$method_name(@method_args);
 				$waiting_for = '-> operator';
 				$method_name = undef;
