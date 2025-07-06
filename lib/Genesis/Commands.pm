@@ -494,6 +494,13 @@ sub command_help { # {{{
 		}
 	}
 
+	$out .= "\n";
+	$out .= wrap(
+		"For comprehensive documentation on Genesis concepts and usage, run " .
+		"#C{genesis help topics} to browse available help topics.",
+		terminal_width
+	)."\n";
+	
 	$out .= "\n$ver$hr\n";
 	info({raw => 1}, $out);
 	exit $rc;

@@ -194,7 +194,6 @@ EOF
 }
 
 sub help {
-
 	
 	# First check if we just want to see global options alone
 	if (!@_ && get_options->{globals}) {
@@ -204,8 +203,21 @@ sub help {
 	}
 
 	if (@_) {
-		# Show help for specific command
 		my $cmd = shift;
+		
+		# Check for help topics command
+		if ($cmd eq 'topics') {
+			require Genesis::HelpTopics;
+			Genesis::HelpTopics::list_help_topics();
+			return;
+		}
+		
+		# Check if it's a help topic
+		require Genesis::HelpTopics;
+		if (Genesis::HelpTopics::is_help_topic($cmd)) {
+			Genesis::HelpTopics::show_help_topic($cmd);
+			return;
+		}
 
 		# Check if command exists
 		if (exists $Genesis::Commands::GENESIS_COMMANDS{$cmd}) {
@@ -216,7 +228,7 @@ sub help {
 			my $show_global = (get_options->{globals} || get_options->{'help-full'} || get_options->{helpful}) ? 1 : 0;
 			command_usage(0, undef, $show_global);
 		} else {
-			command_help("Unknown command: #G{$cmd}", 2);
+			command_help("Unknown command or topic: #G{$cmd}", 2);
 		}
 	} else {
 		# Show general help listing
