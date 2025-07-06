@@ -1,5 +1,5 @@
 package Genesis::Hook::CloudConfig;
-use strict;
+use v5.20;
 use warnings;
 
 use Genesis;
@@ -606,7 +606,18 @@ sub lookup_az {
 	my $base_az = $az;
 	if (! exists $self->network->{azs}{$az}) {
 		# Find the base_az that contains the given az as a name
-		$base_az = (grep {$_->{name} eq $az} values %{$self->network->{azs}})[0];
+		my $azs = $self->network->{azs};
+		for my $az_name (keys %$azs) {
+			if ($azs->{$az_name}{name} eq $az) {
+				$base_az = $az_name;
+				last;
+			}
+			if ($self->cpi_enabled && $azs->{$az_name}{for_cpi}{$self->cpi_name} eq $az) {
+				$base_az = $az_name;
+				last;
+			}
+			# TODO: Should we support the az-prefix.# here? (ie z1)
+		}
 		bail(
 			"Availability zone %s not found in the available AZs for the network",
 			$az
@@ -1333,4 +1344,4 @@ sub _get_subnet_ref {
 =cut
 1;
 
-# vim - fdm=marker:foldlevel=1:ts=2:sts=2:sw=2:noet
+# vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

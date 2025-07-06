@@ -130,7 +130,7 @@ Furthermore, the Genesis project provides a suite of tests to ensure the functio
 
 - All modules should have a vim config commentline at the bottom of the file, stating:
 ```
-# vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu list
+# vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
 ```
 
 - Only uses core Perl modules, and the libraries under `lib/` - NO external CPAN dependencies. Tests are the exception to this rule, as they are not part of the core functionality of the project.

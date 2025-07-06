@@ -1,5 +1,5 @@
 package Genesis::Hook::CloudConfig::Director;
-use strict;
+use v5.20;
 use warnings;
 
 use Genesis;
@@ -22,7 +22,7 @@ sub init {
 		$opts{purpose} ? "got '$opts{purpose}'" : "no purpose provided"
 	) unless ($opts{purpose}//'') eq 'director';
 	my $obj = $class->SUPER::init(%opts, network => {});
-	
+
 	# Set the azs and subnets
 	# FIXME: Check if az prefix set in environment config
 	$obj->_set_network_azs();
@@ -103,7 +103,7 @@ sub compilation_definition {
 		'Unsupported strategy for building compilation definitions: %s',
 		$strategy
 	) unless ($strategy eq 'ocfp');
-	
+
 	# TODO: Enable overrides for the compilation definition in bosh-configs
 	# section of the environment configuration.
 	my $network = $self->name_for('net','compilation');
@@ -194,7 +194,7 @@ sub _set_network_subnets {
 				}
 			);
 		} sort grep {$_ =~ /^ocfp-/} keys %{scalar $subnets};
-		
+
 		# FIXME: Validate the subnets against any existing definitions
 		$self->{network}{subnets} = \%subnets;
 	} else {
@@ -213,4 +213,4 @@ sub _get_bosh_network_data {
 # }}}
 1;
 
-# vim - fdm=marker:foldlevel=1:ts=2:sts=2:sw=2:noet
+# vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
