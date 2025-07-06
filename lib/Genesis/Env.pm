@@ -1318,6 +1318,33 @@ sub ocfp_config_lookup {
 
 # }}}
 
+# Policies
+
+# deployment_change_reason_required_policy - returns min length of reason if policy is enabled {{{
+sub deployment_change_reason_required_size_policy {
+	my $self = shift;
+	return $self->_memoize(sub {
+		# This comes from two places: OCFP config and the repo config.
+		# The OCFP config takes precedence, but if it is not set, then
+		# the repo config is used.  Default is false.
+		my $length = $self->ocfp_config_lookup('policies.deployment_change_reason_required_size', undef);
+		$length //= $self->top->config->get('deployment_change_reason_required_size', 0);
+		return $length;
+	});
+}
+
+# }}}
+# bosh_local_users_policy - returns ignore, allow or require for how BOSH_USER/BOSH_PASSWORD env vars are handled {{{
+sub bosh_local_users_policy {
+	my $self = shift;
+	return $self->_memoize(sub {
+		# This comes from the OCFP config, then repo config, and defaults to 'ignore'.
+		my $policy = $self->ocfp_config_lookup('policies.user_provided_bosh_creds', undef);
+		$policy //= $self->top->config->get('user_provided_bosh_creds', 'ignore');
+		return $policy;
+	});
+}
+
 # BOSH config stuff - Generic
 
 sub bosh_config_name {
@@ -2858,6 +2885,13 @@ sub deploy {
 	my ($self, %opts) = @_;
 	my $noprompt = delete(%opts{yes});
 
+	if (my $min_reason_length = $self->deployment_change_reason_required_size_policy()) {
+		bail(
+			"Deployment without reason is not allowed - minimum length is %d characters",
+			$min_reason_length
+		) unless length($opts{reason}//'') > $min_reason_length;
+	}
+
   $self->deployment_cache_setup;
 
 	# Generate and store the deployment manifest (pruned and unpruned versions)
@@ -3475,6 +3509,13 @@ sub terminate {
 		'flags'   => $term_flags,
 		'reason'  => $reason,
 	);
+
+	if (my $min_reason_length = $self->deployment_change_reason_required_size_policy()) {
+		bail(
+			"Termination without reason is not allowed - minimum length is %d characters",
+			$min_reason_length
+		) unless length($reason//'') > $min_reason_length;
+	}
 
 	# Set up deployment cache early so it's available for all termination paths
 	$self->deployment_cache_setup;

@@ -639,16 +639,6 @@ sub deploy {
 	command_usage(1) if @_ < 1 || @_ > 2;
 	my ($env_name, $reason) = @_;
 
-	# Check if the user is compelled to provide a reason for the deployment
-	if ($Genesis::RC->get('force_deploy_reason', 0)) {
-		bail(
-			"Cannot deploy environment #C{%s} without a reason. ".
-			"Please provide a reason after any options on the command line",
-			$env_name
-		) unless $reason;
-	}
-	$reason ||= '<unspecified>'; # TODO: add repo option to always require a reason
-
 	# TODO: Check if there's a deployment cache directory and tell the user to
 	#       run `genesis deploy --resume` to finish the deployment, or `genesis
 	#       deploy --clean` to start over.
@@ -658,6 +648,16 @@ sub deploy {
 
 	$options{'disable-reactions'} = ! delete($options{reactions});
 	my $env = Genesis::Top->new('.')->load_env($env_name)->with_vault()->with_bosh();
+
+	# Check if the user is compelled to provide a reason for the deployment
+	if (my $min_size = $env->deployment_change_reason_required_size_policy) {
+		# TODO: Maybe prompt for a reason if it wasn't provided
+		bail(
+			"Cannot deploy environment #C{%s} without a reason (minimum length is %d characters)",
+			"Please provide a reason after any options on the command line",
+			$env->name, $min_size
+		) unless length($reason//'') >= $min_size;
+	}
 
 	if (scalar(grep {$_} ($options{fix}, $options{recreate}, $options{'dry-run'})) > 1) {
 		command_usage(1,"Can only specify one of --dry-run, --fix or --recreate");
@@ -963,18 +963,19 @@ sub terminate {
 	my ($env, $reason, @extras) = @_;
 	command_usage(1) if @extras || !defined($env);
 
-	# Check if the user is compelled to provide a reason for the deployment
-	if ($Genesis::RC->get('force_deploy_reason', 0)) {
-		bail(
-			"Cannot terminate environment #C{%s} without a reason. ".
-			"Please provide a reason after any options on the command line",
-			$env->name
-		) unless $reason;
-	}
-
 	my %options = %{get_options()};
 	$env = Genesis::Top->new('.')->load_env($env)->with_vault()->with_bosh()
 		unless $env->isa('Genesis::Env');
+
+	# Check if the user is compelled to provide a reason for the deployment
+	if (my $min_size = $env->deployment_change_reason_required_size_policy) {
+		# TODO: Maybe prompt for reason if not provided?
+		bail(
+			"Cannot terminate environment #C{%s} without a reason (minimum length is %d characters).",
+			"Please provide a reason after any options on the command line",
+			$env->name, $min_size
+		) unless length($reason//'') >= $min_size;
+	}
 
 	my $flags = join(" ", map {
 		if ($_ =~ m/(resources|secrets|user-secrets|credhub|networking)/) {

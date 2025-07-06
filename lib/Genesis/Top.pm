@@ -1,5 +1,5 @@
 package Genesis::Top;
-use strict;
+use v5.20;
 use warnings;
 
 use base 'Genesis::Base';
@@ -960,15 +960,16 @@ sub _repo_config_schema {
 				alias        => {type => 'string'}
 			}
 		},
-		force_deployment_reason => {
-			type           => 'boolean',
-			default        => Genesis::Config::FALSE,
-			description    => 'Require deployment reason'
+		deployment_change_reason_required_size => {
+			type           => 'number',
+			default        => 0,
+			description    => 'Minimum size of the deployment change reason in characters (0 to disable)',
 		},
-		force_user_bosh_creds => {
-			type           => 'boolean',
-			default        => Genesis::Config::FALSE,
-			description    => 'Force user to provide BOSH credentials'
+		user_provided_bosh_creds => {
+			type           => 'enum',
+			default        => 'ignore',
+			values         => [qw/ignore allow require/],
+			description    => 'How should BOSH_USER and BOSH_PASSWORD env vars be handled',
 		},
 		allow_oversized_secrets => {
 			type           => 'boolean',
