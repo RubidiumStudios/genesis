@@ -109,11 +109,22 @@ sub from_exodus {
 		return;
 	}
 
+	my ($user, $pw);
+	if ($env->user_provided_bosh_creds_policy ne 'ignore') {
+		$user = $ENV{BOSH_USER} if exists($ENV{BOSH_USER});
+		$pw = $ENV{BOSH_PASSWORD} if exists($ENV{BOSH_PASSWORD});
+		if ($env->user_provided_bosh_creds_policy eq 'require') {
+			bail(
+				"Must provide BOSH credentials via environment variables BOSH_USER and BOSH_PASSWORD"
+			) unless ($user && $pw);
+		}
+	}
+
 	return $class->new($alias,
 		env     => $env,
 		url     => $exodus->{url},
-		client  => $exodus->{admin_username},
-		secret  => $exodus->{admin_password},
+		client  => $user || $exodus->{admin_username},
+		secret  => $pw || $exodus->{admin_password},
 		ca_cert => $exodus->{ca_cert},
 		deployment => $opts{deployment},
 		exodus_path => $exodus_path,
@@ -235,6 +246,8 @@ sub environment_variables {
 		BOSH_EXODUS_PATH   => $self->exodus_path,
 		BOSH_EXODUS_VAULT  => $self->exodus_vault->build_descriptor,
 		BOSH_REL_TO_ENV    => $self->{rel_to_env} || 'parent',
+		BOSH_USER          => undef,
+		BOSH_PASSWORD      => undef,
 	);
 	$envs{BOSH_DEPLOYMENT} = $self->{deployment} if $self->{deployment};
 	return %envs;

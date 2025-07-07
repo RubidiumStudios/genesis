@@ -1334,13 +1334,17 @@ sub deployment_change_reason_required_size_policy {
 }
 
 # }}}
-# bosh_local_users_policy - returns ignore, allow or require for how BOSH_USER/BOSH_PASSWORD env vars are handled {{{
-sub bosh_local_users_policy {
+# user_provided_bosh_creds_policy - returns ignore, allow or require for how BOSH_USER/BOSH_PASSWORD env vars are handled {{{
+sub user_provided_bosh_creds_policy {
 	my $self = shift;
 	return $self->_memoize(sub {
 		# This comes from the OCFP config, then repo config, and defaults to 'ignore'.
 		my $policy = $self->ocfp_config_lookup('policies.user_provided_bosh_creds', undef);
 		$policy //= $self->top->config->get('user_provided_bosh_creds', 'ignore');
+		bail(
+			"Invalid value for user_provided_bosh_creds policy: %s. Valid values are 'ignore', 'allow', or 'require'.",
+			$policy
+		) unless $policy =~ /^(ignore|allow|require)$/;
 		return $policy;
 	});
 }
