@@ -111,12 +111,13 @@ sub from_exodus {
 
 	my ($user, $pw);
 	if ($env->user_provided_bosh_creds_policy ne 'ignore') {
-		$user = $ENV{BOSH_USER} if exists($ENV{BOSH_USER});
-		$pw = $ENV{BOSH_PASSWORD} if exists($ENV{BOSH_PASSWORD});
-		if ($env->user_provided_bosh_creds_policy eq 'require') {
+		if (exists($ENV{BOSH_USER}) && exists($ENV{BOSH_PASSWORD})) {
+			$user = $ENV{BOSH_USER};
+			$pw = $ENV{BOSH_PASSWORD};
+		} elsif ($env->user_provided_bosh_creds_policy eq 'require') {
 			bail(
 				"Must provide BOSH credentials via environment variables BOSH_USER and BOSH_PASSWORD"
-			) unless ($user && $pw);
+			);
 		}
 	}
 
