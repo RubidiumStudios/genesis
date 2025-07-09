@@ -237,6 +237,20 @@ sub has_reason {
 }
 
 # }}}
+# has_error - Return true if the deployment has an error result {{{
+sub has_error {
+	my ($self) = @_;
+	return !!$self->{data}{error};
+}
+
+# }}}
+# error - Return the error message if the deployment has an error result {{{
+sub error {
+	my ($self) = @_;
+	return $self->{data}{error} // '';
+}
+
+# }}}
 # lookup - Explicit method to access internal data fields {{{
 sub lookup {
 	my $self = shift;

@@ -264,7 +264,12 @@ sub information {
 						"%s[[           #i{Reason:} >>%s\n\n",
 						$prefix,
 						$deployment->reason
-					) if $deployment->has_reason && $deployment->reason ne 'Deployment failed.';
+					) if $deployment->has_reason;
+					$out .= sprintf(
+						"%s[[            #i{Error:} >>%s\n\n",
+						$prefix,
+						$deployment->error
+					) if $deployment->has_error && $deployment->error ne 'Deployment failed.';
 				}
 				$out .=     "\n[[   #I{user legend:} >>".Genesis::Env::Deployment::user_colorized_legend(@roles)."\n";
 			}
