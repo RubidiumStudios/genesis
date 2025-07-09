@@ -206,7 +206,7 @@ sub information {
 				"Currently Genesis does not support manifest validation for ".
 				"environments that store manifests in the repository.  Please set ".
 				"#C{manifest_store} in the environment's #C{.genesis/config} to ".
-				"#C{exodus} or #C{hybrid} to enable manifest validation."	
+				"#C{exodus} or #C{hybrid} to enable manifest validation."
 			)
 		}
 
@@ -349,7 +349,7 @@ sub lookup {
 
 sub yamls {
 	option_defaults(
-		"include-kit" => 0
+		"include-kit" => 1
 	);
 	command_usage(1) if @_ != 1;
 
@@ -357,8 +357,31 @@ sub yamls {
 		->new('.')
 		->load_env($_[0])
 		->download_required_configs('blueprint');
+
+	my $view = delete(get_options->{view});
+	if ($view) {
+		# First check if the file exist under the kit's path
+		my $file;
+		if (-f ($file = $env->kit->path($view))) {
+			# If the file exists under the kit's path, we will read it and output
+			# it to the terminal.
+			output {raw => 1}, slurp($file);
+		} elsif (-f ($file = $env->path($view))) {
+			# If the file exists under the environment's path, we will read it and output
+			# it to the terminal.
+			output {raw => 1}, slurp($file);
+		} else {
+			bail(
+				"File '%s' not found in environment '%s' or kit '%s'.",
+				$view, $env->name, $env->kit->id
+			);
+		}
+		exit 0;
+	}
+
 	my @files = $env->format_yaml_files(%{get_options()});
 	output join("\n", @files)."\n";
+	exit 0;
 }
 
 sub vault_paths {
@@ -488,7 +511,7 @@ sub environments {
 	my $json = get_options->{json};
 	my %data;
 	#preemptively check that vault is available
-	
+
 	# Get the list of deployment roots
 	my $root_map = Genesis::deployment_roots_map(
 		['@current', $ENV{GENESIS_ORIGINATING_DIR}],

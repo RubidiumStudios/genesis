@@ -56,11 +56,11 @@ define_command('help', {
 		Genesis::Commands::show_global_options();
 		return;
 	}
-	
+
 	if (@_) {
 		# Show help for specific command
 		my $cmd = shift;
-		
+
 		# Check if command exists
 		if (exists $Genesis::Commands::GENESIS_COMMANDS{$cmd}) {
 			# Prepare command context for usage display
@@ -838,14 +838,21 @@ define_command("yamls", {
 		"is named #M{c-region-env.yml}), as well as any ops files, or specified ".
 		"by 'genesis.inherits' array in the environment file.\n".
 		"\n".
-		"If the #y{-k|--include-kit} option is specified, it will also include ".
-		"the fragments the kit supplies, depending on the features requested.",
+		"It also includes the fragments the kit supplies, depending on the ".
+		"features requested.",
 	function_group => Genesis::Commands::INFO,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
+		'view|v=s' =>
+			"View the specified YAML in the terminal.  This is handy to see ".
+			"or debug the content of kit fragments and dynamically generated ".
+			"YAML",
+	],
+  deprecated_options => [
 		'include-kit|k' =>
-			"This also includes the files that will be merges from the kit."
+			"This also includes the files that will be merges from the kit.  ".
+			"Deprecated because this is now the default behaviour"
 	]
 });
 
