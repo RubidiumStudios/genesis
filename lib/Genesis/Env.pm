@@ -2895,6 +2895,7 @@ sub deploy {
 			$min_reason_length
 		) unless length($opts{reason}//'') > $min_reason_length;
 	}
+	$opts{reason} //= 'unknown';
 
   $self->deployment_cache_setup;
 
@@ -3503,8 +3504,8 @@ sub terminate {
 	my $force =    $opts{force}    //= 0;
 	my $noprompt = $opts{noprompt} //= 0;
 
-	my $reason =     delete($opts{reason}) // '<unspecified>';
-	my $term_flags = delete($opts{flags})  // '<unspecified>';
+	my $reason =     delete($opts{reason}) // 'unknown';
+	my $term_flags = delete($opts{flags})  // '';
 	my %clean_up =   delete(%opts{qw/resources secrets user_secrets networking credhub/});
 
 	my $start_time = Time::Piece->new->strftime(EXODUS_TIME_FORMAT);

@@ -658,6 +658,7 @@ sub deploy {
 			$env->name, $min_size
 		) unless length($reason//'') >= $min_size;
 	}
+	$reason //= 'unknown'; # if not provided or required, use 'unknown' as the reason
 
 	if (scalar(grep {$_} ($options{fix}, $options{recreate}, $options{'dry-run'})) > 1) {
 		command_usage(1,"Can only specify one of --dry-run, --fix or --recreate");
