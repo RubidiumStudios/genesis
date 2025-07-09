@@ -135,7 +135,7 @@ Each environment managed by this repository will have its own
 deployment file, e.g. `us-east-prod.yml`. However, in many cases,
 it can be desirable to share param configurations, or kit configurations
 across all of the environments, or specific subsets. Genesis supports
-this by splitting environment names based on hypthens (`-`), and finding
+this by splitting environment names based on hyphens (`-`), and finding
 files with common prefixes to include in the final manifest.
 
 For example, let's look at a scenario where there are three environments
@@ -150,99 +150,332 @@ To see what files are currently in play for an environment, you can run
 Quickstart
 ----------
 
-To create a new environment (called `us-east-prod-$name`):
+To create a new environment (called `us-east-prod`):
 
-    genesis new us-east-prod
+    genesis create us-east-prod
+
+To edit an environment file:
+
+    genesis us-east-prod edit
+
+To edit without opening the kit manual:
+
+    genesis us-east-prod edit --no-manual
+
+To use a specific editor command:
+
+    genesis us-east-prod edit --editor "code --wait"
+    genesis us-east-prod edit --editor "grep '<feature>'" # it doesn't have to be an editor
 
 To build the full BOSH manifest for an environment:
 
-    genesis manifest us-east-prod
+    genesis us-east-prod manifest
 
 ... and then deploy it:
 
-    genesis deploy us-east-prod
+    genesis us-east-prod deploy
+
+To deploy and automatically fix any missing requirements (secrets, stemcells, etc.):
+
+    genesis us-east-prod deploy -F
+
+The `-F` flag tells Genesis to automatically generate any missing secrets,
+upload required stemcells, and handle other deployment prerequisites.
 
 To rotate credentials for an environment:
 
-    genesis rotate-secrets us-east-prod
-    genesis deploy us-east-prod
+    genesis us-east-prod rotate-secrets
+    genesis us-east-prod deploy
 
-To change the secrets provider for the environments in this repo:
+To check for missing or invalid secrets:
 
-    genesis secrets-provider --url https://example.com:8200 --insecure
+    genesis us-east-prod check-secrets
+
+To manage secrets provider for the environments in this repo, select from known safe targets:
+
+    genesis secrets-provider -i
 
 ... or clear it to use safe's currently targeted vault:
 
     genesis secrets-provider --clear
 
-By default, the provider for kits is https://github.com/genesis-community, but
-you can set this to another provider url via the `genesis kit-provider`
-command:
+By default, the provider for kits is the Genesis Community at
+https://github.com/genesis-community, but you can set this to another
+provider url via the `genesis kit-provider` command:
 
     genesis kit-provider https://github.mycorp.com/mygenesiskits
 
-This requires that url to provide releases in the same manner as github does.
+This requires that url to provide releases in the same manner as GitHub does.
 You can see the current kit provider by calling it with no argument, or revert
-back to default with the `--clear` option.
+back to default with the `--default` option.
 
-To update the Concourse Pipeline for this repo:
+To check for kit updates and download new versions:
 
-    genesis repipe
+    genesis list-kits --updates
+    genesis fetch-kit $name [version]  # omitting version downloads the latest
 
-To check for updates for this kit:
+To update an environment to use a new kit version:
 
-    genesis list-kits -u
-
-To download a new version of the kit, and deploy it:
-
-    genesis download $name [version] # omitting version downloads the latest
-
-    # update the environment yaml to use the desired kit version,
-    # this might be in a different file if using CI to propagate
-    # deployment upgrades (perhaps us.yml)
+    # Edit the environment file to specify the new kit version
     vi us-east-prod.yml
 
-    genesis deploy us-east-prod.yml     # or commit + git push to have
-                                        # CI run through the upgrades
+    # Then deploy the updated environment
+    genesis us-east-prod deploy
 
-See the [Deployment Pipeline Documentation][3] for more
-information on getting set up with Concourse deployment pipelines.
+Environment Management
+----------------------
+
+Genesis provides several commands for managing environments:
+
+- `genesis <env> info` - Show environment details and configuration
+- `genesis <env> check` - Validate environment configuration and run checks
+- `genesis <env> edit` - Edit the environment file in your default editor
+- `genesis <env> deploy` - Deploy the environment to BOSH
+- `genesis <env> deploy -F` - Deploy with automatic prerequisite handling
+- `genesis <env> secrets` - List available secrets for the environment
+- `genesis <env> check-secrets` - Check for missing certificates and credentials
+- `genesis <env> add-secrets` - Generate missing certificates and credentials
+- `genesis <env> rotate-secrets` - Regenerate secrets for the environment
+- `genesis <env> remove-secrets` - Remove certificates and credentials
+- `genesis <env> bosh <cmd>` - Run BOSH commands against the environment
+- `genesis <env> credhub <cmd>` - Run Credhub commands against the environment
+- `genesis <env> do <task>` - Run kit-specific addon tasks
+- `genesis <env> logs` - Fetch logs from the BOSH director
+- `genesis <env> terminate` - Terminate the environment on the BOSH director
+
+Match-Mode Environment Selection
+--------------------------------
+
+Genesis supports match-mode selection using @-notation, which allows you to
+work with environments without being in their repository directory. This is
+especially useful when managing multiple repositories.
+
+To set up match-mode selection, configure deployment roots in your global
+Genesis configuration file `\$HOME/.genesis/config`:
+
+    ---
+    deployment_roots_map:
+      ops: /path/to/root/of/ops/deployments
+      test: /path/to/root/of/test/deployments
+
+This allows you to run commands like:
+
+  See the contents without changin the directory:
+    genesis \@dev:cf edit --editor "cat"
+
+  Not specifying the type defaults to bosh kit
+    genesis \@prod info
+
+  Targets the vault repository under the deployment roots map:
+    genesis \@:v secrets-provider --interactive
+
+The \@-notation supports several patterns:
+
+- `\@<env-pattern>` - Match bosh environments by name pattern
+- `\@<env-pattern>:<deployment-pattern>` - Match environments within specific deployment types
+- `\@*:<deployment-pattern>` - Match any environment within deployment types matching the pattern
+- `\@:<deployment-pattern>` - Match the repo within the specified deployment type
+
+The patterns can be incomplete glob patterns, and can additonally use `^` and
+`\$` to anchor the start and end of the name. If in a controlling terminal, you
+will be presented with a list of matching environments to choose from if the
+match is not unique.
+
+The `--editor` option is particularly useful with match-mode, as it allows you
+to interact with the environment files without changing directories:
+
+    genesis \@dev:cf edit --editor "code --wait --new-window"
+    genesis \@prod:vault edit --editor "emacs"
+    genesis \@aws-east1:jumpbox edit # Defaults to your \$EDITOR
+
+Deployment Options
+------------------
+
+The `genesis deploy` command supports several useful flags:
+
+- `-F` - Automatically fix missing requirements (secrets, stemcells, releases)
+- `-y` - Skip confirmation prompts and deploy automatically
+- `-n` - Dry-run mode (show what would be deployed without actually deploying)
+- `--redact` - Show redacted manifest during deployment process
+
+For example, to deploy an environment with automatic fixes and no prompts:
+
+    genesis us-east-prod deploy -F -y
+
+Secrets Management
+------------------
+
+Genesis integrates with Vault for secrets management. Each environment
+can have its own secrets path, and Genesis provides tools for:
+
+- Generating and rotating secrets automatically
+- Validating secret requirements
+- Supporting both Vault and Credhub backends
+- Tracking secret changes and dependencies
+
+To configure the secrets provider, use the interactive selection:
+
+    genesis secrets-provider -i
+
+This will show you a list of known safe targets and allow you to select
+the appropriate one for your environment.
+
+To clear the secrets provider and use safe's currently targeted vault:
+
+    genesis secrets-provider --clear
+
+This resets the secrets provider to use whatever vault `safe` is currently
+targeting, which is useful when switching between different vault instances
+or when you want to use your default safe configuration.
+
+Kit Features
+------------
+
+The $name kit supports various features that can be enabled in your
+environment files. Common features include:
+
+- IaaS-specific configurations (aws, azure, gcp, vsphere, etc.)
+- Scaling options (small-footprint, ha, etc.)
+- Integration features (external databases, load balancers, etc.)
+
+Check the kit documentation for a complete list of available features
+and their requirements:
+
+    genesis kit-manual $name
+
+Repository Structure
+--------------------
+
+Most of the deployment configuration happens at the base level.
+Environment YAML files and shared YAML files are stored here.
+
+The `.genesis/` directory contains:
+
+- `config` - Repository configuration and metadata
+- `kits/` - Downloaded and compiled kits
+- `manifests/` - Deployed manifest archives (if enabled)
+- `bin/` - Embedded Genesis binary for CI/CD (if present)
+
+Environment files can be organized hierarchically using hyphens in names,
+allowing shared configuration across related environments.
+
+Development and Testing
+-----------------------
+
+For kit development, you can use a local development kit:
+
+    genesis create-kit --dev --name $name
+
+This creates a `dev/` directory with an uncompiled kit for testing
+changes before release.
+
+You can also decompile an existing kit for modification:
+
+    genesis decompile-kit $name/version
+
+To build a distributable kit from your dev directory:
+
+    genesis build-kit
+
+Information and Debugging
+-------------------------
+
+Genesis provides several commands for inspecting environments:
+
+- `genesis <env> yamls` - List YAML files used for the environment
+- `genesis <env> lookup <key>` - Look up values from environment files or manifests
+- `genesis <env> vault-paths` - List vault paths used by the environment
+- `genesis environments` - List all environments in known repositories
+
+Kit Management
+--------------
+
+Genesis provides commands for managing kits:
+
+- `genesis list-kits` - List available local kits
+- `genesis list-kits --remote` - List available remote kits
+- `genesis list-kits --updates` - Check for kit updates
+- `genesis fetch-kit <name>` - Download a kit from the provider
+- `genesis compare-kits` - Compare two kit versions
+
+Getting Help
+------------
+
+Genesis provides comprehensive built-in help for all commands and options:
+
+### General Help
+
+Get an overview of all available commands:
+
+    genesis help
+
+Show the Genesis version and build information:
+
+    genesis version
+
+### Command-Specific Help
+
+Get detailed help for any command by adding `help` after the command:
+
+    genesis help <command>
+
+This is synonymous with `genesis <command> --help` and provides detailed
+information about the command's usage, options, and examples.
+
+To get a list of available commands, you can use:
+
+    genesis help
+
+### Addon Task Help
+
+List available addon tasks for an environment:
+
+    genesis <env> do list
+
+Get help for a specific addon task:
+
+    genesis <env> do <task> --help
+
+### Command Synopsis
+
+Most commands support `--help` or `-h` flags for quick reference:
+
+    genesis deploy --help
+    genesis secrets --help
+    genesis edit --help
+
+The help system shows:
+- Command syntax and usage patterns
+- Available options and flags
+- Examples of common usage scenarios
+- Related commands and cross-references
+
+### Kit Documentation
+
+Access kit-specific documentation and manual pages:
+
+		genesis kit-manual <kit-name>
+
+This opens the kit's documentation in your default pager, showing:
+- Available features and their descriptions
+- Configuration parameters and their usage
+- Examples and best practices
+
+This file is opened automatically when you run `genesis <env> edit` and placed
+in a side-by-side split with the environment file for easy reference, if you're
+\$EDITOR is `code`, `emacs`, or `vim` (gvim, mvim, nvim are also supported).
 
 Helpful Links
 -------------
 
-- [$name-genesis-kit][2] - Details on the kit used in this repo,
-  its features, prerequesites, and params.
+- [$name Genesis Kit][2] - Kit documentation, features, and parameters
+- [Genesis Documentation][3] - Complete Genesis user guide
+- [Genesis Community][4] - Community kits and support
 
-- [Deployment Pipeline Documentation][3] - Docs on all the
-  configuration options for `ci.yml`, and how the automated
-  deployment pipelines behave.
-
-[1]: https://github.com/starkandwayne/genesis
+[1]: https://github.com/genesis-community/genesis
 [2]: https://github.com/genesis-community/$name-genesis-kit
-[3]: https://github.com/starkandwayne/genesis/blob/master/docs/PIPELINES.md
-
-Repo Structure
---------------
-
-Most of the meat of the deployment repo happens at the base level.
-Envirionment YAML files, shared YAML files, and the CI
-configuration YAML file will all be here.
-
-The `.genesis/manifests` directory saves redacted copies of the
-deployment manifests as they are deployed, for posterity, and to
-keep track of any `my-env-name-state.yml` files from `bosh create-env`.
-
-The `.genesis/cached` directory is used by CI to propagate changes
-for shared YAML files along the pipelines. To aid in CI deploys, the
-`genesis/bin` directory contains an embedded copy of genesis.
-
-`.genesis/kits` contains copies of the kits that have been used in
-this deployment. Once a kit is no longer used in any environment,
-it can be safely removed.
-
-`.genesis/config` is used internally by `genesis` to understand
-what is being deployed, and how.
+[3]: https://github.com/genesis-community/genesis/tree/master/docs
+[4]: https://github.com/genesis-community
 EOF
 
 # }}}
