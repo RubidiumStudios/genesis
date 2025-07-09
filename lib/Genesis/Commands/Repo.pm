@@ -22,11 +22,23 @@ sub init {
 	%options = %{get_options()};
 
 	command_usage(1) if @_ > 1; # name is now optional if kit specified
+	command_usage(1, "You can only specify one of kit (-k) or link to a kit (-L)")
+		if scalar(grep {$_ =~ /^(?:kit|link-dev-kit)$/} keys %options) > 1;
 
 	my $abs_target;
 	my $kit_desc = "";
-	if ($options{'link-dev-kit'}) {
-		command_usage(1,"Cannot specify both a kit (-k) and a link to a kit (-L)") if $options{kit};
+	my $kit_path = undef;
+	if (exists($options{kits_path})) {
+		$abs_target = abs_path($options{'kits-path'}//$ENV{HOME}.'/.genesis/kits');
+		mkdir_or_fail ($abs_target) unless -d $abs_target;
+		delete($options{'kits-path'});
+	}
+	if ($options{kit}) {
+		$abs_target = abs_path($options{kit});
+		bail(
+			"Kit file '%s' cannot be found from %s!", $options{kit}, getcwd()
+		) unless $abs_target;
+	} elsif ($options{'link-dev-kit'}) {
 		$abs_target = abs_path($options{'link-dev-kit'});
 		my $pwd = getcwd;
 		bail(
@@ -70,7 +82,7 @@ sub init {
 		);
 	}
 
-	my $top = Genesis::Top->create('.', $name, %options);
+	my $top = Genesis::Top->create('.', $name, %options, kit_path => $kit_path);
 	my $vault_desc = "\n - using default safe target for the system";
 	if ($top->vault) {
 		$vault_desc = "\n - using vault at #C{".$top->vault->url."}";

@@ -93,6 +93,8 @@ sub create {
 		$self->config->set('deployment_type',$name);
 		$self->config->set('version',2);
 		$self->config->set('creator_version', $Genesis::VERSION);
+		$self->config->set('minimum_version', $Genesis::VERSION);
+		$self->config->set('manifest_store', 'exodus');
 
 		$self->config->set('secrets_provider', {
 			url       => $self->vault->url,
@@ -108,7 +110,15 @@ sub create {
 		$self->_validate_config;
 		$self->config->save;
 
-	$self->mkfile("README.md", # {{{
+		if ($opts{'kit_path'}) {
+			# Create the kits directory, and link it to the specified path
+			my $kits_path = Cwd::abs_path($opts{'kit_path'} // $ENV{HOME}.'/.genesis/kits');
+			mkdir_or_fail($kits_path) unless -d $kits_path;
+			$self->symlink_or_fail($kits_path, ".genesis/kits");
+			debug("Kits path linked to #C{$kits_path}");
+		}
+
+		$self->mkfile_or_fail("README.md", # {{{
 <<EOF);
 $name deployments
 ==============================
