@@ -360,16 +360,22 @@ sub yamls {
 
 	my $view = delete(get_options->{view});
 	if ($view) {
-		# First check if the file exist under the kit's path
 		my $file;
-		if (-f ($file = $env->kit->path($view))) {
+		if ($view =~ /^(init|fin).yml$/) {
+			# Check if the file is a dynamically generated genesis meta file:
+			$file = $1 eq 'init' ? $env->_init_yaml_file : $env->_cap_yaml_file;
+			output {raw => 1}, slurp($file);
+
+		} elsif (-f ($file = $env->kit->path($view))) {
 			# If the file exists under the kit's path, we will read it and output
 			# it to the terminal.
 			output {raw => 1}, slurp($file);
+
 		} elsif (-f ($file = $env->path($view))) {
 			# If the file exists under the environment's path, we will read it and output
 			# it to the terminal.
 			output {raw => 1}, slurp($file);
+
 		} else {
 			bail(
 				"File '%s' not found in environment '%s' or kit '%s'.",
