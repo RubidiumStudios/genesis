@@ -1161,7 +1161,7 @@ define_command("init", {
 				"Instead of using a kit or initializing an empty dev directory, this ".
 				"will link the specified directory to the dev directory.",
 
-			"kits-path|K=s?" =>
+			"kits-path|K:s" =>
 				"Path to the directory where Genesis will look for compiled kits, ".
 				"forming a symbolic link to the specified path in the new repository ".
 				"as the repository's #C{.genesis/kits}.  It defaults to ".
