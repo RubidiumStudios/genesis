@@ -2,7 +2,7 @@ package Genesis::Hook;
 use strict;
 use warnings;
 
-use Genesis qw/trace bug bail trace in_array new_enough semver pushd popd run humanize_path read_json_from/;
+use Genesis qw/trace bug bail trace in_array new_enough semver pushd popd run humanize_path read_json_from save_to_yaml_file/;
 use Data::Dumper ();
 use JSON::PP;
 use Digest::SHA qw(sha1_hex);
@@ -187,8 +187,33 @@ sub label {
 sub spruce_merge {
 	my ($self, @args) = @_;
 	my $opts = ref($args[0]) eq 'HASH' ? shift @args : {};
+	my @spruce_opts = ();
+	my @files = ();
+	my $idx = 1;
+	while (my $arg = shift @args) {
+		if (ref($arg) eq 'HASH') {
+			# It is a raw hash, so convert it to json and store it in a file
+			my $file = $self->tempfile("spruce-merge-$idx.yml");
+			save_to_yaml_file($arg,$file);
+		} elsif ($arg =~ m/^-/) {
+			push @spruce_opts, $arg;
+			if ($arg =~ m/^-(cherry-pick|prune)/) {
+				push @spruce_opts, shift @args;
+			}
+		} elsif (-f $arg) {
+			# It is a file, so add it to the list of files
+			push @files, $arg;
+		} elsif (-f (my $file = $self->kit->path($arg))) {
+			# It is a file in the kit, so add it to the list of files
+			push @files, $file;
+		} else {
+			bug("Invalid argument for spruce merge: %s", $arg);
+		}
+	}
+
 	# TODO: make this support passing in json/yaml directly
-	my ($out, $err, $res) = run($opts, 'spruce','merge', @args);
+	my ($out, $err, $res) = run($opts, 'spruce','merge', @spruce_opts, @files);
+	return ($out, $err, $res) if wantarray; # allows caller to handle errors
 	bail "Failed to merge spruce files: %s", $err if $res;
 	return $out;
 }
