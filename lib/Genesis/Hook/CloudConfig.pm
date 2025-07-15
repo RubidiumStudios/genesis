@@ -871,9 +871,11 @@ sub _network_cloud_properties_for_iaas {
 # _cloud_properties_for_iaas - Returns the cloud properties for a given type and cpi {{{
 sub _cloud_properties_for_iaas {
 	my ($self, $type, $target, %map) = @_;
-	my $map_key = (grep {$_ eq $self->iaas} keys %map)[0]
-		// (grep {$_ =~ /(?:^|\|)$self->iaas(?:\||$)/} keys %map)[0]
+	my $iaas = $self->iaas;
+	my $map_key = (grep {$_ eq $iaas} keys %map)[0]
+		// (grep {$_ =~ /(?:^|\|)${iaas}(?:\||$)/} keys %map)[0]
 		// '*';
+	# FIXME: Should this error if no match is found?
 	my $cloud_properties = $map{$map_key} // {}; #TODO: allow glob-style matching
 
 	return $self->_process_config_overrides(
