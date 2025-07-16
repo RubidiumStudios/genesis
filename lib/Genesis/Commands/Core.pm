@@ -223,7 +223,7 @@ sub hack {
 		if ($@) {
 			bail("Attempted to evaluate Perl expression, but encountered error: %s", $@);
 		}
-		Genesis::dump_var({level => 1}, result => $obj) unless @args;
+		Genesis::dump_var({level => 'OUTPUT'}, result => $obj) unless @args;
 
 		# Build the chain based on '(' opening arguments acceptance, ')' closing arguments acceptance, and '->' for chaining calls. First chain the -> is optional.
 		unshift @args, '->' unless $args[0] && $args[0] =~ /^->/;
@@ -303,7 +303,7 @@ sub hack {
 				$call_ready = 0;
 			}
 		}
-		Genesis::dump_var({level => 1}, result => $obj);
+		Genesis::dump_var({level => 'OUTPUT'}, result => $obj);
 		return defined($obj)
 	} else {
 		# Move this into the upper conditional
@@ -317,7 +317,7 @@ sub hack {
 		my $result = $op eq '::'
 			? &{$module.'::'.$cmd}(@args)
 			: $module->$cmd(@args);
-		Genesis::dump_var({level => 1}, result => $result);
+		Genesis::dump_var({level => 'OUTPUT'}, result => $result);
 		return 1
 	}
 }
