@@ -584,8 +584,9 @@ sub get_network_security_groups {
 	return $self->network_reference('sgs', sub {
 		my ($self, $network_data, $ref, $type, @names) = @_;
 		my $sgs = $network_data->{sgs} || {};
-		my @values = uniq map {
-			$sgs->{$_}{$type//'id'}
+		$type //= 'id';
+		my @values = uniq sort map {
+			$sgs->{$_}{$type}
 		} grep {
 			!@names || in_array($sgs->{$_}{name}, @names)
 		} keys %$sgs;
@@ -709,7 +710,11 @@ sub vm_extension_definition {
 	};
 }
 
-# }}}
+# make the above method available as vm_extension_definition_for_iaas
+sub vm_extension_definition_for_iaas {
+	my ($self, $name, $data) = @_;
+	return $self->vm_extension_definition($name, $data);
+}
 
 # }}}
 # disk_type_definition - Returns the definition for a given disk type {{{
