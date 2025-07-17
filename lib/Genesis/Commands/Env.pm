@@ -751,18 +751,23 @@ sub deploy {
 				# TODO: Support multiple cloud configs
 				my $cloud_config_name = $env->name.'.'.$env->type;
 				my $cloud_config_dir = $env->workpath('cloud-configs');
+				my $diff_dir = $env->workpath('cloud-config-diffs');
 				my $new_path = "$cloud_config_dir/${cloud_config_name}.yml";
+				my $new_path_diff = "$diff_dir/${cloud_config_name}.yml";
 				info "[[  - >>cloud config synthesized.";
 
 				mkdir($cloud_config_dir) unless -d $cloud_config_dir;
+				mkdir($diff_dir) unless -d $diff_dir;
 				mkfile_or_fail($new_path, 0644, $cloud_config);
+				my ($out, $rc, $err) = run( 'spruce merge --skip-eval $1 > $2',$new_path,$new_path_diff);
+				bail "Error generating cloud config for diff: %s", $err//$out if $rc;
 				info "[[  - >>checking for existing cloud config on #M{%s} BOSH director...", $env->bosh->{alias};
 				if ($env->bosh->has_config('cloud',$cloud_config_name)) {
 					my $old_path = "$cloud_config_dir/current-${cloud_config_name}.yml";
 					info "[[  - >>comparing generated cloud config with existing cloud config...";
 					$env->bosh->download_configs($old_path,'cloud',$cloud_config_name);
 					my ($out, $rc, $err) = run(
-						fake_tty("$cloud_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path)
+						fake_tty("$cloud_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path_diff)
 					);
 					bail "Error comparing cloud configs: %s", $err if $rc;
 
