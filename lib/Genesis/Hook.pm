@@ -197,7 +197,7 @@ sub spruce_merge {
 			save_to_yaml_file($arg,$file);
 		} elsif ($arg =~ m/^-/) {
 			push @spruce_opts, $arg;
-			if ($arg =~ m/^-(cherry-pick|prune)/) {
+			if ($arg =~ m/^--(cherry-pick|prune)$/) {
 				push @spruce_opts, shift @args;
 			}
 		} elsif (-f $arg) {
