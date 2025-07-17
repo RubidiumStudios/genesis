@@ -211,10 +211,9 @@ sub spruce_merge {
 		}
 	}
 
-	# TODO: make this support passing in json/yaml directly
-	my ($out, $err, $res) = run($opts, 'spruce','merge', @spruce_opts, @files);
-	return ($out, $err, $res) if wantarray; # allows caller to handle errors
-	bail "Failed to merge spruce files: %s", $err if $res;
+	my ($out, $rc, $err) = run($opts, 'spruce','merge', @spruce_opts, @files);
+	return ($out, $rc, $err) if wantarray; # allows caller to handle errors
+	bail "Failed to merge spruce files: %s", $err if $rc;
 	return $out;
 }
 
