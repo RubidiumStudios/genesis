@@ -4689,7 +4689,7 @@ sub _check_secrets {
 			if ($self->is_vaultified && grep {$_->{source} eq 'manifest'} ($self->secrets_plan->secrets)) {
 				$msg .= csprintf(
 					" (you may need to run '#g{%s add-secrets} #Y{--import}' to import them from credhub)",
-					$self->get_call_path_with_env
+					scalar($self->get_call_path_with_env)
 				);
 			}
 			return {
@@ -4723,7 +4723,7 @@ sub _fix_secrets {
 			"'#g{%s add-secrets} #Y{--import}' to import them from ".
 			"credhub manually, then add-secrets again without the #Y{--import} ".
 			"option to add any missing secrets not found in credhub.",
-			$self->get_call_path_with_env
+			scalar($self->get_call_path_with_env)
 		);
 	}
 
