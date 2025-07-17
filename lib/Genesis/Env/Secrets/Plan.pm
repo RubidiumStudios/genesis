@@ -694,7 +694,7 @@ sub notify {
 			csprintf( ($args{path} =~ /^(.*?):([^: ]*)(?: \((.*)\))?$/)
 				? "#C{$1}:#c{$2}".($3 ? " #mi{$3}" : '')
 				: "#C{$args{path}}"
-			),	
+			),
 			$args{label} . ($level eq 'line' || !$args{details} ? '' : " - $args{details}"),
 			$long_warning
 		];
@@ -954,7 +954,7 @@ sub _order_x509_secrets {
 			push @$errored_certs, $cert->reject( $cert->label => 'Cyclical CA signage detected');
 			next;
 		}
-		if (($kit_id//'') !~ /^cf\/2.*/ && $issuer) { # cf/v2.x kits have a CA subject DN error inherited from upstream
+		if (($kit_id//'') !~ /^cf\/[2-9]\.*/ && $issuer) { # cf/v2.x (and higher) kits have a CA subject DN error inherited from upstream
 			my $subject_cn = $cert->get('subject_cn',(@{$cert->get('names' => [])})[0]);
 			my $issuer_cn  = $issuer->get('subject_cn',(@{$issuer->get('names' => [])})[0]);
 			push(@$errored_certs, $cert->reject(
@@ -975,7 +975,7 @@ sub _unused_vault_secrets {
 	# Note: the intention of this method is to find unused secrets under the vault
 	# path for the kit.  It will not find secrets that may have been once used by
 	# the environment that are in the vault but under a different root path.
-	
+
 	my ($self, %opts) = @_;
 
 	my $vault_prefix = $self->store->base =~ s/^\///r;
@@ -1099,7 +1099,7 @@ sub _unused_entombed_secrets {
 	}
 
 	# Get the list of entombed secrets from the last manifest
-	my @used_paths = uniq sort 
+	my @used_paths = uniq sort
 		map {my @result = $_ =~ /\(\((.*?)\)\)/g; @result}
 		grep {$_ && /^\(\(genesis-entombed/}
 		values %{flatten({}, undef, $last_manifest)};
