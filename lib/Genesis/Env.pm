@@ -1,5 +1,6 @@
 package Genesis::Env;
-use strict;
+
+use v5.20;
 use warnings;
 use utf8;
 
@@ -16,7 +17,7 @@ use Genesis qw/
 	copy_or_fail mkfile_or_fail mkdir_or_fail save_to_yaml_file
 	slurp load_json load_yaml load_yaml_file spruce_diff
 	deep_merge in_array uniq get_opts struct_lookup flatten unflatten
-	new_enough by_semver
+	new_enough by_semver count_nouns
 	is_valid_uri
 	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
 /;
@@ -3269,26 +3270,31 @@ sub _post_deploy {
 	if (!$deployment_ok) {
 		if (!$opts{"dry-run"} && $self->has_hook('post-deploy')) {
 			# Call post-deploy hook with the pre-deploy data in case of cleanup on failure
-			$self->run_hook('post-deploy', rc => $state->{results}[1], interactive => !$noprompt, data => $state->{predeploy_data})
+			$self->run_hook('post-deploy', rc => $state->{results}[1], interactive => !$noprompt, data => $state->{predeploy_data});
 		}
 		$state->{results}[0] //= '';
 		my $last_bits_of_output = join "\n", map {decolorize($_)} (split(/\r?\n/,$state->{results}[0]))[-5..-1];
 		my $msg;
+		my $cleanup_cache = 1;
 		if ($last_bits_of_output =~ /Continue\?[^\n]*: [^\n]*[nN]o?\r?\n\s*Stopped\s*Exit code 1/sm) {
-			$msg = "User canceled deployment when prompted to continue."
+			$msg = "User canceled deployment when prompted to continue.";
 		} elsif ($last_bits_of_output =~ /Continue\?[^\n]*:\s*Asking for confirmation:\s*  EOF\s*Exit code 1/sm) {
-			$msg = "User interrupted deployment at continue prompt."
+			$msg = "User interrupted deployment at continue prompt.";
 		} elsif ($last_bits_of_output =~ /\^C$/m) {
-			$msg = "User interrupted deployment (Ctrl-C)"
+			# This may leave the deployment detached if pressed after the confirmation prompt, so
+			# once we have deployment recovery working, we'll need to handle this state differently.
+			$msg = "User interrupted deployment (Ctrl-C)";
+			$cleanup_cache = 0; # Don't clean up the cache, as we may want to rejoin the deployment
 		} else {
-			$msg = "Deployment failed."
+			$msg = "Deployment failed.";
 		}
 		$self->_create_deployment_audit_log(
-			'deploy'   => Genesis::Env::Deployment::action_failed,
-			reason     => $opts{reason},
-			error      => $msg,
-			flags      => $opts{flags} || '',
-			bails_with => $msg
+			'deploy'      => Genesis::Env::Deployment::action_failed,
+			reason        => $opts{reason},
+			error         => $msg,
+			flags         => $opts{flags} || '',
+			bails_with    => $msg,
+			cleanup_cache => $cleanup_cache,
 		);
 	}
 
@@ -5426,7 +5432,7 @@ sub _parse_bosh_env {
 sub _create_deployment_audit_log {
 	my ($self, $action, $result, %audit_data) = @_;
 	my $bails_with = delete($audit_data{bails_with});
-	$bails_with = ['%s', $bails_with] if $bails_with && ref($bails_with) ne 'ARRAY';
+	my $cleanup_cache => exists($audit_data{cleanup_cache}) ? delete($audit_data{cleanup_cache}) : 1;
 	my $returns = delete($audit_data{returns});
 
 	# Validate the action
@@ -5446,7 +5452,15 @@ sub _create_deployment_audit_log {
 		$out, $err
 	) if $rc;
 
-	bail(@$bails_with) if $bails_with;
+	if ($bails_with) {
+		$bails_with = $bails_with->($self) if ref($bails_with) eq 'CODE';
+		$bails_with = ['%s',$bails_with] if $bails_with && ref($bails_with) ne 'ARRAY';
+		if ($bails_with) {
+			$self->deployment_cache_cleanup if $cleanup_cache;
+			bail(@$bails_with);
+		}
+	}
+
 	$self->deployments->reset;
 	return $returns
 		? (ref($returns) eq 'CODE' ? $returns->($self, $out, $rc, $err) : $returns)
@@ -5575,5 +5589,57 @@ sub get_network_claims {
 	return $claims;
 }
 
+# }}}
+# rejoin_deployment - handle rejoining an interrupted deployment {{{
+sub rejoin_deployment {
+	my ($self, %opts) = @_;
+	my $deployment_files = delete($opts{deployment_files});
+	my $cache_path = $self->{__deployment_cache_path};
+	my $humanized_cache_path = humanize_path($cache_path);
+
+	# Count the files found
+	my $file_count = scalar(keys %$deployment_files);
+	my $file_list = join("\n", map {
+			sprintf("[[  - >>%s", basename($_))
+	} sort values %$deployment_files);
+
+	# Log the detection
+	$self->notify(
+		"warning",
+		"detected #y{%s} from a previous incomplete deployment",
+		count_nouns($file_count, 'active deployment cache file'),
+	);
+
+	info(
+		"\nThe following deployment cache files were found in:\n".
+		"[[  >>#C{%s}\n".
+		"%s\n\n".
+		"This indicates that a previous deployment may have been interrupted or is still in progress.\n".
+		"Genesis cannot safely continue without risking deployment state corruption.\n\n".
+		"#Wku{Options to resolve this:}\n".
+		"[[  1. >>If you are certain the previous deployment is complete and these files are stale:\n".
+		"[[     >>#G{rm -rf %s}\n\n".
+		"[[  2. >>If the previous deployment failed and you want to retry but not lose the previous ".
+		         "deployment data (ie a state.yml file for a create-env deployment):\n".
+		"[[     >>#G{mv  %s }#Gi{<target-dir>}\n\n".
+		"[[     >>#G{%s deploy --STATE-FILE-PATH=}#Gi{<target-dir>/<state-file-name.yml>}\n\n".
+		"[[  3. >>If you are unsure about the deployment state, consult with your platform team\n".
+		         "or Genesis support before proceeding.\n\n".
+		"[[#Y{Note:} >>In the future, Genesis will support rejoining interrupted deployments,\n".
+		              "but this functionality is not yet implemented.",
+		$humanized_cache_path,
+		$file_list,
+		$humanized_cache_path,
+		$humanized_cache_path,
+		scalar($self->get_call_path_with_env)
+	);
+
+	bail(
+		"Cannot continue with active deployment cache files present.\n".
+		"Please resolve the deployment state as described above."
+	);
+}
+# }}}
+
 1;
-# vim: fdm=marker:foldlevel=1:noet
+# vim: set ts=2 sw=2 sts=2 noet foldmethod=marker foldlevel=1 nu
