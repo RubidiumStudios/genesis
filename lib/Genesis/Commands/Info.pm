@@ -17,6 +17,7 @@ use Genesis::Env::Deployment;
 use Cwd            qw/getcwd abs_path/;
 use File::Basename qw/basename/;
 use JSON::PP       qw/encode_json/;
+use Time::HiRes    qw/gettimeofday/;
 
 sub information {
 	# TODO: Make use of terminal_width and wrap to make this look better
@@ -370,27 +371,38 @@ sub yamls {
 			# Check if the file is a dynamically generated genesis meta file:
 			$file = $1 eq 'init' ? $env->_init_yaml_file : $env->_cap_yaml_file;
 			output {raw => 1}, slurp($file);
+			exit 0;
+		}
 
-		} elsif (-f ($file = $env->kit->path($view))) {
-			# If the file exists under the kit's path, we will read it and output
-			# it to the terminal.
-			output {raw => 1}, slurp($file);
-
-		} elsif (-f ($file = $env->path($view))) {
+		if (-f ($file = $env->path($view))) {
 			# If the file exists under the environment's path, we will read it and output
 			# it to the terminal.
 			output {raw => 1}, slurp($file);
-
-		} else {
-			bail(
-				"File '%s' not found in environment '%s' or kit '%s'.",
-				$view, $env->name, $env->kit->id
-			);
+			exit 0;
 		}
-		exit 0;
+
+		my $start_time = gettimeofday();
+		$env->notify({pending => 1}, 'building file list for the current kit features...');
+		$env->kit_files;
+		info('#G{done}%s', pretty_duration(gettimeofday() - $start_time));
+		$env->notify({pending => 0}, 'done in %.2f seconds', gettimeofday() - $start_time);
+		if (-f ($file = $env->kit->path($view))) {
+			# If the file exists under the kit's path, we will read it and output
+			# it to the terminal.
+			output {raw => 1}, slurp($file);
+			exit 0;
+		}
+		bail(
+			"File '%s' not found in environment '%s' or kit '%s'.",
+			$view, $env->name, $env->kit->id
+		);
 	}
 
-	my @files = $env->format_yaml_files(%{get_options()});
+	my $start_time = gettimeofday();
+	$env->notify({pending => 1}, 'building file list for the current kit features...');
+	my $kit_files = $env->kit_files;
+	info('#G{done}%s', pretty_duration(gettimeofday() - $start_time));
+	my @files = $env->format_yaml_files(%{get_options()}, kit_files => $kit_files);
 	output join("\n", @files)."\n";
 	exit 0;
 }
@@ -699,8 +711,8 @@ sub environments {
 				} else {
 					info {pending => 1}, $ansi_reset_line.$ansi_cursor_up.$ansi_show_cursor;
 					info "\n[[  #E{warning}>>#Ki{No environments found}" . ($search
-					 ? sprintf("#Ki{ matching pattern }#Ci{%s}", $search)
-					 : '#Ki{.}'
+						? sprintf("#Ki{ matching pattern }#Ci{%s}", $search)
+						: '#Ki{.}'
 					);
 				}
 			}
