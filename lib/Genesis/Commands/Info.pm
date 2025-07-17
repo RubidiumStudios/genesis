@@ -400,9 +400,9 @@ sub yamls {
 
 	my $start_time = gettimeofday();
 	$env->notify({pending => 1}, 'building file list for the current kit features...');
-	my $kit_files = $env->kit_files;
+	my @kit_files = $env->kit_files;
 	info('#G{done}%s', pretty_duration(gettimeofday() - $start_time));
-	my @files = $env->format_yaml_files(%{get_options()}, kit_files => $kit_files);
+	my @files = $env->format_yaml_files(%{get_options()}, kit_files => \@kit_files);
 	output join("\n", @files)."\n";
 	exit 0;
 }
