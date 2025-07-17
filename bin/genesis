@@ -753,9 +753,9 @@ define_command("info", {
 		"timestamp" =>
 			"If specified, will print the information for the environment at the ".
 			"given timestamp.  This is useful for getting information about a ".
-			"previous deployment, especially when retrieving artifacts.".
+			"previous deployment, especially when retrieving artifacts.\n".
 			"\n".
-			"[[#{y}Note: >>The kit portion of the environment information (the part ".
+			"[[#yi{Note:} >>The kit portion of the environment information (the part ".
 			"after the horizontal line) will not be printed, as it only reflects ".
 			"the current exodus data for the last good deployment."
 	],
