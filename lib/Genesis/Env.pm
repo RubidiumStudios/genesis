@@ -5614,18 +5614,19 @@ sub rejoin_deployment {
 		"\nThe following deployment cache files were found in:\n".
 		"[[  >>#C{%s}\n".
 		"%s\n\n".
-		"This indicates that a previous deployment may have been interrupted or is still in progress.\n".
-		"Genesis cannot safely continue without risking deployment state corruption.\n\n".
+		"This indicates that a previous deployment may have been interrupted or is still in progress.  ".
+		"Genesis cannot safely continue without risking deployment state corruption; this is particularly ".
+		"true when dealing with #Mu{create-env deployments} where the #Yu{state file} may have changed.\n\n".
 		"#Wku{Options to resolve this:}\n".
 		"[[  1. >>If you are certain the previous deployment is complete and these files are stale:\n".
 		"[[     >>#G{rm -rf %s}\n\n".
 		"[[  2. >>If the previous deployment failed and you want to retry but not lose the previous ".
 		         "deployment data (ie a state.yml file for a create-env deployment):\n".
-		"[[     >>#G{mv  %s }#Gi{<target-dir>}\n\n".
+		"[[     >>#G{mv %s }#Gi{<target-dir>}\n".
 		"[[     >>#G{%s deploy --STATE-FILE-PATH=}#Gi{<target-dir>/<state-file-name.yml>}\n\n".
-		"[[  3. >>If you are unsure about the deployment state, consult with your platform team\n".
+		"[[  3. >>If you are unsure about the deployment state, consult with your platform team ".
 		         "or Genesis support before proceeding.\n\n".
-		"[[#Y{Note:} >>In the future, Genesis will support rejoining interrupted deployments,\n".
+		"[[#Y{Note:} >>In the future, Genesis will support rejoining interrupted deployments, ".
 		              "but this functionality is not yet implemented.",
 		$humanized_cache_path,
 		$file_list,
