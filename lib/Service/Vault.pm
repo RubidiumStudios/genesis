@@ -305,6 +305,7 @@ sub query {
 	$opts->{env} ||= {};
 	$opts->{env}{DEBUG} = ""; # safe DEBUG is disruptive
 	$opts->{env}{SAFE_TARGET} = $self->ref unless defined($opts->{env}{SAFE_TARGET});
+	$opts->{stderr} = 0 unless defined($opts->{stderr});
 	return run($opts, @cmd);
 }
 
