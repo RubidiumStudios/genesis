@@ -5246,7 +5246,8 @@ genesis:
 	$self->is_ocfp
 	? "\n  ocfp:          true".
 		"\n  ocfp_env:      ".$self->ocfp_env .
-		"\n  ocfp_config_mount:  ".$self->ocfp_config_mount
+		"\n  ocfp_config_mount:  ".$self->ocfp_config_mount .
+		"\n  ocfp_config_base:   ".$self->ocfp_config_base
 	: ''
 	)}
 
