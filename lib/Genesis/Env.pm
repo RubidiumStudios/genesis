@@ -1451,8 +1451,9 @@ sub env_config_overrides {
 # }}}
 # director_config_overrides - returns the director config overrides for the environment {{{
 sub director_config_overrides {
-	my $self = shift;
-	my $overrides = $self->director_exodus_lookup(['bosh-config/cloud' => '.'], {});
+	my ($self, $type) = @_;
+	bug("No type specified for director config overrides") unless $type;
+	my $overrides = $self->director_exodus_lookup('/bosh-config/'.$type, {});
 	return $overrides;
 }
 
