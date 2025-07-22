@@ -100,7 +100,7 @@ sub root_ca_path {
 
 sub store_data {
 	my $self = shift;
-	$self->{__data} //= read_json_from($self->service->query({redact_output => 1}, 'export', grep {$_} ($self->base, $self->root_ca_path)));
+	$self->{__data} //= read_json_from($self->service->query({stderr => 1, redact_output => 1}, 'export', grep {$_} ($self->base, $self->root_ca_path)));
 	return $self->{__data}//{};
 }
 
