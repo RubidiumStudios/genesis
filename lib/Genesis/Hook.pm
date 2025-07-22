@@ -50,8 +50,17 @@ sub load_hook_module {
 		$file, $kit->id
 	) unless $hook_module;
 
-	eval {require $file};
-	bail "Failed to load hook module %s: %s", $file, $@ if $@;
+	# Check if module is already loaded to prevent redefinition warnings
+	my $module_path = $hook_module;
+	$module_path =~ s{::}{/}g;
+	$module_path .= '.pm';
+	
+	if (!$INC{$module_path}) {
+		eval {require $file};
+		bail "Failed to load hook module %s: %s", $file, $@ if $@;
+		# Mark it as loaded in %INC to prevent reloading
+		$INC{$module_path} = $file;
+	}
 	return $hook_module;
 }
 
