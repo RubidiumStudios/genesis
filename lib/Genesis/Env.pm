@@ -5514,8 +5514,8 @@ sub _get_stemcell_status {
 		if ($wants_latest) {
 			$result->{latest} = 1;
 			$result->{search_type} = 'latest';
-			my @targets = ($newest_by_os{$os}->@*);
-			my $latest_major_version = int($available{$targets[0]}{version});
+			my @targets = exists($newest_by_os{$os}) ? ($newest_by_os{$os}->@*) : ();
+			my $latest_major_version = @targets ? int($available{$targets[0]}{version}) : 0;
 			if (defined($major_version) && $major_version != $latest_major_version) {
 				$result->{search_type} = 'latest-minor';
 				@targets = (
@@ -5541,7 +5541,7 @@ sub _get_stemcell_status {
 				}
 			} else {
 				# No stemcells available for the desired os
-				$result->{alt} = Service::Bosh::Stemcell->find(
+				$result->{alt} = Service::BOSH::Stemcell->find(
 					$self->iaas,
 					$os,
 					$version
