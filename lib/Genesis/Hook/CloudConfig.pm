@@ -312,7 +312,7 @@ sub _build_generic_network_definition {
 # _available_ocfp_network_models - Returns the available OCFP network models {{{
 sub _available_ocfp_network_models {
 	# Overridable in hook files to allow kits to provide their own
-	return qw(dynamic_subnets subnets);
+	return qw(dynamic_subnets subnets greedy_subnets);
 }
 
 # }}}
@@ -348,6 +348,67 @@ sub _build_ocfp_network_definition {
 	return $self->$network_model_builder(
 		$target, $config, %options
 	);
+}
+
+# }}}
+# _build_ocfp_network_model_greedy - Builds an OCFP network definition with greedy allocation {{{
+sub _build_ocfp_network_model_greedy_subnets {
+	my ($self, $target, $config, %options) = @_;
+	# OCFP greedy network model consumes all the available IPs in the available CIDR range
+	# for the network, and does not reserve any IPs for static allocations.  This is useful
+	# for preallating large networks and allowing the BOSH director to allocate
+	# IPs as needed, without worrying about static allocations.
+	my $strategy = 'ocfp:greedy_subnets';
+	my $definition = $options{greedy_subnets};
+	my $network_id = $config->{name};
+	my $subnets = $self->_filter_subnets($definition->{subnets});
+	$config->{subnets} = [];
+
+	# We only use the ocfp-* subnets for the network definition
+	my $ocfp_subnet_prefix = $self->env->ocfp_subnet_prefix;
+	my @ocfp_subnet_names = sort grep {/^${ocfp_subnet_prefix}-/} keys %$subnets;
+	bail(
+		'No ocfp-* subnets found in the ocfp configuration for network %s',
+		$target
+	) unless @ocfp_subnet_names;
+
+	# Get existing allocations from exodus data
+	my $existing_allocations = $self->_get_existing_allocations();
+	for my $subnet_name (@ocfp_subnet_names) {
+		my $subnet = $subnets->{$subnet_name};
+		my $full_range = IPv4->new($subnet->{cidr_block});
+		my ($available, $reserved) = $self->_get_subnet_ranges($subnet);
+
+		# Remove existing allocations from available range that are not for the
+		# target network
+		for my $claiming_network (keys %$existing_allocations) {
+			next if ($network_id eq $claiming_network);
+			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name};
+			$available -= $alloc if ($alloc);
+		}
+
+		# Find any existing allocations, but ignore those explicitly reserved
+		my $existing = $existing_allocations->{$network_id}{$subnet_name} // IPv4->new();
+		$existing -= $reserved if $existing && $reserved;
+
+		my $allocated_range = $available - $existing - $reserved;
+		$reserved += $full_range->subtract($allocated_range);
+
+		my $fields = {
+			az => $self->lookup_az($subnet->{az}), # TODO: Needs to change if we support multiple AZs
+			range => $self->_standardized_subnet_cidr($subnet, $subnet_name, $target),
+			gateway => $subnet->{gateway},
+			dns => ref($subnet->{dns}) eq 'ARRAY' ? $subnet->{dns} : [$subnet->{dns}],
+			reserved => [map {$_->range} $reserved->simplify->spans],
+			cloud_properties_for_iaas	=> $definition->{cloud_properties_for_iaas} // {},
+		};
+
+		my $subnet_config = $self->_subnet_definition(
+			$target, $subnet_name, $fields, $strategy
+		);
+
+		push @{$config->{subnets}}, $subnet_config if $full_range->size > $reserved->size;
+	}
 }
 
 # }}}
@@ -490,24 +551,9 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			$reserved     -= $_;
 		}
 
-		# Standardize the range using IPv4 library for consistent CIDR expression
-		# Range must be one cohesive CIDR block.
-		my $range = IPv4->new($subnet->{cidr_block});
-		my @spans = $range->spans;
-		bail(
-			"Subnet %s for network %s is not a single CIDR block, but has multiple ranges: %s",
-			$subnet_name, $target, join(', ', map {"$_"} @spans)
-		) if @spans > 1;
-		my @cidrs = $spans[0]->cidrs;
-		bail(
-			"Subnet %s for network %s is not a single CIDR block, but has multiple CIDRs: %s",
-			$subnet_name, $target, join(', ', map {"$_"} @cidrs)
-		) if @cidrs > 1;
-		my $standardized_range_cidr = $cidrs[0];
-
 		my $fields = {
 			az => $self->lookup_az($subnet->{az}), # TODO: Needs to change if we support multiple AZs
-			range => $standardized_range_cidr,
+			range => $self->_standardized_subnet_cidr($subnet, $subnet_name, $target),
 			gateway => $subnet->{gateway},
 			dns => ref($subnet->{dns}) eq 'ARRAY' ? $subnet->{dns} : [$subnet->{dns}],
 			reserved => [map {$_->range} $reserved->spans],
@@ -1298,57 +1344,27 @@ sub _get_subnet_ref {
 }
 
 # }}}
+# _standardized_subnet_cidr - Returns a standardized CIDR range for a given subnet {{{
+sub _standardized_subnet_cidr {
+	my ($self, $subnet, $name, $target) = @_;
+	# Standardize the range using IPv4 library for consistent CIDR expression
+	# Range must be one cohesive CIDR block.
 
-=old-lsa-code
+	my $range = IPv4->new($subnet->{cidr_block});
+	my @spans = $range->spans;
+	bail(
+		"Subnet %s for network %s is not a single CIDR block, but has multiple ranges: %s",
+		$name, $target, join(', ', map {"$_"} @spans)
+	) if @spans > 1;
+	my @cidrs = $spans[0]->cidrs;
+	bail(
+		"Subnet %s for network %s is not a single CIDR block, but has multiple CIDRs: %s",
+		$name, $target, join(', ', map {"$_"} @cidrs)
+	) if @cidrs > 1;
+	my $standardized_range_cidr = $cidrs[0];
+	return $standardized_range_cidr;
+}
 
-
-	# We need to detect if there are multiple subnets with the same range, and
-	# amalgamate them into a single logical subnet amalgamation (LSA) if so.
-	# The network map (as created by `update_network`) will have the nominal
-	# subnet name as the key, but the networks defined in the config will need
-	# to use the LSAs instead (the name doesn't matter because it doesn't show
-	# up anywhere, but it does need to be unique in the hash).
-
-	# Process each range group
-	for my $range (keys %subnets_by_range) {
-		my @subnet_configs = @{$subnets_by_range{$range}};
-
-		if (@subnet_configs == 1) {
-			# Single subnet, use as-is
-			my $subnet_config = $subnet_configs[0];
-			my $full_range = IPv4->new($subnet_config->{range});
-			my $reserved = IPv4->new(@{$subnet_config->{reserved}});
-
-			push @{$config->{subnets}}, $subnet_config
-				if $full_range->size > $reserved->size;
-		} else {
-			# Multiple subnets with same range - create LSA
-			my $lsa_config = $self->_build_logical_subnet_amalgamation(
-				$target, \@subnet_configs,
-#				$target, \@subnet_names, \%subnet_configs_hash, $subnets, $strategy
-			);
-
-			if ($lsa_config) {
-				push @{$config->{subnets}}, $lsa_config;
-			}
-		}
-	}
-
-	# Apply subnet filtering after LSA creation
-	if (defined($definition->{subnets})) {
-		my $built_subnets = [map {$_->{name}} @{$config->{subnets}}];
-		my @used_subnets = map {
-
-			$self->_get_subnet_ref($_, $built_subnets)
-		} @{$definition->{subnets}};
-
-		my ($unused, $used) = compare_arrays($built_subnets, \@used_subnets);
-		delete $config->{subnets}{$_} for @$unused;
-
-		return 1;
-	}
-
-=cut
 1;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
