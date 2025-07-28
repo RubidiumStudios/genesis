@@ -8,6 +8,13 @@ use Genesis;
 use Genesis::State;
 use Genesis::Helpers;
 
+# Ignore redefinition warnings for Addon hooks
+$SIG{__WARN__} = sub {
+	my $msg = shift;
+	return if ($msg =~ /redefine/ && $msg =~ /Hook\/Addon.pm/);
+	warn $msg;
+};
+
 ### Class Methods {{{
 
 # new - abstract class only, expects derived class to specify new body {{{
