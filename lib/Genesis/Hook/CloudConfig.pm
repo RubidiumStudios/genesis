@@ -650,29 +650,25 @@ sub lookup_az {
 	) unless keys %{$self->network->{azs}};
 	# This code is autoviving the azs hash, so we need to check for the key
 	# TBD: Should we check for the full name as well in all the existing azs?
-	my $base_az = $az;
-	if (! exists $self->network->{azs}{$az}) {
-		# Find the base_az that contains the given az as a name
-		my $azs = $self->network->{azs};
-		for my $az_name (keys %$azs) {
-			if ($azs->{$az_name}{name} eq $az) {
-				$base_az = $az_name;
-				last;
-			}
-			if ($self->cpi_enabled && $azs->{$az_name}{for_cpi}{$self->cpi_name} eq $az) {
-				$base_az = $az_name;
-				last;
-			}
-			# TODO: Should we support the az-prefix.# here? (ie z1)
-		}
-		bail(
-			"Availability zone %s not found in the available AZs for the network",
-			$az
-		) unless $base_az;
-	}
+	my $azs = $self->network->{azs};
+	my $base_az = exists $azs->{$az} ? $az : undef;
 
-	my $az_name = $self->network->{azs}{$base_az}{for_cpi}{$self->cpi_name}
-		if $self->cpi_enabled;
+	# Find the base_az that contains the given az as a name
+	($base_az) = grep {
+		$azs->{$_}{name} eq $az
+	} keys %$azs if !$base_az;
+
+	# Check if its a cpi-specific az
+	($base_az) = grep {
+		($azs->{$_}{for_cpi}{$self->cpi_name}//'') eq $az
+	} keys %$azs if !$base_az && $self->cpi_enabled;
+
+	bail(
+		"Availability zone %s not found in the available AZs for the network",
+		$az
+	) unless $base_az;
+
+	my $az_name = $azs->{$base_az}{for_cpi}{$self->cpi_name} if $self->cpi_enabled;
 	return $az_name//$self->network->{azs}{$base_az}{name}; # Director cpi is default
 }
 
