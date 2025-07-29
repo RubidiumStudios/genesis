@@ -100,7 +100,8 @@ sub root_ca_path {
 
 sub store_data {
 	my $self = shift;
-	$self->{__data} //= read_json_from($self->service->query({stderr => 1, redact_output => 1}, 'export', grep {$_} ($self->base, $self->root_ca_path)));
+	# FIXME: Handle errors better...
+	$self->{__data} //= read_json_from($self->service->query({stderr => '&1', redact_output => 1}, 'export', grep {$_} ($self->base, $self->root_ca_path)));
 	return $self->{__data}//{};
 }
 
@@ -160,7 +161,7 @@ sub read   {
 	my ($self, $secret) = @_;
 	my $path = $secret->path;
 	$path .= ":".$secret->default_key if $secret->default_key;
-	my $value = $self->service->has($self->path($path)) 
+	my $value = $self->service->has($self->path($path))
 		? $self->service->get($self->path($path))
 		: undef;
 	$secret->set_value($value, loaded => 1);
