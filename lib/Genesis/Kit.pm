@@ -24,6 +24,15 @@ sub new {
 		if ($class == __PACKAGE__);
 }
 # }}}
+
+sub known_hooks {
+	# Returns a list of known hooks that can be used in the kit.
+	return qw/
+		new feature blueprint info check pre-deploy post-deploy terminate
+		edit shell addon
+		cloud-config cpi-config features runtime-config
+	/;
+}
 # }}}
 
 ### Instance Methods {{{
@@ -161,10 +170,7 @@ sub run_hook {
 
 	bug("Unrecognized hook '$hook'\n") unless grep {
 		$_ eq $hook
-	} qw/
-		new blueprint secrets info addon check prereqs pre-deploy post-deploy
-		cloud-config features shell edit terminate cpi-config runtime-config
-	/;
+	} known_hooks();
 
 	if ($opts{env}) {
 		my %env_vars = $opts{env}->get_environment_variables($hook);

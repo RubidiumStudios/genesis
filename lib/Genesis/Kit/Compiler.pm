@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::Kit;
 use Genesis::Kit::Dev;
 use Genesis::Env::Secrets::Parser::FromKit;
 use Genesis::Env::Secrets::Plan;
@@ -61,7 +62,7 @@ sub validate {
 			}
 
 			# check for errant top-level keys - params, subkits and features have been discontinued.
-			my @valid_keys = qw/name version description code docs author authors genesis_version_min secrets_store required_configs exclude_paths/;
+			my @valid_keys = qw/name version description code docs author authors genesis_version_min secrets_store required_configs exclude_paths supports/;
 			if (!defined($meta->{secrets_store}) || $meta->{secrets_store} eq 'vault') {
 				push @valid_keys, "credentials", "certificates", "provided";
 			} elsif ($meta->{secrets_store} ne "credhub") {
@@ -93,7 +94,7 @@ sub validate {
 		push @yml_errors, "does not exist.";
 	}
 
-	# TODO: Check hook scripts for validation. 
+	# TODO: Check hook scripts for validation.
 
 	if (@yml_errors) {
 		push @errors, "#Wk{Kit Metadata file }#Ck{kit.yml}#Wk{:}\n[[- >>".
@@ -134,18 +135,34 @@ sub validate {
 
 	# Hooks validation
 	my @hook_errors;
-	for my $hook (qw(new secrets blueprint info addon check)) {
-		if (!-e "$self->{root}/hooks/$hook") {
-			push(@hook_errors, "#C{hooks/$hook} is missing - this hook is not optional.")
-				if $hook =~ /^(new|blueprint)$/;
+	my @known_hooks = Genesis::Kit->known_hooks();
+	my @required_hooks = qw/new blueprint/;
+	my @present_hooks = ();
+	for my $hook (@known_hooks) {
+		my $hook_file = "$self->{root}/hooks/$hook";
+		$hook_file = "$self->{root}/hooks/$hook.pm" if !-e $hook_file;
+		if (!-e $hook_file) {
+			push @hook_errors, "#C{hooks/$hook} is missing - this hook is not optional."
+				if grep {$_ eq $hook} @required_hooks;
 			next;
 		}
-		if (!-f "$self->{root}/hooks/$hook") {
+		if (!-f $hook_file) {
 			push @hook_errors, "#C{hooks/$hook} is not a regular file.";
-		} elsif (!-x "$self->{root}/hooks/$hook") {
-			push @hook_errors, "#C{hooks/$hook} is not executable.";
+			next;
 		}
-		#TODO: validate hooks that are bash or perl with shellcheck or perl -c
+
+		if ($hook_file =~ /\.pm$/) {
+			# Perl hook, check if it compiles
+			my ($out,$rc) = run('perl', '-c', $hook_file);
+			if ($rc) {
+				push @hook_errors, "#C{hooks/$hook.pm} does not compile.  Run 'perl -c hooks/$hook.pm' for details.";
+			}
+		} else {
+			# Bash hook, check if it is executable
+			if (!-x $hook_file) {
+				push @hook_errors, "#C{hooks/$hook} is not executable.";
+			}
+		}
 	}
 	push @errors, "#Wk{Hook scripts:}\n[[- >>".join("\n[[- >>", @hook_errors)
 		if @hook_errors;
