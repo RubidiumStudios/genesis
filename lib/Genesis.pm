@@ -207,14 +207,39 @@ sub deployment_roots_map {
 }
 
 sub expand_path {
-	my ($path) = @_;
-	$path =~ s/^~/$ENV{HOME}/;
-	$path =~ s/\$([A-Za-z0-9_]+)/$ENV{$1}/g;
-	if (-l $path) {
-		$path = readlink($path);
-		$path = expand_path($path) if -l $path;
+	my ($path, $base_path) = @_;
+	return undef unless defined $path;
+
+	# Expand tilde patterns
+	if ($path =~ /^~/) {
+		if ($path eq '~' || $path =~ m{^~/}) {
+			$path =~ s{^~}{$ENV{HOME}};
+		} elsif ($path =~ m{^~([^/]+)}) {
+			# Handle ~username expansion
+			my $user_home = (getpwnam($1))[7];
+			bail("Unknown user '$1' in path expansion") unless $user_home;
+			$path =~ s{^~[^/]+}{$user_home};
+		}
 	}
+
+	# Expand environment variables
+	while ($path =~ s#\$(?:\{([A-Za-z0-9_]+)\}|([A-Za-z0-9_]+))#$ENV{$1//$2}||$&#e) {
+		bail(
+			"Environment variable '%s' is not set in path %s", $1//$2, $path
+		) unless defined $ENV{$1//$2};
+	}
+
+	# Convert to absolute path and resolve symlinks (abs_path does both)
+	pushd($base_path) if ($base_path);
+	$path = Cwd::abs_path($path);
+	popd() if ($base_path);
+
 	return $path;
+}
+
+# Legacy alias for backward compatibility
+sub absolute_path {
+	return expand_path(@_);
 }
 
 sub in_repo_dir {
@@ -926,23 +951,12 @@ sub chmod_or_fail {
 		or bail "Could not change mode of $path: $!";
 }
 
-sub absolute_path {
-	my ($path, $base_path) = @_;
-	$path =~ s{^~}{$ENV{HOME}} if substr($path,0,2) eq '~/';
-	$path =~ s{^~([^/]+)}{dirname($ENV{HOME})."/$1"}e if substr($path,0,1) eq '~';
-	return $path if $path =~ m{^/};
-	pushd($base_path) if $base_path;
-	$path = Cwd::abs_path($path);
-	popd() if $base_path;
-	return $path;
-}
-
 our %path_cache = ();
 sub humanize_path {
 	my ($path, %opts) = @_;
 
 	#TODO: cache paths better
-	my $pwd = Cwd::abs_path($ENV{GENESIS_CALLER_DIR} || Cwd::getcwd());
+	my $pwd = $opts{base_dir} || Cwd::abs_path($ENV{GENESIS_CALLER_DIR} || Cwd::getcwd());
 	return $path_cache{"$path\@$pwd"}
 		if ($path =~ m{^/} && defined($path_cache{"$path\@$pwd"}));
 
@@ -1547,6 +1561,10 @@ sub global_config_schema {
 			],
 			str_format    => \*Genesis::deployment_roots_str_format,
 			description   => 'List of deployment root directories',
+		},
+		kits_path => {
+			type          => 'string',
+			description   => 'Path for storing kit files. Defaults to deployment repository\'s config settings.',
 		},
 
 		suppress_warnings => {

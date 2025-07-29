@@ -1166,7 +1166,9 @@ define_command("init", {
 				"forming a symbolic link to the specified path in the new repository ".
 				"as the repository's #C{.genesis/kits}.  It defaults to ".
 				"#C{\$HOME/.genesis/kits} if not specified.  If that directory does ".
-				"not exist, it will be created.",
+				"not exist, it will be created.  You can also specify `kits-path` in ".
+				"the Genesis configuration file #C{\$HOME/.genesis/config.yml} to ".
+				"set the default path for all repositories.",
 
 			"vault=s" =>
 				"Name of a 'safe' target (a Vault) to store newly generated ".

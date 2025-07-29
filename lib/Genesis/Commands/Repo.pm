@@ -29,16 +29,11 @@ sub init {
 	my $kit_desc = "";
 	my $kit_path = undef;
 	if (exists($options{kits_path})) {
-		$abs_target = abs_path($options{'kits-path'}//$ENV{HOME}.'/.genesis/kits');
-		mkdir_or_fail ($abs_target) unless -d $abs_target;
+		$kit_path = abs_path($options{'kits-path'}//$ENV{HOME}.'/.genesis/kits');
+		mkdir_or_fail ($abs_target) unless -d $kit_path;
 		delete($options{'kits-path'});
 	}
-	if ($options{kit}) {
-		$abs_target = abs_path($options{kit});
-		bail(
-			"Kit file '%s' cannot be found from %s!", $options{kit}, getcwd()
-		) unless $abs_target;
-	} elsif ($options{'link-dev-kit'}) {
+	if ($options{'link-dev-kit'}) {
 		$abs_target = abs_path($options{'link-dev-kit'});
 		my $pwd = getcwd;
 		bail(
@@ -82,7 +77,7 @@ sub init {
 		);
 	}
 
-	my $top = Genesis::Top->create('.', $name, %options, kit_path => $kit_path);
+	my $top = Genesis::Top->create('.', $name, %options, kits_path => $kit_path);
 	my $vault_desc = "\n - using default safe target for the system";
 	if ($top->vault) {
 		$vault_desc = "\n - using vault at #C{".$top->vault->url."}";

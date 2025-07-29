@@ -86,6 +86,19 @@ sub create {
 
 	$self->{__kit_provider} = Genesis::Kit::Provider->init(%opts);
 	$self->{__vault} = Service::Vault::Remote->target($opts{vault});
+	my $kits_path = '';
+	if ($kits_path = $opts{kits_path}) {
+		$kits_path = expand_path($kits_path);
+		if (my $rel_path = humanize_path($kits_path, base_dir => $self->path()) !~ m#^/#) {
+			debug("Kit: using relative path $rel_path for kits path");
+			$kits_path = $rel_path;
+		} else {
+			debug("Kit: using absolute path $kits_path for kits");
+			my $home_parent_dir = dirname($ENV{HOME});
+			$kits_path =~ s{^$ENV{HOME}/}{~/};
+			$kits_path =~ s{^$home_parent_dir/}{~};
+		}
+	}
 
 	eval { # to delete path if creation fails
 
@@ -95,6 +108,7 @@ sub create {
 		$self->config->set('creator_version', $Genesis::VERSION);
 		$self->config->set('minimum_version', $Genesis::VERSION);
 		$self->config->set('manifest_store', 'exodus');
+		$self->config->set('kits_path', $kits_path) if $kits_path;
 
 		$self->config->set('secrets_provider', {
 			url       => $self->vault->url,
@@ -109,14 +123,9 @@ sub create {
 
 		$self->_validate_config;
 		$self->config->save;
-
-		if ($opts{'kit_path'}) {
-			# Create the kits directory, and link it to the specified path
-			my $kits_path = Cwd::abs_path($opts{'kit_path'} // $ENV{HOME}.'/.genesis/kits');
-			mkdir_or_fail($kits_path) unless -d $kits_path;
-			$self->symlink_or_fail($kits_path, ".genesis/kits");
-			debug("Kits path linked to #C{$kits_path}");
-		}
+		my $kits_path = $self->local_kits_path;
+		# FIXME: Should we prompt the user to confirm if outside the repo parent dir or ~/.genesis?
+		mkdir_or_fail($kits_path) unless -d $kits_path;
 
 		$self->mkfile_or_fail("README.md", # {{{
 <<EOF);
@@ -887,10 +896,23 @@ sub warnings {
 # }}}
 # warn_on - return true if the repo is set to warn on the specified condition {{{
 sub warn_on {
-   my ($self,$type) = @_;
-   return scalar(grep {$type eq $_} split(/\s*,\s*/, $self->warnings));
+	my ($self,$type) = @_;
+	return scalar(grep {$type eq $_} split(/\s*,\s*/, $self->warnings));
 }
 #}}}
+
+# local_kits_path - return the path to the local kit directory {{{
+sub local_kits_path {
+	my ($self) = @_;
+
+	# Check user config first (highest precedence)
+	my $kits_path = expand_path(
+		$Genesis::RC->get('kits_path') ||
+		$self->config->get('kits_path'),
+		$self->path()
+	);
+}
+
 # has_dev_kit - returns true if the repo has an embedded dev kit {{{
 sub has_dev_kit {
 	my ($self) = @_;
@@ -976,7 +998,7 @@ sub local_kits {
 	my ($self) = @_;
 	return Genesis::Kit::Compiled->local_kits(
 		$self->kit_provider(),
-		$self->path(".genesis/kits"),
+		$self->local_kits_path()
 	);
 }
 
@@ -1050,8 +1072,8 @@ sub download_kit {
 	} elsif ($opts{'as-dev'}) {
 		$target = workdir;
 	} else {
-		$target = $self->path(".genesis/kits");
-		mkdir_or_fail($target);
+		$target = $self->local_kits_path();
+		mkdir_or_fail($target) unless -d $target;
 	}
 
 	$self->kit_provider->fetch_kit_version($name,$version,$target,$opts{force});
@@ -1180,6 +1202,11 @@ sub _repo_config_schema {
 			values         => ['repository','hybrid','exodus'],
 			default        => 'hybrid',
 			description    => 'Where to store manifests'
+		},
+		kits_path => {
+			type           => 'string',
+			default        => '$GENESIS_ROOT/.genesis/kits',
+			description    => 'Path to directory containing compiled kits (defaults to .genesis/kits under the deployment base directory)',
 		},
 		kit_provider => {
 			type           => 'hash',
