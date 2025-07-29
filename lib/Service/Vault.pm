@@ -589,9 +589,8 @@ sub env {
 				},'safe', 'env', '--json')
 		);
 		$self->{_env}{VAULT_SKIP_VERIFY} ||= "";
-		# Explicitly override any existing SAFE_TARGET and GENESIS_TARGET_VAULT
+		# Explicitly override any existing SAFE_TARGET
 		$self->{_env}{SAFE_TARGET} = $self->{_env}{VAULT_ADDR};
-		$self->{_env}{GENESIS_TARGET_VAULT} = $self->{_env}{VAULT_ADDR};
 		# die on missing VAULT_ADDR env?
 	}
 
