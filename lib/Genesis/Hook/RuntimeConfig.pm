@@ -103,6 +103,10 @@ sub perform {
 		$self->upload_runtime_config($config, $config_data, $config_name);
 	}
 
+	# FIXME: Automatically upload any missing releases (if possible, or
+	#        warn that they're missing) when uploading the runtime configs,
+	#        or list them in dry-run mode.
+
 	# Store any secrets that were generated during the runtime config builds (or
 	# list them in dry-run mode)
 	$self->store_secrets();
@@ -159,22 +163,44 @@ sub validate_runtime_config_requests {
 	}
 
 	# Step 1: Standardize the requests to a hash of request names with options
-	if (!ref($args) && $args =~ /^\w+$/) {
+	if (!ref($args) && $args =~ /^[\w\,]+$/) {
 		# If its a string, promote it to a hash with no options
 		$args = {$args => {}};
 
 	} elsif (ref($args) eq 'ARRAY') {
-		# If the args are an array, promote to a joined string (to preserve order)
-		# RISK: If the world builds a better idiot who puts a comma in the
-		# request name, or includes the special '*' character, this will break.
-		# We reserve the right to publicly shame those that engage in such folly.
-		$args = {join(',', @$args) => {}};
+		# The world built a better idiot, and it was I.
+
+		# The PostDeploy hook will pass in an array of not just strings, but also
+		# hashes, so we need to be more surgical about how we handle this.
+		my @names = ();
+		my %new_args = ();
+		my $disable_all = 0;
+		for my $arg (@$args) {
+			if (!ref($arg)) {
+				# If its a string, we assume its a request name
+				push(@names, $arg);
+			} elsif (ref($arg) eq 'HASH') {
+				# If its a hash, merge it into the new_args
+				%new_args = (%new_args, %$arg);
+			} elsif (ref($arg) eq 'JSON::PP::Boolean') {
+				# If its a boolean, we assume its a request with no options
+				push(@names, $arg ? '*' : ());
+				$disable_all = 1 if !$arg; # If its false, we disable all requests
+			} else {
+				bail("Invalid runtime config request argument type: expecting a string, a boolean, or hash of options, got %s", ref($arg));
+			}
+		}
+		$args = {%{@names ? {join(',', @names) => {}} : {}}, %new_args};
+		if (!keys %$args && $disable_all) {
+			# If we have no args and we disabled all, we assume no requests
+			$args = {all => $JSON::PP::false};
+		}
 	} elsif (!ref($args) || ref($args) ne 'HASH') {
 		# Invalid argument type, bail out
 		bail(
 			"Invalid runtime config request arguments: expecting a #C{true}, a ",
-			"string, array of strings, or a hash of runtime build with options ".
-			"or boolean got %s",
+			"string, array of strings or build => option hash, or a hash of ".
+			"runtime build with options or boolean, but got %s",
 			ref($args)
 				? "a ".ref($args)." value"
 				: defined $args
@@ -496,9 +522,9 @@ sub _get_runtime_configs {
 # }}}
 # _get_req_names - Get the runtime build name from a request identifier {{{
 sub _get_req_names {
-	# Names can be a single name, a comma-separated list of names, or '*'
+	# Names can be a single name, a comma-separated list of names, or '*'/'all'
 	my ($self, $req_id) = @_;
-	if ($req_id eq '*') {
+	if ($req_id eq '*' || $req_id eq 'all') {
 		# If the request is '*', we return all registered builds, sorted by their
 		# registration order
 		return sort {
