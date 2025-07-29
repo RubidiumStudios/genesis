@@ -5,7 +5,7 @@ use warnings;
 
 use parent qw(Genesis::Hook);
 
-use Genesis qw/bail bug info notice error warning count_nouns pretty_duration spruce_diff in_array success to_yaml read_json_from/;
+use Genesis qw/bail bug info notice error warning count_nouns pretty_duration spruce_diff in_array uniq success to_yaml read_json_from/;
 use Genesis::Term qw/in_controlling_terminal terminal_width wrap bullet render_markdown/;
 use Genesis::UI qw/prompt_for_boolean/;
 use Service::Credhub;
@@ -262,7 +262,7 @@ sub validate_runtime_config_requests {
 		)} sort keys %{$self->{builds}}),
 	) if @invalid_requests;
 
-	$self->{requests} = \@requests;
+	$self->{requests} = [uniq @requests];
 	$self->{request_options} = \%req_opts;
 	return 1;
 }
