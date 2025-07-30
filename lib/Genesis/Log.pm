@@ -222,17 +222,17 @@ sub set_level {
 
 sub log_styles {
 	return {
-		output    => {colors => "kC", pri => 6, emoji => 'printer'},
-		info      => {colors => "Wc", pri => 6, emoji => 'information'},
-		debug     => {colors => "Wm", emoji => 'crystal-ball'},
-		warning   => {colors => "yk", pri => 4, emoji => 'warning'},
-		notice    => {colors => "wb", pri => 4, emoji => 'megaphone'},
-		error     => {colors => "WR", pri => 3, emoji => 'collision'},
-		fatal     => {colors => "Yr", pri => 0, emoji => 'stop-sign'},
-		trace     => {colors => "WG", emoji => 'detective', show_stack => 'current'},
-		qtrace    => {colors => "Wg", emoji => 'detective'},
-		dumpvar   => {colors => "WB", show_scope => 'current', emoji => 'magnifying-glass', raw => 1},
-		dumpstack => {colors => "kY", emoji => 'pancakes', raw => 1},
+		output    => {colors => "Ck", pri => 6, emoji => 'printer'},
+		info      => {colors => "cW", pri => 6, emoji => 'information'},
+		debug     => {colors => "mW", emoji => 'crystal-ball'},
+		warning   => {colors => "ky", pri => 4, emoji => 'warning'},
+		notice    => {colors => "bw", pri => 4, emoji => 'megaphone'},
+		error     => {colors => "RW", pri => 3, emoji => 'collision'},
+		fatal     => {colors => "rY", pri => 0, emoji => 'stop-sign'},
+		trace     => {colors => "GW", emoji => 'detective', show_stack => 'current'},
+		qtrace    => {colors => "gW", emoji => 'detective'},
+		dumpvar   => {colors => "BW", show_scope => 'current', emoji => 'magnifying-glass', raw => 1},
+		dumpstack => {colors => "Yk", emoji => 'pancakes', raw => 1},
 	}->{$_[0]}
 }
 
@@ -396,14 +396,10 @@ sub flush_logs {
 					$prefix = '';
 					$colors = '';
 				} elsif ($config->{style} eq 'fun') {
-					my $fg = substr($colors,1,1);
-					my $bg = substr($colors,0,1);
-					$prefix = sprintf("#%s{[#E{%s}%s]} ",$fg.$bg,$emoji,$label);
+					$prefix = sprintf("#%s{[#E{%s}%s]} ",$colors,$emoji,$label);
 					$prefix = "#K{$ts} $prefix" if $config->{timestamp};
 				} elsif ($config->{style} eq 'plain') {
-					my $fg = substr($colors,1,1);
-					my $bg = substr($colors,0,1);
-					$prefix = "#${fg}${bg}{[$label]} ";
+					$prefix = "#${colors}{[$label]} ";
 					$prefix = "#K{$ts} $prefix" if $config->{timestamp};
 				} elsif ($config->{style} eq 'rfc-5424') {
 					$priority += 8; # See https://datatracker.ietf.org/doc/html/rfc5424#section-6.2.1
@@ -424,14 +420,16 @@ sub flush_logs {
 					$columns = 999;
 					$indent = "  ";
 				} else { # current default - if ($config->{style} eq 'pointer') {
-					my ($gt,$gtc) = (">",$colors);
-					$prefix = $label;
-					unless (envset "NOCOLOR") {
+					my ($gt,$gtc);
+					if (envset 'NOCOLOR' || envset 'GENESIS_NO_UTF8') {
+						$colors = $gtc = substr($colors,0,1) || '-';
+						$gt = '>';
+						$gtc = '-';
+					} else {
 						$gt = csprintf('#@{>}');
-						$gtc = substr($colors||'-',1,1);
-						$prefix = " $prefix " unless envset('GENESIS_NO_UTF8');
+						$gtc = substr($colors,1,1)||'-';
+						$prefix = " $prefix ";
 					}
-					$colors = substr($colors,1,1) if envset('GENESIS_NO_UTF8');
 					$prefix = "$ts $prefix" if $config->{timestamp};
 					$prefix = sprintf("#%s{%s}#%s{%s} ", $colors,$prefix,$gtc,$gt)
 				}
