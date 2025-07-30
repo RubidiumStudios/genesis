@@ -1,5 +1,5 @@
 package Genesis::Log;
-use strict;
+use v5.20;
 use warnings;
 
 use utf8;
@@ -68,7 +68,7 @@ sub configure_log {
 		# Skip logging for certain commands
 		my $skip_commands = $options{skip_commands} || [];
 		push @$skip_commands, 'help' unless grep { $_ eq 'help' } @$skip_commands;
-		
+
 		$self->{log_templates}{$log} = {
 			template => $log,
 			options => \%options,
@@ -138,7 +138,7 @@ sub setup_from_configs {
 		for (@$log_configs) {
 			my $file = delete($_->{file});
 			my $path = delete($_->{path});
-			
+
 			# Handle new format with path and file template
 			if ($path && $file) {
 				# Expand the base path
@@ -149,7 +149,7 @@ sub setup_from_configs {
 				# Default file template if not specified
 				$file = $path ? File::Spec->catfile($path, '{env}/{command}/{timestamp}.log') : '~/.genesis/last-trace';
 			}
-			
+
 			$class->new->configure_log(File::Spec->rel2abs(Genesis::expand_path($file)), %{$_});
 			# TODO: add suppress list so that we can set a level, but ingore specific output
 			# TODO: support an only-log-if-an-error-occurred setting... that adds and flushes the log in END step if rc > 0
@@ -161,13 +161,13 @@ sub setup_from_configs {
 
 sub expand_log_template {
 	my ($self, $template) = @_;
-	
+
 	# Get timestamp components
 	my ($s,$us) = gettimeofday;
 	my $ts = sprintf "%s.%03dZ", gmtime($s)->strftime("%Y%m%dT%H%M%S"), $us / 1000;
 	my $date = gmtime($s)->strftime("%Y%m%d");
 	my $time = gmtime($s)->strftime("%H%M%S");
-	
+
 	# Replace template variables
 	my $path = $template;
 	$path =~ s/\{command\}/$ENV{GENESIS_COMMAND} || 'unknown'/ge;
@@ -175,12 +175,12 @@ sub expand_log_template {
 	$path =~ s/\{date\}/$date/g;
 	$path =~ s/\{time\}/$time/g;
 	$path =~ s/\{pid\}/$$/g;
-	
+
 	# Handle {env} specially - remove the path component if env is not set
 	if ($path =~ /\{env\}/ && !$ENV{GENESIS_ENVIRONMENT}) {
 		# Remove {env}/ patterns
 		$path =~ s/\{env\}\///g;
-		# Remove /{env}/ patterns  
+		# Remove /{env}/ patterns
 		$path =~ s/\/\{env\}\//\//g;
 		# Remove /{env} at end
 		$path =~ s/\/\{env\}$//g;
@@ -189,10 +189,10 @@ sub expand_log_template {
 	} else {
 		$path =~ s/\{env\}/$ENV{GENESIS_ENVIRONMENT}/ge;
 	}
-	
+
 	# Clean up any double slashes
 	$path =~ s/\/\/+/\//g;
-	
+
 	return $path;
 }
 
@@ -349,7 +349,7 @@ sub flush_logs {
 	# Process templates first
 	for my $template (keys %{$self->{log_templates}}) {
 		next if $self->{realized_logs}{$template}; # Already realized
-		
+
 		# Check if we should skip logging for this command
 		my $skip_commands = $self->{log_templates}{$template}{skip_commands} || [];
 		if ($ENV{GENESIS_COMMAND} && grep { $_ eq $ENV{GENESIS_COMMAND} } @$skip_commands) {
@@ -357,17 +357,17 @@ sub flush_logs {
 			$self->{realized_logs}{$template} = '<skipped>';
 			next;
 		}
-		
+
 		my $actual_log = $self->expand_log_template($template);
 		my $options = $self->{log_templates}{$template}{options};
-		
+
 		# Configure the actual log file
 		$self->configure_log($actual_log, %$options);
 		$self->{realized_logs}{$template} = $actual_log;
 	}
-	
+
 	# Process realized logs from templates (no need to do anything here, they're already configured)
-	
+
 	for my $log (keys %{$self->{logs}}) {
 		my $config = $self->{logs}{$log};
 		for my $line_number ($config->{next_entry}..$last_line) {
@@ -435,6 +435,7 @@ sub flush_logs {
 				}
 
 				$indent ||=  ' ' x csize($prefix);
+
 				my $content;
 				eval {
 					our @trap_warnings = qw/uninitialized/;
@@ -481,7 +482,7 @@ sub flush_logs {
 					$file =~ s/^~/$ENV{HOME}/;
 					open $fh, '>>:encoding(UTF-8)', $file
 						or die "Could not open $log for writing logs: $!\n";
-					
+
 					# Write command line as first entry if this is a new file
 					if ($ENV{GENESIS_FULL_CALL} && !$self->{command_logged}{$log} && -z $file) {
 						print $fh "Command: $ENV{GENESIS_FULL_CALL}\n\n";
