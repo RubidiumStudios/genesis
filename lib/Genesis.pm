@@ -267,6 +267,7 @@ sub error      {logger->error({offset => 1},@_);}
 sub warning    {logger->warning({offset => 1},@_);}
 sub success    {logger->warning({offset => 1, emoji => 'tada', colors => 'gk', label => 'DONE'}, @_);}
 sub dryrun     {logger->warning({offset => 1, emoji => 'noentry', colors => 'Wg', label => 'DRYRUN'}, @_);}
+sub notice     {logger->notice({offset => 1}, @_);}
 sub info       {logger->info({offset => 1},@_);}
 sub debug      {logger->debug({offset => 1},@_);}
 sub trace      {logger->trace({offset => 1},@_);}
