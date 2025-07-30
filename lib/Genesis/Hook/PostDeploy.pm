@@ -235,84 +235,64 @@ sub upload_stemcells {
 
 sub upload_runtime_configs {
 	my ($self) = @_;
-	my $runtime_opts = $self->env->lookup('bosh-configs.runtime', undef);
+	my $env = $self->env;
+	my $runtime_opts = $env->lookup('bosh-configs.runtime', undef);
 	return if !$runtime_opts;
 
-	if (ref $runtime_opts ne 'HASH') {
-		$runtime_opts = {$self->env->type => $runtime_opts};
-	}
+	bail(
+		"Runtime configs must be a hash reference, got %s.  Please check the ".
+		"'bosh-configs.runtime' setting in the #C{%s} environment.",
+		ref($runtime_opts)//(defined($runtime_opts) ? "#B{'$runtime_opts'}" : '#R{<undef>}'),
+		$env->name
+	) unless ref $runtime_opts eq 'HASH';
+	return if !scalar(keys %$runtime_opts);
 
-	my $env = $self->env;
+	bail(
+		"The #M{%s} kit does not provide any runtime configs.  Please check the ".
+		"'bosh-configs.runtime' setting in the #C{%s} environment.",
+		$self->env->kit->id, $self->env->name
+	) unless $env->has_hook('runtime-config');
 
-	# Bosh deployments always target themselves, other deployments target the BOSH director
-	my $bosh = $env->is_bosh_director
-		? $env->get_target_bosh({self => 1})
-		: $env->bosh;
+	$env->notify(
+		"uploading %s runtime config%s to the BOSH director",
+		sentence_join(sort keys %$runtime_opts),
+		scalar(keys %$runtime_opts) != 1 ? 's' : ''
+	);
 
-	my @types = (sort {
-		$a eq $env->type ? -1 : # Ensure the current environment type is first
-		$b eq $env->type ? 1 : # Ensure the current environment type is first
-		$a cmp $b
-	} keys %$runtime_opts);
-	my $max_length = (sort map {length $_} @types)[-1] // 0;
-
-	$env->notify("uploading runtime configs to the BOSH director");
 	my $tstart = gettimeofday;
-	for my $type (@types) {
-		my $configs = $runtime_opts->{$type};
 
-		# TODO: Support running bosh runtime configs on other environments
-		if ($type ne $env->type) {
-			# If the type is not the current environment type, we skip it for now
-			info(
-				"[[#-B{%*s}>> #Y{runtime configs from other kits are not supported yet}",
-				$max_length, $type
-			);
-			next;
-		}
+	# TODO: Support options in the runtime configs, such as:
+	# action => upload (default) or remove
+	# merge_with => object to merge with (default: empty)
+	# replace_with => object to replace with (default: empty)
 
-		my $args = ref($configs) eq 'ARRAY'
-			? $configs
-			: ref($configs) eq 'HASH'
-			? $configs->{args} || []
-			: $configs eq JSON::PP::true
-			? []
-			: [split(/\s+/, $configs)];
+	# Right now, we just support the `params` key, which will be the arguments passed in.
+	# Validate the runtime configs before proceeding
+	my @errors = map {
+		my $config = $runtime_opts->{$_};
+		sprintf(
+			"#Y{%s} is %s",
+			$_, ref($config) ? "a ".ref($config) :
+			defined($config) ? "'$config'" : '#R{<undef>}'
+		);
+	} grep {
+		my $config = $runtime_opts->{$_};
+		!(ref($config) eq 'HASH' || (ref($config) eq 'JSON::PP::Boolean' && $config));
+	} sort keys %{$runtime_opts};
+	bail(
+		"Runtime config options must be a hash reference or 'true', but:\n%s\n",
+		join("\n", map {"  - $_"} @errors)
+	) if @errors;
 
-		# Find out if there is a runtime config hook, or a addon hook that can handle this
-		if ($env->has_hook('runtime-config')) {
-			# If the runtime config hook is present, we will run it
-			info(
-				"\n[[#-B{[%-*s]}>> #G{runtime config hook with arguments:} [%s]",
-				$max_length, $type, join(", ", @$args)
-			);
-			# FIXME: When we support other environments, we'll need different '$env' here...
-			my ($out, $rc, $err) = $env->run_hook('runtime-config', args => $args, interactive => $self->{interactive});
-			# TODO: Do we need to handle failed runtime config hooks?
-		} elsif ($env->has_hook("addon-runtime-config~rc")) {
-			# If the runtime config hook is not present, we will run the addon hook
-			info(
-				"[[#-B{%*s}>> #G{addon runtime config with arguments: %s}]\n",
-				$max_length, $type, join(", ", @$args)
-			);
-			my ($out, $rc, $err) = $env->run_hook("addon-runtime-config~rc", args => $args, interactive => $self->{interactive}, rc => $type);
-			if ($rc) {
-				error("Failed to run addon runtime config hook: %s", $err);
-				return 0;
-			}
-		} else {
-			info(
-				"[[#-B{%*s}>> #R{no runtime config hook found for type %s}]",
-				$max_length, $type
-			);
-			next;
-		}
+	# Now we can run the runtime configs
+	my ($out, $rc, $err) = $env->run_hook('runtime-config', args => $runtime_opts, interactive => $self->{interactive});
 
-		info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+	if ($rc) {
+		error("Failed to successfully run runtime config hook: %s", $err);
+		return 0;
 	}
-	# TODO: Support running bosh runtime configs on other environments
-
-
+	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+	return $self->done(1);
 }
 
 sub results {

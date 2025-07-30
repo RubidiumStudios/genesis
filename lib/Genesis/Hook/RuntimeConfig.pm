@@ -27,6 +27,10 @@ sub init {
 		"Invalid optional arguments for a perl-based runtime-config hook call: %s",
 		join(", ", @invalid_opts)
 	) if @invalid_opts;
+	bail(
+		"Cannot specify both 'print' and 'remove' options."
+	) if ($opts{print} && $opts{remove});
+
 
 	my $obj = $class->SUPER::init(%opts);
 	$obj->{args} //= [];
@@ -74,6 +78,13 @@ sub credhub_base {
 }
 
 # }}}
+# config_name_for - Get the config name for a runtime build {{{
+sub config_name_for {
+	my ($self, $build) = @_;
+	return $self->env->bosh_config_name.".$build";
+}
+
+# }}}
 # perform - Default perform method, so kits just have to implement the build_*_runtime methods {{{
 sub perform {
 	my $self = shift;
@@ -90,7 +101,7 @@ sub perform {
 	return $self->remove_configs() if ($self->remove);
 
 	for my $config ($self->{requests}->@*) {
-		my $config_name = $env->bosh_config_name.".$config";
+		my $config_name = $self->config_name_for($config);
 		my $config_data = $self->build($config, $config_name);
 		next unless $config_data; # If the build failed or was skipped, continue to the next config
 		if ($self->print) {
@@ -410,8 +421,9 @@ sub remove_configs {
 	} @{$self->_get_runtime_configs()};
 
 	for my $config ($self->{requests}->@*) {
-		if (!exists $existing{$config}) {
-			info("  - runtime config #g{%s} does not exist", $config);
+		my $config_name = $self->config_name_for($config);
+		if (!exists $existing{$config_name}) {
+			info("  - runtime config #g{%s} does not exist", $config_name);
 			next;
 		}
 		if ($self->{dryrun}) {
