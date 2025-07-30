@@ -1574,6 +1574,31 @@ sub global_config_schema {
 			}
 		},
 
+		ui => {
+			type    => 'hash',
+			default => {},
+			schema  => {
+				colors => {
+					type    => 'hash',
+					default => {},
+					schema  => {
+						code => {
+							type        => 'string',
+							default     => 'Yb', # Yellow on dark blue
+							envvar      => 'GENESIS_UI_COLOR_CODE',
+							description => 'Color for code blocks in the UI'
+						},
+						warning_alert => {
+							type        => 'string',
+							default     => 'kYi', # Black on yellow header, yellow text
+							envvar      => 'GENESIS_UI_COLOR_WARNING',
+							description => 'Color for warning messages in the UI'
+						},
+					}
+				}
+			}
+		},
+
 		logs => {
 			type => 'array',
 			subtype => 'hash',
