@@ -271,7 +271,9 @@ sub run_hook {
 			remove => $opts{remove} || 0, # whether to remove the runtime configs
 			print => $opts{print} || 0, # whether to show the runtime configs
 		);
-		@args = @{$opts{args} || []};
+		@args = ref($opts{args}) eq 'ARRAY' ? $opts{args}->@*
+		      : ref($opts{args}) eq 'HASH'  ? $opts{args}->%*
+		      : $opts{args} ? ($opts{args}) : ();
 	}
 
 	# Detect Perl-based hooks and psuedo-hooks

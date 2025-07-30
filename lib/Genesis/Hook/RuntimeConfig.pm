@@ -361,7 +361,7 @@ sub compare_configs {
 		info(
 			"  - no existing #m{%s} runtime config found, generated the following:\n\n%s",
 			$description,
-			render_markdown("```yaml\n$config_data```")
+			render_markdown("```yaml\n$config_data```") . $Genesis::Term::ansi_cursor_up
 		);
 	}
 	return 1;
@@ -383,7 +383,7 @@ sub upload_runtime_config {
 		) unless in_controlling_terminal;
 
 		# If we're in interactive mode, we can prompt the user to confirm the upload
-		my $prompt = $Genesis::Term::ansi_cursor_up . wrap(sprintf(
+		my $prompt = wrap(sprintf(
 			"[[  - >>upload #m{%s} runtime config #c{%s} to BOSH director #M{%s}? [y|n]",
 			$description, $config_name, $self->bosh->alias || $self->bosh->host
 		), terminal_width - 2);
