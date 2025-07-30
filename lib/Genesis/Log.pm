@@ -329,6 +329,10 @@ sub _log {
 		show_stack => $options->{show_stack},
 		stack      => \@stack,
 		raw        => $options->{raw},
+
+		# Terminal specific options
+		prefix     => $options->{prefix},
+		style      => $options->{style},
 	};
 
 	# Check if there are any logs for the given level
@@ -372,9 +376,9 @@ sub flush_logs {
 		my $config = $self->{logs}{$log};
 		for my $line_number ($config->{next_entry}..$last_line) {
 			my (
-					$level, $ts,      $label, $colors, $emoji, $priority, $contents, $show_stack, $stack, $pending, $reset, $raw
+					$level, $ts,      $label, $colors, $emoji, $priority, $contents, $show_stack, $stack, $pending, $reset, $raw, $term_prefix, $term_style
 			)	= @{@{$self->{buffer}}[$line_number]}{
-				qw/level   timestamp label   colors   emoji   priority   contents   show_stack   stack   pending   reset   raw/
+				qw/level   timestamp label   colors   emoji   priority   contents   show_stack   stack   pending   reset   raw   prefix        style/
 			};
 
 			next unless meets_level($config->{level},$level);
@@ -392,16 +396,19 @@ sub flush_logs {
 				my $columns = $log eq '<terminal>' ? terminal_width : ($config->{width} || 120);
 				my ($prefix,$indent);
 
+				my $style = $config->{style} || 'pointer';
+				$style = $term_style if defined($term_style) && $log eq '<terminal>';
+
 				if ($log eq '<terminal>' && grep {$_ eq $level} (qw(OUTPUT INFO))) {
 					$prefix = '';
 					$colors = '';
-				} elsif ($config->{style} eq 'fun') {
+				} elsif ($style eq 'fun') {
 					$prefix = sprintf("#%s{[#E{%s}%s]} ",$colors,$emoji,$label);
 					$prefix = "#K{$ts} $prefix" if $config->{timestamp};
-				} elsif ($config->{style} eq 'plain') {
+				} elsif ($style eq 'plain') {
 					$prefix = "#${colors}{[$label]} ";
 					$prefix = "#K{$ts} $prefix" if $config->{timestamp};
-				} elsif ($config->{style} eq 'rfc-5424') {
+				} elsif ($style eq 'rfc-5424') {
 					$priority += 8; # See https://datatracker.ietf.org/doc/html/rfc5424#section-6.2.1
 					my $msgid = '-'; #FIXME: Not yet implemented
 					no warnings 'once';
@@ -419,7 +426,8 @@ sub flush_logs {
 					$pending = undef;
 					$columns = 999;
 					$indent = "  ";
-				} else { # current default - if ($config->{style} eq 'pointer') {
+				} else { # current default - if ($style eq 'pointer') {
+					$prefix = $label;
 					my ($gt,$gtc);
 					if (envset 'NOCOLOR' || envset 'GENESIS_NO_UTF8') {
 						$colors = $gtc = substr($colors,0,1) || '-';
@@ -433,6 +441,7 @@ sub flush_logs {
 					$prefix = "$ts $prefix" if $config->{timestamp};
 					$prefix = sprintf("#%s{%s}#%s{%s} ", $colors,$prefix,$gtc,$gt)
 				}
+				$prefix = $term_prefix.$prefix if defined($term_prefix) && $log eq '<terminal>';
 
 				$indent ||=  ' ' x csize($prefix);
 
