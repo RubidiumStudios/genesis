@@ -5,8 +5,8 @@ use warnings;
 
 use parent qw(Genesis::Hook);
 
-use Genesis qw/bail bug info notice error warning count_nouns pretty_duration spruce_diff in_array uniq success to_yaml read_json_from/;
-use Genesis::Term qw/in_controlling_terminal terminal_width wrap bullet render_markdown/;
+use Genesis qw/bail bug info output notice error warning count_nouns pretty_duration spruce_diff in_array uniq success to_yaml read_json_from/;
+use Genesis::Term qw/in_controlling_terminal terminal_width wrap bullet render_markdown colored_block/;
 use Genesis::UI qw/prompt_for_boolean/;
 use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
@@ -304,12 +304,12 @@ sub build {
 
 	if ($status && $status eq 'failed') {
 		info("#R{failed}".pretty_duration(gettimeofday() - $start_time));
-		error($msg);
+		error({prefix => '    '}, $msg);
 		delete $self->{secrets}{$build};
 		return undef;
 	} elsif ($status && $status eq 'skipped') {
 		info("#y{skipped}".pretty_duration(gettimeofday() - $start_time));
-		warning(
+		warning({prefix => '    '},
 			"#y{Skipping %s runtime config generation: %s}",
 			$build, $msg
 		);
@@ -326,12 +326,13 @@ sub build {
 sub print_config {
 	my ($self, $config_data, $config_name) = @_;
 	bail("No runtime config contents given") unless $config_data;
-
-	info({raw => 1},
-		"#{Wg{#--[%s]%s}\n%s\n\n",
+	my $code_colors = $Genesis::RC->get('ui.colors.code', 'Yb');
+	output({raw => 1},
+		"\n#%s{#--[%s]%s}\n%s\n",
+		$code_colors,
 		$config_name,
 		'-' x (terminal_width - length($config_name) - 5),
-		$config_data
+		colored_block($config_data, $code_colors)
 	);
 	return 1;
 }
@@ -360,7 +361,7 @@ sub compare_configs {
 		info(
 			"  - no existing #m{%s} runtime config found, generated the following:\n\n%s",
 			$description,
-			render_markdown("```yaml\n$config_data\n```")
+			render_markdown("```yaml\n$config_data```")
 		);
 	}
 	return 1;
@@ -382,7 +383,7 @@ sub upload_runtime_config {
 		) unless in_controlling_terminal;
 
 		# If we're in interactive mode, we can prompt the user to confirm the upload
-		my $prompt = wrap(sprintf(
+		my $prompt = $Genesis::Term::ansi_cursor_up . wrap(sprintf(
 			"[[  - >>upload #m{%s} runtime config #c{%s} to BOSH director #M{%s}? [y|n]",
 			$description, $config_name, $self->bosh->alias || $self->bosh->host
 		), terminal_width - 2);
@@ -403,7 +404,7 @@ sub upload_runtime_config {
 		return undef;
 	}
 	info("#G{done}".pretty_duration(gettimeofday() - $start_time));
-	info("[[  - >>#G{runtime config upload complete}\n");
+	info("[[  - >>#G{runtime config upload %scomplete}\n", $self->dryrun ? "dry-run " : "");
 	return 1;
 }
 
@@ -420,10 +421,10 @@ sub remove_configs {
 		})
 	} @{$self->_get_runtime_configs()};
 
-	for my $config ($self->{requests}->@*) {
-		my $config_name = $self->config_name_for($config);
-		if (!exists $existing{$config_name}) {
-			info("  - runtime config #g{%s} does not exist", $config_name);
+	for my $config_build ($self->{requests}->@*) {
+		my $config = $self->config_name_for($config_build);
+		if (!exists $existing{$config}) {
+			info("  - runtime config #g{%s} does not exist", $config);
 			next;
 		}
 		if ($self->{dryrun}) {
@@ -451,8 +452,8 @@ sub remove_configs {
 		}
 	}
 
-	success("\nruntime config removal complete\n");
-	return 1;
+	success("\nruntime config removal %scomplete\n", $self->dryrun ? "dry-run " : "");
+	return $self->done(1);
 }
 
 # }}}
@@ -470,15 +471,15 @@ sub store_secrets {
 		# ~1-2 seconds, so not a big deal.
 		if ($self->{dryrun}) {
 			info(
-				"[[  - >>would entomb %s used by these runtime configs:\n%s",
+				"\n[[  - >>would entomb %s used by these runtime configs:\n%s",
 				count_nouns( scalar keys %{$self->{secrets}}, "secret"),
 				join("\n", map {bullet($_, indent => 4)} map {sprintf(
 					"#c{%s}#C{%s}", ($_ =~ m#^(.*/)([^/]+)$#),
-				)} sort keys %{$self->{secrets}})
+				)} sort keys %secrets)
 			);
 		} else {
 			info(
-				"[[  - >>entombing %s secrets used by these runtime configs:",
+				"\n[[  - >>entombing %s secrets used by these runtime configs:",
 				scalar keys %secrets
 			);
 			my $idx = 0;
