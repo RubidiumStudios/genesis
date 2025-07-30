@@ -1,5 +1,6 @@
 package Genesis::Hook::Blueprint;
-use strict;
+
+use v5.20;
 use warnings;
 
 use parent qw(Genesis::Hook);
@@ -23,6 +24,26 @@ sub add_files {
 	my $self = shift;
 	push(@{$self->{files}}, @_);
 }
+
+
+sub add_files_if_wants {
+	my ($self, $feature_test, @files) = @_;
+	return unless $self->want_feature($feature_test);
+	$self->add_files(@files);
+}
+
+sub add_files_if_exists {
+	my ($self, @files) = @_;
+	for my $file (@files) {
+		next unless -f $self->kit->path($file);
+		$self->add_files($file);
+	}
+}
+
+# TODO: Add a generalized add_files method that takes an option hashref as first argument
+# if_wants => want_feature_match,
+# if_exists => 1,
+# before => file-match, -or- after => file-match
 
 sub remove_files {
 	my $self = shift;
