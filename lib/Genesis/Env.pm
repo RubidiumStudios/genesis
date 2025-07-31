@@ -5134,7 +5134,18 @@ sub _genesis_inherits {
 	my ($self,$file, @files) = @_;
 	my ($out,$rc,$err) = run({stderr => 0},'cat "$1" | spruce merge --skip-eval --go-patch --multi-doc | spruce json', $self->path($file));
 	bail "Error processing json in $file!:\n$err" if $rc;
-	my @contents = map {load_json($_)} lines($out);
+	
+	# Better error handling for empty output
+	if (!$out || $out =~ /^\s*$/) {
+		bail "Spruce returned empty output when processing file %s - the file may have YAML syntax errors or be empty", $file;
+	}
+	
+	my @contents = eval {
+		map {load_json($_)} lines($out)
+	};
+	if ($@) {
+		bail "Failed to parse JSON from spruce output for file %s: %s\nOutput was: %s", $file, $@, $out;
+	}
 
 	my @new_files;
 	for my $contents (@contents) {
