@@ -3334,17 +3334,6 @@ sub _post_deploy {
 		);
 	}
 
-	# Update the network map on the director's exodus network data
-	if (!$self->use_create_env && $opts{network_map}) {
-		$self->notify("Submitting network claims for this deployment to #M{%s} BOSH director...", $self->bosh->{alias});
-		eval {$self->bosh->vault->set_path($self->bosh->exodus_path.'/network', $opts{network_map}, flatten => 1, clear => 1);};
-		if ($@) {
-			info("  - #R{failed to update network map}:\n\n%s", $@);
-		} else {
-			info("  - #G{network map successfully updated}");
-		}
-	}
-
 	# Run post-deploy hook
 	$self->run_hook(
 		'post-deploy',
