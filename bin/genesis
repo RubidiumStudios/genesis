@@ -430,6 +430,15 @@ define_command("deploy", {
 		'fix-checks|F' =>
 			"Shorthand for --fix-stemcells and --fix-secrets, as applicable.",
 
+		'clear' =>
+			"Clear the deployment cache before deploying.  This will remove any ".
+			"files that were part of a previous deployment that didn't complete.  ".
+			"If you don't use this option, and the previous deployment was ".
+			"interrupted, you will be prompted to clear the cache before ".
+			"proceeding with the deployment unless you're not in an interactive ".
+			"terminal, or use the #Y{--yes} option, in which case it will bail ".
+			"with an error.",
+
 		'recreate' =>
 			"Recreate all VMs instead of just applying changes to them. This ".
 			"requires the VMs to be responsive; use --fix if they are not.\n".

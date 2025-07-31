@@ -639,15 +639,46 @@ sub deploy {
 	command_usage(1) if @_ < 1 || @_ > 2;
 	my ($env_name, $reason) = @_;
 
-	# TODO: Check if there's a deployment cache directory and tell the user to
-	#       run `genesis deploy --resume` to finish the deployment, or `genesis
-	#       deploy --clean` to start over.
-
 	my %options = %{get_options()};
 	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix dry-run fix-stemcells/);
 
 	$options{'disable-reactions'} = ! delete($options{reactions});
 	my $env = Genesis::Top->new('.')->load_env($env_name)->with_vault()->with_bosh();
+
+	if (my @files = $env->deployment_cache_path_lookup('all')) {
+		# TODO: Support the --resume option here, to resume a previous deployment.
+		#       This will have to use a step file that indicates the last step
+		#       that was completed, and then resume from there, if possible.
+		if ($options{clear}) {
+			$env->deployment_cache_clear;
+		} else {
+			my $cache_dir = $env->deployment_cache_dir;
+			my $cache_files = join("\n", map {'[[  - >>'.Cwd::abs_path($_)} @files);
+			warning(
+				"\nThere are cached deployment files in #C{%s} from the previous failed deployment:\n%s\n",
+				$cache_dir, $cache_files
+			);
+			if (!$options{yes} && in_controlling_terminal()) {
+				# Ask the user if they want to clear the cache directory
+				prompt_for_boolean(
+					"Do you want to clear the cache directory and start a new deployment? [y|n]",
+					0
+				) || bail("Aborted by user");
+
+				$env->notify("Clearing deployment cache files...");
+				$env->deployment_cache_clear;
+			} else {
+				bail(
+					"\nCowardly refusing to clear deployment cache files in #C{%s} ".
+					"without user confirmation.\n\n".
+					"Use the #Y{--clear} option to clear them, or run the command ".
+					"without the #Y{--yes} option in an interactive terminal to be ".
+					"prompted.",
+					$cache_dir
+				);
+			}
+		}
+	}
 
 	# Check if the user is compelled to provide a reason for the deployment
 	if (my $min_size = $env->deployment_change_reason_required_size_policy) {

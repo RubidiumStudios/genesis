@@ -2911,23 +2911,8 @@ sub deploy {
 	}
 	$opts{reason} //= 'unknown';
 
+	# TODO: Support the --resume option to resume a deployment
 	$self->deployment_cache_setup;
-
-	# Check if there are any existing files in the deployment cache
-	my $deployment_files = $self->deployment_cache_path_lookup('existing');
-	if (scalar(keys %$deployment_files)) {
-		# If there was a previous deployment, we need to check the state of that deployment,
-		# and respond accordingly. There are three scenarios we need to handle:
-		#  - The deployment was successful, but errored out post-deploy.
-		#  - The deployment was interrupted, and we need to check if it was successful
-		#    or not.
-		#  - The deployment is still in progress, and we need to join back into it.
-		$self->rejoin_deployment(
-			%opts,
-			deployment_files => $deployment_files
-		);
-		return;
-	}
 
 	# Initialize deployment state
 	$self->{deployment_state} = {
@@ -3041,7 +3026,7 @@ sub _deploy_create_env {
 	my ($last_manifest_path, $last_manifest_sha1);
 	unless ($last_manifest->{not_found}) {
 		if ($last_manifest->{errors}) {
-			bail("Errors encountered while retrieving last deployed manifest: %s",
+			$self->_cleanup_and_bail("Errors encountered while retrieving last deployed manifest: %s",
 				join("\n", @{$last_manifest->{errors}})
 			);
 		}
@@ -3052,7 +3037,7 @@ sub _deploy_create_env {
 	my $alternative_state_file = $opts{'STATE-FILE-PATH'};
 	if ($alternative_state_file) {
 		$alternative_state_file = absolute_path($alternative_state_file,$ENV{GENESIS_CALLER_DIR});
-		bail(
+		$self->_cleanup_and_bail(
 			"Alternative state file option specified, but does not appear to be valid file: %s",
 			humanize_path($alternative_state_file)
 		) if $alternative_state_file && !-f $alternative_state_file;
@@ -3081,7 +3066,7 @@ sub _deploy_create_env {
 				prompt_for_boolean(
 					"Proceed with BOSH create-env for the #C{${\($self->name)}} anyways? [y|n] ",
 					0
-				) or bail "Aborted!\n";
+				) or $self->_cleanup_and_bail("Aborted!\n");
 				$self->notify("\nchecking for the currently deployed manifest...");
 			} else {
 				bail(
@@ -3124,11 +3109,11 @@ sub _deploy_create_env {
 			);
 		}
 
-		bail(
+		$self->_cleanup_and_bail(
 			"Failed to diff the last deployed manifest with the current manifest: %s",
 			$err//$out
 		) if $rc > 1;
-		bail(
+		$self->_cleanup_and_bail(
 			"Failed to diff the last deployed vars file with the current vars file: %s",
 			$vars_err//$vars_out
 		) if ($vars_rc > 1);
@@ -3158,10 +3143,10 @@ sub _deploy_create_env {
 	if (in_controlling_terminal && !$noprompt) {
 		prompt_for_boolean(
 			"Proceed with BOSH create-env for the #C{${\($self->name)}}? [y|n] ",1
-		) or bail "Aborted!\n";
+		) or $self->_cleanup_and_bail("Aborted!\n");
 		print "\n";
 	} elsif (!$noprompt) {
-		bail(
+		$self->_cleanup_and_bail(
 			"Cannot proceed with BOSH create-env for the #C{${\($self->name)}} without user confirmation. ".
 			"Please run this command in a terminal, or use the --yes option to skip confirmation."
 		);
@@ -5645,6 +5630,15 @@ sub rejoin_deployment {
 		"Please resolve the deployment state as described above."
 	);
 }
+# }}}
+
+# _cleanup_and_bail - cleanup the deployment cache and bail with a message {{{
+sub _cleanup_and_bail {
+	my $self = shift;
+	$self->deployment_cache_cleanup;
+	bail({offset => 1}, @_);
+}
+
 # }}}
 
 1;
