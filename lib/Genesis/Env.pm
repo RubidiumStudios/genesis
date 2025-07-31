@@ -1492,6 +1492,9 @@ sub is_vaultified {
 					# convert to hash format
 					$page = "__ops__:\n$page";
 				}
+				# Skip empty pages (that may be multiple lines
+				next if $page =~ /\A\s*\z/;
+
 				my $data = load_yaml($page);
 				next unless $data;
 				return 1 if $data->{variables};
