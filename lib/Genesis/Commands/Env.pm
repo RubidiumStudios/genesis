@@ -865,19 +865,27 @@ sub deploy {
 						slurp($new_path)
 					);
 					info "[[  - >>cloud config for #C{%s} deployment has been created.\n", $env->name;
+				}
 
-					# Update the network map on the director's exodus network data
-					$env->notify(
-						"submitting network claims for this deployment to #M{%s} BOSH director...",
-						$env->bosh->{alias}
-					);
-					eval {$env->bosh->vault->set_path(
-						$env->bosh->exodus_path.'/network', $network_map, flatten => 1, clear => 1
-					);};
-					if ($@) {
-						info("  - #R{failed to update network map}:\n\n%s", $@);
+				if (ref($network_map) eq 'HASH') {
+					if ($dryrun) {
+						dryrun(
+							"Network map would be updated on the BOSH director if not in dry-run mode."
+						);
 					} else {
-						info("  - #G{network map successfully updated}");
+						# Update the network map on the director's exodus network data
+						$env->notify(
+							"submitting network claims for this deployment to #M{%s} BOSH director...",
+							$env->bosh->{alias}
+						);
+						eval {$env->bosh->vault->set_path(
+							$env->bosh->exodus_path.'/network', $network_map, flatten => 1, clear => 1
+						);};
+						if ($@) {
+							info("  - #R{failed to update network map}:\n\n%s", $@);
+						} else {
+							info("  - #G{network map successfully updated}");
+						}
 					}
 				}
 
