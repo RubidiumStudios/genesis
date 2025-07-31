@@ -2924,7 +2924,7 @@ sub deploy {
 	};
 
 	# Run pre-deployment phase
-	my $predeploy_ok = $self->_predeploy(%opts, noprompt => $noprompt);
+	my $predeploy_ok = $self->_pre_deploy(%opts, noprompt => $noprompt);
 	return unless $predeploy_ok;
 
 	# Run the actual deployment
@@ -2943,8 +2943,8 @@ sub deploy {
 }
 
 # }}}
-# _predeploy - handle pre-deployment setup and validation {{{
-sub _predeploy {
+# _pre_deploy - handle pre-deployment setup and validation {{{
+sub _pre_deploy {
 	my ($self, %opts) = @_;
 	my $noprompt = delete($opts{noprompt});
 
