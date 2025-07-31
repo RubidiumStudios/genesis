@@ -2879,9 +2879,7 @@ sub deployment_cache_cleanup {
 # deployment_cache_path_lookup - return the path to a file in the deployment cache {{{
 sub deployment_cache_path_lookup {
 	my ($self, $descriptor) = @_;
-	bug(
-		"Deployment cache not set up; run deployment_cache_setup first"
-	) unless defined $self->{__deployment_cache_path};
+	return {} unless defined $self->{__deployment_cache_path};
 
 	my $deploy_cache = $self->{__deployment_cache_path};
 	return $deploy_cache unless $descriptor;

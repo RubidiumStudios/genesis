@@ -645,7 +645,8 @@ sub deploy {
 	$options{'disable-reactions'} = ! delete($options{reactions});
 	my $env = Genesis::Top->new('.')->load_env($env_name)->with_vault()->with_bosh();
 
-	if (my @files = $env->deployment_cache_path_lookup('all')) {
+	my $deployment_files = $env->deployment_cache_path_lookup('existing');
+	if (scalar(keys %$deployment_files)) {
 		# TODO: Support the --resume option here, to resume a previous deployment.
 		#       This will have to use a step file that indicates the last step
 		#       that was completed, and then resume from there, if possible.
@@ -653,10 +654,20 @@ sub deploy {
 			$env->deployment_cache_clear;
 		} else {
 			my $cache_dir = $env->deployment_cache_dir;
-			my $cache_files = join("\n", map {'[[  - >>'.Cwd::abs_path($_)} @files);
+			my $file_list = join("\n", map {
+				sprintf("[[  - >>%s", basename($_))
+			} sort values %$deployment_files);
 			warning(
-				"\nThere are cached deployment files in #C{%s} from the previous failed deployment:\n%s\n",
-				$cache_dir, $cache_files
+				"\nThere are cached deployment files in #C{%s} from the previous failed or interrupted deployment:\n%s%s",
+				$cache_dir, $file_list,
+				$deployment_files->{state}
+					? "\n\n[[#Yr{IMPORTANT:} >>The cached files contain a state file, which ".
+					"may contain values necessary to run this deployment successfully.  ".
+					"Please copy it to a safe location, then use the --STATE-FILE-PATH ".
+					"option to use that file instead of a potentially outdated one from ".
+					"a previously successful deployment instead of clearing and ".
+					"continuing with this deployment."
+					: ""
 			);
 			if (!$options{yes} && in_controlling_terminal()) {
 				# Ask the user if they want to clear the cache directory
