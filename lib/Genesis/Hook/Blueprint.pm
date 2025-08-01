@@ -60,15 +60,17 @@ sub exchange_files {
 }
 
 sub ops_dir {
-	$_[0]->env->lookup('genesis.ops_dir') // 'ops';
+	return $_[0]->env->lookup('genesis.ops_dir') // 'ops';
 }
 
 sub upstream_dir {
-	($_[0]->{upstream_dir}	// 'upstream') =~ s{/?$}{/}r;
+	my $self = shift;
+	return unless $self->{upstream_dir};
+	return $self->{upstream_dir} =~ s{/?$}{/}r; # Ensure it ends with a slash
 }
 
 sub upstream_pattern_match {
-	$_[0]->{upstream_pattern_match} // qr/^operations\/(.*)$/;
+	return $_[0]->{upstream_pattern_match} // qr/^operations\/(.*)$/;
 }
 
 # validate_features - Process feature validation {{{
@@ -109,7 +111,7 @@ sub validate_features {
 				\@curated_features, \@warnings, \@errors
 			);
 
-		} elsif ($feature =~ $self->upstream_pattern_match) {
+		} elsif ($self->upstream_dir && $feature =~ $self->upstream_pattern_match) {
 			if (-f $self->kit->path($self->upstream_dir.$feature.'.yml')) {
 				# Custom ops file from the kit
 				push @curated_features, $feature;
