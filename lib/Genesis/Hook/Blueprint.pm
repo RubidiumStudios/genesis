@@ -15,11 +15,6 @@ sub init {
 	return $obj
 }
 
-sub validate_features {
-	my ($self, @features) = @_;
-	return 1
-}
-
 sub add_files {
 	my $self = shift;
 	push(@{$self->{files}}, @_);
@@ -62,6 +57,161 @@ sub exchange_files {
 			if (exists $exchange{$self->{files}[$i]});
 		last if (scalar(keys %exchange) == 0);
 	}
+}
+
+sub ops_dir {
+	$_[0]->env->lookup('genesis.ops_dir') // 'ops';
+}
+
+sub upstream_dir {
+	($_[0]->{upstream_dir}	// 'upstream') =~ s{/?$}{/}r;
+}
+
+sub upstream_pattern_match {
+	$_[0]->{upstream_pattern_match} // qr/^operations\/(.*)$/;
+}
+
+# validate_features - Process feature validation {{{
+sub validate_features {
+	my ($self, %opts) = @_;
+
+	# Keep a backup of the raw features
+	$self->{raw_features} //= $self->features;
+
+	my @curated_features            = ();
+	my @warnings                    = $opts{warnings} ? $opts{warnings}->@* : ();
+	my @errors                      = $opts{errors}   ? $opts{errors}->@*   : ();
+	my $deprecated_features         = $opts{deprecated_features}           // {};
+	my $mutually_exclusive_features = $opts{mutually_exclusive_features}   // {};
+
+	my %valid_features = ref($opts{valid_features}) eq 'HASH'
+		? $opts{valid_features}->%*
+		: ref($opts{valid_features}) eq 'ARRAY'
+		? map { $_ => 1 } $opts{valid_features}->@*
+		: bail(
+			"Invalid valid_features parameter: expected a hash or array reference, got %s",
+			ref($opts{valid_features})       ? ref($opts{valid_features})
+			: defined($opts{valid_features}) ? "#B{$opts{valid_features}}"
+			: '#R{<undef>}'
+		);
+
+	my $ops_dir = $self->ops_dir;
+
+	for my $feature (@{$self->{raw_features}}) {
+		if ($valid_features{$feature}) {
+			# Valid feature, add it to the curated list
+			push @curated_features, $feature;
+
+		} elsif (exists($deprecated_features->{$feature})) {
+			my $resolution = $deprecated_features->{$feature}//{};
+			$self->_handle_deprecated_feature(
+				$feature, $resolution,
+				\@curated_features, \@warnings, \@errors
+			);
+
+		} elsif ($feature =~ $self->upstream_pattern_match) {
+			if (-f $self->kit->path($self->upstream_dir.$feature.'.yml')) {
+				# Custom ops file from the kit
+				push @curated_features, $feature;
+			} else {
+				push @errors, "Invalid upstream operation requested: #c{$feature}";
+			}
+
+		} elsif (-f $self->env->path("$ops_dir/$feature.yml")) {
+			# Custom ops file from the environment
+			push @curated_features, $feature;
+
+		} else {
+			push @errors, "Invalid feature requested: #c{$feature}";
+		}
+	}
+	for my $group (keys %{$self->env->mutually_exclusive_features}) {
+		my @group_features = $self->env->mutually_exclusive_features->{$group}->@*;
+		my @features_in_group = grep { $valid_features{$_} } @curated_features;
+		if (@features_in_group > 1) {
+			push @errors, sprintf(
+				"Mutually exclusive features in group '%s': %s",
+				$group,
+				sentence_join(map {"#c{$_}"} @features_in_group)
+			);
+		}
+	}
+
+	$self->set_features(@curated_features);
+
+	# Process mutually exclusive features
+	for my $group (keys %$mutually_exclusive_features) {
+		my @group_features = $mutually_exclusive_features->{$group}->@*;
+		my @features_in_group = grep {$self->want_feature($_)} @group_features;
+		if (@features_in_group > 1) {
+			push @errors, sprintf(
+				"Cannot set multiple #M{%s} features: %s",
+				$group, join(', ', map {"#c{$_}"} @features_in_group)
+			);
+		}
+	}
+
+	warning(
+		"\nFeature validation encountered the following warnings:\n%s",
+		join('', map {"[[  - >>$_\n"} @warnings)
+	) if @warnings;
+
+	bail(
+		"\nFeature validation encountered the following errors:\n%s",
+		join('', map {"[[  - >>$_\n"} @errors)
+	) if @errors;
+
+}
+
+# }}}
+
+# _handle_deprecated_feature - Handle deprecated features {{{
+sub _handle_deprecated_feature {
+	my ($self, $feature, $resolution, $curated_features, $warnings_ref, $errors_ref) = @_;
+	my $msg = undef;
+	my $replacement = undef;
+
+	$resolution = {replace => $resolution} unless ref($resolution) eq 'HASH';
+
+	if (!exists($resolution->{params})) {
+		$msg = $resolution->{msg};
+		$replacement = $resolution->{replace};
+	} else {
+		# TODO: Deal with features that have been replaced by env params
+		bail("Feature replacement by params not yet implemented for $feature");
+	}
+
+	if (ref($replacement) eq 'ARRAY') {
+		# Multiple replacements
+		if (!@$replacement) {
+			push @$warnings_ref, sprintf(
+				"The #g{%s} feature is now the default behaviour %s",
+				$feature,
+				$msg // "and no longer needs to be specified."
+			);
+		} else {
+			push @$warnings_ref, sprintf(
+				"The #y{%s} feature has been deprecated %s",
+				$feature,
+				$msg // "and should be replaced with ". sentence_join(map {"#c{$_}"} @$replacement)
+			);
+			push @$curated_features, @$replacement;
+		}
+	} elsif (!defined($replacement)) {
+		push @$errors_ref, sprintf(
+			"The #r{%s} feature is no longer supported and has been removed.%s",
+			$feature,
+			$msg ? " $msg" : ""
+		);
+	} else {
+		# Single replacement
+		push @$warnings_ref, sprintf(
+			"The #c{%s} feature has been replaced with #c{%s}",
+			$feature, $replacement
+		);
+		push @$curated_features, $replacement;
+	}
+	return 1;
 }
 
 sub results {
