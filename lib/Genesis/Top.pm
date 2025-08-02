@@ -127,7 +127,7 @@ sub create {
 		# FIXME: Should we prompt the user to confirm if outside the repo parent dir or ~/.genesis?
 		mkdir_or_fail($kits_path) unless -d $kits_path;
 
-		$self->mkfile_or_fail("README.md", # {{{
+		$self->mkfile("README.md", # {{{
 <<EOF);
 $name deployments
 ==============================
