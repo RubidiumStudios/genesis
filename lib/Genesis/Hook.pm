@@ -54,7 +54,7 @@ sub load_hook_module {
 	my $module_path = $hook_module;
 	$module_path =~ s{::}{/}g;
 	$module_path .= '.pm';
-	
+
 	if (!$INC{$module_path}) {
 		eval {require $file};
 		bail "Failed to load hook module %s: %s", $file, $@ if $@;
@@ -275,7 +275,11 @@ sub get_config_override {
 
 sub exodus_data {
 	my $self = shift;
-	return $self->{__exodus_data} ||= $self->env->exodus_lookup('.',{});
+	$self->{__exodus_data} ||= $self->env->exodus_lookup('.',{});
+	return $self->{__exodus_data} unless @_;
+	return $self->{__exodus_data}{$_[0]} if @_ == 1;
+	my @results = map {$self->{__exodus_data}{$_}} @_;
+	return wantarray ? @results : \@results;
 }
 
 sub bosh {
