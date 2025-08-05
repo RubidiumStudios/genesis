@@ -77,8 +77,8 @@ sub upstream_pattern_match {
 sub validate_features {
 	my ($self, %opts) = @_;
 
-	# Keep a backup of the raw features
-	$self->{raw_features} //= [$self->features];
+	# Keep a backup of the raw features as an array ref
+	$self->{raw_features} //= [ $self->features ];
 
 	my @curated_features            = ();
 	my @warnings                    = $opts{warnings} ? $opts{warnings}->@* : ();
@@ -127,17 +127,7 @@ sub validate_features {
 			push @errors, "Invalid feature requested: #c{$feature}";
 		}
 	}
-	for my $group (keys %{$self->env->mutually_exclusive_features}) {
-		my @group_features = $self->env->mutually_exclusive_features->{$group}->@*;
-		my @features_in_group = grep { $valid_features{$_} } @curated_features;
-		if (@features_in_group > 1) {
-			push @errors, sprintf(
-				"Mutually exclusive features in group '%s': %s",
-				$group,
-				sentence_join(map {"#c{$_}"} @features_in_group)
-			);
-		}
-	}
+
 
 	$self->set_features(@curated_features);
 
@@ -148,7 +138,8 @@ sub validate_features {
 		if (@features_in_group > 1) {
 			push @errors, sprintf(
 				"Cannot set multiple #M{%s} features: %s",
-				$group, join(', ', map {"#c{$_}"} @features_in_group)
+				$group,
+        join(', ', map {"#c{$_}"} @features_in_group)
 			);
 		}
 	}
