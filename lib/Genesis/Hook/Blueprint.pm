@@ -78,7 +78,7 @@ sub validate_features {
 	my ($self, %opts) = @_;
 
 	# Keep a backup of the raw features
-	$self->{raw_features} //= $self->features;
+	$self->{raw_features} //= [$self->features];
 
 	my @curated_features            = ();
 	my @warnings                    = $opts{warnings} ? $opts{warnings}->@* : ();
