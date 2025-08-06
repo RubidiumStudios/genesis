@@ -30,6 +30,19 @@ use Time::Seconds;
 
 use utf8;
 
+BEGIN { # Enable development mode if GENESIS_DEV_MODE is set
+	if ($ENV{GENESIS_DEV_MODE} && $ENV{GENESIS_DEV_MODE} =~ /^(?:1|yes|true)$/i) {
+		printf STDERR "Running in development mode, using Genesis lib from %s\n",
+			$ENV{GENESIS_LIB} || $ENV{HOME}.'/.genesis/lib';
+		eval {require Pry; Pry->import()};
+		printf STDERR "  - Pry is %s on this system\n", $@ ? 'not available' : 'available';
+		eval {require Carp::Always; Carp::Always->import()};
+		printf STDERR "  - Carp::Always is %s\n", $@ ? 'not available on this system' :'active';
+		eval {require Smart::Comments; Smart::Comments->import()};
+		printf STDERR "  - Smart::Comments is %s\n", $@ ? 'not available on this system' :'active';
+	}
+}
+
 use constant {
 	EXODUS_TIME_FORMAT => "%Y-%m-%d %H:%M:%S %z",
 	EXODUS_TIME_FORMAT_SHORT => "%Y%m%d%H%M%S",
