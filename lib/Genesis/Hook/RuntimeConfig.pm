@@ -522,6 +522,31 @@ sub _get_secret {
 }
 
 # }}}
+# _get_exodus_secret - Get secret from exodus data with entombment support {{{
+sub _get_exodus_secret {
+	my ($self, $key, $default, $deployment_slug) = @_;
+	my $config = $self->{__current_config};
+
+	# Use exodus_lookup which handles deployment slug pass-through automatically
+	my $value = $self->env->exodus_lookup($key, $default, $deployment_slug);
+	return $value unless $self->credhub_base;
+
+	# we actually want an explicit deployment slug here, so we can entomb the secret
+	# with the deployment slug as part of the path
+	$deployment_slug //= $self->env->exodus_slug;
+
+	# Create entombed reference if credhub is available
+	my $credhub_var = $self->get_credhub_variable(
+		$self->credhub_base . 'runtime-configs/genesis-entombments/',
+		"exodus/$deployment_slug",
+		$key,
+		$value
+	);
+	$self->{secrets}{$config//''}{$credhub_var} = $value;
+	return "(($credhub_var))";
+}
+
+# }}}
 # _get_runtime_configs - Get runtime configs from BOSH {{{
 sub _get_runtime_configs {
 	my ($self, $name) = @_;
