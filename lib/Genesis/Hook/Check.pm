@@ -60,7 +60,7 @@ sub has_entry {
 	}
 	$self->{__entry_checks}{$config}{$type}{$name} = $has_entry;
 	@msg = (
-		"%s #Y{%s}",
+		"#Y{%s} %s",
 		$type =~ s/[-_]/ /gr,
 		$name
 	) unless @msg;
