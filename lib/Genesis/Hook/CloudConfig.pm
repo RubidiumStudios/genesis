@@ -292,7 +292,7 @@ sub network_definition {
 
 	#TODO: Before we return, we must store a local copy in the object for
 	#reference to build other parts of the cloud config.
-	$self->update_network($target, $config);
+	$self->update_network($target, $config, %rules);
 
 	return $config;
 }
@@ -589,11 +589,15 @@ sub network {
 # }}}
 # update_network - Updates the network definitions for the environment {{{
 sub update_network {
-	my ($self, $target, $config) = @_;
+	my ($self, $target, $config, %options) = @_;
 	my $network = $self->name_for('net', $target);
 
 	# clear out any existing allocations for this network
 	delete($_->{claims}{$network}) for (values %{$self->network->{subnets}});
+
+  	# Don't record claims for greedy networks - they consume all available IPs
+  	# without specific allocations and don't need claims tracking
+  	return if exists($options{greedy_subnets});
 
 	# Calculate and store the new allocations
 	for my $subnet (@{$config->{subnets}}) {
