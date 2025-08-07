@@ -541,13 +541,13 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 		# Check for reserved_ips and "unreserve" them from the reserved range
 		# and put them into the static list
-		my $reserved_ips = $self->_get_reserved_allocation(
+		my ($reserved_ips,$reserved_static) = $self->_get_reserved_allocation(
 			$target,
 			$subnet
 		);
 
 		while (<$reserved_ips>) {
-			$static_range += $_;
+			$reserved_static ? $static_range += $_ : $allocated_range += $_;
 			$reserved     -= $_;
 		}
 
@@ -1166,9 +1166,9 @@ sub _get_reserved_allocation {
 	my $idx = 'a';
 	my $allocation = IPv4->new();
 	while (exists $subnet->{'reserved-ips'}{$target."_$idx"}) {
-		my $start = $subnet->{'reserved-ips'}{$target."_".$idx++};
-		my $end = $subnet->{'reserved-ips'}{$target."_".$idx++};
-		$allocation += "$start-$end";
+		my $start = IPv4->address($subnet->{'reserved-ips'}{$target."_".$idx++})+1;
+		my $end   = IPv4->address($subnet->{'reserved-ips'}{$target."_".$idx++})-1;
+		$allocation += $start->to($end);
 	}
 
 	$allocation += IPv4->new(
@@ -1176,7 +1176,9 @@ sub _get_reserved_allocation {
 		grep {$_ =~ m/${target}_ip/}
 		keys %{$subnet->{'reserved-ips'}//{}}
 	);
-	return $allocation->simplify;
+
+	my $static = $subnet->{'reserved-ips'}{$target."_static"}//1;
+	return ($allocation->simplify, $static);
 }
 
 # }}}
