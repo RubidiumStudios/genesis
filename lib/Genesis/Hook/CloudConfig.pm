@@ -991,6 +991,37 @@ sub _process_config_overrides {
 		#	"/configs/cloud/$type/$path" =~ s/\./\//gr,
 		#) unless defined($override);
 
+		# Override vm_types if the vm_type name equals to the full vm_type name
+		if (!defined($override) && $type eq VM_TYPE) {
+			# Generate the full VM type name for this target
+			my $full_vm_name = $self->name_for('vm', $target);
+
+			# Look through all VM type overrides in the env
+			my $vm_overrides = $self->env->lookup('bosh-configs.cloud.vm_types', {});
+			if (ref($vm_overrides) eq 'HASH' && exists($vm_overrides->{$full_vm_name})) {
+				# Found an override using the full name - extract the relevant path
+				my $full_override = $vm_overrides->{$full_vm_name};
+
+				# Navigate to the specific path within the override
+				if ($path) {
+					my @path_parts = split(/\./, $path);
+					my $current = $full_override;
+					for my $part (@path_parts) {
+						if (ref($current) eq 'HASH' && exists($current->{$part})) {
+							$current = $current->{$part};
+						} else {
+							$current = undef;
+							last;
+						}
+					}
+					if (defined($current)) {
+						$override = $current;
+						$src = "bosh-configs.cloud.vm_types.$full_vm_name.$path";
+					}
+				}
+			}
+		}
+
 		if ($override) {
 			trace(
 				"Applying override for %s %s %s: %s (from %s)",
