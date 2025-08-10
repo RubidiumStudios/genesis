@@ -190,6 +190,32 @@ sub build_cloud_config {
 	# this is just a wrapper as the config is already assembled, but is included
 	# so that if post-processing is needed, it can be done here without changing
 	# the kits.
+  	# Always add all custom VM types from environment file
+ 	my ($custom_vm_types) = $self->env->lookup('bosh-configs.cloud.vm_types', []);
+    if (ref($custom_vm_types) eq 'HASH' && keys %$custom_vm_types) {
+        $config->{vm_types} ||= [];
+
+        # Transform hash to array of hashes with 'name' field
+        foreach my $vm_name (keys %$custom_vm_types) {
+            my $vm_spec = $custom_vm_types->{$vm_name};
+            # Add the name field to the spec
+            $vm_spec->{name} = $vm_name;
+            push @{$config->{vm_types}}, $vm_spec;
+        }
+    }
+  	# Always add all custom disk types from environment file
+  	my ($custom_disk_types) = $self->env->lookup('bosh-configs.cloud.disk_types', []);
+    if (ref($custom_disk_types) eq 'HASH' && keys %$custom_disk_types) {
+        $config->{disk_types} ||= [];
+
+        foreach my $disk_name (keys %$custom_disk_types) {
+            my $disk_spec = $custom_disk_types->{$disk_name};
+            # Add the name field to the spec
+            $disk_spec->{name} = $disk_name;
+            push @{$config->{disk_types}}, $disk_spec;
+        }
+    }	
+
 	return $config;
 }
 
