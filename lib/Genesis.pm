@@ -1196,6 +1196,49 @@ sub struct_set_value {
 			} else {
 				return $what->[$idx] = $value;
 			}
+		} elsif ($bit eq /([^=]+)=(.*)/) {
+			# This is a search for a hash in an array, e.g. "name=unique-identifier"
+			# lets find the index of the hash, and use that as the 'what'.
+			my ($k, $v) = ($1, $2);
+			bail(
+				"Type Mismatch: expected array of hashes at %s, got %s",
+				$path, lc(ref($what) || "scalar")
+			) unless ref($what) eq 'ARRAY';
+			my $idx = 0; $idx += 1
+				while $idx < scalar(@{$what}) && ref($what->[$idx]) eq 'HASH' && $what->[$idx]{$k} ne $v;
+			if ($idx >= scalar(@{$what})) {
+				# If not found, and no more path bits, push the new value as the result;
+				if (!@bits) {
+					return undef if $clear;
+					bail(
+						"Cannot append new entry to array of hashes, as it is not a hash with %s set to %s",
+						$k, $v
+					) unless ref($value) eq 'HASH' && exists($value->{$k}) && $value->{$k} eq $v;
+					push @{$what}, $value;
+					return undef;
+				}
+				bail(
+					"Could not find hash with key '%s' and value '%s' at %s",
+					$k, $v, $path
+				);
+			}
+
+			bail(
+				"Type Mismatch: expected array of hashes at %s, got %s at position %d",
+				$path, lc(ref($what->[$idx]) || "scalar"), $idx
+			) unless ref($what->[$idx]) eq 'HASH';
+			if (@bits) {
+				$what=$what->[$idx];
+			} elsif ($clear) {
+				my $old = $what->[$idx];
+				splice(@$what, $idx, 1);
+				return $old;
+			} else {
+				my $old = $what->[$idx];
+				$what->[$idx] = $value;
+				return $old;
+			}
+
 		} else {
 			$path .= ($path ? "." : "") . $bit;
 			bail(
