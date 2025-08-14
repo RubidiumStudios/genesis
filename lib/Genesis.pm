@@ -1196,7 +1196,7 @@ sub struct_set_value {
 			} else {
 				return $what->[$idx] = $value;
 			}
-		} elsif ($bit eq /([^=]+)=(.*)/) {
+		} elsif ($bit && $bit =~ /([^=]+)=(.*)/) {
 			# This is a search for a hash in an array, e.g. "name=unique-identifier"
 			# lets find the index of the hash, and use that as the 'what'.
 			my ($k, $v) = ($1, $2);
@@ -1250,9 +1250,11 @@ sub struct_set_value {
 					unless exists($what->{$bit});
 				$what=$what->{$bit};
 			} elsif ($clear) {
-				#return delete $what->{$bit};
+				return delete $what->{$bit};
 			} else {
-				return $what->{$bit} = $value;
+				my $old = $what->{$bit};
+				$what->{$bit} = $value;
+				return $old;
 			}
 		}
 	}
