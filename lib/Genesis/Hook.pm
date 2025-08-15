@@ -51,9 +51,7 @@ sub load_hook_module {
 	) unless $hook_module;
 
 	# Check if module is already loaded to prevent redefinition warnings
-	my $module_path = $hook_module;
-	$module_path =~ s{::}{/}g;
-	$module_path .= '.pm';
+	my $module_path = ($hook_module =~ s{::}{/}gr) .'.pm';
 
 	if (!$INC{$module_path}) {
 		eval {require $file};
@@ -293,7 +291,10 @@ sub bosh {
 
 sub read_json_from_bosh {
 	my ($self, @args) = @_;
-	my $data = read_json_from($self->bosh->execute(@args, '--json'));
+	my ($data,$rc,$err) = read_json_from($self->bosh->execute(@args, '--json'));
+	bail(
+		"Failed to read JSON from BOSH command: %s", $err
+	) if $rc;
 	return $data->{Tables}[0]{Rows};
 }
 sub get_credhub_variable {
