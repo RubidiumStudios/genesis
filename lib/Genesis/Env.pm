@@ -1565,7 +1565,6 @@ sub get_environment_variables {
 
 		$env{GENESIS_ROOT}        = $self->path;
 		$env{GENESIS_ENVIRONMENT} = $self->name;
-		$env{GENESIS_ENV}         = scalar($self->lookup(['genesis.env','params.env'], $self->name));
 		$env{GENESIS_TYPE}        = $self->type;
 		$env{GENESIS_PREFIX_TYPE} = $ENV{GENESIS_PREFIX_TYPE} || 'none';
 
@@ -5224,7 +5223,6 @@ genesis:
   vault_env:     ${\($self->env_vault_slug)}
   secrets_mount: ${\($self->secrets_mount)}
   secrets_path:  ${\($self->secrets_slug)}
-  secrets_slug:  ${\($self->secrets_slug)}
   secrets_base:  ${\($self->secrets_base)}
   exodus_mount:  ${\($self->exodus_mount)}
   exodus_path:   ${\($self->exodus_slug)}
