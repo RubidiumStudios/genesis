@@ -1085,6 +1085,24 @@ sub save_to_yaml_file {
 	my $tmpfile = "$file.$i.json";
 	save_to_json_file($data,$tmpfile);
 	run('spruce merge --skip-eval "$1" | perl -I$GENESIS_LIB -MGenesis -e \'my $c=do{local $/;<STDIN>};$c=~s/\s*\z/\n/ms;print $c\' > $2; rm "$1"', $tmpfile, $file);
+
+	# Fix orphaned ')) on new lines - join them with previous line
+	my $content = slurp($file);
+	my @lines = split /\n/, $content;
+	my @fixed_lines;
+
+	for my $i (0 .. $#lines) {
+		my $line = $lines[$i];
+
+		# If this line is just whitespace + )), join it with the previous line
+		if ($line =~ /^\s*\)\)\s*$/ && @fixed_lines) {
+			$fixed_lines[-1] .= ' ))';
+		} else {
+			push @fixed_lines, $line;
+		}
+	}
+
+	mkfile_or_fail($file, join("\n", @fixed_lines) . "\n");
 }
 
 sub to_yaml {
