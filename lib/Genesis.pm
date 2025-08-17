@@ -117,6 +117,7 @@ our @EXPORT = qw/
 	in_array
 	index_of
 	compare_arrays
+	delete_from_array
 	sentence_join
 	parse_fixed_width_table
 	uniq
@@ -1451,6 +1452,34 @@ sub compare_arrays {
 		push(@{$results[2]}, $item) if ($in_arr2{$item} && !$in_arr1{$item})
 	}
 	return wantarray ? @results : \@results;
+}
+
+sub delete_from_array {
+	my ($arr_ref, @search_terms) = @_;
+
+	my %index_matches;
+	for my $i (0 .. $#{$arr_ref}) {
+		for my $term (@search_terms) {
+			if ($arr_ref->[$i] =~ $term) {
+				$index_matches{$i} = 1;
+				last;  # Stop checking other terms if a match is found
+			}
+		}
+	}
+	return () unless keys %index_matches;
+
+	my @removed = ();
+	my @kept = ();
+
+	for my $idx (0 .. $#{$arr_ref}) {
+		if (exists $index_matches{$idx}) {
+			push @removed, $arr_ref->[$idx];
+		} else {
+			push @kept, $arr_ref->[$idx];
+		}
+	}
+	@$arr_ref = @kept;
+	return @removed;
 }
 
 sub sentence_join {
