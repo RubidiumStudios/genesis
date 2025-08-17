@@ -1432,14 +1432,23 @@ sub index_of {
 sub compare_arrays {
 	my ($arr1, $arr2) = @_;
 
-	my %matrix = ();
-	$matrix{$_} -=1 for @$arr1;
-	$matrix{$_} +=1 for @$arr2;
+	# Create sets for presence checking
+	my %in_arr1 = map { $_ => 1 } @$arr1;
+	my %in_arr2 = map { $_ => 1 } @$arr2;
 
-	my @results = ([],[],[]);
-	for (@$arr1, @$arr2) { # This is O(n), probably a better way to do it while still keeping order
-		next unless defined($matrix{$_});
-		push(@{$results[delete($matrix{$_})+1]}, $_);
+	my @results = ([], [], []);
+	my %processed = ();
+
+	# Process arr1 first to preserve its order for "only in arr1" and "in both"
+	for my $item (@$arr1) {
+		next if $processed{$item}++; # Skip duplicates - treat as sets
+		push(@{$results[$in_arr1{$item} && $in_arr2{$item} ? 1 : 0]}, $item)
+	}
+
+	# Process arr2 for "only in arr2" items
+	for my $item (@$arr2) {
+		next if $processed{$item}++; # Skip duplicates and already processed items
+		push(@{$results[2]}, $item) if ($in_arr2{$item} && !$in_arr1{$item})
 	}
 	return wantarray ? @results : \@results;
 }
