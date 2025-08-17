@@ -210,14 +210,13 @@ sub run_hook {
 	} elsif ($hook eq 'addon') {
 		$ENV{GENESIS_ADDON_SCRIPT} = $opts{script};
 		my $args = $opts{args} || [];
-		my @help_opt = (qw (--help -h));
-		($args, my $want_help) = compare_arrays($args, \@help_opt);
-		push @$want_help, 'list' if !$opts{script} || $opts{script} =~ /^(list|help)$/;
+		my @want_help = delete_from_array($args, qr/^(?:-h|--help)$/);
+		push @want_help, 'list' if !$opts{script} || $opts{script} =~ /^(list|help)$/;
 		@args = @$args; # For bash addon hooks
 		%module_options = (
 			script => $opts{script},
 			args => $args,
-			help => scalar(@$want_help) ? 1 : 0,
+			help => scalar(@want_help) ? 1 : 0,
 		);
 
 	} elsif ($hook eq 'cloud-config') {
