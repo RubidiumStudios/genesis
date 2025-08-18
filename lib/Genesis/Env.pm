@@ -3362,8 +3362,13 @@ sub extract_manifest_exodus {
 	#interpolate bosh vars first
 	if ($vars_file) {
 		for my $key (keys %$exodus) {
-			if (defined($exodus->{$key}) && $exodus->{$key} =~ /^\(\((.*)\)\)$/) {
-				$exodus->{$key} = $self->manifest_lookup("bosh-variables.$1", $exodus->{$key});
+			if (defined($exodus->{$key})) {
+				while ($exodus->{$key} =~ /\(\((.*)\)\)/) {
+					my $val = $self->manifest_lookup("bosh-variables.$1", undef);
+					# FIXME: This should be handled when its a credhub reference
+					trace("Unknown BOSH variable encountered in exodus: $1 in $key") &&	last unless $val;
+					$exodus->{$key} =~ s/\(\($1\)\)/$val/;
+				}
 			}
 		}
 	}
