@@ -856,7 +856,11 @@ define_command("yamls", {
 		'view|v=s' =>
 			"View the specified YAML in the terminal.  This is handy to see ".
 			"or debug the content of kit fragments and dynamically generated ".
-			"YAML",
+			"YAML.  There are two extra files that can be specified:\n".
+			"[[- init.yml: >>The initial seed YAML file that genesis uses ".
+			"to start the merge process.\n".
+			"[[- fin.yml:  >>Contains all the extra merge bits that genesis ".
+			"itself provides, including exodus data",
 	],
   deprecated_options => [
 		'include-kit|k' =>
