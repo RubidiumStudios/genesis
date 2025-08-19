@@ -387,17 +387,17 @@ sub _subset_plans {
 				description => "The list of variable and credhub lookups used in the manifest",
 				include     => [qw(variables bosh-variables)]
 			},
-			bosh_vars    => {
+			bosh_vars => {
 				description => "BOSH variables in a format suitable for bosh-cli deploy command (--vars-file|-l)",
-				fetch   => {key => 'bosh-variables', default => {}}
+				fetch       => {key => 'bosh-variables', default => {}}
 			},
-			pruned       => {
+			pruned => {
 				description => "Manifest with the Genesis-specific keys pruned - suitable for use with BOSH deploy",
-				exclude => [$_[0]->env->prunable_keys]
+				exclude     => [$_[0]->env->prunable_keys]
 			},
-			releases     => {
+			releases => {
 				description => "YAML file containing the array of BOSH releases used in the deployment",
-				fetch   => {key => 'releases', default => {}}
+				include     => ['releases']
 			},
 		}
 	});
