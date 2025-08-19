@@ -582,15 +582,30 @@ sub manifest {
 		->load_env($_[0])
 		->with_vault();
 
-	my $valid_types = $env->manifest_provider->known_types;
-	my $valid_subsets = $env->manifest_provider->known_subsets;
+	my %valid_types = $env->manifest_provider->known_types;
+	my %valid_subsets = $env->manifest_provider->known_subsets;
 	if (get_options->{list}) {
+		# Calculate max width for consistent alignment
+		my $max_len = ((sort {$b <=> $a} map {length($_ =~ s/_/-/gr)} (keys %valid_types, keys %valid_subsets))[0] || 0) + 2;
+
+		# Format types with descriptions
+		my @type_lines = map {
+			my $name = $_ =~ s/_/-/gr . ':';
+			sprintf("[[  #c{%-*s}>>%s", $max_len, $name, $valid_types{$_})
+		} sort keys %valid_types;
+
+		# Format subsets with descriptions
+		my @subset_lines = map {
+			my $name = $_ =~ s/_/-/gr . ':';
+			sprintf("[[  #c{%-*s}>>%s", $max_len, $name, $valid_subsets{$_})
+		} sort keys %valid_subsets;
+
 		output(
 			"Valid manifest types (defaults to default deployment manifest):\n".
-			join("", map {"  - $_\n"} map {$_ =~ s/_/-/gr} sort @$valid_types).
-			"\n".
+			join("\n", @type_lines).
+			"\n\n".
 			"Valid subsets (defaults to full contents):\n".
-			join("", map {"  - $_\n"} map {$_ =~ s/_/-/gr} sort @$valid_subsets)
+			join("\n", @subset_lines)
 		);
 		return 1;
 	}
@@ -598,12 +613,12 @@ sub manifest {
 	bail(
 		"Unknown manifest type %s - use --list option to show valid types",
 		$type
-	) if ($type && ! in_array($type =~ s/-/_/gr, @$valid_types));
+	) if ($type && ! in_array($type =~ s/-/_/gr, keys %valid_types));
 
 	bail(
 		"Unknown manifest subset %s - use --list option to show valid subsets",
 		$subset
-	) if ($subset && ! in_array($subset =~ s/-/_/gr, @$valid_subsets));
+	) if ($subset && ! in_array($subset =~ s/-/_/gr, keys %valid_subsets));
 
 	if ($env->use_create_env && scalar(@{$env->configs})) {
 		warning(

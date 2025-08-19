@@ -53,20 +53,19 @@ sub new {
 # }}}
 # known_types - return the list of known manifest type (dynamically determined) {{{
 sub known_types {
-	# TODO - return hash with types and descriptions
-	# for each entry in %manifest_types - key is type, value->description is description
 	my @types = keys %$manifest_types;
 	@types = grep {$_ !~ /entombed/} @types
 		if ($_[0]->env->use_create_env);
-	return [@types]
+	@types = grep {$_ !~ /vaultif/} @types
+		unless ($_[0]->env->kit->uses_credhub);
+	return map { $_ => $manifest_types->{$_}->description // 'No description given' } @types;
 }
 
 # }}}
 # known_subsets - return the list of subset names that can be requested {{{
 sub known_subsets {
-	# TODO - return hash with subset and description
-	# embed descr in _subset_plans
-	return [keys %{$_[0]->_subset_plans}];
+	my %subsets = %{$_[0]->_subset_plans};
+	return map { $_ => $subsets{$_}{description} } keys %subsets;
 }
 # }}}
 # }}}
@@ -384,10 +383,22 @@ sub vault_paths {
 sub _subset_plans {
 	return $_[0]->_memoize( sub {
 		return {
-			credhub_vars => { include => [qw(variables bosh-variables)]},
-			bosh_vars    => { fetch   => {key => 'bosh-variables', default => {}} },
-			pruned       => { exclude => [$_[0]->env->prunable_keys]},
-			releases     => { fetch   => {key => 'releases', default => {}} },
+			credhub_vars => {
+				description => "The list of variable and credhub lookups used in the manifest",
+				include     => [qw(variables bosh-variables)]
+			},
+			bosh_vars    => {
+				description => "BOSH variables in a format suitable for bosh-cli deploy command (--vars-file|-l)",
+				fetch   => {key => 'bosh-variables', default => {}}
+			},
+			pruned       => {
+				description => "Manifest with the Genesis-specific keys pruned - suitable for use with BOSH deploy",
+				exclude => [$_[0]->env->prunable_keys]
+			},
+			releases     => {
+				description => "YAML file containing the array of BOSH releases used in the deployment",
+				fetch   => {key => 'releases', default => {}}
+			},
 		}
 	});
 };

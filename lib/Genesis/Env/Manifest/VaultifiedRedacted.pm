@@ -5,6 +5,8 @@ use warnings;
 
 use parent qw/Genesis::Env::Manifest/;
 
+sub description { "Redacted manifest for an environment that has been vaultified, with secrets redacted for safe viewing" }
+
 use File::Basename;
 do((File::Basename::dirname(__FILE__) =~ s#^lib/##r) . "/_vaultify_mixin.pm");
 
