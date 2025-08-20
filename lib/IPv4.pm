@@ -25,7 +25,7 @@ sub range(@args) {
 
 sub __strip_call_ref(@args) {
 	return () unless @args;
-	shift @args if ref($args[0]) eq __PACKAGE__;
+	shift @args if $args[0] eq __PACKAGE__;
 	return @args;
 }
 
