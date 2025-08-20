@@ -6,21 +6,7 @@ use utf8;
 
 use base 'Genesis::Base'; # for _memoize
 
-use Genesis qw/
-	error bail bug fatal warning info output success notice dryrun
-	debug trace dump_stack dump_var
-	pretty_duration
-	pushd popd
-	humanize_path humanize_bin absolute_path
-	run lines fake_tty
-	workdir tmpfile
-	copy_or_fail mkfile_or_fail mkdir_or_fail save_to_yaml_file
-	slurp load_json load_yaml load_yaml_file spruce_diff
-	deep_merge in_array uniq get_opts struct_lookup flatten unflatten
-	new_enough by_semver count_nouns
-	is_valid_uri
-	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
-/;
+use Genesis; # We import 50% of the functions provided, so more efficient to just use promiscuous import
 use Genesis::State qw/envset under_test in_callback/;
 use Genesis::Term qw/csprintf wrap fix_wrap decolorize in_controlling_terminal bullet/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_line prompt_for_choice new_prompt_for_choice/;
@@ -28,7 +14,7 @@ use Genesis::Commands qw/current_command known_commands/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
 
-# REFACTOR:  Importing from a non-Expporter module is a bit odd.  It seems we have
+# REFACTOR:  Importing from a non-Exporter module is a bit odd.  It seems we have
 #            to explicitly import the functions, but also have to use fully
 #            qualified names to use them.  We need a better way to handle this.
 use Genesis::Env::Deployment qw/
