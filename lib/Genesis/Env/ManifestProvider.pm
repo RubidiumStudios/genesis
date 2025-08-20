@@ -206,7 +206,28 @@ sub get_subset {
 	# The already-existant alternative source is already resolved at this point
 	$self->env->notify($manifest->get_build_notice)
 		if $manifest->has_notice && ! $self->{suppress_notification};
-	my ($operator,$selection) = %{$self->_subset_plans()->{$subset}};
+	my $subset_plans = $self->_subset_plans;
+	my @valid_operators = qw/include exclude fetch/;
+	my %operators = %{$subset_plans->{$subset}}{
+		grep { exists $subset_plans->{$subset}{$_} }
+		@valid_operators};
+
+	bail(
+		"Invalid subset '%s' requested for manifest %s: valid operators are %s",
+		$subset, $manifest->type,
+		join(', ', @valid_operators)
+	) unless keys %operators;
+	bail(
+		"Invalid subset '%s' requested for manifest %s: no selection specified",
+		$subset, $manifest->type
+	) unless exists($subset_plans->{$subset}{selection});
+	bail(
+		"Too many selections specified for subset '%s' in manifest %s",
+		$subset, $manifest->type
+	) if keys %operators > 1;
+	my $operator = (keys %operators)[0];
+
+	my $selection = $subset_plans->{$subset}{$operator};
 	if ($req eq 'data') {
 		my $src = $src_manifest->data;
 		my $data = undef;
@@ -219,7 +240,7 @@ sub get_subset {
 			? $src->{$selection->{key}}
 			: $selection->{default};
 		} else {
-			bug("Invalid subset operator '$operator'")
+			bug("Invalid subset operator '$operator'") # Should never reach here
 		}
 		my $new_data = decode_json(encode_json($data)); # deep-copy made easy
 
