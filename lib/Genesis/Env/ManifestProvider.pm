@@ -206,10 +206,12 @@ sub get_subset {
 	# The already-existant alternative source is already resolved at this point
 	$self->env->notify($manifest->get_build_notice)
 		if $manifest->has_notice && ! $self->{suppress_notification};
-	my $subset_plans = $self->_subset_plans;
+	my $subset_plan = $self->_subset_plans()->{subset};
+	bail("Unknown subset '%s' requested for manifest %s", $subset, $manifest->type)
+		unless keys %$subset_plan;
 	my @valid_operators = qw/include exclude fetch/;
-	my %operators = %{$subset_plans->{$subset}}{
-		grep { exists $subset_plans->{$subset}{$_} }
+	my %operators = %{$subset_plan}{
+		grep { exists $subset_plan->{$_} }
 		@valid_operators};
 
 	bail(
@@ -218,16 +220,12 @@ sub get_subset {
 		join(', ', @valid_operators)
 	) unless keys %operators;
 	bail(
-		"Invalid subset '%s' requested for manifest %s: no selection specified",
-		$subset, $manifest->type
-	) unless exists($subset_plans->{$subset}{selection});
-	bail(
 		"Too many selections specified for subset '%s' in manifest %s",
 		$subset, $manifest->type
 	) if keys %operators > 1;
 	my $operator = (keys %operators)[0];
 
-	my $selection = $subset_plans->{$subset}{$operator};
+	my $selection = $subset_plan->{$operator};
 	if ($req eq 'data') {
 		my $src = $src_manifest->data;
 		my $data = undef;
