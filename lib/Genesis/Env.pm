@@ -41,6 +41,7 @@ use Service::BOSH::CreateEnvProxy;
 use Service::Vault::Remote;
 use Service::Vault::Local;
 use Service::Vault::None;
+use IPv4;
 
 use Archive::Tar;
 use Data::Dumper;
@@ -2950,9 +2951,27 @@ sub _deployment_may_affect_secrets_vault {
 	return $explicit_config if defined($explicit_config);
 
 	# Check if deploying a vault kit
-	if ($self->kit->name eq 'vault') {
+	if ($self->type eq 'vault') {
 		debug("Vault kit detected - deployment may affect secrets vault");
-		return 1;
+
+		# Check for static IPs in the vault kit
+		my @kit_ips =
+			map {IPv4->address($_)}
+			grep {$_} map { ($_->{static_ips}//[])->@* }
+			grep {$_} map { ($_->{networks}//[])->@* }
+			@{scalar $self->manifest_lookup('instance_groups')};
+		debug("Vault kit has static IPs: ".join(", ", @kit_ips)) if (@kit_ips);
+
+		# Get ips from `safe status`
+		my @vault_ips =
+			map {IPv4->address($_)}
+			grep {$_} map {$_ =~ m{https?://([^: ]*)} && $1}
+			grep {$_ =~ /^http/}
+			lines($self->vault->query('status'));
+		debug("Active vault using IPs: ".join(", ", @vault_ips)) if (@vault_ips);
+
+		my (undef, $shared_ips) = compare_arrays(\@kit_ips, \@vault_ips);
+		return scalar(@$shared_ips) ? 1 : 0;
 	}
 
 	# Check if vault domain matches any external domain in the deployment

@@ -684,9 +684,11 @@ sub unseal {
 	if ($rc == 0) {
 		return ($out, 0, "");
 	} else {
+		# RISK: If the unseal fails, we log the keys used for debugging purposes
+		# This is a security risk, as it exposes the unseal keys in logs.
 		trace(
-			"Failed to unseal vault cluster at #M{%s}:\n%s",
-			$self->{url}, $err || $out
+			"Failed to unseal vault cluster at #M{%s} using keys:\n%s",
+			$self->{url}, join("\n", map {sprintf("#C{%s}", $_)} @{$self->{unseal_keys}})
 		);
 		return ($out, $rc, $err || "Failed to unseal vault cluster");
 	}
