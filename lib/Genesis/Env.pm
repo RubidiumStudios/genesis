@@ -2941,6 +2941,54 @@ sub deploy {
 }
 
 # }}}
+# _deployment_may_affect_secrets_vault - determine if deployment could seal secrets vault {{{
+sub _deployment_may_affect_secrets_vault {
+	my $self = shift;
+
+	# Check for explicit configuration override
+	my $explicit_config = $self->lookup('genesis.unseal_vault_after_deploy', undef);
+	return $explicit_config if defined($explicit_config);
+
+	# Check if deploying a vault kit
+	if ($self->kit->name eq 'vault') {
+		debug("Vault kit detected - deployment may affect secrets vault");
+		return 1;
+	}
+
+	# Check if vault domain matches any external domain in the deployment
+	my $vault_url = $self->vault->url;
+	my ($vault_domain) = $vault_url =~ m{^https?://([^:/]+)};
+	return 0 unless $vault_domain;
+
+	# Look for external domain parameters that might match
+	my @domain_params = qw(
+		external_domain
+		external_url
+		domain
+		vault_external_domain
+		vault_domain
+	);
+
+	for my $param (@domain_params) {
+		my $deploy_domain = $self->lookup($param, undef);
+		next unless $deploy_domain;
+
+		# Remove protocol if present
+		$deploy_domain =~ s{^https?://}{};
+		# Remove port if present
+		$deploy_domain =~ s{:[0-9]+$}{};
+
+		if ($vault_domain eq $deploy_domain) {
+			debug("Vault domain '$vault_domain' matches deployment domain '$deploy_domain' (from $param)");
+			return 1;
+		}
+	}
+
+	debug("No indication that deployment will affect secrets vault");
+	return 0;
+}
+
+# }}}
 # _pre_deploy - handle pre-deployment setup and validation {{{
 sub _pre_deploy {
 	my ($self, %opts) = @_;
@@ -3006,6 +3054,22 @@ sub _pre_deploy {
 
 	$self->{deployment_state}{cached_redacted_manifest_path} = $cached_redacted_manifest_path;
 	$self->{deployment_state}{cached_redacted_vars_path} = $cached_redacted_vars_path;
+
+	# Check if this deployment might affect the vault being used for secrets
+	if ($self->_deployment_may_affect_secrets_vault()) {
+		# Fetch vault unseal keys if available (for post-deploy unsealing)
+		my ($success, $message) = $self->vault->fetch_unseal_keys($self);
+		if (!$success) {
+			error("[[ERROR: >>%s", $message);
+			bail("[[      >>Cannot proceed with deployment - vault unsealing will be required after deployment\n".
+			     "[[      >>but no unseal keys are available. Please ensure unseal keys are stored at:\n".
+			     "[[      >>#C{%s}vault/seal/keys:key[1-5]", $self->secrets_mount);
+		} else {
+			info("[[  #@{+}>>%s", $message);
+		}
+	} else {
+		debug("Skipping unseal key check - deployment does not appear to affect secrets vault");
+	}
 
 	$self->notify("all systems #G{ok}, initiating BOSH deploy...");
 	return 1;
@@ -3288,6 +3352,18 @@ sub _post_deploy {
 	if ($opts{"dry-run"}) {
 		$self->notify("dry-run deployment complete; post-deployment activities will be skipped.");
 		exit 0;
+	}
+
+	# If vault is sealed after deployment, unseal it before updating exodus data
+	if ($self->vault->status eq 'sealed') {
+		$self->notify("[[  ! >>Vault is sealed - attempting to unseal...");
+		my ($out, $rc, $err) = $self->vault->unseal;
+		if ($rc) {
+			error("[[ERROR: >>Failed to unseal vault: %s", $err || $out);
+			warning("[[       >>Exodus data update may fail due to sealed vault");
+		} else {
+			info("[[  #@{+}>>Vault unsealed successfully");
+		}
 	}
 
 	# Update exodus data
@@ -5139,12 +5215,12 @@ sub _genesis_inherits {
 	my ($self,$file, @files) = @_;
 	my ($out,$rc,$err) = run({stderr => 0},'cat "$1" | spruce merge --skip-eval --go-patch --multi-doc | spruce json', $self->path($file));
 	bail "Error processing json in $file!:\n$err" if $rc;
-	
+
 	# Better error handling for empty output
 	if (!$out || $out =~ /^\s*$/) {
 		bail "Spruce returned empty output when processing file %s - the file may have YAML syntax errors or be empty", $file;
 	}
-	
+
 	my @contents = eval {
 		map {load_json($_)} lines($out)
 	};

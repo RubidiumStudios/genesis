@@ -4,7 +4,7 @@ use warnings;
 
 use Genesis;
 use Genesis::State;
-use Genesis::Term;
+use Genesis::Term qw/csprintf/;
 
 use Genesis::UI;
 use JSON::PP qw/decode_json/;
@@ -636,6 +636,60 @@ sub set_as_current {
 }
 sub is_current {
   $current_vault && $current_vault->{id} eq $_[0]->{id};
+}
+
+# }}}
+# fetch_unseal_keys - fetch and store unseal keys for post-deploy unsealing {{{
+sub fetch_unseal_keys {
+	my ($self, $env) = @_;
+
+	# Clear any previously stored keys
+	my $secrets_mount = $env->secrets_mount;
+	my $keys_path = "${secrets_mount}vault/seal/keys";
+	$self->{unseal_keys} = values(($self->get($keys_path)//{})->%*);
+
+	# Check if the keys path exists
+	return (0, "Vault unseal keys not found at #C{$keys_path}")
+		unless ($self->{unseal_keys}->@*);
+
+	return (0, "Insufficient unseal keys found at #C{$keys_path}: Need at least 3, found ".scalar(@{$self->{unseal_keys}}))
+		unless scalar(@{$self->{unseal_keys}}) >= 3;
+
+	return (1, sprintf("Successfully fetched vault unseal keys from #C{%s}", $keys_path));
+}
+
+# }}}
+# unseal - unseal the vault using stored unseal keys {{{
+sub unseal {
+	my $self = shift;
+
+	# Check if we have stored unseal keys
+	unless ($self->{unseal_keys} && @{$self->{unseal_keys}}) {
+		return ("No unseal keys available", 1, "fetch_unseal_keys() must be called first");
+	}
+
+	# Check if we have at least 3 keys (required by safe unseal)
+	unless (@{$self->{unseal_keys}} >= 3) {
+		return ("Insufficient unseal keys available", 1, sprintf("safe unseal requires 3 keys, but only %d available", scalar(@{$self->{unseal_keys}})));
+	}
+
+	# Use safe unseal which unseals all vault instances in the cluster
+	# safe unseal expects exactly 3 keys, so take the first 3
+	my @keys_to_use = splice(@{$self->{unseal_keys}}, 0, 3);
+	my $keys_input = join("\n", @keys_to_use) . "\n";
+
+	# Use the stdin option with query to pass keys to safe unseal
+	my ($out, $rc, $err) = $self->query({stderr => 0, stdin => $keys_input, redact_stdin => 1}, 'unseal');
+
+	if ($rc == 0) {
+		return ($out, 0, "");
+	} else {
+		trace(
+			"Failed to unseal vault cluster at #M{%s}:\n%s",
+			$self->{url}, $err || $out
+		);
+		return ($out, $rc, $err || "Failed to unseal vault cluster");
+	}
 }
 
 # }}}
