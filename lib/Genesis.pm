@@ -621,15 +621,28 @@ sub run {
 	my @cmd = ($shell, "-c", $prog, @cmd_args);
 	my $start_time = gettimeofday();
 	my $out;
-	if ($opts{interactive}) {
-		system @cmd;
-	} else {
-		open my $pipe, "-|", @cmd
-			or bail("Could not open pipe to run #C{%s}", join(' ',@cmd));
-		$out = do { local $/; <$pipe> };
-		$out =~ s/\s+$//;
-		close $pipe;
-	}
+
+	# Handle STDIN redirection if requested
+	set_stdin($opts{stdin}) if ($opts{stdin});
+
+	eval {
+		if ($opts{interactive}) {
+			system @cmd;
+		} else {
+			open my $pipe, "-|", @cmd
+				or bail("Could not open pipe to run #C{%s}", join(' ',@cmd));
+			$out = do { local $/; <$pipe> };
+			$out =~ s/\s+$//;
+			close $pipe;
+		}
+	};
+	my $eval_err = $@;
+
+	# Always reset STDIN if it was redirected
+	reset_stdin() if ($opts{stdin});
+
+	# Re-throw any errors after STDIN cleanup
+	die $eval_err if $eval_err;
 
 my $duration = gettimeofday() - $start_time;
 qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',undef,1));

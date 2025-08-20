@@ -2125,6 +2125,10 @@ END {
 	my $rc = $?;
 	require Service::Vault::Local;
 	Service::Vault::Local->shutdown_all();
+	
+	# Ensure STDIN is restored if it was redirected
+	reset_stdin();
+	
 	my $level = envset('QUIET') ? 'ERROR' : 'INFO';
 	logger->configure_log(
 		level => $level,
