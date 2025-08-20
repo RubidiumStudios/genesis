@@ -3065,12 +3065,16 @@ sub _pre_deploy {
 		# Fetch vault unseal keys if available (for post-deploy unsealing)
 		my ($success, $message) = $self->vault->fetch_unseal_keys($self);
 		if (!$success) {
-			error("[[ERROR: >>%s", $message);
-			bail("[[      >>Cannot proceed with deployment - vault unsealing will be required after deployment\n".
-			     "[[      >>but no unseal keys are available. Please ensure unseal keys are stored at:\n".
-			     "[[      >>#C{%s}vault/seal/keys:key[1-5]", $self->secrets_mount);
+			debug("[[ERROR: >>%s", $message);
+			bail(
+				"Cannot proceed with deployment - vault unsealing will be required after deployment ".
+				"but no unseal keys are available. Please ensure unseal keys are stored at:\n".
+				"[[  >>#C{%s}vault/seal/keys:key[1-N]\n".
+				"#Ki(where N is 3 or greater, normally 5)",
+				$self->secrets_mount
+			);
 		} else {
-			info("[[  #@{+}>>%s", $message);
+			info('[[  #g@{+}>>%s', $message);
 		}
 	} else {
 		debug("Skipping unseal key check - deployment does not appear to affect secrets vault");
@@ -3367,7 +3371,7 @@ sub _post_deploy {
 			error("[[ERROR: >>Failed to unseal vault: %s", $err || $out);
 			warning("[[       >>Exodus data update may fail due to sealed vault");
 		} else {
-			info("[[  #@{+}>>Vault unsealed successfully");
+			info('[[  #g@{+} >>Vault unsealed successfully');
 		}
 	}
 
