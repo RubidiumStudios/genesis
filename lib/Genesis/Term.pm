@@ -29,6 +29,8 @@ our @EXPORT = qw/
 	render_markdown
 	elipses
 	string_to_hex
+	set_stdin
+	reset_stdin
 	$ansi_reset_line
 	$ansi_clear_to_eol
 	$ansi_cursor_up
@@ -911,5 +913,45 @@ sub string_to_hex {
 #
 #   Motive: render help docs and release notes created in markdown, needed for
 #           help refactor phase 2
+
+### STDIN Manipulation Functions {{{
+
+my ($stdin_r, $stdin_w, $stdin_orig);
+
+# set_stdin - redirect STDIN to read from provided input {{{
+sub set_stdin {
+	my $input = shift;
+
+	if (defined($stdin_orig)) {
+		# Already redirected, close existing handles
+		close $stdin_r if $stdin_r;
+	} else {
+		# First time redirection, create original STDIN handle
+		open $stdin_orig, '<&', \*STDIN or die "can't dup STDIN: $!";
+	}
+
+	# First time redirection
+	pipe($stdin_r, $stdin_w) or die "can't create pipe: $!";
+	open STDIN, '<&', $stdin_r or die "can't dup pipe to STDIN: $!";
+	print $stdin_w $input;
+	close $stdin_w;
+	return;
+}
+
+# }}}
+# reset_stdin - restore original STDIN {{{
+sub reset_stdin {
+	return unless defined($stdin_orig); # Nothing to restore
+	open STDIN, '<&', $stdin_orig or die "can't restore STDIN: $!";
+	close $stdin_orig;
+	$stdin_orig = undef;
+	close $stdin_r;
+	$stdin_r = undef;
+	$stdin_w = undef;
+	return;
+}
+
+# }}}
+# }}}
 
 1;
