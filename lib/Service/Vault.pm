@@ -646,14 +646,15 @@ sub fetch_unseal_keys {
 	# Clear any previously stored keys
 	my $secrets_mount = $env->secrets_mount;
 	my $keys_path = "${secrets_mount}vault/seal/keys";
-	$self->{unseal_keys} = values(($self->get($keys_path)//{})->%*);
+	$self->{unseal_keys} = [values(($self->get($keys_path)//{})->%*)];
+	my $key_count = scalar(@{$self->{unseal_keys}});
 
 	# Check if the keys path exists
 	return (0, "Vault unseal keys not found at #C{$keys_path}")
-		unless ($self->{unseal_keys}->@*);
+		unless ($key_count);
 
-	return (0, "Insufficient unseal keys found at #C{$keys_path}: Need at least 3, found ".scalar(@{$self->{unseal_keys}}))
-		unless scalar(@{$self->{unseal_keys}}) >= 3;
+	return (0, "Insufficient unseal keys found at #C{$keys_path}: Need at least 3, found $key_count")
+		unless $key_count >= 3;
 
 	return (1, sprintf("Successfully fetched vault unseal keys from #C{%s}", $keys_path));
 }
