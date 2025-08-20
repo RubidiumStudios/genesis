@@ -206,7 +206,7 @@ sub get_subset {
 	# The already-existant alternative source is already resolved at this point
 	$self->env->notify($manifest->get_build_notice)
 		if $manifest->has_notice && ! $self->{suppress_notification};
-	my $subset_plan = $self->_subset_plans()->{subset};
+	my $subset_plan = $self->_subset_plans()->{$subset};
 	bail("Unknown subset '%s' requested for manifest %s", $subset, $manifest->type)
 		unless keys %$subset_plan;
 	my @valid_operators = qw/include exclude fetch/;

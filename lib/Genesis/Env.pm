@@ -4897,6 +4897,7 @@ sub _check_release_overrides {
 	my @overrides = ();
 	my @outdated = ();
 	my $env_releases = $self->manifest_provider->partial_environment(subset=>'releases')->data;
+	$env_releases = $env_releases->{releases} if ref($env_releases) eq 'HASH';
 	if (ref($env_releases) eq 'ARRAY' && scalar(@$env_releases)) {
 
 		my $kit_releases = scalar(load_yaml(scalar(run(
