@@ -2936,6 +2936,8 @@ sub _deployment_may_affect_secrets_vault {
 	my $explicit_config = $self->lookup('genesis.unseal_vault_after_deploy', undef);
 	return $explicit_config if defined($explicit_config);
 
+	return 0 unless $self->vault->initialized;
+
 	# Check if deploying a vault kit
 	if ($self->type eq 'vault') {
 		debug("Vault kit detected - deployment may affect secrets vault");
