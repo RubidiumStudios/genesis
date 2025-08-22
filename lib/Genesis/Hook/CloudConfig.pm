@@ -290,7 +290,7 @@ sub network_definition {
 
 	my ($self, $target, %rules) = @_;
 	my $strategy = delete($rules{strategy}) // 'generic';
-	my $name_prefix => delete($rules{name_prefix});
+	my $name_prefix = delete($rules{name_prefix});
 
 	# FIXME: Should this just die if the strategy does not match?
 	if (($strategy eq 'ocfp') xor $self->env->is_ocfp) {
