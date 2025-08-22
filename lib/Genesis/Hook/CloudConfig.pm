@@ -304,9 +304,9 @@ sub network_definition {
 
 	my $config = {
 		name => $network_id,
-		type => 'manual',
+		type => $strategy eq 'vip' ? 'vip' : 'manual',
 	};
-	# FIXME: We also need to support 'VIP' networks.
+	return $config if ($strategy eq 'vip');
 
 	# This allows kit-provided strategies to be provided.
 	my $strategy_method = "_build_${strategy}_network_definition";
