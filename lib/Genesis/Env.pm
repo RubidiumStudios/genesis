@@ -5307,6 +5307,7 @@ sub _cap_yaml_file {
 
 	my $now = strftime(EXODUS_TIME_FORMAT, gmtime());
 	my $bosh_target = $self->use_create_env ? "~" : $self->bosh_env->{description};
+	my $bosh_exodus_path = $self->use_create_env ? "~" : $self->bosh->exodus_path;
 	mkfile_or_fail($cap_file, 0644, <<EOF);
 ---
 name: (( concat genesis.env "-$type" ))
@@ -5322,7 +5323,9 @@ genesis:
   exodus_base:   ${\($self->exodus_base)}
   ci_mount:      ${\($self->ci_mount)}${\(
   ($self->use_create_env || $self->bosh_env->{description} eq $self->name) ? "" :
-  "\n  bosh_env:      $bosh_target")}${\(
+	"\n  bosh_env:      $bosh_target".
+	"\n  bosh_exodus_base:  $bosh_exodus_path"
+	)}${\(
 	$self->is_ocfp
 	? "\n  ocfp:          true".
 		"\n  ocfp_env:      ".$self->ocfp_env .
