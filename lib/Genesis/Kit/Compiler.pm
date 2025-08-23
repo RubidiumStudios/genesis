@@ -168,6 +168,7 @@ sub validate {
 		if @hook_errors;
 
 	my ($changes, undef) = run('cd "$1" >/dev/null && git status --porcelain', $self->{root});
+	$self->{git_clean} = !$changes;  # Set property to track if git repo is clean
 	push @errors, "#Wk{Git repository status:}\n".
 	              "[[- >>Unstaged / uncommited changes found in working directory:\n".
 	              join("\n", map {"[[    >>#Y{$_}"} split("\n",$changes)) .
@@ -232,6 +233,14 @@ sub compile {
 		if !semver($version);
 
 	$self->validate($name,$version) || $opts{force} or return undef;
+
+	# Update hook package lines if git repo is clean
+	if ($self->{git_clean}) {
+		$self->_update_hook_packages($name, $version);
+	} else {
+		warning "Not updating version in perl hooks due to uncommitted changes in working directory";
+	}
+
 	$self->_prepare("$name-$version");
 
 	run({ onfailure => "Unable to update kit.yml with version '$version'", stderr => 0 },
@@ -243,6 +252,134 @@ sub compile {
 		$outdir, $self->{work}, $self->{relpath});
 
 	return "$self->{relpath}.tar.gz";
+}
+
+sub _update_hook_packages {
+	my ($self, $name, $version) = @_;
+	my $hooks_dir = "$self->{root}/hooks";
+	return unless -d $hooks_dir;
+
+	# Convert kit name to CamelCase for package naming
+	my $kit_type = $self->_to_camel_case($name);
+
+	# Find all .pm files in hooks directory
+	my @hook_files = glob("$hooks_dir/*.pm");
+	return unless @hook_files;
+	
+	my $updated_files = 0;
+	for my $hook_file (@hook_files) {
+		my $filename = (split '/', $hook_file)[-1];
+		$filename =~ s/\.pm$//;
+		
+		my $package_name = $self->_generate_package_name($filename, $kit_type);
+		my $new_package_line = "package $package_name v$version;";
+		
+		if ($self->_update_package_line($hook_file, $new_package_line)) {
+			$updated_files++;
+		}
+	}
+	
+	if ($updated_files > 0) {
+		$self->_prepare_hook_commit($updated_files, $version);
+	}
+}
+
+sub _to_camel_case {
+	my ($self, $name) = @_;
+	
+	# Special case mappings
+	my %special_mappings = (
+		cf   => 'CF',
+		bosh => 'BOSH',
+	);
+	
+	# Split on hyphens and convert each part
+	my @parts = split /-/, $name;
+	my @camel_parts;
+	
+	for my $part (@parts) {
+		push @camel_parts, $special_mappings{$part} // ucfirst(lc($part));
+	}
+	
+	return join('', @camel_parts);
+}
+
+sub _generate_package_name {
+	my ($self, $filename, $kit_type) = @_;
+	
+	# Strip tilde shortcut part if present (e.g., addon-bind-autoscaler~ba -> addon-bind-autoscaler)
+	my $hook_name = $filename;
+	$hook_name =~ s/~.*$//;
+	
+	if ($hook_name =~ /^addon-(.+)$/) {
+		# Addon hook
+		my $addon_name = $1;
+		my $addon_camel = $self->_to_camel_case($addon_name);
+		return "Genesis::Hook::Addon::${kit_type}::${addon_camel}";
+	} else {
+		# Regular hook
+		my $hook_camel = $self->_to_camel_case($hook_name);
+		return "Genesis::Hook::${hook_camel}::${kit_type}";
+	}
+}
+
+sub _update_package_line {
+	my ($self, $hook_file, $new_package_line) = @_;
+	
+	# Read the file content
+	open my $fh, '<', $hook_file or return 0;
+	my @lines = <$fh>;
+	close $fh;
+	
+	my $updated = 0;
+	# Update the package line (should be first non-comment line)
+	for my $i (0..$#lines) {
+		if ($lines[$i] =~ /^package\s+/) {
+			# Only update if different
+			if ($lines[$i] ne "$new_package_line\n") {
+				$lines[$i] = "$new_package_line\n";
+				$updated = 1;
+			}
+			last;
+		}
+	}
+	
+	# Write the file back if updated
+	if ($updated) {
+		open $fh, '>', $hook_file or return 0;
+		print $fh @lines;
+		close $fh;
+	}
+	
+	return $updated;
+}
+
+sub _prepare_hook_commit {
+	my ($self, $updated_files, $version) = @_;
+	
+	# Add the changed files to git
+	run('cd "$1" && git add hooks/*.pm', $self->{root});
+	
+	# Prepare commit message template
+	my $commit_msg = "Update perl hook package versions to v$version\n\nUpdated package declarations in $updated_files perl hook file";
+	$commit_msg .= $updated_files > 1 ? "s" : "";
+	$commit_msg .= " to include version v$version.\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply\@anthropic.com>";
+	
+	# Write commit message template to temporary file
+	my $commit_msg_file = "/tmp/genesis_hook_commit_msg.txt";
+	open my $fh, '>', $commit_msg_file or bail "Unable to create commit message template";
+	print $fh $commit_msg;
+	close $fh;
+	
+	# Inform user about the changes
+	info "Updated package versions in %d perl hook file%s to v%s.", $updated_files, ($updated_files > 1 ? "s" : ""), $version;
+	info "Changes have been staged. Opening git commit editor...";
+	
+	# Run git commit with the template in the user's default editor
+	run('cd "$1" && git commit --template="$2"', $self->{root}, $commit_msg_file);
+	
+	# Clean up template file
+	unlink $commit_msg_file;
 }
 
 sub scaffold {
