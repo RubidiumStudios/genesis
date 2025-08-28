@@ -187,35 +187,7 @@ sub subnet_reference {
 # build_cloud_config - Builds the cloud config for the environment {{{
 sub build_cloud_config {
 	my ($self,$config) = @_;
-	# this is just a wrapper as the config is already assembled, but is included
-	# so that if post-processing is needed, it can be done here without changing
-	# the kits.
-  	# Always add all custom VM types from environment file
- 	my ($custom_vm_types) = $self->env->lookup('bosh-configs.cloud.vm_types', []);
-    if (ref($custom_vm_types) eq 'HASH' && keys %$custom_vm_types) {
-        $config->{vm_types} ||= [];
-
-        # Transform hash to array of hashes with 'name' field
-        foreach my $vm_name (keys %$custom_vm_types) {
-            my $vm_spec = $custom_vm_types->{$vm_name};
-            # Add the name field to the spec
-            $vm_spec->{name} = $vm_name;
-            push @{$config->{vm_types}}, $vm_spec;
-        }
-    }
-  	# Always add all custom disk types from environment file
-  	my ($custom_disk_types) = $self->env->lookup('bosh-configs.cloud.disk_types', []);
-    if (ref($custom_disk_types) eq 'HASH' && keys %$custom_disk_types) {
-        $config->{disk_types} ||= [];
-
-        foreach my $disk_name (keys %$custom_disk_types) {
-            my $disk_spec = $custom_disk_types->{$disk_name};
-            # Add the name field to the spec
-            $disk_spec->{name} = $disk_name;
-            push @{$config->{disk_types}}, $disk_spec;
-        }
-    }	
-
+	$self->_add_extended_cloud_config($config);
 	return $config;
 }
 
@@ -802,6 +774,80 @@ sub disk_type_definition {
 # }}}
 #
 # Private Methods {{{
+
+# _add_extended_cloud_config - Adds extended cloud config from environment to the given config {{{
+sub _add_extended_cloud_config {
+	my ($self, $config) = @_;
+	# This will add any extended cloud config from the environment to the given config.
+	# It will also add any additional cloud properties for the IaaS.
+	my $extended_config = $self->env->lookup('bosh-configs.cloud', {});
+	my @types = grep {$_ !~ m/_defaults$/} keys %$extended_config;
+	for my $type (@types) {
+		bail(
+			"Invalid cloud config definition '#R{%s}' in #C{%s} environment file",
+			$type, $self->env->name
+		) unless $self->can($type.'_definition');
+
+		# Map singular type names to their plural config keys and prefixes
+		my %type_mapping = (
+			vm_type => { plural => 'vm_types', prefix => 'vm' },
+			vm_extension => { plural => 'vm_extensions', prefix => 'vm-ext' },
+			disk_type => { plural => 'disk_types', prefix => 'disk' },
+			network => { plural => 'networks', prefix => 'net' }
+		);
+
+		next unless exists $type_mapping{$type};
+		my $plural_key = $type_mapping{$type}{plural};
+		my $prefix = $type_mapping{$type}{prefix};
+
+		my @targets = (keys %{$extended_config->{$type}});
+		my %defered_targets = ();
+		while (my $target = shift @targets) {
+			# First we need to check if we've already processed this target
+			next if (exists $config->{$plural_key} && grep { $_->{name} eq $self->name_for($prefix, $target) } @{$config->{$plural_key}});
+
+			my $defn = $extended_config->{$type}{$target} // {};
+
+			# If we haven't processed it, check if we can base it on an existing target
+			if (my $src_target = delete($defn->{based_on})) {
+				if (!grep { $_->{name} eq $self->name_for($prefix, $src_target) } @{$config->{$plural_key} // []}) {
+					if (exists($extended_config->{$type}{$src_target})) {
+						bail(
+							"Cyclic dependency detected for target '%s' in extended cloud config for type '%s'",
+							$target, $type
+						) if (exists $defered_targets{$target});
+
+						# This target will be based on an extended config target that hasn't been processed yet
+						push(@targets, $src_target);
+						$defered_targets{$target} = 1;
+						next;
+					} else {
+						bail(
+							"The %s target '%s' depends on '%s' in environment #C{%s} bosh-configs.cloud ".
+							"definition, but it does not exist",
+							$type, $target, $src_target, $self->env->name
+						);
+					}
+				}
+				# Find the source definition and merge with it
+				my ($src_defn) = grep { $_->{name} eq $self->name_for($prefix, $src_target) } @{$config->{$plural_key}};
+				if ($src_defn) {
+					$defn = { %$src_defn, %$defn };
+				}
+			}
+
+			# Process the definition using the appropriate method
+			my $method = $type.'_definition';
+			my $processed_defn = $self->$method($target, %$defn);
+			if ($processed_defn && keys %$processed_defn) {
+				$config->{$plural_key} //= [];
+				push @{$config->{$plural_key}}, $processed_defn;
+			}
+		}
+	}
+
+	return $config;
+}
 # _config_definition - Returns the definition for a given config type {{{
 sub _config_definition {
 	my ($self, $type, $prefix, $target, %maps) = @_;
