@@ -734,12 +734,6 @@ sub subnets {
 }
 
 # }}}
-# network_cloud_properties_for_iaas - Returns the cloud properties for a given network and cpi {{{
-sub network_cloud_properties_for_iaas {
-	return shift->_cloud_properties_for_iaas('network', @_);
-}
-
-# }}}
 # vm_type_definition - Returns the definition for a given vm type {{{
 sub vm_type_definition {
 	return shift->_config_definition(VM_TYPE, 'vm', @_);
@@ -751,23 +745,27 @@ sub vm_type_definition {
 # need to update any existing references to them in deployments.	For now, we just use the name as-is.
 sub vm_extension_definition {
 	my ($self, $name, $data) = @_;
-	return () unless exists($data->{$self->env->iaas});
-	my $iaas_data = $data->{$self->env->iaas} || {};
-	return {name => $name} unless keys %$iaas_data; # Create vmx without cloud properties
 
-	my $cloud_properties = $data->{$self->env->iaas};
-	return {
+	# vm extensions are handled a bit differently, since they may not
+	# have cloud properties for the IaaS, in which case we do not include
+	# them in the cloud config.  They also only have cloud properties, so
+	# the `cloud_properties_for_iaas` key is optional.
+
+	my $_data = $data->{cloud_properties_for_iaas} // $data;
+	my ($cloud_properties, $found) = $self->_cloud_properties_for_iaas( %$_data);
+	return () unless $found; # No cloud properties for this IaaS, so no vm extension
+
+	my $config = {
 		name => $name,
-		cloud_properties => $self->_process_config_overrides(
-			Genesis::Hook::CloudConfig::VM_EXTENSION, $name, $cloud_properties, 'cloud_properties'
-		),
+		cloud_properties => $cloud_properties,
 	};
-}
 
-# make the above method available as vm_extension_definition_for_iaas
-sub vm_extension_definition_for_iaas {
-	my ($self, $name, $data) = @_;
-	return $self->vm_extension_definition($name, $data);
+	$config = $self->_process_config_overrides(VM_EXTENSION, $name, $config);
+	delete($config->{cloud_properties}) if (
+		exists $config->{cloud_properties} && ! keys %{$config->{cloud_properties}}
+	);
+
+	return $config
 }
 
 # }}}
