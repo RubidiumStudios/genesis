@@ -477,6 +477,18 @@ sub _build_ocfp_network_model_dynamic_subnets {
 	) unless @ocfp_subnet_names;
 
 	my $allocation = delete($definition->{allocation});
+	# Check for allocation overrides
+	my $network_overrides = $self->env->lookup($self->overrides_base.'.networks.'.$target);
+	$allocation->{total_size} = $network_overrides->{allocation}{total_size}
+		if (defined $network_overrides->{allocation}{total_size});
+	$allocation->{vms_per_subnet} = $network_overrides->{allocation}{vms_per_subnet}
+		if (defined $network_overrides->{allocation}{vms_per_subnet});
+	$allocation->{size} = $network_overrides->{allocation}{size}
+		if (defined $network_overrides->{allocation}{size});
+
+	# Assign VMs per subnet based on allocation strategy
+	# FIXME: Really should know used and free ips, so we can properly balance
+	#        allocations across subnets, but this is a good start.
 	my %vms_per_subnet = ();
 	if (defined $allocation->{total_size}) {
 		my $vm_count = $allocation->{total_size};
@@ -486,6 +498,10 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		for my $subnet_name (@ocfp_subnet_names) {
 			$vms_per_subnet{$subnet_name} = $per_subnet_count;
 			$vms_per_subnet{$subnet_name}++ if $remaining-- > 0;
+		}
+	} elsif (defined $allocation->{vms_per_subnet}) {
+		for my $subnet_name (@ocfp_subnet_names) {
+			$vms_per_subnet{$subnet_name} = $allocation->{vms_per_subnet}{$subnet_name} // 0;
 		}
 	} else {
 		my $vm_count = $allocation->{size} // 0;
@@ -789,7 +805,7 @@ sub _validate_override_schema {
 
 	my @valid_types = qw(vm_type vm_extension disk_type network);
 	my @valid_type_defaults = map { $_ . '_defaults' } @valid_types;
-	my @valid_types_plural = map { count_nouns(2,$_, suppress_count => 1) } @valid_types;
+	my @valid_types_plural = map { _plural_of($_) } @valid_types;
 	my @valid_matching_types = map { "matching_$_" } @valid_types_plural;
 	my @valid_root_keys = (
 		@valid_type_defaults,
@@ -902,13 +918,8 @@ sub _add_extended_cloud_config {
 	# This will add any extended cloud config from the environment to the given config.
 	# It will also add any additional cloud properties for the IaaS.
 	my $extended_config = $self->env->lookup($self->overrides_base, {});
-	my @types = grep {$_ !~ m/_defaults$/} keys %$extended_config;
-	for my $type (@types) {
-		bail(
-			"Invalid cloud config definition '#R{%s}' in #C{%s} environment file",
-			$type, $self->env->name
-		) unless $self->can($type.'_definition');
-
+	my @groups = grep {$_ !~ m/(^matches_|_defaults$)/} keys %$extended_config;
+	for my $group_label (@groups) {
 		# Map singular type names to their plural config keys and prefixes
 		my %type_mapping = (
 			vm_type => {prefix => 'vm' },
@@ -916,26 +927,38 @@ sub _add_extended_cloud_config {
 			disk_type => {prefix => 'disk' },
 			network => {prefix => 'net' }
 		);
+		my %singular = map {(_plural_of($_), $_)} keys %type_mapping;
 
-		next unless exists $type_mapping{$type};
-		my $plural_key = _plural_of($type_mapping{$type});
+		bail(
+			"Invalid cloud config definition '#R{%s}' in #C{%s} environment file",
+			$group_label, $self->env->name
+		) unless $singular{$group_label};
+		my $type = $singular{$group_label};
+
 		my $prefix = $type_mapping{$type}{prefix};
-
-		my @targets = (keys %{$extended_config->{$type}});
+		my @targets = (keys %{$extended_config->{$group_label}});
 		my %defered_targets = ();
 		while (my $target = shift @targets) {
 			# First we need to check if we've already processed this target
-			my $defn = $extended_config->{$type}{$target} // {};
+			my $defn = $extended_config->{$group_label}{$target} // {};
 			my $explicit_name = delete($defn->{'<explicit-name>'});
 			my $name = ($explicit_name || $type_mapping{$type}{explicit_name}) ? $target : $self->name_for($prefix, $target);
-			next if (exists $config->{$plural_key} && grep { $_->{name} eq $name } @{$config->{$plural_key}});
+			next if (exists $config->{$group_label} && grep { $_->{name} eq $name } @{$config->{$group_label}});
+
+			# Additional networks aren't supported yet
+			if ($type eq 'network') {
+				bail(
+					"Extended cloud config network definitions are not supported yet: '%s' in #C{%s} environment file",
+					$target, $self->env->name
+				);
+			}
 
 			# If we haven't processed it, check if we can base it on an existing target
 			if (my $src_target = delete($defn->{'<based-on>'})) {
 				my $src_name = $type_mapping{$type}{explicit_name}
 					? $src_target
 					: $self->name_for($prefix, $src_target);
-				if (!grep { $_->{name} eq $src_name} @{$config->{$plural_key} // []}) {
+				if (!grep { $_->{name} eq $src_name} @{$config->{$group_label} // []}) {
 					if (exists($extended_config->{$type}{$src_target})) {
 						bail(
 							"Cyclic dependency detected for target '%s' in extended cloud config for type '%s'",
@@ -955,7 +978,7 @@ sub _add_extended_cloud_config {
 					}
 				}
 				# Find the source definition and merge with it
-				my ($src_defn) = grep { $_->{name} eq $src_name } @{$config->{$plural_key}};
+				my ($src_defn) = grep { $_->{name} eq $src_name } @{$config->{$group_label}};
 				if ($src_defn) {
 					$defn = { %$src_defn, %$defn };
 				}
@@ -965,14 +988,16 @@ sub _add_extended_cloud_config {
 			my $method = $type.'_definition';
 			my $processed_defn = $self->$method($target, %$defn);
 			if ($processed_defn && keys %$processed_defn) {
-				$config->{$plural_key} //= [];
-				push @{$config->{$plural_key}}, $processed_defn;
+				$config->{$group_label} //= [];
+				push @{$config->{$group_label}}, $processed_defn;
 			}
 		}
 	}
 
 	return $config;
 }
+
+# }}}
 # _config_definition - Returns the definition for a given config type {{{
 sub _config_definition {
 	my ($self, $type, $prefix, $target, %maps) = @_;
@@ -1075,7 +1100,7 @@ sub _subnet_definition {
 			}
 		}
 		$base_config->{cloud_properties} = $self->_network_cloud_properties_for_iaas(
-			$target, $subnet_id, $self->iaas => unflatten($cloud_properties)
+			$target, $subnet_id, $fields, $self->iaas => unflatten($cloud_properties)
 		);
 	}
 
@@ -1240,10 +1265,10 @@ sub _process_config_overrides {
 	}
 
 	# Reflatten in case any of the above returned nested structures
-	$config = flatten($config);
+	$config = flatten(unflatten($config));
 
 	# Next, we apply any overrides from the environment (TODO: or bosh exodus data)
-	my $plural_type = count_nouns(2,$type, suppress_count => 1);
+	my $plural_type = _plural_of($type);
 
 	my $overrides_base = $self->overrides_base;
 	#Locations for
@@ -1734,6 +1759,12 @@ sub _standardized_subnet_cidr {
 	) if @cidrs > 1;
 	my $standardized_range_cidr = $cidrs[0];
 	return $standardized_range_cidr;
+}
+
+# }}}
+# _plural_of - Returns the plural form of a given noun {{{
+sub _plural_of {
+	return count_nouns(2, $_[0], suppress_count => 1);
 }
 
 1;
