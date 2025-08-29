@@ -22,4 +22,10 @@ sub default {
 	my ($self) = @_;
 	return $self->{default};
 }
+
+sub resolve {
+	my ($self, $config) = @_;
+	my $value = struct_lookup($config, $self->paths, $self->default);
+	return $value;
+}
 1;
