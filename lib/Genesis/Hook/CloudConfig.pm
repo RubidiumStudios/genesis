@@ -925,15 +925,13 @@ sub _add_extended_cloud_config {
 		my %defered_targets = ();
 		while (my $target = shift @targets) {
 			# First we need to check if we've already processed this target
-			my $name = $type_mapping{$type}{explicit_name}
-				? $target
-				: $self->name_for($prefix, $target);
+			my $defn = $extended_config->{$type}{$target} // {};
+			my $explicit_name = delete($defn->{'<explicit-name>'});
+			my $name = ($explicit_name || $type_mapping{$type}{explicit_name}) ? $target : $self->name_for($prefix, $target);
 			next if (exists $config->{$plural_key} && grep { $_->{name} eq $name } @{$config->{$plural_key}});
 
-			my $defn = $extended_config->{$type}{$target} // {};
-
 			# If we haven't processed it, check if we can base it on an existing target
-			if (my $src_target = delete($defn->{based_on})) {
+			if (my $src_target = delete($defn->{'<based-on>'})) {
 				my $src_name = $type_mapping{$type}{explicit_name}
 					? $src_target
 					: $self->name_for($prefix, $src_target);
