@@ -236,16 +236,14 @@ sub compile {
 
 	# Update hook package lines if git repo is clean
 	if ($self->{git_clean}) {
+		$self->_update_version($version);
 		$self->_update_hook_packages($name, $version);
+		$self->_prepare_hook_commit($version);
 	} else {
 		warning "Not updating version in perl hooks due to uncommitted changes in working directory";
 	}
 
 	$self->_prepare("$name-$version");
-
-	run({ onfailure => "Unable to update kit.yml with version '$version'", stderr => 0 },
-		'cat "${2}/kit.yml" | sed -e "s/^version:.*/version: ${1}/" > "${3}/${4}/kit.yml"',
-		$version, $self->{root}, $self->{work}, $self->{relpath});
 
 	run({ onfailure => 'Unable to compile final kit tarball' },
 		'tar -czf "$1/$3.tar.gz" -C "$2" "$3/"',
@@ -265,52 +263,48 @@ sub _update_hook_packages {
 	# Find all .pm files in hooks directory
 	my @hook_files = glob("$hooks_dir/*.pm");
 	return unless @hook_files;
-	
+
 	my $updated_files = 0;
 	for my $hook_file (@hook_files) {
 		my $filename = (split '/', $hook_file)[-1];
 		$filename =~ s/\.pm$//;
-		
+
 		my $package_name = $self->_generate_package_name($filename, $kit_type);
 		my $new_package_line = "package $package_name v$version;";
-		
+
 		if ($self->_update_package_line($hook_file, $new_package_line)) {
 			$updated_files++;
 		}
-	}
-	
-	if ($updated_files > 0) {
-		$self->_prepare_hook_commit($updated_files, $version);
 	}
 }
 
 sub _to_camel_case {
 	my ($self, $name) = @_;
-	
+
 	# Special case mappings
 	my %special_mappings = (
 		cf   => 'CF',
 		bosh => 'BOSH',
 	);
-	
+
 	# Split on hyphens and convert each part
 	my @parts = split /-/, $name;
 	my @camel_parts;
-	
+
 	for my $part (@parts) {
 		push @camel_parts, $special_mappings{$part} // ucfirst(lc($part));
 	}
-	
+
 	return join('', @camel_parts);
 }
 
 sub _generate_package_name {
 	my ($self, $filename, $kit_type) = @_;
-	
+
 	# Strip tilde shortcut part if present (e.g., addon-bind-autoscaler~ba -> addon-bind-autoscaler)
 	my $hook_name = $filename;
 	$hook_name =~ s/~.*$//;
-	
+
 	if ($hook_name =~ /^addon-(.+)$/) {
 		# Addon hook
 		my $addon_name = $1;
@@ -325,12 +319,12 @@ sub _generate_package_name {
 
 sub _update_package_line {
 	my ($self, $hook_file, $new_package_line) = @_;
-	
+
 	# Read the file content
 	open my $fh, '<', $hook_file or return 0;
 	my @lines = <$fh>;
 	close $fh;
-	
+
 	my $updated = 0;
 	# Update the package line (should be first non-comment line)
 	for my $i (0..$#lines) {
@@ -343,41 +337,51 @@ sub _update_package_line {
 			last;
 		}
 	}
-	
+
 	# Write the file back if updated
 	if ($updated) {
 		open $fh, '>', $hook_file or return 0;
 		print $fh @lines;
 		close $fh;
 	}
-	
+
 	return $updated;
 }
 
+sub _update_version {
+	my ($self, $version) = @_;
+	my $kit_yml = "$self->{root}/kit.yml";
+
+	# Read the original kit.yml
+	my $content = slurp($kit_yml);
+
+	# Update the version line
+	$content =~ s/^version:\s*.*/version: $version/m;
+
+	# Write to the work directory
+	mkfile_or_fail($kit_yml, $content);
+}
+
 sub _prepare_hook_commit {
-	my ($self, $updated_files, $version) = @_;
-	
+	my ($self, $version) = @_;
+
 	# Add the changed files to git
-	run('cd "$1" && git add hooks/*.pm', $self->{root});
-	
+	run('cd "$1" && git add kit.yml hooks/*.pm', $self->{root});
+
 	# Prepare commit message template
-	my $commit_msg = "Update perl hook package versions to v$version\n\nUpdated package declarations in $updated_files perl hook file";
-	$commit_msg .= $updated_files > 1 ? "s" : "";
-	$commit_msg .= " to include version v$version.\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply\@anthropic.com>";
-	
+	my $commit_msg = "Update for release v$version\n\nUpdated kit version and perl hook packages";
+
 	# Write commit message template to temporary file
 	my $commit_msg_file = "/tmp/genesis_hook_commit_msg.txt";
-	open my $fh, '>', $commit_msg_file or bail "Unable to create commit message template";
-	print $fh $commit_msg;
-	close $fh;
-	
+	mkfile_or_fail($commit_msg_file, $commit_msg);
+
 	# Inform user about the changes
-	info "Updated package versions in %d perl hook file%s to v%s.", $updated_files, ($updated_files > 1 ? "s" : ""), $version;
+	info "Updated version and package versions in perl hook files to v%s.", $version;
 	info "Changes have been staged. Opening git commit editor...";
-	
+
 	# Run git commit with the template in the user's default editor
-	run('cd "$1" && git commit --template="$2"', $self->{root}, $commit_msg_file);
-	
+	run({interactive => 1}, 'cd "$1" && git commit -v --edit --file "$2"', $self->{root}, $commit_msg_file);
+
 	# Clean up template file
 	unlink $commit_msg_file;
 }
