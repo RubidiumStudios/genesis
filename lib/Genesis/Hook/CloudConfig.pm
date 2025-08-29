@@ -981,19 +981,18 @@ sub _config_definition {
 	my %config = %{$maps{common}//{}};
 	$config{name} = $self->name_for($prefix, $target);
 	$config{cloud_properties} = $self->_cloud_properties_for_iaas(
-		$type, $target, %{$maps{cloud_properties_for_iaas}//{}}
-	) if exists $maps{cloud_properties_for_iaas};
+		$maps{cloud_properties_for_iaas}->%*
+	) if ref($maps{cloud_properties_for_iaas}) eq 'HASH';
 
-	$self->_process_config_overrides($type, $target, \%config, 'definition');
+	$self->_process_config_overrides($type, $target, \%config);
 
 	# After any overrides, we need to make sure there is a configuration to set
 	# Return an empty list if there is no configuration.
-	if (exists $config{cloud_properties} && ! keys %{$config{cloud_properties}}) {
-		delete($config{cloud_properties});
-	}
-	return {%config}
-		if (grep {$_ !~ m/^(name)$/} keys %config)
-		|| ($type eq VM_EXTENSION); # VM Extensions can be empty
+	delete($config{cloud_properties}) if (
+		exists $config{cloud_properties} && ! keys %{$config{cloud_properties}}
+	);
+
+	return {%config} if (grep {$_ !~ m/^(name)$/} keys %config);
 	return ();
 }
 
@@ -1019,37 +1018,39 @@ sub _subnet_definition {
 	my $base_config = {
 		name => $subnet_id, # Not actually a valid property, but we need it for reference?
 		range => $self->_get_network_subnet_property(
-			$target, $subnet_id, $fields, 'range', required => 1
+			$target, $subnet_id, $fields, 'range'
 		),
 		reserved => $self->_get_network_subnet_property(
-			$target, $subnet_id, $fields, 'reserved', required => 1
+			$target, $subnet_id, $fields, 'reserved', no_defaults => 1
 		),
 	};
 
 	if ($fields->{az}) {
 		$base_config->{az} = $self->_get_network_subnet_property(
-			$target, $subnet_id, $fields, 'az'
+			$target, $subnet_id, $fields, 'az', optional => 1
 		);
 	} elsif ($fields->{azs}) {
 		$base_config->{azs} = $self->_get_network_subnet_property(
-			$target, $subnet_id, $fields, 'azs'
+			$target, $subnet_id, $fields, 'azs', optional => 1
 		);
+		# FIXME: What if the fields specify azs but user overrides specify az, or vice versa?
 	} else {
 		bail(
 			"No availability zone(s) specified for network %s subnet %s",
 			$target, $subnet_id
 		);
 	}
+
 	my $gateway = $self->_get_network_subnet_property(
 		$target, $subnet_id, $fields, 'gateway'
 	)	// IPv4->new($base_config->{range})->start->add(1)->address;
 	my $dns = $self->_get_network_subnet_property(
-		$target, $subnet_id, $fields, 'dns'
+		$target, $subnet_id, $fields, 'dns', optional => 1
 	) // [$gateway, '1.1.1.1'];
 	$base_config->{gateway} = $gateway;
 	$base_config->{dns}     = $dns;
 	$base_config->{static}  = $self->_get_network_subnet_property(
-		$target, $subnet_id, $fields, 'static'
+		$target, $subnet_id, $fields, 'static', optional => 1, no_defaults => 1
 	) if exists $fields->{static};
 
 	if (exists $fields->{cloud_properties_for_iaas}) {
@@ -1088,51 +1089,133 @@ sub _subnet_definition {
 # _get_network_subnet_property - Returns the value for a given property for a network or subnet {{{
 sub _get_network_subnet_property {
 	my ($self, $target, $subnet_id, $fields, $property, %opts) = @_;
-	my $value = $fields->{$property};
+	my $source = 'cloud-config definition';
+	my @sources = ();
 
-	# Check for overrides from the environment, and the bosh exodus data
-	my $target_path = "networks.$target.subnet";
-	my $override = $self->_process_config_overrides(
-		$target_path, $subnet_id, $value, "subnets.$subnet_id.$property"
-	);
-	$override = $self->_process_config_overrides(
-		'network_defaults.subnet', $subnet_id, $value, "subnet_defaults.$property"
-	) unless defined($override);
-	$value = $override if defined($override);
+	my $overrides_base = $self->overrides_base;
+	unless ($opts{no_defaults}) {
+		push @sources, "$overrides_base.network_defaults.subnets.$property";
+		# TODO: push @sources, "$overrides_base.matching_networks";
+		push @sources, "$overrides_base.networks.$target.subnet_defaults.$property";
+	}
+
+	# Check for explicit overrides from the environment, and the bosh exodus data
+	push @sources, "$overrides_base.networks.$target.subnets.$subnet_id.$property";
+
+	my $value = $fields->{$property};
+	for my $source_path (@sources) {
+		if ($source_path =~ /\.matching_networks$/) {
+			# This will have to be handles differently, since we need to check
+			# each rule to see if it matches the target network, and will only
+			# retrieve the subnet_defaults property.  The following is WIP and
+			# may not be the final implementation.
+			my $match_rules = $self->env->lookup($source_path, []);
+			if (ref($match_rules) eq 'ARRAY' && scalar(@$match_rules)) {
+				my $idx = 0;
+				foreach my $rule (@$match_rules) {
+					$idx++;
+					next unless ref($rule) eq 'HASH';
+					my $overrides = $self->_evaluate_matching_rule(
+						$target,
+						$rule,
+						flatten({name => $target, subnet_id => $subnet_id, subnet => { %$fields, $property => $value}}),
+					);
+					if (exists $overrides->{subnet}{$property}) {
+						$value = $overrides->{subnet}{$property};
+						$source = "$source_path (matching rule #$idx)";
+					}
+				}
+			}
+		} else {
+			my ($override, $found) = $self->env->lookup($source_path);
+			if (defined($found)) {
+				$value = $override;
+				$source = $source_path;
+			}
+		}
+	}
 
 	bail(
-		"No %s specified for network %s subnet %s",
-		$property, $target, $subnet_id
-	) if (!defined($value) && $opts{required});
+		"No %s specified for network %s subnet %s (source: %s)",
+		$property, $target, $subnet_id, $source
+	) if (!defined($value) && !$opts{optional});
+
 	return $value;
 }
 
 # }}}
 # _network_cloud_properties_for_iaas - Returns the cloud properties for a given network and cpi {{{
 sub _network_cloud_properties_for_iaas {
-	my ($self, $target, $subnet_id, %map) = @_;
-	my $config = $self->_cloud_properties_for_iaas(
-		'network_defaults.subnet', $subnet_id, %map
-	);
-	return $self->_process_config_overrides(
-		"networks.$target.subnet", $subnet_id, $config, 'cloud_properties'
-	);
+	my ($self, $target, $subnet_id, $fields, %map) = @_;
+	my $config = $self->_cloud_properties_for_iaas(%map);
+
+	my $source = 'cloud-config definition';
+	my @sources = ();
+	my $overrides_base = $self->overrides_base;
+
+	# First, we check for any defaults
+	push @sources, "$overrides_base.network_defaults.subnets.cloud_properties";
+	# TODO: push @sources, "$overrides_base.matching_networks";
+	push @sources, "$overrides_base.networks.$target.subnet_defaults.cloud_properties";
+
+	# Check for explicit overrides from the environment, and the bosh exodus data
+	push @sources, "$overrides_base.networks.$target.subnets.$subnet_id.cloud_properties";
+
+	for my $source_path (@sources) {
+		if ($source_path =~ /\.matching_networks$/) {
+			# This will have to be handles differently, since we need to check
+			# each rule to see if it matches the target network, and will only
+			# retrieve the subnet_defaults property.  The following is WIP and
+			# may not be the final implementation.
+			my $match_rules = $self->env->lookup($source_path, []);
+			if (ref($match_rules) eq 'ARRAY' && scalar(@$match_rules)) {
+				my $idx = 0;
+				foreach my $rule (@$match_rules) {
+					$idx++;
+					next unless ref($rule) eq 'HASH';
+					my $overrides = $self->_evaluate_matching_rule(
+						$target,
+						$rule,
+						flatten({name => $target, subnet_id => $subnet_id, subnet => { %$fields, cloud_properties => $config}}),
+					);
+					if (exists $overrides->{subnet}{cloud_properties}) {
+						$config = {%$config, $overrides->{subnet}{cloud_properties}->%*};
+						$source = "$source_path (matching rule #$idx)";
+					}
+				}
+			}
+		} else {
+			my ($override, $found) = $self->env->lookup($source_path.'.cloud_properties');
+			if (defined($found)) {
+				$config = {%$config, flatten($override)->%*};
+				$source = $source_path;
+			}
+		}
+	}
+
+	# Short-circuit if there are no overrides
+	return $config if $source eq 'cloud-config definition';
+
+	my $flat_config = flatten($config);
+	for my $key (keys %$flat_config) {
+		delete($flat_config->{$key}) unless defined($flat_config->{$key});
+	}
+	$config = unflatten($flat_config);
+
+	return $config;
 }
 
 # }}}
 # _cloud_properties_for_iaas - Returns the cloud properties for a given type and cpi {{{
 sub _cloud_properties_for_iaas {
-	my ($self, $type, $target, %map) = @_;
+	my ($self, %map) = @_;
 	my $iaas = $self->iaas;
 	my $map_key = (grep {$_ eq $iaas} keys %map)[0]
 		// (grep {$_ =~ /(?:^|\|)${iaas}(?:\||$)/} keys %map)[0]
 		// '*';
-	# FIXME: Should this error if no match is found?
-	my $cloud_properties = $map{$map_key} // {}; #TODO: allow glob-style matching
 
-	return $self->_process_config_overrides(
-		$type, $target, $cloud_properties, 'cloud_properties'
-	);
+	my $cloud_properties = $map{$map_key} // {}; #TODO: allow glob-style matching
+	return wantarray ? ($cloud_properties, exists($map{$map_key})) : $cloud_properties;
 }
 
 # }}}
