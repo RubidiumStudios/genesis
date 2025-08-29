@@ -901,7 +901,7 @@ sub _add_extended_cloud_config {
 	my ($self, $config) = @_;
 	# This will add any extended cloud config from the environment to the given config.
 	# It will also add any additional cloud properties for the IaaS.
-	my $extended_config = $self->env->lookup('bosh-configs.cloud', {});
+	my $extended_config = $self->env->lookup($self->overrides_base, {});
 	my @types = grep {$_ !~ m/_defaults$/} keys %$extended_config;
 	for my $type (@types) {
 		bail(
@@ -950,9 +950,9 @@ sub _add_extended_cloud_config {
 						next;
 					} else {
 						bail(
-							"The %s target '%s' depends on '%s' in environment #C{%s} bosh-configs.cloud ".
+							"The %s target '%s' depends on '%s' in environment #C{%s} %s ".
 							"definition, but it does not exist",
-							$type, $target, $src_target, $self->env->name
+							$type, $target, $src_target, $self->env->name, $self->overrides_base
 						);
 					}
 				}
@@ -1268,7 +1268,7 @@ sub _evaluate_matching_conditions {
 		bail(
 			"The #y{%s} definition expects rules to have a list of conditions. If ".
 			"there are no conditions, use #y{%s} instead.",
-			$matching_key, "bosh-configs.cloud.${type}_defaults"
+			$matching_key, "${overrides_base}.${type}_defaults"
 		) unless defined($conditions) && ref($conditions) eq 'ARRAY';
 
 		my $properties = $rule->{properties};
