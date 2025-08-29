@@ -1221,233 +1221,132 @@ sub _cloud_properties_for_iaas {
 # }}}
 # _process_config_overrides - Applies overrides to a given config based on the environment and bosh {{{
 sub _process_config_overrides {
-	my ($self, $type, $target, $config, $path) = @_;
+	# BREAKING CHANGE: The path is no longer allowed, the full config must be passed in.
+	my ($self, $type, $target, $config) = @_;
+
+	# FIXME: What do we do if the config is not a hashref?  Is this possible?
+	$config = flatten($config);
+
+	# First, we step through all the items and evaluate any deferred values (ie Ref objects, or subroutines)
+	for my $key (keys %$config) {
+		my $value = $config->{$key};
+		if (ref($value) eq 'CODE') {
+			# This is a subroutine, so we call it to get the value
+			$config->{$key} = $value->($self, $type, $target, $key, unflatten($config));
+		} elsif (ref($value) eq 'Genesis::Hook::CloudConfig::LookupRef') {
+			# This is a lookup referrence, with optional defaults
+			$config->{$key} = $value->resolve($self->env->params);
+		}
+	}
+
+	# Reflatten in case any of the above returned nested structures
+	$config = flatten($config);
+
+	# Next, we apply any overrides from the environment (TODO: or bosh exodus data)
 	my $plural_type = count_nouns(2,$type, suppress_count => 1);
 
-	# Recursively process each key or array element in the config, keeping track
-	# of the path to determine where the overrides can be found.  Locations for
+	my $overrides_base = $self->overrides_base;
+	#Locations for
 	# the overides are:
-	# - environment file:
-	#  - bosh-configs.cloud.${type}_defaults.${path}
-	#  - bosh-configs.cloud.${type}s.$name.${path}
+	# - environment file: ($path is $basepath.$subpath)
+	#  - ${overrides_base}.${type}_defaults.${path}
+	#  - ${overrides_base}.matching_${type}s.$name.${path}
+	#  - ${overrides_base}.${type}s.$name.${path}
 	# - exodus:
 	#   /secret/<bosh-env-name>/<bosh-type>/configs/cloud/${type}/${path} TODO:  This is not implemented yet
-	#
-	# If the key is an array reference, the key is the first element, and the
-	# lookup path is the second element.
-	#
-	# FIXME:  This only detects overrides for known config properties.  We need
-	# to track the overrides that aren't applied, and just apply them at the end.
-	# Alternatively, we lookup all the overrides first, and apply them as we go
-	# for any matching paths.
-	if (ref($config) eq 'HASH') {
-		foreach my $key (keys %$config) {
-			my $value    = delete($config->{$key});
-			my $new_path = $path ? "$path.$key" : $key;
 
-			$config->{$key} = $self->_process_config_overrides(
-				$type, $target, $value, $new_path
+	# Step 0: Get it from exodus if it exists -- TODO
+
+	# Step 1: Apply environment defaults
+	my $overrides = $self->env->lookup("${overrides_base}.${type}_defaults");
+	if ($overrides && ref($overrides) eq 'HASH' && scalar(keys %$overrides)) {
+		$config = { %$config, flatten($overrides)->%* }; # Merge defaults into config
+	}
+
+	# Step 2: Apply any conditional overrides
+	my $match_rules = $self->env->lookup("${overrides_base}.matching_${plural_type}", []);
+	if (ref($match_rules) eq 'ARRAY' && scalar(@$match_rules)) {
+		foreach my $rule (@$match_rules) {
+			next unless ref($rule) eq 'HASH';
+			my $overrides = $self->_evaluate_matching_rule(
+				$target,
+				$rule,
+				$config, # This is flattened already
 			);
-			delete($config->{$key}) unless defined($config->{$key});
-		}
-
-		# Apply overrides for non-processed items here...
-	} elsif (ref($config) eq 'ARRAY') {
-		foreach my $i (0..$#{$config}) {
-			my $element  = $config->[$i];
-			my $new_path = $path ? "${path}[$i]" : ".[$i]";
-			$config->[$i] = $self->_process_config_overrides(
-				$type, $target, $element, $new_path
-			);
-		}
-
-		# Apply overrides for non-processed items here... (not likely to happen for arrays)
-	} elsif (ref($config) eq 'Genesis::Hook::CloudConfig::LookupRef') {
-		# This is a lookup referrence, with optional defaults
-		$config = $config->default; ## FIXME: Does this do what we want? Should we resolve it now?
-	} else {
-		# Check for explicit override first
-		my ($override, $src) = $self->env->lookup(
-			"bosh-configs.cloud.$plural_type.$target.$path"
-		);
-
-		# If no explicit override, check matching conditions
-		($override, $src) = $self->_evaluate_matching_conditions(
-			$type, $target, $path, $config
-		) unless defined($override);
-
-		# Finally fall back to defaults
-		($override, $src) = $self->env->lookup(
-			"bosh-configs.cloud.${type}_defaults.$path"
-		) unless defined($override);
-
-		# Unimplemented in upstream deployments so far, so disabling for now
-		#($override, $src) = $self->_bosh_exodus_lookup( # This will be cached so don't fetch exodus data for each lookup
-		#	"/configs/cloud/$type/$path" =~ s/\./\//gr,
-		#) unless defined($override);
-
-		# Override vm_types if the vm_type name equals to the full vm_type name
-		if (!defined($override) && $type eq VM_TYPE) {
-			# Generate the full VM type name for this target
-			my $full_vm_name = $self->name_for('vm', $target);
-
-			# Look through all VM type overrides in the env
-			my $vm_overrides = $self->env->lookup('bosh-configs.cloud.vm_types', {});
-			if (ref($vm_overrides) eq 'HASH' && exists($vm_overrides->{$full_vm_name})) {
-				# Found an override using the full name - extract the relevant path
-				my $full_override = $vm_overrides->{$full_vm_name};
-
-				# Navigate to the specific path within the override
-				if ($path) {
-					my @path_parts = split(/\./, $path);
-					my $current = $full_override;
-					for my $part (@path_parts) {
-						if (ref($current) eq 'HASH' && exists($current->{$part})) {
-							$current = $current->{$part};
-						} else {
-							$current = undef;
-							last;
-						}
-					}
-					if (defined($current)) {
-						$override = $current;
-						$src = "bosh-configs.cloud.vm_types.$full_vm_name.$path";
-					}
-				}
-			}
-		}
-
-		if ($override) {
-			trace(
-				"Applying override for %s %s %s: %s (from %s)",
-				$type, $target, $path, JSON::PP->new->allow_nonref->encode($override), $src
-			);
-			$config = $override;
+			$config = { %$config, flatten($overrides)->%* } if keys %$overrides;
 		}
 	}
-	return $config;
+
+	# Step 3: Apply specific overrides
+	$overrides = $self->env->lookup("${overrides_base}.${plural_type}.$target");
+	if ($overrides && ref($overrides) eq 'HASH' && scalar(keys %$overrides)) {
+		$config = { %$config, flatten($overrides)->%* }; # Merge overrides into config
+	}
+	return unflatten($config);
 }
 
 # }}}
-# _evaluate_matching_conditions - Evaluates matching conditions for config overrides {{{
-sub _evaluate_matching_conditions {
-	my ($self, $type, $target, $path, $config) = @_;
+# _evaluate_matching_rule - Evaluates matching rule's conditions for config overrides {{{
+sub _evaluate_matching_rule {
+	my ($self, $target, $rule, $config) = @_;
+	# config is expected to be flattened already.
 
-	# Get the matching rules for this type
-	my $plural_type = count_nouns(2,$type, suppress_count => 1);
-	my $matching_key = "bosh-configs.cloud.matching_$plural_type";
-	my $matching_rules = $self->env->lookup($matching_key, []);
+	# Evaluate conditions (OR between conditions, AND within each condition)
+	my $conditions = $rule->{conditions};
+	my $criteria_met = 0;
+	foreach my $condition_set (@$conditions) {
+		next unless ref($condition_set) eq 'HASH'; # Skip invalid condition sets
 
-	return (undef, undef) unless ref($matching_rules) eq 'ARRAY';
+		# Flatten the condition set to ensure all fields are single-level keys
+		$condition_set = flatten($condition_set);
 
-	# Process each matching rule
-	foreach my $rule (@$matching_rules) {
-		next unless ref($rule) eq 'HASH';
+		my $failed_match = 0;
+		foreach my $field (keys %$condition_set) {
+			my $patterns = $condition_set->{$field};
+			my $field_matches = 0;
 
-		# Check if this rule has conditions
-		my $conditions = $rule->{conditions};
-		bail(
-			"The #y{%s} definition expects rules to have a list of conditions. If ".
-			"there are no conditions, use #y{%s} instead.",
-			$matching_key, "${overrides_base}.${type}_defaults"
-		) unless defined($conditions) && ref($conditions) eq 'ARRAY';
-
-		my $properties = $rule->{properties};
-		bail(
-			"The #y{%s} definition expects rules to have a #y{properties} key to ".
-			"specify overrides.",
-			$matching_key
-		) unless defined($properties) && ref($properties) eq 'HASH';
-
-		# Evaluate conditions (OR between conditions, AND within each condition)
-		my $criteria_met = 0;
-		foreach my $condition_set (@$conditions) {
-			bail(
-				"The #y{%s} definition expects each condition to be a hashmap of field ".
-				"patterns to match against.",
-				$matching_key
-			) unless ref($condition_set) eq 'HASH';
-
-			# Flatten the condition set to ensure all fields are single-level keys
-			$condition_set = flatten($condition_set);
-
-			foreach my $field (keys %$condition_set) {
-				my $patterns = $condition_set->{$field};
-				my $failed_match = 0;
-
-				# Convert all patterns to array for uniform processing
-				$patterns = [$patterns] unless ref($patterns) eq 'ARRAY';
-				for my $test (@$patterns) {
-					bail(
-						"The #y{%s} definition expects patterns to be either a string, null, ".
-						"regex (/.../ or =~/.../ or !~/.../) or an array of strings/regexes, ".
-						"but found %s for field %s.",
-						ref($test), $matching_key
-					) if ref($test);
-
-					my $field_value = struct_lookup($config->{$plural_type}{$target}, $field);
-					if (!defined($field_value)) {
-						# Null pattern matches undefined, which is okay if that's what we're looking for
-						next if !defined($test);
-						$failed_match = 1;
-						last;
-					}
-
-					if (defined($test) && $test =~ /^(?:([!=])~)?\/(.+)\/([gimsx]*)$/) {
-						# Regex pattern - check if the field value matches
-						my ($op, $regex, $flags) = ($1, $2, $3);
-						$op //= '=';
-						my $compiled_regex = $flags ? qr/(?$flags)$regex/ : qr/$regex/;
-						if (defined($field_value)) {
-							my $re_match = $field_value =~ /$compiled_regex/;
-							if (($op eq '=') eq !$re_match) { # Either '=' and doesn't match, or '!' and matches
-								$failed_match = 1;
-								last;
-							}
-						} elsif ($field_value ne $test) {
-							$failed_match = 1;
-							last;
-						}
-					}
-
-					last if $failed_match;
-				}
-
-				if (!$failed_match) {
-					# If nothing failed, the OR criteria is met for this condition set
-					$criteria_met = 1	;
+			# Convert all patterns to array for uniform processing
+			$patterns = [$patterns] unless ref($patterns) eq 'ARRAY';
+			for my $test (@$patterns) {
+				my $field_value = struct_lookup($config, $field);
+				if (!defined($field_value)) {
+					# Null pattern matches undefined, which is okay if that's what we're looking for
+					next unless !defined($test);
+					$field_matches = 1;
 					last;
 				}
-			}
 
-			# If this condition matched, we have a match (OR between conditions)
-			if ($criteria_met) {
-				# We need to return the overrides, but there's an issue if multiple rules apply...
+				if (defined($test) && $test =~ /^(?:([!=])~)?\/(.+)\/([gimsx]*)$/) {
+					# Regex pattern - check if the field value matches
+					my ($op, $regex, $flags) = ($1, $2, $3);
+					$op //= '=';
+					my $compiled_regex = $flags ? qr/(?$flags)$regex/ : qr/$regex/;
+					if (defined($field_value)) {
+						my $re_match = $field_value =~ /$compiled_regex/;
+						if (($op eq '!') eq !$re_match) { # Either '!' and doesn't match, or '=' and matches
+							$field_matches = 1;
+							last;
+						}
+					} elsif ($field_value eq $test) {
+						$field_matches = 1;
+						last;
+					}
+				}
 			}
+			$failed_match = 1 unless $field_matches;
+			last if $failed_match; # No need to check further fields in this condition set
+		}
+
+		if (!$failed_match) {
+			# If nothing failed, the OR criteria is met for this condition set
+			$criteria_met = 1	;
+			last;
 		}
 	}
-}
 
-# }}}
-# _navigate_hash_path - Navigate to a path within a hash structure {{{
-sub _navigate_hash_path {
-	my ($self, $hash, $path) = @_;
-
-	return undef unless ref($hash) eq 'HASH';
-	return $hash unless defined($path) && $path ne '';
-
-	my @path_parts = split(/\./, $path);
-	my $current = $hash;
-
-	foreach my $part (@path_parts) {
-		if (ref($current) eq 'HASH' && exists($current->{$part})) {
-			$current = $current->{$part};
-		} else {
-			return undef;
-		}
-	}
-
-	return $current;
+	# If this condition matched, we have a match (OR between conditions)
+	return {} unless $criteria_met;
+	return $rule->{properties} // {};
 }
 
 # }}}
