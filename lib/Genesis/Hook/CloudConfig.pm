@@ -63,6 +63,9 @@ sub init {
 		$obj->{ocfp_config} = $env->ocfp_config_lookup(['net','vpc']);
 	}
 
+	# Validate the override schema
+	$obj->_validate_override_schema();
+
 	return $cloud_configs{$id} = $obj;
 }
 
@@ -137,6 +140,7 @@ sub _can_build_cloud_config {
 # Accessors {{{
 sub basename { return shift->{basename}; }
 sub contents { return shift->{contents}; }
+sub overrides_base { return 'bosh-configs.cloud'; }
 
 # }}}
 
@@ -776,6 +780,123 @@ sub disk_type_definition {
 # }}}
 #
 # Private Methods {{{
+
+# _validate_override_schema - Validates the structure of bosh-configs override definitions {{{
+sub _validate_override_schema {
+	my ($self) = @_;
+	my $overrides_base = $self->overrides_base;
+	my $config = $self->env->lookup($overrides_base, {});
+
+	return unless ref($config) eq 'HASH' && keys %$config;
+
+	my @valid_types = qw(vm_type vm_extension disk_type network);
+	my @valid_type_defaults = map { $_ . '_defaults' } @valid_types;
+	my @valid_types_plural = map { count_nouns(2,$_, suppress_count => 1) } @valid_types;
+	my @valid_matching_types = map { "matching_$_" } @valid_types_plural;
+	my @valid_root_keys = (
+		@valid_type_defaults,
+		@valid_types_plural,
+		@valid_matching_types
+	);
+
+	my @errors = ();
+
+	# Validate root keys
+	my @invalid_root_keys = ();
+	for my $key (keys %$config) {
+		push(@invalid_root_keys, $key) unless in_array($key, @valid_root_keys);
+	}
+	push(@errors, sprintf(
+		"Invalid override keys in #y{%s}: %s",
+		$overrides_base, join(', ', @invalid_root_keys)
+	)) if @invalid_root_keys;
+
+	# Validate defaults sections
+	my @invalid_defaults_content = grep {
+		ref($config->{$_}) ne 'HASH'
+	} grep { /_defaults$/ } keys %$config;
+	push(@errors, sprintf(
+		"Invalid defaults sections in #y{%s} (must be hashmaps): %s",
+		$overrides_base, join(', ', @invalid_defaults_content)
+	)) if @invalid_defaults_content;
+
+	# Ensure defaults contents don't use meta-keys like <based-on> or <explicit-name>
+	for my $defaults_key (grep { /_defaults$/ } keys %$config) {
+		my @invalid_meta_keys = grep { /^<.*>$/ } keys %{$config->{$defaults_key}};
+		push(@errors, sprintf(
+			"Invalid meta-keys in #C{%s.%s}: %s",
+			$overrides_base, $defaults_key, join(', ', @invalid_meta_keys)
+		)) if @invalid_meta_keys;
+	}
+
+	# Validate matching sections
+	for my $matching_key (grep { /^matching_/ } keys %$config) {
+		my $rules = $config->{$matching_key};
+		if (ref($rules) ne 'ARRAY') {
+			push(@errors, sprintf(
+				"#C{%s.%s} must be an array of hashmaps, each containing conditions and properties keys",
+				$overrides_base, $matching_key
+			));
+			next;
+		}
+
+		for my $rule_idx (0..$#{$rules}) {
+			my $rule = $rules->[$rule_idx];
+			if (ref($rule) ne 'HASH' || !exists $rule->{conditions} || ref($rule->{conditions}) ne 'ARRAY'
+			|| !exists $rule->{properties} || ref($rule->{properties}) ne 'HASH') {
+				push(@errors, sprintf(
+					"Rule #%d in #C{%s.%s} must be a hashmap with 'conditions' array and 'properties' hashmap",
+					$rule_idx+1, $overrides_base, $matching_key
+				));
+				next;
+			}
+
+			# Validate each condition set
+			for my $j (0..$#{$rule->{conditions}}) {
+				my $condition_set = $rule->{conditions}->[$j];
+				push(@errors, sprintf(
+					"Condition set #%d in rule #%d of #C{%s.%s} must be a hashmap of field patterns",
+					$j+1, $rule_idx+1, $overrides_base, $matching_key
+				)) unless defined $condition_set;
+			}
+
+			# Ensure properties contents don't use meta-keys like <based-on> or <explicit-name>
+			my @invalid_meta_keys = grep { /^<.*>$/ } keys %{$rule->{properties}};
+			push(@errors, sprintf(
+				"Invalid meta-keys in properties of rule #%d in #C{%s.%s}: %s",
+				$rule_idx+1, $overrides_base, $matching_key, join(', ', @invalid_meta_keys)
+			)) if @invalid_meta_keys;
+		}
+	}
+
+	# Validate specific type sections
+	for my $type_key (grep { in_array($_, @valid_types_plural) } keys %$config) {
+		if (ref($config->{$type_key}) ne 'HASH') {
+			push(@errors, sprintf(
+				"#C{%s.%s} must be a hashmap of named configurations",
+				$overrides_base, $type_key
+			));
+			next;
+		}
+		my @invalid_explicit_type_contents = grep {
+			!ref($config->{$type_key}{$_}) eq 'HASH'
+		} keys %{$config->{$type_key}};
+		push(@errors, sprintf(
+			"Invalid configurations in #C{%s.%s} (must be hashmaps): %s",
+			$overrides_base, $type_key, join(', ', @invalid_explicit_type_contents)
+		)) if @invalid_explicit_type_contents;
+	}
+
+	# Assemble and report errors if any
+	bail(
+		"Errors found in cloud config overrides:\n%s",
+		join("\n", map {"[[  - >>$_"} @errors)
+	) if @errors;
+
+	return 1;
+}
+
+# }}}
 
 # _add_extended_cloud_config - Adds extended cloud config from environment to the given config {{{
 sub _add_extended_cloud_config {

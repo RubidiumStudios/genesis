@@ -125,6 +125,12 @@ sub compilation_definition {
 }
 
 # }}}
+# overrides_base - Returns the base path for overrides in the environment configuration {{{
+sub overrides_base {
+	return 'bosh-configs.director_cloud';
+}
+
+# }}}
 # }}}
 
 # Private Methods {{{
