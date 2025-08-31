@@ -955,10 +955,18 @@ sub _add_extended_cloud_config {
 
 			# If we haven't processed it, check if we can base it on an existing target
 			if (my $src_target = delete($defn->{'<based-on>'})) {
-				my $src_name = $type_mapping{$type}{explicit_name}
-					? $src_target
-					: $self->name_for($prefix, $src_target);
-				if (!grep { $_->{name} eq $src_name} @{$config->{$group_label} // []}) {
+				# Check for environment-prefixed and explicit names for the source target
+				my @candidates = ();
+				if ($type_mapping{$type}{explicit_name}) {
+					push(@candidates, $src_target, $self->name_for($prefix, $src_target));
+				} else {
+					push(@candidates, $self->name_for($prefix, $src_target), $src_target);
+				}
+				my (undef, $found) = compare_arrays(\@candidates, [map {$_->{name}} @{$config->{$group_label} // []}]);
+				my $src_name = $found->[0];
+
+				if (!$src_name) {
+					# FIXME: Check for both explicit and env-prefixed names for the source target?
 					if (exists($extended_config->{$type}{$src_target})) {
 						bail(
 							"Cyclic dependency detected for target '%s' in extended cloud config for type '%s'",
@@ -980,17 +988,12 @@ sub _add_extended_cloud_config {
 				# Find the source definition and merge with it
 				my ($src_defn) = grep { $_->{name} eq $src_name } @{$config->{$group_label}};
 				if ($src_defn) {
-					$defn = { %$src_defn, %$defn };
+					$defn = deep_merge($src_defn, $defn);
 				}
 			}
 
-			# Process the definition using the appropriate method
-			my $method = $type.'_definition';
-			my $processed_defn = $self->$method($target, %$defn);
-			if ($processed_defn && keys %$processed_defn) {
-				$config->{$group_label} //= [];
-				push @{$config->{$group_label}}, $processed_defn;
-			}
+			$config->{$group_label} //= [];
+			push @{$config->{$group_label}}, {%$defn, name => $name};
 		}
 	}
 
@@ -1009,7 +1012,7 @@ sub _config_definition {
 		$maps{cloud_properties_for_iaas}->%*
 	) if ref($maps{cloud_properties_for_iaas}) eq 'HASH';
 
-	$self->_process_config_overrides($type, $target, \%config);
+	%config = $self->_process_config_overrides($type, $target, \%config)->%*;
 
 	# After any overrides, we need to make sure there is a configuration to set
 	# Return an empty list if there is no configuration.
