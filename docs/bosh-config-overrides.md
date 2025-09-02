@@ -326,9 +326,9 @@ bosh-configs:
       ocf-core:
         allocation:
           vms_per_subnet: Customize per-subnet VM distribution
-					  ocfp-0: 30
-						ocfp-1: 30
-						ocfp-2: 20
+            ocfp-0: 30
+            ocfp-1: 30
+            ocfp-2: 20
 ```
 
 ### Custom Disk Types
