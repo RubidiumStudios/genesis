@@ -225,8 +225,7 @@ This pattern allows you to:
 
 ### File Extension Handling
 
-- Inherited file names automatically strip `.yml` extensions
-- Files are resolved with `.yml` extension added back
+- File extensions are optional - `.yml` is optional, but not recommended.
 - Example: `inherits: ["common-config"]` resolves to `./common-config.yml`
 
 ### Error Handling
