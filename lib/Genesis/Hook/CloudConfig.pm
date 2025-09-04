@@ -268,12 +268,6 @@ sub network_definition {
 	my $strategy = delete($rules{strategy}) // 'generic';
 	my $name_prefix = delete($rules{name_prefix});
 
-	# FIXME: Should this just die if the strategy does not match?
-	if (($strategy eq 'ocfp') xor $self->env->is_ocfp) {
-		# This is an ocfp deployment, but the network is not an ocfp network (or vice versa)
-		return ();
-	}
-
 	my $network_id = defined($name_prefix)
 		? $name_prefix.$target
 		: $self->name_for('net', $target);
@@ -283,6 +277,12 @@ sub network_definition {
 		type => $strategy eq 'vip' ? 'vip' : 'manual',
 	};
 	return $config if ($strategy eq 'vip');
+
+	# FIXME: Should this just die if the strategy does not match?
+	if (($strategy eq 'ocfp') xor $self->env->is_ocfp) {
+		# This is an ocfp deployment, but the network is not an ocfp network (or vice versa)
+		return ();
+	}
 
 	# This allows kit-provided strategies to be provided.
 	my $strategy_method = "_build_${strategy}_network_definition";
@@ -1619,6 +1619,7 @@ sub _process_network_subnets {
 	# - Transform any subnets that have the same CIDR range into a Logical Subnet Amalgamation (LSA).
 
 	for my $network (@$networks) {
+		next if ($network->{type}//'') eq 'vip'; # Skip VIP networks
 		bail(
 			"Network definition is not a hashref: %s", $network
 		) unless ref($network) eq 'HASH' && exists $network->{subnets};
