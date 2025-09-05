@@ -14,6 +14,10 @@ use Genesis qw(
 );
 use Genesis::State qw/in_callback envset under_test/;
 use Service::Vault;
+use POSIX qw(strftime);
+use Time::Piece;
+use JSON::PP ();
+use Sys::Hostname ();
 
 ### Class Methods {{{
 
@@ -707,6 +711,69 @@ sub cleanup {
 	my ($out, $rc, $err) = $self->execute({interactive => 1},@cmd);
 	return wantarray ? ($out, $rc, $err) : !$rc;
 }
+
+# check_network_lock - check for existing network lock {{{
+sub check_network_lock {
+	my ($self, %opts) = @_;
+	my $lock_key = 'network-claim-lock';
+	my $lock_path = $self->exodus_path . ':' . $lock_key;
+	my $max_age = $opts{max_lock_age} // 1800; # 30 minutes default
+
+	my $existing_lock_json = eval { $self->vault->get($lock_path, 'value') };
+	return { status => 'unlocked' } unless $existing_lock_json;
+
+	my $lock = JSON::PP->new->decode($existing_lock_json);
+	my $lock_time = Time::Piece->strptime($lock->{at}, '%Y-%m-%d %H:%M:%S %z');
+	my $lock_age = time - $lock_time->epoch;
+
+	return {
+		status => $lock_age > $max_age ? 'stale' : 'locked',
+		lock => $lock,
+		age => $lock_age,
+		description => sprintf(
+			"%s by %s@%s (env: %s, pid: %d)",
+			strfuzzytime($lock->{at}),
+			$lock->{user}, $lock->{hostname},
+			$lock->{env}, $lock->{pid}
+		)
+	};
+}
+# }}}
+
+# acquire_network_lock - acquire lock for network claim updates {{{
+sub acquire_network_lock {
+	my ($self) = @_;
+
+	# Check current lock status
+	my $lock_status = $self->check_network_lock();
+	bail(
+		"Cannot acquire network claim lock: it was locked %s.\n",
+		$lock_status->{description}
+	) unless $lock_status->{status} eq 'unlocked';
+
+	# Acquire the lock
+	my $lock_key = 'network-claim-lock';
+	my $lock_path = $self->exodus_path . ':' . $lock_key;
+
+	my $lock = {
+		at       => strftime('%Y-%m-%d %H:%M:%S %z', gmtime()),
+		hostname => Sys::Hostname::hostname(),
+		user     => $ENV{USER} // 'unknown',
+		pid      => $$,
+		env      => $self->env ? $self->env->name : 'unknown'
+	};
+
+	my $lock_json = JSON::PP->new->encode($lock);
+	$self->vault->set($lock_path, $lock_json);
+}
+# }}}
+
+# clear_network_lock - clear network claim lock {{{
+sub clear_network_lock {
+	my ($self) = @_;
+	$self->vault->clear($self->exodus_path . ':network-claim-lock');
+}
+# }}}
 
 sub env {
 	return $_[0]->{env};

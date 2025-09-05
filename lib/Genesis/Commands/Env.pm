@@ -803,107 +803,154 @@ sub deploy {
 			# Refactor this to use _check_cloud_config and _fix_cloud_config like the cpi stuff above
 			if ($env->has_hook('cloud-config')) {
 				$env->notify("checking cloud configs for #C{%s} deployment...", $env->name);
-				($cloud_config, $network_map) = $env->run_hook('cloud-config');
-
-				# TODO: Support multiple cloud configs
-				my $cloud_config_name = $env->name.'.'.$env->type;
-				my $cloud_config_dir = $env->workpath('cloud-configs');
-				my $diff_dir = $env->workpath('cloud-config-diffs');
-				my $new_path = "$cloud_config_dir/${cloud_config_name}.yml";
-				my $new_path_diff = "$diff_dir/${cloud_config_name}.yml";
-				info "[[  - >>cloud config synthesized.";
-
-				mkdir($cloud_config_dir) unless -d $cloud_config_dir;
-				mkdir($diff_dir) unless -d $diff_dir;
-				mkfile_or_fail($new_path, 0644, $cloud_config);
-				my ($out, $rc, $err) = run( 'spruce merge --skip-eval $1 > $2',$new_path,$new_path_diff);
-				bail "Error generating cloud config for diff: %s", $err//$out if $rc;
-				info "[[  - >>checking for existing cloud config on #M{%s} BOSH director...", $env->bosh->{alias};
-				if ($env->bosh->has_config('cloud',$cloud_config_name)) {
-					my $old_path = "$cloud_config_dir/current-${cloud_config_name}.yml";
-					info "[[  - >>comparing generated cloud config with existing cloud config...";
-					$env->bosh->download_configs($old_path,'cloud',$cloud_config_name);
-					my ($out, $rc, $err) = run(
-						fake_tty("$cloud_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path_diff)
+				info({pending=>1},
+					"[[  - >>checking for existing network claims lock on #M{%s} BOSH director...",
+					$env->bosh->{alias}
+				);
+				my $current_lock = $env->bosh->check_network_lock;
+				if ($current_lock->{status} eq 'unlocked') {
+					info "#G{available}";
+				} elsif ($current_lock->{status} eq 'locked') {
+					info "#r{locked} %s", $current_lock->{description};
+					bail(
+						"Network claims are currently locked -- cannot proceed with deployment!"
 					);
-					bail "Error comparing cloud configs: %s", $err if $rc;
-
-					$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/mrs;
-					if ($out) {
-						$out =~ s/\(root level\)/<root>/m;
-						info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
-						if ($dryrun) {
-							dryrun(
-								"Cloud config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
-								$out
-							);
-						} else {
-							if (in_controlling_terminal || !$options{'yes'}) {
-								prompt_for_boolean(
-									"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
-									1
-								) or bail "Aborted by user!";
-							}
-							info(
-								"Uploading new cloud config to #M{%s} BOSH director...",
-								$env->bosh->{alias}
-							);
-							eval {
-								# Upload the new cloud config
-								$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
-							} or bail(
-								"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
-								$cloud_config_name,
-								fix_wrap($@),
-								slurp($new_path)
-							);
-							info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
-						}
-					} else {
-						info "[[  - >>no changes required in cloud config; proceeding with deploy.\n";
-					}
-				} elsif ($dryrun) {
-					dryrun(
-						"Cloud config missing.  This would be created and uploaded if not in dry-run mode.",
-					);
-				} else {
-					info(
-						"[[  - >>uploading new cloud config to #M{%s} BOSH director...",
-						$env->bosh->{alias}
-					);
-					eval {
-						$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
-					} or bail(
-						"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
-						$cloud_config_name,
-						fix_wrap($@),
-						slurp($new_path)
-					);
-					info "[[  - >>cloud config for #C{%s} deployment has been created.\n", $env->name;
-				}
-
-				if (ref($network_map) eq 'HASH') {
+				} elsif ($current_lock->{status} eq 'stale') {
+					info "#y{locked (stale)} %s", $current_lock->{description};
 					if ($dryrun) {
 						dryrun(
-							"Network map would be updated on the BOSH director if not in dry-run mode."
+							"Network claims are locked with a stale lock: %s\n\nThis would be fixed if not in dry-run mode.",
+							$current_lock->{description}
 						);
 					} else {
-						# Update the network map on the director's exodus network data
-						$env->notify(
-							"submitting network claims for this deployment to #M{%s} BOSH director...",
-							$env->bosh->{alias}
-						);
-						eval {$env->bosh->vault->set_path(
-							$env->bosh->exodus_path.'/network', $network_map, flatten => 1, clear => 1
-						);};
-						if ($@) {
-							info("  - #R{failed to update network map}:\n\n%s", $@);
-						} else {
-							info("  - #G{network map successfully updated}");
+						if (in_controlling_terminal || !$options{'yes'}) {
+							prompt_for_boolean(
+								"Clear the stale network claims lock and continue with deployment? [y|n]",
+								0
+							) or bail "Aborted by user!";
 						}
+						$env->bosh->clear_network_lock;
+						$env->notify("checking cloud configs for #C{%s} deployment (continued)...", $env->name);
+						info "[[  - >>stale network claims lock cleared.";
 					}
 				}
 
+				# Place network-update lock here, to prevent concurrent updates to the network data
+				info "[[  - >>acquiring network claims lock on #M{%s} BOSH director...", $env->bosh->{alias};
+				$env->bosh->acquire_network_lock();
+
+				eval {
+					($cloud_config, $network_map) = $env->run_hook('cloud-config');
+
+					# TODO: Support multiple cloud configs
+					my $cloud_config_name = $env->name.'.'.$env->type;
+					my $cloud_config_dir = $env->workpath('cloud-configs');
+					my $diff_dir = $env->workpath('cloud-config-diffs');
+					my $new_path = "$cloud_config_dir/${cloud_config_name}.yml";
+					my $new_path_diff = "$diff_dir/${cloud_config_name}.yml";
+					info "[[  - >>cloud config synthesized.";
+
+					# Wrap this in an eval block to ensure the lock is cleared on error
+					mkdir($cloud_config_dir) unless -d $cloud_config_dir;
+					mkdir($diff_dir) unless -d $diff_dir;
+					mkfile_or_fail($new_path, 0644, $cloud_config);
+					my ($out, $rc, $err) = run( 'spruce merge --skip-eval $1 > $2',$new_path,$new_path_diff);
+					bail "Error generating cloud config for diff: %s", $err//$out if $rc;
+					info "[[  - >>checking for existing cloud config on #M{%s} BOSH director...", $env->bosh->{alias};
+					if ($env->bosh->has_config('cloud',$cloud_config_name)) {
+						my $old_path = "$cloud_config_dir/current-${cloud_config_name}.yml";
+						info "[[  - >>comparing generated cloud config with existing cloud config...";
+						$env->bosh->download_configs($old_path,'cloud',$cloud_config_name);
+						my ($out, $rc, $err) = run(
+							fake_tty("$cloud_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path_diff)
+						);
+						bail "Error comparing cloud configs: %s", $err if $rc;
+
+						$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/mrs;
+						if ($out) {
+							$out =~ s/\(root level\)/<root>/m;
+							info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
+							if ($dryrun) {
+								dryrun(
+									"Cloud config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
+									$out
+								);
+							} else {
+								if (in_controlling_terminal || !$options{'yes'}) {
+									prompt_for_boolean(
+										"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
+										1
+									) or bail "Aborted by user!";
+								}
+								info(
+									"Uploading new cloud config to #M{%s} BOSH director...",
+									$env->bosh->{alias}
+								);
+								eval {
+									# Upload the new cloud config
+									$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
+								} or bail(
+									"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
+									$cloud_config_name,
+									fix_wrap($@),
+									slurp($new_path)
+								);
+								info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
+							}
+						} else {
+							info "[[  - >>no changes required in cloud config; proceeding with deploy.\n";
+						}
+					} elsif ($dryrun) {
+						dryrun(
+							"Cloud config missing.  This would be created and uploaded if not in dry-run mode.",
+						);
+					} else {
+						info(
+							"[[  - >>uploading new cloud config to #M{%s} BOSH director...",
+							$env->bosh->{alias}
+						);
+						eval {
+							$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
+						} or bail(
+							"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
+							$cloud_config_name,
+							fix_wrap($@),
+							slurp($new_path)
+						);
+						info "[[  - >>cloud config for #C{%s} deployment has been created.\n", $env->name;
+					}
+
+					if (ref($network_map) eq 'HASH') {
+						if ($dryrun) {
+							dryrun(
+								"Network map would be updated on the BOSH director if not in dry-run mode."
+							);
+						} else {
+							# Update the network map on the director's exodus network data
+							$env->notify(
+								"submitting network claims for this deployment to #M{%s} BOSH director...",
+								$env->bosh->{alias}
+							);
+							eval {$env->bosh->vault->set_path(
+								$env->bosh->exodus_path.'/network', $network_map, flatten => 1, clear => 1
+							);};
+							if ($@) {
+								info("  - #R{failed to update network map}\n");
+								bail("\nCannot continue without a valid network map:\n\n%s", $@);
+							}
+							info("  - #G{network map successfully updated }#Gi{(lock removed)}\n");
+							$env->bosh->clear_network_lock();
+						}
+					}
+				}; # end eval
+
+				if ($@) {
+					my $err = $@;
+					# Clear network-update lock here (even if there was an error)
+					info("[[  - >>releasing network claims lock on #M{%s} BOSH director due to error.", $env->bosh->{alias});
+					$env->bosh->clear_network_lock();
+					die $@;
+				}
 			} else {
 				warning(
 					"Kit %s does not provide a cloud-config hook, so cloud configs will ".
