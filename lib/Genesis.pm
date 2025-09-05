@@ -1098,7 +1098,7 @@ sub save_to_yaml_file {
 	my $i=1; while (-f "$file.$i.json") {$i++};
 	my $tmpfile = "$file.$i.json";
 	save_to_json_file($data,$tmpfile);
-	run('spruce merge --skip-eval "$1" | perl -I$GENESIS_LIB -MGenesis -e \'my $c=do{local $/;<STDIN>};$c=~s/\s*\z/\n/ms;print $c\' > $2; rm "$1"', $tmpfile, $file);
+	run('spruce merge --skip-eval "$1" | perl -e \'my $c=do{local $/;<STDIN>};$c=~s/\s*\z/\n/ms;print $c\' > $2; rm "$1"', $tmpfile, $file);
 
 	# Fix orphaned ')) on new lines - join them with previous line
 	my $content = slurp($file);
@@ -1396,6 +1396,7 @@ sub deep_merge {
 	for my $removed_key (grep {! defined $flat_base->{$_}} keys %$flat_base) {
 		delete $flat_base->{$removed_key};
 	}
+	# FIXME: This doesn't handle arrays of hashes properly -- it just overwrites them in position order.
 	while (my $overlay = shift @overlays) {
 		if (ref($overlay) eq 'HASH') {
 			my $flat_overlay = flatten($overlay);
