@@ -30,8 +30,18 @@ sub add_files_if_wants {
 sub add_files_if_exists {
 	my ($self, @files) = @_;
 	for my $file (@files) {
-		next unless -f $self->kit->path($file);
-		$self->add_files($file);
+		my $absfile = $file;
+		if ($file =~ m{^/}) {
+			my $env_base = $self->env->path();
+			# Check if the path is under the env base dir
+			if ($file !~ qr/^\Q$env_base\E/) {
+				debug("Refusing to add absolute path outside of env: %s", $file);
+				next;
+			}
+		} else {
+			$absfile = $self->kit->path($file);
+		}
+		$self->add_files($file) if -f $absfile
 	}
 }
 
