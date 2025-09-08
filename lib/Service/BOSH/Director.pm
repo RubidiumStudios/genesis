@@ -753,7 +753,6 @@ sub acquire_network_lock {
 
 	# Acquire the lock
 	my $lock_key = 'network-claim-lock';
-	my $lock_path = $self->exodus_path . ':' . $lock_key;
 
 	my $lock = {
 		at       => strftime('%Y-%m-%d %H:%M:%S %z', gmtime()),
@@ -764,7 +763,7 @@ sub acquire_network_lock {
 	};
 
 	my $lock_json = JSON::PP->new->encode($lock);
-	$self->vault->set($lock_path, $lock_json);
+	$self->vault->set($self->exodus_path, $lock_key, $lock_json);
 }
 # }}}
 
