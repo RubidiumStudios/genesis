@@ -836,8 +836,11 @@ sub deploy {
 				}
 
 				# Place network-update lock here, to prevent concurrent updates to the network data
-				info "[[  - >>acquiring network claims lock on #M{%s} BOSH director...", $env->bosh->{alias};
+				info({pending=>1},
+					"[[  - >>acquiring network claims lock on #M{%s} BOSH director...", $env->bosh->{alias}
+				);
 				$env->bosh->acquire_network_lock();
+				info "#G{done}";
 
 				eval {
 					($cloud_config, $network_map) = $env->run_hook('cloud-config');
@@ -882,6 +885,10 @@ sub deploy {
 										1
 									) or bail "Aborted by user!";
 								}
+								my $last_check = $env->bosh->check_network_lock;
+								bail(
+									"Network claims lock was lost since last checked (may have become stale and removed) -- cannot proceed with deployment!"
+								) if ($last_check->{status} eq 'unlocked');
 								info(
 									"Uploading new cloud config to #M{%s} BOSH director...",
 									$env->bosh->{alias}
@@ -938,8 +945,8 @@ sub deploy {
 								info("  - #R{failed to update network map}\n");
 								bail("\nCannot continue without a valid network map:\n\n%s", $@);
 							}
-							info("  - #G{network map successfully updated }#Gi{(lock removed)}\n");
 							$env->bosh->clear_network_lock();
+							info("  - #G{network map successfully updated }#Gi{(lock removed)}\n");
 						}
 					}
 				}; # end eval
@@ -947,9 +954,15 @@ sub deploy {
 				if ($@) {
 					my $err = $@;
 					# Clear network-update lock here (even if there was an error)
-					info("[[  - >>releasing network claims lock on #M{%s} BOSH director due to error.", $env->bosh->{alias});
-					$env->bosh->clear_network_lock();
-					die $@;
+					if ($env->bosh->network_locked_by_me) {
+						$env->notify("cleaning up...");
+						info({pending=>1},
+							"[[  - >>releasing network claims lock on #M{%s} BOSH director...", $env->bosh->{alias}
+						);
+						$env->bosh->clear_network_lock();
+						info "#G{done}";
+					}
+					die $err;
 				}
 			} else {
 				warning(

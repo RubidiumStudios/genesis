@@ -11,6 +11,7 @@ use Genesis qw(
 		save_to_yaml_file mkfile_or_fail
     is_valid_uri tcp_listening workdir
 		parse_fixed_width_table by_semver
+		strfuzzytime
 );
 use Genesis::State qw/in_callback envset under_test/;
 use Service::Vault;
@@ -716,10 +717,9 @@ sub cleanup {
 sub check_network_lock {
 	my ($self, %opts) = @_;
 	my $lock_key = 'network-claim-lock';
-	my $lock_path = $self->exodus_path . ':' . $lock_key;
 	my $max_age = $opts{max_lock_age} // 1800; # 30 minutes default
 
-	my $existing_lock_json = eval { $self->vault->get($lock_path, 'value') };
+	my $existing_lock_json = eval { $self->vault->get($self->exodus_path, $lock_key) };
 	return { status => 'unlocked' } unless $existing_lock_json;
 
 	my $lock = JSON::PP->new->decode($existing_lock_json);
@@ -764,6 +764,18 @@ sub acquire_network_lock {
 
 	my $lock_json = JSON::PP->new->encode($lock);
 	$self->vault->set($self->exodus_path, $lock_key, $lock_json);
+}
+# }}}
+
+# network_locked_by_me - check if the current network lock is held by this process {{{
+sub network_locked_by_me {
+	my ($self) = @_;
+	my $lock_status = $self->check_network_lock();
+	return 0 if $lock_status->{status} eq 'unlocked';
+	return $lock_status->{lock}{pid} == $$
+		&& $lock_status->{lock}{hostname} eq Sys::Hostname::hostname()
+		&& $lock_status->{lock}{user} eq ($ENV{USER} // 'unknown')
+		&& $lock_status->{lock}{env} eq ($self->env ? $self->env->name : 'unknown');
 }
 # }}}
 
