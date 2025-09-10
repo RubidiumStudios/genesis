@@ -6,15 +6,20 @@ use base 'Genesis::Kit';
 use Genesis;
 use Genesis::Term;
 use Genesis::Helpers;
+use Archive::Tar;
 
 sub new {
 	my ($class, %opts) = @_;
-	bless({
+
+	my $tar = $class->_validate_tar_archive(\%opts);
+	my $obj =	bless({
 		name     => $opts{name},
 		version  => $opts{version},
-		archive  => $opts{archive},
+		source   => $opts{archive},
 		provider => $opts{provider},
+		tar      => $tar,
 	}, $class);
+
 }
 
 sub local_kits {
@@ -77,13 +82,51 @@ sub extract {
 	my ($self) = @_;
 	return if $self->{root};
 	$self->{root} = workdir();
-	run({ onfailure => 'Could not read kit file' },
-	    'tar -xz -C "$1" --strip-components 1 -f "$2"',
-	    $self->{root}, $self->{archive});
-
+	my $basedir = sprintf("%s-%s/", $self->{name}, $self->{version});
+	$self->{tar}->remove($basedir);
+	$self->{tar}->setcwd($self->{root});
+	for my $file (sort $self->{tar}->list_files) {
+		$self->{tar}->extract_file($file, "$self->{root}/".($file =~ s{^$basedir}{}r));
+	}
 	Genesis::Helpers->write("$self->{root}/.helper");
 	return 1;
 }
+
+### Private Class Methods
+sub _validate_tar_archive {
+	my($class, $opts) = @_;
+	bail("Missing required option: archive") unless $opts->{archive};
+	bail("Archive file does not exist: $opts->{archive}") unless -f $opts->{archive};
+	my $tar = eval{Archive::Tar->new($opts->{archive})};
+	bail("Archive file %s does not appear valid: %s", $opts->{archive}, $@) if $@;
+
+	my ($basedir, @o)  = grep {$_ =~ m{/$} && $_ !~ m{/.*/}} $tar->list_files;
+	bail("Archive file %s does not appear to be a valid Genesis kit (missing base directory)", $opts->{archive}) unless $basedir;
+	my ($base_name, $base_version) = $basedir =~ m{^([^/]+)-(\d+(\.\d+(\.\d+([.-]rc[.-]?\d+)?)?)?)/$} if $basedir;
+	if ($opts->{name} && $opts->{version}) {
+		$opts->{version} =~ s/^v//; # Strip leading v if any
+		bail("Archive file %s name/version (%s/%s) does not match provided name/version (%s/%s)",
+			$opts->{archive}, $base_name // 'unknown', $base_version // 'unknown',
+			$opts->{name}, $opts->{version}
+		) if (!$base_name || !$base_version || $base_name ne $opts->{name} || $base_version ne $opts->{version});
+	} elsif (!$base_name || !$base_version) {
+		bail("Archive file %s does not appear to be a valid Genesis kit (missing base director 'name-version')", $opts->{archive});
+	} else {
+		# Use from archive
+		$opts->{name} = $base_name;
+		$opts->{version} = $base_version;
+	}
+	bail(
+		"Archive file %s does not appear to be a valid Genesis kit (missing kit.yml in base directory %s)",
+		$opts->{archive}, $basedir
+	) unless $tar->contains_file("$basedir"."kit.yml");
+
+	# TODO: Validate name/version aginst kit.yml contents?
+
+	return $tar;
+}
+
+
 
 1;
 

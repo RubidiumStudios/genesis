@@ -10,7 +10,7 @@ use Genesis::Helpers;
 sub new {
 	my ($class, $path) = @_;
 	bless({
-		path => $path,
+		source => $path,
 	}, $class);
 }
 
@@ -44,7 +44,7 @@ sub extract {
 
 	$self->{root} = workdir();
 	run({ onfailure => 'Could not copy dev/ kit directory' },
-		'cp -a "$1/" "$2/dev"', $self->{path}, $self->{root});
+		'cp -a "$1/" "$2/dev"', $self->{source}, $self->{root});
 	$self->{root} .= "/dev";
 
 	Genesis::Helpers->write("$self->{root}/.helper");
