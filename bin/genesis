@@ -1320,7 +1320,12 @@ define_command("build-kit", {
 	options => [
 		'version|v=s' => { argument => ' <semver>', description =>
 			"Specify the explicit version you want created.  If this version already ".
-			"exists locally or remotely, you must also specify --force to recreate it."
+			"exists locally or remotely, you must also specify --force to recreate it.\n\n".
+			"[[#y{Note:} >>If you don't specify a version explicitly, it will determine ".
+			"the next version based on the other options provided and the latest version ".
+			"it finds locally or remotely (whichever is greater), and then prompt you to ".
+			"confirm it before proceeding -- if you are using this in a pipeline, you must ".
+			"specify the version explicitly."
 		},
 
 		'major|M' =>
@@ -1358,6 +1363,11 @@ define_command("build-kit", {
 			"Proceed with compilation even if there are unstaged or uncommitted ".
 			"changes in the working directory, or if the validation of the contents ".
 			"fails.  Normally, Genesis will refuse to continue when this happens.",
+
+		'skip-version-updates' =>
+			"By default, Genesis will update the version numbers in all the ".
+			"hook files and kit.yml file to match the version being built.  Use ".
+			"this option to skip that step.",
 	],
 	no_vault => 1,
 	skip_check_prereqs => 1,
@@ -2125,10 +2135,10 @@ END {
 	my $rc = $?;
 	require Service::Vault::Local;
 	Service::Vault::Local->shutdown_all();
-	
+
 	# Ensure STDIN is restored if it was redirected
 	reset_stdin();
-	
+
 	my $level = envset('QUIET') ? 'ERROR' : 'INFO';
 	logger->configure_log(
 		level => $level,

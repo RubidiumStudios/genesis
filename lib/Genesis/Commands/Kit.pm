@@ -7,6 +7,7 @@ use utf8;
 
 use Genesis;
 use Genesis::Term;
+use Genesis::UI qw/prompt_for_boolean/;
 use Genesis::State;
 use Genesis::Commands;
 use Genesis::Top;
@@ -61,14 +62,16 @@ sub build_kit {
 	check_prereqs(); # TODO: Does this work?
 	command_usage(1, "Missing name option, cannot determine from `pwd`") unless $options{name};
 
+	my $name = delete $options{name};
+
 	my $top = Genesis::Top->new('.');
 	my @remote_versions = map {$_->{version}} ($top->remote_kit_versions(
-		$options{name},
+		$name,
 		include_prereleases=>1,
 		include_drafts=>1
 	));
 	my $local_kits = Genesis::Kit::Compiled->local_kits($top->kit_provider, $target);
-	my @local_versions = grep { semver($_) } (keys %{ $local_kits->{$options{name}} });
+	my @local_versions = grep { semver($_) } (keys %{ $local_kits->{$name} });
 
 	if ($options{version}) {
 		$options{version} =~ s/^v//; # trim any leading 'v'
@@ -100,7 +103,7 @@ sub build_kit {
 		my @semver = semver($latest);
 		if (@semver) {
 			my $locale=(grep {$latest eq $_} @local_versions) ? 'locally' : 'in remote kit source';
-			info "Found latest version of #C{%s} for #M{%s} %s.", $latest, $options{name}, $locale;
+			info "Found latest version of #C{%s} for #M{%s} %s.", $latest, $name, $locale;
 		} else {
 			@semver = (0,0,0,0) unless @semver;
 		}
@@ -114,7 +117,13 @@ sub build_kit {
 		}
 		$options{version} = join('.',@semver[0 .. 2]);
 		$options{version} .= "-rc" . (++$semver[3] % -100000 + 100000) unless $options{final};
+
+		prompt_for_boolean(sprintf(
+			"Selected next version of #C{%s} to be #M{v%s}.  Proceed [y|n]?",
+			$name, $options{version}
+		),1) or bail "Aborted by user.\n";
 	}
+	my $version = delete $options{version};
 
 	unless ($dir) {
 		if ($options{dev}) {
@@ -122,16 +131,16 @@ sub build_kit {
 			bail "$dir does not exist -- cannot continue compiling dev kit.\n" unless -d $dir;
 		} else {
 			$dir = ($options{cwd} || ".");
-			$dir .= "/$options{name}-genesis-kit"
-				if (! -f "$dir/kit.yml" && -d "/$options{name}-genesis-kit");
+			$dir .= "/$name-genesis-kit"
+				if (! -f "$dir/kit.yml" && -d "/$name-genesis-kit");
 		}
 	}
-	info "Preparing to compile #M{%s} kit #C{v%s}...", $options{name}, $options{version};
+	info "Preparing to compile #M{%s} kit #C{v%s}...", $name, $version;
 	my $cc = Genesis::Kit::Compiler->new($dir);
-	my $tar = $cc->compile($options{name}, $options{version}, $target, force => $options{force})
-		or bail "Unable to compile v$options{version} of $options{name} Genesis Kit.\n";
+	my $tar = $cc->compile($name, $version, $target, %options)
+		or bail "Unable to compile v$version of $name Genesis Kit.\n";
 
-	info("Compiled #M{$options{name}} v#C{$options{version}} to #G{$target$tar}\n");
+	info("Compiled #M{$name} v#C{$version} to #G{$target$tar}\n");
 }
 
 sub list_kits {
@@ -233,7 +242,7 @@ sub list_kits {
 				) unless keys(%{$kits{$kit}});
 			}
 			for my $version (sort by_semver keys(%{$kits{$kit}})) {
-				my $c = ($version =~ /[\.-]rc[\.-]?(\d+)$/) 
+				my $c = ($version =~ /[\.-]rc[\.-]?(\d+)$/)
 					? "Y"
 					: ($kits{$kit}{$version}{prerelease} ? "y" : "G");
 				my $d = "";

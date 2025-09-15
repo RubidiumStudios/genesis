@@ -25,6 +25,7 @@ sub new {
 sub local_kits {
 	my ($class, $provider, $path) = @_;
 	$path ||= '.';
+	$path =~ s{/$}{};
 
 	my %kits;
 	for (glob("$path/*")) {
@@ -100,7 +101,7 @@ sub _validate_tar_archive {
 	my $tar = eval{Archive::Tar->new($opts->{archive})};
 	bail("Archive file %s does not appear valid: %s", $opts->{archive}, $@) if $@;
 
-	my ($basedir, @o)  = grep {$_ =~ m{/$} && $_ !~ m{/.*/}} $tar->list_files;
+	my ($basedir, @o) = grep {$_ !~ m{/.}} map {$_->full_path() =~ s{/*$}{/}r} grep {$_->is_dir} $tar->get_files;
 	bail("Archive file %s does not appear to be a valid Genesis kit (missing base directory)", $opts->{archive}) unless $basedir;
 	my ($base_name, $base_version) = $basedir =~ m{^([^/]+)-(\d+(\.\d+(\.\d+([.-]rc[.-]?\d+)?)?)?)/$} if $basedir;
 	if ($opts->{name} && $opts->{version}) {
@@ -119,7 +120,7 @@ sub _validate_tar_archive {
 	bail(
 		"Archive file %s does not appear to be a valid Genesis kit (missing kit.yml in base directory %s)",
 		$opts->{archive}, $basedir
-	) unless $tar->contains_file("$basedir"."kit.yml");
+	) unless $tar->contains_file("${basedir}kit.yml");
 
 	# TODO: Validate name/version aginst kit.yml contents?
 

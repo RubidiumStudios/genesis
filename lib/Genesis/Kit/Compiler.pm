@@ -8,6 +8,9 @@ use Genesis::Kit::Dev;
 use Genesis::Env::Secrets::Parser::FromKit;
 use Genesis::Env::Secrets::Plan;
 
+use Archive::Tar;
+use File::Find ();
+
 sub new {
 	my ($class, $root) = @_;
 	bless({
@@ -196,34 +199,46 @@ sub _lookup_test_params {
 	return struct_lookup($self->{__test_params}, $key, $default);
 }
 
-sub _prepare {
-	my ($self, $relpath) = @_;
-	$self->{relpath} = $relpath;
+sub _select_files {
+	my ($self) = @_;
 
-	run(
-		{ onfailure => 'Unable to set up a temporary working copy of the kit source files' },
-		'rm -rf "$2/$3" && cp -a "$1" "$2/$3"',
-		$self->{root}, $self->{work}, $self->{relpath});
-
-	my @files = map { "$self->{work}/$self->{relpath}/$_" } qw(ci .git .gitignore spec devtools);
+	my @exclude = map { "$self->{root}/$_" } qw(ci .git .gitignore spec devtools);
 
 	my $meta;
 	eval {$meta = load_yaml_file("$self->{root}/kit.yml"); };
 	if (! $@ && $meta && $meta->{exclude_paths} && ref($meta->{exclude_paths}) eq "ARRAY") {
 		for (@{$meta->{exclude_paths}}) {
 			next if /(?:^|\/)\.\.\//; # don't let kits delete out of scope
-			push(@files, "$self->{work}/$self->{relpath}/$_");
+			push(@exclude, "$self->{root}/$_");
 		}
 	}
 
-	push @files, map {"$self->{work}/$self->{relpath}/$_"} lines(run(
+	push @exclude, map {"$self->{root}/$_"} lines(run(
 		{ onfailure => 'Unable to determine what files to clean up before compiling the kit' },
 		'git -C "$1" clean -xdn | sed -e "s/Would remove //"', $self->{root}
 	));
-	run(
-		{ onfailure => 'Unable to clean up work directory before compiling the kit' },
-		'rm -rf "$@"', @files
+
+	trace(
+		"Excluding the following paths from the kit:\n".
+		join("\n", map {"  - $_"} sort @exclude)
 	);
+
+	# Build regexp pattern for dir exclusions, and lookup table for files.
+	my $exclude_pattern = join('|', map { quotemeta($_ =~ s{/$}{}r) } grep { -d $_ } @exclude);
+	my $exclude_re = qr/^(?:$exclude_pattern)(?:\/|$)/;
+	my %exclude_files = map { $_ => 1 } grep { -f $_ } @exclude;
+
+	my @all_files = ();
+	File::Find::find (sub {
+		return if $exclude_files{$File::Find::name};
+		return if $exclude_re && $File::Find::name =~ $exclude_re;
+		return if $File::Find::name eq $self->{root}; # skip root dir itself
+
+		# Strip the root path prefix
+		my $filename = substr($File::Find::name, length($self->{root} =~ s{/*}{/}r) + 1);
+		push @all_files, $filename;
+	}, $self->{root});
+	return @all_files;
 }
 
 sub compile {
@@ -235,7 +250,7 @@ sub compile {
 	$self->validate($name,$version) || $opts{force} or return undef;
 
 	# Update hook package lines if git repo is clean
-	if ($self->{git_clean}) {
+	if ($self->{git_clean} && !$opts{'skip-version-updates'}) {
 		$self->_update_version($version);
 		$self->_update_hook_packages($name, $version);
 		$self->_prepare_hook_commit($version);
@@ -243,13 +258,26 @@ sub compile {
 		warning "Not updating version in perl hooks due to uncommitted changes in working directory";
 	}
 
-	$self->_prepare("$name-$version");
+	my $base_dir = "$name-$version/";
+	my @files = $self->_select_files();
+	my $tar = Archive::Tar->new;
+	$tar->setcwd($self->{root});
+	$tar->add_files('.');
+	$tar->rename('.' => $base_dir);
+	$tar->chown('uuuuuuuu:gggggggg');
 
-	run({ onfailure => 'Unable to compile final kit tarball' },
-		'tar -czf "$1/$3.tar.gz" -C "$2" "$3/"',
-		$outdir, $self->{work}, $self->{relpath});
+	# Add and remap the files to be under the base dir
+	for my $path (sort @files) {
+		my ($file) = $tar->add_files($path);
+		my $full_path = "$base_dir".$file->full_path;
+		$full_path =~ s{/*$}{/} if $file->is_dir;
+		$file->rename($full_path);
+		$file->chown('uuuuuuuu:gggggggg');
+	}
 
-	return "$self->{relpath}.tar.gz";
+	my $filename = "$name-$version.tar.gz";
+	$tar->write($filename, COMPRESS_GZIP);
+	return $filename;
 }
 
 sub _update_hook_packages {
@@ -270,7 +298,9 @@ sub _update_hook_packages {
 		$filename =~ s/\.pm$//;
 
 		my $package_name = $self->_generate_package_name($filename, $kit_type);
-		my $new_package_line = "package $package_name v$version;";
+		my ($semver, $extra) = $version =~ /^((?:\d+)\.(?:\d+)\.(?:\d+))(?:-(.+))?$/;
+		my $new_package_line = "package $package_name v$semver;";
+		$new_package_line .= " # $extra" if $extra;
 
 		if ($self->_update_package_line($hook_file, $new_package_line)) {
 			$updated_files++;
