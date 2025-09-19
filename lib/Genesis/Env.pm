@@ -3621,7 +3621,7 @@ sub update_deployment_exodus {
 			$action eq 'deploy'
 				? "\nThis may be resolved by deploying again, or it may be a permissions issue while trying to ".
 					"write to vault path '".$self->exodus_base."'\n"
-				: '\nThis may be resolved by terminating again, or it may be a permissions issue while trying to '.
+				: "\nThis may be resolved by terminating again, or it may be a permissions issue while trying to ".
 					"write to vault path '".$self->exodus_base."'\n"
 		);
 	}

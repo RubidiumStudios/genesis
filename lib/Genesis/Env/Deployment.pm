@@ -90,9 +90,12 @@ sub new {
 
 	# Validate the input data has all the required fields
 	my @missing = grep { !exists $data{$_} } qw(
-		action result genesis_version reason
-		kit user manifest
+		action result genesis_version reason user
 	);
+	push @missing, grep { !exists $data{$_} } qw(
+		kit manifest
+	) if $data{action} eq 'deploy';
+
 	# Kit and user are hashrefs with their own required fields
 	push @missing, map { "kit.$_" } grep {ref($data{kit}) eq 'HASH' && !exists $data{kit}{$_}} qw(
 		id name version is_dev features
