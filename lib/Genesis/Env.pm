@@ -4791,14 +4791,21 @@ sub _fix_secrets {
 	# secrets), and import them if they're not in the vault but are in credhub
 	# (does import skip secrets already in vault?)
 	if ($self->is_vaultified && grep {$_->{source} eq 'manifest'} ($self->secrets_plan->secrets)) {
+		# Check if there are any credhub secrets for the environment, and if there
+		# are, tell user what to do.  Otherwise, just generate any missing secrets
+		# normally..
+		my $existing_ch_secrets = scalar(grep {$_ !~ /genesis-entombed/} $self->credhub->paths());
 		bail(
 			"Cannot safely fix secrets in vaultified environment with manifest ".
-			"secrets, as they may already exist in credhub.  Please use the ".
-			"'#g{%s add-secrets} #Y{--import}' to import them from ".
-			"credhub manually, then add-secrets again without the #Y{--import} ".
-			"option to add any missing secrets not found in credhub.",
-			scalar($self->get_call_path_with_env)
-		);
+			"secrets, as they already exist in credhub.  Please import them from ".
+			"credhub manually by calling:\n".
+			"[[  >>#g{%s add-secrets} #Y{--import}\n\n".
+			"Once that is done, remove the credhub secrets by calling:\n".
+			"[[  >>#g{%s remove-secrets} #Y{--unused}\n\n".
+			"Then you can this command to fix any remaining invalid secrets (or ".
+			"run #g{%s add-secrets} again without the #Y{--import} option).",
+			(scalar($self->get_call_path_with_env)) x 3
+		)	if $existing_ch_secrets;
 	}
 
 	my ($rotate_results, $rotate_msg) = $self->rotate_secrets(
