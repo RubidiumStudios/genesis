@@ -85,13 +85,13 @@ our @global_options = ( # {{{
 	[
 		"help|h" =>
 			"Show this help screen.",
-		
+
 		"help-full" =>
 			"Show help screen with all available options including global options.",
-		
+
 		"helpful" =>
 			"Show help screen with all available options including global options (same as --help-full, but more fun!).",
-		
+
 		"globals" =>
 			"Show only the global options available to all commands.",
 	],
@@ -195,6 +195,7 @@ sub define_command { # {{{
 
 	$RUN{$name} = sub {
 		$ENV{GENESIS_COMMAND} = $name;
+		$ENV{GENESIS_CALLED_COMMAND} = $CALLED;
 		$ENV{GENESIS_NO_VAULT} = 1 if $PROPS{$name}{no_vault};
 		if ($fn_require) {
 			require $fn_require;
@@ -364,7 +365,7 @@ sub get_args { # {{{
 sub has_option { # {{{
 	# Returns 0 if the option does not exists
 	# Returns 1 if it does and no test is provided
-	# Compares the content of the option to the test if provided, 
+	# Compares the content of the option to the test if provided,
 	# which can be undef (returns true if the option is also undef),
 	# a string (returns true if the option is equal to the string),
 	# or a regex (returns true if the option matches the regex).
@@ -373,7 +374,7 @@ sub has_option { # {{{
 	return 1 unless @_;
 	my $test = shift;
 	if (!defined($COMMAND_OPTIONS->{$option}) || !defined($test)) {
-		return !defined($COMMAND_OPTIONS->{$option}) && !defined($test) 
+		return !defined($COMMAND_OPTIONS->{$option}) && !defined($test)
 	} elsif (ref($test) eq "Regexp") {
 		return $COMMAND_OPTIONS->{$option} =~ $test ? 1 : 0;
 	} else {
@@ -555,7 +556,7 @@ sub command_usage { # {{{
 		[command =>$PROPS{$COMMAND}{options} || [], 'Option'],
 		[legacy  => $PROPS{$COMMAND}{deprecated_options} || []],
 	);
-	
+
 	# Only add global options if explicitly requested or if we're checking help from command line
 	if ($show_global || (!defined($show_global) && get_options->{help})) {
 		push @sources, [global  => [(map {@$_} @global_options[0..$PROPS{$COMMAND}{option_group}])]];
@@ -672,7 +673,7 @@ sub show_global_options { # {{{
 	my $out = "";
 	$out .= wrap("#G{Global Options} - Available to all Genesis commands", terminal_width)."\n\n";
 	$out .= wrap("#g{${\(humanize_bin)}} [<global options...>] #G{<command>} [<command options and args...>]",terminal_width,"#Wku{Usage:} ", 7)."\n";
-	
+
 	my (%options_desc, %options_def, %options_order);
 	my $section = 0;
 	for my $global_opt_group (@global_options) {
@@ -713,9 +714,9 @@ sub show_global_options { # {{{
 			$options_def{$opt_def} = "#y{$opt_label}#B{$opt_arg}";
 		}
 	}
-	
+
 	my $def_width = (sort {$b <=> $a} map {csize($_)} values(%options_def))[0] + 4;
-	
+
 	if (defined $options_order{global}) {
 		$out .= "\n#Wku{Global Options}\n";
 		for (@{$options_order{global}}) {

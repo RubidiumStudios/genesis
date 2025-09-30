@@ -7,14 +7,16 @@ use parent qw(Genesis::Hook);
 use Genesis;
 
 sub init {
-	my ($class, %ops) = @_;
-	my @missing = grep {!defined($ops{$_})} qw/env kit script args/;
-	bug(
-		"Missing required arguments for a perl-based kit hook call: %s",
-		join(", ", @missing)
-	) if @missing;
-	
-	my $obj = $class->SUPER::init(%ops);
+	my ($class, %opts) = @_;
+	$class->check_for_required_args(\%opts, qw/env kit script args/);
+	my $obj = $class->SUPER::init(%opts);
+
+	# Deal with help option if present
+	if ($opts{help}) {
+		$obj->help;
+		exit 0;
+	}
+
 	return $obj;
 }
 
@@ -40,7 +42,7 @@ sub help {
 	}
 
 	# Loook for any extended addon hooks
-	my @module_files = 
+	my @module_files =
 		map {substr($_,length($self->kit->path())+1)}
 		grep { /\/addon-[^.]*(.pm)?$/ } # ignore disabled or other invalidly named files
 		glob($self->kit->path("hooks/addon-*"));
@@ -66,7 +68,8 @@ sub help {
 				# FIXME: Initializing the subcommand addons with the current env is a hack,
 				# 			but it is needed to ensure that the addon's cmd_details method
 				# 			can access the environment variables and other context.
-				$addons{"$cmd"} = $class->init(%$self)->cmd_details() // 'No help available';
+				local $ENV{GENESIS_ADDON_SCRIPT} = $cmd;
+				$addons{"$cmd"} = $class->cmd_details() // 'No help available';
 			};
 			trace("Failed to load addon module %s: %s", $file, $@) if $@;
 		}

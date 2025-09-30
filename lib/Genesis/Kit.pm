@@ -311,7 +311,7 @@ EOF
 				$hook_name = "hook/addon '$addon_label'";
 				info(
 					"[1ARunning #G{%s} addon for #C{%s} #M{%s} deployment",
-					$addon_label, $opts{env}->name, $self->id
+					$addon_label =~ s/\.pm$//r, $opts{env}->name, $self->id
 				);
 
 			# Check if there's a addon.pm perl module
@@ -370,7 +370,7 @@ EOF
 	debug ("Running #C{$hook_name} hook now in ".$self->path);
 	if ($hook_module) {
 		$module_options{file} = $hook_file;
-		$module_options{label} //= $hook_name =~ s/^hook\/addon '([^'])'.*/$1/r =~ s{/}{|}r;
+		$module_options{label} //= $hook_name =~ s/^hook\/addon '([^']*?)(?:\.pm)?'.*/$1/r =~ s{/}{|}r;
 		eval {require $hook_file unless $hook_module->can('init')};
 		bail(
 			"Could not load Perl module %s to run hook %s in kit %s: %s",
