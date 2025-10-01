@@ -47,7 +47,7 @@ sub reset {
 # find - find matching deployment audits {{{
 sub find {
 	my ($self, %options) = @_; # See POD for valid options
-	
+
 	my $env = $self->env;
 
 	# Validate options
@@ -57,7 +57,7 @@ sub find {
 		join(", ", @invalid_options)
 	) if @invalid_options;
 	$options{all} = 1 if $options{result}; # If result is specified, include all deployments
-	
+
 	# Get list of deployment - Don't get by ref, because we're likely going to modify it
 	my @all_deployments = $self->all();
 	return () unless @all_deployments;
@@ -116,7 +116,7 @@ sub latest {
 	my ($self, %options) = @_;
 	my $deployments = $self->_all();
 	return undef unless $deployments && @$deployments;
-	
+
 	for my $deployment ($deployments->@*) {
 		next if $options{action} && $deployment->lookup('action') ne $options{action};
 		next if $options{result} && $deployment->lookup('result') ne $options{result};
@@ -131,7 +131,7 @@ sub latest {
 sub latest_successful {
 	my ($self, %options) = @_;
 	# Get the latest successful deployment - find by default will return only successful actions
-	
+
 	my ($latest_successful) = $self->find(%options,limit => 1);
 	return $latest_successful;
 }
@@ -149,7 +149,7 @@ sub current_state {
 		return 'deployed' if (keys %$exodus_data);
 		return 'undeployed';
 	}
-	
+
 	# FIXME: Cache, and clear on reset;
 	for my $deployment (@deployments) {
 		if ($deployment->succeeded) {
@@ -434,7 +434,7 @@ sub _base_deployment_content {
 			lines(run({stderr => '/dev/null'},'who', '-mH'))
 		)->[1];
 		my $user = $user_data->[0] // $ENV{USER};
-		delete($user_data->[3]) if $user_data->[3] =~ /^tmux\(/; # Remove tmux session name if present)'
+		delete($user_data->[3]) if $user_data->[3] && $user_data->[3] =~ /^tmux\(/; # Remove tmux session name if present)'
 		$user .= (" ".$user_data->[3]) if $user_data->[3];
 		$base->{user} = {
 			shell         => $user,
