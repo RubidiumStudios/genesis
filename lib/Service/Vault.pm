@@ -676,23 +676,27 @@ sub unseal {
 
 	# Use safe unseal which unseals all vault instances in the cluster
 	# safe unseal expects exactly 3 keys, so take the first 3
-	my @keys_to_use = splice(@{$self->{unseal_keys}}, 0, 3);
+	my @keys_to_use = @{$self->{unseal_keys}}[0..2];
 	my $keys_input = join("\n", @keys_to_use) . "\n";
 
 	# Use the stdin option with query to pass keys to safe unseal
-	my ($out, $rc, $err) = $self->query({stderr => 0, stdin => $keys_input, redact_stdin => 1}, 'unseal');
+	my ($out, $rc);
+	my ($tries, $max_tries) = (0, 3);
+	while ($tries++ < $max_tries) {
+		($out, $rc) = $self->query({stdin => $keys_input, redact_stdin => 1}, 'unseal');
+		return ($out, 0, '') if ($rc == 0) || ($out =~ /Vault is already unsealed/);
 
-	if ($rc == 0) {
-		return ($out, 0, "");
-	} else {
-		# RISK: If the unseal fails, we log the keys used for debugging purposes
-		# This is a security risk, as it exposes the unseal keys in logs.
+		# RISK: If the unseal fails, we log all available keys for recovery purposes
+		# This is a security risk, as it exposes the unseal keys in logs, but is
+		# necessary to prevent irrevocable sealing of the vault.
 		trace(
-			"Failed to unseal vault cluster at #M{%s} using keys:\n%s",
-			$self->{url}, join("\n", map {sprintf("#C{%s}", $_)} @{$self->{unseal_keys}})
+			"[Attempt %s] Failed to unseal vault cluster at #M{%s} - all available keys (first three used):\n%s",
+			$tries, $self->{url}, join("\n", map {sprintf("#C{%s}", $_)} @{$self->{unseal_keys}})
 		);
-		return ($out, $rc, $err || "Failed to unseal vault cluster");
+		sleep(2); # brief pause before retrying
 	}
+	# If we reach here, all attempts failed
+	return ('', $rc // 1, $out || "Failed to unseal vault cluster");
 }
 
 # }}}
