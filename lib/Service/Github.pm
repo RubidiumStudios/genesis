@@ -429,6 +429,53 @@ sub latest_version_of {
 }
 
 # }}}
+# get_user_ssh_keys - fetch SSH public keys for a user {{{
+sub get_user_ssh_keys {
+	my ($self, $username) = @_;
+	bail("Missing username for SSH key retrieval") unless $username;
+
+	# Validate username format (GitHub/GitLab compatible)
+	# GitHub: 1-39 chars, alphanumeric or hyphens, cannot start/end with hyphen
+	# GitLab: more permissive, but we use stricter GitHub rules for safety
+	bail("Invalid username format: $username")
+		unless $username =~ /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
+
+	# Construct URL for .keys endpoint (works for GitHub, GitLab, Gitea, etc.)
+	my $url = sprintf("%s://%s/%s.keys",
+		($self->{tls} eq 'no' ? "http" : "https"),
+		$self->{domain},
+		$username
+	);
+
+	my ($code, $msg, $data) = curl(
+		"GET", $url, undef, undef,
+		$self->{tls} eq 'skip' ? 1 : 0,
+		$self->{creds}
+	);
+
+	# Handle HTTP errors
+	return (undef, "User '$username' not found on $self->{domain}") if $code == 404;
+	return (undef, "Rate limit exceeded (HTTP 403). Set GITHUB_AUTH_TOKEN to increase limit.") if $code == 403;
+	return (undef, "HTTP Error $code: $msg") if $code != 200;
+
+	# Parse and validate SSH keys
+	my @valid_keys =
+		grep { $self->validate_ssh_key($_) }
+		grep { /\S/ }
+		split /\n/, $data;
+
+	return (\@valid_keys, undef);
+}
+
+# }}}
+# validate_ssh_key - validate SSH public key format {{{
+sub validate_ssh_key {
+	my ($self, $key) = @_;
+	return 0 unless defined $key;
+	return $key =~ /^(ssh-rsa|ssh-dss|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521)\s+[A-Za-z0-9+\/]+[=]{0,3}(\s+.+)?$/;
+}
+
+# }}}
 # }}}
 
 1;
