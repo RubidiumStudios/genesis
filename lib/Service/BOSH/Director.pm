@@ -19,6 +19,7 @@ use POSIX qw(strftime);
 use Time::Piece;
 use JSON::PP ();
 use Sys::Hostname ();
+use File::Basename qw(basename);
 
 ### Class Methods {{{
 
@@ -785,6 +786,144 @@ sub clear_network_lock {
 	$self->vault->clear($self->exodus_path . ':network-claim-lock');
 }
 # }}}
+
+sub run_on_instance {
+	my ($self, $command, %opts) = @_;
+	bug("No command provided in call to run_on_instance()") unless $command;
+
+	my $target = $opts{target};
+	bail("No target specified") unless $target;
+
+	# Default to index 0 if only group name provided
+	my ($instance_group, $index) = split('/', $target);
+	if (!defined($index)) {
+		$index = 0;
+		debug("No instance index specified for '%s', defaulting to %s/0", $instance_group, $instance_group);
+	}
+	# TODO: Validate UUID if provided, or convert integer index to UUID
+
+	my $instance = sprintf("%s/%s", $instance_group, $index);
+	my $interactive = $opts{interactive} // 0;
+
+	if ($interactive) {
+		# Interactive mode: direct streaming, no JSON parsing
+		return $self->execute(
+			{ interactive => 1 },
+			'ssh', $instance, '--command', $command
+		);
+	}
+
+	# Non-interactive mode: use --json --results for structured output
+	my ($out, $rc, $err) = $self->execute(
+		{ interactive => 0, stderr => $opts{stderr} // 0 },
+		'ssh', $instance, '--command', $command, '--json', '--results'
+	);
+
+	my $json = read_json_from($out, $rc, $err);
+
+	# Extract single instance result from Tables[0].Rows[0]
+	my $result = $json->{Tables}[0]{Rows}[0] if $json->{Tables} && @{$json->{Tables}};
+
+	return wantarray ? ($result, $rc, $err) : $result;
+}
+
+sub run_on_instances {
+	my ($self, $command, %opts) = @_;
+	bug("No command provided in call to run_on_instances()") unless $command;
+
+	# Normalize targets to array ref
+	my $targets = ref($opts{targets}) eq 'ARRAY'
+		? $opts{targets}
+		: defined($opts{targets}) ? [$opts{targets}] : [];
+
+	# Empty targets means all VMs in deployment
+	if (!@$targets) {
+		debug("No targets specified - running on all VMs in deployment");
+		my ($out, $rc, $err) = $self->execute(
+			{ interactive => 0, stderr => $opts{stderr} // 0 },
+			'ssh', '--command', $command, '--json', '--results'
+		);
+
+		my $json = read_json_from($out, $rc, $err);
+		return $json->{Tables}[0]{Rows} // [];
+	}
+
+	# Run command on each target separately and collect results
+	my @all_results;
+	for my $target (@$targets) {
+		debug("Running command on target '%s'", $target);
+
+		my ($out, $rc, $err) = $self->execute(
+			{ interactive => 0, stderr => $opts{stderr} // 0 },
+			'ssh', $target, '--command', $command, '--json', '--results'
+		);
+
+		my $json = read_json_from($out, $rc, $err);
+		my $results = $json->{Tables}[0]{Rows} // [];
+
+		# Add results from this target to accumulated results
+		push @all_results, @$results;
+	}
+
+	return \@all_results;
+}
+
+sub upload_to_instances {
+	my ($self, %opts) = @_;
+
+	my $local_path = $opts{local_path};
+	bug("No local_path provided in call to upload_to_instances()") unless $local_path;
+
+	# Default remote path to /tmp/<basename>
+	my $remote_path = $opts{remote_path} // '/tmp/' . basename($local_path);
+
+	# Normalize targets to array ref
+	my $targets = ref($opts{targets}) eq 'ARRAY'
+		? $opts{targets}
+		: defined($opts{targets}) ? [$opts{targets}] : [];
+
+	bail("No targets specified") unless @$targets;
+
+	# Upload to each target
+	my @results;
+	for my $target (@$targets) {
+		# Default to index 0 if only group name provided
+		my ($instance_group, $index) = split('/', $target);
+		if (!defined($index)) {
+			$index = 0;
+			debug("No instance index specified for '%s', defaulting to %s/0", $instance_group, $instance_group);
+		}
+
+		my $instance = sprintf("%s/%s", $instance_group, $index);
+		debug("Uploading '%s' to '%s:%s'", $local_path, $instance, $remote_path);
+
+		my ($out, $rc, $err) = $self->execute(
+			{ interactive => $opts{interactive} // 1 },
+			'scp', $local_path, "$instance:$remote_path",
+			$opts{recursive} ? '--recursive' : ()
+		);
+
+		push @results, {
+			target => $instance,
+			local_path => $local_path,
+			remote_path => $remote_path,
+			stdout => $out,
+			exit_code => $rc,
+			stderr => $err
+		};
+	}
+
+	return \@results;
+}
+
+# Alias for single target convenience
+sub upload_to_instance {
+	my ($self, %opts) = @_;
+	# Convert single target to targets array
+	$opts{targets} = delete($opts{target}) if $opts{target};
+	return $self->upload_to_instances(%opts);
+}
+
 
 sub env {
 	return $_[0]->{env};
