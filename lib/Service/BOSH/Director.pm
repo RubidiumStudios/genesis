@@ -1,6 +1,6 @@
 package Service::BOSH::Director;
 
-use strict;
+use v5.20;
 use warnings;
 use utf8;
 
@@ -787,6 +787,7 @@ sub clear_network_lock {
 }
 # }}}
 
+# run_on_instance - run command on a single instance {{{
 sub run_on_instance {
 	my ($self, $command, %opts) = @_;
 	bug("No command provided in call to run_on_instance()") unless $command;
@@ -796,7 +797,7 @@ sub run_on_instance {
 
 	# Default to index 0 if only group name provided
 	my ($instance_group, $index) = split('/', $target);
-	if (!defined($index)) {
+	unless (defined($index)) {
 		$index = 0;
 		debug("No instance index specified for '%s', defaulting to %s/0", $instance_group, $instance_group);
 	}
@@ -826,7 +827,9 @@ sub run_on_instance {
 
 	return wantarray ? ($result, $rc, $err) : $result;
 }
+# }}}
 
+# run_on_instances - run command on multiple instances {{{
 sub run_on_instances {
 	my ($self, $command, %opts) = @_;
 	bug("No command provided in call to run_on_instances()") unless $command;
@@ -867,7 +870,9 @@ sub run_on_instances {
 
 	return \@all_results;
 }
+# }}}
 
+# upload_to_instances - upload file to multiple instances {{{
 sub upload_to_instances {
 	my ($self, %opts) = @_;
 
@@ -889,7 +894,7 @@ sub upload_to_instances {
 	for my $target (@$targets) {
 		# Default to index 0 if only group name provided
 		my ($instance_group, $index) = split('/', $target);
-		if (!defined($index)) {
+		unless (defined($index)) {
 			$index = 0;
 			debug("No instance index specified for '%s', defaulting to %s/0", $instance_group, $instance_group);
 		}
@@ -915,20 +920,22 @@ sub upload_to_instances {
 
 	return \@results;
 }
+# }}}
 
-# Alias for single target convenience
+# upload_to_instance - alias for upload_to_instances with single target {{{
 sub upload_to_instance {
 	my ($self, %opts) = @_;
 	# Convert single target to targets array
 	$opts{targets} = delete($opts{target}) if $opts{target};
 	return $self->upload_to_instances(%opts);
 }
+# }}}
 
-
+# env - return the environment object {{{
 sub env {
 	return $_[0]->{env};
 }
 
 # }}}
 1;
-# vim: fdm=marker:foldlevel=1:noet
+# vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
