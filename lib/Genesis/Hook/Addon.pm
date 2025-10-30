@@ -100,7 +100,9 @@ sub help {
 use Getopt::Long qw(GetOptionsFromArray);
 sub parse_options {
 	my ($self, $opt_defn, %opts) = @_;
-
+	Getopt::Long::Configure(
+		qw(no_ignore_case bundling no_pass_through auto_abbrev permute)
+	);
 	GetOptionsFromArray($self->{args}, \%opts, @$opt_defn)
 		or bail("Error parsing command line arguments");
 	my $bad_opts = join(", ", grep {/^-/} @{$self->{args}});
