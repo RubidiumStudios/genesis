@@ -808,10 +808,12 @@ sub run_on_instance {
 
 	if ($interactive) {
 		# Interactive mode: direct streaming, no JSON parsing
-		return $self->execute(
+		my $err = '';
+		my ($out, $rc) = $self->execute(
 			{ interactive => 1 },
 			'ssh', $instance, '--command', $command
 		);
+		return { stdout => $out, exit_code => $rc, instance => $instance, interactive => 1 };
 	}
 
 	# Non-interactive mode: use --json --results for structured output
