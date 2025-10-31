@@ -3367,11 +3367,13 @@ sub _post_deploy {
 
 	# If vault is sealed after deployment, unseal it before updating exodus data
 	if ($self->vault->status eq 'sealed') {
-		$self->notify("[[  ! >>Vault is sealed - attempting to unseal...");
+		$self->notify("vault is sealed - attempting to unseal...");
 		my ($out, $rc, $err) = $self->vault->unseal;
 		if ($rc) {
-			error("[[ERROR: >>Failed to unseal vault: %s", $err || $out);
-			warning("[[       >>Exodus data update may fail due to sealed vault");
+			error(
+				"Failed to unseal vault: %s\n\n%s", $err || $out,
+				"#Yi{Exodus data update may fail due to sealed vault}"
+			);
 		} else {
 			info('[[  #g@{+} >>Vault unsealed successfully');
 		}
