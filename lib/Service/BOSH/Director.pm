@@ -929,7 +929,7 @@ sub upload_to_instance {
 	my ($self, %opts) = @_;
 	# Convert single target to targets array
 	$opts{targets} = delete($opts{target}) if $opts{target};
-	return $self->upload_to_instances(%opts);
+	return $self->upload_to_instances(%opts)->[0];
 }
 # }}}
 
