@@ -31,11 +31,13 @@ sub init {
 
 sub tempfile {
 	my ($self, $file) = @_;
+	$file //= 'tempfile-'.time().'-'.int(rand(10000));
 	$file = $self->env->workpath($file);
 	return $file;
 }
 sub tempdir {
 	my ($self, $dir) = @_;
+	$dir //= 'tempdir-'.time().'-'.int(rand(10000));
 	$dir = $self->env->workpath($dir);
 	return $dir;
 }
