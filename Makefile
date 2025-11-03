@@ -12,15 +12,15 @@ test: unit-test e2e-test
 
 unit-test: sanity-test
 	@echo "Running unit tests (library/module level)..."
-	@SKIP_SECRETS_TESTS=yes prove -l $(shell awk '/^\[unit-tests\]/{unit=1;next}/^\[/{unit=0}unit&&/\.t$$/&&!/^#/{print "t/"$$0}' $(TEST_MANIFEST))
+	@SKIP_SECRETS_TESTS=yes prove -l $(shell awk '/^\[unit-tests\]/{f=1;next}/^\[/{f=0}f' $(TEST_MANIFEST) | grep '\.t$$' | grep -v '^#' | sed 's|^|t/|')
 
 integration-test: sanity-test
 	@echo "Running integration tests (multi-component)..."
-	@prove -l $(shell awk '/^\[integration-tests\]/{int=1;next}/^\[/{int=0}int&&/\.t$$/&&!/^#/{print "t/"$$0}' $(TEST_MANIFEST))
+	@prove -l $(shell awk '/^\[integration-tests\]/{f=1;next}/^\[/{f=0}f' $(TEST_MANIFEST) | grep '\.t$$' | grep -v '^#' | sed 's|^|t/|')
 
 e2e-test: sanity-test
 	@echo "Running e2e tests (full workflows)..."
-	@prove -l $(shell awk '/^\[e2e-tests\]/{e2e=1;next}/^\[/{e2e=0}e2e&&/\.t$$/&&!/^#/{print "t/"$$0}' $(TEST_MANIFEST))
+	@prove -l $(shell awk '/^\[e2e-tests\]/{f=1;next}/^\[/{f=0}f' $(TEST_MANIFEST) | grep '\.t$$' | grep -v '^#' | sed 's|^|t/|')
 
 test-all: sanity-test unit-test integration-test e2e-test
 
