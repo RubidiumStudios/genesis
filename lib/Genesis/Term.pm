@@ -7,6 +7,7 @@ no warnings 'utf8';
 use utf8;
 
 use Genesis::State;
+$Genesis::RC = $Genesis::RC;  # Suppress "used only once" warning
 
 use Data::Dumper;
 use File::Basename qw/basename dirname/;
