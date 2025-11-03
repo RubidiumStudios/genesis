@@ -250,12 +250,17 @@ sub environment_variables {
 		BOSH_CA_CERT       => $self->{ca_cert},
 		BOSH_CLIENT        => $self->{client},
 		BOSH_CLIENT_SECRET => $self->{secret},
-		BOSH_EXODUS_PATH   => $self->exodus_path,
-		BOSH_EXODUS_VAULT  => $self->exodus_vault->build_descriptor,
 		BOSH_REL_TO_ENV    => $self->{rel_to_env} || 'parent',
 		BOSH_USER          => undef,
 		BOSH_PASSWORD      => undef,
 	);
+	# Only set exodus variables if exodus_path is configured
+	if ($self->{exodus_path} && $self->{exodus_vault}) {
+		$envs{BOSH_EXODUS_PATH} = $self->exodus_path;
+		$envs{BOSH_EXODUS_VAULT} = $self->exodus_vault->build_descriptor;
+	} else {
+		debug "Skipping BOSH_EXODUS_PATH and BOSH_EXODUS_VAULT environment variables (exodus_path and/or exodus_vault not set)";
+	}
 	$envs{BOSH_DEPLOYMENT} = $self->{deployment} if $self->{deployment};
 	return %envs;
 }

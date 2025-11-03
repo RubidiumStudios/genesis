@@ -15,7 +15,7 @@ use Genesis;
 sub get_bosh_director {
 	my $alias = shift || 'bosh-director';
 	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
-	Service::BOSH::Director->new($alias,url => 'https://127.0.0.1', ca_cert=>"ca_cert", client=>'admin', secret=>'password', @_);
+	Service::BOSH::Director->new($alias,url => 'https://127.0.0.1', ca_cert=>"ca_cert", client=>'admin', secret=>'password', exodus_path => 'secret/exodus', @_);
 }
 sub get_bosh_create_env {
 	my $alias = shift;
@@ -98,7 +98,6 @@ EOF
 	bosh_runs_as("-n create-env --state state.json manifest.yml");
 	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
 	($out,$rc) = $bosh->create_env("manifest.yml", state => "state.json");
-	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 	ok !$rc, "create_env honors BOSH_NON_INTERACTIVE";
 	popd;
 };
