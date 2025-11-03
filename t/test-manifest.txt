@@ -39,6 +39,7 @@ unit-tests/genesis-cli.t
 integration-tests/genesis_command.t  # Command execution (run, curl, lines, fake_tty)
 integration-tests/genesis_data.t     # Data file operations (YAML/JSON load/save)
 integration-tests/genesis_files.t    # File operations (mkfile_or_fail, slurp, humanize_path)
+integration-tests/service_github.t   # GitHub/GitLab API integration (SSH key fetching)
 
 [e2e-tests]
 # Full workflow tests using genesis executable
