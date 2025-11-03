@@ -1578,7 +1578,7 @@ sub parse_fixed_width_table {
 		$header = shift @rows;
 	}
 
-	return [] unless $header;
+	return wantarray ? () : [] unless $header;
 
 	# Get column names and their positions
 	my @cols = split(/\s{2,}/, $header);
