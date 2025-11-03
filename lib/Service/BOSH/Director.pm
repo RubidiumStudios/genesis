@@ -822,7 +822,7 @@ sub run_on_instance {
 		'ssh', $instance, '--command', $command, '--json', '--results'
 	);
 
-	my $json = read_json_from($out, $rc, $err);
+	my $json = read_json_from($out, 0, $err); # real rc is inside JSON
 
 	# Extract single instance result from Tables[0].Rows[0]
 	my $result = $json->{Tables}[0]{Rows}[0] if $json->{Tables} && @{$json->{Tables}};
