@@ -1497,6 +1497,8 @@ sub delete_from_array {
 }
 
 sub sentence_join {
+  return '' unless @_;
+  return $_[0] if scalar(@_) == 1;
   join(' and ', grep {$_} (join(", ",@_[0...scalar(@_)-2]), @_[scalar(@_)-1]))
 }
 
