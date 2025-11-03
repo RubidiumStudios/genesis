@@ -103,9 +103,9 @@ subtest 'IPv4::Address' => sub {
 
 
     ok(! defined(IPv4::Address->new('192.168.90.1')->hostname), 'new() with dotted decimal input does not set host');
-    
+
     my $ip4 = IPv4::Address->new([192,168,0,1]);
-    isa_ok($ip4, 'IPv4::Address', 'IPv4->new returns IPv4::Address object when array of octets is provided (non-class method)'); 
+    isa_ok($ip4, 'IPv4::Address', 'IPv4->new returns IPv4::Address object when array of octets is provided (non-class method)');
 
     dies_ok { IPv4::Address->new([192,168,0]) } 'new() with invalid octets array dies';
     like($@, qr/invalid address array; expected 4 octets, got \[192 168 0\]/i, 'new() with invalid octets array dies with correct message');
@@ -165,7 +165,7 @@ subtest 'IPv4::Address' => sub {
     is($next->range, '172.16.24.1', 'next() returns correct first address');
     $next = $ip->next();
     is($next, undef, 'next() returns undef after exhausting addresses');
-    
+
     $ip->next();
     $ip->reset();
     $next = $ip->next();
@@ -199,7 +199,7 @@ subtest 'IPv4::Address' => sub {
 
     # Test direct subtraction of one IPv4::Address from another (tests line 182 of IPv4::Address.pm)
     is($ip2 - $ip1, 12, 'direct subtraction of one IPv4::Address from another returns correct integer difference');
-    
+
     # Test direct subtraction of a span from an address (tests line 183 of IPv4::Address.pm)
     my $span1 = IPv4::Span->new('192.168.1.5-192.168.1.8');
     my $result = $ip1 - $span1;
@@ -209,7 +209,7 @@ subtest 'IPv4::Address' => sub {
 		$result = $ip1 - $span1;
 		isa_ok($result, 'IPv4::Range', 'direct subtraction of a span from an address returns an IPv4::Range object');
 		is($result->size, 0, 'direct subtraction of a span containing address from that address returns and empty range');
-    
+
     is($ip1->cmp($ip2), -1, 'cmp() returns correct comparison result');
     is($ip1->cmp('192.168.0.0'), 1, 'cmp() returns correct comparison result (string)');
     is('192.168.0.0' cmp $ip1, -1, 'overloaded cmp returns correct comparison result (string - swapped positions)');
@@ -221,7 +221,7 @@ subtest 'IPv4::Address' => sub {
     dies_ok {$ip1 ne $ip1->int} 'overloaded `ne` operator with integer-equivalent address dies';
     like($@, qr/Invalid IPv4 literal or object '3232235777'/i, 'overloaded `ne` operator with integer-equivalent address dies with correct message');
     ok($ip1 ne '192.168.1.2', 'overloaded `ne` operator returns true for different addresses');
-    
+
     my ($start, $end) = $ip2->in_cidr(16);
     is($start->range, '192.168.0.0', 'in_cidr() returns correct start address');
     is($end->address, '192.168.255.255', 'in_cidr() returns correct end address');
@@ -335,36 +335,36 @@ subtest 'IPv4::Address' => sub {
   # Test cidr and cidrs methods
   subtest 'cidr and cidrs methods' => sub {
     plan tests => 9;
-    
+
     my $addr = IPv4::Address->new('192.168.1.1');
-    
+
     # Test cidr method
     my $cidr = $addr->cidr();
     is($cidr, '192.168.1.1/32', 'cidr() returns correct CIDR notation with /32 suffix');
-    
+
     # Test cidrs method in list context
     my @cidrs = $addr->cidrs();
     is(scalar @cidrs, 1, 'cidrs() returns single-element array');
     is($cidrs[0], '192.168.1.1/32', 'cidrs() returns correct CIDR notation');
-    
+
     # Test cidrs method in scalar context
     my $cidr_count = $addr->cidrs();
     is($cidr_count, 1, 'cidrs() in scalar context returns count of 1 for single address');
-    
+
     # Test with different address
     my $addr2 = IPv4::Address->new('10.0.0.1');
     is($addr2->cidr(), '10.0.0.1/32', 'cidr() works with different address');
-    
+
     my @cidrs2 = $addr2->cidrs();
     is_deeply(\@cidrs2, ['10.0.0.1/32'], 'cidrs() returns correct array for different address');
-    
+
     # Test scalar context for different address
     my $cidr_count2 = $addr2->cidrs();
     is($cidr_count2, 1, 'cidrs() in scalar context returns count of 1 for different address');
-    
+
     # Test that cidrs and cidr return consistent results
     is($addr->cidr(), ($addr->cidrs())[0], 'cidr() and cidrs() return consistent results');
-    
+
     # Test that scalar and list context are consistent
     is(scalar($addr->cidrs()), scalar @cidrs, 'cidrs() scalar and list context return consistent counts');
   };
@@ -751,7 +751,7 @@ subtest 'IPv4::Span' => sub {
     is($slice->range, '192.168.1.8-192.168.1.10', 'slice() with negative offset returns correct slice');
 
     # Test a slice that wants more addresses than are available
-    $slice = $span->slice(3, 8); 
+    $slice = $span->slice(3, 8);
     isa_ok($slice, 'IPv4::Span', 'slice() with size greater than available addresses returns IPv4::Span object');
     is($slice->size, 2, 'slice() with size greater than available addresses returns the remaining addresses');
     is($slice->range, '192.168.1.9-192.168.1.10', 'slice() with size greater than available addresses returns correct slice');
@@ -764,11 +764,11 @@ subtest 'IPv4::Span' => sub {
     isa_ok($slice, 'IPv4::Range', 'slice() with offset of 0 returns IPv4::Range object');
     is($slice->size, 0, 'slice() with offset of 0 returns empty range');
 
-  }; 
+  };
 
   subtest 'cidrs method' => sub {
     plan tests => 6;  # update test count
-    
+
     # Single IP Address
     my $span = IPv4::Span->new('192.168.1.1', '192.168.1.1');
     my @cidrs = $span->cidrs();
@@ -817,47 +817,47 @@ subtest 'IPv4::Span' => sub {
   };
 
   subtest 'cidr method' => sub {
-    plan tests => 12;
-    
+    plan tests => 11;
+
     # Single CIDR block
     my $span = IPv4::Span->new('192.168.1.0/24');
     my $cidr = $span->cidr();
     is($cidr, '192.168.1.0/24', 'cidr() returns correct CIDR for exact CIDR block');
-    
+
     # Single IP address
     $span = IPv4::Span->new('192.168.1.1');
     $cidr = $span->cidr();
     is($cidr, '192.168.1.1/32', 'cidr() returns correct CIDR for single IP');
-    
+
     # Range that is NOT a CIDR block
     $span = IPv4::Span->new('192.168.1.1-192.168.1.5');
     $cidr = $span->cidr();
     is($cidr, undef, 'cidr() returns undef for non-CIDR range');
-    
+
     # Range that forms multiple CIDR blocks
     $span = IPv4::Span->new('192.168.1.0-192.168.1.128');
     $cidr = $span->cidr();
     is($cidr, undef, 'cidr() returns undef for range requiring multiple CIDR blocks');
-    
+
     # Different CIDR sizes
     $span = IPv4::Span->new('10.0.0.0/16');
     $cidr = $span->cidr();
     is($cidr, '10.0.0.0/16', 'cidr() works with different CIDR sizes');
-    
+
     $span = IPv4::Span->new('172.16.0.0/12');
     $cidr = $span->cidr();
     is($cidr, '172.16.0.0/12', 'cidr() works with /12 CIDR');
-    
+
     # Test consistency between cidr and cidrs for single CIDR blocks
     $span = IPv4::Span->new('192.168.1.0/24');
     my @cidrs = $span->cidrs();
     is($span->cidr(), $cidrs[0], 'cidr() and cidrs() consistent for single CIDR block');
     is(scalar @cidrs, 1, 'cidrs() returns single element for exact CIDR block');
-    
+
     # Test cidrs() in scalar context for single CIDR block
     my $cidr_count = $span->cidrs();
     is($cidr_count, 1, 'cidrs() in scalar context returns count of 1 for single CIDR block');
-    
+
     # Test cidrs() in scalar context for non-CIDR range requiring multiple blocks
     $span = IPv4::Span->new('192.168.1.1-192.168.1.5');
     @cidrs = $span->cidrs();
@@ -868,84 +868,84 @@ subtest 'IPv4::Span' => sub {
 
   subtest 'NetAddr::IP-like methods' => sub {
     plan tests => 31;
-    
+
     # Test with a standard network (CIDR block)
     my $span = IPv4::Span->new('192.168.1.0/24');
-    
+
     # Test network() method
     my $network = $span->network();
     isa_ok($network, 'IPv4::Address', 'network() returns IPv4::Address object');
     is($network->address, '192.168.1.0', 'network() returns correct network address');
-    
+
     # Test broadcast() method
     my $broadcast = $span->broadcast();
     isa_ok($broadcast, 'IPv4::Address', 'broadcast() returns IPv4::Address object');
     is($broadcast->address, '192.168.1.255', 'broadcast() returns correct broadcast address');
-    
+
     # Test first() method
     my $first = $span->first();
     isa_ok($first, 'IPv4::Address', 'first() returns IPv4::Address object');
     is($first->address, '192.168.1.1', 'first() returns correct first usable address');
-    
+
     # Test last() method
     my $last = $span->last();
     isa_ok($last, 'IPv4::Address', 'last() returns IPv4::Address object');
     is($last->address, '192.168.1.254', 'last() returns correct last usable address');
-    
+
     # Test nth() method - similar to NetAddr::IP nth method
     # Test with positive offsets
     my $second = $span->nth(1);
     isa_ok($second, 'IPv4::Address', 'nth() returns IPv4::Address object');
     is($second->address, '192.168.1.2', 'nth(1) returns correct address (skipping network/broadcast)');
-    
+
     my $middle = $span->nth(127);
     is($middle->address, '192.168.1.128', 'nth(127) returns correct address');
-    
+
     # Test with negative offsets
     my $last_minus_one = $span->nth(-2);
     is($last_minus_one->address, '192.168.1.253', 'nth(-2) returns correct address');
-    
+
     # Test with $include_reserved = true (include network and broadcast)
     my $network_addr = $span->nth(0, 1);
     is($network_addr->address, '192.168.1.0', 'nth(0, 1) returns network address when include_reserved=true');
-    
+
     my $broadcast_addr = $span->nth(-1, 1);
     is($broadcast_addr->address, '192.168.1.255', 'nth(-1, 1) returns broadcast address when include_reserved=true');
-    
+
     my $first_host_included = $span->nth(1, 1);
     is($first_host_included->address, '192.168.1.1', 'nth(1, 1) returns first host address when include_reserved=true');
-    
+
     # Test out of bounds
     is($span->nth(500), undef, 'nth() returns undef for out of bounds index');
     is($span->nth(-500), undef, 'nth() returns undef for negative out of bounds index');
-    
+
     # Test nth() on a /31 network (point-to-point, no network/broadcast reserved)
     my $p2p = IPv4::Span->new('10.0.0.0/31');
     is($p2p->nth(0)->address, '10.0.0.0', 'nth(0) on /31 returns first address (no reserved addresses)');
     is($p2p->nth(1)->address, '10.0.0.1', 'nth(1) on /31 returns second address (no reserved addresses)');
     is($p2p->nth(0, 1)->address, '10.0.0.0', 'nth(0, 1) on /31 returns same as nth(0) (no reserved addresses)');
-    
+
     # Test usable_hosts() method
     my $usable = $span->usable_hosts();
     isa_ok($usable, 'IPv4::Span', 'usable_hosts() returns IPv4::Span object');
     is($usable->size, 254, 'usable_hosts() returns correct number of usable hosts');
     is($usable->range, '192.168.1.1-192.168.1.254', 'usable_hosts() returns correct range of usable hosts');
-    
+
     # Test with a single IP address
     my $single_ip = IPv4::Span->new('10.0.0.1');
-    
+
     # For a single IP, network and broadcast are the same IP
     is($single_ip->network()->address, '10.0.0.1', 'network() returns the IP itself for single-IP span');
     is($single_ip->broadcast()->address, '10.0.0.1', 'broadcast() returns the IP itself for single-IP span');
-    
+
     # For a single IP, first and last are the same IP (no increment/decrement)
     is($single_ip->first()->address, '10.0.0.1', 'first() returns the IP itself for single-IP span');
     is($single_ip->last()->address, '10.0.0.1', 'last() returns the IP itself for single-IP span');
-    
+
     # For a single IP, there are no usable hosts (since network and broadcast use the single IP)
     my $single_usable = $single_ip->usable_hosts();
     is($single_usable->size, 0, 'usable_hosts() returns empty range for single-IP span');
-    
+
     # Test with a point-to-point network (/30 - only 2 usable IPs)
     $p2p = IPv4::Span->new('10.0.0.0/30');
     is($p2p->first()->address, '10.0.0.1', 'first() returns correct first usable address for /30');
@@ -1115,7 +1115,7 @@ subtest 'IPv4::Range' => sub {
     my $clone = $range->clone();
     isa_ok($clone, 'IPv4::Range', 'clone() returns IPv4::Range object');
     is($clone->range, $range->range, 'clone() creates identical range');
-    
+
     $clone = IPv4::Range->new('192.168.3.1-192.168.3.5');
     isnt($clone->range, $range->range, 'cloned object can be modified independently');
   };
@@ -1258,7 +1258,7 @@ subtest 'IPv4::Range' => sub {
     ok($range2 > $span, 'range with multiple spans greater than single span');
     ok($range2 != $span, 'range with multiple spans numerically not equal to single span');
 
-    my $addr2 = IPv4::Address->new('192.168.2.1'); 
+    my $addr2 = IPv4::Address->new('192.168.2.1');
     ok($range2 > $addr2, 'range greater than highest address in range (object comparison)');
     ok($range2 > $addr2, 'range numerically greater than single address in range');
 
@@ -1310,13 +1310,13 @@ subtest 'IPv4::Range' => sub {
     is('192.168.1.11' cmp $range, 1, 'cmp returns 1 when string greater than range');
 
     ok($range == '192.168.1.1-192.168.1.10', 'range numerically equals string of same size');
-    ok('192.168.1.1-192.168.1.10' == $range, 'string numerically equals range of same size'); 
+    ok('192.168.1.1-192.168.1.10' == $range, 'string numerically equals range of same size');
     ok($range != '192.168.1.1', 'range not numerically equal to string of different size');
     ok('192.168.1.1' != $range, 'string not numerically equal to range of different size');
 
     ok($range > '192.168.1.1', 'range numerically greater than smaller string');
     ok('192.168.1.1-192.168.1.20' > $range, 'larger string numerically greater than range');
-    ok($range < '192.168.1.1-192.168.1.20', 'range numerically less than larger string');  
+    ok($range < '192.168.1.1-192.168.1.20', 'range numerically less than larger string');
     ok('192.168.1.1' < $range, 'smaller string numerically less than range');
 
     is($range <=> '192.168.1.1', 1, 'spaceship returns 1 when range numerically greater');
@@ -1349,82 +1349,82 @@ subtest 'IPv4::Range' => sub {
   };
 
   subtest 'cidr and cidrs methods' => sub {
-    plan tests => 20;
-    
+    plan tests => 19;
+
     # Single CIDR block range
     my $range = IPv4::Range->new('192.168.1.0/24');
     my $cidr = $range->cidr();
     is($cidr, '192.168.1.0/24', 'cidr() returns correct CIDR for single CIDR block range');
-    
+
     my @cidrs = $range->cidrs();
     is_deeply(\@cidrs, ['192.168.1.0/24'], 'cidrs() returns correct array for single CIDR block range');
-    
+
     # Test cidrs() in scalar context for single CIDR block
     my $cidr_count = $range->cidrs();
     is($cidr_count, 1, 'cidrs() in scalar context returns count of 1 for single CIDR block range');
-    
+
     # Single IP address range
     $range = IPv4::Range->new('192.168.1.1');
     $cidr = $range->cidr();
     is($cidr, '192.168.1.1/32', 'cidr() returns correct CIDR for single IP range');
-    
+
     @cidrs = $range->cidrs();
     is_deeply(\@cidrs, ['192.168.1.1/32'], 'cidrs() returns correct array for single IP range');
-    
+
     # Test cidrs() in scalar context for single IP range
     $cidr_count = $range->cidrs();
     is($cidr_count, 1, 'cidrs() in scalar context returns count of 1 for single IP range');
-    
+
     # Multiple CIDR blocks range
     $range = IPv4::Range->new('192.168.1.0/24', '192.168.2.0/24');
     $cidr = $range->cidr();
     is($cidr, undef, 'cidr() returns undef for range with multiple CIDR blocks');
-    
+
     @cidrs = $range->cidrs();
     is_deeply(\@cidrs, ['192.168.1.0/24', '192.168.2.0/24'], 'cidrs() returns correct array for multiple CIDR blocks');
-    
+
     # Test cidrs() in scalar context for multiple CIDR blocks
     $cidr_count = $range->cidrs();
     is($cidr_count, 2, 'cidrs() in scalar context returns count of 2 for multiple CIDR blocks');
-    
+
     # Range with non-CIDR spans
     $range = IPv4::Range->new('192.168.1.1-192.168.1.5', '192.168.2.10-192.168.2.15');
     $cidr = $range->cidr();
     is($cidr, undef, 'cidr() returns undef for range with non-CIDR spans');
-    
+
     @cidrs = $range->cidrs();
     my $expected_cidrs = [
       '192.168.1.1/32', '192.168.1.2/31', '192.168.1.4/31',  # First span CIDRs
       '192.168.2.10/31', '192.168.2.12/30'                   # Second span CIDRs
     ];
     is_deeply(\@cidrs, $expected_cidrs, 'cidrs() returns correct CIDRs for non-CIDR spans');
-    
+
     # Test cidrs() in scalar context for non-CIDR spans
     $cidr_count = $range->cidrs();
     is($cidr_count, scalar @cidrs, 'cidrs() in scalar context returns correct count for non-CIDR spans');
     is($cidr_count, 5, 'cidrs() in scalar context returns count of 5 for non-CIDR spans');
-    
+
     # Mixed CIDR and non-CIDR spans
     $range = IPv4::Range->new('192.168.1.0/24', '192.168.2.1-192.168.2.5');
     $cidr = $range->cidr();
     is($cidr, undef, 'cidr() returns undef for mixed CIDR and non-CIDR spans');
-    
+
     @cidrs = $range->cidrs();
     $expected_cidrs = [
       '192.168.1.0/24',                                       # First span CIDR
       '192.168.2.1/32', '192.168.2.2/31', '192.168.2.4/31'  # Second span CIDRs
     ];
     is_deeply(\@cidrs, $expected_cidrs, 'cidrs() returns correct CIDRs for mixed spans');
-    
+
     # Test cidrs() in scalar context for mixed spans
     $cidr_count = $range->cidrs();
     is($cidr_count, scalar @cidrs, 'cidrs() in scalar context returns correct count for mixed spans');
     is($cidr_count, 4, 'cidrs() in scalar context returns count of 4 for mixed spans');
-    
+
     # Test consistency between cidr and cidrs for single CIDR block
     $range = IPv4::Range->new('10.0.0.0/16');
     is($range->cidr(), ($range->cidrs())[0], 'cidr() and cidrs() consistent for single CIDR block range');
-    
+
     # Test empty range
     $range = IPv4::Range->new();
     @cidrs = $range->cidrs();

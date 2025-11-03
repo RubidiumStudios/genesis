@@ -115,7 +115,8 @@ sub cidr($self) {
 }
 
 sub cidrs($self) {
-	return ($self->cidr());
+	my @cidrs = ($self->cidr());
+	return wantarray ? @cidrs : scalar(@cidrs);
 }
 
 # }}}
