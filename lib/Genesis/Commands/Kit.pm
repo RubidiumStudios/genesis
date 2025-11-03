@@ -11,6 +11,8 @@ use Genesis::State;
 use Genesis::Commands;
 use Genesis::Top;
 use Genesis::Kit::Compiler;
+use Genesis::CI::KitVersion;
+use Genesis::CI::UpstreamConfiguration;
 
 use Service::Github;
 
@@ -492,40 +494,31 @@ sub compare_kits {
 		}
 	}
 
-	# Get the releases from the kits
+	# Get the releases from the kits using new structure
 	info( "\nFetching releases from target kit #M{%s}...", $kit->id);
 	my $tstart = gettimeofday;
-	my ($new_releases, $new_versions, $new_dup_versions, $new_unversioned) = _get_kit_releases($kit, @filters);
-	my $found = scalar(keys %$new_releases);
+	my $new_kit_version = Genesis::CI::KitVersion->from_kit_object($kit);
+	$new_kit_version->load_releases();
+	$new_kit_version->apply_filter(\@filters) if @filters;
+	my $found = scalar($new_kit_version->get_release_names());
 	info("  - #%s{found %s}".pretty_duration(gettimeofday-$tstart,0.5,2), $found ? 'G' : 'R', $found);
 
 	info( "\nFetching releases from comparison kit #Y{%s}...", $other_kit->id);
 	$tstart = gettimeofday;
-	my ($old_releases, $old_versions, $old_dup_versions, $old_unversioned) = _get_kit_releases($other_kit, @filters);
-	$found = scalar(keys %$old_releases);
+	my $old_kit_version = Genesis::CI::KitVersion->from_kit_object($other_kit);
+	$old_kit_version->load_releases();
+	$old_kit_version->apply_filter(\@filters) if @filters;
+	$found = scalar($old_kit_version->get_release_names());
 	info("  - #%s{found %s}".pretty_duration(gettimeofday-$tstart,0.5,2), $found ? 'G' : 'R', $found);
 
-	# Compare the releases
-	my ($added, $common, $removed) = compare_arrays([keys %$new_releases], [keys %$old_releases]);
-
-	my ($changed, $unchanged) = ();
-	for my $name (@$common) {
-		my ($versions_added, $versions_common, $versions_removed) = compare_arrays(
-			[reverse sort by_semver keys %{$new_releases->{$name}}],
-			[reverse sort by_semver keys %{$old_releases->{$name}}]
-		);
-		if (@$versions_added || @$versions_removed) {
-			$changed->{$name} = {
-				added => $versions_added,
-				removed => $versions_removed,
-				common => $versions_common
-			};
-		} else {
-			$unchanged->{$name} = {
-				common => $versions_common
-			};
-		}
-	}
+	# Compare the releases using new KitVersion comparison method
+	my $comparison = $new_kit_version->compare_with($old_kit_version);
+	
+	# Extract the traditional format for backward compatibility with existing code
+	my $added = [keys %{$comparison->{added}}];
+	my $removed = [keys %{$comparison->{removed}}];
+	my $changed = $comparison->{changed};
+	my $unchanged = $comparison->{unchanged};
 
 	# Fetch the job specs for versions that have changed
 	my %spec_files = ();
@@ -572,16 +565,24 @@ sub compare_kits {
 		}
 		for my $name (sort keys %$changed) {
 			# TODO: Figure out how to handle multiple sources of a version
-			my $new_version = $changed->{$name}{added}[0];
-			my $old_version = $changed->{$name}{removed}
+			my $new_version = @{$changed->{$name}{added}} ? $changed->{$name}{added}[0] : undef;
+			my $old_version = @{$changed->{$name}{removed}}
 				? $changed->{$name}{removed}[0]
 				: $changed->{$name}{common}[0];
-			$old_releases->{$name}{$old_version}{role} = 'old';
-			$old_releases->{$name}{$old_version}{repo} = $old_upstream_repo;
-			$old_releases->{$name}{$old_version}{alt_repo} = $new_upstream_repo;
-			$new_releases->{$name}{$new_version}{role} = 'new';
-			$new_releases->{$name}{$new_version}{repo} = $new_upstream_repo;
-			for my $release ($old_releases->{$name}{$old_version}, $new_releases->{$name}{$new_version}) {
+			if ($old_version) {
+				$old_releases->{$name}{$old_version}{role} = 'old';
+				$old_releases->{$name}{$old_version}{repo} = $old_upstream_repo;
+				$old_releases->{$name}{$old_version}{alt_repo} = $new_upstream_repo;
+			}
+			if ($new_version) {
+				$new_releases->{$name}{$new_version}{role} = 'new';
+				$new_releases->{$name}{$new_version}{repo} = $new_upstream_repo;
+			}
+			my @releases_to_process = ();
+			push @releases_to_process, $old_releases->{$name}{$old_version} if $old_version;
+			push @releases_to_process, $new_releases->{$name}{$new_version} if $new_version;
+			
+			for my $release (@releases_to_process) {
 				my ($name, $version) = @{$release}{qw/name version repo/};
 
 				$release->{spec_url} //= _get_spec_url($release);
@@ -625,6 +626,7 @@ sub compare_kits {
 						if ($old_contents ne $contents) {
 							push @{$spec_files{$name}{$version}{errors}}, sprintf(
 								"Job spec has two different specs for job %s in version %s",
+								$job, $version
 							);
 						}
 						next if $spec_files{$name}{$version}{jobs}{$job};
@@ -670,47 +672,50 @@ sub compare_kits {
 	if (keys %$changed) {
 		output("\n#yu{Changed Releases:}");
 		for my $name (sort keys %$changed) {
-
-			my $added = $changed->{$name}{added}[0];
-			my $removed = $changed->{$name}{removed}[0];
-
-			output("[[  - >>#c{%s} (%s -> %s)", $name, $removed, $added);
+			# Show latest-to-latest version transition
+			my $old_latest = (reverse sort by_semver keys %{$old_releases->{$name}})[0];
+			my $new_latest = (reverse sort by_semver keys %{$new_releases->{$name}})[0];
+			
+			output("[[  - >>#c{%s} (%s -> %s)", $name, $old_latest, $new_latest);
 		}
 
 		output("\n#Mu{Spec Changes in Changed Releases:}");
 		for my $name (sort keys %$changed) {
 
-			my $added_version = $changed->{$name}{added}[0];
-			my $added_specs = $spec_files{$name}{$added_version};
+			my $added_version = @{$changed->{$name}{added}} ? $changed->{$name}{added}[0] : undef;
+			my $added_specs = $added_version ? $spec_files{$name}{$added_version} : {};
 			my @added_jobs = keys %{$added_specs->{jobs}//{}};
 			my @added_errors = @{$added_specs->{errors}//[]};
 
-			my $removed_version = $changed->{$name}{removed}[0];
-			my $removed_specs = $spec_files{$name}{$removed_version};
+			my $removed_version = @{$changed->{$name}{removed}} ? $changed->{$name}{removed}[0] : undef;
+			my $removed_specs = $removed_version ? $spec_files{$name}{$removed_version} : {};
 			my @removed_jobs = keys %{$removed_specs->{jobs}//{}};
 			my @removed_errors = @{$removed_specs->{errors}//[]};
 
 			if (@added_errors || @removed_errors) {
+				my @failed_versions = ();
+				push @failed_versions, "v$added_version" if @added_errors && $added_version;
+				push @failed_versions, "v$removed_version" if @removed_errors && $removed_version;
 				output(
 					"\n[#m{%s}] Could not retrieve job specs %s - no comparison possible",
-					$name, join(' or ', map {"v$_"} (@added_errors ? ($added_version) : (), @removed_errors ? ($removed_version) : ()))
+					$name, join(' or ', @failed_versions)
 				);
 				next;
 			}
 
 			for my $job (uniq sort @added_jobs, @removed_jobs) {
 
-				if (!$added_specs->{jobs}{$job}) {
+				if (!$added_specs->{jobs}{$job} && $removed_version) {
 					output(
 						"\n[#m{%s/job/%s}] #Ri{Job removed in v%s}",
-						$name, $job, $added_version
+						$name, $job, $removed_version
 					);
-				} elsif (!$removed_specs->{jobs}{$job}) {
+				} elsif (!$removed_specs->{jobs}{$job} && $added_version) {
 					output(
 						"\n[#m{%s/job/%s}] #Yi{Job added in v%s}",
 						$name, $job, $added_version
 					);
-				}	else {
+				} elsif ($added_version && $removed_version) {
 					my $added = $added_specs->{jobs}{$job};
 					my $removed = $removed_specs->{jobs}{$job};
 					my ($diff, $rc, $error) = run({interactive => 0},
@@ -800,11 +805,82 @@ sub compare_kits {
 		info("\n");
 	}
 
+	# Report release variants (source vs compiled releases for same version)
+	_report_release_variants($new_variants, $old_variants);
+
 	# TODO: Display details on unversioned releases
 
 	success("Comparison complete.\n");
 
 	exit 0;
+}
+
+sub _report_release_variants {
+	my ($new_variants, $old_variants) = @_;
+	
+	# Find releases that have multiple variants (source + compiled)
+	my %all_variants;
+	
+	# Collect from both kits
+	for my $variants_hash ($new_variants, $old_variants) {
+		for my $release_name (keys %$variants_hash) {
+			for my $version (keys %{$variants_hash->{$release_name}}) {
+				push @{$all_variants{$release_name}{$version}}, @{$variants_hash->{$release_name}{$version}};
+			}
+		}
+	}
+	
+	# Find releases with multiple variants
+	my @releases_with_variants;
+	for my $release_name (sort keys %all_variants) {
+		for my $version (sort keys %{$all_variants{$release_name}}) {
+			my @variants = @{$all_variants{$release_name}{$version}};
+			next unless @variants > 1;
+			
+			# Categorize variants
+			my @source_variants = grep { !_is_compiled_release($_->{url}) } @variants;
+			my @compiled_variants = grep { _is_compiled_release($_->{url}) } @variants;
+			
+			if (@source_variants && @compiled_variants) {
+				push @releases_with_variants, {
+					name => $release_name,
+					version => $version,
+					source_count => scalar(@source_variants),
+					compiled_count => scalar(@compiled_variants),
+					source_files => [map { $_->{__src} } @source_variants],
+					compiled_files => [map { $_->{__src} } @compiled_variants],
+				};
+			}
+		}
+	}
+	
+	if (@releases_with_variants) {
+		output("\n#Yu{Release Variants (Source and Compiled):}");
+		for my $variant (@releases_with_variants) {
+			output("  - #y{%s v%s} has both source and compiled variants:",
+				$variant->{name}, $variant->{version});
+			output("    * #G{%d source} variant%s from: #c{%s}",
+				$variant->{source_count},
+				$variant->{source_count} == 1 ? '' : 's',
+				join(', ', uniq @{$variant->{source_files}}));
+			output("    * #R{%d compiled} variant%s from: #c{%s}",
+				$variant->{compiled_count}, 
+				$variant->{compiled_count} == 1 ? '' : 's',
+				join(', ', uniq @{$variant->{compiled_files}}));
+			output("    → #G{Using source variant} for job spec comparison");
+		}
+		output("");
+	}
+}
+
+sub _is_compiled_release {
+	my ($url) = @_;
+	return 0 unless $url;
+	return 1 if $url =~ m{^https?://s3(-.*)?.amazonaws.com};
+	return 1 if $url =~ m{^https?://storage.googleapis.com};
+	# These patterns typically indicate compiled releases
+	return 1 if $url =~ m{compiled-release-tarballs};
+	return 0;
 }
 
 sub _get_kit_releases {
@@ -866,10 +942,26 @@ sub _get_kit_releases {
 	my $releases = {};
 	my $release_versions = {};
 	my $unversioned_releases = {};
+	my $release_variants = {}; # Track all variants per name/version
+	
 	for my $release (@src_spruce_blocks, @src_patch_blocks) {
 		if ($release->{name} && $release->{version}) {
-			$releases->{$release->{name}}{$release->{version}} = $release;
-			push @{$release_versions->{$release->{name}}}, {$release->{version} => $release};
+			my $name = $release->{name};
+			my $version = $release->{version};
+			
+			# Track all variants for this name/version
+			push @{$release_variants->{$name}{$version}}, $release;
+			
+			# Select the best release (prioritize source over compiled)
+			my $existing = $releases->{$name}{$version};
+			if (!$existing || (_is_compiled_release($existing->{url}) && !_is_compiled_release($release->{url}))) {
+				$releases->{$name}{$version} = $release;
+				# Replace in release_versions array too
+				$release_versions->{$name} = [grep { !exists $_->{$version} } @{$release_versions->{$name} // []}];
+				push @{$release_versions->{$name}}, {$version => $release};
+			} elsif (!$existing) {
+				push @{$release_versions->{$name}}, {$version => $release};
+			}
 		} else {
 			push @{$unversioned_releases->{$release->{name}}}, $release;
 		}
@@ -893,7 +985,7 @@ sub _get_kit_releases {
 		scalar( uniq map {keys %$_} @{$release_versions->{$_}}) > 1
 	} keys %$release_versions;
 
-	return $releases, $release_versions, \%duplicate_releases;
+	return $releases, $release_versions, \%duplicate_releases, $release_variants;
 }
 
 sub _get_spec_url {
@@ -918,6 +1010,14 @@ sub _get_spec_tarball {
 	my ($release, $path) = @_;
 	my ($name, $version, $spec_url) = @{$release}{qw/name version spec_url/};
 	my ($org, $repo) = $release->{spec_url} =~ m{^https?://github.com/([^/]+)/([^/]+)};
+
+	# Handle non-GitHub URLs by returning appropriate error
+	unless ($org && $repo) {
+		return (undef, 
+			"Cannot retrieve job specs for $name v$version: spec URL '$spec_url' is not a GitHub repository. " .
+			"Job spec comparison is only supported for releases hosted on GitHub."
+		);
+	}
 
 	my $file = "$path/$org--$repo/$name-$version-src.tar.gz";
 	mkdir_or_fail(dirname($file)) unless -d dirname($file);
