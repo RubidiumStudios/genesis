@@ -8,20 +8,39 @@ sanity-test:
 coverage:
 	SKIP_SECRETS_TESTS=yes cover -t -ignore_re '(/Legacy.pm|/JSON/|/UUID/|^t/.*\.pm)'
 
-test: sanity-test
-	prove -lf $(TESTS)
+test: unit-test e2e-test
 
-test-all: sanity-test test-quick test-secrets
+unit-test: sanity-test
+	@echo "Running unit tests (library/module level)..."
+	@SKIP_SECRETS_TESTS=yes prove -l $(shell awk '/^\[unit-tests\]/{unit=1;next}/^\[/{unit=0}unit&&/\.t$$/{print "t/"$$1}' $(TEST_MANIFEST))
 
-test-quick: sanity-test
-	SKIP_SECRETS_TESTS=yes prove -l t/*.t
+integration-test: sanity-test
+	@echo "Running integration tests (multi-component)..."
+	@prove -l $(shell awk '/^\[integration-tests\]/{int=1;next}/^\[/{int=0}int&&/\.t$$/{print "t/"$$1}' $(TEST_MANIFEST))
+
+e2e-test: sanity-test
+	@echo "Running e2e tests (full workflows)..."
+	@prove -l $(shell awk '/^\[e2e-tests\]/{e2e=1;next}/^\[/{e2e=0}e2e&&/\.t$$/{print "t/"$$1}' $(TEST_MANIFEST))
+
+test-all: sanity-test unit-test integration-test e2e-test
+
+test-manifest: sanity-test
+	@echo "Running all tests from manifest..."
+	@prove -lf $(TESTS)
+
+test-quick: unit-test
 
 test-secrets: sanity-test
-	@echo 'prove t/secrets.t'
-	@prove -l t/secrets.t ; rc=$$? ; for pid in $$(ps | grep '[\.]/t/vaults/vault-' | awk '{print $$1}') ; do kill -TERM $$pid; done ; exit $$rc
+	@echo 'Running secrets e2e test...'
+	@prove -l t/e2e-tests/secrets.t ; rc=$$? ; for pid in $$(ps | grep '[\.]/t/vaults/vault-' | awk '{print $$1}') ; do kill -TERM $$pid; done ; exit $$rc
 
 test-isolated: sanity-test
-	for x in t/*.t; do git clean -xdf t; prove -lv $$x; done
+	@echo "Running all tests in isolation..."
+	@for x in $$(awk '/\.t$$/{print "t/"$$1}' $(TEST_MANIFEST)); do \
+		echo "Testing $$x..."; \
+		git clean -xdf t; \
+		prove -lv $$x || exit 1; \
+	done
 
 release:
 	@if [[ -z $(VERSION) ]]; then echo >&2 "No VERSION specified in environment; try \`make VERSION=2.0 release'"; exit 1; fi
