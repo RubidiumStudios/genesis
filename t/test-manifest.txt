@@ -1,0 +1,45 @@
+# Genesis Test Execution Manifest
+# See .claude/plans/test-organization-manifest-approach.md for details
+#
+# Format: Each section lists test files to execute in order
+# Tests are path relative to t/ directory
+# Blank lines and # comments are ignored
+
+[unit-tests]
+# Library/module-level tests (formerly numeric-prefixed)
+# Will be reviewed and potentially split into unit/integration as updated
+unit-tests/utils.t
+unit-tests/term-color.t.DNF
+unit-tests/lib-ipv4.t
+unit-tests/lib-boolean.t
+unit-tests/service-github.t
+unit-tests/bosh.t
+unit-tests/repo-top.t
+unit-tests/kit-core.t
+unit-tests/kit-compilation.t
+unit-tests/hooks.t
+unit-tests/hooks-cloudconfig.t
+unit-tests/env-core.t
+unit-tests/env-terminate.t
+unit-tests/release-sha1.t
+unit-tests/release-overrides.t
+unit-tests/genesis-cli.t
+
+[integration-tests]
+# Multi-component interaction tests to be added
+# Tests moved here during updates if they require multiple components
+
+[e2e-tests]
+# Full workflow tests using genesis executable
+# Will be reviewed and potentially split during updates
+e2e-tests/compiled.t
+e2e-tests/init.t
+e2e-tests/manifest.t
+e2e-tests/new.t
+e2e-tests/params.t
+e2e-tests/pipeline.t
+e2e-tests/secrets.t
+e2e-tests/yamls.t
+
+[regression-tests]
+# Regression tests for known bugs to be added
