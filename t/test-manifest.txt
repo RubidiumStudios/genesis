@@ -20,7 +20,7 @@ unit-tests/term-color.t.DNF
 unit-tests/lib-ipv4.t
 unit-tests/lib-boolean.t
 unit-tests/service-github.t
-unit-tests/bosh.t
+unit-tests/service-bosh.t
 unit-tests/repo-top.t
 unit-tests/kit-core.t
 unit-tests/kit-compilation.t
@@ -40,6 +40,7 @@ integration-tests/genesis_command.t  # Command execution (run, curl, lines, fake
 integration-tests/genesis_data.t     # Data file operations (YAML/JSON load/save)
 integration-tests/genesis_files.t    # File operations (mkfile_or_fail, slurp, humanize_path)
 integration-tests/service_github.t   # GitHub/GitLab API integration (SSH key fetching)
+integration-tests/service_bosh_stemcells.t  # BOSH stemcell API integration (bosh.io)
 
 [e2e-tests]
 # Full workflow tests using genesis executable
