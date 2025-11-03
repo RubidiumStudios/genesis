@@ -1,5 +1,7 @@
-.PHONY: sanity-test test test-quick test-secrets test-ci release dev-release clean coverage
+.PHONY: sanity-test test test-quick test-secrets test-ci unit-test integration-test e2e-test test-all test-manifest release dev-release clean coverage
 
+# Test manifest-based execution
+TEST_MANIFEST ?= t/test-manifest.txt
 TESTS ?= t/*.t
 
 sanity-test:
@@ -12,7 +14,7 @@ test: unit-test e2e-test
 
 unit-test: sanity-test
 	@echo "Running unit tests (library/module level)..."
-	@SKIP_SECRETS_TESTS=yes prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests)
+	SKIP_SECRETS_TESTS=yes prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests)
 
 integration-test: sanity-test
 	@echo "Running integration tests (multi-component)..."
