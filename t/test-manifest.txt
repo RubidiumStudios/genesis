@@ -8,7 +8,14 @@
 [unit-tests]
 # Library/module-level tests (formerly numeric-prefixed)
 # Will be reviewed and potentially split into unit/integration as updated
-unit-tests/utils.t
+# Naming: {lib-path}_{module}-{context}.t (e.g., genesis-struct.t, genesis_env-core.t)
+# Genesis.pm tests split by context:
+unit-tests/genesis-core.t        # Error/logging/env utilities
+unit-tests/genesis-string.t      # String utilities (ordify, count_nouns, sentence_join)
+unit-tests/genesis-semver.t      # Semantic versioning (semver, by_semver, new_enough)
+unit-tests/genesis-struct.t      # Data structures (struct_*, flatten, deep_merge)
+unit-tests/genesis-time.t        # Time formatting (strfuzzytime, pretty_duration)
+unit-tests/genesis-uri.t         # URI parsing (parse_uri, is_valid_uri)
 unit-tests/term-color.t.DNF
 unit-tests/lib-ipv4.t
 unit-tests/lib-boolean.t
@@ -26,8 +33,12 @@ unit-tests/release-overrides.t
 unit-tests/genesis-cli.t
 
 [integration-tests]
-# Multi-component interaction tests to be added
-# Tests moved here during updates if they require multiple components
+# Multi-component interaction tests that require system interaction
+# Naming: {lib-path}_{module}-{context}.t (e.g., genesis_command.t, genesis_yaml.t)
+# Genesis.pm tests requiring filesystem/network:
+integration-tests/genesis_command.t  # Command execution (run, curl, lines, fake_tty)
+integration-tests/genesis_data.t     # Data file operations (YAML/JSON load/save)
+integration-tests/genesis_files.t    # File operations (mkfile_or_fail, slurp, humanize_path)
 
 [e2e-tests]
 # Full workflow tests using genesis executable
