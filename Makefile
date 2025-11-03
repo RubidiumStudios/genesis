@@ -12,15 +12,15 @@ test: unit-test e2e-test
 
 unit-test: sanity-test
 	@echo "Running unit tests (library/module level)..."
-	@SKIP_SECRETS_TESTS=yes prove -l $(shell awk '/^\[unit-tests\]/{f=1;next}/^\[/{f=0}f' $(TEST_MANIFEST) | grep '\.t$$' | grep -v '^#' | sed 's|^|t/|')
+	@SKIP_SECRETS_TESTS=yes prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests)
 
 integration-test: sanity-test
 	@echo "Running integration tests (multi-component)..."
-	@prove -l $(shell awk '/^\[integration-tests\]/{f=1;next}/^\[/{f=0}f' $(TEST_MANIFEST) | grep '\.t$$' | grep -v '^#' | sed 's|^|t/|')
+	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests)
 
 e2e-test: sanity-test
 	@echo "Running e2e tests (full workflows)..."
-	@prove -l $(shell awk '/^\[e2e-tests\]/{f=1;next}/^\[/{f=0}f' $(TEST_MANIFEST) | grep '\.t$$' | grep -v '^#' | sed 's|^|t/|')
+	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests)
 
 test-all: sanity-test unit-test integration-test e2e-test
 
