@@ -10,7 +10,7 @@ sanity-test:
 coverage:
 	SKIP_SECRETS_TESTS=yes cover -t -ignore_re '(/Legacy.pm|/JSON/|/UUID/|^t/.*\.pm)'
 
-test: unit-test e2e-test
+test: unit-test integration-test e2e-test
 
 unit-test: sanity-test
 	@echo "Running unit tests (library/module level)..."
