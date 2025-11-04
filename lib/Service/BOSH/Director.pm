@@ -179,7 +179,7 @@ sub from_environment {
 	if (is_valid_uri($ENV{BOSH_ENVIRONMENT}) && $ENV{BOSH_CLIENT}) {
 		return $class->new(
 			$ENV{BOSH_ALIAS},
-			undef,
+			env => undef,
 			url => $ENV{BOSH_ENVIRONMENT},
 			client => $ENV{BOSH_CLIENT},
 			secret => $ENV{BOSH_CLIENT_SECRET},

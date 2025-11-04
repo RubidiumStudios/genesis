@@ -6,6 +6,7 @@ use lib 'lib';
 use lib 't';
 use helper;
 use Test::Output;
+use JSON::PP qw/encode_json/;
 
 use_ok "Service::BOSH";
 use_ok "Service::BOSH::Director";
@@ -274,6 +275,310 @@ subtest 'Director accessor methods' => sub {
 	# Note: vault()/exodus_vault() and constructor pattern tests
 	# (from_exodus, from_alias, from_environment) require real vault instance.
 	# These are tested in integration-tests/service_bosh_director.t
+};
+
+subtest 'bosh configs - list all configurations' => sub {
+	plan tests => 6;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	# Test with multiple configs of different types
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"configs -r=99999 --json"*)
+		cat <<'JSON'
+{"Tables":[{"Content":"configs","Header":{"id":"ID","type":"Type","name":"Name","team":"Team","created_at":"Created At"},"Rows":[{"id":"1*","type":"cloud","name":"default","team":"","created_at":"2024-01-15T10:30:00Z"},{"id":"2","type":"cloud","name":"default","team":"","created_at":"2024-01-10T09:00:00Z"},{"id":"3*","type":"cloud","name":"az1","team":"dev","created_at":"2024-01-20T14:00:00Z"},{"id":"4*","type":"runtime","name":"default","team":"","created_at":"2024-01-18T11:00:00Z"},{"id":"5","type":"runtime","name":"default","team":"","created_at":"2024-01-12T08:00:00Z"}],"Notes":null}],"Blocks":null,"Lines":["Using environment 'https://127.0.0.1:25555' as user 'admin'","Succeeded"]}
+JSON
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+	my $configs = $bosh->configs();
+
+	# Test cloud configs
+	ok(exists $configs->{cloud}, 'configs() returns cloud configs');
+	ok(exists $configs->{cloud}{default}, 'cloud config "default" exists');
+	is($configs->{cloud}{default}{current}, 1, 'cloud config "default" current version is 1');
+	ok(exists $configs->{cloud}{az1}, 'cloud config "az1" exists');
+
+	# Test runtime configs
+	ok(exists $configs->{runtime}{default}, 'runtime config "default" exists');
+	is($configs->{runtime}{default}{current}, 4, 'runtime config "default" current version is 4');
+};
+
+subtest 'bosh has_config - check config existence' => sub {
+	plan tests => 3;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"configs -r=1 --type=cloud --name=default --json"*)
+		cat <<'JSON'
+{"Tables":[{"Rows":[{"id":"1*","type":"cloud","name":"default","team":"","created_at":"2024-01-15T10:30:00Z"}]}]}
+JSON
+		;;
+	*"configs -r=1 --type=cloud --name=nonexistent --json"*)
+		cat <<'JSON'
+{"Tables":[{"Rows":[]}]}
+JSON
+		;;
+	*"configs -r=1 --type=runtime --name=default --json"*)
+		cat <<'JSON'
+{"Tables":[{"Rows":[{"id":"4*","type":"runtime","name":"default","team":"","created_at":"2024-01-18T11:00:00Z"}]}]}
+JSON
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+	ok($bosh->has_config('cloud', 'default'), 'has_config() returns true for existing config');
+	ok(!$bosh->has_config('cloud', 'nonexistent'), 'has_config() returns false for non-existent config');
+	ok($bosh->has_config('runtime', 'default'), 'has_config() works for runtime configs');
+};
+
+subtest 'bosh get_config - retrieve config content' => sub {
+	plan tests => 2;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"config --type=cloud --name=default --json"*)
+		cat <<'JSON'
+{"Tables":[{"Rows":[{"content":"---\nazs:\n- name: z1\n  cloud_properties:\n    availability_zone: us-east-1a\n- name: z2\n  cloud_properties:\n    availability_zone: us-east-1b\n"}]}]}
+JSON
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+	my $config = $bosh->get_config('cloud', 'default');
+
+	ok(defined $config, 'get_config() returns config content');
+	like($config, qr/azs:/, 'config content contains expected YAML');
+};
+
+subtest 'bosh deployments - list all deployments' => sub {
+	plan tests => 3;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"deployments --json"*)
+		cat <<'JSON'
+{"Tables":[{"Content":"deployments","Header":{"name":"Name","release_s":"Release(s)","stemcell_s":"Stemcell(s)","team_s":"Team(s)"},"Rows":[{"name":"cf-production","release_s":"cf/290.0.0\ncflinuxfs3/1.290.0","stemcell_s":"ubuntu-xenial/621.74","team_s":""},{"name":"concourse","release_s":"concourse/7.8.2\ngarden-runc/1.19.16","stemcell_s":"ubuntu-xenial/621.74","team_s":""}]}]}
+JSON
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+	my $deployments = $bosh->deployments();
+
+	is(ref($deployments), 'HASH', 'deployments() returns hash reference');
+	is(scalar keys %$deployments, 2, 'deployments() returns correct count');
+	ok(exists $deployments->{'cf-production'}, 'cf-production deployment exists');
+};
+
+subtest 'bosh has_deployment - check deployment existence' => sub {
+	plan tests => 2;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"deployments --json"*)
+		cat <<'JSON'
+{"Tables":[{"Rows":[{"name":"cf-production"},{"name":"concourse"}]}]}
+JSON
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+	ok($bosh->has_deployment('cf-production'), 'has_deployment() returns true for existing deployment');
+	ok(!$bosh->has_deployment('vault'), 'has_deployment() returns false for non-existent deployment');
+};
+
+subtest 'bosh status - connection and authorization check' => sub {
+	plan tests => 3;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	# Set up fake director with listening socket
+	my $director = fake_bosh_director('test-env');
+
+	# Test successful connection
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"env"*)
+		cat <<'OUTPUT'
+Using environment 'https://127.0.0.1:25555' as user 'admin'
+
+Name               proto-bosh
+UUID               c406e16b-600e-4ceb-a736-69dd50512a80
+Version            271.2.0 (00000000)
+Director Stemcell  ubuntu-xenial/621.74
+CPI                vsphere_cpi
+User               admin
+
+Succeeded
+OUTPUT
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+	my $status = $bosh->status();
+
+	is($status->{status}, 'ok', 'status() returns ok for successful connection');
+	like($status->{msg}, qr/authorized as/, 'status() returns authorization message');
+	ok(exists $status->{msg}, 'status() includes message');
+
+	$director->stop();
+};
+
+subtest 'bosh upload_config_from_file - upload configuration' => sub {
+	plan tests => 2;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	# Test cloud config upload
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"update-config --type=cloud --name=default"*"-n"*)
+		echo "Successfully uploaded cloud config"
+		exit 0
+		;;
+	*"update-runtime-config --name=dns"*"-n"*)
+		echo "Successfully uploaded runtime config"
+		exit 0
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+
+	# Create temp config file
+	my $tmp = workdir;
+	my $cloud_config = "$tmp/cloud.yml";
+	put_file($cloud_config, "---\nnetworks: []");
+
+	ok($bosh->upload_config_from_file($cloud_config, 'cloud', 'default'),
+		'upload_config_from_file() successfully uploads cloud config');
+
+	my $runtime_config = "$tmp/runtime.yml";
+	put_file($runtime_config, "---\nreleases: []");
+
+	ok($bosh->upload_config_from_file($runtime_config, 'runtime', 'dns'),
+		'upload_config_from_file() successfully uploads runtime config');
+};
+
+subtest 'bosh delete_config - delete configuration' => sub {
+	plan tests => 2;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	# Test config deletion
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"delete-config --type=cloud --name=old"*"-n"*)
+		echo "Config deleted"
+		exit 0
+		;;
+	*"delete-config --type=runtime --name=deprecated"*"-n"*)
+		echo "Config deleted"
+		exit 0
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+
+	ok($bosh->delete_config('cloud', 'old'),
+		'delete_config() successfully deletes cloud config');
+
+	ok($bosh->delete_config('runtime', 'deprecated'),
+		'delete_config() successfully deletes runtime config');
+};
+
+subtest 'bosh delete_deployment - delete deployment' => sub {
+	plan tests => 2;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	# Test deployment deletion
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"delete-deployment -d my-deployment"*)
+		echo "Deployment deleted"
+		exit 0
+		;;
+	*"delete-deployment --force -d old-deployment"*)
+		echo "Deployment force deleted"
+		exit 0
+		;;
+esac
+SCRIPT
+
+	# Test normal deletion
+	my $bosh = Service::BOSH::Director->new(
+		'test-env',
+		url => 'https://127.0.0.1:25555',
+		client => 'admin',
+		secret => 'password',
+		ca_cert => 'fake-cert',
+		deployment => 'my-deployment'
+	);
+
+	ok($bosh->delete_deployment(),
+		'delete_deployment() successfully deletes deployment');
+
+	# Test force deletion
+	$bosh->{deployment} = 'old-deployment';
+	ok($bosh->delete_deployment(force => 1),
+		'delete_deployment() successfully force deletes deployment');
+};
+
+subtest 'bosh cleanup - cleanup BOSH director' => sub {
+	plan tests => 2;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+
+	# Test cleanup
+	fake_bosh(<<'SCRIPT');
+#!/bin/bash
+case "$*" in
+	*"clean-up"*)
+		echo "Cleanup completed"
+		exit 0
+		;;
+	*"clean-up --all --keep-orphaned-disks"*)
+		echo "Full cleanup with orphaned disks kept"
+		exit 0
+		;;
+esac
+SCRIPT
+
+	my $bosh = get_bosh_director('test-env');
+
+	ok($bosh->cleanup(),
+		'cleanup() successfully cleans up BOSH director');
+
+	ok($bosh->cleanup(all => 1, 'keep-orphaned-disks' => 1),
+		'cleanup() with options works correctly');
 };
 
 

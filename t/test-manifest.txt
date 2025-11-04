@@ -41,6 +41,7 @@ integration-tests/genesis_data.t     # Data file operations (YAML/JSON load/save
 integration-tests/genesis_files.t    # File operations (mkfile_or_fail, slurp, humanize_path)
 integration-tests/service_github.t   # GitHub/GitLab API integration (SSH key fetching)
 integration-tests/service_bosh_stemcells.t  # BOSH stemcell API integration (bosh.io)
+integration-tests/service_bosh_director.t   # BOSH Director constructor patterns (from_exodus, from_alias, from_environment)
 
 [e2e-tests]
 # Full workflow tests using genesis executable
