@@ -238,5 +238,43 @@ EOF
 		"bosh() helper should clear out the environment implicitly");
 };
 
+subtest 'Director accessor methods' => sub {
+	plan tests => 8;
+
+	# Create a director with known values
+	local $ENV{GENESIS_BOSH_COMMAND};
+	fake_bosh('');
+	my $bosh = get_bosh_director('test-director', deployment => 'test-deployment');
+
+	# Test alias()
+	is($bosh->alias, 'test-director', 'alias() returns director alias');
+
+	# Test deployment() getter
+	is($bosh->deployment, 'test-deployment', 'deployment() getter returns deployment name');
+
+	# Test deployment() setter
+	$bosh->deployment('new-deployment');
+	is($bosh->deployment, 'new-deployment', 'deployment() setter updates deployment name');
+
+	# Test url()
+	is($bosh->url, 'https://127.0.0.1:25555', 'url() returns full URL with schema and port');
+
+	# Test host()
+	is($bosh->host, '127.0.0.1', 'host() returns hostname');
+
+	# Test exodus_path()
+	is($bosh->exodus_path, 'secret/exodus', 'exodus_path() returns exodus path');
+
+	# Test env() - should be undef since we didn't pass an env object
+	is($bosh->env, undef, 'env() returns undef when no env object provided');
+
+	# Test has_director() class method
+	ok(Service::BOSH::Director->has_director(), 'has_director() class method returns true');
+
+	# Note: vault()/exodus_vault() and constructor pattern tests
+	# (from_exodus, from_alias, from_environment) require real vault instance.
+	# These are tested in integration-tests/service_bosh_director.t
+};
+
 
 done_testing;
