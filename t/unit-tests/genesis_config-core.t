@@ -27,9 +27,10 @@ EOF
 
 	my $config = Genesis::Config->new($config_file);
 	ok($config->exists, "config file exists");
-	ok($config->loaded, "config is loaded");
+	ok(!$config->loaded, "config not loaded until accessed (lazy loading)");
 
 	is($config->get('foo'), 'bar', "can get simple string value");
+	ok($config->loaded, "config is loaded after accessing contents");
 	is($config->get('number'), 42, "can get numeric value");
 	is($config->get('nested.key'), 'value', "can get nested value");
 	cmp_deeply($config->get('nested.array'), ['one', 'two'], "can get array value");

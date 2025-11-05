@@ -2,7 +2,7 @@ package Genesis::Config;
 use strict;
 use warnings;
 
-use Genesis qw/bail bug debug info struct_lookup struct_set_value in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file/;
+use Genesis qw/bail bug debug info struct_lookup struct_set_value in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff/;
 use Genesis::Term qw/bullet decolorize/;
 
 use JSON::PP ();
@@ -117,7 +117,7 @@ sub clear {
 	# TODO: Validate key and value against schema
 
 	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
-	struct_set_value($self->_contents,$key,1);
+	struct_set_value($self->_contents, $key, undef, 1);
 	$self->save if $self->changed && ($save || $self->{autosave});
 	return $self->changed;
 }
@@ -467,21 +467,16 @@ sub show_diff {
 	my ($self, $other) = @_;
 	$other ||= Genesis::Config->new($self->{path});
 
-	# Use spruce to diff the two configurations
-	my $file1 = workdir('genesis-config')."/genesis-config-1.yml";
-	my $file2 = workdir('genesis-config')."/genesis-config-2.yml";
-	my $diff_file  = workdir('genesis-config')."/spruce-diff.ym";
-	save_to_yaml_file($self->_contents, $file1);
-	save_to_yaml_file($other->_contents, $file2);
-
-	my @cmd = ('spruce', 'diff', $file2, $file1);
-	my ($diff, $rc, $err) = run( {stderr => 0}, fake_tty($diff_file, @cmd));
+	# Use Genesis::spruce_diff to compare configurations
+	my $diff = spruce_diff(
+		{object => $other->_contents, label => 'saved'},
+		{object => $self->_contents, label => 'current'}
+	);
 
 	if ($diff) {
-		$diff = decolorize($diff) if $ENV{NOCOLOR};
 		info("Differences between existing and updated configuration:\n%s", $diff);
 	} else {
-		bug "No differences found between existing and updated configuration -- this is impossible.";
+		info("No differences found between existing and updated configuration");
 	}
 }
 
