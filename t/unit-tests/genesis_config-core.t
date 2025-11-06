@@ -374,29 +374,14 @@ subtest 'has() and is_set() methods' => sub {
 
 	# is_set() only checks loaded/set values (not env or defaults)
 	can_ok($config, 'is_set');
-	SKIP: {
-		skip "is_set() not yet implemented", 1;
-		ok($config->is_set('explicit'), "is_set() returns true for explicit value");
-	}
-	SKIP: {
-		skip "is_set() not yet implemented", 1;
-		ok(!$config->is_set('with_default'), "is_set() returns false for default-only value");
-	}
-	SKIP: {
-		skip "is_set() not yet implemented", 1;
-		ok(!$config->is_set('with_env'), "is_set() returns false for env-only value");
-	}
-	SKIP: {
-		skip "is_set() not yet implemented", 1;
-		ok(!$config->is_set('missing'), "is_set() returns false for missing value");
-	}
+	ok($config->is_set('explicit'), "is_set() returns true for explicit value");
+	ok(!$config->is_set('with_default'), "is_set() returns false for default-only value");
+	ok(!$config->is_set('with_env'), "is_set() returns false for env-only value");
+	ok(!$config->is_set('missing'), "is_set() returns false for missing value");
 
 	# Test after setting a value
-	SKIP: {
-		skip "is_set() not yet implemented", 1;
-		$config->set('with_default', 'now_set');
-		ok($config->is_set('with_default'), "is_set() returns true after explicitly setting a defaulted value");
-	}
+	$config->set('with_default', 'now_set');
+	ok($config->is_set('with_default'), "is_set() returns true after explicitly setting a defaulted value");
 };
 
 subtest 'validation does not modify explicit contents' => sub {

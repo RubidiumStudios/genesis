@@ -106,6 +106,17 @@ sub has {
 }
 
 # }}}
+# is_set - check if a key was explicitly loaded or set (not from env/defaults) {{{
+sub is_set {
+	my ($self, $key) = @_;
+
+	bug("Cannot check for key in configuration without a key") unless defined($key);
+
+	# Check if key exists in explicit contents (loaded + set, excludes env + defaults)
+	return struct_has($self->_explicit_contents, $key);
+}
+
+# }}}
 # get_source - returns the source of a configuration value {{{
 sub get_source {
 	my ($self, $key) = @_;
