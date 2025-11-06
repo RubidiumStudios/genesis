@@ -162,16 +162,10 @@ sub set {
 	my ($self, $key, $value, $save) = @_;
 	# TODO: Validate key and value against schema
 
-	bug("Cannot set a key in the configuration without a key") unless defined($key);
 	bug("Cannot save configuration without a path") if $save && ! $self->{path};
 
-	# Track in set_values for source tracking
-	struct_set_value($self->{set_values},$key,$value);
-
-	# Invalidate caches
-	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
-	delete $self->{_contents};
-	delete $self->{_explicit_contents};
+	# Use _update_source to handle cache invalidation
+	$self->_update_source('set', $key, $value);
 
 	$self->save if $self->changed && ($save || $self->{autosave});
 	return $self->changed;
