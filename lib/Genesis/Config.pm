@@ -124,6 +124,11 @@ sub set {
 
 	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
 	struct_set_value($self->_contents,$key,$value);
+
+	# Track in set_values for source tracking
+	$self->{set_values} //= {};
+	struct_set_value($self->{set_values},$key,$value);
+
 	$self->save if $self->changed && ($save || $self->{autosave});
 	return $self->changed;
 }
@@ -190,7 +195,7 @@ sub replace {
 	$self->{autosave} = $autosave;
 	return $ok;
 }
-	
+
 
 # }}}
 # validate - validate the configuration against a schema {{{
@@ -262,7 +267,7 @@ sub _load {
 	} else {
 		$self->{contents} = {};
 		$self->{loaded_values} = {};
-		$self->{save} if $self->{autosave} && $self->{path};
+		$self->save if $self->{autosave} && $self->{path};
 	}
 
 	# Initialize other source structures if they don't exist

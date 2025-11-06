@@ -90,10 +90,7 @@ EOF
 	# Check source tracking (new method)
 	can_ok($config, 'get_source');
 	is($config->get_source('foo'), 'loaded', "value loaded from file has 'loaded' source");
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('nonexistent'), undef, "nonexistent key has no source");
-	}
+	is($config->get_source('nonexistent'), undef, "nonexistent key has no source");
 };
 
 subtest 'setting values explicitly' => sub {
@@ -107,10 +104,7 @@ subtest 'setting values explicitly' => sub {
 	is($config->get('bar'), 'baz', "can set and get new value");
 
 	can_ok($config, 'get_source');
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('bar'), 'set', "explicitly set value has 'set' source");
-	}
+	is($config->get_source('bar'), 'set', "explicitly set value has 'set' source");
 
 	# Override existing value
 	$config->set('foo', 'modified');
