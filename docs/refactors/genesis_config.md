@@ -1,9 +1,9 @@
 # Genesis::Config Refactoring Plan
 
-**Status**: Planned
+**Status**: Phase 1 COMPLETE ✅ (Phase 2 Planned)
 **Priority**: High
 **Complexity**: Medium-High
-**Estimated Effort**: 2-3 days
+**Estimated Effort**: ~~2-3 days~~ (Phase 1: 1 day actual)
 
 ## Executive Summary
 
@@ -249,28 +249,41 @@ Mix of styles - **tests can be freely updated**:
 
 ## Implementation Plan
 
-### Phase 1: Source Tracking (Core Refactoring)
+### Phase 1: Source Tracking (Core Refactoring) ✅ COMPLETE
+
 **Goal**: Fix save() behavior - don't write defaults/env vars
 
 **Steps**:
-1. ✅ Create comprehensive TDD tests (DONE - 21 subtests in genesis_config-core.t)
-2. Change internal `_contents` structure to track sources
-3. Implement `get_source()` method
-4. Implement `get_all()` method
-5. Implement `is_set()` method
-6. Implement `_explicit_contents()` private method
-7. Modify `validate()` to not call `set()` for defaults
-8. Modify `get()` to compute defaults on-demand with priority resolution
-9. Modify `save()` to use `_explicit_contents()`
-10. Run tests incrementally as methods are implemented (red-green-refactor)
+1. ✅ Create comprehensive TDD tests (DONE - 23 subtests in genesis_config-core.t)
+2. ✅ Change internal structure to use four source tracking structures (loaded_values, set_values, env_values, default_values)
+3. ✅ Implement `get_source()` method
+4. ✅ Implement `get_all()` method with deep copy protection
+5. ✅ Implement `is_set()` method
+6. ✅ Implement `_explicit_contents()` private method
+7. ✅ Modify `validate()` to populate env_values/default_values structures (not set())
+8. ✅ Modify `_contents()` to compute with priority resolution (env > set > loaded > default)
+9. ✅ Modify `save()` to use `_explicit_contents()`
+10. ✅ Fix `clear()` to work with source tracking
+11. ✅ Fix `_signature()` to avoid deep recursion and use explicit contents
+12. ✅ Run tests incrementally with TDD red-green-refactor cycle
 
-**Success Criteria**:
-- All 21 subtests in genesis_config-core.t pass
-- `save()` only writes loaded/set values
-- Defaults accessible via `get()` but not saved
-- Source tracking works for all value types
+**Success Criteria**: ✅ ALL MET
+- ✅ All 23/23 subtests in genesis_config-core.t passing (100%)
+- ✅ `save()` only writes loaded/set values (defaults/env excluded)
+- ✅ Defaults accessible via `get()` but not saved to disk
+- ✅ Source tracking works for all value types
+- ✅ Priority resolution correct (env > set > loaded > default)
+- ✅ No regressions in existing functionality
+- ✅ External mutation protection via deep copy in get_all()
+- ✅ Cache invalidation working correctly
 
-**Estimated Effort**: 1-2 days
+**Actual Effort**: 1 day (2025-11-06)
+
+**Implementation Notes**:
+- Used four separate hash structures instead of embedded source tracking for cleaner separation
+- Discovered and fixed deep recursion bug in _signature() method
+- _contents() and _explicit_contents() both use caching with proper invalidation
+- Constructor initializes all four source structures (no `// {}` defaults needed)
 
 ### Phase 2: Schema Integration
 **Goal**: Automatic validation with schema attachment
@@ -293,7 +306,127 @@ Mix of styles - **tests can be freely updated**:
 
 **Estimated Effort**: 1 day
 
-### Phase 3: Test Migration (Optional, Can Be Done Incrementally)
+### Phase 3: Flattened Internal Storage (Performance Optimization)
+**Goal**: Optimize read performance by storing values in flattened form internally
+
+**Rationale**:
+The primary use case for Genesis::Config is **reading** values, not deep structure manipulation.
+Currently every `get()` call requires `struct_lookup()` to traverse nested structures, and
+`is_set()`/`get_source()` require `struct_has()` traversal. Since we already have `flatten()`
+and `unflatten()` utilities, we can optimize for the common case (reading) at the cost of
+slightly more work during rare operations (loading/saving).
+
+**Current Architecture** (Deep Structures):
+```perl
+# Four deep source structures
+$self->{loaded_values} = { nested => { key => 'value' } };
+$self->{set_values} = { another => { deep => { key => 'val' } } };
+
+# Every read requires traversal
+$val = struct_lookup($self->{loaded_values}, 'nested.key');  # O(depth)
+$exists = struct_has($self->{set_values}, 'another.deep.key');  # O(depth)
+```
+
+**Proposed Architecture** (Flattened):
+```perl
+# Four flattened source structures
+$self->{loaded_values} = { 'nested.key' => 'value' };
+$self->{set_values} = { 'another.deep.key' => 'val' };
+
+# Direct hash access
+$val = $self->{loaded_values}{'nested.key'};  # O(1)
+$exists = exists $self->{set_values}{'another.deep.key'};  # O(1)
+```
+
+**Performance Impact**:
+- **get()**: O(depth) → O(1) - Direct hash lookup instead of traversal
+- **get_source()**: O(depth * 4) → O(4) - Four hash lookups instead of four traversals
+- **is_set()**: O(depth * 2) → O(2) - Two hash lookups instead of two traversals
+- **has()**: O(depth) → O(1) - Direct hash lookup
+- **Caching**: Can potentially eliminate path-based cache since lookups are already fast
+
+**Implementation Changes**:
+
+**Loading** (convert to flattened on load):
+```perl
+sub _load {
+    my ($self, $path) = @_;
+    # ... existing load logic ...
+
+    # Flatten on load (one-time cost)
+    $self->{loaded_values} = flatten(load_yaml_file($path));
+}
+```
+
+**Saving** (unflatten before save):
+```perl
+sub save {
+    my ($self) = @_;
+    # Unflatten explicit contents before save
+    my $explicit = unflatten($self->_explicit_contents);
+    # ... save deep structure as YAML ...
+}
+```
+
+**Validation** (flatten defaults/env):
+```perl
+sub validate {
+    my ($self, $schema) = @_;
+    for my $key (keys %$schema) {
+        if (env var) {
+            # Direct hash assignment (flattened key)
+            $self->{env_values}{$key} = $ENV{...};
+        }
+        if (default) {
+            $self->{default_values}{$key} = $schema->{$key}{default};
+        }
+    }
+}
+```
+
+**get_all()** (unflatten and merge):
+```perl
+sub get_all {
+    my ($self) = @_;
+    # Unflatten each source, then merge
+    return deep_merge(
+        unflatten($self->{default_values}),
+        unflatten($self->{loaded_values}),
+        unflatten($self->{set_values}),
+        unflatten($self->{env_values})
+    );
+}
+```
+
+**Modified Methods**:
+- `get()`: Remove struct_lookup, use direct hash access
+- `set()`: Use direct hash assignment instead of struct_set_value
+- `clear()`: Use direct hash delete instead of struct_set_value(..., undef, 1)
+- `has()`: Use exists() instead of struct_lookup
+- `get_source()`: Use exists() instead of struct_has
+- `is_set()`: Use exists() instead of struct_has
+- `_contents()`: Unflatten each source before deep_merge
+- `_explicit_contents()`: Unflatten before merge
+
+**Trade-offs**:
+- ✅ **Reads** (common): O(depth) → O(1) - **Much faster**
+- ✅ **Simpler code**: exists() and hash access vs struct_lookup/struct_has
+- ✅ **Less caching needed**: Direct access is already fast
+- ❌ **Load** (rare): Small overhead to flatten on load
+- ❌ **Save** (rare): Small overhead to unflatten before save
+- ❌ **get_all()** (rare): Must unflatten all four sources
+
+**Success Criteria**:
+- All 23/23 tests still passing
+- No behavior changes (refactor only)
+- Measurable performance improvement on read-heavy workloads
+- Simpler code without struct_lookup/struct_has/struct_set_value calls
+
+**Estimated Effort**: 0.5-1 day
+
+**Dependencies**: Phase 1 must be complete (source tracking architecture in place)
+
+### Phase 4: Test Migration (Optional, Can Be Done Incrementally)
 **Goal**: Modernize test code to use new named-params style
 
 **Steps**:
@@ -445,6 +578,8 @@ Mix of styles - **tests can be freely updated**:
 
 ---
 
-**Last Updated**: 2025-11-06
+**Last Updated**: 2025-11-06 (Phase 1 Complete)
 **Author**: Claude Code Session
-**Status**: Ready for Implementation
+**Phase 1 Status**: ✅ COMPLETE - All 23/23 tests passing
+**Phase 2 Status**: Planned
+**Phase 3 Status**: Proposed (Performance Optimization)
