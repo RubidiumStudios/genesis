@@ -131,6 +131,7 @@ sub set {
 	# Invalidate caches
 	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
 	delete $self->{_contents};
+	delete $self->{_explicit_contents};
 
 	$self->save if $self->changed && ($save || $self->{autosave});
 	return $self->changed;
@@ -160,7 +161,7 @@ sub save {
 	my $i=1; while (-f "$tmp/$i.json") {$i++};
 	open my $fh, ">", "$tmp/$i.json"
 		or bail "Unable to create tempfile for YAML conversion: $!";
-	print $fh JSON::PP->new->canonical->encode($self->_contents);
+	print $fh JSON::PP->new->canonical->encode($self->_explicit_contents);
 	close $fh;
 	my ($out,$rc,$err) = run(
 		{stderr => 0},
@@ -270,6 +271,25 @@ sub _contents {
 	);
 
 	return $self->{_contents};
+}
+
+# }}}
+# _explicit_contents - only loaded and set values (for saving to disk) {{{
+sub _explicit_contents {
+	my ($self) = @_;
+	$self->_load() unless ($self->loaded) || (! $self->exists && exists($self->{loaded_values}));
+
+	# Return cached explicit contents if available
+	return $self->{_explicit_contents} if exists $self->{_explicit_contents};
+
+	# Merge only explicit sources: set > loaded
+	# Exclude env and default values from disk persistence
+	$self->{_explicit_contents} = deep_merge(
+		$self->{loaded_values},
+		$self->{set_values}
+	);
+
+	return $self->{_explicit_contents};
 }
 
 # }}}

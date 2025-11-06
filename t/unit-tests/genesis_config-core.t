@@ -451,8 +451,8 @@ subtest 'validation does not modify explicit contents' => sub {
 		cmp_deeply($after, { foo => 'bar' }, "explicit contents unchanged after validation");
 	}
 
-	# Validate for subsequent tests
-	$config->validate($schema) unless $config->can('_explicit_contents');
+	# Validate for subsequent tests (always needed to populate defaults)
+	$config->validate($schema);
 
 	# But default is accessible
 	is($config->get('with_default'), 'default_value', "default value is accessible after validation");
