@@ -10,6 +10,58 @@ use_ok 'Genesis::Config';
 
 my $tmp = workdir();
 
+subtest 'constructor backward compatibility' => sub {
+	# Test old-style positional parameters (backward compatibility)
+
+	# Old style: path only
+	my $c1 = Genesis::Config->new("$tmp/test.yml");
+	is($c1->path, "$tmp/test.yml", "old style: path only works");
+	ok(!$c1->{autosave}, "old style: autosave defaults to false");
+
+	# Old style: path + autosave
+	my $c2 = Genesis::Config->new("$tmp/test.yml", 1);
+	is($c2->path, "$tmp/test.yml", "old style: path + autosave works");
+	ok($c2->{autosave}, "old style: autosave is set");
+
+	# Old style: path + autosave + content
+	my $c3 = Genesis::Config->new(undef, 0, {foo => 'bar'});
+	is($c3->path, undef, "old style: can have undef path");
+	ok(!$c3->{autosave}, "old style: autosave off with content");
+	is($c3->get('foo'), 'bar', "old style: content is set");
+
+	# Old style: no args
+	my $c4 = Genesis::Config->new();
+	is($c4->path, undef, "old style: no args creates empty config");
+};
+
+subtest 'constructor new named parameters' => sub {
+	# Test new-style named parameters
+	# These tests document the planned API for the Genesis::Config refactoring
+	# See docs/refactors/genesis_config.md for implementation plan
+
+	SKIP: {
+		skip "Hybrid constructor not yet implemented - see docs/refactors/genesis_config.md", 5;
+
+		# New style: path as named param
+		my $c1 = Genesis::Config->new(path => "$tmp/test.yml");
+		is($c1->path, "$tmp/test.yml", "new style: path param works");
+
+		# New style: path + autosave
+		my $c2 = Genesis::Config->new(path => "$tmp/test.yml", autosave => 1);
+		is($c2->path, "$tmp/test.yml", "new style: path + autosave works");
+		ok($c2->{autosave}, "new style: autosave is set");
+
+		# New style: content
+		my $c3 = Genesis::Config->new(content => {foo => 'bar'});
+		is($c3->get('foo'), 'bar', "new style: content param works");
+
+		# New style: schema (new feature)
+		my $schema = {foo => {type => 'string'}};
+		my $c4 = Genesis::Config->new(path => "$tmp/test.yml", schema => $schema);
+		is($c4->{schema}, $schema, "new style: schema param is stored");
+	}
+};
+
 subtest 'basic config creation and loading' => sub {
 	my $config_file = "$tmp/test1.yml";
 
