@@ -218,34 +218,13 @@ EOF
 
 	# Source tests
 	can_ok($config, 'get_source');
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('only_file'), 'loaded', "correct source for file-only");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('set_and_file'), 'set', "correct source for set override");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('env_and_file'), 'env', "correct source for env override");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('env_set_file'), 'env', "correct source for env > set");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('only_default'), 'default', "correct source for default-only");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('set_and_default'), 'set', "correct source for set > default");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('env_and_default'), 'env', "correct source for env > default");
-	}
+	is($config->get_source('only_file'), 'loaded', "correct source for file-only");
+	is($config->get_source('set_and_file'), 'set', "correct source for set override");
+	is($config->get_source('env_and_file'), 'env', "correct source for env override");
+	is($config->get_source('env_set_file'), 'env', "correct source for env > set");
+	is($config->get_source('only_default'), 'default', "correct source for default-only");
+	is($config->get_source('set_and_default'), 'set', "correct source for set > default");
+	is($config->get_source('env_and_default'), 'env', "correct source for env > default");
 };
 
 subtest 'save behavior - only explicit values' => sub {
@@ -435,21 +414,15 @@ subtest 'validation does not modify explicit contents' => sub {
 	my $config = Genesis::Config->new($config_file);
 
 	can_ok($config, '_explicit_contents');
-	SKIP: {
-		skip "_explicit_contents() not yet implemented", 1;
-		# Get explicit contents before validation
-		my $before = $config->_explicit_contents();
-		cmp_deeply($before, { foo => 'bar' }, "explicit contents before validation");
-	}
+	# Get explicit contents before validation
+	my $before = $config->_explicit_contents();
+	cmp_deeply($before, { foo => 'bar' }, "explicit contents before validation");
 
-	SKIP: {
-		skip "_explicit_contents() not yet implemented", 1;
-		$config->validate($schema);
+	$config->validate($schema);
 
-		# Get explicit contents after validation
-		my $after = $config->_explicit_contents();
-		cmp_deeply($after, { foo => 'bar' }, "explicit contents unchanged after validation");
-	}
+	# Get explicit contents after validation
+	my $after = $config->_explicit_contents();
+	cmp_deeply($after, { foo => 'bar' }, "explicit contents unchanged after validation");
 
 	# Validate for subsequent tests (always needed to populate defaults)
 	$config->validate($schema);
