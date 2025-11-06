@@ -285,6 +285,11 @@ Mix of styles - **tests can be freely updated**:
 - _contents() and _explicit_contents() both use caching with proper invalidation
 - Constructor initializes all four source structures (no `// {}` defaults needed)
 
+**Bug Fixes During Implementation**:
+- **Validation normalization bug** (2025-11-06): Fixed _validate_key() calling set() for normalization (hasharray, boolean conversions), which incorrectly marked values as 'set' source instead of preserving original source. Added _update_source(source, key, value) method to update values in their specific source structure. Reproduced with user's deployment_roots config containing hasharray format. Refactored set() to use _update_source() for consistency.
+  - Commits: f88517d (fix), 7823a22 (refactor)
+  - Test: [t/unit-tests/genesis_config-core.t:594](t/unit-tests/genesis_config-core.t#L594) "validation preserves source tracking"
+
 ### Phase 2: Schema Integration
 **Goal**: Automatic validation with schema attachment
 
