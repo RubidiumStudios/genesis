@@ -21,7 +21,6 @@ unit-tests/lib-ipv4.t
 unit-tests/lib-boolean.t
 unit-tests/service_github-core.t
 unit-tests/service_bosh-director.t
-unit-tests/genesis_top-repos.t
 unit-tests/kit-core.t
 unit-tests/kit-compilation.t
 unit-tests/hooks.t
@@ -42,6 +41,7 @@ integration-tests/genesis-files.t    # File operations (mkfile_or_fail, slurp, h
 integration-tests/service_github-api.t   # GitHub/GitLab API integration (SSH key fetching, API methods)
 integration-tests/service_bosh_stemcells.t  # BOSH stemcell API integration (bosh.io)
 integration-tests/service_bosh_director.t   # BOSH Director constructor patterns (from_exodus, from_alias, from_environment)
+integration-tests/genesis_top-complete.t    # Genesis::Top with external vault and GitHub dependencies
 
 [e2e-tests]
 # Full workflow tests using genesis executable
