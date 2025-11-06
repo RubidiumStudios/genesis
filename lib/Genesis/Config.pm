@@ -86,6 +86,14 @@ sub get {
 }
 
 # }}}
+# get_all - get all effective configuration values from all sources {{{
+sub get_all {
+	my ($self) = @_;
+	# Return a deep copy to prevent external mutation of internal state
+	return JSON::PP->new->decode(JSON::PP->new->encode($self->_contents));
+}
+
+# }}}
 # has - check if a key exists in the configuration {{{
 sub has {
 	my ($self, $key) = @_;

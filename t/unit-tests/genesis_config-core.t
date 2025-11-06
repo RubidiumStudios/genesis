@@ -313,16 +313,13 @@ subtest 'contents methods' => sub {
 
 	# get_all() should return all effective values
 	can_ok($config, 'get_all');
-	SKIP: {
-		skip "get_all() not yet implemented", 1;
-		my $all = $config->get_all();
-		cmp_deeply($all, {
-			loaded_key => 'loaded_value',
-			default_key => 'default_value',
-			env_key => 'env_value',
-			set_key => 'set_value'
-		}, "get_all() includes all sources");
-	}
+	my $all = $config->get_all();
+	cmp_deeply($all, {
+		loaded_key => 'loaded_value',
+		default_key => 'default_value',
+		env_key => 'env_value',
+		set_key => 'set_value'
+	}, "get_all() includes all sources");
 
 	# _explicit_contents() should only return loaded/set values (what gets saved)
 	can_ok($config, '_explicit_contents');
