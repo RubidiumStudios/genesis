@@ -167,11 +167,8 @@ subtest 'init' => sub {
 		creator_version => ignore,
 		version => 2,
 		deployment_type => 'jumpbox',
-		manifest_store => ignore,
+		manifest_store => 'exodus',
 		minimum_version => '3.1.0',
-		kits_path => '$GENESIS_ROOT/.genesis/kits',
-		deployment_change_reason_required_size => 0,
-		user_provided_bosh_creds => 'ignore',
 		secrets_provider => {
 			url => $VAULT_URL,
 			insecure => bool(0),
@@ -284,7 +281,6 @@ EOF
 ---
 creator_version: 99.99.99
 deployment_type: test
-manifest_store: hybrid
 secrets_provider:
   url: $VAULT_URL{$vault_target}
   insecure: false
@@ -296,7 +292,6 @@ version: 2
 EOF
 	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
-			"manifest_store"  => "hybrid",
 			"creator_version" => "99.99.99",
 			"updater_version" => "(development)",
 			"version" => 2,
@@ -318,7 +313,6 @@ EOF
 ---
 creator_version: 99.99.99
 deployment_type: test
-manifest_store: hybrid
 secrets_provider:
   url: $VAULT_URL{$vault_target}
   insecure: false
@@ -330,7 +324,6 @@ version: 2
 EOF
 	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
-			"manifest_store"  => "hybrid",
 			"creator_version" => "99.99.99",
 			"updater_version" => "(development)",
 			"version" => 2,
@@ -354,7 +347,6 @@ EOF
 ---
 creator_version: 99.99.99
 deployment_type: test
-manifest_store: hybrid
 secrets_provider:
   url: $VAULT_URL{$other_vault_name}
   insecure: false
@@ -366,7 +358,6 @@ version: 2
 EOF
 	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
-			"manifest_store"  => "hybrid",
 			"creator_version" => "99.99.99",
 			"updater_version" => "(development)",
 			"version" => 2,
