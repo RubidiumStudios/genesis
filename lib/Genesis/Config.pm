@@ -136,6 +136,27 @@ sub get_source {
 }
 
 # }}}
+# _update_source - updates a value in a specific source structure {{{
+sub _update_source {
+	my ($self, $source, $key, $value) = @_;
+	bug("Cannot update key in configuration without a source") unless defined($source);
+	bug("Cannot update key in configuration without a key") unless defined($key);
+
+	my $source_field = "${source}_values";
+	bug("Invalid source '$source' - must be one of: env, set, loaded, default")
+		unless exists $self->{$source_field};
+
+	# Update the value in the specified source structure
+	struct_set_value($self->{$source_field}, $key, $value);
+
+	# Invalidate caches
+	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
+	delete $self->{_contents};
+	# Only invalidate _explicit_contents if we modified loaded or set
+	delete $self->{_explicit_contents} if $source eq 'loaded' || $source eq 'set';
+}
+
+# }}}
 # set - write a value to the configuration {{{
 sub set {
 	my ($self, $key, $value, $save) = @_;
@@ -385,9 +406,9 @@ sub _validate_key {
 				my $subschema = $schema->{schema}{$subkey};
 				if (exists($subschema->{envvar}) && exists($ENV{$subschema->{envvar}})) {
 					# Environment variables take precedence over configuration values.
-					$self->set("$key.$subkey", $ENV{$subschema->{envvar}});
+					$self->_update_source('env', "$key.$subkey", $ENV{$subschema->{envvar}});
 				} elsif (exists($subschema->{default}) and ! exists($value->{$subkey})) {
-					$self->set("$key.$subkey", $subschema->{default});
+					$self->_update_source('default', "$key.$subkey", $subschema->{default});
 				} elsif ($subschema->{required} and ! exists($value->{$subkey})) {
 					push @errors, "#R{$key}: missing required key #ri{$subkey}";
 				}
@@ -514,14 +535,20 @@ sub _validate_key {
 					push @errors, sprintf("No subtype matched the value: %s\n%s", $value->[$i], $error_list);
 				}
 			}
-			$self->set($key, $value);
+			# Normalize array in place - update the source structure, not set()
+			my $source = $self->get_source($key);
+			bug("Cannot normalize key '$key' - no source found") unless $source;
+			$self->_update_source($source, $key, $value);
 		}
 
 	} elsif ($type eq 'boolean') {
 		if (! in_array($value, TRUE, FALSE, 1, 0, '', undef, 'true', 'false', 'yes', 'no')) {
 			push @errors, "#R{$key}: expected a boolean, not #ri{".($value ? $value : '<null>')."}";
 		}
-		$self->set($key, $value ? TRUE : FALSE); # Normalize to JSON::PP::true or JSON::PP::false
+		# Normalize boolean in place - update the source structure, not set()
+		my $source = $self->get_source($key);
+		bug("Cannot normalize key '$key' - no source found") unless $source;
+		$self->_update_source($source, $key, $value ? TRUE : FALSE);
 	} elsif ($type eq 'enum') {
 		if (! in_array($value, @{$schema->{values}})) {
 			push @errors, "#R{$key}: unknown value: #ri{".($value ? $value : "<null>")."}; expected one of ".join(', ', @{$schema->{values}});

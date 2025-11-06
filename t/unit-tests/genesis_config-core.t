@@ -591,6 +591,47 @@ subtest 'clear() with save parameter' => sub {
 	ok($reloaded->has('baz'), "other keys remain after clear");
 };
 
+subtest 'validation preserves source tracking for normalized values' => sub {
+	# Test that when validation normalizes values (hasharray, boolean, etc),
+	# the source tracking is preserved (not marked as 'set')
+
+	# Hasharray normalization test - reproduces the deployment_roots issue
+	my $config_file = "$tmp/test19.yml";
+	put_file($config_file, "---\nroots:\n- label: path/to/root\n");
+
+	my $config = Genesis::Config->new($config_file);
+
+	# Schema that converts hasharray format
+	my $schema = {
+		roots => {
+			type => 'array',
+			subtype => 'hasharray',
+		}
+	};
+
+	$config->validate($schema);
+
+	# After validation, the value should still be tracked as 'loaded'
+	is($config->get_source('roots'), 'loaded', "hasharray normalization preserves 'loaded' source");
+
+	# Boolean normalization test
+	my $config_file2 = "$tmp/test20.yml";
+	put_file($config_file2, "---\nenabled: yes\n");
+
+	my $config2 = Genesis::Config->new($config_file2);
+
+	my $schema2 = {
+		enabled => {
+			type => 'boolean',
+		}
+	};
+
+	$config2->validate($schema2);
+
+	# After validation, the value should still be tracked as 'loaded'
+	is($config2->get_source('enabled'), 'loaded', "boolean normalization preserves 'loaded' source");
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
