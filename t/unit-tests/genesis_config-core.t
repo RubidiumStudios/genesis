@@ -110,10 +110,7 @@ subtest 'setting values explicitly' => sub {
 	$config->set('foo', 'modified');
 	is($config->get('foo'), 'modified', "can override existing value");
 
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('foo'), 'set', "overridden value has 'set' source");
-	}
+	is($config->get_source('foo'), 'set', "overridden value has 'set' source");
 
 	# Set nested value
 	$config->set('nested.deep.key', 'value');
@@ -143,14 +140,8 @@ subtest 'environment variable overrides' => sub {
 	is($config->get('foo'), 'from_env', "env var overrides file value");
 
 	can_ok($config, 'get_source');
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('foo'), 'env', "env override has 'env' source");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('bar'), 'loaded', "value without env var has 'loaded' source");
-	}
+	is($config->get_source('foo'), 'env', "env override has 'env' source");
+	is($config->get_source('bar'), 'loaded', "value without env var has 'loaded' source");
 
 	is($config->get('bar'), 'original', "value without env var is unchanged");
 };

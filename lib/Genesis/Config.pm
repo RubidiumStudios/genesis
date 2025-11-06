@@ -204,13 +204,27 @@ sub validate {
 	$self->{schema} = $schema;
 	my @errors = ();
 
+	# Initialize source tracking structures if needed
+	$self->{env_values} //= {};
+	$self->{default_values} //= {};
+
 	# Ensure all required keys are present, and all defaults are set
 	for my $key (keys %$schema) {
 		if (exists($schema->{$key}{envvar}) and exists($ENV{$schema->{$key}{envvar}})) {
 			# Environment variables take precedence over configuration values.
-			$self->set($key, $ENV{$schema->{$key}{envvar}});
+			my $env_value = $ENV{$schema->{$key}{envvar}};
+			# Track in env_values for source tracking
+			struct_set_value($self->{env_values}, $key, $env_value);
+			# Also update contents (TODO: eventually contents can be removed)
+			struct_set_value($self->_contents, $key, $env_value);
+			delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
 		} elsif (exists($schema->{$key}{default}) and ! exists($self->_contents->{$key})) {
-			$self->set($key, $schema->{$key}{default});
+			# Track in default_values for source tracking
+			my $default_value = $schema->{$key}{default};
+			struct_set_value($self->{default_values}, $key, $default_value);
+			# Also update contents (TODO: eventually contents can be removed)
+			struct_set_value($self->_contents, $key, $default_value);
+			delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
 		} elsif ($schema->{$key}{required} and ! exists($self->_contents->{$key})) {
 			push @errors, "#R{$key}: missing required key";
 			next;
