@@ -172,18 +172,9 @@ subtest 'schema defaults' => sub {
 	is($config->get('another_default'), 123, "numeric default is returned");
 
 	can_ok($config, 'get_source');
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('foo'), 'loaded', "explicit value has 'loaded' source");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('with_default'), 'default', "default value has 'default' source");
-	}
-	SKIP: {
-		skip "get_source() not yet implemented", 1;
-		is($config->get_source('another_default'), 'default', "numeric default has 'default' source");
-	}
+	is($config->get_source('foo'), 'loaded', "explicit value has 'loaded' source");
+	is($config->get_source('with_default'), 'default', "default value has 'default' source");
+	is($config->get_source('another_default'), 'default', "numeric default has 'default' source");
 };
 
 subtest 'priority resolution: env > set > loaded > default' => sub {

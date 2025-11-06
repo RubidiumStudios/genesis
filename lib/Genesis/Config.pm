@@ -2,7 +2,7 @@ package Genesis::Config;
 use strict;
 use warnings;
 
-use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff/;
+use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff deep_merge/;
 use Genesis::Term qw/bullet decolorize/;
 
 use JSON::PP ();
@@ -31,7 +31,10 @@ sub new {
 			path => $path,
 			persistant_signature => undef,
 			autosave => ($autosave && $path)? 1 : 0,
-			contents => $content//{},
+			loaded_values => {},
+			set_values => $content//{},
+			env_values => {},
+			default_values => {},
 		}, $class);
 }
 
@@ -122,12 +125,12 @@ sub set {
 	bug("Cannot set a key in the configuration without a key") unless defined($key);
 	bug("Cannot save configuration without a path") if $save && ! $self->{path};
 
-	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
-	struct_set_value($self->_contents,$key,$value);
-
 	# Track in set_values for source tracking
-	$self->{set_values} //= {};
 	struct_set_value($self->{set_values},$key,$value);
+
+	# Invalidate caches
+	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
+	delete $self->{_contents};
 
 	$self->save if $self->changed && ($save || $self->{autosave});
 	return $self->changed;
@@ -204,28 +207,23 @@ sub validate {
 	$self->{schema} = $schema;
 	my @errors = ();
 
-	# Initialize source tracking structures if needed
-	$self->{env_values} //= {};
-	$self->{default_values} //= {};
-
 	# Ensure all required keys are present, and all defaults are set
 	for my $key (keys %$schema) {
 		if (exists($schema->{$key}{envvar}) and exists($ENV{$schema->{$key}{envvar}})) {
 			# Environment variables take precedence over configuration values.
 			my $env_value = $ENV{$schema->{$key}{envvar}};
-			# Track in env_values for source tracking
 			struct_set_value($self->{env_values}, $key, $env_value);
-			# Also update contents (TODO: eventually contents can be removed)
-			struct_set_value($self->_contents, $key, $env_value);
+			# Invalidate caches
 			delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
-		} elsif (exists($schema->{$key}{default}) and ! exists($self->_contents->{$key})) {
-			# Track in default_values for source tracking
+			delete $self->{_contents};
+		} elsif (exists($schema->{$key}{default}) and ! struct_has($self->{loaded_values}, $key) and ! struct_has($self->{set_values}, $key)) {
+			# Set default only if not loaded or explicitly set
 			my $default_value = $schema->{$key}{default};
 			struct_set_value($self->{default_values}, $key, $default_value);
-			# Also update contents (TODO: eventually contents can be removed)
-			struct_set_value($self->_contents, $key, $default_value);
+			# Invalidate caches
 			delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
-		} elsif ($schema->{$key}{required} and ! exists($self->_contents->{$key})) {
+			delete $self->{_contents};
+		} elsif ($schema->{$key}{required} and ! struct_has($self->{loaded_values}, $key) and ! struct_has($self->{set_values}, $key)) {
 			push @errors, "#R{$key}: missing required key";
 			next;
 		}
@@ -254,11 +252,24 @@ sub validate {
 
 ### Instance Private Methods {{{
 
-# _contents - the contents of the configuration object {{{
+# _contents - the contents of the configuration object computed from source structures {{{
 sub _contents {
 	my ($self) = @_;
-	$self->_load() unless ($self->loaded) || (! $self->exists && exists($self->{contents}));
-	return $self->{contents}
+	$self->_load() unless ($self->loaded) || (! $self->exists && exists($self->{loaded_values}));
+
+	# Return cached contents if available
+	return $self->{_contents} if exists $self->{_contents};
+
+	# Merge all sources with priority: env > set > loaded > default
+	# deep_merge takes multiple hashes, later ones override earlier ones
+	$self->{_contents} = deep_merge(
+		$self->{default_values},
+		$self->{loaded_values},
+		$self->{set_values},
+		$self->{env_values}
+	);
+
+	return $self->{_contents};
 }
 
 # }}}
@@ -270,24 +281,15 @@ sub _load {
 	bug("Cannot load configuration without a path") unless $path;
 
 	if ($self->exists) {
-		($self->{contents}, my $rc, my $err) = load_yaml_file($path);
+		($self->{loaded_values}, my $rc, my $err) = load_yaml_file($path);
 		debug "Loaded ".$self->{path}." - rc:$rc";
-		bail("Failed to load %s: %s", $path, $err) if ($rc || ! $self->{contents});
-
-		# Track loaded values separately for source tracking
-		$self->{loaded_values} = $self->{contents};
+		bail("Failed to load %s: %s", $path, $err) if ($rc || ! $self->{loaded_values});
 
 		$self->{persistant_signature} = $self->_signature;
 	} else {
-		$self->{contents} = {};
 		$self->{loaded_values} = {};
 		$self->save if $self->{autosave} && $self->{path};
 	}
-
-	# Initialize other source structures if they don't exist
-	$self->{set_values} //= {};
-	$self->{env_values} //= {};
-	$self->{default_values} //= {};
 }
 
 # }}}
