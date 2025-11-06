@@ -163,7 +163,7 @@ subtest 'init' => sub {
 	is $top->type, 'jumpbox', 'an initialized top has a type';
 	is $top->vault->url, $VAULT_URL, 'specifies the correct vault url';
 
-	cmp_deeply $top->config->_contents, {
+	cmp_deeply $top->config->_explicit_contents, {
 		creator_version => ignore,
 		version => 2,
 		deployment_type => 'jumpbox',
@@ -275,9 +275,7 @@ EOF
 	is($top->vault->{name}, $other_vault_name, "overridden vault is the expected vault");
 
 	# Check that vault can be changed and set in config when no vault is in config
-	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 	is($top->set_vault(target => $VAULT_URL{$vault_target}), undef, "top can set its registered vault when it doesn't have one");
-	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 	is($top->config->get('secrets_provider.url'),$VAULT_URL{$vault_target} , "top updates its configuration after saving its new vault");
 	is(ref($top->{__vault}), "Service::Vault::Remote", "top has a vault after saving its new vault");
 	is($top->{__vault}->url, $VAULT_URL{$vault_target}, "top has the correct vault after saving its new vault");
@@ -296,7 +294,7 @@ secrets_provider:
 updater_version: (development)
 version: 2
 EOF
-	cmp_deeply($top->config->_contents, {
+	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
 			"manifest_store"  => "hybrid",
 			"creator_version" => "99.99.99",
@@ -314,7 +312,7 @@ EOF
 
 	# Check that vault can be temporarily changed and set in config
 	is($top->set_vault(target => $VAULT_URL{$other_vault_name}, session_only => 1), undef, "top can set its registered vault when it doesn't have one");
-	isnt($top->config->_contents, undef, "top doesn't clears its configuration after setting a temporary vault");
+	isnt($top->config->_explicit_contents, undef, "top doesn't clears its configuration after setting a temporary vault");
 	is($top->vault->{name}, $other_vault_name, "top targets the expected vault");
 	yaml_is(get_file("$tmp/.genesis/config"), <<EOF, ".genesis/config contains the correct information");
 ---
@@ -330,7 +328,7 @@ secrets_provider:
 updater_version: (development)
 version: 2
 EOF
-	cmp_deeply($top->config->_contents, {
+	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
 			"manifest_store"  => "hybrid",
 			"creator_version" => "99.99.99",
@@ -366,7 +364,7 @@ secrets_provider:
 updater_version: (development)
 version: 2
 EOF
-	cmp_deeply($top->config->_contents, {
+	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
 			"manifest_store"  => "hybrid",
 			"creator_version" => "99.99.99",
