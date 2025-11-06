@@ -163,8 +163,18 @@ sub clear {
 	# TODO: Delete entire structure if key is undefined, or should that be an error?
 	# TODO: Validate key and value against schema
 
+	# Trigger lazy loading
+	$self->_contents;
+
+	# Remove from both loaded_values and set_values (whichever has it)
+	struct_set_value($self->{loaded_values}, $key, undef, 1);
+	struct_set_value($self->{set_values}, $key, undef, 1);
+
+	# Invalidate caches
 	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
-	struct_set_value($self->_contents, $key, undef, 1);
+	delete $self->{_contents};
+	delete $self->{_explicit_contents};
+
 	$self->save if $self->changed && ($save || $self->{autosave});
 	return $self->changed;
 }
@@ -277,19 +287,15 @@ sub _contents {
 	my ($self) = @_;
 	$self->_load() unless ($self->loaded) || (! $self->exists && exists($self->{loaded_values}));
 
-	# Return cached contents if available
-	return $self->{_contents} if exists $self->{_contents};
-
 	# Merge all sources with priority: env > set > loaded > default
 	# deep_merge takes multiple hashes, later ones override earlier ones
-	$self->{_contents} = deep_merge(
+	# (if it it hasn't been cached already)
+	return $self->{_contents} //= deep_merge(
 		$self->{default_values},
 		$self->{loaded_values},
 		$self->{set_values},
 		$self->{env_values}
 	);
-
-	return $self->{_contents};
 }
 
 # }}}
@@ -334,7 +340,11 @@ sub _load {
 # }}}
 # _signature - generate a signature for the current in-memory contents {{{
 sub _signature {
-	sha1_hex(JSON::PP->new->canonical->encode($_[0]->{contents}))
+	my ($self) = @_;
+	# Don't trigger loading - directly compute from source structures
+	# Merge loaded + set (explicit contents) without calling _explicit_contents()
+	my $explicit = deep_merge($self->{loaded_values}, $self->{set_values});
+	return sha1_hex(JSON::PP->new->canonical->encode($explicit));
 }
 # }}}
 # _validate_key - validate a value against a schema {{{
