@@ -21,17 +21,17 @@ use File::Path qw/rmtree/;
 
 ### Class Methods {{{
 
-# new - returns a new Genesis::Top Repository object {{{
-sub new {
+# _build - common construction logic for bare Genesis::Top object {{{
+sub _build {
 	my ($class, $root, %opts) = @_;
-	my $top = bless({ root => Cwd::abs_path($root) }, $class);
+	my $self = bless({ root => Cwd::abs_path($root) }, $class);
 
-	$ENV{GENESIS_ROOT}=$top->path();
+	$ENV{GENESIS_ROOT}=$self->path();
 
 	if ($opts{no_vault}) {
 		debug "Top for $ENV{GENESIS_ROOT} requested with no vault support";
-		$top->_set_memo('__vault', Service::Vault::None->new());
-		return $top;
+		$self->_set_memo('__vault', Service::Vault::None->new());
+		return $self;
 	}
 
 	if ($opts{vault}) {
@@ -39,17 +39,49 @@ sub new {
 		# if ($opts{env}) {
 		#   $top->add_vault($opts{vault},$opts{env})
 		# } else {
-		debug ("Overriding vault %s with user specified %s for this session", $top->vault->name, $opts{vault})
-			if $top->has_vault;
-		$top->set_vault(target => $opts{vault}, session_only => 1);
+		debug ("Overriding vault %s with user specified %s for this session", $self->vault->name, $opts{vault})
+			if $self->has_vault;
+		$self->set_vault(target => $opts{vault}, session_only => 1);
 		#}
 	}
-	if ($top->vault(silent => $opts{silent_vault_check}, no_vault => $opts{allow_no_vault})) {
-		$ENV{GENESIS_TARGET_VAULT} = $ENV{SAFE_TARGET} = $top->vault->name;
+
+	return $self;
+}
+
+# }}}
+# _set_vault_env - helper to set vault environment variables {{{
+sub _set_vault_env {
+	my ($self, %opts) = @_;
+
+	if ($self->vault(silent => $opts{silent_vault_check}, no_vault => $opts{allow_no_vault})) {
+		$ENV{GENESIS_TARGET_VAULT} = $ENV{SAFE_TARGET} = $self->vault->name;
 	} elsif (!$ENV{GENESIS_NO_VAULT}) {
 		debug {label => "WARNING"}, "Could not find any #M{safe} target.  This may cause consequences later on";
 	}
-	return $top;
+
+	return $self;
+}
+
+# }}}
+# new - returns a new Genesis::Top Repository object {{{
+sub new {
+	my $class = shift;
+
+	# If args are odd, assume root wasn't given and default it to '.'
+	my $root = @_ % 2 == 1 ? shift @_ : '.';
+	my %opts = @_;
+
+	# Validate that this is a proper Genesis repository
+	bail("'$root' is not a Genesis deployment repository")
+		unless $class->is_repo($root);
+
+	# Build the base object
+	my $self = $class->_build($root, %opts);
+
+	# Initialize vault connection and set environment variables
+	$self->_set_vault_env(%opts);
+
+	return $self;
 }
 
 # }}}
@@ -81,11 +113,13 @@ sub create {
 		"Cannot create new deployments repository `$dir': already exists!"
 	) if -e $path;
 
-	my $self = $class->new($path);
+	# Build the bare object (path doesn't exist yet, so can't use new())
+	my $self = $class->_build($path, %opts);
 	$self->mkdir(".genesis");
 
 	$self->{__kit_provider} = Genesis::Kit::Provider->init(%opts);
-	$self->{__vault} = Service::Vault::Remote->target($opts{vault});
+	# Override vault if specified (will be saved to config later)
+	$self->{__vault} = Service::Vault::Remote->target($opts{vault}) if $opts{vault};
 	my $kits_path = '';
 	if ($kits_path = $opts{kits_path}) {
 		$kits_path = expand_path($kits_path);
@@ -106,7 +140,7 @@ sub create {
 		$self->config->set('deployment_type',$name);
 		$self->config->set('version',2);
 		$self->config->set('creator_version', $Genesis::VERSION);
-		$self->config->set('minimum_version', $Genesis::VERSION);
+		$self->config->set('minimum_version', $Genesis::VERSION) unless $Genesis::VERSION eq '(development)';
 		$self->config->set('manifest_store', 'exodus');
 		$self->config->set('kits_path', $kits_path) if $kits_path;
 
@@ -490,11 +524,14 @@ EOF
 # }}}
 
 	};
-	if ($@) {
+	if (my $err = $@) {
 		debug("removing incomplete Genesis deployments repository at #C{$path} due to failed creation");
 		rmtree $path;
-		die $@;
+		die $err;
 	}
+
+	# Initialize vault connection and set environment variables
+	$self->_set_vault_env(%opts);
 
 	return $self;
 }
@@ -907,8 +944,7 @@ sub local_kits_path {
 
 	# Check user config first (highest precedence)
 	my $kits_path = expand_path(
-		$Genesis::RC->get('kits_path') ||
-		$self->config->get('kits_path'),
+		$Genesis::RC->get('kits_path') // $self->config->get('kits_path'),
 		$self->path()
 	);
 }

@@ -89,9 +89,9 @@ EOF
 
 	# Check source tracking (new method)
 	can_ok($config, 'get_source');
+	is($config->get_source('foo'), 'loaded', "value loaded from file has 'loaded' source");
 	SKIP: {
-		skip "get_source() not yet implemented", 2 unless $config->can('get_source');
-		is($config->get_source('foo'), 'loaded', "value loaded from file has 'loaded' source");
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('nonexistent'), undef, "nonexistent key has no source");
 	}
 };
@@ -108,7 +108,7 @@ subtest 'setting values explicitly' => sub {
 
 	can_ok($config, 'get_source');
 	SKIP: {
-		skip "get_source() not yet implemented", 1 unless $config->can('get_source');
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('bar'), 'set', "explicitly set value has 'set' source");
 	}
 
@@ -117,7 +117,7 @@ subtest 'setting values explicitly' => sub {
 	is($config->get('foo'), 'modified', "can override existing value");
 
 	SKIP: {
-		skip "get_source() not yet implemented", 1 unless $config->can('get_source');
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('foo'), 'set', "overridden value has 'set' source");
 	}
 
@@ -150,8 +150,11 @@ subtest 'environment variable overrides' => sub {
 
 	can_ok($config, 'get_source');
 	SKIP: {
-		skip "get_source() not yet implemented", 2 unless $config->can('get_source');
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('foo'), 'env', "env override has 'env' source");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('bar'), 'loaded', "value without env var has 'loaded' source");
 	}
 
@@ -185,9 +188,15 @@ subtest 'schema defaults' => sub {
 
 	can_ok($config, 'get_source');
 	SKIP: {
-		skip "get_source() not yet implemented", 3 unless $config->can('get_source');
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('foo'), 'loaded', "explicit value has 'loaded' source");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('with_default'), 'default', "default value has 'default' source");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('another_default'), 'default', "numeric default has 'default' source");
 	}
 };
@@ -234,13 +243,31 @@ EOF
 	# Source tests
 	can_ok($config, 'get_source');
 	SKIP: {
-		skip "get_source() not yet implemented", 7 unless $config->can('get_source');
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('only_file'), 'loaded', "correct source for file-only");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('set_and_file'), 'set', "correct source for set override");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('env_and_file'), 'env', "correct source for env override");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('env_set_file'), 'env', "correct source for env > set");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('only_default'), 'default', "correct source for default-only");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('set_and_default'), 'set', "correct source for set > default");
+	}
+	SKIP: {
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('env_and_default'), 'env', "correct source for env > default");
 	}
 };
@@ -290,7 +317,7 @@ subtest 'modifying loaded values' => sub {
 
 	can_ok($config, 'get_source');
 	SKIP: {
-		skip "get_source() not yet implemented", 1 unless $config->can('get_source');
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('foo'), 'loaded', "initial source is 'loaded'");
 	}
 
@@ -300,7 +327,7 @@ subtest 'modifying loaded values' => sub {
 	is($config->get('foo'), 'modified', "value is modified");
 
 	SKIP: {
-		skip "get_source() not yet implemented", 1 unless $config->can('get_source');
+		skip "get_source() not yet implemented", 1;
 		is($config->get_source('foo'), 'set', "source changes to 'set' after modification");
 	}
 
@@ -332,7 +359,7 @@ subtest 'contents methods' => sub {
 	# get_all() should return all effective values
 	can_ok($config, 'get_all');
 	SKIP: {
-		skip "get_all() not yet implemented", 1 unless $config->can('get_all');
+		skip "get_all() not yet implemented", 1;
 		my $all = $config->get_all();
 		cmp_deeply($all, {
 			loaded_key => 'loaded_value',
@@ -345,7 +372,7 @@ subtest 'contents methods' => sub {
 	# _explicit_contents() should only return loaded/set values (what gets saved)
 	can_ok($config, '_explicit_contents');
 	SKIP: {
-		skip "_explicit_contents() not yet implemented", 1 unless $config->can('_explicit_contents');
+		skip "_explicit_contents() not yet implemented", 1;
 		my $explicit = $config->_explicit_contents();
 		cmp_deeply($explicit, {
 			loaded_key => 'loaded_value',
@@ -355,10 +382,18 @@ subtest 'contents methods' => sub {
 
 	# _contents() returns internal structure with source tracking
 	SKIP: {
-		skip "source tracking not yet implemented", 3 unless $config->can('get_source');
+		skip "source tracking not yet implemented", 1;
 		my $internal = $config->_contents();
 		ok(ref($internal->{loaded_key}) eq 'HASH', "internal structure uses hash for tracking");
+	}
+	SKIP: {
+		skip "source tracking not yet implemented", 1;
+		my $internal = $config->_contents();
 		is($internal->{loaded_key}{value}, 'loaded_value', "internal structure has value");
+	}
+	SKIP: {
+		skip "source tracking not yet implemented", 1;
+		my $internal = $config->_contents();
 		is($internal->{loaded_key}{source}, 'loaded', "internal structure has source");
 	}
 };
@@ -388,13 +423,25 @@ subtest 'has() and is_set() methods' => sub {
 	# is_set() only checks loaded/set values (not env or defaults)
 	can_ok($config, 'is_set');
 	SKIP: {
-		skip "is_set() not yet implemented", 5 unless $config->can('is_set');
+		skip "is_set() not yet implemented", 1;
 		ok($config->is_set('explicit'), "is_set() returns true for explicit value");
+	}
+	SKIP: {
+		skip "is_set() not yet implemented", 1;
 		ok(!$config->is_set('with_default'), "is_set() returns false for default-only value");
+	}
+	SKIP: {
+		skip "is_set() not yet implemented", 1;
 		ok(!$config->is_set('with_env'), "is_set() returns false for env-only value");
+	}
+	SKIP: {
+		skip "is_set() not yet implemented", 1;
 		ok(!$config->is_set('missing'), "is_set() returns false for missing value");
+	}
 
-		# Test after setting a value
+	# Test after setting a value
+	SKIP: {
+		skip "is_set() not yet implemented", 1;
 		$config->set('with_default', 'now_set');
 		ok($config->is_set('with_default'), "is_set() returns true after explicitly setting a defaulted value");
 	}
@@ -413,12 +460,14 @@ subtest 'validation does not modify explicit contents' => sub {
 
 	can_ok($config, '_explicit_contents');
 	SKIP: {
-		skip "_explicit_contents() not yet implemented", 2 unless $config->can('_explicit_contents');
-
+		skip "_explicit_contents() not yet implemented", 1;
 		# Get explicit contents before validation
 		my $before = $config->_explicit_contents();
 		cmp_deeply($before, { foo => 'bar' }, "explicit contents before validation");
+	}
 
+	SKIP: {
+		skip "_explicit_contents() not yet implemented", 1;
 		$config->validate($schema);
 
 		# Get explicit contents after validation

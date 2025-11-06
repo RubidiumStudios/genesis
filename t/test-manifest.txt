@@ -21,7 +21,7 @@ unit-tests/lib-ipv4.t
 unit-tests/lib-boolean.t
 unit-tests/service_github-core.t
 unit-tests/service_bosh-director.t
-unit-tests/repo-top.t
+unit-tests/genesis_top-repos.t
 unit-tests/kit-core.t
 unit-tests/kit-compilation.t
 unit-tests/hooks.t

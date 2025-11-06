@@ -823,6 +823,32 @@ sub cp_kit {
 	}
 }
 
+sub mk_test_kit {
+	my ($name, $version, $dest_dir) = @_;
+	my $basedir = "$name-$version";
+	my $tempdir = File::Temp::tempdir(CLEANUP => 1);
+	my $kitdir = "$tempdir/$basedir";
+
+	# Create minimal kit structure
+	mkdir_or_fail($kitdir) unless -d $kitdir;
+	put_file("$kitdir/kit.yml", "---\nname: $name\n");
+
+	# Ensure destination directory exists
+	mkdir_or_fail($dest_dir) unless -d $dest_dir;
+
+	# Create tarball
+	my $archive = "$dest_dir/$name-$version.tar.gz";
+	my $err = qx(cd $tempdir && tar czf $archive $basedir 2>&1);
+	if ($? != 0) {
+		diag "failed to create test kit archive $archive:";
+		diag "-----------------------------------------------";
+		diag $err ? $err : '(no output)';
+		diag "-----------------------------------------------";
+		exit 1;
+	}
+	return $archive;
+}
+
 sub mock {
 	my ($mock_class, $definition) = @_;
 

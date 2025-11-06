@@ -111,6 +111,7 @@ our @EXPORT = qw/
 
 	struct_set_value
 	struct_lookup
+	struct_has
 	flatten
 	unflatten
 	deep_merge
@@ -1310,6 +1311,14 @@ sub struct_lookup {
 	}
 	return wantarray ? ($value,$key) : $value;
 }
+
+# struct_has - return true if the given key exists in the structure {{{
+sub struct_has {
+	my ($what, $keys) = @_;
+	my (undef, $found) = struct_lookup($what, $keys, undef);
+	return defined $found;
+}
+# }}}
 
 # flatten - convert deep structure to single sequence of key:value {{{
 sub flatten {

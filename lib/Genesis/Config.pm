@@ -2,7 +2,7 @@ package Genesis::Config;
 use strict;
 use warnings;
 
-use Genesis qw/bail bug debug info struct_lookup struct_set_value in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff/;
+use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff/;
 use Genesis::Term qw/bullet decolorize/;
 
 use JSON::PP ();
@@ -92,6 +92,25 @@ sub has {
 	return 1 if exists($self->{cache}{$key});
 	my (undef,$found) = Genesis::struct_lookup($self->_contents,$key);
 	return $found;
+}
+
+# }}}
+# get_source - returns the source of a configuration value {{{
+sub get_source {
+	my ($self, $key) = @_;
+
+	# Access contents to trigger lazy loading
+	$self->_contents;
+
+	# Check each source in priority order (env > set > loaded > default)
+	# Return the highest priority source that has this key
+	return 'env'     if $self->{env_values}     && struct_has($self->{env_values},     $key);
+	return 'set'     if $self->{set_values}     && struct_has($self->{set_values},     $key);
+	return 'loaded'  if $self->{loaded_values}  && struct_has($self->{loaded_values},  $key);
+	return 'default' if $self->{default_values} && struct_has($self->{default_values}, $key);
+
+	# Key doesn't exist in any source
+	return undef;
 }
 
 # }}}
@@ -235,11 +254,21 @@ sub _load {
 		($self->{contents}, my $rc, my $err) = load_yaml_file($path);
 		debug "Loaded ".$self->{path}." - rc:$rc";
 		bail("Failed to load %s: %s", $path, $err) if ($rc || ! $self->{contents});
+
+		# Track loaded values separately for source tracking
+		$self->{loaded_values} = $self->{contents};
+
 		$self->{persistant_signature} = $self->_signature;
 	} else {
 		$self->{contents} = {};
+		$self->{loaded_values} = {};
 		$self->{save} if $self->{autosave} && $self->{path};
 	}
+
+	# Initialize other source structures if they don't exist
+	$self->{set_values} //= {};
+	$self->{env_values} //= {};
+	$self->{default_values} //= {};
 }
 
 # }}}

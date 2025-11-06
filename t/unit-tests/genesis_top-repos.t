@@ -22,15 +22,22 @@ $ENV{GENESIS_OUTPUT_COLUMNS}=80;
 
 subtest 'kit location' => sub {
 	my $tmp = workdir();
+	pushd($tmp);
+
 	my $again = sub {
 		system("rm -rf $tmp/.genesis/kits; mkdir -p $tmp/.genesis/kits");
-		system("touch $tmp/.genesis/kits/$_") for (qw/
-			foo-1.0.0.tar.gz
-			foo-1.0.1.tgz
-			foo-0.9.6.tar.gz
-			foo-0.9.5.tar.gz
-			bar-3.4.5.tar.gz
+		# Create valid kit archives
+		mk_test_kit('foo', '1.0.0', "$tmp/.genesis/kits");
+		mk_test_kit('foo', '1.0.1', "$tmp/.genesis/kits");
+		mk_test_kit('foo', '0.9.6', "$tmp/.genesis/kits");
+		mk_test_kit('foo', '0.9.5', "$tmp/.genesis/kits");
+		mk_test_kit('bar', '3.4.5', "$tmp/.genesis/kits");
 
+		# Rename 1.0.1 to .tgz to test extension handling
+		system("mv $tmp/.genesis/kits/foo-1.0.1.tar.gz $tmp/.genesis/kits/foo-1.0.1.tgz");
+
+		# Create invalid files that should be ignored
+		system("touch $tmp/.genesis/kits/$_") for (qw/
 			not-a-kit-file
 			unversioned.tar.gz
 			unversioned.tgz
@@ -42,43 +49,48 @@ creator_version: 2.7.0
 deployment_type: foo
 EOF
 	};
-	my $top = Genesis::Top->new($tmp);
 
-	$again->();
+	$again->(); # Setup repo dir
+	my $top = Genesis::Top->new($tmp);
 	ok(!$top->has_dev_kit, "roots without dev/ should not report having a dev kit");
 	cmp_deeply($top->local_kits, {
 			foo => {
 				'0.9.5' => bless({
-					'archive'  => $top->path(".genesis/kits/foo-0.9.5.tar.gz"),
+					'source'   => $top->path(".genesis/kits/foo-0.9.5.tar.gz"),
 					'name'     => 'foo',
 					'version'  => '0.9.5',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 				'0.9.6' => bless({
-					'archive'  => $top->path(".genesis/kits/foo-0.9.6.tar.gz"),
+					'source'   => $top->path(".genesis/kits/foo-0.9.6.tar.gz"),
 					'name'     => 'foo',
 					'version'  => '0.9.6',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 				'1.0.0' => bless({
-					'archive'  => $top->path(".genesis/kits/foo-1.0.0.tar.gz"),
+					'source'   => $top->path(".genesis/kits/foo-1.0.0.tar.gz"),
 					'name'     => 'foo',
 					'version'  => '1.0.0',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 				'1.0.1' => bless({
-					'archive'  => $top->path(".genesis/kits/foo-1.0.1.tgz"),
+					'source'   => $top->path(".genesis/kits/foo-1.0.1.tgz"),
 					'name'     => 'foo',
 					'version'  => '1.0.1',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 			},
 			bar => {
 				'3.4.5' => bless({
-					'archive'  => $top->path(".genesis/kits/bar-3.4.5.tar.gz"),
+					'source'   => $top->path(".genesis/kits/bar-3.4.5.tar.gz"),
 					'name'     => 'bar',
 					'version'  => '3.4.5',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 			},
 		}, "roots should list out all of their compiled kits");
@@ -99,28 +111,32 @@ EOF
 	cmp_deeply($top->local_kits, {
 			foo => {
 				'0.9.5' => bless({
-					'archive'  => $top->path(".genesis/kits/foo-0.9.5.tar.gz"),
+					'source'   => $top->path(".genesis/kits/foo-0.9.5.tar.gz"),
 					'name'     => 'foo',
 					'version'  => '0.9.5',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 				'0.9.6' => bless({
-					'archive'  => $top->path(".genesis/kits/foo-0.9.6.tar.gz"),
+					'source'   => $top->path(".genesis/kits/foo-0.9.6.tar.gz"),
 					'name'     => 'foo',
 					'version'  => '0.9.6',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 				'1.0.0' => bless({
-					'archive'  => $top->path(".genesis/kits/foo-1.0.0.tar.gz"),
+					'source'   => $top->path(".genesis/kits/foo-1.0.0.tar.gz"),
 					'name'     => 'foo',
 					'version'  => '1.0.0',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 				'1.0.1' => bless({
-					'archive'  => $top->path(".genesis/kits/foo-1.0.1.tgz"),
+					'source'   => $top->path(".genesis/kits/foo-1.0.1.tgz"),
 					'name'     => 'foo',
 					'version'  => '1.0.1',
-					'provider' => isa("Genesis::Kit::Provider")
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
 				}, "Genesis::Kit::Compiled"),
 			},
 		}, "root should only have `foo' kit");
@@ -130,6 +146,8 @@ EOF
 	is($top->local_kit_version(undef, 'latest')->{name}, 'foo', "the only kit should be 'foo'");
 	is($top->local_kit_version(undef, '0.9.6')->{version}, '0.9.6', "specific version of the kit are returned");
 	is($top->local_kit_version(undef, '0.9.6')->{name}, 'foo', "the only kit should be 'foo' (0.9.6)");
+
+	popd;
 };
 
 subtest 'init' => sub {
@@ -138,6 +156,7 @@ subtest 'init' => sub {
 	# without a directory override
 	$tmp = workdir;
 	ok ! -f "$tmp/jumpbox-deployments/.genesis/config", "No .genesis/config in new Top";
+	local $Genesis::VERSION = "3.1.0";
 	$top = Genesis::Top->create($tmp, 'jumpbox', vault=>$VAULT_URL);
 	ok -f "$tmp/jumpbox/.genesis/config", ".genesis created in correct top dir";
 	ok -f $top->path('.genesis/config'), "Top->create should create a new .genesis/config";
@@ -149,6 +168,10 @@ subtest 'init' => sub {
 		version => 2,
 		deployment_type => 'jumpbox',
 		manifest_store => ignore,
+		minimum_version => '3.1.0',
+		kits_path => '$GENESIS_ROOT/.genesis/kits',
+		deployment_change_reason_required_size => 0,
+		user_provided_bosh_creds => 'ignore',
 		secrets_provider => {
 			url => $VAULT_URL,
 			insecure => bool(0),
@@ -204,12 +227,8 @@ EOF
 
 subtest 'downloading kits' => sub {
 	my $tmp = workdir();
-	my $again = sub {
-		system("rm -rf $tmp/.genesis/kits; mkdir -p $tmp/.genesis/kits");
-	};
-	my $top = Genesis::Top->new($tmp);
+	my $top = Genesis::Top->create($tmp, 'test', vault=>$VAULT_URL);
 
-	$again->();
 	ok(!defined $top->local_kit_version('bosh'), "bosh kit shouldn't exist (before download)");
 	$top->download_kit("bosh/0.2.0");
 	ok( defined $top->local_kit_version('bosh'), "bosh kit should exist after we download");
@@ -256,7 +275,9 @@ EOF
 	is($top->vault->{name}, $other_vault_name, "overridden vault is the expected vault");
 
 	# Check that vault can be changed and set in config when no vault is in config
+	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 	is($top->set_vault(target => $VAULT_URL{$vault_target}), undef, "top can set its registered vault when it doesn't have one");
+	`cp /Users/dennis.bell/.replyrc \$HOME/` unless -f $ENV{HOME}."/.replyrc"; use Pry; pry;
 	is($top->config->get('secrets_provider.url'),$VAULT_URL{$vault_target} , "top updates its configuration after saving its new vault");
 	is(ref($top->{__vault}), "Service::Vault::Remote", "top has a vault after saving its new vault");
 	is($top->{__vault}->url, $VAULT_URL{$vault_target}, "top has the correct vault after saving its new vault");
