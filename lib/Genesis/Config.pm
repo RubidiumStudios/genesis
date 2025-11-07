@@ -2,7 +2,7 @@ package Genesis::Config;
 use strict;
 use warnings;
 
-use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff deep_merge/;
+use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff deep_merge flatten unflatten/;
 use Genesis::Term qw/bullet decolorize/;
 
 use JSON::PP ();
@@ -324,10 +324,12 @@ sub _explicit_contents {
 
 	# Merge only explicit sources: set > loaded
 	# Exclude env and default values from disk persistence
-	$self->{_explicit_contents} = deep_merge(
-		$self->{loaded_values},
-		$self->{set_values}
-	);
+	# Note: Flatten both structures, use hash slice to preserve undef values, then unflatten
+	# (deep_merge strips undef values, which we need to preserve for explicit nulls)
+	my $flat_loaded = flatten($self->{loaded_values});
+	my $flat_set = flatten($self->{set_values});
+	my $flat_merged = {$flat_loaded->%*, $flat_set->%*};
+	$self->{_explicit_contents} = unflatten($flat_merged);
 
 	return $self->{_explicit_contents};
 }

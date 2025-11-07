@@ -632,6 +632,77 @@ subtest 'validation preserves source tracking for normalized values' => sub {
 	is($config2->get_source('enabled'), 'loaded', "boolean normalization preserves 'loaded' source");
 };
 
+subtest 'YAML special value handling' => sub {
+	# Test that YAML keywords and special characters are properly quoted
+	# when saved and correctly parsed when loaded
+
+	my $config_file = "$tmp/test_yaml_special.yml";
+	my $config = Genesis::Config->new($config_file);
+
+	# Set various YAML-special string values
+	$config->set('string_true', 'true');
+	$config->set('string_false', 'false');
+	$config->set('string_yes', 'yes');
+	$config->set('string_no', 'no');
+	$config->set('string_null', 'null');
+	$config->set('string_array', '[this is not an array]');
+	$config->set('string_hash', '{this is not a hash}');
+	$config->set('actual_null', undef);
+	$config->save();
+
+	# Reload config from disk to verify proper serialization/deserialization
+	my $config2 = Genesis::Config->new($config_file);
+
+	is($config2->get('string_true'), 'true', "string 'true' preserved as string");
+	is($config2->get('string_false'), 'false', "string 'false' preserved as string");
+	is($config2->get('string_yes'), 'yes', "string 'yes' preserved as string");
+	is($config2->get('string_no'), 'no', "string 'no' preserved as string");
+	is($config2->get('string_null'), 'null', "string 'null' preserved as string");
+	is($config2->get('string_array'), '[this is not an array]', "string that looks like array preserved");
+	is($config2->get('string_hash'), '{this is not a hash}', "string that looks like hash preserved");
+	is($config2->get('actual_null'), undef, "undef preserved as null");
+
+	# Verify file contents have proper quoting
+	my $config_content = get_file($config_file);
+	like($config_content, qr/string_true:\s+['"]true['"]/, "string 'true' is quoted in file");
+	like($config_content, qr/string_false:\s+['"]false['"]/, "string 'false' is quoted in file");
+	like($config_content, qr/string_yes:\s+['"]yes['"]/, "string 'yes' is quoted in file");
+	like($config_content, qr/string_no:\s+['"]no['"]/, "string 'no' is quoted in file");
+	like($config_content, qr/string_null:\s+['"]null['"]/, "string 'null' is quoted in file");
+	like($config_content, qr/string_array:\s+['"][^'"]*\[/, "string array is quoted in file");
+	like($config_content, qr/string_hash:\s+['"][^'"]*\{/, "string hash is quoted in file");
+	like($config_content, qr/actual_null:\s+(null|~)/, "undef written as unquoted null (null or ~)");
+};
+
+subtest 'partial deep hash override preserves other branches' => sub {
+	# Test that setting a deep nested value doesn't lose other branches
+	# This validates the flatten→merge→unflatten approach in _explicit_contents()
+
+	my $config_file = "$tmp/test_partial_override.yml";
+	put_file($config_file, <<EOF);
+---
+top:
+  branch1:
+    leaf1: value1
+    leaf2: value2
+  branch2:
+    leaf3: value3
+    leaf4: value4
+EOF
+
+	# Load config and override one deep leaf
+	my $config = Genesis::Config->new($config_file);
+	$config->set('top.branch1.leaf2', 'overridden');
+	$config->save();
+
+	# Reload and verify all values preserved
+	my $config2 = Genesis::Config->new($config_file);
+	is($config2->get('top.branch1.leaf1'), 'value1', "unmodified leaf in same branch preserved");
+	is($config2->get('top.branch1.leaf2'), 'overridden', "overridden leaf has new value");
+	is($config2->get('top.branch2.leaf3'), 'value3', "unmodified leaf in different branch preserved");
+	is($config2->get('top.branch2.leaf4'), 'value4', "another unmodified leaf in different branch preserved");
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
