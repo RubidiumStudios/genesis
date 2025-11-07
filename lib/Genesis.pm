@@ -782,7 +782,7 @@ sub curl {
 	while ($line = shift @$header_src) {
 		if ($line =~ m/^HTTP\/\d+(?:\.\d)?\s+((\d+)(\s+.*)?)$/) {
 			$in_header = 1;
-			chomp($status_line = $1);
+			$status_line = $1 =~ s/[\r\n]+$//r; # Strip off line endings
 			$status = $2;
 		}
 		last unless $in_header;
