@@ -39,6 +39,7 @@ sub tempdir {
 	my ($self, $dir) = @_;
 	$dir //= 'tempdir-'.time().'-'.int(rand(10000));
 	$dir = $self->env->workpath($dir);
+	mkdir_or_fail($dir) unless -d $dir;
 	return $dir;
 }
 
