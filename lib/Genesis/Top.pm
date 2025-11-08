@@ -924,20 +924,6 @@ sub genesis_version {
    return "Unknown";
 }
 # }}}
-# warnings - return comma-separated list of the warnings that are configured for this environment {{{
-sub warnings {
-   my $self = @_;
-   return defined($self->config->get("warnings")) ? $self->config->get("warnings") : "deprecation,configuration,secrets";
-}
-
-# }}}
-# warn_on - return true if the repo is set to warn on the specified condition {{{
-sub warn_on {
-	my ($self,$type) = @_;
-	return scalar(grep {$type eq $_} split(/\s*,\s*/, $self->warnings));
-}
-#}}}
-
 # local_kits_path - return the path to the local kit directory {{{
 sub local_kits_path {
 	my ($self) = @_;
@@ -1251,7 +1237,7 @@ sub _repo_config_schema {
 				type         => {type => 'enum', values => ['github','genesis-community']},
 				organization => {type => 'string'},
 				label        => {type => 'string'},
-				tls          => {type => 'boolean'},
+				tls          => {type => 'enum', values => ['yes', 'no', 'skip', 'insecure']},
 				domain       => {type => 'string'},
 			}
 		},

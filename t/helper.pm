@@ -850,7 +850,7 @@ sub mk_test_kit {
 }
 
 sub mock {
-	my ($mock_class, $definition) = @_;
+	my ($mock_class, $definition, $class_methods) = @_;
 
 	my $base_class = 'Mock';
 	eval qq(
@@ -867,6 +867,14 @@ sub mock {
 		package $mock_class;
 		use parent '$base_class';
 	);
+
+	if ($class_methods) {
+		no strict 'refs';
+		no warnings 'redefine';
+		for my $method (keys %$class_methods) {
+			*{$mock_class."::".$method} = $class_methods->{$method};
+		}
+	}
 	die "Error creating mock class: $@" if $@;
   my $mock_obj = $mock_class->new(%$definition);
 }

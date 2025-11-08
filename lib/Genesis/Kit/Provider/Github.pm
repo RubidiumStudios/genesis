@@ -25,7 +25,7 @@ sub init {
 
 	bail("$label kit provider requires specifying the organization using the --kit-provider-org option")
 		unless $opts{"kit-provider-org"};
-	
+
 	$opts{"kit-provider-tls"} ||= DEFAULT_TLS;
 	bail("Github kit provider option --kit-provider-tls only accepts: no, yes, and skip")
 		unless $opts{"kit-provider-tls"} =~ /^(no|yes|skip)$/;
@@ -43,14 +43,17 @@ sub init {
 sub new {
 	my ($class, %config) = @_;
 	my $label = $config{label} || DEFAULT_LABEL;
+	my $tls = $config{tls} || DEFAULT_TLS;
+	$tls = "skip" if $tls eq 'insecure'; # flexibility for older configs
+
 	bless({
 		label  => $label,
 		remote => Service::Github->new(
-		            domain => $config{domain} || DEFAULT_DOMAIN,
-		            org    => $config{organization},
-		            tls    => $config{tls} || DEFAULT_TLS,
-		            label  => $label
-		          )
+			domain => $config{domain} || DEFAULT_DOMAIN,
+			org    => $config{organization},
+			tls    => $tls,
+			label  => $label
+		)
 	}, $class);
 }
 
