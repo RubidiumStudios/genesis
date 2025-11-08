@@ -35,8 +35,14 @@ sub available_stemcells {
 		$os, $cpi
 	) unless $cpi;
 
+	# The agent suffix has been dropped for ubuntu-noble (and later?)
+	my $agent= $opts{agent};
+	$agent //= 'go_agent' if $os =~ m/^ubuntu-(trusty|xenial|bionic|focal|jammy)$/;
+	$agent //= 'go_agent' if $os =~ m/^windows/;
+	$agent = "-$agent" if $agent;
+
 	my $url = ($opts{stemcell_url}//default_stemcell_url).
-		"bosh-$cpi-$os-go_agent?all=$all";
+		"bosh-$cpi-$os$agent?all=$all";
 	my ($status, $line, $data, $headers) = curl(
 		'GET', $url, { 'Accept' => 'application/json' }
 	);
@@ -59,7 +65,7 @@ sub available_stemcells {
 	}
 	return [sort {
 		(by_semver($b,$a)) || # Newest (aka highest version number) first
-		($a->{type} cmp $b->{type})          # light before regular 
+		($a->{type} cmp $b->{type})          # light before regular
 	} @$stemcells];
 }
 
@@ -101,7 +107,7 @@ sub select_stemcell {
 	my $selected_minor = undef;
 	if (keys %grouped_by_minor > 1) {
 		my @minor_versions = sort by_semver keys %grouped_by_minor;
-		my @labels = $type_filter 
+		my @labels = $type_filter
 		? @minor_versions
 		: map {
 			[sprintf(
@@ -183,7 +189,7 @@ sub cpi_stemcell_prefix {
     'virtualbox'  => 'warden-boshlite',
     'warden'      => 'warden-boshlite',
   );
-  
+
   return $mapping{$cpi} || '';
 }
 
