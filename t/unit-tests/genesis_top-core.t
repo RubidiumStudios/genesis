@@ -319,6 +319,102 @@ EOF
 
 	# Verify invalid.yml is not included
 	ok(!(grep { $_->name eq 'invalid' } @envs), "envs() doesn't include invalid.yml (no kit info)");
+
+	# Test has_env() method - uses same validation as envs()
+	ok($top->has_env('ci-baseline'), "has_env() returns true for valid environment ci-baseline");
+	ok($top->has_env('ci-ocfp'), "has_env() returns true for valid environment ci-ocfp");
+	ok($top->has_env('prod'), "has_env() returns true for valid environment prod");
+	ok($top->has_env('prod-east'), "has_env() returns true for valid environment prod-east");
+	ok($top->has_env('staging'), "has_env() returns true for valid environment staging");
+
+	ok(!$top->has_env('ci'), "has_env() returns false for parent-only file (no genesis.env)");
+	ok(!$top->has_env('invalid'), "has_env() returns false for invalid environment (no kit info)");
+	ok(!$top->has_env('nonexistent'), "has_env() returns false for nonexistent environment");
+	ok(!$top->has_env('README'), "has_env() returns false for non-yml file");
+
+	# Test with .yml extension
+	ok($top->has_env('ci-baseline.yml'), "has_env() handles .yml extension");
+	ok(!$top->has_env('invalid.yml'), "has_env() correctly identifies invalid env even with .yml");
+};
+
+subtest 'load_env method' => sub {
+	my $tmp = make_test_repo(workdir(), 'test');
+
+	# Test that load_env bails on non-existent environment
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+	eval { $top->load_env('nonexistent') };
+	like($@, qr/does not exist/, "load_env() bails on non-existent environment");
+
+	# Test that load_env with .yml extension is handled
+	mkfile_or_fail("$tmp/basic.yml", <<EOF);
+---
+genesis:
+  env: basic
+EOF
+
+	# This will fail because basic.yml has no kit info, but we can verify
+	# the error message to confirm load_env is stripping .yml correctly
+	eval { $top->load_env('basic.yml') };
+	like($@, qr/basic/, "load_env() strips .yml extension when processing");
+	unlike($@, qr/basic\.yml\.yml/, "load_env() doesn't double .yml extension");
+};
+
+subtest 'link_dev_kit method' => sub {
+	my $tmp = make_test_repo(workdir(), 'test');
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	# Create a fake kit directory to link to
+	my $kit_dev_path = workdir('kit-dev');
+	system("mkdir -p $kit_dev_path");
+	mkfile_or_fail("$kit_dev_path/kit.yml", "---\nname: test\nversion: 1.0.0\n");
+
+	# Test successful link creation
+	$top->link_dev_kit($kit_dev_path);
+	ok(-l "$tmp/dev", "link_dev_kit creates dev symlink");
+	is(Cwd::abs_path(readlink("$tmp/dev")), Cwd::abs_path($kit_dev_path),
+		"dev symlink points to correct path");
+
+	# Test that linking again overwrites the existing link
+	my $kit_dev_path2 = workdir('kit-dev-2');
+	system("mkdir -p $kit_dev_path2");
+	$top->link_dev_kit($kit_dev_path2);
+	is(Cwd::abs_path(readlink("$tmp/dev")), Cwd::abs_path($kit_dev_path2),
+		"link_dev_kit overwrites existing symlink");
+
+	# Test that it fails if dev/ exists as a directory
+	unlink("$tmp/dev");
+	system("mkdir -p $tmp/dev");
+	eval { $top->link_dev_kit($kit_dev_path) };
+	like($@, qr/dev\/ already exists, and is not a symbolic link/,
+		"link_dev_kit fails if dev/ is a directory");
+
+	# Clean up for next test
+	system("rm -rf $tmp/dev");
+
+	# Test that it fails with nonexistent path
+	eval { $top->link_dev_kit("/nonexistent/path/to/kit") };
+	like($@, qr/Unable to locate/, "link_dev_kit fails with nonexistent path");
+};
+
+subtest 'embed method' => sub {
+	my $tmp = make_test_repo(workdir(), 'test');
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	# Create a fake genesis binary to embed
+	my $bin_dir = workdir('bin-test');
+	my $fake_bin = "$bin_dir/genesis";
+	put_file($fake_bin, "#!/bin/bash\necho 'fake genesis'\n");
+	chmod(0755, $fake_bin);
+
+	# Test successful embed
+	ok($top->embed($fake_bin), "embed() returns true on success");
+	ok(-d "$tmp/.genesis/bin", "embed() creates .genesis/bin directory");
+	ok(-f "$tmp/.genesis/bin/genesis", "embed() creates genesis binary");
+	ok(-x "$tmp/.genesis/bin/genesis", "embed() makes genesis executable");
+
+	# Verify the content was copied correctly
+	is(slurp("$tmp/.genesis/bin/genesis"), slurp($fake_bin),
+		"embed() copies binary content correctly");
 };
 
 done_testing;

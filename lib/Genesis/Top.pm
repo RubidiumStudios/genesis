@@ -957,39 +957,9 @@ sub envs {
 		glob($self->path("*.yml"));
 
 	foreach my $env (@candidates) {
-		my $yaml_src;
-		eval {$yaml_src = slurp($self->path("$env.yml"))};
-		next if $@;
-
-		my @env_names = $yaml_src =~ /^genesis:\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+([^\s]*)/mg;
-		next unless scalar(@env_names) == 1;
-		next unless $env_names[-1] eq $env;
-		my $env_obj = Genesis::Env->new(name => $env, top => $self);
-
-		# Check if the environment has kit information available
-		# First check the main file (fast path)
-		my $kit_name_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*name:\s+([^\s]+)/m;
-		my $kit_version_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*version:\s+([^\s]+)/m;
-		my $has_kit = $yaml_src =~ $kit_name_re && $yaml_src =~ $kit_version_re;
-
-		# If not in main file, check hierarchical files (still faster than full lookup)
-		unless ($has_kit) {
-			my @env_files = $env_obj->actual_environment_files();
-			pop @env_files; # Remove main file, already checked
-			while (my $ancestor_file = pop @env_files) {
-				next unless -f $self->path($ancestor_file);
-				my $ancestor_yaml = eval { slurp($self->path($ancestor_file)) };
-				next unless $ancestor_yaml;
-
-				if ($ancestor_yaml =~ $kit_name_re && $ancestor_yaml =~ $kit_version_re) {
-					$has_kit = 1;
-					last;
-				}
-			}
-			# Skip if we still haven't found kit info
-			next unless $has_kit;
-		}
-		push @envs, $env_obj;
+		# Use has_env to validate the environment (checks for genesis.env and kit info)
+		next unless $self->has_env($env);
+		push @envs, Genesis::Env->new(name => $env, top => $self);
 	}
 	return @envs;
 }
@@ -1018,10 +988,37 @@ sub has_env {
 	my ($self, $name) = @_;
 	$name =~ s/.yml$//;
 	return undef unless -f $self->path("$name.yml");
-	return Genesis::Env->exists(
-		top => $self,
-		name => $name
-	);
+
+	# Check if the environment file has genesis.env declaration
+	my $yaml_src = eval { slurp($self->path("$name.yml")) };
+	return undef unless $yaml_src;
+
+	my @env_names = $yaml_src =~ /^genesis:\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+([^\s]*)/mg;
+	return undef unless scalar(@env_names) == 1 && $env_names[0] eq $name;
+
+	# Check if the environment has kit information available (same validation as envs())
+	my $kit_name_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*name:\s+([^\s]+)/m;
+	my $kit_version_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*version:\s+([^\s]+)/m;
+	my $has_kit = $yaml_src =~ $kit_name_re && $yaml_src =~ $kit_version_re;
+
+	# If not in main file, check hierarchical files
+	unless ($has_kit) {
+		my $env_obj = Genesis::Env->new(name => $name, top => $self);
+		my @env_files = $env_obj->actual_environment_files();
+		pop @env_files; # Remove main file, already checked
+		while (my $ancestor_file = pop @env_files) {
+			next unless -f $self->path($ancestor_file);
+			my $ancestor_yaml = eval { slurp($self->path($ancestor_file)) };
+			next unless $ancestor_yaml;
+
+			if ($ancestor_yaml =~ $kit_name_re && $ancestor_yaml =~ $kit_version_re) {
+				$has_kit = 1;
+				last;
+			}
+		}
+		return undef unless $has_kit;
+	}
+	return 1;
 }
 
 # }}}
