@@ -9,6 +9,7 @@ use helper;
 use Test::Deep;
 use Test::Output;
 use Cwd ();
+use List::Util qw(all);
 
 use_ok 'Genesis::Config';
 $Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
@@ -227,6 +228,97 @@ secrets_provider:
   strongbox: true
   namespace: ""
 EOF
+};
+
+subtest 'environment discovery' => sub {
+	my $tmp = make_test_repo(workdir(), 'cf');
+
+	# Create environment files testing both name-based and explicit inheritance:
+	# 1. ci.yml - parent with kit info (NO genesis.env - not an environment)
+	# 2. ci-baseline.yml - inherits kit via name-based hierarchy from ci.yml
+	# 3. ci-ocfp.yml - also inherits kit via name-based hierarchy from ci.yml
+	# 4. prod.yml - environment using genesis.inherits
+	# 5. prod-east.yml - inherits kit via name-based hierarchy from prod.yml
+	# 6. staging.yml - environment using genesis.inherits
+	# 7. invalid.yml - has genesis.env but NO kit and NO inheritance (INVALID!)
+
+	mkfile_or_fail("$tmp/ci.yml", <<EOF);
+---
+kit:
+  name: cf
+  version: 1.0.0
+params:
+  ci_common: value
+EOF
+
+	mkfile_or_fail("$tmp/ci-baseline.yml", <<EOF);
+---
+genesis:
+  env: ci-baseline
+EOF
+
+	mkfile_or_fail("$tmp/ci-ocfp.yml", <<EOF);
+---
+genesis:
+  env: ci-ocfp
+EOF
+
+	mkfile_or_fail("$tmp/prod.yml", <<EOF);
+---
+genesis:
+  env: prod
+  inherits: [ci]
+params:
+  instances: 3
+EOF
+
+	mkfile_or_fail("$tmp/prod-east.yml", <<EOF);
+---
+genesis:
+  env: prod-east
+params:
+  instances: 5
+EOF
+
+	mkfile_or_fail("$tmp/staging.yml", <<EOF);
+---
+genesis:
+  env: staging
+  inherits: [ci]
+EOF
+
+	# Invalid env - has genesis.env but no kit and no inheritance
+	mkfile_or_fail("$tmp/invalid.yml", <<EOF);
+---
+genesis:
+  env: invalid
+params:
+  some: value
+EOF
+
+	mkfile_or_fail("$tmp/README.md", "Not an env file");
+	mkfile_or_fail("$tmp/.hidden.yml", "Hidden file");
+
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	# Test envs() method - should handle invalid envs gracefully
+	my @envs = sort { $a->name cmp $b->name } $top->envs();
+
+	# Check the env names - invalid.yml should cause error/be skipped
+	my @env_names = sort map { $_->name } @envs;
+
+	# This test will initially fail, exposing the bug
+	cmp_deeply(\@env_names, bag('ci-baseline', 'ci-ocfp', 'prod', 'prod-east', 'staging'),
+		"envs() returns valid environments and skips invalid ones");
+
+	# Verify all returned objects are Genesis::Env
+	ok((all { ref($_) eq 'Genesis::Env' } @envs), "envs() returns Genesis::Env objects");
+
+	# Verify it doesn't include parent-only hierarchy files
+	ok(!(grep { $_->name eq 'ci' } @envs), "envs() doesn't include ci.yml (no genesis.env)");
+
+	# Verify invalid.yml is not included
+	ok(!(grep { $_->name eq 'invalid' } @envs), "envs() doesn't include invalid.yml (no kit info)");
 };
 
 done_testing;
