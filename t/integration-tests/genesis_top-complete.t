@@ -10,6 +10,8 @@ use Test::Deep;
 use Test::Output;
 use Cwd ();
 
+plan tests => 9; # Total subtests and tests outside subtests
+
 use_ok 'Genesis::Config';
 $Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
 
@@ -19,8 +21,11 @@ use Genesis;
 my $vault_target = vault_ok();
 
 $ENV{GENESIS_OUTPUT_COLUMNS}=80;
+$Genesis::VERSION = '99.99.99'; # Avoid version_min_source warnings in tests
 
 subtest 'init' => sub {
+	plan tests => 16;
+
 	my ($tmp, $top);
 
 	# without a directory override
@@ -72,6 +77,8 @@ subtest 'init' => sub {
 };
 
 subtest 'embedding stuff' => sub {
+	plan tests => 4;
+
 	my $tmp = workdir;
 	my $top = Genesis::Top->create($tmp, 'thing', vault=>$VAULT_URL);
 	put_file("$tmp/not-genesis", <<EOF);
@@ -92,7 +99,13 @@ EOF
 		"embed() makes the embedded copy executable";
 };
 
+# Cached kit and repo for reuse across subtests
+our $CACHED_KIT_REPO;
+our $CACHED_KIT_TOP;
+
 subtest 'downloading kits' => sub {
+	plan tests => 3;
+
 	my $tmp = workdir();
 	my $top = Genesis::Top->create($tmp, 'test', vault=>$VAULT_URL);
 
@@ -100,9 +113,52 @@ subtest 'downloading kits' => sub {
 	$top->download_kit("bosh/0.2.0");
 	ok( defined $top->local_kit_version('bosh'), "bosh kit should exist after we download");
 	ok( defined $top->local_kit_version('bosh', '0.2.0'), "top downloaded bosh-0.2.0 as requested");
+
+	# Cache this repo for use in load_env test
+	$CACHED_KIT_REPO = "$tmp/test";
+	$CACHED_KIT_TOP = $top;
+};
+
+subtest 'load_env with downloaded kit' => sub {
+	plan tests => 8, skip_all => 'requires successful kit download' unless $CACHED_KIT_TOP;
+
+	my $top = $CACHED_KIT_TOP;
+	my $tmp = $CACHED_KIT_REPO;
+
+	# Create an environment file that uses the downloaded kit
+	mkfile_or_fail("$tmp/test-env.yml", <<EOF);
+---
+kit:
+  name: bosh
+  version: 0.2.0
+
+genesis:
+  env: test-env
+
+params:
+  env_type: test
+EOF
+
+	# Test successful load
+	my $env = $top->load_env('test-env');
+	ok($env, "load_env() successfully loads environment with downloaded kit");
+	isa_ok($env, 'Genesis::Env', "load_env() returns Genesis::Env object");
+	is($env->name, 'test-env', "loaded environment has correct name");
+	ok($env->kit, "loaded environment has kit object");
+	is($env->kit->id, 'bosh/0.2.0', "loaded environment has correct kit");
+
+	# Test with .yml extension
+	my $env2 = $top->load_env('test-env.yml');
+	ok($env2, "load_env() handles .yml extension");
+	is($env2->name, 'test-env', "load_env() strips .yml extension correctly");
+
+	# Test that has_env returns true for this valid environment
+	ok($top->has_env('test-env'), "has_env() returns true for loaded environment");
 };
 
 subtest 'manage secrets provider' => sub {
+	plan tests => 34;
+
 	my $tmp = workdir();
 
 	my $reset = sub {
@@ -157,13 +213,13 @@ secrets_provider:
   strongbox: false
   namespace: ""
   alias: $vault_target
-updater_version: (development)
+updater_version: 99.99.99
 version: 2
 EOF
 	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
 			"creator_version" => "99.99.99",
-			"updater_version" => "(development)",
+			"updater_version" => "99.99.99",
 			"version" => 2,
 			"secrets_provider" => {
 				"url" => $VAULT_URL{$vault_target},
@@ -189,13 +245,13 @@ secrets_provider:
   strongbox: false
   namespace: ""
   alias: $vault_target
-updater_version: (development)
+updater_version: 99.99.99
 version: 2
 EOF
 	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
 			"creator_version" => "99.99.99",
-			"updater_version" => "(development)",
+			"updater_version" => "99.99.99",
 			"version" => 2,
 			"secrets_provider" => {
 				"url" => $VAULT_URL{$vault_target},
@@ -223,13 +279,13 @@ secrets_provider:
   strongbox: false
   namespace: ""
   alias: $other_vault_name
-updater_version: (development)
+updater_version: 99.99.99
 version: 2
 EOF
 	cmp_deeply($top->config->_explicit_contents, {
 			"deployment_type" => "test",
 			"creator_version" => "99.99.99",
-			"updater_version" => "(development)",
+			"updater_version" => "99.99.99",
 			"version" => 2,
 			"secrets_provider" => {
 				"url" => $VAULT_URL{$other_vault_name},
@@ -243,7 +299,7 @@ EOF
 
 	my $new_top;
 	my ($ansi_ltred, $ansi_ltcyan, $ansi_reset) = ("\e[1;31m", "\e[1;36m", "\e[0m");
-	lives_ok {$new_top = Genesis::Top->new($tmp, vault => $vault_target)};
+	lives_ok {$new_top = Genesis::Top->new($tmp, vault => $vault_target)} "allows vault to be overridden when present in config";
 	is(ref($new_top->vault), "Service::Vault::Remote", "Top vault is a vault object");
 	is($new_top->vault->{url}, $VAULT_URL{$vault_target}, "Other vault is used by top");
 };

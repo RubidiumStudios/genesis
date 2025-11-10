@@ -9,7 +9,7 @@ use helper;
 use Test::Deep;
 use Test::Output;
 use Cwd ();
-use List::Util qw(all);
+use List::Util ();
 
 use_ok 'Genesis::Config';
 $Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
@@ -312,7 +312,7 @@ EOF
 		"envs() returns valid environments and skips invalid ones");
 
 	# Verify all returned objects are Genesis::Env
-	ok((all { ref($_) eq 'Genesis::Env' } @envs), "envs() returns Genesis::Env objects");
+	ok((List::Util::all { ref($_) eq 'Genesis::Env' } @envs), "envs() returns Genesis::Env objects");
 
 	# Verify it doesn't include parent-only hierarchy files
 	ok(!(grep { $_->name eq 'ci' } @envs), "envs() doesn't include ci.yml (no genesis.env)");
