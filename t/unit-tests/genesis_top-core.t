@@ -417,4 +417,131 @@ subtest 'embed method' => sub {
 		"embed() copies binary content correctly");
 };
 
+subtest 'kit location and versioning' => sub {
+	my $tmp = workdir();
+
+	my $setup_kits = sub {
+		system("rm -rf $tmp/.genesis/kits; mkdir -p $tmp/.genesis/kits");
+		# Create valid kit archives
+		mk_test_kit('foo', '1.0.0', "$tmp/.genesis/kits");
+		mk_test_kit('foo', '1.0.1', "$tmp/.genesis/kits");
+		mk_test_kit('foo', '0.9.6', "$tmp/.genesis/kits");
+		mk_test_kit('foo', '0.9.5', "$tmp/.genesis/kits");
+		mk_test_kit('bar', '3.4.5', "$tmp/.genesis/kits");
+
+		# Rename 1.0.1 to .tgz to test extension handling
+		system("mv $tmp/.genesis/kits/foo-1.0.1.tar.gz $tmp/.genesis/kits/foo-1.0.1.tgz");
+
+		# Create invalid files that should be ignored
+		system("touch $tmp/.genesis/kits/$_") for (qw/
+			not-a-kit-file
+			unversioned.tar.gz
+			unversioned.tgz
+		/);
+		mkfile_or_fail("$tmp/.genesis/config", <<EOF);
+---
+version: 2
+creator_version: 2.7.0
+deployment_type: foo
+EOF
+	};
+
+	$setup_kits->(); # Setup repo dir
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+	ok(!$top->has_dev_kit, "repos without dev/ should not report having a dev kit");
+	cmp_deeply($top->local_kits, {
+			foo => {
+				'0.9.5' => bless({
+					'source'   => $top->path(".genesis/kits/foo-0.9.5.tar.gz"),
+					'name'     => 'foo',
+					'version'  => '0.9.5',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+				'0.9.6' => bless({
+					'source'   => $top->path(".genesis/kits/foo-0.9.6.tar.gz"),
+					'name'     => 'foo',
+					'version'  => '0.9.6',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+				'1.0.0' => bless({
+					'source'   => $top->path(".genesis/kits/foo-1.0.0.tar.gz"),
+					'name'     => 'foo',
+					'version'  => '1.0.0',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+				'1.0.1' => bless({
+					'source'   => $top->path(".genesis/kits/foo-1.0.1.tgz"),
+					'name'     => 'foo',
+					'version'  => '1.0.1',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+			},
+			bar => {
+				'3.4.5' => bless({
+					'source'   => $top->path(".genesis/kits/bar-3.4.5.tar.gz"),
+					'name'     => 'bar',
+					'version'  => '3.4.5',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+			},
+		}, "repos should list out all of their compiled kits");
+
+	$setup_kits->();
+	ok( defined $top->local_kit_version(foo => '1.0.0'), "repo should have foo-1.0.0 kit");
+	ok(!defined $top->local_kit_version(foo => '9.8.7'), "repo should not have foo-9.8.7 kit");
+	ok(!defined $top->local_kit_version(quxx => undef), "repo should not have any quux kit");
+	ok( defined $top->local_kit_version(foo => '1.0.1'), "repos should recognize .tgz kits");
+	ok( defined $top->local_kit_version(foo => 'latest'), "repo should find latest kit versions");
+	is($top->local_kit_version(foo => 'latest')->{version}, '1.0.1', "the latest foo kit should be 1.0.1");
+	is($top->local_kit_version(foo => undef)->{version}, '1.0.1', "an undef version should count as 'latest'");
+	ok(!defined $top->local_kit_version(undef => 'latest'), "kit name should be required if more than one kit exists");
+	ok(!defined $top->local_kit_version(undef => '1.0.0'), "kit name should be required if more than one kit exists, regardless of version uniqueness");
+
+	$setup_kits->();
+	system("rm -f $tmp/.genesis/kits/bar-*gz");
+	cmp_deeply($top->local_kits, {
+			foo => {
+				'0.9.5' => bless({
+					'source'   => $top->path(".genesis/kits/foo-0.9.5.tar.gz"),
+					'name'     => 'foo',
+					'version'  => '0.9.5',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+				'0.9.6' => bless({
+					'source'   => $top->path(".genesis/kits/foo-0.9.6.tar.gz"),
+					'name'     => 'foo',
+					'version'  => '0.9.6',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+				'1.0.0' => bless({
+					'source'   => $top->path(".genesis/kits/foo-1.0.0.tar.gz"),
+					'name'     => 'foo',
+					'version'  => '1.0.0',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+				'1.0.1' => bless({
+					'source'   => $top->path(".genesis/kits/foo-1.0.1.tgz"),
+					'name'     => 'foo',
+					'version'  => '1.0.1',
+					'provider' => isa("Genesis::Kit::Provider"),
+					'tar'      => isa("Archive::Tar")
+				}, "Genesis::Kit::Compiled"),
+			},
+		}, "repo should only have `foo' kit");
+	ok( defined $top->local_kit_version(undef, 'latest'), "repo should find latest kit version of only kit");
+	ok( defined $top->local_kit_version(undef, '0.9.6'), "repo should find 0.9.6 kit version of only kit");
+	is($top->local_kit_version(undef, 'latest')->{version}, '1.0.1', "the latest foo kit should be 1.0.1");
+	is($top->local_kit_version(undef, 'latest')->{name}, 'foo', "the only kit should be 'foo'");
+	is($top->local_kit_version(undef, '0.9.6')->{version}, '0.9.6', "specific version of the kit are returned");
+	is($top->local_kit_version(undef, '0.9.6')->{name}, 'foo', "the only kit should be 'foo' (0.9.6)");
+};
+
 done_testing;
