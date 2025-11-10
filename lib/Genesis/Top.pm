@@ -562,7 +562,7 @@ sub search_for_repo_path {
 	# roots specified in the .genesis/config file, then bosh first, followed by
 	# any other deployments in alphabetical order.
 	my @paths = ();
-	for my $label ('@current', '@parent', @$root_labels) {
+	for my $label (uniq ('@current', '@parent', @$root_labels)) {
 		if ($path_map{$label}) {
 			my $is_bosh= qr{/bosh(-deployments)?/$};
 			push(@paths,

@@ -544,4 +544,397 @@ EOF
 	is($top->local_kit_version(undef, '0.9.6')->{name}, 'foo', "the only kit should be 'foo' (0.9.6)");
 };
 
+subtest 'search_for_repo_path' => sub {
+	plan tests => 26;
+
+	# Save original environment and config
+	local $ENV{GENESIS_ORIGINATING_DIR} = Cwd::getcwd();
+	local $Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+
+	my $basedir = workdir('search-repo-test');
+
+	# Create directory structure (repos ARE the directories with .genesis/):
+	# basedir/
+	#   ├── clientA/              <- deployment root directory
+	#   │   ├── mykit/            <- deployment repo (has .genesis/, staging.yml, prod.yml, etc)
+	#   │   └── otherkit/         <- another deployment repo
+	#   └── clientB/              <- another deployment root directory
+	#       ├── mykit/            <- deployment repo (same name as clientA/mykit)
+	#       ├── aaa/              <- deployment repo
+	#       ├── bosh/             <- deployment repo (special: bosh gets priority)
+	#       └── special-mykit/    <- deployment repo
+
+	my $repo1_clientA = "$basedir/clientA/mykit";
+	my $repo2 = "$basedir/clientA/otherkit";
+	my $repo1_clientB = "$basedir/clientB/mykit";  # Same name as repo1_clientA
+	my $repo3 = "$basedir/clientB/aaa";
+	my $repo4 = "$basedir/clientB/bosh";
+	my $repo5 = "$basedir/clientB/special-mykit";
+
+	make_test_repo($repo1_clientA, 'mykit');
+	make_test_repo($repo2, 'otherkit');
+	make_test_repo($repo1_clientB, 'mykit');
+	make_test_repo($repo3, 'aaa');
+	make_test_repo($repo4, 'bosh');
+	make_test_repo($repo5, 'mykit');
+
+	# Test 1: From basedir, no repos visible (repos are two levels deep: basedir/clientX/repo)
+	local $ENV{GENESIS_ORIGINATING_DIR} = $basedir;
+	eval { Genesis::Top->search_for_repo_path('mykit') };
+	like($@, qr/No deployment repositories found/,
+		"finds no repos when in parent of deployment root directories");
+
+	# Test 2: From clientA, see repos directly under clientA (\@current)
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+	my ($root, $path) = Genesis::Top->search_for_repo_path('mykit');
+	is($path, Cwd::abs_path($repo1_clientA), 'finds mykit repo under @current (clientA)');
+	is($root, Cwd::abs_path("$basedir/clientA"), 'returns @current (clientA) as deployment root');
+
+	# Test 3: From inside clientA/mykit repo, see sibling repos via \@parent (clientA)
+	local $ENV{GENESIS_ORIGINATING_DIR} = $repo1_clientA;
+	($root, $path) = Genesis::Top->search_for_repo_path('otherkit');
+	is($path, Cwd::abs_path($repo2), 'from inside mykit repo, finds sibling otherkit repo via @parent');
+	is($root, Cwd::abs_path("$basedir/clientA"), 'returns @parent (clientA) as deployment root');
+
+	# Test 4: From clientB, see only repos under clientB (\@current), not clientA
+	# Note: searching for 'mykit' would match both 'mykit' and 'special-mykit'
+	# Use exact match with anchors to avoid ambiguity
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientB";
+	($root, $path) = Genesis::Top->search_for_repo_path('^mykit$');
+	is($path, Cwd::abs_path($repo1_clientB), 'finds mykit repo under @current (clientB), not clientA');
+	is($root, Cwd::abs_path("$basedir/clientB"), 'returns @current (clientB) as deployment root');
+
+	# Test 5: Bosh repos get priority when multiple matches with '*'
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientB";
+	($root, $path) = Genesis::Top->search_for_repo_path('*');
+	is($path, Cwd::abs_path($repo4), "bosh repo prioritized over other repos");
+
+	# Test 6: Without bosh, alphabetical sorting (aaa before mykit/special-mykit)
+	system("rm -rf $repo4");
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientB";
+	($root, $path) = Genesis::Top->search_for_repo_path('*');
+	is($path, Cwd::abs_path($repo3), "non-bosh repos sorted alphabetically (aaa first)");
+
+	# Recreate bosh for next tests
+	make_test_repo($repo4, 'bosh');
+
+	# Test 7: Set deployment_roots in config - now see repos from BOTH clientA and clientB
+	my $config_file = workdir('config-test') . "/config";
+	mkfile_or_fail($config_file, <<EOF);
+---
+deployment_roots:
+  - ["clientA", "$basedir/clientA"]
+  - ["clientB", "$basedir/clientB"]
+EOF
+
+	local $Genesis::RC = Genesis::Config->new($config_file);
+	local $ENV{GENESIS_ORIGINATING_DIR} = $basedir;  # From basedir (not in clientA or clientB)
+
+	# Now we should see repos from both deployment roots
+	($root, $path) = Genesis::Top->search_for_repo_path('otherkit');
+	is($path, Cwd::abs_path($repo2), "with deployment_roots config, finds repos from configured roots");
+	is($root, Cwd::abs_path("$basedir/clientA"), "returns correct deployment root from config (clientA)");
+
+	# Test 8: With deployment_roots, 'mykit' repo appears in BOTH clientA and clientB -> ambiguous
+	local $Genesis::RC = Genesis::Config->new($config_file);
+	local $ENV{GENESIS_ORIGINATING_DIR} = $basedir;
+
+	eval { Genesis::Top->search_for_repo_path('mykit') };
+	like($@, qr/Ambiguous deployment repository name/,
+		"ambiguous: 'mykit' repo exists in both clientA and clientB deployment roots");
+
+	# Test 9: No duplication when \@current IS a configured deployment_root
+	# When in clientA (which is in deployment_roots), should see clientA repos via \@current only
+	local $Genesis::RC = Genesis::Config->new($config_file);
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+
+	($root, $path) = Genesis::Top->search_for_repo_path('mykit');
+	is($path, Cwd::abs_path($repo1_clientA), 'no duplicate when @current matches deployment_root (clientA)');
+	is($root, Cwd::abs_path("$basedir/clientA"), "returns clientA as deployment root");
+
+	# Test 10: No duplication when \@parent IS a configured deployment_root
+	# When in clientA/mykit, \@parent=clientA (also in deployment_roots) - no duplicate
+	local $Genesis::RC = Genesis::Config->new($config_file);
+	local $ENV{GENESIS_ORIGINATING_DIR} = $repo1_clientA;
+
+	($root, $path) = Genesis::Top->search_for_repo_path('otherkit');
+	is($path, Cwd::abs_path($repo2), 'no duplicate when @parent matches deployment_root');
+	is($root, Cwd::abs_path("$basedir/clientA"), 'returns clientA as deployment root via @parent');
+
+	# Test 11: Priority order - \@current > \@parent > deployment_roots
+	# When in clientA, 'mykit' is in clientA (\@current) and clientB (deployment_root)
+	# Should get clientA version without ambiguity
+	local $Genesis::RC = Genesis::Config->new($config_file);
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+
+	($root, $path) = Genesis::Top->search_for_repo_path('mykit');
+	is($path, Cwd::abs_path($repo1_clientA), '@current (clientA) takes priority over deployment_roots (clientB)');
+
+	# Test 12: Wildcard behavior - partial match
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+	($root, $path) = Genesis::Top->search_for_repo_path('myk');
+	is($path, Cwd::abs_path($repo1_clientA), "partial match: 'myk' matches 'mykit'");
+
+	# Test 13: Anchor at start (^) removes leading wildcard
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+	($root, $path) = Genesis::Top->search_for_repo_path('^mykit');
+	is($path, Cwd::abs_path($repo1_clientA), "^ anchor: '^mykit' matches 'mykit' at start");
+
+	# Test 14: Anchor at end ($) removes trailing wildcard
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+	($root, $path) = Genesis::Top->search_for_repo_path('kit$');
+	# Matches 'mykit' and 'otherkit', mykit is first alphabetically
+	is($path, Cwd::abs_path($repo1_clientA), "\$ anchor: 'kit\$' matches repos ending in 'kit'");
+
+	# Test 15: Only valid Genesis repos matched (must have .genesis/config with deployment_type)
+	my $invalid_repo = "$basedir/clientA/invalid";
+	system("mkdir -p $invalid_repo/.genesis");
+	mkfile_or_fail("$invalid_repo/.genesis/config", "---\nversion: 2\n");  # No deployment_type
+
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+	eval { Genesis::Top->search_for_repo_path('invalid') };
+	like($@, qr/No deployment repositories found/,
+		"ignores directories without valid .genesis/config (missing deployment_type)");
+
+	# Test 16: Returns (root, path) tuple
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+	my @result = Genesis::Top->search_for_repo_path('mykit');
+	is(scalar(@result), 2, "returns two-element list (root, path)");
+	is($result[0], Cwd::abs_path("$basedir/clientA"), "first element is deployment root");
+	is($result[1], Cwd::abs_path($repo1_clientA), "second element is full repo path");
+
+	# Test 17: Path does not contain .genesis/config
+	unlike($result[1], qr/\.genesis\/config$/, "path stripped of .genesis/config");
+
+	# Test 18: Deployment name with special characters (dots, dashes)
+	my $repo6 = "$basedir/clientA/my-kit.v2";
+	make_test_repo($repo6, 'mykit');
+
+	local $ENV{GENESIS_ORIGINATING_DIR} = "$basedir/clientA";
+	($root, $path) = Genesis::Top->search_for_repo_path('my-kit.v2');
+	is($path, Cwd::abs_path($repo6), "handles repo names with dots and dashes");
+};
+
+subtest 'get_ancestral_vault' => sub {
+	plan tests => 10;
+
+	my $tmp = workdir();
+
+	# Create a basic repo structure
+	mkfile_or_fail("$tmp/.genesis/config", <<EOF);
+---
+version: 2
+creator_version: 3.0.0
+deployment_type: test
+EOF
+
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	# Create hierarchical environment files for testing
+	# Structure: a.yml, a-b.yml, c.yml, and target env a-b-c (doesn't exist yet)
+
+	# Test 1: No genesis.vault in any ancestor
+	mkfile_or_fail("$tmp/a.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+EOF
+
+	mkfile_or_fail("$tmp/a-b.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+EOF
+
+	my $vault_info = $top->get_ancestral_vault('a-b-c');
+	ok(!defined($vault_info), "returns undef when genesis.vault not defined in any ancestor");
+
+	# Test 2: genesis.vault in a-b.yml
+	mkfile_or_fail("$tmp/a-b.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  vault: https://vault-from-a-b:8200/secret/path
+EOF
+
+	# Clear manifest cache to ensure fresh parsing
+	unlink(glob(workdir('ENV')."/manifest-a-b-c-*"));
+
+	$vault_info = $top->get_ancestral_vault('a-b-c');
+	is($vault_info, 'https://vault-from-a-b:8200/secret/path',
+		"returns vault from immediate parent (a-b.yml)");
+
+	# Test 3: genesis.vault in both a.yml and a-b.yml - closer parent wins
+	mkfile_or_fail("$tmp/a.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  vault: https://vault-from-a:8200/secret/path
+EOF
+
+	# Clear manifest cache to ensure fresh parsing
+	unlink(glob(workdir('ENV')."/manifest-a-b-c-*"));
+
+	$vault_info = $top->get_ancestral_vault('a-b-c');
+	is($vault_info, 'https://vault-from-a-b:8200/secret/path',
+		"returns vault from closer ancestor (a-b.yml) when both parents have vault");
+
+	# Test 4: Remove from a-b.yml, should get from a.yml
+	mkfile_or_fail("$tmp/a-b.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+EOF
+
+	# Clear manifest cache to ensure fresh parsing
+	unlink(glob(workdir('ENV')."/manifest-a-b-c-*"));
+
+	$vault_info = $top->get_ancestral_vault('a-b-c');
+	is($vault_info, 'https://vault-from-a:8200/secret/path',
+		"returns vault from farther ancestor (a.yml) when closer parent doesn't have vault");
+
+	# Test 5: Inherited environment (c.yml via genesis.inherits)
+	mkfile_or_fail("$tmp/c.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  vault: https://vault-from-c:8200/secret/path
+EOF
+
+	mkfile_or_fail("$tmp/a-b.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  inherits: [c]
+EOF
+
+	# Clear manifest cache to ensure fresh parsing
+	unlink(glob(workdir('ENV')."/manifest-a-b-c-*"));
+
+	$vault_info = $top->get_ancestral_vault('a-b-c');
+	is($vault_info, 'https://vault-from-c:8200/secret/path',
+		"returns vault from inherited environment (c.yml via genesis.inherits)");
+
+	# Test 6: Direct parent vault overrides inherited vault
+	mkfile_or_fail("$tmp/a-b.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  inherits: [c]
+  vault: https://vault-from-a-b-override:8200/secret/path
+EOF
+
+	# Clear manifest cache to ensure fresh parsing
+	unlink(glob(workdir('ENV')."/manifest-a-b-c-*"));
+
+	$vault_info = $top->get_ancestral_vault('a-b-c');
+	is($vault_info, 'https://vault-from-a-b-override:8200/secret/path',
+		"direct parent vault overrides inherited vault");
+
+	# Test 7: Test with simple vault descriptor (no path, just URL)
+	mkfile_or_fail("$tmp/a.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  vault: https://simple-vault:8200
+EOF
+
+	mkfile_or_fail("$tmp/a-b.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+EOF
+
+	# Clear manifest cache to ensure fresh parsing
+	unlink(glob(workdir('ENV')."/manifest-a-b-c-*"));
+
+	$vault_info = $top->get_ancestral_vault('a-b-c');
+	is($vault_info, 'https://simple-vault:8200',
+		"handles simple vault descriptor (URL only)");
+
+	# Test 8: Test with complex vault descriptor (with namespace and other params)
+	mkfile_or_fail("$tmp/a.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  vault: https://vault:8200/secret/my/namespace!verify-tls+strongbox
+EOF
+
+	# Clear manifest cache to ensure fresh parsing
+	unlink(glob(workdir('ENV')."/manifest-a-b-c-*"));
+
+	$vault_info = $top->get_ancestral_vault('a-b-c');
+	is($vault_info, 'https://vault:8200/secret/my/namespace!verify-tls+strongbox',
+		"handles complex vault descriptor with namespace and flags");
+
+	# Test 9: Environment with no ancestors (just env name, no dashes)
+	mkfile_or_fail("$tmp/simple.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  vault: https://vault-simple:8200
+EOF
+
+	$vault_info = $top->get_ancestral_vault('simple');
+	is($vault_info, 'https://vault-simple:8200',
+		"returns vault from environment file itself when no ancestors");
+
+	# Test 10: Multiple levels of hierarchy (a-b-c-d with vault in a.yml)
+	mkfile_or_fail("$tmp/a.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+
+genesis:
+  vault: https://vault-deep-ancestor:8200
+EOF
+
+	mkfile_or_fail("$tmp/a-b.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+EOF
+
+	mkfile_or_fail("$tmp/a-b-c.yml", <<EOF);
+---
+kit:
+  name: test
+  version: 1.0.0
+EOF
+
+	$vault_info = $top->get_ancestral_vault('a-b-c-d');
+	is($vault_info, 'https://vault-deep-ancestor:8200',
+		"finds vault from deep ancestor (multiple hierarchy levels)");
+};
+
 done_testing;
