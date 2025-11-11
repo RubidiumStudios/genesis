@@ -142,6 +142,7 @@ sub _glyphize {
 		'[ ]' => "\x{25FB}",
 		'[x]' => "\x{25FC}",
 		'X'   => "\x{25FC}",
+		'_'   => "\x{00A0}",
 	);
 
 	$glyph = $glyphs{$glyph} if !envset('GENESIS_NO_UTF8') && defined($glyphs{$glyph});

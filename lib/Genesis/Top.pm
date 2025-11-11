@@ -539,8 +539,15 @@ EOF
 # }}}
 # search_for_repo_path - search for an deployment repository path in known deployment root(s) {{{
 sub search_for_repo_path {
-	my ($class, $deployment) = @_;
+	my ($class, $deployment, %opts) = @_;
 	my $label = "\@:$deployment";
+
+	# Process and validate options
+	my $return_all = delete($opts{all_paths}) // 0;
+	bug(
+		"Invalid option specified to search_for_repo_path: %s",
+		join(", ", keys %opts)
+	) if scalar(keys %opts) > 0;
 
 	my ($root_labels, $root_map) = Genesis::deployment_roots_map(
 		['@current', $ENV{GENESIS_ORIGINATING_DIR}],
@@ -550,26 +557,26 @@ sub search_for_repo_path {
 	$deployment = "*$deployment*" =~ s/\*\^//r =~ s/\$\*//r if defined($deployment) && $deployment ne '*';
 
 	my %path_map = ();
-	for my $label (@$root_labels) {
-		my $root = $root_map->{$label};
-		my @deployments = map {s{/\.genesis/config$}{}r}
+	for my $root_label (@$root_labels) {
+		my $root = $root_map->{$root_label};
+		my @deployments = map {s{/\.genesis/config$}{}r} grep {-f $_}
 			glob("$root/".($deployment//'*')."/.genesis/config"); # Only include genesis repos
 		next unless @deployments;
-		$path_map{$label} = [@deployments];
+		$path_map{$root_label} = [@deployments];
 	}
 
 	# Order the files by current directory, then by the order of the deployment
 	# roots specified in the .genesis/config file, then bosh first, followed by
 	# any other deployments in alphabetical order.
 	my @paths = ();
-	for my $label (uniq ('@current', '@parent', @$root_labels)) {
-		if ($path_map{$label}) {
-			my $is_bosh= qr{/bosh(-deployments)?/$};
+	for my $root_label (uniq ('@current', '@parent', @$root_labels)) {
+		if ($path_map{$root_label}) {
+			my $is_bosh= qr{/bosh(-deployments)?/?$};
 			push(@paths,
-				map {[$label, $_]}
+				map {[$root_label, $_]}
 				sort {
 					($a =~ $is_bosh ? 0 : 1) <=> ($b =~ $is_bosh ? 0 : 1 ) || $a cmp $b
-				} @{$path_map{$label}}
+				} @{$path_map{$root_label}}
 			);
 		}
 	}
@@ -594,7 +601,7 @@ sub search_for_repo_path {
 				if ($section eq '@current') {
 					$fmt_section = csprintf("#Gu{%sCurrent Directory:} #Ki{%s}", $flag, $target_path);
 				} elsif ($section eq '@parent') {
-					$fmt_section = csprintf("%s#Yu{%sParent Directory:} #Ki{%s}", $flag, $target_path);
+					$fmt_section = csprintf("#Yu{%sParent Directory:} #Ki{%s}", $flag, $target_path);
 				} elsif ($section ne $root_map->{$section}) {
 					my $is_current = $root_map->{$section} eq $ENV{GENESIS_ORIGINATING_DIR};
 					$fmt_section = csprintf("#%su{%sDeployment Root '%s':} #Ki{%s}", $is_current ? 'g' : 'B', $flag, $section, $target_path);
@@ -607,11 +614,12 @@ sub search_for_repo_path {
 			}
 		} @paths;
 		bail(
-			"Ambiguous deployment repository name: #C{%s} matches multiple paths:\n  - %s\n\n".
+			"Ambiguous deployment repository name: #C{%s} matches multiple paths:\n  -#\@{_}%s\n\n".
 			"Please refine your match criteria.",
-			$label, join("\n  - ", map {$_->[1]} grep {ref($_) eq 'ARRAY'} @path_labels)
-		) unless in_controlling_terminal;
+			$label, join("\n  -#\@{_}", map {$_->[1]} grep {ref($_) eq 'ARRAY'} @path_labels)
+		) unless in_controlling_terminal || $return_all;
 
+		return @paths if $return_all;
 
 		my $selected_path = prompt_for_choice(
 			csprintf(
@@ -997,12 +1005,14 @@ sub has_env {
 	return undef unless scalar(@env_names) == 1 && $env_names[0] eq $name;
 
 	# Check if the environment has kit information available (same validation as envs())
+	# Kit info can be split across hierarchical files (kit.name in parent, kit.version in child)
 	my $kit_name_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*name:\s+([^\s]+)/m;
 	my $kit_version_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*version:\s+([^\s]+)/m;
-	my $has_kit = $yaml_src =~ $kit_name_re && $yaml_src =~ $kit_version_re;
+	my $has_kit_name = $yaml_src =~ $kit_name_re;
+	my $has_kit_version = $yaml_src =~ $kit_version_re;
 
-	# If not in main file, check hierarchical files
-	unless ($has_kit) {
+	# If kit info not complete in main file, check hierarchical files
+	unless ($has_kit_name && $has_kit_version) {
 		my $env_obj = Genesis::Env->new(name => $name, top => $self);
 		my @env_files = $env_obj->actual_environment_files();
 		pop @env_files; # Remove main file, already checked
@@ -1011,12 +1021,11 @@ sub has_env {
 			my $ancestor_yaml = eval { slurp($self->path($ancestor_file)) };
 			next unless $ancestor_yaml;
 
-			if ($ancestor_yaml =~ $kit_name_re && $ancestor_yaml =~ $kit_version_re) {
-				$has_kit = 1;
-				last;
-			}
+			$has_kit_name = 1 if !$has_kit_name && $ancestor_yaml =~ $kit_name_re;
+			$has_kit_version = 1 if !$has_kit_version && $ancestor_yaml =~ $kit_version_re;
+			last if $has_kit_name && $has_kit_version;
 		}
-		return undef unless $has_kit;
+		return undef unless $has_kit_name && $has_kit_version;
 	}
 	return 1;
 }
