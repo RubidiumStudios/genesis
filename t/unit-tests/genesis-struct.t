@@ -125,6 +125,51 @@ subtest 'flatten() - complex structures' => sub {
 	is $flat->{'list[1].name'}, 'second', 'array of hashes flattened';
 };
 
+subtest 'flatten() - empty hashes and arrays' => sub {
+	my $nested = {
+		empty_hash => {},
+		empty_array => [],
+		nested_empty => {
+			inner => {}
+		},
+		mixed => {
+			value => 'test',
+			empty => {}
+		},
+		some_items => [
+			{odd => [1, 3]},
+			{even => [2, 4]},
+			{both => []},
+			{}
+		]
+	};
+
+	my $flat = flatten($nested);
+	ok exists($flat->{empty_hash}), 'empty hash key exists in flattened structure';
+	is ref($flat->{empty_hash}), 'HASH', 'empty hash value is HASH ref';
+	is scalar(keys %{$flat->{empty_hash}}), 0, 'empty hash has 0 keys';
+	ok exists($flat->{empty_array}), 'empty array key exists in flattened structure';
+	is ref($flat->{empty_array}), 'ARRAY', 'empty array value is ARRAY ref';
+	is scalar(@{$flat->{empty_array}}), 0, 'empty array has 0 elements';
+	ok exists($flat->{'nested_empty.inner'}), 'nested empty hash key exists';
+	is ref($flat->{'nested_empty.inner'}), 'HASH', 'nested empty hash value is HASH ref';
+	is scalar(keys %{$flat->{'nested_empty.inner'}}), 0, 'nested empty hash has 0 keys';
+	is $flat->{'mixed.value'}, 'test', 'value preserved alongside empty hash';
+	ok exists($flat->{'mixed.empty'}), 'empty hash exists alongside value';
+	is ref($flat->{'mixed.empty'}), 'HASH', 'empty hash value is HASH ref in mixed structure';
+	is scalar(keys %{$flat->{'mixed.empty'}}), 0, 'empty hash in mixed structure has 0 keys';
+	is $flat->{'some_items[0].odd[0]'}, 1, 'array element with values (first)';
+	is $flat->{'some_items[0].odd[1]'}, 3, 'array element with values (second)';
+	is $flat->{'some_items[1].even[0]'}, 2, 'array element with values (first)';
+	is $flat->{'some_items[1].even[1]'}, 4, 'array element with values (second)';
+	ok exists($flat->{'some_items[2].both'}), 'empty array in hash element preserved';
+	is ref($flat->{'some_items[2].both'}), 'ARRAY', 'empty array in hash element is ARRAY ref';
+	is scalar(@{$flat->{'some_items[2].both'}}), 0, 'empty array in hash element has 0 elements';
+	ok exists($flat->{'some_items[3]'}), 'empty hash element in array preserved';
+	is ref($flat->{'some_items[3]'}), 'HASH', 'empty hash element in array is HASH ref';
+	is scalar(keys %{$flat->{'some_items[3]'}}), 0, 'empty hash element in array has 0 keys';
+};
+
 # Test unflatten() - Convert flat dotted keys back to nested structure
 subtest 'unflatten() - basic unflattening' => sub {
 	my $flat = {
@@ -151,6 +196,39 @@ subtest 'unflatten() - arrays' => sub {
 	is $nested->{array}[2], 'three', 'array element 2 correct';
 };
 
+subtest 'flatten/unflatten roundtrip - empty hashes and arrays' => sub {
+	my $original = {
+		empty_hash => {},
+		empty_array => [],
+		nested_empty => {
+			inner => {}
+		},
+		mixed => {
+			value => 'test',
+			empty => {}
+		},
+		some_items => [
+			{odd => [1, 3]},
+			{even => [2, 4]},
+			{both => []},
+			{}
+		]
+	};
+
+	# Test flatten preserves empty structures
+	my $flat = flatten($original);
+	ok exists($flat->{empty_hash}), 'empty hash key exists in flattened structure';
+	is ref($flat->{empty_hash}), 'HASH', 'empty hash value is HASH ref';
+	is scalar(keys %{$flat->{empty_hash}}), 0, 'empty hash has 0 keys';
+	ok exists($flat->{empty_array}), 'empty array key exists in flattened structure';
+	is ref($flat->{empty_array}), 'ARRAY', 'empty array value is ARRAY ref';
+	is scalar(@{$flat->{empty_array}}), 0, 'empty array has 0 elements';
+
+	# Test unflatten preserves empty structures and roundtrip matches original
+	my $roundtrip = unflatten($flat);
+	is_deeply $roundtrip, $original, 'roundtrip matches original structure';
+};
+
 # Test deep_merge() - Recursive hash merging
 subtest 'deep_merge() - simple merging' => sub {
 	my $base = {
@@ -166,6 +244,86 @@ subtest 'deep_merge() - simple merging' => sub {
 	is $merged->{a}, 1, 'base key preserved';
 	is $merged->{b}, 3, 'override key wins';
 	is $merged->{c}, 4, 'new key added';
+};
+
+subtest 'priority_merge() - priority-aware merging with conflict detection' => sub {
+	# Test 1: Basic priority - first structure wins
+	my $high_priority = {
+		foo => 'high',
+		bar => 1
+	};
+	my $low_priority = {
+		foo => 'low',
+		baz => 2
+	};
+
+	my $result = priority_merge($high_priority, $low_priority);
+	is $result->{foo}, 'high', 'high priority value preserved';
+	is $result->{bar}, 1, 'high priority key preserved';
+	is $result->{baz}, 2, 'non-conflicting low priority key added';
+
+	# Test 2: Ancestor blocks descendants - deployment_roots => [] blocks deployment_roots[0].default
+	$high_priority = {
+		deployment_roots => []
+	};
+	$low_priority = {
+		'deployment_roots' => [
+			{ default => 'some/path' }
+		]
+	};
+
+	$result = priority_merge($high_priority, $low_priority);
+	is_deeply $result->{deployment_roots}, [], 'empty array from high priority preserved';
+
+	# Test 3: Descendants block ancestors - deployment_roots[0].my_lab blocks deployment_roots => []
+	$high_priority = {
+		deployment_roots => [
+			{ my_lab => 'some/path' }
+		]
+	};
+	$low_priority = {
+		deployment_roots => []
+	};
+
+	$result = priority_merge($high_priority, $low_priority);
+	is_deeply $result->{deployment_roots}, [{ my_lab => 'some/path' }],
+		'array with value from high priority preserved, ancestor blocked';
+
+	# Test 4: Complex nested case with multiple conflicts
+	$high_priority = {
+		ui => {
+			colors => {
+				code => 'Yb'
+			}
+		}
+	};
+	$low_priority = {
+		ui => {
+			colors => {
+				code => 'default',
+				warning_alert => 'kYi'
+			},
+			theme => 'dark'
+		}
+	};
+
+	$result = priority_merge($high_priority, $low_priority);
+	is $result->{ui}{colors}{code}, 'Yb', 'high priority nested value preserved';
+	is $result->{ui}{colors}{warning_alert}, 'kYi', 'non-conflicting nested value added';
+	is $result->{ui}{theme}, 'dark', 'non-conflicting sibling key added';
+
+	# Test 5: Empty hash/array preservation with priority
+	$high_priority = {
+		empty_config => {}
+	};
+	$low_priority = {
+		empty_config => {
+			default => 'value'
+		}
+	};
+
+	$result = priority_merge($high_priority, $low_priority);
+	is_deeply $result->{empty_config}, {}, 'empty hash from high priority preserved';
 };
 
 subtest 'deep_merge() - nested merging' => sub {

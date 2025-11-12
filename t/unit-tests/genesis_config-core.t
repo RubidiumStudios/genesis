@@ -177,6 +177,139 @@ subtest 'schema defaults' => sub {
 	is($config->get_source('another_default'), 'default', "numeric default has 'default' source");
 };
 
+subtest 'nested schema defaults with parent defaults' => sub {
+	# Test that defaults are applied in nested schemas even when parent has a default
+	# Regression test for ui.colors.code.warning_alert not getting default value
+	# when ui or ui.colors has a default of {}
+
+	my $schema = {
+		some_other => {
+			type => 'string'
+		},
+		ui => {
+			type    => 'hash',
+			default => {},
+			schema  => {
+				some_other_setting => {
+					type => 'any'
+				},
+				colors => {
+					type    => 'hash',
+					default => {},
+					schema  => {
+						some_other_color => {
+							type => 'string'
+						},
+						code => {
+							type        => 'string',
+							default     => 'Yb',
+							description => 'Color for code blocks in the UI'
+						},
+						warning_alert => {
+							type        => 'string',
+							default     => 'kYi',
+							description => 'Color for warning messages in the UI'
+						}
+					}
+				}
+			}
+		}
+	};
+
+	# Test 1: No ui key at all
+	my $config_file1 = "$tmp/test_nested1.yml";
+	put_file($config_file1, "---\nsome_other: value\n");
+
+	my $config1 = Genesis::Config->new($config_file1);
+	$config1->validate($schema);
+
+	is($config1->get('ui.colors.code'), 'Yb',
+		"nested default applied when ui key missing");
+	is($config1->get('ui.colors.warning_alert'), 'kYi',
+		"nested default applied when ui key missing");
+
+	# Test 2: ui present but ui.colors missing
+	my $config_file2 = "$tmp/test_nested2.yml";
+	put_file($config_file2, <<EOF);
+---
+ui:
+  some_other_setting: value
+EOF
+
+	my $config2 = Genesis::Config->new($config_file2);
+	$config2->validate($schema);
+
+	is($config2->get('ui.colors.code'), 'Yb',
+		"nested default applied when ui.colors key missing");
+	is($config2->get('ui.colors.warning_alert'), 'kYi',
+		"nested default applied when ui.colors key missing");
+
+	# Test 3: ui.colors present but ui.colors.code missing
+	my $config_file3 = "$tmp/test_nested3.yml";
+	put_file($config_file3, <<EOF);
+---
+ui:
+  colors:
+    some_other_color: Rb
+EOF
+
+	my $config3 = Genesis::Config->new($config_file3);
+	$config3->validate($schema);
+
+	is($config3->get('ui.colors.code'), 'Yb',
+		"nested default applied when ui.colors.code key missing");
+	is($config3->get('ui.colors.warning_alert'), 'kYi',
+		"nested default applied when ui.colors.warning_alert key missing");
+
+	# Test 4: ui.colors.code present but ui.colors.warning_alert missing
+	my $config_file4 = "$tmp/test_nested4.yml";
+	put_file($config_file4, <<EOF);
+---
+ui:
+  colors:
+    code: Gb
+EOF
+
+	my $config4 = Genesis::Config->new($config_file4);
+	$config4->validate($schema);
+
+	is($config4->get('ui.colors.code'), 'Gb',
+		"explicit value used when present");
+	is($config4->get('ui.colors.warning_alert'), 'kYi',
+		"nested default applied for sibling key when one child is explicit");
+
+	# Test 5: ui explicitly set to {} in file
+	my $config_file5 = "$tmp/test_nested5.yml";
+	put_file($config_file5, <<EOF);
+---
+ui: {}
+EOF
+
+	my $config5 = Genesis::Config->new($config_file5);
+	$config5->validate($schema);
+
+	is($config5->get('ui.colors.code'), 'Yb',
+		"nested default applied when ui explicitly {} in file");
+	is($config5->get('ui.colors.warning_alert'), 'kYi',
+		"nested default applied when ui explicitly {} in file");
+
+	# Test 6: ui.colors explicitly set to {} in file
+	my $config_file6 = "$tmp/test_nested6.yml";
+	put_file($config_file6, <<EOF);
+---
+ui:
+  colors: {}
+EOF
+
+	my $config6 = Genesis::Config->new($config_file6);
+	$config6->validate($schema);
+
+	is($config6->get('ui.colors.code'), 'Yb',
+		"nested default applied when ui.colors explicitly {} in file");
+	is($config6->get('ui.colors.warning_alert'), 'kYi',
+		"nested default applied when ui.colors explicitly {} in file");
+};
+
 subtest 'priority resolution: env > set > loaded > default' => sub {
 	my $config_file = "$tmp/test5.yml";
 	put_file($config_file, <<EOF);

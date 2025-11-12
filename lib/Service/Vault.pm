@@ -447,12 +447,15 @@ sub set_path {
 	for my $key (sort keys %$data) {
 		my $value = $data->{$key};
 
+		# Skip empty containers from flatten() - vault cannot store refs
 		if (ref($value) eq 'HASH') {
+			next if keys %$value == 0;  # Skip empty hashes
 			$self->set_path("$path/$key", $value);
 			next;
 		}
 
 		if (ref($value) eq 'ARRAY') {
+			next if @$value == 0;  # Skip empty arrays
 			for my $i (0..$#{$value}) {
 				if (ref($value->[$i]) eq 'HASH') {
 					$self->set_path("$path/$key/$i", $value->[$i]);
@@ -460,6 +463,7 @@ sub set_path {
 					push(@set_data, "${key}[${i}]=$value->[$i]");
 				}
 			}
+			next;  # Don't fall through to scalar handling
 		}
 
 		push(@set_data, "$key=$value");

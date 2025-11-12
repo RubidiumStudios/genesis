@@ -2,7 +2,7 @@ package Genesis::Config;
 use strict;
 use warnings;
 
-use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff deep_merge flatten unflatten/;
+use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff priority_merge flatten unflatten/;
 use Genesis::Term qw/bullet decolorize/;
 
 use JSON::PP ();
@@ -149,8 +149,12 @@ sub _update_source {
 	# Update the value in the specified source structure
 	struct_set_value($self->{$source_field}, $key, $value);
 
-	# Invalidate caches
-	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
+	# Invalidate caches - both the key itself, its descendants, and any parent keys
+	# that might contain it (since flatten uses literal empty refs, not actual refs)
+	delete($self->{cache}{$_}) for (grep {
+		$_ =~ /^$key($|[\.\[])/  ||  # Invalidate self and all descendants
+		$key =~ /^\Q$_\E[\.\[]/      # Invalidate if updating a descendant of a cached parent
+	} keys(%{$self->{cache}}));
 	delete $self->{_contents};
 	# Only invalidate _explicit_contents if we modified loaded or set
 	delete $self->{_explicit_contents} if $source eq 'loaded' || $source eq 'set';
@@ -256,18 +260,10 @@ sub validate {
 	for my $key (keys %$schema) {
 		if (exists($schema->{$key}{envvar}) and exists($ENV{$schema->{$key}{envvar}})) {
 			# Environment variables take precedence over configuration values.
-			my $env_value = $ENV{$schema->{$key}{envvar}};
-			struct_set_value($self->{env_values}, $key, $env_value);
-			# Invalidate caches
-			delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
-			delete $self->{_contents};
+			$self->_update_source('env', $key, $ENV{$schema->{$key}{envvar}});
 		} elsif (exists($schema->{$key}{default}) and ! struct_has($self->{loaded_values}, $key) and ! struct_has($self->{set_values}, $key)) {
 			# Set default only if not loaded or explicitly set
-			my $default_value = $schema->{$key}{default};
-			struct_set_value($self->{default_values}, $key, $default_value);
-			# Invalidate caches
-			delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
-			delete $self->{_contents};
+			$self->_update_source('default', $key, $schema->{$key}{default});
 		} elsif ($schema->{$key}{required} and ! struct_has($self->{loaded_values}, $key) and ! struct_has($self->{set_values}, $key)) {
 			push @errors, "#R{$key}: missing required key";
 			next;
@@ -290,6 +286,9 @@ sub validate {
 			join('', map {"\n[[".bullet('', inline => 1, indent => 0).">>$_"} @errors));
 	}
 
+	# Invalidate contents cache after all validation is complete
+	delete $self->{_contents};
+
 	return 1;
 }
 # }}}
@@ -303,13 +302,14 @@ sub _contents {
 	$self->_load() unless ($self->loaded) || (! $self->exists && exists($self->{loaded_values}));
 
 	# Merge all sources with priority: env > set > loaded > default
-	# deep_merge takes multiple hashes, later ones override earlier ones
+	# priority_merge takes multiple hashes in priority order (highest first)
+	# and prevents ancestor/descendant conflicts
 	# (if it it hasn't been cached already)
-	return $self->{_contents} //= deep_merge(
-		$self->{default_values},
-		$self->{loaded_values},
+	return $self->{_contents} //= priority_merge(
+		$self->{env_values},
 		$self->{set_values},
-		$self->{env_values}
+		$self->{loaded_values},
+		$self->{default_values}
 	);
 }
 
@@ -324,14 +324,11 @@ sub _explicit_contents {
 
 	# Merge only explicit sources: set > loaded
 	# Exclude env and default values from disk persistence
-	# Note: Flatten both structures, use hash slice to preserve undef values, then unflatten
-	# (deep_merge strips undef values, which we need to preserve for explicit nulls)
-	my $flat_loaded = flatten($self->{loaded_values});
-	my $flat_set = flatten($self->{set_values});
-	my $flat_merged = {$flat_loaded->%*, $flat_set->%*};
-	$self->{_explicit_contents} = unflatten($flat_merged);
-
-	return $self->{_explicit_contents};
+	# priority_merge preserves undef values and prevents ancestor/descendant conflicts
+	return $self->{_explicit_contents} //= priority_merge(
+		$self->{set_values},
+		$self->{loaded_values}
+	);
 }
 
 # }}}
@@ -360,7 +357,8 @@ sub _signature {
 	my ($self) = @_;
 	# Don't trigger loading - directly compute from source structures
 	# Merge loaded + set (explicit contents) without calling _explicit_contents()
-	my $explicit = deep_merge($self->{loaded_values}, $self->{set_values});
+	# Uses priority_merge to match _explicit_contents() behavior
+	my $explicit = priority_merge($self->{set_values}, $self->{loaded_values});
 	return sha1_hex(JSON::PP->new->canonical->encode($explicit));
 }
 # }}}
@@ -409,6 +407,9 @@ sub _validate_key {
 					push @errors, "#R{$key}: missing required key #ri{$subkey}";
 				}
 			}
+			# Refetch value to include newly-added defaults for recursive validation
+			# TODO: Optimize to only refetch if defaults or env values were actually set
+			$value = $self->get($key);
 			for my $subkey (sort keys %$value) {
 				if (! exists($schema->{schema}{$subkey})) {
 					push @errors, "#R{$key.$subkey}: unknown configuration key: expected one of ".join(', ', keys %{$schema->{schema}});

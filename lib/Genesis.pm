@@ -115,6 +115,7 @@ our @EXPORT = qw/
 	flatten
 	unflatten
 	deep_merge
+	priority_merge
 	in_array
 	index_of
 	compare_arrays
@@ -1325,14 +1326,26 @@ sub flatten {
 	my ($final, $key, $val) = (@_ == 1 ) ? ({},'', $_[0]) : @_;
 
 	if (ref $val eq 'ARRAY') {
-		for (my $i = 0; $i < @$val; $i++) {
-			flatten($final, $key ? "${key}[$i]" : "$i", $val->[$i]);
+		if (@$val == 0) {
+			# Preserve empty arrays by storing the array ref itself
+			# Skip if top-level (key is empty string from initial call)
+			$final->{$key} = [] if defined($key) && length($key);
+		} else {
+			for (my $i = 0; $i < @$val; $i++) {
+				flatten($final, $key ? "${key}[$i]" : "$i", $val->[$i]);
+			}
 		}
 
 	} elsif (ref $val eq 'HASH') {
-		for (keys %$val) {
-			my $leaf_key = $_ =~ s/\./~/gr;
-			flatten($final, $key ? "$key.$leaf_key" : "$leaf_key", $val->{$_})
+		if (keys %$val == 0) {
+			# Preserve empty hashes by storing the hash ref itself
+			# Skip if top-level (key is empty string from initial call)
+			$final->{$key} = {} if defined($key) && length($key);
+		} else {
+			for (keys %$val) {
+				my $leaf_key = $_ =~ s/\./~/gr;
+				flatten($final, $key ? "$key.$leaf_key" : "$leaf_key", $val->{$_})
+			}
 		}
 
 	} else {
@@ -1379,6 +1392,7 @@ sub unflatten {
 			my ($pk, $sk) = $k =~ /^([^\[\.]*)(?:\.)?([^\.].*?)?$/;
 			$pk =~ s/~/./g;
 			if (defined $sk) {
+				# If $h_data{$pk} is an array ref,
 				die "Hash cannot have scalar and non-scalar values (at ".join('.', grep $_, ($branch, "pk")).")"
 					if defined $h_data{$pk} && ref($h_data{$pk}) ne 'HASH';
 				$h_data{$pk}->{$sk} = delete $data->{$k};
@@ -1431,6 +1445,32 @@ sub deep_merge {
 	return $flatten ? $flat_base : unflatten($flat_base);
 }
 
+# }}}
+# priority_merge - priority-aware merge with conflict detection {{{
+sub priority_merge {
+	my @structures = @_;  # In priority order, highest first
+	my $merged = {};
+	my $blocked = {};  # Ancestors blocked because descendants exist
+
+	for my $structure (@structures) {
+		my $flat = flatten($structure);
+
+		for my $key (keys %$flat) {
+			# Don't add keys if there are deeper keys already present
+			next if grep {$_ =~ /^\Q$key\E(\.|[\[]|$)/} keys %$merged;
+
+			# Don't add keys if any ancestor is already present
+			next if grep {$key =~ /^\Q$_\E(\.|[\[]|$)/} keys %$merged;
+
+			# No conflict - add the key and block all its ancestors
+			$merged->{$key} = $flat->{$key};
+		}
+	}
+
+	return unflatten($merged);
+}
+
+# }}}
 
 sub uniq {
 	my (@items,%check);
