@@ -263,16 +263,26 @@ sub paths {
 		push(@filter, '-n', $self->_full_path($filter));
 	}
 
-	my $paths = read_json_from(run({
+	my ($paths, $rc, $err) = read_json_from(run({
 			env => $self->env(),
 			redact_env => 1,
 			stderr => 0,
 		},
 		'credhub', 'find', '-j', @filter
 	));
+	if ($rc) {
+		$err = decolorize($err) =~ s/\AWARNING: Two different login methods were detected.*?\n\n\n//sr =~ s/^\s+|\s+\z//gr;
+		bail(
+			"Could not list CredHub paths under #c{%s}:%s\n\n[Exit Code: %s]",
+			defined($filter) ? $filter : $self->{base},
+			$err ? "\n\n#rui{STDERR:}\n$err" : '',
+			$rc
+		) unless $err =~ /^No credentials exist which match/;
+		return ();
+	}
 	return
-	  grep {ref($filter) ne "Regexp" || $_ =~ $filter}
-	  map {$_->{name}}
+		grep {ref($filter) ne "Regexp" || $_ =~ $filter}
+		map {$_->{name}}
 		@{$paths->{credentials}};
 }
 
