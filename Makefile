@@ -1,10 +1,27 @@
-.PHONY: sanity-test test test-quick test-secrets test-ci unit-test integration-test e2e-test test-all test-manifest release dev-release clean coverage
+.PHONY: sanity-test compile-check test test-quick test-secrets test-ci unit-test integration-test e2e-test test-all test-manifest release dev-release clean coverage
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
 TESTS ?= t/*.t
 
-sanity-test:
+compile-check:
+	@echo "Checking all Perl modules compile..."
+	@failed=0; \
+	for pm in $$(find lib -name '*.pm'); do \
+		if ! perl -Ilib -c "$$pm" >/dev/null 2>&1; then \
+			echo "FAILED: $$pm"; \
+			perl -Ilib -c "$$pm"; \
+			failed=$$((failed+1)); \
+		fi; \
+	done; \
+	if [ $$failed -eq 0 ]; then \
+		echo "All modules compile successfully"; \
+	else \
+		echo "$$failed module(s) failed to compile"; \
+		exit 1; \
+	fi
+
+sanity-test: compile-check
 	@bash -c 'set -o pipefail; export GENESIS_OUTPUT_COLUMNS=120; perl -Ilib -c bin/genesis && perl -Ilib -- bin/genesis -D ping 2>&1'
 
 coverage:
