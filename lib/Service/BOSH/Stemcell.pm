@@ -39,7 +39,7 @@ sub available_stemcells {
 	my $agent= $opts{agent};
 	$agent //= 'go_agent' if $os =~ m/^ubuntu-(trusty|xenial|bionic|focal|jammy)$/;
 	$agent //= 'go_agent' if $os =~ m/^windows/;
-	$agent = "-$agent" if $agent;
+	$agent = $agent ? "-$agent"  : '';
 
 	my $url = ($opts{stemcell_url}//default_stemcell_url).
 		"bosh-$cpi-$os$agent?all=$all";
