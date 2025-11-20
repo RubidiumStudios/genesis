@@ -918,7 +918,7 @@ sub _add_extended_cloud_config {
 	# This will add any extended cloud config from the environment to the given config.
 	# It will also add any additional cloud properties for the IaaS.
 	my $extended_config = $self->env->lookup($self->overrides_base, {});
-	my @groups = grep {$_ !~ m/(^matches_|_defaults$)/} keys %$extended_config;
+	my @groups = grep {$_ !~ m/(^matching_|_defaults$)/} keys %$extended_config;
 	for my $group_label (@groups) {
 		# Map singular type names to their plural config keys and prefixes
 		my %type_mapping = (
