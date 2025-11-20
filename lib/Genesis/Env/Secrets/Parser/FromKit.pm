@@ -163,9 +163,9 @@ sub _parse_credential_definition {
 
 	if (ref($data) eq 'HASH') {
 		return map {$self->_parse_credential_key($path, $_, $data->{$_}, $feature)} (keys %$data);
-	} elsif ($data =~ m/^(ssh|rsa)\s+(\d+)(\s+fixed)?$/) {
+	} elsif ($data =~ m/^(ssh|rsa)(?:\s+(\d+))(\s+fixed)?$/) {
 		my $type = "Genesis::Secret::".uc($1);
-		return $type->new($path, size => $2, fixed => ($3 ? 1 : 0), _feature => $feature);
+		return $type->new($path, size => $2//2048, fixed => ($3 ? 1 : 0), _feature => $feature);
 	} elsif ($data =~ m/^dhparams?\s+(\d+)(\s+fixed)?$/) {
 		return Genesis::Secret::DHParams->new($path, size => $1, fixed => ($2 ? 1 : 0), _feature => $feature);
 	} elsif ($data =~ m/^random .?$/) {
