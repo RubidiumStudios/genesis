@@ -23,6 +23,11 @@ while (<$fh>) {
 	}
 	next unless $in_section;
 	next if /^#/ || /^\s*$/;  # Skip comments and blank lines
+
+	# Strip inline comments and trailing whitespace
+	s/\s*#.*$//;
+	s/\s+$//;
+
 	next unless /\.t$/;        # Only .t files
 
 	print "t/$_\n";
