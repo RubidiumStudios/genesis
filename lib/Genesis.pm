@@ -1596,7 +1596,7 @@ sub pretty_duration {
 		: $style;
 
 	my ($start,$end) = (substr($wrap,0,1),substr($wrap, length($wrap)-1, 1));
-	return sprintf(
+	return csprintf(
 		"#%s{%s%s}#%s{$fmt}#%s{%s}",
 		$style, $prefix, $start, $color, @values, $style, $end
 	);
