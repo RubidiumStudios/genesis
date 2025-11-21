@@ -144,13 +144,19 @@ sub create {
 		$self->config->set('manifest_store', 'exodus');
 		$self->config->set('kits_path', $kits_path) if $kits_path;
 
-		$self->config->set('secrets_provider', {
-			url       => $self->vault->url,
-			insecure  => $self->vault->verify    ? Genesis::Config::FALSE : Genesis::Config::TRUE,
-			namespace => $self->vault->namespace,
-			strongbox => $self->vault->strongbox ? Genesis::Config::TRUE  : Genesis::Config::FALSE,
-			alias     => $self->vault->name
-		});
+		# Only set vault configuration if not using no_vault (and only allow no_vault in tests)
+		if ($opts{no_vault}) {
+			bail("no_vault option can only be used in test contexts")
+				if $ENV{GENESIS_COMMAND};
+		} else {
+			$self->config->set('secrets_provider', {
+				url       => $self->vault->url,
+				insecure  => $self->vault->verify    ? Genesis::Config::FALSE : Genesis::Config::TRUE,
+				namespace => $self->vault->namespace,
+				strongbox => $self->vault->strongbox ? Genesis::Config::TRUE  : Genesis::Config::FALSE,
+				alias     => $self->vault->name
+			});
+		}
 
 		$self->config->set('kit_provider', $self->kit_provider->config)
 			unless ref($self->kit_provider) eq "Genesis::Kit::Provider::GenesisCommunity";
@@ -995,10 +1001,11 @@ sub load_env {
 sub has_env {
 	my ($self, $name) = @_;
 	$name =~ s/.yml$//;
-	return undef unless -f $self->path("$name.yml");
+	my $path = $self->path("$name.yml");
+	return undef unless -f $path;
 
 	# Check if the environment file has genesis.env declaration
-	my $yaml_src = eval { slurp($self->path("$name.yml")) };
+	my $yaml_src = eval { slurp($path) };
 	return undef unless $yaml_src;
 
 	my @env_names = $yaml_src =~ /^genesis:\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+([^\s]*)/mg;
@@ -1013,7 +1020,7 @@ sub has_env {
 
 	# If kit info not complete in main file, check hierarchical files
 	unless ($has_kit_name && $has_kit_version) {
-		my $env_obj = Genesis::Env->new(name => $name, top => $self);
+		my $env_obj = bless({name => $name, top => $self}, 'Genesis::Env');
 		my @env_files = $env_obj->actual_environment_files();
 		pop @env_files; # Remove main file, already checked
 		while (my $ancestor_file = pop @env_files) {

@@ -868,7 +868,7 @@ sub validate_genesis_version_requirements {
 	return {
 		errors => \@errors,
 		warnings => \@warnings,
-		effective_minimum => $effective_min,
+		effective_minimum => $effective_min//'0.0.0',
 		running_version => $running_version,
 		source => $env_min ? 'environment file' : $repo_min ? 'repository configuration' : undef,
 	};
@@ -923,6 +923,10 @@ sub potential_environment_files {
 # }}}
 # actual_environment_files - list the heirarchal environment files that exist for this env {{{
 sub actual_environment_files {
+
+	# This will return all name-based and explicitly inherited environment files, with itself last.
+	my ($self, $seen) = @_;
+
 	my $ref = $_[0]->_memoize('__actual_files', sub {
 		my $self = shift;
 		if ($self->{is_from_envvars} && ! -f $self->path($self->file)) {
@@ -930,9 +934,45 @@ sub actual_environment_files {
 			save_to_yaml_file($self->params,$tmpenv);
 			return [$tmpenv];
 		}
+		# FIXME:  SUPER IMPORTANT - we need to handle cached files too (ie pipeline support)
+		my $self_filename = "./".$self->name.".yml";
 		my @files;
-		for my $file (grep {-f $self->path($_)} $self->potential_environment_files) {
-			push( @files, $self->_genesis_inherits($file, @files),$file);
+		$seen //= {$self_filename => -1}; # Ensure we always include self last.
+
+		# This will cycle through all the name-based inherited files that exist, including itself.
+		my @existing_ancestors = (grep {-f $self->path($_)} $self->potential_environment_files);
+		my $i = 1;
+		for my $ancestor_file (@existing_ancestors) {
+			next if $seen->{$ancestor_file}++ > 0; # Already seen this file
+			$seen->{$ancestor_file} = 1;
+
+			# This will cycle through all explicitly inherited files of the target
+			# file (NOT including the file itself), and any actual files they inherit
+			# by explicit inheritance.  We need to make sure it doesn't include itself
+			# or any other files already seen to avoid infinite loops.
+			my @ignore_files = keys %$seen;
+			#push(@ignore_files, $self_filename) unless $seen->{$self_filename};
+			for my $inherited_file ($self->_genesis_inherits($ancestor_file, @ignore_files)) {
+
+				# For any explicitly inherited file, we need to check if it has any
+				# name-based files that it should inherit as well (and recursively, if
+				# they have any explicit inherits).  This should never return already
+				# seen files (or the current file name).
+
+				# Check if the inherited file should inherit name-based files
+				my ($inherited_name) = $inherited_file =~ m{.*/([^/]*)\.yml$};
+				next unless $inherited_name; # This should never happen, but just in case...
+				my $inherited_env = bless({name => $inherited_name, top => $self->top}, ref($self)); # Lightweight env object for inspecting name-based relationships
+
+				# Pass in the seen files to avoid duplicates and infinite loops
+				for my $ancestor ($inherited_env->actual_environment_files($seen)) {
+					push(@files, $ancestor);
+					$seen->{$ancestor}++;
+				}
+
+				# Get name-based files for the inherited environment
+			}
+			push( @files, $ancestor_file);
 		};
 		return \@files;
 	});
@@ -5258,7 +5298,7 @@ sub _genesis_inherits {
 
 		for (@{$contents->{genesis}{inherits}}) {
 			s/\.yml$//; # remove any .yml extensions
-			my $cached_file;
+			my $cached_file = '';
 			if ($ENV{PREVIOUS_ENV}) {
 				$cached_file = ".genesis/cached/$ENV{PREVIOUS_ENV}/$_.yml";
 				$cached_file = undef unless -f $self->path($cached_file);
