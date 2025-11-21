@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
+use utf8;
 
 use lib 'lib';
 use lib 't';
@@ -71,14 +72,16 @@ subtest 'strfuzzytime with seconds' => sub {
 };
 
 subtest 'pretty_duration' => sub {
-	is pretty_duration(0), '0 seconds', 'zero duration';
-	is pretty_duration(1), '1 second', 'single second';
-	is pretty_duration(30), '30 seconds', 'multiple seconds';
-	is pretty_duration(60), '1 minute', 'one minute';
-	is pretty_duration(90), '1 minute, 30 seconds', 'minute and seconds';
-	is pretty_duration(3600), '1 hour', 'one hour';
-	is pretty_duration(3661), '1 hour, 1 minute, 1 second', 'hour minute second';
-	is pretty_duration(86400), '1 day', 'one day';
+	$ENV{GENESIS_SHOW_DURATION} = 1;
+	$ENV{NOCOLOR} = 1;
+	matches_utf8 encode_utf8(pretty_duration(0)), ' (0 µs)', 'microsecond duration';
+	is pretty_duration(1), ' (1000 ms)', 'millisecond duration';
+	is pretty_duration(30), ' (30 s)', 'seconds duration';
+	is pretty_duration(60), ' (1 m 0 s)', 'one minute';
+	is pretty_duration(90), ' (1 m 30 s)', 'minute and seconds';
+	is pretty_duration(3600), ' (1 h 0 m)', 'one hour';
+	is pretty_duration(3661), ' (1 h 1 m)', 'hour and minute';
+	is pretty_duration(86400), ' (24 h 0 m)', 'one day';
 };
 
 subtest 'time_exec' => sub {
