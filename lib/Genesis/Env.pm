@@ -5448,7 +5448,11 @@ sub _yaml_files {
 sub _reactions {
 	return @{
 		$_[0]->_memoize(sub {
-				[sort keys (%{$_[0]->lookup("genesis.reactions",{})})]
+				my $reactions = $_[0]->lookup("genesis.reactions", {});
+				bail(
+					"Value of #y{genesis.reactions} must be a hashmap"
+				) if ref($reactions) ne 'HASH';
+				return [sort keys %$reactions];
 			})
 	};
 }
