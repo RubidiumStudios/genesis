@@ -516,7 +516,7 @@ sub search_for_env_file {
 				if ($section eq '@current') {
 					$fmt_section = csprintf("#Gu{%sCurrent Directory:} #Ki{%s}", $flag, $target_path);
 				} elsif ($section eq '@parent') {
-					$fmt_section = csprintf("%s#Yu{%sParent Directory:} #Ki{%s}", $flag, $target_path);
+					$fmt_section = csprintf("#Yu{%sParent Directory:} #Ki{%s}", $flag, $target_path);
 				} elsif ($section ne $root_map->{$section}) {
 					my $is_current = $root_map->{$section} eq $ENV{GENESIS_ORIGINATING_DIR};
 					$fmt_section = csprintf("#%su{%sDeployment Root '%s':} #Ki{%s}", $is_current ? 'g' : 'B', $flag, $section, $target_path);
