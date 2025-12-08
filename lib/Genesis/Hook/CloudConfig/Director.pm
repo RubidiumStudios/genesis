@@ -110,8 +110,8 @@ sub compilation_definition {
 	my $vm_type = $self->name_for('vm','compilation');
 	my $azs = $self->get_available_azs_in_network('compilation');
 	my $workers = $self->get_network_size('compilation',$azs->[0]);
-	my $reuse_compilation = $self->env->lookup(
-		'bosh-configs.director_cloud.reuse_compilation'
+	my $reuse_compilation_vms = $self->env->lookup(
+		'bosh-configs.director_cloud.compilation.reuse_vms'
 	)//$self->TRUE;
 
 	my $config = {
@@ -119,7 +119,7 @@ sub compilation_definition {
 		vm_type => $vm_type,
 		az => $azs->[0],
 		workers => $workers,
-		reuse_compilation => $reuse_compilation,
+		reuse_compilation_vms => $reuse_compilation_vms,
 	};
 	return %$config;
 }
