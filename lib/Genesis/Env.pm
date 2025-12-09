@@ -115,6 +115,26 @@ sub load {
 			$env->{__params}{genesis}{bosh_env} = delete($env->{__params}{params}{bosh});
 		}
 
+		# Normalize genesis.use_create_env to boolean
+		if ($env->defines('genesis.use_create_env')) {
+			my $val = $env->lookup('genesis.use_create_env');
+			my $normalized = ref($val) eq 'JSON::PP::Boolean' ? ($val ? 1 : 0) : lc($val // '');
+			my $result = {
+				'yes' => 1, 'true' => 1, '1' => 1, 1 => 1,
+				'no' => 0, 'false' => 0, '0' => 0, 0 => 0
+			}->{$normalized};
+
+			if (defined $result) {
+				$env->{__params}{genesis}{use_create_env} = $result;
+			} else {
+				push(@errors,
+					"Invalid value #ri{%s} for #ci{genesis.use_create_env}.\n".
+					"Valid values are: #Y{yes}, #Y{no}, #Y{true}, #Y{false}, #Y{1}, or #Y{0}",
+					$val
+				);
+			}
+		}
+
 		my $version_check = $env->validate_genesis_version_requirements();
 		if ($version_check->{effective_minimum}) {
 			my $min_version = $version_check->{effective_minimum};
@@ -157,9 +177,10 @@ sub load {
 		} elsif (!$kit_version) {
 			push(@errors, "Missing #ci{kit.version}");
 		} else {
+			my $vlabel = $kit_version eq 'latest' ? 'latest version' : "v$kit_version";
 			push(@errors, sprintf(
-				"Unable to locate v%s of #M{%s}` kit for #C{%s} environment.",
-				$kit_version, $kit_name, $env->name
+				"Unable to locate %s of #M{%s} kit for #C{%s} environment.",
+				$vlabel, $kit_name, $env->name
 			));
 		}
 		last if @errors;
@@ -218,8 +239,9 @@ sub from_envvars {
 	# reconstitute our kit via top
 	my $kit_name = $ENV{GENESIS_KIT_NAME};
 	my $kit_version = $ENV{GENESIS_KIT_VERSION};
+	my $vlabel = $kit_version eq 'latest' ? 'latest version' : "v$kit_version";
 	$env->{kit} = $env->{top}->local_kit_version($kit_name, $kit_version)
-		or bail "Unable to locate v$kit_version of `$kit_name` kit for '$env->{name}' environment.";
+		or bail "Unable to locate $vlabel of #M{$kit_name} kit for #C{$env->{name}} environment.";
 	$env->kit->apply_env_overrides(split(' ',$ENV{GENESIS_ENV_KIT_OVERRIDE_FILES}))
 	  if defined $ENV{GENESIS_ENV_KIT_OVERRIDE_FILES};
 
@@ -713,7 +735,9 @@ sub use_create_env {
 			# Kits that are explicitly compatible with 2.8.0 can specify if they
 			# support or require create-env deployments.
 
-			my $kuce = $self->kit->metadata('use_create_env')||'';
+			# use_create_env is already sanitized to 'yes', 'no', or 'allowed' by Genesis::Kit
+			my $kuce = $self->kit->metadata('use_create_env');
+
 			if ($kuce eq 'yes') {
 				clear_and_bail($self,
 					"This kit only allows create-env deployments, but this environment ".
@@ -734,19 +758,30 @@ sub use_create_env {
 
 			# Allowed, but not reuqired to use create-env
 			my $is_create_env = undef;
+			# genesis.use_create_env is already normalized to 1/0 by load()
 			my $euce = $self->lookup('genesis.use_create_env', undef);
 			my $is_310plus = $self->feature_compatibility("3.1.0-rc1");
+			my $is_proto = grep {$_ eq 'proto'} @{$self->lookup('kit.features', [])};
 			if ($is_310plus && $is_bosh_director) {
 				# proto feature removed in 3.1.0-rc1
 				$is_create_env = $euce || !$different_bosh_env;
 			} elsif ($euce) {
 				$is_create_env = 1;
+			} elsif ($is_proto) {
+				# Proto feature forces create-env (checked before bosh_env)
+				$is_create_env = 1;
 			} elsif ( $is_bosh_director && $different_bosh_env) {
 				$is_create_env = 0;
-			} elsif (grep {$_ eq 'proto'} @{$self->lookup('kit.features', [])}) {
-				$is_create_env = 1;
 			} else {
 				$is_create_env = 0;
+			}
+			if ($is_proto && $different_bosh_env) {
+				clear_and_bail(
+					"This environment is marked as a create-env (proto) environment ".
+					"by using the #M{proto} feature, but also specifies an alternative ".
+					"bosh_env.  Create-env deployments can't use a #C{genesis.bosh_env} ".
+					"value, so please remove it."
+				);
 			}
 
 			validate_create_env_state(

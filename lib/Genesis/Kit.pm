@@ -511,6 +511,39 @@ sub metadata {
 				'spruce merge --go-patch --multi-doc "$@" | spruce json',
 				@kit_files
 		));
+
+		# Sanitize use_create_env to only allow 'yes', 'no', 'allowed', or booleans
+
+		if (exists $self->{__metadata}{use_create_env}) {
+			my $uce = $self->{__metadata}{use_create_env};
+			if (ref($uce) eq 'JSON::PP::Boolean') {
+				# JSON boolean: true -> 'yes', false -> 'no'
+				$self->{__metadata}{use_create_env} = $uce ? 'yes' : 'no';
+			} elsif (ref($uce)) {
+				kit_bug(
+					"Invalid use_create_env type '#C{%s}' in kit metadata.\n".
+					"Expected string or boolean, got %s",
+					$uce, ref($uce)
+				);
+			} else {
+				# String value: normalize to 'yes', 'no', or 'allowed'
+				my $val = lc($uce // '');
+				$self->{__metadata}{use_create_env} = {
+					'yes' => 'yes', 'true'  => 'yes', '1' => 'yes',
+					'no'  => 'no',  'false' => 'no',  '0' => 'no',
+					'allowed' => 'allowed'
+				}->{$val};
+				$self->kit_bug(
+					"Invalid use_create_env value '#C{%s}' in kit metadata.\n".
+					"Valid values are: #Y{yes}, #Y{no}, #Y{allowed}, #Y{true}, or #Y{false}",
+					$uce
+				) unless $self->{__metadata}{use_create_env};
+			}
+		} elsif (new_enough($self->{__metadata}{genesis_version_min}//'0.0.0', "2.8.0")) {
+			# Default to 'allowed' for 2.8.0+ kits
+			$self->{__metadata}{use_create_env} = 'allowed';
+		}
+		# Legacy kits (pre-2.8.0) should not have use_create_env set
 	}
 	return $self->{__metadata} unless @keys;
 	return $self->{__metadata}->{$keys[0]} if @keys == 1;
