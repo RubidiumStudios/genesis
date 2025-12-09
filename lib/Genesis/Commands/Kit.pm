@@ -64,13 +64,16 @@ sub build_kit {
 
 	my $name = delete $options{name};
 
-	my $top = Genesis::Top->new('.');
-	my @remote_versions = map {$_->{version}} ($top->remote_kit_versions(
+	my $kit_provider = Genesis::Top->is_repo('.')
+		? Genesis::Top->new('.')->kit_provider
+		: Genesis::Kit::Provider->default_provider();
+
+	my @remote_versions = map {$_->{version}} ($kit_provider->kit_versions(
 		$name,
 		include_prereleases=>1,
 		include_drafts=>1
 	));
-	my $local_kits = Genesis::Kit::Compiled->local_kits($top->kit_provider, $target);
+	my $local_kits = Genesis::Kit::Compiled->local_kits($kit_provider, $target);
 	my @local_versions = grep { semver($_) } (keys %{ $local_kits->{$name} });
 
 	if ($options{version}) {

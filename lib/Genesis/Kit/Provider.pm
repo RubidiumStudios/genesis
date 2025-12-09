@@ -59,6 +59,13 @@ sub init {
 }
 
 # }}}
+# default_provider - returns the default provider instance {{{
+sub default_provider {
+	require Genesis::Kit::Provider::GenesisCommunity;
+	return Genesis::Kit::Provider::GenesisCommunity->new();
+}
+
+# }}}
 # opts -  list of options supported by init method {{{
 sub opts {
 	qw/
@@ -154,7 +161,7 @@ sub config {
 	# Output expected:
 	#   Hash of config items that would be expected to create an object of this
 	#   class as arguments to its new method
-	
+
 }
 # }}}
 # check - checks the availability of this provider (abstract) {{{
@@ -178,7 +185,7 @@ sub kit_names {
 	#
 	# Output expected:
 	#   List of kit names as strings, not including the '-genesis-kit' suffix.
-	
+
 }
 
 # }}}

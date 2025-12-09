@@ -66,7 +66,8 @@ sub validate {
 
 			# check for errant top-level keys - params, subkits and features have been discontinued.
 			my @valid_keys = qw/name version description code docs author authors genesis_version_min secrets_store required_configs exclude_paths supports/;
-			if (!defined($meta->{secrets_store}) || $meta->{secrets_store} eq 'vault') {
+			if (!defined($meta->{secrets_store}) || $meta->{secrets_store} eq 'vault' || new_enough($min_version, "3.1.0")) {
+				# v3.1.0 allows a mix of vault and credhub secrets
 				push @valid_keys, "credentials", "certificates", "provided";
 			} elsif ($meta->{secrets_store} ne "credhub") {
 				push @yml_errors, "specifies invalid secrets_store: expecting one of 'vault' or 'credhub'";
@@ -202,42 +203,44 @@ sub _lookup_test_params {
 sub _select_files {
 	my ($self) = @_;
 
-	my @exclude = map { "$self->{root}/$_" } qw(ci .git .gitignore spec devtools);
+	pushd $self->{root};
+	my @exclude = qw(ci .git .gitignore spec devtools);
 
 	my $meta;
 	eval {$meta = load_yaml_file("$self->{root}/kit.yml"); };
 	if (! $@ && $meta && $meta->{exclude_paths} && ref($meta->{exclude_paths}) eq "ARRAY") {
 		for (@{$meta->{exclude_paths}}) {
 			next if /(?:^|\/)\.\.\//; # don't let kits delete out of scope
-			push(@exclude, "$self->{root}/$_");
+			push(@exclude, $_);
 		}
 	}
 
-	push @exclude, map {"$self->{root}/$_"} lines(run(
+	push @exclude, lines(run(
 		{ onfailure => 'Unable to determine what files to clean up before compiling the kit' },
-		'git -C "$1" clean -xdn | sed -e "s/Would remove //"', $self->{root}
+		'git clean -xdn | sed -e "s/Would remove //"',
 	));
 
 	trace(
-		"Excluding the following paths from the kit:\n".
+		"Excluding the following paths from the kit under %s:\n%s",
+		$self->{root},
 		join("\n", map {"  - $_"} sort @exclude)
 	);
 
 	# Build regexp pattern for dir exclusions, and lookup table for files.
 	my $exclude_pattern = join('|', map { quotemeta($_ =~ s{/$}{}r) } grep { -d $_ } @exclude);
-	my $exclude_re = qr/^(?:$exclude_pattern)(?:\/|$)/;
-	my %exclude_files = map { $_ => 1 } grep { -f $_ } @exclude;
+	my $exclude_re = qr/^.\/(?:$exclude_pattern)(?:\/|$)/;
+	my %exclude_files = map { ("./$_" => 1) } grep { -f $_ } @exclude;
 
 	my @all_files = ();
 	File::Find::find (sub {
+		return if $File::Find::name eq '.'; # skip current dir entry
 		return if $exclude_files{$File::Find::name};
 		return if $exclude_re && $File::Find::name =~ $exclude_re;
-		return if $File::Find::name eq $self->{root}; # skip root dir itself
 
 		# Strip the root path prefix
-		my $filename = substr($File::Find::name, length($self->{root} =~ s{/*}{/}r) + 1);
-		push @all_files, $filename;
-	}, $self->{root});
+		push @all_files, substr($File::Find::name, 2);
+	}, '.');
+	popd;
 	return @all_files;
 }
 
