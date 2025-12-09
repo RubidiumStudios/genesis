@@ -22,8 +22,8 @@ unit-tests/genesis-struct.t      # Data structures (struct_*, flatten, deep_merg
 unit-tests/genesis-time.t        # Time formatting (strfuzzytime, pretty_duration)
 unit-tests/genesis-uri.t         # URI parsing (parse_uri, is_valid_uri)
 unit-tests/term-color.t.DNF
-unit-tests/lib-ipv4.t
-unit-tests/lib-boolean.t
+unit-tests/ipv4-core.t
+unit-tests/boolean-core.t
 unit-tests/service_github-core.t
 unit-tests/service_bosh-director.t
 unit-tests/genesis_top-core.t
