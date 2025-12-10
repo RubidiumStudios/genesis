@@ -33,7 +33,7 @@ unit-tests/genesis_top-core.t
 #unit-tests/hooks.t
 #unit-tests/hooks-cloudconfig.t
 #unit-tests/env-core.t
-unit-tests/genesis_env-validations.t  # Genesis::Env name validation (_env_name_errors)
+unit-tests/genesis_env-name_validation.t  # Genesis::Env name validation (_env_name_errors)
 unit-tests/genesis_env-file_loading_and_inheritance.t  # Genesis::Env file loading, hierarchy, and inheritance
 unit-tests/genesis_env-accessors.t  # Genesis::Env basic accessors and identity
 unit-tests/genesis_env-use_create_env.t  # Genesis::Env use_create_env comprehensive testing
