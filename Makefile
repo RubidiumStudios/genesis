@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check test test-quick test-secrets test-ci unit-test integration-test e2e-test test-all test-manifest release dev-release clean coverage
+.PHONY: sanity-test compile-check test test-quick test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -27,27 +27,27 @@ sanity-test: compile-check
 coverage:
 	SKIP_SECRETS_TESTS=yes cover -t -ignore_re '(/Legacy.pm|/JSON/|/UUID/|^t/.*\.pm)'
 
-test: unit-test integration-test e2e-test
+test: unit-tests integration-tests e2e-tests
 
-unit-test: sanity-test
+unit-tests: sanity-test
 	@echo "Running unit tests (library/module level)..."
 	@SKIP_SECRETS_TESTS=yes prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests)
 
-integration-test: sanity-test
+integration-tests: sanity-test
 	@echo "Running integration tests (multi-component)..."
 	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests)
 
-e2e-test: sanity-test
+e2e-tests: sanity-test
 	@echo "Running e2e tests (full workflows)..."
 	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests)
 
-test-all: sanity-test unit-test integration-test e2e-test
+test-all: sanity-test unit-tests integration-tests e2e-tests
 
 test-manifest: sanity-test
 	@echo "Running all tests from manifest..."
 	@prove -lf $(TESTS)
 
-test-quick: unit-test
+test-quick: unit-tests
 
 test-secrets: sanity-test
 	@echo 'Running secrets e2e test...'
