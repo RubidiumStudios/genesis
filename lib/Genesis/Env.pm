@@ -45,6 +45,10 @@ use Time::Piece;
 use Time::Seconds;
 use Time::HiRes qw/gettimeofday/;
 
+# Class-level validation cache to avoid re-validating the same file multiple times
+# Cache is keyed by absolute file path and stores validation results
+my %_validation_cache;
+
 ### Class Methods {{{
 
 # new - create a raw Genesis::Env object {{{
@@ -85,10 +89,9 @@ sub load {
 	my $env = $class->new(get_opts(\%opts, qw(name top)));
 	my (@errors, @config_warnings, @deprecations);
 	while (1) {
-		push(@errors, sprintf(
-			"Environment file #C{%s} does not exist.",
-			$env->{file}
-		)) unless -f $env->path($env->{file});
+		# Validate environment file using centralized cached validation
+		my ($valid, @validation_errors) = $class->is_valid_env_file($env->{name}, $env->{top});
+		push(@errors, @validation_errors) unless $valid;
 		last if @errors;
 
 		$env->notify("using environment file #M{%s}", humanize_path($env->path($env->{file})))
@@ -447,17 +450,127 @@ sub create {
 # }}}
 # exists - returns true if the given environment exists {{{
 sub exists {
-	my ($ref,%args) = @_;
-	unless (ref($ref)) {
-		# called on the class, need a instance
-		my $err = _env_name_errors($args{name});
-		bail("Bad environment name '%s': %s", $args{name}, $err) if $err;
-		return undef unless $args{top};
-		eval{ $ref = $ref->new(%args) };
-		bug ("Failed to check existence of Genesis Environment: %s", $@) if $@;
-		return undef unless $ref;
+	my $ref = shift if @_ % 2 == 1;
+	return -f $ref->path($ref->{file}) if ref($ref) eq __PACKAGE__;
+
+	# Called directly or on class
+	my %args = @_;
+	bug(
+		"%s::exists called without name and/or top named arguments",
+		__PACKAGE__
+	) unless $args{name} && $args{top};
+	return scalar __PACKAGE__->is_valid_env_file($args{name}, $args{top});
+}
+
+#}}}
+# is_valid_env_file - check if a named environment file is valid without instantiation {{{
+sub is_valid_env_file {
+	my ($class, $name, $top) = @_;
+
+	# Check required top parameter
+	bug(
+		"No 'top' specified in call to is_valid_env_file!!"
+	) unless $top;
+
+	# Strip .yml extension if present
+	$name =~ s/.yml$//;
+	my $path = $top->path("$name.yml");
+
+	# Check validation cache
+	if (exists $_validation_cache{$path}) {
+		my $cached = $_validation_cache{$path};
+		return wantarray ? @$cached : $cached->[0];
 	}
-	return -f $ref->path($ref->{file});
+
+	# Collect all errors
+	my @errors;
+	my $yaml_src;
+
+	while (1) {
+		# Validate environment name
+		my $name_err = _env_name_errors($name);
+		push @errors, "Invalid environment name #ri{$name}:$name_err" if $name_err;
+		last if @errors;
+
+		push @errors, sprintf(
+			"Environment file #C{%s} does not exist.",
+			humanize_path($path)
+		) unless -f $path;
+		last if @errors;
+
+		# Check if the environment file has genesis.env declaration
+		$yaml_src = eval { slurp($path) };
+		unless ($yaml_src) {
+			push @errors, sprintf(
+				"Failed to read environment file #C{%s}.",
+				humanize_path($path)
+			);
+			last;
+		}
+
+		my @env_names = $yaml_src =~ /^genesis:\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+([^\s]*)/mg;
+		unless (scalar(@env_names) == 1 && $env_names[0] eq $name) {
+			if (scalar(@env_names) == 0) {
+				push @errors, sprintf(
+					"Environment file #C{%s} does not contain a 'genesis.env' declaration.",
+					humanize_path($path)
+				);
+			} elsif (scalar(@env_names) > 1) {
+				push @errors, sprintf(
+					"Environment file #C{%s} contains multiple 'genesis.env' declarations.",
+					humanize_path($path)
+				);
+			} else {
+				push @errors, sprintf(
+					"Environment file #C{%s} declares environment '%s' but is named '%s.yml'.",
+					humanize_path($path), $env_names[0], $name
+				);
+			}
+			last;
+		}
+
+		# Check if the environment has kit information available
+		# Kit info can be split across hierarchical files (kit.name in parent, kit.version in child)
+		my $kit_name_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*name:\s+([^\s]+)/m;
+		my $kit_version_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*version:\s+([^\s]+)/m;
+		my $has_kit_name = $yaml_src =~ $kit_name_re;
+		my $has_kit_version = $yaml_src =~ $kit_version_re;
+
+		# If kit info not complete in main file, check hierarchical files
+		unless ($has_kit_name && $has_kit_version) {
+			my $env_obj = bless({name => $name, top => $top}, 'Genesis::Env');
+			my @env_files = $env_obj->actual_environment_files();
+			pop @env_files; # Remove main file, already checked
+			while (my $ancestor_file = pop @env_files) {
+				next unless -f $top->path($ancestor_file);
+				my $ancestor_yaml = eval { slurp($top->path($ancestor_file)) };
+				next unless $ancestor_yaml;
+
+				$has_kit_name = 1 if !$has_kit_name && $ancestor_yaml =~ $kit_name_re;
+				$has_kit_version = 1 if !$has_kit_version && $ancestor_yaml =~ $kit_version_re;
+				last if $has_kit_name && $has_kit_version;
+			}
+
+			unless ($has_kit_name && $has_kit_version) {
+				my @missing;
+				push @missing, "kit.name" unless $has_kit_name;
+				push @missing, "kit.version" unless $has_kit_version;
+				push @errors, sprintf(
+					"Environment file #C{%s} is missing required kit information: %s.",
+					humanize_path($path),
+					join(", ", @missing)
+				);
+				last;
+			}
+		}
+
+		last; # All validation passed
+	}
+
+	# Cache and return results
+	my @result = @errors ? (undef, @errors) : (1);
+	$_validation_cache{$path} = \@result;
+	return wantarray ? @result : $result[0];
 }
 
 #}}}
@@ -601,7 +714,7 @@ sub _env_name_errors {
 	push(@errors,"names can only contain lowercase letters, numbers, underscores and hyphens.\n")
 		if $name !~ m/^[a-z0-9_-]+$/;
 
-	push(@errors,"names must start with a (lowercase) letter.\n")
+	push(@errors,"names must start with a lowercase letter.\n")
 		if $name !~ m/^[a-z]/;
 
 	push(@errors,"names must not end with a hyphen.\n")

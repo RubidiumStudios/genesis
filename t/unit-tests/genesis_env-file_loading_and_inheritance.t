@@ -822,6 +822,133 @@ EOF
 	}
 };
 
+subtest 'environment name validation during load' => sub {
+	# Test that invalid names are rejected during load
+	# This ensures validation happens at load time, not just in _env_name_errors
+	# Uses the existing $top Genesis::Top object with dev kit already linked
+
+	# Disable color output for cleaner error message matching
+	local $ENV{NOCOLOR} = 1;
+
+	my @invalid_cases = (
+		{
+			name => 'Prod',
+			desc => 'starts with uppercase letter',
+			pattern => qr/environment name.*must start with.*lowercase.*letter/ims,
+		},
+		{
+			name => 'test-env-',
+			desc => 'ends with hyphen',
+			pattern => qr/environment name.*must not end with.*hyphen/ims,
+		},
+		{
+			name => '123-test--env',
+			desc => 'starts with number and contains sequential hyphens',
+			pattern => qr/environment name/ims,  # Should mention multiple violations
+		},
+		{
+			name => '_private',
+			desc => 'starts with underscore',
+			pattern => qr/environment name.*must start with.*lowercase.*letter/ims,
+		},
+		{
+			name => 'my env',
+			desc => 'contains whitespace',
+			pattern => qr/environment name.*whitespace/ims,
+		},
+		{
+			name => 'env!prod',
+			desc => 'contains special character',
+			pattern => qr/environment name.*lowercase letters.*numbers.*underscores.*hyphens/ims,
+		},
+	);
+
+	foreach my $case (@invalid_cases) {
+		my $name = $case->{name};
+		my $desc = $case->{desc};
+		my $pattern = $case->{pattern};
+
+		# Create environment file with invalid name
+		put_file $top->path("$name.yml"), <<EOF;
+---
+kit:
+  name:    dev
+  version: latest
+EOF
+
+		# Attempt to load - should fail with validation error
+		my $error;
+		dies_ok {
+			eval {
+				$top->load_env($name);
+			};
+			$error = $@;
+			die $error if $error;
+		} "loading env with invalid name '$name' ($desc) fails";
+
+		if ($error) {
+			like($error, $pattern,
+				"error for '$name' mentions environment name validation")
+				or diag("Actual error: $error");
+		}
+	}
+
+	# Test that files not ending with .yml are not considered
+	# (This is a different kind of validation - file discovery, not name validation)
+	{
+		# Create file without .yml extension
+		put_file $top->path("testenv.yaml"), <<EOF;
+---
+kit:
+  name:    dev
+  version: latest
+EOF
+
+		# Should fail to find the file (wrong extension)
+		dies_ok {
+			$top->load_env('testenv');
+		} 'environment file without .yml extension is not found';
+
+		# Create with wrong extension that has .yml somewhere
+		put_file $top->path("prod.yml.bak"), <<EOF;
+---
+kit:
+  name:    dev
+  version: latest
+EOF
+
+		dies_ok {
+			$top->load_env('prod.yml.bak');
+		} 'environment name cannot contain .yml in the name';
+	}
+
+	# Test that valid names still work (sanity check)
+	{
+		put_file $top->path("valid-env-123.yml"), <<EOF;
+---
+genesis:
+  env: valid-env-123
+kit:
+  name:    dev
+  version: latest
+EOF
+
+		my $env;
+		my $error;
+		lives_ok {
+			eval {
+				$env = $top->load_env('valid-env-123');
+			};
+			$error = $@;
+			die $error if $error;
+		} 'valid environment name loads successfully'
+			or diag("Error loading valid env: $error");
+
+		is($env->name, 'valid-env-123', 'loaded environment has correct name')
+			if $env;
+	}
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

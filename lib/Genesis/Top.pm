@@ -983,16 +983,24 @@ sub load_env {
 	my ($self, $name) = @_;
 	$name =~ s/.yml$//;
 	debug("loading environment #C{%s}", $name);
-	if ($self->has_env($name)) {
+
+	# Check if environment exists and get validation errors if any
+	my ($valid, @errors) = $self->has_env($name);
+	if ($valid) {
 		return Genesis::Env->load(top  => $self, name => $name);
 	} elsif (in_callback() && $name eq $ENV{'GENESIS_ENVIRONMENT'}) {
 		return Genesis::Env->from_envvars($self);
 	} else {
-		bail(
-			"Environment file #C{%s} does not exist%s",
-			humanize_path($self->path($name.".yml")),
-			-f $self->path(".genesis/config") ? '' : " - this does not appear to be a Genesis deployment directory!"
-		);
+		# If we have specific validation errors, use them; otherwise generic message
+		if (@errors) {
+			bail(join("\n\n", @errors));
+		} else {
+			bail(
+				"Environment file #C{%s} does not exist%s",
+				humanize_path($self->path($name.".yml")),
+				-f $self->path(".genesis/config") ? '' : " - this does not appear to be a Genesis deployment directory!"
+			);
+		}
 	}
 }
 
@@ -1000,41 +1008,9 @@ sub load_env {
 # has_env - returns true if the repo has an enviroment of the given name {{{
 sub has_env {
 	my ($self, $name) = @_;
-	$name =~ s/.yml$//;
-	my $path = $self->path("$name.yml");
-	return undef unless -f $path;
-
-	# Check if the environment file has genesis.env declaration
-	my $yaml_src = eval { slurp($path) };
-	return undef unless $yaml_src;
-
-	my @env_names = $yaml_src =~ /^genesis:\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+([^\s]*)/mg;
-	return undef unless scalar(@env_names) == 1 && $env_names[0] eq $name;
-
-	# Check if the environment has kit information available (same validation as envs())
-	# Kit info can be split across hierarchical files (kit.name in parent, kit.version in child)
-	my $kit_name_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*name:\s+([^\s]+)/m;
-	my $kit_version_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*version:\s+([^\s]+)/m;
-	my $has_kit_name = $yaml_src =~ $kit_name_re;
-	my $has_kit_version = $yaml_src =~ $kit_version_re;
-
-	# If kit info not complete in main file, check hierarchical files
-	unless ($has_kit_name && $has_kit_version) {
-		my $env_obj = bless({name => $name, top => $self}, 'Genesis::Env');
-		my @env_files = $env_obj->actual_environment_files();
-		pop @env_files; # Remove main file, already checked
-		while (my $ancestor_file = pop @env_files) {
-			next unless -f $self->path($ancestor_file);
-			my $ancestor_yaml = eval { slurp($self->path($ancestor_file)) };
-			next unless $ancestor_yaml;
-
-			$has_kit_name = 1 if !$has_kit_name && $ancestor_yaml =~ $kit_name_re;
-			$has_kit_version = 1 if !$has_kit_version && $ancestor_yaml =~ $kit_version_re;
-			last if $has_kit_name && $has_kit_version;
-		}
-		return undef unless $has_kit_name && $has_kit_version;
-	}
-	return 1;
+	# Delegate to Genesis::Env for all validation logic
+	# This ensures consistent validation behavior and DRY principle
+	return Genesis::Env->is_valid_env_file($name, $self);
 }
 
 # }}}
