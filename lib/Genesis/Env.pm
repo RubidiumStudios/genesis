@@ -987,38 +987,25 @@ sub feature_compatibility {
 sub validate_genesis_version_requirements {
 	my ($self) = @_;
 
-	my $running_version = $Genesis::VERSION;
-	my $env_min = $self->lookup('genesis.min_version');
-	my $repo_min = $self->top->config->get('minimum_version');
-	my $effective_min = $self->minimum_genesis_version();
-
 	my @warnings = ();
 	my @errors = ();
+	my $running_version = $Genesis::VERSION;
+	my $env_min = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], '') =~ s/^v//ri;
+	my $repo_min = $self->top->config->get('minimum_version','') =~ s/^v//ri;
 
-	# Check running version against effective minimum
-	if ($running_version eq "(development)") {
-		# Development version, no minimum check
-		push @warnings, "Running Genesis in development mode, skipping minimum version checks";
-		return {
-			errors => \@errors,
-			warnings => \@warnings,
-			effective_minimum => $effective_min,
-			running_version => $running_version,
-			source => undef,
+	# Determine effective minimum (whichever is greater)
+	my $effective_min;
+	my $source;
+	if ($env_min && $repo_min) {
+		# Both specified - use whichever is greater
+		$effective_min = new_enough($env_min, $repo_min) ? $env_min : $repo_min;
+		my $src_map = {
+			$repo_min => 'repository configuration',
+			$env_min  => 'environment file',
 		};
-	}
-	if ($effective_min && !new_enough($running_version, $effective_min)) {
-		my $source = $env_min ? "environment file" : "repository configuration";
-		push @errors, sprintf(
-			"Genesis version %s does not meet the minimum required version %s ".
-			"specified in the %s",
-			$running_version, $effective_min, $source
-		);
-	}
+		$source = $src_map->{$effective_min};
 
-	# Check for conflicts between env and repo minimums
-	if ($env_min && $repo_min && $env_min ne $repo_min) {
-		if (new_enough($env_min, $repo_min)) {
+		if ($effective_min ne $repo_min) {
 			# Environment requires newer version than repo - this is fine
 			push @warnings, sprintf(
 				"Environment requires Genesis %s, which is newer than the ".
@@ -1033,6 +1020,36 @@ sub validate_genesis_version_requirements {
 				$env_min, $repo_min
 			);
 		}
+	} elsif ($env_min) {
+		$effective_min = $env_min;
+		$source = 'environment file';
+	} elsif ($repo_min) {
+		$effective_min = $repo_min;
+		$source = 'repository configuration';
+	} else {
+		$effective_min = '0.0.0';
+		$source = 'unspecified';
+	}
+
+	# Check running version against effective minimum
+	if ($running_version eq "(development)") {
+		# Development version, no minimum check
+		push @warnings, "Running Genesis in development mode, skipping minimum version checks";
+		return {
+			errors => \@errors,
+			warnings => \@warnings,
+			effective_minimum => $effective_min,
+			running_version => $running_version,
+			source => $source,
+		};
+	}
+	if ($effective_min && !new_enough($running_version, $effective_min)) {
+		my $source = $env_min ? "environment file" : "repository configuration";
+		push @errors, sprintf(
+			"Genesis version %s does not meet the minimum required version %s ".
+			"specified in the %s",
+			$running_version, $effective_min, $source
+		);
 	}
 
 	return {
