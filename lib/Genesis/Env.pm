@@ -138,6 +138,28 @@ sub load {
 			}
 		}
 
+		# Validate bosh-configs keys
+		if ($env->defines('bosh-configs')) {
+			my $bosh_configs = $env->lookup('bosh-configs');
+			if (ref($bosh_configs) eq 'HASH') {
+				my @valid_keys = qw(cloud director_cloud cpi runtime);
+				my %valid = map { $_ => 1 } @valid_keys;
+				my @invalid_keys = grep { !$valid{$_} } keys %$bosh_configs;
+
+				if (@invalid_keys) {
+					my @key_errors;
+					foreach my $key (@invalid_keys) {
+						if ($key eq 'scale' || $key eq 'iaas') {
+							push(@key_errors, "#ri{$key} should be under #Y{kit:}");
+						} else {
+							push(@key_errors, "#ri{$key} is invalid");
+						}
+					}
+					push(@errors, "Encountered errors under #Y{bosh-configs:} key:\n  - ".join("\n  - ", @key_errors));
+				}
+			}
+		}
+
 		my $version_check = $env->validate_genesis_version_requirements();
 		if ($version_check->{effective_minimum}) {
 			my $min_version = $version_check->{effective_minimum};
@@ -1210,7 +1232,7 @@ sub features {
 			$self->name, defined($features) ? (lc(ref($features)) || 'string') : 'null'
 		) unless ref($features) eq 'ARRAY';
 
-		my @derived_features = grep {$_ =~ /^\+/} $features;
+		my @derived_features = grep {$_ =~ /^\+/} @$features;
 		bail(
 			"Environment #C{%s} cannot explicitly specify derived features:\n  - %s",
 			$self->name, join("\n  - ",@derived_features)
@@ -1394,9 +1416,7 @@ sub vault_paths {
 # scale - returns the scale for the environment {{{
 sub scale {
 	my ($self) = @_;
-	my $scale = $self->lookup(
-		['bosh-configs.scale', 'kit.scale']
-	);
+	my $scale = $self->lookup('kit.scale');
 
 	return $scale if $scale;
 	eval {$scale = $self->director_exodus_lookup('scale',undef)};
@@ -1414,11 +1434,9 @@ sub scale {
 # iaas - returns the iaas for the environment {{{
 sub iaas {
 	my ($self) = @_;
-	my $iaas = $self->lookup(
-		['kit.iaas','bosh-configs.iaas']
-	);
+	my $iaas = $self->lookup('kit.iaas');
 
-	return $iaas if $iaas;
+	return lc($iaas) if $iaas;
 
 	bail(
 		"No IaaS type set for %s environment, which uses a create-env deployment. ".
@@ -1492,6 +1510,7 @@ sub ocfp_env {
 sub ocfp_config {
 	my ($self,$path) = @_;
 	return scalar $self->_memoize(sub {
+		return {} unless $self->is_ocfp();
 		return scalar $self->vault->get_path($self->ocfp_config_base);
 	});
 }
