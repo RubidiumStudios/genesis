@@ -949,6 +949,199 @@ EOF
 	}
 };
 
+subtest 'bosh-configs validation - valid keys' => sub {
+	# Test that valid bosh-configs keys are accepted
+	my $top = Genesis::Top->create(workdir(), 'cf', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	# Test each valid key individually
+	my @valid_keys = qw(cloud director_cloud cpi runtime);
+
+	foreach my $key (@valid_keys) {
+		put_file $top->path("bosh-config-$key.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: bosh-config-$key
+bosh-configs:
+  $key:
+    test: value
+EOF
+
+		my $env;
+		lives_ok {
+			$env = $top->load_env("bosh-config-$key");
+		} "bosh-configs.$key is accepted as valid key";
+
+		is($env->name, "bosh-config-$key", "environment with bosh-configs.$key loaded successfully");
+	}
+
+	# Test multiple valid keys together
+	put_file $top->path("bosh-config-multiple.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: bosh-config-multiple
+bosh-configs:
+  cloud:
+    type: aws
+  cpi:
+    enabled: true
+  runtime:
+    addons: []
+EOF
+
+	my $env;
+	lives_ok {
+		$env = $top->load_env("bosh-config-multiple");
+	} 'multiple valid bosh-configs keys are accepted';
+
+	is($env->name, "bosh-config-multiple", "environment with multiple bosh-configs keys loaded successfully");
+};
+
+subtest 'bosh-configs validation - invalid keys rejected' => sub {
+	my $top = Genesis::Top->create(workdir(), 'cf', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	# Test various invalid keys
+	my @invalid_cases = (
+		{
+			key => 'invalid_key',
+			desc => 'random invalid key',
+		},
+		{
+			key => 'stemcell',
+			desc => 'stemcell key',
+		},
+		{
+			key => 'releases',
+			desc => 'releases key',
+		},
+		{
+			key => 'deployment',
+			desc => 'deployment key',
+		},
+	);
+
+	foreach my $case (@invalid_cases) {
+		my $key = $case->{key};
+		my $desc = $case->{desc};
+
+		put_file $top->path("bosh-config-bad-$key.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: bosh-config-bad-$key
+bosh-configs:
+  $key:
+    test: value
+EOF
+
+		throws_ok {
+			$top->load_env("bosh-config-bad-$key");
+		} qr/Encountered errors under.*bosh-configs.*$key.*is invalid/ims,
+			"bosh-configs.$key ($desc) is rejected with error";
+	}
+};
+
+subtest 'bosh-configs validation - scale/iaas with helpful message' => sub {
+	my $top = Genesis::Top->create(workdir(), 'cf', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	# Test scale key with helpful message
+	put_file $top->path("bosh-config-scale.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: bosh-config-scale
+bosh-configs:
+  scale: medium
+EOF
+
+	throws_ok {
+		$top->load_env("bosh-config-scale");
+	} qr/Encountered errors under.*bosh-configs.*scale.*should be under.*kit:/ims,
+		"bosh-configs.scale is rejected with helpful message about kit.scale";
+
+	# Test iaas key with helpful message
+	put_file $top->path("bosh-config-iaas.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: bosh-config-iaas
+bosh-configs:
+  iaas: aws
+EOF
+
+	throws_ok {
+		$top->load_env("bosh-config-iaas");
+	} qr/Encountered errors under.*bosh-configs.*iaas.*should be under.*kit:/ims,
+		"bosh-configs.iaas is rejected with helpful message about kit.iaas";
+
+	# Test both scale and iaas together (should mention both)
+	put_file $top->path("bosh-config-both.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: bosh-config-both
+bosh-configs:
+  scale: medium
+  iaas: aws
+  invalid: foo
+EOF
+
+	my $error;
+	dies_ok {
+		eval {
+			$top->load_env("bosh-config-both");
+		};
+		$error = $@;
+		die $error if $error;
+	} 'multiple invalid bosh-configs keys are rejected';
+
+	like($error, qr/scale.*should be under.*kit:/ims, 'error mentions scale should be under kit.scale');
+	like($error, qr/iaas.*should be under.*kit:/ims, 'error mentions iaas should be under kit.iaas');
+};
+
+subtest 'bosh-configs validation - mixed valid and invalid keys' => sub {
+	my $top = Genesis::Top->create(workdir(), 'cf', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	# Test mix of valid and invalid keys
+	put_file $top->path("bosh-config-mixed.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: bosh-config-mixed
+bosh-configs:
+  cloud:
+    type: aws
+  invalid_key:
+    test: value
+  cpi:
+    enabled: true
+EOF
+
+	throws_ok {
+		$top->load_env("bosh-config-mixed");
+	} qr/Encountered errors under.*bosh-configs.*invalid_key.*is invalid/ims,
+		"environment with mixed valid/invalid bosh-configs keys is rejected";
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

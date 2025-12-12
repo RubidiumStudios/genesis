@@ -464,6 +464,7 @@ EOF
 # - vault_paths() - requires manifest provider and vault integration
 # - params() - requires manifest provider for parameter evaluation
 # - defines() - requires manifest provider to check parameter existence
+# - iaas and scale from parent bosh exodus data when not set in env.yml file.  Also, is this only applicable to OCFP? Need to test kit->requires_scale for kits that need scale defined.
 #
 # These will be tested in integration-level tests where full manifest
 # generation and vault operations are available.

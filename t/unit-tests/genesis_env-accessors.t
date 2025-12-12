@@ -372,6 +372,433 @@ EOF
 	is($type1, $type2, 'type() returns consistent value');
 };
 
-done_testing;  # 8 subtests + 4 use_ok calls = 12 tests total
+subtest 'deployment_change_reason_required_size_policy' => sub {
+	plan tests => 3;
+
+	my $top = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	put_file($top->path('policy-test.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: policy-test
+EOF
+
+	my $env = $top->load_env('policy-test');
+
+	# Test default value (no config set)
+	is($env->deployment_change_reason_required_size_policy, 0,
+		'deployment_change_reason_required_size_policy defaults to 0');
+
+	# Modify top config and test updated value
+	$top->config->set('deployment_change_reason_required_size', 50);
+	# Clear memoization cache to pick up new config value
+	$env->_clear_memo("__$_") for qw(deployment_change_reason_required_size_policy ocfp_config);
+
+	is($env->deployment_change_reason_required_size_policy, 50,
+		'deployment_change_reason_required_size_policy reads from top config');
+
+	# Test different value
+	$top->config->set('deployment_change_reason_required_size', 100);
+	$env->_clear_memo("__$_") for qw(deployment_change_reason_required_size_policy ocfp_config);
+
+	is($env->deployment_change_reason_required_size_policy, 100,
+		'policy can be set to custom values via top config');
+};
+
+subtest 'user_provided_bosh_creds_policy' => sub {
+	plan tests => 5;
+
+	my $top = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	put_file($top->path('creds-test.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: creds-test
+EOF
+
+	my $env = $top->load_env('creds-test');
+
+	# Test default value (no config set)
+	is($env->user_provided_bosh_creds_policy, 'ignore',
+		'user_provided_bosh_creds_policy defaults to "ignore"');
+
+	# Test 'allow' value
+	$top->config->set('user_provided_bosh_creds', 'allow');
+	$env->_clear_memo("__$_") for qw(user_provided_bosh_creds_policy ocfp_config);
+
+	is($env->user_provided_bosh_creds_policy, 'allow',
+		'user_provided_bosh_creds_policy reads "allow" from top config');
+
+	# Test 'require' value
+	$top->config->set('user_provided_bosh_creds', 'require');
+	$env->_clear_memo("__$_") for qw(user_provided_bosh_creds_policy ocfp_config);
+
+	is($env->user_provided_bosh_creds_policy, 'require',
+		'user_provided_bosh_creds_policy reads "require" from top config');
+
+	# Test invalid value validation
+	$top->config->set('user_provided_bosh_creds', 'invalid');
+	$env->_clear_memo("__$_") for qw(user_provided_bosh_creds_policy ocfp_config);
+
+	throws_ok {
+		$env->user_provided_bosh_creds_policy;
+	} qr/Invalid\s+value.*user_provided_bosh_creds.*policy.*invalid.*Valid\s+values.*ignore.*allow.*require/is,
+		'user_provided_bosh_creds_policy validates values';
+
+	# Test explicit 'ignore' value
+	$top->config->set('user_provided_bosh_creds', 'ignore');
+	$env->_clear_memo("__$_") for qw(user_provided_bosh_creds_policy ocfp_config);
+
+	is($env->user_provided_bosh_creds_policy, 'ignore',
+		'user_provided_bosh_creds_policy accepts explicit "ignore" from top config');
+};
+
+subtest 'minimum_genesis_version' => sub {
+	plan tests => 9;
+
+	# Test 1: No minimum specified (default)
+	my $top1 = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	$top1->link_dev_kit('t/src/simple');
+	$top1->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top1->path('no-min.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: no-min
+EOF
+
+	my $env = $top1->load_env('no-min');
+	is($env->minimum_genesis_version, '0.0.0',
+		'minimum_genesis_version returns 0.0.0 when no minimum specified');
+
+	# Test 2: Minimum from repository config only
+	my $top2 = Genesis::Top->create(workdir(), 'repo-min', no_vault => 1);
+	$top2->link_dev_kit('t/src/simple');
+	$top2->config->set('minimum_version', '2.8.0');
+
+	put_file($top2->path('no-env-min.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: no-env-min
+EOF
+
+	$env = $top2->load_env('no-env-min');
+	is($env->minimum_genesis_version, '2.8.0',
+		'minimum_genesis_version reads from repository config');
+
+	# Test 3: Minimum from environment file only (genesis.min_version)
+	my $top3 = Genesis::Top->create(workdir(), 'env-min', no_vault => 1);
+	$top3->link_dev_kit('t/src/simple');
+	$top3->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top3->path('env-min.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: env-min
+  min_version: 2.9.0
+EOF
+
+	$env = $top3->load_env('env-min');
+	is($env->minimum_genesis_version, '2.9.0',
+		'minimum_genesis_version reads from genesis.min_version in env file');
+
+	# Test 4: Minimum from environment file (genesis.minimum_version - alternate key)
+	my $top4 = Genesis::Top->create(workdir(), 'env-min-alt', no_vault => 1);
+	$top4->link_dev_kit('t/src/simple');
+	$top4->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top4->path('env-min-alt.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: env-min-alt
+  minimum_version: 3.0.0
+EOF
+
+	$env = $top4->load_env('env-min-alt');
+	is($env->minimum_genesis_version, '3.0.0',
+		'minimum_genesis_version reads from genesis.minimum_version in env file');
+
+	# Test 5: Both specified - environment takes precedence
+	my $top5 = Genesis::Top->create(workdir(), 'both-min', no_vault => 1);
+	$top5->link_dev_kit('t/src/simple');
+	$top5->config->set('minimum_version', '2.8.0');
+
+	put_file($top5->path('both-min.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: both-min
+  min_version: 3.0.0
+EOF
+
+	$env = $top5->load_env('both-min');
+	is($env->minimum_genesis_version, '3.0.0',
+		'environment minimum takes precedence over repository minimum');
+
+	# Test 6: Version with 'v' prefix is stripped
+	my $top6 = Genesis::Top->create(workdir(), 'v-prefix', no_vault => 1);
+	$top6->link_dev_kit('t/src/simple');
+	$top6->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top6->path('v-prefix.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: v-prefix
+  min_version: v2.7.5
+EOF
+
+	$env = $top6->load_env('v-prefix');
+	is($env->minimum_genesis_version, '2.7.5',
+		'minimum_genesis_version strips leading v from version string');
+
+	# Test 7: Repository version with 'v' prefix is stripped
+	my $top7 = Genesis::Top->create(workdir(), 'repo-v', no_vault => 1);
+	$top7->link_dev_kit('t/src/simple');
+	$top7->config->set('minimum_version', 'v2.6.0');
+
+	put_file($top7->path('repo-v-test.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: repo-v-test
+EOF
+
+	$env = $top7->load_env('repo-v-test');
+	is($env->minimum_genesis_version, '2.6.0',
+		'minimum_genesis_version strips leading v from repository config');
+
+	# Test 8: Memoization works
+	my $version1 = $env->minimum_genesis_version;
+	my $version2 = $env->minimum_genesis_version;
+	is($version1, $version2,
+		'minimum_genesis_version returns consistent memoized value');
+
+	# Test 9: Empty string treated as no minimum
+	my $top8 = Genesis::Top->create(workdir(), 'empty-min', no_vault => 1);
+	$top8->link_dev_kit('t/src/simple');
+	$top8->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top8->path('empty-min.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: empty-min
+  min_version: ''
+EOF
+
+	$env = $top8->load_env('empty-min');
+	is($env->minimum_genesis_version, '0.0.0',
+		'minimum_genesis_version treats empty string as no minimum');
+};
+
+subtest 'feature_compatibility' => sub {
+	plan tests => 4;
+
+	my $top = Genesis::Top->create(workdir(), 'feat-compat', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+	$top->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	# Test 1: Environment version meets requirement
+	put_file($top->path('meets-req.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: meets-req
+  min_version: 2.8.0
+EOF
+
+	my $env = $top->load_env('meets-req');
+	ok($env->feature_compatibility('2.7.0'),
+		'feature_compatibility returns true when env minimum exceeds requirement');
+
+	# Test 2: Environment version exactly meets requirement
+	ok($env->feature_compatibility('2.8.0'),
+		'feature_compatibility returns true when env minimum equals requirement');
+
+	# Test 3: Environment version doesn't meet requirement
+	ok(!$env->feature_compatibility('2.9.0'),
+		'feature_compatibility returns false when env minimum is less than requirement');
+
+	# Test 4: No minimum specified (0.0.0 allows any 0.0.0 feature)
+	my $top2 = Genesis::Top->create(workdir(), 'no-min-feat', no_vault => 1);
+	$top2->link_dev_kit('t/src/simple');
+	$top2->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top2->path('no-min-feat.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: no-min-feat
+EOF
+
+	$env = $top2->load_env('no-min-feat');
+	ok($env->feature_compatibility('0.0.0'),
+		'feature_compatibility returns true with no minimum specified (0.0.0)');
+};
+
+subtest 'validate_genesis_version_requirements' => sub {
+	plan tests => 10;
+
+	# Test 1: Development version (skip checks)
+	local $Genesis::VERSION = '(development)';
+	my $top1 = Genesis::Top->create(workdir(), 'dev-mode', no_vault => 1);
+	$top1->link_dev_kit('t/src/simple');
+	$top1->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top1->path('dev-mode.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: dev-mode
+  min_version: 999.0.0
+EOF
+
+	my $env = $top1->load_env('dev-mode');
+	my $result = $env->validate_genesis_version_requirements();
+
+	is(scalar(@{$result->{errors}}), 0,
+		'development mode has no errors despite high minimum');
+	is(scalar(@{$result->{warnings}}), 1,
+		'development mode generates warning');
+	like($result->{warnings}[0], qr/development mode/i,
+		'warning mentions development mode');
+
+	# Test 2: Running version meets minimum
+	local $Genesis::VERSION = '2.8.5';
+	my $top2 = Genesis::Top->create(workdir(), 'meets-min', no_vault => 1);
+	$top2->link_dev_kit('t/src/simple');
+	$top2->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top2->path('meets-min.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: meets-min
+  min_version: 2.8.0
+EOF
+
+	$env = $top2->load_env('meets-min');
+	$result = $env->validate_genesis_version_requirements();
+
+	is(scalar(@{$result->{errors}}), 0,
+		'no errors when running version meets minimum');
+	is($result->{effective_minimum}, '2.8.0',
+		'effective_minimum is correctly set');
+	is($result->{source}, 'environment file',
+		'source correctly identifies environment file');
+
+	# Test 3: Running version doesn't meet minimum
+	# Load with compatible version first, then test with lower version
+	my $top3 = Genesis::Top->create(workdir(), 'below-min', no_vault => 1);
+	$top3->link_dev_kit('t/src/simple');
+	$top3->config->set('minimum_version', '');  # Ensure no repo minimum
+
+	put_file($top3->path('below-min.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: below-min
+  min_version: 2.8.0
+EOF
+
+	local $Genesis::VERSION = '2.8.5';  # Load with compatible version
+	$env = $top3->load_env('below-min');
+
+	local $Genesis::VERSION = '2.7.0';  # Test with incompatible version
+	$result = $env->validate_genesis_version_requirements();
+
+	is(scalar(@{$result->{errors}}), 1,
+		'error generated when running version below minimum');
+	like($result->{errors}[0], qr/does not meet.*minimum required version/i,
+		'error message describes version requirement failure');
+
+	# Test 4: Environment requires newer than repository (warning)
+	local $Genesis::VERSION = '3.0.0';
+	my $top4 = Genesis::Top->create(workdir(), 'env-newer', no_vault => 1);
+	$top4->link_dev_kit('t/src/simple');
+	$top4->config->set('minimum_version', '2.7.0');
+
+	put_file($top4->path('env-newer.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: env-newer
+  min_version: 2.9.0
+EOF
+
+	$env = $top4->load_env('env-newer');
+	$result = $env->validate_genesis_version_requirements();
+
+	is(scalar(@{$result->{warnings}}), 1,
+		'warning generated when env minimum newer than repo minimum');
+
+	# Test 5: Environment allows older than repository requires (error)
+	# Load without conflict first, then set repo minimum to trigger error
+	my $top5 = Genesis::Top->create(workdir(), 'env-older', no_vault => 1);
+	$top5->link_dev_kit('t/src/simple');
+	$top5->config->set('minimum_version', '');  # No conflict during load
+
+	put_file($top5->path('env-older.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: env-older
+  min_version: 2.6.0
+EOF
+
+	$env = $top5->load_env('env-older');
+
+	# Now set repo minimum higher to trigger conflict
+	$top5->config->set('minimum_version', '2.7.0');
+	$result = $env->validate_genesis_version_requirements();
+
+	is(scalar(@{$result->{errors}}), 1,
+		'error generated when env minimum older than repo minimum');
+};
+
+done_testing;  # 17 subtests + 4 use_ok calls = 21 tests total
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
