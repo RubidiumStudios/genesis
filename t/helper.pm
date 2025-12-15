@@ -879,4 +879,27 @@ sub mock {
   my $mock_obj = $mock_class->new(%$definition);
 }
 
+sub make_top {
+	my (%opts) = @_;
+
+	# Extract deployment name, defaulting to 'test-deployment'
+	my $name = delete $opts{name} || 'test-deployment';
+
+	# Use a temp workdir unless path is specified, creating a unique subdirectory
+	# to avoid collisions when multiple Top objects are created with the same name
+	my $path = delete $opts{path};
+	unless ($path) {
+		require UUID::Tiny;
+		my $uuid = UUID::Tiny::create_uuid_as_string(UUID::Tiny::UUID_V4());
+		$path = workdir() . "/$uuid";
+	}
+
+	mkdir_or_fail($path) unless -d $path;
+
+	# Create the Top object using the real Genesis::Top->create() code path
+	# This ensures tests use the actual config creation logic
+	require Genesis::Top;
+	return Genesis::Top->create($path, $name, %opts);
+}
+
 1;

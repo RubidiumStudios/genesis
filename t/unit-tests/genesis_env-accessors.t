@@ -25,7 +25,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS}=80;
 subtest 'basic accessors' => sub {
 	plan tests => 9;
 
-	my $top = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	my $top = make_top(name => 'thing', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	put_file($top->path('test-env.yml'), <<EOF);
@@ -67,7 +67,7 @@ EOF
 subtest 'signature generation' => sub {
 	plan tests => 4;
 
-	my $top = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	my $top = make_top(name => 'thing', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	put_file($top->path('env-a.yml'), <<EOF);
@@ -103,7 +103,7 @@ EOF
 	is($env_a->signature, $sig_a, 'signature is stable across multiple calls');
 
 	# Test signature changes with file changes
-	my $top2 = Genesis::Top->create(workdir(), 'other-type', no_vault => 1);
+	my $top2 = make_top(name => 'other-type', no_vault => 1);
 	$top2->link_dev_kit('t/src/simple');
 	put_file($top2->path('env-a.yml'), <<EOF);
 ---
@@ -122,7 +122,7 @@ EOF
 subtest 'deployment_name' => sub {
 	plan tests => 2;
 
-	my $top = Genesis::Top->create(workdir(), 'bosh', no_vault => 1);
+	my $top = make_top(name => 'bosh', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	put_file($top->path('prod.yml'), <<EOF);
@@ -156,7 +156,7 @@ EOF
 subtest 'manifest_store' => sub {
 	plan tests => 2;
 
-	my $top = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	my $top = make_top(name => 'thing', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	# Test default manifest store (from config)
@@ -180,7 +180,7 @@ subtest 'is_bosh_director' => sub {
 	plan tests => 2;
 
 	# Test with non-director kit
-	my $top = Genesis::Top->create(workdir(), 'cf', no_vault => 1);
+	my $top = make_top(name => 'cf', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	put_file($top->path('regular.yml'), <<EOF);
@@ -196,7 +196,7 @@ EOF
 	ok(!$env->is_bosh_director, 'environment with non-director kit is not a BOSH director');
 
 	# Test with director kit (custom-bosh has is_bosh_director: true in kit.yml)
-	my $top2 = Genesis::Top->create(workdir(), 'bosh', no_vault => 1);
+	my $top2 = make_top(name => 'bosh', no_vault => 1);
 	$top2->link_dev_kit('t/src/custom-bosh');
 
 	put_file($top2->path('director.yml'), <<EOF);
@@ -216,7 +216,7 @@ subtest 'use_create_env - basic behavior' => sub {
 	plan tests => 7;
 
 	# Basic tests with simple kit (no metadata) to verify accessor works
-	my $top = Genesis::Top->create(workdir(), 'bosh', no_vault => 1);
+	my $top = make_top(name => 'bosh', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	# Test 1: Explicit genesis.use_create_env: true
@@ -344,7 +344,7 @@ subtest 'accessor error handling' => sub {
 subtest 'accessor immutability' => sub {
 	plan tests => 3;
 
-	my $top = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	my $top = make_top(name => 'thing', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	put_file($top->path('test.yml'), <<EOF);
@@ -375,7 +375,7 @@ EOF
 subtest 'deployment_change_reason_required_size_policy' => sub {
 	plan tests => 3;
 
-	my $top = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	my $top = make_top(name => 'thing', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	put_file($top->path('policy-test.yml'), <<EOF);
@@ -412,7 +412,7 @@ EOF
 subtest 'user_provided_bosh_creds_policy' => sub {
 	plan tests => 5;
 
-	my $top = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	my $top = make_top(name => 'thing', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
 
 	put_file($top->path('creds-test.yml'), <<EOF);
@@ -465,9 +465,8 @@ subtest 'minimum_genesis_version' => sub {
 	plan tests => 9;
 
 	# Test 1: No minimum specified (default)
-	my $top1 = Genesis::Top->create(workdir(), 'thing', no_vault => 1);
+	my $top1 = make_top(name => 'thing', minimum_version => undef, no_vault => 1);
 	$top1->link_dev_kit('t/src/simple');
-	$top1->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top1->path('no-min.yml'), <<EOF);
 ---
@@ -483,9 +482,8 @@ EOF
 		'minimum_genesis_version returns 0.0.0 when no minimum specified');
 
 	# Test 2: Minimum from repository config only
-	my $top2 = Genesis::Top->create(workdir(), 'repo-min', no_vault => 1);
+	my $top2 = make_top(name => 'repo-min', minimum_version => '2.8.0', no_vault => 1);
 	$top2->link_dev_kit('t/src/simple');
-	$top2->config->set('minimum_version', '2.8.0');
 
 	put_file($top2->path('no-env-min.yml'), <<EOF);
 ---
@@ -501,9 +499,8 @@ EOF
 		'minimum_genesis_version reads from repository config');
 
 	# Test 3: Minimum from environment file only (genesis.min_version)
-	my $top3 = Genesis::Top->create(workdir(), 'env-min', no_vault => 1);
+	my $top3 = make_top(name => 'env-min', minimum_version => undef, no_vault => 1);
 	$top3->link_dev_kit('t/src/simple');
-	$top3->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top3->path('env-min.yml'), <<EOF);
 ---
@@ -520,9 +517,8 @@ EOF
 		'minimum_genesis_version reads from genesis.min_version in env file');
 
 	# Test 4: Minimum from environment file (genesis.minimum_version - alternate key)
-	my $top4 = Genesis::Top->create(workdir(), 'env-min-alt', no_vault => 1);
+	my $top4 = make_top(name => 'env-min-alt', minimum_version => undef, no_vault => 1);
 	$top4->link_dev_kit('t/src/simple');
-	$top4->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top4->path('env-min-alt.yml'), <<EOF);
 ---
@@ -539,9 +535,8 @@ EOF
 		'minimum_genesis_version reads from genesis.minimum_version in env file');
 
 	# Test 5: Both specified - environment takes precedence
-	my $top5 = Genesis::Top->create(workdir(), 'both-min', no_vault => 1);
+	my $top5 = make_top(name => 'both-min', minimum_version => '2.8.0', no_vault => 1);
 	$top5->link_dev_kit('t/src/simple');
-	$top5->config->set('minimum_version', '2.8.0');
 
 	put_file($top5->path('both-min.yml'), <<EOF);
 ---
@@ -558,9 +553,8 @@ EOF
 		'environment minimum takes precedence over repository minimum');
 
 	# Test 6: Version with 'v' prefix is stripped
-	my $top6 = Genesis::Top->create(workdir(), 'v-prefix', no_vault => 1);
+	my $top6 = make_top(name => 'v-prefix', minimum_version => undef, no_vault => 1);
 	$top6->link_dev_kit('t/src/simple');
-	$top6->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top6->path('v-prefix.yml'), <<EOF);
 ---
@@ -577,9 +571,8 @@ EOF
 		'minimum_genesis_version strips leading v from version string');
 
 	# Test 7: Repository version with 'v' prefix is stripped
-	my $top7 = Genesis::Top->create(workdir(), 'repo-v', no_vault => 1);
+	my $top7 = make_top(name => 'repo-v', minimum_version => 'v2.6.0', no_vault => 1);
 	$top7->link_dev_kit('t/src/simple');
-	$top7->config->set('minimum_version', 'v2.6.0');
 
 	put_file($top7->path('repo-v-test.yml'), <<EOF);
 ---
@@ -601,9 +594,8 @@ EOF
 		'minimum_genesis_version returns consistent memoized value');
 
 	# Test 9: Empty string treated as no minimum
-	my $top8 = Genesis::Top->create(workdir(), 'empty-min', no_vault => 1);
+	my $top8 = make_top(name => 'empty-min', minimum_version => undef, no_vault => 1);
 	$top8->link_dev_kit('t/src/simple');
-	$top8->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top8->path('empty-min.yml'), <<EOF);
 ---
@@ -623,9 +615,8 @@ EOF
 subtest 'feature_compatibility' => sub {
 	plan tests => 4;
 
-	my $top = Genesis::Top->create(workdir(), 'feat-compat', no_vault => 1);
+	my $top = make_top(name => 'feat-compat', minimum_version => undef, no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
-	$top->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	# Test 1: Environment version meets requirement
 	put_file($top->path('meets-req.yml'), <<EOF);
@@ -651,9 +642,8 @@ EOF
 		'feature_compatibility returns false when env minimum is less than requirement');
 
 	# Test 4: No minimum specified (0.0.0 allows any 0.0.0 feature)
-	my $top2 = Genesis::Top->create(workdir(), 'no-min-feat', no_vault => 1);
+	my $top2 = make_top(name => 'no-min-feat', minimum_version => undef, no_vault => 1);
 	$top2->link_dev_kit('t/src/simple');
-	$top2->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top2->path('no-min-feat.yml'), <<EOF);
 ---
@@ -674,9 +664,8 @@ subtest 'validate_genesis_version_requirements' => sub {
 
 	# Test 1: Development version (skip checks)
 	local $Genesis::VERSION = '(development)';
-	my $top1 = Genesis::Top->create(workdir(), 'dev-mode', no_vault => 1);
+	my $top1 = make_top(name => 'dev-mode', minimum_version => undef, no_vault => 1);
 	$top1->link_dev_kit('t/src/simple');
-	$top1->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top1->path('dev-mode.yml'), <<EOF);
 ---
@@ -700,9 +689,8 @@ EOF
 
 	# Test 2: Running version meets minimum
 	local $Genesis::VERSION = '2.8.5';
-	my $top2 = Genesis::Top->create(workdir(), 'meets-min', no_vault => 1);
+	my $top2 = make_top(name => 'meets-min', minimum_version => undef, no_vault => 1);
 	$top2->link_dev_kit('t/src/simple');
-	$top2->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top2->path('meets-min.yml'), <<EOF);
 ---
@@ -726,9 +714,8 @@ EOF
 
 	# Test 3: Running version doesn't meet minimum
 	# Load with compatible version first, then test with lower version
-	my $top3 = Genesis::Top->create(workdir(), 'below-min', no_vault => 1);
+	my $top3 = make_top(name => 'below-min', minimum_version => undef, no_vault => 1);
 	$top3->link_dev_kit('t/src/simple');
-	$top3->config->set('minimum_version', '');  # Ensure no repo minimum
 
 	put_file($top3->path('below-min.yml'), <<EOF);
 ---
@@ -753,9 +740,8 @@ EOF
 
 	# Test 4: Environment requires newer than repository (warning)
 	local $Genesis::VERSION = '3.0.0';
-	my $top4 = Genesis::Top->create(workdir(), 'env-newer', no_vault => 1);
+	my $top4 = make_top(name => 'env-newer', minimum_version => '2.7.0', no_vault => 1);
 	$top4->link_dev_kit('t/src/simple');
-	$top4->config->set('minimum_version', '2.7.0');
 
 	put_file($top4->path('env-newer.yml'), <<EOF);
 ---
@@ -775,9 +761,8 @@ EOF
 
 	# Test 5: Environment allows older than repository requires (error)
 	# Load without conflict first, then set repo minimum to trigger error
-	my $top5 = Genesis::Top->create(workdir(), 'env-older', no_vault => 1);
+	my $top5 = make_top(name => 'env-older', minimum_version => undef, no_vault => 1);
 	$top5->link_dev_kit('t/src/simple');
-	$top5->config->set('minimum_version', '');  # No conflict during load
 
 	put_file($top5->path('env-older.yml'), <<EOF);
 ---
@@ -799,6 +784,301 @@ EOF
 		'error generated when env minimum older than repo minimum');
 };
 
-done_testing;  # 17 subtests + 4 use_ok calls = 21 tests total
+subtest 'path' => sub {
+	plan tests => 3;
+
+	my $top = make_top(name => 'thing', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	put_file($top->path('path-test.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: path-test
+EOF
+
+	my $env = $top->load_env('path-test');
+
+	# Test delegation to top->path()
+	is($env->path(), $top->path(),
+		'path() with no arguments returns top path');
+
+	is($env->path('test-file.yml'), $top->path('test-file.yml'),
+		'path() with filename argument delegates to top->path()');
+
+	is($env->path('dir', 'subdir', 'file.txt'), $top->path('dir', 'subdir', 'file.txt'),
+		'path() with multiple arguments delegates to top->path()');
+};
+
+subtest 'workpath' => sub {
+	plan tests => 5;
+
+	my $top = make_top(name => 'thing', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	put_file($top->path('workpath-test.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: workpath-test
+EOF
+
+	my $env = $top->load_env('workpath-test');
+
+	# Test workpath() returns a path
+	my $work1 = $env->workpath();
+	ok(defined($work1), 'workpath() returns a defined value');
+	ok(length($work1) > 0, 'workpath() returns a non-empty string');
+
+	# Test workpath() with arguments
+	my $work2 = $env->workpath('subdir');
+	ok(defined($work2), 'workpath() with argument returns a defined value');
+	like($work2, qr/subdir$/, 'workpath() with argument appends to base path');
+
+	# Test workpath() is memoized
+	my $work3 = $env->workpath();
+	is($work1, $work3, 'workpath() returns consistent memoized base path');
+
+	# NOTE: Testing automatic cleanup on script exit would require process-level
+	# testing and belongs in integration or E2E tests
+};
+
+subtest 'relate - environment file relationships' => sub {
+	plan tests => 8;
+
+	# Test relate() logic using blessed objects (no file I/O needed)
+	my $a = bless({ name => "us-west-1-preprod-a" }, 'Genesis::Env');
+	my $b = bless({ name => "us-west-1-prod"      }, 'Genesis::Env');
+
+	cmp_deeply([$a->relate($b)], [qw[
+			./us.yml
+			./us-west.yml
+			./us-west-1.yml
+			./us-west-1-preprod.yml
+			./us-west-1-preprod-a.yml
+		]], "(us-west-1-preprod-a)->relate(us-west-1-prod) returns correct hierarchy");
+
+	cmp_deeply([$a->relate($b, ".cache")], [qw[
+			.cache/us.yml
+			.cache/us-west.yml
+			.cache/us-west-1.yml
+			./us-west-1-preprod.yml
+			./us-west-1-preprod-a.yml
+		]], "relate() handles cache prefix for common files");
+
+	cmp_deeply([$a->relate($b, ".cache", "TOP/LEVEL")], [qw[
+			.cache/us.yml
+			.cache/us-west.yml
+			.cache/us-west-1.yml
+			TOP/LEVEL/us-west-1-preprod.yml
+			TOP/LEVEL/us-west-1-preprod-a.yml
+		]], "relate() handles both cache and top prefixes");
+
+	cmp_deeply([$a->relate("us-east-sandbox", ".cache", "TOP/LEVEL")], [qw[
+			.cache/us.yml
+			TOP/LEVEL/us-west.yml
+			TOP/LEVEL/us-west-1.yml
+			TOP/LEVEL/us-west-1-preprod.yml
+			TOP/LEVEL/us-west-1-preprod-a.yml
+		]], "relate() accepts environment name string instead of object");
+
+	cmp_deeply([$a->relate($a, ".cache", "TOP/LEVEL")], [qw[
+			.cache/us.yml
+			.cache/us-west.yml
+			.cache/us-west-1.yml
+			.cache/us-west-1-preprod.yml
+			.cache/us-west-1-preprod-a.yml
+		]], "relate() to self returns all files as common");
+
+	cmp_deeply([$a->relate(undef, ".cache", "TOP/LEVEL")], [qw[
+			TOP/LEVEL/us.yml
+			TOP/LEVEL/us-west.yml
+			TOP/LEVEL/us-west-1.yml
+			TOP/LEVEL/us-west-1-preprod.yml
+			TOP/LEVEL/us-west-1-preprod-a.yml
+		]], "relate() to undef treats all files as unique");
+
+	cmp_deeply(scalar $a->relate($b, ".cache", "TOP/LEVEL"), {
+			common => [qw[
+				.cache/us.yml
+				.cache/us-west.yml
+				.cache/us-west-1.yml
+			]],
+			unique => [qw[
+				TOP/LEVEL/us-west-1-preprod.yml
+				TOP/LEVEL/us-west-1-preprod-a.yml
+			]],
+		}, "relate() in scalar context returns hashref with common/unique");
+
+	# Test potential_environment_files() integration with PREVIOUS_ENV cache
+	{
+		local $ENV{PREVIOUS_ENV} = 'us-west-1-sandbox';
+		cmp_deeply([$a->potential_environment_files()], [qw[
+				.genesis/cached/us-west-1-sandbox/us.yml
+				.genesis/cached/us-west-1-sandbox/us-west.yml
+				.genesis/cached/us-west-1-sandbox/us-west-1.yml
+				./us-west-1-preprod.yml
+				./us-west-1-preprod-a.yml
+			]], "potential_environment_files() with PREVIOUS_ENV uses Genesis cache");
+	}
+};
+
+subtest 'manifest_store - manifest storage strategy with version compatibility' => sub {
+	plan tests => 9;
+
+	# Test 1: Default value with modern Genesis version (>= 3.1.0)
+	my $top1 = make_top(name => 'modern', manifest_store => undef, minimum_version => undef, creator_version => '3.1.0', no_vault => 1);
+	$top1->link_dev_kit('t/src/simple');
+
+	put_file($top1->path('modern-env.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: modern-env
+  min_version: 3.1.0
+EOF
+
+	my $env = $top1->load_env('modern-env');
+	is($env->manifest_store, 'hybrid',
+		'manifest_store defaults to "hybrid" for Genesis 3.1.0+');
+
+	# Test 2: Config value 'exodus' with modern Genesis version
+	my $top2 = make_top(name => 'modern2', manifest_store => 'exodus', minimum_version => undef, creator_version => '3.1.0', no_vault => 1);
+	$top2->link_dev_kit('t/src/simple');
+
+	put_file($top2->path('exodus-env.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: exodus-env
+  min_version: 3.1.0
+EOF
+
+	$env = $top2->load_env('exodus-env');
+	is($env->manifest_store, 'exodus',
+		'manifest_store reads "exodus" from top config for Genesis 3.1.0+');
+
+	# Test 3: Config value 'repository' with modern Genesis version
+	my $top3 = make_top(name => 'modern3', manifest_store => 'repository', minimum_version => undef, creator_version => '3.1.0', no_vault => 1);
+	$top3->link_dev_kit('t/src/simple');
+
+	put_file($top3->path('repo-env.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: repo-env
+  min_version: 3.1.0
+EOF
+
+	$env = $top3->load_env('repo-env');
+	is($env->manifest_store, 'repository',
+		'manifest_store reads "repository" from top config for Genesis 3.1.0+');
+
+	# Test 4: Legacy Genesis version (< 3.1.0) always returns 'repository'
+	my $top4 = make_top(name => 'legacy', manifest_store => undef, minimum_version => undef, creator_version => '3.0.0', no_vault => 1);
+	$top4->link_dev_kit('t/src/simple');
+
+	put_file($top4->path('legacy-env.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: legacy-env
+  min_version: 3.0.0
+EOF
+
+	$env = $top4->load_env('legacy-env');
+	is($env->manifest_store, 'repository',
+		'manifest_store returns "repository" for Genesis < 3.1.0');
+
+	# Test 5: Legacy version ignores config setting
+	my $top5 = make_top(name => 'legacy2', manifest_store => 'exodus', minimum_version => undef, creator_version => '3.0.0', no_vault => 1);
+	$top5->link_dev_kit('t/src/simple');
+
+	put_file($top5->path('legacy-exodus.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: legacy-exodus
+  min_version: 3.0.0
+EOF
+
+	$env = $top5->load_env('legacy-exodus');
+	is($env->manifest_store, 'repository',
+		'manifest_store returns "repository" for Genesis < 3.1.0 even when config is "exodus"');
+
+	# Test 6: No minimum version specified (defaults to 0.0.0, legacy behavior)
+	my $top6 = make_top(name => 'no-min', manifest_store => undef, minimum_version => undef, creator_version => '3.0.0', no_vault => 1);
+	$top6->link_dev_kit('t/src/simple');
+
+	put_file($top6->path('no-min-env.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: no-min-env
+EOF
+
+	$env = $top6->load_env('no-min-env');
+	is($env->manifest_store, 'repository',
+		'manifest_store returns "repository" when no minimum version specified');
+
+	# Test 7: Config setting honored when repo minimum_version >= 3.1.0
+	my $top7 = make_top(name => 'repo-min', minimum_version => '3.1.0', manifest_store => undef, creator_version => '3.1.0', no_vault => 1);
+	$top7->link_dev_kit('t/src/simple');
+
+	put_file($top7->path('repo-min-env.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: repo-min-env
+EOF
+
+	$env = $top7->load_env('repo-min-env');
+	is($env->manifest_store, 'hybrid',
+		'manifest_store defaults to "hybrid" when repo minimum_version >= 3.1.0');
+
+	# Test 8: Config changes are reflected immediately
+	my $top8 = make_top(name => 'memo-test', minimum_version => '3.1.0', manifest_store => 'exodus', creator_version => '3.1.0', no_vault => 1);
+	$top8->link_dev_kit('t/src/simple');
+
+	put_file($top8->path('memo-env.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: memo-env
+EOF
+
+	$env = $top8->load_env('memo-env');
+	my $result1 = $env->manifest_store;
+	is($result1, 'exodus', 'manifest_store reads initial config value');
+
+	# Change config value after loading - should reflect the new value
+	$top8->config->set('manifest_store', 'repository');
+	my $result2 = $env->manifest_store;
+
+	is($result2, 'repository',
+		'manifest_store() reflects config changes (not memoized)');
+};
+
+done_testing;  # 21 subtests + 4 use_ok calls = 25 tests total
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

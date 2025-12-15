@@ -136,13 +136,22 @@ sub create {
 
 	eval { # to delete path if creation fails
 
-		# Write new configuration
+		# Write new configuration - Set defaults
 		$self->config->set('deployment_type',$name);
 		$self->config->set('version',2);
 		$self->config->set('creator_version', $Genesis::VERSION);
 		$self->config->set('minimum_version', $Genesis::VERSION) unless $Genesis::VERSION eq '(development)';
 		$self->config->set('manifest_store', 'exodus');
 		$self->config->set('kits_path', $kits_path) if $kits_path;
+
+		# Apply any config overrides from %opts
+		for my $override (grep {exists $opts{$_}} qw(creator_version updater_version minimum_version manifest_store kits_path)) {
+			if (defined $opts{$override}) {
+				$self->config->set($override, $opts{$override});
+			} else {
+				$self->config->clear($override);
+			}
+		}
 
 		# Only set vault configuration if not using no_vault (and only allow no_vault in tests)
 		if ($opts{no_vault}) {

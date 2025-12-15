@@ -20,7 +20,7 @@ use Genesis::Env;
 local $ENV{NOCOLOR} = 1;
 
 # Setup common test fixtures
-my $top = Genesis::Top->create(workdir(), 'cf', no_vault => 1);
+my $top = make_top(name => 'cf', no_vault => 1);
 $top->link_dev_kit('t/src/simple');
 
 subtest 'no defaults for iaas and scale' => sub {

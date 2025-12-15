@@ -21,7 +21,7 @@ use Genesis::Env;
 local $ENV{NOCOLOR} = 1;
 
 # Setup common test fixtures
-my $top = Genesis::Top->create(workdir(), 'simple', no_vault => 1);
+my $top = make_top(name => 'simple', no_vault => 1);
 $top->link_dev_kit('t/src/simple');
 
 my $kit = $top->local_kit_version('dev');
@@ -131,7 +131,7 @@ subtest 'Genesis::Env->new() - environment name validation' => sub {
 subtest 'Genesis::Env->new() - deployment type requirement' => sub {
 	# Test defensive check for deployment type
 	# Create a valid Top, then remove deployment type using Config API
-	my $test_top = Genesis::Top->create(workdir(), 'test-type', no_vault => 1);
+	my $test_top = make_top(name => 'test-type', no_vault => 1);
 
 	# Use Config::clear() to remove deployment_type
 	# This simulates a corrupted or incomplete Top object
