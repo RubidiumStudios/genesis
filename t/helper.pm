@@ -902,4 +902,40 @@ sub make_top {
 	return Genesis::Top->create($path, $name, %opts);
 }
 
+sub make_env_with_kit {
+	my ($kit_path, $env_name, %opts) = @_;
+
+	# Extract genesis options from opts
+	my %genesis_opts;
+	for my $key (grep { /^(env|min_version|entomb|secrets_mount|secrets_path|exodus_mount|ci_mount|ci_base|root_ca_path)$/ } keys %opts) {
+		$genesis_opts{$key} = delete $opts{$key};
+	}
+
+	# Default minimum_version to undef to avoid $Genesis::VERSION (999.999.999)
+	$opts{minimum_version} //= undef;
+	$opts{no_vault} //= 1;
+	$opts{name} //= 'thing';
+
+	my $top = make_top(%opts);
+	$top->link_dev_kit($kit_path);
+
+	my $genesis_block = "  env: $env_name\n";
+	for my $key (keys %genesis_opts) {
+		$genesis_block .= "  $key: $genesis_opts{$key}\n";
+	}
+
+	put_file($top->path("$env_name.yml"), <<"EOF");
+---
+kit:
+  name:    dev
+  version: latest
+  features: []
+
+genesis:
+$genesis_block
+EOF
+
+	return $top->load_env($env_name);
+}
+
 1;
