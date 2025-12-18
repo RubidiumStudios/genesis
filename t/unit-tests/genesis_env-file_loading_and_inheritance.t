@@ -1142,6 +1142,187 @@ EOF
 		"environment with mixed valid/invalid bosh-configs keys is rejected";
 };
 
+subtest 'is_valid_env_file - direct method testing' => sub {
+	my $top = Genesis::Top->create(workdir(), 'valid-env-test', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	# Test 1: Valid environment file returns true in scalar context
+	put_file $top->path("valid-scalar.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: valid-scalar
+EOF
+
+	my $result = Genesis::Env->is_valid_env_file('valid-scalar', $top);
+	ok($result, 'valid env file returns true in scalar context');
+
+	# Test 2: Valid file returns (1) in list context
+	my @result = Genesis::Env->is_valid_env_file('valid-scalar', $top);
+	cmp_deeply(\@result, [1], 'valid env file returns (1) in list context');
+
+	# Test 3: Scalar context cache hit - call again in scalar context
+	$result = Genesis::Env->is_valid_env_file('valid-scalar', $top);
+	ok($result, 'cached result works in scalar context');
+
+	# Test 4: No genesis.env declaration
+	put_file $top->path("no-genesis-env.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+params:
+  test: value
+EOF
+
+	@result = Genesis::Env->is_valid_env_file('no-genesis-env', $top);
+	is($result[0], undef, 'file without genesis.env returns undef as first element');
+	like($result[1], qr/does not contain.*genesis\.env.*declaration/i,
+		'error mentions missing genesis.env declaration');
+
+	# Test 5: Multiple genesis.env declarations
+	put_file $top->path("multi-genesis-env.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: multi-genesis-env
+---
+genesis:
+  env: multi-genesis-env
+EOF
+
+	@result = Genesis::Env->is_valid_env_file('multi-genesis-env', $top);
+	is($result[0], undef, 'file with multiple genesis.env returns undef');
+	like($result[1], qr/multiple.*genesis\.env.*declarations/i,
+		'error mentions multiple genesis.env declarations');
+
+	# Test 6: genesis.env name mismatch
+	put_file $top->path("name-mismatch.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: different-name
+EOF
+
+	@result = Genesis::Env->is_valid_env_file('name-mismatch', $top);
+	is($result[0], undef, 'file with name mismatch returns undef');
+	like($result[1], qr/declares environment.*different-name.*but is named.*name-mismatch/i,
+		'error mentions name mismatch');
+
+	# Test 7: Missing kit.name (no parent to inherit from)
+	put_file $top->path("missing-kit-name.yml"), <<EOF;
+---
+kit:
+  version: latest
+genesis:
+  env: missing-kit-name
+EOF
+
+	@result = Genesis::Env->is_valid_env_file('missing-kit-name', $top);
+	is($result[0], undef, 'file without kit.name returns undef');
+	like($result[1], qr/missing required kit information.*kit\.name/i,
+		'error mentions missing kit.name');
+
+	# Test 8: Missing kit.version (no parent to inherit from)
+	put_file $top->path("missing-kit-version.yml"), <<EOF;
+---
+kit:
+  name: dev
+genesis:
+  env: missing-kit-version
+EOF
+
+	@result = Genesis::Env->is_valid_env_file('missing-kit-version', $top);
+	is($result[0], undef, 'file without kit.version returns undef');
+	like($result[1], qr/missing required kit information.*kit\.version/i,
+		'error mentions missing kit.version');
+
+	# Test 9: Missing both kit.name and kit.version
+	put_file $top->path("missing-both-kit.yml"), <<EOF;
+---
+kit:
+  features: []
+genesis:
+  env: missing-both-kit
+EOF
+
+	@result = Genesis::Env->is_valid_env_file('missing-both-kit', $top);
+	is($result[0], undef, 'file without kit info returns undef');
+	like($result[1], qr/missing required kit information/i,
+		'error mentions missing kit information');
+	like($result[1], qr/kit\.name/i, 'error mentions kit.name');
+	like($result[1], qr/kit\.version/i, 'error mentions kit.version');
+
+	# Test 10: File does not exist
+	@result = Genesis::Env->is_valid_env_file('nonexistent-env', $top);
+	is($result[0], undef, 'nonexistent file returns undef');
+	like($result[1], qr/does not exist/i, 'error mentions file does not exist');
+
+	# Test 11: .yml extension is stripped if provided
+	$result = Genesis::Env->is_valid_env_file('valid-scalar.yml', $top);
+	ok($result, 'method handles .yml extension in name');
+
+	# Test 12: Kit info inherited from parent file
+	put_file $top->path("parent-kit.yml"), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+genesis:
+  env: parent-kit
+EOF
+
+	put_file $top->path("parent-kit-child.yml"), <<EOF;
+---
+genesis:
+  env: parent-kit-child
+params:
+  child_param: value
+EOF
+
+	$result = Genesis::Env->is_valid_env_file('parent-kit-child', $top);
+	ok($result, 'child file with kit info in parent is valid');
+
+	# Test 13: kit.name in one parent, kit.version in another
+	put_file $top->path("split-kit.yml"), <<EOF;
+---
+kit:
+  name: dev
+genesis:
+  env: split-kit
+EOF
+
+	put_file $top->path("split-kit-middle.yml"), <<EOF;
+---
+kit:
+  version: latest
+genesis:
+  env: split-kit-middle
+EOF
+
+	put_file $top->path("split-kit-middle-child.yml"), <<EOF;
+---
+genesis:
+  env: split-kit-middle-child
+params:
+  test: value
+EOF
+
+	$result = Genesis::Env->is_valid_env_file('split-kit-middle-child', $top);
+	ok($result, 'kit info split across parent files is valid');
+
+	# Test 14: Invalid name still caught
+	@result = Genesis::Env->is_valid_env_file('Invalid-Name', $top);
+	is($result[0], undef, 'invalid name returns undef');
+	like($result[1], qr/Invalid environment name/i, 'error mentions invalid environment name');
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

@@ -452,6 +452,43 @@ EOF
 	ok($env->has_feature('child-feat'), 'has_feature() finds appended feature');
 };
 
+# ============================================================================
+# can_be_entombed tests
+# ============================================================================
+
+subtest 'can_be_entombed - requires genesis.min_version 3.0.0-rc.1+' => sub {
+	plan tests => 2;
+
+	# Env with genesis.min_version < 3.0.0-rc.1 cannot be entombed
+	my $env_old = make_env_with_kit('t/src/simple', 'test-env', min_version => '2.8.0');
+	ok(!$env_old->can_be_entombed, 'env with min_version < 3.0.0-rc.1 cannot be entombed');
+
+	# Env with genesis.min_version >= 3.0.0-rc.1 can be entombed
+	my $env_new = make_env_with_kit('t/src/simple-3.0.0', 'test-env', min_version => '3.0.0');
+	ok($env_new->can_be_entombed, 'env with min_version >= 3.0.0-rc.1 can be entombed');
+};
+
+subtest 'can_be_entombed - false when use_create_env' => sub {
+	plan tests => 1;
+
+	# Create-env kit deployment cannot be entombed even with compatible min_version
+	my $env = make_env_with_kit('t/src/bosh-3.0.0-create-env', 'proto-bosh',
+		name => 'bosh', min_version => '3.0.0');
+	ok(!$env->can_be_entombed, 'create-env deployments cannot be entombed');
+};
+
+subtest 'can_be_entombed - respects genesis.entomb setting' => sub {
+	plan tests => 2;
+
+	# Default should allow entombment for env with compatible min_version
+	my $env_default = make_env_with_kit('t/src/simple-3.0.0', 'test-env', min_version => '3.0.0');
+	ok($env_default->can_be_entombed, 'entomb defaults to true for compatible env');
+
+	# Explicit entomb: false disables entombment
+	my $env_disabled = make_env_with_kit('t/src/simple-3.0.0', 'test-env', min_version => '3.0.0', entomb => 'false');
+	ok(!$env_disabled->can_be_entombed, 'genesis.entomb: false disables entombment');
+};
+
 # NOTE: Policy methods (deployment_change_reason_required_size_policy and
 # user_provided_bosh_creds_policy) attempt to read from OCFP config in vault first,
 # which requires vault integration and cannot be tested with no_vault => 1.
