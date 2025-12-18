@@ -32,16 +32,13 @@ unit-tests/genesis_top-core.t
 #unit-tests/kit-compilation.t
 #unit-tests/hooks.t
 #unit-tests/hooks-cloudconfig.t
-#unit-tests/env-core.t
 unit-tests/genesis_env-name_validation.t  # Genesis::Env name validation (_env_name_errors)
 unit-tests/genesis_env-file_loading_and_inheritance.t  # Genesis::Env file loading, hierarchy, and inheritance
 unit-tests/genesis_env-accessors.t  # Genesis::Env basic accessors and identity
 unit-tests/genesis_env-use_create_env.t  # Genesis::Env use_create_env comprehensive testing
 unit-tests/genesis_env-creation.t  # Genesis::Env object creation (new, create error handling)
 unit-tests/genesis_env-metadata.t  # Genesis::Env metadata accessors (scale, iaas, features, has_feature)
-#unit-tests/env-terminate.t
-unit-tests/release-sha1.t
-unit-tests/release-overrides.t
+unit-tests/genesis_env-bosh.t  # Genesis::Env BOSH-related methods (_parse_bosh_env, bosh_env, bosh_alias)
 #unit-tests/genesis-cli.t
 
 [integration-tests]
@@ -55,6 +52,12 @@ integration-tests/service_github-api.t   # GitHub/GitLab API integration (SSH ke
 integration-tests/service_bosh_stemcells.t  # BOSH stemcell API integration (bosh.io)
 integration-tests/service_bosh_director.t   # BOSH Director constructor patterns (from_exodus, from_alias, from_environment)
 integration-tests/genesis_top-complete.t    # Genesis::Top with external vault and GitHub dependencies
+# Genesis::Env integration tests - require vault/BOSH mocks
+#integration-tests/genesis_env-core.t        # Comprehensive env operations (loading, manifest, deployment)
+#integration-tests/genesis_env-terminate.t   # Environment termination workflow
+# Tests needing rebuild - concepts preserved, need to test actual Genesis methods
+#integration-tests/genesis_env-release_sha1_validation.t  # REBUILD: Test Genesis::Env::_check_release_url_sha1
+#integration-tests/genesis-undefined_handling.t           # REBUILD: Test Genesis::new_enough with edge cases
 
 [e2e-tests]
 # Full workflow tests using genesis executable

@@ -2,6 +2,30 @@
 use strict;
 use warnings;
 
+# =============================================================================
+# REBUILD REQUIRED - This test does not actually test Genesis::Env
+# =============================================================================
+#
+# This test was originally intended to validate SHA1 checksum verification for
+# BOSH releases in manifests, but it only tests inline logic and never calls
+# the actual Genesis::Env method.
+#
+# The REAL implementation is: Genesis::Env::_check_release_url_sha1
+#   - Located in lib/Genesis/Env.pm lines 5079-5133
+#   - Called from Genesis::Env::check() method
+#   - Uses $self->manifest_provider->deployment(subset=>'releases')->data
+#   - Returns {state => 'ok'|'error', msg => ...}
+#
+# TO REBUILD THIS TEST:
+#   1. Create a Genesis::Env object with a test environment
+#   2. Mock or provide a manifest with releases (some with SHA1, some without)
+#   3. Call $env->_check_release_url_sha1() or $env->check()
+#   4. Verify the method correctly identifies missing SHA1s for http/https URLs
+#   5. Verify file:// URLs are correctly ignored
+#
+# The test concepts below are valid but need to test against actual Genesis::Env
+# =============================================================================
+
 use lib 'lib';
 use lib 't';
 use helper;

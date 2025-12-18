@@ -2,7 +2,7 @@
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
-TESTS ?= t/*.t
+TESTS ?= t/*/*.t
 
 compile-check:
 	@echo "Checking all Perl modules compile..."
@@ -27,7 +27,10 @@ sanity-test: compile-check
 coverage:
 	SKIP_SECRETS_TESTS=yes cover -t -ignore_re '(/Legacy.pm|/JSON/|/UUID/|^t/.*\.pm)'
 
-test: unit-tests integration-tests e2e-tests
+test: sanity-test
+	prove -lf $(TESTS)
+
+test-all: sanity-test unit-tests integration-tests e2e-tests
 
 unit-tests: sanity-test
 	@echo "Running unit tests (library/module level)..."
