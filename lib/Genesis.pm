@@ -1176,7 +1176,7 @@ sub _lookup_key {
 
 	return (1,$what) if $key eq '';
 
-	$key =~ s/\.\./.\0/;
+	$key =~ s/\.\./\0/g;
 	for (split /[\[\.]+/, $key) {
 		if (ref($what) eq 'ARRAY') {
 			my ($k, $v) = (/^(?:(.*?)=)?(.*?)]?$/);
@@ -1198,7 +1198,7 @@ sub _lookup_key {
 				return (0, undef) unless $found;
 			}
 		} else {
-			my $k = $_ eq "\0" ? "." : $_;
+			(my $k = $_) =~ s/\0/./g;
 			return (0, undef) unless eval {exists $what->{$k}};
 			$what = $what->{$k};
 		}
