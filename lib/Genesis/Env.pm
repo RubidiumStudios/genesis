@@ -5733,7 +5733,7 @@ sub _process_reactions {
 # _parse_bosh_env - parse the bosh env into its constituent parts, and returns a hashref {{{
 sub _parse_bosh_env {
 	my ($self, $bosh_env_description) = @_;
-	bail("Invalid BOSH environment description: %s", $bosh_env_description) unless $bosh_env_description;
+	bail("Undefined BOSH environment description") unless $bosh_env_description;
 
 	# Pattern: <name>[/<type>][@[<url>]/<mount>]
 	my ($name, $dep_type, $vault_url, $exodus_mount) =
