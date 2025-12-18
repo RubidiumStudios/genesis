@@ -786,7 +786,7 @@ sub signature {
 sub deployment_name {
 	$_[0]->_memoize('__deployment', sub {
 		my $self = shift;
-		sprintf('%s-%s',$self->name,$self->top->type);
+		sprintf('%s-%s',$self->name,$self->type);
 	});
 }
 
@@ -3566,7 +3566,7 @@ sub _post_deploy {
 			$msg = "User canceled deployment when prompted to continue.";
 		} elsif ($last_bits_of_output =~ /Continue\?[^\n]*:\s*Asking for confirmation:\s*  EOF\s*Exit code 1/sm) {
 			$msg = "User interrupted deployment at continue prompt.";
-		} elsif ($last_bits_of_output =~ /\^C$/m) {
+		} elsif ($last_bits_of_output =~ qr{\^C$}m) {
 			# This may leave the deployment detached if pressed after the confirmation prompt, so
 			# once we have deployment recovery working, we'll need to handle this state differently.
 			$msg = "User interrupted deployment (Ctrl-C)";
