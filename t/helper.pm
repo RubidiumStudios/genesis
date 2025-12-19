@@ -16,6 +16,7 @@ BEGIN {
 
 use lib 't';
 use Mock;
+use MockWrapper;
 use Test::More;
 use Test::Exception;
 use Test::Differences;
@@ -911,6 +912,12 @@ sub make_env_with_kit {
 		$genesis_opts{$key} = delete $opts{$key};
 	}
 
+	# Extract kit options (iaas, scale, features)
+	my %kit_opts;
+	for my $key (grep { /^(iaas|scale|features)$/ } keys %opts) {
+		$kit_opts{$key} = delete $opts{$key};
+	}
+
 	# Default minimum_version to undef to avoid $Genesis::VERSION (999.999.999)
 	$opts{minimum_version} //= undef;
 	$opts{no_vault} //= 1;
@@ -924,18 +931,30 @@ sub make_env_with_kit {
 		$genesis_block .= "  $key: $genesis_opts{$key}\n";
 	}
 
+	my $kit_block = "  name:    dev\n  version: latest\n";
+	if (exists $kit_opts{features}) {
+		$kit_block .= "  features: $kit_opts{features}\n";
+	} else {
+		$kit_block .= "  features: []\n";
+	}
+	for my $key (grep { $_ ne 'features' } keys %kit_opts) {
+		$kit_block .= "  $key: $kit_opts{$key}\n";
+	}
+
 	put_file($top->path("$env_name.yml"), <<"EOF");
 ---
 kit:
-  name:    dev
-  version: latest
-  features: []
-
+$kit_block
 genesis:
 $genesis_block
 EOF
 
 	return $top->load_env($env_name);
+}
+
+sub wrap_obj {
+	my ($obj, %overrides) = @_;
+	return MockWrapper->new($obj, %overrides);
 }
 
 1;
