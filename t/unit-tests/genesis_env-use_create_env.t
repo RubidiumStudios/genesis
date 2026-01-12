@@ -108,11 +108,11 @@ EOF
 	}
 };
 
-subtest 'kit allows user choice: allowed' => sub {
+subtest 'kit allows user choice: allow' => sub {
 	plan tests => 10;
 
 	my $top = Genesis::Top->create(workdir(), 'bosh', no_vault => 1);
-	$top->link_dev_kit('t/src/kit-uce-allowed');
+	$top->link_dev_kit('t/src/kit-uce-allow');
 
 	# Test 1: Explicit use_create_env: true
 	put_file($top->path('explicit-true.yml'), <<EOF);
@@ -488,7 +488,7 @@ subtest 'edge cases and validation' => sub {
 	plan tests => 25;
 
 	my $top = Genesis::Top->create(workdir(), 'bosh', no_vault => 1);
-	$top->link_dev_kit('t/src/kit-uce-allowed');
+	$top->link_dev_kit('t/src/kit-uce-allow');
 
 	# Test 1: use_create_env with various truthy values
 	my $counter = 0;

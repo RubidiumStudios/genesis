@@ -526,22 +526,22 @@ sub metadata {
 					$uce, ref($uce)
 				);
 			} else {
-				# String value: normalize to 'yes', 'no', or 'allowed'
+				# String value: normalize to 'yes', 'no', or 'allow'
 				my $val = lc($uce // '');
 				$self->{__metadata}{use_create_env} = {
 					'yes' => 'yes', 'true'  => 'yes', '1' => 'yes',
 					'no'  => 'no',  'false' => 'no',  '0' => 'no',
-					'allowed' => 'allowed'
+					'allow' => 'allow'
 				}->{$val};
 				$self->kit_bug(
 					"Invalid use_create_env value '#C{%s}' in kit metadata.\n".
-					"Valid values are: #Y{yes}, #Y{no}, #Y{allowed}, #Y{true}, or #Y{false}",
+					"Valid values are: #Y{yes}, #Y{no}, #Y{allow}, #Y{true}, or #Y{false}",
 					$uce
 				) unless $self->{__metadata}{use_create_env};
 			}
 		} elsif (new_enough($self->{__metadata}{genesis_version_min}//'0.0.0', "2.8.0")) {
-			# Default to 'allowed' for 2.8.0+ kits
-			$self->{__metadata}{use_create_env} = 'allowed';
+			# Default to 'allow' for 2.8.0+ kits
+			$self->{__metadata}{use_create_env} = 'allow';
 		}
 		# Legacy kits (pre-2.8.0) should not have use_create_env set
 	}

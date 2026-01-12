@@ -870,7 +870,7 @@ sub use_create_env {
 			# Kits that are explicitly compatible with 2.8.0 can specify if they
 			# support or require create-env deployments.
 
-			# use_create_env is already sanitized to 'yes', 'no', or 'allowed' by Genesis::Kit
+			# use_create_env is already sanitized to 'yes', 'no', or 'allow' by Genesis::Kit
 			my $kuce = $self->kit->metadata('use_create_env');
 
 			if ($kuce eq 'yes') {
@@ -891,7 +891,7 @@ sub use_create_env {
 				return 0 ;
 			}
 
-			# Allowed, but not reuqired to use create-env
+			# Allow, but not required to use create-env
 			my $is_create_env = undef;
 			# genesis.use_create_env is already normalized to 1/0 by load()
 			my $euce = $self->lookup('genesis.use_create_env', undef);
