@@ -4,6 +4,9 @@
 TEST_MANIFEST ?= t/test-manifest.txt
 TESTS ?= t/*/*.t
 
+# Coverage report format (html, json, text)
+COVERAGE_REPORT_FORMAT ?= html
+
 compile-check:
 	@echo "Checking all Perl modules compile..."
 	@failed=0; \
@@ -25,7 +28,7 @@ sanity-test: compile-check
 	@bash -c 'set -o pipefail; export GENESIS_OUTPUT_COLUMNS=120; perl -Ilib -c bin/genesis && perl -Ilib -- bin/genesis -D ping 2>&1'
 
 coverage:
-	SKIP_SECRETS_TESTS=yes cover -t -ignore_re '(/Legacy.pm|/JSON/|/UUID/|^t/.*\.pm)'
+	SKIP_SECRETS_TESTS=yes cover -t -ignore_re '(/Legacy.pm|/JSON/|/UUID/|^t/.*\.pm)' -report $(COVERAGE_REPORT_FORMAT)
 
 test: sanity-test
 	prove -lf $(TESTS)
