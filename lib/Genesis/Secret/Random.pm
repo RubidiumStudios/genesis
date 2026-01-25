@@ -92,7 +92,7 @@ sub check_value {
 
 sub promote_value_to_stored {
 	my $self = shift;
-	$self->{stored_value} = delete($self->{value});
+	$self->SUPER::promote_value_to_stored;
 	$self->{stored_format_value} = delete($self->{format_value}) if $self->format_path;
 }
 

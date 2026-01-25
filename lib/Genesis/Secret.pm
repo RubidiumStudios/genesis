@@ -37,7 +37,7 @@ sub new {
 sub build {
 	my ($class,$type,$source,$path,%definition) = @_;
 	# FIXME: resolve multiple
-	explain("called $type -> $path");
+	trace("build called: $type -> $path");
 	bug ('Cannot call build on %s -- use build on %s', $class, __PACKAGE__)
 		if $class ne __PACKAGE__;
 
@@ -163,9 +163,13 @@ sub label {ucfirst($_[0]->type)}
 sub class_of {
 	my $type = shift;
 	__PACKAGE__."::".(({
-		dhparams => 'DHParams',
-		ssh => 'SSH',
-		rsa => 'RSA',# Put exceptions here
+		# Exceptions where ucfirst($type) doesn't match the actual class name
+		dhparams        => 'DHParams',
+		ssh             => 'SSH',
+		rsa             => 'RSA',
+		uuid            => 'UUID',
+		userprovided    => 'UserProvided',
+		'user-provided' => 'UserProvided',
 	})->{$type} || ucfirst($type));
 }
 
