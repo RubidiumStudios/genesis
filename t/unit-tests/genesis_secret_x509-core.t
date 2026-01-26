@@ -127,6 +127,16 @@ subtest 'constructor validation - valid_for formats' => sub {
 		valid_for => '24h'
 	);
 	is($hours->get('valid_for'), '24h', "valid_for hours accepted");
+
+	# Test valid_for through build() to exercise validation success path
+	# Must unset skip flag to actually run validation
+	delete local $ENV{GENESIS_SKIP_SECRET_DEFINITION_VALIDATION};
+	my $validated = Genesis::Secret->build('x509', 'kit', 'path/cert',
+		names => ['example.com'],
+		valid_for => '1y'
+	);
+	isa_ok($validated, 'Genesis::Secret::X509', "valid_for passes build() validation");
+	is($validated->get('valid_for'), '1y', "valid_for stored after validation");
 };
 
 subtest 'constructor validation - usage array' => sub {
@@ -197,6 +207,12 @@ subtest 'constructor validation - error cases' => sub {
 		names => ['example.com', '', 'other.com']
 	);
 	isa_ok($empty_entry, 'Genesis::Secret::Invalid', "empty name entry returns Invalid");
+
+	# Non-string entry in names array (catches accidentally nested YAML structures)
+	my $ref_entry = Genesis::Secret->build('x509', 'kit', 'path/cert',
+		names => ['example.com', ['nested', 'array']]
+	);
+	isa_ok($ref_entry, 'Genesis::Secret::Invalid', "reference in names array returns Invalid");
 
 	# Invalid valid_for format
 	my $bad_valid = Genesis::Secret->build('x509', 'kit', 'path/cert',
@@ -386,6 +402,21 @@ subtest 'vault_operator with invalid key dies' => sub {
 
 	ok($error, "vault_operator with invalid key dies");
 	like($error, qr/Invalid key/i, "error mentions invalid key");
+};
+
+subtest 'vault_operator ca with absolute signed_by path' => sub {
+	local $ENV{GENESIS_SKIP_SECRET_DEFINITION_VALIDATION} = 1;
+
+	# When signed_by is an absolute path, vault_operator can resolve it
+	# without needing Plan (no $self->ca call needed)
+	my $secret = Genesis::Secret::X509->new('my/secret',
+		names => ['example.com'],
+		signed_by => '/absolute/ca/path'
+	);
+
+	my $ca_op = $secret->vault_operator('ca');
+	like($ca_op, qr/vault/, "ca vault_operator contains 'vault'");
+	like($ca_op, qr/\/absolute\/ca\/path:certificate/, "ca vault_operator uses absolute path");
 };
 
 # ------------------------------------------------------------------------------
