@@ -31,3 +31,10 @@ Notes on Current/Future Pipeline Concerns
 - Currently, you can have N-1 deployed multiple times before N is deployed if it is not automatically triggered.  This means that if there was a deployment that was required to progress to the next version of the application, it might be missed if N is not deployed after each N-1 deployment.  This could lead to a situation where N is deployed without a required migration, or other necessary change that was made in N-1.  IE: the bosh release used one way of handling mtas prior to release X, then for release X, it made a new way available but still supported the old way.  At some point X+y, the old way is removed.  If N-1 was deployed multiple times, and N was not deployed until after the old way was removed, then N would be deployed without the necessary changes to handle the new way of mtas.
 
 - How can we ensure that required changes are not missed when deploying N.  Do we require that N be deployed after each N-1 deployment?  Or do we have a way of tracking what changes were made in N-1 that need to be included in N, and ensure that those changes are included when N is deployed, regardless of how many times N-1 was deployed?  If using PRs to propagate changes, how do we ensure that a) we only allow merges to N up to the required point, b) that merges are done in the correct order, and c) that we don't miss any required changes?
+
+Additional notes on workflow:
+- Sandbox can and most likely will have every change from upstream (releases and stemcells for example)
+- These changes will not trigger higher environments
+- When Staging is triggered it is expected for proceed through nonProd and Prod
+- If there are failures two possible options fail-back and fail-forwardIn the branch plan, revert may not be possible
+- Some updates (like migrations) may not allow change to be skipped, investigating tags and commit messages (Github Metadata) as a way to tag as unskippable.
