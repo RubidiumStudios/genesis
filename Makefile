@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check test test-quick test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage
+.PHONY: sanity-test compile-check pod-check pod-check-syntax pod-check-quiet test test-quick test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -23,6 +23,18 @@ compile-check:
 		echo "$$failed module(s) failed to compile"; \
 		exit 1; \
 	fi
+
+pod-check:
+	@echo "Checking POD coverage for all modules..."
+	@t/bin/pod-coverage-check
+
+pod-check-syntax:
+	@echo "Checking POD coverage and syntax for all modules..."
+	@t/bin/pod-coverage-check --syntax
+
+pod-check-quiet:
+	@echo "Checking POD coverage (summary only)..."
+	@t/bin/pod-coverage-check --quiet
 
 sanity-test: compile-check
 	@bash -c 'set -o pipefail; export GENESIS_OUTPUT_COLUMNS=120; perl -Ilib -c bin/genesis && perl -Ilib -- bin/genesis -D ping 2>&1'
