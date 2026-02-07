@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check pod-check pod-check-syntax pod-check-quiet test test-quick test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage
+.PHONY: sanity-test compile-check pod-check pod-check-syntax pod-check-quiet test test-quick test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -97,3 +97,21 @@ dev-release:
 
 clean:
 	rm -f genesis-*
+
+# AI-powered POD documentation validation
+# Requires: uv, claude CLI
+#
+# Usage:
+#   make pod-validate-ai                    # Validate all POD modules
+#   make pod-validate-ai MODULES="Genesis::Kit Genesis::Env"
+#   make pod-validate-changed               # Validate changed files only
+#   make pod-validate-changed BASE=main     # Compare to specific branch
+pod-validate-ai:
+ifdef MODULES
+	@t/bin/pod-validate-ai $(MODULES)
+else
+	@t/bin/pod-validate-ai --all
+endif
+
+pod-validate-changed:
+	@t/bin/pod-validate-ai --changed --base $(or $(BASE),main)
