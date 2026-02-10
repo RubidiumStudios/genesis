@@ -78,13 +78,48 @@ A class variable that allows oversized masks. The default value is 1 (true). If 
   my $span = IPv4::Span->new($string_description);
   my $span = IPv4::Span->new($start [, $end]);
 
-Creates a new C<IPv4::Span> object. The input can be two IPv4 addresses representing the start and end of the span, just a single ip address, or a string in the format 'start-end' representing the range of the span, or a 'start/mask' representing a CIDR block.
+Creates a new C<IPv4::Span> object. Accepted input forms:
 
-  # Example
+=over 4
+
+=item * Two addresses: C<< ->new($start, $end) >>
+
+=item * Single address string: C<< ->new('192.168.1.1') >>
+
+=item * Dash range string: C<< ->new('192.168.1.1-192.168.1.10') >>
+
+=item * CIDR string: C<< ->new('10.0.0.0/8') >>
+
+=item * Two-element array ref (start/end addresses): C<< ->new([$start, $end]) >>
+
+=item * Two-element array ref (start address, integer end): C<< ->new([$addr, $int]) >>
+
+=item * Integer: C<< ->new(3232235521) >> (treated as a single address)
+
+=back
+
+When a CIDR is given and the address is not the block start, behavior depends on C<$IPv4::Span::allow_oversized_mask>: if true (the default), the address is silently adjusted to the block start; if false, the constructor dies.
+
+Dies if the input is invalid:
+
+=over 4
+
+=item * Array reference with a separate end value: C<"Invalid mix of arguments - array and end value">
+
+=item * Start contains a dash or slash when end is also given: C<"Invalid IPv4::Span arguments: '...', '...'">
+
+=item * End value is not a valid address or mask: C<"Invalid IPv4::Span arguments: '...', '...'">
+
+=item * CIDR address is not the start of the mask block (when C<$IPv4::Span::allow_oversized_mask> is false): C<"Address ... is not the start of the mask block .../N">
+
+=back
+
+  # Examples
   my $span = IPv4::Span->new('192.168.1.1', '192.168.1.10');
   my $span = IPv4::Span->new('172.16.24.24');
   my $span = IPv4::Span->new('192.168.1.1-192.168.1.10');
   my $span = IPv4::Span->new('10.0.0.0/8');
+  my $span = IPv4::Span->new([IPv4->address('10.0.0.1'), IPv4->address('10.0.0.5')]);
 
 =head2 clone
 
@@ -123,7 +158,7 @@ Returns the span as a string.
 
   my $start = $span->start();
 
-Returns the start address of the span.
+Returns the start C<IPv4::Address> of the span.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.1', '192.168.1.10');
@@ -134,7 +169,7 @@ Returns the start address of the span.
 
   my $end = $span->end();
 
-Returns the end address of the span.
+Returns the end C<IPv4::Address> of the span.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.1', '192.168.1.10');
@@ -163,7 +198,7 @@ Determines if the span contains the given address, span, or range.
 
   my $result = $span1->cmp($span2);
 
-Compares two spans.  It first compares their starting addresses, and if they are equal, it compares their ending addresses.  Returns -1, 0, or 1 if the first span is less than, equal to, or greater than the second span, respectively.
+Compares two spans. It first compares their starting addresses, and if they are equal, it compares their ending addresses, then sizes as a final tiebreaker. Returns -1, 0, or 1. The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
 
   # Example
   my $span1 = IPv4::Span->new('192.168.1.1', '192.168.1.5');
@@ -173,39 +208,35 @@ Compares two spans.  It first compares their starting addresses, and if they are
 
 =head2 numeric_cmp
 
-  my $result = $span1->numeric_cmp($span2); # Compares two spans
+  my $result = $span1->numeric_cmp($span2); # Compares two spans by size
   my $result = $span1 <=> 6;   # Compares the size of the span to the number 6
 
-Compares two IPv4 objects numerically.
+Compares two IPv4 objects numerically based on their sizes. Returns -1, 0, or 1 if the size of the first object is less than, equal to, or greater than the size of the second object, respectively.
 
-It first compares their starting addresses, and if they are equal, it compares their ending addresses, and if those are equal it will compare the size of the objects (IPv4::Range objects can have the same start and end addresses but different sizes)
+When compared to an integer, it compares the size of the span to the integer. The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
 
-Returns -1, 0, or 1 if the first object is less than, equal to, or greater than the second 
-object, respectively.
-
-When compared to an integer, it will compare the size of the object to the integer.  In this scenario, the span object must be on the left side of the comparison operator.
-
-  # Example
+  # Example - same size, different addresses
   my $span1 = IPv4::Span->new('192.168.1.1', '192.168.1.5');
   my $span2 = IPv4::Span->new('192.168.1.6', '192.168.1.10');
   my $result = $span1->numeric_cmp($span2);
-  print "Numeric comparison result: $result\n"; # prints '-1'
+  print "Numeric comparison result: $result\n"; # prints '0' (both have 5 addresses)
 
+  # Example - different sizes
   $span1 = IPv4::Span->new('192.168.1.1', '192.168.1.10');
   $span2 = IPv4::Span->new('192.168.1.1', '192.168.1.5');
   $result = $span1->numeric_cmp($span2);
-  print "Numeric comparison result: $result\n"; # prints '1'
+  print "Numeric comparison result: $result\n"; # prints '1' (10 > 5)
 
+  # Example - compare to integer
   $span1 = IPv4::Span->new('192.168.1.1', '192.168.1.5');
-  $span2 = IPv4::Span->new('192.168.1.1', '192.168.1.5');
-  $result = $span1->numeric_cmp($span2);
-  print "Numeric comparison result: $result\n"; # prints '0'
+  $result = $span1 <=> 5;
+  print "Numeric comparison result: $result\n"; # prints '0' (size is 5)
 
 =head2 eq
 
   my $bool = $span1->eq($span2);
 
-Checks if two spans are equal based on their start and end addresses.
+Checks if two spans are equal based on their string representations. The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
 
   # Example
   my $span1 = IPv4::Span->new('192.168.1.1', '192.168.1.5');
@@ -213,11 +244,28 @@ Checks if two spans are equal based on their start and end addresses.
   my $bool = $span1->eq($span2);
   print "Equality: $bool\n"; # prints '1'
 
+=head2 numeric_eq
+
+  my $bool = $span1->numeric_eq($span2);
+
+Checks if two IPv4 objects are numerically equal by size. Returns true if the sizes are equal, false otherwise. Can also compare the size to an integer. The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
+
+  # Example
+  my $span1 = IPv4::Span->new('192.168.1.0', '192.168.1.9');
+  my $span2 = IPv4::Span->new('10.0.0.0', '10.0.0.9');
+  my $bool = $span1->numeric_eq($span2);
+  print $bool; # prints '1' (both have size 10)
+
+  # Example with integer
+  my $span = IPv4::Span->new('192.168.1.0', '192.168.1.4');
+  my $bool = $span->numeric_eq(5);
+  print $bool; # prints '1'
+
 =head2 next
 
   my $next = $span->next();
 
-Returns the next address in the span. If the end of the span is reached, it returns C<undef>.  Any further call to C<next> will return the first address in the span, and repeat the cycle.
+Returns the next C<IPv4::Address> in the span, or C<undef> when the end of the span is reached. After returning C<undef>, the next call will restart from the first address in the span.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.1', '192.168.1.3');
@@ -259,9 +307,9 @@ Returns all addresses in the span as an array.
 
   my $slice = $span->slice($size, $offset = 0);
 
-Given a size and an optional offset, returns a new span of the given size starting at the offset. If the offset is negative, the slice will end at the given offset, with the start being the nth address before the end of the span that accommodates the given size. An offset of -1 will represent the last address in the span.
+Given a size and an optional offset (default 0), returns a new C<IPv4::Span> of the given size starting at the offset. If the offset is negative, the slice will end at the given offset, with the start being the nth address before the end of the span that accommodates the given size. An offset of -1 will represent the last address in the span.
 
-If there is not enough space in the span to accommodate the requested size and offset, the offset will be maintained, while the size will be reduced to the maximum possible size.
+If there is not enough space in the span to accommodate the requested size and offset, the offset will be maintained, while the size will be reduced to the maximum possible size. Returns an empty C<IPv4::Range> if the offset is beyond the span or the size is 0.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.1', '192.168.1.10');
@@ -278,16 +326,18 @@ If there is not enough space in the span to accommodate the requested size and o
 
   my @cidrs = $span->cidrs();
 
-Returns a list of CIDR notation strings that represent the span. If the span represents a single CIDR block, returns a single-element list. If the span covers multiple non-contiguous CIDR blocks, returns multiple CIDR strings.
+Returns a list of CIDR notation strings that cover the span exactly. A CIDR-aligned span returns a single string; an arbitrary range returns multiple CIDR blocks that together represent the span.
 
-  # Example
+  # Example - CIDR-aligned
   my $span1 = IPv4::Span->new('192.168.1.0/24');
   my @cidrs1 = $span1->cidrs();
   print "CIDRs: @cidrs1\n"; # prints 'CIDRs: 192.168.1.0/24'
-  
-  my $span2 = IPv4::Span->new('192.168.1.1-192.168.1.5');  
+
+  # Example - non-aligned range decomposes into multiple CIDRs
+  my $span2 = IPv4::Span->new('192.168.1.1-192.168.1.5');
   my @cidrs2 = $span2->cidrs();
-  print "CIDRs: @cidrs2\n"; # prints multiple CIDR blocks
+  print "CIDRs: @cidrs2\n";
+  # prints 'CIDRs: 192.168.1.1/32 192.168.1.2/31 192.168.1.4/31'
 
 =head2 cidr
 
@@ -313,9 +363,11 @@ This method is useful for determining if a span can be represented as a single C
 Adds one or more spans/addresses/ranges/numbers to the span. For each argument:
 - If a number, grows the span by that many addresses
 - If negative, grows backward from start address
-- If positive, grows forward from end address  
+- If positive, grows forward from end address
 - If a span/address/range, combines them into a single span if contiguous
 - If not contiguous, returns an IPv4::Range containing both spans
+
+Dies with C<"Cannot add an IPv4::Span object to a number"> if the span appears on the right side of an integer addition (e.g., C<5 + $span>).
 
 Returns a simplified result (address for single IP, span for contiguous range).
 
@@ -344,10 +396,12 @@ Returns a simplified result (address for single IP, span for contiguous range).
 
 Subtracts one or more spans/addresses/ranges/numbers from the span. For each argument:
 - If a number, shrinks the span by that many addresses
-- If negative, shrinks from start address 
+- If negative, shrinks from start address
 - If positive, shrinks from end address
 - If a span/address/range, removes it from the original span
 - If removal creates gaps, returns an IPv4::Range
+
+Dies with C<"Cannot subtract an IPv4::Span object from a number"> if the span appears on the right side of an integer subtraction (e.g., C<5 - $span>). Returns an empty range if the number exceeds the span size.
 
 Returns a simplified result (address for single IP, span for contiguous range).
 
@@ -397,7 +451,7 @@ Returns an array containing the span itself. This method exists for compatibilit
 
   my $addr = $span->network();
 
-Returns the network address (the first address in the span). Similar to NetAddr::IP's network() method.
+Returns the network C<IPv4::Address> (the first address in the span). Similar to NetAddr::IP's network() method.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.0/24');
@@ -407,7 +461,7 @@ Returns the network address (the first address in the span). Similar to NetAddr:
 
   my $addr = $span->broadcast();
 
-Returns the broadcast address (the last address in the span). Similar to NetAddr::IP's broadcast() method.
+Returns the broadcast C<IPv4::Address> (the last address in the span). Similar to NetAddr::IP's broadcast() method.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.0/24');
@@ -417,8 +471,7 @@ Returns the broadcast address (the last address in the span). Similar to NetAddr
 
   my $addr = $span->first();
 
-Returns the first usable host address in the span (typically network address + 1). 
-Similar to NetAddr::IP's first() method.
+Returns the first usable host C<IPv4::Address> in the span (typically network address + 1). Similar to NetAddr::IP's first() method.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.0/24');
@@ -431,8 +484,7 @@ Similar to NetAddr::IP's first() method.
 
   my $addr = $span->last();
 
-Returns the last usable host address in the span (typically broadcast address - 1).
-Similar to NetAddr::IP's last() method.
+Returns the last usable host C<IPv4::Address> in the span (typically broadcast address - 1). Similar to NetAddr::IP's last() method.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.0/24');
@@ -445,33 +497,26 @@ Similar to NetAddr::IP's last() method.
 
   my $usable_range = $span->usable_hosts();
 
-Returns a new range containing only the usable host addresses (excludes network and broadcast addresses if span size > 1).
-Similar to iterating through usable addresses with NetAddr::IP's nth() method.
+Returns an C<IPv4::Range> containing only the usable host addresses (excludes network and broadcast). For spans with more than one address, this is C<< $self->first >> through C<< $self->last >>. For single-address spans (size <= 1), returns an empty C<IPv4::Range> (size 0) because the sole address is the network address with no usable hosts.
 
   # Example
   my $span = IPv4::Span->new('192.168.1.0/24');
   my $usable = $span->usable_hosts();
   print $usable->range(); # prints '192.168.1.1-192.168.1.254'
 
-  my $small = IPv4::Span->new('192.168.1.1');
-  my $empty = $small->usable_hosts();
-  print $empty->size(); # prints '0' (no usable hosts in a single-IP span)
+  my $single = IPv4::Span->new('192.168.1.1');
+  my $empty = $single->usable_hosts();
+  print $empty->size(); # prints '0'
 
 =head2 nth($index [, $include_reserved])
 
-Returns the IPv4::Address at the specified index within the span, or undef if the
-index is out of range. This method is similar to the nth() method in NetAddr::IP.
+Returns the C<IPv4::Address> at the specified index within the span, or C<undef> if the index is out of bounds after any negative-index conversion. Similar to NetAddr::IP's C<nth()>.
 
-If called without the optional $include_reserved parameter (or with a false value),
-it will skip the network and broadcast addresses in standard networks (/30 or larger).
-In this case, index 0 refers to the first usable host address (typically network+1).
+Without C<$include_reserved> (or with a false value), network and broadcast addresses are excluded for spans of size > 1: the method internally constructs a usable-host sub-span (C<< $self->first->to($self->last) >>) and indexes into that. Index 0 is the first usable host.
 
-If called with $include_reserved set to a true value, it will include network and
-broadcast addresses, and index 0 will refer to the network address.
+With C<$include_reserved> set to true, all addresses are included and index 0 is the network address.
 
-Negative indices count from the end of the span (with -1 representing the last address).
-If $include_reserved is false, this will be the last usable host address rather than
-the broadcast address.
+Negative indices count from the end (C<-1> is the last address in the selected range). If a negative index converts to a position before the start, C<undef> is returned.
 
 Examples:
 
@@ -491,7 +536,11 @@ Examples:
   my $p2p_first = $p2p->nth(0);          # Returns 10.0.0.0
   my $p2p_second = $p2p->nth(1);         # Returns 10.0.0.1
 
-=head2 _plus (Internal)
+=head1 INTERNAL METHODS
+
+Private methods used internally and for overloading support. These should not be called directly.
+
+=head2 __plus
 
   my $result = $span->__plus($other, $swap);
 
@@ -502,16 +551,22 @@ Internal method called by overloaded + operator, as well as the add method. Hand
 - Returns IPv4::Range for non-contiguous results
 - Enforces integer must be on right side
 
-=head2 _minus (Internal)
+=head2 __minus
 
-  my $result = $span->__minus($other, $swap); 
+  my $result = $span->__minus($other, $swap);
 
 Internal method called by overloaded - operator, as well as the subtract method. Handles:
 
 - Subtracting integers to shrink the span
 - Subtracting spans or addresses for removing ranges
-- Returns IPv4::Range for non-contiguous results 
+- Returns IPv4::Range for non-contiguous results
 - Enforces integer must be on right side
+
+=head2 _cidr_block
+
+  my ($start, $end) = _cidr_block($address, $mask);
+
+Internal helper that returns the start and end C<IPv4::Address> objects of the CIDR block for the given address and mask. Delegates to C<< IPv4::Address->in_cidr >>. Used by the constructor when parsing CIDR notation input.
 
 =head1 OPERATOR OVERLOADS
 
