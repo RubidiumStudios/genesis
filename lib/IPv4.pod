@@ -104,23 +104,31 @@ Similarly, when you add or subtract an integer from an Address, it will return a
 
 Creates a new IPv4 object. The type of object returned depends on the input arguments. If the input represents a single address, a C<IPv4::Address> object is returned. If the input represents a span of addresses, a C<IPv4::Span> object is returned. If the input represents a range of addresses, a C<IPv4::Range> object is returned.
 
+Dies if the input cannot be parsed as a valid IPv4 address, span, or range. The specific error depends on which child constructor is invoked — see the C<new> method documentation for C<IPv4::Address>, C<IPv4::Span>, and C<IPv4::Range>.
+
 =head2 address
 
   my $address = IPv4->address(@args);
 
-Creates a new C<IPv4::Address> object. The input arguments should represent a single IPv4 address.
+Creates a new C<IPv4::Address> object. Accepts a dotted-decimal string, an integer, an array reference of 4 octets, or a resolvable hostname.
+
+Dies if the input is not a valid IPv4 address. See L<IPv4::Address/new> for details.
 
 =head2 span
 
   my $span = IPv4->span(@args);
 
-Creates a new C<IPv4::Span> object. The input arguments should represent a span of IPv4 addresses.
+Creates a new C<IPv4::Span> object. Accepts a dash-separated range (C<start-end>), a CIDR block (C<addr/mask>), a single address, or two address arguments.
+
+Dies if the input is not a valid IPv4 span. See L<IPv4::Span/new> for details.
 
 =head2 range
 
   my $range = IPv4->range(@args);
 
-Creates a new C<IPv4::Range> object. The input arguments should represent a range of IPv4 addresses.
+Creates a new C<IPv4::Range> object. Accepts any combination of IP addresses, CIDR blocks, dash-separated ranges, or comma-separated lists thereof, as well as C<IPv4::Address>, C<IPv4::Span>, and C<IPv4::Range> objects.
+
+Dies if the input is not a valid IPv4 range. See L<IPv4::Range/new> for details.
 
 =head1 INTERNAL METHODS
 
@@ -128,19 +136,19 @@ Creates a new C<IPv4::Range> object. The input arguments should represent a rang
 
   my @args = __strip_call_ref(@args);
 
-Strips the call reference from the input arguments. This is an internal method and should not be used directly.
+Strips the leading class name from C<@args> if it matches C<IPv4>. This allows methods to work both as class methods (C<< IPv4->new(...) >>) and as plain function calls. Returns the remaining arguments as a list. This is an internal method and should not be called directly.
 
 =head2 __is_integer
 
   if (IPv4::__is_integer($arg)) { ... }
 
-Returns true if the argument is an integer.  Intended for internal use only by the IPv4 children classes.
+Returns true if C<$arg> is a plain scalar (not a reference) that matches the pattern C</^-?\d+$/>. Used by child classes to distinguish integer arguments from IPv4 strings or objects when handling operator overloading and method dispatch. This is an internal method and should not be called directly.
 
 =head2 __autovivify
 
   my $obj = __autovivify($arg);
 
-Autovivifies the argument into an IPv4 object.  Intended for internal use only by the IPv4 children classes.  Dies if the argument cannot be used to create an IPv4 child class object.
+Converts C<$arg> into the appropriate IPv4 object. If C<$arg> is already an C<IPv4::Address>, C<IPv4::Span>, or C<IPv4::Range>, returns its simplified form. Otherwise, attempts to parse it via C<< IPv4->new($arg) >>. Dies with C<"Invalid IPv4 literal or object ..."> if the argument cannot be converted. Used internally by child classes to accept raw strings wherever an IPv4 object is expected.
 
 =head1 AUTHOR
 

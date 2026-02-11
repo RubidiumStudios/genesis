@@ -58,11 +58,14 @@ Dies if the input is invalid:
 
 =back
 
-  # Examples
+  # All of the following produce an address that prints '192.168.0.1':
   my $addr1 = IPv4::Address->new('192.168.0.1');
   my $addr2 = IPv4::Address->new(3232235521);
   my $addr3 = IPv4::Address->new([192, 168, 0, 1]);
+  print $addr1;  # prints '192.168.0.1'
+
   my $addr4 = IPv4::Address->new('localhost');
+  print $addr4;  # prints '127.0.0.1'
 
 =head2 all_for_host (class method)
 
@@ -73,11 +76,16 @@ Returns all IPv4 addresses associated with the given hostname. In list context, 
 
 Dies with C<"Invalid host: `...`"> if the hostname cannot be resolved.
 
-  # Example
+  # Example - list context
   my @addresses = IPv4::Address->all_for_host('localhost');
   foreach my $address (@addresses) {
     print $address->address(); # prints '127.0.0.1'
   }
+
+  # Example - scalar context
+  my $addresses = IPv4::Address->all_for_host('localhost');
+  print ref($addresses);       # prints 'ARRAY'
+  print $addresses->[0];       # prints '127.0.0.1'
 
 =head2 address
 
@@ -177,6 +185,8 @@ Returns the start and end C<IPv4::Address> objects of the CIDR block that the ad
 
 Adds a specified number to the IPv4 address and returns a new C<IPv4::Address>.
 
+Dies with C<"IPv4 Address space overflow when adding N to ADDR"> if the result would exceed 255.255.255.255.
+
   # Example
   my $address = IPv4::Address->new('192.168.0.1');
   my $new_address = $address->add(5);
@@ -187,6 +197,8 @@ Adds a specified number to the IPv4 address and returns a new C<IPv4::Address>.
   my $new_address = $address->subtract($count);
 
 Subtracts a specified number from the IPv4 address and returns a new C<IPv4::Address>.
+
+Dies with C<"IPv4 Address space underflow when subtracting N from ADDR"> if the result would go below 0.0.0.0.
 
   # Example
   my $address = IPv4::Address->new('192.168.0.10');
@@ -209,9 +221,9 @@ Dies with C<"Cannot diff an address with an integer - did you mean to call `->su
 
 =head2 cmp
 
-  my $result = $address1->cmp($address2);
+  my $result = $address1->cmp($other);
 
-Compares two IPv4 addresses. Returns -1, 0, or 1 if the first address is less than, equal to, or greater than the second address, respectively. Comparison is based on the integer value of the addresses, with size as a tiebreaker for mixed types (e.g., comparing an address to a span). The C<$swap> parameter is set automatically by Perl when the object appears on the right side of an operator (e.g., C<$string cmp $address>) and should not be passed directly.
+Compares two IPv4 addresses. Returns -1, 0, or 1 if the first address is less than, equal to, or greater than C<$other>, respectively. Comparison is based on the integer value of the addresses, with size as a tiebreaker for mixed types (e.g., comparing an address to a span). When called via Perl's operator overloading, an additional argument indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<cmp> method would be used.
 
   # Example
   my $address1 = IPv4::Address->new('192.168.0.1');
@@ -221,9 +233,9 @@ Compares two IPv4 addresses. Returns -1, 0, or 1 if the first address is less th
 
 =head2 numeric_cmp
 
-  my $result = $address1->numeric_cmp($address2);
+  my $result = $address1->numeric_cmp($other);
 
-Compares two IPv4 objects by size. Returns -1, 0, or 1 if the size of the first object is less than, equal to, or greater than the size of the second, respectively. Can also compare the size to an integer. While the size of an address is always 1, this method is included for polymorphic consistency with C<IPv4::Span> and C<IPv4::Range>. The C<$swap> parameter is set automatically by Perl when the object appears on the right side of an operator and should not be passed directly.
+Compares two IPv4 objects by size. Returns -1, 0, or 1 if the size of the first object is less than, equal to, or greater than the size of C<$other>, respectively. Can also compare the size to an integer. While the size of an address is always 1, this method is included for polymorphic consistency with C<IPv4::Span> and C<IPv4::Range>. When called via Perl's operator overloading, an additional argument indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<numeric_cmp> method would be used.
 
   # Example - two addresses (always equal, both size 1)
   my $address1 = IPv4::Address->new('192.168.0.1');
@@ -266,9 +278,9 @@ Creates a new C<IPv4::Span> object representing the range between the current ad
 
 =head2 numeric_eq
 
-  my $bool = $address1->numeric_eq($address2);
+  my $bool = $address1->numeric_eq($other);
 
-Checks if two IPv4 addresses are numerically equal. Returns true if they are equal, false otherwise.
+Returns true if two IPv4 addresses are numerically equal, false otherwise.
 
   # Example
   my $address1 = IPv4::Address->new('192.168.0.1');
@@ -328,18 +340,18 @@ Returns an array containing a single span representing this address.
 
   my $next_address = $address->next();
 
-Returns the next address in sequence when iterating. Returns undef after the first call.
+Advances the internal iterator and returns the current C<IPv4::Address>, or C<undef> when exhausted. Since an address represents a single value, the first call returns the address itself and the second returns C<undef>. The iterator auto-resets after returning C<undef>. Use C<reset()> to rewind mid-iteration.
 
   # Example
   my $address = IPv4::Address->new('192.168.0.1');
   print $address->next()->address(); # prints '192.168.0.1'
-  print $address->next(); # prints nothing (undef)
+  print defined($address->next()) ? 'defined' : 'undef'; # prints 'undef'
 
 =head2 reset
 
   $address->reset();
 
-Resets the iteration state for the next() method.
+Resets the internal iterator so the next call to C<next()> returns the address again. Does not return a meaningful value.
 
   # Example
   my $address = IPv4::Address->new('192.168.0.1');
@@ -376,10 +388,14 @@ Returns the address in CIDR notation with a /32 suffix, since individual address
 
 Returns an array containing the address in CIDR notation. For individual addresses, this always returns a single-element array containing the address with a /32 suffix. In scalar context, returns the count of CIDR strings (always 1 for an address).
 
-  # Example
+  # Example - list context
   my $addr = IPv4::Address->new('192.168.1.1');
   my @cidrs = $addr->cidrs();
   print "CIDRs: @cidrs\n"; # prints 'CIDRs: 192.168.1.1/32'
+
+  # Example - scalar context (returns count, not a CIDR string)
+  my $count = $addr->cidrs();
+  print "Count: $count\n";  # prints 'Count: 1'
 
 =head1 INTERNAL METHODS
 
@@ -389,13 +405,13 @@ Private methods used internally and for overloading support. These should not be
 
   my $result = $address->__minus($other, $swap);
 
-Internal method called by the overloaded C<-> operator. When C<$other> is an integer, returns a new C<IPv4::Address> decremented by that amount. When C<$other> is another C<IPv4::Address>, returns the integer difference between the two addresses. When C<$other> is a span or range, delegates to C<< IPv4::Range->subtract >>. Dies on address space underflow or if C<$swap> is true with an integer (cannot subtract an address from a number). The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
+Internal method called by the overloaded C<-> operator. When C<$other> is an integer, returns a new C<IPv4::Address> decremented by that amount. When C<$other> is another C<IPv4::Address>, returns the integer difference between the two addresses. When C<$other> is a span or range, delegates to C<< IPv4::Range->subtract >>. Dies on address space underflow or if C<$swap> is true with an integer (cannot subtract an address from a number). When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__minus> method would be used.
 
 =head2 __plus
 
   my $result = $address->__plus($other, $swap);
 
-Internal method called by the overloaded C<+> operator. When C<$other> is an integer, returns a new C<IPv4::Address> incremented by that amount. When C<$other> is a span or range, delegates to C<< $other->add($self) >>. When C<$other> is another address, returns a simplified range containing both. Dies on address space overflow or if C<$swap> is true with an integer (cannot add an address to a number). The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
+Internal method called by the overloaded C<+> operator. When C<$other> is an integer, returns a new C<IPv4::Address> incremented by that amount. When C<$other> is a span or range, delegates to C<< $other->add($self) >>. When C<$other> is another address, returns a simplified range containing both. Dies on address space overflow or if C<$swap> is true with an integer (cannot add an address to a number). When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__plus> method would be used.
 
 =head1 OVERLOADED OPERATORS
 

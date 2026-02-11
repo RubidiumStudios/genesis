@@ -61,10 +61,11 @@ Dies if the input is invalid:
 =back
 
   # Examples
-  my $range1 = IPv4::Range->new('192.168.1.1');
-  my $range2 = IPv4::Range->new('192.168.1.0/24');
-  my $range3 = IPv4::Range->new('192.168.1.1-192.168.1.10');
-  my $range4 = IPv4::Range->new(['192.168.1.1', '192.168.1.10']);
+  my $range = IPv4::Range->new('192.168.1.1');
+  my $range = IPv4::Range->new('192.168.1.0/24');
+  my $range = IPv4::Range->new('192.168.1.1-192.168.1.10');
+  my $range = IPv4::Range->new(['192.168.1.1', '192.168.1.10']);
+  print $range->range();  # prints '192.168.1.1-192.168.1.10'
 
 =head2 compact
 
@@ -241,10 +242,10 @@ Adds one or more spans to the range. Returns a new C<IPv4::Range>.
 
 =head2 cmp
 
-  my $result = $range1->cmp($range2);
+  my $result = $range1->cmp($other);
   my $result = $range1 cmp $range2;
 
-Compares two ranges span-by-span using each span's start and end addresses. Returns -1, 0, or 1. The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
+Compares two ranges span-by-span using each span's start and end addresses. Returns -1, 0, or 1. C<$other> can be any IPv4 object. When called via Perl's operator overloading, an additional argument indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<cmp> method would be used.
 
   # Example
   my $range1 = IPv4::Range->new('192.168.1.1-192.168.1.10');
@@ -256,22 +257,21 @@ Compares two ranges span-by-span using each span's start and end addresses. Retu
 
 =head2 eq
 
-  my $bool = $range1->eq($range2);
+  my $bool = $range1->eq($other);
 
-Checks if two ranges are equal based on their string representations. The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
+Returns true if two ranges are equal based on their string representations.
 
   # Example
   my $range1 = IPv4::Range->new('192.168.1.1-192.168.1.10');
   my $range2 = IPv4::Range->new('192.168.1.1-192.168.1.10');
-  my $bool = $range1->eq($range2);
-  print $bool; # prints '1'
+  print $range1->eq($range2); # prints '1'
 
 =head2 numeric_eq
 
-  my $bool = $range1->numeric_eq($range2);
+  my $bool = $range1->numeric_eq($other);
   my $bool = $range1 == 5;     # Compares size to a number
 
-Checks if two ranges have the same size. Returns true if their sizes are equal, false otherwise. The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
+Returns true if two ranges have the same size, false otherwise.
 
   # Example
   my $range1 = IPv4::Range->new('192.168.1.1-192.168.1.5');
@@ -283,10 +283,10 @@ Checks if two ranges have the same size. Returns true if their sizes are equal, 
 
 =head2 numeric_cmp
 
-  my $result = $range1->numeric_cmp($range2);
+  my $result = $range1->numeric_cmp($other);
   my $result = $range1 <=> 6;   # Compares the size of the range to the number 6
 
-Compares two ranges numerically based on their sizes. Returns -1, 0, or 1. The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
+Compares two ranges numerically based on their sizes. Returns -1, 0, or 1. C<$other> can be any IPv4 object or integer. When called via Perl's operator overloading, an additional argument indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<numeric_cmp> method would be used.
 
   # Example
   my $range1 = IPv4::Range->new('192.168.1.1-192.168.1.5');
@@ -330,11 +330,9 @@ Resets the internal iterator so the next call to C<next()> returns the first add
 
 =head2 contains
 
-  my $bool = $range->contains($addr);
-  my $bool = $range->contains($span);
-  my $bool = $range->contains($other_range);
+  my $bool = $range->contains($obj);
 
-Checks if the range contains the given address, span, or range.
+Returns true if the range contains the given C<$obj>, which may be an address, span, or range.
 
   # Example
   my $range = IPv4::Range->new('192.168.1.1-192.168.1.10');
@@ -386,7 +384,7 @@ Private methods used internally and for overloading support. These should not be
 
   my $result = $range->__minus($other, $swap);
 
-Internal method called by the overloaded C<-> operator. Dies if C<$other> is an integer, since adding/subtracting integers on ranges is undefined. When C<$other> is an IPv4 object, subtracts it from the range (or vice versa if C<$swap> is true). The C<$swap> parameter is used internally by Perl's operator overloading and should not be passed directly.
+Internal method called by the overloaded C<-> operator. Dies if C<$other> is an integer, since adding/subtracting integers on ranges is undefined. When C<$other> is an IPv4 object, subtracts it from the range (or vice versa if C<$swap> is true). When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__minus> method would be used.
 
 =head1 OVERLOADED OPERATORS
 
@@ -429,6 +427,14 @@ Internal method called by the overloaded C<-> operator. Dies if C<$other> is an 
 
   if ($range1 == $range2) { ... }   # Compare sizes
   if ($range1 eq $range2) { ... }   # Compare exact ranges
+
+=item * Inequality (!=)
+
+  if ($range1 != $range2) { ... }   # Compare sizes (negated)
+
+=item * Copy (=)
+
+  my $copy = $range;  # Creates a clone (applied on +=, -=, etc.)
 
 =back
 
