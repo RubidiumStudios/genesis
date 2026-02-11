@@ -195,6 +195,10 @@ sub eq($self, $other, $swap = 0) {
 	return "$self" eq "$other";
 }
 
+sub numeric_eq($self, $other, $swap=0) {
+	return $self->numeric_cmp($other) == 0 ? 1 : 0;
+}
+
 sub add ($self, @args) {
 	my $result = $self->clone();
 	$result += $_ for @args;

@@ -178,6 +178,10 @@ sub numeric_cmp($self, $other, $swap=0) {
 	return $swap ? -$r : $r;
 }
 
+sub numeric_eq($self, $other, $swap=0) {
+	return $self->numeric_cmp($other) == 0 ? 1 : 0;
+}
+
 sub __minus($self, $other, $swap=0) {
 	if (IPv4::__is_integer($other)) {
 		die "Cannot subtract an address from an integer" if $swap;
