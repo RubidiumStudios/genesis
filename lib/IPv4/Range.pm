@@ -158,7 +158,7 @@ sub slice($self, $size, $offset=0) {
 		# Reduce size if the offset is greater than the size of the span
 		$size = $self->size - $offset;
 	}
-	
+
   my $slice = IPv4->range();
 	for my $span ($self->spans) {
 		if ($offset > $span->size -1) {
@@ -203,7 +203,7 @@ sub __minus($self, $other, $swap = 0) {
 	# FIXME: Shouldn't we just use the size of the range in the following case?
 	die "Invalid subtraction between IPv4::Range and integer"
 		if (IPv4::__is_integer($other));
-	
+
 	my $obj = IPv4::__autovivify($other);
 	return $swap ? $obj->subtract($self) : $self->subtract($obj);
 }
