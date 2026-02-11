@@ -1509,11 +1509,7 @@ sub _calculate_subnet_allocation {
 			' (has %d, needs %d)',
 			$target, $available, $needed
 		) if ($available < $needed);
-		my ($additional, $still_needed) = $available->slice($needed);
-		bug(
-			"Failed to allocate available range for network '%s' allocation",
-			$target
-		) if $still_needed;
+		my $additional = $available->slice($needed);
 		return IPv4->new($existing)->add($additional)->simplify;
 	}
 	return $existing if $needed == 0;
