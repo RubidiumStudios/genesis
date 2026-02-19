@@ -51,9 +51,10 @@ EOF
 		if ($pipeline->{pipeline}{registry}{uri}) {
 			$registry_prefix = $pipeline->{pipeline}{registry}{uri} . "/";
 			if ($pipeline->{pipeline}{registry}{username}) {
+				my $username_as_yaml = string_to_yaml($pipeline->{pipeline}{registry}{username});
 				my $registry_password_as_yaml = string_to_yaml($pipeline->{pipeline}{registry}{password});
 				$registry_creds = <<EOF
-          username: $pipeline->{pipeline}{registry}{username},
+          username: "$username_as_yaml",
           password: "$registry_password_as_yaml",
 EOF
 			}
@@ -1107,10 +1108,9 @@ EOF
 	if ($pipeline->{pipeline}{registry}{uri}) {
 		$registry_prefix = $pipeline->{pipeline}{registry}{uri} . "/";
 		if ($pipeline->{pipeline}{registry}{username}) {
-			my $username_as_yaml = string_to_yaml($pipeline->{pipeline}{registry}{username});
 			$registry_password_as_yaml = string_to_yaml($pipeline->{pipeline}{registry}{password});
 			$registry_creds = <<EOF
-      username: "$username_as_yaml"
+      username: $pipeline->{pipeline}{registry}{username}
       password: "$registry_password_as_yaml"
 EOF
 		}
