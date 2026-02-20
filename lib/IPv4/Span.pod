@@ -131,11 +131,6 @@ Dies if the input is invalid:
 
 Returns a clone of the span.
 
-  # Example
-  my $span = IPv4::Span->new('192.168.1.1', '192.168.1.10');
-  my $clone = $span->clone();
-  print "Clone: ", $clone->range(), "\n"; # prints '192.168.1.1-192.168.1.10'
-
 =head2 size
 
   my $size = $span->size();
@@ -553,6 +548,17 @@ Internal method called by overloaded + operator, as well as the add method. Hand
 
 Dies with C<"Cannot add an IPv4::Span object to a number"> if C<$swap> is true (cannot add a span to a number).
 
+  # Example - add integer to grow span forward
+  my $span = IPv4::Span->new('192.168.1.1', '192.168.1.5');
+  my $result = $span + 3;
+  print $result->range(); # prints '192.168.1.1-192.168.1.8'
+
+  # Example - add overlapping spans to merge them
+  my $a = IPv4::Span->new('192.168.1.1', '192.168.1.5');
+  my $b = IPv4::Span->new('192.168.1.3', '192.168.1.10');
+  my $merged = $a + $b;
+  print $merged->range(); # prints '192.168.1.1-192.168.1.10'
+
 =head2 __minus
 
   my $result = $span->__minus($other, $swap);
@@ -564,11 +570,28 @@ Internal method called by overloaded - operator, as well as the subtract method.
 - Returns IPv4::Range for non-contiguous results
 - Enforces integer must be on right side
 
+Dies with C<"Cannot subtract an IPv4::Span object from a number"> if C<$swap> is true (integer on left side, e.g., C<5 - $span>).
+
+  # Example - subtract integer to shrink span from end
+  my $span = IPv4::Span->new('192.168.1.1', '192.168.1.10');
+  my $result = $span - 3;
+  print $result->range(); # prints '192.168.1.1-192.168.1.7'
+
+  # Example - subtract a span to remove addresses
+  my $a = IPv4::Span->new('192.168.1.1', '192.168.1.10');
+  my $b = IPv4::Span->new('192.168.1.4', '192.168.1.6');
+  my $remainder = $a - $b;
+  print $remainder; # prints '192.168.1.1-192.168.1.3,192.168.1.7-192.168.1.10'
+
 =head2 _cidr_block
 
   my ($start, $end) = _cidr_block($address, $mask);
 
 Internal helper that returns the start and end C<IPv4::Address> objects of the CIDR block for the given address and mask. Delegates to C<< IPv4::Address->in_cidr >>. Used by the constructor when parsing CIDR notation input.
+
+  # Example
+  my ($start, $end) = IPv4::Span::_cidr_block(IPv4->address('192.168.1.0')->int(), 24);
+  print "$start - $end\n"; # prints '192.168.1.0 - 192.168.1.255'
 
 =head1 OPERATOR OVERLOADS
 

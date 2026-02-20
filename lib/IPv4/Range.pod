@@ -194,11 +194,6 @@ Subtracts one or more ranges from the current range. Returns a new C<IPv4::Range
 
 Returns a new C<IPv4::Range> that is a deep copy of this range.
 
-  # Example
-  my $range = IPv4::Range->new('192.168.1.1-192.168.1.10');
-  my $clone = $range->clone();
-  print $clone->range(); # prints '192.168.1.1-192.168.1.10'
-
 =head2 slice
 
   my $slice = $range->slice($size, $offset);
@@ -384,7 +379,25 @@ Private methods used internally and for overloading support. These should not be
 
   my $result = $range->__minus($other, $swap);
 
-Internal method called by the overloaded C<-> operator. Dies if C<$other> is an integer, since adding/subtracting integers on ranges is undefined. When C<$other> is an IPv4 object, subtracts it from the range (or vice versa if C<$swap> is true). When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__minus> method would be used.
+Internal method called by the overloaded C<-> operator. When C<$other> is an IPv4 object, subtracts it from the range (or vice versa if C<$swap> is true). Returns a new C<IPv4::Range> with the subtracted addresses removed. When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__minus> method would be used.
+
+Dies if C<$other> is an integer, since adding/subtracting integers on ranges is undefined:
+
+=over 4
+
+=item * C<"Invalid subtraction between IPv4::Range and integer">
+
+=back
+
+  # Examples
+  my $range = IPv4::Range->new('192.168.1.1-192.168.1.10');
+  my $result = $range - '192.168.1.5-192.168.1.7';
+  print $result->range(); # prints '192.168.1.1-192.168.1.4,192.168.1.8-192.168.1.10'
+
+  my $r1 = IPv4::Range->new('10.0.0.1-10.0.0.20');
+  my $r2 = IPv4::Range->new('10.0.0.5-10.0.0.10');
+  my $diff = $r1 - $r2;
+  print $diff->range(); # prints '10.0.0.1-10.0.0.4,10.0.0.11-10.0.0.20'
 
 =head1 OVERLOADED OPERATORS
 

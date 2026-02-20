@@ -143,29 +143,17 @@ Returns the hostname associated with the IPv4 address, if available.  Otherwise,
 
 Returns the address itself as an C<IPv4::Address>. For an individual address, start and end are the same.
 
-  # Example
-  my $address = IPv4::Address->new('192.168.0.1');
-  print $address->start()->address(); # prints '192.168.0.1'
-
 =head2 end
 
   my $end_address = $address->end();
 
 Returns the address itself as an C<IPv4::Address>. For an individual address, start and end are the same. Provided for polymorphic consistency with C<IPv4::Span> and C<IPv4::Range>.
 
-  # Example
-  my $address = IPv4::Address->new('192.168.0.1');
-  print $address->end()->address(); # prints '192.168.0.1'
-
 =head2 size
 
   my $size = $address->size();
 
 Returns the size of the address. For an individual address, this is always 1.
-
-  # Example
-  my $address = IPv4::Address->new('192.168.0.1');
-  print $address->size(); # prints '1'
 
 =head2 in_cidr
 
@@ -299,20 +287,11 @@ Returns true if two IPv4 addresses are numerically equal, false otherwise.
 
 Creates an exact copy of the address object.
 
-  # Example
-  my $address = IPv4::Address->new('192.168.0.1');
-  my $copy = $address->clone();
-  print $copy->address(); # prints '192.168.0.1'
-
 =head2 simplify
 
   my $simple = $address->simplify();
 
 Returns the address object itself. Provided for compatibility with C<IPv4::Span> and C<IPv4::Range> objects.
-
-  # Example
-  my $address = IPv4::Address->new('192.168.0.1');
-  print $address->simplify()->address(); # prints '192.168.0.1'
 
 =head2 addresses
 
@@ -320,21 +299,11 @@ Returns the address object itself. Provided for compatibility with C<IPv4::Span>
 
 Returns an array containing only this address. Provided for compatibility with C<IPv4::Span> and C<IPv4::Range> objects.
 
-  # Example
-  my $address = IPv4::Address->new('192.168.0.1');
-  my @addrs = $address->addresses();
-  print scalar(@addrs); # prints '1'
-
 =head2 spans
 
   my @spans = $address->spans();
 
 Returns an array containing a single span representing this address.
-
-  # Example
-  my $address = IPv4::Address->new('192.168.0.1');
-  my @spans = $address->spans();
-  print $spans[0]->range(); # prints '192.168.0.1'
 
 =head2 next
 
@@ -407,11 +376,41 @@ Private methods used internally and for overloading support. These should not be
 
 Internal method called by the overloaded C<-> operator. When C<$other> is an integer, returns a new C<IPv4::Address> decremented by that amount. When C<$other> is another C<IPv4::Address>, returns the integer difference between the two addresses. When C<$other> is a span or range, delegates to C<< IPv4::Range->subtract >>. Dies on address space underflow or if C<$swap> is true with an integer (cannot subtract an address from a number). When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__minus> method would be used.
 
+Dies with C<"Cannot subtract an address from an integer"> if C<$swap> is true (i.e., an integer appeared on the left side of the C<-> operator).
+
+Dies with C<"IPv4 Address space underflow when subtracting %d from %s"> if the integer to subtract is larger than the address's integer value. C<%d> is the integer being subtracted and C<%s> is the address string.
+
+  # Subtract an integer from an address
+  my $addr = IPv4::Address->new('192.168.0.10');
+  my $new = $addr - 5;
+  print $new->address(); # prints '192.168.0.5'
+
+  # Difference between two addresses
+  my $a = IPv4::Address->new('192.168.0.10');
+  my $b = IPv4::Address->new('192.168.0.3');
+  my $diff = $a - $b;
+  print $diff; # prints '7'
+
 =head2 __plus
 
   my $result = $address->__plus($other, $swap);
 
 Internal method called by the overloaded C<+> operator. When C<$other> is an integer, returns a new C<IPv4::Address> incremented by that amount. When C<$other> is a span or range, delegates to C<< $other->add($self) >>. When C<$other> is another address, returns a simplified range containing both. Dies on address space overflow or if C<$swap> is true with an integer (cannot add an address to a number). When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__plus> method would be used.
+
+Dies with C<"Cannot add an address to an integer"> if C<$swap> is true (i.e., an integer appeared on the left side of the C<+> operator).
+
+Dies with C<"IPv4 Address space overflow when adding %d to %s"> if the result would exceed 255.255.255.255. C<%d> is the integer being added and C<%s> is the address string.
+
+  # Add an integer to an address
+  my $addr = IPv4::Address->new('192.168.0.1');
+  my $new = $addr + 10;
+  print $new->address(); # prints '192.168.0.11'
+
+  # Combine two addresses into a range
+  my $a = IPv4::Address->new('10.0.0.1');
+  my $b = IPv4::Address->new('10.0.0.5');
+  my $range = $a + $b;
+  print $range->range(); # prints '10.0.0.1-10.0.0.5'
 
 =head1 OVERLOADED OPERATORS
 
