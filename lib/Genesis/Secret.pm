@@ -63,7 +63,7 @@ sub save {
 }
 
 sub load {
-	my ($self,$value) = @_;
+	my ($self) = @_;
 	$self->plan->store->read($self);
 }
 
