@@ -187,7 +187,7 @@ subtest 'IPv4::Address' => sub {
 
   # Test calculation methods
   subtest 'calculation methods' => sub {
-    plan tests => 41;
+    plan tests => 45;
     my $ip1 = IPv4::Address->new(3232235777); # 192.168.1.1
     is($ip1->add(256)->range, '192.168.2.1', 'add() adds correct number of addresses');
     is($ip1->subtract(258)->range, '192.167.255.255', 'subtract() subtracts correct number of addresses');
@@ -221,6 +221,12 @@ subtest 'IPv4::Address' => sub {
     dies_ok {$ip1 ne $ip1->int} 'overloaded `ne` operator with integer-equivalent address dies';
     like($@, qr/Invalid IPv4 literal or object '3232235777'/i, 'overloaded `ne` operator with integer-equivalent address dies with correct message');
     ok($ip1 ne '192.168.1.2', 'overloaded `ne` operator returns true for different addresses');
+
+    # Test numeric_eq method (compares by size)
+    ok($ip1->numeric_eq($ip2), 'numeric_eq() returns true for two addresses (both size 1)');
+    ok($ip1->numeric_eq('10.0.0.1'), 'numeric_eq() returns true for address and string (both size 1)');
+    ok($ip1->numeric_eq(1), 'numeric_eq() returns true when compared with integer 1');
+    ok(!$ip1->numeric_eq(2), 'numeric_eq() returns false when compared with integer 2');
 
     my ($start, $end) = $ip2->in_cidr(16);
     is($start->range, '192.168.0.0', 'in_cidr() returns correct start address');
@@ -631,7 +637,7 @@ subtest 'IPv4::Span' => sub {
   };
 
   subtest 'cmp method' => sub {
-    plan tests => 24;
+    plan tests => 28;
     my $span1 = IPv4::Span->new('192.168.1.1', '192.168.1.5');
     my $span2 = IPv4::Span->new('192.168.1.6', '192.168.1.10');
     my $span3 = IPv4::Span->new('192.168.1.1', '192.168.1.10');
@@ -647,6 +653,13 @@ subtest 'IPv4::Span' => sub {
     cmp_ok($span1, 'lt', $span3, 'overloaded comparison operator returns correct comparison result for less than (ending address)');
 
     is($span1->numeric_cmp($span2), 0, 'numeric_cmp() returns correct comparison result: span1 is equal to span2 in size');
+
+    # Test numeric_eq method (compares by size)
+    ok($span1->numeric_eq($span2), 'numeric_eq() returns true for spans of equal size');
+    ok($span1->numeric_eq(5), 'numeric_eq() returns true when compared with integer matching size');
+    ok(!$span1->numeric_eq($span3), 'numeric_eq() returns false for spans of different size');
+    ok(!$span1->numeric_eq(6), 'numeric_eq() returns false when compared with integer not matching size');
+
     ok(7 > $span1, 'overloaded comparison operator returns correct comparison result for greater than (size of range - number on left)');
     ok($span1 < 7, 'overloaded comparison operator returns correct comparison result for less than (size of range - number on right)');
 
