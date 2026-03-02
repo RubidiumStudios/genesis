@@ -106,7 +106,8 @@ sub from_exodus {
 		);
 		return;
 	}
-	if ($exodus->{kit_name} ne 'bosh' && ! $exodus->{is_bosh} && ! $exodus->{is_director}) {
+	my $has_director_service = $exodus->{services} && grep { $_ eq 'director' } split(/,/, $exodus->{services});
+	if ($exodus->{kit_name} ne 'bosh' && ! $exodus->{is_bosh} && ! $exodus->{is_director} && ! $has_director_service) {
 		trace(
 			"#R{[ERROR]} Exodus data %s does not appear to be for a BOSH deployment:\n".
 			"        Kit type is #M{%s}",

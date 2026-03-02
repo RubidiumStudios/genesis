@@ -804,6 +804,39 @@ sub requires_scale {
 	return $self->metadata->{requires_scale};
 }
 # }}}
+# services - what services does this kit provide? {{{
+sub services {
+	my ($self) = @_;
+	my $services = $self->metadata->{services};
+	return () unless $services;
+	return @{$services} if ref($services) eq 'ARRAY';
+	return ($services);
+}
+
+# }}}
+# provides_service - does this kit provide the named service? {{{
+sub provides_service {
+	my ($self, $service) = @_;
+
+	# Check explicit services declaration first
+	my @declared = $self->services;
+	if (@declared) {
+		return scalar grep { $_ eq $service } @declared;
+	}
+
+	# Backward compatibility: infer from kit name and metadata
+	if ($service eq 'vault') {
+		return ($self->metadata->{name} || '') eq 'vault';
+	}
+	if ($service eq 'director') {
+		return 1 if ($self->id || '') =~ /^bosh\//;
+		return $self->metadata->{is_bosh_director} ? 1 : 0;
+	}
+
+	return 0;
+}
+
+# }}}
 # }}}
 
 ### Private Methods {{{

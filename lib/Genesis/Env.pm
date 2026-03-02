@@ -820,8 +820,7 @@ sub deployment_state {
 # is_bosh_director - returns true if the environment represents a BOSH director deployment {{{
 sub is_bosh_director {
 	my $self = shift;
-	$self->kit->id =~ /^bosh\// || $self->kit->metadata->{is_bosh_director};
-	# RISK: This is very fragile, rework for better diagnosis
+	$self->kit->provides_service('director');
 }
 
 # }}}
@@ -3163,8 +3162,8 @@ sub _deployment_may_affect_secrets_vault {
 	return 0 unless $self->vault->initialized;
 
 	# Check if deploying a vault kit
-	if ($self->type eq 'vault') {
-		debug("Vault kit detected - deployment may affect secrets vault");
+	if ($self->kit->provides_service('vault')) {
+		debug("Vault service kit detected - deployment may affect secrets vault");
 
 		# Check for static IPs in the vault kit
 		my @kit_ips =
@@ -5581,6 +5580,7 @@ exodus:
   is_director:    ${\($self->is_bosh_director ? 'true' : 'false')}
   use_create_env: ${\($self->use_create_env ? 'true' : 'false')}
   features:       (( join "," kit.features ))
+  services:       ${\(join(",", $self->kit->services) || '~')}
 EOF
 }
 

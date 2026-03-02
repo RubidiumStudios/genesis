@@ -65,7 +65,7 @@ sub validate {
 			}
 
 			# check for errant top-level keys - params, subkits and features have been discontinued.
-			my @valid_keys = qw/name version description code docs author authors genesis_version_min secrets_store required_configs exclude_paths supports/;
+			my @valid_keys = qw/name version description code docs author authors genesis_version_min secrets_store required_configs exclude_paths supports services/;
 			if (!defined($meta->{secrets_store}) || $meta->{secrets_store} eq 'vault' || new_enough($min_version, "3.1.0")) {
 				# v3.1.0 allows a mix of vault and credhub secrets
 				push @valid_keys, "credentials", "certificates", "provided";
@@ -82,6 +82,14 @@ sub validate {
 			}
 
 			push @valid_keys, "use_create_env" if new_enough($min_version, "2.8.0");
+
+			# Validate services field
+			if (exists $meta->{services}) {
+				if (ref($meta->{services}) ne 'ARRAY') {
+					push @yml_errors, "expects 'services' to be an array";
+				}
+			}
+
 			my @errant_keys = ();
 			for my $key (sort keys %$meta) {
 				push(@errant_keys, $key) unless grep {$_ eq $key} @valid_keys;
