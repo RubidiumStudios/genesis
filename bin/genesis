@@ -644,6 +644,42 @@ define_command("bosh-configs", {
 }, "Genesis::Commands::BOSH::bosh_configs");
 
 # }}}
+# genesis ocfp - OCFP environment management and inspection {{{
+define_command("ocfp", {
+	summary => "OCFP environment management and inspection",
+	usage => "<env> ocfp <topic> <action> [<options...>]",
+	description =>
+		"Inspect and manage OCFP (Open Cloud Foundry Platform) environment ".
+		"configuration.  Currently supports:\n".
+		"\n".
+		"  ocfp show network   Show network configuration, IP reservations,\n".
+		"                      allocations, and availability\n".
+		"\n".
+		"[[Note: >>The target environment must have the 'ocfp' feature enabled.",
+	function_group => Genesis::Commands::ENVIRONMENT,
+	scope => 'env',
+	option_group => Genesis::Commands::ENV_OPTIONS,
+	arguments => [
+		"topic"  => "The topic: show",
+		"action" => "The action: network",
+	],
+	options => [
+		"reserved|r"  =>
+			"Show only reserved IPs",
+		"allocated|a"  =>
+			"Show only allocated/claimed IPs",
+		"available|A"  =>
+			"Show only available (free) IPs",
+		"subnet|s=s"   =>
+			"Filter to a specific subnet name",
+		"summary|S"    =>
+			"Show compact summary view",
+		"json|j"       =>
+			"Output as JSON",
+	]
+}, "Genesis::Commands::Ocfp::ocfp");
+
+# }}}
 # genesis credhub - run a credhub command on the Credhub server for the specified environment {{{
 define_command("credhub", {
 	summary => "Run a Credhub cli command for the specific environment.",
