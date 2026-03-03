@@ -97,8 +97,7 @@ sub ocfp {
 	my %options = %{get_options()};
 	my ($env_name, $topic, $action, @extra_args) = @_;
 
-	$topic  //= '';
-	$action //= '';
+	command_usage(1) unless $env_name && $topic && $action;
 
 	bail("Too many arguments provided") if @extra_args > 0;
 
@@ -106,7 +105,7 @@ sub ocfp {
 	bail(
 		"Invalid topic: '%s' - expected one of: %s",
 		$topic, sentence_join(@valid_topics)
-	) unless $topic && grep {$_ eq $topic} @valid_topics;
+	) unless grep {$_ eq $topic} @valid_topics;
 
 	my $env = Genesis::Top->new('.')->load_env($env_name)->with_vault();
 
@@ -126,12 +125,11 @@ sub ocfp {
 sub ocfp_show {
 	my ($env, $action, %options) = @_;
 
-	$action //= '';
 	my @valid_actions = qw(network);
 	bail(
 		"Invalid show action: '%s' - expected one of: %s",
 		$action, sentence_join(@valid_actions)
-	) unless $action && grep {$_ eq $action} @valid_actions;
+	) unless grep {$_ eq $action} @valid_actions;
 
 	if ($action eq 'network') {
 		require Genesis::Commands::Ocfp::ShowNetwork;
