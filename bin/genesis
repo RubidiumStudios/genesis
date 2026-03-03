@@ -676,6 +676,8 @@ define_command("ocfp", {
 			"Show compact summary view",
 		"json|j"       =>
 			"Output as JSON",
+		"verbose|v"    =>
+			"Show detailed CIDR information",
 	]
 }, "Genesis::Commands::Ocfp::ocfp");
 

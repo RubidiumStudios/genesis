@@ -465,23 +465,22 @@ sub _output_full {
 	# VPC Header
 	if ($data->{vpc_cidr}) {
 		info("\n#C{VPC Network}: %s  (#mi{%s})\n", $data->{vpc_cidr}, $data->{ocfp_type});
-		_display_cidr_section("VPC", $data->{vpc_info});
+		_display_cidr_section("VPC", $data->{vpc_info}) if $opts{verbose};
 	}
 
 	info("\n#Cu{Environment}: %s\n", $data->{env_name});
 
 	for my $subnet_name (sort keys %{$data->{subnets}}) {
 		my $s = $data->{subnets}{$subnet_name};
-		info("\n%s\n", '=' x terminal_width());
+		info("\n%s\n", '-' x 40);
 		info("#G{Subnet}: %s  (AZ: %s)\n", $subnet_name, $s->{az});
 		info("  CIDR: %s  Gateway: %s  DNS: %s\n",
 			$s->{cidr_block}, $s->{gateway}, $s->{dns});
 
-		_display_cidr_section($subnet_name, $s->{cidr_info});
+		_display_cidr_section($subnet_name, $s->{cidr_info}) if $opts{verbose};
 		_display_utilization_bar($s);
-		_display_reserved_section($s);
-		_display_allocated_section($s);
-		_display_available_section($s);
+		_display_assignments_section($s, %opts);
+		_display_free_section($s);
 	}
 }
 
@@ -567,6 +566,38 @@ sub _output_json {
 
 # Display Helpers
 
+# _display_assignments_section - Combined reserved + allocated table {{{
+sub _display_assignments_section {
+	my ($subnet_data, %opts) = @_;
+
+	my @named = @{$subnet_data->{named_reserved} || []};
+	my %claims = %{$subnet_data->{claims} || {}};
+
+	return unless @named || %claims;
+
+	my $table = "| Type | Name | IP / Range |\n|:-----|:-----|:-----------|\n";
+	for my $entry (@named) {
+		$table .= sprintf("| #R{reserved} | %s | %s |\n", $entry->{name}, $entry->{ip});
+	}
+	for my $network (sort keys %claims) {
+		$table .= sprintf("| #Y{allocated} | %s | %s |\n", $network, $claims{$network});
+	}
+	info("%s\n", build_markdown_table($table));
+}
+
+# }}}
+# _display_free_section - Compact free range display {{{
+sub _display_free_section {
+	my ($subnet_data) = @_;
+
+	my $free_size = ref($subnet_data->{free_range}) ? $subnet_data->{free_range}->size : 0;
+	return unless $free_size > 0;
+
+	info("  #Gi{Free}: %s\n", $subnet_data->{free_range}->range);
+}
+
+# }}}
+
 # _display_cidr_section - Render sipcalc-style CIDR info {{{
 sub _display_cidr_section {
 	my ($label, $info) = @_;
@@ -642,7 +673,7 @@ sub _display_available_section {
 }
 
 # }}}
-# _display_utilization_bar - Visual usage bar {{{
+# _display_utilization_bar - Visual usage bar with counts and percentages {{{
 sub _display_utilization_bar {
 	my ($subnet_data) = @_;
 	my $total = $subnet_data->{cidr_info}{total_addresses} || return;
@@ -663,10 +694,13 @@ sub _display_utilization_bar {
 
 	my $bar = '#R{' . ('=' x $r_len) . '}'
 	        . '#Y{' . ('=' x $a_len) . '}'
-	        . '#G{' . ('=' x $f_len) . '}';
+	        . ('.' x $f_len);
 
-	info("  [%s] #R{R}:%.0f%% #Y{A}:%.0f%% #G{F}:%.0f%%\n",
-		$bar, $r_pct * 100, $a_pct * 100, $f_pct * 100);
+	info("  [%s] #R{R}:%d/%.0f%% #Y{A}:%d/%.0f%% #G{F}:%d/%.0f%%\n",
+		$bar,
+		$reserved_count, $r_pct * 100,
+		$allocated_count, $a_pct * 100,
+		$free_count, $f_pct * 100);
 }
 
 # }}}

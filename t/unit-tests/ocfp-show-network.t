@@ -478,9 +478,105 @@ subtest 'run dispatches to correct output mode' => sub {
 	);
 
 	lives_ok(
+		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, verbose => 1) },
+		'verbose output mode runs without error'
+	);
+
+	lives_ok(
 		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, subnet => 'ocfp-0') },
 		'subnet filter runs without error'
 	);
+};
+
+# ============================================================================
+# Tests: Compact output format
+# ============================================================================
+
+subtest 'compact output format' => sub {
+	my $env = mock_env();
+
+	# Capture full default (non-verbose) output via STDERR (info() writes to STDERR)
+	my $output = '';
+	{
+		local *STDERR;
+		open STDERR, '>', \$output or die "Cannot redirect STDERR: $!";
+		Genesis::Commands::Ocfp::ShowNetwork::run($env);
+	}
+
+	subtest 'no CIDR info in default mode' => sub {
+		unlike($output, qr/CIDR Info/,    'no CIDR Info header in default output');
+		unlike($output, qr/Netmask:/,     'no Netmask line in default output');
+		unlike($output, qr/Wildcard:/,    'no Wildcard line in default output');
+		unlike($output, qr/Broadcast:/,   'no Broadcast line in default output');
+		unlike($output, qr/Total Addresses:/, 'no Total Addresses in default output');
+	};
+
+	subtest 'CIDR info present in verbose mode' => sub {
+		my $verbose_output = '';
+		{
+			local *STDERR;
+			open STDERR, '>', \$verbose_output or die "Cannot redirect STDERR: $!";
+			Genesis::Commands::Ocfp::ShowNetwork::run($env, verbose => 1);
+		}
+		like($verbose_output, qr/CIDR Info/,    'CIDR Info header in verbose output');
+		like($verbose_output, qr/Netmask:/,     'Netmask line in verbose output');
+		like($verbose_output, qr/Wildcard:/,    'Wildcard line in verbose output');
+		like($verbose_output, qr/Broadcast:/,   'Broadcast line in verbose output');
+		like($verbose_output, qr/Total Addresses:/, 'Total Addresses in verbose output');
+	};
+
+	subtest 'lightweight separator' => sub {
+		# Should not have full-width '=' separator
+		unlike($output, qr/={40,}/, 'no full-width = separator');
+		# Should have the 40-char dash separator
+		like($output, qr/-{40}/, 'has 40-char dash separator');
+	};
+
+	subtest 'utilization bar shows counts and percentages' => sub {
+		# Bar should show format like R:42/16% A:44/17% F:170/66%
+		like($output, qr/R:\d+\/\d+%/, 'reserved shows count/percentage');
+		like($output, qr/A:\d+\/\d+%/, 'allocated shows count/percentage');
+		like($output, qr/F:\d+\/\d+%/, 'free shows count/percentage');
+	};
+
+	subtest 'combined assignments table' => sub {
+		# Should have Type column
+		like($output, qr/Type.*Name.*IP \/ Range/s, 'assignments table has correct headers');
+		# Should have reserved and allocated rows
+		like($output, qr/reserved.*bosh_ip/s, 'table contains reserved entries');
+		like($output, qr/allocated.*test-env\.bosh\.net-default/s, 'table contains allocated entries');
+	};
+
+	subtest 'compact free range display' => sub {
+		# Free line should just show the range, no "X IPs" count
+		like($output, qr/Free:.*\d+\.\d+\.\d+\.\d+/, 'free range shown inline');
+		unlike($output, qr/Free:\s+\d+\s+IPs/, 'no "X IPs" in free display');
+	};
+};
+
+# ============================================================================
+# Tests: Empty section suppression
+# ============================================================================
+
+subtest 'empty section suppression' => sub {
+	# ocfp-1 has no named reserved IPs, but has claims
+	# ocfp-2 has named reserved IPs but no claims
+	# Use an env with no claims at all to test full suppression
+	my $env = mock_env(
+		bosh_network_data => { subnets => {} },
+	);
+
+	my $output = '';
+	{
+		local *STDERR;
+		open STDERR, '>', \$output or die "Cannot redirect STDERR: $!";
+		# Run for a subnet that has named reserved but no claims
+		Genesis::Commands::Ocfp::ShowNetwork::run($env, subnet => 'ocfp-1');
+	}
+
+	# ocfp-1 has no named IPs (only reserved_a/reserved_b pairs)
+	# and we gave it no claims, so assignments table should be absent
+	unlike($output, qr/Type.*Name.*IP \/ Range/, 'no assignments table when no named IPs and no claims');
 };
 
 # ============================================================================
