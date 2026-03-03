@@ -97,7 +97,8 @@ sub ocfp {
 	my %options = %{get_options()};
 	my ($env_name, $topic, $action, @extra_args) = @_;
 
-	command_usage(1) unless $env_name && $topic && $action;
+	command_usage(1, "Environment name, topic, and action are required")
+		unless $env_name && $topic && $action;
 
 	bail("Too many arguments provided") if @extra_args > 0;
 

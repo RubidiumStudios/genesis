@@ -1011,7 +1011,7 @@ sub validate_genesis_version_requirements {
 				"repository minimum of %s",
 				$env_min, $repo_min
 			);
-		} else {
+		} elsif (!new_enough($env_min, $repo_min)) {
 			# Environment allows older version than repo requires - problematic
 			push @errors, sprintf(
 				"Environment specifies minimum Genesis version %s, but repository ".
@@ -1019,6 +1019,7 @@ sub validate_genesis_version_requirements {
 				$env_min, $repo_min
 			);
 		}
+		# else: versions match exactly, no issue
 	} elsif ($env_min) {
 		$effective_min = $env_min;
 		$source = 'environment file';
