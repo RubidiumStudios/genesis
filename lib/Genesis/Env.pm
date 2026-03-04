@@ -2102,7 +2102,19 @@ sub ocfp_config_mount {
 # }}}
 # ocfp_config_slug - returns the component of the Vault path under the ocfp_config mount for this evironments ocfp_config data {{{
 sub ocfp_config_slug {
-	return $_[0]->lookup('params.ocfp_vault_config_slug')//$_[0]->ocfp_env;
+	my $self = shift;
+	# 1. Explicit slug override (full slug including env type)
+	my $slug = $self->lookup('params.ocfp_vault_config_slug');
+	return $slug if defined $slug;
+
+	# 2. Bloc name from env file (just the bloc name, env type appended)
+	my $bloc = $self->lookup('ocfp.bloc');
+	if (defined $bloc) {
+		return $bloc . "/" . $self->ocfp_type;
+	}
+
+	# 3. Fallback: derive from environment name
+	return $self->ocfp_env;
 }
 
 # }}}
