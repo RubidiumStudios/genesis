@@ -211,6 +211,8 @@ Genesis supports having this root directory as a single git repository, or as a 
 
 ### Match Mode Configuration
 
+> **See [matcher.md](matcher.md) for the full match mode reference**, including syntax, pattern matching rules, the search algorithm, disambiguation behavior, BOSH target defaults, and troubleshooting.
+
 When issuing Genesis CLI commands, certain (and most used) commands require an environment or deployment repo to be specified.  In normal mode, Genesis will look for an exact match of the name provided (.yml extension is optional) in the current directory.  You can also specify the absolute or relative path to the environment if you're not in the deployment directory.  Given how long environment names can be, this can become burdensome.
 
 However, Genesis also supports a *match mode* that allows you to use glob-style pattern matching to find the environment file.  That way, you only have to specify the unique part of the environment name and/or type to reference it.
