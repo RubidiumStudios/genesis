@@ -61,7 +61,7 @@ sub configure_log {
 	my @valid_levels = qw/ERROR WARN DEBUG INFO TRACE/;
 	my ($level_ord, $level);
 	my $default_level = envset("QUIET") ? "ERROR" :  envset("GENESIS_TRACE") ? "TRACE" : envset("GENESIS_DEBUG") ? "DEBUG" : "INFO";
-	my $default_output_style = defined($Genesis::RC) ? $Genesis::RC->get('output_style','plain') : 'plain';
+	my $default_output_style = (defined($Genesis::RC) && $Genesis::RC->loaded) ? $Genesis::RC->get('output_style','plain') : 'plain';
 
 	# Store template if log path contains template variables
 	if ($log && $log ne '<terminal>' && $log =~ /\{(command|timestamp|date|time|pid|env)\}/) {
@@ -85,7 +85,7 @@ sub configure_log {
 			printf STDERR wrap( # Have to use printf because logs aren't set up yet
 				csprintf(
 					"[[#BK{[#E{%s}NOTICE]} >>Creating missing log directory for log #c{%s}\n\n",
-					$Genesis::RC->get('output_style','plain') eq 'fun' ? 'megaphone' : '',
+					(defined($Genesis::RC) && $Genesis::RC->loaded && $Genesis::RC->get('output_style','plain') eq 'fun') ? 'megaphone' : '',
 					$log
 				),
 				terminal_width

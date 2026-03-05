@@ -336,6 +336,11 @@ sub _explicit_contents {
 sub _load {
 	my ($self, $path) = @_;
 
+	# Re-entrancy guard: prevent infinite recursion when debug/bail
+	# triggers configure_log which reads from this same config object
+	return if $self->{_loading};
+	local $self->{_loading} = 1;
+
 	$path ||= $self->{path};
 	bug("Cannot load configuration without a path") unless $path;
 
