@@ -14,13 +14,7 @@ use Genesis::Commands qw/current_command known_commands/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
 
-# REFACTOR:  Importing from a non-Exporter module is a bit odd.  It seems we have
-#            to explicitly import the functions, but also have to use fully
-#            qualified names to use them.  We need a better way to handle this.
-use Genesis::Env::Deployment qw/
-	is_a_successful_result
-	action_succeeded action_failed action_post_failed
-/;
+use Genesis::Env::Deployment;
 
 use Service::BOSH::Director;
 use Service::BOSH::CreateEnvProxy;

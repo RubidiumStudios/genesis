@@ -152,7 +152,7 @@ sub run_hook {
 		$hook=$opts{hook}||'shell';
 	} elsif ($is_edit) {
 		$opts{editor} ||= $ENV{EDITOR}||'vim';
-	} elsif (! $hook eq 'addon' && !$self->has_hook($hook)) {
+	} elsif ($hook ne 'addon' && !$self->has_hook($hook)) {
 		# Addon is a special case, it can be missing
 		bail("No '$hook' hook script found")
 	}
