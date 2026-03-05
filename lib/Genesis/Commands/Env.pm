@@ -123,7 +123,7 @@ sub edit {
 	bail(
 		"Cannot specify #Y{--manual} unless the editor is vi-based (vi,vim,mvim,".
 		"nvim,gvim), vscode (code) or emacs: ".
-		"Pull request are welcome for other editors."
+		"Pull requests are welcome for other editors."
 	) if $use_manual && $editor !~ m/^([gmn]?vim|vi|emacs|code)$/;
 	if ($use_manual//1 && $editor =~ m/^([gmn]?vim|vi|emacs|code)$/) {
 		if ($kit_name eq 'dev') {
