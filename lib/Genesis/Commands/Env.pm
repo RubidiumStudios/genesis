@@ -165,7 +165,7 @@ sub edit {
 	my $show_ancestors = defined(get_options->{ancestors}) ? (get_options->{ancestors} ? 1 : 0) : undef;
 	bail(
 		"Cannot specify #Y{--include-all-ancestors} unless the editor is vi-based ".
-		"(vi,vim,mvim,nvim,gvim) or vscode (code): Pull request are welcome for other editors."
+		"(vi,vim,mvim,nvim,gvim) or vscode (code): Pull requests are welcome for other editors."
 	) if $show_ancestors && $editor !~ m/^([gmn]?vim|vi|code)$/;
 
 	if ($show_ancestors//1 && $editor =~ m/^([gmn]?vim|vi|code)$/) {
