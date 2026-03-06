@@ -307,12 +307,6 @@ sub addresses($self) {
 	return @ips;
 }
 
-=head2 slice
-
-Given a size and an optional offset, returns a new span of the given size starting at the offset.  If the offset is negative, the slice will end at the given offset, with the start being the nth address before the end of the span that accommodates the given size.  An offset of -1 will represent the last address in the span.
-
-If there is not enough space in the span to accommodate the requested size and offset, the offset will be maintained, while the size will be reduced to the maximum possible size.
-=cut
 sub slice($self, $size, $offset = 0) {
 	# Check if the offset is negative
 	if ($offset < 0) {
