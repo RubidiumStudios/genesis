@@ -1,0 +1,76 @@
+=head1 NAME
+
+Service::Vault::Admin
+
+=head1 DESCRIPTION
+
+This module provides administrative utilities for managing Vault AppRoles and policies.
+It extends the basic vault functionality with higher-level operations for setting up
+authentication and authorization for Genesis and Concourse deployments.
+
+=head1 CLASS METHODS
+
+=head2 new($vault)
+
+Creates a new C<Service::Vault::Admin> object that wraps the provided C<Service::Vault> object.
+
+=head1 INSTANCE METHODS
+
+=head2 vault()
+
+Returns the underlying C<Service::Vault> object.
+
+=head2 ensure_approle_enabled()
+
+Ensures that the AppRole authentication method is enabled in Vault.
+
+=head2 list_approles()
+
+Returns a list of all existing AppRole names.
+
+=head2 approle_exists($role_name)
+
+Returns true if the specified AppRole exists.
+
+=head2 create_policy($policy_name, $policy_content, %opts)
+
+Creates a Vault policy with the specified name and content. Options:
+- C<overwrite>: Force overwrite existing policy without prompting
+- C<prompt>: Enable/disable interactive prompting (default: true)
+
+=head2 policy_exists($policy_name)
+
+Returns true if the specified policy exists.
+
+=head2 create_approle($role_name, %config)
+
+Creates an AppRole with the specified configuration. Options:
+- C<overwrite>: Force overwrite existing role without prompting
+- C<prompt>: Enable/disable interactive prompting (default: true)
+- Standard AppRole configuration options (token_ttl, policies, etc.)
+
+=head2 get_approle_credentials($role_name)
+
+Returns the role-id and a new secret-id for the specified AppRole.
+
+=head2 store_approle_credentials($role_name, $storage_path, $role_id, $secret_id)
+
+Stores AppRole credentials at the specified vault path.
+
+=head2 setup_concourse_approle(%opts)
+
+Sets up a complete AppRole configuration for Concourse, including policy creation,
+role creation, and credential storage. Options:
+- C<role_name>: Name of the AppRole (default: 'concourse')
+- C<concourse_path>: Vault path for Concourse secrets (default: '/concourse')
+- C<storage_base>: Base path for storing credentials
+
+=head2 setup_genesis_pipelines_approle(%opts)
+
+Sets up a complete AppRole configuration for Genesis pipelines, including policy
+creation, role creation, and credential storage. Options:
+- C<role_name>: Name of the AppRole (default: 'genesis-pipelines')
+- C<exodus_mount>: Vault mount for exodus data
+- C<storage_base>: Base path for storing credentials
+
+=cut
