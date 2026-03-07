@@ -243,7 +243,7 @@ sub decolorize {
 
 sub csize {
 	my $str = shift;
-	my $size = length(decolorize($str)) + length(join('', (map {csprintf($_)} $str =~ m/#E\{[^\}]+}/g)));
+	return length(decolorize($str)) + length(join('', (map {csprintf($_)} $str =~ m/#E\{[^\}]+}/g)));
 }
 
 sub wrap {
