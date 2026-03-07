@@ -1768,10 +1768,10 @@ depending on Perl's optimizer. This can mask proxy timeout errors.
 
 =item DIRECTOR-2 (high)
 
-C<deployment()> setter guard never fires. The C<shift> on the preceding
-line has already consumed the second argument from C<@_> by the time the
-C<if @_> check runs, so extra arguments are silently ignored rather than
-triggering C<bug()>.
+C<deployment()> lines 214-219: setter guard never fires. The C<shift> on
+the preceding line has already consumed the second argument from C<@_> by
+the time the C<if @_> check runs, so extra arguments are silently ignored
+rather than triggering C<bug()>.
 
 =item DIRECTOR-3 (low)
 
