@@ -57,7 +57,7 @@ sub parse {
 sub _parse_x509_secret_definition {
 	my ($self, $path, $data, $feature) = @_;
 
-	next unless defined($data);
+	return () unless defined($data);
 
 	return _invalid_secret(
 		"X.509 certificate" => "Path cannot contain colons", $path, $data, $feature
@@ -78,22 +78,23 @@ sub _parse_x509_subpaths {
 
 	my $ext_path = "$path/$subpath";
 
-	next unless defined($subdata);
+	return () unless defined($subdata);
 
 	return _invalid_secret(
 		"X.509 certificate" => "Expecting hashmap, got "._ref_description($subdata),
 		$ext_path, $subdata, $feature
 	) unless ref($subdata) eq 'HASH';
 
-	$subdata->{is_ca} = 1 if $subpath eq 'ca' && !exists($subdata->{is_ca});
+	my %sd = %$subdata;
+	$sd{is_ca} = 1 if $subpath eq 'ca' && !exists($sd{is_ca});
 
 	# In-the-wild POC conflict fix for cf-genesis-kit v1.8.0-v1.10.x
-	$subdata->{signed_by} = "application/certs/ca"
-		if ($subdata->{signed_by} || '') eq "base.application/certs.ca";
+	$sd{signed_by} = "application/certs/ca"
+		if ($sd{signed_by} || '') eq "base.application/certs.ca";
 
 	return Genesis::Secret::X509->new(
 		$ext_path,
-		%$subdata,  # Blind passthrough -- may need to be generalized once Credhub variable parser is built
+		%sd,  # Blind passthrough -- may need to be generalized once Credhub variable parser is built
 		base_path => $path,
 		_feature => $feature
 	);
@@ -102,7 +103,7 @@ sub _parse_x509_subpaths {
 sub _parse_provided_secret_definition {
 	my ($self, $path, $data, $feature) = @_;
 
-	next unless defined($data);
+	return () unless defined($data);
 
 	return _invalid_secret(
 		"User-Provided" => "Path cannot contain colons",
@@ -155,7 +156,7 @@ sub _parse_provided_secret_definition {
 sub _parse_credential_definition {
 	my ($self, $path, $data, $feature) = @_;
 
-	next unless defined($data);
+	return () unless defined($data);
 
 	return _invalid_secret(
 		"Credential" => "Path cannot contain colons",
@@ -270,10 +271,11 @@ sub _validate_feature_block {
 		credentials => "Credentials"
 	}->{$block};
 	push @$secrets, _invalid_secret(
-		 $subject =>
+		$subject =>
 			"Expecting a hashmap, got "._ref_description($data->{$block}{$feature}),
-		"$block/$feature"
-
+		"$block/$feature",
+		$data->{$block}{$feature},
+		$feature
 	);
 	return 0;
 }

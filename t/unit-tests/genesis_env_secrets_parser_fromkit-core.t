@@ -183,4 +183,76 @@ subtest 'FWT-683: bare ssh/rsa without size defaults to 2048' => sub {
 	is($rsa_fixed->get('fixed'), 1, "'rsa 1024 fixed' has fixed=1");
 };
 
+subtest 'FWT-681 Cat1: undefined data returns empty list, not bare next' => sub {
+	# Test that each parser method returns () when data is undef,
+	# rather than using bare next which escapes the subroutine scope
+
+	my $parser = Genesis::Env::Secrets::Parser::FromKit->new(undef);
+
+	# _parse_x509_secret_definition with undef data
+	my @x509 = $parser->_parse_x509_secret_definition('test/path', undef, 'base');
+	is(scalar @x509, 0, "_parse_x509_secret_definition returns empty list for undef data");
+
+	# _parse_x509_subpaths with undef subdata
+	my @subpaths = $parser->_parse_x509_subpaths('test/path', 'ca', undef, 'base');
+	is(scalar @subpaths, 0, "_parse_x509_subpaths returns empty list for undef subdata");
+
+	# _parse_provided_secret_definition with undef data
+	my @provided = $parser->_parse_provided_secret_definition('test/path', undef, 'base');
+	is(scalar @provided, 0, "_parse_provided_secret_definition returns empty list for undef data");
+
+	# _parse_credential_definition with undef data
+	my @creds = $parser->_parse_credential_definition('test/path', undef, 'base');
+	is(scalar @creds, 0, "_parse_credential_definition returns empty list for undef data");
+};
+
+subtest 'FWT-681 Cat2: _validate_feature_block passes complete args to _invalid_secret' => sub {
+	# When a feature block exists but is not a hashref, the resulting
+	# Invalid secret should have data and _feature populated
+	my @secrets = parse_metadata({
+		certificates => {
+			base => 'not-a-hash',
+		},
+	});
+
+	is(scalar @secrets, 1, "one invalid secret produced");
+	isa_ok($secrets[0], 'Genesis::Secret::Invalid');
+
+	# Verify the data field is populated (not undef)
+	ok(defined($secrets[0]->get('data')),
+		"Invalid secret has defined data field");
+	is($secrets[0]->get('data'), 'not-a-hash',
+		"Invalid secret data contains the actual bad value");
+
+	# Verify the _feature field is populated (not undef)
+	ok($secrets[0]->from_kit,
+		"Invalid secret has from_kit set (feature is populated)");
+
+	my $desc = $secrets[0]->describe;
+	like($desc, qr/base/, "describe() mentions the feature name");
+};
+
+subtest 'FWT-681 Cat3: _parse_x509_subpaths does not mutate caller hashref' => sub {
+	my $subdata = {
+		valid_for => '1y',
+		names     => ['server.example.com'],
+	};
+
+	my $parser = Genesis::Env::Secrets::Parser::FromKit->new(undef);
+
+	# Parse a 'ca' subpath — this should set is_ca but not mutate $subdata
+	$parser->_parse_x509_subpaths('test/certs', 'ca', $subdata, 'base');
+	ok(!exists $subdata->{is_ca},
+		"caller's hashref not mutated: is_ca not injected");
+
+	# Parse with legacy signed_by — should rewrite but not mutate $subdata
+	my $legacy_data = {
+		signed_by => 'base.application/certs.ca',
+		valid_for => '6m',
+	};
+	$parser->_parse_x509_subpaths('test/certs', 'server', $legacy_data, 'base');
+	is($legacy_data->{signed_by}, 'base.application/certs.ca',
+		"caller's hashref not mutated: signed_by not rewritten");
+};
+
 done_testing;
