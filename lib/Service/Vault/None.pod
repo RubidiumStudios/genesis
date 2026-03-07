@@ -64,6 +64,42 @@ B<Examples:>
   my $vault = Service::Vault::None->new();
   # returns a Service::Vault::None object
 
+=head2 name
+
+  my $name = $vault->name();
+
+Returns an empty string. The null vault has no name because it represents the
+absence of a vault connection.
+
+B<Returns:> An empty string C<''>.
+
+B<Examples:>
+
+  my $vault = Service::Vault::None->new();
+  print $vault->name();
+  # prints ''
+
+=head2 status
+
+  my $status = $vault->status();
+
+Returns C<'absent'>. This sentinel value distinguishes the null vault from real
+vault objects, which return status strings such as C<'ok'>, C<'sealed'>, or
+C<'unreachable'>.
+
+B<Returns:> The string C<'absent'>.
+
+B<Examples:>
+
+  my $vault = Service::Vault::None->new();
+  print $vault->status();
+  # prints 'absent'
+
+  if ($vault->status eq 'absent') {
+    print "No vault configured\n";
+  }
+  # prints 'No vault configured'
+
 =head1 AUTHORS
 
 Written by the Genesis team.
