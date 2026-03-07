@@ -217,7 +217,7 @@ sub save {
 		"$tmp/$i.json"
 	);
 	bail(
-		"Failed to convert configuration file to yaml: %s",
+		"Failed to convert configuration file %s to yaml: %s",
 		$self->{path}, $err
 	) if $rc;
 	mkdir_or_fail(dirname($self->{path}));

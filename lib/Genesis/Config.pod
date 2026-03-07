@@ -477,11 +477,9 @@ placeholder is replaced by the system error message (C<$!>).
 
 =item *
 
-C<"Failed to convert configuration file to yaml: %s"> — raised if the
-C<spruce merge> command fails. The C<%s> placeholder is replaced by the
-value of C<$self-E<gt>{path}> (note: see FWT-690 — the spruce error output
-is not currently included in this message due to a known argument-ordering
-defect).
+C<"Failed to convert configuration file %s to yaml: %s"> — raised if the
+C<spruce merge> command fails. The first C<%s> is the file path and the
+second is the error output from C<spruce>.
 
 =item *
 
