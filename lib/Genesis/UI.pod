@@ -93,6 +93,9 @@ Displays a numbered list of choices preceded by C<$prompt>, then prompts the
 user to enter selection numbers one at a time. The user enters a blank line to
 finish (or selection ends automatically when C<$max> is reached).
 
+B<Note:> Unlike C<prompt_for_choice>, this function does not support
+section-header labels (C<---text--->) or separator labels (C<--->).
+
 B<Parameters:>
 
 =over
@@ -157,7 +160,7 @@ is returned when the user presses Enter without input.
 
 If C<$labels> are provided, they follow the same format as in
 C<prompt_for_choices>: plain strings or two-element array references. Labels
-matching the pattern C<---text---"> are treated as section headers displayed
+matching the pattern C<---text---> are treated as section headers displayed
 without a selection number; the label C<"---"> inserts a blank separator line.
 
 The C<$default> is matched against the choice values (not the labels). The
@@ -513,9 +516,8 @@ fit the terminal width. Defaults to C<0>.
 
 =item C<paginate>
 
-Optional. When true, navigation commands C<N> (next page) and C<P> (previous
-page) are accepted in addition to selection numbers. Pagination is partially
-implemented. Defaults to C<0>.
+Optional. Setting C<paginate =E<gt> 1> currently has no effect; pagination is
+not yet implemented. Defaults to C<0>.
 
 =back
 

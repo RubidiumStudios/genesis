@@ -99,7 +99,7 @@ C<"\e[u"> — Restore the previously saved cursor position.
 
 Returns 1 if the C<TERM> environment variable is set and the C<tput> command is available
 on the system path, or 0 otherwise. Used internally before invoking C<tput> for terminal
-dimension queries.
+dimension queries. Not exported by default; call as C<Genesis::Term::has_tput()>.
 
 B<Returns:>
 
@@ -141,7 +141,7 @@ B<Examples:>
 
   my $rows = terminal_height();
 
-Returns the terminal height in rows. Checks, in order:
+Returns the terminal height in rows. Not exported by default; call as C<Genesis::Term::terminal_height()>. Checks, in order:
 
 =over 4
 
@@ -225,6 +225,9 @@ C<*> cycles through rainbow colors.
 Fatal sprintf warnings (missing or redundant arguments, uninitialized values) are
 propagated as exceptions via C<confess> from the C<Carp> module. Non-fatal sprintf
 warnings are logged via C<Genesis::Log> when in dev or testing mode.
+
+B<Note:> Italic formatting (C<I>/C<i>) is suppressed when running inside C<tmux>
+(C<$ENV{TMUX}> is set).
 
 Returns an empty string if C<$fmt> is false.
 
@@ -721,8 +724,9 @@ Render width. Defaults to C<terminal_width()>.
 
 =item C<links>
 
-An array reference to accumulate extracted link targets. Required when rendering
-documents with links; pass the same reference to all blocks in a document.
+Required for any block that may contain Markdown links. If omitted and a link
+pattern is found, the function will die. Pass the same array reference to all
+blocks in a document to maintain consistent link numbering.
 
 =back
 
