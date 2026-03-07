@@ -152,6 +152,11 @@ Dies with C<"No stemcells found for %s on the %s CPI"> if the resolved CPI
 prefix is empty (i.e. the IaaS is not recognised). C<%s> is the OS slug;
 the second C<%s> is the (empty) CPI string.
 
+B<Note:> The HTTP response status from the bosh.io API is not checked. If the
+request fails (network error, non-200 status), the response body is passed
+to C<JSON::PP-E<gt>decode> unchanged, which will die with an unhandled
+exception on malformed input.
+
 B<Examples:>
 
   my $all = Service::BOSH::Stemcell->available_stemcells(
@@ -404,6 +409,10 @@ The IaaS name to look up.
 
 B<Returns:> The CPI prefix string (e.g. C<'aws-xen-hvm'>), or an empty
 string if the IaaS is not recognised.
+
+B<Note:> The source code names this parameter C<$cpi>, but it accepts an
+IaaS name and returns a CPI prefix. The POD uses C<$iaas> to reflect the
+semantic role of the argument.
 
 B<Examples:>
 

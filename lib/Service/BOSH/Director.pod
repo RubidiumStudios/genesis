@@ -401,7 +401,6 @@ B<Examples:>
 
 =head2 exodus_vault
 
-  my $vault = Service::BOSH::Director->exodus_vault();
   my $vault = $director->exodus_vault();
 
 Returns the C<Service::Vault> object used for exodus data and network
@@ -421,7 +420,6 @@ B<Examples:>
 
 =head2 exodus_path
 
-  my $path = Service::BOSH::Director->exodus_path();
   my $path = $director->exodus_path();
 
 Returns the Vault path under which this director's exodus data is stored.
@@ -1278,6 +1276,11 @@ Boolean. When true, shows what would be removed without removing it.
 
 B<Returns:> In list context, a three-element list C<($out, $rc, $err)>.
 In scalar context, a boolean (true on success).
+
+B<Note:> In dryrun mode, the list-context C<$out> value is a reformatted
+summary of unused releases, stemcells, and compiled packages -- not the raw
+C<bosh clean-up --dry-run> output. The raw output is parsed, categorised,
+and colourised before being returned and printed via C<info>.
 
 B<Examples:>
 
