@@ -244,9 +244,13 @@ B<Examples:>
 
   $vault->shutdown;
 
-Terminates the vault's safe and vault OS processes in order, then clears
-the stored PIDs. Terminating the safe process restores the previous safe
-target as a side effect.
+Terminates the vault and safe OS processes, then clears the stored PIDs.
+
+B<Strategy:> The vault process is killed B<first>. This is intentional:
+when vault dies, the safe process detects the child's death and
+self-terminates, cleaning up its C<~/.saferc> target registration in the
+process. Killing safe first would orphan the vault process and skip the
+C<.saferc> cleanup.
 
 Shutdown is skipped without error in two cases: if the vault's embedded PID
 does not match the current process (C<$$>), meaning the vault was created
@@ -255,9 +259,10 @@ has already been shut down.
 
 When the vault process is running, it is sent C<SIGINT> initially, escalating
 to C<SIGTERM> after 4 attempts and C<SIGKILL> after 8 attempts (each attempt
-waits 0.5 seconds). After the vault process exits, the same escalation
-sequence is intended for the safe process (SIGTERM after 10 attempts,
-SIGKILL after 20, each 0.2 seconds apart).
+waits 0.5 seconds). After the vault process exits, safe is expected to
+self-terminate. The method waits for this, giving safe time to clean up. If
+safe has not exited after 10 iterations (0.2 seconds each), the escalation
+fallback sends C<SIGTERM>; after 20 iterations, C<SIGKILL>.
 
 After both processes exit, the C<safe_pid> and C<vault_pid> fields are set
 to C<undef>.

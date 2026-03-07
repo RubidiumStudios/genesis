@@ -90,17 +90,17 @@ sub rebind {
 	));
 	return unless ($vault_info && ref($vault_info) eq 'HASH' && $vault_info->{url});
 
-	my $pid = _get_safe_process($alias);
-	return unless defined($pid);
+	my $safe_process = _get_safe_process($alias);
+	return unless defined($safe_process);
 
 	my $vault = $class->SUPER::new(
 		@{$vault_info}{qw(url name verify namespace strongbox mount)}
 	);
 	return unless $vault;
-	
+
 	$vault->{logfile}   = workdir."/$alias.out"; #FIXME: This just assumes this value -- should use lsof to detect correct value
-	$vault->{safe_pid}  = $pid;
-	$vault->{vault_pid} = _get_vault_process($pid);
+	$vault->{safe_pid}  = $safe_process->{pid};
+	$vault->{vault_pid} = _get_vault_process($safe_process->{pid});
 	$local_vaults->{$alias} = $vault;
 
 	return $vault;
@@ -158,6 +158,9 @@ sub shutdown {
 		return;
 	}
 
+	# Shutdown strategy: Kill the vault process FIRST. When vault dies, the
+	# safe process detects this and self-terminates, cleaning up .saferc
+	# references. Killing safe first would orphan the vault process.
 	if ($self->{vault_pid}) {
 		my $signal = 'INT';
 		my $tries = 0;
@@ -170,6 +173,9 @@ sub shutdown {
 			$signal = 'KILL' if ($tries > 8);
 		}
 	}
+	# Wait for safe to self-terminate after vault death. The initial signal
+	# is empty (just wait). If safe hasn't exited after 10 iterations,
+	# escalate to TERM, then KILL after 20 iterations.
 	if ($self->{safe_pid}) {
 		my $signal = '';
 		my $tries = 0;
@@ -177,7 +183,7 @@ sub shutdown {
 		while (_process_running($self->{safe_pid})) {
 			if ($signal) {
 				trace "Shutting down safe $self->{safe_pid} with $signal";
-				kill $signal => $self->{vault_pid}
+				kill $signal => $self->{safe_pid}
 			}
 			select(undef, undef, undef, 0.20);
 			$tries += 1;
