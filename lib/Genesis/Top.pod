@@ -353,8 +353,8 @@ C<Genesis::Kit::Provider::GenesisCommunity> instance, the C<kit_provider>
 key is cleared from the config (restoring the default). Otherwise the
 provider configuration is written and saved.
 
-Note: when the provider is C<GenesisCommunity>, the configuration is cleared
-but not saved — this is a known issue (see L</KNOWN ISSUES>, FWT-699).
+Both branches (GenesisCommunity and custom provider) set C<updater_version>,
+call C<_validate_config()>, and save the config to disk.
 
 B<Parameters:>
 
@@ -460,19 +460,13 @@ B<Examples:>
 
     my $result = $top->repo_vault;
 
-B<Note:> This method currently has a known behavioral defect (FWT-696). The
-intended behavior is to return the repository's configured vault object, but
-the implementation returns C<< Service::Vault->default >> (the system default
-vault) when the repository has no vault configured, and returns the value of
-C<secrets_provider.insecure> (a boolean) rather than the vault object when
-one is configured.
+Returns the repository's configured vault object when C<has_vault()> is true,
+or the system default vault otherwise. Builds a C<Service::Vault::Remote>
+from the C<secrets_provider> config, mirroring the attach logic in C<vault()>
+but without memoization or session options.
 
-Until FWT-696 is resolved, callers should use C<has_vault()> and C<vault()>
-directly.
-
-B<Returns:> C<< Service::Vault->default >> when no vault is configured; the value
-of C<< $self->config->get("secrets_provider.insecure") >> (a boolean) when a
-vault is configured.
+B<Returns:> A C<Service::Vault::Remote> object when a vault is configured;
+C<< Service::Vault->default >> otherwise.
 
 =head2 has_vault
 
@@ -1356,10 +1350,7 @@ based on RC settings). If the version is C<2>, validates against the schema
 returned by C<_repo_config_schema()>. Any other version causes an immediate
 error.
 
-B<Returns:> The implicit return value of the last evaluated expression (the
-return value of C<< $self->config->validate() >> for v2, or the return value
-of C<_upgrade_config_to_v2()> for v1). There is no explicit C<return>
-statement. See L</KNOWN ISSUES> (FWT-698) for how this affects callers.
+B<Returns:> C<1> on success. Raises on invalid or unsupported config versions.
 
 B<Errors:>
 
@@ -1382,7 +1373,7 @@ C<$config_version> is the literal version value from the config file.
 B<Examples:>
 
     $self->_validate_config;
-    # Returns: implicit result of last expression; raises on invalid schema
+    # Returns: 1 on success; raises on invalid schema
 
 =head2 _upgrade_config_to_v2
 
@@ -1398,10 +1389,9 @@ Modifies the object in-place: replaces C<$self-E<gt>{__config}> with the new
 v2 config object during validation, then calls C<< $self->config->replace($old_config) >>
 on success.
 
-B<Note:> There is a known defect (FWT-698): C<_validate_config()> is called
-recursively on the new config object but its return value is not checked;
-C<bail()> inside C<_validate_config()> is the only mechanism that stops
-execution when the new config is invalid.
+B<Note:> C<_validate_config()> is called recursively on the new config object.
+C<bail()> inside C<_validate_config()> is the mechanism that stops execution
+when the new config is invalid.
 
 B<Parameters:>
 
@@ -1481,49 +1471,6 @@ recognized top-level keys:
 =back
 
 B<Returns:> A hash reference.
-
-=head1 KNOWN ISSUES
-
-=over 4
-
-=item B<FWT-696: C<repo_vault()> returns a boolean instead of a vault object>
-
-When C<has_vault()> is true, C<repo_vault()> returns
-C<< $self->config->get("secrets_provider.insecure") >> — a boolean — rather
-than the configured C<Service::Vault> object. Callers that need the
-repository's vault object should use C<vault()> directly.
-
-=item B<FWT-697: Operator-precedence bug in C<create()> kits path assignment>
-
-In C<create()>, the expression
-
-    if (my $rel_path = humanize_path(...) !~ m#^/#) { ... }
-
-binds as C<humanize_path(...) !~ m#^/#> (a boolean) assigned to C<$rel_path>,
-not the result of C<humanize_path> tested against the regex. The C<$rel_path>
-variable always receives C<1> or C<''>, causing the relative-path branch to
-always store the wrong value.
-
-=item B<FWT-698: C<_upgrade_config_to_v2()> bail may always fire>
-
-C<_upgrade_config_to_v2()> calls C<$self->_validate_config()> on the candidate
-v2 config and then checks the return value with C<unless>. Because
-C<_validate_config()> has no explicit C<return> statement, its return value is
-the implicit result of the last evaluated expression — for v2 configs, the
-return value of C<< $self->config->validate() >>. If that method returns a
-falsy value on success, the C<unless> condition is always true and the
-C<"Cannot upgrade..."> bail fires unconditionally, making v1-to-v2 automatic
-upgrade impossible.
-
-=item B<FWT-699: C<set_kit_provider()> does not save config for GenesisCommunity>
-
-When C<set_kit_provider()> detects that the new provider is a
-C<Genesis::Kit::Provider::GenesisCommunity> instance, it calls
-C<< $self->config->clear('kit_provider', 1) >> but does not call
-C<< $self->config->save() >> afterward. The change is lost when the process
-exits.
-
-=back
 
 =head1 SEE ALSO
 
