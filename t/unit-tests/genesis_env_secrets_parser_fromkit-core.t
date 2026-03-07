@@ -5,7 +5,6 @@ use warnings;
 use lib 't';
 use lib 'lib';
 use helper;
-use Test::Deep;
 
 # Test Genesis::Env::Secrets::Parser::FromKit
 # Validates parsing of kit metadata into Genesis::Secret objects
