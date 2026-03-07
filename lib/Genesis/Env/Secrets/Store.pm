@@ -1,6 +1,8 @@
-package Genesis::Env::SecretsStore;
+package Genesis::Env::Secrets::Store;
 use strict;
 use warnings;
+
+use Genesis;
 
 ### Class Methods {{{
 
@@ -12,7 +14,7 @@ sub new {
 	#   options:     key-value pairings to configure secrets store
 	#
 	# Output expected:
-	#   New derived SecretsStore object.
+	#   New derived Secrets::Store object.
 }
 
 # }}}
@@ -21,11 +23,12 @@ sub provide {
 	my ($class, $env, $service, %options) = @_;
 	if (ref($service) =~ /^Service::Vault::(Remote|Local)$/) {
 		require Genesis::Env::Secrets::Store::Vault;
-		return Genesis::Env::Secrets::Store::Vault->provide($env,$service);
+		return Genesis::Env::Secrets::Store::Vault->new($env, service => $service, %options);
 	} elsif (ref($service) =~ /^Service::Credhub$/) {
 		require Genesis::Env::Secrets::Store::Credhub;
-		return Genesis::Env::Secrets::Store::Credhub->provide($env,$service);
+		return Genesis::Env::Secrets::Store::Credhub->new($env, service => $service, %options);
 	}
+	bug("Unknown secrets service type '%s' for environment '%s'", ref($service), $env->name);
 }
 
 # }}}

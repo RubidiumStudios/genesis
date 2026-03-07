@@ -26,9 +26,9 @@ sub new {
 	# validate call
 	my @required_options = qw/service/;
 	my @valid_options = (@required_options, qw/mount_override slug_override root_ca_override/);
-	bug("No '$_' specified in call to Genesis::Env::SecretsStore::Vault->new")
+	bug("No '$_' specified in call to Genesis::Env::Secrets::Store::Vault->new")
 		for grep {!$opts{$_}} @required_options;
-	bug("Unknown '$_' option specified in call to Genesis::Env::SecretsStore::Vault->new")
+	bug("Unknown '$_' option specified in call to Genesis::Env::Secrets::Store::Vault->new")
 		for grep {my $k = $_; ! grep {$_ eq $k} @valid_options} CORE::keys(%opts);
 
 	$opts{mount_override}   //= $env->lookup('genesis.secrets_mount');
