@@ -250,13 +250,30 @@ sub parse_vault_descriptor {
 
 ### Instance Methods {{{
 
-# public accessors: url, name, verify, tls {{{
-sub url        { $_[0]->{url};       }
-sub name       { $_[0]->{name};      }
-sub verify     { $_[0]->{verify};    }
-sub namespace  { $_[0]->{namespace}; }
-sub strongbox  { $_[0]->{strongbox}; }
-sub tls        { $_[0]->{url} =~ "^https://"; }
+# public accessors: url, name, verify, namespace, strongbox, tls {{{
+sub url {
+	$_[0]->{url};
+}
+
+sub name {
+	$_[0]->{name};
+}
+
+sub verify {
+	$_[0]->{verify};
+}
+
+sub namespace {
+	$_[0]->{namespace};
+}
+
+sub strongbox {
+	$_[0]->{strongbox};
+}
+
+sub tls {
+	$_[0]->{url} =~ "^https://";
+}
 
 #}}}
 # connect_and_validate - connect to the vault and validate that its connected {{{
