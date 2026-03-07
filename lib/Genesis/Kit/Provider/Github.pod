@@ -645,10 +645,27 @@ differ, the user is prompted interactively to confirm overwriting.
 The saved file is written with permissions C<0444> and named
 C<$name-$version-src.tar.gz> under C<$path>.
 
-B<Note:> Unlike C<fetch_kit_version()>, this method does I<not> perform
-download-time content validation.  The empty-response check, HTML
-interception check, and gzip magic bytes check are absent.  See
-L</KNOWN ISSUES>.
+Three content validation checks are performed on the downloaded data
+before the file is written, matching those in C<fetch_kit_version()>:
+
+=over 4
+
+=item 1. Empty response check
+
+If the downloaded response body is empty, the method dies immediately.
+
+=item 2. HTML interception check
+
+If the response starts with C<< <!DOCTYPE >>, C<< <html >>, or
+C<< <head >> (case-insensitive), the download is rejected as a proxy or
+captive-portal intercept.
+
+=item 3. Gzip magic bytes check
+
+If the response is non-empty but the first two bytes are not C<0x1f 0x8b>
+(the gzip magic number), a warning is emitted and the download proceeds.
+
+=back
 
 B<Parameters:>
 
@@ -702,6 +719,16 @@ values are the kit name, version, and release notes body.
 Raised when the HTTP download returns a non-200 response.  The C<%s>
 values are the kit name, version, provider label, and HTTP status code.
 
+=item C<"Downloaded source for kit %s/%s from %s but received empty response.\nThe server returned HTTP 200 but no content.">
+
+Raised when the download succeeds (HTTP 200) but the response body is
+empty.  The C<%s> values are the kit name, version, and provider label.
+
+=item C<"Downloaded source for kit %s/%s from %s but received an HTML page\ninstead of a source archive.\n\nA network proxy or captive portal likely intercepted the download.\nCheck network connectivity and proxy settings.">
+
+Raised when the downloaded content begins with an HTML tag.  The C<%s>
+values are the kit name, version, and provider label.
+
 =item C<"Aborted!\n">
 
 Raised when the user declines to overwrite an existing file that differs.
@@ -711,6 +738,12 @@ Raised when the user declines to overwrite an existing file that differs.
 B<Warnings:>
 
 =over 4
+
+=item C<"Downloaded source data for kit %s/%s does not appear to be gzip-compressed.\nProceeding, but the source archive may fail to extract.">
+
+Emitted when the downloaded content is non-empty but the first two bytes
+are not C<0x1f 0x8b> (the gzip magic number).  The download is saved
+regardless.  The C<%s> values are the kit name and version.
 
 =item C<"Exact same kit source already exists under #C{%s} - no change.\n">
 
@@ -857,33 +890,7 @@ B<Examples:>
 
 =head1 KNOWN ISSUES
 
-=head3 fetch_kit_version_src does not validate downloaded content
-
-C<fetch_kit_version_src()> does not perform any of the three download-time
-content validation checks that C<fetch_kit_version()> performs.
-Specifically:
-
-=over 4
-
-=item *
-
-No empty-response check -- a silent HTTP 200 with no body is saved to
-disk without error.
-
-=item *
-
-No HTML interception check -- a proxy or captive-portal response is saved
-as if it were a valid source archive.
-
-=item *
-
-No gzip magic bytes warning -- the file is written regardless of its
-content type.
-
-=back
-
-As a result, source archives downloaded via C<fetch_kit_version_src()> are
-not content-verified before saving.  This is tracked as B<FWT-706>.
+None at this time.
 
 =head1 AUTHORS
 

@@ -143,10 +143,10 @@ hashref if no matching files are found.
 
 B<Errors:>
 
-If any matching tarball fails validation inside C<new()>, the entire scan is
-terminated and the error from C<_validate_tar_archive> is propagated. Corrupt
-or partial archives abort the scan rather than being skipped. See
-L</KNOWN ISSUES>.
+If a matching tarball fails validation inside C<new()>, a warning is emitted
+identifying the file and the validation error, and that file is skipped.
+The scan continues with remaining files. No single corrupt archive can
+prevent discovery of other valid kits in the same directory.
 
 B<Examples:>
 
@@ -462,16 +462,7 @@ B<Examples:>
 
 =head1 KNOWN ISSUES
 
-=head3 Corrupt archive aborts local_kits scan (FWT-706)
-
-C<local_kits()> calls C<new()> for each matching tarball, which in turn calls
-C<_validate_tar_archive()>. If any archive in the scanned directory fails
-validation, the entire scan is terminated and the error is propagated to the
-caller. As a result, a single corrupt or partially-downloaded kit file
-prevents discovery of all other valid kits in the same directory.
-
-The correct behavior would be to emit a warning and skip the offending file,
-continuing the scan. This will be addressed in FWT-706.
+None at this time.
 
 =head1 AUTHORS
 
