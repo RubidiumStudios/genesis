@@ -378,7 +378,7 @@ sub latest_version_of {
 	bail("Missing name for retrieving kit releases") unless $name;
 	my $version = (
 		grep {$_->{url}}
-		$self->kit_versions($name, latest => 1, include_drafts => $opts{include_drafts}, include_prerelease => $opts{include_prereleases})
+		$self->kit_versions($name, latest => 1, include_drafts => $opts{include_drafts}, include_prereleases => $opts{include_prereleases})
 	)[0];
 	return $version && $version->{version};
 }

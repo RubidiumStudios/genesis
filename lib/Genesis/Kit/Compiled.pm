@@ -30,10 +30,11 @@ sub local_kits {
 	my %kits;
 	for (glob("$path/*")) {
 		next unless m{/([^/]*)-(\d+(\.\d+(\.\d+([.-]rc[.-]?\d+)?)?)?).t(ar.)?gz$};
+		my ($kit_name, $kit_version) = ($1, $2);
 		my $kit = eval {
 			$class->new(
-				name     => $1,
-				version  => $2,
+				name     => $kit_name,
+				version  => $kit_version,
 				archive  => $_,
 				provider => $provider
 			);
@@ -42,7 +43,7 @@ sub local_kits {
 			warning("Skipping invalid kit archive %s: %s", $_, $@);
 			next;
 		}
-		$kits{$1}{$2} = $kit;
+		$kits{$kit_name}{$kit_version} = $kit;
 	}
 	return \%kits;
 }
