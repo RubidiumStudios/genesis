@@ -366,9 +366,8 @@ Any arguments (ignored — the function always bails when defined).
 
 B<Errors:>
 
-Calls C<__bail> with a message indicating that the safe target is not set
-to the expected Genesis vault, including the current values of
-C<SAFE_TARGET> and C<GENESIS_TARGET_VAULT>.
+Calls C<__bail> with C<"Safe target not associated with Genesis Vault --
+this is a bug in Genesis, or you are running $0 outside of Genesis">.
 
 =head1 Exodus Data
 
@@ -620,8 +619,9 @@ B<Examples:>
 Returns exit code 0 if the current deployment uses C<bosh create-env>
 (proto/bootstrapping deployments), non-zero otherwise.
 
-For Genesis versions before 2.8.6-rc1, the check falls back to looking for
-the C<proto> feature flag.  For Genesis 2.8.6-rc1 and later, reads the
+For kits whose C<GENESIS_MIN_VERSION_FOR_KIT> is older than C<2.8.6-rc1>,
+the check falls back to looking for the C<proto> feature flag.  For kits
+requiring Genesis C<2.8.6-rc1> or later, C<use_create_env> reads the
 C<GENESIS_USE_CREATE_ENV> environment variable.
 
 B<Returns:>
@@ -1299,7 +1299,8 @@ C<use_create_env: true> is added when C<use_create_env> returns success.
 =item *
 
 C<bosh_env:> is added when C<BOSH_ALIAS> differs from C<GENESIS_ENVIRONMENT>
-and is non-empty; set to C<((prune))> for create-env deployments.
+and is non-empty; it is set to C<((prune))> when C<GENESIS_USE_CREATE_ENV>
+is exactly C<1>.
 
 =item *
 
@@ -1585,12 +1586,17 @@ Running Genesis version string (e.g., C<2.8.6>).  Used by C<version_check>.
 =item C<GENESIS_MIN_VERSION>
 
 Minimum Genesis version required by the current kit.  Used by
-C<use_create_env>.
+C<genesis_config_block>.
+
+=item C<GENESIS_MIN_VERSION_FOR_KIT>
+
+Minimum Genesis version required by the current kit when using
+C<bosh create-env>.  Used by C<use_create_env>.
 
 =item C<GENESIS_USE_CREATE_ENV>
 
 Set to C<"true"> by Genesis when the deployment uses C<bosh create-env>.
-Used by C<use_create_env> and C<genesis_config_block>.
+Used by C<use_create_env>.
 
 =item C<GENESIS_SECRETS_BASE>
 
