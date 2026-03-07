@@ -1736,11 +1736,8 @@ sub can_be_entombed {
 sub secrets_store {
 	return $_[0]->_memoize(sub{
 		my $self = shift;
-		# TODO: Use a builder?
-		require Genesis::Env::Secrets::Store::Vault;
-		Genesis::Env::Secrets::Store::Vault->new(
-			$self, service => $self->vault
-		);
+		require Genesis::Env::Secrets::Store;
+		Genesis::Env::Secrets::Store->provide($self, $self->vault);
 	});
 }
 
