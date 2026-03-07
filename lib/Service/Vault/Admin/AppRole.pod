@@ -65,7 +65,7 @@ B<Errors:>
 
 =over 4
 
-=item C<"Service::Vault::Admin::AppRole equires a Service::Vault::Admin object">
+=item C<"Service::Vault::Admin::AppRole requires a Service::Vault::Admin object">
 
 Thrown when C<$admin> is undefined or is not a C<Service::Vault::Admin>
 instance.

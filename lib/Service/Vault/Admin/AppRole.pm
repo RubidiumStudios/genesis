@@ -2,11 +2,11 @@ package Service::Vault::Admin::AppRole;
 
 use v5.20;
 use warnings;
-use Genesis qw/bail info run debug trace/;
+use Genesis qw/bail info run debug trace read_json_from/;
 
 sub new {
 	my ($class, $admin) = @_;
-	bail("Service::Vault::Admin::AppRole equires a Service::Vault::Admin object")
+	bail("Service::Vault::Admin::AppRole requires a Service::Vault::Admin object")
 		unless $admin && ref($admin) =~ /^Service::Vault::Admin/;
 
 	return bless({
