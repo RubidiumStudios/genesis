@@ -15,7 +15,7 @@ Genesis::Top - Root-directory context object for Genesis deployment repositories
     my $top = Genesis::Top->new('/path/to/cf-deployments', vault => 'prod-vault');
 
     # Create a new deployment repository
-    my $top = Genesis::Top->create('/repos', 'cf', type => 'cf');
+    my $top = Genesis::Top->create('/repos', 'cf');
 
     # Common operations
     my $env  = $top->load_env('us-east-prod');
