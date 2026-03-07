@@ -469,6 +469,11 @@ For C<download> only. The local file path (currently unused).
 B<Returns:> Boolean for C<is_type>, C<is_light>, C<is_full>, and C<is_local>.
 C<download> never returns.
 
+B<Errors:>
+
+Dies with C<"Downloading stemcell from %s is not implemented yet">.
+C<%s> is the stemcell's URL.
+
 B<Examples:>
 
   if ($sc->is_type('light')) {

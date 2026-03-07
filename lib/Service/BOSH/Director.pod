@@ -626,8 +626,9 @@ Returns C<$self> immediately when the director is already marked
 validated (either from a previous call or from C<$ENV{GENESIS_BOSH_VERIFIED}>
 at construction time).
 
-On success, sets C<$self-E<gt>{validated}> to C<1> and
-C<$ENV{GENESIS_BOSH_VERIFIED}> to the director alias.
+Delegates to L</status> which, on success, sets
+C<$self-E<gt>{validated}> to C<1> and C<$ENV{GENESIS_BOSH_VERIFIED}> to
+the director alias.
 
 B<Returns:> The director object (C<$self>).
 
@@ -659,8 +660,9 @@ proxy and applies a timeout from C<$ENV{GENESIS_NETWORK_TIMEOUT}> (default
 is checked first with a plain socket test.
 
 On success, the authenticated user is extracted from the C<bosh env>
-output and stored in C<$self-E<gt>{user}>, and C<$self-E<gt>{validated}> is
-set to C<1>.
+output and stored in C<$self-E<gt>{user}>, C<$self-E<gt>{validated}> is
+set to C<1>, and C<$ENV{GENESIS_BOSH_VERIFIED}> is set to
+C<$self-E<gt>{alias}>.
 
 B<Returns:> A hashref with keys:
 
@@ -862,7 +864,9 @@ named configuration. This indicates an unexpected BOSH API response (note
 DIRECTOR-6: in the double-quoted string, C<$_-E<gt>label> interpolates as the
 stringified hashref followed by the literal text C<-E<gt>label>, producing a
 garbled message like C<"HASH(0x...)-E<gt>label">. The intended code was
-C<$_-E<gt>{label}>. This bug is also unreachable due to DIRECTOR-5).
+C<$_-E<gt>{label}>. This code path is also unreachable due to DIRECTOR-5:
+an identical C<if ($rc || $json_err)> check earlier in the method calls
+C<bail()> first, so the second check never fires).
 
 Dies with C<"Failed to converge the active $type configurations: $err"> when
 C<spruce merge> fails while merging multiple configs. C<$type> is the config
@@ -1444,13 +1448,14 @@ B<Examples:>
   $director->acquire_network_lock();
 
 Acquires the network claim lock by writing a JSON lock record to the Vault
-at C<$self-E<gt>exodus_path . ':network-claim-lock'>. The lock record
-contains the timestamp, hostname, username, PID, and environment name.
+at C<$self-E<gt>exodus_path . ':network-claim-lock'> via
+C<$self-E<gt>vault-E<gt>set(...)>. The lock record contains the timestamp,
+hostname, username, PID, and environment name.
 
 Dies when the lock is already held (even when it is stale; see
 DIRECTOR-10, tracked in FWT-694).
 
-B<Returns:> Nothing.
+B<Returns:> Nothing (Vault write is the only externally observable effect).
 
 B<Errors:>
 

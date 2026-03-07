@@ -84,13 +84,11 @@ considered.
 
 =back
 
-B<Returns:> The full path to the selected BOSH CLI executable.
-
-B<Note:> Due to a known defect (BOSH-1, tracked in FWT-694), this method
-has no explicit return statement at the end. When version constraints are
-applied and a suitable CLI is found, the method sets C<$bosh_cmd> and then
-falls off the end of the sub, returning C<undef> instead of C<$bosh_cmd>.
-See L</KNOWN ISSUES>.
+B<Returns:> The full path to the selected BOSH CLI executable, except when
+version constraints are applied and a matching CLI is found via the scan
+loop -- in that case, returns C<undef> due to a missing return statement
+(BOSH-1; see L</KNOWN ISSUES>). The early-return paths (C<GENESIS_BOSH_COMMAND>
+and the no-constraints cache hit) are not affected.
 
 B<Errors:>
 
@@ -370,9 +368,10 @@ Optional hash reference. Recognised keys:
 
 Controls whether the command is actually run after printing the dry-run
 message. If false (the default), only the message is printed and C<1> is
-returned. If true, the command is executed with C<--dry-run> appended. May
-also be an array reference of flag strings to append instead of the default
-C<['--dry-run']>.
+returned. If set to a scalar true value (e.g. C<1>), the command is
+executed with C<--dry-run> appended. If set to an array reference of flag
+strings (e.g. C<['--dry-run', '--no-redact']>), those flags are appended
+instead of the default C<['--dry-run']>.
 
 =item exec_msg
 
@@ -418,7 +417,9 @@ class provides default behaviour; subclasses replace or extend it.
 
 Returns C<0> in the base class. Override in subclasses that represent a
 full BOSH director connection to return C<1>. C<Service::BOSH::Director>
-overrides this method; C<Service::BOSH::CreateEnvProxy> does not.
+overrides this to return C<1>; C<Service::BOSH::CreateEnvProxy> inherits
+the base-class C<0>. See L</has_director> under CLASS METHODS for the
+full signature and examples.
 
 =head2 environment_variables
 

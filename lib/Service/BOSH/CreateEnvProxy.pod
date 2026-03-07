@@ -143,7 +143,10 @@ C<bosh create-env> before the manifest argument.
 
 =back
 
-B<Returns:> The return value of the underlying C<execute> call.
+B<Returns:> The return value of the underlying C<execute> call. In list
+context this is C<($output, $exit_code, $stderr)>; in scalar context it
+is the raw exit code (C<0> on success). See L<Service::BOSH/execute> for
+full return semantics.
 
 B<Errors:>
 
@@ -246,7 +249,7 @@ B<Examples:>
   my ($out, $rc, undef) = $proxy->delete_env('/path/to/bosh.yml',
     state => '/path/to/bosh-state.json',
   );
-  # Returns: ($output, 0, undef) on success
+  # Returns: ($output, $exit_code, undef)
 
   # Dryrun -- logs intent, does not execute
   my $ok = $proxy->delete_env('/path/to/bosh.yml',
