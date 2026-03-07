@@ -8,7 +8,7 @@ use Genesis;
 
 # new -  abstract builder for creating a secrets store for an environment {{{
 sub new {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'new');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'new');
 	# Input expected:
 	#   environment: environment object
 	#   options:     key-value pairings to configure secrets store
@@ -39,7 +39,7 @@ sub provide {
 # Informational
 # default_mount - returns the default mount point for this class of secrets store {{{
 sub default_mount {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'default_mount');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'default_mount');
 	# Input expected:
 	#   No arguments
 	#
@@ -50,7 +50,7 @@ sub default_mount {
 # }}}
 # mount - returns the mount point for this secrets store {{{
 sub mount {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'mount');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'mount');
 	# Input expected:
 	#   No arguments
 	#
@@ -61,7 +61,7 @@ sub mount {
 # }}}
 # default_slug - the default subpath for the environment based on its name and type {{{
 sub default_slug {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'default_slug');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'default_slug');
 	# Input expected:
 	#   No arguments
 	#
@@ -72,7 +72,7 @@ sub default_slug {
 # }}}
 # slug - the subpath for the given environment {{{
 sub slug {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'slug');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'slug');
 	# Input expected:
 	#   No arguments
 	#
@@ -83,7 +83,7 @@ sub slug {
 # }}}
 # label - descriptive string for the secret store for this environment {{{
 sub label {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'label');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'label');
 	# Input expected:
 	#   No arguments
 	#
@@ -96,7 +96,7 @@ sub label {
 # Basic Access
 # list - returns an array of existing secrets, given an optional filter {{{
 sub list {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'list');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'list');
 	# Input expected:
 	#   filter: either a string, regular expression or a hash that describes a
 	#           filter on the name or type or feature of the secrets.  String
@@ -112,7 +112,7 @@ sub list {
 # }}}
 # get - get the secrets under the given path (and optional key) {{{
 sub get {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'get');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'get');
 	# Input expected:
 	#   path:         store secret path to return the values for
 	#   list of keys: a subset of keys to return values for.  (optional - all keys
@@ -127,7 +127,7 @@ sub get {
 # }}}
 # set - write the secret value for the given path, and optional type {{{
 sub set {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'set');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'set');
 	# Input expected:
 	#   path:   store secret path to set values for
 	#   values: The value to store at the given secret path.  If this is a scalar,
@@ -145,7 +145,7 @@ sub set {
 
 # authenticate - authenticate to the remote store service {{{
 sub authenticate {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'authenticate');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'authenticate');
 	# Input expected:
 	#   No Arguments
 	#
@@ -156,7 +156,7 @@ sub authenticate {
 # }}}
 # is_authenticated - determine if already authenticated to the remote store service {{{
 sub is_authenticated {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'is_authenticated');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'is_authenticated');
 	# Input expected:
 	#   No Arguements
 	#
@@ -167,7 +167,7 @@ sub is_authenticated {
 # }}}
 # is_available - determine if remote store service is reachable and targetable {{{
 sub is_available {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'is_available');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'is_available');
 	# Input expected:
 	#   No arguments
 	#
@@ -181,7 +181,7 @@ sub is_available {
 #
 # generate - generate secrets based on the environment {{{
 sub generate {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'generate');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'generate');
 	# Input expected:
 	#   options: determine how/what secrets are generated
 	#     filter:  filter for which secrets to add
@@ -201,7 +201,7 @@ sub generate {
 # }}}
 # validate - validate secrets based on the environment {{{
 sub validate {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'validate');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'validate');
 	# Input expected:
 	#   options: determine how/what secrets are validated
 	#     filter:   filter for which secrets to validate
@@ -225,7 +225,7 @@ sub validate {
 # }}}
 # regenerate - regenerate secrets {{{
 sub regenerate {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'regenerate');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'regenerate');
 	# Input expected:
 	#   options: determine how/what secrets are regenerated
 	#     filter:      filter for which secrets to regenerate
@@ -256,7 +256,7 @@ sub regenerate {
 # }}}
 # remove - remove specific secrets as defined by a filter {{{
 sub remove {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'remove');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'remove');
 	# Input expected:
 	#   filter: either a string, regular expression or a hash that describes a filter on the name or type or feature of the secrets
 	#
@@ -272,7 +272,7 @@ sub remove {
 # }}}
 # remove_all - remove all secrets under a given path {{{
 sub remove_all {
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($_[0]), 'remove_all');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($_[0]), 'remove_all');
 	# Input expected:
 	#   filter: either a string, regular expression or a hash that describes a filter on the name or type or feature of the secrets
 	#
