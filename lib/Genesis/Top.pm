@@ -123,7 +123,8 @@ sub create {
 	my $kits_path = '';
 	if ($kits_path = $opts{kits_path}) {
 		$kits_path = expand_path($kits_path);
-		if (my $rel_path = humanize_path($kits_path, base_dir => $self->path()) !~ m#^/#) {
+		my $rel_path = humanize_path($kits_path, base_dir => $self->path());
+		if ($rel_path !~ m#^/#) {
 			debug("Kit: using relative path $rel_path for kits path");
 			$kits_path = $rel_path;
 		} else {
@@ -145,7 +146,7 @@ sub create {
 		$self->config->set('kits_path', $kits_path) if $kits_path;
 
 		# Apply any config overrides from %opts
-		for my $override (grep {exists $opts{$_}} qw(creator_version updater_version minimum_version manifest_store kits_path)) {
+		for my $override (grep {exists $opts{$_}} qw(creator_version updater_version minimum_version manifest_store)) {
 			if (defined $opts{$override}) {
 				$self->config->set($override, $opts{$override});
 			} else {
