@@ -230,6 +230,32 @@ sub fetch_kit_version {
 		$name, $version, $self->label, $code
 	) unless $code == 200;
 	info "#G{done.}";
+
+	# Validate downloaded content before saving
+	if (length($data) == 0) {
+		bail(
+			"Downloaded kit %s/%s from %s but received empty response.\n".
+			"The server returned HTTP 200 but no content.",
+			$name, $version, $self->label
+		);
+	}
+	if ($data =~ /\A<(!DOCTYPE|html|head)/i) {
+		bail(
+			"Downloaded kit %s/%s from %s but received an HTML page\n".
+			"instead of a kit archive.\n\n".
+			"A network proxy or captive portal likely intercepted the download.\n".
+			"Check network connectivity and proxy settings.",
+			$name, $version, $self->label
+		);
+	}
+	if (length($data) >= 2 && substr($data, 0, 2) ne "\x1f\x8b") {
+		warning(
+			"Downloaded data for kit %s/%s does not appear to be gzip-compressed.\n".
+			"Proceeding, but the kit may fail to load.",
+			$name, $version
+		);
+	}
+
 	my $file = "$path/$name-$version.tar.gz";
 	if (-f $file) {
 		if (! $force) {
