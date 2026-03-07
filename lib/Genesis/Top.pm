@@ -752,7 +752,15 @@ sub vault {
 sub repo_vault {
 	my $self = shift;
 	return Service::Vault::default unless $self->has_vault();
-	return $self->config->get("secrets_provider.insecure");
+	my $namespace = $self->config->get("secrets_provider.namespace");
+	my $strongbox = $self->config->get("secrets_provider.strongbox");
+	my %opts = (
+		url    => $self->config->get("secrets_provider.url"),
+		verify => $self->config->get("secrets_provider.insecure") ? 0 : 1,
+	);
+	$opts{namespace} = $namespace if defined($namespace);
+	$opts{strongbox} = ($strongbox ? 1 : 0) if defined($strongbox);
+	return Service::Vault::Remote->attach(%opts);
 }
 
 # }}}
