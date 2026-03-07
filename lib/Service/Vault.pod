@@ -531,6 +531,10 @@ B<Examples:>
   print $vault->namespace();
   # Returns: ''
 
+  # When the vault URL includes a namespace path
+  print $vault->namespace();
+  # Returns: 'admin'
+
 =head2 strongbox
 
   my $sb = $vault->strongbox();
