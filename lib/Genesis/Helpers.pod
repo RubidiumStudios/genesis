@@ -605,13 +605,6 @@ B<Errors:>
 Exits with a bash error if C<KEY> is missing:
 C<"typeof() - must specify a key to look up">.
 
-B<Caveats:>
-
-The current implementation passes arguments to C<genesis lookup> in
-inverted order (KEY, ENV instead of ENV, KEY).  This is a known defect
-tracked in FWT-693.  The function may not return correct results until
-this is fixed.
-
 B<Examples:>
 
     t=$(typeof params.networks)
