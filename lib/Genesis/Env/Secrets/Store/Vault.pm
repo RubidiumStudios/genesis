@@ -116,15 +116,15 @@ sub clear_data {
 sub paths {
 	my $self = shift;
 	return $self->service->paths(@_) unless exists($self->{__data});
+	return CORE::keys %{$self->{__data}} unless @_;
 	my @paths = ();
 	my $base = $self->base =~ s/^\///r;
 	for my $path (@_) {
-		if ($path =~ /^$base/) {
+		if ($path =~ /^\Q$base\E/) {
 			my $spath = $path =~ s/\/$//r;
 			my @sub_paths = grep {$_ =~ /^\/$spath(\/|$)/} CORE::keys %{$self->{__data}};
 			push(@paths, @sub_paths);
 		} else {
-			#use Pry; pry();
 			# if its not under the store base, then its not in the store
 			push(@paths, $self->service->paths($path));
 		}
@@ -136,10 +136,10 @@ sub keys {
 	my $self = shift;
 	return $self->service->keys(@_) unless exists($self->{__data});
 	my @paths = $self->paths(@_);
+	my $base = $self->base;
 	my @keys = ();
 	for my $path (@paths) {
-		my $base = $self->base;
-		if ($path =~ /^$base\//) {
+		if ($path =~ /^\Q$base\E\//) {
 			push (@keys, CORE::keys %{$self->{__data}{$path}})
 		} else {
 			push (@keys, $self->service->keys($path));
@@ -167,7 +167,6 @@ sub read   {
 	$secret->set_value($value, loaded => 1);
 
 	if ($secret->can('format_path') && (my $format_path = $secret->format_path)) {
-		my $format_path = $secret->format_path;
 		my $fmt_value = $self->service->has($self->path($format_path))
 			? $self->service->get($self->path($format_path))
 			: undef;
@@ -183,13 +182,13 @@ sub write   {
 	if ($secret->path =~ ':') {
 		$self->service->set(split(":",$self->path($secret->path),2), $secret->value);
 		if ($secret->can('format_path') && (my $format_path = $secret->format_path)) {
-			$self->service->set($self->path($format_path), $_, $secret->calc_format_value);
+			$self->service->set(split(":", $self->path($format_path), 2), $secret->calc_format_value);
 		}
 	} elsif (ref($secret->value) eq 'HASH') {
 		my %values = %{$secret->value};
 		for my $key ( map {(split ':', $_, 2 )[1]} $self->service->keys($self->path($secret->path))) {
 			next if exists($secret->value->{$key});
-			$self->service->query('rm', join(":", ($self->path($secret->path),$_)));
+			$self->service->query('rm', join(":", ($self->path($secret->path),$key)));
 		}	;
 		$self->service->set($self->path($secret->path), $_, $values{$_}) for CORE::keys %values;
 	} else {
