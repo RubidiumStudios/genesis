@@ -445,21 +445,26 @@ configs from their respective sources.
 The following defects are tracked in FWT-694 and are documented here so
 that callers are aware of the current behaviour.
 
-=head3 BOSH-1: command() missing explicit return
+=over 4
 
-C<command()> stores the selected CLI path in C<$bosh_cmd> and then falls
-off the end of the sub without returning C<$bosh_cmd>. When version
-constraints are in effect and a matching CLI is found, the method returns
-C<undef> rather than the path. The early-return paths (C<GENESIS_BOSH_COMMAND>
-and the no-constraints cache hit) are not affected.
+=item BOSH-1 (medium)
 
-=head3 BOSH-2: execute() scalar return is a raw exit code
+C<command()> line 61: stores the selected CLI path in C<$bosh_cmd> and
+then falls off the end of the sub without returning C<$bosh_cmd>. When
+version constraints are in effect and a matching CLI is found, the method
+returns C<undef> rather than the path. The early-return paths
+(C<GENESIS_BOSH_COMMAND> and the no-constraints cache hit) are not
+affected.
 
-In scalar context without the C<passfail> option, C<execute()> returns
-C<$results[1]>, which is the raw process exit code. A successful command
-returns C<0>, which is falsy in Perl. This is the inverse of the boolean
-C<passfail> return. Callers using scalar context should test for C<== 0>
-rather than simple truth.
+=item BOSH-2 (medium)
+
+C<execute()> lines 176-177: in scalar context without the C<passfail>
+option, returns C<$results[1]>, which is the raw process exit code. A
+successful command returns C<0>, which is falsy in Perl. This is the
+inverse of the boolean C<passfail> return. Callers using scalar context
+should test for C<== 0> rather than simple truth.
+
+=back
 
 =head1 SEE ALSO
 

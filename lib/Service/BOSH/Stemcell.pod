@@ -588,26 +588,28 @@ B<Examples:>
 
 =head1 KNOWN ISSUES
 
-The following defects are tracked as FWT-694 and have not yet been fixed.
+The following defects are tracked in FWT-694 and are documented here so
+that callers are aware of the current behaviour.
 
 =over 4
 
-=item SC-2: Missing JSON::PP import
+=item SC-2 (high)
 
-C<available_stemcells> calls JSON::PP to decode the bosh.io API response but
-the module does not contain C<use JSON::PP>. At runtime this call succeeds
-only when another module loaded earlier in the process (such as
-C<Service::BOSH::Director>) has already imported JSON::PP. If called in
-isolation the method will crash with
+C<available_stemcells()> line 49: calls C<JSON::PP> to decode the bosh.io
+API response but the module does not contain C<use JSON::PP>. At runtime
+this call succeeds only when another module loaded earlier in the process
+(such as C<Service::BOSH::Director>) has already imported C<JSON::PP>. If
+called in isolation the method will crash with
 C<"Can't locate object method "new" via package "JSON::PP">.
 
-=item SC-5: C<select_stemcell> type filter not applied at final selection
+=item SC-5 (medium)
 
-When the C<type> option is provided to C<select_stemcell> and both C<light>
-and C<regular> stemcells exist for the selected minor version, the method
-returns the stemcell at an arbitrary hash key (determined by Perl's hash
-iteration order) rather than the stemcell matching the requested type. The
-C<if ($type_filter || @types == 1)> branch at line 130 reaches into
+C<select_stemcell()> line 131: when the C<type> option is provided and
+both C<light> and C<regular> stemcells exist for the selected minor
+version, the method returns the stemcell at an arbitrary hash key
+(determined by Perl's hash iteration order) rather than the stemcell
+matching the requested type. The C<if ($type_filter || @types == 1)>
+branch reaches into
 C<(keys %{$grouped_by_minor{$selected_minor}})[0]> without filtering on
 C<$type_filter>.
 

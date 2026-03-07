@@ -300,14 +300,19 @@ B<Examples:>
 
 =head1 KNOWN ISSUES
 
-B<CEP-2: create_env() ignores dryrun (FWT-694)>
+The following defects are tracked in FWT-694 and are documented here so
+that callers are aware of the current behaviour.
 
-The C<create_env> method does not implement a dryrun path. Passing
+=over 4
+
+=item CEP-2 (medium)
+
+C<create_env()> lines 29-44: does not implement a dryrun path. Passing
 C<dryrun =E<gt> 1> in the options hash has no effect; the real
-C<bosh create-env> command executes unconditionally.
+C<bosh create-env> command executes unconditionally. The sibling method
+C<delete_env> handles dryrun correctly.
 
-The sibling method C<delete_env> handles dryrun correctly. This asymmetry
-is a known defect tracked as CEP-2 / FWT-694.
+=back
 
 =head1 SEE ALSO
 
