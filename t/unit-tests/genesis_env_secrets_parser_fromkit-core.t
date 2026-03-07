@@ -255,4 +255,26 @@ subtest 'FWT-681 Cat3: _parse_x509_subpaths does not mutate caller hashref' => s
 		"caller's hashref not mutated: signed_by not rewritten");
 };
 
+subtest 'FWT-686: arbitrary X.509 subpath names are accepted' => sub {
+	# Kit authors can use any subpath name — no whitelist restriction
+	my @secrets = parse_metadata({
+		certificates => {
+			base => {
+				'test/certs' => {
+					ca      => { is_ca => 1, valid_for => '10y' },
+					server  => { valid_for => '1y', names => ['srv.example.com'] },
+					custom  => { valid_for => '6m', names => ['custom.example.com'] },
+				},
+			},
+		},
+	});
+
+	is(scalar @secrets, 3, "three X.509 secrets produced");
+	ok($_->valid, $_->path . " is valid") for @secrets;
+
+	my ($custom) = grep { $_->path eq 'test/certs/custom' } @secrets;
+	isa_ok($custom, 'Genesis::Secret::X509');
+	is($custom->get('valid_for'), '6m', "custom subpath passes through correctly");
+};
+
 done_testing;
