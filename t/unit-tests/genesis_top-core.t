@@ -983,4 +983,28 @@ EOF
 		"finds vault from deep ancestor (multiple hierarchy levels)");
 };
 
+subtest 'create() kits_path stores relative path not boolean (FWT-697)' => sub {
+	local $Genesis::VERSION = '3.1.0';
+	my $basedir = workdir('fwt-697-test');
+
+	# kits_path inside the repo: humanize_path returns a relative path.
+	# Bug: operator precedence causes $rel_path to get boolean 1, not the
+	# humanized path, so the relative path is never stored. The config
+	# override loop then stores the original absolute path from opts.
+	# After fix: the relative path (e.g. "custom-kits") should be stored.
+	my $repo_path = "$basedir/myrepo";
+	my $kits_dir = "$repo_path/custom-kits";
+
+	my $top = Genesis::Top->create(
+		$basedir, "myrepo",
+		no_vault => 1,
+		kits_path => $kits_dir,
+	);
+
+	my $stored = $top->config->get('kits_path');
+	ok(defined($stored), "kits_path is defined in config");
+	unlike($stored, qr{^/}, "kits_path is relative, not absolute (FWT-697)");
+	is($stored, 'custom-kits', "kits_path is the humanized relative path");
+};
+
 done_testing;
