@@ -281,8 +281,8 @@ C<"0-65535"> bounded numeric form.
 =item C<"n-m"> or C<"n+">
 
 Bounded numeric validation. C<"n-m"> requires a value between C<n> and C<m>
-inclusive; C<"n+"> requires a value of at least C<n>. Both C<n> and C<m> may
-be integers or floating-point values and may be negative.
+inclusive; C<"n+"> requires a value of at least C<n>. Both C<n> and C<m> must
+be non-negative integers (matching C</^\d+$/>).
 
 =item C<"/pattern/flags"> or C<"!/pattern/flags">
 

@@ -226,7 +226,8 @@ C<*> cycles through rainbow colors.
 
 Fatal sprintf warnings (missing or redundant arguments, uninitialized values) are
 propagated as exceptions via C<confess> from the C<Carp> module. Non-fatal sprintf
-warnings are logged via C<Genesis::Log> when in dev or testing mode.
+warnings are logged via C<Genesis::Log> (subject to configured log level), with
+additional stack traces via C<Carp::cluck> only in dev or testing mode.
 
 B<Note:> Italic formatting (C<I>/C<i>) is suppressed when running inside C<tmux>
 (C<$ENV{TMUX}> is set).
@@ -257,7 +258,7 @@ B<Examples:>
   # Returns: colorized "OK: processed 5 items" (green "OK")
 
   my $glyph = csprintf("#R@{-} Error occurred");
-  # Returns: colorized red checkmark glyph followed by " Error occurred"
+  # Returns: colorized red cross glyph (✘) followed by " Error occurred"
 
   my $empty = csprintf('');
   # Returns: ''

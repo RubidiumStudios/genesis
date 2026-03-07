@@ -56,10 +56,11 @@ Targets may be the terminal (referred to as C<'E<lt>terminalE<gt>'>) or
 named log files. Each target has its own level filter, output style,
 timestamp setting, and other options.
 
-Log output is formatted in one of four styles: C<pointer> (the default
-terminal style with colored level arrows), C<plain> (bracketed level
-labels), C<fun> (emoji-prefixed labels), and C<rfc-5424> (syslog-compliant
-structured format).
+Log output is formatted in one of four styles: C<pointer> (colored level
+arrows), C<plain> (bracketed level labels), C<fun> (emoji-prefixed labels),
+and C<rfc-5424> (syslog-compliant structured format). The active style is
+determined by the C<GENESIS_LOG_STYLE> environment variable if set, otherwise
+the RC config C<output_style> setting (which defaults to C<plain>).
 
 The module is used as a singleton -- C<new()> returns the existing instance
 if one has already been created. Normal callers use the exported C<$Logger>
@@ -253,7 +254,7 @@ path. The following variables are recognized:
 if not set
 
 =item * C<{timestamp}> -- replaced with a UTC timestamp in the form
-C<YYYYMMDDTHHMMSSsss.mmmZ>
+C<YYYYMMDDTHHMMSS.mmmZ>
 
 =item * C<{date}> -- replaced with the UTC date as C<YYYYMMDD>
 
@@ -341,7 +342,7 @@ B<Returns:> The style string for the target.
 B<Examples:>
 
   my $s = $logger->style;
-  print $s;  # Returns: 'pointer' (the default)
+  print $s;  # Returns: 'plain' (the default)
 
   my $file_style = $logger->style('/var/log/genesis.log');
   print $file_style;  # Returns: 'plain'
