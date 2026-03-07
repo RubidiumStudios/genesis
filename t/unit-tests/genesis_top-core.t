@@ -1016,4 +1016,39 @@ subtest '_validate_config returns truthy (FWT-698)' => sub {
 	is($result, 1, "_validate_config explicitly returns 1 (FWT-698)");
 };
 
+subtest 'set_kit_provider sets updater_version for GenesisCommunity (FWT-699)' => sub {
+	local $Genesis::VERSION = '3.2.0';
+	my $tmp = workdir('fwt-699-test');
+
+	# Create repo with a custom kit_provider already set
+	system("mkdir -p $tmp/.genesis");
+	mkfile_or_fail("$tmp/.genesis/config", <<EOF);
+---
+version: 2
+deployment_type: test
+creator_version: 3.1.0
+kit_provider:
+  label: Custom Provider
+  type: github
+  domain: github.example.com
+  organization: my-org
+  tls: "yes"
+EOF
+
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	# Confirm custom provider is currently set
+	ok($top->config->get('kit_provider'), "kit_provider is configured before revert");
+
+	# Revert to GenesisCommunity (default, no args)
+	quietly { $top->set_kit_provider() };
+
+	# Re-read config from disk to verify persistence
+	my $saved = Genesis::Config->new("$tmp/.genesis/config");
+	ok(!$saved->get('kit_provider'),
+		"kit_provider cleared from saved config on disk");
+	is($saved->get('updater_version'), '3.2.0',
+		"updater_version set in saved config (FWT-699)");
+};
+
 done_testing;
