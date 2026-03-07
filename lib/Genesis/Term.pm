@@ -857,7 +857,6 @@ sub get_control_picture {
 
 sub string_to_hex {
 	my ($str) = @_;
-	my $printable = '';
 
 	my $offset = 0;
 	while ($str) {
