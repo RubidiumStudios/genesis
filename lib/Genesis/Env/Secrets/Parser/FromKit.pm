@@ -169,12 +169,12 @@ sub _parse_credential_definition {
 		return $type->new($path, size => $2//2048, fixed => ($3 ? 1 : 0), _feature => $feature);
 	} elsif ($data =~ m/^dhparams?\s+(\d+)(\s+fixed)?$/) {
 		return Genesis::Secret::DHParams->new($path, size => $1, fixed => ($2 ? 1 : 0), _feature => $feature);
-	} elsif ($data =~ m/^random .?$/) {
+	} elsif ($data =~ m/^random\b/) {
 		return _invalid_secret(
 			"Random" => "random password request for a path must be specified per key in a hashmap",
 			$path, $data, $feature
 		)
-	} elsif ($data =~ m/^uuid .?$/) {
+	} elsif ($data =~ m/^uuid\b/) {
 		return _invalid_secret(
 			"UUID" => "UUID request for a path must be specified per key in a hashmap",
 			$path, $data, $feature

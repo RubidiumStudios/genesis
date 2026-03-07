@@ -114,4 +114,35 @@ subtest 'FWT-682: parse_provided does not mutate caller metadata' => sub {
 	isa_ok($secrets[0], 'Genesis::Secret::UserProvided');
 };
 
+subtest 'FWT-684: path-level random/uuid produce specific error messages' => sub {
+	my @secrets = parse_metadata({
+		credentials => {
+			base => {
+				'test/random-path' => 'random 32',
+				'test/uuid-path'   => 'uuid v4',
+			},
+		},
+	});
+
+	is(scalar @secrets, 2, "two invalid secrets returned");
+
+	# Find the random one
+	my ($random_inv) = grep { $_->path =~ /random-path/ } @secrets;
+	isa_ok($random_inv, 'Genesis::Secret::Invalid');
+	my $rdesc = $random_inv->describe;
+	like($rdesc, qr/per key in a hashmap/i,
+		"random path-level error gives specific guidance");
+	unlike($rdesc, qr/Unrecognized request/,
+		"random path-level error does NOT give generic message");
+
+	# Find the uuid one
+	my ($uuid_inv) = grep { $_->path =~ /uuid-path/ } @secrets;
+	isa_ok($uuid_inv, 'Genesis::Secret::Invalid');
+	my $udesc = $uuid_inv->describe;
+	like($udesc, qr/per key in a hashmap/i,
+		"uuid path-level error gives specific guidance");
+	unlike($udesc, qr/Unrecognized request/,
+		"uuid path-level error does NOT give generic message");
+};
+
 done_testing;
