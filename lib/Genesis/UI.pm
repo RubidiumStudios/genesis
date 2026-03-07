@@ -381,6 +381,8 @@ sub new_prompt_for_choice {
 	$options{description} //= "choice";
 	$options{header} //= sprintf("Select one of the following %s:", count_nouns(2, $options{description}, suppress_count => 1));
 	$options{compact} //= 0;
+	bug("prompt_for_choice compact mode is not yet implemented")
+		if $options{compact};
 	$options{paginate} //= 0;
 	
 	# Deal with default choice
@@ -628,10 +630,9 @@ sub __process_legacy_prompt_for_choice_args {
 	);
 	
 	# Convert old choices and labels format to new choices format
-	$choices = [];
+	my $choices = [];
 	my $label_offset = 0;
 	for my $i (0 .. $#{$old_choices}) {
-		my $j = $i + $label_offset;
 		my $choice = {
 			value => $old_choices->[$i],
 		};

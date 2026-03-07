@@ -665,13 +665,7 @@ number, and optionally the subroutine name, styled with terminal color codes.
 If the C<GENESIS_STACK_TRACE> environment variable is set, additional frames
 are included (one per line); otherwise only the immediate caller is shown.
 
-B<Note: this function has a known bug.> The implementation calls
-C<_get_stack>, a private function that does not exist in this module. The
-public equivalent C<get_stack> exists and is the intended callee. As a
-result, C<get_scope> will raise a runtime error when called. This defect
-is tracked for a future fix.
-
-Until this is resolved, callers should use C<get_stack> directly.
+Internally delegates to C<get_stack> for stack frame retrieval.
 
 B<Parameters:>
 
@@ -686,7 +680,7 @@ B<Returns:> A formatted string of the call location with color markup.
 
 B<Examples:>
 
-  # Intended usage (currently broken due to the _get_stack bug):
+  # Example usage:
   my $loc = get_scope(0);
   # Returns: a string like '^- lib/Genesis/Secret.pm:L42 (in Genesis::Secret::new)'
 
