@@ -273,7 +273,14 @@ B<Returns:> The proxy object (C<$self>).
 
 B<Errors:>
 
-Dies with C<"Missing bosh cli command"> if no C<bosh> binary is found.
+Dies via the base-class C<command()> method if no C<bosh> binary is found.
+The error message is:
+C<"#RE<lt>Missing `bosh`E<gt> - install the BOSH (v2) CLI from
+#BE<lt>https://github.com/cloudfoundry/bosh-cli/releasesE<gt>">.
+
+B<Note:> The C<bail('Missing bosh cli command')> call in the source is
+unreachable dead code -- the base-class C<command()> method bails before
+control returns to C<connect_and_validate>.
 
 B<Examples:>
 

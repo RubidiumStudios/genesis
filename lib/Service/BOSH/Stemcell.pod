@@ -19,7 +19,7 @@ Service::BOSH::Stemcell - Models a BOSH stemcell, with support for querying bosh
   my $selected = Service::BOSH::Stemcell->select_stemcell(iaas => 'vsphere');
 
   # Construct a stemcell object directly
-  my $sc = Service::BOSH::Stemcell->new(
+  my $stemcell = Service::BOSH::Stemcell->new(
     iaas    => 'aws',
     os      => 'ubuntu-jammy',
     type    => 'light',

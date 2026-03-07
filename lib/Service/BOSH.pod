@@ -20,8 +20,9 @@ Service::BOSH - Abstract base class for BOSH service objects
   # List available stemcells for an IaaS
   my @stemcells = Service::BOSH->available_stemcells(iaas => 'aws');
 
-  # Check whether this object has a director
-  if ($bosh->has_director) {
+  # Subclass check (Service::BOSH is abstract)
+  # has_director returns true for Director, false for CreateEnvProxy
+  if (Service::BOSH::Director->has_director) {
     print "Director is available\n";
   }
 
@@ -178,7 +179,7 @@ B<Parameters:>
 =item iaas
 
 Required (unless C<env> is provided). The IaaS name (e.g. C<'aws'>,
-C<'gcp'>, C<'vsphere'>).
+C<'google'>, C<'vsphere'>).
 
 =item os
 
@@ -212,7 +213,7 @@ B<Examples:>
   # Returns: list of stemcell objects for AWS
 
   # Scalar context for the array reference
-  my $stemcells = Service::BOSH->available_stemcells(iaas => 'gcp', os => 'ubuntu-jammy');
+  my $stemcells = Service::BOSH->available_stemcells(iaas => 'google', os => 'ubuntu-jammy');
   # Returns: array reference of stemcell objects
 
   # Derived from a Genesis environment object
