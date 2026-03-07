@@ -37,8 +37,9 @@ Bearer token), paginated repository and release listing, version-specific
 release fetching, and SSH key retrieval for user validation.
 
 The client targets GitHub.com by default but can be pointed at GitHub
-Enterprise or any compatible Git hosting service (GitLab, Gitea) by
-supplying the C<domain> option.
+Enterprise or other hosts that expose a GitHub-compatible REST API
+(serving the API under C<https://api.E<lt>domainE<gt>>) by supplying
+the C<domain> option.
 
 B<Authentication> is driven by two environment variables:
 
@@ -105,6 +106,30 @@ normally returns an array, but for tag-based single-release endpoints it
 may return a single release object (a hashref). Passing a hashref to
 C<@{...}> causes a fatal C<"Not an ARRAY reference"> error.
 
+=item GH-5 (medium)
+
+C<new()>: the C<tls =E<gt> 'skip'> option is intended to disable TLS
+certificate verification, but only C<get_user_ssh_keys()> checks
+C<$self-E<gt>{tls}> to set the C<skip_verify> parameter in the underlying
+HTTP call. All other API methods (C<check>, C<repos>, C<get_release_info>)
+hard-code C<0> for the skip_verify argument, so TLS verification is
+always performed regardless of the C<tls> setting.
+
+=item GH-6 (medium)
+
+C<get_release_info()> lines 194 and 205: on a cache hit, the method
+returns only the cached C<\@results> arrayref without a second
+C<\@errors> element. The normal return path (lines 301-305) returns a
+two-element list C<(\@results, \@errors)>. Callers that unpack both
+values on a cache hit will receive C<undef> for C<\@errors>.
+
+=item GH-7 (medium)
+
+C<latest_version_of()> line 426: passes C<include_prerelease> (singular)
+to C<versions()>, but C<versions()> at line 328 checks
+C<include_prereleases> (plural). The key-name mismatch means pre-release
+filtering has no effect when calling C<latest_version_of()>.
+
 =back
 
 =head1 CLASS METHODS
@@ -135,6 +160,10 @@ TLS mode for HTTPS connections. Accepted values are C<'yes'> (verify
 certificates), C<'no'> (use plain HTTP), and C<'skip'> (HTTPS but skip
 certificate verification). Any other value is normalised to C<'skip'>.
 Defaults to C<'yes'>.
+
+B<Note:> In the current implementation, C<'skip'> is only honoured by
+C<get_user_ssh_keys>; most API methods hard-code TLS verification
+regardless of this setting. See GH-5 in L</KNOWN ISSUES>.
 
 =item label
 
@@ -584,7 +613,11 @@ normally be printed for non-200 responses.
 
 =back
 
-B<Returns:> A two-element list C<(\@results, \@errors)>.
+B<Returns:> A two-element list C<(\@results, \@errors)> on a fresh fetch.
+On a cache hit, only the cached C<\@results> arrayref is returned; if
+assigned to a two-element list, C<\@errors> will be C<undef>. Callers
+should be prepared for C<\@errors> to be either C<undef> or an arrayref.
+See GH-6 in L</KNOWN ISSUES>.
 
 In list mode, C<\@results> is an arrayref of release hash references
 (same structure as returned by the GitHub releases API), and is also stored
@@ -830,6 +863,9 @@ version.
 
 Optional. If true, pre-release releases are considered when determining the
 latest version.
+
+B<Note:> Due to a parameter-name mismatch, this option currently has no
+effect. See GH-7 in L</KNOWN ISSUES>.
 
 =back
 
