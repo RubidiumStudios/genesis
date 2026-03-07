@@ -584,7 +584,7 @@ sub log_levels {
 sub get_scope {
 	my ($scope) = @_;
 	my $out = "";
-	for (_get_stack($scope+1)) {
+	for (get_stack($scope+1)) {
 		$out .= csprintf("#K\@{^-}#Ki{ %s:L%d%s\n}", $_->{file}, $_->{line}, $_->{sub} ? " (in $_->{sub})" : '');
 		last unless envset ("GENESIS_STACK_TRACE");
 	}
