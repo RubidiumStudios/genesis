@@ -281,11 +281,14 @@ bosh_cpi() {
     echo "$GENESIS_TESTING_BOSH_CPI"
     return 0
   fi
-  __have_env="$(bosh env --json | jq -r '.Tables[0].Rows[0].cpi')"
-  [[ "$?" != "0" ]] && \
+  local __bosh_out
+  __bosh_out="$(bosh env --json 2>&1)"
+  if [[ "$?" != "0" ]] ; then
     __bail "Cannot determine CPI from BOSH director - failed to communicate with BOSH director:" \
-           "${__have_env}"
-  [[ -z "${__have_env}" ]] && \
+           "${__bosh_out}"
+  fi
+  __have_env="$(echo "$__bosh_out" | jq -r '.Tables[0].Rows[0].cpi')"
+  [[ -z "${__have_env}" || "${__have_env}" == "null" ]] && \
     __bail "Cannot determine CPI from BOSH director - no response from BOSH director"
 
   echo "${__have_env%_cpi}"
@@ -766,6 +769,9 @@ move_secrets_to_credhub() {
     bail "#R{[ERROR]} Failed to store secret #C{$1} under credhub path #C{$2}:" "$result"
   fi
   result="$(safe rm "${GENESIS_SECRETS_BASE}$src" 2>&1)"
+  if [[ $? -gt 0 ]] ; then
+    bail "#R{[ERROR]} Failed to remove secret #C{$1} from vault:" "$result"
+  fi
 }
 export -f move_secrets_to_credhub
 
