@@ -272,7 +272,8 @@ sub compile {
 	my $base_dir = "$name-$version/";
 	my @files = $self->_select_files();
 	my $tar = Archive::Tar->new;
-	$tar->setcwd($self->{root});
+
+	pushd $self->{root};
 	$tar->add_files('.');
 	$tar->rename('.' => $base_dir);
 	$tar->chown('uuuuuuuu:gggggggg');
@@ -280,14 +281,16 @@ sub compile {
 	# Add and remap the files to be under the base dir
 	for my $path (sort @files) {
 		my ($file) = $tar->add_files($path);
+		next unless $file;
 		my $full_path = "$base_dir".$file->full_path;
 		$full_path =~ s{/*$}{/} if $file->is_dir;
 		$file->rename($full_path);
 		$file->chown('uuuuuuuu:gggggggg');
 	}
+	popd;
 
 	my $filename = "$name-$version.tar.gz";
-	$tar->write($filename, COMPRESS_GZIP);
+	$tar->write("$outdir/$filename", COMPRESS_GZIP);
 	return $filename;
 }
 
