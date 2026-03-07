@@ -242,13 +242,15 @@ bosh() {
         Service::BOSH::Director->from_alias($ENV{BOSH_ALIAS})
       );
       unless ($bosh) {
-        print "echo 'Could not connect to $ENV{BOSH_ALIAS}'\n";
-        print "exit 1\n";
+        print "__bail 'Could not connect to $ENV{BOSH_ALIAS}'\n";
         exit 0;
       }
       my %vars = $bosh->environment_variables;
       for (keys %vars) {
-        print "export $_=\"$vars{$_}\"\n";
+        next unless /^[A-Za-z_][A-Za-z0-9_]*$/;
+        my $val = defined $vars{$_} ? $vars{$_} : '';
+        $val =~ s/'/'\"'\"'/g;
+        print "export $_='$val'\n";
       }
       EOF
       )"
@@ -281,13 +283,10 @@ bosh_cpi() {
     echo "$GENESIS_TESTING_BOSH_CPI"
     return 0
   fi
-  local __bosh_out
-  __bosh_out="$(bosh env --json 2>&1)"
+  __have_env="$(bosh env --json 2>/dev/null | jq -r '.Tables[0].Rows[0].cpi')"
   if [[ "$?" != "0" ]] ; then
-    __bail "Cannot determine CPI from BOSH director - failed to communicate with BOSH director:" \
-           "${__bosh_out}"
+    __bail "Cannot determine CPI from BOSH director - failed to communicate with BOSH director"
   fi
-  __have_env="$(echo "$__bosh_out" | jq -r '.Tables[0].Rows[0].cpi')"
   [[ -z "${__have_env}" || "${__have_env}" == "null" ]] && \
     __bail "Cannot determine CPI from BOSH director - no response from BOSH director"
 
