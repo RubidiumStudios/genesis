@@ -1,86 +1,74 @@
 =pod
 
+=encoding UTF-8
+
 =head1 NAME
 
 Genesis::Env::Deployment - Class representing a deployment audit for a Genesis environment
 
 =head1 SYNOPSIS
 
-  # Create a new deployment audit object
-  my $deployment = Genesis::Env::Deployment->new($env,
-    action         => 'deploy',
-    result         => 'success',
-    reason         => 'User initiated deployment',
-    started        => $start_time,
-    completed      => $end_time,
-    genesis_version => $GENESIS_VERSION,
-    kit            => {
-      id          => $kit->id,
-      name        => $kit->name,
-      version     => $kit->version,
-      is_dev      => $kit->is_dev,
-      features    => $kit->requested_features
-    },
-    user          => {
-      shell       => $ENV{SHELL},
-      repo        => $ENV{GENESIS_REPO} // 'unknown',
-      vault       => $env->vault->url
-    },
-    manifest       => {
-      type        => $manifest->type,
-      sha2        => $manifest_sha2
-    },
-    artifacts      => {
-      manifest     => $env->manifest_file,
-      log          => $env->workpath('output.log')
+    # Create a new deployment audit object
+    my $deployment = Genesis::Env::Deployment->new($env,
+      action          => 'deploy',
+      result          => 'success',
+      reason          => 'User initiated deployment',
+      genesis_version => $GENESIS_VERSION,
+      kit             => {
+        id       => $kit->id,
+        name     => $kit->name,
+        version  => $kit->version,
+        is_dev   => $kit->is_dev,
+        features => $kit->requested_features
+      },
+      user => {
+        shell => $ENV{SHELL},
+        repo  => $ENV{GENESIS_REPO} // 'unknown',
+        vault => $env->vault->url
+      },
+      manifest => {
+        type => $manifest->type,
+        sha2 => $manifest_sha2
+      },
+      artifacts => {
+        manifest => $env->manifest_file,
+        log      => $env->workpath('output.log')
+      }
+    );
+
+    # Commit the deployment audit to vault
+    $deployment->commit;
+
+    # Check if deployment has been committed
+    if ($deployment->committed) {
+      say "Deployment action: " . $deployment->action;
+      say "Deployment result: " . $deployment->result;
+      say "Started at: " . $deployment->started;
+      say "Completed at: " . $deployment->completed;
+
+      # Check success or error
+      say "Success: " . ($deployment->succeeded ? 'Yes' : 'No');
+      if ($deployment->has_error) {
+        say "Error: " . $deployment->error;
+      }
+
+      # Get user information
+      say "User: " . $deployment->user_description;
+      my ($colorized, @roles) = $deployment->user_colorized_roles;
+
+      # Access artifacts
+      my $manifest = $deployment->artifact('manifest');
+      my $all      = $deployment->artifacts;
+      my $files    = $deployment->extract_artifacts_to('/tmp/artifacts');
     }
-  );
-  
-  # Commit the deployment audit
-  $deployment->commit;
-  
-  # Check if deployment has been committed
-  if ($deployment->committed) {
-    # Access deployment information
-    say "Deployment action: " . $deployment->action;
-    say "Deployment result: " . $deployment->result;
-    say "Deployment reason: " . $deployment->reason;
-    say "Started at: " . $deployment->started;
-    say "Completed at: " . $deployment->completed;
-    say "Duration: " . $deployment->duration;
-    
-    # Check if deployment succeeded
-    say "Success: " . ($deployment->succeeded ? 'Yes' : 'No');
-    
-    # Get user information
-    say "User: " . $deployment->user_description;
-    my $colorized_roles = $deployment->user_colorized_roles;
-    my $legend = Genesis::Env::Deployment::user_colorized_legend();
-    
-    # Access artifact types and filenames
-    my @types = $deployment->artifact_types;
-    my @filenames = $deployment->artifact_filenames;
-    
-    # Get contents of a specific artifact
-    my $manifest = $deployment->artifact('manifest');
-    
-    # Get multiple artifacts
-    my $artifacts = $deployment->artifacts('manifest', 'log');
-    
-    # Get detailed artifact information
-    my @details = $deployment->details_for_artifacts('manifest', 'log');
-    
-    # Extract artifacts to a directory
-    my $files = $deployment->extract_artifacts_to('/tmp/artifacts');
-  }
 
 =head1 DESCRIPTION
 
-Genesis::Env::Deployment represents a deployment audit for a Genesis environment. 
-It records metadata about deployments, including the action performed (deploy or 
+Genesis::Env::Deployment represents a deployment audit for a Genesis environment.
+It records metadata about deployments, including the action performed (deploy or
 terminate), the result, timestamps, and associated artifacts.
 
-This class provides methods for creating, committing, and retrieving deployment 
+This class provides methods for creating, committing, and retrieving deployment
 audits, as well as accessing and extracting deployment artifacts.
 
 =head1 CLASS CONSTANTS
@@ -117,16 +105,78 @@ Constant value: '_artifact_map.json'
 
 =head2 is_a_successful_result($result)
 
-Returns true if the given result represents a successful deployment (success or post-failed).
+Returns true if the given result represents a successful deployment. A result
+is considered successful if it is C<'success'> or C<'post-failed'>.
+
+B<Parameters:>
+
+=over
+
+=item $result
+
+The result string to check.
+
+=back
+
+B<Returns:> True (1) if the result is C<'success'> or C<'post-failed'>, false otherwise.
+
+B<Examples:>
+
+    Genesis::Env::Deployment::is_a_successful_result('success');     # Returns: 1
+    Genesis::Env::Deployment::is_a_successful_result('post-failed'); # Returns: 1
+    Genesis::Env::Deployment::is_a_successful_result('failed');      # Returns: ''
 
 =head2 is_a_failed_result($result)
 
-Returns true if the given result represents a failed deployment.
+Returns true if the given result represents a failed deployment. A result is
+considered failed only if it is C<'failed'>. Note that C<'post-failed'> is
+considered successful, not failed.
+
+B<Parameters:>
+
+=over
+
+=item $result
+
+The result string to check.
+
+=back
+
+B<Returns:> True (1) if the result is C<'failed'>, false otherwise.
+
+B<Examples:>
+
+    Genesis::Env::Deployment::is_a_failed_result('failed');      # Returns: 1
+    Genesis::Env::Deployment::is_a_failed_result('success');     # Returns: ''
+    Genesis::Env::Deployment::is_a_failed_result('post-failed'); # Returns: ''
 
 =head2 user_colorized_legend(@roles)
 
-Class method that returns a colorized legend for user roles. If no roles are provided,
-returns a legend for all known roles. The legend uses Genesis Term color codes.
+Class method that returns a colorized legend string for user roles. If no
+roles are provided, returns a legend for all known roles (shell, bosh, vault,
+repo, concourse). If roles are provided, only the ones that are in the known
+set are included. The legend uses Genesis Term color codes.
+
+B<Parameters:>
+
+=over
+
+=item @roles (optional)
+
+Zero or more role names to include in the legend. When omitted, all known
+roles are included.
+
+=back
+
+B<Returns:> A comma-joined string of colorized role labels.
+
+B<Examples:>
+
+    my $legend = Genesis::Env::Deployment::user_colorized_legend();
+    # Returns: "#y{shell},#B{bosh},#m{vault},#r{repo},#c{concourse}"
+
+    my $partial = Genesis::Env::Deployment::user_colorized_legend('shell', 'vault');
+    # Returns: "#y{shell},#m{vault}"
 
 =head1 CLASS METHODS
 
@@ -134,228 +184,892 @@ returns a legend for all known roles. The legend uses Genesis Term color codes.
 
 Creates a new Genesis::Env::Deployment object based on the provided data.
 
-Required fields in %data:
+B<Parameters:>
 
 =over
 
-=item action
+=item $env
 
-The action performed (deploy or terminate).
+A Genesis::Env object representing the environment this deployment belongs to.
 
-=item result 
+=item %data
 
-The result of the action (success, failed, pending, post-failed, assumed).
+A hash of deployment data. The following keys are recognised:
 
-=item started
+=over
 
-When the action started (Time::Piece object or string in EXODUS_TIME_FORMAT).
+=item action (required)
 
-=item completed
+The action performed. Must be one of: C<'deploy'>, C<'terminate'>.
 
-When the action completed (Time::Piece object or string in EXODUS_TIME_FORMAT).
+=item result (required)
 
-=item genesis_version
+The result of the action. Must be one of: C<'success'>, C<'failed'>,
+C<'pending'>, C<'post-failed'>, C<'assumed'>.
 
-The version of Genesis used for the deployment.
+=item genesis_version (required)
 
-=item reason
+The version string of Genesis used for the deployment.
+
+=item reason (required)
 
 The reason for the deployment.
 
-=item kit
+=item user (required)
 
-A hashref containing kit information with these keys:
-  - id: The kit identifier
-  - name: The kit name
-  - version: The kit version
-  - is_dev: Whether the kit is a development kit
-  - features: An array of features enabled for the kit
+A hashref containing user information. The C<shell> key is required; C<repo>
+and C<vault> are optional:
 
-=item user
+  user => {
+    shell => $ENV{SHELL},
+    repo  => $ENV{GENESIS_REPO} // 'unknown',  # optional
+    vault => $env->vault->url,                 # optional
+  }
 
-A hashref containing user information with these keys:
-  - shell: The user's shell
-  - repo (optional): The repository path
-  - vault (optional): The vault URL
+=item kit (required when action is 'deploy')
 
-=item manifest
+A hashref containing kit information. All of the following keys are required
+when C<action> is C<'deploy'>:
 
-A hashref containing manifest information with these keys:
-  - type: The manifest type
-  - sha2: The SHA-256 hash of the manifest
+  kit => {
+    id       => $kit->id,
+    name     => $kit->name,
+    version  => $kit->version,
+    is_dev   => $kit->is_dev,
+    features => $kit->requested_features,
+  }
+
+=item manifest (required when action is 'deploy')
+
+A hashref containing manifest information. Both keys are required when
+C<action> is C<'deploy'>:
+
+  manifest => {
+    type => $manifest->type,
+    sha2 => $manifest_sha2,
+  }
+
+=item started (optional)
+
+When the action started. Accepts a Time::Piece object or a string in
+EXODUS_TIME_FORMAT. If not provided at construction time, this value is
+backfilled during C<commit()> from the deployment's existing C<timestamp>
+(as initialized during C<new()>), not from the wall-clock time at which
+C<commit()> runs. If no C<timestamp> is set on the object, it falls back
+to the C<completed> value or, lastly, the current time.
+
+=item completed (optional)
+
+When the action completed. Accepts a Time::Piece object or a string in
+EXODUS_TIME_FORMAT. If not provided at construction time, this value is
+backfilled during C<commit()> from the deployment's existing C<timestamp>
+(as initialized during C<new()>), not from the wall-clock time at which
+C<commit()> runs. If no C<timestamp> is set on the object, it falls back
+to the current time.
 
 =item artifacts (optional)
 
-Either:
-  - A hashref mapping artifact types to file paths
-  - A base64 gzipped string containing artifact contents
+Either a hashref mapping artifact type names to local file paths, or a
+base64-encoded gzip string containing a tarball of artifact contents.
+
+=item state (legacy)
+
+When a C<state> key is present (from older Genesis versions), it is
+automatically converted: C<'deployed'> maps to C<action='deploy'>, any other
+value maps to C<action='terminate'>. The result is set to C<'success'>, and
+default values are filled in for C<kit>, C<user>, C<manifest>, and
+C<genesis_version> if not already present.
 
 =back
+
+=back
+
+B<Returns:> A blessed Genesis::Env::Deployment object.
+
+B<Errors:>
+
+=over
+
+=item C<"Expected Genesis::Env object, got %s">
+
+Thrown via C<bug()> if C<$env> is not a Genesis::Env instance. The C<%s>
+placeholder is the actual ref type or the string C<'undefined'>.
+
+=item C<"Missing required fields for $timestamp deployment audit: ...">
+
+Thrown via C<bug()> if any required fields are absent from C<%data>. The
+missing field names are listed in the message.
+
+=item C<"Invalid action '%s' for deployment audit - must be one of: %s">
+
+Thrown via C<bug()> if the C<action> value is not C<'deploy'> or
+C<'terminate'>. The first C<%s> is the supplied action; the second is the
+allowed list.
+
+=item C<"Invalid result '%s' for deployment audit - must be one of: %s">
+
+Thrown via C<bug()> if the C<result> value is not one of the known constants.
+The first C<%s> is the supplied result; the second is the allowed list.
+
+=item C<"Invalid artifacts format - must be a hashref or base64 gzipped string">
+
+Thrown via C<bug()> if the C<artifacts> value is neither a hashref nor a
+base64-encoded gzip string.
+
+=back
+
+B<Examples:>
+
+    my $deployment = Genesis::Env::Deployment->new($env, %data);
+    # Returns: Genesis::Env::Deployment object
+
+    # Typical deploy audit:
+    my $deploy = Genesis::Env::Deployment->new($env,
+      action          => 'deploy',
+      result          => 'success',
+      reason          => 'CI pipeline triggered',
+      genesis_version => '3.1.0',
+      kit             => { id => 'bosh/1.0', name => 'bosh',
+                           version => '1.0', is_dev => 0, features => [] },
+      user            => { shell => '/bin/bash' },
+      manifest        => { type => 'bosh', sha2 => 'abc123' },
+    );
+    # Returns: Genesis::Env::Deployment object
 
 =head1 INSTANCE METHODS
 
 =head2 action()
 
-Returns the action performed (deploy or terminate).
+Returns the action performed.
+
+B<Returns:> String — either C<'deploy'> or C<'terminate'>.
 
 =head2 result()
 
-Returns the result of the action (success, failed, pending, post-failed, assumed).
+Returns the result of the action.
+
+B<Returns:> String — one of C<'success'>, C<'failed'>, C<'pending'>,
+C<'post-failed'>, or C<'assumed'>.
 
 =head2 succeeded()
 
-Returns true if the deployment was successful (result is either 'success' or 'post-failed').
+Returns true if the deployment was successful. A deployment is considered
+successful if its result is either C<'success'> or C<'post-failed'>.
 
-=head2 started([$strftime_format])
+B<Returns:> True if the result is C<'success'> or C<'post-failed'>, false otherwise.
 
-Returns the Time::Piece object representing when the action started.
-If $strftime_format is provided, returns the formatted string instead.
+=head2 has_error()
 
-=head2 completed([$strftime_format])
+Returns true if the deployment has an error message stored.
 
-Returns the Time::Piece object representing when the action completed.
-If $strftime_format is provided, returns the formatted string instead.
+B<Returns:> Boolean — true (C<!!1>) if C<$self-E<gt>{data}{error}> is set and
+truthy, false otherwise.
+
+B<Examples:>
+
+    if ($deployment->has_error) {
+      warn "Deployment error: " . $deployment->error;
+    }
+    # Returns: 1 if error is set, '' otherwise
+
+=head2 error()
+
+Returns the error message for this deployment, if any.
+
+B<Returns:> String — the error message, or an empty string C<''> if no error
+is stored.
+
+B<Examples:>
+
+    my $msg = $deployment->error;
+    # Returns: "vault connection refused" (or '')
+
+=head2 started([$strf_format])
+
+Returns the timestamp for when the action started.
+
+B<Parameters:>
+
+=over
+
+=item $strf_format (optional)
+
+A C<strftime>-compatible format string. When provided, the method returns
+the timestamp formatted as a string rather than as a Time::Piece object.
+
+=back
+
+B<Returns:> A Time::Piece object, or a formatted string if C<$strf_format>
+is supplied.
+
+B<Errors:>
+
+=over
+
+=item C<"Cannot format started timestamp '%s' - not a Time::Piece object">
+
+Thrown via C<bail()> if C<$strf_format> is provided but the stored
+timestamp is not a Time::Piece object. The C<%s> placeholder is the raw
+stored value.
+
+=back
+
+B<Examples:>
+
+    my $ts  = $deployment->started;
+    # Returns: Time::Piece object
+
+    my $str = $deployment->started('%Y-%m-%d %H:%M:%S');
+    # Returns: "2024-01-15 14:30:00"
+
+=head2 completed([$strf_format])
+
+Returns the timestamp for when the action completed.
+
+B<Parameters:>
+
+=over
+
+=item $strf_format (optional)
+
+A C<strftime>-compatible format string. When provided, the method returns
+the timestamp formatted as a string rather than as a Time::Piece object.
+
+=back
+
+B<Returns:> A Time::Piece object, or a formatted string if C<$strf_format>
+is supplied.
+
+B<Errors:>
+
+=over
+
+=item C<"Cannot format completed timestamp '%s' - not a Time::Piece object">
+
+Thrown via C<bail()> if C<$strf_format> is provided but the stored
+timestamp is not a Time::Piece object. The C<%s> placeholder is the raw
+stored value.
+
+=back
+
+B<Examples:>
+
+    my $ts  = $deployment->completed;
+    # Returns: Time::Piece object
+
+    my $str = $deployment->completed('%Y-%m-%d %H:%M:%S');
+    # Returns: "2024-01-15 14:35:22"
 
 =head2 duration()
 
-Returns the duration of the action (completed - started) in seconds.
+Returns the duration of the deployment in seconds, computed as
+C<completed - started>.
+
+B<Returns:> Numeric — number of seconds between started and completed.
 
 =head2 reason()
 
-Returns the reason for the deployment. Returns 'unknown' if no reason is set.
+Returns the reason for the deployment.
+
+B<Returns:> String — the reason, or C<'unknown'> if no reason was set.
 
 =head2 has_reason()
 
-Returns true if the deployment has a meaningful reason (not 'unknown', '<unspecified>', 
-'none', 'null', or undefined).
+Returns true if the deployment has a meaningful reason. A reason is considered
+meaningful if it is set, defined, and not one of the placeholder strings:
+C<'unknown'>, C<'E<lt>unspecifiedE<gt>'>, C<'none'>, or C<'null'>.
 
-=head2 lookup(@keys)
+B<Returns:> 1 if a meaningful reason is present, 0 otherwise.
 
-Looks up a value in the deployment data using struct_lookup.
+=head2 lookup
+
+Looks up a value in the deployment's internal data hash using
+C<struct_lookup>. All arguments after C<$self> are passed through to
+C<struct_lookup> and support dot-notation paths
+(e.g., C<'kit.name'>, C<'user.shell'>).
+
+B<Returns:> The value found at the given path, or C<undef> if not found.
+Always returns a scalar regardless of calling context.
 
 =head2 timestamp()
 
-Returns the timestamp for this deployment in EXODUS_TIME_FORMAT_SHORT format.
+Returns the timestamp key for this deployment in EXODUS_TIME_FORMAT_SHORT
+format (e.g., C<'20240115143000'>).
+
+B<Returns:> String — the deployment timestamp key.
 
 =head2 sequence()
 
-Returns the sequence number for this deployment.
+Returns the sequence number for this deployment as stored in the exodus data.
+
+B<Returns:> Integer sequence number, or C<undef> if not yet committed.
 
 =head2 user_description()
 
-Returns a formatted string describing the user who performed the deployment,
-including any additional roles (repo, vault, concourse, bosh).
+Returns a formatted string describing the user who performed the deployment.
+The primary identifier is the C<shell> value from the user hash (with tmux
+session information stripped). Any additional non-shell roles that are set and
+not C<'unknown'> are appended in square brackets.
+
+B<Returns:> String — e.g., C<"/bin/bash [repo: /home/user/cf, vault: https://vault.example.com]">.
 
 =head2 user_colorized_roles()
 
-Returns a colorized string of user roles using Genesis Term color codes.
-In list context, returns both the colorized string and an array of role names.
-If no roles are found, returns '#ki{unknown}'.
+Returns a colorized string of user roles using Genesis Term color codes. Each
+role is rendered as C<#COLOR{value}>, with roles joined by C<|>. Tmux session
+information is stripped from shell values. Roles with no value or a value of
+C<'unknown'> are omitted.
+
+In list context, returns the colorized role string followed by the list of
+role names that were included.
+
+In scalar context, returns just the colorized role string.
+
+If no roles are found, returns C<'#ki{unknown}'> in both list and scalar
+context (no wantarray check on the fallback path).
+
+B<Returns:>
+
+In list context: C<($role_string, @role_names)>
+
+In scalar context: C<$role_string>
+
+B<Examples:>
+
+    my $colored = $deployment->user_colorized_roles;
+    # Returns: "#y{/bin/bash}|#r{/home/user/repos/cf}"
+
+    my ($colored, @roles) = $deployment->user_colorized_roles;
+    # $colored: "#y{/bin/bash}|#r{/home/user/repos/cf}"
+    # @roles:   ('shell', 'repo')
 
 =head2 env()
 
 Returns the Genesis::Env object associated with this deployment.
 
+B<Returns:> A Genesis::Env object.
+
 =head2 committed()
 
-Returns true if the deployment has been committed to exodus.
+Returns true if this deployment has been committed to exodus in the vault.
+
+Note: C<committed()> checks the vault path C<'deployments/' . $self-E<gt>timestamp()>,
+which is a relative path. Due to a known issue (FWT-708), this may not match
+the full exodus path used by C<commit()>.
+
+B<Returns:> True if the vault path exists, false otherwise.
 
 =head2 commit()
 
-Saves the deployment audit to the environment's vault under the exodus path.
-Throws an error if the deployment has already been committed.
+Saves the deployment audit to the environment's vault under the full exodus
+path. The deployment data is flattened and written as key-value pairs. If
+artifacts are present, they are packaged as a base64-encoded gzip tarball and
+stored under the C<artifacts> key via vault's C<key@file> notation.
 
-=head2 artifact_types()
+If C<started> or C<completed> are not set on the object, they default to the
+deployment's C<timestamp> value (which is generally set during C<new()> and
+therefore often reflects the construction time). If no C<timestamp> is set on
+the object, they instead default to the time that C<commit()> is called. This
+mutation is a side effect of this method (known issue — FWT-708).
 
-Returns a sorted list of artifact types available in this deployment.
+B<Returns:>
 
-=head2 artifact_filenames()
+In list context: C<($out, $rc, $err)> from the underlying vault query. Note
+that list context bypasses the error check — the caller is responsible for
+inspecting C<$rc>.
 
-Returns a sorted list of artifact filenames available in this deployment.
+In scalar context: Returns C<1> on success.
 
-=head2 artifact($artifact)
-
-Returns the contents of a specific artifact by type or filename.
-Throws an error if the artifact is not found.
-
-=head2 artifacts(@artifacts)
-
-Returns a hashref mapping artifact types or filenames to their contents.
-If no arguments are provided, returns all artifacts.
-Throws an error if any of the requested artifacts are not found.
-
-=head2 details_for_artifacts(@artifacts)
-
-Returns detailed information about the specified artifacts (or all if none specified).
-Each detail entry is a hashref containing:
-  - type: The artifact type
-  - filename: The artifact filename
-  - sha2: The SHA-256 hash of the content (undef if empty)
-  - size: The size of the content in bytes
-  - content: The actual content
-
-Returns an array in list context, arrayref in scalar context.
-
-=head2 extract_artifacts_to($path, @artifacts)
-
-Extracts the specified artifacts to the given path.
-If no artifacts are specified, extracts all artifacts.
-The path can be relative (resolved against GENESIS_CALLER_DIR) or absolute.
-Returns a hashref mapping artifact names to their extracted file paths.
-Throws an error if the path is not a directory or if any artifacts are not found.
-
-=head1 INTERNAL METHODS
-
-These methods are used internally and are not meant to be called directly:
+B<Errors:>
 
 =over
 
-=item _get_artifact_hash(@artifacts)
+=item C<"Cannot commit a deployment that already exists!">
 
-Internal helper to get all artifacts as a hash.
+Thrown via C<bail()> if C<committed()> returns true before the vault write.
 
-=item _build_artifacts_file($artifact_file, %artifacts)
+=item C<"Failed to set deployment audit data in exodus: %s\n%s">
 
-Builds a tarball of deployment artifacts and stores it as a base64-encoded file.
+Thrown via C<bail()> in scalar context if the vault write returns a non-zero
+exit code. The first C<%s> is stdout from the vault command; the second is
+stderr.
 
-=item _collect_secrets_from_paths(@paths)
+=back
 
-Collects secrets from the specified vault paths and returns them as JSON.
-Cannot use vault export as it gets everything under the path including subpaths.
+B<Examples:>
 
-=item _get_artifact_tarball()
+    # Scalar context — throws on failure
+    $deployment->commit;
+    # Returns: 1
 
-Gets the artifact tarball for this deployment (for b64-gzipped format).
+    # List context — caller checks return code
+    my ($out, $rc, $err) = $deployment->commit;
+    die "vault write failed: $err" if $rc;
 
-=item _artifact_map()
+=head2 artifact_types()
 
-Returns the artifact map for this deployment, mapping types to filenames.
+Returns a sorted list of artifact type names available in this deployment
+(e.g., C<'log'>, C<'manifest'>, C<'secrets'>).
 
-=item _is_artifact_type($ref)
+B<Returns:> Sorted list of type name strings.
 
-Checks if the given reference is an artifact type.
+=head2 artifact_filenames()
 
-=item _is_artifact_filename($ref)
+Returns a sorted list of artifact filenames available in this deployment
+(e.g., C<'myenv.yml'>, C<'myenv-output.log'>).
 
-Checks if the given reference is an artifact filename.
+B<Returns:> Sorted list of filename strings.
 
-=item _get_artifact_type($ref)
+=head2 artifact($artifact)
 
-Returns the artifact type for the given reference.
+Returns the contents of a specific artifact, looked up by type name or
+filename.
 
-=item _get_artifact_filename($ref)
+B<Parameters:>
 
-Returns the artifact filename for the given reference.
+=over
 
-=item _is_base64_gzipped($data)
+=item $artifact
 
-Determines if a string is base64-encoded gzipped data by checking for base64
-format and gzip magic number.
+The artifact type name (e.g., C<'manifest'>) or filename
+(e.g., C<'myenv.yml'>) to retrieve.
 
-=item _get_ts_string($timestamp)
+=back
 
-Converts a timestamp to EXODUS_TIME_FORMAT_SHORT string format. Accepts
-Time::Piece objects or properly formatted timestamp strings.
+B<Returns:> String — the raw contents of the artifact.
+
+B<Errors:>
+
+=over
+
+=item C<"Artifact name is required">
+
+Thrown via C<bail()> if C<$artifact> is not provided or is false.
+
+=item C<"artifact '$artifact' not found in deployment">
+
+Thrown via C<bail()> if the named artifact does not exist in this deployment.
+
+=back
+
+B<Examples:>
+
+    my $manifest_content = $deployment->artifact('manifest');
+    # Returns: "---\nname: my-env\n..."
+
+    my $log = $deployment->artifact('myenv-output.log');
+    # Returns: raw log file contents
+
+=head2 artifacts(@artifacts)
+
+Returns a hashref mapping artifact type names or filenames to their contents.
+If no arguments are provided, returns all artifacts.
+
+Returns an empty hashref (C<{}>) if no artifacts are stored on this
+deployment. Throws via C<_get_artifact_hash()> if invalid artifact names are
+requested.
+
+B<Parameters:>
+
+=over
+
+=item @artifacts (optional)
+
+Zero or more artifact type names or filenames to retrieve. When omitted, all
+available artifacts are returned.
+
+=back
+
+B<Returns:> Hashref mapping artifact identifiers to content strings. Returns
+C<{}> if the deployment has no artifacts.
+
+B<Examples:>
+
+    my $all = $deployment->artifacts(@artifacts);
+    # Returns: { manifest => "---\n...", log => "Deploying...\n" }
+
+    # No args — returns all artifacts:
+    my $all = $deployment->artifacts;
+    # Returns: { manifest => "---\n...", log => "Deploying...\n" }
+
+    # Specific artifacts:
+    my $subset = $deployment->artifacts('manifest', 'log');
+    # Returns: { manifest => "---\n...", log => "Deploying...\n" }
+
+=head2 details_for_artifacts(@artifacts)
+
+Returns detailed information about the specified artifacts (or all if none
+specified). Each artifact is described by a hashref with these keys:
+
+=over
+
+=item type
+
+The artifact type name.
+
+=item filename
+
+The artifact filename.
+
+=item sha2
+
+The SHA-256 hex digest of the content, or C<undef> if the content is empty.
+
+=item size
+
+The size of the content in bytes.
+
+=item content
+
+The raw content string.
+
+=back
+
+In list context returns a list of detail hashrefs. In scalar context returns
+an arrayref.
+
+B<Parameters:>
+
+=over
+
+=item @artifacts (optional)
+
+Zero or more artifact type names or filenames. When omitted, all available
+artifact types are used.
+
+=back
+
+B<Returns:>
+
+In list context: list of detail hashrefs.
+
+In scalar context: arrayref of detail hashrefs.
+
+B<Examples:>
+
+    my @details = $deployment->details_for_artifacts('manifest');
+    # Returns: ({ type => 'manifest', filename => 'myenv.yml',
+    #             sha2 => 'abc123...', size => 1024,
+    #             content => "---\n..." })
+
+    my $all = $deployment->details_for_artifacts;
+    # Returns: arrayref of all artifact detail hashrefs
+
+=head2 extract_artifacts_to($path, @artifacts)
+
+Extracts the specified artifacts (or all if none specified) to the given
+directory. If C<$path> is relative, it is resolved against
+C<$ENV{GENESIS_CALLER_DIR}>. Each artifact is written using the artifact's
+filename (not its type name). Returns a hashref mapping artifact identifiers
+to their absolute output paths.
+
+Returns C<{}> if the deployment has no artifacts.
+
+B<Parameters:>
+
+=over
+
+=item $path
+
+The target directory path. May be relative (resolved against
+C<GENESIS_CALLER_DIR>) or absolute.
+
+=item @artifacts (optional)
+
+Zero or more artifact type names or filenames to extract. When omitted, all
+artifacts are extracted.
+
+=back
+
+B<Returns:> Hashref mapping artifact identifiers to absolute file paths of the
+extracted files.
+
+B<Errors:>
+
+=over
+
+=item C<"Path #B{%s} is not a directory">
+
+Thrown via C<bail()> if the resolved C<$path> does not exist or is not a
+directory. The C<%s> placeholder is the original (unresolved) C<$path> value.
+
+=item C<"Invalid artifact filename '#B{%s}'%s - artifact names cannot contain path separators">
+
+Thrown via C<bail()> if an artifact's stored filename contains a C</> character.
+The first C<%s> is the filename; the second is an empty string if the artifact
+identifier equals the filename, or the text C<" for artifact #M{$artifact}"> otherwise.
+
+=back
+
+B<Examples:>
+
+    my $files = $deployment->extract_artifacts_to($path, @artifacts);
+    # Returns: hashref mapping artifact names to extracted file paths
+
+    # Extract all artifacts:
+    my $all = $deployment->extract_artifacts_to('/tmp/artifacts');
+    # Returns: { manifest => '/tmp/artifacts/myenv.yml',
+    #             log      => '/tmp/artifacts/myenv-output.log' }
+
+    # Extract specific artifact:
+    my $subset = $deployment->extract_artifacts_to('/tmp/out', 'manifest');
+    # Returns: { manifest => '/tmp/out/myenv.yml' }
+
+=head1 INTERNAL METHODS
+
+These methods are internal to the implementation. They may change without
+notice and should not be called directly.
+
+=head2 _get_artifact_hash
+
+    $self->_get_artifact_hash(@artifacts)
+
+Returns a hashref mapping artifact identifiers to their raw content strings.
+If C<@artifacts> is empty, all artifact types are returned. If specific
+artifacts are requested, each is validated against the artifact map; invalid
+names cause a C<bail()>. Handles both C<'local-file-hash'> and
+C<'b64-gzipped'> artifact formats.
+
+B<Returns:> Hashref mapping artifact identifier strings to raw content strings.
+
+B<Errors:>
+
+=over
+
+=item C<"Invalid artifacts requested: %s">
+
+Thrown via C<bail()> when one or more of the requested artifact names are not
+valid types or filenames in the artifact map. The C<%s> placeholder is a
+comma-joined list of the invalid names.
+
+=item C<"artifact '$artifact' file not found">
+
+Thrown via C<bail()> for C<'local-file-hash'> format when the local file for
+an artifact does not exist on disk.
+
+=item C<"Failed to extract artifact '$ref' from archive">
+
+Thrown via C<bail()> for C<'b64-gzipped'> format when the tar object's
+get_content call returns C<undef> for the requested artifact.
+
+=back
+
+B<Examples:>
+
+    my $hash = $self->_get_artifact_hash('manifest');
+    # Returns: { manifest => "---\nname: my-env\n..." }
+
+=head2 _build_artifacts_file
+
+    $self->_build_artifacts_file($artifact_file, %artifacts)
+
+Builds a gzip-compressed tar archive of the deployment artifacts and writes
+it as a base64-encoded string to C<$artifact_file>. The C<secrets> key in
+C<%artifacts>, if present, is handled separately by calling
+C<_collect_secrets_from_paths()> and stored as C<secrets.json> in the archive.
+The artifact map (C<_artifact_map.json>) is also included in the archive.
+
+B<Returns:> 1 on success.
+
+B<Errors:>
+
+=over
+
+=item C<"Failed to compress manifest artifacts">
+
+Thrown via C<bail()> if the tar write call fails during gzip compression.
+
+=back
+
+B<Examples:>
+
+    $self->_build_artifacts_file($artifact_file, %artifacts);
+    # Returns: 1
+
+=head2 _collect_secrets_from_paths
+
+    $self->_collect_secrets_from_paths(@paths)
+
+Collects secrets from the specified vault paths and returns them as a JSON
+string. Each path may be in C<'path:key'> format (to retrieve a single key)
+or plain C<'path'> format (to retrieve all keys at that path via
+C<get_path>). Uses per-path vault reads rather than vault export to avoid
+retrieving subpath contents. Returns C<'{}'> if no secrets are found.
+
+B<Returns:> JSON string of collected secrets.
+
+B<Examples:>
+
+    my $json = $self->_collect_secrets_from_paths(@paths);
+    # Returns: '{"secret/myenv":{"username":"admin",...}}'
+
+=head2 _get_artifact_tarball
+
+    $self->_get_artifact_tarball()
+
+Returns an Archive::Tar object for the deployment's base64-encoded gzip
+artifact tarball. The result is cached in C<$self-E<gt>{__tarball}>. Throws
+via C<bug()> with C<"Cannot get artifact tarball for deployment without compressed artifacts">
+if the deployment does not have C<'b64-gzipped'> format artifacts. Throws
+via C<bail()> with C<"Failed to decompress manifest artifacts"> if
+decompression fails.
+
+B<Returns:> An Archive::Tar object.
+
+B<Examples:>
+
+    my $tar = $self->_get_artifact_tarball();
+    # Returns: Archive::Tar object
+
+=head2 _artifact_map
+
+    $self->_artifact_map()
+
+Returns a hashref mapping artifact type names to artifact filenames for this
+deployment. The result is cached in C<$self-E<gt>{artifacts}{map}>. Returns
+C<undef> if the deployment has no artifacts. For C<'local-file-hash'> format,
+builds the map from the local file hash (only including files that exist on
+disk). For C<'b64-gzipped'> format, reads the embedded C<_artifact_map.json>
+from the tarball, or constructs a map by matching filenames against
+environment-name-based patterns.
+
+=head2 _is_artifact_type
+
+    $self->_is_artifact_type($ref)
+
+Returns 1 if C<$ref> is a key in the artifact map (i.e., a type name),
+0 otherwise.
+
+B<Returns:> 1 or 0.
+
+B<Examples:>
+
+    $self->_is_artifact_type('manifest');
+    # Returns: 1
+
+=head2 _is_artifact_filename
+
+    $self->_is_artifact_filename($ref)
+
+Returns 1 if C<$ref> appears as a value in the artifact map (i.e., a
+filename), 0 otherwise.
+
+B<Returns:> 1 or 0.
+
+B<Examples:>
+
+    $self->_is_artifact_filename('myenv.yml');
+    # Returns: 1
+
+=head2 _get_artifact_type
+
+    $self->_get_artifact_type($ref)
+
+Returns the artifact type name for the given reference. If C<$ref> is already
+a type key in the artifact map, it is returned as-is. Otherwise, returns the
+type whose mapped filename equals C<$ref>.
+
+B<Returns:> String — the artifact type name.
+
+B<Examples:>
+
+    $self->_get_artifact_type('manifest');
+    # Returns: "manifest"
+
+    $self->_get_artifact_type('myenv.yml');
+    # Returns: "manifest"
+
+=head2 _get_artifact_filename
+
+    $self->_get_artifact_filename($ref)
+
+Returns the artifact filename for the given reference. If C<$ref> is a type
+key in the artifact map, returns its mapped filename. Otherwise, returns
+C<$ref> if it exists as a value (filename) in the map.
+
+B<Returns:> String — the artifact filename.
+
+B<Examples:>
+
+    $self->_get_artifact_filename('manifest');
+    # Returns: "myenv.yml"
+
+    $self->_get_artifact_filename('myenv.yml');
+    # Returns: "myenv.yml"
+
+=head2 _is_base64_gzipped
+
+    Genesis::Env::Deployment::_is_base64_gzipped($base64_data)
+
+Returns true if C<$base64_data> appears to be a base64-encoded gzip string.
+Checks that the string is at least 12 characters, that the first 12 characters
+are valid base64, and that the decoded bytes begin with the gzip magic number
+C<\x1F\x8B>.
+
+B<Parameters:>
+
+=over
+
+=item $base64_data
+
+The string to test.
+
+=back
+
+B<Returns:> True if the string looks like base64-encoded gzip data, false otherwise.
+
+B<Examples:>
+
+    Genesis::Env::Deployment::_is_base64_gzipped($base64_data);
+    # Returns: 1 if base64-gzipped, '' otherwise
+
+=head2 _get_ts_string
+
+    Genesis::Env::Deployment::_get_ts_string($timestamp)
+
+Converts a timestamp to EXODUS_TIME_FORMAT_SHORT string format
+(e.g., C<'20240115143000'>). Accepts a Time::Piece object (formatted via
+C<strftime>) or a string matching a recognized ISO-8601-like UTC timestamp
+pattern (digits, dashes, colons, T, Z, and C<+0000> suffix stripped). Throws
+via C<bail()> with C<"Invalid timestamp format: $ts"> if the input does not
+match either form. If called as an instance method on a
+Genesis::Env::Deployment object, the object argument is consumed and the next
+argument is used as the timestamp.
+
+B<Returns:> String — timestamp in EXODUS_TIME_FORMAT_SHORT format.
+
+B<Examples:>
+
+    Genesis::Env::Deployment::_get_ts_string(Time::Piece->new);
+    # Returns: "20240115143000"
+
+    Genesis::Env::Deployment::_get_ts_string('2024-01-15T14:30:00Z');
+    # Returns: "20240115143000"
+
+=head1 KNOWN ISSUES
+
+The following defects are tracked and pending resolution (FWT-708):
+
+=over
+
+=item *
+
+C<committed()> checks a relative vault path (C<'deployments/' . $self-E<gt>timestamp()>)
+rather than the full exodus path used by C<commit()>. This means C<committed()>
+may return incorrect results (FWT-708 C-1 through M-5).
+
+=item *
+
+C<commit()> mutates the object's internal data as a side effect: it sets
+C<started> and C<completed> on C<$self-E<gt>{data}> if they are not already
+present. Callers that inspect C<started()> or C<completed()> before and after
+C<commit()> may observe different values.
+
+=item *
+
+In list context, C<commit()> returns the raw C<($out, $rc, $err)> tuple from
+the vault query without performing error checking. The caller must inspect
+C<$rc> to detect failures.
 
 =back
 
