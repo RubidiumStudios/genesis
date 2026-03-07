@@ -89,6 +89,14 @@ B<Errors:>
 Raises C<"Expected %s to provide 'connect_and_validate' method, but it did
 not (or called SUPER)"> when called on the base class. C<%s> is the class name.
 
+B<Returns:> Defined by subclass implementation.
+
+B<Examples:>
+
+  # Subclasses call connect_and_validate internally during target/attach
+  my $vault = Service::Vault::Remote->target('prod-vault');
+  # Returns: subclass-defined (target() calls connect_and_validate internally)
+
 =head2 authenticate
 
   $vault->authenticate();
@@ -477,33 +485,77 @@ B<Examples:>
 Returns the URL of the Vault target in the form C<scheme://host:port>. The
 port is optional; it is implied as C<80> for C<http> and C<443> for C<https>.
 
-The C<name>, C<verify>, C<namespace>, C<strongbox>, and C<tls> accessors are
-defined alongside this method and follow the same calling convention.
-
 B<Returns:> A string such as C<'https://vault.example.com:8200'>.
-
-B<Errors:>
-
-Raises C<"Expected %s to provide 'connect_and_validate' method, but it did
-not (or called SUPER)"> when C<connect_and_validate> is called on the base
-class directly. C<%s> is the class name.
 
 B<Examples:>
 
   print $vault->url();
   # Returns: 'https://vault.example.com:8200'
 
+=head2 name
+
+  my $name = $vault->name();
+
+Returns the target alias as registered in C<~/.saferc>.
+
+B<Returns:> A string (the target alias, e.g. C<'prod-vault'>).
+
+B<Examples:>
+
   print $vault->name();
   # Returns: 'prod-vault'
+
+=head2 verify
+
+  my $verify = $vault->verify();
+
+Returns whether TLS certificate verification is enabled for this vault.
+
+B<Returns:> C<1> if verification is enabled, C<0> if disabled.
+
+B<Examples:>
 
   print $vault->verify();
   # Returns: 1
 
+=head2 namespace
+
+  my $ns = $vault->namespace();
+
+Returns the Vault namespace string configured for this vault.
+
+B<Returns:> A string, or C<''> if no namespace is set.
+
+B<Examples:>
+
   print $vault->namespace();
-  # Returns: '' or 'admin'
+  # Returns: ''
+
+=head2 strongbox
+
+  my $sb = $vault->strongbox();
+
+Returns whether strongbox mode is enabled. Defaults to true when not
+explicitly configured.
+
+B<Returns:> C<1> if enabled, C<0> if disabled.
+
+B<Examples:>
 
   print $vault->strongbox();
   # Returns: 1
+
+=head2 tls
+
+  my $is_tls = $vault->tls();
+
+Returns whether the vault URL uses HTTPS. This is computed from the URL
+rather than stored as a separate property.
+
+B<Returns:> True (C<1>) if the URL starts with C<https://>, false (empty
+string) otherwise.
+
+B<Examples:>
 
   print $vault->tls() ? 'TLS' : 'plaintext';
   # Returns: 'TLS'
