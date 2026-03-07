@@ -1007,4 +1007,13 @@ subtest 'create() kits_path stores relative path not boolean (FWT-697)' => sub {
 	is($stored, 'custom-kits', "kits_path is the humanized relative path");
 };
 
+subtest '_validate_config returns truthy (FWT-698)' => sub {
+	my $tmp = make_test_repo(workdir('fwt-698-test'));
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	my $result = $top->_validate_config;
+	ok($result, "_validate_config returns truthy for valid v2 config");
+	is($result, 1, "_validate_config explicitly returns 1 (FWT-698)");
+};
+
 done_testing;
