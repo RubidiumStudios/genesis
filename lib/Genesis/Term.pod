@@ -99,7 +99,8 @@ C<"\e[u"> — Restore the previously saved cursor position.
 
 Returns 1 if the C<TERM> environment variable is set and the C<tput> command is available
 on the system path, or 0 otherwise. Used internally before invoking C<tput> for terminal
-dimension queries. Not exported by default; call as C<Genesis::Term::has_tput()>.
+dimension queries. Not exported by default; use the fully-qualified name or import it
+explicitly.
 
 B<Returns:>
 
@@ -141,7 +142,8 @@ B<Examples:>
 
   my $rows = terminal_height();
 
-Returns the terminal height in rows. Not exported by default; call as C<Genesis::Term::terminal_height()>. Checks, in order:
+Returns the terminal height in rows. Not exported by default; use the fully-qualified name
+or import it explicitly. Checks, in order:
 
 =over 4
 

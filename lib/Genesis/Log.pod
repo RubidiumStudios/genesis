@@ -434,13 +434,39 @@ B<Examples:>
   $logger->output($format, @args);
 
 Emits a log entry using the given format string and arguments. This method
-is the basis for all the per-level logging shortcut methods. Each shortcut
-delegates to the internal C<_log> method with the corresponding level name
-and style definition from C<log_styles>.
+is the basis for all the per-level logging shortcut methods listed below.
 
 C<$format> is a C<sprintf>-style format string. If only one argument is
 given it is treated as a literal string (a C<"%s"> format is prepended
 automatically).
+
+The following shortcut methods are all defined in the same way; each
+delegates to the internal C<_log> method with the corresponding level name
+and style definition from C<log_styles>:
+
+=over 4
+
+=item * C<output> -- level C<OUTPUT>; goes to STDOUT on terminal, no prefix/colors
+
+=item * C<info> -- level C<INFO>; goes to STDERR; no prefix/colors on terminal
+
+=item * C<debug> -- level C<DEBUG>; visible at C<DEBUG> or C<TRACE> threshold
+
+=item * C<notice> -- level C<NOTICE>
+
+=item * C<warning> -- level C<WARNING>
+
+=item * C<error> -- level C<ERROR>
+
+=item * C<fatal> -- level C<FATAL>; does not terminate the process on its own
+
+=item * C<trace> -- level C<TRACE>; automatically appends current call location
+(C<show_stack> is C<'current'> for this style)
+
+=item * C<qtrace> -- level C<TRACE>; like C<trace> but without the automatic
+stack annotation
+
+=back
 
 C<output>-level messages go to STDOUT on the terminal; all other levels go
 to STDERR.
@@ -452,117 +478,40 @@ B<Examples:>
   $logger->output("Deployment complete.\n");
   # Returns: nothing (prints to STDOUT)
 
-=head2 info
-
-  $logger->info($message);
-  $logger->info($format, @args);
-
-Shortcut for logging at INFO level. See L</output>.
-
-B<Examples:>
-
   $logger->info("Environment %s is ready\n", $env_name);
   # Returns: nothing (prints to STDERR)
-
-=head2 debug
-
-  $logger->debug($message);
-  $logger->debug($format, @args);
-
-Shortcut for logging at DEBUG level. See L</output>. Visible only when the
-terminal target is at C<DEBUG> or C<TRACE> threshold.
-
-B<Examples:>
 
   $logger->debug("Vault path resolved to: %s", $path);
   # Returns: nothing (printed only if terminal is at DEBUG or TRACE level)
 
-=head2 notice
-
-  $logger->notice($message);
-  $logger->notice($format, @args);
-
-Shortcut for logging at NOTICE level. See L</output>.
-
-=head2 warning
-
-  $logger->warning($message);
-  $logger->warning($format, @args);
-
-Shortcut for logging at WARNING level. See L</output>.
-
-B<Examples:>
-
   $logger->warning("Certificate expires in %d days", $days);
   # Returns: nothing (prints to STDERR)
-
-=head2 error
-
-  $logger->error($message);
-  $logger->error($format, @args);
-
-Shortcut for logging at ERROR level. See L</output>.
-
-B<Examples:>
 
   $logger->error("Could not connect to vault at %s", $url);
   # Returns: nothing (prints to STDERR)
 
-=head2 fatal
-
-  $logger->fatal($message);
-  $logger->fatal($format, @args);
-
-Shortcut for logging at FATAL level. See L</output>. Does not terminate
-the process on its own; the caller must exit.
-
-B<Examples:>
-
   $logger->fatal("Unrecoverable error: %s", $msg);
   # Returns: nothing (prints to STDERR; caller must exit)
-
-=head2 trace
-
-  $logger->trace($message);
-  $logger->trace($format, @args);
-
-Shortcut for logging at TRACE level. See L</output>. Automatically appends
-the current call location (C<show_stack> is C<'current'> for this style).
-
-B<Examples:>
 
   $logger->trace("Entering %s with args: %s", $method, join(', ', @args));
   # Returns: nothing (prints to STDERR with call location appended)
 
-=head2 qtrace
-
-  $logger->qtrace($message);
-  $logger->qtrace($format, @args);
-
-Shortcut for logging at TRACE level without the automatic stack annotation.
-See L</output>.
-
-B<Examples:>
-
   $logger->qtrace("Loop iteration %d: value=%s", $i, $val);
   # Returns: nothing (prints to STDERR at TRACE level, no location appended)
 
-=head2 dump_var
+In addition to the shortcut methods above, the C<output> code block in the
+source also defines C<dump_var>:
 
   $logger->dump_var(%vars);
   $logger->dump_var(\%options, %vars);
   $logger->dump_var($scope_offset, %vars);
 
-Dumps one or more named variables to the log at C<VALUE> level using
-Data::Dumper. Each key/value pair in C<%vars> produces a separate log
-entry formatted as C<name = value>. An optional leading hashref
-C<\%options> is merged into the log entry options. An optional leading
-integer C<$scope_offset> (absolute value used) adjusts the stack depth
-for scope reporting.
-
-B<Returns:> Nothing.
-
-B<Examples:>
+C<dump_var> dumps one or more named variables to the log at C<VALUE> level
+using Data::Dumper. Each key/value pair in C<%vars> produces a separate log
+entry formatted as C<name = value>. An optional leading hashref C<\%options>
+is merged into the log entry options. An optional leading integer
+C<$scope_offset> (absolute value used) adjusts the stack depth for scope
+reporting. Returns nothing.
 
   $logger->dump_var(my_hash => \%config, my_list => \@items);
   # Returns: nothing (prints each variable's Data::Dumper output to STDERR)
