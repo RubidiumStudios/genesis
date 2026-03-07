@@ -22,6 +22,7 @@ my $cc = Genesis::Kit::Compiler->new($kitdir);
 my $out;
 $ENV{NOCOLOR} = 'y';
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
+$ENV{GIT_EDITOR} = 'true';
 
 sub again {
 	system("rm -rf $kitdir; mkdir -p $kitdir");
@@ -318,7 +319,7 @@ eq_or_diff($out, <<'EOF', "validate should report when genesis_min_version is us
         Kit Metadata file kit.yml:
         - contains invalid top-level key: genesis_min_version;
           valid keys are: name, version, description, code, docs, author, authors, genesis_version_min, secrets_store,
-                          required_configs, exclude_paths, credentials, certificates, provided
+                          required_configs, exclude_paths, supports, services, credentials, certificates, provided
 
 EOF
 
@@ -351,7 +352,7 @@ eq_or_diff($out, <<'EOF', "validate should report credentials and certificate fi
         Kit Metadata file kit.yml:
         - contains invalid top-level keys: certificates, credentials;
           valid keys are: name, version, description, code, docs, author, authors, genesis_version_min, secrets_store,
-                          required_configs, exclude_paths
+                          required_configs, exclude_paths, supports, services
 
 EOF
 
@@ -475,12 +476,12 @@ eq_or_diff($out, <<'EOF', "validate should report when unknown top-level keys ar
         - does not identify the author(s) via 'author' or 'authors'
         - contains invalid top-level keys: by, descriptoin, github, homepage, params, secrets, subkits;
           valid keys are: name, version, description, code, docs, author, authors, genesis_version_min, secrets_store,
-                          required_configs, exclude_paths, credentials, certificates, provided
+                          required_configs, exclude_paths, supports, services, credentials, certificates, provided
 
 EOF
 
 $out = combined_from {
-  ok($cc->compile("test", "1.2.3", $tmp, force => 1), "compiling an invalid kit should be allowed with force option");
+  ok($cc->compile("test", "1.2.3", $tmp, force => 1, 'skip-version-updates' => 1), "compiling an invalid kit should be allowed with force option");
 };
 eq_or_diff($out, <<'EOF', "validate should report errors even when force is used");
 
@@ -491,8 +492,9 @@ eq_or_diff($out, <<'EOF', "validate should report errors even when force is used
         - does not identify the author(s) via 'author' or 'authors'
         - contains invalid top-level keys: by, descriptoin, github, homepage, params, secrets, subkits;
           valid keys are: name, version, description, code, docs, author, authors, genesis_version_min, secrets_store,
-                          required_configs, exclude_paths, credentials, certificates, provided
+                          required_configs, exclude_paths, supports, services, credentials, certificates, provided
 
+[WARNING] Not updating version in perl hooks due to uncommitted changes in working directory
 EOF
 
 ##################################
@@ -723,7 +725,7 @@ eq_or_diff($out, <<'EOF', "validate should report all errors in the kit");
         - specifies name 'testing', expecting 'test'
         - contains invalid top-level keys: code repo, params, url;
           valid keys are: name, version, description, code, docs, author, authors, genesis_version_min, secrets_store,
-                          required_configs, exclude_paths, credentials, certificates, provided
+                          required_configs, exclude_paths, supports, services, credentials, certificates, provided
 
         Secrets specifications in kit.yml:
         - Invalid definition for X.509 certificate secret:
@@ -928,11 +930,11 @@ EOF
 ##################################
 
 again();
-lives_ok { $cc->_prepare('test-1.2.3'); } "kit source prep should work on the default test kit";
+my @selected;
+lives_ok { @selected = $cc->_select_files(); } "file selection should work on the default test kit";
 
-my $root = "$cc->{work}/$cc->{relpath}";
-ok(!-d "$root/ci", "ci/ directory should be removed from prepared kit source");
-ok(!-f "$root/NOTES", ".gitignore'd NOTES files should removed from prepared kit source");
+ok(!(grep { $_ =~ m{^ci/} || $_ eq 'ci' } @selected), "ci/ directory should be excluded from selected files");
+ok(!(grep { $_ eq 'NOTES' } @selected), ".gitignore'd NOTES files should be excluded from selected files");
 
 
 ##################################
@@ -942,22 +944,22 @@ lives_ok { $cc->compile("test", "1.2.3", $tmp) } "kit compilation should work ";
 ok(-f "$tmp/test-1.2.3.tar.gz", "kit compilation should produce a tarball in \$tmp");
 
 my $tar = Archive::Tar->new("$tmp/test-1.2.3.tar.gz");
-my %files = map { delete $_->{name} => $_ } $tar->list_files([qw[name size mode]]);
+my %files = map { $_->full_path => { mode => $_->mode, size => $_->size } } $tar->get_files();
 cmp_deeply(\%files, {
-	'test-1.2.3/' => superhashof({ mode => 0755 }),
+	'test-1.2.3' => superhashof({}),
 	'test-1.2.3/README.md' => {
 		'mode' => 0644,
 		'size' => -s "$kitdir/README.md",
 	},
 	'test-1.2.3/kit.yml' => superhashof({ 'mode' => 0644 }),
 
-	'test-1.2.3/manifests/' => superhashof({ mode => 0755 }),
+	'test-1.2.3/manifests' => superhashof({ mode => 0755 }),
 	'test-1.2.3/manifests/test.yml' => {
 		'mode' => 0644,
 		'size' => -s "$kitdir/manifests/test.yml",
 	},
 
-	'test-1.2.3/hooks/' => superhashof({ mode => 0755 }),
+	'test-1.2.3/hooks' => superhashof({ mode => 0755 }),
 	'test-1.2.3/hooks/blueprint' => {
 		'mode' => 0755,
 		'size' => -s "$kitdir/hooks/blueprint",
