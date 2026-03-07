@@ -236,7 +236,7 @@ sub _parse_credential_key {
 		}
 	} else {
 		return _invalid_secret(
-			"Random" => "Bad generate-password format '$data'",
+			"Credential" => "Unrecognized credential format '$data'",
 			$ext_path, $data, $feature
 		);
 	}

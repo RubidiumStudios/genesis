@@ -62,4 +62,27 @@ subtest 'FWT-687: features defaulting does not have dead code' => sub {
 	ok($secrets[0]->valid, "produced secret is valid");
 };
 
+subtest 'FWT-685: unrecognized credential key uses correct subject label' => sub {
+	my @secrets = parse_metadata({
+		credentials => {
+			base => {
+				'test/path' => {
+					mykey => 'bogus_value',
+				},
+			},
+		},
+	});
+
+	is(scalar @secrets, 1, "one secret returned");
+	isa_ok($secrets[0], 'Genesis::Secret::Invalid');
+	is($secrets[0]->get('subject'), 'Credential',
+		"subject is 'Credential', not 'Random'");
+
+	my $desc = $secrets[0]->describe;
+	like($desc, qr/Unrecognized credential format/i,
+		"error message says 'Unrecognized credential format'");
+	unlike($desc, qr/Bad generate-password/,
+		"error message does NOT say 'Bad generate-password'");
+};
+
 done_testing;
