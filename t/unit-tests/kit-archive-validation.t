@@ -119,4 +119,50 @@ subtest 'valid archive loads successfully' => sub {
 	} 'valid kit archive loads without error';
 };
 
+# --- Test 9: local_kits skips corrupt archives instead of dying ---
+subtest 'local_kits skips corrupt archives and returns valid kits' => sub {
+	my $scan_dir = "$tmp/local_kits_test";
+	mkdir $scan_dir unless -d $scan_dir;
+
+	# Create one valid kit
+	mk_test_kit('alpha', '1.0.0', $scan_dir);
+
+	# Create one corrupt kit (HTML content, not a real tarball)
+	put_file("$scan_dir/broken-2.0.0.tar.gz",
+		"<!DOCTYPE html><html><body>403 Forbidden</body></html>");
+
+	# Create another valid kit
+	mk_test_kit('charlie', '3.0.0', $scan_dir);
+
+	my $result;
+	lives_ok {
+		$result = Genesis::Kit::Compiled->local_kits(undef, $scan_dir);
+	} 'local_kits does not die when a corrupt kit is present';
+
+	ok defined($result), 'local_kits returns a result';
+	ok ref($result) eq 'HASH', 'local_kits returns a hashref';
+	ok exists($result->{alpha}), 'valid kit alpha is present in results';
+	ok exists($result->{alpha}{'1.0.0'}), 'alpha version 1.0.0 is present';
+	ok exists($result->{charlie}), 'valid kit charlie is present in results';
+	ok exists($result->{charlie}{'3.0.0'}), 'charlie version 3.0.0 is present';
+	ok !exists($result->{broken}), 'corrupt kit broken is not in results';
+};
+
+# --- Test 10: local_kits with only valid kits works normally ---
+subtest 'local_kits with all valid kits works normally' => sub {
+	my $scan_dir = "$tmp/local_kits_valid";
+	mkdir $scan_dir unless -d $scan_dir;
+
+	mk_test_kit('foo', '1.0.0', $scan_dir);
+	mk_test_kit('bar', '2.0.0', $scan_dir);
+
+	my $result;
+	lives_ok {
+		$result = Genesis::Kit::Compiled->local_kits(undef, $scan_dir);
+	} 'local_kits works with all valid kits';
+
+	ok exists($result->{foo}{'1.0.0'}), 'foo/1.0.0 found';
+	ok exists($result->{bar}{'2.0.0'}), 'bar/2.0.0 found';
+};
+
 done_testing;
