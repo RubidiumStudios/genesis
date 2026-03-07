@@ -20,7 +20,7 @@ Genesis::Config - Configuration file management with multi-layer value resolutio
     # Validate against a schema before use
     $cfg->validate({
         log_level => { type => 'enum', values => [qw(debug info warn error)], default => 'info' },
-        max_retries => { type => 'integer', required => 1 },
+        max_retries => { type => 'integer' },
     });
 
     # Read values
@@ -471,9 +471,9 @@ on the config object.
 
 =item *
 
-C<"Unable to create tempfile for YAML conversion: %s"> — raised if the
-temporary JSON file used for YAML conversion cannot be opened. The C<%s>
-placeholder is replaced by the system error message (C<$!>).
+C<"Unable to create tempfile for YAML conversion: $!"> — raised if the
+temporary JSON file used for YAML conversion cannot be opened. C<$!> is
+the system error message, interpolated directly into the string.
 
 =item *
 
@@ -618,9 +618,10 @@ B<Errors:>
 
 =item *
 
-C<"Configuration validation failed for %s:%s"> — raised via C<bail()> if any
-validation errors are found. The first C<%s> is the config file path; the
-second is a formatted bullet-list of all error messages.
+C<"Configuration validation failed for #C{%s}:%s"> — raised via C<bail()> if
+any validation errors are found. The first C<%s> is the config file path
+(wrapped in C<#C{}> for color highlighting); the second is a formatted
+bullet-list of all error messages.
 
 =back
 
