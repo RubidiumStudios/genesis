@@ -113,7 +113,7 @@ sub create_approle {
 	%config = (%defaults, %config);
 
 	# Check if role exists
-	if ($self->approle_exists($role_name)) {
+	if ($self->approles->exists($role_name)) {
 		if ($prompt && !$overwrite) {
 			my $continue = prompt_for_boolean(
 				"AppRole #C{$role_name} already exists. Do you want to recreate it?",
@@ -154,7 +154,7 @@ sub get_approle_credentials {
 	my ($self, $role_name) = @_;
 
 	bail("AppRole name is required") unless $role_name;
-	bail("AppRole #C{$role_name} does not exist") unless $self->approle_exists($role_name);
+	bail("AppRole #C{$role_name} does not exist") unless $self->approles->exists($role_name);
 
 	# Get role-id
 	my ($role_id, $rid_rc) = $self->vault->query(
@@ -211,7 +211,7 @@ sub setup_concourse_approle {
 	}
 
 	# Ensure AppRole is enabled
-	$self->ensure_approle_enabled();
+	$self->approles->enable();
 
 	# Create policy for Concourse
 	my $policy_content = qq{
@@ -257,7 +257,7 @@ sub setup_genesis_pipelines_approle {
 	}
 
 	# Ensure AppRole is enabled
-	$self->ensure_approle_enabled();
+	$self->approles->enable();
 
 	# Create policy for Genesis pipelines
 	my $policy_content = qq{
