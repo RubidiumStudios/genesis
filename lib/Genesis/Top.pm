@@ -693,13 +693,13 @@ sub set_kit_provider {
 		info {pending => 1}, "Writing configuration...";
 		$self->{__kit_provider} = $new_provider;
 		if (ref($self->kit_provider) eq "Genesis::Kit::Provider::GenesisCommunity") {
-			$self->config->clear('kit_provider',1)
+			$self->config->clear('kit_provider');
 		} else {
 			$self->config->set('kit_provider', $self->kit_provider->config);
-			$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
-			$self->_validate_config;
-			$self->config->save;
 		}
+		$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
+		$self->_validate_config;
+		$self->config->save;
 		info "done.";
 	};
 	return $@;
