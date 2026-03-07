@@ -613,7 +613,6 @@ sub build_markdown_blockquote {
 	$block =~ s/^\s*>\s*//;
 	$block =~ s/\n\s*>\s*//g;
 	return wrap($block, $width, ' ' x $indent, $indent);
-	return wrap($block =~ s/^\s*>\s*//gmr, $width, boxify('line', 'left').' ');
 }
 
 sub process_markdown_block {
