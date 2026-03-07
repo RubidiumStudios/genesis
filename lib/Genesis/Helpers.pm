@@ -569,7 +569,7 @@ prompt_for() {
     if [[ $__rc -ne 0 ]] ; then
       # error
       rm -f "$__tmpfile"
-      _bail --rc "$__rc" "Error encountered - cannot continue";
+      __bail --rc "$__rc" "Error encountered - cannot continue";
     fi
     if [[ $__type =~ ^multi- ]] ; then
       eval "unset $__var; ${__var}=()"
@@ -650,7 +650,7 @@ export -f param_comment
 # Helper to inject new Genesis configuration (v2.6.13+)
 genesis_config_block() {
 	config_block="$(
-	if [[ "${GENESIS_USE_CREATE_ENV:-}" == '1' ]] ; then
+	if [[ "${GENESIS_USE_CREATE_ENV:-}" == "true" ]] ; then
 		cat <<EOF
   bosh_env:       ((prune))
 EOF
@@ -721,7 +721,7 @@ export -f genesis_config_block
 
 offer_environment_editor() {
   local __edit_query="${1:-''}"
-  local __file __tmpdir __editor __edit_query __editor_cmd
+  local __file __tmpdir __editor __editor_cmd
   if [[ "$__edit_query" != 'true' ]] ; then
     prompt_for __edit_query boolean \
       "Would you like to edit the '$GENESIS_ENVIRONMENT.yml' environment file?" \
