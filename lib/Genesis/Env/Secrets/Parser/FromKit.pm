@@ -115,7 +115,8 @@ sub _parse_provided_secret_definition {
 	) unless ref($data) eq 'HASH';
 
 	my @secrets = ();
-	if (($data->{type} //= 'generic') eq 'generic') {
+	my $type = $data->{type} // 'generic';
+	if ($type eq 'generic') {
 		return _invalid_secret(
 			"User-Provided" => "Missing or invalid 'keys' hash",
 			$path, $data, $feature

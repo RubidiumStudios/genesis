@@ -85,4 +85,33 @@ subtest 'FWT-685: unrecognized credential key uses correct subject label' => sub
 		"error message does NOT say 'Bad generate-password'");
 };
 
+subtest 'FWT-682: parse_provided does not mutate caller metadata' => sub {
+	my $metadata = {
+		provided => {
+			base => {
+				'test/path' => {
+					keys => {
+						username => { prompt => 'Enter username' },
+					},
+				},
+			},
+		},
+	};
+
+	# Capture state before parse
+	ok(!exists $metadata->{provided}{base}{'test/path'}{type},
+		"type key does not exist before parse");
+
+	my @secrets = parse_metadata($metadata);
+
+	# After parse, the original metadata should be unmodified
+	ok(!exists $metadata->{provided}{base}{'test/path'}{type},
+		"type key still does not exist after parse — no mutation");
+
+	# The parse should still work correctly
+	is(scalar @secrets, 1, "one secret produced");
+	ok($secrets[0]->valid, "secret is valid");
+	isa_ok($secrets[0], 'Genesis::Secret::UserProvided');
+};
+
 done_testing;
