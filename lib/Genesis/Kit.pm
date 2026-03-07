@@ -898,10 +898,17 @@ sub _dereference_param {
 		push @{($self->{__deref_miss}||=[])}, $key;
 		return "\${$key}"
 	}
-	bail(
-		"Cannnot dereference kit parameter '%s' to a value because it has an unresolved vault lookup:\n[[  >>%s",
-		$key, $val
-	) if defined($val) && $val =~ /\(\( vault /;
+	if (defined($val) && $val =~ /\(\( vault /) {
+		my $hint = ($val =~ /ocfp/)
+			? "\n\n        Ensure OCFP vault configuration data has been populated.\n".
+			  "        Run: ocfp vault populate --bloc <bloc-name>"
+			: "";
+		bail(
+			"Cannot dereference kit parameter '%s' to a value because it has an unresolved\n".
+			"        vault lookup:\n[[  >>%s%s",
+			$key, $val, $hint
+		);
+	}
 	trace "Dereference: got %s", $val;
 	($self->{__deref_cache}||={})->{$key} = $val;
 	return $val; # TODO: maybe change unquoted ~ to undef, and remove quotes from default

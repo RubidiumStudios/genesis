@@ -1410,7 +1410,14 @@ sub director_exodus_lookup {
 # dereferenced_kit_metadata - get kit metadata that been filled with environment references {{{
 sub dereferenced_kit_metadata {
 	my ($self) = shift;
-	return $self->kit->dereferenced_metadata(sub {$self->partial_manifest_lookup(@_)}, 1);
+	return $self->kit->dereferenced_metadata(sub {
+		my $val = $self->partial_manifest_lookup(@_);
+		if (defined($val) && !ref($val) && $val =~ /\(\(\s*vault\s/) {
+			my $full_val = eval { $self->manifest_lookup(@_) };
+			return $full_val if defined($full_val) && !ref($full_val) && $full_val !~ /\(\(\s*vault\s/;
+		}
+		return $val;
+	}, 1);
 }
 
 # }}}
