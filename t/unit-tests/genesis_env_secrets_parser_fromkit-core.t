@@ -43,4 +43,23 @@ sub parse_invalid {
 	return grep { $_->isa('Genesis::Secret::Invalid') } parse_metadata($metadata, @features);
 }
 
+subtest 'FWT-687: features defaulting does not have dead code' => sub {
+	# This is a code-review regression test — verify parse() works
+	# with a mock environment that returns an empty features list
+	my $env = MockEnv->new(
+		features => [],
+		metadata => {
+			credentials => {
+				base => {
+					'test/path' => 'ssh 2048',
+				},
+			},
+		},
+	);
+	my $parser = Genesis::Env::Secrets::Parser::FromKit->new($env);
+	my @secrets = $parser->parse();
+	is(scalar @secrets, 1, "parse() works with empty features list from env");
+	ok($secrets[0]->valid, "produced secret is valid");
+};
+
 done_testing;

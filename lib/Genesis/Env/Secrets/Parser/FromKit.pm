@@ -30,7 +30,7 @@ sub parse {
 	) unless $self->env || ($opts{kit_metadata} && $opts{features});
 
 	my $metadata = $opts{kit_metadata} // $self->env->dereferenced_kit_metadata;
-	my $features = $opts{features} // [$self->env->features] // [];
+	my $features = $opts{features} // [$self->env->features];
 	for my $feature ('base', @$features) {
 		if (_validate_feature_block($metadata, 'certificates', $feature, \@secrets)) {
 			while (my ($path, $data) = each(%{$metadata->{certificates}{$feature}||{}})) {
