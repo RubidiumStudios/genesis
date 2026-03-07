@@ -983,4 +983,115 @@ EOF
 		"finds vault from deep ancestor (multiple hierarchy levels)");
 };
 
+subtest 'create() kits_path stores relative path not boolean (FWT-697)' => sub {
+	local $Genesis::VERSION = '3.1.0';
+	my $basedir = workdir('fwt-697-test');
+
+	# kits_path inside the repo: humanize_path returns a relative path.
+	# Bug: operator precedence causes $rel_path to get boolean 1, not the
+	# humanized path, so the relative path is never stored. The config
+	# override loop then stores the original absolute path from opts.
+	# After fix: the relative path (e.g. "custom-kits") should be stored.
+	my $repo_path = "$basedir/myrepo";
+	my $kits_dir = "$repo_path/custom-kits";
+
+	my $top = Genesis::Top->create(
+		$basedir, "myrepo",
+		no_vault => 1,
+		kits_path => $kits_dir,
+	);
+
+	my $stored = $top->config->get('kits_path');
+	ok(defined($stored), "kits_path is defined in config");
+	unlike($stored, qr{^/}, "kits_path is relative, not absolute (FWT-697)");
+	is($stored, 'custom-kits', "kits_path is the humanized relative path");
+};
+
+subtest '_validate_config returns truthy (FWT-698)' => sub {
+	my $tmp = make_test_repo(workdir('fwt-698-test'));
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	my $result = $top->_validate_config;
+	ok($result, "_validate_config returns truthy for valid v2 config");
+	is($result, 1, "_validate_config explicitly returns 1 (FWT-698)");
+};
+
+subtest 'set_kit_provider sets updater_version for GenesisCommunity (FWT-699)' => sub {
+	local $Genesis::VERSION = '3.2.0';
+	my $tmp = workdir('fwt-699-test');
+
+	# Create repo with a custom kit_provider already set
+	system("mkdir -p $tmp/.genesis");
+	mkfile_or_fail("$tmp/.genesis/config", <<EOF);
+---
+version: 2
+deployment_type: test
+creator_version: 3.1.0
+kit_provider:
+  label: Custom Provider
+  type: github
+  domain: github.example.com
+  organization: my-org
+  tls: "yes"
+EOF
+
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	# Confirm custom provider is currently set
+	ok($top->config->get('kit_provider'), "kit_provider is configured before revert");
+
+	# Revert to GenesisCommunity (default, no args)
+	quietly { $top->set_kit_provider() };
+
+	# Re-read config from disk to verify persistence
+	my $saved = Genesis::Config->new("$tmp/.genesis/config");
+	ok(!$saved->get('kit_provider'),
+		"kit_provider cleared from saved config on disk");
+	is($saved->get('updater_version'), '3.2.0',
+		"updater_version set in saved config (FWT-699)");
+};
+
+subtest 'repo_vault returns vault object not boolean (FWT-696)' => sub {
+	my $tmp = workdir('fwt-696-test');
+
+	system("mkdir -p $tmp/.genesis");
+	mkfile_or_fail("$tmp/.genesis/config", <<EOF);
+---
+version: 2
+creator_version: 3.1.0
+deployment_type: test
+secrets_provider:
+  url: https://vault.example.com:8200
+  insecure: true
+  strongbox: true
+  namespace: secret/my/ns
+  alias: my-vault
+EOF
+
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+	ok($top->has_vault(), "has_vault() is true with secrets_provider configured");
+
+	# Mock Service::Vault::Remote->attach to return a mock object
+	my $mock_vault = bless {
+		url       => 'https://vault.example.com:8200',
+		name      => 'my-vault',
+		verify    => 0,
+		namespace => 'secret/my/ns',
+		strongbox => 1,
+	}, 'Service::Vault::Remote';
+
+	no strict 'refs';
+	local *{"Service::Vault::Remote::attach"} = sub {
+		my ($class, %opts) = @_;
+		is($opts{url}, 'https://vault.example.com:8200', "attach receives correct url");
+		is($opts{verify}, 0, "attach receives verify=0 for insecure=true");
+		return $mock_vault;
+	};
+	use strict 'refs';
+
+	my $result = $top->repo_vault();
+	isa_ok($result, 'Service::Vault::Remote',
+		"repo_vault() returns a vault object (FWT-696)");
+};
+
 done_testing;

@@ -123,7 +123,8 @@ sub create {
 	my $kits_path = '';
 	if ($kits_path = $opts{kits_path}) {
 		$kits_path = expand_path($kits_path);
-		if (my $rel_path = humanize_path($kits_path, base_dir => $self->path()) !~ m#^/#) {
+		my $rel_path = humanize_path($kits_path, base_dir => $self->path());
+		if ($rel_path !~ m#^/#) {
 			debug("Kit: using relative path $rel_path for kits path");
 			$kits_path = $rel_path;
 		} else {
@@ -145,7 +146,7 @@ sub create {
 		$self->config->set('kits_path', $kits_path) if $kits_path;
 
 		# Apply any config overrides from %opts
-		for my $override (grep {exists $opts{$_}} qw(creator_version updater_version minimum_version manifest_store kits_path)) {
+		for my $override (grep {exists $opts{$_}} qw(creator_version updater_version minimum_version manifest_store)) {
 			if (defined $opts{$override}) {
 				$self->config->set($override, $opts{$override});
 			} else {
@@ -692,13 +693,13 @@ sub set_kit_provider {
 		info {pending => 1}, "Writing configuration...";
 		$self->{__kit_provider} = $new_provider;
 		if (ref($self->kit_provider) eq "Genesis::Kit::Provider::GenesisCommunity") {
-			$self->config->clear('kit_provider',1)
+			$self->config->clear('kit_provider');
 		} else {
 			$self->config->set('kit_provider', $self->kit_provider->config);
-			$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
-			$self->_validate_config;
-			$self->config->save;
 		}
+		$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
+		$self->_validate_config;
+		$self->config->save;
 		info "done.";
 	};
 	return $@;
@@ -751,7 +752,15 @@ sub vault {
 sub repo_vault {
 	my $self = shift;
 	return Service::Vault::default unless $self->has_vault();
-	return $self->config->get("secrets_provider.insecure");
+	my $namespace = $self->config->get("secrets_provider.namespace");
+	my $strongbox = $self->config->get("secrets_provider.strongbox");
+	my %opts = (
+		url    => $self->config->get("secrets_provider.url"),
+		verify => $self->config->get("secrets_provider.insecure") ? 0 : 1,
+	);
+	$opts{namespace} = $namespace if defined($namespace);
+	$opts{strongbox} = ($strongbox ? 1 : 0) if defined($strongbox);
+	return Service::Vault::Remote->attach(%opts);
 }
 
 # }}}
@@ -1147,6 +1156,7 @@ sub _validate_config {
 	} else {
 		bail "Genesis deployment repo configuration version $config_version is not supported";
 	}
+	return 1;
 }
 
 # }}}
