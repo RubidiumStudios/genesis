@@ -390,7 +390,7 @@ cloud_config_needs() {
   az|azs)                      __type=azs;           __name=az           ;;
   *) __bail --rc 77
             "cloud_config_needs(): invalid cloud-config object type '$__type'; must be one of" \
-            "                      'vm_type', 'vm_extension', 'disk_type', or 'az'" ;;
+            "                      'vm_type', 'vm_extension', 'disk_type', 'network', or 'az'" ;;
   esac
 
   local __want __have __token
@@ -444,12 +444,12 @@ cloud_config_has() {
   disk_type|disk_types)        __type=disk_types;    __name=disk_type    ;;
   az|azs)                      __type=azs;           __name=az           ;;
   *) __bail --rc 77
-            "cloud_config_needs(): invalid cloud-config object type '$__type'; must be one of" \
-            "                      'vm_type', 'vm_extension', 'disk_type', or 'az'" ;;
+            "cloud_config_has(): invalid cloud-config object type '$__type'; must be one of" \
+            "                    'vm_type', 'vm_extension', 'disk_type', 'network', or 'az'" ;;
   esac
 
   __have=$(spruce json "$GENESIS_CLOUD_CONFIG" | \
-    jq -r "if (.(${__type}//[])[] | select(.name == \"$__want\")) then 1 else 0 end")
+    jq -r "if ((.${__type}//[])[] | select(.name == \"$__want\")) then 1 else 0 end")
   if [[ -n "$__have" ]]; then
     return 0
   else
