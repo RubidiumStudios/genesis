@@ -511,8 +511,10 @@ Defaults to C<"Enter a number between 1 and $num_choices">.
 
 =item C<compact>
 
-Optional. When true, choices are displayed in multiple columns calculated to
-fit the terminal width. Defaults to C<0>.
+Optional. Intended to display choices in multiple columns calculated to fit
+the terminal width. B<Not yet implemented:> enabling C<compact> (any true
+value) is currently broken and will cause the program to abort with a fatal
+error. Defaults to C<0>.
 
 =item C<paginate>
 
