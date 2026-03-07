@@ -252,14 +252,20 @@ C<action> is C<'deploy'>:
 =item started (optional)
 
 When the action started. Accepts a Time::Piece object or a string in
-EXODUS_TIME_FORMAT. Defaults to the commit time when C<commit()> is called if
-not provided at construction time.
+EXODUS_TIME_FORMAT. If not provided at construction time, this value is
+backfilled during C<commit()> from the deployment's existing C<timestamp>
+(as initialized during C<new()>), not from the wall-clock time at which
+C<commit()> runs. If no C<timestamp> is set on the object, it falls back
+to the C<completed> value or, lastly, the current time.
 
 =item completed (optional)
 
 When the action completed. Accepts a Time::Piece object or a string in
-EXODUS_TIME_FORMAT. Defaults to the commit time when C<commit()> is called if
-not provided at construction time.
+EXODUS_TIME_FORMAT. If not provided at construction time, this value is
+backfilled during C<commit()> from the deployment's existing C<timestamp>
+(as initialized during C<new()>), not from the wall-clock time at which
+C<commit()> runs. If no C<timestamp> is set on the object, it falls back
+to the current time.
 
 =item artifacts (optional)
 
@@ -561,7 +567,10 @@ artifacts are present, they are packaged as a base64-encoded gzip tarball and
 stored under the C<artifacts> key via vault's C<key@file> notation.
 
 If C<started> or C<completed> are not set on the object, they default to the
-commit time as a side effect of this method (known issue — FWT-708).
+deployment's C<timestamp> value (which is generally set during C<new()> and
+therefore often reflects the construction time). If no C<timestamp> is set on
+the object, they instead default to the time that C<commit()> is called. This
+mutation is a side effect of this method (known issue — FWT-708).
 
 B<Returns:>
 

@@ -141,8 +141,8 @@ Filter by action type. Valid values: C<'deploy'> or C<'terminate'>.
 =item result
 
 Filter by result status. Valid values: C<'success'>, C<'failed'>,
-C<'pending'>, C<'post-failed'>. Providing this option automatically
-enables C<all =E<gt> 1>.
+C<'pending'>, C<'post-failed'>, C<'assumed'>. Providing this option
+automatically enables C<all =E<gt> 1>.
 
 =item all
 
@@ -210,7 +210,7 @@ B<Examples:>
 
   # Timestamps only
   my @ts = $mgr->find(timestamps_only => 1, limit => 5);
-  # Returns: ('2024-03-15 14:22:01 +0000', '2024-02-10 09:11:00 +0000', ...)
+  # Returns: ('20240315142201', '20240210091100', ...)
 
 =head2 at($timestamp)
 
@@ -224,8 +224,8 @@ B<Parameters:>
 
 =item $timestamp
 
-The timestamp string of the deployment to retrieve, in the same format
-stored by Genesis (e.g. C<"2024-03-15 14:22:01 +0000">).
+The timestamp string of the deployment to retrieve, in
+EXODUS_TIME_FORMAT_SHORT format (e.g. C<"20240315142201">).
 
 =back
 
@@ -234,7 +234,7 @@ with that timestamp exists or if no deployments exist at all.
 
 B<Examples:>
 
-  my $d = $mgr->at('2024-03-15 14:22:01 +0000');
+  my $d = $mgr->at('20240315142201');
   print $d->result if $d;
   # prints: success
 
@@ -252,7 +252,8 @@ to include failed deployments.
 
 Note: if you pass C<result =E<gt> 'failed'> without C<include_failed =E<gt> 1>,
 the method will always return C<undef>, because failed deployments are
-excluded before the result filter is checked.
+excluded whenever C<include_failed> is false, even if you explicitly filter
+for a failed result.
 
 B<Parameters:>
 
