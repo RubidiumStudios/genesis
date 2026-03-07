@@ -1148,6 +1148,7 @@ sub _validate_config {
 	} else {
 		bail "Genesis deployment repo configuration version $config_version is not supported";
 	}
+	return 1;
 }
 
 # }}}
