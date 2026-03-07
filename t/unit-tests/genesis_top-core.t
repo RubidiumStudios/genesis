@@ -1051,4 +1051,47 @@ EOF
 		"updater_version set in saved config (FWT-699)");
 };
 
+subtest 'repo_vault returns vault object not boolean (FWT-696)' => sub {
+	my $tmp = workdir('fwt-696-test');
+
+	system("mkdir -p $tmp/.genesis");
+	mkfile_or_fail("$tmp/.genesis/config", <<EOF);
+---
+version: 2
+creator_version: 3.1.0
+deployment_type: test
+secrets_provider:
+  url: https://vault.example.com:8200
+  insecure: true
+  strongbox: true
+  namespace: secret/my/ns
+  alias: my-vault
+EOF
+
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+	ok($top->has_vault(), "has_vault() is true with secrets_provider configured");
+
+	# Mock Service::Vault::Remote->attach to return a mock object
+	my $mock_vault = bless {
+		url       => 'https://vault.example.com:8200',
+		name      => 'my-vault',
+		verify    => 0,
+		namespace => 'secret/my/ns',
+		strongbox => 1,
+	}, 'Service::Vault::Remote';
+
+	no strict 'refs';
+	local *{"Service::Vault::Remote::attach"} = sub {
+		my ($class, %opts) = @_;
+		is($opts{url}, 'https://vault.example.com:8200', "attach receives correct url");
+		is($opts{verify}, 0, "attach receives verify=0 for insecure=true");
+		return $mock_vault;
+	};
+	use strict 'refs';
+
+	my $result = $top->repo_vault();
+	isa_ok($result, 'Service::Vault::Remote',
+		"repo_vault() returns a vault object (FWT-696)");
+};
+
 done_testing;
