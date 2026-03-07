@@ -30,12 +30,19 @@ sub local_kits {
 	my %kits;
 	for (glob("$path/*")) {
 		next unless m{/([^/]*)-(\d+(\.\d+(\.\d+([.-]rc[.-]?\d+)?)?)?).t(ar.)?gz$};
-		$kits{$1}{$2} = $class->new(
-			name     => $1,
-			version  => $2,
-			archive  => $_,
-			provider => $provider
-		);
+		my $kit = eval {
+			$class->new(
+				name     => $1,
+				version  => $2,
+				archive  => $_,
+				provider => $provider
+			);
+		};
+		if ($@) {
+			warning("Skipping invalid kit archive %s: %s", $_, $@);
+			next;
+		}
+		$kits{$1}{$2} = $kit;
 	}
 	return \%kits;
 }
@@ -217,7 +224,11 @@ sub _validate_tar_archive {
 		$opts->{archive}, $basedir
 	) unless $tar->contains_file("${basedir}kit.yml");
 
-	# TODO: Validate name/version aginst kit.yml contents?
+	# Note: Name/version validation is performed against the archive's
+	# base directory structure (step 9 above). Parsing kit.yml here to
+	# cross-check would add I/O overhead for minimal benefit, since the
+	# directory name is the authoritative source during archive validation.
+	# If kit.yml validation is needed, it should happen during extract().
 
 	return $tar;
 }
