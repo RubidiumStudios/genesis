@@ -145,4 +145,42 @@ subtest 'FWT-684: path-level random/uuid produce specific error messages' => sub
 		"uuid path-level error does NOT give generic message");
 };
 
+subtest 'FWT-683: bare ssh/rsa without size defaults to 2048' => sub {
+	my @secrets = parse_metadata({
+		credentials => {
+			base => {
+				'test/ssh-bare' => 'ssh',
+				'test/rsa-bare' => 'rsa',
+				'test/ssh-sized' => 'ssh 4096',
+				'test/rsa-fixed' => 'rsa 1024 fixed',
+			},
+		},
+	});
+
+	is(scalar @secrets, 4, "four secrets returned");
+
+	# Bare ssh → SSH with default size 2048
+	my ($ssh_bare) = grep { $_->path eq 'test/ssh-bare' } @secrets;
+	ok($ssh_bare->valid, "bare 'ssh' produces a valid secret");
+	isa_ok($ssh_bare, 'Genesis::Secret::SSH');
+	is($ssh_bare->get('size'), 2048, "bare 'ssh' defaults to size 2048");
+
+	# Bare rsa → RSA with default size 2048
+	my ($rsa_bare) = grep { $_->path eq 'test/rsa-bare' } @secrets;
+	ok($rsa_bare->valid, "bare 'rsa' produces a valid secret");
+	isa_ok($rsa_bare, 'Genesis::Secret::RSA');
+	is($rsa_bare->get('size'), 2048, "bare 'rsa' defaults to size 2048");
+
+	# ssh with explicit size still works
+	my ($ssh_sized) = grep { $_->path eq 'test/ssh-sized' } @secrets;
+	ok($ssh_sized->valid, "'ssh 4096' produces a valid secret");
+	is($ssh_sized->get('size'), 4096, "'ssh 4096' has size 4096");
+
+	# rsa with fixed flag still works
+	my ($rsa_fixed) = grep { $_->path eq 'test/rsa-fixed' } @secrets;
+	ok($rsa_fixed->valid, "'rsa 1024 fixed' produces a valid secret");
+	is($rsa_fixed->get('size'), 1024, "'rsa 1024 fixed' has size 1024");
+	is($rsa_fixed->get('fixed'), 1, "'rsa 1024 fixed' has fixed=1");
+};
+
 done_testing;

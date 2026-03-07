@@ -164,7 +164,7 @@ sub _parse_credential_definition {
 
 	if (ref($data) eq 'HASH') {
 		return map {$self->_parse_credential_key($path, $_, $data->{$_}, $feature)} (keys %$data);
-	} elsif ($data =~ m/^(ssh|rsa)(?:\s+(\d+))(\s+fixed)?$/) {
+	} elsif ($data =~ m/^(ssh|rsa)(?:\s+(\d+))?(\s+fixed)?$/) {
 		my $type = "Genesis::Secret::".uc($1);
 		return $type->new($path, size => $2//2048, fixed => ($3 ? 1 : 0), _feature => $feature);
 	} elsif ($data =~ m/^dhparams?\s+(\d+)(\s+fixed)?$/) {
