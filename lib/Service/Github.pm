@@ -423,7 +423,7 @@ sub latest_version_of {
 	bail("Missing name for retrieving release") unless $name;
 	my $version = (
 		grep {$_->{url}}
-		$self->versions($name, latest => 1, include_drafts => $opts{include_drafts}, include_prerelease => $opts{include_prereleases})
+		$self->versions($name, latest => 1, include_drafts => $opts{include_drafts}, include_prereleases => $opts{include_prereleases})
 	)[0];
 	return $version && $version->{version};
 }
