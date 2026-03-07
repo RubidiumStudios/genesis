@@ -47,8 +47,13 @@ sub new {
 
 ### Instance Methods {{{
 
-sub env {$_[0]->{env}}
-sub service {$_[0]->{service}}
+sub env {
+	$_[0]->{env}
+}
+
+sub service {
+	$_[0]->{service}
+}
 
 sub default_mount {
 	'/secret/'
