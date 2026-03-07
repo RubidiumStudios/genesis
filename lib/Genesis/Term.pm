@@ -243,7 +243,7 @@ sub decolorize {
 
 sub csize {
 	my $str = shift;
-	my $size = length(decolorize($str)) + length(join('', (map {csprintf($_)} $str =~ m/#E\{[^\}]+}/g)));
+	return length(decolorize($str)) + length(join('', (map {csprintf($_)} $str =~ m/#E\{[^\}]+}/g)));
 }
 
 sub wrap {
@@ -613,7 +613,6 @@ sub build_markdown_blockquote {
 	$block =~ s/^\s*>\s*//;
 	$block =~ s/\n\s*>\s*//g;
 	return wrap($block, $width, ' ' x $indent, $indent);
-	return wrap($block =~ s/^\s*>\s*//gmr, $width, boxify('line', 'left').' ');
 }
 
 sub process_markdown_block {
@@ -858,7 +857,6 @@ sub get_control_picture {
 
 sub string_to_hex {
 	my ($str) = @_;
-	my $printable = '';
 
 	my $offset = 0;
 	while ($str) {
