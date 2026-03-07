@@ -241,10 +241,14 @@ bosh() {
         Service::BOSH::Director->from_exodus($ENV{BOSH_ALIAS}) ||
         Service::BOSH::Director->from_alias($ENV{BOSH_ALIAS})
       );
-      print "echo 'Could not connect to $ENV{BOSH_ALIAS}'\n" unless $bosh;
+      unless ($bosh) {
+        print "echo 'Could not connect to $ENV{BOSH_ALIAS}'\n";
+        print "exit 1\n";
+        exit 0;
+      }
       my %vars = $bosh->environment_variables;
       for (keys %vars) {
-        print "export $_=\"$val{$_}\"\n";
+        print "export $_=\"$vars{$_}\"\n";
       }
       EOF
       )"
