@@ -249,7 +249,8 @@ sub generate {
 }
 
 sub regenerate {
-	bail "Regenerate not implemented for Vault store";}
+	bail "Regenerate not implemented for Vault store";
+}
 
 sub remove {
 	bail "Remove not implemented for Vault store";
