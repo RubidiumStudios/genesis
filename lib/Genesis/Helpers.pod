@@ -155,8 +155,8 @@ Any arguments to pass to the Genesis CLI.
 
 B<Returns:>
 
-Exits with code 2 if C<GENESIS_CALLBACK_BIN> is unset or empty.  Otherwise
-exits with the same return code as the Genesis binary.
+Returns the exit code of the Genesis binary.  Exits with code 2 on error
+(see B<Errors> below).
 
 B<Errors:>
 
@@ -605,6 +605,13 @@ B<Errors:>
 Exits with a bash error if C<KEY> is missing:
 C<"typeof() - must specify a key to look up">.
 
+B<Caveats:>
+
+The current implementation passes arguments to C<genesis lookup> in
+inverted order (KEY, ENV instead of ENV, KEY).  This is a known defect
+tracked in FWT-693.  The function may not return correct results until
+this is fixed.
+
 B<Examples:>
 
     t=$(typeof params.networks)
@@ -859,9 +866,10 @@ B<Examples:>
 
     check_cloud_config
 
-Reports the results of all C<cloud_config_needs> calls.  If any requirement
-failed, prints the accumulated error messages and returns exit code 1.
-Returns exit code 0 if all checks passed.
+Finalizes cloud config validation.  If C<cloud_config_needs> was not
+previously called in the current hook, prints a C<[Checking cloud config]>
+header and any accumulated error messages.  Returns exit code 1 if any
+requirement failed, 0 if all checks passed.
 
 B<Returns:>
 
@@ -1097,9 +1105,11 @@ The list of valid feature flag names for this kit.
 
 B<Errors:>
 
-Calls C<__bail> with C<"[ERROR] $GENESIS_KIT_ID does not understand the
-following feature flags: - FLAG1 - FLAG2 ..."> if invalid features are
-found.
+Calls C<__bail> with a message listing each invalid flag on its own line:
+
+    [ERROR] my-kit/1.0.0 does not understand the following feature flags:
+     - bad-flag-1
+     - bad-flag-2
 
 B<Examples:>
 
@@ -1418,8 +1428,9 @@ contain a C<~> character to define a short alias (e.g., C<deploy~d> defines
 the C<deploy> command with alias C<d>).
 
 After the static list, automatically scans the C<hooks/> directory for
-executable C<addon-*> scripts and C<addon-*.pm> Perl module hooks,
-displaying their self-reported C<help> output as additional entries.
+executable C<addon-*> scripts and C<addon-*.pm> Perl module hooks.  Shell
+scripts are invoked with the C<help> argument; Perl module hooks use the
+C<cmd_details> class method.  Both are displayed as additional addon entries.
 
 B<Arguments:>
 
