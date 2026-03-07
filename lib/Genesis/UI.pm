@@ -381,6 +381,8 @@ sub new_prompt_for_choice {
 	$options{description} //= "choice";
 	$options{header} //= sprintf("Select one of the following %s:", count_nouns(2, $options{description}, suppress_count => 1));
 	$options{compact} //= 0;
+	bug("prompt_for_choice compact mode is not yet implemented")
+		if $options{compact};
 	$options{paginate} //= 0;
 	
 	# Deal with default choice
