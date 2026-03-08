@@ -260,7 +260,7 @@ sub paths {
 	my ($self,$filter) = @_;
 	my @filter = ();
 	if (!  defined($filter)) {
-		push(@filter, '-n', $self->{base}.'/');
+		push(@filter, '-n', $self->base());
 	} elsif ($filter && ref($filter) eq "") {
 		push(@filter, '-n', $self->_full_path($filter));
 	}
