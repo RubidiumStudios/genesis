@@ -72,39 +72,24 @@ that callers are aware of the current behaviour.
 
 =over 4
 
-=item GH-1 (critical)
+=item GH-1 (critical) E<mdash> B<RESOLVED>
 
-C<get_release_info()> line 194: the early-return cache check fires before
-C<%opts> is processed. A C<versions>-mode call for a repository that was
-previously fetched in list mode returns the cached list-mode arrayref
-without attempting to fetch the requested individual version data. Callers
-relying on versions mode after a prior list-mode call for the same
-repository will receive stale data silently.
+The premature early-return cache check in C<get_release_info()> has been
+removed. The correct guard at line 204 now handles all cache-hit logic.
 
-=item GH-2 (critical)
+=item GH-2 (critical) E<mdash> B<RESOLVED>
 
-C<get_release_info()> lines 225, 232, 245, 251, 257, 282, 283, and 285: uses
-C<@$versions[0]> (array slice syntax) instead of C<$versions-E<gt>[0]>
-(scalar dereference). In boolean and string context, this produces a
-one-element list rather than a scalar. Under C<use warnings>, this triggers
-"Useless use of a variable in void context" and related warnings. Hash
-key lookups using this expression produce incorrect cache keys.
+All C<@$versions[0]> occurrences replaced with C<$versions-E<gt>[0]>.
 
-=item GH-3 (medium)
+=item GH-3 (medium) E<mdash> B<RESOLVED>
 
-C<releases()> line 179: C<repo_names()> returns an arrayref, but it is used
-inside C<grep> without dereferencing. The inner C<grep> iterates over a
-single arrayref element rather than the list of repository names, so the
-404-detection heuristic (C<"No repository named ..."> error message) never
-correctly identifies a missing repository.
+C<releases()> now dereferences C<repo_names()> correctly via
+C<@{$self-E<gt>repo_names}>.
 
-=item GH-4 (medium)
+=item GH-4 (medium) E<mdash> B<RESOLVED>
 
-C<get_release_info()> line 288: C<push(@results, @{$results})> dereferences
-the C<load_json> return value as an arrayref. The GitHub releases API
-normally returns an array, but for tag-based single-release endpoints it
-may return a single release object (a hashref). Passing a hashref to
-C<@{...}> causes a fatal C<"Not an ARRAY reference"> error.
+C<get_release_info()> now checks C<ref($results) eq 'ARRAY'> before
+pushing, and records an error for unexpected non-array responses.
 
 =item GH-5 (medium)
 
@@ -569,8 +554,7 @@ and the C<v>-prefixed form (e.g. C<v1.2.3>) are tried.
 
 =back
 
-See L</KNOWN ISSUES> for critical cache and array-dereference defects in
-the current implementation (GH-1 and GH-2).
+See L</KNOWN ISSUES> for remaining open defects (GH-5, GH-6, GH-7).
 
 B<Parameters:>
 
@@ -602,9 +586,7 @@ immediate C<bail()> instead of being collected in C<@errors>.
 =item versions
 
 Optional arrayref of version strings to fetch in versions mode. Must
-contain at least one entry when present. B<Note:> See GH-2 in
-L</KNOWN ISSUES>: array-slice syntax is used internally when processing
-this list, which may produce incorrect cache keys under C<use warnings>.
+contain at least one entry when present.
 
 =item suppress_errors
 

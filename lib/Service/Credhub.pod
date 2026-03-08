@@ -70,46 +70,29 @@ that callers are aware of the current behaviour.
 
 =over 4
 
-=item CH-1 (critical)
+=item CH-1 (critical) E<mdash> B<RESOLVED>
 
-C<query()> lines 321-322: the condition checks C<$params{_data}> but the
-delete operates on C<$params{data}>. When a caller passes C<_data =E<gt>
-$val>, the condition is true but C<delete($params{data})> deletes a key
-that likely does not exist (returns C<undef>), so the C<-d> argument
-receives C<undef>. When a caller passes C<data =E<gt> $val>, the value is
-deleted silently and never sent. The key names C<_data> (condition) and
-C<data> (delete) must match.
+C<query()>: the C<delete> key now matches the condition key (C<_data>).
 
-=item CH-2 (medium)
+=item CH-2 (medium) E<mdash> B<RESOLVED>
 
-C<set()> lines 163-165 and 184-187: the C<bail()> messages for missing
-C<ssh>, C<rsa>, C<user>, and C<password> keys report all required keys via
-C<sentence_join(@valid_keys)> instead of only the missing keys from
-C<@$missing>. The error message always lists every required key even when
-only one is absent. The messages also contain a double-space typo before
-C<"when">.
+C<set()> error messages now report only the missing keys via
+C<sentence_join(@$missing)>, and the double-space typo is fixed.
 
-=item CH-3 (medium)
+=item CH-3 (medium) E<mdash> B<RESOLVED>
 
-C<preload()> line 102: strips the base prefix from cached credential names
-using C<$self-E<gt>{base}> (raw hash key) instead of C<$self-E<gt>base()>
-(the accessor that normalises the trailing slash). If the raw stored value
-lacks a trailing slash, the regex substitution produces incorrect cache
-keys, causing C<get()> and C<has()> lookups to miss even after a
-successful preload.
+C<preload()> now uses C<$self-E<gt>base()> (via a local variable) with
+C<\Q...\E> quoting in the regex substitution.
 
-=item CH-4 (low)
+=item CH-4 (low) E<mdash> B<RESOLVED>
 
-C<set()> line 253: a TODO comment acknowledges that the in-memory cache is
-not updated after a successful C<set()>. A subsequent C<get()> on the same
-path will call C<data()> (a live network request) even when the cache is
-populated.
+C<set()> now updates the in-memory cache after a successful write when the
+cache is populated.
 
-=item CH-5 (low)
+=item CH-5 (low) E<mdash> B<RESOLVED>
 
-C<is_preloaded()> line 110: returns false when the credential store is
-legitimately empty because it checks C<scalar(keys %{$self-E<gt>{cached}})>.
-Callers cannot distinguish "never preloaded" from "preloaded but empty."
+C<is_preloaded()> now returns true when the cache has been initialised,
+even if the credential store is empty.
 
 =back
 
@@ -345,9 +328,8 @@ reference; for simple types (C<password>, C<value>), it is a scalar string.
 When C<GENESIS_SHOW_CREDHUB_SECRETS> is set in the environment, CredHub
 output is not redacted.
 
-B<Note:> See CH-3 in L</KNOWN ISSUES>: C<preload()> uses the raw stored base
-path instead of the normalised C<base()> accessor, which may cause cache-key
-mismatches when the stored value lacks a trailing slash.
+B<Note:> C<preload()> uses the C<base()> accessor to normalise the base path
+prefix when building cache keys.
 
 B<Returns:> The C<Service::Credhub> object, for method chaining.
 
@@ -365,23 +347,20 @@ B<Examples:>
 
   my $bool = $ch->is_preloaded();
 
-Returns true if the in-memory cache has been populated and contains at
-least one entry. Returns false if C<preload> has never been called, if it
-failed, or if the cache was cleared.
+Returns true if the in-memory cache has been initialised by a successful
+call to C<preload()>. Returns false if C<preload> has never been called,
+if it failed, or if the cache was cleared.
 
-B<Note:> See CH-5 in L</KNOWN ISSUES>: returns false for a legitimately
-empty credential store, making it impossible to distinguish "never preloaded"
-from "preloaded but empty."
+An empty credential store still returns true after a successful preload,
+allowing callers to distinguish "never preloaded" from "preloaded but empty."
 
-B<Returns:> A positive integer (number of cached entries) if preloaded and
-non-empty, or false otherwise.
+B<Returns:> True (C<1>) if the cache is initialised, false otherwise.
 
 B<Examples:>
 
   if ($ch->is_preloaded()) {
     print "Cache is ready\n";
   }
-  # Returns: number of cached entries when populated
 
 =head2 has
 
@@ -567,9 +546,9 @@ C<credhub set> invocation without dying on non-zero exit.
 When C<GENESIS_SHOW_CREDHUB_SECRETS> is set in the environment, CredHub
 output is not redacted.
 
-B<Note:> See CH-4 in L</KNOWN ISSUES>: the in-memory cache is not updated
-after a successful C<set()>. A subsequent C<get()> on the same path will
-make a live network request even when the cache is populated.
+B<Note:> On success, the in-memory cache (when populated) is updated with
+the new value so that a subsequent C<get()> on the same path returns the
+cached result without a network round-trip.
 
 B<Parameters:>
 
@@ -603,7 +582,7 @@ B<Errors:>
 Dies with C<"Invalid parameters specified for creating a CredHub certificate value: E<lt>keysE<gt>">
 when unexpected keys are present in the hash for type C<certificate>.
 
-Dies with C<"You must supply either the certificate and the public_key when creating a CredHub certificate value.">
+Dies with C<"You must supply the certificate and the private_key when creating a CredHub certificate value.">
 when C<certificate> or C<private_key> is missing for type C<certificate>.
 
 Dies with C<"You must supply either the root ca certificate (root) or the CredHub path to the root ca (root_path) when creating a certificate, but not both.">
@@ -613,11 +592,10 @@ Dies with C<"Invalid parameters specified for creating a CredHub %s value: %s">
 when unexpected keys are present for types C<ssh>, C<rsa>, C<user>, or
 C<password>. C<%s> is the uppercased type name and the invalid key list.
 
-Dies with C<"You must supply the %s  when creating a Credhub %s value">
+Dies with C<"You must supply the %s when creating a Credhub %s value">
 when required keys are missing for types C<ssh>, C<rsa>, C<user>, or
-C<password>. C<%s> placeholders are the required key list and the
-uppercased type name. (Note: contains a double-space before C<"when">; see
-CH-2 in L</KNOWN ISSUES>.)
+C<password>. C<%s> placeholders are the missing key list and the
+uppercased type name.
 
 Dies with C<"You must specify a HASH or an ARRAY as the value when creating a CredHub json value">
 when C<$value> is not a reference for type C<json>.
@@ -811,12 +789,8 @@ default (C<GET>).
 
 =item _data
 
-When C<_data> is defined in C<%params>, the value stored under C<data> in
-C<%params> is passed to C<credhub curl> as the C<-d> request body.
-
-B<Note:> See CH-1 in L</KNOWN ISSUES>: the condition checks C<_data> but
-the delete reads C<data>. These keys must be set together for the request
-body to be sent correctly.
+When C<_data> is defined in C<%params>, its value is passed to
+C<credhub curl> as the C<-d> request body.
 
 =back
 
@@ -831,7 +805,7 @@ C<credhub curl --path>.
 
 =item %params
 
-Optional. Supports C<_method> and C<_data>/C<data> as described above.
+Optional. Supports C<_method> and C<_data> as described above.
 Additional keys are accepted by the hash but currently not forwarded to
 the request (see the TODO in the source).
 
@@ -845,11 +819,10 @@ B<Examples:>
   my $result = $ch->query('/api/v1/data', _method => 'get');
   # Returns: parsed JSON response as a hash reference
 
-  # POST with body (subject to CH-1 bug)
+  # POST with body
   my $result = $ch->query('/api/v1/data',
     _method => 'post',
-    _data   => 1,
-    data    => encode_json({ name => '/my/cred', type => 'value' }),
+    _data   => encode_json({ name => '/my/cred', type => 'value' }),
   );
   # Returns: parsed JSON response as a hash reference
 
