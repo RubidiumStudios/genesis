@@ -219,6 +219,14 @@ subtest 'FWT-725: _collect_secrets_from_paths validates paths' => sub {
 		done_testing;
 	};
 
+	subtest 'bails on path: (trailing colon)' => sub {
+		my $d = make_deployment();
+		throws_ok { $d->_collect_secrets_from_paths('secret/path:') }
+			qr/Malformed vault path|Invalid vault path/i,
+			"bails on path ending with colon";
+		done_testing;
+	};
+
 	subtest 'empty @paths returns {}' => sub {
 		my $d = make_deployment();
 		my $result;

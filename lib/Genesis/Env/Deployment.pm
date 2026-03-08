@@ -677,8 +677,8 @@ sub _build_artifacts_file {
 	)	if (defined $secrets && ref($secrets) eq 'ARRAY');
 
 	# Bail if no artifacts were added to the archive
-	bail("No artifacts to archive — all artifact files were missing or empty")
-		unless $tar->list_files();
+	bail("No artifacts to archive -- all artifact files were missing or empty")
+		unless scalar $tar->list_files();
 
 	# Compress and base64 encode the artifacts into a tarball
 	my $compressed_data;
@@ -707,6 +707,8 @@ sub _collect_secrets_from_paths {
 			unless defined($path) && length($path);
 		bail("Malformed vault path '%s' in secrets list", $path)
 			if $path =~ m{^:};
+		bail("Malformed vault path '%s' in secrets list", $path)
+			if $path =~ m{:$};
 		# Check if we want a path:key or a path
 		my ($p,$key) = $path =~ m{^(.+?)(?::([^/]+))?$};
 		bail("Malformed vault path '%s' in secrets list", $path)
