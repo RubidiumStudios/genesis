@@ -138,7 +138,7 @@ subtest 'Defect 1b: validate() uses read(), not get()' => sub {
 
 subtest 'Defect 2: keys() cache regex matches paths correctly' => sub {
 	# When cache is populated, keys() should match paths under base()
-	# base() returns '/secret/my/org/my-env/bosh/' (with trailing slash)
+	# base() returns '/secret/my/org/my/env/bosh/' (with trailing slash)
 	# Bug: the old regex /^\Q$base\E\// demands a double-slash '//' that
 	# never appears in paths. The fix strips trailing slash from base and
 	# uses (\/|$) alternation.
@@ -185,6 +185,33 @@ subtest 'Defect 3: stubs accept $self correctly' => sub {
 
 	throws_ok { $store->remove_all } qr/Remove_all not implemented/,
 		"remove_all() dies with expected message when called as method";
+};
+
+subtest 'Defect 4: store_data() handles undef export safely' => sub {
+	my $read_json_calls = 0;
+
+	my $store = make_store();
+
+	# Monkey-patch read_json_from in the Vault package namespace to simulate
+	# vault export decoding to undef (the function is imported, so we must
+	# override it in the consuming package's symbol table)
+	no warnings 'redefine';
+	local *Genesis::Env::Secrets::Store::Vault::read_json_from = sub {
+		$read_json_calls++;
+		return undef;
+	};
+	use warnings 'redefine';
+
+	# (1) undef JSON → returns {} without caching
+	my $data = $store->store_data();
+	is_deeply($data, {}, "store_data() returns {} when export decodes to undef");
+
+	# (2) cache must remain unset so paths/keys delegate to service
+	ok(!exists $store->{__data}, "cache not populated after undef export");
+
+	# (3) subsequent call retries (read_json_from called again)
+	$store->store_data();
+	is($read_json_calls, 2, "store_data() retries export after undef result");
 };
 
 subtest 'Defect 5: new() validates options without CORE::keys' => sub {
