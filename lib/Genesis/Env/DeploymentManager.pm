@@ -250,8 +250,9 @@ sub synthesize_from_exodus {
 		},
 		manifest => {
 			type => $exodus_data->{manifest_type} // 'unknown',
+			sha2 => $exodus_data->{manifest_sha1} // 'unknown',
 			sha1 => $exodus_data->{manifest_sha1} // 'unknown',
-			using_sha1 => 1, # Exodus uses sha1 instead of sha2
+			using_sha1 => 1, # sha2 contains SHA-1 data from legacy exodus
 		},
 	);
 }
@@ -407,8 +408,8 @@ sub _filter_by_range {
 			}
 		} elsif ($range =~ /^(=?)(\d.*)$/) {
 			my ($eq, $ts) = ($1, $2);
-			$before = _parse_into_timestamp_gt_cmp($ts, '>=');
-			$after = _parse_into_timestamp_gt_cmp($ts, '<=');
+			$before = _parse_into_timestamp_gt_cmp($ts, '<=');
+			$after = _parse_into_timestamp_gt_cmp($ts, '>=');
 		} else {
 			bail(
 				"Invalid range format: %s",
@@ -474,7 +475,8 @@ sub _parse_into_timestamp_gt_cmp {
 	);
 	my $gt = $cmp_op =~ /^>/ ? 1 : 0;
 	my $eq = $cmp_op =~ /=$/ ? 1 : 0;
-	my ($dm,$dd,$dH,$dM,$dS,$dtz) = $gt
+	my $eff_gt = $gt ^ $eq; # Effective direction for boundary fill values
+	my ($dm,$dd,$dH,$dM,$dS,$dtz) = $eff_gt
 	? (12, $tm ? _get_last_day_of_month($ty,$tm) : 31, 23, 59, 59, '+0000')
 	: (1, 1, 0, 0, 0, '+0000');
 	my $time = Time::Piece->strptime(
@@ -485,8 +487,8 @@ sub _parse_into_timestamp_gt_cmp {
 		EXODUS_TIME_FORMAT
 	);
 
-	# Adjust by 1 second: subtract for strict operators (<, >), not inclusive (<=, >=)
-	$time -= 1 unless $eq;
+	# Adjust by 1 second: subtract when using start-of-period fills
+	$time -= 1 unless $eff_gt;
 
 	my $ts_str = $time->gmtime($time->epoch)->strftime(EXODUS_TIME_FORMAT_SHORT);
 	return $ts_str;
