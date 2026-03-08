@@ -162,8 +162,8 @@ Must be called as a plain function, not as a method:
 
     my $legend = Genesis::Env::Deployment::user_colorized_legend(@roles);
 
-See L</KNOWN ISSUES> entry M-2 for details on why instance-method invocation
-produces incorrect output.
+See L</KNOWN ISSUES> entry M-2 for details on why method invocation (instance
+or class) produces incorrect output.
 
 B<Parameters:>
 
@@ -513,7 +513,7 @@ Returns the sequence number for this deployment as stored in the exodus data.
 B<Returns:> Integer sequence number, or C<undef> if not yet populated.
 
 B<Note:> The sequence number is computed during C<commit()> via
-C<< $env->deployments->next_sequence_number() >> and written to the vault
+C<< $self->env->deployments->next_sequence_number() >> and written to the vault
 payload, but it is B<not> stored back into the object's internal data.
 This accessor returns C<undef> both before and after C<commit()> unless
 the value was provided at construction time.
@@ -1089,14 +1089,14 @@ L<FWT-708|https://fivetwenty.atlassian.net/browse/FWT-708>.
 
 =over
 
-=item C-1: Undef key access before validation (lines 97-108)
+=item C-1: Undef key access before validation (in new(), lines 97-108)
 
-C<$data{action}> is accessed on line 97 (C<if $data{action} eq 'deploy'>)
-before the C<@missing> check fires on line 112.  If C<action> is absent, this
-produces an uninitialized-value warning and causes the conditional sub-field
-validation for C<kit> and C<manifest> to be silently skipped.
+C<$data{action}> is accessed (C<if $data{action} eq 'deploy'>) before the
+C<@missing> check is performed later in C<new()>.  If C<action> is absent,
+this produces an uninitialized-value warning and causes the conditional
+sub-field validation for C<kit> and C<manifest> to be silently skipped.
 
-=item C-3: List-context commit() bypasses error check (lines 439-443)
+=item C-3: List-context commit() bypasses error check (in commit(), lines 439-443)
 
 When C<commit()> is called in list context, it returns the raw
 C<($out, $rc, $err)> triple from the vault query without checking C<$rc>.
@@ -1109,7 +1109,7 @@ the C<bail()> that fires in scalar context.
 
 =over
 
-=item M-1: committed() uses relative vault path (lines 363-370)
+=item M-1: committed() uses relative vault path (in committed(), lines 363-370)
 
 C<committed()> queries the vault path C<deployments/E<lt>timestampE<gt>>,
 while C<commit()> stores data at
@@ -1117,26 +1117,28 @@ C<< $self-E<gt>env-E<gt>exodus_base . '/deployments/' . $timestamp >>.
 The paths are inconsistent, so C<committed()> may always return false,
 allowing duplicate commits.
 
-=item M-2: user_colorized_legend breaks as instance method (lines 335-336)
+=item M-2: user_colorized_legend breaks when invoked as a method (in user_colorized_legend(), lines 335-336)
 
-The sub signature C<my (@roles) = @_> captures C<$self> as the first role
-element when called as an instance method (C<< $deployment-E<gt>user_colorized_legend() >>).
+The sub signature C<my (@roles) = @_> captures the invocant (C<$self> or the
+class name) as the first role element when called as a method, whether as an
+instance method (C<< $deployment-E<gt>user_colorized_legend(@roles) >>) or as
+a class method (C<< Genesis::Env::Deployment-E<gt>user_colorized_legend(@roles) >>).
 Must be called as a plain function:
 C<Genesis::Env::Deployment::user_colorized_legend(@roles)>.
 
-=item M-3: commit() permanently mutates $self->{data} (lines 389-390)
+=item M-3: commit() permanently mutates $self->{data} (in commit(), lines 389-390)
 
 C<commit()> obtains C<$data> as a reference to C<< $self-E<gt>{data} >>
 (not a copy) and writes C<completed> and C<started> defaults via C<//=>.
 After C<commit()>, the object's internal data is permanently altered.
 
-=item M-4: Vault set arguments unescaped (lines 428-431)
+=item M-4: Vault set arguments unescaped (in commit(), lines 428-431)
 
 The vault C<set> command is built by interpolating data values directly into
 C<key=value> strings without escaping.  Values containing C<=>, spaces, or
 shell special characters can cause malformed vault commands.
 
-=item M-5: secrets/secrets.json dual-key handling fragile (lines 593-613)
+=item M-5: secrets/secrets.json dual-key handling fragile (in _get_artifact_hash(), lines 593-613)
 
 In the C<local-file-hash> format, C<secrets> is stored as an array of vault
 paths, but C<secrets.json> refers to the same collected content.  Requesting
@@ -1150,30 +1152,30 @@ C<secrets>/C<secrets.json> mapping differently without clear documentation.
 
 =over
 
-=item m-1: Typo "TDB" should be "TBD" (line 132)
+=item m-1: Typo "TDB" should be "TBD" (in new(), line 132)
 
 Comment reads C<# TDB: Should we automate...> instead of C<# TBD: ...>.
 
-=item m-2: Sub-field validation skips when parent has wrong type (lines 100-108)
+=item m-2: Sub-field validation skips when parent has wrong type (in new(), lines 100-108)
 
 The guard C<ref($data{kit}) eq 'HASH'> means that if C<kit> is present but
 is not a hashref (e.g., a scalar string), sub-field validation is silently
 skipped without reporting an error.
 
-=item m-3: _get_ts_string called before timestamp conversion (lines 88-89)
+=item m-3: _get_ts_string called before timestamp conversion (in new(), lines 88-89)
 
 C<_get_ts_string($data{completed}//Time::Piece-E<gt>new)> is called on line
 89 before C<$data{completed}> is converted from a string to a Time::Piece
 object (lines 155-158).  Works for UTC strings via regex fallback but is
 fragile for non-standard formats.
 
-=item m-5: Instance-method guard in _get_ts_string is dead code (line 837)
+=item m-5: Instance-method guard in _get_ts_string is dead code (in _get_ts_string(), line 837)
 
 The guard C<$ts = shift if ref($ts) eq 'Genesis::Env::Deployment'> can never
 fire because C<_get_ts_string> is always called as a plain function, never
 as a method.
 
-=item m-6: encode_json fallback unreachable (line 699)
+=item m-6: encode_json fallback unreachable (in _collect_secrets_from_paths(), line 699)
 
 C<encode_json> always returns a defined string (it dies on error rather than
 returning C<undef>), so the C<// '{}'> fallback is unreachable.
@@ -1184,22 +1186,22 @@ returning C<undef>), so the C<// '{}'> fallback is unreachable.
 
 =over
 
-=item C-2: Dead unreachable timestamp fallback (lines 160-163)
+=item C-2: Dead unreachable timestamp fallback (in new(), lines 160-163)
 
 The C<unless (defined($timestamp))> block at line 160 is unreachable because
 C<$timestamp> is always defined after line 89 (C<_get_ts_string> either
 returns a string or calls C<bail()>).  Originally categorized as Critical
 but has zero runtime impact.
 
-=item I-1: Mutable package globals unprotected (lines 300-307)
+=item I-1: Mutable package globals unprotected (package scope, lines 300-307)
 
 C<$user_color_map> and C<@sorted_roles> are declared with C<our> and are
 mutable from any code that can reach the package namespace.
 
-=item I-2: Error message shows $path instead of $target_path (line 528)
+=item I-2: Error message shows $path instead of $target_path (in extract_artifacts_to(), lines 529-530)
 
-In C<extract_artifacts_to()>, the error message for a non-directory path
-displays the original C<$path> argument rather than the resolved absolute
+In C<extract_artifacts_to()>, the C<bail()> for a non-directory path displays
+the original C<$path> argument rather than the resolved absolute
 C<$target_path>.
 
 =back
