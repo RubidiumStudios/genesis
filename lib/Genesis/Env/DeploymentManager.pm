@@ -37,6 +37,7 @@ sub all {
 	my @all = $self->_all(); # Forces array context
 	return @all;
 }
+# }}}
 
 # reset - reset the cached deployments {{{
 sub reset {
@@ -151,12 +152,7 @@ sub current_state {
 	}
 
 	# FIXME: Cache, and clear on reset;
-	for my $deployment (@deployments) {
-		if ($deployment->succeeded) {
-			return $deployment->action eq 'deploy' ? 'deployed' : 'terminated';
-		}
-	}
-	return 'undeployed';
+	return $deployments[0]->action eq 'deploy' ? 'deployed' : 'terminated';
 }
 # }}}
 
@@ -179,8 +175,8 @@ sub build {
 
 # next_sequence_number - get the next sequence number for deployments {{{
 sub next_sequence_number {
-	my ($self, $action) = @_;
-	# Get the latest deployment for the given action
+	my ($self) = @_;
+	# Get the latest deployment
 	my $latest = $self->latest();
 	return 1 unless $latest; # If no deployments, return 1
 	return scalar($self->all)+1 unless $latest->sequence;
@@ -229,7 +225,7 @@ sub synthesize_from_exodus {
 		started => $exodus_data->{dated},
 		completed => $exodus_data->{completed} // $exodus_data->{dated},
 		genesis_version => $exodus_data->{version} // 'unknown',
-		create_env => $exodus_data->{use_create_env} ? JSON::PP::true : JSON::PP->false,
+		create_env => $exodus_data->{use_create_env} ? JSON::PP::true : JSON::PP::false,
 		bosh_target => {
 			name => $exodus_data->{bosh}
 		},
@@ -242,7 +238,7 @@ sub synthesize_from_exodus {
 			),
 			name => $exodus_data->{kit_name},
 			version => $exodus_data->{kit_version},
-			is_dev => $exodus_data->{kit_is_dev} ? JSON::PP::true : JSON::PP->false,
+			is_dev => $exodus_data->{kit_is_dev} ? JSON::PP::true : JSON::PP::false,
 			features => $exodus_data->{features} // '',
 		},
 		user => {
@@ -255,7 +251,8 @@ sub synthesize_from_exodus {
 		manifest => {
 			type => $exodus_data->{manifest_type} // 'unknown',
 			sha2 => $exodus_data->{manifest_sha1} // 'unknown',
-			using_sha1 => 1, # Exodus uses sha1 instead of sha2
+			sha1 => $exodus_data->{manifest_sha1} // 'unknown',
+			using_sha1 => 1, # sha2 contains SHA-1 data from legacy exodus
 		},
 	);
 }
@@ -270,7 +267,10 @@ sub _all {
 		# Get list of deployments from vault
 		# REFACTOR: Would like to lazy load artifacts, but can't do that with a massive export
 		my $deployments = $env->vault->get_path($env->exodus_base.'/deployments');
-		return (wantarray ? () : []) unless $deployments && keys %$deployments; # FIXME: Should we cache 'no deployments'?
+		unless ($deployments && keys %$deployments) {
+			$self->{__all_deployments} = [];
+			return wantarray ? () : [];
+		}
 
 		# Create a new deployment object for each deployment
 		my @deployments = map {
@@ -307,15 +307,15 @@ sub _base_deployment_content {
 			id            => $env->kit->id,
 			name          => $env->kit->name,
 			version       => $env->kit->version,
-			is_dev        => $env->kit->is_dev ? JSON::PP::true : JSON::PP->false,
+			is_dev        => $env->kit->is_dev ? JSON::PP::true : JSON::PP::false,
 			features      => join(',', $env->lookup('kit.features', [])->@*),
-			bosh_target   => { map { $_ => $env->bosh_env->{$_} } grep { defined $env->bosh_env->{$_} } keys %{$env->bosh_env} },
-			create_env    => $env->use_create_env ? JSON::PP::true : JSON::PP->false,
+			create_env    => $env->use_create_env ? JSON::PP::true : JSON::PP::false,
 		};
+		$base->{bosh_target} = { map { $_ => $env->bosh_env->{$_} } grep { defined $env->bosh_env->{$_} } keys %{$env->bosh_env} };
 
 		my $user_data = parse_fixed_width_table({array_rows => 1},
 			lines(run({stderr => '/dev/null'},'who', '-mH'))
-		)->[1];
+		)->[1] // [];
 		my $user = $user_data->[0] // $ENV{USER};
 		delete($user_data->[3]) if $user_data->[3] && $user_data->[3] =~ /^tmux\(/; # Remove tmux session name if present)'
 		$user .= (" ".$user_data->[3]) if $user_data->[3];
@@ -332,10 +332,10 @@ sub _base_deployment_content {
 		if ($action eq 'deploy') {
 			$base->{parameters} = {
 				iaas         => $env->iaas,
-				cloud_config => $env->can_build_cloud_configs ? JSON::PP::true : JSON::PP->false,
+				cloud_config => $env->can_build_cloud_configs ? JSON::PP::true : JSON::PP::false,
 				cpi          => $env->cpi_name,
 				scale        => $env->scale,
-				is_ocfp      => $env->is_ocfp ? JSON::PP::true : JSON::PP->false,
+				is_ocfp      => $env->is_ocfp ? JSON::PP::true : JSON::PP::false,
 			};
 			$base->{manifest} = {
 				type => $env->manifest_provider->deployment->type,
@@ -384,6 +384,8 @@ sub _filter_by_range {
 	$self->_confirm_deployments_sorted($deployments);
 
 	if ($range =~ /^(-?\d{1,3})(?:\.\.\.(-?\d{1,3}))?$/) {
+		# Integer index range: N or N...M (0-based, negative counts from end)
+		# Negative indices work via Perl array slice semantics (-1 = last, -2 = second-to-last)
 		my ($start, $end) = ($1, $2);
 		$end //= $start;
 		# This gets applied after all the other filters, just store it for now
@@ -406,8 +408,8 @@ sub _filter_by_range {
 			}
 		} elsif ($range =~ /^(=?)(\d.*)$/) {
 			my ($eq, $ts) = ($1, $2);
-			$before = _parse_into_timestamp_gt_cmp($ts, '>=');
-			$after = _parse_into_timestamp_gt_cmp($ts, '<=');
+			$before = _parse_into_timestamp_gt_cmp($ts, '<=');
+			$after = _parse_into_timestamp_gt_cmp($ts, '>=');
 		} else {
 			bail(
 				"Invalid range format: %s",
@@ -425,7 +427,7 @@ sub _filter_by_range {
 		$idx++ while ($idx < @$deployments && $deployments->[$idx]->timestamp gt $after);
 
 		# Clear any deployments that are after the `after` timestamp idx
-		splice(@$deployments, $idx) if $idx < @$deployments - 1;
+		splice(@$deployments, $idx) if $idx < @$deployments;
 	}
 	return undef; # No deferred range, and we altered the deployments array passed in in place.
 }
@@ -473,7 +475,8 @@ sub _parse_into_timestamp_gt_cmp {
 	);
 	my $gt = $cmp_op =~ /^>/ ? 1 : 0;
 	my $eq = $cmp_op =~ /=$/ ? 1 : 0;
-	my ($dm,$dd,$dH,$dM,$dS,$dtz) = $gt
+	my $eff_gt = $gt ^ $eq; # Effective direction for boundary fill values
+	my ($dm,$dd,$dH,$dM,$dS,$dtz) = $eff_gt
 	? (12, $tm ? _get_last_day_of_month($ty,$tm) : 31, 23, 59, 59, '+0000')
 	: (1, 1, 0, 0, 0, '+0000');
 	my $time = Time::Piece->strptime(
@@ -484,8 +487,8 @@ sub _parse_into_timestamp_gt_cmp {
 		EXODUS_TIME_FORMAT
 	);
 
-	# Alter the timestamp to be a greater than comparison
-	$time -=1 if $gt xor $eq; # If gt or eq, subtract 1 second, but not both
+	# Adjust by 1 second: subtract when using start-of-period fills
+	$time -= 1 unless $eff_gt;
 
 	my $ts_str = $time->gmtime($time->epoch)->strftime(EXODUS_TIME_FORMAT_SHORT);
 	return $ts_str;
