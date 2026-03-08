@@ -904,7 +904,7 @@ sub use_create_env {
 				$is_create_env = 0;
 			}
 			if ($is_proto && $different_bosh_env) {
-				$clear_and_bail->(
+				$clear_and_bail->($self,
 					"This environment is marked as a create-env (proto) environment ".
 					"by using the #M{proto} feature, but also specifies an alternative ".
 					"bosh_env.  Create-env deployments can't use a #C{genesis.bosh_env} ".
