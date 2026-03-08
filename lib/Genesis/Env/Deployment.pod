@@ -152,10 +152,18 @@ B<Examples:>
 
 =head2 user_colorized_legend(@roles)
 
-Class method that returns a colorized legend string for user roles. If no
-roles are provided, returns a legend for all known roles (shell, bosh, vault,
-repo, concourse). If roles are provided, only the ones that are in the known
-set are included. The legend uses Genesis Term color codes.
+Package function (B<not> an instance method or class method) that returns a
+colorized legend string for user roles. If no roles are provided, returns a
+legend for all known roles from C<@sorted_roles>. If roles are provided, only
+the ones that are in the known set are included. The legend uses Genesis Term
+color codes from C<$user_color_map>.
+
+Must be called as a plain function, not as a method:
+
+    my $legend = Genesis::Env::Deployment::user_colorized_legend(@roles);
+
+See L</KNOWN ISSUES> entry M-2 for details on why method invocation (instance
+or class) produces incorrect output.
 
 B<Parameters:>
 
@@ -502,7 +510,13 @@ B<Returns:> String — the deployment timestamp key.
 
 Returns the sequence number for this deployment as stored in the exodus data.
 
-B<Returns:> Integer sequence number, or C<undef> if not yet committed.
+B<Returns:> Integer sequence number, or C<undef> if not yet populated.
+
+B<Note:> The sequence number is computed during C<commit()> via
+C<< $self->env->deployments->next_sequence_number() >> and written to the vault
+payload, but it is B<not> stored back into the object's internal data.
+This accessor returns C<undef> both before and after C<commit()> unless
+the value was provided at construction time.
 
 =head2 user_description()
 
@@ -815,6 +829,26 @@ B<Examples:>
     my $subset = $deployment->extract_artifacts_to('/tmp/out', 'manifest');
     # Returns: { manifest => '/tmp/out/myenv.yml' }
 
+=head1 PACKAGE VARIABLES
+
+=head2 $user_color_map
+
+A hashref mapping user role names to Genesis Term color codes:
+
+    shell     => 'y'   # yellow
+    repo      => 'r'   # red
+    vault     => 'm'   # magenta (violet)
+    concourse => 'c'   # cyan
+    bosh      => 'B'   # bold blue
+
+This is a mutable package global (C<our>).  See L</KNOWN ISSUES> I-1.
+
+=head2 @sorted_roles
+
+The display order for user roles: C<shell bosh vault repo concourse>.
+
+This is a mutable package global (C<our>).  See L</KNOWN ISSUES> I-1.
+
 =head1 INTERNAL METHODS
 
 These methods are internal to the implementation. They may change without
@@ -1048,28 +1082,148 @@ B<Examples:>
 
 =head1 KNOWN ISSUES
 
-The following defects are tracked and pending resolution (FWT-708):
+The following issues have been identified and tracked in
+L<FWT-708|https://fivetwenty.atlassian.net/browse/FWT-708>.
+
+=head3 Critical
 
 =over
 
-=item *
+=item C-1: Undef key access before validation (in new(), lines 97-108)
 
-C<committed()> checks a relative vault path (C<'deployments/' . $self-E<gt>timestamp()>)
-rather than the full exodus path used by C<commit()>. This means C<committed()>
-may return incorrect results (FWT-708 C-1 through M-5).
+C<$data{action}> is accessed (C<if $data{action} eq 'deploy'>) before the
+C<@missing> check is performed later in C<new()>.  If C<action> is absent,
+this produces an uninitialized-value warning and causes the conditional
+sub-field validation for C<kit> and C<manifest> to be silently skipped.
 
-=item *
+=item C-3: List-context commit() bypasses error check (in commit(), lines 439-443)
 
-C<commit()> mutates the object's internal data as a side effect: it sets
-C<started> and C<completed> on C<$self-E<gt>{data}> if they are not already
-present. Callers that inspect C<started()> or C<completed()> before and after
-C<commit()> may observe different values.
+When C<commit()> is called in list context, it returns the raw
+C<($out, $rc, $err)> triple from the vault query without checking C<$rc>.
+A non-zero return code (failure) is silently passed to the caller, bypassing
+the C<bail()> that fires in scalar context.
 
-=item *
+=back
 
-In list context, C<commit()> returns the raw C<($out, $rc, $err)> tuple from
-the vault query without performing error checking. The caller must inspect
-C<$rc> to detect failures.
+=head3 Major
+
+=over
+
+=item M-1: committed() uses relative vault path (in committed(), lines 363-370)
+
+C<committed()> queries the vault path C<deployments/E<lt>timestampE<gt>>,
+while C<commit()> stores data at
+C<< $self-E<gt>env-E<gt>exodus_base . '/deployments/' . $timestamp >>.
+The paths are inconsistent, so C<committed()> may always return false,
+allowing duplicate commits.
+
+=item M-2: user_colorized_legend breaks when invoked as a method (in user_colorized_legend(), lines 335-336)
+
+The sub signature C<my (@roles) = @_> captures the invocant (C<$self> or the
+class name) as the first role element when called as a method, whether as an
+instance method (C<< $deployment-E<gt>user_colorized_legend(@roles) >>) or as
+a class method (C<< Genesis::Env::Deployment-E<gt>user_colorized_legend(@roles) >>).
+Must be called as a plain function:
+C<Genesis::Env::Deployment::user_colorized_legend(@roles)>.
+
+=item M-3: commit() permanently mutates $self->{data} (in commit(), lines 389-390)
+
+C<commit()> obtains C<$data> as a reference to C<< $self-E<gt>{data} >>
+(not a copy) and writes C<completed> and C<started> defaults via C<//=>.
+After C<commit()>, the object's internal data is permanently altered.
+
+=item M-4: Vault set arguments unescaped (in commit(), lines 428-431)
+
+The vault C<set> command is built by interpolating data values directly into
+C<key=value> strings without escaping.  Values containing C<=>, spaces, or
+shell special characters can cause malformed vault commands.
+
+=item M-5: secrets/secrets.json dual-key handling fragile (in _get_artifact_hash(), lines 593-613)
+
+In the C<local-file-hash> format, C<secrets> is stored as an array of vault
+paths, but C<secrets.json> refers to the same collected content.  Requesting
+both keys returns two copies of the same data under different keys.  The two
+artifact format paths (C<local-file-hash> vs C<b64-gzipped>) handle the
+C<secrets>/C<secrets.json> mapping differently without clear documentation.
+
+=back
+
+=head3 Minor
+
+=over
+
+=item m-1: Typo "TDB" should be "TBD" (in new(), line 132)
+
+Comment reads C<# TDB: Should we automate...> instead of C<# TBD: ...>.
+
+=item m-2: Sub-field validation skips when parent has wrong type (in new(), lines 100-108)
+
+The guard C<ref($data{kit}) eq 'HASH'> means that if C<kit> is present but
+is not a hashref (e.g., a scalar string), sub-field validation is silently
+skipped without reporting an error.
+
+=item m-3: _get_ts_string called before timestamp conversion (in new(), lines 88-89)
+
+C<_get_ts_string($data{completed}//Time::Piece-E<gt>new)> is called on line
+89 before C<$data{completed}> is converted from a string to a Time::Piece
+object (lines 155-158).  Works for UTC strings via regex fallback but is
+fragile for non-standard formats.
+
+=item m-5: Instance-method guard in _get_ts_string is dead code (in _get_ts_string(), line 837)
+
+The guard C<$ts = shift if ref($ts) eq 'Genesis::Env::Deployment'> can never
+fire because C<_get_ts_string> is always called as a plain function, never
+as a method.
+
+=item m-6: encode_json fallback unreachable (in _collect_secrets_from_paths(), line 699)
+
+C<encode_json> always returns a defined string (it dies on error rather than
+returning C<undef>), so the C<// '{}'> fallback is unreachable.
+
+=back
+
+=head3 Info
+
+=over
+
+=item C-2: Dead unreachable timestamp fallback (in new(), lines 160-163)
+
+The C<unless (defined($timestamp))> block at line 160 is unreachable because
+C<$timestamp> is always defined after line 89 (C<_get_ts_string> either
+returns a string or calls C<bail()>).  Originally categorized as Critical
+but has zero runtime impact.
+
+=item I-1: Mutable package globals unprotected (package scope, lines 300-307)
+
+C<$user_color_map> and C<@sorted_roles> are declared with C<our> and are
+mutable from any code that can reach the package namespace.
+
+=item I-2: Error message shows $path instead of $target_path (in extract_artifacts_to(), lines 529-530)
+
+In C<extract_artifacts_to()>, the C<bail()> for a non-directory path displays
+the original C<$path> argument rather than the resolved absolute
+C<$target_path>.
+
+=back
+
+=head3 Additional Issues
+
+The following issues were discovered during the documentation audit and
+tracked as child tickets of FWT-708:
+
+=over
+
+=item L<FWT-723|https://fivetwenty.atlassian.net/browse/FWT-723>: duration() dies if either timestamp is absent (Major)
+
+=item L<FWT-724|https://fivetwenty.atlassian.net/browse/FWT-724>: committed() vault call propagates unhandled (Minor)
+
+=item L<FWT-725|https://fivetwenty.atlassian.net/browse/FWT-725>: Empty/malformed path in _collect_secrets_from_paths (Minor)
+
+=item L<FWT-726|https://fivetwenty.atlassian.net/browse/FWT-726>: extract_artifacts_to error lacks path specificity (Info)
+
+=item L<FWT-727|https://fivetwenty.atlassian.net/browse/FWT-727>: Empty tar can be committed as artifact (Minor)
+
+=item L<FWT-728|https://fivetwenty.atlassian.net/browse/FWT-728>: Temporary artifact file not cleaned up on bail (Major)
 
 =back
 
