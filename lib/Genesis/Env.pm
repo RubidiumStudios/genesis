@@ -827,15 +827,15 @@ sub use_create_env {
 		$self->_set_memo("processing");
 		my $is_bosh_director = $self->is_bosh_director;
 
-		sub clear_and_bail {
+		my $clear_and_bail = sub {
 			my $self = shift;
 			$self->_clear_memo('__use_create_env');
 			bail(@_);
-		}
+		};
 
-		sub validate_create_env_state {
+		my $validate_create_env_state = sub {
 			my ($self,$is_create_env,$has_bosh_env,$env_type,$is_bosh_kit, $is_310plus) = @_;
-			clear_and_bail($self,
+			$clear_and_bail->($self,
 				"This #M{$env_type} environment specifies an alternative bosh_env, but ".
 				"is marked as a create-env (proto) environment. Create-env deployments ".
 				"can't use a #C{genesis.bosh_env} value, so please remove it, or mark ".
@@ -843,19 +843,19 @@ sub use_create_env {
 				"bosh_env is configured in an inherited environment file."
 			) if $is_create_env && $has_bosh_env;
 			return unless $is_bosh_kit;
-			clear_and_bail($self,
+			$clear_and_bail->($self,
 				"This #M{$env_type} environment does not use create-env nor does it ".
 				"specify an alternative #C{genesis.bosh_env} as a deploy target.  ".
 				"Please provide the name of the BOSH environment that will deploy this ".
 				"environment, or mark this environment as a create-env environment."
 			) if $is_310plus && !($is_create_env || $has_bosh_env );
-			clear_and_bail($self,
+			$clear_and_bail->($self,
 				"This #M{$env_type} environment does not use create-env (proto) or ".
 				"specify an alternative #C{genesis.bosh_env} as a deploy target.  ".
 				"Please provide the name of the BOSH environment that will deploy this ".
 				"environment, or mark this environment as a create-env environment."
 			) unless $is_create_env || $has_bosh_env;
-		}
+		};
 
 		my $different_bosh_env = ($self->bosh_env->{description}//$self->name) ne $self->name;
 
@@ -867,7 +867,7 @@ sub use_create_env {
 			my $kuce = $self->kit->metadata('use_create_env');
 
 			if ($kuce eq 'yes') {
-				clear_and_bail($self,
+				$clear_and_bail->($self,
 					"This kit only allows create-env deployments, but this environment ".
 					"specifies an alternative bosh_env.  Please remove the ".
 					"#C{genesis.bosh_env} entry from the environment file."
@@ -875,7 +875,7 @@ sub use_create_env {
 				return 1;
 			};
 			if ($kuce eq 'no') {
-				clear_and_bail($self,
+				$clear_and_bail->($self,
 					"BOSH environments must specify the name of the parent BOSH director ".
 					"that will deploy this enviornment under #C{genesis.bosh_env} in the ".
 					"file, because unlike other kits, it cannot derive its director from ".
@@ -904,7 +904,7 @@ sub use_create_env {
 				$is_create_env = 0;
 			}
 			if ($is_proto && $different_bosh_env) {
-				clear_and_bail(
+				$clear_and_bail->(
 					"This environment is marked as a create-env (proto) environment ".
 					"by using the #M{proto} feature, but also specifies an alternative ".
 					"bosh_env.  Create-env deployments can't use a #C{genesis.bosh_env} ".
@@ -912,7 +912,7 @@ sub use_create_env {
 				);
 			}
 
-			validate_create_env_state(
+			$validate_create_env_state->(
 				$self,$is_create_env,$different_bosh_env,$self->type,
 				$is_bosh_director,$is_310plus
 			);
@@ -933,7 +933,7 @@ sub use_create_env {
 			$euce = !$ENV{GENESIS_BOSH_ENVIRONMENT};
 		}
 		dump_var detected=>$euce, diff => $different_bosh_env;
-		validate_create_env_state($self,$euce,$different_bosh_env,"bosh",1);
+		$validate_create_env_state->($self,$euce,$different_bosh_env,"bosh",1);
 		return $euce;
 	});
 }
@@ -1006,14 +1006,13 @@ sub validate_genesis_version_requirements {
 				$env_min, $repo_min
 			);
 		} elsif (!new_enough($env_min, $repo_min)) {
-			# Environment allows older version than repo requires - problematic
+			# Environment allows older version than repo requires
 			push @errors, sprintf(
 				"Environment specifies minimum Genesis version %s, but repository ".
-				"requires %s. Please update the environment file to meet repository requirements",
+				"requires at least %s",
 				$env_min, $repo_min
 			);
 		}
-		# else: versions match exactly, no issue
 	} elsif ($env_min) {
 		$effective_min = $env_min;
 		$source = 'environment file';
@@ -1498,7 +1497,6 @@ sub ocfp_type {
 		# If it doesn't match, assume it's an OCF environment
 		return 'ocf';
 	}
-	return 'unknown';
 }
 
 # }}}
@@ -1520,13 +1518,12 @@ sub ocfp_env {
 		# mgmt is mgmt, anything else is ocf
 		return "$name/ocf";
 	}
-	return $name;
 }
 
 # }}}
 #	ocfp_config - returns the OCFP configuration for the environment {{{
 sub ocfp_config {
-	my ($self,$path) = @_;
+	my ($self) = @_;
 	return scalar $self->_memoize(sub {
 		return {} unless $self->is_ocfp();
 		return scalar $self->vault->get_path($self->ocfp_config_base);
@@ -1651,11 +1648,11 @@ sub bosh_config_names {
 }
 
 # }}}
-# bosh_config_overrides - returns the bosh config overrides for the environment {{{
+# env_config_overrides - returns the bosh config overrides for the environment {{{
 sub env_config_overrides {
 	my ($self, $type) = @_;
 	bug("No type specified for bosh config overrides") unless $type;
-	my $overrides = $self->lookup('bosh-configs.$type', {});
+	my $overrides = $self->lookup("bosh-configs.$type", {});
 	# TODO: Need to figure out where to find these overrides
 	return $overrides;
 }
@@ -2053,8 +2050,7 @@ sub exodus_mount {
 }
 
 # }}}
-# FIXME: These env references aren't being used anywhere
-# exodus_slug - returns the component of the Vault path under the Exodus mount for this evironments Exodus data {{{
+# exodus_slug - returns the component of the Vault path under the Exodus mount for this environment's Exodus data {{{
 sub exodus_slug {
 	sprintf("%s/%s", $_[0]->name, $_[0]->type);
 }
@@ -3881,7 +3877,7 @@ sub terminate {
 
 	my $reason =     delete($opts{reason}) // 'unknown';
 	my $term_flags = delete($opts{flags})  // '';
-	my %clean_up =   delete(%opts{qw/resources secrets user_secrets networking credhub/});
+	my %clean_up = map { $_ => delete $opts{$_} } qw/resources secrets user_secrets networking credhub/;
 
 	my $start_time = Time::Piece->new->strftime(EXODUS_TIME_FORMAT);
 	my %audit_data = (
@@ -4298,19 +4294,6 @@ sub terminate {
 		}
 	}
 
-	# TODO: Remove old credhub and entombed secrets
-	if (0 && $clean_up{credhub} && !$self->use_create_env) {
-		$self->notify("removing credhub secrets...");
-		my $credhub = $self->credhub;
-		my $start = gettimeofday();
-		my $ok = $credhub->delete_old_secrets($self->name); # This function doesn't exist...
-		info(
-			'%s%s',
-			$ok ? " #G{done.}" : " #R{failed}",
-			$ok ? pretty_duration(gettimeofday() - $start) : '' # TODO: capture bail message and print it here
-		);
-	}
-
 	# Update deployment archive with new exodus data indicating the deployment has been terminated
 	#if ($full_reset) {
 	#	$self->vault->authenticate->clear($self->exodus_base, 1);
@@ -4329,7 +4312,7 @@ sub terminate {
 			'terminate' => $result,
 			reason  => $reason,
 			flags   => $term_flags,
-			started => Time::Piece->new($start)->strftime(EXODUS_TIME_FORMAT),
+			started => Time::Piece->new(int($start))->strftime(EXODUS_TIME_FORMAT),
 		);
 	} else {
 		# No exodus deployment audit data to update, so just remove the base exodus data
@@ -4530,7 +4513,7 @@ sub remove_secrets {
 			my $msg = "Failed to remove secrets under '#C{%s}':\n%s";
 			return ({error => 1}, sprintf($msg, $store->base, $out));
 		}
-		return ({success => 1}, "#G{All applicable secrets removed.}");;
+		return ({success => 1}, "#G{All applicable secrets removed.}");
 	}
 
 	$self->manifest_provider->kit_files(); #process blueprint
@@ -4565,8 +4548,7 @@ sub notify {
 	my $opts = ref($_[0]) eq 'HASH' ? shift : {};
 	my $msg = shift;
 	bug(
-		"Invalid message argument to '%s' - expected a string, got undefined value: [%s]",
-		$msg,
+		"Invalid message argument to 'notify' - expected a string, got undefined value: [%s]",
 		join(", ", map {$_//'<undef>'} @_)
 	) if grep {!defined} (@_);
 	$msg = sprintf($msg, @_) if scalar(@_);
@@ -4654,23 +4636,23 @@ sub bosh_logs {
 	}
 
 	pushd($dep_log_path);
-  my @dep_archives = glob("*.tgz");
+	my @dep_archives = glob("*.tgz");
 
-  foreach my $archive (@dep_archives) {
-    my $file_name = $archive =~ s/\.tgz$//r;
-    my ($job, $vmid, $ts) = split /\./, $file_name;
+	foreach my $archive (@dep_archives) {
+		my $file_name = $archive =~ s/\.tgz$//r;
+		my ($job, $vmid, $ts) = split /\./, $file_name;
 
 		my $target_dir = "$dep_log_path/$job/$vmid/$ts";
-    mkdir_or_fail($target_dir) unless -d $target_dir;
+		mkdir_or_fail($target_dir) unless -d $target_dir;
 
-    my ($out, $rc, $err) = run("tar", "-zxf", $archive, "-C", $target_dir);
+		my ($out, $rc, $err) = run("tar", "-zxf", $archive, "-C", $target_dir);
 		if ($rc) {
 			warning("failed to extract archive %s: %s", $file_name, $err);
 		} else {
 			info("- extracted archive %s", $file_name);
 		}
-    unlink $archive;
-  }
+		unlink $archive;
+	}
 	popd();
 	popd();
 	$self->notify(success => "BOSH logs fetched successfully - they can be found in #G{%s}\n", humanize_path($dep_log_path));
@@ -4964,18 +4946,16 @@ sub _fix_cpi_config {
 # _check_cloud_config - check the cloud config {{{
 sub _check_cloud_config {
 	my ($self) = @_;
-	bug(
-		"Cloud config check is not implemented yet"
-	);
+	# TODO: Implement cloud config check; see Genesis::Commands::Env for planned usage
+	return;
 }
 
 # }}}
 # _fix_cloud_config - fix the cloud config on the director {{{
 sub _fix_cloud_config {
 	my ($self, $fix_data, %opts) = @_;
-	bug(
-		"Cloud config fix is not implemented yet"
-	);
+	# TODO: Implement cloud config fix; see Genesis::Commands::Env for planned usage
+	return;
 }
 
 # }}}
@@ -5764,7 +5744,7 @@ sub _parse_bosh_env {
 sub _create_deployment_audit_log {
 	my ($self, $action, $result, %audit_data) = @_;
 	my $bails_with = delete($audit_data{bails_with});
-	my $cleanup_cache => exists($audit_data{cleanup_cache}) ? delete($audit_data{cleanup_cache}) : 1;
+	my $cleanup_cache = exists($audit_data{cleanup_cache}) ? delete($audit_data{cleanup_cache}) : 1;
 	my $returns = delete($audit_data{returns});
 
 	# Validate the action
