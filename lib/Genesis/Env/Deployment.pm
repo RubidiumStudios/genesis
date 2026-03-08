@@ -221,7 +221,10 @@ sub completed {
 # duration - Return the duration of the deployment {{{
 sub duration {
 	my ($self) = @_;
-	return $self->{data}{completed} - $self->{data}{started};
+	my ($completed, $started) = @{$self->{data}}{qw(completed started)};
+	return undef unless ref($completed) eq 'Time::Piece'
+	                  && ref($started)   eq 'Time::Piece';
+	return $completed - $started;
 }
 
 # }}}
@@ -364,9 +367,16 @@ sub env {
 sub committed {
 	my ($self) = @_;
 	return 0 unless $self->timestamp();
-	return $self->env->vault->has(
-		'deployments/' . $self->timestamp()
-	);
+	my $result = eval {
+		$self->env->vault->has(
+			'deployments/' . $self->timestamp()
+		);
+	};
+	if ($@) {
+		debug("Could not check deployment commit status in vault: %s", $@);
+		return 0;
+	}
+	return $result;
 }
 
 # }}}
@@ -400,10 +410,16 @@ sub commit {
 			# notation to store the gzipped data in the vault
 			mkfile_or_fail($artifact_file, $artifacts->{data});
 		} elsif ($artifacts->{format} eq 'local-file-hash') {
-			$self->_build_artifacts_file(
-				$artifact_file,
-				%{$artifacts->{data}}
-			);
+			eval {
+				$self->_build_artifacts_file(
+					$artifact_file,
+					%{$artifacts->{data}}
+				);
+			};
+			if ($@) {
+				unlink $artifact_file if -f $artifact_file;
+				die $@;  # Re-throw after cleanup
+			}
 		}
 	}
 
@@ -436,6 +452,7 @@ sub commit {
 		@cmds
 	);
 	$self->env->deployments->reset; # FIXME: This should be more surgical.
+	unlink $artifact_file if $artifact_file && -f $artifact_file;
 	return ($out, $rc, $err) if wantarray;
 	bail(
 		"Failed to set deployment audit data in exodus: %s\n%s",
@@ -527,7 +544,7 @@ sub extract_artifacts_to {
 	# If path is not absolute, make it relative to the directory the user called genesis from
 	my $target_path = absolute_path($path, $ENV{GENESIS_CALLER_DIR});
 	bail(
-		"Path #B{%s} is not a directory", $path
+		"Path #B{%s} is not a directory", $target_path
 	) unless -d $target_path;
 
 	# No artifacts to extract
@@ -659,6 +676,10 @@ sub _build_artifacts_file {
 		$self->_collect_secrets_from_paths(@$secrets)
 	)	if (defined $secrets && ref($secrets) eq 'ARRAY');
 
+	# Bail if no artifacts were added to the archive
+	bail("No artifacts to archive -- all artifact files were missing or empty")
+		unless scalar $tar->list_files();
+
 	# Compress and base64 encode the artifacts into a tarball
 	my $compressed_data;
 	open(my $data_fh, '>', \$compressed_data);
@@ -682,8 +703,16 @@ sub _collect_secrets_from_paths {
 
 	my $struct = {};
 	for my $path (@paths) {
+		bail("Invalid vault path in secrets list: empty or undefined")
+			unless defined($path) && length($path);
+		bail("Malformed vault path '%s' in secrets list", $path)
+			if $path =~ m{^:};
+		bail("Malformed vault path '%s' in secrets list", $path)
+			if $path =~ m{:$};
 		# Check if we want a path:key or a path
 		my ($p,$key) = $path =~ m{^(.+?)(?::([^/]+))?$};
+		bail("Malformed vault path '%s' in secrets list", $path)
+			unless defined($p) && length($p);
 
 		#my $struct_key = $p =~ s{^/}{.}; -- in case we want to have a deep structure
 		if ($key) {
