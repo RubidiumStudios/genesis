@@ -253,14 +253,17 @@ sub generate {
 }
 
 sub regenerate {
+	my ($self, $secret) = @_;
 	bail "Regenerate not implemented for Vault store";
 }
 
 sub remove {
+	my ($self, $secret) = @_;
 	bail "Remove not implemented for Vault store";
 }
 
 sub remove_all {
+	my ($self, @secrets) = @_;
 	bail "Remove_all not implemented for Vault store";
 }
 
