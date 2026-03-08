@@ -892,7 +892,7 @@ sub use_create_env {
 			my $is_proto = grep {$_ eq 'proto'} @{$self->lookup('kit.features', [])};
 			if ($is_310plus && $is_bosh_director) {
 				# proto feature removed in 3.1.0-rc1
-				$is_create_env = $euce || !$different_bosh_env;
+				$is_create_env = ($euce || !$different_bosh_env) ? 1 : 0;
 			} elsif ($euce) {
 				$is_create_env = 1;
 			} elsif ($is_proto) {
@@ -930,7 +930,7 @@ sub use_create_env {
 			my $features = scalar($self->lookup(['kit.features', 'kit.subkits'], []));
 			$euce = scalar(grep {$_ =~ /^(proto|bosh-init|create-env)$/} @$features) ? 1 : 0; # FIXME: remove bosh-init prior to 3.1.0, proto prior to 3.2.0
 		} else {
-			$euce = !$ENV{GENESIS_BOSH_ENVIRONMENT};
+			$euce = $ENV{GENESIS_BOSH_ENVIRONMENT} ? 0 : 1;
 		}
 		dump_var detected=>$euce, diff => $different_bosh_env;
 		$validate_create_env_state->($self,$euce,$different_bosh_env,"bosh",1);
