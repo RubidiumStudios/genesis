@@ -77,10 +77,6 @@ Returns all deployment audits for the environment, sorted by timestamp
 (newest first). Results are cached for performance; call C<reset()> to
 invalidate the cache.
 
-B<Known issue (m-4):> The source code is missing the closing vim fold marker
-for this method, causing it and several subsequent methods to collapse into a
-single fold in editors configured with C<fdm=marker>.
-
 B<Returns:> A list of C<Genesis::Env::Deployment> objects. Always returns a
 list (never a reference), to protect against accidental modification of the
 internal cache.
@@ -278,14 +274,9 @@ If none are found, it checks for legacy exodus data: if any exodus keys exist
 the environment is considered C<'deployed'>. If there are no successful audit
 records and no exodus data the environment is C<'undeployed'>.
 
-When successful deployments do exist, the method iterates them newest-first
-and returns C<'deployed'> if the first succeeded deployment's action was
-C<'deploy'>, or C<'terminated'> if it was C<'terminate'>.
-
-B<Known issue (m-3):> C<find()> already returns only successful deployments by
-default, yet the loop re-checks each deployment with C<succeeded()>.  If
-C<find()> returns records but none pass the redundant C<succeeded()> check (a
-reachable edge case), the method falls through and returns C<'undeployed'>.
+When successful deployments do exist, the first (newest) deployment's action
+determines the result: C<'deployed'> for C<'deploy'>, or C<'terminated'> for
+C<'terminate'>.
 
 B<Returns:> One of the strings C<'deployed'>, C<'terminated'>, or
 C<'undeployed'>.
@@ -331,7 +322,7 @@ B<Returns:> A new C<Genesis::Env::Deployment> object.
 
 =head2 next_sequence_number
 
-  my $n = $mgr->next_sequence_number($action);
+  my $n = $mgr->next_sequence_number();
 
 Calculates the next sequence number for a new deployment audit record.
 
@@ -339,24 +330,10 @@ If no deployments exist, returns C<1>. If the most recent deployment has no
 sequence field, falls back to C<scalar($self-E<gt>all) + 1> (total count plus
 one). Otherwise returns the most recent sequence number incremented by one.
 
-B<Parameters:>
-
-=over 4
-
-=item C<$action>
-
-Accepted but currently unused. Reserved for future use.
-
-B<Known issue (m-2):> The C<$action> parameter is accepted but never used in
-the current implementation; the sequence number is always computed from the
-overall list of deployments regardless of action type.
-
-=back
-
 B<Returns:> The next sequence number as a positive integer.
 
   # Example
-  my $n = $mgr->next_sequence_number('deploy');
+  my $n = $mgr->next_sequence_number();
   print $n; # prints, e.g., '5'
 
 =head2 env
@@ -390,15 +367,9 @@ succeeded result. Several identity fields (C<vault>, C<git>, C<concourse>,
 C<bosh> users) are set to C<'unknown'> because the exodus store does not
 retain that information.
 
-B<Known issue (M-4):> The C<manifest.sha2> field is populated from
-C<$exodus_data-E<gt>{manifest_sha1}>, which is a SHA-1 hash stored under a
-legacy key name. The stored value is a SHA-1 digest, not SHA-256, despite the
-field name C<sha2>.
-
-B<Known issue (M-5):> Boolean fields in the synthesized record use
-inconsistent C<JSON::PP> calling styles: C<JSON::PP::true> (function call) at
-one point and C<JSON::PP-E<gt>false> (method call) at another.  Both evaluate
-correctly, but the mixed style is inconsistent with the rest of the codebase.
+The C<manifest.sha1> field is populated from C<$exodus_data-E<gt>{manifest_sha1}>
+and is flagged with C<using_sha1 =E<gt> 1> to indicate that this is a SHA-1
+digest rather than the SHA-256 used by current deployments.
 
 B<Parameters:>
 
@@ -441,8 +412,8 @@ In list context returns a list of C<Genesis::Env::Deployment> objects sorted
 newest-first. In scalar context returns an arrayref to the cached list
 (suitable for efficient read-only access).
 
-If Vault returns no data for the deployments path, returns an empty list or an
-empty arrayref according to calling context, without caching.
+If Vault returns no data for the deployments path, caches an empty list and
+returns an empty list or empty arrayref according to calling context.
 
 Modifies the object in-place by populating C<{__all_deployments}> on first
 call.
@@ -466,16 +437,12 @@ collects kit metadata, user identity (from C<who -mH> and environment
 variables), and artifact paths. For C<$action eq 'deploy'> it additionally
 includes C<parameters> and a C<manifest.sha2> computed with SHA-256.
 
-B<Known issue (M-2):> When C<who -mH> returns no current-user row (e.g., in
-non-interactive or containerised contexts), C<$user_data-E<gt>[0]> is
-C<undef>. The code falls back to C<$ENV{USER}> for the username but continues
-to access C<$user_data-E<gt>[3]> without a null check, which causes a fatal
-dereference.
-
-B<Known issue (M-3):> The C<bosh_target> key is nested inside C<kit> in the
-base content generated here (C<$base-E<gt>{kit}{bosh_target}>), but read from
-the top-level C<bosh_target> key when deserialising from Vault in
-C<synthesize_from_exodus()>.
+The C<bosh_target> key is placed at the top level of the base content
+(C<$base-E<gt>{bosh_target}>), consistent with how it is read from Vault and
+how C<synthesize_from_exodus()> constructs it. When C<who -mH> returns no
+current-user row (e.g., in non-interactive or containerised contexts), the
+user data defaults to an empty arrayref and C<$ENV{USER}> is used as the
+username.
 
 B<Parameters:>
 
@@ -546,10 +513,6 @@ For timestamp ranges (comparisons and between expressions), modifies
 C<@deployments> in-place by shifting elements from the front that are newer
 than the C<before> bound, and splicing elements from the end that are older
 than the C<after> bound, then returns C<undef>.
-
-B<Known issue (M-1):> The splice condition uses C<< $idx < @$deployments - 1 >>
-instead of C<< $idx < @$deployments >>, so the last element of the array is
-never removed even when it falls outside the requested range.
 
 B<Parameters:>
 
@@ -658,19 +621,9 @@ C<< <= >> comparisons, missing fields are filled with their minimum values
 (month 01, day 01, hour 00, minute 00, second 00).
 
 After filling in the boundary values, the code adjusts the timestamp by one
-second to convert between inclusive and exclusive bounds.  The adjustment is
-controlled by C<$gt xor $eq>: when exactly one of C<$gt> or C<$eq> is true,
-one second is subtracted from the computed boundary.
-
-B<Known issue (m-1):> The inline comment at this line reads "If gt or eq,
-subtract 1 second, but not both", which incorrectly describes C<or> logic.
-The actual operator is C<xor>.
-
-B<Known issue (C-1):> Because C<xor> is used, the subtraction is applied when
-exactly one of C<$gt> or C<$eq> is true -- that is, for C<< > >> (gt=1, eq=0)
-and C<< <= >> (gt=0, eq=1). The operator C<< >= >> (gt=1, eq=1) and C<< = >>
-(gt=0, eq=0) do I<not> trigger the subtraction. This inverts the intended
-exclusive/inclusive semantics for C<< <= >> vs C<< < >>.
+second to convert between inclusive and exclusive bounds: one second is
+subtracted for strict operators (C<< < >>, C<< > >>), and no adjustment is
+made for inclusive operators (C<< <= >>, C<< >= >>).
 
 B<Parameters:>
 
