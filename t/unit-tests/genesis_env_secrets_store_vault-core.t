@@ -139,27 +139,32 @@ subtest 'Defect 1b: validate() uses read(), not get()' => sub {
 subtest 'Defect 2: keys() cache regex matches paths correctly' => sub {
 	# When cache is populated, keys() should match paths under base()
 	# base() returns '/secret/my/org/my-env/bosh/' (with trailing slash)
-	# The regex should not require a double-slash
+	# Bug: the old regex /^\Q$base\E\// demands a double-slash '//' that
+	# never appears in paths. The fix strips trailing slash from base and
+	# uses (\/|$) alternation.
 
 	my $store = make_store();
 
-	# Pre-populate cache with sample data
+	# Verify base() has trailing slash (this is what causes the bug)
+	like($store->base, qr/\/$/, "base() ends with trailing slash");
+
+	# Pre-populate cache — keys() with no args calls paths() which returns
+	# all CORE::keys of __data, then keys() checks each against the base regex
 	$store->{__data} = {
-		'/secret/my/org/my-env/bosh/certs/server' => {
+		$store->base . 'certs/server' => {
 			certificate => 'cert-data',
 			key         => 'key-data',
 		},
-		'/secret/my/org/my-env/bosh/certs/ca' => {
+		$store->base . 'certs/ca' => {
 			certificate => 'ca-cert-data',
 		},
 	};
 
-	# Verify base() has trailing slash
-	like($store->base, qr/\/$/, "base() ends with trailing slash");
-
-	# Ask for keys at a specific path — should come from cache
-	my @keys = $store->keys('/secret/my/org/my-env/bosh/certs/server');
+	# Call keys() with no arguments — paths() returns all cache keys,
+	# then keys() must match them against base to look up their values
+	my @keys = $store->keys();
 	ok(scalar(@keys) > 0, "keys() returns keys from cache (not empty)");
+	is(scalar(@keys), 3, "keys() returns all 3 keys across 2 paths");
 
 	# Verify we got the right keys
 	my %key_set = map { $_ => 1 } @keys;

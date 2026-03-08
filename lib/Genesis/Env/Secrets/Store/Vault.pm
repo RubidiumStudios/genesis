@@ -141,10 +141,10 @@ sub keys {
 	my $self = shift;
 	return $self->service->keys(@_) unless exists($self->{__data});
 	my @paths = $self->paths(@_);
-	my $base = $self->base;
+	my $base = $self->base =~ s/\/$//r;
 	my @keys = ();
 	for my $path (@paths) {
-		if ($path =~ /^\Q$base\E\//) {
+		if ($path =~ /^\Q$base\E(\/|$)/) {
 			push (@keys, CORE::keys %{$self->{__data}{$path}})
 		} else {
 			push (@keys, $self->service->keys($path));
