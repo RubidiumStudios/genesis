@@ -9,7 +9,7 @@ Genesis - Core utility functions for the Genesis deployment toolkit
     use Genesis;
 
     # Initialise Genesis for the current run
-    Init();
+    Genesis::Init();
 
     # Run an external command and capture output
     my ($out, $rc, $err) = run({ stderr => 0 }, 'spruce json "$1"', $file);
@@ -62,8 +62,8 @@ metadata timestamps.
 
 =head2 Init
 
-    Init();
-    Init($version);
+    Genesis::Init();
+    Genesis::Init($version);
 
 Initialises the Genesis runtime. Loads and validates the global configuration
 file at C<~/.genesis/config>, configures logging, and populates a set of
@@ -87,13 +87,13 @@ B<Returns:> nothing.
 
 B<Examples:>
 
-    Init();        # Returns: nothing
-    Init('2.8.0'); # Returns: nothing
+    Genesis::Init();        # Returns: nothing
+    Genesis::Init('2.8.0'); # Returns: nothing
 
 =head2 deployment_roots_map
 
-    my ($labels_ref, $roots_ref) = deployment_roots_map(@extras);
-    my $map = deployment_roots_map(@extras);
+    my ($labels_ref, $roots_ref) = Genesis::deployment_roots_map(@extras);
+    my $map = Genesis::deployment_roots_map(@extras);
 
 Reads the C<deployment_roots> list from the global Genesis configuration,
 expands each path (tilde and environment-variable expansion, then
@@ -139,14 +139,14 @@ Raised when two roots resolve to the same label. C<%s> is the duplicate label.
 B<Examples:>
 
     # list context
-    my ($labels, $roots) = deployment_roots_map();
+    my ($labels, $roots) = Genesis::deployment_roots_map();
     for my $label (@$labels) {
         printf "%s => %s\n", $label, $roots->{$label};
         # prints: staging => /home/user/deployments/staging
     }
 
     # scalar context
-    my $map = deployment_roots_map([staging => '~/deployments/staging']);
+    my $map = Genesis::deployment_roots_map([staging => '~/deployments/staging']);
     # Returns: { labels => ['staging'], roots => { staging => '/home/user/deployments/staging' } }
 
 =head2 expand_path
@@ -2864,11 +2864,13 @@ B<Examples:>
 
 =head2 deployment_roots_str_format
 
-    my $str = deployment_roots_str_format($root);
+    my $str = Genesis::deployment_roots_str_format($root);
 
 Formats a deployment root entry for display. If C<$root> is a plain scalar,
 returns it unchanged. If it is a hash reference with C<label> and C<path>
 keys, returns a colourised string of the form C<[label] path>.
+
+Not exported. Used internally as a callback passed via glob reference.
 
 B<Parameters:>
 
@@ -2885,10 +2887,10 @@ B<Returns:> A display string.
 
 B<Examples:>
 
-    deployment_roots_str_format('/home/user/deployments');
+    Genesis::deployment_roots_str_format('/home/user/deployments');
     # Returns: '/home/user/deployments'
 
-    deployment_roots_str_format({ label => 'prod', path => '/deployments/prod' });
+    Genesis::deployment_roots_str_format({ label => 'prod', path => '/deployments/prod' });
     # Returns: '[prod] /deployments/prod' (with colour codes applied)
 
 =head1 INTERNAL METHODS
