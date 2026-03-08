@@ -98,8 +98,9 @@ sub preload {
 		delete($self->{cached});
 	} else {
 		my $data = read_json_from($out, $rc, $err);
+		my $base = $self->base();
 		$self->{cached} = $rc ? {} : {(
-			map {($_->{Name} =~ s/$self->{base}\///r, $_->{Value})} @{$data->{Credentials}}
+			map {($_->{Name} =~ s/\Q$base\E//r, $_->{Value})} @{$data->{Credentials} // []}
 		)};
 	}
 	return $self;
@@ -107,7 +108,7 @@ sub preload {
 
 sub is_preloaded {
 	my $self = shift;
-	return defined($self->{cached}) && ref($self->{cached}) eq 'HASH' && scalar(keys %{$self->{cached}});
+	return defined($self->{cached}) && ref($self->{cached}) eq 'HASH';
 }
 
 sub has {
@@ -160,7 +161,7 @@ sub set {
 			join(', ',@$invalid)
 		) if @$invalid;
 		bail(
-			"You must supply either the certificate and the public_key when creating ".
+			"You must supply the certificate and the private_key when creating ".
 			"a CredHub certificate value."
 		) if @$missing;
 		bail(
@@ -182,8 +183,8 @@ sub set {
 			uc($type), join(', ',@$invalid)
 		) if @$invalid;
 		bail(
-			"You must supply the %s  when creating a Credhub %s value",
-			sentence_join(@valid_keys), uc($type)
+			"You must supply the %s when creating a Credhub %s value",
+			sentence_join(@$missing), uc($type)
 		) if @$missing;
 
 		push @args, '-u', $value->{public_key};
@@ -199,8 +200,8 @@ sub set {
 			uc($type), join(', ',@$invalid)
 		) if @$invalid;
 		bail(
-			"You must supply the %s  when creating a Credhub %s value",
-			sentence_join(@valid_keys), uc($type)
+			"You must supply the %s when creating a Credhub %s value",
+			sentence_join(@$missing), uc($type)
 		) if @$missing;
 
 		push @args, '-z', $value->{username} if defined($value->{username});
@@ -250,7 +251,8 @@ sub set {
 		$rc
 	) if $rc;
 	my $result = read_json_from($out, $rc, $err);
-	# TODO: update cache if it exists
+	$self->{cached}{$path} = $result->{value} // $value
+		if defined($self->{cached});
 	return ($result->{id});
 }
 
@@ -258,7 +260,7 @@ sub paths {
 	my ($self,$filter) = @_;
 	my @filter = ();
 	if (!  defined($filter)) {
-		push(@filter, '-n', $self->{base}.'/');
+		push(@filter, '-n', $self->base());
 	} elsif ($filter && ref($filter) eq "") {
 		push(@filter, '-n', $self->_full_path($filter));
 	}
@@ -318,7 +320,7 @@ sub query {
 	my @args;
 	push @args, '-X', uc(delete($params{_method}))
 		if defined $params{_method};
-	push @args, '-d', delete($params{data})
+	push @args, '-d', delete($params{_data})
 		if defined $params{_data};
 	# TODO: extract uri-encoded query params out of %params
 	return scalar(read_json_from(run({
