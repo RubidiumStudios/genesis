@@ -176,7 +176,7 @@ sub releases {
 		if ($code == 404) {
 			# Check if kit exists, for a better error message
 			bail("No repository named #C{%s} exists under #M{%s}", $name, $self->label)
-				if (! grep {$_ eq $name} ($self->repo_names));
+				if (! grep {$_ eq $name} @{$self->repo_names});
 		}
 		bail "$status"."\n" if $status;
 		trace "About to get releases from Github";
@@ -191,8 +191,6 @@ sub releases {
 # get_release_info - fetch all release information for the given repository {{{
 sub get_release_info {
 	my ($self, $name, %opts) = @_;
-	return $self->{_releases}{$name} if $self->{_releases}{$name};
-
 	my ($code,$msg,$data,$headers,@results);
 	my $prefix = $opts{prefix} // '';
 	my $label =  $opts{label} || $self->label || "repository #C{$name}";
@@ -222,14 +220,14 @@ sub get_release_info {
 	}
 
 	my $urls = $get_versions
-		? $self->release_version_urls($name, @$versions[0])
+		? $self->release_version_urls($name, $versions->[0])
 		: [$self->releases_url($name)];
 
 	my $pages = 0;
 	my @retrieved_versions = ();
 	my @errors;
 	while (1) {
-		if ($get_versions && $self->{_release_versions}{$name}{@$versions[0]}) {
+		if ($get_versions && $self->{_release_versions}{$name}{$versions->[0]}) {
 			push @retrieved_versions, shift @$versions;
 			last unless @$versions;
 			next;
@@ -242,19 +240,19 @@ sub get_release_info {
 		$msg =~ s/\s*$//;
 		if ($code != 200) {
 			if ($code == 404 && $get_versions) {
-				if ($url =~ /v@$versions[0]/) {
+				if ($url =~ /v$versions->[0]/) {
 					next;
 				}
 			}
 			bail(
 				"Failed to retrieve release information for #M{%s}; Github responded with a #R{%s} status:\n#y{%s}\n\nURL: %s",
-				$get_versions ? $name.'/'.@$versions[0] : $name,
+				$get_versions ? $name.'/'.$versions->[0] : $name,
 				$code, $msg, $url
 			) if $fatal;
 
 			error(
 				"Could not find %s release information - got %s status from Github.",
-				$get_versions ? $name.'/'.@$versions[0] : $name, $code
+				$get_versions ? $name.'/'.$versions->[0] : $name, $code
 			) unless $suppress_output || $suppress_errors;
 			push @errors, {
 				code => $code,
@@ -263,7 +261,7 @@ sub get_release_info {
 				msg  => $msg eq $code
 					? csprintf(
 						"Failed to retrieve release information for #M{%s}; Github responded with a #R{%s} status:\n#y{%s}\n\nURL: %s",
-						$get_versions ? $name.'/'.@$versions[0] : $name,
+						$get_versions ? $name.'/'.$versions->[0] : $name,
 						$code,  $data, $url
 					): $msg
 				}
@@ -279,13 +277,22 @@ sub get_release_info {
 		info({pending=>1}, '.') unless $suppress_output;
 		$pages++;
 		if ($get_versions) {
-			$self->{_release_versions}{$name}{@$versions[0]} = $results;
+			$self->{_release_versions}{$name}{$versions->[0]} = $results;
 			push @retrieved_versions, shift @$versions;
 			last unless @$versions;
-			$urls = $self->release_version_urls($name, @$versions[0] =~ s/^v?/v/r);
+			$urls = $self->release_version_urls($name, $versions->[0] =~ s/^v?/v/r);
 			next
 		} else {
-			push(@results, @{$results});
+			if (ref($results) eq 'ARRAY') {
+				push(@results, @{$results});
+			} elsif (defined $results) {
+				push @errors, {
+					code => $code,
+					data => $data,
+					url  => $url // '',
+					msg  => "Unexpected non-array response from Github"
+				};
+			}
 			my ($links) = grep {$_ =~ s/^Link: //i} split(/[\r\n]+/, $headers);
 			last unless $links;
 			$url = (grep {$_ =~ s/^<(.*)>; rel="next"/$1/} split(', ', $links))[0];
