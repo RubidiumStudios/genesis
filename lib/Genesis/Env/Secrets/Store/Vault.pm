@@ -237,14 +237,14 @@ sub empty {
 
 sub check {
 	my ($self, $secret) = @_;
-	my $ok = $self->get($secret) unless $secret->has_value;
-	return $ok;
+	$self->read($secret) unless $secret->has_value;
+	return $secret->check_value;
 }
 
 sub validate {
 	my ($self, $secret) = @_;
-	my $ok = $self->get($secret) unless $secret->has_value;
-	return $secret->validate();
+	$self->read($secret) unless $secret->has_value;
+	return $secret->validate_value;
 }
 
 sub generate {

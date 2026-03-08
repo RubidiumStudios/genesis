@@ -99,11 +99,11 @@ subtest 'Defect 1b: validate() uses read(), not get()' => sub {
 		path                   => 'certs/server',
 		default_key            => 'certificate',
 		full_path              => 'certs/server:certificate',
-		validate_value         => sub { return ('ok', '') },
+		validate_value         => 'ok',
 		# The buggy code calls $secret->validate() instead of
 		# $secret->validate_value — provide it so the test doesn't crash,
 		# but return a sentinel value to detect the wrong call path
-		validate               => sub { return ('WRONG_METHOD_CALLED', '') },
+		validate               => 'WRONG_METHOD_CALLED',
 		set_value              => sub { },
 		promote_value_to_stored => sub { },
 		can                    => sub { 0 },
@@ -225,9 +225,9 @@ subtest 'validate() skips read when secret already has value' => sub {
 
 	my $secret = Mock->new(
 		has_value      => 1,
-		validate_value => sub { return ('ok', '') },
+		validate_value => 'ok',
 		# Provide validate to prevent crash with buggy code
-		validate       => sub { return ('WRONG_METHOD_CALLED', '') },
+		validate       => 'WRONG_METHOD_CALLED',
 	);
 
 	my $store = make_store();
