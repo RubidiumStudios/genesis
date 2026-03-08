@@ -29,7 +29,7 @@ sub new {
 	bug("No '$_' specified in call to Genesis::Env::Secrets::Store::Vault->new")
 		for grep {!$opts{$_}} @required_options;
 	bug("Unknown '$_' option specified in call to Genesis::Env::Secrets::Store::Vault->new")
-		for grep {my $k = $_; ! grep {$_ eq $k} @valid_options} CORE::keys(%opts);
+		for grep {my $k = $_; ! grep {$_ eq $k} @valid_options} keys(%opts);
 
 	$opts{mount_override}   //= $env->lookup('genesis.secrets_mount');
 	$opts{slug_override}    //= $env->lookup(['genesis.secrets_path','params.vault_prefix','params.vault']);
@@ -105,9 +105,21 @@ sub root_ca_path {
 
 sub store_data {
 	my $self = shift;
-	# FIXME: Handle errors better...
-	$self->{__data} //= read_json_from($self->service->query({stderr => '&1', redact_output => 1}, 'export', grep {$_} ($self->base, $self->root_ca_path)));
-	return $self->{__data}//{};
+	unless (exists $self->{__data}) {
+		my $data = read_json_from(
+			$self->service->query(
+				{stderr => '&1', redact_output => 1},
+				'export',
+				grep {$_} ($self->base, $self->root_ca_path)
+			)
+		);
+		if (defined $data) {
+			$self->{__data} = $data;
+		} else {
+			warning("Vault export returned no data for %s", $self->base);
+		}
+	}
+	return $self->{__data} // {};
 }
 
 sub store_paths {
@@ -141,10 +153,10 @@ sub keys {
 	my $self = shift;
 	return $self->service->keys(@_) unless exists($self->{__data});
 	my @paths = $self->paths(@_);
-	my $base = $self->base;
+	my $base = $self->base =~ s/\/$//r;
 	my @keys = ();
 	for my $path (@paths) {
-		if ($path =~ /^\Q$base\E\//) {
+		if ($path =~ /^\Q$base\E(\/|$)/) {
 			push (@keys, CORE::keys %{$self->{__data}{$path}})
 		} else {
 			push (@keys, $self->service->keys($path));
@@ -237,14 +249,14 @@ sub empty {
 
 sub check {
 	my ($self, $secret) = @_;
-	my $ok = $self->get($secret) unless $secret->has_value;
-	return $ok;
+	$self->read($secret) unless $secret->has_value;
+	return $secret->check_value;
 }
 
 sub validate {
 	my ($self, $secret) = @_;
-	my $ok = $self->get($secret) unless $secret->has_value;
-	return $secret->validate();
+	$self->read($secret) unless $secret->has_value;
+	return $secret->validate_value;
 }
 
 sub generate {
@@ -253,14 +265,17 @@ sub generate {
 }
 
 sub regenerate {
+	my ($self, $secret) = @_;
 	bail "Regenerate not implemented for Vault store";
 }
 
 sub remove {
+	my ($self, $secret) = @_;
 	bail "Remove not implemented for Vault store";
 }
 
 sub remove_all {
+	my ($self, @secrets) = @_;
 	bail "Remove_all not implemented for Vault store";
 }
 
