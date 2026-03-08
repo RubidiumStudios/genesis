@@ -105,9 +105,21 @@ sub root_ca_path {
 
 sub store_data {
 	my $self = shift;
-	# FIXME: Handle errors better...
-	$self->{__data} //= read_json_from($self->service->query({stderr => '&1', redact_output => 1}, 'export', grep {$_} ($self->base, $self->root_ca_path)));
-	return $self->{__data}//{};
+	unless (exists $self->{__data}) {
+		my $data = read_json_from(
+			$self->service->query(
+				{stderr => '&1', redact_output => 1},
+				'export',
+				grep {$_} ($self->base, $self->root_ca_path)
+			)
+		);
+		if (defined $data) {
+			$self->{__data} = $data;
+		} else {
+			warning("Vault export returned no data for %s", $self->base);
+		}
+	}
+	return $self->{__data} // {};
 }
 
 sub store_paths {
