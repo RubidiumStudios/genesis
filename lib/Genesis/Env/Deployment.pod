@@ -471,9 +471,11 @@ B<Examples:>
 =head2 duration()
 
 Returns the duration of the deployment in seconds, computed as
-C<completed - started>.
+C<completed - started>. Returns C<undef> if either timestamp is missing
+or is not a Time::Piece object.
 
-B<Returns:> Numeric — number of seconds between started and completed.
+B<Returns:> Numeric — number of seconds between started and completed, or
+C<undef> if either timestamp is absent or not a Time::Piece object.
 
 =head2 reason()
 
@@ -566,12 +568,15 @@ B<Returns:> A Genesis::Env object.
 =head2 committed()
 
 Returns true if this deployment has been committed to exodus in the vault.
+Returns 0 (not die) if the vault is unreachable or throws an error,
+allowing callers to proceed gracefully.
 
 Note: C<committed()> checks the vault path C<'deployments/' . $self-E<gt>timestamp()>,
 which is a relative path. Due to a known issue (FWT-708), this may not match
 the full exodus path used by C<commit()>.
 
-B<Returns:> True if the vault path exists, false otherwise.
+B<Returns:> True if the vault path exists, 0 if the path does not exist or
+if the vault is unreachable.
 
 =head2 commit()
 
@@ -805,7 +810,7 @@ B<Errors:>
 =item C<"Path #B{%s} is not a directory">
 
 Thrown via C<bail()> if the resolved C<$path> does not exist or is not a
-directory. The C<%s> placeholder is the original (unresolved) C<$path> value.
+directory. The C<%s> placeholder is the resolved absolute C<$target_path>.
 
 =item C<"Invalid artifact filename '#B{%s}'%s - artifact names cannot contain path separators">
 
@@ -909,6 +914,11 @@ B<Errors:>
 
 =over
 
+=item C<"No artifacts to archive — all artifact files were missing or empty">
+
+Thrown via C<bail()> if no files were added to the tar archive (all
+artifact paths were missing or empty on disk).
+
 =item C<"Failed to compress manifest artifacts">
 
 Thrown via C<bail()> if the tar write call fails during gzip compression.
@@ -928,9 +938,26 @@ Collects secrets from the specified vault paths and returns them as a JSON
 string. Each path may be in C<'path:key'> format (to retrieve a single key)
 or plain C<'path'> format (to retrieve all keys at that path via
 C<get_path>). Uses per-path vault reads rather than vault export to avoid
-retrieving subpath contents. Returns C<'{}'> if no secrets are found.
+retrieving subpath contents. Returns C<'{}'> if no paths are provided.
+
+Validates each path before processing: bails on empty, undefined, or
+malformed paths (e.g., paths starting with C<:>).
 
 B<Returns:> JSON string of collected secrets.
+
+B<Errors:>
+
+=over
+
+=item C<"Invalid vault path in secrets list: empty or undefined">
+
+Thrown via C<bail()> if any path in C<@paths> is empty or undefined.
+
+=item C<"Malformed vault path '%s' in secrets list">
+
+Thrown via C<bail()> if a path starts with C<:> or fails to parse.
+
+=back
 
 B<Examples:>
 
@@ -1200,30 +1227,28 @@ mutable from any code that can reach the package namespace.
 
 =item I-2: Error message shows $path instead of $target_path (in extract_artifacts_to(), lines 529-530)
 
-In C<extract_artifacts_to()>, the C<bail()> for a non-directory path displays
-the original C<$path> argument rather than the resolved absolute
-C<$target_path>.
+B<Resolved> (FWT-726). The error now displays the resolved C<$target_path>.
 
 =back
 
-=head3 Additional Issues
+=head3 Additional Issues (Resolved)
 
-The following issues were discovered during the documentation audit and
-tracked as child tickets of FWT-708:
+The following issues were discovered during the documentation audit, tracked
+as child tickets of FWT-708, and resolved:
 
 =over
 
-=item L<FWT-723|https://fivetwenty.atlassian.net/browse/FWT-723>: duration() dies if either timestamp is absent (Major)
+=item L<FWT-723|https://fivetwenty.atlassian.net/browse/FWT-723>: duration() guards missing timestamps (was Major) E<mdash> Fixed
 
-=item L<FWT-724|https://fivetwenty.atlassian.net/browse/FWT-724>: committed() vault call propagates unhandled (Minor)
+=item L<FWT-724|https://fivetwenty.atlassian.net/browse/FWT-724>: committed() handles vault errors gracefully (was Minor) E<mdash> Fixed
 
-=item L<FWT-725|https://fivetwenty.atlassian.net/browse/FWT-725>: Empty/malformed path in _collect_secrets_from_paths (Minor)
+=item L<FWT-725|https://fivetwenty.atlassian.net/browse/FWT-725>: _collect_secrets_from_paths validates paths (was Minor) E<mdash> Fixed
 
-=item L<FWT-726|https://fivetwenty.atlassian.net/browse/FWT-726>: extract_artifacts_to error lacks path specificity (Info)
+=item L<FWT-726|https://fivetwenty.atlassian.net/browse/FWT-726>: extract_artifacts_to shows resolved path (was Info) E<mdash> Fixed
 
-=item L<FWT-727|https://fivetwenty.atlassian.net/browse/FWT-727>: Empty tar can be committed as artifact (Minor)
+=item L<FWT-727|https://fivetwenty.atlassian.net/browse/FWT-727>: _build_artifacts_file rejects empty tar (was Minor) E<mdash> Fixed
 
-=item L<FWT-728|https://fivetwenty.atlassian.net/browse/FWT-728>: Temporary artifact file not cleaned up on bail (Major)
+=item L<FWT-728|https://fivetwenty.atlassian.net/browse/FWT-728>: commit() cleans up temp files on failure (was Major) E<mdash> Fixed
 
 =back
 
