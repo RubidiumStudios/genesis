@@ -26,7 +26,7 @@ Genesis::Env::DeploymentManager - Manager for deployment audits in Genesis envir
   my $state = $mgr->current_state(); # 'deployed', 'terminated', or 'undeployed'
 
   # Build a new deployment audit object
-  my $deployment = $mgr->build('deploy', 'succeeded');
+  my $deployment = $mgr->build('deploy', 'success');
 
   # Reset the internal cache
   $mgr->reset();
@@ -127,7 +127,7 @@ deployments are returned.
 
 =item C<timestamps_only>
 
-If true, return timestamps strings instead of C<Genesis::Env::Deployment>
+If true, return timestamp strings instead of C<Genesis::Env::Deployment>
 objects.
 
 =item C<limit>
@@ -143,10 +143,12 @@ Filter by position or timestamp range. Supported formats:
 
 =item Integer range: C<N> or C<N...M>
 
-Selects by position index (0-based, after other filters). Negative values
-count from the end. A single C<N> selects exactly that position. C<N...M>
-selects positions N through M inclusive; the result preserves latest-first
-order regardless of whether N < M or N > M.
+Selects by position index in chronological (oldest-first) order after all
+other filters are applied. Index 0 refers to the oldest matching deployment.
+Negative values count from the newest end (C<-1> is newest, C<-2> is
+second-newest). A single C<N> selects exactly that position. C<N...M>
+selects positions N through M inclusive; returned deployments are reordered
+into latest-first order regardless of whether N < M or N > M.
 
 =item Comparison: C<< <TS >>, C<< <=TS >>, C<< >TS >>, C<< >=TS >>
 
@@ -260,7 +262,7 @@ successful deployment exists.
 
   # Example
   my $last_ok = $mgr->latest_successful();
-  print $last_ok->lookup('result') if $last_ok; # prints the succeeded result value
+  print $last_ok->lookup('result') if $last_ok; # prints 'success' or 'post-failed'
 
 =head2 current_state
 
@@ -304,7 +306,7 @@ The deployment action. Valid values are C<'deploy'> and C<'terminate'>.
 
 =item C<$result>
 
-The deployment result (e.g., C<'succeeded'>, C<'failed'>, C<'assumed'>).
+The deployment result (e.g., C<'success'>, C<'failed'>, C<'assumed'>).
 
 =item C<%options>
 
@@ -316,7 +318,7 @@ supplied values override the base content for any keys in common.
 B<Returns:> A new C<Genesis::Env::Deployment> object.
 
   # Example
-  my $d = $mgr->build('deploy', 'succeeded', reason => 'manual release');
+  my $d = $mgr->build('deploy', 'success', reason => 'manual release');
   print ref($d); # prints 'Genesis::Env::Deployment'
   $d->commit();  # persist to Vault
 
@@ -363,13 +365,15 @@ When the exodus data hash is empty (no data at all), C<undef> is returned
 since it cannot be determined whether the environment was ever deployed.
 
 The synthesized deployment always records C<action =E<gt> 'deploy'> and a
-succeeded result. Several identity fields (C<vault>, C<git>, C<concourse>,
+result of C<'success'>. Several identity fields (C<vault>, C<git>, C<concourse>,
 C<bosh> users) are set to C<'unknown'> because the exodus store does not
 retain that information.
 
-The C<manifest.sha1> field is populated from C<$exodus_data-E<gt>{manifest_sha1}>
-and is flagged with C<using_sha1 =E<gt> 1> to indicate that this is a SHA-1
-digest rather than the SHA-256 used by current deployments.
+The C<manifest.sha2> field is populated from C<$exodus_data-E<gt>{manifest_sha1}>
+for compatibility with C<Deployment-E<gt>new()> validation, and
+C<manifest.sha1> is set to the same value. The C<using_sha1 =E<gt> 1> flag
+indicates that both fields contain a SHA-1 digest rather than the SHA-256
+used by current deployments.
 
 B<Parameters:>
 
@@ -464,7 +468,7 @@ B<Returns:> A hashref of base deployment audit fields suitable for passing to
 C<Genesis::Env::Deployment-E<gt>new()>.
 
   # Example
-  my $base = $mgr->_base_deployment_content('deploy', 'succeeded');
+  my $base = $mgr->_base_deployment_content('deploy', 'success');
   print ref($base); # prints 'HASH'
 
 =head2 _base_artifacts
@@ -614,16 +618,15 @@ timestamp string and a comparison operator into a normalised, fully-specified
 timestamp string suitable for lexicographic comparison against stored
 deployment timestamps.
 
-Missing trailing components are filled with boundary values: for C<< > >> and
-C<< >= >> comparisons, missing fields are filled with their maximum values
-(month 12, last day of month, hour 23, minute 59, second 59); for C<< < >> and
-C<< <= >> comparisons, missing fields are filled with their minimum values
-(month 01, day 01, hour 00, minute 00, second 00).
+The effective boundary direction is determined by C<$gt ^ $eq>: when the
+effective direction is true (C<< > >> or C<< <= >>), missing fields are filled
+with their maximum values (month 12, last day of month, hour 23, minute 59,
+second 59); when false (C<< < >> or C<< >= >>), missing fields are filled with
+their minimum values (month 01, day 01, hour 00, minute 00, second 00).
 
-After filling in the boundary values, the code adjusts the timestamp by one
-second to convert between inclusive and exclusive bounds: one second is
-subtracted for strict operators (C<< < >>, C<< > >>), and no adjustment is
-made for inclusive operators (C<< <= >>, C<< >= >>).
+After filling in the boundary values, the code adjusts the timestamp by
+subtracting one second when the effective direction is false (start-of-period
+fills), and makes no adjustment when true (end-of-period fills).
 
 B<Parameters:>
 
