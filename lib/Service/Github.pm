@@ -240,7 +240,7 @@ sub get_release_info {
 		$msg =~ s/\s*$//;
 		if ($code != 200) {
 			if ($code == 404 && $get_versions) {
-				if ($url =~ /v$versions->[0]/) {
+				if ($url =~ /v\Q$versions->[0]\E/) {
 					next;
 				}
 			}
