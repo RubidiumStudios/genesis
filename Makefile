@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check pod-check pod-check-syntax pod-check-quiet test test-quick test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed
+.PHONY: sanity-test compile-check pod-check pod-check-syntax pod-check-quiet test test-quick test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -115,3 +115,19 @@ endif
 
 pod-validate-changed:
 	@t/bin/pod-validate-ai --changed --base $(or $(BASE),main)
+
+# Install test dependencies via Homebrew and cpanm
+test-deps:
+	@command -v brew >/dev/null 2>&1 || { \
+		echo >&2 "Error: Homebrew is required but not installed."; \
+		echo >&2 "Install it from https://brew.sh"; \
+		exit 1; \
+	}
+	brew install shellcheck perl cpanminus
+	cpanm -n Carp::Always Expect PadWalker \
+		Test::Deep Test::Differences Test::Exception \
+		Test::Exit Test::Output Test::TCP
+
+# Install optional coverage dependencies (requires test-deps)
+test-deps-coverage: test-deps
+	cpanm -n Devel::Cover Template PPI::HTML Pod::Coverage::CountParents
