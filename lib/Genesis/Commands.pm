@@ -1012,6 +1012,10 @@ sub check_version { # {{{
 	my $v = $version;
 	if ($regex) {
 		$version =~ $regex; $v = $1;
+		if ($v && $v =~ /^dev\b/) {
+			debug("#Y{Version $v} of #C{$name} (development) being used - minimum of #W{$min} needed.");
+			return;
+		}
 		return "Could not determine version of $name from `#M{$cmd}`: Got '#C{$version}'"
 			unless $v && semver($v);
 	}
