@@ -12,7 +12,7 @@ BEGIN {
 }
 
 subtest 'Service::Github pure unit tests' => sub {
-	plan tests => 6;
+	plan tests => 7;
 
 	subtest 'new() constructor' => sub {
 		plan tests => 12;
@@ -139,6 +139,40 @@ subtest 'Service::Github pure unit tests' => sub {
 		$urls = $gh->release_version_urls('test-kit', '1.2.3');
 		is($urls->[0], 'https://api.github.com/repos/test-org/test-kit/releases/tags/1.2.3',
 			'complete URL structure correct');
+	};
+
+	subtest 'repo_names() filter logic' => sub {
+		plan tests => 3;
+
+		my $gh = Service::Github->new();
+		# Pre-populate repos cache to avoid API calls
+		$gh->{_repos} = [
+			{ name => 'cf-genesis-kit' },
+			{ name => 'bosh-genesis-kit' },
+			{ name => 'vault-genesis-kit' },
+			{ name => 'genesis' },
+			{ name => 'ci-tools' },
+		];
+
+		# All names without filter
+		my $all = $gh->repo_names();
+		is_deeply(
+			[sort @$all],
+			[sort qw(cf-genesis-kit bosh-genesis-kit vault-genesis-kit genesis ci-tools)],
+			'returns all repo names without filter'
+		);
+
+		# Filter with regex
+		my $kits = $gh->repo_names(qr/-genesis-kit$/);
+		is_deeply(
+			[sort @$kits],
+			[sort qw(cf-genesis-kit bosh-genesis-kit vault-genesis-kit)],
+			'filters names with regex'
+		);
+
+		# No match
+		my $none = $gh->repo_names(qr/^nonexistent-/);
+		is_deeply($none, [], 'returns empty arrayref when no match');
 	};
 };
 

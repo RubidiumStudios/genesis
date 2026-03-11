@@ -108,12 +108,10 @@ C<\@errors> element. The normal return path (lines 301-305) returns a
 two-element list C<(\@results, \@errors)>. Callers that unpack both
 values on a cache hit will receive C<undef> for C<\@errors>.
 
-=item GH-7 (medium)
+=item GH-7 (medium) E<mdash> B<RESOLVED>
 
-C<latest_version_of()> line 426: passes C<include_prerelease> (singular)
-to C<versions()>, but C<versions()> at line 328 checks
-C<include_prereleases> (plural). The key-name mismatch means pre-release
-filtering has no effect when calling C<latest_version_of()>.
+C<latest_version_of()> now passes C<include_prereleases> (plural) to
+C<versions()>, matching the key that C<versions()> checks at line 328.
 
 =back
 
@@ -845,9 +843,6 @@ version.
 
 Optional. If true, pre-release releases are considered when determining the
 latest version.
-
-B<Note:> Due to a parameter-name mismatch, this option currently has no
-effect. See GH-7 in L</KNOWN ISSUES>.
 
 =back
 
