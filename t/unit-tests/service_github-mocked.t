@@ -27,8 +27,9 @@ BEGIN {
 #   HEAD:
 #     ($status_code, $status_msg, $combined)
 #
-# We always return four elements so callers that unpack fewer
-# simply ignore the trailing ones.
+# The mock returns the queued arrayref as-is, so callers can
+# unpack as many elements as they need (typically 4 for
+# GET/POST/DELETE/PUT and 3 for HEAD).
 # ============================================================
 
 my @curl_calls;
@@ -467,9 +468,8 @@ subtest 'releases() method' => sub {
 		my $body    = encode_json_simple([$release]);
 		# HEAD check for releases endpoint
 		queue_curl_response(200, '200 OK', '');
-		# GET releases — one result, then empty to stop pagination
+		# GET releases — single page (no Link header, so no pagination)
 		queue_curl_response(200, '200 OK', $body, '');
-		queue_curl_response(200, '200 OK', encode_json_simple([]), '');
 		my @r1 = $gh->releases('cf-kit');
 		my $call_count = scalar @curl_calls;
 		# Second call — must use cache
@@ -490,9 +490,8 @@ subtest 'get_release_info() list mode' => sub {
 		reset_mocks();
 		my $gh    = Service::Github->new(org => 'test-org');
 		my @rels  = (make_release(version => '1.0.0'), make_release(version => '1.1.0'));
+		# Single page of releases (no Link header, so no pagination)
 		queue_curl_response(200, '200 OK', encode_json_simple(\@rels), '');
-		# Empty second response to stop pagination
-		queue_curl_response(200, '200 OK', encode_json_simple([]), '');
 		my ($results, $errors) = $gh->get_release_info('cf-kit', msg => undef);
 		isa_ok($results, 'ARRAY', 'results is arrayref');
 		isa_ok($errors,  'ARRAY', 'errors is arrayref');
@@ -504,8 +503,8 @@ subtest 'get_release_info() list mode' => sub {
 		reset_mocks();
 		my $gh   = Service::Github->new(org => 'test-org');
 		my @rels = (make_release(version => '2.0.0'));
+		# Single page (no Link header)
 		queue_curl_response(200, '200 OK', encode_json_simple(\@rels), '');
-		queue_curl_response(200, '200 OK', encode_json_simple([]), '');
 		my ($r1, $e1) = $gh->get_release_info('my-kit', msg => undef);
 		is(scalar @$r1, 1, 'first call returns 1 result');
 		# Second call hits cache — returns only the arrayref, $e2 is undef (GH-6)
@@ -657,17 +656,11 @@ subtest 'get_release_info() versions mode' => sub {
 		is(scalar @$results, 1, 'found via v-prefixed fallback URL');
 	};
 
-	subtest 'fatal error when both tag URLs fail' => sub {
+	subtest 'fatal=1 bails on non-404 error in versions mode' => sub {
 		reset_mocks();
 		my $gh = Service::Github->new(org => 'test-org');
-		# Both URLs (bare and v-prefixed) return 404
-		queue_curl_response(404, '404 Not Found', '', '');
-		queue_curl_response(404, '404 Not Found', '', '');
-		# With fatal=1, should bail after exhausting both URLs
-		# Note: with fatal=0 (default), it collects errors but does not bail
-		# on 404-in-versions mode it skips rather than bailing. We test fatal=1
-		# with a 500 error that is not a 404.
-		reset_mocks();
+		# In versions mode, 404s are silently skipped (v-prefix fallback).
+		# A non-404 error with fatal=1 triggers bail immediately.
 		queue_curl_response(500, '500 Server Error', 'down', '');
 		throws_ok {
 			$gh->get_release_info('cf-kit', versions => ['3.0.0'], fatal => 1, msg => undef);
