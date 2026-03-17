@@ -57,7 +57,7 @@ IPv4::Span - A module for handling spans of IPv4 addresses.
   # Get the CIDR blocks for the span
   my @cidrs = $span->cidrs();
   print "CIDRs: ", join(', ', @cidrs), "\n";
-  # >  192.168.1.1/32, 192.168.1.2/31, 192.168.4/30, 192.168.8/31, 192.168.10/32
+  # >  192.168.1.1/32, 192.168.1.2/31, 192.168.1.4/30, 192.168.1.8/31, 192.168.1.10/32
 
 =head1 DESCRIPTION
 
@@ -550,17 +550,6 @@ B<Returns:> A simplified result: an C<IPv4::Address> for single-IP results,
 an C<IPv4::Span> for contiguous ranges, or an C<IPv4::Range> for
 non-contiguous results.
 
-B<Errors:>
-
-=over 4
-
-=item C<"Cannot add an IPv4::Span object to a number">
-
-Raised when the span appears on the right side of an integer addition
-(e.g., C<5 + $span>).
-
-=back
-
 B<Examples:>
 
   my $span1 = IPv4::Span->new('192.168.1.1', '192.168.1.5');
@@ -606,17 +595,6 @@ B<Returns:> A simplified result: an C<IPv4::Address> for single-IP results,
 an C<IPv4::Span> for contiguous ranges, or an C<IPv4::Range> for
 non-contiguous results. Returns an empty C<IPv4::Range> if the number
 exceeds the span size.
-
-B<Errors:>
-
-=over 4
-
-=item C<"Cannot subtract an IPv4::Span object from a number">
-
-Raised when the span appears on the right side of an integer subtraction
-(e.g., C<5 - $span>).
-
-=back
 
 B<Examples:>
 
@@ -988,6 +966,11 @@ Returns the number of addresses in the span.
 
   Note: $new_span will actually be a IPv4::Range object if the removed span results in non-contiguous addresses.
 
+B<Errors:>
+
+Dies with C<"Cannot subtract an IPv4::Span object from a number"> if an
+integer appears on the left side of the C<-> operator (e.g. C<5 - $span>).
+
 =head2 Addition (+)
 
   my $new_span = $span + $other_span;
@@ -1002,6 +985,11 @@ Adds one span/address to another, or grows a span by the given number.  See the 
   print "New span: $new_span\n"; # prints '192.168.1.1-192.168.1.10'
 
   Note: $new_span will actually be a IPv4::Range object if the added span results in non-contiguous addresses.
+
+B<Errors:>
+
+Dies with C<"Cannot add an IPv4::Span object to a number"> if an integer
+appears on the left side of the C<+> operator (e.g. C<5 + $span>).
 
 =head2 Comparison (<=>)
 

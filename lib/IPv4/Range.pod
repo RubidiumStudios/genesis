@@ -188,7 +188,7 @@ B<Examples:>
 
   my $range = IPv4::Range->new('192.168.1.1-192.168.1.10');
   my $result = $range->subtract('192.168.1.5-192.168.1.7');
-  print "Resulting range: ", $result->range(), "\n"; # prints '192.168.1.1-192.168.1.4, 192.168.1.8-192.168.1.10'
+  print "Resulting range: ", $result->range(), "\n"; # prints '192.168.1.1-192.168.1.4,192.168.1.8-192.168.1.10'
 
 =head2 clone
 

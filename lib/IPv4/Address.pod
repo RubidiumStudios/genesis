@@ -221,6 +221,8 @@ B<Examples:>
 
 Returns the integer difference between two IPv4 addresses.
 
+B<Returns:> The integer difference between the two address values (C<$self->int - $other->int>).
+
 Dies with C<"Cannot diff an address with an integer - did you mean to call `->subtract`?"> if C<$other_address> is an integer rather than an address.
 
 
@@ -276,7 +278,7 @@ B<Examples:>
 
   my $bool = $address1->eq($address2);
 
-Checks if two IPv4 addresses are equal based on their string representations. Returns true if they are equal, false otherwise.
+Checks if two IPv4 addresses are equal using integer comparison via C<cmp>. Returns true if they are equal, false otherwise.
 
 
 B<Examples:>
