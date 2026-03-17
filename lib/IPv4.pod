@@ -138,17 +138,94 @@ Dies if the input is not a valid IPv4 range. See L<IPv4::Range/new> for details.
 
 Strips the leading class name from C<@args> if it matches C<IPv4>. This allows methods to work both as class methods (C<< IPv4->new(...) >>) and as plain function calls. Returns the remaining arguments as a list. This is an internal method and should not be called directly.
 
+B<Parameters:>
+
+=over 4
+
+=item C<@args>
+
+The argument list passed to the calling method. The first element is consumed if it equals the string C<"IPv4">.
+
+=back
+
+B<Returns:> The remaining arguments as a list, with the leading class name removed if present.
+
+B<Examples:>
+
+  # Called as a class method -- strips 'IPv4' from the front
+  my @stripped = __strip_call_ref('IPv4', '10.0.0.1');
+  # Returns: ('10.0.0.1')
+
+  # Called without a class name -- no stripping occurs
+  my @unchanged = __strip_call_ref('10.0.0.1');
+  # Returns: ('10.0.0.1')
+
 =head2 __is_integer
 
-  if (IPv4::__is_integer($arg)) { ... }
+  if (IPv4::__is_integer($value)) { ... }
 
-Returns true if C<$arg> is a plain scalar (not a reference) that matches the pattern C</^-?\d+$/>. Used by child classes to distinguish integer arguments from IPv4 strings or objects when handling operator overloading and method dispatch. This is an internal method and should not be called directly.
+Returns true if C<$value> is a plain scalar (not a reference) that matches the pattern C</^-?\d+$/>. Used by child classes to distinguish integer arguments from IPv4 strings or objects when handling operator overloading and method dispatch. This is an internal method and should not be called directly.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+The value to test. Returns false for any reference type regardless of content.
+
+=back
+
+B<Returns:> True (1) if C<$value> is an unblessed scalar matching C</^-?\d+$/>; false (empty string) otherwise.
+
+B<Examples:>
+
+  IPv4::__is_integer(42);        # Returns: 1
+  IPv4::__is_integer(-7);        # Returns: 1
+  IPv4::__is_integer('10.0.0.1'); # Returns: ''
+  IPv4::__is_integer([]);        # Returns: ''
 
 =head2 __autovivify
 
-  my $obj = __autovivify($arg);
+  my $obj = __autovivify($value);
 
-Converts C<$arg> into the appropriate IPv4 object. If C<$arg> is already an C<IPv4::Address>, C<IPv4::Span>, or C<IPv4::Range>, returns its simplified form. Otherwise, attempts to parse it via C<< IPv4->new($arg) >>. Dies with C<"Invalid IPv4 literal or object ..."> if the argument cannot be converted. Used internally by child classes to accept raw strings wherever an IPv4 object is expected.
+Converts C<$value> into the appropriate IPv4 object. If C<$value> is already
+an C<IPv4::Address>, C<IPv4::Span>, or C<IPv4::Range>, returns its simplified
+form. Otherwise, attempts to parse it via C<< IPv4->new($value) >>. Used
+internally by child classes to accept raw strings wherever an IPv4 object is
+expected.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+A string, integer, or existing C<IPv4::Address>, C<IPv4::Span>, or
+C<IPv4::Range> object to convert.
+
+=back
+
+B<Returns:> An C<IPv4::Address>, C<IPv4::Span>, or C<IPv4::Range> object.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Invalid IPv4 literal or object ...">
+
+Raised when the input cannot be parsed as a valid IPv4 address, span, or range.
+
+=back
+
+B<Examples:>
+
+  my $obj = __autovivify('192.168.1.0/24');
+  # Returns: an IPv4::Span object for 192.168.1.0-192.168.1.255
+
+  my $addr = IPv4::Address->new('10.0.0.1');
+  my $same = __autovivify($addr);
+  # Returns: the simplified form of the IPv4::Address object
 
 =head1 AUTHOR
 
