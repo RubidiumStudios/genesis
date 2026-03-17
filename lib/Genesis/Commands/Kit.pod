@@ -205,7 +205,7 @@ deployment repo.  With C<--remote>, queries the configured remote kit provider
 instead.  With C<--updates>, lists only remote versions newer than the locally
 installed version.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -318,7 +318,7 @@ The keyword C<latest> (resolves to the latest locally installed kit version)
 
 =back
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -406,7 +406,7 @@ omitted, the latest available version is fetched.
 When C<--as-dev> is specified, the downloaded kit is also decompiled into the
 C<dev/> directory of the current deployment repo.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -507,7 +507,7 @@ GitHub repository and compared using C<spruce diff>.  A C<spec_cache_dir>
 setting in C<~/.genesis/config> is used to cache downloaded spec archives and
 avoid repeated network fetches.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 

@@ -141,7 +141,7 @@ variable, rooted at C<GENESIS_ROOT>.  This wrapper ensures all hook-script
 calls to C<genesis> use the correct binary and working directory, even when
 the hook is executed in a different directory.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -174,7 +174,7 @@ B<Examples:>
 Renders Genesis color-coded terminal markup and prints the result to STDOUT.
 Uses the Genesis terminal color-sprint function internally.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -202,7 +202,7 @@ Sends a log message to the Genesis Perl logging system by invoking
 C<log_from_script> (in the C<Genesis::Helpers> Perl module) via C<perl>.
 This is how bash hook scripts write to the Genesis structured log.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -236,7 +236,7 @@ B<Examples:>
 Converts a string to title case (each word's first letter capitalised, rest
 lower-cased) using a Perl one-liner.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -265,7 +265,7 @@ B<Examples:>
 Converts an absolute file path into a human-readable form (e.g., replacing
 the home directory with C<~>) using the Genesis C<humanize_path> helper.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -294,7 +294,7 @@ Internal error-reporting function.  Logs all C<MESSAGE> lines at the
 C<@fatal> log level via C<genesis_log> (output is redirected to STDERR),
 then exits the current shell process.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -320,7 +320,7 @@ B<Examples:>
 Public alias for C<__bail>.  Kit hook scripts should use C<bail> instead of
 C<__bail>, as C<__bail> is intended for use within the helper library itself.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -352,7 +352,7 @@ wrong target.
 When C<SAFE_TARGET> matches C<GENESIS_TARGET_VAULT>, this wrapper is B<not>
 defined, allowing the real C<safe> CLI to be called normally.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -391,7 +391,7 @@ as a JSON object (via C<spruce json | jq -r .>).
 The function outputs nothing and returns silently if the requested key does
 not exist in Vault.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -439,7 +439,7 @@ B<Examples:>
 Returns true (exit code 0) if exodus data exists in Vault for the given
 C<ENV/TYPE> path; false (non-zero) otherwise.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -494,7 +494,7 @@ greater than or equal to C<MINIMUM>; non-zero otherwise.
 Temporarily disables the shell's C<errexit> (C<-e>) option during the
 comparison and restores it afterward to avoid spurious script failures.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -535,7 +535,7 @@ used.
 
 Delegates to C<genesis lookup "$GENESIS_ENVIRONMENT" KEY [DEFAULT]>.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -584,7 +584,7 @@ Looks up C<KEY> in the environment YAML files and prints the YAML type of
 its value: C<"map">, C<"list">, C<"scalar">, or an empty string if the key
 is absent or empty.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -640,7 +640,7 @@ Checks that the running Genesis version is at least C<MIN_VERSION>.  Skips
 the check when C<GENESIS_VERSION> ends in C<-dev>.  Prints an error message
 to STDERR and returns exit code 1 if the version requirement is not met.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -701,7 +701,7 @@ validates connectivity via C<Service::BOSH::Director>.
 When C<GENESIS_SHOW_BOSH_CMD> is set, prints the BOSH command to STDERR
 before executing.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -808,7 +808,7 @@ Each named object is checked only once (duplicates are skipped).  Results
 are displayed inline when checks are already in progress; otherwise the
 C<"[Checking cloud config]"> header is printed automatically.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -879,7 +879,7 @@ Tests whether the BOSH cloud config contains a single named object of
 C<TYPE>, without accumulating error messages or printing output.  Supports
 the same type names as C<cloud_config_needs>.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -928,7 +928,7 @@ B<Examples:>
 Queries the BOSH cloud config as JSON using C<jq>.  Lazily converts
 C<GENESIS_CLOUD_CONFIG> to JSON on the first call and caches the result.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -961,7 +961,7 @@ B<Examples:>
 Queries the BOSH runtime config as JSON using C<jq>.  Lazily converts
 C<GENESIS_RUNTIME_CONFIG> to JSON on the first call and caches the result.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -993,7 +993,7 @@ B<Examples:>
 Returns exit code 0 if C<FEATURE> is present in the space-separated
 C<GENESIS_REQUESTED_FEATURES> environment variable; non-zero otherwise.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1028,7 +1028,7 @@ Prints (to STDOUT) any features in C<GENESIS_REQUESTED_FEATURES> that are
 not listed among the C<VALID_FEATURE> arguments.  Features beginning with
 C<+> are always considered valid and are skipped.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1057,7 +1057,7 @@ Returns exit code 0 if every feature in C<GENESIS_REQUESTED_FEATURES> is
 present in the C<VALID_FEATURE> list (features beginning with C<+> are
 always accepted); returns exit code 1 if any feature is not recognised.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1084,7 +1084,7 @@ B<Examples:>
 Calls C<valid_features> and, if any unknown feature is found, calls
 C<__bail> with a human-readable list of the invalid flags.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1134,7 +1134,7 @@ For all other types the value is a scalar string stored in C<VARNAME>.
 
 =back
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1194,7 +1194,7 @@ B<Examples:>
 Appends a YAML parameter entry to the string variable C<VARNAME>.
 Handles scalar values, multi-line block scalars, and array values.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1249,7 +1249,7 @@ Appends comment lines to the string variable C<VARNAME> in YAML comment
 format (prefixed with C<#>).  When C<-e> is specified, each line is also
 printed to STDOUT (useful as a preamble displayed before a user prompt).
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1344,7 +1344,7 @@ not recognized.
 The editor is determined by the C<EDITOR> environment variable (defaults to
 C<vim>).
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1378,7 +1378,7 @@ C<$GENESIS_SECRETS_BASE/SRC_PATH> and stores it in CredHub at
 C</$GENESIS_CREDHUB_ROOT/DST_PATH>, then removes the source secret from
 Vault.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1423,7 +1423,7 @@ executable C<addon-*> scripts and C<addon-*.pm> Perl module hooks.  Shell
 scripts are invoked with the C<help> argument; Perl module hooks use the
 C<cmd_details> class method.  Both are displayed as additional addon entries.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 
@@ -1487,7 +1487,7 @@ Converts a dotted-decimal IPv4 address to its decimal integer equivalent.
 Used internally by C<cloud_config_needs static_ips> to count available
 static IP addresses.
 
-B<Arguments:>
+B<Parameters:>
 
 =over 4
 

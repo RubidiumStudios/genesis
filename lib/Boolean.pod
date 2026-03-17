@@ -103,9 +103,9 @@ more than one argument is passed.
 
 B<Examples:>
 
-    my $yes   = Boolean->parse("yes");      # Boolean true
-    my $zero  = Boolean->parse(0);          # Boolean false
-    my $undef = Boolean->parse("unknown");  # undef
+    my $yes   = Boolean->parse("yes");      # Returns: Boolean true
+    my $zero  = Boolean->parse(0);          # Returns: Boolean false
+    my $undef = Boolean->parse("unknown");  # Returns: undef
 
 =head2 of
 
@@ -173,19 +173,19 @@ B<Examples:>
 =head2 to_str
 
     my $string = $bool->to_str();
-    my $string = $bool->to_str($true_value);
-    my $string = $bool->to_str($true_value, $false_value);
+    my $string = $bool->to_str($tvalue);
+    my $string = $bool->to_str($tvalue, $fvalue);
 
 Converts the Boolean object to a string representation. By default, returns
 "true" for true values and "false" for false values.
 
 =over
 
-=item C<$true_value>
+=item C<$tvalue>
 
 B<(optional)> The string to return for true values. Defaults to C<"true">.
 
-=item C<$false_value>
+=item C<$fvalue>
 
 B<(optional)> The string to return for false values. When omitted, the
 method attempts to auto-derive the false value from registered boolean
@@ -206,13 +206,13 @@ appropriate value directly without additional processing.
 B<Examples:>
 
     my $true = Boolean->true;
-    print $true->to_str();              # "true"
-    print $true->to_str("YES", "NO");   # "YES"
-    print $true->to_str("ON");          # "ON" (auto-derives "OFF")
+    print $true->to_str();              # prints: true
+    print $true->to_str("YES", "NO");   # prints: YES
+    print $true->to_str("ON");          # prints: ON (auto-derives "OFF")
 
     my $false = Boolean->false;
-    print $false->to_str("YES", "NO");  # "NO"
-    print $false->to_str("ON");         # "OFF" (auto-derived)
+    print $false->to_str("YES", "NO");  # prints: NO
+    print $false->to_str("ON");         # prints: OFF (auto-derived)
 
 =head2 to_i
 
