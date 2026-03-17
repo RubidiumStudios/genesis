@@ -104,7 +104,7 @@ Similarly, when you add or subtract an integer from an Address, it will return a
 
 Creates a new IPv4 object. The type of object returned depends on the input arguments. If the input represents a single address, a C<IPv4::Address> object is returned. If the input represents a span of addresses, a C<IPv4::Span> object is returned. If the input represents a range of addresses, a C<IPv4::Range> object is returned.
 
-Dies if the input cannot be parsed as a valid IPv4 address, span, or range. The specific error depends on which child constructor is invoked — see the C<new> method documentation for C<IPv4::Address>, C<IPv4::Span>, and C<IPv4::Range>.
+Dies if the input cannot be parsed as a valid IPv4 address, span, or range. The specific error depends on which child constructor is invoked - see the C<new> method documentation for C<IPv4::Address>, C<IPv4::Span>, and C<IPv4::Range>.
 
 =head2 address
 

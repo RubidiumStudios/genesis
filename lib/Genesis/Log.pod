@@ -1,5 +1,3 @@
-=encoding utf8
-
 =head1 NAME
 
 Genesis::Log - Genesis logging subsystem providing structured, leveled, multi-target output

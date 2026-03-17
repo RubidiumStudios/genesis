@@ -1,5 +1,3 @@
-=encoding utf8
-
 =head1 NAME
 
 Genesis::Kit::Provider::Github - Github-based kit provider for Genesis deployment kits

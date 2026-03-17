@@ -96,7 +96,7 @@ B<Errors:>
 
 =item *
 
-C<invalid call to Boolean::parse - only one argument allowed> — raised if
+C<invalid call to Boolean::parse - only one argument allowed> - raised if
 more than one argument is passed.
 
 =back
@@ -148,17 +148,17 @@ B<Errors:>
 =item *
 
 C<Invalid call to Boolean::register_pair - must provide two strings of non-zero length>
-— raised if the argument count is not exactly two.
+- raised if the argument count is not exactly two.
 
 =item *
 
 C<Invalid true value - must be a non-empty string or an object that provides a string value>
-— raised if C<$true_value> is undefined, empty, or a non-stringifiable reference.
+- raised if C<$true_value> is undefined, empty, or a non-stringifiable reference.
 
 =item *
 
 C<Invalid false value - must be a non-empty string or an object that provides a string value>
-— raised if C<$false_value> is undefined, empty, or a non-stringifiable reference.
+- raised if C<$false_value> is undefined, empty, or a non-stringifiable reference.
 
 =back
 

@@ -1,5 +1,3 @@
-=encoding utf8
-
 =head1 NAME
 
 Genesis::Kit::Provider::GenesisCommunity - Genesis Community kit provider for Genesis deployment kits
@@ -13,7 +11,7 @@ Genesis::Kit::Provider::GenesisCommunity - Genesis Community kit provider for Ge
       type => 'genesis-community',
   );
 
-  # Or create one directly (no options needed — it is a singleton)
+  # Or create one directly (no options needed - it is a singleton)
   my $provider = Genesis::Kit::Provider::GenesisCommunity->new();
 
   # List available kits from the Genesis Community organization
@@ -51,7 +49,7 @@ C<github.com>.
 
 Creates a new C<GenesisCommunity> provider during C<genesis init> or
 C<genesis update> when the user selects C<genesis-community> as the
-provider type.  This method accepts no options — the provider target is
+provider type.  This method accepts no options - the provider target is
 fully determined by the class itself.
 
 Delegates immediately to L</new>.

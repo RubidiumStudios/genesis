@@ -1,5 +1,3 @@
-=encoding utf-8
-
 =head1 NAME
 
 Genesis::Commands - Command infrastructure and dispatch for Genesis CLI

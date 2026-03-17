@@ -1,5 +1,3 @@
-=encoding utf8
-
 =head1 NAME
 
 Service::Credhub - CredHub credential store service object
@@ -443,15 +441,15 @@ success and contains an error string on failure.
 
 B<Examples:>
 
-  # Scalar context — value only
+  # Scalar context - value only
   my $pw = $ch->get('db/password');
   # Returns: 'hunter2'
 
-  # Scalar context — specific key within the credential
+  # Scalar context - specific key within the credential
   my $cert = $ch->get('db/cert', 'certificate');
   # Returns: '-----BEGIN CERTIFICATE-----...'
 
-  # List context — value and error
+  # List context - value and error
   my ($val, $err) = $ch->get('db/password');
   die "Error: $err" if $err;
   # Returns: ('hunter2', undef) on success
@@ -618,7 +616,7 @@ B<Examples:>
   my $id = $ch->set('db/password', 'hunter2');
   # Returns: '4f7a1c2b-...' (CredHub credential ID)
 
-  # Store a plain value (list context — no die on error)
+  # Store a plain value (list context - no die on error)
   my ($out, $rc, $err) = $ch->set('db/password', 'hunter2');
   # Returns: ($json_output, 0, '') on success
 
@@ -713,9 +711,9 @@ Always dies with C<"Service::Credhub::keys method not supported">.
 
 B<Examples:>
 
-  # Do not call this method — it always dies
+  # Do not call this method - it always dies
   $ch->keys();
-  # Returns: never — always dies with "Service::Credhub::keys method not supported"
+  # Returns: never - always dies with "Service::Credhub::keys method not supported"
 
 =head2 delete
 
@@ -883,7 +881,7 @@ Optional. A relative or absolute credential path.
 
 =back
 
-B<Returns:> A string — the resolved full credential path.
+B<Returns:> A string - the resolved full credential path.
 
 B<Examples:>
 

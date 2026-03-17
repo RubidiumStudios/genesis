@@ -1,5 +1,3 @@
-=encoding UTF-8
-
 =head1 NAME
 
 Genesis::Hook::CloudConfig::LookupNetworkRef - Network reference resolver for cloud-config lookups
@@ -8,7 +6,7 @@ Genesis::Hook::CloudConfig::LookupNetworkRef - Network reference resolver for cl
 
     use Genesis::Hook::CloudConfig::LookupNetworkRef;
 
-    # Direct hash lookup — resolve 'default' from network data
+    # Direct hash lookup - resolve 'default' from network data
     my $ref = Genesis::Hook::CloudConfig::LookupNetworkRef->new('default');
     my $value = $ref->resolve($config, $network_data);
 
@@ -42,18 +40,18 @@ Three resolution strategies are supported, tried in priority order:
 
 =item 1.
 
-B<Code reference> — if C<$lookup_method> is a code reference, it is called
+B<Code reference> - if C<$lookup_method> is a code reference, it is called
 directly with C<($config, $network_data, $ref, @lookup_args)>.
 
 =item 2.
 
-B<Named method> — if C<$lookup_method> is a non-empty string and
+B<Named method> - if C<$lookup_method> is a non-empty string and
 C<$config-E<gt>can($lookup_method)> returns true, the method is invoked as
 C<$config-E<gt>$lookup_method($network_data, $ref, @lookup_args)>.
 
 =item 3.
 
-B<Direct hash lookup> — if C<$ref> exists as a key in C<$network_data>, its
+B<Direct hash lookup> - if C<$ref> exists as a key in C<$network_data>, its
 value is returned directly.
 
 =back
@@ -171,7 +169,7 @@ B<Examples:>
     my $cidr = $ref->resolve($config, $net_data);
     # Returns: value from $config->get_network_cidr($net_data, 'mgmt')
 
-    # Unknown reference — dies
+    # Unknown reference - dies
     my $ref = Genesis::Hook::CloudConfig::LookupNetworkRef->new('missing');
     $ref->resolve($config, $net_data);
     # Dies: Could not resolve reference 'missing' in network data.

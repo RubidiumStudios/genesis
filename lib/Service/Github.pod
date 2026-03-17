@@ -1,5 +1,3 @@
-=encoding utf8
-
 =head1 NAME
 
 Service::Github - GitHub API client for kit release discovery and download
@@ -159,7 +157,7 @@ B<Returns:> A blessed C<Service::Github> object.
 
 B<Examples:>
 
-  # Default client — github.com / genesis-community
+  # Default client - github.com / genesis-community
   my $gh = Service::Github->new();
   # Returns: a Service::Github object
 
@@ -302,10 +300,10 @@ B<Examples:>
 
 =head2 check
 
-  # Scalar context — undef on success, error string on failure
+  # Scalar context - undef on success, error string on failure
   my $err = $gh->check($url, $ref);
 
-  # List context — returns ($http_code, $error_string)
+  # List context - returns ($http_code, $error_string)
   my ($code, $err) = $gh->check($url, $ref);
 
 Performs a C<HEAD> request against the given URL (defaulting to
@@ -353,12 +351,12 @@ where C<$error_string> is C<undef> on success.
 
 B<Examples:>
 
-  # Scalar context — simple success/failure check
+  # Scalar context - simple success/failure check
   my $err = $gh->check();
   die "GitHub unreachable: $err" if $err;
   # Returns: undef on success
 
-  # List context — inspect the HTTP status code
+  # List context - inspect the HTTP status code
   my ($code, $err) = $gh->check($gh->releases_url('cf-kit'));
   if ($code == 404) {
     print "Repository not found\n";
@@ -630,12 +628,12 @@ parse errors.
 
 B<Examples:>
 
-  # List mode — all releases
+  # List mode - all releases
   my ($releases, $errors) = $gh->get_release_info('cf-kit', label => 'My GitHub');
   print scalar(@$releases), " releases\n";
   # Returns: (\@release_list, [])
 
-  # Versions mode — specific versions
+  # Versions mode - specific versions
   my ($results, $errors) = $gh->get_release_info(
     'cf-kit',
     versions => ['1.2.3', '1.3.0'],
@@ -663,11 +661,11 @@ Release notes body text.
 
 =item draft
 
-Boolean — true when the release is a draft.
+Boolean - true when the release is a draft.
 
 =item prerelease
 
-Boolean — true when the release is marked as a pre-release.
+Boolean - true when the release is marked as a pre-release.
 
 =item date
 
@@ -875,7 +873,7 @@ discarded.
 Accepted key types: C<ssh-rsa>, C<ssh-dss>, C<ssh-ed25519>,
 C<ecdsa-sha2-nistp256>, C<ecdsa-sha2-nistp384>, C<ecdsa-sha2-nistp521>.
 
-The username must conform to GitHub naming rules (1–39 characters,
+The username must conform to GitHub naming rules (1-39 characters,
 alphanumeric and hyphens, cannot start or end with a hyphen).
 
 B<Parameters:>
@@ -899,15 +897,15 @@ On failure, C<\@keys> is C<undef> and C<$error> is one of:
 
 =item *
 
-C<"User 'E<lt>usernameE<gt>' not found on E<lt>domainE<gt>"> — HTTP 404.
+C<"User 'E<lt>usernameE<gt>' not found on E<lt>domainE<gt>"> - HTTP 404.
 
 =item *
 
-C<"Rate limit exceeded (HTTP 403). Set GITHUB_AUTH_TOKEN to increase limit."> — HTTP 403.
+C<"Rate limit exceeded (HTTP 403). Set GITHUB_AUTH_TOKEN to increase limit."> - HTTP 403.
 
 =item *
 
-C<"HTTP Error E<lt>codeE<gt>: E<lt>msgE<gt>"> — any other non-200 status.
+C<"HTTP Error E<lt>codeE<gt>: E<lt>msgE<gt>"> - any other non-200 status.
 
 =back
 

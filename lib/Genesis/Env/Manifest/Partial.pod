@@ -1,5 +1,3 @@
-=encoding utf8
-
 =head1 NAME
 
 Genesis::Env::Manifest::Partial - Partially evaluated manifest for debugging spruce operator issues

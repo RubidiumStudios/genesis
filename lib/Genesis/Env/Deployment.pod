@@ -1,6 +1,5 @@
 =pod
 
-=encoding UTF-8
 
 =head1 NAME
 
@@ -350,13 +349,13 @@ B<Examples:>
 
 Returns the action performed.
 
-B<Returns:> String — either C<'deploy'> or C<'terminate'>.
+B<Returns:> String - either C<'deploy'> or C<'terminate'>.
 
 =head2 result()
 
 Returns the result of the action.
 
-B<Returns:> String — one of C<'success'>, C<'failed'>, C<'pending'>,
+B<Returns:> String - one of C<'success'>, C<'failed'>, C<'pending'>,
 C<'post-failed'>, or C<'assumed'>.
 
 =head2 succeeded()
@@ -370,7 +369,7 @@ B<Returns:> True if the result is C<'success'> or C<'post-failed'>, false otherw
 
 Returns true if the deployment has an error message stored.
 
-B<Returns:> Boolean — true (C<!!1>) if C<$self-E<gt>{data}{error}> is set and
+B<Returns:> Boolean - true (C<!!1>) if C<$self-E<gt>{data}{error}> is set and
 truthy, false otherwise.
 
 B<Examples:>
@@ -384,7 +383,7 @@ B<Examples:>
 
 Returns the error message for this deployment, if any.
 
-B<Returns:> String — the error message, or an empty string C<''> if no error
+B<Returns:> String - the error message, or an empty string C<''> if no error
 is stored.
 
 B<Examples:>
@@ -474,14 +473,14 @@ Returns the duration of the deployment in seconds, computed as
 C<completed - started>. Returns C<undef> if either timestamp is missing
 or is not a Time::Piece object.
 
-B<Returns:> Numeric — number of seconds between started and completed, or
+B<Returns:> Numeric - number of seconds between started and completed, or
 C<undef> if either timestamp is absent or not a Time::Piece object.
 
 =head2 reason()
 
 Returns the reason for the deployment.
 
-B<Returns:> String — the reason, or C<'unknown'> if no reason was set.
+B<Returns:> String - the reason, or C<'unknown'> if no reason was set.
 
 =head2 has_reason()
 
@@ -506,7 +505,7 @@ Always returns a scalar regardless of calling context.
 Returns the timestamp key for this deployment in EXODUS_TIME_FORMAT_SHORT
 format (e.g., C<'20240115143000'>).
 
-B<Returns:> String — the deployment timestamp key.
+B<Returns:> String - the deployment timestamp key.
 
 =head2 sequence()
 
@@ -527,7 +526,7 @@ The primary identifier is the C<shell> value from the user hash (with tmux
 session information stripped). Any additional non-shell roles that are set and
 not C<'unknown'> are appended in square brackets.
 
-B<Returns:> String — e.g., C<"/bin/bash [repo: /home/user/cf, vault: https://vault.example.com]">.
+B<Returns:> String - e.g., C<"/bin/bash [repo: /home/user/cf, vault: https://vault.example.com]">.
 
 =head2 user_colorized_roles()
 
@@ -589,12 +588,12 @@ If C<started> or C<completed> are not set on the object, they default to the
 deployment's C<timestamp> value (which is generally set during C<new()> and
 therefore often reflects the construction time). If no C<timestamp> is set on
 the object, they instead default to the time that C<commit()> is called. This
-mutation is a side effect of this method (known issue — FWT-708).
+mutation is a side effect of this method (known issue - FWT-708).
 
 B<Returns:>
 
 In list context: C<($out, $rc, $err)> from the underlying vault query. Note
-that list context bypasses the error check — the caller is responsible for
+that list context bypasses the error check - the caller is responsible for
 inspecting C<$rc>.
 
 In scalar context: Returns C<1> on success.
@@ -617,11 +616,11 @@ stderr.
 
 B<Examples:>
 
-    # Scalar context — throws on failure
+    # Scalar context - throws on failure
     $deployment->commit;
     # Returns: 1
 
-    # List context — caller checks return code
+    # List context - caller checks return code
     my ($out, $rc, $err) = $deployment->commit;
     die "vault write failed: $err" if $rc;
 
@@ -655,7 +654,7 @@ The artifact type name (e.g., C<'manifest'>) or filename
 
 =back
 
-B<Returns:> String — the raw contents of the artifact.
+B<Returns:> String - the raw contents of the artifact.
 
 B<Errors:>
 
@@ -707,7 +706,7 @@ B<Examples:>
     my $all = $deployment->artifacts(@artifacts);
     # Returns: { manifest => "---\n...", log => "Deploying...\n" }
 
-    # No args — returns all artifacts:
+    # No args - returns all artifacts:
     my $all = $deployment->artifacts;
     # Returns: { manifest => "---\n...", log => "Deploying...\n" }
 
@@ -914,7 +913,7 @@ B<Errors:>
 
 =over
 
-=item C<"No artifacts to archive — all artifact files were missing or empty">
+=item C<"No artifacts to archive - all artifact files were missing or empty">
 
 Thrown via C<bail()> if no files were added to the tar archive (all
 artifact paths were missing or empty on disk).
@@ -1030,7 +1029,7 @@ Returns the artifact type name for the given reference. If C<$ref> is already
 a type key in the artifact map, it is returned as-is. Otherwise, returns the
 type whose mapped filename equals C<$ref>.
 
-B<Returns:> String — the artifact type name.
+B<Returns:> String - the artifact type name.
 
 B<Examples:>
 
@@ -1048,7 +1047,7 @@ Returns the artifact filename for the given reference. If C<$ref> is a type
 key in the artifact map, returns its mapped filename. Otherwise, returns
 C<$ref> if it exists as a value (filename) in the map.
 
-B<Returns:> String — the artifact filename.
+B<Returns:> String - the artifact filename.
 
 B<Examples:>
 
@@ -1097,7 +1096,7 @@ match either form. If called as an instance method on a
 Genesis::Env::Deployment object, the object argument is consumed and the next
 argument is used as the timestamp.
 
-B<Returns:> String — timestamp in EXODUS_TIME_FORMAT_SHORT format.
+B<Returns:> String - timestamp in EXODUS_TIME_FORMAT_SHORT format.
 
 B<Examples:>
 

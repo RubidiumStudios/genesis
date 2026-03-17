@@ -1,5 +1,3 @@
-=encoding UTF-8
-
 =head1 NAME
 
 Genesis::Config - Configuration file management with multi-layer value resolution
@@ -111,7 +109,7 @@ B<Errors:>
 
 =item *
 
-C<"No path to config file was specified - cannot autosave"> — raised if
+C<"No path to config file was specified - cannot autosave"> - raised if
 C<$autosave> is true but C<$path> is undefined.
 
 =back
@@ -163,7 +161,7 @@ B<Examples:>
 
     my $bool = $cfg->loaded;
 
-Tests whether the config has been initialized — either loaded from disk or
+Tests whether the config has been initialized - either loaded from disk or
 written to disk at least once. A config that has never been accessed from a
 file that does not yet exist is not considered loaded.
 
@@ -180,7 +178,7 @@ B<Examples:>
 B<Re-entrancy note:> During C<_load()>, the re-entrancy guard causes
 nested calls to skip loading without setting C<persistent_signature>.
 In this transient state, C<loaded()> returns false for the nested caller.
-This is intentional — it allows C<Genesis::Log> to safely fall back to
+This is intentional - it allows C<Genesis::Log> to safely fall back to
 default output settings when the configuration file is still being read.
 On successful load, the outermost C<_load()> call sets
 C<persistent_signature> upon completion, after which C<loaded()> returns
@@ -290,7 +288,7 @@ B<Errors:>
 
 =item *
 
-C<"Cannot check for key in configuration without a key"> — raised if C<$key>
+C<"Cannot check for key in configuration without a key"> - raised if C<$key>
 is undefined.
 
 =back
@@ -329,7 +327,7 @@ B<Errors:>
 
 =item *
 
-C<"Cannot check for key in configuration without a key"> — raised if C<$key>
+C<"Cannot check for key in configuration without a key"> - raised if C<$key>
 is undefined.
 
 =back
@@ -399,7 +397,7 @@ changed. Requires a path to have been set on the object.
 
 =back
 
-B<Returns:> The result of C<changed()> after the write — true if the config
+B<Returns:> The result of C<changed()> after the write - true if the config
 now differs from the persisted state, false if not.
 
 B<Errors:>
@@ -408,12 +406,12 @@ B<Errors:>
 
 =item *
 
-C<"Cannot update key in configuration without a key"> — raised (via
+C<"Cannot update key in configuration without a key"> - raised (via
 C<_update_source()>) if C<$key> is undefined.
 
 =item *
 
-C<"Cannot save configuration without a path"> — raised if C<$save> is true
+C<"Cannot save configuration without a path"> - raised if C<$save> is true
 but no path was set on the config object.
 
 =back
@@ -448,7 +446,7 @@ changed. Requires a path to have been set on the object.
 
 =back
 
-B<Returns:> The result of C<changed()> after the removal — true if the config
+B<Returns:> The result of C<changed()> after the removal - true if the config
 now differs from the persisted state, false if not.
 
 B<Examples:>
@@ -480,24 +478,24 @@ B<Errors:>
 
 =item *
 
-C<"Cannot save configuration without a path"> — raised if no path was set
+C<"Cannot save configuration without a path"> - raised if no path was set
 on the config object.
 
 =item *
 
-C<"Unable to create tempfile for YAML conversion: $!"> — raised if the
+C<"Unable to create tempfile for YAML conversion: $!"> - raised if the
 temporary JSON file used for YAML conversion cannot be opened. C<$!> is
 the system error message, interpolated directly into the string.
 
 =item *
 
-C<"Failed to convert configuration file %s to yaml: %s"> — raised if the
+C<"Failed to convert configuration file %s to yaml: %s"> - raised if the
 C<spruce merge> command fails. The first C<%s> is the file path and the
 second is the error output from C<spruce>.
 
 =item *
 
-C<"Failed to write configuration file to %s: %s"> — raised if the output
+C<"Failed to write configuration file to %s: %s"> - raised if the output
 file cannot be opened for writing. The first C<%s> is the file path and the
 second is the system error message.
 
@@ -632,7 +630,7 @@ B<Errors:>
 
 =item *
 
-C<"Configuration validation failed for #C{%s}:%s"> — raised via C<bail()> if
+C<"Configuration validation failed for #C{%s}:%s"> - raised via C<bail()> if
 any validation errors are found. The first C<%s> is the config file path
 (wrapped in C<#C{}> for color highlighting); the second is a formatted
 bullet-list of all error messages.
@@ -712,7 +710,7 @@ invalidated by C<_update_source()>.
 
     $self->_explicit_contents
 
-Returns the merged I<set>+I<loaded> hash reference — the subset of values
+Returns the merged I<set>+I<loaded> hash reference - the subset of values
 that are written to disk by C<save()>. Env and default values are excluded.
 Triggers lazy loading from disk if needed. The result is cached and
 invalidated by C<_update_source()> whenever the I<set> or I<loaded> store
@@ -757,7 +755,7 @@ so it only affects the duration of the current load operation.
 B<Non-existent file note:> When the file does not exist and C<autosave>
 is disabled, C<_load()> completes without setting C<persistent_signature>.
 In this case C<loaded()> remains false after the load attempt returns.
-This is expected — a config that has never been persisted is not considered
+This is expected - a config that has never been persisted is not considered
 loaded.
 
 B<Errors:>
@@ -766,12 +764,12 @@ B<Errors:>
 
 =item *
 
-C<"Cannot load configuration without a path"> — raised if no path is
+C<"Cannot load configuration without a path"> - raised if no path is
 available.
 
 =item *
 
-C<"Failed to load %s: %s"> — raised if the YAML file cannot be read or
+C<"Failed to load %s: %s"> - raised if the YAML file cannot be read or
 parsed. The first C<%s> is the file path and the second is the error detail.
 
 =back
@@ -815,18 +813,18 @@ B<Errors:>
 
 =item *
 
-C<"Cannot update key in configuration without a source"> — raised if
+C<"Cannot update key in configuration without a source"> - raised if
 C<$source> is undefined.
 
 =item *
 
-C<"Cannot update key in configuration without a key"> — raised if C<$key>
+C<"Cannot update key in configuration without a key"> - raised if C<$key>
 is undefined.
 
 =item *
 
 C<"Invalid source '$source' - must be one of: env, set, loaded, default">
-— raised if C<$source> is not one of the four recognized source names.
+- raised if C<$source> is not one of the four recognized source names.
 
 =back
 
@@ -867,31 +865,31 @@ B<Examples:>
     my @errs = $self->_validate_key('log_level', {type => 'enum', values => [qw(debug info)]});
     # Returns: () if value is valid, or a list of error strings if not
 
-B<Errors:> (internal — these call C<bug()> and abort rather than returning
+B<Errors:> (internal - these call C<bug()> and abort rather than returning
 errors)
 
 =over 4
 
 =item *
 
-C<"Schema for $key has no type"> — raised if the schema entry has no C<type>
+C<"Schema for $key has no type"> - raised if the schema entry has no C<type>
 key.
 
 =item *
 
 C<"Schema for array $key has no envsplit, but was given a string value: #ri{%s}">
-— raised if an array key received a string value but the schema provides no
+- raised if an array key received a string value but the schema provides no
 C<envsplit> pattern for splitting it.
 
 =item *
 
-C<"Schema for array $key hash value has no schema"> — raised if a C<hash>
+C<"Schema for array $key hash value has no schema"> - raised if a C<hash>
 subtype is encountered inside an array but the schema has no nested C<schema>
 key.
 
 =item *
 
-C<"Cannot normalize key '$key' - no source found"> — raised if a C<boolean>
+C<"Cannot normalize key '$key' - no source found"> - raised if a C<boolean>
 or C<array> value needs to be normalized in-place but C<get_source()> returns
 C<undef> for that key.
 

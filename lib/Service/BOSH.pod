@@ -1,5 +1,3 @@
-=encoding utf8
-
 =head1 NAME
 
 Service::BOSH - Abstract base class for BOSH service objects
@@ -160,10 +158,10 @@ B<Examples:>
 
 =head2 available_stemcells
 
-  # List context — returns a list of stemcell objects
+  # List context - returns a list of stemcell objects
   my @stemcells = Service::BOSH->available_stemcells(%opts);
 
-  # Scalar context — returns an array reference
+  # Scalar context - returns an array reference
   my $stemcells = Service::BOSH->available_stemcells(%opts);
 
 Queries bosh.io for available stemcells matching the given criteria.
@@ -253,17 +251,17 @@ The command in C<@cmd> may be provided in three forms:
 
 =item *
 
-A string beginning with C<bosh> — the leading C<bosh> token is replaced
+A string beginning with C<bosh> - the leading C<bosh> token is replaced
 with the resolved CLI path.
 
 =item *
 
-A string containing shell operators (C<|> or variable references) — the CLI
+A string containing shell operators (C<|> or variable references) - the CLI
 path is prepended to the entire string for shell interpolation.
 
 =item *
 
-A plain subcommand list (e.g. C<'deploy', $manifest>) — the CLI path and
+A plain subcommand list (e.g. C<'deploy', $manifest>) - the CLI path and
 any C<-n> flag are unshifted onto the argument list.
 
 =back

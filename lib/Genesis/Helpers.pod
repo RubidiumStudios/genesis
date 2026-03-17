@@ -1,5 +1,3 @@
-=encoding utf8
-
 =head1 NAME
 
 Genesis::Helpers - Bash helper library for Genesis kit hooks
@@ -9,7 +7,7 @@ Genesis::Helpers - Bash helper library for Genesis kit hooks
     # In Perl -- write the helper script to a kit workspace
     Genesis::Helpers->write($workspace_path);
 
-    # In kit hook scripts — source the helper and use its functions
+    # In kit hook scripts - source the helper and use its functions
     genesis do ...
     exodus "kit_version"
     lookup "params.key" "default"
@@ -360,7 +358,7 @@ B<Arguments:>
 
 =item C<ARGS...>
 
-Any arguments (ignored — the function always bails when defined).
+Any arguments (ignored - the function always bails when defined).
 
 =back
 
@@ -723,15 +721,15 @@ B<Errors:>
 
 =item *
 
-C<"[ERROR] BOSH CLI command not specified - this is a bug in Genesis, or you are running $0 outside of Genesis"> — C<GENESIS_BOSH_COMMAND> is unset on the legacy path.
+C<"[ERROR] BOSH CLI command not specified - this is a bug in Genesis, or you are running $0 outside of Genesis"> - C<GENESIS_BOSH_COMMAND> is unset on the legacy path.
 
 =item *
 
-C<"[ERROR] Environment not found for BOSH Director -- please ensure you've configured your BOSH alias used by this environment"> — C<BOSH_ENVIRONMENT> or C<BOSH_CA_CERT> could not be resolved.
+C<"[ERROR] Environment not found for BOSH Director -- please ensure you've configured your BOSH alias used by this environment"> - C<BOSH_ENVIRONMENT> or C<BOSH_CA_CERT> could not be resolved.
 
 =item *
 
-C<"[ERROR] Could not connect to BOSH director '#M{ALIAS}' (#M{ENVIRONMENT})"> — director is unreachable or authentication failed.
+C<"[ERROR] Could not connect to BOSH director '#M{ALIAS}' (#M{ENVIRONMENT})"> - director is unreachable or authentication failed.
 
 =back
 
@@ -762,11 +760,11 @@ B<Errors:>
 
 =item *
 
-C<"Cannot determine CPI from BOSH director - failed to communicate with BOSH director: DETAIL"> — the C<bosh env> command failed.
+C<"Cannot determine CPI from BOSH director - failed to communicate with BOSH director: DETAIL"> - the C<bosh env> command failed.
 
 =item *
 
-C<"Cannot determine CPI from BOSH director - no response from BOSH director"> — the C<bosh env> command succeeded but returned an empty CPI.
+C<"Cannot determine CPI from BOSH director - no response from BOSH director"> - the C<bosh env> command succeeded but returned an empty CPI.
 
 =back
 
@@ -802,7 +800,7 @@ Supported types (singular or plural forms accepted):
 
 =item * C<az> / C<azs>
 
-=item * C<static_ips> — special form; counts available static IPs in C<NETWORK> and verifies at least C<COUNT> are available
+=item * C<static_ips> - special form; counts available static IPs in C<NETWORK> and verifies at least C<COUNT> are available
 
 =back
 
@@ -831,19 +829,19 @@ B<Errors:>
 
 =item *
 
-C<"cloud_config_needs() - must specify a type"> — C<TYPE> is missing.
+C<"cloud_config_needs() - must specify a type"> - C<TYPE> is missing.
 
 =item *
 
-C<"cloud_config_needs(static_ips) - must supply network name"> — network name missing for C<static_ips> check.
+C<"cloud_config_needs(static_ips) - must supply network name"> - network name missing for C<static_ips> check.
 
 =item *
 
-C<"cloud_config_needs(static_ips) - must supply static_ip count"> — count missing for C<static_ips> check.
+C<"cloud_config_needs(static_ips) - must supply static_ip count"> - count missing for C<static_ips> check.
 
 =item *
 
-C<"cloud_config_needs(): invalid cloud-config object type 'TYPE'; must be one of vm_type, vm_extension, disk_type, or az"> — unknown type, exits with code 77.
+C<"cloud_config_needs(): invalid cloud-config object type 'TYPE'; must be one of vm_type, vm_extension, disk_type, or az"> - unknown type, exits with code 77.
 
 =back
 
@@ -905,11 +903,11 @@ B<Errors:>
 
 =item *
 
-C<"cloud_config_has() - must specify a type"> — C<TYPE> is missing.
+C<"cloud_config_has() - must specify a type"> - C<TYPE> is missing.
 
 =item *
 
-C<"cloud_config_has() - must specify a name"> — C<NAME> is missing.
+C<"cloud_config_has() - must specify a name"> - C<NAME> is missing.
 
 =item *
 

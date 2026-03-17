@@ -59,35 +59,35 @@ The following package-global ANSI escape sequence variables are exported by defa
 
 =item C<$ansi_reset_line>
 
-C<"\r\e[2K"> — Move cursor to column 0 and erase the entire line.
+C<"\r\e[2K"> - Move cursor to column 0 and erase the entire line.
 
 =item C<$ansi_clear_to_eol>
 
-C<"\e[0K"> — Erase from the cursor position to the end of the line.
+C<"\e[0K"> - Erase from the cursor position to the end of the line.
 
 =item C<$ansi_cursor_up>
 
-C<"\e[A"> — Move cursor up one line.
+C<"\e[A"> - Move cursor up one line.
 
 =item C<$ansi_cursor_down>
 
-C<"\e[B"> — Move cursor down one line.
+C<"\e[B"> - Move cursor down one line.
 
 =item C<$ansi_hide_cursor>
 
-C<"\e[?25l"> — Hide the terminal cursor.
+C<"\e[?25l"> - Hide the terminal cursor.
 
 =item C<$ansi_show_cursor>
 
-C<"\e[?25h"> — Show the terminal cursor.
+C<"\e[?25h"> - Show the terminal cursor.
 
 =item C<$ansi_save_cursor>
 
-C<"\e[s"> — Save the current cursor position.
+C<"\e[s"> - Save the current cursor position.
 
 =item C<$ansi_restore_cursor>
 
-C<"\e[u"> — Restore the previously saved cursor position.
+C<"\e[u"> - Restore the previously saved cursor position.
 
 =back
 
@@ -211,11 +211,11 @@ then applies the Genesis color markup language to the result:
 
 =over 4
 
-=item * C<#CODE{text}> — colorize C<text> with the given color code
+=item * C<#CODE{text}> - colorize C<text> with the given color code
 
-=item * C<#CODE@{glyph}> — substitute a named glyph symbol, then colorize it
+=item * C<#CODE@{glyph}> - substitute a named glyph symbol, then colorize it
 
-=item * C<#E{name}> — substitute a named emoji character
+=item * C<#E{name}> - substitute a named emoji character
 
 =back
 
@@ -298,7 +298,7 @@ B<Examples:>
 
   my $len = csize($str);
 
-Returns the display width of C<$str> as it would appear on the terminal — that is,
+Returns the display width of C<$str> as it would appear on the terminal - that is,
 the character count after stripping all color markup and adding back the rendered
 width of any emoji characters (which expand to their Unicode codepoint representations).
 
@@ -474,15 +474,15 @@ Type values and their defaults:
 
 =over 4
 
-=item C<"good"> — green check mark (C<✔ >)
+=item C<"good"> - green check mark (C<✔ >)
 
-=item C<"bad"> — red cross (C<✘ >)
+=item C<"bad"> - red cross (C<✘ >)
 
-=item C<"warn"> — yellow warning sign (C<⚠ >)
+=item C<"warn"> - yellow warning sign (C<⚠ >)
 
-=item C<"empty"> — two spaces
+=item C<"empty"> - two spaces
 
-=item any other value or empty string — bullet (C<•>)
+=item any other value or empty string - bullet (C<•>)
 
 =back
 
@@ -603,16 +603,16 @@ Returns one of:
 
 =over 4
 
-=item C<"terminal"> — the filehandle is connected to a terminal
+=item C<"terminal"> - the filehandle is connected to a terminal
 
-=item C<"pipe"> — the filehandle is a named pipe
+=item C<"pipe"> - the filehandle is a named pipe
 
-=item The resolved file path — if the filehandle is a regular file and C</proc/self/fd>
+=item The resolved file path - if the filehandle is a regular file and C</proc/self/fd>
 is available to resolve the inode
 
-=item C<"file"> — if the filehandle is a regular file but the path cannot be resolved
+=item C<"file"> - if the filehandle is a regular file but the path cannot be resolved
 
-=item C<"unknown device"> — for any other filehandle type
+=item C<"unknown device"> - for any other filehandle type
 
 =back
 
@@ -1166,9 +1166,9 @@ C<W>/C<w> (light grey/white). Uppercase gives the bright variant.
 
 B<Parameters:>
 
-C<$fg> — foreground color letter, or undef for no foreground change.
+C<$fg> - foreground color letter, or undef for no foreground change.
 
-C<$bg> — background color letter, or undef for no background change.
+C<$bg> - background color letter, or undef for no background change.
 
 B<Returns:>
 
@@ -1195,9 +1195,9 @@ Returns C<""> if C<$msg> is empty. Returns C<$msg> unchanged if C<NOCOLOR> is se
 
 B<Parameters:>
 
-C<$c> — a color code string (one to four characters from C<[-IUKRGYBMPCWiuk*]>).
+C<$c> - a color code string (one to four characters from C<[-IUKRGYBMPCWiuk*]>).
 
-C<$msg> — the text to colorize.
+C<$msg> - the text to colorize.
 
 B<Returns:>
 
@@ -1223,9 +1223,9 @@ C<"^-">, C<"O">, C<"@">, C<"[ ]">, C<"[x]">, C<"X">, C<"_">.
 
 B<Parameters:>
 
-C<$c> — color code string, or empty string for no colorization.
+C<$c> - color code string, or empty string for no colorization.
 
-C<$glyph> — the glyph key to look up.
+C<$glyph> - the glyph key to look up.
 
 B<Returns:>
 
@@ -1253,7 +1253,7 @@ C<"tada">, C<"tmyn">, C<"notice">, C<"megaphone">, C<"noentry">.
 
 B<Parameters:>
 
-C<$name> — the emoji name key.
+C<$name> - the emoji name key.
 
 B<Returns:>
 
@@ -1278,11 +1278,11 @@ for cell alignment.
 
 B<Parameters:>
 
-C<$str> — the string to align.
+C<$str> - the string to align.
 
-C<$width> — the target display width.
+C<$width> - the target display width.
 
-C<$align> — alignment: C<"l"> (left), C<"r"> (right), or anything else (center).
+C<$align> - alignment: C<"l"> (left), C<"r"> (right), or anything else (center).
 
 B<Returns:>
 
@@ -1310,11 +1310,11 @@ line per row height, padding shorter cells with spaces.
 
 B<Parameters:>
 
-C<$row> — an array reference of cell content strings.
+C<$row> - an array reference of cell content strings.
 
-C<$col_widths> — an array reference of integer column widths.
+C<$col_widths> - an array reference of integer column widths.
 
-C<$col_align> — an array reference of alignment characters (C<"l">, C<"r">, C<"c">).
+C<$col_align> - an array reference of alignment characters (C<"l">, C<"r">, C<"c">).
 
 B<Returns:>
 
