@@ -229,6 +229,204 @@ Converts the Boolean object to a JSON::PP::Boolean representation for use
 with JSON serialization. Returns JSON::PP->true() for true values and
 JSON::PP->false() for false values. This method requires JSON::PP at runtime.
 
+=head1 INTERNAL METHODS
+
+These methods are internal to the implementation. They may change without
+notice and should not be called directly.
+
+=head2 _process_class_args
+
+    my ($class, @args) = _process_class_args(@_);
+
+Normalises C<@_> for methods that can be called as either class methods or
+instance methods. If the first element of C<@_> is the string C<"Boolean">
+it is treated as the class name and the list is returned unchanged. Otherwise
+C<"Boolean"> is prepended so the caller always receives a consistent
+C<($class, @args)> structure.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@_>
+
+The raw argument list passed to the calling method.
+
+=back
+
+B<Returns:>
+
+A list with C<"Boolean"> as the first element followed by the original
+arguments (minus the class name if one was already present).
+
+B<Examples:>
+
+    # Called as a class method - class name already present
+    my ($class, @rest) = _process_class_args('Boolean', 'foo');
+    # $class eq 'Boolean', @rest == ('foo')
+
+    # Called as a plain function - class name prepended
+    my ($class, @rest) = _process_class_args('foo');
+    # $class eq 'Boolean', @rest == ('foo')
+
+=head2 _find_boolean_pairing
+
+    my ($true_str, $false_str, $is_true) = _find_boolean_pairing($value);
+
+Looks up C<$value> in the registered boolean-pairs registry (obtained via
+C<_get_pairs_ref>) performing a case-insensitive search. If a matching pair
+is found, the true and false strings are returned with capitalisation
+adjusted to match the pattern of C<$value> (via C<_preserve_case>).
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+The string to look up. Matched case-insensitively against both the true
+and false sides of every registered pair.
+
+=back
+
+B<Returns:>
+
+In list context, returns a three-element list C<($true_str, $false_str,
+$is_true)>. C<$true_str> and C<$false_str> are the matched pair with
+preserved capitalisation. C<$is_true> is 1 if C<$value> matched the true
+side of the pair, 0 if it matched the false side. Returns an empty list
+(C<undef> in scalar context) when no matching pair is found.
+
+B<Examples:>
+
+    my ($t, $f, $is_true) = _find_boolean_pairing('YES');
+    # Returns: ('YES', 'NO', 1)
+
+    my ($t, $f, $is_true) = _find_boolean_pairing('off');
+    # Returns: ('on', 'off', 0)
+
+    my @result = _find_boolean_pairing('unknown');
+    # Returns: () -- empty list, no match
+
+=head2 _get_pairs_ref
+
+    my $pairs = Boolean->_get_pairs_ref;
+
+Returns a reference to the package-level hash that stores the registered
+boolean pairs. Keys are the true values in lowercase; values are the
+corresponding false values in lowercase. The hash is initialised on first
+call with a built-in set of common boolean word pairs and is stored as the
+package variable C<$Boolean::_pairs>.
+
+B<Parameters:>
+
+None.
+
+B<Returns:>
+
+A hash reference. Keys are lowercase true-value strings; values are the
+corresponding lowercase false-value strings.
+
+B<Examples:>
+
+    my $pairs = Boolean->_get_pairs_ref;
+    # $pairs->{'yes'} eq 'no'   # Returns: 1
+    # $pairs->{'on'}  eq 'off'  # Returns: 1
+
+=head2 _preserve_case
+
+    my $result = _preserve_case($original, $target);
+
+Applies the capitalisation pattern of C<$original> to C<$target>. Three
+patterns are recognised: all-lowercase, ALL-UPPERCASE, and First-letter
+capitalised. For any other pattern the target is returned as-is (lowercase).
+
+B<Parameters:>
+
+=over 4
+
+=item C<$original>
+
+The string whose capitalisation pattern is to be matched.
+
+=item C<$target>
+
+The string to be recapitalised.
+
+=back
+
+B<Returns:>
+
+The recapitalised version of C<$target> as a plain string.
+
+B<Examples:>
+
+    _preserve_case('YES', 'no');    # Returns: 'NO'
+    _preserve_case('Yes', 'no');    # Returns: 'No'
+    _preserve_case('yes', 'no');    # Returns: 'no'
+    _preserve_case('yEs', 'no');    # Returns: 'no'  (unrecognised pattern)
+
+=head2 _compare
+
+    my $bool_val = $self->_compare($other);
+    my $bool_val = $self->_compare($other, $str_context);
+
+Implements the C<==> and C<eq> overloaded comparison operators. When
+C<$other> is a Boolean object, the underlying scalar values are compared
+directly. Otherwise C<$other> is converted: using C<parse()> in string
+context (C<eq>) or C<of()> in numeric context (C<==>), then compared
+against the invoking object's underlying value.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$other>
+
+The value to compare against. May be a Boolean object or any scalar.
+
+=item C<$str_context>
+
+B<(optional)> A boolean flag. When true the comparison is performed in
+string context and C<$other> is converted via C<parse()>. When false or
+omitted, C<$other> is converted via C<of()>.
+
+=back
+
+B<Returns:>
+
+1 if the two values are considered equal, the empty string (false) otherwise.
+
+B<Examples:>
+
+    my $t = Boolean->true;
+    $t->_compare(Boolean->true);   # Returns: 1
+    $t->_compare(1);               # Returns: 1
+    $t->_compare('yes', 1);        # Returns: 1  (string context)
+    $t->_compare(Boolean->false);  # Returns: '' (false)
+
+=head2 _invert
+
+    my $opposite = $self->_invert;
+
+Returns the opposite Boolean singleton. Implements the C<!> overloaded
+operator.
+
+B<Parameters:>
+
+None beyond the implicit invocant.
+
+B<Returns:>
+
+C<Boolean->false> when the invocant is true; C<Boolean->true> when the
+invocant is false.
+
+B<Examples:>
+
+    my $t = Boolean->true;
+    my $f = $t->_invert;   # Returns: Boolean false
+    my $t2 = $f->_invert;  # Returns: Boolean true
+
 =head1 OPERATOR OVERLOADING
 
 The Boolean package overloads the following operators for natural usage:
