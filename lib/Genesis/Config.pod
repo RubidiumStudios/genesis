@@ -730,7 +730,7 @@ internal logging triggers a config read.
 Modifies the object in-place (C<loaded_values>, C<persistent_signature>).
 
 B<Re-entrancy guard:> The guard (C<return if $self-E<gt>{_loading}>) prevents
-infinite recursion when internal operations (e.g., C<debug> logging)
+infinite recursion when internal operations (e.g., C<debug()> logging)
 trigger a read from this same config object. When the guard fires:
 
 =over 4
