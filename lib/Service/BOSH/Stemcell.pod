@@ -427,39 +427,8 @@ B<Examples:>
 =head2 is_type
 
   my $bool = $sc->is_type($type);
-  my $bool = $sc->is_light();
-  my $bool = $sc->is_full();
-  my $bool = $sc->is_local();
 
-C<is_type> returns true if the stemcell's type matches C<$type>.
-
-The following convenience methods are also provided:
-
-=over 4
-
-=item C<is_light()>
-
-Returns true if the stemcell type is C<'light'>.
-
-=item C<is_full()>
-
-Returns true if the stemcell type is C<'regular'> (a full disk image).
-
-=item C<is_local()>
-
-Returns true if the stemcell URL is not an HTTP or HTTPS URL (i.e. it refers
-to a local file path).
-
-=item C<download($file)>
-
-B<Not implemented.> Always dies with C<"Downloading stemcell from %s is not
-implemented yet">. C<%s> is the stemcell's URL. The C<$file> parameter and
-the C<return 1> statement that follows the error are unreachable dead code.
-
-The unused imports Digest::SHA, File::Temp, and File::Path are placeholders
-for a future implementation of this method.
-
-=back
+Returns true if the stemcell's type matches C<$type>.
 
 B<Parameters:>
 
@@ -467,21 +436,11 @@ B<Parameters:>
 
 =item $type
 
-For C<is_type> only. The type string to compare: C<'light'> or C<'regular'>.
-
-=item $file
-
-For C<download> only. The local file path (currently unused).
+The type string to compare: C<'light'> or C<'regular'>.
 
 =back
 
-B<Returns:> Boolean for C<is_type>, C<is_light>, C<is_full>, and C<is_local>.
-C<download> never returns.
-
-B<Errors:>
-
-Dies with C<"Downloading stemcell from %s is not implemented yet">.
-C<%s> is the stemcell's URL.
+B<Returns:> True if the stemcell's type equals C<$type>, false otherwise.
 
 B<Examples:>
 
@@ -490,10 +449,93 @@ B<Examples:>
   }
   # Returns: 1 for a light stemcell
 
+=head2 is_light
+
+  my $bool = $sc->is_light();
+
+Returns true if the stemcell type is C<'light'>.
+
+B<Parameters:> None.
+
+B<Returns:> True if the stemcell type is C<'light'>, false otherwise.
+
+B<Examples:>
+
   if ($sc->is_light()) {
     print "Light stemcell\n";
   }
   # Returns: 1 for a light stemcell
+
+=head2 is_full
+
+  my $bool = $sc->is_full();
+
+Returns true if the stemcell type is C<'regular'> (a full disk image).
+
+B<Parameters:> None.
+
+B<Returns:> True if the stemcell type is C<'regular'>, false otherwise.
+
+B<Examples:>
+
+  if ($sc->is_full()) {
+    print "Full (regular) stemcell\n";
+  }
+  # Returns: 1 for a regular stemcell
+
+=head2 is_local
+
+  my $bool = $sc->is_local();
+
+Returns true if the stemcell URL is not an HTTP or HTTPS URL (i.e. it refers
+to a local file path).
+
+B<Parameters:> None.
+
+B<Returns:> True if the stemcell URL does not start with C<http://> or
+C<https://>, false otherwise.
+
+B<Examples:>
+
+  if ($sc->is_local()) {
+    print "Local stemcell file\n";
+  }
+  # Returns: 1 when url is a file path rather than an http/https URL
+
+=head2 download
+
+  $sc->download($file);
+
+B<Not implemented.> Always dies with
+C<"Downloading stemcell from %s is not implemented yet">, where C<%s> is the
+stemcell's URL. The C<$file> parameter and the C<return 1> statement that
+follows the error are unreachable dead code.
+
+The unused imports Digest::SHA, File::Temp, and File::Path are placeholders
+for a future implementation of this method.
+
+B<Parameters:>
+
+=over 4
+
+=item $file
+
+The intended local file path. Currently unused; the method always dies before
+reaching any file-writing logic.
+
+=back
+
+B<Returns:> Never returns normally.
+
+B<Errors:>
+
+Always dies with C<"Downloading stemcell from %s is not implemented yet">.
+C<%s> is the stemcell's URL.
+
+B<Examples:>
+
+  eval { $sc->download('/tmp/stemcell.tgz') };
+  # Returns: never -- always dies with "Downloading stemcell from ... is not implemented yet"
 
 =head2 upload
 
@@ -597,8 +639,8 @@ B<Examples:>
 
 =head1 KNOWN ISSUES
 
-The following defects are tracked in FWT-694 and are documented here so
-that callers are aware of the current behaviour.
+The following defects are documented here so that callers are aware of the
+current behaviour.
 
 =over 4
 
