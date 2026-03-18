@@ -108,11 +108,13 @@ B<Examples:>
 Runs C<bosh create-env> interactively against the given manifest, building
 the BOSH director from scratch or updating it in place. The state file is
 always passed via C<--state>. An optional vars store and vars file may also
-be supplied.
+be supplied. Supports dryrun mode.
 
-B<Note:> This method has no dryrun path. Passing C<dryrun =E<gt> 1> in
-C<%opts> has no effect -- the real C<bosh create-env> command will still
-execute. See L</KNOWN ISSUES> (CEP-2, FWT-694).
+In list context, returns a three-element list. The third element is always
+C<undef>.
+
+In scalar context, returns a boolean: C<1> on success or in dryrun mode,
+C<0> on failure.
 
 B<Parameters:>
 
@@ -141,12 +143,20 @@ at the given path.
 Optional. An array reference of additional CLI flags to pass to
 C<bosh create-env> before the manifest argument.
 
+=item dryrun
+
+Optional. If true, logs the command that would be run via C<dryrun_of> and
+returns without executing it.
+
 =back
 
-B<Returns:> The return value of the underlying C<execute> call. In list
-context this is C<($output, $exit_code, $stderr)>; in scalar context it
-is the raw exit code (C<0> on success). See L<Service::BOSH/execute> for
-full return semantics.
+B<Returns:>
+
+In dryrun mode, list context returns C<(undef, 0, undef)>; scalar context
+returns C<1>.
+
+In live mode, list context returns C<($output, $exit_code, undef)>; scalar
+context returns C<1> on success (exit code 0) or C<0> on failure.
 
 B<Errors:>
 
@@ -161,14 +171,21 @@ B<Examples:>
   $proxy->create_env('/path/to/bosh.yml',
     state => '/path/to/bosh-state.json',
   );
-  # Returns: return value of execute()
+  # Returns: 1 on success, 0 on failure
 
   $proxy->create_env('/path/to/bosh.yml',
     state     => '/path/to/bosh-state.json',
     store     => '/path/to/creds.yml',
     vars_file => '/path/to/vars.yml',
   );
-  # Returns: return value of execute()
+  # Returns: 1 on success, 0 on failure
+
+  # Dryrun -- logs intent, does not execute
+  my $ok = $proxy->create_env('/path/to/bosh.yml',
+    state  => '/path/to/bosh-state.json',
+    dryrun => 1,
+  );
+  # Returns: 1
 
 =head2 delete_env
 
@@ -304,22 +321,6 @@ B<Examples:>
   eval { $proxy->download_configs() };
   # Dies with: "create-env environments do not support configuration files"
   # Returns: does not return
-
-=head1 KNOWN ISSUES
-
-The following defects are tracked in FWT-694 and are documented here so
-that callers are aware of the current behaviour.
-
-=over 4
-
-=item CEP-2 (medium)
-
-C<create_env()> lines 29-44: does not implement a dryrun path. Passing
-C<dryrun =E<gt> 1> in the options hash has no effect; the real
-C<bosh create-env> command executes unconditionally. The sibling method
-C<delete_env> handles dryrun correctly.
-
-=back
 
 =head1 SEE ALSO
 

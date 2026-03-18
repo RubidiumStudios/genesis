@@ -323,7 +323,7 @@ returns the raw exit code (C<0> for success, non-zero for failure).
 
 B<Note:> The scalar return is a raw exit code, where C<0> means success
 (falsy in boolean context). This is inverted relative to the C<passfail>
-boolean return. See L</KNOWN ISSUES> (BOSH-2, FWT-694).
+boolean return. See the C<execute-scalar-return> entry in L</KNOWN ISSUES>.
 
 B<Examples:>
 
@@ -439,12 +439,12 @@ configs from their respective sources.
 
 =head1 KNOWN ISSUES
 
-The following defects are tracked in FWT-694 and are documented here so
+The following defects are documented here so
 that callers are aware of the current behaviour.
 
 =over 4
 
-=item BOSH-2 (low)
+=item execute-scalar-return (low)
 
 C<execute()> lines 176-177: in scalar context without the C<passfail>
 option, returns C<$results[1]>, which is the raw process exit code. A

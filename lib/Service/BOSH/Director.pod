@@ -106,7 +106,8 @@ the director starts pre-validated when the environment variable matches
 C<$alias>.
 
 B<Note:> No validation is performed on the URL; a malformed URL silently
-produces C<undef> for schema, host, and port (DIRECTOR-13).
+produces C<undef> for schema, host, and port (see C<url-parse-no-validate>
+in L</KNOWN ISSUES>).
 
 B<Parameters:>
 
@@ -325,9 +326,6 @@ C<alias> field matches C<$alias>.
 Returns C<undef> when the config file does not exist or no matching
 alias is found.
 
-B<Note:> When C<$alias> is falsy, the method enables trace logging as a
-debugging side-effect (DIRECTOR-9, tracked in FWT-694).
-
 B<Parameters:>
 
 =over 4
@@ -363,6 +361,17 @@ Any additional options are passed through to L</new>.
 
 B<Returns:> A C<Service::BOSH::Director> object on success, or C<undef>
 when the config file is absent or the alias is not found.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Calls C<bug()> with C<"from_alias() called without an alias"> when C<$alias>
+is falsy.
+
+=back
 
 B<Examples:>
 
@@ -447,10 +456,6 @@ Getter/setter for the current default deployment name. When called with
 an argument, sets C<$self-E<gt>{deployment}> and returns the new value.
 When called without arguments, returns the current value.
 
-B<Note:> The guard that would call C<bug()> on extra arguments is
-unreachable because C<shift> has already consumed the argument at the
-point the check fires (DIRECTOR-2, tracked in FWT-694).
-
 B<Parameters:>
 
 =over 4
@@ -468,7 +473,7 @@ B<Errors:>
 
 Would die with C<"Too many arguments to Service::BOSH::Director#deployment: expecting at most 1, got extra: ">
 if more than one argument were passed, but this guard is currently unreachable
-due to DIRECTOR-2.
+due to the C<deployment-setter-guard> defect (see L</KNOWN ISSUES>).
 
 B<Examples:>
 
@@ -681,8 +686,7 @@ B<Errors:>
 When C<BOSH_ALL_PROXY> is set and the proxy timeout fires, the ALRM
 signal handler raises C<"timeout\n"> internally. This is caught and
 results in a C<< { status => 'unreachable', msg => "timeout after N seconds" } >>
-return value rather than propagating as an exception (note DIRECTOR-1:
-the C<$err> variable capture is undefined behavior and may mask this).
+return value rather than propagating as an exception.
 
 B<Examples:>
 
@@ -856,15 +860,12 @@ Dies with C<"No $_->{label} contents."> when a fetched configuration entry
 has empty content. C<$_-E<gt>{label}> is the human-readable label of the
 config entry (e.g. C<"base cloud config">).
 
-Dies with C<"BOSH returned multiple entries for $_->label - Genesis doesn't know how to process this">
+Dies (via C<bug()>) with C<"BOSH returned multiple entries for $_-E<gt>{label} - Genesis doesn't know how to process this">
 when the BOSH C<config> command returns more than one table row for a single
 named configuration. This indicates an unexpected BOSH API response (note
-DIRECTOR-6: in the double-quoted string, C<$_-E<gt>label> interpolates as the
-stringified hashref followed by the literal text C<-E<gt>label>, producing a
-garbled message like C<"HASH(0x...)-E<gt>label">. The intended code was
-C<$_-E<gt>{label}>. This code path is also unreachable due to DIRECTOR-5:
-an identical C<if ($rc || $json_err)> check earlier in the method calls
-C<bail()> first, so the second check never fires).
+C<download-configs-garbled-message> in L</KNOWN ISSUES>: the error message
+string uses C<$_-E<gt>label> without braces, producing a garbled label like
+C<"HASH(0x...)-E<gt>label">; the intended form is C<$_-E<gt>{label}>).
 
 Dies with C<"Failed to converge the active $type configurations: $err"> when
 C<spruce merge> fails while merging multiple configs. C<$type> is the config
@@ -890,7 +891,8 @@ L</upload_config_from_file> is called.
 C<$name> defaults to C<'default'> when not provided.
 
 B<Note:> The return value of the inner L</upload_config_from_file> call
-is discarded (DIRECTOR-7, tracked in FWT-694).
+is discarded; callers cannot determine from this method whether the upload
+succeeded. See C<upload-config-discards-return> in L</KNOWN ISSUES>.
 
 B<Parameters:>
 
@@ -942,7 +944,7 @@ In list context, returns the raw output, exit code, and stderr without
 dying on failure.
 
 B<Note:> The bail-on-failure path is asymmetric: it fires only in scalar
-context (DIRECTOR-8).
+context (see C<upload-config-asymmetric-bail> in L</KNOWN ISSUES>).
 
 B<Parameters:>
 
@@ -1088,11 +1090,11 @@ Runs the named BOSH errand against the director's current deployment.
 Runs interactively and streams output to the terminal.
 
 Always returns C<1> regardless of the errand's actual exit code, because
-the execute result is discarded (DIRECTOR-4, tracked in FWT-694).
+the execute result is discarded. See C<errand-discards-exit-code> in L</KNOWN ISSUES>.
 
 B<Note:> The C<bug()> message for a missing errand name incorrectly reads
 C<"Missing errand name in call to deploy()"> instead of
-C<"run_errand()"> (DIRECTOR-3).
+C<"run_errand()"> (see C<errand-wrong-method-name> in L</KNOWN ISSUES>).
 
 B<Parameters:>
 
@@ -1455,21 +1457,23 @@ at C<$self-E<gt>exodus_path . ':network-claim-lock'> via
 C<$self-E<gt>vault-E<gt>set(...)>. The lock record contains the timestamp,
 hostname, username, PID, and environment name.
 
-Dies when the lock is already held (even when it is stale; see
-DIRECTOR-10, tracked in FWT-694).
+If C<check_network_lock> reports the lock is stale (exceeded C<max_lock_age>),
+the stale lock is logged via C<info()>, cleared via C<clear_network_lock()>,
+and then the new lock is acquired. If the lock is actively held, the method
+dies.
 
 B<Returns:> Nothing (Vault write is the only externally observable effect).
 
 B<Errors:>
 
 Dies with C<"Cannot acquire network claim lock: it was locked %s.\n">
-when the lock is already held. C<%s> is the human-readable lock
+when the lock is actively held. C<%s> is the human-readable lock
 description from L</check_network_lock>.
 
 B<Examples:>
 
   $director->acquire_network_lock();
-  # Returns: nothing (or dies if already locked)
+  # Returns: nothing (or dies if actively locked)
   # Lock is now held; clear it when done:
   $director->clear_network_lock();
   # Returns: nothing
@@ -1757,78 +1761,53 @@ B<Examples:>
 
 =head1 KNOWN ISSUES
 
-The following defects are tracked in FWT-694 and are documented here to
+The following defects are documented here to
 prevent callers from relying on the current (incorrect) behavior.
 
 =over 4
 
-=item DIRECTOR-1 (critical)
+=item deployment-setter-guard (high)
 
-C<status()> line 312: C<my $err = $@ if $@> is syntactically valid Perl
-but produces undefined behavior. The variable C<$err> is declared
-conditionally, which means it may be undef even when C<$@> is set,
-depending on Perl's optimizer. This can mask proxy timeout errors.
+C<deployment()> setter guard never fires. The C<shift> on the preceding
+line has already consumed the second argument from C<@_> by the time the
+C<if @_> check runs, so extra arguments are silently ignored rather than
+triggering C<bug()>.
 
-=item DIRECTOR-2 (high)
+=item errand-wrong-method-name (low)
 
-C<deployment()> lines 214-219: setter guard never fires. The C<shift> on
-the preceding line has already consumed the second argument from C<@_> by
-the time the C<if @_> check runs, so extra arguments are silently ignored
-rather than triggering C<bug()>.
+C<run_errand()>: the error message says C<"Missing errand name in call to
+deploy()"> but should say C<run_errand()>.
 
-=item DIRECTOR-3 (low)
-
-C<run_errand()> line 528: the error message says C<"Missing errand name in
-call to deploy()"> but should say C<run_errand()>.
-
-=item DIRECTOR-4 (medium)
+=item errand-discards-exit-code (medium)
 
 C<run_errand()> always returns C<1> regardless of the errand's exit code.
 The result of C<$self-E<gt>execute(...)> is discarded before the C<return 1>
 statement.
 
-=item DIRECTOR-5 (high)
+=item download-configs-garbled-message (medium)
 
-C<download_configs()> contains an unreachable dead code block (the second
-C<if ($rc || $json_err)> check at line 422 can never fire because an
-identical check above it already called C<bail()>).
-
-=item DIRECTOR-6 (medium)
-
-C<download_configs()> line 431: C<$_-E<gt>label> inside a double-quoted
-string interpolates C<$_> as the stringified hashref (e.g. C<HASH(0x...)>)
+C<download_configs()>: C<$_-E<gt>label> inside a double-quoted string
+interpolates C<$_> as the stringified hashref (e.g. C<HASH(0x...)>)
 followed by the literal text C<-E<gt>label>, producing a garbled error
 message. The correct form is C<$_-E<gt>{label}>.
 
-=item DIRECTOR-7 (medium)
+=item upload-config-discards-return (medium)
 
 C<upload_config()> calls C<upload_config_from_file()> but discards its
 return value, so callers of C<upload_config()> cannot determine whether
 the upload succeeded.
 
-=item DIRECTOR-8 (medium)
+=item upload-config-asymmetric-bail (medium)
 
 C<upload_config_from_file()> only calls C<bail()> on failure when invoked
 in scalar or void context. In list context, a failed upload is silently
 returned as C<($out, $rc, $err)> without any automatic error handling.
 Callers in list context must check C<$rc> explicitly.
 
-=item DIRECTOR-9 (medium)
-
-C<from_alias()> mutates C<$ENV{GENESIS_TRACE}=1> when C<$alias> is
-falsy. This is a debugging artifact that permanently enables trace logging
-for the remainder of the process.
-
-=item DIRECTOR-10 (medium)
-
-C<acquire_network_lock()> treats stale locks identically to active locks
-and cannot break them. If a lock is stale (exceeded C<max_lock_age>),
-the method still dies rather than replacing the stale lock.
-
-=item DIRECTOR-13 (low)
+=item url-parse-no-validate (low)
 
 C<new()> does not validate the C<url> option. If the URL is missing or
-malformed, the regex on line 31 silently produces C<undef> for C<schema>,
+malformed, the regex silently produces C<undef> for C<schema>,
 C<host>, and C<port>. The object is constructed with these undefined values
 and subsequent calls to C<url()>, C<connect_and_validate()>, or C<status()>
 will behave unpredictably.
