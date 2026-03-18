@@ -94,11 +94,6 @@ agent suffix (C<-go_agent>) is appended automatically for supported OS families
 (ubuntu trusty/xenial/bionic/focal/jammy and windows); it is omitted for newer
 OS families such as ubuntu-noble.
 
-B<Note:> This method calls JSON::PP to decode the API response but does not
-import JSON::PP itself (see L</KNOWN ISSUES>, SC-2). At runtime the call
-succeeds only if another module (e.g. C<Service::BOSH::Director>) has already
-loaded JSON::PP.
-
 B<Parameters:>
 
 =over 4
@@ -190,7 +185,7 @@ C<available_stemcells> is called with the remaining options.
 
 B<Note:> When C<type> is provided and both types exist for the selected minor
 version, the method returns the stemcell at an arbitrary hash key rather than
-the filtered type (see L</KNOWN ISSUES>, SC-5). The C<type> filter is applied
+the filtered type (see L</KNOWN ISSUES>, type-filter-key-selection). The C<type> filter is applied
 correctly at the major-version grouping step and at the version label display,
 but not at final selection.
 
@@ -206,7 +201,7 @@ Optional. A pre-fetched array reference of C<Service::BOSH::Stemcell> objects
 =item type
 
 Optional. Filter to a specific stemcell type: C<'light'> or C<'regular'>.
-See the note above regarding SC-5.
+See the note above regarding type-filter-key-selection.
 
 =item (other opts)
 
@@ -644,16 +639,7 @@ current behaviour.
 
 =over 4
 
-=item SC-2 (high)
-
-C<available_stemcells()> line 49: calls C<JSON::PP> to decode the bosh.io
-API response but the module does not contain C<use JSON::PP>. At runtime
-this call succeeds only when another module loaded earlier in the process
-(such as C<Service::BOSH::Director>) has already imported C<JSON::PP>. If
-called in isolation the method will crash with
-C<"Can't locate object method "new" via package "JSON::PP">.
-
-=item SC-5 (medium)
+=item type-filter-key-selection (low)
 
 C<select_stemcell()> line 131: when the C<type> option is provided and
 both C<light> and C<regular> stemcells exist for the selected minor
