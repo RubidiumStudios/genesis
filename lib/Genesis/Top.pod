@@ -121,7 +121,8 @@ C<$name> (or C<$name-deployments> when the legacy suffix is enabled in the
 Genesis RC configuration).
 
 The method writes C<.genesis/config>, creates the C<.genesis/> directory
-hierarchy, creates the local kits directory, and generates a C<README.md>.
+hierarchy, creates the local kits directory (when C<kits_path> is supplied),
+and generates a C<README.md>.
 On failure the partially-created directory is removed and the error is
 re-thrown.
 
@@ -351,8 +352,9 @@ C<Genesis::Kit::Provider::GenesisCommunity> instance, the C<kit_provider>
 key is cleared from the config (restoring the default). Otherwise the
 provider configuration is written and saved.
 
-Both branches (GenesisCommunity and custom provider) set C<updater_version>,
-call C<_validate_config()>, and save the config to disk.
+Both branches (GenesisCommunity and custom provider) set C<updater_version>
+(when the config file exists on disk), call C<_validate_config()>, and save
+the config to disk.
 
 B<Parameters:>
 
@@ -554,9 +556,8 @@ B<Examples:>
 
     $top->add_vault;
 
-B<Note:> This method is an unimplemented stub. The body is empty. See TODO
-C<#ADDVAULT> in the source for the planned multi-vault support. Do not call
-this method.
+B<Note:> This method is an unimplemented stub for planned multi-vault support.
+The body is empty. Do not call this method.
 
 B<Returns:> Nothing.
 
