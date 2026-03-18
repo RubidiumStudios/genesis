@@ -415,17 +415,11 @@ sub download_configs {
 		chomp(my $json_err = $@ || '');
 		if ($rc || $json_err) {
 			$json_err =~ s/ at lib\/Genesis\/BOSH.*//sm if $json_err;
-			$err ||= $json_err || "bosh configs returned exit code $rc";
-			bail("Could not determine available #C{$type} configurations: $err");
-		}
-
-		if ($rc || $json_err) {
-			my $msg = $err;
-			$msg = "#R{$json_err:}\n\n\e[36m$out\e[0m" if ($json_err && !$msg);
+			my $msg = $json_err ? "#R{$json_err:}\n\n\e[36m$out\e[0m" : ($err || "bosh configs returned exit code $rc");
 			$msg ||= join("\n", grep {$_ !~ /^Exit code/} grep {$_ !~ /^using environment/} @{$json->{Lines}});
 			$msg ||= "Could not understand 'BOSH config' json output:\n\n\e[36m$out\e[0m";
 			$msg = "No $_->{label} found" if $msg eq 'No config';
-			bail $msg;
+			bail("Could not determine available #C{$_->{type}} configurations: $msg");
 		}
 
 		bug("BOSH returned multiple entries for $_->{label} - Genesis doesn't know how to process this")
