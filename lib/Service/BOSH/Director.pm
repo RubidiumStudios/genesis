@@ -150,7 +150,7 @@ sub from_alias {
 	my $bosh = load_yaml_file($config_home)
 		or return;
 
-	unless ($alias) {$ENV{GENESIS_TRACE}=1 && dump_stack;}
+	bug("from_alias() called without an alias") unless $alias;
 	for my $e (@{ $bosh->{environments} || []  }) {
 		return $class->new(
 			$alias,
@@ -309,7 +309,7 @@ sub status {
 			($out,$rc,$err) = eval{$self->execute('env')};
 			alarm 0;
 		};
-		my $err = $@ if $@;
+		$err = $@;
 		return {
 			status => 'unreachable',
 			msg => $err eq "timeout\n" ? "timeout after $timeout seconds" : $err
@@ -428,7 +428,7 @@ sub download_configs {
 			bail $msg;
 		}
 
-		bug("BOSH returned multiple entries for $_->label - Genesis doesn't know how to process this")
+		bug("BOSH returned multiple entries for $_->{label} - Genesis doesn't know how to process this")
 			if (@{$json->{Tables}} != 1 || @{$json->{Tables}[0]{Rows}} != 1);
 
 		my $config = $json->{Tables}[0]{Rows}[0]{content};
@@ -753,10 +753,15 @@ sub acquire_network_lock {
 
 	# Check current lock status
 	my $lock_status = $self->check_network_lock();
-	bail(
-		"Cannot acquire network claim lock: it was locked %s.\n",
-		$lock_status->{description}
-	) unless $lock_status->{status} eq 'unlocked';
+	if ($lock_status->{status} eq 'stale') {
+		info("Clearing stale network claim lock (held %s).", $lock_status->{description});
+		$self->clear_network_lock();
+	} elsif ($lock_status->{status} ne 'unlocked') {
+		bail(
+			"Cannot acquire network claim lock: it was locked %s.\n",
+			$lock_status->{description}
+		);
+	}
 
 	# Acquire the lock
 	my $lock_key = 'network-claim-lock';

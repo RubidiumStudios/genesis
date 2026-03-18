@@ -38,9 +38,15 @@ sub create_env {
 	push(@{$opts{flags}}, '--vars-store', $opts{store}) if $opts{store} && -f $opts{store};
 	push(@{$opts{flags}}, '-l', $opts{vars_file}) if ($opts{vars_file} && -f $opts{vars_file});
 
-	return $self->execute( { interactive => 1},
+	if ($opts{dryrun}) {
+		$self->dryrun_of('create-env', @{$opts{flags}}, $manifest);
+		return wantarray ? (undef, 0, undef) : 1;
+	}
+
+	my ($out, $rc) = $self->execute( { interactive => 1},
 		'create-env', @{$opts{flags}}, $manifest
 	);
+	return wantarray ? ($out, $rc, undef) : $rc ? 0 : 1;
 }
 
 # }}}
