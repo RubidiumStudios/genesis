@@ -9,6 +9,7 @@ use Genesis::UI qw/prompt_for_choice prompt_for_boolean/;
 use Digest::SHA qw(sha1_hex);
 use File::Temp qw(tempdir);
 use File::Path qw(make_path);
+use JSON::PP ();
 
 use constant {
 	# bosh.io API URL for stemcells
