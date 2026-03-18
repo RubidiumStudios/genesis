@@ -209,8 +209,8 @@ B<Examples:>
     my $value = $cfg->get($key, $default, $set_if_missing);
 
 Retrieves the value for C<$key> from the merged configuration, applying the
-priority order C<env E<gt> set E<gt> loaded E<gt> default>. Results are
-cached by key after the first lookup.
+priority order C<env E<gt> set E<gt> loaded E<gt> default>. Found values are
+cached by key. Lookups for absent keys are not cached and re-run on every call.
 
 B<Parameters:>
 
@@ -431,6 +431,10 @@ a path and either C<$save> or C<autosave> is enabled, and the removal results
 in a difference from the last persisted state, C<save()> is called
 automatically.
 
+Keys that exist only in the I<env> or I<default> layers (populated by
+C<validate()>) remain accessible via C<has()> and C<get()> after C<clear()> -
+those layers are not modified.
+
 B<Parameters:>
 
 =over 4
@@ -451,8 +455,10 @@ now differs from the persisted state, false if not.
 
 B<Examples:>
 
-    $cfg->clear('log_level');
-    print $cfg->has('log_level') ? "still set" : "cleared";  # Returns: cleared
+    $cfg->set('temp_key', 'value');
+    print $cfg->has('temp_key') ? "yes" : "no";  # Returns: yes
+    $cfg->clear('temp_key');
+    print $cfg->has('temp_key') ? "yes" : "no";  # Returns: no (no default layer value)
 
     $cfg->clear('db.host', 1);  # Remove and save immediately
 
