@@ -574,7 +574,7 @@ sub _validate_key {
 			push @errors, "#R{$key}: expected a number, not #ri{".($value ? $value : "<null>")."}";
 		}
 	} elsif ($type eq 'integer') {
-		if (ref($value) ne '' || !defined($value) || $value !~ m/^-?[1-9]\d*$/) {
+		if (ref($value) ne '' || !defined($value) || $value !~ m/^-?(?:0|[1-9]\d*)$/) {
 			push @errors, "#R{$key}: expected an integer, not #ri{".($value ? $value : "<null>")."}";
 		}
 	} elsif ($type eq 'semver') {

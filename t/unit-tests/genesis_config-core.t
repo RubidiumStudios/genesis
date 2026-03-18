@@ -863,6 +863,37 @@ subtest '_load() with explicit path argument' => sub {
 	is($config->get('alt_key'), 'alt_value', "_load with explicit path loads from that file");
 };
 
+subtest 'validate() integer type accepts zero and rejects leading zeros' => sub {
+	my $config = Genesis::Config->new(undef, 0, {count => 0});
+	my $schema = { count => { type => 'integer' } };
+
+	ok(eval { $config->validate($schema); 1 }, "integer type accepts 0");
+	is($config->get('count'), 0, "zero value is preserved after validation");
+
+	my $config2 = Genesis::Config->new(undef, 0, {count => -0});
+	ok(eval { $config2->validate($schema); 1 }, "integer type accepts -0");
+
+	my $config3 = Genesis::Config->new(undef, 0, {count => 42});
+	ok(eval { $config3->validate($schema); 1 }, "integer type accepts positive integer");
+
+	my $config4 = Genesis::Config->new(undef, 0, {count => -7});
+	ok(eval { $config4->validate($schema); 1 }, "integer type accepts negative integer");
+
+	my $config5 = Genesis::Config->new(undef, 0, {count => '007'});
+	throws_ok(
+		sub { $config5->validate($schema) },
+		qr/expected an integer/,
+		"integer type rejects leading-zero string 007"
+	);
+
+	my $config6 = Genesis::Config->new(undef, 0, {count => '0123'});
+	throws_ok(
+		sub { $config6->validate($schema) },
+		qr/expected an integer/,
+		"integer type rejects leading-zero string 0123"
+	);
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
