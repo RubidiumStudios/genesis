@@ -309,7 +309,7 @@ returns any errors. Dies with the following messages for DSL parse errors:
 
 =item C<"No BOSH director configuration found for $env (at `pipeline.boshes[$env]').\n"> -- an environment in the layout has no corresponding C<pipeline.boshes> entry.
 
-=item C<"Environment '$b' is already being triggered by environment '$triggers->{$b}'.\nIt is illegal to trigger an environment more than once.\n"> -- an environment appears as a trigger target more than once.
+=item C<"Environment '$b' is already being triggered by environment '$triggers->{$b}'.\nIt is illegal to trigger an environment more than once.\n"> -- an environment appears as a trigger target from a different source. Identical duplicate declarations (same source and target) are silently accepted.
 
 =back
 
@@ -531,6 +531,20 @@ B<Examples:>
         $pipeline, "Deployment of sandbox failed", "sandbox"
     );
     # Returns: "in_parallel: [\n{ put: \"slack\", ... },\n]"
+
+=head1 FUTURE CHANGES
+
+=over 4
+
+=item C<pipeline.require-passed-caches> default will change from C<true> to C<false>
+
+The C<require-passed-caches> pipeline key currently defaults to
+C<JSON::PP::true> during validation. A planned change will invert this
+default to C<JSON::PP::false>. Pipelines that rely on the current default
+should explicitly set C<require-passed-caches: true> to preserve behavior
+after the change.
+
+=back
 
 =head1 AUTHORS
 
