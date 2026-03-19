@@ -1,5 +1,8 @@
 package Genesis::UI;
 
+use v5.20;
+use warnings;
+
 use base 'Exporter';
 our @EXPORT = qw/
 	prompt_for_boolean
@@ -130,7 +133,8 @@ sub __prompt_for_block {
 	$prompt = "$prompt (Enter <CTRL-D> to end)";
 	(my $line = $prompt) =~ s/./-/g;
 	print csprintf("%s","\n$prompt\n$line\n");
-	open(my $in, '<&', fileno(STDIN)) or $in = \*STDIN;
+	my $in;
+	open($in, '<&', fileno(STDIN)) or $in = \*STDIN;
 	my @data = <$in>;
 	return join("", @data);
 }
@@ -427,7 +431,7 @@ sub new_prompt_for_choice {
 			}
 			my $label = $choice->{label} // $choice->{value};
 			$max_label_len = max($max_label_len, length($label)+ $max_number_width + 2); # 2 for column separator 
-			push @{$sections{$section_headers[-1] //= []}}, $choice;
+			push @{$sections->{$section_headers[-1] //= []}}, $choice;
 		}
 		$columns = int($max_width / $max_label_len);
 		$col_width = int($max_width / $columns);
@@ -454,8 +458,12 @@ sub new_prompt_for_choice {
 
 	# Display header
 	my $form = $options{header}."\n";
+	my $default_choice;
 	# Handle user input
 	my $display_choices = sub {
+		my $terminal_width = terminal_width();
+		my $section_offset = 0;
+		my %selection_map;
 
 		for my $section_header (@section_headers) {
 			if ($section_header) {
@@ -467,7 +475,7 @@ sub new_prompt_for_choice {
 					$form .= csprintf("\n  #Wku{%s}\n", $section_header);
 				}
 			}
-			my $section_choices = $sections{$section_header};
+			my $section_choices = $sections->{$section_header};
 		};
 		
 		# Calculate item ranges for pagination
@@ -630,28 +638,39 @@ sub __process_legacy_prompt_for_choice_args {
 		description => $object_description
 	);
 	
-	# Convert old choices and labels format to new choices format
+	# Convert old choices and labels format to new choices format.
+	# Labels may contain section headers (---Title---) and separators (---)
+	# that don't correspond to entries in the choices array. $label_offset
+	# tracks how many such non-choice labels have been consumed so that
+	# $labels->[$i + $label_offset] always points to the label for choice $i.
 	my $choices = [];
 	my $label_offset = 0;
 	for my $i (0 .. $#{$old_choices}) {
+		# Consume any section headers or separators before this choice
+		while (ref($labels) eq 'ARRAY' && defined $labels->[$i + $label_offset]) {
+			my ($label) = (ref($labels->[$i + $label_offset]) eq 'ARRAY')
+				? @{$labels->[$i + $label_offset]}
+				: ($labels->[$i + $label_offset]);
+			if ($label =~ /^---(.*)---$/) {
+				push @$choices, {section => $1};
+				$label_offset++;
+			} elsif ($label eq '---') {
+				push @$choices, {separator => 1};
+				$label_offset++;
+			} else {
+				last;
+			}
+		}
+
 		my $choice = {
 			value => $old_choices->[$i],
 		};
-		
-		# Handle labels if provided
-		if (ref($labels) eq 'ARRAY' && defined $labels->[$i]) {
-			my ($label, $summary) = (ref($labels->[$i]) eq 'ARRAY')
-				? @{$labels->[$i]}
-				: ($labels->[$i]);
-			if ($label =~ /^---(.*)---$/) {
-				push @$choices, {section => $1};
-				$label_offset += 1;
-				redo;
-			} elsif ($label eq '---') {
-				push @$choices, {separator => 1};
-				$label_offset += 1;
-				redo;
-			}
+
+		# Apply the label for this choice
+		if (ref($labels) eq 'ARRAY' && defined $labels->[$i + $label_offset]) {
+			my ($label, $summary) = (ref($labels->[$i + $label_offset]) eq 'ARRAY')
+				? @{$labels->[$i + $label_offset]}
+				: ($labels->[$i + $label_offset]);
 			$choice->{label} = $label;
 			$choice->{summary} = $summary if defined $summary;
 		}
