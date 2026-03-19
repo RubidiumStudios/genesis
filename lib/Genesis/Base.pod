@@ -95,7 +95,9 @@ B<Examples:>
 
 Stores C<$value> in the cache under C<$token> and returns C<$value>. When
 called with a single argument, the token is derived from the calling method
-via C<_get_token()> and that argument is treated as the value.
+via C<_get_token()> and that argument is treated as the value. See
+L</KNOWN ISSUES> (set-memo-undef-dispatch) for an edge case with C<undef>
+values.
 
 Modifies the object in-place.
 
@@ -262,6 +264,20 @@ B<Examples:>
 
   my $token = $self->_get_token_for('Genesis::Env::my_data');
   # Returns: '__my_data' if Genesis::Env->can('Genesis::Env::my_data')
+
+=head1 KNOWN ISSUES
+
+=over 4
+
+=item set-memo-undef-dispatch (low)
+
+C<_set_memo($token, undef)> is incorrectly treated as the single-argument
+form because the dispatch uses C<if (!defined($value))> instead of an
+argument count check. Passing C<undef> as an explicit value to cache will
+store C<$token> as the value under an auto-derived key. Avoid caching
+C<undef> explicitly until this is fixed.
+
+=back
 
 =head1 AUTHORS
 

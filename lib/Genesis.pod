@@ -1,3 +1,5 @@
+=encoding utf8
+
 =head1 NAME
 
 Genesis - Core utility functions for the Genesis deployment toolkit
@@ -313,64 +315,441 @@ B<Examples:>
 Returns the active C<Genesis::Log> logger instance, creating and configuring
 a new one with default settings if none exists yet.
 
-The following logging dispatch functions are exported alongside C<logger> and
-delegate to it at the appropriate log level. All accept a C<sprintf>-style
-format string and optional arguments, and support C<csprintf>-style color
-codes. When called inside an active C<eval> block, any fatal dispatcher
-(C<bail>) will C<die> rather than exit; the die string begins with C<"\n">
-followed by the formatted message. The C<$more_options> hash reference, when
-supplied as a leading argument, may include C<exitcode> and C<offset> keys.
-
-=over 4
-
-=item C<output($fmt, @args)> -- OUTPUT level
-
-=item C<fatal($fmt, @args)> -- FATAL level (does not exit)
-
-=item C<error($fmt, @args)> -- ERROR level
-
-=item C<warning($fmt, @args)> -- WARNING level
-
-=item C<success($fmt, @args)> -- WARNING level, styled as success (DONE label)
-
-=item C<dryrun($fmt, @args)> -- WARNING level, styled as dry-run (DRYRUN label)
-
-=item C<notice($fmt, @args)> -- NOTICE level
-
-=item C<info($fmt, @args)> -- INFO level
-
-=item C<debug($fmt, @args)> -- DEBUG level
-
-=item C<trace($fmt, @args)> -- TRACE level (includes stack info)
-
-=item C<qtrace($fmt, @args)> -- TRACE level (no stack info)
-
-=item C<dump_var([$scope,] $name, $value)> -- dumps named value at TRACE level
-
-=item C<dump_stack([$scope])> -- dumps call stack at TRACE level
-
-=item C<bail([\%opts,] $fmt, @args)> -- exits the process (or C<die>s inside an active C<eval> block) with a FATAL-level error message
-
-=back
+The logging dispatch functions documented below (C<output>, C<fatal>,
+C<error>, C<warning>, C<success>, C<dryrun>, C<notice>, C<info>, C<debug>,
+C<trace>, C<qtrace>, C<dump_var>, C<dump_stack>, C<bail>) are exported
+alongside C<logger> and each delegate to the active logger at the appropriate
+log level.
 
 B<Returns:> A C<Genesis::Log> object.
 
-B<Errors:>
+B<Examples:>
 
-The internal C<bail> dispatcher used by logging helpers may C<die> with a
-message beginning with C<"\n"> when called inside an active C<eval> block
-(and when C<GENESIS_IGNORE_EVAL> is not set). The full message follows.
+    my $log = logger();
+    # Returns: Genesis::Log object
+
+    logger()->info("Hello from Genesis");
+    # prints: INFO message to logger
+
+=head2 output
+
+    output($fmt, @args);
+
+Dispatches a message at OUTPUT level to the active logger.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
 
 B<Examples:>
 
-    logger()->info("Hello from Genesis");
-    # Returns: Genesis::Log object
+    output("Deploying %s", $env_name);
+    # prints: OUTPUT-level message to the active logger
+
+=head2 fatal
+
+    fatal($fmt, @args);
+
+Dispatches a message at FATAL level to the active logger. Unlike C<bail>,
+this does not exit the process.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    fatal("Configuration error: %s", $msg);
+    # prints: FATAL-level message without exiting
+
+=head2 error
+
+    error($fmt, @args);
+
+Dispatches a message at ERROR level to the active logger.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    error("Failed to connect: %s", $reason);
+    # prints: ERROR-level message to the active logger
+
+=head2 warning
+
+    warning($fmt, @args);
+
+Dispatches a message at WARNING level to the active logger.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    warning("Deprecated option '%s' used", $opt);
+    # prints: WARNING-level message to the active logger
+
+=head2 success
+
+    success($fmt, @args);
+
+Dispatches a message at WARNING level styled as a success notification, with
+a C<DONE> label.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    success("Deployment of %s complete.", $env_name);
+    # prints: WARNING-level message with DONE label
+
+=head2 dryrun
+
+    dryrun($fmt, @args);
+
+Dispatches a message at WARNING level styled as a dry-run notification, with
+a C<DRYRUN> label.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    dryrun("Would deploy %s", $env_name);
+    # prints: WARNING-level message with DRYRUN label
+
+=head2 notice
+
+    notice($fmt, @args);
+
+Dispatches a message at NOTICE level to the active logger.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    notice("Using cached result for %s", $key);
+    # prints: NOTICE-level message to the active logger
+
+=head2 info
+
+    info($fmt, @args);
+
+Dispatches a message at INFO level to the active logger.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
 
     info("Processing %s", $env_name);
-    # prints: INFO message to logger
+    # prints: INFO-level message to the active logger
+
+=head2 debug
+
+    debug($fmt, @args);
+
+Dispatches a message at DEBUG level to the active logger.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    debug("Parsed config: %s", $cfg_path);
+    # prints: DEBUG-level message to the active logger
+
+=head2 trace
+
+    trace($fmt, @args);
+
+Dispatches a message at TRACE level, including call-stack information.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
 
     trace("value is %s", $val);
-    # prints: TRACE message with stack info
+    # prints: TRACE-level message with stack info
+
+=head2 qtrace
+
+    qtrace($fmt, @args);
+
+Dispatches a message at TRACE level without call-stack information (quiet
+trace).
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fmt>
+
+A C<sprintf>-style format string. C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    qtrace("loop iteration %d", $i);
+    # prints: TRACE-level message without stack info
+
+=head2 dump_var
+
+    dump_var($name, $value);
+    dump_var($scope, $name, $value);
+
+Dumps a named variable value at TRACE level.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$scope> (optional)
+
+A string scope label prepended to the output, used to group related dumps.
+
+=item C<$name>
+
+The variable name to display.
+
+=item C<$value>
+
+The value to dump.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    dump_var("config", $cfg);
+    # prints: TRACE-level dump of $cfg labelled "config"
+
+=head2 dump_stack
+
+    dump_stack();
+    dump_stack($scope);
+
+Dumps the current call stack at TRACE level.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$scope> (optional)
+
+A string scope label prepended to the stack output.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+    dump_stack("deploy");
+    # prints: TRACE-level call stack with scope label "deploy"
+
+=head2 bail
+
+    bail($fmt, @args);
+    bail(\%opts, $fmt, @args);
+
+Formats a FATAL-level error message and exits the process. When called inside
+an active C<eval> block (and C<GENESIS_IGNORE_EVAL> is not set), C<bail>
+C<die>s instead of exiting; the die string begins with C<"\n"> followed by
+the formatted message.
+
+Multiple leading hash-reference arguments may be passed; their keys are
+merged, with C<offset> values summed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%opts> [, C<$more_options>, ...] (optional)
+
+One or more hash references passed as leading arguments. Keys are merged
+across all supplied hash references, with C<offset> values summed. Supported
+keys:
+
+=over 4
+
+=item C<exitcode>
+
+Integer exit code. Defaults to 1.
+
+=item C<offset>
+
+Stack-frame offset used when reporting the call site. Defaults to 0.
+
+=back
+
+=item C<$fmt>
+
+A C<sprintf>-style format string for the error message.
+C<csprintf>-style color codes are supported.
+
+=item C<@args> (optional)
+
+Arguments interpolated into C<$fmt>.
+
+=back
+
+B<Returns:> Does not return; exits the process (or C<die>s inside an active
+C<eval> block).
+
+B<Errors:>
+
+When called inside an active C<eval> block and C<GENESIS_IGNORE_EVAL> is not
+set, C<bail> throws an exception whose string begins with C<"\n"> followed by
+the formatted message.
+
+B<Examples:>
+
+    bail("Need genesis >= 2.0") unless new_enough($Genesis::VERSION, '2.0');
+    # prints: FATAL-level message to STDERR, then exits with code 1
+
+    bail({exitcode => 2}, "Too many arguments: expected %d, got %d", $exp, $got);
+    # prints: FATAL-level message to STDERR, then exits with code 2
 
 =head2 bug
 
@@ -749,6 +1128,9 @@ keys (any absent component has an undefined value):
     uri         The full original URI string
     scheme      The URI scheme (e.g., 'https', 'file')
     authority   The authority component (host + optional port)
+    userinfo    The user:password portion before '@' (optional)
+    user        The username extracted from userinfo (optional)
+    password    The password extracted from userinfo (optional)
     host        Hostname or IP address
     port        TCP port number (optional)
     path        The path component
@@ -899,7 +1281,10 @@ C<stderr => 0> was passed.
 In scalar context: C<$out>, or C<$err> if the exit code is non-zero and stderr
 was captured.
 
-When C<passfail> is set: C<1> or C<0>.
+When C<passfail> is set: C<1> on success or C<''> (empty string) on failure.
+
+When C<onfailure> is set and the command succeeds: the bare C<$out> scalar
+(not a three-element list).
 
 When C<interactive> is set: C<(undef, $rc)> in list context, C<$rc> in scalar.
 
@@ -952,12 +1337,19 @@ The command and arguments to run inside the fake TTY.
 
 =back
 
-B<Returns:> The modified command array ready to pass to C<run()>.
+B<Returns:> The modified command array ready to pass to C<run()>. On macOS
+this is a list of separate arguments. On Linux the entire C<script>
+invocation is returned as a single string (the subcommand arguments are
+joined with spaces and shell-quoted), so the return is a one-element list.
+
+B<Note:> The Linux single-string form does not handle quotes or pipes in
+C<@cmd> arguments robustly; this is a known limitation.
 
 B<Examples:>
 
     my @cmd = fake_tty('/tmp/out.log', 'spruce', 'diff', $a, $b);
-    # Returns: ('script', '-qeF', '/tmp/out.log', 'spruce', 'diff', $a, $b)
+    # Returns (macOS): ('script', '-qeF', '/tmp/out.log', 'spruce', 'diff', $a, $b)
+    # Returns (Linux): ("script -qf '/tmp/out.log' -c 'spruce diff $a $b'")
     run(@cmd);
 
 =head2 lines
@@ -2302,6 +2694,10 @@ with control strings.
 
 B<Returns:> The merged structure (flattened or unflattened depending on flags).
 
+B<Note:> Arrays of hashes are merged by position order, not by name-based
+matching. The element at index 0 in the overlay replaces the element at
+index 0 in the base, regardless of their content.
+
 B<Errors:>
 
 =over 4
@@ -2569,7 +2965,7 @@ Durations are formatted with adaptive precision:
 
 =over 4
 
-=item * Under 1 ms -- microseconds (us)
+=item * Under 1 ms -- microseconds (µs)
 
 =item * Under 2 s -- milliseconds (ms)
 
