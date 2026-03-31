@@ -1610,10 +1610,6 @@ define_command("repipe", {
 			"asked.  Allows automation to repipe without requiring human ".
 			"intervention or expect-style scripting.",
 
-		'dry-run|n' =>
-			"Generate the Concourse Pipeline configuration, but refrain from ".
-			"actually deploying it to Concourse.  Instead, just print the YAML.",
-
 		'target|t=s' =>
 			"The name of your Concourse target (per `fly targets'), if it differs ".
 			"from the pipeline layout name.",
@@ -1625,6 +1621,29 @@ define_command("repipe", {
 
 		'paused|P' =>
 			"Keep the pipeline paused after repiping.",
+
+		'platform|provider|p=s' =>
+			"CI provider/platform to generate for: 'concourse' or 'github-actions'.\n".
+			"When specified, uses the new compiler pipeline instead of the legacy ".
+			"code path. Looks for .genesis/ci/ directory first, falls back to ci.yml.",
+
+		'dry-run|n' =>
+			"Generate the pipeline configuration, but refrain from deploying ".
+			"it.  Use --output-dir to save the compiled artifacts to disk.",
+
+		'output-dir|o=s' =>
+			"Write compiled pipeline artifacts to this directory.\n".
+			"Independent of --dry-run: artifacts are saved whether or not the ".
+			"pipeline is deployed.",
+
+		'skip-vault' =>
+			"Skip vault connectivity when compiling pipelines.\n".
+			"Requires --platform. Useful for local compilation without a running vault.",
+
+		'debug-dir=s' =>
+			"Dump intermediate compiler artifacts (parsed config, AST, resolved ".
+			"pipeline, provider output) to this directory for debugging.\n".
+			"Requires --platform.",
 	],
 	deprecated_options => [
 		'vault=s' =>
