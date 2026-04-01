@@ -517,31 +517,6 @@ sub _yaml_bool {
 }
 
 # }}}
-# _resolve_secret_refs - detect ((...)) syntax and wrap {{{
-sub _resolve_secret_refs {
-	my ($self, $value) = @_;
-	return $value unless defined $value;
-
-	if (!ref($value) && $value =~ /^\(\((.+)\)\)$/) {
-		return { secret_ref => $1 };
-	}
-
-	if (ref($value) eq 'HASH') {
-		my %result;
-		for my $key (keys %$value) {
-			$result{$key} = $self->_resolve_secret_refs($value->{$key});
-		}
-		return \%result;
-	}
-
-	if (ref($value) eq 'ARRAY') {
-		return [map { $self->_resolve_secret_refs($_) } @$value];
-	}
-
-	return $value;
-}
-
-# }}}
 # }}}
 
 1;
