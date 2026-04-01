@@ -128,32 +128,15 @@ sub _build_legacy_workflows {
 		my $layout = $wf_data->{$layout_name};
 		next unless ref($layout) eq 'HASH';
 
-		my @environments  = @{$layout->{environments} || []};
-		my @auto_patterns = @{$layout->{auto_patterns} || []};
-		my %will_trigger  = %{$layout->{will_trigger} || {}};
+		my @environments = @{$layout->{environments} || []};
+		my %will_trigger = %{$layout->{will_trigger} || {}};
 
 		# Build aliases and genesis_envs maps
 		my %aliases      = map { $_ => ($boshes->{$_}{alias}       || $_) } @environments;
 		my %genesis_envs = map { $_ => ($boshes->{$_}{genesis_env} || $_) } @environments;
 
-		# Determine auto-trigger environments.
-		# When the layout was parsed via Genesis::CI::Layout the expansion has
-		# already been done and stored in _auto_envs; fall back to re-expanding
-		# raw patterns for callers that populate auto_patterns directly.
-		my %auto_envs;
-		if ($layout->{_auto_envs}) {
-			%auto_envs = map { $_ => 1 } @{$layout->{_auto_envs}};
-		} else {
-			for my $pattern (@auto_patterns) {
-				my $regex = $pattern;
-				$regex =~ s/\*/.*/g;
-				$regex = qr/^$regex$/;
-
-				for my $env (@environments) {
-					$auto_envs{$env} = 1 if $env =~ $regex;
-				}
-			}
-		}
+		# Auto-trigger environments — already expanded by Genesis::CI::Layout
+		my %auto_envs = map { $_ => 1 } @{$layout->{_auto_envs} || []};
 
 		# Build trigger map (inverse of will_trigger)
 		my %triggers;
@@ -207,9 +190,8 @@ sub _build_legacy_workflows {
 			},
 			# Preserve legacy-specific data for the Concourse provider
 			_legacy => {
-				environments  => \@environments,
-				auto_patterns => \@auto_patterns,
-				auto_envs     => [keys %auto_envs],
+				environments => \@environments,
+				auto_envs    => [keys %auto_envs],
 				aliases       => \%aliases,
 				genesis_envs  => \%genesis_envs,
 				will_trigger  => \%will_trigger,

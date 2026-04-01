@@ -362,11 +362,9 @@ sub _parse_layout_dsl {
 	bail("Layout DSL error: %s", $@) if $@;
 
 	return {
-		auto_patterns => [],                   # expansion already done by Layout; use _auto_envs
-		environments  => $layout->{envs},
-		will_trigger  => $layout->{will_trigger},
-		_raw_source   => $src,
-		_auto_envs    => $layout->{auto},      # pre-expanded; used by ASTBuilder directly
+		environments => $layout->{envs},
+		will_trigger => $layout->{will_trigger},
+		_auto_envs   => $layout->{auto},
 	};
 }
 
