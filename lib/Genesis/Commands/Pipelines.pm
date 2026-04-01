@@ -24,6 +24,7 @@ sub embed {
 }
 
 sub repipe {
+	warning("'genesis repipe' is deprecated and will be removed in a future version.  Use 'genesis pipeline-apply' instead.");
 	option_defaults(config => 'ci.yml');
 	my $layout = $_[0];
 
@@ -96,6 +97,7 @@ sub repipe {
 }
 
 sub graph {
+	warning("'genesis graph' is deprecated and will be removed in a future version.  Use 'genesis pipeline-graph' instead.");
 	option_defaults(config => 'ci.yml');
 	my $layout = $_[0];
 	my $top = Genesis::Top->new('.');
@@ -112,6 +114,7 @@ sub graph {
 }
 
 sub describe {
+	warning("'genesis describe' is deprecated and will be removed in a future version.  Use 'genesis pipeline-describe' instead.");
 	option_defaults(config => 'ci.yml');
 	my $layout = $_[0];
 	my $top = Genesis::Top->new('.');
