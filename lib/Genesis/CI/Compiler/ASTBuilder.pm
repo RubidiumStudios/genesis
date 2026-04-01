@@ -136,15 +136,22 @@ sub _build_legacy_workflows {
 		my %aliases      = map { $_ => ($boshes->{$_}{alias}       || $_) } @environments;
 		my %genesis_envs = map { $_ => ($boshes->{$_}{genesis_env} || $_) } @environments;
 
-		# Determine auto-trigger environments
+		# Determine auto-trigger environments.
+		# When the layout was parsed via Genesis::CI::Layout the expansion has
+		# already been done and stored in _auto_envs; fall back to re-expanding
+		# raw patterns for callers that populate auto_patterns directly.
 		my %auto_envs;
-		for my $pattern (@auto_patterns) {
-			my $regex = $pattern;
-			$regex =~ s/\*/.*/g;
-			$regex = qr/^$regex$/;
+		if ($layout->{_auto_envs}) {
+			%auto_envs = map { $_ => 1 } @{$layout->{_auto_envs}};
+		} else {
+			for my $pattern (@auto_patterns) {
+				my $regex = $pattern;
+				$regex =~ s/\*/.*/g;
+				$regex = qr/^$regex$/;
 
-			for my $env (@environments) {
-				$auto_envs{$env} = 1 if $env =~ $regex;
+				for my $env (@environments) {
+					$auto_envs{$env} = 1 if $env =~ $regex;
+				}
 			}
 		}
 

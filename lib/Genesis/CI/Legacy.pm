@@ -5,6 +5,7 @@ use warnings;
 use Genesis;
 use Genesis::Top;
 use Genesis::UI;
+use Genesis::CI::Layout;
 use Socket qw/inet_ntoa/;
 use JSON::PP;
 
@@ -493,101 +494,24 @@ sub parse {
 	$P->{pipeline}{task}{version} ||= 'latest';
 	$P->{pipeline}{task}{privileged} ||= [];
 
-	# NOTE that source-level mucking about via regexen obliterates
-	# all of the line and column information we would expect from
-	# a more traditional parser.  If it becomes important to report
-	# syntax / semantic errors with line information, this whole
-	# parser has to be gutted and re-written.
+	# Parse the layout DSL via Genesis::CI::Layout.
+	# Env names are validated against boshes; auto patterns are expanded
+	# against the same set.  All four graph structures are returned directly.
+	my $layout_data = eval {
+		Genesis::CI::Layout->parse(
+			$src,
+			known_envs => [keys %{$P->{pipeline}{boshes}}],
+		);
+	};
+	die $@ if $@;
 
-	$src =~ s/\s*#.*$//gm;   # remove comments (without strings, this is fine)
-	$src =~ s/[\r\n]+/ ; /g; # collapse newlines into ';' terminators
-	$src =~ s/(^\s+|\s+$)//; # strip leading and trailing whitespace
+	$P->{envs}         = $layout_data->{envs};
+	$P->{auto}         = $layout_data->{auto};
+	$P->{will_trigger} = $layout_data->{will_trigger};
+	$P->{triggers}     = $layout_data->{triggers};
 
-	# condense the raw stream of tokens into a list or rules,
-	# where each rule is itself a list of the significant tokens
-	# between two terminators (or begining of file and a terminator)
-	#
-	# i.e.
-	#   [['auto', 'sandbox*'],
-	#    ['auto', 'preprod*'],
-	#    ['tagged'],
-	#    ['sandbox-a', '->', 'sandbox-b']]
-	#
-	# this structure is designed to be easier to interpret individual
-	# rules from, since we can assert against arity and randomly access
-	# tokens (i.e. a trigger rule must have '->' at $rule[1]).
-	#
-	my @rules = ();
-	my $rule = [];
-	for my $tok (split /\s+/, "$src ;") {
-		$tok or die "'$tok' was empty in [$src]!\n";
-		if ($tok eq ';') {
-			if (@$rule) {
-				push @rules, $rule;
-				$rule = [];
-			}
-			next;
-		}
-		push @$rule, $tok;
-	}
-
-	my @auto; # patterns; we'll expand them once we have all the
-	          # environments, and then populate $P->{auto};
-	my %envs; # de-duplicating map; keys will become $P->{envs}
-	for $rule (@rules) {
-		my ($cmd, @args) = @$rule;
-		if ($cmd eq 'auto') {
-			die "The 'auto' directive requires at least one argument.\n"
-				unless @args;
-			push @auto, @args;
-			next;
-		}
-
-		# Anything that is not a command must be a pipeline
-		if ($P->{pipeline}{boshes}{$cmd}) {
-			# Pipeline definition: env [ -> env]*
-			my $orig = join ' ', @$rule;
-			my ($env, $token);
-			while (@$rule) {
-				($env, $token, @$rule) = @$rule;
-				die "Unknown environment '$env' in pipeline definition '$orig'\n"
-					unless ($P->{pipeline}{boshes}{$cmd});
-				$envs{$env} = 1;
-				if (defined($token)) {
-					die "Invalid pipeline definition '$orig': expecting '<env> [-> <env>]...'.\n"
-						unless $token eq '->';
-					my $target =  $rule->[0];
-					die "Missing target after -> in pipeline definition '$orig'\n"
-						unless $target;
-					push @{$P->{will_trigger}{$env}}, $target;
-				}
-			}
-			next;
-		}
-		die "Unrecognized environment or configuration directive:  '$cmd'.\n";
-	}
-	$P->{envs} = [keys %envs];
-	$P->{aliases} =      { map { $_ => ($P->{pipeline}{boshes}{$_}{alias}       || $_) } keys %envs};
-	$P->{genesis_envs} = { map { $_ => ($P->{pipeline}{boshes}{$_}{genesis_env} || $_) } keys %envs};
-
-	%envs = (); # we'll reuse envs for auto environment de-duplication
-	for my $pattern (@auto) {
-		my $regex = $pattern;
-		$regex =~ s/\*/.*/g;
-		$regex = qr/^$regex$/;
-
-		my $n = 0;
-		for my $env (@{$P->{envs}}) {
-			if ($env =~ $regex) {
-				$envs{$env} = 1;
-				$n++;
-			}
-		}
-		if ($n == 0) {
-			error "#Y{warning}: rule `auto $pattern' did not match any environments...\n";
-		}
-	}
-	$P->{auto} = [keys %envs];
+	$P->{aliases}      = { map { $_ => ($P->{pipeline}{boshes}{$_}{alias}       || $_) } @{$P->{envs}} };
+	$P->{genesis_envs} = { map { $_ => ($P->{pipeline}{boshes}{$_}{genesis_env} || $_) } @{$P->{envs}} };
 
 	# make sure we have a BOSH director for each seen environment.
 	# (thanks to read_pipeline, we know any extant BOSH director configs are good)
@@ -595,29 +519,6 @@ sub parse {
 		die "No BOSH director configuration found for $env (at `pipeline.boshes[$env]').\n"
 			unless $P->{pipeline}{boshes}{$env};
 	}
-
-	# figure out who triggers each environment.
-	# this is an inversion of the directed acyclic graph that we
-	# are storing in {triggers}.
-	#
-	# this means that it is illegal for a given environment to be
-	# triggererd by more than one other environment.  this decision
-	# was made to simplify implementation, and was deemed to not
-	# impose overly much on desired pipeline structure.
-	#
-	# TODO: Explore allowing multiple triggers for a given environment, such
-	# as having lab A and qa B both pass in order to trigger a deploy of preprod C.
-	my $triggers = {};
-	for my $a (keys %{$P->{will_trigger}}) {
-		for my $b (@{$P->{will_trigger}{$a}}) {
-			# $a triggers $b, that is $b won't deploy until we
-			# see a successful deploy (+test) of the $a environment
-			die "Environment '$b' is already being triggered by environment '$triggers->{$b}'.\nIt is illegal to trigger an environment more than once.\n"
-				if $triggers->{$b} and $triggers->{$b} ne $a;
-			$triggers->{$b} = $a;
-		}
-	}
-	$P->{triggers} = $triggers;
 
 	return ($P, $layout);
 }

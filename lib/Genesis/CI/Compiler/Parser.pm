@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::CI::Layout;
 use JSON::PP;
 
 ### Constructor {{{
@@ -347,68 +348,25 @@ sub _normalize_legacy_layouts {
 
 # }}}
 # _parse_layout_dsl - parse the legacy layout DSL into structured form {{{
+#
+# Delegates to Genesis::CI::Layout->parse for tokenizing, rule dispatch,
+# and trigger-graph construction, then maps the result to the internal
+# intermediate form expected by ASTBuilder::_build_legacy_workflows.
 sub _parse_layout_dsl {
 	my ($self, $src, $boshes) = @_;
 
-	# Remove comments and collapse newlines (same as Legacy.pm lines 502-504)
-	$src =~ s/\s*#.*$//gm;
-	$src =~ s/[\r\n]+/ ; /g;
-	$src =~ s/(^\s+|\s+$)//;
+	my @known_envs = keys %{$boshes || {}};
+	my %opts = @known_envs ? (known_envs => \@known_envs) : ();
 
-	# Tokenize into rules
-	my @rules = ();
-	my $rule  = [];
-	for my $tok (split /\s+/, "$src ;") {
-		next unless $tok;
-		if ($tok eq ';') {
-			push @rules, $rule if @$rule;
-			$rule = [];
-			next;
-		}
-		push @$rule, $tok;
-	}
-
-	# Process rules into auto patterns and trigger chains
-	my @auto_patterns;
-	my %envs;
-	my %will_trigger;
-
-	for $rule (@rules) {
-		my ($cmd, @args) = @$rule;
-
-		if ($cmd eq 'auto') {
-			bail("The 'auto' directive requires at least one argument")
-				unless @args;
-			push @auto_patterns, @args;
-			next;
-		}
-
-		# Must be a pipeline definition: env [ -> env]*
-		unless ($boshes->{$cmd}) {
-			bail("Unrecognized environment or configuration directive: '%s'", $cmd);
-		}
-
-		my $orig = join ' ', @$rule;
-		my ($env, $token);
-		while (@$rule) {
-			($env, $token, @$rule) = @$rule;
-			$envs{$env} = 1;
-			if (defined($token)) {
-				bail("Invalid pipeline definition '%s': expecting '<env> [-> <env>]...'", $orig)
-					unless $token eq '->';
-				my $target = $rule->[0];
-				bail("Missing target after -> in pipeline definition '%s'", $orig)
-					unless $target;
-				push @{$will_trigger{$env}}, $target;
-			}
-		}
-	}
+	my $layout = eval { Genesis::CI::Layout->parse($src, %opts) };
+	bail("Layout DSL error: %s", $@) if $@;
 
 	return {
-		auto_patterns => \@auto_patterns,
-		environments  => [keys %envs],
-		will_trigger  => \%will_trigger,
+		auto_patterns => [],                   # expansion already done by Layout; use _auto_envs
+		environments  => $layout->{envs},
+		will_trigger  => $layout->{will_trigger},
 		_raw_source   => $src,
+		_auto_envs    => $layout->{auto},      # pre-expanded; used by ASTBuilder directly
 	};
 }
 
