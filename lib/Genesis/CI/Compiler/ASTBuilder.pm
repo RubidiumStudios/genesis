@@ -228,8 +228,26 @@ sub _build_from_multi_file {
 	# Targets (legacy accessor)
 	my $targets_data = $parsed->{targets}{targets} || $parsed->{targets} || {};
 
-	# Build workflows
-	my $workflows = $self->_build_modern_workflows($pipeline->{workflows} || {}, $scripts);
+	# Build workflows: from pipeline.yml definitions when present; otherwise
+	# derive topology from genesis.pipeline.* keys in env files (Phase A).
+	my $workflow_defs = $pipeline->{workflows} || {};
+	my $workflows;
+	if (%$workflow_defs) {
+		$workflows = $self->_build_modern_workflows($workflow_defs, $scripts);
+	} else {
+		my $env_dir = $parsed->{env_dir}
+			|| $self->{env_dir}
+			|| ($self->{top} ? $self->{top}->path : '.');
+		my ($nodes, $edges) = $self->_build_from_env_files($env_dir);
+		$workflows = {
+			default => {
+				name     => 'default',
+				type     => 'deployment',
+				triggers => [],
+				graph    => { nodes => $nodes, edges => $edges },
+			},
+		};
+	}
 
 	# Configuration
 	my $configuration = $pipeline->{configuration} || {};

@@ -319,6 +319,10 @@ sub graph_md {
 }
 
 # }}}
+# generate_description - alias for describe(); called by Genesis::Commands::Pipeline {{{
+sub generate_description { $_[0]->describe() }
+
+# }}}
 # describe - generate human-readable description {{{
 sub describe {
 	my ($self) = @_;

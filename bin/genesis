@@ -1852,6 +1852,210 @@ define_command("ci-pipeline-run-errand", {
 # }}}
 # }}}
 
+### Pipeline command suite (Phase B) {{{
+# genesis pipeline-apply - compile and deploy pipeline {{{
+define_command("pipeline-apply", {
+	summary => "Compile and deploy the CI/CD pipeline.",
+	usage   => "pipeline-apply [<pipeline-layout>]",
+	description =>
+		"Compiles the pipeline configuration and deploys it to the configured ".
+		"CI provider (Concourse by default).  Replaces `genesis repipe` for ".
+		"the new compiler pipeline.\n".
+		"\n".
+		"Reads from .genesis/ci/ (multi-file format), falling back to ci.yml ".
+		"(legacy format) when the directory is absent.",
+	alias          => [qw(pipeline-push)],
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	arguments      => [
+		'pipeline-layout?' =>
+			"Layout name to deploy.  Defaults to the single layout present, ".
+			"or 'default' if multiple layouts exist.",
+	],
+	options => [
+		'yes|y' =>
+			"Suppress interactive confirmations (for automation).",
+
+		'target|t=s' =>
+			"Concourse target name (per `fly targets`).  Defaults to the ".
+			"pipeline name.",
+
+		'config|c=s' =>
+			"Path to the legacy pipeline config file.  Defaults to 'ci.yml'. ".
+			"Ignored when .genesis/ci/ is present.",
+
+		'paused|P' =>
+			"Leave the pipeline paused after applying.",
+
+		'platform|provider|p=s' =>
+			"CI provider: 'concourse' (default) or 'github-actions'.",
+
+		'dry-run|n' =>
+			"Compile and print the pipeline YAML without deploying it.",
+
+		'output-dir|o=s' =>
+			"Write compiled artifacts to this directory instead of deploying.",
+
+		'skip-vault' =>
+			"Skip vault connectivity when compiling.  Useful for dry runs ".
+			"and CI environments without a running vault.",
+
+		'debug-dir=s' =>
+			"Write intermediate compiler artifacts to this directory.",
+	],
+}, 'Genesis::Commands::Pipeline::apply');
+# }}}
+# genesis pipeline-graph - write Mermaid pipeline.md {{{
+define_command("pipeline-graph", {
+	summary => "Write a Mermaid pipeline graph to pipeline.md.",
+	usage   => "pipeline-graph",
+	description =>
+		"Compiles the pipeline and writes a Mermaid flowchart to pipeline.md ".
+		"in the current directory.  Replaces `genesis graph`.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'config|c=s' =>
+			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
+
+		'platform|provider|p=s' =>
+			"CI provider: 'concourse' (default) or 'github-actions'.",
+	],
+}, 'Genesis::Commands::Pipeline::graph');
+# }}}
+# genesis pipeline-describe - human-readable pipeline description {{{
+define_command("pipeline-describe", {
+	summary => "Describe the pipeline in human-readable form.",
+	usage   => "pipeline-describe",
+	description =>
+		"Compiles the pipeline and prints an ordered environment progression ".
+		"with gate and trigger annotations.  Replaces `genesis describe`.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'config|c=s' =>
+			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
+
+		'platform|provider|p=s' =>
+			"CI provider: 'concourse' (default) or 'github-actions'.",
+	],
+}, 'Genesis::Commands::Pipeline::describe');
+# }}}
+# genesis pipeline-diff - show compiled vs live pipeline delta {{{
+define_command("pipeline-diff", {
+	summary => "Show the diff between compiled and live pipeline.",
+	usage   => "pipeline-diff",
+	description =>
+		"Compiles the pipeline and compares it against the live pipeline ".
+		"fetched via `fly get-pipeline`.  Shows a unified diff, or reports ".
+		"that the pipelines are identical.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'target|t=s' =>
+			"Concourse target name.  Defaults to the pipeline name.",
+
+		'config|c=s' =>
+			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
+
+		'platform|p=s' =>
+			"CI provider.  Defaults to 'concourse'.",
+
+		'skip-vault' =>
+			"Skip vault connectivity when compiling.",
+	],
+}, 'Genesis::Commands::Pipeline::diff');
+# }}}
+# genesis pipeline-status - show per-environment job health {{{
+define_command("pipeline-status", {
+	summary => "Show per-environment pipeline job health.",
+	usage   => "pipeline-status [<env>]",
+	description =>
+		"Queries `fly jobs` and displays the status of each environment's ".
+		"deployment job.  Pass an environment name to filter to a single job.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	arguments => [
+		'env?' => "Filter output to this environment name.",
+	],
+	options => [
+		'target|t=s' =>
+			"Concourse target name.  Defaults to the pipeline name.",
+
+		'config|c=s' =>
+			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
+
+		'platform|p=s' =>
+			"CI provider.  Defaults to 'concourse'.",
+
+		'skip-vault' =>
+			"Skip vault connectivity when compiling.",
+	],
+}, 'Genesis::Commands::Pipeline::status');
+# }}}
+# genesis pipeline-pause - pause an environment job or entire pipeline {{{
+define_command("pipeline-pause", {
+	summary => "Pause an environment job or the entire pipeline.",
+	usage   => "pipeline-pause [<env>]",
+	description =>
+		"Pauses the named environment's Concourse job via `fly pause-job`. ".
+		"When no environment is given, pauses the entire pipeline instead.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	arguments => [
+		'env?' => "Environment name whose job should be paused.",
+	],
+	options => [
+		'target|t=s' =>
+			"Concourse target name.  Defaults to the pipeline name.",
+
+		'config|c=s' =>
+			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
+
+		'platform|p=s' =>
+			"CI provider.  Defaults to 'concourse'.",
+
+		'skip-vault' =>
+			"Skip vault connectivity when compiling.",
+	],
+}, 'Genesis::Commands::Pipeline::pause');
+# }}}
+# genesis pipeline-resume - resume an environment job or entire pipeline {{{
+define_command("pipeline-resume", {
+	summary => "Resume an environment job or the entire pipeline.",
+	usage   => "pipeline-resume [<env>]",
+	description =>
+		"Resumes the named environment's Concourse job via `fly unpause-job`. ".
+		"When no environment is given, resumes the entire pipeline instead.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	arguments => [
+		'env?' => "Environment name whose job should be resumed.",
+	],
+	options => [
+		'target|t=s' =>
+			"Concourse target name.  Defaults to the pipeline name.",
+
+		'config|c=s' =>
+			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
+
+		'platform|p=s' =>
+			"CI provider.  Defaults to 'concourse'.",
+
+		'skip-vault' =>
+			"Skip vault connectivity when compiling.",
+	],
+}, 'Genesis::Commands::Pipeline::resume');
+# }}}
+# }}}
+
 ### Genesis Utility commands {{{
 # genesis ui-semver - Provides semver in support of hook scripts {{{
 define_command("ui-semver", {

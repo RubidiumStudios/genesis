@@ -16,9 +16,10 @@ sub new {
 	my ($class, %opts) = @_;
 
 	return bless({
-		ci_dir => $opts{ci_dir},
-		file   => $opts{file},
-		top    => $opts{top},
+		ci_dir  => $opts{ci_dir},
+		file    => $opts{file},
+		env_dir => $opts{env_dir},
+		top     => $opts{top},
 	}, $class);
 }
 
@@ -69,7 +70,8 @@ sub compile {
 	# Stage 4: Build AST (source representation)
 	info("Building pipeline AST...");
 	my $ast_builder = Genesis::CI::Compiler::ASTBuilder->new(
-		top => $self->{top},
+		top     => $self->{top},
+		env_dir => $self->{env_dir},
 	);
 	my $ast = $ast_builder->build($parsed, $scripts);
 
@@ -117,12 +119,30 @@ sub compile {
 # }}}
 ### Class Methods {{{
 
-# can_compile - detect if new config format exists at a path {{{
+# can_compile - detect if multi-file config with pipeline.yml exists {{{
 sub can_compile {
 	my ($class, $ci_dir) = @_;
 	$ci_dir ||= '.genesis/ci';
 
 	return (-d $ci_dir && -f "$ci_dir/pipeline.yml");
+}
+
+# }}}
+# can_compile_from_env_files - detect if .genesis/ci/ exists for env-file topology {{{
+#
+# Returns true when the .genesis/ci/ directory is present and contains the
+# required support files (targets.yml + integrations.yml), even if there is
+# no pipeline.yml (topology coming from genesis.pipeline.* in env files).
+sub can_compile_from_env_files {
+	my ($class, $ci_dir) = @_;
+	$ci_dir ||= '.genesis/ci';
+
+	return (
+		-d  $ci_dir &&
+		-f  "$ci_dir/targets.yml" &&
+		-f  "$ci_dir/integrations.yml" &&
+		!-f "$ci_dir/pipeline.yml"
+	);
 }
 
 # }}}

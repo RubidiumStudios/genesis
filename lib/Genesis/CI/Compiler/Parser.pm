@@ -51,10 +51,17 @@ sub _parse_multi_file {
 
 	my %parsed;
 
-	# Load pipeline.yml (required)
+	# Load pipeline.yml (optional — topology may come from genesis.pipeline.*
+	# in env files when no explicit layout/workflows are defined)
 	my $pipeline_file = "$ci_dir/pipeline.yml";
-	bail("Missing required '%s'", $pipeline_file) unless -f $pipeline_file;
-	$parsed{pipeline} = $self->_load_yaml_file($pipeline_file);
+	if (-f $pipeline_file) {
+		$parsed{pipeline} = $self->_load_yaml_file($pipeline_file);
+	} else {
+		# No pipeline.yml: workflow topology will be derived from env files.
+		# ASTBuilder will read *.yml files in env_dir for prior_env/gates.
+		$parsed{pipeline} = {};
+		$parsed{env_dir}  = $self->{top} ? $self->{top}->path : '.';
+	}
 
 	# Load targets.yml (required)
 	my $targets_file = "$ci_dir/targets.yml";
