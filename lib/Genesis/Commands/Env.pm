@@ -76,6 +76,48 @@ sub create {
 	my $env = $top->create_env($name, $kit, %{get_options()});
 	bail "Failed to create environment $name" unless $env;
 
+	# Phase C: prompt for pipeline metadata when CI provider is configured
+	if ($top->config->has('ci.provider')) {
+		info(
+			"\n#G{Pipeline configuration} (ci.provider: #C{%s})\n",
+			$top->config->get('ci.provider')
+		);
+
+		my $prior_env = prompt_for_line(
+			"Prior environment (leave blank if this is the pipeline entrypoint):",
+			"prior env",
+			"",
+		);
+
+		my $require_pr = prompt_for_boolean(
+			"Require a PR gate before this environment deploys? [y|n]",
+			"n",
+		);
+
+		my $manual = prompt_for_boolean(
+			"Require a manual CI trigger before this environment deploys? [y|n]",
+			"n",
+		);
+
+		if (length($prior_env)) {
+			my $pipeline_yaml = "  pipeline:\n";
+			$pipeline_yaml .= "    prior_env: $prior_env\n";
+			$pipeline_yaml .= "    require_pr: true\n" if $require_pr;
+			$pipeline_yaml .= "    manual: true\n"     if $manual;
+
+			my $file     = $env->path($env->file);
+			my $contents = slurp($file);
+			unless ($contents =~ /^  pipeline:/m) {
+				$contents =~ s/^(  env:\s+\S[^\n]*\n)/$1$pipeline_yaml/m;
+				mkfile_or_fail($file, $contents);
+			}
+
+			info("#G{Pipeline metadata written to} #C{%s}", $env->file);
+		} else {
+			info("No prior environment — #C{%s} is a pipeline entrypoint, no pipeline section written.", $name);
+		}
+	}
+
 	# let the user know
 	info(
 		"New environment $env->{name} provisioned!\n\n".
