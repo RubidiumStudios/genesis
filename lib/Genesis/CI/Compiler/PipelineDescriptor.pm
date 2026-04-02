@@ -54,7 +54,7 @@ sub describe {
 
 		my @wf_job_names;
 		my @notify_job_names;
-		for my $env (sort @{$wf_data->{environments}}) {
+		for my $env (@{$wf_data->{environments}}) {
 			my $alias         = $wf_data->{aliases}{$env} || $env;
 			my $is_auto       = $wf_data->{auto}{$env};
 			my $trigger_from  = $wf_data->{triggers}{$env};
@@ -1154,7 +1154,7 @@ sub _extract_workflow_data {
 	}
 
 	return {
-		environments => [sort keys %$nodes],
+		environments => (@$edges ? [_topological_sort($graph)] : [sort keys %$nodes]),
 		auto         => \%auto,
 		aliases      => \%aliases,
 		genesis_envs => \%genesis_envs,

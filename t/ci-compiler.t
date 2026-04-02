@@ -669,6 +669,103 @@ subtest 'ASTBuilder + PipelineDescriptor - end-to-end env-file mermaid gates' =>
 	unlike $mermaid, qr/lab\(\[/,                         "lab has no gate annotation";
 };
 
+subtest 'PipelineDescriptor - env-file topology produces topological job order' => sub {
+	my $tmp = tempdir(CLEANUP => 1);
+
+	# lab → nonprod → prod (alphabetical order would be lab, nonprod, prod — same here)
+	# Use names that expose alphabetical vs topological difference: zoo → alpha → middle
+	open my $fh, '>', "$tmp/zoo.yml" or die $!;
+	print $fh "---\ngenesis:\n  pipeline:\n    prior_env:\n";
+	close $fh;
+
+	open $fh, '>', "$tmp/alpha.yml" or die $!;
+	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: zoo\n";
+	close $fh;
+
+	open $fh, '>', "$tmp/middle.yml" or die $!;
+	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: alpha\n";
+	close $fh;
+
+	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
+	my $ast = $builder->build({
+		_source_format => 'multi-file',
+		env_dir        => $tmp,
+		pipeline       => { metadata => { name => 'topo-order-test' } },
+		integrations   => { vault => { url => 'https://vault.example.com' },
+		                    source_control => { provider => 'github', repository => 'org/repo' } },
+		targets        => {},
+		scripts        => {},
+		provider_config => {},
+	}, {});
+
+	my $descriptor = Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast);
+	my $wf   = $ast->workflows->{default};
+	my $data = $descriptor->_extract_workflow_data($ast, $wf);
+
+	my @envs = @{$data->{environments}};
+	is $envs[0], 'zoo',    "zoo comes first (topo, not alpha)";
+	is $envs[1], 'alpha',  "alpha comes second";
+	is $envs[2], 'middle', "middle comes last";
+
+	# Confirm alpha sorts before middle and zoo alphabetically to prove
+	# this order is NOT alphabetical
+	my @alpha_sorted = sort @envs;
+	isnt $alpha_sorted[0], $envs[0], "topological order differs from alphabetical";
+};
+
+subtest 'ASTBuilder - workflows: in pipeline.yml overrides env-file topology' => sub {
+	my $tmp = tempdir(CLEANUP => 1);
+
+	# Env files declare: a -> b -> c
+	open my $fh, '>', "$tmp/a.yml" or die $!;
+	print $fh "---\ngenesis:\n  pipeline:\n    prior_env:\n";
+	close $fh;
+
+	open $fh, '>', "$tmp/b.yml" or die $!;
+	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: a\n";
+	close $fh;
+
+	open $fh, '>', "$tmp/c.yml" or die $!;
+	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: b\n";
+	close $fh;
+
+	# pipeline.yml declares a different topology via workflows:
+	my $parsed = {
+		_source_format => 'multi-file',
+		env_dir        => $tmp,
+		pipeline => {
+			metadata => { name => 'override-test' },
+			workflows => {
+				default => {
+					name  => 'default',
+					type  => 'deployment',
+					graph => {
+						nodes => { x => { stage_name => 'x' }, y => { stage_name => 'y' } },
+						edges => [ { from => 'x', to => 'y' } ],
+					},
+				},
+			},
+		},
+		integrations    => {},
+		targets         => {},
+		scripts         => {},
+		provider_config => {},
+	};
+
+	my $builder = Genesis::CI::Compiler::ASTBuilder->new(env_dir => $tmp);
+	my $ast = $builder->build($parsed, {});
+
+	my $wf    = $ast->workflows->{default};
+	my $nodes = $wf->{graph}{nodes};
+
+	# Should have x and y from pipeline.yml, NOT a/b/c from env files
+	ok  exists $nodes->{x}, "node x from pipeline.yml workflow present";
+	ok  exists $nodes->{y}, "node y from pipeline.yml workflow present";
+	ok !exists $nodes->{a}, "env-file node 'a' absent when workflows: present";
+	ok !exists $nodes->{b}, "env-file node 'b' absent when workflows: present";
+	ok !exists $nodes->{c}, "env-file node 'c' absent when workflows: present";
+};
+
 ### ============================================================ ###
 ### Validator Tests
 ### ============================================================ ###
