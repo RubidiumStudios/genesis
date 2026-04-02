@@ -1962,7 +1962,7 @@ define_command("pipeline-diff", {
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
 
-		'platform|p=s' =>
+		'platform|provider|p=s' =>
 			"CI provider.  Defaults to 'concourse'.",
 
 		'skip-vault' =>
@@ -1990,7 +1990,7 @@ define_command("pipeline-status", {
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
 
-		'platform|p=s' =>
+		'platform|provider|p=s' =>
 			"CI provider.  Defaults to 'concourse'.",
 
 		'skip-vault' =>
@@ -2018,7 +2018,7 @@ define_command("pipeline-pause", {
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
 
-		'platform|p=s' =>
+		'platform|provider|p=s' =>
 			"CI provider.  Defaults to 'concourse'.",
 
 		'skip-vault' =>
@@ -2046,7 +2046,7 @@ define_command("pipeline-resume", {
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
 
-		'platform|p=s' =>
+		'platform|provider|p=s' =>
 			"CI provider.  Defaults to 'concourse'.",
 
 		'skip-vault' =>

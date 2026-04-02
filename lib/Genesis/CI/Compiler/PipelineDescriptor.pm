@@ -1297,7 +1297,8 @@ sub _topological_sort {
 	$visit = sub {
 		my ($node) = @_;
 		return if $visited{$node};
-		return if $temp_mark{$node}; # cycle - skip silently here
+		bail("Cycle detected in workflow graph at node '%s'", $node)
+			if $temp_mark{$node};
 		$temp_mark{$node} = 1;
 		for my $edge (@{$graph->{edges} || []}) {
 			$visit->($edge->{to}) if $edge->{from} eq $node;
