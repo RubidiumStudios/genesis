@@ -170,9 +170,9 @@ subtest 'PipelineDescriptor resolves generic pipeline' => sub {
 	my @grp_names = map { $_->{name} } @{$pipeline->{groups}};
 	diag("Groups: " . join(', ', @grp_names));
 
-	# Graphviz
-	ok($pipeline->{graphviz}, 'graphviz present');
-	like($pipeline->{graphviz}, qr/digraph/, 'graphviz contains digraph');
+	# Mermaid (replaced graphviz in the modern compiler path)
+	ok($pipeline->{mermaid}, 'mermaid present');
+	like($pipeline->{mermaid}, qr/flowchart/, 'mermaid contains flowchart directive');
 
 	# Description
 	ok($pipeline->{description}, 'description present');
