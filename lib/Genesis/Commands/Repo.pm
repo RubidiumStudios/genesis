@@ -118,8 +118,31 @@ sub init {
 		run({ onfailure => "Failed to initialize a git repository in $human_root/" },
 			'git init && git add .');
 
-		run({ onfailure => "Failed to commit initial Genesis repository in $human_root/" },
-			'git commit -m "Initial Genesis Repo"');
+		# Show a summary of what was staged
+		my ($stat) = run({}, 'git diff --cached --stat');
+		if ($stat && $stat =~ /\S/) {
+			info "\n#G{Files staged for initial commit:}";
+			for my $line (split /\n/, $stat) {
+				info "  %s", $line;
+			}
+			info "";
+		}
+
+		my $do_commit;
+		if ($options{commit}) {
+			$do_commit = 1;
+		} elsif ($options{'no-commit'}) {
+			$do_commit = 0;
+		} else {
+			$do_commit = prompt_for_boolean(
+				"Commit initial state? [y|n]", "y"
+			);
+		}
+
+		if ($do_commit) {
+			run({ onfailure => "Failed to commit initial Genesis repository in $human_root/" },
+				'git commit -m "Initial Genesis Repo"');
+		}
 	};
 	my $err = $@;
 	popd;

@@ -1234,6 +1234,12 @@ define_command("init", {
 				"the '-deployments' suffix, but the option is still available for ".
 				"backward compatibility by setting the #Y{legacy_repo_suffix} option in ".
 				"the Genesis configuration file \$HOME/.genesis/config.yml to true.",
+
+			"commit" =>
+				"Automatically commit the initial state without prompting.",
+
+			"no-commit" =>
+				"Stage files and show the summary but skip the commit entirely.",
 		],
 		option_passthrough => 1,
 		arguments => [
