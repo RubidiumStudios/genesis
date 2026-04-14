@@ -61,7 +61,7 @@ sub apply {
 		my $target = $opts->{target} || $layout || $name;
 
 		my ($out, $rc) = run('fly -t $1 pause-pipeline -p $2', $target, $name);
-		bail("Could not pause #c{%s} pipeline: %s", $name, $out)
+		bail("Could not pause #C{%s} pipeline: %s", $name, $out)
 			unless $rc == 0 || $out =~ /pipeline '.*' not found/;
 
 		my $yes = $opts->{yes} ? ' -n ' : '';
@@ -232,12 +232,29 @@ sub status {
 	output "#G{Pipeline}: #C{%s}  (#Yi{target}: %s)", $name, $target;
 	output "";
 
+	# Index jobs by name for ordered lookup
+	my %job_by_name = map { $_->{name} => $_ } @$jobs;
+
+	# Use AST pipeline order when available; fall back to alphabetical
+	my @ordered_names;
+	for my $wf_name ($ast->workflow_names) {
+		my @stage_order = eval { $ast->workflow_stage_order($wf_name) };
+		if (@stage_order) {
+			my $nodes = ($ast->workflows->{$wf_name} || {})->{graph}{nodes} || {};
+			push @ordered_names, map { $nodes->{$_}{alias} || $_ } @stage_order;
+		}
+	}
+	# Append any jobs from fly that didn't appear in the AST (e.g. update-pipeline)
+	my %seen = map { $_ => 1 } @ordered_names;
+	push @ordered_names, sort grep { !$seen{$_} } keys %job_by_name;
+
 	my $col_w = 40;
 	output "  %-${col_w}s  %-10s  %s", "Environment", "Status", "Notes";
 	output "  %s  %s  %s", '-' x $col_w, '-' x 10, '-' x 20;
 
-	for my $job (sort { $a->{name} cmp $b->{name} } @$jobs) {
-		next if $filter_env && $job->{name} ne $filter_env;
+	for my $job_name (@ordered_names) {
+		next if $filter_env && $job_name ne $filter_env;
+		my $job = $job_by_name{$job_name} or next;
 
 		my $status = _job_status_label($job);
 		my @notes;
@@ -245,7 +262,7 @@ sub status {
 		push @notes, 'errored' if ($job->{finished_build} || {})->{status} eq 'errored';
 
 		output "  %-${col_w}s  %-10s  %s",
-			$job->{name},
+			$job_name,
 			$status,
 			join(', ', @notes) || '';
 	}

@@ -295,7 +295,14 @@ sub repo_update {
 
 	my $top = Genesis::Top->new('.', no_vault => 1);
 
-	my @flag_keys = grep { $_ ne 'yes' } keys %options;
+	unless ($top->config->has('ci.provider')) {
+		warning(
+			"CI provider is not configured for this repository.\n".
+			"Use #C{genesis repo-init} to set up CI from scratch."
+		);
+	}
+
+	my @flag_keys = keys %options;
 
 	if (@flag_keys) {
 		# Non-interactive: apply only the provided flags, leave everything else alone
@@ -342,12 +349,14 @@ sub _existing_ci_defaults {
 	if (-f "$ci_dir/integrations.yml") {
 		eval {
 			my $raw = slurp("$ci_dir/integrations.yml");
-			# Extract vault url from YAML without full spruce evaluation
-			if ($raw =~ /^\s{0,2}vault:\s*\n.*?\n\s{2,4}url:\s*(\S+)/ms) {
-				$defaults->{vault_url} = $1;
-			} elsif ($raw =~ /url:\s*(\S+)/) {
-				$defaults->{vault_url} = $1;
+			# Extract vault.url: capture only within the vault: block, stopping
+			# before the next top-level key (no leading spaces) to avoid matching
+			# url: keys in other sections.
+			if ($raw =~ /^vault:\s*\n((?:[ \t]+[^\n]*\n)*)/m) {
+				my $vault_block = $1;
+				$defaults->{vault_url} = $1 if $vault_block =~ /url:\s*(\S+)/;
 			}
+			# source_control.uri and default_branch are unique keys in our schema
 			if ($raw =~ /uri:\s*(\S+)/) {
 				$defaults->{git_uri} = $1;
 			}
@@ -426,6 +435,13 @@ sub _ci_wizard {
 sub _apply_ci_flags {
 	my ($options, $top) = @_;
 
+	unless ($top->config->has('ci.provider') || exists $options->{'ci-provider'}) {
+		warning(
+			"CI provider not configured and --ci-provider not given.\n".
+			"Run #C{genesis repo-init} to perform initial CI setup."
+		);
+	}
+
 	if (exists $options->{'ci-provider'}) {
 		my $provider = $options->{'ci-provider'};
 		bail(
@@ -477,7 +493,7 @@ sub _apply_ci_flags {
 
 # _write_ci_config - write config key and scaffold directory for init/full update
 sub _write_ci_config {
-	my ($top, $cfg, %opts) = @_;
+	my ($top, $cfg) = @_;
 
 	my $provider = $cfg->{ci_provider};
 
