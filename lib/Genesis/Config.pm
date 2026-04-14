@@ -590,6 +590,9 @@ sub _validate_key {
 		if (defined($value)) {
 			push @errors, "#R{$key}: expected null, not #ri{".($value ? $value : "<null>")."}";
 		}
+	} elsif ($type eq 'opaque') {
+		# Passthrough — any value accepted, sub-keys not validated here.
+		# Used for config sections delegated to other modules (see Top::register_config_section).
 	} elsif ($type eq 'any') {
 		# Do nothing
 	} else {

@@ -9,6 +9,14 @@ use Genesis::CI::Compiler::ScriptDiscovery;
 use Genesis::CI::Compiler::ASTBuilder;
 use Genesis::CI::Compiler::PipelineDescriptor;
 
+# Register as the owner of the ci: section in .genesis/config.
+# This runs at module load time so Top.pm's _validate_config() can
+# delegate ci: section validation to us when we're loaded.
+{
+	require Genesis::Top;
+	Genesis::Top->register_config_section('ci', __PACKAGE__);
+}
+
 ### Constructor {{{
 
 # new - create a new compiler instance {{{
@@ -143,6 +151,46 @@ sub can_compile_from_env_files {
 		-f  "$ci_dir/integrations.yml" &&
 		!-f "$ci_dir/pipeline.yml"
 	);
+}
+
+# }}}
+# can_compile_from_genesis_config - detect if ci: section exists in .genesis/config {{{
+#
+# Returns true when $top has a Genesis::Config with a ci: key, meaning
+# CI configuration is embedded inline in .genesis/config rather than in
+# separate files under .genesis/ci/.
+sub can_compile_from_genesis_config {
+	my ($class, $top) = @_;
+	return 0 unless $top && $top->can('config');
+	return 0 unless eval { $top->config->has('ci') };
+	return 1;
+}
+
+# }}}
+# validate_config_section - validate the ci: section delegated by Top.pm {{{
+#
+# Called by Top::_validate_config() when this module is loaded and a ci: key
+# exists in .genesis/config.  Performs structural validation; detailed
+# cross-reference checks happen later in Compiler::Validator during compile().
+sub validate_config_section {
+	my ($class, $data, $top) = @_;
+
+	return unless defined $data;
+	bail("'ci' configuration in .genesis/config must be a hash")
+		unless ref($data) eq 'HASH';
+
+	bail("'ci.targets' is required and must be a non-empty hash")
+		unless ref($data->{targets}) eq 'HASH' && %{$data->{targets}};
+
+	bail("'ci.integrations' is required and must be a hash")
+		unless ref($data->{integrations}) eq 'HASH';
+
+	bail("'ci.integrations.vault' must be a hash if present")
+		if defined $data->{integrations}{vault}
+		&& ref($data->{integrations}{vault}) ne 'HASH';
+
+	bail("'ci.integrations.source_control' is required and must be a hash")
+		unless ref($data->{integrations}{source_control}) eq 'HASH';
 }
 
 # }}}

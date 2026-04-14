@@ -578,14 +578,20 @@ sub _compile_pipeline {
 
 	my %compiler_opts = (top => $top);
 
-	# Detect configuration source
-	my $ci_dir = '.genesis/ci';
-	if (-d $ci_dir && -f "$ci_dir/pipeline.yml") {
+	# Detect configuration source — priority order:
+	#   1. .genesis/ci/ directory with targets.yml or pipeline.yml (multi-file)
+	#   2. ci: section in .genesis/config                          (genesis-config, Phase E)
+	#   3. Legacy ci.yml / --config file                          (backward compat)
+	my $ci_dir = $top->path('.genesis/ci');
+	if (-d $ci_dir && (-f "$ci_dir/pipeline.yml" || -f "$ci_dir/targets.yml")) {
 		$compiler_opts{ci_dir} = $ci_dir;
-		info("Using multi-file configuration from #C{%s/}", $ci_dir);
+		info("Using multi-file CI configuration from #C{.genesis/ci/}");
+	} elsif (Genesis::CI::Compiler->can_compile_from_genesis_config($top)) {
+		# Parser reads ci: from $top->config — no ci_dir or file needed
+		info("Using inline CI configuration from #C{.genesis/config}");
 	} else {
-		$compiler_opts{file} = get_options->{config} || 'ci.yml';
-		info("Using legacy configuration from #C{%s}", $compiler_opts{file});
+		$compiler_opts{file} = get_options->{config} || $top->path('ci.yml');
+		info("Using legacy CI configuration from #C{%s}", $compiler_opts{file});
 	}
 
 	my $compiler = Genesis::CI::Compiler->new(%compiler_opts);

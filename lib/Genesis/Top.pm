@@ -19,6 +19,27 @@ use Genesis::Config;
 use Cwd ();
 use File::Path qw/rmtree/;
 
+### Config Section Delegation Registry {{{
+# Modules may register themselves as handlers for specific top-level keys in
+# .genesis/config.  Top.pm owns the core schema; registered handlers own their
+# section's schema and validation.  This pattern is reusable for any future
+# section beyond ci:.
+#
+#   Genesis::Top->register_config_section('ci', 'Genesis::CI::Compiler');
+#
+# The handler class must implement:
+#   validate_config_section($data, $top)  # called after core schema validation
+
+my %_config_section_handlers;
+
+# register_config_section - register a module as owner of a config section {{{
+sub register_config_section {
+	my ($class, $section, $handler) = @_;
+	$_config_section_handlers{$section} = $handler;
+}
+
+# }}}
+# }}}
 ### Class Methods {{{
 
 # _build - common construction logic for bare Genesis::Top object {{{
@@ -1154,6 +1175,14 @@ sub _validate_config {
 
 	} elsif ($config_version == 2){
 		$self->config->validate($self->_repo_config_schema());
+
+		# Delegate validation of registered sections to their owning modules
+		for my $section (sort keys %_config_section_handlers) {
+			next unless $self->config->has($section);
+			my $handler = $_config_section_handlers{$section};
+			$handler->validate_config_section($self->config->get($section), $self)
+				if $handler->can('validate_config_section');
+		}
 	} else {
 		bail "Genesis deployment repo configuration version $config_version is not supported";
 	}
@@ -1306,6 +1335,10 @@ sub _repo_config_schema {
 			values         => [qw/always outdated never/],
 			envvar         => 'GENESIS_CONFIRM_RELEASE_OVERRIDES',
 			description    => 'Confirm release overrides'
+		},
+		ci => {
+			type           => 'opaque',
+			description    => 'CI pipeline configuration (owned by Genesis::CI::Compiler)',
 		},
 	};
 }
