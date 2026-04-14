@@ -555,6 +555,52 @@ subtest 'ASTBuilder - _build_from_env_files: prior_env referencing unknown env i
 	is scalar(@$edges), 0, "no edge added for unknown prior_env";
 };
 
+subtest 'ASTBuilder - _build_from_env_files: entrypoint with no pipeline block is included when referenced' => sub {
+	my $tmp = tempdir(CLEANUP => 1);
+
+	# lab.yml — pipeline entrypoint; Phase C convention writes NO pipeline block
+	open my $fh, '>', "$tmp/lab.yml" or die $!;
+	print $fh "---\ngenesis:\n  env: lab\n";
+	close $fh;
+
+	# nonprod.yml — references lab as prior_env
+	open $fh, '>', "$tmp/nonprod.yml" or die $!;
+	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: lab\n";
+	close $fh;
+
+	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
+	my ($nodes, $edges) = $builder->_build_from_env_files($tmp);
+
+	ok exists $nodes->{lab},     "lab node present despite no genesis.pipeline block";
+	ok exists $nodes->{nonprod}, "nonprod node present";
+	is scalar(@$edges), 1, "one edge";
+	is $edges->[0]{from}, 'lab',    "edge from: lab";
+	is $edges->[0]{to},   'nonprod', "edge to: nonprod";
+	is $nodes->{lab}{require_pr}, 0, "lab require_pr defaults to 0";
+	is $nodes->{lab}{manual},     0, "lab manual defaults to 0";
+};
+
+subtest 'ASTBuilder - _build_from_env_files: unreferenced files without pipeline block excluded' => sub {
+	my $tmp = tempdir(CLEANUP => 1);
+
+	# infra.yml — genesis block but no pipeline sub-key, not referenced
+	open my $fh, '>', "$tmp/infra.yml" or die $!;
+	print $fh "---\ngenesis:\n  env: infra\n";
+	close $fh;
+
+	# lab.yml — has pipeline block and references nothing
+	open $fh, '>', "$tmp/lab.yml" or die $!;
+	print $fh "---\ngenesis:\n  pipeline:\n    require_pr: false\n";
+	close $fh;
+
+	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
+	my ($nodes, $edges) = $builder->_build_from_env_files($tmp);
+
+	ok  exists $nodes->{lab},   "lab included (has pipeline block)";
+	ok !exists $nodes->{infra}, "infra excluded (no pipeline block, not referenced)";
+	is scalar(@$edges), 0, "no edges";
+};
+
 subtest 'ASTBuilder - _build_from_env_files: non-existent dir returns empty' => sub {
 	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
 	my ($nodes, $edges) = $builder->_build_from_env_files('/does/not/exist/xyz');

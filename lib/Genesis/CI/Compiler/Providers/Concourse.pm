@@ -101,7 +101,6 @@ sub parse {
 
 	$self->{ast}    = $ast;
 	$self->{config} = $parsed;
-	$self->{layout} = $self->{layout};
 
 	return $self;
 }

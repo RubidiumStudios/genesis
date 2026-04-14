@@ -310,7 +310,7 @@ sub repo_update {
 	} else {
 		# Bare invocation: full wizard with existing values pre-populated
 		my $cfg = _ci_wizard(\%options, $top, _existing_ci_defaults($top));
-		_write_ci_config($top, $cfg, update => 1);
+		_write_ci_config($top, $cfg);
 	}
 
 	info(

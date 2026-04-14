@@ -72,7 +72,7 @@ sub repipe {
 		'fly -t $1 pause-pipeline -p $2',
 		get_options->{target}, $pipeline->{pipeline}{name}
 	);
-	bail("Could not pause #c{%s} pipeline: $out", $pipeline->{pipeline}{name})
+	bail("Could not pause #C{%s} pipeline: $out", $pipeline->{pipeline}{name})
 		unless $rc == 0 || $out =~ /pipeline '.*' not found/;
 
 	my $yes = get_options->{yes} ? ' -n ' : '';
@@ -481,7 +481,7 @@ sub _repipe_compiled {
 			'fly -t $1 pause-pipeline -p $2',
 			get_options->{target}, $name
 		);
-		bail("Could not pause #c{%s} pipeline: $out", $name)
+		bail("Could not pause #C{%s} pipeline: $out", $name)
 			unless $rc == 0 || $out =~ /pipeline '.*' not found/;
 
 		my $yes = get_options->{yes} ? ' -n ' : '';
