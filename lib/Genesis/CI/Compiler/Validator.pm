@@ -452,6 +452,10 @@ sub _validate_pipeline_section {
 		return;
 	}
 
+	# Empty pipeline section means env-file-topology mode (no pipeline.yml).
+	# Topology is derived from genesis.pipeline.* in env files; nothing to validate here.
+	return unless %$pipeline;
+
 	# Metadata
 	if ($pipeline->{metadata}) {
 		$self->_error("'metadata.name' is required")
@@ -611,12 +615,14 @@ sub _validate_cross_references {
 			next unless $trigger->{pattern};
 
 			my $pattern = $trigger->{pattern};
-			my $regex = $pattern;
-			$regex =~ s/\*/.*/g;
+			my $regex = join('', map {
+				$_ eq '*' ? '.*' : $_ eq '?' ? '.' : quotemeta($_)
+			} split(/([*?])/, $pattern, -1));
+			$regex = qr/^$regex$/;
 
 			my $matched = 0;
 			for my $target_name (keys %$targets) {
-				if ($target_name =~ /^$regex$/) {
+				if ($target_name =~ $regex) {
 					$matched = 1;
 					last;
 				}

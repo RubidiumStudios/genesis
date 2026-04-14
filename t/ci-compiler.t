@@ -2012,6 +2012,71 @@ subtest 'Compiler - override lookup uses ci_dir' => sub {
 		"override in wrong directory is not applied";
 };
 
+### ============================================================ ###
+### AST - glob metacharacter safety
+### ============================================================ ###
+
+subtest 'AST - targets_matching escapes regex metacharacters in literal segments' => sub {
+	my $ast = Genesis::CI::Compiler::AST->new(
+		targets => {
+			'aws.dev-sandbox' => { type => 'bosh-director' },
+			'awsXdev-sandbox' => { type => 'bosh-director' },  # should NOT match 'aws.dev-*'
+			'aws.dev-prod'    => { type => 'bosh-director' },
+		},
+	);
+
+	my @matched = $ast->targets_matching('aws.dev-*');
+	is scalar(@matched), 2, "targets_matching 'aws.dev-*' matches 2 (dot is literal)";
+
+	@matched = $ast->targets_matching('awsXdev-*');
+	is scalar(@matched), 1, "targets_matching 'awsXdev-*' matches only 1 (no false positive)";
+
+	@matched = $ast->targets_matching('aws.dev-sandbox');
+	is scalar(@matched), 1, "exact match with dot finds exactly 1";
+};
+
+subtest 'AST - resources_matching escapes regex metacharacters in literal segments' => sub {
+	my $ast = Genesis::CI::Compiler::AST->new(
+		resources => {
+			'git.repo'   => { type => 'git' },
+			'gitXrepo'   => { type => 'git' },   # should NOT match 'git.repo'
+			'git.config' => { type => 'git' },
+		},
+	);
+
+	my @matched = $ast->resources_matching('git.repo');
+	is scalar(@matched), 1, "resources_matching 'git.repo' matches only 1 (dot is literal)";
+
+	@matched = $ast->resources_matching('git.*');
+	is scalar(@matched), 2, "resources_matching 'git.*' matches 2 git.* entries";
+};
+
+### ============================================================ ###
+### Validator - env-file-topology mode (no pipeline.yml)
+### ============================================================ ###
+
+subtest 'Validator - multi-file without pipeline.yml passes validation' => sub {
+	my $v = Genesis::CI::Compiler::Validator->new();
+
+	# When no pipeline.yml exists, the parser sets pipeline => {}.
+	# The validator must not require 'workflows' in this case.
+	$v->validate({
+		_source_format => 'multi-file',
+		pipeline       => {},   # empty: no pipeline.yml, topology from env files
+		integrations   => {
+			vault          => { url => 'https://vault.example.com' },
+			source_control => { provider => 'github', repository => 'org/repo' },
+		},
+		targets => {
+			sandbox => { type => 'bosh-director', connection => { url => 'https://bosh' } },
+		},
+	});
+
+	ok !$v->has_errors,
+		"empty pipeline section (env-file-topology mode) passes without 'workflows required' error"
+		or diag join("\n", @{$v->errors});
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

@@ -132,9 +132,9 @@ sub trigger_names {
 sub resources_matching {
 	my ($self, $pattern) = @_;
 
-	my $regex = $pattern;
-	$regex =~ s/\*/.*/g;
-	$regex =~ s/\?/./g;
+	my $regex = join('', map {
+		$_ eq '*' ? '.*' : $_ eq '?' ? '.' : quotemeta($_)
+	} split(/([*?])/, $pattern, -1));
 	$regex = qr/^$regex$/;
 
 	my @matching;
@@ -149,9 +149,9 @@ sub resources_matching {
 sub targets_matching {
 	my ($self, $pattern) = @_;
 
-	my $regex = $pattern;
-	$regex =~ s/\*/.*/g;
-	$regex =~ s/\?/./g;
+	my $regex = join('', map {
+		$_ eq '*' ? '.*' : $_ eq '?' ? '.' : quotemeta($_)
+	} split(/([*?])/, $pattern, -1));
 	$regex = qr/^$regex$/;
 
 	my @matching;

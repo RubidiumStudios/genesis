@@ -148,9 +148,9 @@ sub topological_sort {
 sub matches_pattern {
 	my ($self, $name, $pattern) = @_;
 
-	my $regex = $pattern;
-	$regex =~ s/\*/.*/g;
-	$regex =~ s/\?/./g;
+	my $regex = join('', map {
+		$_ eq '*' ? '.*' : $_ eq '?' ? '.' : quotemeta($_)
+	} split(/([*?])/, $pattern, -1));
 
 	return $name =~ /^$regex$/;
 }
