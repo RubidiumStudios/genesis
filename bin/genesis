@@ -1309,6 +1309,76 @@ define_command("kit-provider", {
 });
 
 # }}}
+# genesis repo-init - one-time CI provider setup {{{
+define_command("repo-init", {
+	summary => "Initialize CI configuration for this Genesis deployment repository.",
+	usage   => "repo-init [--ci-provider PROVIDER] [--git-uri URI] [--git-branch BRANCH] [--vault-url URL] [--pipeline-name NAME]",
+	description =>
+		"One-time setup that writes a #C{ci:} section to #C{.genesis/config} and ".
+		"generates the #C{.genesis/ci/} scaffold files required by the pipeline ".
+		"compiler.\n".
+		"\n".
+		"Errors if CI is already configured for this repository. Use ".
+		"#C{genesis repo-update} to modify an existing configuration.\n".
+		"\n".
+		"When required flags are omitted an interactive wizard collects them.",
+	function_group => Genesis::Commands::REPOSITORY,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'ci-provider|P=s' =>
+			"CI provider to configure: #C{concourse} (default), ".
+			"#C{github-actions}, or #C{none}.",
+
+		'git-uri|g=s' =>
+			"Git repository URI (e.g. #C{git\@github.com:org/repo.git}).",
+
+		'git-branch|b=s' =>
+			"Default branch for the source-control integration. Defaults to #C{main}.",
+
+		'vault-url|V=s' =>
+			"Vault URL for the secrets integration ".
+			"(e.g. #C{https://vault.example.com:8200}).",
+
+		'pipeline-name|n=s' =>
+			"Name written into #C{pipeline.yml} metadata. Defaults to the ".
+			"deployment type.",
+	],
+}, 'Genesis::Commands::Repo::repo_init');
+# }}}
+# genesis repo-update - idempotent CI config update {{{
+define_command("repo-update", {
+	summary => "Update CI configuration for this Genesis deployment repository.",
+	usage   => "repo-update [--ci-provider PROVIDER] [--git-uri URI] [--git-branch BRANCH] [--vault-url URL] [--pipeline-name NAME]",
+	description =>
+		"Idempotent counterpart to #C{genesis repo-init}. Updates the CI ".
+		"configuration in #C{.genesis/config} and regenerates missing scaffold ".
+		"files in #C{.genesis/ci/}.\n".
+		"\n".
+		"When called with flags, only the specified values are changed; ".
+		"everything else is left as-is. A bare invocation (no flags) launches ".
+		"an interactive wizard pre-populated with the current configuration.",
+	function_group => Genesis::Commands::REPOSITORY,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'ci-provider|P=s' =>
+			"CI provider to configure: #C{concourse}, #C{github-actions}, or #C{none}.",
+
+		'git-uri|g=s' =>
+			"Git repository URI.",
+
+		'git-branch|b=s' =>
+			"Default branch for the source-control integration.",
+
+		'vault-url|V=s' =>
+			"Vault URL for the secrets integration.",
+
+		'pipeline-name|n=s' =>
+			"Name written into #C{pipeline.yml} metadata.",
+	],
+}, 'Genesis::Commands::Repo::repo_update');
+# }}}
 # }}}
 
 ### Kit Management command {{{
