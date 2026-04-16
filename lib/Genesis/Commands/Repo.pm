@@ -11,7 +11,7 @@ use Genesis::Kit::Provider;
 use Genesis::UI;
 
 use Cwd qw/getcwd abs_path/;
-use File::Basename qw/basename/;
+use File::Basename qw/basename dirname/;
 use File::Path qw/rmtree/;
 use JSON::PP qw/encode_json/;
 
@@ -21,8 +21,7 @@ use JSON::PP qw/encode_json/;
 
 sub repo_init {
 	_repo_init_validate();
-	my $result = _repo_init_execute();
-	_repo_init_report($result);
+	_repo_init_report(scalar _repo_init_execute());
 	exit 0;
 }
 
@@ -112,11 +111,73 @@ sub _repo_init_validate {
 			'git config user.email');
 	}
 
-	# Detect git repo for subdirectory mode
-	my $in_git_repo = run({ passfail => 1 }, 'git rev-parse --is-inside-work-tree 2>/dev/null');
-	my $use_subdir = $opts{sub};
-	if ($in_git_repo && !defined($use_subdir)) {
-		$use_subdir = 1;
+	# Guardrail: forbid creating a new Genesis repo inside (or under) an
+	# existing one.  Nested Genesis repos are never correct in this
+	# ecosystem -- pipeline tooling, kit discovery, and .genesis/config
+	# resolution all assume a single enclosing deployment root.
+	if (my $enclosing = _find_enclosing_genesis_repo()) {
+		bail(
+			"Cannot create a new Genesis deployment repository inside an ".
+			"existing one.\n  Enclosing deployment repo: #C{%s}",
+			humanize_path($enclosing)
+		);
+	}
+
+	# Auto-detect whether we're inside an existing (non-Genesis) git
+	# worktree.  If so, the new repo is created as a subdirectory with no
+	# separate .git -- it will share history with the surrounding repo.
+	# This is reported in the plan below so the user can notice an
+	# unexpected enclosure.
+	my $use_subdir = run({ passfail => 1 }, 'git rev-parse --is-inside-work-tree 2>/dev/null') ? 1 : 0;
+
+	# In subdir mode, require the enclosing repo to have no staged or
+	# unstaged changes to tracked files.  Untracked files are fine.
+	# This means that if execution fails and we need to roll back the
+	# index, we can do so without risking the user's in-progress work.
+	# #C{-F|--force} bypasses this check for users who understand the
+	# risk (e.g. scripted environments, known-safe index).
+	if ($use_subdir && !$opts{force}) {
+		my ($dirty) = run({}, 'git status --porcelain --untracked-files=no');
+		if (defined($dirty) && $dirty =~ /\S/) {
+			bail(
+				"Cannot create a Genesis deployment repository inside an ".
+				"enclosing git repository that has uncommitted changes to ".
+				"tracked files.\n".
+				"  Please commit, stash, or discard the following first, ".
+				"or rerun with #C{-F|--force} to bypass this check:\n\n%s\n",
+				$dirty
+			);
+		}
+	}
+
+	# In subdir mode, require the enclosing repo to be on the CI
+	# control branch.  Genesis pipeline tooling treats this branch as
+	# the single source of truth from which environment branches are
+	# cut (#C{genesis new}) and against which deploys are validated
+	# (#C{genesis deploy}).  We do not rename or create branches in
+	# the enclosing repo -- the user must set this up themselves.  No
+	# #C{--force} bypass: this is a topology requirement, not a safety
+	# check.
+	my $control_branch = Genesis::Top::DEFAULT_CONTROL_BRANCH;
+	if ($use_subdir) {
+		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
+		chomp $branch if defined $branch;
+		if (!defined($branch) || $branch ne $control_branch) {
+			bail(
+				"Genesis requires the enclosing git repository to be on a ".
+				"branch named #C{%s}, but it is currently on #C{%s}.\n".
+				"  Please switch to the #C{%s} branch before running ".
+				"#C{repo-init}:\n\n".
+				"    git checkout %s\n\n".
+				"  or, if it doesn't exist yet:\n\n".
+				"    git checkout -b %s\n",
+				$control_branch,
+				$branch // '<detached HEAD>',
+				$control_branch,
+				$control_branch,
+				$control_branch
+			);
+		}
 	}
 
 	# --- 4. Check destructive prerequisites (before expensive network calls) ---
@@ -198,7 +259,8 @@ sub _repo_init_validate {
 	push @plan, "vault: #C{$vault_target}" if $vault_target;
 	push @plan, "vault: #Yi{deferred}" unless $vault_target;
 	push @plan, "ci provider: #C{$opts{'ci-provider'}}" if $opts{'ci-provider'};
-	push @plan, "subdirectory: #C{yes} (no separate git)" if $use_subdir;
+	push @plan, "control branch: #C{$control_branch}";
+	push @plan, "subdirectory of enclosing git repo: #C{yes} (no separate .git, auto-detected)" if $use_subdir;
 	info "\nCreating #C{%s} deployment repository in #M{%s/}:", $name, $dir;
 	info "  %s", $_ for @plan;
 	info "";
@@ -213,6 +275,7 @@ sub _repo_init_validate {
 #
 sub _repo_init_execute {
 	my (
+		# Derived and validated values from validation phase (prefixed with _)
 		$name,             # derived name of the deployment/repo
 		$dir,              # target directory name (derived from name or specified by user)
 		$parent_dir,       # parent directory where repo will be created (usually cwd)
@@ -224,12 +287,16 @@ sub _repo_init_execute {
 		$vault_target,     # vault target to configure, or undef to skip vault
 		$replace_existing, # whether to remove existing target directory if it exists
 		$linked_dev_kit,   # optional path to a local dev kit to link into the repo
+
+		# User provided options (validated but not altered)
 		$ci_provider,      # optional CI provider type
 		$directory,        # optional custom directory name override
 		$kits_path,        # optional custom kits path
+		$no_commit,        # skip the initial commit (stage only)
+		$reason,           # optional commit message override
 	) = get_options()->@{qw/
 		_name _dir _parent_dir _target_path _kit_file kit _kit_provider _use_subdir _vault_target
-		_replace_existing link-dev-kit ci-provider directory kits-path
+		_replace_existing link-dev-kit ci-provider directory kits-path no-commit reason
 	/};
 
 	# Remove existing directory if validation approved it
@@ -294,42 +361,160 @@ sub _repo_init_execute {
 			_create_ci_scaffold($top, $ci_provider);
 		}
 
-		# Git init (skip if subdirectory of existing repo)
+		# Record the CI control branch name in .genesis/config so
+		# pipeline tooling (genesis new, genesis deploy, compiler) can
+		# read it via $top->ci_control_branch.  Written AFTER
+		# _create_ci_scaffold because that helper replaces the ci:
+		# hash wholesale.
+		$top->config->set(
+			'ci.control_branch',
+			Genesis::Top::DEFAULT_CONTROL_BRANCH,
+			1,   # save
+		);
+
+		# Only create a new .git when we're not already sitting inside
+		# an enclosing git worktree; in subdir mode we share the
+		# parent's .git and just stage into its index.  In standalone
+		# mode, force the initial branch name to match the CI control
+		# branch (e.g. 'control') so the initial commit lands there
+		# instead of on whatever git's init.defaultBranch happens to
+		# be.  #C{git symbolic-ref HEAD} works on all git versions,
+		# unlike #C{git init -b} which requires >= 2.28.
 		unless ($use_subdir) {
+			my $branch = $top->ci_control_branch;
 			run({ onfailure => "Failed to initialize git in $human_root/" },
-				'git init && git add .');
-			run({ onfailure => "Failed to commit initial repository in $human_root/" },
-				'git commit -m "Initial Genesis Repo"');
+				"git init && git symbolic-ref HEAD refs/heads/$branch");
+		}
+		run({ onfailure => "Failed to stage repository in $human_root/" },
+			'git add .');
+
+		# Show a summary of what we just staged so the user can see
+		# exactly what the initial commit (or leftover stage) contains.
+		my ($stat) = run({}, 'git diff --cached --stat -- .');
+		if ($stat && $stat =~ /\S/) {
+			info "\n#G{Files staged for initial commit:}";
+			info "  %s", $_ for split /\n/, $stat;
+			info "";
+		}
+
+		# Commit unless the user explicitly opted out.  In subdir mode
+		# we scope the commit with a pathspec ('-- .') so any unrelated
+		# changes already staged in the enclosing repo are not bundled
+		# into this commit.
+		if ($no_commit) {
+			info "Skipping initial commit (#C{--no-commit} set); files remain staged.";
+		} else {
+			my $message = $reason || "Initial Genesis repo for $name";
+			my @cmd = ('git', 'commit', '-m', $message);
+			push @cmd, '--', '.' if $use_subdir;
+			run({ onfailure => "Failed to commit initial repository in $human_root/" }, @cmd);
 		}
 	};
 	my $err = $@;
-	popd;
+	eval { popd };  # always restore cwd; swallow errors to not mask $err
+
+	# On failure, return only what the report phase needs to clean up
+	# and bail -- the $top object may be in a partial state and its
+	# accessors (vault, etc.) are not safe to call.
 	if ($err) {
-		debug("removing incomplete Genesis repository at #C{$root} due to failed creation");
-		rmtree $root;
-		bail $err;
+		return {
+			error        => $err,
+			root         => $root,
+			human_root   => $human_root,
+			target_path  => $target_path,
+			parent_dir   => $parent_dir,
+			use_subdir   => $use_subdir,
+		};
 	}
 
-	return {
+	# Success: the repository is created and (if requested) committed.
+	# Resolving the vault URL for the report is not part of the
+	# command's core purpose -- if it trips a runtime error, warn the
+	# user but do NOT fail the command (the repo is already on disk).
+	my %result = (
+		error         => undef,
 		root          => $root,
 		human_root    => $human_root,
 		name          => $name,
 		kit_desc      => $kit_desc,
 		ci_provider   => $ci_provider,
 		vault_skipped => $vault_target ? 0 : 1,
-		vault         => $vault_target ? ($top->vault ? $top->vault->url : $vault_target) : undef,
+		vault         => $vault_target,
 		submodule     => $use_subdir,
+	);
+	eval {
+		$result{vault} = $vault_target
+			? ($top->vault ? $top->vault->url : $vault_target)
+			: undef;
 	};
+	if (my $housekeeping_err = $@) {
+		warning(
+			"Repository was created successfully, but a post-commit ".
+			"housekeeping step failed (non-fatal):\n%s",
+			$housekeeping_err
+		);
+	}
+	return \%result;
 }
 
 # -- Phase 3: Report ----------------------------------------------------------
-
+#
+# Handles both success and failure.  On failure, cleans up any partial
+# initialization (removing the new directory and, in subdir mode,
+# unstaging from the enclosing repo's index) before bailing with an
+# appropriate message.  On success, prints the summary.
+#
 sub _repo_init_report {
 	my ($result) = @_;
+
+	if ($result->{error}) {
+		debug(
+			"removing incomplete Genesis repository at #C{%s} due to failed creation",
+			$result->{root}
+		);
+		# In subdir mode, unstage anything we added to the enclosing
+		# repo's index before deleting the directory so the parent
+		# repo's working state is left clean.  This is safe because
+		# validation ensured the parent repo had no other tracked
+		# changes (or the user passed --force); the pathspec scopes
+		# the reset strictly to what we just staged.
+		if ($result->{use_subdir}) {
+			eval {
+				run({ dir => $result->{parent_dir} },
+					'git', 'reset', 'HEAD', '--', $result->{target_path});
+			};
+		}
+		rmtree $result->{root} if -e $result->{root};
+		bail(
+			"Failed to create Genesis repository at #C{%s}:\n%s",
+			$result->{human_root}, $result->{error}
+		);
+	}
+
 	success "\nGenesis repository #C{%s} created successfully.\n", $result->{name};
 }
 
 # -- Helpers -------------------------------------------------------------------
+
+# Walk upward from the current working directory looking for an
+# enclosing Genesis deployment repository.  Returns the absolute path
+# of the enclosing repo if found, otherwise undef.
+#
+# The global #C{in_repo_dir()} helper only checks cwd, and almost every
+# consumer downstream uses #C{Genesis::Top->new('.')} which assumes
+# cwd IS the repo root -- so teaching the global helper to walk up
+# would ripple.  This variant is scoped to #C{repo-init}'s guardrail
+# against creating a nested deployment repo.
+sub _find_enclosing_genesis_repo {
+	my $dir = abs_path(getcwd());
+	while (defined($dir) && length($dir) > 1) {
+		return $dir if Genesis::Top->is_repo($dir);
+		my $parent = dirname($dir);
+		last if $parent eq $dir;
+		$dir = $parent;
+	}
+	return undef;
+}
 
 sub _select_vault_target {
 	my $configure = Genesis::UI::prompt_for_boolean(

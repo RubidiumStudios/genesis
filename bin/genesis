@@ -1237,21 +1237,21 @@ define_command("repo-init", {
 				"backward compatibility by setting the #Y{legacy_repo_suffix} option in ".
 				"the Genesis configuration file \$HOME/.genesis/config.yml to true.",
 
-			"commit" =>
-				"Automatically commit the initial state without prompting.",
-
 			"no-commit" =>
-				"Stage files and show the summary but skip the commit entirely.",
+				"Stage the new repository contents but skip the initial commit. ".
+				"By default, #C{repo-init} commits the new repository automatically.",
 
-			'sub!' =>
-				"Control whether the new repo is created as a subdirectory of the ".
-				"current git repository (no separate .git). If not specified and ".
-				"the current directory is inside a git repo, subdirectory mode is ".
-				"used automatically.",
+			"reason=s" =>
+				"Commit message for the initial commit.  Defaults to a message ".
+				"describing the new Genesis deployment.  Ignored if #C{--no-commit} ".
+				"is set.",
 
 			'force|F' =>
-				"If the target directory already exists, remove it and recreate. ".
-				"Without this flag, you will be prompted to confirm replacement.",
+				"If the target directory already exists, remove it and recreate ".
+				"(without this flag, you will be prompted to confirm ".
+				"replacement).  Also bypasses the check that the enclosing git ".
+				"repository is clean when creating the new repo as a ".
+				"subdirectory; use with care.",
 
 			'skip-vault' =>
 				"Defer vault configuration. The repo will be created without a ".
