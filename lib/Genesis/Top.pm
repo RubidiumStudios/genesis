@@ -19,6 +19,15 @@ use Genesis::Config;
 use Cwd ();
 use File::Path qw/rmtree/;
 
+# ---- Constants --------------------------------------------------------------
+#
+# Default name of the CI "control" branch -- the branch from which
+# environment branches are cut by 'genesis new' and against which
+# 'genesis deploy' validates its working state.  Captured as a constant
+# (and a config key) so it can change without rippling through the
+# codebase; not currently exposed to end users.
+use constant DEFAULT_CONTROL_BRANCH => 'control';
+
 ### Config Section Delegation Registry {{{
 # Modules may register themselves as handlers for specific top-level keys in
 # .genesis/config.  Top.pm owns the core schema; registered handlers own their
@@ -960,6 +969,19 @@ sub config {
 sub type {
 	my ($self) = @_;
 	return $self->config->get("deployment_type");
+}
+
+# }}}
+# ci_control_branch - return the configured CI control branch name {{{
+#
+# Returns the branch name that Genesis pipeline tooling treats as the
+# source of truth for this deployment repository.  Reads from
+# #C{ci.control_branch} in #C{.genesis/config}, defaulting to the
+# value of the #C{DEFAULT_CONTROL_BRANCH} constant.  Intentionally
+# not exposed as a user-facing option at this time.
+sub ci_control_branch {
+	my ($self) = @_;
+	return $self->config->get('ci.control_branch', DEFAULT_CONTROL_BRANCH);
 }
 
 # }}}
