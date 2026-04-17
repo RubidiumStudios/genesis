@@ -30,16 +30,36 @@ sub repo_init {
 # Order within validation:
 #   1. Parse options and derive values (fast, no side effects)
 #   2. Check invalid option combinations (fast bail)
-#   3. Gather data: resolve kit provider, check kit availability, detect git repo
-#   4. Check for destructive prerequisites (existing directory)
-#   5. Prompt for missing info (vault selection)
-#   6. Summarize intent
+#   3. Gather data: validate local sources, detect git repo (no network)
+#   4. Check destructive prerequisites (existing directory, before network)
+#   5. Validate remote kit availability (network calls)
+#   6. Prompt for missing info (vault selection)
+#   7. Store derived values and summarize intent
 #
 sub _repo_init_validate {
 	my %opts = %{get_options()};
 	my @args = get_args();
 
 	# --- 1. Parse and derive ---
+
+	# The #C{repo-init} command uses #C{option_passthrough => 1}, so
+	# any option that isn't declared in bin/genesis (e.g. the
+	# #C{--kit-provider-*} flags provided by #C{Genesis::Kit::Provider}
+	# and, in the future, the CI-provider-specific flags) is left
+	# untouched in @args alongside true positional arguments.  We must
+	# consume those passthrough options here, BEFORE reading
+	# #C{$args[0]} as the deployment name -- otherwise a flag value
+	# (or the flag itself) could be mistaken for the name.
+	#
+	# parse_opts mutates @args in place: it strips recognised flags
+	# into %provider_opts and leaves the remaining positional args
+	# behind.  The provider object itself is built later, only when
+	# $opts{kit} is actually set.
+	#
+	# When the CI-provider parse_opts analogue lands, call it from
+	# here as well.
+	my %provider_opts;
+	Genesis::Kit::Provider->parse_opts(\@args, \%provider_opts);
 
 	my $name = $args[0];
 	my $kit_file;
@@ -150,24 +170,29 @@ sub _repo_init_validate {
 		}
 	}
 
-	# In subdir mode, require the enclosing repo to be on the CI
-	# control branch.  Genesis pipeline tooling treats this branch as
-	# the single source of truth from which environment branches are
-	# cut (#C{genesis new}) and against which deploys are validated
+	# In subdir mode AND when a CI provider is being configured,
+	# require the enclosing repo to be on the CI control branch.
+	# Genesis pipeline tooling treats this branch as the single source
+	# of truth from which environment branches are cut
+	# (#C{genesis new}) and against which deploys are validated
 	# (#C{genesis deploy}).  We do not rename or create branches in
 	# the enclosing repo -- the user must set this up themselves.  No
 	# #C{--force} bypass: this is a topology requirement, not a safety
 	# check.
-	my $control_branch = Genesis::Top::DEFAULT_CONTROL_BRANCH;
-	if ($use_subdir) {
+	#
+	# Without #C{--ci-provider}, no pipeline topology is being
+	# established, so the branch name is irrelevant at this point.
+	my $control_branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+	if ($use_subdir && $opts{'ci-provider'}) {
 		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
 		chomp $branch if defined $branch;
 		if (!defined($branch) || $branch ne $control_branch) {
 			bail(
-				"Genesis requires the enclosing git repository to be on a ".
-				"branch named #C{%s}, but it is currently on #C{%s}.\n".
+				"Configuring a CI provider requires the enclosing git ".
+				"repository to be on a branch named #C{%s}, but it is ".
+				"currently on #C{%s}.\n".
 				"  Please switch to the #C{%s} branch before running ".
-				"#C{repo-init}:\n\n".
+				"#C{repo-init --ci-provider ...}:\n\n".
 				"    git checkout %s\n\n".
 				"  or, if it doesn't exist yet:\n\n".
 				"    git checkout -b %s\n",
@@ -201,8 +226,10 @@ sub _repo_init_validate {
 	if ($opts{kit} && !$kit_file) {
 		($resolved_kit_name, $resolved_kit_version) = split('/', $opts{kit}, 2);
 
-		my %provider_opts;
-		Genesis::Kit::Provider->parse_opts(\@args, \%provider_opts);
+		# %provider_opts was populated at the top of this sub so
+		# that positional-arg parsing wasn't fooled by passthrough
+		# flags.  Build the provider object now that we know we
+		# need it.
 		$kit_provider = eval { Genesis::Kit::Provider->init(%provider_opts) };
 		bail("Could not initialize kit provider: %s", $@) if $@;
 
@@ -259,7 +286,6 @@ sub _repo_init_validate {
 	push @plan, "vault: #C{$vault_target}" if $vault_target;
 	push @plan, "vault: #Yi{deferred}" unless $vault_target;
 	push @plan, "ci provider: #C{$opts{'ci-provider'}}" if $opts{'ci-provider'};
-	push @plan, "control branch: #C{$control_branch}";
 	push @plan, "subdirectory of enclosing git repo: #C{yes} (no separate .git, auto-detected)" if $use_subdir;
 	info "\nCreating #C{%s} deployment repository in #M{%s/}:", $name, $dir;
 	info "  %s", $_ for @plan;
@@ -356,34 +382,31 @@ sub _repo_init_execute {
 			$kit_desc = "with an empty development kit in #C{$human_root/dev}";
 		}
 
-		# CI provider scaffold
+		# CI provider scaffold (only when --ci-provider is given)
 		if ($ci_provider) {
 			_create_ci_scaffold($top, $ci_provider);
 		}
 
-		# Record the CI control branch name in .genesis/config so
-		# pipeline tooling (genesis new, genesis deploy, compiler) can
-		# read it via $top->ci_control_branch.  Written AFTER
-		# _create_ci_scaffold because that helper replaces the ci:
-		# hash wholesale.
-		$top->config->set(
-			'ci.control_branch',
-			Genesis::Top::DEFAULT_CONTROL_BRANCH,
-			1,   # save
-		);
-
 		# Only create a new .git when we're not already sitting inside
 		# an enclosing git worktree; in subdir mode we share the
 		# parent's .git and just stage into its index.  In standalone
-		# mode, force the initial branch name to match the CI control
-		# branch (e.g. 'control') so the initial commit lands there
-		# instead of on whatever git's init.defaultBranch happens to
-		# be.  #C{git symbolic-ref HEAD} works on all git versions,
-		# unlike #C{git init -b} which requires >= 2.28.
+		# mode, if the user is establishing pipeline topology
+		# (--ci-provider given), force the initial branch name to the
+		# control branch so the initial commit lands there instead of
+		# on whatever git's init.defaultBranch happens to be.  When
+		# no CI provider is being configured, let git choose its
+		# default branch -- pipeline topology is not relevant yet.
+		# #C{git symbolic-ref HEAD} works on all git versions, unlike
+		# #C{git init -b} which requires >= 2.28.
 		unless ($use_subdir) {
-			my $branch = $top->ci_control_branch;
-			run({ onfailure => "Failed to initialize git in $human_root/" },
-				"git init && git symbolic-ref HEAD refs/heads/$branch");
+			if ($ci_provider) {
+				my $branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+				run({ onfailure => "Failed to initialize git in $human_root/" },
+					"git init && git symbolic-ref HEAD refs/heads/$branch");
+			} else {
+				run({ onfailure => "Failed to initialize git in $human_root/" },
+					'git init');
+			}
 		}
 		run({ onfailure => "Failed to stage repository in $human_root/" },
 			'git add .');
@@ -408,6 +431,13 @@ sub _repo_init_execute {
 			my @cmd = ('git', 'commit', '-m', $message);
 			push @cmd, '--', '.' if $use_subdir;
 			run({ onfailure => "Failed to commit initial repository in $human_root/" }, @cmd);
+
+			# Report the commit that was just made so the user has a
+			# clear record of what was recorded (and, in subdir mode,
+			# where in the enclosing repo's history to find it).
+			my ($sha) = run({}, 'git rev-parse --short HEAD');
+			chomp $sha if defined $sha;
+			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
 		}
 	};
 	my $err = $@;
@@ -801,7 +831,13 @@ sub kit_provider {
 	info("         Kits: %s\n\n", $kit_list) if $info{status} eq "ok";
 }
 
-sub repo_init {
+# PARKED: this is Tristan's CI-only repo-init handler from the upstream
+# merge.  It conflicts with our phased repo-init at the top of this file
+# (both registered under the same command name, causing Perl to redefine
+# our sub).  Renamed to repo_configure_ci as a parking slot until the
+# folding meeting resolves how his CI-scaffold logic merges into our
+# _create_ci_scaffold.  Not currently dispatched by any command.
+sub repo_configure_ci {
 	my %options = %{get_options()};
 	command_usage(1) if @_;
 
@@ -864,7 +900,7 @@ sub repo_update {
 
 ### Private helpers ###########################################################
 
-# _empty_ci_defaults - blank defaults for repo_init wizard
+# _empty_ci_defaults - blank defaults for repo_configure_ci wizard
 sub _empty_ci_defaults {
 	my ($top) = @_;
 	return {
