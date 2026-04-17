@@ -21,12 +21,6 @@ sub new {
 }
 
 # }}}
-# opts - Manual provider takes no CLI flags {{{
-sub opts {
-	qw//;
-}
-
-# }}}
 # opts_help - usage documentation for Manual provider {{{
 sub opts_help {
 	my ($class, %config) = @_;

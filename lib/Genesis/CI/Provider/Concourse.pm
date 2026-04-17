@@ -89,7 +89,8 @@ sub check_prereqs {
 	my $ok = 1;
 
 	# Require fly in PATH
-	chomp(my $fly_path = `which fly 2>/dev/null`);
+	my ($fly_path) = run({ stderr => 0 }, 'type -p fly');
+	chomp($fly_path //= '');
 	unless ($fly_path) {
 		error(
 			"The Concourse CI provider requires the #C{fly} CLI but it was not ".
@@ -135,25 +136,34 @@ sub config {
 # }}}
 # interactive_wizard - prompt user for Concourse configuration {{{
 sub interactive_wizard {
-	my ($self, $top) = @_;
+	my ($self, $top, %opts) = @_;
 
-	my $target = prompt_for_line(undef,
-		"Concourse target name (from ~/.flyrc): ", '');
-	bail("Concourse CI provider requires a target name")
-		unless $target && $target =~ /\S/;
+	my $target = $opts{'ci-target'};
+	unless ($target && $target =~ /\S/) {
+		$target = prompt_for_line(undef,
+			"Concourse target name (from ~/.flyrc): ", '');
+		bail("Concourse CI provider requires a target name")
+			unless $target && $target =~ /\S/;
+	}
 
-	my $team = prompt_for_line(undef,
-		sprintf("Concourse team [%s]: ", DEFAULT_TEAM), DEFAULT_TEAM);
-	$team = DEFAULT_TEAM unless $team && $team =~ /\S/;
+	my $team;
+	if (exists $opts{'ci-team'}) {
+		$team = $opts{'ci-team'} || DEFAULT_TEAM;
+	} else {
+		$team = prompt_for_line(undef,
+			sprintf("Concourse team [%s]: ", DEFAULT_TEAM), DEFAULT_TEAM);
+		$team = DEFAULT_TEAM unless $team && $team =~ /\S/;
+	}
 
-	my $insecure = prompt_for_boolean(
-		"Skip TLS certificate verification? [y|n] ", 0);
+	my $insecure = exists $opts{'ci-insecure'}
+		? ($opts{'ci-insecure'} ? 1 : 0)
+		: prompt_for_boolean("Skip TLS certificate verification? [y|n] ", 0);
 
 	return $self->new(
 		type     => 'concourse',
 		target   => $target,
 		team     => $team,
-		insecure => $insecure ? 1 : 0,
+		insecure => $insecure,
 	);
 }
 

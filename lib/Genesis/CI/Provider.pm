@@ -147,17 +147,7 @@ sub config {
 }
 
 # }}}
-# check_prereqs - verify all required external tools are available {{{
-#
-# Called before any provider-dependent operation (repo-init, repipe, etc.)
-# to confirm the provider's toolchain is present and meets any minimum
-# version requirements.
-#
-# Returns 1 when all prereqs are satisfied; returns 0 and emits error()
-# for each unmet prereq.  Caller decides whether to bail.
-#
-# Subclasses override to add provider-specific checks.
-# Base implementation has no prereqs and always returns 1.
+# check_prereqs - returns 1 if toolchain is present, 0 + error() if not {{{
 sub check_prereqs {
 	return 1;
 }

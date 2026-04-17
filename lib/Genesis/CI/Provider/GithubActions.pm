@@ -89,18 +89,26 @@ sub config {
 # }}}
 # interactive_wizard - prompt user for GitHub Actions configuration {{{
 sub interactive_wizard {
-	my ($self, $top) = @_;
+	my ($self, $top, %opts) = @_;
 
-	my $repo = prompt_for_line(undef,
-		"GitHub repository (org/repo format): ", '');
-	bail("GitHub Actions CI provider requires a repository")
-		unless $repo && $repo =~ /\S/;
-	bail("Repository must be in 'org/repo' format")
-		unless $repo =~ m{^[^/]+/[^/]+$};
+	my $repo = $opts{'ci-github-repo'};
+	unless ($repo && $repo =~ m{^[^/]+/[^/]+$}) {
+		$repo = prompt_for_line(undef,
+			"GitHub repository (org/repo format): ", '');
+		bail("GitHub Actions CI provider requires a repository")
+			unless $repo && $repo =~ /\S/;
+		bail("Repository must be in 'org/repo' format")
+			unless $repo =~ m{^[^/]+/[^/]+$};
+	}
 
-	my $branch = prompt_for_line(undef,
-		sprintf("Default branch [%s]: ", DEFAULT_BRANCH), DEFAULT_BRANCH);
-	$branch = DEFAULT_BRANCH unless $branch && $branch =~ /\S/;
+	my $branch;
+	if (exists $opts{'ci-github-branch'}) {
+		$branch = $opts{'ci-github-branch'} || DEFAULT_BRANCH;
+	} else {
+		$branch = prompt_for_line(undef,
+			sprintf("Default branch [%s]: ", DEFAULT_BRANCH), DEFAULT_BRANCH);
+		$branch = DEFAULT_BRANCH unless $branch && $branch =~ /\S/;
+	}
 
 	return $self->new(
 		type   => 'github-actions',

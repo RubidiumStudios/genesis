@@ -112,10 +112,10 @@ sub _repo_init_validate {
 		$ci_provider_obj = eval { Genesis::CI::Provider->init(%ci_provider_opts) };
 		if ($@) {
 			if (in_controlling_terminal) {
-				# Required flags omitted — run interactive wizard to collect them
+				# Required flags omitted — run interactive wizard, pre-filling any flags supplied
 				$ci_provider_obj = eval {
 					Genesis::CI::Provider->new(type => $ci_provider_opts{'ci-provider'})
-						->interactive_wizard(undef);
+						->interactive_wizard(undef, %ci_provider_opts);
 				};
 				bail("CI provider wizard failed: %s", $@) if $@;
 			} else {
