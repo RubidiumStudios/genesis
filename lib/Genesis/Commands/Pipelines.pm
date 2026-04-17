@@ -479,8 +479,7 @@ sub _repipe_compiled {
 		}
 
 		# Verify the provider's toolchain is available before attempting deploy.
-		bail("CI provider prerequisite check failed")
-			unless $provider->check_prereqs();
+		$provider->check_prereqs() or exit 86;
 
 		# Pass all relevant CLI flags to deploy() for three-tier resolution.
 		# Provider reads: ci-target, ci-team, ci-pipeline-name, ci-pause, ci-expose,

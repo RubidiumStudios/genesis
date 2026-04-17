@@ -124,8 +124,7 @@ sub _repo_init_validate {
 		}
 
 		# Verify the provider's toolchain is available before we do any work
-		bail("CI provider prerequisite check failed")
-			unless $ci_provider_obj->check_prereqs();
+		$ci_provider_obj->check_prereqs() or exit 86;
 	}
 
 	# --- 3. Gather data: validate local sources, detect git repo ---
