@@ -15,16 +15,64 @@ use constant {
 ### Class Methods {{{
 
 # init - create a new Concourse provider from CLI options {{{
+#
+# Two modes:
+#   1. Existing target: --ci-target <name> (looks up url/team/insecure
+#      from ~/.flyrc)
+#   2. New target: --ci-url <url> --ci-team <team> [--ci-insecure]
+#      [--ci-target <name>]  (derives target name if not specified)
+#
 sub init {
 	my ($class, %opts) = @_;
 
-	bail("Concourse CI provider requires --ci-target")
-		unless $opts{'ci-target'};
+	my $has_target = $opts{'ci-target'};
+	my $has_new    = $opts{'ci-url'} || $opts{'ci-team'} || $opts{'ci-insecure'};
 
-	$class->new(
+	if ($has_target) {
+		# Check if the target already exists in flyrc
+		my $flyrc = "$ENV{HOME}/.flyrc";
+		my $entry;
+		if (-f $flyrc) {
+			my $data = load_yaml_file($flyrc);
+			$entry = $data->{targets}{$opts{'ci-target'}}
+				if ref($data) eq 'HASH' && ref($data->{targets}) eq 'HASH';
+		}
+
+		if ($entry) {
+			# Existing target — reject conflicting flags
+			bail(
+				"Target '%s' already exists in ~/.flyrc.\n".
+				"  Cannot combine --ci-target with --ci-url, --ci-team, ".
+				"or --ci-insecure when the target already exists.",
+				$opts{'ci-target'}
+			) if $has_new;
+
+			return $class->new(
+				type     => 'concourse',
+				target   => $opts{'ci-target'},
+				url      => $entry->{api},
+				team     => $entry->{team} || DEFAULT_TEAM,
+				insecure => $entry->{insecure} ? 1 : 0,
+			);
+		}
+
+		# Target name provided but doesn't exist yet — fall through
+		# to new-target creation below (--ci-url and --ci-team required)
+	}
+
+	# New target: --ci-url and --ci-team are required; --ci-target is
+	# an optional name override (derived from url/team if omitted).
+	bail("Concourse CI provider requires --ci-url and --ci-team for a new target")
+		unless $opts{'ci-url'} && $opts{'ci-team'};
+
+	my $target = $opts{'ci-target'}
+		// _derive_target_name($opts{'ci-url'}, $opts{'ci-team'});
+
+	return $class->new(
 		type     => 'concourse',
-		target   => $opts{'ci-target'},
-		team     => $opts{'ci-team'} || DEFAULT_TEAM,
+		target   => $target,
+		url      => $opts{'ci-url'},
+		team     => $opts{'ci-team'},
 		insecure => $opts{'ci-insecure'} ? 1 : 0,
 	);
 }
@@ -33,9 +81,11 @@ sub init {
 # new - create a Concourse provider from stored config {{{
 sub new {
 	my ($class, %config) = @_;
+	$class = ref($class) || $class;
 	bless({
 		label    => 'Concourse',
 		target   => $config{target},
+		url      => $config{url},
 		team     => $config{team}     || DEFAULT_TEAM,
 		insecure => $config{insecure} ? 1 : 0,
 	}, $class);
@@ -46,6 +96,7 @@ sub new {
 sub opts {
 	qw/
 		ci-target=s
+		ci-url=s
 		ci-team=s
 		ci-insecure
 	/;
@@ -60,19 +111,31 @@ sub opts_help {
 	<<'EOF';
   CI Provider `concourse`:
 
-    --ci-target <name> (required)
-        The Concourse target name (as configured in ~/.flyrc) to use when
-        setting the pipeline.  This is the same target you would pass to
-        `fly -t <target>`.
+    Use an existing fly target:
 
-    --ci-team <name> (optional, defaults to "main")
-        The Concourse team name to set the pipeline on.  Defaults to the
-        "main" team if not specified.
+    --ci-target <name>
+        An existing Concourse target name from ~/.flyrc.  URL, team, and
+        TLS settings are read from the target.  Cannot be combined with
+        --ci-url, --ci-team, or --ci-insecure when the target exists.
+
+    Or specify a new target:
+
+    --ci-url <url> (required for new targets)
+        The Concourse server URL (e.g. https://ci.example.com).
+
+    --ci-team <name> (required for new targets)
+        The Concourse team name.
+
+    --ci-target <name> (optional for new targets)
+        Override the fly target name.  Defaults to a name derived from
+        the URL and team (e.g. ci/platform).
 
     --ci-insecure (optional flag)
         Skip TLS certificate verification when connecting to the Concourse
         server.  Equivalent to fly's --skip-ssl-validation flag.
-        Use with caution — only for self-signed or development endpoints.
+
+    When neither --ci-target nor --ci-url is provided, an interactive
+    wizard guides target selection or creation.
 
 EOF
 }
@@ -85,64 +148,118 @@ EOF
 sub label { 'Concourse' }
 
 # }}}
-# check_prereqs - verify fly CLI is installed and meets min version {{{
-sub check_prereqs {
-	my ($self) = @_;
-	my $ok = 1;
-
-	# Require fly in PATH
-	my ($fly_path) = run({ stderr => 0 }, 'type -p fly');
-	chomp($fly_path //= '');
-	unless ($fly_path) {
-		error(
-			"The Concourse CI provider requires the #C{fly} CLI but it was not ".
-			"found in your PATH.\n".
-			"  Install it from your Concourse server:\n".
-			"    #C{<concourse-url>/api/v1/cli?arch=amd64&platform=<linux|darwin|windows>}\n".
-			"  Or log in via the Concourse UI and download fly from the bottom-right icon.",
-		);
-		return 0;
-	}
-
-	# Optional minimum version enforcement
-	if (defined $self->{min_fly_version}) {
-		my ($ver_out) = run({ stderr => 0 }, 'fly', '--version');
-		chomp(my $fly_version = $ver_out // '');
-		$fly_version =~ s/\s.*$//;  # strip trailing build info if any
-		unless (new_enough($fly_version, $self->{min_fly_version})) {
-			error(
-				"Concourse CI provider requires fly version #C{%s} or later ".
-				"(found: #Y{%s}).\n".
-				"  Sync fly with your Concourse server: #C{fly -t <target> sync}",
-				$self->{min_fly_version},
-				$fly_version || 'unknown',
-			);
-			$ok = 0;
-		}
-	}
-
-	return $ok;
-}
-
-# }}}
 # config - returns hash for .genesis/config ci.provider section {{{
 sub config {
 	my ($self) = @_;
 	my %cfg = (type => 'concourse');
 	$cfg{target}   = $self->{target}   if defined $self->{target};
+	$cfg{url}      = $self->{url}      if defined $self->{url};
 	$cfg{team}     = $self->{team}     if defined $self->{team} && $self->{team} ne DEFAULT_TEAM;
 	$cfg{insecure} = 1                 if $self->{insecure};
 	return %cfg;
 }
 
 # }}}
-# interactive_wizard - prompt user for Concourse configuration {{{
+# interactive_wizard - select existing target or create a new one {{{
 sub interactive_wizard {
-	my ($self, $top, %opts) = @_;
+	my ($self, $top) = @_;
 
-	my ($target, $team, $insecure);
+	my ($target, $url, $team, $insecure);
 
-	my @fly_targets;
+	# --- Gather existing targets from fly targets + flyrc ---
+	my @fly_targets = _load_fly_targets();
+
+	if (@fly_targets) {
+		# Compute column widths for aligned display
+		my ($w_name, $w_api, $w_team) = (0, 0, 0);
+		for (@fly_targets) {
+			$w_name = length($_->{name}) if length($_->{name}) > $w_name;
+			$w_api  = length($_->{api})  if length($_->{api})  > $w_api;
+			$w_team = length($_->{team}) if length($_->{team}) > $w_team;
+		}
+
+		my @choices = map {{
+			value   => $_->{name},
+			label   => sprintf("#C{%-${w_name}s}  %-${w_api}s  %-${w_team}s  %s%s",
+				$_->{name}, $_->{api}, $_->{team},
+				$_->{insecure} ? "#Yi{insecure}" : "#G{secure}  ",
+				$_->{expired}  ? "  #R{EXPIRED!}" : ""),
+			summary => $_->{name},
+		}} @fly_targets;
+
+		push @choices, { separator => 1 };
+		push @choices, {
+			value   => '__new__',
+			label   => '#Yi{Create a new Concourse target}',
+			summary => '(new target)',
+		};
+
+		my $selection = new_prompt_for_choice(
+			header      => "Select a Concourse target:",
+			choices     => \@choices,
+			default     => $self->{target},
+			description => "target",
+		);
+
+		if ($selection ne '__new__') {
+			my ($selected) = grep { $_->{name} eq $selection } @fly_targets;
+			$target   = $selected->{name};
+			$url      = $selected->{api};
+			$team     = $selected->{team};
+			$insecure = $selected->{insecure};
+
+			# Re-authenticate if the token has expired
+			if ($selected->{expired}) {
+				info "\nRe-authenticating expired target #C{%s}...\n", $target;
+				my @cmd = ('fly', '-t', $target, 'login', '-n', $team);
+				push @cmd, '-k' if $insecure;
+				run({ interactive => 1,
+					  onfailure   => "fly login failed for target '$target'" },
+					@cmd);
+			}
+		}
+	}
+
+	# Create a new target: prompt for details and run fly login
+	unless ($target) {
+		$url = prompt_for_line(undef,
+			"Concourse URL (e.g. https://ci.example.com): ", '');
+		bail("A Concourse URL is required.") unless $url && $url =~ m{^https?://};
+
+		$team = prompt_for_line(undef,
+			sprintf("Team name [%s]: ", DEFAULT_TEAM), DEFAULT_TEAM);
+		$team = DEFAULT_TEAM unless $team && $team =~ /\S/;
+
+		$insecure = prompt_for_boolean(
+			"Skip TLS certificate verification? [y|n] ", 0);
+
+		$target = _derive_target_name($url, $team);
+
+		info "\nLogging in to #C{%s} as team #C{%s} (target: #C{%s})...\n",
+			$url, $team, $target;
+		my @cmd = ('fly', '-t', $target, 'login',
+			'-c', $url, '-n', $team);
+		push @cmd, '-k' if $insecure;
+		run({ interactive => 1,
+			  onfailure   => "fly login failed for target '$target'" },
+			@cmd);
+	}
+
+	return $self->new(
+		type     => 'concourse',
+		target   => $target,
+		url      => $url,
+		team     => $team,
+		insecure => $insecure ? 1 : 0,
+	);
+}
+
+# }}}
+
+# _load_fly_targets - merge fly targets output with flyrc insecure flags {{{
+sub _load_fly_targets {
+	my @targets;
+
 	my $flyrc = "$ENV{HOME}/.flyrc";
 	my %flyrc_data;
 	if (-f $flyrc) {
@@ -160,7 +277,7 @@ sub interactive_wizard {
 		for my $row (@rows) {
 			my $name = $row->{name} // next;
 			my $flyrc_entry = $flyrc_data{$name} // {};
-			push @fly_targets, {
+			push @targets, {
 				name     => $name,
 				api      => $row->{url}  // '(unknown)',
 				team     => $row->{team} // DEFAULT_TEAM,
@@ -169,93 +286,21 @@ sub interactive_wizard {
 			};
 		}
 	}
-
-	if (@fly_targets) {
-		# Compute column widths for aligned display
-		my $w_name = 0;
-		my $w_api  = 0;
-		my $w_team = 0;
-		for (@fly_targets) {
-			$w_name = length($_->{name}) if length($_->{name}) > $w_name;
-			$w_api  = length($_->{api})  if length($_->{api})  > $w_api;
-			$w_team = length($_->{team}) if length($_->{team}) > $w_team;
-		}
-
-		my @choices = map {{
-			value   => $_->{name},
-			label   => sprintf("#C{%-${w_name}s}  %-${w_api}s  %-${w_team}s  %s%s",
-				$_->{name}, $_->{api}, $_->{team},
-				$_->{insecure} ? "#Yi{insecure}" : "#G{secure}  ",
-				$_->{expired}  ? "  #R{EXPIRED!}" : ""),
-			summary => $_->{name},
-		}} @fly_targets;
-
-		# Separator + "create new" option at the bottom
-		push @choices, { separator => 1 };
-		push @choices, {
-			value   => '__new__',
-			label   => '#Yi{Create a new Concourse target}',
-			summary => '(new target)',
-		};
-
-		$target = new_prompt_for_choice(
-			header      => "Select a Concourse target:",
-			choices     => \@choices,
-			default     => $self->{target},
-			description => "target",
-		);
-
-		if ($target ne '__new__') {
-			# Pre-fill team and insecure from the selected flyrc entry
-			my ($selected) = grep { $_->{name} eq $target } @fly_targets;
-			if ($selected) {
-				$team     = $selected->{team};
-				$insecure = $selected->{insecure};
-			}
-		}
-	}
-
-	# Create a new target: prompt for details and run fly login
-	if (!$target || $target eq '__new__') {
-		my $name = prompt_for_line(undef,
-			"Target name (short alias for this Concourse): ", '');
-		bail("A target name is required.") unless $name && $name =~ /\S/;
-
-		my $url = prompt_for_line(undef,
-			"Concourse URL (e.g. https://ci.example.com): ", '');
-		bail("A Concourse URL is required.") unless $url && $url =~ m{^https?://};
-
-		$team = prompt_for_line(undef,
-			sprintf("Team name [%s]: ", DEFAULT_TEAM), DEFAULT_TEAM);
-		$team = DEFAULT_TEAM unless $team && $team =~ /\S/;
-
-		$insecure = prompt_for_boolean(
-			"Skip TLS certificate verification? [y|n] ", 0);
-
-		# Run fly login to create the target in ~/.flyrc and
-		# authenticate the user.  This is interactive — fly will
-		# prompt for credentials or open a browser.
-		info "\nLogging in to Concourse as #C{%s} on #C{%s}...\n", $team, $url;
-		my @fly_cmd = ('fly', '-t', $name, 'login',
-			'-c', $url, '-n', $team);
-		push @fly_cmd, '-k' if $insecure;
-		run({ interactive => 1,
-			  onfailure   => "fly login failed for target '$name'" },
-			join(' ', map { /\s/ ? "\"$_\"" : $_ } @fly_cmd));
-
-		$target = $name;
-	}
-
-	return (ref($self) || $self)->new(
-		type     => 'concourse',
-		target   => $target,
-		team     => $team,
-		insecure => $insecure,
-	);
+	return @targets;
 }
 
 # }}}
+# _derive_target_name - build a target name from url and team {{{
+sub _derive_target_name {
+	my ($url, $team) = @_;
+	# https://ci.example.com → ci
+	# https://pipes.scalecf.net → pipes
+	(my $host = $url) =~ s{^https?://}{}; $host =~ s{[:/].*}{};
+	my $subdomain = (split /\./, $host)[0] // $host;
+	return $team eq 'main' ? $subdomain : "$subdomain/$team";
+}
 
+# }}}
 # _token_expired - check if a fly targets expiry string is in the past {{{
 my %_months = (
 	Jan => 0, Feb => 1, Mar => 2, Apr => 3, May => 4,  Jun => 5,
