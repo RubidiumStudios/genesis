@@ -1271,7 +1271,9 @@ define_command("repo-init", {
 		],
 		extended_usage => sub {
 			require Genesis::Kit::Provider;
-			Genesis::Kit::Provider->opts_help();
+			require Genesis::CI::Provider;
+			Genesis::Kit::Provider->opts_help() .
+			Genesis::CI::Provider->opts_help();
 		}
 });
 

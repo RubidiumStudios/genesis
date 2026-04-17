@@ -132,6 +132,7 @@ sub _parse_genesis_config {
 	$parsed{targets}         = $data->{targets}         || {};
 	$parsed{integrations}    = $data->{integrations}    || {};
 	$parsed{scripts}         = $data->{scripts}         || {};
+	$parsed{provider}        = $data->{provider}        || {};
 	$parsed{provider_config} = $data->{provider_config} || {};
 
 	# When no pipeline section is provided, workflow topology is derived from

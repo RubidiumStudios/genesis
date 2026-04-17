@@ -98,7 +98,19 @@ sub compile {
 	eval { require $provider_info->{file} } ## no critic
 		or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
 
-	my $provider = $provider_info->{class}->new(ast => $ast, top => $self->{top});
+	# Extract provider options from parsed config (ci.provider: section)
+	# and merge with any caller-supplied opts.  These are stored in the
+	# provider object and used by deploy() at deploy time.
+	my $provider_opts = {
+		%{ $parsed->{provider}       || {} },   # from ci.provider: section
+		%{ $opts{provider_opts}      || {} },   # caller-supplied overrides
+	};
+
+	my $provider = $provider_info->{class}->new(
+		ast           => $ast,
+		top           => $self->{top},
+		provider_opts => $provider_opts,
+	);
 	my $raw_output = $provider->generate_from_ast($ast);
 
 	# Wrap raw output into file map using provider's output_files manifest
@@ -191,6 +203,47 @@ sub validate_config_section {
 
 	bail("'ci.integrations.source_control' is required and must be a hash")
 		unless ref($data->{integrations}{source_control}) eq 'HASH';
+
+	# Validate ci.provider: section against the provider's own schema
+	if (my $provider_data = $data->{provider}) {
+		bail("'ci.provider' must be a hash")
+			unless ref($provider_data) eq 'HASH';
+
+		my $type = $provider_data->{type};
+		bail("'ci.provider.type' is required") unless $type;
+
+		# Load provider class to get its schema
+		my $provider_info = eval { $class->_resolve_provider_class($type) };
+		if ($@) {
+			bail("'ci.provider.type' is '%s', which is not a known CI provider type.  ".
+				"Valid types: %s", $type,
+				join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers()));
+		}
+
+		eval { require $provider_info->{file} };  ## no critic
+		if ($@) {
+			bail("Failed to load CI provider '%s' for config validation: %s", $type, $@);
+		}
+
+		my $schema   = $provider_info->{class}->provider_options_schema();
+		my $defaults = $provider_info->{class}->provider_options_defaults();
+
+		# Check required keys
+		for my $key (sort keys %$schema) {
+			my $spec = $schema->{$key};
+			next unless $spec->{required};
+			bail("'ci.provider.%s' is required for provider type '%s'", $key, $type)
+				unless defined $provider_data->{$key};
+		}
+
+		# Check unknown keys
+		for my $key (sort keys %$provider_data) {
+			next if exists $schema->{$key};
+			bail("'ci.provider.%s' is not a recognized option for provider type '%s'.  ".
+				"Valid options: %s",
+				$key, $type, join(', ', sort keys %$schema));
+		}
+	}
 }
 
 # }}}

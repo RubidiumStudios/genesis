@@ -2215,6 +2215,28 @@ subtest 'Parser - genesis-config: produces correct normalized structure' => sub 
 	# env_dir must NOT be set when a pipeline section is provided
 	ok(!$parsed->{env_dir},
 		"env_dir not set when pipeline section is provided");
+
+	# ci.provider: must be propagated into $parsed->{provider} so that
+	# Compiler->compile() can populate provider_opts from stored config.
+	ok ref($parsed->{provider}) eq 'HASH', "provider is a hash";
+};
+
+subtest 'Parser - genesis-config: provider key propagated from ci.provider' => sub {
+	my $ci_with_provider = {
+		%$_ci_data,
+		provider => { type => 'concourse', target => 'prod', team => 'platform' },
+	};
+	my $top = MockTop->new(
+		config => MockConfig->new(ci => $ci_with_provider),
+		base   => '/myrepo',
+	);
+	my $parser = Genesis::CI::Compiler::Parser->new(top => $top);
+	my $parsed = eval { $parser->parse() };
+	ok !$@, "parse() succeeds with provider in ci" or diag $@;
+
+	is_deeply $parsed->{provider},
+		{ type => 'concourse', target => 'prod', team => 'platform' },
+		"ci.provider data round-trips through parser into parsed->{provider}";
 };
 
 subtest 'Parser - genesis-config: sets env_dir when no pipeline section' => sub {
@@ -2304,6 +2326,225 @@ subtest 'Top - register_config_section stores handler' => sub {
 	ok $FakeHandler::called == 0, "handler not yet called (no config loaded)";
 	Genesis::Top->register_config_section('_test_section_', 'FakeHandler');
 	ok 1, "re-registering same section does not error";
+};
+
+### ============================================================ ###
+### Phase E Provider Options System Tests
+### ============================================================ ###
+
+subtest 'PipelineProvider - known_providers lists registered types' => sub {
+	my @providers = Genesis::CI::Compiler::PipelineProvider->known_providers();
+	ok scalar(@providers) >= 1, "at least one provider registered";
+	ok grep { $_ eq 'concourse' } @providers, "concourse is registered";
+};
+
+subtest 'PipelineProvider - base class cli_opts returns empty list' => sub {
+	# We cannot call cli_opts on the abstract base directly (bug guard),
+	# so we test via the Concourse subclass and verify the pattern instead.
+	my @opts = Genesis::CI::Concourse->cli_opts();
+	ok scalar(@opts) > 0, "Concourse declares at least one CLI opt";
+	ok grep { $_ eq 'ci-target=s' } @opts, "ci-target=s declared";
+	ok grep { $_ eq 'ci-team=s'   } @opts, "ci-team=s declared";
+	ok grep { $_ eq 'ci-pause'    } @opts, "ci-pause declared (boolean flag)";
+	ok grep { $_ eq 'ci-expose'   } @opts, "ci-expose declared (boolean flag)";
+};
+
+subtest 'Concourse - cli_opts_help contains required option documentation' => sub {
+	my $help = Genesis::CI::Concourse->cli_opts_help(valid_types => ['concourse']);
+	ok length($help) > 0,                          "help text is non-empty";
+	like $help, qr/--ci-target/,                   "documents --ci-target";
+	like $help, qr/--ci-team/,                     "documents --ci-team";
+	like $help, qr/--ci-pipeline-name/,            "documents --ci-pipeline-name";
+	like $help, qr/--ci-pause/,                    "documents --ci-pause";
+	like $help, qr/--ci-expose/,                   "documents --ci-expose";
+	like $help, qr/required/i,                     "marks required options";
+	like $help, qr/optional.*default|default.*optional/i, "marks optional options with defaults";
+	like $help, qr/main/,                          "shows default team 'main'";
+};
+
+subtest 'Concourse - cli_opts_help hidden when type not in valid_types' => sub {
+	my $help = Genesis::CI::Concourse->cli_opts_help(valid_types => ['github-actions']);
+	is $help, '', "help empty when concourse not in valid_types";
+};
+
+subtest 'Concourse - provider_options_schema has correct structure' => sub {
+	my $schema = Genesis::CI::Concourse->provider_options_schema();
+	ok ref($schema) eq 'HASH',            "schema is a hash";
+	ok exists $schema->{type},            "'type' key present";
+	ok $schema->{type}{required},         "'type' is required";
+	ok exists $schema->{target},          "'target' key present";
+	ok exists $schema->{team},            "'team' key present";
+	ok exists $schema->{expose},          "'expose' key present";
+	ok exists $schema->{pause_after_set}, "'pause_after_set' key present";
+	is $schema->{team}{default}, 'main',  "team default is 'main'";
+};
+
+subtest 'Concourse - provider_options_defaults returns expected defaults' => sub {
+	my $defaults = Genesis::CI::Concourse->provider_options_defaults();
+	ok ref($defaults) eq 'HASH',          "defaults is a hash";
+	is $defaults->{team},            'main', "team default is 'main'";
+	is $defaults->{expose},          0,      "expose default is false";
+	is $defaults->{pause_after_set}, 0,      "pause_after_set default is false";
+};
+
+subtest 'Concourse - provider_config omits default values' => sub {
+	# Only non-defaults should appear in config output
+	my $ast = Genesis::CI::Compiler::AST->new();
+	my $provider = Genesis::CI::Concourse->new(
+		ast           => $ast,
+		provider_opts => {
+			type   => 'concourse',
+			target => 'my-target',
+			team   => 'main',      # this IS the default — should be omitted
+			expose => 0,           # this IS the default — should be omitted
+		},
+	);
+	my $config = $provider->provider_config();
+	ok ref($config) eq 'HASH',          "provider_config returns hash";
+	is $config->{type},   'concourse',  "type always present";
+	is $config->{target}, 'my-target',  "non-default target included";
+	ok !exists $config->{team},         "default team omitted";
+	ok !exists $config->{expose},       "default expose omitted";
+};
+
+subtest 'Concourse - provider_config includes non-default values' => sub {
+	my $ast = Genesis::CI::Compiler::AST->new();
+	my $provider = Genesis::CI::Concourse->new(
+		ast           => $ast,
+		provider_opts => {
+			type            => 'concourse',
+			team            => 'my-team',   # non-default
+			pause_after_set => 1,           # non-default
+		},
+	);
+	my $config = $provider->provider_config();
+	is $config->{team},            'my-team', "non-default team included";
+	is $config->{pause_after_set}, 1,         "non-default pause_after_set included";
+};
+
+subtest 'Concourse - provider_option applies defaults when not set' => sub {
+	my $ast = Genesis::CI::Compiler::AST->new();
+	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+
+	is $provider->provider_option('team'),   'main', "team defaults to 'main'";
+	is $provider->provider_option('expose'),  0,     "expose defaults to 0";
+	is $provider->provider_option('target'), undef,  "target has no default";
+};
+
+subtest 'Concourse - provider_option prefers stored opts over defaults' => sub {
+	my $ast = Genesis::CI::Compiler::AST->new();
+	my $provider = Genesis::CI::Concourse->new(
+		ast           => $ast,
+		provider_opts => { team => 'custom-team' },
+	);
+	is $provider->provider_option('team'), 'custom-team',
+		"stored team overrides default";
+};
+
+subtest 'Concourse - describe_provider returns structured hash' => sub {
+	my $ast = Genesis::CI::Compiler::AST->new();
+	my $provider = Genesis::CI::Concourse->new(
+		ast           => $ast,
+		provider_opts => {
+			target => 'prod-concourse',
+			team   => 'genesis',
+		},
+	);
+	my %info = $provider->describe_provider();
+
+	is $info{type},   'concourse',  "type is 'concourse'";
+	is $info{label},  'Concourse',  "label is 'Concourse'";
+	is $info{status}, 'ok',         "status is 'ok'";
+	ok ref($info{extras}) eq 'ARRAY', "extras is an arrayref";
+	ok grep { $_ eq 'Target' } @{$info{extras}}, "Target in extras";
+	ok grep { $_ eq 'Team'   } @{$info{extras}}, "Team in extras";
+	is $info{Target}, 'prod-concourse', "Target value correct";
+	is $info{Team},   'genesis',        "Team value correct";
+};
+
+subtest 'PipelineProvider - all_cli_opts_help covers all providers' => sub {
+	my $help = Genesis::CI::Compiler::PipelineProvider->all_cli_opts_help();
+	like $help, qr/CI PROVIDER OPTIONS/,   "contains header";
+	like $help, qr/--ci-provider/,         "documents --ci-provider";
+	like $help, qr/concourse/,             "mentions concourse";
+	like $help, qr/--ci-target/,           "includes Concourse-specific flag";
+};
+
+subtest 'PipelineProvider - parse_cli_opts two-pass extraction' => sub {
+	# Simulate argv that includes a provider-specific flag
+	my @argv = ('--ci-target', 'my-fly-target', '--ci-team', 'ops', '--other-flag');
+	my %opts;
+
+	Genesis::CI::Compiler::PipelineProvider->parse_cli_opts(
+		\@argv, \%opts, 'concourse'
+	);
+
+	is $opts{'ci-target'}, 'my-fly-target', "ci-target extracted";
+	is $opts{'ci-team'},   'ops',           "ci-team extracted";
+	ok grep { $_ eq '--other-flag' } @argv, "unknown flag left in argv";
+};
+
+subtest 'Compiler - validate_config_section validates ci.provider' => sub {
+	# Valid with a correct provider section
+	my $valid_data = {
+		%$_ci_data,
+		provider => { type => 'concourse', target => 'my-target' },
+	};
+	eval { Genesis::CI::Compiler->validate_config_section($valid_data, undef) };
+	ok !$@, "valid ci.provider section passes" or diag $@;
+
+	# Unknown provider type
+	my $bad_type = {
+		%$_ci_data,
+		provider => { type => 'kubernetes' },
+	};
+	eval { Genesis::CI::Compiler->validate_config_section($bad_type, undef) };
+	like $@, qr/not a known CI provider/i, "unknown provider type fails";
+
+	# Unknown option key for concourse
+	my $bad_key = {
+		%$_ci_data,
+		provider => { type => 'concourse', bogus_option => 'foo' },
+	};
+	eval { Genesis::CI::Compiler->validate_config_section($bad_key, undef) };
+	like $@, qr/not a recognized option/i, "unknown provider option key fails";
+};
+
+subtest 'Validator - provider section validated in multi-file path' => sub {
+	my $v = Genesis::CI::Compiler::Validator->new();
+
+	# Valid provider section
+	$v->validate({
+		_source_format  => 'multi-file',
+		pipeline        => {},
+		targets         => { sandbox => { type => 'bosh-director', connection => { url => 'https://bosh' } } },
+		integrations    => {
+			vault          => { url => 'https://vault.example.com' },
+			source_control => { provider => 'github', repository => 'org/repo' },
+		},
+		provider        => { type => 'concourse', target => 'my-target', team => 'main' },
+		scripts         => {},
+		provider_config => {},
+	});
+	ok !$v->has_errors, "valid provider section passes validator"
+		or diag join("\n", @{$v->errors});
+
+	# Unknown option
+	$v->validate({
+		_source_format  => 'multi-file',
+		pipeline        => {},
+		targets         => { sandbox => { type => 'bosh-director', connection => { url => 'https://bosh' } } },
+		integrations    => {
+			vault          => { url => 'https://vault.example.com' },
+			source_control => { provider => 'github', repository => 'org/repo' },
+		},
+		provider        => { type => 'concourse', unknown_key => 'bad' },
+		scripts         => {},
+		provider_config => {},
+	});
+	ok $v->has_errors, "unknown provider key triggers validation error";
+	like join(' ', @{$v->errors}), qr/not a recognized option/i,
+		"error message identifies the unknown key";
 };
 
 done_testing;

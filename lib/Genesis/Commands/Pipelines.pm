@@ -465,43 +465,30 @@ sub _repipe_compiled {
 		exit 0;
 	}
 
-	# For concourse, output is { 'pipeline.yml' => $yaml_string }
+	# For concourse: delegate deploy to the provider, which applies the
+	# three-tier option resolution (CLI > ci.provider: config > defaults).
 	if ($platform eq 'concourse') {
-		my $yaml = $output->{'pipeline.yml'}
-			or bail("Concourse provider did not produce pipeline.yml");
+		my $provider = $result->{provider};
 
+		# --dry-run: print pipeline YAML and exit without deploying
 		if (get_options->{'dry-run'}) {
+			my $yaml = $output->{'pipeline.yml'}
+				or bail("Concourse provider did not produce pipeline.yml");
 			output({raw => 1}, $yaml);
 			exit 0;
 		}
 
-		option_defaults(target => $layout || $name);
-
-		my ($out,$rc) = run(
-			'fly -t $1 pause-pipeline -p $2',
-			get_options->{target}, $name
+		# Pass all relevant CLI flags to deploy() for three-tier resolution.
+		# Provider reads: ci-target, ci-team, ci-pipeline-name, ci-pause, ci-expose,
+		# plus the stored provider_opts (from ci.provider: section in .genesis/config).
+		$provider->deploy(
+			'ci-target'        => get_options->{'ci-target'} || get_options->{target} || $layout,
+			'ci-team'          => get_options->{'ci-team'},
+			'ci-pipeline-name' => get_options->{'ci-pipeline-name'},
+			'ci-pause'         => get_options->{'ci-pause'}  || get_options->{paused},
+			'ci-expose'        => get_options->{'ci-expose'},
+			'yes'              => get_options->{yes},
 		);
-		bail("Could not pause #C{%s} pipeline: $out", $name)
-			unless $rc == 0 || $out =~ /pipeline '.*' not found/;
-
-		my $yes = get_options->{yes} ? ' -n ' : '';
-		my $dir = workdir;
-		mkfile_or_fail("${dir}/pipeline.yml", $yaml);
-		run({ interactive => 1, onfailure => "Could not upload pipeline $name" },
-			'fly -t $1 set-pipeline '.$yes.' -p $2 -c $3/pipeline.yml',
-			get_options->{target}, $name, $dir);
-
-		run(
-			{ interactive => 1, onfailure => "Could not unpause pipeline $name" },
-			'fly -t $1 unpause-pipeline -p $2',
-			get_options->{target}, $name
-		) unless (get_options->{paused});
-
-		my $public = $ast->configuration->{public} || 0;
-		my $action = ($public ? 'expose' : 'hide');
-		run({ interactive => 1, onfailure => "Could not $action pipeline $name" },
-			'fly -t $1 '.$action.'-pipeline -p $2',
-			get_options->{target}, $name);
 
 	} elsif ($platform eq 'github-actions') {
 		# GitHub Actions outputs workflow YAML files to .github/workflows/
@@ -594,8 +581,31 @@ sub _compile_pipeline {
 		info("Using legacy CI configuration from #C{%s}", $compiler_opts{file});
 	}
 
+	# Parse provider-specific CLI flags via the provider options system.
+	# This mirrors Kit::Provider::parse_opts() — first pass extracts the
+	# provider type, second pass loads that provider's cli_opts() and parses them.
+	my %provider_cli_opts;
+	{
+		# Build a synthetic argv from get_options so we can run GetOptionsFromArray.
+		# Provider flags are prefixed with 'ci-' and live alongside existing flags.
+		# We only need to pull the ones the provider declares.
+		require Genesis::CI::Compiler::PipelineProvider;
+		my @argv = (); # provider flags come from get_options, not ARGV at this point
+		Genesis::CI::Compiler::PipelineProvider->parse_cli_opts(
+			\@argv, \%provider_cli_opts, $platform
+		);
+		# Merge any provider flags already captured by the outer option parser
+		for my $key (qw(ci-target ci-team ci-pipeline-name ci-pause ci-expose)) {
+			$provider_cli_opts{$key} = get_options->{$key}
+				if defined get_options->{$key};
+		}
+	}
+
 	my $compiler = Genesis::CI::Compiler->new(%compiler_opts);
-	my $result = $compiler->compile(provider => $platform);
+	my $result = $compiler->compile(
+		provider      => $platform,
+		provider_opts => \%provider_cli_opts,
+	);
 
 	# Dump debug artifacts if --debug-dir is specified
 	if (my $debug_dir = get_options->{'debug-dir'}) {
