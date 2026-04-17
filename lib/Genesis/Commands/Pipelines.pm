@@ -478,6 +478,10 @@ sub _repipe_compiled {
 			exit 0;
 		}
 
+		# Verify the provider's toolchain is available before attempting deploy.
+		bail("CI provider prerequisite check failed")
+			unless $provider->check_prereqs();
+
 		# Pass all relevant CLI flags to deploy() for three-tier resolution.
 		# Provider reads: ci-target, ci-team, ci-pipeline-name, ci-pause, ci-expose,
 		# plus the stored provider_opts (from ci.provider: section in .genesis/config).

@@ -2547,6 +2547,63 @@ subtest 'Validator - provider section validated in multi-file path' => sub {
 		"error message identifies the unknown key";
 };
 
+### ============================================================ ###
+### PipelineProvider - check_prereqs
+### ============================================================ ###
+
+subtest 'PipelineProvider - base class check_prereqs returns 1' => sub {
+	# Base class has no prereqs; GHA provider inherits this no-op default.
+	eval { require 'Genesis/CI/Compiler/Providers/GithubActions.pm' };
+	if ($@) {
+		pass 'skipped: GithubActions provider not available';
+		return;
+	}
+	my $gha = Genesis::CI::GithubActions->new(
+		ast => Genesis::CI::Compiler::AST->new(
+			metadata     => { name => 'test', version => '2.0', source => 'modern' },
+			branches     => { live => 'main', target_prefix => 'target/' },
+			integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
+			targets      => {},
+			workflows    => {},
+		),
+		top => undef,
+		provider_opts => {},
+	);
+	ok $gha->check_prereqs(), 'GithubActions PipelineProvider check_prereqs returns 1';
+};
+
+subtest 'PipelineProvider::Concourse - check_prereqs returns 1 when fly present' => sub {
+	my $fly = `which fly 2>/dev/null`;
+	chomp $fly;
+	unless ($fly) {
+		pass 'skipped: fly not installed in this environment';
+		return;
+	}
+	my $ast = Genesis::CI::Compiler::AST->new(
+		metadata     => { name => 'test', version => '2.0', source => 'modern' },
+		branches     => { live => 'main', target_prefix => 'target/' },
+		integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
+		targets      => {},
+		workflows    => {},
+	);
+	my $p = Genesis::CI::Concourse->new(ast => $ast, top => undef, provider_opts => {});
+	ok $p->check_prereqs(), 'check_prereqs returns 1 when fly is present';
+};
+
+subtest 'PipelineProvider::Concourse - check_prereqs returns 0 when fly absent' => sub {
+	local $ENV{PATH} = '/nonexistent';
+	my $ast = Genesis::CI::Compiler::AST->new(
+		metadata     => { name => 'test', version => '2.0', source => 'modern' },
+		branches     => { live => 'main', target_prefix => 'target/' },
+		integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
+		targets      => {},
+		workflows    => {},
+	);
+	my $p = Genesis::CI::Concourse->new(ast => $ast, top => undef, provider_opts => {});
+	my $result = $p->check_prereqs();
+	ok !$result, 'check_prereqs returns 0 when fly is not in PATH';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

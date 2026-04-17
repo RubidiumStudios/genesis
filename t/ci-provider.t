@@ -287,4 +287,77 @@ subtest 'Manual->label' => sub {
 	is $m->label, 'Manual', 'label is Manual';
 };
 
+### ============================================================ ###
+### check_prereqs
+### ============================================================ ###
+
+subtest 'check_prereqs: base Provider always returns 1' => sub {
+	# Base class has no prereqs; all three concrete providers inherit this
+	# as a no-op default except where they override it.
+	my $m = Genesis::CI::Provider::Manual->new(type => 'manual');
+	ok $m->check_prereqs(), 'Manual->check_prereqs returns 1';
+
+	my $g = Genesis::CI::Provider::GithubActions->new(
+		type => 'github-actions', repo => 'acme/x'
+	);
+	ok $g->check_prereqs(), 'GithubActions->check_prereqs returns 1';
+};
+
+subtest 'check_prereqs: Concourse returns 1 when fly is in PATH' => sub {
+	# Only run if fly is actually installed in this environment.
+	my $fly = `which fly 2>/dev/null`;
+	chomp $fly;
+	if ($fly) {
+		my $p = Genesis::CI::Provider::Concourse->new(
+			type => 'concourse', target => 'test'
+		);
+		ok $p->check_prereqs(), 'check_prereqs returns 1 when fly is present';
+	} else {
+		pass 'skipped: fly not installed in this environment';
+	}
+};
+
+subtest 'check_prereqs: Concourse returns 0 when fly is absent' => sub {
+	# Temporarily shadow PATH so fly cannot be found.
+	local $ENV{PATH} = '/nonexistent';
+	my $p = Genesis::CI::Provider::Concourse->new(
+		type => 'concourse', target => 'test'
+	);
+	my $result = $p->check_prereqs();
+	ok !$result, 'check_prereqs returns 0 when fly is not in PATH';
+};
+
+subtest 'check_prereqs: Concourse min_fly_version satisfied' => sub {
+	my $fly = `which fly 2>/dev/null`;
+	chomp $fly;
+	unless ($fly) {
+		pass 'skipped: fly not installed in this environment';
+		return;
+	}
+	# Require a minimum of 0.0.1 — any real fly version will satisfy this.
+	my $p = Genesis::CI::Provider::Concourse->new(
+		type           => 'concourse',
+		target         => 'test',
+		min_fly_version => '0.0.1',
+	);
+	ok $p->check_prereqs(), 'check_prereqs passes with trivially low min version';
+};
+
+subtest 'check_prereqs: Concourse min_fly_version not satisfied' => sub {
+	my $fly = `which fly 2>/dev/null`;
+	chomp $fly;
+	unless ($fly) {
+		pass 'skipped: fly not installed in this environment';
+		return;
+	}
+	# Require an impossibly high minimum — should fail.
+	my $p = Genesis::CI::Provider::Concourse->new(
+		type            => 'concourse',
+		target          => 'test',
+		min_fly_version => '9999.0.0',
+	);
+	my $result = $p->check_prereqs();
+	ok !$result, 'check_prereqs returns 0 when fly version too old';
+};
+
 done_testing;

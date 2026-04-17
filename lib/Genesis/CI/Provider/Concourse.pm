@@ -83,6 +83,45 @@ EOF
 sub label { 'Concourse' }
 
 # }}}
+# check_prereqs - verify fly CLI is installed and meets min version {{{
+sub check_prereqs {
+	my ($self) = @_;
+	my $ok = 1;
+
+	# Require fly in PATH
+	chomp(my $fly_path = `which fly 2>/dev/null`);
+	unless ($fly_path) {
+		error(
+			"The Concourse CI provider requires the #C{fly} CLI but it was not ".
+			"found in your PATH.\n".
+			"  Install it from your Concourse server:\n".
+			"    #C{<concourse-url>/api/v1/cli?arch=amd64&platform=<linux|darwin|windows>}\n".
+			"  Or log in via the Concourse UI and download fly from the bottom-right icon.",
+		);
+		return 0;
+	}
+
+	# Optional minimum version enforcement
+	if (defined $self->{min_fly_version}) {
+		my ($ver_out) = run({ stderr => 0 }, 'fly', '--version');
+		chomp(my $fly_version = $ver_out // '');
+		$fly_version =~ s/\s.*$//;  # strip trailing build info if any
+		unless (new_enough($fly_version, $self->{min_fly_version})) {
+			error(
+				"Concourse CI provider requires fly version #C{%s} or later ".
+				"(found: #Y{%s}).\n".
+				"  Sync fly with your Concourse server: #C{fly -t <target> sync}",
+				$self->{min_fly_version},
+				$fly_version || 'unknown',
+			);
+			$ok = 0;
+		}
+	}
+
+	return $ok;
+}
+
+# }}}
 # config - returns hash for .genesis/config ci.provider section {{{
 sub config {
 	my ($self) = @_;

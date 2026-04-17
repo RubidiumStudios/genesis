@@ -69,6 +69,27 @@ sub init {
 sub provider_type { 'concourse' }
 
 # }}}
+# check_prereqs - verify fly CLI is installed before attempting deploy {{{
+sub check_prereqs {
+	my ($self) = @_;
+	my $ok = 1;
+
+	chomp(my $fly_path = `which fly 2>/dev/null`);
+	unless ($fly_path) {
+		error(
+			"Cannot deploy Concourse pipeline: the #C{fly} CLI was not found in ".
+			"your PATH.\n".
+			"  Install it from your Concourse server:\n".
+			"    #C{<concourse-url>/api/v1/cli?arch=amd64&platform=<linux|darwin|windows>}\n".
+			"  Or log in via the Concourse UI and download fly from the bottom-right icon.",
+		);
+		return 0;
+	}
+
+	return $ok;
+}
+
+# }}}
 # cli_opts - Getopt::Long specs for deploy-time command-line flags {{{
 #
 # All CI provider options are prefixed with 'ci-' to avoid clashing with

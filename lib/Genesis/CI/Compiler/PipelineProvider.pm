@@ -80,6 +80,22 @@ sub output_files {
 
 # }}}
 # }}}
+### Prerequisite Checking {{{
+
+# check_prereqs - verify all required external tools are available {{{
+#
+# Called before deploy() to confirm the provider's toolchain is present.
+# Returns 1 when all prereqs are satisfied; returns 0 and emits error()
+# messages for each unmet prereq (caller decides whether to bail).
+#
+# Subclasses override to check their specific requirements.
+# Base implementation has no prereqs and always returns 1.
+sub check_prereqs {
+	return 1;
+}
+
+# }}}
+# }}}
 ### Provider Options Contract {{{
 # These methods define the provider options system, modelled after
 # Genesis::Kit::Provider.  Subclasses override them to expose their
