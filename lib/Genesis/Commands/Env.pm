@@ -76,45 +76,112 @@ sub create {
 	my $env = $top->create_env($name, $kit, %{get_options()});
 	bail "Failed to create environment $name" unless $env;
 
-	# Phase C: prompt for pipeline metadata when CI provider is configured
-	if ($top->config->has('ci.provider')) {
+	# Phase C: write pipeline metadata when CI provider is configured.
+	# Runs interactively when in a controlling terminal; honours --prior-env,
+	# --require-pr, and --manual flags for non-interactive (scripted) use.
+	if ($top->config->has('ci.provider.type')) {
+		my $ci_type = $top->config->get('ci.provider.type') // 'unknown';
 		info(
-			"\n#G{Pipeline configuration} (ci.provider: #C{%s})\n",
-			$top->config->get('ci.provider')
+			"\n#G{Pipeline configuration} (ci provider: #C{%s})\n",
+			$ci_type
 		);
 
-		my $prior_env = prompt_for_line(
-			"Prior environment (leave blank if this is the pipeline entrypoint):",
-			"prior env",
-			"",
-		);
+		my %cli_opts = %{get_options()};
+		my $interactive = in_controlling_terminal;
 
-		my $require_pr = prompt_for_boolean(
-			"Require a PR gate before this environment deploys? [y|n]",
-			"n",
-		);
+		# --- prior_env (Issue 1: use choice menu, not freeform) ---
+		my $prior_env;
+		if (exists $cli_opts{'prior-env'}) {
+			# Non-interactive path: flag supplied; validate it refers to a real env.
+			$prior_env = $cli_opts{'prior-env'} // '';
+			if (length($prior_env)) {
+				my %known = map { $_->name => 1 } $top->envs();
+				bail(
+					"--prior-env '%s' does not match any environment in this repository.",
+					$prior_env
+				) unless $known{$prior_env};
+			}
+		} elsif ($interactive) {
+			# Interactive path: present numbered menu of existing envs.
+			my @existing = grep { $_->name ne $name } $top->envs();
+			if (@existing) {
+				my @env_names = map { $_->name } @existing;
+				my @choices   = ('', @env_names);
+				my @labels    = ('(none — pipeline entrypoint)', @env_names);
+				$prior_env = prompt_for_choice(
+					"Select prior environment (the environment that must succeed before this one):",
+					\@choices,
+					'',
+					\@labels,
+					"Please select a number from the list",
+					"environment",
+				);
+			} else {
+				# No other envs yet — must be the entrypoint.
+				$prior_env = '';
+				info("No other environments found — #C{%s} will be the pipeline entrypoint.", $name);
+			}
+		}
 
-		my $manual = prompt_for_boolean(
-			"Require a manual CI trigger before this environment deploys? [y|n]",
-			"n",
-		);
+		# --- require_pr ---
+		my $require_pr;
+		if (exists $cli_opts{'require-pr'}) {
+			$require_pr = $cli_opts{'require-pr'} ? 1 : 0;
+		} elsif ($interactive) {
+			$require_pr = prompt_for_boolean(
+				"Require a PR gate before this environment deploys? [y|n]",
+				"n",
+			);
+		}
 
-		if (length($prior_env)) {
+		# --- manual ---
+		my $manual;
+		if (exists $cli_opts{manual}) {
+			$manual = $cli_opts{manual} ? 1 : 0;
+		} elsif ($interactive) {
+			$manual = prompt_for_boolean(
+				"Require a manual CI trigger before this environment deploys? [y|n]",
+				"n",
+			);
+		}
+
+		# Write pipeline: section when there is something to record.
+		# Entrypoints (no prior_env) can still carry manual: true.
+		if (length($prior_env // '') || $require_pr || $manual) {
 			my $pipeline_yaml = "  pipeline:\n";
-			$pipeline_yaml .= "    prior_env: $prior_env\n";
-			$pipeline_yaml .= "    require_pr: true\n" if $require_pr;
-			$pipeline_yaml .= "    manual: true\n"     if $manual;
+			$pipeline_yaml .= "    prior_env: $prior_env\n" if length($prior_env // '');
+			$pipeline_yaml .= "    require_pr: true\n"      if $require_pr;
+			$pipeline_yaml .= "    manual: true\n"          if $manual;
 
 			my $file     = $env->path($env->file);
 			my $contents = slurp($file);
-			unless ($contents =~ /^  pipeline:/m) {
-				$contents =~ s/^(  env:\s+\S[^\n]*\n)/$1$pipeline_yaml/m;
-				mkfile_or_fail($file, $contents);
-			}
 
-			info("#G{Pipeline metadata written to} #C{%s}", $env->file);
+			if ($contents =~ /^\s+pipeline:/m) {
+				# pipeline: section already present (kit wrote one) — don't overwrite.
+				info(
+					"#Y{Note}: pipeline section already present in #C{%s}, skipping injection.",
+					$env->file
+				);
+			} else {
+				# Inject after the env: line; flexible indentation (Issue 4).
+				my $injected = ($contents =~ s/^((\s+)env:\s+\S[^\n]*\n)/$1$pipeline_yaml/m);
+				if ($injected) {
+					mkfile_or_fail($file, $contents);
+					info("#G{Pipeline metadata written to} #C{%s}", $env->file);
+				} else {
+					warning(
+						"Could not inject pipeline metadata into #C{%s}: ".
+						"'env:' key not found at expected indentation. ".
+						"Add the pipeline section manually:\n%s",
+						$env->file, $pipeline_yaml
+					);
+				}
+			}
 		} else {
-			info("No prior environment — #C{%s} is a pipeline entrypoint, no pipeline section written.", $name);
+			info(
+				"#C{%s} is a pipeline entrypoint with no gate flags — no pipeline section written.",
+				$name
+			);
 		}
 	}
 

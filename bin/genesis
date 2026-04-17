@@ -254,7 +254,21 @@ define_command("create", {
 			"repository for the environment.",
 
 		"force|f" =>
-			"Create a new environment file even if it already exists."
+			"Create a new environment file even if it already exists.",
+
+		"prior-env=s" =>
+			"Name of the prior environment in the pipeline chain (the environment ".
+			"that must succeed before this one deploys).  Only used when a CI ".
+			"provider is configured in #C{.genesis/config}.  Omit or leave blank ".
+			"to designate this environment as a pipeline entrypoint.",
+
+		"require-pr" =>
+			"Require a pull-request gate before this environment deploys.  ".
+			"Only used when a CI provider is configured in #C{.genesis/config}.",
+
+		"manual" =>
+			"Require a manual CI trigger before this environment deploys.  ".
+			"Only used when a CI provider is configured in #C{.genesis/config}."
 	],
 	deprecated_options => [
 		"^prefix=s" =>
