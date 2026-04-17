@@ -256,13 +256,16 @@ sub _repo_init_validate {
 			if (in_controlling_terminal) {
 				$ci_provider_obj = eval {
 					Genesis::CI::Provider->new(type => $ci_provider_opts{'ci-provider'})
-						->interactive_wizard(undef);
+						->interactive_wizard(undef, %ci_provider_opts);
 				};
 				bail("CI provider wizard failed: %s", $@) if $@;
 			} else {
 				bail("Could not initialize CI provider: %s", $@);
 			}
 		}
+
+		# Verify the provider's toolchain is available before we do any work
+		$ci_provider_obj->check_prereqs() or exit 86;
 	}
 
 	# --- 7. Store derived values and summarize intent ---
