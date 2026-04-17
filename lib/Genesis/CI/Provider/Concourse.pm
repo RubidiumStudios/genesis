@@ -6,6 +6,8 @@ use base 'Genesis::CI::Provider';
 use Genesis;
 use Genesis::UI;
 
+use POSIX qw(mktime);
+
 use constant {
 	DEFAULT_TEAM => 'main',
 };
@@ -138,33 +140,143 @@ sub config {
 sub interactive_wizard {
 	my ($self, $top, %opts) = @_;
 
-	my $target = $opts{'ci-target'};
-	unless ($target && $target =~ /\S/) {
-		$target = prompt_for_line(undef,
-			"Concourse target name (from ~/.flyrc): ", '');
-		bail("Concourse CI provider requires a target name")
-			unless $target && $target =~ /\S/;
+	my ($target, $team, $insecure);
+
+	my @fly_targets;
+	my $flyrc = "$ENV{HOME}/.flyrc";
+	my %flyrc_data;
+	if (-f $flyrc) {
+		my $data = load_yaml_file($flyrc);
+		if (ref($data) eq 'HASH' && ref($data->{targets}) eq 'HASH') {
+			%flyrc_data = %{$data->{targets}};
+		}
 	}
 
-	my $team;
-	if (exists $opts{'ci-team'}) {
-		$team = $opts{'ci-team'} || DEFAULT_TEAM;
-	} else {
+	my ($fly_out) = run({ stderr => '/dev/null' },
+		'fly targets --print-table-headers');
+	if ($fly_out && $fly_out =~ /\S/) {
+		my @lines = split /\n/, $fly_out;
+		my @rows = parse_fixed_width_table(@lines);
+		for my $row (@rows) {
+			my $name = $row->{name} // next;
+			my $flyrc_entry = $flyrc_data{$name} // {};
+			push @fly_targets, {
+				name     => $name,
+				api      => $row->{url}  // '(unknown)',
+				team     => $row->{team} // DEFAULT_TEAM,
+				insecure => $flyrc_entry->{insecure} ? 1 : 0,
+				expired  => _token_expired($row->{expiry}),
+			};
+		}
+	}
+
+	if (@fly_targets) {
+		# Compute column widths for aligned display
+		my $w_name = 0;
+		my $w_api  = 0;
+		my $w_team = 0;
+		for (@fly_targets) {
+			$w_name = length($_->{name}) if length($_->{name}) > $w_name;
+			$w_api  = length($_->{api})  if length($_->{api})  > $w_api;
+			$w_team = length($_->{team}) if length($_->{team}) > $w_team;
+		}
+
+		my @choices = map {{
+			value   => $_->{name},
+			label   => sprintf("#C{%-${w_name}s}  %-${w_api}s  %-${w_team}s  %s%s",
+				$_->{name}, $_->{api}, $_->{team},
+				$_->{insecure} ? "#Yi{insecure}" : "#G{secure}  ",
+				$_->{expired}  ? "  #R{EXPIRED!}" : ""),
+			summary => $_->{name},
+		}} @fly_targets;
+
+		# Separator + "create new" option at the bottom
+		push @choices, { separator => 1 };
+		push @choices, {
+			value   => '__new__',
+			label   => '#Yi{Create a new Concourse target}',
+			summary => '(new target)',
+		};
+
+		$target = new_prompt_for_choice(
+			header      => "Select a Concourse target:",
+			choices     => \@choices,
+			default     => $self->{target},
+			description => "target",
+		);
+
+		if ($target ne '__new__') {
+			# Pre-fill team and insecure from the selected flyrc entry
+			my ($selected) = grep { $_->{name} eq $target } @fly_targets;
+			if ($selected) {
+				$team     = $selected->{team};
+				$insecure = $selected->{insecure};
+			}
+		}
+	}
+
+	# Create a new target: prompt for details and run fly login
+	if (!$target || $target eq '__new__') {
+		my $name = prompt_for_line(undef,
+			"Target name (short alias for this Concourse): ", '');
+		bail("A target name is required.") unless $name && $name =~ /\S/;
+
+		my $url = prompt_for_line(undef,
+			"Concourse URL (e.g. https://ci.example.com): ", '');
+		bail("A Concourse URL is required.") unless $url && $url =~ m{^https?://};
+
 		$team = prompt_for_line(undef,
-			sprintf("Concourse team [%s]: ", DEFAULT_TEAM), DEFAULT_TEAM);
+			sprintf("Team name [%s]: ", DEFAULT_TEAM), DEFAULT_TEAM);
 		$team = DEFAULT_TEAM unless $team && $team =~ /\S/;
+
+		$insecure = prompt_for_boolean(
+			"Skip TLS certificate verification? [y|n] ", 0);
+
+		# Run fly login to create the target in ~/.flyrc and
+		# authenticate the user.  This is interactive — fly will
+		# prompt for credentials or open a browser.
+		info "\nLogging in to Concourse as #C{%s} on #C{%s}...\n", $team, $url;
+		my @fly_cmd = ('fly', '-t', $name, 'login',
+			'-c', $url, '-n', $team);
+		push @fly_cmd, '-k' if $insecure;
+		run({ interactive => 1,
+			  onfailure   => "fly login failed for target '$name'" },
+			join(' ', map { /\s/ ? "\"$_\"" : $_ } @fly_cmd));
+
+		$target = $name;
 	}
 
-	my $insecure = exists $opts{'ci-insecure'}
-		? ($opts{'ci-insecure'} ? 1 : 0)
-		: prompt_for_boolean("Skip TLS certificate verification? [y|n] ", 0);
-
-	return $self->new(
+	return (ref($self) || $self)->new(
 		type     => 'concourse',
 		target   => $target,
 		team     => $team,
 		insecure => $insecure,
 	);
+}
+
+# }}}
+
+# _token_expired - check if a fly targets expiry string is in the past {{{
+my %_months = (
+	Jan => 0, Feb => 1, Mar => 2, Apr => 3, May => 4,  Jun => 5,
+	Jul => 6, Aug => 7, Sep => 8, Oct => 9, Nov => 10, Dec => 11,
+);
+sub _token_expired {
+	my ($expiry_str) = @_;
+	return 0 unless $expiry_str && $expiry_str =~ /\S/;
+
+	# fly targets format: "Sat, 08 Feb 2025 18:53:16 UTC"
+	if ($expiry_str =~ /(\d{2})\s+(\w{3})\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+UTC/) {
+		my ($day, $mon, $year, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
+		return 0 unless defined $_months{$mon};
+		my $exp = eval {
+			local $ENV{TZ} = 'UTC';
+			POSIX::mktime($sec, $min, $hour, $day, $_months{$mon}, $year - 1900);
+		};
+		return 0 unless $exp;
+		return $exp < time() ? 1 : 0;
+	}
+	return 0;
 }
 
 # }}}

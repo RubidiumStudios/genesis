@@ -30,10 +30,11 @@ sub repo_init {
 #   1. Parse options and derive values (fast, no side effects)
 #   2. Check invalid option combinations (fast bail)
 #   3. Gather data: validate local sources, detect git repo (no network)
-#   4. Check destructive prerequisites (existing directory, before network)
-#   5. Validate remote kit availability (network calls)
-#   6. Prompt for missing info (vault selection)
-#   7. Store derived values and summarize intent
+#   4. Subdir preflight: dirty check, control-branch check
+#   5. Check destructive prerequisites (existing directory, before network)
+#   6. Validate remote kit availability (network calls)
+#   7. Prompt for missing info (vault, CI provider wizard)
+#   8. Store derived values and summarize intent
 #
 sub _repo_init_validate {
 	# Passthrough options (e.g. --kit-provider-*) have already been
@@ -83,28 +84,11 @@ sub _repo_init_validate {
 
 	# CI provider options (--ci-provider, --ci-target, etc.) have been
 	# parsed by the framework's extended_handlers into the ci_provider
-	# slot of get_options().  Build the provider object if one was
-	# requested.
+	# slot.  We extract the opts hash here for quick flag checks (e.g.
+	# branch validation), but defer building the actual provider object
+	# until step 6 (after directory/kit validation passes) so the
+	# interactive wizard doesn't run if we're going to bail anyway.
 	my %ci_provider_opts = %{$opts{ci_provider} // {}};
-	my $ci_provider_obj;
-	if ($ci_provider_opts{'ci-provider'}) {
-		$ci_provider_obj = eval { Genesis::CI::Provider->init(%ci_provider_opts) };
-		if ($@) {
-			if (in_controlling_terminal) {
-				# Required flags omitted — run interactive wizard, pre-filling any flags supplied
-				$ci_provider_obj = eval {
-					Genesis::CI::Provider->new(type => $ci_provider_opts{'ci-provider'})
-						->interactive_wizard(undef, %ci_provider_opts);
-				};
-				bail("CI provider wizard failed: %s", $@) if $@;
-			} else {
-				bail("Could not initialize CI provider: %s", $@);
-			}
-		}
-
-		# Verify the provider's toolchain is available before we do any work
-		$ci_provider_obj->check_prereqs() or exit 86;
-	}
 
 	# --- 3. Gather data: validate local sources, detect git repo ---
 
@@ -184,7 +168,7 @@ sub _repo_init_validate {
 	# Without #C{--ci-provider}, no pipeline topology is being
 	# established, so the branch name is irrelevant at this point.
 	my $control_branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-	if ($use_subdir && $ci_provider_obj) {
+	if ($use_subdir && $ci_provider_opts{'ci-provider'}) {
 		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
 		chomp $branch if defined $branch;
 		if (!defined($branch) || $branch ne $control_branch) {
@@ -246,6 +230,10 @@ sub _repo_init_validate {
 	}
 
 	# --- 6. Prompt for missing info ---
+	#
+	# Interactive steps are deferred until here so we don't waste the
+	# user's time if validation is going to bail (directory exists,
+	# kit not found, wrong branch, etc.).
 
 	my $vault_target;
 	if ($opts{'skip-vault'}) {
@@ -257,7 +245,27 @@ sub _repo_init_validate {
 		$vault_target = $vault->{name} if $vault;
 	}
 
-	# --- 8. Store derived values and summarize intent ---
+	# Build the CI provider object now that all preflight checks have
+	# passed.  If required flags (--ci-target, etc.) were omitted and
+	# we have a controlling terminal, fall back to the interactive
+	# wizard to collect them.
+	my $ci_provider_obj;
+	if ($ci_provider_opts{'ci-provider'}) {
+		$ci_provider_obj = eval { Genesis::CI::Provider->init(%ci_provider_opts) };
+		if ($@) {
+			if (in_controlling_terminal) {
+				$ci_provider_obj = eval {
+					Genesis::CI::Provider->new(type => $ci_provider_opts{'ci-provider'})
+						->interactive_wizard(undef);
+				};
+				bail("CI provider wizard failed: %s", $@) if $@;
+			} else {
+				bail("Could not initialize CI provider: %s", $@);
+			}
+		}
+	}
+
+	# --- 7. Store derived values and summarize intent ---
 
 	option_defaults(
 		_name                 => $name,

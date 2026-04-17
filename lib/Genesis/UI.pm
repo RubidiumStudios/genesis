@@ -556,7 +556,7 @@ sub new_prompt_for_choice {
 				my $choice = $i+1-$section_offset;
 				$selection_map{$choice} = $choices->[$i];
 				$form .= csprintf("\n  %*s) %s", $iw, $choice, $choices->[$i]{label});
-				$default_choice = $choice if $i == $default_idx;
+				$default_choice = $choice if defined($default_idx) && $i == $default_idx;
 			}
 		}
 		
