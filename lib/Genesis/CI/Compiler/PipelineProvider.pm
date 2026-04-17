@@ -82,14 +82,7 @@ sub output_files {
 # }}}
 ### Prerequisite Checking {{{
 
-# check_prereqs - verify all required external tools are available {{{
-#
-# Called before deploy() to confirm the provider's toolchain is present.
-# Returns 1 when all prereqs are satisfied; returns 0 and emits error()
-# messages for each unmet prereq (caller decides whether to bail).
-#
-# Subclasses override to check their specific requirements.
-# Base implementation has no prereqs and always returns 1.
+# check_prereqs - returns 1 if toolchain is present, 0 + error() if not {{{
 sub check_prereqs {
 	return 1;
 }

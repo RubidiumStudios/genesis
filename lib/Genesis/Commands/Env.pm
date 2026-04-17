@@ -89,10 +89,8 @@ sub create {
 		my %cli_opts = %{get_options()};
 		my $interactive = in_controlling_terminal;
 
-		# --- prior_env (Issue 1: use choice menu, not freeform) ---
 		my $prior_env;
 		if (exists $cli_opts{'prior-env'}) {
-			# Non-interactive path: flag supplied; validate it refers to a real env.
 			$prior_env = $cli_opts{'prior-env'} // '';
 			if (length($prior_env)) {
 				my %known = map { $_->name => 1 } $top->envs();
@@ -102,7 +100,6 @@ sub create {
 				) unless $known{$prior_env};
 			}
 		} elsif ($interactive) {
-			# Interactive path: present numbered menu of existing envs.
 			my @existing = grep { $_->name ne $name } $top->envs();
 			if (@existing) {
 				my @env_names = map { $_->name } @existing;
@@ -117,13 +114,12 @@ sub create {
 					"environment",
 				);
 			} else {
-				# No other envs yet — must be the entrypoint.
 				$prior_env = '';
 				info("No other environments found — #C{%s} will be the pipeline entrypoint.", $name);
 			}
 		}
 
-		# --- require_pr ---
+		# --- require_pr / manual ---
 		my $require_pr;
 		if (exists $cli_opts{'require-pr'}) {
 			$require_pr = $cli_opts{'require-pr'} ? 1 : 0;
@@ -134,7 +130,6 @@ sub create {
 			);
 		}
 
-		# --- manual ---
 		my $manual;
 		if (exists $cli_opts{manual}) {
 			$manual = $cli_opts{manual} ? 1 : 0;
@@ -157,13 +152,11 @@ sub create {
 			my $contents = slurp($file);
 
 			if ($contents =~ /^\s+pipeline:/m) {
-				# pipeline: section already present (kit wrote one) — don't overwrite.
 				info(
 					"#Y{Note}: pipeline section already present in #C{%s}, skipping injection.",
 					$env->file
 				);
 			} else {
-				# Inject after the env: line; flexible indentation (Issue 4).
 				my $injected = ($contents =~ s/^((\s+)env:\s+\S[^\n]*\n)/$1$pipeline_yaml/m);
 				if ($injected) {
 					mkfile_or_fail($file, $contents);

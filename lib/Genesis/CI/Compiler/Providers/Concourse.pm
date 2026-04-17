@@ -69,12 +69,12 @@ sub init {
 sub provider_type { 'concourse' }
 
 # }}}
-# check_prereqs - verify fly CLI is installed before attempting deploy {{{
+# check_prereqs - returns 1 if fly is in PATH, 0 + error() if not {{{
 sub check_prereqs {
 	my ($self) = @_;
-	my $ok = 1;
 
-	chomp(my $fly_path = `which fly 2>/dev/null`);
+	my ($fly_path) = run({ stderr => 0 }, 'type -p fly');
+	chomp($fly_path //= '');
 	unless ($fly_path) {
 		error(
 			"Cannot deploy Concourse pipeline: the #C{fly} CLI was not found in ".
@@ -86,7 +86,7 @@ sub check_prereqs {
 		return 0;
 	}
 
-	return $ok;
+	return 1;
 }
 
 # }}}
