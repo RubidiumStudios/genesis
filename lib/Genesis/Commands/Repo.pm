@@ -423,6 +423,27 @@ sub _repo_init_execute {
 		run({ onfailure => "Failed to stage repository in $human_root/" },
 			'git add .');
 
+		# Check if the only staged changes are metadata-only (the
+		# "Last updated" comment and/or updater/creator_version in
+		# .genesis/config).  If so, roll them back — re-running
+		# repo-init with --force on the same kit version shouldn't
+		# produce a commit with no meaningful content.
+		my ($diff_names) = run({}, 'git diff --cached --name-only -- .');
+		if ($diff_names && $diff_names =~ /\S/) {
+			my @changed = grep { /\S/ } split /\n/, $diff_names;
+			if (@changed == 1 && $changed[0] =~ m{\.genesis/config$}) {
+				my ($diff_content) = run({}, 'git diff --cached -- .genesis/config');
+				my @meaningful = grep {
+					/^[-+]/ && !/^[-+]{3}\s/ &&
+					$_ !~ /^[-+]\s*#\s*Last updated by\b/ &&
+					$_ !~ /^[-+]\s*(updater_version|creator_version):/
+				} split /\n/, $diff_content;
+				unless (@meaningful) {
+					run({}, 'git checkout -- .genesis/config');
+				}
+			}
+		}
+
 		# Show a summary of what we just staged so the user can see
 		# exactly what the initial commit (or leftover stage) contains.
 		my ($stat) = run({}, 'git diff --cached --stat -- .');
@@ -430,13 +451,16 @@ sub _repo_init_execute {
 			info "\n#G{Files staged for initial commit:}";
 			info "  %s", $_ for split /\n/, $stat;
 			info "";
+		} else {
+			info "\nNo changes to commit — repository contents are unchanged.";
+			$kit_desc = "unchanged (already up to date)";
 		}
 
-		# Commit unless the user explicitly opted out.  In subdir mode
-		# we scope the commit with a pathspec ('-- .') so any unrelated
-		# changes already staged in the enclosing repo are not bundled
-		# into this commit.
-		if ($no_commit) {
+		# Commit unless the user explicitly opted out or there is
+		# nothing staged.
+		if (!$stat || $stat !~ /\S/) {
+			# nothing to commit — already reported above
+		} elsif ($no_commit) {
 			info "Skipping initial commit (#C{--no-commit} set); files remain staged.";
 		} else {
 			my $message = $reason || "Initial Genesis repo for $name";
