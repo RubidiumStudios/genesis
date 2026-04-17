@@ -92,6 +92,10 @@ sub parse_opts {
 }
 
 # }}}
+# opts_slot - key name for this handler's parsed options in $COMMAND_OPTIONS {{{
+sub opts_slot { 'ci_provider' }
+
+# }}}
 # opts - base class has no options of its own {{{
 sub opts {
 	qw//;

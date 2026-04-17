@@ -7,8 +7,6 @@ use Genesis;
 use Genesis::Commands;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::Top;
-use Genesis::Kit::Provider;
-use Genesis::CI::Provider;
 use Genesis::UI;
 
 use Cwd qw/getcwd abs_path/;
@@ -38,29 +36,14 @@ sub repo_init {
 #   7. Store derived values and summarize intent
 #
 sub _repo_init_validate {
+	# Passthrough options (e.g. --kit-provider-*) have already been
+	# parsed by the framework's extended_handlers and are available in
+	# get_options()->{kit_provider}.  @args from get_args()
+	# contains only true positional arguments.
 	my %opts = %{get_options()};
 	my @args = get_args();
 
 	# --- 1. Parse and derive ---
-
-	# The #C{repo-init} command uses #C{option_passthrough => 1}, so
-	# any option that isn't declared in bin/genesis (e.g. the
-	# #C{--kit-provider-*} flags provided by #C{Genesis::Kit::Provider}
-	# and, in the future, the CI-provider-specific flags) is left
-	# untouched in @args alongside true positional arguments.  We must
-	# consume those passthrough options here, BEFORE reading
-	# #C{$args[0]} as the deployment name -- otherwise a flag value
-	# (or the flag itself) could be mistaken for the name.
-	#
-	# parse_opts mutates @args in place: it strips recognised flags
-	# into %provider_opts and leaves the remaining positional args
-	# behind.  The provider object itself is built later, only when
-	# $opts{kit} is actually set.
-	#
-	# When the CI-provider parse_opts analogue lands, call it from
-	# here as well.
-	my %provider_opts;
-	Genesis::Kit::Provider->parse_opts(\@args, \%provider_opts);
 
 	my $name = $args[0];
 	my $kit_file;
@@ -98,15 +81,11 @@ sub _repo_init_validate {
 		"Cannot specify both --vault and --skip-vault."
 	) if $opts{vault} && $opts{'skip-vault'};
 
-	# --ci-provider is a declared option and is pre-parsed by get_options() into
-	# %opts; provider-specific flags (--ci-target, --ci-team, etc.) are NOT
-	# declared, so they stay in @args via option_passthrough.  Seed ci-provider
-	# from %opts first so parse_opts can do the second pass for provider extras.
-	my %ci_provider_opts;
-	$ci_provider_opts{'ci-provider'} = delete $opts{'ci-provider'}
-		if $opts{'ci-provider'};
-	Genesis::CI::Provider->parse_opts(\@args, \%ci_provider_opts);
-
+	# CI provider options (--ci-provider, --ci-target, etc.) have been
+	# parsed by the framework's extended_handlers into the ci_provider
+	# slot of get_options().  Build the provider object if one was
+	# requested.
+	my %ci_provider_opts = %{$opts{ci_provider} // {}};
 	my $ci_provider_obj;
 	if ($ci_provider_opts{'ci-provider'}) {
 		$ci_provider_obj = eval { Genesis::CI::Provider->init(%ci_provider_opts) };
@@ -205,7 +184,7 @@ sub _repo_init_validate {
 	# Without #C{--ci-provider}, no pipeline topology is being
 	# established, so the branch name is irrelevant at this point.
 	my $control_branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-	if ($use_subdir && $opts{'ci-provider'}) {
+	if ($use_subdir && $ci_provider_obj) {
 		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
 		chomp $branch if defined $branch;
 		if (!defined($branch) || $branch ne $control_branch) {
@@ -248,10 +227,9 @@ sub _repo_init_validate {
 	if ($opts{kit} && !$kit_file) {
 		($resolved_kit_name, $resolved_kit_version) = split('/', $opts{kit}, 2);
 
-		# %provider_opts was populated at the top of this sub so
-		# that positional-arg parsing wasn't fooled by passthrough
-		# flags.  Build the provider object now that we know we
-		# need it.
+		# Kit provider options were parsed by the framework's
+		# extended_handlers into the kit_provider slot.
+		my %provider_opts = %{$opts{kit_provider} // {}};
 		$kit_provider = eval { Genesis::Kit::Provider->init(%provider_opts) };
 		bail("Could not initialize kit provider: %s", $@) if $@;
 

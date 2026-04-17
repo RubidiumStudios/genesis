@@ -1271,24 +1271,13 @@ define_command("repo-init", {
 				"Defer vault configuration. The repo will be created without a ".
 				"secrets provider. You must configure one via #C{genesis secrets-provider} ".
 				"before creating environments.",
-
-			'ci-provider=s' =>
-				"CI provider for pipeline automation: 'concourse', 'github-actions', ".
-				"or 'manual'. When specified, writes the ci: section to .genesis/config ".
-				"and generates the .genesis/ci/ scaffold.",
 		],
-		option_passthrough => 1,
+		extended_handlers => ['Genesis::Kit::Provider', 'Genesis::CI::Provider'],
 		arguments => [
 			"name?" =>
 				"If the name argument is not specified, it will default to the same ".
 				"name as the kit.  You must specify either name or kit."
 		],
-		extended_usage => sub {
-			require Genesis::Kit::Provider;
-			require Genesis::CI::Provider;
-			Genesis::Kit::Provider->opts_help() .
-			Genesis::CI::Provider->opts_help();
-		}
 });
 
 # }}}
@@ -1346,10 +1335,7 @@ define_command("kit-provider", {
 		"export-config" =>
 			"Export the current kit provider information."
 	],
-	extended_usage => sub {
-			require Genesis::Kit::Provider;
-			Genesis::Kit::Provider->opts_help();
-	}
+	extended_handlers => ['Genesis::Kit::Provider'],
 });
 
 # }}}
