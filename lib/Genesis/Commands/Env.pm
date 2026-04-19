@@ -71,6 +71,26 @@ sub create {
 	# check version prereqs
 	$kit->check_prereqs() or exit 86;
 
+	# Pipeline-aware repos require new environments to be created on the
+	# control branch so the topology is visible to pipeline tooling and
+	# the environment branch can be cut from the right point.
+	my $ci_configured = $top->config->has('ci.provider.type');
+	if ($ci_configured) {
+		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
+		chomp $branch if defined $branch;
+		if (!defined($branch) || $branch ne $control) {
+			bail(
+				"Creating environments requires being on the #C{%s} branch, ".
+				"but you are currently on #C{%s}.\n\n".
+				"    git checkout %s\n",
+				$control,
+				$branch // '<detached HEAD>',
+				$control
+			);
+		}
+	}
+
 	# create the environment
 	info("\nSetting up new environment #C{$name} based on kit %s ...", $kit->id);
 	my $env = $top->create_env($name, $kit, %{get_options()});
@@ -103,15 +123,17 @@ sub create {
 			my @existing = grep { $_->name ne $name } $top->envs();
 			if (@existing) {
 				my @env_names = map { $_->name } @existing;
-				my @choices   = ('', @env_names);
-				my @labels    = ('(none — pipeline entrypoint)', @env_names);
-				$prior_env = prompt_for_choice(
-					"Select prior environment (the environment that must succeed before this one):",
-					\@choices,
-					'',
-					\@labels,
-					"Please select a number from the list",
-					"environment",
+				my @choices = map {{ value => $_, label => $_ }} @env_names;
+				push @choices, { separator => 1 };
+				push @choices, {
+					value => '',
+					label => '#Yi{(none — pipeline entrypoint)}',
+					summary => '(entrypoint)',
+				};
+				$prior_env = new_prompt_for_choice(
+					header      => "Select prior environment (must succeed before this one):",
+					choices     => \@choices,
+					description => "environment",
 				);
 			} else {
 				$prior_env = '';
@@ -178,13 +200,53 @@ sub create {
 		}
 	}
 
+	# Git operations: stage, commit, and create an environment branch.
+	# Only when CI is configured and --no-commit is not set.
+	my %cli_opts_git = %{get_options()};
+	if ($ci_configured) {
+		my $env_file = $env->file;
+		run({ onfailure => "Failed to stage $env_file" },
+			'git', 'add', $env_file);
+
+		if ($cli_opts_git{'no-commit'}) {
+			info "Skipping commit (#C{--no-commit} set); #C{%s} remains staged.", $env_file;
+		} else {
+			my $message = $cli_opts_git{reason}
+				|| "Add environment $name";
+			run({ onfailure => "Failed to commit $env_file" },
+				'git', 'commit', '-m', $message);
+
+			my ($sha) = run({}, 'git rev-parse --short HEAD');
+			chomp $sha if defined $sha;
+			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
+
+			# Create the environment branch at the current commit.
+			# This is the branch where future config changes and
+			# deploys for this environment will happen.  We stay on
+			# the control branch.
+			run({ onfailure => "Failed to create branch '$name'" },
+				'git', 'branch', $name);
+			info "Environment branch #C{%s} created.", $name;
+		}
+	}
+
 	# let the user know
-	info(
-		"New environment $env->{name} provisioned!\n\n".
-		"To deploy, run this:\n\n".
-		"  #C{genesis deploy '%s'}\n",
-		$env->{name}
-	);
+	if ($ci_configured && !$cli_opts_git{'no-commit'}) {
+		info(
+			"\nNew environment #C{%s} provisioned!\n\n".
+			"To deploy, switch to the environment branch and run:\n\n".
+			"  #C{git checkout '%s'}\n".
+			"  #C{genesis deploy '%s'}\n",
+			$env->{name}, $name, $env->{name}
+		);
+	} else {
+		info(
+			"\nNew environment #C{%s} provisioned!\n\n".
+			"To deploy, run this:\n\n".
+			"  #C{genesis deploy '%s'}\n",
+			$env->{name}, $env->{name}
+		);
+	}
 }
 
 sub edit {

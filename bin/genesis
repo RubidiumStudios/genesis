@@ -268,7 +268,17 @@ define_command("create", {
 
 		"manual" =>
 			"Require a manual CI trigger before this environment deploys.  ".
-			"Only used when a CI provider is configured in #C{.genesis/config}."
+			"Only used when a CI provider is configured in #C{.genesis/config}.",
+
+		"no-commit" =>
+			"Stage the new environment file but skip the git commit and ".
+			"environment branch creation.  Only applies when a CI ".
+			"provider is configured.",
+
+		"reason=s" =>
+			"Commit message for the environment commit.  Defaults to ".
+			"#C{Add environment <name>}.  Only applies when a CI ".
+			"provider is configured and #C{--no-commit} is not set.",
 	],
 	deprecated_options => [
 		"^prefix=s" =>
@@ -1260,7 +1270,7 @@ define_command("repo-init", {
 				"describing the new Genesis deployment.  Ignored if #C{--no-commit} ".
 				"is set.",
 
-			'force|F' =>
+			'force|f' =>
 				"If the target directory already exists, remove it and recreate ".
 				"(without this flag, you will be prompted to confirm ".
 				"replacement).  Also bypasses the check that the enclosing git ".
