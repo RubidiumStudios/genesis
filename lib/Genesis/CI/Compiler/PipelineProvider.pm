@@ -272,6 +272,50 @@ sub parse_cli_opts {
 }
 
 # }}}
+# cli_key_to_config_key - convert a ci-* CLI key to its config/schema key {{{
+#
+# The convention is: strip the 'ci-' prefix, convert hyphens to underscores.
+# Examples:
+#   ci-target        => target
+#   ci-team          => team
+#   ci-pipeline-name => pipeline_name
+#   ci-pause         => pause
+#   ci-expose        => expose
+#
+# Non-ci-prefixed keys are returned unchanged (already in config form).
+sub cli_key_to_config_key {
+	my ($class, $key) = @_;
+	$key =~ s/^ci-//;
+	$key =~ s/-/_/g;
+	return $key;
+}
+
+# }}}
+# normalize_provider_opts - convert a hash of CLI-keyed opts to config keys {{{
+sub normalize_provider_opts {
+	my ($class, $opts) = @_;
+	my %out;
+	for my $k (keys %{ $opts || {} }) {
+		$out{ $class->cli_key_to_config_key($k) } = $opts->{$k};
+	}
+	return \%out;
+}
+
+# }}}
+# cli_opt_keys - return parsed option key names for a given provider type {{{
+#
+# Strips Getopt::Long type suffixes (=s, !, +, etc.) leaving bare key names.
+# Used by the commands layer to copy matching options from get_options without
+# hardcoding provider-specific names.
+sub cli_opt_keys {
+	my ($class, $provider_type) = @_;
+	my $info = $_providers{$provider_type} or return ();
+	eval { require $info->{file} }  ## no critic
+		or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
+	return map { (split /[=!+:]/, $_)[0] } $info->{class}->cli_opts();
+}
+
+# }}}
 # all_cli_opts_help - assembled help text for all known providers {{{
 #
 # Prints shared CI flags, then delegates to each provider's cli_opts_help().

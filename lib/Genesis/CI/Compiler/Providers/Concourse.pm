@@ -13,10 +13,10 @@ use JSON::PP;
 ### Provider Constants {{{
 
 use constant {
-	DEFAULT_TEAM             => 'main',
-	DEFAULT_PIPELINE_NAME    => undef,    # falls back to deployment_type from Top
-	DEFAULT_EXPOSE           => 0,
-	DEFAULT_PAUSE_AFTER_SET  => 0,
+	DEFAULT_TEAM          => 'main',
+	DEFAULT_PIPELINE_NAME => undef,    # falls back to deployment_type from Top
+	DEFAULT_EXPOSE        => 0,
+	DEFAULT_PAUSE         => 0,
 };
 
 # }}}
@@ -170,9 +170,9 @@ sub provider_options_schema {
 			default     => DEFAULT_EXPOSE,
 			description => 'Make pipeline publicly viewable (fly expose-pipeline)',
 		},
-		pause_after_set => {
+		pause => {
 			type        => 'boolean',
-			default     => DEFAULT_PAUSE_AFTER_SET,
+			default     => DEFAULT_PAUSE,
 			description => 'Leave pipeline paused after fly set-pipeline',
 		},
 	};
@@ -182,9 +182,9 @@ sub provider_options_schema {
 # provider_options_defaults - default values for all Concourse options {{{
 sub provider_options_defaults {
 	return {
-		team            => DEFAULT_TEAM,
-		expose          => DEFAULT_EXPOSE,
-		pause_after_set => DEFAULT_PAUSE_AFTER_SET,
+		team   => DEFAULT_TEAM,
+		expose => DEFAULT_EXPOSE,
+		pause  => DEFAULT_PAUSE,
 	};
 }
 
@@ -196,11 +196,11 @@ sub provider_options_defaults {
 sub describe_provider {
 	my ($self) = @_;
 
-	my $target    = $self->provider_option('ci-target')        || $self->provider_option('target')        || '(not set)';
-	my $team      = $self->provider_option('ci-team')          || $self->provider_option('team')          || DEFAULT_TEAM;
-	my $pipe_name = $self->provider_option('ci-pipeline-name') || $self->provider_option('pipeline_name') || '(deployment type)';
-	my $expose    = $self->provider_option('expose')           ? 'yes' : 'no';
-	my $paused    = $self->provider_option('pause_after_set')  ? 'yes' : 'no';
+	my $target    = $self->provider_option('target')        || '(not set)';
+	my $team      = $self->provider_option('team')          || DEFAULT_TEAM;
+	my $pipe_name = $self->provider_option('pipeline_name') || '(deployment type)';
+	my $expose    = $self->provider_option('expose') ? 'yes' : 'no';
+	my $paused    = $self->provider_option('pause')  ? 'yes' : 'no';
 
 	return (
 		type     => 'concourse',
@@ -306,37 +306,40 @@ sub deploy {
 
 	bail("Must call parse() before deploy()") unless $self->{config};
 
+	# All keys use config-file names (target, team, pipeline_name, pause, expose).
+	# Callers are responsible for normalizing cli-prefixed keys before calling deploy().
+
 	# --- Resolve options from three tiers ---
 
-	# Target: CLI > provider_opts > legacy layout
-	my $target = $opts{'ci-target'}
-		|| $self->provider_option('target')
-		|| $self->{layout};
+	# Target: call-site override > provider_opts > legacy layout
+	my $target = $opts{target}
+		// $self->provider_option('target')
+		// $self->{layout};
 	bail("No Concourse target specified.  Use --ci-target or set ci.provider.target in .genesis/config")
 		unless $target;
 
-	# Team: CLI > provider_opts > default
-	my $team = $opts{'ci-team'}
-		|| $self->provider_option('team')
-		|| DEFAULT_TEAM;
+	# Team: call-site override > provider_opts > default
+	my $team = $opts{team}
+		// $self->provider_option('team')
+		// DEFAULT_TEAM;
 
-	# Pipeline name: CLI > provider_opts > config name > deployment_type
-	my $pipeline_name = $opts{'ci-pipeline-name'}
-		|| $self->provider_option('pipeline_name')
-		|| $self->{config}{pipeline}{name}
-		|| ($self->{top} ? $self->{top}->type : undef);
+	# Pipeline name: call-site override > provider_opts > config name > deployment_type
+	my $pipeline_name = $opts{pipeline_name}
+		// $self->provider_option('pipeline_name')
+		// $self->{config}{pipeline}{name}
+		// ($self->{top} ? $self->{top}->type : undef);
 	bail("Cannot determine pipeline name — set ci.provider.pipeline_name or ensure deployment_type is set")
 		unless $pipeline_name;
 
-	# Pause/expose: CLI flags > provider_opts > defaults
-	my $dry_run = $opts{'dry-run'} || $opts{'ci-dry-run'};
-	my $yes     = $opts{yes}       || $opts{'-y'};
-	my $paused  = $opts{'ci-pause'}
-		|| $self->provider_option('pause_after_set')
-		|| DEFAULT_PAUSE_AFTER_SET;
-	my $expose  = $opts{'ci-expose'}
-		|| $self->provider_option('expose')
-		|| _yaml_bool(($self->{config}{pipeline} || {})->{public}, DEFAULT_EXPOSE);
+	# Pause/expose/dry-run: call-site override > provider_opts > defaults
+	my $dry_run = $opts{'dry-run'};
+	my $yes     = $opts{yes};
+	my $pause   = $opts{pause}
+		// $self->provider_option('pause')
+		// DEFAULT_PAUSE;
+	my $expose  = $opts{expose}
+		// $self->provider_option('expose')
+		// _yaml_bool(($self->{config}{pipeline} || {})->{public}, DEFAULT_EXPOSE);
 
 	my $yaml = $self->generate();
 
@@ -368,8 +371,8 @@ sub deploy {
 		$target, $pipeline_name, $dir
 	);
 
-	# Unpause pipeline (unless --ci-pause / pause_after_set)
-	unless ($paused) {
+	# Unpause pipeline (unless ci.provider.pause or --ci-pause override)
+	unless ($pause) {
 		run({
 			interactive => 1,
 			onfailure => "Could not unpause pipeline $pipeline_name",

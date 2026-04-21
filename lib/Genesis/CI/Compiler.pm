@@ -99,11 +99,15 @@ sub compile {
 		or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
 
 	# Extract provider options from parsed config (ci.provider: section)
-	# and merge with any caller-supplied opts.  These are stored in the
-	# provider object and used by deploy() at deploy time.
+	# and merge with any caller-supplied opts.  Normalize caller opts from their
+	# CLI form (ci-* prefixed, hyphenated) to config/schema form (unprefixed, underscored)
+	# so that provider_option() and provider_config() always see consistent keys.
+	require Genesis::CI::Compiler::PipelineProvider;
 	my $provider_opts = {
-		%{ $parsed->{provider}       || {} },   # from ci.provider: section
-		%{ $opts{provider_opts}      || {} },   # caller-supplied overrides
+		%{ $parsed->{provider} || {} },
+		%{ Genesis::CI::Compiler::PipelineProvider->normalize_provider_opts(
+			$opts{provider_opts} || {}
+		) },
 	};
 
 	my $provider = $provider_info->{class}->new(

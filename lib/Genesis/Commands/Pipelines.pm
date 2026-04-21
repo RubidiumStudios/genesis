@@ -481,17 +481,15 @@ sub _repipe_compiled {
 		# Verify the provider's toolchain is available before attempting deploy.
 		$provider->check_prereqs() or exit 86;
 
-		# Pass all relevant CLI flags to deploy() for three-tier resolution.
-		# Provider reads: ci-target, ci-team, ci-pipeline-name, ci-pause, ci-expose,
-		# plus the stored provider_opts (from ci.provider: section in .genesis/config).
-		$provider->deploy(
-			'ci-target'        => get_options->{'ci-target'} || get_options->{target} || $layout,
-			'ci-team'          => get_options->{'ci-team'},
-			'ci-pipeline-name' => get_options->{'ci-pipeline-name'},
-			'ci-pause'         => get_options->{'ci-pause'}  || get_options->{paused},
-			'ci-expose'        => get_options->{'ci-expose'},
-			'yes'              => get_options->{yes},
-		);
+		# Normalize provider CLI opts (ci-* → config keys) then merge legacy
+		# repipe aliases (--target → target, --paused → pause) before calling deploy().
+		require Genesis::CI::Compiler::PipelineProvider;
+		my %deploy_opts = %{ Genesis::CI::Compiler::PipelineProvider->normalize_provider_opts(
+			$result->{provider_cli_opts} || {}
+		) };
+		$deploy_opts{target} //= get_options->{target} // $layout;
+		$deploy_opts{pause}  //= get_options->{paused};
+		$provider->deploy(%deploy_opts, yes => get_options->{yes});
 
 	} elsif ($platform eq 'github-actions') {
 		# GitHub Actions outputs workflow YAML files to .github/workflows/
@@ -597,8 +595,9 @@ sub _compile_pipeline {
 		Genesis::CI::Compiler::PipelineProvider->parse_cli_opts(
 			\@argv, \%provider_cli_opts, $platform
 		);
-		# Merge any provider flags already captured by the outer option parser
-		for my $key (qw(ci-target ci-team ci-pipeline-name ci-pause ci-expose)) {
+		# Merge any provider-specific flags already captured by the outer option parser.
+		# Ask the provider what keys it owns — don't hardcode them here.
+		for my $key (Genesis::CI::Compiler::PipelineProvider->cli_opt_keys($platform)) {
 			$provider_cli_opts{$key} = get_options->{$key}
 				if defined get_options->{$key};
 		}
@@ -615,6 +614,7 @@ sub _compile_pipeline {
 		_dump_debug_artifacts($debug_dir, $result, $platform);
 	}
 
+	$result->{provider_cli_opts} = \%provider_cli_opts;
 	return $result;
 }
 

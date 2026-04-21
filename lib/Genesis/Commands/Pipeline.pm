@@ -50,38 +50,25 @@ sub apply {
 	}
 
 	if ($platform eq 'concourse') {
-		my $yaml = $output->{'pipeline.yml'}
-			or bail("Concourse provider did not produce pipeline.yml");
+		my $provider = $result->{provider};
 
 		if ($opts->{'dry-run'}) {
+			my $yaml = $output->{'pipeline.yml'}
+				or bail("Concourse provider did not produce pipeline.yml");
 			output({raw => 1}, $yaml);
 			exit 0;
 		}
 
-		my $target = $opts->{target} || $layout || $name;
+		$provider->check_prereqs() or exit 86;
 
-		my ($out, $rc) = run('fly -t $1 pause-pipeline -p $2', $target, $name);
-		bail("Could not pause #C{%s} pipeline: %s", $name, $out)
-			unless $rc == 0 || $out =~ /pipeline '.*' not found/;
-
-		my $yes = $opts->{yes} ? ' -n ' : '';
-		my $dir = workdir;
-		mkfile_or_fail("$dir/pipeline.yml", $yaml);
-		run({ interactive => 1, onfailure => "Could not upload pipeline $name" },
-			'fly -t $1 set-pipeline '.$yes.' -p $2 -c $3/pipeline.yml',
-			$target, $name, $dir);
-
-		unless ($opts->{paused}) {
-			run({ interactive => 1, onfailure => "Could not unpause pipeline $name" },
-				'fly -t $1 unpause-pipeline -p $2',
-				$target, $name);
-		}
-
-		my $public = $ast->configuration->{public} || 0;
-		my $action = $public ? 'expose' : 'hide';
-		run({ interactive => 1, onfailure => "Could not $action pipeline $name" },
-			'fly -t $1 '.$action.'-pipeline -p $2',
-			$target, $name);
+		# Delegate all fly operations to the Concourse provider.  Pass generic
+		# command-level flags using plain keys; deploy() accepts both plain and
+		# ci-* prefixed forms so neither layer has to know the other's naming.
+		$provider->deploy(
+			target => $opts->{target} || $layout || $name,
+			pause  => $opts->{paused},
+			yes    => $opts->{yes},
+		);
 
 	} elsif ($platform eq 'github-actions') {
 		if ($opts->{'dry-run'}) {
