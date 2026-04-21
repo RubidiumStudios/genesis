@@ -77,6 +77,18 @@ EOF
 sub label { 'GitHub Actions' }
 
 # }}}
+# validate_config - assert required fields are present in stored config {{{
+sub validate_config {
+	my ($self) = @_;
+	my @errors;
+	push @errors, "'repo' is required for the GitHub Actions provider"
+		unless $self->{repo};
+	push @errors, "'repo' must be in 'org/repo' format"
+		if $self->{repo} && $self->{repo} !~ m{^[^/]+/[^/]+$};
+	return @errors;
+}
+
+# }}}
 # config - returns hash for .genesis/config ci.provider section {{{
 sub config {
 	my ($self) = @_;

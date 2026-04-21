@@ -62,8 +62,10 @@ sub init {
 
 	# New target: --ci-url and --ci-team are required; --ci-target is
 	# an optional name override (derived from url/team if omitted).
-	bail("Concourse CI provider requires --ci-url and --ci-team for a new target")
-		unless $opts{'ci-url'} && $opts{'ci-team'};
+	bail(
+		"Concourse CI provider requires --ci-target (existing fly target) ".
+		"or --ci-url and --ci-team (new target)"
+	) unless $opts{'ci-url'} && $opts{'ci-team'};
 
 	my $target = $opts{'ci-target'}
 		// _derive_target_name($opts{'ci-url'}, $opts{'ci-team'});
@@ -146,6 +148,18 @@ EOF
 
 # label - human-readable name for this provider {{{
 sub label { 'Concourse' }
+
+# }}}
+# validate_config - assert required fields are present in stored config {{{
+sub validate_config {
+	my ($self) = @_;
+	my @errors;
+	push @errors, "'target' is required for the Concourse provider"
+		unless $self->{target};
+	push @errors, "'url' must begin with http:// or https://"
+		if $self->{url} && $self->{url} !~ m{^https?://};
+	return @errors;
+}
 
 # }}}
 # config - returns hash for .genesis/config ci.provider section {{{

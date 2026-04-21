@@ -41,7 +41,11 @@ subtest 'Provider->new rejects unknown type' => sub {
 ### ============================================================ ###
 
 subtest 'Provider->init dispatches on ci-provider opt' => sub {
-	my $c = Genesis::CI::Provider->init('ci-provider' => 'concourse', 'ci-target' => 'prod');
+	my $c = Genesis::CI::Provider->init(
+		'ci-provider' => 'concourse',
+		'ci-url'      => 'https://ci.example.com',
+		'ci-team'     => 'main',
+	);
 	isa_ok $c, 'Genesis::CI::Provider::Concourse', 'ci-provider=concourse';
 
 	my $g = Genesis::CI::Provider->init(
@@ -142,21 +146,22 @@ subtest 'Concourse->opts returns Getopt spec' => sub {
 	ok grep { $_ eq 'ci-insecure' } @opts, 'ci-insecure present';
 };
 
-subtest 'Concourse->init requires --ci-target' => sub {
+subtest 'Concourse->init requires --ci-target or --ci-url+--ci-team' => sub {
 	eval { Genesis::CI::Provider::Concourse->init() };
-	like $@, qr/requires --ci-target/i, 'bails without ci-target';
+	like $@, qr/requires --ci-target/i, 'bails without ci-target or url+team';
 };
 
-subtest 'Concourse->init defaults team to main' => sub {
-	my $p = Genesis::CI::Provider::Concourse->init('ci-target' => 'ci.example.com');
-	is $p->{team}, 'main', 'team defaults to main';
-	is $p->{insecure}, 0,  'insecure defaults to 0';
+subtest 'Concourse defaults team to main and insecure to 0' => sub {
+	my $p = Genesis::CI::Provider::Concourse->new(type => 'concourse', target => 'ci.example.com');
+	is $p->{team},    'main', 'team defaults to main';
+	is $p->{insecure}, 0,     'insecure defaults to 0';
 };
 
-subtest 'Concourse->init honours all opts' => sub {
+subtest 'Concourse->init honours all opts (new-target path)' => sub {
 	my $p = Genesis::CI::Provider::Concourse->init(
-		'ci-target'   => 'ci.example.com',
+		'ci-url'      => 'https://ci.example.com',
 		'ci-team'     => 'platform',
+		'ci-target'   => 'ci.example.com',
 		'ci-insecure' => 1,
 	);
 	is $p->{target},   'ci.example.com', 'target set';
@@ -358,6 +363,98 @@ subtest 'check_prereqs: Concourse min_fly_version not satisfied' => sub {
 	);
 	my $result = $p->check_prereqs();
 	ok !$result, 'check_prereqs returns 0 when fly version too old';
+};
+
+### ============================================================ ###
+### validate_config — per-provider field validation
+### ============================================================ ###
+
+subtest 'validate_config: Manual always passes' => sub {
+	my $m = Genesis::CI::Provider::Manual->new(type => 'manual');
+	my @errors = $m->validate_config;
+	is scalar @errors, 0, 'Manual has no required fields';
+};
+
+subtest 'validate_config: Concourse passes with target' => sub {
+	my $p = Genesis::CI::Provider::Concourse->new(
+		type => 'concourse', target => 'my-ci',
+	);
+	my @errors = $p->validate_config;
+	is scalar @errors, 0, 'no errors when target is present';
+};
+
+subtest 'validate_config: Concourse fails without target' => sub {
+	my $p = Genesis::CI::Provider::Concourse->new(type => 'concourse');
+	my @errors = $p->validate_config;
+	ok scalar @errors > 0, 'errors returned when target missing';
+	like $errors[0], qr/target.*required/i, 'error mentions target';
+};
+
+subtest 'validate_config: Concourse passes with target and valid url' => sub {
+	my $p = Genesis::CI::Provider::Concourse->new(
+		type   => 'concourse',
+		target => 'my-ci',
+		url    => 'https://ci.example.com',
+	);
+	my @errors = $p->validate_config;
+	is scalar @errors, 0, 'no errors with target and valid https url';
+};
+
+subtest 'validate_config: Concourse rejects malformed url' => sub {
+	my $p = Genesis::CI::Provider::Concourse->new(
+		type   => 'concourse',
+		target => 'my-ci',
+		url    => 'not-a-url',
+	);
+	my @errors = $p->validate_config;
+	ok scalar @errors > 0, 'error returned for malformed url';
+	like $errors[0], qr/url.*http/i, 'error mentions url format';
+};
+
+subtest 'validate_config: GithubActions passes with valid repo' => sub {
+	my $p = Genesis::CI::Provider::GithubActions->new(
+		type => 'github-actions', repo => 'acme/deploy',
+	);
+	my @errors = $p->validate_config;
+	is scalar @errors, 0, 'no errors when repo is valid';
+};
+
+subtest 'validate_config: GithubActions fails without repo' => sub {
+	my $p = Genesis::CI::Provider::GithubActions->new(type => 'github-actions');
+	my @errors = $p->validate_config;
+	ok scalar @errors > 0, 'errors returned when repo missing';
+	like $errors[0], qr/repo.*required/i, 'error mentions repo';
+};
+
+subtest 'validate_config: GithubActions fails on bad repo format' => sub {
+	my $p = Genesis::CI::Provider::GithubActions->new(
+		type => 'github-actions', repo => 'noslash',
+	);
+	my @errors = $p->validate_config;
+	ok scalar @errors > 0, 'errors returned for bad repo format';
+	like $errors[0], qr/org.repo/i, 'error mentions org/repo format';
+};
+
+subtest 'Provider->new bails when validate_config returns errors' => sub {
+	# Concourse with no target should be rejected by the factory
+	eval { Genesis::CI::Provider->new(type => 'concourse') };
+	like $@, qr/Invalid CI provider configuration/i, 'factory bails on invalid config';
+	like $@, qr/target.*required/i, 'bail message includes field-level error';
+};
+
+subtest 'Provider->new accepts valid Concourse config' => sub {
+	my $p = Genesis::CI::Provider->new(type => 'concourse', target => 'prod');
+	isa_ok $p, 'Genesis::CI::Provider::Concourse', 'valid Concourse config accepted';
+};
+
+subtest 'Provider->new bails on invalid GithubActions config' => sub {
+	eval { Genesis::CI::Provider->new(type => 'github-actions') };
+	like $@, qr/Invalid CI provider configuration/i, 'factory bails on missing repo';
+};
+
+subtest 'Provider->new accepts valid GithubActions config' => sub {
+	my $p = Genesis::CI::Provider->new(type => 'github-actions', repo => 'org/repo');
+	isa_ok $p, 'Genesis::CI::Provider::GithubActions', 'valid GHA config accepted';
 };
 
 done_testing;

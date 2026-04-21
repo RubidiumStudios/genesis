@@ -15,18 +15,27 @@ sub new {
 
 	my $type = $config{type} || 'manual';
 
+	my $obj;
 	if ($type eq 'concourse') {
 		require Genesis::CI::Provider::Concourse;
-		return Genesis::CI::Provider::Concourse->new(%config);
+		$obj = Genesis::CI::Provider::Concourse->new(%config);
 	} elsif ($type eq 'github-actions') {
 		require Genesis::CI::Provider::GithubActions;
-		return Genesis::CI::Provider::GithubActions->new(%config);
+		$obj = Genesis::CI::Provider::GithubActions->new(%config);
 	} elsif ($type eq 'manual') {
 		require Genesis::CI::Provider::Manual;
-		return Genesis::CI::Provider::Manual->new(%config);
+		$obj = Genesis::CI::Provider::Manual->new(%config);
 	} else {
 		bail("Unknown CI provider type '%s'. Valid types: concourse, github-actions, manual", $type);
 	}
+
+	my @errors = $obj->validate_config;
+	bail(
+		"Invalid CI provider configuration for type '%s':\n%s",
+		$type, join("\n", map { "  - $_" } @errors)
+	) if @errors;
+
+	return $obj;
 }
 
 # }}}
@@ -154,6 +163,17 @@ sub config {
 # check_prereqs - returns 1 if toolchain is present, 0 + error() if not {{{
 sub check_prereqs {
 	return 1;
+}
+
+# }}}
+# validate_config - check stored config fields; returns list of error strings {{{
+#
+# Called by Provider->new after the subclass object is constructed.
+# Subclasses override this to assert that all required fields are present and
+# well-formed.  Returning an empty list means the config is valid.
+# No network calls should be made here — this is a fast, local check only.
+sub validate_config {
+	return ();
 }
 
 # }}}
