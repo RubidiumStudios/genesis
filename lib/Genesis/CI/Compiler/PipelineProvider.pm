@@ -306,7 +306,6 @@ EOF
 # }}}
 # }}}
 ### Shared Helper Methods {{{
-### Shared Helper Methods {{{
 
 # ast - get stored AST {{{
 sub ast {

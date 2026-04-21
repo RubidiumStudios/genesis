@@ -350,7 +350,7 @@ the generic pipeline and should not be accessed by providers directly.
   my $resources      = $ast->pipeline_resources;
   my $jobs           = $ast->jobs;
   my $groups         = $ast->groups;
-  my $dot            = $ast->graphviz;
+  my $dot            = $ast->mermaid;
   my $text           = $ast->description;
 
 =head1 SEE ALSO

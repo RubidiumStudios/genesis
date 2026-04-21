@@ -281,8 +281,10 @@ sub _apply_provider_overrides {
 		my $base_path = "$dir/override-base-${filename}";
 		open(my $fh, '>', $base_path)
 			or bail("Cannot write temporary override base %s: %s", $base_path, $!);
-		print $fh $content;
-		close $fh;
+		print $fh $content
+			or bail("Cannot write to temporary override base %s: %s", $base_path, $!);
+		close $fh
+			or bail("Cannot flush temporary override base %s: %s", $base_path, $!);
 
 		my ($merged_yaml, $rc) = run(
 			'spruce', 'merge', $base_path, $override_file

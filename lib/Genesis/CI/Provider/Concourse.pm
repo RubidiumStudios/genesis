@@ -85,12 +85,53 @@ sub new {
 	my ($class, %config) = @_;
 	$class = ref($class) || $class;
 	bless({
-		label    => 'Concourse',
-		target   => $config{target},
-		url      => $config{url},
-		team     => $config{team}     || DEFAULT_TEAM,
-		insecure => $config{insecure} ? 1 : 0,
+		label           => 'Concourse',
+		target          => $config{target},
+		url             => $config{url},
+		team            => $config{team}            || DEFAULT_TEAM,
+		insecure        => $config{insecure}        ? 1 : 0,
+		min_fly_version => $config{min_fly_version} || undef,
 	}, $class);
+}
+
+# }}}
+# check_prereqs - verify fly CLI is present and meets min version {{{
+sub check_prereqs {
+	my ($self) = @_;
+
+	my ($fly_path) = run({ stderr => 0 }, 'type -p fly');
+	chomp($fly_path //= '');
+	unless ($fly_path) {
+		error(
+			"Concourse CI provider requires the #C{fly} CLI but it was not found in PATH.\n".
+			"  Download it from your Concourse server's home page or:\n".
+			"    #C{<concourse-url>/api/v1/cli?arch=amd64&platform=<linux|darwin|windows>}"
+		);
+		return 0;
+	}
+
+	if ($self->{min_fly_version}) {
+		my ($ver_out) = run({ stderr => 0 }, 'fly --version');
+		chomp($ver_out //= '');
+		if ($ver_out && $ver_out =~ /^(\d+)\.(\d+)\.(\d+)/) {
+			my @got = ($1+0, $2+0, $3+0);
+			my @min = map { $_ + 0 } split(/\./, $self->{min_fly_version}, 3);
+			push @min, 0 while @min < 3;
+			for my $i (0..2) {
+				if ($got[$i] < ($min[$i]//0)) {
+					error(
+						"Concourse CI provider requires fly >= %s but found %s.\n".
+						"  Upgrade fly from your Concourse server.",
+						$self->{min_fly_version}, $ver_out
+					);
+					return 0;
+				}
+				last if $got[$i] > ($min[$i]//0);
+			}
+		}
+	}
+
+	return 1;
 }
 
 # }}}
