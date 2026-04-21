@@ -346,15 +346,18 @@ sub deploy {
 	bail("Cannot determine pipeline name — set ci.provider.pipeline_name or ensure deployment_type is set")
 		unless $pipeline_name;
 
-	# Pause/expose/dry-run: call-site override > provider_opts > defaults
-	my $dry_run = $opts{'dry-run'};
-	my $yes     = $opts{yes};
-	my $pause   = $opts{pause}
+	# Pause/expose/dry-run/insecure: call-site override > provider_opts > defaults
+	my $dry_run  = $opts{'dry-run'};
+	my $yes      = $opts{yes};
+	my $pause    = $opts{pause}
 		// $self->provider_option('pause')
 		// DEFAULT_PAUSE;
-	my $expose  = $opts{expose}
+	my $expose   = $opts{expose}
 		// $self->provider_option('expose')
 		// _yaml_bool(($self->{config}{pipeline} || {})->{public}, DEFAULT_EXPOSE);
+	my $insecure = $opts{insecure}
+		// $self->provider_option('insecure')
+		// DEFAULT_INSECURE;
 
 	my $yaml = $self->generate();
 
@@ -363,9 +366,11 @@ sub deploy {
 		return;
 	}
 
+	my $k_flag = $insecure ? ' -k' : '';
+
 	# Pause pipeline before updating (safe to do even when not found yet)
 	my ($out, $rc) = run(
-		'fly -t $1 pause-pipeline -p $2',
+		"fly${k_flag} -t \$1 pause-pipeline -p \$2",
 		$target, $pipeline_name
 	);
 	bail("Could not pause pipeline '%s': %s", $pipeline_name, $out)
@@ -376,13 +381,13 @@ sub deploy {
 	mkfile_or_fail("${dir}/pipeline.yml", $yaml);
 
 	# Upload pipeline
-	my $yes_flag = $yes ? '-n' : '';
+	my $yes_flag  = $yes ? ' -n' : '';
 	my $team_flag = " --team=$team";
 	run({
 		interactive => 1,
 		onfailure => "Could not upload pipeline $pipeline_name",
 	},
-		"fly -t \$1 set-pipeline${yes_flag}${team_flag} -p \$2 -c \$3/pipeline.yml",
+		"fly${k_flag} -t \$1 set-pipeline${yes_flag}${team_flag} -p \$2 -c \$3/pipeline.yml",
 		$target, $pipeline_name, $dir
 	);
 
@@ -392,7 +397,7 @@ sub deploy {
 			interactive => 1,
 			onfailure => "Could not unpause pipeline $pipeline_name",
 		},
-			'fly -t $1 unpause-pipeline -p $2',
+			"fly${k_flag} -t \$1 unpause-pipeline -p \$2",
 			$target, $pipeline_name
 		);
 	}
@@ -403,7 +408,7 @@ sub deploy {
 		interactive => 1,
 		onfailure => "Could not $action pipeline $pipeline_name",
 	},
-		"fly -t \$1 ${action}-pipeline -p \$2",
+		"fly${k_flag} -t \$1 ${action}-pipeline -p \$2",
 		$target, $pipeline_name
 	);
 
