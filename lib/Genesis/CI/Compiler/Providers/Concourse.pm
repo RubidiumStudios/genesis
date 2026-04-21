@@ -17,6 +17,7 @@ use constant {
 	DEFAULT_PIPELINE_NAME => undef,    # falls back to deployment_type from Top
 	DEFAULT_EXPOSE        => 0,
 	DEFAULT_PAUSE         => 0,
+	DEFAULT_INSECURE      => 0,
 };
 
 # }}}
@@ -101,6 +102,7 @@ sub cli_opts {
 		ci-pipeline-name=s
 		ci-pause
 		ci-expose
+		ci-insecure
 	/;
 }
 
@@ -134,6 +136,11 @@ sub cli_opts_help {
     --ci-expose  (optional, default: false)
         Run fly expose-pipeline after setting, making the pipeline publicly
         viewable without authentication.  Useful for open-source pipelines.
+
+    --ci-insecure  (optional, default: false)
+        Skip TLS certificate verification when communicating with Concourse.
+        Passes --skip-ssl-validation (-k) to all fly commands.  Use when the
+        Concourse server uses a self-signed or otherwise untrusted certificate.
 
 EOF
 }
@@ -175,6 +182,11 @@ sub provider_options_schema {
 			default     => DEFAULT_PAUSE,
 			description => 'Leave pipeline paused after fly set-pipeline',
 		},
+		insecure => {
+			type        => 'boolean',
+			default     => DEFAULT_INSECURE,
+			description => 'Skip TLS certificate verification (fly --skip-ssl-validation)',
+		},
 	};
 }
 
@@ -182,9 +194,10 @@ sub provider_options_schema {
 # provider_options_defaults - default values for all Concourse options {{{
 sub provider_options_defaults {
 	return {
-		team   => DEFAULT_TEAM,
-		expose => DEFAULT_EXPOSE,
-		pause  => DEFAULT_PAUSE,
+		team     => DEFAULT_TEAM,
+		expose   => DEFAULT_EXPOSE,
+		pause    => DEFAULT_PAUSE,
+		insecure => DEFAULT_INSECURE,
 	};
 }
 
@@ -199,18 +212,20 @@ sub describe_provider {
 	my $target    = $self->provider_option('target')        || '(not set)';
 	my $team      = $self->provider_option('team')          || DEFAULT_TEAM;
 	my $pipe_name = $self->provider_option('pipeline_name') || '(deployment type)';
-	my $expose    = $self->provider_option('expose') ? 'yes' : 'no';
-	my $paused    = $self->provider_option('pause')  ? 'yes' : 'no';
+	my $expose    = $self->provider_option('expose')    ? 'yes' : 'no';
+	my $paused    = $self->provider_option('pause')     ? 'yes' : 'no';
+	my $insecure  = $self->provider_option('insecure')  ? 'yes' : 'no';
 
 	return (
 		type     => 'concourse',
 		label    => 'Concourse',
-		extras   => [qw(Target Team Pipeline Expose PauseAfterSet)],
+		extras   => [qw(Target Team Pipeline Expose PauseAfterSet Insecure)],
 		Target        => $target,
 		Team          => $team,
 		Pipeline      => $pipe_name,
 		Expose        => $expose,
 		PauseAfterSet => $paused,
+		Insecure      => $insecure,
 		status   => 'ok',
 	);
 }
