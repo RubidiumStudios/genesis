@@ -74,7 +74,7 @@ sub create {
 	# Pipeline-aware repos require new environments to be created on the
 	# control branch so the topology is visible to pipeline tooling and
 	# the environment branch can be cut from the right point.
-	my $ci_configured = $top->config->has('ci.provider.type');
+	my $ci_configured = $top->ci_configured;
 	if ($ci_configured) {
 		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
@@ -99,7 +99,7 @@ sub create {
 	# Phase C: write pipeline metadata when CI provider is configured.
 	# Runs interactively when in a controlling terminal; honours --prior-env,
 	# --require-pr, and --manual flags for non-interactive (scripted) use.
-	if ($top->config->has('ci.provider.type')) {
+	if ($ci_configured) {
 		my $ci_type = $top->config->get('ci.provider.type') // 'unknown';
 		info(
 			"\n#G{Pipeline configuration} (ci provider: #C{%s})\n",
@@ -166,9 +166,9 @@ sub create {
 		# Entrypoints (no prior_env) can still carry manual: true.
 		if (length($prior_env // '') || $require_pr || $manual) {
 			my $pipeline_yaml = "  pipeline:\n";
-			$pipeline_yaml .= "    prior_env: $prior_env\n" if length($prior_env // '');
-			$pipeline_yaml .= "    require_pr: true\n"      if $require_pr;
-			$pipeline_yaml .= "    manual: true\n"          if $manual;
+			$pipeline_yaml .= "    prior_env:    $prior_env\n" if length($prior_env // '');
+			$pipeline_yaml .= "    require_pr:   true\n"       if $require_pr;
+			$pipeline_yaml .= "    manual:       true\n"       if $manual;
 
 			my $file     = $env->path($env->file);
 			my $contents = slurp($file);
@@ -228,6 +228,23 @@ sub create {
 				'git', 'branch', $name);
 			info "Environment branch #C{%s} created.", $name;
 		}
+	}
+
+	# Generate secrets.  Non-fatal — the env file, pipeline metadata, and
+	# git branch are already in place; secrets can be retried later with
+	# `genesis add-secrets` or will be generated at deploy time.
+	my $secrets_ok = eval { $env->add_secrets(verbose => 1, import => 1) };
+	if (!$secrets_ok) {
+		my $err = $@ || '';
+		$err =~ s/\s+$//;
+		warning(
+			"Secret generation incomplete for #C{%s}.%s\n".
+			"Run #C{genesis add-secrets '%s'} to retry, or secrets will be\n".
+			"generated at deploy time.",
+			$name,
+			$err ? "\n$err" : '',
+			$name
+		);
 	}
 
 	# let the user know

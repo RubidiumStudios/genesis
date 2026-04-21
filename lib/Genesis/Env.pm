@@ -351,7 +351,7 @@ sub create {
 		my $old_path = "${env_path}.old";
 		rename($env_path, $old_path)
 			or bail("Could not move existing %s to %s: %s", $env->{file}, "$env->{file}.old", $!);
-		info("Moved existing #C{%s} to #C{%s.old}", $env->{file}, $env->{file});
+		notice("\nMoved existing #C{%s} to #C{%s.old}", $env->{file}, $env->{file});
 	}
 
 	# Sanitize the vault descriptor, if present
@@ -480,11 +480,6 @@ sub create {
 		}
 	}
 
-	if (! $env->add_secrets(verbose=>1, import => 1)) {
-		$env->remove_secrets(all => 1, 'no-prompt' => 1);
-		unlink $env->file;
-		return undef;
-	}
 	return $env;
 }
 
@@ -5660,8 +5655,17 @@ sub _cap_yaml_file {
 	my $cap_file  = $self->workpath("fin.yml");
 
 	my $now = strftime(EXODUS_TIME_FORMAT, gmtime());
-	my $bosh_target = $self->use_create_env ? "~" : $self->bosh_env->{description};
-	my $bosh_exodus_path = $self->use_create_env ? "~" : $self->bosh->exodus_path;
+	my ($bosh_target, $bosh_exodus_path);
+	if ($self->use_create_env) {
+		$bosh_target = "~";
+		$bosh_exodus_path = "~";
+	} else {
+		$bosh_target = $self->bosh_env->{description};
+		# Prefer live director; fall back to bosh_env-derived path when
+		# the parent director hasn't been deployed yet.
+		my $bosh = eval { $self->bosh };
+		$bosh_exodus_path = $bosh ? $bosh->exodus_path : $self->bosh_env->{exodus_path};
+	}
 	mkfile_or_fail($cap_file, 0644, <<EOF);
 ---
 name: (( concat genesis.env "-$type" ))
@@ -5861,12 +5865,24 @@ sub _parse_bosh_env {
 	my ($name, $dep_type, $vault_url, $exodus_mount) =
 		($bosh_env_description) =~ m/^([^\/\@]+)(?:\/([^\@]+))?(?:@(?:(https?:\/\/[^\/]+)?(?:\/|$))?(.*))?$/;
 
+	# Synthesize the BOSH director's exodus path from parsed components.
+	# This allows callers to reference the path without needing a live
+	# director (e.g., during env creation before the parent is deployed).
+	my $mount = $exodus_mount;
+	unless ($mount) {
+		(my $sm = $self->secrets_mount) =~ s#/?$#/#;
+		$mount = "${sm}exodus/";
+	}
+	$mount =~ s#/?$#/#;
+	my $bosh_exodus_path = sprintf("%s%s/%s", $mount, $name, $dep_type || 'bosh');
+
 	return wantarray ? ($name, $dep_type, $vault_url, $exodus_mount) : {
-		name         => $name,
-		dep_type     => $dep_type,
-		vault_url    => $vault_url,
-		exodus_mount => $exodus_mount,
-		description  => $bosh_env_description,
+		name              => $name,
+		dep_type          => $dep_type,
+		vault_url         => $vault_url,
+		exodus_mount      => $exodus_mount,
+		exodus_path       => $bosh_exodus_path,
+		description       => $bosh_env_description,
 	};
 }
 
