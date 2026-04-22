@@ -2049,6 +2049,31 @@ define_command("pipeline-graph", {
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_graph');
 # }}}
+# genesis propagate - propagate control branch changes to environment branches {{{
+define_command("propagate", {
+	summary => "Propagate changes from the control branch to environment branches.",
+	usage   => "propagate [options]",
+	description =>
+		"Identifies files that have changed on the control branch since each ".
+		"environment branch was last synced, and copies them to the appropriate ".
+		"environment branches.  Walks the pipeline DAG in order so upstream ".
+		"environments are updated before downstream ones.\n\n".
+		"Each propagation commit records the control branch SHA it was sourced ".
+		"from, enabling deterministic tracking across the pipeline chain.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'dry-run|n' =>
+			"Show what would be propagated without making changes.",
+
+		'commit=s' =>
+			"Control branch commit SHA to propagate from.  Defaults to ".
+			"current HEAD when on the control branch, or the SHA recorded ".
+			"in the last propagation commit when on an environment branch.",
+	],
+}, 'Genesis::Commands::Pipelines::propagate');
+# }}}
 # genesis pipeline-describe - human-readable pipeline description {{{
 define_command("pipeline-describe", {
 	summary => "Describe the pipeline in human-readable form.",

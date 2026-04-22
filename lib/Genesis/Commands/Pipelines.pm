@@ -104,6 +104,207 @@ sub apply {
 }
 
 # }}}
+# propagate - cascade control branch changes one level down the DAG {{{
+sub propagate {
+
+	my $opts    = get_options;
+	my $dry_run = $opts->{'dry-run'};
+	my $top     = Genesis::Top->new('.');
+
+	bail("CI is not configured for this repository.")
+		unless $top->ci_configured;
+
+	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+
+	# Determine current branch
+	my ($current_branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
+	chomp $current_branch if defined $current_branch;
+	bail("Cannot propagate from a detached HEAD.")
+		unless defined $current_branch;
+
+	# Build the DAG
+	my $env_dir = $top->path;
+	require Genesis::CI::Compiler::ASTBuilder;
+	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
+		top     => $top,
+		env_dir => $env_dir,
+	);
+	my ($nodes, $edges) = $builder->_build_from_env_files($env_dir);
+
+	bail("No environments with pipeline metadata found.")
+		unless %$nodes;
+
+	my %children;
+	my %has_parent;
+	for my $edge (@$edges) {
+		push @{$children{$edge->{from}}}, $edge->{to};
+		$has_parent{$edge->{to}} = 1;
+	}
+
+	# Determine the control SHA and target environments based on
+	# where we are in the DAG.
+	my ($control_sha_full, $control_sha_short, @targets);
+
+	if ($current_branch eq $control) {
+		# On control: propagate to root envs (entry points)
+		$control_sha_full = $opts->{commit};
+		unless ($control_sha_full) {
+			($control_sha_full) = run({}, 'git rev-parse HEAD');
+			chomp $control_sha_full;
+		}
+		($control_sha_short) = run({}, 'git rev-parse --short', $control_sha_full);
+		chomp $control_sha_short;
+
+		@targets = sort grep { !$has_parent{$_} } keys %$nodes;
+		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}", $control, $control_sha_short;
+
+	} elsif ($nodes->{$current_branch}) {
+		# On an env branch: propagate to this env's children using the
+		# control SHA from the last propagation commit or merge-base.
+		my $manual_commits;
+		($control_sha_full, $manual_commits) = _resolve_propagation_base($current_branch);
+		bail(
+			"Cannot determine propagation base for branch #C{%s}.\n".
+			"Run #C{genesis propagate} from the #C{%s} branch first.",
+			$current_branch, $control
+		) unless $control_sha_full;
+
+		($control_sha_short) = run({}, 'git rev-parse --short', $control_sha_full);
+		chomp $control_sha_short;
+
+		@targets = sort @{$children{$current_branch} || []};
+		bail("Environment #C{%s} has no downstream environments.", $current_branch)
+			unless @targets;
+
+		info "\n#G{Propagating from} #C{%s} #G{(control@}#C{%s}#G{)}", $current_branch, $control_sha_short;
+	} else {
+		bail(
+			"Branch #C{%s} is not the control branch or a known environment branch.",
+			$current_branch
+		);
+	}
+
+	info "";
+
+	# Propagate to each target
+	my $propagated = 0;
+	for my $env_name (@targets) {
+		# Check if env branch exists
+		my $exists = run({ passfail => 1 },
+			'git', 'rev-parse', '--verify', $env_name);
+		unless ($exists) {
+			warning("Branch #C{%s} does not exist — skipping.", $env_name);
+			next;
+		}
+
+		# Load the env to get its dependency files
+		my $env = eval { $top->load_env($env_name) };
+		unless ($env) {
+			warning("Could not load environment #C{%s} — skipping.", $env_name);
+			next;
+		}
+
+		my @dep_files = $env->propagation_files;
+		next unless @dep_files;
+
+		# Diff: what changed between this env branch and control@SHA.
+		# Run from git toplevel so pathspecs resolve correctly for subdir repos.
+		my ($git_root) = run({}, 'git rev-parse --show-toplevel');
+		chomp $git_root;
+		my ($git_prefix) = run({}, 'git rev-parse --show-prefix');
+		chomp $git_prefix;
+		my @git_dep_files = map { "${git_prefix}$_" } @dep_files;
+		my ($diff_out) = run({ dir => $git_root },
+			'git', 'diff', '--name-only', "$env_name", $control_sha_full, '--', @git_dep_files
+		);
+		my @changed = grep { /\S/ } split /\n/, ($diff_out || '');
+		next unless @changed;
+
+		if ($dry_run) {
+			info "  #C{%s}: %d file%s to propagate", $env_name, scalar(@changed), @changed == 1 ? '' : 's';
+			info "    %s", $_ for @changed;
+			$propagated++;
+		} else {
+			# Checkout env branch, update files from control@SHA, commit
+			run({ onfailure => "Failed to checkout $env_name" },
+				'git', 'checkout', $env_name);
+
+			for my $file (@changed) {
+				my $dir = $file;
+				$dir =~ s{/[^/]+$}{};
+				mkdir_or_fail($dir) if $dir ne $file && !-d $dir;
+				run({ onfailure => "Failed to checkout $file from control\@$control_sha_short" },
+					'git', 'checkout', $control_sha_full, '--', $file);
+			}
+
+			run({}, 'git', 'add', @changed);
+			my $msg = sprintf("[pipeline] control\@%s → %s", $control_sha_short, $env_name);
+			run({ onfailure => "Failed to commit propagation to $env_name" },
+				'git', 'commit', '-m', $msg);
+			info "  #G{%s}: propagated %d file%s", $env_name, scalar(@changed), @changed == 1 ? '' : 's';
+			$propagated++;
+		}
+	}
+
+	# Return to the branch we started on
+	unless ($dry_run) {
+		run({ onfailure => "Failed to return to $current_branch" },
+			'git', 'checkout', $current_branch);
+	}
+
+	if ($propagated) {
+		info "\n#G{Done.} %s %d environment%s.",
+			$dry_run ? "Would propagate to" : "Propagated to",
+			$propagated, $propagated == 1 ? '' : 's';
+	} else {
+		info "\n#Yi{No changes to propagate.}";
+	}
+	exit 0;
+}
+
+# _resolve_propagation_base - find the control SHA to diff from for an env branch {{{
+#
+# Resolution order:
+#   1. Scan commit log for most recent [pipeline] control@<sha> → use that
+#      (warns if it's not the HEAD commit, meaning manual commits were added)
+#   2. No propagation commit found → branch was spawned from control, use
+#      git merge-base as the starting point
+#
+# Returns: ($control_sha_full, $manual_commits_on_top)
+sub _resolve_propagation_base {
+	my ($branch) = @_;
+	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+
+	# Scan log for propagation markers
+	my ($log) = run({}, 'git', 'log', '--format=%H %s', $branch);
+	if ($log) {
+		my $depth = 0;
+		for my $line (split /\n/, $log) {
+			if ($line =~ /^[0-9a-f]+ \[pipeline\] control\@([0-9a-f]+)/) {
+				my ($full) = run({}, 'git', 'rev-parse', $1);
+				chomp $full if defined $full;
+				if ($depth > 0) {
+					warning(
+						"Branch #C{%s} has %d manual commit%s on top of the last propagation.",
+						$branch, $depth, $depth == 1 ? '' : 's'
+					);
+				}
+				return ($full, $depth);
+			}
+			$depth++;
+		}
+	}
+
+	# No propagation commit — use merge-base with control
+	my ($merge_base) = run({}, 'git', 'merge-base', $control, $branch);
+	chomp $merge_base if defined $merge_base;
+	return ($merge_base, 0) if $merge_base;
+
+	return (undef, 0);
+}
+# }}}
+
+# }}}
 # pipeline_graph - write pipeline.md with Mermaid flowchart {{{
 sub pipeline_graph {
 	my ($layout) = @_;

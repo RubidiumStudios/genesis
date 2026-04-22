@@ -1189,6 +1189,97 @@ sub actual_environment_files {
 }
 
 # }}}
+# propagation_files - list all files this environment depends on for pipeline propagation {{{
+#
+# Returns a list of repo-relative paths that should be tracked when
+# propagating changes from the control branch to this environment's
+# branch.  Includes: env file hierarchy, kit archive (or dev/),
+# .genesis/config, and any reaction scripts referenced in the env.
+sub propagation_files {
+	my ($self) = @_;
+	my %files;
+
+	# Env file hierarchy (ancestors + self)
+	for my $f ($self->actual_environment_files) {
+		$f =~ s{^\./}{};
+		$files{$f} = 1;
+	}
+
+	# Kit source (compiled tarball or dev directory)
+	if ($self->kit->is_dev) {
+		$files{'dev/'} = 1;
+	} else {
+		my $source = $self->kit->{source};
+		if ($source) {
+			my $rel = $source;
+			$rel =~ s{^\Q${\$self->path}\E/?}{};
+			$files{$rel} = 1;
+		}
+	}
+
+	# Config
+	$files{'.genesis/config'} = 1;
+
+	# Reaction scripts
+	my $reactions = $self->lookup('genesis.reactions', {});
+	if (ref($reactions) eq 'HASH') {
+		for my $phase (values %$reactions) {
+			next unless ref($phase) eq 'ARRAY';
+			for my $action (@$phase) {
+				next unless ref($action) eq 'HASH' && $action->{script};
+				$files{"bin/$action->{script}"} = 1;
+			}
+		}
+	}
+
+	return sort keys %files;
+}
+
+# }}}
+# propagation_diff - files that changed between this env branch and a control commit {{{
+#
+# Compares this environment's branch against a target commit on the
+# control branch, filtered to only files this env depends on.
+# Returns a list of repo-relative paths that need propagating.
+#
+# The target_sha is embedded in the propagation commit message so
+# downstream environments can trace which control state they deployed.
+sub propagation_diff {
+	my ($self, $target_sha) = @_;
+	$target_sha ||= 'control';
+
+	my @dep_files = $self->propagation_files;
+	return () unless @dep_files;
+
+	my $env_branch = $self->name;
+	my ($diff_out, $rc) = run(
+		{ passfail => 1 },
+		'git', 'diff', '--name-only', "$env_branch..$target_sha", '--', @dep_files
+	);
+	return () if $rc || !$diff_out;
+
+	return grep { /\S/ } split /\n/, $diff_out;
+}
+
+# }}}
+# last_propagated_sha - extract the control SHA from the last propagation commit {{{
+sub last_propagated_sha {
+	my ($self) = @_;
+	my ($log, $rc) = run(
+		{ passfail => 1 },
+		'git', 'log', '--format=%s', $self->name, '--', '.'
+	);
+	return undef if $rc || !$log;
+
+	for my $line (split /\n/, $log) {
+		if ($line =~ /control\@([0-9a-f]+)/) {
+			return $1;
+		}
+	}
+	return undef;
+}
+
+# }}}
 # relate - get hierarchal file relationships with another environment {{{
 sub relate {
 	my ($self, $them, $common_base, $unique_base) = @_;
