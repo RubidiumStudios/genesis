@@ -109,9 +109,26 @@ sub pipeline_graph {
 	my ($layout) = @_;
 	option_defaults(config => 'ci.yml');
 
-	my $opts     = get_options;
+	my $opts = get_options;
+	my $top  = Genesis::Top->new('.');
+
+	# For env-file topology, build the DAG directly.
+	if ($top->ci_configured) {
+		my $env_dir = $top->path;
+		require Genesis::CI::Compiler::ASTBuilder;
+		my $builder = Genesis::CI::Compiler::ASTBuilder->new(
+			top     => $top,
+			env_dir => $env_dir,
+		);
+		my ($nodes, $edges) = $builder->_build_from_env_files($env_dir);
+		my $md = _topology_to_mermaid_md($top, $nodes, $edges);
+		mkfile_or_fail('pipeline.md', $md);
+		info("Wrote #C{pipeline.md}");
+		exit 0;
+	}
+
+	# Full compiler path for legacy/multi-file configurations
 	my $platform = $opts->{platform} || 'concourse';
-	my $top      = Genesis::Top->new('.');
 	my $result   = _compile_pipeline($top, $platform);
 	my $ast      = $result->{ast};
 	my $provider = $result->{provider};
@@ -132,8 +149,24 @@ sub pipeline_describe {
 	option_defaults(config => 'ci.yml');
 
 	my $opts     = get_options;
-	my $platform = $opts->{platform} || 'concourse';
 	my $top      = Genesis::Top->new('.');
+
+	# For env-file topology (manual provider or genesis-config CI),
+	# build the DAG directly without the full compiler/provider chain.
+	if ($top->ci_configured) {
+		my $env_dir = $top->path;
+		require Genesis::CI::Compiler::ASTBuilder;
+		my $builder = Genesis::CI::Compiler::ASTBuilder->new(
+			top     => $top,
+			env_dir => $env_dir,
+		);
+		my ($nodes, $edges) = $builder->_build_from_env_files($env_dir);
+		_describe_topology($top, $nodes, $edges);
+		exit 0;
+	}
+
+	# Full compiler path for legacy/multi-file configurations
+	my $platform = $opts->{platform} || 'concourse';
 	my $result   = _compile_pipeline($top, $platform);
 	my $ast      = $result->{ast};
 	my $provider = $result->{provider};
@@ -815,6 +848,89 @@ sub _ast_to_mermaid_md {
 
 	my $mermaid = join("\n", @lines) . "\n";
 	return "# Pipeline: $name\n\n\`\`\`mermaid\n${mermaid}\`\`\`\n";
+}
+
+# }}}
+# _topology_to_mermaid_md - mermaid flowchart from nodes+edges {{{
+sub _topology_to_mermaid_md {
+	my ($top, $nodes, $edges) = @_;
+
+	my $name  = $top->config->get('ci.name') || $top->type;
+	my @lines = (
+		"---",
+		"config:",
+		"  flowchart:",
+		"    useMaxWidth: false",
+		"---",
+		"flowchart TD",
+	);
+
+	# Declare nodes with explicit labels so names aren't truncated
+	my %declared;
+	for my $n (sort keys %$nodes) {
+		my $label = $nodes->{$n}{alias} || $n;
+		(my $id = $n) =~ s/[^a-zA-Z0-9_]/_/g;
+		push @lines, "  ${id}[\"$label\"]";
+		$declared{$n} = $id;
+	}
+
+	for my $edge (@$edges) {
+		push @lines, "  $declared{$edge->{from}} --> $declared{$edge->{to}}";
+	}
+
+	my $mermaid = join("\n", @lines) . "\n";
+	return "# Pipeline: $name\n\n\`\`\`mermaid\n${mermaid}\`\`\`\n";
+}
+
+# }}}
+# _describe_topology - human-readable env-file topology description {{{
+sub _describe_topology {
+	my ($top, $nodes, $edges) = @_;
+
+	my $name = $top->config->get('ci.name') || $top->type;
+	my $provider_type = $top->config->get('ci.provider.type') || 'manual';
+	output "\n#G{Pipeline}: #C{%s}", $name;
+	output "  #Yi{Provider}: %s", $provider_type;
+	output "";
+
+	unless (%$nodes) {
+		output "#Yi{No environments with pipeline metadata found.}";
+		output "";
+		return;
+	}
+
+	# Build adjacency: parent → [children]
+	my %children;
+	my %has_parent;
+	for my $edge (@$edges) {
+		push @{$children{$edge->{from}}}, $edge->{to};
+		$has_parent{$edge->{to}} = 1;
+	}
+
+	# Roots are nodes with no incoming edge
+	my @roots = sort grep { !$has_parent{$_} } keys %$nodes;
+
+	output "#G{Environment progression}:";
+	output "";
+
+	my $print_tree;
+	$print_tree = sub {
+		my ($env, $indent) = @_;
+		my $node = $nodes->{$env};
+		my @flags;
+		push @flags, '#Y{manual}'     if $node->{manual};
+		push @flags, '#M{require_pr}' if $node->{require_pr};
+		my $flag_str = @flags ? '  (' . join(', ', @flags) . ')' : '';
+		output "%s#C{%s}%s", $indent, $env, $flag_str;
+		for my $child (sort @{$children{$env} || []}) {
+			$print_tree->($child, "$indent  ");
+		}
+	};
+
+	for my $root (@roots) {
+		$print_tree->($root, '  ');
+	}
+	output "";
 }
 
 # }}}
