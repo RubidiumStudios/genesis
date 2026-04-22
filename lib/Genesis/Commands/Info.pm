@@ -537,16 +537,20 @@ sub environments {
 		my %deployments_by_name;
 		if (scalar @repos) {
 			$root =~ s{/?$}{/};
+			my $root_display = $label eq '@current' ? '.'
+				: $label eq '@parent'  ? '..'
+				: $label =~ /^@/       ? humanize_path($root)
+				: $label;
 			if ($json) {
 				info(
 					"\nReading %s under deployment root #C{%s}",
 					$group_by eq 'env' ? "environments" : "repositories",
-					humanize_path($root, root_map => $root_map) =~ s{/?$}{/}r =~ s{>\e\[0m/$}{>\e\[0m}r
+					$root_display
 				);
 			} else {
 				info(
-					"\nDeployment root #C{%s} contains the following %s:",
-					humanize_path($root, root_map => $root_map) =~ s{/?$}{/}r =~ s{>\e\[0m/$}{>\e\[0m}r,
+					"\nDeployment root #C{%s} contains the following\n%s:\n",
+					$root_display,
 					$group_by eq 'env' ? "environments" : "repositories"
 				);
 			}
@@ -554,9 +558,18 @@ sub environments {
 			my ($i,$j) = (0,0);
 			for my $repo (@repos) {
 				__processing($i, scalar(@repos), $j) if ($show_details && ($group_by eq 'env' || $json));
-				my $top = Genesis::Top->new($repo, silent_vault_check => 1, allow_no_vault => 1);
+				my ($top, @envs);
+				eval {
+					$top = Genesis::Top->new($repo, silent_vault_check => 1, allow_no_vault => 1);
+					@envs = $top->envs;
+				};
+				if ($@) {
+					my $err = $@;
+					$err =~ s/\s+$//;
+					warning("Skipping #C{%s}: %s", basename($repo), $err);
+					next;
+				}
 				my $repo_label = basename($top->path);
-				my @envs = $top->envs; # Do the heavy lifting to determine which files are environments
 				@envs = grep {$_->name =~ qr($filter_env)} @envs if $filter_env;
 				__processing(++$i, scalar(@repos), $j) if ($show_details && ($group_by eq 'env' || $json));
 
