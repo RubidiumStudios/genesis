@@ -26,8 +26,9 @@ use File::Path qw/rmtree/;
 # 'genesis deploy' validates its working state.  Captured as a constant
 # (and a config key) so it can change without rippling through the
 # codebase; not currently exposed to end users.
-use constant DEFAULT_CONTROL_BRANCH => 'control';
-use constant LATEST_CONFIG_VERSION  => 3;
+use constant DEFAULT_CONTROL_BRANCH  => 'control';
+use constant CI_PIPELINE_CONTROL_KEY => 'control'; # key in pipeline.branches{} hash for the control branch
+use constant LATEST_CONFIG_VERSION   => 3;
 
 ### Config Section Delegation Registry {{{
 # Modules may register themselves as handlers for specific top-level keys in

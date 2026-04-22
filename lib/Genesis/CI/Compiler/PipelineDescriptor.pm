@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::Top ();
 use JSON::PP;
 
 ### Constructor {{{
@@ -324,7 +325,7 @@ sub _git_resource {
 
 	my $sc     = $ast->integrations->{source_control} || {};
 	my $uri    = $self->_git_uri($sc);
-	my $branch = $sc->{default_branch} || $ast->branches->{live} || 'main';
+	my $branch = $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main';
 
 	my $source = { uri => $uri, branch => $branch };
 
@@ -381,7 +382,7 @@ sub _env_resources {
 	my @resources;
 	my $sc   = $ast->integrations->{source_control} || {};
 	my $uri  = $self->_git_uri($sc);
-	my $br   = $sc->{default_branch} || $ast->branches->{live} || 'main';
+	my $br   = $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main';
 	my $root = $sc->{root} || '.';
 	my $pr   = ($root eq '.') ? '' : "$root/";
 
@@ -927,7 +928,7 @@ sub _task_config {
 		CACHE_DIR            => "$alias-cache",
 		OUT_DIR              => 'out/git',
 		WORKING_DIR          => "$alias-changes",
-		GIT_BRANCH           => $sc->{default_branch} || $ast->branches->{live} || 'main',
+		GIT_BRANCH           => $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main',
 		GIT_AUTHOR_NAME      => ($sc->{commit_author} ? $sc->{commit_author}{name}  : undef)
 			|| 'Concourse Bot',
 		GIT_AUTHOR_EMAIL     => ($sc->{commit_author} ? $sc->{commit_author}{email} : undef)
@@ -1001,7 +1002,7 @@ sub _cache_task_config {
 		CURRENT_ENV       => $env,
 		WORKING_DIR       => 'out/git',
 		OUT_DIR           => 'cache-out/git',
-		GIT_BRANCH        => $sc->{default_branch} || $ast->branches->{live} || 'main',
+		GIT_BRANCH        => $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main',
 		GIT_AUTHOR_NAME   => ($sc->{commit_author} ? $sc->{commit_author}{name}  : undef)
 			|| 'Concourse Bot',
 		GIT_AUTHOR_EMAIL  => ($sc->{commit_author} ? $sc->{commit_author}{email} : undef)

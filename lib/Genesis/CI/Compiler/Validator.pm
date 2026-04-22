@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::Top ();
 use JSON::PP;
 
 ### Constructor {{{
@@ -532,8 +533,8 @@ sub _validate_pipeline_section {
 
 	# Branches
 	if ($pipeline->{branches}) {
-		$self->_error("'pipeline.branches.live' is required")
-			unless $pipeline->{branches}{live};
+		$self->_error("'pipeline.branches." . Genesis::Top::CI_PIPELINE_CONTROL_KEY() . "' is required")
+			unless $pipeline->{branches}{Genesis::Top::CI_PIPELINE_CONTROL_KEY()};
 	}
 
 	# Workflows are optional — absent means topology is derived from env files

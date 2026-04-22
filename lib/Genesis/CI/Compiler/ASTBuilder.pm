@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::Top ();
 use Genesis::CI::Compiler::AST;
 use JSON::PP;
 
@@ -58,7 +59,7 @@ sub _build_from_legacy {
 
 	# Branches
 	my $branches = {
-		live          => $p->{git}{branch} || 'master',
+		Genesis::Top::CI_PIPELINE_CONTROL_KEY() => $p->{git}{branch} || 'master',
 		target_prefix => 'target/',
 	};
 
@@ -216,8 +217,8 @@ sub _build_from_multi_file {
 
 	# Branches
 	my $branches = $pipeline->{branches} || {
-		live          => 'main',
-		target_prefix => 'target/',
+		Genesis::Top::CI_PIPELINE_CONTROL_KEY() => 'main',
+		target_prefix                            => 'target/',
 	};
 
 	# Integrations
