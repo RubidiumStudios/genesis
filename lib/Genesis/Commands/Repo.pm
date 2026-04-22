@@ -82,13 +82,7 @@ sub _repo_init_validate {
 		"Cannot specify both --vault and --skip-vault."
 	) if $opts{vault} && $opts{'skip-vault'};
 
-	# CI provider options (--ci-provider, --ci-target, etc.) have been
-	# parsed by the framework's extended_handlers into the ci_provider
-	# slot.  We extract the opts hash here for quick flag checks (e.g.
-	# branch validation), but defer building the actual provider object
-	# until step 6 (after directory/kit validation passes) so the
-	# interactive wizard doesn't run if we're going to bail anyway.
-	my %ci_provider_opts = %{$opts{ci_provider} // {}};
+	my $with_ci = $opts{'with-ci'};
 
 	# --- 3. Gather data: validate local sources, detect git repo ---
 
@@ -168,7 +162,7 @@ sub _repo_init_validate {
 	# Without #C{--ci-provider}, no pipeline topology is being
 	# established, so the branch name is irrelevant at this point.
 	my $control_branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-	if ($use_subdir && $ci_provider_opts{'ci-provider'}) {
+	if ($use_subdir && $with_ci) {
 		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
 		chomp $branch if defined $branch;
 		if (!defined($branch) || $branch ne $control_branch) {
@@ -245,28 +239,8 @@ sub _repo_init_validate {
 		$vault_target = $vault->{name} if $vault;
 	}
 
-	# Build the CI provider object now that all preflight checks have
-	# passed.  If required flags (--ci-target, etc.) were omitted and
-	# we have a controlling terminal, fall back to the interactive
-	# wizard to collect them.
-	my $ci_provider_obj;
-	if ($ci_provider_opts{'ci-provider'}) {
-		$ci_provider_obj = eval { Genesis::CI::Provider->init(%ci_provider_opts) };
-		if ($@) {
-			if (in_controlling_terminal) {
-				$ci_provider_obj = eval {
-					Genesis::CI::Provider->new(type => $ci_provider_opts{'ci-provider'})
-						->interactive_wizard(undef, %ci_provider_opts);
-				};
-				bail("CI provider wizard failed: %s", $@) if $@;
-			} else {
-				bail("Could not initialize CI provider: %s", $@);
-			}
-		}
-
-		# Verify the provider's toolchain is available before we do any work
-		$ci_provider_obj->check_prereqs() or exit 86;
-	}
+	# --with-ci just sets a flag; provider details come later via
+	# `genesis repo config ci`.  No provider object needed at init time.
 
 	# --- 7. Store derived values and summarize intent ---
 
@@ -277,7 +251,7 @@ sub _repo_init_validate {
 		_target_path          => $target_path,
 		_kit_file             => $kit_file,
 		_kit_provider         => $kit_provider,
-		_ci_provider_obj      => $ci_provider_obj,
+		_with_ci              => $with_ci,
 		_use_subdir           => $use_subdir,
 		_vault_target         => $vault_target,
 		_replace_existing     => $replace_existing,
@@ -297,7 +271,7 @@ sub _repo_init_validate {
 	}
 	push @plan, "vault: #C{$vault_target}" if $vault_target;
 	push @plan, "vault: #Yi{deferred}" unless $vault_target;
-	push @plan, "ci provider: #C{" . $ci_provider_obj->label . "}" if $ci_provider_obj;
+	push @plan, "ci: #C{enabled} (manual provider)" if $with_ci;
 	push @plan, "subdirectory of enclosing git repo: #C{yes} (no separate .git, auto-detected)" if $use_subdir;
 	info "\nCreating #C{%s} deployment repository in #M{%s/}:", $name, $dir;
 	info "  %s", $_ for @plan;
@@ -325,7 +299,7 @@ sub _repo_init_execute {
 		$vault_target,     # vault target to configure, or undef to skip vault
 		$replace_existing, # whether to remove existing target directory if it exists
 		$linked_dev_kit,   # optional path to a local dev kit to link into the repo
-		$ci_provider_obj,  # optional Genesis::CI::Provider object (from validation)
+		$with_ci,          # enable CI pipeline support (manual provider)
 
 		# User provided options (validated but not altered)
 		$directory,        # optional custom directory name override
@@ -334,7 +308,7 @@ sub _repo_init_execute {
 		$reason,           # optional commit message override
 	) = get_options()->@{qw/
 		_name _dir _parent_dir _target_path _kit_file kit _kit_provider _use_subdir _vault_target
-		_replace_existing link-dev-kit _ci_provider_obj directory kits-path no-commit reason
+		_replace_existing link-dev-kit _with_ci directory kits-path no-commit reason
 	/};
 
 	# Remove existing directory if validation approved it
@@ -368,7 +342,7 @@ sub _repo_init_execute {
 	# Create the repo via Top->create (pass kit_provider if we already built one)
 	$create_opts{kit_provider} = $kit_provider if $kit_provider;
 	my $top = Genesis::Top->create($parent_dir, $name, %create_opts, kits_path => $kit_path);
-	$top->embed($ENV{GENESIS_CALLBACK_BIN} || $0) if $ci_provider_obj;
+	$top->embed($ENV{GENESIS_CALLBACK_BIN} || $0) if $with_ci;
 
 	my $root = $top->path;
 	my $human_root = humanize_path($root);
@@ -394,24 +368,21 @@ sub _repo_init_execute {
 			$kit_desc = "with an empty development kit in #C{$human_root/dev}";
 		}
 
-		# CI provider scaffold
-		if ($ci_provider_obj) {
-			_create_ci_scaffold($top, $ci_provider_obj);
+		# CI: write manual provider to config
+		if ($with_ci) {
+			_create_ci_scaffold($top, root => ($use_subdir ? $dir : '.'));
 		}
 
 		# Only create a new .git when we're not already sitting inside
 		# an enclosing git worktree; in subdir mode we share the
 		# parent's .git and just stage into its index.  In standalone
-		# mode, if the user is establishing pipeline topology
-		# (--ci-provider given), force the initial branch name to the
-		# control branch so the initial commit lands there instead of
-		# on whatever git's init.defaultBranch happens to be.  When
-		# no CI provider is being configured, let git choose its
-		# default branch -- pipeline topology is not relevant yet.
+		# mode, if --with-ci is set, force the initial branch name to
+		# the control branch so the initial commit lands there instead
+		# of whatever git's init.defaultBranch happens to be.
 		# #C{git symbolic-ref HEAD} works on all git versions, unlike
 		# #C{git init -b} which requires >= 2.28.
 		unless ($use_subdir) {
-			if ($ci_provider_obj) {
+			if ($with_ci) {
 				my $branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 				run({ onfailure => "Failed to initialize git in $human_root/" },
 					"git init && git symbolic-ref HEAD refs/heads/$branch");
@@ -503,7 +474,7 @@ sub _repo_init_execute {
 		human_root    => $human_root,
 		name          => $name,
 		kit_desc      => $kit_desc,
-		ci_provider   => $ci_provider_obj ? $ci_provider_obj->label : undef,
+		ci_provider   => $with_ci ? 'manual' : undef,
 		vault_skipped => $vault_target ? 0 : 1,
 		vault         => $vault_target,
 		submodule     => $use_subdir,
@@ -594,23 +565,24 @@ sub _select_vault_target {
 }
 
 sub _create_ci_scaffold {
-	my ($top, $provider) = @_;
+	my ($top, %opts) = @_;
 
-	# $provider may be a Genesis::CI::Provider object or a plain string (legacy).
-	my %provider_cfg = ref($provider) ? $provider->config() : (type => $provider);
+	my %provider_cfg;
+	if (ref($opts{provider})) {
+		%provider_cfg = $opts{provider}->config();
+	} else {
+		%provider_cfg = (type => $opts{provider} || 'manual');
+	}
 
-	$top->config->set('ci', {
+	my %ci = (
 		enabled  => Genesis::Config::TRUE,
 		provider => \%provider_cfg,
-		pipeline => {
-			name => $top->config->get('deployment_type'),
-		},
-	});
-	$top->config->save;
+		name     => $top->config->get('deployment_type'),
+	);
+	$ci{repo} = { root => $opts{root} } if $opts{root};
 
-	my $ci_dir = $top->path(".genesis/ci");
-	mkdir_or_fail($ci_dir);
-	mkfile_or_fail("$ci_dir/.keep", "");
+	$top->config->set('ci', \%ci);
+	$top->config->save;
 }
 
 

@@ -1282,12 +1282,14 @@ define_command("repo-init", {
 				"secrets provider.  You must configure one via #C{genesis secrets-provider} ".
 				"before creating environments.",
 
-			'ci-provider=s' =>
-				"CI provider for pipeline automation: 'concourse', 'github-actions', ".
-				"or 'manual'.  When specified, writes the ci: section to .genesis/config ".
-				"and generates the .genesis/ci/ scaffold.",
+			'with-ci' =>
+				"Enable CI pipeline support.  Sets up the control branch and ".
+				"configures the repo for branch-based pipeline topology.  ".
+				"Environments created with #C{genesis new} will be prompted ".
+				"for pipeline metadata (prior_env, gates).  Connect an ".
+				"automated provider later with #C{genesis repo config ci}.",
 		],
-		extended_handlers => ['Genesis::Kit::Provider', 'Genesis::CI::Provider'],
+		extended_handlers => ['Genesis::Kit::Provider'],
 		arguments => [
 			"name?" =>
 				"If the name argument is not specified, it will default to the same ".

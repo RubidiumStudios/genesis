@@ -1225,10 +1225,11 @@ sub _validate_config {
 		my $ci_yml = $self->path('ci.yml');
 		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
 			bail(
-				"Legacy CI configuration detected at #C{ci.yml}.\n".
+				"Legacy CI configuration detected at #C{%s}.\n".
 				"Pipeline support requires a v3 config.  Please run:\n\n".
 				"  genesis repo-init --upgrade\n\n".
-				"to migrate your CI configuration into the v3 config format."
+				"to migrate your CI configuration into the v3 config format.",
+				$ci_yml
 			);
 		}
 
@@ -1248,15 +1249,17 @@ sub _validate_config {
 		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
 			if ($self->config->get('ci.enabled') && $self->config->has('ci.provider.type')) {
 				bail(
-					"Legacy #C{ci.yml} conflicts with the v3 CI configuration.\n".
-					"Remove #C{ci.yml} — CI is already configured in #C{.genesis/config}."
+					"Legacy #C{%s} conflicts with the v3 CI configuration.\n".
+					"Remove it — CI is already configured in #C{.genesis/config}.",
+					$ci_yml
 				);
 			} else {
 				bail(
-					"Legacy CI configuration detected at #C{ci.yml}.\n".
+					"Legacy CI configuration detected at #C{%s}.\n".
 					"Pipeline support requires migrating this into the v3 config.  Please run:\n\n".
 					"  genesis repo-init --upgrade\n\n".
-					"to migrate your CI configuration into the v3 config format."
+					"to migrate your CI configuration into the v3 config format.",
+					$ci_yml
 				);
 			}
 		}
@@ -1452,11 +1455,12 @@ sub _repo_config_schema {
 						insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS verification'},
 					}
 				},
-				pipeline => {
+				name => {type => 'string', description => 'Pipeline name (defaults to deployment_type)'},
+				repo => {
 					type        => 'hash',
-					description => 'Pipeline generation settings',
+					description => 'Repository layout settings',
 					schema => {
-						name => {type => 'string', description => 'Pipeline name (defaults to deployment_type)'},
+						root => {type => 'string', default => '.', description => 'Path to deployment root within the git repo'},
 					}
 				},
 			}

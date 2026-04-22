@@ -292,7 +292,7 @@ subtest 'v3 config validates with CI enabled and provider' => sub {
 	my $dir = make_v3_repo(workdir("v3-enabled"), ci => {
 		enabled  => 'true',
 		provider => { type => 'concourse', target => 'pipes/lmelt', url => 'https://pipes.example.com', team => 'lmelt' },
-		pipeline => { name => 'bosh' },
+		name => 'bosh',
 	});
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
@@ -300,7 +300,7 @@ subtest 'v3 config validates with CI enabled and provider' => sub {
 	ok $top->ci_configured, "ci_configured is true";
 	is $top->config->get('ci.provider.type'), 'concourse', "provider type is concourse";
 	is $top->config->get('ci.provider.target'), 'pipes/lmelt', "provider target correct";
-	is $top->config->get('ci.pipeline.name'), 'bosh', "pipeline name correct";
+	is $top->config->get('ci.name'), 'bosh', "ci name correct";
 };
 
 subtest 'v3 config bails when enabled but no provider' => sub {
