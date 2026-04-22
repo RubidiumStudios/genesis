@@ -195,10 +195,13 @@ sub validate_config_section {
 	bail("'ci' configuration in .genesis/config must be a hash")
 		unless ref($data) eq 'HASH';
 
-	# Validate ci.provider section against the provider's own schema
+	# Validate ci.provider section against the provider's own schema.
+	# The 'manual' provider has no compiler class — skip validation.
 	if (my $provider_data = $data->{provider}) {
 		bail("'ci.provider' must be a hash")
 			unless ref($provider_data) eq 'HASH';
+		# The 'manual' provider has no compiler class — skip validation.
+		return if ($provider_data->{type} || '') eq 'manual';
 
 		my $type = $provider_data->{type};
 		bail("'ci.provider.type' is required") unless $type;
