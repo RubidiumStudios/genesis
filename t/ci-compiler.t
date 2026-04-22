@@ -2797,7 +2797,7 @@ subtest 'Validator - pipeline section with metadata but no workflows is valid' =
 	my $v = Genesis::CI::Compiler::Validator->new();
 	$v->validate({
 		_source_format => 'genesis-config',
-		pipeline       => { name => 'cf', branches => { propagation => 'push' } },
+		pipeline       => { name => 'cf', branches => { live => 'main', propagation => 'push' } },
 		integrations   => {
 			vault          => { url => 'https://vault.example.com' },
 			source_control => { provider => 'github', repository => 'org/repo' },
