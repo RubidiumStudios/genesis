@@ -163,6 +163,10 @@ sub provider_options_schema {
 			type        => 'string',
 			description => 'Fly target alias (fly login -t <target>)',
 		},
+		url => {
+			type        => 'string',
+			description => 'Concourse API URL (informational; used by fly login)',
+		},
 		team => {
 			type        => 'string',
 			default     => DEFAULT_TEAM,
