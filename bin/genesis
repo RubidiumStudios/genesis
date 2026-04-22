@@ -1278,9 +1278,14 @@ define_command("repo-init", {
 				"subdirectory; use with care.",
 
 			'skip-vault' =>
-				"Defer vault configuration. The repo will be created without a ".
-				"secrets provider. You must configure one via #C{genesis secrets-provider} ".
+				"Defer vault configuration.  The repo will be created without a ".
+				"secrets provider.  You must configure one via #C{genesis secrets-provider} ".
 				"before creating environments.",
+
+			'ci-provider=s' =>
+				"CI provider for pipeline automation: 'concourse', 'github-actions', ".
+				"or 'manual'.  When specified, writes the ci: section to .genesis/config ".
+				"and generates the .genesis/ci/ scaffold.",
 		],
 		extended_handlers => ['Genesis::Kit::Provider', 'Genesis::CI::Provider'],
 		arguments => [
