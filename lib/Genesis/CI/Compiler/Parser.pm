@@ -130,10 +130,16 @@ sub _parse_genesis_config {
 
 	$parsed{pipeline}        = $data->{pipeline}        || {};
 	$parsed{targets}         = $data->{targets}         || {};
-	$parsed{integrations}    = $data->{integrations}    || {};
 	$parsed{scripts}         = $data->{scripts}         || {};
 	$parsed{provider}        = $data->{provider}        || {};
 	$parsed{provider_config} = $data->{provider_config} || {};
+
+	# Accept both nested (ci.integrations.*) and flat (ci.vault:, ci.source_control:) formats.
+	# Flat keys win only if the nested key is absent so explicit ci.integrations: always takes precedence.
+	my %integ = %{ $data->{integrations} || {} };
+	$integ{vault}          //= $data->{vault}          if $data->{vault}          && !$integ{vault};
+	$integ{source_control} //= $data->{source_control} if $data->{source_control} && !$integ{source_control};
+	$parsed{integrations} = \%integ;
 
 	# When no pipeline section is provided, workflow topology is derived from
 	# genesis.pipeline.* keys in environment YAML files (same as multi-file

@@ -2734,6 +2734,93 @@ subtest 'PipelineProvider - provider_config keeps boolean false when non-default
 ### validate_config_section: source_control must be a hash
 ### ============================================================ ###
 
+### ============================================================ ###
+### Parser: flat-format vault/source_control normalization
+### ============================================================ ###
+
+subtest 'Parser - genesis-config: flat vault/source_control lifted into integrations' => sub {
+	my $flat_ci = {
+		targets => {
+			sandbox => { type => 'bosh-director', connection => { url => 'https://bosh' } },
+		},
+		vault => {
+			url  => 'https://vault.example.com',
+			auth => { role_id => { secret_ref => 'secret/ci:role_id' } },
+		},
+		source_control => {
+			provider   => 'github',
+			repository => 'org/repo',
+		},
+		pipeline => {},
+	};
+
+	my $top = MockTop->new(config => MockConfig->new(ci => $flat_ci), base => '/repo');
+	my $parser = Genesis::CI::Compiler::Parser->new(top => $top);
+	my $parsed = eval { $parser->parse() };
+	ok !$@, "flat-format config parses without error" or diag $@;
+
+	ok ref($parsed->{integrations}) eq 'HASH', "integrations is a hash";
+	ok $parsed->{integrations}{vault},
+		"ci.vault lifted into integrations.vault";
+	is $parsed->{integrations}{vault}{url}, 'https://vault.example.com',
+		"vault url preserved";
+	ok $parsed->{integrations}{source_control},
+		"ci.source_control lifted into integrations.source_control";
+	is $parsed->{integrations}{source_control}{provider}, 'github',
+		"source_control provider preserved";
+};
+
+subtest 'Parser - genesis-config: nested integrations.* takes precedence over flat' => sub {
+	my $mixed_ci = {
+		targets       => { sandbox => { type => 'bosh-director', connection => { url => 'u' } } },
+		vault         => { url => 'https://flat-vault.example.com' },   # flat — should be ignored
+		integrations  => {
+			vault          => { url => 'https://nested-vault.example.com' },  # nested wins
+			source_control => { provider => 'github', repository => 'org/repo' },
+		},
+		pipeline => {},
+	};
+
+	my $top = MockTop->new(config => MockConfig->new(ci => $mixed_ci), base => '/repo');
+	my $parser = Genesis::CI::Compiler::Parser->new(top => $top);
+	my $parsed = eval { $parser->parse() };
+	ok !$@, "mixed flat+nested parses without error" or diag $@;
+	is $parsed->{integrations}{vault}{url}, 'https://nested-vault.example.com',
+		"nested integrations.vault takes precedence over flat ci.vault";
+};
+
+### ============================================================ ###
+### Validator: workflows optional in pipeline section
+### ============================================================ ###
+
+subtest 'Validator - pipeline section with metadata but no workflows is valid' => sub {
+	my $v = Genesis::CI::Compiler::Validator->new();
+	$v->validate({
+		_source_format => 'genesis-config',
+		pipeline       => { name => 'cf', branches => { propagation => 'push' } },
+		integrations   => {
+			vault          => { url => 'https://vault.example.com' },
+			source_control => { provider => 'github', repository => 'org/repo' },
+		},
+		targets => {
+			sandbox => { type => 'bosh-director', connection => { url => 'https://bosh' } },
+		},
+	});
+	ok !$v->has_errors,
+		"pipeline with name/branches but no workflows passes validation (env-file topology)"
+		or diag join("\n", @{$v->errors});
+};
+
+subtest 'Validator - validate_config_section: accepts flat-format source_control' => sub {
+	my $flat = {
+		targets        => { sandbox => { type => 'bosh-director', connection => { url => 'u' } } },
+		source_control => { provider => 'github', repository => 'org/repo' },
+		# no integrations: key at all
+	};
+	eval { Genesis::CI::Compiler->validate_config_section($flat, undef) };
+	ok !$@, "flat ci.source_control accepted by validate_config_section" or diag $@;
+};
+
 subtest 'Compiler - validate_config_section: rejects scalar source_control' => sub {
 	my $bad = {
 		%$_ci_data,

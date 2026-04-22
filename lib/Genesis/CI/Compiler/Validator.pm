@@ -526,23 +526,21 @@ sub _validate_pipeline_section {
 
 	# Metadata
 	if ($pipeline->{metadata}) {
-		$self->_error("'metadata.name' is required")
+		$self->_error("'pipeline.metadata.name' is required")
 			unless $pipeline->{metadata}{name};
 	}
 
 	# Branches
 	if ($pipeline->{branches}) {
-		$self->_error("'branches.live' is required")
+		$self->_error("'pipeline.branches.live' is required")
 			unless $pipeline->{branches}{live};
 	}
 
-	# Workflows
+	# Workflows are optional — absent means topology is derived from env files
 	if ($pipeline->{workflows}) {
 		for my $wf_name (keys %{$pipeline->{workflows}}) {
 			$self->_validate_workflow($wf_name, $pipeline->{workflows}{$wf_name});
 		}
-	} else {
-		$self->_error("'workflows' section is required in pipeline.yml");
 	}
 }
 
@@ -648,20 +646,20 @@ sub _validate_integrations_section {
 	my ($self, $integrations) = @_;
 
 	unless ($integrations && ref($integrations) eq 'HASH') {
-		$self->_error("Invalid or empty integrations.yml");
+		$self->_error("'integrations' section is missing or invalid");
 		return;
 	}
 
 	# Vault is required
 	unless ($integrations->{vault}) {
-		$self->_error("'vault' section is required in integrations.yml");
+		$self->_error("'integrations.vault' is required (set ci.integrations.vault or ci.vault)");
 	} elsif (!$integrations->{vault}{url}) {
-		$self->_error("'vault.url' is required in integrations.yml");
+		$self->_error("'integrations.vault.url' is required");
 	}
 
 	# Source control is required
 	unless ($integrations->{source_control}) {
-		$self->_error("'source_control' section is required in integrations.yml");
+		$self->_error("'integrations.source_control' is required (set ci.integrations.source_control or ci.source_control)");
 	}
 }
 
