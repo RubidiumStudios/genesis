@@ -48,7 +48,7 @@ ok !$@, "loaded Concourse provider" or diag $@;
 subtest 'AST - construction and accessors' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata     => { name => 'test-pipe', version => '2.0', source => 'modern' },
-		branches     => { live => 'main', target_prefix => 'target/' },
+		branches     => { control => 'main', target_prefix => 'target/' },
 		integrations => {
 			vault => { url => 'https://vault.example.com' },
 			source_control => {
@@ -88,7 +88,7 @@ subtest 'AST - construction and accessors' => sub {
 
 	# Accessors
 	is $ast->metadata->{name}, 'test-pipe', "metadata name accessor works";
-	is $ast->branches->{live}, 'main', "branches accessor works";
+	is $ast->branches->{control}, 'main', "branches accessor works";
 	is $ast->integrations->{vault}{url}, 'https://vault.example.com', "integrations accessor works";
 	is $ast->configuration->{public}, 1, "configuration accessor works";
 
@@ -326,7 +326,7 @@ subtest 'ASTBuilder - legacy format' => sub {
 	is $ast->metadata->{name}, 'my-legacy-pipeline', "legacy pipeline name preserved";
 	is $ast->metadata->{source}, 'legacy', "source marked as legacy";
 	is $ast->metadata->{source_file}, 'ci.yml', "source_file preserved";
-	is $ast->branches->{live}, 'master', "branch preserved from legacy git.branch";
+	is $ast->branches->{control}, 'master', "branch preserved from legacy git.branch";
 	ok $ast->provider_config->{concourse}{_legacy_pipeline_raw}, "legacy raw data preserved in provider_config";
 };
 
@@ -341,7 +341,7 @@ subtest 'ASTBuilder - modern format' => sub {
 				version => '2.0',
 			},
 			branches => {
-				live => 'main',
+				control => 'main',
 				target_prefix => 'deploy/',
 			},
 			workflows => {
@@ -374,7 +374,7 @@ subtest 'ASTBuilder - modern format' => sub {
 	my $ast = $builder->build($parsed, $scripts);
 	isa_ok $ast, 'Genesis::CI::Compiler::AST', "build returns an AST for modern format";
 	is $ast->metadata->{name}, 'modern-pipeline', "modern metadata preserved";
-	is $ast->branches->{live}, 'main', "branches preserved from modern format";
+	is $ast->branches->{control}, 'main', "branches preserved from modern format";
 
 	# Workflows should have been processed into graph form
 	my $wf = $ast->workflows->{deploy};
@@ -399,7 +399,7 @@ subtest 'ASTBuilder - modern format populates generic fields' => sub {
 		_source_format => 'multi-file',
 		pipeline => {
 			metadata => { name => 'generic-test', version => '2.0' },
-			branches => { live => 'main' },
+			branches => { control => 'main' },
 			workflows => {
 				deploy => {
 					type   => 'deployment',
@@ -436,7 +436,7 @@ subtest 'ASTBuilder - no auto-population without explicit triggers/resources' =>
 		_source_format => 'multi-file',
 		pipeline => {
 			metadata  => { name => 'no-auto-pop-test' },
-			branches  => { live => 'main' },
+			branches  => { control => 'main' },
 			workflows => {},
 			# No explicit triggers or resources
 		},
@@ -907,7 +907,7 @@ subtest 'Validator - DAG cycle detection' => sub {
 		_source_format => 'multi-file',
 		pipeline => {
 			metadata => { name => 'test' },
-			branches => { live => 'main' },
+			branches => { control => 'main' },
 			workflows => {
 				cycle => {
 					graph => {
@@ -941,7 +941,7 @@ subtest 'Validator - valid multi-file config' => sub {
 		_source_format => 'multi-file',
 		pipeline => {
 			metadata  => { name => 'test-pipeline' },
-			branches  => { live => 'main' },
+			branches  => { control => 'main' },
 			workflows => {
 				deploy => {
 					type   => 'deployment',
@@ -1056,7 +1056,7 @@ subtest 'Concourse - native generation from modern AST' => sub {
 			source          => 'modern',
 			deployment_type => 'cf',
 		},
-		branches => { live => 'main' },
+		branches => { control => 'main' },
 		integrations => {
 			vault => {
 				url  => 'https://vault.example.com',
@@ -1293,7 +1293,7 @@ subtest 'Concourse - output_files' => sub {
 subtest 'Concourse - generate_from_ast routes to native for non-legacy' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata => { name => 'test', source => 'modern' },
-		branches => { live => 'main' },
+		branches => { control => 'main' },
 		integrations => {
 			source_control => { provider => 'github', repository => 'org/repo' },
 		},
@@ -1329,7 +1329,7 @@ subtest 'Concourse - locker resources generated when locker configured' => sub {
 			source          => 'modern',
 			deployment_type => 'cf',
 		},
-		branches => { live => 'main' },
+		branches => { control => 'main' },
 		integrations => {
 			vault => {
 				url  => 'https://vault.example.com',
@@ -1396,7 +1396,7 @@ subtest 'Concourse - locker resources generated when locker configured' => sub {
 subtest 'Concourse - locker skips bosh-lock for create-env' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata => { name => 'ce-test', deployment_type => 'bosh', source => 'modern' },
-		branches => { live => 'main' },
+		branches => { control => 'main' },
 		integrations => {
 			vault => { url => 'https://vault.example.com' },
 			source_control => {
@@ -1447,7 +1447,7 @@ subtest 'Concourse - locker skips bosh-lock for create-env' => sub {
 subtest 'Concourse - auto-update job generated' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata => { name => 'autoupdate-test', deployment_type => 'cf', source => 'modern' },
-		branches => { live => 'main' },
+		branches => { control => 'main' },
 		integrations => {
 			vault => { url => 'https://vault.example.com' },
 			source_control => {
@@ -1513,7 +1513,7 @@ subtest 'Concourse - auto-update job generated' => sub {
 subtest 'Concourse - grouped notifications' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata => { name => 'grouped-test', deployment_type => 'cf', source => 'modern' },
-		branches => { live => 'main' },
+		branches => { control => 'main' },
 		integrations => {
 			vault => { url => 'https://vault.example.com' },
 			source_control => {
@@ -1569,7 +1569,7 @@ subtest 'Concourse - grouped notifications' => sub {
 subtest 'Concourse - custom groups' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata => { name => 'custom-groups-test', deployment_type => 'cf', source => 'modern' },
-		branches => { live => 'main' },
+		branches => { control => 'main' },
 		integrations => {
 			vault => { url => 'https://vault.example.com' },
 			source_control => {
@@ -1630,7 +1630,7 @@ subtest 'Concourse - custom groups' => sub {
 subtest 'Concourse - OCFP config name support' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata => { name => 'ocfp-test', deployment_type => 'cf', source => 'modern' },
-		branches => { live => 'main' },
+		branches => { control => 'main' },
 		integrations => {
 			vault => { url => 'https://vault.example.com' },
 			source_control => {
@@ -2561,7 +2561,7 @@ subtest 'PipelineProvider - base class check_prereqs returns 1' => sub {
 	my $gha = Genesis::CI::GithubActions->new(
 		ast => Genesis::CI::Compiler::AST->new(
 			metadata     => { name => 'test', version => '2.0', source => 'modern' },
-			branches     => { live => 'main', target_prefix => 'target/' },
+			branches     => { control => 'main', target_prefix => 'target/' },
 			integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
 			targets      => {},
 			workflows    => {},
@@ -2581,7 +2581,7 @@ subtest 'PipelineProvider::Concourse - check_prereqs returns 1 when fly present'
 	}
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata     => { name => 'test', version => '2.0', source => 'modern' },
-		branches     => { live => 'main', target_prefix => 'target/' },
+		branches     => { control => 'main', target_prefix => 'target/' },
 		integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
 		targets      => {},
 		workflows    => {},
@@ -2594,7 +2594,7 @@ subtest 'PipelineProvider::Concourse - check_prereqs returns 0 when fly absent' 
 	local $ENV{PATH} = '/nonexistent';
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata     => { name => 'test', version => '2.0', source => 'modern' },
-		branches     => { live => 'main', target_prefix => 'target/' },
+		branches     => { control => 'main', target_prefix => 'target/' },
 		integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
 		targets      => {},
 		workflows    => {},
@@ -2797,7 +2797,7 @@ subtest 'Validator - pipeline section with metadata but no workflows is valid' =
 	my $v = Genesis::CI::Compiler::Validator->new();
 	$v->validate({
 		_source_format => 'genesis-config',
-		pipeline       => { name => 'cf', branches => { live => 'main', propagation => 'push' } },
+		pipeline       => { name => 'cf', branches => { control => 'main', propagation => 'push' } },
 		integrations   => {
 			vault          => { url => 'https://vault.example.com' },
 			source_control => { provider => 'github', repository => 'org/repo' },
