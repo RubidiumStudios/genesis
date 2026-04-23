@@ -3360,11 +3360,13 @@ sub deploy {
 		? $self->_deploy_create_env(%opts, noprompt => $noprompt)
 		: $self->_deploy_to_bosh(%opts, noprompt => $noprompt);
 
-	my $deploy_completed = gettimeofday;
-	$self->notify(
-		"BOSH deployment completed in %s",
-		pretty_duration($deploy_completed - $self->{deployment_state}{deploy_started}, undef,undef, '','','-',1)
-	);
+	if (defined $self->{deployment_state}{deploy_started}) {
+		my $deploy_completed = gettimeofday;
+		$self->notify(
+			"BOSH deployment completed in %s",
+			pretty_duration($deploy_completed - $self->{deployment_state}{deploy_started}, undef,undef, '','','-',1)
+		);
+	}
 
 	# Run post-deployment phase
 	return $self->_post_deploy(%opts, noprompt => $noprompt);
@@ -3655,8 +3657,10 @@ sub _deploy_create_env {
 		info "[[  - >>no previous deployment of this environment found in the deployment archive.";
 	}
 
-	# Confirm deployment
-	if (in_controlling_terminal && !$noprompt) {
+	# Confirm deployment (skip on dry-run — nothing destructive to confirm)
+	if ($opts{'dry-run'}) {
+		# no confirmation needed
+	} elsif (in_controlling_terminal && !$noprompt) {
 		prompt_for_boolean(
 			"Proceed with BOSH create-env for the #C{${\($self->name)}}? [y|n] ",1
 		) or $self->_cleanup_and_bail("Aborted!\n");
@@ -3691,7 +3695,7 @@ sub _deploy_create_env {
 	# merged the manifest, checked secrets, and validated configs by this point.
 	if ($opts{'dry-run'}) {
 		$self->notify("dry-run: skipping #C{bosh create-env} (not supported by BOSH CLI)");
-		$self->notify("manifest: #C{%s}", $state->{manifest_path});
+		$self->notify("manifest: #C{%s}", humanize_path($state->{manifest_path}));
 		$state->{results} = ['(dry-run)', 0];
 		return $state->{ok} = 1;
 	}
