@@ -854,8 +854,32 @@ sub deploy {
 	my %options = %{get_options()};
 	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix dry-run fix-stemcells/);
 
+	# When CI is configured, auto-checkout the environment branch
+	# so the deploy reads the correct propagated state.
+	my $top = Genesis::Top->new('.');
+	if ($top->ci_configured) {
+		require Service::Git;
+		my $git = Service::Git->new('.', track_branch => 1);
+		my $current = $git->current_branch // '';
+		if ($current ne $env_name) {
+			bail(
+				"Working tree has uncommitted changes.  Commit or stash them\n".
+				"before deploying."
+			) unless $git->is_clean;
+			bail(
+				"Environment branch #C{%s} does not exist.\n".
+				"Run #C{genesis propagate} to create it.",
+				$env_name
+			) unless $git->branch_exists($env_name);
+			info "\nSwitching to environment branch #C{%s}...", $env_name;
+			$git->checkout($env_name);
+			# Reload Top from the env branch
+			$top = Genesis::Top->new('.');
+		}
+	}
+
 	$options{'disable-reactions'} = ! delete($options{reactions});
-	my $env = Genesis::Top->new('.')->load_env($env_name)->with_vault()->with_bosh();
+	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
 	my $deployment_files = $env->deployment_cache_path_lookup('existing');
 	if (scalar(keys %$deployment_files)) {
