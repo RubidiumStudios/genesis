@@ -852,7 +852,7 @@ sub deploy {
 	my ($env_name, $reason) = @_;
 
 	my %options = %{get_options()};
-	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix dry-run fix-stemcells/);
+	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix fix-stemcells/);
 
 	# When CI is configured, auto-checkout the environment branch
 	# so the deploy reads the correct propagated state.

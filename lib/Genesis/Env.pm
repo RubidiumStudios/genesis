@@ -3686,6 +3686,16 @@ sub _deploy_create_env {
 	my @bosh_opts;
 	push @bosh_opts, "--$_" for grep { $opts{$_} } qw/recreate skip-drain/;
 
+	# Dry-run: skip the bosh create-env call but report what would deploy.
+	# bosh create-env doesn't support --dry-run natively, but we've already
+	# merged the manifest, checked secrets, and validated configs by this point.
+	if ($opts{'dry-run'}) {
+		$self->notify("dry-run: skipping #C{bosh create-env} (not supported by BOSH CLI)");
+		$self->notify("manifest: #C{%s}", $state->{manifest_path});
+		$state->{results} = ['(dry-run)', 0];
+		return $state->{ok} = 1;
+	}
+
 	# Execute deployment
 	$state->{deploy_started} = gettimeofday;
 	my @results = $self->bosh->create_env(
