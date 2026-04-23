@@ -220,13 +220,31 @@ sub create {
 			chomp $sha if defined $sha;
 			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
 
-			# Create the environment branch at the current commit.
-			# This is the branch where future config changes and
-			# deploys for this environment will happen.  We stay on
-			# the control branch.
+			# Create the environment branch at the current commit,
+			# then prune files that don't belong to this environment.
 			run({ onfailure => "Failed to create branch '$name'" },
 				'git', 'branch', $name);
-			info "Environment branch #C{%s} created.", $name;
+
+			my @pruned = $env->prune_branch;
+			info "Environment branch #C{%s} created (%d file%s pruned).",
+				$name, scalar(@pruned), @pruned == 1 ? '' : 's';
+
+			# For automated CI providers, the pipeline needs to be
+			# rebuilt to include a job for the new environment branch.
+			my $provider_type = $top->config->get('ci.provider.type') || 'manual';
+			if ($provider_type ne 'manual') {
+				if (in_controlling_terminal) {
+					if (prompt_for_boolean(
+						"Rebuild the CI pipeline to include #C{$name}? [y|n]", "y"
+					)) {
+						info "Rebuilding pipeline...";
+						# TODO: call genesis repipe equivalent
+						warning("Automated pipeline rebuild not yet implemented.  Run #C{genesis repipe} manually.");
+					}
+				} else {
+					info "Run #C{genesis repipe} to update the pipeline with the new environment.";
+				}
+			}
 		}
 	}
 
