@@ -5256,7 +5256,7 @@ sub _check_secrets {
 		}	if ($secrets_results->{error});
 
 		if ($secrets_results->{missing}) {
-			my $msg = "#{missing secrets detected}";
+			my $msg = "#R{missing secrets detected}";
 			if ($self->is_vaultified && grep {$_->{source} eq 'manifest'} ($self->secrets_plan->secrets)) {
 				$msg .= csprintf(
 					" (you may need to run '#g{%s add-secrets} #Y{--import}' to import them from credhub)",

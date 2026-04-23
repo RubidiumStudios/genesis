@@ -965,10 +965,12 @@ sub deploy {
 		info "  - to '#M{%s}' BOSH director at #c{%s}.", $env->bosh->{alias}, $env->bosh->{url};
 	}
 	# Specify the environment iaas and scale
-	info(
-		"  - to a #Y{%s}-scale #G{%s} IaaS target",
-		$env->scale, $env->iaas
-	);
+	my $scale = $env->scale;
+	if ($scale) {
+		info("  - to a #Y{%s}-scale #G{%s} IaaS target", $scale, $env->iaas);
+	} else {
+		info("  - targeting #G{%s} IaaS", $env->iaas);
+	}
 
 	# Check if the kit supports the environment's IaaS
 	if (my $supported_iaas = $env->kit->metadata('supports')) {
