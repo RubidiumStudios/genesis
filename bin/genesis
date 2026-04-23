@@ -2052,14 +2052,15 @@ define_command("pipeline-graph", {
 # genesis propagate - propagate control branch changes to environment branches {{{
 define_command("propagate", {
 	summary => "Propagate changes from the control branch to environment branches.",
-	usage   => "propagate [options]",
+	usage   => "propagate [options] [env]",
 	description =>
-		"Identifies files that have changed on the control branch since each ".
-		"environment branch was last synced, and copies them to the appropriate ".
-		"environment branches.  Walks the pipeline DAG in order so upstream ".
-		"environments are updated before downstream ones.\n\n".
-		"Each propagation commit records the control branch SHA it was sourced ".
-		"from, enabling deterministic tracking across the pipeline chain.",
+		"Must be run from the control branch.  Identifies files that have ".
+		"changed since each environment branch was last synced, and copies ".
+		"them to the appropriate environment branches.\n\n".
+		"Without arguments, determines entry points by walking the DAG and ".
+		"finding the first environment that uses each changed file.\n\n".
+		"With an environment name, scopes propagation to that environment's ".
+		"children (cascade after a successful deploy).",
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
@@ -2069,8 +2070,12 @@ define_command("propagate", {
 
 		'commit=s' =>
 			"Control branch commit SHA to propagate from.  Defaults to ".
-			"current HEAD when on the control branch, or the SHA recorded ".
-			"in the last propagation commit when on an environment branch.",
+			"HEAD of the control branch.",
+	],
+	arguments => [
+		'env?' =>
+			"Environment that was just deployed.  Scopes propagation to ".
+			"its downstream children only.",
 	],
 }, 'Genesis::Commands::Pipelines::propagate');
 # }}}

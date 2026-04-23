@@ -107,16 +107,14 @@ sub apply {
 # }}}
 # propagate - route control branch changes to environment branches {{{
 #
-# Determines which environments are the entry points for each changed
-# file by walking the DAG in order.  A file is "claimed" by the first
-# environment that uses it — downstream envs will receive it via cascade
-# after their upstream deploys.  Files used only by a non-root env
-# (e.g., a leaf env file) go directly to that env.
+# Must be run from the control branch.  Optional positional argument
+# names an environment whose children should be the propagation scope
+# (cascade after deploy).  Without it, all envs are candidates and
+# the entry point algorithm determines which receive files.
 #
-# Always sources files from control@SHA.  Can be run from control
-# (targets entry points) or from an env branch (targets children,
-# using the control SHA from the last propagation commit).
+# Always sources files from control HEAD (or --commit).
 sub propagate {
+	my ($after_env) = @_;
 
 	my $opts    = get_options;
 	my $dry_run = $opts->{'dry-run'};
@@ -127,13 +125,25 @@ sub propagate {
 
 	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 
-	# Determine current branch
+	# Must be on control branch
 	my ($current_branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
 	chomp $current_branch if defined $current_branch;
-	bail("Cannot propagate from a detached HEAD.")
-		unless defined $current_branch;
+	bail(
+		"Propagation must be run from the #C{%s} branch (currently on #C{%s}).",
+		$control, $current_branch // '<detached>'
+	) unless defined($current_branch) && $current_branch eq $control;
 
-	# Build the DAG
+	# Guard: working tree must be clean before we switch branches
+	unless ($dry_run) {
+		my ($status) = run({}, 'git status --porcelain');
+		my @dirty = grep { /^[^?]/ } split /\n/, ($status || '');
+		bail(
+			"Working tree has uncommitted changes.  Commit or stash them\n".
+			"before running propagate."
+		) if @dirty;
+	}
+
+	# Build the DAG from control branch env files
 	my $env_dir = $top->path;
 	require Genesis::CI::Compiler::ASTBuilder;
 	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
@@ -164,33 +174,15 @@ sub propagate {
 		push @queue, sort @{$children{$env} || []};
 	}
 
-	# Resolve control SHA
+	# Resolve control SHA — always use HEAD
 	my $control_sha_full = $opts->{commit};
-	if ($current_branch eq $control) {
-		unless ($control_sha_full) {
-			($control_sha_full) = run({}, 'git rev-parse HEAD');
-			chomp $control_sha_full;
-		}
-	} elsif ($nodes->{$current_branch}) {
-		# On an env branch: use control SHA from last propagation or merge-base
-		unless ($control_sha_full) {
-			($control_sha_full) = _resolve_propagation_base($current_branch);
-			bail(
-				"Cannot determine propagation base for branch #C{%s}.\n".
-				"Run #C{genesis propagate} from the #C{%s} branch first.",
-				$current_branch, $control
-			) unless $control_sha_full;
-		}
-	} else {
-		bail(
-			"Branch #C{%s} is not the control branch or a known environment branch.",
-			$current_branch
-		);
+	unless ($control_sha_full) {
+		($control_sha_full) = run({}, 'git rev-parse HEAD');
+		chomp $control_sha_full;
 	}
 
 	my ($control_sha_short) = run({}, 'git rev-parse --short', $control_sha_full);
 	chomp $control_sha_short;
-	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}\n", $control, $control_sha_short;
 
 	# Git prefix for subdir repos
 	my ($git_root) = run({}, 'git rev-parse --show-toplevel');
@@ -198,26 +190,71 @@ sub propagate {
 	my ($git_prefix) = run({}, 'git rev-parse --show-prefix');
 	chomp $git_prefix;
 
-	# Determine scope: which envs are candidates for this propagation?
-	# On control: all envs.  On an env branch: only that env's children.
+	# Determine scope
 	my @scope;
-	if ($current_branch eq $control) {
-		@scope = @dag_order;
-	} else {
-		# Children of current env, in DAG order
+	if ($after_env) {
+		bail("Environment #C{%s} is not in the pipeline topology.", $after_env)
+			unless $nodes->{$after_env};
+
+		# Verify the after_env doesn't have outstanding changes on
+		# control that would make it an entry point.  If it does,
+		# those changes haven't flowed through yet — cascading past
+		# it is unsafe.
+		my ($last_sync) = _resolve_propagation_base($after_env);
+		if ($last_sync) {
+			# Check what changed on control since this env was last synced
+			my $after_load = eval { $top->load_env($after_env) };
+			if ($after_load) {
+				my @after_deps = $after_load->propagation_files;
+				my @after_git_deps = map { "${git_prefix}$_" } @after_deps;
+				my ($since_diff) = run({ dir => $git_root },
+					'git', 'diff', '--name-only', $last_sync, $control_sha_full,
+					'--', @after_git_deps
+				);
+				my @outstanding = grep { /\S/ } split /\n/, ($since_diff || '');
+				if (@outstanding) {
+					bail(
+						"Environment #C{%s} has %d outstanding change%s on control\n".
+						"that have not been propagated to it yet.\n".
+						"Run #C{genesis propagate} without arguments first.",
+						$after_env, scalar(@outstanding),
+						@outstanding == 1 ? '' : 's'
+					);
+				}
+			}
+		} else {
+			# No propagation commit and no merge-base — branch doesn't exist
+			# or has never been synced.
+			bail(
+				"Environment #C{%s} has never been propagated to.\n".
+				"Run #C{genesis propagate} without arguments first.",
+				$after_env
+			);
+		}
+
+		# Children and descendants of the named env
 		my %child_set;
-		my @expand = @{$children{$current_branch} || []};
+		my @expand = @{$children{$after_env} || []};
 		while (@expand) {
 			my $e = shift @expand;
 			next if $child_set{$e}++;
 			push @expand, @{$children{$e} || []};
 		}
 		@scope = grep { $child_set{$_} } @dag_order;
+		bail("Environment #C{%s} has no downstream environments.", $after_env)
+			unless @scope;
+		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s} #G{(after %s)}\n",
+			$control, $control_sha_short, $after_env;
+	} else {
+		@scope = @dag_order;
+		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}\n",
+			$control, $control_sha_short;
 	}
 
 	# Build per-env dependency file lists and diffs
 	my %env_dep_files;
 	my %env_changed;
+	my %env_changed_detail;
 	for my $env_name (@scope) {
 		my $exists = run({ passfail => 1 },
 			'git', 'rev-parse', '--verify', $env_name);
@@ -231,11 +268,31 @@ sub propagate {
 		$env_dep_files{$env_name} = \@dep_files;
 
 		my @git_dep_files = map { "${git_prefix}$_" } @dep_files;
+		# Use --diff-filter and --name-status to distinguish adds/modifies
+		# from deletes and renames.
 		my ($diff_out) = run({ dir => $git_root },
-			'git', 'diff', '--name-only', $env_name, $control_sha_full, '--', @git_dep_files
+			'git', 'diff', '--name-status', $env_name, $control_sha_full, '--', @git_dep_files
 		);
-		my @changed = grep { /\S/ } split /\n/, ($diff_out || '');
-		$env_changed{$env_name} = \@changed if @changed;
+		my (@changed, @deleted, %renamed);
+		for my $line (grep { /\S/ } split /\n/, ($diff_out || '')) {
+			if ($line =~ /^D\t(.+)$/) {
+				push @deleted, $1;
+			} elsif ($line =~ /^R\d*\t(.+)\t(.+)$/) {
+				$renamed{$1} = $2;    # old → new
+				push @deleted, $1;    # remove old name
+				push @changed, $2;    # add new name
+			} elsif ($line =~ /^[AMT]\t(.+)$/) {
+				push @changed, $1;
+			}
+		}
+		if (@changed || @deleted) {
+			$env_changed{$env_name} = [@changed, @deleted];
+			$env_changed_detail{$env_name} = {
+				changed => \@changed,
+				deleted => \@deleted,
+				renamed => \%renamed,
+			};
+		}
 	}
 
 	# Determine entry points via pure decision logic.
@@ -248,40 +305,74 @@ sub propagate {
 
 	# Propagate to entry point envs
 	my $propagated = 0;
+	my $error;
 	for my $env_name (@scope) {
 		next unless $env_propagate->{$env_name};
 		my @files = @{$env_propagate->{$env_name}};
 
+		my $detail  = $env_changed_detail{$env_name} || { changed => \@files, deleted => [], renamed => {} };
+		my @to_copy = @{$detail->{changed}};
+		my @to_rm   = @{$detail->{deleted}};
+		my %renames  = %{$detail->{renamed}};
+		my $total   = scalar(@to_copy) + scalar(@to_rm);
+		my $msg     = sprintf("[pipeline] control\@%s -> %s", $control_sha_short, $env_name);
+
 		if ($dry_run) {
-			info "  #C{%s}: %d file%s to propagate", $env_name, scalar(@files), @files == 1 ? '' : 's';
-			info "    %s", $_ for @files;
+			info "  #C{%s}: %d file%s to propagate", $env_name, $total, $total == 1 ? '' : 's';
+			for my $f (@to_copy) {
+				my ($old) = grep { $renames{$_} eq $f } keys %renames;
+				my $note = $old ? " #Yi{(renamed from $old)}" : '';
+				info "    #G{M} %s%s", $f, $note;
+			}
+			info "    #R{D} %s", $_ for @to_rm;
+			info "    #Yi{commit}: %s", $msg;
 			$propagated++;
 		} else {
-			run({ onfailure => "Failed to checkout $env_name" },
-				'git', 'checkout', $env_name);
+			eval {
+				run({ dir => $git_root, onfailure => "Failed to checkout $env_name" },
+					'git', 'checkout', $env_name);
 
-			for my $file (@files) {
-				my $dir = $file;
-				$dir =~ s{/[^/]+$}{};
-				mkdir_or_fail($dir) if $dir ne $file && !-d $dir;
-				run({ onfailure => "Failed to checkout $file from control\@$control_sha_short" },
-					'git', 'checkout', $control_sha_full, '--', $file);
+				# Copy added/modified files from control@SHA
+				for my $file (@to_copy) {
+					my $dir = "$git_root/$file";
+					$dir =~ s{/[^/]+$}{};
+					mkdir_or_fail($dir) if !-d $dir;
+					run({ dir => $git_root, onfailure => "Failed to checkout $file from control\@$control_sha_short" },
+						'git', 'checkout', $control_sha_full, '--', $file);
+				}
+
+				# Remove deleted files
+				for my $file (@to_rm) {
+					run({ dir => $git_root, passfail => 1 }, 'git', 'rm', '-f', '--', $file);
+				}
+
+				run({ dir => $git_root }, 'git', 'add', @to_copy) if @to_copy;
+				run({ dir => $git_root, onfailure => "Failed to commit propagation to $env_name" },
+					'git', 'commit', '-m', $msg);
+				info "  #G{%s}: propagated %d file%s", $env_name, $total, $total == 1 ? '' : 's';
+				$propagated++;
+			};
+			if ($@) {
+				$error = $@;
+				# Reset any partial changes on this branch
+				run({ dir => $git_root, passfail => 1 },
+					'git', 'checkout', '--', '.');
+				warning(
+					"Propagation to #C{%s} failed: %s",
+					$env_name, $error =~ s/\s+$//r
+				);
+				last;
 			}
-
-			run({}, 'git', 'add', @files);
-			my $msg = sprintf("[pipeline] control\@%s → %s", $control_sha_short, $env_name);
-			run({ onfailure => "Failed to commit propagation to $env_name" },
-				'git', 'commit', '-m', $msg);
-			info "  #G{%s}: propagated %d file%s", $env_name, scalar(@files), @files == 1 ? '' : 's';
-			$propagated++;
 		}
 	}
 
-	# Return to starting branch
+	# Always return to starting branch after non-dry-run
 	unless ($dry_run) {
-		run({ onfailure => "Failed to return to $current_branch" },
+		run({ dir => $git_root, passfail => 1 },
 			'git', 'checkout', $current_branch);
 	}
+
+	bail("Propagation aborted due to error.") if $error;
 
 	if ($propagated) {
 		info "\n#G{Done.} %s %d environment%s.",
