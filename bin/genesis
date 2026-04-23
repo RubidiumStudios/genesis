@@ -2049,6 +2049,19 @@ define_command("pipeline-graph", {
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_graph');
 # }}}
+# genesis pipeline-status - show propagation state across all environments {{{
+define_command("pipeline-status", {
+	summary => "Show propagation status for all pipeline environments.",
+	usage   => "pipeline-status",
+	description =>
+		"Displays the propagation state of each environment in the pipeline ".
+		"DAG: last sync point, number of pending changes, and whether the ".
+		"environment is blocked by an ancestor that needs propagation first.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => 'repo',
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+}, 'Genesis::Commands::Pipelines::pipeline_status');
+# }}}
 # genesis propagate - propagate control branch changes to environment branches {{{
 define_command("propagate", {
 	summary => "Propagate changes from the control branch to environment branches.",
@@ -2128,10 +2141,10 @@ define_command("pipeline-diff", {
 	],
 }, 'Genesis::Commands::Pipelines::diff');
 # }}}
-# genesis pipeline-status - show per-environment job health {{{
-define_command("pipeline-status", {
-	summary => "Show per-environment pipeline job health.",
-	usage   => "pipeline-status [<env>]",
+# genesis pipeline-jobs - show per-environment job health (Concourse) {{{
+define_command("pipeline-jobs", {
+	summary => "Show per-environment pipeline job health (Concourse).",
+	usage   => "pipeline-jobs [<env>]",
 	description =>
 		"Queries `fly jobs` and displays the status of each environment's ".
 		"deployment job.  Pass an environment name to filter to a single job.",

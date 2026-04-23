@@ -106,6 +106,158 @@ sub apply {
 }
 
 # }}}
+# pipeline_status - show propagation state across all environments {{{
+sub pipeline_status {
+
+	my $top = Genesis::Top->new('.');
+	bail("CI is not configured for this repository.")
+		unless $top->ci_configured;
+
+	my $git     = Service::Git->new('.');
+	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+	my $head    = $git->sha('HEAD');
+	my $head_short = $git->sha($head, short => 1);
+
+	# Build the DAG
+	require Genesis::CI::Compiler::ASTBuilder;
+	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
+		top     => $top,
+		env_dir => $top->path,
+	);
+	my ($nodes, $edges) = $builder->_build_from_env_files($top->path);
+
+	bail("No environments with pipeline metadata found.")
+		unless %$nodes;
+
+	my (%children, %has_parent, %parent_of);
+	for my $edge (@$edges) {
+		push @{$children{$edge->{from}}}, $edge->{to};
+		$has_parent{$edge->{to}} = 1;
+		$parent_of{$edge->{to}} = $edge->{from};
+	}
+
+	# Topological order
+	my @dag_order;
+	my @queue = sort grep { !$has_parent{$_} } keys %$nodes;
+	my %visited;
+	while (@queue) {
+		my $env = shift @queue;
+		next if $visited{$env}++;
+		push @dag_order, $env;
+		push @queue, sort @{$children{$env} || []};
+	}
+
+	# Gather state for each env
+	my %env_state;   # env => { sync, changed, detail }
+	my %env_changed; # for propagation target computation
+	for my $env_name (@dag_order) {
+		my %state = ( name => $env_name );
+
+		unless ($git->branch_exists($env_name)) {
+			$state{status} = 'no-branch';
+			$env_state{$env_name} = \%state;
+			next;
+		}
+
+		my ($last_sync) = _resolve_propagation_base($env_name, $git);
+		$state{sync} = $last_sync ? $git->sha($last_sync, short => 1) : undef;
+
+		my $env = eval { $top->load_env($env_name) };
+		unless ($env) {
+			$state{status} = 'error';
+			$env_state{$env_name} = \%state;
+			next;
+		}
+
+		my @dep_files = $env->propagation_files;
+		my $diff = $git->diff_files(
+			$env_name, $head,
+			$git->prefixed(@dep_files)
+		);
+
+		if (@{$diff->{all}}) {
+			$state{changed} = $diff->{all};
+			$state{count}   = scalar @{$diff->{all}};
+			$env_changed{$env_name} = $diff->{all};
+		} else {
+			$state{status} = 'synced';
+		}
+
+		$env_state{$env_name} = \%state;
+	}
+
+	# Run entry point algorithm to determine who's blocked
+	my $targets = Genesis::CI::Propagation::compute_propagation_targets(
+		dag_order   => \@dag_order,
+		parent_of   => \%parent_of,
+		env_changed => \%env_changed,
+	);
+
+	for my $env_name (@dag_order) {
+		my $state = $env_state{$env_name};
+		next if $state->{status};  # already resolved (synced, no-branch, error)
+
+		if ($targets->{$env_name}) {
+			$state->{status} = 'pending';
+		} else {
+			# Has changes but not an entry point — blocked by ancestor
+			my $blocker = $parent_of{$env_name};
+			while ($blocker && !$env_changed{$blocker}) {
+				$blocker = $parent_of{$blocker};
+			}
+			$state->{status}  = 'blocked';
+			$state->{blocker} = $blocker;
+		}
+	}
+
+	# Display
+	my $pipeline_name = $top->config->get('ci.name') || $top->type;
+	my $provider_type = $top->config->get('ci.provider.type') || 'manual';
+
+	output "\n#G{Pipeline}: #C{%s}  #Yi{provider}: %s  #Yi{control}: %s",
+		$pipeline_name, $provider_type, $head_short;
+	output "";
+
+	my $max_name = 0;
+	for (@dag_order) {
+		$max_name = length($_) if length($_) > $max_name;
+	}
+
+	for my $env_name (@dag_order) {
+		my $state  = $env_state{$env_name};
+		my $status = $state->{status};
+		my $sync   = $state->{sync} || '-';
+		my $indent = '';
+
+		# Compute depth for visual indentation
+		my $depth = 0;
+		my $p = $parent_of{$env_name};
+		while ($p) { $depth++; $p = $parent_of{$p}; }
+		$indent = '  ' x $depth;
+
+		my $name_pad = $max_name - length($env_name) - ($depth * 2);
+		$name_pad = 0 if $name_pad < 0;
+		my $padded_name = $env_name . (' ' x $name_pad);
+
+		if ($status eq 'synced') {
+			output "  %s#G{%s}  %s  #G{synced}", $indent, $padded_name, $sync;
+		} elsif ($status eq 'pending') {
+			output "  %s#C{%s}  %s  #Y{%d pending}", $indent, $padded_name, $sync, $state->{count};
+		} elsif ($status eq 'blocked') {
+			output "  %s#C{%s}  %s  #Yi{blocked by %s} (%d files)",
+				$indent, $padded_name, $sync, $state->{blocker}, $state->{count};
+		} elsif ($status eq 'no-branch') {
+			output "  %s#R{%s}  %s  #R{no branch}", $indent, $padded_name, '-';
+		} elsif ($status eq 'error') {
+			output "  %s#R{%s}  %s  #R{load error}", $indent, $padded_name, '-';
+		}
+	}
+
+	output "";
+	exit 0;
+}
+
+# }}}
 # propagate - route control branch changes to environment branches {{{
 #
 # Must be run from the control branch.  Optional positional argument
