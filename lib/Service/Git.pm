@@ -1,0 +1,407 @@
+package Service::Git;
+
+use strict;
+use warnings;
+
+use Genesis qw/run bail debug trace/;
+use File::Basename qw/dirname/;
+
+### Constructor & Lifecycle {{{
+
+# new - create a Git service instance for a repository {{{
+#
+# Auto-detects the git root and subdir prefix from the given path
+# (or cwd).  Caches both for the lifetime of the object.
+#
+#   my $git = Service::Git->new($path);   # or ->new() for cwd
+#   my $git = Service::Git->new($path, track_branch => 1);
+#
+# With track_branch => 1, the current branch is saved and restored
+# when the object goes out of scope (DESTROY).
+sub new {
+	my ($class, $path, %opts) = @_;
+	$path ||= '.';
+
+	my ($root) = run({}, 'git', '-C', $path, 'rev-parse', '--show-toplevel');
+	chomp $root if defined $root;
+	bail("Not a git repository: %s", $path) unless $root;
+
+	my ($prefix) = run({}, 'git', '-C', $path, 'rev-parse', '--show-prefix');
+	chomp $prefix if defined $prefix;
+	$prefix //= '';
+
+	my $self = bless {
+		root           => $root,
+		prefix         => $prefix,
+		_branch_cache  => {},
+		_track_branch  => $opts{track_branch} || 0,
+		_original_branch => undef,
+	}, $class;
+
+	if ($self->{_track_branch}) {
+		$self->{_original_branch} = $self->current_branch;
+	}
+
+	return $self;
+}
+
+# }}}
+# DESTROY - restore original branch on scope exit {{{
+sub DESTROY {
+	my ($self) = @_;
+	if ($self->{_track_branch} && $self->{_original_branch}) {
+		my $current = eval { $self->current_branch };
+		if ($current && $current ne $self->{_original_branch}) {
+			# Reset any partial changes before switching
+			run({ dir => $self->{root}, passfail => 1 },
+				'git', 'checkout', '--', '.');
+			run({ dir => $self->{root}, passfail => 1 },
+				'git', 'checkout', $self->{_original_branch});
+			trace("Service::Git: restored branch %s", $self->{_original_branch});
+		}
+	}
+}
+
+# }}}
+# }}}
+
+### Accessors {{{
+
+# root - git toplevel directory (cached) {{{
+sub root { $_[0]->{root} }
+
+# }}}
+# prefix - subdir offset within git repo (cached, e.g., "bosh/") {{{
+sub prefix { $_[0]->{prefix} }
+
+# }}}
+# }}}
+
+### Branch Operations {{{
+
+# current_branch - name of HEAD branch (cached, invalidated on checkout) {{{
+sub current_branch {
+	my ($self) = @_;
+	my ($branch) = run({ dir => $self->{root} },
+		'git', 'rev-parse', '--abbrev-ref', 'HEAD');
+	chomp $branch if defined $branch;
+	$self->{_current_branch} = $branch;
+	return $branch;
+}
+
+# }}}
+# checkout - switch to a branch {{{
+#
+# Saves the original branch for restore_branch / DESTROY.
+sub checkout {
+	my ($self, $branch) = @_;
+	$self->{_original_branch} //= $self->current_branch
+		if $self->{_track_branch};
+	run({ dir => $self->{root}, onfailure => "Failed to checkout '$branch'" },
+		'git', 'checkout', $branch);
+	delete $self->{_current_branch};
+	return $self;
+}
+
+# }}}
+# restore_branch - return to the branch we were on before any checkout {{{
+sub restore_branch {
+	my ($self) = @_;
+	return unless $self->{_original_branch};
+	my $current = $self->current_branch;
+	if ($current ne $self->{_original_branch}) {
+		run({ dir => $self->{root}, passfail => 1 },
+			'git', 'checkout', $self->{_original_branch});
+		delete $self->{_current_branch};
+	}
+	return $self;
+}
+
+# }}}
+# create_branch - create a new branch at the given ref (default HEAD) {{{
+sub create_branch {
+	my ($self, $name, $ref) = @_;
+	my @cmd = ('git', 'branch', $name);
+	push @cmd, $ref if $ref;
+	run({ dir => $self->{root}, onfailure => "Failed to create branch '$name'" },
+		@cmd);
+	$self->{_branch_cache}{$name} = 1;
+	return $self;
+}
+
+# }}}
+# branch_exists - check if a branch exists (cached) {{{
+sub branch_exists {
+	my ($self, $name) = @_;
+	return $self->{_branch_cache}{$name}
+		if exists $self->{_branch_cache}{$name};
+	my $exists = run({ dir => $self->{root}, passfail => 1 },
+		'git', 'rev-parse', '--verify', $name);
+	$self->{_branch_cache}{$name} = $exists ? 1 : 0;
+	return $self->{_branch_cache}{$name};
+}
+
+# }}}
+# }}}
+
+### Queries {{{
+
+# rev_parse - resolve a ref to a SHA {{{
+#
+# Options:
+#   short => 1   — return abbreviated SHA
+sub rev_parse {
+	my ($self, $ref, %opts) = @_;
+	my @cmd = ('git', 'rev-parse');
+	push @cmd, '--short' if $opts{short};
+	push @cmd, $ref;
+	my ($sha) = run({ dir => $self->{root} }, @cmd);
+	chomp $sha if defined $sha;
+	return $sha;
+}
+
+# }}}
+# merge_base - find the common ancestor of two refs {{{
+sub merge_base {
+	my ($self, $a, $b) = @_;
+	my ($sha) = run({ dir => $self->{root} }, 'git', 'merge-base', $a, $b);
+	chomp $sha if defined $sha;
+	return $sha;
+}
+
+# }}}
+# is_clean - true if working tree has no modified/staged/conflicted files {{{
+#
+# Ignores untracked files — they don't affect branch switching.
+sub is_clean {
+	my ($self) = @_;
+	my ($status) = run({ dir => $self->{root} }, 'git', 'status', '--porcelain');
+	my @dirty = grep { /^[^?]/ } split /\n/, ($status || '');
+	return !@dirty;
+}
+
+# }}}
+# diff_files - structured diff between two refs, filtered by pathspecs {{{
+#
+# Returns a hashref:
+#   {
+#     changed => \@files,     # added, modified, or type-changed
+#     deleted => \@files,
+#     renamed => \%old_to_new,
+#     all     => \@all_files, # union of changed + deleted
+#   }
+#
+# Pathspecs are relative to git root (caller should prefix if needed).
+sub diff_files {
+	my ($self, $from, $to, @pathspecs) = @_;
+	my @cmd = ('git', 'diff', '--name-status', $from, $to);
+	push @cmd, '--', @pathspecs if @pathspecs;
+	my ($out) = run({ dir => $self->{root} }, @cmd);
+
+	my (@changed, @deleted, %renamed);
+	for my $line (grep { /\S/ } split /\n/, ($out || '')) {
+		if ($line =~ /^D\t(.+)$/) {
+			push @deleted, $1;
+		} elsif ($line =~ /^R\d*\t(.+)\t(.+)$/) {
+			$renamed{$1} = $2;
+			push @deleted, $1;
+			push @changed, $2;
+		} elsif ($line =~ /^[AMT]\t(.+)$/) {
+			push @changed, $1;
+		}
+	}
+	return {
+		changed => \@changed,
+		deleted => \@deleted,
+		renamed => \%renamed,
+		all     => [@changed, @deleted],
+	};
+}
+
+# }}}
+# diff_names - simple list of changed file names between two refs {{{
+sub diff_names {
+	my ($self, $from, $to, @pathspecs) = @_;
+	my @cmd = ('git', 'diff', '--name-only', $from, $to);
+	push @cmd, '--', @pathspecs if @pathspecs;
+	my ($out) = run({ dir => $self->{root} }, @cmd);
+	return grep { /\S/ } split /\n/, ($out || '');
+}
+
+# }}}
+# ls_tree - list files on a ref under a prefix {{{
+sub ls_tree {
+	my ($self, $ref, $path) = @_;
+	$path //= '';
+	my ($out) = run({ dir => $self->{root} },
+		'git', 'ls-tree', '-r', '--name-only', $ref, $path);
+	return grep { /\S/ } split /\n/, ($out || '');
+}
+
+# }}}
+# log_subjects - return commit subjects for a branch {{{
+#
+# Options:
+#   limit  => N       — max number of entries
+#   format => '...'   — custom format (default: %H %s)
+sub log_subjects {
+	my ($self, $branch, %opts) = @_;
+	my $fmt = $opts{format} || '%H %s';
+	my @cmd = ('git', 'log', "--format=$fmt", $branch);
+	push @cmd, "-$opts{limit}" if $opts{limit};
+	my ($out) = run({ dir => $self->{root} }, @cmd);
+	return split /\n/, ($out || '');
+}
+
+# }}}
+# show_file - read file content from a specific ref {{{
+sub show_file {
+	my ($self, $ref, $path) = @_;
+	my ($content, $rc) = run({ dir => $self->{root}, passfail => 0 },
+		'git', 'show', "$ref:$path");
+	return $content;
+}
+
+# }}}
+# }}}
+
+### Working Tree Operations {{{
+
+# checkout_file - extract a file from a ref into the working tree {{{
+sub checkout_file {
+	my ($self, $ref, $file) = @_;
+	# Ensure parent directory exists
+	my $full_path = "$self->{root}/$file";
+	my $dir = dirname($full_path);
+	if (!-d $dir) {
+		require File::Path;
+		File::Path::make_path($dir);
+	}
+	run({ dir => $self->{root}, onfailure => "Failed to checkout $file from $ref" },
+		'git', 'checkout', $ref, '--', $file);
+	return $self;
+}
+
+# }}}
+# add - stage files {{{
+sub add {
+	my ($self, @files) = @_;
+	return unless @files;
+	run({ dir => $self->{root} }, 'git', 'add', @files);
+	return $self;
+}
+
+# }}}
+# rm - remove files from index and working tree {{{
+sub rm {
+	my ($self, @files) = @_;
+	return unless @files;
+	run({ dir => $self->{root}, passfail => 1 },
+		'git', 'rm', '-f', '-q', '--', @files);
+	return $self;
+}
+
+# }}}
+# commit - stage files and commit {{{
+#
+#   $git->commit("message");              # commit staged changes
+#   $git->commit("message", @files);      # add files then commit
+sub commit {
+	my ($self, $message, @files) = @_;
+	$self->add(@files) if @files;
+	run({ dir => $self->{root}, onfailure => "Failed to commit" },
+		'git', 'commit', '-m', $message);
+	return $self;
+}
+
+# }}}
+# reset_working_tree - discard all working tree changes to tracked files {{{
+sub reset_working_tree {
+	my ($self) = @_;
+	run({ dir => $self->{root}, passfail => 1 },
+		'git', 'checkout', '--', '.');
+	return $self;
+}
+
+# }}}
+# }}}
+
+### Remote Operations {{{
+
+# default_remote - first configured remote name (cached) {{{
+sub default_remote {
+	my ($self) = @_;
+	return $self->{_default_remote} if exists $self->{_default_remote};
+	my ($out) = run({ dir => $self->{root} }, 'git', 'remote');
+	if ($out && $out =~ /\S/) {
+		chomp $out;
+		$self->{_default_remote} = (split /\n/, $out)[0];
+	} else {
+		$self->{_default_remote} = undef;
+	}
+	return $self->{_default_remote};
+}
+
+# }}}
+# push - push branches to a remote {{{
+#
+#   $git->push(@branches);              # push to default remote
+#   $git->push($remote, @branches);     # push to specific remote
+#
+# Returns a hashref of branch => success (1/0).
+sub push {
+	my ($self, @args) = @_;
+	# If first arg looks like a remote name (not a branch we know), use it
+	my $remote;
+	if (@args && !$self->branch_exists($args[0])) {
+		$remote = shift @args;
+	}
+	$remote ||= $self->default_remote;
+	return {} unless $remote;
+
+	my %results;
+	for my $branch (@args) {
+		my $ok = run({ dir => $self->{root}, passfail => 1 },
+			'git', 'push', $remote, $branch);
+		$results{$branch} = $ok ? 1 : 0;
+	}
+	return \%results;
+}
+
+# }}}
+# }}}
+
+### Utility {{{
+
+# prefixed - prepend the git prefix to repo-relative paths {{{
+#
+# Converts paths relative to the deployment repo root into paths
+# relative to the git root.  No-op when prefix is empty.
+#
+#   my @git_paths = $git->prefixed(@repo_paths);
+sub prefixed {
+	my ($self, @paths) = @_;
+	my $p = $self->{prefix};
+	return @paths unless $p;
+	return map { "${p}$_" } @paths;
+}
+
+# }}}
+# in_repo - true if we're inside a subdirectory of the git root {{{
+sub in_repo {
+	return defined $_[0]->{root};
+}
+
+# }}}
+# is_inside_work_tree - check if a path is inside a git work tree {{{
+sub is_inside_work_tree {
+	my ($class, $path) = @_;
+	$path ||= '.';
+	return run({ passfail => 1 },
+		'git', '-C', $path, 'rev-parse', '--is-inside-work-tree');
+}
+
+# }}}
+# }}}
+
+1;
