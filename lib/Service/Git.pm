@@ -6,18 +6,25 @@ use warnings;
 use Genesis qw/run bail debug trace/;
 use File::Basename qw/dirname/;
 
+### Class State {{{
+my %_instances;  # keyed by resolved git root path
+# }}}
+
 ### Constructor & Lifecycle {{{
 
-# new - create a Git service instance for a repository {{{
+# new - get or create a Git service instance for a repository {{{
 #
-# Auto-detects the git root and subdir prefix from the given path
-# (or cwd).  Caches both for the lifetime of the object.
+# Flyweight: returns the existing instance if one already exists for
+# the same .git-controlled repo.  This prevents competing objects
+# from stepping on each other's branch tracking or caches.
 #
 #   my $git = Service::Git->new($path);   # or ->new() for cwd
 #   my $git = Service::Git->new($path, track_branch => 1);
 #
 # With track_branch => 1, the current branch is saved and restored
-# when the object goes out of scope (DESTROY).
+# when the object goes out of scope (DESTROY).  If the instance
+# already exists and track_branch is requested, it upgrades the
+# existing instance.
 sub new {
 	my ($class, $path, %opts) = @_;
 	$path ||= '.';
@@ -25,6 +32,16 @@ sub new {
 	my ($root) = run({}, 'git', '-C', $path, 'rev-parse', '--show-toplevel');
 	chomp $root if defined $root;
 	bail("Not a git repository: %s", $path) unless $root;
+
+	# Return existing instance for this repo
+	if (my $existing = $_instances{$root}) {
+		# Upgrade to track_branch if requested and not already tracking
+		if ($opts{track_branch} && !$existing->{_track_branch}) {
+			$existing->{_track_branch} = 1;
+			$existing->{_original_branch} //= $existing->current_branch;
+		}
+		return $existing;
+	}
 
 	my ($prefix) = run({}, 'git', '-C', $path, 'rev-parse', '--show-prefix');
 	chomp $prefix if defined $prefix;
@@ -42,24 +59,27 @@ sub new {
 		$self->{_original_branch} = $self->current_branch;
 	}
 
+	$_instances{$root} = $self;
 	return $self;
 }
 
 # }}}
-# DESTROY - restore original branch on scope exit {{{
+# DESTROY - restore original branch on process exit {{{
+#
+# With flyweight caching, the instance lives for the process lifetime.
+# DESTROY fires during global cleanup, restoring the branch if needed.
 sub DESTROY {
 	my ($self) = @_;
-	if ($self->{_track_branch} && $self->{_original_branch}) {
-		my $current = eval { $self->current_branch };
-		if ($current && $current ne $self->{_original_branch}) {
-			# Reset any partial changes before switching
-			run({ dir => $self->{root}, passfail => 1 },
-				'git', 'checkout', '--', '.');
-			run({ dir => $self->{root}, passfail => 1 },
-				'git', 'checkout', $self->{_original_branch});
-			trace("Service::Git: restored branch %s", $self->{_original_branch});
-		}
-	}
+	return unless $self->{_track_branch} && $self->{_original_branch};
+	my $current = eval { $self->current_branch };
+	return unless $current && $current ne $self->{_original_branch};
+	# Reset any partial changes before switching
+	run({ dir => $self->{root}, passfail => 1 },
+		'git', 'checkout', '--', '.');
+	run({ dir => $self->{root}, passfail => 1 },
+		'git', 'checkout', $self->{_original_branch});
+	trace("Service::Git: restored branch %s", $self->{_original_branch});
+	delete $_instances{$self->{root}};
 }
 
 # }}}
