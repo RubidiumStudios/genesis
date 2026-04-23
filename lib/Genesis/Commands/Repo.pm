@@ -8,6 +8,7 @@ use Genesis::Commands;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::Top;
 use Genesis::UI;
+use Service::Git;
 
 use Cwd qw/getcwd abs_path/;
 use File::Basename qw/basename dirname/;
@@ -127,7 +128,7 @@ sub _repo_init_validate {
 	# separate .git -- it will share history with the surrounding repo.
 	# This is reported in the plan below so the user can notice an
 	# unexpected enclosure.
-	my $use_subdir = run({ passfail => 1 }, 'git rev-parse --is-inside-work-tree 2>/dev/null') ? 1 : 0;
+	my $use_subdir = Service::Git->is_inside_work_tree('.');
 
 	# In subdir mode, require the enclosing repo to have no staged or
 	# unstaged changes to tracked files.  Untracked files are fine.
@@ -136,15 +137,14 @@ sub _repo_init_validate {
 	# #C{-F|--force} bypasses this check for users who understand the
 	# risk (e.g. scripted environments, known-safe index).
 	if ($use_subdir && !$opts{force}) {
-		my ($dirty) = run({}, 'git status --porcelain --untracked-files=no');
-		if (defined($dirty) && $dirty =~ /\S/) {
+		my $enclosing_git = Service::Git->new('.');
+		unless ($enclosing_git->is_clean) {
 			bail(
 				"Cannot create a Genesis deployment repository inside an ".
 				"enclosing git repository that has uncommitted changes to ".
 				"tracked files.\n".
-				"  Please commit, stash, or discard the following first, ".
-				"or rerun with #C{-F|--force} to bypass this check:\n\n%s\n",
-				$dirty
+				"  Please commit, stash, or discard them first, ".
+				"or rerun with #C{-F|--force} to bypass this check."
 			);
 		}
 	}
@@ -163,8 +163,8 @@ sub _repo_init_validate {
 	# established, so the branch name is irrelevant at this point.
 	my $control_branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 	if ($use_subdir && $with_ci) {
-		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
-		chomp $branch if defined $branch;
+		my $enclosing_git = Service::Git->new('.');
+		my $branch = $enclosing_git->current_branch;
 		if (!defined($branch) || $branch ne $control_branch) {
 			bail(
 				"Configuring a CI provider requires the enclosing git ".
@@ -381,18 +381,18 @@ sub _repo_init_execute {
 		# of whatever git's init.defaultBranch happens to be.
 		# #C{git symbolic-ref HEAD} works on all git versions, unlike
 		# #C{git init -b} which requires >= 2.28.
+		my $repo_git;
 		unless ($use_subdir) {
 			if ($with_ci) {
 				my $branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-				run({ onfailure => "Failed to initialize git in $human_root/" },
-					"git init && git symbolic-ref HEAD refs/heads/$branch");
+				$repo_git = Service::Git->create('.', initial_branch => $branch);
 			} else {
-				run({ onfailure => "Failed to initialize git in $human_root/" },
-					'git init');
+				$repo_git = Service::Git->create('.');
 			}
+		} else {
+			$repo_git = Service::Git->new('.');
 		}
-		run({ onfailure => "Failed to stage repository in $human_root/" },
-			'git add .');
+		$repo_git->add('.');
 
 		# Check if the only staged changes are metadata-only (the
 		# "Last updated" comment and/or updater/creator_version in
@@ -435,15 +435,14 @@ sub _repo_init_execute {
 			info "Skipping initial commit (#C{--no-commit} set); files remain staged.";
 		} else {
 			my $message = $reason || "Initial Genesis repo for $name";
-			my @cmd = ('git', 'commit', '-m', $message);
-			push @cmd, '--', '.' if $use_subdir;
-			run({ onfailure => "Failed to commit initial repository in $human_root/" }, @cmd);
+			if ($use_subdir) {
+				run({ onfailure => "Failed to commit initial repository in $human_root/" },
+					'git', 'commit', '-m', $message, '--', '.');
+			} else {
+				$repo_git->commit($message);
+			}
 
-			# Report the commit that was just made so the user has a
-			# clear record of what was recorded (and, in subdir mode,
-			# where in the enclosing repo's history to find it).
-			my ($sha) = run({}, 'git rev-parse --short HEAD');
-			chomp $sha if defined $sha;
+			my $sha = $repo_git->sha('HEAD', short => 1);
 			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
 		}
 	};

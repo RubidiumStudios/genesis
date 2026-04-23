@@ -75,10 +75,12 @@ sub create {
 	# control branch so the topology is visible to pipeline tooling and
 	# the environment branch can be cut from the right point.
 	my $ci_configured = $top->ci_configured;
+	my $git;
 	if ($ci_configured) {
+		require Service::Git;
+		$git = Service::Git->new('.');
 		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-		my ($branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
-		chomp $branch if defined $branch;
+		my $branch = $git->current_branch;
 		if (!defined($branch) || $branch ne $control) {
 			bail(
 				"Creating environments requires being on the #C{%s} branch, ".
@@ -205,25 +207,21 @@ sub create {
 	my %cli_opts_git = %{get_options()};
 	if ($ci_configured) {
 		my $env_file = $env->file;
-		run({ onfailure => "Failed to stage $env_file" },
-			'git', 'add', $env_file);
+		$git->add($env_file);
 
 		if ($cli_opts_git{'no-commit'}) {
 			info "Skipping commit (#C{--no-commit} set); #C{%s} remains staged.", $env_file;
 		} else {
 			my $message = $cli_opts_git{reason}
 				|| "Add environment $name";
-			run({ onfailure => "Failed to commit $env_file" },
-				'git', 'commit', '-m', $message);
+			$git->commit($message);
 
-			my ($sha) = run({}, 'git rev-parse --short HEAD');
-			chomp $sha if defined $sha;
+			my $sha = $git->sha('HEAD', short => 1);
 			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
 
 			# Create the environment branch at the current commit,
 			# then prune files that don't belong to this environment.
-			run({ onfailure => "Failed to create branch '$name'" },
-				'git', 'branch', $name);
+			$git->create_branch($name);
 
 			my @pruned = $env->prune_branch;
 			info "Environment branch #C{%s} created (%d file%s pruned).",

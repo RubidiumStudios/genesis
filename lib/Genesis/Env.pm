@@ -1249,39 +1249,27 @@ sub propagation_files {
 sub prune_branch {
 	my ($self, %opts) = @_;
 
-	my $branch  = $self->name;
-	my @keep    = $self->propagation_files;
+	require Service::Git;
+	my $git    = Service::Git->new('.');
+	my $branch = $self->name;
+	my @keep   = $self->propagation_files;
 
-	my ($git_root) = run({}, 'git rev-parse --show-toplevel');
-	chomp $git_root;
-	my ($git_prefix) = run({}, 'git rev-parse --show-prefix');
-	chomp $git_prefix;
-
-	# Must not be on the env branch — propagation_files is built from
-	# the current branch's files, which must be control.
+	# Must not be on the env branch
 	unless ($opts{dry_run}) {
-		my ($current) = run({}, 'git rev-parse --abbrev-ref HEAD');
-		chomp $current if defined $current;
 		bail(
 			"Cannot prune #C{%s} while on that branch.  Switch to the control branch first.",
 			$branch
-		) if defined($current) && $current eq $branch;
+		) if ($git->current_branch // '') eq $branch;
 	}
 
 	# Build keep set with git-root-relative paths
-	my %keep_set;
-	for my $f (@keep) {
-		$keep_set{"${git_prefix}$f"} = 1;
-	}
+	my %keep_set = map { $_ => 1 } $git->prefixed(@keep);
 
 	# List tracked files on the env branch under our prefix
-	my ($tracked) = run({ dir => $git_root },
-		'git', 'ls-tree', '-r', '--name-only', $branch, "${git_prefix}"
-	);
+	my @tracked = $git->ls_tree($branch, $git->prefix);
 	my @to_remove;
-	for my $file (grep { /\S/ } split /\n/, ($tracked || '')) {
-		# Always keep .genesis/ contents
-		next if $file =~ m{^\Q${git_prefix}\E\.genesis/};
+	for my $file (@tracked) {
+		next if $file =~ m{^\Q@{[$git->prefix]}\E\.genesis/};
 		next if $keep_set{$file};
 		push @to_remove, $file;
 	}
@@ -1289,19 +1277,10 @@ sub prune_branch {
 	return () unless @to_remove;
 	return @to_remove if $opts{dry_run};
 
-	my ($current_branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
-	chomp $current_branch;
-
-	run({ dir => $git_root, onfailure => "Failed to checkout $branch for pruning" },
-		'git', 'checkout', $branch);
-
-	run({ dir => $git_root, passfail => 1 },
-		'git', 'rm', '-q', '--', @to_remove);
-	run({ dir => $git_root, onfailure => "Failed to commit pruned branch $branch" },
-		'git', 'commit', '-m', "Prune non-dependency files from $branch");
-
-	run({ dir => $git_root, onfailure => "Failed to return to $current_branch" },
-		'git', 'checkout', $current_branch);
+	$git->checkout($branch);
+	$git->rm(@to_remove);
+	$git->commit("Prune non-dependency files from $branch");
+	$git->restore_branch;
 
 	return @to_remove;
 }

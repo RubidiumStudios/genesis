@@ -11,6 +11,7 @@ use Genesis::Env;
 use Genesis::CI::Legacy qw//;
 use Genesis::CI::Compiler;
 use Genesis::CI::Propagation;
+use Service::Git;
 use Service::Vault::Remote;
 
 use File::Basename qw/dirname/;
@@ -124,34 +125,26 @@ sub propagate {
 	bail("CI is not configured for this repository.")
 		unless $top->ci_configured;
 
+	my $git     = Service::Git->new('.', track_branch => !$dry_run);
 	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 
-	# Must be on control branch
-	my ($current_branch) = run({}, 'git rev-parse --abbrev-ref HEAD');
-	chomp $current_branch if defined $current_branch;
 	bail(
 		"Propagation must be run from the #C{%s} branch (currently on #C{%s}).",
-		$control, $current_branch // '<detached>'
-	) unless defined($current_branch) && $current_branch eq $control;
+		$control, $git->current_branch // '<detached>'
+	) unless ($git->current_branch // '') eq $control;
 
-	# Guard: working tree must be clean before we switch branches
-	unless ($dry_run) {
-		my ($status) = run({}, 'git status --porcelain');
-		my @dirty = grep { /^[^?]/ } split /\n/, ($status || '');
-		bail(
-			"Working tree has uncommitted changes.  Commit or stash them\n".
-			"before running propagate."
-		) if @dirty;
-	}
+	bail(
+		"Working tree has uncommitted changes.  Commit or stash them\n".
+		"before running propagate."
+	) unless $dry_run || $git->is_clean;
 
 	# Build the DAG from control branch env files
-	my $env_dir = $top->path;
 	require Genesis::CI::Compiler::ASTBuilder;
 	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
 		top     => $top,
-		env_dir => $env_dir,
+		env_dir => $top->path,
 	);
-	my ($nodes, $edges) = $builder->_build_from_env_files($env_dir);
+	my ($nodes, $edges) = $builder->_build_from_env_files($top->path);
 
 	bail("No environments with pipeline metadata found.")
 		unless %$nodes;
@@ -164,9 +157,8 @@ sub propagate {
 	}
 
 	# Topological order (BFS from roots)
-	my @roots = sort grep { !$has_parent{$_} } keys %$nodes;
 	my @dag_order;
-	my @queue = @roots;
+	my @queue = sort grep { !$has_parent{$_} } keys %$nodes;
 	my %visited;
 	while (@queue) {
 		my $env = shift @queue;
@@ -176,20 +168,8 @@ sub propagate {
 	}
 
 	# Resolve control SHA — always use HEAD
-	my $control_sha_full = $opts->{commit};
-	unless ($control_sha_full) {
-		($control_sha_full) = run({}, 'git rev-parse HEAD');
-		chomp $control_sha_full;
-	}
-
-	my ($control_sha_short) = run({}, 'git rev-parse --short', $control_sha_full);
-	chomp $control_sha_short;
-
-	# Git prefix for subdir repos
-	my ($git_root) = run({}, 'git rev-parse --show-toplevel');
-	chomp $git_root;
-	my ($git_prefix) = run({}, 'git rev-parse --show-prefix');
-	chomp $git_prefix;
+	my $control_sha   = $opts->{commit} || $git->sha('HEAD');
+	my $control_short = $git->sha($control_sha, short => 1);
 
 	# Determine scope
 	my @scope;
@@ -197,35 +177,24 @@ sub propagate {
 		bail("Environment #C{%s} is not in the pipeline topology.", $after_env)
 			unless $nodes->{$after_env};
 
-		# Verify the after_env doesn't have outstanding changes on
-		# control that would make it an entry point.  If it does,
-		# those changes haven't flowed through yet — cascading past
-		# it is unsafe.
-		my ($last_sync) = _resolve_propagation_base($after_env);
+		# Verify the after_env has no outstanding changes
+		my ($last_sync) = _resolve_propagation_base($after_env, $git);
 		if ($last_sync) {
-			# Check what changed on control since this env was last synced
 			my $after_load = eval { $top->load_env($after_env) };
 			if ($after_load) {
-				my @after_deps = $after_load->propagation_files;
-				my @after_git_deps = map { "${git_prefix}$_" } @after_deps;
-				my ($since_diff) = run({ dir => $git_root },
-					'git', 'diff', '--name-only', $last_sync, $control_sha_full,
-					'--', @after_git_deps
+				my @outstanding = $git->diff_names(
+					$last_sync, $control_sha,
+					$git->prefixed($after_load->propagation_files)
 				);
-				my @outstanding = grep { /\S/ } split /\n/, ($since_diff || '');
-				if (@outstanding) {
-					bail(
-						"Environment #C{%s} has %d outstanding change%s on control\n".
-						"that have not been propagated to it yet.\n".
-						"Run #C{genesis propagate} without arguments first.",
-						$after_env, scalar(@outstanding),
-						@outstanding == 1 ? '' : 's'
-					);
-				}
+				bail(
+					"Environment #C{%s} has %d outstanding change%s on control\n".
+					"that have not been propagated to it yet.\n".
+					"Run #C{genesis propagate} without arguments first.",
+					$after_env, scalar(@outstanding),
+					@outstanding == 1 ? '' : 's'
+				) if @outstanding;
 			}
 		} else {
-			# No propagation commit and no merge-base — branch doesn't exist
-			# or has never been synced.
 			bail(
 				"Environment #C{%s} has never been propagated to.\n".
 				"Run #C{genesis propagate} without arguments first.",
@@ -233,7 +202,6 @@ sub propagate {
 			);
 		}
 
-		# Children and descendants of the named env
 		my %child_set;
 		my @expand = @{$children{$after_env} || []};
 		while (@expand) {
@@ -245,58 +213,34 @@ sub propagate {
 		bail("Environment #C{%s} has no downstream environments.", $after_env)
 			unless @scope;
 		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s} #G{(after %s)}\n",
-			$control, $control_sha_short, $after_env;
+			$control, $control_short, $after_env;
 	} else {
 		@scope = @dag_order;
 		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}\n",
-			$control, $control_sha_short;
+			$control, $control_short;
 	}
 
-	# Build per-env dependency file lists and diffs
-	my %env_dep_files;
-	my %env_changed;
-	my %env_changed_detail;
+	# Build per-env diffs
+	my (%env_changed, %env_changed_detail);
 	for my $env_name (@scope) {
-		my $exists = run({ passfail => 1 },
-			'git', 'rev-parse', '--verify', $env_name);
-		next unless $exists;
-
+		next unless $git->branch_exists($env_name);
 		my $env = eval { $top->load_env($env_name) };
 		next unless $env;
 
 		my @dep_files = $env->propagation_files;
 		next unless @dep_files;
-		$env_dep_files{$env_name} = \@dep_files;
 
-		my @git_dep_files = map { "${git_prefix}$_" } @dep_files;
-		# Use --diff-filter and --name-status to distinguish adds/modifies
-		# from deletes and renames.
-		my ($diff_out) = run({ dir => $git_root },
-			'git', 'diff', '--name-status', $env_name, $control_sha_full, '--', @git_dep_files
+		my $diff = $git->diff_files(
+			$env_name, $control_sha,
+			$git->prefixed(@dep_files)
 		);
-		my (@changed, @deleted, %renamed);
-		for my $line (grep { /\S/ } split /\n/, ($diff_out || '')) {
-			if ($line =~ /^D\t(.+)$/) {
-				push @deleted, $1;
-			} elsif ($line =~ /^R\d*\t(.+)\t(.+)$/) {
-				$renamed{$1} = $2;    # old → new
-				push @deleted, $1;    # remove old name
-				push @changed, $2;    # add new name
-			} elsif ($line =~ /^[AMT]\t(.+)$/) {
-				push @changed, $1;
-			}
-		}
-		if (@changed || @deleted) {
-			$env_changed{$env_name} = [@changed, @deleted];
-			$env_changed_detail{$env_name} = {
-				changed => \@changed,
-				deleted => \@deleted,
-				renamed => \%renamed,
-			};
+		if (@{$diff->{all}}) {
+			$env_changed{$env_name}        = $diff->{all};
+			$env_changed_detail{$env_name} = $diff;
 		}
 	}
 
-	# Determine entry points via pure decision logic.
+	# Determine entry points
 	my $env_propagate = Genesis::CI::Propagation::compute_propagation_targets(
 		dag_order   => \@dag_order,
 		parent_of   => \%parent_of,
@@ -310,14 +254,14 @@ sub propagate {
 	my $error;
 	for my $env_name (@scope) {
 		next unless $env_propagate->{$env_name};
-		my @files = @{$env_propagate->{$env_name}};
 
-		my $detail  = $env_changed_detail{$env_name} || { changed => \@files, deleted => [], renamed => {} };
+		my $detail  = $env_changed_detail{$env_name}
+			|| { changed => $env_propagate->{$env_name}, deleted => [], renamed => {} };
 		my @to_copy = @{$detail->{changed}};
 		my @to_rm   = @{$detail->{deleted}};
-		my %renames  = %{$detail->{renamed}};
+		my %renames = %{$detail->{renamed}};
 		my $total   = scalar(@to_copy) + scalar(@to_rm);
-		my $msg     = sprintf("[pipeline] control\@%s -> %s", $control_sha_short, $env_name);
+		my $msg     = sprintf("[pipeline] control\@%s -> %s", $control_short, $env_name);
 
 		if ($dry_run) {
 			info "  #C{%s}: %d file%s to propagate", $env_name, $total, $total == 1 ? '' : 's';
@@ -331,67 +275,36 @@ sub propagate {
 			$propagated++;
 		} else {
 			eval {
-				run({ dir => $git_root, onfailure => "Failed to checkout $env_name" },
-					'git', 'checkout', $env_name);
-
-				# Copy added/modified files from control@SHA
-				for my $file (@to_copy) {
-					my $dir = "$git_root/$file";
-					$dir =~ s{/[^/]+$}{};
-					mkdir_or_fail($dir) if !-d $dir;
-					run({ dir => $git_root, onfailure => "Failed to checkout $file from control\@$control_sha_short" },
-						'git', 'checkout', $control_sha_full, '--', $file);
-				}
-
-				# Remove deleted files
-				for my $file (@to_rm) {
-					run({ dir => $git_root, passfail => 1 }, 'git', 'rm', '-f', '--', $file);
-				}
-
-				run({ dir => $git_root }, 'git', 'add', @to_copy) if @to_copy;
-				run({ dir => $git_root, onfailure => "Failed to commit propagation to $env_name" },
-					'git', 'commit', '-m', $msg);
+				$git->checkout($env_name);
+				$git->checkout_file($control_sha, $_) for @to_copy;
+				$git->rm(@to_rm)                      if @to_rm;
+				$git->commit($msg, @to_copy);
 				info "  #G{%s}: propagated %d file%s", $env_name, $total, $total == 1 ? '' : 's';
 				push @pushed_branches, $env_name;
 				$propagated++;
 			};
 			if ($@) {
 				$error = $@;
-				# Reset any partial changes on this branch
-				run({ dir => $git_root, passfail => 1 },
-					'git', 'checkout', '--', '.');
-				warning(
-					"Propagation to #C{%s} failed: %s",
-					$env_name, $error =~ s/\s+$//r
-				);
+				$git->reset_working_tree;
+				warning("Propagation to #C{%s} failed: %s",
+					$env_name, $error =~ s/\s+$//r);
 				last;
 			}
 		}
 	}
 
-	# Always return to starting branch after non-dry-run
-	unless ($dry_run) {
-		run({ dir => $git_root, passfail => 1 },
-			'git', 'checkout', $current_branch);
-	}
-
+	# Restore branch explicitly (DESTROY would too, but be clear)
+	$git->restore_branch unless $dry_run;
 	bail("Propagation aborted due to error.") if $error;
 
 	# Push control and propagated branches to remote
 	if ($propagated && !$dry_run && !$no_push) {
-		my ($remote) = run({ passfail => 1 }, 'git', 'remote');
+		my $remote = $git->default_remote;
 		if ($remote) {
-			chomp $remote;
-			$remote = (split /\n/, $remote)[0]; # use first remote
 			info "\n#G{Pushing} to #C{%s}...", $remote;
-			# Push control first (so the SHA is resolvable)
-			run({ dir => $git_root, passfail => 1 },
-				'git', 'push', $remote, $current_branch);
-			# Push propagated env branches
+			my $results = $git->push($remote, $control, @pushed_branches);
 			for my $branch (@pushed_branches) {
-				my $ok = run({ dir => $git_root, passfail => 1 },
-					'git', 'push', $remote, $branch);
-				if ($ok) {
+				if ($results->{$branch}) {
 					info "  #G{%s}: pushed", $branch;
 				} else {
 					warning("Failed to push #C{%s} to #C{%s}.", $branch, $remote);
@@ -420,32 +333,29 @@ sub propagate {
 #
 # Returns: ($control_sha_full, $manual_commits_on_top)
 sub _resolve_propagation_base {
-	my ($branch) = @_;
+	my ($branch, $git) = @_;
+	$git ||= Service::Git->new('.');
 	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 
 	# Scan log for propagation markers
-	my ($log) = run({}, 'git', 'log', '--format=%H %s', $branch);
-	if ($log) {
-		my $depth = 0;
-		for my $line (split /\n/, $log) {
-			if ($line =~ /^[0-9a-f]+ \[pipeline\] control\@([0-9a-f]+)/) {
-				my ($full) = run({}, 'git', 'rev-parse', $1);
-				chomp $full if defined $full;
-				if ($depth > 0) {
-					warning(
-						"Branch #C{%s} has %d manual commit%s on top of the last propagation.",
-						$branch, $depth, $depth == 1 ? '' : 's'
-					);
-				}
-				return ($full, $depth);
+	my @lines = $git->log_subjects($branch);
+	my $depth = 0;
+	for my $line (@lines) {
+		if ($line =~ /^[0-9a-f]+ \[pipeline\] control\@([0-9a-f]+)/) {
+			my $full = $git->sha($1);
+			if ($depth > 0) {
+				warning(
+					"Branch #C{%s} has %d manual commit%s on top of the last propagation.",
+					$branch, $depth, $depth == 1 ? '' : 's'
+				);
 			}
-			$depth++;
+			return ($full, $depth);
 		}
+		$depth++;
 	}
 
 	# No propagation commit — use merge-base with control
-	my ($merge_base) = run({}, 'git', 'merge-base', $control, $branch);
-	chomp $merge_base if defined $merge_base;
+	my $merge_base = $git->merge_base($control, $branch);
 	return ($merge_base, 0) if $merge_base;
 
 	return (undef, 0);
