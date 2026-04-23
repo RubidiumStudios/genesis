@@ -64,6 +64,31 @@ sub new {
 }
 
 # }}}
+# create - initialize a new git repository and return an instance {{{
+#
+#   my $git = Service::Git->create($path);
+#   my $git = Service::Git->create($path, initial_branch => 'control');
+#
+# Runs git init at the given path, optionally setting the initial
+# branch name.  Returns a Service::Git instance for the new repo.
+sub create {
+	my ($class, $path, %opts) = @_;
+	$path ||= '.';
+
+	my @init = ('git', 'init');
+	if ($opts{initial_branch}) {
+		# git symbolic-ref works on all versions (git init -b requires >= 2.28)
+		run({ onfailure => "Failed to initialize git in $path" },
+			"cd \Q$path\E && git init && git symbolic-ref HEAD refs/heads/$opts{initial_branch}");
+	} else {
+		run({ onfailure => "Failed to initialize git in $path" },
+			'git', '-C', $path, 'init');
+	}
+
+	return $class->new($path, %opts);
+}
+
+# }}}
 # DESTROY - restore original branch on process exit {{{
 #
 # With flyweight caching, the instance lives for the process lifetime.
@@ -166,7 +191,19 @@ sub branch_exists {
 
 ### Queries {{{
 
-# rev_parse - resolve a ref to a SHA {{{
+# sha - return the commit SHA for a ref {{{
+#
+#   $git->sha('HEAD')                  # full SHA
+#   $git->sha('HEAD', short => 1)      # abbreviated
+#   $git->sha($branch)                 # resolve branch to SHA
+#   $git->sha($short_sha)             # expand short to full
+sub sha {
+	my ($self, $ref, %opts) = @_;
+	return $self->rev_parse($ref // 'HEAD', %opts);
+}
+
+# }}}
+# rev_parse - resolve a ref via git rev-parse (low-level) {{{
 #
 # Options:
 #   short => 1   — return abbreviated SHA
