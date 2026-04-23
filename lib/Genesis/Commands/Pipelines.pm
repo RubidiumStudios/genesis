@@ -118,6 +118,7 @@ sub propagate {
 
 	my $opts    = get_options;
 	my $dry_run = $opts->{'dry-run'};
+	my $no_push = $opts->{'no-push'};
 	my $top     = Genesis::Top->new('.');
 
 	bail("CI is not configured for this repository.")
@@ -305,6 +306,7 @@ sub propagate {
 
 	# Propagate to entry point envs
 	my $propagated = 0;
+	my @pushed_branches;
 	my $error;
 	for my $env_name (@scope) {
 		next unless $env_propagate->{$env_name};
@@ -350,6 +352,7 @@ sub propagate {
 				run({ dir => $git_root, onfailure => "Failed to commit propagation to $env_name" },
 					'git', 'commit', '-m', $msg);
 				info "  #G{%s}: propagated %d file%s", $env_name, $total, $total == 1 ? '' : 's';
+				push @pushed_branches, $env_name;
 				$propagated++;
 			};
 			if ($@) {
@@ -373,6 +376,29 @@ sub propagate {
 	}
 
 	bail("Propagation aborted due to error.") if $error;
+
+	# Push control and propagated branches to remote
+	if ($propagated && !$dry_run && !$no_push) {
+		my ($remote) = run({ passfail => 1 }, 'git', 'remote');
+		if ($remote) {
+			chomp $remote;
+			$remote = (split /\n/, $remote)[0]; # use first remote
+			info "\n#G{Pushing} to #C{%s}...", $remote;
+			# Push control first (so the SHA is resolvable)
+			run({ dir => $git_root, passfail => 1 },
+				'git', 'push', $remote, $current_branch);
+			# Push propagated env branches
+			for my $branch (@pushed_branches) {
+				my $ok = run({ dir => $git_root, passfail => 1 },
+					'git', 'push', $remote, $branch);
+				if ($ok) {
+					info "  #G{%s}: pushed", $branch;
+				} else {
+					warning("Failed to push #C{%s} to #C{%s}.", $branch, $remote);
+				}
+			}
+		}
+	}
 
 	if ($propagated) {
 		info "\n#G{Done.} %s %d environment%s.",

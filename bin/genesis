@@ -2071,6 +2071,10 @@ define_command("propagate", {
 		'commit=s' =>
 			"Control branch commit SHA to propagate from.  Defaults to ".
 			"HEAD of the control branch.",
+
+		'no-push' =>
+			"Skip pushing control and env branches to the remote after ".
+			"propagation.  By default, propagated branches are pushed.",
 	],
 	arguments => [
 		'env?' =>
