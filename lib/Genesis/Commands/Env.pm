@@ -860,19 +860,22 @@ sub deploy {
 	if ($top->ci_configured) {
 		require Service::Git;
 		my $git = Service::Git->new('.', track_branch => 1);
+		# Derive branch name: strip path prefix and .yml/.yaml suffix
+		(my $branch_name = $env_name) =~ s{^.*/}{};
+		$branch_name =~ s/\.ya?ml$//;
 		my $current = $git->current_branch // '';
-		if ($current ne $env_name) {
+		if ($current ne $branch_name) {
 			bail(
 				"Working tree has uncommitted changes.  Commit or stash them\n".
 				"before deploying."
 			) unless $git->is_clean;
 			bail(
 				"Environment branch #C{%s} does not exist.\n".
-				"Run #C{genesis propagate} to create it.",
-				$env_name
-			) unless $git->branch_exists($env_name);
-			info "\nSwitching to environment branch #C{%s}...", $env_name;
-			$git->checkout($env_name);
+				"Create it with #C{genesis new %s} on the control branch.",
+				$branch_name, $branch_name
+			) unless $git->branch_exists($branch_name);
+			info "\nSwitching to environment branch #C{%s}...", $branch_name;
+			$git->checkout($branch_name);
 			# Reload Top from the env branch
 			$top = Genesis::Top->new('.');
 		}

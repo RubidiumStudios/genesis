@@ -327,6 +327,27 @@ sub _base_deployment_content {
 			bosh          => $ENV{BOSH_USERNAME} || $ENV{BOSH_USER} || $ENV{BOSH_CLIENT} || undef,
 		};
 
+		# Git context for pipeline propagation tracking (CI-only)
+		if ($env->top->ci_configured) {
+			eval {
+				require Service::Git;
+				my $git = Service::Git->new('.');
+				$base->{git} = {
+					branch => $git->current_branch,
+					commit => $git->sha('HEAD'),
+				};
+				# Extract control commit from last propagation commit on this branch
+				my @log = $git->log_subjects($git->current_branch, limit => 20);
+				for my $line (@log) {
+					if ($line =~ /\[pipeline\] control\@([0-9a-f]+)/) {
+						$base->{git}{control_commit} = $git->sha($1);
+						last;
+					}
+				}
+			};
+			# Non-fatal — git context is supplementary
+		}
+
 		$base->{artifacts} = $self->_base_artifacts($action);
 
 		if ($action eq 'deploy') {

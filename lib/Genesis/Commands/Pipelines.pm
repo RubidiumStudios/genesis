@@ -180,7 +180,18 @@ sub pipeline_status {
 			$state{count}   = scalar @{$diff->{all}};
 			$env_changed{$env_name} = $diff->{all};
 		} else {
-			$state{status} = 'synced';
+			# Synced — check if also deployed
+			my $branch_head = $git->sha($env_name);
+			my $deployed = 0;
+			my $env_v = eval { $env->with_vault };
+			if ($env_v) {
+				my $dep = $env_v->deployments->latest_successful;
+				if ($dep) {
+					my $dep_commit = $dep->lookup('git.commit') || '';
+					$deployed = 1 if !$dep_commit || $dep_commit eq $branch_head;
+				}
+			}
+			$state{status} = $deployed ? 'deployed' : 'awaiting-deploy';
 		}
 
 		$env_state{$env_name} = \%state;
@@ -240,8 +251,10 @@ sub pipeline_status {
 		$pad = 0 if $pad < 0;
 		my $name_col = sprintf("%s%s%s", $indent, $env_name, ' ' x $pad);
 
-		if ($status eq 'synced') {
-			output "  #G{%s}  %s  #G{synced}", $name_col, $sync;
+		if ($status eq 'deployed') {
+			output "  #G{%s}  %s  #G{deployed}", $name_col, $sync;
+		} elsif ($status eq 'awaiting-deploy') {
+			output "  #C{%s}  %s  #Y{synced, pending deploy}", $name_col, $sync;
 		} elsif ($status eq 'pending') {
 			output "  #C{%s}  %s  #Y{%d pending}", $name_col, $sync, $state->{count};
 		} elsif ($status eq 'blocked') {
@@ -330,29 +343,31 @@ sub propagate {
 		bail("Environment #C{%s} is not in the pipeline topology.", $after_env)
 			unless $nodes->{$after_env};
 
-		# Verify the after_env has no outstanding changes
+		# Verify the after_env has been propagated AND deployed
 		my ($last_sync) = _resolve_propagation_base($after_env, $git);
-		if ($last_sync) {
-			my $after_load = eval { $top->load_env($after_env) };
-			if ($after_load) {
-				my @outstanding = $git->diff_names(
-					$last_sync, $control_sha,
-					$git->prefixed($after_load->propagation_files)
-				);
-				bail(
-					"Environment #C{%s} has %d outstanding change%s on control\n".
-					"that have not been propagated to it yet.\n".
-					"Run #C{genesis propagate} without arguments first.",
-					$after_env, scalar(@outstanding),
-					@outstanding == 1 ? '' : 's'
-				) if @outstanding;
-			}
-		} else {
-			bail(
-				"Environment #C{%s} has never been propagated to.\n".
-				"Run #C{genesis propagate} without arguments first.",
-				$after_env
+		bail(
+			"Environment #C{%s} has never been propagated to.\n".
+			"Run #C{genesis propagate} without arguments first.",
+			$after_env
+		) unless $last_sync;
+
+		my $after_load = eval { $top->load_env($after_env) };
+		if ($after_load) {
+			# 1. Check for outstanding unpropagated changes
+			my @outstanding = $git->diff_names(
+				$last_sync, $control_sha,
+				$git->prefixed($after_load->propagation_files)
 			);
+			bail(
+				"Environment #C{%s} has %d outstanding change%s on control\n".
+				"that have not been propagated to it yet.\n".
+				"Run #C{genesis propagate} without arguments first.",
+				$after_env, scalar(@outstanding),
+				@outstanding == 1 ? '' : 's'
+			) if @outstanding;
+
+			# 2. Check that the propagated state was deployed
+			_verify_deployed($after_env, $after_load, $git);
 		}
 
 		my %child_set;
@@ -512,6 +527,52 @@ sub _resolve_propagation_base {
 	return ($merge_base, 0) if $merge_base;
 
 	return (undef, 0);
+}
+# }}}
+# _verify_deployed - check that an env's propagated state was deployed {{{
+#
+# Compares the env branch HEAD against the git.commit field in the
+# latest successful deployment's exodus audit data.  Requires vault.
+# Warns and allows cascade if vault is unavailable.
+sub _verify_deployed {
+	my ($env_name, $env, $git) = @_;
+
+	my $branch_head = $git->sha($env_name);
+
+	# Vault access is required — soft-fail if unavailable
+	my $env_with_vault = eval { $env->with_vault };
+	unless ($env_with_vault) {
+		warning(
+			"Could not verify deployment status for #C{%s} (vault unavailable).\n".
+			"Ensure it has been deployed before cascading.",
+			$env_name
+		);
+		return;
+	}
+
+	my $deployment = $env_with_vault->deployments->latest_successful;
+	bail(
+		"Environment #C{%s} has never been successfully deployed.\n".
+		"Deploy it before cascading to downstream environments.",
+		$env_name
+	) unless $deployment;
+
+	my $deployed_commit = $deployment->lookup('git.commit') || '';
+	if ($deployed_commit && $deployed_commit ne $branch_head) {
+		bail(
+			"Environment #C{%s} has been propagated but not yet deployed\n".
+			"with the latest changes.  Deploy it before cascading to\n".
+			"downstream environments.",
+			$env_name
+		);
+	} elsif (!$deployed_commit) {
+		# Pre-pipeline deployment (no git context in exodus) — warn only
+		warning(
+			"Environment #C{%s} was deployed before pipeline tracking was enabled.\n".
+			"Cannot verify deployment state — ensure it has been deployed.",
+			$env_name
+		);
+	}
 }
 # }}}
 
