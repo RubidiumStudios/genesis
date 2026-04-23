@@ -218,38 +218,39 @@ sub pipeline_status {
 		$pipeline_name, $provider_type, $head_short;
 	output "";
 
-	my $max_name = 0;
-	for (@dag_order) {
-		$max_name = length($_) if length($_) > $max_name;
+	# Compute column width: widest (indent + name) across all envs
+	my $col_width = 0;
+	my %depth_of;
+	for my $env_name (@dag_order) {
+		my $depth = 0;
+		my $p = $parent_of{$env_name};
+		while ($p) { $depth++; $p = $parent_of{$p}; }
+		$depth_of{$env_name} = $depth;
+		my $w = ($depth * 2) + length($env_name);
+		$col_width = $w if $w > $col_width;
 	}
 
 	for my $env_name (@dag_order) {
 		my $state  = $env_state{$env_name};
 		my $status = $state->{status};
-		my $sync   = $state->{sync} || '-';
-		my $indent = '';
-
-		# Compute depth for visual indentation
-		my $depth = 0;
-		my $p = $parent_of{$env_name};
-		while ($p) { $depth++; $p = $parent_of{$p}; }
-		$indent = '  ' x $depth;
-
-		my $name_pad = $max_name - length($env_name) - ($depth * 2);
-		$name_pad = 0 if $name_pad < 0;
-		my $padded_name = $env_name . (' ' x $name_pad);
+		my $sync   = $state->{sync} || '  -    ';
+		my $depth  = $depth_of{$env_name};
+		my $indent = '  ' x $depth;
+		my $pad    = $col_width - ($depth * 2) - length($env_name);
+		$pad = 0 if $pad < 0;
+		my $name_col = sprintf("%s%s%s", $indent, $env_name, ' ' x $pad);
 
 		if ($status eq 'synced') {
-			output "  %s#G{%s}  %s  #G{synced}", $indent, $padded_name, $sync;
+			output "  #G{%s}  %s  #G{synced}", $name_col, $sync;
 		} elsif ($status eq 'pending') {
-			output "  %s#C{%s}  %s  #Y{%d pending}", $indent, $padded_name, $sync, $state->{count};
+			output "  #C{%s}  %s  #Y{%d pending}", $name_col, $sync, $state->{count};
 		} elsif ($status eq 'blocked') {
-			output "  %s#C{%s}  %s  #Yi{blocked by %s} (%d files)",
-				$indent, $padded_name, $sync, $state->{blocker}, $state->{count};
+			output "  #C{%s}  %s  #Yi{blocked by %s} (%d files)",
+				$name_col, $sync, $state->{blocker}, $state->{count};
 		} elsif ($status eq 'no-branch') {
-			output "  %s#R{%s}  %s  #R{no branch}", $indent, $padded_name, '-';
+			output "  #R{%s}  %s  #R{no branch}", $name_col, '-      ';
 		} elsif ($status eq 'error') {
-			output "  %s#R{%s}  %s  #R{load error}", $indent, $padded_name, '-';
+			output "  #R{%s}  %s  #R{load error}", $name_col, '-      ';
 		}
 	}
 
