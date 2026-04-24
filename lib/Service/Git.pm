@@ -227,6 +227,20 @@ sub merge_base {
 }
 
 # }}}
+# is_ancestor - true if $maybe_ancestor is an ancestor of (or equal to) $descendant {{{
+#
+#   $git->is_ancestor($a, $b)  # true if A == B, or A is reachable from B
+sub is_ancestor {
+	my ($self, $maybe_ancestor, $descendant) = @_;
+	return 0 unless defined $maybe_ancestor && defined $descendant;
+	my $ok = run(
+		{ dir => $self->{root}, passfail => 1 },
+		'git', 'merge-base', '--is-ancestor', $maybe_ancestor, $descendant
+	);
+	return $ok ? 1 : 0;
+}
+
+# }}}
 # is_clean - true if working tree has no modified/staged/conflicted files {{{
 #
 # Ignores untracked files — they don't affect branch switching.

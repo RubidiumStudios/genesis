@@ -358,10 +358,13 @@ sub propagate {
 		$control, $git->current_branch // '<detached>'
 	) unless ($git->current_branch // '') eq $control;
 
+	# Bail on uncommitted changes — even on --dry-run.  Propagation
+	# operates on committed state; uncommitted edits to env files
+	# would silently make a dry-run misrepresent reality.
 	bail(
 		"Working tree has uncommitted changes.  Commit or stash them\n".
 		"before running propagate."
-	) unless $dry_run || $git->is_clean;
+	) unless $git->is_clean;
 
 	# Build the DAG from control branch env files
 	require Genesis::CI::Compiler::ASTBuilder;
@@ -486,7 +489,7 @@ sub propagate {
 	#                    descendants don't cascade past an ancestor that
 	#                    has received a change on-branch but not yet
 	#                    deployed it.
-	my (%env_changed, %env_changed_detail, %env_undeployed);
+	my (%env_changed, %env_changed_detail, %env_undeployed, %env_skipped_ahead);
 	for my $env_name (@scope) {
 		next unless $git->branch_exists($env_name);
 		my $env = eval { $top->load_env($env_name) };
@@ -494,6 +497,22 @@ sub propagate {
 
 		my @dep_files = $env->propagation_files;
 		next unless @dep_files;
+
+		# Cascade-only safety: if this env's last propagation marker
+		# already references a commit equal-to or descended-from
+		# $control_sha, the env is at-or-ahead of the cascade source.
+		# Propagating now would REGRESS its state to an older commit.
+		# Skip the diff entirely so the env shows up in the summary
+		# as "ahead of cascade source" rather than getting silently
+		# rolled back.
+		if ($after_env) {
+			my ($env_last_sync) = _resolve_propagation_base($env_name, $git);
+			if ($env_last_sync
+				&& $git->is_ancestor($control_sha, $env_last_sync)) {
+				$env_skipped_ahead{$env_name} = $git->sha($env_last_sync, short => 1);
+				next;
+			}
+		}
 
 		my $diff = $git->diff_files(
 			$env_name, $control_sha, @dep_files
@@ -729,10 +748,22 @@ sub propagate {
 		}
 	}
 
+	# Report any envs we deliberately skipped because they were already
+	# at-or-ahead of the cascade source (avoids silent regressions).
+	if (%env_skipped_ahead) {
+		info "";
+		for my $env_name (sort keys %env_skipped_ahead) {
+			info "  #Y{%s}: skipped - already at #C{%s} (more recent %s commit)",
+				$env_name, $env_skipped_ahead{$env_name}, $control;
+		}
+	}
+
 	if ($propagated) {
 		info "\n#G{Done.} %s %d environment%s.",
 			$dry_run ? "Would propagate to" : "Propagated to",
 			$propagated, $propagated == 1 ? '' : 's';
+	} elsif (%env_skipped_ahead) {
+		info "\n#Yi{No changes to propagate (downstream envs already up-to-date or ahead).}";
 	} else {
 		info "\n#Yi{No changes to propagate.}";
 	}
