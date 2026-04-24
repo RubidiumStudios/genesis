@@ -53,6 +53,21 @@ sub describe {
 		my $workflow = $ast->workflows->{$wf_name};
 		my $wf_data  = $self->_extract_workflow_data($ast, $workflow);
 
+		# Error early if bosh-upgrade locks are needed but locker is not configured.
+		my $locker = $ast->integrations->{locker} || {};
+		for my $env (@{$wf_data->{environments}}) {
+			my $parent = $wf_data->{bosh_parent}{$env} || '';
+			next unless $parent && ($wf_data->{bosh_upgrade_lock}{$env} // 1);
+			bail(
+				"Environment '%s' has a pipeline-managed BOSH director ('%s') but no\n".
+				"locker integration is configured.\n".
+				"Add a 'locker:' block to your integrations configuration, or set\n".
+				"  genesis:\n    pipeline:\n      locks:\n        bosh_upgrade: false\n".
+				"in %s.yml to opt out.",
+				$env, $parent, $env
+			) unless $locker->{url};
+		}
+
 		my @wf_job_names;
 		my @notify_job_names;
 		my @redeploy_job_names;
@@ -67,10 +82,9 @@ sub describe {
 			)};
 
 			# Locker resources
-			my $locker = $ast->integrations->{locker} || {};
 			if ($locker->{url}) {
 				push @resources, @{$self->_locker_resources(
-					$ast, $env, $alias, $deploy_type, $is_create_env
+					$ast, $env, $alias, $deploy_type, $is_create_env, $wf_data
 				)};
 			}
 
@@ -236,13 +250,17 @@ sub mermaid {
 			? _topological_sort($graph)
 			: sort @{$wf_data->{environments}};
 
-		# Emit edges; node shapes are defined inline on first appearance as target
+		# Emit edges; node shapes are defined inline on first appearance
 		my %shape_defined;
 		for my $env (@order) {
 			next unless $out_edges{$env};
 
 			my $from_alias = $wf_data->{aliases}{$env} || $env;
 			my $from_id    = _mermaid_id($from_alias);
+			my $from_ref   = $shape_defined{$from_id}
+				? $from_id
+				: _mermaid_node_def($from_alias, $nodes->{$env},
+				    $wf_data->{is_bosh_director}{$env});
 			$shape_defined{$from_id} = 1;
 
 			for my $to_env (@{$out_edges{$env}}) {
@@ -250,9 +268,10 @@ sub mermaid {
 				my $to_id    = _mermaid_id($to_alias);
 				my $to_ref   = $shape_defined{$to_id}
 					? $to_id
-					: _mermaid_node_def($to_alias, $nodes->{$to_env});
+					: _mermaid_node_def($to_alias, $nodes->{$to_env},
+					    $wf_data->{is_bosh_director}{$to_env});
 				$shape_defined{$to_id} = 1;
-				push @lines, "  $from_id --> $to_ref";
+				push @lines, "  $from_ref --> $to_ref";
 			}
 		}
 
@@ -260,7 +279,8 @@ sub mermaid {
 		for my $env (@order) {
 			next if $in_any_edge{$env};
 			my $alias = $wf_data->{aliases}{$env} || $env;
-			push @lines, "  " . _mermaid_node_def($alias, $nodes->{$env});
+			push @lines, "  " . _mermaid_node_def($alias, $nodes->{$env},
+				$wf_data->{is_bosh_director}{$env});
 		}
 	}
 
@@ -529,8 +549,18 @@ sub _env_resources {
 
 # }}}
 # _locker_resources - build locker resources for an environment {{{
+#
+# Three cases:
+#   Director  (is_bosh_director=1):  emits <alias>-bosh-lock as a shared named
+#                                    lock; all children will acquire this resource.
+#   Child     (bosh_parent set, bosh_upgrade_lock=1):  emits only the
+#                                    deployment-lock — bosh-lock is the director's.
+#   Standalone (no pipeline parent): emits per-env bosh-lock pointing to the
+#                                    BOSH director URL (legacy behaviour).
+#
+# All cases emit <alias>-deployment-lock for intra-env deploy serialization.
 sub _locker_resources {
-	my ($self, $ast, $env, $alias, $deploy_type, $is_create_env) = @_;
+	my ($self, $ast, $env, $alias, $deploy_type, $is_create_env, $wf_data) = @_;
 
 	my @resources;
 	my $locker = $ast->integrations->{locker} || {};
@@ -547,17 +577,36 @@ sub _locker_resources {
 		ca_cert             => $locker->{ca_cert},
 	);
 
-	unless ($is_create_env) {
-		my $target = $ast->targets->{$env} || {};
-		my $conn   = $target->{connection} || {};
+	my $bosh_parent    = $wf_data->{bosh_parent}{$env}       || '';
+	my $bu_lock        = $wf_data->{bosh_upgrade_lock}{$env} // 1;
+	my $is_director    = $wf_data->{is_bosh_director}{$env}  || 0;
+
+	if ($is_director) {
+		# Shared bosh-upgrade lock — children acquire this during their deploys.
+		# Use lock_name (named lock) so no BOSH URL is required at pipeline-gen time.
 		push @resources, {
 			name   => "$alias-bosh-lock",
 			type   => 'locker',
 			icon   => 'shield-lock-outline',
 			%to,
-			source => { %locker_source, bosh_lock => $conn->{url} },
+			source => { %locker_source, lock_name => "$alias-bosh-upgrade" },
 		};
+	} elsif (!$bosh_parent || !$bu_lock) {
+		# Standalone or opted-out child: per-env bosh-lock using the BOSH URL.
+		unless ($is_create_env) {
+			my $target = $ast->targets->{$env} || {};
+			my $conn   = $target->{connection} || {};
+			push @resources, {
+				name   => "$alias-bosh-lock",
+				type   => 'locker',
+				icon   => 'shield-lock-outline',
+				%to,
+				source => { %locker_source, bosh_lock => $conn->{url} },
+			};
+		}
 	}
+	# Children with bosh_parent + bosh_upgrade_lock: no own bosh-lock resource —
+	# they acquire the director's <director-alias>-bosh-lock instead.
 
 	push @resources, {
 		name   => "$alias-deployment-lock",
@@ -686,22 +735,36 @@ sub _deploy_job {
 	my @unlock_steps;
 	my $locker = $ast->integrations->{locker} || {};
 	if ($locker->{url}) {
-		unless ($is_create_env) {
+		my $bosh_parent = $wf_data->{bosh_parent}{$env}       || '';
+		my $bu_lock     = $wf_data->{bosh_upgrade_lock}{$env} // 1;
+		my $is_director = $wf_data->{is_bosh_director}{$env}  || 0;
+
+		my $bosh_lock_alias;
+		if ($bosh_parent && $bu_lock) {
+			# Child: acquire director's shared bosh-lock
+			$bosh_lock_alias = $wf_data->{aliases}{$bosh_parent} || $bosh_parent;
+		} elsif ($is_director || !$is_create_env) {
+			# Director or standalone non-create-env: acquire own bosh-lock
+			$bosh_lock_alias = $alias;
+		}
+
+		if ($bosh_lock_alias) {
 			push @lock_steps, {
-				put => "$alias-bosh-lock", %to,
+				put => "$bosh_lock_alias-bosh-lock", %to,
 				params => {
 					lock_op => 'lock', key => 'dont-upgrade-bosh-on-me',
 					locked_by => "$env-$deploy_type",
 				},
 			};
 			push @unlock_steps, {
-				put => "$alias-bosh-lock", %to,
+				put => "$bosh_lock_alias-bosh-lock", %to,
 				params => {
 					lock_op => 'unlock', key => 'dont-upgrade-bosh-on-me',
 					locked_by => "$env-$deploy_type",
 				},
 			};
 		}
+
 		push @lock_steps, {
 			put => "$alias-deployment-lock", %to,
 			params => {
@@ -837,42 +900,50 @@ sub _redeploy_job {
 	my @priv = @{$config->{task}{privileged} || []};
 	$deploy_task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
 
-	# Locker steps — same dual-lock pattern as the normal deploy job
+	# Locker steps — mirrors _deploy_job lock topology
 	my @lock_steps;
 	my @unlock_steps;
 	my $locker = $ast->integrations->{locker} || {};
 	if ($locker->{url}) {
-		unless ($is_create_env) {
+		my $bosh_parent = $wf_data->{bosh_parent}{$env}       || '';
+		my $bu_lock     = $wf_data->{bosh_upgrade_lock}{$env} // 1;
+		my $is_director = $wf_data->{is_bosh_director}{$env}  || 0;
+
+		my $bosh_lock_alias;
+		if ($bosh_parent && $bu_lock) {
+			$bosh_lock_alias = $wf_data->{aliases}{$bosh_parent} || $bosh_parent;
+		} elsif ($is_director || !$is_create_env) {
+			$bosh_lock_alias = $alias;
+		}
+
+		if ($bosh_lock_alias) {
 			push @lock_steps, {
-				put => "$alias-bosh-lock", %to,
+				put => "$bosh_lock_alias-bosh-lock", %to,
 				params => {
-					lock_op   => 'lock',
-					key       => 'dont-upgrade-bosh-on-me',
+					lock_op => 'lock', key => 'dont-upgrade-bosh-on-me',
 					locked_by => "$env-redeploy",
 				},
 			};
 			push @unlock_steps, {
-				put => "$alias-bosh-lock", %to,
+				put => "$bosh_lock_alias-bosh-lock", %to,
 				params => {
-					lock_op   => 'unlock',
-					key       => 'dont-upgrade-bosh-on-me',
+					lock_op => 'unlock', key => 'dont-upgrade-bosh-on-me',
 					locked_by => "$env-redeploy",
 				},
 			};
 		}
+
 		push @lock_steps, {
 			put => "$alias-deployment-lock", %to,
 			params => {
-				lock_op   => 'lock',
-				key       => 'i-need-to-deploy-myself',
+				lock_op => 'lock', key => 'i-need-to-deploy-myself',
 				locked_by => "$env-redeploy",
 			},
 		};
 		push @unlock_steps, {
 			put => "$alias-deployment-lock", %to,
 			params => {
-				lock_op   => 'unlock',
-				key       => 'i-need-to-deploy-myself',
+				lock_op => 'unlock', key => 'i-need-to-deploy-myself',
 				locked_by => "$env-redeploy",
 			},
 		};
@@ -1451,7 +1522,8 @@ sub _extract_workflow_data {
 
 	my (%will_trigger, %triggers, %auto, %aliases, %genesis_envs,
 	    %redeploy, %redeploy_cron_start, %redeploy_cron_stop,
-	    %status_signal, %signal_prefix);
+	    %status_signal, %signal_prefix,
+	    %bosh_parent, %bosh_upgrade_lock, %is_bosh_director);
 
 	for my $edge (@$edges) {
 		push @{$will_trigger{$edge->{from}}}, $edge->{to};
@@ -1467,6 +1539,13 @@ sub _extract_workflow_data {
 		$redeploy_cron_stop{$n}  = $nd->{redeploy_cron_stop}  || '';
 		$status_signal{$n}       = $nd->{status_signal}       // '';
 		$signal_prefix{$n}       = $nd->{signal_prefix}       || '';
+		$bosh_parent{$n}         = $nd->{bosh_parent}         || '';
+		$bosh_upgrade_lock{$n}   = $nd->{bosh_upgrade_lock}   // 1;
+	}
+	# Derive which envs are pipeline BOSH directors (referenced as bosh_parent)
+	for my $n (keys %bosh_parent) {
+		my $parent = $bosh_parent{$n};
+		$is_bosh_director{$parent} = 1 if $parent;
 	}
 
 	if ($workflow->{_legacy}) {
@@ -1491,6 +1570,9 @@ sub _extract_workflow_data {
 		redeploy_cron_stop  => \%redeploy_cron_stop,
 		status_signal       => \%status_signal,
 		signal_prefix       => \%signal_prefix,
+		bosh_parent         => \%bosh_parent,
+		bosh_upgrade_lock   => \%bosh_upgrade_lock,
+		is_bosh_director    => \%is_bosh_director,
 	};
 }
 
@@ -1598,11 +1680,12 @@ sub _mermaid_id {
 # }}}
 # _mermaid_node_def - node reference with optional gate shape annotation {{{
 sub _mermaid_node_def {
-	my ($alias, $node) = @_;
+	my ($alias, $node, $is_director) = @_;
 	$node ||= {};
 	my $id = _mermaid_id($alias);
 
 	my @labels;
+	push @labels, 'DIRECTOR' if $is_director;
 	push @labels, 'PR'       if $node->{require_pr};
 	push @labels, 'MANUAL'   if $node->{manual};
 	push @labels, 'REDEPLOY' if $node->{redeploy};

@@ -181,6 +181,14 @@ sub _build_legacy_workflows {
 				$nodes{$env}{redeploy_cron_stop}  = $ef->{redeploy_cron_stop};
 				$nodes{$env}{status_signal}       = $ef->{status_signal};
 				$nodes{$env}{signal_prefix}       = $ef->{signal_prefix};
+				# bosh_parent only valid if the director is also in this pipeline
+				my $bp    = $ef->{bosh_parent} // '';
+				my $locks = $ef->{locks} || {};
+				$nodes{$env}{bosh_parent}       = (exists $nodes{$bp}) ? $bp : '';
+				$nodes{$env}{bosh_upgrade_lock} =
+					exists $locks->{bosh_upgrade}
+						? _truthy($locks->{bosh_upgrade})
+						: 1;
 			}
 		}
 
@@ -440,8 +448,24 @@ sub _build_from_env_files {
 			redeploy_cron_stop  => $data->{redeploy_cron_stop}  || '',
 			status_signal       => $ss,
 			signal_prefix       => $data->{signal_prefix} || '',
+			bosh_parent         => '',  # resolved in second pass below
+			bosh_upgrade_lock   => 1,   # default: enabled
 		};
 		$prior_env_map{$env} = $data->{prior_env} if $data->{prior_env};
+	}
+
+	# Second pass: resolve bosh_parent from genesis.bosh_env — only when the
+	# named director is also a pipeline-managed env in this same node set.
+	for my $env (sort keys %envs_to_include) {
+		my $data   = $pipeline_data{$env} || {};
+		my $be     = $data->{_bosh_env}  || '';
+		next unless $be && exists $nodes{$be};
+		my $locks = $data->{locks} || {};
+		$nodes{$env}{bosh_parent}       = $be;
+		$nodes{$env}{bosh_upgrade_lock} =
+			exists $locks->{bosh_upgrade}
+				? _truthy($locks->{bosh_upgrade})
+				: 1;
 	}
 
 	my @edges;
@@ -458,15 +482,17 @@ sub _build_from_env_files {
 # }}}
 ### Internal Helpers {{{
 
-# _read_genesis_pipeline_keys - extract genesis.pipeline.* from a YAML file {{{
+# _read_genesis_pipeline_keys - extract genesis-level and genesis.pipeline.* keys {{{
 #
-# Reads a YAML file line-by-line looking for the nested structure:
+# Reads a YAML file line-by-line capturing:
 #   genesis:
+#     bosh_env: <value>      (genesis-level — stored as _bosh_env)
 #     pipeline:
-#       key: value
+#       key: value           (pipeline sub-keys — stored directly)
+#       locks:
+#         bosh_upgrade: val  (stored as locks->{bosh_upgrade})
 #
-# Returns a hashref of the pipeline sub-keys (may be empty).
-# No external YAML parser needed — only flat scalar values are extracted.
+# Returns a hashref (may be empty).  No external YAML parser needed.
 sub _read_genesis_pipeline_keys {
 	my ($file) = @_;
 
@@ -475,7 +501,7 @@ sub _read_genesis_pipeline_keys {
 	close $fh;
 
 	my %result;
-	my ($in_genesis, $in_pipeline) = (0, 0);
+	my ($in_genesis, $in_pipeline, $in_locks) = (0, 0, 0);
 
 	for my $line (@lines) {
 		chomp $line;
@@ -486,24 +512,51 @@ sub _read_genesis_pipeline_keys {
 			my $key = $1;
 			$in_genesis  = $key eq 'genesis' ? 1 : 0;
 			$in_pipeline = 0;
+			$in_locks    = 0;
 			next;
 		}
 
 		# 'pipeline:' under genesis (2-space indent)
 		if ($in_genesis && $line =~ /^  pipeline:\s*$/) {
 			$in_pipeline = 1;
+			$in_locks    = 0;
 			next;
 		}
 
-		# Another 2-space key under genesis resets pipeline context
-		if ($in_genesis && $line =~ /^  [a-zA-Z]/) {
+		# Other 2-space keys under genesis: capture selected ones, reset pipeline context
+		if ($in_genesis && $line =~ /^  ([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/) {
+			my ($k, $v) = ($1, $2);
 			$in_pipeline = 0;
+			$in_locks    = 0;
+			if ($k eq 'bosh_env') {
+				$v =~ s/\s*#.*$//;
+				$v =~ s/^\s+|\s+$//g;
+				$v =~ s/^(["'])(.*)\1$/$2/;
+				$result{_bosh_env} = $v;
+			}
 			next;
 		}
 
-		# 4-space keys under genesis.pipeline
+		# 'locks:' sub-section under genesis.pipeline (4-space, no inline value)
+		if ($in_pipeline && $line =~ /^    locks:\s*$/) {
+			$in_locks = 1;
+			next;
+		}
+
+		# 6-space keys under genesis.pipeline.locks
+		if ($in_locks && $line =~ /^      ([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/) {
+			my ($k, $v) = ($1, $2);
+			$v =~ s/\s*#.*$//;
+			$v =~ s/^\s+|\s+$//g;
+			$v =~ s/^(["'])(.*)\1$/$2/;
+			$result{locks}{$k} = $v;
+			next;
+		}
+
+		# 4-space keys under genesis.pipeline (non-locks)
 		if ($in_pipeline && $line =~ /^    ([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/) {
 			my ($k, $v) = ($1, $2);
+			$in_locks = 0;
 			$v =~ s/\s*#.*$//;    # strip inline comment
 			$v =~ s/^\s+|\s+$//g; # trim
 			$v =~ s/^(["'])(.*)\1$/$2/; # unquote surrounding quotes
