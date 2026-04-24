@@ -400,6 +400,34 @@ sub default_remote {
 }
 
 # }}}
+# remote_url - fetch the fetch URL for a named (or default) remote {{{
+sub remote_url {
+	my ($self, $remote) = @_;
+	$remote //= $self->default_remote;
+	return undef unless $remote;
+	my ($url) = run({ dir => $self->{root} }, 'git', 'remote', 'get-url', $remote);
+	chomp $url if defined $url;
+	return $url;
+}
+
+# }}}
+# fetch_branch - fetch a specific branch from remote into a local ref {{{
+#
+# Uses the forced refspec (+refs/heads/branch:refs/heads/branch) so the
+# local ref is created or updated regardless of fast-forward status.
+# Safe for propagation branches that are written-once and never rebased.
+sub fetch_branch {
+	my ($self, $branch, $remote) = @_;
+	$remote //= $self->default_remote;
+	return $self unless $remote;
+	run({ dir => $self->{root}, onfailure => "Failed to fetch '$branch' from '$remote'" },
+		'git', 'fetch', $remote,
+		"+refs/heads/$branch:refs/heads/$branch");
+	$self->{_branch_cache}{$branch} = 1;
+	return $self;
+}
+
+# }}}
 # push - push branches to a remote {{{
 #
 #   $git->push(@branches);              # push to default remote

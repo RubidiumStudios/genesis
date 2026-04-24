@@ -6,6 +6,7 @@ use Genesis;
 use Genesis::UI;
 use Genesis::Term qw/csprintf/;
 
+use JSON::PP;
 use Time::HiRes qw/gettimeofday/;
 use Digest::SHA qw/sha1_hex/;
 
@@ -480,6 +481,133 @@ sub validate_ssh_key {
 	my ($self, $key) = @_;
 	return 0 unless defined $key;
 	return $key =~ /^(ssh-rsa|ssh-dss|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521)\s+[A-Za-z0-9+\/]+[=]{0,3}(\s+.+)?$/;
+}
+
+# }}}
+# pulls_url - URL for the GitHub pull requests API {{{
+#
+#   $gh->pulls_url('org/repo')         # list endpoint
+#   $gh->pulls_url('org/repo', 42)     # single-PR endpoint
+sub pulls_url {
+	my ($self, $owner_repo, $number) = @_;
+	my $url = sprintf("%s/repos/%s/pulls", $self->base_url, $owner_repo);
+	$url .= "/$number" if defined $number;
+	return $url;
+}
+
+# }}}
+# list_prs - list pull requests for a repository {{{
+#
+# Options:
+#   state  - 'open' (default), 'closed', or 'all'
+#   head   - filter by head branch (bare branch name; owner: prefix added automatically)
+#   base   - filter by base (target) branch
+#
+# Returns an arrayref of PR objects from the GitHub API.
+sub list_prs {
+	my ($self, $owner_repo, %opts) = @_;
+	bail("Missing owner/repo for list_prs") unless $owner_repo;
+
+	my $state = $opts{state} || 'open';
+	my $url   = $self->pulls_url($owner_repo) . "?state=$state&per_page=100";
+	$url .= "&base=" . $opts{base} if $opts{base};
+	# GitHub requires owner:branch format for cross-fork head filter
+	if ($opts{head}) {
+		my ($owner) = split m{/}, $owner_repo;
+		$url .= "&head=$owner:$opts{head}";
+	}
+
+	my @all_prs;
+	while ($url) {
+		my ($code, $msg, $data, $headers) = curl("GET", $url, undef, undef, 0, $self->{creds});
+		bail(
+			"Failed to list pull requests for #C{%s}: HTTP %s - %s",
+			$owner_repo, $code, $msg
+		) unless $code == 200;
+
+		my $page;
+		eval { $page = load_json($data); 1 }
+			or bail("Failed to parse pull request list from GitHub: %s", $@);
+		push @all_prs, @$page if ref($page) eq 'ARRAY';
+
+		# Follow Link: <url>; rel="next" pagination header
+		$url = undef;
+		if ($headers) {
+			my ($link_hdr) = grep { s/^Link:\s*//i } split /[\r\n]+/, $headers;
+			if ($link_hdr) {
+				($url) = grep { s/^<(.*)>; rel="next"$/$1/ } split /,\s*/, $link_hdr;
+			}
+		}
+	}
+	return \@all_prs;
+}
+
+# }}}
+# create_pr - create a pull request {{{
+#
+# Required options: head (source branch), base (target branch), title
+# Optional:         body
+#
+# Returns the PR object (hashref) from the GitHub API.
+sub create_pr {
+	my ($self, $owner_repo, %opts) = @_;
+	bail("Missing owner/repo for create_pr")  unless $owner_repo;
+	bail("Missing head branch for create_pr") unless $opts{head};
+	bail("Missing base branch for create_pr") unless $opts{base};
+	bail("Missing title for create_pr")       unless $opts{title};
+
+	my $payload = JSON::PP->new->encode({
+		title => $opts{title},
+		body  => $opts{body} // '',
+		head  => $opts{head},
+		base  => $opts{base},
+	});
+
+	my ($code, $msg, $data) = curl(
+		"POST", $self->pulls_url($owner_repo),
+		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}
+	);
+	bail(
+		"Failed to create pull request for #C{%s}: HTTP %s - %s",
+		$owner_repo, $code, $msg
+	) unless $code == 201;
+
+	my $pr;
+	eval { $pr = load_json($data); 1 }
+		or bail("Failed to parse create_pr response from GitHub: %s", $@);
+	return $pr;
+}
+
+# }}}
+# update_pr - update an existing pull request {{{
+#
+# opts: title, body, state ('open' or 'closed')
+#
+# Returns the updated PR object.
+sub update_pr {
+	my ($self, $owner_repo, $number, %opts) = @_;
+	bail("Missing owner/repo for update_pr") unless $owner_repo;
+	bail("Missing PR number for update_pr")  unless defined $number;
+
+	my %update;
+	$update{title} = $opts{title} if defined $opts{title};
+	$update{body}  = $opts{body}  if defined $opts{body};
+	$update{state} = $opts{state} if defined $opts{state};
+
+	my $payload = JSON::PP->new->encode(\%update);
+	my ($code, $msg, $data) = curl(
+		"PATCH", $self->pulls_url($owner_repo, $number),
+		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}
+	);
+	bail(
+		"Failed to update pull request #%d for #C{%s}: HTTP %s - %s",
+		$number, $owner_repo, $code, $msg
+	) unless $code == 200;
+
+	my $pr;
+	eval { $pr = load_json($data); 1 }
+		or bail("Failed to parse update_pr response from GitHub: %s", $@);
+	return $pr;
 }
 
 # }}}

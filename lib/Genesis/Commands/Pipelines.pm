@@ -12,6 +12,7 @@ use Genesis::CI::Legacy qw//;
 use Genesis::CI::Compiler;
 use Genesis::CI::Propagation;
 use Service::Git;
+use Service::Github;
 use Service::Vault::Remote;
 
 use File::Basename qw/dirname/;
@@ -221,6 +222,29 @@ sub pipeline_status {
 		}
 	}
 
+	# Pre-fetch open propagation PRs from GitHub if any env uses require_pr.
+	# One paginated API call covers all envs; non-fatal if credentials are
+	# absent or the call fails — display degrades to [PR required] for all.
+	my %gh_open_prs;  # env_name => PR object for the most-recent open propagation PR
+	{
+		my $has_require_pr = grep { ($nodes->{$_}{require_pr} // 0) } keys %$nodes;
+		if ($has_require_pr && $ENV{GITHUB_AUTH_TOKEN}) {
+			my ($gh_owner, $gh_repo) = _github_owner_repo_from_remote($git);
+			if ($gh_owner && $gh_repo) {
+				my $github = Service::Github->new(org => $gh_owner);
+				eval {
+					my $prs = $github->list_prs("$gh_owner/$gh_repo", state => 'open');
+					for my $pr (@$prs) {
+						if ($pr->{head}{ref} =~ m{^propagate/([^/]+)/}) {
+							$gh_open_prs{$1} //= $pr;
+						}
+					}
+				};
+				# Silently degrade on error — status output continues without PR info
+			}
+		}
+	}
+
 	# Display
 	my $pipeline_name = $top->config->get('ci.name') || $top->type;
 	my $provider_type = $top->config->get('ci.provider.type') || 'manual';
@@ -256,7 +280,20 @@ sub pipeline_status {
 		} elsif ($status eq 'awaiting-deploy') {
 			output "  #C{%s}  %s  #Y{synced, pending deploy}", $name_col, $sync;
 		} elsif ($status eq 'pending') {
-			output "  #C{%s}  %s  #Y{%d pending}", $name_col, $sync, $state->{count};
+			my $req_pr  = ($nodes->{$env_name} || {})->{require_pr} // 0;
+			if ($req_pr) {
+				my $open_pr = $gh_open_prs{$env_name};
+				if ($open_pr) {
+					output "  #C{%s}  %s  #Y{%d pending} #Yi{[PR #%d open: %s]}",
+						$name_col, $sync, $state->{count},
+						$open_pr->{number}, $open_pr->{html_url};
+				} else {
+					output "  #C{%s}  %s  #Y{%d pending} #Yi{[PR required]}",
+						$name_col, $sync, $state->{count};
+				}
+			} else {
+				output "  #C{%s}  %s  #Y{%d pending}", $name_col, $sync, $state->{count};
+			}
 		} elsif ($status eq 'blocked') {
 			output "  #C{%s}  %s  #Yi{blocked by %s} (%d files)",
 				$name_col, $sync, $state->{blocker}, $state->{count};
@@ -416,9 +453,42 @@ sub propagate {
 		scope       => \@scope,
 	);
 
+	# Pre-flight: build GitHub service once for all require_pr envs in scope.
+	# Owner/repo is resolved from the remote URL; credentials are validated
+	# against the API before touching any branches.  With --no-push, GitHub
+	# is not contacted (no push, no PR) so credentials are not required.
+	my ($gh_owner, $gh_repo, $github);
+	if (!$dry_run) {
+		my $needs_github = grep {
+			$env_propagate->{$_} && ($nodes->{$_}{require_pr} // 0)
+		} @scope;
+		if ($needs_github) {
+			($gh_owner, $gh_repo) = _github_owner_repo_from_remote($git);
+			bail(
+				"Could not determine GitHub owner/repo from remote URL.\n".
+				"Ensure the origin remote points to a GitHub repository."
+			) unless $gh_owner && $gh_repo;
+
+			unless ($no_push) {
+				bail(
+					"GitHub credentials required for PR-based propagation.\n".
+					"Set the GITHUB_AUTH_TOKEN environment variable."
+				) unless $ENV{GITHUB_AUTH_TOKEN};
+
+				$github = Service::Github->new(org => $gh_owner);
+				my $authed_user = $github->get_authorized_user;
+				bail(
+					"GitHub credentials are invalid or lack sufficient permissions.\n".
+					"Verify GITHUB_AUTH_TOKEN is a valid Personal Access Token."
+				) unless $authed_user;
+			}
+		}
+	}
+
 	# Propagate to entry point envs
 	my $propagated = 0;
 	my @pushed_branches;
+	my @pr_targets;
 	my $error;
 	for my $env_name (@scope) {
 		next unless $env_propagate->{$env_name};
@@ -428,8 +498,10 @@ sub propagate {
 		my @to_copy = @{$detail->{changed}};
 		my @to_rm   = @{$detail->{deleted}};
 		my %renames = %{$detail->{renamed}};
-		my $total   = scalar(@to_copy) + scalar(@to_rm);
-		my $msg     = sprintf("[pipeline] control\@%s -> %s", $control_short, $env_name);
+		my $total      = scalar(@to_copy) + scalar(@to_rm);
+		my $msg        = sprintf("[pipeline] control\@%s -> %s", $control_short, $env_name);
+		my $require_pr = $nodes->{$env_name}{require_pr} // 0;
+		my $prop_branch = "propagate/$env_name/$control_short";
 
 		if ($dry_run) {
 			info "  #C{%s}: %d file%s to propagate", $env_name, $total, $total == 1 ? '' : 's';
@@ -440,7 +512,67 @@ sub propagate {
 			}
 			info "    #R{D} %s", $_ for @to_rm;
 			info "    #Yi{commit}: %s", $msg;
+			if ($require_pr) {
+				info "    #Yi{PR}: would open %s -> %s", $prop_branch, $env_name;
+			}
 			$propagated++;
+		} elsif ($require_pr) {
+			# PR-based propagation: commit onto a short-lived propagation branch.
+			# Idempotency is checked via the GitHub API when credentials are
+			# available (normal run), or via local branch existence when not
+			# (--no-push).  If an open PR is found on the remote, the branch is
+			# fetched rather than re-created.
+			eval {
+				my $existing_pr;
+
+				if ($github) {
+					my $prs = $github->list_prs("$gh_owner/$gh_repo",
+						head  => $prop_branch,
+						base  => $env_name,
+						state => 'open',
+					);
+					($existing_pr) = grep { $_->{head}{ref} eq $prop_branch } @$prs;
+				}
+
+				if ($existing_pr) {
+					unless ($git->branch_exists($prop_branch)) {
+						$git->fetch_branch($prop_branch);
+					}
+					$git->checkout($prop_branch);
+					info "  #Yi{%s}: PR #%d already open, reusing branch #C{%s}",
+						$env_name, $existing_pr->{number}, $prop_branch;
+				} elsif ($git->branch_exists($prop_branch)) {
+					# --no-push re-run: local branch exists, no PR yet
+					$git->checkout($prop_branch);
+					info "  #Yi{%s}: reusing local propagation branch #C{%s}",
+						$env_name, $prop_branch;
+				} else {
+					$git->checkout($env_name);
+					$git->create_branch($prop_branch);
+					$git->checkout($prop_branch);
+					$git->checkout_file($control_sha, $_) for @to_copy;
+					$git->rm(@to_rm)                      if @to_rm;
+					$git->commit($msg, @to_copy);
+					info "  #G{%s}: committed %d file%s to #C{%s}",
+						$env_name, $total, $total == 1 ? '' : 's', $prop_branch;
+				}
+
+				push @pushed_branches, $prop_branch unless $no_push;
+				push @pr_targets, {
+					env      => $env_name,
+					branch   => $prop_branch,
+					detail   => $detail,
+					existing => $existing_pr,
+				};
+				$propagated++;
+			};
+			if ($@) {
+				$error = $@;
+				$git->reset_working_tree;
+				warning("PR propagation to #C{%s} failed: %s",
+					$env_name, $error =~ s/\s+$//r);
+				last;
+			}
 		} else {
 			eval {
 				$git->checkout($env_name);
@@ -465,7 +597,7 @@ sub propagate {
 	$git->restore_branch unless $dry_run;
 	bail("Propagation aborted due to error.") if $error;
 
-	# Push control and propagated branches to remote
+	# Push control and propagated/PR branches to remote
 	if ($propagated && !$dry_run && !$no_push) {
 		my $remote = $git->default_remote;
 		if ($remote) {
@@ -476,6 +608,32 @@ sub propagate {
 					info "  #G{%s}: pushed", $branch;
 				} else {
 					warning("Failed to push #C{%s} to #C{%s}.", $branch, $remote);
+				}
+			}
+		}
+
+		# Open or update GitHub PRs for require_pr environments.
+		# $github is only set when credentials were validated; @pr_targets
+		# is only populated for require_pr envs; both guards are needed.
+		if (@pr_targets && $github) {
+			my $owner_repo = "$gh_owner/$gh_repo";
+			info "\n#G{Opening pull requests} on #C{%s}...", $owner_repo;
+			for my $pt (@pr_targets) {
+				my $pr_env    = $pt->{env};
+				my $pr_branch = $pt->{branch};
+				my $pr_title  = sprintf("[pipeline] propagate control\@%s to %s",
+					$control_short, $pr_env);
+				my $pr_body = _build_pr_body($pr_env, $control_sha, $control_short, $pt->{detail});
+				eval {
+					my $pr = _find_or_open_pr(
+						$github, $owner_repo, $pr_branch, $pr_env,
+						$pr_title, $pr_body, $pt->{existing}
+					);
+					info "  #G{%s}: PR #%d %s", $pr_env, $pr->{number}, $pr->{html_url};
+				};
+				if ($@) {
+					warning("Failed to open/update PR for #C{%s}: %s",
+						$pr_env, $@ =~ s/\s+$//r);
 				}
 			}
 		}
@@ -573,6 +731,84 @@ sub _verify_deployed {
 			$env_name
 		);
 	}
+}
+# }}}
+# _github_owner_repo_from_remote - parse owner and repo from the git remote URL {{{
+#
+# Supports SSH (git@github.com:owner/repo.git) and HTTPS formats.
+# Returns (owner, repo) or (undef, undef) on failure.
+sub _github_owner_repo_from_remote {
+	my ($git) = @_;
+	my $url = $git->remote_url($git->default_remote) or return (undef, undef);
+	if ($url =~ m{github\.com[:/]([^/]+)/([^/.]+?)(?:\.git)?\s*$}) {
+		return ($1, $2);
+	}
+	return (undef, undef);
+}
+# }}}
+# _build_pr_body - compose the pull request description {{{
+sub _build_pr_body {
+	my ($env_name, $control_sha, $control_short, $detail) = @_;
+	my @changed = @{$detail->{changed} || []};
+	my @deleted = @{$detail->{deleted} || []};
+	my %renames = %{$detail->{renamed} || {}};
+
+	my @lines = (
+		"Propagating `control\@$control_short` to `$env_name`",
+		"",
+		"**Control SHA:** \`$control_sha\`",
+		"",
+	);
+
+	if (@changed) {
+		push @lines, "**Changed files:**";
+		for my $f (@changed) {
+			my ($old) = grep { $renames{$_} eq $f } keys %renames;
+			push @lines, $old ? "- \`$f\` *(renamed from \`$old\`)*" : "- \`$f\`";
+		}
+		push @lines, "";
+	}
+
+	if (@deleted) {
+		push @lines, "**Deleted files:**";
+		push @lines, "- \`$_\`" for @deleted;
+		push @lines, "";
+	}
+
+	push @lines, "---";
+	push @lines, "_[pipeline] control\@$control_short -> ${env_name}_";
+
+	return join("\n", @lines);
+}
+# }}}
+# _find_or_open_pr - create a PR or update the existing one for this propagation branch {{{
+#
+# Accepts an optional $existing PR object (pre-fetched during the propagation
+# loop) to avoid a redundant list_prs call.  Falls back to querying GitHub
+# when $existing is not provided.
+sub _find_or_open_pr {
+	my ($github, $owner_repo, $prop_branch, $env_name, $title, $body, $existing) = @_;
+
+	unless ($existing) {
+		my $prs = $github->list_prs($owner_repo,
+			head  => $prop_branch,
+			base  => $env_name,
+			state => 'open',
+		);
+		($existing) = grep { $_->{head}{ref} eq $prop_branch } @$prs;
+	}
+
+	return $existing
+		? $github->update_pr($owner_repo, $existing->{number},
+			title => $title,
+			body  => $body,
+		)
+		: $github->create_pr($owner_repo,
+			head  => $prop_branch,
+			base  => $env_name,
+			title => $title,
+			body  => $body,
+		);
 }
 # }}}
 
