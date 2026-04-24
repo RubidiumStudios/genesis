@@ -640,15 +640,70 @@ Genesis::CI::Concourse - Concourse CI provider implementation
 =head1 DESCRIPTION
 
 Genesis::CI::Concourse implements the Genesis::CI trait interface for
-Concourse CI. It handles parsing ci.yml configuration, generating Concourse
+Concourse CI.  It handles parsing ci.yml configuration, generating Concourse
 pipeline YAML, and deploying pipelines via the fly CLI.
 
-This implementation currently delegates to Genesis::CI::Legacy for the heavy
-lifting, but provides a clean interface for future refactoring.
+The native pipeline compiler (C<PipelineDescriptor>) produces fully-resolved
+Concourse YAML with support for:
+
+=over 4
+
+=item Deployment propagation
+
+Environments form a directed graph; each env's branch is updated after its
+upstream deploys successfully.
+
+=item Redeploy lane (C<genesis.pipeline.redeploy>)
+
+A separate C<redeploy-E<lt>envE<gt>> Concourse job that redeploys an
+environment without change detection or cache promotion.  Three trigger modes:
+
+=over 4
+
+=item C<manual> — operator triggers via Concourse UI or C<fly trigger-job>.
+
+=item C<cron> — a Concourse C<time> resource triggers the job within a
+configured daily window (C<redeploy_cron_start> / C<redeploy_cron_stop>,
+default 04:00–05:00 UTC).
+
+=item C<signal> — the C<redeploy-E<lt>envE<gt>> job triggers off the
+environment's status-signal resource (C<get: E<lt>envE<gt>-signal, trigger:
+true, version: {status: success}>).  Requires C<status_signal> to be
+configured globally; otherwise falls back to manual behaviour.
+
+=back
+
+=item Deployment status signals (C<configuration.status_signal>)
+
+A generic event bus backed by the C<cfcommunity/shuttle-resource> Concourse
+custom resource type.  Every deploy and redeploy job emits C<on_success>,
+C<on_failure>, C<on_abort>, and C<on_error> put steps to a per-environment
+C<E<lt>envE<gt>-signal> resource.  Supported backends: C<file>, C<s3>, C<gcs>.
+
+Global configuration example:
+
+  configuration:
+    status_signal:
+      backend: s3
+      bucket: my-genesis-signals
+      region: us-east-1
+      access_key_id: ((aws-access-key))
+      secret_access_key: ((aws-secret-key))
+
+Per-environment overrides (in C<genesis.pipeline> within each env YAML):
+
+  status_signal: gcs    # override backend for this env
+  signal_prefix: my-pipeline/prod  # override resource prefix
+
+Disable signals for a specific env:
+
+  status_signal: false
+
+=back
 
 =head1 SYNOPSIS
 
-  # Via trait interface (legacy path)
+  # Via trait interface
   use Genesis::CI;
   my $ci = Genesis::CI->new(
     type   => 'concourse',
@@ -660,7 +715,7 @@ lifting, but provides a clean interface for future refactoring.
   my $yaml = $ci->generate();
   $ci->deploy(target => 'prod', yes => 1);
 
-  # Via compiler pipeline (new path)
+  # Via compiler pipeline
   my $result = Genesis::CI->compile(
     ci_dir   => '.genesis/ci',
     provider => 'concourse',
@@ -673,7 +728,7 @@ lifting, but provides a clean interface for future refactoring.
 
 Generate Concourse pipeline YAML from a Genesis::CI::Compiler::AST.
 For legacy-sourced ASTs, bridges to Legacy::generate_pipeline_concourse_yaml().
-For modern ASTs, generates Concourse YAML natively.
+For modern ASTs, generates Concourse YAML natively via PipelineDescriptor.
 
 =head2 output_files()
 
@@ -715,7 +770,10 @@ Generate pipeline.md content containing a Mermaid flowchart LR diagram.
 
 =head2 describe()
 
-Print human-readable pipeline description to stdout.
+Print human-readable pipeline description to stdout.  Each environment is
+annotated with its trigger mode and, when configured, its redeploy mode
+(C<REDEPLOY:MANUAL>, C<REDEPLOY:CRON>, C<REDEPLOY:SIGNAL>) and signal backend
+(C<SIGNAL:file>, C<SIGNAL:s3>, C<SIGNAL:gcs>).
 
 =head1 ACCESSORS
 
@@ -733,7 +791,8 @@ Returns layout name.
 
 =head1 SEE ALSO
 
-Genesis::CI, Genesis::CI::GithubActions, Genesis::CI::Legacy
+Genesis::CI, Genesis::CI::GithubActions, Genesis::CI::Legacy,
+Genesis::CI::Compiler::PipelineDescriptor
 
 =cut
 

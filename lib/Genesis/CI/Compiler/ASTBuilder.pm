@@ -179,6 +179,8 @@ sub _build_legacy_workflows {
 				$nodes{$env}{redeploy}            = $ef->{redeploy};
 				$nodes{$env}{redeploy_cron_start} = $ef->{redeploy_cron_start};
 				$nodes{$env}{redeploy_cron_stop}  = $ef->{redeploy_cron_stop};
+				$nodes{$env}{status_signal}       = $ef->{status_signal};
+				$nodes{$env}{signal_prefix}       = $ef->{signal_prefix};
 			}
 		}
 
@@ -418,6 +420,12 @@ sub _build_from_env_files {
 		if ($rd && $rd !~ /^(manual|cron|signal)$/) {
 			$rd = _truthy($rd) ? 'manual' : '';
 		}
+		my $ss = $data->{status_signal} || '';
+		if ($ss && $ss !~ /^(false|no|0|file|s3|gcs)$/i && _truthy($ss)) {
+			$ss = '1';  # truthy shorthand → "enabled, use global config"
+		} elsif ($ss && $ss =~ /^(false|no|0)$/i) {
+			$ss = '0';  # normalized disabled
+		}
 		$nodes{$env} = {
 			stage_name          => $env,
 			target_name         => $env,
@@ -430,6 +438,8 @@ sub _build_from_env_files {
 			redeploy            => $rd,
 			redeploy_cron_start => $data->{redeploy_cron_start} || '',
 			redeploy_cron_stop  => $data->{redeploy_cron_stop}  || '',
+			status_signal       => $ss,
+			signal_prefix       => $data->{signal_prefix} || '',
 		};
 		$prior_env_map{$env} = $data->{prior_env} if $data->{prior_env};
 	}
