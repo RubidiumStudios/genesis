@@ -140,7 +140,7 @@ sub describe {
 
 		# Auto-update resources and job
 		my $auto_update = $config->{auto_update};
-		if ($auto_update && defined $auto_update->{file}) {
+		if ($auto_update && $auto_update->{enabled}) {
 			push @resources, @{$self->_auto_update_resources($ast)};
 			push @jobs, $self->_auto_update_job($ast);
 		}
@@ -198,7 +198,7 @@ sub describe {
 			}
 		}
 
-		if ($auto_update && defined $auto_update->{file}) {
+		if ($auto_update && $auto_update->{enabled}) {
 			push @groups, {
 				name => 'genesis-updates',
 				jobs => ['update-genesis-assets'],
@@ -1194,57 +1194,103 @@ sub _outcome_hooks {
 }
 
 # }}}
-# _auto_update_resources - build kit-release and genesis-release resources {{{
+# _auto_update_resources - build kit-release, genesis-release, and optional
+# git-autoupdate resources based on the active auto_update flags {{{
 sub _auto_update_resources {
 	my ($self, $ast) = @_;
 
 	my $config      = $ast->configuration || {};
 	my $auto_update = $config->{auto_update} || {};
+	my $sc          = $ast->integrations->{source_control} || {};
+	my $period      = $auto_update->{period} || '24h';
+	my $api_url     = $auto_update->{api_url};
+	my $auth_token  = _unwrap_ref($auto_update->{auth_token} || '');
 
 	my @resources;
-	push @resources, {
-		name        => 'kit-release',
-		icon        => 'package-variant',
-		type        => 'github-release',
-		check_every => $auto_update->{period} || '24h',
-		source      => {
-			user         => $auto_update->{org},
-			repository   => "$auto_update->{kit}-genesis-kit",
-			access_token => _unwrap_ref($auto_update->{kit_auth_token}
-				|| $auto_update->{auth_token} || ''),
-			($auto_update->{api_url}
-				? (github_api_url => $auto_update->{api_url}) : ()),
-		},
-	};
 
-	push @resources, {
-		name        => 'genesis-release',
-		type        => 'github-release',
-		icon        => 'leaf',
-		check_every => $auto_update->{period} || '24h',
-		source      => {
-			user         => 'genesis-community',
-			repository   => 'genesis',
-			access_token => _unwrap_ref($auto_update->{genesis_auth_token}
-				|| $auto_update->{auth_token} || ''),
-		},
-	};
+	# kit-release: GitHub release feed for the configured kit
+	if ($auto_update->{update_kit} // 1) {
+		push @resources, {
+			name        => 'kit-release',
+			icon        => 'package-variant',
+			type        => 'github-release',
+			check_every => $period,
+			source      => {
+				user         => $auto_update->{org},
+				repository   => "$auto_update->{kit}-genesis-kit",
+				access_token => _unwrap_ref($auto_update->{kit_auth_token} || $auth_token),
+				($api_url ? (github_api_url => $api_url) : ()),
+			},
+		};
+	}
+
+	# genesis-release: GitHub release feed for the genesis binary
+	if ($auto_update->{update_genesis} // 1) {
+		push @resources, {
+			name        => 'genesis-release',
+			type        => 'github-release',
+			icon        => 'leaf',
+			check_every => $period,
+			source      => {
+				user         => 'genesis-community',
+				repository   => 'genesis',
+				access_token => _unwrap_ref($auto_update->{genesis_auth_token} || $auth_token),
+			},
+		};
+	}
+
+	# git-autoupdate: separate push resource when target_branch differs from
+	# the pipeline control branch (e.g., operator wants commits on a dedicated branch)
+	my $control_branch = $sc->{default_branch}
+		|| $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()}
+		|| 'main';
+	my $target_branch = $auto_update->{target_branch} || '';
+	if ($target_branch && $target_branch ne $control_branch) {
+		my $uri = $self->_git_uri($sc);
+		my %source = (uri => $uri, branch => $target_branch);
+		if ($sc->{auth}) {
+			if (($sc->{auth}{type} || '') eq 'ssh-key') {
+				$source{private_key} = _unwrap_ref($sc->{auth}{private_key});
+			} else {
+				$source{username} = _unwrap_ref($sc->{auth}{username});
+				$source{password} = _unwrap_ref($sc->{auth}{password});
+			}
+		}
+		push @resources, {
+			name   => 'git-autoupdate',
+			type   => 'git',
+			icon   => 'source-branch',
+			source => \%source,
+		};
+	}
 
 	return \@resources;
 }
 
 # }}}
 # _auto_update_job - build update-genesis-assets job {{{
+#
+# Emits three optional task steps, each guarded by a flag:
+#   list-kits      — pre-flight kit availability check  (update_kit: true)
+#   update-genesis — embed newer genesis binary          (update_genesis: true)
+#   fetch-kit      — sed kit version + commit           (update_kit: true)
+#
+# The push target defaults to the pipeline control branch via 'git'.  When
+# target_branch is set to a different branch, a dedicated 'git-autoupdate'
+# resource (emitted by _auto_update_resources) is used for the put step.
 sub _auto_update_job {
 	my ($self, $ast) = @_;
 
-	my $config      = $ast->configuration || {};
-	my $sc          = $ast->integrations->{source_control} || {};
-	my $root        = $sc->{root} || '.';
-	my $auto_update = $config->{auto_update} || {};
-	my $task_cfg    = $config->{task} || {};
-	my $reg         = $config->{registry} || {};
-	my $pfx         = $reg->{uri} ? "$reg->{uri}/" : '';
+	my $config         = $ast->configuration || {};
+	my $sc             = $ast->integrations->{source_control} || {};
+	my $root           = $sc->{root} || '.';
+	my $auto_update    = $config->{auto_update} || {};
+	my $update_kit     = $auto_update->{update_kit}     // 1;
+	my $update_genesis = $auto_update->{update_genesis} // 1;
+
+	my $task_cfg = $config->{task} || {};
+	my $reg      = $config->{registry} || {};
+	my $pfx      = $reg->{uri} ? "$reg->{uri}/" : '';
 
 	my $img_src = {
 		repository => "$pfx" . ($task_cfg->{image} || 'genesiscommunity/concourse'),
@@ -1255,24 +1301,49 @@ sub _auto_update_job {
 		$img_src->{password} = _unwrap_ref($reg->{password});
 	}
 
-	my $git_genesis_dir = 'git';
+	# Path helpers for repos rooted in a subdirectory
+	my $git_genesis_dir     = 'git';
 	my $genesis_config_path = '';
-	my $path_prefix = '';
-	my $subdir_msg = '';
+	my $path_prefix         = '';
+	my $subdir_msg          = '';
 	if ($root ne '.') {
-		$git_genesis_dir .= "/$root";
-		$genesis_config_path = " -C '$root'";
-		$path_prefix = "$root/";
-		$subdir_msg = " under $root";
+		$git_genesis_dir     .= "/$root";
+		$genesis_config_path  = " -C '$root'";
+		$path_prefix          = "$root/";
+		$subdir_msg           = " under $root";
 	}
+	my $pushd_cmd = ($root eq '.') ? '' : "pushd '$root' &> /dev/null\n";
+	my $popd_cmd  = ($root eq '.') ? '' : "popd &> /dev/null\n";
 
-	my $user_name = ($sc->{commit_author} ? $sc->{commit_author}{name}  : undef)
+	my $user_name  = ($sc->{commit_author} ? $sc->{commit_author}{name}  : undef)
 		|| 'Concourse Bot';
 	my $user_email = ($sc->{commit_author} ? $sc->{commit_author}{email} : undef)
 		|| 'concourse@pipeline';
-	my $ci_label  = $auto_update->{label} || 'concourse';
-	my $kit_name  = $auto_update->{kit};
+	my $ci_label   = $auto_update->{label} || $auto_update->{commit_label} || 'concourse';
+	my $kit_name   = $auto_update->{kit}   || '';
 
+	# Determine which git resource receives the auto-commit push
+	my $control_branch = $sc->{default_branch}
+		|| $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()}
+		|| 'main';
+	my $target_branch = $auto_update->{target_branch} || '';
+	my $push_resource = ($target_branch && $target_branch ne $control_branch)
+		? 'git-autoupdate'
+		: 'git';
+
+	# -----------------------------------------------------------------------
+	# in_parallel gets — only include resources that are enabled
+	# kit-release and genesis-release both trigger when their flag is set.
+	# -----------------------------------------------------------------------
+	my @parallel_gets = ({ get => 'git' });
+	push @parallel_gets, { get => 'kit-release',     trigger => JSON::PP::true }
+		if $update_kit;
+	push @parallel_gets, { get => 'genesis-release', trigger => JSON::PP::true }
+		if $update_genesis;
+
+	# -----------------------------------------------------------------------
+	# list-kits — pre-flight: confirm kit version exists in remote registry
+	# -----------------------------------------------------------------------
 	my $list_kits_task = {
 		task   => 'list-kits',
 		config => {
@@ -1288,8 +1359,9 @@ sub _auto_update_job {
 		},
 	};
 
-	my $pushd_cmd = ($root eq '.') ? '' : "pushd '$root' &> /dev/null\n";
-	my $popd_cmd  = ($root eq '.') ? '' : "popd &> /dev/null\n";
+	# -----------------------------------------------------------------------
+	# update-genesis — embed newer genesis binary if upstream > embedded
+	# -----------------------------------------------------------------------
 	my $update_genesis_script = <<"SCRIPT";
 chmod +x ../genesis-release/genesis
 upstream="\$(../genesis-release/genesis -v 2>/dev/null | sed -e 's/Genesis v\\([^ ]*\\) .*/\\1/')"
@@ -1330,6 +1402,10 @@ SCRIPT
 		},
 	};
 
+	# -----------------------------------------------------------------------
+	# fetch-kit — fetch kit version from GitHub release, sed version file,
+	# commit if changed
+	# -----------------------------------------------------------------------
 	my $fetch_kit_script = <<"SCRIPT";
 version="\$(cat ../kit-release/version)"
 ${pushd_cmd}if ! .genesis/bin/genesis --no-color list-kits \${GENESIS_KIT_NAME} | grep "v\$version\\\$"; then
@@ -1366,21 +1442,23 @@ SCRIPT
 		},
 	};
 
+	# -----------------------------------------------------------------------
+	# Assemble plan — only include steps for enabled features
+	# -----------------------------------------------------------------------
+	my @plan = ({ in_parallel => \@parallel_gets });
+	push @plan, $list_kits_task      if $update_kit;
+	push @plan, $update_genesis_task if $update_genesis;
+	push @plan, $fetch_kit_task      if $update_kit;
+	push @plan, {
+		put    => $push_resource,
+		params => { repository => $push_resource, rebase => JSON::PP::true },
+	};
+
 	return {
-		name => 'update-genesis-assets',
-		plan => [
-			{
-				in_parallel => [
-					{ get => 'git' },
-					{ get => 'kit-release', trigger => JSON::PP::true },
-					{ get => 'genesis-release' },
-				],
-			},
-			$list_kits_task,
-			$update_genesis_task,
-			$fetch_kit_task,
-			{ put => 'git', params => { repository => 'git', rebase => JSON::PP::true } },
-		],
+		name   => 'update-genesis-assets',
+		public => JSON::PP::true,
+		serial => JSON::PP::true,
+		plan   => \@plan,
 	};
 }
 

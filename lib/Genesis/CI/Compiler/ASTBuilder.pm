@@ -102,6 +102,7 @@ sub _build_from_legacy {
 		},
 		'require-passed-caches' => $p->{'require-passed-caches'},
 	};
+	_normalize_auto_update($configuration->{auto_update});
 
 	# Provider config - include legacy raw pipeline data for Concourse bridge
 	my $provider_config = $parsed->{provider_config} || {};
@@ -278,6 +279,7 @@ sub _build_from_multi_file {
 
 	# Configuration
 	my $configuration = $pipeline->{configuration} || {};
+	_normalize_auto_update($configuration->{auto_update});
 
 	# Provider config
 	my $provider_config = $parsed->{provider_config} || {};
@@ -497,6 +499,42 @@ sub _build_from_env_files {
 # }}}
 ### Internal Helpers {{{
 
+# _normalize_auto_update - normalize auto_update config to internal representation {{{
+#
+# Accepts both the legacy format (file, label) and the v2 format
+# (kit_version_file, commit_label, enabled, update_genesis, update_kit,
+# target_branch).  Normalizes in-place so downstream code only needs to
+# read the internal keys.
+#
+# Internal keys after normalization:
+#   enabled        — 0/1; legacy: enabled when 'file' is present
+#   file           — kit version file path (from kit_version_file or file)
+#   label          — commit prefix (from commit_label or label)
+#   update_genesis — 0/1, default 1
+#   update_kit     — 0/1, default 1
+#   target_branch  — optional branch override for the push commit
+sub _normalize_auto_update {
+	my ($au) = @_;
+	return unless ref($au) eq 'HASH';
+
+	# Key aliases: v2 names → internal names
+	$au->{file}  //= $au->{kit_version_file} if defined $au->{kit_version_file};
+	$au->{label} //= $au->{commit_label}     if defined $au->{commit_label};
+
+	# Feature flag defaults
+	$au->{update_genesis} //= 1;
+	$au->{update_kit}     //= 1;
+
+	# enabled: legacy path auto-enables when 'file' is declared;
+	# v2 path requires explicit enabled: true
+	if (!defined $au->{enabled}) {
+		$au->{enabled} = defined($au->{file}) ? 1 : 0;
+	} else {
+		$au->{enabled} = _truthy($au->{enabled}) ? 1 : 0;
+	}
+}
+
+# }}}
 # _normalize_slack_config - normalize Slack notification config to integrations.slack {{{
 #
 # Accepts either the new structured format:
