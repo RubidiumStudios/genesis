@@ -171,10 +171,7 @@ sub pipeline_status {
 		}
 
 		my @dep_files = $env->propagation_files;
-		my $diff = $git->diff_files(
-			$env_name, $head,
-			$git->prefixed(@dep_files)
-		);
+		my $diff = $git->diff_files($env_name, $head, @dep_files);
 
 		if (@{$diff->{all}}) {
 			$state{changed} = $diff->{all};
@@ -393,7 +390,7 @@ sub propagate {
 			# 1. Check for outstanding unpropagated changes
 			my @outstanding = $git->diff_names(
 				$last_sync, $control_sha,
-				$git->prefixed($after_load->propagation_files)
+				$after_load->propagation_files,
 			);
 			bail(
 				"Environment #C{%s} has %d outstanding change%s on control\n".
@@ -436,8 +433,7 @@ sub propagate {
 		next unless @dep_files;
 
 		my $diff = $git->diff_files(
-			$env_name, $control_sha,
-			$git->prefixed(@dep_files)
+			$env_name, $control_sha, @dep_files
 		);
 		if (@{$diff->{all}}) {
 			$env_changed{$env_name}        = $diff->{all};
@@ -507,10 +503,12 @@ sub propagate {
 			info "  #C{%s}: %d file%s to propagate", $env_name, $total, $total == 1 ? '' : 's';
 			for my $f (@to_copy) {
 				my ($old) = grep { $renames{$_} eq $f } keys %renames;
-				my $note = $old ? " #Yi{(renamed from $old)}" : '';
-				info "    #G{M} %s%s", $f, $note;
+				my ($disp_f)   = $git->unprefixed($f);
+				my ($disp_old) = $old ? $git->unprefixed($old) : ();
+				my $note = $old ? " #Yi{(renamed from $disp_old)}" : '';
+				info "    #G{M} %s%s", $disp_f, $note;
 			}
-			info "    #R{D} %s", $_ for @to_rm;
+			info "    #R{D} %s", $_ for $git->unprefixed(@to_rm);
 			info "    #Yi{commit}: %s", $msg;
 			if ($require_pr) {
 				info "    #Yi{PR}: would open %s -> %s", $prop_branch, $env_name;
