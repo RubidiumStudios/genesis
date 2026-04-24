@@ -972,7 +972,11 @@ sub use_create_env {
 sub can_build_cloud_configs {
 	my $self = shift;
 	return 0 unless $self->feature_compatibility("3.1.0-rc.9");
-	return 0 unless $self->lookup('genesis.manage-cloud-configs')//1;
+	# Cloud-config generation is an OCFP-only concern; non-OCFP envs
+	# have their cloud-config managed externally regardless of whether
+	# the kit happens to provide a cloud-config hook.
+	return 0 unless $self->is_ocfp;
+	return 0 unless $self->lookup('genesis.manage-cloud-configs', 1);
 	return 1;
 }
 
@@ -2114,8 +2118,12 @@ sub get_environment_variables {
 		$env{GENESIS_KIT_PATH}                 = $self->kit->path;
 		$env{GENESIS_MIN_VERSION_FOR_KIT}      = $self->kit->genesis_version_min();
 		if ($self->exists) {
-			$env{GENESIS_ENV_IAAS}               = $self->iaas();
-			$env{GENESIS_ENV_SCALE}              = $self->scale();
+			# Skip iaas/scale for the features hook — they're derived
+			# from features and calling them here recurses via bosh.
+			if ($hook ne 'features') {
+				$env{GENESIS_ENV_IAAS}               = $self->iaas();
+				$env{GENESIS_ENV_SCALE}              = $self->scale();
+			}
 			$env{GENESIS_ENV_KIT_OVERRIDE_FILES} = join(' ', $self->kit->env_override_files);
 		}
 
@@ -6257,13 +6265,17 @@ sub _get_stemcell_status {
 					$result->{alt_existing_cpis} = $available{$targets[0]}->{cpis};
 				}
 			} else {
-				# No stemcells available for the desired os
+				# No stemcells available for the desired os.  $newest is
+				# undef (no entry in %newest_by_os for this OS), so there
+				# are no existing-CPI stemcells to report.
 				$result->{alt} = Service::BOSH::Stemcell->find(
 					$self->iaas,
 					$os,
 					$version
 				);
-				$result->{alt_existing_cpis} = $available{$newest}{cpis};
+				$result->{alt_existing_cpis} = defined($newest)
+					? $available{$newest}{cpis}
+					: [];
 			}
 
 				# If using a non-default CPI, check if the latest version is available for it

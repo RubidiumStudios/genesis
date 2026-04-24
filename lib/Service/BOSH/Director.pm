@@ -544,7 +544,11 @@ sub stemcells {
 	)->{Tables}[0]{Rows};
 	for my $stemcell (@$stemcell_rows) {
 		my $id = sprintf('%s@%s', $stemcell->{os}, $stemcell->{version}) =~ s/\*$//r;
-		my $cpi = $stemcell->{cpi} // '<default>';
+		# BOSH reports default-cpi stemcells with cpi == '' (defined but
+		# empty); normalize both undef and empty to '<default>' so the
+		# downstream `in_array('<default>', cpis)` lookup succeeds.
+		my $cpi = $stemcell->{cpi};
+		$cpi = '<default>' unless defined($cpi) && length($cpi);
 		$stemcells{$id} //= {
 			id => $id,
 			name => $stemcell->{name},
@@ -553,7 +557,7 @@ sub stemcells {
 			os => $stemcell->{os},
 			cpis => []
 		};
-		push @{$stemcells{$id}{cpis}}, $cpi if $cpi;
+		push @{$stemcells{$id}{cpis}}, $cpi;
 	}
 
 	return wantarray ? %stemcells : \%stemcells;

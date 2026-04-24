@@ -1076,43 +1076,48 @@ sub deploy {
 	if (! $env->use_create_env) {
 		# TODO: refactor to clean this up a bit
 
-		if ($env->cpi_enabled) {
-			if ($env->has_hook('cpi-config')) {
-				$env->notify("checking CPI config for #C{%s} deployment...", $env->name); #FIXME: move this into the _check_cpi_config method
-				my $check_result = $env->_check_cpi_config();
+		# CPI config management is an OCFP concern.  Non-OCFP envs have
+		# CPI config managed externally (typically via the director's
+		# cloud-config), so skip the check/fix and the default-CPI notify.
+		if ($env->is_ocfp) {
+			if ($env->cpi_enabled) {
+				if ($env->has_hook('cpi-config')) {
+					$env->notify("checking CPI config for #C{%s} deployment...", $env->name); #FIXME: move this into the _check_cpi_config method
+					my $check_result = $env->_check_cpi_config();
 
-				bail(
-					"Cannot provide the required CPI config: %s",
-					$check_result->{msg}
-				) if $check_result->{fatal}; # Should we just set a flag instead, and skip to next check?
+					bail(
+						"Cannot provide the required CPI config: %s",
+						$check_result->{msg}
+					) if $check_result->{fatal}; # Should we just set a flag instead, and skip to next check?
 
-				if ($check_result->{state} ne 'ok') {
-					if ($dryrun) {
-						dryrun(
-							"CPI config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
-							$check_result->{msg}
-						);
-					} else {
-						# Just going to force the fix for now
-						my $fix_result = $env->_fix_cpi_config(
-							$check_result->{state},
-							$check_result->{fix_data},
-							noprompt => 1,
-						);
-						bail(
-							"Could not update required CPI config: %s",
-							$fix_result->{msg}
-						) unless $fix_result->{result} eq 'ok';
+					if ($check_result->{state} ne 'ok') {
+						if ($dryrun) {
+							dryrun(
+								"CPI config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
+								$check_result->{msg}
+							);
+						} else {
+							# Just going to force the fix for now
+							my $fix_result = $env->_fix_cpi_config(
+								$check_result->{state},
+								$check_result->{fix_data},
+								noprompt => 1,
+							);
+							bail(
+								"Could not update required CPI config: %s",
+								$fix_result->{msg}
+							) unless $fix_result->{result} eq 'ok';
+						}
 					}
 				}
+			} else {
+				# Use the cpi config provided by the director (via exodus data)
+				$env->notify(
+					"Using %s CPI config from #M{%s} BOSH director...",
+					scalar $env->director_exodus_lookup('default_cpi_config','default'),
+					$env->bosh->{alias}
+				);
 			}
-		} else {
-			# Use the cpi config provided by the director (via exodus data)
-			$env->notify(
-				"Using %s CPI config from #M{%s} BOSH director...",
-				$env->director_exodus_lookup('default_cpi_config','default'),
-				$env->bosh->{alias}
-			);
 		}
 
 		if ($env->can_build_cloud_configs) {
@@ -1282,12 +1287,16 @@ sub deploy {
 				}
 			} else {
 				warning(
-					"Kit %s does not provide a cloud-config hook, so cloud configs will ".
-					"not be generated.  Ensure that the BOSH director has the necessary ".
-					"cloud config in place.",
+					"Kit #C{%s} does not provide a cloud-config hook, so cloud configs ".
+					"will not be generated.  Ensure that the BOSH director has the ".
+					"necessary cloud config in place.",
+					$env->kit->id,
 				);
 			}
-		} else {
+		} elsif ($env->is_ocfp) {
+			# OCFP env opted out via genesis.manage-cloud-configs: false.
+			# For non-OCFP envs the cloud-config is always externally
+			# managed, so skip the warning entirely — it's not actionable.
 			warning(
 				"Cloud Configs will not be generated for this deployment.  ".
 				"Ensure that the BOSH director has the necessary cloud config in place."
