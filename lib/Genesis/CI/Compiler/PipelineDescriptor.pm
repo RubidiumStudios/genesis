@@ -96,7 +96,8 @@ sub describe {
 				);
 			}
 
-			unless ($is_auto) {
+			my $notif_style_env = $self->_effective_notif_style($ast);
+			unless ($is_auto || $notif_style_env eq 'minimal' || $notif_style_env eq 'none') {
 				my $nj = $self->_notify_job(
 					$ast, $env, $alias, $deploy_type, $trigger_from,
 					$is_create_env, $wf_data
@@ -140,7 +141,7 @@ sub describe {
 		}
 
 		# Groups
-		my $group_notifications = ($config->{notifications}{style} || 'inline') eq 'grouped';
+		my $group_notifications = $self->_effective_notif_style($ast) eq 'grouped';
 		my $custom_groups = $config->{groups};
 
 		if (ref($custom_groups) eq 'HASH') {
@@ -381,12 +382,27 @@ sub _resource_types {
 		type   => 'registry-image',
 		source => { %rs, repository => "$prefix$_->[1]" },
 	}} (
-		['script',             'cfcommunity/script-resource'],
-		['email',              'pcfseceng/email-resource'],
-		['slack-notification', 'cfcommunity/slack-notification-resource'],
-		['bosh-config',        'cfcommunity/bosh-config-resource'],
-		['locker',             'cfcommunity/locker-resource'],
+		['script',      'cfcommunity/script-resource'],
+		['email',       'pcfseceng/email-resource'],
+		['bosh-config', 'cfcommunity/bosh-config-resource'],
+		['locker',      'cfcommunity/locker-resource'],
 	);
+
+	# slack-notification type only when Slack is configured and not suppressed
+	if ($self->_effective_notif_style($ast) ne 'none') {
+		my $has_slack = $ast->integrations->{slack}
+			|| do {
+				my $nn = $ast->integrations->{notifications} || [];
+				scalar grep { ref($_) eq 'HASH' && ($_->{type}||'') eq 'slack' } @$nn;
+			};
+		if ($has_slack) {
+			push @types, {
+				name   => 'slack-notification',
+				type   => 'registry-image',
+				source => { %rs, repository => "${prefix}cfcommunity/slack-notification-resource" },
+			};
+		}
+	}
 
 	# Shuttle resource type for deployment status signals
 	if (my $signal = $config->{status_signal}) {
@@ -434,17 +450,27 @@ sub _notification_resources {
 	my ($self, $ast) = @_;
 
 	my @resources;
-	my $notifications = $ast->integrations->{notifications} || [];
 
-	for my $notif (@$notifications) {
-		if ($notif->{type} eq 'slack') {
+	# Structured Slack config (new format or legacy-normalized)
+	if ($self->_effective_notif_style($ast) ne 'none') {
+		my $slack = $self->_resolve_slack_config($ast, undef);
+		if ($slack) {
 			push @resources, {
 				name   => 'slack',
 				type   => 'slack-notification',
 				icon   => 'slack',
-				source => { url => _unwrap_ref($notif->{webhook}) },
+				source => { url => _unwrap_ref($slack->{webhook}) },
 			};
-		} elsif ($notif->{type} eq 'email') {
+		}
+	}
+
+	# Legacy email / other notification backends
+	my $notifications = $ast->integrations->{notifications} || [];
+	$notifications = [] unless ref($notifications) eq 'ARRAY';
+	for my $notif (@$notifications) {
+		next unless ref($notif) eq 'HASH';
+		next if ($notif->{type} || '') eq 'slack';  # handled via integrations.slack
+		if (($notif->{type} || '') eq 'email') {
 			push @resources, {
 				name   => 'email',
 				type   => 'email',
@@ -457,6 +483,7 @@ sub _notification_resources {
 			};
 		}
 	}
+
 	return \@resources;
 }
 
@@ -647,7 +674,8 @@ sub _notify_job {
 
 	my $pipeline_name = $ast->metadata->{name} || 'genesis-pipeline';
 	my $notif = $self->_notification_step($ast,
-		"$pipeline_name: Changes staged for $env-$deploy_type");
+		"$pipeline_name: Changes staged for $env-$deploy_type",
+		{ env => $env });
 
 	my @plan = (
 		{ in_parallel => \@gets },
@@ -678,8 +706,8 @@ sub _deploy_job {
 	my $trigger    = $is_auto ? JSON::PP::true : JSON::PP::false;
 	my $passed     = $trigger_from ? $wf_data->{aliases}{$trigger_from} : '';
 	my $passed_job = $passed ? "$passed-$deploy_type" : '';
-	my $pass_cache = $config->{'require-passed-caches'};
-	my $inline     = ($config->{notifications}{style} || 'inline') eq 'inline';
+	my $pass_cache  = $config->{'require-passed-caches'};
+	my $inline      = $self->_effective_notif_style($ast) eq 'per-env';
 
 	my $srcdir = $pass_cache
 		? ($trigger_from ? "$alias-cache" : "$alias-changes")
@@ -1061,18 +1089,21 @@ sub _outcome_hooks {
 	my $ok_msg    = "$name: Successfully ${ok_action} $env-$deploy_type";
 	my $fail_msg  = "$name: $action $env-$deploy_type failed";
 
-	my $signal_cfg = $self->_env_signal_config($ast, $env, $wf_data);
+	my $signal_cfg  = $self->_env_signal_config($ast, $env, $wf_data);
+	my $notif_style = $self->_effective_notif_style($ast);
 
 	my %hooks;
 	for my $outcome (qw(success failure abort error)) {
 		my @steps;
 
-		# Notification: success and failure only
-		if ($outcome eq 'success') {
-			my $notif = $self->_notification_step($ast, $ok_msg);
+		# Notifications: suppressed entirely for 'none'; success suppressed for 'minimal'
+		if ($outcome eq 'success'
+			&& $notif_style ne 'minimal' && $notif_style ne 'none') {
+			my $notif = $self->_notification_step($ast, $ok_msg, { env => $env });
 			push @steps, @{$notif->{in_parallel}} if $notif;
-		} elsif ($outcome eq 'failure') {
-			my $notif = $self->_notification_step($ast, $fail_msg);
+		} elsif ($outcome eq 'failure' && $notif_style ne 'none') {
+			my $notif = $self->_notification_step($ast, $fail_msg,
+				{ env => $env, is_failure => 1 });
 			push @steps, @{$notif->{in_parallel}} if $notif;
 		}
 
@@ -1482,30 +1513,99 @@ sub _errand_config {
 }
 
 # }}}
-# _notification_step - build notification plan step {{{
-sub _notification_step {
-	my ($self, $ast, $message) = @_;
+# _effective_notif_style - resolve the active notification style {{{
+#
+# Returns: 'per-env' | 'grouped' | 'minimal' | 'none'
+# Sources: integrations.slack.style (new format), or legacy
+# configuration.notifications.style mapped to per-env/grouped.
+sub _effective_notif_style {
+	my ($self, $ast) = @_;
 
-	my $notifications = $ast->integrations->{notifications};
-	return undef unless $notifications && ref($notifications) eq 'ARRAY'
-		&& @$notifications;
+	my $slack = $ast->integrations->{slack};
+	return $slack->{style} || 'per-env' if $slack;
 
-	my @steps;
-	for my $notif (@$notifications) {
-		if ($notif->{type} eq 'slack') {
-			push @steps, {
-				put    => 'slack',
-				params => {
-					channel  => $notif->{channel},
-					username => $notif->{username} || 'runwaybot',
-					icon_url => $notif->{icon},
-					text     => $message,
-				},
-			};
-		}
+	# Legacy fallback: check notifications array + configuration style flag
+	my $notifs = $ast->integrations->{notifications} || [];
+	$notifs = [] unless ref($notifs) eq 'ARRAY';
+	my ($sn) = grep { ref($_) eq 'HASH' && ($_->{type} || '') eq 'slack' } @$notifs;
+	if ($sn) {
+		my $old = ($ast->configuration || {})->{notifications}{style} || 'inline';
+		return $old eq 'grouped' ? 'grouped' : 'per-env';
 	}
 
-	return @steps ? { in_parallel => \@steps } : undef;
+	return 'none';
+}
+
+# }}}
+# _resolve_slack_config - return effective Slack config for an env {{{
+#
+# Returns a merged hashref (global + per-env override) or undef when Slack
+# is not configured or style is 'none'.
+sub _resolve_slack_config {
+	my ($self, $ast, $env) = @_;
+
+	my $slack = $ast->integrations->{slack};
+
+	# Legacy fallback: build from old notifications array
+	unless ($slack) {
+		my $notifs = $ast->integrations->{notifications} || [];
+		$notifs = [] unless ref($notifs) eq 'ARRAY';
+		my ($sn) = grep { ref($_) eq 'HASH' && ($_->{type} || '') eq 'slack' } @$notifs;
+		return undef unless $sn;
+		my $old = ($ast->configuration || {})->{notifications}{style} || 'inline';
+		$slack = {
+			webhook             => $sn->{webhook},
+			channel             => $sn->{channel},
+			username            => $sn->{username},
+			icon_url            => $sn->{icon},
+			style               => $old eq 'grouped' ? 'grouped' : 'per-env',
+			mentions_on_failure => [],
+			per_env_overrides   => {},
+		};
+	}
+
+	return undef if ($slack->{style} || 'per-env') eq 'none';
+
+	# Merge per-env override
+	my %cfg = %$slack;
+	if ($env) {
+		my $override = ($slack->{per_env_overrides} || {})->{$env} || {};
+		$cfg{$_} = $override->{$_} for keys %$override;
+	}
+
+	return \%cfg;
+}
+
+# }}}
+# _notification_step - build notification plan step {{{
+#
+# opts: { env => '', is_failure => 0 }
+# Returns { in_parallel => [...] } or undef.
+sub _notification_step {
+	my ($self, $ast, $message, $opts) = @_;
+	$opts ||= {};
+	my $env        = $opts->{env}        // '';
+	my $is_failure = $opts->{is_failure} // 0;
+
+	my $slack = $self->_resolve_slack_config($ast, $env);
+	return undef unless $slack;
+
+	my $text = $message;
+	if ($is_failure && @{$slack->{mentions_on_failure} || []}) {
+		$text = join(' ', @{$slack->{mentions_on_failure}}) . ': ' . $text;
+	}
+
+	my @steps = ({
+		put    => 'slack',
+		params => {
+			channel  => $slack->{channel},
+			username => $slack->{username} || 'runwaybot',
+			icon_url => $slack->{icon_url} || $slack->{icon},
+			text     => $text,
+		},
+	});
+
+	return { in_parallel => \@steps };
 }
 
 # }}}

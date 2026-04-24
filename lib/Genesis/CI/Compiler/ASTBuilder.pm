@@ -66,6 +66,15 @@ sub _build_from_legacy {
 	# Integrations (already normalized by parser)
 	my $integrations = $parsed->{integrations};
 
+	# Normalize Slack config; apply legacy style flag
+	_normalize_slack_config($integrations);
+	if (my $s = $integrations->{slack}) {
+		$s->{style} //= do {
+			my $raw = $p->{notifications} || '';
+			$raw eq 'grouped' ? 'grouped' : 'per-env';
+		};
+	}
+
 	# Targets (already normalized by parser)
 	my $targets_data = $parsed->{targets}{targets} || $parsed->{targets};
 
@@ -236,6 +245,12 @@ sub _build_from_multi_file {
 
 	# Integrations
 	my $integrations = $parsed->{integrations} || {};
+
+	# Normalize Slack config; default style if absent
+	_normalize_slack_config($integrations);
+	if (my $s = $integrations->{slack}) {
+		$s->{style} //= 'per-env';
+	}
 
 	# Targets (legacy accessor)
 	my $targets_data = $parsed->{targets}{targets} || $parsed->{targets} || {};
@@ -482,6 +497,44 @@ sub _build_from_env_files {
 # }}}
 ### Internal Helpers {{{
 
+# _normalize_slack_config - normalize Slack notification config to integrations.slack {{{
+#
+# Accepts either the new structured format:
+#   integrations.slack: { webhook, channel, style, mentions_on_failure, per_env_overrides }
+# or the legacy notifications array format:
+#   integrations.notifications: [{ type: slack, webhook, channel, ... }]
+#
+# Normalizes integrations.slack in-place.  The caller is responsible for
+# defaulting the style key afterwards (since it depends on the source format).
+sub _normalize_slack_config {
+	my ($integrations) = @_;
+
+	if (my $s = $integrations->{slack}) {
+		# New format already present — ensure structural defaults
+		$s->{mentions_on_failure} //= [];
+		$s->{per_env_overrides}   //= {};
+		return 1;
+	}
+
+	# Legacy format: extract Slack entry from the notifications array
+	my $notifs = $integrations->{notifications} || [];
+	$notifs = [] unless ref($notifs) eq 'ARRAY';
+	my ($sn) = grep { ref($_) eq 'HASH' && ($_->{type} || '') eq 'slack' } @$notifs;
+	return 0 unless $sn;
+
+	$integrations->{slack} = {
+		webhook             => $sn->{webhook},
+		channel             => $sn->{channel},
+		username            => $sn->{username},
+		icon_url            => $sn->{icon},
+		mentions_on_failure => [],
+		per_env_overrides   => {},
+		# style: set by caller based on legacy notifications: flag
+	};
+	return 0;
+}
+
+# }}}
 # _read_genesis_pipeline_keys - extract genesis-level and genesis.pipeline.* keys {{{
 #
 # Reads a YAML file line-by-line capturing:
