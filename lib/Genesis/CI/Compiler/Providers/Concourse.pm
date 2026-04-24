@@ -142,6 +142,30 @@ sub cli_opts_help {
         Passes --skip-ssl-validation (-k) to all fly commands.  Use when the
         Concourse server uses a self-signed or otherwise untrusted certificate.
 
+  Pipeline features are driven by configuration files, not CLI flags.
+  The following sections are controlled in ci/configuration.yml (or the
+  legacy ci.yml):
+
+    Notification styles (integrations.slack.style):
+        per-env  — pending-changes notify job gates each deployment (default)
+        grouped  — notify jobs exist but do not block deployments
+        minimal  — no notify jobs; Slack alerts on failure only
+        none     — no Slack resource or notifications at all
+
+    BOSH upgrade locks (genesis.pipeline.locks.bosh_upgrade):
+        Automatically wired when a pipeline manages a BOSH director alongside
+        child deployments.  Prevents a director upgrade from racing a child
+        deploy.  Requires a locker integration.  Opt out per-env with:
+            genesis:
+              pipeline:
+                locks:
+                  bosh_upgrade: false
+
+    Task library (configuration.task_library):
+        Declares an external git repository of custom task files.  The repo
+        is checked out as a Concourse git resource and made available as an
+        input to every deploy task.  Configure uri, branch, path, and auth.
+
 EOF
 }
 
@@ -152,6 +176,10 @@ EOF
 # This schema is used by:
 #   - Genesis::CI::Compiler::validate_config_section()
 #   - Genesis::CI::Compiler::Validator::_validate_multi_file()
+#
+# NOTE: notification styles, BOSH upgrade locks, and task library are
+# configuration-level features (ci/configuration.yml), not provider-level
+# options — they are documented in the cli_opts_help and POD below.
 sub provider_options_schema {
 	return {
 		type => {
@@ -221,6 +249,8 @@ sub normalize_provider_opts {
 #
 # Mirrors Genesis::Kit::Provider::Github::status() — returns a hash with
 # type, label, an ordered 'extras' list, and a per-key status structure.
+# Also surfaces the active notification style and task library when an AST
+# is already resolved (i.e., after parse() has been called).
 sub describe_provider {
 	my ($self) = @_;
 
@@ -231,18 +261,44 @@ sub describe_provider {
 	my $paused    = $self->provider_option('pause_after_set') ? 'yes' : 'no';
 	my $insecure  = $self->provider_option('insecure')  ? 'yes' : 'no';
 
-	return (
-		type     => 'concourse',
-		label    => 'Concourse',
-		extras   => [qw(Target Team Pipeline Expose PauseAfterSet Insecure)],
+	my @extras = qw(Target Team Pipeline Expose PauseAfterSet Insecure);
+	my %desc = (
+		type          => 'concourse',
+		label         => 'Concourse',
 		Target        => $target,
 		Team          => $team,
 		Pipeline      => $pipe_name,
 		Expose        => $expose,
 		PauseAfterSet => $paused,
 		Insecure      => $insecure,
-		status   => 'ok',
+		status        => 'ok',
 	);
+
+	# Augment with pipeline-level feature summary when AST is available
+	if (my $ast = $self->{ast}) {
+		my $descriptor = Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast);
+
+		# Notification style
+		my $notif_style = $descriptor->_effective_notif_style($ast);
+		push @extras, 'NotifStyle';
+		$desc{NotifStyle} = $notif_style;
+
+		# Task library
+		my $tl = ($ast->configuration || {})->{task_library};
+		if ($tl && ref($tl) eq 'HASH' && $tl->{uri}) {
+			push @extras, 'TaskLibrary';
+			my $rn = $tl->{resource_name} || 'tasks';
+			$desc{TaskLibrary} = "$rn ($tl->{uri})";
+		}
+
+		# BOSH upgrade lock summary
+		my $has_locker = ($ast->integrations->{locker} || {})->{url} ? 'yes' : 'no';
+		push @extras, 'BoshLocks';
+		$desc{BoshLocks} = $has_locker;
+	}
+
+	$desc{extras} = \@extras;
+	return %desc;
 }
 
 # }}}
@@ -640,66 +696,149 @@ Genesis::CI::Concourse - Concourse CI provider implementation
 =head1 DESCRIPTION
 
 Genesis::CI::Concourse implements the Genesis::CI trait interface for
-Concourse CI.  It handles parsing ci.yml configuration, generating Concourse
-pipeline YAML, and deploying pipelines via the fly CLI.
+Concourse CI.  It handles parsing configuration, generating Concourse pipeline
+YAML, and deploying pipelines via the fly CLI.
 
 The native pipeline compiler (C<PipelineDescriptor>) produces fully-resolved
-Concourse YAML with support for:
+Concourse YAML.  The following sections document every first-class feature.
+
+=head2 Deployment propagation
+
+Environments form a directed graph; each env's git branch is updated after its
+upstream deploys successfully.  The graph is derived from C<genesis.pipeline.prior_env>
+keys in each environment YAML file, or from explicit C<stages:> declarations in
+C<pipeline.yml>.
+
+=head2 Notification styles (C<integrations.slack.style>)
+
+Four styles control what gets notified, when, and how.
+
+  integrations:
+    slack:
+      webhook:  ((slack-webhook))
+      channel:  '#deployments'
+      style:    grouped       # per-env | grouped | minimal | none
+
+B<per-env> (default) — A C<notify-E<lt>envE<gt>-E<lt>typeE<gt>-changes> job is
+created for every non-auto environment.  The deploy job depends on the notify
+job, so deployment is gated on operator acknowledgement.
+
+B<grouped> — Same notify jobs as C<per-env>, but they are collected into a
+separate C<notifications> Concourse group.  Deploy jobs do not depend on them.
+
+B<minimal> — No notify jobs.  Slack notifications fire only on failure via the
+C<on_failure> hook.  Success is silent.
+
+B<none> — No Slack resource, no notify jobs, no hooks.  The
+C<slack-notification> resource type is also omitted from the pipeline.
+
+=head3 mentions_on_failure
+
+A list of Slack handles prepended to failure notification text only:
+
+  slack:
+    mentions_on_failure:
+      - '@sre-oncall'
+
+=head3 per_env_overrides
+
+Override C<channel> and/or C<mentions_on_failure> for a specific environment:
+
+  slack:
+    channel: '#deployments'
+    per_env_overrides:
+      prod:
+        channel: '#prod-critical'
+        mentions_on_failure:
+          - '@prod-sre'
+
+=head2 BOSH upgrade locks (C<genesis.pipeline.locks.bosh_upgrade>)
+
+When a child deployment's YAML declares C<genesis.bosh_env: E<lt>directorE<gt>> and
+the named director is also in the pipeline, Genesis wires a shared upgrade lock:
 
 =over 4
 
-=item Deployment propagation
+=item Director — emits C<E<lt>aliasE<gt>-bosh-lock> as a named Concourse locker
+resource (C<lock_name: E<lt>aliasE<gt>-bosh-upgrade>).  Its deploy job acquires
+the lock before upgrading.
 
-Environments form a directed graph; each env's branch is updated after its
-upstream deploys successfully.
+=item Child — acquires the director's shared C<bosh-lock> before deploying,
+blocking any concurrent director upgrade.  No own bosh-lock resource is emitted.
 
-=item Redeploy lane (C<genesis.pipeline.redeploy>)
-
-A separate C<redeploy-E<lt>envE<gt>> Concourse job that redeploys an
-environment without change detection or cache promotion.  Three trigger modes:
-
-=over 4
-
-=item C<manual> — operator triggers via Concourse UI or C<fly trigger-job>.
-
-=item C<cron> — a Concourse C<time> resource triggers the job within a
-configured daily window (C<redeploy_cron_start> / C<redeploy_cron_stop>,
-default 04:00–05:00 UTC).
-
-=item C<signal> — the C<redeploy-E<lt>envE<gt>> job triggers off the
-environment's status-signal resource (C<get: E<lt>envE<gt>-signal, trigger:
-true, version: {status: success}>).  Requires C<status_signal> to be
-configured globally; otherwise falls back to manual behaviour.
+=item Standalone — acquires a per-env C<bosh-lock> by BOSH URL (legacy behaviour
+for envs whose director is not in the same pipeline).
 
 =back
 
-=item Deployment status signals (C<configuration.status_signal>)
+Requires a C<locker:> integration.  Opt out per-env:
 
-A generic event bus backed by the C<cfcommunity/shuttle-resource> Concourse
-custom resource type.  Every deploy and redeploy job emits C<on_success>,
-C<on_failure>, C<on_abort>, and C<on_error> put steps to a per-environment
-C<E<lt>envE<gt>-signal> resource.  Supported backends: C<file>, C<s3>, C<gcs>.
+  genesis:
+    pipeline:
+      locks:
+        bosh_upgrade: false
 
-Global configuration example:
+=head2 Redeploy lane (C<genesis.pipeline.redeploy>)
+
+A separate C<redeploy-E<lt>envE<gt>> job redeploys without change detection or
+cache promotion.  Three trigger modes:
+
+B<manual> — operator triggers via Concourse UI or C<fly trigger-job>.
+
+B<cron> — a C<time> resource triggers within a daily window
+(C<redeploy_cron_start> / C<redeploy_cron_stop>, default 04:00–05:00 UTC).
+
+B<signal> — triggers off the environment's C<E<lt>envE<gt>-signal> resource
+(version C<{status: success}>).  Requires C<status_signal> to be configured.
+
+=head2 Deployment status signals (C<configuration.status_signal>)
+
+Every deploy and redeploy job emits C<on_success>, C<on_failure>, C<on_abort>,
+and C<on_error> put steps to a per-environment C<E<lt>envE<gt>-signal> resource
+backed by C<cfcommunity/shuttle-resource>.  Supported backends: C<file>, C<s3>,
+C<gcs>.
 
   configuration:
     status_signal:
       backend: s3
-      bucket: my-genesis-signals
-      region: us-east-1
-      access_key_id: ((aws-access-key))
+      bucket:  my-genesis-signals
+      region:  us-east-1
+      access_key_id:     ((aws-access-key))
       secret_access_key: ((aws-secret-key))
 
-Per-environment overrides (in C<genesis.pipeline> within each env YAML):
+Per-env backend or prefix override in the env YAML:
 
-  status_signal: gcs    # override backend for this env
-  signal_prefix: my-pipeline/prod  # override resource prefix
+  genesis:
+    pipeline:
+      status_signal: gcs
+      signal_prefix: my-pipeline/prod
 
-Disable signals for a specific env:
+Disable for a specific env:
 
-  status_signal: false
+  genesis:
+    pipeline:
+      status_signal: false
 
-=back
+=head2 Task library (C<configuration.task_library>)
+
+Declare an external git repository of custom task files.  Genesis emits a
+C<tasks> git resource, adds a non-triggering C<get: tasks> step to every deploy
+and redeploy job, and passes the library as an input to every running task.
+
+  configuration:
+    task_library:
+      uri:           https://github.com/org/pipeline-tasks.git
+      branch:        main              # optional, default 'main'
+      path:          tasks             # optional subdirectory within the repo
+      resource_name: tasks             # optional resource name, default 'tasks'
+      auth:
+        type:        ssh-key           # or 'token'
+        private_key: ((library-key))   # for ssh-key
+        # — or —
+        password: ((library-token))    # for token (username defaults to x-oauth-basic)
+
+The C<GENESIS_TASK_LIBRARY_PATH> environment variable is set in each task to the
+resolved path (C<E<lt>resource_nameE<gt>> or C<E<lt>resource_nameE<gt>/E<lt>pathE<gt>>).
 
 =head1 SYNOPSIS
 
@@ -709,7 +848,7 @@ Disable signals for a specific env:
     type   => 'concourse',
     file   => 'ci.yml',
     top    => $top_obj,
-    layout => 'default'
+    layout => 'default',
   );
   $ci->parse();
   my $yaml = $ci->generate();
@@ -726,73 +865,79 @@ Disable signals for a specific env:
 
 =head2 generate_from_ast($ast)
 
-Generate Concourse pipeline YAML from a Genesis::CI::Compiler::AST.
-For legacy-sourced ASTs, bridges to Legacy::generate_pipeline_concourse_yaml().
-For modern ASTs, generates Concourse YAML natively via PipelineDescriptor.
+Generate Concourse pipeline YAML from a C<Genesis::CI::Compiler::AST>.
+Legacy-sourced ASTs are bridged to C<Legacy::generate_pipeline_concourse_yaml()>.
+Modern ASTs are generated natively via C<PipelineDescriptor>.
 
 =head2 output_files()
 
-Returns hash describing generated files.
+Returns a hash describing generated output files.
 
 =head1 TRAIT INTERFACE METHODS
 
 =head2 init(%opts)
 
-Initialize Concourse provider instance.
+Initialize a Concourse provider instance via the trait path.
 
 =head2 parse()
 
-Parse and validate ci.yml configuration for Concourse.
+Parse and validate the CI configuration.  Populates C<$self-E<gt>{ast}>.
 
 =head2 generate()
 
-Generate Concourse pipeline YAML.
+Generate Concourse pipeline YAML.  Must be called after C<parse()>.
 
 =head2 deploy(%opts)
 
-Deploy pipeline to Concourse via fly CLI.
+Deploy the pipeline to Concourse via the fly CLI.
 
-Options: target, dry-run, yes, paused
+Options: C<target>, C<team>, C<pipeline_name>, C<pause_after_set>, C<expose>,
+C<insecure>, C<dry-run>, C<yes>.
 
 =head2 platform_name()
 
-Returns "Concourse".
+Returns C<"Concourse">.
 
 =head2 file_extension()
 
-Returns ".yml".
+Returns C<".yml">.
 
 =head1 CONCOURSE-SPECIFIC METHODS
 
 =head2 graph_md()
 
-Generate pipeline.md content containing a Mermaid flowchart LR diagram.
+Generate C<pipeline.md> content containing a Mermaid flowchart LR diagram.
+Director environments are annotated with C<DIRECTOR>.
 
 =head2 describe()
 
-Print human-readable pipeline description to stdout.  Each environment is
-annotated with its trigger mode and, when configured, its redeploy mode
-(C<REDEPLOY:MANUAL>, C<REDEPLOY:CRON>, C<REDEPLOY:SIGNAL>) and signal backend
-(C<SIGNAL:file>, C<SIGNAL:s3>, C<SIGNAL:gcs>).
+Print a human-readable pipeline description to stdout.  Each environment is
+annotated with gate mode (C<PR>, C<MANUAL>), redeploy mode
+(C<REDEPLOY:MANUAL|CRON|SIGNAL>), and signal backend (C<SIGNAL:file|s3|gcs>).
+
+=head2 describe_provider()
+
+Return a structured description hash for CLI display.  When an AST is
+available (after C<parse()>), the description includes C<NotifStyle>,
+C<TaskLibrary>, and C<BoshLocks> fields.
 
 =head1 ACCESSORS
 
 =head2 config()
 
-Returns parsed pipeline configuration.
+Returns the parsed configuration.
 
 =head2 top()
 
-Returns Genesis::Top object.
+Returns the C<Genesis::Top> object.
 
 =head2 layout()
 
-Returns layout name.
+Returns the layout name.
 
 =head1 SEE ALSO
 
-Genesis::CI, Genesis::CI::GithubActions, Genesis::CI::Legacy,
-Genesis::CI::Compiler::PipelineDescriptor
+L<Genesis::CI>, L<Genesis::CI::Legacy>, L<Genesis::CI::Compiler::PipelineDescriptor>
 
 =cut
 

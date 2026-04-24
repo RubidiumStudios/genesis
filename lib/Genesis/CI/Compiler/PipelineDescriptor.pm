@@ -48,6 +48,11 @@ sub describe {
 	push @resources, $self->_git_resource($ast);
 	push @resources, @{$self->_notification_resources($ast)};
 
+	# Task library resource (optional external git repo for custom tasks)
+	if (my $tlr = $self->_task_library_resource($ast)) {
+		push @resources, $tlr;
+	}
+
 	# Process each workflow
 	for my $wf_name (sort $ast->workflow_names) {
 		my $workflow = $ast->workflows->{$wf_name};
@@ -445,6 +450,64 @@ sub _git_resource {
 }
 
 # }}}
+# _task_library_resource - git resource for the external task library {{{
+#
+# Returns a git resource hashref when configuration.task_library is declared,
+# undef otherwise.  The resource is named by resource_name (default 'tasks').
+sub _task_library_resource {
+	my ($self, $ast) = @_;
+	my $tl = ($ast->configuration || {})->{task_library};
+	return undef unless $tl && ref($tl) eq 'HASH' && $tl->{uri};
+
+	my $name   = $tl->{resource_name} || 'tasks';
+	my $branch = $tl->{branch}        || 'main';
+
+	my %source = ( uri => $tl->{uri}, branch => $branch );
+
+	if (my $auth = $tl->{auth}) {
+		if (($auth->{type} || '') eq 'ssh-key') {
+			$source{private_key} = _unwrap_ref($auth->{private_key});
+		} else {
+			$source{username} = _unwrap_ref($auth->{username}) || 'x-oauth-basic';
+			$source{password} = _unwrap_ref($auth->{password});
+		}
+	}
+
+	return {
+		name   => $name,
+		type   => 'git',
+		icon   => 'source-repository',
+		source => \%source,
+	};
+}
+
+# }}}
+# _task_library_get - get step for the task library resource {{{
+#
+# Returns { get => $name, trigger => false } when the library is configured,
+# undef otherwise.
+sub _task_library_get {
+	my ($self, $ast) = @_;
+	my $tl = ($ast->configuration || {})->{task_library};
+	return undef unless $tl && ref($tl) eq 'HASH' && $tl->{uri};
+	my $name = $tl->{resource_name} || 'tasks';
+	return { get => $name, trigger => JSON::PP::false };
+}
+
+# }}}
+# _task_library_path - resolve a task name to its file path in the library {{{
+#
+# Returns "<resource_name>/<path>/<name>.yml" (with path omitted when empty).
+sub _task_library_path {
+	my ($self, $ast, $task_name) = @_;
+	my $tl = ($ast->configuration || {})->{task_library};
+	return undef unless $tl && ref($tl) eq 'HASH' && $tl->{uri};
+	my $rn   = $tl->{resource_name} || 'tasks';
+	my $path = $tl->{path}          || '';
+	return $path ? "$rn/$path/$task_name.yml" : "$rn/$task_name.yml";
+}
+
+# }}}
 # _notification_resources - build slack/email resources {{{
 sub _notification_resources {
 	my ($self, $ast) = @_;
@@ -740,6 +803,11 @@ sub _deploy_job {
 			if $gp;
 	}
 
+	# Task library (optional external git resource with custom task files)
+	if (my $tl_get = $self->_task_library_get($ast)) {
+		push @gets, $tl_get;
+	}
+
 	# Deploy task
 	my $deploy_task = {
 		task => 'bosh-deploy', %to,
@@ -817,10 +885,11 @@ sub _deploy_job {
 
 	unless ($is_create_env) {
 		for my $errand (@{$config->{errands} || []}) {
-			push @do, {
-				task => "$errand-errand", %to,
-				config => $self->_errand_config($ast, $env, $errand, $bindir, $srcdir),
-			};
+			my $tl_file = $self->_task_library_path($ast, $errand);
+			push @do, $tl_file
+				? { task => "$errand-errand", %to, file => $tl_file }
+				: { task => "$errand-errand", %to,
+				    config => $self->_errand_config($ast, $env, $errand, $bindir, $srcdir) };
 		}
 	}
 
@@ -914,6 +983,11 @@ sub _redeploy_job {
 	unless ($is_create_env) {
 		push @gets, { get => "$alias-cloud-config",   %to, trigger => JSON::PP::false };
 		push @gets, { get => "$alias-runtime-config", %to, trigger => JSON::PP::false };
+	}
+
+	# Task library
+	if (my $tl_get = $self->_task_library_get($ast)) {
+		push @gets, $tl_get;
 	}
 
 	# Deploy task — reuses ci-pipeline-deploy with no prior_env
@@ -1382,6 +1456,16 @@ sub _task_config {
 	push @inputs, { name => "$alias-cache" } if $passed;
 	push @inputs, { name => 'git' } unless $config->{'require-passed-caches'};
 
+	# Task library input — expose library files to the running task
+	if (my $tl = $config->{task_library}) {
+		if (ref($tl) eq 'HASH' && $tl->{uri}) {
+			my $rn   = $tl->{resource_name} || 'tasks';
+			my $path = $tl->{path}          || '';
+			push @inputs, { name => $rn };
+			$params{GENESIS_TASK_LIBRARY_PATH} = $path ? "$rn/$path" : $rn;
+		}
+	}
+
 	return {
 		platform       => 'linux',
 		image_resource => { type => 'registry-image', source => $img_src },
@@ -1499,6 +1583,18 @@ sub _errand_config {
 
 	my $subdir = ($root eq '.') ? '' : "/$root";
 
+	my @inputs = ({ name => 'out' }, { name => $srcdir });
+
+	# Task library input for errands
+	if (my $tl = $config->{task_library}) {
+		if (ref($tl) eq 'HASH' && $tl->{uri}) {
+			my $rn   = $tl->{resource_name} || 'tasks';
+			my $path = $tl->{path}          || '';
+			push @inputs, { name => $rn };
+			$params{GENESIS_TASK_LIBRARY_PATH} = $path ? "$rn/$path" : $rn;
+		}
+	}
+
 	return {
 		platform       => 'linux',
 		image_resource => { type => 'registry-image', source => $img_src },
@@ -1508,7 +1604,7 @@ sub _errand_config {
 			dir  => "out/git$subdir",
 			args => ['ci-pipeline-run-errand'],
 		},
-		inputs => [{ name => 'out' }, { name => $srcdir }],
+		inputs => \@inputs,
 	};
 }
 
