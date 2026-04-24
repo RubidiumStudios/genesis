@@ -472,6 +472,22 @@ sub prefixed {
 }
 
 # }}}
+# unprefixed - strip the git prefix from git-root-relative paths {{{
+#
+# Inverse of `prefixed`.  Converts git-root-relative paths into
+# Top-root-relative paths for user-facing display.  Paths that don't
+# start with the prefix are left untouched (so sibling-dir paths
+# outside the deployment Top root remain identifiable).
+#
+#   my @user_paths = $git->unprefixed(@git_paths);
+sub unprefixed {
+	my ($self, @paths) = @_;
+	my $p = $self->{prefix};
+	return @paths unless $p;
+	return map { my $q = $_; $q =~ s{^\Q$p\E}{}; $q } @paths;
+}
+
+# }}}
 # in_repo - true if we're inside a subdirectory of the git root {{{
 sub in_repo {
 	return defined $_[0]->{root};

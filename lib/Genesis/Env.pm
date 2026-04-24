@@ -1189,17 +1189,21 @@ sub actual_environment_files {
 }
 
 # }}}
-# propagation_files - list all files this environment depends on for pipeline propagation {{{
+# propagation_files - git-root-relative paths this env depends on for pipeline propagation {{{
 #
-# Returns a list of repo-relative paths that should be tracked when
-# propagating changes from the control branch to this environment's
-# branch.  Includes: env file hierarchy, kit archive (or dev/),
-# .genesis/config, and any reaction scripts referenced in the env.
+# Returns the unified pathspec that propagation and pruning operate
+# over: kit dependencies (env file hierarchy, kit archive, config,
+# reaction scripts) prefixed with the git prefix so they're
+# git-root-relative, plus any `genesis.pipeline.required_files`
+# declared on the env (already git-root-relative).
+#
+# All returned paths are relative to the git root — no caller
+# should apply `Service::Git->prefixed` on top.
 sub propagation_files {
 	my ($self) = @_;
 	my %files;
 
-	# Env file hierarchy (ancestors + self)
+	# Env file hierarchy (ancestors + self) — kit-relative
 	for my $f ($self->actual_environment_files) {
 		$f =~ s{^\./}{};
 		$files{$f} = 1;
@@ -1232,8 +1236,108 @@ sub propagation_files {
 		}
 	}
 
-	return sort keys %files;
+	require Service::Git;
+	my $git = Service::Git->new('.');
+
+	# Prefix kit-relative paths to git-root-relative
+	my %out = map { $_ => 1 } $git->prefixed(sort keys %files);
+
+	# Merge required_files — already git-root-relative, validated
+	$out{$_} = 1 for $self->required_files;
+
+	return sort keys %out;
 }
+
+# }}}
+# required_files - list additional paths that should travel with this env's branch {{{
+#
+# Reads `genesis.pipeline.required_files` (inherited via env file
+# hierarchy — so pipeline-wide defaults can be declared in a parent
+# env file like `lmelt.yml` and apply to every child that doesn't
+# override).
+#
+# Path templates (user-facing, Top-root-relative):
+#   - `<env>` is substituted with the environment's name
+#   - Glob metacharacters (`*`, `?`, `[`) are expanded against the
+#     deployment top root (i.e., the kit subdirectory)
+#   - Anything else is used verbatim as a Top-root-relative path
+#
+# Returns git-root-relative paths for internal use — callers pass
+# them straight to git.  User-facing output should strip the git
+# prefix before display.
+sub required_files {
+	my ($self) = @_;
+
+	my $entries = $self->lookup('genesis.pipeline.required_files', []);
+	return () unless ref($entries) eq 'ARRAY' && @$entries;
+
+	require Service::Git;
+	my $git  = Service::Git->new('.');
+	my $root = $git->root;
+	return () unless $root;
+
+	# Top root = git root + git prefix (e.g., "$repo/bosh" for a bosh/ kit)
+	my $top_root = $root;
+	if (my $prefix = $git->prefix) {
+		(my $p = $prefix) =~ s{/$}{};
+		$top_root = "$root/$p" if length $p;
+	}
+
+	my @top_relative = __PACKAGE__->_resolve_required_files(
+		$entries, $self->name, $top_root
+	);
+	return $git->prefixed(@top_relative);
+}
+
+# _resolve_required_files - pure helper for required_files path resolution {{{
+#
+# Takes a list of raw path templates, an env name, and a root path
+# (conceptually the deployment Top root).  Returns sorted unique
+# paths relative to that root:
+#   - `<env>` is substituted with the env name
+#   - Glob patterns are expanded against the filesystem under the
+#     provided root
+#   - Literal paths are passed through verbatim
+#
+# Rejects entries that would escape the root (absolute paths,
+# `~/...`, or any `..` segment).  Bail()s on violation so config
+# errors surface loudly.
+#
+# Exposed as a class method so unit tests can exercise the logic
+# without constructing an Env or touching Service::Git.
+sub _resolve_required_files {
+	my ($class, $entries, $env_name, $root) = @_;
+	return () unless ref($entries) eq 'ARRAY' && @$entries;
+	return () unless defined $root && length $root;
+
+	require File::Glob;
+
+	my %out;
+	for my $raw (@$entries) {
+		next unless defined $raw && length $raw;
+		(my $path = $raw) =~ s/<env>/$env_name/g;
+
+		bail(
+			"genesis.pipeline.required_files entry #C{%s} escapes the deployment root.\n".
+			"  Paths must be relative to the deployment root — no #R{/}, #R{~/}, or #R{..} allowed.",
+			$raw
+		) if $path =~ m{^/} || $path =~ m{^~} || $path =~ m{(?:^|/)\.\.(?:/|$)};
+
+		if ($path =~ m{[*?\[]}) {
+			my @matches = File::Glob::bsd_glob("$root/$path");
+			for my $abs (@matches) {
+				(my $rel = $abs) =~ s{^\Q$root/\E}{};
+				$out{$rel} = 1 if length $rel;
+			}
+		} else {
+			$out{$path} = 1;
+		}
+	}
+
+	return sort keys %out;
+}
+
+# }}}
 
 # }}}
 # prune_branch - remove files from this env's branch that it doesn't depend on {{{
@@ -1262,8 +1366,8 @@ sub prune_branch {
 		) if ($git->current_branch // '') eq $branch;
 	}
 
-	# Build keep set with git-root-relative paths
-	my %keep_set = map { $_ => 1 } $git->prefixed(@keep);
+	# propagation_files returns git-root-relative paths already
+	my %keep_set = map { $_ => 1 } @keep;
 
 	# List tracked files on the env branch under our prefix
 	my @tracked = $git->ls_tree($branch, $git->prefix);
@@ -1298,13 +1402,13 @@ sub propagation_diff {
 	my ($self, $target_sha) = @_;
 	$target_sha ||= 'control';
 
-	my @dep_files = $self->propagation_files;
-	return () unless @dep_files;
+	my @pathspec = $self->propagation_files;
+	return () unless @pathspec;
 
 	my $env_branch = $self->name;
 	my ($diff_out, $rc) = run(
 		{ passfail => 1 },
-		'git', 'diff', '--name-only', "$env_branch..$target_sha", '--', @dep_files
+		'git', 'diff', '--name-only', "$env_branch..$target_sha", '--', @pathspec
 	);
 	return () if $rc || !$diff_out;
 
