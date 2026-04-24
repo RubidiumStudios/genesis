@@ -843,6 +843,84 @@ sub manifest {
 	output {raw => 1}, $content;
 }
 
+# _derive_deploy_reason - build a default --reason from the pipeline commit range {{{
+#
+# Reads the last successful deployment's `git.commit` from exodus and
+# compares it to the env branch HEAD.  If equal, this is a redeploy —
+# returns a "Redeploy of <sha>" stub.  If different, walks commits in
+# the `$last_deployed..$branch_head` range on the env branch and
+# delegates to _format_pipeline_reason to produce the audit string.
+#
+# Returns undef if vault is unreachable (caller falls back to the
+# operator-provided or default reason).
+sub _derive_deploy_reason {
+	my ($env, $git) = @_;
+
+	my $env_v = eval { $env->with_vault };
+	return undef unless $env_v;
+
+	my $dep = eval { $env_v->deployments->latest_successful };
+	my $last_deployed = $dep ? ($dep->lookup('git.commit') || '') : '';
+
+	my $branch_head = $git->sha($env->name);
+	return undef unless $branch_head;
+
+	if ($last_deployed && $last_deployed eq $branch_head) {
+		return sprintf("Redeploy of %s", $git->sha($branch_head, short => 1));
+	}
+
+	my $range = $last_deployed ? "$last_deployed..$branch_head" : $branch_head;
+	my @lines = $git->log_subjects($range, limit => 50);
+
+	return _format_pipeline_reason(
+		\@lines,
+		sub { $git->sha($_[0], short => 1) },
+		sub {
+			my ($subject) = $git->log_subjects($_[0], limit => 1, format => '%s');
+			$subject //= '';
+			$subject =~ s/\s+$//;
+			return $subject;
+		},
+	);
+}
+
+# _format_pipeline_reason - pure formatter for the derived deploy reason {{{
+#
+# Inputs:
+#   \@log_lines   — output of `git log --format='%H %s'` for the range
+#   $short_sha    — callback: sha => abbreviated-sha (kept for API
+#                   compatibility; may be unused)
+#   $subject_of   — callback: sha => commit subject line
+#
+# Extracts `[pipeline] control@<sha>` markers from the env-branch log
+# lines, flips them into oldest-first order, and produces a reason
+# string made up of the control commit subjects (SHAs are omitted
+# because exodus already records `git.control_commit`).  For a single
+# commit the subject is returned verbatim; for multiple commits a
+# bulleted list is produced.  Returns undef if no markers are found.
+sub _format_pipeline_reason {
+	my ($log_lines, $short_sha, $subject_of) = @_;
+
+	my @controls;
+	for my $line (@{$log_lines || []}) {
+		next unless $line =~ /\[pipeline\] control\@([0-9a-f]+)/;
+		push @controls, $1;
+	}
+	return undef unless @controls;
+
+	@controls = reverse @controls;  # log is newest-first; reason reads oldest-first
+
+	my @subjects = map { $subject_of->($_) } @controls;
+
+	return $subjects[0] if @subjects == 1;
+
+	return join("\n",
+		sprintf("%d commits:", scalar @subjects),
+		map { "  - $_" } @subjects,
+	);
+}
+
+# }}}
 sub deploy {
 	option_defaults(
 		redact   => ! -t STDOUT,
@@ -857,25 +935,28 @@ sub deploy {
 	# When CI is configured, auto-checkout the environment branch
 	# so the deploy reads the correct propagated state.
 	my $top = Genesis::Top->new('.');
+	my $pipeline_git;
+	my $pipeline_branch;
 	if ($top->ci_configured) {
 		require Service::Git;
-		my $git = Service::Git->new('.', track_branch => 1);
+		$pipeline_git = Service::Git->new('.', track_branch => 1);
 		# Derive branch name: strip path prefix and .yml/.yaml suffix
 		(my $branch_name = $env_name) =~ s{^.*/}{};
 		$branch_name =~ s/\.ya?ml$//;
-		my $current = $git->current_branch // '';
+		$pipeline_branch = $branch_name;
+		my $current = $pipeline_git->current_branch // '';
 		if ($current ne $branch_name) {
 			bail(
 				"Working tree has uncommitted changes.  Commit or stash them\n".
 				"before deploying."
-			) unless $git->is_clean;
+			) unless $pipeline_git->is_clean;
 			bail(
 				"Environment branch #C{%s} does not exist.\n".
 				"Create it with #C{genesis new %s} on the control branch.",
 				$branch_name, $branch_name
-			) unless $git->branch_exists($branch_name);
+			) unless $pipeline_git->branch_exists($branch_name);
 			info "\nSwitching to environment branch #C{%s}...", $branch_name;
-			$git->checkout($branch_name);
+			$pipeline_git->checkout($branch_name);
 			# Reload Top from the env branch
 			$top = Genesis::Top->new('.');
 		}
@@ -927,6 +1008,15 @@ sub deploy {
 					$cache_dir
 				);
 			}
+		}
+	}
+
+	# Derive a default reason from the pipeline commit range when the
+	# env is on a pipeline branch and no --reason was supplied.
+	if (!defined($reason) && $pipeline_git && $pipeline_branch) {
+		if (my $derived = _derive_deploy_reason($env, $pipeline_git)) {
+			$reason = $derived;
+			info "\nDerived deploy reason from pipeline history:\n%s\n", $reason;
 		}
 	}
 
@@ -1324,6 +1414,30 @@ sub deploy {
 
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;
+
+		# Auto-cascade propagation on manual-provider pipelines.
+		# Non-manual providers (concourse, gha) own their own cascade.
+		my $provider = $top->config->get('ci.provider.type') || '';
+		if ($pipeline_git
+			&& $provider eq 'manual'
+			&& !$options{'no-propagate'}
+			&& !$options{'dry-run'}) {
+
+			# Switch back to control so propagate runs from the right context
+			$pipeline_git->restore_branch;
+
+			info "\nCascading propagation from #C{%s}...", $env->name;
+			my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
+			system($bin, 'propagate', $env->name);
+			if ($? != 0) {
+				warning(
+					"Cascade propagation failed (rc=%d).  Deploy itself succeeded;\n".
+					"run #C{genesis propagate %s} manually to retry.",
+					($? >> 8), $env->name
+				);
+			}
+		}
+
 		exit 0;
 	} else {
 		bail "[#M{%s}] #R{Deployment Failed}", $env->name;

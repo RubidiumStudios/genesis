@@ -413,10 +413,14 @@ sub _build_from_env_files {
 	my @files = sort grep { /\.ya?ml$/i && -f "$dir/$_" } readdir($dh);
 	closedir $dh;
 
-	# Pass 1: collect genesis.pipeline data and note which files exist
+	# Pass 1: enumerate valid environments (Top::has_env filters out
+	# shared parent config files like lmelt.yml that lack `genesis.env`
+	# and kit info) and collect their genesis.pipeline data.
+	my $top = $self->{top};
 	my (%pipeline_data, %file_exists);
 	for my $file (@files) {
 		(my $env = $file) =~ s/\.ya?ml$//i;
+		next unless $top && $top->has_env($env);
 		$file_exists{$env} = 1;
 		my $data = _read_genesis_pipeline_keys("$dir/$file");
 		$pipeline_data{$env} = $data if %$data;
@@ -430,12 +434,14 @@ sub _build_from_env_files {
 		$referenced_upstream{$upstream} = 1;
 	}
 
-	# Pass 2: build nodes for envs that either have pipeline data OR are
-	# referenced as upstream by another env AND have a file in the directory.
+	# Pass 2: every valid env becomes a node (so envs without any
+	# genesis.pipeline block still appear in the DAG — useful for
+	# pipeline-status), plus any upstream reference that resolves to a
+	# file on disk.
 	my %nodes;
 	my %prior_env_map;
 	my %envs_to_include = (
-		%pipeline_data,
+		(map { $_ => ($pipeline_data{$_} // {}) } keys %file_exists),
 		map { $_ => {} } grep { $file_exists{$_} } keys %referenced_upstream,
 	);
 

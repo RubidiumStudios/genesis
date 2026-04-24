@@ -149,7 +149,7 @@ sub pipeline_status {
 	}
 
 	# Gather state for each env
-	my %env_state;   # env => { sync, changed, detail }
+	my %env_state;   # env => { branch_sha, deployed_sha, changed, ... }
 	my %env_changed; # for propagation target computation
 	for my $env_name (@dag_order) {
 		my %state = ( name => $env_name );
@@ -160,8 +160,13 @@ sub pipeline_status {
 			next;
 		}
 
-		my ($last_sync) = _resolve_propagation_base($env_name, $git);
-		$state{sync} = $last_sync ? $git->sha($last_sync, short => 1) : undef;
+		# Branch column: the CONTROL sha that was most recently propagated
+		# to this env (read from the `[pipeline] control@<sha>` marker on
+		# the env branch) — not the env-branch's own HEAD sha.
+		my ($branch_ctl) = _resolve_propagation_base($env_name, $git);
+		$state{branch_sha} = $branch_ctl
+			? $git->sha($branch_ctl, short => 1)
+			: undef;
 
 		my $env = eval { $top->load_env($env_name) };
 		unless ($env) {
@@ -169,6 +174,19 @@ sub pipeline_status {
 			$env_state{$env_name} = \%state;
 			next;
 		}
+
+		# Deploy column: the CONTROL sha certified by the last successful
+		# deployment (exodus git.control_commit).  Also used below to
+		# determine deployed-vs-pending status.
+		my $dep_ctl = '';
+		my $env_v = eval { $env->with_vault };
+		if ($env_v) {
+			my $dep = eval { $env_v->deployments->latest_successful };
+			$dep_ctl = $dep ? ($dep->lookup('git.control_commit') || '') : '';
+		}
+		$state{deployed_sha} = $dep_ctl
+			? $git->sha($dep_ctl, short => 1)
+			: undef;
 
 		my @dep_files = $env->propagation_files;
 		my $diff = $git->diff_files($env_name, $head, @dep_files);
@@ -178,17 +196,8 @@ sub pipeline_status {
 			$state{count}   = scalar @{$diff->{all}};
 			$env_changed{$env_name} = $diff->{all};
 		} else {
-			# Synced — check if also deployed
-			my $branch_head = $git->sha($env_name);
-			my $deployed = 0;
-			my $env_v = eval { $env->with_vault };
-			if ($env_v) {
-				my $dep = $env_v->deployments->latest_successful;
-				if ($dep) {
-					my $dep_commit = $dep->lookup('git.commit') || '';
-					$deployed = 1 if !$dep_commit || $dep_commit eq $branch_head;
-				}
-			}
+			# Synced — check if branch's control sha matches deploy's
+			my $deployed = ($dep_ctl && $branch_ctl && $dep_ctl eq $branch_ctl) ? 1 : 0;
 			$state{status} = $deployed ? 'deployed' : 'awaiting-deploy';
 		}
 
@@ -262,42 +271,58 @@ sub pipeline_status {
 		$col_width = $w if $w > $col_width;
 	}
 
+	# SHA columns: fixed-width (7-char short SHA + padding).  Displays
+	# the env branch's HEAD and the last successfully deployed commit
+	# side by side so drift is visually obvious.
+	my $sha_col = sub {
+		my ($sha) = @_;
+		return sprintf("%-7s", defined($sha) ? $sha : '-');
+	};
+
+	output "  %s  #u{%-7s}  #u{%-7s}  #u{%s}",
+		' ' x $col_width, 'branch', 'deploy', 'status';
+
 	for my $env_name (@dag_order) {
 		my $state  = $env_state{$env_name};
 		my $status = $state->{status};
-		my $sync   = $state->{sync} || '  -    ';
 		my $depth  = $depth_of{$env_name};
 		my $indent = '  ' x $depth;
 		my $pad    = $col_width - ($depth * 2) - length($env_name);
 		$pad = 0 if $pad < 0;
 		my $name_col = sprintf("%s%s%s", $indent, $env_name, ' ' x $pad);
+		my $branch   = $sha_col->($state->{branch_sha});
+		my $deployed = $sha_col->($state->{deployed_sha});
 
 		if ($status eq 'deployed') {
-			output "  #G{%s}  %s  #G{deployed}", $name_col, $sync;
+			output "  #G{%s}  %s  %s  #G{deployed}", $name_col, $branch, $deployed;
 		} elsif ($status eq 'awaiting-deploy') {
-			output "  #C{%s}  %s  #Y{synced, pending deploy}", $name_col, $sync;
+			output "  #C{%s}  %s  %s  #Y{synced, pending deploy}",
+				$name_col, $branch, $deployed;
 		} elsif ($status eq 'pending') {
 			my $req_pr  = ($nodes->{$env_name} || {})->{require_pr} // 0;
 			if ($req_pr) {
 				my $open_pr = $gh_open_prs{$env_name};
 				if ($open_pr) {
-					output "  #C{%s}  %s  #Y{%d pending} #Yi{[PR #%d open: %s]}",
-						$name_col, $sync, $state->{count},
+					output "  #C{%s}  %s  %s  #Y{%d pending} #Yi{[PR #%d open: %s]}",
+						$name_col, $branch, $deployed, $state->{count},
 						$open_pr->{number}, $open_pr->{html_url};
 				} else {
-					output "  #C{%s}  %s  #Y{%d pending} #Yi{[PR required]}",
-						$name_col, $sync, $state->{count};
+					output "  #C{%s}  %s  %s  #Y{%d pending} #Yi{[PR required]}",
+						$name_col, $branch, $deployed, $state->{count};
 				}
 			} else {
-				output "  #C{%s}  %s  #Y{%d pending}", $name_col, $sync, $state->{count};
+				output "  #C{%s}  %s  %s  #Y{%d pending}",
+					$name_col, $branch, $deployed, $state->{count};
 			}
 		} elsif ($status eq 'blocked') {
-			output "  #C{%s}  %s  #Yi{blocked by %s} (%d files)",
-				$name_col, $sync, $state->{blocker}, $state->{count};
+			output "  #C{%s}  %s  %s  #Yi{blocked by %s} (%d files)",
+				$name_col, $branch, $deployed, $state->{blocker}, $state->{count};
 		} elsif ($status eq 'no-branch') {
-			output "  #R{%s}  %s  #R{no branch}", $name_col, '-      ';
+			output "  #R{%s}  %-7s  %-7s  #R{no branch}",
+				$name_col, '-', '-';
 		} elsif ($status eq 'error') {
-			output "  #R{%s}  %s  #R{load error}", $name_col, '-      ';
+			output "  #R{%s}  %-7s  %-7s  #R{load error}",
+				$name_col, '-', '-';
 		}
 	}
 
@@ -367,9 +392,18 @@ sub propagate {
 		push @queue, sort @{$children{$env} || []};
 	}
 
-	# Resolve control SHA — always use HEAD
-	my $control_sha   = $opts->{commit} || $git->sha('HEAD');
-	my $control_short = $git->sha($control_sha, short => 1);
+	# Resolve the control SHA that will be the source of this propagation.
+	#
+	# Root propagation (no after_env): use control HEAD so freshly-pushed
+	# commits reach the first tier immediately.  This preserves the
+	# "always HEAD" principle that solves the lost-no-op problem.
+	#
+	# Cascade propagation (after_env given): use <after_env>'s last
+	# successfully deployed git.control_commit.  Descendants receive the
+	# exact control state that was CERTIFIED at the ancestor — not
+	# whatever happens to be on HEAD now.  This keeps commits travelling
+	# as a unit down the chain even while control keeps advancing.
+	my $control_sha = $opts->{commit} || $git->sha('HEAD');
 
 	# Determine scope
 	my @scope;
@@ -387,21 +421,37 @@ sub propagate {
 
 		my $after_load = eval { $top->load_env($after_env) };
 		if ($after_load) {
-			# 1. Check for outstanding unpropagated changes
-			my @outstanding = $git->diff_names(
-				$last_sync, $control_sha,
-				$after_load->propagation_files,
-			);
-			bail(
-				"Environment #C{%s} has %d outstanding change%s on control\n".
-				"that have not been propagated to it yet.\n".
-				"Run #C{genesis propagate} without arguments first.",
-				$after_env, scalar(@outstanding),
-				@outstanding == 1 ? '' : 's'
-			) if @outstanding;
+			# Cascade requires a successful deployment with a recorded
+			# git.control_commit.  The env branch being ahead of that
+			# deployment is FINE — cascade intentionally propagates
+			# the certified (last deployed) control state, not whatever
+			# is currently on the env branch.  New changes on control
+			# flow through a fresh root-propagate + deploy cycle.
+			my $env_v = eval { $after_load->with_vault };
+			unless ($env_v) {
+				warning(
+					"Could not verify deployment status for #C{%s} (vault unavailable).\n".
+					"Ensure it has been deployed before cascading.",
+					$after_env
+				);
+			} elsif (!$opts->{commit}) {
+				my $dep = $env_v->deployments->latest_successful;
+				bail(
+					"Environment #C{%s} has never been successfully deployed.\n".
+					"Deploy it before cascading to downstream environments.",
+					$after_env
+				) unless $dep;
 
-			# 2. Check that the propagated state was deployed
-			_verify_deployed($after_env, $after_load, $git);
+				my $certified = $dep->lookup('git.control_commit');
+				bail(
+					"Environment #C{%s} has no #C{git.control_commit} in its\n".
+					"last successful deployment (pre-pipeline deploy?).\n".
+					"Cannot cascade safely — redeploy #C{%s} to record it.",
+					$after_env, $after_env
+				) unless $certified;
+
+				$control_sha = $certified;
+			}
 		}
 
 		my %child_set;
@@ -414,16 +464,29 @@ sub propagate {
 		@scope = grep { $child_set{$_} } @dag_order;
 		bail("Environment #C{%s} has no downstream environments.", $after_env)
 			unless @scope;
-		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s} #G{(after %s)}\n",
-			$control, $control_short, $after_env;
 	} else {
 		@scope = @dag_order;
+	}
+
+	my $control_short = $git->sha($control_sha, short => 1);
+	if ($after_env) {
+		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s} #G{(certified by %s)}\n",
+			$control, $control_short, $after_env;
+	} else {
 		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}\n",
 			$control, $control_short;
 	}
 
-	# Build per-env diffs
-	my (%env_changed, %env_changed_detail);
+	# Build per-env diffs.  Two diffs per env:
+	#   env_changed    — files on control not yet on the env branch
+	#                    (what we'd copy if this env were an entry point)
+	#   env_undeployed — files on control not yet DEPLOYED from this env
+	#                    (branch may have them but exodus shows an older
+	#                    commit).  Used by the entry-point algorithm so
+	#                    descendants don't cascade past an ancestor that
+	#                    has received a change on-branch but not yet
+	#                    deployed it.
+	my (%env_changed, %env_changed_detail, %env_undeployed);
 	for my $env_name (@scope) {
 		next unless $git->branch_exists($env_name);
 		my $env = eval { $top->load_env($env_name) };
@@ -439,14 +502,43 @@ sub propagate {
 			$env_changed{$env_name}        = $diff->{all};
 			$env_changed_detail{$env_name} = $diff;
 		}
+
+		# Compute the undeployed set (for cascade-blocking).
+		#
+		# Anchor is the last-successful deploy's `git.control_commit`
+		# (the control SHA that was propagated when this env last
+		# deployed).  Diff that against control HEAD and filter by
+		# dep_files to get "what's changed on control since this env
+		# last shipped."
+		#
+		# Fallback (no exodus record, vault down, or pre-pipeline
+		# deploy): conservatively treat everything the env would
+		# receive via propagation as undeployed — blocks descendants
+		# from cascading past an env whose state we can't verify.
+		my $last_ctl_sha;
+		my $env_v = eval { $env->with_vault };
+		if ($env_v) {
+			my $dep = eval { $env_v->deployments->latest_successful };
+			$last_ctl_sha = $dep ? ($dep->lookup('git.control_commit') || '') : '';
+		}
+		if ($last_ctl_sha) {
+			my $udiff = $git->diff_files(
+				$last_ctl_sha, $control_sha, @dep_files
+			);
+			$env_undeployed{$env_name} = $udiff->{all} if @{$udiff->{all}};
+		} elsif ($env_changed{$env_name}) {
+			# No deploy history: use the env branch's own pending set
+			$env_undeployed{$env_name} = $env_changed{$env_name};
+		}
 	}
 
 	# Determine entry points
 	my $env_propagate = Genesis::CI::Propagation::compute_propagation_targets(
-		dag_order   => \@dag_order,
-		parent_of   => \%parent_of,
-		env_changed => \%env_changed,
-		scope       => \@scope,
+		dag_order      => \@dag_order,
+		parent_of      => \%parent_of,
+		env_changed    => \%env_changed,
+		env_undeployed => \%env_undeployed,
+		scope          => \@scope,
 	);
 
 	# Pre-flight: build GitHub service once for all require_pr envs in scope.

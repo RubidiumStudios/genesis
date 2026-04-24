@@ -490,11 +490,20 @@ define_command("deploy", {
 			"specifically in the case of a failed partial deployments.\n\n".
 			"This option will allow you to specify a specfic state file to use for ".
 			"the deploy. You can use the `info` command to retrieve the state file",
+
+		'no-propagate' =>
+			"On manual-provider pipelines, `genesis deploy` automatically runs ".
+			"`genesis propagate <env>` after a successful deploy to cascade ".
+			"changes to downstream environments.  Use this flag to skip that ".
+			"cascade.  Non-manual providers (concourse, github-actions) always ".
+			"own their own cascade and are unaffected by this flag.",
 	],
 	args => {
 		'reason' =>
 			"An optional reason for deploying the environment.  This will be ".
-			"recorded in the exodus data for the deployment."
+			"recorded in the exodus data for the deployment.  When omitted and ".
+			"the env is on a pipeline-managed branch, genesis derives the reason ".
+			"from the control commit range being deployed."
 	}
 });
 

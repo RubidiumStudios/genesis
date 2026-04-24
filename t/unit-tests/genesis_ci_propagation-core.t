@@ -281,4 +281,67 @@ subtest 'partial overlap: any shared file blocks the env' => sub {
 	}, "lab blocked even though ops/lab-only.yml is independent — lmelt.yml overlaps";
 };
 
+# =========================================================================
+# Deploy-aware overlap: ancestor has a synced-but-undeployed file.
+# env_changed for the ancestor is empty (already propagated) but its
+# env_undeployed is non-empty — descendant must still be blocked.
+# =========================================================================
+subtest 'synced-but-undeployed ancestor blocks descendants' => sub {
+	my $targets = Genesis::CI::Propagation::compute_propagation_targets(
+		dag_order      => \@dag_order,
+		parent_of      => \%parent_of,
+		env_changed    => {
+			# mgmt already has lmelt.yml propagated — nothing to copy
+			lab => ['lmelt.yml', 'lmelt-vsphere-canwest-1-lab.yml'],
+		},
+		env_undeployed => {
+			# mgmt is "synced, pending deploy" — holds lmelt.yml in flight
+			mgmt => ['lmelt.yml'],
+			lab  => ['lmelt.yml', 'lmelt-vsphere-canwest-1-lab.yml'],
+		},
+	);
+
+	cmp_deeply $targets, {}, "lab blocked: mgmt has undeployed lmelt.yml";
+};
+
+# =========================================================================
+# Deploy-aware overlap: undeployed files differ from propagation files.
+# Descendant's files that do NOT overlap with ancestor's undeployed set
+# are allowed through.
+# =========================================================================
+subtest 'deploy_diff only blocks on actual overlap' => sub {
+	my $targets = Genesis::CI::Propagation::compute_propagation_targets(
+		dag_order      => \@dag_order,
+		parent_of      => \%parent_of,
+		env_changed    => {
+			lab => ['lmelt-vsphere-canwest-1-lab.yml'],
+		},
+		env_undeployed => {
+			# mgmt has undeployed mgmt-only.yml — doesn't overlap with lab
+			mgmt => ['lmelt-vsphere-canwest-1-mgmt.yml'],
+			lab  => ['lmelt-vsphere-canwest-1-lab.yml'],
+		},
+	);
+
+	cmp_deeply $targets, {
+		lab => bag('lmelt-vsphere-canwest-1-lab.yml'),
+	}, "lab allowed: mgmt's undeployed set is disjoint from lab's changes";
+};
+
+# =========================================================================
+# env_undeployed defaults to env_changed when not supplied (backwards-
+# compatible with callers that haven't been updated to track deploy state).
+# =========================================================================
+subtest 'env_undeployed defaults to env_changed when omitted' => sub {
+	# Using the original single-diff helper — same result as before
+	my $targets = propagate(
+		mgmt => ['lmelt.yml'],
+		lab  => ['lmelt.yml', 'ops/lab-only.yml'],
+	);
+
+	cmp_deeply $targets, {
+		mgmt => bag('lmelt.yml'),
+	}, "omitting env_undeployed preserves original single-diff behaviour";
+};
+
 done_testing;
