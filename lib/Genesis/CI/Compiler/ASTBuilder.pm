@@ -174,8 +174,11 @@ sub _build_legacy_workflows {
 			my ($ef_nodes) = $self->_build_from_env_files($env_dir);
 			for my $env (keys %nodes) {
 				my $ef = $ef_nodes->{$env} or next;
-				$nodes{$env}{require_pr} = $ef->{require_pr};
-				$nodes{$env}{manual}     = $ef->{manual};
+				$nodes{$env}{require_pr}          = $ef->{require_pr};
+				$nodes{$env}{manual}              = $ef->{manual};
+				$nodes{$env}{redeploy}            = $ef->{redeploy};
+				$nodes{$env}{redeploy_cron_start} = $ef->{redeploy_cron_start};
+				$nodes{$env}{redeploy_cron_stop}  = $ef->{redeploy_cron_stop};
 			}
 		}
 
@@ -411,15 +414,22 @@ sub _build_from_env_files {
 
 	for my $env (sort keys %envs_to_include) {
 		my $data = $pipeline_data{$env} || {};
+		my $rd = $data->{redeploy} || '';
+		if ($rd && $rd !~ /^(manual|cron|signal)$/) {
+			$rd = _truthy($rd) ? 'manual' : '';
+		}
 		$nodes{$env} = {
-			stage_name  => $env,
-			target_name => $env,
-			alias       => $env,
-			genesis_env => $env,
-			auto        => 0,
-			type        => 'deployment',
-			require_pr  => _truthy($data->{require_pr}),
-			manual      => _truthy($data->{manual}),
+			stage_name          => $env,
+			target_name         => $env,
+			alias               => $env,
+			genesis_env         => $env,
+			auto                => 0,
+			type                => 'deployment',
+			require_pr          => _truthy($data->{require_pr}),
+			manual              => _truthy($data->{manual}),
+			redeploy            => $rd,
+			redeploy_cron_start => $data->{redeploy_cron_start} || '',
+			redeploy_cron_stop  => $data->{redeploy_cron_stop}  || '',
 		};
 		$prior_env_map{$env} = $data->{prior_env} if $data->{prior_env};
 	}
@@ -484,8 +494,9 @@ sub _read_genesis_pipeline_keys {
 		# 4-space keys under genesis.pipeline
 		if ($in_pipeline && $line =~ /^    ([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/) {
 			my ($k, $v) = ($1, $2);
-			$v =~ s/\s*#.*$//;   # strip inline comment
+			$v =~ s/\s*#.*$//;    # strip inline comment
 			$v =~ s/^\s+|\s+$//g; # trim
+			$v =~ s/^(["'])(.*)\1$/$2/; # unquote surrounding quotes
 			$result{$k} = $v;
 		}
 	}

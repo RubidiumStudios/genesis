@@ -55,6 +55,7 @@ sub describe {
 
 		my @wf_job_names;
 		my @notify_job_names;
+		my @redeploy_job_names;
 		for my $env (@{$wf_data->{environments}}) {
 			my $alias         = $wf_data->{aliases}{$env} || $env;
 			my $is_auto       = $wf_data->{auto}{$env};
@@ -89,6 +90,24 @@ sub describe {
 			);
 			push @jobs, $dj;
 			push @wf_job_names, $dj->{name};
+
+			# Redeploy lane
+			my $redeploy_mode = $wf_data->{redeploy}{$env} || '';
+			if ($redeploy_mode) {
+				if ($redeploy_mode eq 'cron') {
+					my $start = $wf_data->{redeploy_cron_start}{$env} || '04:00';
+					my $stop  = $wf_data->{redeploy_cron_stop}{$env}  || '05:00';
+					push @resources, $self->_redeploy_resource(
+						$ast, $env, $alias, $start, $stop
+					);
+				}
+				my $rj = $self->_redeploy_job(
+					$ast, $env, $alias, $deploy_type, $redeploy_mode,
+					$is_create_env, $wf_data
+				);
+				push @jobs, $rj;
+				push @redeploy_job_names, $rj->{name};
+			}
 		}
 
 		# Auto-update resources and job
@@ -155,6 +174,13 @@ sub describe {
 			push @groups, {
 				name => 'genesis-updates',
 				jobs => ['update-genesis-assets'],
+			};
+		}
+
+		if (@redeploy_job_names) {
+			push @groups, {
+				name => 'redeploy',
+				jobs => [sort @redeploy_job_names],
 			};
 		}
 	}
@@ -700,6 +726,141 @@ sub _deploy_job {
 }
 
 # }}}
+# _redeploy_resource - Concourse time resource for cron-mode redeploy {{{
+sub _redeploy_resource {
+	my ($self, $ast, $env, $alias, $start, $stop) = @_;
+
+	my $config = $ast->configuration || {};
+	my $tagged = $config->{tagged};
+	my %to = $tagged ? (tags => [$env]) : ();
+
+	return {
+		name   => "$alias-redeploy-cron",
+		type   => 'time',
+		icon   => 'clock-outline',
+		%to,
+		source => {
+			start    => $start,
+			stop     => $stop,
+			location => 'UTC',
+		},
+	};
+}
+
+# }}}
+# _redeploy_job - redeploy job for an environment {{{
+#
+# Redeploys an environment without change detection or cache generation.
+# Trigger modes: manual (no auto-trigger), cron (time resource), signal (like manual).
+sub _redeploy_job {
+	my ($self, $ast, $env, $alias, $deploy_type, $trigger_mode,
+		$is_create_env, $wf_data) = @_;
+
+	my $config = $ast->configuration || {};
+	my $sc     = $ast->integrations->{source_control} || {};
+	my $root   = $sc->{root} || '.';
+	my $tagged = $config->{tagged};
+	my %to     = $tagged ? (tags => [$env]) : ();
+	my $name   = $ast->metadata->{name} || 'genesis-pipeline';
+
+	my $bindir = 'git';
+	my $srcdir = "$alias-changes";
+	$bindir .= "/$root" if $root ne '.';
+
+	# Resource gets — no change-detection triggers
+	my @gets;
+	if ($trigger_mode eq 'cron') {
+		push @gets, {
+			get     => "$alias-redeploy-cron",
+			trigger => JSON::PP::true,
+		};
+	}
+	push @gets, { get => "$alias-changes", trigger => JSON::PP::false };
+	push @gets, { get => 'git', trigger => JSON::PP::false }
+		unless $config->{'require-passed-caches'};
+	unless ($is_create_env) {
+		push @gets, { get => "$alias-cloud-config",   %to, trigger => JSON::PP::false };
+		push @gets, { get => "$alias-runtime-config", %to, trigger => JSON::PP::false };
+	}
+
+	# Deploy task — reuses ci-pipeline-deploy with no prior_env
+	my $deploy_task = {
+		task => 'bosh-redeploy', %to,
+		config => $self->_task_config($ast, $env, $alias, undef, $wf_data,
+			{ command        => 'ci-pipeline-deploy',
+			  genesis_bindir => $bindir,
+			  genesis_srcdir => $srcdir }),
+		ensure => { put => 'git', params => { repository => 'out/git' } },
+	};
+	my @priv = @{$config->{task}{privileged} || []};
+	$deploy_task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
+
+	# Locker steps — same dual-lock pattern as the normal deploy job
+	my @lock_steps;
+	my @unlock_steps;
+	my $locker = $ast->integrations->{locker} || {};
+	if ($locker->{url}) {
+		unless ($is_create_env) {
+			push @lock_steps, {
+				put => "$alias-bosh-lock", %to,
+				params => {
+					lock_op   => 'lock',
+					key       => 'dont-upgrade-bosh-on-me',
+					locked_by => "$env-redeploy",
+				},
+			};
+			push @unlock_steps, {
+				put => "$alias-bosh-lock", %to,
+				params => {
+					lock_op   => 'unlock',
+					key       => 'dont-upgrade-bosh-on-me',
+					locked_by => "$env-redeploy",
+				},
+			};
+		}
+		push @lock_steps, {
+			put => "$alias-deployment-lock", %to,
+			params => {
+				lock_op   => 'lock',
+				key       => 'i-need-to-deploy-myself',
+				locked_by => "$env-redeploy",
+			},
+		};
+		push @unlock_steps, {
+			put => "$alias-deployment-lock", %to,
+			params => {
+				lock_op   => 'unlock',
+				key       => 'i-need-to-deploy-myself',
+				locked_by => "$env-redeploy",
+			},
+		};
+	}
+
+	my @do;
+	push @do, @lock_steps;
+	push @do, { in_parallel => \@gets };
+	push @do, $deploy_task;
+
+	my $fail = $self->_notification_step($ast,
+		"$name: Redeploy of $env-$deploy_type failed");
+	my $succ = $self->_notification_step($ast,
+		"$name: Successfully redeployed $env-$deploy_type");
+
+	my $plan_step = {};
+	$plan_step->{on_failure} = $fail if $fail;
+	$plan_step->{on_success} = $succ if $succ;
+	$plan_step->{ensure} = { do => \@unlock_steps } if @unlock_steps;
+	$plan_step->{do} = \@do;
+
+	return {
+		name   => "redeploy-$alias",
+		public => JSON::PP::true,
+		serial => JSON::PP::true,
+		plan   => [$plan_step],
+	};
+}
+
+# }}}
 # _auto_update_resources - build kit-release and genesis-release resources {{{
 sub _auto_update_resources {
 	my ($self, $ast) = @_;
@@ -1131,7 +1292,8 @@ sub _extract_workflow_data {
 	my $nodes = $graph->{nodes} || {};
 	my $edges = $graph->{edges} || [];
 
-	my (%will_trigger, %triggers, %auto, %aliases, %genesis_envs);
+	my (%will_trigger, %triggers, %auto, %aliases, %genesis_envs,
+	    %redeploy, %redeploy_cron_start, %redeploy_cron_stop);
 
 	for my $edge (@$edges) {
 		push @{$will_trigger{$edge->{from}}}, $edge->{to};
@@ -1139,9 +1301,12 @@ sub _extract_workflow_data {
 	}
 	for my $n (keys %$nodes) {
 		my $nd = $nodes->{$n};
-		$auto{$n}         = 1 if $nd->{auto};
-		$aliases{$n}      = $nd->{alias}       || $n;
-		$genesis_envs{$n} = $nd->{genesis_env} || $n;
+		$auto{$n}               = 1 if $nd->{auto};
+		$aliases{$n}            = $nd->{alias}              || $n;
+		$genesis_envs{$n}       = $nd->{genesis_env}        || $n;
+		$redeploy{$n}           = $nd->{redeploy}           || '';
+		$redeploy_cron_start{$n} = $nd->{redeploy_cron_start} || '';
+		$redeploy_cron_stop{$n}  = $nd->{redeploy_cron_stop}  || '';
 	}
 
 	if ($workflow->{_legacy}) {
@@ -1155,12 +1320,15 @@ sub _extract_workflow_data {
 	}
 
 	return {
-		environments => (@$edges ? [_topological_sort($graph)] : [sort keys %$nodes]),
-		auto         => \%auto,
-		aliases      => \%aliases,
-		genesis_envs => \%genesis_envs,
-		will_trigger => \%will_trigger,
-		triggers     => \%triggers,
+		environments        => (@$edges ? [_topological_sort($graph)] : [sort keys %$nodes]),
+		auto                => \%auto,
+		aliases             => \%aliases,
+		genesis_envs        => \%genesis_envs,
+		will_trigger        => \%will_trigger,
+		triggers            => \%triggers,
+		redeploy            => \%redeploy,
+		redeploy_cron_start => \%redeploy_cron_start,
+		redeploy_cron_stop  => \%redeploy_cron_stop,
 	};
 }
 
@@ -1270,19 +1438,16 @@ sub _mermaid_id {
 sub _mermaid_node_def {
 	my ($alias, $node) = @_;
 	$node ||= {};
-	my $id  = _mermaid_id($alias);
-	my $pr  = $node->{require_pr} || 0;
-	my $man = $node->{manual}     || 0;
+	my $id = _mermaid_id($alias);
 
-	if ($pr && $man) {
-		return "$id([$alias\\nPR+MANUAL])";
-	} elsif ($pr) {
-		return "$id([$alias\\nPR])";
-	} elsif ($man) {
-		return "$id([$alias\\nMANUAL])";
-	} else {
-		return $id;
-	}
+	my @labels;
+	push @labels, 'PR'       if $node->{require_pr};
+	push @labels, 'MANUAL'   if $node->{manual};
+	push @labels, 'REDEPLOY' if $node->{redeploy};
+
+	return @labels
+		? "$id([$alias\\n" . join('+', @labels) . "])"
+		: $id;
 }
 
 # }}}
