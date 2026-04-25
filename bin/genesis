@@ -493,10 +493,11 @@ define_command("deploy", {
 
 		'no-propagate' =>
 			"On manual-provider pipelines, `genesis deploy` automatically runs ".
-			"`genesis propagate <env>` after a successful deploy to cascade ".
-			"changes to downstream environments.  Use this flag to skip that ".
-			"cascade.  Non-manual providers (concourse, github-actions) always ".
-			"own their own cascade and are unaffected by this flag.",
+			"`genesis propagate <env>` after a successful deploy to push the ".
+			"freshly certified state to downstream environments.  Use this ".
+			"flag to skip that propagation.  Non-manual providers (concourse, ".
+			"github-actions) own their own propagation and are unaffected by ".
+			"this flag.",
 	],
 	args => {
 		'reason' =>
@@ -2082,7 +2083,7 @@ define_command("propagate", {
 		"Without arguments, determines entry points by walking the DAG and ".
 		"finding the first environment that uses each changed file.\n\n".
 		"With an environment name, scopes propagation to that environment's ".
-		"children (cascade after a successful deploy).",
+		"children, sourced from the named env's last-deployed control commit.",
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,

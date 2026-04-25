@@ -3861,14 +3861,6 @@ sub _post_deploy {
 
 	$self->notify("#G{Deployment successful.}") if $deployment_ok;
 
-	# Process post-deploy reactions
-	if ($self->_reactions && !$state->{disable_reactions}) {
-		$state->{reaction_vars}{GENESIS_DEPLOY_RC} = ($state->{results}[1]);
-		$self->_process_reactions('post-deploy', $state->{reaction_vars}) or warning(
-			"Environment post-deploy reaction failed!  Manual intervention may be needed."
-		);
-	}
-
 	# Save deployment log
 	my $manifest_store = $self->top->config->get('manifest_store','hybrid');
 	mkfile_or_fail(
@@ -3899,6 +3891,14 @@ sub _post_deploy {
 
 	# bail out early if the deployment failed;
 	if (!$deployment_ok) {
+		# Reactions on failure: GENESIS_DEPLOY_RC != 0 lets scripts skip.
+		if ($self->_reactions && !$state->{disable_reactions}) {
+			$state->{reaction_vars}{GENESIS_DEPLOY_RC} = ($state->{results}[1]);
+			$self->_process_reactions('post-deploy', $state->{reaction_vars}) or warning(
+				"Environment post-deploy reaction failed!  Manual intervention may be needed."
+			);
+		}
+
 		if (!$opts{"dry-run"} && $self->has_hook('post-deploy')) {
 			# Call post-deploy hook with the pre-deploy data in case of cleanup on failure
 			$self->run_hook('post-deploy', rc => $state->{results}[1], interactive => !$noprompt, data => $state->{predeploy_data});
@@ -3976,6 +3976,14 @@ sub _post_deploy {
 		exodus_overrides => $exodus_overrides
 	);
 
+	# Reactions on success: run AFTER exodus so `genesis bosh --self` works.
+	if ($self->_reactions && !$state->{disable_reactions}) {
+		$state->{reaction_vars}{GENESIS_DEPLOY_RC} = ($state->{results}[1]);
+		$self->_process_reactions('post-deploy', $state->{reaction_vars}) or warning(
+			"Environment post-deploy reaction failed!  Manual intervention may be needed."
+		);
+	}
+
 	# Clean up deployment cache
 	$self->deployment_cache_cleanup;
 
@@ -3988,6 +3996,29 @@ sub _post_deploy {
 			$self->path(".genesis/manifests/".$self->name."-state.json"),
 			$self->path(".genesis/manifests/".$self->name."-store.yml")
 		);
+	}
+
+	# Auto-cascade propagation on manual-provider pipelines.  Non-manual
+	# providers (concourse, gha) own their own cascade.
+	if ($self->top->ci_configured
+		&& ($self->top->config->get('ci.provider.type') || '') eq 'manual'
+		&& !$opts{'no-propagate'}) {
+
+		require Service::Git;
+		require Genesis::Top;
+		my $git     = Service::Git->new('.');
+		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+		my $current = $git->current_branch // '';
+		$git->checkout($control) if $current && $current ne $control;
+
+		$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
+		my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
+		system($bin, 'propagate', $self->name);
+		warning(
+			"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
+			"run #C{genesis propagate %s} manually to retry.",
+			($? >> 8), $self->name
+		) if $? != 0;
 	}
 
 	# Run post-deploy hook

@@ -449,7 +449,7 @@ sub propagate {
 				bail(
 					"Environment #C{%s} has no #C{git.control_commit} in its\n".
 					"last successful deployment (pre-pipeline deploy?).\n".
-					"Cannot cascade safely — redeploy #C{%s} to record it.",
+					"Cannot propagate safely - redeploy #C{%s} to record it.",
 					$after_env, $after_env
 				) unless $certified;
 
@@ -465,8 +465,11 @@ sub propagate {
 			push @expand, @{$children{$e} || []};
 		}
 		@scope = grep { $child_set{$_} } @dag_order;
-		bail("Environment #C{%s} has no downstream environments.", $after_env)
-			unless @scope;
+		unless (@scope) {
+			info "\n#Yi{Environment %s has no downstream environments - nothing to propagate.}",
+				$after_env;
+			exit 0;
+		}
 	} else {
 		@scope = @dag_order;
 	}

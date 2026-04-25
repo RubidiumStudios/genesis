@@ -1016,7 +1016,7 @@ sub deploy {
 	if (!defined($reason) && $pipeline_git && $pipeline_branch) {
 		if (my $derived = _derive_deploy_reason($env, $pipeline_git)) {
 			$reason = $derived;
-			info "\nDerived deploy reason from pipeline history:\n%s\n", $reason;
+			$env->notify("derived deploy reason from pipeline history:\n%s", $reason);
 		}
 	}
 
@@ -1423,30 +1423,6 @@ sub deploy {
 
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;
-
-		# Auto-cascade propagation on manual-provider pipelines.
-		# Non-manual providers (concourse, gha) own their own cascade.
-		my $provider = $top->config->get('ci.provider.type') || '';
-		if ($pipeline_git
-			&& $provider eq 'manual'
-			&& !$options{'no-propagate'}
-			&& !$options{'dry-run'}) {
-
-			# Switch back to control so propagate runs from the right context
-			$pipeline_git->restore_branch;
-
-			info "\nCascading propagation from #C{%s}...", $env->name;
-			my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
-			system($bin, 'propagate', $env->name);
-			if ($? != 0) {
-				warning(
-					"Cascade propagation failed (rc=%d).  Deploy itself succeeded;\n".
-					"run #C{genesis propagate %s} manually to retry.",
-					($? >> 8), $env->name
-				);
-			}
-		}
-
 		exit 0;
 	} else {
 		bail "[#M{%s}] #R{Deployment Failed}", $env->name;
