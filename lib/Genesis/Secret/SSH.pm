@@ -85,25 +85,52 @@ sub _validate_value {
 	my ($self, %opts) = @_;
 	my $values = $self->value;
 	my %results;
-	my $fifo_file="genesis-ssh-1.fifo";
 
-	$fifo_file =~ s/-(\d+)\.fifo$/"-${\($1+1)}.fifo"/e while ( -e $fifo_file );
-	my ($rendered_public,$priv_rc) = run('mkfifo -m 600 "$2"; echo "$1">"$2"|ssh-keygen -y -f "$2"; rm "$2"', $values->{private}, $fifo_file);
-	$results{priv} = [
-		!$priv_rc,
-		"Valid private key"
-	];
+	# ssh-keygen needs `-f <path>` and refuses to load private keys
+	# from regular files with broad permissions or from /dev/stdin
+	# (pipe perms 0660).  Use a NAMED PIPE in a private temp dir:
+	# - data flows through memory, not disk
+	# - mkfifo -m 600 yields 0600 perms on the fifo node
+	# - ssh-keygen's permission check is skipped for non-regular files
+	# - bash background-writer handles the open/open rendezvous so we
+	#   don't deadlock the way the older inline pipe construct did
+	require File::Temp;
+	my $tmpdir = File::Temp->newdir('genesis-ssh-XXXXXXXX', TMPDIR => 1);
+	chmod 0700, "$tmpdir";
 
-	$fifo_file =~ s/-(\d+)\.fifo$/"-${\($1+1)}.fifo"/e while ( -e $fifo_file );
-	my ($pub_sig,$pub_rc) = run('mkfifo -m 600 "$2"; echo "$1">"$2"|ssh-keygen -B -f "$2"; rm "$2"', $values->{public}, $fifo_file);
-	$results{pub} = [
-		!$pub_rc,
-		"Valid public key"
-	];
+	my $counter = 0;
+	my $with_fifo = sub {
+		my ($content, @cmd) = @_;
+		my $fifo = "$tmpdir/key-" . (++$counter) . ".fifo";
+		# bash -c: mkfifo with 0600, background-write, run command
+		# reading from the fifo, then unlink.  The single-quoted
+		# heredoc-style content goes via env var to avoid argv length
+		# limits and to keep it out of the trace_args formatting.
+		local $ENV{__GENESIS_SSH_FIFO} = $fifo;
+		local $ENV{__GENESIS_SSH_KEY}  = $content;
+		return run(
+			'mkfifo -m 600 "$__GENESIS_SSH_FIFO" && '.
+			'{ printf %s\\\\n "$__GENESIS_SSH_KEY" > "$__GENESIS_SSH_FIFO" & } && '.
+			'"$@" -f "$__GENESIS_SSH_FIFO"; '.
+			'rc=$?; wait; rm -f "$__GENESIS_SSH_FIFO"; exit $rc',
+			@cmd
+		);
+	};
+
+	my ($rendered_public, $priv_rc) = $with_fifo->(
+		$values->{private}, 'ssh-keygen', '-y'
+	);
+	$results{priv} = [ !$priv_rc, "Valid private key" ];
+
+	my ($pub_sig, $pub_rc) = $with_fifo->(
+		$values->{public}, 'ssh-keygen', '-B'
+	);
+	$results{pub} = [ !$pub_rc, "Valid public key" ];
 
 	if (!$priv_rc) {
-		$fifo_file =~ s/-(\d+)\.fifo$/"-${\($1+1)}.fifo"/e while ( -e $fifo_file );
-		my ($rendered_sig,$rendered_rc) = run('mkfifo -m 600 "$2"; echo "$1">"$2"|ssh-keygen -B -f "$2"; rm "$2"', $rendered_public, $fifo_file);
+		my ($rendered_sig, $rendered_rc) = $with_fifo->(
+			$rendered_public, 'ssh-keygen', '-B'
+		);
 		$results{agree} = [
 			$rendered_sig eq $pub_sig,
 			"Public/Private key Agreement"
