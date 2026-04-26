@@ -78,7 +78,9 @@ sub create {
 	my $git;
 	if ($ci_configured) {
 		require Service::Git;
-		$git = Service::Git->new('.');
+		# track_branch so that prune_branch's checkout to the new env
+		# branch is restored back to control before we return.
+		$git = Service::Git->new('.', track_branch => 1);
 		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 		my $branch = $git->current_branch;
 		if (!defined($branch) || $branch ne $control) {
@@ -207,7 +209,7 @@ sub create {
 	my %cli_opts_git = %{get_options()};
 	if ($ci_configured) {
 		my $env_file = $env->file;
-		$git->add($env_file);
+		$git->add($git->prefixed($env_file));
 
 		if ($cli_opts_git{'no-commit'}) {
 			info "Skipping commit (#C{--no-commit} set); #C{%s} remains staged.", $env_file;
