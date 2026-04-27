@@ -41,7 +41,22 @@ sub apply {
 	bail("--debug-dir requires --platform")
 		if $opts->{'debug-dir'} && !$opts->{platform};
 
-	my $top    = _get_top($opts);
+	my $top = _get_top($opts);
+
+	# Short-circuit on the 'manual' provider: it has no pipeline to apply
+	# — Genesis is the CLI you run at your terminal, there is no CI to
+	# generate or deploy.
+	if (($top->config->get('ci.provider.type') // '') eq 'manual') {
+		bail(
+			"Manual provider has no pipeline to apply.\n\n".
+			"#i{Genesis is your CLI - deploys happen at your terminal, ".
+			"not in a hosted pipeline.}\n\n".
+			"To use a real CI provider, change #C{ci.provider.type} in ".
+			"#C{.genesis/config} to one of: #C{concourse}, #C{github-actions}, ".
+			"then re-run #C{genesis pipeline-apply}."
+		);
+	}
+
 	my $result = _compile_pipeline($top, $platform);
 
 	_dump_debug_artifacts($opts->{'debug-dir'}, $result, $platform)
