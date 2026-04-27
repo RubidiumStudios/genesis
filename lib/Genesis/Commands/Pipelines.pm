@@ -294,34 +294,35 @@ sub pipeline_status {
 		my $deployed = $sha_col->($state->{deployed_sha});
 
 		if ($status eq 'deployed') {
-			output "  #G{%s}  %s  %s  #G{deployed}", $name_col, $branch, $deployed;
+			output "  #G{%s}  %s  %s  #G\@{+}#G{deployed}",
+				$name_col, $branch, $deployed;
 		} elsif ($status eq 'awaiting-deploy') {
-			output "  #C{%s}  %s  %s  #Y{synced, pending deploy}",
+			output "  #C{%s}  %s  %s  #Y\@{O}#Y{synced, pending deploy}",
 				$name_col, $branch, $deployed;
 		} elsif ($status eq 'pending') {
 			my $req_pr  = ($nodes->{$env_name} || {})->{require_pr} // 0;
 			if ($req_pr) {
 				my $open_pr = $gh_open_prs{$env_name};
 				if ($open_pr) {
-					output "  #C{%s}  %s  %s  #Y{%d pending} #Yi{[PR #%d open: %s]}",
+					output "  #C{%s}  %s  %s  #Y\@{!}#Y{%d pending} #Yi{[PR #%d open: %s]}",
 						$name_col, $branch, $deployed, $state->{count},
 						$open_pr->{number}, $open_pr->{html_url};
 				} else {
-					output "  #C{%s}  %s  %s  #Y{%d pending} #Yi{[PR required]}",
+					output "  #C{%s}  %s  %s  #Y\@{!}#Y{%d pending} #Yi{[PR required]}",
 						$name_col, $branch, $deployed, $state->{count};
 				}
 			} else {
-				output "  #C{%s}  %s  %s  #Y{%d pending}",
+				output "  #C{%s}  %s  %s  #Y\@{!}#Y{%d pending}",
 					$name_col, $branch, $deployed, $state->{count};
 			}
 		} elsif ($status eq 'blocked') {
-			output "  #C{%s}  %s  %s  #Yi{blocked by %s} (%d files)",
+			output "  #C{%s}  %s  %s  #Y\@{!}#Yi{blocked by %s} (%d files)",
 				$name_col, $branch, $deployed, $state->{blocker}, $state->{count};
 		} elsif ($status eq 'no-branch') {
-			output "  #R{%s}  %-7s  %-7s  #R{no branch}",
+			output "  #K{%s}  %-7s  %-7s  #K\@{*}#K{not propagated}",
 				$name_col, '-', '-';
 		} elsif ($status eq 'error') {
-			output "  #R{%s}  %-7s  %-7s  #R{load error}",
+			output "  #R{%s}  %-7s  %-7s  #R\@{-}#R{load error}",
 				$name_col, '-', '-';
 		}
 	}
