@@ -336,13 +336,23 @@ sub _base_deployment_content {
 					branch => $git->current_branch,
 					commit => $git->sha('HEAD'),
 				};
-				# Extract control commit from last propagation commit on this branch
+				# Prefer the control commit recorded by the last pipeline propagation
+				# on this branch ([pipeline] control@<sha> in the commit message).
 				my @log = $git->log_subjects($git->current_branch, limit => 20);
 				for my $line (@log) {
 					if ($line =~ /\[pipeline\] control\@([0-9a-f]+)/) {
 						$base->{git}{control_commit} = $git->sha($1);
 						last;
 					}
+				}
+				# Fallback: entrypoint envs (no prior_env) are never the target of
+				# `genesis propagate`, so they never get the [pipeline] control@sha
+				# marker — this is the normal path for them.  Also covers bootstrap
+				# and emergency manual deploys of downstream envs.
+				unless ($base->{git}{control_commit}) {
+					my $control_branch = $env->top->ci_control_branch;
+					my $sha = eval { $git->sha($control_branch) };
+					$base->{git}{control_commit} = $sha if $sha;
 				}
 			};
 			# Non-fatal — git context is supplementary

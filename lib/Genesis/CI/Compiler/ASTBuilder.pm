@@ -473,6 +473,7 @@ sub _build_from_env_files {
 			signal_prefix       => $data->{signal_prefix} || '',
 			bosh_parent         => '',  # resolved in second pass below
 			bosh_upgrade_lock   => 1,   # default: enabled
+			track_bosh_configs  => $data->{track_bosh_configs},
 		};
 		$prior_env_map{$env} = $data->{prior_env} if $data->{prior_env};
 	}

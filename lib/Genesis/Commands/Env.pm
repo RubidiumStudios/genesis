@@ -967,6 +967,32 @@ sub deploy {
 	$options{'disable-reactions'} = ! delete($options{reactions});
 	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
+	# Warn when manually deploying a pipeline-managed environment outside of a
+	# pipeline job.  GENESIS_HONOR_ENV is set by ci-pipeline-deploy, so its
+	# absence means we are not running inside Concourse.  Without a prior
+	# [pipeline] control@<sha> marker on the env branch, propagation from this
+	# env would have failed with "no git.control_commit".  DeploymentManager
+	# now falls back to the control branch HEAD automatically, but the warning
+	# reminds operators that the pipeline is the preferred deploy path.
+	if ($top->ci_configured && !$ENV{GENESIS_HONOR_ENV}) {
+		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
+		if ($prior) {
+			warning(
+				"\nManually deploying #C{%s}, which is managed by a Genesis pipeline.\n".
+				"The pipeline is the preferred deploy path — manual deploys bypass\n".
+				"change-detection, propagation gating, and approval gates.\n\n".
+				"The deployment will still record a #C{git.control_commit} so that\n".
+				"cascade propagation continues to work after this deploy.",
+				$env->name
+			);
+			unless ($options{yes} || !in_controlling_terminal()) {
+				prompt_for_boolean(
+					"Continue with manual deploy? [y|n]", 0
+				) || bail("Aborted.");
+			}
+		}
+	}
+
 	my $deployment_files = $env->deployment_cache_path_lookup('existing');
 	if (scalar(keys %$deployment_files)) {
 		# TODO: Support the --resume option here, to resume a previous deployment.

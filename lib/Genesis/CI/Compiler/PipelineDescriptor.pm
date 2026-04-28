@@ -600,38 +600,42 @@ sub _env_resources {
 		};
 	}
 
-	# BOSH config resources (non-create-env)
+	# BOSH config resources — emitted only when track_bosh_configs is configured
 	unless ($is_create_env) {
-		my $target = $ast->targets->{$env} || {};
-		my $conn   = $target->{connection} || {};
-		my $auth   = $conn->{auth} || {};
-		my $tagged = ($ast->configuration || {})->{tagged};
-		my %to = $tagged ? (tags => [$env]) : ();
+		my $types = $self->_bosh_config_types($ast, $env, $wf_data);
+		if (@$types) {
+			my $target = $ast->targets->{$env} || {};
+			my $conn   = $target->{connection} || {};
+			my $auth   = $conn->{auth} || {};
+			my $tagged = ($ast->configuration || {})->{tagged};
+			my %to = $tagged ? (tags => [$env]) : ();
 
-		my $ocfp = ($ast->configuration || {})->{ocfp};
-		my $config_name = 'default';
-		if ($ocfp) {
-			$config_name = $wf_data->{genesis_envs}{$env} || $env;
+			my $ocfp = ($ast->configuration || {})->{ocfp};
+			my $config_name = 'default';
+			if ($ocfp) {
+				$config_name = $wf_data->{genesis_envs}{$env} || $env;
+			}
+
+			my %bs = (
+				target        => $conn->{url},
+				client        => $auth->{client_id},
+				client_secret => _unwrap_ref($auth->{client_secret}),
+				ca_cert       => _unwrap_ref($conn->{ca_cert}),
+			);
+			$bs{name} = $config_name if $ocfp;
+
+			my %_bc_suffix = (cloud => 'cloud-config', runtime => 'runtime-config', cpi => 'cpi-config');
+			my %_bc_icon   = (cloud => 'cloud', runtime => 'run-fast', cpi => 'chip');
+			for my $type (@$types) {
+				push @resources, {
+					name   => "$alias-$_bc_suffix{$type}",
+					type   => 'bosh-config',
+					icon   => $_bc_icon{$type},
+					%to,
+					source => { %bs, config => $type, all => JSON::PP::true },
+				};
+			}
 		}
-
-		my %bs = (
-			target        => $conn->{url},
-			client        => $auth->{client_id},
-			client_secret => _unwrap_ref($auth->{client_secret}),
-			ca_cert       => _unwrap_ref($conn->{ca_cert}),
-		);
-		$bs{name} = $config_name if $ocfp;
-
-		push @resources, {
-			name => "$alias-cloud-config", type => 'bosh-config',
-			icon => 'script-text', %to,
-			source => { %bs, config => 'cloud', all => JSON::PP::true },
-		};
-		push @resources, {
-			name => "$alias-runtime-config", type => 'bosh-config',
-			icon => 'script-text', %to,
-			source => { %bs, config => 'runtime', all => JSON::PP::true },
-		};
 	}
 
 	return \@resources;
@@ -728,8 +732,10 @@ sub _notify_job {
 		if $passed_job && !$config->{'require-passed-caches'};
 
 	unless ($is_create_env) {
-		push @gets, { get => "$alias-cloud-config",   %to, trigger => JSON::PP::true };
-		push @gets, { get => "$alias-runtime-config", %to, trigger => JSON::PP::true };
+		my %_bc_suffix = (cloud => 'cloud-config', runtime => 'runtime-config', cpi => 'cpi-config');
+		for my $type (@{$self->_bosh_config_types($ast, $env, $wf_data)}) {
+			push @gets, { get => "$alias-$_bc_suffix{$type}", %to, trigger => JSON::PP::true };
+		}
 	}
 
 	my $task_cfg = $self->_task_config($ast, $env, $alias, $trigger_from, $wf_data,
@@ -781,8 +787,10 @@ sub _deploy_job {
 	# Resource gets
 	my @gets;
 	if (!$is_create_env && $is_auto) {
-		push @gets, { get => "$alias-cloud-config",   %to, trigger => JSON::PP::true };
-		push @gets, { get => "$alias-runtime-config", %to, trigger => JSON::PP::true };
+		my %_bc_suffix = (cloud => 'cloud-config', runtime => 'runtime-config', cpi => 'cpi-config');
+		for my $type (@{$self->_bosh_config_types($ast, $env, $wf_data)}) {
+			push @gets, { get => "$alias-$_bc_suffix{$type}", %to, trigger => JSON::PP::true };
+		}
 	}
 	if ($is_auto || !$inline) {
 		push @gets, { get => "$alias-changes", trigger => $trigger };
@@ -981,8 +989,10 @@ sub _redeploy_job {
 	push @gets, { get => 'git', trigger => JSON::PP::false }
 		unless $config->{'require-passed-caches'};
 	unless ($is_create_env) {
-		push @gets, { get => "$alias-cloud-config",   %to, trigger => JSON::PP::false };
-		push @gets, { get => "$alias-runtime-config", %to, trigger => JSON::PP::false };
+		my %_bc_suffix = (cloud => 'cloud-config', runtime => 'runtime-config', cpi => 'cpi-config');
+		for my $type (@{$self->_bosh_config_types($ast, $env, $wf_data)}) {
+			push @gets, { get => "$alias-$_bc_suffix{$type}", %to, trigger => JSON::PP::false };
+		}
 	}
 
 	# Task library
@@ -1797,7 +1807,8 @@ sub _extract_workflow_data {
 	my (%will_trigger, %triggers, %auto, %aliases, %genesis_envs,
 	    %redeploy, %redeploy_cron_start, %redeploy_cron_stop,
 	    %status_signal, %signal_prefix,
-	    %bosh_parent, %bosh_upgrade_lock, %is_bosh_director);
+	    %bosh_parent, %bosh_upgrade_lock, %is_bosh_director,
+	    %track_bosh_configs);
 
 	for my $edge (@$edges) {
 		push @{$will_trigger{$edge->{from}}}, $edge->{to};
@@ -1815,6 +1826,8 @@ sub _extract_workflow_data {
 		$signal_prefix{$n}       = $nd->{signal_prefix}       || '';
 		$bosh_parent{$n}         = $nd->{bosh_parent}         || '';
 		$bosh_upgrade_lock{$n}   = $nd->{bosh_upgrade_lock}   // 1;
+		$track_bosh_configs{$n}  = $nd->{track_bosh_configs}
+			if defined $nd->{track_bosh_configs};
 	}
 	# Derive which envs are pipeline BOSH directors (referenced as bosh_parent)
 	for my $n (keys %bosh_parent) {
@@ -1847,6 +1860,7 @@ sub _extract_workflow_data {
 		bosh_parent         => \%bosh_parent,
 		bosh_upgrade_lock   => \%bosh_upgrade_lock,
 		is_bosh_director    => \%is_bosh_director,
+		track_bosh_configs  => \%track_bosh_configs,
 	};
 }
 
@@ -1867,6 +1881,37 @@ sub _git_uri {
 	} else {
 		return $repo;
 	}
+}
+
+# }}}
+# _normalize_bosh_config_types - coerce track_bosh_configs to a list of types {{{
+#
+# Accepts: undef/false/""/0 → []
+#          true/yes/1       → [cloud, runtime]
+#          [cloud,runtime,cpi] (arrayref) → filtered list
+#          "cloud,runtime"  (comma string) → split and filtered
+sub _normalize_bosh_config_types {
+	my ($val) = @_;
+	return [] unless defined $val && $val ne '';
+	if (ref($val) eq 'ARRAY') {
+		return [grep { /^(?:cloud|runtime|cpi)$/ } @$val];
+	}
+	my $s = lc("$val");
+	return []                   if $s =~ /^(?:false|no|0)$/;
+	return ['cloud', 'runtime'] if $s =~ /^(?:true|yes|1)$/;
+	my @types = split /[\s,]+/, $s;
+	return [grep { /^(?:cloud|runtime|cpi)$/ } @types];
+}
+
+# }}}
+# _bosh_config_types - resolve track_bosh_configs for an env (per-env then global) {{{
+sub _bosh_config_types {
+	my ($self, $ast, $env, $wf_data) = @_;
+	my $track = $wf_data->{track_bosh_configs} || {};
+	my $val = exists $track->{$env}
+		? $track->{$env}
+		: ($ast->configuration || {})->{track_bosh_configs};
+	return _normalize_bosh_config_types($val);
 }
 
 # }}}

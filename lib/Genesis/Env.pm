@@ -1031,8 +1031,8 @@ sub validate_genesis_version_requirements {
 		};
 		$source = $src_map->{$effective_min};
 
-		if ($effective_min ne $repo_min) {
-			# Environment requires newer version than repo - this is fine
+		if (by_semver($env_min, $repo_min) > 0) {
+			# Environment requires strictly newer version than repo minimum
 			push @warnings, sprintf(
 				"Environment requires Genesis %s, which is newer than the ".
 				"repository minimum of %s",
