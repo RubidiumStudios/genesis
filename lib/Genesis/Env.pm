@@ -484,6 +484,71 @@ sub create {
 }
 
 # }}}
+# genesis_config_block - generate a YAML genesis: config block for injection into env files {{{
+sub genesis_config_block {
+	my ($self) = @_;
+
+	# Perl analogue of the legacy bash helper `genesis_config_block`, but
+	# prefers inferred/declared values from the env object.
+	my @out = ('genesis:');
+	push @out, "  env:<pad>".$self->{name};
+
+	# bosh_env: only emit when not create-env, and when it differs from the env name
+	my $bosh_env_desc = $self->bosh_env->{description} // '';
+	push @out, "  bosh_env:<pad>$bosh_env_desc"
+		if !$self->use_create_env && $bosh_env_desc ne '' && $bosh_env_desc ne $self->name;
+
+	# vault: prefer env-configured value; omit if unset
+	my $vault_desc = $self->lookup('genesis.vault', undef);
+	push @out, "  vault:<pad>$vault_desc"
+		if defined($vault_desc) && $vault_desc ne '';
+
+	# min_version: prefer env value, else use current runtime (except development)
+	my $min_version = $self->lookup(['genesis.min_version','genesis.minimum_version'], undef);
+	$min_version //= $Genesis::VERSION unless $Genesis::VERSION eq '(development)';
+	push @out, "  min_version:<pad>$min_version"
+		if defined($min_version) && $min_version ne '';
+
+	# secrets/exodus/ci: derived from env
+	push @out, '  secrets_path:<pad>'.$self->secrets_slug unless $self->secrets_slug eq $self->default_secrets_slug;
+	push @out, '  secrets_mount:<pad>'.$self->secrets_mount unless $self->secrets_mount eq $self->default_secrets_mount;
+	push @out, '  exodus_mount:<pad>'.$self->exodus_mount unless $self->exodus_mount eq $self->default_exodus_mount;
+	push @out, '  ci_mount:<pad>'.$self->ci_mount unless $self->ci_mount eq $self->default_ci_mount;
+
+	# root_ca_path: optional
+	my $root_ca_path = $self->root_ca_path;
+	push @out, "  root_ca_path:<pad>$root_ca_path"
+		if defined($root_ca_path) && $root_ca_path ne '';
+
+	# credhub_env: optional
+	my $credhub_env = $self->lookup('genesis.credhub_env', '');
+	push @out, "  credhub_env:<pad>$credhub_env" if $credhub_env ne '';
+
+	# Determine padding for alignment based on longest key
+	my $max_key_length = 0;
+	for my $line (@out) {
+		next unless $line =~ /^(\s*\S+):<pad>/;
+		my $key_length = length($1);
+		$max_key_length = $key_length if $key_length > $max_key_length;
+	}
+	for my $line (@out) {
+		next unless $line =~ /^(\s*\S+):<pad>/;
+		my $key_length = length($1);
+		$line =~ s/<pad>/ ' ' x ($max_key_length - $key_length + 2)/e;
+	}
+
+	return join("\n", @out)."\n\n";
+}
+
+# }}}
+# write_manifest - write the environment file manifest to disk {{{
+sub write_manifest {
+	my ($self, $content) = @_;
+	my $path = $self->path($self->{file});
+	mkfile_or_fail($path, 0644, $content);
+}
+
+# }}}
 # exists - returns true if the given environment exists {{{
 sub exists {
 	my $ref = shift if @_ % 2 == 1;
