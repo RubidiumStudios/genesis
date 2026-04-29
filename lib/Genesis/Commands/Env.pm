@@ -876,7 +876,18 @@ sub _derive_deploy_reason {
 	}
 
 	my $range = $last_deployed ? "$last_deployed..$branch_head" : $branch_head;
-	my @lines = $git->log_subjects($range, limit => 50);
+
+	# Scope the history to commits that actually touched files this env
+	# depends on.  Without this filter, multi-deploy repos (e.g. bosh and
+	# vault sharing one env branch) would surface propagation markers
+	# from sibling deployments whose subjects are irrelevant to the deploy
+	# being reasoned about.
+	my @dep_files = $env->propagation_files;
+	my @lines = $git->log_subjects(
+		$range,
+		limit => 50,
+		paths => \@dep_files,
+	);
 
 	return _format_pipeline_reason(
 		\@lines,

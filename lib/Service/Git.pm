@@ -320,6 +320,13 @@ sub log_subjects {
 	my $fmt = $opts{format} || '%H %s';
 	my @cmd = ('git', 'log', "--format=$fmt", $branch);
 	push @cmd, "-$opts{limit}" if $opts{limit};
+	# Optional pathspec filter: only commits that touched any of these
+	# git-root-relative paths.  Used to scope the env-branch history to
+	# what's relevant to a particular deployment (e.g., bosh vs vault in
+	# a multi-deploy repo).
+	if ($opts{paths} && @{$opts{paths}}) {
+		push @cmd, '--', @{$opts{paths}};
+	}
 	my ($out) = run({ dir => $self->{root} }, @cmd);
 	return split /\n/, ($out || '');
 }
