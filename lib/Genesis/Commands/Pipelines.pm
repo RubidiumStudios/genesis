@@ -186,6 +186,7 @@ sub pipeline_status {
 		my $env = eval { $top->load_env($env_name) };
 		unless ($env) {
 			$state{status} = 'error';
+			$state{error}  = _summarize_load_error($@);
 			$env_state{$env_name} = \%state;
 			next;
 		}
@@ -337,8 +338,12 @@ sub pipeline_status {
 			output "  #K{%s}  %-7s  %-7s  #K\@{*}#K{not propagated}",
 				$name_col, '-', '-';
 		} elsif ($status eq 'error') {
-			output "  #R{%s}  %-7s  %-7s  #R\@{-}#R{load error}",
-				$name_col, '-', '-';
+			# Branch SHA is git-only — we already have it even if the env
+			# itself couldn't be loaded.  Surface what we know plus the
+			# reason instead of pretending the row is blank.
+			my $reason = $state->{error} || 'unknown reason';
+			output "  #R{%s}  %s  %-7s  #R\@{-}#R{load error}: #Ri{%s}",
+				$name_col, $branch, '-', $reason;
 		}
 	}
 
@@ -798,6 +803,37 @@ sub propagate {
 #      git merge-base as the starting point
 #
 # Returns: ($control_sha_full, $manual_commits_on_top)
+# _summarize_load_error - extract a short, actionable reason from a
+# load_env failure for the pipeline-status display.  bail() output is
+# multi-line and decorated; we strip the noise and keep the first
+# substantive line.
+sub _summarize_load_error {
+	my ($err) = @_;
+	return 'unknown reason' unless defined($err) && length($err);
+
+	# Strip ANSI color escapes and structural prose
+	$err =~ s/\e\[[0-9;]*m//g;
+	$err =~ s/\[FATAL\]\s*//g;
+	$err =~ s/Environment\s+\S+\s+could not be loaded:\s*//g;
+	$err =~ s/Please fix the above errors and try again\.\s*//g;
+
+	# Take the first non-blank line that looks like a reason
+	my $reason;
+	for my $line (split /\n/, $err) {
+		$line =~ s/^\s*-\s+//;     # bullet prefix
+		$line =~ s/^\s+|\s+$//g;
+		next unless length $line;
+		next if $line =~ /^at \S+ line \d+/;  # perl trace frames
+		$reason = $line;
+		last;
+	}
+	$reason //= 'unknown reason';
+
+	# Trim to fit on one terminal row alongside the rest of the row
+	$reason = substr($reason, 0, 80) . '...' if length($reason) > 80;
+	return $reason;
+}
+
 sub _resolve_propagation_base {
 	my ($branch, $git) = @_;
 	$git ||= Service::Git->new('.');
