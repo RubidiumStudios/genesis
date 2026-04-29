@@ -78,7 +78,7 @@ sub create {
 	my $git;
 	if ($ci_configured) {
 		require Service::Git;
-		# track_branch so that prune_branch's checkout to the new env
+		# track_branch so that prepare_branch's checkout to the env
 		# branch is restored back to control before we return.
 		$git = Service::Git->new('.', track_branch => 1);
 		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
@@ -221,13 +221,17 @@ sub create {
 			my $sha = $git->sha('HEAD', short => 1);
 			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
 
-			# Create the environment branch at the current commit,
-			# then prune files that don't belong to this environment.
-			$git->create_branch($name);
-
-			my @pruned = $env->prune_branch;
-			info "Environment branch #C{%s} created (%d file%s pruned).",
-				$name, scalar(@pruned), @pruned == 1 ? '' : 's';
+			# Create the environment branch (if needed) and reconcile it
+			# with the files this env depends on.  prepare_branch handles
+			# both the fresh-create case (cut from current commit, prune
+			# unrelated files) and the existing-branch case (add files
+			# that this env adds without disturbing files owned by other
+			# deployments sharing the same branch).
+			my $branch_existed = $git->branch_exists($name);
+			my ($added, $removed) = $env->prepare_branch;
+			info "Environment branch #C{%s} %s (%d added, %d removed).",
+				$name, $branch_existed ? 'reconciled' : 'created',
+				scalar(@$added), scalar(@$removed);
 
 			# For automated CI providers, the pipeline needs to be
 			# rebuilt to include a job for the new environment branch.

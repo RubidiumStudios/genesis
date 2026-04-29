@@ -848,7 +848,7 @@ sub file   { $_[0]->{file};   }
 sub kit    { $_[0]->{kit}    || bug("Incompletely initialized environment '".$_[0]->name."': no kit specified"); }
 sub top    { $_[0]->{top}    || bug("Incompletely initialized environment '".$_[0]->name."': no top specified"); }
 
-# }}}
+# }}
 # Delegations: type, path {{{
 sub type   { $_[0]->top->type; }
 sub path   { shift->top->path(@_); }
@@ -1096,8 +1096,8 @@ sub validate_genesis_version_requirements {
 		};
 		$source = $src_map->{$effective_min};
 
-		if (by_semver($env_min, $repo_min) > 0) {
-			# Environment requires strictly newer version than repo minimum
+		if ($effective_min ne $repo_min) {
+			# Environment requires newer version than repo - this is fine
 			push @warnings, sprintf(
 				"Environment requires Genesis %s, which is newer than the ".
 				"repository minimum of %s",
@@ -1409,17 +1409,29 @@ sub _resolve_required_files {
 # }}}
 
 # }}}
-# prune_branch - remove files from this env's branch that it doesn't depend on {{{
+# prepare_branch - create or reconcile this env's branch with the files it needs {{{
 #
-# Checks out the environment's branch, removes tracked files not in
-# propagation_files (keeping .genesis/ wholesale), commits the prune,
-# and returns to the original branch.
+# Reconciles the environment branch with this env's propagation_files set:
+#
+#   1. Creates the branch from the current commit if it doesn't yet exist
+#      (so that newly-created envs land on a fresh branch off control HEAD).
+#   2. Adds any files this env needs that aren't already on the branch
+#      (the multi-deployment-per-repo case: branch was created when only
+#      the bosh deployment existed; now we're adding a vault env file
+#      that needs to land on the same branch).
+#   3. Removes tracked files under our git prefix that this env no longer
+#      depends on, keeping .genesis/ wholesale.  Files outside our prefix
+#      are left alone — other deployments sharing this repo own them.
+#
+# All add/remove changes land in a single commit on the env branch and
+# the original branch is restored before returning.
 #
 # Options:
-#   dry_run => 1    — list files that would be removed without changing anything
+#   dry_run => 1   — return the planned add/remove sets without changing
+#                    anything on disk or in git
 #
-# Returns the list of removed files (empty if nothing to prune).
-sub prune_branch {
+# Returns: ($added_arrayref, $removed_arrayref).  Either may be empty.
+sub prepare_branch {
 	my ($self, %opts) = @_;
 
 	require Service::Git;
@@ -1427,10 +1439,11 @@ sub prune_branch {
 	my $branch = $self->name;
 	my @keep   = $self->propagation_files;
 
-	# Must not be on the env branch
+	# Must not be on the env branch (we need to copy files INTO it from
+	# the current branch's HEAD).
 	unless ($opts{dry_run}) {
 		bail(
-			"Cannot prune #C{%s} while on that branch.  Switch to the control branch first.",
+			"Cannot prepare #C{%s} while on that branch.  Switch to the control branch first.",
 			$branch
 		) if ($git->current_branch // '') eq $branch;
 	}
@@ -1438,24 +1451,81 @@ sub prune_branch {
 	# propagation_files returns git-root-relative paths already
 	my %keep_set = map { $_ => 1 } @keep;
 
-	# List tracked files on the env branch under our prefix
-	my @tracked = $git->ls_tree($branch, $git->prefix);
+	# Compute the add/remove sets.  When the branch doesn't exist yet, we
+	# treat the current HEAD as its starting tree (so "tracked" is what
+	# the new branch would inherit before reconciliation).
+	my $branch_exists = $git->branch_exists($branch);
+	my $tree_ref      = $branch_exists ? $branch : 'HEAD';
+	my @tracked       = $git->ls_tree($tree_ref, $git->prefix);
+	my %tracked_set   = map { $_ => 1 } @tracked;
+
+	my @to_add = grep { !$tracked_set{$_} } @keep;
+
 	my @to_remove;
 	for my $file (@tracked) {
 		next if $file =~ m{^\Q@{[$git->prefix]}\E\.genesis/};
 		next if $keep_set{$file};
+		# Don't touch anything outside our prefix — other deployments in
+		# this repo may own files on this branch (multi-deploy repos),
+		# and users may keep hand-added artifacts (CI config, notes, etc.)
+		# that we don't know about.
+		next if $git->prefix && $file !~ m{^\Q@{[$git->prefix]}\E};
 		push @to_remove, $file;
 	}
 
-	return () unless @to_remove;
-	return @to_remove if $opts{dry_run};
+	# Nothing to do AND branch already exists: idempotent no-op.
+	return ([], []) if $branch_exists && !@to_add && !@to_remove;
+	return (\@to_add, \@to_remove) if $opts{dry_run};
+
+	# Source SHA for any add operations: whatever the current branch
+	# points at.  For a brand-new branch this is also the branch's HEAD.
+	my $source_sha = $git->sha('HEAD');
+
+	# We're about to swap branches, and the target branch may not have
+	# the deployment subdirectory the user is currently in (multi-deploy
+	# repos: branch was created when only the bosh deployment existed,
+	# now we're adding vault/<env>.yml).  After the checkout, popping
+	# back to a now-vanished cwd would fatal.  Step up to the git root
+	# for the duration of the swap; restore_branch puts us back on a
+	# branch where the original cwd exists again.
+	pushd($git->{root});
+
+	# Create the branch off the current commit if it didn't exist.
+	$git->create_branch($branch) unless $branch_exists;
 
 	$git->checkout($branch);
-	$git->rm(@to_remove);
-	$git->commit("Prune non-dependency files from $branch");
-	$git->restore_branch;
 
-	return @to_remove;
+	# checkout_file creates any missing parent directories itself, so a
+	# brand-new deployment subdirectory (vault/, jumpbox/, etc.) on a
+	# branch that didn't have it before materializes naturally.
+	$git->checkout_file($source_sha, $_) for @to_add;
+	$git->rm(@to_remove) if @to_remove;
+
+	my $msg;
+	if (!$branch_exists) {
+		# First time we're committing on this branch.  Even with no
+		# add/remove (everything from HEAD already belonged), record an
+		# empty seed commit so the branch has a distinct propagation
+		# anchor.  Skip when there's literally nothing different from
+		# HEAD — the branch already starts there.
+		$msg = sprintf("Initialize %s branch (%d added, %d removed)",
+			$branch, scalar(@to_add), scalar(@to_remove));
+	} else {
+		$msg = sprintf("Reconcile %s branch (%d added, %d removed)",
+			$branch, scalar(@to_add), scalar(@to_remove));
+	}
+
+	if (@to_add || @to_remove) {
+		$git->commit($msg, @to_add);
+	}
+
+	# Switch back to control before popping back to the original cwd —
+	# that cwd lives on control (we just came from there) and may not
+	# exist on the env branch.
+	$git->restore_branch;
+	popd;
+
+	return (\@to_add, \@to_remove);
 }
 
 # }}}
