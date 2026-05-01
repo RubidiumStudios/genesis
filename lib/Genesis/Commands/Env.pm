@@ -93,6 +93,13 @@ sub create {
 				$control
 			);
 		}
+
+		# Refresh env branches so branch_exists checks and reconciliation
+		# see teammate-created branches that aren't in the local clone yet.
+		unless (get_options->{'no-fetch'}) {
+			require Genesis::Commands::Pipelines;
+			Genesis::Commands::Pipelines::_fetch_pipeline_envs($top, $git);
+		}
 	}
 
 	# create the environment
@@ -960,6 +967,10 @@ sub deploy {
 		$do_pull = 0;
 	}
 
+	# --no-fetch: skip the pre-deploy env-branch refresh (offline use).
+	# Remove from %options so it is not forwarded to $env->deploy().
+	my $no_fetch = delete($options{'no-fetch'}) ? 1 : 0;
+
 	# When CI is configured, switch to the environment's branch and
 	# pull from remote BEFORE loading the env -- otherwise all the
 	# preflight work (cloud-config download, manifest viability,
@@ -1036,6 +1047,13 @@ sub deploy {
 				}
 			}
 		}
+	}
+
+	# Refresh pipeline env branches from remote before deploying so
+	# cascade-source siblings are up to date (one auth prompt).
+	if (!$no_fetch && $top->ci_configured && $pipeline_git) {
+		require Genesis::Commands::Pipelines;
+		Genesis::Commands::Pipelines::_fetch_pipeline_envs($top, $pipeline_git);
 	}
 
 	# --pull: pull propagated files from the prior env (or control HEAD for

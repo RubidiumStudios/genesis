@@ -131,8 +131,6 @@ sub pipeline_status {
 
 	my $git     = Service::Git->new('.');
 	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-	my $remote  = $git->default_remote;
-	my $current = $git->current_branch // '';
 
 	# Build the DAG
 	require Genesis::CI::Compiler::ASTBuilder;
@@ -163,17 +161,10 @@ sub pipeline_status {
 		push @queue, sort @{$children{$env} || []};
 	}
 
-	# Pull every pipeline branch up to its remote state before reading
-	# status.  Uses pull --ff-only for the currently checked-out branch and
-	# force-fetch for all others (works without a checkout).  Both are
-	# wrapped in eval so a temporarily unreachable remote or a diverged
-	# branch never prevents the status display from running.
-	if ($remote) {
-		# Fetch all non-current branches in one call so credentials are only
-		# prompted once, then pull the current branch forward separately.
-		eval { $git->fetch_branches($remote, $control, @dag_order) };
-		eval { $git->pull_ff_only($current, $remote) } if $current;
-	}
+	# Refresh env branch refs from remote before reading status so the
+	# display reflects teammate commits, not just local state.
+	_fetch_pipeline_envs($top, $git)
+		unless get_options->{'no-fetch'};
 
 	my $head       = $git->sha($control);
 	my $head_short = $git->sha($head, short => 1);
@@ -430,6 +421,10 @@ sub propagate {
 		push @dag_order, $env;
 		push @queue, sort @{$children{$env} || []};
 	}
+
+	# Refresh env branch refs so diff computations see teammate commits.
+	_fetch_pipeline_envs($top, $git)
+		unless $opts->{'no-fetch'};
 
 	# Resolve the control SHA that will be the source of this propagation.
 	#
@@ -825,6 +820,31 @@ sub propagate {
 	exit 0;
 }
 
+# _fetch_pipeline_envs - bulk-fetch all pipeline env branches in one round-trip {{{
+#
+#   _fetch_pipeline_envs($top, $git)
+#
+# Walks the pipeline DAG to collect env names, then calls fetch_branches
+# with a single git fetch (one auth prompt regardless of branch count).
+# Control and any other non-env branches are never included in the
+# refspecs.  No-op when CI is not configured or no remote is reachable.
+# Silently swallows fetch errors so offline use never aborts a command.
+sub _fetch_pipeline_envs {
+	my ($top, $git) = @_;
+	return unless $top->ci_configured;
+	my $remote = $git->default_remote;
+	return unless $remote;
+	require Genesis::CI::Compiler::ASTBuilder;
+	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
+		top     => $top,
+		env_dir => $top->path,
+	);
+	my ($nodes) = $builder->_build_from_env_files($top->path);
+	return unless $nodes && %$nodes;
+	eval { $git->fetch_branches([sort keys %$nodes], $remote) };
+}
+
+# }}}
 # _resolve_propagation_base - find the control SHA to diff from for an env branch {{{
 #
 # Resolution order:

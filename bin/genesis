@@ -279,6 +279,12 @@ define_command("create", {
 			"Commit message for the environment commit.  Defaults to ".
 			"#C{Add environment <name>}.  Only applies when a CI ".
 			"provider is configured and #C{--no-commit} is not set.",
+
+		"no-fetch" =>
+			"Skip the pre-create refresh of pipeline environment branches from ".
+			"remote.  By default all env branches are fetched in one round-trip ".
+			"before checking for existing branches.  Use this flag when working ".
+			"offline or when the remote is temporarily unavailable.",
 	],
 	deprecated_options => [
 		"^prefix=s" =>
@@ -505,6 +511,12 @@ define_command("deploy", {
 			"environment branch before deploying.  No-op when the environment ".
 			"is already current.  Implied by #y{-F}/#y{--fix-checks}; use ".
 			"#y{--no-pull} to opt out.  No-op for non-pipeline repositories.",
+
+		'no-fetch' =>
+			"Skip the pre-deploy refresh of pipeline environment branches from ".
+			"remote.  By default all env branches are fetched in one round-trip ".
+			"before reading branch state.  Use this flag when working offline or ".
+			"when the remote is temporarily unavailable.",
 	],
 	args => {
 		'reason' =>
@@ -2077,6 +2089,13 @@ define_command("pipeline-status", {
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'no-fetch' =>
+			"Skip the pre-status refresh of pipeline environment branches from ".
+			"remote.  By default all env branches are fetched in one round-trip ".
+			"before reading branch state.  Use this flag when working offline or ".
+			"when the remote is temporarily unavailable.",
+	],
 }, 'Genesis::Commands::Pipelines::pipeline_status');
 # }}}
 # genesis propagate - propagate control branch changes to environment branches {{{
@@ -2105,6 +2124,12 @@ define_command("propagate", {
 		'no-push' =>
 			"Skip pushing control and env branches to the remote after ".
 			"propagation.  By default, propagated branches are pushed.",
+
+		'no-fetch' =>
+			"Skip the pre-propagate refresh of pipeline environment branches ".
+			"from remote.  By default all env branches are fetched in one ".
+			"round-trip before computing diffs.  Use this flag when working ".
+			"offline or when the remote is temporarily unavailable.",
 	],
 	arguments => [
 		'env?' =>
