@@ -169,13 +169,10 @@ sub pipeline_status {
 	# wrapped in eval so a temporarily unreachable remote or a diverged
 	# branch never prevents the status display from running.
 	if ($remote) {
-		for my $branch ($control, @dag_order) {
-			if ($branch eq $current) {
-				eval { $git->pull_ff_only($branch, $remote) };
-			} else {
-				eval { $git->fetch_branch($branch, $remote) };
-			}
-		}
+		# Fetch all non-current branches in one call so credentials are only
+		# prompted once, then pull the current branch forward separately.
+		eval { $git->fetch_branches($remote, $control, @dag_order) };
+		eval { $git->pull_ff_only($current, $remote) } if $current;
 	}
 
 	my $head       = $git->sha($control);

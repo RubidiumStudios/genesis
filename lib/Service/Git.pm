@@ -508,6 +508,28 @@ sub fetch_branch {
 }
 
 # }}}
+# fetch_branches - fetch multiple branches from remote in one call {{{
+#
+# Builds all refspecs and runs a single git fetch, so credentials are
+# only prompted once regardless of how many branches are listed.
+# Silently skips the currently checked-out branch (git refuses to
+# update an active branch via refspec fetch); call pull_ff_only for
+# that one separately.  Returns $self.
+sub fetch_branches {
+	my ($self, $remote, @branches) = @_;
+	$remote //= $self->default_remote;
+	return $self unless $remote && @branches;
+	my $current  = $self->current_branch // '';
+	my @refspecs = map { "+refs/heads/$_:refs/heads/$_" }
+	               grep { $_ ne $current } @branches;
+	return $self unless @refspecs;
+	run({ dir => $self->{root}, passfail => 1 },
+		'git', 'fetch', $remote, @refspecs);
+	$self->{_branch_cache}{$_} = 1 for grep { $_ ne $current } @branches;
+	return $self;
+}
+
+# }}}
 # push - push branches to a remote {{{
 #
 #   $git->push(@branches);              # push to default remote
