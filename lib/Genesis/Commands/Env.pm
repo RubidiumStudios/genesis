@@ -988,6 +988,15 @@ sub deploy {
 		$branch_name =~ s/\.ya?ml$//;
 		$pipeline_branch = $branch_name;
 
+		# Fetch all pipeline env branches in one round-trip before any
+		# branch-state reads (branch_exists, checkout, pull_ff_only).
+		# This ensures teammate-created branches and propagation commits
+		# are visible before we act on them.
+		unless ($no_fetch) {
+			require Genesis::Commands::Pipelines;
+			Genesis::Commands::Pipelines::_fetch_pipeline_envs($top, $pipeline_git);
+		}
+
 		my $current = $pipeline_git->current_branch // '';
 		if ($current ne $branch_name) {
 			bail(
@@ -1047,13 +1056,6 @@ sub deploy {
 				}
 			}
 		}
-	}
-
-	# Refresh pipeline env branches from remote before deploying so
-	# cascade-source siblings are up to date (one auth prompt).
-	if (!$no_fetch && $top->ci_configured && $pipeline_git) {
-		require Genesis::Commands::Pipelines;
-		Genesis::Commands::Pipelines::_fetch_pipeline_envs($top, $pipeline_git);
 	}
 
 	# --pull: pull propagated files from the prior env (or control HEAD for
