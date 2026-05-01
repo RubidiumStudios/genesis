@@ -949,6 +949,17 @@ sub deploy {
 	my %options = %{get_options()};
 	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix fix-stemcells/);
 
+	# --pull: explicitly requested, or implied by -F/--fix-checks unless --no-pull.
+	# Remove 'pull' from %options so it is not forwarded to $env->deploy().
+	my $do_pull;
+	if (exists $options{pull}) {
+		$do_pull = delete($options{pull}) ? 1 : 0;
+	} elsif ($options{'fix-checks'}) {
+		$do_pull = 1;
+	} else {
+		$do_pull = 0;
+	}
+
 	# Branch coordination (auto-checkout, pull, baseline snapshot,
 	# post-deploy commit + push, auto-cascade) is handled inside
 	# Genesis::Env::_pre_deploy / _post_deploy when CI is configured,
@@ -971,30 +982,65 @@ sub deploy {
 	$options{'disable-reactions'} = ! delete($options{reactions});
 	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
-	# Warn when manually deploying a pipeline-managed environment outside of a
-	# pipeline job.  GENESIS_HONOR_ENV is set by ci-pipeline-deploy, so its
-	# absence means we are not running inside Concourse.  Without a prior
-	# [pipeline] control@<sha> marker on the env branch, propagation from this
-	# env would have failed with "no git.control_commit".  DeploymentManager
-	# now falls back to the control branch HEAD automatically, but the warning
-	# reminds operators that the pipeline is the preferred deploy path.
-	if ($top->ci_configured && !$ENV{GENESIS_HONOR_ENV}) {
+	# CI-only checks for pipeline-managed environments.
+	if ($top->ci_configured) {
 		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
 		if ($prior) {
-			warning(
-				"\nManually deploying #C{%s}, which is managed by a Genesis pipeline.\n".
-				"The pipeline is the preferred deploy path — manual deploys bypass\n".
-				"change-detection, propagation gating, and approval gates.\n\n".
-				"The deployment will still record a #C{git.control_commit} so that\n".
-				"cascade propagation continues to work after this deploy.",
-				$env->name
-			);
-			unless ($options{yes} || !in_controlling_terminal()) {
-				prompt_for_boolean(
-					"Continue with manual deploy? [y|n]", 0
-				) || bail("Aborted.");
+			# Hard invariant (no --yes override): the pipeline predecessor must
+			# have been successfully deployed at least once.  Without this guard
+			# a deploy could proceed past an env that skipped its predecessor,
+			# leaving the pipeline DAG in an inconsistent state.
+			_assert_prior_env_deployed($env, $prior);
+
+			# Warn when manually deploying outside of a pipeline job.
+			# GENESIS_HONOR_ENV is set by ci-pipeline-deploy; its absence means
+			# we are running at a terminal, not inside Concourse.
+			if (!$ENV{GENESIS_HONOR_ENV}) {
+				warning(
+					"\nManually deploying #C{%s}, which is managed by a Genesis pipeline.\n".
+					"The pipeline is the preferred deploy path — manual deploys bypass\n".
+					"change-detection, propagation gating, and approval gates.\n\n".
+					"The deployment will still record a #C{git.control_commit} so that\n".
+					"cascade propagation continues to work after this deploy.",
+					$env->name
+				);
+				unless ($options{yes} || !in_controlling_terminal()) {
+					prompt_for_boolean(
+						"Continue with manual deploy? [y|n]", 0
+					) || bail("Aborted.");
+				}
 			}
 		}
+	}
+
+	# --pull: pull propagated files from the prior env (or control HEAD for
+	# entry points) onto the env branch before deploying.  No-op when the
+	# env branch is already current or when CI is not configured.
+	if ($do_pull && $top->ci_configured && $pipeline_git) {
+		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
+
+		# Upgrade to track_branch so DESTROY returns us to the branch we were
+		# on before the pull (e.g. control), not to the env branch.
+		$pipeline_git = Service::Git->new('.', track_branch => 1);
+
+		bail(
+			"Environment branch #C{%s} does not exist.\n".
+			"Create it with #C{genesis new %s} on the control branch.",
+			$pipeline_branch, $pipeline_branch
+		) unless $pipeline_git->branch_exists($pipeline_branch);
+
+		# Switch to the env branch.  _pre_deploy will find us already there.
+		if (($pipeline_git->current_branch // '') ne $pipeline_branch) {
+			bail(
+				"Working tree has uncommitted changes.  Commit or stash them\n".
+				"before deploying with --pull."
+			) unless $pipeline_git->is_clean;
+			$pipeline_git->checkout($pipeline_branch);
+		}
+
+		my $source_sha = _get_source_sha_for_pull($env, $prior, $pipeline_git);
+		_apply_pull_propagation($env, $pipeline_branch, $source_sha, $pipeline_git)
+			if $source_sha;
 	}
 
 	my $deployment_files = $env->deployment_cache_path_lookup('existing');
@@ -1461,6 +1507,122 @@ sub deploy {
 	}
 }
 
+# _assert_prior_env_deployed - hard invariant: prior_env must have a successful deploy {{{
+#
+# Bails unconditionally (no --yes override) when the prior_env has never
+# produced a successful deployment.  Called from deploy() when CI is
+# configured and genesis.pipeline.prior_env is set.
+sub _assert_prior_env_deployed {
+	my ($env, $prior_name) = @_;
+
+	# exodus_mount already ends with '/'; construct the deployments path directly.
+	my $prior_deploys = $env->exodus_mount . $prior_name . '/' . $env->type . '/deployments';
+	my $deploys = eval { $env->vault->get_path($prior_deploys) };
+
+	if ($deploys && ref($deploys) eq 'HASH') {
+		for my $entry (values %$deploys) {
+			next unless ref($entry) eq 'HASH';
+			my $result = $entry->{result} // '';
+			# 'post-failed' means the BOSH deploy itself succeeded; env is running.
+			return if $result eq 'success' || $result eq 'post-failed';
+		}
+	}
+
+	bail(
+		"Cannot deploy #C{%s}: its pipeline predecessor #C{%s} has\n".
+		"never been successfully deployed.\n\n".
+		"Deploy #C{%s} first, then retry.",
+		$env->name, $prior_name, $prior_name
+	);
+}
+
+# }}}
+# _get_source_sha_for_pull - determine the control SHA to use for a --pull {{{
+#
+# Entry-point envs (no prior_env): returns control HEAD so the env
+# gets the latest committed control content.
+#
+# Downstream envs: returns the git.control_commit from the prior_env's
+# last successful deployment — the certified control state that was in
+# effect when the predecessor last shipped.  Falls back to control HEAD
+# with a warning when no record is found.
+sub _get_source_sha_for_pull {
+	my ($env, $prior_name, $git) = @_;
+
+	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+
+	unless ($prior_name) {
+		# Entry point: pull from control HEAD.
+		return $git->sha($control);
+	}
+
+	# Access the prior env's last successful deployment directly via vault.
+	my $prior_deploys = $env->exodus_mount . $prior_name . '/' . $env->type . '/deployments';
+	my $deploys = eval { $env->vault->get_path($prior_deploys) };
+
+	if ($deploys && ref($deploys) eq 'HASH') {
+		for my $ts (sort { $b cmp $a } keys %$deploys) {
+			my $entry = $deploys->{$ts};
+			next unless ref($entry) eq 'HASH';
+			my $result = $entry->{result} // '';
+			next unless $result eq 'success' || $result eq 'post-failed';
+
+			# get_path unflattens vault data: git.control_commit → {git}{control_commit}
+			my $ctl = (ref($entry->{git}) eq 'HASH') ? $entry->{git}{control_commit} : undef;
+			return $ctl if $ctl;
+		}
+	}
+
+	warning(
+		"Prior environment #C{%s} has no #C{git.control_commit} in its\n".
+		"last successful deployment.  Falling back to control HEAD for pull.",
+		$prior_name
+	);
+	return $git->sha($control);
+}
+
+# }}}
+# _apply_pull_propagation - pull propagated files from source_sha onto env branch {{{
+#
+# Diffs the propagation files between the env branch and the source SHA.
+# If there are changes, checks out the updated files from source_sha,
+# removes any deleted files, and commits with a [pipeline] control@<sha>
+# (pulled) marker.  Notifies and returns without committing when the env
+# branch is already current.
+sub _apply_pull_propagation {
+	my ($env, $env_branch, $source_sha, $git) = @_;
+
+	my @dep_files = $env->propagation_files;
+	unless (@dep_files) {
+		info "  #Yi{%s}: no propagation files defined — nothing to pull.", $env_branch;
+		return;
+	}
+
+	my $diff = $git->diff_files($env_branch, $source_sha, @dep_files);
+	my @to_copy = @{$diff->{changed}};
+	my @to_rm   = @{$diff->{deleted}};
+
+	unless (@to_copy || @to_rm) {
+		info "  #Yi{%s}: already current — no propagation changes to pull.", $env_branch;
+		return;
+	}
+
+	my $total     = scalar(@to_copy) + scalar(@to_rm);
+	my $sha_short = $git->sha($source_sha, short => 1) // substr($source_sha, 0, 8);
+
+	info "  #C{%s}: pulling %d file%s from control\@%s",
+		$env_branch, $total, $total == 1 ? '' : 's', $sha_short;
+
+	$git->checkout_file($source_sha, $_) for @to_copy;
+	$git->rm(@to_rm) if @to_rm;
+
+	my $msg = sprintf("[pipeline] control\@%s -> %s (pulled)", $sha_short, $env_branch);
+	$git->commit($msg, @to_copy);
+
+	info "  #G{%s}: propagation pull committed.", $env_branch;
+}
+
+# }}}
 sub terminate {
 	my ($env, $reason, @extras) = @_;
 	command_usage(1) if @extras || !defined($env);

@@ -498,6 +498,13 @@ define_command("deploy", {
 			"flag to skip that propagation.  Non-manual providers (concourse, ".
 			"github-actions) own their own propagation and are unaffected by ".
 			"this flag.",
+
+		'pull!' =>
+			"Pull propagated files from the prior environment's last successful ".
+			"deploy (or control HEAD for pipeline entry points) onto this ".
+			"environment branch before deploying.  No-op when the environment ".
+			"is already current.  Implied by #y{-F}/#y{--fix-checks}; use ".
+			"#y{--no-pull} to opt out.  No-op for non-pipeline repositories.",
 	],
 	args => {
 		'reason' =>
