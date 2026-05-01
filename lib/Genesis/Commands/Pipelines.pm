@@ -131,8 +131,8 @@ sub pipeline_status {
 
 	my $git     = Service::Git->new('.');
 	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-	my $head    = $git->sha('HEAD');
-	my $head_short = $git->sha($head, short => 1);
+	my $remote  = $git->default_remote;
+	my $current = $git->current_branch // '';
 
 	# Build the DAG
 	require Genesis::CI::Compiler::ASTBuilder;
@@ -162,6 +162,25 @@ sub pipeline_status {
 		push @dag_order, $env;
 		push @queue, sort @{$children{$env} || []};
 	}
+
+	# Pull every pipeline branch up to its remote state before reading
+	# status.  Uses pull --ff-only for the currently checked-out branch and
+	# force-fetch for all others (works without a checkout).  Both are
+	# wrapped in eval so a temporarily unreachable remote or a diverged
+	# branch never prevents the status display from running.
+	if ($remote) {
+		for my $branch ($control, @dag_order) {
+			next unless $git->branch_exists($branch);
+			if ($branch eq $current) {
+				eval { $git->pull_ff_only($branch, $remote) };
+			} else {
+				eval { $git->fetch_branch($branch, $remote) };
+			}
+		}
+	}
+
+	my $head       = $git->sha($control);
+	my $head_short = $git->sha($head, short => 1);
 
 	# Gather state for each env
 	my %env_state;   # env => { branch_sha, deployed_sha, changed, ... }
