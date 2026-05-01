@@ -688,6 +688,14 @@ sub propagate {
 					$git->commit($msg, @to_copy);
 					info "  #G{%s}: committed %d file%s to #C{%s}",
 						$env_name, $total, $total == 1 ? '' : 's', $prop_branch;
+					for my $f (@to_copy) {
+						my ($old) = grep { $renames{$_} eq $f } keys %renames;
+						my ($disp_f)   = $git->unprefixed($f);
+						my ($disp_old) = $old ? $git->unprefixed($old) : ();
+						my $note = $old ? " #Yi{(renamed from $disp_old)}" : '';
+						info "    #G{M} %s%s", $disp_f, $note;
+					}
+					info "    #R{D} %s", $_ for $git->unprefixed(@to_rm);
 				}
 
 				push @pushed_branches, $prop_branch unless $no_push;
@@ -713,6 +721,14 @@ sub propagate {
 				$git->rm(@to_rm)                      if @to_rm;
 				$git->commit($msg, @to_copy);
 				info "  #G{%s}: propagated %d file%s", $env_name, $total, $total == 1 ? '' : 's';
+				for my $f (@to_copy) {
+					my ($old) = grep { $renames{$_} eq $f } keys %renames;
+					my ($disp_f)   = $git->unprefixed($f);
+					my ($disp_old) = $old ? $git->unprefixed($old) : ();
+					my $note = $old ? " #Yi{(renamed from $disp_old)}" : '';
+					info "    #G{M} %s%s", $disp_f, $note;
+				}
+				info "    #R{D} %s", $_ for $git->unprefixed(@to_rm);
 				push @pushed_branches, $env_name;
 				$propagated++;
 			};
