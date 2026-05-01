@@ -170,7 +170,6 @@ sub pipeline_status {
 	# branch never prevents the status display from running.
 	if ($remote) {
 		for my $branch ($control, @dag_order) {
-			next unless $git->branch_exists($branch);
 			if ($branch eq $current) {
 				eval { $git->pull_ff_only($branch, $remote) };
 			} else {
