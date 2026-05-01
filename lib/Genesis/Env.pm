@@ -3693,45 +3693,18 @@ sub _pre_deploy {
 	my ($self, %opts) = @_;
 	my $noprompt = delete($opts{noprompt});
 
-	# CI-configured branch coordination: ensure we're on this env's
-	# branch, pull any concurrent updates, and snapshot the working
-	# tree so _post_deploy can identify which files genesis newly
-	# touched (vs. untracked artifacts that pre-existed).  Stash the
-	# git handle in deployment_state so _post_deploy can finish the
-	# work after the deploy itself.
+	# Snapshot the working tree (modified + untracked) before the
+	# deploy runs, scoped to our deployment prefix.  _post_deploy
+	# diffs against this to know which files this deploy actually
+	# produced.  Branch checkout + pull happens earlier (in
+	# Genesis::Commands::Env::deploy) so the preflight checks above
+	# this method run on the env-branch view.
 	if ($self->top->ci_configured) {
 		require Service::Git;
-		my $git = Service::Git->new('.', track_branch => 1);
+		my $git    = Service::Git->new('.');
 		my $branch = $self->name;
-
-		my $current = $git->current_branch // '';
-		if ($current ne $branch) {
-			bail(
-				"Working tree has uncommitted changes.  Commit or stash them\n".
-				"before deploying."
-			) unless $git->is_clean;
-			bail(
-				"Environment branch #C{%s} does not exist.\n".
-				"Create it with #C{genesis new %s} on the control branch.",
-				$branch, $branch
-			) unless $git->branch_exists($branch);
-			$self->notify("Switching to environment branch #C{%s}...", $branch);
-			$git->checkout($branch);
-		}
-
-		# Pull --ff-only so concurrent updates aren't clobbered.  Bails
-		# on divergence -- continuing on stale state risks overwriting
-		# whatever was pushed.
-		if (my $remote = $git->default_remote) {
-			$self->notify("Pulling latest #C{%s} from #C{%s}...", $branch, $remote);
-			$git->pull_ff_only($branch, $remote);
-		}
-
-		# Baseline snapshot of the working tree (modified + untracked),
-		# scoped to our deployment prefix.  _post_deploy diffs against
-		# this to know which files this deploy actually produced.
 		my $prefix = $git->prefix // '';
-		my $pre = $git->status($prefix || '.');
+		my $pre    = $git->status($prefix || '.');
 
 		$self->{deployment_state}{pipeline_git}       = $git;
 		$self->{deployment_state}{pipeline_branch}    = $branch;
@@ -4198,7 +4171,9 @@ sub _post_deploy {
 		if ($deployment_ok && $git && $branch) {
 			my $pre = $state->{pre_deploy_unclean} || {};
 			my $prefix = $git->prefix // '';
-			my $manifests_subpath = $git->prefixed('.genesis/manifests');
+			# prefixed() returns a list; force scalar/list-ctx assignment
+			# so we get the path string, not the element count.
+			my ($manifests_subpath) = $git->prefixed('.genesis/manifests');
 
 			# Diff post-deploy working tree against the pre-deploy baseline.
 			my $post = $git->status($prefix || '.');

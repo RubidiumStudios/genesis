@@ -960,23 +960,44 @@ sub deploy {
 		$do_pull = 0;
 	}
 
-	# Branch coordination (auto-checkout, pull, baseline snapshot,
-	# post-deploy commit + push, auto-cascade) is handled inside
-	# Genesis::Env::_pre_deploy / _post_deploy when CI is configured,
-	# so the whole git lifecycle lives next to the deploy itself
-	# rather than split between Commands and Env.
-	#
-	# We still create a read-only Service::Git here for derived-reason
-	# lookups below (which need to walk env-branch history).
+	# When CI is configured, switch to the environment's branch and
+	# pull from remote BEFORE loading the env -- otherwise all the
+	# preflight work (cloud-config download, manifest viability,
+	# secret checks, stemcell checks) would run against whatever
+	# branch the operator happened to be on.  The post-deploy git
+	# work (commit + push manifest artifacts, auto-cascade) runs in
+	# Genesis::Env::_post_deploy after the deploy itself.
 	my $top = Genesis::Top->new('.');
 	my $pipeline_git;
 	my $pipeline_branch;
 	if ($top->ci_configured) {
 		require Service::Git;
-		$pipeline_git = Service::Git->new('.');
+		$pipeline_git = Service::Git->new('.', track_branch => 1);
 		(my $branch_name = $env_name) =~ s{^.*/}{};
 		$branch_name =~ s/\.ya?ml$//;
 		$pipeline_branch = $branch_name;
+
+		my $current = $pipeline_git->current_branch // '';
+		if ($current ne $branch_name) {
+			bail(
+				"Working tree has uncommitted changes.  Commit or stash them\n".
+				"before deploying."
+			) unless $pipeline_git->is_clean;
+			bail(
+				"Environment branch #C{%s} does not exist.\n".
+				"Create it with #C{genesis new %s} on the control branch.",
+				$branch_name, $branch_name
+			) unless $pipeline_git->branch_exists($branch_name);
+			info "\nSwitching to environment branch #C{%s}...", $branch_name;
+			$pipeline_git->checkout($branch_name);
+			# Reload Top now that the working tree is on the env branch
+			$top = Genesis::Top->new('.');
+		}
+
+		if (my $remote = $pipeline_git->default_remote) {
+			info "Pulling latest #C{%s} from #C{%s}...", $branch_name, $remote;
+			$pipeline_git->pull_ff_only($branch_name, $remote);
+		}
 	}
 
 	$options{'disable-reactions'} = ! delete($options{reactions});
@@ -993,9 +1014,13 @@ sub deploy {
 			_assert_prior_env_deployed($env, $prior);
 
 			# Warn when manually deploying outside of a pipeline job.
-			# GENESIS_HONOR_ENV is set by ci-pipeline-deploy; its absence means
-			# we are running at a terminal, not inside Concourse.
-			if (!$ENV{GENESIS_HONOR_ENV}) {
+			# GENESIS_HONOR_ENV is set by ci-pipeline-deploy; its absence
+			# means we are running at a terminal, not inside Concourse.
+			# Skip the warning when the configured provider is 'manual' --
+			# in that mode the operator IS the pipeline, so the warning
+			# is just noise.
+			my $provider_type = $top->config->get('ci.provider.type') || '';
+			if ($provider_type ne 'manual' && !$ENV{GENESIS_HONOR_ENV}) {
 				warning(
 					"\nManually deploying #C{%s}, which is managed by a Genesis pipeline.\n".
 					"The pipeline is the preferred deploy path — manual deploys bypass\n".
@@ -1127,6 +1152,9 @@ sub deploy {
 	}
 
 	info "\nPreparing to deploy #C{%s}:\n  - based on kit #c{%s}\n  - using Genesis #c{%s}", $env->name, $env->kit->id, $Genesis::VERSION;
+	if ($pipeline_branch) {
+		info "  - from branch #c{%s}", $pipeline_branch;
+	}
 	if ($env->use_create_env) {
 		info "  - as a #M{create-env} deployment.";
 	} else {
@@ -1139,6 +1167,7 @@ sub deploy {
 	} else {
 		info("  - targeting #G{%s} IaaS", $env->iaas);
 	}
+	info "";
 
 	# Check if the kit supports the environment's IaaS
 	if (my $supported_iaas = $env->kit->metadata('supports')) {
