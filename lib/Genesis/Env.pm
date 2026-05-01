@@ -3693,6 +3693,51 @@ sub _pre_deploy {
 	my ($self, %opts) = @_;
 	my $noprompt = delete($opts{noprompt});
 
+	# CI-configured branch coordination: ensure we're on this env's
+	# branch, pull any concurrent updates, and snapshot the working
+	# tree so _post_deploy can identify which files genesis newly
+	# touched (vs. untracked artifacts that pre-existed).  Stash the
+	# git handle in deployment_state so _post_deploy can finish the
+	# work after the deploy itself.
+	if ($self->top->ci_configured) {
+		require Service::Git;
+		my $git = Service::Git->new('.', track_branch => 1);
+		my $branch = $self->name;
+
+		my $current = $git->current_branch // '';
+		if ($current ne $branch) {
+			bail(
+				"Working tree has uncommitted changes.  Commit or stash them\n".
+				"before deploying."
+			) unless $git->is_clean;
+			bail(
+				"Environment branch #C{%s} does not exist.\n".
+				"Create it with #C{genesis new %s} on the control branch.",
+				$branch, $branch
+			) unless $git->branch_exists($branch);
+			$self->notify("Switching to environment branch #C{%s}...", $branch);
+			$git->checkout($branch);
+		}
+
+		# Pull --ff-only so concurrent updates aren't clobbered.  Bails
+		# on divergence -- continuing on stale state risks overwriting
+		# whatever was pushed.
+		if (my $remote = $git->default_remote) {
+			$self->notify("Pulling latest #C{%s} from #C{%s}...", $branch, $remote);
+			$git->pull_ff_only($branch, $remote);
+		}
+
+		# Baseline snapshot of the working tree (modified + untracked),
+		# scoped to our deployment prefix.  _post_deploy diffs against
+		# this to know which files this deploy actually produced.
+		my $prefix = $git->prefix // '';
+		my $pre = $git->status($prefix || '.');
+
+		$self->{deployment_state}{pipeline_git}       = $git;
+		$self->{deployment_state}{pipeline_branch}    = $branch;
+		$self->{deployment_state}{pre_deploy_unclean} = $pre;
+	}
+
 	# Generate and store the deployment manifest (pruned and unpruned versions)
 	my $pruned_deploy_manifest = $self->manifest_provider->deployment(subset=>'pruned',notify=>1);
 	my $unpruned_deploy_manifest = $self->manifest_provider->deployment(notify=>0);
@@ -4133,27 +4178,96 @@ sub _post_deploy {
 		);
 	}
 
-	# Auto-cascade propagation on manual-provider pipelines.  Non-manual
-	# providers (concourse, gha) own their own cascade.
-	if ($self->top->ci_configured
-		&& ($self->top->config->get('ci.provider.type') || '') eq 'manual'
-		&& !$opts{'no-propagate'}) {
+	# CI-configured branch finalization: commit + push the deploy's
+	# manifest artifacts on the env branch, then run the auto-cascade
+	# (manual-provider only).  Non-manual providers (concourse, gha)
+	# own their own cascade, so we skip the cascade in those cases
+	# but still commit + push the manifest.
+	if ($self->top->ci_configured) {
+		my $git    = $state->{pipeline_git};
+		my $branch = $state->{pipeline_branch};
 
-		require Service::Git;
-		require Genesis::Top;
-		my $git     = Service::Git->new('.');
-		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-		my $current = $git->current_branch // '';
-		$git->checkout($control) if $current && $current ne $control;
+		# Commit and push manifest artifacts that landed under
+		# .genesis/manifests/ during this deploy.  When manifest_store
+		# is 'repository' or 'hybrid' (the default), genesis writes
+		# the rendered manifest plus state/creds files there; without
+		# this step those files would be left untracked on the env
+		# branch and either lost on the next checkout or clobbered by
+		# the auto-cascade's checkout of control below.  No-op when
+		# nothing new ended up under .genesis/manifests/.
+		if ($deployment_ok && $git && $branch) {
+			my $pre = $state->{pre_deploy_unclean} || {};
+			my $prefix = $git->prefix // '';
+			my $manifests_subpath = $git->prefixed('.genesis/manifests');
 
-		$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
-		my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
-		system($bin, 'propagate', $self->name);
-		warning(
-			"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
-			"run #C{genesis propagate %s} manually to retry.",
-			($? >> 8), $self->name
-		) if $? != 0;
+			# Diff post-deploy working tree against the pre-deploy baseline.
+			my $post = $git->status($prefix || '.');
+			my (@new_manifests, @other);
+			for my $path (sort keys %$post) {
+				my $code = $post->{$path};
+				# Skip files already in this state pre-deploy.
+				next if exists($pre->{$path}) && $pre->{$path} eq $code;
+				if ($path =~ m{^\Q$manifests_subpath\E(?:/|$)}) {
+					push @new_manifests, $path;
+				} else {
+					push @other, sprintf("%s %s", $code, $path);
+				}
+			}
+
+			if (@other) {
+				warning(
+					"Deploy left unexpected working-tree changes outside #C{%s/}:\n%s\n\n".
+					"These are not being committed.  Review and clean up manually.",
+					$manifests_subpath,
+					join("\n", map {"  $_"} @other)
+				);
+			}
+
+			if (@new_manifests) {
+				$git->add($manifests_subpath);
+
+				my $sha_short = $git->sha('HEAD', short => 1) // '<unknown>';
+				my $msg = sprintf("[deploy] %s @ %s", $self->name, $sha_short);
+				$git->commit($msg);
+
+				if (my $remote = $git->default_remote) {
+					$self->notify(
+						"Rebasing #C{%s} onto #C{%s/%s} before push...",
+						$branch, $remote, $branch
+					);
+					$git->pull_rebase($branch, $remote);
+
+					$self->notify(
+						"Pushing #C{%s} deploy artifacts to #C{%s}...",
+						$branch, $remote
+					);
+					my $results = $git->push($remote, $branch);
+					bail("Failed to push %s to %s after deploy", $branch, $remote)
+						unless $results->{$branch};
+				}
+			}
+		}
+
+		# Auto-cascade propagation (manual-provider only).
+		if (($self->top->config->get('ci.provider.type') || '') eq 'manual'
+			&& !$opts{'no-propagate'}) {
+
+			require Service::Git;
+			require Genesis::Top;
+			my $cgit    = Service::Git->new('.');
+			my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+			my $current = $cgit->current_branch // '';
+			$cgit->checkout($control) if $current && $current ne $control;
+
+			$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
+			my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
+			system($bin, 'propagate', $self->name);
+			warning(
+				"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
+				"run #C{genesis propagate %s} manually to retry.",
+				($? >> 8), $self->name
+			) if $? != 0;
+		}
 	}
 
 	# Run post-deploy hook

@@ -252,6 +252,65 @@ sub is_clean {
 }
 
 # }}}
+# status - working-tree state as a {path => XY-code} hashref {{{
+#
+# Wraps `git status --porcelain` and parses each line into the
+# two-character status code and the path.  Optional pathspec args
+# limit the report to those paths (relative to git root).  Includes
+# untracked files (`??`) -- callers can filter if they only want
+# tracked-file changes.
+sub status {
+	my ($self, @pathspecs) = @_;
+	my @cmd = ('git', 'status', '--porcelain');
+	push @cmd, '--', @pathspecs if @pathspecs;
+	my ($out) = run({ dir => $self->{root} }, @cmd);
+	my %unclean;
+	for my $line (split /\n/, ($out // '')) {
+		next unless length $line;
+		# Format: "XY path" — two-char status, single space, path.
+		my $code = substr($line, 0, 2);
+		my $path = substr($line, 3);
+		$unclean{$path} = $code if length $path;
+	}
+	return \%unclean;
+}
+
+# }}}
+# pull_ff_only - fast-forward a branch from a remote, bail on divergence {{{
+#
+# Defaults to `default_remote` when no remote is given.  No-op when
+# no remote is configured.  Bails (via run's onfailure) when the
+# pull would require a non-fast-forward.
+sub pull_ff_only {
+	my ($self, $branch, $remote) = @_;
+	$remote //= $self->default_remote;
+	return $self unless $remote;
+	run({ dir => $self->{root},
+		  onfailure => "Failed to fast-forward $branch from $remote -- ".
+		               "resolve the divergence and retry" },
+		'git', 'pull', '--ff-only', $remote, $branch);
+	delete $self->{_branch_cache}{$branch};
+	return $self;
+}
+
+# }}}
+# pull_rebase - rebase the current branch on top of remote/<branch> {{{
+#
+# Used to integrate concurrent updates before a push.  Defaults to
+# `default_remote` when no remote is given.  No-op when no remote
+# is configured.  Bails (via run's onfailure) when rebase fails.
+sub pull_rebase {
+	my ($self, $branch, $remote) = @_;
+	$remote //= $self->default_remote;
+	return $self unless $remote;
+	run({ dir => $self->{root},
+		  onfailure => "Failed to rebase $branch on $remote/$branch -- ".
+		               "resolve the divergence and push manually" },
+		'git', 'pull', '--rebase', $remote, $branch);
+	return $self;
+}
+
+# }}}
 # diff_files - structured diff between two refs, filtered by pathspecs {{{
 #
 # Returns a hashref:

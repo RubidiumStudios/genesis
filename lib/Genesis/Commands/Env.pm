@@ -949,47 +949,23 @@ sub deploy {
 	my %options = %{get_options()};
 	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix fix-stemcells/);
 
-	# When CI is configured, auto-checkout the environment branch
-	# so the deploy reads the correct propagated state.
+	# Branch coordination (auto-checkout, pull, baseline snapshot,
+	# post-deploy commit + push, auto-cascade) is handled inside
+	# Genesis::Env::_pre_deploy / _post_deploy when CI is configured,
+	# so the whole git lifecycle lives next to the deploy itself
+	# rather than split between Commands and Env.
+	#
+	# We still create a read-only Service::Git here for derived-reason
+	# lookups below (which need to walk env-branch history).
 	my $top = Genesis::Top->new('.');
 	my $pipeline_git;
 	my $pipeline_branch;
 	if ($top->ci_configured) {
 		require Service::Git;
-		$pipeline_git = Service::Git->new('.', track_branch => 1);
-		# Derive branch name: strip path prefix and .yml/.yaml suffix
+		$pipeline_git = Service::Git->new('.');
 		(my $branch_name = $env_name) =~ s{^.*/}{};
 		$branch_name =~ s/\.ya?ml$//;
 		$pipeline_branch = $branch_name;
-		my $current = $pipeline_git->current_branch // '';
-		if ($current ne $branch_name) {
-			bail(
-				"Working tree has uncommitted changes.  Commit or stash them\n".
-				"before deploying."
-			) unless $pipeline_git->is_clean;
-			bail(
-				"Environment branch #C{%s} does not exist.\n".
-				"Create it with #C{genesis new %s} on the control branch.",
-				$branch_name, $branch_name
-			) unless $pipeline_git->branch_exists($branch_name);
-			info "\nSwitching to environment branch #C{%s}...", $branch_name;
-			$pipeline_git->checkout($branch_name);
-			# Reload Top from the env branch
-			$top = Genesis::Top->new('.');
-		}
-
-		# Pull in any updates pushed to this env branch since we last
-		# saw it -- another operator or a CI run may have advanced it.
-		# Bail if the pull fails: deploying on stale state silently can
-		# clobber whatever was pushed.
-		my $remote = $pipeline_git->default_remote;
-		if ($remote) {
-			info "Pulling latest #C{%s} from #C{%s}...", $pipeline_branch, $remote;
-			run({ dir => $pipeline_git->{root},
-				  onfailure => "Failed to fast-forward $pipeline_branch from $remote -- ".
-				               "resolve the divergence and retry the deploy" },
-				'git', 'pull', '--ff-only', $remote, $pipeline_branch);
-		}
 	}
 
 	$options{'disable-reactions'} = ! delete($options{reactions});
@@ -1475,90 +1451,7 @@ sub deploy {
 		"Preflight checks failed; deployment operation halted."
 	) unless $ok;
 
-	# Snapshot the working tree's "unclean" set before deploy so we can
-	# tell after the deploy which files genesis actually touched, vs.
-	# which were already in this state when we started (e.g. untracked
-	# user artifacts).  Scoped to the deployment prefix.
-	my %pre_deploy_unclean;
-	if ($pipeline_git && $pipeline_branch) {
-		my $prefix = $pipeline_git->prefix // '';
-		my ($s) = run({ dir => $pipeline_git->{root} },
-			'git', 'status', '--porcelain', '--', ($prefix || '.'));
-		for my $line (split /\n/, ($s // '')) {
-			next unless length $line;
-			my $path = substr($line, 3);
-			$pre_deploy_unclean{$path} = substr($line, 0, 2);
-		}
-	}
-
 	$ok = $env->deploy(%options, network_map => $network_map, reason => $reason);
-
-	# Compare working-tree state to the pre-deploy snapshot.  Files
-	# genesis newly touched under .genesis/manifests/ are committed +
-	# pushed (when manifest_store is 'repository' or 'hybrid').  Files
-	# touched outside that path are reported as unexpected -- not
-	# fatal, but the operator should know.
-	if ($ok && $pipeline_git && $pipeline_branch) {
-		my $prefix = $pipeline_git->prefix // '';
-		my $manifests_subpath = $pipeline_git->prefixed('.genesis/manifests');
-
-		my ($s) = run({ dir => $pipeline_git->{root} },
-			'git', 'status', '--porcelain', '--', ($prefix || '.'));
-		my (@new_manifest_changes, @other_new_changes);
-		for my $line (split /\n/, ($s // '')) {
-			next unless length $line;
-			my $path = substr($line, 3);
-			my $code = substr($line, 0, 2);
-			# Skip anything that was already in this state pre-deploy.
-			next if exists($pre_deploy_unclean{$path})
-				 && $pre_deploy_unclean{$path} eq $code;
-			if ($path =~ m{^\Q$manifests_subpath\E(?:/|$)}) {
-				push @new_manifest_changes, $path;
-			} else {
-				push @other_new_changes, $line;
-			}
-		}
-
-		if (@other_new_changes) {
-			warning(
-				"Deploy left unexpected working-tree changes outside #C{%s/}:\n%s\n\n".
-				"These are not being committed.  Review and clean up manually.",
-				$manifests_subpath,
-				join("\n", map {"  $_"} @other_new_changes)
-			);
-		}
-
-		if (@new_manifest_changes) {
-			run({ dir => $pipeline_git->{root}, passfail => 1 },
-				'git', 'add', '-A', '--', $manifests_subpath);
-
-			my $sha_short = $pipeline_git->sha('HEAD', short => 1) // '<unknown>';
-			my $msg = sprintf("[deploy] %s @ %s", $env->name, $sha_short);
-			run({ dir => $pipeline_git->{root},
-				  onfailure => "Failed to commit deploy artifacts on $pipeline_branch" },
-				'git', 'commit', '-m', $msg);
-
-			my $remote = $pipeline_git->default_remote;
-			if ($remote) {
-				# Rebase before push so any concurrent updates to the
-				# env branch are integrated cleanly.
-				info "Rebasing #C{%s} onto #C{%s/%s} before push...",
-					$pipeline_branch, $remote, $pipeline_branch;
-				run({ dir => $pipeline_git->{root},
-					  onfailure => "Failed to rebase $pipeline_branch on ".
-					               "$remote/$pipeline_branch after deploy -- ".
-					               "resolve the divergence and push manually" },
-					'git', 'pull', '--rebase', $remote, $pipeline_branch);
-
-				info "Pushing #C{%s} deploy artifacts to #C{%s}...",
-					$pipeline_branch, $remote;
-				my $results = $pipeline_git->push($remote, $pipeline_branch);
-				bail("Failed to push %s to %s after deploy",
-					$pipeline_branch, $remote)
-					unless $results->{$pipeline_branch};
-			}
-		}
-	}
 
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;
