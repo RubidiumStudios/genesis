@@ -136,7 +136,7 @@ sub load {
 		if ($env->defines('bosh-configs')) {
 			my $bosh_configs = $env->lookup('bosh-configs');
 			if (ref($bosh_configs) eq 'HASH') {
-				my @valid_keys = qw(cloud director_cloud cpi runtime);
+				my @valid_keys = qw(cloud director_cloud cpi director-cpi runtime);
 				my %valid = map { $_ => 1 } @valid_keys;
 				my @invalid_keys = grep { !$valid{$_} } keys %$bosh_configs;
 
@@ -2076,6 +2076,180 @@ sub cpi_credhub_base {
 	my $self = shift;
 	my $base = $self->lookup('bosh-configs.cpi.credhub_base');
 	return $base // ($self->credhub->base."genesis-entombed/");
+}
+
+# Builds the cpi-related portion of the deploy-time exodus override hash.
+# Returns {} unless this is a bosh director with cpi_enabled. When inline
+# director-cpi is declared, also publishes the available_cpis inventory and
+# the bosh config slot name for forward-compat with AZ-aware consumers.
+sub _cpi_exodus_overrides {
+	my $self = shift;
+	return {} unless $self->is_bosh_director && $self->cpi_enabled;
+
+	my $overrides = { default_cpi_config => $self->default_cpi_name };
+
+	my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef);
+	if (defined($inline) && ref($inline) eq 'ARRAY' && @$inline) {
+		$overrides->{available_cpis} = [
+			map { $_->{name} } grep { defined $_->{name} } @$inline
+		];
+		$overrides->{cpi_config_name} =
+			$self->lookup('bosh-configs.director-cpi.name', 'default');
+	}
+
+	return $overrides;
+}
+
+# Returns the name this env publishes to its own exodus as default_cpi_config —
+# the "primary CPI" advertisement for downstream consumer deployments. Separate
+# from cpi_name to avoid changing the meaning of cpi_name's existing callers.
+sub default_cpi_name {
+	my $self = shift;
+	return undef unless $self->cpi_enabled;
+
+	if (defined(my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef))) {
+		if (ref($inline) eq 'ARRAY' && @$inline) {
+			my $declared = $self->lookup('bosh-configs.director-cpi.default', undef);
+			return $declared if defined $declared;
+			return $inline->[0]{name} if @$inline == 1 && defined $inline->[0]{name};
+		}
+	}
+
+	return $self->cpi_name;
+}
+
+# Returns ($config, $secrets, $source, $bosh_config_name, $errors?) describing
+# the post-deploy self-upload payload, or () if there's nothing to do.
+# Inline bosh-configs.director-cpi takes precedence over the cpi-config hook.
+sub _resolve_director_cpi_config {
+	my ($self, %opts) = @_;
+	return () unless $self->cpi_enabled;
+
+	my $credhub_prefix = $opts{credhub_prefix} // "/cpi-config/properties/";
+
+	if (defined(my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef))) {
+		bail(
+			"#C{bosh-configs.director-cpi.cpis} must be a non-empty array of ".
+			"CPI entries, got %s.", ref($inline) || 'scalar'
+		) unless ref($inline) eq 'ARRAY' && @$inline;
+
+		my @names = grep { defined } map { $_->{name} } @$inline;
+		my $declared_default = $self->lookup('bosh-configs.director-cpi.default', undef);
+		if (defined $declared_default) {
+			bail(
+				"#C{bosh-configs.director-cpi.default} = #R{%s} does not match ".
+				"any cpi in #C{cpis[]} (have: %s).",
+				$declared_default, join(', ', @names)
+			) unless grep { $_ eq $declared_default } @names;
+		} elsif (@$inline > 1) {
+			bail(
+				"Multiple entries declared under #C{bosh-configs.director-cpi.cpis} ".
+				"(%d); specify #C{director-cpi.default: <name>} to identify the ".
+				"primary CPI for legacy single-CPI consumers (exodus ".
+				"default_cpi_config).",
+				scalar(@$inline)
+			);
+		}
+
+		my $bosh_config_name = $self->lookup('bosh-configs.director-cpi.name', 'default');
+		return ({ cpis => $inline }, {}, 'inline', $bosh_config_name);
+	}
+
+	if ($self->has_hook('cpi-config')) {
+		my ($config, $secrets, $errors) = $self->run_hook(
+			'cpi-config', credhub_prefix => $credhub_prefix
+		);
+		return (undef, undef, 'cpi-config hook', undef, $errors) if $errors;
+		return (
+			$config,
+			$secrets // {},
+			'cpi-config hook',
+			join('.', $self->cpi_name, 'director'),
+		);
+	}
+
+	return ();
+}
+
+# I/O wrapper around _resolve_director_cpi_config. Performs the post-deploy
+# self-upload of the CPI config to the newly-deployed BOSH director and
+# entombs any credhub secrets that came back from the cpi-config hook.
+sub upload_director_cpi_config {
+	my ($self, %opts) = @_;
+
+	my ($config, $secrets, $source, $bosh_config_name, $errors)
+		= $self->_resolve_director_cpi_config(%opts);
+
+	if ($errors) {
+		error("Errors were found in the cpi-config: %s", $errors);
+		return 0;
+	}
+	return 1 unless $source;
+
+	my $bosh = $self->get_target_bosh({self => 1});
+	info({pending => 1},
+		"[[  - >>uploading CPI config (from %s) to #M{%s} bosh director...",
+		$source, $self->name);
+	my $tstart = gettimeofday;
+	my ($out, $rc, $err) = $bosh->upload_config($config, 'cpi', $bosh_config_name);
+	if ($rc) {
+		info("#G{failed}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+		error("Failed to upload the cpi-config: %s", $err);
+		return 0;
+	}
+	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
+
+	$self->_commit_config_credhub_secrets($secrets) if $secrets && %$secrets;
+	return 1;
+}
+
+# Genesis-driven fallback for older bosh kits whose post-deploy hook predates
+# inline director-cpi awareness (kits < 4.0.0). Kits >= 4.0.0 (and dev kits,
+# which we assume track latest) handle the upload themselves by delegating
+# Genesis::Hook::PostDeploy::upload_director_cpi_config to Env, so we no-op
+# for them to avoid double-uploading.
+#
+# Note: the older kit's own cpi-config-hook + post-deploy flow still runs
+# unchanged for OCFP. This helper only fires for the inline declaration that
+# the older kit doesn't know how to consume.
+sub _upload_director_cpi_if_necessary {
+	my ($self) = @_;
+
+	return 0 unless $self->lookup('bosh-configs.director-cpi.cpis', undef);
+	return 0 unless $self->is_bosh_director;
+
+	my $kit = $self->kit;
+	return 0 if $kit->is_dev;                          # assume latest
+	return 0 if new_enough($kit->version, '4.0.0');    # kit handles it
+
+	info "Older bosh kit (#C{%s}) detected; uploading inline director-cpi config from genesis core",
+		$kit->version;
+	return $self->upload_director_cpi_config;
+}
+
+sub _commit_config_credhub_secrets {
+	my ($self, $secrets) = @_;
+	my @paths = keys %{$secrets || {}};
+	return 1 unless @paths;
+
+	require Service::Credhub;
+	my $bosh = $self->get_target_bosh({self => 1});
+	my $credhub = Service::Credhub->from_bosh($bosh);
+	my $start = gettimeofday;
+	info({pending => 1},
+		"[[  - >>entombing %s secrets into #M{%s} BOSH director's credhub...",
+		scalar @paths, $self->name);
+	for my $path (@paths) {
+		my $secret = $secrets->{$path};
+		bail("No value specified for the secret %s", $path) unless $secret;
+		eval { $credhub->set($path, $secret) };
+		if (my $err = $@) {
+			info("#G{failed}" . pretty_duration(gettimeofday - $start, 2, 5));
+			bail("Failed to entomb the secret %s: %s", $path, $err);
+		}
+	}
+	info("#G{done}" . pretty_duration(gettimeofday - $start, 2, 5));
+	return 1;
 }
 
 # Bosh Config stuff - TODO: sort later
@@ -4118,10 +4292,7 @@ sub _post_deploy {
 		$opts{'canaries'} ? "canaries=$opts{'canaries'}" : undef,
 		$opts{'max-in-flight'} ? "max-in-flight=$opts{'max-in-flight'}" : undef,
 	));
-	my $exodus_overrides = {};
-	if ($self->is_bosh_director && $self->cpi_enabled) {
-		$exodus_overrides->{default_cpi_config} = $self->cpi_name;
-	}
+	my $exodus_overrides = $self->_cpi_exodus_overrides;
 	$self->update_deployment_exodus(
 		'deploy' => Genesis::Env::Deployment::action_succeeded,
 		reason => $opts{reason},
@@ -4253,6 +4424,10 @@ sub _post_deploy {
 		interactive => !$noprompt,
 		flags => $opt_flags,
 	) if $self->has_hook('post-deploy');
+
+	# Genesis-driven fallback for older bosh kits whose post-deploy hook
+	# doesn't know how to consume inline director-cpi declarations.
+	$self->_upload_director_cpi_if_necessary;
 
 	# Clean up deployment state
 	delete $self->{deployment_state};

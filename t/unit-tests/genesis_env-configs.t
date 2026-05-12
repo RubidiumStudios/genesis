@@ -384,6 +384,58 @@ subtest 'has_required_configs - true when hook requires no configs' => sub {
 		'has_required_configs(cloud-config) is true (no configs required for this hook)');
 };
 
+# ======================================================================
+# bosh-configs key validation
+# ======================================================================
+
+sub load_env_with_bosh_configs {
+	my ($env_name, $bosh_configs_yaml) = @_;
+	my $top = make_top(name => 'cf', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+
+	put_file($top->path("$env_name.yml"), <<"EOF");
+---
+kit:
+  name:    dev
+  version: latest
+  features: []
+genesis:
+  env: $env_name
+bosh-configs:
+$bosh_configs_yaml
+EOF
+
+	return $top->load_env($env_name);
+}
+
+subtest 'bosh-configs validation - accepts director-cpi key' => sub {
+	plan tests => 1;
+
+	lives_ok {
+		load_env_with_bosh_configs('cpi-inline', <<'YAML');
+  director-cpi:
+    name: default
+    cpis:
+    - name: vsphere-prod
+      type: vsphere
+      properties:
+        host: vcenter.example.com
+YAML
+	} 'bosh-configs.director-cpi is an accepted key';
+};
+
+subtest 'bosh-configs validation - rejects unknown key' => sub {
+	plan tests => 1;
+
+	throws_ok {
+		load_env_with_bosh_configs('cpi-junk', <<'YAML');
+  totally-bogus:
+    nope: true
+YAML
+	} qr/totally-bogus.*is invalid/ms,
+		'unknown bosh-configs.<key> is still rejected';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

@@ -465,6 +465,32 @@ subtest 'upload_director_cpi_config - method exists' => sub {
 		'hook can() upload_director_cpi_config');
 };
 
+subtest 'upload_director_cpi_config - delegates to env' => sub {
+	plan tests => 3;
+
+	# Build an env mock whose upload_director_cpi_config captures the call
+	# and returns a sentinel. The hook's method should pass through opts
+	# verbatim and return whatever the env returned.
+	my @env_calls;
+	my $env = mock_env(
+		upload_director_cpi_config => sub {
+			my ($self, %opts) = @_;
+			push @env_calls, \%opts;
+			return 'sentinel-return-value';
+		},
+	);
+	my $hook = Genesis::Hook::PostDeploy::test_kit->init(env => $env, rc => 0);
+
+	my $ret = $hook->upload_director_cpi_config(credhub_prefix => '/x/');
+
+	is $ret, 'sentinel-return-value',
+		'hook returns whatever env->upload_director_cpi_config returned';
+	is scalar(@env_calls), 1,
+		'env->upload_director_cpi_config was called exactly once';
+	is_deeply $env_calls[0], { credhub_prefix => '/x/' },
+		'opts passed through verbatim';
+};
+
 subtest '_commit_config_credhub_secrets - method exists' => sub {
 	plan tests => 1;
 
