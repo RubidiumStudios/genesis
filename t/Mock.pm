@@ -72,7 +72,7 @@ sub _mock_get_response {
 		confess "Invalid method $method called on mock $class object";
 	}
 
-	return $value = $value->($self, @args) if (ref($value) eq 'CODE');
+	return $value->($self, @args) if (ref($value) eq 'CODE');
 	return $value->value if ref($value) eq 'Mock::ReferencedValue';
 	return $value;
 }
