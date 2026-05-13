@@ -1001,6 +1001,41 @@ sub ci_configured {
 }
 
 # }}}
+# pipeline_env_names - return the sorted list of env names in this repo {{{
+#
+# Returns the names of all valid environments in this repo, sorted
+# alphabetically.  Returns an empty list when CI is not configured.
+# Delegates to envs() for the canonical name-and-validation logic.
+sub pipeline_env_names {
+	my $self = shift;
+	return () unless $self->ci_configured;
+	return sort map { $_->name } $self->envs;
+}
+
+# }}}
+# fetch_pipeline_envs - bulk-fetch all pipeline env branches in one round-trip {{{
+#
+#   $top->fetch_pipeline_envs($git);
+#   $top->fetch_pipeline_envs($git, include_control => 1);
+#
+# Calls $git->fetch_branches with the env-name list (and optionally the
+# control branch) so credentials are only prompted once.  No-op when CI
+# is not configured, no remote is configured, or the DAG is empty.
+# Returns 1 in all no-op or success cases; returns 0 if fetch_branches
+# explicitly fails.
+sub fetch_pipeline_envs {
+	my ($self, $git, %opts) = @_;
+	return 1 unless $self->ci_configured;
+	my $remote = $git->default_remote;
+	return 1 unless $remote;
+	my @names = $self->pipeline_env_names;
+	return 1 unless @names;
+	unshift @names, DEFAULT_CONTROL_BRANCH if $opts{include_control};
+	my $ok = eval { $git->fetch_branches(\@names, $remote); 1 };
+	return $ok ? 1 : 0;
+}
+
+# }}}
 # version - return the version of the cofiguration schema {{{
 sub version {
 	my ($self) = @_;

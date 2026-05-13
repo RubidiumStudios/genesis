@@ -96,10 +96,7 @@ sub create {
 
 		# Refresh env branches so branch_exists checks and reconciliation
 		# see teammate-created branches that aren't in the local clone yet.
-		unless (get_options->{'no-fetch'}) {
-			require Genesis::Commands::Pipelines;
-			Genesis::Commands::Pipelines::_fetch_pipeline_envs($top, $git);
-		}
+		$top->fetch_pipeline_envs($git) unless get_options->{'no-fetch'};
 	}
 
 	# create the environment
@@ -992,10 +989,7 @@ sub deploy {
 		# branch-state reads (branch_exists, checkout, pull_ff_only).
 		# This ensures teammate-created branches and propagation commits
 		# are visible before we act on them.
-		unless ($no_fetch) {
-			require Genesis::Commands::Pipelines;
-			Genesis::Commands::Pipelines::_fetch_pipeline_envs($top, $pipeline_git);
-		}
+		$top->fetch_pipeline_envs($pipeline_git) unless $no_fetch;
 
 		my $current = $pipeline_git->current_branch // '';
 		if ($current ne $branch_name) {

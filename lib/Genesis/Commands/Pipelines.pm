@@ -163,7 +163,7 @@ sub pipeline_status {
 
 	# Refresh env branch refs from remote before reading status so the
 	# display reflects teammate commits, not just local state.
-	_fetch_pipeline_envs($top, $git)
+	$top->fetch_pipeline_envs($git)
 		unless get_options->{'no-fetch'};
 
 	my $head       = $git->sha($control);
@@ -423,7 +423,7 @@ sub propagate {
 	}
 
 	# Refresh env branch refs so diff computations see teammate commits.
-	_fetch_pipeline_envs($top, $git)
+	$top->fetch_pipeline_envs($git)
 		unless $opts->{'no-fetch'};
 
 	# Resolve the control SHA that will be the source of this propagation.
@@ -820,31 +820,6 @@ sub propagate {
 	exit 0;
 }
 
-# _fetch_pipeline_envs - bulk-fetch all pipeline env branches in one round-trip {{{
-#
-#   _fetch_pipeline_envs($top, $git)
-#
-# Walks the pipeline DAG to collect env names, then calls fetch_branches
-# with a single git fetch (one auth prompt regardless of branch count).
-# Control and any other non-env branches are never included in the
-# refspecs.  No-op when CI is not configured or no remote is reachable.
-# Silently swallows fetch errors so offline use never aborts a command.
-sub _fetch_pipeline_envs {
-	my ($top, $git) = @_;
-	return unless $top->ci_configured;
-	my $remote = $git->default_remote;
-	return unless $remote;
-	require Genesis::CI::Compiler::ASTBuilder;
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-		top     => $top,
-		env_dir => $top->path,
-	);
-	my ($nodes) = $builder->_build_from_env_files($top->path);
-	return unless $nodes && %$nodes;
-	eval { $git->fetch_branches([sort keys %$nodes], $remote) };
-}
-
-# }}}
 # _resolve_propagation_base - find the control SHA to diff from for an env branch {{{
 #
 # Resolution order:
