@@ -1724,6 +1724,26 @@ sub lookup {
 }
 
 # }}}
+# lookup_entombed - look up a value from the env's deployment manifest where {{{
+# vault references have already been replaced with credhub var references
+# (via the normal entombment dance performed at deploy time). Intended for
+# post-deploy callers that need to upload env-file data to a BOSH director
+# without leaking plaintext secrets. When the deployment manifest isn't
+# available (pre-deploy, unit tests), falls back to lookup_unevaled so
+# callers don't accidentally get evaluated-to-plaintext values.
+sub lookup_entombed {
+	my ($self, $key, $default) = @_;
+	$key //= '.';
+	my $data = eval {
+		my $type = $self->deployment_manifest_type;
+		$self->manifest_provider->$type->data;
+	};
+	return struct_lookup($data, $key, $default)
+		if !$@ && ref($data) eq 'HASH';
+	return $self->lookup_unevaled($key, $default);
+}
+
+# }}}
 # lookup_unevaled - look up a value from the heirarchal evironment without evaluating operators {{{
 sub lookup_unevaled {
 	my ($self, $key, $default) = @_;
@@ -2151,7 +2171,12 @@ sub _resolve_director_cpi_config {
 
 	my $credhub_prefix = $opts{credhub_prefix} // "/cpi-config/properties/";
 
-	if (defined(my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef))) {
+	# Use lookup_entombed: the deployment-time entombment has already
+	# replaced (( vault ... )) operators inside the cpis tree with
+	# ((credhub-var)) references, so the payload we hand to BOSH carries
+	# credhub indirection, never the plaintext form that a plain lookup()
+	# would resolve to.
+	if (defined(my $inline = $self->lookup_entombed('bosh-configs.director-cpi.cpis', undef))) {
 		bail(
 			"#C{bosh-configs.director-cpi.cpis} must be a non-empty array of ".
 			"CPI entries, got %s.", ref($inline) || 'scalar'

@@ -248,6 +248,86 @@ YAML
 	is $run_hook_called, 0, 'run_hook is not invoked when inline is present';
 };
 
+subtest 'resolver - reads the entombed manifest (credhub vars already substituted)' => sub {
+	plan tests => 4;
+
+	my $env = make_cpi_env('cpi-entombed', <<'YAML');
+  cpi:
+    enabled: true
+  director-cpi:
+    cpis:
+    - name: vsphere-prod
+      type: vsphere
+      properties:
+        host:     vcenter.example.com
+        user:     admin
+        password: (( vault "secret/vcenter/prod:password" ))
+YAML
+
+	# Simulate the entombed manifest having already done its job:
+	# vault refs are replaced by credhub-var references.
+	no warnings qw(redefine once);
+	local *Genesis::Env::lookup_entombed = sub {
+		my ($self, $key, $default) = @_;
+		return [{
+			name => 'vsphere-prod',
+			type => 'vsphere',
+			properties => {
+				host     => 'vcenter.example.com',
+				user     => 'admin',
+				password => '((/cpi-config/properties/genesis-entombed/secret-vcenter-prod--password--abc12345))',
+			},
+		}] if $key eq 'bosh-configs.director-cpi.cpis';
+		return $default;
+	};
+
+	my ($config, $secrets, $source) = $env->_resolve_director_cpi_config;
+
+	is $source, 'inline', 'source is inline';
+	is $config->{cpis}[0]{properties}{host}, 'vcenter.example.com',
+		'non-vault values pass through unchanged';
+	is $config->{cpis}[0]{properties}{password},
+		'((/cpi-config/properties/genesis-entombed/secret-vcenter-prod--password--abc12345))',
+		'password is the credhub-var ref from the entombed manifest, not plaintext';
+	is_deeply $secrets, {},
+		'secrets dict is empty — entombment was done at deploy time';
+};
+
+subtest 'lookup_entombed - delegates to deployment_manifest_type and struct_lookups' => sub {
+	plan tests => 2;
+
+	my $env = make_cpi_env('le-direct', <<'YAML');
+  cpi:
+    enabled: true
+YAML
+
+	# Stub the manifest_provider to expose a fake manifest of the type
+	# deployment_manifest_type would pick. Verify lookup_entombed reaches
+	# in via struct_lookup and respects the default.
+	my $fake_manifest = bless {
+		data => {
+			'bosh-configs' => {
+				'director-cpi' => {
+					cpis => [{ name => 'ent', type => 'vsphere', properties => {} }],
+				},
+			},
+		},
+	}, 'Test::Mock::Manifest';
+	{ no strict 'refs'; *{"Test::Mock::Manifest::data"} = sub { $_[0]->{data} }; }
+
+	my $fake_provider = bless {}, 'Test::Mock::Provider';
+	no warnings qw(redefine once);
+	local *Genesis::Env::manifest_provider = sub { $fake_provider };
+	local *Genesis::Env::deployment_manifest_type = sub { 'entombed' };
+	{ no strict 'refs'; *{"Test::Mock::Provider::entombed"} = sub { $fake_manifest }; }
+
+	is_deeply scalar $env->lookup_entombed('bosh-configs.director-cpi.cpis'),
+		[{ name => 'ent', type => 'vsphere', properties => {} }],
+		'lookup_entombed reads from the deployment_manifest_type manifest data';
+	is scalar $env->lookup_entombed('absent.key', 'fallback'), 'fallback',
+		'lookup_entombed returns default for missing keys';
+};
+
 subtest 'resolver - no source returns empty' => sub {
 	plan tests => 1;
 
