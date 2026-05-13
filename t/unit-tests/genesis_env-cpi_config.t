@@ -317,6 +317,25 @@ YAML
 		'director-cpi.default wins over cpis[0] ordering';
 };
 
+subtest 'default_cpi_name - director-cpi.default honored without cpis (advertise-only)' => sub {
+	plan tests => 1;
+
+	my $env = make_cpi_env('dcn-advertise-only', <<'YAML');
+  cpi:
+    enabled: true
+  director-cpi:
+    default: externally-uploaded-cpi
+YAML
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::cpi_name = sub {
+		die "cpi_name should not be reached when director-cpi.default is set";
+	};
+
+	is $env->default_cpi_name, 'externally-uploaded-cpi',
+		'director-cpi.default is honored even without cpis: (advertise-only)';
+};
+
 subtest 'default_cpi_name - falls through to cpi_name when no inline' => sub {
 	plan tests => 1;
 
@@ -404,6 +423,24 @@ YAML
 		available_cpis     => ['only-cpi'],
 		cpi_config_name    => 'default',
 	}, 'sole inline entry → default_cpi_config, available_cpis, cpi_config_name';
+};
+
+subtest 'exodus overrides - advertise-only (default without cpis)' => sub {
+	plan tests => 1;
+
+	my $env = make_cpi_env('exo-advertise', <<'YAML');
+  cpi:
+    enabled: true
+  director-cpi:
+    default: externally-uploaded-cpi
+YAML
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::is_bosh_director = sub { 1 };
+
+	is_deeply $env->_cpi_exodus_overrides,
+		{ default_cpi_config => 'externally-uploaded-cpi' },
+		'advertise-only: only default_cpi_config published, no inventory keys';
 };
 
 subtest 'exodus overrides - inline N entries with declared default and custom name' => sub {

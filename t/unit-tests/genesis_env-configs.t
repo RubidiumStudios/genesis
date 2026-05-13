@@ -436,6 +436,29 @@ YAML
 		'unknown bosh-configs.<key> is still rejected';
 };
 
+subtest 'bosh-configs validation - director-cpi.default alone is allowed (advertise-only)' => sub {
+	plan tests => 1;
+
+	lives_ok {
+		load_env_with_bosh_configs('cpi-default-only', <<'YAML');
+  director-cpi:
+    default: externally-uploaded-cpi
+YAML
+	} 'director-cpi.default without cpis: is allowed (advertise-only path)';
+};
+
+subtest 'bosh-configs validation - director-cpi.name without cpis bails' => sub {
+	plan tests => 1;
+
+	throws_ok {
+		load_env_with_bosh_configs('cpi-name-no-cpis', <<'YAML');
+  director-cpi:
+    name: orphan-name
+YAML
+	} qr/director-cpi\.name.*requires.*cpis/ims,
+		'director-cpi.name without cpis: is rejected (name has no meaning without upload)';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

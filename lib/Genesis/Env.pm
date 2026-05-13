@@ -151,6 +151,20 @@ sub load {
 					}
 					push(@errors, "Encountered errors under #Y{bosh-configs:} key:\n  - ".join("\n  - ", @key_errors));
 				}
+
+				# director-cpi.name is the bosh config slot for the upload —
+				# meaningless without director-cpi.cpis. Surface this as a
+				# config error so operators don't silently get unexpected
+				# advertise-only behavior.
+				if (ref($bosh_configs->{'director-cpi'}) eq 'HASH'
+					&& defined $bosh_configs->{'director-cpi'}{name}
+					&& !defined $bosh_configs->{'director-cpi'}{cpis}) {
+					push(@errors,
+						"#C{bosh-configs.director-cpi.name} requires a ".
+						"sibling #C{cpis:} block. Drop #C{name} to use the ".
+						"advertise-only path (just #C{default:})."
+					);
+				}
 			}
 		}
 
@@ -2086,8 +2100,14 @@ sub _cpi_exodus_overrides {
 	my $self = shift;
 	return {} unless $self->is_bosh_director && $self->cpi_enabled;
 
-	my $overrides = { default_cpi_config => $self->default_cpi_name };
+	my $overrides = {};
+	my $primary = $self->default_cpi_name;
+	$overrides->{default_cpi_config} = $primary if defined $primary;
 
+	# Inventory advertisement only applies when we uploaded a known list.
+	# The advertise-only path (director-cpi.default without cpis:) leaves
+	# available_cpis and cpi_config_name unset, since genesis doesn't know
+	# what the externally-uploaded director actually contains.
 	my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef);
 	if (defined($inline) && ref($inline) eq 'ARRAY' && @$inline) {
 		$overrides->{available_cpis} = [
@@ -2107,12 +2127,16 @@ sub default_cpi_name {
 	my $self = shift;
 	return undef unless $self->cpi_enabled;
 
-	if (defined(my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef))) {
-		if (ref($inline) eq 'ARRAY' && @$inline) {
-			my $declared = $self->lookup('bosh-configs.director-cpi.default', undef);
-			return $declared if defined $declared;
-			return $inline->[0]{name} if @$inline == 1 && defined $inline->[0]{name};
-		}
+	# Operator-declared default always wins, with or without an inline cpis
+	# block. The advertise-only path uses just director-cpi.default to point
+	# at an externally-uploaded CPI without genesis re-uploading it.
+	my $declared = $self->lookup('bosh-configs.director-cpi.default', undef);
+	return $declared if defined $declared;
+
+	# No explicit default — fall back to the single-entry inline shortcut.
+	my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef);
+	if (ref($inline) eq 'ARRAY' && @$inline == 1 && defined $inline->[0]{name}) {
+		return $inline->[0]{name};
 	}
 
 	return $self->cpi_name;
