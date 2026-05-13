@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use Genesis qw/run bail debug trace/;
+use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
 
 ### Class State {{{
@@ -518,19 +519,51 @@ sub fetch_branch {
 # Force-updates local refs to match remote; safe for pipeline env
 # branches because local divergence there is a bug, not a workflow.
 # Silently skips the currently checked-out branch (git refuses to
-# update an active branch via refspec).  Returns $self.
+# update an active branch via refspec).
+#
+# In list context returns ($self, \%result) where %result carries:
+#   ok    - 1 on success or no-op; 0 on a real fetch failure
+#   kind  - 'success' | 'network' | 'auth' | 'unknown'
+#   err   - the git stderr (only when ok=0)
+#
+# In scalar context returns $self for backwards compatibility.
+#
+# Non-interactive contexts (no controlling terminal) get
+# GIT_TERMINAL_PROMPT=0 injected so a missing-cred situation exits
+# fast instead of hanging on a stdin prompt.
 sub fetch_branches {
 	my ($self, $names, $remote) = @_;
 	$remote //= $self->default_remote;
-	return $self unless $remote && $names && @$names;
+	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self
+		unless $remote && $names && @$names;
 	my $current  = $self->current_branch // '';
 	my @refspecs = map { "+refs/heads/$_:refs/heads/$_" }
 	               grep { $_ ne $current } @$names;
-	return $self unless @refspecs;
-	run({ dir => $self->{root}, passfail => 1 },
-		'git', 'fetch', $remote, @refspecs);
+	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self
+		unless @refspecs;
+
+	my %env;
+	$env{GIT_TERMINAL_PROMPT} = '0' unless in_controlling_terminal();
+
+	my ($out, $rc, $err) = run({
+		dir => $self->{root},
+		(%env ? (env => \%env) : ()),
+	}, 'git', 'fetch', $remote, @refspecs);
+
+	if ($rc) {
+		my $emsg = $err // '';
+		my $kind = $emsg =~ /could not resolve host|network is unreachable|operation timed out|connection refused/i
+			? 'network'
+			: $emsg =~ /authentication failed|permission denied|terminal prompts disabled|could not read username|could not read password/i
+				? 'auth'
+				: 'unknown';
+		return wantarray
+			? ($self, { ok => 0, kind => $kind, err => $emsg })
+			: $self;
+	}
+
 	$self->{_branch_cache}{$_} = 1 for grep { $_ ne $current } @$names;
-	return $self;
+	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self;
 }
 
 # }}}

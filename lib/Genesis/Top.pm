@@ -1020,9 +1020,12 @@ sub pipeline_env_names {
 #
 # Calls $git->fetch_branches with the env-name list (and optionally the
 # control branch) so credentials are only prompted once.  No-op when CI
-# is not configured, no remote is configured, or the DAG is empty.
-# Returns 1 in all no-op or success cases; returns 0 if fetch_branches
-# explicitly fails.
+# is not configured, no remote is configured, or there are no envs.
+#
+# Returns 1 on success and no-op cases.  Bails on real fetch failure
+# (network / auth / unknown) so the operator can't accidentally act
+# on stale refs.  Operators who genuinely want to work offline pass
+# --no-fetch at the command surface to skip this entirely.
 sub fetch_pipeline_envs {
 	my ($self, $git, %opts) = @_;
 	return 1 unless $self->ci_configured;
@@ -1031,8 +1034,29 @@ sub fetch_pipeline_envs {
 	my @names = $self->pipeline_env_names;
 	return 1 unless @names;
 	unshift @names, DEFAULT_CONTROL_BRANCH if $opts{include_control};
-	my $ok = eval { $git->fetch_branches(\@names, $remote); 1 };
-	return $ok ? 1 : 0;
+
+	my (undef, $result) = $git->fetch_branches(\@names, $remote);
+	return 1 if $result->{ok};
+
+	if ($result->{kind} eq 'network') {
+		bail(
+			"Failed to reach #C{%s} when fetching pipeline env branches.\n".
+			"If you're offline, re-run with #C{--no-fetch} to skip the refresh.",
+			$remote
+		);
+	} elsif ($result->{kind} eq 'auth') {
+		bail(
+			"Failed to authenticate to #C{%s} when fetching pipeline env branches.\n".
+			"Resolve the credential issue or re-run with #C{--no-fetch} to skip the refresh.",
+			$remote
+		);
+	} else {
+		bail(
+			"Pipeline env fetch from #C{%s} failed: %s\n".
+			"Re-run with #C{--no-fetch} to skip the refresh if this persists.",
+			$remote, $result->{err} // 'unknown error'
+		);
+	}
 }
 
 # }}}

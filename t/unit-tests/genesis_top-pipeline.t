@@ -88,7 +88,7 @@ sub mock_git {
 	my $git = bless {
 		_calls         => $calls,
 		_default_remote => $opts{default_remote},
-		_fetch_ok       => $opts{fetch_ok} // 1,
+		_result         => $opts{result},  # optional override of result hash
 	}, 'Test::Mock::Git';
 	$git;
 }
@@ -103,8 +103,8 @@ sub mock_git {
 			names   => [@$names],
 			remote  => $remote,
 		};
-		return $self if $self->{_fetch_ok};
-		die "simulated fetch failure" unless $self->{_fetch_ok};
+		my $result = $self->{_result} // { ok => 1, kind => 'success' };
+		return wantarray ? ($self, $result) : $self;
 	}
 }
 
@@ -167,6 +167,71 @@ subtest 'fetch_pipeline_envs - include_control prepends control to names' => sub
 	is_deeply $git->{_calls}[0]{names},
 		[qw(control prod qa)],
 		'control is included in the refspec list when requested';
+};
+
+# ======================================================================
+# fetch_pipeline_envs - failure-kind routing
+# ======================================================================
+
+# Capture warning/debug calls inside Top so we can assert routing without
+# parsing stderr. warning/debug are imported into Genesis::Top via
+# `use Genesis;`, so the symbols to override live in Genesis::Top.
+sub capture_log {
+	my ($warns, $debugs) = ([], []);
+	no warnings qw(redefine once);
+	# Returning a guard pair so callers can `my ($w, $d, $guard) = capture_log()`.
+	# Since `local *` can't escape its scope, we instead install plain
+	# overrides and rely on the test cleaning up by going out of scope
+	# at end of subtest.  Easier: the caller owns the locals.
+	($warns, $debugs);
+}
+
+subtest 'fetch_pipeline_envs - network failure bails with --no-fetch hint' => sub {
+	plan tests => 1;
+
+	my $top = make_ci_top();
+	put_env($top, 'qa');
+	my $git = mock_git(
+		default_remote => 'origin',
+		result         => { ok => 0, kind => 'network', err => 'Could not resolve host: ...' },
+	);
+
+	throws_ok {
+		$top->fetch_pipeline_envs($git);
+	} qr/Failed to reach.*origin.*--no-fetch/is,
+		'network failure bails with remote name and --no-fetch hint';
+};
+
+subtest 'fetch_pipeline_envs - auth failure bails with --no-fetch hint' => sub {
+	plan tests => 1;
+
+	my $top = make_ci_top();
+	put_env($top, 'qa');
+	my $git = mock_git(
+		default_remote => 'origin',
+		result         => { ok => 0, kind => 'auth', err => 'Authentication failed' },
+	);
+
+	throws_ok {
+		$top->fetch_pipeline_envs($git);
+	} qr/authenticate.*origin.*--no-fetch/is,
+		'auth failure bails with retry guidance and --no-fetch hint';
+};
+
+subtest 'fetch_pipeline_envs - unknown failure bails with raw err' => sub {
+	plan tests => 1;
+
+	my $top = make_ci_top();
+	put_env($top, 'qa');
+	my $git = mock_git(
+		default_remote => 'origin',
+		result         => { ok => 0, kind => 'unknown', err => 'weird transient error' },
+	);
+
+	throws_ok {
+		$top->fetch_pipeline_envs($git);
+	} qr/weird transient error.*--no-fetch/is,
+		'unknown failure bails with raw err and --no-fetch hint';
 };
 
 done_testing;
