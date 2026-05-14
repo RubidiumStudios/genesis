@@ -1,15 +1,28 @@
 # Mixin to provide entombment functionality - require to use;
 
-use Digest::SHA qw/sha1_hex/;
-
 use Genesis qw/info bail read_json_from lines/;
 use Genesis::Term qw/terminal_width wrap csprintf/;
 
 use Service::Vault::Local;
 use Service::Credhub;
+use Genesis::Env::Secrets::Entombment qw(
+	credhub_var_name put_secret
+	make_local_vault prime_credhub_cache
+);
 
 sub local_vault {
-	return Service::Vault::Local->create($_[0]->env->name);
+	return make_local_vault(env => $_[0]->env);
+}
+
+# credhub_target - which credhub the entombment writes into.
+#
+# Defaults to the env's primary credhub (the BOSH director that
+# deploys this env, or the env's own credhub if it is a director).
+# Subclasses such as Manifest::EntombedSelf override this to target
+# a different credhub (e.g. the deployed env's own credhub for
+# post-deploy self-uploaded configs).
+sub credhub_target {
+	return $_[0]->env->credhub;
 }
 
 sub _entomb_secrets {
@@ -54,8 +67,8 @@ sub _entomb_secrets {
 
 		my $local_vault = $self->_setup_local_vault();
 
-		my $credhub = $self->env->credhub();
-		$credhub->preload();
+		my $credhub = $self->credhub_target();
+		prime_credhub_cache($credhub);
 
 		#Design decision: use value-type credhub for each key, and only populate what is needed.
 		my $base_path = $self->env->secrets_base();
@@ -131,23 +144,26 @@ sub _setup_local_vault {
 sub _entomb_secret_for_vault {
 	my ($self, $local_vault, $vault_path, $key, $value, $credhub, $cred_path, $entombment_prefix) = @_;
 	$entombment_prefix //= 'genesis-entombed/';
-	my $secret_sha = substr(sha1_hex("$cred_path--$key--".$value),0,8);
-	my $cred_name = "$entombment_prefix$cred_path--$key--$secret_sha";
+
+	# Capture the pre-write value for display before put_secret may
+	# update the credhub cache.
+	my $cred_name = credhub_var_name($cred_path, $key, $value, $entombment_prefix);
+	my $existing  = $credhub->get($cred_name);
+	my $action    = put_secret($credhub, $cred_name, $value);
+
+	# 8-char sha for display (the full cred_name already embeds it,
+	# but the rendered output prints it separately).
+	my ($secret_sha) = $cred_name =~ /--([0-9a-f]{8})$/;
+
+	my %action_colors = (
+		new     => 'gi',
+		exists  => 'yi',
+		altered => 'ri',
+		failed  => 'Yr',
+	);
+	my $action_color = $action_colors{$action};
+
 	my $credhub_var = "(($cred_name))";
-	my $existing = $credhub->get($cred_name);
-	my $action_color = "yi";
-	my $action = "exists";
-	unless ($existing && $existing eq $value) {
-		$credhub->set($cred_name, $value);
-		my $new_value = $credhub->get($cred_name);
-		if ($new_value ne $value) {
-			$action = "failed";
-			$action_color = "Yr";
-		} else {
-			$action = $existing ? "altered" : "new";
-			$action_color = $existing ? "ri" : "gi";
-		}
-	}
 	$local_vault->set($vault_path, $key, $credhub_var) if $local_vault;
 	return ($credhub_var, $secret_sha, $action, $action_color, $existing);
 }
@@ -156,22 +172,13 @@ sub _entomb_secret {
 	return shift->_entomb_secret_for_vault(@_) if scalar(@_) > 6; # Backwards compatibility
 	my ($self, $credhub, $path, $key, $value, $prefix) = @_;
 	$prefix //= 'genesis-entombed/';
-	# REFACTOR: Extract this out to a helper (used here and in CpiConfig.pm)
-	my $secret_sha = substr(sha1_hex("$path--$key--".$value),0,8);
-	my $cred_name = "$prefix$path--$key--$secret_sha";
-	# end REFACTOR
+
+	my $cred_name = credhub_var_name($path, $key, $value, $prefix);
+	my $existing  = $credhub->get($cred_name);
+	my $action    = put_secret($credhub, $cred_name, $value);
+	my ($secret_sha) = $cred_name =~ /--([0-9a-f]{8})$/;
+
 	my $credhub_var = "(($cred_name))";
-	my $existing = $credhub->get($cred_name);
-	my $action = "exists";
-	unless ($existing && $existing eq $value) {
-		$credhub->set($cred_name, $value);
-		my $new_value = $credhub->get($cred_name);
-		if ($new_value ne $value) {
-			$action = "failed";
-		} else {
-			$action = $existing ? "altered" : "new";
-		}
-	}
 	my $color = {new => "gi", exists => "yi", altered => "ri", failed => "Yr"}->{$action};
 	return ($credhub_var, $secret_sha, $action, $color, $existing);
 }
