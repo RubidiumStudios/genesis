@@ -1,0 +1,76 @@
+=head1 NAME
+
+Genesis::Env::Manifest::EntombedSelf - Manifest entombed against the deployed director's own Credhub
+
+=head1 SYNOPSIS
+
+  use Genesis::Env::Manifest::EntombedSelf;
+
+  # EntombedSelf manifests are created by the builder, not directly
+  my $manifest = $builder->entombed_self();
+
+  # Access manifest content (triggers entombment-against-self-credhub
+  # on first call)
+  my $data = $manifest->data();
+
+=head1 DESCRIPTION
+
+C<Genesis::Env::Manifest::EntombedSelf> is a thin subclass of
+L<Genesis::Env::Manifest::Entombed> that runs the same entombment
+workflow but targets the *deployed director's own Credhub* instead of
+the parent director's.
+
+It exists for post-deploy operations that upload env-file data to the
+newly-deployed BOSH director -- for example,
+C<bosh-configs.director-cpi.cpis> in FWT-970.  Those uploads must carry
+C<((credhub-var))> references that the new director's own Credhub can
+resolve.  The standard L<Genesis::Env::Manifest::Entombed> targets the
+parent director's Credhub, which the deployed director cannot read --
+hence the need for this variant.
+
+The only override is L</credhub_target>, which returns
+C<< Service::Credhub->from_bosh($env->get_target_bosh({self => 1})) >>.
+Every other aspect of the entombment flow -- spruce vaultinfo to
+discover paths, the local-vault re-merge that substitutes
+C<((credhub-var))> references, the source-vault read, the deterministic
+naming via L<Genesis::Env::Secrets::Entombment/credhub_var_name> -- is
+inherited unchanged from C<Manifest::Entombed>.
+
+=head1 USAGE
+
+Access via the manifest provider:
+
+  my $data = $env->manifest_provider->entombed_self->data;
+
+or, more commonly, via L<Genesis::Env/lookup_entombed_self>:
+
+  my $cpis = $env->lookup_entombed_self('bosh-configs.director-cpi.cpis');
+
+=head1 METHODS
+
+=head2 description
+
+Returns a short human-readable description of this manifest type.
+Used by C<known_types> for the C<genesis manifest --list> output.
+
+=head2 credhub_target
+
+Overrides the base implementation to return
+C<< Service::Credhub->from_bosh($env->get_target_bosh({self => 1})) >>.
+Called by L<Genesis::Env::Manifest::_entombment_mixin/_entomb_secrets>
+to decide which Credhub each secret is written into.
+
+=head1 NOTES
+
+The deployed director must exist for this manifest type to function.
+Use it only in post-deploy contexts (post-deploy hooks, post-deploy
+config uploads).  Pre-deploy callers attempting to access it will
+fail when C<get_target_bosh({self => 1})> can't reach the director.
+
+=head1 SEE ALSO
+
+L<Genesis::Env::Manifest::Entombed>,
+L<Genesis::Env::Secrets::Entombment>,
+L<Genesis::Env/lookup_entombed_self>.
+
+=cut

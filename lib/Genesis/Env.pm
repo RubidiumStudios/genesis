@@ -1724,20 +1724,25 @@ sub lookup {
 }
 
 # }}}
-# lookup_entombed - look up a value from the env's deployment manifest where {{{
-# vault references have already been replaced with credhub var references
-# (via the normal entombment dance performed at deploy time). Intended for
-# post-deploy callers that need to upload env-file data to a BOSH director
-# without leaking plaintext secrets. When the deployment manifest isn't
-# available (pre-deploy, unit tests), falls back to lookup_unevaled so
-# callers don't accidentally get evaluated-to-plaintext values.
-sub lookup_entombed {
+# lookup_entombed_self - lookup against the env's own-credhub-entombed manifest {{{
+#
+# Triggers (or reuses) the EntombedSelf manifest variant — which runs
+# the standard entombment dance but targets the deployed director's own
+# Credhub instead of the parent's — and returns a value from it.
+#
+# Intended for post-deploy callers that upload env-file data into the
+# new director (e.g. bosh-configs.director-cpi.cpis).  The resulting
+# data carries ((credhub-var)) references that the new director's own
+# Credhub can resolve.
+#
+# Falls back to lookup_unevaled when the EntombedSelf manifest can't
+# be built (pre-deploy, unit-test fixtures); the unevaluated form
+# preserves vault refs as literal strings so callers never silently
+# end up with plaintext.
+sub lookup_entombed_self {
 	my ($self, $key, $default) = @_;
 	$key //= '.';
-	my $data = eval {
-		my $type = $self->deployment_manifest_type;
-		$self->manifest_provider->$type->data;
-	};
+	my $data = eval { $self->manifest_provider->entombed_self->data };
 	return struct_lookup($data, $key, $default)
 		if !$@ && ref($data) eq 'HASH';
 	return $self->lookup_unevaled($key, $default);
@@ -2171,12 +2176,12 @@ sub _resolve_director_cpi_config {
 
 	my $credhub_prefix = $opts{credhub_prefix} // "/cpi-config/properties/";
 
-	# Use lookup_entombed: the deployment-time entombment has already
-	# replaced (( vault ... )) operators inside the cpis tree with
-	# ((credhub-var)) references, so the payload we hand to BOSH carries
-	# credhub indirection, never the plaintext form that a plain lookup()
-	# would resolve to.
-	if (defined(my $inline = $self->lookup_entombed('bosh-configs.director-cpi.cpis', undef))) {
+	# Use lookup_entombed_self: post-deploy entombment runs against the
+	# deployed director's OWN Credhub (via Manifest::EntombedSelf), so
+	# the uploaded cpis carry ((credhub-var)) references that the new
+	# director can resolve — not plaintext, and not parent-credhub refs
+	# (which the new director can't resolve).
+	if (defined(my $inline = $self->lookup_entombed_self('bosh-configs.director-cpi.cpis', undef))) {
 		bail(
 			"#C{bosh-configs.director-cpi.cpis} must be a non-empty array of ".
 			"CPI entries, got %s.", ref($inline) || 'scalar'

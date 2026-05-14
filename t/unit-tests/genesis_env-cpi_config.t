@@ -264,10 +264,11 @@ subtest 'resolver - reads the entombed manifest (credhub vars already substitute
         password: (( vault "secret/vcenter/prod:password" ))
 YAML
 
-	# Simulate the entombed manifest having already done its job:
-	# vault refs are replaced by credhub-var references.
+	# Simulate the EntombedSelf manifest having already done its job:
+	# vault refs are replaced by credhub-var references targeting the
+	# deployed director's OWN credhub.
 	no warnings qw(redefine once);
-	local *Genesis::Env::lookup_entombed = sub {
+	local *Genesis::Env::lookup_entombed_self = sub {
 		my ($self, $key, $default) = @_;
 		return [{
 			name => 'vsphere-prod',
@@ -293,7 +294,7 @@ YAML
 		'secrets dict is empty — entombment was done at deploy time';
 };
 
-subtest 'lookup_entombed - delegates to deployment_manifest_type and struct_lookups' => sub {
+subtest 'lookup_entombed_self - reads from EntombedSelf manifest data' => sub {
 	plan tests => 2;
 
 	my $env = make_cpi_env('le-direct', <<'YAML');
@@ -301,9 +302,12 @@ subtest 'lookup_entombed - delegates to deployment_manifest_type and struct_look
     enabled: true
 YAML
 
-	# Stub the manifest_provider to expose a fake manifest of the type
-	# deployment_manifest_type would pick. Verify lookup_entombed reaches
-	# in via struct_lookup and respects the default.
+	# Verifies that lookup_entombed_self pulls from
+	# manifest_provider->entombed_self (the new Manifest::EntombedSelf
+	# variant introduced in this ticket).  We stub manifest_provider to
+	# expose a fake entombed_self manifest with known data, then assert
+	# struct_lookup reaches in to the right subtree and respects the
+	# default for missing keys.
 	my $fake_manifest = bless {
 		data => {
 			'bosh-configs' => {
@@ -318,14 +322,13 @@ YAML
 	my $fake_provider = bless {}, 'Test::Mock::Provider';
 	no warnings qw(redefine once);
 	local *Genesis::Env::manifest_provider = sub { $fake_provider };
-	local *Genesis::Env::deployment_manifest_type = sub { 'entombed' };
-	{ no strict 'refs'; *{"Test::Mock::Provider::entombed"} = sub { $fake_manifest }; }
+	{ no strict 'refs'; *{"Test::Mock::Provider::entombed_self"} = sub { $fake_manifest }; }
 
-	is_deeply scalar $env->lookup_entombed('bosh-configs.director-cpi.cpis'),
+	is_deeply scalar $env->lookup_entombed_self('bosh-configs.director-cpi.cpis'),
 		[{ name => 'ent', type => 'vsphere', properties => {} }],
-		'lookup_entombed reads from the deployment_manifest_type manifest data';
-	is scalar $env->lookup_entombed('absent.key', 'fallback'), 'fallback',
-		'lookup_entombed returns default for missing keys';
+		'lookup_entombed_self reads from the entombed_self manifest data';
+	is scalar $env->lookup_entombed_self('absent.key', 'fallback'), 'fallback',
+		'lookup_entombed_self returns default for missing keys';
 };
 
 subtest 'resolver - no source returns empty' => sub {
