@@ -2117,6 +2117,60 @@ sub cpi_credhub_base {
 	return $base // ($self->credhub->base."genesis-entombed/");
 }
 
+# instance_group_azs - sorted unique AZ names used across the env's manifest {{{
+#
+# Reads the merged manifest's instance_groups and returns the sorted,
+# deduped list of AZ names that appear across all groups' `azs:` lists.
+# Empty list when instance_groups is absent or no group declares any AZ.
+#
+# Tolerates non-hash entries in the instance_groups array (filtered) and
+# missing/empty `azs:` keys (skipped).  Caller-facing answer to the
+# question "which AZs do my workloads run in?".
+sub instance_group_azs {
+	my $self = shift;
+	my $igs  = scalar $self->manifest_lookup('instance_groups', []);
+	my %seen;
+	return sort grep { !$seen{$_}++ }
+	            map  { @{ $_->{azs} // [] } }
+	            grep { ref($_) eq 'HASH' }
+	            @$igs;
+}
+
+# }}}
+# needed_cpis - sorted unique CPI names this env's workloads run as {{{
+#
+# Joins instance_group_azs against the merged-manifest cloud-config
+# `azs:` section and returns the deduped, sorted list of CPI names
+# that appear on the AZs this env actually uses.
+#
+# AZs that have no `cpi:` field (i.e. fall through to the director's
+# default CPI) and AZs referenced by instance_groups but absent from
+# the cloud-config are filtered out -- the result is the explicit
+# list of non-default CPIs this env exercises.  Empty list = "all
+# my workloads use the director default CPI" (today's common case
+# for single-CPI directors).
+#
+# Pre-deploy validation pattern (parallel to stemcells):
+#   for my $cpi (@{$env->needed_cpis}) {
+#       bail("missing CPI on director") unless $env->bosh->has_cpi($cpi);
+#   }
+sub needed_cpis {
+	my $self = shift;
+	my @azs = $self->instance_group_azs;
+	return () unless @azs;
+
+	my $cloud_azs = scalar $self->manifest_lookup('azs', []);
+	my %az_cpi = map  { $_->{name} => $_->{cpi} }
+	             grep { ref($_) eq 'HASH' && defined($_->{name}) }
+	             @$cloud_azs;
+
+	my %seen;
+	return sort grep { defined && !$seen{$_}++ }
+	            map  { $az_cpi{$_} } @azs;
+}
+
+# }}}
+
 # Builds the cpi-related portion of the deploy-time exodus override hash.
 # Returns {} unless this is a bosh director with cpi_enabled. When inline
 # director-cpi is declared, also publishes the available_cpis inventory and
@@ -2269,7 +2323,7 @@ sub upload_director_cpi_config {
 sub _upload_director_cpi_if_necessary {
 	my ($self) = @_;
 
-	return 0 unless $self->lookup('bosh-configs.director-cpi.cpis', undef);
+	return 0 unless scalar $self->lookup('bosh-configs.director-cpi.cpis', undef);
 	return 0 unless $self->is_bosh_director;
 
 	my $kit = $self->kit;
@@ -4470,6 +4524,10 @@ sub _post_deploy {
 		}
 	}
 
+	# Genesis-driven fallback for older bosh kits whose post-deploy hook
+	# doesn't know how to consume inline director-cpi declarations.
+	$self->_upload_director_cpi_if_necessary;
+
 	# Run post-deploy hook
 	$self->run_hook(
 		'post-deploy',
@@ -4478,10 +4536,6 @@ sub _post_deploy {
 		interactive => !$noprompt,
 		flags => $opt_flags,
 	) if $self->has_hook('post-deploy');
-
-	# Genesis-driven fallback for older bosh kits whose post-deploy hook
-	# doesn't know how to consume inline director-cpi declarations.
-	$self->_upload_director_cpi_if_necessary;
 
 	# Clean up deployment state
 	delete $self->{deployment_state};
