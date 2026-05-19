@@ -25,6 +25,10 @@ use_ok 'Genesis::Env::Secrets::Store::Vault';
 	sub name   { $_[0]{name} }
 	sub type   { $_[0]{type} }
 	sub lookup { $_[0]{lookup_value} }
+	# Store::Vault::store_data uses env->exists to gate its
+	# "no data" warning for new (uncreated) envs.  Tests don't
+	# assert on the warning; return 0 to suppress it.
+	sub exists { 0 }
 }
 
 # Helper: build a store with mock env and service
