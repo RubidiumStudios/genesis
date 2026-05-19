@@ -200,14 +200,18 @@ sub information {
 			$deployment->lookup('genesis_version', 'unknown')
 		);
 
-		# TODO: Restore manifest validation status for 'repository' manifests
+		# TODO: Ensure that manifest validation status for 'repository' manifests works.  For now, just warn users that it may not be accurate and to use 'exodus' or 'hybrid' manifest stores for accurate validation status and details.
 		if ($env->manifest_store eq 'repository') {
 			# Do the manifest validation status here...
-			bail(
-				"Currently Genesis does not support manifest validation for ".
-				"environments that store manifests in the repository.  Please set ".
-				"#C{manifest_store} in the environment's #C{.genesis/config} to ".
-				"#C{exodus} or #C{hybrid} to enable manifest validation."
+			warning(
+				"\nCurrently Genesis does not fully support manifest validation for ".
+				"environments that store manifests in the repository -- you may ".
+				"encounter some errors.  To use #M{hybrid} or #M{exodus} modes for ".
+				"manifest artifact storage, please ensure that you specify a ".
+				"minimum Genesis version of 3.1.0 in your environment file, and ".
+				"edit your repo's #C{.genesis/config} file to set the ".
+				"#C{manifest_store} to #C{exodus} or #C{hybrid} and set the ".
+				"#C{minimum_version} to 3.1.0 or higher.\n"
 			)
 		}
 
