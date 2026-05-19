@@ -2175,12 +2175,28 @@ sub needed_cpis {
 	             grep { ref($_) eq 'HASH' && defined($_->{name}) }
 	             @$cloud_azs;
 
+	# Any instance_group AZ that has no entry in cloud-config is an
+	# unresolvable reference: BOSH cannot deploy a VM there, and we
+	# cannot determine which CPI it would need.  This is a hard
+	# configuration error -- bail loudly rather than silently dropping
+	# the AZ from the result, which would let a broken env pass
+	# preflight only to explode at deploy time.
+	my @unresolvable = grep { !exists $az_cpi{$_} } @azs;
+	if (@unresolvable) {
+		bail(
+			"instance_groups reference AZ(s) not present in the cloud-config:\n".
+			"  - %s\n\n".
+			"Cloud-config declares: %s",
+			join("\n  - ", map { "#R{$_}" } @unresolvable),
+			(%az_cpi ? join(', ', map { "#C{$_}" } sort keys %az_cpi)
+			         : '#K{<none>}'),
+		);
+	}
+
 	my %seen;
 	return sort grep { !$seen{$_}++ }
-	            map  { (defined($_->{cpi}) && length($_->{cpi})) ? $_->{cpi} : '<default>' }
-	            grep { ref($_) eq 'HASH' }
-	            map  { +{ name => $_, cpi => $az_cpi{$_} } }
-	            grep { exists $az_cpi{$_} }
+	            map  { defined($_) && length($_) ? $_ : '<default>' }
+	            map  { $az_cpi{$_} }
 	            @azs;
 }
 

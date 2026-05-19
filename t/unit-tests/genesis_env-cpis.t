@@ -193,7 +193,7 @@ subtest 'needed_cpis - az without cpi field maps to <default>' => sub {
 		'mixed env emits <default> sentinel for unpinned azs alongside named cpis';
 };
 
-subtest 'needed_cpis - az referenced but not in cloud-config is filtered out' => sub {
+subtest 'needed_cpis - bails when az is not present in cloud-config' => sub {
 	plan tests => 1;
 	my $env = make_env('cc-orphan');
 
@@ -207,8 +207,13 @@ subtest 'needed_cpis - az referenced but not in cloud-config is filtered out' =>
 		return $default;
 	};
 
-	is_deeply [$env->needed_cpis], ['aws-east'],
-		'azs not present in cloud-config yield no cpi entry';
+	# Unresolvable AZs are a hard configuration error: BOSH can't
+	# deploy a VM there, and we can't determine which CPI it would
+	# need.  needed_cpis bails so the broken env can't slip past
+	# preflight to fail later at deploy time.
+	throws_ok { $env->needed_cpis }
+		qr/z9.*not present in the cloud-config|cloud-config.*z9/is,
+		'needed_cpis bails listing the unresolvable AZ';
 };
 
 # ======================================================================
@@ -222,7 +227,7 @@ subtest 'needed_cpis - az referenced but not in cloud-config is filtered out' =>
 # Lightweight fake bosh: lets each test specify the list of CPIs the
 # (imagined) director has registered, plus an alias for the error
 # message.
-sub fake_bosh {
+sub stub_bosh {
 	my %opts = @_;
 	my $cpis = $opts{cpis} // [];
 	my $alias = $opts{alias} // 'mock-bosh';
@@ -284,7 +289,7 @@ subtest '_check_cpis - all named cpis present => ok' => sub {
 	local *Genesis::Env::use_create_env = sub { 0 };
 	local *Genesis::Env::needed_cpis    = sub { qw(aws-east vsphere-prod) };
 	local *Genesis::Env::bosh           = sub {
-		fake_bosh(cpis => [qw(aws-east aws-west vsphere-prod)]);
+		stub_bosh(cpis => [qw(aws-east aws-west vsphere-prod)]);
 	};
 
 	my $result = $env->_check_cpis;
@@ -301,7 +306,7 @@ subtest '_check_cpis - missing cpis => error' => sub {
 	local *Genesis::Env::use_create_env = sub { 0 };
 	local *Genesis::Env::needed_cpis    = sub { qw(aws-east vsphere-prod azure-gov) };
 	local *Genesis::Env::bosh           = sub {
-		fake_bosh(cpis => [qw(aws-east)], alias => 'prod-bosh');
+		stub_bosh(cpis => [qw(aws-east)], alias => 'prod-bosh');
 	};
 
 	my $result = $env->_check_cpis;
@@ -318,7 +323,7 @@ subtest '_check_cpis - mixed default + named: only named are checked' => sub {
 	local *Genesis::Env::use_create_env = sub { 0 };
 	local *Genesis::Env::needed_cpis    = sub { ('<default>', 'aws-east') };
 	local *Genesis::Env::bosh           = sub {
-		fake_bosh(cpis => [qw(aws-east)]);
+		stub_bosh(cpis => [qw(aws-east)]);
 	};
 
 	is $env->_check_cpis->{status}, 'ok',
