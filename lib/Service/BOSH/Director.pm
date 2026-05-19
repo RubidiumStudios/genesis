@@ -7,7 +7,7 @@ use utf8;
 use base 'Service::BOSH';
 use Genesis qw(
     trace debug info error bail bug dump_stack dump_var
-    run lines read_json_from load_yaml_file
+    run lines read_json_from load_yaml load_yaml_file
 		save_to_yaml_file mkfile_or_fail
     is_valid_uri tcp_listening workdir
 		parse_fixed_width_table by_semver
@@ -568,6 +568,50 @@ sub upload_stemcell {
 	bug("No stemcell provided in call to upload_stemcell()") unless $stemcell;
 	return $stemcell->upload($self, %opts);
 }
+
+# cpis - sorted list of CPI names registered with this director {{{
+#
+#   my @cpis = $director->cpis;                 # cached after first call
+#   my @cpis = $director->cpis(refresh => 1);   # force a fresh query
+#
+# Live-queries the director for every cpi-typed config slot, parses
+# each config's YAML body, and unions the cpis[].name fields across
+# them.  Result is memoized on the Director instance so repeated
+# calls within the same process don't reissue the bosh subprocesses.
+# Pass `refresh => 1` to invalidate the memo (use this after a known
+# upload that changed the director's CPI inventory).
+#
+# This always queries the director live -- exodus is intentionally
+# NOT used as a fast-path source.  Exodus only reflects what Genesis
+# advertised at deploy time; non-OCFP envs may have CPI configs
+# uploaded out-of-band, and the director's own state is the
+# authoritative answer to "what CPIs are available here?".
+#
+# Analogous to L</stemcells> -- a fact about the director, not about
+# any particular environment that consumes it.
+sub cpis {
+	my ($self, %opts) = @_;
+	delete $self->{_cpis_cache} if $opts{refresh};
+	return wantarray ? @{$self->{_cpis_cache}} : $self->{_cpis_cache}
+		if $self->{_cpis_cache};
+
+	my $configs = eval { $self->configs } // {};
+	my %names;
+	for my $config_name (keys %{$configs->{cpi} // {}}) {
+		my $yaml = eval { $self->get_config('cpi', $config_name) };
+		next unless defined($yaml) && length($yaml);
+		my $parsed = eval { load_yaml($yaml) };
+		next unless ref($parsed) eq 'HASH' && ref($parsed->{cpis}) eq 'ARRAY';
+		for my $entry (@{$parsed->{cpis}}) {
+			next unless ref($entry) eq 'HASH' && defined($entry->{name});
+			$names{$entry->{name}} = 1;
+		}
+	}
+	$self->{_cpis_cache} = [sort keys %names];
+	return wantarray ? @{$self->{_cpis_cache}} : $self->{_cpis_cache};
+}
+
+# }}}
 
 # }}}
 # vault - returns the vault object used to fetch exodus data {{{
