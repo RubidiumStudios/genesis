@@ -173,7 +173,7 @@ subtest 'needed_cpis - maps used azs through cloud-config cpi field' => sub {
 		'needed_cpis are deduped and sorted CPI names from used azs';
 };
 
-subtest 'needed_cpis - az without cpi field is filtered out' => sub {
+subtest 'needed_cpis - az without cpi field maps to <default>' => sub {
 	plan tests => 1;
 	my $env = make_env('cc-default');
 
@@ -189,8 +189,8 @@ subtest 'needed_cpis - az without cpi field is filtered out' => sub {
 		return $default;
 	};
 
-	is_deeply [$env->needed_cpis], ['aws-east'],
-		'azs without explicit cpi are not reported (caller falls back to default)';
+	is_deeply [$env->needed_cpis], ['<default>', 'aws-east'],
+		'mixed env emits <default> sentinel for unpinned azs alongside named cpis';
 };
 
 subtest 'needed_cpis - az referenced but not in cloud-config is filtered out' => sub {

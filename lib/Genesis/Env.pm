@@ -2143,12 +2143,23 @@ sub instance_group_azs {
 # `azs:` section and returns the deduped, sorted list of CPI names
 # that appear on the AZs this env actually uses.
 #
-# AZs that have no `cpi:` field (i.e. fall through to the director's
-# default CPI) and AZs referenced by instance_groups but absent from
-# the cloud-config are filtered out -- the result is the explicit
-# list of non-default CPIs this env exercises.  Empty list = "all
-# my workloads use the director default CPI" (today's common case
-# for single-CPI directors).
+# AZs in cloud-config that have no `cpi:` field (i.e. fall through to
+# the director's default CPI) emit the sentinel string '<default>' --
+# the same sentinel Service::BOSH::Director::stemcells uses for
+# default-CPI stemcells, so consumer-side validation can do a straight
+# set intersection.  This is important for mixed envs where some AZs
+# are pinned to named CPIs and others rely on the director default;
+# without the sentinel, the "we also need the default CPI" requirement
+# would be silently lost.
+#
+# AZs referenced by instance_groups but absent from the cloud-config
+# are filtered out -- those are configuration errors that will surface
+# as an AZ-resolution error from BOSH at deploy time, not a CPI gap.
+#
+# Empty list = "this env has no instance_groups, or none of them
+# declare any azs".  A single ['<default>'] = "all my workloads use
+# the director's default CPI" (today's common case for single-CPI
+# directors).
 #
 # Pre-deploy validation pattern (parallel to stemcells):
 #   for my $cpi (@{$env->needed_cpis}) {
@@ -2165,8 +2176,12 @@ sub needed_cpis {
 	             @$cloud_azs;
 
 	my %seen;
-	return sort grep { defined && !$seen{$_}++ }
-	            map  { $az_cpi{$_} } @azs;
+	return sort grep { !$seen{$_}++ }
+	            map  { (defined($_->{cpi}) && length($_->{cpi})) ? $_->{cpi} : '<default>' }
+	            grep { ref($_) eq 'HASH' }
+	            map  { +{ name => $_, cpi => $az_cpi{$_} } }
+	            grep { exists $az_cpi{$_} }
+	            @azs;
 }
 
 # }}}
