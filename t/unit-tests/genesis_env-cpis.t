@@ -220,8 +220,8 @@ subtest 'needed_cpis - bails when az is not present in cloud-config' => sub {
 # _check_cpis - validate $env->needed_cpis ⊆ $env->bosh->cpis
 # ======================================================================
 #
-# Returns {status, msg} matching the shape Genesis::Env::check expects
-# (parallel to _check_stemcells).  status is 'ok' or 'error'.  The
+# Returns {state, msg} matching the shape Genesis::Env::check expects
+# (parallel to _check_stemcells).  state is 'ok' or 'error'.  The
 # '<default>' sentinel is always satisfied by any director.
 
 # Lightweight fake bosh: lets each test specify the list of CPIs the
@@ -251,7 +251,7 @@ subtest '_check_cpis - create-env skips the check' => sub {
 	local *Genesis::Env::bosh           = sub { die "bosh must not be queried for create-env" };
 
 	my $result = $env->_check_cpis;
-	is $result->{status}, 'ok', 'create-env skip => ok';
+	is $result->{state}, 'ok', 'create-env skip => ok';
 	like $result->{msg}, qr/create-env/i, 'message mentions create-env';
 };
 
@@ -264,7 +264,7 @@ subtest '_check_cpis - no instance_groups => ok (nothing to check)' => sub {
 	local *Genesis::Env::needed_cpis    = sub { () };
 	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when needed_cpis is empty" };
 
-	is $env->_check_cpis->{status}, 'ok',
+	is $env->_check_cpis->{state}, 'ok',
 		'no instance_groups => ok, bosh not queried';
 };
 
@@ -277,7 +277,7 @@ subtest '_check_cpis - only <default> needed => ok (every director has default)'
 	local *Genesis::Env::needed_cpis    = sub { ('<default>') };
 	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when only <default> is needed" };
 
-	is $env->_check_cpis->{status}, 'ok',
+	is $env->_check_cpis->{state}, 'ok',
 		'<default>-only needs are always satisfied';
 };
 
@@ -293,7 +293,7 @@ subtest '_check_cpis - all named cpis present => ok' => sub {
 	};
 
 	my $result = $env->_check_cpis;
-	is $result->{status}, 'ok', 'all needed cpis present => ok';
+	is $result->{state}, 'ok', 'all needed cpis present => ok';
 	like $result->{msg}, qr/aws-east.*vsphere-prod|vsphere-prod.*aws-east/,
 		'success message names the satisfied cpis';
 };
@@ -310,7 +310,7 @@ subtest '_check_cpis - missing cpis => error' => sub {
 	};
 
 	my $result = $env->_check_cpis;
-	is $result->{status}, 'error', 'missing cpis => error';
+	is $result->{state}, 'error', 'missing cpis => error';
 	like $result->{msg}, qr/vsphere-prod/, 'error message lists the missing vsphere-prod';
 	like $result->{msg}, qr/azure-gov/,    'error message lists the missing azure-gov';
 };
@@ -326,7 +326,7 @@ subtest '_check_cpis - mixed default + named: only named are checked' => sub {
 		stub_bosh(cpis => [qw(aws-east)]);
 	};
 
-	is $env->_check_cpis->{status}, 'ok',
+	is $env->_check_cpis->{state}, 'ok',
 		'named cpi present + <default> sentinel always satisfied => ok';
 };
 

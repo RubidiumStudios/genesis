@@ -3781,11 +3781,11 @@ sub check {
 	# TODO: Detect 'fix-secrets' option and run it against invalid or missing secrets, then run the check
 	if (!exists($opts{check_secrets}) || $opts{check_secrets}) {
 		my $secrets_check = $self->_check_secrets();
-		my $msg_type = $secrets_check->{status};
+		my $msg_type = $secrets_check->{state};
 		$msg_type = '%s' if $msg_type eq 'ok';
 
 		$self->notify($msg_type => $secrets_check->{msg});
-		$ok = 0 unless $secrets_check->{status} =~ /^(ok|warning)$/;
+		$ok = 0 unless $secrets_check->{state} =~ /^(ok|warning)$/;
 	}
 
 	if ($opts{check_yamls}) {
@@ -3826,21 +3826,21 @@ sub check {
 	# env's parent director.  Skipped for create-env (no parent).
 	if ((!exists($opts{check_cpis}) || $opts{check_cpis}) && !$self->use_create_env) {
 		my $cpis_check = $self->_check_cpis();
-		my $msg_type = $cpis_check->{status};
+		my $msg_type = $cpis_check->{state};
 		$msg_type = '%s' if $msg_type eq 'ok';
 		$self->notify($msg_type => $cpis_check->{msg});
-		$ok = 0 unless $cpis_check->{status} =~ /^(ok|warning)$/;
+		$ok = 0 unless $cpis_check->{state} =~ /^(ok|warning)$/;
 	}
 
 	# TODO: secrets check for Credhub (post manifest generation)
-if ((!exists($opts{check_stemcells}) || $opts{check_stemcells}) && !$self->use_create_env) {
+	if ((!exists($opts{check_stemcells}) || $opts{check_stemcells}) && !$self->use_create_env) {
 		my $stemcells_check = $self->_check_stemcells();
-		my $msg_type = $stemcells_check->{status};
+		my $msg_type = $stemcells_check->{state};
 		$msg_type = '%s' if $msg_type eq 'ok';
 
 		$self->notify($msg_type => $stemcells_check->{msg});
-		$self->_advise_stemcell_updates($stemcells_check->{fix_data}) unless $stemcells_check->{status} eq 'ok';
-		$ok = 0 unless $stemcells_check->{status} =~ /^(ok|warning)$/;
+		$self->_advise_stemcell_updates($stemcells_check->{fix_data}) unless $stemcells_check->{state} eq 'ok';
+		$ok = 0 unless $stemcells_check->{state} =~ /^(ok|warning)$/;
 	}
 	return $ok;
 }
@@ -6168,8 +6168,8 @@ sub _check_release_overrides {
 # _check_stemcells - check the stemcells {{{
 # _check_cpis - validate the env's needed CPIs are present on its director {{{
 #
-# Returns a {status, msg} hashref matching the shape Genesis::Env::check
-# expects (parallel to _check_stemcells).  status is one of 'ok' or
+# Returns a {state, msg} hashref matching the shape Genesis::Env::check
+# expects (parallel to _check_stemcells).  state is one of 'ok' or
 # 'error'.
 #
 # Logic:
@@ -6185,24 +6185,24 @@ sub _check_cpis {
 
 	if ($self->use_create_env) {
 		return {
-			status => 'ok',
-			msg    => 'using create-env, no parent director CPIs to validate',
+			state => 'ok',
+			msg   => 'using create-env, no parent director CPIs to validate',
 		};
 	}
 
 	my @needed = $self->needed_cpis;
 	if (!@needed) {
 		return {
-			status => 'ok',
-			msg    => 'no instance groups declare azs -- no CPI dependencies',
+			state => 'ok',
+			msg   => 'no instance groups declare azs -- no CPI dependencies',
 		};
 	}
 
 	my @real_needed = grep { $_ ne '<default>' } @needed;
 	if (!@real_needed) {
 		return {
-			status => 'ok',
-			msg    => 'all azs use the director default CPI',
+			state => 'ok',
+			msg   => 'all azs use the director default CPI',
 		};
 	}
 
@@ -6213,8 +6213,8 @@ sub _check_cpis {
 
 	if (@missing) {
 		return {
-			status => 'error',
-			msg    => sprintf(
+			state => 'error',
+			msg   => sprintf(
 				"CPI(s) needed by this env are missing on director #M{%s}:\n  - %s\n\nDirector has: %s",
 				($self->bosh->alias // '<unknown>'),
 				join("\n  - ", map { "#R{$_}" } @missing),
@@ -6224,8 +6224,8 @@ sub _check_cpis {
 	}
 
 	return {
-		status => 'ok',
-		msg    => sprintf(
+		state => 'ok',
+		msg   => sprintf(
 			"all needed CPI(s) present on director: %s",
 			join(', ', map { "#C{$_}" } @real_needed),
 		),
