@@ -3805,6 +3805,17 @@ sub check {
 		}
 	}
 
+	# CPI availability check: verifies the env's needed_cpis (from
+	# instance_groups + cloud-config azs) are all registered on the
+	# env's parent director.  Skipped for create-env (no parent).
+	if ((!exists($opts{check_cpis}) || $opts{check_cpis}) && !$self->use_create_env) {
+		my $cpis_check = $self->_check_cpis();
+		my $msg_type = $cpis_check->{status};
+		$msg_type = '%s' if $msg_type eq 'ok';
+		$self->notify($msg_type => $cpis_check->{msg});
+		$ok = 0 unless $cpis_check->{status} =~ /^(ok|warning)$/;
+	}
+
 	# TODO: secrets check for Credhub (post manifest generation)
 if ((!exists($opts{check_stemcells}) || $opts{check_stemcells}) && !$self->use_create_env) {
 		my $stemcells_check = $self->_check_stemcells();
@@ -6139,6 +6150,73 @@ sub _check_release_overrides {
 
 # }}}
 # _check_stemcells - check the stemcells {{{
+# _check_cpis - validate the env's needed CPIs are present on its director {{{
+#
+# Returns a {status, msg} hashref matching the shape Genesis::Env::check
+# expects (parallel to _check_stemcells).  status is one of 'ok' or
+# 'error'.
+#
+# Logic:
+#   - create-env envs are skipped (no parent director to validate against).
+#   - Empty needed_cpis (no instance_groups declare azs) skips the check.
+#   - The '<default>' sentinel emitted by needed_cpis for azs without an
+#     explicit cpi: field is always satisfied -- every director has SOME
+#     default CPI by definition, so we don't shell out to verify it.
+#   - For the remaining (named) cpis, $env->bosh->cpis is the
+#     authoritative answer to "what's actually on the director".
+sub _check_cpis {
+	my ($self) = @_;
+
+	if ($self->use_create_env) {
+		return {
+			status => 'ok',
+			msg    => 'using create-env, no parent director CPIs to validate',
+		};
+	}
+
+	my @needed = $self->needed_cpis;
+	if (!@needed) {
+		return {
+			status => 'ok',
+			msg    => 'no instance groups declare azs -- no CPI dependencies',
+		};
+	}
+
+	my @real_needed = grep { $_ ne '<default>' } @needed;
+	if (!@real_needed) {
+		return {
+			status => 'ok',
+			msg    => 'all azs use the director default CPI',
+		};
+	}
+
+	$self->notify("running CPI checks...");
+	my @available = $self->bosh->cpis;
+	my %has = map { $_ => 1 } @available;
+	my @missing = grep { !$has{$_} } @real_needed;
+
+	if (@missing) {
+		return {
+			status => 'error',
+			msg    => sprintf(
+				"CPI(s) needed by this env are missing on director #M{%s}:\n  - %s\n\nDirector has: %s",
+				($self->bosh->alias // '<unknown>'),
+				join("\n  - ", map { "#R{$_}" } @missing),
+				(@available ? join(', ', map {"#C{$_}"} @available) : '#K{<none>}'),
+			),
+		};
+	}
+
+	return {
+		status => 'ok',
+		msg    => sprintf(
+			"all needed CPI(s) present on director: %s",
+			join(', ', map { "#C{$_}" } @real_needed),
+		),
+	};
+}
+
+# }}}
 sub _check_stemcells {
 	my ($self) = @_;
 

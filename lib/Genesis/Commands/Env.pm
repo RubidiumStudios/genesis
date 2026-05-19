@@ -509,10 +509,10 @@ sub check {
 		$env->download_required_configs(@hooks);
 	}
 
-	get_options->{$_} //= 0 for qw/secrets stemcells/;
+	get_options->{$_} //= 0 for qw/secrets stemcells cpis/;
 
 	my $ok = $env->check(
-		(map {("check_$_" => has_option($_,1))} qw/manifest secrets stemcells/)
+		(map {("check_$_" => has_option($_,1))} qw/manifest secrets stemcells cpis/)
 	);
 	if ($ok) {
 		info "\n[#M{%s}] #G{All Checks Succeeded}", $env->name;

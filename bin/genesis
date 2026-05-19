@@ -365,6 +365,13 @@ define_command("check", {
 		'stemcells!' =>
 			"Determines if the secrets checks are run.\n".
 			"DOES NOT run by default.",
+
+		'cpis!' =>
+			"Verify that every CPI the env's instance-groups require (per\n".
+			"the merged cloud-config azs[].cpi mapping) is registered on\n".
+			"this env's parent BOSH director.  Skipped for create-env\n".
+			"environments.\n".
+			"DOES NOT run by default.",
 	],
 });
 

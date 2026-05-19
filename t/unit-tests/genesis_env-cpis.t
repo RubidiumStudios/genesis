@@ -211,6 +211,120 @@ subtest 'needed_cpis - az referenced but not in cloud-config is filtered out' =>
 		'azs not present in cloud-config yield no cpi entry';
 };
 
+# ======================================================================
+# _check_cpis - validate $env->needed_cpis ⊆ $env->bosh->cpis
+# ======================================================================
+#
+# Returns {status, msg} matching the shape Genesis::Env::check expects
+# (parallel to _check_stemcells).  status is 'ok' or 'error'.  The
+# '<default>' sentinel is always satisfied by any director.
+
+# Lightweight fake bosh: lets each test specify the list of CPIs the
+# (imagined) director has registered, plus an alias for the error
+# message.
+sub fake_bosh {
+	my %opts = @_;
+	my $cpis = $opts{cpis} // [];
+	my $alias = $opts{alias} // 'mock-bosh';
+	my $self = bless { _cpis => $cpis, _alias => $alias }, 'Test::Mock::Bosh';
+	{
+		no strict 'refs';
+		no warnings 'redefine';
+		*{'Test::Mock::Bosh::cpis'}  = sub { @{$_[0]->{_cpis}} };
+		*{'Test::Mock::Bosh::alias'} = sub { $_[0]->{_alias} };
+	}
+	$self;
+}
+
+subtest '_check_cpis - create-env skips the check' => sub {
+	plan tests => 2;
+	my $env = make_env('chk-createenv');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::use_create_env = sub { 1 };
+	# bosh should never be consulted in this branch
+	local *Genesis::Env::bosh           = sub { die "bosh must not be queried for create-env" };
+
+	my $result = $env->_check_cpis;
+	is $result->{status}, 'ok', 'create-env skip => ok';
+	like $result->{msg}, qr/create-env/i, 'message mentions create-env';
+};
+
+subtest '_check_cpis - no instance_groups => ok (nothing to check)' => sub {
+	plan tests => 1;
+	my $env = make_env('chk-noig');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::needed_cpis    = sub { () };
+	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when needed_cpis is empty" };
+
+	is $env->_check_cpis->{status}, 'ok',
+		'no instance_groups => ok, bosh not queried';
+};
+
+subtest '_check_cpis - only <default> needed => ok (every director has default)' => sub {
+	plan tests => 1;
+	my $env = make_env('chk-default-only');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::needed_cpis    = sub { ('<default>') };
+	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when only <default> is needed" };
+
+	is $env->_check_cpis->{status}, 'ok',
+		'<default>-only needs are always satisfied';
+};
+
+subtest '_check_cpis - all named cpis present => ok' => sub {
+	plan tests => 2;
+	my $env = make_env('chk-present');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::needed_cpis    = sub { qw(aws-east vsphere-prod) };
+	local *Genesis::Env::bosh           = sub {
+		fake_bosh(cpis => [qw(aws-east aws-west vsphere-prod)]);
+	};
+
+	my $result = $env->_check_cpis;
+	is $result->{status}, 'ok', 'all needed cpis present => ok';
+	like $result->{msg}, qr/aws-east.*vsphere-prod|vsphere-prod.*aws-east/,
+		'success message names the satisfied cpis';
+};
+
+subtest '_check_cpis - missing cpis => error' => sub {
+	plan tests => 3;
+	my $env = make_env('chk-missing');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::needed_cpis    = sub { qw(aws-east vsphere-prod azure-gov) };
+	local *Genesis::Env::bosh           = sub {
+		fake_bosh(cpis => [qw(aws-east)], alias => 'prod-bosh');
+	};
+
+	my $result = $env->_check_cpis;
+	is $result->{status}, 'error', 'missing cpis => error';
+	like $result->{msg}, qr/vsphere-prod/, 'error message lists the missing vsphere-prod';
+	like $result->{msg}, qr/azure-gov/,    'error message lists the missing azure-gov';
+};
+
+subtest '_check_cpis - mixed default + named: only named are checked' => sub {
+	plan tests => 1;
+	my $env = make_env('chk-mixed');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::needed_cpis    = sub { ('<default>', 'aws-east') };
+	local *Genesis::Env::bosh           = sub {
+		fake_bosh(cpis => [qw(aws-east)]);
+	};
+
+	is $env->_check_cpis->{status}, 'ok',
+		'named cpi present + <default> sentinel always satisfied => ok';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet
