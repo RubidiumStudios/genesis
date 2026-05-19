@@ -256,29 +256,39 @@ subtest '_check_cpis - create-env skips the check' => sub {
 };
 
 subtest '_check_cpis - no instance_groups => ok (nothing to check)' => sub {
-	plan tests => 1;
+	plan tests => 2;
 	my $env = make_env('chk-noig');
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
-	local *Genesis::Env::needed_cpis    = sub { () };
-	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when needed_cpis is empty" };
+	local *Genesis::Env::cpi_az_map     = sub { {} };
+	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when no azs declared" };
 
-	is $env->_check_cpis->{state}, 'ok',
-		'no instance_groups => ok, bosh not queried';
+	# Skip paths still return a msg so the caller emits one notify
+	# line explaining why no checks ran -- only the per-CPI fan-out
+	# path elides msg (it prints summary inline).
+	my $result = $env->_check_cpis;
+	is $result->{state}, 'ok', 'no instance_groups => ok, bosh not queried';
+	like $result->{msg}, qr/no instance groups|no CPI dependencies/i,
+		'skip path keeps msg so caller can notify';
 };
 
 subtest '_check_cpis - only <default> needed => ok (every director has default)' => sub {
-	plan tests => 1;
+	plan tests => 2;
 	my $env = make_env('chk-default-only');
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
-	local *Genesis::Env::needed_cpis    = sub { ('<default>') };
+	local *Genesis::Env::cpi_az_map     = sub { { '<default>' => ['z1', 'z2'] } };
+	# <default>-only path skips the director query; bosh->cpis must
+	# not be called.
 	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when only <default> is needed" };
 
-	is $env->_check_cpis->{state}, 'ok',
+	my $result = $env->_check_cpis;
+	is $result->{state}, 'ok',
 		'<default>-only needs are always satisfied';
+	is $result->{msg}, undef,
+		'msg is undef -- summary was printed inline';
 };
 
 subtest '_check_cpis - all named cpis present => ok' => sub {
@@ -287,47 +297,66 @@ subtest '_check_cpis - all named cpis present => ok' => sub {
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
-	local *Genesis::Env::needed_cpis    = sub { qw(aws-east vsphere-prod) };
+	local *Genesis::Env::cpi_az_map     = sub {
+		{ 'aws-east' => ['z1'], 'vsphere-prod' => ['z2', 'z3'] }
+	};
 	local *Genesis::Env::bosh           = sub {
 		stub_bosh(cpis => [qw(aws-east aws-west vsphere-prod)]);
 	};
 
+	# Contract changed: when the fan-out runs, _check_cpis prints
+	# the per-CPI bullets and summary inline, and returns msg=>undef
+	# so the Env::check caller doesn't duplicate the summary.
 	my $result = $env->_check_cpis;
 	is $result->{state}, 'ok', 'all needed cpis present => ok';
-	like $result->{msg}, qr/aws-east.*vsphere-prod|vsphere-prod.*aws-east/,
-		'success message names the satisfied cpis';
+	is $result->{msg}, undef,
+		'msg is undef -- per-CPI bullets + summary already printed';
 };
 
 subtest '_check_cpis - missing cpis => error' => sub {
-	plan tests => 3;
+	plan tests => 2;
 	my $env = make_env('chk-missing');
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
-	local *Genesis::Env::needed_cpis    = sub { qw(aws-east vsphere-prod azure-gov) };
+	local *Genesis::Env::cpi_az_map     = sub {
+		{
+			'aws-east'     => ['z1'],
+			'vsphere-prod' => ['z2'],
+			'azure-gov'    => ['z3', 'z4'],
+		}
+	};
 	local *Genesis::Env::bosh           = sub {
 		stub_bosh(cpis => [qw(aws-east)], alias => 'prod-bosh');
 	};
 
+	# The named-CPI failure path now also returns msg=>undef --
+	# bullet rows showed which CPIs were missing, and the inline
+	# summary already said "Missing 2 of 3 required CPI(s)".
 	my $result = $env->_check_cpis;
 	is $result->{state}, 'error', 'missing cpis => error';
-	like $result->{msg}, qr/vsphere-prod/, 'error message lists the missing vsphere-prod';
-	like $result->{msg}, qr/azure-gov/,    'error message lists the missing azure-gov';
+	is $result->{msg}, undef,
+		'msg is undef -- inline summary already printed the count';
 };
 
 subtest '_check_cpis - mixed default + named: only named are checked' => sub {
-	plan tests => 1;
+	plan tests => 2;
 	my $env = make_env('chk-mixed');
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
-	local *Genesis::Env::needed_cpis    = sub { ('<default>', 'aws-east') };
+	local *Genesis::Env::cpi_az_map     = sub {
+		{ '<default>' => ['z1'], 'aws-east' => ['z2', 'z3'] }
+	};
 	local *Genesis::Env::bosh           = sub {
 		stub_bosh(cpis => [qw(aws-east)]);
 	};
 
-	is $env->_check_cpis->{state}, 'ok',
+	my $result = $env->_check_cpis;
+	is $result->{state}, 'ok',
 		'named cpi present + <default> sentinel always satisfied => ok';
+	is $result->{msg}, undef,
+		'msg is undef -- inline summary already printed';
 };
 
 # ======================================================================

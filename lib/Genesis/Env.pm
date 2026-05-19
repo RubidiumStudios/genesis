@@ -2167,8 +2167,30 @@ sub instance_group_azs {
 #   }
 sub needed_cpis {
 	my $self = shift;
+	return sort keys %{$self->cpi_az_map};
+}
+
+# }}}
+# cpi_az_map - hashref of CPI name => sorted list of AZs that use it {{{
+#
+# Joins instance_group_azs against the merged-manifest cloud-config
+# `azs:` section.  Same input semantics as needed_cpis (which now
+# delegates here): AZs with no `cpi:` field bucket under the
+# '<default>' sentinel; AZs referenced by instance_groups but
+# absent from the cloud-config bail.
+#
+# Returned shape:
+#   { '<default>'       => ['z1', 'z2'],
+#     'vsphere-east'    => ['z3'],
+#     'aws-gov'         => ['z4', 'z5'] }
+#
+# Empty hashref = "this env has no instance_groups, or none of them
+# declare any azs".  Useful for callers that need both the CPI list
+# and the AZ provenance (e.g. _check_cpis' per-CPI fan-out display).
+sub cpi_az_map {
+	my $self = shift;
 	my @azs = $self->instance_group_azs;
-	return () unless @azs;
+	return {} unless @azs;
 
 	my $cloud_azs = scalar $self->manifest_lookup('azs', []);
 	my %az_cpi = map  { $_->{name} => $_->{cpi} }
@@ -2193,11 +2215,14 @@ sub needed_cpis {
 		);
 	}
 
-	my %seen;
-	return sort grep { !$seen{$_}++ }
-	            map  { defined($_) && length($_) ? $_ : '<default>' }
-	            map  { $az_cpi{$_} }
-	            @azs;
+	my %map;
+	for my $az (@azs) {
+		my $cpi = $az_cpi{$az};
+		$cpi = '<default>' unless defined($cpi) && length($cpi);
+		push @{$map{$cpi}}, $az;
+	}
+	$map{$_} = [sort @{$map{$_}}] for keys %map;
+	return \%map;
 }
 
 # }}}
@@ -3826,9 +3851,14 @@ sub check {
 	# env's parent director.  Skipped for create-env (no parent).
 	if ((!exists($opts{check_cpis}) || $opts{check_cpis}) && !$self->use_create_env) {
 		my $cpis_check = $self->_check_cpis();
-		my $msg_type = $cpis_check->{state};
-		$msg_type = '%s' if $msg_type eq 'ok';
-		$self->notify($msg_type => $cpis_check->{msg});
+		# msg => undef signals "_check_cpis already printed its own
+		# summary inline"; only notify when the helper deferred output
+		# (skip cases like create-env / no instance_groups).
+		if (defined $cpis_check->{msg} && length $cpis_check->{msg}) {
+			my $msg_type = $cpis_check->{state};
+			$msg_type = '%s' if $msg_type eq 'ok';
+			$self->notify($msg_type => $cpis_check->{msg});
+		}
 		$ok = 0 unless $cpis_check->{state} =~ /^(ok|warning)$/;
 	}
 
@@ -6172,12 +6202,20 @@ sub _check_release_overrides {
 # expects (parallel to _check_stemcells).  state is one of 'ok' or
 # 'error'.
 #
+# Output style follows the cloud-config / stemcell convention:
+# `running CPI checks...` header, one indented bullet per (CPI, AZs)
+# pair, then a green/red summary line.  msg is undef when this
+# function has already printed its own output; the Env::check caller
+# skips its notify() in that case.  The "skipped" paths (create-env,
+# no instance_groups) still return msg => '...' so the caller emits
+# a single notify line explaining the skip.
+#
 # Logic:
 #   - create-env envs are skipped (no parent director to validate against).
-#   - Empty needed_cpis (no instance_groups declare azs) skips the check.
-#   - The '<default>' sentinel emitted by needed_cpis for azs without an
-#     explicit cpi: field is always satisfied -- every director has SOME
-#     default CPI by definition, so we don't shell out to verify it.
+#   - Empty cpi_az_map (no instance_groups declare azs) skips the check.
+#   - The '<default>' sentinel for azs without an explicit cpi: field
+#     is always satisfied -- every director has SOME default CPI by
+#     definition, so it always renders with a check.
 #   - For the remaining (named) cpis, $env->bosh->cpis is the
 #     authoritative answer to "what's actually on the director".
 sub _check_cpis {
@@ -6190,7 +6228,8 @@ sub _check_cpis {
 		};
 	}
 
-	my @needed = $self->needed_cpis;
+	my $az_map = $self->cpi_az_map;
+	my @needed = sort keys %$az_map;
 	if (!@needed) {
 		return {
 			state => 'ok',
@@ -6198,38 +6237,44 @@ sub _check_cpis {
 		};
 	}
 
+	$self->notify("running CPI checks...");
+
+	# Only consult the director when we have at least one named CPI to
+	# validate.  '<default>' is satisfied by definition -- no remote
+	# call needed when it's the only requirement.
 	my @real_needed = grep { $_ ne '<default>' } @needed;
-	if (!@real_needed) {
-		return {
-			state => 'ok',
-			msg   => 'all azs use the director default CPI',
-		};
+	my %has;
+	if (@real_needed) {
+		my @available = $self->bosh->cpis;
+		%has = map { $_ => 1 } @available;
 	}
 
-	$self->notify("running CPI checks...");
-	my @available = $self->bosh->cpis;
-	my %has = map { $_ => 1 } @available;
-	my @missing = grep { !$has{$_} } @real_needed;
+	my @missing;
+	for my $cpi (@needed) {
+		my $azs = $az_map->{$cpi};
+		my $present = ($cpi eq '<default>') || $has{$cpi};
+		push @missing, $cpi unless $present;
+		info(
+			"[[%s>>#%s{%s} (%s)",
+			bullet($present ? 'good' : 'bad', '', box => 1),
+			$present ? 'C' : 'R',
+			$cpi,
+			join(', ', map { "#c{$_}" } @$azs),
+		);
+	}
 
 	if (@missing) {
-		return {
-			state => 'error',
-			msg   => sprintf(
-				"CPI(s) needed by this env are missing on director #M{%s}:\n  - %s\n\nDirector has: %s",
-				($self->bosh->alias // '<unknown>'),
-				join("\n  - ", map { "#R{$_}" } @missing),
-				(@available ? join(', ', map {"#C{$_}"} @available) : '#K{<none>}'),
-			),
-		};
+		info(
+			"  #R{Missing %d of %d required CPI(s)}",
+			scalar(@missing), scalar(@needed),
+		);
+		return { state => 'error', msg => undef };
 	}
-
-	return {
-		state => 'ok',
-		msg   => sprintf(
-			"all needed CPI(s) present on director: %s",
-			join(', ', map { "#C{$_}" } @real_needed),
-		),
-	};
+	info(
+		"  #G{All %d required CPI(s) available.}",
+		scalar(@needed),
+	);
+	return { state => 'ok', msg => undef };
 }
 
 # }}}
