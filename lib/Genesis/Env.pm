@@ -6253,12 +6253,12 @@ sub _check_stemcells {
 			my $wants_latest = $stemcell_info->{latest};
 			my %details = $stemcell_info->{found}->%*;
 			info(
-				"[[%s>>Stemcell #C{%s} (%s/%s) %s%s",
+				"[[%s>>Stemcell #C{%s} (%s/%s) %s for CPI #C{%s}",
 				bullet('good', '', box => 1),
 				$stemcell_info->{alias}, $details{os},
 				$stemcell_info->{search_term},
 				$wants_latest ? "#G{will use v$details{version}}" : '#G{present}',
-				$self->cpi_enabled ? " for CPI #C{".$stemcell_info->{cpi}."}" : "",
+				$stemcell_info->{cpi},
 			);
 
 			# Warn if alternative stemcell is found
@@ -6275,12 +6275,12 @@ sub _check_stemcells {
 
 		# Deal with missing stemcells
 		info(
-			"[[%s>>Stemcell #C{%s} (%s/%s) %s%s#R{!}",
+			"[[%s>>Stemcell #C{%s} (%s/%s) %s#R{ for CPI }#ri{%s}#R{!}",
 			bullet('bad', '', box => 1),
 			$stemcell_info->{alias}, $stemcell_info->{os},
 			$stemcell_info->{search_term},
 			$stemcell_info->{latest} ? "#R{- no matching stemcells available}" : '#R{missing}',
-			$self->cpi_enabled ? "#R{ for CPI }#ri{".$stemcell_info->{cpi}."}":"",
+			$stemcell_info->{cpi},
 		);
 		push(@missing, $stemcell_info);
 	}
@@ -6450,6 +6450,18 @@ sub _advise_stemcell_updates {
 
 	my ($missing, $alt) = $fix_data->@{qw/missing alt/};
 	my @downloadable = grep {$_->{alt}} (@$missing, @$alt);
+
+	# Multi-CPI fan-out can produce the same (os, alt-version) download
+	# pair multiple times -- once per CPI a single stemcell entry is
+	# missing for.  Dedupe by os@alt-version so the operator sees one
+	# advice line per actual download, not one per (stemcell, CPI).
+	{
+		my %seen;
+		@downloadable = grep {
+			my $id = $_->{os} . '@' . ($_->{alt}{version} // '?');
+			!$seen{$id}++;
+		} @downloadable;
+	}
 
 	my $msg = "\n#Y{The following stemcells are available for download:}";
 	my @stemcell_ids = ();
@@ -6867,82 +6879,91 @@ sub _get_stemcell_status {
 		my ($os, $version) = split('@', $key, 2);
 		push @{$newest_by_os{$os}}, $key;
 	}
-	my $cpi = $self->cpi_enabled ? $self->cpi_name : '<default>';
+
+	# Multi-CPI fan-out: validate each requested stemcell against every
+	# CPI this env's workloads actually need (per instance_groups +
+	# cloud-config azs[].cpi).  Empty needed_cpis falls back to the
+	# legacy single-cpi behavior so envs without instance_groups (and
+	# create-env envs that skip the check earlier) keep working
+	# unchanged.
+	my @cpis = $self->needed_cpis;
+	@cpis = ($self->cpi_enabled ? $self->cpi_name : '<default>') unless @cpis;
+
 	my @results = ();
 
 	for my $stemcell_info (@$stemcells_to_check) {
-		my ($alias, $os, $version) = @$stemcell_info{qw/alias os version/};
-		$alias //= "stemcell-$os-$version";
-		my $newest = $newest_by_os{$os}->[0];
-		my $result = {alias => $alias, os => $os, search_term => $version, cpi => $cpi};
-		my ($wants_latest,$major_version) = $version =~ /^((?:(\d+)\.)?latest)$/;
+		for my $cpi (@cpis) {
+			my ($alias, $os, $version) = @$stemcell_info{qw/alias os version/};
+			$alias //= "stemcell-$os-$version";
+			my $newest = $newest_by_os{$os}->[0];
+			my $result = {alias => $alias, os => $os, search_term => $version, cpi => $cpi};
+			my ($wants_latest,$major_version) = $version =~ /^((?:(\d+)\.)?latest)$/;
 
-		# Finding "latest" stemcells is a bit tricky, because we need to
-		# ballance latest known version vs latest available version for
-		# the CPI.  We also support getting the latest minor version of a
-		# major version, so we need to check for that too.
+			# Finding "latest" stemcells is a bit tricky, because we need to
+			# ballance latest known version vs latest available version for
+			# the CPI.  We also support getting the latest minor version of a
+			# major version, so we need to check for that too.
 
-		# TODO:  Should latest check for latest available upstream, or just local (current behavior)?
-		if ($wants_latest) {
-			$result->{latest} = 1;
-			$result->{search_type} = 'latest';
-			my @targets = exists($newest_by_os{$os}) ? ($newest_by_os{$os}->@*) : ();
-			my $latest_major_version = @targets ? int($available{$targets[0]}{version}) : 0;
-			if (defined($major_version) && $major_version != $latest_major_version) {
-				$result->{search_type} = 'latest-minor';
-				@targets = (
-					grep {$major_version == int($available{$_}{version})}
-					@targets
-				);
-			}
-			# There exists one or more stemcells that match the desired latest version
-			if (@targets) {
-				# Check if the latest version is available for the desired CPI
-				my @cpi_targets = grep {
-					in_array($cpi, $available{$_}{cpis}->@*)
-				} @targets;
-				if (@cpi_targets) {
-					$result->{found} = $available{$cpi_targets[0]};
-				}
-				if (!@cpi_targets || $cpi_targets[0] ne $targets[0]) {
-					$result->{alt} = Service::BOSH::Stemcell->find(
-						$self->iaas, $available{$targets[0]}->@{qw/os version/},
-						scalar($self->lookup('bosh-configs.stemcells.type',undef))
+			# TODO:  Should latest check for latest available upstream, or just local (current behavior)?
+			if ($wants_latest) {
+				$result->{latest} = 1;
+				$result->{search_type} = 'latest';
+				my @targets = exists($newest_by_os{$os}) ? ($newest_by_os{$os}->@*) : ();
+				my $latest_major_version = @targets ? int($available{$targets[0]}{version}) : 0;
+				if (defined($major_version) && $major_version != $latest_major_version) {
+					$result->{search_type} = 'latest-minor';
+					@targets = (
+						grep {$major_version == int($available{$_}{version})}
+						@targets
 					);
-					$result->{alt_existing_cpis} = $available{$targets[0]}->{cpis};
 				}
-			} else {
-				# No stemcells available for the desired os.  $newest is
-				# undef (no entry in %newest_by_os for this OS), so there
-				# are no existing-CPI stemcells to report.
-				$result->{alt} = Service::BOSH::Stemcell->find(
-					$self->iaas,
-					$os,
-					$version
-				);
-				$result->{alt_existing_cpis} = defined($newest)
-					? $available{$newest}{cpis}
-					: [];
-			}
+				# There exists one or more stemcells that match the desired latest version
+				if (@targets) {
+					# Check if the latest version is available for the desired CPI
+					my @cpi_targets = grep {
+						in_array($cpi, $available{$_}{cpis}->@*)
+					} @targets;
+					if (@cpi_targets) {
+						$result->{found} = $available{$cpi_targets[0]};
+					}
+					if (!@cpi_targets || $cpi_targets[0] ne $targets[0]) {
+						$result->{alt} = Service::BOSH::Stemcell->find(
+							$self->iaas, $available{$targets[0]}->@{qw/os version/},
+							scalar($self->lookup('bosh-configs.stemcells.type',undef))
+						);
+						$result->{alt_existing_cpis} = $available{$targets[0]}->{cpis};
+					}
+				} else {
+					# No stemcells available for the desired os.  $newest is
+					# undef (no entry in %newest_by_os for this OS), so there
+					# are no existing-CPI stemcells to report.
+					$result->{alt} = Service::BOSH::Stemcell->find(
+						$self->iaas,
+						$os,
+						$version
+					);
+					$result->{alt_existing_cpis} = defined($newest)
+						? $available{$newest}{cpis}
+						: [];
+				}
 
-				# If using a non-default CPI, check if the latest version is available for it
-
-		} else {
-			$result->{search_type} = 'exact';
-			my $key = "$os\@$version";
-			my $match = $available{$key};
-			if (in_array($cpi, $match->{cpis}->@*)) {
-				$result->{found} = $match;
 			} else {
-				$result->{alt} = Service::BOSH::Stemcell->find(
-					$self->iaas,
-					$os,
-					$version
-				);
-				$result->{alt_existing_cpis} = ($available{$key}//{})->{cpis};
+				$result->{search_type} = 'exact';
+				my $key = "$os\@$version";
+				my $match = $available{$key};
+				if (in_array($cpi, $match->{cpis}->@*)) {
+					$result->{found} = $match;
+				} else {
+					$result->{alt} = Service::BOSH::Stemcell->find(
+						$self->iaas,
+						$os,
+						$version
+					);
+					$result->{alt_existing_cpis} = ($available{$key}//{})->{cpis};
+				}
 			}
+			push @results, $result;
 		}
-		push @results, $result;
 	}
 	$self->{__stemcell_status} = \@results;
 	return wantarray ? @results : \@results;

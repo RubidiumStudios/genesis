@@ -330,6 +330,81 @@ subtest '_check_cpis - mixed default + named: only named are checked' => sub {
 		'named cpi present + <default> sentinel always satisfied => ok';
 };
 
+# ======================================================================
+# _get_stemcell_status - multi-CPI fan-out
+# ======================================================================
+#
+# Asserts that the loop emits one result per (stemcell, cpi) tuple
+# when needed_cpis is multi-element, and a single result per stemcell
+# when needed_cpis is empty (legacy fallback).  Inner found/alt
+# branching is unchanged and is covered by integration paths.
+
+sub mock_bosh_for_stemcell_status {
+	my $self = bless { _stemcells => {}, _cpis => [] }, 'Test::Mock::Bosh2';
+	{
+		no strict 'refs';
+		no warnings 'redefine';
+		*{'Test::Mock::Bosh2::stemcells'} = sub { %{$_[0]->{_stemcells}} };
+		*{'Test::Mock::Bosh2::cpis'}      = sub { @{$_[0]->{_cpis}} };
+	}
+	$self;
+}
+
+subtest '_get_stemcell_status - fans out per cpi when needed_cpis is multi' => sub {
+	plan tests => 3;
+	my $env = make_env('sc-fanout');
+
+	no warnings qw(redefine once);
+	# Two cpis demanded by the env's instance-group AZs
+	local *Genesis::Env::needed_cpis = sub { ('cpi-a', 'cpi-b') };
+	local *Genesis::Env::partial_manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{ alias => 'sc1', os => 'ubuntu', version => '1.0' }]
+			if $key eq 'stemcells';
+		return $default;
+	};
+	local *Genesis::Env::bosh = sub { mock_bosh_for_stemcell_status() };
+	local *Genesis::Env::iaas = sub { 'mock-iaas' };
+	# Avoid the Stemcell->find subprocess in the no-targets path
+	require Service::BOSH::Stemcell;
+	local *Service::BOSH::Stemcell::find = sub {
+		{ os => 'ubuntu', version => '1.0-alt' };
+	};
+
+	my @results = $env->_get_stemcell_status(1);
+	is scalar @results, 2,
+		'1 stemcell entry x 2 cpis => 2 results';
+	is $results[0]{cpi}, 'cpi-a',
+		'first result tagged with first cpi';
+	is $results[1]{cpi}, 'cpi-b',
+		'second result tagged with second cpi';
+};
+
+subtest '_get_stemcell_status - falls back to single-cpi when needed_cpis is empty' => sub {
+	plan tests => 2;
+	my $env = make_env('sc-single');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::needed_cpis = sub { () };
+	local *Genesis::Env::cpi_enabled = sub { 0 };
+	local *Genesis::Env::partial_manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{ alias => 'sc1', os => 'ubuntu', version => '1.0' }]
+			if $key eq 'stemcells';
+		return $default;
+	};
+	local *Genesis::Env::bosh = sub { mock_bosh_for_stemcell_status() };
+	local *Genesis::Env::iaas = sub { 'mock-iaas' };
+	require Service::BOSH::Stemcell;
+	local *Service::BOSH::Stemcell::find = sub { { os => 'ubuntu', version => '1.0-alt' } };
+
+	my @results = $env->_get_stemcell_status(1);
+	is scalar @results, 1,
+		'1 stemcell, empty needed_cpis => 1 result (legacy single-cpi path)';
+	is $results[0]{cpi}, '<default>',
+		'fallback cpi is <default> when cpi_enabled is false';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet
