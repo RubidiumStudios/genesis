@@ -337,32 +337,67 @@ sub status {
 # }}}
 # configs - list all the configurations on the BOSH director {{{
 sub configs {
-	my ($self) = @_;
-	my $configs_raw = read_json_from(
-		$self->execute({interactive => 0}, 'configs', '-r=99999', '--json')
-	);
-	my %configs = ();
-	for my $config (@{$configs_raw->{Tables}[0]{Rows}}) {
-		my ($type, $name) = @{$config}{qw{type name}};
-		my ($id, $current) = $config->{id} =~ m/^(\d+)(\*)?$/;
-		$configs{$type}{$name} //= {'current' => undef, 'entries' => {}};
-		$configs{$type}{$name}{'current'} = $id if $current;
-		$configs{$type}{$name}{'entries'}{$id} = {
-			date => $config->{"created_at"},
-			team => $config->{"team"},
+	my ($self, %opts) = @_;
+	delete $self->{_configs_cache} if $opts{refresh};
+	if (!$self->{_configs_cache}) {
+		my $configs_raw = read_json_from(
+			$self->execute({interactive => 0}, 'configs', '-r=99999', '--json')
+		);
+		my %configs = ();
+		for my $config (@{$configs_raw->{Tables}[0]{Rows}}) {
+			my ($type, $name) = @{$config}{qw{type name}};
+			my ($id, $current) = $config->{id} =~ m/^(\d+)(\*)?$/;
+			$configs{$type}{$name} //= {'current' => undef, 'entries' => {}};
+			$configs{$type}{$name}{'current'} = $id if $current;
+			$configs{$type}{$name}{'entries'}{$id} = {
+				date => $config->{"created_at"},
+				team => $config->{"team"},
+			}
 		}
+		$self->{_configs_cache} = \%configs;
 	}
-	return wantarray ? %configs : \%configs;
+	return wantarray ? %{$self->{_configs_cache}} : $self->{_configs_cache};
 }
-# has_config - check if a configuration exists on the BOSH director {{{
+# has_config_of_type - cheap "any configs of $type uploaded?" check {{{
+#
+# Derived from the cached configs() listing -- no per-call BOSH
+# round-trip beyond the initial configs() fetch.  Use to short-
+# circuit code paths that only matter when at least one config of
+# $type exists (e.g. the CPI check on single-iaas envs where no
+# named cpi-configs are uploaded).
+sub has_config_of_type {
+	my ($self, $type) = @_;
+	return 0 unless defined $type;
+	my $configs = $self->configs;
+	return (exists($configs->{$type}) && scalar(keys %{$configs->{$type}})) ? 1 : 0;
+}
+# }}}
+# config_names_of - sorted list of CONFIG names for $type {{{
+#
+# Returns the BOSH `--name=` identifiers (cpi config names, with
+# 'default' as the literal default when uploaded without --name).
+# See memory:reference-bosh-cpi-terminology -- these are NOT the
+# cpi names appearing inside the cpis[] array of a cpi-config.
+sub config_names_of {
+	my ($self, $type) = @_;
+	return () unless defined $type;
+	my $configs = $self->configs;
+	return () unless exists($configs->{$type});
+	return sort keys %{$configs->{$type}};
+}
+# }}}
+# has_config - check if a specific (type, name) configuration is currently active {{{
+#
+# Derived from the cached configs() listing -- no per-call BOSH
+# round-trip.  Returns true when the (type, name) pair appears in
+# the listing AND has a current entry (mirrors the prior behavior
+# of requiring the id to end with `*`).
 sub has_config {
 	my ($self, $type, $name) = @_;
-	my $config_raw = read_json_from(
-		$self->execute({interactive => 0}, 'configs', '-r=1', "--type=$type","--name=$name",'--json')
-	);
-	return ($config_raw->{Tables}[0]{Rows}[0]{name}||'') eq $name
-	    && ($config_raw->{Tables}[0]{Rows}[0]{type}||'') eq $type
-	    && ($config_raw->{Tables}[0]{Rows}[0]{id}||'') =~ m/^\d+\*?$/;
+	return 0 unless defined $type && defined $name;
+	my $configs = $self->configs;
+	return 0 unless exists($configs->{$type}) && exists($configs->{$type}{$name});
+	return defined($configs->{$type}{$name}{current}) ? 1 : 0;
 }
 # }}}
 

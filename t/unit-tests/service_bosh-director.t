@@ -313,22 +313,20 @@ subtest 'bosh has_config - check config existence' => sub {
 
 	local $ENV{GENESIS_BOSH_COMMAND};
 
+	# has_config now derives from the cached configs() listing (FWT-983
+	# Step 1) -- no per-call (type, name) round-trip.  The mock therefore
+	# responds to the listing call `bosh configs -r=99999 --json` with
+	# all rows in one shot; `has_config` calls thereafter are hash
+	# lookups against that cache.
 	fake_bosh(<<'SCRIPT');
 #!/bin/bash
 case "$*" in
-	*"configs -r=1 --type=cloud --name=default --json"*)
+	*"configs -r=99999 --json"*)
 		cat <<'JSON'
-{"Tables":[{"Rows":[{"id":"1*","type":"cloud","name":"default","team":"","created_at":"2024-01-15T10:30:00Z"}]}]}
-JSON
-		;;
-	*"configs -r=1 --type=cloud --name=nonexistent --json"*)
-		cat <<'JSON'
-{"Tables":[{"Rows":[]}]}
-JSON
-		;;
-	*"configs -r=1 --type=runtime --name=default --json"*)
-		cat <<'JSON'
-{"Tables":[{"Rows":[{"id":"4*","type":"runtime","name":"default","team":"","created_at":"2024-01-18T11:00:00Z"}]}]}
+{"Tables":[{"Rows":[
+{"id":"1*","type":"cloud","name":"default","team":"","created_at":"2024-01-15T10:30:00Z"},
+{"id":"4*","type":"runtime","name":"default","team":"","created_at":"2024-01-18T11:00:00Z"}
+]}]}
 JSON
 		;;
 esac
