@@ -231,12 +231,28 @@ sub stub_bosh {
 	my %opts = @_;
 	my $cpis = $opts{cpis} // [];
 	my $alias = $opts{alias} // 'mock-bosh';
-	my $self = bless { _cpis => $cpis, _alias => $alias }, 'Test::Mock::Bosh';
+	# has_cpi_configs defaults to true when cpis are listed (so existing
+	# tests that don't pass this opt keep their old behavior).  Set
+	# `has_cpi_configs => 0` to simulate a director with zero cpi
+	# configs uploaded (single-iaas env case).
+	my $has_cpi_cfgs = exists $opts{has_cpi_configs}
+		? $opts{has_cpi_configs}
+		: (@$cpis ? 1 : 0);
+	my $self = bless {
+		_cpis => $cpis,
+		_alias => $alias,
+		_has_cpi_configs => $has_cpi_cfgs,
+	}, 'Test::Mock::Bosh';
 	{
 		no strict 'refs';
 		no warnings 'redefine';
 		*{'Test::Mock::Bosh::cpis'}  = sub { @{$_[0]->{_cpis}} };
 		*{'Test::Mock::Bosh::alias'} = sub { $_[0]->{_alias} };
+		*{'Test::Mock::Bosh::has_config_of_type'} = sub {
+			my ($self, $type) = @_;
+			return 0 unless $type eq 'cpi';
+			return $self->{_has_cpi_configs};
+		};
 	}
 	$self;
 }
@@ -357,6 +373,55 @@ subtest '_check_cpis - mixed default + named: only named are checked' => sub {
 		'named cpi present + <default> sentinel always satisfied => ok';
 	is $result->{msg}, undef,
 		'msg is undef -- inline summary already printed';
+};
+
+subtest '_check_cpis - no cpi configs uploaded short-circuits without listing fetch' => sub {
+	# When has_config_of_type('cpi') is false (no cpi
+	# configs uploaded on the director at all), _check_cpis must fail
+	# fast for envs that need named cpis -- without enumerating
+	# bosh->cpis (which would walk the merged cpis[] union pointlessly
+	# when we already know it's empty).  The bail message is also more
+	# actionable than the generic "missing CPI(s)" branch: operators
+	# get told the director has zero cpi configs, not that specific
+	# named cpis can't be found.
+	plan tests => 3;
+	my $env = make_env('chk-no-cpi-cfgs');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::cpi_az_map     = sub {
+		{ 'aws-east' => ['z1', 'z2'], 'vsphere-prod' => ['z3'] }
+	};
+	# Stub bosh: NO cpi configs uploaded.  If _check_cpis still calls
+	# ->cpis here, the cpis() sub dies and the assertions fail.
+	local *Genesis::Env::bosh = sub {
+		my $b = stub_bosh(
+			cpis            => [],
+			has_cpi_configs => 0,
+			alias           => 'prod-bosh',
+		);
+		# Replace cpis() with a guard so any attempt to enumerate the
+		# director-side cpi names (which would be wasted work) blows
+		# up loudly.
+		no strict 'refs';
+		no warnings 'redefine';
+		*{'Test::Mock::Bosh::cpis'} = sub {
+			die "bosh->cpis must NOT be called when has_config_of_type('cpi') is false";
+		};
+		$b;
+	};
+
+	my $result = $env->_check_cpis;
+	is $result->{state}, 'error',
+		'short-circuit yields state=error when no cpi configs are uploaded';
+	like $result->{msg} // '',
+		qr/no cpi configs uploaded|no cpi configurations.*uploaded/i,
+		'error message names the missing-cpi-configs condition explicitly';
+	# msg defined (not undef) on the short-circuit path -- this is a
+	# pre-fan-out failure; no inline bullets were printed, so the
+	# Env::check caller still needs the notify line.
+	ok defined($result->{msg}) && length($result->{msg}),
+		'msg is defined (caller will notify) -- not the post-fan-out undef path';
 };
 
 # ======================================================================

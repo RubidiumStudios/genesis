@@ -6246,12 +6246,32 @@ sub _check_cpis {
 		};
 	}
 
+	# Short-circuit: if the env requires at least one NAMED cpi (not
+	# just '<default>') but the director has zero cpi configs uploaded
+	# of any kind, fail fast with an actionable message.  No point
+	# walking ->cpis (which would merge an empty union) or fanning
+	# out per-cpi bullets that all read "missing" for the same
+	# underlying reason -- the operator needs to know the director
+	# has nothing uploaded, not that named cpis are individually
+	# absent.
+	my @real_needed = grep { $_ ne '<default>' } @needed;
+	if (@real_needed && !$self->bosh->has_config_of_type('cpi')) {
+		return {
+			state => 'error',
+			msg   => sprintf(
+				"No cpi configs uploaded on director #M{%s}, but this env requires named CPI(s): %s.\n".
+				"Upload a cpi-config (`#g{bosh update-config --type=cpi ...}`) declaring the required cpi entries, or remap the env's instance-group AZs to use the director default CPI.",
+				($self->bosh->alias // '<unknown>'),
+				join(', ', map { "#R{$_}" } @real_needed),
+			),
+		};
+	}
+
 	$self->notify("running CPI checks...");
 
 	# Only consult the director when we have at least one named CPI to
 	# validate.  '<default>' is satisfied by definition -- no remote
 	# call needed when it's the only requirement.
-	my @real_needed = grep { $_ ne '<default>' } @needed;
 	my %has;
 	if (@real_needed) {
 		my @available = $self->bosh->cpis;
