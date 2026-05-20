@@ -459,6 +459,69 @@ YAML
 		'director-cpi.name without cpis: is rejected (name has no meaning without upload)';
 };
 
+# ======================================================================
+# Env::download_configs - opts threading to the Director (FWT-983)
+# ======================================================================
+#
+# After Step 3, Director::download_configs accepts `optional => 1`
+# (and `refresh => 1`).  Env::download_configs is the orchestrator
+# that walks @specs and dispatches per-type; it needs to forward
+# those opts so env-level callers can use the new knobs without
+# reaching past Env into Director directly.
+#
+# Calling convention: trailing hashref of opts.
+#   $env->download_configs('cpi', { optional => 1 });
+#   $env->download_configs(qw/cloud runtime/, { refresh => 1 });
+
+subtest 'download_configs - threads trailing opts hashref to bosh->download_configs' => sub {
+	plan tests => 3;
+
+	local %ENV = %ENV;
+	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
+
+	my $env = make_simple_env('opts-threading');
+	$env->{__configs} = {};
+	$env->{__tmp} //= workdir();
+
+	# Stub bosh: capture the args to download_configs and return an
+	# empty @configs list (simulating optional=>1 + nothing uploaded).
+	my @captured;
+	my $stub_bosh = bless {
+		alias => 'stub',
+		_dl   => sub {
+			shift;  # $self
+			push @captured, [@_];
+			return ();   # empty list -- caller sees no @downloaded
+		},
+	}, 'Test::Mock::Bosh::Env';
+	{
+		no strict 'refs';
+		no warnings 'redefine';
+		*{'Test::Mock::Bosh::Env::download_configs'} = sub {
+			my ($self, @args) = @_;
+			$self->{_dl}->(undef, @args);
+		};
+		# alias() is referenced for error formatting; provide it.
+		*{'Test::Mock::Bosh::Env::alias'} = sub { $_[0]->{alias} };
+	}
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::with_bosh = sub { $_[0] };
+	local *Genesis::Env::bosh      = sub { $stub_bosh };
+
+	$env->download_configs('cpi', { optional => 1 });
+
+	is scalar(@captured), 1,
+		'one bosh->download_configs call per spec';
+	# Args shape: ($path, $type, $name, %opts)
+	my @args = @{$captured[0]};
+	is $args[1], 'cpi', 'type is forwarded';
+	# %opts at the end -- pull pairs from index 3 onwards.
+	my %fwd = @args[3..$#args];
+	is $fwd{optional}, 1,
+		'optional => 1 is threaded through to the bosh->download_configs call';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

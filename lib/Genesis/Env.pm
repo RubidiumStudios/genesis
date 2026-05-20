@@ -3212,7 +3212,12 @@ sub download_required_configs {
 # }}}
 # download_configs - download the specified BOSH configs from the director {{{
 sub download_configs {
-	my ($self, @configs) = @_;
+	my ($self, @args) = @_;
+	# Trailing hashref carries Director::download_configs %opts
+	# (optional, refresh, ...) so env-level callers can drive the
+	# Step-3 knobs without reaching past Env into the Director.
+	my $opts = (@args && ref($args[-1]) eq 'HASH') ? pop @args : {};
+	my @configs = @args;
 	@configs = qw/cloud runtime/ unless @configs;
 
 	info "Downloading configs from #M{%s} BOSH director...", $self->bosh->{alias};
@@ -3223,7 +3228,7 @@ sub download_configs {
 		$name ||= '*';
 		my $label = $name eq "*" ? "all $type configs" : $name eq "default" ? "$type config" : "$type config '$name'";
 		info {pending => 1}, bullet('empty',$label."...", box => 1);
-		my @downloaded = eval {$self->with_bosh->bosh->download_configs($file,$type,$name)};
+		my @downloaded = eval {$self->with_bosh->bosh->download_configs($file,$type,$name,%$opts)};
 		if ($@) {
 			$err = $@;
 			info(
@@ -3234,7 +3239,7 @@ sub download_configs {
 			);
 		} else {
 			info(
-				"[2K\r".bullet(
+				"\e[2K\r".bullet(
 					'good',$label.($name eq '*' ? ':' : ''),
 					box => 1
 				)
@@ -3281,6 +3286,31 @@ sub has_config {
 
 # }}}
 # config_file - retrieve the path of the local file (provided or downloaded) being used for the named BOSH config {{{
+#
+# FIXME: contract is fragile.  Returns the empty string when
+# (a) no prior caller registered the config via use_config (typically
+# via download_configs), AND (b) no enclosing genesis -> shell call
+# pre-set GENESIS_<TYPE>_CONFIG[_NAME] in the env.  Callers that
+# treat an empty string as "no config" silently degrade; callers that
+# feed it into spruce-merge (Env::_cc_yaml_files) explode at merge
+# time with a confusing "file not found" error rather than a clear
+# "you forgot to download_configs".
+#
+# Two future paths if/when this bites:
+#   1. Bug-gate: bail loudly when neither overlay, env var, NOR
+#      $self->bosh->config_file($type, $name) (Director cache) has
+#      anything.  Requires adding a Director::config_file getter --
+#      see plans/fwt-983-director-config-cache-refactor.md (AC 6).
+#   2. Auto-fallback: silently consult the Director cache as a third
+#      lookup layer.  Lower friction but hides the missing-download
+#      bug class entirely.
+#
+# Neither is needed for the current call flows -- Env::download_configs
+# always calls use_config on success, so every code path that reaches
+# config_file has populated the overlay first.  Documented here so
+# the next caller that hits this footgun knows where to look.
+# has_config and config_contents delegate here and inherit the same
+# contract.
 sub config_file {
 	my ($self, $type, $name) = @_;
 	my $label = $type ||= 'cloud';
