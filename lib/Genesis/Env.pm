@@ -6074,7 +6074,16 @@ sub _check_release_url_sha1 {
 	$self->notify("checking release URLs for SHA1 checksums...");
 
 	my @missing_sha1 = ();
-	my $releases = $self->manifest_provider->deployment(subset=>'releases')->data;
+	# The releases: section is invariant across manifest variants
+	# (vault/credhub transforms don't touch URLs or SHAs), so reuse
+	# any cached richer variant instead of forcing the entombment
+	# dance for what's effectively a flat-data slice.  Falls back to
+	# unredacted -- the cheapest fresh render -- when nothing's
+	# cached.
+	my $releases = $self->manifest_provider
+		->cached_or_build(qw/unredacted deployment/)
+		->subset_of('releases')
+		->data;
 
 	if (ref($releases) eq 'ARRAY' && scalar(@$releases)) {
 		for my $release (@$releases) {

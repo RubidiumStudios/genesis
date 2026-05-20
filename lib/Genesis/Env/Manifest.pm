@@ -115,6 +115,27 @@ sub reset {
 
 sub is_subset  {defined($_[0]->{subset})};
 
+# subset_of - return a sibling subset manifest of the same parent type.
+#
+# Equivalent to asking the provider for `<type>(subset => $subset)`,
+# but written as a method on the parent so callers can chain:
+#
+#   $mfp->cached_or_build(qw/unredacted deployment/)
+#       ->subset_of('releases')
+#       ->data;
+#
+# type() derives from the class name only, so calling this on a
+# manifest that is itself a subset always rebases off the
+# unsubsetted parent type -- never nests subsets.  The provider's
+# `${type}_${subset}` cache key means a subset already built is
+# returned directly.
+sub subset_of {
+	my ($self, $subset) = @_;
+	bug("subset_of requires a subset name") unless defined $subset && length $subset;
+	my $type = $self->type;
+	return $self->builder->$type(subset => $subset);
+}
+
 sub notify {
 	$_[0]->{notice} = $_[1]//sprintf(
 		"generating #c{%s} manifest...",

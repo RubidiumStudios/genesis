@@ -104,6 +104,42 @@ sub base_manifest {
 
 	$self->$lookup_type(@args);
 }
+
+# }}}
+# cached_or_build - reuse any already-built variant in the listed types;
+# otherwise build the first one.  Always returns an unsubsetted
+# manifest; chain ->subset_of('foo') for a slice.
+#
+# Use when the data you need is invariant across manifest variants
+# (e.g. releases:, stemcells:) so you can skip rendering a richer
+# variant just to read a section identical in the cheaper one.  The
+# sentinel 'deployment' is rewritten to $env->deployment_manifest_type
+# so callers don't have to repeat that resolution.
+#
+#   $mfp->cached_or_build(qw/unredacted deployment/);
+#       # if either is cached, return it; else build unredacted.
+#
+# A variant is "cached" when its in-memory Manifest object has data
+# populated (built this run) or a file populated (loaded at
+# construction time from on-disk cache).
+sub cached_or_build {
+	my ($self, @types) = @_;
+	bug("cached_or_build: at least one manifest type required") unless @types;
+
+	# Resolve 'deployment' sentinel + dedup (a non-vaultified env's
+	# deployment_manifest_type can equal 'unredacted').
+	my %seen;
+	@types = grep { !$seen{$_}++ }
+	         map  { $_ eq 'deployment' ? $self->env->deployment_manifest_type : $_ }
+	         @types;
+
+	for my $type (@types) {
+		my $m = $self->{manifests}{$type};
+		return $m if $m && ($m->has_data || $m->has_file);
+	}
+	my $first = $types[0];
+	return $self->$first;
+}
 # }}}
 # reset - reset all stored and cached manifests {{{
 sub reset {
