@@ -169,27 +169,38 @@ subtest 'required_configs - returns empty list for create-env environments' => s
 	is(scalar(@required), 0, 'required_configs(blueprint) returns empty list for create-env');
 };
 
-subtest 'required_configs - blueprint hook requires cloud (default kit behaviour)' => sub {
+subtest 'required_configs - blueprint hook requires cloud and cpi' => sub {
+	# Contract changed in FWT-983 Step 6: Env appends cpi to
+	# manifest-track hook results so cpi configs are surfaced in
+	# the upfront "Downloading configs from..." block.  Kit-level
+	# required_configs still returns ('cloud') only -- the cpi
+	# append is an Env-layer concern.
 	plan tests => 2;
 
 	my $env = make_simple_env('req-blueprint');
 
 	my @required = $env->required_configs('blueprint');
-	is(scalar(@required), 1, 'required_configs(blueprint) returns 1 config');
-	is($required[0], 'cloud', 'required_configs(blueprint) requires cloud config');
+	is_deeply [sort @required], [qw(cloud cpi)],
+		'required_configs(blueprint) returns cloud + cpi (Step-6 append)';
+	ok((grep { $_ eq 'cloud' } @required),
+		'cloud is still required (kit-level)');
 };
 
-subtest 'required_configs - manifest hook requires cloud (default kit behaviour)' => sub {
+subtest 'required_configs - manifest hook requires cloud and cpi' => sub {
+	# Same contract change as blueprint subtest above.
 	plan tests => 2;
 
 	my $env = make_simple_env('req-manifest');
 
 	my @required = $env->required_configs('manifest');
-	is(scalar(@required), 1, 'required_configs(manifest) returns 1 config');
-	is($required[0], 'cloud', 'required_configs(manifest) requires cloud config');
+	is_deeply [sort @required], [qw(cloud cpi)],
+		'required_configs(manifest) returns cloud + cpi (Step-6 append)';
+	ok((grep { $_ eq 'cloud' } @required),
+		'cloud is still required (kit-level)');
 };
 
-subtest 'required_configs - check hook requires cloud unless GENESIS_CONFIG_NO_CHECK' => sub {
+subtest 'required_configs - check hook requires cloud and cpi unless GENESIS_CONFIG_NO_CHECK' => sub {
+	# Same contract change as blueprint/manifest subtests.
 	plan tests => 2;
 
 	local %ENV = %ENV;
@@ -198,8 +209,10 @@ subtest 'required_configs - check hook requires cloud unless GENESIS_CONFIG_NO_C
 	my $env = make_simple_env('req-check');
 
 	my @required = $env->required_configs('check');
-	is(scalar(@required), 1, 'required_configs(check) returns 1 config by default');
-	is($required[0], 'cloud', 'required_configs(check) requires cloud');
+	is_deeply [sort @required], [qw(cloud cpi)],
+		'required_configs(check) returns cloud + cpi by default (Step-6 append)';
+	ok((grep { $_ eq 'cloud' } @required),
+		'cloud is still required (kit-level)');
 };
 
 subtest 'required_configs - check hook requires nothing when GENESIS_CONFIG_NO_CHECK set' => sub {
@@ -213,15 +226,18 @@ subtest 'required_configs - check hook requires nothing when GENESIS_CONFIG_NO_C
 	is(scalar(@required), 0, 'required_configs(check) returns empty when GENESIS_CONFIG_NO_CHECK set');
 };
 
-subtest 'required_configs - explicit blueprint hook requires cloud when called directly' => sub {
+subtest 'required_configs - explicit blueprint hook requires cloud and cpi when called directly' => sub {
+	# Same FWT-983 Step-6 contract change as the other manifest-
+	# track subtests: cpi joins cloud in the Env-layer result.
 	plan tests => 2;
 
 	my $env = make_simple_env('req-direct');
 
-	# Calling blueprint directly (without deploy expansion) requires cloud
 	my @required = $env->required_configs('blueprint');
-	is(scalar(@required), 1, 'required_configs(blueprint) called directly returns 1 config');
-	is($required[0], 'cloud', 'required_configs(blueprint) called directly requires cloud');
+	is_deeply [sort @required], [qw(cloud cpi)],
+		'required_configs(blueprint) called directly returns cloud + cpi (Step-6 append)';
+	ok((grep { $_ eq 'cloud' } @required),
+		'cloud is still required (kit-level)');
 };
 
 # ======================================================================
@@ -292,7 +308,9 @@ subtest 'has_config - with named config (type@name)' => sub {
 # ======================================================================
 
 subtest 'missing_required_configs - all required when none registered' => sub {
-	plan tests => 2;
+	# FWT-983 Step 6: required_configs(blueprint) now returns both
+	# cloud AND cpi.  With nothing registered, both are missing.
+	plan tests => 1;
 
 	local %ENV = %ENV;
 	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
@@ -301,23 +319,26 @@ subtest 'missing_required_configs - all required when none registered' => sub {
 	$env->{__configs} = {};
 
 	my @missing = $env->missing_required_configs('blueprint');
-	is(scalar(@missing), 1, 'missing_required_configs(blueprint) returns 1 when nothing registered');
-	is($missing[0], 'cloud', 'missing_required_configs(blueprint) identifies "cloud" as missing');
+	is_deeply [sort @missing], [qw(cloud cpi)],
+		'missing_required_configs(blueprint) returns cloud + cpi when nothing registered';
 };
 
-subtest 'missing_required_configs - empty when all required are present' => sub {
+subtest 'missing_required_configs - cpi still missing when only cloud registered' => sub {
+	# FWT-983 Step 6: cpi joined the required set.  Registering only
+	# cloud leaves cpi as the lone missing config.
 	plan tests => 1;
 
 	local %ENV = %ENV;
 	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
 
-	my $env = make_simple_env('missing-none');
+	my $env = make_simple_env('missing-cpi-only');
 	$env->{__configs} = {};
 
 	$env->use_config('/tmp/cloud.yml', 'cloud');
 
 	my @missing = $env->missing_required_configs('blueprint');
-	is(scalar(@missing), 0, 'missing_required_configs(blueprint) returns empty when cloud is registered');
+	is_deeply [@missing], ['cpi'],
+		'cpi remains in missing list until use_config(cpi) is also called';
 };
 
 subtest 'missing_required_configs - empty for create-env environments' => sub {
@@ -347,6 +368,8 @@ subtest 'has_required_configs - false when required configs absent' => sub {
 };
 
 subtest 'has_required_configs - true when all required configs present' => sub {
+	# FWT-983 Step 6: cpi joined the required set.  has_required_configs
+	# now only returns true once BOTH cloud and cpi are registered.
 	plan tests => 1;
 
 	local %ENV = %ENV;
@@ -356,9 +379,10 @@ subtest 'has_required_configs - true when all required configs present' => sub {
 	$env->{__configs} = {};
 
 	$env->use_config('/tmp/cloud.yml', 'cloud');
+	$env->use_config('/tmp/cpi.yml',   'cpi');
 
 	ok($env->has_required_configs('blueprint'),
-		'has_required_configs(blueprint) is true when cloud config is registered');
+		'has_required_configs(blueprint) is true when both cloud and cpi are registered');
 };
 
 subtest 'has_required_configs - always true for create-env environments' => sub {
@@ -460,6 +484,73 @@ YAML
 };
 
 # ======================================================================
+# Env::required_configs - cpi added for check/manifest/blueprint/deploy
+# (FWT-983 Step 6)
+# ======================================================================
+#
+# When the env will exercise check, manifest, blueprint, or deploy
+# hooks, cpi configs should be in the upfront required set so the
+# "Downloading configs from..." block surfaces them alongside cloud
+# and runtime.  download_configs treats cpi as always-optional so
+# single-iaas envs (no cpi configs uploaded) gracefully no-op.
+
+subtest 'required_configs - includes cpi for check hook' => sub {
+	plan tests => 1;
+	my $env = make_simple_env('rc-check');
+	my @configs = $env->required_configs('check');
+	ok((grep { $_ eq 'cpi' } @configs),
+		'cpi appears in required_configs for the check hook');
+};
+
+subtest 'required_configs - includes cpi for manifest hook' => sub {
+	plan tests => 1;
+	my $env = make_simple_env('rc-manifest');
+	my @configs = $env->required_configs('manifest');
+	ok((grep { $_ eq 'cpi' } @configs),
+		'cpi appears in required_configs for the manifest hook');
+};
+
+subtest 'required_configs - includes cpi for blueprint hook' => sub {
+	plan tests => 1;
+	my $env = make_simple_env('rc-blueprint');
+	my @configs = $env->required_configs('blueprint');
+	ok((grep { $_ eq 'cpi' } @configs),
+		'cpi appears in required_configs for the blueprint hook');
+};
+
+subtest 'required_configs - includes cpi for deploy expansion' => sub {
+	plan tests => 1;
+	# 'deploy' expands to blueprint+check+manifest (+ pre/post if kit
+	# has them).  cpi should be in the union.
+	my $env = make_simple_env('rc-deploy');
+	my @configs = $env->required_configs('deploy');
+	ok((grep { $_ eq 'cpi' } @configs),
+		'cpi appears in required_configs for the deploy hook expansion');
+};
+
+subtest 'required_configs - cloud-config-only hook does NOT include cpi' => sub {
+	plan tests => 1;
+	# The cloud-config hook is the kit-side compute of the cloud
+	# config itself.  It runs WITHOUT any uploaded configs and
+	# returning cpi here would create a chicken-and-egg loop.
+	my $env = make_simple_env('rc-cc-only');
+	my @configs = $env->required_configs('cloud-config');
+	ok(!(grep { $_ eq 'cpi' } @configs),
+		'cpi is NOT added for the cloud-config-only path');
+};
+
+subtest 'required_configs - create-env returns empty regardless' => sub {
+	plan tests => 1;
+	# create-env has no parent director, so no configs at all (kit-
+	# specified or otherwise).  The cpi append must not contaminate
+	# this path.
+	my $env = make_create_env('rc-create');
+	my @configs = $env->required_configs('check');
+	is_deeply [@configs], [],
+		'create-env returns empty list -- cpi is not appended';
+};
+
+# ======================================================================
 # Env::download_configs - opts threading to the Director (FWT-983)
 # ======================================================================
 #
@@ -473,6 +564,99 @@ YAML
 #   $env->download_configs('cpi', { optional => 1 });
 #   $env->download_configs(qw/cloud runtime/, { refresh => 1 });
 
+subtest 'download_configs - silently skips cpi spec when no cpi configs uploaded' => sub {
+	# FWT-983 Step 6: cpi joined the required-configs set, but
+	# single-iaas envs have no cpi configs uploaded.  Rather than
+	# emitting an empty success bullet ("(none uploaded)") or
+	# walking the download path only to no-op, Env consults the
+	# Director's cached listing (has_config_of_type from Step 1)
+	# and silently drops the cpi spec when there's nothing to
+	# fetch.  No UI noise, no bogus use_config registration.
+	plan tests => 3;
+
+	local %ENV = %ENV;
+	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
+
+	my $env = make_simple_env('cpi-silent-skip');
+	$env->{__configs} = {};
+	$env->{__tmp} //= workdir();
+
+	my @captured;
+	my $stub_bosh = bless { alias => 'stub' }, 'Test::Mock::Bosh::CpiSkip';
+	{
+		no strict 'refs';
+		no warnings 'redefine';
+		*{'Test::Mock::Bosh::CpiSkip::has_config_of_type'} = sub {
+			my ($self, $type) = @_;
+			return 0;  # nothing uploaded
+		};
+		*{'Test::Mock::Bosh::CpiSkip::download_configs'} = sub {
+			my ($self, @args) = @_;
+			push @captured, [@args];
+			return ();
+		};
+		*{'Test::Mock::Bosh::CpiSkip::alias'} = sub { $_[0]->{alias} };
+	}
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::with_bosh = sub { $_[0] };
+	local *Genesis::Env::bosh      = sub { $stub_bosh };
+
+	$env->download_configs('cpi');
+
+	is scalar(@captured), 0,
+		'bosh->download_configs is NOT called when has_config_of_type(cpi) is false';
+	ok(!$env->has_config('cpi'),
+		'has_config(cpi) remains false -- no use_config was registered');
+	ok(!exists($env->{__configs}{'cpi'}),
+		'overlay carries no entry for cpi (skip kept it clean)');
+};
+
+subtest 'download_configs - cpi spec proceeds (optional=>1) when configs are uploaded' => sub {
+	# Companion to the silent-skip subtest above: when the director
+	# DOES have cpi configs uploaded, the cpi spec flows through
+	# normally with optional=>1 set defensively (covers the race
+	# where the listing is fresh but the content fetch finds zero
+	# entries between calls).
+	plan tests => 2;
+
+	local %ENV = %ENV;
+	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
+
+	my $env = make_simple_env('cpi-proceeds');
+	$env->{__configs} = {};
+	$env->{__tmp} //= workdir();
+
+	my @captured;
+	my $stub_bosh = bless { alias => 'stub' }, 'Test::Mock::Bosh::CpiProceed';
+	{
+		no strict 'refs';
+		no warnings 'redefine';
+		*{'Test::Mock::Bosh::CpiProceed::has_config_of_type'} = sub {
+			my ($self, $type) = @_;
+			return $type eq 'cpi' ? 1 : 0;
+		};
+		*{'Test::Mock::Bosh::CpiProceed::download_configs'} = sub {
+			my ($self, @args) = @_;
+			push @captured, [@args];
+			return ({ type => 'cpi', name => 'aws-bundle', label => "cpi config 'aws-bundle'" });
+		};
+		*{'Test::Mock::Bosh::CpiProceed::alias'} = sub { $_[0]->{alias} };
+	}
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::with_bosh = sub { $_[0] };
+	local *Genesis::Env::bosh      = sub { $stub_bosh };
+
+	$env->download_configs('cpi');
+
+	is scalar(@captured), 1,
+		'bosh->download_configs IS called when cpi configs are uploaded';
+	my %fwd = @{$captured[0]}[3..$#{$captured[0]}];
+	is $fwd{optional}, 1,
+		'optional=>1 is forced for cpi as defensive insurance';
+};
+
 subtest 'download_configs - threads trailing opts hashref to bosh->download_configs' => sub {
 	plan tests => 3;
 
@@ -485,6 +669,9 @@ subtest 'download_configs - threads trailing opts hashref to bosh->download_conf
 
 	# Stub bosh: capture the args to download_configs and return an
 	# empty @configs list (simulating optional=>1 + nothing uploaded).
+	# has_config_of_type returns true so the cpi pre-filter
+	# (introduced for Step 6) doesn't drop the spec before we can
+	# observe the call.
 	my @captured;
 	my $stub_bosh = bless {
 		alias => 'stub',
@@ -501,7 +688,7 @@ subtest 'download_configs - threads trailing opts hashref to bosh->download_conf
 			my ($self, @args) = @_;
 			$self->{_dl}->(undef, @args);
 		};
-		# alias() is referenced for error formatting; provide it.
+		*{'Test::Mock::Bosh::Env::has_config_of_type'} = sub { 1 };
 		*{'Test::Mock::Bosh::Env::alias'} = sub { $_[0]->{alias} };
 	}
 

@@ -3174,14 +3174,37 @@ sub configs {
 sub required_configs {
 	my ($self, @hooks) = @_;
 	return () if $self->use_create_env;
-	my @deploy_hooks = $self->_memoize('__deploy_hooks', sub {
+	# _memoize stores the initializer's scalar return value.  The
+	# initializer must return an explicit arrayref -- a trailing
+	# `push @h, ...` returns the count in scalar context, which
+	# would silently shrink @deploy_hooks to a one-element list of
+	# an integer (pre-existing bug).
+	my @deploy_hooks = @{$self->_memoize('__deploy_hooks', sub {
 		my $self = shift;
 		my @h = qw/blueprint check manifest/;
 		push @h, grep {$self->kit->has_hook($_)} qw(pre-deploy post-deploy);
-	});
+		return \@h;
+	})};
 	my @expanded_hooks;
 	push(@expanded_hooks, ($_ eq 'deploy' ? @deploy_hooks : $_)) for (@hooks);
-	return $self->kit->required_configs(uniq(@expanded_hooks));
+	my @configs = $self->kit->required_configs(uniq(@expanded_hooks));
+
+	# Surface cpi configs in the upfront "Downloading configs from..."
+	# block for any hook that builds toward a deployable manifest.
+	# download_configs treats cpi as always-optional, so single-iaas
+	# envs (no cpi configs uploaded) gracefully no-op rather than
+	# bailing.
+	#
+	# Gate on `@configs && ...` so we don't append cpi to an empty
+	# return -- empty here means the kit signalled "this hook is
+	# being skipped" (e.g. GENESIS_CONFIG_NO_CHECK suppresses the
+	# check hook; cloud-config hook explicitly returns nothing).
+	# Adding cpi in those cases would override the kit's skip signal.
+	my %manifest_track = map { $_ => 1 } qw(blueprint check manifest pre-deploy post-deploy);
+	if (@configs && grep { $manifest_track{$_} } @expanded_hooks) {
+		push @configs, 'cpi' unless grep { /^cpi(\@|$)/ } @configs;
+	}
+	return @configs;
 }
 
 # }}}
@@ -3220,6 +3243,21 @@ sub download_configs {
 	my @configs = @args;
 	@configs = qw/cloud runtime/ unless @configs;
 
+	# Connect once so subsequent has_config_of_type checks read the
+	# cached listing (free) rather than re-issuing `bosh configs`.
+	my $bosh = $self->with_bosh->bosh;
+
+	# Pre-filter: drop cpi specs when the director has nothing
+	# uploaded under the cpi type.  Single-iaas envs hit this --
+	# they need no named cpi configs, and silently skipping the
+	# spec avoids a spurious "(none uploaded)" bullet in the
+	# "Downloading configs from..." block.
+	@configs = grep {
+		my ($t) = split('@', $_);
+		!($t eq 'cpi' && !$bosh->has_config_of_type('cpi'));
+	} @configs;
+	return $self unless @configs;
+
 	info "Downloading configs from #M{%s} BOSH director...", $self->bosh->{alias};
 	my $err;
 	for (@configs) {
@@ -3228,7 +3266,13 @@ sub download_configs {
 		$name ||= '*';
 		my $label = $name eq "*" ? "all $type configs" : $name eq "default" ? "$type config" : "$type config '$name'";
 		info {pending => 1}, bullet('empty',$label."...", box => 1);
-		my @downloaded = eval {$self->with_bosh->bosh->download_configs($file,$type,$name,%$opts)};
+		# cpi configs are inherently optional: single-iaas envs run
+		# entirely against the director's default CPI and upload no
+		# named cpi configs.  Force optional=>1 regardless of caller
+		# opts so the call returns an empty list instead of bailing
+		# when nothing is uploaded.
+		my %call_opts = (%$opts, ($type eq 'cpi' ? (optional => 1) : ()));
+		my @downloaded = eval {$self->with_bosh->bosh->download_configs($file,$type,$name,%call_opts)};
 		if ($@) {
 			$err = $@;
 			info(
