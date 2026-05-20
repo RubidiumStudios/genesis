@@ -822,7 +822,7 @@ The configuration name.
 
 =item label
 
-A human-readable label (e.g. C<'base cloud config'> or C<"cloud config 'extra'">).
+A human-readable label (e.g. C<'default cloud config'> or C<"cloud config 'extra'">).
 
 =back
 
@@ -858,7 +858,7 @@ when the downloaded file is empty. C<%s> is the director alias.
 
 Dies with C<"No $_->{label} contents."> when a fetched configuration entry
 has empty content. C<$_-E<gt>{label}> is the human-readable label of the
-config entry (e.g. C<"base cloud config">).
+config entry (e.g. C<"default cloud config">).
 
 Dies (via C<bug()>) with C<"BOSH returned multiple entries for $_-E<gt>{label} - Genesis doesn't know how to process this">
 when the BOSH C<config> command returns more than one table row for a single
@@ -877,7 +877,7 @@ B<Examples:>
   for my $e (@entries) {
     print "Downloaded: $e->{label}\n";
   }
-  # Returns: ({ type => 'cloud', name => 'default', label => 'base cloud config' }, ...)
+  # Returns: ({ type => 'cloud', name => 'default', label => 'default cloud config' }, ...)
 
 =head2 upload_config
 

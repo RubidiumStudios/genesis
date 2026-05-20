@@ -353,6 +353,325 @@ subtest 'get_config - refresh=>1 invalidates the per-pair cache' => sub {
 		'refresh=>1 on get_config forces one re-fetch; subsequent calls reuse';
 };
 
+# ======================================================================
+# download_configs() - cache-aware bulk fetch + per-call file copy
+# ======================================================================
+#
+# Contract (Step 3): the existing download_configs($path, $type, $name,
+# %opts) API stays source-compatible.  Internals are rewired to use
+# the cached listing (Step 1) for name resolution and the memoized
+# get_config (Step 2) for content.  The assembled output is cached
+# in a director-scoped workdir path; subsequent calls for the same
+# (type, name) reuse the cache and just copy the file into the
+# caller-supplied $path.
+#
+# Step 3 also introduces `optional => 1`: when no configs of the
+# requested type exist, return an empty list instead of bailing.
+# Required for cpi-config prefetch on single-iaas envs where no
+# named cpi-configs are uploaded.
+
+subtest 'download_configs - repeat call reuses cached content, copies to new path' => sub {
+	plan tests => 5;
+	my $d = make_director();
+	my %execute_calls;  # by first arg of execute()
+	# Mutated between the first and second call so we can prove the
+	# second result came from the cache, not from a fresh fetch.  A
+	# correct cache returns 'body-A' from the second call too; a
+	# broken cache (re-fetch) would return 'body-B'.
+	my $body = 'body-A';
+
+	no warnings qw(redefine once);
+	local *Service::BOSH::Director::execute = sub {
+		shift;  # $self
+		shift if ref($_[0]) eq 'HASH';  # opts
+		my $first_arg = $_[0] // '';
+		$execute_calls{$first_arg}++;
+		if ($first_arg eq 'configs') {
+			return configs_fixture_json();
+		}
+		return qq({"Tables":[{"Rows":[{"content":"---\\n$body\\n"}]}]});
+	};
+
+	my $first_path  = workdir().'/dl-first.yml';
+	my $second_path = workdir().'/dl-second.yml';
+
+	my @first = $d->download_configs($first_path,  'cpi', 'aws-bundle');
+	# Mutate the source-of-truth.  If the cache is honoured, the
+	# second call returns the original body.  If it's broken and
+	# re-fetches, the file will contain the new body instead.
+	$body = 'body-B';
+	my @second = $d->download_configs($second_path, 'cpi', 'aws-bundle');
+
+	ok -s $first_path,  'first call writes the requested file';
+	ok -s $second_path, 'second call writes the new requested file';
+	is $execute_calls{config}, 1,
+		'content fetched once across both calls (memoized via get_config)';
+	is_deeply [sort map { $_->{name} } @second], [sort map { $_->{name} } @first],
+		'second call returns the same @configs info shape';
+
+	my $c2 = do { local $/; open my $fh, '<', $second_path; <$fh> };
+	like $c2, qr/body-A/,
+		'second file carries the ORIGINAL body (cache hit), not the post-mutation body';
+};
+
+subtest 'download_configs - optional=>1 returns empty list when no configs of $type exist' => sub {
+	plan tests => 3;
+	my $d = make_director();
+
+	no warnings qw(redefine once);
+	local *Service::BOSH::Director::execute = sub {
+		shift; shift if ref($_[0]) eq 'HASH';
+		# Listing has cloud + runtime but NO cpi configs -- the
+		# single-iaas env case for which optional was introduced.
+		if (($_[0] // '') eq 'configs') {
+			return <<'JSON';
+{"Tables":[{"Rows":[
+{"id":"1*","type":"cloud","name":"default","team":"","created_at":"2026-05-19T10:00:00Z"},
+{"id":"2*","type":"runtime","name":"default","team":"","created_at":"2026-05-19T10:00:00Z"}
+]}]}
+JSON
+		}
+		die "content fetch must not be attempted when no configs of \$type exist";
+	};
+
+	my $target = workdir().'/optional-cpi.yml';
+	my @result = $d->download_configs($target, 'cpi', '*', optional => 1);
+
+	is scalar(@result), 0,
+		'optional=>1 + no configs of this type => empty list';
+	ok ! -e $target,
+		'no file written when there were no configs to download';
+	# Belt and suspenders: bail would set $@ via Carp; just confirm
+	# we got here without dying.
+	ok 1, 'no bail when optional=>1 and zero configs';
+};
+
+subtest 'download_configs - refresh=>1 cascades listing and content' => sub {
+	plan tests => 5;
+	my $d = make_director();
+	# Director-side state we mutate between cached and refreshed
+	# calls to prove refresh actually goes back to BOSH:
+	#   - $listing  -- which names the listing returns
+	#   - %bodies   -- the per-name content (each is a valid YAML
+	#                  doc with a unique cpis: entry so spruce-merge
+	#                  can append-merge them when both are present).
+	my $listing = <<'JSON';
+{"Tables":[{"Rows":[
+{"id":"5*","type":"cpi","name":"aws-bundle","team":"","created_at":"2026-05-19T10:00:00Z"}
+]}]}
+JSON
+	my %bodies = (
+		'aws-bundle'   => "---\ncpis:\n- name: aws-east-v1\n  type: aws\n  properties: {}\n",
+		'vsphere-prod' => "---\ncpis:\n- name: vsphere-az1\n  type: vsphere\n  properties: {}\n",
+	);
+
+	no warnings qw(redefine once);
+	local *Service::BOSH::Director::execute = sub {
+		shift; shift if ref($_[0]) eq 'HASH';
+		if (($_[0] // '') eq 'configs') {
+			return $listing;
+		}
+		# 'config --type=cpi --name=X --json' -- find the --name= arg
+		my ($cname) = grep { /^--name=/ } @_;
+		$cname =~ s/^--name=// if $cname;
+		my $body = $bodies{$cname // ''} // '';
+		# JSON-encode body content (escape newlines)
+		(my $jbody = $body) =~ s/\n/\\n/g;
+		return qq({"Tables":[{"Rows":[{"content":"$jbody"}]}]});
+	};
+
+	my $p1 = workdir().'/refresh-1.yml';
+	my @first = $d->download_configs($p1, 'cpi', '*');
+	is_deeply [map { $_->{name} } @first], ['aws-bundle'],
+		'initial call sees only aws-bundle';
+
+	# Director-side: add vsphere-prod AND change aws-bundle's body.
+	$listing = <<'JSON';
+{"Tables":[{"Rows":[
+{"id":"5*","type":"cpi","name":"aws-bundle","team":"","created_at":"2026-05-19T10:00:00Z"},
+{"id":"7*","type":"cpi","name":"vsphere-prod","team":"","created_at":"2026-05-19T10:00:00Z"}
+]}]}
+JSON
+	$bodies{'aws-bundle'} = "---\ncpis:\n- name: aws-east-v2\n  type: aws\n  properties: {}\n";
+
+	# Cached call: should NOT pick up either mutation.
+	my $p_cached = workdir().'/refresh-cached.yml';
+	my @cached = $d->download_configs($p_cached, 'cpi', '*');
+	is_deeply [map { $_->{name} } @cached], ['aws-bundle'],
+		'cached call still sees only aws-bundle (listing cache held)';
+	my $c_cached = do { local $/; open my $fh, '<', $p_cached; <$fh> };
+	like $c_cached, qr/aws-east-v1/,
+		'cached call file carries original aws-east-v1 content (content cache held)';
+
+	# Refresh: pick up listing AND content cascade.  Two cpi configs
+	# now ⇒ spruce-merge appends their cpis: arrays.
+	my $p_refreshed = workdir().'/refresh-now.yml';
+	my @refreshed = $d->download_configs($p_refreshed, 'cpi', '*', refresh => 1);
+	is_deeply [sort map { $_->{name} } @refreshed],
+		[qw(aws-bundle vsphere-prod)],
+		'refresh=>1 sees both cpi configs (listing cache invalidated)';
+
+	my $c_ref = do { local $/; open my $fh, '<', $p_refreshed; <$fh> };
+	like $c_ref, qr/aws-east-v2/,
+		'refreshed file carries the NEW aws-east-v2 content (content cache cascaded)';
+};
+
+# ======================================================================
+# cpi-type assembly: BOSH concatenates cpis[] arrays across active cpi
+# configs and bails on duplicate cpi names (see memory:
+# reference-bosh-cpi-merge-semantics).  Spruce's default merge-by-name
+# would silently dedupe those duplicates.  Genesis takes a manual path
+# for type='cpi': concat the cpis[] arrays, detect duplicates locally,
+# and bail with a message naming the cpi-name AND the cpi-config-names
+# (per memory:reference-bosh-cpi-terminology) where it appears -- more
+# useful than waiting for BOSH's terser CpiDuplicateName at deploy.
+
+use Genesis qw(load_yaml_file);
+
+# Builder for the execute() stub: takes a hash of cpi-config-name =>
+# YAML body and returns a sub suitable for `local *execute = ...`.
+sub cpi_fixture {
+	my (%bodies) = @_;
+	my @names = sort keys %bodies;
+	my $rows = join(",\n", map {
+		qq({"id":"1*","type":"cpi","name":"$_","team":"","created_at":"2026-05-19T10:00:00Z"})
+	} @names);
+	return sub {
+		shift; shift if ref($_[0]) eq 'HASH';
+		if (($_[0] // '') eq 'configs') {
+			return qq({"Tables":[{"Rows":[$rows]}]});
+		}
+		my ($cname) = grep { /^--name=/ } @_;
+		$cname =~ s/^--name=// if $cname;
+		my $body = $bodies{$cname // ''} // '';
+		(my $jbody = $body) =~ s/\n/\\n/g;
+		return qq({"Tables":[{"Rows":[{"content":"$jbody"}]}]});
+	};
+}
+
+subtest 'download_configs - cpi assembly concatenates cpis[] arrays (no dupes)' => sub {
+	plan tests => 3;
+	my $d = make_director();
+
+	no warnings qw(redefine once);
+	local *Service::BOSH::Director::execute = cpi_fixture(
+		'bundle-A' => "---\ncpis:\n- name: aws-east\n  type: aws\n  properties:\n    region: us-east-1\n",
+		'bundle-B' => "---\ncpis:\n- name: vsphere-prod\n  type: vsphere\n  properties:\n    datacenter: dc-prod\n",
+	);
+
+	my $target = workdir().'/cpi-concat-clean.yml';
+	my @result = $d->download_configs($target, 'cpi', '*');
+	is scalar(@result), 2, 'two cpi configs reported in @result';
+
+	my $assembled = load_yaml_file($target);
+	my @cpis = @{$assembled->{cpis} // []};
+	is scalar(@cpis), 2,
+		'cpis[] array contains BOTH entries -- concat preserves count';
+	is_deeply
+		[sort map { $_->{name} } @cpis],
+		['aws-east', 'vsphere-prod'],
+		'both cpi names are present in the assembled output';
+};
+
+subtest 'download_configs - cpi assembly bails on duplicate cpi name with file attribution' => sub {
+	plan tests => 3;
+	my $d = make_director();
+
+	no warnings qw(redefine once);
+	local *Service::BOSH::Director::execute = cpi_fixture(
+		'bundle-A' => "---\ncpis:\n- name: aws-east\n  type: aws\n  properties:\n    region: us-east-1\n",
+		'bundle-B' => "---\ncpis:\n- name: aws-east\n  type: aws\n  properties:\n    region: us-east-2\n",
+	);
+
+	my $target = workdir().'/cpi-concat-dupe.yml';
+	throws_ok {
+		$d->download_configs($target, 'cpi', '*');
+	} qr/duplicate cpi name/i, 'bails when the same cpi name appears in multiple cpi configs';
+
+	my $err = $@;
+	like $err, qr/aws-east/,
+		'error names the duplicated cpi name';
+	like $err, qr/bundle-A.*bundle-B|bundle-B.*bundle-A/,
+		'error names the cpi-config-names where the duplicate appears';
+};
+
+# ======================================================================
+# cloud-type assembly: keeps using spruce-merge so the established
+# merge-by-name semantics for keyed entries (azs, networks, vm_types,
+# etc.) continue to work.  This test pins down that the cpi carve-out
+# above did not accidentally change the cloud path -- a manual concat
+# in the cloud path would leave duplicate entries by name, which would
+# be wrong for cloud configs.
+
+# Builder analogous to cpi_fixture but emits cloud-typed listing rows.
+sub cloud_fixture {
+	my (%bodies) = @_;
+	my @names = sort keys %bodies;
+	my $rows = join(",\n", map {
+		qq({"id":"1*","type":"cloud","name":"$_","team":"","created_at":"2026-05-19T10:00:00Z"})
+	} @names);
+	return sub {
+		shift; shift if ref($_[0]) eq 'HASH';
+		if (($_[0] // '') eq 'configs') {
+			return qq({"Tables":[{"Rows":[$rows]}]});
+		}
+		my ($cname) = grep { /^--name=/ } @_;
+		$cname =~ s/^--name=// if $cname;
+		my $body = $bodies{$cname // ''} // '';
+		(my $jbody = $body) =~ s/\n/\\n/g;
+		return qq({"Tables":[{"Rows":[{"content":"$jbody"}]}]});
+	};
+}
+
+subtest 'download_configs - cloud assembly uses spruce-merge (merge-by-name)' => sub {
+	plan tests => 3;
+	my $d = make_director();
+
+	# Two cloud configs:
+	#   - "default" defines az z1 and a network dmz with cloud_properties
+	#   - "extra"   adds a NEW network app, AND extends dmz with another
+	#               cloud_properties field (same name => merge-by-name)
+	# If spruce-merge runs: the assembled output has ONE dmz network
+	# (with both fields) and ONE app network.  If we'd accidentally
+	# used manual concat, we'd see TWO dmz entries.
+	no warnings qw(redefine once);
+	local *Service::BOSH::Director::execute = cloud_fixture(
+		'default' => <<'YAML',
+---
+networks:
+- name: dmz
+  type: manual
+YAML
+		'extra' => <<'YAML',
+---
+networks:
+- name: dmz
+  cloud_properties:
+    subnet: subnet-dmz
+- name: app
+  type: manual
+YAML
+	);
+
+	my $target = workdir().'/cloud-merge.yml';
+	my @result = $d->download_configs($target, 'cloud', '*');
+	is scalar(@result), 2, 'two cloud configs reported in @result';
+
+	my $assembled = load_yaml_file($target);
+	my @networks = @{$assembled->{networks} // []};
+
+	is scalar(@networks), 2,
+		'merge-by-name kept ONE dmz entry plus the new app entry (not 3 via concat)';
+
+	# Find the dmz entry and confirm it carries fields from BOTH sources.
+	# Top-level network fields are where merge-by-name applies cleanly;
+	# nested arrays (subnets) follow --fallback-append semantics that
+	# are not the point of this test.
+	my ($dmz) = grep { $_->{name} eq 'dmz' } @networks;
+	ok defined($dmz) && defined($dmz->{type}) && defined($dmz->{cloud_properties}),
+		'dmz network has both `type` (from default) and `cloud_properties` (from extra) -- spruce merged-by-name';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet

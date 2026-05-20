@@ -8,7 +8,7 @@ use base 'Service::BOSH';
 use Genesis qw(
     trace debug info error bail bug dump_stack dump_var
     run lines read_json_from load_yaml load_yaml_file
-		save_to_yaml_file mkfile_or_fail
+		save_to_yaml_file mkfile_or_fail copy_or_fail to_yaml
     is_valid_uri tcp_listening workdir
 		parse_fixed_width_table by_semver
 		strfuzzytime
@@ -420,78 +420,148 @@ sub get_config {
 }
 
 # }}}
-# download_confgs - download configuration(s) of the given type (and optional name) {{{
+# download_configs - assemble & deliver BOSH config(s) of the given type {{{
+#
+# Public API (signature) preserved.  Internally, name resolution
+# now uses the cached configs() listing (Step 1) and content uses
+# the memoized get_config (Step 2).  The assembled output is
+# cached in the director's workdir; subsequent calls for the same
+# (type, name) reuse the cache and just copy the file into the
+# caller-supplied $path.
+#
+# %opts:
+#   optional => 1  - tolerate "no configs of this type" by
+#                    returning an empty list instead of bailing.
+#                    Used by cpi-prefetch on single-iaas envs.
+#   refresh => 1   - invalidate caches and re-fetch.  Cascades to
+#                    configs() listing (unconditionally -- the
+#                    requested name may itself be a new upload not
+#                    yet in the cached listing) and to the per-
+#                    name content cache as each name is resolved.
 sub download_configs {
-	my ($self, $path, $type, $name) = @_;
+	my ($self, $path, $type, $name, %opts) = @_;
 	$name ||= '*';
+	my $key = "$type|$name";
+	$self->{_config_assembly_cache} //= {};
 
+	if ($opts{refresh}) {
+		delete $self->{_config_assembly_cache}{$key};
+		# Unconditional listing refresh: even when the caller named a
+		# specific config, that name could be a fresh upload absent
+		# from the cached listing.
+		$self->configs(refresh => 1);
+	}
+
+	# Build the @configs info list (always returned to caller for
+	# their display / use_config registration).
 	my @configs;
 	if ($name eq '*') {
-		# FIXME:
-		# There is a bug here that all the cloud config names are pointing to the same merged file.  It would
-		# be better if each separate cloud config got its own file, and then also provide a .../merged-cloud.yml
-		# file that contains the merged contents of all the cloud configs.
-		my ($out,$rc,$err) = $self->execute({interactive => 0},
-			'configs -r=1 --type="$1" --json | jq -r \'.Tables[0].Rows[]| {"type": .type, "name": .name}\' | jq -sMc',
-			$type
-		);
-
-		my $configs_list = eval {JSON::PP::decode_json($out) unless $rc};
-		chomp(my $json_err = $@ || '');
-		if ($rc || $json_err) {
-			$json_err =~ s/ at lib\/Genesis\/BOSH.*//sm if $json_err;
-			$err ||= $json_err || "bosh configs returned exit code $rc";
-			bail("Could not determine available #C{$type} configurations: $err");
-		}
-
-		for (@$configs_list) {
-			my $label = $_->{name} eq "default" ? "base $_->{type} config" : "$_->{type} config '$_->{name}'";
-			push @configs, {type => $_->{type}, name => $_->{name}, label => $label};
+		for my $cname ($self->config_names_of($type)) {
+			my $label = $cname eq "default" ? "default $type config" : "$type config '$cname'";
+			push @configs, {type => $type, name => $cname, label => $label};
 		}
 	} else {
 		my $label = $name eq "default" ? "$type config" : "$type config '$name'";
 		push @configs, {type => $type, name => $name, label => $label};
 	}
 
-	my @config_contents;
-	for (@configs) {
-		my ($out,$rc,$err) = $self->execute({ interactive => 0},
-			'config', "--type=$_->{type}", "--name=$_->{name}", '--json'
-		);
-
-		my $json = eval {JSON::PP::decode_json($out) unless $rc};
-		chomp(my $json_err = $@ || '');
-		if ($rc || $json_err) {
-			$json_err =~ s/ at lib\/Genesis\/BOSH.*//sm if $json_err;
-			my $msg = $json_err ? "#R{$json_err:}\n\n\e[36m$out\e[0m" : ($err || "bosh configs returned exit code $rc");
-			$msg ||= join("\n", grep {$_ !~ /^Exit code/} grep {$_ !~ /^using environment/} @{$json->{Lines}});
-			$msg ||= "Could not understand 'BOSH config' json output:\n\n\e[36m$out\e[0m";
-			$msg = "No $_->{label} found" if $msg eq 'No config';
-			bail("Could not determine available #C{$_->{type}} configurations: $msg");
-		}
-
-		bug("BOSH returned multiple entries for $_->{label} - Genesis doesn't know how to process this")
-			if (@{$json->{Tables}} != 1 || @{$json->{Tables}[0]{Rows}} != 1);
-
-		my $config = $json->{Tables}[0]{Rows}[0]{content};
-
-		bail "No $_->{label} contents." unless $config;
-		push @config_contents, $config;
+	# Cache hit: skip the fetch+merge entirely, just copy the cached
+	# assembly into the caller's requested $path.
+	if (my $cached = $self->{_config_assembly_cache}{$key}) {
+		copy_or_fail($cached, $path);
+		return wantarray ? @configs : \@configs;
 	}
-	my $config;
-	if (scalar(@config_contents) > 1) {
-		($config, my $rc, my $err) = run(
+
+	# No configs of this type exist on the director.  optional => 1
+	# returns empty without writing or bailing (single-iaas envs
+	# with no named cpi-configs land here); otherwise preserve the
+	# legacy bail.
+	if (!@configs) {
+		return wantarray ? () : [] if $opts{optional};
+		bail(
+			"No matching %s configurations defined on '#M{%s}' BOSH director",
+			$type, $self->alias
+		);
+	}
+
+	# Fetch each config's content via the memoized get_config.  If
+	# refresh was requested, cascade it through the per-name cache.
+	my @config_contents;
+	for my $c (@configs) {
+		my $content = $opts{refresh}
+			? $self->get_config($c->{type}, $c->{name}, refresh => 1)
+			: $self->get_config($c->{type}, $c->{name});
+		bail("No $c->{label} contents.")
+			unless defined($content) && length($content);
+		push @config_contents, $content;
+	}
+
+	# Assemble.  For most types the long-standing spruce-merge
+	# behaviour is correct: merge-by-name on keyed entries (azs,
+	# networks, vm_types, addons, releases, ...) reflects how BOSH
+	# actually composes them at deploy time.
+	#
+	# `cpi` is the exception: BOSH (CpiManifestParser.merge_configs)
+	# concatenates the cpis: arrays across all active cpi configs
+	# and ERRORS on duplicate cpi names.  Spruce's default
+	# merge-by-name would silently dedupe those duplicates and
+	# hide the divergence from operators.  Take the manual concat
+	# path for cpi: parse each config, concat the cpis: arrays,
+	# bail locally with file-attributed error when duplicates
+	# would result -- more actionable than waiting for BOSH's
+	# terser CpiDuplicateName at deploy.
+	my $assembled;
+	if ($type eq 'cpi' && @config_contents > 1) {
+		my @all_cpis;
+		my %seen;        # cpi-name => [cpi-config-name, ...]
+		for my $i (0 .. $#config_contents) {
+			my $cpi_config_name = $configs[$i]{name};
+			my $parsed = eval { load_yaml($config_contents[$i]) } // {};
+			my $cpis_arr = $parsed->{cpis};
+			next unless ref($cpis_arr) eq 'ARRAY';
+			for my $entry (@$cpis_arr) {
+				next unless ref($entry) eq 'HASH';
+				if (defined(my $cpi_name = $entry->{name})) {
+					push @{$seen{$cpi_name}}, $cpi_config_name;
+				}
+				push @all_cpis, $entry;
+			}
+		}
+		my @dupes = grep { @{$seen{$_}} > 1 } sort keys %seen;
+		if (@dupes) {
+			bail(
+				"Duplicate cpi name(s) found across uploaded cpi configs on '#M{%s}' BOSH director:\n%s\n\n".
+				"BOSH will refuse to deploy until the duplicate is resolved (delete the redundant config or rename the cpi entry).",
+				$self->alias,
+				join("\n", map {
+					sprintf("  - #R{%s} appears in: %s", $_,
+					        join(', ', map { "#C{$_}" } @{$seen{$_}}))
+				} @dupes)
+			);
+		}
+		$assembled = to_yaml({cpis => \@all_cpis});
+	} elsif (@config_contents > 1) {
+		my ($out, $rc, $err) = run(
 			{interactive => 0, stderr=>0},
 			'spruce merge --multi-doc --go-patch --fallback-append <(echo "$1")',
 			join("\n---\n", @config_contents)
 		);
 		bail("Failed to converge the active $type configurations: $err") if $rc;
+		$assembled = $out;
 	} else {
-		$config = $config_contents[0]
+		$assembled = $config_contents[0];
 	}
-	mkfile_or_fail($path,$config || "");
+
+	# Write the assembled output to the director's internal cache
+	# path, then copy to the caller's $path.  Subsequent calls for
+	# the same (type, name) only pay the copy cost.
+	my $cache_path = workdir().'/'.$self->{alias}.'-'.$type.'-'.$name.'-assembled.yml';
+	mkfile_or_fail($cache_path, $assembled // '');
+	$self->{_config_assembly_cache}{$key} = $cache_path;
+	copy_or_fail($cache_path, $path);
 	bail(
-		"No matching $type configurations defined on '#M{%s}' BOSH director", $self->alias
+		"No matching %s configurations defined on '#M{%s}' BOSH director",
+		$type, $self->alias
 	) unless (-s $path);
 	return wantarray ? @configs : \@configs;
 }
