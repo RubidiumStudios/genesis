@@ -289,6 +289,70 @@ JSON
 		'cpis() does fetch cpi-config contents (one or more `bosh config` calls)';
 };
 
+# ======================================================================
+# get_config() memoization
+# ======================================================================
+#
+# Contract: get_config($type, $name) caches content per (type, name)
+# pair.  A second call for the same pair returns the cached content
+# without a second BOSH round-trip.  Distinct pairs are independent
+# cache slots.
+
+subtest 'get_config - memoizes per (type, name) pair' => sub {
+	plan tests => 4;
+	my $d = make_director();
+	my %content_calls;  # by "type|name"
+	no warnings qw(redefine once);
+	local *Service::BOSH::Director::execute = sub {
+		shift;  # $self
+		shift if ref($_[0]) eq 'HASH';  # opts
+		# 'config --type=X --name=Y --json'
+		my %args = @_[1..$#_];
+		my $type = $args{'--type'} // ($_[0] =~ /--type=(\S+)/ ? $1 : '?');
+		my $name = $args{'--name'} // ($_[0] =~ /--name=(\S+)/ ? $1 : '?');
+		# Reconstruct from positional arg list: parse the strings
+		for my $a (@_) {
+			$type = $1 if $a =~ /^--type=(.+)/;
+			$name = $1 if $a =~ /^--name=(.+)/;
+		}
+		$content_calls{"$type|$name"}++;
+		return qq({"Tables":[{"Rows":[{"content":"---\\ncontent-of-$type-$name\\n"}]}]});
+	};
+
+	my $first  = $d->get_config('cpi', 'aws-bundle');
+	my $second = $d->get_config('cpi', 'aws-bundle');
+	my $other  = $d->get_config('cpi', 'vsphere-prod');
+	$d->get_config('cpi', 'vsphere-prod');
+
+	is $content_calls{'cpi|aws-bundle'}, 1,
+		'repeat (cpi, aws-bundle) fetch uses cache (1 execute)';
+	is $content_calls{'cpi|vsphere-prod'}, 1,
+		'distinct (cpi, vsphere-prod) is an independent cache slot (1 execute)';
+	is $second, $first,
+		'cached call returns the same content as the first';
+	like $other, qr/vsphere-prod/,
+		'distinct pair gets its own content';
+};
+
+subtest 'get_config - refresh=>1 invalidates the per-pair cache' => sub {
+	plan tests => 1;
+	my $d = make_director();
+	my $execute_calls = 0;
+	no warnings qw(redefine once);
+	local *Service::BOSH::Director::execute = sub {
+		$execute_calls++;
+		return qq({"Tables":[{"Rows":[{"content":"---\\nfresh\\n"}]}]});
+	};
+
+	$d->get_config('cpi', 'aws-bundle');
+	$d->get_config('cpi', 'aws-bundle');
+	$d->get_config('cpi', 'aws-bundle', refresh => 1);
+	$d->get_config('cpi', 'aws-bundle');
+
+	is $execute_calls, 2,
+		'refresh=>1 on get_config forces one re-fetch; subsequent calls reuse';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet

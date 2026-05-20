@@ -403,12 +403,20 @@ sub has_config {
 
 # get_config - get the configuration of the given type and name {{{
 sub get_config {
-	my ($self, $type, $name) = @_;
-	my $config_raw = read_json_from(
-		$self->execute({interactive => 0}, 'config', "--type=$type", "--name=$name", '--json')
-	);
-	return $config_raw->{Tables}[0]{Rows}[0]{content} if $config_raw->{Tables}[0]{Rows}[0];
-	return undef;
+	my ($self, $type, $name, %opts) = @_;
+	my $key = ($type // '') . '|' . ($name // '');
+	$self->{_config_content_cache} //= {};
+	delete $self->{_config_content_cache}{$key} if $opts{refresh};
+	if (!exists $self->{_config_content_cache}{$key}) {
+		my $config_raw = read_json_from(
+			$self->execute({interactive => 0}, 'config', "--type=$type", "--name=$name", '--json')
+		);
+		$self->{_config_content_cache}{$key} =
+			$config_raw->{Tables}[0]{Rows}[0]
+				? $config_raw->{Tables}[0]{Rows}[0]{content}
+				: undef;
+	}
+	return $self->{_config_content_cache}{$key};
 }
 
 # }}}
