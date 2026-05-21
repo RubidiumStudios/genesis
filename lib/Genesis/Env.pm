@@ -624,7 +624,7 @@ sub is_valid_env_file {
 		}
 
 		# Block format: genesis:\n  env: name
-		my @env_names = $yaml_src =~ /^genesis:\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+([^\s]*)/mg;
+		my @env_names = $yaml_src =~ /^genesis: *\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+(\S*)/mg;
 		# Inline format: {genesis: {env: 'name'}} or {genesis: {env: name}}
 		unless (@env_names) {
 			@env_names = $yaml_src =~ /\bgenesis:\s*\{[^}]*\benv:\s*'?([a-zA-Z0-9_][a-zA-Z0-9_-]*)'?/mg;
@@ -651,8 +651,8 @@ sub is_valid_env_file {
 
 		# Check if the environment has kit information available
 		# Kit info can be split across hierarchical files (kit.name in parent, kit.version in child)
-		my $kit_name_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*name:\s+([^\s]+)/m;
-		my $kit_version_re = qr/^kit:\r?\n\r?  (?:.*\r?\n\r?  )*version:\s+([^\s]+)/m;
+		my $kit_name_re = qr/^kit: *\r?\n\r?  (?:.*\r?\n\r?  )*name:\s+(\S+)/m;
+		my $kit_version_re = qr/^kit: *\r?\n\r?  (?:.*\r?\n\r?  )*version:\s+(\S+)/m;
 		my $has_kit_name = $yaml_src =~ $kit_name_re;
 		my $has_kit_version = $yaml_src =~ $kit_version_re;
 
