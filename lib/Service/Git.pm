@@ -453,6 +453,37 @@ sub commit {
 }
 
 # }}}
+# cherry_pick - apply the given commit by sha onto the current branch {{{
+#
+# Runs `git cherry-pick <sha>`.  On success returns $self.  On
+# conflict, runs `git cherry-pick --abort` to clean up the
+# working tree state and bails with a message naming the
+# conflicting file(s).  On any other failure, bails with the
+# underlying git error.
+sub cherry_pick {
+	my ($self, $sha) = @_;
+	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
+		'git', 'cherry-pick', $sha);
+	return $self unless $rc;
+
+	# Conflict: collect the conflicting paths from `git cherry-pick`'s
+	# stdout/stderr ("CONFLICT (content): Merge conflict in <path>"),
+	# abort the in-progress cherry-pick, then bail.
+	my @conflicts = ($out =~ /Merge conflict in (.+?)(?:\r?\n|$)/g);
+	if (@conflicts) {
+		run({ dir => $self->{root}, passfail => 1 },
+			'git', 'cherry-pick', '--abort');
+		bail(
+			"cherry-pick of #C{%s} produced conflict(s):\n  - %s\n",
+			$sha, join("\n  - ", @conflicts)
+		);
+	}
+
+	# Non-conflict failure: surface whatever git said.
+	bail("cherry-pick of #C{%s} failed: %s",
+		$sha, ($err || $out || "rc=$rc") =~ s/\s+$//r);
+}
+# }}}
 # reset_working_tree - discard all working tree changes to tracked files {{{
 sub reset_working_tree {
 	my ($self) = @_;
