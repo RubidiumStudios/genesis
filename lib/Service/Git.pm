@@ -523,6 +523,42 @@ sub remote_url {
 }
 
 # }}}
+# remote_branch_exists - check whether a branch exists on the remote {{{
+#
+# Uses `git ls-remote --heads <remote> <branch>`.  Non-empty stdout
+# means the branch is present remotely.  Returns 0 when no default
+# remote is configured (nothing to check against).  Bails on
+# ls-remote failure (auth/network/bad-remote) so a transient error
+# isn't silently misclassified as "branch doesn't exist".
+sub remote_branch_exists {
+	my ($self, $branch, $remote) = @_;
+	$remote //= $self->default_remote;
+	return 0 unless $remote;
+	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
+		'git', 'ls-remote', '--heads', $remote, $branch);
+	bail("ls-remote against #C{%s} failed: %s",
+		$remote, ($err || $out || "rc=$rc") =~ s/\s+$//r) if $rc;
+	return ($out && $out =~ /\S/) ? 1 : 0;
+}
+
+# }}}
+# delete_remote_branch - delete a branch on the remote {{{
+#
+# Uses `git push <remote> --delete <branch>`.  Returns $self on
+# success or when no remote is configured (no-op).  Bails on push
+# failure with the underlying git error.
+sub delete_remote_branch {
+	my ($self, $branch, $remote) = @_;
+	$remote //= $self->default_remote;
+	return $self unless $remote;
+	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
+		'git', 'push', $remote, '--delete', $branch);
+	bail("Failed to delete remote branch #C{%s} on #C{%s}: %s",
+		$branch, $remote, ($err || $out || "rc=$rc") =~ s/\s+$//r) if $rc;
+	return $self;
+}
+
+# }}}
 # fetch_branch - fetch a specific branch from remote into a local ref {{{
 #
 # Uses the forced refspec (+refs/heads/branch:refs/heads/branch) so the
