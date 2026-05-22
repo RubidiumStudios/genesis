@@ -948,6 +948,25 @@ sub _github_owner_repo_from_remote {
 	return (undef, undef);
 }
 # }}}
+# _pr_branch_has_control_sha - idempotency check for rolling-branch PR propagation {{{
+#
+# Returns 1 iff $branch exists and its latest commit message
+# references the given $control_short (e.g. "[pipeline] control@abc1234").
+# Used to skip duplicate-commit creation when `genesis propagate` is
+# re-run against an unchanged control HEAD.
+#
+# The regex anchors on a word boundary so a shorter sha doesn't
+# accidentally match a longer one whose prefix matches (e.g.
+# "abc1234" must NOT match "[pipeline] control@abc1234567 -> env").
+sub _pr_branch_has_control_sha {
+	my ($git, $branch, $control_short) = @_;
+	return 0 unless $git->branch_exists($branch);
+	my @subjects = $git->log_subjects($branch, limit => 1, format => '%s');
+	return 0 unless @subjects;
+	return $subjects[0] =~ /\[pipeline\]\s+control\@\Q$control_short\E\b/ ? 1 : 0;
+}
+
+# }}}
 # _build_pr_body - compose the pull request description {{{
 sub _build_pr_body {
 	my ($env_name, $control_sha, $control_short, $detail) = @_;
