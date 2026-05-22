@@ -543,6 +543,37 @@ sub list_prs {
 }
 
 # }}}
+# open_prs - list open PRs against a base branch (head optional) {{{
+#
+# Semantic wrapper around list_prs for the rolling-branch PR
+# propagation flow.  Caller decides what 0/1/many means; this
+# method just returns the filtered list with state=open enforced.
+#
+#   $gh->open_prs($owner_repo, $base)           # all open PRs targeting $base
+#   $gh->open_prs($owner_repo, $base, $head)    # filtered to PRs from $head
+#
+# Returns an arrayref.  When $head is provided the server-side
+# filter is applied AND a defensive grep filters the response (in
+# case the API surfaces unrelated results from pagination edge cases
+# or fork heads).
+sub open_prs {
+	my ($self, $owner_repo, $base, $head) = @_;
+	bail("Missing owner/repo for open_prs") unless $owner_repo;
+	bail("Missing base branch for open_prs") unless defined $base && length $base;
+
+	my %opts = (state => 'open', base => $base);
+	$opts{head} = $head if defined $head && length $head;
+
+	my $prs = $self->list_prs($owner_repo, %opts);
+	return $prs unless defined $head && length $head;
+
+	# Defensive: ensure every returned PR actually has head=$head.
+	# Pagination, fork heads, or future API changes could surface
+	# unrelated PRs; this grep keeps the contract tight.
+	return [ grep { ($_->{head}{ref} // '') eq $head } @$prs ];
+}
+
+# }}}
 # create_pr - create a pull request {{{
 #
 # Required options: head (source branch), base (target branch), title

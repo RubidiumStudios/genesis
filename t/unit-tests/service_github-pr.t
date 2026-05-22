@@ -418,6 +418,93 @@ subtest 'pagination: two-page list with Link header' => sub {
 	is($result->[2]{number}, 12, 'last PR from page 2 present');
 };
 
+# ======================================================================
+# open_prs - list open PRs against a base branch (head optional)
+# ----------------------------------------------------------------------
+# Lower-level primitive for the rolling-branch PR propagation flow.
+# Caller decides what 0/1/many means; this method just returns the
+# filtered list with state=open enforced.
+#
+#   $gh->open_prs($owner_repo, $base)           # all open PRs targeting $base
+#   $gh->open_prs($owner_repo, $base, $head)    # filtered to PRs from $head
+#
+# Returns an arrayref.  Filter by head is the GitHub API filter when
+# provided (server-side), with a defensive grep on the response (in
+# case the API surfaces unrelated results).
+# ======================================================================
+
+subtest 'open_prs - lists all open PRs against base when head omitted' => sub {
+	plan tests => 2;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+	my @prs = (
+		make_pr(number => 1, head_ref => 'pr/staging',   base_ref => 'staging'),
+		make_pr(number => 2, head_ref => 'hotfix/asap',  base_ref => 'staging'),
+		make_pr(number => 3, head_ref => 'feat/banner',  base_ref => 'staging'),
+	);
+	queue_curl_response(200, 'OK', encode_json(\@prs), '');
+
+	my $result = $gh->open_prs('org/repo', 'staging');
+	is(scalar(@$result), 3, 'returns all open PRs against staging');
+	is_deeply [sort map { $_->{number} } @$result], [1, 2, 3],
+		'all three PRs present regardless of head';
+};
+
+subtest 'open_prs - filters to head when provided' => sub {
+	plan tests => 2;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+	# Even if the API returns multiple, we want only those matching
+	# the head filter (defensive grep on top of server-side filter).
+	my @prs = (
+		make_pr(number => 1, head_ref => 'pr/staging',  base_ref => 'staging'),
+		make_pr(number => 2, head_ref => 'hotfix/asap', base_ref => 'staging'),
+	);
+	queue_curl_response(200, 'OK', encode_json(\@prs), '');
+
+	my $result = $gh->open_prs('org/repo', 'staging', 'pr/staging');
+	is(scalar(@$result), 1, 'only the head=pr/staging PR survives the filter');
+	is($result->[0]{number}, 1, 'correct PR returned');
+};
+
+subtest 'open_prs - empty result when no open PRs' => sub {
+	plan tests => 1;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+	queue_curl_response(200, 'OK', encode_json([]), '');
+
+	my $result = $gh->open_prs('org/repo', 'staging');
+	is_deeply $result, [],
+		'empty arrayref when no open PRs are targeting the base';
+};
+
+subtest 'open_prs - issues state=open and base=<base> in the GET URL' => sub {
+	plan tests => 2;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+	queue_curl_response(200, 'OK', encode_json([]), '');
+
+	$gh->open_prs('org/repo', 'staging');
+
+	my $url = $curl_calls[0][1];   # second arg to curl is the URL
+	like $url, qr/state=open/, 'GET URL includes state=open';
+	like $url, qr/base=staging/, 'GET URL includes base=staging';
+};
+
+subtest 'open_prs - includes head filter in GET URL when provided' => sub {
+	plan tests => 1;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+	queue_curl_response(200, 'OK', encode_json([]), '');
+
+	$gh->open_prs('org/repo', 'staging', 'pr/staging');
+
+	my $url = $curl_calls[0][1];
+	# GitHub requires owner:branch format for head filter
+	like $url, qr{head=org:pr/staging},
+		'GET URL includes owner-prefixed head=org:pr/staging';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet
