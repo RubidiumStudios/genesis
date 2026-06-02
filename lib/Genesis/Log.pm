@@ -159,6 +159,199 @@ sub setup_from_configs {
 	}
 }
 
+# parse_lifespan - parse a lifespan config string into a structured policy.
+#
+# Pure function: no IO, no globals.  Returns:
+#   {
+#     mode        => 'none' | 'union' | 'intersection' | 'truncate',
+#     count       => N | undef,
+#     age_seconds => S | undef,
+#     warnings    => [strings],  # caller emits subject to
+#                                # suppress_warnings.deprecations
+#   }
+#
+# Bails (Genesis::bail) on unparseable input with the offending substring
+# named.
+#
+# Modes:
+#   'none'         - no cleanup pass (value 'forever')
+#   'union'        - keep file if EITHER count or age would keep
+#                    ('min of ...', bare 'or', bare count, bare duration)
+#   'intersection' - keep file only if BOTH count and age would keep
+#                    ('max of ...')
+#   'truncate'     - reserved; not currently produced (kept for forward
+#                    compat with the design doc)
+sub parse_lifespan {
+	my ($value) = @_;
+
+	Genesis::bail("Invalid lifespan: empty value")
+		unless defined($value) && length($value);
+
+	my $v = $value;
+	$v =~ s/^\s+|\s+$//g;
+	Genesis::bail("Invalid lifespan: empty value")
+		unless length($v);
+
+	if (lc($v) eq 'forever') {
+		return {
+			mode => 'none', count => undef, age_seconds => undef,
+			warnings => [],
+		};
+	}
+
+	if (lc($v) eq 'current') {
+		return {
+			mode => 'union', count => 1, age_seconds => undef,
+			warnings => [
+				'lifespan: current is deprecated; '.
+				'use lifespan: 1 instead '.
+				'(with default on_reuse: truncate for equivalent behavior)',
+			],
+		};
+	}
+
+	# Parse a single bound: bare count (optionally "5 logs") or duration.
+	my $parse_bound = sub {
+		my ($part) = @_;
+		$part =~ s/^\s+|\s+$//g;
+		if ($part =~ /^(\d+)\s*(?:logs?)?$/i) {
+			return ('count', $1 + 0);
+		}
+		if ($part =~ /^(\d+)\s*(d|day|days|w|week|weeks|m|mon|month|months|y|year|years)$/i) {
+			my ($num, $unit) = ($1, $2);
+			my $secs = _time_unit_to_seconds($unit);
+			return ('age_seconds', $num * $secs) if $secs;
+		}
+		return ();
+	};
+
+	# Detect compound form: "min of X or Y", "max of X or Y", "X or Y".
+	my ($mode, $rest);
+	if ($v =~ /^min\s+of\s+(.+)$/i) {
+		$mode = 'union';
+		$rest = $1;
+	} elsif ($v =~ /^max\s+of\s+(.+)$/i) {
+		$mode = 'intersection';
+		$rest = $1;
+	} elsif ($v =~ /\s+or\s+/i) {
+		$mode = 'union';
+		$rest = $v;
+	}
+
+	if (defined $mode) {
+		my @parts = split /\s+or\s+/i, $rest;
+		Genesis::bail("Invalid lifespan: '%s' (expected '<count> or <duration>')", $value)
+			unless @parts == 2;
+		my $result = {
+			mode => $mode, count => undef, age_seconds => undef,
+			warnings => [],
+		};
+		for my $part (@parts) {
+			my ($key, $val) = $parse_bound->($part);
+			Genesis::bail("Invalid lifespan component: '%s' in '%s'", $part, $value)
+				unless defined $key;
+			$result->{$key} = $val;
+		}
+		return $result;
+	}
+
+	# Single bound.
+	my ($key, $val) = $parse_bound->($v);
+	if (defined $key) {
+		return {
+			mode => 'union', count => undef, age_seconds => undef,
+			warnings => [], $key => $val,
+		};
+	}
+
+	Genesis::bail("Invalid lifespan: '%s'", $value);
+}
+
+sub _time_unit_to_seconds {
+	my ($unit) = @_;
+	my $u = lc(substr($unit // '', 0, 1));
+	return 86400    if $u eq 'd';
+	return 604800   if $u eq 'w';
+	return 2592000  if $u eq 'm';
+	return 31536000 if $u eq 'y';
+	return undef;
+}
+
+# template_to_glob_pattern - convert a log path template into a filesystem
+# glob pattern suitable for Perl's built-in glob() operator.
+#
+# Pure function: no IO.  For each {name} in the template, if `name` is a
+# key in %concrete the value is substituted directly; otherwise the
+# variable is replaced with a shape-matching wildcard from the table:
+#
+#   {timestamp} -> YYYYMMDDTHHMMSS.mmmZ digit pattern
+#   {date}      -> YYYYMMDD digit pattern
+#   {time}      -> HHMMSS digit pattern
+#   {pid}       -> [0-9]* (variable-length numeric)
+#   {env}       -> *
+#   {command}   -> *
+#
+# Tilde-prefixed paths are expanded via Genesis::expand_path before
+# variable substitution.
+sub template_to_glob_pattern {
+	my ($template, %concrete) = @_;
+
+	# Simple tilde expansion only - we need pure string transformation
+	# here, not Cwd::abs_path (which resolves symlinks and returns undef
+	# for non-existent paths; templates routinely reference subdirs that
+	# won't exist until cleanup time).
+	my $path = $template;
+	$path =~ s{^~/}{$ENV{HOME}/};
+	$path =~ s{^~$}{$ENV{HOME}};
+
+	my %wildcards = (
+		timestamp => '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9].[0-9][0-9][0-9]Z',
+		date      => '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]',
+		time      => '[0-9][0-9][0-9][0-9][0-9][0-9]',
+		pid       => '[0-9]*',
+		env       => '*',
+		command   => '*',
+	);
+
+	$path =~ s/\{([a-z_]+)\}/
+		exists $concrete{$1}        ? $concrete{$1} :
+		exists $wildcards{$1}       ? $wildcards{$1} :
+		"{$1}"
+	/gex;
+
+	return $path;
+}
+
+# find_log_files - locate log files matching a template, with metadata.
+#
+# Args:
+#   $template - log path template (e.g. '~/.genesis/logs/{env}/{timestamp}.log')
+#   %concrete - optional substitutions for specific template variables
+#
+# Uses Perl's built-in glob() operator (portable across Linux/POSIX/BSD).
+#
+# Returns: arrayref of hashrefs sorted by mtime descending (newest first):
+#   [ { path => '...', mtime => <epoch> }, ... ]
+#
+# Skips non-files (directories, symlinks to nothing, etc.) and any path
+# whose stat() fails.  Empty arrayref when nothing matches.
+sub find_log_files {
+	my ($template, %concrete) = @_;
+
+	my $pattern = template_to_glob_pattern($template, %concrete);
+	my @paths = glob($pattern);
+
+	my @files;
+	for my $p (@paths) {
+		next unless -f $p;
+		my @stat = stat($p);
+		next unless @stat;
+		push @files, { path => $p, mtime => $stat[9] };
+	}
+
+	return [ sort { $b->{mtime} <=> $a->{mtime} } @files ];
+}
+
 sub expand_log_template {
 	my ($self, $template) = @_;
 

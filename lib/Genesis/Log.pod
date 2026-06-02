@@ -239,6 +239,181 @@ B<Examples:>
   ]);
   # Returns: nothing (configures logger as a side effect)
 
+=head2 parse_lifespan
+
+  my $policy = Genesis::Log::parse_lifespan($lifespan_value);
+
+Parses a C<lifespan> configuration string into a structured retention
+policy. Pure function: no IO, no globals. Bails (C<Genesis::bail>) on
+unparseable input with the offending substring named.
+
+Returns a hashref with these keys:
+
+=over 4
+
+=item * C<mode> -- one of:
+
+=over 4
+
+=item * C<'none'> -- skip the cleanup pass entirely (value C<forever>)
+
+=item * C<'union'> -- keep file if EITHER C<count> or C<age_seconds> would
+keep it; produced by C<min of X or Y>, bare C<X or Y>, bare count, and
+bare duration
+
+=item * C<'intersection'> -- keep file only if BOTH C<count> AND
+C<age_seconds> would keep it; produced by C<max of X or Y>
+
+=item * C<'truncate'> -- reserved for forward compatibility with the
+earlier design doc; not currently produced by this parser
+
+=back
+
+=item * C<count> -- positive integer count limit, or C<undef>
+
+=item * C<age_seconds> -- positive integer age limit in seconds, or
+C<undef>
+
+=item * C<warnings> -- arrayref of strings the caller should emit (subject
+to C<suppress_warnings.deprecations>). Empty arrayref when no warnings to
+emit.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item * C<$lifespan_value> -- the string from the C<lifespan> key in the
+log config. Common forms:
+
+=over 4
+
+=item C<forever> -- no cleanup pass
+
+=item C<current> -- B<deprecated> alias for C<1>; embeds a deprecation
+warning in the result
+
+=item C<5> -- count-only retention: keep 5 files total
+
+=item C<7d>, C<2 weeks>, C<3 months>, C<1y> -- duration-only retention.
+Suffixes: C<d>/C<day(s)>, C<w>/C<week(s)>, C<m>/C<month(s)> (30 days),
+C<y>/C<year(s)> (365 days). Case-insensitive.
+
+=item C<min of 5 or 2 weeks> -- liberal compound: keep file if either
+bound holds
+
+=item C<max of 5 or 2 weeks> -- aggressive compound: keep file only if
+both bounds hold
+
+=item C<5 or 2 weeks> -- bare-C<or> back-compat alias for C<min of ...>
+
+=back
+
+=back
+
+B<Examples:>
+
+  my $p = Genesis::Log::parse_lifespan('forever');
+  # { mode => 'none', count => undef, age_seconds => undef, warnings => [] }
+
+  my $p = Genesis::Log::parse_lifespan('current');
+  # { mode => 'union', count => 1, age_seconds => undef,
+  #   warnings => ['lifespan: current is deprecated; ...'] }
+
+  my $p = Genesis::Log::parse_lifespan('5');
+  # { mode => 'union', count => 5, age_seconds => undef, warnings => [] }
+
+  my $p = Genesis::Log::parse_lifespan('7d');
+  # { mode => 'union', count => undef, age_seconds => 604800,
+  #   warnings => [] }
+
+  my $p = Genesis::Log::parse_lifespan('max of 5 or 2 weeks');
+  # { mode => 'intersection', count => 5, age_seconds => 1209600,
+  #   warnings => [] }
+
+=head2 template_to_glob_pattern
+
+  my $pattern = Genesis::Log::template_to_glob_pattern($template, %concrete);
+
+Convert a log path template into a filesystem glob pattern suitable for
+Perl's built-in C<glob> operator. Pure function: no IO.
+
+For each C<{name}> in the template, if C<name> is a key in C<%concrete>
+the value is substituted directly; otherwise the variable is replaced
+with a shape-matching wildcard. This lets callers control the grouping
+axis: pass C<env =E<gt> ...> and C<command =E<gt> ...> to scope cleanup
+to a per-env-command group; omit them to glob the broad family.
+
+Tilde-prefixed paths are expanded against C<$ENV{HOME}> (or
+C<getpwnam($user)> for C<~user/...> forms).
+
+Shape-matching wildcards:
+
+  {timestamp} -> [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9].[0-9][0-9][0-9]Z
+                 (YYYYMMDDTHHMMSS.mmmZ)
+  {date}      -> [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]   (YYYYMMDD)
+  {time}      -> [0-9][0-9][0-9][0-9][0-9][0-9]             (HHMMSS)
+  {pid}       -> [0-9]*                                     (variable-length numeric)
+  {env}       -> *
+  {command}   -> *
+
+B<Parameters:>
+
+=over 4
+
+=item * C<$template> -- the log path template, possibly containing
+C<{env}>, C<{command}>, C<{timestamp}>, C<{date}>, C<{time}>, C<{pid}>
+variables and an optional leading C<~>.
+
+=item * C<%concrete> -- optional hash of substitutions; keys are template
+variable names without the braces, values are the concrete substitution
+to insert.
+
+=back
+
+B<Examples:>
+
+  Genesis::Log::template_to_glob_pattern('~/.genesis/{timestamp}.log');
+  # /Users/.../genesis/[0-9]{...}T[0-9]{...}.log
+
+  Genesis::Log::template_to_glob_pattern(
+    '/var/log/{env}/{command}/{timestamp}.log',
+    env => 'staging',
+  );
+  # /var/log/staging/*/[0-9]{...}T[0-9]{...}.log
+
+=head2 find_log_files
+
+  my $files = Genesis::Log::find_log_files($template, %concrete);
+
+Locate log files matching a template, with per-file metadata. Returns
+an arrayref of hashrefs:
+
+  [
+    { path => '/var/log/staging/deploy/20260602T....log', mtime => 1717000000 },
+    { path => '/var/log/staging/deploy/20260601T....log', mtime => 1716913600 },
+    ...
+  ]
+
+Results are sorted by mtime descending (newest first). Skips
+directories, symlinks that don't resolve, and any path whose C<stat>
+fails. Returns an empty arrayref when nothing matches.
+
+Uses Perl's built-in C<glob> operator (portable across Linux/POSIX/BSD).
+
+B<Parameters:>
+
+=over 4
+
+=item * C<$template> -- log path template (same syntax as
+C<template_to_glob_pattern>)
+
+=item * C<%concrete> -- optional substitutions for specific template
+variables (same as C<template_to_glob_pattern>)
+
+=back
+
 =head2 expand_log_template
 
   my $path = $logger->expand_log_template($template);
