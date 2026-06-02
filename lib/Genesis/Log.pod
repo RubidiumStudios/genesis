@@ -332,6 +332,49 @@ B<Examples:>
   # { mode => 'intersection', count => 5, age_seconds => 1209600,
   #   warnings => [] }
 
+=head2 Template syntax
+
+Log file paths use a template grammar that allows variables and optional
+separator characters. The grammar is:
+
+  {[<sep>]<name>[<sep>]}
+
+Where C<E<lt>sepE<gt>> is a single character from the set C<-_.~/>.
+
+When the variable resolves to a non-empty value, the leading and
+trailing separators (if present) are emitted alongside the value. When
+the variable is empty, both the value AND its separators are dropped.
+
+Variables: C<command>, C<timestamp>, C<date>, C<time>, C<pid>, C<env>.
+
+B<Examples (with env=staging, cmd=deploy):>
+
+  Template                        Result
+  -------------------------------+--------------------------------------
+  genesis-{command}{-env}.log    | genesis-deploy-staging.log
+  {env-}{command}.log            | staging-deploy.log
+  logs/{env/}{command}.log       | logs/staging/deploy.log
+  {-env-}{command}               | -staging-deploy
+
+B<Examples (with env unset, cmd=ping):>
+
+  Template                        Result
+  -------------------------------+--------------------------------------
+  genesis-{command}{-env}.log    | genesis-ping.log
+  {env-}{command}.log            | ping.log
+  logs/{env/}{command}.log       | logs/ping.log
+  {-env-}{command}               | ping     (both separators drop)
+
+The bare form C<{name}> (no separators) remains supported and behaves
+as before - the variable is substituted with its value, or with the
+empty string when the value is empty.
+
+B<Deprecated:> the implicit C<{env}/> slash-removal special case (where
+the slash adjacent to a bare C<{env}> is automatically stripped when
+env is empty) is preserved for back-compat but emits a deprecation
+warning. Operators should migrate to the explicit C<{env/}>, C</{env}>,
+or C<{-env-}> forms.
+
 =head2 template_to_glob_pattern
 
   my $pattern = Genesis::Log::template_to_glob_pattern($template, %concrete);
@@ -339,9 +382,17 @@ B<Examples:>
 Convert a log path template into a filesystem glob pattern suitable for
 Perl's built-in C<glob> operator. Pure function: no IO.
 
-For each C<{name}> in the template, if C<name> is a key in C<%concrete>
-the value is substituted directly; otherwise the variable is replaced
-with a shape-matching wildcard. This lets callers control the grouping
+For each C<{[sep]name[sep]}> in the template, if C<name> is a key in
+C<%concrete> the value is substituted directly; otherwise the variable
+is replaced with a shape-matching wildcard. Separators are kept
+literally in the glob (matching files where the variable was present
+with the separator).
+
+The original behavior for bare C<{name}> is preserved as a special case
+of the new grammar - C<{name}> is C<{[sep]name[sep]}> with empty
+separators.
+
+This lets callers control the grouping
 axis: pass C<env =E<gt> ...> and C<command =E<gt> ...> to scope cleanup
 to a per-env-command group; omit them to glob the broad family.
 

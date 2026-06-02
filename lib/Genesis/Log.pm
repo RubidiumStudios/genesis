@@ -313,11 +313,22 @@ sub template_to_glob_pattern {
 		command   => '*',
 	);
 
-	$path =~ s/\{([a-z_]+)\}/
-		exists $concrete{$1}        ? $concrete{$1} :
-		exists $wildcards{$1}       ? $wildcards{$1} :
-		"{$1}"
-	/gex;
+	# {[sep]name[sep]} grammar - sep is a single char from the set
+	# [-_.~/] that wraps the substituted value.  In wildcard mode the
+	# sep is preserved literally in the glob pattern, so files matching
+	# the explicit-sep form (e.g. "-staging") are matched and files
+	# without (env empty case) are not.
+	my $sep = qr/[-_.~\/]/;
+	$path =~ s{ \{ ($sep)? ([a-z]+) ($sep)? \} }{
+		my ($lead, $name, $trail) = ($1 // '', $2, $3 // '');
+		if (exists $concrete{$name}) {
+			"$lead$concrete{$name}$trail";
+		} elsif (exists $wildcards{$name}) {
+			"$lead$wildcards{$name}$trail";
+		} else {
+			"{$lead$name$trail}";
+		}
+	}gex;
 
 	return $path;
 }
@@ -516,27 +527,49 @@ sub expand_log_template {
 	my $date = gmtime($s)->strftime("%Y%m%d");
 	my $time = gmtime($s)->strftime("%H%M%S");
 
-	# Replace template variables
-	my $path = $template;
-	$path =~ s/\{command\}/$ENV{GENESIS_COMMAND} || 'unknown'/ge;
-	$path =~ s/\{timestamp\}/$ts/g;
-	$path =~ s/\{date\}/$date/g;
-	$path =~ s/\{time\}/$time/g;
-	$path =~ s/\{pid\}/$$/g;
+	my %values = (
+		command   => ($ENV{GENESIS_COMMAND} // '') eq '' ? 'unknown' : $ENV{GENESIS_COMMAND},
+		timestamp => $ts,
+		date      => $date,
+		time      => $time,
+		pid       => $$,
+		env       => $ENV{GENESIS_ENVIRONMENT} // '',
+	);
 
-	# Handle {env} specially - remove the path component if env is not set
-	if ($path =~ /\{env\}/ && !$ENV{GENESIS_ENVIRONMENT}) {
-		# Remove {env}/ patterns
-		$path =~ s/\{env\}\///g;
-		# Remove /{env}/ patterns
-		$path =~ s/\/\{env\}\//\//g;
-		# Remove /{env} at end
-		$path =~ s/\/\{env\}$//g;
-		# Remove any remaining {env}
-		$path =~ s/\{env\}//g;
-	} else {
-		$path =~ s/\{env\}/$ENV{GENESIS_ENVIRONMENT}/ge;
+	my $path = $template;
+
+	# Legacy implicit {env}/ slash-removal: when bare {env} appears
+	# adjacent to slashes AND env is empty, strip the slash with the
+	# var.  Preserved for back-compat but deprecated in favor of the
+	# explicit {env/}, {/env} forms below.
+	if ($values{env} eq '' && $path =~ /\{env\}/) {
+		my $fired = 0;
+		$fired += ($path =~ s/\{env\}\///g);
+		$fired += ($path =~ s/\/\{env\}\//\//g);
+		$fired += ($path =~ s/\/\{env\}$//g);
+		if ($fired) {
+			require Genesis;
+			Genesis::warning(
+				"Template '%s' uses implicit {env}/ slash-removal which ".
+				"is deprecated; use {env/}, {/env}, or {-env-} for ".
+				"explicit separator handling.",
+				$template
+			);
+		}
 	}
+
+	# {[sep]name[sep]} grammar - sep is a single char from [-_.~/].
+	# Empty values drop both the value and its separators.
+	my $sep = qr/[-_.~\/]/;
+	$path =~ s{ \{ ($sep)? ([a-z]+) ($sep)? \} }{
+		my ($lead, $name, $trail) = ($1 // '', $2, $3 // '');
+		if (exists $values{$name}) {
+			my $v = $values{$name};
+			(defined($v) && length($v)) ? "$lead$v$trail" : '';
+		} else {
+			"{$lead$name$trail}";
+		}
+	}gex;
 
 	# Clean up any double slashes
 	$path =~ s/\/\/+/\//g;
