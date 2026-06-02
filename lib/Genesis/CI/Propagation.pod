@@ -1,0 +1,373 @@
+=head1 NAME
+
+Genesis::CI::Propagation - DAG-driven propagation of pipeline files between environment branches
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Propagation;
+
+    # Phase 1: compute which envs are direct entry points for propagation
+    my $targets = Genesis::CI::Propagation::compute_propagation_targets(
+        dag_order      => \@ordered_env_names,
+        parent_of      => \%parent_map,
+        env_changed    => \%propagation_diff,
+        env_undeployed => \%deploy_diff,        # optional
+        scope          => \@scope,              # optional
+    );
+
+    # Phase 2: execute the propagation against git + GitHub
+    my $result = Genesis::CI::Propagation::propagate_envs(
+        git           => $git,
+        github        => $github,
+        owner_repo    => 'acme/widgets',
+        targets       => [
+            { env => 'staging', require_pr => 0, detail => {...} },
+            { env => 'preprod', require_pr => 1, detail => {...} },
+        ],
+        control       => 'control',
+        control_sha   => $sha,
+        control_short => substr($sha, 0, 7),
+
+        push_direct_commits => 1,   # manual provider
+        push_pr_branches    => 1,
+        create_prs          => 1,
+        no_push             => 0,
+        dry_run             => 0,
+        push_extra_branches => ['control'],
+    );
+
+=head1 DESCRIPTION
+
+C<Genesis::CI::Propagation> owns the two phases of pipeline propagation:
+
+=over 4
+
+=item *
+
+B<Planning> (C<compute_propagation_targets>) - pure-functional DAG
+analysis.  Given the topology and per-env diffs, decides which
+environments are direct entry points for a propagation event and
+which files each receives.  No git, no IO.
+
+=item *
+
+B<Execution> (C<propagate_envs>) - applies a computed target list to
+a real git working tree and (optionally) the GitHub API.  Implements
+the rolling C<pr/E<lt>envE<gt>> branch model with idempotent
+re-runs, mode-parameterised push behavior, and batched push + PR
+API calls.
+
+=back
+
+Both phases are provider-agnostic.  Callers parameterise execution
+for Manual vs Concourse modes by setting the option flags on
+C<propagate_envs>.  The Manual provider invokes propagate from the
+deploy postlude with C<push_direct_commits =E<gt> 1>; the Concourse
+provider's per-env pipeline task invokes it with
+C<push_direct_commits =E<gt> 0> (because the concourse C<put> step
+on the env's git resource handles direct-mode pushes, while
+C<pr/E<lt>envE<gt>> branches and PR creation still go through
+genesis because there is no concourse resource for creating GitHub
+pull requests).
+
+=head1 FUNCTIONS
+
+=head2 compute_propagation_targets
+
+    my $targets = Genesis::CI::Propagation::compute_propagation_targets(
+        dag_order      => \@dag,
+        parent_of      => \%parents,
+        env_changed    => \%propagation_diff,
+        env_undeployed => \%deploy_diff,    # optional
+        scope          => \@scope,           # optional
+    );
+
+Determines which environments should receive a propagation event
+directly, and which files each receives.  An environment is a
+direct entry point when its propagation diff is non-empty AND none
+of its propagation-diff files overlap with any ancestor's
+undeployed-set.  Descendants of entry-point envs wait for the
+cascade.
+
+This ancestor-overlap filter is what prevents the
+fast-forward-append cherry-pick problem in C<propagate_envs>: by
+the time a propagation target reaches the rolling C<pr/E<lt>envE<gt>>
+branch, it touches files that are disjoint from anything already
+queued on the branch from prior propagations.
+
+B<Parameters:>
+
+=over 4
+
+=item C<dag_order>
+
+Arrayref of environment names in topological order (root first).
+
+=item C<parent_of>
+
+Hashref mapping each env name to its parent env name (or undef for
+roots).
+
+=item C<env_changed>
+
+Hashref mapping each env name to the arrayref of files that should
+be propagated to it (the C<control> versus C<env-branch> diff,
+filtered to dependency files).
+
+=item C<env_undeployed>
+
+Hashref mapping each env name to the files it has on-branch but has
+not yet deployed (from BOSH/exodus).  Used for the ancestor-overlap
+filter.  Defaults to C<env_changed> when omitted, preserving
+single-diff behaviour for callers that aren't deployment-aware.
+
+=item C<scope>
+
+Arrayref of env names to consider.  Defaults to C<dag_order>.
+Useful when the operator restricts propagation to a subset of the
+DAG.
+
+=back
+
+B<Returns:> hashref of C<{ env_name =E<gt> \@files_to_propagate }>.
+Only direct entry-point envs appear.
+
+=head2 propagate_envs
+
+    my $result = Genesis::CI::Propagation::propagate_envs(
+        git                 => $git,
+        github              => $github,
+        owner_repo          => 'acme/widgets',
+        targets             => \@targets,
+        control             => 'control',
+        control_sha         => $sha,
+        control_short       => $short,
+        push_direct_commits => 1,
+        push_pr_branches    => 1,
+        create_prs          => 1,
+        no_push             => 0,
+        dry_run             => 0,
+        push_extra_branches => ['control'],
+    );
+
+Executes the propagation against the live git working tree and
+optionally the GitHub API.  Iterates the targets; for each, dispatches
+to a direct-to-env-branch commit path or a rolling
+C<pr/E<lt>envE<gt>> branch + PR path based on the target's
+C<require_pr> flag.  Batches branch pushes into a single
+C<git push> at the end, then makes all PR API calls.
+
+The rolling-branch decision tree (PR mode):
+
+=over 4
+
+=item *
+
+Query open PRs from GitHub: C<open_prs(base =E<gt> $env, head =E<gt> "pr/$env")>.
+
+=item *
+
+B<Count 0> - clean any stale remote C<pr/E<lt>envE<gt>>, branch
+from C<E<lt>envE<gt>>, apply propagation commit, queue for push +
+C<create_pr>.
+
+=item *
+
+B<Count 1> - fetch C<pr/E<lt>envE<gt>> if missing locally, check
+out, check idempotency marker.  If the latest commit subject
+already references this C<control_short>, full-skip the env (no
+commit, no push, no PR update; env counted as
+C<skipped_idempotent>).  Otherwise append the propagation commit,
+queue for push + C<update_pr>.
+
+=item *
+
+B<Count E<gt> 1> - warn and use the first PR.  Treated as Count 1.
+Unreachable in practice because GitHub enforces (head, base)
+uniqueness for open PRs.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item C<git>
+
+A C<Service::Git> instance pointing at the working tree.  Required.
+
+=item C<github>
+
+A C<Service::Github> instance with credentials authorised for the
+target repository.  Required when any target has C<require_pr =E<gt> 1>
+and C<no_push> is false; optional otherwise (PR-mode targets under
+C<no_push> still run their local-branch work).
+
+=item C<owner_repo>
+
+The C<"owner/name"> string for the GitHub repository.  Required
+when C<github> is supplied.
+
+=item C<targets>
+
+Arrayref of target hashes.  Each:
+
+    {
+        env        => 'staging',
+        require_pr => 0|1,
+        detail     => {
+            changed => [...],     # files to copy from control_sha
+            deleted => [...],     # files to remove
+            renamed => {...},     # old_path => new_path
+        },
+    }
+
+The C<env> name is also the local git branch name for the target.
+For C<require_pr =E<gt> 1>, the actual propagation branch is
+C<pr/$env>.
+
+=item C<control>
+
+The control branch name (typically C<"control">).  Used for the PR
+body and as the default value of C<push_extra_branches>.
+
+=item C<control_sha>, C<control_short>
+
+The full and short SHA of the source commit being propagated.  The
+short SHA appears in the commit subject's idempotency marker:
+C<[pipeline] control@E<lt>shortE<gt> -E<gt> E<lt>envE<gt>>.
+
+=item C<push_direct_commits> (default 1)
+
+Whether to queue direct-to-C<E<lt>envE<gt>> commits for the
+batched push.  Manual provider sets to 1.  Concourse provider sets
+to 0, since concourse's C<put> step on the env's git resource is
+what lands direct-mode commits upstream.
+
+=item C<push_pr_branches> (default 1)
+
+Whether to queue C<pr/E<lt>envE<gt>> branches for the batched push.
+Always 1 in current usage: concourse cannot push these branches
+itself (no PR resource), and manual operators rely on this to make
+the PR visible.
+
+=item C<create_prs> (default 1)
+
+Whether to call C<create_pr> / C<update_pr> against the GitHub API.
+
+=item C<no_push> (default 0)
+
+Master kill switch.  When true, forces C<push_direct_commits>,
+C<push_pr_branches>, and C<create_prs> all to 0 regardless of their
+explicit values.  Local git operations (commits, branch creation,
+checkout) still happen, allowing inspection workflows.
+
+=item C<dry_run> (default 0)
+
+When true, reports what would happen without touching git or the
+GitHub API.  Each target counts as C<propagated> in the result.
+
+=item C<push_extra_branches> (default C<[]>)
+
+Arrayref of additional branches to include in the batched push.
+The Manual provider typically passes C<[$control]> so that any new
+control commits land on the remote alongside the propagated branches.
+
+=back
+
+B<Returns:> hashref
+
+    {
+        propagated         => N,         # envs that successfully propagated
+                                         # (includes skipped_idempotent)
+        skipped_idempotent => [envs],    # envs whose pr/<env> HEAD already
+                                         # matched this control_sha
+        errors             => [strings], # per-env failures (loop bails on
+                                         # first error and skips push + PRs)
+    }
+
+The function does not call C<bail> on per-env failures - it
+collects them and returns.  Callers (such as the C<propagate>
+command) decide whether to bail on errors or proceed.  Push and PR
+API blocks are skipped entirely when C<errors> is non-empty, so the
+remote never sees partial state from a failed propagation event.
+
+=head1 LIMITATIONS
+
+=head2 GitHub-only for PR-based propagation
+
+PR creation, lookup, and update go through C<Service::Github> only.
+GitLab, Bitbucket, and Gitea are not supported.  When a target has
+C<require_pr =E<gt> 1>, the caller must supply a C<Service::Github>
+instance and the C<owner_repo> resolves to a GitHub C<owner/name>
+slug.  Adding another forge would require a parallel
+C<Service::E<lt>ForgeE<gt>> with the same C<open_prs / create_pr /
+update_pr> surface, plus a dispatch layer in C<propagate_envs>.
+
+=head2 Single-repo working tree only
+
+C<propagate_envs> assumes the C<Service::Git> instance points at a
+single working tree where all target env branches can be checked
+out.  This is the Manual mode shape.
+
+The Concourse mode shape - one git workspace per env branch,
+provided as a separate job input - is B<not yet wired>.  When that
+work lands, callers will resolve workspace paths via convention or
+environment variables and invoke C<propagate_envs> once per env
+target, each with a distinct C<git> handle.  The interface is
+stable for that change; only the caller layer changes.
+
+=head2 Fast-forward-only push for C<pr/E<lt>envE<gt>> branches
+
+When the count=1 case appends a new commit to an existing
+C<pr/E<lt>envE<gt>> branch, the push is a plain
+C<git push origin pr/E<lt>envE<gt>>.  If the remote has commits
+that the local branch does not (non-fast-forward), the push fails
+and the env is reported in C<errors>.
+
+The cherry-pick + force-push recovery path (rebuild
+C<pr/E<lt>envE<gt>> locally from C<E<lt>envE<gt>>, cherry-pick the
+remote's pending commits, append the new propagation, force-push)
+is B<deferred>.  In practice the C<compute_propagation_targets>
+ancestor-overlap filter prevents the non-fast-forward case: a fresh
+propagation reaching C<pr/E<lt>envE<gt>> touches files disjoint
+from anything already queued on the branch.  If real-world usage
+proves the case reachable, the recovery path will be added; until
+then, the failure is caught and surfaced rather than papered over.
+
+=head2 C<--no-push> semantics are master-kill-switch
+
+C<no_push =E<gt> 1> currently allows read-only network operations
+(C<open_prs> queries the GitHub API, C<fetch_branch> contacts the
+remote) but skips all writes.  Local C<pr/E<lt>envE<gt>> branches
+are left with the propagation commit applied; mixing C<no_push>
+runs with normal runs may require manual local-branch cleanup.
+
+The alternative interpretation - skip all network including reads,
+so the decision tree degrades to "always create local branch from
+C<E<lt>envE<gt>>" - is still under review.  If preferred, it would
+be a single guard at the top of C<_propagate_one_pr_env>.
+
+=head2 Manifest store under C<require_pr> is broken
+
+When an env has C<require_pr =E<gt> 1>, propagation creates the
+rolling C<pr/E<lt>envE<gt>> branch instead of pushing to
+C<E<lt>envE<gt>>.  This breaks the post-deploy manifest writer
+for C<manifest_store=repository> and C<manifest_store=hybrid>,
+which expect to push the rendered manifest to C<E<lt>envE<gt>>.
+
+C<manifest_store=exodus> is unaffected (writes to vault, not git).
+
+Tracked in FWT-988; design discussion pending.  Workaround:
+configure C<manifest_store=exodus> on envs with
+C<require_pr =E<gt> 1>.
+
+=head1 AUTHOR
+
+Originally part of C<Genesis::Commands::Pipelines>; extracted into
+C<Genesis::CI::Propagation> in FWT-944 to share execution between
+the C<genesis propagate> command and the Manual provider's deploy
+auto-trigger (FWT-987), and to make the rolling-branch decision
+tree unit-testable in isolation.
+
+=cut
