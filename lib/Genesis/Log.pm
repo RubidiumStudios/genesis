@@ -352,6 +352,80 @@ sub find_log_files {
 	return [ sort { $b->{mtime} <=> $a->{mtime} } @files ];
 }
 
+# apply_retention_policy - decide which files to delete from a list.
+#
+# Pure function: no IO.  Given a candidate file list (as produced by
+# find_log_files) and a parsed retention policy (as produced by
+# parse_lifespan), returns the subset of files that should be deleted.
+#
+# Args:
+#   $files  - arrayref of { path, mtime } hashrefs
+#   $policy - hashref { mode, count, age_seconds, ... }
+#
+# Returns: arrayref of file hashrefs (subset of $files)
+#
+# Semantics by mode:
+#   'none'         - keep all (forever); returns empty arrayref
+#   'truncate'     - reserved forward-compat; returns empty arrayref
+#   'union'        - keep file if EITHER count or age bound votes keep
+#   'intersection' - keep file only if BOTH count and age bounds vote keep
+#
+# A bound that is undef contributes "no opinion" - the result collapses
+# to the other bound alone.
+sub apply_retention_policy {
+	my ($files, $policy) = @_;
+
+	$files //= [];
+	return [] if !$policy || $policy->{mode} eq 'none' || $policy->{mode} eq 'truncate';
+
+	my $count       = $policy->{count};
+	my $age_seconds = $policy->{age_seconds};
+	my $mode        = $policy->{mode};
+	my $now         = _now();
+
+	# Both bounds undef in a non-degenerate mode: nothing to decide on,
+	# keep everything (parser shouldn't produce this, but be defensive).
+	return [] if !defined($count) && !defined($age_seconds);
+
+	my @sorted = sort { $b->{mtime} <=> $a->{mtime} } @$files;
+
+	my @to_delete;
+	for my $i (0 .. $#sorted) {
+		my $f = $sorted[$i];
+
+		# Each bound votes keep/delete/abstain (undef = abstain)
+		my $count_keeps =
+			defined($count) ? ($i < $count ? 1 : 0) : undef;
+		my $age_keeps =
+			defined($age_seconds)
+				? (($now - $f->{mtime}) < $age_seconds ? 1 : 0)
+				: undef;
+
+		my $keep;
+		if ($mode eq 'union') {
+			# Kept if any defined bound votes keep
+			$keep = 0;
+			$keep ||= 1 if defined($count_keeps) && $count_keeps;
+			$keep ||= 1 if defined($age_keeps)   && $age_keeps;
+		} else {  # intersection
+			# Kept only if every defined bound votes keep
+			$keep = 1;
+			$keep = 0 if defined($count_keeps) && !$count_keeps;
+			$keep = 0 if defined($age_keeps)   && !$age_keeps;
+		}
+
+		push @to_delete, $f unless $keep;
+	}
+
+	# Return oldest-first; operator-friendly for cleanup reporting and
+	# matches the natural "files to be deleted, oldest to newest" order.
+	return [ sort { $a->{mtime} <=> $b->{mtime} } @to_delete ];
+}
+
+# Tiny indirection so tests can stub time(); production code calls
+# the real time() via this thunk.
+sub _now { time() }
+
 sub expand_log_template {
 	my ($self, $template) = @_;
 

@@ -414,6 +414,72 @@ variables (same as C<template_to_glob_pattern>)
 
 =back
 
+=head2 apply_retention_policy
+
+  my $to_delete = Genesis::Log::apply_retention_policy($files, $policy);
+
+Pure decision function: given a list of candidate files (as produced by
+C<find_log_files>) and a parsed retention policy (as produced by
+C<parse_lifespan>), returns the subset of files to delete. No IO.
+
+The age comparison is strict (C<E<lt>>): a file is "kept by age" iff
+its age is strictly less than C<age_seconds>. A file exactly at the
+threshold is considered expired.
+
+B<Semantics by mode:>
+
+=over 4
+
+=item * C<'none'> -- keep all (the C<forever> case); returns empty arrayref
+
+=item * C<'truncate'> -- reserved forward-compat; returns empty arrayref
+
+=item * C<'union'> -- keep file if EITHER count or age bound votes keep;
+delete only files that fail BOTH bounds. A bound that is C<undef>
+abstains and does not contribute.
+
+=item * C<'intersection'> -- keep file only if BOTH bounds vote keep;
+delete files that fail EITHER bound. A bound that is C<undef> abstains
+and does not contribute.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item * C<$files> -- arrayref of C<{ path =E<gt> ..., mtime =E<gt> ... }>
+hashrefs. Input order is not assumed; sorting is handled internally.
+
+=item * C<$policy> -- hashref produced by C<parse_lifespan>.
+
+=back
+
+B<Returns:> arrayref of file hashrefs to delete, sorted by mtime
+ascending (oldest first). Empty arrayref when nothing should be deleted.
+
+B<Examples:>
+
+  # Keep last 5; delete the rest
+  my $delete = Genesis::Log::apply_retention_policy(
+    $files,
+    Genesis::Log::parse_lifespan('5'),
+  );
+
+  # Keep files newer than 7 days OR the 10 most-recent (whichever is
+  # more); delete the rest
+  my $delete = Genesis::Log::apply_retention_policy(
+    $files,
+    Genesis::Log::parse_lifespan('min of 10 or 7d'),
+  );
+
+  # Keep ONLY files that are both in the top 5 AND newer than 2 weeks;
+  # delete everything else
+  my $delete = Genesis::Log::apply_retention_policy(
+    $files,
+    Genesis::Log::parse_lifespan('max of 5 or 2 weeks'),
+  );
+
 =head2 expand_log_template
 
   my $path = $logger->expand_log_template($template);
