@@ -426,6 +426,87 @@ sub apply_retention_policy {
 # the real time() via this thunk.
 sub _now { time() }
 
+# cleanup_old_logs - find + decide + unlink for a single log config.
+#
+# Side-effect-ful orchestrator that composes parse_lifespan,
+# find_log_files, and apply_retention_policy, then unlinks the
+# resulting set.  Tolerant of failures: parser bails and unlink
+# errors are recorded in the result, never propagated.
+#
+# Args:
+#   $log_config - hashref with at least `file` and `lifespan` keys
+#                 (other keys are ignored)
+#
+#   %opts:
+#     active_path    => path-string  - protect from deletion (current
+#                                       session's running log; never
+#                                       unlinked even if selected)
+#     reserve_slots  => N            - subtract from policy count to
+#                                       reserve budget for upcoming
+#                                       new files (Subtask F caller
+#                                       decides based on on_reuse mode)
+#     concrete       => hashref      - per-template-var substitutions
+#                                       passed through to find_log_files
+#
+# Returns: { deleted => [paths], errors => [strings] }
+sub cleanup_old_logs {
+	my ($log_config, %opts) = @_;
+
+	my $result = { deleted => [], errors => [] };
+
+	return $result unless $log_config
+		&& $log_config->{file}
+		&& defined($log_config->{lifespan})
+		&& length($log_config->{lifespan});
+
+	my $policy;
+	my $ok = eval {
+		$policy = parse_lifespan($log_config->{lifespan});
+		1;
+	};
+	unless ($ok) {
+		my $err = $@;
+		$err =~ s/\s+$//;
+		push @{$result->{errors}}, "lifespan parse: $err";
+		return $result;
+	}
+
+	# No-op policies
+	return $result if $policy->{mode} eq 'none'
+		|| $policy->{mode} eq 'truncate';
+
+	# Reserve slots for an upcoming new file (rotate-archive or
+	# templated-new-path) - shrink the effective count budget.
+	my $reserve = $opts{reserve_slots} // 0;
+	if ($reserve > 0 && defined $policy->{count}) {
+		my $adjusted = $policy->{count} - $reserve;
+		$adjusted = 0 if $adjusted < 0;
+		$policy = { %$policy, count => $adjusted };
+	}
+
+	my $concrete = $opts{concrete} // {};
+	my $files = find_log_files($log_config->{file}, %$concrete);
+	my $to_delete = apply_retention_policy($files, $policy);
+
+	my $active = $opts{active_path};
+	for my $f (@$to_delete) {
+		if (defined $active && $f->{path} eq $active) {
+			next;  # current session's log; protected
+		}
+		if (_unlink($f->{path})) {
+			push @{$result->{deleted}}, $f->{path};
+		} else {
+			push @{$result->{errors}},
+				sprintf("unlink %s: %s", $f->{path}, $!);
+		}
+	}
+
+	return $result;
+}
+
+# Tiny indirection so tests can stub the actual unlink call.
+sub _unlink { CORE::unlink($_[0]) }
+
 sub expand_log_template {
 	my ($self, $template) = @_;
 

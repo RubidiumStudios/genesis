@@ -480,6 +480,74 @@ B<Examples:>
     Genesis::Log::parse_lifespan('max of 5 or 2 weeks'),
   );
 
+=head2 cleanup_old_logs
+
+  my $result = Genesis::Log::cleanup_old_logs($log_config, %opts);
+
+Side-effect-ful orchestrator. Composes C<parse_lifespan>,
+C<find_log_files>, and C<apply_retention_policy> and unlinks the
+resulting file set. Tolerant of failures: parser bails and unlink
+errors are recorded in the result, never propagated. Callers
+(typically the higher-level startup integration) may emit a warning
+summary but should not bail on cleanup errors.
+
+B<Parameters:>
+
+=over 4
+
+=item * C<$log_config> -- hashref with at least C<file> and C<lifespan>
+keys. Other keys are ignored. A missing or empty C<file> or C<lifespan>
+is a no-op.
+
+=item * C<%opts:>
+
+=over 4
+
+=item C<active_path> -- the realized path of the current invocation's
+running log. If selected for deletion, this path is skipped.
+
+=item C<reserve_slots> -- non-negative integer. When the policy has a
+C<count> bound, the effective budget is reduced by C<reserve_slots>
+(floored at 0). Callers reserve slots to make room for an upcoming new
+file (rotate-archive or templated-new-path scenarios; see Subtask F /
+the C<on_reuse> contract). Defaults to 0.
+
+=item C<concrete> -- hashref of template-variable substitutions passed
+through to C<find_log_files>. Lets the orchestrator scope cleanup to a
+per-group family (e.g., C<{ env =E<gt> 'staging', command =E<gt> 'deploy' }>)
+rather than the broad pattern.
+
+=back
+
+=back
+
+B<Returns:>
+
+  {
+    deleted => [ '/path/to/foo.log', '/path/to/bar.log', ... ],
+    errors  => [ 'lifespan parse: ...', 'unlink /path: ...', ... ],
+  }
+
+B<Examples:>
+
+  # Simple count-based cleanup of a global last-trace family.
+  my $r = Genesis::Log::cleanup_old_logs({
+    file     => '~/.genesis/logs/{timestamp}.log',
+    lifespan => '50',
+  });
+
+  # Per-env-command scoped cleanup with a reservation for the new write
+  # about to happen (on_reuse: rotate or templated-new path).
+  my $r = Genesis::Log::cleanup_old_logs(
+    {
+      file     => '~/.genesis/logs/{env}/{command}/{timestamp}.log',
+      lifespan => 'min of 7 or 14d',
+    },
+    reserve_slots => 1,
+    concrete      => { env => 'staging', command => 'deploy' },
+    active_path   => '/Users/me/.genesis/logs/staging/deploy/20260603T....log',
+  );
+
 =head2 expand_log_template
 
   my $path = $logger->expand_log_template($template);
