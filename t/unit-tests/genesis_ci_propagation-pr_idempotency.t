@@ -10,7 +10,7 @@ use Test::More;
 
 use Genesis;
 $Genesis::VERSION = '999.999.999';
-use_ok 'Genesis::Commands::Pipelines';
+use_ok 'Genesis::CI::Propagation';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -55,7 +55,7 @@ sub stub_git {
 subtest 'returns false when branch does not exist' => sub {
 	plan tests => 1;
 	my $git = stub_git();
-	ok !Genesis::Commands::Pipelines::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
+	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
 		'no branch => not idempotent (caller will create the branch)';
 };
 
@@ -65,7 +65,7 @@ subtest 'returns false when branch exists but has no commits' => sub {
 		branch_exists => { 'pr/staging' => 1 },
 		log_subjects  => { 'pr/staging' => [] },
 	);
-	ok !Genesis::Commands::Pipelines::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
+	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
 		'empty branch => not idempotent';
 };
 
@@ -80,7 +80,7 @@ subtest 'returns true when latest commit references the same control sha' => sub
 			],
 		},
 	);
-	ok Genesis::Commands::Pipelines::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
+	ok Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
 		'matching control sha in latest commit => idempotent (skip duplicate)';
 };
 
@@ -95,7 +95,7 @@ subtest 'returns false when latest commit is a different control sha' => sub {
 			],
 		},
 	);
-	ok !Genesis::Commands::Pipelines::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
+	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
 		'latest commit is a different sha => not idempotent (even if older commit matches)';
 };
 
@@ -105,7 +105,7 @@ subtest 'returns false when latest commit is unrelated' => sub {
 		branch_exists => { 'pr/staging' => 1 },
 		log_subjects  => { 'pr/staging' => ['operator-manual-edit'] },
 	);
-	ok !Genesis::Commands::Pipelines::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
+	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
 		'unrelated latest commit => not idempotent';
 };
 
@@ -122,10 +122,10 @@ subtest 'matches even when control sha is a substring of a longer sha' => sub {
 	);
 	# This SHOULD be false: 'abc1234' is a prefix of the actual sha
 	# 'abc1234567', not an equal match.
-	ok !Genesis::Commands::Pipelines::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
+	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
 		'shorter sha does not match a longer sha that starts with the same chars';
 	# And the full sha SHOULD match.
-	ok Genesis::Commands::Pipelines::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234567'),
+	ok Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234567'),
 		'full sha matches its own commit';
 };
 

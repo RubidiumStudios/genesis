@@ -626,177 +626,42 @@ sub propagate {
 		}
 	}
 
-	# Propagate to entry point envs
-	my $propagated = 0;
-	my @pushed_branches;
-	my @pr_targets;
-	my $error;
+	# Build the propagation target list in DAG order, then delegate
+	# the per-env execution + batched push + PR API calls to the
+	# shared Genesis::CI::Propagation::propagate_envs.
+	my @targets;
 	for my $env_name (@scope) {
 		next unless $env_propagate->{$env_name};
-
-		my $detail  = $env_changed_detail{$env_name}
-			|| { changed => $env_propagate->{$env_name}, deleted => [], renamed => {} };
-		my @to_copy = @{$detail->{changed}};
-		my @to_rm   = @{$detail->{deleted}};
-		my %renames = %{$detail->{renamed}};
-		my $total      = scalar(@to_copy) + scalar(@to_rm);
-		my $msg        = sprintf("[pipeline] control\@%s -> %s", $control_short, $env_name);
-		my $require_pr = $nodes->{$env_name}{require_pr} // 0;
-		my $prop_branch = "propagate/$env_name/$control_short";
-
-		if ($dry_run) {
-			info "  #C{%s}: %d file%s to propagate", $env_name, $total, $total == 1 ? '' : 's';
-			for my $f (@to_copy) {
-				my ($old) = grep { $renames{$_} eq $f } keys %renames;
-				my ($disp_f)   = $git->unprefixed($f);
-				my ($disp_old) = $old ? $git->unprefixed($old) : ();
-				my $note = $old ? " #Yi{(renamed from $disp_old)}" : '';
-				info "    #G{M} %s%s", $disp_f, $note;
-			}
-			info "    #R{D} %s", $_ for $git->unprefixed(@to_rm);
-			info "    #Yi{commit}: %s", $msg;
-			if ($require_pr) {
-				info "    #Yi{PR}: would open %s -> %s", $prop_branch, $env_name;
-			}
-			$propagated++;
-		} elsif ($require_pr) {
-			# PR-based propagation: commit onto a short-lived propagation branch.
-			# Idempotency is checked via the GitHub API when credentials are
-			# available (normal run), or via local branch existence when not
-			# (--no-push).  If an open PR is found on the remote, the branch is
-			# fetched rather than re-created.
-			eval {
-				my $existing_pr;
-
-				if ($github) {
-					my $prs = $github->list_prs("$gh_owner/$gh_repo",
-						head  => $prop_branch,
-						base  => $env_name,
-						state => 'open',
-					);
-					($existing_pr) = grep { $_->{head}{ref} eq $prop_branch } @$prs;
-				}
-
-				if ($existing_pr) {
-					unless ($git->branch_exists($prop_branch)) {
-						$git->fetch_branch($prop_branch);
-					}
-					$git->checkout($prop_branch);
-					info "  #Yi{%s}: PR #%d already open, reusing branch #C{%s}",
-						$env_name, $existing_pr->{number}, $prop_branch;
-				} elsif ($git->branch_exists($prop_branch)) {
-					# --no-push re-run: local branch exists, no PR yet
-					$git->checkout($prop_branch);
-					info "  #Yi{%s}: reusing local propagation branch #C{%s}",
-						$env_name, $prop_branch;
-				} else {
-					$git->checkout($env_name);
-					$git->create_branch($prop_branch);
-					$git->checkout($prop_branch);
-					$git->checkout_file($control_sha, $_) for @to_copy;
-					$git->rm(@to_rm)                      if @to_rm;
-					$git->commit($msg, @to_copy);
-					info "  #G{%s}: committed %d file%s to #C{%s}",
-						$env_name, $total, $total == 1 ? '' : 's', $prop_branch;
-					for my $f (@to_copy) {
-						my ($old) = grep { $renames{$_} eq $f } keys %renames;
-						my ($disp_f)   = $git->unprefixed($f);
-						my ($disp_old) = $old ? $git->unprefixed($old) : ();
-						my $note = $old ? " #Yi{(renamed from $disp_old)}" : '';
-						info "    #G{M} %s%s", $disp_f, $note;
-					}
-					info "    #R{D} %s", $_ for $git->unprefixed(@to_rm);
-				}
-
-				push @pushed_branches, $prop_branch unless $no_push;
-				push @pr_targets, {
-					env      => $env_name,
-					branch   => $prop_branch,
-					detail   => $detail,
-					existing => $existing_pr,
-				};
-				$propagated++;
-			};
-			if ($@) {
-				$error = $@;
-				$git->reset_working_tree;
-				warning("PR propagation to #C{%s} failed: %s",
-					$env_name, $error =~ s/\s+$//r);
-				last;
-			}
-		} else {
-			eval {
-				$git->checkout($env_name);
-				$git->checkout_file($control_sha, $_) for @to_copy;
-				$git->rm(@to_rm)                      if @to_rm;
-				$git->commit($msg, @to_copy);
-				info "  #G{%s}: propagated %d file%s", $env_name, $total, $total == 1 ? '' : 's';
-				for my $f (@to_copy) {
-					my ($old) = grep { $renames{$_} eq $f } keys %renames;
-					my ($disp_f)   = $git->unprefixed($f);
-					my ($disp_old) = $old ? $git->unprefixed($old) : ();
-					my $note = $old ? " #Yi{(renamed from $disp_old)}" : '';
-					info "    #G{M} %s%s", $disp_f, $note;
-				}
-				info "    #R{D} %s", $_ for $git->unprefixed(@to_rm);
-				push @pushed_branches, $env_name;
-				$propagated++;
-			};
-			if ($@) {
-				$error = $@;
-				$git->reset_working_tree;
-				warning("Propagation to #C{%s} failed: %s",
-					$env_name, $error =~ s/\s+$//r);
-				last;
-			}
-		}
+		push @targets, {
+			env        => $env_name,
+			require_pr => $nodes->{$env_name}{require_pr} // 0,
+			detail     => $env_changed_detail{$env_name} || {
+				changed => $env_propagate->{$env_name},
+				deleted => [],
+				renamed => {},
+			},
+		};
 	}
 
-	# Restore branch explicitly (DESTROY would too, but be clear)
-	$git->restore_branch unless $dry_run;
-	bail("Propagation aborted due to error.") if $error;
+	my $owner_repo = ($gh_owner && $gh_repo) ? "$gh_owner/$gh_repo" : undef;
+	my $result = Genesis::CI::Propagation::propagate_envs(
+		git           => $git,
+		github        => $github,
+		owner_repo    => $owner_repo,
+		targets       => \@targets,
+		control       => $control,
+		control_sha   => $control_sha,
+		control_short => $control_short,
+		push_direct_commits => 1,    # manual provider
+		push_pr_branches    => 1,
+		create_prs          => 1,
+		no_push             => $no_push,
+		dry_run             => $dry_run,
+		push_extra_branches => @targets ? [$control] : [],
+	);
 
-	# Push control and propagated/PR branches to remote
-	if ($propagated && !$dry_run && !$no_push) {
-		my $remote = $git->default_remote;
-		if ($remote) {
-			info "\n#G{Pushing} to #C{%s}...", $remote;
-			my $results = $git->push($remote, $control, @pushed_branches);
-			for my $branch (@pushed_branches) {
-				if ($results->{$branch}) {
-					info "  #G{%s}: pushed", $branch;
-				} else {
-					warning("Failed to push #C{%s} to #C{%s}.", $branch, $remote);
-				}
-			}
-		}
-
-		# Open or update GitHub PRs for require_pr environments.
-		# $github is only set when credentials were validated; @pr_targets
-		# is only populated for require_pr envs; both guards are needed.
-		if (@pr_targets && $github) {
-			my $owner_repo = "$gh_owner/$gh_repo";
-			info "\n#G{Opening pull requests} on #C{%s}...", $owner_repo;
-			for my $pt (@pr_targets) {
-				my $pr_env    = $pt->{env};
-				my $pr_branch = $pt->{branch};
-				my $pr_title  = sprintf("[pipeline] propagate control\@%s to %s",
-					$control_short, $pr_env);
-				my $pr_body = _build_pr_body($pr_env, $control_sha, $control_short, $pt->{detail});
-				eval {
-					my $pr = _find_or_open_pr(
-						$github, $owner_repo, $pr_branch, $pr_env,
-						$pr_title, $pr_body, $pt->{existing}
-					);
-					info "  #G{%s}: PR #%d %s", $pr_env, $pr->{number}, $pr->{html_url};
-				};
-				if ($@) {
-					warning("Failed to open/update PR for #C{%s}: %s",
-						$pr_env, $@ =~ s/\s+$//r);
-				}
-			}
-		}
-	}
+	bail("Propagation aborted due to error.") if @{$result->{errors}};
+	my $propagated = $result->{propagated};
 
 	# Report any envs we deliberately skipped because they were already
 	# at-or-ahead of the cascade source (avoids silent regressions).
@@ -946,90 +811,6 @@ sub _github_owner_repo_from_remote {
 		return ($1, $2);
 	}
 	return (undef, undef);
-}
-# }}}
-# _pr_branch_has_control_sha - idempotency check for rolling-branch PR propagation {{{
-#
-# Returns 1 iff $branch exists and its latest commit message
-# references the given $control_short (e.g. "[pipeline] control@abc1234").
-# Used to skip duplicate-commit creation when `genesis propagate` is
-# re-run against an unchanged control HEAD.
-#
-# The regex anchors on a word boundary so a shorter sha doesn't
-# accidentally match a longer one whose prefix matches (e.g.
-# "abc1234" must NOT match "[pipeline] control@abc1234567 -> env").
-sub _pr_branch_has_control_sha {
-	my ($git, $branch, $control_short) = @_;
-	return 0 unless $git->branch_exists($branch);
-	my @subjects = $git->log_subjects($branch, limit => 1, format => '%s');
-	return 0 unless @subjects;
-	return $subjects[0] =~ /\[pipeline\]\s+control\@\Q$control_short\E\b/ ? 1 : 0;
-}
-
-# }}}
-# _build_pr_body - compose the pull request description {{{
-sub _build_pr_body {
-	my ($env_name, $control_sha, $control_short, $detail) = @_;
-	my @changed = @{$detail->{changed} || []};
-	my @deleted = @{$detail->{deleted} || []};
-	my %renames = %{$detail->{renamed} || {}};
-
-	my @lines = (
-		"Propagating `control\@$control_short` to `$env_name`",
-		"",
-		"**Control SHA:** \`$control_sha\`",
-		"",
-	);
-
-	if (@changed) {
-		push @lines, "**Changed files:**";
-		for my $f (@changed) {
-			my ($old) = grep { $renames{$_} eq $f } keys %renames;
-			push @lines, $old ? "- \`$f\` *(renamed from \`$old\`)*" : "- \`$f\`";
-		}
-		push @lines, "";
-	}
-
-	if (@deleted) {
-		push @lines, "**Deleted files:**";
-		push @lines, "- \`$_\`" for @deleted;
-		push @lines, "";
-	}
-
-	push @lines, "---";
-	push @lines, "_[pipeline] control\@$control_short -> ${env_name}_";
-
-	return join("\n", @lines);
-}
-# }}}
-# _find_or_open_pr - create a PR or update the existing one for this propagation branch {{{
-#
-# Accepts an optional $existing PR object (pre-fetched during the propagation
-# loop) to avoid a redundant list_prs call.  Falls back to querying GitHub
-# when $existing is not provided.
-sub _find_or_open_pr {
-	my ($github, $owner_repo, $prop_branch, $env_name, $title, $body, $existing) = @_;
-
-	unless ($existing) {
-		my $prs = $github->list_prs($owner_repo,
-			head  => $prop_branch,
-			base  => $env_name,
-			state => 'open',
-		);
-		($existing) = grep { $_->{head}{ref} eq $prop_branch } @$prs;
-	}
-
-	return $existing
-		? $github->update_pr($owner_repo, $existing->{number},
-			title => $title,
-			body  => $body,
-		)
-		: $github->create_pr($owner_repo,
-			head  => $prop_branch,
-			base  => $env_name,
-			title => $title,
-			body  => $body,
-		);
 }
 # }}}
 

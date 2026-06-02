@@ -33,11 +33,13 @@ genesis:
     require_pr: true
 ```
 
-When `require_pr` is set, `genesis propagate` creates a `propagate/<env>/<control-sha>` branch instead of pushing directly to the env branch, then opens (or updates) a GitHub Pull Request for review. Merging the PR is what triggers the Concourse deploy.
+When `require_pr` is set, `genesis propagate` uses a rolling `pr/<env>` branch instead of pushing directly to the env branch. The first propagation to a given env creates `pr/<env>` from the env branch, commits the change, pushes, and opens a GitHub Pull Request. Subsequent propagations to the same env append commits to the existing branch and update the PR. Merging the PR is what triggers the Concourse deploy.
+
+The branch is short-lived: it exists only while a PR is open against the env. Operators are expected to delete the branch after the PR merges; stale branches are detected and cleaned up automatically when a fresh propagation arrives with no open PR.
 
 ### Idempotency
 
-Re-running `genesis propagate` with the same control SHA updates the existing PR rather than creating a new one. The check uses the GitHub API to find an open PR with the matching head branch — this works across machines and CI runs.
+Re-running `genesis propagate` with the same control SHA is a full no-op for envs whose `pr/<env>` HEAD already references that control SHA — no commit, no push, no PR update. The check looks at the latest commit subject on `pr/<env>` for the `[pipeline] control@<short-sha>` marker. Operators may safely re-run propagate to confirm state.
 
 ### Propagation Flags
 
