@@ -172,8 +172,8 @@ subtest 'new() - optional keys accepted without error' => sub {
 # 2. cpi_stemcell_prefix()
 # ---------------------------------------------------------------------------
 
-subtest 'cpi_stemcell_prefix() - all 8 known IaaS mappings' => sub {
-	plan tests => 9;
+subtest 'cpi_stemcell_prefix() - all 9 known IaaS mappings' => sub {
+	plan tests => 10;
 
 	my %expected = (
 		aws        => 'aws-xen-hvm',
@@ -181,6 +181,7 @@ subtest 'cpi_stemcell_prefix() - all 8 known IaaS mappings' => sub {
 		google     => 'google-kvm',
 		openstack  => 'openstack-kvm',
 		stackit    => 'openstack-kvm',
+		pve        => 'openstack-kvm',
 		vsphere    => 'vsphere-esxi',
 		virtualbox => 'warden-boshlite',
 		warden     => 'warden-boshlite',

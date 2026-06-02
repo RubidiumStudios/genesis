@@ -102,7 +102,7 @@ B<Parameters:>
 
 Required. The IaaS name. Valid values correspond to the keys recognised by
 C<cpi_stemcell_prefix>: C<aws>, C<azure>, C<google>, C<openstack>, C<stackit>,
-C<vsphere>, C<virtualbox>, C<warden>.
+C<pve>, C<vsphere>, C<virtualbox>, C<warden>.
 
 =item os
 
@@ -388,6 +388,7 @@ The mapping is:
   google      => google-kvm
   openstack   => openstack-kvm
   stackit     => openstack-kvm
+  pve         => openstack-kvm
   vsphere     => vsphere-esxi
   virtualbox  => warden-boshlite
   warden      => warden-boshlite
