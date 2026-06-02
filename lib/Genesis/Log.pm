@@ -518,6 +518,88 @@ sub cleanup_old_logs {
 # Tiny indirection so tests can stub the actual unlink call.
 sub _unlink { CORE::unlink($_[0]) }
 
+# apply_on_reuse - file-collision behavior for a single log path.
+#
+# Runs BEFORE log content is written.  Operates on the realized log
+# path; orchestrator (Subtask H) calls this once per configured log
+# at startup.
+#
+# Args:
+#   $path - the realized log path
+#   $mode - one of 'truncate' (default), 'append', 'rotate'
+#
+# Behavior:
+#   truncate - zero an existing file's size; no-op if it doesn't exist
+#   append   - no filesystem action regardless of existence
+#   rotate   - cascade rotation: highest .N -> .N+1, ..., file -> .1.
+#              mtimes preserved on archives.  No fixed cascade depth;
+#              relies on family-level lifespan cleanup to drop ancient
+#              archives.  No-op if the file doesn't exist.
+#
+# Returns:
+#   {
+#     mode             => $mode,
+#     action           => 'none' | 'truncated' | 'rotated',
+#     archives_shifted => N,        # rotate only
+#     error            => string,   # only when something failed
+#   }
+sub apply_on_reuse {
+	my ($path, $mode) = @_;
+
+	$mode //= 'truncate';
+	$mode = 'truncate' unless $mode eq 'append' || $mode eq 'rotate';
+
+	my $result = { mode => $mode, action => 'none' };
+
+	if ($mode eq 'append') {
+		return $result;
+	}
+
+	unless (-e $path) {
+		return $result;
+	}
+
+	if ($mode eq 'truncate') {
+		if (_truncate($path)) {
+			$result->{action} = 'truncated';
+		} else {
+			$result->{error} = "truncate $path: $!";
+		}
+		return $result;
+	}
+
+	# rotate
+	my @archives;
+	for my $f (glob("$path.*")) {
+		if ($f =~ /^\Q$path\E\.(\d+)$/) {
+			push @archives, { path => $f, n => $1 + 0 };
+		}
+	}
+	# Shift highest-numbered first to avoid clobbering
+	@archives = sort { $b->{n} <=> $a->{n} } @archives;
+
+	for my $a (@archives) {
+		my $new = "$path." . ($a->{n} + 1);
+		unless (_rename($a->{path}, $new)) {
+			$result->{error} = "rename $a->{path} -> $new: $!";
+			return $result;
+		}
+	}
+
+	unless (_rename($path, "$path.1")) {
+		$result->{error} = "rename $path -> $path.1: $!";
+		return $result;
+	}
+
+	$result->{action} = 'rotated';
+	$result->{archives_shifted} = scalar(@archives);
+	return $result;
+}
+
+# Tiny indirections so tests can stub filesystem ops.
+sub _truncate { CORE::truncate($_[0], 0) }
+sub _rename   { CORE::rename($_[0], $_[1]) }
+
 sub expand_log_template {
 	my ($self, $template) = @_;
 

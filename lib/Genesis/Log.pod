@@ -599,6 +599,77 @@ B<Examples:>
     active_path   => '/Users/me/.genesis/logs/staging/deploy/20260603T....log',
   );
 
+=head2 apply_on_reuse
+
+  my $r = Genesis::Log::apply_on_reuse($path, $mode);
+
+File-collision behavior for a single log path. Runs BEFORE the log
+content is written, by the orchestrator at startup. Side-effect-ful
+but tolerant of failures.
+
+B<Modes:>
+
+=over 4
+
+=item * C<truncate> (default) -- zero the existing file's size; no-op if
+the file doesn't exist. Matches the existing C<lifespan: current>
+behavior. Used when the operator wants each command to start with a
+clean log slate.
+
+=item * C<append> -- no filesystem action. Append semantics happen at
+log-write time via opening in append mode. Use when the operator wants
+multiple commands to accumulate in a single log file.
+
+=item * C<rotate> -- cascade rotation: the highest-numbered C<.N>
+archive shifts to C<.N+1>, ..., C<.1> shifts to C<.2>, then the current
+path renames to C<.1>. New file is left for the log writer to create
+fresh.
+
+=back
+
+Rotation preserves mtime on archives (via C<rename(2)> semantics). No
+fixed cascade depth - the family-level C<lifespan> cleanup drops
+ancient archives.
+
+Unknown or undefined C<$mode> defaults to C<truncate>.
+
+B<Parameters:>
+
+=over 4
+
+=item * C<$path> -- the realized (template-expanded) log path
+
+=item * C<$mode> -- C<truncate>, C<append>, or C<rotate>
+
+=back
+
+B<Returns:> hashref
+
+  {
+    mode             => $mode,
+    action           => 'none' | 'truncated' | 'rotated',
+    archives_shifted => N,        # rotate only
+    error            => string,   # only when something failed
+  }
+
+Filesystem errors (permission denied, target exists, etc.) are
+recorded in C<error> but do not bail. Callers may log a summary but
+should not abort Genesis on cleanup failures.
+
+B<Examples:>
+
+  # First run, file doesn't exist: rotate is a no-op
+  apply_on_reuse('/var/log/genesis.log', 'rotate');
+  # { mode => 'rotate', action => 'none' }
+
+  # Second run, file exists: rotate renames it to .1
+  apply_on_reuse('/var/log/genesis.log', 'rotate');
+  # { mode => 'rotate', action => 'rotated', archives_shifted => 0 }
+
+  # N+1th run: existing .1, .2, ... cascade to .2, .3, ...
+  apply_on_reuse('/var/log/genesis.log', 'rotate');
+  # { mode => 'rotate', action => 'rotated', archives_shifted => 5 }
+
 =head2 expand_log_template
 
   my $path = $logger->expand_log_template($template);
