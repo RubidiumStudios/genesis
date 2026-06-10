@@ -36,13 +36,28 @@ sub expand {
 
 sub glob_for { Genesis::Log::template_to_glob_pattern(@_) }
 
-# Track Genesis::warning() invocations for deprecation assertions.
+# Track _log invocations for deprecation assertions.  Capturing at _log
+# is implementation-agnostic - the implicit-env warning emits via
+# $self->warning({context=>'deprecation'}, ...) directly on the singleton
+# (no Genesis::warning round-trip; avoids the Log->Genesis circular dep).
 our @WARNINGS;
 {
 	no warnings 'redefine';
-	*Genesis::warning = sub { push @WARNINGS, sprintf(shift, @_) };
+	*Genesis::Log::_log = sub {
+		my ($self, $level, @contents) = @_;
+		my %opts;
+		while (ref($contents[0]) eq 'HASH') {
+			my %m = %{shift @contents};
+			@opts{keys %m} = values %m;
+		}
+		my $msg = scalar(@contents) > 1
+			? sprintf($contents[0], @contents[1..$#contents])
+			: $contents[0];
+		push @WARNINGS, { level => $level, opts => \%opts, msg => $msg };
+	};
 }
 sub reset_warnings { @WARNINGS = () }
+sub depr_warnings  { grep { ($_->{opts}{context} // '') eq 'deprecation' } @WARNINGS }
 
 # ---------- expand_log_template: new syntax with non-empty values ----------
 
@@ -121,8 +136,8 @@ subtest 'expand: explicit {env/} with env empty drops slash' => sub {
 	like expand('logs/{env/}{command}.log'),
 		qr|^logs/ping\.log$|,
 		'{env/} drops the slash with empty env';
-	ok( !(grep { /deprecat/i } @WARNINGS),
-		'explicit {env/} does NOT emit deprecation warning' );
+	is scalar(depr_warnings()), 0,
+		'explicit {env/} does NOT emit deprecation warning';
 };
 
 # ---------- expand_log_template: separator character set ----------
@@ -159,17 +174,20 @@ subtest 'expand: implicit {env}/ removal still works (back-compat)' => sub {
 		'implicit {env}/ removal preserved (no double slash)';
 };
 
-subtest 'expand: implicit {env}/ removal emits deprecation warning' => sub {
-	plan tests => 2;
+subtest 'expand: implicit {env}/ removal emits deprecation entry' => sub {
+	plan tests => 3;
 	reset_warnings();
 	local $ENV{GENESIS_COMMAND} = 'ping';
 	delete local $ENV{GENESIS_ENVIRONMENT};
 	expand('logs/{env}/{command}.log');
-	ok scalar(@WARNINGS) > 0,
-		'deprecation warning emitted for implicit {env}/ removal';
-	ok( (grep { /env.*deprecated|implicit.*env|use.*\{env\/\}/i } @WARNINGS),
-		'warning suggests explicit form' )
-		or diag "WARNINGS: ", join("\n  ", @WARNINGS);
+	my @depr = depr_warnings();
+	ok scalar(@depr) > 0,
+		'deprecation-context log entry emitted for implicit {env}/ removal';
+	is $depr[0]{level}, 'WARNING',
+		'logged at WARNING level';
+	ok( ($depr[0]{msg} =~ /env.*deprecated|implicit.*env|use.*\{env\/\}/i),
+		'message suggests explicit form' )
+		or diag "msg: $depr[0]{msg}";
 };
 
 # ---------- template_to_glob_pattern: new syntax with %concrete ----------

@@ -670,6 +670,55 @@ B<Examples:>
   apply_on_reuse('/var/log/genesis.log', 'rotate');
   # { mode => 'rotate', action => 'rotated', archives_shifted => 5 }
 
+=head2 Context-tagged log entries
+
+Log entries can carry a C<context> tag (e.g. C<deprecation>) via the
+options hashref accepted by the convenience methods:
+
+  $logger->warning({context => 'deprecation', label => 'DEPRECATED'},
+                   "Template '%s' uses implicit ...", $template);
+
+At flush time, each target's emission is gated by
+C<_context_suppressed($log_name, $log_config, $context)>:
+
+=over 4
+
+=item *
+
+If the target's config has a C<suppress_contexts> list, that list is
+B<authoritative>: contexts in the list are suppressed for that target,
+contexts not in the list are emitted (the per-target list overrides any
+global default).
+
+=item *
+
+Otherwise, the global env var C<GENESIS_SUPPRESS_E<lt>CONTEXTE<gt>S> (e.g.
+C<GENESIS_SUPPRESS_DEPRECATIONS>) is consulted. If set to a truthy value,
+the context is suppressed.
+
+=item *
+
+Otherwise, the loaded C<Genesis::Config> is consulted:
+C<suppress_warnings.E<lt>contextE<gt>s>.
+
+=back
+
+This lets different log targets independently suppress different
+contexts - the terminal output can suppress C<deprecation> to keep the
+console clean while file logs keep them for auditing.
+
+=head3 Genesis::deprecation
+
+  Genesis::deprecation("Template ... is deprecated; use ...", @args);
+
+A shim parallel to C<Genesis::warning> that tags the entry with
+C<context =E<gt> 'deprecation'>. Callers outside the C<Genesis::Log>
+module should use this in preference to calling
+C<$logger-E<gt>warning({context =E<gt> 'deprecation'}, ...)> directly.
+Code B<inside> C<Genesis::Log> calls the singleton's C<warning> with the
+context option directly (to avoid the C<Log -E<gt> Genesis -E<gt> Log>
+circular dependency).
+
 =head2 set_active_log_path
 
   Genesis::Log::set_active_log_path($index, $path);

@@ -133,29 +133,76 @@ sub setup_from_configs {
 	my ($class, $log_configs) = @_;
 
 	require Genesis;
+	# Avoid Genesis::bail inside Log - it dispatches through the logger,
+	# which would recurse infinitely on any config error.
+	die "Configuration error - logs entry must be an array\n"
+		unless ref($log_configs) eq 'ARRAY';
 
-	if (ref($log_configs) eq 'ARRAY') {
-		for (@$log_configs) {
-			my $file = delete($_->{file});
-			my $path = delete($_->{path});
+	my $logger = $class->new;
 
-			# Handle new format with path and file template
-			if ($path && $file) {
-				# Expand the base path
-				$path = File::Spec->rel2abs(Genesis::expand_path($path));
-				# Combine path and file template
-				$file = File::Spec->catfile($path, $file);
-			} elsif (!$file) {
-				# Default file template if not specified
-				$file = $path ? File::Spec->catfile($path, '{env}/{command}/{timestamp}.log') : '~/.genesis/last-trace';
-			}
+	for my $i (0 .. $#$log_configs) {
+		# Copy so we can extract orchestration keys without mutating
+		# the caller's hash.
+		my %cfg = %{$log_configs->[$i]};
+		my $file     = delete $cfg{file};
+		my $path     = delete $cfg{path};
+		my $lifespan = delete $cfg{lifespan};
+		my $on_reuse = delete $cfg{on_reuse} // 'truncate';
 
-			$class->new->configure_log(File::Spec->rel2abs(Genesis::expand_path($file)), %{$_});
-			# TODO: add suppress list so that we can set a level, but ingore specific output
-			# TODO: support an only-log-if-an-error-occurred setting... that adds and flushes the log in END step if rc > 0
+		# Combine path + file into a single template per existing convention
+		if ($path && $file) {
+			$path = File::Spec->rel2abs(Genesis::expand_path($path));
+			$file = File::Spec->catfile($path, $file);
+		} elsif (!$file) {
+			$file = $path
+				? File::Spec->catfile($path, '{env}/{command}/{timestamp}.log')
+				: '~/.genesis/last-trace';
 		}
-	} else {
-		Genesis::bail("Configuration error - logs entry must be an array");
+
+		# Child-process inheritance: parent recorded its realized path
+		# at this index; we adopt it as our log target, force append +
+		# forever, and skip cleanup / on_reuse action.
+		if (my $inherited = get_active_log_path($i)) {
+			$logger->configure_log(
+				$inherited,
+				%cfg,
+				lifespan => 'forever',
+				on_reuse => 'append',
+			);
+			next;
+		}
+
+		# Fresh setup: realize the path, run on_reuse, then cleanup
+		my $realized = File::Spec->rel2abs(
+			Genesis::expand_path($logger->expand_log_template($file))
+		);
+
+		apply_on_reuse($realized, $on_reuse);
+
+		# After on_reuse: if the realized path still exists (truncate /
+		# append on an existing file), the slot is occupied so reserve 0.
+		# If it doesn't (rotate moved it to .1; or templated-new path
+		# that hasn't been written yet), reserve 1 for the upcoming
+		# write.
+		my $reserve = (-e $realized) ? 0 : 1;
+
+		if (defined($lifespan) && length($lifespan)) {
+			my %concrete;
+			$concrete{env}     = $ENV{GENESIS_ENVIRONMENT}
+				if defined $ENV{GENESIS_ENVIRONMENT} && length $ENV{GENESIS_ENVIRONMENT};
+			$concrete{command} = $ENV{GENESIS_COMMAND}
+				if defined $ENV{GENESIS_COMMAND} && length $ENV{GENESIS_COMMAND};
+
+			my $r = cleanup_old_logs(
+				{ file => $file, lifespan => $lifespan },
+				active_path   => $realized,
+				reserve_slots => $reserve,
+				concrete      => \%concrete,
+			);
+		}
+
+		$logger->configure_log($realized, %cfg);
+		set_active_log_path($i, $realized);
 	}
 }
 
@@ -482,6 +529,19 @@ sub cleanup_old_logs {
 		return $result;
 	}
 
+	# Emit any embedded deprecation warnings (e.g. from `lifespan: current`)
+	# through the singleton's warning channel, tagged with context so
+	# per-target suppression can silence them independently.
+	if ($policy->{warnings} && @{$policy->{warnings}}) {
+		my $logger = __PACKAGE__->new;
+		for my $msg (@{$policy->{warnings}}) {
+			$logger->warning(
+				{ context => 'deprecation', label => 'DEPRECATED' },
+				"%s", $msg,
+			);
+		}
+	}
+
 	# No-op policies
 	return $result if $policy->{mode} eq 'none'
 		|| $policy->{mode} eq 'truncate';
@@ -622,6 +682,40 @@ sub get_active_log_path {
 	return $ENV{"GENESIS_ACTIVE_LOG_$index"};
 }
 
+# _context_suppressed - decide whether an entry's context is suppressed
+# for a given log target.  Called per-target in flush_logs.
+#
+# Sources, in priority order:
+#   1. Per-target `suppress_contexts` list - AUTHORITATIVE when present.
+#      If the list is configured, the target has explicitly stated which
+#      contexts it suppresses; global defaults are not consulted.
+#   2. Env var GENESIS_SUPPRESS_<CONTEXT>S (only when target has no list)
+#   3. suppress_warnings.<context>s in the loaded Genesis::Config
+#      (only when target has no list)
+#
+# Returns truthy if the entry should NOT be emitted to this target.
+sub _context_suppressed {
+	my ($log_name, $log_config, $context) = @_;
+	return 0 unless defined($context) && length($context);
+
+	# Per-target list is authoritative when specified: the target has
+	# opted in or out explicitly.  Global defaults are not consulted.
+	if (defined $log_config->{suppress_contexts}) {
+		return (grep { $_ eq $context } @{$log_config->{suppress_contexts}})
+			? 1 : 0;
+	}
+
+	# Target hasn't expressed an opinion; consult global suppression.
+	my $envvar = 'GENESIS_SUPPRESS_' . uc($context) . 'S';
+	return 1 if $ENV{$envvar};
+
+	if (defined($Genesis::RC) && $Genesis::RC->loaded) {
+		return 1 if $Genesis::RC->get("suppress_warnings.${context}s" => 0);
+	}
+
+	return 0;
+}
+
 sub expand_log_template {
 	my ($self, $template) = @_;
 
@@ -652,8 +746,13 @@ sub expand_log_template {
 		$fired += ($path =~ s/\/\{env\}\//\//g);
 		$fired += ($path =~ s/\/\{env\}$//g);
 		if ($fired) {
-			require Genesis;
-			Genesis::warning(
+			# Tag this as a deprecation so per-target context filtering
+			# can suppress it independently per log target.  Direct call
+			# on the singleton avoids requiring Genesis from inside Log
+			# (Genesis already requires Log; the round-trip would be a
+			# load-order cycle).
+			$self->warning(
+				{context => 'deprecation', label => 'DEPRECATED'},
 				"Template '%s' uses implicit {env}/ slash-removal which ".
 				"is deprecated; use {env/}, {/env}, or {-env-} for ".
 				"explicit separator handling.",
@@ -814,6 +913,7 @@ sub _log {
 		show_stack => $options->{show_stack},
 		stack      => \@stack,
 		raw        => $options->{raw},
+		context    => $options->{context},
 
 		# Terminal specific options
 		prefix     => $options->{prefix},
@@ -867,6 +967,13 @@ sub flush_logs {
 			};
 
 			next unless meets_level($config->{level},$level);
+
+			# Per-target context filtering: skip this entry for this target
+			# if its context (e.g. 'deprecation') is suppressed.  Other
+			# targets that don't suppress this context still see the entry.
+			my $entry_context = $self->{buffer}[$line_number]{context};
+			next if defined($entry_context) && length($entry_context)
+				&& _context_suppressed($log, $config, $entry_context);
 
 			$reset = 1 if defined($config->{last_label}) && $config->{last_label} ne $label;
 

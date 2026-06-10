@@ -3234,7 +3234,15 @@ String. Override path for kit storage.
 
 =item C<suppress_warnings>
 
-Hash with sub-keys C<oversized_secrets> and C<bosh_target> (booleans).
+Hash with sub-keys C<oversized_secrets>, C<bosh_target>, and
+C<deprecations> (all booleans). Setting C<deprecations> to true silences
+deprecation log entries globally; equivalent to setting the
+C<GENESIS_SUPPRESS_DEPRECATIONS> env var.
+
+Per-target suppression is also available - any log target in C<logs:> can
+specify a C<suppress_contexts:> list (currently supporting C<deprecation>);
+when present, the per-target list is authoritative and the global setting
+is not consulted for that target.
 
 =item C<ui>
 

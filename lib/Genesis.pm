@@ -281,6 +281,7 @@ sub output     {logger->output({offset => 1},@_);}
 sub fatal      {logger->fatal({offset => 1},@_);}
 sub error      {logger->error({offset => 1},@_);}
 sub warning    {logger->warning({offset => 1},@_);}
+sub deprecation{logger->warning({offset => 1, context => 'deprecation', label => 'DEPRECATED'}, @_);}
 sub success    {logger->warning({offset => 1, emoji => 'tada', colors => 'gk', label => 'DONE'}, @_);}
 sub dryrun     {logger->warning({offset => 1, emoji => 'noentry', colors => 'Wg', label => 'DRYRUN'}, @_);}
 sub notice     {logger->notice({offset => 1}, @_);}
@@ -1767,6 +1768,7 @@ sub global_config_schema {
 			schema => {
 				oversized_secrets => { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING'},
 				bosh_target =>       { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPPRESS_BOSH_TARGET_WARNING'},
+				deprecations =>      { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPPRESS_DEPRECATIONS'},
 			}
 		},
 
