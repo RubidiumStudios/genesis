@@ -600,6 +600,28 @@ sub apply_on_reuse {
 sub _truncate { CORE::truncate($_[0], 0) }
 sub _rename   { CORE::rename($_[0], $_[1]) }
 
+# Child-process safety: per-index GENESIS_ACTIVE_LOG_<N>.
+#
+# The user's .genesis/config logs array is invariant across a Genesis
+# process tree (parent and child read the same file).  Each log config
+# has a stable array index.  Parent records its realized log path at
+# that index; child consults the same index to inherit.  No count or
+# bookkeeping - the config itself is the shared ground truth.
+#
+# When the child finds a non-empty value at its log's index, it treats
+# the inherited path as on_reuse=append + lifespan=forever, preserving
+# call-stack continuity in operator log triage.
+sub set_active_log_path {
+	my ($index, $path) = @_;
+	$ENV{"GENESIS_ACTIVE_LOG_$index"} = $path;
+	return $path;
+}
+
+sub get_active_log_path {
+	my ($index) = @_;
+	return $ENV{"GENESIS_ACTIVE_LOG_$index"};
+}
+
 sub expand_log_template {
 	my ($self, $template) = @_;
 

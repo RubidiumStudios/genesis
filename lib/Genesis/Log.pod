@@ -670,6 +670,61 @@ B<Examples:>
   apply_on_reuse('/var/log/genesis.log', 'rotate');
   # { mode => 'rotate', action => 'rotated', archives_shifted => 5 }
 
+=head2 set_active_log_path
+
+  Genesis::Log::set_active_log_path($index, $path);
+
+Records the realized log file path at C<$index> in the
+C<GENESIS_ACTIVE_LOG_E<lt>indexE<gt>> environment variable. The index
+corresponds to the log's position in the user's C<.genesis/config>
+C<logs:> array; child Genesis invocations read this same env var to
+know which configured log they are inheriting from the parent.
+
+=head2 get_active_log_path
+
+  my $inherited = Genesis::Log::get_active_log_path($index);
+
+Reads C<GENESIS_ACTIVE_LOG_E<lt>indexE<gt>> from the environment.
+Returns the parent-set path if present; C<undef> if the slot is unset
+(top-level invocation, or no inheritance for this log).
+
+The user's C<.genesis/config> C<logs:> array is invariant across a
+Genesis process tree (parent and child read the same file), so the
+index alone is sufficient to correlate parent and child views of the
+same log. No counter or other bookkeeping is needed.
+
+=head3 Child-process contract
+
+The contract for orchestrators (Subtask H):
+
+=over 4
+
+=item *
+
+When walking the configured C<logs:> array, the orchestrator calls
+C<get_active_log_path($i)> for each entry. If a non-empty value is
+returned, the child treats that configured log as inherited: writes
+in C<append> mode, lifespan C<forever>, no cleanup, no on_reuse
+action.
+
+=item *
+
+When the orchestrator opens a fresh log (no inherited path), it calls
+C<set_active_log_path($i, $realized_path)> after computing the
+realized path. Subprocesses spawned by this Genesis invocation will
+inherit it.
+
+=item *
+
+C<Genesis::run> preserves C<GENESIS_ACTIVE_LOG_E<lt>NE<gt>> entries
+across the subprocess boundary by default (env vars are inherited
+through C<system>/C<open "-|">). A defensive restore in
+C<Genesis::run> additionally preserves them if a caller passes
+C<env =E<gt> { GENESIS_ACTIVE_LOG_N =E<gt> undef }> through the
+C<opts> hash.
+
+=back
+
 =head2 expand_log_template
 
   my $path = $logger->expand_log_template($template);

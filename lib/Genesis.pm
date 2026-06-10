@@ -567,6 +567,16 @@ sub run {
 	}
 
 	local %ENV = %ENV; # To get local scope for duration of this call
+
+	# Snapshot GENESIS_ACTIVE_LOG_<N> entries so child-process log
+	# inheritance survives even if a caller passes
+	# env => { GENESIS_ACTIVE_LOG_N => undef } and unintentionally
+	# clears the inheritance.  Cheap: only iterates a small set.
+	my %_active_log_inherit =
+		map { $_ => $ENV{$_} }
+		grep { /^GENESIS_ACTIVE_LOG_\d+$/ }
+		keys %ENV;
+
 	my $tracemsg = "";
 	if (scalar(keys %{$opts{env} || {}})) {
 		$tracemsg = "#M{Setting environment values:}";
@@ -586,6 +596,11 @@ sub run {
 		}
 		$tracemsg .= "\n\n";
 	}
+
+	# Restore any GENESIS_ACTIVE_LOG_<N> that opts{env} cleared.  See
+	# the snapshot above for rationale.
+	$ENV{$_} //= $_active_log_inherit{$_} for keys %_active_log_inherit;
+
 	my $shell = $opts{shell} || '/bin/bash';
 	if (!$opts{interactive} && $opts{stderr}) {
 		$prog .= " 2>$opts{stderr}";
