@@ -358,22 +358,30 @@ sub template_to_glob_pattern {
 		pid       => '[0-9]*',
 		env       => '*',
 		command   => '*',
+		type      => '*',
 	);
 
-	# {[sep]name[sep]} grammar - sep is a single char from the set
-	# [-_.~/] that wraps the substituted value.  In wildcard mode the
-	# sep is preserved literally in the glob pattern, so files matching
-	# the explicit-sep form (e.g. "-staging") are matched and files
-	# without (env empty case) are not.
+	# {[sep]name[sep]} grammar plus optional ||default suffix.  Seps and
+	# default are mutually exclusive (an operator providing a default
+	# guarantees a non-empty value, so seps belong outside the braces);
+	# at glob time we drop seps silently when a default is also present.
+	# The default substring itself is a runtime fallback - the glob
+	# substitutes the var's wildcard / concrete value either way.
 	my $sep = qr/[-_.~\/]/;
-	$path =~ s{ \{ ($sep)? ([a-z]+) ($sep)? \} }{
-		my ($lead, $name, $trail) = ($1 // '', $2, $3 // '');
+	$path =~ s{ \{ ($sep)? ([a-z]+) ($sep)? (?: \|\| ([^\}]*) )? \} }{
+		my ($lead, $name, $trail, $default) = ($1 // '', $2, $3 // '', $4);
+		# Drop seps silently in glob mode if default is present
+		if (defined($default) && (length($lead) || length($trail))) {
+			$lead = $trail = '';
+		}
 		if (exists $concrete{$name}) {
 			"$lead$concrete{$name}$trail";
 		} elsif (exists $wildcards{$name}) {
 			"$lead$wildcards{$name}$trail";
 		} else {
-			"{$lead$name$trail}";
+			defined($default)
+				? "{$lead$name$trail||$default}"
+				: "{$lead$name$trail}";
 		}
 	}gex;
 
@@ -732,6 +740,7 @@ sub expand_log_template {
 		time      => $time,
 		pid       => $$,
 		env       => $ENV{GENESIS_ENVIRONMENT} // '',
+		type      => $ENV{GENESIS_TYPE} // '',
 	);
 
 	my $path = $template;
@@ -761,16 +770,40 @@ sub expand_log_template {
 		}
 	}
 
-	# {[sep]name[sep]} grammar - sep is a single char from [-_.~/].
-	# Empty values drop both the value and its separators.
+	# {[sep]name[sep]} grammar plus optional ||default suffix for
+	# fallback when the var resolves to empty.  Seps and default are
+	# mutually exclusive (the default guarantees a non-empty value, so
+	# seps belong outside the braces); when combined, emit a deprecation
+	# warning and treat the default as authoritative (seps dropped).
 	my $sep = qr/[-_.~\/]/;
-	$path =~ s{ \{ ($sep)? ([a-z]+) ($sep)? \} }{
-		my ($lead, $name, $trail) = ($1 // '', $2, $3 // '');
+	$path =~ s{ \{ ($sep)? ([a-z]+) ($sep)? (?: \|\| ([^\}]*) )? \} }{
+		my ($lead, $name, $trail, $default) = ($1 // '', $2, $3 // '', $4);
+
+		if (defined($default) && (length($lead) || length($trail))) {
+			$self->warning(
+				{context => 'deprecation', label => 'DEPRECATED'},
+				"Template '%s' combines a separator with a default value ".
+				"({...||...}); the default guarantees a non-empty value ".
+				"so separators belong outside the braces. Separators ".
+				"ignored.",
+				$template
+			);
+			$lead = $trail = '';
+		}
+
 		if (exists $values{$name}) {
 			my $v = $values{$name};
-			(defined($v) && length($v)) ? "$lead$v$trail" : '';
+			if (defined($v) && length($v)) {
+				"$lead$v$trail";
+			} elsif (defined $default) {
+				$default;
+			} else {
+				'';
+			}
 		} else {
-			"{$lead$name$trail}";
+			defined($default)
+				? "{$lead$name$trail||$default}"
+				: "{$lead$name$trail}";
 		}
 	}gex;
 

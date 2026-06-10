@@ -345,7 +345,33 @@ When the variable resolves to a non-empty value, the leading and
 trailing separators (if present) are emitted alongside the value. When
 the variable is empty, both the value AND its separators are dropped.
 
-Variables: C<command>, C<timestamp>, C<date>, C<time>, C<pid>, C<env>.
+Variables: C<command>, C<timestamp>, C<date>, C<time>, C<pid>, C<env>,
+C<type>.  C<type> resolves to C<$ENV{GENESIS_TYPE}> at runtime (the kit
+type slug, e.g. C<bosh>, C<vault>, C<shield>, C<cf>).
+
+=head3 Default values: C<{name||default}>
+
+An optional C<||default> suffix inside the braces provides a fallback
+literal when the variable resolves to empty:
+
+  Template                  GENESIS_TYPE=vault   GENESIS_TYPE unset
+  ------------------------- -------------------- -------------------
+  genesis-{type||bosh}.log  genesis-vault.log    genesis-bosh.log
+  {env||local}-{command}    staging-deploy       local-deploy
+
+The default is also used during glob construction in
+C<template_to_glob_pattern> when the variable would otherwise be
+wildcarded - but only as the substituted text alongside the wildcard;
+the runtime semantics of "use default when empty" don't translate to a
+glob pattern.
+
+B<Mutual exclusivity with separators:> the separator syntax
+C<{[sep]name[sep]}> and the default syntax C<{name||default}> are
+mutually exclusive. An operator providing a default has guaranteed a
+non-empty value, so any separators belong outside the braces.
+Templates combining them (e.g. C<{-env||local}>) trigger a
+deprecation-context warning and the separators are dropped; the
+default takes precedence.
 
 B<Examples (with env=staging, cmd=deploy):>
 
