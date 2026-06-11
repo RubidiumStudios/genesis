@@ -1012,6 +1012,65 @@ B<Examples:>
   }
   # Returns: 'ok'
 
+=head2 max_json_string_value_length
+
+  my $bytes = $vault->max_json_string_value_length();
+
+Return the maximum size, in bytes, of any single JSON string value
+Vault will accept on an incoming write request. Used by chunked-write
+callers (e.g. C<Genesis::Env::Deployment::commit>) to derive a safe
+chunk size for writes that might otherwise exceed Vault's per-string
+ceiling.
+
+The limit comes from the Vault listener config option
+C<max_json_string_value_length>, introduced in B<Vault 1.21.0>
+(October 2025), defined in C<internalshared/configutil/listener.go>
+and enforced in C<http/handler.go>. It caps the length of a single
+string value inside a JSON request body. It does B<not> cap the total
+request body (see C<max_request_size>, default 32 MiB) or the secret
+as a whole. Earlier Vault releases impose no such per-string cap; we
+still use the 1 MiB default in that case for conservative chunking.
+
+Sources, in priority order:
+
+=over 4
+
+=item 1.
+
+C<GENESIS_VAULT_MAX_JSON_STRING_VALUE_LENGTH> environment variable,
+when set to a positive integer.
+
+=item 2.
+
+Vault server query via C<safe curl --data-only
+/sys/config/state/sanitized>. When the response decodes to JSON and
+exposes C<data.listeners[0].config.max_json_string_value_length>, that
+value wins. A privileged token is required to read this endpoint;
+permission failures fall through silently.
+
+=item 3.
+
+Vault's compiled-in default of C<1024 * 1024> = B<1 MiB> (1,048,576
+bytes). Matches Vault 1.21+ source.
+
+=back
+
+The returned value is cached on the instance after the first call.
+Query failure paths (network error, missing field, malformed JSON) all
+fall through to the default without warning so callers can rely on a
+sensible cap even when the vault is uncommunicative.
+
+Derive your usable chunk size by subtracting headroom for the key
+prefix (e.g. C<artifacts[N]=>), JSON envelope overhead, and any
+base64 line-break padding. Genesis defaults to 2 KiB of headroom.
+
+B<Example:>
+
+  $ENV{GENESIS_VAULT_MAX_JSON_STRING_VALUE_LENGTH} = 2_097_152;
+  my $vault = Service::Vault->new(...);
+  my $cap   = $vault->max_json_string_value_length();   # => 2097152
+  my $chunk = $cap - 2048;                              # 2 KiB headroom
+
 =head2 token_info
 
   my $info = $vault->token_info();

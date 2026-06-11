@@ -579,6 +579,71 @@ sub status {
 }
 
 # }}}
+# max_json_string_value_length - return the per-string JSON value cap {{{
+#
+# Returns the size, in bytes, of the largest single JSON string value
+# Vault will accept on a write request.  Used by chunked-write callers
+# (e.g. Genesis::Env::Deployment::commit) to derive a safe chunk size
+# that keeps each individual `artifacts[N]` value under the cap.
+#
+# This is Vault's `max_json_string_value_length` listener config option,
+# introduced in Vault 1.21.0 (October 2025), with a compiled-in default
+# of 1 MiB.  It applies per-string within the JSON request body - so
+# each key's value must fit, but the total request body has its own
+# (much larger) limit via `max_request_size`.
+#
+# Sources, in priority order:
+#   1. GENESIS_VAULT_MAX_JSON_STRING_VALUE_LENGTH env var (positive int).
+#   2. Vault server query: safe curl --data-only /sys/config/state/
+#      sanitized; parse JSON; read data.listeners[0].config.
+#      max_json_string_value_length.  Returns the value if present;
+#      otherwise falls through (most Vault setups don't explicitly
+#      configure this, so the field is absent and Vault's compiled-in
+#      default applies).  The query is tolerant of failure (permissions,
+#      malformed response, missing field).
+#   3. Compiled-in Vault default: 1 MiB (1024 * 1024 = 1,048,576).
+#
+# Cached on the instance after first lookup.
+sub max_json_string_value_length {
+	my ($self) = @_;
+
+	return $self->{__max_json_string_value_length}
+		if defined $self->{__max_json_string_value_length};
+
+	if (defined($ENV{GENESIS_VAULT_MAX_JSON_STRING_VALUE_LENGTH})
+		&& $ENV{GENESIS_VAULT_MAX_JSON_STRING_VALUE_LENGTH} =~ /^\d+$/
+		&& $ENV{GENESIS_VAULT_MAX_JSON_STRING_VALUE_LENGTH} > 0)
+	{
+		return $self->{__max_json_string_value_length}
+			= $ENV{GENESIS_VAULT_MAX_JSON_STRING_VALUE_LENGTH} + 0;
+	}
+
+	# Try to consult the server's listener config.  `safe curl
+	# --data-only` strips safe's own wrapping; Vault's response envelope
+	# (request_id, data, ...) is preserved, so the actual content lives
+	# at $decoded->{data}->...
+	my ($out, $rc, $err) = $self->query(
+		{redact_output => 1, stderr => 0},
+		'curl', '--data-only', '/sys/config/state/sanitized'
+	);
+	if ($rc == 0 && defined($out) && length($out)) {
+		my $decoded = eval { decode_json($out) };
+		if ($decoded && ref($decoded) eq 'HASH') {
+			my $listeners = $decoded->{data}{listeners};
+			if (ref($listeners) eq 'ARRAY' && @$listeners) {
+				my $max = $listeners->[0]{config}{max_json_string_value_length};
+				if (defined($max) && $max =~ /^\d+$/ && $max > 0) {
+					return $self->{__max_json_string_value_length} = $max + 0;
+				}
+			}
+		}
+	}
+
+	# Vault's compiled-in default for max_json_string_value_length.
+	return $self->{__max_json_string_value_length} = 1024 * 1024;
+}
+
+# }}}
 # token_info - return the token information for the active user token {{{
 sub token_info {
 	my $self = shift;
