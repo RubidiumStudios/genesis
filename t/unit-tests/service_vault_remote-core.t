@@ -152,15 +152,27 @@ subtest 'authenticate() - already authenticated returns self' => sub {
 
 	my $v = make_remote(name => 'authed-vault');
 
-	my $query_called = 0;
+	# Capture the auth-related queries.  Token introspection queries
+	# (vault token lookup -format=json, issued by start_token_renewer
+	# during the new renewer-arming path) are explicitly excluded — the
+	# invariant we care about is "no credential-based safe auth attempt
+	# happens when we're already authenticated."
+	my @auth_queries;
 	no warnings 'redefine';
 	local *Service::Vault::Remote::authenticated = sub { 1 };
-	local *Service::Vault::Remote::query = sub { $query_called = 1; return ('', 0) };
+	local *Service::Vault::Remote::query = sub {
+		shift;   # $self
+		shift if ref($_[0]) eq 'HASH';
+		push @auth_queries, [@_]
+			if grep { defined && /^safe auth/ } @_;
+		return ('', 0, '');
+	};
 	use warnings 'redefine';
 
 	my $ret = $v->authenticate();
 	is($ret, $v, 'authenticate() returns self when already authenticated');
-	ok(!$query_called, 'query() is not called when already authenticated');
+	is(scalar(@auth_queries), 0,
+		'no `safe auth ...` query issued when already authenticated');
 };
 
 # -------------------------------------------------------------------------

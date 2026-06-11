@@ -131,6 +131,43 @@ our @EXPORT = qw/
 	validate_global_config global_config_schema
 /;
 
+sub init_forked_child {
+	# Defensive setup run inside the child branch immediately after fork()
+	# in any Genesis-spawned helper process.  The child is expected to
+	# exit via POSIX::_exit (which skips END / DESTROY entirely); this
+	# routine guards against accidental `exit` / `die` paths and against
+	# terminal contention with the parent.
+	#
+	# Notes on what is NOT needed here:
+	# - Service::Vault::Local::shutdown already self-guards by comparing
+	#   the encoded parent PID in the vault name against $$, so a child
+	#   running its DESTROY chain will no-op rather than killing the
+	#   parent's safe.  No need to clear the vault cache.
+	# - bin/genesis's END block calls shutdown_all, which inherits the
+	#   same PID guard.  POSIX::_exit also skips it.
+
+	# Wipe the at_exit hook queue inherited from the parent.  User code
+	# may have registered arbitrary callbacks via Genesis::Commands::at_exit;
+	# those belong to the parent's lifecycle, not ours.
+	@{$Genesis::Commands::END_HOOKS} = ()
+		if defined $Genesis::Commands::END_HOOKS;
+
+	# Don't compete with the parent for terminal input.  Redirect rather
+	# than close so fd 0 stays bound to a benign source — a closed fd 0
+	# can be reclaimed by the next open() in the child, which would let
+	# something later refer to STDIN and actually be reading/writing the
+	# wrong file.
+	open(STDIN, '<', '/dev/null') or close STDIN;
+
+	# Signal-driven exits go through POSIX::_exit so END / DESTROY do not
+	# run even if our caller forgot to handle a signal explicitly.
+	$SIG{TERM} = sub { POSIX::_exit(0) };
+	$SIG{INT}  = sub { POSIX::_exit(0) };
+	$SIG{HUP}  = sub { POSIX::_exit(0) };
+
+	return;
+}
+
 sub Init {
 	my $version = shift // $Genesis::VERSION;
 	$Genesis::RC = Genesis::Config->new($ENV{HOME}."/.genesis/config");

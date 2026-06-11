@@ -454,6 +454,14 @@ B<Examples:>
 Attempts to authenticate against the vault using credentials found in
 environment variables. Returns immediately if already authenticated.
 
+After any successful authentication path (including the
+already-authenticated short-circuit and the post-credential
+last-chance check), a background token renewer is armed via
+L</start_token_renewer>. Token renewal is only attempted if the token
+itself is renewable and has a positive TTL; otherwise the renewer is a
+no-op. See L</LIMITATIONS> for the conditions under which the renewer
+declines to arm.
+
 The following authentication methods are tried in order. The first method
 whose required environment variables are all present and non-empty is
 attempted:
@@ -505,6 +513,177 @@ B<Examples:>
   $ENV{VAULT_AUTH_TOKEN} = 'hvs.EXAMPLE';
   my $result = $vault->authenticate();
   # Returns: the $vault object
+
+=head2 start_token_renewer
+
+  my $pid = $vault->start_token_renewer();
+
+Forks a background child that periodically renews the vault token for
+the lifetime of the parent vault object. The child runs in its own
+process (signal table, alarm timer, scheduler view) so it is immune to
+the parent's C<alarm()> usage in kit hooks, blocking C<system()> calls
+during long deploys, and reuse of C<$SIG{ALRM}> elsewhere.
+
+Renewal loop body:
+
+=over 4
+
+=item *
+
+Sleep for C<max(60, int($ttl / 2))> seconds.
+
+=item *
+
+Check the parent is alive (C<kill 0> against parent PID, plus
+C<getppid() == 1> as a reparented-to-init backstop immune to PID
+reuse). Exit cleanly if the parent is gone.
+
+=item *
+
+Issue C<vault token renew>. On non-zero return code, exit with code 1
+so the parent re-authenticates on its next vault call.
+
+=item *
+
+Re-read C<token_info()>. If the token has become non-renewable or its
+TTL has dropped to zero, exit cleanly.
+
+=back
+
+Dead-man switches:
+
+=over 4
+
+=item *
+
+B<Idempotent re-arm.> Any prior renewer is stopped before a new one
+starts, so repeated C<authenticate()> calls never leak children.
+
+=item *
+
+B<eval-wrapped child body.> Every exit path goes through
+C<POSIX::_exit>. A C<die> from anywhere inside the renewer loop is
+caught and converted to C<POSIX::_exit(2)>, bypassing Perl's normal
+exit machinery (which would otherwise run END blocks).
+
+=item *
+
+B<Fail-closed.> If C<token_info()> dies (vault unreachable, malformed
+response, etc.), no renewer is started and C<authenticate()> proceeds
+normally. The renewer is best-effort; its absence never crashes
+callers.
+
+=back
+
+The child runs L<Genesis/init_forked_child> immediately after C<fork()>
+to neutralise inherited END/DESTROY hooks and install signal handlers
+that bypass them.
+
+B<Parameters:> None beyond C<$self>.
+
+B<Returns:> The child PID on success; C<undef> when the token is not
+renewable, when C<token_info()> failed, or when C<fork()> failed.
+
+B<Side effects:>
+
+=over 4
+
+=item *
+
+Stores the child PID on C<$self-E<gt>{__renewer_pid}>.
+
+=item *
+
+Reaps any prior renewer recorded on C<$self> before forking.
+
+=back
+
+=head2 stop_token_renewer
+
+  $vault->stop_token_renewer();
+
+Signals and reaps the background renewer child if one is running.
+
+The stop sequence is:
+
+=over 4
+
+=item *
+
+C<SIGTERM> the child.
+
+=item *
+
+Poll C<waitpid(..., WNOHANG)> for up to ~2 seconds.
+
+=item *
+
+If the child has not exited (it ignored TERM, or is stuck in an
+uninterruptible syscall), escalate to C<SIGKILL> and block on
+C<waitpid> to reap.
+
+=back
+
+This dead-man escalation is the load-bearing guarantee that
+C<DESTROY> never hangs Genesis at command exit.
+
+B<Parameters:> None.
+
+B<Returns:> Nothing meaningful; called for side effects only. Safe to
+call when no renewer is running (no-op).
+
+=head2 renewer_pid
+
+  my $pid = $vault->renewer_pid;
+
+Returns the PID of the running token renewer child, or C<undef> when
+none is running. Primarily a test seam.
+
+=head2 DESTROY
+
+Automatically invoked when the vault object goes out of scope. Calls
+L</stop_token_renewer> to ensure no renewer child outlives its parent
+vault instance.
+
+=head1 LIMITATIONS
+
+=over 4
+
+=item *
+
+The token renewer only arms when C<token_info()> returns a token that
+is both C<renewable> and has a positive C<ttl>. Tokens issued without
+the C<renewable> capability (root tokens, batch tokens, periodic
+tokens that don't expire) are correctly skipped.
+
+=item *
+
+The renewer is fail-closed: any failure during C<token_info()> (auth
+denied to C<vault token lookup>, malformed response, network error)
+results in B<no renewer> being started. Callers are not informed; a
+later token expiry surfaces as a normal vault failure.
+
+=item *
+
+The child's parent-liveness check polls C<kill 0> and C<getppid()> at
+the half-life of the current token TTL. In the worst case the child
+runs up to one half-life past the parent's exit before noticing it
+was orphaned (mitigated by Genesis's own C<DESTROY>-driven
+C<SIGTERM>).
+
+=item *
+
+Self-deploy guard (skipping renewal when deploying the vault that
+issued the token) is currently handled at the env layer, not by
+C<Service::Vault::Remote>.
+
+=item *
+
+Interactive re-auth on token expiry (TTY prompt vs non-TTY bail) is
+deferred; today, an expired token surfaces as a normal vault
+operation failure.
+
+=back
 
 =head1 AUTHORS
 

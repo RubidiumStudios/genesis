@@ -90,6 +90,71 @@ B<Examples:>
     Genesis::Init();        # Returns: nothing
     Genesis::Init('2.8.0'); # Returns: nothing
 
+=head2 init_forked_child
+
+    Genesis::init_forked_child();
+
+Defensive setup run inside the child branch immediately after C<fork()>
+in any Genesis-spawned helper process (background token renewer,
+future background workers).
+
+The child is B<expected> to exit via C<POSIX::_exit> so Perl's C<END>
+blocks and object destructors do not fire. C<init_forked_child> is
+belt-and-suspenders for accidental C<exit> or unhandled C<die> paths
+in the child's body, and for terminal contention with the parent.
+
+What it does:
+
+=over 4
+
+=item *
+
+Empties C<$Genesis::Commands::END_HOOKS> so any C<at_exit> callbacks
+the parent registered before the fork do not run in the child.
+
+=item *
+
+Redirects C<STDIN> to C</dev/null> (rather than closing it) so the
+child does not contend for the parent's terminal input, and so fd 0
+stays bound to a benign source — a closed fd 0 can be reclaimed by
+the next C<open()> in the child and silently land on something else.
+
+=item *
+
+Installs C<$SIG{TERM}>, C<$SIG{INT}>, and C<$SIG{HUP}> handlers that
+exit via C<POSIX::_exit(0)>, so signal-driven termination also
+bypasses C<END> and C<DESTROY>.
+
+=back
+
+What it does B<not> need to do:
+
+=over 4
+
+=item *
+
+Clear the C<Service::Vault> singleton cache.
+C<Service::Vault::Local::shutdown> already self-guards by comparing
+the encoded parent PID against C<$$>, so a child running its
+C<DESTROY> chain is a no-op rather than killing the parent's C<safe>
+process.
+
+=back
+
+B<Parameters:> None.
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+    my $pid = fork();
+    die "fork failed: $!" unless defined $pid;
+    if ($pid == 0) {
+        Genesis::init_forked_child();
+        # ... renewer / worker body ...
+        POSIX::_exit(0);
+    }
+
 =head2 deployment_roots_map
 
     my ($labels_ref, $roots_ref) = Genesis::deployment_roots_map(@extras);

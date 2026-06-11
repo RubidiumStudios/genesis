@@ -8,6 +8,7 @@ use Genesis::Term;
 
 use Genesis::UI;
 use JSON::PP qw/decode_json/;
+use POSIX ();
 use UUID::Tiny ();
 
 use base 'Service::Vault';
@@ -284,7 +285,7 @@ sub authenticate {
 		{method => 'github',   label => "Github Peronal Access Token", vars => [qw/VAULT_GITHUB_TOKEN/]},
 	];
 
-	return $self if $self->authenticated;
+	return $self->_on_auth_success if $self->authenticated;
 	my %failed;
 	for my $auth (@$auth_types) {
 		my @vars = @{$auth->{vars}};
@@ -293,7 +294,7 @@ sub authenticate {
 			my ($out, $rc) = $self->query(
 				'safe auth ${1} < <(echo "$2")', $auth->{method}, join("\n", map {$ENV{$_}} @vars)
 			);
-			return $self if $self->authenticated;
+			return $self->_on_auth_success if $self->authenticated;
 			debug "Authentication with $auth->{label} to #M{$ref} vault failed!";
 			$failed{$auth->{method}} = 1;
 		}
@@ -301,7 +302,7 @@ sub authenticate {
 
 	# Last chance, check if we're already authenticated; otherwise bail.
 	# This also forces a update to the token, so we don't have to explicitly do that here.
-	return $self if $self->authenticated;
+	return $self->_on_auth_success if $self->authenticated;
 	bail(
 		"Could not successfully authenticate against #M{$ref} vault with #C{safe}.\n\n".
 		"Genesis can automatically authenticate with safe in the following ways:\n".
@@ -315,6 +316,183 @@ sub authenticate {
 			)
 		} @{$auth_types})
 	);
+}
+
+# }}}
+# _on_auth_success - common return path for a successful authenticate() {{{
+#
+# Called from every "return $self" point in authenticate() so that the
+# token renewer is armed regardless of which auth method succeeded (or
+# whether we short-circuited on an already-authenticated session).
+sub _on_auth_success {
+	my ($self) = @_;
+	$self->start_token_renewer;
+	return $self;
+}
+
+# }}}
+# DESTROY - reap any running token renewer when the vault goes out of scope {{{
+sub DESTROY {
+	my ($self) = @_;
+	$self->stop_token_renewer;
+	return;
+}
+
+# }}}
+# renewer_pid - accessor for the background renewer child's PID {{{
+sub renewer_pid {
+	return $_[0]->{__renewer_pid};
+}
+
+# }}}
+# start_token_renewer - fork a child that keeps the vault token alive {{{
+#
+# Returns the child PID on success, or undef when:
+#   - The token is not renewable (or has zero/undef TTL).
+#   - fork() fails.
+#
+# Dead-man switches:
+#   - Idempotent: any prior renewer is stopped before a new one starts,
+#     so repeated authenticate() calls don't leak children.
+#   - Child body is eval-wrapped.  Every exit path goes through
+#     POSIX::_exit, so a `die` cannot fall through to Perl's normal exit
+#     machinery (which would run END blocks).
+#   - Child's parent-liveness check honours both `kill 0` AND getppid().
+#     getppid() == 1 (reparented to init) is a reliable orphan signal
+#     immune to PID reuse on long-running systems.
+sub start_token_renewer {
+	my ($self) = @_;
+
+	# Reap any prior renewer first.
+	$self->stop_token_renewer if $self->renewer_pid;
+
+	# token_info() can die (read_json_from bails on malformed/empty
+	# response, network error, etc.).  Treat any failure as "no renewer"
+	# — fail-closed so authenticate() never crashes when the vault is
+	# unreachable or returning garbage.
+	my $info = eval { $self->token_info() };
+	return undef unless $self->_token_renewal_available($info);
+
+	my $parent_pid = $$;
+	my $pid = fork();
+	return undef unless defined $pid;
+
+	if ($pid == 0) {
+		# CHILD: never `exit`, never `die` uncaught — POSIX::_exit only.
+		Genesis::init_forked_child();
+		my $rc = eval {
+			$self->_run_renewer_loop(
+				parent_pid => $parent_pid,
+				ttl        => $info->{data}{ttl},
+				sleep_fn   => sub { sleep $_[0] },
+				kill_fn    => sub {
+					# Reparented to init means the original parent is
+					# definitively gone, independent of PID reuse.
+					return 0 if getppid() == 1;
+					return kill 0 => $_[0];
+				},
+				query_fn   => sub { $self->query(@_) },
+				info_fn    => sub { $self->token_info },
+			);
+		};
+		# On die ($@ set, $rc undef): exit non-zero rather than letting
+		# Perl's normal exit machinery run END blocks.
+		POSIX::_exit(defined($rc) ? $rc : 2);
+	}
+
+	$self->{__renewer_pid} = $pid;
+	return $pid;
+}
+
+# }}}
+# stop_token_renewer - signal and reap the background renewer child {{{
+#
+# Idempotent: no-op when no renewer PID is stored.  Always clears the
+# stored PID regardless of whether kill/waitpid succeed, so a second
+# call is safe.
+#
+# Dead-man switch: TERM is polled with WNOHANG for ~2 seconds; if the
+# child refuses to exit (or is stuck in an uninterruptible syscall) the
+# stop path escalates to SIGKILL.  Without this, a stuck child would
+# block DESTROY and hang Genesis at command exit.
+sub stop_token_renewer {
+	my ($self) = @_;
+	my $pid = delete $self->{__renewer_pid};
+	return unless $pid;
+
+	kill 'TERM', $pid;
+
+	my $reaped = 0;
+	for (1..20) {
+		$reaped = waitpid($pid, POSIX::WNOHANG());
+		last if $reaped;        # >0 = reaped, -1 = no such child (race)
+		select(undef, undef, undef, 0.1);
+	}
+	if ($reaped <= 0) {
+		# Child ignored TERM or is stuck.  KILL is uninterceptible.
+		kill 'KILL', $pid;
+		waitpid($pid, 0);
+	}
+	return;
+}
+
+# }}}
+# _run_renewer_loop - testable renewer loop body {{{
+#
+# Returns an exit code (0 or 1) instead of calling POSIX::_exit directly
+# so the body can be unit-tested without forking.  All side-effecting
+# operations are injected so tests can drive the loop in-process:
+#
+#   parent_pid  parent PID to monitor (kill 0 => $parent_pid)
+#   ttl         initial token ttl, seconds
+#   sleep_fn    invoked with the computed sleep duration
+#   kill_fn     invoked with parent_pid; truthy => alive, false => dead
+#   query_fn    invoked with ('vault', 'token', 'renew');
+#               returns ($out, $rc, $err)
+#   info_fn     invoked after each renew; returns token_info hash
+#
+# Termination:
+#   - parent reported dead       => return 0
+#   - renew returned non-zero rc => return 1 (parent re-auths next call)
+#   - token becomes non-renewable
+#     or ttl decays to 0/undef   => return 0
+#
+# Sleep computation: half-life with a 60s floor so pathologically short
+# tokens don't busy-renew.
+sub _run_renewer_loop {
+	my ($self, %opts) = @_;
+	my $parent_pid = $opts{parent_pid};
+	my $ttl        = $opts{ttl};
+	my $sleep_fn   = $opts{sleep_fn};
+	my $kill_fn    = $opts{kill_fn};
+	my $query_fn   = $opts{query_fn};
+	my $info_fn    = $opts{info_fn};
+
+	while (1) {
+		my $sleep_for = $ttl >= 120 ? int($ttl / 2) : 60;
+		$sleep_fn->($sleep_for);
+
+		return 0 unless $kill_fn->($parent_pid);
+
+		my ($out, $rc, $err) = $query_fn->('vault', 'token', 'renew');
+		return 1 if $rc != 0;
+
+		my $info = $info_fn->();
+		return 0 unless $self->_token_renewal_available($info);
+		$ttl = $info->{data}{ttl};
+	}
+}
+
+# }}}
+# _token_renewal_available - pure: does this token support background renewal? {{{
+sub _token_renewal_available {
+	my ($self, $info) = @_;
+	return 0 unless $info && ref($info) eq 'HASH';
+	my $data = $info->{data} or return 0;
+	return 0 unless $data->{renewable};
+	my $ttl = $data->{ttl};
+	return 0 unless defined($ttl) && $ttl =~ /^\d+$/ && $ttl > 0;
+	return 1;
 }
 
 # }}}
