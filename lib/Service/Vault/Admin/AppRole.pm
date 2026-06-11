@@ -35,7 +35,8 @@ sub enable {
 	return 1 if $self->enabled();
 
 	my ($output, $rc, $err) = $self->vault->query(qw/vault auth enable approle/);
-	bail("Failed to enable AppRole auth method: $err") if $rc;
+	bail("Failed to enable AppRole auth method: %s", $err // '(no error message)')
+		if $rc;
 	return 1;
 }
 

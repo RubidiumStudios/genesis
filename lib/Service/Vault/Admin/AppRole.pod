@@ -136,10 +136,11 @@ B<Errors:>
 
 =over 4
 
-=item C<"Failed to enable AppRole auth method: $err">
+=item C<"Failed to enable AppRole auth method: %s">
 
 Thrown when the C<vault auth enable approle> command exits with a non-zero
-status. C<$err> is the error output from the command.
+status. The C<%s> placeholder is the error output from the command, or
+the literal string C<"(no error message)"> when stderr was empty.
 
 =back
 
