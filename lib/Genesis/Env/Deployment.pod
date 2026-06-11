@@ -276,8 +276,31 @@ to the current time.
 
 =item artifacts (optional)
 
-Either a hashref mapping artifact type names to local file paths, or a
-base64-encoded gzip string containing a tarball of artifact contents.
+One of:
+
+=over 4
+
+=item *
+
+A hashref mapping artifact type names to local file paths (write side
+on the way in).
+
+=item *
+
+A base64-encoded gzip string containing a tarball of artifact
+contents (back-compat read shape for deployments stored before
+chunking, or pre-chunk in-memory representation).
+
+=item *
+
+An array reference of base64-encoded gzip string B<chunks> (read
+shape for chunked deployments). The constructor concatenates the
+chunks in order to reconstitute the single base64-gzipped scalar
+before further processing. This shape is produced by
+L<Genesis/unflatten> when the vault stores the artifact across
+C<artifacts[0]>, C<artifacts[1]>, ... keys.
+
+=back
 
 =item state (legacy)
 
@@ -581,8 +604,20 @@ if the vault is unreachable.
 
 Saves the deployment audit to the environment's vault under the full exodus
 path. The deployment data is flattened and written as key-value pairs. If
-artifacts are present, they are packaged as a base64-encoded gzip tarball and
-stored under the C<artifacts> key via vault's C<key@file> notation.
+artifacts are present, they are packaged as a base64-encoded gzip tarball
+and stored across one or more vault keys via vault's C<key@file> notation.
+
+B<Chunked artifact storage:> the encoded tarball is split into chunks
+sized to fit within Vault's per-JSON-string limit, then written as
+C<artifacts[0]>, C<artifacts[1]>, ..., C<artifacts[N-1]> within a
+single C<safe set> call. Chunk size is derived from
+L<Service::Vault/max_json_string_value_length> minus 2 KiB of headroom
+for key prefix, JSON envelope, and base64 padding. The relevant
+upstream cap is Vault 1.21+'s C<max_json_string_value_length> listener
+option (default 1 MiB), which caps each individual JSON string value
+in the request body but not the body as a whole. Older deployments
+written under the single-key C<artifacts> shape remain readable
+unchanged.
 
 If C<started> or C<completed> are not set on the object, they default to the
 deployment's C<timestamp> value (which is generally set during C<new()> and

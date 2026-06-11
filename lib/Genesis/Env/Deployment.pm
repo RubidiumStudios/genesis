@@ -133,6 +133,16 @@ sub new {
 
 	my $artifact_defn = undef;
 	if (my $artifacts = delete($data{artifacts})) {
+		# Chunked storage: write side splits a large blob across
+		# numbered vault keys (artifacts.0, artifacts.1, ...).  On read,
+		# the vault round-trip surfaces those keys as an array ref
+		# (or stays a scalar for older single-blob deployments).
+		# Normalise by concatenating array chunks back into the
+		# original single base64-gzipped string.
+		if (ref($artifacts) eq 'ARRAY') {
+			$artifacts = join('', @$artifacts);
+		}
+
 		if (ref($artifacts) eq 'HASH') {
 			$artifact_defn = {
 				format => 'local-file-hash',
@@ -144,10 +154,14 @@ sub new {
 				data => $artifacts,
 			}
 		} else {
-			# TODO: Support uncompressed file contents are subfields under
-			#       `artifacts.`, possibly sequenced due to file size exceeding vaults
-			#       max field size (1MB)
-			bug("Invalid artifacts format - must be a hashref or base64 gzipped string");
+			# TODO: Support an uncompressed raw artifact format - some
+			# organizations don't allow compressed or base64-encoded
+			# contents in their vault for auditability / security
+			# reasons, so the operator may need to opt out of the
+			# default b64-gzipped storage in favor of raw YAML stored
+			# verbatim (also chunked across artifacts.<i> keys to
+			# respect the per-secret size cap).
+			bug("Invalid artifacts format - must be a hashref, arrayref, or base64 gzipped string");
 		}
 	}
 
@@ -399,26 +413,57 @@ sub commit {
 	$data->{completed} //= $timestamp_time;
 	$data->{started} //= $timestamp_time;
 
-	# Process the artifacts
+	# Process the artifacts.  Chunk the encoded blob across multiple
+	# `artifacts[N]` vault keys so that each individual JSON string
+	# value sent to Vault stays under the per-string limit
+	# (`max_json_string_value_length` on Vault 1.21+ listener config;
+	# compiled-in default 1 MiB).  See Service::Vault::max_json_string_value_length
+	# for the source; we apply a small headroom for the `artifacts[N]=`
+	# key prefix and JSON envelope overhead per value.
 	my $artifacts = $self->{artifacts};
 	my $deployment_time = $self->timestamp();
-	my $artifact_file = undef;
+	my @chunk_files;
 	if ($artifacts) {
-		$artifact_file = $self->env->workpath("artifacts-$deployment_time.tgz.b64");
+		# 1. Resolve the encoded blob - either supplied directly or
+		#    built from a local-file-hash of input artifacts.
+		my $blob;
 		if ($artifacts->{format} eq 'b64-gzipped') {
-			# We need to store this value as a temporary file so that we can use the key@file
-			# notation to store the gzipped data in the vault
-			mkfile_or_fail($artifact_file, $artifacts->{data});
+			$blob = $artifacts->{data};
 		} elsif ($artifacts->{format} eq 'local-file-hash') {
+			my $tmp = $self->env->workpath("artifacts-$deployment_time.tgz.b64");
 			eval {
-				$self->_build_artifacts_file(
-					$artifact_file,
-					%{$artifacts->{data}}
-				);
+				$self->_build_artifacts_file($tmp, %{$artifacts->{data}});
 			};
 			if ($@) {
-				unlink $artifact_file if -f $artifact_file;
+				unlink $tmp if -f $tmp;
 				die $@;  # Re-throw after cleanup
+			}
+			# Read back the encoded contents for chunking, then drop
+			# the intermediate file.
+			open my $fh, '<', $tmp or bail("Could not read %s: %s", $tmp, $!);
+			local $/;
+			$blob = <$fh>;
+			close $fh;
+			unlink $tmp;
+		}
+
+		# 2. Chunk the blob into per-key files.  Each chunk lands as a
+		#    separate file referenced via safe's `key@file` notation;
+		#    on the read side the array reassembles by concatenation
+		#    (see Deployment->new artifact normalisation).
+		#    Headroom: subtract 2 KiB from the per-string limit to
+		#    cover the `artifacts[N]=` key prefix and JSON envelope
+		#    overhead per value.
+		if (defined($blob) && length($blob)) {
+			my $max = $self->env->vault->max_json_string_value_length;
+			my $chunk_size = $max - 2048;
+			$chunk_size = 1 if $chunk_size < 1;
+			my $blob_len = length($blob);
+			for (my $offset = 0; $offset < $blob_len; $offset += $chunk_size) {
+				my $idx = scalar @chunk_files;
+				my $f = $self->env->workpath("artifacts-$deployment_time.chunk-$idx");
+				mkfile_or_fail($f, substr($blob, $offset, $chunk_size));
+				push @chunk_files, $f;
 			}
 		}
 	}
@@ -445,14 +490,18 @@ sub commit {
 			"$_=$deployment_data->{$_}"
 		} keys %$deployment_data
 	);
-	push @cmds, "artifacts\@$artifact_file" if $artifact_file && -f $artifact_file;
+	# Push each chunk as its own indexed key so the round-trip on read
+	# becomes an array ref (handled by Deployment->new normalisation).
+	for my $i (0 .. $#chunk_files) {
+		push @cmds, "artifacts[$i]\@$chunk_files[$i]";
+	}
 
 	my ($out, $rc, $err) = $self->env->vault->authenticate->query(
 		{ redact => 1 },
 		@cmds
 	);
 	$self->env->deployments->reset; # FIXME: This should be more surgical.
-	unlink $artifact_file if $artifact_file && -f $artifact_file;
+	unlink @chunk_files;
 	return ($out, $rc, $err) if wantarray;
 	bail(
 		"Failed to set deployment audit data in exodus: %s\n%s",

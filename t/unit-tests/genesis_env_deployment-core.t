@@ -1227,6 +1227,7 @@ subtest 'commit()' => sub {
 		my $ok_vault = Mock->new(
 			has          => sub { return 0 },
 			authenticate => sub { return $_[0] },
+			max_json_string_value_length => sub { 1024 * 1024 },
 			query        => Mock::ReferencedValue->new(['', 0, '']),
 		);
 		my $mock_deployments = Mock->new(
