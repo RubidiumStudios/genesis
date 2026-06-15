@@ -4048,6 +4048,20 @@ sub deploy {
 }
 
 # }}}
+# _stop_renewer_for_self_deploy - pause renewer when redeploying our vault {{{
+#
+# Avoids renew calls racing a half-deployed vault.  Next authenticate()
+# re-arms via _on_auth_success.  No-op on vaults without the method.
+sub _stop_renewer_for_self_deploy {
+	my ($self) = @_;
+	return 0 unless $self->_deployment_may_affect_secrets_vault();
+	my $vault = $self->vault;
+	return 0 unless $vault && $vault->can('stop_token_renewer');
+	$vault->stop_token_renewer;
+	return 1;
+}
+
+# }}}
 # _deployment_may_affect_secrets_vault - determine if deployment could seal secrets vault {{{
 sub _deployment_may_affect_secrets_vault {
 	my $self = shift;
@@ -4219,6 +4233,8 @@ sub _pre_deploy {
 	} else {
 		debug("Skipping unseal key check - deployment does not appear to affect secrets vault");
 	}
+
+	$self->_stop_renewer_for_self_deploy;
 
 	$self->notify("all systems #G{ok}, initiating BOSH deploy...");
 	return 1;
