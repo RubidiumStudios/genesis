@@ -331,6 +331,7 @@ subtest 'FWT-728: commit() cleans up temp files on failure' => sub {
 		my $ok_vault = Mock->new(
 			has          => sub { return 0 },  # not yet committed
 			authenticate => sub { return $_[0] },
+			max_json_string_value_length => sub { 1024 * 1024 },
 			query        => Mock::ReferencedValue->new(['', 0, '']),  # success
 		);
 		my $mock_deployments = Mock->new(
