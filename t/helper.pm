@@ -33,6 +33,11 @@ unified_diff;
 
 $ENV{GENESIS_TESTING} = "yes";
 
+# Deterministic wrap width so bail/error messages don't get
+# environment-dependent newlines.  Wrap-behaviour tests override
+# locally via `local $ENV{GENESIS_OUTPUT_COLUMNS} = ...`.
+$ENV{GENESIS_OUTPUT_COLUMNS} //= 200;
+
 our $TOPDIR;
 
 sub import {
@@ -263,6 +268,9 @@ fi
 EOF
   }
 
+	# Caller-supplied scripts may omit a shebang; bosh_runs_as scripts
+	# use bash-only [[ ... ]] so default-sh (dash on Linux) fails them.
+	$script = "#!/bin/bash\n$script" unless $script =~ /^#!/;
 	my $tmp = workdir;
 	put_file("$tmp/fake-bosh", $script);
 	chmod(0755, "$tmp/fake-bosh");
