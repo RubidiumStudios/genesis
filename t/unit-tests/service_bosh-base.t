@@ -74,9 +74,17 @@ subtest 'command() dies when no BOSH CLI is found on PATH' => sub {
 	# Clear the cached command so the scan loop runs.
 	Service::BOSH->set_command(undef);
 
-	# Override PATH to a directory that contains no bosh variants.
-	my $emptydir = workdir('no-bosh-bin');
-	local $ENV{PATH} = $emptydir;
+	# Build a sandbox PATH containing the scan tools we need
+	# (grep/head/etc.) but NO bosh CLI.  Wiping PATH outright works
+	# for the assertion but on CI images where /usr/bin holds both
+	# the bosh CLIs and the scan tools, that produces a flood of
+	# "command not found" stderr that wastes a reader's time.
+	my $sandbox = workdir('bosh-free-bin');
+	for my $tool (qw/grep head bash sh env which hostname cut/) {
+		chomp(my $path = `command -v $tool 2>/dev/null`);
+		symlink($path, "$sandbox/$tool") if $path && -x $path;
+	}
+	local $ENV{PATH} = $sandbox;
 
 	quietly {
 		throws_ok {
