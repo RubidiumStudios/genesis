@@ -5,7 +5,7 @@ meta:
   target:  pipes/genesis
   url:     https://pipes.scalecf.net
 
-  initial_version: 2.9.0
+  initial_version: 3.2.0-rc.0
 
   # we build our own image in this pipeline, and
   # use it, instead of standard concourse images.
@@ -22,9 +22,9 @@ meta:
     token:        ((vault.token))
 
   github:
-    owner:        genesis-community
+    owner:        RubidiumStudios
     repo:         genesis
-    branch:       v3.0.x-dev
+    branch:       v3.2.x-dev
     main-branch:  main
     private_key:  ((github.private_key))
     access_token: ((github.access_token))

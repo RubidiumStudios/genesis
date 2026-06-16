@@ -50,8 +50,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 ARG GENESIS_VERSION
+ARG GENESIS_OWNER=genesis-community
 
-RUN curl -Lo /usr/bin/genesis https://github.com/genesis-community/genesis/releases/download/v$GENESIS_VERSION/genesis \
+RUN curl -Lo /usr/bin/genesis "https://github.com/${GENESIS_OWNER}/genesis/releases/download/v${GENESIS_VERSION}/genesis" \
      && chmod 0755 /usr/bin/genesis
 
 RUN genesis -v

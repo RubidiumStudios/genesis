@@ -32,6 +32,7 @@ jobs:
       build: git-ci/ci/dockerimage
       build_args:
         GENESIS_VERSION: "((.:genesis_version))"
+        GENESIS_OWNER:   (( grab meta.github.owner ))
       tag_file: version/number
       tag_as_latest: true
   - put: genesis-image-dockerhub
