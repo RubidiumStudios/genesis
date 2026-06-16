@@ -300,12 +300,32 @@ sub authenticate {
 		}
 	}
 
-	# Last chance, check if we're already authenticated; otherwise bail.
-	# This also forces a update to the token, so we don't have to explicitly do that here.
+	# Last chance, check if we're already authenticated; otherwise fall
+	# through to the interactive ladder.  This also forces an update to
+	# the token, so we don't have to explicitly do that here.
 	return $self->_on_auth_success if $self->authenticated;
+
+	# Interactive fallback: only when a real operator can answer.
+	if ($self->_interactive_auth_available) {
+		if ($self->_authenticate_interactively) {
+			return $self->_on_auth_success if $self->authenticated;
+		}
+	}
+
+	# Bail with a message that distinguishes "session expired" from
+	# "you have not authenticated yet".  The __renewer_armed_at marker
+	# is set by start_token_renewer() on success, so its presence
+	# tells us we had a working renewable session earlier.
+	my $had_session = defined $self->{__renewer_armed_at};
+	my $heading = $had_session
+		? "Your vault session at #M{$ref} has expired and could not be renewed."
+		: "Could not successfully authenticate against #M{$ref} vault with #C{safe}.";
+	my $verb = $had_session ? 're-authenticate' : 'authenticate';
+
 	bail(
-		"Could not successfully authenticate against #M{$ref} vault with #C{safe}.\n\n".
-		"Genesis can automatically authenticate with safe in the following ways:\n".
+		"%s\n\nGenesis can automatically %s with #C{safe} in the following ways:\n%s",
+		$heading,
+		$verb,
 		join("", map {
 			my $a=$_;
 			sprintf(
@@ -401,6 +421,10 @@ sub start_token_renewer {
 	}
 
 	$self->{__renewer_pid} = $pid;
+	# Marker that this session had a working, renewable token at some
+	# point.  Consumed by authenticate()'s bail message to distinguish
+	# "your session expired" from "you have not authenticated yet".
+	$self->{__renewer_armed_at} = time;
 	return $pid;
 }
 
@@ -481,6 +505,105 @@ sub _run_renewer_loop {
 		return 0 unless $self->_token_renewal_available($info);
 		$ttl = $info->{data}{ttl};
 	}
+}
+
+# }}}
+# _authenticate_interactively - prompt-driven re-auth flow {{{
+#
+# Walks the operator through choosing an auth method and entering
+# credentials, then issues the same `safe auth $method` query the
+# env-var path uses.  Sensitive fields (tokens, passwords, secret-ids)
+# are collected via prompt_for_password (hidden input); identity
+# fields (role-id, username) via prompt_for_line.
+#
+# Returns truthy when $self->authenticated() agrees the new
+# credentials worked.  Returns 0 when the operator aborts, enters a
+# blank credential, or the safe call fails post-prompt.
+sub _authenticate_interactively {
+	my ($self) = @_;
+	my $ref = $self->ref;
+
+	my $methods = [
+		{ value => 'approle',
+		  label => 'AppRole (role-id / secret-id)',
+		  fields => [
+		  	{ prompt => 'Role ID',   hide => 0 },
+		  	{ prompt => 'Secret ID', hide => 1 },
+		  ],
+		},
+		{ value => 'token',
+		  label => 'Vault Token (paste a token)',
+		  fields => [
+		  	{ prompt => 'Vault Token', hide => 1 },
+		  ],
+		},
+		{ value => 'userpass',
+		  label => 'Username / Password',
+		  fields => [
+		  	{ prompt => 'Username', hide => 0 },
+		  	{ prompt => 'Password', hide => 1 },
+		  ],
+		},
+		{ value => 'github',
+		  label => 'GitHub Personal Access Token',
+		  fields => [
+		  	{ prompt => 'GitHub Personal Access Token', hide => 1 },
+		  ],
+		},
+	];
+
+	my @choices = (
+		(map { {value => $_->{value}, label => $_->{label}} } @$methods),
+		{value => 'abort', label => 'Abort'},
+	);
+
+	my $choice = new_prompt_for_choice(
+		header => "Re-authenticate to vault $ref:",
+		description => "method",
+		choices => \@choices,
+	);
+	return 0 if !defined($choice) || $choice eq 'abort';
+
+	my ($spec) = grep { $_->{value} eq $choice } @$methods;
+	return 0 unless $spec;
+
+	my @creds;
+	for my $field (@{$spec->{fields}}) {
+		my $value = $field->{hide}
+			? prompt_for_password($field->{prompt})
+			: prompt_for_line(undef, $field->{prompt}, undef, undef, undef);
+		return 0 unless defined($value) && $value ne '';
+		push @creds, $value;
+	}
+
+	my ($out, $rc) = $self->query(
+		'safe auth ${1} < <(echo "$2")',
+		$spec->{value},
+		join("\n", @creds),
+	);
+	return 0 if $rc;
+
+	return $self->authenticated ? 1 : 0;
+}
+
+# }}}
+# _interactive_auth_available - pure: can we prompt the operator? {{{
+#
+# True only when:
+#   - We're attached to a controlling terminal.
+#   - We're not running inside a Genesis kit-hook callback
+#     (the parent Genesis owns the user interaction in that case).
+#   - GENESIS_QUIET is not set.
+#   - GENESIS_NONINTERACTIVE is not set (explicit operator opt-out
+#     even when a TTY happens to be attached, e.g. some CI runners).
+#   - GENESIS_TESTING is not set (test harnesses must never prompt).
+sub _interactive_auth_available {
+	return 0 unless in_controlling_terminal();
+	return 0 if in_callback();
+	return 0 if envset('QUIET');
+	return 0 if envset('GENESIS_NONINTERACTIVE');
+	return 0 if under_test();
+	return 1;
 }
 
 # }}}

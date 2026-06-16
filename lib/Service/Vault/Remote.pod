@@ -486,9 +486,56 @@ Requires C<VAULT_GITHUB_TOKEN>.
 
 =back
 
-After all methods are tried, a final check confirms authentication. If the
-vault is still not authenticated, an error is raised listing each method,
-its required variables, and whether any were attempted but rejected.
+After all env-var methods are tried, a final check confirms authentication.
+When that check still reports unauthenticated, the method falls through to an
+B<interactive re-auth ladder>:
+
+=over 4
+
+=item 1.
+
+L</_interactive_auth_available> evaluates the gating predicate. The
+interactive prompt only fires when the process is attached to a controlling
+terminal and is not running inside a Genesis kit-hook callback, with
+C<GENESIS_QUIET> unset, C<GENESIS_NONINTERACTIVE> unset, and
+C<GENESIS_TESTING> unset (test harnesses must never prompt).
+
+=item 2.
+
+If interactive auth is available, L</_authenticate_interactively> prompts
+the operator with a menu of the same four auth methods, collects the
+required credentials (hidden input for tokens, passwords, secret-ids,
+PATs), and runs the identical C<safe auth $method> call the env-var path
+uses.
+
+=item 3.
+
+If interactive auth is unavailable or the operator's response did not
+produce a valid session, the method bails. The bail message distinguishes
+two cases:
+
+=over 4
+
+=item *
+
+When L</start_token_renewer> previously succeeded in this session
+(C<$self-E<gt>{__renewer_armed_at}> is set), the message leads with
+S<C<"Your vault session at %s has expired and could not be renewed.">> so
+operators understand that a working session lapsed rather than seeing a
+first-time-setup hint.
+
+=item *
+
+When no renewer was ever armed, the original C<"Could not successfully
+authenticate against %s vault with safe."> heading is retained.
+
+=back
+
+In both cases, the bail body lists each supported auth method and its
+required environment variables, with C<#R{[present, but failed]}>
+annotations for any env-var attempt that ran but did not authenticate.
+
+=back
 
 B<Parameters:> None beyond C<$self>.
 
@@ -498,12 +545,15 @@ B<Errors:>
 
 =over 4
 
+=item C<"Your vault session at %s has expired and could not be renewed.\n\nGenesis can automatically re-authenticate with safe in the following ways:\n...">
+
+Raised when a previously-armed token renewer's session has lapsed and no
+re-auth path succeeded. C<%s> is the vault reference.
+
 =item C<"Could not successfully authenticate against %s vault with safe.\n\nGenesis can automatically authenticate with safe in the following ways:\n...">
 
-Raised when no available authentication method succeeds. C<%s> is the
-vault reference (name or alias). The message lists each supported method,
-its required environment variables, and whether those variables were
-present but failed.
+Raised on initial auth failure when no renewer has ever been armed for
+this vault. C<%s> is the vault reference (name or alias).
 
 =back
 
@@ -513,6 +563,87 @@ B<Examples:>
   $ENV{VAULT_AUTH_TOKEN} = 'hvs.EXAMPLE';
   my $result = $vault->authenticate();
   # Returns: the $vault object
+
+=head2 _interactive_auth_available
+
+  my $bool = $vault->_interactive_auth_available;
+
+Pure predicate. Returns true only when L</authenticate> can safely
+prompt the operator for credentials. Gates checked, all of which must
+report "open" for the predicate to be true:
+
+=over 4
+
+=item *
+
+Process is attached to a controlling terminal
+(L<Genesis::Term/in_controlling_terminal>).
+
+=item *
+
+Not running inside a Genesis kit-hook callback
+(L<Genesis::State/in_callback>). The parent Genesis owns user
+interaction in that case.
+
+=item *
+
+C<GENESIS_QUIET> is not set.
+
+=item *
+
+C<GENESIS_NONINTERACTIVE> is not set. This is the explicit operator
+opt-out for environments where a TTY happens to be attached (some CI
+runners with PTY allocation) but interactive behaviour is undesired.
+
+=item *
+
+C<GENESIS_TESTING> is not set (L<Genesis::State/under_test>). Test
+harnesses must never prompt.
+
+=back
+
+B<Returns:> 1 when interactive prompting is allowed, 0 otherwise.
+
+=head2 _authenticate_interactively
+
+  my $ok = $vault->_authenticate_interactively;
+
+Prompt-driven re-auth flow used by L</authenticate> when env-var
+auth methods have not produced a valid session and
+L</_interactive_auth_available> reports true.
+
+Presents the operator with a menu (via L<Genesis::UI/new_prompt_for_choice>)
+of the same four auth methods the env-var path supports plus
+C<Abort>:
+
+=over 4
+
+=item AppRole
+
+Prompts for role-id (visible) and secret-id (hidden via
+L<Genesis::UI/prompt_for_password>).
+
+=item Vault Token
+
+Prompts for the token (hidden).
+
+=item Username/Password
+
+Prompts for username (visible) and password (hidden).
+
+=item GitHub Personal Access Token
+
+Prompts for the PAT (hidden).
+
+=back
+
+Once credentials are collected the same C<safe auth $method> query
+the env-var path uses is issued, and C<authenticated()> is checked
+to confirm.
+
+B<Returns:> 1 on successful re-auth, 0 when the operator aborts, enters
+a blank credential, the safe call returns non-zero, or the
+post-auth C<authenticated> check still reports false.
 
 =head2 start_token_renewer
 
@@ -591,6 +722,13 @@ B<Side effects:>
 =item *
 
 Stores the child PID on C<$self-E<gt>{__renewer_pid}>.
+
+=item *
+
+Stores the start time on C<$self-E<gt>{__renewer_armed_at}>. Consumed
+by L</authenticate>'s bail message to distinguish "session expired"
+from "first-time authentication failure" -- see the heading variants
+documented under L</authenticate>'s B<Errors>.
 
 =item *
 
@@ -674,14 +812,18 @@ C<SIGTERM>).
 =item *
 
 Self-deploy guard (skipping renewal when deploying the vault that
-issued the token) is currently handled at the env layer, not by
-C<Service::Vault::Remote>.
+issued the token) is handled at the env layer, not by
+C<Service::Vault::Remote>. See
+L<Genesis::Env/_stop_renewer_for_self_deploy>.
 
 =item *
 
-Interactive re-auth on token expiry (TTY prompt vs non-TTY bail) is
-deferred; today, an expired token surfaces as a normal vault
-operation failure.
+The interactive re-auth ladder only fires when L</authenticate> is
+called and discovers no env-var method succeeded. Code paths that
+talk to the vault without going through C<authenticate> first (e.g.
+direct C<safe> CLI invocations bypassing this module) will surface a
+token expiry as a normal vault failure rather than triggering the
+prompt.
 
 =back
 

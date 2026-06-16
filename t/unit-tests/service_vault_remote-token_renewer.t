@@ -240,6 +240,45 @@ subtest 'start_token_renewer returns undef when ttl is zero' => sub {
 	is($v->start_token_renewer(), undef, 'returns undef when ttl is zero');
 };
 
+subtest 'start_token_renewer sets __renewer_armed_at marker on success' => sub {
+	plan tests => 3;
+	my $v = make_remote();
+	is($v->{__renewer_armed_at}, undef, 'precondition: marker is unset');
+	no warnings 'redefine', 'once';
+	local *Service::Vault::Remote::token_info = sub {
+		{data => {renewable => 1, ttl => 3600}};
+	};
+	local *Service::Vault::Remote::_run_renewer_loop = sub {
+		sleep 30;
+		return 0;
+	};
+	use warnings 'redefine';
+
+	my $before = time;
+	my $pid = $v->start_token_renewer;
+	ok(defined($v->{__renewer_armed_at}),
+		'__renewer_armed_at defined after successful start');
+	cmp_ok($v->{__renewer_armed_at}, '>=', $before,
+		'marker reflects start time (not stale)');
+
+	# Cleanup
+	kill 'TERM', $pid;
+	waitpid($pid, 0);
+};
+
+subtest 'start_token_renewer does NOT set marker when not renewable' => sub {
+	plan tests => 1;
+	my $v = make_remote();
+	no warnings 'redefine', 'once';
+	local *Service::Vault::Remote::token_info = sub {
+		{data => {renewable => 0, ttl => 3600}};
+	};
+	use warnings 'redefine';
+	$v->start_token_renewer;
+	is($v->{__renewer_armed_at}, undef,
+		'marker remains undef when no renewer started');
+};
+
 subtest 'start_token_renewer forks a child and stores its pid' => sub {
 	plan tests => 4;
 	my $v = make_remote();
