@@ -376,6 +376,10 @@ cmp_deeply(\@env_names, bag('ci-baseline', 'ci-ocfp', 'c-prod', 'c-upgrade', 'pr
 };
 
 subtest 'load_env method' => sub {
+	# tmpdir paths may be long enough to wrap the bail message between
+	# "does not" and "exist." under the file-level 80-col default
+	local $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
+
 	my $tmp = make_test_repo(workdir(), 'test');
 
 	# Test that load_env bails on non-existent environment
