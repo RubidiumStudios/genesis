@@ -21,7 +21,7 @@ $SIG{__WARN__} = sub {
 sub new {
 	my ($class,$provider) = @_;
 	bug "Attempt to initialize abstract class Genesis::Kit"
-		if ($class == __PACKAGE__);
+		if ($class eq __PACKAGE__);
 }
 # }}}
 
