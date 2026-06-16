@@ -11,6 +11,7 @@ our @EXPORT = qw/
 	prompt_for_line
 	prompt_for_list
 	prompt_for_block
+	prompt_for_password
 	new_prompt_for_choice
 /;
 
@@ -22,7 +23,7 @@ use Genesis::Term;
 use POSIX qw//;
 
 sub __prompt_for_line {
-	my ($prompt,$validation,$err_msg,$default,$allow_blank) = @_;
+	my ($prompt,$validation,$err_msg,$default,$allow_blank,$hide_response) = @_;
 	$prompt = join(' ', grep {defined($_) && $_ ne ""} ($prompt, '>')) . " ";
 
 	# `validate` is a sub with first argument the test value, and the second
@@ -105,7 +106,25 @@ sub __prompt_for_line {
 
 	while (1) {
 		print STDERR csprintf("%s", $prompt);
-		chomp (my $in=<STDIN>);
+		# When asked to hide the response and we are actually attached to
+		# a controlling terminal, drop terminal echo around the read so the
+		# typed value is not displayed.  In non-TTY environments (tests,
+		# piped input) we read normally so test harnesses keep working.
+		my $hidden = $hide_response && in_controlling_terminal();
+		system('stty', '-echo') if $hidden;
+		my $in = <STDIN>;
+		if ($hidden) {
+			system('stty', 'echo');
+			# Their Enter was not echoed; emit one so the next line of
+			# output is not glued to the prompt.
+			print STDERR "\n";
+		}
+		# Defensive: <STDIN> returns undef on EOF, and chomp on undef
+		# emits an uninit warning.  Coerce to empty string so the
+		# allow_blank short-circuit below can fire cleanly instead of
+		# spinning the loop on a closed pipe.
+		$in = '' unless defined $in;
+		chomp $in;
 		if ($in eq "" && defined($default)) {
 			$in = $default;
 			print STDERR (csprintf("\033[1A%s#C{%s}\n",$prompt, $in));
@@ -280,7 +299,7 @@ sub prompt_for_choice {
 }
 
 sub prompt_for_line {
-	my ($prompt,$label,$default,$validation,$err_msg) = @_;
+	my ($prompt,$label,$default,$validation,$err_msg,$hide_response) = @_;
 	if ($prompt) {
 		print csprintf("%s","\n$prompt");
 		my $padding = ($prompt =~ /\s$/) ? "" : " ";
@@ -291,7 +310,17 @@ sub prompt_for_line {
 	}
 	print "\n";
 	my $allow_blank = (defined($default) && $default eq "");
-	return __prompt_for_line(defined($label) ? $label : "", $validation, $err_msg, $default, $allow_blank);
+	return __prompt_for_line(defined($label) ? $label : "", $validation, $err_msg, $default, $allow_blank, $hide_response);
+}
+
+# prompt_for_password - read a line from STDIN with terminal echo disabled.
+# Calls __prompt_for_line directly (bypassing prompt_for_line's banner
+# logic, which would emit a stray "\n" on STDOUT) with allow_blank=1 so
+# an empty or EOF response returns "" instead of looping for retry.
+sub prompt_for_password {
+	my ($label) = @_;
+	# args: prompt, validation, err_msg, default, allow_blank, hide_response
+	return __prompt_for_line($label, undef, undef, undef, 1, 1);
 }
 
 sub prompt_for_list {

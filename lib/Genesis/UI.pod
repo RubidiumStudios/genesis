@@ -223,7 +223,7 @@ B<Examples:>
 
 =head2 prompt_for_line
 
-    my $value = prompt_for_line($prompt, $label, $default, $validation, $err_msg);
+    my $value = prompt_for_line($prompt, $label, $default, $validation, $err_msg, $hide_response);
 
 Prompts the user for a single line of text, optionally validating the input
 and reprompting on invalid entries.
@@ -315,6 +315,13 @@ string on success or an error message string on failure.
 
 Optional. Custom error message passed to the validation function when
 validation fails.
+
+=item C<$hide_response>
+
+Optional. When true B<and> the process is attached to a controlling
+terminal, terminal echo is disabled around the C<STDIN> read so the
+typed value is not displayed. See L</prompt_for_password> for the common
+wrapper that uses this flag.
 
 =back
 
@@ -436,6 +443,40 @@ B<Examples:>
 
     my $notes = prompt_for_block("Paste your deployment notes:");
     # Returns: e.g. "Line one\nLine two\n"
+
+=head2 prompt_for_password
+
+    my $secret = prompt_for_password($label);
+
+Reads a single line of input from C<STDIN> with terminal echo disabled, so
+the typed value is not displayed. Intended for passwords, tokens, AppRole
+secret-ids, GitHub PATs, and other sensitive credentials.
+
+Calls L</__prompt_for_line> with C<allow_blank> set so an EOF or empty
+response returns the empty string rather than looping for retry. Hidden
+input only takes effect when attached to a controlling terminal; in non-TTY
+environments (tests, piped input) the read happens normally so test
+harnesses keep working.
+
+B<Parameters:>
+
+=over
+
+=item C<$label>
+
+Short label shown next to the C<E<gt>> prompt (e.g. C<"Password">,
+C<"GitHub Personal Access Token">).
+
+=back
+
+B<Returns:> The line entered with the trailing newline stripped. Returns
+the empty string on EOF or when the user presses Enter without typing
+anything.
+
+B<Examples:>
+
+    my $token = prompt_for_password("Vault Token");
+    # Returns: the typed token, no echo to the screen
 
 =head2 new_prompt_for_choice
 
@@ -566,7 +607,7 @@ notice and should not be called directly.
 
 =head2 __prompt_for_line
 
-    __prompt_for_line($prompt, $validation, $err_msg, $default, $allow_blank)
+    __prompt_for_line($prompt, $validation, $err_msg, $default, $allow_blank, $hide_response)
 
 Core line-input loop used by all public prompt functions. Displays the prompt
 with a trailing C<E<gt>>, reads from C<STDIN>, applies the optional validation
@@ -578,6 +619,16 @@ substituted and echoed back. When C<$allow_blank> is true and the input is
 empty, returns C<""> immediately. Numeric inputs are detainted and returned as
 numbers.
 
+When C<$hide_response> is true B<and> the process is attached to a controlling
+terminal (per L<Genesis::Term/in_controlling_terminal>), terminal echo is
+disabled around the C<STDIN> read so the typed value is not displayed. In
+non-TTY environments (tests, piped input) the read happens normally so test
+harnesses driving the function via a piped C<STDIN> are unaffected.
+
+The C<E<lt>STDINE<gt>> read is defensive against C<undef> on EOF; combined
+with C<$allow_blank>, this prevents an EOF on a closed pipe from spinning the
+retry loop.
+
 Dies with C<"Error compiling param regex: $!"> if the C<$validation> string is
 a regex-format specifier and the pattern fails to compile.
 
@@ -586,6 +637,10 @@ B<Examples:>
     # Used internally by prompt_for_line and prompt_for_choices
     my $val = __prompt_for_line("Enter IP", "ip", undef, "10.0.0.1", undef);
     # Returns: user input or '10.0.0.1' if Enter pressed
+
+    # Hidden input (used by prompt_for_password)
+    my $secret = __prompt_for_line("Password", undef, undef, undef, 1, 1);
+    # Returns: user input; nothing is echoed to the terminal during typing
 
 =head2 __prompt_for_block
 
