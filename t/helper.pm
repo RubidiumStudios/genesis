@@ -33,21 +33,6 @@ unified_diff;
 
 $ENV{GENESIS_TESTING} = "yes";
 
-# Defaults that nearly every test seeds for itself.  Setting them
-# here once removes ~40 copies of the same boilerplate AND silences
-# the file-local "used only once" warning that fires on tests that
-# only assign these variables but never read them back by name.
-# Tests that need a different version can still `local`-override or
-# reassign at the file level.  `no warnings 'once'` is required
-# here too: helper.pm itself only references these fully-qualified
-# names once.
-require Genesis::Config;
-{
-	no warnings 'once';
-	$Genesis::VERSION = '999.999.999';                              # force dev mode
-	$Genesis::RC      = Genesis::Config->new("$ENV{HOME}/.genesis/config");
-}
-
 # Deterministic wrap width so bail/error messages don't get
 # environment-dependent newlines.  Wrap-behaviour tests override
 # locally via `local $ENV{GENESIS_OUTPUT_COLUMNS} = ...`.

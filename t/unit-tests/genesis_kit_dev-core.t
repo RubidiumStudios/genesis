@@ -15,7 +15,7 @@ use_ok 'Genesis::Kit::Compiler';
 use_ok 'Genesis::Config';
 use_ok 'Service::Vault::Remote';
 
-# $Genesis::RC is seeded by t/helper.pm
+$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
 
 
 # ---------------------------------------------------------------------------

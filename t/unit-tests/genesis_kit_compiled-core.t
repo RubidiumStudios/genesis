@@ -14,7 +14,10 @@ use_ok 'Genesis::Kit::Compiled';
 use_ok 'Genesis::Kit::Compiler';
 
 use_ok 'Genesis::Config';
-# $Genesis::RC is seeded by t/helper.pm
+# 'once' silences the file-local "used only once" check;
+# $Genesis::RC is a Genesis-namespace package variable that this
+# file assigns to but never reads back by name.
+{ no warnings 'once'; $Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config"); }
 
 use_ok 'Service::Vault::Remote';
 
