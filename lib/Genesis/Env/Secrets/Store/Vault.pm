@@ -33,7 +33,7 @@ sub new {
 
 	$opts{mount_override}   //= $env->lookup('genesis.secrets_mount');
 	$opts{slug_override}    //= $env->lookup(['genesis.secrets_path','params.vault_prefix','params.vault']);
-	$opts{root_ca_override} //= $env->lookup('genesis.root_ca_path','') =~ s/\/$//r;
+	$opts{root_ca_override} //= ($env->lookup('genesis.root_ca_path','') // '') =~ s/\/$//r;
 
 	return bless({
 			env => $env,

@@ -198,13 +198,16 @@ subtest 'Defect 4: store_data() handles undef export safely' => sub {
 
 	# Monkey-patch read_json_from in the Vault package namespace to simulate
 	# vault export decoding to undef (the function is imported, so we must
-	# override it in the consuming package's symbol table)
-	no warnings 'redefine';
+	# override it in the consuming package's symbol table).  `once` is
+	# suppressed because this file references the fully-qualified name
+	# exactly once — at the assignment below — which would otherwise trip
+	# the "used only once: possible typo" warning.
+	no warnings qw/redefine once/;
 	local *Genesis::Env::Secrets::Store::Vault::read_json_from = sub {
 		$read_json_calls++;
 		return undef;
 	};
-	use warnings 'redefine';
+	use warnings qw/redefine once/;
 
 	# (1) undef JSON → returns {} without caching
 	my $data = $store->store_data();
