@@ -11,7 +11,8 @@ use Cwd qw/abs_path/;
 
 use_ok "Service::BOSH::Director";
 use_ok 'Genesis::Config';
-$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# Initialize $Genesis::RC for tests that consult global config
+provide_rc();
 
 use Genesis;
 use Genesis::Top;

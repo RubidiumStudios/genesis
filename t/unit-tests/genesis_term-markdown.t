@@ -15,9 +15,8 @@ $ENV{GENESIS_OUTPUT_LINES}   = 24;
 
 use_ok 'Genesis::Term';
 
-# Initialize Genesis::RC for codeblock tests
-use Genesis::Config;
-$Genesis::RC = Genesis::Config->new(undef, 0, {'ui' => {'colors' => {'code' => 'Wk'}}});
+# Initialize $Genesis::RC with pre-loaded ui colors for codeblock tests
+provide_rc(undef, 0, {'ui' => {'colors' => {'code' => 'Wk'}}});
 
 # ---------------------------------------------------------------------------
 # build_markdown_paragraph

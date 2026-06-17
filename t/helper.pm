@@ -111,6 +111,30 @@ sub reset_kit {
 	$kit->{extract};
 }
 
+# provide_rc - seed $Genesis::RC for tests that need a Config object
+#
+# 38 test files contain a single write-only line like:
+#   $Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# which trips the file-local "Name $Genesis::RC used only once"
+# warning.  Centralising the assignment here means the only
+# fully-qualified reference lives inside helper.pm, where we silence
+# the warning once.  Tests call:
+#   provide_rc();                 # uses $ENV{HOME}/.genesis/config
+#   provide_rc($path);            # overrides the config path
+#   provide_rc($path,$auto,$ct);  # full Genesis::Config->new signature
+#
+# Genesis::Config is loaded lazily so that helper.pm itself does not
+# pull Genesis into compile-time scope -- Test::Exit's CORE::GLOBAL::exit
+# override is sensitive to load ordering when used together with eval-
+# based subtests (see genesis-core.t).
+sub provide_rc {
+	my @args = @_;
+	@args = ("$ENV{HOME}/.genesis/config") unless @args;
+	require Genesis::Config;
+	no warnings 'once';
+	$Genesis::RC = Genesis::Config->new(@args);
+}
+
 our $WORKDIR = undef;
 sub workdir {
 	$WORKDIR ||= tempdir(CLEANUP => 1);

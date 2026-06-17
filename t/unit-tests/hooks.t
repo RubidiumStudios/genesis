@@ -11,7 +11,8 @@ use Test::Deep;
 use Test::Output;
 
 use_ok 'Genesis::Config';
-$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# Initialize $Genesis::RC for tests that consult global config
+provide_rc();
 
 use_ok 'Genesis::Kit';
 use Genesis::Kit::Dev;

@@ -10,7 +10,8 @@ use_ok 'Genesis';
 use_ok 'Genesis::Kit::Compiled';
 
 use_ok 'Genesis::Config';
-$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# Initialize $Genesis::RC for tests that consult global config
+provide_rc();
 
 my $tmp = workdir;
 

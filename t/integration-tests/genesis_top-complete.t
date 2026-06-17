@@ -13,7 +13,8 @@ use Cwd ();
 plan tests => 14; # Total subtests and tests outside subtests
 
 use_ok 'Genesis::Config';
-$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# Initialize $Genesis::RC for tests that consult global config
+provide_rc();
 
 use_ok 'Genesis::Top';
 use_ok 'Genesis::Kit::Compiled';

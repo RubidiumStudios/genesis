@@ -233,7 +233,8 @@ YAML
 
 ### Config v3 validation tests ################################################
 
-$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# Initialize $Genesis::RC for tests that consult global config
+provide_rc();
 
 sub make_v3_repo {
 	my ($dir, %opts) = @_;

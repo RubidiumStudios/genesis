@@ -12,7 +12,8 @@ use Test::Output;
 use Genesis;
 $Genesis::VERSION = '999.999.999'; # force dev mode for testing
 use Genesis::Config;
-$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# Initialize $Genesis::RC for tests that consult global config
+provide_rc();
 
 use Genesis::Top;
 use Genesis::Env;

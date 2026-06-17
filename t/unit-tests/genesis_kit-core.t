@@ -14,7 +14,8 @@ use_ok 'Genesis::Kit::Dev';
 use_ok 'Service::Vault::Remote';
 
 use_ok 'Genesis::Config';
-$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# Initialize $Genesis::RC for tests that consult global config
+provide_rc();
 
 use Genesis::Kit::Compiler;
 
