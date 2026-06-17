@@ -558,7 +558,10 @@ sub environments {
 					$group_by eq 'env' ? "environments" : "repositories"
 				);
 			}
-			info $ansi_hide_cursor if $group_by eq 'env';
+			if ($group_by eq 'env') {
+				info $ansi_hide_cursor;
+				mark_cursor_hidden();
+			}
 			my ($i,$j) = (0,0);
 			for my $repo (@repos) {
 				__processing($i, scalar(@repos), $j) if ($show_details && ($group_by eq 'env' || $json));
@@ -671,8 +674,10 @@ sub environments {
 				}
 			}
 
-			info {pending => 1}, $ansi_show_cursor.$ansi_reset_line.$ansi_cursor_up
-				if $show_details && ($group_by eq 'env' || $json);
+			if ($show_details && ($group_by eq 'env' || $json)) {
+				info {pending => 1}, $ansi_show_cursor.$ansi_reset_line.$ansi_cursor_up;
+				mark_cursor_visible();
+			}
 
 			if ($group_by eq 'env' && ! $json) {
 				if (scalar keys %deployments_by_name) {
@@ -714,6 +719,7 @@ sub environments {
 					}
 				} else {
 					info {pending => 1}, $ansi_reset_line.$ansi_cursor_up.$ansi_show_cursor;
+					mark_cursor_visible();
 					info "\n[[  #E{warning}>>#Ki{No environments found}" . ($search
 						? sprintf("#Ki{ matching pattern }#Ci{%s}", $search)
 						: '#Ki{.}'
@@ -735,6 +741,7 @@ sub environments {
 		output {raw => 1}, encode_json(\%data);
 	}
 	info $ansi_show_cursor;
+	mark_cursor_visible();
 }
 
 sub __processing {

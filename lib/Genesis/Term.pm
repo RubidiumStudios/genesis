@@ -40,6 +40,10 @@ our @EXPORT = qw/
 	$ansi_show_cursor
 	$ansi_save_cursor
 	$ansi_restore_cursor
+	hide_cursor
+	show_cursor
+	mark_cursor_hidden
+	mark_cursor_visible
 /;
 
 # ANSI control sequences
@@ -49,6 +53,26 @@ our $ansi_cursor_up = "\e[A";
 our $ansi_cursor_down = "\e[B";
 our $ansi_hide_cursor = "\e[?25l";
 our $ansi_show_cursor = "\e[?25h";
+
+# Tracks whether we have hidden the cursor via hide_cursor() (or marked it
+# hidden because something else emitted $ansi_hide_cursor inline through
+# info()).  show_cursor() is a no-op unless the cursor is known to be
+# hidden, so that "just in case" restoration calls in bail()/bug() don't
+# emit unpaired DECTCEM sequences that interleave with prove's progress
+# rewriting during tests.
+our $__cursor_hidden = 0;
+sub hide_cursor {
+	return if $__cursor_hidden;
+	$__cursor_hidden = 1;
+	print STDERR $ansi_hide_cursor;
+}
+sub show_cursor {
+	return unless $__cursor_hidden;
+	$__cursor_hidden = 0;
+	print STDERR $ansi_show_cursor;
+}
+sub mark_cursor_hidden  { $__cursor_hidden = 1 }
+sub mark_cursor_visible { $__cursor_hidden = 0 }
 our $ansi_save_cursor = "\e[s";
 our $ansi_restore_cursor = "\e[u";
 

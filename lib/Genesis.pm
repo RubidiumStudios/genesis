@@ -352,7 +352,7 @@ sub bail {
 	# log a fatal message and exit
 	my $rc = delete($options->{exitcode}) // 1;
 	logger->fatal({offset=>1},$options, "\n".$msg);
-	print STDERR $ansi_show_cursor; # restore cursor visibility, just in case
+	show_cursor(); # restore cursor visibility if we hid it
 	exit $rc;
 }
 
@@ -385,7 +385,7 @@ sub bug {
 	if ($^S && !envset("GENESIS_IGNORE_EVAL")) {
 		# die if in an eval;
 		logger->trace("Bug caught: $msg");
-		print STDERR $ansi_show_cursor; # restore cursor visibility, just in case
+		show_cursor(); # restore cursor visibility if we hid it
 		die "\n".csprintf("%s",wrap($msg,terminal_width,"#r{[FATAL]} ")."\n\n");
 	}
 
@@ -394,7 +394,7 @@ sub bug {
 
 	my $rc = delete($options->{exitcode}) // 1;
 	logger->fatal({offset=>1, show_stack => 'none'},$options, "\n".$msg."\n");
-	print STDERR $ansi_show_cursor; # restore cursor visibility, just in case
+	show_cursor(); # restore cursor visibility if we hid it
 	exit $rc;
 }
 
