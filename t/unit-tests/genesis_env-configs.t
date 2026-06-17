@@ -10,6 +10,7 @@ use helper;
 use Test::More;
 use Test::Deep;
 use Test::Exception;
+use Test::Output;
 
 use Genesis;
 $Genesis::VERSION = '999.999.999';
@@ -618,7 +619,7 @@ subtest 'download_configs - cpi spec proceeds (optional=>1) when configs are upl
 	# normally with optional=>1 set defensively (covers the race
 	# where the listing is fresh but the content fetch finds zero
 	# entries between calls).
-	plan tests => 2;
+	plan tests => 4;
 
 	local %ENV = %ENV;
 	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
@@ -648,17 +649,23 @@ subtest 'download_configs - cpi spec proceeds (optional=>1) when configs are upl
 	local *Genesis::Env::with_bosh = sub { $_[0] };
 	local *Genesis::Env::bosh      = sub { $stub_bosh };
 
-	$env->download_configs('cpi');
+	# Capture stderr so the progress banner doesn't leak into prove
+	# output, and assert on its content as part of the contract.
+	my $stderr = stderr_from { $env->download_configs('cpi') };
 
 	is scalar(@captured), 1,
 		'bosh->download_configs IS called when cpi configs are uploaded';
 	my %fwd = @{$captured[0]}[3..$#{$captured[0]}];
 	is $fwd{optional}, 1,
 		'optional=>1 is forced for cpi as defensive insurance';
+	like $stderr, qr/Downloading configs from .*stub.* BOSH director/,
+		'progress banner names the BOSH director by alias';
+	like $stderr, qr/cpi config 'aws-bundle'/,
+		'per-config bullet identifies the uploaded cpi config';
 };
 
 subtest 'download_configs - threads trailing opts hashref to bosh->download_configs' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	local %ENV = %ENV;
 	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
@@ -696,7 +703,9 @@ subtest 'download_configs - threads trailing opts hashref to bosh->download_conf
 	local *Genesis::Env::with_bosh = sub { $_[0] };
 	local *Genesis::Env::bosh      = sub { $stub_bosh };
 
-	$env->download_configs('cpi', { optional => 1 });
+	# Capture stderr so the progress banner doesn't leak into prove
+	# output, and assert on its content as part of the contract.
+	my $stderr = stderr_from { $env->download_configs('cpi', { optional => 1 }) };
 
 	is scalar(@captured), 1,
 		'one bosh->download_configs call per spec';
@@ -707,6 +716,8 @@ subtest 'download_configs - threads trailing opts hashref to bosh->download_conf
 	my %fwd = @args[3..$#args];
 	is $fwd{optional}, 1,
 		'optional => 1 is threaded through to the bosh->download_configs call';
+	like $stderr, qr/Downloading configs from .*stub.* BOSH director/,
+		'progress banner names the BOSH director by alias';
 };
 
 done_testing;
