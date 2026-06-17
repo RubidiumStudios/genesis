@@ -69,10 +69,15 @@ sub import {
 
 	# helper resets $ENV{HOME} to a fresh test home, so any global
 	# git identity from the host or CI image is no longer visible.
-	# Establish a deterministic identity in the test HOME so kit
-	# compile / commit paths don't bail with "Author identity unknown".
-	`git config --global user.name "Genesis Test Runner" 2>/dev/null`;
-	`git config --global user.email "test\@genesis.example.com" 2>/dev/null`;
+	# Write a deterministic identity directly into the test HOME's
+	# .gitconfig.  We do NOT shell out to `git config --global` because
+	# git aborts before reading any config when it stumbles on the
+	# worktree's stale .git pointer (the worktree's .git file has a
+	# host-side absolute path that doesn't exist inside CI containers).
+	if (open my $fh, '>', "$ENV{HOME}/.gitconfig") {
+		print $fh "[user]\n\tname = Genesis Test Runner\n\temail = test\@genesis.example.com\n";
+		close $fh;
+	}
 	$ENV{OFFLINE} = 'y';
 	$ENV{GENESIS_LIB} = "$ENV{GENESIS_TOPDIR}/lib";
 

@@ -433,8 +433,16 @@ sub _prepare_hook_commit {
 sub scaffold {
 	my ($self, $name) = @_;
 
-	my ($user, undef)  = run('git config user.name');  $user  ||= 'The Unknown Kit Author';
-	my ($email, undef) = run('git config user.email'); $email ||= 'no-reply@example.com';
+	# Suppress git's stderr -- scaffold runs from CWD which may not
+	# be a git working tree (or may sit under a broken worktree
+	# pointer).  Genesis::run merges stderr into stdout by default,
+	# which would let git's "fatal: not a git repository" message
+	# defeat the ||= fallback and land in kit.yml's author line as
+	# a malformed plain scalar with multiple colons.  An inline
+	# `2>/dev/null` is no good because Genesis::run appends its own
+	# stderr redirect; pass it as an option instead.
+	my ($user, undef)  = run({stderr => '/dev/null'}, 'git config user.name');  $user  ||= 'The Unknown Kit Author';
+	my ($email, undef) = run({stderr => '/dev/null'}, 'git config user.email'); $email ||= 'no-reply@example.com';
 
 	if (-f "$self->{root}/kit.yml") {
 		bail "Found a kit.yml in $self->{root}; cowardly refusing to overwrite an existing kit.";
