@@ -100,7 +100,11 @@ subtest 'connect_and_validate() - unauthenticated triggers authenticate' => sub 
 	my $v = make_remote(name => 'unauth-vault');
 
 	my $authenticate_called = 0;
-	no warnings 'redefine';
+	# `once` is suppressed alongside `redefine` because the
+	# fully-qualified names below appear in this file only at
+	# the local-glob assignments, which would otherwise trip
+	# "Name X used only once: possible typo".
+	no warnings qw/redefine once/;
 	local *Service::Vault::Remote::status = sub { 'unauthenticated' };
 	local *Service::Vault::Remote::authenticate = sub {
 		$authenticate_called = 1;
@@ -109,7 +113,7 @@ subtest 'connect_and_validate() - unauthenticated triggers authenticate' => sub 
 	# After authenticate(), initialized() is called to determine new status.
 	# Return true so the derived status becomes 'ok'.
 	local *Service::Vault::Remote::initialized = sub { 1 };
-	use warnings 'redefine';
+	use warnings qw/redefine once/;
 
 	my $ret;
 	lives_ok { $ret = $v->connect_and_validate() }
