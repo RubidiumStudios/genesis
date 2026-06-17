@@ -6,6 +6,7 @@ use lib 'lib';
 use lib 't';
 use helper;
 use Test::Deep;
+use Test::Output;
 
 use_ok 'Genesis';
 use_ok 'Genesis::Kit';
@@ -13,7 +14,10 @@ use_ok 'Genesis::Kit::Compiled';
 use_ok 'Genesis::Kit::Compiler';
 
 use_ok 'Genesis::Config';
-$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+# 'once' silences the file-local "used only once" check;
+# $Genesis::RC is a Genesis-namespace package variable that this
+# file assigns to but never reads back by name.
+{ no warnings 'once'; $Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config"); }
 
 use_ok 'Service::Vault::Remote';
 
@@ -514,14 +518,24 @@ subtest 'local_kits() skips corrupt archives and continues scanning' => sub {
         "<!DOCTYPE html><html><body>403</body></html>");
     mk_test_kit('also-good', '3.0.0', $scan_dir);
 
+    # Capture stderr so the legitimate warning Genesis::Kit::Compiled
+    # emits for the bad archive doesn't pollute prove output, and so
+    # we can assert on its content as part of the contract.
     my $result;
-    lives_ok {
-        $result = Genesis::Kit::Compiled->local_kits(undef, $scan_dir);
-    } 'local_kits() does not die when a corrupt archive is present';
+    my $stderr = stderr_from {
+        lives_ok {
+            $result = Genesis::Kit::Compiled->local_kits(undef, $scan_dir);
+        } 'local_kits() does not die when a corrupt archive is present';
+    };
 
     ok  exists($result->{good}{'1.0.0'}),        'valid kit good/1.0.0 is found';
     ok  exists($result->{'also-good'}{'3.0.0'}), 'valid kit also-good/3.0.0 is found';
     ok !exists($result->{bad}),                  'corrupt kit bad is skipped';
+
+    like($stderr, qr/Skipping invalid kit archive .*bad-2\.0\.0\.tar\.gz/,
+        'warning identifies the corrupt archive by path');
+    like($stderr, qr/HTML instead of a gzip archive/,
+        'warning explains HTML-as-archive as the root cause');
 };
 
 subtest 'local_kits() defaults path to current directory when omitted' => sub {
