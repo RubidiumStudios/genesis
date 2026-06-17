@@ -66,6 +66,13 @@ sub import {
 	$ENV{HOME} = "${TOPDIR}/t/tmp/home";
 	$ENV{GENESIS_TOPDIR} = $TOPDIR;
 	$ENV{PATH} = "${TOPDIR}/bin:$ENV{PATH}";
+
+	# helper resets $ENV{HOME} to a fresh test home, so any global
+	# git identity from the host or CI image is no longer visible.
+	# Establish a deterministic identity in the test HOME so kit
+	# compile / commit paths don't bail with "Author identity unknown".
+	`git config --global user.name "Genesis Test Runner" 2>/dev/null`;
+	`git config --global user.email "test\@genesis.example.com" 2>/dev/null`;
 	$ENV{OFFLINE} = 'y';
 	$ENV{GENESIS_LIB} = "$ENV{GENESIS_TOPDIR}/lib";
 
@@ -669,9 +676,27 @@ sub output_ok($$;$) {
 }
 
 sub quietly(&) {
-	local *STDERR;
-	open(STDERR, '>', '/dev/null') or die "failed to quiet stderr!";
-	return $_[0]->();
+	# `local *STDERR` would localise the Perl typeglob without changing
+	# the process's fd 2, so child processes still wrote to the real
+	# stderr.  Save fd 2, point fd 2 at /dev/null for the duration of
+	# the block (so Perl AND subprocesses are silenced), then restore.
+	open(my $orig, '>&', \*STDERR) or die "dup STDERR: $!";
+	open(STDERR, '>', '/dev/null') or die "failed to quiet stderr: $!";
+	my $err;
+	my @rv;
+	my $list_context = wantarray;
+	eval {
+		if ($list_context) {
+			@rv = $_[0]->();
+		} else {
+			$rv[0] = $_[0]->();
+		}
+		1;
+	} or $err = $@;
+	open(STDERR, '>&', $orig) or die "restore STDERR: $!";
+	close($orig);
+	die $err if defined $err;
+	return $list_context ? @rv : $rv[0];
 }
 
 sub bosh2_cli_ok {
