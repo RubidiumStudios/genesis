@@ -1227,7 +1227,9 @@ sub get_stack {
 		push @stack, {line => $line, sub => $sub, file => Genesis::humanize_path($file)} if ($file);
 		(undef, $file, $line) = @info;
 	}
-	push @stack, {line => $line, file => Genesis::humanize_path($file)};
+	# Same guard as inside the loop: skip the final push if caller()
+	# never seeded $file (no frames at $scope).
+	push @stack, {line => $line, file => Genesis::humanize_path($file)} if ($file);
 	return @stack;
 }
 
