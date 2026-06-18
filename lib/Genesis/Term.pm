@@ -421,7 +421,10 @@ sub get_io_target {
 			my $link = readlink("/proc/self/fd/$file");
 			next unless defined $link;
 			my $link_stat = File::stat::stat($link);
-			next unless $link_stat->dev == $dev && $link_stat->ino == $ino;
+			# stat can return undef when the symlink target is gone
+			# (e.g. an unlinked tempfile that the handle still holds open).
+			next unless $link_stat
+				&& $link_stat->dev == $dev && $link_stat->ino == $ino;
 			closedir($dh);
 			return $link;
 		}
