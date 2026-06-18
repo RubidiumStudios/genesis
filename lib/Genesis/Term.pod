@@ -692,6 +692,84 @@ B<Examples:>
   print build_markdown_table($md);
   # Prints a Unicode-bordered table with Name and Age columns
 
+=head2 tableify
+
+  my $rendered = tableify($table, %opts);
+
+Renders the same Markdown-table input format as C<build_markdown_table()> in a
+lighter, rule-only style intended for compact summaries. The rendered table has
+no left/right borders, no column dividers, and no inter-row dividers. A heavy
+horizontal rule (C<━> or C<=> in ASCII mode) frames the top and bottom; the
+header row is emitted in bold and separated from the data rows by a single
+light rule (C<─> or C<-> in ASCII mode).
+
+Column widths are auto-sized to fit the widest cell. The alignment markers in
+the Markdown separator row (C<:--->, C<--->, C<---:>, C<:---:>) are honoured.
+Unlike C<build_markdown_table()>, C<tableify> does not wrap or fractionally
+expand columns — it is intended for short, well-bounded summary tables where
+every cell fits comfortably on one line.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$table>
+
+A Markdown table string with a header row, an optional alignment row, and zero
+or more data rows. Each row must be pipe-delimited. Leading and trailing pipes
+are tolerated but not required.
+
+=item C<%opts>
+
+Optional csprintf-style colour markers. Passing an empty string explicitly
+disables a default that would otherwise apply.
+
+=over 8
+
+=item C<header>
+
+Colour marker applied to the header row. When omitted the header defaults to
+bold (via C<\e[1m...\e[0m>); passing a marker replaces the default-bold wrap
+with a C<csprintf> colour wrap. Pass C<''> to suppress the bold default
+entirely.
+
+=item C<row>
+
+Colour marker applied to each data row.
+
+=item C<other_row>
+
+Colour marker applied to every second data row, producing a zebra-stripe
+effect. Only honoured when C<row> is also set (or for the alternating-row
+contrast on its own).
+
+=item C<line>
+
+Colour marker applied to both the heavy and light horizontal rules.
+
+=back
+
+=back
+
+B<Returns:>
+
+A multi-line string containing the rendered table.
+
+B<Examples:>
+
+  my $md = "| Subnet | CIDR        | Reserved |\n"
+         . "|:-------|:------------|---------:|\n"
+         . "| ocfp-0 | 10.0.0.0/24 |       42 |\n"
+         . "| ocfp-1 | 10.0.1.0/24 |       42 |\n";
+  print tableify($md);
+
+  # With colour:
+  print tableify($md,
+      header    => 'Cu',  # bold cyan underline
+      other_row => 'Ki',  # dark-grey italic zebra stripe
+      line      => 'Ki',
+  );
+
 =head2 process_markdown_block
 
   my $rendered = process_markdown_block($block, %opts);

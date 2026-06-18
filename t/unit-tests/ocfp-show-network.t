@@ -7,6 +7,7 @@ use helper;
 use Test::More;
 use Test::Exception;
 use Test::Deep;
+use Test::Output;
 use Genesis qw(struct_lookup bail);
 use Cwd qw(abs_path);
 use JSON::PP;
@@ -446,46 +447,32 @@ subtest '_extract_named_reserved' => sub {
 subtest 'run dispatches to correct output mode' => sub {
 	my $env = mock_env();
 
-	# We test that run doesn't die for each mode
-	lives_ok(
-		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, json => 1) },
-		'json output mode runs without error'
+	# Each run() variant writes its rendered output to STDOUT/STDERR.
+	# Wrap in output_from to capture (and discard) the output so it
+	# doesn't leak into the prove progress line, and assert that the
+	# call lives.  output_from is Capture::Tiny-based, so it captures
+	# both streams cleanly.
+	my %modes = (
+		json      => { json      => 1 },
+		summary   => { summary   => 1 },
+		reserved  => { reserved  => 1 },
+		allocated => { allocated => 1 },
+		available => { available => 1 },
+		full      => {},
+		verbose   => { verbose   => 1 },
+		'subnet filter' => { subnet => 'ocfp-0' },
 	);
-
-	lives_ok(
-		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, summary => 1) },
-		'summary output mode runs without error'
-	);
-
-	lives_ok(
-		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, reserved => 1) },
-		'reserved output mode runs without error'
-	);
-
-	lives_ok(
-		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, allocated => 1) },
-		'allocated output mode runs without error'
-	);
-
-	lives_ok(
-		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, available => 1) },
-		'available output mode runs without error'
-	);
-
-	lives_ok(
-		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env) },
-		'full (default) output mode runs without error'
-	);
-
-	lives_ok(
-		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, verbose => 1) },
-		'verbose output mode runs without error'
-	);
-
-	lives_ok(
-		sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, subnet => 'ocfp-0') },
-		'subnet filter runs without error'
-	);
+	for my $label (sort keys %modes) {
+		my $opts = $modes{$label};
+		my ($stdout, $stderr) = output_from {
+			lives_ok(
+				sub { Genesis::Commands::Ocfp::ShowNetwork::run($env, %$opts) },
+				"$label output mode runs without error"
+			);
+		};
+		ok(length($stdout) + length($stderr) > 0,
+			"$label output mode produced output");
+	}
 };
 
 # ============================================================================

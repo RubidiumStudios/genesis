@@ -626,7 +626,7 @@ sub tableify {
 
 	my $header_line = exists $opts{header}
 		? $tint->($cells->(\@headers), $opts{header})
-		: csprintf("[1m%s[0m", $cells->(\@headers));
+		: "\e[1m".$cells->(\@headers)."\e[0m";
 
 	my @data_lines;
 	for my $i (0..$#data) {
@@ -635,13 +635,14 @@ sub tableify {
 	}
 
 	my $hrule = sub { $tint->(shift() x $rule_width, $opts{line}) };
+	my $data_block = @data_lines ? join("\n", @data_lines) . "\n" : "";
 
 	return "\n" x $blank
-	     . $hrule->($heavy)   . "\n"
-	     . $header_line        . "\n"
-	     . $hrule->($light)   . "\n"
-	     . join("\n", @data_lines) . "\n"
-	     . $hrule->($heavy)   . "\n";
+	     . $hrule->($heavy)  . "\n"
+	     . $header_line       . "\n"
+	     . $hrule->($light)  . "\n"
+	     . $data_block
+	     . $hrule->($heavy)  . "\n";
 }
 
 my $last_indent = -1;
