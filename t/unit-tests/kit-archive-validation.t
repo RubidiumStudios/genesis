@@ -5,6 +5,7 @@ use warnings;
 use lib 'lib';
 use lib 't';
 use helper;
+use Test::Output;
 
 use_ok 'Genesis';
 use_ok 'Genesis::Kit::Compiled';
@@ -136,9 +137,16 @@ subtest 'local_kits skips corrupt archives and returns valid kits' => sub {
 	mk_test_kit('charlie', '3.0.0', $scan_dir);
 
 	my $result;
-	lives_ok {
-		$result = Genesis::Kit::Compiled->local_kits(undef, $scan_dir);
-	} 'local_kits does not die when a corrupt kit is present';
+	my $warn = stderr_from {
+		lives_ok {
+			$result = Genesis::Kit::Compiled->local_kits(undef, $scan_dir);
+		} 'local_kits does not die when a corrupt kit is present';
+	};
+
+	like($warn, qr{Skipping invalid kit archive .*broken-2\.0\.0\.tar\.gz},
+		'local_kits warns about the corrupt archive by path');
+	like($warn, qr{contains HTML instead of a gzip archive},
+		'warning identifies the HTML-as-archive cause');
 
 	ok defined($result), 'local_kits returns a result';
 	ok ref($result) eq 'HASH', 'local_kits returns a hashref';
