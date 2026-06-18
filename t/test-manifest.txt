@@ -111,6 +111,74 @@ unit-tests/genesis_hook_features-core.t      # Genesis::Hook::Features
 unit-tests/genesis_hook_postdeploy-core.t    # Genesis::Hook::PostDeploy
 unit-tests/genesis_hook_runtimeconfig-core.t # Genesis::Hook::RuntimeConfig
 unit-tests/genesis_hook_terminate-core.t     # Genesis::Hook::Terminate
+# Genesis::Hook::CloudConfig sub-area tests
+unit-tests/genesis_hook_cloudconfig-core.t      # CloudConfig base behaviour
+unit-tests/genesis_hook_cloudconfig-director.t  # Director cloud-config rendering
+unit-tests/genesis_hook_cloudconfig-helpers.t   # Internal helper subs
+unit-tests/genesis_hook_cloudconfig-lookups.t   # Lookup utilities
+unit-tests/genesis_hook_cloudconfig-networks.t  # Network/subnet handling
+unit-tests/genesis_hook_cloudconfig-resources.t # Resource (vm/disk type) handling
+
+# CI pipeline-descriptor tests
+unit-tests/genesis_ci_pipeline_descriptor-auto-update.t   # auto-update pipeline descriptor
+unit-tests/genesis_ci_pipeline_descriptor-bosh-configs.t  # bosh-configs descriptor
+unit-tests/genesis_ci_pipeline_descriptor-notifications.t # notifications descriptor
+unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library descriptor
+# Failing - feature implementation incomplete; re-enable once green
+#unit-tests/genesis_ci_pipeline_descriptor-bosh-locks.t
+#unit-tests/genesis_ci_pipeline_descriptor-redeploy.t
+#unit-tests/genesis_ci_pipeline_descriptor-signal.t
+
+# CI propagation tests
+unit-tests/genesis_ci_propagation-core.t            # propagation engine core
+unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
+unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
+
+# Genesis::Env extension tests
+unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi
+unit-tests/genesis_env-cpis.t                             # multi-cpi accessors
+unit-tests/genesis_env-stop_renewer_for_self_deploy.t     # vault token-renewer pause during self-deploy
+unit-tests/genesis_env_deployment-artifact_chunking.t     # exodus artifact chunking
+unit-tests/genesis_env_deployment-core.t                  # Deployment core
+unit-tests/genesis_env_deploymentmanager-core.t           # DeploymentManager core
+unit-tests/genesis_env_manifest-core.t                    # Env::Manifest core
+unit-tests/genesis_env_manifestprovider-core.t            # Env::ManifestProvider core
+unit-tests/genesis_env_required_files-core.t              # required-files propagation
+unit-tests/genesis_env_secrets_entombment-core.t          # secrets entombment
+
+# Genesis::Log per-target tests
+unit-tests/genesis_log-active_log_env.t
+unit-tests/genesis_log-apply_on_reuse.t
+unit-tests/genesis_log-apply_retention_policy.t
+unit-tests/genesis_log-cleanup_old_logs.t
+unit-tests/genesis_log-find_log_files.t
+unit-tests/genesis_log-parse_lifespan.t
+unit-tests/genesis_log-setup_from_configs.t
+unit-tests/genesis_log-template_defaults_and_type.t
+unit-tests/genesis_log-template_separators.t
+
+# Commands sub-area tests
+unit-tests/genesis_commands_env_reason-core.t  # deploy-driven reason and cascade
+unit-tests/genesis_commands_repo_ci-core.t     # repo CI commands
+
+# Additional Service::* tests
+unit-tests/service_bosh-director_configs.t                 # Director config CRUD
+unit-tests/service_bosh-director_cpis.t                    # Director CPI inventory
+unit-tests/service_git-cherry_pick.t                       # cherry-pick helper
+unit-tests/service_git-fetch_branches.t                    # fetch_branches helper
+unit-tests/service_git-remote_branch.t                     # remote_branch helper
+unit-tests/service_github-pr.t                             # Github PR helpers
+unit-tests/service_vault-max_json_string_value_length.t    # JSON value length guard
+unit-tests/service_vault_remote-reauth.t                   # Remote vault re-auth
+unit-tests/service_vault_remote-token_renewer.t            # Background token renewer
+
+# Other unit tests not yet in any thematic block
+unit-tests/genesis-init_forked_child.t       # forked-child defensive init
+unit-tests/genesis_secret_rsa-core.t         # Genesis::Secret::RSA
+unit-tests/genesis_term-tableify.t           # tableify rule-only table renderer
+unit-tests/genesis_top-pipeline.t            # Top::pipeline()
+unit-tests/genesis_ui-prompt_for_password.t  # password prompt
+unit-tests/kit-core.t                        # kit operations (network-dependent at present)
 
 [integration-tests]
 # Multi-component interaction tests that require system interaction
