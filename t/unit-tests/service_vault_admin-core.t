@@ -11,6 +11,7 @@ our $TODO;
 use_ok 'Service::Vault::Admin';
 use_ok 'Service::Vault::Admin::AppRole';
 use Genesis;
+use Test::Output;
 
 # ---------------------------------------------------------------------------
 # Mock vault class
@@ -157,8 +158,15 @@ subtest 'Admin::create_policy - new policy created' => sub {
 	# Call 2: policy write — succeeds
 	$vault->_push_query(['', 0]);
 	my $admin = Service::Vault::Admin->new($vault);
-	my $result = $admin->create_policy('new-policy', 'path "secret/*" {}', prompt => 0);
+	my $result;
+	my $out = stderr_from {
+		$result = $admin->create_policy('new-policy', 'path "secret/*" {}', prompt => 0);
+	};
 	is($result, 1, 'create_policy() returns 1 for new policy');
+	like($out, qr/Creating policy new-policy/,
+		'create_policy() emits creating-policy banner');
+	like($out, qr/\[OK\] Policy new-policy created/,
+		'create_policy() emits OK banner on success');
 };
 
 subtest 'Admin::create_policy - existing policy with overwrite' => sub {
@@ -168,9 +176,16 @@ subtest 'Admin::create_policy - existing policy with overwrite' => sub {
 	# Call 2: policy write — succeeds
 	$vault->_push_query(['', 0]);
 	my $admin = Service::Vault::Admin->new($vault);
-	my $result = $admin->create_policy('new-policy', 'path "secret/*" {}',
-		overwrite => 1, prompt => 0);
+	my $result;
+	my $out = stderr_from {
+		$result = $admin->create_policy('new-policy', 'path "secret/*" {}',
+			overwrite => 1, prompt => 0);
+	};
 	is($result, 1, 'create_policy() returns 1 when overwriting existing policy');
+	like($out, qr/Creating policy new-policy/,
+		'create_policy() re-emits creating-policy banner on overwrite');
+	like($out, qr/\[OK\] Policy new-policy created/,
+		'create_policy() emits OK banner after overwrite');
 };
 
 subtest 'Admin::create_policy - existing policy without overwrite skips' => sub {
@@ -205,10 +220,15 @@ subtest 'Admin::create_policy - vault write failure throws' => sub {
 	# Call 2: policy write — fails
 	$vault->_push_query(['vault error message', 1]);
 	my $admin = Service::Vault::Admin->new($vault);
-	throws_ok {
-		$admin->create_policy('my-policy', 'content', prompt => 0);
-	} qr/Failed to create policy/,
-		'create_policy() throws when vault write fails';
+	my $err;
+	my $out = stderr_from {
+		eval { $admin->create_policy('my-policy', 'content', prompt => 0) };
+		$err = $@;
+	};
+	like($err, qr/Failed to create policy/,
+		'create_policy() throws when vault write fails');
+	like($out, qr/Creating policy my-policy/,
+		'create_policy() emits creating banner before failing');
 };
 
 # ---------------------------------------------------------------------------
@@ -220,12 +240,19 @@ subtest 'Admin::create_approle - new role with defaults' => sub {
 	$vault->_push_query(['', 0]);
 	my $admin = Service::Vault::Admin->new($vault);
 
-	no warnings 'redefine';
+	no warnings qw/redefine once/;
 	local *Service::Vault::Admin::AppRole::list = sub { () };
-	use warnings 'redefine';
+	use warnings qw/redefine once/;
 
-	my $result = $admin->create_approle('concourse', prompt => 0);
+	my $result;
+	my $out = stderr_from {
+		$result = $admin->create_approle('concourse', prompt => 0);
+	};
 	is($result, 1, 'create_approle() returns 1 for new role');
+	like($out, qr/Creating AppRole concourse/,
+		'create_approle() emits creating banner');
+	like($out, qr/\[OK\] AppRole concourse created/,
+		'create_approle() emits OK banner on success');
 };
 
 subtest 'Admin::create_approle - missing name throws' => sub {
@@ -244,12 +271,19 @@ subtest 'Admin::create_approle - existing role with overwrite deletes and recrea
 	$vault->_push_query(['', 0]);
 	my $admin = Service::Vault::Admin->new($vault);
 
-	no warnings 'redefine';
+	no warnings qw/redefine once/;
 	local *Service::Vault::Admin::AppRole::list = sub { ('concourse') };
-	use warnings 'redefine';
+	use warnings qw/redefine once/;
 
-	my $result = $admin->create_approle('concourse', overwrite => 1, prompt => 0);
+	my $result;
+	my $out = stderr_from {
+		$result = $admin->create_approle('concourse', overwrite => 1, prompt => 0);
+	};
 	is($result, 1, 'create_approle() returns 1 when overwriting existing role');
+	like($out, qr/Creating AppRole concourse/,
+		'create_approle() emits creating banner on overwrite');
+	like($out, qr/\[OK\] AppRole concourse created/,
+		'create_approle() emits OK banner after overwrite');
 
 	my $has_delete = grep { grep { /vault delete/ } @$_ } @{$vault->{_query_calls}};
 	ok($has_delete, 'create_approle() issued a vault delete for the existing role');
@@ -272,11 +306,13 @@ subtest 'Admin::create_approle - custom config overrides defaults' => sub {
 	$vault->_push_query(['', 0]);
 	my $admin = Service::Vault::Admin->new($vault);
 
-	no warnings 'redefine';
+	no warnings qw/redefine once/;
 	local *Service::Vault::Admin::AppRole::list = sub { () };
-	use warnings 'redefine';
+	use warnings qw/redefine once/;
 
-	$admin->create_approle('concourse', token_ttl => '120m', prompt => 0);
+	stderr_from {
+		$admin->create_approle('concourse', token_ttl => '120m', prompt => 0);
+	};
 
 	my @all_args = map { @$_ } @{$vault->{_query_calls}};
 	ok((grep { $_ eq 'token_ttl=120m' } @all_args),
@@ -349,10 +385,17 @@ subtest 'Admin::get_approle_credentials - vault query failure throws' => sub {
 subtest 'Admin::store_approle_credentials - success' => sub {
 	my $vault = make_vault();
 	my $admin = Service::Vault::Admin->new($vault);
-	my $result = $admin->store_approle_credentials(
-		'concourse', '/secret/ci/concourse', 'role-abc', 'secret-xyz',
-	);
+	my $result;
+	my $out = stderr_from {
+		$result = $admin->store_approle_credentials(
+			'concourse', '/secret/ci/concourse', 'role-abc', 'secret-xyz',
+		);
+	};
 	is($result, 1, 'store_approle_credentials() returns 1');
+	like($out, qr{Storing credentials for AppRole concourse at /secret/ci/concourse},
+		'store_approle_credentials() emits storing banner');
+	like($out, qr{\[OK\] Credentials stored at /secret/ci/concourse},
+		'store_approle_credentials() emits OK banner');
 	is(scalar(@{$vault->{_set_calls}}), 2,
 		'store_approle_credentials() calls set() twice');
 
@@ -422,14 +465,19 @@ subtest 'Admin::setup_concourse_approle - orchestration chain (no prompt)' => su
 
 	use warnings 'redefine';
 
-	my $result = $admin->setup_concourse_approle(
-		prompt       => 0,
-		role_name    => 'concourse',
-		overwrite    => 1,
-		storage_base => '/secret/genesis/',
-	);
+	my $result;
+	my $out = stderr_from {
+		$result = $admin->setup_concourse_approle(
+			prompt       => 0,
+			role_name    => 'concourse',
+			overwrite    => 1,
+			storage_base => '/secret/genesis/',
+		);
+	};
 
 	is($result, 1, 'setup_concourse_approle() returns 1');
+	like($out, qr/\[DONE\] AppRole concourse setup complete/,
+		'setup_concourse_approle() emits DONE banner');
 	is($method_calls[0], 'approles.enable',           'step 1: approles.enable() called');
 	is($method_calls[1], 'create_policy',             'step 2: create_policy() called');
 	is($method_calls[2], 'create_approle',            'step 3: create_approle() called');
@@ -474,15 +522,20 @@ subtest 'Admin::setup_genesis_pipelines_approle - orchestration chain (no prompt
 
 	use warnings 'redefine';
 
-	my $result = $admin->setup_genesis_pipelines_approle(
-		prompt       => 0,
-		role_name    => 'genesis-pipelines',
-		exodus_mount => '/secret/exodus',
-		storage_base => '/secret/ci/',
-		overwrite    => 1,
-	);
+	my $result;
+	my $out = stderr_from {
+		$result = $admin->setup_genesis_pipelines_approle(
+			prompt       => 0,
+			role_name    => 'genesis-pipelines',
+			exodus_mount => '/secret/exodus',
+			storage_base => '/secret/ci/',
+			overwrite    => 1,
+		);
+	};
 
 	is($result, 1, 'setup_genesis_pipelines_approle() returns 1');
+	like($out, qr/\[DONE\] AppRole genesis-pipelines setup complete/,
+		'setup_genesis_pipelines_approle() emits DONE banner');
 	is($method_calls[0], 'approles.enable',           'step 1: approles.enable() called');
 	is($method_calls[1], 'create_policy',             'step 2: create_policy() called');
 	is($method_calls[2], 'create_approle',            'step 3: create_approle() called');

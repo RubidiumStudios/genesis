@@ -130,7 +130,10 @@ subtest 'get_scope returns a non-empty string' => sub {
 subtest 'get_scope without GENESIS_STACK_TRACE emits a single frame' => sub {
 	# Each rendered frame occupies exactly 2 segments when split on "\n"
 	# (the ANSI-coloured file:line run, then the ANSI-reset suffix).
+	# helper.pm defaults NOCOLOR=1 for the test suite; this subtest is
+	# specifically asserting on the ANSI rendering, so opt back in.
 	# Without GENESIS_STACK_TRACE only the innermost frame is emitted.
+	local $ENV{NOCOLOR} = 0;
 	local $ENV{GENESIS_STACK_TRACE};
 	delete $ENV{GENESIS_STACK_TRACE};
 
@@ -144,6 +147,8 @@ subtest 'get_scope without GENESIS_STACK_TRACE emits a single frame' => sub {
 subtest 'get_scope with GENESIS_STACK_TRACE emits multiple frames' => sub {
 	# With GENESIS_STACK_TRACE every frame in the call stack is appended.
 	# Calling through a helper sub guarantees at least 2 frames, giving >= 4 segments.
+	# Opt back into ANSI colours -- helper.pm defaults NOCOLOR=1.
+	local $ENV{NOCOLOR} = 0;
 	local $ENV{GENESIS_STACK_TRACE} = '1';
 
 	my $scope_from_depth_trace = sub { get_scope(0) };

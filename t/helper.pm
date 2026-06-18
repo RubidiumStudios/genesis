@@ -33,6 +33,13 @@ unified_diff;
 
 $ENV{GENESIS_TESTING} = "yes";
 
+# Tests should generally run without ANSI colours: assertions that
+# inspect captured output (Test::Output's stderr_from/stdout_from)
+# would otherwise have to either strip the escape codes or build
+# colour-aware regexes.  Individual tests that *exercise* colour
+# output can still `local`-set NOCOLOR=0 within a subtest.
+$ENV{NOCOLOR} //= 1;
+
 # Deterministic wrap width so bail/error messages don't get
 # environment-dependent newlines.  Wrap-behaviour tests override
 # locally via `local $ENV{GENESIS_OUTPUT_COLUMNS} = ...`.
