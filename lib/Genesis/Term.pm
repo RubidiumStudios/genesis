@@ -115,7 +115,10 @@ sub _color {
 		push(@cc, 38, 5, $fid + ($fg eq uc($fg) ? 8 : 0)) if defined $fid;
 		push(@cc, 48, 5, $bid + ($bg eq uc($bg) ? 8 : 0)) if defined $bid;
 	} else {
-		push @cc, "1" if $fg eq uc($fg);
+		# Uppercase fg signals the "bright" variant; in low-colour
+		# terminals we approximate that by emitting the bold SGR.
+		# Guarded on defined $fid so an unset $fg doesn't warn.
+		push @cc, "1" if defined($fid) && $fg eq uc($fg);
 		push @cc, "3$fid" if defined $fid;
 		push @cc, "4$bid" if defined $bid;
 	}
