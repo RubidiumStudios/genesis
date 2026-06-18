@@ -4,7 +4,7 @@ use strict;
 use warnings;
 
 use Genesis qw/bail info output struct_lookup sentence_join/;
-use Genesis::Term qw/terminal_width csprintf decolorize csize build_markdown_table/;
+use Genesis::Term qw/terminal_width csprintf decolorize csize build_markdown_table tableify/;
 use IPv4;
 use JSON::PP;
 
@@ -251,8 +251,10 @@ sub _output_summary {
 	my ($data, %opts) = @_;
 
 	my @header = ("Subnet", "CIDR", "AZ", "Reserved", "Allocated", "Free", "Util%");
+	# Left-align the textual columns; right-align the numeric ones.
+	my @align  = (':---',    ':---', ':---', '---:',     '---:',      '---:',  '---:');
 	my $table = sprintf("| %s |\n", join(' | ', @header));
-	$table .= sprintf("|%s|\n", join('|', map { ':' . ('-' x (length($_))) . '-' } @header));
+	$table   .= sprintf("|%s|\n",   join('|',   @align));
 
 	for my $name (sort keys %{$data->{subnets}}) {
 		my $s = $data->{subnets}{$name};
@@ -268,7 +270,7 @@ sub _output_summary {
 	}
 
 	info("\n#Cu{Network Summary}: %s (%s)\n\n", $data->{env_name}, $data->{ocfp_type});
-	info("%s\n", build_markdown_table($table));
+	info("%s\n", tableify($table));
 }
 
 # }}}
