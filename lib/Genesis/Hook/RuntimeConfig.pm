@@ -209,9 +209,9 @@ sub validate_runtime_config_requests {
 	} elsif (!ref($args) || ref($args) ne 'HASH') {
 		# Invalid argument type, bail out
 		bail(
-			"Invalid runtime config request arguments: expecting a #C{true}, a ",
-			"string, array of strings or build => option hash, or a hash of ".
-			"runtime build with options or boolean, but got %s",
+			"Invalid runtime config request arguments: expecting a #C{true}, a "
+			. "string, array of strings or build => option hash, or a hash of "
+			. "runtime build with options or boolean, but got %s",
 			ref($args)
 				? "a ".ref($args)." value"
 				: defined $args
