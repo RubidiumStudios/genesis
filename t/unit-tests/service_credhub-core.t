@@ -240,10 +240,14 @@ subtest 'Phase 2: from_bosh() factory' => sub {
 			exodus_path  => 'secret/exodus/test/bosh',
 		);
 
-		no warnings 'redefine';
+		# `once` suppresses "Name X used only once: possible typo"
+		# on `Service::Vault::default` -- it is referenced exactly
+		# at this monkey-patch assignment and nowhere else in this
+		# file by its fully-qualified name.
+		no warnings qw/redefine once/;
 		local *Service::Vault::current = sub { return undef };
 		local *Service::Vault::default = sub { return $default_vault };
-		use warnings 'redefine';
+		use warnings qw/redefine once/;
 
 		my $ch = Service::Credhub->from_bosh($mock_bosh);
 		isa_ok($ch, 'Service::Credhub', 'falls back to Vault::default');
