@@ -8,6 +8,7 @@ use helper;
 use Test::More;
 use Test::Exception;
 use Test::Deep;
+use Test::Output;
 use Genesis qw(bail);
 use Cwd qw(abs_path);
 
@@ -320,15 +321,22 @@ subtest 'parse_options - short flags work via bundling' => sub {
 };
 
 subtest 'parse_options - unknown option dies' => sub {
-	plan tests => 1;
+	plan tests => 2;
 
 	# With no_pass_through, GetOptionsFromArray rejects unknown flags and
 	# returns false, causing bail("Error parsing command line arguments").
+	# GetOptionsFromArray writes "Unknown option: ..." to STDERR before we
+	# bail; capture it so it does not leak into the prove progress line,
+	# and assert on its content as part of the contract.
 	my $hook = make_hook(args => ['--unknown-flag']);
-	throws_ok {
-		$hook->parse_options(['verbose|v']);
-	} qr/Error parsing command line arguments/,
-		'parse_options() dies when GetOptionsFromArray rejects unknown option';
+	my $stderr = stderr_from {
+		throws_ok {
+			$hook->parse_options(['verbose|v']);
+		} qr/Error parsing command line arguments/,
+			'parse_options() dies when GetOptionsFromArray rejects unknown option';
+	};
+	like($stderr, qr/Unknown option:\s*unknown-flag/,
+		'GetOptionsFromArray reports the rejected flag by name');
 };
 
 subtest 'parse_options - non-option args remain in args array' => sub {

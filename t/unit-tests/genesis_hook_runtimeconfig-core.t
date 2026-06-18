@@ -8,6 +8,7 @@ use helper;
 use Test::More;
 use Test::Exception;
 use Test::Deep;
+use Test::Output;
 use Genesis qw(bail);
 use Cwd qw(abs_path);
 use JSON::PP;
@@ -585,27 +586,33 @@ subtest 'build - dies for unregistered build name' => sub {
 };
 
 subtest 'build - returns YAML string for hash return value' => sub {
-	plan tests => 2;
+	plan tests => 3;
 	my $hook = make_hook();
 	$hook->register_runtime_config_builds('dns');
-	my $result = $hook->build('dns');
+	my $result;
+	my $out = stderr_from { $result = $hook->build('dns') };
+	like($out, qr/synthesizing.*Dns runtime config.*done/s,
+		'emits synthesize/done banner for dns build');
 	ok(defined $result, 'build("dns") returns a defined value');
 	like($result, qr/releases/,
 		'returned value contains "releases" key from hash-to-YAML conversion');
 };
 
 subtest 'build - returns YAML string unchanged when build returns string' => sub {
-	plan tests => 2;
+	plan tests => 3;
 	my $hook = make_hook();
 	$hook->register_runtime_config_builds('logging');
-	my $result = $hook->build('logging');
+	my $result;
+	my $out = stderr_from { $result = $hook->build('logging') };
+	like($out, qr/synthesizing.*Logging runtime config.*done/s,
+		'emits synthesize/done banner for logging build');
 	ok(defined $result, 'build("logging") returns a defined value');
 	like($result, qr/loggregator/,
 		'returned YAML contains loggregator release name');
 };
 
 subtest 'build - returns undef when build method returns failed status' => sub {
-	plan tests => 2;
+	plan tests => 3;
 	{
 		no warnings 'redefine';
 		*Genesis::Hook::RuntimeConfig::test_kit::build_failing_runtime = sub {
@@ -615,13 +622,17 @@ subtest 'build - returns undef when build method returns failed status' => sub {
 	my $hook = make_hook();
 	$hook->register_runtime_config_builds('failing');
 	my $result;
-	lives_ok { $result = $hook->build('failing') }
-		'build() does not die when build method returns failed status';
+	my $out = stderr_from {
+		lives_ok { $result = $hook->build('failing') }
+			'build() does not die when build method returns failed status';
+	};
+	like($out, qr/synthesizing.*Failing runtime config.*failed.*something went wrong/s,
+		'emits synthesize/failed banner with the failure message');
 	ok(!defined $result, 'build() returns undef for failed status');
 };
 
 subtest 'build - returns undef when build method returns skipped status' => sub {
-	plan tests => 2;
+	plan tests => 3;
 	{
 		no warnings 'redefine';
 		*Genesis::Hook::RuntimeConfig::test_kit::build_skipped_runtime = sub {
@@ -631,8 +642,12 @@ subtest 'build - returns undef when build method returns skipped status' => sub 
 	my $hook = make_hook();
 	$hook->register_runtime_config_builds('skipped');
 	my $result;
-	lives_ok { $result = $hook->build('skipped') }
-		'build() does not die when build method returns skipped status';
+	my $out = stderr_from {
+		lives_ok { $result = $hook->build('skipped') }
+			'build() does not die when build method returns skipped status';
+	};
+	like($out, qr/synthesizing.*Skipped runtime config.*skipped.*not applicable here/s,
+		'emits synthesize/skipped banner with the skip reason');
 	ok(!defined $result, 'build() returns undef for skipped status');
 };
 
@@ -641,7 +656,7 @@ subtest 'build - clears secrets for failed build' => sub {
 	my $hook = make_hook();
 	$hook->{secrets}{failing} = {'/some/path:key' => 'value'};
 	$hook->register_runtime_config_builds('failing');
-	$hook->build('failing');
+	stderr_from { $hook->build('failing') };
 	ok(!exists $hook->{secrets}{failing},
 		'secrets entry cleared for failed build');
 };

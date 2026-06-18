@@ -8,6 +8,7 @@ use helper;
 use Test::More;
 use Test::Exception;
 use Test::Deep;
+use Test::Output;
 use Genesis qw(bail);
 use Cwd qw(abs_path);
 
@@ -647,64 +648,76 @@ subtest 'validate_features - bails on invalid feature' => sub {
 };
 
 subtest 'validate_features - deprecated feature with single string replacement' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $env = mock_env(
 		features => Mock::ReferencedValue->new(['postgres']),
 	);
 	my $hook = make_hook($env);
 
-	lives_ok {
-		$hook->validate_features(
-			valid_features => [qw(ha tls external-db)],
-			deprecated_features => {
-				'postgres' => { replace => 'external-db' },
-			},
-		);
-	} 'validate_features lives when deprecated feature has single replacement';
+	my $warn = stderr_from {
+		lives_ok {
+			$hook->validate_features(
+				valid_features => [qw(ha tls external-db)],
+				deprecated_features => {
+					'postgres' => { replace => 'external-db' },
+				},
+			);
+		} 'validate_features lives when deprecated feature has single replacement';
+	};
 
+	like($warn, qr/postgres feature has been replaced with external-db/,
+		'warning names the deprecated feature and its replacement');
 	cmp_deeply([$hook->features], ['external-db'],
 		'deprecated feature replaced with its single replacement');
 };
 
 subtest 'validate_features - deprecated feature with array replacement' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $env = mock_env(
 		features => Mock::ReferencedValue->new(['old-tls']),
 	);
 	my $hook = make_hook($env);
 
-	lives_ok {
-		$hook->validate_features(
-			valid_features => [qw(ha tls mutual-tls)],
-			deprecated_features => {
-				'old-tls' => { replace => ['tls', 'mutual-tls'] },
-			},
-		);
-	} 'validate_features lives when deprecated feature has array replacement';
+	my $warn = stderr_from {
+		lives_ok {
+			$hook->validate_features(
+				valid_features => [qw(ha tls mutual-tls)],
+				deprecated_features => {
+					'old-tls' => { replace => ['tls', 'mutual-tls'] },
+				},
+			);
+		} 'validate_features lives when deprecated feature has array replacement';
+	};
 
+	like($warn, qr/old-tls feature has been deprecated.*tls.*mutual-tls/s,
+		'warning names the deprecated feature and both replacements');
 	cmp_deeply([$hook->features], ['tls', 'mutual-tls'],
 		'deprecated feature replaced with all array replacements');
 };
 
 subtest 'validate_features - deprecated feature with empty array (now default)' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $env = mock_env(
 		features => Mock::ReferencedValue->new(['legacy']),
 	);
 	my $hook = make_hook($env);
 
-	lives_ok {
-		$hook->validate_features(
-			valid_features => [qw(ha tls)],
-			deprecated_features => {
-				'legacy' => { replace => [] },
-			},
-		);
-	} 'validate_features lives when deprecated feature is now default (empty array)';
+	my $warn = stderr_from {
+		lives_ok {
+			$hook->validate_features(
+				valid_features => [qw(ha tls)],
+				deprecated_features => {
+					'legacy' => { replace => [] },
+				},
+			);
+		} 'validate_features lives when deprecated feature is now default (empty array)';
+	};
 
+	like($warn, qr/legacy feature is now the default behaviour/,
+		'warning explains that the deprecated feature is now implicit');
 	cmp_deeply([$hook->features], [],
 		'deprecated default feature removed from feature list');
 };
