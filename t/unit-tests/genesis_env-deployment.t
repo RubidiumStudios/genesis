@@ -14,7 +14,6 @@ use File::Path qw/mkpath rmtree/;
 use Time::Piece;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999';
 use_ok 'Genesis::Env::Deployment';
 
 # ===========================================================================

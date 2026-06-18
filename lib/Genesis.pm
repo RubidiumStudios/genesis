@@ -5,7 +5,11 @@ no warnings 'utf8';
 use utf8;
 
 our $APP     = "genesis";
-our $VERSION = "(development)";
+# Use //= so a caller (typically bin/genesis after pack injection,
+# or t/helper.pm's test-harness seed) can pin $Genesis::VERSION
+# before `use Genesis;` and have that pin survive the load.
+our $VERSION;
+$VERSION //= "(development)";
 our $BUILD   = "";
 
 our $GITHUB  = "https://github.com/genesis-community/genesis";

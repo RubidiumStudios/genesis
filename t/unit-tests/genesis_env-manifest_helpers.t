@@ -11,7 +11,6 @@ use Test::Deep;
 use Test::Exception;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999'; # force dev mode for testing
 use_ok 'Genesis::Config';
 # Initialize $Genesis::RC for tests that consult global config
 provide_rc();

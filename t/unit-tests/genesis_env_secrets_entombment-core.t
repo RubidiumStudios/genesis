@@ -12,7 +12,6 @@ use Test::Exception;
 use Digest::SHA qw/sha1_hex/;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999';
 use_ok 'Genesis::Env::Secrets::Entombment',
 	qw/credhub_var_name put_secret entomb_one_secret prime_credhub_cache
 	   make_local_vault shutdown_local_vault populate_local_vault/;

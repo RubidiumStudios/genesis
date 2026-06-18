@@ -10,7 +10,6 @@ use Test::More;
 use Test::Deep;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999';
 use_ok 'Genesis::CI::Propagation';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;

@@ -14,7 +14,6 @@ use Time::Piece;
 use Time::Seconds qw/ONE_DAY/;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999';
 use_ok 'Genesis::Env::Deployment';
 use_ok 'Genesis::Env::DeploymentManager';
 

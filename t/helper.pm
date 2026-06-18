@@ -88,6 +88,19 @@ sub import {
 	$ENV{OFFLINE} = 'y';
 	$ENV{GENESIS_LIB} = "$ENV{GENESIS_TOPDIR}/lib";
 
+	# Seed $Genesis::VERSION so any test that touches Genesis::Log
+	# (or another consumer that compares $Genesis::VERSION) BEFORE
+	# `use Genesis` has run gets a defined value rather than an
+	# uninit-value warning out of Genesis::Log's `eq` check.  Use
+	# `//=` so tests that have already pinned a specific version
+	# (e.g. hook compatibility assertions that set
+	# $Genesis::VERSION = '3.1.0-rc.10' at file scope before
+	# `use helper`) keep their pinned value.
+	{
+		no warnings 'once';
+		$Genesis::VERSION //= '999.999.999';
+	}
+
 	# Ensure absolute lib paths in @INC so runtime require() works after chdir
 	for my $dir ("$TOPDIR/lib", "$TOPDIR/t") {
 		unshift @INC, $dir unless grep { $_ eq $dir } @INC;

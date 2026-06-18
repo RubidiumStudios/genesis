@@ -12,7 +12,6 @@ use Test::Exception;
 use File::Path qw/rmtree/;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999';
 use_ok 'Genesis::Config';
 # Initialize $Genesis::RC for tests that consult global config
 provide_rc();

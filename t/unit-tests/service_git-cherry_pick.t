@@ -11,7 +11,6 @@ use Test::Deep;
 use Test::Exception;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999';
 use_ok 'Service::Git';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;

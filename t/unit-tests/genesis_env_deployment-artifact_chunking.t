@@ -14,7 +14,6 @@ use IO::Compress::Gzip qw/gzip $GzipError/;
 use Archive::Tar;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999';
 use_ok 'Genesis::Env::Deployment';
 
 # ===========================================================================

@@ -19,7 +19,6 @@ use JSON::PP qw/encode_json decode_json/;
 use Digest::SHA qw/sha256_hex/;
 
 use Genesis;
-$Genesis::VERSION = '999.999.999';
 use_ok 'Genesis::Env::Deployment';
 
 
