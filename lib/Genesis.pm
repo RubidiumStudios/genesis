@@ -1095,8 +1095,12 @@ sub humanize_bin {
 	chomp(my $path_bin = `which $bin`);
 	trace "bin:       %s\npath_bin:  %s\nhumanized: %s",
 	       $bin,          $path_bin,     $rel_bin;
+	# Resolve both sides to absolute paths up front so a missing/
+	# unresolvable callback bin doesn't feed undef into the eq.
+	my $resolved_path = $path_bin ? Cwd::abs_path($path_bin)                   : undef;
+	my $resolved_cb   =             Cwd::abs_path($ENV{GENESIS_CALLBACK_BIN});
 	$humanized_bin =
-		($path_bin && Cwd::abs_path($path_bin) eq Cwd::abs_path($ENV{GENESIS_CALLBACK_BIN}))
+		(defined($resolved_path) && defined($resolved_cb) && $resolved_path eq $resolved_cb)
 		? $bin
 		: $rel_bin;
 	return $humanized_bin;

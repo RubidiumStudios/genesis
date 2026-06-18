@@ -158,7 +158,7 @@ sub label {
 # config - provides the config hash used to specify this provider (abstract) {{{
 sub config {
 	my ($self) = @_;
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($self), 'config');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($self), 'config');
 	# Input expected:
 	#		No arguments>
 	#
@@ -171,7 +171,7 @@ sub config {
 # check - checks the availability of this provider (abstract) {{{
 sub check {
 	my ($self) = @_;
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($self), 'config');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($self), 'check');
 	# Input expected:
 	#		No arguments, but can allow alternate url>
 	#
@@ -183,7 +183,7 @@ sub check {
 # kit_names - retrieves list of kit names available from this provider (abstract) {{{
 sub kit_names {
 	my ($self, $filter) = @_;
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($self), 'kits');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($self), 'kit_names');
 	# Input expected:
 	#		$filter <regular expression to match kit names against>
 	#
@@ -197,7 +197,7 @@ sub kit_names {
 sub kit_releases {
 	# TODO: This should create (and cache) a list of Genesis::Kit:<Provider-centric-remote-type>
 	my ($self, $name) = @_;
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($self), 'kit_releases');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($self), 'kit_releases');
 	# Input expected:
 	#		$name: <kit name>
 	#
@@ -209,7 +209,7 @@ sub kit_releases {
 # kit_versions - retrieves a list of versions for the given kit name (abstract) {{{
 sub kit_versions {
 	my ($self, $name, %opts) = @_;
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($self), 'kit_versions');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($self), 'kit_versions');
 	# Input expected:
 	#		$name: <kit name>
 	#		%opts: Hash that must except at least:
@@ -234,7 +234,7 @@ sub kit_versions {
 # fetch_kit_version - fetches a tarball for the named kit and version from this provide (abstract) {{{
 sub fetch_kit_version {
 	my ($self, $name, $version, $path, $force) = @_;
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($self), 'fetch_kit_version');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($self), 'fetch_kit_version');
 	# Input expected:
 	#		$name:    <kit name>
 	#		$version: <kit version, or 'latest'>
@@ -247,7 +247,7 @@ sub fetch_kit_version {
 # fetch_kit_version_src - fetches a source tarball for the named kit and version from this provide (abstract) {{{
 sub fetch_kit_version_src {
 	my ($self, $name, $version, $path, $force) = @_;
-	bug("Abstract Method: Expecting %s class to define concrete '%' method", ref($self), 'fetch_kit_version_src');
+	bug("Abstract Method: Expecting %s class to define concrete '%s' method", ref($self), 'fetch_kit_version_src');
 	# Input expected:
 	#		$name:    <kit name>
 	#		$version: <kit version, or 'latest'>
