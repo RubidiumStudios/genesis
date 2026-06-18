@@ -284,7 +284,7 @@ sub validate {
 
 	if (@errors) {
 		bail("Configuration validation failed for #C{%s}:%s",
-			$self->{path},
+			$self->{path} // '<in-memory config>',
 			join('', map {"\n[[".bullet('', inline => 1, indent => 0).">>$_"} @errors));
 	}
 

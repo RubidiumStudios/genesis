@@ -5,6 +5,7 @@ use warnings;
 use lib 't';
 use helper;
 use Test::Deep;
+use Test::Output;
 
 use_ok 'Genesis::Config';
 
@@ -670,14 +671,23 @@ EOF
 	$config->set('foo', 'modified');
 	$config->set('baz', 'new');
 
-	# show_diff should work without dying
-	# (We can't easily test the output since it's sent to info())
-	lives_ok { $config->show_diff() } "show_diff() doesn't die";
+	# show_diff emits its result through info() (STDERR).  Capture
+	# and assert on the message instead of letting it leak into the
+	# prove progress line.
+	my $out = stderr_from {
+		lives_ok { $config->show_diff() } "show_diff() doesn't die";
+	};
+	like($out, qr/(No differences found|Differences between existing)/,
+		"show_diff() emits either the diff or the no-diff banner");
 
 	# Compare with another config
 	my $other_config = Genesis::Config->new();
 	$other_config->set('foo', 'different');
-	lives_ok { $config->show_diff($other_config) } "show_diff(other) doesn't die";
+	my $out2 = stderr_from {
+		lives_ok { $config->show_diff($other_config) } "show_diff(other) doesn't die";
+	};
+	like($out2, qr/(No differences found|Differences between existing)/,
+		"show_diff(other) emits either the diff or the no-diff banner");
 };
 
 subtest 'get() with default parameter' => sub {
