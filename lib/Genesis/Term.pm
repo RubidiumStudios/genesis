@@ -26,6 +26,7 @@ our @EXPORT = qw/
 	decolorize
 	boxify
 	build_markdown_table
+	tableify
 	process_markdown_block
 	render_markdown
 	elipses
@@ -545,6 +546,102 @@ sub build_markdown_table {
 			boxify(bot => 'span') x (2+ $col_widths[$_])
 		} 0..$#headers) .
 		boxify(bot => 'right')."\n";
+}
+
+# tableify - render a markdown table in a rule-only, edge-free style.
+#
+# Accepts the same input as build_markdown_table (pipe-delimited
+# rows with an optional `:---` alignment row), but renders without
+# left/right borders, column dividers, or inter-row dividers:
+#
+#   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#    Subnet  CIDR         AZ   Reserved  ...     <- bold
+#   ─────────────────────────────────────────
+#    ocfp-0  10.0.0.0/24  az1  42        ...
+#    ocfp-1  10.0.1.0/24  az2  25        ...
+#   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Heavy rule (━ / =) frames the table top and bottom; a light rule
+# (─ / -) separates the bold header from the data rows.  Columns
+# are sized to fit content (no wrapping or fractional expand mode
+# -- this is for compact summaries, not narrative tables).
+#
+# Optional %opts (all csprintf-style colour markers; passing an empty
+# string disables a default that would otherwise apply):
+#   header     - colour for the header row (default: bold via [1m)
+#   row        - colour for data rows
+#   other_row  - colour for every other data row (zebra stripe)
+#   line       - colour for both heavy and light rules
+sub tableify {
+	my ($table, %opts) = @_;
+
+	my $rows = [
+		map { s/^\s*\|\s*//r =~ s/\s*\|\s*$//r }
+		split(/\n/, $table)
+	];
+	my $blank = 0;
+	while (@$rows && $rows->[0] =~ m/^\s*$/) { shift @$rows; $blank++ }
+	return '' unless @$rows >= 1;
+
+	my @headers = split(/\s*\|\s*/, shift @$rows, -1);
+	my @align;
+	if (@$rows && $rows->[0] =~ m/^\s*:?-+/) {
+		@align = map { m/^:-/ ? (m/-+:$/ ? 'c' : 'l') : (m/-:$/ ? 'r' : 'l') }
+		             split(/\s*\|\s*/, shift @$rows, -1);
+	}
+	@align = ('l') x @headers unless @align;
+	my @data = map { [split(/\s*\|\s*/, $_, -1)] } @$rows;
+
+	my @w = map { csize($_) } @headers;
+	for my $row (@data) {
+		for my $i (0..$#$row) {
+			my $c = csize($row->[$i] // '');
+			$w[$i] = $c if $c > $w[$i];
+		}
+	}
+
+	# Each cell occupies " <content padded to col width> ", so the
+	# horizontal-rule width is sum(widths) + 2 per column.
+	my $rule_width = 0;
+	$rule_width += 2 + $_ for @w;
+
+	my ($heavy, $light) = (envset('GENESIS_NO_UTF8') || envset('GENESIS_NO_BOXES'))
+		? ('=', '-')
+		: ("\x{2501}", "\x{2500}");
+
+	# Wrap $text in a csprintf colour marker iff $marker is a
+	# non-empty string.  Passing undef or '' is a no-op.
+	my $tint = sub {
+		my ($text, $marker) = @_;
+		return $text unless defined $marker && length $marker;
+		return csprintf("#%s{%s}", $marker, $text);
+	};
+
+	my $cells = sub {
+		my $cells = shift;
+		join '', map {
+			" " . _align($cells->[$_] // '', $w[$_], $align[$_]) . " "
+		} 0..$#$cells;
+	};
+
+	my $header_line = exists $opts{header}
+		? $tint->($cells->(\@headers), $opts{header})
+		: csprintf("[1m%s[0m", $cells->(\@headers));
+
+	my @data_lines;
+	for my $i (0..$#data) {
+		my $marker = ($i % 2 && defined $opts{other_row}) ? $opts{other_row} : $opts{row};
+		push @data_lines, $tint->($cells->($data[$i]), $marker);
+	}
+
+	my $hrule = sub { $tint->(shift() x $rule_width, $opts{line}) };
+
+	return "\n" x $blank
+	     . $hrule->($heavy)   . "\n"
+	     . $header_line        . "\n"
+	     . $hrule->($light)   . "\n"
+	     . join("\n", @data_lines) . "\n"
+	     . $hrule->($heavy)   . "\n";
 }
 
 my $last_indent = -1;
