@@ -1190,7 +1190,7 @@ sub save_to_yaml_file {
 sub to_yaml {
 	my ($data) = @_;
 	my $json = JSON::PP->new->allow_nonref->encode($data);
-	my $tmp = tempfile;
+	my $tmp = tmpfile(template => 'to_yaml_XXXXXXXXXX', ext => '.json');
 	mkfile_or_fail($tmp, 0644, $json);
 	my ($out,$rc,$err) = run({ stderr => 0 }, qw/spruce merge --skip-eval/, $tmp);
 	bail("Error converting data to YAML: $err") if $rc;
