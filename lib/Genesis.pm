@@ -23,7 +23,7 @@ use Data::Dumper;
 use Encode qw/decode_utf8/;
 use File::Basename qw/basename dirname/;
 use File::Find ();
-use File::Temp qw/tempdir tempfile/;
+use File::Temp qw/tempdir/;
 use IO::Socket;
 use JSON::PP ();
 use POSIX qw/strftime/;
@@ -426,7 +426,7 @@ sub tmpfile {
 	my $dir = $opts{dir} // workdir;
 	my $ext = $opts{ext} // '';
 	my $template = $opts{template} // 'tmp_XXXXXXXXXX';
-	my (undef, $filename) = tempfile($template, DIR => $dir, SUFFIX => $ext, OPEN => 0);
+	my (undef, $filename) = File::Temp::tempfile($template, DIR => $dir, SUFFIX => $ext, OPEN => 0);
 	return $filename;
 }
 
