@@ -4,7 +4,7 @@ use warnings;
 
 use base "Genesis::Secret";
 
-use Genesis qw(run debug);
+use Genesis qw(bug run debug);
 
 ### Construction arguments {{{
 # size:  <positive integer>
