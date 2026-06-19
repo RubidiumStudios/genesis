@@ -7,10 +7,14 @@ BEGIN {
 		1;
 	};
 
+	# Diagnostic, not TAP output -- send to STDERR.  Tests that
+	# capture STDOUT (e.g. "bug() does not print to stdout") would
+	# otherwise see this notice in their captured buffer because the
+	# UTF-8 layer applied below makes STDOUT defer the flush.
 	if ($carp_always_loaded) {
-		print "Carp::Always loaded successfully.\n";
+		print STDERR "Carp::Always loaded successfully.\n";
 	} else {
-		print "Carp::Always not available - falling back to standard die() and warn() behavior.\n";
+		print STDERR "Carp::Always not available - falling back to standard die() and warn() behavior.\n";
 	}
 }
 
