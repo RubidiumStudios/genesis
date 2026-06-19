@@ -10,6 +10,7 @@ use helper;
 use Test::More;
 use Test::Deep;
 use Test::Exception;
+use Test::Output;
 
 use Genesis;
 use_ok 'Genesis::Config';
@@ -290,25 +291,26 @@ subtest '_check_cpis - no instance_groups => ok (nothing to check)' => sub {
 };
 
 subtest '_check_cpis - only <default> needed => ok (every director has default)' => sub {
-	plan tests => 2;
+	plan tests => 4;
 	my $env = make_env('chk-default-only');
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
 	local *Genesis::Env::cpi_az_map     = sub { { '<default>' => ['z1', 'z2'] } };
-	# <default>-only path skips the director query; bosh->cpis must
-	# not be called.
+	# <default>-only path skips the director query; bosh->cpis must not be called.
 	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when only <default> is needed" };
 
-	my $result = $env->_check_cpis;
-	is $result->{state}, 'ok',
-		'<default>-only needs are always satisfied';
-	is $result->{msg}, undef,
-		'msg is undef -- summary was printed inline';
+	my $result;
+	my $out = stderr_from { $result = $env->_check_cpis };
+	is $result->{state}, 'ok', '<default>-only needs are always satisfied';
+	is $result->{msg}, undef, 'msg is undef -- summary was printed inline';
+	like $out, qr/<default>.*z1.*z2/, 'bullet line lists <default> with its azs';
+	like $out, qr/All 1 required CPI\(s\) available/,
+		'summary reports all required CPIs available';
 };
 
 subtest '_check_cpis - all named cpis present => ok' => sub {
-	plan tests => 2;
+	plan tests => 5;
 	my $env = make_env('chk-present');
 
 	no warnings qw(redefine once);
@@ -320,17 +322,21 @@ subtest '_check_cpis - all named cpis present => ok' => sub {
 		stub_bosh(cpis => [qw(aws-east aws-west vsphere-prod)]);
 	};
 
-	# Contract changed: when the fan-out runs, _check_cpis prints
-	# the per-CPI bullets and summary inline, and returns msg=>undef
-	# so the Env::check caller doesn't duplicate the summary.
-	my $result = $env->_check_cpis;
+	# When the fan-out runs, _check_cpis prints the per-CPI bullets
+	# and summary inline and returns msg=>undef so Env::check doesn't
+	# duplicate the summary.
+	my $result;
+	my $out = stderr_from { $result = $env->_check_cpis };
 	is $result->{state}, 'ok', 'all needed cpis present => ok';
-	is $result->{msg}, undef,
-		'msg is undef -- per-CPI bullets + summary already printed';
+	is $result->{msg}, undef, 'msg is undef -- bullets + summary already printed';
+	like $out, qr/aws-east.*z1/,             'bullet line lists aws-east';
+	like $out, qr/vsphere-prod.*z2.*z3/,     'bullet line lists vsphere-prod with its azs';
+	like $out, qr/All 2 required CPI\(s\) available/,
+		'summary reports all 2 required CPIs available';
 };
 
 subtest '_check_cpis - missing cpis => error' => sub {
-	plan tests => 2;
+	plan tests => 5;
 	my $env = make_env('chk-missing');
 
 	no warnings qw(redefine once);
@@ -346,17 +352,21 @@ subtest '_check_cpis - missing cpis => error' => sub {
 		stub_bosh(cpis => [qw(aws-east)], alias => 'prod-bosh');
 	};
 
-	# The named-CPI failure path now also returns msg=>undef --
-	# bullet rows showed which CPIs were missing, and the inline
-	# summary already said "Missing 2 of 3 required CPI(s)".
-	my $result = $env->_check_cpis;
+	# The named-CPI failure path also returns msg=>undef -- bullet
+	# rows show which CPIs are missing and the inline summary already
+	# says "Missing 2 of 3 required CPI(s)".
+	my $result;
+	my $out = stderr_from { $result = $env->_check_cpis };
 	is $result->{state}, 'error', 'missing cpis => error';
-	is $result->{msg}, undef,
-		'msg is undef -- inline summary already printed the count';
+	is $result->{msg}, undef, 'msg is undef -- inline summary already printed the count';
+	like $out, qr/aws-east.*z1/,    'present cpi appears with ✔ marker';
+	like $out, qr/azure-gov.*z3.*z4/, 'missing azure-gov listed with its azs';
+	like $out, qr/Missing 2 of 3 required CPI\(s\)/,
+		'inline summary reports the missing count';
 };
 
 subtest '_check_cpis - mixed default + named: only named are checked' => sub {
-	plan tests => 2;
+	plan tests => 5;
 	my $env = make_env('chk-mixed');
 
 	no warnings qw(redefine once);
@@ -368,11 +378,15 @@ subtest '_check_cpis - mixed default + named: only named are checked' => sub {
 		stub_bosh(cpis => [qw(aws-east)]);
 	};
 
-	my $result = $env->_check_cpis;
+	my $result;
+	my $out = stderr_from { $result = $env->_check_cpis };
 	is $result->{state}, 'ok',
 		'named cpi present + <default> sentinel always satisfied => ok';
-	is $result->{msg}, undef,
-		'msg is undef -- inline summary already printed';
+	is $result->{msg}, undef, 'msg is undef -- inline summary already printed';
+	like $out, qr/<default>.*z1/,        'bullet line lists <default>';
+	like $out, qr/aws-east.*z2.*z3/,     'bullet line lists aws-east with its azs';
+	like $out, qr/All 2 required CPI\(s\) available/,
+		'summary reports all 2 required CPIs available';
 };
 
 subtest '_check_cpis - no cpi configs uploaded short-circuits without listing fetch' => sub {
