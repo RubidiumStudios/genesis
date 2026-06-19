@@ -6,6 +6,7 @@ use lib 'lib';
 use lib 't';
 use helper;
 use Test::Deep;
+use Test::Output;
 
 use_ok 'Genesis';
 use_ok 'Genesis::Kit';
@@ -161,7 +162,10 @@ subtest 'genesis-community kit provider configuration' => sub {
 	cmp_deeply({$kit_provider->config()}, {
 			type => 'genesis-community',
 		}, "GenesisCommunity kit provider has correct config");
-	lives_ok { %info = $kit_provider->status() } "GenesisCommunity kit provider is reachable";
+	# status() prints the "Retrieving list of available kits..." banner
+	# to STDERR.  Capture it so it doesn't leak into the prove progress line.
+	stderr_from { lives_ok { %info = $kit_provider->status() }
+		"GenesisCommunity kit provider is reachable" };
 	cmp_deeply({%info}, {
 		'type'   => 'genesis-community',
 		'Source' => "Genesis Community organization on Github",
@@ -181,19 +185,28 @@ subtest 'kit urls' => sub {
 	my ($kit, $url, $version);
 	my $provider = Genesis::Kit::Provider->init();
 
-	lives_ok { $kit = $provider->kit_version_info('bosh') } "The latest BOSH kit can be found";
+	# kit_version_info() emits "Retrieving list of available releases..."
+	# banners through info().  Wrap the network-touching calls in
+	# stderr_from to keep prove output clean.
+	stderr_from {
+		lives_ok { $kit = $provider->kit_version_info('bosh') } "The latest BOSH kit can be found";
+	};
 	lives_ok { $url = $kit->{url} } "The BOSH kit has a download url";
 	like $url, qr{^https://github.com/genesis-community/bosh-genesis-kit/releases/download/},
 		"The BOSH kit url is on Github";
 
-	lives_ok { $kit = $provider->kit_version_info('bosh', '0.2.0') } "The BOSH kit v0.2.0 can be found";
+	stderr_from {
+		lives_ok { $kit = $provider->kit_version_info('bosh', '0.2.0') } "The BOSH kit v0.2.0 can be found";
+	};
 	lives_ok { $url = $kit->{url} } "The BOSH kit has a download url";
 	lives_ok { $version = $kit->{version} } "The BOSH kit has a download url";
 	is $version, '0.2.0', 'bosh-0.2.0 is v0.2.0';
 	is $url, 'https://github.com/genesis-community/bosh-genesis-kit/releases/download/v0.2.0/bosh-0.2.0.tar.gz',
 		"The BOSH kit url points to the 0.2.0 release";
 
-	dies_ok { $provider->kit_version_info('bosh', '0.0.781')->{url} } "Non-existent versions of kits do not exists";
+	stderr_from {
+		dies_ok { $provider->kit_version_info('bosh', '0.0.781')->{url} } "Non-existent versions of kits do not exists";
+	};
 };
 
 subtest 'available kits' => sub {
@@ -201,18 +214,25 @@ subtest 'available kits' => sub {
 
 	my $kit_provider = Genesis::Kit::Provider::GenesisCommunity->init();
 
-	lives_ok { @kits = $kit_provider->kit_names } "Can get a list of downloadable kits from Github";
+	# Each kit_names() call emits the "Retrieving list..." banner.
+	stderr_from {
+		lives_ok { @kits = $kit_provider->kit_names } "Can get a list of downloadable kits from Github";
+	};
 	@expected = qw(blacksmith bosh cf concourse jumpbox shield vault);
 	cmp_deeply(\@kits, supersetof(@expected),
 		"Downloadable kits includes at least the core kits known at the time of this writing.");
-	
-	lives_ok { @kits = $kit_provider->kit_names('^b.*h$') } "Can filter on a regex pattern";
+
+	stderr_from {
+		lives_ok { @kits = $kit_provider->kit_names('^b.*h$') } "Can filter on a regex pattern";
+	};
 	@expected = qw(bosh blacksmith);
 	cmp_deeply(\@kits, supersetof(@expected), "Can filter on anchors to get bosh and blacksmith");
 	my @bad = grep {$_ !~ /^b.*h$/} @kits;
 	ok scalar(@bad) == 0, "No erroneous element were found in the filter";
 
-	lives_ok { @kits = $kit_provider->kit_names('^cf$') } "Can filter on explicit name";
+	stderr_from {
+		lives_ok { @kits = $kit_provider->kit_names('^cf$') } "Can filter on explicit name";
+	};
 	ok @kits == 1 && $kits[0] eq 'cf', "Found one and only one match to 'cf' genesis kit";
 };
 
@@ -221,7 +241,10 @@ subtest 'kit versions' => sub {
 
 	my $kit_provider = Genesis::Kit::Provider::GenesisCommunity->init();
 
-	lives_ok { @version_info = $kit_provider->kit_versions('jumpbox') } "The Jumpbox kit has versions";
+	# kit_versions() emits the "Retrieving list of available releases..." banner.
+	stderr_from {
+		lives_ok { @version_info = $kit_provider->kit_versions('jumpbox') } "The Jumpbox kit has versions";
+	};
 	@versions = map {$_->{version}} @version_info;
 	my @bad = grep {$_ !~ /^(\d+)(?:\.(\d+)(?:\.(\d+)(?:[\.-]rc[\.-]?(\d+))?)?)?/} @versions;
 	ok scalar(@versions) > 0 && scalar(@bad) == 0, "Returned good semver versions and no bad ones";
@@ -237,7 +260,9 @@ subtest 'kit versions' => sub {
 	cmp_deeply( [@version_info], array_each(\%struct), "Each version contains desired details");
 
 	my @latest_two = (reverse sort by_semver @versions)[0..1];
-	lives_ok { @version_info = $kit_provider->kit_versions('jumpbox',latest => 2) } "get the latest 2 versions";
+	stderr_from {
+		lives_ok { @version_info = $kit_provider->kit_versions('jumpbox',latest => 2) } "get the latest 2 versions";
+	};
 	@versions = map {$_->{version}} @version_info;
 	cmp_bag(\@versions, \@latest_two);
 	
