@@ -217,8 +217,9 @@ sub setup_from_configs {
 #                                # suppress_warnings.deprecations
 #   }
 #
-# Bails (Genesis::bail) on unparseable input with the offending substring
-# named.
+# Dies on unparseable input with the offending substring named.
+# (NOT Genesis::bail -- bail routes through the logger, so it's a
+# circular dep when called from within Log itself.)
 #
 # Modes:
 #   'none'         - no cleanup pass (value 'forever')
@@ -231,12 +232,15 @@ sub setup_from_configs {
 sub parse_lifespan {
 	my ($value) = @_;
 
-	Genesis::bail("Invalid lifespan: empty value")
+	# Use die, NOT Genesis::bail: bail dispatches through the logger,
+	# so calling bail from inside Log is a circular dep that explodes
+	# at fatal-message format time.
+	die "Invalid lifespan: empty value\n"
 		unless defined($value) && length($value);
 
 	my $v = $value;
 	$v =~ s/^\s+|\s+$//g;
-	Genesis::bail("Invalid lifespan: empty value")
+	die "Invalid lifespan: empty value\n"
 		unless length($v);
 
 	if (lc($v) eq 'forever') {
@@ -287,7 +291,7 @@ sub parse_lifespan {
 
 	if (defined $mode) {
 		my @parts = split /\s+or\s+/i, $rest;
-		Genesis::bail("Invalid lifespan: '%s' (expected '<count> or <duration>')", $value)
+		die sprintf("Invalid lifespan: '%s' (expected '<count> or <duration>')\n", $value)
 			unless @parts == 2;
 		my $result = {
 			mode => $mode, count => undef, age_seconds => undef,
@@ -295,7 +299,7 @@ sub parse_lifespan {
 		};
 		for my $part (@parts) {
 			my ($key, $val) = $parse_bound->($part);
-			Genesis::bail("Invalid lifespan component: '%s' in '%s'", $part, $value)
+			die sprintf("Invalid lifespan component: '%s' in '%s'\n", $part, $value)
 				unless defined $key;
 			$result->{$key} = $val;
 		}
@@ -311,7 +315,7 @@ sub parse_lifespan {
 		};
 	}
 
-	Genesis::bail("Invalid lifespan: '%s'", $value);
+	die sprintf("Invalid lifespan: '%s'\n", $value);
 }
 
 sub _time_unit_to_seconds {
@@ -1243,15 +1247,13 @@ sub find_log_level {
 		if (scalar(@log_levels) == 1) {
 			$log_level = $log_levels[0];
 		} elsif (scalar(@log_levels) > 1) {
-			require Genesis;
-			Genesis::bail(
-				"Ambiguous log level $log_level: please specify one of ".join(", ",@log_levels)
-			);
+			# die instead of Genesis::bail -- bail dispatches through the
+			# logger, so calling it from within Log is a circular dep.
+			die "Ambiguous log level $log_level: please specify one of "
+				. join(", ", @log_levels) . "\n";
 		} else {
-			require Genesis;
-			Genesis::bail(
-				"Not a valid log level '$log_level': please specify one of ".join(", ",log_levels())
-			);
+			die "Not a valid log level '$log_level': please specify one of "
+				. join(", ", log_levels()) . "\n";
 		}
 	}
 	return $log_level;
