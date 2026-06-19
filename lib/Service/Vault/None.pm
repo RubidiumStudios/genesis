@@ -39,7 +39,8 @@ sub AUTOLOAD {
 	my $field = $AUTOLOAD;
 	$field =~ s/.*:://;
 
-	bug("The command $ENV{GENESIS_COMMAND} should not need a vault, but is asking for one");
+	my $cmd = $ENV{GENESIS_COMMAND} // '(unknown command)';
+	bug("The command $cmd should not need a vault, but is asking for one");
 }
 
 # }}}
