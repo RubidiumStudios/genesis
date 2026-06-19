@@ -7,7 +7,7 @@ use lib 'lib';
 
 use Test::More;
 use Test::Deep;
-use Test::Fatal;
+use Test::Exception;
 use File::Temp qw/tempdir/;
 use File::Path qw/make_path/;
 
@@ -120,13 +120,9 @@ subtest 'path-safety rule bails on escape attempts' => sub {
 		'cloud-config/../../escape.yml',
 		'a/b/../c/../../d.yml',
 	) {
-		like(
-			exception {
-				Genesis::Env->_resolve_required_files([$bad], 'x', $root);
-			},
-			qr/escapes/,
-			"rejects $bad",
-		);
+		throws_ok {
+			Genesis::Env->_resolve_required_files([$bad], 'x', $root);
+		} qr/escapes/, "rejects $bad";
 	}
 
 	# '..' embedded in a filename (not a segment) is allowed
