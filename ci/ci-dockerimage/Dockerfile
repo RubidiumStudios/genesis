@@ -4,6 +4,7 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true apt-get install -y \
       libexpect-perl \
       expect \
+      libcarp-always-perl \
       libpadwalker-perl \
       libtest-deep-perl \
       libtest-differences-perl \

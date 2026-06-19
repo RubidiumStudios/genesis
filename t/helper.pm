@@ -7,14 +7,19 @@ BEGIN {
 		1;
 	};
 
-	# Diagnostic, not TAP output -- send to STDERR.  Tests that
-	# capture STDOUT (e.g. "bug() does not print to stdout") would
-	# otherwise see this notice in their captured buffer because the
-	# UTF-8 layer applied below makes STDOUT defer the flush.
-	if ($carp_always_loaded) {
-		print STDERR "Carp::Always loaded successfully.\n";
-	} else {
-		print STDERR "Carp::Always not available - falling back to standard die() and warn() behavior.\n";
+	# Print the load notice ONCE per prove run, not once per test
+	# file.  Every test under one `prove` invocation shares the
+	# same parent PID, so a sentinel keyed on getppid() lets the
+	# first test print and the rest skip.  Stale sentinels (older
+	# than 60s) are ignored so a recycled prove PID from a prior
+	# run can't silently suppress the notice.
+	my $sentinel = "/tmp/.genesis-helper-carp-status-".getppid();
+	unlink $sentinel if -e $sentinel && -M _ > 60/86400;
+	unless (-e $sentinel) {
+		open my $fh, '>', $sentinel and close $fh;
+		print STDERR $carp_always_loaded
+			? "Carp::Always loaded successfully.\n"
+			: "Carp::Always not available - falling back to standard die() and warn() behavior.\n";
 	}
 }
 
