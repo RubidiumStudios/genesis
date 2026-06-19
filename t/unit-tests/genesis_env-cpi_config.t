@@ -2,6 +2,10 @@
 use strict;
 use warnings;
 use utf8;
+# Apply UTF-8 layer to STDIN/STDOUT/STDERR as a compile-time pragma so
+# Test2's TAP formatter doesn't warn ("Wide character in print") when
+# subtest names contain em-dashes or arrows.
+use open ':std', ':encoding(UTF-8)';
 
 use lib 'lib';
 use lib 't';
@@ -22,6 +26,20 @@ use_ok 'Genesis::Env';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
+
+# quiet_env_call - invoke an Env method that triggers manifest
+# synthesis, swallowing the "[env/cf] determining manifest fragments
+# for merging..." banner that would otherwise leak into the prove
+# progress line.  Use list-context invocation always (callers pick
+# the context they want via scalar() / list assignment).
+sub quiet_env_call {
+	my ($env, $method, @args) = @_;
+	my @result;
+	stderr_from {
+		@result = $env->$method(@args);
+	};
+	return wantarray ? @result : $result[0];
+}
 
 # Helper: build an env whose `bosh-configs:` block is taken verbatim.
 sub make_cpi_env {
@@ -56,7 +74,7 @@ subtest 'resolver - empty list when cpi disabled' => sub {
     enabled: false
 YAML
 
-	my @result = $env->_resolve_director_cpi_config;
+	my @result = quiet_env_call($env, "_resolve_director_cpi_config");
 	is_deeply \@result, [], 'no source returned when cpi_enabled is false';
 };
 
@@ -75,7 +93,7 @@ subtest 'resolver - inline single entry, default name' => sub {
 YAML
 
 	my ($config, $secrets, $source, $name)
-		= $env->_resolve_director_cpi_config;
+		= quiet_env_call($env, "_resolve_director_cpi_config");
 
 	is $source, 'inline',  'source = inline';
 	is $name,   'default', 'bosh config name defaults to "default"';
@@ -104,7 +122,7 @@ subtest 'resolver - inline single entry, custom bosh config name' => sub {
 YAML
 
 	my ($config, $secrets, $source, $name)
-		= $env->_resolve_director_cpi_config;
+		= quiet_env_call($env, "_resolve_director_cpi_config");
 
 	is $source, 'inline',       'source = inline';
 	is $name,   'vsphere-main', 'bosh config name comes from director-cpi.name';
@@ -128,7 +146,7 @@ subtest 'resolver - inline N entries with explicit default' => sub {
 YAML
 
 	my ($config, $secrets, $source, $name)
-		= $env->_resolve_director_cpi_config;
+		= quiet_env_call($env, "_resolve_director_cpi_config");
 
 	is $source, 'inline', 'source = inline';
 	is scalar @{$config->{cpis}}, 2, 'both cpis present in payload';
@@ -151,7 +169,7 @@ subtest 'resolver - inline N entries without default bails' => sub {
 YAML
 
 	throws_ok {
-		$env->_resolve_director_cpi_config;
+		quiet_env_call($env, "_resolve_director_cpi_config");
 	} qr/Multiple entries.*director-cpi\.cpis.*specify.*director-cpi\.default/ims,
 		'multi-cpi without explicit default bails';
 };
@@ -174,7 +192,7 @@ subtest 'resolver - inline default not in cpis bails' => sub {
 YAML
 
 	throws_ok {
-		$env->_resolve_director_cpi_config;
+		quiet_env_call($env, "_resolve_director_cpi_config");
 	} qr/director-cpi\.default.*nonsense.*does not match.*cpis/ims,
 		'declared default not in cpis[] bails';
 };
@@ -190,7 +208,7 @@ subtest 'resolver - inline scalar bails (schema)' => sub {
 YAML
 
 	throws_ok {
-		$env->_resolve_director_cpi_config;
+		quiet_env_call($env, "_resolve_director_cpi_config");
 	} qr/director-cpi\.cpis.*must be a non-empty array/ims,
 		'scalar cpis bails with schema message';
 };
@@ -216,7 +234,7 @@ YAML
 	local *Genesis::Env::cpi_name = sub { 'aws-east' };
 
 	my ($config, $secrets, $source, $name)
-		= $env->_resolve_director_cpi_config;
+		= quiet_env_call($env, "_resolve_director_cpi_config");
 
 	is $source, 'cpi-config hook',  'source = cpi-config hook';
 	is $name,   'aws-east.director', 'name = <cpi_name>.director';
@@ -242,7 +260,7 @@ YAML
 	local *Genesis::Env::has_hook = sub { $_[1] eq 'cpi-config' };
 	local *Genesis::Env::run_hook = sub { $run_hook_called++; () };
 
-	my (undef, undef, $source) = $env->_resolve_director_cpi_config;
+	my (undef, undef, $source) = quiet_env_call($env, "_resolve_director_cpi_config");
 
 	is $source, 'inline', 'source = inline even when cpi-config hook exists';
 	is $run_hook_called, 0, 'run_hook is not invoked when inline is present';
@@ -282,7 +300,7 @@ YAML
 		return $default;
 	};
 
-	my ($config, $secrets, $source) = $env->_resolve_director_cpi_config;
+	my ($config, $secrets, $source) = quiet_env_call($env, "_resolve_director_cpi_config");
 
 	is $source, 'inline', 'source is inline';
 	is $config->{cpis}[0]{properties}{host}, 'vcenter.example.com',
@@ -342,7 +360,7 @@ YAML
 	no warnings 'redefine';
 	local *Genesis::Env::has_hook = sub { 0 };
 
-	my @result = $env->_resolve_director_cpi_config;
+	my @result = quiet_env_call($env, "_resolve_director_cpi_config");
 	is_deeply \@result, [], 'no inline + no hook returns empty list';
 };
 
@@ -358,7 +376,7 @@ subtest 'default_cpi_name - undef when cpi disabled' => sub {
     enabled: false
 YAML
 
-	is $env->default_cpi_name, undef,
+	is quiet_env_call($env, "default_cpi_name"), undef,
 		'default_cpi_name returns undef when cpi_enabled is false';
 };
 
@@ -375,7 +393,7 @@ subtest 'default_cpi_name - inline sole entry (implicit default)' => sub {
       properties: {}
 YAML
 
-	is $env->default_cpi_name, 'only-cpi',
+	is quiet_env_call($env, "default_cpi_name"), 'only-cpi',
 		'sole inline entry name is the implicit default';
 };
 
@@ -396,7 +414,7 @@ subtest 'default_cpi_name - inline N entries with declared default' => sub {
       properties: {}
 YAML
 
-	is $env->default_cpi_name, 'west',
+	is quiet_env_call($env, "default_cpi_name"), 'west',
 		'director-cpi.default wins over cpis[0] ordering';
 };
 
@@ -415,7 +433,7 @@ YAML
 		die "cpi_name should not be reached when director-cpi.default is set";
 	};
 
-	is $env->default_cpi_name, 'externally-uploaded-cpi',
+	is quiet_env_call($env, "default_cpi_name"), 'externally-uploaded-cpi',
 		'director-cpi.default is honored even without cpis: (advertise-only)';
 };
 
@@ -430,7 +448,7 @@ YAML
 	no warnings qw(redefine once);
 	local *Genesis::Env::cpi_name = sub { 'fallthrough-cpi' };
 
-	is $env->default_cpi_name, 'fallthrough-cpi',
+	is quiet_env_call($env, "default_cpi_name"), 'fallthrough-cpi',
 		'default_cpi_name delegates to cpi_name when inline is absent';
 };
 
@@ -683,7 +701,7 @@ YAML
 		die "get_target_bosh must not be called when cpi is disabled";
 	};
 
-	is $env->upload_director_cpi_config, 1,
+	is scalar(quiet_env_call($env, 'upload_director_cpi_config')), 1,
 		'upload returns 1 (success no-op) when cpi disabled';
 };
 
@@ -701,7 +719,7 @@ YAML
 		die "get_target_bosh must not be called when there's no source";
 	};
 
-	is $env->upload_director_cpi_config, 1,
+	is scalar(quiet_env_call($env, 'upload_director_cpi_config')), 1,
 		'upload returns 1 (no-op) when cpi enabled but no source';
 };
 
