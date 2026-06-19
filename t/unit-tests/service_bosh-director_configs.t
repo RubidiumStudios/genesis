@@ -305,12 +305,8 @@ subtest 'get_config - memoizes per (type, name) pair' => sub {
 	no warnings qw(redefine once);
 	local *Service::BOSH::Director::execute = sub {
 		shift;  # $self
-		shift if ref($_[0]) eq 'HASH';  # opts
-		# 'config --type=X --name=Y --json'
-		my %args = @_[1..$#_];
-		my $type = $args{'--type'} // ($_[0] =~ /--type=(\S+)/ ? $1 : '?');
-		my $name = $args{'--name'} // ($_[0] =~ /--name=(\S+)/ ? $1 : '?');
-		# Reconstruct from positional arg list: parse the strings
+		shift if ref($_[0]) eq 'HASH';  # opts (--type/--name live in @cmd)
+		my ($type, $name) = ('?', '?');
 		for my $a (@_) {
 			$type = $1 if $a =~ /^--type=(.+)/;
 			$name = $1 if $a =~ /^--name=(.+)/;
