@@ -9,6 +9,7 @@ use helper;
 use Test::More;
 use Test::Deep;
 use Test::Exception;
+use Test::Output;
 
 use Genesis;
 use_ok 'Genesis::Config';
@@ -344,8 +345,12 @@ subtest 'validate() returns 0 and does not die on failure' => sub {
 
 	my $manifest = Genesis::Env::Manifest::Unredacted->new($mock_builder, undef);
 	my $result;
-	lives_ok { $result = $manifest->validate } 'validate() does not propagate exception';
+	my $err = stderr_from {
+		lives_ok { $result = $manifest->validate } 'validate() does not propagate exception';
+	};
 	is($result, 0, 'validate() returns 0 on failure');
+	like $err, qr/Failed to build unredacted manifest:.*merge failed/s,
+		'error banner names the failed manifest and includes the builder error';
 };
 
 # ============================================================================
