@@ -8,6 +8,7 @@ use lib 't';
 use helper;
 use Test::More;
 use Test::Deep;
+use Test::Output;
 
 use Genesis;
 use_ok 'Genesis::CI::Propagation';
@@ -178,6 +179,25 @@ sub pr_target {
 	$t;
 }
 
+# Capture-and-return wrapper around propagate_envs.  Every subtest
+# below exercises one propagate_envs() call which emits multi-line
+# progress banners through info()/output() (e.g. "  staging: pushed",
+# "Pushing to origin...").  Without capture these leak into the prove
+# progress line.
+#
+# Returns the call's result in scalar context (so existing
+#   `my $result = propagate_envs_captured(...)`
+# call sites work unchanged) and (result, stdout, stderr) in list
+# context for subtests that want to assert on the banner content.
+sub propagate_envs_captured {
+	my @args = @_;
+	my $result;
+	my ($stdout, $stderr) = output_from {
+		$result = Genesis::CI::Propagation::propagate_envs(@args);
+	};
+	return wantarray ? ($result, $stdout, $stderr) : $result;
+}
+
 # Standard args bundle, mergeable with subtest-specific overrides
 sub base_args {
 	my (%over) = @_;
@@ -202,7 +222,7 @@ sub base_args {
 subtest 'direct mode + push_direct_commits=1 commits and pushes <env>' => sub {
 	plan tests => 5;
 	my $git = mock_git();
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(),
 		git     => $git,
 		github  => undef,
@@ -222,7 +242,7 @@ subtest 'direct mode + push_direct_commits=1 commits and pushes <env>' => sub {
 subtest 'direct mode + push_direct_commits=0 commits but does not push' => sub {
 	plan tests => 3;
 	my $git = mock_git();
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(push_direct_commits => 0),
 		git     => $git,
 		github  => undef,
@@ -238,7 +258,7 @@ subtest 'direct mode + push_direct_commits=0 commits but does not push' => sub {
 subtest 'no_push master kill switch suppresses all pushes' => sub {
 	plan tests => 3;
 	my $git = mock_git();
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(no_push => 1),
 		git     => $git,
 		github  => undef,
@@ -253,7 +273,7 @@ subtest 'no_push master kill switch suppresses all pushes' => sub {
 subtest 'dry_run reports without mutating git' => sub {
 	plan tests => 3;
 	my $git = mock_git();
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(dry_run => 1),
 		git     => $git,
 		github  => undef,
@@ -268,7 +288,7 @@ subtest 'dry_run reports without mutating git' => sub {
 subtest 'multiple direct envs all pushed in a single push call' => sub {
 	plan tests => 3;
 	my $git = mock_git();
-	Genesis::CI::Propagation::propagate_envs(
+	propagate_envs_captured(
 		base_args(),
 		git     => $git,
 		github  => undef,
@@ -296,7 +316,7 @@ subtest 'PR mode count=0 creates fresh branch and PR' => sub {
 	plan tests => 6;
 	my $git    = mock_git();
 	my $github = mock_github();   # default: open_prs returns []
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(),
 		git     => $git,
 		github  => $github,
@@ -328,7 +348,7 @@ subtest 'PR mode count=0 cleans up stale remote branch first' => sub {
 	plan tests => 2;
 	my $git    = mock_git(remote_branch_exists => { 'pr/staging' => 1 });
 	my $github = mock_github();
-	Genesis::CI::Propagation::propagate_envs(
+	propagate_envs_captured(
 		base_args(),
 		git     => $git,
 		github  => $github,
@@ -360,7 +380,7 @@ subtest 'PR mode count=1 with new control_sha appends commit and updates PR' => 
 		log_subjects  => { 'pr/staging' => ['[pipeline] control@9999999 -> staging'] },
 	);
 
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(),
 		git     => $git,
 		github  => $github,
@@ -401,7 +421,7 @@ subtest 'PR mode count=1 idempotent: HEAD matches control_sha → full skip' => 
 		log_subjects  => { 'pr/staging' => ['[pipeline] control@abcdef1 -> staging'] },
 	);
 
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(),
 		git     => $git,
 		github  => $github,
@@ -418,7 +438,7 @@ subtest 'PR mode count=1 idempotent: HEAD matches control_sha → full skip' => 
 };
 
 subtest 'PR mode count>1 warns and uses first PR' => sub {
-	plan tests => 2;
+	plan tests => 3;
 	my $github = mock_github(
 		open_prs => {
 			'staging/pr/staging' => [
@@ -432,7 +452,8 @@ subtest 'PR mode count>1 warns and uses first PR' => sub {
 		log_subjects  => { 'pr/staging' => ['[pipeline] control@9999999 -> staging'] },
 	);
 
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	# List-context capture so we can assert on the warning banner.
+	my ($result, $stdout, $stderr) = propagate_envs_captured(
 		base_args(),
 		git     => $git,
 		github  => $github,
@@ -440,6 +461,9 @@ subtest 'PR mode count>1 warns and uses first PR' => sub {
 	);
 
 	is $result->{propagated}, 1, 'still propagates';
+	like "$stdout$stderr",
+		qr/Multiple open PRs for staging with head pr\/staging.*using PR #17/s,
+		'warns that multiple PRs were found and names the one being used';
 
 	# Should have called update_pr against PR #17 (the first one)
 	my @updates = $github->calls('update_pr');
@@ -451,7 +475,7 @@ subtest 'no_push kill switch suppresses all push and PR API writes in PR mode' =
 	my $git    = mock_git();
 	my $github = mock_github();   # open_prs returns []
 
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(no_push => 1),
 		git     => $git,
 		github  => $github,
@@ -470,7 +494,7 @@ subtest 'PR mode dry_run reports without git or API mutations' => sub {
 	my $git    = mock_git();
 	my $github = mock_github();
 
-	my $result = Genesis::CI::Propagation::propagate_envs(
+	my $result = propagate_envs_captured(
 		base_args(dry_run => 1),
 		git     => $git,
 		github  => $github,
@@ -489,7 +513,7 @@ subtest 'mixed direct + PR envs: direct envs and pr/ branches batched in one pus
 	my $git    = mock_git();
 	my $github = mock_github();
 
-	Genesis::CI::Propagation::propagate_envs(
+	propagate_envs_captured(
 		base_args(),
 		git     => $git,
 		github  => $github,
