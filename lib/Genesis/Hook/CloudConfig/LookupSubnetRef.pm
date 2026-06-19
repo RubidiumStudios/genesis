@@ -25,8 +25,8 @@ sub resolve {
 		return $subnet_data->{$ref};
 	} else {
 		bail(
-			"Could not resolve reference '$ref' in subnet data. ",
-			"Please ensure the reference exists and is spelled correctly."
+			"Could not resolve reference '$ref' in subnet data. "
+			. "Please ensure the reference exists and is spelled correctly."
 		);
 	}
 }

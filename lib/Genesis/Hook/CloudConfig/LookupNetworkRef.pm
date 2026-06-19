@@ -28,8 +28,8 @@ sub resolve {
 		return $network_data->{$ref};
 	} else {
 		bail(
-			"Could not resolve reference '$ref' in network data. ",
-			"Please ensure the reference exists and is spelled correctly."
+			"Could not resolve reference '$ref' in network data. "
+			. "Please ensure the reference exists and is spelled correctly."
 		);
 	}
 }
