@@ -1557,6 +1557,11 @@ subtest 'extract_artifacts_to()' => sub {
 # ###########################################################################
 subtest 'Package Variables' => sub {
 
+	# `once` suppresses "Name X used only once: possible typo" --
+	# these two package vars are read exactly once by their fully-
+	# qualified names below and never assigned in this file.
+	no warnings 'once';
+
 	subtest '$user_color_map has correct mappings' => sub {
 		my $map = $Genesis::Env::Deployment::user_color_map;
 		is($map->{shell},     'y', 'shell maps to y (yellow)');
