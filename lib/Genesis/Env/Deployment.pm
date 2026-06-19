@@ -88,24 +88,29 @@ sub new {
 	my $timestamp = delete($data{timestamp});  # TODO: Should we default to current time?
 	$timestamp //= _get_ts_string($data{completed}//Time::Piece->new);
 
-	# Validate the input data has all the required fields
+	# Validate the input data has all the required fields.  `action`
+	# itself is collected into @missing on line 1 below; use `// ''` on
+	# subsequent eq checks so callers that forgot `action` get the full
+	# missing-field list in the bug() message instead of a stream of
+	# uninit warnings here first.
 	my @missing = grep { !exists $data{$_} } qw(
 		action result genesis_version reason user
 	);
+	my $is_deploy = ($data{action} // '') eq 'deploy';
 	push @missing, grep { !exists $data{$_} } qw(
 		kit manifest
-	) if $data{action} eq 'deploy';
+	) if $is_deploy;
 
 	# Kit and user are hashrefs with their own required fields
 	push @missing, map { "kit.$_" } grep {ref($data{kit}) eq 'HASH' && !exists $data{kit}{$_}} qw(
 		id name version is_dev features
-	) if $data{action} eq 'deploy';
+	) if $is_deploy;
 	push @missing, map { "user.$_" } grep {ref($data{user}) eq 'HASH' && !exists $data{user}{$_}} qw(
 		shell
 	);
 	push @missing, map { "manifest.$_" } grep {ref($data{manifest}) eq 'HASH' && !exists $data{manifest}{$_}} qw(
 		type sha2
-	) if $data{action} eq 'deploy';
+	) if $is_deploy;
 
 	# TODO: Should we validate against unknown fields, or just allow them?
 
