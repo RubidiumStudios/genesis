@@ -14,6 +14,12 @@ BEGIN {
 	}
 }
 
+# Must come BEFORE `use Test::More`: Test2's TAP formatter clones
+# STDOUT/STDERR at load time and inherits whatever IO layers are
+# active then.  Without this, non-ASCII in subtest names trips
+# "Wide character in print".
+use open ':std', ':encoding(UTF-8)';
+
 use lib 't';
 use Mock;
 use MockWrapper;

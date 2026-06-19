@@ -2,10 +2,6 @@
 use strict;
 use warnings;
 use utf8;
-# Apply UTF-8 layer to STDIN/STDOUT/STDERR as a compile-time pragma so
-# Test2's TAP formatter doesn't warn ("Wide character in print") when
-# subtest names contain em-dashes or arrows.
-use open ':std', ':encoding(UTF-8)';
 
 use lib 'lib';
 use lib 't';
