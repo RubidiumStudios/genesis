@@ -9,6 +9,7 @@ use Test::More;
 use Test::Deep;
 use Test::Differences;
 use Test::Exception;
+use Test::Output;
 use File::Temp qw/tempfile tempdir/;
 
 use_ok 'Genesis';
@@ -77,10 +78,21 @@ EOF
 };
 
 subtest 'load_yaml_file() - error handling' => sub {
-	# Non-existent file
-	my ($data, $rc, $err) = load_yaml_file('/nonexistent/file.yml');
+	# Non-existent file.  Bash's "No such file or directory"
+	# diagnostic should arrive in the returned $err (not leak to
+	# the real STDERR) -- run() now wraps the inner script in a
+	# `{ ...; } 2>err_file` group so the redirect applies before
+	# the input-redirect inside the script can fail.
+	my ($data, $rc, $err);
+	my $stderr = stderr_from {
+		($data, $rc, $err) = load_yaml_file('/nonexistent/file.yml');
+	};
 	isnt $rc, 0, 'non-existent file returns error code';
 	ok !defined($data), 'non-existent file returns undef data';
+	is $stderr, '',
+		'shell diagnostic does not leak past run() to the real STDERR';
+	like $err, qr{/nonexistent/file\.yml.*No such file or directory},
+		'shell diagnostic is returned via $err';
 };
 
 # Test to_yaml() - Convert data to YAML string

@@ -645,7 +645,11 @@ sub run {
 
 	my $shell = $opts{shell} || '/bin/bash';
 	if (!$opts{interactive} && $opts{stderr}) {
-		$prog .= " 2>$opts{stderr}";
+		# Wrap in `{ ;}` so 2> applies before any inner `<` runs.
+		# Without this, an input-redirect failure leaks to real
+		# STDERR AND bash never creates err_file -- so slurp()
+		# returns undef instead of bash's error message.
+		$prog = "{ $prog ; } 2>$opts{stderr}";
 	}
 	pushd($opts{dir}) if ($opts{dir});
 
