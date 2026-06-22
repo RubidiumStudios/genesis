@@ -1165,7 +1165,9 @@ sub deploy {
 		$options{'fix-secrets'} = 1;
 	}
 
-	info "\nPreparing to deploy #C{%s}:\n  - based on kit #c{%s}\n  - using Genesis #c{%s}", $env->name, $env->kit->id, $Genesis::VERSION;
+	info "\nPreparing to deploy #C{%s}:\n  - based on kit #c{%s}\n  - using Genesis #c{%s}%s",
+		$env->name, $env->kit->id, $Genesis::VERSION,
+		_format_deploy_feature_opt_in($env);
 	if ($pipeline_branch) {
 		info "  - from branch #c{%s}", $pipeline_branch;
 	}
@@ -1821,6 +1823,17 @@ sub env_shell {
 	$env->shell(%{get_options()});
 }
 
+# _format_deploy_feature_opt_in - returns the " (feature opt-in: ...)" tail
+# for the deploy header, or '' when the env has no effective floor.
+sub _format_deploy_feature_opt_in {
+	my ($env) = @_;
+	my $fc = $env->effective_minimum_version;
+	return '' if !$fc || $fc eq '0.0.0';
+	return sprintf(
+		" (feature opt-in: #c{v%s} from #c{%s})",
+		$fc, $env->effective_minimum_version_source
+	);
+}
 
 1;
 # vim: fdm=marker:foldlevel=1:noet

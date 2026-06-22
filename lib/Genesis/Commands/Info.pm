@@ -199,6 +199,7 @@ sub information {
 			"[[  #I{        using}>> #C{Genesis v%s}\n",
 			$deployment->lookup('genesis_version', 'unknown')
 		);
+		$out .= _format_feature_compatibility_line($deployment);
 
 		# TODO: Ensure that manifest validation status for 'repository' manifests works.  For now, just warn users that it may not be accurate and to use 'exodus' or 'hybrid' manifest stores for accurate validation status and details.
 		if ($env->manifest_store eq 'repository') {
@@ -760,5 +761,19 @@ sub __processing {
 
 }
 
+# _format_feature_compatibility_line - returns the "feature opt-in" line
+# for a deployment, or '' when the deployment record has no
+# feature_compatibility field (older records or no-floor deploys).
+sub _format_feature_compatibility_line {
+	my ($deployment) = @_;
+	my $fc = $deployment->lookup('feature_compatibility');
+	return '' unless $fc;
+	my $src = $deployment->lookup('feature_compatibility_source');
+	return sprintf(
+		"[[  #I{feature opt-in}>> #C{v%s}%s\n",
+		$fc,
+		$src ? " (from $src)" : ''
+	);
+}
 
 1;
