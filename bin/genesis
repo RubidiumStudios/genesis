@@ -84,13 +84,23 @@ define_command("version", {
 		summary => "Print the version of Genesis",
 		description =>
 			"With no arguments, will print out a human-readable line specifying the ".
-			"version, commit hash and build code.  Alternatively, you can ask for ".
-			"one or more version components as arguments (listed below), printed ".
-			"either on separate lines, or in a json block with the #y{--json} option.",
+			"version, commit hash and build code.  When run inside a Genesis ".
+			"deployment repo, the line is annotated with the effective feature ".
+			"opt-in level and its source (repository or environment).  Pass an ".
+			"environment name as the first argument to scope the opt-in lookup ".
+			"to that env.  Alternatively, you can ask for one or more version ".
+			"components as arguments (listed below), printed either on separate ".
+			"lines, or in a json block with the #y{--json} option.",
 
 		function_group => Genesis::Commands::GENESIS,
 		skip_check_prereqs => 1,
 		arguments => [
+			'[env]' =>
+				"Optional environment name.  When supplied (and we are inside a ".
+				"repo), feature_compatibility and feature_compatibility_source ".
+				"reflect the effective minimum derived from both the env file ".
+				"and the repo's minimum_version config.",
+
 			'semver' =>
 				"Provide the version in semantic format (dev versions are 0.0.0-rc.0)",
 
@@ -126,6 +136,16 @@ define_command("version", {
 
 			'is_dirty' =>
 				"Outputs true if version was built with uncommitted changes, false otherwise",
+
+			'feature_compatibility' =>
+				"Effective minimum Genesis version that feature gates compare against ".
+				"(max of repo minimum_version and env genesis.min_version).  Only ".
+				"present when inside a deployment repo with a minimum declared.",
+
+			'feature_compatibility_source' =>
+				"Which side contributed the effective feature_compatibility level: ".
+				"#C{repository} or #C{environment}.  Only present when ".
+				"feature_compatibility is present.",
 		],
 		option_group => Genesis::Commands::BLANK_OPTIONS,
 		options => [

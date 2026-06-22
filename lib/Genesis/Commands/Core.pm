@@ -11,21 +11,35 @@ use JSON::PP qw/encode_json/;
 use POSIX qw/strftime mktime/;
 
 sub version {
+	my @args = @_;
 
-	unless (scalar( @{[ keys(%{get_options()}), @_ ]} )) {
-		output "Genesis v$Genesis::VERSION$Genesis::BUILD";
-		exit 0;
-	}
-
-	# validate arguments
+	# Argument shape: [env-name] [field ...]
+	# The first positional, if it's NOT a known field, is treated as an
+	# env name (matches the Genesis convention of env as positional 1).
 	my @valid_args = qw(
 		semver is_dev major minor patch rc is_rc
 		build_epoch build_code build_date commit is_dirty
+		feature_compatibility feature_compatibility_source
 	);
-	if (@_) {
-		my %check_args;
-		@check_args{@valid_args} = (1) x scalar(@valid_args);
-		my @bad_args = grep {! $check_args{$_}} @_;
+	my %check_args;
+	@check_args{@valid_args} = (1) x scalar(@valid_args);
+
+	my $env_name;
+	if (@args && !$check_args{$args[0]}) {
+		$env_name = shift @args;
+	}
+
+	# Detect repo + (optional) env to compute feature_compatibility.
+	my ($fc_level, $fc_source) = _detect_feature_compatibility($env_name);
+
+	unless (scalar(keys %{get_options()}) || @args) {
+		output "Genesis v$Genesis::VERSION$Genesis::BUILD"
+			. _format_feature_level_tail($fc_level, $fc_source);
+		exit 0;
+	}
+
+	if (@args) {
+		my @bad_args = grep {! $check_args{$_}} @args;
 		bail(
 			"Invalid version field%s: %s",
 			(scalar(@bad_args) > 1 ? 's' : ''),
@@ -56,12 +70,17 @@ sub version {
 		($dirty//'') eq '+' ? $JSON::PP::true : $JSON::PP::false,
 	) if $Y;
 
+	if (defined $fc_level) {
+		$version{feature_compatibility}        = $fc_level;
+		$version{feature_compatibility_source} = $fc_source;
+	}
+
 	if (get_options->{json}) {
-		%version = %version{@_} if @_;
+		%version = %version{@args} if @args;
 		output encode_json(\%version);
 	} else {
 		output ($_ =~ /^is_/ ? ($version{$_} ? 'true' : 'false') : $version{$_})
-			for (@_);
+			for (@args);
 	}
 	exit 0
 }
@@ -324,6 +343,41 @@ sub hack {
 		Genesis::dump_var({level => 'OUTPUT'}, result => $result);
 		return 1
 	}
+}
+
+# _detect_feature_compatibility - returns ($level, $source) for the current
+# repo (and optional $env_name).  Returns (undef, undef) outside a repo,
+# when nothing is declared, or when the env can't be loaded.
+sub _detect_feature_compatibility {
+	my ($env_name) = @_;
+	my ($fc_level, $fc_source);
+	eval {
+		require Genesis::Top;
+		return unless Genesis::Top->is_repo('.');
+		my $top = Genesis::Top->new('.');
+		my $repo_min = $top->config->get('minimum_version', '') =~ s/^v//ri;
+		if ($env_name) {
+			my $env = $top->load_env($env_name);
+			$fc_level  = $env->effective_minimum_version;
+			$fc_source = $env->effective_minimum_version_source;
+		} elsif ($repo_min) {
+			$fc_level  = $repo_min;
+			$fc_source = 'repository';
+		}
+	};
+	# Treat the no-floor sentinel as "no opt-in".
+	return (undef, undef)
+		if !defined($fc_level) || $fc_level eq '0.0.0';
+	return ($fc_level, $fc_source);
+}
+
+# _format_feature_level_tail - returns " (feature level: vX.Y.Z [source])"
+# or '' when no level is supplied.  Used by the simple-line output of
+# `genesis version`.
+sub _format_feature_level_tail {
+	my ($fc_level, $fc_source) = @_;
+	return '' unless defined $fc_level;
+	return sprintf(' (feature level: v%s [%s])', $fc_level, $fc_source);
 }
 
 1;
