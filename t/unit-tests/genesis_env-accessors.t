@@ -660,7 +660,7 @@ EOF
 };
 
 subtest 'validate_genesis_version_requirements' => sub {
-	plan tests => 10;
+	plan tests => 14;
 
 	# Test 1: Development version (skip checks)
 	local $Genesis::VERSION = '(development)';
@@ -709,8 +709,8 @@ EOF
 		'no errors when running version meets minimum');
 	is($result->{effective_minimum}, '2.8.0',
 		'effective_minimum is correctly set');
-	is($result->{source}, 'environment file',
-		'source correctly identifies environment file');
+	is($result->{source}, 'environment',
+		'source correctly identifies environment as the floor');
 
 	# Test 3: Running version doesn't meet minimum
 	# Load with compatible version first, then test with lower version
@@ -756,8 +756,14 @@ EOF
 	$env = $top4->load_env('env-newer');
 	$result = $env->validate_genesis_version_requirements();
 
-	is(scalar(@{$result->{warnings}}), 1,
-		'warning generated when env minimum newer than repo minimum');
+	# Env-vs-repo mismatch is informational only (debug, not warning) --
+	# the running-version check below is the real safety net.
+	is(scalar(@{$result->{warnings}}), 0,
+		'no warning when env minimum newer than repo minimum (debug only)');
+	is($result->{effective_minimum}, '2.9.0',
+		'effective_minimum picks the greater of env (2.9.0) and repo (2.7.0)');
+	is($result->{source}, 'environment',
+		'source identifies environment as the floor when env > repo');
 
 	# Test 5: Environment allows older than repository requires (error)
 	# Load without conflict first, then set repo minimum to trigger error
@@ -776,12 +782,18 @@ EOF
 
 	$env = $top5->load_env('env-older');
 
-	# Now set repo minimum higher to trigger conflict
+	# Set repo minimum higher than env's.  Running version satisfies both,
+	# so the mismatch is informational only (debug) and the validator
+	# returns no errors or warnings.
 	$top5->config->set('minimum_version', '2.7.0');
 	$result = $env->validate_genesis_version_requirements();
 
-	is(scalar(@{$result->{errors}}), 1,
-		'error generated when env minimum older than repo minimum');
+	is(scalar(@{$result->{errors}}), 0,
+		'no error when env minimum older than repo minimum but running version satisfies both');
+	is($result->{effective_minimum}, '2.7.0',
+		'effective_minimum picks the greater of env (2.6.0) and repo (2.7.0)');
+	is($result->{source}, 'repository',
+		'source identifies repository as the floor when repo > env');
 };
 
 subtest 'path' => sub {

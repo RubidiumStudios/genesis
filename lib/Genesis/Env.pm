@@ -1061,22 +1061,45 @@ sub can_build_cloud_configs {
 
 # }}}
 
-# minimum_genesis_version - returns the effective minimum genesis version for this environment {{{
-sub minimum_genesis_version {
+# effective_minimum_version - max(env_min, repo_min); the single floor that
+# feature gates consult, so a low env_min can't artificially disable kit
+# features supported by the higher repo_min (and vice versa). {{{
+sub effective_minimum_version {
 	my ($self) = @_;
 	return $self->_memoize(sub {
-		my $env_min = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], '') =~ s/^v//ri;
-		my $repo_min = $self->top->config->get('minimum_version','') =~ s/^v//ri;
-
-		# Environment minimum takes precedence if specified
-		return $env_min if $env_min;
-
-		# Fall back to repository minimum
-		return $repo_min if $repo_min;
-
-		# No minimum specified
-		return'0.0.0';
+		my $env_min  = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], '') =~ s/^v//ri;
+		my $repo_min = $self->top->config->get('minimum_version', '') =~ s/^v//ri;
+		my @declared = grep { length $_ } ($env_min, $repo_min);
+		return '0.0.0' unless @declared;
+		my $max = shift @declared;
+		for my $v (@declared) { $max = $v if new_enough($v, $max) }
+		return $max;
 	});
+}
+
+# }}}
+# effective_minimum_version_source - returns 'environment' or 'repository'
+# to identify which side contributed the effective floor.  When both
+# declared values agree, prefers 'repository' (the broader scope). {{{
+sub effective_minimum_version_source {
+	my ($self) = @_;
+	return $self->_memoize(sub {
+		my $env_min  = $self->lookup(['genesis.min_version', 'genesis.minimum_version'], '') =~ s/^v//ri;
+		my $repo_min = $self->top->config->get('minimum_version', '') =~ s/^v//ri;
+		return undef unless length($env_min) || length($repo_min);
+		return 'environment' unless length $repo_min;
+		return 'repository'  unless length $env_min;
+		# Both set; pick whichever is >= the other.  Tie -> repository.
+		return new_enough($env_min, $repo_min) && $env_min ne $repo_min
+			? 'environment'
+			: 'repository';
+	});
+}
+
+# }}}
+# minimum_genesis_version - legacy alias for effective_minimum_version. {{{
+sub minimum_genesis_version {
+	$_[0]->effective_minimum_version;
 }
 
 # }}}
@@ -1102,35 +1125,22 @@ sub validate_genesis_version_requirements {
 	my $effective_min;
 	my $source;
 	if ($env_min && $repo_min) {
-		# Both specified - use whichever is greater
+		# Use whichever is greater as the effective floor.  Mismatch
+		# between the two declared floors is informational only --
+		# the running-version check below uses the greater.
 		$effective_min = new_enough($env_min, $repo_min) ? $env_min : $repo_min;
-		my $src_map = {
-			$repo_min => 'repository configuration',
-			$env_min  => 'environment file',
-		};
-		$source = $src_map->{$effective_min};
-
-		if ($effective_min ne $repo_min) {
-			# Environment requires newer version than repo - this is fine
-			push @warnings, sprintf(
-				"Environment requires Genesis %s, which is newer than the ".
-				"repository minimum of %s",
-				$env_min, $repo_min
-			);
-		} elsif (!new_enough($env_min, $repo_min)) {
-			# Environment allows older version than repo requires
-			push @errors, sprintf(
-				"Environment specifies minimum Genesis version %s, but repository ".
-				"requires at least %s",
-				$env_min, $repo_min
-			);
-		}
+		$source = $effective_min eq $repo_min ? 'repository' : 'environment';
+		debug(
+			"Environment minimum_version (%s) and repository (%s) differ; ".
+			"using effective minimum %s from %s",
+			$env_min, $repo_min, $effective_min, $source
+		) if $env_min ne $repo_min;
 	} elsif ($env_min) {
 		$effective_min = $env_min;
-		$source = 'environment file';
+		$source = 'environment';
 	} elsif ($repo_min) {
 		$effective_min = $repo_min;
-		$source = 'repository configuration';
+		$source = 'repository';
 	} else {
 		$effective_min = '0.0.0';
 		$source = 'unspecified';
@@ -1149,20 +1159,20 @@ sub validate_genesis_version_requirements {
 		};
 	}
 	if ($effective_min && !new_enough($running_version, $effective_min)) {
-		my $source = $env_min ? "environment file" : "repository configuration";
+		my $err_source = $env_min ? "environment" : "repository";
 		push @errors, sprintf(
 			"Genesis version %s does not meet the minimum required version %s ".
-			"specified in the %s",
-			$running_version, $effective_min, $source
+			"specified by the %s",
+			$running_version, $effective_min, $err_source
 		);
 	}
 
 	return {
 		errors => \@errors,
 		warnings => \@warnings,
-		effective_minimum => $effective_min//'0.0.0',
+		effective_minimum => $effective_min // '0.0.0',
 		running_version => $running_version,
-		source => $env_min ? 'environment file' : $repo_min ? 'repository configuration' : undef,
+		source => $source,
 	};
 }
 
