@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check pod-check pod-check-syntax pod-check-quiet test test-quick test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage
+.PHONY: sanity-test compile-check pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -61,6 +61,16 @@ e2e-tests: sanity-test
 	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests)
 
 test-quick: unit-tests
+
+# Run all manifest tests sequentially, bailing on the first failure.
+# Useful when the test ordering matters and you want to debug the
+# earliest break without waiting for the rest of the suite.
+test-fail-fast: sanity-test
+	@echo "Running all tests from manifest (fail-fast)..."
+	@for t in $$(t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests unit-tests integration-tests e2e-tests); do \
+		echo "+ $$t"; \
+		prove -l $$t || { echo "STOP: $$t failed; bailing per fail-fast policy"; exit 1; }; \
+	done
 
 test-secrets: sanity-test
 	@echo 'Running secrets e2e test...'
