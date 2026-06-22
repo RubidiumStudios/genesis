@@ -2,33 +2,67 @@
 use strict;
 use warnings;
 
-# Parse test manifest and extract test files for given section(s)
+# Parse test manifest and extract test files for given section(s).
 # Usage: parse-manifest <manifest-file> <section-name> [section-name ...]
+#
+# Side effect: emits a "[manifest] unregistered:" warning line to STDERR
+# for every .t file present in any requested section's directory but not
+# listed in the manifest (or listed only via a commented-out entry).
+# Commented entries are treated as INTENTIONAL exclusions and do not
+# trigger the warning.
 
 my $manifest = shift @ARGV;
 my @sections = @ARGV;
-die "Usage: $0 <manifest-file> <section-name> [section-name ...]\n" unless $manifest && @sections;
+die "Usage: $0 <manifest-file> <section-name> [section-name ...]\n"
+	unless $manifest && @sections;
 
 my %wanted = map { $_ => 1 } @sections;
 
+# Preserve document order in the output (the manifest's order is
+# meaningful -- earlier tests should be passable when later ones are
+# broken).  Also track commented-out entries as INTENTIONAL exclusions
+# so the unregistered-warning doesn't fire on them.
+my (@ordered, %registered, %excluded);
 open my $fh, '<', $manifest or die "Cannot open $manifest: $!\n";
-
-my $in_section = 0;
+my $in_section;
 while (<$fh>) {
 	chomp;
 	if (/^\[(.+?)\]/) {
-		$in_section = $wanted{$1} ? 1 : 0;
+		$in_section = $wanted{$1} ? $1 : undef;
 		next;
 	}
 	next unless $in_section;
-	next if /^#/ || /^\s*$/;  # Skip comments and blank lines
 
-	# Strip inline comments and trailing whitespace
+	if (my ($path) = /^\s*#\s*(\S+\.t(?:\.\w+)?)\s*(?:#.*)?$/) {
+		$excluded{$path} = 1;
+		next;
+	}
+
+	next if /^#/ || /^\s*$/;
 	s/\s*#.*$//;
 	s/\s+$//;
-
-	next unless /\.t$/;        # Only .t files
-
-	print "t/$_\n";
+	next unless /\S/;
+	next unless /\.t(?:\.\w+)?$/;
+	next if $registered{$_}++;   # de-dup if a path is listed twice
+	push @ordered, $_;
 }
 close $fh;
+
+# Warn about tests present on disk that we never mentioned.  Only scans
+# directories that the wanted sections actually use.
+my %seen_dirs;
+for my $p (@ordered) {
+	$seen_dirs{$1}++ if $p =~ m{^([^/]+)/};
+}
+for my $dir (sort keys %seen_dirs) {
+	opendir(my $dh, "t/$dir") or next;
+	for my $f (sort readdir $dh) {
+		next unless $f =~ /\.t$/;
+		my $rel = "$dir/$f";
+		next if $registered{$rel} || $excluded{$rel};
+		warn "[manifest] unregistered: $rel\n";
+	}
+	closedir $dh;
+}
+
+print "t/$_\n" for @ordered;
