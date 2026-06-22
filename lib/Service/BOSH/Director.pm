@@ -66,20 +66,14 @@ sub from_exodus {
 		"Require an env object - was not passed in",
 	) unless $env && ref($env) eq 'Genesis::Env';
 
-	my $bosh_env = $env->bosh_env;
-	if (!defined($exodus_path)) {
-		if ($rel_to_env eq 'self') {
-			$exodus_path //= $env->exodus_base;
-		} else { # default is parent
-			$exodus_mount //= $bosh_env->{exodus_mount} || $env->exodus_mount;
-			$exodus_path = $exodus_mount . $alias.'/'.($opts{bosh_deployment_type} || $bosh_env->{dep_type} || 'bosh');
-		}
-	}
-	if (!defined($exodus_vault)) {
-		$exodus_vault = $rel_to_env eq 'self'
-			? $env->vault
-			: ($bosh_env->{exodus_vault} || $env->vault);
-	}
+	($exodus_path, $exodus_vault) = $class->_derive_exodus_pointers(
+		$alias, $env,
+		exodus_path  => $exodus_path,
+		exodus_vault => $exodus_vault,
+		exodus_mount => $exodus_mount,
+		rel_to_env   => $rel_to_env,
+		bosh_deployment_type => $opts{bosh_deployment_type},
+	);
 
 	my $exodus_source //= 'provided';
 	if (!$exodus) {
@@ -141,6 +135,43 @@ sub from_exodus {
 }
 
 # }}}
+# _derive_exodus_pointers - shared between from_exodus and from_alias.
+# Given (alias, env, %opts), compute (exodus_path, exodus_vault).  A
+# caller-supplied $opts{exodus_path} / $opts{exodus_vault} wins
+# unchanged; otherwise the value is derived from the env's bosh_env
+# settings and the rel_to_env hint ('self' -> env's own exodus_base,
+# 'parent' (default) -> parent director's exodus_mount + alias +
+# deployment-type).  When $env is undef, only the caller-supplied
+# values are returned (no derivation possible). {{{
+sub _derive_exodus_pointers {
+	my ($class, $alias, $env, %opts) = @_;
+	my $exodus_path  = $opts{exodus_path};
+	my $exodus_vault = $opts{exodus_vault};
+	return ($exodus_path, $exodus_vault) unless $env;
+
+	my $rel_to_env = $opts{rel_to_env} // 'parent';
+	my $bosh_env   = $env->bosh_env;
+
+	if (!defined $exodus_path) {
+		if ($rel_to_env eq 'self') {
+			$exodus_path = $env->exodus_base;
+		} else {
+			my $mount    = $opts{exodus_mount}
+				|| $bosh_env->{exodus_mount} || $env->exodus_mount;
+			my $dep_type = $opts{bosh_deployment_type}
+				|| $bosh_env->{dep_type} || 'bosh';
+			$exodus_path = $mount . $alias . '/' . $dep_type;
+		}
+	}
+	if (!defined $exodus_vault) {
+		$exodus_vault = $rel_to_env eq 'self'
+			? $env->vault
+			: ($bosh_env->{exodus_vault} || $env->vault);
+	}
+	return ($exodus_path, $exodus_vault);
+}
+
+# }}}
 # from_alias - create a BOSH director object that uses a local config alias {{{
 sub from_alias {
 	debug("from_alias called with %d args: [%s]", scalar(@_)-1, join(', ', map {defined($_) ? "'$_'" : 'undef'} @_[1..$#_]));
@@ -152,6 +183,13 @@ sub from_alias {
 		or return;
 
 	bug("from_alias() called without an alias") unless $alias;
+
+	# Derive exodus_path / exodus_vault so callers downstream (e.g.
+	# Env::_cap_yaml_file) don't have to special-case alias-built
+	# Directors.
+	my ($exodus_path, $exodus_vault)
+		= $class->_derive_exodus_pointers($alias, $env, %opts);
+
 	for my $e (@{ $bosh->{environments} || []  }) {
 		return $class->new(
 			$alias,
@@ -160,6 +198,8 @@ sub from_alias {
 			ca_cert => $e->{ca_cert},
 			use_local_config => 1,
 			deployment => $opts{deployment},
+			exodus_path  => $exodus_path,
+			exodus_vault => $exodus_vault,
 			%opts
 		) if $e->{alias} eq $alias;
 	}
