@@ -1,0 +1,178 @@
+#!/usr/bin/env perl
+# audit-test-order
+#
+# Static audit of t/test-manifest.txt's unit-tests section: for each
+# test in manifest order, flag any (class, method) the test exercises
+# whose first-validating test sits LATER in the manifest.
+#
+# Heuristic anchors (no runtime instrumentation):
+#
+#   validates(T) = the (class, method) pairs T asserts on:
+#     - method names captured from subtest descriptions matching
+#         /^method_name( -- |\s+-\s+|\(/
+#       (class inferred from filename, e.g. genesis_env-lookups.t
+#       -> Genesis::Env)
+#
+#   depends_on(T) = method calls in T's body that are NOT in validates(T):
+#     - $obj->method(...) patterns scoped by `my $obj = Class->new` or
+#       `my $obj = make_env(...)` style helpers when we can resolve the
+#       resulting class.  Otherwise we record the method name only and
+#       compare class-loose.
+#
+# A test that depends on a method M of class C that is first validated
+# in a test V appearing LATER in the manifest is an ordering candidate.
+#
+# Class-loose matches (same method name across two different classes)
+# get a [loose] tag so reviewers can ignore obvious false positives.
+
+use strict;
+use warnings;
+use Getopt::Long;
+
+my $manifest_path = 't/test-manifest.txt';
+my $section       = 'unit-tests';
+my $verbose       = 0;
+my $show_loose    = 0;  # cross-class same-method matches; noisy by default
+GetOptions(
+	'manifest=s' => \$manifest_path,
+	'section=s'  => \$section,
+	'verbose'    => \$verbose,
+	'loose'      => \$show_loose,
+) or die "Usage: $0 [--manifest PATH] [--section NAME] [--loose] [--verbose]\n";
+
+# Pull ordered test list straight from parse-manifest so the audit
+# follows the same parsing rules as the test runner.
+my @tests = `t/bin/parse-manifest $manifest_path $section 2>/dev/null`;
+chomp @tests;
+die "parse-manifest returned no tests for [$section]\n" unless @tests;
+
+# ---------------------------------------------------------------------
+# Per-test extraction
+# ---------------------------------------------------------------------
+
+sub infer_class_from_path {
+	# t/unit-tests/genesis_env-lookups.t -> Genesis::Env
+	# t/unit-tests/genesis_kit_compiled-core.t -> Genesis::Kit::Compiled
+	# t/unit-tests/service_vault_remote-token_renewer.t -> Service::Vault::Remote
+	#
+	# Returns '' when the filename doesn't look like a Perl test (e.g.
+	# a stale entry the audit can't classify); the caller should treat
+	# that as "no primary class -- skip the validates/uses extraction".
+	my ($path) = @_;
+	my ($leaf) = $path =~ m{/([^/]+)\.t$};
+	return '' unless defined $leaf;
+	$leaf =~ s/-[^-]*$//;  # strip subtest suffix
+	my @parts = grep { length } split /_/, $leaf;
+	return '' unless @parts;
+	return join('::', map { ucfirst } @parts);
+}
+
+my %test_index;   # path -> position
+my @validates;    # parallel to @tests: arrayref of [class, method]
+my @uses;         # parallel: arrayref of [maybe_class, method]
+for my $i (0 .. $#tests) {
+	my $path = $tests[$i];
+	$test_index{$path} = $i;
+	my $primary_class = infer_class_from_path($path);
+
+	open my $fh, '<', $path or do {
+		warn "[audit] cannot open $path: $!\n";
+		$validates[$i] = [];
+		$uses[$i]      = [];
+		next;
+	};
+	my $src = do { local $/; <$fh> };
+	close $fh;
+
+	# --- validates: subtest descriptions ---
+	my %v;
+	while ($src =~ m{subtest \s+ ['"] (\w+) (?: \( \) )? (?: \s* (?: - | -- | : | ,)
+	                  | \s+ (?: returns | dies | parses | reads | writes | accepts | rejects ) )
+	                }gx) {
+		$v{"$primary_class\::$1"} = 1;
+	}
+	$validates[$i] = [ keys %v ];
+
+	# --- uses: $obj->method(...) calls ---
+	# Resolve $obj -> Class for the simple my $obj = Class->new(...) /
+	# Class->method(...) patterns; fall back to "unknown".
+	my %var_to_class;
+	while ($src =~ m{my \s+ (\$\w+) \s* = \s* ([A-Z]\w+(?:::\w+)*) \s* -> \s* new\b}gx) {
+		$var_to_class{$1} = $2;
+	}
+
+	my %u;
+	# $var->method(...
+	while ($src =~ m{(\$\w+) \s* -> \s* (\w+) \s* (?: \( | ; | $ )}gxm) {
+		my ($var, $m) = ($1, $2);
+		# skip Test::* helper methods and builtins we never care about
+		next if $m =~ /^(can|isa|new|TRACE|TODO|todo_skip)$/;
+		my $cls = $var_to_class{$var};
+		if (defined $cls) {
+			$u{"$cls\::$m"} = 1;
+		} else {
+			$u{"*::$m"} = 1;
+		}
+	}
+	# Class->method
+	while ($src =~ m{([A-Z]\w+(?:::\w+)+) \s* -> \s* (\w+)}gx) {
+		my ($cls, $m) = ($1, $2);
+		next if $m =~ /^(new|can|isa|import)$/;
+		$u{"$cls\::$m"} = 1;
+	}
+	$uses[$i] = [ keys %u ];
+}
+
+# ---------------------------------------------------------------------
+# Build "first-validating test" index
+# ---------------------------------------------------------------------
+my %first_validator;  # "Class::method" -> position
+for my $i (0 .. $#tests) {
+	for my $cm (@{ $validates[$i] }) {
+		$first_validator{$cm} //= $i;
+	}
+}
+
+# ---------------------------------------------------------------------
+# Report ordering candidates
+# ---------------------------------------------------------------------
+my $finding_count = 0;
+for my $i (0 .. $#tests) {
+	my $path = $tests[$i];
+	my @late;
+	for my $cm (sort @{ $uses[$i] }) {
+		# Exact-class match first
+		if (exists $first_validator{$cm} && $first_validator{$cm} > $i) {
+			push @late, { cm => $cm, at => $first_validator{$cm}, loose => 0 };
+			next;
+		}
+		# Loose match: any class with same method name, validated later.
+		# Off by default -- cross-class method-name collisions (path,
+		# metadata, status, ...) generate mostly false positives.
+		# Enable with --loose to see them.
+		next unless $show_loose;
+		next unless $cm =~ /::(\w+)$/;
+		my $m = $1;
+		next if $cm =~ /^\*::/;  # unresolved $var; skip loose to avoid noise
+		for my $vcm (sort keys %first_validator) {
+			next unless $vcm =~ /::\Q$m\E$/;
+			next if $vcm eq $cm;
+			next unless $first_validator{$vcm} > $i;
+			push @late, { cm => "$cm [loose: $vcm]", at => $first_validator{$vcm}, loose => 1 };
+			last;
+		}
+	}
+	next unless @late;
+	$finding_count++;
+	printf "#%d %s\n", $i, $path;
+	for my $f (sort { $a->{at} <=> $b->{at} } @late) {
+		printf "    uses %-60s validated #%d %s%s\n",
+			$f->{cm}, $f->{at}, $tests[$f->{at}],
+			$f->{loose} ? ' (loose)' : '';
+	}
+	print "\n";
+}
+
+printf STDERR "[audit] %d test(s) with later-validated dependencies (of %d total)\n",
+	$finding_count, scalar @tests;
+exit($finding_count ? 1 : 0);
