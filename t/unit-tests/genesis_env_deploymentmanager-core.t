@@ -44,6 +44,8 @@ sub make_mock_env {
 		workpath       => sub { return "/tmp/test-$$-$_[1]" },
 		name           => $overrides{name} // 'test-env',
 		exodus_lookup  => $overrides{exodus_lookup} // sub { return {} },
+		effective_minimum_version        => $overrides{effective_minimum_version}        // '0.0.0',
+		effective_minimum_version_source => $overrides{effective_minimum_version_source} // undef,
 	);
 }
 
@@ -822,6 +824,44 @@ subtest 'build() method' => sub {
 		);
 		is($d->lookup('genesis_version'), '999.999.999',
 			'genesis_version comes from $Genesis::VERSION');
+		done_testing;
+	};
+
+	subtest 'build captures feature_compatibility when env has effective floor' => sub {
+		# When the mock env reports a non-sentinel effective_minimum_version,
+		# the audit record carries feature_compatibility + source.  Coverage
+		# for the "success" branch is implicit -- the new fields live in
+		# the always-populated base section before the `unless ($result eq
+		# 'assumed')` branch, so the populating logic doesn't depend on
+		# $result.
+		my $env = make_mock_env(
+			effective_minimum_version        => '3.2.0-rc.1',
+			effective_minimum_version_source => 'environment',
+		);
+		my $mgr = Genesis::Env::DeploymentManager->new($env);
+		my $d = $mgr->build('terminate', 'assumed',
+			reason => 'test',
+			user   => { shell => 'test-user' },
+		);
+		is($d->lookup('feature_compatibility'), '3.2.0-rc.1',
+			'feature_compatibility populated from effective_minimum_version');
+		is($d->lookup('feature_compatibility_source'), 'environment',
+			'feature_compatibility_source populated from the accessor');
+		done_testing;
+	};
+
+	subtest 'build omits feature_compatibility when env has no floor' => sub {
+		# Default mock returns '0.0.0' as the no-floor sentinel.
+		my $env = make_mock_env();
+		my $mgr = Genesis::Env::DeploymentManager->new($env);
+		my $d = $mgr->build('terminate', 'assumed',
+			reason => 'test',
+			user   => { shell => 'test-user' },
+		);
+		ok(!defined($d->lookup('feature_compatibility')),
+			'feature_compatibility absent when no floor declared');
+		ok(!defined($d->lookup('feature_compatibility_source')),
+			'feature_compatibility_source absent when no floor declared');
 		done_testing;
 	};
 

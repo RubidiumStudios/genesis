@@ -294,11 +294,18 @@ sub _base_deployment_content {
 	my ($self, $action, $result) = @_;
 	my $env = $self->env;
 
+	my $eff_min    = $env->effective_minimum_version;
+	my $eff_source = $env->effective_minimum_version_source;
+
 	my $base = {
 		action          => $action,
 		result          => $result,
 		genesis_version => $Genesis::VERSION,
 		reason          => 'unspecified',
+		($eff_min && $eff_min ne '0.0.0' ? (
+			feature_compatibility        => $eff_min,
+			feature_compatibility_source => $eff_source,
+		) : ()),
 	};
 
 	unless ($result eq 'assumed') { # TODO: Handles backfilling of assumed deployments and terminations
