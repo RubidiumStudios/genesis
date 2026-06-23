@@ -408,6 +408,22 @@ sub vault_paths {
 		)->file;
 	}
 	pushd $self->env->path;
+	# spruce vaultinfo evaluates every operator while walking, so a
+	# leftover `(( grab X ))` whose target was pruned in a later
+	# multidoc page bails the whole pass.  Strip all non-vault
+	# operators first; the empty-string substitute keeps the YAML
+	# parseable.
+	my $sanitized = slurp($file);
+	$sanitized =~ s{\(\(\s*(\w[\w-]*)([^)]*?)\)\)}{
+		$1 eq 'vault' ? "(( $1$2))" : '""';
+	}ges;
+	my $sanitized_file = tmpfile(
+		dir      => $self->env->workpath,
+		ext      => '.yml',
+		template => 'vaultinfo-XXXXXXXX',
+	);
+	mkfile_or_fail($sanitized_file, 0644, $sanitized);
+
 	my $json = read_json_from(run({
 			onfailure => "Unable to determine vault paths from ".$self->env->name." manifest",
 			stderr => "&1",
@@ -415,7 +431,7 @@ sub vault_paths {
 				$self->env->get_environment_variables
 			}
 		},
-		'spruce vaultinfo "$1" | spruce json', $file
+		'spruce vaultinfo "$1" | spruce json', $sanitized_file
 	));
 	popd;
 
