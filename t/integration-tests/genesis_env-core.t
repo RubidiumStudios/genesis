@@ -333,24 +333,52 @@ EOF
 		"bosh environments with bosh_env can't be a protobosh, or vice versa";
 	};
 
-	# Test the parsing of the bosh env, including deployment type, alternate vault and alternate exodus mount
+	# Test the parsing of the bosh env, including deployment type, alternate
+	# vault and alternate exodus mount.  bosh_env() in scalar context also
+	# synthesises an exodus_path (mount + name + dep_type) so callers can
+	# reference the parent director's vault path without instantiating a
+	# Service::BOSH::Director object.  Each entry below pins both the
+	# parsed components and the derived path.
 	my %valid_bosh_envs=(
-		$env->bosh_alias => ["parent-bosh", undef, undef, undef],
-		"test-me/my-bosh" => ["test-me","my-bosh",undef,undef],
-		"my-parent-bosh\@secret/other/exodus" => ["my-parent-bosh",undef,undef,"secret/other/exodus"],
-		"big-badda-boom/special_bosh@/secret/mngt/exodus/" => ["big-badda-boom","special_bosh",undef,"secret/mngt/exodus/"],
-		"bosh-env/bosh-type\@https://mngt-vault:8443/private/data" => ["bosh-env","bosh-type", "https://mngt-vault:8443", "private/data"]
+		$env->bosh_alias => [
+			"parent-bosh", undef, undef, undef,
+			"/secret/exodus/parent-bosh/bosh",
+		],
+		"test-me/my-bosh" => [
+			"test-me", "my-bosh", undef, undef,
+			"/secret/exodus/test-me/my-bosh",
+		],
+		"my-parent-bosh\@secret/other/exodus" => [
+			"my-parent-bosh", undef, undef, "secret/other/exodus",
+			"secret/other/exodus/my-parent-bosh/bosh",
+		],
+		"big-badda-boom/special_bosh\@/secret/mngt/exodus/" => [
+			"big-badda-boom", "special_bosh", undef, "secret/mngt/exodus/",
+			"secret/mngt/exodus/big-badda-boom/special_bosh",
+		],
+		"bosh-env/bosh-type\@https://mngt-vault:8443/private/data" => [
+			"bosh-env", "bosh-type", "https://mngt-vault:8443", "private/data",
+			"private/data/bosh-env/bosh-type",
+		],
 	);
 	for my $bosh_env (sort keys(%valid_bosh_envs)) {
+		my ($name, $dep_type, $vault_url, $exodus_mount, $exodus_path)
+			= @{$valid_bosh_envs{$bosh_env}};
 		$env->{__params}{genesis}{bosh_env} = $bosh_env;
 		delete($env->{__bosh_env});
-		cmp_deeply([($env->bosh_env)], [@{$valid_bosh_envs{$bosh_env}},$bosh_env], "Ensuring bosh_env '$bosh_env' can be parsed correctly (array context)");
+		# Array context returns only the parsed components (no exodus_path).
+		cmp_deeply(
+			[$env->bosh_env],
+			[$name, $dep_type, $vault_url, $exodus_mount, $bosh_env],
+			"Ensuring bosh_env '$bosh_env' can be parsed correctly (array context)",
+		);
 		cmp_deeply(scalar($env->bosh_env), {
-			name => $valid_bosh_envs{$bosh_env}[0],
-			dep_type => $valid_bosh_envs{$bosh_env}[1],
-			vault_url => $valid_bosh_envs{$bosh_env}[2],
-			exodus_mount => $valid_bosh_envs{$bosh_env}[3],
-			description => $bosh_env
+			name         => $name,
+			dep_type     => $dep_type,
+			vault_url    => $vault_url,
+			exodus_mount => $exodus_mount,
+			exodus_path  => $exodus_path,
+			description  => $bosh_env,
 		}, "Ensuring bosh_env '$bosh_env' can be parsed correctly (scalar hashref context)");
 	}
 
@@ -381,6 +409,13 @@ EOF
 
 	my $env = $top->load_env('standalone');
 	$env->manifest_provider->set_deployment('unredacted');
+
+	# required_configs auto-appends cpi for manifest-track hooks; pre-
+	# register an empty one so the merge tests below don't trip into
+	# download_configs against a non-existent director.
+	put_file $top->path(".cpi.yml"), "--- {}\n";
+	$env->use_config($top->path(".cpi.yml"), 'cpi');
+
 	cmp_deeply([$env->kit_files], [qw[
 		base.yml
 		addons/whiskey.yml
@@ -443,35 +478,39 @@ networks:
 - name: dummy
 
 EOF
+	# Pattern under test: define a value in doc 1, grab it elsewhere in
+	# doc 2, prune it in doc 3.  Originally demonstrated against
+	# genesis.env, but the validator now requires a literal genesis.env,
+	# so the dance is moved to kit.scale (a non-name-sensitive field).
 	put_file $top->path('standalone.yml'), <<'EOF';
 ---
 kit:
   name:    dev
   version: latest
   iaas:    vsphere
-  scale:   dev
   features:
     - whiskey
     - tango
     - foxtrot
 
 params:
-  env:   standalone
+  tmp:    dev
   secret: (( vault $GENESIS_SECRETS_BASE "test:secret" ))
   network: (( grab networks[0].name ))
   junk:    ((    vault    "secret/passcode:key" ))
 
 ---
 genesis:
-  env:       (( grab params.env ))
+  env:     standalone
 
 kit:
+  scale:   (( grab params.tmp ))
   features:
   - (( replace ))
   - oscar
 ---
 params:
-  env:  (( prune ))
+  tmp:  (( prune ))
 
 kit:
   features:
@@ -526,26 +565,26 @@ kit:
   name:    dev
   version: latest
   iaas:    vsphere
-  scale:   prod
   features:
     - whiskey
     - tango
     - foxtrot
 
 params:
-  env:   standalone
+  tmp:   prod
 
 ---
 genesis:
-  env:       (( grab params.env ))
+  env:     standalone
 
 kit:
+  scale:   (( grab params.tmp ))
   features:
   - (( replace ))
   - oscar
 ---
 params:
-  env:  (( prune ))
+  tmp:  (( prune ))
 
 kit:
   features:
