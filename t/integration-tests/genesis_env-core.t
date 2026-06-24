@@ -1103,7 +1103,14 @@ subtest 'bosh variables' => sub {
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();
 	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
-	my $top = Genesis::Top->create(workdir, 'thing', vault=>$VAULT_URL)->link_dev_kit('t/src/fancy');
+	# Pin the repo floor so it doesn't auto-bake helper.pm's seeded
+	# $Genesis::VERSION (999.999.999) into minimum_version; the subtest
+	# below intentionally drops $Genesis::VERSION to 3.0.0-rc.10.
+	my $top = Genesis::Top->create(
+		workdir, 'thing',
+		vault => $VAULT_URL,
+		minimum_version => '3.0.0-rc.1',
+	)->link_dev_kit('t/src/fancy');
 	$top->config->set(manifest_store => "repository");
   pushd $top->path;
   local $ENV{GENESIS_VERSION} = '3.0.0-rc.10';
@@ -1146,8 +1153,9 @@ EOF
 	$env->manifest_provider->reset->set_deployment('unredacted');
 	my ($stdout, $stderr) = output_from {eval {$env->deploy();}};
 	$stdout =~ s/\r//g;
-	my $manifest_file = $env->workpath("deploy-cache/$env->{name}.yml");
-	my $varsfile = $env->workpath("deploy-cache/$env->{name}.vars");
+	$stdout =~ s/^\^D\x08*//; # macOS script(1) session-header prefix that survives non-TTY capture
+	my $manifest_file = $env->deployment_cache_path_lookup('manifest');
+	my $varsfile = $env->deployment_cache_path_lookup('vars');
 	eq_or_diff($stdout, <<EOF, "Deploy should call BOSH with the correct options, including vars file");
 bosh
 deploy
