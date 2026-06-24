@@ -1209,7 +1209,13 @@ subtest 'new env and check' => sub{
 	my $out;
 	lives_ok {
     local $ENV{GENESIS_MIN_VERSION} = '3.0.0-rc.1';
-		$out = combined_from {$env = $top->create_env($name, $kit, vault => $vault_target)}
+		# Env::create no longer auto-runs add_secrets (extracted out
+		# in 2025-12); the CLI's `genesis new` does both in sequence.
+		# Capture both calls so the expected output below still matches.
+		$out = combined_from {
+			$env = $top->create_env($name, $kit, vault => $vault_target);
+			$env->add_secrets(verbose => 1, quiet_if_empty => 1) if $env;
+		}
 	} "successfully create an env with a dev kit";
 
 	eq_or_diff $out, <<EOF, "creating environment provides secret generation output";
