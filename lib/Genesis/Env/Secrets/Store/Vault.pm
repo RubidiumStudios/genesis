@@ -105,6 +105,10 @@ sub root_ca_path {
 
 sub store_data {
 	my $self = shift;
+	my %opts;
+	while (@_ && ref($_[0]) eq 'HASH') {
+		%opts = (%opts, %{shift @_});
+	}
 	unless (exists $self->{__data}) {
 		my $data = read_json_from(
 			$self->service->query(
@@ -116,15 +120,24 @@ sub store_data {
 		if (defined $data) {
 			$self->{__data} = $data;
 		} else {
+			# Default behaviour: warn when an existing env's vault
+			# unexpectedly returns nothing.  Callers that already
+			# know the store should be empty (fresh env's purge or
+			# initial add_secrets) opt out via quiet_if_empty.
 			warning("Vault export returned no data for %s", $self->base)
-				if $self->env->exists;
+				if $self->env->exists && !$opts{quiet_if_empty};
 		}
 	}
 	return $self->{__data} // {};
 }
 
 sub store_paths {
-	return CORE::keys %{$_[0]->store_data};
+	my $self = shift;
+	my %opts;
+	while (@_ && ref($_[0]) eq 'HASH') {
+		%opts = (%opts, %{shift @_});
+	}
+	return CORE::keys %{$self->store_data(\%opts)};
 }
 
 sub clear_data {
@@ -220,8 +233,13 @@ sub write   {
 }
 
 sub fill  {
-	my ($self, @secrets) = @_;
-	my $data = $self->store_data();
+	my $self = shift;
+	my %opts;
+	while (@_ && ref($_[0]) eq 'HASH') {
+		%opts = (%opts, %{shift @_});
+	}
+	my @secrets = @_;
+	my $data = $self->store_data(\%opts);
 	my $pause = 0;
 	for my $secret (@secrets) {
 		my $path = $self->path($secret->path) =~ s#/?(.*?)/?#$1#r;

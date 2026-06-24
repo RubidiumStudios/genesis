@@ -458,7 +458,9 @@ sub create {
 	bail("No vault specified or configured.")
 		unless $env->vault;
 
-	my ($results) = $env->remove_secrets(all => 'purge');
+	# Pre-create purge: this is a fresh env, so the store is expected
+	# to be empty.  Suppress the "no data" warning from store_data.
+	my ($results) = $env->remove_secrets(all => 'purge', quiet_if_empty => 1);
 	bail "Cannot continue with existing secrets for this environment"
 		if ($results->{abort} || $results->{error});
 
@@ -5430,8 +5432,9 @@ sub add_secrets {
 	) if ($self->has_hook('secrets'));
 
 	return $plan->generate_secrets(
-		import    => $opts{import},
-		level     => $opts{verbose}?'full':'line'
+		import         => $opts{import},
+		level          => $opts{verbose}?'full':'line',
+		quiet_if_empty => $opts{quiet_if_empty},
 	);
 }
 
@@ -5515,9 +5518,10 @@ sub remove_secrets {
 	}
 
 	my $store = $self->secrets_store(%opts);
+	my %store_opts = $opts{quiet_if_empty} ? (quiet_if_empty => 1) : ();
 
 	if ($opts{all}) {
-		my @paths = $store->store_paths();
+		my @paths = $store->store_paths(\%store_opts);
 		return ({empty => 1}) unless scalar(@paths);
 
 		# Purge mode: called from create() before the env file exists.

@@ -275,8 +275,9 @@ sub generate_secrets {
 	my @update_args = ('add', {%opts, indent => '    '});
 	$self->env->notify("adding missing environment secrets...");
 	info({pending => 1}, "[[  - >>loading existing secrets from source...");
+	my %store_opts = $opts{quiet_if_empty} ? (quiet_if_empty => 1) : ();
 	my $t = time_exec(sub {
-			$self->store->fill($self->secrets);
+			$self->store->fill(\%store_opts, $self->secrets);
 			$self->credhub->preload() if $opts{import};
 	});
 	info("#G{done}".pretty_duration($t, scalar($self->secrets) * 0.04, scalar($self->secrets) * 0.08));

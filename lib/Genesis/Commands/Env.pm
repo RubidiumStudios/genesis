@@ -259,7 +259,11 @@ sub create {
 	# Generate secrets.  Non-fatal — the env file, pipeline metadata, and
 	# git branch are already in place; secrets can be retried later with
 	# `genesis add-secrets` or will be generated at deploy time.
-	my $secrets_ok = eval { $env->add_secrets(verbose => 1, import => 1) };
+	# quiet_if_empty: this runs immediately after create_env, so the
+	# source vault is expected to be empty for a brand-new env.
+	my $secrets_ok = eval {
+		$env->add_secrets(verbose => 1, import => 1, quiet_if_empty => 1)
+	};
 	if (!$secrets_ok) {
 		my $err = $@ || '';
 		$err =~ s/\s+$//;
