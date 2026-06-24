@@ -4867,6 +4867,18 @@ sub update_deployment_exodus {
 		debug("$action failed, not updating exodus in vault");
 	}
 
+	# Capture the sequence for this deploy BEFORE _create_deployment_audit_log
+	# would advance the high-watermark.  The same value is then mirrored
+	# into the top-level exodus blob below regardless of manifest_store, so
+	# repository-mode envs (which never build audit records) still see
+	# sequence advance, and next_sequence_number reads it back on the next
+	# deploy.
+	my $deploy_sequence;
+	if (!@errors && $action eq 'deploy'
+		&& Genesis::Env::Deployment::is_a_successful_result($result)) {
+		$deploy_sequence = $self->deployments->next_sequence_number;
+	}
+
 	# If the manifest store is not 'repository', build the deployment audit data
 	if ($self->manifest_store ne 'repository' && !@errors) {
 		info(
@@ -4881,16 +4893,10 @@ sub update_deployment_exodus {
 			);
 		};
 		push @errors, fix_wrap($@) if ($@);
-
-		unless (@errors) {
-			if ($action eq 'deploy') {
-				my $latest_deployment = $self->deployments->latest;
-				$self->vault->set(
-					$self->exodus_base, 'sequence' => $latest_deployment->sequence,
-				) if ($latest_deployment->succeeded && $latest_deployment->sequence);
-			}
-		}
 	}
+
+	$self->vault->set($self->exodus_base, 'sequence' => $deploy_sequence)
+		if defined $deploy_sequence && !@errors;
 
 	if (@errors) {
 		my $error_msg = join("\n", @errors);

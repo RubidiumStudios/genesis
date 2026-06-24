@@ -176,11 +176,17 @@ sub build {
 # next_sequence_number - get the next sequence number for deployments {{{
 sub next_sequence_number {
 	my ($self) = @_;
-	# Get the latest deployment
-	my $latest = $self->latest();
-	return 1 unless $latest; # If no deployments, return 1
-	return scalar($self->all)+1 unless $latest->sequence;
-	return $latest->sequence + 1; # Return the next sequence number
+	# Prefer the audit record when it exists.
+	if (my $latest = $self->latest()) {
+		return $latest->sequence + 1 if $latest->sequence;
+		return scalar($self->all) + 1;
+	}
+	# Repository-mode envs (or anything without audit records) carry the
+	# sequence in the top-level exodus blob; fall back to that so deploys
+	# still advance.
+	my $exodus_seq = $self->env->exodus_lookup('sequence');
+	return $exodus_seq + 1 if defined $exodus_seq && $exodus_seq =~ /^\d+$/;
+	return 1;
 }
 # }}}
 
@@ -225,6 +231,11 @@ sub synthesize_from_exodus {
 		started => $exodus_data->{dated},
 		completed => $exodus_data->{completed} // $exodus_data->{dated},
 		genesis_version => $exodus_data->{version} // 'unknown',
+		# Top-level exodus has carried the sequence since the
+		# repository-mode fix; preserve it on synthesise so Info
+		# commands can report the deploy number.
+		(defined $exodus_data->{sequence} && $exodus_data->{sequence} =~ /^\d+$/
+			? (sequence => $exodus_data->{sequence} + 0) : ()),
 		create_env => $exodus_data->{use_create_env} ? JSON::PP::true : JSON::PP::false,
 		bosh_target => {
 			name => $exodus_data->{bosh}
