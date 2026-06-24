@@ -194,7 +194,8 @@ integration-tests/service_bosh_director.t   # BOSH Director constructor patterns
 integration-tests/genesis_top-complete.t    # Genesis::Top with external vault and GitHub dependencies
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 # Genesis::Env integration tests - require vault/BOSH mocks
-#integration-tests/genesis_env-core.t        # Comprehensive env operations (loading, manifest, deployment)
+integration-tests/genesis_env-core.t         # Comprehensive env operations (loading, manifest, deployment)
+integration-tests/genesis_commands-env_deploy.t  # CLI/UX surface for `genesis deploy` (reactions, orchestration)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests (FWT-568)
 integration-tests/genesis_env-deploy_workflow.t      # Deploy and post-deploy workflow
@@ -203,6 +204,8 @@ integration-tests/genesis_env-check_workflow.t       # Pre-deployment validation
 integration-tests/genesis_env-secrets_workflow.t     # Secrets lifecycle workflow
 integration-tests/genesis_env-bosh_config_workflow.t # BOSH config management workflow
 integration-tests/genesis_env-feature_compatibility.t # effective_min_version + audit capture + `genesis version` augmentation
+# Scaffold for can_build_cloud_configs strategy matrix; semantics pending design
+#integration-tests/genesis_env-cloud_config_creation.t
 # Tests needing rebuild - concepts preserved, need to test actual Genesis methods
 #integration-tests/genesis_env-release_sha1_validation.t  # REBUILD: Test Genesis::Env::_check_release_url_sha1
 #integration-tests/genesis-undefined_handling.t           # REBUILD: Test Genesis::new_enough with edge cases
