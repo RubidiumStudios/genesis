@@ -1843,12 +1843,12 @@ EOF
 		GENESIS_SECRETS_PATH => "base/extended/thing",
 		GENESIS_SECRETS_SLUG => "base/extended/thing",
 		GENESIS_SECRETS_SLUG_OVERRIDE => "",
-		GENESIS_TARGET_VAULT => $vault_target,
+		GENESIS_TARGET_VAULT => $VAULT_URL,
 		GENESIS_USE_CREATE_ENV => "true",
 		GENESIS_VAULT_ENV_SLUG => "base/extended",
 		GENESIS_VAULT_PREFIX => "base/extended/thing",
 		GENESIS_VERIFY_VAULT => "1",
-		SAFE_TARGET => $vault_target,
+		SAFE_TARGET => $VAULT_URL,
 		GENESIS_ENVIRONMENT_PARAMS => re('^{.*}$'),
 		BOSH_ALIAS => undef,
 		BOSH_CA_CERT => undef,
@@ -1874,8 +1874,16 @@ EOF
 	ok $env_from_evs->use_create_env, "env from env vars uses create env.";
 	ok $env_from_evs->{is_from_envvars}, "env from env vars indicates so.";
 
-	my @old_properties = grep {$_ !~ /^(__actual_files|__signature|__manifest_provider|__get_call_path(_with_env)?|__get_environment_variables)$/} keys(%$env);
-	my @new_properties = grep {$_ !~ /^(__actual_files|__signature|__manifest_provider|is_from_envvars)$/} keys(%$env_from_evs);
+	# Drop the call-path/env-vars memoization caches from comparison on
+	# both sides; they're per-invocation derivations whose values legitimately
+	# differ (separate temp dirs, hash-ordered JSON) and aren't part of the
+	# round-trip contract.  `is_from_envvars` only exists on the new side.
+	my $skip = qr/^(?:__actual_files|__signature|__manifest_provider
+	                 |__get_call_path(?:_with_env)?
+	                 |__get_environment_variables
+	                 |__env_vars_for_)$/x;
+	my @old_properties = grep {$_ !~ $skip} keys(%$env);
+	my @new_properties = grep {$_ !~ $skip && $_ ne 'is_from_envvars'} keys(%$env_from_evs);
 	cmp_set(\@new_properties, \@old_properties, "original and from_envvars environments have the same properties");
 
 	for my $property (@old_properties) {
