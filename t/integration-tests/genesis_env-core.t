@@ -1400,7 +1400,7 @@ EOF
 	my $out;
 
 	lives_ok {
-		$out = combined_from {$env->add_secrets() }
+		$out = combined_from {$env->add_secrets(quiet_if_empty => 1) }
 	} "successfully add secrets with environment kit overrides";
 
 	eq_or_diff $out, <<EOF, "environment kit overrides add the expected secrets";
@@ -1584,7 +1584,7 @@ EOF
   `safe set --quiet secret/c/env/thing/iaas access_key='knock-knock' secret_key='drowsapp'`;
 	local $ENV{NOCOLOR} = "yes";
 	lives_ok {
-		$out = combined_from {$env->add_secrets() }
+		$out = combined_from {$env->add_secrets(quiet_if_empty => 1) }
 	} "successfully add secrets with environment kit overrides";
 
 	eq_or_diff $out, <<EOF, "environment kit overrides add the expected secrets";
