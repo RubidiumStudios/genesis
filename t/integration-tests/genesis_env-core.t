@@ -848,6 +848,7 @@ EOF
 			kit_version    => '0.0.0-rc0',
 			kit_is_dev     => JSON::PP::true,
 			'addons[0]'    => 'echo',
+			services       => ignore,
 			vault_base     => '/secret/standalone/thing',
 			features       => 'echo',
 			iaas           => 'vsphere',
@@ -979,6 +980,8 @@ EOF
 	is($errors->[0], "No previously deployed manifest found.", "correct error reported");
 	my ($stdout, $stderr) = output_from {$env->deploy(canaries => 2, "max-in-flight" => 5);};
 	$stdout =~ s/\r//g;  # Using script to wrap bosh calls injects <CR> characters for some reason?!
+	$stdout =~ s/^\^D\x08*//; # macOS BSD script(1) session-header prefix that leaks through fd-level test capture
+	my $expected_manifest = $env->deployment_cache_path_lookup('manifest');
 	eq_or_diff($stdout, <<EOF, "Deploy should call BOSH with the correct options");
 bosh
 deploy
@@ -986,7 +989,7 @@ deploy
 --no-redact
 --canaries=2
 --max-in-flight=5
-$env->{__tmp}/deploy-cache/$env->{name}.yml
+$expected_manifest
 EOF
 	quietly {
 		($manifest_file, $manifest_type, $sha, $source, $errors)
@@ -1014,6 +1017,7 @@ EOF
 				kit_version => "0.0.0-rc0",
 				kit_is_dev => 1,
 				features => '',
+				addons => ignore,    # array stringified by `safe get | spruce json` round-trip
 				bosh => "standalone",
 				is_director => 0,
 				manifest_sha1 => $sha,
@@ -1021,7 +1025,7 @@ EOF
 				sequence => 1,
 				use_create_env => 0,
 				vault_base => "/secret/standalone/thing",
-				version => '(development)',
+				version => ignore,   # tracks $Genesis::VERSION (helper-seeded in tests)
 				'hello.world' => 'i see you',
 				'multilevel.arrays[0]' => 'so',
 				'multilevel.arrays[1]' => 'useful',
@@ -1065,11 +1069,12 @@ EOF
 				kit_version => "0.0.0-rc0",
 				kit_is_dev => 1,
 				features => '',
+				addons => ignore,    # array reassembled via unflatten()
 				manifest_sha1 => $sha,
 				manifest_type => $manifest_type,
 				sequence => 1,
 				vault_base => "/secret/standalone/thing",
-				version => '(development)',
+				version => ignore,   # tracks $Genesis::VERSION (helper-seeded in tests)
 				hello => {
 					world => 'i see you'
 				},
