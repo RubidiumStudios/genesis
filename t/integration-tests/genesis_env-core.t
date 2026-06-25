@@ -1911,7 +1911,7 @@ EOF
 };
 
 # 'pre and post deploy reactions' subtest moved to
-# t/integration-tests/genesis_commands-env_deploy.t -- those assertions
+# t/integration-tests/genesis_commands_env-deploy.t -- those assertions
 # exercise the user-facing deploy orchestration (CLI/UX surface), which
 # is a separate contract from the Genesis::Env API behaviour this file
 # pins.

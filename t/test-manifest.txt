@@ -195,7 +195,7 @@ integration-tests/genesis_top-complete.t    # Genesis::Top with external vault a
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 # Genesis::Env integration tests - require vault/BOSH mocks
 integration-tests/genesis_env-core.t         # Comprehensive env operations (loading, manifest, deployment)
-integration-tests/genesis_commands-env_deploy.t  # CLI/UX surface for `genesis deploy` (reactions, orchestration)
+integration-tests/genesis_commands_env-deploy.t  # CLI/UX surface for `genesis deploy` (reactions, orchestration)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests (FWT-568)
 integration-tests/genesis_env-deploy_workflow.t      # Deploy and post-deploy workflow
