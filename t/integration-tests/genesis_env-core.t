@@ -593,7 +593,7 @@ kit:
 EOF
 
 	# Get rid of the unparsable value that would prevent manifest generation
-	
+
 	$env = $top->load_env('standalone');
 	use Genesis;
 	$env->manifest_provider
