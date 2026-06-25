@@ -103,7 +103,7 @@ subtest 'genesis env secrets workflow' => sub {
     my $vault_target = vault_ok;
     Service::Vault->clear_all();
 
-    my $top = Genesis::Top->create(workdir, 'secrets-test', vault => $VAULT_URL);
+    my $top = Genesis::Top->create(workdir, 'secrets-test', vault => $VAULT_URL, minimum_version => '3.1.0-rc.20');
     cp_kit('t/src/simple', $top);
     put_file $top->path("secrets-test.yml"), <<'EOF';
 ---

@@ -103,7 +103,14 @@ subtest 'genesis env check workflow' => sub {
     my $vault_target = vault_ok;
     Service::Vault->clear_all();
 
-    my $top = Genesis::Top->create(workdir, 'check-test', vault => $VAULT_URL);
+    # Align the repo's minimum_version with the env fixture's declared
+    # min_version so validate_genesis_version_requirements has a single
+    # floor to compare against.  Top->create otherwise auto-bakes the
+    # current $Genesis::VERSION (which helper.pm seeds to 999.999.999),
+    # and the version-validation subtest below would see a floor higher
+    # than the running version it intentionally pins.
+    my $top = Genesis::Top->create(workdir, 'check-test',
+        vault => $VAULT_URL, minimum_version => '3.1.0-rc.20');
     cp_kit('t/src/simple', $top);
     put_file $top->path("check-test.yml"), <<'EOF';
 ---

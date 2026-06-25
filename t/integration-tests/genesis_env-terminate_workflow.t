@@ -150,7 +150,7 @@ subtest 'terminate workflow' => sub {
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();
 
-	my $top = Genesis::Top->create(workdir, 'terminate-test', vault => $VAULT_URL);
+	my $top = Genesis::Top->create(workdir, 'terminate-test', vault => $VAULT_URL, minimum_version => '3.1.0');
 	cp_kit('t/src/simple', $top);
 	put_file $top->path("termination-test.yml"), <<EOF;
 ---
@@ -703,7 +703,7 @@ subtest "terminating a create_env deployment with a hook" => sub {
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();
 
-	my $top = Genesis::Top->create(workdir, 'pseudobosh', vault => $VAULT_URL);
+	my $top = Genesis::Top->create(workdir, 'pseudobosh', vault => $VAULT_URL, minimum_version => '3.1.0-rc.20');
 	cp_kit('t/src/bosh-hooks', $top);
 	put_file $top->path("my-mgmt.yml"), <<EOF;
 ---

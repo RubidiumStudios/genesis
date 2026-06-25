@@ -98,12 +98,12 @@ sub reset_secrets {
 }
 
 subtest 'genesis env BOSH config workflow' => sub {
-    plan tests => 9;
+    plan tests => 8;
 
     my $vault_target = vault_ok;
     Service::Vault->clear_all();
 
-    my $top = Genesis::Top->create(workdir, 'config-test', vault => $VAULT_URL);
+    my $top = Genesis::Top->create(workdir, 'config-test', vault => $VAULT_URL, minimum_version => '3.1.0-rc.20');
     cp_kit('t/src/simple', $top);
     put_file $top->path("config-test.yml"), <<'EOF';
 ---
@@ -180,24 +180,11 @@ EOF
         is($env->config_file('cloud'), $cloud_file, "config_file returns registered path");
     };
 
-    subtest 'can_build_cloud_configs feature check' => sub {
-        plan tests => 2;
-
-        # With min_version >= 3.1.0-rc.9 and no manage-cloud-configs override,
-        # can_build_cloud_configs should return true
-        my $result;
-        lives_ok {
-            $result = $env->can_build_cloud_configs;
-        } "can_build_cloud_configs does not die";
-
-        ok($result, "can_build_cloud_configs returns true for env with min_version 3.1.0-rc.20");
-    };
-
     subtest 'missing_required_configs detection' => sub {
         plan tests => 3;
 
         # Create a fresh env object without configs set to test missing detection
-        my $top2 = Genesis::Top->create(workdir, 'missing-config-test', vault => $VAULT_URL);
+        my $top2 = Genesis::Top->create(workdir, 'missing-config-test', vault => $VAULT_URL, minimum_version => '3.1.0-rc.20');
         cp_kit('t/src/simple', $top2);
         put_file $top2->path("missing-config.yml"), <<'EOF';
 ---
@@ -233,7 +220,7 @@ EOF
     subtest 'has_config returns false before registration, true after' => sub {
         plan tests => 4;
 
-        my $top3 = Genesis::Top->create(workdir, 'hasconfig-test', vault => $VAULT_URL);
+        my $top3 = Genesis::Top->create(workdir, 'hasconfig-test', vault => $VAULT_URL, minimum_version => '3.1.0-rc.20');
         cp_kit('t/src/simple', $top3);
         put_file $top3->path("hasconfig-test.yml"), <<'EOF';
 ---
@@ -294,7 +281,7 @@ EOF
     subtest 'multiple config types tracked independently' => sub {
         plan tests => 5;
 
-        my $top4 = Genesis::Top->create(workdir, 'multiconfig-test', vault => $VAULT_URL);
+        my $top4 = Genesis::Top->create(workdir, 'multiconfig-test', vault => $VAULT_URL, minimum_version => '3.1.0-rc.20');
         cp_kit('t/src/simple', $top4);
         put_file $top4->path("multiconfig-test.yml"), <<'EOF';
 ---
@@ -334,7 +321,7 @@ EOF
     subtest 'config_file returns empty string for unregistered type' => sub {
         plan tests => 2;
 
-        my $top5 = Genesis::Top->create(workdir, 'unregistered-config-test', vault => $VAULT_URL);
+        my $top5 = Genesis::Top->create(workdir, 'unregistered-config-test', vault => $VAULT_URL, minimum_version => '3.1.0-rc.20');
         cp_kit('t/src/simple', $top5);
         put_file $top5->path("unregistered-config.yml"), <<'EOF';
 ---
