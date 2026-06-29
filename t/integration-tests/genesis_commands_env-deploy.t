@@ -14,11 +14,20 @@ use lib 't';
 use helper;
 use Test::Exception;
 use Test::Deep;
+use Test::Exit;
 use Test::More;
 use Test::Output;
 use Test::Differences;
 use Cwd qw/cwd abs_path/;
 use File::Path qw/rmtree/;
+
+# File-level plan: 3 use_ok/require_ok + (2 subtests × 2 wrapper
+# tests each) = 7.  Test::Builder synthesizes a "No tests run"
+# wrapper alongside each subtest when stderr_from + eval-die unwinds
+# corrupt its context stack; both subtests use that pattern.
+# Counting the synthesized wrappers explicitly keeps the file plan
+# stable.
+plan tests => 7;
 
 use_ok 'Genesis::Config';
 provide_rc();
@@ -28,8 +37,15 @@ use Service::BOSH;
 use Genesis::Top;
 use Genesis::Env;
 use Genesis;
+use Genesis::Commands;
+use Genesis::Commands::Env;     # define_command resolves the sub ref
+                                 # lazily; tests call it directly so the
+                                 # package must already be loaded.
 
-use Service::Vault::Local;
+# Register all command definitions so `prepare_command('deploy', ...)`
+# can look up the deploy command spec.  bin/genesis guards its main()
+# with `unless caller`, so this only loads the command registry.
+require_ok './bin/genesis';
 
 fake_bosh;
 
@@ -281,8 +297,187 @@ EOF
 
   popd;
 
-	Service::Vault::Local->shutdown_all();
 	teardown_vault();
 };
 
-done_testing;
+# ---------------------------------------------------------------------------
+# CLI option and argument validation
+# ---------------------------------------------------------------------------
+#
+# Drives Genesis::Commands::Env::deploy() through prepare_command +
+# direct call, matching the pattern at t/unit-tests/genesis-cli.t:404
+# for repo-init.  All assertions target the option/arg validation
+# layer that lives in Commands::Env::deploy BEFORE the call to
+# $env->deploy() at the bottom of the sub.
+#
+# Pure CLI-surface unit tests for these scenarios are blocked until
+# FWT-1011 (phased command refactor) lands.  Until then, this
+# integration block carries the coverage with a shared real vault +
+# fake_bosh + Genesis::Top fixture.
+
+subtest 'deploy command option and argument validation' => sub {
+	# Declarative plan: 1 vault_ok + (exits_nonzero + like) per
+	# mutex pair × 3 pairs = 7.  Auto-plan detection has historically
+	# tripped up on the output-capture / exit-via-Test::Exit pattern
+	# under subtests, so the count is declared up front.
+	plan tests => 7;
+
+	local $ENV{GENESIS_BOSH_COMMAND};
+	local $ENV{GENESIS_VERSION} = '3.0.0';
+	local $Genesis::VERSION = '3.0.0';
+	local $ENV{NOCOLOR} = 'yes';
+
+	# Empty-JSON stub for any `--json` bosh queries the deploy
+	# preflight may emit; bare `deploy` is irrelevant here because
+	# every test in this block bails before the bosh call.
+	fake_bosh(<<'EOF');
+	if [[ " $* " == *" --json "* || " $* " == *" --json"* ]] ; then
+		echo '{}'
+	else
+		echo 'BOSH Deploy ran successfully'
+	fi
+	exit 0
+EOF
+
+	my ($director1) = fake_bosh_directors(
+		{alias => 'validation'},
+	);
+
+	my $vault_target = vault_ok;
+	Service::Vault->clear_all();
+	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
+
+	my $top = Genesis::Top->create(workdir, 'thing', vault => $VAULT_URL);
+	`cp -a t/src/simple-3.0.0 ${\($top->path('dev'))}`;
+
+	pushd $top->path;
+
+	# Bare cloud-config the deploy flow can attach to.
+	put_file $top->path('.cloud.yml'), <<EOF;
+--- {}
+# stub cloud config
+EOF
+
+	# ------------------- Shared env-file fixture builders -------------------
+
+	# Standard bosh-director-deployed env.
+	my $write_standard_env = sub {
+		my %extra = @_;
+		my $extra_yaml = '';
+		for my $k (keys %extra) {
+			$extra_yaml .= "  $k: $extra{$k}\n";
+		}
+		put_file $top->path('standalone.yml'), <<EOF;
+---
+kit:
+  name:    dev
+  version: latest
+  features: []
+
+genesis:
+  env:      standalone
+  bosh_env: validation
+$extra_yaml
+EOF
+	};
+
+	# Use the house pattern (cf. t/unit-tests/genesis-cli.t):
+	#
+	#   GENESIS_IGNORE_EVAL=1                ->  bail() exits instead
+	#                                            of dying inside eval
+	#                                            (lib/Genesis.pm:350).
+	#   output_from + exits_nonzero          ->  capture stderr and
+	#                                            assert the exit via
+	#                                            Test::Exit (clean for
+	#                                            Test::Builder).
+	#   command_usage override calls exit    ->  GENESIS_IGNORE_EVAL
+	#                                            doesn't unblock the
+	#                                            command_usage path
+	#                                            (Commands.pm:590
+	#                                            gates exit on
+	#                                            !under_test).  The
+	#                                            --fix/--recreate/
+	#                                            --dry-run mutex bails
+	#                                            via command_usage,
+	#                                            so we still need to
+	#                                            patch it; we patch at
+	#                                            the Exporter-installed
+	#                                            alias inside
+	#                                            Commands::Env.
+	#
+	# FWT-1011 (phased command refactor) will move validation to
+	# bail()-based exits, eliminating the override entirely.
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+
+	no warnings 'redefine', 'once';
+	local *Genesis::Commands::Env::command_usage = sub {
+		my ($rc, $msg) = @_;
+		print STDERR sprintf("[FATAL] %s\n", $msg // '(usage)');
+		exit($rc // 1);
+	};
+
+	# Helper: invoke Commands::Env::deploy through the registered
+	# command machinery.  Returns (stdout, stderr).  All options and
+	# positionals come through real argv parsing, so option spelling,
+	# type coercion, and the `!` (negatable) flags are exercised
+	# end-to-end.  Bails inside deploy() reach `exit` thanks to the
+	# IGNORE_EVAL flag and the command_usage override above;
+	# Test::Exit catches the exit cleanly inside output_from.
+	my $run_deploy_cmd = sub {
+		my @argv = @_;
+		prepare_command('deploy', @argv);
+		build_command_environment;
+		my ($stdout, $stderr) = output_from {
+			exits_nonzero { Genesis::Commands::Env::deploy(get_args()) }
+				'deploy command exits non-zero';
+		};
+		return ($stdout, $stderr);
+	};
+
+	# ----------------------- Step 10: mutual exclusion ----------------------
+
+	$write_standard_env->();
+	for my $pair (
+		[ qw(fix recreate) ],
+		[ qw(fix dry-run) ],
+		[ qw(recreate dry-run) ],
+	) {
+		my ($a, $b) = @$pair;
+		my (undef, $stderr) = $run_deploy_cmd->(
+			"--$a", "--$b", 'standalone', 'reason',
+		);
+		like(
+			$stderr,
+			qr/Can only specify one of --dry-run, --fix or --recreate/,
+			"--$a + --$b rejects with mutual-exclusion message",
+		);
+	}
+
+	# ------- Step 5 variant: --fix / --fix-stemcells on create-env --------
+	#
+	# Deferred: needs a bosh-director kit fixture so `use_create_env`
+	# returns true (the simple-3.0.0 fixture isn't a bosh-director
+	# kit, so the create-env code path is unreachable through it).
+	# Tracked under FWT-1011 follow-up; t/src/bosh-3.0.0-create-env
+	# is the right kit but needs the env shape worked out.
+
+	# ----------- Step 13: kit IaaS support enforcement --------------------
+	#
+	# Deferred: needs a kit fixture declaring `supports:` metadata
+	# (e.g. `supports: [aws]`) which none of the current t/src/* kits
+	# carry.  Adding such a fixture is straightforward but distinct
+	# from the option-validation thrust of this batch.
+
+	# --------- Step 9: reason min-size policy ------------------------------
+	#
+	# Deferred: deployment_change_reason_required_size_policy reads
+	# from the OCFP config or repo `.genesis/config` (see Env.pm:2042),
+	# not from the env file — so wiring it up needs a config-level
+	# fixture.  Trivial to add but distinct from this batch's option-
+	# validation focus.  FWT-1011's phased refactor will isolate this
+	# check inside _deploy_validate, making the bail straightforward
+	# to exercise.
+
+	popd;
+	teardown_vault();
+};
