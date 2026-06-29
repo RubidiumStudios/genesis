@@ -21,13 +21,8 @@ use Test::Differences;
 use Cwd qw/cwd abs_path/;
 use File::Path qw/rmtree/;
 
-# File-level plan: 3 use_ok/require_ok + (2 subtests × 2 wrapper
-# tests each) = 7.  Test::Builder synthesizes a "No tests run"
-# wrapper alongside each subtest when stderr_from + eval-die unwinds
-# corrupt its context stack; both subtests use that pattern.
-# Counting the synthesized wrappers explicitly keeps the file plan
-# stable.
-plan tests => 7;
+# File-level plan: 3 use_ok/require_ok + 2 subtests = 5.
+plan tests => 5;
 
 use_ok 'Genesis::Config';
 provide_rc();
