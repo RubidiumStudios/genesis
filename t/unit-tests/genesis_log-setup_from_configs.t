@@ -41,6 +41,15 @@ sub depr_entries {
 	grep { ($_->{opts}{context} // '') eq 'deprecation' } @LOG_ENTRIES;
 }
 
+# setup_from_configs always seeds <terminal> at the default level
+# (so the singleton has a usable terminal log even when log_configs is
+# empty -- see the regression subtest at the bottom of this file).
+# Subtests asserting on the orchestration of explicit configs filter
+# that seeding call out via this helper.
+sub orchestrated_calls {
+	grep { $_->{log} ne '<terminal>' } @CONFIGURE_CALLS;
+}
+
 # Install stubs once, after Genesis::Log is loaded
 {
 	no warnings 'redefine';
@@ -142,8 +151,9 @@ subtest 'inherited log path: skips on_reuse + cleanup, configures with inherited
 
 	is scalar(@ON_REUSE_CALLS), 0, 'apply_on_reuse skipped on inherit';
 	is scalar(@CLEANUP_CALLS),  0, 'cleanup_old_logs skipped on inherit';
-	is scalar(@CONFIGURE_CALLS), 1, 'configure_log still invoked';
-	is $CONFIGURE_CALLS[0]{log}, '/parent/inherited.log',
+	my @orch = orchestrated_calls();
+	is scalar(@orch), 1, 'configure_log still invoked (excluding terminal default)';
+	is $orch[0]{log}, '/parent/inherited.log',
 		'configure_log uses the inherited path, not the local template';
 };
 
@@ -235,8 +245,11 @@ subtest 'mixed inherited + fresh logs: orchestration per index' => sub {
 		'on_reuse ran on the fresh log (index 1)';
 
 	# configure_log invoked twice - once with inherited, once with realized
-	is scalar(@CONFIGURE_CALLS), 2, 'configure_log called for both logs';
-	is $CONFIGURE_CALLS[0]{log}, '/parent/inherited.log',
+	# (excluding the implicit <terminal> default seeded at the top of
+	# setup_from_configs).
+	my @orch = orchestrated_calls();
+	is scalar(@orch), 2, 'configure_log called for both logs';
+	is $orch[0]{log}, '/parent/inherited.log',
 		'index 0 configured with inherited path';
 };
 
@@ -276,6 +289,33 @@ subtest '_context_suppressed: per-target list is authoritative when present' => 
 		{},
 		'deprecation',
 	), 'no per-target list, global env off => not suppressed' );
+};
+
+# ---------- regression: empty configs still leaves <terminal> usable -------
+#
+# Pre-7ad8e029, setup_from_configs created the singleton inside the
+# loop -- so an empty $log_configs left the singleton undef, and the
+# next `logger` helper would chain `Genesis::Log->new->configure_log`
+# (defaulting <terminal> to INFO).  After 7ad8e029, the singleton is
+# created unconditionally, and an empty $log_configs left it with no
+# <terminal>.  The first bail() then created <terminal> at level FATAL
+# (via its own fallback), permanently suppressing every subsequent
+# info/warning/debug entry.
+#
+# This subtest pins the invariant: setup_from_configs([]) MUST leave
+# the singleton with <terminal> configured at its default level.
+
+subtest 'empty config still configures <terminal> at default level' => sub {
+	plan tests => 2;
+	reset_tracking();
+
+	Genesis::Log->setup_from_configs([]);
+
+	my @term = grep { $_->{log} eq '<terminal>' } @CONFIGURE_CALLS;
+	is scalar(@term), 1,
+		'<terminal> configured exactly once by setup_from_configs([])';
+	ok !exists($term[0]{opts}{level}),
+		'default level used (no explicit override that could raise it to FATAL)';
 };
 
 done_testing;

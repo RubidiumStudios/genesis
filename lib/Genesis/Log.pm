@@ -140,6 +140,16 @@ sub setup_from_configs {
 
 	my $logger = $class->new;
 
+	# Ensure <terminal> is configured at the default level (matching
+	# the lazy `Genesis::Log->new()->configure_log()` chain used by
+	# the `logger` helper).  Without this, an empty $log_configs
+	# leaves the singleton with no `<terminal>` entry, so the first
+	# `bail()` would create one at level FATAL via its own fallback
+	# and permanently suppress subsequent info/warning/debug output.
+	# configure_log() is internally idempotent (`unless ($self->{logs}{$log})`
+	# at the top of configure_log), so re-calls are safe.
+	$logger->configure_log;
+
 	for my $i (0 .. $#$log_configs) {
 		# Copy so we can extract orchestration keys without mutating
 		# the caller's hash.
