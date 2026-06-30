@@ -56,12 +56,46 @@ sub _repo_init_validate {
 		$name = $1 unless $name;
 	}
 
-	# Derive name from kit or link-dev-kit if not specified
+	# Derive name from kit or link-dev-kit if not specified.  For
+	# --link-dev-kit, validate the link target up-front so we can use
+	# kit.yml's `name:` field as the authoritative deployment name:
+	#   - path must exist
+	#   - kit.yml must be present (else use name-only invocation)
+	#   - kit.yml must parse as YAML
+	#   - kit.yml must declare a `name:` field
+	# Each failure mode bails with a message that names the specific
+	# defect so the user can fix it at init time (rather than at first
+	# `genesis new` / `genesis deploy`).
+	my $link_kit_name;
+	if ($opts{'link-dev-kit'}) {
+		my $link_target = $opts{'link-dev-kit'};
+		bail("Dev kit link target '%s' not found.", $link_target)
+			unless -e $link_target;
+		bail(
+			"Dev kit link target '%s' is not a valid kit (missing kit.yml).\n".
+			"  If you want an empty dev/ directory to write a new kit into, ".
+			"run #C{repo-init <name>} (without #C{-l}) -- name-only ".
+			"invocation explicitly creates an empty dev kit.",
+			$link_target
+		) unless -f "$link_target/kit.yml";
+
+		my ($link_kit_meta, $rc, $err) = load_yaml_file("$link_target/kit.yml");
+		bail(
+			"Dev kit link target '%s' has an unreadable kit.yml:\n%s",
+			$link_target, $err
+		) if $rc;
+		$link_kit_name = $link_kit_meta->{name};
+		bail(
+			"Dev kit link target '%s' has a kit.yml that is missing the ".
+			"required #C{name:} field.",
+			$link_target
+		) unless defined $link_kit_name && length $link_kit_name;
+	}
 	unless ($name) {
 		if ($opts{kit} && !$kit_file) {
 			($name = $opts{kit}) =~ s|/.*||;
 		} elsif ($opts{'link-dev-kit'}) {
-			$name = basename($opts{'link-dev-kit'});
+			$name = $link_kit_name;
 		}
 	}
 
@@ -92,10 +126,8 @@ sub _repo_init_validate {
 		bail("Local compiled kit file '%s' not found.", $kit_file)
 			unless -f $kit_file;
 	}
-	if ($opts{'link-dev-kit'}) {
-		bail("Dev kit link target '%s' not found.", $opts{'link-dev-kit'})
-			unless -e $opts{'link-dev-kit'};
-	}
+	# link-dev-kit existence + kit.yml presence are validated earlier
+	# (moved up so name derivation can read kit.yml safely).
 
 	# Check git author config
 	if ($ENV{GIT_AUTHOR_NAME}) {
