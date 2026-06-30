@@ -1264,7 +1264,25 @@ sub _validate_config {
 	return 1 if $self->{__config_validated};
 	$self->{__config_validated} = 1;
 	my $config_version = $self->config->get(version => 1);
-	if ($config_version == 1 || $config_version =~ /^\d+\.\d+\.\d+(-[A-Za-z0-9_-]\.?\d+)?$/) {
+
+	# Classify before comparing.  In modern repos the `version` field
+	# is either an integer schema number (1, 2, 3) or absent (which
+	# get(version => 1) defaults to 1).  But ancient pre-2018 repos
+	# -- before commit e9cad6ac introduced the dedicated
+	# `genesis_version:` field -- wrote the genesis RELEASE semver
+	# (e.g. "2.7.1") into the `version:` field itself.  Those configs
+	# are now extremely rare in practice but the defensive semver
+	# match is preserved here (and in _upgrade_config_to_v2's
+	# creator_version capture) to upgrade them cleanly if anyone
+	# still has one.
+	#
+	# Numeric `==` against a semver string warns ("Argument 'X.Y.Z'
+	# isn't numeric in numeric eq (==)"), so gate each `==` on an
+	# integer-shape check first.
+	my $is_integer = ($config_version =~ /^\d+$/);
+	my $is_semver  = ($config_version =~ /^\d+\.\d+\.\d+(-[A-Za-z0-9_-]\.?\d+)?$/);
+
+	if (($is_integer && $config_version == 1) || $is_semver) {
 
 		my $upgrade_automatically = $Genesis::RC->get(automatic_config_upgrade => 'no');
 		bail(
@@ -1274,7 +1292,7 @@ sub _validate_config {
 
 		$self->_upgrade_config_to_v2($config_version, $upgrade_automatically);
 
-	} elsif ($config_version == 2){
+	} elsif ($is_integer && $config_version == 2){
 		$self->config->validate($self->_repo_config_schema_v2());
 		$self->{__config_disk_version} = 2;
 
@@ -1299,7 +1317,7 @@ sub _validate_config {
 			enabled => Genesis::Config::FALSE,
 		});
 
-	} elsif ($config_version == 3){
+	} elsif ($is_integer && $config_version == 3){
 		$self->config->validate($self->_repo_config_schema());
 		$self->{__config_disk_version} = 3;
 
