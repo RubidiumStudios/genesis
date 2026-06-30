@@ -99,11 +99,11 @@ sub _repo_init_validate {
 		}
 	}
 
-	my $dir = $opts{directory} || $name;
-	my $parent_dir = abs_path(getcwd());
-	my $target_path = "$parent_dir/$dir";
-
 	# --- 2. Check invalid option combinations ---
+	#
+	# Name-required bail moved BEFORE target_path computation so the
+	# "$parent_dir/$dir" concatenation doesn't warn on an uninit $dir
+	# when no name could be derived.
 
 	bail(
 		"You must specify a deployment name, a kit (-k), or a dev link target (-l)."
@@ -112,6 +112,10 @@ sub _repo_init_validate {
 	bail(
 		"You can only specify one of kit (-k) or link to a kit (-l)."
 	) if $opts{kit} && $opts{'link-dev-kit'};
+
+	my $dir = $opts{directory} || $name;
+	my $parent_dir = abs_path(getcwd());
+	my $target_path = "$parent_dir/$dir";
 
 	bail(
 		"Cannot specify both --vault and --skip-vault."
