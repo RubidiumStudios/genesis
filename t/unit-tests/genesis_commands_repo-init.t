@@ -44,6 +44,28 @@ use Genesis qw/pushd popd slurp run mkfile_or_fail symlink_or_fail/;
 $ENV{NOCOLOR} = 1;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 
+# Both validate and execute phases emit info() output (the "Creating
+# <name> deployment repository" banner, "Files staged for initial
+# commit" listing, "Committed XXXX..." line).  Useful diagnostics in
+# a real run; pure noise during the test suite if we just drop them.
+# These wrappers capture stdout/stderr around each call and return
+# ($rv, $stdout, $stderr) so individual tests can either ignore the
+# output (most cases) or assert on representative banner content.
+sub run_validate {
+	my ($rv, $out, $err);
+	($out, $err) = output_from(sub {
+		$rv = Genesis::Commands::Repo::_repo_init_validate();
+	});
+	return ($rv, $out, $err);
+}
+sub run_execute {
+	my ($rv, $out, $err);
+	($out, $err) = output_from(sub {
+		$rv = Genesis::Commands::Repo::_repo_init_execute();
+	});
+	return ($rv, $out, $err);
+}
+
 # Load the command registry by requiring bin/genesis (its main() is
 # guarded with `unless caller`, so this only runs the define_command
 # calls, not the CLI dispatcher).
@@ -169,7 +191,7 @@ subtest 'option parsing' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'validate phase' => sub {
-	plan tests => 11;
+	plan tests => 13;
 
 	require Genesis::Commands::Repo;
 	delete $ENV{GENESIS_IGNORE_EVAL};       # let bail() die instead of exit
@@ -205,32 +227,36 @@ subtest 'validate phase' => sub {
 	prepare_command('repo-init', '-k', "$vt_tarball/bosh-0.0.1.tar.gz",
 		'--skip-vault', 'my-bosh');
 	build_command_environment;
-	lives_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	my ($vrv, $vout, $verr);
+	lives_ok { ($vrv, $vout, $verr) = run_validate() }
 		'valid: local kit tarball + name';
+	like($verr, qr/Creating\s+my-bosh\s+deployment\s+repository/,
+		'validate banner names the deployment');
+	like($verr, qr{my-bosh/}, 'validate banner names the target directory');
 
 	# Valid: link-dev-kit + skip-vault
 	prepare_command('repo-init', '-l', $vt_devkit, '--skip-vault', 'my-bosh');
 	build_command_environment;
-	lives_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	lives_ok { run_validate() }
 		'valid: link-dev-kit + skip-vault';
 
 	# Valid: with-ci (manual provider only, no provider type needed)
 	prepare_command('repo-init', '-l', $vt_devkit, '--skip-vault', '--with-ci', 'my-bosh');
 	build_command_environment;
-	lives_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	lives_ok { run_validate() }
 		'valid: --with-ci enables manual provider';
 
 	# Valid: name derived from link-dev-kit basename when positional omitted
 	prepare_command('repo-init', '-l', $vt_devkit, '--skip-vault');
 	build_command_environment;
-	lives_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	lives_ok { run_validate() }
 		'valid: name derived from link-dev-kit basename';
 
 	# Invalid: --vault and --skip-vault together
 	prepare_command('repo-init', '-l', $vt_devkit,
 		'--vault', 'my-vault', '--skip-vault', 'my-bosh');
 	build_command_environment;
-	throws_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	throws_ok { run_validate() }
 		qr/Cannot specify both --vault and --skip-vault/,
 		'invalid: --vault + --skip-vault rejected';
 
@@ -238,14 +264,14 @@ subtest 'validate phase' => sub {
 	prepare_command('repo-init', '-k', "$vt_tarball/bosh-0.0.1.tar.gz",
 		'-l', $vt_devkit, 'my-bosh');
 	build_command_environment;
-	throws_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	throws_ok { run_validate() }
 		qr/only specify one of kit.*or link/i,
 		'invalid: --kit + --link-dev-kit rejected';
 
 	# Invalid: nothing supplied -- no name, no kit, no dev-kit link
 	prepare_command('repo-init');
 	build_command_environment;
-	throws_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	throws_ok { run_validate() }
 		qr/must specify a deployment name/i,
 		'invalid: empty invocation rejected';
 
@@ -256,7 +282,7 @@ subtest 'validate phase' => sub {
 	# into."  This is the explicit "I'll write my own kit" path.
 	prepare_command('repo-init', '--skip-vault', 'my-bosh');
 	build_command_environment;
-	lives_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	lives_ok { run_validate() }
 		'valid: name-only (empty dev kit will be created)';
 
 	# -l pointing to a directory without kit.yml bails.  A link target
@@ -268,7 +294,7 @@ subtest 'validate phase' => sub {
 	# (directory created by workdir() but no kit.yml inside)
 	prepare_command('repo-init', '-l', $empty_link_target, '--skip-vault', 'my-bosh');
 	build_command_environment;
-	throws_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	throws_ok { run_validate() }
 		qr/missing kit\.yml/i,
 		'invalid: -l target without kit.yml rejected';
 
@@ -280,7 +306,7 @@ subtest 'validate phase' => sub {
 	mkfile_or_fail("$no_name_link/kit.yml", "version: 0.0.1\n");
 	prepare_command('repo-init', '-l', $no_name_link, '--skip-vault');
 	build_command_environment;
-	throws_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	throws_ok { run_validate() }
 		qr/missing the required.*name:/i,
 		'invalid: -l target with nameless kit.yml rejected';
 
@@ -290,7 +316,7 @@ subtest 'validate phase' => sub {
 	mkfile_or_fail("$bad_yaml_link/kit.yml", "name: : : not valid yaml :::\n");
 	prepare_command('repo-init', '-l', $bad_yaml_link, '--skip-vault');
 	build_command_environment;
-	throws_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	throws_ok { run_validate() }
 		qr/unreadable kit\.yml/i,
 		'invalid: -l target with malformed kit.yml rejected';
 
@@ -302,7 +328,7 @@ subtest 'validate phase' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'execute phase' => sub {
-	plan tests => 39;
+	plan tests => 41;
 
 	require Genesis::Commands::Repo;
 	local $Genesis::VERSION = '3.2.0-rc2';
@@ -324,8 +350,8 @@ subtest 'execute phase' => sub {
 	run('git init 2>/dev/null');
 	prepare_command('repo-init', '-l', $devkit, '--skip-vault', 'bosh');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	my $r = Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	my ($r, $eout, $eerr) = run_execute();
 
 	ok(-d "$sub/bosh",                'subdir: bosh directory created');
 	ok(-d "$sub/bosh/.genesis",       'subdir: .genesis directory created');
@@ -337,6 +363,10 @@ subtest 'execute phase' => sub {
 	is($r->{name}, 'bosh',            'subdir: result name is bosh');
 	ok($r->{vault_skipped},           'subdir: result vault_skipped is true');
 	ok(!$r->{vault},                  'subdir: result vault is undef');
+	like($eerr, qr/Files staged for initial commit/,
+		'subdir: execute reports staged files banner');
+	like($eerr, qr/Committed\s+\S+\s+--\s+Initial Genesis repo for bosh/,
+		'subdir: execute reports initial commit with sha and message');
 	popd;
 
 	# ----- Auto-detect standalone mode: outside any git repo -----
@@ -345,8 +375,8 @@ subtest 'execute phase' => sub {
 	pushd($standalone);   # no git init -- this is not a git repo
 	prepare_command('repo-init', '-l', $devkit, '--skip-vault', 'bosh');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	my $rstand = Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	my ($rstand) = run_execute();
 
 	ok(-d "$standalone/bosh/.git",
 		'standalone: .git created (not inside any enclosing repo)');
@@ -363,8 +393,8 @@ subtest 'execute phase' => sub {
 
 	prepare_command('repo-init', '-l', $devkit, '--skip-vault', '-f', 'bosh');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	run_execute();
 
 	ok(-d "$force/bosh/.genesis",
 		'force: .genesis created after force replace');
@@ -379,7 +409,7 @@ subtest 'execute phase' => sub {
 	mkdir_or_fail("$nf/bosh");
 	prepare_command('repo-init', '-l', $devkit, '--skip-vault', 'bosh');
 	build_command_environment;
-	throws_ok { Genesis::Commands::Repo::_repo_init_validate() }
+	throws_ok { run_validate() }
 		qr/already exists.*-f\b/,
 		'no-force: bails on existing directory in non-interactive mode (suggests -f)';
 	popd;
@@ -390,8 +420,8 @@ subtest 'execute phase' => sub {
 	pushd($derived);
 	prepare_command('repo-init', '-l', $devkit, '--skip-vault');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	my $rderived = Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	my ($rderived) = run_execute();
 
 	ok(-d "$derived/simple/.genesis",
 		'derived: directory named from dev-kit basename (simple)');
@@ -406,8 +436,8 @@ subtest 'execute phase' => sub {
 	prepare_command('repo-init', '-k', $kit_tarball,
 		'--skip-vault', '-d', 'my-custom-dir', 'bosh');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	run_execute();
 
 	ok(-d "$cd/my-custom-dir/.genesis",
 		'custom-dir: created under -d path');
@@ -424,8 +454,8 @@ subtest 'execute phase' => sub {
 	pushd($cn);
 	prepare_command('repo-init', '-l', $devkit, '--skip-vault', 'my-boshen');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	my $rcn = Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	my ($rcn) = run_execute();
 
 	ok(-d "$cn/my-boshen/.genesis",
 		'custom-name: directory uses custom name, not kit name');
@@ -445,8 +475,8 @@ subtest 'execute phase' => sub {
 	pushd($sym);
 	prepare_command('repo-init', '-l', $dk, '--skip-vault', 'my-devkit');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	my $rsym = Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	my ($rsym) = run_execute();
 
 	ok(-d "$sym/my-devkit/.genesis",
 		'symlink: .genesis created for linked dev kit');
@@ -464,8 +494,8 @@ subtest 'execute phase' => sub {
 	pushd($cfg);
 	prepare_command('repo-init', '-k', $kit_tarball, '--skip-vault', 'my-cf');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	run_execute();
 
 	my $c = slurp("$cfg/my-cf/.genesis/config");
 	like($c, qr/deployment_type: my-cf/,        'config: deployment_type matches name');
@@ -492,8 +522,8 @@ subtest 'execute phase' => sub {
 	pushd($kydir);
 	prepare_command('repo-init', '-l', $kit_yml_dir, '--skip-vault');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	run_execute();
 
 	ok(-d "$kydir/widget",
 		'kit.yml-derived: directory uses kit.yml name (widget), not link basename');
@@ -508,8 +538,8 @@ subtest 'execute phase' => sub {
 	pushd($wc);
 	prepare_command('repo-init', '-l', $devkit, '--skip-vault', '--with-ci', 'bosh');
 	build_command_environment;
-	Genesis::Commands::Repo::_repo_init_validate();
-	my $rwc = Genesis::Commands::Repo::_repo_init_execute();
+	run_validate();
+	my ($rwc) = run_execute();
 
 	my $cfg_wc = slurp("$wc/bosh/.genesis/config");
 	like($cfg_wc, qr/^ci:/m,
