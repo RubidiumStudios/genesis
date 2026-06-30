@@ -319,8 +319,14 @@ subtest 'IPv4::Address' => sub {
   subtest 'all_for_host method' => sub {
     plan tests => 8;
     my @ips = IPv4::Address->all_for_host('localhost');
-    is(scalar @ips, 1, 'all_for_host() returns correct number of addresses');
-    is($ips[0]->address, '127.0.0.1', 'all_for_host() returns correct address');
+    # System resolvers vary in both count and order of localhost
+    # entries: macOS returns 1 (just 127.0.0.1); Linux containers
+    # often return 2+ because NSS sources can duplicate, and the
+    # order of multi-source results isn't guaranteed.  The portable
+    # invariant is that 127.0.0.1 appears SOMEWHERE in the list.
+    cmp_ok(scalar @ips, '>=', 1, 'all_for_host() returns at least one address');
+    ok(scalar(grep { $_->address eq '127.0.0.1' } @ips),
+       'all_for_host() includes 127.0.0.1 in the result set');
 
     @ips = IPv4::Address->all_for_host('amazon.com');
     cmp_ok(scalar @ips, '>', 1, 'all_for_host() returns correct number of addresses');

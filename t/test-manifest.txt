@@ -21,7 +21,7 @@ unit-tests/genesis-semver.t      # Semantic versioning (semver, by_semver, new_e
 unit-tests/genesis-struct.t      # Data structures (struct_*, flatten, deep_merge)
 unit-tests/genesis-time.t        # Time formatting (strfuzzytime, pretty_duration)
 unit-tests/genesis-uri.t         # URI parsing (parse_uri, is_valid_uri)
-unit-tests/term-color.t.DNF
+#unit-tests/term-color.t.DNF                          # disabled: .DNF = Does Not Function (file extension marks it as broken pending rewrite)
 unit-tests/ipv4-core.t
 unit-tests/boolean-core.t
 unit-tests/service_github-core.t
