@@ -42,7 +42,7 @@ subtest 'init' => sub {
 
 	cmp_deeply $top->config->_explicit_contents, {
 		creator_version => ignore,
-		version => 2,
+		version => 3,
 		deployment_type => 'jumpbox',
 		manifest_store => 'exodus',
 		minimum_version => '3.1.0',
