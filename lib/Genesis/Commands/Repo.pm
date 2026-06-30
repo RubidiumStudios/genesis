@@ -166,7 +166,7 @@ sub _repo_init_validate {
 	# unstaged changes to tracked files.  Untracked files are fine.
 	# This means that if execution fails and we need to roll back the
 	# index, we can do so without risking the user's in-progress work.
-	# #C{-F|--force} bypasses this check for users who understand the
+	# #C{-f|--force} bypasses this check for users who understand the
 	# risk (e.g. scripted environments, known-safe index).
 	if ($use_subdir && !$opts{force}) {
 		my $enclosing_git = Service::Git->new('.');
@@ -176,7 +176,7 @@ sub _repo_init_validate {
 				"enclosing git repository that has uncommitted changes to ".
 				"tracked files.\n".
 				"  Please commit, stash, or discard them first, ".
-				"or rerun with #C{-F|--force} to bypass this check."
+				"or rerun with #C{-f|--force} to bypass this check."
 			);
 		}
 	}
@@ -191,7 +191,7 @@ sub _repo_init_validate {
 	# #C{--force} bypass: this is a topology requirement, not a safety
 	# check.
 	#
-	# Without #C{--ci-provider}, no pipeline topology is being
+	# Without #C{--with-ci}, no pipeline topology is being
 	# established, so the branch name is irrelevant at this point.
 	my $control_branch = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 	if ($use_subdir && $with_ci) {
@@ -203,7 +203,7 @@ sub _repo_init_validate {
 				"repository to be on a branch named #C{%s}, but it is ".
 				"currently on #C{%s}.\n".
 				"  Please switch to the #C{%s} branch before running ".
-				"#C{repo-init --ci-provider ...}:\n\n".
+				"#C{repo-init --with-ci}:\n\n".
 				"    git checkout %s\n\n".
 				"  or, if it doesn't exist yet:\n\n".
 				"    git checkout -b %s\n",
@@ -227,7 +227,7 @@ sub _repo_init_validate {
 		)) {
 			$replace_existing = 1;
 		} else {
-			bail("Cannot create repository: directory #C{$dir} already exists. Use -F to force replacement.");
+			bail("Cannot create repository: directory #C{$dir} already exists. Use -f to force replacement.");
 		}
 	}
 

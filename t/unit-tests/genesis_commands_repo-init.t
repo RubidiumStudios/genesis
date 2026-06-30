@@ -379,15 +379,9 @@ subtest 'execute phase' => sub {
 	mkdir_or_fail("$nf/bosh");
 	prepare_command('repo-init', '-l', $devkit, '--skip-vault', 'bosh');
 	build_command_environment;
-	# Intent: tell the user to pass the force option.  Match either -f
-	# or --force (case-insensitive) so the assertion tracks intent
-	# rather than current wording.  The source presently says "-F" at
-	# Commands/Repo.pm:198 -- a stale message that survived the
-	# 78da5319 standardisation of --force to -f and should be updated
-	# separately.
 	throws_ok { Genesis::Commands::Repo::_repo_init_validate() }
-		qr/already exists.*(?:-f\b|--force)/i,
-		'no-force: bails on existing directory in non-interactive mode';
+		qr/already exists.*-f\b/,
+		'no-force: bails on existing directory in non-interactive mode (suggests -f)';
 	popd;
 
 	# ----- Name derived from --link-dev-kit basename when omitted -----
