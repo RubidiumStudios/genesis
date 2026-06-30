@@ -164,6 +164,32 @@ sub provide_rc {
 	$Genesis::RC = Genesis::Config->new(@args);
 }
 
+# running_under_qemu_user_mode - detect cross-arch user-mode emulation.
+#
+# When a Linux container runs under `docker run --platform linux/amd64`
+# on an Apple Silicon (arm64) host, Docker Desktop registers
+# qemu-user-static as the binfmt_misc handler for x86_64 binaries.
+# Every x86_64 process in the container -- including PID 1 -- is then
+# actually `qemu-x86_64` interpreting the requested binary, and
+# /proc/1/exe resolves to that interpreter rather than the entrypoint.
+#
+# Go binaries (spruce, vault, safe, bosh-cli) misbehave catastrophically
+# under that interpretation -- Go's runtime + qemu translation produce
+# memory corruption that manifests as random "runtime: pointer ... to
+# unallocated span" panics during spruce merges.  Tests that exercise
+# those binaries hang or crash, even though the Genesis code under
+# test is correct.
+#
+# Returns 1 when running under qemu user-mode, 0 otherwise.  Set
+# GENESIS_FORCE_QEMU_DETECTED=1 to force-on for testing the skip path
+# on a non-emulated host.
+sub running_under_qemu_user_mode {
+	return 1 if $ENV{GENESIS_FORCE_QEMU_DETECTED};
+	return 0 unless -r '/proc/1/exe';
+	my $exe = readlink '/proc/1/exe';
+	return defined($exe) && $exe =~ m{^/usr/(?:local/)?bin/qemu-} ? 1 : 0;
+}
+
 our $WORKDIR = undef;
 sub workdir {
 	$WORKDIR ||= tempdir(CLEANUP => 1);

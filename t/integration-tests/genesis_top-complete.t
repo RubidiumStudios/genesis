@@ -10,6 +10,15 @@ use Test::Deep;
 use Test::Output;
 use Cwd ();
 
+# Several subtests download kits and drive spruce -- a Go binary that
+# misbehaves catastrophically under qemu-user-mode emulation (random
+# memory corruption manifesting as "runtime: pointer ... to unallocated
+# span" panics).  See helper::running_under_qemu_user_mode for the
+# detection rationale.  Real CI runners are native amd64 Linux, where
+# this skip is a no-op.
+plan skip_all => 'spruce/Go binaries crash under qemu user-mode emulation'
+	if running_under_qemu_user_mode();
+
 plan tests => 14; # Total subtests and tests outside subtests
 
 use_ok 'Genesis::Config';

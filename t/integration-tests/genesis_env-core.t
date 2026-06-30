@@ -14,6 +14,14 @@ use Test::Differences;
 use Cwd qw/cwd abs_path/;
 use File::Path qw/rmtree/;
 
+# Multiple subtests in this file download kits, build manifests, and
+# otherwise drive spruce -- a Go binary that misbehaves catastrophically
+# under qemu-user-mode emulation (random memory corruption).  See
+# helper::running_under_qemu_user_mode for the detection rationale.
+# Real CI runners are native amd64 Linux, where this skip is a no-op.
+plan skip_all => 'spruce/Go binaries crash under qemu user-mode emulation'
+	if running_under_qemu_user_mode();
+
 use_ok 'Genesis::Config';
 # Initialize $Genesis::RC for tests that consult global config
 provide_rc();
