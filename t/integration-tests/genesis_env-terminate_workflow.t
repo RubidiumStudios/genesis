@@ -282,7 +282,7 @@ EOF
 
 		like($stderr, qr/Environment termination-test has already been terminated/, "terminate warns when prior deployment is terminated");
 		like($stderr, qr/terminated by sus-agent/, "terminate reports who terminated the environment");
-		like($stderr, qr/on 2025-01-02\s+at 17:34:15/, "terminate reports when the environment was terminated");
+		like($stderr, qr/on 2025-01-02\s+at\s+17:34:15/, "terminate reports when the environment was terminated");
 		like($stderr, qr/for reason: 'shenanigans'/, "terminate reports why the environment was terminated");
 		like($stderr, qr/Cowardly refusing to terminate.  Use --force to attempt anyway./, "terminate refses to terminate, but suggests --force to override");
 
@@ -296,7 +296,7 @@ EOF
 		};
 		like($stderr, qr/Environment termination-test has already been terminated/, "forced terminate warns when prior deployment is terminated");
 		like($stderr, qr/terminated by sus-agent/, "forced terminate reports who terminated the environment");
-		like($stderr, qr/on 2025-01-02\s+at 17:34:15/, "forced terminate reports when the environment was terminated");
+		like($stderr, qr/on 2025-01-02\s+at\s+17:34:15/, "forced terminate reports when the environment was terminated");
 		like($stderr, qr/for reason: 'shenanigans'/, "forced terminate reports why the environment was terminated");
 		like($stderr, qr/Forcing termination anyway.../, "forced terminate forces termination of a terminated deployment");
 
