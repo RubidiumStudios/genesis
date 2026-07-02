@@ -350,6 +350,13 @@ sub generate_secrets {
 			last if ($rc);
 		}
 	}
+	# Invalidate the store's cached vault snapshot: we just wrote new
+	# secrets to the vault, so the next fill() must refetch instead
+	# of reusing the pre-generation snapshot from line 280 above.  Without
+	# this, an in-process check_secrets/validate_secrets right after
+	# add_secrets sees the generated secrets as still missing.  Mirrors
+	# the same invalidation at the tail of remove_secrets().
+	$self->store->clear_data;
 	return $self->notify(@update_args, 'completed');
 }
 
@@ -485,6 +492,9 @@ sub regenerate_secrets {
 			last if ($rc);
 		}
 	}
+	# Same invalidation as generate_secrets: rotation mutates the vault,
+	# so a subsequent in-process fill() must refetch.
+	$self->store->clear_data;
 	return $self->notify(@update_args, 'completed', msg => ($label ? "$label ":'').'secrets rotated');
 }
 
