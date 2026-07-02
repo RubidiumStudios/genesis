@@ -116,18 +116,27 @@ our $CACHED_KIT_TOP;
 our $KITS_DOWNLOADED = 0; # Flag indicating both bosh kits were successfully downloaded
 
 subtest 'kit provider info' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $tmp = workdir();
 	my $top = Genesis::Top->create($tmp, 'test', vault=>$VAULT_URL);
 
-	# Test default Genesis Community provider
-	my %provider_info = $top->kit_provider_info();
+	# Test default Genesis Community provider.  kit_provider_info()
+	# calls status() which eagerly fetches the kit-names list and
+	# emits the "Retrieving list of available kits..." banner --
+	# capture it here so it doesn't pollute the TAP stream, and
+	# assert the banner is what we expect.
+	my (%provider_info, $pi_out, $pi_err);
+	($pi_out, $pi_err) = output_from(sub {
+		%provider_info = $top->kit_provider_info();
+	});
 	ok(%provider_info, "kit_provider_info() returns provider information");
 	ok($provider_info{type}, "provider info has type");
 	is($provider_info{type}, 'genesis-community', "default provider is genesis-community");
 	ok($provider_info{Source}, "provider info has Source field");
 	like($provider_info{Source}, qr/Genesis Community/i, "Source field contains Genesis Community");
+	like($pi_err, qr/Retrieving list of available kits/,
+		"kit_provider_info() emits kit-list retrieval banner");
 
 	# Cache top for subsequent tests
 	$CACHED_KIT_REPO = "$tmp/test";
@@ -135,13 +144,22 @@ subtest 'kit provider info' => sub {
 };
 
 subtest 'remote kit discovery' => sub {
-	plan tests => 6, skip_all => 'requires kit provider' unless $CACHED_KIT_TOP;
+	plan tests => 7, skip_all => 'requires kit provider' unless $CACHED_KIT_TOP;
 
 	my $top = $CACHED_KIT_TOP;
 
-	# Test remote_kit_names - verify common kits are available
-	my @kit_names = $top->remote_kit_names();
+	# Test remote_kit_names - verify common kits are available.
+	# Provider caches the kit-name list after the first fetch
+	# (Kit/Provider/Github.pm:137 guard on $self->{_kits}); the
+	# banner was emitted (and asserted) upstream in the 'kit provider
+	# info' subtest.  Assert this call is silent -- both confirms the
+	# cache works and pins it as part of the contract.
+	my (@kit_names, $kn_out, $kn_err);
+	($kn_out, $kn_err) = output_from(sub {
+		@kit_names = $top->remote_kit_names();
+	});
 	ok(@kit_names > 0, "remote_kit_names() returns kit list");
+	is($kn_err, '', "remote_kit_names() is silent on cached lookup");
 
 	my %kits = map { $_ => 1 } @kit_names;
 	ok($kits{bosh}, "bosh kit is available in remote kit list");
@@ -156,13 +174,19 @@ subtest 'remote kit discovery' => sub {
 };
 
 subtest 'remote kit versions' => sub {
-	plan tests => 10, skip_all => 'requires kit provider' unless $CACHED_KIT_TOP;
+	plan tests => 11, skip_all => 'requires kit provider' unless $CACHED_KIT_TOP;
 
 	my $top = $CACHED_KIT_TOP;
 
-	# Test remote_kit_versions for bosh kit - returns array of hash refs
-	my @bosh_version_info = $top->remote_kit_versions('bosh');
+	# Test remote_kit_versions for bosh kit - returns array of hash refs.
+	# Same banner-suppression pattern as 'remote kit discovery'.
+	my (@bosh_version_info, $bv_out, $bv_err);
+	($bv_out, $bv_err) = output_from(sub {
+		@bosh_version_info = $top->remote_kit_versions('bosh');
+	});
 	ok(@bosh_version_info > 0, "remote_kit_versions() returns version list for bosh kit");
+	like($bv_err, qr/Retrieving list of available releases for bosh-genesis-kit/,
+		"remote_kit_versions() emits retrieval banner");
 
 	# Verify all entries are hash refs with required fields
 	ok((List::Util::all { ref($_) eq 'HASH' } @bosh_version_info),
@@ -191,12 +215,20 @@ subtest 'remote kit versions' => sub {
 };
 
 subtest 'remote kit version info' => sub {
-	plan tests => 14, skip_all => 'requires kit provider' unless $CACHED_KIT_TOP;
+	plan tests => 16, skip_all => 'requires kit provider' unless $CACHED_KIT_TOP;
 
 	my $top = $CACHED_KIT_TOP;
 
-	# Test version info for classic kit (1.0.0) - kit_versions returns array but we filter to one
-	my ($classic_info) = grep { $_->{version} eq '1.0.0' } $top->remote_kit_versions('bosh');
+	# Test version info for classic kit (1.0.0) - kit_versions returns
+	# array but we filter to one.  Provider caches per-kit release
+	# lists (Kit/Provider/Github.pm:170 guard on _releases{$name});
+	# this call should hit the cache and be silent.
+	my (@classic_versions, $cv_out, $cv_err);
+	($cv_out, $cv_err) = output_from(sub {
+		@classic_versions = $top->remote_kit_versions('bosh');
+	});
+	is($cv_err, '', "remote_kit_versions('bosh') is silent on cached lookup");
+	my ($classic_info) = grep { $_->{version} eq '1.0.0' } @classic_versions;
 	ok($classic_info, "remote_kit_version_info() returns info for bosh/1.0.0");
 	ok(ref($classic_info) eq 'HASH', "version info is a hash reference");
 	ok($classic_info->{version}, "version info has version field");
@@ -205,8 +237,13 @@ subtest 'remote kit version info' => sub {
 	ok($classic_info->{filename}, "classic kit has filename field");
 	ok($classic_info->{date}, "classic kit has date field");
 
-	# Test version info for new-style kit (4.0.5)
-	my ($newstyle_info) = grep { $_->{version} eq '4.0.5' } $top->remote_kit_versions('bosh');
+	# Test version info for new-style kit (4.0.5) -- still cached.
+	my @newstyle_versions;
+	my (undef, $nv_err) = output_from(sub {
+		@newstyle_versions = $top->remote_kit_versions('bosh');
+	});
+	is($nv_err, '', "remote_kit_versions('bosh') stays silent on second cached lookup");
+	my ($newstyle_info) = grep { $_->{version} eq '4.0.5' } @newstyle_versions;
 	ok($newstyle_info, "remote_kit_version_info() returns info for bosh/4.0.5");
 	ok(ref($newstyle_info) eq 'HASH', "version info is a hash reference");
 	ok($newstyle_info->{version}, "version info has version field");
@@ -217,19 +254,27 @@ subtest 'remote kit version info' => sub {
 };
 
 subtest 'downloading kits' => sub {
-	plan tests => 7, skip_all => 'requires kit provider' unless $CACHED_KIT_TOP;
+	plan tests => 8, skip_all => 'requires kit provider' unless $CACHED_KIT_TOP;
 
 	my $top = $CACHED_KIT_TOP;
 	my $tmp = $CACHED_KIT_REPO;
 
-	# Download classic kit (1.0.0)
+	# Download classic kit (1.0.0).  Capture the "Downloading v1.0.0
+	# of bosh kit..." banner; assert the format here so the
+	# noise-suppression is intentional and observed.
 	ok(!defined $top->local_kit_version('bosh', '1.0.0'), "bosh/1.0.0 shouldn't exist before download");
-	$top->download_kit("bosh/1.0.0");
+	my ($dl_out, $dl_err) = output_from(sub {
+		$top->download_kit("bosh/1.0.0");
+	});
 	ok(defined $top->local_kit_version('bosh', '1.0.0'), "bosh/1.0.0 exists after download");
+	like($dl_err, qr/Downloading v1\.0\.0 of bosh kit/,
+		"download_kit() emits download banner with version");
 
-	# Download new-style kit (4.0.5)
+	# Download new-style kit (4.0.5) -- same suppression, no further assert.
 	ok(!defined $top->local_kit_version('bosh', '4.0.5'), "bosh/4.0.5 shouldn't exist before download");
-	$top->download_kit("bosh/4.0.5");
+	output_from(sub {
+		$top->download_kit("bosh/4.0.5");
+	});
 	ok(defined $top->local_kit_version('bosh', '4.0.5'), "bosh/4.0.5 exists after download");
 
 	# Verify both are available
