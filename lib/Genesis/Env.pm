@@ -5790,8 +5790,12 @@ sub _check_environment_viability {
 		$self->notify("#Y{%s does not define a 'check' hook; $checks checks will be skipped.}", $self->kit->id);
 	}
 
+	# manifest_provider->kit_files() returns a list, so wrap in [ ] to
+	# capture as an arrayref -- assigning a list-returning call to a
+	# scalar otherwise yields the last element, and downstream
+	# format_yaml_files() dereferences the kit_files opt with ->@*.
 	my $kit_files = eval {
-		$self->manifest_provider->kit_files(); # pre-warm the cache
+		[$self->manifest_provider->kit_files()]; # pre-warm the cache
 	};
 	my $err = $@;
 	if ($err) {
