@@ -134,6 +134,7 @@ sub config {
 sub kit_names {
 	my ($self, $filter) = @_;
 
+	my $fetched;
 	unless (defined($self->{_kits})) {
 		my $status = $self->check;
 		bail $status."\n" if $status;
@@ -142,16 +143,21 @@ sub kit_names {
 		$self->{_kits} = [
 			map  {(my $k = $_) =~ s/-genesis-kit$//; $k}
 			@{$self->remote->repo_names(qr/.*-genesis-kit$/)}
-		]
+		];
+		$fetched = 1;
 	}
 	my @kits = @{$self->{_kits}};
 	@kits = grep {$_ =~ qr/$filter/} @kits if $filter;
 	if (@kits) {
-		info "#G{ done.}";
+		# Pair the trailing " done." with the "Retrieving..." pending
+		# banner above.  Cached calls skip the banner, so they must
+		# also skip the trailer -- otherwise the user sees an orphan
+		# " done." line with no preceding context.
+		info "#G{ done.}" if $fetched;
 		return @kits
 	}
 
-	info "#R{failed.}";
+	info "#R{failed.}" if $fetched;
 
 	my $err = "No genesis kit repositories found on $self->label";
 	$err .= "that match the pattern /$filter/" if $filter;
