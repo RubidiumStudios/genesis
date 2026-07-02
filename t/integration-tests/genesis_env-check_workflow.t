@@ -91,6 +91,12 @@ sub reset_exodus_data {
 sub reset_secrets {
     my ($env) = @_;
     note "-- resetting secrets for ".$env->name;
+    # Clear the whole secrets base so add_secrets always sees a
+    # deterministic pre-state; then seed the user-provided secret so
+    # add_secrets doesn't try to prompt for it.
+    quietly {
+        $env->vault->clear($env->secrets_base, 1);
+    };
     $env->{__secrets_plan} = undef;
     $env->{__secrets_store} = undef;
     $env->vault->set($env->secrets_base.'super_secrets','password', 'super-secret-password');
@@ -164,11 +170,33 @@ EOF
     $Genesis::VERSION = '3.1.0-rc.20';
 
     subtest 'check with secrets validation passes when all secrets present' => sub {
-        # SKIP: Env::check() uses $secrets_check->{status} but _check_secrets()
-        # returns {state => ...} -- the key mismatch means check() always sets
-        # $ok = 0 when secrets checking is enabled, even when all secrets are
-        # valid.  This is a library bug in Env.pm; skip until it is fixed.
-        plan skip_all => 'library bug: check() uses wrong key (status vs state) from _check_secrets';
+        plan tests => 3;
+
+        # Ensure all required secrets are present in vault.
+        reset_secrets($env);
+
+        # Presence-only check: the fixture's valid_for: 1h certs would
+        # otherwise fail the deep validity check on any test host whose
+        # clock is far from generation time.  This subtest is about the
+        # secrets-present branch of Env::check, not certificate liveness.
+        local $ENV{GENESIS_TESTING_CHECK_SECRETS_PRESENCE_ONLY} = 1;
+
+        my ($out, $err, $rv);
+        lives_ok {
+            ($out, $err) = output_from {
+                $rv = $env->check(
+                    check_secrets      => 1,
+                    check_manifest     => 0,
+                    check_releases     => 0,
+                    check_release_sha1 => 0,
+                    check_stemcells    => 0,
+                );
+            };
+        } "check() does not die when secrets are valid";
+
+        ok($rv, "check() returns true when all secrets are valid");
+        like($err, qr/all secrets valid/i,
+            "check output reports all-secrets-valid state");
     };
 
     subtest 'check detects missing secrets' => sub {
@@ -289,13 +317,47 @@ EOF
     };
 
     subtest 'check_yamls option lists YAML files' => sub {
-        # SKIP: Env::check() passes kit_files as a scalar count to
-        # format_yaml_files() which dereferences it as an arrayref (->@*).
-        # The root cause is that _check_environment_viability() assigns the
-        # list return of manifest_provider->kit_files() into a scalar, so it
-        # captures only the last element.  This is a library bug in Env.pm;
-        # skip until it is fixed.
-        plan skip_all => 'library bug: kit_files passed as scalar count, not arrayref, to format_yaml_files';
+        # Regression test for the scalar-vs-arrayref bug in
+        # _check_environment_viability: it used to assign the list
+        # return of manifest_provider->kit_files() to a scalar,
+        # capturing only the last element.  check(check_yamls => 1)
+        # then handed that scalar to format_yaml_files, which does
+        # ->@* on its kit_files opt and crashed.
+        plan tests => 4;
+
+        reset_secrets($env);
+        local $ENV{GENESIS_TESTING_CHECK_SECRETS_PRESENCE_ONLY} = 1;
+
+        # The kit's blueprint hook requires a cpi config (in addition
+        # to the cloud config already registered above); without it,
+        # check_yamls skips the listing branch and prints "Required
+        # BOSH configs not provided" instead.  Provide a stub so the
+        # listing branch runs.
+        put_file $top->path(".cpi.yml"), <<'EOF';
+--- {}
+EOF
+        $env->use_config($top->path(".cpi.yml"), 'cpi');
+
+        my ($out, $err);
+        lives_ok {
+            ($out, $err) = output_from {
+                $env->check(
+                    check_secrets      => 1,
+                    check_manifest     => 0,
+                    check_releases     => 0,
+                    check_release_sha1 => 0,
+                    check_stemcells    => 0,
+                    check_yamls        => 1,
+                );
+            };
+        } "check(check_yamls => 1) does not die";
+
+        like($err, qr/inspecting YAML files used to build manifest/,
+            "check_yamls announces YAML inspection");
+        like($err, qr/\.ya?ml\b/,
+            "check_yamls lists at least one .yml/.yaml file");
+        unlike($err, qr/Can't call method "\@\*" on/,
+            "no scalar-vs-arrayref crash in format_yaml_files");
     };
 };
 
