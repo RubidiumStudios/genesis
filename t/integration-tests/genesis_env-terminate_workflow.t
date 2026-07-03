@@ -55,7 +55,7 @@ fake_bosh;
 $ENV{GENESIS_CALLBACK_BIN} ||= abs_path('bin/genesis');
 $ENV{GENESIS_LIB} ||= abs_path('lib');
 $ENV{NOCOLOR} = 1;
-$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 
 sub reset_exodus_data {
 	my $env = shift;
@@ -349,13 +349,11 @@ EOF
 
 [termination-test/terminate-test] deleting deployment...
 
-[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test on standalone
-         BOSH director.
+[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test on standalone BOSH director.
 
 [termination-test/terminate-test] cleaning up any unused resources...
 
-[DRYRUN] would execute <test-bosh> clean-up --all on standalone BOSH director, resulting in the removal
-         of the following resources:
+[DRYRUN] would execute <test-bosh> clean-up --all on standalone BOSH director, resulting in the removal of the following resources:
 bosh
 -n
 clean-up
@@ -363,12 +361,9 @@ clean-up
 --dry-run
 --tty
 
-[WARNING] The contents above is a summary of the resources currently unused by
-          any deployment. Further resources may become unused once this
-          environment is actually terminated.
+[WARNING] The contents above is a summary of the resources currently unused by any deployment. Further resources may become unused once this environment is actually terminated.
 
-[termination-test/terminate-test] gathering list of associated items for
-cleanup... done
+[termination-test/terminate-test] gathering list of associated items for cleanup... done
 
 [DRYRUN] no config files found to remove.
 
@@ -413,13 +408,11 @@ EOF
 
 [termination-test/terminate-test] deleting deployment...
 
-[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test on standalone
-         BOSH director.
+[DRYRUN] would execute <test-bosh> delete-deployment -d termination-test-terminate-test on standalone BOSH director.
 
 [DRYRUN] would keep any unused resources on the standalone BOSH director.
 
-[termination-test/terminate-test] gathering list of associated items for
-cleanup... done
+[termination-test/terminate-test] gathering list of associated items for cleanup... done
 
 [DRYRUN] no config files found to remove.
 
