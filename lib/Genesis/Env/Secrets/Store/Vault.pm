@@ -245,7 +245,19 @@ sub fill  {
 		my $path = $self->path($secret->path) =~ s#/?(.*?)/?#$1#r;
 		my $key = $secret->default_key;
 		($path,$key) = split(":",$path,2) if $path =~ /:/;
-		next unless defined($data->{$path});
+		unless (defined($data->{$path})) {
+			# Secret is not in the current vault snapshot -- clear any
+			# stale in-memory value carried over from a prior fill().
+			# Some safe versions omit removed paths from `safe export`
+			# entirely (Linux), others include them with a null/empty
+			# value (macOS); silently skipping here would leave the
+			# in-memory secret asserting stored_value=<old> even after
+			# the vault path was cleared, which makes
+			# check_secrets/validate_secrets report 'ok' for a secret
+			# that is no longer present.
+			$secret->reset;
+			next;
+		}
 		if (defined($key)) {
 			$secret->set_value($data->{$path}{$key});
 			if ($secret->can('format_path') && (my $format_path = $secret->format_path)) {
