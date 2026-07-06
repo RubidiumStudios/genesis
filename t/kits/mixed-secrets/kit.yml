@@ -1,0 +1,42 @@
+---
+name:    mixed-secrets
+version: 1.0.0
+author:  FiveTwenty test fixture
+homepage: https://github.com/fivetwenty-io/genesis
+code:    https://github.com/fivetwenty-io/genesis
+
+genesis_version_min: 3.1.0
+
+# Declare credhub secrets_store so is_vaultified returns true
+# short-circuit, which enables the FromManifest secrets parser to
+# read the env's `variables:` block alongside the FromKit parser's
+# kit.yml credentials/certificates blocks.
+secrets_store: credhub
+
+required_configs:
+  cloud:
+    - blueprint
+
+description: |
+  Minimal test kit that declares a small mix of kit-side credentials
+  and certificates so an env can layer additional secrets via a
+  bosh-manifest `variables:` block, exercising both the FromKit and
+  FromManifest secret parsers together.
+
+credentials:
+  base:
+    admin:
+      password: random 32
+    admin/rsa: rsa 2048
+
+certificates:
+  base:
+    tls:
+      ca:
+        is_ca:     true
+        valid_for: 1y
+      server:
+        signed_by: 'tls/ca'
+        valid_for: 90d
+        names:
+          - api.mixed-secrets.example.com
