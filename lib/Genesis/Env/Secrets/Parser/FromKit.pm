@@ -21,7 +21,7 @@ sub parse {
 	my ($self,%opts) = @_;
 	my @secrets = ();
 	logger->info({pending =>1},
-		"[[  - >>fetching secret definitions from kit defintion file ... "
+		"[[  - >>fetching secret definitions from kit definition file ... "
 	) if $opts{notify};
 
 	bug(

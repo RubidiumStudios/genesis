@@ -1232,7 +1232,7 @@ subtest 'new env and check' => sub{
 
 [far-fetched/sample] processing secrets descriptions...
   - using kit Sample Kit/in-development (dev)
-  - fetching secret definitions from kit defintion file ... found 10
+  - fetching secret definitions from kit definition file ... found 10
   - processed 10 secret definitions [1 rsa/4 random/1 ssh/4 x509]
 
 [far-fetched/sample] adding missing environment secrets...
@@ -1417,7 +1417,7 @@ EOF
 
 [standalone/thing] processing secrets descriptions...
   - using kit Sample Kit/in-development (dev)
-  - fetching secret definitions from kit defintion file ... found 10
+  - fetching secret definitions from kit definition file ... found 10
   - processed 10 secret definitions [1 rsa/5 random/1 ssh/3 x509]
 
 [standalone/thing] adding missing environment secrets...
@@ -1601,7 +1601,7 @@ EOF
 
 [c-env/thing] processing secrets descriptions...
   - using kit Sample Kit/in-development (dev)
-  - fetching secret definitions from kit defintion file ... found 16
+  - fetching secret definitions from kit definition file ... found 16
   - processed 16 secret definitions [1 rsa/6 random/1 ssh/2 userprovided/6 x509]
 
 [c-env/thing] adding missing environment secrets...
