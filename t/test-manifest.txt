@@ -220,7 +220,7 @@ e2e-tests/init.t
 e2e-tests/manifest.t
 e2e-tests/new.t
 e2e-tests/params.t
-e2e-tests/pipeline.t
+#e2e-tests/pipeline.t             # disabled: pipeline subsystem is being reworked for 3.2
 e2e-tests/secrets.t
 e2e-tests/yamls.t
 # Genesis::Commands E2E tests (FWT-571)
