@@ -1302,7 +1302,7 @@ EOF
 	$out = combined_from {
 		($results) = $env->check_secrets(verbose=>1)
 	};
-	ok $results->{missing} == 2, "check_secrets shows missing secrets and keys";
+	ok $results->{missing} == 4, "check_secrets shows missing secrets and keys";
 
 	matches_utf8 encode_utf8($out), <<EOF,  "check_secrets gives meaninful output on failure";
 
@@ -1319,10 +1319,10 @@ EOF
     [ 5/10] crazy/thing:id Random - 32 bytes, fixed ... found.
     [ 6/10] crazy/thing:token Random - 16 bytes ... missing!
     [ 7/10] something/ssh SSH public/private keypair - 2048 bits, fixed ... found.
-    [ 8/10] users/admin:password Random - 64 bytes ... found.
-    [ 9/10] users/bob:password Random - 16 bytes ... found.
+    [ 8/10] users/admin:password Random - 64 bytes ... missing!
+    [ 9/10] users/bob:password Random - 16 bytes ... missing!
     [10/10] work/signing_key RSA public/private keypair - 2048 bits, fixed ... found.
-    failed [8 found/0 skipped/2 errors]
+    failed [6 found/0 skipped/4 errors]
 EOF
 
   popd;
