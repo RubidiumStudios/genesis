@@ -17,7 +17,7 @@ write_bosh_config "us-common";
 $ENV{NOCOLOR} = 1;
 $ENV{GENESIS_OUTPUT_COLUMNS}=80;
 
-runs_ok "genesis manifest -c cloud.yml -t unredacted -s pruned us-east-1-sandbox >$tmp/manifest.yml";
+runs_ok "genesis manifest -c cloud.yml --config cpi=cpi.yml -t unredacted -s pruned us-east-1-sandbox >$tmp/manifest.yml";
 eq_or_diff get_file("$tmp/manifest.yml"), <<EOF, "manifest generated for us-east-1/sandbox";
 
 [us-east-1-sandbox/manifest-test] generating unredacted manifest...
@@ -38,7 +38,7 @@ releases:
   version: 1.2.3-rc.1
 EOF
 
-runs_ok "genesis manifest -c cloud.yml -t unredacted -s pruned us-west-1-sandbox >$tmp/manifest.yml";
+runs_ok "genesis manifest -c cloud.yml --config cpi=cpi.yml -t unredacted -s pruned us-west-1-sandbox >$tmp/manifest.yml";
 eq_or_diff get_file("$tmp/manifest.yml"), <<EOF, "manifest generated for us-west-1/sandbox";
 
 [us-west-1-sandbox/manifest-test] generating unredacted manifest...
@@ -140,7 +140,7 @@ vm_extensions:
 EOF
 
 $ENV{PREVIOUS_ENV} = "us-cache-test";
-runs_ok "genesis manifest -c init-cloud.yml -t unredacted -s pruned us-west-1-sandbox >$tmp/manifest.yml";
+runs_ok "genesis manifest -c init-cloud.yml --config cpi=cpi.yml -t unredacted -s pruned us-west-1-sandbox >$tmp/manifest.yml";
 eq_or_diff get_file("$tmp/manifest.yml"), <<EOF, "manifest is generated using cached files if PREVIOUS_ENV variable is set";
 
 [us-west-1-sandbox/manifest-test] generating unredacted manifest...
@@ -208,7 +208,7 @@ vm_extensions:
 EOF
 
 $ENV{PREVIOUS_ENV} = "us-cache-test";
-runs_ok "genesis -C $configdir/us-west-1-sandbox.yml manifest -c init-cloud.yml -t unredacted -s pruned  >manifest.yml";
+runs_ok "genesis -C $configdir/us-west-1-sandbox.yml manifest -c init-cloud.yml --config cpi=cpi.yml -t unredacted -s pruned  >manifest.yml";
 eq_or_diff get_file("manifest.yml"), <<EOF, "manifest is generated using cached files if PREVIOUS_ENV variable is set (-C option with yml)";
 
 [us-west-1-sandbox/manifest-test] generating unredacted manifest...
