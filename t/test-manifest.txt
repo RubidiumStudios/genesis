@@ -160,7 +160,7 @@ unit-tests/genesis_log-template_separators.t
 
 # Commands sub-area tests
 unit-tests/genesis_commands_env_reason-core.t  # deploy-driven reason and cascade
-unit-tests/genesis_commands_repo-init.t        # repo-init CLI (phased: register, parse, validate, execute)
+unit-tests/genesis_commands_repo-init.t        # repo-init CLI (registration + option parsing; validate + execute in integration-tests/)
 unit-tests/genesis_commands_repo_ci-core.t     # repo CI commands
 
 # Additional Service::* tests
@@ -198,6 +198,7 @@ integration-tests/service_vault-operations.t  # Service::Vault real vault operat
 # Genesis::Env integration tests - require vault/BOSH mocks
 integration-tests/genesis_env-core.t         # Comprehensive env operations (loading, manifest, deployment)
 integration-tests/genesis_commands_env-deploy.t  # CLI/UX surface for `genesis deploy` (reactions, orchestration)
+integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests (FWT-568)
 integration-tests/genesis_env-deploy_workflow.t      # Deploy and post-deploy workflow
@@ -216,7 +217,12 @@ integration-tests/genesis_env-feature_compatibility.t # effective_min_version + 
 # Full workflow tests using genesis executable
 # Will be reviewed and potentially split during updates
 e2e-tests/compiled.t
-e2e-tests/init.t
+# init.t retired: repo-init is fully covered by
+# unit-tests/genesis_commands_repo-init.t (registration + parsing)
+# and integration-tests/genesis_commands_repo-init.t (validate +
+# execute against real workdirs).  The CLI-dispatcher layer between
+# `genesis repo-init` and `Commands::Repo::_repo_init_*` adds no
+# behavior worth a separate e2e test.
 e2e-tests/manifest.t
 e2e-tests/new.t
 e2e-tests/params.t
