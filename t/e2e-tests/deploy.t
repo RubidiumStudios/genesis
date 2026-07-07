@@ -52,13 +52,11 @@ subtest 'deploy option validation - create-env restrictions' => sub {
 	matches $out, qr/cannot be specified for.*create-env/i,
 		"create-env --fix rejection message";
 
-	# create-env rejects --dry-run
-	($pass, $rc, $out) = run_fails(
-		"genesis create-env-sandbox deploy --dry-run",
-		"deploy --dry-run on create-env should fail"
-	);
-	matches $out, qr/cannot be specified for.*create-env/i,
-		"create-env --dry-run rejection message";
+	# --dry-run is intentionally allowed on create-env deployments:
+	# it produces the merged manifest without invoking bosh, which is
+	# useful for local iteration.  The restriction we still enforce
+	# below is around --fix / --fix-stemcells, which are director-
+	# managed recovery flags with no meaning outside a director.
 
 	# create-env rejects --fix-stemcells
 	($pass, $rc, $out) = run_fails(
