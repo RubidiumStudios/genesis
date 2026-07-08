@@ -31,8 +31,6 @@ RUN apt-get update \
     libtool \
     libxml2-dev \
     libxslt-dev \
-    libyaml-dev \
-    libyaml-perl \
     lsof \
     om \
     openssl \
