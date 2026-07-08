@@ -60,11 +60,11 @@ RUN curl -Lo /usr/bin/genesis "https://github.com/${GENESIS_OWNER}/genesis/relea
 # and File::Temp are already in Ubuntu's perl-base.  Genesis's own
 # Perl lib is discovered at runtime under ~/.genesis/lib via the
 # self-extract path -- no PERL5LIB gymnastics required.
-ARG KIT_VALIDATOR_REF=main
+ARG KIT_VALIDATOR_REF=v0.1.0
 RUN apt-get update && apt-get install -y --no-install-recommends cpanminus \
  && cpanm --no-man-pages --notest Test::Deep Test::Output Test::Exit \
  && cpanm --no-man-pages --notest \
-      "https://github.com/genesis-community/kit-validator/archive/${KIT_VALIDATOR_REF}.tar.gz" \
+      "https://github.com/genesis-community/kit-validator/archive/refs/tags/${KIT_VALIDATOR_REF}.tar.gz" \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
