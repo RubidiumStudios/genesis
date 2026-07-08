@@ -100,6 +100,48 @@ sub default {
 }
 
 # }}}
+# target - resolve an alias or URL to a vault and connect_and_validate {{{
+#
+# Handles the non-interactive case only: given an alias or URL,
+# resolve to exactly one vault matching that URL and connect to it.
+# The lookup is class-agnostic on purpose -- a target passed as
+# --vault URL_OF_LOCAL_VAULT should resolve to the Local vault
+# living at that URL, not silently fail because the caller happens
+# to be Service::Vault::Remote.
+#
+# Subclasses may override to add extra semantics for the no-target
+# case (e.g. Service::Vault::Remote's interactive picker); when they
+# do, they should still delegate here for the target-given path so
+# the class-agnostic contract is preserved.
+sub target {
+	my ($class, $target, %opts) = @_;
+	bail "Service::Vault->target requires an alias or url (use ".
+		"Service::Vault::Remote->target for interactive selection)"
+		unless defined $target && length $target;
+
+	my ($url, @targets) = _get_targets($target);
+	bail "Safe target \"#M{%s}\" not found.  Please create it".
+		 "and authorize against it before re-attempting this command.",
+		 $target
+		if scalar(@targets) < 1;
+	bail "Multiple safe targets use url #M{%s}:\n%s\n".
+		 "\n".
+		 "Your ~/.saferc file cannot have more than one target for the ".
+		 "given url.  Please remove any duplicate targets before ".
+		 "re-attempting this command.",
+		 $url, join("", map {" - #C{$_}\n"} @targets)
+		if scalar(@targets) > 1;
+
+	# Deliberate: Service::Vault->find here, not $class->find.  The
+	# resolved URL may point at a Local vault; a subclass override
+	# like Service::Vault::Remote::find would silently drop it.
+	# Matches the class-agnostic lookup pattern already used by
+	# Service::Vault::Remote::attach.
+	my $vault = (Service::Vault->find(url => $url))[0];
+	return $vault->connect_and_validate();
+}
+
+# }}}
 # set_default - set the default vault (targeted by system) {{{
 sub set_default {
 	my ($class, $vault) = @_;

@@ -553,7 +553,11 @@ subtest 'target() - known alias, single result' => sub {
 		my ($target) = @_;
 		return ('https://vault.example.com:8200', 'prod-vault');
 	};
-	local *Service::Vault::Remote::find = sub {
+	# The non-interactive path lives on the parent Service::Vault::target
+	# now, and it looks up the final url-match via Service::Vault->find
+	# (deliberately class-agnostic so Local vaults matched by
+	# _get_targets aren't dropped).  Patch the parent hook.
+	local *Service::Vault::find = sub {
 		my ($class, %filter) = @_;
 		return ($v);
 	};

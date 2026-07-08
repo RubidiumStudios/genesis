@@ -1229,19 +1229,39 @@ EOF
 	like($result[1], qr/missing required kit information.*kit\.name/i,
 		'error mentions missing kit.name');
 
-	# Test 8: Missing kit.version (no parent to inherit from)
-	put_file $top->path("missing-kit-version.yml"), <<EOF;
+	# Test 8: Missing kit.version, kit.name=dev, dev kit linked.
+	# The env's version is implicit in whatever the dev symlink points
+	# at, so this is accepted -- matches how `genesis init
+	# --link-dev-kit` workflows have always had kit fixtures declare
+	# only `kit.name: dev`.
+	put_file $top->path("dev-name-no-version.yml"), <<EOF;
 ---
 kit:
   name: dev
 genesis:
-  env: missing-kit-version
+  env: dev-name-no-version
 EOF
 
-	@result = Genesis::Env->is_valid_env_file('missing-kit-version', $top);
-	is($result[0], undef, 'file without kit.version returns undef');
+	@result = Genesis::Env->is_valid_env_file('dev-name-no-version', $top);
+	ok($result[0], 'kit.name=dev + linked dev kit accepted without kit.version');
+
+	# Test 8b: Missing kit.version, kit.name=<something-real>.  The
+	# escape hatch above is scoped to the literal name "dev"; any
+	# other kit name still requires an explicit version because there
+	# is no symlink to pin the version against.
+	put_file $top->path("real-name-no-version.yml"), <<EOF;
+---
+kit:
+  name: some-real-kit
+genesis:
+  env: real-name-no-version
+EOF
+
+	@result = Genesis::Env->is_valid_env_file('real-name-no-version', $top);
+	is($result[0], undef,
+		'non-dev kit name without kit.version still returns undef');
 	like($result[1], qr/missing required kit information.*kit\.version/i,
-		'error mentions missing kit.version');
+		'error mentions missing kit.version for non-dev kit');
 
 	# Test 9: Missing both kit.name and kit.version
 	put_file $top->path("missing-both-kit.yml"), <<EOF;

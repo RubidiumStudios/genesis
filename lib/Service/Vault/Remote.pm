@@ -48,79 +48,73 @@ sub create {
 
 # }}}
 # target - builder for vault based on locally available vaults {{{
+#
+# Two code paths:
+#   1. Target given (alias or url): delegates to the parent
+#      Service::Vault->target, whose lookup is class-agnostic so a
+#      local vault at that url is honored.
+#   2. Target absent: interactive picker for the user to choose from
+#      the Remote vaults on this system.  Remote-specific and stays
+#      here.
 sub target {
-	my ($class,$target,%opts) = @_;
+	my ($class, $target, %opts) = @_;
 
+	# Non-interactive path lives on the parent so the naming stays
+	# honest ("Service::Vault->target" = class-agnostic lookup).
+	return $class->SUPER::target($target, %opts) if defined $target && length $target;
+
+	# Interactive picker: Remote-specific.  All find calls below are
+	# deliberately $class->find, i.e. Service::Vault::Remote::find,
+	# which filters to Remote objects -- the user is choosing a
+	# Remote to connect to.
 	$opts{default_vault} ||= $class->default;
 
-	my $url;
-	if ($target) {
-		($url, my @targets) = Service::Vault::_get_targets($target);
-		if (scalar(@targets) <1) {
-			bail "Safe target \"#M{%s}\" not found.  Please create it".
-					 "and authorize against it before re-attempting this command.",
-					 $target;
-		}
-		if (scalar(@targets) >1) {
-			# TODO: check if one of the returned values matches the alias
-			bail "Multiple safe targets use url #M{%s}:\n%s\n".
-					 "\n".
-					 "Your ~/.saferc file cannot have more than one target for the ".
-					 "given url.  Please remove any duplicate targets before ".
-					 "re-attempting this command.",
-					 $url, join("", map {" - #C{$_}\n"} @targets);
-		}
-	} else {
+	die_unless_controlling_terminal
+		"Cannot interactively select vault unless in a controlling terminal - terminating!";
 
-		die_unless_controlling_terminal
-			"Cannot interactively select vault unless in a controlling terminal - terminating!";
+	my $w = (sort {$b<=>$a} map {length($_->{name})} $class->find)[0];
 
-		my $w = (sort {$b<=>$a} map {length($_->{name})} $class->find)[0];
-
-		my (%uses,@labels,@choices);
-		$uses{$_->{url}}++ for $class->find;
-		for ($class->find) {
-			next unless $uses{$_->{url}} == 1;
-			push(@choices, $_->{url});
-			push(@labels, [csprintf(
-			"#%s{%-*.*s}   #R{%-10.10s} #%s{%s}",
-			  $_->{name} eq $opts{default_vault}->{name} ? "G" : "-",
-			     $w, $w, $_->{name},
-			                  $_->{url} =~ /^https/ ? ($_->{verify} ? "" : "(noverify)") : "(insecure)",
-			                             $_->{name} eq $opts{default_vault}->{name} ? "Y" : "-",
-			                                $_->{url}
-			),$_->{name}]);
-		}
-
-		my $msg = csprintf("#u{Select Vault:}\n");
-		my @invalid_urls = grep {$uses{$_} > 1} keys(%uses);
-
-		if (scalar(@invalid_urls)) {
-			$msg .= csprintf("\n".
-				"#Y{Note:} One or more vault targets have been omitted because they are alias for\n".
-				"      the same URL, which is incompatible with Genesis's distributed model.\n".
-				"      If you need one of the omitted targets, please ensure there is only one\n".
-				"      target alias that uses its URL.\n");
-		}
-
-		bail("There are no valid vault targets found on this system.")
-			unless scalar(@choices);
-
-		$url = prompt_for_choice(
-			$msg,
-			\@choices,
-			$uses{$opts{default_vault}->{url}} == 1 ? $opts{default_vault}->{url} : undef,
-			\@labels
-		)
+	my (%uses, @labels, @choices);
+	$uses{$_->{url}}++ for $class->find;
+	for ($class->find) {
+		next unless $uses{$_->{url}} == 1;
+		push(@choices, $_->{url});
+		push(@labels, [csprintf(
+		"#%s{%-*.*s}   #R{%-10.10s} #%s{%s}",
+		  $_->{name} eq $opts{default_vault}->{name} ? "G" : "-",
+		     $w, $w, $_->{name},
+		                  $_->{url} =~ /^https/ ? ($_->{verify} ? "" : "(noverify)") : "(insecure)",
+		                             $_->{name} eq $opts{default_vault}->{name} ? "Y" : "-",
+		                                $_->{url}
+		),$_->{name}]);
 	}
 
-	# NB: use the parent find, not $class->find.  Remote::find filters
-	# to ref($_) eq __PACKAGE__, which drops a Service::Vault::Local
-	# matched by _get_targets earlier -- turning a valid local-vault
-	# target into an opaque "Can't call method connect_and_validate on
-	# undef" bail one line down.
-	my $vault = (Service::Vault->find(url => $url))[0];
-	return $vault->connect_and_validate()
+	my $msg = csprintf("#u{Select Vault:}\n");
+	my @invalid_urls = grep {$uses{$_} > 1} keys(%uses);
+
+	if (scalar(@invalid_urls)) {
+		$msg .= csprintf("\n".
+			"#Y{Note:} One or more vault targets have been omitted because they are alias for\n".
+			"      the same URL, which is incompatible with Genesis's distributed model.\n".
+			"      If you need one of the omitted targets, please ensure there is only one\n".
+			"      target alias that uses its URL.\n");
+	}
+
+	bail("There are no valid vault targets found on this system.")
+		unless scalar(@choices);
+
+	my $url = prompt_for_choice(
+		$msg,
+		\@choices,
+		$uses{$opts{default_vault}->{url}} == 1 ? $opts{default_vault}->{url} : undef,
+		\@labels
+	);
+
+	# The picker fed us a URL known to come from a Remote target
+	# (choices were built from $class->find above), so class-filtered
+	# find is safe and correct here.
+	my $vault = ($class->find(url => $url))[0];
+	return $vault->connect_and_validate();
 }
 
 # }}}
