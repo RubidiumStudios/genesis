@@ -21,6 +21,7 @@ unit-tests/genesis-semver.t      # Semantic versioning (semver, by_semver, new_e
 unit-tests/genesis-struct.t      # Data structures (struct_*, flatten, deep_merge)
 unit-tests/genesis-time.t        # Time formatting (strfuzzytime, pretty_duration)
 unit-tests/genesis-uri.t         # URI parsing (parse_uri, is_valid_uri)
+unit-tests/genesis_run-backgrounded_command.t         # Genesis::run shell-wrap regression for `cmd &`
 #unit-tests/term-color.t.DNF                          # disabled: .DNF = Does Not Function (file extension marks it as broken pending rewrite)
 unit-tests/ipv4-core.t
 unit-tests/boolean-core.t
@@ -94,6 +95,7 @@ unit-tests/genesis_ui-list_and_validation.t
 unit-tests/kit-archive-validation.t
 unit-tests/ocfp-show-network.t
 unit-tests/genesis_config-core.t
+unit-tests/genesis_config-log_lifespan_schema.t     # global config schema accepts Genesis::Log lifespan grammar
 unit-tests/service_credhub-core.t  # Service::Credhub unit tests (constructor, accessors, CRUD operations)
 unit-tests/genesis_commands-core.t  # Genesis::Commands infrastructure (registration, parsing, dispatch deps)
 unit-tests/genesis_commands-feature_compatibility.t  # deploy/info/version renderer helpers for feature opt-in
