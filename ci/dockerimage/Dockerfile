@@ -7,8 +7,10 @@ RUN apt-get update \
  && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
  && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
- && wget -q -O - https://raw.githubusercontent.com/cloudfoundry-community/homebrew-cf/master/public.key | apt-key add - \
- && echo "deb http://apt.community.cloudfoundry.org stable main" | tee /etc/apt/sources.list.d/cloudfoundry-community.list \
+ && wget -qO- https://raw.githubusercontent.com/cloudfoundry-community/homebrew-cf/master/public.key \
+      | gpg --dearmor -o /etc/apt/keyrings/cloudfoundry-community-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/cloudfoundry-community-archive-keyring.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/cloudfoundry-community-archive-keyring.gpg] http://apt.community.cloudfoundry.org stable main" | tee /etc/apt/sources.list.d/cloudfoundry-community.list > /dev/null \
  && apt-get update && apt-get install -yy \
     aha \
     autoconf \
