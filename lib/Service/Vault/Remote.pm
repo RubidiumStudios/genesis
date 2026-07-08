@@ -114,7 +114,12 @@ sub target {
 		)
 	}
 
-	my $vault = ($class->find(url => $url))[0];
+	# NB: use the parent find, not $class->find.  Remote::find filters
+	# to ref($_) eq __PACKAGE__, which drops a Service::Vault::Local
+	# matched by _get_targets earlier -- turning a valid local-vault
+	# target into an opaque "Can't call method connect_and_validate on
+	# undef" bail one line down.
+	my $vault = (Service::Vault->find(url => $url))[0];
 	return $vault->connect_and_validate()
 }
 

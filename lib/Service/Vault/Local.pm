@@ -136,6 +136,21 @@ sub shutdown_all {
 
 ### Instance Methods {{{
 
+# connect_and_validate - trivial pass-through for local vaults {{{
+# A local vault is spun up in-process (or by rebind from a running
+# safe process) and is known-good by construction: we have the token
+# in .saferc and just verified `safe status` returned ok before
+# create() returned.  The Remote implementation adds an authenticate/
+# status retry loop which is meaningless for locals.  Just set-as-
+# current and return; a caller doing Service::Vault->attach(url => X)
+# where X happens to be a local vault should get the same
+# "usable vault handle" semantics as it would from Remote.
+sub connect_and_validate {
+	my ($self) = @_;
+	return $self->set_as_current;
+}
+
+# }}}
 # pid - return the pid of the local vault instance {{{
 sub pid {
 	return $_[0]->{name} =~ /.*_([0-9]*)$/ ? $1 : undef;
