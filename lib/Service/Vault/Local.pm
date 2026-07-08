@@ -33,7 +33,11 @@ sub create {
 			"Could not start local memory-backed vault:\n%s",
 			slurp($logfile)
 		) unless $safe_process;
-		$class->set_default($default_vault); # Restore default vault target
+		# Restore default vault target -- but only if we had one to
+		# restore.  In a fresh scoped HOME (kit-validator test runs)
+		# there is no existing safe target, and calling set_default
+		# with undef explodes on $vault->name.
+		$class->set_default($default_vault) if $default_vault;
 	}
 
 	my $vault_process = _get_vault_process($safe_process->{pid}, 1);
@@ -212,6 +216,12 @@ sub DESTROY {
 ### Helper functions {{{
 sub _generate_alias {
 	my $name = shift;
+	# Idempotent: when called with an already-full alias (from
+	# all_vaults iterating `safe targets --json`, which returns the
+	# alias verbatim), preserve it.  Otherwise double-prefixing
+	# produces 'local_vault_local_vault_..._<pid>' that never
+	# matches the .saferc entry.
+	return $name if $name =~ /^local_vault_.+_\d+$/;
 	my $pid = $name =~ /^local_vault_(.*)_([0-9]+)$/ ? $2 : $$;
 	$name =~ s/^local_vault_(.*)_[0-9]+$/$1/; # strip back to original name
 	return "local_vault_${name}_${pid}";
