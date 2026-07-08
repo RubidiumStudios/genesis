@@ -1879,10 +1879,13 @@ sub global_config_schema {
 					description => 'Log output style',
 				},
 				lifespan => {
-					type => 'enum',
-					default => 'current',
-					values => [qw/forever current/],
-					description => 'Log file lifespan',
+					type => 'string',
+					default => '1',
+					description => 'Log file retention policy: '.
+						'"forever", a count (1, "5 logs"), a duration '.
+						'("30d", "1w"), or a compound bound ("5 or 30d", '.
+						'"min of 5 or 30d").  Grammar validated at '.
+						'setup time by Genesis::Log::parse_lifespan.',
 				},
 				timestamp => {
 					type => 'boolean',
