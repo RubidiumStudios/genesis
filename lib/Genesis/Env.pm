@@ -673,11 +673,17 @@ sub is_valid_env_file {
 				last if $has_kit_name && $has_kit_version;
 			}
 
-			# Skip kit validation error if a dev kit is present AND no kit: block
-			# exists in any env file (handles env files that rely entirely on the dev kit)
+			# Skip kit validation error if a dev kit is present AND either:
+			#  - no kit: block exists in any env file (env fully relies on
+			#    the dev kit); or
+			#  - kit.name resolves to "dev" (kit-validator-style specs and
+			#    any linked-dev-kit workflow supply the version via the
+			#    symlink itself, not via YAML).
 			unless ($has_kit_name && $has_kit_version) {
 				my $has_kit_block = ($yaml_src =~ /^kit:/m);
 				last if !$has_kit_block && !$has_kit_name && !$has_kit_version && $top->has_dev_kit();
+				last if $has_kit_name && !$has_kit_version && $top->has_dev_kit()
+					&& ($yaml_src =~ /^\s*name:\s*['"]?dev['"]?\s*(?:#.*)?$/m);
 				my @missing;
 				push @missing, "kit.name" unless $has_kit_name;
 				push @missing, "kit.version" unless $has_kit_version;
