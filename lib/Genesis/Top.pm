@@ -1001,6 +1001,25 @@ sub ci_configured {
 }
 
 # }}}
+# has_legacy_ci_yml - return true when a legacy pipeline ci.yml is present {{{
+#
+# Set at config-load time when a top-level `ci.yml` file exists AND its
+# content is a pipeline config (has a top-level `pipeline:` key).  Used
+# by command dispatch to gate the PIPELINE-group commands
+# behind a migration message, while letting non-pipeline commands run
+# in v2 mode against the same repo.
+sub has_legacy_ci_yml {
+	my ($self) = @_;
+	# Ensure config validation has run so the flag is populated.
+	# Genesis::Top->new() defers _validate_config until config() is
+	# first accessed; without this touch, callers that only ever
+	# call has_legacy_ci_yml (like the dispatch gate) would silently
+	# see 0 and let pipeline commands slip past migration.
+	$self->config if -f $self->path(".genesis/config");
+	return $self->{__has_legacy_ci_yml} ? 1 : 0;
+}
+
+# }}}
 # pipeline_env_names - return the sorted list of env names in this repo {{{
 #
 # Returns the names of all valid environments in this repo, sorted
@@ -1296,19 +1315,16 @@ sub _validate_config {
 		$self->config->validate($self->_repo_config_schema_v2());
 		$self->{__config_disk_version} = 2;
 
-		# Check for legacy ci.yml — bail until post-MVP migration is implemented.
-		# Only flag it if it looks like a pipeline config (has 'pipeline:' key),
-		# not an environment file (which would have 'kit:' or 'genesis:').
+		# Detect legacy ci.yml -- flag it so command dispatch can gate
+		# pipeline-consuming commands, but otherwise let the repo load.
+		# Non-pipeline commands (deploy, check, manifest, secrets ops)
+		# run unchanged in v2 mode.  Only pages with a top-level
+		# 'pipeline:' key are treated as legacy CI configs; env files
+		# named ci.yml (which start with 'kit:' or 'genesis:') don't
+		# trip the check.
 		my $ci_yml = $self->path('ci.yml');
-		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
-			bail(
-				"Legacy CI configuration detected at #C{%s}.\n".
-				"Pipeline support requires a v3 config.  Please run:\n\n".
-				"  genesis repo-init --upgrade\n\n".
-				"to migrate your CI configuration into the v3 config format.",
-				$ci_yml
-			);
-		}
+		$self->{__has_legacy_ci_yml} = 1
+			if -f $ci_yml && _is_legacy_ci_file($ci_yml);
 
 		# Augment in-memory with v3 defaults so downstream code sees
 		# a uniform v3 shape.  These go into the 'default' layer and
@@ -1321,23 +1337,23 @@ sub _validate_config {
 		$self->config->validate($self->_repo_config_schema());
 		$self->{__config_disk_version} = 3;
 
-		# Detect legacy ci.yml alongside v3 config
+		# Detect legacy ci.yml alongside v3 config -- flag it for the
+		# dispatch gate.  Two sub-cases surface at load time:
+		#   * v3 config already declares ci.enabled + ci.provider.type
+		#     -> stale ci.yml, warn once and keep going; the v3 config
+		#     wins downstream.
+		#   * v3 config has no ci configured -> flag as legacy CI so
+		#     pipeline commands gate on migration; other commands run.
 		my $ci_yml = $self->path('ci.yml');
 		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
 			if ($self->config->get('ci.enabled') && $self->config->has('ci.provider.type')) {
-				bail(
-					"Legacy #C{%s} conflicts with the v3 CI configuration.\n".
-					"Remove it — CI is already configured in #C{.genesis/config}.",
-					$ci_yml
+				warning(
+					"Legacy #C{%s} present alongside a v3 CI configuration; ".
+					"the v3 config wins.  Remove #C{%s} to clear this warning.",
+					$ci_yml, $ci_yml
 				);
 			} else {
-				bail(
-					"Legacy CI configuration detected at #C{%s}.\n".
-					"Pipeline support requires migrating this into the v3 config.  Please run:\n\n".
-					"  genesis repo-init --upgrade\n\n".
-					"to migrate your CI configuration into the v3 config format.",
-					$ci_yml
-				);
+				$self->{__has_legacy_ci_yml} = 1;
 			}
 		}
 

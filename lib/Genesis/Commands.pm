@@ -253,8 +253,48 @@ sub run_command { # {{{
 		}
 		warning({label => "DEPRECATED"}, $msg);
 	}
+	_gate_pipeline_on_legacy_ci_yml();
 	$RUN{$COMMAND}(@COMMAND_ARGS);
 	exit 0
+} # }}}
+
+# _gate_pipeline_on_legacy_ci_yml - PIPELINE-group dispatch gate {{{
+#
+# When the loaded deployment repo still carries a legacy pipeline
+# ci.yml (see Genesis::Top::has_legacy_ci_yml), refuse to run
+# PIPELINE-group commands and print a concrete migration message.
+# Non-pipeline commands (deploy, check, manifest, secrets ops, etc.)
+# continue to run against the same repo without a pipeline block
+# interfering.
+sub _gate_pipeline_on_legacy_ci_yml {
+	# Only PIPELINE-group commands need the gate.
+	my $fg = command_properties()->{function_group} // {};
+	return unless ($fg->{module}//'') eq 'Pipelines';
+
+	# Only meaningful when the command has a repo context to load a
+	# Top from.  Commands like `help`, `version`, `ping` don't.
+	return unless has_scope('repo', 'env');
+
+	require Genesis::Top;
+	my $top = eval { Genesis::Top->new('.', no_vault => 1) };
+	return unless $top;                 # if Top load itself failed
+	return unless $top->has_legacy_ci_yml;
+
+	require Genesis;
+	Genesis::bail(
+		"This repository still has a legacy CI configuration at #C{ci.yml}.\n".
+		"Pipeline commands are unavailable until the ci configuration is\n".
+		"migrated by hand to the v3 repo config.  To migrate:\n\n".
+		"  1. Read the pipeline: block in ci.yml and note the provider,\n".
+		"     git URI, branch, pipeline name, vault URL you were using.\n".
+		"  2. Run:  #g{genesis repo-update --ci-provider PROVIDER}  \\\n".
+		"               [--git-uri URI] [--git-branch BRANCH]   \\\n".
+		"               [--pipeline-name NAME] [--vault-url URL]\n".
+		"     to set those values in the v3 config.\n".
+		"  3. Remove ci.yml (#g{git rm ci.yml}).\n\n".
+		"Pipeline commands become available again once ci.yml is gone\n".
+		"and the v3 config declares ci.provider.type."
+	);
 } # }}}
 
 sub has_command { # {{{

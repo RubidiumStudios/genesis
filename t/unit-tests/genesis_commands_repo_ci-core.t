@@ -4,6 +4,7 @@ use warnings;
 
 use lib 't';
 use helper;
+use Test::Exception;
 
 use Genesis;
 use Genesis::Config;
@@ -271,14 +272,16 @@ subtest 'v2 config loads and augments ci.enabled default' => sub {
 	is $top->config->get_source('ci'), 'default', "ci section comes from default layer";
 };
 
-subtest 'v2 config with ci.yml bails' => sub {
+subtest 'v2 config with ci.yml flags as legacy' => sub {
+	# Soft-gate migration: repo loads with has_legacy_ci_yml set so
+	# dispatch can gate pipeline commands behind the migration prompt
+	# while non-pipeline commands (deploy, check, ...) keep working.
 	my $dir = make_v3_repo(workdir("v2-ci-yml"), version => 2);
 	mkfile_or_fail("$dir/ci.yml", "---\npipeline:\n  layouts:\n    - sandbox\n");
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
-	eval { $top->config };
-	like $@, qr/Legacy CI configuration/, "v2 + ci.yml bails with migration message";
-	like $@, qr/repo-init --upgrade/, "bail message mentions upgrade command";
+	lives_ok { $top->config } "v2 + ci.yml loads without bailing";
+	ok $top->has_legacy_ci_yml, "has_legacy_ci_yml flag is set";
 };
 
 subtest 'v3 config validates with CI disabled' => sub {
@@ -313,7 +316,9 @@ subtest 'v3 config bails when enabled but no provider' => sub {
 	like $@, qr/provider/, "bail message references provider";
 };
 
-subtest 'v3 config with ci.yml and CI configured bails with conflict' => sub {
+subtest 'v3 config with ci.yml and CI configured warns' => sub {
+	# v3 already declares CI; the stale ci.yml is a noise warning, not
+	# a bail.  The v3 config wins downstream.
 	my $dir = make_v3_repo(workdir("v3-conflict"), ci => {
 		enabled  => 'true',
 		provider => { type => 'concourse', target => 'pipes/test', url => 'https://ci.example.com', team => 'test' },
@@ -321,18 +326,18 @@ subtest 'v3 config with ci.yml and CI configured bails with conflict' => sub {
 	mkfile_or_fail("$dir/ci.yml", "---\npipeline:\n  layouts:\n    - sandbox\n");
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
-	eval { $top->config };
-	like $@, qr/conflicts/, "v3 + ci.yml + configured CI bails with conflict message";
+	lives_ok { $top->config } "v3 + ci.yml + configured CI loads without bailing";
+	ok $top->ci_configured, "v3 CI config still wins";
+	ok !$top->has_legacy_ci_yml, "legacy flag not set when v3 CI is configured";
 };
 
-subtest 'v3 config with ci.yml and CI not configured bails with migrate' => sub {
+subtest 'v3 config with ci.yml and CI not configured flags as legacy' => sub {
 	my $dir = make_v3_repo(workdir("v3-migrate"), ci => { enabled => 'false' });
 	mkfile_or_fail("$dir/ci.yml", "---\npipeline:\n  layouts:\n    - sandbox\n");
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
-	eval { $top->config };
-	like $@, qr/Legacy CI configuration/, "v3 + ci.yml + disabled CI bails with migrate message";
-	like $@, qr/repo-init --upgrade/, "mentions upgrade command";
+	lives_ok { $top->config } "v3 + ci.yml + disabled CI loads without bailing";
+	ok $top->has_legacy_ci_yml, "has_legacy_ci_yml flag is set";
 };
 
 subtest 'v3 config rejects unknown ci keys' => sub {
