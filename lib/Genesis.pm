@@ -649,7 +649,10 @@ sub run {
 		# Without this, an input-redirect failure leaks to real
 		# STDERR AND bash never creates err_file -- so slurp()
 		# returns undef instead of bash's error message.
-		$prog = "{ $prog ; } 2>$opts{stderr}";
+		# Newline (not `;`) separates the last statement from `}`
+		# so a trailing `&` (backgrounded command) parses cleanly.
+		# `{ CMD & ; }` is a bash syntax error; `{ CMD &\n}` is not.
+		$prog = "{ $prog\n} 2>$opts{stderr}";
 	}
 	pushd($opts{dir}) if ($opts{dir});
 
