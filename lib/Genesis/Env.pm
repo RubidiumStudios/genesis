@@ -3246,8 +3246,28 @@ sub download_required_configs {
 	my @configs = $self->missing_required_configs(@hooks);
 	return $self unless @configs;
 	debug "Missing configs: ".join(', ', @configs);
-	$self->with_bosh->download_configs(@configs);
-	return $self
+
+	# cpi is auto-appended by Env::required_configs's opportunistic
+	# prefetch (kits don't declare it themselves) so real deployments
+	# benefit from the pre-warmed cpi listing.  When a caller supplies
+	# cloud/runtime by hand (kit-validator, dev iteration, air-gapped
+	# smoke tests) and the director isn't reachable, honor the
+	# "opportunistic" contract already documented on the prefetch:
+	# skip the download silently instead of bailing.
+	#
+	# Any non-cpi missing config is a genuine kit requirement and must
+	# still bail loud so the user knows why the deployment can't move.
+	my @required = grep { !/^cpi(\@|$)/ } @configs;
+
+	eval { $self->with_bosh };
+	if ($@) {
+		die $@ if @required;
+		debug "Skipping opportunistic cpi prefetch: director unreachable";
+		return $self;
+	}
+
+	$self->download_configs(@configs);
+	return $self;
 }
 
 # }}}

@@ -720,6 +720,112 @@ subtest 'download_configs - threads trailing opts hashref to bosh->download_conf
 		'progress banner names the BOSH director by alias';
 };
 
+# ======================================================================
+# download_required_configs() -- opportunistic cpi degrade
+#
+# Env::required_configs auto-appends 'cpi' to the required-configs list
+# for manifest-adjacent hooks (per commit 1146a669e).  That's
+# opportunistic: real deployments benefit from the prefetch, but callers
+# that supply cloud/runtime by hand (kit-validator, dev iteration,
+# air-gapped smoke tests) shouldn't be forced to reach for a director
+# just to satisfy an auto-appended cpi entry.
+#
+# When the ONLY missing config is cpi and with_bosh throws, honor the
+# "opportunistic" contract and skip the download silently.  When any
+# non-cpi config is also missing, the director-lookup error must
+# propagate loud so the user knows why the deployment can't move.
+# ======================================================================
+
+subtest 'download_required_configs - cpi-only missing degrades when director unreachable' => sub {
+	plan tests => 2;
+
+	local %ENV = %ENV;
+	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
+
+	my $env = make_simple_env('drc-cpi-only-degrade');
+	$env->{__configs} = {};
+	# Register cloud so only cpi (auto-appended by required_configs)
+	# is left in missing_required_configs('check').
+	$env->use_config('/tmp/cloud.yml', 'cloud');
+	is_deeply [$env->missing_required_configs('check')], ['cpi'],
+		'preflight: cpi is the sole missing config';
+
+	# Force with_bosh to throw the same error bosh() would raise on a
+	# missing parent director.
+	no warnings qw(redefine once);
+	local *Genesis::Env::with_bosh = sub {
+		die "Could not find BOSH director test-parent under exodus stub\n";
+	};
+
+	lives_ok {
+		$env->download_required_configs('check');
+	} 'cpi-only miss with unreachable director does not bail';
+};
+
+subtest 'download_required_configs - non-cpi missing still bails when director unreachable' => sub {
+	plan tests => 1;
+
+	local %ENV = %ENV;
+	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
+
+	my $env = make_simple_env('drc-cloud-missing');
+	$env->{__configs} = {};
+	# Nothing registered -- both cloud and cpi are missing.  The
+	# missing cloud is a genuine kit requirement; must NOT be silently
+	# skipped.
+	no warnings qw(redefine once);
+	local *Genesis::Env::with_bosh = sub {
+		die "Could not find BOSH director test-parent under exodus stub\n";
+	};
+
+	throws_ok {
+		$env->download_required_configs('check');
+	} qr/Could not find BOSH director/,
+		'non-cpi missing configs propagate the director-unreachable error loud';
+};
+
+subtest 'download_required_configs - happy path still calls download_configs' => sub {
+	plan tests => 2;
+
+	local %ENV = %ENV;
+	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
+
+	my $env = make_simple_env('drc-happy-path');
+	$env->{__configs} = {};
+	$env->use_config('/tmp/cloud.yml', 'cloud');
+
+	# with_bosh succeeds; capture the download_configs call arguments
+	# to prove the full missing-list (cpi) was forwarded.
+	my @dl_calls;
+	my $stub_bosh = bless { alias => 'stub' }, 'Test::Mock::Bosh::DrcHappy';
+	{
+		no strict 'refs';
+		no warnings 'redefine';
+		*{'Test::Mock::Bosh::DrcHappy::alias'} = sub { $_[0]->{alias} };
+		*{'Test::Mock::Bosh::DrcHappy::has_config_of_type'} = sub { 0 };
+		# The env's own download_configs sub calls
+		# $self->with_bosh->bosh->download_configs(...); intercept it
+		# by mocking the env's download_configs directly to record and
+		# short-circuit -- we only need to prove
+		# download_required_configs forwarded the right args.
+	}
+	no warnings qw(redefine once);
+	local *Genesis::Env::with_bosh = sub { $_[0] };
+	local *Genesis::Env::bosh      = sub { $stub_bosh };
+	local *Genesis::Env::download_configs = sub {
+		my ($self, @args) = @_;
+		push @dl_calls, [@args];
+		return $self;
+	};
+
+	$env->download_required_configs('check');
+
+	is scalar(@dl_calls), 1,
+		'download_configs called exactly once when director reachable';
+	is_deeply $dl_calls[0], ['cpi'],
+		'download_configs receives the full missing-configs list';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
