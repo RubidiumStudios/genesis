@@ -102,7 +102,13 @@ sub has_environment_entry {
 	$self->{__environment} //= $self->env->lookup();
 
 	if ($type eq 'params') {
-		# Support for params under environment
+		# Support for params under environment.
+		#
+		# Every return here MUST supply values for both %s slots in
+		# "params.#Y{%s}%s" -- the first is the param name, the second is
+		# the qualifier message.  Under-supplying by one dies at
+		# Genesis::Log:1092 with "Missing argument in sprintf" once
+		# has_entry composes info() from these return values.
 		my $param = $self->{__environment}{params}{$name};
 		my %opts = @args;
 		if (exists($opts{type})) {
@@ -112,6 +118,7 @@ sub has_environment_entry {
 				return (
 					($actualtype eq $reqtype) ? 1 : 0,
 					"params.#Y{%s}%s",
+					$name,
 					$opts{msg} || "is ".($reqtype eq 'undefined' ? 'undefined' : "a $reqtype"),
 				);
 			}
@@ -120,6 +127,7 @@ sub has_environment_entry {
 			return (
 				defined($param) && in_array($param, $opts{value_in}->@*) ? 1 : 0,
 				"params.#Y{%s}%s",
+				$name,
 				$opts{msg} || "must be one of ".join(', ', $opts{value_in}->@*),
 			);
 		}
@@ -128,6 +136,7 @@ sub has_environment_entry {
 			return (
 				defined($param) ? 0 : 1,
 				"params.#Y{%s}%s",
+				$name,
 				$opts{msg} || "has been retired and no longer supported",
 			);
 		}
@@ -135,6 +144,7 @@ sub has_environment_entry {
 		return (
 			defined($param) ? 1 : 0,
 			"params.#Y{%s}%s",
+			$name,
 			$opts{msg} || "is provided",
 		);
 	} elsif ($type eq 'exodus') {
@@ -146,12 +156,19 @@ sub has_environment_entry {
 			$opts{msg} || $name,
 		) unless (@opts{qw/env deployment/});
 
+		# With env/deployment scoping both %s slots must be filled:
+		# the entry name (or the caller's msg override) AND the scope.
+		# The old `$opts{msg} || ($name, $for)` idiom worked only when
+		# msg was undef -- a truthy msg collapsed the second value away
+		# and sprintf ran short by one arg.  Use `//` so msg swaps just
+		# the name slot and $for keeps its own.
 		my $for = ($opts{env}//$self->env->name).'/'.$opts{deployment};
 		my $value = $self->env->exodus_lookup($name,undef, $for);
 		return (
 			defined($value) ? 1 : 0,
 			"#Y{%s} exodus entry exists under #M{%s}",
-			$opts{msg} || ($name, $for)
+			$opts{msg} // $name,
+			$for,
 		);
 
 	} else {

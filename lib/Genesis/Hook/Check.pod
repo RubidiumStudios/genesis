@@ -446,9 +446,24 @@ for supported keys.
 
 =back
 
-B<Returns:> In list context, a list of two or three elements: the boolean
-result (C<1> or C<0>), a C<sprintf>-style format string for the display
-message, and one or more format arguments.
+B<Returns:> In list context, a list beginning with the boolean result
+(C<1> or C<0>), followed by a C<sprintf>-style format string for the
+display message, followed by one C<sprintf> argument per C<%s>
+placeholder in the format string.
+
+The value count MUST match the format's placeholder count.  C<has_entry>
+composes an C<info()> call from these return values, and an
+under-supplied values list dies at C<Genesis::Log:1092> with
+"Missing argument in sprintf".
+
+Concretely, for C<$type eq 'params'> every branch returns
+C<< ($ok, "params.#Y{%s}%s", $name, $qualifier_msg) >> -- four
+elements, matching the two C<%s> slots.  For C<$type eq 'exodus'>
+without env/deployment scoping the return is
+C<< ($ok, "#Y{%s} exodus entry exists", $entry_name_or_msg) >> --
+three elements, one C<%s>.  With env/deployment scoping the return
+is C<< ($ok, "#Y{%s} exodus entry exists under #M{%s}", $entry_name_or_msg, $for) >>
+-- four elements, two C<%s>.
 
 B<Errors:>
 

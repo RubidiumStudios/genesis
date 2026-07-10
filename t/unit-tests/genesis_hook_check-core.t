@@ -682,6 +682,161 @@ subtest 'has_environment_entry - exodus with deployment returns 0 for unknown ke
 };
 
 # ---------------------------------------------------------------------------
+# has_environment_entry — return-list shape (format vs values arity)
+#
+# has_entry composes an info() call whose sprintf template is
+# "[[    %s>>" concatenated with the format that has_environment_entry
+# returns.  For sprintf to succeed, the number of %s placeholders in
+# the returned format must equal the number of values returned after
+# it.  Under-supplying values dies at Genesis::Log:1092 with
+# "Missing argument in sprintf" and aborts the check hook -- the
+# exact failure surfaced by the BOSH kit's vsphere check under
+# kit-validator.  Assert the values-list matches the format's %s
+# count for every return site in has_environment_entry so a
+# format/value drift can't sneak back in.
+# ---------------------------------------------------------------------------
+sub sprintf_slot_count {
+	my ($fmt) = @_;
+	my $count = 0;
+	$count++ while $fmt =~ /%[^%]/g;
+	return $count;
+}
+
+subtest 'has_environment_entry - params type=X returns $name + $msg for the two %s slots' => sub {
+	plan tests => 4;
+	my $hook = make_hook();
+	my ($ret, $fmt, @values) = $hook->has_environment_entry('params', 'base_domain',
+		type => 'string', msg => 'is a string');
+	is($ret, 1,                       'type-check success bool');
+	is($fmt, "params.#Y{%s}%s",       'format has two %s placeholders');
+	is(scalar(@values), sprintf_slot_count($fmt),
+		'value count matches format %s count');
+	is_deeply(\@values, ['base_domain', 'is a string'],
+		'values are ($name, $msg) in that order');
+};
+
+subtest 'has_environment_entry - params value_in returns $name + $msg' => sub {
+	plan tests => 3;
+	my $hook = make_hook();
+	my ($ret, $fmt, @values) = $hook->has_environment_entry('params', 'scale',
+		value_in => [qw(dev staging prod)]);
+	is($fmt, "params.#Y{%s}%s", 'value_in format has two %s placeholders');
+	is(scalar(@values), sprintf_slot_count($fmt),
+		'value count matches format %s count');
+	is($values[0], 'scale', 'first value is the param name');
+};
+
+subtest 'has_environment_entry - params retired returns $name + $msg' => sub {
+	plan tests => 3;
+	my $hook = make_hook();
+	my ($ret, $fmt, @values) = $hook->has_environment_entry('params', 'no_such_param',
+		retired => 1);
+	is($fmt, "params.#Y{%s}%s", 'retired format has two %s placeholders');
+	is(scalar(@values), sprintf_slot_count($fmt),
+		'value count matches format %s count');
+	is($values[0], 'no_such_param', 'first value is the param name');
+};
+
+subtest 'has_environment_entry - params default branch returns $name + $msg' => sub {
+	plan tests => 3;
+	my $hook = make_hook();
+	my ($ret, $fmt, @values) = $hook->has_environment_entry('params', 'base_domain');
+	is($fmt, "params.#Y{%s}%s", 'default format has two %s placeholders');
+	is(scalar(@values), sprintf_slot_count($fmt),
+		'value count matches format %s count');
+	is($values[0], 'base_domain', 'first value is the param name');
+};
+
+subtest 'has_environment_entry - exodus (no env/deploy) values match single %s slot' => sub {
+	plan tests => 3;
+	my $hook = make_hook();
+	my ($ret, $fmt, @values) = $hook->has_environment_entry('exodus', 'name');
+	is($fmt, "#Y{%s} exodus entry exists", 'exodus (no deploy) format has one %s');
+	is(scalar(@values), sprintf_slot_count($fmt),
+		'value count matches format %s count');
+	is($values[0], 'name', 'first value is the exodus key');
+};
+
+subtest 'has_environment_entry - exodus with env/deploy returns $name + $for' => sub {
+	plan tests => 4;
+	my $hook = make_hook();
+	my ($ret, $fmt, @values) = $hook->has_environment_entry('exodus', 'director_url',
+		deployment => 'bosh');
+	is($fmt, "#Y{%s} exodus entry exists under #M{%s}",
+		'exodus (with deploy) format has two %s placeholders');
+	is(scalar(@values), sprintf_slot_count($fmt),
+		'value count matches format %s count');
+	is($values[0], 'director_url', 'first value is the exodus key');
+	like($values[1], qr!\Q/bosh\E$!, 'second value is the env/deployment scope');
+};
+
+subtest 'has_environment_entry - exodus with env/deploy + msg still fills two %s slots' => sub {
+	# When msg is supplied, we still need to fill both %s slots -- the
+	# msg takes the entry-name slot but the scope slot must still be
+	# populated by $for.  Otherwise the format string ends up with a
+	# trailing bare "%s" and sprintf fails.
+	plan tests => 3;
+	my $hook = make_hook();
+	my ($ret, $fmt, @values) = $hook->has_environment_entry('exodus', 'director_url',
+		deployment => 'bosh', msg => 'is the primary director');
+	is(scalar(@values), sprintf_slot_count($fmt),
+		'value count matches format %s count even when msg supplied');
+	is($values[0], 'is the primary director', 'msg fills the entry-name slot');
+	like($values[1], qr!\Q/bosh\E$!, 'second value is still the env/deployment scope');
+};
+
+# ---------------------------------------------------------------------------
+# Regression: has_entry composes info() without dying
+#
+# The full path exercised on real kit hooks -- assert has_entry runs
+# to completion (no "Missing argument in sprintf") for each branch of
+# has_environment_entry.  When any return site under-supplies values,
+# Log::info's sprintf dies with a warning-turned-fatal at Log.pm:1092
+# and the exception bubbles up here.
+# ---------------------------------------------------------------------------
+subtest 'has_entry - environment params type=X composes info() without sprintf failure' => sub {
+	plan tests => 1;
+	my $hook = make_hook();
+	lives_ok {
+		quietly {
+			$hook->has_entry('environment', 'params', 'base_domain',
+				type => 'string', msg => 'is a string');
+		};
+	} 'has_entry survives info() sprintf for type=X return path';
+};
+
+subtest 'has_entry - environment params value_in composes info() without sprintf failure' => sub {
+	plan tests => 1;
+	my $hook = make_hook();
+	lives_ok {
+		quietly {
+			$hook->has_entry('environment', 'params', 'scale',
+				value_in => [qw(dev staging prod)]);
+		};
+	} 'has_entry survives info() sprintf for value_in return path';
+};
+
+subtest 'has_entry - environment params retired composes info() without sprintf failure' => sub {
+	plan tests => 1;
+	my $hook = make_hook();
+	lives_ok {
+		quietly {
+			$hook->has_entry('environment', 'params', 'no_such_param', retired => 1);
+		};
+	} 'has_entry survives info() sprintf for retired return path';
+};
+
+subtest 'has_entry - environment exodus with deployment composes info() without sprintf failure' => sub {
+	plan tests => 1;
+	my $hook = make_hook();
+	lives_ok {
+		quietly {
+			$hook->has_entry('environment', 'exodus', 'director_url', deployment => 'bosh');
+		};
+	} 'has_entry survives info() sprintf for exodus-with-deployment return path';
+};
+
+# ---------------------------------------------------------------------------
 # has_environment_entry — unknown type dies
 # ---------------------------------------------------------------------------
 subtest 'has_environment_entry - unknown type dies' => sub {
