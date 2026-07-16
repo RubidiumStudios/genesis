@@ -2148,7 +2148,11 @@ sub instance_group_azs {
 	my $self = shift;
 	my $igs  = scalar $self->manifest_lookup('instance_groups', []);
 	my %seen;
+	# Skip unevaluated spruce operators (e.g. the (( replace )) array
+	# marker emitted by kit blueprints) -- they are merge directives,
+	# not AZ names, and only appear when this reads a pre-eval manifest.
 	return sort grep { !$seen{$_}++ }
+	            grep { !/^\s*\(\(.*\)\)\s*$/ }
 	            map  { @{ $_->{azs} // [] } }
 	            grep { ref($_) eq 'HASH' }
 	            @$igs;
