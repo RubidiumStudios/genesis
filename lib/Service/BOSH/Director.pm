@@ -623,6 +623,18 @@ sub upload_config {
 sub upload_config_from_file {
 	my ($self, $path, $type, $name, $confirm) = @_;
 	$name ||= 'default';
+
+	# Invalidate memoized config state for this (type, name): a
+	# pre-upload existence probe may have cached a negative content
+	# result, and the assembly/listing caches predate this upload.
+	delete $self->{_config_content_cache}{($type // '') . '|' . ($name // '')}
+		if ref($self->{_config_content_cache}) eq 'HASH';
+	if (ref($self->{_config_assembly_cache}) eq 'HASH') {
+		delete $self->{_config_assembly_cache}{"$type|$name"};
+		delete $self->{_config_assembly_cache}{"$type|*"};
+	}
+	delete $self->{_configs_cache};
+
   local $ENV{BOSH_NON_INTERACTIVE} = undef;
 	my @commands = $type eq 'runtime'
 		? ('update-runtime-config', "--name=$name", $path) # runtime configs needs to do it this ways to upload releases
