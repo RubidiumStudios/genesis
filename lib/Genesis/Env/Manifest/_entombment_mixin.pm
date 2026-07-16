@@ -90,6 +90,11 @@ sub _entomb_secrets {
 			$cred_path =~ s#^/#_/#;
 			for my $key (sort @{$secret_keys{$secret}}) {
 				my $value = $secret_values{substr($secret,1)}{$key};
+				bail(
+					"Manifest references vault path #C{%s:%s} which has no value in ".
+					"the vault -- populate it (or fix the reference) and redeploy.",
+					$secret, $key
+				) unless defined($value) && length($value);
 				my ($credhub_var, $secret_sha, $action, $action_color, $existing) = $self->_entomb_secret_for_vault(
 					$local_vault, $secret, $key, $value, $credhub, $cred_path, $entombment_prefix
 				);
