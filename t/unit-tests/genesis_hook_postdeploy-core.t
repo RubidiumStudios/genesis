@@ -457,6 +457,62 @@ subtest 'upload_runtime_configs - method exists' => sub {
 		'hook can() upload_runtime_configs');
 };
 
+# Per-config value validation.  bosh-configs.runtime.<name> must accept
+# a hash (options), a JSON boolean true (enable with defaults), OR a
+# JSON boolean false (explicitly disable).  Explicit-false was
+# previously rejected, which broke user expectations: the only way to
+# turn off a single runtime config was to omit its key entirely, and
+# users configuring via defaults + per-env overrides had no way to
+# disable a config that a shared default turned on.
+subtest 'upload_runtime_configs - accepts per-config false to disable' => sub {
+	plan tests => 2;
+
+	my @hook_calls;
+	my $env = mock_env(
+		lookup => sub {
+			my ($self, $key, $default) = @_;
+			return { blacksmith => JSON::PP::false, dns => JSON::PP::true }
+				if $key eq 'bosh-configs.runtime';
+			return $default;
+		},
+		has_hook => sub { $_[1] eq 'runtime-config' ? 1 : 0 },
+		notify   => sub { 1 },
+		kit      => $kit,
+		run_hook => sub {
+			my ($self, $hook, %opts) = @_;
+			push @hook_calls, { hook => $hook, args => $opts{args} };
+			return ('', 0, '');
+		},
+	);
+	my $hook = Genesis::Hook::PostDeploy::test_kit->init(env => $env, rc => 0);
+
+	eval { $hook->upload_runtime_configs };
+	is $@, '', 'no bail when a per-config value is false';
+	is_deeply $hook_calls[0]{args},
+		{ blacksmith => JSON::PP::false, dns => JSON::PP::true },
+		'runtime-config hook receives the full opts hash including false values';
+};
+
+subtest 'upload_runtime_configs - still bails on plain-string per-config value' => sub {
+	plan tests => 1;
+
+	my $env = mock_env(
+		lookup => sub {
+			my ($self, $key, $default) = @_;
+			return { blacksmith => 'yes' } if $key eq 'bosh-configs.runtime';
+			return $default;
+		},
+		has_hook => sub { $_[1] eq 'runtime-config' ? 1 : 0 },
+		notify   => sub { 1 },
+		kit      => $kit,
+	);
+	my $hook = Genesis::Hook::PostDeploy::test_kit->init(env => $env, rc => 0);
+
+	eval { $hook->upload_runtime_configs };
+	like $@, qr/hash reference or boolean/i,
+		'string value still rejected; error mentions boolean as accepted type';
+};
+
 subtest 'upload_director_cpi_config - method exists' => sub {
 	plan tests => 1;
 

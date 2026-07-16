@@ -243,10 +243,10 @@ sub upload_runtime_configs {
 		);
 	} grep {
 		my $config = $runtime_opts->{$_};
-		!(ref($config) eq 'HASH' || (ref($config) eq 'JSON::PP::Boolean' && $config));
+		!(ref($config) eq 'HASH' || ref($config) eq 'JSON::PP::Boolean');
 	} sort keys %{$runtime_opts};
 	bail(
-		"Runtime config options must be a hash reference or 'true', but:\n%s\n",
+		"Runtime config options must be a hash reference or boolean, but:\n%s\n",
 		join("\n", map {"  - $_"} @errors)
 	) if @errors;
 
