@@ -189,6 +189,46 @@ sub find_single_match_or_bail {
 }
 
 # }}}
+# rebind - callback-context vault lookup by URL or legacy name {{{
+#
+# Bash hooks that shell back into `genesis lookup|has-feature|...`
+# arrive in a subprocess with $ENV{GENESIS_TARGET_VAULT} set by the
+# outer command.  This method resolves that env var to a concrete
+# vault object, regardless of subclass (Remote or Local).  It lives
+# on the base class deliberately: callback callers cannot know which
+# kind of vault the URL points at, and shouldn't have to.  The
+# previous location (Service::Vault::Remote) class-filtered its
+# find() and silently excluded Local vaults, so any callback under
+# a `safe local -m` vault (kit-validator test runs, proto-BOSH dev
+# loops) failed with "not found in .saferc".
+sub rebind {
+	my ($class) = @_;
+
+	bail("Cannot rebind to vault in callback due to missing environment variables!")
+		unless $ENV{GENESIS_TARGET_VAULT};
+
+	my $vault;
+	if (is_valid_uri($ENV{GENESIS_TARGET_VAULT})) {
+		# URL form: class-agnostic lookup -- accepts whatever
+		# vault kind sits at this URL in .saferc.
+		$vault = ($class->find(url => $ENV{GENESIS_TARGET_VAULT}))[0];
+		bail("Cannot rebind to vault at address '$ENV{GENESIS_TARGET_VAULT}` - not found in .saferc")
+			unless $vault;
+		trace "Rebinding to $ENV{GENESIS_TARGET_VAULT}: matches %s",
+			$vault->{name} || "<unnamed>";
+	} else {
+		# Legacy named-target path: match against the default vault.
+		my $default = $class->default;
+		if ($default && $ENV{GENESIS_TARGET_VAULT} eq $default->{name}) {
+			$vault = $default->ref_by_name();
+			trace "Rebinding to default vault `$ENV{GENESIS_TARGET_VAULT}` (legacy mode)";
+		}
+	}
+	return unless $vault;
+	return $vault->set_as_current;
+}
+
+# }}}
 # get_vault_from_descriptor - find unique vault from vault descriptor, or bail {{{
 sub get_vault_from_descriptor {
 

@@ -9,6 +9,8 @@ use Test::Output;
 
 use_ok 'Service::Vault';
 use_ok 'Service::Vault::None';
+use Service::Vault::Remote;
+use Service::Vault::Local;
 use Genesis;
 
 # -------------------------------------------------------------------------
@@ -805,6 +807,86 @@ subtest 'Service::Vault::None - sentinel detection patterns' => sub {
 		'ref() check works for class-based detection');
 	is($none->status(), 'absent',
 		'status() check works for value-based detection');
+};
+
+# -------------------------------------------------------------------------
+# rebind() - class-agnostic, callback-context lookup by URL from
+# $ENV{GENESIS_TARGET_VAULT}.  Returns whatever kind of vault sits at
+# the target URL (Remote OR Local) -- callers in bash-hook subprocess
+# contexts must not need to know or care.  Regression prevention for a
+# prior design where rebind() lived on Remote and class-filtered its
+# find(), which silently excluded Local vaults and bailed on any
+# kit-test / dev-loop that used `safe local -m` -- see kit-validator's
+# HOME-sandbox setup.
+# -------------------------------------------------------------------------
+subtest 'rebind() - missing GENESIS_TARGET_VAULT throws' => sub {
+	plan tests => 1;
+
+	delete local $ENV{GENESIS_TARGET_VAULT};
+
+	quietly {
+		throws_ok { Service::Vault->rebind() }
+			qr/Cannot rebind to vault in callback due to missing environment variables/i,
+			'rebind() throws when GENESIS_TARGET_VAULT is not set';
+	};
+};
+
+subtest 'rebind() returns the vault at the URL regardless of subclass' => sub {
+	plan tests => 4;
+
+	local $ENV{GENESIS_TARGET_VAULT} = 'http://127.0.0.1:8201';
+
+	# Case 1: URL resolves to a Remote vault.
+	Service::Vault->clear_all();
+	{
+		my $r = bless {
+			url => 'http://127.0.0.1:8201', name => 'remote-vault',
+			verify => 0, namespace => '', strongbox => 0,
+		}, 'Service::Vault::Remote';
+
+		no warnings 'redefine';
+		local *Service::Vault::find = sub { ($r) };
+		use warnings 'redefine';
+
+		my $ret = Service::Vault->rebind();
+		is(ref($ret), 'Service::Vault::Remote', 'Remote at URL is returned as Remote');
+		is($ret->{name}, 'remote-vault', 'correct Remote instance returned');
+	}
+
+	# Case 2: URL resolves to a Local vault -- the case that used to bail.
+	Service::Vault->clear_all();
+	{
+		my $l = bless {
+			url => 'http://127.0.0.1:8201', name => 'local_vault_test_1234',
+			verify => 0, namespace => '', strongbox => 0,
+		}, 'Service::Vault::Local';
+
+		no warnings 'redefine';
+		local *Service::Vault::find = sub { ($l) };
+		use warnings 'redefine';
+
+		my $ret = Service::Vault->rebind();
+		is(ref($ret), 'Service::Vault::Local', 'Local at URL is returned as Local');
+		is($ret->{name}, 'local_vault_test_1234', 'correct Local instance returned');
+	}
+
+	Service::Vault->clear_all();
+};
+
+subtest 'rebind() throws when URL is not found in .saferc' => sub {
+	plan tests => 1;
+
+	local $ENV{GENESIS_TARGET_VAULT} = 'http://nowhere.invalid:8200';
+
+	no warnings 'redefine';
+	local *Service::Vault::find = sub { () };
+	use warnings 'redefine';
+
+	quietly {
+		throws_ok { Service::Vault->rebind() }
+			qr/Cannot rebind to vault at address/i,
+			'rebind() throws when URL is unknown';
+	};
 };
 
 done_testing;

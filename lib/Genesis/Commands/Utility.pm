@@ -34,7 +34,7 @@ sub line_prompt_handler {
 	}
 	if (defined($opts{validation}) && !ref($opts{validation}) && $opts{validation} =~ /^vault_path/) {
 		require Service::Vault::Remote;
-		my $vault = Service::Vault::Remote->current || Service::Vault::Remote->rebind();
+		my $vault = Service::Vault::Remote->current || Service::Vault->rebind();
 		bail("No vault selected!") unless $vault;
 	}
 	return prompt_for_line($prompt, $opts{label},$opts{default},$opts{validation},$opts{msg})
@@ -70,7 +70,7 @@ sub multi_line_prompt_handler {
 	validate_prompt_opts("multi-line", \%opts, qw(label min max validation msg));
 	if (defined($opts{validation}) && !ref($opts{validation}) && $opts{validation} =~ /^vault_path/) {
 		require Service::Vault::Remote;
-		my $vault = Service::Vault::Remote->current || Service::Vault::Remote->rebind();
+		my $vault = Service::Vault::Remote->current || Service::Vault->rebind();
 		bail("No vault selected!") unless $vault;
 	}
 	my $results = prompt_for_list('line',$prompt,$opts{label},$opts{min},$opts{max},$opts{validation},$opts{msg});
@@ -105,7 +105,7 @@ sub secret_line_prompt_handler {
 	validate_prompt_opts("secret-line", \%opts, qw(echo));
 
 	require Service::Vault::Remote;
-	my $vault = Service::Vault::Remote->current || Service::Vault::Remote->rebind();
+	my $vault = Service::Vault::Remote->current || Service::Vault->rebind();
 	bail("No vault selected!") unless $vault;
 
 	$secret = $secrets_base.$secret unless $secret =~ /^\//;
@@ -123,7 +123,7 @@ sub secret_block_prompt_handler {
 	my $file = mkfile_or_fail(workdir()."/param", prompt_for_block($prompt));
 
 	require Service::Vault::Remote;
-	my $vault = Service::Vault::Remote->current || Service::Vault::Remote->rebind();
+	my $vault = Service::Vault::Remote->current || Service::Vault->rebind();
 	bail("No vault selected!") unless $vault;
 
 	$secret = $secrets_base.$secret unless $secret =~ /^\//;

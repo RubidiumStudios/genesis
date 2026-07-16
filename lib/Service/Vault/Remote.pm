@@ -193,31 +193,11 @@ sub attach {
 }
 
 # }}}
-# rebind - builder for rebinding to a previously selected vault (for callbacks) {{{
-# TODO: Bind to alias, which encapuslates all the namespace, validation, strongbox, url, etc...
-sub rebind {
-	# Special builder with less checking for callback support
-	my ($class) = @_;
-
-	bail("Cannot rebind to vault in callback due to missing environment variables!")
-		unless $ENV{GENESIS_TARGET_VAULT};
-
-	my $vault;
-	if (is_valid_uri($ENV{GENESIS_TARGET_VAULT})) {
-		$vault = ($class->find(url => $ENV{GENESIS_TARGET_VAULT}))[0];
-		bail("Cannot rebind to vault at address '$ENV{GENESIS_TARGET_VAULT}` - not found in .saferc")
-			unless $vault;
-		trace "Rebinding to $ENV{GENESIS_TARGET_VAULT}: Matches %s", $vault && $vault->{name} || "<undef>";
-	} else {
-		# Check if its a named vault and if it matches the default (legacy mode)
-		if ($ENV{GENESIS_TARGET_VAULT} eq $class->default->{name}) {
-			$vault = $class->default()->ref_by_name();
-			trace "Rebinding to default vault `$ENV{GENESIS_TARGET_VAULT}` (legacy mode)";
-		}
-	}
-	return unless $vault;
-	return $vault->set_as_current;
-}
+# rebind - inherited from Service::Vault (see that class's rebind
+# docstring).  Legacy callers of Service::Vault::Remote->rebind()
+# continue to work via inheritance; new code should use
+# Service::Vault->rebind() to make the class-agnostic intent
+# explicit.
 
 # }}}
 # find - return vaults that match filter (defaults to all) {{{

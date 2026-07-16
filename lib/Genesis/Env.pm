@@ -2758,7 +2758,7 @@ sub vault {
 
 		my $details = Service::Vault->parse_vault_descriptor($vault_info);
 
-		return Service::Vault::Remote->rebind()
+		return Service::Vault->rebind()
 			if (
 				in_callback &&
 				$ENV{GENESIS_TARGET_VAULT} &&

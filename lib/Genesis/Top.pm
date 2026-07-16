@@ -757,7 +757,7 @@ sub vault {
 		return Service::Vault::None->new() if ($ENV{GENESIS_NO_VAULT});
 		my ($self) = @_;
 		if (in_callback && $ENV{GENESIS_TARGET_VAULT}) {
-			return Service::Vault::Remote->rebind();
+			return Service::Vault->rebind();
 		} elsif ($self->has_vault) {
 			my $namespace =  $self->config->get("secrets_provider.namespace");
 			my $strongbox = $self->config->get("secrets_provider.strongbox");
