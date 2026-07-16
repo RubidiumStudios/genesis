@@ -22,7 +22,7 @@ The Dockerfile accepts two build arguments:
   in `genesis-community/genesis-kit-validator` to install for kit
   spec-testing.  Override with a tag (e.g. `v0.1.0`) once
   genesis-kit-validator cuts a release; leave as `main` for tracking
-  head.  The image installs Kit::Validator via `cpanm` from
+  head.  The image installs Genesis::Kit::Validator via `cpanm` from
   `https://github.com/genesis-community/genesis-kit-validator/archive/${KIT_VALIDATOR_REF}.tar.gz`.
 
 The binary is fetched from
@@ -54,14 +54,14 @@ libxml2/libxslt/libyaml dev libs) for kits and hooks that need
 to compile native extensions inside the container.
 
 Genesis itself is downloaded from the GitHub release at image
-build time.  Kit::Validator (the Perl spec-test framework
+build time.  Genesis::Kit::Validator (the Perl spec-test framework
 that replaces the earlier Ginkgo-based testkit) is installed
 via `cpanm` from GitHub -- controlled by the
 `KIT_VALIDATOR_REF` build arg -- along with the three non-core
 test modules it needs (`Test::Deep`, `Test::Output`,
 `Test::Exit`).  Kit spec-test tasks can then simply run
 `prove -lv spec/spec.t`; no `PERL5LIB` setup is needed
-because Kit::Validator self-discovers Genesis's Perl lib from
+because Genesis::Kit::Validator self-discovers Genesis's Perl lib from
 `~/.genesis/lib` (populated on first invocation of the
 `genesis` binary).
 

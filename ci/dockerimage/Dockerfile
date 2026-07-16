@@ -55,18 +55,18 @@ ARG GENESIS_OWNER=genesis-community
 RUN curl -Lo /usr/bin/genesis "https://github.com/${GENESIS_OWNER}/genesis/releases/download/v${GENESIS_VERSION}/genesis" \
      && chmod 0755 /usr/bin/genesis
 
-# Kit::Validator (Perl spec-test framework for Genesis kits) and its
-# non-core CPAN test deps.  Runtime deps like Test::More, JSON::PP,
-# and File::Temp are already in Ubuntu's perl-base.  Genesis's own
-# Perl lib is discovered at runtime under ~/.genesis/lib via the
-# self-extract path -- no PERL5LIB gymnastics required.
-ARG KIT_VALIDATOR_REF=v0.1.1
+# Genesis::Kit::Validator (Perl spec-test framework for Genesis kits)
+# and its non-core CPAN test deps.  Runtime deps like Test::More,
+# JSON::PP, and File::Temp are already in Ubuntu's perl-base.
+# Genesis's own Perl lib is discovered at runtime under ~/.genesis/lib
+# via the self-extract path -- no PERL5LIB gymnastics required.
+ARG KIT_VALIDATOR_REF=main
 RUN apt-get update && apt-get install -y --no-install-recommends cpanminus \
  && cpanm --no-man-pages --notest Test::Deep Test::Output Test::Exit \
  && cpanm --no-man-pages --notest \
-      "https://github.com/genesis-community/genesis-kit-validator/archive/refs/tags/${KIT_VALIDATOR_REF}.tar.gz" \
+      "https://github.com/genesis-community/genesis-kit-validator/archive/${KIT_VALIDATOR_REF}.tar.gz" \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
 RUN genesis -v \
- && perl -MKit::Validator -e 'print "Kit::Validator ", Kit::Validator->VERSION, " loaded OK\n"'
+ && perl -MGenesis::Kit::Validator -e 'print "Genesis::Kit::Validator ", Genesis::Kit::Validator->VERSION, " loaded OK\n"'
