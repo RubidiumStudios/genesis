@@ -2215,6 +2215,25 @@ sub cpi_az_map {
 	return {} unless @azs;
 
 	my $cloud_azs = scalar $self->manifest_lookup('azs', []);
+
+	# Director-deployed envs do not carry azs in their deployment
+	# manifest -- the azs live in cloud configs uploaded to the parent
+	# director (the manifest-embedded form only exists for create-env).
+	# Fall back to collecting the azs sections across the director's
+	# active cloud configs.
+	if (!(ref($cloud_azs) eq 'ARRAY' && @$cloud_azs) && !$self->use_create_env) {
+		my @director_azs;
+		my $configs = eval { scalar $self->bosh->configs } // {};
+		for my $name (sort keys %{$configs->{cloud} // {}}) {
+			my $yaml = eval { $self->bosh->get_config('cloud', $name) };
+			next unless defined($yaml) && length($yaml);
+			my $parsed = eval { load_yaml($yaml) };
+			next unless ref($parsed) eq 'HASH' && ref($parsed->{azs}) eq 'ARRAY';
+			push @director_azs, @{$parsed->{azs}};
+		}
+		$cloud_azs = \@director_azs;
+	}
+
 	my %az_cpi = map  { $_->{name} => $_->{cpi} }
 	             grep { ref($_) eq 'HASH' && defined($_->{name}) }
 	             @$cloud_azs;
