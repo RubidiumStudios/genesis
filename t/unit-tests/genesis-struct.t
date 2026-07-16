@@ -196,6 +196,35 @@ subtest 'unflatten() - arrays' => sub {
 	is $nested->{array}[2], 'three', 'array element 2 correct';
 };
 
+subtest 'unflatten() - does not mutate the source hash' => sub {
+	# Regression: unflatten used to `delete $data->{$k}` while building
+	# the nested result, so the caller's flat hash came back empty and
+	# a second consumer (e.g. params re-read after the first unflatten)
+	# saw nothing.  The contract is now: source is read-only.
+	my %flat_data = (
+		'simple'      => 'value',
+		'nested.key'  => 'nested_value',
+		'array[0]'    => 'one',
+		'array[1]'    => 'two',
+		'deep.hash.a' => 1,
+		'deep.hash.b' => 2,
+	);
+	my %expected_source = %flat_data;
+	my $flat_ref = \%flat_data;
+
+	my $nested = unflatten($flat_ref);
+
+	# All original keys still present with original values.
+	is_deeply \%flat_data, \%expected_source,
+		'source hash unchanged after unflatten';
+
+	# Second unflatten of the same source produces the same result --
+	# proves the mutation would have poisoned any downstream consumer.
+	my $again = unflatten($flat_ref);
+	is_deeply $again, $nested,
+		'unflatten is idempotent on the same source (no state carries over)';
+};
+
 subtest 'flatten/unflatten roundtrip - empty hashes and arrays' => sub {
 	my $original = {
 		empty_hash => {},

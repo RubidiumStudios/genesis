@@ -1445,11 +1445,11 @@ sub unflatten {
 			if (defined $sk) {
 				die "Array cannot have scalar and non-scalar values (at ${branch}[$i])"
 					if defined $a_data[$i] && ref($a_data[$i]) ne 'HASH';
-				$a_data[$i]->{$sk} = delete $data->{$k};
+				$a_data[$i]->{$sk} = $data->{$k};
 			} else {
 				die "Array cannot have scalar and non-scalar values (at ${branch}[$i])"
 					if defined $a_data[$i];
-				$a_data[$i] = delete $data->{$k};
+				$a_data[$i] = $data->{$k};
 			}
 		}
 		for my $i (0..$#a_data) {
@@ -1465,11 +1465,11 @@ sub unflatten {
 				# If $h_data{$pk} is an array ref,
 				die "Hash cannot have scalar and non-scalar values (at ".join('.', grep $_, ($branch, "pk")).")"
 					if defined $h_data{$pk} && ref($h_data{$pk}) ne 'HASH';
-				$h_data{$pk}->{$sk} = delete $data->{$k};
+				$h_data{$pk}->{$sk} = $data->{$k};
 			} else {
 				die "Hash cannot have scalar and non-scalar values (at ".join('.', grep $_, ($branch, "pk")).")"
 					if defined $h_data{$pk};
-				$h_data{$pk} = delete $data->{$k};
+				$h_data{$pk} = $data->{$k};
 			}
 		}
 		for my $k (sort keys %h_data) {
