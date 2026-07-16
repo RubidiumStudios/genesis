@@ -111,6 +111,11 @@ sub gather_properties {
 	for my $property (@properties) {
 		my ($is_secret, $key, $alts, $default, $optional, $path) =
 			$property =~ /^(!?)([^\@:\?\>]+)(?:\@([^:\?\>]+))?(?:(?::([^>]+))|(\?))?(?:>(.+))?$/;
+		bail(
+			"Invalid CPI config property specification '%s' in kit cpi-config hook "
+			. "(expected [!]key[\@alt][:default|?][>path])",
+			$property
+		) unless defined $key;
 		$path //= $key;
 		$default //= '';
 		my @lookups = ($key, (split /,/, $alts//''));
