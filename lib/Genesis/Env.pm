@@ -2148,10 +2148,32 @@ sub instance_group_azs {
 	my $self = shift;
 	my $igs  = scalar $self->manifest_lookup('instance_groups', []);
 	my %seen;
-	return sort grep { !$seen{$_}++ }
-	            map  { @{ $_->{azs} // [] } }
-	            grep { ref($_) eq 'HASH' }
-	            @$igs;
+	my @azs = map  { @{ $_->{azs} // [] } }
+	          grep { ref($_) eq 'HASH' }
+	          @$igs;
+
+	# base_manifest -> unredacted merges without --skip-eval, so any
+	# `(( ... ))` reaching here violates the fully-evaluated invariant.
+	# Common cause is a spruce marker inside a go-patch document (which
+	# never consumes it); an unconsumed `(( replace ))` in particular
+	# means the parent's AZ entries are still present alongside the
+	# intended replacement.  Filtering the marker hides the corruption;
+	# bail so the operator fixes the merge, not the symptom.
+	if (my @unresolved = grep { /^\s*\(\(.*\)\)\s*$/ } @azs) {
+		bail(
+			"Unresolved spruce operator(s) in #C{instance_groups.*.azs}: %s\n".
+			"The manifest was not fully evaluated before AZ resolution ran, ".
+			"so downstream AZ/CPI selection would use unreliable data.  ".
+			"Common cause: a spruce operator (e.g. #C{(( replace ))}) was ".
+			"embedded inside a go-patch document -- go-patch does not consume ".
+			"spruce markers, so the operator survives to the resolved ".
+			"manifest.  Investigate the ops file that owns this instance_group's ".
+			"#C{azs:} block.",
+			join(', ', map { "'$_'" } @unresolved)
+		);
+	}
+
+	return sort grep { !$seen{$_}++ } @azs;
 }
 
 # }}}
