@@ -410,29 +410,37 @@ sub vault_paths {
 	pushd $self->env->path;
 	# spruce vaultinfo evaluates every operator while walking, so a
 	# leftover `(( grab X ))` whose target was pruned in a later
-	# multidoc page bails the whole pass.  Strip all non-vault
-	# operators first; the empty-string substitute keeps the YAML
-	# parseable.
-	my $sanitized = slurp($file);
-	$sanitized =~ s{\(\(\s*(\w[\w-]*)([^)]*?)\)\)}{
-		$1 eq 'vault' ? "(( $1$2))" : '""';
-	}ges;
-	my $sanitized_file = tmpfile(
-		dir      => $self->env->workpath,
-		ext      => '.yml',
-		template => 'vaultinfo-XXXXXXXX',
+	# multidoc page bails the whole pass.  Try the original file first:
+	# blanking non-vault operators destroys grab/concat chains that feed
+	# vault operator arguments (eg `(( vault meta.x ":ca_cert" ))` where
+	# meta.x is `(( grab ... ))`), yielding bogus paths like `/:ca_cert`.
+	# Only fall back to a sanitized copy when spruce cannot walk the
+	# original.
+	my %run_env = ($self->env->get_environment_variables);
+	my ($out, $rc) = run({stderr => "&1", env => {%run_env}},
+		'spruce vaultinfo "$1" | spruce json', $file
 	);
-	mkfile_or_fail($sanitized_file, 0644, $sanitized);
-
-	my $json = read_json_from(run({
-			onfailure => "Unable to determine vault paths from ".$self->env->name." manifest",
-			stderr => "&1",
-			env => {
-				$self->env->get_environment_variables
-			}
-		},
-		'spruce vaultinfo "$1" | spruce json', $sanitized_file
-	));
+	my $json;
+	$json = eval {read_json_from($out)} if $rc == 0;
+	unless (ref($json) eq 'HASH' && ref($json->{secrets}) eq 'ARRAY') {
+		my $sanitized = slurp($file);
+		$sanitized =~ s{\(\(\s*(\w[\w-]*)([^)]*?)\)\)}{
+			$1 eq 'vault' ? "(( $1$2))" : '""';
+		}ges;
+		my $sanitized_file = tmpfile(
+			dir      => $self->env->workpath,
+			ext      => '.yml',
+			template => 'vaultinfo-XXXXXXXX',
+		);
+		mkfile_or_fail($sanitized_file, 0644, $sanitized);
+		$json = read_json_from(run({
+				onfailure => "Unable to determine vault paths from ".$self->env->name." manifest",
+				stderr => "&1",
+				env => {%run_env}
+			},
+			'spruce vaultinfo "$1" | spruce json', $sanitized_file
+		));
+	}
 	popd;
 
 	bail(
