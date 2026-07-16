@@ -19,11 +19,11 @@ The Dockerfile accepts two build arguments:
   building images from a fork or a private dev org. Example:
   `RubidiumStudios`.
 - `KIT_VALIDATOR_REF` (optional, default `main`) -- the git ref
-  in `genesis-community/kit-validator` to install for kit
+  in `genesis-community/genesis-kit-validator` to install for kit
   spec-testing.  Override with a tag (e.g. `v0.1.0`) once
-  kit-validator cuts a release; leave as `main` for tracking
+  genesis-kit-validator cuts a release; leave as `main` for tracking
   head.  The image installs Kit::Validator via `cpanm` from
-  `https://github.com/genesis-community/kit-validator/archive/${KIT_VALIDATOR_REF}.tar.gz`.
+  `https://github.com/genesis-community/genesis-kit-validator/archive/${KIT_VALIDATOR_REF}.tar.gz`.
 
 The binary is fetched from
 `https://github.com/${GENESIS_OWNER}/genesis/releases/download/v${GENESIS_VERSION}/genesis`,

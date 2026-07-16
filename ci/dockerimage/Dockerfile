@@ -64,7 +64,7 @@ ARG KIT_VALIDATOR_REF=v0.1.1
 RUN apt-get update && apt-get install -y --no-install-recommends cpanminus \
  && cpanm --no-man-pages --notest Test::Deep Test::Output Test::Exit \
  && cpanm --no-man-pages --notest \
-      "https://github.com/genesis-community/kit-validator/archive/refs/tags/${KIT_VALIDATOR_REF}.tar.gz" \
+      "https://github.com/genesis-community/genesis-kit-validator/archive/refs/tags/${KIT_VALIDATOR_REF}.tar.gz" \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
