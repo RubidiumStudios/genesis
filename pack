@@ -54,22 +54,32 @@ $stub_out = $ARGV[1] if $ARGV[1];
 my $BUILD = "($sha1) build ".strftime("%Y%m%d.%H%M%S", gmtime);
 
 # ---
-# Brand script with version
+# Brand with version
 # ---
-open my $out, ">", "pkg/genesis"
-	or die "Failed to open pkg/genesis for writing: $!\n";
-open my $in, "<", "bin/genesis"
-	or die "Failed to open bin/genesis for reading: $!\n";
-
-while (<$in>) {
-	s/^(\$Genesis::VERSION) = .*$/$1 = \"$VERSION\";/;
-	s/^(\$Genesis::BUILD) = .*$/$1 = \" $BUILD\";/;
-	print $out $_;
-}
-
-close $out;
-close $in;
+# bin/genesis carries no version state; copy it unchanged.
+system('cp', 'bin/genesis', 'pkg/genesis') == 0
+	or die "Failed to copy bin/genesis into pkg/: $!\n";
 chmod 0755, "pkg/genesis";
+
+# Rewrite the version/build assignments in pkg/lib/Genesis.pm (the
+# copy under pkg/, not the source tree).
+{
+	my $file = "pkg/lib/Genesis.pm";
+	open my $in, "<", $file
+		or die "Failed to open $file for reading: $!\n";
+	my @lines = <$in>;
+	close $in;
+
+	for (@lines) {
+		s{^\$VERSION\s*//=\s*.*$}{\$VERSION = "$VERSION";};
+		s{^(our \$BUILD)\s*=\s*.*$}{$1 = " $BUILD";};
+	}
+
+	open my $out, ">", $file
+		or die "Failed to open $file for writing: $!\n";
+	print $out @lines;
+	close $out;
+}
 
 # ---
 # Assemble the tarball (with embedded checksum)

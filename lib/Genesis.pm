@@ -5,11 +5,12 @@ no warnings 'utf8';
 use utf8;
 
 our $APP     = "genesis";
-# Use //= so a caller (typically bin/genesis after pack injection,
-# or t/helper.pm's test-harness seed) can pin $Genesis::VERSION
-# before `use Genesis;` and have that pin survive the load.
+# `//=` lets a caller (t/helper.pm's test-harness seed) pin
+# $Genesis::VERSION before `use Genesis;` and have that pin survive
+# the load.  `pack` rewrites this line to a literal `= "X.Y.Z";` at
+# release time; local dev overrides via $GENESIS_DEV_VERSION.
 our $VERSION;
-$VERSION //= "(development)";
+$VERSION //= $ENV{GENESIS_DEV_VERSION} // "(development)";
 our $BUILD   = "";
 
 our $GITHUB  = "https://github.com/genesis-community/genesis";

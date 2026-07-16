@@ -30,9 +30,8 @@ use Genesis::Term;
 use Genesis::Commands;
 use Genesis::Log;
 
-$Genesis::APP = 'genesis';
-$Genesis::VERSION = "(development)";
-$Genesis::BUILD = "";
+# $Genesis::{APP,VERSION,BUILD} are owned by Genesis.pm; pack injects
+# the release version into that file.  Do not reassign them here.
 
 # Command will be determined later in main()
 $ENV{GENESIS_COMMAND} = '';
