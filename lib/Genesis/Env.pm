@@ -5528,7 +5528,11 @@ sub rotate_secrets {
 		} else {
 			$self->notify(success => "doesn't have any secrets to rotate.\n");
 		}
-		exit 0;
+		# Return rather than exit: callers (_fix_secrets during deploy, the
+		# rotate-secrets command) already handle an {empty=>1} result. exit 0 here
+		# aborts `genesis deploy` before bosh deploy for any secret-less
+		# deployment (e.g. jumpbox with no features defining secrets).
+		return ({empty => 1});
 	}
 
 	kit_bug(
