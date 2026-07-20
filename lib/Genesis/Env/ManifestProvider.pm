@@ -423,6 +423,47 @@ sub vault_paths {
 	my $json;
 	$json = eval {read_json_from($out)} if $rc == 0;
 	unless (ref($json) eq 'HASH' && ref($json->{secrets}) eq 'ARRAY') {
+		# The original manifest has a node spruce can't resolve (most
+		# often a dangling `(( grab ))` left over from a multidoc page
+		# whose target was pruned by a later page).  Rather than
+		# blanking every non-vault operator -- which would also erase
+		# any grab/concat chain that composes a vault operator's own
+		# base path -- prune only the specific node(s) spruce reports
+		# as unresolvable and retry.  This keeps operator-computed
+		# vault paths (eg kits that build meta.x.vault.config via
+		# grab/concat) intact.
+		my $working_file = $file;
+		for (1..10) {
+			my ($verr, $vrc) = run({stderr => "&1", env => {%run_env}},
+				'spruce vaultinfo "$1"', $working_file
+			);
+			last unless $vrc;
+			my @unresolvable = ($verr//'') =~ /^\s*-\s*\$\.(\S+?):/mg;
+			last unless @unresolvable;
+
+			my $pruned_file = tmpfile(
+				dir      => $self->env->workpath,
+				ext      => '.yml',
+				template => 'vaultinfo-pruned-XXXXXXXX',
+			);
+			my (undef, $prc) = run({stderr => "&1", env => {%run_env}},
+				'fin="$1";fout="$2"; shift 2; spruce merge --skip-eval "$@" "$fin" > "$fout"',
+				$working_file, $pruned_file, map {('--prune', $_)} @unresolvable
+			);
+			last if $prc;
+			$working_file = $pruned_file;
+
+			($out, $rc) = run({stderr => "&1", env => {%run_env}},
+				'spruce vaultinfo "$1" | spruce json', $working_file
+			);
+			$json = eval {read_json_from($out)} if $rc == 0;
+			last if ref($json) eq 'HASH' && ref($json->{secrets}) eq 'ARRAY';
+		}
+	}
+	unless (ref($json) eq 'HASH' && ref($json->{secrets}) eq 'ARRAY') {
+		# Last resort: blank every non-vault operator.  This can still
+		# corrupt operator-computed vault paths, but only applies when
+		# targeted pruning above could not make the manifest walkable.
 		my $sanitized = slurp($file);
 		$sanitized =~ s{\(\(\s*(\w[\w-]*)([^)]*?)\)\)}{
 			$1 eq 'vault' ? "(( $1$2))" : '""';
