@@ -25,6 +25,34 @@ use constant {
 
 # }}}
 
+# OCFP reserved-ip target aliases {{{
+# Core-side safety net for kit renames whose bloc carve data still keys
+# reserved-ips under the old name (eg openbao inheriting vault's).
+# Prefer declaring aliases on the kit itself via
+# ocfp_reserved_ip_target_aliases so the rename story stays with the kit.
+# Values may be a scalar name or an arrayref of names.
+my %OCFP_RESERVED_IP_TARGET_ALIASES = (
+	openbao => 'vault',
+);
+
+# }}}
+# _as_list - normalize scalar-or-arrayref into a list {{{
+sub _as_list {
+	my ($v) = @_;
+	return () unless defined $v;
+	return ref($v) eq 'ARRAY' ? @$v : ($v);
+}
+
+# }}}
+# ocfp_reserved_ip_target_aliases - kit hook: return scalar or arrayref of
+# alias target names for $target; base returns nothing.
+sub ocfp_reserved_ip_target_aliases {
+	my ($self, $target) = @_;
+	return;
+}
+
+# }}}
+
 # Class Overrides {{{
 # init - Initializes the CloudConfig hook, injecting the common properties {{{
 
@@ -590,7 +618,16 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			$target, $subnet_name, $fields, $strategy
 		);
 
-		push @{$config->{subnets}}, $subnet_config if $full_range->size > $reserved->size;
+		if ($full_range->size > $reserved->size) {
+			push @{$config->{subnets}}, $subnet_config;
+		} else {
+			warning(
+				"Dropping subnet %s from network %s: no reserved IP allocation ".
+				"found for target '%s' (checked reserved-ips keys %s_a/_b/../_ip".
+				", and any registered alias targets)",
+				$subnet_name, $network_id, $target, $target
+			);
+		}
 	}
 
 
@@ -1535,23 +1572,48 @@ sub _calculate_static_allocation {
 # _get_reserved_allocation - Returns the reserved IP allocation for a given target and subnet {{{
 sub _get_reserved_allocation {
 	my ($self, $target, $subnet) = @_;
+	my $reserved_ips = $subnet->{'reserved-ips'} // {};
+
+	# Resolution order: target itself, then aliases.  Aliases come from
+	# ocfp_reserved_ip_target_aliases when the kit returns defined
+	# (kit owns the story, including opting out with []); otherwise
+	# fall through to %OCFP_RESERVED_IP_TARGET_ALIASES.  Applied
+	# independently to each of the three lookup mechanisms below.
+	my $kit_aliases = $self->ocfp_reserved_ip_target_aliases($target);
+	my @aliases = defined($kit_aliases)
+		? _as_list($kit_aliases)
+		: _as_list($OCFP_RESERVED_IP_TARGET_ALIASES{$target});
+	my %seen;
+	my @candidates = grep { !$seen{$_}++ } ($target, @aliases);
 
 	# We need to use target_a, .._b, .._c, _d if available
-	my $idx = 'a';
 	my $allocation = IPv4->new();
-	while (exists $subnet->{'reserved-ips'}{$target."_$idx"}) {
-		my $start = IPv4->address($subnet->{'reserved-ips'}{$target."_".$idx++})+1;
-		my $end   = IPv4->address($subnet->{'reserved-ips'}{$target."_".$idx++})-1;
-		$allocation += $start->to($end);
+	for my $candidate (@candidates) {
+		next unless exists $reserved_ips->{$candidate."_a"};
+		my $idx = 'a';
+		while (exists $reserved_ips->{$candidate."_$idx"}) {
+			my $start = IPv4->address($reserved_ips->{$candidate."_".$idx++})+1;
+			my $end   = IPv4->address($reserved_ips->{$candidate."_".$idx++})-1;
+			$allocation += $start->to($end);
+		}
+		last;
 	}
 
-	$allocation += IPv4->new(
-		map  {$subnet->{'reserved-ips'}{$_}}
-		grep {$_ =~ m/${target}_ip/}
-		keys %{$subnet->{'reserved-ips'}//{}}
-	);
+	for my $candidate (@candidates) {
+		my @ip_keys = grep {$_ =~ m/${candidate}_ip/} keys %$reserved_ips;
+		next unless @ip_keys;
+		$allocation += IPv4->new(map {$reserved_ips->{$_}} @ip_keys);
+		last;
+	}
 
-	my $static = $subnet->{'reserved-ips'}{$target."_static"}//1;
+	my $static;
+	for my $candidate (@candidates) {
+		next unless exists $reserved_ips->{$candidate."_static"};
+		$static = $reserved_ips->{$candidate."_static"};
+		last;
+	}
+	$static //= 1;
+
 	return ($allocation->simplify, $static);
 }
 
