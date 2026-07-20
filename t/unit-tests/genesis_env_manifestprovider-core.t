@@ -636,6 +636,49 @@ subtest 'vault_paths() extracts vault secrets from manifest (requires spruce)' =
 	done_testing;
 };
 
+subtest 'vault_paths() preserves grab/concat-computed vault base paths' => sub {
+	my $spruce = do { chomp(my $s = `which spruce 2>/dev/null`); $s };
+	plan skip_all => 'spruce not found in PATH' unless $spruce && -x $spruce;
+
+	# Reproduces a defect where a kit builds its vault BASE path via
+	# (( grab ))/(( concat )) (eg meta.ocfp.vault.config), while the
+	# manifest also has an unrelated dangling (( grab )) elsewhere (the
+	# common shape of a multidoc page whose target was pruned by a
+	# later page).  spruce vaultinfo can't walk the manifest as-is
+	# because of the dangling grab; vault_paths() must recover from
+	# that without destroying the concat/grab chain that composes the
+	# vault operator's own base path.
+	my $dir = workdir('vault-paths-defect');
+	my $manifest = "$dir/manifest.yml";
+	put_file($manifest, <<'EOF');
+meta:
+  name: dev
+  ocfp:
+    vault:
+      config: (( concat "/secret/" meta.name "/reserved-ips" ))
+properties:
+  something: (( vault meta.ocfp.vault.config ":password" ))
+  unrelated: (( grab this.path.does.not.exist ))
+EOF
+
+	my $env = Mock->new(
+		name                      => 'vp-defect-test',
+		path                      => sub { $dir },
+		workpath                  => sub { $dir },
+		get_environment_variables => sub { () },
+	);
+	my $provider = Genesis::Env::ManifestProvider->new($env);
+
+	my $paths = $provider->vault_paths(file => $manifest);
+
+	ok(
+		exists $paths->{'/secret/dev/reserved-ips:password'},
+		'vault_paths() resolves the grab/concat-computed base path'
+	) or diag explain $paths;
+
+	done_testing;
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
