@@ -25,6 +25,19 @@ use constant {
 
 # }}}
 
+# Reserved IP target aliases {{{
+# Some kits are renamed after their bloc carve data has already been
+# published (eg the vault kit becoming openbao) without a corresponding
+# rename of the reserved-ips entries in the bloc's cloud carve data.  When
+# a target has no reserved-ips keys of its own, _get_reserved_allocation
+# falls back to the aliased target(s) listed here.  Add the new kit name
+# as a key with its predecessor(s) as the value to cover the next rename.
+my %RESERVED_IP_TARGET_ALIASES = (
+	openbao => ['vault'],
+);
+
+# }}}
+
 # Class Overrides {{{
 # init - Initializes the CloudConfig hook, injecting the common properties {{{
 
@@ -590,7 +603,16 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			$target, $subnet_name, $fields, $strategy
 		);
 
-		push @{$config->{subnets}}, $subnet_config if $full_range->size > $reserved->size;
+		if ($full_range->size > $reserved->size) {
+			push @{$config->{subnets}}, $subnet_config;
+		} else {
+			warning(
+				"Dropping subnet %s from network %s: no reserved IP allocation ".
+				"found for target '%s' (checked reserved-ips keys %s_a/_b/../_ip".
+				", and any registered alias targets)",
+				$subnet_name, $network_id, $target, $target
+			);
+		}
 	}
 
 
@@ -1535,23 +1557,43 @@ sub _calculate_static_allocation {
 # _get_reserved_allocation - Returns the reserved IP allocation for a given target and subnet {{{
 sub _get_reserved_allocation {
 	my ($self, $target, $subnet) = @_;
+	my $reserved_ips = $subnet->{'reserved-ips'} // {};
+
+	# Consult the target itself first, then any aliases registered in
+	# %RESERVED_IP_TARGET_ALIASES.  The primary target always wins when
+	# its own keys are present; an alias is only consulted when the
+	# primary yields nothing, and this is applied independently to each
+	# of the three lookup mechanisms below.
+	my @candidates = ($target, @{$RESERVED_IP_TARGET_ALIASES{$target}//[]});
 
 	# We need to use target_a, .._b, .._c, _d if available
-	my $idx = 'a';
 	my $allocation = IPv4->new();
-	while (exists $subnet->{'reserved-ips'}{$target."_$idx"}) {
-		my $start = IPv4->address($subnet->{'reserved-ips'}{$target."_".$idx++})+1;
-		my $end   = IPv4->address($subnet->{'reserved-ips'}{$target."_".$idx++})-1;
-		$allocation += $start->to($end);
+	for my $candidate (@candidates) {
+		next unless exists $reserved_ips->{$candidate."_a"};
+		my $idx = 'a';
+		while (exists $reserved_ips->{$candidate."_$idx"}) {
+			my $start = IPv4->address($reserved_ips->{$candidate."_".$idx++})+1;
+			my $end   = IPv4->address($reserved_ips->{$candidate."_".$idx++})-1;
+			$allocation += $start->to($end);
+		}
+		last;
 	}
 
-	$allocation += IPv4->new(
-		map  {$subnet->{'reserved-ips'}{$_}}
-		grep {$_ =~ m/${target}_ip/}
-		keys %{$subnet->{'reserved-ips'}//{}}
-	);
+	for my $candidate (@candidates) {
+		my @ip_keys = grep {$_ =~ m/${candidate}_ip/} keys %$reserved_ips;
+		next unless @ip_keys;
+		$allocation += IPv4->new(map {$reserved_ips->{$_}} @ip_keys);
+		last;
+	}
 
-	my $static = $subnet->{'reserved-ips'}{$target."_static"}//1;
+	my $static;
+	for my $candidate (@candidates) {
+		next unless exists $reserved_ips->{$candidate."_static"};
+		$static = $reserved_ips->{$candidate."_static"};
+		last;
+	}
+	$static //= 1;
+
 	return ($allocation->simplify, $static);
 }
 

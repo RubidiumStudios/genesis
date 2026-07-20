@@ -8,6 +8,7 @@ use Test::More;
 use Test::Exception;
 use Test::Deep;
 use Test::Differences;
+use Test::Output;
 use Carp qw/croak/;
 use Genesis qw(logger struct_lookup bail);
 use Cwd qw(abs_path);
@@ -784,6 +785,168 @@ subtest 'get_network_security_groups - resolves to SG ids when resolved' => sub 
 	ok(defined $result, 'resolved security groups is defined');
 	cmp_deeply($result, ['xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx02'],
 		'resolved SG ids match expected default SG id');
+};
+
+# ---------------------------------------------------------------------------
+# Reserved IP target aliasing (openbao/vault rename fallback)
+# ---------------------------------------------------------------------------
+# ocfp-0 reserves a single vault_ip, ocfp-1 reserves a vault_a/vault_b pair,
+# and ocfp-2 has no target-specific reservation at all (used to prove the
+# no-match/no-alias case still drops the subnet and now warns).
+my $alias_ocfp_config = {
+	vpc => {
+		azs => {
+			'az1' => { cloud_properties => '{"zone": "us-east-1a"}' },
+			'az2' => { cloud_properties => '{"zone": "us-east-1b"}' },
+			'az3' => { cloud_properties => '{"zone": "us-east-1c"}' },
+		},
+		cidr_block => '10.9.0.0/20',
+		dns        => '1.1.1.1',
+		id         => 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxx09',
+		region     => 'us-east-1',
+		sgs => {
+			default => {
+				'description' => 'Default security group',
+				'id'          => 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx09',
+				'name'        => 'default',
+			},
+		},
+		subnets => {
+			'ocfp-0' => {
+				az => 'az1', cidr_block => '10.9.0.0/24',
+				gateway => '10.9.0.1', dns => '10.9.0.2',
+				'reserved-ips' => {
+					'vault_ip' => '10.9.0.5',
+				},
+			},
+			'ocfp-1' => {
+				az => 'az2', cidr_block => '10.9.1.0/24',
+				gateway => '10.9.1.1', dns => '10.9.1.2',
+				'reserved-ips' => {
+					'vault_a' => '10.9.1.9',
+					'vault_b' => '10.9.1.11',
+				},
+			},
+			'ocfp-2' => {
+				az => 'az3', cidr_block => '10.9.2.0/24',
+				gateway => '10.9.2.1', dns => '10.9.2.2',
+				'reserved-ips' => {},
+			},
+		},
+	},
+};
+
+subtest '_get_reserved_allocation - openbao falls back to vault reserved-ips' => sub {
+	plan tests => 3;
+
+	my $env  = make_deploy_env(ocfp_config => $alias_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+	my $subnets = $hook->subnets;
+
+	my ($ip_alloc) = $hook->_get_reserved_allocation('openbao', $subnets->{'ocfp-0'});
+	is($ip_alloc->range, '10.9.0.5',
+		'openbao resolves the single vault_ip reservation on ocfp-0');
+
+	my ($pair_alloc) = $hook->_get_reserved_allocation('openbao', $subnets->{'ocfp-1'});
+	is($pair_alloc->range, '10.9.1.10',
+		'openbao resolves the vault_a/vault_b pair reservation on ocfp-1');
+
+	my ($empty_alloc) = $hook->_get_reserved_allocation('openbao', $subnets->{'ocfp-2'});
+	is($empty_alloc->size, 0,
+		'openbao has no allocation on ocfp-2, which defines no vault reservation either');
+};
+
+subtest '_get_reserved_allocation - vault target is unchanged (regression)' => sub {
+	plan tests => 3;
+
+	my $env  = make_deploy_env(ocfp_config => $alias_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+	my $subnets = $hook->subnets;
+
+	my ($ip_alloc) = $hook->_get_reserved_allocation('vault', $subnets->{'ocfp-0'});
+	is($ip_alloc->range, '10.9.0.5',
+		'vault still resolves its own vault_ip reservation directly on ocfp-0');
+
+	my ($pair_alloc) = $hook->_get_reserved_allocation('vault', $subnets->{'ocfp-1'});
+	is($pair_alloc->range, '10.9.1.10',
+		'vault still resolves its own vault_a/vault_b pair directly on ocfp-1');
+
+	my ($empty_alloc) = $hook->_get_reserved_allocation('vault', $subnets->{'ocfp-2'});
+	is($empty_alloc->size, 0,
+		'vault has no allocation on ocfp-2, which defines no reservation at all');
+};
+
+subtest '_get_reserved_allocation - unaliased target with no keys returns empty' => sub {
+	plan tests => 1;
+
+	my $env  = make_deploy_env(ocfp_config => $alias_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my ($alloc) = $hook->_get_reserved_allocation('foobar', $hook->subnets->{'ocfp-0'});
+	is($alloc->size, 0,
+		'target with no matching keys and no alias table entry resolves to no allocation');
+};
+
+subtest 'network_definition - openbao target keeps subnets via vault alias fallback' => sub {
+	plan tests => 3;
+
+	my $env  = make_deploy_env(ocfp_config => $alias_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $net;
+	my $warn = stderr_from {
+		$net = $hook->network_definition('openbao',
+			strategy => 'ocfp',
+			dynamic_subnets => {
+				allocation => { size => 0, statics => 0 },
+				cloud_properties_for_iaas => {
+					openstack => {
+						'net_id'          => $hook->network_reference('id'),
+						'security_groups' => ['default'],
+					},
+				},
+			},
+		);
+	};
+
+	is(scalar @{$net->{subnets}}, 2,
+		'openbao network keeps ocfp-0 and ocfp-1, which resolve via the vault alias');
+
+	my @names = map { $_->{az} } @{$net->{subnets}};
+	cmp_deeply(\@names, ['test-env-mgmt-z1', 'test-env-mgmt-z2'],
+		'surviving subnets are ocfp-0 (az1) and ocfp-1 (az2)');
+
+	like($warn, qr/ocfp-2.*openbao|openbao.*ocfp-2/,
+		'dropping ocfp-2 for openbao (no vault reservation either) emits a warning naming both');
+};
+
+subtest 'network_definition - unaliased target with no reservations drops and warns for every subnet' => sub {
+	plan tests => 2;
+
+	my $env  = make_deploy_env(ocfp_config => $alias_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $net;
+	my $warn = stderr_from {
+		$net = $hook->network_definition('foobar',
+			strategy => 'ocfp',
+			dynamic_subnets => {
+				allocation => { size => 0, statics => 0 },
+				cloud_properties_for_iaas => {
+					openstack => {
+						'net_id'          => $hook->network_reference('id'),
+						'security_groups' => ['default'],
+					},
+				},
+			},
+		);
+	};
+
+	is(scalar @{$net->{subnets}}, 0,
+		'foobar network has no alias and no reservations, so every subnet is dropped');
+
+	like($warn, qr/ocfp-0/,
+		'warning names at least one dropped subnet for the unaliased target');
 };
 
 done_testing;
