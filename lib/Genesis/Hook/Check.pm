@@ -113,7 +113,7 @@ sub has_environment_entry {
 		my %opts = @args;
 		if (exists($opts{type})) {
 			my $reqtype = $opts{type};
-			my $actualtype = lc(ref($param) || defined($param) ? 'string' : 'undefined'); # expand to non-empty-string, number, ip, domain, etc.
+			my $actualtype = lc(ref($param) || (defined($param) ? 'string' : 'undefined')); # expand to non-empty-string, number, ip, domain, etc.
 			if ($reqtype) {
 				return (
 					($actualtype eq $reqtype) ? 1 : 0,
