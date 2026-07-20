@@ -400,7 +400,7 @@ sub _build_ocfp_network_model_greedy_subnets {
 
 	# We only use the ocfp-* subnets for the network definition
 	my $ocfp_subnet_prefix = $self->env->ocfp_subnet_prefix;
-	my @ocfp_subnet_names = sort grep {/^${ocfp_subnet_prefix}-/} keys %$subnets;
+	my @ocfp_subnet_names = sort grep {/^${ocfp_subnet_prefix}(?:-|$)/} keys %$subnets;
 	bail(
 		'No ocfp-* subnets found in the ocfp configuration for network %s',
 		$target
@@ -498,7 +498,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 	# We only use the ocfp-* subnets for the network definition
 	my $ocfp_subnet_prefix = $self->env->ocfp_subnet_prefix;
-	my @ocfp_subnet_names = sort grep {/^${ocfp_subnet_prefix}-/} keys %$subnets;
+	my @ocfp_subnet_names = sort grep {/^${ocfp_subnet_prefix}(?:-|$)/} keys %$subnets;
 	bail(
 		'No ocfp-* subnets found in the ocfp configuration for network %s',
 		$target

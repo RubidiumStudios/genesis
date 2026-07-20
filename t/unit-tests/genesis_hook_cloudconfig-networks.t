@@ -426,6 +426,50 @@ subtest '_filter_subnets - nonexistent name returns empty hashref' => sub {
 		'_filter_subnets("nonexistent") returns an empty hashref');
 };
 
+subtest 'dynamic_subnets - subnet named exactly the prefix is selected' => sub {
+	plan tests => 3;
+
+	# A bloc may hold a single subnet whose name IS the prefix (e.g. an
+	# 'infra' subnet with ocfp_subnet_prefix 'infra') alongside numbered
+	# '<prefix>-N' subnets for other prefixes.
+	my $config = dclone($ocfp_config);
+	$config->{vpc}{subnets} = {
+		'infra' => {
+			az => 'az1', cidr_block => '10.0.3.0/24',
+			gateway => '10.0.3.1', dns => '10.0.3.2',
+			'reserved-ips' => {
+				'wireguard_ip' => '10.0.3.6',
+			},
+		},
+	};
+
+	my $env  = make_deploy_env(
+		ocfp_subnet_prefix => 'infra',
+		ocfp_config        => $config,
+	);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $net;
+	lives_ok {
+		$net = $hook->network_definition('wireguard',
+			strategy => 'ocfp',
+			dynamic_subnets => {
+				allocation => { size => 0, statics => 0 },
+				cloud_properties_for_iaas => {
+					openstack => {
+						'net_id'          => $hook->network_reference('id'),
+						'security_groups' => ['default'],
+					},
+				},
+			},
+		);
+	} 'network_definition() succeeds when the only subnet is named exactly the prefix';
+
+	is(scalar @{$net->{subnets}}, 1, 'network definition contains one subnet');
+	is($net->{subnets}[0]{range}, '10.0.3.0/24',
+		'subnet range comes from the prefix-named subnet');
+};
+
 # ---------------------------------------------------------------------------
 # Allocation Tracking
 # ---------------------------------------------------------------------------
