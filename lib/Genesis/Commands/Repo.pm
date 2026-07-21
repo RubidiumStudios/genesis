@@ -807,7 +807,7 @@ sub secrets_provider {
 		info "\n#Y{Not set - legacy mode enabled (will use current safe target on system)}\n";
 	}
 
-	exit defined($err) ? 1 : 0;
+	exit(defined($err) ? 1 : 0);
 }
 
 sub kit_provider {
