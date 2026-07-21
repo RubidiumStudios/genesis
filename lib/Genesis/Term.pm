@@ -17,6 +17,8 @@ use IO::Socket;
 use base 'Exporter';
 our @EXPORT = qw/
 	terminal_width
+	terminal_height
+	terminal_colors
 	wrap fix_wrap
 	colored_block
 	in_controlling_terminal
@@ -86,13 +88,244 @@ sub has_tput {
 
 sub terminal_width () {
 	return $ENV{GENESIS_OUTPUT_COLUMNS} if $ENV{GENESIS_OUTPUT_COLUMNS};
+	# Read directly from the controlling terminal so we get the real
+	# width even when stdout is a pipe (prove, less, `|` chains).
+	# `tput cols` looks at stdout, so it returns the 80-column default
+	# in those contexts; stty against /dev/tty sees the actual tty.
+	my $sz = _stty_size();
+	return $sz->[1] if $sz;
 	return 80 unless has_tput();
-	return (grep {/^[0-9]*$/} split("\n",`tput cols`))[0] || $ENV{GENESIS_OUTPUT_COLUMNS} || 80;
+	return (grep {/^[0-9]*$/} split("\n",`tput cols`))[0] || 80;
 }
 sub terminal_height () {
 	return $ENV{GENESIS_OUTPUT_LINES} if $ENV{GENESIS_OUTPUT_LINES};
+	my $sz = _stty_size();
+	return $sz->[0] if $sz;
 	return 24 unless has_tput();
-	return (grep {/^[0-9]*$/} split("\n",`tput lines`))[0] || $ENV{GENESIS_OUTPUT_LINES} || 24;
+	return (grep {/^[0-9]*$/} split("\n",`tput lines`))[0] || 24;
+}
+
+# _stty_size - [$rows, $cols] via `stty size </dev/tty`, or undef if
+# the controlling terminal isn't readable (headless, cron, redirected
+# both ways).  Cached per-process; the terminal geometry doesn't
+# change often enough to justify a re-probe on every call.
+my $__stty_size;
+sub _stty_size {
+	return $__stty_size if defined $__stty_size;
+	my $out = `stty size </dev/tty 2>/dev/null`;
+	if (defined $out && $out =~ /^(\d+)\s+(\d+)/) {
+		return $__stty_size = [$1, $2];
+	}
+	return $__stty_size = undef;
+}
+
+# terminal_colors - probe the terminal emulator for its actual
+# foreground and background colors via OSC 10 / OSC 11.  Returns a
+# hashref (or undef if the probe fails):
+#
+#   {
+#     fg => {
+#       rgb    => [$r, $g, $b],       # floats, 0..1
+#       rgb256 => [$R, $G, $B],       # ints,   0..255
+#       hex    => "RRGGBB",
+#       ansi   => "\e[38;2;R;G;Bm",   # SGR set-foreground truecolor
+#       simple => {
+#         index  => 0..7,             # basic 8-color index
+#         bright => 0|1,              # 1 == aixterm "highcolor" (8..15)
+#         ansi   => "\e[3Nm" | "\e[9Nm",   # ready-to-print SGR (fg)
+#       },
+#     },
+#     bg => {
+#       rgb    => [$r, $g, $b],
+#       rgb256 => [$R, $G, $B],
+#       hex    => "RRGGBB",
+#       ansi   => "\e[48;2;R;G;Bm",   # SGR set-background truecolor
+#       simple => {
+#         index  => 0..7,
+#         bright => 0|1,
+#         ansi   => "\e[4Nm" | "\e[10Nm",  # ready-to-print SGR (bg)
+#       },
+#     },
+#     luma    => $y,                  # BT.601 luminance of bg, 0..1
+#     is_dark => 0|1,                 # $luma < 0.5
+#   }
+#
+# Returns undef when /dev/tty isn't accessible or the terminal
+# doesn't reply within the timeout (dumb terminals, cron, older
+# emulators that ignore OSC 10/11).
+#
+# Response is memoized per-process because raw-mode I/O against
+# /dev/tty is comparatively expensive and the palette doesn't
+# change mid-run.
+my $__terminal_colors;
+my $__terminal_colors_probed;
+sub terminal_colors {
+	return $__terminal_colors if $__terminal_colors_probed;
+	$__terminal_colors_probed = 1;
+	$__terminal_colors = _probe_terminal_colors();
+	return $__terminal_colors;
+}
+
+sub _probe_terminal_colors {
+	open(my $tty, '+<', '/dev/tty') or return undef;
+
+	# Snapshot stty state so we can restore even on die().
+	my $orig_stty = `stty -g </dev/tty 2>/dev/null`;
+	chomp $orig_stty if defined $orig_stty;
+	unless (defined $orig_stty && length $orig_stty) {
+		close $tty;
+		return undef;
+	}
+
+	# Raw mode: no echo, no canonical line-buffering.  Without this
+	# the OSC reply would either wait for a newline or echo to the
+	# user's screen.
+	unless (system('stty raw -echo </dev/tty 2>/dev/null') == 0) {
+		close $tty;
+		return undef;
+	}
+
+	my $query = sub {
+		my ($ps) = @_;   # 10 => fg, 11 => bg
+		my $seq = "\e]${ps};?\e\\";
+		# tmux/screen intercept OSC by default; wrap in passthrough
+		# so the outer terminal sees the query and its reply is
+		# routed back through the multiplexer.
+		if ($ENV{TMUX}) {
+			(my $wrapped = $seq) =~ s/\e/\e\e/g;
+			$seq = "\ePtmux;$wrapped\e\\";
+		}
+		syswrite($tty, $seq);
+		my $resp = '';
+		eval {
+			local $SIG{ALRM} = sub { die "timeout\n" };
+			alarm 1;
+			while (length($resp) < 64) {
+				my $c;
+				my $n = sysread($tty, $c, 1);
+				last unless defined $n && $n > 0;
+				$resp .= $c;
+				# ST (ESC backslash) or BEL both close an OSC.
+				last if $resp =~ /(?:\e\\|\a)\z/;
+			}
+			alarm 0;
+		};
+		return $resp;
+	};
+
+	my $fg_resp = $query->(10);
+	my $bg_resp = $query->(11);
+
+	system("stty '$orig_stty' </dev/tty 2>/dev/null");
+	close $tty;
+
+	my $bg = _build_color_entry($bg_resp, 48);
+	my $fg = _build_color_entry($fg_resp, 38);
+	return undef unless $bg;   # bg drives the light/dark decision
+
+	my $luma = 0.299 * $bg->{rgb}[0] + 0.587 * $bg->{rgb}[1] + 0.114 * $bg->{rgb}[2];
+	return {
+		fg      => $fg,
+		bg      => $bg,
+		luma    => $luma,
+		is_dark => ($luma < 0.5) ? 1 : 0,
+	};
+}
+
+# _build_color_entry - turn an OSC 10/11 reply into the full
+# per-color hashref (rgb / rgb256 / hex / ansi / simple).  $sgr
+# is 38 for foreground or 48 for background -- the SGR 24-bit
+# truecolor introducer, so callers can print $color->{ansi}
+# without knowing which side they're on.  The `simple` sub-hash
+# additionally provides the basic-8-color approximation with its
+# own aixterm-compatible SGR for callers that need to work on
+# terminals without truecolor support.  Returns undef if the
+# reply didn't parse.
+sub _build_color_entry {
+	my ($resp, $sgr) = @_;
+	my $rgb = _parse_osc_rgb($resp);
+	return undef unless $rgb;
+	my @rgb256 = map { int($_ * 255 + 0.5) } @$rgb;
+	my $hex    = sprintf('%02x%02x%02x', @rgb256);
+	my $ansi   = sprintf("\e[%d;2;%d;%d;%dm", $sgr, @rgb256);
+
+	my $ansi16 = _nearest_ansi16(@rgb256);
+	my $bright = ($ansi16 >= 8) ? 1 : 0;
+	my $base   = $ansi16 % 8;
+	# fg uses 30..37 dim / 90..97 bright; bg uses 40..47 / 100..107.
+	# The aixterm 90/100 ranges are widely supported and
+	# unambiguous compared to the older "1;3Xm" bold-as-bright
+	# hack (which some terminals render as bold rather than
+	# bright colour).
+	my $simple_sgr = ($sgr == 38)
+		? sprintf("\e[%dm", ($bright ? 90 : 30) + $base)
+		: sprintf("\e[%dm", ($bright ? 100 : 40) + $base);
+
+	return {
+		rgb    => $rgb,
+		rgb256 => [@rgb256],
+		hex    => $hex,
+		ansi   => $ansi,
+		simple => {
+			index  => $base,
+			bright => $bright,
+			ansi   => $simple_sgr,
+		},
+	};
+}
+
+# _nearest_ansi16 - map a 24-bit RGB triple to the closest classic
+# 16-colour palette entry (0..15, low half = dim, high half =
+# aixterm bright).  Uses squared Euclidean distance in sRGB byte
+# space -- crude but adequate for the "which basic colour is this
+# background closest to" question the simple sub-hash exists to
+# answer.  Values are the VGA/xterm defaults; if a caller cares
+# about a specific palette variant they should stick with the
+# truecolour `ansi` field.
+my @_ansi16_palette = (
+	[0,0,0],       # 0  black
+	[170,0,0],     # 1  dark red
+	[0,170,0],     # 2  dark green
+	[170,85,0],    # 3  dark yellow (olive/brown)
+	[0,0,170],     # 4  dark blue
+	[170,0,170],   # 5  dark magenta
+	[0,170,170],   # 6  dark cyan
+	[170,170,170], # 7  light grey
+	[85,85,85],    # 8  dark grey (bright black)
+	[255,85,85],   # 9  bright red
+	[85,255,85],   # 10 bright green
+	[255,255,85],  # 11 bright yellow
+	[85,85,255],   # 12 bright blue
+	[255,85,255],  # 13 bright magenta
+	[85,255,255],  # 14 bright cyan
+	[255,255,255], # 15 white
+);
+sub _nearest_ansi16 {
+	my ($r, $g, $b) = @_;
+	my $best_idx = 0;
+	my $best_d   = ~0;
+	for my $i (0 .. $#_ansi16_palette) {
+		my $p = $_ansi16_palette[$i];
+		my $d = ($r - $p->[0]) ** 2
+		      + ($g - $p->[1]) ** 2
+		      + ($b - $p->[2]) ** 2;
+		if ($d < $best_d) { $best_d = $d; $best_idx = $i }
+	}
+	return $best_idx;
+}
+
+# _parse_osc_rgb - extract [R,G,B] as 0..1 floats from an OSC
+# 10/11 reply.  Terminals emit variable hex widths per channel
+# (rgb:ff/aa/bb, rgb:ffff/aaaa/bbbb, rgb:fff/aaa/bbb, ...), each
+# padded to the max value at that width -- divide by (16^N - 1)
+# with N = actual hex length.  Returns undef on any parse miss so
+# callers get a clean "no data" signal.
+sub _parse_osc_rgb {
+	my ($resp) = @_;
+	return undef unless defined $resp
+		&& $resp =~ /rgb:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)/i;
+	my @hex = ($1, $2, $3);
+	return [ map { my $n = length $_; hex($_) / (16 ** $n - 1) } @hex ];
 }
 
 my $__is_highcolour = $ENV{TERM} && $ENV{TERM} =~ /256color/;
