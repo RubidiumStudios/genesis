@@ -4591,19 +4591,10 @@ sub _post_deploy {
 		exit 0;
 	}
 
-	# If vault is sealed after deployment, unseal it before updating exodus data
-	if ($self->vault->status eq 'sealed') {
-		$self->notify("vault is sealed - attempting to unseal...");
-		my ($out, $rc, $err) = $self->vault->unseal;
-		if ($rc) {
-			error(
-				"Failed to unseal vault: %s\n\n%s", $err || $out,
-				"#Yi{Exodus data update may fail due to sealed vault}"
-			);
-		} else {
-			info('[[  #g@{+} >>Vault unsealed successfully');
-		}
-	}
+	# If vault is sealed after deployment, unseal it before updating exodus
+	# data; fail fast when the vault stays unusable and nobody can answer an
+	# auth prompt.
+	$self->_ensure_vault_ready_for_exodus($noprompt);
 
 	# Update exodus data
 	$self->notify("preparing metadata for export...");
@@ -4763,6 +4754,48 @@ sub _post_deploy {
 	delete $self->{deployment_state};
 
 	return $deployment_ok;
+}
+
+# }}}
+# _ensure_vault_ready_for_exodus - fail fast when exodus cannot be recorded {{{
+#
+# After a successful deploy, the exodus update needs a reachable, unsealed,
+# authenticated vault.  A sealed vault gets one unseal attempt - this covers
+# a self-hosted provider (BOSH kit openbao feature) that came back sealed
+# from its own VM recreate.  If the vault is still not usable and there is
+# no controlling terminal (or --yes was given), bail with recovery guidance
+# instead of letting a downstream safe call block forever on an interactive
+# vault-auth prompt.  Returns 1 when the vault is ready, 0 when it is not
+# but an operator is present to answer the prompt.
+sub _ensure_vault_ready_for_exodus {
+	my ($self, $noprompt) = @_;
+
+	my $status = $self->vault->status;
+	if ($status eq 'sealed') {
+		$self->notify("vault is sealed - attempting to unseal...");
+		my ($out, $rc, $err) = $self->vault->unseal;
+		if ($rc) {
+			error(
+				"Failed to unseal vault: %s\n\n%s", $err || $out,
+				"#Yi{Exodus data update may fail due to sealed vault}"
+			);
+		} else {
+			info('[[  #g@{+} >>Vault unsealed successfully');
+		}
+		$status = $self->vault->status;
+	}
+	return 1 if $status eq 'ok';
+
+	bail(
+		"The deployment itself succeeded, but the vault is %s, so the exodus ".
+		"data for this deployment cannot be recorded, and no terminal is ".
+		"available to answer a vault authentication prompt.  Restore vault ".
+		"access (unseal it if sealed), then re-run this deploy: the deployment ".
+		"is already up, and the re-run completes the exodus update.",
+		$status
+	) if $noprompt || !in_controlling_terminal;
+
+	return 0;
 }
 
 # }}}
