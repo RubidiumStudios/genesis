@@ -679,6 +679,58 @@ EOF
 	done_testing;
 };
 
+subtest 'vault_paths() reports a clean bail instead of a raw JSON crash' => sub {
+	my $spruce = do { chomp(my $s = `which spruce 2>/dev/null`); $s };
+	plan skip_all => 'spruce not found in PATH' unless $spruce && -x $spruce;
+
+	# `spruce vaultinfo "$1" | spruce json` silently swallows a real
+	# vaultinfo failure: when vaultinfo fails it writes nothing to
+	# stdout, and `spruce json` happily exits 0 on that empty input,
+	# so the pipeline's own exit code looks like success. Since this
+	# manifest is malformed in a way targeted pruning can't repair (no
+	# `$.path: ...` node to prune -- it's a YAML syntax error, not an
+	# unresolvable reference), vault_paths() falls through to the last
+	# -resort sanitized attempt, which hits the same swallowed-exit-code
+	# pipe and tries to JSON-decode spruce's plain-text error output.
+	# That used to surface as an uncaught "malformed JSON string ...''
+	# crash instead of the intended "Unable to determine vault paths"
+	# bail.
+	my $dir = workdir('vault-paths-badyaml');
+	my $manifest = "$dir/manifest.yml";
+	put_file($manifest,
+		"meta:\n".
+		"  vault:\n".
+		"\tconfig: bad-indent-here\n".
+		"properties:\n".
+		"  something: (( vault meta.vault.config \":password\" ))\n"
+	);
+
+	my $env = Mock->new(
+		name                      => 'vp-badyaml-test',
+		path                      => sub { $dir },
+		workpath                  => sub { $dir },
+		get_environment_variables => sub { () },
+	);
+	my $provider = Genesis::Env::ManifestProvider->new($env);
+
+	my $paths = eval { $provider->vault_paths(file => $manifest) };
+	my $err = $@;
+
+	ok($err, 'vault_paths() bails rather than returning bogus data');
+	like(
+		$err,
+		qr/Unable to determine vault paths/,
+		'bail message is the intended one, not a raw JSON decode error'
+	) or diag $err;
+	unlike(
+		$err,
+		qr/malformed JSON string/,
+		'no raw JSON::PP decode error leaks through'
+	);
+
+	done_testing;
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
