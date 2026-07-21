@@ -417,8 +417,15 @@ sub vault_paths {
 	# Only fall back to a sanitized copy when spruce cannot walk the
 	# original.
 	my %run_env = ($self->env->get_environment_variables);
+	# `spruce vaultinfo | spruce json` swallows a vaultinfo failure:
+	# with no `set -o pipefail`, bash reports the exit code of the
+	# LAST command in the pipe.  `spruce json` exits 0 on the empty
+	# stdin it gets when vaultinfo fails, so a genuine failure looks
+	# like success and the caller tries to JSON-decode vaultinfo's
+	# plain-text error output.  `set -o pipefail` makes $rc reflect
+	# vaultinfo's real exit status.
 	my ($out, $rc) = run({stderr => "&1", env => {%run_env}},
-		'spruce vaultinfo "$1" | spruce json', $file
+		'set -o pipefail; spruce vaultinfo "$1" | spruce json', $file
 	);
 	my $json;
 	$json = eval {read_json_from($out)} if $rc == 0;
@@ -454,7 +461,7 @@ sub vault_paths {
 			$working_file = $pruned_file;
 
 			($out, $rc) = run({stderr => "&1", env => {%run_env}},
-				'spruce vaultinfo "$1" | spruce json', $working_file
+				'set -o pipefail; spruce vaultinfo "$1" | spruce json', $working_file
 			);
 			$json = eval {read_json_from($out)} if $rc == 0;
 			last if ref($json) eq 'HASH' && ref($json->{secrets}) eq 'ARRAY';
@@ -479,7 +486,7 @@ sub vault_paths {
 				stderr => "&1",
 				env => {%run_env}
 			},
-			'spruce vaultinfo "$1" | spruce json', $sanitized_file
+			'set -o pipefail; spruce vaultinfo "$1" | spruce json', $sanitized_file
 		));
 	}
 	popd;
