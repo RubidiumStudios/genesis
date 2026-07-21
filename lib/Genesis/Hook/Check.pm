@@ -105,7 +105,7 @@ sub has_environment_entry {
 		# Support for params under environment.
 		#
 		# Every return here MUST supply values for both %s slots in
-		# "params.#Y{%s}%s" -- the first is the param name, the second is
+		# "params.#Y{%s} %s" -- the first is the param name, the second is
 		# the qualifier message.  Under-supplying by one dies at
 		# Genesis::Log:1092 with "Missing argument in sprintf" once
 		# has_entry composes info() from these return values.
@@ -113,11 +113,18 @@ sub has_environment_entry {
 		my %opts = @args;
 		if (exists($opts{type})) {
 			my $reqtype = $opts{type};
-			my $actualtype = lc(ref($param) || defined($param) ? 'string' : 'undefined'); # expand to non-empty-string, number, ip, domain, etc.
+			# Reflect a ref's kind (ARRAY/HASH) as its actual type so
+			# `type => 'array'` compares correctly.  Collapsing both
+			# ref() and defined() under a single boolean-or (as done
+			# previously) treated any ref as truthy and yielded 'string'
+			# for an ARRAY, silently failing every type=array check.
+			my $actualtype = ref($param) ? lc(ref($param))
+			               : defined($param) ? 'string'
+			               : 'undefined'; # expand to non-empty-string, number, ip, domain, etc.
 			if ($reqtype) {
 				return (
 					($actualtype eq $reqtype) ? 1 : 0,
-					"params.#Y{%s}%s",
+					"params.#Y{%s} %s",
 					$name,
 					$opts{msg} || "is ".($reqtype eq 'undefined' ? 'undefined' : "a $reqtype"),
 				);
@@ -126,7 +133,7 @@ sub has_environment_entry {
 		if ($opts{value_in}) {
 			return (
 				defined($param) && in_array($param, $opts{value_in}->@*) ? 1 : 0,
-				"params.#Y{%s}%s",
+				"params.#Y{%s} %s",
 				$name,
 				$opts{msg} || "must be one of ".join(', ', $opts{value_in}->@*),
 			);
@@ -135,7 +142,7 @@ sub has_environment_entry {
 			# FIXME: Should this take another parameter for what it changed to?
 			return (
 				defined($param) ? 0 : 1,
-				"params.#Y{%s}%s",
+				"params.#Y{%s} %s",
 				$name,
 				$opts{msg} || "has been retired and no longer supported",
 			);
@@ -143,7 +150,7 @@ sub has_environment_entry {
 		# Add support for other checks here: exclusivity of params, ranges, etc.
 		return (
 			defined($param) ? 1 : 0,
-			"params.#Y{%s}%s",
+			"params.#Y{%s} %s",
 			$name,
 			$opts{msg} || "is provided",
 		);
