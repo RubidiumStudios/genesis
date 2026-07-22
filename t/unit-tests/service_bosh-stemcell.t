@@ -719,6 +719,54 @@ subtest 'available_stemcells() - default os is ubuntu-jammy' => sub {
 	like($captured, qr/ubuntu-jammy/, 'default OS is ubuntu-jammy');
 };
 
+subtest 'available_stemcells() - unreachable bosh.io bails cleanly' => sub {
+	# Regression: when bosh.io is down the curl helper returns a synthetic 599
+	# status and a non-JSON error body.  available_stemcells() used to feed that
+	# body straight into JSON::PP->decode and crash with a parse error instead of
+	# reporting the connectivity problem.
+	plan tests => 2;
+
+	my $err;
+	{
+		no warnings 'redefine';
+		local *Service::BOSH::Stemcell::curl = sub {
+			return (599, 'Error executing curl command',
+				'curl: (6) Could not resolve host: bosh.io', {});
+		};
+		quietly {
+			eval { Service::BOSH::Stemcell->available_stemcells(iaas => 'aws') };
+			$err = $@;
+		};
+	}
+
+	like($err, qr/unable to reach bosh\.io/i,
+		'error reports the connectivity problem in plain language');
+	unlike($err, qr/malformed JSON|character offset|JSON::PP/i,
+		'does not crash inside JSON::PP->decode');
+};
+
+subtest 'available_stemcells() - HTTP error status bails cleanly' => sub {
+	plan tests => 2;
+
+	my $err;
+	{
+		no warnings 'redefine';
+		local *Service::BOSH::Stemcell::curl = sub {
+			return (503, 'HTTP/1.1 503 Service Unavailable',
+				'<html>503 Service Unavailable</html>', {});
+		};
+		quietly {
+			eval { Service::BOSH::Stemcell->available_stemcells(iaas => 'aws') };
+			$err = $@;
+		};
+	}
+
+	like($err, qr/unable to reach bosh\.io.*503/is,
+		'error reports the HTTP status in plain language');
+	unlike($err, qr/malformed JSON|character offset|JSON::PP/i,
+		'does not crash inside JSON::PP->decode');
+};
+
 # ---------------------------------------------------------------------------
 # 8. find() - mocked available_stemcells
 # ---------------------------------------------------------------------------
