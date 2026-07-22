@@ -47,6 +47,13 @@ sub available_stemcells {
 	my ($status, $line, $data, $headers) = curl(
 		'GET', $url, { 'Accept' => 'application/json' }
 	);
+	bail(
+		"Unable to reach bosh.io to list stemcells for #C{%s} on the #C{%s} ".
+		"CPI (HTTP status: %s).\n".
+		"Pin an already-uploaded stemcell version or retry once bosh.io is ".
+		"reachable.",
+		$os, $cpi, (defined($status) && length($status)) ? $status : 'none'
+	) unless defined($status) && $status == 200 && defined($data) && length($data);
 	my $json = JSON::PP->new->utf8(1)->decode($data);
 	my $stemcells = [];
 	for my $data (@$json) {
