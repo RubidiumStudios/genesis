@@ -1093,17 +1093,17 @@ sub _unused_entombed_secrets {
 
 	return {} unless @entombed_paths;
 
-	# Determine if the last manifest contains entombed secrets
+	# No manifest = nothing entombed; the type question is meaningless.
 	if (!defined($type) || $type eq 'unknown') {
-		# We need to do some forensics to determine the last manifest type
-		my $flat_manifest = flatten({}, undef, $last_manifest);
-		if (grep {$_ && /^\(\(genesis-entombed/} values %$flat_manifest) {
-			$type = 'entombed';
-		} elsif ($_ && /^REDACTED$/) {
-			$type = 'redacted';
-		} else {
-			# still unknown
+		if (!defined($last_manifest) || (!ref($last_manifest) && !length($last_manifest))) {
 			$type = 'unknown';
+		} else {
+			# Scan flat leaves.  The old elsif checked $_ outside the grep --
+			# always undef there, so the redacted case never triggered.
+			my @leaves = grep {defined} values %{flatten($last_manifest)};
+			if    (grep {/^\(\(genesis-entombed/} @leaves) { $type = 'entombed' }
+			elsif (grep {/^REDACTED$/}           @leaves) { $type = 'redacted' }
+			else                                          { $type = 'unknown'  }
 		}
 	}
 	if ($type !~ /entombed$/) {
@@ -1120,8 +1120,8 @@ sub _unused_entombed_secrets {
 	# Get the list of entombed secrets from the last manifest
 	my @used_paths = uniq sort
 		map {my @result = $_ =~ /\(\((.*?)\)\)/g; @result}
-		grep {$_ && /^\(\(genesis-entombed/}
-		values %{flatten({}, undef, $last_manifest)};
+		grep {defined && /^\(\(genesis-entombed/}
+		values %{flatten($last_manifest)};
 
 	my ($unused, $used) = compare_arrays(\@entombed_paths, \@used_paths);
 

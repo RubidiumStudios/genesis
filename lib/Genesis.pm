@@ -1419,7 +1419,10 @@ sub flatten {
 		}
 
 	} else {
-		$final->{$key} = $val;
+		# Normalize undef top-level key to '' (matches single-arg form);
+		# trace it so caller misuse stays visible.
+		debug("flatten(): undef top-level key normalized to ''") unless defined($key);
+		$final->{$key // ''} = $val;
 	}
 
 	return $final;
