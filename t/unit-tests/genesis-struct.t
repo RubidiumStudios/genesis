@@ -170,6 +170,29 @@ subtest 'flatten() - empty hashes and arrays' => sub {
 	is scalar(keys %{$flat->{'some_items[3]'}}), 0, 'empty hash element in array has 0 keys';
 };
 
+subtest 'flatten() - undef key on scalar input does not warn' => sub {
+	# Regression: Genesis::Env::Secrets::Plan calls flatten({}, undef, $manifest)
+	# when inspecting the last deployed manifest during `remove-secrets --unused`.
+	# With no prior deploy $manifest is undef (or a bare scalar) and the scalar
+	# branch stored $final->{$key} with an undef $key, emitting
+	# "Use of uninitialized value $key in hash element".
+	plan tests => 3;
+
+	my @warnings;
+	local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+
+	flatten({}, undef, undef);
+	is_deeply([grep {/uninitialized value \$key/} @warnings], [],
+		'undef input emits no uninitialized-$key warning');
+
+	@warnings = ();
+	my $flat = flatten({}, undef, 'REDACTED');
+	is_deeply([grep {/uninitialized value \$key/} @warnings], [],
+		'scalar input emits no uninitialized-$key warning');
+	is($flat->{''}, 'REDACTED',
+		'scalar stored under empty-string key, matching single-arg flatten');
+};
+
 # Test unflatten() - Convert flat dotted keys back to nested structure
 subtest 'unflatten() - basic unflattening' => sub {
 	my $flat = {

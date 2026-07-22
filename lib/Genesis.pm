@@ -1419,7 +1419,10 @@ sub flatten {
 		}
 
 	} else {
-		$final->{$key} = $val;
+		# Callers may seed the top-level key as undef (e.g. flatten({}, undef,
+		# $data)); normalize it to the empty-string key used by the single-arg
+		# form so a scalar or undef input does not warn on an uninitialized key.
+		$final->{$key // ''} = $val;
 	}
 
 	return $final;
