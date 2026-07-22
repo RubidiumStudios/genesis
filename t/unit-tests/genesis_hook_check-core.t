@@ -574,16 +574,24 @@ subtest 'has_environment_entry - params type=string for string value returns 1' 
 	is($ret, 1, 'has_environment_entry returns 1 when param is a string and type=string');
 };
 
-subtest 'has_environment_entry - params type=string for array ref also returns 1' => sub {
-	plan tests => 1;
-
-	# The implementation computes actualtype as:
-	#   lc(ref($param) || defined($param) ? 'string' : 'undefined')
-	# Any truthy ref() causes the ternary to yield 'string', so array refs
-	# are also treated as type 'string' by the current implementation.
+subtest 'has_environment_entry - params type reflects ref kind' => sub {
+	plan tests => 7;
 	my $hook = make_hook();
-	my ($ret) = $hook->has_environment_entry('params', 'list_param', type => 'string');
-	is($ret, 1, 'has_environment_entry returns 1 for array ref with type=string (ref is truthy in ternary)');
+	my ($ret) = $hook->has_environment_entry('params', 'base_domain', type => 'string');
+	is($ret, 1, 'string param satisfies type=string');
+	($ret) = $hook->has_environment_entry('params', 'base_domain', type => 'array');
+	is($ret, 0, 'string param does not satisfy type=array');
+	($ret) = $hook->has_environment_entry('params', 'list_param', type => 'array');
+	is($ret, 1, 'array ref satisfies type=array');
+	($ret) = $hook->has_environment_entry('params', 'list_param', type => 'string');
+	is($ret, 0, 'array ref does not satisfy type=string');
+	($ret) = $hook->has_environment_entry('params', 'no_such_param', type => 'string');
+	is($ret, 0, 'absent param does not satisfy type=string');
+	($ret) = $hook->has_environment_entry('params', 'no_such_param', type => 'array');
+	is($ret, 0, 'absent param does not satisfy type=array');
+	throws_ok {
+		$hook->has_environment_entry('params', 'base_domain', type => 'banana')
+	} qr/unknown type/i, 'unknown type raises kit_bug';
 };
 
 subtest 'has_environment_entry - params type=undefined for absent param returns 1' => sub {
@@ -708,7 +716,7 @@ subtest 'has_environment_entry - params type=X returns $name + $msg for the two 
 	my ($ret, $fmt, @values) = $hook->has_environment_entry('params', 'base_domain',
 		type => 'string', msg => 'is a string');
 	is($ret, 1,                       'type-check success bool');
-	is($fmt, "params.#Y{%s}%s",       'format has two %s placeholders');
+	is($fmt, "params.#Y{%s} %s",       'format has two %s placeholders');
 	is(scalar(@values), sprintf_slot_count($fmt),
 		'value count matches format %s count');
 	is_deeply(\@values, ['base_domain', 'is a string'],
@@ -720,7 +728,7 @@ subtest 'has_environment_entry - params value_in returns $name + $msg' => sub {
 	my $hook = make_hook();
 	my ($ret, $fmt, @values) = $hook->has_environment_entry('params', 'scale',
 		value_in => [qw(dev staging prod)]);
-	is($fmt, "params.#Y{%s}%s", 'value_in format has two %s placeholders');
+	is($fmt, "params.#Y{%s} %s", 'value_in format has two %s placeholders');
 	is(scalar(@values), sprintf_slot_count($fmt),
 		'value count matches format %s count');
 	is($values[0], 'scale', 'first value is the param name');
@@ -731,7 +739,7 @@ subtest 'has_environment_entry - params retired returns $name + $msg' => sub {
 	my $hook = make_hook();
 	my ($ret, $fmt, @values) = $hook->has_environment_entry('params', 'no_such_param',
 		retired => 1);
-	is($fmt, "params.#Y{%s}%s", 'retired format has two %s placeholders');
+	is($fmt, "params.#Y{%s} %s", 'retired format has two %s placeholders');
 	is(scalar(@values), sprintf_slot_count($fmt),
 		'value count matches format %s count');
 	is($values[0], 'no_such_param', 'first value is the param name');
@@ -741,7 +749,7 @@ subtest 'has_environment_entry - params default branch returns $name + $msg' => 
 	plan tests => 3;
 	my $hook = make_hook();
 	my ($ret, $fmt, @values) = $hook->has_environment_entry('params', 'base_domain');
-	is($fmt, "params.#Y{%s}%s", 'default format has two %s placeholders');
+	is($fmt, "params.#Y{%s} %s", 'default format has two %s placeholders');
 	is(scalar(@values), sprintf_slot_count($fmt),
 		'value count matches format %s count');
 	is($values[0], 'base_domain', 'first value is the param name');

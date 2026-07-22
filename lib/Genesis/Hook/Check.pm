@@ -113,6 +113,12 @@ sub has_environment_entry {
 		my %opts = @args;
 		if (exists($opts{type})) {
 			my $reqtype = $opts{type};
+			$self->kit_bug(
+				"has_environment_entry: unknown type '%s' for param '%s'",
+				$reqtype, $name
+			) if defined $reqtype
+			  && $reqtype ne ''
+			  && $reqtype !~ /^(string|array|hash|undefined)$/;
 			# Reflect a ref's kind (ARRAY/HASH) as its actual type so
 			# `type => 'array'` compares correctly.  Collapsing both
 			# ref() and defined() under a single boolean-or (as done
