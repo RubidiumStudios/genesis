@@ -6206,25 +6206,28 @@ sub _fix_secrets {
 	my ($self, %opts) = @_;
 	my $ok = 1;
 
-	# FIXME: Find a way to check if secrets are in the manifest (ie credhub
-	# secrets), and import them if they're not in the vault but are in credhub
-	# (does import skip secrets already in vault?)
-	if ($self->is_vaultified && grep {$_->{source} eq 'manifest'} ($self->secrets_plan->secrets)) {
-		# Check if there are any credhub secrets for the environment, and if there
-		# are, tell user what to do.  Otherwise, just generate any missing secrets
-		# normally..
-		my $existing_ch_secrets = scalar(grep {$_ !~ /genesis-entombed/} $self->credhub->paths());
+	# TODO: When manifest secrets still live in credhub, import them from credhub
+	# instead of bailing (does import skip secrets already in vault?).  Until then
+	# we only refuse the operation for the paths that would actually diverge.
+	if ($self->is_vaultified) {
+		# Fixing secrets regenerates them, so it is only unsafe when a manifest
+		# secret still has a live (non-entombed) copy in credhub -- regenerating
+		# would diverge from the value credhub is serving.  Disjoint credhub paths
+		# are harmless, so only bail for the intersection and name the offenders.
+		my @conflicting_paths = $self->_manifest_secret_credhub_conflicts;
 		bail(
-			"Cannot safely fix secrets in vaultified environment with manifest ".
-			"secrets, as they already exist in credhub.  Please import them from ".
-			"credhub manually by calling:\n".
+			"Cannot safely fix secrets in this vaultified environment: the ".
+			"following manifest secrets still exist in credhub and would ".
+			"diverge if regenerated:\n%s\n\n".
+			"Import them from credhub by calling:\n".
 			"[[  >>#g{%s add-secrets} #Y{--import}\n\n".
-			"Once that is done, remove the credhub secrets by calling:\n".
+			"Once that is done, remove the credhub copies by calling:\n".
 			"[[  >>#g{%s remove-secrets} #Y{--unused}\n\n".
-			"Then you can this command to fix any remaining invalid secrets (or ".
+			"Then re-run this command to fix any remaining invalid secrets (or ".
 			"run #g{%s add-secrets} again without the #Y{--import} option).",
+			join("\n", map {"  - #C{$_}"} @conflicting_paths),
 			(scalar($self->get_call_path_with_env)) x 3
-		)	if $existing_ch_secrets;
+		)	if @conflicting_paths;
 	}
 
 	my ($rotate_results, $rotate_msg) = $self->rotate_secrets(
@@ -6265,6 +6268,30 @@ sub _fix_secrets {
 		"#R{invalid return from rotate_secrets: %s}",
 		Data::Dumper::Dumper($rotate_results)
 	);
+}
+
+# }}}
+# _manifest_secret_credhub_conflicts - manifest secrets still live in credhub {{{
+# Returns the sorted list of non-entombed credhub paths (relative to the
+# credhub base) that correspond to manifest-sourced secrets.  These are the
+# only paths for which regenerating a secret is unsafe in a vaultified
+# environment; disjoint credhub paths are ignored.  Mirrors the var_name-based
+# matching used by Genesis::Env::Secrets::Plan::_unused_credhub_secrets.
+sub _manifest_secret_credhub_conflicts {
+	my ($self) = @_;
+	return () unless $self->is_vaultified;
+
+	my %manifest_var_names =
+		map  {($_->var_name => 1)}
+		grep {$_->from_manifest && defined($_->var_name)}
+		($self->secrets_plan->secrets);
+	return () unless %manifest_var_names;
+
+	my $credhub_prefix = $self->credhub->base;
+	return sort
+		grep {$_ !~ m{^genesis-entombed/} && $manifest_var_names{$_}}
+		map  {s/^\Q$credhub_prefix\E//r}
+		$self->credhub->paths();
 }
 
 # }}}
