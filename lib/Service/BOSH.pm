@@ -4,6 +4,7 @@ use File::Temp qw/tempfile/;
 
 use Genesis qw/
 	trace debug bail run slurp new_enough logger dump_var humanize_path dryrun
+	shell_quote
 /;
 use Genesis::State qw/envset/;
 
@@ -154,10 +155,11 @@ sub execute {
 			if ($OS eq 'darwin') {
 				unshift(@cmd, "script", "-q", "$file");
 			} elsif ($OS eq 'linux') {
-				# Sometimes gnu just sucks...
-				my $subcmd = join(" ", map {$_ =~ m/\s/ ? "\"$_\"" : $_} @cmd);
-				# TODO: more rigorous wrapping of subcmd to deal with quotes and pipes
-				@cmd = ("script -q $file -c '$subcmd'");
+				# `script -c` re-parses its argument with a shell, so the
+				# argument list must be flattened with shell_quote: naive
+				# joining lets values containing shell metacharacters split
+				# into separate arguments or execute as injected commands.
+				@cmd = ('script', '-q', $file, '-c', shell_quote(@cmd));
 			}
 		}
 	}
