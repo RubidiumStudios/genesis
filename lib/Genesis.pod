@@ -1380,6 +1380,38 @@ B<Examples:>
     run({ onfailure => "git fetch failed" }, 'git fetch origin');
     # Returns: nothing (exits on failure)
 
+=head2 shell_quote
+
+    my $string = shell_quote(@args);
+
+Joins C<@args> into a single string in which each argument is single-quoted
+for a POSIX shell (embedded single quotes are escaped with the standard
+C<'\''> idiom), so the shell parses each argument back as one literal word.
+
+Use this wherever a pre-tokenized argument list must be flattened into a
+command string that a shell will re-parse — such as the C<-c> argument to
+C<script> or C<sh>. Joining arguments naively instead lets any value
+containing shell metacharacters (C<|>, C<;>, C<$>, quotes, backticks) be
+split into separate arguments or, worse, executed as an injected command.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@args>
+
+The argument list to quote and join.
+
+=back
+
+B<Returns:> A single string of space-separated, single-quoted arguments.
+
+B<Examples:>
+
+    shell_quote('bosh', 'attach-disk', 'web/0', 'disk-1|meta');
+    # Returns: "'bosh' 'attach-disk' 'web/0' 'disk-1|meta'"
+    # A shell re-parsing this sees 4 words; the | is never a pipe.
+
 =head2 fake_tty
 
     my @cmd = fake_tty($output_file, @cmd);
@@ -1402,19 +1434,18 @@ The command and arguments to run inside the fake TTY.
 
 =back
 
-B<Returns:> The modified command array ready to pass to C<run()>. On macOS
-this is a list of separate arguments. On Linux the entire C<script>
-invocation is returned as a single string (the subcommand arguments are
-joined with spaces and shell-quoted), so the return is a one-element list.
-
-B<Note:> The Linux single-string form does not handle quotes or pipes in
-C<@cmd> arguments robustly; this is a known limitation.
+B<Returns:> The modified command array ready to pass to C<run()>, a list of
+separate arguments on both platforms. On Linux the subcommand is flattened
+into a single C<script -c> argument via C<shell_quote>, so command values
+containing shell metacharacters (pipes, semicolons, quotes) survive the
+inner shell's re-parsing intact instead of being split or executed as
+injected commands.
 
 B<Examples:>
 
     my @cmd = fake_tty('/tmp/out.log', 'spruce', 'diff', $a, $b);
     # Returns (macOS): ('script', '-qeF', '/tmp/out.log', 'spruce', 'diff', $a, $b)
-    # Returns (Linux): ("script -qf '/tmp/out.log' -c 'spruce diff $a $b'")
+    # Returns (Linux): ('script', '-qf', '/tmp/out.log', '-c', "'spruce' 'diff' '$a' '$b'")
     run(@cmd);
 
 =head2 lines

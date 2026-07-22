@@ -265,6 +265,50 @@ subtest 'global config schema and validation' => sub {
 	lives_ok { validate_global_config($roots_config) } 'deployment_roots validates';
 };
 
+subtest 'shell_quote round-trips arguments through a real shell' => sub {
+	my @args = (
+		'plain',
+		'has space',
+		'pipe|not-a-pipe',
+		'semi;colon',
+		'dollar$VAR',
+		"single'quote",
+		'double"quote',
+		'back`tick`',
+		'sub$(whoami)shell',
+		'redirect>file',
+	);
+	my $quoted = Genesis::shell_quote(@args);
+	my ($out, $rc) = run('printf "%s\n" '.$quoted);
+	is $rc, 0, 'shell parses the quoted string without error';
+	eq_or_diff [split /\n/, $out], \@args,
+		'every argument survives shell re-parsing byte-for-byte';
+};
+
+subtest 'shell_quote prevents command injection' => sub {
+	my $canary = workdir()."/injection-canary-$$";
+	my ($out, $rc) = run('printf "%s\n" '.Genesis::shell_quote("x; touch $canary"));
+	is $rc, 0, 'shell accepts the quoted injection attempt';
+	is $out, "x; touch $canary", 'payload is emitted as a literal argument';
+	ok !-e $canary, 'injected command did not execute';
+};
+
+subtest 'fake_tty on linux quotes the flattened subcommand' => sub {
+	local $^O = 'linux';
+	my @cmd = Genesis::fake_tty('/tmp/out.log', 'spruce', 'diff', 'a file', 'pipe|arg');
+	eq_or_diff \@cmd,
+		['script', '-qf', '/tmp/out.log', '-c', "'spruce' 'diff' 'a file' 'pipe|arg'"],
+		'linux form is an argument list with a shell_quoted -c payload';
+};
+
+subtest 'fake_tty on darwin passes arguments through unmodified' => sub {
+	local $^O = 'darwin';
+	my @cmd = Genesis::fake_tty('/tmp/out.log', 'spruce', 'diff', 'a file', 'pipe|arg');
+	eq_or_diff \@cmd,
+		['script', '-qeF', '/tmp/out.log', 'spruce', 'diff', 'a file', 'pipe|arg'],
+		'darwin form stays a plain argument list';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

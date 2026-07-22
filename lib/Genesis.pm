@@ -93,7 +93,7 @@ our @EXPORT = qw/
 
 	spruce_diff
 
-	run lines curl fake_tty
+	run lines curl fake_tty shell_quote
 	read_json_from
 	safe_path_exists
 
@@ -746,6 +746,15 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 	return ($rc > 0 && defined($err) ? $err : $out);
 }
 
+# Quote a list of arguments so a POSIX shell parses each back as a single
+# literal word.  Use wherever a pre-tokenized argument list must be flattened
+# into a shell command string (e.g. `script -c`): without this, argument
+# values containing shell metacharacters (|, ;, $, quotes, backticks) get
+# split into separate words -- or executed as commands (shell injection).
+sub shell_quote {
+	return join(' ', map {(my $s = $_) =~ s/'/'\\''/g; "'$s'"} @_);
+}
+
 # Wrap the command in an OS-specific script call to fake being in a tty terminal.
 sub fake_tty {
 	my ($file, @cmd) = @_;
@@ -753,10 +762,11 @@ sub fake_tty {
 	if ($OS eq 'darwin') {
 		unshift @cmd, 'script', '-qeF', $file
 	} elsif ($OS eq 'linux') {
-		# Sometimes gnu just sucks...
-		# TODO: more rigorous wrapping of subcmd to deal with quotes and pipes
-		my $subcmd = join(" ", map {$_ =~ m/\s/ ? "\"$_\"" : $_} @cmd);
-		@cmd = ("script -qf '$file' -c '$subcmd'");
+		# `script -c` re-parses its argument with a shell, so the argument
+		# list must be flattened with shell_quote: naive joining lets values
+		# containing shell metacharacters split into separate arguments or
+		# execute as injected commands.
+		@cmd = ('script', '-qf', $file, '-c', shell_quote(@cmd));
 	}
 	return @cmd
 }
