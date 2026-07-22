@@ -110,8 +110,12 @@ sub terminal_height () {
 # both ways).  Cached per-process; the terminal geometry doesn't
 # change often enough to justify a re-probe on every call.
 my $__stty_size;
+my $__stty_probed;
 sub _stty_size {
-	return $__stty_size if defined $__stty_size;
+	return $__stty_size if $__stty_probed;
+	$__stty_probed = 1;
+	# Pseudo-ttys in CI can lie; require a TERM signal.
+	return $__stty_size = undef unless $ENV{TERM};
 	my $out = `stty size </dev/tty 2>/dev/null`;
 	if (defined $out && $out =~ /^(\d+)\s+(\d+)/) {
 		return $__stty_size = [$1, $2];
