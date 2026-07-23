@@ -505,6 +505,46 @@ B<Examples:>
 
     push @{$config->{azs}}, $cpi_block{azs}->@* if %cpi_block;
 
+=head2 cpi_name_for_az
+
+    my $cpi = $self->cpi_name_for_az($az_key, \%az_data);
+
+Returns the CPI name to inject into an AZ definition. The default
+implementation ignores its arguments and returns C<cpi_name>, so every AZ
+uses the environment's single CPI.
+
+This is the extension point for kits that route AZs to different CPIs (for
+example, a single director serving multiple IaaSes). Override this method
+and return a CPI name per AZ key; the loops in C<build_az_definitions> and
+C<build_cpi_azs> call it for every AZ they emit when CPI is enabled.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$az_key>
+
+The AZ's key as returned by C<get_available_azs> (the vault key, not the
+rendered AZ name). May be C<undef> when the caller did not supply one.
+
+=item C<\%az_data>
+
+The AZ's data hashref.
+
+=back
+
+B<Returns:> The CPI name string to use for this AZ.
+
+B<Examples:>
+
+    # In a kit hook, route AZs via an az_map from the environment config:
+    sub cpi_name_for_az {
+        my ($self, $az_key, $az_data) = @_;
+        my $az_map = $self->env->lookup('bosh-configs.director-cpi.az_map', {});
+        return $az_map->{$az_key} if exists $az_map->{$az_key};
+        return $self->cpi_name;
+    }
+
 =head2 relinquish_networks
 
     $self->relinquish_networks(@networks);
@@ -1993,7 +2033,8 @@ B<Examples:>
 
 Builds a single AZ definition hashref from the given AZ data. When
 C<< $options{virtual} >> is true, C<cloud_properties> is omitted. When CPI
-is enabled, adds a C<cpi> field.
+is enabled, adds a C<cpi> field whose value comes from
+C<cpi_name_for_az($options{az_key}, \%az)>.
 
 B<Parameters:>
 
@@ -2015,6 +2056,12 @@ B<(optional)> Override for the AZ name (supports CPI shadow naming).
 =item C<virtual>
 
 B<(optional)> When true, omits C<cloud_properties> from the definition.
+
+=item C<az_key>
+
+B<(optional)> The AZ's key as returned by C<get_available_azs>, forwarded
+to C<cpi_name_for_az> so per-AZ CPI overrides can route by key. Consumed
+here; never emitted into the definition.
 
 =back
 

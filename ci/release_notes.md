@@ -1,5 +1,15 @@
 # New Features
 
+* Per-AZ CPI extension point in cloud-config hooks.
+
+  `Genesis::Hook::CloudConfig` now exposes `cpi_name_for_az($az_key,
+  $az_data)`, called for every AZ definition emitted by
+  `build_az_definitions` and `build_cpi_azs` when CPI is enabled. The
+  default returns the environment's single `cpi_name`, so existing kits
+  render identical cloud-config. Kits that route AZs to different CPIs
+  (one director serving multiple IaaSes) override just this method
+  instead of duplicating the AZ definition loop.
+
 * Auto-connect to BOSH director.
 
   Genesis can now automatically connect to the correct BOSH director for the

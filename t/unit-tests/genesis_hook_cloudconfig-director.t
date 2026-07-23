@@ -252,6 +252,101 @@ subtest 'build_az_definitions - cloud_properties are decoded from JSON' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# cpi_name_for_az
+# ---------------------------------------------------------------------------
+{
+	package Genesis::Hook::CloudConfig::PerAZKit::Director;
+	our @ISA = ('Genesis::Hook::CloudConfig::Bosh::Director');
+	our @seen_calls;
+	sub cpi_name_for_az {
+		my ($self, $az_key, $az_data) = @_;
+		push @seen_calls, [$az_key, $az_data];
+		return "cpi-for-$az_key";
+	}
+}
+
+subtest 'cpi_name_for_az - default returns cpi_name' => sub {
+	plan tests => 3;
+
+	can_ok('Genesis::Hook::CloudConfig', 'cpi_name_for_az');
+
+	my $env = mock_env(cpi_enabled => 1, cpi_name => 'default-cpi');
+	local $ENV{GENESIS_ENVIRONMENT} = "test-env-dir-$test_seq";
+	my $hook = Genesis::Hook::CloudConfig::Bosh::Director->init(
+		env => $env, purpose => 'director'
+	);
+
+	is($hook->cpi_name_for_az('az1', $hook->network->{azs}{az1}), 'default-cpi',
+		'default cpi_name_for_az returns the single cpi_name');
+	is($hook->cpi_name_for_az('no-such-az', undef), 'default-cpi',
+		'default cpi_name_for_az ignores its arguments');
+};
+
+subtest 'build_az_definitions - single-CPI injection unchanged' => sub {
+	plan tests => 1;
+
+	my $env = mock_env(cpi_enabled => 1, cpi_name => 'default-cpi');
+	local $ENV{GENESIS_ENVIRONMENT} = "test-env-dir-$test_seq";
+	my $hook = Genesis::Hook::CloudConfig::Bosh::Director->init(
+		env => $env, purpose => 'director'
+	);
+	my $env_name = "test-env-dir-$test_seq";
+
+	my @azs = $hook->build_az_definitions();
+	cmp_deeply(\@azs, [
+		{ cloud_properties => {"zone" => "us-east-1a"}, name => "${env_name}-z1", cpi => 'default-cpi' },
+		{ cloud_properties => {"zone" => "us-east-1b"}, name => "${env_name}-z2", cpi => 'default-cpi' },
+		{ cloud_properties => {"zone" => "us-east-1c"}, name => "${env_name}-z3", cpi => 'default-cpi' },
+	], 'every AZ definition carries the single cpi_name when no override exists');
+};
+
+subtest 'build_az_definitions - per-AZ override wins' => sub {
+	plan tests => 3;
+
+	local @Genesis::Hook::CloudConfig::PerAZKit::Director::seen_calls = ();
+	my $env = mock_env(cpi_enabled => 1, cpi_name => 'default-cpi');
+	local $ENV{GENESIS_ENVIRONMENT} = "test-env-dir-$test_seq";
+	my $hook = Genesis::Hook::CloudConfig::PerAZKit::Director->init(
+		env => $env, purpose => 'director'
+	);
+	my $env_name = "test-env-dir-$test_seq";
+
+	my @azs = $hook->build_az_definitions();
+	cmp_deeply(\@azs, [
+		{ cloud_properties => {"zone" => "us-east-1a"}, name => "${env_name}-z1", cpi => 'cpi-for-az1' },
+		{ cloud_properties => {"zone" => "us-east-1b"}, name => "${env_name}-z2", cpi => 'cpi-for-az2' },
+		{ cloud_properties => {"zone" => "us-east-1c"}, name => "${env_name}-z3", cpi => 'cpi-for-az3' },
+	], 'overridden cpi_name_for_az routes each AZ by its original key');
+
+	my @calls = sort { $a->[0] cmp $b->[0] }
+		@Genesis::Hook::CloudConfig::PerAZKit::Director::seen_calls;
+	cmp_deeply([map {$_->[0]} @calls], ['az1', 'az2', 'az3'],
+		'hook receives each original AZ key exactly once');
+	is($calls[0][1], $hook->network->{azs}{az1},
+		'hook receives the AZ data hashref alongside the key');
+};
+
+subtest 'build_cpi_azs - per-AZ override wins' => sub {
+	plan tests => 2;
+
+	local @Genesis::Hook::CloudConfig::PerAZKit::Director::seen_calls = ();
+	my $env = mock_env(cpi_enabled => 1, cpi_name => 'default-cpi');
+	local $ENV{GENESIS_ENVIRONMENT} = "test-env-dir-$test_seq";
+	my $hook = Genesis::Hook::CloudConfig::PerAZKit::Director->init(
+		env => $env, purpose => 'director'
+	);
+
+	my %block = $hook->build_cpi_azs();
+	cmp_deeply([map {$_->{cpi}} @{$block{azs}}],
+		['cpi-for-az1', 'cpi-for-az2', 'cpi-for-az3'],
+		'shadow AZ definitions route cpi by original key too');
+	cmp_deeply(
+		[sort map {$_->[0]} @Genesis::Hook::CloudConfig::PerAZKit::Director::seen_calls],
+		['az1', 'az2', 'az3'],
+		'build_cpi_azs passes each original AZ key to the hook');
+};
+
+# ---------------------------------------------------------------------------
 # network data population via init
 # ---------------------------------------------------------------------------
 subtest 'network data population - azs after init' => sub {
