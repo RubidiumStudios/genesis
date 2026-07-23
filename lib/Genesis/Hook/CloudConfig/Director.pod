@@ -146,7 +146,9 @@ B<Examples:>
 Builds and returns the availability-zone definitions for all AZs known to
 this director. For each AZ stored in C<< $self->{network}{azs} >> (populated
 during C<init>), calls C<_az_definition_for> to produce the BOSH-compatible
-AZ definition hash. The results are deduplicated and sorted by name.
+AZ definition hash, passing the AZ's key as the C<az_key> option so
+per-AZ CPI routing via C<cpi_name_for_az> receives the original key. The
+results are deduplicated and sorted by name.
 
 B<Parameters:>
 
