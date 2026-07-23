@@ -20,6 +20,7 @@ use Time::Piece;
 use JSON::PP ();
 use Sys::Hostname ();
 use File::Basename qw(basename);
+use Errno ();
 
 ### Class Methods {{{
 
@@ -945,8 +946,22 @@ sub check_network_lock {
 	my $lock_time = Time::Piece->strptime($lock->{at}, '%Y-%m-%d %H:%M:%S %z');
 	my $lock_age = time - $lock_time->epoch;
 
+	my $status = $lock_age > $max_age ? 'stale' : 'locked';
+
+	# Same-host pid-liveness fallback: a lock recorded on this same
+	# host whose pid is no longer running can never be released by
+	# its owner (eg an interrupted diff, killed process, Ctrl-C), so
+	# don't make callers wait out the full $max_age timeout for it.
+	# Locks from other hosts can't be checked this way, so those still
+	# rely on the age-based timeout above.
+	if ($status ne 'stale' && $lock->{pid} && $lock->{hostname}
+		&& $lock->{hostname} eq Sys::Hostname::hostname()
+		&& !(kill(0, $lock->{pid}) || $!{EPERM})) {
+		$status = 'stale';
+	}
+
 	return {
-		status => $lock_age > $max_age ? 'stale' : 'locked',
+		status => $status,
 		lock => $lock,
 		age => $lock_age,
 		description => sprintf(

@@ -1042,7 +1042,7 @@ SCRIPT
 };
 
 subtest 'Network lock methods (mock vault)' => sub {
-	plan tests => 9;
+	plan tests => 11;
 
 	local $ENV{GENESIS_BOSH_COMMAND};
 	fake_bosh('');
@@ -1130,6 +1130,42 @@ subtest 'Network lock methods (mock vault)' => sub {
 	my $status3 = $bosh->check_network_lock(max_lock_age => 1800);
 	is($status3->{status}, 'stale',
 		'check_network_lock() reports stale when lock age exceeds max_lock_age');
+
+	# 8. Same-host pid-liveness fallback: a lock recorded on this host
+	# whose pid is no longer running should be treated as stale even
+	# though it's well within max_lock_age -- an interrupted genesis
+	# process (killed diff, Ctrl-C, etc) leaves a lock nothing will
+	# ever clear otherwise.
+	require Sys::Hostname;
+	my $dead_pid = fork();
+	if (defined($dead_pid) && $dead_pid == 0) { exit 0; } # child: exit immediately
+	waitpid($dead_pid, 0) if defined($dead_pid);
+	my $fresh_dead_host_lock = JSON::PP::encode_json({
+		at       => strftime('%Y-%m-%d %H:%M:%S +0000', gmtime(time - 60)),
+		hostname => Sys::Hostname::hostname(),
+		user     => $ENV{USER} // 'unknown',
+		pid      => $dead_pid,
+		env      => 'lock-test',
+	});
+	$vault_data->{'secret/exodus/lock-test/bosh:network-claim-lock'} = $fresh_dead_host_lock;
+	my $status4 = $bosh->check_network_lock(max_lock_age => 1800);
+	is($status4->{status}, 'stale',
+		'check_network_lock() reports stale for a same-host lock whose pid is dead, even when fresh');
+
+	# 9. Same-host lock with a genuinely live pid (this test process
+	# itself) must NOT be falsely reported stale just because it's on
+	# the same host.
+	my $fresh_live_host_lock = JSON::PP::encode_json({
+		at       => strftime('%Y-%m-%d %H:%M:%S +0000', gmtime(time - 60)),
+		hostname => Sys::Hostname::hostname(),
+		user     => $ENV{USER} // 'unknown',
+		pid      => $$,
+		env      => 'lock-test',
+	});
+	$vault_data->{'secret/exodus/lock-test/bosh:network-claim-lock'} = $fresh_live_host_lock;
+	my $status5 = $bosh->check_network_lock(max_lock_age => 1800);
+	is($status5->{status}, 'locked',
+		'check_network_lock() does not falsely report stale for a live same-host pid');
 };
 
 done_testing;
