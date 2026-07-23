@@ -194,8 +194,12 @@ subtest 'needed_cpis - az without cpi field maps to <default>' => sub {
 		'mixed env emits <default> sentinel for unpinned azs alongside named cpis';
 };
 
-subtest 'needed_cpis - bails when az is not present in cloud-config' => sub {
-	plan tests => 1;
+subtest 'cpi_az_map - unresolvable azs bucket under <default> without bailing' => sub {
+	# Shape 4 refactor: cpi_az_map is pure data.  Unresolvable AZs
+	# bucket under <default> (conservative) so callers that just want
+	# the fan-out set (e.g. _get_stemcell_status) can proceed.  The
+	# strict-bail semantic moves to _check_cpis.
+	plan tests => 3;
 	my $env = make_env('cc-orphan');
 
 	no warnings qw(redefine once);
@@ -207,14 +211,55 @@ subtest 'needed_cpis - bails when az is not present in cloud-config' => sub {
 			if $key eq 'azs';
 		return $default;
 	};
+	local *Genesis::Env::use_create_env = sub { 1 };  # skip exodus fallback
 
-	# Unresolvable AZs are a hard configuration error: BOSH can't
-	# deploy a VM there, and we can't determine which CPI it would
-	# need.  needed_cpis bails so the broken env can't slip past
-	# preflight to fail later at deploy time.
-	throws_ok { $env->needed_cpis }
-		qr/z9.*not present in the cloud-config|cloud-config.*z9/is,
-		'needed_cpis bails listing the unresolvable AZ';
+	my $map = $env->cpi_az_map;
+	is_deeply([sort keys %$map], ['<default>', 'aws-east'],
+		'both cpis present (unresolvable bucketed under <default>)');
+	is_deeply($map->{'aws-east'}, ['z1'], 'resolved az goes to its cpi');
+	is_deeply($map->{'<default>'}, ['z9'],
+		'unresolvable az buckets under <default>');
+};
+
+subtest '_unresolvable_azs - returns AZs not in cloud-config' => sub {
+	plan tests => 2;
+	my $env = make_env('cc-orphan-list');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{ name => 'api', azs => ['z1', 'z9', 'z10'] }]
+			if $key eq 'instance_groups';
+		return [{ name => 'z1' }]
+			if $key eq 'azs';
+		return $default;
+	};
+	local *Genesis::Env::use_create_env = sub { 1 };
+
+	my @unresolvable = $env->_unresolvable_azs;
+	is scalar(@unresolvable), 2,
+		'two AZs unresolvable (z9, z10)';
+	is_deeply([sort @unresolvable], ['z10', 'z9'],
+		'unresolvable AZs returned sorted');
+};
+
+subtest '_unresolvable_azs - empty when all AZs resolve' => sub {
+	plan tests => 1;
+	my $env = make_env('cc-clean');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{ name => 'api', azs => ['z1', 'z2'] }]
+			if $key eq 'instance_groups';
+		return [{ name => 'z1' }, { name => 'z2', cpi => 'aws' }]
+			if $key eq 'azs';
+		return $default;
+	};
+	local *Genesis::Env::use_create_env = sub { 1 };
+
+	is_deeply([$env->_unresolvable_azs], [],
+		'no unresolvable AZs when all are declared');
 };
 
 # ======================================================================
@@ -277,9 +322,10 @@ subtest '_check_cpis - no instance_groups => ok (nothing to check)' => sub {
 	my $env = make_env('chk-noig');
 
 	no warnings qw(redefine once);
-	local *Genesis::Env::use_create_env = sub { 0 };
-	local *Genesis::Env::cpi_az_map     = sub { {} };
-	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when no azs declared" };
+	local *Genesis::Env::use_create_env    = sub { 0 };
+	local *Genesis::Env::_unresolvable_azs = sub { () };
+	local *Genesis::Env::cpi_az_map        = sub { {} };
+	local *Genesis::Env::bosh              = sub { die "bosh must not be queried when no azs declared" };
 
 	# Skip paths still return a msg so the caller emits one notify
 	# line explaining why no checks ran -- only the per-CPI fan-out
@@ -296,6 +342,7 @@ subtest '_check_cpis - only <default> needed => ok (every director has default)'
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::_unresolvable_azs = sub { () };
 	local *Genesis::Env::cpi_az_map     = sub { { '<default>' => ['z1', 'z2'] } };
 	# <default>-only path skips the director query; bosh->cpis must not be called.
 	local *Genesis::Env::bosh           = sub { die "bosh must not be queried when only <default> is needed" };
@@ -315,6 +362,7 @@ subtest '_check_cpis - all named cpis present => ok' => sub {
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::_unresolvable_azs = sub { () };
 	local *Genesis::Env::cpi_az_map     = sub {
 		{ 'aws-east' => ['z1'], 'vsphere-prod' => ['z2', 'z3'] }
 	};
@@ -341,6 +389,7 @@ subtest '_check_cpis - missing cpis => error' => sub {
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::_unresolvable_azs = sub { () };
 	local *Genesis::Env::cpi_az_map     = sub {
 		{
 			'aws-east'     => ['z1'],
@@ -371,6 +420,7 @@ subtest '_check_cpis - mixed default + named: only named are checked' => sub {
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::_unresolvable_azs = sub { () };
 	local *Genesis::Env::cpi_az_map     = sub {
 		{ '<default>' => ['z1'], 'aws-east' => ['z2', 'z3'] }
 	};
@@ -403,6 +453,7 @@ subtest '_check_cpis - no cpi configs uploaded short-circuits without listing fe
 
 	no warnings qw(redefine once);
 	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::_unresolvable_azs = sub { () };
 	local *Genesis::Env::cpi_az_map     = sub {
 		{ 'aws-east' => ['z1', 'z2'], 'vsphere-prod' => ['z3'] }
 	};
@@ -436,6 +487,39 @@ subtest '_check_cpis - no cpi configs uploaded short-circuits without listing fe
 	# Env::check caller still needs the notify line.
 	ok defined($result->{msg}) && length($result->{msg}),
 		'msg is defined (caller will notify) -- not the post-fan-out undef path';
+};
+
+subtest '_check_cpis - bails when instance_groups reference unresolvable AZs' => sub {
+	# Shape 4 refactor: the strict-bail semantic that used to live in
+	# cpi_az_map (and therefore fired from every caller including the
+	# stemcell fan-out) now lives here.  _check_cpis owns "is this env
+	# consistent with the director's cloud-config"; cpi_az_map is pure
+	# data.
+	plan tests => 3;
+	my $env = make_env('chk-orphan-az');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{ name => 'api', azs => ['z1', 'z9'] }]
+			if $key eq 'instance_groups';
+		return [{ name => 'z1', cpi => 'aws-east' }]
+			if $key eq 'azs';
+		return $default;
+	};
+	local *Genesis::Env::bosh = sub { stub_bosh(cpis => ['aws-east']) };
+
+	my $result = $env->_check_cpis;
+	is $result->{state}, 'error',
+		'unresolvable AZ yields state=error';
+	like $result->{msg} // '',
+		qr/z9.*not present in the cloud-config|cloud-config.*z9/is,
+		'error message names the unresolvable AZ';
+	# msg defined -- caller notifies (no inline output was emitted
+	# before the unresolvable check fires).
+	ok defined($result->{msg}) && length($result->{msg}),
+		'msg is defined (caller will notify)';
 };
 
 # ======================================================================
