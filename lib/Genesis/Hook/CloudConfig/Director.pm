@@ -71,7 +71,7 @@ sub build_az_definitions {
 	my $azs = $self->get_available_azs;
 	for my $az (keys %$azs) {
 		next unless $azs->{$az}{name};
-		my $config = $self->_az_definition_for($azs->{$az}, %options);
+		my $config = $self->_az_definition_for($azs->{$az}, %options, az_key => $az);
 		push @azs, $config;
 	}
 	my @results = uniq sort {$a->{name} cmp $b->{name}} @azs;

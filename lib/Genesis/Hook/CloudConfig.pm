@@ -241,13 +241,24 @@ sub build_cpi_azs {
 			// ($az_name =~ m/[^0-9]([0-9]*)$/)[0]
 			|| ($az_defn->{name} =~ m/[^0-9]([0-9]*)$/)[0];
 		my $config = $self->_az_definition_for(
-			$az_defn, %options, name => $self->{az_prefix} . $idx
+			$az_defn, %options, name => $self->{az_prefix} . $idx, az_key => $az_name
 		);
 		push @azs, $config;
 		$self->_add_cpi_to_network_az($az_name, $config->{name});
 	}
 
 	return (azs => \@azs);
+}
+
+# }}}
+# cpi_name_for_az - Returns the CPI name to inject for a given AZ {{{
+sub cpi_name_for_az {
+	my ($self, $az_key, $az_data) = @_;
+
+	# Override point for kits that route AZs to different CPIs (eg a single
+	# director serving multiple IaaSes).  $az_key is the AZ's key as returned
+	# by get_available_azs; $az_data is its data hashref.
+	return $self->cpi_name;
 }
 
 # }}}
@@ -1656,11 +1667,12 @@ sub _filter_subnets {
 # _az_definition_for - Returns the definition for a given availability zone {{{
 sub _az_definition_for {
 	my ($self, $az, %options) = @_;
+	my $az_key = delete($options{az_key});
 	my $config = {
 		name => $options{name} // $az->{name}, # Support CPI Shadow naming
 	};
 	$config->{cloud_properties} = JSON::PP->new->decode($az->{cloud_properties}) unless $options{virtual};
-	$config->{cpi} = $self->cpi_name if ($self->cpi_enabled);
+	$config->{cpi} = $self->cpi_name_for_az($az_key, $az) if ($self->cpi_enabled);
 	return $config;
 }
 
