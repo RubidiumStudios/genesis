@@ -2232,52 +2232,21 @@ sub cpi_az_map {
 	my @azs = $self->instance_group_azs;
 	return {} unless @azs;
 
-	my $cloud_azs = scalar $self->manifest_lookup('azs', []);
-
-	# Director-deployed envs whose kit does not include `cloud` in
-	# required_configs('blueprint') never merge a cloud-config into
-	# their manifest, so manifest_lookup('azs') is empty.  Fall back
-	# to the parent director's own network exodus -- same source that
-	# Genesis::Hook::CloudConfig::network() consults on write.  Bail
-	# loudly if exodus is empty for a director-deployed env; a silent
-	# empty here would let downstream stemcell/CPI checks return bogus
-	# results.
-	if (!(ref($cloud_azs) eq 'ARRAY' && @$cloud_azs) && !$self->use_create_env) {
-		my $network = $self->director_exodus_lookup('/network');
-		unless (ref($network) eq 'HASH' && ref($network->{azs}) eq 'HASH'
-		    && %{$network->{azs}}) {
-			bail(
-				"No network exodus recorded for parent director %s; deploy ".
-				"the director first (or re-run its post-deploy to backfill ".
-				"/network) before deploying this env.",
-				$self->bosh->alias // '<unknown>'
-			);
-		}
-		$cloud_azs = $self->_azs_from_director_network($network);
-	}
-
+	# Best-effort AZ set: manifest first, then parent director's
+	# /network exodus for director-deployed envs whose kit doesn't
+	# merge cloud-config into the manifest.  Silent empty (not a bail)
+	# here -- pure data.  _check_cpis owns "was this resolution
+	# complete" via _unresolvable_azs; _get_stemcell_status just needs
+	# the best-effort fan-out set.
+	my $cloud_azs = $self->_resolve_cloud_azs;
 	my %az_cpi = map  { $_->{name} => $_->{cpi} }
 	             grep { ref($_) eq 'HASH' && defined($_->{name}) }
-	             @$cloud_azs;
+	             @{$cloud_azs || []};
 
-	# Any instance_group AZ that has no entry in cloud-config is an
-	# unresolvable reference: BOSH cannot deploy a VM there, and we
-	# cannot determine which CPI it would need.  This is a hard
-	# configuration error -- bail loudly rather than silently dropping
-	# the AZ from the result, which would let a broken env pass
-	# preflight only to explode at deploy time.
-	my @unresolvable = grep { !exists $az_cpi{$_} } @azs;
-	if (@unresolvable) {
-		bail(
-			"instance_groups reference AZ(s) not present in the cloud-config:\n".
-			"  - %s\n\n".
-			"Cloud-config declares: %s",
-			join("\n  - ", map { "#R{$_}" } @unresolvable),
-			(%az_cpi ? join(', ', map { "#C{$_}" } sort keys %az_cpi)
-			         : '#K{<none>}'),
-		);
-	}
-
+	# Pure data: unresolvable AZs bucket under <default> so callers that
+	# just want the fan-out set (stemcell checks) can proceed.  Callers
+	# that need to enforce "every AZ resolves" (_check_cpis) query
+	# _unresolvable_azs and bail themselves.
 	my %map;
 	for my $az (@azs) {
 		my $cpi = $az_cpi{$az};
@@ -2286,6 +2255,28 @@ sub cpi_az_map {
 	}
 	$map{$_} = [sort @{$map{$_}}] for keys %map;
 	return \%map;
+}
+
+# }}}
+# _resolve_cloud_azs - get cloud-config azs from manifest or exodus fallback {{{
+#
+# Returns the merged cloud-config `azs:` array for this env.  Preference:
+# manifest_lookup (fastest, standard case), falling back to the parent
+# director's /network exodus for director-deployed envs whose kit does not
+# include `cloud` in required_configs('blueprint') (so the manifest carries
+# no azs).  Returns an empty arrayref when no resolution succeeds -- pure
+# data; callers decide whether that's an error (via _unresolvable_azs).
+sub _resolve_cloud_azs {
+	my $self = shift;
+	my $cloud_azs = scalar $self->manifest_lookup('azs', []);
+	return $cloud_azs if ref($cloud_azs) eq 'ARRAY' && @$cloud_azs;
+	return [] if $self->use_create_env;
+
+	my $network = $self->director_exodus_lookup('/network');
+	return [] unless ref($network) eq 'HASH'
+	              && ref($network->{azs}) eq 'HASH'
+	              && %{$network->{azs}};
+	return $self->_azs_from_director_network($network);
 }
 
 # }}}
@@ -2312,6 +2303,27 @@ sub _azs_from_director_network {
 		}
 	}
 	return \@cloud_azs;
+}
+
+# }}}
+# _unresolvable_azs - instance_group AZs not declared in cloud-config {{{
+#
+# Returns the sorted list of instance_group AZs that have no entry in
+# either the manifest cloud-config or the director's /network exodus
+# fallback.  Callers that need to enforce complete AZ resolution
+# (_check_cpis) bail on non-empty; callers that just need best-effort
+# CPI fan-out (_get_stemcell_status via needed_cpis) ignore this and
+# let cpi_az_map bucket unresolvables under <default>.
+sub _unresolvable_azs {
+	my $self = shift;
+	my @azs = $self->instance_group_azs;
+	return () unless @azs;
+
+	my $cloud_azs = $self->_resolve_cloud_azs;
+	my %az_cpi = map  { $_->{name} => 1 }
+	             grep { ref($_) eq 'HASH' && defined($_->{name}) }
+	             @{$cloud_azs || []};
+	return sort grep { !exists $az_cpi{$_} } @azs;
 }
 
 # }}}
@@ -6515,6 +6527,30 @@ sub _check_cpis {
 		return {
 			state => 'ok',
 			msg   => 'using create-env, no parent director CPIs to validate',
+		};
+	}
+
+	# Strict AZ resolution: this check owns "every instance_group AZ
+	# resolves to a known cloud-config entry".  cpi_az_map itself is
+	# pure data since Shape 4 refactor -- unresolvable AZs bucket
+	# under <default> there so other callers (stemcell fan-out) can
+	# proceed with best-effort data.
+	my @unresolvable = $self->_unresolvable_azs;
+	if (@unresolvable) {
+		my $cloud_azs = scalar $self->manifest_lookup('azs', []);
+		my @declared = map  { $_->{name} }
+		               grep { ref($_) eq 'HASH' && defined($_->{name}) }
+		               @{$cloud_azs || []};
+		return {
+			state => 'error',
+			msg   => sprintf(
+				"instance_groups reference AZ(s) not present in the cloud-config:\n".
+				"  - %s\n\n".
+				"Cloud-config declares: %s",
+				join("\n  - ", map { "#R{$_}" } @unresolvable),
+				(@declared ? join(', ', map { "#C{$_}" } sort @declared)
+				           : '#K{<none>}'),
+			),
 		};
 	}
 

@@ -128,18 +128,17 @@ subtest 'create-env -> skip fallback entirely' => sub {
 	plan tests => 1;
 
 	# create-env envs get their azs from their own manifest; they never
-	# consult a parent director's /network exodus.  Feeding a populated
-	# exodus should NOT be used when use_create_env is true (and would
-	# be misleading, so verify the bail happens instead of silent use).
-	throws_ok {
-		make_env(
-			__use_create_env     => 1,
-			__instance_group_azs => ['z1'],
-			__manifest_azs       => [],
-			__director_network   => aws_sample_network(),
-		)
-	} qr/not present in the cloud-config|use_create_env/i,
-		'create-env with empty manifest.azs bails (does not silently pull from exodus)';
+	# consult a parent director's /network exodus.  With no manifest.azs
+	# and no exodus consultation, unresolvable AZs bucket under <default>
+	# (pure-data cpi_az_map).
+	my $map = make_env(
+		__use_create_env     => 1,
+		__instance_group_azs => ['z1'],
+		__manifest_azs       => [],
+		__director_network   => aws_sample_network(),
+	);
+	is_deeply($map, {'<default>' => ['z1']},
+		'create-env: no exodus consultation, unresolvable az buckets under <default>');
 };
 
 subtest 'director-deployed, mgmt-default child (AWS sample shape)' => sub {
@@ -232,46 +231,46 @@ subtest 'mixed instance_group_azs (default + named)' => sub {
 		'child-served az under named cpi');
 };
 
-subtest 'missing /network exodus -> bail' => sub {
+subtest 'missing /network exodus -> pure-data returns <default>' => sub {
 	plan tests => 1;
 
-	throws_ok {
-		make_env(
-			__instance_group_azs => ['z1'],
-			__manifest_azs       => [],
-			__director_network   => undef,
-		)
-	} qr/no network exodus|deploy the director first/i,
-		'undef /network exodus bails with actionable message';
+	# Under Shape 4, cpi_az_map no longer bails when the
+	# fallback yields nothing -- unresolvable AZs bucket under <default>.
+	# _check_cpis owns the strict-bail path via _unresolvable_azs;
+	# tested in genesis_env-cpis.t.
+	my $map = make_env(
+		__instance_group_azs => ['z1'],
+		__manifest_azs       => [],
+		__director_network   => undef,
+	);
+	is_deeply($map, {'<default>' => ['z1']},
+		'undef /network: az still resolves to <default> (pure data)');
 };
 
-subtest 'empty azs in /network -> bail' => sub {
+subtest 'empty azs in /network -> pure-data returns <default>' => sub {
 	plan tests => 1;
 
-	throws_ok {
-		make_env(
-			__instance_group_azs => ['z1'],
-			__manifest_azs       => [],
-			__director_network   => { azs => {} },
-		)
-	} qr/no network exodus|deploy the director first/i,
-		'empty azs bails same as missing /network';
+	my $map = make_env(
+		__instance_group_azs => ['z1'],
+		__manifest_azs       => [],
+		__director_network   => { azs => {} },
+	);
+	is_deeply($map, {'<default>' => ['z1']},
+		'empty azs: same pure-data behavior as missing exodus');
 };
 
-subtest 'unresolvable az in exodus -> still bails via existing check' => sub {
+subtest 'unresolvable az in exodus -> buckets under <default>' => sub {
 	plan tests => 1;
 
-	# instance_group AZ that doesn't match any exodus name or for_cpi
-	# entry: same as the pre-existing "not present in cloud-config"
-	# bail -- the fallback resolved SOME azs, just not this one.
-	throws_ok {
-		make_env(
-			__instance_group_azs => ['ghost-az'],
-			__manifest_azs       => [],
-			__director_network   => aws_sample_network(),
-		)
-	} qr/not present in the cloud-config/i,
-		'unresolvable az bails via existing @unresolvable check';
+	# Fallback resolved SOME azs (from aws_sample_network) but not the
+	# ghost-az requested.  Pure-data: ghost-az buckets under <default>.
+	my $map = make_env(
+		__instance_group_azs => ['ghost-az'],
+		__manifest_azs       => [],
+		__director_network   => aws_sample_network(),
+	);
+	is_deeply($map, {'<default>' => ['ghost-az']},
+		'ghost-az not in resolved fallback -> buckets under <default>');
 };
 
 subtest 'child director as parent: no for_cpi, all default' => sub {
