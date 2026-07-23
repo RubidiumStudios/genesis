@@ -54,6 +54,29 @@ subtest 'semantic versioning' => sub {
 	ok !new_enough('2.8.12',     '2.11.1'), '2.8.12 is not new enough to satisfy 2.11.1+';
 };
 
+subtest 'build metadata' => sub {
+	for my $good (qw(
+		1.2.3+build
+		1.2.3-rc.2+cpiazmap
+		1.2.3-rc.4+build.5
+		v1.2.3+21AF26D
+	)) {
+		ok semver($good), "'$good' should be a valid semantic version";
+	}
+
+	ok !semver('1.2.3+'), "'1.2.3+' (empty build metadata) is not valid";
+
+	# build metadata must be ignored when determining precedence
+	ok  new_enough('3.2.1+cpiazmap', '3.2.1'),
+		'build metadata is ignored: 3.2.1+cpiazmap satisfies 3.2.1+';
+	ok  new_enough('1.0.0-rc.2+x', '1.0.0-rc.2'),
+		'build metadata is ignored on RCs: 1.0.0-rc.2+x equals 1.0.0-rc.2';
+	ok  by_semver('1.0.0+x', '1.0.0') == 0,
+		'build metadata does not change ordering';
+	ok  by_semver('1.0.0+x', '1.0.0-rc.1') > 0,
+		'release with build metadata still outranks an RC';
+};
+
 subtest 'by_semver sorting' => sub {
 	my @versions = qw(2.0.0 1.0.0 1.2.3 1.2.2 1.0.0-rc.1 0.9.0);
 	my @sorted = sort by_semver @versions;
