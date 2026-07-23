@@ -2233,6 +2233,29 @@ sub cpi_az_map {
 	return {} unless @azs;
 
 	my $cloud_azs = scalar $self->manifest_lookup('azs', []);
+
+	# Director-deployed envs whose kit does not include `cloud` in
+	# required_configs('blueprint') never merge a cloud-config into
+	# their manifest, so manifest_lookup('azs') is empty.  Fall back
+	# to the parent director's own network exodus -- same source that
+	# Genesis::Hook::CloudConfig::network() consults on write.  Bail
+	# loudly if exodus is empty for a director-deployed env; a silent
+	# empty here would let downstream stemcell/CPI checks return bogus
+	# results.
+	if (!(ref($cloud_azs) eq 'ARRAY' && @$cloud_azs) && !$self->use_create_env) {
+		my $network = $self->director_exodus_lookup('/network');
+		unless (ref($network) eq 'HASH' && ref($network->{azs}) eq 'HASH'
+		    && %{$network->{azs}}) {
+			bail(
+				"No network exodus recorded for parent director %s; deploy ".
+				"the director first (or re-run its post-deploy to backfill ".
+				"/network) before deploying this env.",
+				$self->bosh->alias // '<unknown>'
+			);
+		}
+		$cloud_azs = $self->_azs_from_director_network($network);
+	}
+
 	my %az_cpi = map  { $_->{name} => $_->{cpi} }
 	             grep { ref($_) eq 'HASH' && defined($_->{name}) }
 	             @$cloud_azs;
@@ -2263,6 +2286,32 @@ sub cpi_az_map {
 	}
 	$map{$_} = [sort @{$map{$_}}] for keys %map;
 	return \%map;
+}
+
+# }}}
+# _azs_from_director_network - invert exodus /network into cloud-config azs {{{
+#
+# Exodus /network has one entry per internal AZ key, each with a `.name`
+# (rendered under the mgmt's default CPI) and an optional `.for_cpi.<cpi>`
+# map (rendered under named CPIs).  Both are valid AZ names a child env's
+# instance_groups can reference.  Inverts to the [{name, cpi?}, ...] array
+# shape cpi_az_map's downstream extraction consumes.
+sub _azs_from_director_network {
+	my ($self, $network) = @_;
+	my @cloud_azs;
+	for my $key (sort keys %{$network->{azs}}) {
+		my $az = $network->{azs}{$key};
+		push @cloud_azs, {name => $az->{name}}
+			if defined($az->{name}) && length($az->{name});
+		if (ref($az->{for_cpi}) eq 'HASH') {
+			for my $cpi (sort keys %{$az->{for_cpi}}) {
+				my $rendered = $az->{for_cpi}{$cpi};
+				push @cloud_azs, {name => $rendered, cpi => $cpi}
+					if defined($rendered) && length($rendered);
+			}
+		}
+	}
+	return \@cloud_azs;
 }
 
 # }}}
