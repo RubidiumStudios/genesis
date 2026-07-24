@@ -213,6 +213,26 @@
   environments deployed via a BOSH director.  This update calls them out
   and gives instructions on their use.
 
+* Bail on unresolved spruce operators in instance-group AZs.
+
+  An unresolved `(( ... ))` reaching an instance group's `azs:` list means
+  the manifest was not fully evaluated, so AZ and CPI resolution would run
+  on unreliable data.  Genesis now fails with the offending value instead
+  of proceeding.
+
+  The usual cause is a spruce operator inside the `value:` block of a
+  go-patch ops document -- `spruce merge --go-patch` applies those
+  verbatim, so the marker survives into the resolved manifest.  Note that
+  `type: replace` already replaces the target outright, which makes an
+  inner `(( replace ))` both redundant and inert; remove it from the ops
+  file.  An unresolved `(( grab ))` or `(( vault ))` arrives the same way
+  and points at the merge inputs instead.
+
+  Environments carrying this fault previously deployed with corrupted AZ
+  lists -- the entries the marker was meant to drop were still present
+  alongside the intended replacement.  Those environments will now fail
+  preflight until the ops file is corrected.
+
 # Bug Fixes
 
 * Kits can now specify required prerequisites via hook.
