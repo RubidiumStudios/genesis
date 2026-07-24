@@ -2163,12 +2163,18 @@ sub instance_group_azs {
 		bail(
 			"Unresolved spruce operator(s) in #C{instance_groups.*.azs}: %s\n".
 			"The manifest was not fully evaluated before AZ resolution ran, ".
-			"so downstream AZ/CPI selection would use unreliable data.  ".
-			"Common cause: a spruce operator (e.g. #C{(( replace ))}) was ".
-			"embedded inside a go-patch document -- go-patch does not consume ".
-			"spruce markers, so the operator survives to the resolved ".
-			"manifest.  Investigate the ops file that owns this instance_group's ".
-			"#C{azs:} block.",
+			"so downstream AZ/CPI selection would use unreliable data.\n".
+			"Most common cause: a spruce operator sits inside the #C{value:} ".
+			"block of a go-patch ops document.  Genesis merges with ".
+			"#C{spruce merge --multi-doc --go-patch}, which applies go-patch ".
+			"documents verbatim -- spruce never evaluates inside a #C{value:} ".
+			"block, so the operator survives into the resolved manifest.  Note ".
+			"that #C{type: replace} already replaces the target outright, which ".
+			"makes an inner #C{(( replace ))} both redundant and inert: drop it ".
+			"from the ops file's #C{value:} block.\n".
+			"An unresolved #C{(( grab ))} (missing target) or #C{(( vault ))} ".
+			"(vault unreachable at merge time) reaches here the same way and ".
+			"points at the merge inputs instead.",
 			join(', ', map { "'$_'" } @unresolved)
 		);
 	}

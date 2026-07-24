@@ -145,7 +145,7 @@ sub bail_text_from {
 }
 
 subtest 'instance_group_azs - bails on unresolved spruce operator' => sub {
-	plan tests => 4;
+	plan tests => 6;
 	my $env = make_env('ig-unresolved');
 
 	no warnings qw(redefine once);
@@ -178,6 +178,15 @@ subtest 'instance_group_azs - bails on unresolved spruce operator' => sub {
 
 	like $msg, qr/go-patch/i,
 		'bail points at the go-patch anti-pattern';
+
+	# The actionable part: name the exact construct to edit.  "somewhere
+	# in a go-patch document" sends the operator hunting; "the value:
+	# block of the ops file" is a location they can act on.
+	like $msg, qr/value:/,
+		'bail names the value: block, not just the ops file';
+
+	like $msg, qr/type: replace already replaces/i,
+		'bail explains why the inner marker is redundant';
 
 	like $msg, qr/instance_groups\.\*\.azs/,
 		'bail names the manifest path that carried it';
