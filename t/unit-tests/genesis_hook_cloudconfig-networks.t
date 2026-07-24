@@ -242,6 +242,19 @@ sub make_deploy_env {
 	), @_};
 }
 
+# expect_bosh_drop - run a network_definition('bosh', ...) call, capture the
+# expected "Dropping subnet ocfp-1" warning off STDERR (fixture has no
+# bosh_* reservations on ocfp-1 so the drop always fires), assert it
+# appeared, and return whatever the block returned.  Counts as one test.
+sub expect_bosh_drop (&) {
+	my $code = shift;
+	my ($result, $warn);
+	$warn = stderr_from { $result = $code->() };
+	like $warn, qr/Dropping subnet ocfp-1.*bosh/i,
+		'expected drop warning emitted for ocfp-1';
+	return $result;
+}
+
 # ---------------------------------------------------------------------------
 # AZ Management
 # ---------------------------------------------------------------------------
@@ -302,13 +315,13 @@ subtest 'lookup_az - also resolves by canonical full name' => sub {
 };
 
 subtest 'get_available_azs_in_network - returns AZs for allocated network' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
 	# Build a bosh network so there are allocations to query
-	$hook->network_definition('bosh',
+	expect_bosh_drop { $hook->network_definition('bosh',
 		strategy => 'ocfp',
 		dynamic_subnets => {
 			allocation => { size => 0, statics => 0 },
@@ -319,7 +332,7 @@ subtest 'get_available_azs_in_network - returns AZs for allocated network' => su
 				},
 			},
 		},
-	);
+	) };
 
 	my $azs = $hook->get_available_azs_in_network('bosh');
 
@@ -495,13 +508,13 @@ subtest '_get_existing_allocations - reflects director compilation claim' => sub
 };
 
 subtest 'get_allocated_networks - returns per-subnet allocation details' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
 	# Build a bosh network first to create an allocation
-	$hook->network_definition('bosh',
+	expect_bosh_drop { $hook->network_definition('bosh',
 		strategy => 'ocfp',
 		dynamic_subnets => {
 			allocation => { size => 0, statics => 0 },
@@ -512,7 +525,7 @@ subtest 'get_allocated_networks - returns per-subnet allocation details' => sub 
 				},
 			},
 		},
-	);
+	) };
 
 	my $allocated = $hook->get_allocated_networks();
 	is(ref($allocated), 'HASH', 'get_allocated_networks() returns a hashref');
@@ -531,12 +544,12 @@ subtest 'get_allocated_networks - returns per-subnet allocation details' => sub 
 };
 
 subtest 'get_network_size - returns total IP count for a network' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
-	$hook->network_definition('bosh',
+	expect_bosh_drop { $hook->network_definition('bosh',
 		strategy => 'ocfp',
 		dynamic_subnets => {
 			allocation => { size => 0, statics => 0 },
@@ -547,7 +560,7 @@ subtest 'get_network_size - returns total IP count for a network' => sub {
 				},
 			},
 		},
-	);
+	) };
 
 	my $total_size = $hook->get_network_size('bosh');
 	ok(defined $total_size, 'get_network_size() returns a defined value');
@@ -558,12 +571,12 @@ subtest 'get_network_size - returns total IP count for a network' => sub {
 };
 
 subtest 'get_network_size - filtered by AZ returns subset' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
-	$hook->network_definition('bosh',
+	expect_bosh_drop { $hook->network_definition('bosh',
 		strategy => 'ocfp',
 		dynamic_subnets => {
 			allocation => { size => 0, statics => 0 },
@@ -574,7 +587,7 @@ subtest 'get_network_size - filtered by AZ returns subset' => sub {
 				},
 			},
 		},
-	);
+	) };
 
 	my $az1_size = $hook->get_network_size('bosh', 'az1');
 	is($az1_size, 1, 'get_network_size("bosh", "az1") returns 1 (ocfp-0 only)');
@@ -584,7 +597,7 @@ subtest 'get_network_size - filtered by AZ returns subset' => sub {
 };
 
 subtest 'update_network - records allocations for named network' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
@@ -595,7 +608,7 @@ subtest 'update_network - records allocations for named network' => sub {
 		'no bosh network claim before network_definition is called');
 
 	# Build network definition — this internally calls update_network
-	$hook->network_definition('bosh',
+	expect_bosh_drop { $hook->network_definition('bosh',
 		strategy => 'ocfp',
 		dynamic_subnets => {
 			allocation => { size => 0, statics => 0 },
@@ -606,7 +619,7 @@ subtest 'update_network - records allocations for named network' => sub {
 				},
 			},
 		},
-	);
+	) };
 
 	# After: claims on ocfp-0 and ocfp-2
 	cmp_deeply($hook->network->{subnets}{'ocfp-0'}{claims}, {
@@ -624,13 +637,13 @@ subtest 'update_network - records allocations for named network' => sub {
 };
 
 subtest 'relinquish_networks - removes claim records for named networks' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
 	# Build two networks
-	$hook->network_definition('bosh',
+	expect_bosh_drop { $hook->network_definition('bosh',
 		strategy => 'ocfp',
 		dynamic_subnets => {
 			allocation => { size => 0, statics => 0 },
@@ -641,7 +654,7 @@ subtest 'relinquish_networks - removes claim records for named networks' => sub 
 				},
 			},
 		},
-	);
+	) };
 
 	my $bosh_net = $hook->basename . '.net-bosh';
 	ok(
@@ -665,12 +678,12 @@ subtest 'relinquish_networks - removes claim records for named networks' => sub 
 # Network Definition
 # ---------------------------------------------------------------------------
 subtest 'network_definition - ocfp strategy returns hashref with name/type/subnets' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
-	my $net = $hook->network_definition('bosh',
+	my $net = expect_bosh_drop { $hook->network_definition('bosh',
 		strategy => 'ocfp',
 		dynamic_subnets => {
 			allocation => { size => 0, statics => 0 },
@@ -681,7 +694,7 @@ subtest 'network_definition - ocfp strategy returns hashref with name/type/subne
 				},
 			},
 		},
-	);
+	) };
 
 	ok($net, 'network_definition() returns a defined value');
 	is(ref($net), 'HASH', 'network_definition() returns a hashref');
@@ -751,12 +764,12 @@ subtest 'network_definition - name_prefix overrides default prefix' => sub {
 };
 
 subtest 'network_definition - ocfp subnets: 2 subnets (ocfp-1 fully claimed)' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
-	my $net = $hook->network_definition('bosh',
+	my $net = expect_bosh_drop { $hook->network_definition('bosh',
 		strategy => 'ocfp',
 		dynamic_subnets => {
 			allocation => { size => 0, statics => 0 },
@@ -767,7 +780,7 @@ subtest 'network_definition - ocfp subnets: 2 subnets (ocfp-1 fully claimed)' =>
 				},
 			},
 		},
-	);
+	) };
 
 	is(scalar @{$net->{subnets}}, 2,
 		'bosh network has 2 subnets (ocfp-1 excluded as fully claimed by director)');
