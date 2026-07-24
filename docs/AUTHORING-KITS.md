@@ -457,6 +457,89 @@ The following hooks are currently recognized by Genesis:
   successful or not.  This is useful for giving the operator hints
   about their next steps, including what addons to try.
 
+Merge Pitfalls
+--------------
+
+### Never put a spruce operator inside a go-patch `value:` block
+
+Genesis merges kit files with `spruce merge --multi-doc --go-patch`.
+That single invocation handles two different kinds of document, and
+they do not follow the same rules:
+
+- A **spruce merge document** (a normal YAML map) has its `(( ... ))`
+  operators evaluated.
+- A **go-patch ops document** (a top-level list of `- type: ...`
+  entries) is applied *verbatim*.  Spruce does not descend into a
+  `value:` block looking for operators.
+
+So this is a bug, even though it looks reasonable:
+
+```yaml
+# WRONG
+- type: replace
+  path: /instance_groups/name=api/azs
+  value:
+  - (( replace ))     # never evaluated; lands in the manifest as a string
+  - z1
+```
+
+The `(( replace ))` is not consumed.  It survives into the resolved
+manifest as the literal string `(( replace ))`, sitting in the AZ list
+alongside `z1`.
+
+Two things make this easy to get wrong.  First, the same marker *is*
+correct one line away — in a spruce merge document, `- (( replace ))`
+as the first element of an array is exactly how you replace an
+inherited array instead of appending to it.  Second, the op already
+does what the marker was reaching for: `type: replace` replaces the
+target outright, so the inner marker is redundant as well as inert.
+
+```yaml
+# RIGHT — the op is already a replace
+- type: replace
+  path: /instance_groups/name=api/azs
+  value:
+  - z1
+```
+
+#### How this surfaces
+
+Genesis bails when an unresolved operator reaches
+`instance_groups.*.azs`:
+
+```
+Unresolved spruce operator(s) in instance_groups.*.azs: '(( replace ))'
+```
+
+It bails rather than filtering the marker out, because filtering would
+hide real corruption: an unconsumed `(( replace ))` means the AZ
+entries it was meant to drop are *still present* alongside the intended
+replacement, and downstream AZ and CPI resolution would proceed on that
+data.
+
+The same guard catches an unresolved `(( grab ))` (missing target) or
+`(( vault ))` (vault unreachable at merge time).  Those point at the
+merge inputs rather than at an ops file.
+
+Note the guard covers `azs` specifically.  The underlying mistake can
+land anywhere a go-patch `value:` block is used, so it is worth
+checking for directly.
+
+#### Finding it in a kit
+
+An operator inside a go-patch `value:` block is the signature.  Not
+every `(( replace ))` is wrong — the ones in spruce merge documents are
+fine — so match on the document shape, not on the marker alone:
+
+```bash
+grep -rlE '^\s*-\s*type:\s*(replace|remove|copy|move)' --include='*.yml' . \
+  | xargs grep -n '(( *replace *))'
+```
+
+Then confirm each hit really sits under a `value:` key in the ops
+document, rather than in a separate spruce document in the same file —
+multi-document YAML files routinely contain both.
+
 Credentials Operator Reference
 ------------------------------
 
