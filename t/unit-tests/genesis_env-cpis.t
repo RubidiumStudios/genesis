@@ -132,6 +132,100 @@ subtest 'instance_group_azs - non-hash entries are tolerated' => sub {
 		'non-hash entries are filtered out without erroring';
 };
 
+# The bail text wraps to GENESIS_OUTPUT_COLUMNS, so a long operator
+# can be split mid-value across lines.  Flatten whitespace before
+# matching so these assertions pin the message content, not its
+# column width.
+sub bail_text_from {
+	my ($code) = @_;
+	my $err = do { local $@; eval { $code->() }; $@ };
+	$err = '' unless defined $err;
+	$err =~ s/\s+/ /g;
+	return $err;
+}
+
+subtest 'instance_group_azs - bails on unresolved spruce operator' => sub {
+	plan tests => 4;
+	my $env = make_env('ig-unresolved');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{ name => 'api', azs => ['(( replace ))', 'z1'] }]
+			if $key eq 'instance_groups';
+		return $default;
+	};
+
+	# base_manifest -> unredacted merges without --skip-eval, so a
+	# surviving `(( ... ))` means the fully-evaluated invariant broke.
+	# The usual culprit is a spruce operator inside a go-patch document
+	# -- `spruce merge --go-patch` applies those verbatim, so the marker
+	# reaches the resolved manifest.  Filtering it would leave the AZ
+	# entries the marker was meant to drop still present, so the bail
+	# has to name both the value and the anti-pattern.
+	throws_ok { $env->instance_group_azs }
+		qr/unresolved spruce operator/i,
+		'bails rather than filtering the marker out';
+
+	my $msg = bail_text_from(sub { $env->instance_group_azs });
+
+	# Match the *quoted* value, not a bare `(( replace ))` -- the
+	# explanatory body cites `(( replace ))` as its example, so a bare
+	# match would pass on the boilerplate even if the offending value
+	# were never reported.
+	like $msg, qr/azs: '\(\( replace \)\)'/,
+		'bail reports the offending value, not just the example';
+
+	like $msg, qr/go-patch/i,
+		'bail points at the go-patch anti-pattern';
+
+	like $msg, qr/instance_groups\.\*\.azs/,
+		'bail names the manifest path that carried it';
+};
+
+subtest 'instance_group_azs - bails on any unresolved operator, not just replace' => sub {
+	plan tests => 2;
+	my $env = make_env('ig-unresolved-grab');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{ name => 'api', azs => ['(( grab meta.azs ))'] }]
+			if $key eq 'instance_groups';
+		return $default;
+	};
+
+	# An unresolved `(( grab ))` (missing target) or `(( vault ))`
+	# (vault unreachable at merge time) is the same class of fault as
+	# the go-patch marker: the manifest is not fully evaluated.  The
+	# guard keys off the operator syntax, not the operator name.
+	throws_ok { $env->instance_group_azs }
+		qr/unresolved spruce operator/i,
+		'unresolved grab bails the same way as replace';
+
+	like bail_text_from(sub { $env->instance_group_azs }),
+		qr/'\(\( grab meta\.azs \)\)'/,
+		'bail names the offending grab';
+};
+
+subtest 'instance_group_azs - resolved az names that merely contain parens are kept' => sub {
+	plan tests => 1;
+	my $env = make_env('ig-parens');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		# The guard anchors on a whole-value `(( ... ))`, so an AZ name
+		# that merely embeds parens is not a false positive.
+		return [{ name => 'api', azs => ['z1 (primary)', 'z2'] }]
+			if $key eq 'instance_groups';
+		return $default;
+	};
+
+	is_deeply [$env->instance_group_azs], ['z1 (primary)', 'z2'],
+		'non-operator parens do not trip the unresolved-operator guard';
+};
+
 # ======================================================================
 # needed_cpis
 # ======================================================================
