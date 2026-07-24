@@ -20,6 +20,12 @@ use Genesis::Term;
 use Genesis::State;
 
 use Cwd ();
+# Snapshot cwd as early as possible so the END block below can restore
+# it before File::Temp's rmtree runs at process exit.  BEGIN so the
+# snapshot lands at compile time, before any Genesis-triggered chdir
+# (env loading, kit resolution) has a chance to move us.
+our $INITIAL_CWD;
+BEGIN { $INITIAL_CWD = Cwd::cwd() }
 use Data::Dumper;
 use Encode qw/decode_utf8/;
 use File::Basename qw/basename dirname/;
@@ -1220,6 +1226,15 @@ sub pushd {
 sub popd {
 	@DIRSTACK or bug "popd called when we don't have anything on the directory stack";
 	chdir_or_fail(pop @DIRSTACK);
+}
+
+# Restore the compile-time cwd on interpreter exit.  A die between
+# pushd and popd (or any other unbalanced chdir) leaves us inside a
+# tempdir that File::Temp's own END block will try to rmtree,
+# emitting "cannot remove path when cwd is X" from File::Path.  Silent
+# on failure -- hygiene fixup, not a functional guarantee.
+END {
+	chdir($INITIAL_CWD) if defined($INITIAL_CWD) && -d $INITIAL_CWD;
 }
 
 sub tcp_listening {
