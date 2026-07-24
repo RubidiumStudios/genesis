@@ -184,9 +184,12 @@ subtest 'fake_tty() - command wrapping' => sub {
 		like join(' ', @cmd), qr/-qeF/, 'Darwin uses -qeF flags';
 		like join(' ', @cmd), qr{/tmp/output\.txt}, 'Darwin includes output file';
 	} elsif ($^O eq 'linux') {
-		like $cmd[0], qr/script/, 'Linux uses script command';
-		like $cmd[0], qr/-qf/, 'Linux uses -qf flags';
-		like $cmd[0], qr{/tmp/output\.txt}, 'Linux includes output file';
+		# Post-security-fix (0f7be5ff): Linux returns an arg list, matching
+		# darwin's shape.  script(1)'s -c argument holds the shell_quote'd
+		# subcommand; -qf and the output file are separate list elements.
+		is $cmd[0], 'script', 'Linux uses script command';
+		like join(' ', @cmd), qr/-qf/, 'Linux uses -qf flags';
+		like join(' ', @cmd), qr{/tmp/output\.txt}, 'Linux includes output file';
 	}
 };
 
