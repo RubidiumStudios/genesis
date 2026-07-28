@@ -74,13 +74,20 @@ already cached in the current process, the cached object is returned
 immediately without starting a new process.
 
 If no matching vault process is found running, a new C<safe local -m>
-process is launched in the background. The method waits briefly for the
-safe process and its child vault process to appear, then queries C<safe
-targets --json> to obtain the connection URL and metadata. The vault is
-polled until its status is C<ok> before being returned.
+process is launched in the background on an explicitly chosen free port.
+The method waits briefly for the safe process and its child vault process
+to appear, then queries C<safe targets --json> to obtain the connection
+URL and metadata. The vault is polled until its status is C<ok> before
+being returned.
 
 After the new vault is registered, the previously active safe target is
 restored, leaving existing target state unchanged.
+
+Startup is serialized machine-wide, per uid, by an exclusive lock held
+from before the port is selected until the new vault answers. This makes
+concurrent C<create> calls safe -- including calls from forked children
+sharing one F<~/.saferc>. See L</"CONCURRENCY"> for what the lock is
+guarding against and what it does not cover.
 
 B<Parameters:>
 
@@ -112,6 +119,17 @@ contain error output from safe or vault.
 
 Raised when C<safe targets --json> does not return a target matching the
 generated alias after the processes are confirmed running.
+
+=item C<"No free port for a local vault in the range %d-%d...">
+
+Raised when every port in the scan range is bound. Most often this means
+stale vaults left behind by interrupted runs rather than genuine
+exhaustion.
+
+=item C<"Could not open local vault startup lock %s: %s"> / C<"Could not acquire local vault startup lock %s: %s">
+
+Raised when the startup lock file cannot be created or locked, typically
+a permissions or full-filesystem problem in the system temp directory.
 
 =item C<"Failed to connect to local memory-backed vault: %s\n\nYou may need to clean out your ~/.saferc file for stale local vaults.">
 
@@ -413,6 +431,124 @@ B<Examples:>
   my $info = _get_process("\\s\\+[s]afe local -m --as local_vault_dev_12345", 2);
   # Returns: { pid => 23456, ppid => 12345, cmd => 'safe local -m --as local_vault_dev_12345' }
 
+=head2 _port_free
+
+  my $bool = _port_free($port);
+
+Returns true if C<$port> can be bound on C<127.0.0.1> right now.
+
+Binds rather than connects. A refused connection only proves nothing is
+listening, not that the port is available -- a socket in C<TIME_WAIT>
+refuses connections but cannot be rebound. C<ReuseAddr> is deliberately
+off so that this check sees what vault will see moments later.
+
+B<Parameters:>
+
+=over 4
+
+=item $port
+
+The TCP port to test.
+
+=back
+
+B<Returns:> True if the port could be bound (the test socket is closed
+again immediately); false otherwise.
+
+=head2 _shuffled_ports
+
+  my @order = _shuffled_ports($min, $max);
+  my @order = _shuffled_ports($min, $max, $seed);
+
+Returns the ports C<$min..$max> as a permutation, in an order that varies
+per process.
+
+Runs Fisher-Yates against a local linear congruential generator rather
+than Perl's C<rand()>, so it neither depends on nor disturbs the
+process-global PRNG. See L</"CONCURRENCY"> for why that matters.
+
+B<Parameters:>
+
+=over 4
+
+=item $min, $max
+
+Range bounds, inclusive.
+
+=item $seed
+
+Optional. Omitted, the seed mixes C<$$> with the clock: C<$$> so that
+forked children -- which inherit everything else -- diverge, and the
+clock so that a recycled pid does not replay an earlier run's order.
+Supply a seed to make the order reproducible, which is how the property
+is tested.
+
+=back
+
+B<Returns:> The full range, permuted.
+
+B<Limitations:> An LCG is a weak generator and the output is not suitable
+for anything requiring unpredictability. The requirement here is only to
+keep concurrent scans from converging.
+
+Its low bits are weak even by that standard -- bit 0 alternates, bit 1
+cycles every four -- so the swap index is taken from the high bits. Doing
+otherwise is not a visible failure, just a clustered distribution: when
+measured, a plain modulo put 43 of 2000 runs on one starting port against
+an expected 2.5. C<t/unit-tests/service_vault_local-port_selection.t>
+asserts the spread so that a regression here fails rather than quietly
+eroding the property this exists to provide.
+
+=head2 _find_free_port
+
+  my $port = _find_free_port();
+  my $port = _find_free_port($min, $max);
+  my $port = _find_free_port($min, $max, $seed);
+
+Returns the first port in L</_shuffled_ports> order for which both the
+port itself and its cluster neighbour (C<$port>+1) are free.
+
+B<Parameters:>
+
+=over 4
+
+=item $min, $max
+
+Optional range bounds, defaulting to 8201 and 8999 -- the same range safe
+scans. Note that the port returned is arbitrary within that range, not
+the lowest free one.
+
+=item $seed
+
+Optional, forwarded to L</_shuffled_ports> to make the walk reproducible.
+
+=back
+
+B<Returns:> The selected port number.
+
+B<Errors:> Bails with C<"No free port for a local vault in the range %d-%d">
+when the range is exhausted.
+
+B<Limitations:> The result is only meaningful while the startup lock is
+held; on its own this is a check-then-act race, exactly the one it exists
+to work around in safe.
+
+=head2 _lock_local_vault_startup
+
+  my $lock = _lock_local_vault_startup();
+
+Acquires an exclusive, blocking C<flock> on a per-uid lock file in the
+system temp directory, and returns the open filehandle. The lock is
+released when that handle goes out of scope, so callers must keep it
+alive for the whole critical section.
+
+Keyed by uid rather than by C<$HOME> because the port race it guards is
+machine-global: per-home locks would not close it. See L</"CONCURRENCY">.
+
+B<Returns:> An open filehandle holding C<LOCK_EX>.
+
+B<Errors:> Bails if the lock file cannot be opened or locked.
+
 =head2 _process_running
 
   my $bool = _process_running($pid);
@@ -439,6 +575,101 @@ B<Examples:>
 
   _process_running(99999);
   # Returns: 0  (no such process)
+
+=head1 CONCURRENCY
+
+Two independent races make unsynchronized C<safe local> invocations
+unsafe. Both live in safe, not in Genesis, and both are closed here by
+holding an exclusive lock across the whole startup.
+
+=over 4
+
+=item Port selection
+
+C<safe local> chooses its port by dialing 8201 upward and taking the
+first port that refuses the connection, then execs C<vault version>
+before C<vault server> ever binds. Concurrent invocations all observe the
+same port free and all choose it. Isolating C<$HOME> does not help --
+this race is machine-global, which is why the lock is keyed by uid rather
+than by home directory.
+
+=item F<~/.saferc> rewrite
+
+C<safe local> writes the new target into F<~/.saferc> B<as current>, then
+re-reads the file and connects to whatever C<current> now names. The
+write is an unlocked whole-file rewrite. Concurrent invocations therefore
+both clobber each other's entries and cross-connect, so that one safe
+initializes another's vault and the losers report C<Vault is already
+initialized>.
+
+=back
+
+Genesis additionally scans for a free port itself and passes it as
+C<--port>. This is defence in depth rather than the fix: with the lock in
+place, safe's own scan would also succeed. It is retained because the
+bind-based check in L</_find_free_port> is strictly stronger than safe's
+connect-based one, and because it keeps port selection independent of
+safe's internals.
+
+Genesis's scan walks the port range in a B<pid-varying> order rather than
+linearly, because concurrent invocations otherwise converge: callers
+under different uids hold different startup locks and so cannot see each
+other, and forked children of a C<rand()>-touched parent inherit
+identical PRNG state and would each walk the range identically.
+
+The order comes from L</_shuffled_ports>, which runs Fisher-Yates against
+a B<local> generator rather than Perl's C<rand()>. Perl's C<rand()> is
+process-global mutable state, which offers only two bad options: seed it
+for a fork-distinct order and every unrelated C<rand()> consumer in the
+process has its stream rewritten underneath it, or leave it alone and
+forked children shuffle identically. A local generator declines the
+choice -- there is nothing to seed and nothing to restore, and a forked
+child is correct by construction because the default seed mixes in
+C<$$>, the one piece of state a fork does not duplicate.
+
+A consequence worth stating plainly: a local vault no longer lands on
+8201 just because 8201 is free. The range is still mirrored from safe's,
+but the port within it is effectively arbitrary. Nothing depends on the
+number -- consumers discover the vault through C<safe targets> -- but
+anyone expecting a predictable port will not find one.
+
+B<Limitations:>
+
+=over 4
+
+=item *
+
+The lock only serializes Genesis callers under the same uid. A C<safe
+local> run by hand, another tool, or a Genesis process under a different
+uid (as with kit-validator matrices scoped to per-uid F<HOME>s), can
+still race a Genesis-started vault. The explicit C<--port> narrows that
+window; the varied scan order from L</_shuffled_ports> makes cross-uid
+convergence unlikely in proportion to the number of free ports. Neither
+closes the race.
+
+=item *
+
+The lock is released once the new vault answers on its API port, which is
+before vault has necessarily bound its cluster port (C<port>+1). Two
+vaults allocated in rapid succession can therefore still end up with
+overlapping port pairs. This is benign -- a memory-backed vault does not
+need the cluster listener, and vault starts successfully without it.
+
+=item *
+
+Nothing reaps ports held by vaults from interrupted runs, so stale
+vaults accumulate in the range and each new allocation has fewer free
+ports to shuffle into. The exhausted-range bail eventually fires when
+enough have accumulated.
+
+=item *
+
+Both underlying defects are safe's. The F<~/.saferc> rewrite in
+particular corrupts state for any concurrent safe command, not just
+C<safe local>; a fix belongs there, at which point the lock here could be
+narrowed or dropped.
+
+=back
 
 =head1 AUTHORS
 

@@ -4,10 +4,26 @@ use strict;
 use warnings;
 
 use Genesis;
+use Fcntl qw/:flock/;
+use File::Spec ();
+use IO::Socket::IP ();
 
 use base 'Service::Vault';
 
 my $local_vaults = {};
+
+# vault takes <port> for its API listener and <port>+1 for its cluster
+# listener.  It survives <port>+1 being unavailable -- a memory-backed vault
+# has no use for the cluster listener -- so this is about not handing out
+# overlapping pairs when several vaults are allocated in quick succession,
+# not about keeping the server alive.
+use constant VAULT_CLUSTER_PORT_OFFSET => 1;
+
+# Mirrors safe's own default scan range, so a genesis-started local vault sits
+# in the band an operator would think to look in.  The port *within* the band
+# is arbitrary -- see _shuffled_ports -- so do not expect 8201.
+use constant LOCAL_VAULT_PORT_MIN => 8201;
+use constant LOCAL_VAULT_PORT_MAX => 8999;
 
 ### Class Methods {{{
 
@@ -23,10 +39,18 @@ sub create {
 	trace "Looking for existing safe $alias";
 	my $safe_process = _get_safe_process($alias,0.25);
 
+	# Held from before the port is chosen until the vault answers below, so
+	# that no other genesis can pick the same port or rewrite ~/.saferc while
+	# safe is mid-startup.  Undef -- and so no lock -- on the rebind path.
+	my $startup_lock;
+
 	unless ($safe_process) {
+		$startup_lock = _lock_local_vault_startup();
 		debug "Starting background local safe $alias";
 		my $default_vault = $class->default;
-		run("safe local -m --as '$alias' &>$logfile &");
+		my $port = _find_free_port();
+		debug "Starting local vault $alias on port $port";
+		run("safe local -m --as '$alias' --port $port &>$logfile &");
 		trace "Looking for new process";
 		$safe_process = _get_safe_process($alias,1);
 		bail(
@@ -76,6 +100,11 @@ sub create {
 			);
 		}
 	}
+
+	# Explicit rather than left to scope exit: this is the point the lock is
+	# safe to drop -- the vault is answering, so the next caller's port scan
+	# will see it.
+	undef $startup_lock;
 
 	return $vault;
 }
@@ -229,6 +258,114 @@ sub DESTROY {
 
 
 ### Helper functions {{{
+# _port_free - true if we can bind <port> on the loopback right now {{{
+sub _port_free {
+	my ($port) = @_;
+	# Bind rather than connect: a refused connection only proves nothing is
+	# listening, not that the port is ours to take.  ReuseAddr is off so a
+	# socket lingering in TIME_WAIT reads as occupied, which is what vault
+	# will find a moment later.
+	my $sock = IO::Socket::IP->new(
+		LocalAddr => '127.0.0.1',
+		LocalPort => $port,
+		Proto     => 'tcp',
+		Listen    => 1,
+		ReuseAddr => 0,
+	) or return 0;
+	close($sock);
+	return 1;
+}
+
+# }}}
+# _shuffled_ports - the range in a pid-varying order, without using rand() {{{
+# Fisher-Yates driven by a local linear congruential generator.  Perl's rand()
+# is process-global mutable state: seeding it for a fork-distinct order would
+# rewrite the stream every other caller is drawing from, and leaving it alone
+# means forked children inherit the parent's state and shuffle identically.
+# A local generator sidesteps the choice -- nothing to seed, nothing to
+# restore, correct in a forked child by construction.
+#
+# An LCG is a weak PRNG.  That is fine: the requirement is to spread probes
+# apart so concurrent scans under different uids (which hold different startup
+# locks, and so cannot see each other) do not converge, not to be
+# unpredictable.
+sub _shuffled_ports {
+	my ($min, $max, $seed) = @_;
+
+	# The multiply below overflows 2^53, so without this the intermediate
+	# promotes to a double on a 32-bit perl and silently drops the low bits
+	# the mask then keeps -- degrading the shuffle rather than failing.
+	# Wrapping is the normal behaviour for an LCG anyway.
+	use integer;
+
+	# Default seed mixes the pid -- distinct per forked child, since $$ is the
+	# one piece of state a fork does not duplicate -- with the clock, so that
+	# recycled pids do not replay an earlier run's order.
+	my $state = ($seed // ($$ * 2654435761 + time)) & 0x7FFFFFFF;
+
+	my @ports = ($min .. $max);
+	for (my $i = $#ports; $i > 0; $i--) {
+		$state = ($state * 1103515245 + 12345) & 0x7FFFFFFF;
+		# Take the index from the HIGH bits.  An LCG's low bits have very
+		# short periods -- bit 0 alternates, bit 1 cycles every 4 -- so a
+		# plain modulo reads exactly its worst output and clusters the
+		# result badly: measured, that put 17x the expected number of runs
+		# on a single starting port.
+		my $j = ($state >> 16) % ($i + 1);
+		@ports[$i, $j] = @ports[$j, $i];
+	}
+	return @ports;
+}
+
+# }}}
+# _find_free_port - first free port from a pid-varying walk of the range {{{
+sub _find_free_port {
+	my ($min, $max, $seed) = @_;
+	$min //= LOCAL_VAULT_PORT_MIN;
+	$max //= LOCAL_VAULT_PORT_MAX;
+
+	for my $port (_shuffled_ports($min, $max, $seed)) {
+		next unless _port_free($port)
+			&& _port_free($port + VAULT_CLUSTER_PORT_OFFSET);
+		return $port;
+	}
+	bail(
+		"No free port for a local vault in the range %d-%d.  Every port in ".
+		"that range is in use, or held by a stale vault from an interrupted ".
+		"run -- check with #C{lsof -nP -iTCP -sTCP:LISTEN}.",
+		$min, $max
+	);
+}
+
+# }}}
+# _lock_local_vault_startup - serialize local vault startup machine-wide {{{
+# Two races make concurrent `safe local` invocations unsafe, and both are
+# closed by holding this lock until the new vault is listening:
+#
+#   1. safe picks its port by scanning for a refused connection, then execs
+#      `vault version` before `vault server` ever binds.  Concurrent callers
+#      all observe the same port free and all choose it.
+#   2. `safe local` writes the new target into ~/.saferc *as current*, then
+#      re-reads the file and talks to whatever `current` now says.  The write
+#      is an unlocked whole-file rewrite, so concurrent callers clobber each
+#      other's entries and one safe ends up initializing another's vault.
+#
+# Keyed by uid, not by HOME: race 1 is machine-global, so per-HOME locks (as
+# scoped-HOME test harnesses would produce) would not close it.
+sub _lock_local_vault_startup {
+	my $path = File::Spec->catfile(
+		File::Spec->tmpdir, sprintf("genesis-local-vault-%d.lock", $<)
+	);
+	open(my $fh, '>>', $path) or bail(
+		"Could not open local vault startup lock %s: %s", $path, $!
+	);
+	flock($fh, LOCK_EX) or bail(
+		"Could not acquire local vault startup lock %s: %s", $path, $!
+	);
+	return $fh;
+}
+
+# }}}
 sub _generate_alias {
 	my $name = shift;
 	# Idempotent: when called with an already-full alias (from

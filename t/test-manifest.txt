@@ -177,6 +177,7 @@ unit-tests/service_github-pr.t                             # Github PR helpers
 unit-tests/service_vault-max_json_string_value_length.t    # JSON value length guard
 unit-tests/service_vault_remote-reauth.t                   # Remote vault re-auth
 unit-tests/service_vault_remote-token_renewer.t            # Background token renewer
+unit-tests/service_vault_local-port_selection.t            # Local vault free-port scan
 
 # Other unit tests not yet in any thematic block
 unit-tests/genesis-init_forked_child.t       # forked-child defensive init
@@ -199,6 +200,7 @@ integration-tests/service_bosh_stemcells.t  # BOSH stemcell API integration (bos
 integration-tests/service_bosh_director.t   # BOSH Director constructor patterns (from_exodus, from_alias, from_environment)
 integration-tests/genesis_top-complete.t    # Genesis::Top with external vault and GitHub dependencies
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
+integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
 # Genesis::Env integration tests - require vault/BOSH mocks
 integration-tests/genesis_env-core.t         # Comprehensive env operations (loading, manifest, deployment)
 integration-tests/genesis_commands_env-deploy.t  # CLI/UX surface for `genesis deploy` (reactions, orchestration)

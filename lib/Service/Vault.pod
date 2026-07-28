@@ -492,6 +492,26 @@ B<Examples:>
   print $vault->url();
   # Returns: 'https://vault.example.com:8200'
 
+=head2 port
+
+  my $port = $vault->port();
+
+Returns the port from the target URL.
+
+B<Returns:> The port as it appears in the URL, or C<undef> when the URL
+carries none. Chiefly of interest for local vaults, which always bind an
+explicit port; see L<Service::Vault::Local>.
+
+B<Limitations:> Reports only what the URL states -- it does not infer the
+scheme default (C<80>/C<443>), so C<< https://vault.example.com >> yields
+C<undef> rather than C<443>. The host pattern is IPv4/hostname only; a
+bracketed IPv6 literal such as C<< http://[::1]:8200 >> yields C<undef>.
+
+B<Examples:>
+
+  print $vault->port();
+  # Returns: 8200
+
 =head2 name
 
   my $name = $vault->name();

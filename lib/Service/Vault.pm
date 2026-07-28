@@ -332,13 +332,19 @@ sub parse_vault_descriptor {
 
 ### Instance Methods {{{
 
-# public accessors: url, name, verify, namespace, strongbox, tls {{{
+# public accessors: url, name, port, verify, namespace, strongbox, tls {{{
 sub url {
 	$_[0]->{url};
 }
 
 sub name {
 	$_[0]->{name};
+}
+
+# undef for urls that rely on the scheme's default port -- callers that care
+# about the port are local vaults, which always carry an explicit one.
+sub port {
+	$_[0]->{url} =~ m{^\w+://[^/:]+:(\d+)} ? $1 : undef;
 }
 
 sub verify {
