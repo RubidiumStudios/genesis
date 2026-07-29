@@ -26,6 +26,24 @@ put_file "$home/.vault_token", '';
 local $ENV{HOME} = $home;
 local $ENV{SAFE_TARGET} = undef;
 
+# A pre-existing default target, as any operator's machine has.  Without one,
+# create() finds nothing to restore and never calls set_default -- which
+# leaves the restore path, and the ~/.saferc write it performs, untested.
+# It does not need to be reachable: set_default only runs `safe target <name>`.
+my $PRE_EXISTING = 'operator-vault';
+my $PRE_URL      = 'https://vault.example.com';
+put_file "$home/.saferc", <<"SAFERC";
+version: 1
+current: $PRE_EXISTING
+vaults:
+  $PRE_EXISTING:
+    url: $PRE_URL
+    token: s.notarealtokenbutplausiblylong0000
+    skip_verify: true
+options:
+  manage_vault_token: false
+SAFERC
+
 pipe(my $reader, my $writer) or BAIL_OUT("could not create pipe: $!");
 
 my @pids;
@@ -81,6 +99,30 @@ my @local_targets = grep { $_->{name} =~ /^local_vault_concurrent-/ } @$targets;
 is(scalar(@local_targets), $WORKERS,
 	"all $WORKERS targets survive in the shared .saferc")
 	or diag("targets: ", join(", ", map { $_->{name} } @$targets));
+
+# The operator's own target must come through untouched.  create() restores it
+# as current, and if that restore overlaps safe's own ~/.saferc write the two
+# whole-file rewrites interleave: both open O_TRUNC and write from offset 0, so
+# the shorter document overwrites the longer one's prefix and leaves its tail
+# behind.  The result parses as a valid config followed by garbage, and the
+# surviving prefix keeps the *previous* current target -- which is how a later
+# `safe local` ends up calling Init against a production vault.
+subtest 'the pre-existing target survives intact' => sub {
+	plan tests => 3;
+
+	my ($kept) = grep { $_->{name} eq $PRE_EXISTING } @$targets;
+	ok($kept, "$PRE_EXISTING is still a known target")
+		or diag("targets: ", join(", ", map { $_->{name} } @$targets));
+	is($kept && $kept->{url}, $PRE_URL, "its url is unchanged");
+
+	# The corruption signature: structural keys appearing more than once,
+	# because a truncated tail was left past the end of the new document.
+	my $raw = get_file("$home/.saferc") // '';
+	my $dupes = join ', ', grep { scalar(() = $raw =~ /^\Q$_\E/gm) > 1 }
+		qw(version: options: vaults:);
+	is($dupes, '', 'no duplicated top-level keys -- file is not a spliced tail')
+		or diag("~/.saferc:\n$raw");
+};
 
 # Reap: the children deliberately left their vaults running.
 for my $t (@local_targets) {

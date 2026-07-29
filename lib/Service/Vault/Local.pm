@@ -44,6 +44,10 @@ sub create {
 	# safe is mid-startup.  Undef -- and so no lock -- on the rebind path.
 	my $startup_lock;
 
+	# The target to put back as current once the new vault has settled, or
+	# undef when there was nothing to restore.
+	my $restore_default;
+
 	unless ($safe_process) {
 		$startup_lock = _lock_local_vault_startup();
 		debug "Starting background local safe $alias";
@@ -57,11 +61,9 @@ sub create {
 			"Could not start local memory-backed vault:\n%s",
 			slurp($logfile)
 		) unless $safe_process;
-		# Restore default vault target -- but only if we had one to
-		# restore.  In a fresh scoped HOME (kit-validator test runs)
-		# there is no existing safe target, and calling set_default
-		# with undef explodes on $vault->name.
-		$class->set_default($default_vault) if $default_vault;
+		# Deliberately NOT restoring the default target here: see the
+		# restore below, after the vault has settled.
+		$restore_default = $default_vault;
 	}
 
 	my $vault_process = _get_vault_process($safe_process->{pid}, 1);
@@ -100,6 +102,26 @@ sub create {
 			);
 		}
 	}
+
+	# Restore the operator's default target -- and only now.  `safe local`
+	# writes ~/.saferc twice: once registering the new target as current, and
+	# again with the root token after it initializes the vault.  Restoring
+	# between those two writes puts a second safe process into an unlocked
+	# whole-file rewrite of the same file, and both open it O_TRUNC and write
+	# from offset zero.  The shorter document then overwrites the longer one's
+	# prefix and leaves its tail behind, producing a ~/.saferc that parses as
+	# a valid config followed by garbage.
+	#
+	# That is not theoretical.  It corrupts real operator config, and because
+	# the surviving prefix keeps the *previous* current target, the next
+	# `safe local` connects to it and calls Init against a production vault.
+	# Waiting until the status loop above has passed puts this after safe's
+	# second write, so the two never overlap.
+	#
+	# Skipped when there was nothing to restore: a fresh scoped HOME (as
+	# kit-validator produces) has no existing target, and set_default with
+	# undef explodes on $vault->name.
+	$class->set_default($restore_default) if $restore_default;
 
 	# Explicit rather than left to scope exit: this is the point the lock is
 	# safe to drop -- the vault is answering, so the next caller's port scan
