@@ -170,7 +170,12 @@ subtest 'forked children get different scan orders' => sub {
 		if ($pid == 0) {
 			close($reader);
 			my @order = Service::Vault::Local::_shuffled_ports(8201, 8999);
-			print $writer "$order[0]\n";
+			# Compare a prefix of the ORDER, not just the first pick.  Two
+			# children agreeing on their first port is a ~1-in-799 coincidence
+			# that says nothing about correlation -- asserting on it alone made
+			# this test fail roughly one run in 130.  Agreeing on the first ten
+			# is not a coincidence.
+			print $writer join(',', @order[0..9])."\n";
 			close($writer);
 			POSIX::_exit(0);
 		}
@@ -182,10 +187,10 @@ subtest 'forked children get different scan orders' => sub {
 	waitpid($_, 0) for @pids;
 	chomp @picks;
 
-	is(scalar(@picks), 4, 'all four children reported a first pick');
+	is(scalar(@picks), 4, 'all four children reported a scan order');
 	my %seen; $seen{$_}++ for @picks;
-	is(scalar(keys %seen), 4,
-		"each child chose a different starting port (@picks)");
+	is(scalar(keys %seen), 4, 'each child walks a different scan order')
+		or diag("orders:\n  ".join("\n  ", @picks));
 };
 
 subtest 'port accessor reports the bound port' => sub {
