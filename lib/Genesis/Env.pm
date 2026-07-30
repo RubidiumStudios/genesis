@@ -3281,6 +3281,13 @@ sub configs {
 sub required_configs {
 	my ($self, @hooks) = @_;
 	return () if $self->use_create_env;
+	return $self->kit->required_configs(uniq($self->_expand_config_hooks(@hooks)));
+}
+
+# }}}
+# _expand_config_hooks - resolve 'deploy' into the hooks it implies {{{
+sub _expand_config_hooks {
+	my ($self, @hooks) = @_;
 	# _memoize stores the initializer's scalar return value.  The
 	# initializer must return an explicit arrayref -- a trailing
 	# `push @h, ...` returns the count in scalar context, which
@@ -3292,23 +3299,38 @@ sub required_configs {
 		push @h, grep {$self->kit->has_hook($_)} qw(pre-deploy post-deploy);
 		return \@h;
 	})};
-	my @expanded_hooks;
-	push(@expanded_hooks, ($_ eq 'deploy' ? @deploy_hooks : $_)) for (@hooks);
-	my @configs = $self->kit->required_configs(uniq(@expanded_hooks));
+	my @expanded;
+	push(@expanded, ($_ eq 'deploy' ? @deploy_hooks : $_)) for (@hooks);
+	return @expanded;
+}
 
-	# Surface cpi configs in the upfront "Downloading configs from..."
-	# block for any hook that builds toward a deployable manifest.
-	# download_configs treats cpi as always-optional, so single-iaas
-	# envs (no cpi configs uploaded) gracefully no-op rather than
-	# bailing.
-	#
+# }}}
+# prefetch_configs - required configs, plus the ones worth fetching anyway {{{
+#
+# Everything required_configs returns, plus cpi for hooks that build toward a
+# deployable manifest.  cpi is deliberately NOT in required_configs: a BOSH
+# director always has a latent CPI of its own, so a director with no cpi
+# configs uploaded is a complete, valid state rather than an unmet
+# prerequisite.  Treating cpi as required makes missing_required_configs
+# permanently non-empty on single-iaas directors, which silently disables the
+# manifest viability check that gates on it.
+#
+# What cpi is here is opportunistic: fetching it up front surfaces the whole
+# director inventory in the "Downloading configs from..." block instead of
+# having cpi fetches happen implicitly later inside _check_cpis.
+sub prefetch_configs {
+	my ($self, @hooks) = @_;
+	return () if $self->use_create_env;
+	my @expanded = $self->_expand_config_hooks(@hooks);
+	my @configs = $self->kit->required_configs(uniq(@expanded));
+
 	# Gate on `@configs && ...` so we don't append cpi to an empty
 	# return -- empty here means the kit signalled "this hook is
 	# being skipped" (e.g. GENESIS_CONFIG_NO_CHECK suppresses the
 	# check hook; cloud-config hook explicitly returns nothing).
 	# Adding cpi in those cases would override the kit's skip signal.
 	my %manifest_track = map { $_ => 1 } qw(blueprint check manifest pre-deploy post-deploy);
-	if (@configs && grep { $manifest_track{$_} } @expanded_hooks) {
+	if (@configs && grep { $manifest_track{$_} } @expanded) {
 		push @configs, 'cpi' unless grep { /^cpi(\@|$)/ } @configs;
 	}
 	return @configs;
@@ -3332,7 +3354,9 @@ sub has_required_configs {
 # download_required_configs - determzoine what BOSH configs are needed and download them {{{
 sub download_required_configs {
 	my ($self, @hooks) = @_;
-	my @configs = $self->missing_required_configs(@hooks);
+	# prefetch_configs, not missing_required_configs: the download path wants
+	# the opportunistic cpi entry, while the gating path must not have it.
+	my @configs = grep {!$self->has_config($_)} $self->prefetch_configs(@hooks);
 	return $self unless @configs;
 	debug "Missing configs: ".join(', ', @configs);
 
@@ -4015,8 +4039,8 @@ sub check {
 	}
 
 	if ($opts{check_yamls}) {
-		if ($self->missing_required_configs('blueprint')) {
-			$self->notify("#Y{Required BOSH configs not provided - can't check manifest viability}");
+		if (my @missing = $self->missing_required_configs('blueprint')) {
+			$self->notify("#Y{Required BOSH configs not provided - can't check manifest viability: %s}", join(', ', @missing));
 		} else {
 			$self->notify("inspecting YAML files used to build manifest...");
 			my @yaml_files = $self->format_yaml_files('include-kit' => 1, padding => '  ', kit_files => $kit_files);
@@ -4025,8 +4049,8 @@ sub check {
 	}
 
 	if ($ok) {
-		if ($self->missing_required_configs('manifest')) {
-			$self->notify("#Y{Required BOSH configs not provided - can't check manifest viability}");
+		if (my @missing = $self->missing_required_configs('manifest')) {
+			$self->notify("#Y{Required BOSH configs not provided - can't check manifest viability: %s}", join(', ', @missing));
 		} elsif (!exists($opts{check_manifest}) || $opts{check_manifest}) {
 			$self->notify("running manifest viability checks...");
 			$self->manifest_provider->unredacted->validate or $ok = 0;

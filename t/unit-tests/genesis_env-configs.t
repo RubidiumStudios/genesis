@@ -170,38 +170,40 @@ subtest 'required_configs - returns empty list for create-env environments' => s
 	is(scalar(@required), 0, 'required_configs(blueprint) returns empty list for create-env');
 };
 
-subtest 'required_configs - blueprint hook requires cloud and cpi' => sub {
-	# Contract changed in FWT-983 Step 6: Env appends cpi to
-	# manifest-track hook results so cpi configs are surfaced in
-	# the upfront "Downloading configs from..." block.  Kit-level
-	# required_configs still returns ('cloud') only -- the cpi
-	# append is an Env-layer concern.
+subtest 'required_configs - blueprint hook requires only cloud' => sub {
+	# required_configs is STRICT: what the kit cannot build without.
+	# cpi is deliberately absent -- a director always has a latent CPI
+	# of its own, so "no cpi configs uploaded" is a complete state, not
+	# an unmet prerequisite.  The opportunistic cpi entry lives in
+	# prefetch_configs instead; see the prefetch_configs block below.
 	plan tests => 2;
 
 	my $env = make_simple_env('req-blueprint');
 
 	my @required = $env->required_configs('blueprint');
-	is_deeply [sort @required], [qw(cloud cpi)],
-		'required_configs(blueprint) returns cloud + cpi (Step-6 append)';
-	ok((grep { $_ eq 'cloud' } @required),
-		'cloud is still required (kit-level)');
+	is_deeply [sort @required], [qw(cloud)],
+		'required_configs(blueprint) returns cloud only';
+	ok(!(grep { $_ eq 'cpi' } @required),
+		'cpi is NOT required -- it would permanently gate out validation');
 };
 
-subtest 'required_configs - manifest hook requires cloud and cpi' => sub {
-	# Same contract change as blueprint subtest above.
+subtest 'required_configs - manifest hook requires only cloud' => sub {
+	# Same strictness as blueprint above.  This is the one that matters
+	# operationally: Env::check gates the manifest viability check on
+	# missing_required_configs('manifest').
 	plan tests => 2;
 
 	my $env = make_simple_env('req-manifest');
 
 	my @required = $env->required_configs('manifest');
-	is_deeply [sort @required], [qw(cloud cpi)],
-		'required_configs(manifest) returns cloud + cpi (Step-6 append)';
-	ok((grep { $_ eq 'cloud' } @required),
-		'cloud is still required (kit-level)');
+	is_deeply [sort @required], [qw(cloud)],
+		'required_configs(manifest) returns cloud only';
+	ok(!(grep { $_ eq 'cpi' } @required),
+		'cpi is NOT required');
 };
 
-subtest 'required_configs - check hook requires cloud and cpi unless GENESIS_CONFIG_NO_CHECK' => sub {
-	# Same contract change as blueprint/manifest subtests.
+subtest 'required_configs - check hook requires only cloud unless GENESIS_CONFIG_NO_CHECK' => sub {
+	# Same strictness as blueprint/manifest subtests.
 	plan tests => 2;
 
 	local %ENV = %ENV;
@@ -210,10 +212,9 @@ subtest 'required_configs - check hook requires cloud and cpi unless GENESIS_CON
 	my $env = make_simple_env('req-check');
 
 	my @required = $env->required_configs('check');
-	is_deeply [sort @required], [qw(cloud cpi)],
-		'required_configs(check) returns cloud + cpi by default (Step-6 append)';
-	ok((grep { $_ eq 'cloud' } @required),
-		'cloud is still required (kit-level)');
+	is_deeply [sort @required], [qw(cloud)],
+		'required_configs(check) returns cloud only by default';
+	ok(!(grep { $_ eq 'cpi' } @required), 'cpi is NOT required');
 };
 
 subtest 'required_configs - check hook requires nothing when GENESIS_CONFIG_NO_CHECK set' => sub {
@@ -227,18 +228,15 @@ subtest 'required_configs - check hook requires nothing when GENESIS_CONFIG_NO_C
 	is(scalar(@required), 0, 'required_configs(check) returns empty when GENESIS_CONFIG_NO_CHECK set');
 };
 
-subtest 'required_configs - explicit blueprint hook requires cloud and cpi when called directly' => sub {
-	# Same FWT-983 Step-6 contract change as the other manifest-
-	# track subtests: cpi joins cloud in the Env-layer result.
+subtest 'required_configs - explicit blueprint hook requires only cloud when called directly' => sub {
 	plan tests => 2;
 
 	my $env = make_simple_env('req-direct');
 
 	my @required = $env->required_configs('blueprint');
-	is_deeply [sort @required], [qw(cloud cpi)],
-		'required_configs(blueprint) called directly returns cloud + cpi (Step-6 append)';
-	ok((grep { $_ eq 'cloud' } @required),
-		'cloud is still required (kit-level)');
+	is_deeply [sort @required], [qw(cloud)],
+		'required_configs(blueprint) called directly returns cloud only';
+	ok(!(grep { $_ eq 'cpi' } @required), 'cpi is NOT required');
 };
 
 # ======================================================================
@@ -310,7 +308,7 @@ subtest 'has_config - with named config (type@name)' => sub {
 
 subtest 'missing_required_configs - all required when none registered' => sub {
 	# FWT-983 Step 6: required_configs(blueprint) now returns both
-	# cloud AND cpi.  With nothing registered, both are missing.
+	# cloud only -- cpi is not required, so it never appears here.
 	plan tests => 1;
 
 	local %ENV = %ENV;
@@ -320,14 +318,21 @@ subtest 'missing_required_configs - all required when none registered' => sub {
 	$env->{__configs} = {};
 
 	my @missing = $env->missing_required_configs('blueprint');
-	is_deeply [sort @missing], [qw(cloud cpi)],
-		'missing_required_configs(blueprint) returns cloud + cpi when nothing registered';
+	is_deeply [sort @missing], [qw(cloud)],
+		'missing_required_configs(blueprint) returns cloud when nothing registered';
 };
 
-subtest 'missing_required_configs - cpi still missing when only cloud registered' => sub {
-	# FWT-983 Step 6: cpi joined the required set.  Registering only
-	# cloud leaves cpi as the lone missing config.
-	plan tests => 1;
+subtest 'missing_required_configs - nothing missing when cloud registered and no cpi uploaded' => sub {
+	# REGRESSION.  This previously asserted cpi stayed in the missing
+	# list forever, which is exactly the defect: a director with no cpi
+	# configs uploaded (any single-iaas / non-OCFP director) could never
+	# empty this list, so Env::check printed "Required BOSH configs not
+	# provided" and skipped manifest viability validation entirely --
+	# silently, on every deploy, since 2026-05.
+	#
+	# cpi is optional by construction: the director always has a latent
+	# CPI of its own.  Nothing uploaded is a complete state.
+	plan tests => 2;
 
 	local %ENV = %ENV;
 	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
@@ -338,8 +343,10 @@ subtest 'missing_required_configs - cpi still missing when only cloud registered
 	$env->use_config('/tmp/cloud.yml', 'cloud');
 
 	my @missing = $env->missing_required_configs('blueprint');
-	is_deeply [@missing], ['cpi'],
-		'cpi remains in missing list until use_config(cpi) is also called';
+	is_deeply [@missing], [],
+		'no configs missing -- manifest viability check will actually run';
+	ok($env->has_required_configs('blueprint'),
+		'has_required_configs is true without any cpi config uploaded');
 };
 
 subtest 'missing_required_configs - empty for create-env environments' => sub {
@@ -485,70 +492,110 @@ YAML
 };
 
 # ======================================================================
-# Env::required_configs - cpi added for check/manifest/blueprint/deploy
-# (FWT-983 Step 6)
+# Env::prefetch_configs - cpi added for check/manifest/blueprint/deploy
 # ======================================================================
 #
 # When the env will exercise check, manifest, blueprint, or deploy
-# hooks, cpi configs should be in the upfront required set so the
-# "Downloading configs from..." block surfaces them alongside cloud
-# and runtime.  download_configs treats cpi as always-optional so
-# single-iaas envs (no cpi configs uploaded) gracefully no-op.
+# hooks, cpi configs are worth fetching up front so the "Downloading
+# configs from..." block surfaces them alongside cloud and runtime.
+#
+# This is the OPPORTUNISTIC list, deliberately separate from
+# required_configs: fetching cpi is useful, requiring it is not, since
+# a director with none uploaded is a complete state.  Conflating the
+# two is what silently disabled manifest viability checks.
 
-subtest 'required_configs - includes cpi for check hook' => sub {
-	plan tests => 1;
+subtest 'prefetch_configs - includes cpi for check hook' => sub {
+	plan tests => 2;
 	my $env = make_simple_env('rc-check');
-	my @configs = $env->required_configs('check');
+	my @configs = $env->prefetch_configs('check');
 	ok((grep { $_ eq 'cpi' } @configs),
-		'cpi appears in required_configs for the check hook');
+		'cpi appears in prefetch_configs for the check hook');
+	ok(!(grep { $_ eq 'cpi' } $env->required_configs('check')),
+		'... but not in required_configs');
 };
 
-subtest 'required_configs - includes cpi for manifest hook' => sub {
-	plan tests => 1;
+subtest 'prefetch_configs - includes cpi for manifest hook' => sub {
+	plan tests => 2;
 	my $env = make_simple_env('rc-manifest');
-	my @configs = $env->required_configs('manifest');
+	my @configs = $env->prefetch_configs('manifest');
 	ok((grep { $_ eq 'cpi' } @configs),
-		'cpi appears in required_configs for the manifest hook');
+		'cpi appears in prefetch_configs for the manifest hook');
+	ok(!(grep { $_ eq 'cpi' } $env->required_configs('manifest')),
+		'... but not in required_configs');
 };
 
-subtest 'required_configs - includes cpi for blueprint hook' => sub {
-	plan tests => 1;
+subtest 'prefetch_configs - includes cpi for blueprint hook' => sub {
+	plan tests => 2;
 	my $env = make_simple_env('rc-blueprint');
-	my @configs = $env->required_configs('blueprint');
+	my @configs = $env->prefetch_configs('blueprint');
 	ok((grep { $_ eq 'cpi' } @configs),
-		'cpi appears in required_configs for the blueprint hook');
+		'cpi appears in prefetch_configs for the blueprint hook');
+	ok(!(grep { $_ eq 'cpi' } $env->required_configs('blueprint')),
+		'... but not in required_configs');
 };
 
-subtest 'required_configs - includes cpi for deploy expansion' => sub {
-	plan tests => 1;
+subtest 'prefetch_configs - includes cpi for deploy expansion' => sub {
+	plan tests => 2;
 	# 'deploy' expands to blueprint+check+manifest (+ pre/post if kit
 	# has them).  cpi should be in the union.
 	my $env = make_simple_env('rc-deploy');
-	my @configs = $env->required_configs('deploy');
+	my @configs = $env->prefetch_configs('deploy');
 	ok((grep { $_ eq 'cpi' } @configs),
-		'cpi appears in required_configs for the deploy hook expansion');
+		'cpi appears in prefetch_configs for the deploy hook expansion');
+	ok(!(grep { $_ eq 'cpi' } $env->required_configs('deploy')),
+		'... but not in required_configs');
 };
 
-subtest 'required_configs - cloud-config-only hook does NOT include cpi' => sub {
+subtest 'prefetch_configs - cloud-config-only hook does NOT include cpi' => sub {
 	plan tests => 1;
 	# The cloud-config hook is the kit-side compute of the cloud
 	# config itself.  It runs WITHOUT any uploaded configs and
 	# returning cpi here would create a chicken-and-egg loop.
 	my $env = make_simple_env('rc-cc-only');
-	my @configs = $env->required_configs('cloud-config');
+	my @configs = $env->prefetch_configs('cloud-config');
 	ok(!(grep { $_ eq 'cpi' } @configs),
 		'cpi is NOT added for the cloud-config-only path');
 };
 
-subtest 'required_configs - create-env returns empty regardless' => sub {
-	plan tests => 1;
+subtest 'prefetch_configs - create-env returns empty regardless' => sub {
+	plan tests => 2;
 	# create-env has no parent director, so no configs at all (kit-
 	# specified or otherwise).  The cpi append must not contaminate
 	# this path.
 	my $env = make_create_env('rc-create');
-	my @configs = $env->required_configs('check');
-	is_deeply [@configs], [],
-		'create-env returns empty list -- cpi is not appended';
+	is_deeply [$env->prefetch_configs('check')], [],
+		'create-env prefetch is empty -- cpi is not appended';
+	is_deeply [$env->required_configs('check')], [],
+		'create-env requires nothing';
+};
+
+subtest 'non-OCFP director: manifest viability check is not gated out' => sub {
+	# End-to-end shape of the reported failure.  On a single-iaas
+	# director nothing is ever uploaded under the cpi type, so
+	# download_configs never records a cpi file and has_config('cpi')
+	# is false forever.  While cpi sat in required_configs that made
+	# missing_required_configs('manifest') permanently non-empty, and
+	# Env::check reported
+	#
+	#   Required BOSH configs not provided - can't check manifest viability
+	#
+	# then skipped validation -- on every deploy, silently.
+	plan tests => 3;
+
+	local %ENV = %ENV;
+	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
+
+	my $env = make_simple_env('non-ocfp-director');
+	$env->{__configs} = {};
+	$env->use_config('/tmp/cloud.yml', 'cloud');   # cloud only, as a plain director gives
+
+	is_deeply [$env->missing_required_configs('manifest')], [],
+		'manifest hook has everything it requires';
+	ok((grep { $_ eq 'cpi' } $env->prefetch_configs('manifest')),
+		'cpi is still prefetched -- the inventory display is unaffected');
+	ok((grep { $_ eq 'cpi' }
+		grep {!$env->has_config($_)} $env->prefetch_configs('manifest')),
+		'and the download path still tries for it');
 };
 
 # ======================================================================
@@ -744,11 +791,13 @@ subtest 'download_required_configs - cpi-only missing degrades when director unr
 
 	my $env = make_simple_env('drc-cpi-only-degrade');
 	$env->{__configs} = {};
-	# Register cloud so only cpi (auto-appended by required_configs)
-	# is left in missing_required_configs('check').
+	# Register cloud so only cpi (auto-appended by prefetch_configs) is
+	# left for the download path to want.  Asserted against
+	# prefetch_configs rather than missing_required_configs: cpi is
+	# never *required*, only ever prefetched.
 	$env->use_config('/tmp/cloud.yml', 'cloud');
-	is_deeply [$env->missing_required_configs('check')], ['cpi'],
-		'preflight: cpi is the sole missing config';
+	is_deeply [grep {!$env->has_config($_)} $env->prefetch_configs('check')], ['cpi'],
+		'preflight: cpi is the sole config the download path still wants';
 
 	# Force with_bosh to throw the same error bosh() would raise on a
 	# missing parent director.
