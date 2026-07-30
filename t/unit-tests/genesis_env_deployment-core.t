@@ -1795,5 +1795,132 @@ subtest '_get_artifact_tarball()' => sub {
 };
 
 
+# ===========================================================================
+# Legacy audit records read back from exodus
+# ===========================================================================
+#
+# Three audit formats exist in the wild.  The current nested one, an
+# intermediate `state`-keyed one, and an original flat snake_cased one that
+# predates both.  Records in the third form sit in real operators' exodus and
+# are read on every deploy to compute the next sequence number.
+#
+# Reading them must never be fatal.  The deployment they describe finished
+# years ago; the one running now is unaffected by our inability to parse its
+# history.
+
+# The exact key set of a record found in production, written 2024-10-31.
+my %LEGACY_FLAT = (
+	artifacts     => '',
+	deployer      => 'dennis',
+	kit_features  => '',
+	kit_id        => 'generic/1.0.0',
+	kit_is_dev    => 0,
+	manifest_sha2 => 'deadbeef',
+	manifest_type => 'bosh',
+);
+
+subtest 'legacy flat audit record is readable, not fatal' => sub {
+	plan tests => 6;
+
+	my $env = make_mock_env();
+	my $d;
+	lives_ok {
+		$d = Genesis::Env::Deployment->new(
+			{from_storage => 1}, $env, timestamp => '20241031221742', %LEGACY_FLAT
+		)
+	} 'reading a flat legacy record does not die'
+		or diag("this is the reported failure: post-deploy bookkeeping bails on history");
+
+	SKIP: {
+		skip "constructor died", 5 unless $d;
+		is($d->timestamp, '20241031221742', 'timestamp is preserved');
+		is($d->lookup('kit.id'), 'generic/1.0.0', 'kit_id maps to kit.id');
+		is($d->lookup('manifest.sha2'), 'deadbeef', 'manifest_sha2 maps to manifest.sha2');
+		is($d->lookup('user.shell'), 'dennis', 'deployer maps to user.shell');
+		ok($d->is_synthesized,
+			'the record reports that values were synthesized for it');
+	}
+};
+
+subtest 'an unrecognizable stored record still does not kill a deploy' => sub {
+	plan tests => 3;
+
+	# Not a format we know at all -- the point is that unknown history is
+	# survivable, since new formats will keep turning up behind us.
+	my $env = make_mock_env();
+	my $d;
+	lives_ok {
+		$d = Genesis::Env::Deployment->new(
+			{from_storage => 1}, $env, timestamp => '20200101000000', wat => 'huh'
+		)
+	} 'a wholly unrecognized stored record does not die';
+
+	SKIP: {
+		skip "constructor died", 2 unless $d;
+		ok($d->is_synthesized, 'it is marked synthesized');
+		is($d->reason, 'unknown', 'reason falls back rather than being required');
+	}
+};
+
+subtest 'creating a NEW record stays strict' => sub {
+	plan tests => 2;
+
+	# Leniency is for reading history.  A field missing from a record Genesis
+	# is writing right now is a genuine internal bug and must stay loud.
+	my $env = make_mock_env();
+	throws_ok {
+		Genesis::Env::Deployment->new($env, action => 'deploy')
+	} qr/missing required fields/i,
+		'building a new record without required fields still bails';
+
+	throws_ok {
+		Genesis::Env::Deployment->new({from_storage => 0}, $env, action => 'deploy')
+	} qr/missing required fields/i,
+		'... and explicitly non-stored construction is equally strict';
+};
+
+subtest 'reason may be absent when READING, still required when writing' => sub {
+	plan tests => 3;
+
+	# The asymmetry is the point.  Writing an audit record without a reason is
+	# a Genesis bug and stays fatal.  Reading one written years ago by a
+	# Genesis that had no such field must not be, and the `state` compat path
+	# never supplied one -- which is how a 2024 record aborted a 2026 deploy.
+	#
+	# Whether a *meaningful* reason is demanded is a separate policy:
+	# Env::deployment_change_reason_required_size_policy, sourced from OCFP
+	# config (policies.deployment_change_reason_required_size) then repo
+	# config, and enforced in the deploy/terminate paths.
+	my $env = make_mock_env();
+
+	my $stored;
+	lives_ok {
+		$stored = Genesis::Env::Deployment->new({from_storage => 1}, $env,
+			timestamp       => '20241031221742',
+			action          => 'deploy',
+			result          => 'success',
+			genesis_version => '3.0.0',
+			user            => { shell => '/bin/bash' },
+			kit             => { id => 'test/1.0', name => 'test', version => '1.0',
+			                     is_dev => 0, features => [] },
+			manifest        => { type => 'bosh', sha2 => 'abc123' },
+		)
+	} 'a stored record without a reason is readable';
+	is($stored && $stored->reason, 'unknown', 'and reports reason as unknown');
+
+	throws_ok {
+		Genesis::Env::Deployment->new($env,
+			action          => 'deploy',
+			result          => 'success',
+			genesis_version => '3.0.0',
+			user            => { shell => '/bin/bash' },
+			kit             => { id => 'test/1.0', name => 'test', version => '1.0',
+			                     is_dev => 0, features => [] },
+			manifest        => { type => 'bosh', sha2 => 'abc123' },
+		)
+	} qr/Missing required fields.*reason/s,
+		'but writing one without a reason is still fatal';
+};
+
 done_testing;
 # vim: set ts=2 sw=2 sts=2 noet:

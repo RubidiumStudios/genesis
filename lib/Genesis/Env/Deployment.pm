@@ -6,7 +6,7 @@ use warnings;
 use 5.20.0;
 
 use Genesis qw/
-	bail debug bug
+	bail debug bug trace
 	unflatten flatten struct_lookup uniq compare_arrays
 	absolute_path mkfile_or_fail slurp in_array
 	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
@@ -52,7 +52,18 @@ sub is_a_failed_result {
 ### Class Methods
 # new - create a new Genesis::Env::Deployment object based on the provided data {{{
 sub new {
-	my ($class, $env, %data) = @_;
+	my $class = shift;
+	my $opts = (ref($_[0]) eq 'HASH') ? shift : {};
+	my ($env, %data) = @_;
+
+	# from_storage marks a record being READ BACK rather than one being
+	# written now.  Stored records come from vault, may have been written
+	# years ago by a Genesis that predates the current schema, and may have
+	# been hand-edited.  That is untrusted input, not an invariant of this
+	# code, so it is normalized and defaulted rather than fatal.  Records
+	# being created keep the strict checks -- a field missing there is a
+	# genuine bug in Genesis and must stay loud.
+	my $from_storage = $opts->{from_storage} ? 1 : 0;
 
 	# Validate that env is a Genesis::Env object
 	bug("Expected Genesis::Env object, got %s", ref($env) || 'undefined')
@@ -60,6 +71,11 @@ sub new {
 
 	# Unflatten the data if it contains dot notation
 	%data = %{unflatten(\%data)} if grep {$_ =~ /\./} keys %data;
+
+	# Normalize the original flat, snake_cased audit format into the nested
+	# one.  Note this is keyed on underscores, so the unflatten() above (which
+	# only fires on dots) never touched it.
+	my @synthesized = _normalize_legacy_fields(\%data);
 
 	# Lets do some sanitizing before we validate the data for older dev versions
 	if (my $state = delete($data{state})) {
@@ -93,6 +109,13 @@ sub new {
 	# subsequent eq checks so callers that forgot `action` get the full
 	# missing-field list in the bug() message instead of a stream of
 	# uninit warnings here first.
+	# `reason` stays required for records being written -- whether a
+	# *meaningful* reason is demanded is a separate policy
+	# (Env::deployment_change_reason_required_size_policy, from OCFP or repo
+	# config), but an audit record Genesis writes should always carry the
+	# field.  Stored records are exempt via $from_storage below: the `state`
+	# compat path never supplied one, so requiring it on read made every
+	# legacy record unreadable.
 	my @missing = grep { !exists $data{$_} } qw(
 		action result genesis_version reason user
 	);
@@ -114,25 +137,53 @@ sub new {
 
 	# TODO: Should we validate against unknown fields, or just allow them?
 
-	bug(
-		"Missing required fields for $timestamp deployment audit: " . join(', ', @missing)
-	) if @missing;
+	if (@missing) {
+		bug(
+			"Missing required fields for $timestamp deployment audit: " . join(', ', @missing)
+		) unless $from_storage;
+
+		# Stored record in a shape we don't recognize.  Fill what we can and
+		# carry on: this describes a deployment that already happened, and
+		# failing here would take down the deployment happening now.
+		trace(
+			"Deployment audit %s is missing %s; substituting 'unknown'",
+			$timestamp, join(', ', @missing)
+		);
+		push @synthesized, @missing;
+		_apply_unknown_defaults(\%data, \@missing);
+	}
 
 	# Validate the action and result fields
 	my @valid_actions = qw(deploy terminate);
 	my @valid_results = (
 		action_succeeded, action_failed, action_pending, action_post_failed, action_assumed
 	);
-	bug(
-		"Invalid action '%s' for deployment audit - must be one of: %s",
-		$data{action}, join(', ', @valid_actions)
-	) unless grep { $_ eq $data{action} } @valid_actions;
+	unless (grep { $_ eq ($data{action} // '') } @valid_actions) {
+		bug(
+			"Invalid action '%s' for deployment audit - must be one of: %s",
+			$data{action}, join(', ', @valid_actions)
+		) unless $from_storage;
+		trace(
+			"Deployment audit %s has unrecognized action '%s'; assuming 'deploy'",
+			$timestamp, $data{action} // '(none)'
+		);
+		push @synthesized, 'action';
+		$data{action} = 'deploy';
+	}
 
-	bug(
-		"Invalid result '%s' for deployment audit - must be one of: %s",
-		$data{result},
-		join(', ', @valid_results)
-	) unless grep { $_ eq $data{result} } @valid_results;
+	unless (grep { $_ eq ($data{result} // '') } @valid_results) {
+		bug(
+			"Invalid result '%s' for deployment audit - must be one of: %s",
+			$data{result},
+			join(', ', @valid_results)
+		) unless $from_storage;
+		trace(
+			"Deployment audit %s has unrecognized result '%s'; assuming '%s'",
+			$timestamp, $data{result} // '(none)', action_assumed
+		);
+		push @synthesized, 'result';
+		$data{result} = action_assumed;
+	}
 
 	# TDB: Should we automate the inclusion of derivable missing fields?
 
@@ -181,12 +232,81 @@ sub new {
 		$timestamp = $ts->strftime(EXODUS_TIME_FORMAT_SHORT) if ref($ts) eq 'Time::Piece';
 	}
 
+	my %seen;
+	my @unique_synthesized = grep { !$seen{$_}++ } @synthesized;
+
 	return bless {
 		env => $env,
 		timestamp => $timestamp,
 		data => {%data},
-		artifacts => $artifact_defn
+		artifacts => $artifact_defn,
+		synthesized => \@unique_synthesized,
 	}, $class;
+}
+
+# }}}
+# _normalize_legacy_fields - fold the original flat audit format into the {{{
+# current nested one, in place.  Returns the names of the fields it filled.
+#
+# The oldest records store kit/manifest/user detail as flat snake_cased keys
+# (kit_id, manifest_sha2, deployer) rather than nested hashes.  The same
+# translation already exists in DeploymentManager::synthesize_from_exodus for
+# the top-level exodus blob; doing it here means both paths agree, instead of
+# one understanding the shape and the other treating it as fatal.
+sub _normalize_legacy_fields {
+	my ($data) = @_;
+	my @synthesized;
+
+	if (!exists $data->{kit} && grep { exists $data->{$_} } qw(kit_id kit_name kit_version kit_is_dev kit_features)) {
+		$data->{kit} = {
+			id       => $data->{kit_id} // 'unknown',
+			name     => $data->{kit_name} // 'unknown',
+			version  => $data->{kit_version} // 'unknown',
+			is_dev   => delete($data->{kit_is_dev}) ? JSON::PP::true : JSON::PP::false,
+			features => delete($data->{kit_features}) // delete($data->{features}) // '',
+		};
+		delete @{$data}{qw(kit_id kit_name kit_version)};
+		push @synthesized, 'kit';
+	}
+
+	if (!exists $data->{manifest} && grep { exists $data->{$_} } qw(manifest_type manifest_sha2 manifest_sha1)) {
+		my $sha1 = delete $data->{manifest_sha1};
+		$data->{manifest} = {
+			type => delete($data->{manifest_type}) // 'unknown',
+			sha2 => delete($data->{manifest_sha2}) // $sha1 // 'unknown',
+			# Legacy records stored a SHA-1 under the sha2 name; record which
+			# it really is so callers do not compare across digest types.
+			($sha1 ? (sha1 => $sha1, using_sha1 => 1) : ()),
+		};
+		push @synthesized, 'manifest';
+	}
+
+	if (!exists $data->{user} && exists $data->{deployer}) {
+		$data->{user} = {shell => delete($data->{deployer}) // 'unknown'};
+		push @synthesized, 'user';
+	}
+
+	return @synthesized;
+}
+
+# }}}
+# _apply_unknown_defaults - fill required fields we could not recover {{{
+sub _apply_unknown_defaults {
+	my ($data, $missing) = @_;
+	for my $field (@$missing) {
+		next if exists $data->{$field};
+		$data->{$field} =
+			$field eq 'action'   ? 'deploy'
+		: $field eq 'result'   ? action_assumed
+		: $field eq 'user'     ? {shell => 'unknown'}
+		: $field eq 'kit'      ? {
+				id => 'unknown', name => 'unknown', version => 'unknown',
+				is_dev => JSON::PP::false, features => '',
+			}
+		: $field eq 'manifest' ? {type => 'unknown', sha2 => 'unknown'}
+		:                        'unknown';
+	}
+	return;
 }
 
 # }}}
@@ -273,6 +393,25 @@ sub has_error {
 sub error {
 	my ($self) = @_;
 	return $self->{data}{error} // '';
+}
+
+# }}}
+# is_synthesized - true when values were filled in for this record {{{
+#
+# Set when a stored record arrived in a deprecated shape (or an unrecognized
+# one) and Genesis supplied values to make it readable.  The record still
+# describes a real deployment; some of what it reports is inferred rather
+# than recorded.
+sub is_synthesized {
+	my ($self) = @_;
+	return scalar(@{$self->{synthesized} // []}) ? 1 : 0;
+}
+
+# }}}
+# synthesized_fields - which fields were filled in {{{
+sub synthesized_fields {
+	my ($self) = @_;
+	return @{$self->{synthesized} // []};
 }
 
 # }}}

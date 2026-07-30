@@ -5,7 +5,7 @@ use warnings;
 use 5.20.0;
 
 use Genesis qw/
-	bail debug bug
+	bail debug bug warning trace
 	flatten unflatten in_array deep_merge
 	parse_fixed_width_table
 	run lines
@@ -222,8 +222,10 @@ sub synthesize_from_exodus {
 	# TODO: Incorporate the artifacts from the repo into the synthesized deployment
 	# audit, if they exist.
 
-	# Create a new deployment object with the exodus data
+	# Create a new deployment object with the exodus data.  Derived from a
+	# legacy top-level exodus blob, so read-back rules apply.
 	return Genesis::Env::Deployment->new(
+		{from_storage => 1},
 		$env,
 		action => 'deploy',
 		result => Genesis::Env::Deployment::action_succeeded,
@@ -283,14 +285,34 @@ sub _all {
 			return wantarray ? () : [];
 		}
 
-		# Create a new deployment object for each deployment
+		# Create a new deployment object for each deployment.  from_storage
+		# tells the constructor these are records being read back, not
+		# written: they may predate the current schema by years, so it
+		# normalizes and fills rather than bailing.  A deployment happening
+		# now must never be stopped by history it cannot parse.
 		my @deployments = map {
 			Genesis::Env::Deployment->new(
+				{from_storage => 1},
 				$env,
 				timestamp => $_,
 				%{$deployments->{$_}}
 			)
 		} sort {$b cmp $a} keys %{$deployments};
+
+		if (my @deprecated = grep { $_->is_synthesized } @deployments) {
+			warning(
+				"Found %s deployment audit %s in a deprecated format; some ".
+				"reported details are synthesized rather than recorded.  Run ".
+				"with #C{-T} for specifics.",
+				scalar(@deprecated), scalar(@deprecated) == 1 ? 'record' : 'records'
+			);
+			trace(
+				"Deprecated deployment audit records: %s",
+				join(', ', map {
+					sprintf("%s (%s)", $_->timestamp, join('/', $_->synthesized_fields))
+				} @deprecated)
+			);
+		}
 
 		$self->{__all_deployments} = \@deployments;
 	}

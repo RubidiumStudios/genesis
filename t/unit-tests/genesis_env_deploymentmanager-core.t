@@ -9,6 +9,7 @@ use helper;
 use Test::More;
 use Test::Deep;
 use Test::Exception;
+use Test::Output;
 use File::Temp qw/tempdir/;
 use Time::Piece;
 use Time::Seconds qw/ONE_DAY/;
@@ -1568,6 +1569,74 @@ subtest 'Edge cases' => sub {
 	done_testing;
 };
 
+
+# ===========================================================================
+# Legacy audit records read through _all
+# ===========================================================================
+#
+# The reported failure: post-deploy bookkeeping calls next_sequence_number,
+# which reads every historical audit record, and a 2024 record in the original
+# flat format aborted the whole deploy -- after BOSH had already succeeded.
+
+subtest '_all survives a legacy flat record and still yields a sequence' => sub {
+	plan tests => 4;
+
+	# Exactly the key set found in production at 20241031221742.
+	my $legacy = {
+		'20241031221742' => {
+			artifacts     => '',
+			deployer      => 'dennis',
+			kit_features  => '',
+			kit_id        => 'generic/1.0.0',
+			kit_is_dev    => 0,
+			manifest_sha2 => 'deadbeef',
+			manifest_type => 'bosh',
+		},
+	};
+
+	my $mock_vault = Mock->new(
+		has          => sub { return 0 },
+		get          => sub { return '{}' },
+		get_path     => sub { return $legacy },
+		authenticate => sub { return $_[0] },
+		query        => sub { return ('', 0, '') },
+	);
+	my $env = make_mock_env(vault => $mock_vault, exodus_lookup => sub { return undef });
+	my $mgr = bless {env => $env}, 'Genesis::Env::DeploymentManager';
+
+	my @all;
+	lives_ok { @all = $mgr->_all } '_all does not die on a legacy flat record';
+	is(scalar(@all), 1, 'the record is kept, not dropped');
+	ok($all[0] && $all[0]->is_synthesized, 'it is flagged as synthesized');
+
+	# The whole reason _all is called on the deploy path.
+	lives_ok { $mgr->next_sequence_number }
+		'next_sequence_number completes -- the deploy is not blocked';
+};
+
+subtest 'the deprecated-record note is emitted once, not per record' => sub {
+	plan tests => 2;
+
+	my $legacy = {
+		'20241031221742' => {deployer => 'a', kit_id => 'generic/1.0.0'},
+		'20241031221743' => {deployer => 'b', kit_id => 'generic/1.0.0'},
+	};
+	my $mock_vault = Mock->new(
+		has          => sub { return 0 },
+		get          => sub { return '{}' },
+		get_path     => sub { return $legacy },
+		authenticate => sub { return $_[0] },
+		query        => sub { return ('', 0, '') },
+	);
+	my $env = make_mock_env(vault => $mock_vault, exodus_lookup => sub { return undef });
+	my $mgr = bless {env => $env}, 'Genesis::Env::DeploymentManager';
+
+	my $out = combined_from { $mgr->_all };
+	my $count = () = $out =~ /deprecated format/g;
+	is($count, 1, 'one note covering both records, not one per record');
+	like($out, qr/synthesized/,
+		'the note says values were synthesized rather than recorded');
+};
 
 done_testing;
 # vim: set ts=2 sw=2 sts=2 noet:

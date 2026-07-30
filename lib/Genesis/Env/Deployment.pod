@@ -187,13 +187,34 @@ B<Examples:>
 
 =head1 CLASS METHODS
 
-=head2 new($env, %data)
+=head2 new([\%opts,] $env, %data)
 
 Creates a new Genesis::Env::Deployment object based on the provided data.
+
+Validation strictness depends on whether the record is being B<written> or
+B<read back>.  A record Genesis is creating now must be complete -- a missing
+field there is a bug in Genesis and is fatal.  A record loaded from vault is
+untrusted input: it may have been written years ago by a Genesis predating the
+current schema, or hand-edited.  Those are normalized and defaulted instead,
+because the deployment they describe is already over and failing to parse it
+must not obstruct the deployment happening now.
 
 B<Parameters:>
 
 =over
+
+=item \%opts (optional, leading)
+
+=over
+
+=item from_storage
+
+When true, treat C<%data> as a record being read back: recognize the legacy
+flat format, fill unrecoverable required fields with C<'unknown'>, coerce an
+unrecognized C<action>/C<result>, and record what was substituted for
+L</is_synthesized()>.  Defaults to false.
+
+=back
 
 =item $env
 
@@ -218,9 +239,18 @@ C<'pending'>, C<'post-failed'>, C<'assumed'>.
 
 The version string of Genesis used for the deployment.
 
-=item reason (required)
+=item reason (required when writing)
 
-The reason for the deployment.
+The reason for the deployment.  Exempt under C<from_storage>: the intermediate
+C<state>-keyed legacy format never carried one, so requiring it on read made
+every such record unloadable.
+
+Note this is only the presence of the field.  Whether a I<meaningful> reason
+is demanded is a separate policy --
+C<Genesis::Env::deployment_change_reason_required_size_policy>, sourced from
+OCFP config (C<policies.deployment_change_reason_required_size>) then repo
+config, disabled by default -- enforced in the deploy and terminate paths
+where that configuration is available.
 
 =item user (required)
 
@@ -512,6 +542,39 @@ meaningful if it is set, defined, and not one of the placeholder strings:
 C<'unknown'>, C<'E<lt>unspecifiedE<gt>'>, C<'none'>, or C<'null'>.
 
 B<Returns:> 1 if a meaningful reason is present, 0 otherwise.
+
+=head2 is_synthesized()
+
+Returns true when values were supplied by Genesis to make a stored record
+readable, rather than being recorded at deployment time.
+
+Only ever true for records constructed with C<from_storage>.  The deployment
+described is real; some of what the object reports about it is inferred.
+
+B<Returns:> 1 if any field was synthesized, 0 otherwise.
+
+B<Examples:>
+
+  warning("some details are inferred") if $deployment->is_synthesized;
+
+B<Limitations:> A flag, not a provenance record -- it tells you the object
+contains synthesized values but not what the original record actually said.
+Use L</synthesized_fields()> to see which fields were affected, and the trace
+log for the detail.
+
+=head2 synthesized_fields()
+
+Returns the names of the fields that were normalized or filled in for a stored
+record: top-level names such as C<action> or C<genesis_version>, and the
+container names C<kit>, C<manifest>, or C<user> when those were rebuilt from
+the legacy flat form.
+
+B<Returns:> A list of field names, empty when nothing was synthesized.
+
+B<Examples:>
+
+  print join(', ', $deployment->synthesized_fields);
+  # prints kit, manifest, user
 
 =head2 lookup
 
