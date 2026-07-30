@@ -43,25 +43,53 @@ subtest 'BOSH Director object' => sub {
 subtest 'bosh connect_and_validate' => sub {
 	local $ENV{GENESIS_BOSH_COMMAND};
 	my $director = fake_bosh_director('the-target');
-	bosh_runs_as('env',<<EOF,BOSH_ENVIRONMENT => "https://127.0.0.1:25555", BOSH_CA_CERT => 'ca_cert', BOSH_CLIENT => 'admin', BOSH_CLIENT_SECRET => 'password', BOSH_DEPLOYMENT => '');
-Using environment 'https://127.0.0.1:25555' as user 'admin'
-
-Name               the-target-bosh
-UUID               c406e16b-600e-4ceb-a736-69dd50512a80
-Version            271.2.0 (00000000)
-Director Stemcell  ubuntu-xenial/621.74
-CPI                vsphere_cpi
-Features           compiled_package_cache: disabled
-                   config_server: enabled
-                   local_dns: enabled
-                   power_dns: disabled
-                   snapshots: disabled
-User               admin
-
-Succeeded
+	# `bosh env --json` transposes its table: one row, keys snake_cased from
+	# the column titles.  Shape taken verbatim from a live 280.0.23 director.
+	bosh_runs_as('env --json',<<EOF,BOSH_ENVIRONMENT => "https://127.0.0.1:25555", BOSH_CA_CERT => 'ca_cert', BOSH_CLIENT => 'admin', BOSH_CLIENT_SECRET => 'password', BOSH_DEPLOYMENT => '');
+{
+    "Tables": [
+        {
+            "Content": "",
+            "Header": {
+                "cpi": "CPI",
+                "director_stemcell": "Director Stemcell",
+                "features": "Features",
+                "name": "Name",
+                "user": "User",
+                "uuid": "UUID",
+                "version": "Version"
+            },
+            "Rows": [
+                {
+                    "cpi": "vsphere_cpi",
+                    "director_stemcell": "ubuntu-xenial/621.74",
+                    "features": "config_server: enabled\\nlocal_dns: enabled\\nsnapshots: disabled",
+                    "name": "the-target-bosh",
+                    "user": "admin",
+                    "uuid": "c406e16b-600e-4ceb-a736-69dd50512a80",
+                    "version": "271.2.0 (00000000)"
+                }
+            ],
+            "Notes": null
+        }
+    ],
+    "Blocks": null,
+    "Lines": [
+        "Using environment 'https://127.0.0.1:25555' as client 'admin'",
+        "Succeeded"
+    ]
+}
 EOF
 	my $bosh = get_bosh_director('the-target');
 	ok $bosh->connect_and_validate(), "bosh env on alias should ping ok";
+
+	# The director summary is retained, not discarded after the reachability
+	# check -- it is the only place the latent CPI is reported.
+	is $bosh->cpi, 'vsphere_cpi', 'cpi() reports the director latent CPI';
+	is $bosh->director_info->{uuid}, 'c406e16b-600e-4ceb-a736-69dd50512a80',
+		'director_info() retains the full bosh env row';
+	is $bosh->director_info->{version}, '271.2.0 (00000000)', 'director_info() carries the version';
+
 	$director->stop();
 };
 
@@ -420,16 +448,7 @@ subtest 'bosh status - connection and authorization check' => sub {
 case "$*" in
 	*"env"*)
 		cat <<'OUTPUT'
-Using environment 'https://127.0.0.1:25555' as user 'admin'
-
-Name               proto-bosh
-UUID               c406e16b-600e-4ceb-a736-69dd50512a80
-Version            271.2.0 (00000000)
-Director Stemcell  ubuntu-xenial/621.74
-CPI                vsphere_cpi
-User               admin
-
-Succeeded
+{"Tables":[{"Content":"","Header":{"cpi":"CPI","director_stemcell":"Director Stemcell","features":"Features","name":"Name","user":"User","uuid":"UUID","version":"Version"},"Rows":[{"cpi":"vsphere_cpi","director_stemcell":"ubuntu-xenial/621.74","features":"config_server: enabled","name":"proto-bosh","user":"admin","uuid":"c406e16b-600e-4ceb-a736-69dd50512a80","version":"271.2.0 (00000000)"}],"Notes":null}],"Blocks":null,"Lines":["Using environment 'https://127.0.0.1:25555' as client 'admin'","Succeeded"]}
 OUTPUT
 		;;
 esac

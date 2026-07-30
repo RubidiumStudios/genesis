@@ -288,6 +288,33 @@ sub host {
 }
 
 # }}}
+# director_info - the director's own summary, as `bosh env --json` reports it {{{
+#
+# Keys: name, uuid, version, director_stemcell, cpi, features, user.
+# Populated as a side effect of status(); queried on demand if something asks
+# before the director has been contacted.  An unreachable director memoizes an
+# empty hash rather than re-querying on every access.
+sub director_info {
+	my $self = shift;
+	$self->status unless defined $self->{director_info};
+	$self->{director_info} //= {};
+	return $self->{director_info};
+}
+
+# }}}
+# cpi - the director's latent CPI {{{
+#
+# The CPI *release* the director itself runs (vsphere_cpi, warden_cpi...).
+# This is a third thing, distinct from both a cpi config's name (the --name= on
+# `bosh update-config --type=cpi`) and a cpi name (the `name:` of an entry in a
+# cpi config's cpis[] list, sentinel '<default>').  It cannot satisfy an az_map
+# reference or any other named-cpi lookup -- it identifies the IaaS the
+# director talks to, not a routing target.  Reporting only.
+sub cpi {
+	return $_[0]->director_info->{cpi};
+}
+
+# }}}
 # environment_variables - retrieve BOSH environment variables for this BOSH director {{{
 sub environment_variables {
 	my ($self) = @_;
@@ -352,7 +379,7 @@ sub status {
 		eval {
 			local $SIG{ALRM} = sub {die "timeout\n"; };
 			alarm $timeout;
-			($out,$rc,$err) = eval{$self->execute('env')};
+			($out,$rc,$err) = eval{$self->execute('env','--json')};
 			alarm 0;
 		};
 		$err = $@;
@@ -363,13 +390,24 @@ sub status {
 	} else {
 		my $status = tcp_listening($self->{host},$self->{port});
 		return {status => 'unreachable', msg => $status} unless ($status eq 'ok');
-		($out,$rc,$err) = eval{$self->execute('env')};
+		($out,$rc,$err) = eval{$self->execute('env','--json')};
 	}
 
 	($err,$rc) = ($@,70)if ($@); # 70 is EX_SOFTWARE in sysexits.h,denoting internal software error
 	return {status => 'error', msg => $err} if ($rc);
 	return {status => 'unauthorized', msg => 'not logged in'} if ($out =~ /\(not logged in\)/);
-	($self->{user}) = $out =~ /^(.*)\z/m;
+
+	# `bosh env --json` transposes its table, so the whole director summary
+	# arrives as a single row keyed by snake_cased column titles: name, uuid,
+	# version, director_stemcell, cpi, features, user.  Keep the row -- it is
+	# the only place the director's latent CPI is reported, and we already
+	# paid for the round trip.
+	$self->{director_info} = eval {
+		read_json_from($out)->{Tables}[0]{Rows}[0]
+	} || {};
+	return {status => 'unauthorized', msg => 'not logged in'}
+		if ($self->{director_info}{user}//'') =~ /not logged in/;
+	$self->{user} = $self->{director_info}{user};
 	$self->{validated} = 1;
 	$ENV{GENESIS_BOSH_VERIFIED} = $self->{alias};
 	return {status => 'ok', msg => 'authorized as '.$self->{user}};

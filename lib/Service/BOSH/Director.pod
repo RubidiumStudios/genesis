@@ -521,6 +521,114 @@ B<Examples:>
   print $director->host();
   # Returns: '10.0.0.6'
 
+=head2 has_config_of_type
+
+  my $bool = $director->has_config_of_type($type);
+
+Returns true when the director has at least one config of C<$type> uploaded.
+
+Derived from the cached C<configs> listing, so it costs no BOSH round trip
+beyond the initial fetch.  Use it to short-circuit paths that only matter when
+configs of a type exist -- notably the CPI checks on single-iaas environments,
+where no named cpi configs are uploaded at all.
+
+B<Parameters:>
+
+=over 4
+
+=item B<$type>
+
+Config type, e.g. C<'cloud'>, C<'runtime'>, C<'cpi'>.
+
+=back
+
+B<Returns:> C<1> or C<0>.  C<0> when C<$type> is undefined.
+
+B<Examples:>
+
+  $director->has_config_of_type('cpi');
+  # Returns: 0 on a single-iaas director
+
+=head2 config_names_of
+
+  my @names = $director->config_names_of($type);
+
+Returns the sorted BOSH C<--name=> identifiers for configs of C<$type>.  For
+cpi configs these are B<cpi config names>, with C<default> appearing literally
+when a config was uploaded without C<--name>.
+
+B<Parameters:>
+
+=over 4
+
+=item B<$type>
+
+Config type, e.g. C<'cloud'>, C<'runtime'>, C<'cpi'>.
+
+=back
+
+B<Returns:> A sorted list of name strings; empty when C<$type> is undefined or
+nothing of that type is uploaded.
+
+B<Examples:>
+
+  $director->config_names_of('cpi');
+  # Returns: ('aws-bundle', 'vsphere-prod')
+
+B<Limitations:> These are B<not> the cpi names appearing inside a cpi config's
+C<cpis[]> array, and not the director's own latent CPI (L</cpi>).  Conflating
+the three is a recurring source of bugs; see L</cpi> for the distinction.
+
+=head2 director_info
+
+  my $info = $director->director_info();
+
+Returns the director's own summary as reported by C<bosh env --json>, as a
+hashref keyed by the snake_cased column titles: C<name>, C<uuid>, C<version>,
+C<director_stemcell>, C<cpi>, C<features>, C<user>.
+
+Populated as a side effect of L</status>, which already makes this call for
+its reachability and authorization check -- retaining the row costs nothing
+extra.  If something asks before the director has been contacted, the query
+happens on demand.
+
+B<Returns:> A hashref.  Empty (C<{}>) when the director could not be reached
+or did not answer with a parseable table.
+
+B<Examples:>
+
+  print $director->director_info->{version};
+  # Returns: '280.0.23 (00000000)'
+
+B<Limitations:> An unreachable director memoizes an empty hashref rather than
+re-querying on every access, so a director that becomes reachable later will
+keep reporting empty within the same process.  C<features> arrives as a
+newline-joined string (C<"config_server: enabled\nlocal_dns: enabled">), not
+as structured data.  Named C<director_info> rather than C<info> because
+C<Genesis> exports an C<info> logging function into this package.
+
+=head2 cpi
+
+  my $cpi = $director->cpi();
+
+Returns the director's latent CPI -- the CPI B<release> it runs, such as
+C<vsphere_cpi> or C<warden_cpi>.  Convenience wrapper over
+L</director_info>.
+
+B<Returns:> A string, or C<undef> when unknown.
+
+B<Examples:>
+
+  print $director->cpi();
+  # Returns: 'vsphere_cpi'
+
+B<Limitations:> This is a third kind of name, distinct from both a B<cpi
+config name> (the C<--name=> on C<bosh update-config --type=cpi>, defaulting
+to C<default>) and a B<cpi name> (the C<name:> of an entry in a cpi config's
+C<cpis[]> list, sentinel C<< <default> >>).  It identifies the IaaS the
+director itself talks to, so it cannot satisfy an C<az_map> reference or any
+other named-cpi lookup.  Treat it as reporting only.
+
 =head2 env
 
   my $genesis_env = $director->env();
