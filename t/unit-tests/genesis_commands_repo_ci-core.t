@@ -5,6 +5,7 @@ use warnings;
 use lib 't';
 use helper;
 use Test::Exception;
+use Test::Output;
 
 use Genesis;
 use Genesis::Config;
@@ -326,7 +327,17 @@ subtest 'v3 config with ci.yml and CI configured warns' => sub {
 	mkfile_or_fail("$dir/ci.yml", "---\npipeline:\n  layouts:\n    - sandbox\n");
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
-	lives_ok { $top->config } "v3 + ci.yml + configured CI loads without bailing";
+
+	# Capture it: this is the one path that actually emits the warning, so
+	# letting it print both leaks into the TAP stream and leaves the
+	# behaviour this subtest is named for unasserted.  Assertions stay
+	# outside the block -- Test::Output would swallow their TAP output too.
+	my $err;
+	my $out = combined_from { eval { $top->config }; $err = $@; };
+
+	is $err, '', "v3 + ci.yml + configured CI loads without bailing";
+	like $out, qr/Legacy .*ci\.yml.* present alongside a v3 CI configuration/,
+		"and warns that the stale ci.yml is being ignored";
 	ok $top->ci_configured, "v3 CI config still wins";
 	ok !$top->has_legacy_ci_yml, "legacy flag not set when v3 CI is configured";
 };
