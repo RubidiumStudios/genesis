@@ -1579,7 +1579,7 @@ subtest 'Edge cases' => sub {
 # flat format aborted the whole deploy -- after BOSH had already succeeded.
 
 subtest '_all survives a legacy flat record and still yields a sequence' => sub {
-	plan tests => 4;
+	plan tests => 6;
 
 	# Exactly the key set found in production at 20241031221742.
 	my $legacy = {
@@ -1604,14 +1604,28 @@ subtest '_all survives a legacy flat record and still yields a sequence' => sub 
 	my $env = make_mock_env(vault => $mock_vault, exodus_lookup => sub { return undef });
 	my $mgr = bless {env => $env}, 'Genesis::Env::DeploymentManager';
 
-	my @all;
-	lives_ok { @all = $mgr->_all } '_all does not die on a legacy flat record';
+	# Capture rather than let it print: this path emits an operator notice,
+	# and an uncaptured one both leaks into the TAP stream and goes
+	# unasserted.  Assertions stay OUTSIDE the block -- Test::Output would
+	# swallow their TAP output too.
+	my (@all, $err, $seq, $seq_err);
+	my $out = combined_from {
+		@all = eval { $mgr->_all };
+		$err = $@;
+		$seq = eval { $mgr->next_sequence_number };
+		$seq_err = $@;
+	};
+
+	is($err, '', '_all does not die on a legacy flat record');
 	is(scalar(@all), 1, 'the record is kept, not dropped');
 	ok($all[0] && $all[0]->is_synthesized, 'it is flagged as synthesized');
 
 	# The whole reason _all is called on the deploy path.
-	lives_ok { $mgr->next_sequence_number }
-		'next_sequence_number completes -- the deploy is not blocked';
+	is($seq_err, '', 'next_sequence_number completes -- the deploy is not blocked');
+	ok(defined $seq, 'and yields a sequence number');
+
+	like($out, qr/deprecated format/,
+		'the operator is actually told, and the notice does not leak to test output');
 };
 
 subtest 'the deprecated-record note is emitted once, not per record' => sub {
