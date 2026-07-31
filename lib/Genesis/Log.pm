@@ -972,6 +972,21 @@ sub _log {
 	return;
 }
 
+# trace_log_files - file-backed logs that actually capture TRACE entries {{{
+#
+# Only these are worth directing an operator to for detail emitted via
+# trace(): a log configured at INFO will not contain any of it, so pointing
+# at one would send them to a file that cannot answer the question.
+# Sorted, because hash key order would otherwise vary between runs.
+sub trace_log_files {
+	my ($self) = @_;
+	my $trace_ord = level_ord('TRACE');
+	return sort grep {
+		$_ ne '<terminal>' && ($self->{logs}{$_}{level_ord} // 0) >= $trace_ord
+	} keys %{$self->{logs} // {}};
+}
+
+# }}}
 my $flushing=0;
 sub flush_logs {
 	my $self = shift;

@@ -1118,6 +1118,32 @@ B<Examples:>
   $logger->dump_stack(1);
   # Returns: nothing (skips one extra frame)
 
+=head2 trace_log_files
+
+  my @paths = $logger->trace_log_files;
+
+Returns the paths of file-backed log targets whose configured level actually
+captures C<TRACE> entries, sorted.
+
+Intended for messages that emit summary detail at C<trace> level and want to
+point the operator at where to read it. Filtering on level matters: a log
+configured at C<INFO> contains none of that detail, so directing someone there
+would send them to a file that cannot answer the question.
+
+B<Returns:> A sorted list of file paths; empty when no file target is
+configured, or when none is verbose enough to hold C<TRACE> entries.
+
+B<Examples:>
+
+  if (my ($log) = $logger->trace_log_files) {
+    notice("...\n\nRun #G{less -R %s} for details.", $log);
+  }
+
+B<Limitations:> Reports where trace entries B<will> be written, not that any
+have been. The C<E<lt>terminalE<gt>> target is always excluded even when it is
+at C<TRACE>, since the intent is to name something the operator can page
+through afterwards.
+
 =head2 flush_logs
 
   $logger->flush_logs;

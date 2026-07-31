@@ -5,7 +5,7 @@ use warnings;
 use 5.20.0;
 
 use Genesis qw/
-	bail debug bug warning trace
+	bail debug bug notice trace logger
 	flatten unflatten in_array deep_merge
 	parse_fixed_width_table
 	run lines
@@ -300,11 +300,20 @@ sub _all {
 		} sort {$b cmp $a} keys %{$deployments};
 
 		if (my @deprecated = grep { $_->is_synthesized } @deployments) {
-			warning(
-				"Found %s deployment audit %s in a deprecated format; some ".
-				"reported details are synthesized rather than recorded.  Run ".
-				"with #C{-T} for specifics.",
-				scalar(@deprecated), scalar(@deprecated) == 1 ? 'record' : 'records'
+			# Notice, not warning: nothing is wrong and there is nothing to
+			# act on -- the records are historical and were read fine.  The
+			# operator only needs to know that some of what follows is
+			# inferred.  Timestamps are noise here; they are in the trace.
+			my ($log) = logger->trace_log_files;
+			notice(
+				"%s deployment record%s use%s a deprecated format, so some ".
+				"values will be inferred for this deployment.%s",
+				scalar(@deprecated) == 1 ? 'A previous' : 'Previous',
+				scalar(@deprecated) == 1 ? '' : 's',
+				scalar(@deprecated) == 1 ? 's' : '',
+				# Only offered when a log is actually capturing TRACE -- the
+				# detail below goes nowhere else.
+				$log ? sprintf("\n\nRun #G{less -R %s} to see which values.", $log) : ''
 			);
 			trace(
 				"Deprecated deployment audit records: %s",

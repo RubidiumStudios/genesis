@@ -1615,10 +1615,10 @@ subtest '_all survives a legacy flat record and still yields a sequence' => sub 
 };
 
 subtest 'the deprecated-record note is emitted once, not per record' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $legacy = {
-		'20241031221742' => {deployer => 'a', kit_id => 'generic/1.0.0'},
+		"20241031221742" => {deployer => 'a', kit_id => 'generic/1.0.0'},
 		'20241031221743' => {deployer => 'b', kit_id => 'generic/1.0.0'},
 	};
 	my $mock_vault = Mock->new(
@@ -1634,8 +1634,10 @@ subtest 'the deprecated-record note is emitted once, not per record' => sub {
 	my $out = combined_from { $mgr->_all };
 	my $count = () = $out =~ /deprecated format/g;
 	is($count, 1, 'one note covering both records, not one per record');
-	like($out, qr/synthesized/,
-		'the note says values were synthesized rather than recorded');
+	like($out, qr/values will be inferred/,
+		'the note says values will be inferred for this record');
+	unlike($out, qr/20241031221742/,
+		'timestamps stay out of the note -- they are trace detail');
 };
 
 done_testing;
