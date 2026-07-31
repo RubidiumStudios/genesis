@@ -1059,25 +1059,33 @@ B<Examples:>
   $logger->qtrace("Loop iteration %d: value=%s", $i, $val);
   # Returns: nothing (prints to STDERR at TRACE level, no location appended)
 
-In addition to the shortcut methods above, the C<output> code block in the
-source also defines C<dump_var>:
+=head2 dump_var
 
   $logger->dump_var(%vars);
   $logger->dump_var(\%options, %vars);
   $logger->dump_var($scope_offset, %vars);
 
-C<dump_var> dumps one or more named variables to the log at C<VALUE> level
-using Data::Dumper. Each key/value pair in C<%vars> produces a separate log
-entry formatted as C<name = value>. An optional leading hashref C<\%options>
-is merged into the log entry options. An optional leading integer
+Dumps one or more named variables to the log at C<VALUE> level using
+Data::Dumper. Each key/value pair in C<%vars> produces a separate log entry
+formatted as C<name = value>. An optional leading hashref C<\%options> is
+merged into the log entry options. An optional leading integer
 C<$scope_offset> (absolute value used) adjusts the stack depth for scope
 reporting. Returns nothing.
+
+Also exported as a function by L<Genesis>, which supplies an offset of 1 so
+the reported scope is the caller rather than the wrapper.
 
   $logger->dump_var(my_hash => \%config, my_list => \@items);
   # Returns: nothing (prints each variable's Data::Dumper output to STDERR)
 
   $logger->dump_var(1, result => $value);
   # Returns: nothing (scope offset shifted up one level)
+
+B<Limitations:> The offset can be supplied three different ways -- an
+C<offset> key in C<\%options>, a leading integer, or accumulated across
+several leading hashrefs -- which the source itself flags as too many
+(C<Log.pm>, "Too many ways to indicate offset"). Prefer the C<\%options>
+form.
 
 =head2 dump_stack
 
