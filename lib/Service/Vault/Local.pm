@@ -403,12 +403,17 @@ sub _generate_alias {
 
 sub _get_safe_process {
 	my ($alias, $timeout) = @_;
-	return _get_process("\\s\\+[s]afe local -m --as $alias", $timeout);
+	return _get_process("\\s\\+[^ ]*[s]afe local -m --as $alias", $timeout);
 }
 
 sub _get_vault_process {
 	my ($ppid, $timeout) = @_;
-	return _get_process("\\s\\+$ppid\\s\\+[v]ault server", $timeout);
+	# `ps -eo pid,ppid,command` reports the child by the path it was exec'd
+	# with, and safe resolves the server binary before spawning it, so the
+	# command column is absolute (/home/linuxbrew/.linuxbrew/bin/vault
+	# server). Anchoring on a bare "vault server" never matches, and the
+	# caller then reports a healthy local vault as failed to start.
+	return _get_process("\\s\\+$ppid\\s\\+[^ ]*[v]ault server", $timeout);
 }
 
 sub _get_process {
