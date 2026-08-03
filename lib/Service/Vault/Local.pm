@@ -74,9 +74,20 @@ sub create {
 
 	# Restore default vault target?
 
-	my $vault_info = read_json_from(run({env => {SAFE_TARGET => undef}},
+	# safe registers the new target in ~/.saferc a moment after the server
+	# process itself is up, so reading it once races the writer and comes
+	# back empty -- which surfaces as a "malformed JSON string" die out of
+	# read_json_from rather than anything naming the real cause. Poll until
+	# the alias appears.
+	my $vault_info;
+	for (1..100) {
+		my $raw = run({env => {SAFE_TARGET => undef}},
 			"safe targets --json | jq '.[] | select(.name==\"$alias\")'"
-	));
+		);
+		$vault_info = eval {read_json_from($raw)} if defined($raw) && $raw =~ /\S/;
+		last if ($vault_info && ref($vault_info) eq 'HASH' && $vault_info->{url});
+		select(undef,undef,undef,0.1);
+	}
 	bail(
 		"Failed to find vault alias after starting local vault."
 	)	unless ($vault_info && ref($vault_info) eq 'HASH' && $vault_info->{url});
