@@ -80,7 +80,12 @@ sub gather_properties {
 	# property, except for the secrets (leave them as-is on the first pass).  We
 	# first have to split out the alternative lookups and default values, and
 	# storage locations.
-	my (%config,%secrets) = ();
+	# %config is keyed by output path, but the manual-override pass below is
+	# keyed by source key. Those agree only while every property leaves >path
+	# unset. %consumed records the source keys this map read, so the override
+	# pass can tell "the kit does not model this key" from "the kit read this
+	# key and emitted it somewhere else".
+	my (%config,%secrets,%consumed) = ();
 	for my $property (@properties) {
 		my ($is_secret, $key, $alts, $default, $optional, $path) =
 			$property =~ /^(!?)([^\@:\?\>]+)(?:\@([^:\?\>]+))?(?:(?::([^>]+))|(\?))?(?:>(.+))?$/;
@@ -92,6 +97,7 @@ sub gather_properties {
 		$path //= $key;
 		$default //= '';
 		my @lookups = ($key, (split /,/, $alts//''));
+		$consumed{$_} = 1 for @lookups;
 		my $value = undef;
 		my $iaas = $self->iaas;
 		for my $lookup (@lookups) {
@@ -139,8 +145,15 @@ sub gather_properties {
 	my $overrides = $self->env->lookup_unevaled('bosh-configs.cpi');
 	for my $override (keys %$overrides) {
 
-		# If we already got this value, skip it
-		next if exists $config{$override};
+		# If we already got this value, skip it.  Checking %consumed as well as
+		# %config matters as soon as a property declares a >path: the value is
+		# then filed under the path, so the source key is absent from %config
+		# and the operator's own setting gets copied back in at the top level
+		# -- unevaluated (a spruce operator reaches the director as a literal
+		# and is rejected as a BOSH variable name) and un-entombed (a '!'
+		# secret lands in cleartext beside the credhub reference that was
+		# supposed to replace it).
+		next if exists $config{$override} || $consumed{$override};
 
 		my $value = $overrides->{$override};
 		# FIXME: Need to handle hashes that may contain vault references

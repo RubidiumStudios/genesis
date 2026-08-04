@@ -67,6 +67,7 @@ unit-tests/genesis_env-vault_ops.t       # get_ancestral_vault(), exodus_lookup(
 unit-tests/genesis_env-fix_secrets_conflicts.t  # _fix_secrets manifest/credhub conflict detection
 unit-tests/genesis_env_secrets_parser_fromkit-core.t  # FromKit parser defect regression tests
 unit-tests/genesis_env_secrets_store_vault-core.t  # Store::Vault code defect regression tests
+unit-tests/genesis_hook_cpiconfig-gather_properties.t  # >path vs source-key handling in the manual-override pass
 unit-tests/genesis_log-get_scope.t
 unit-tests/genesis_log-core.t
 unit-tests/genesis_log-levels.t
