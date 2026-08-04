@@ -216,8 +216,25 @@ sub cpi_entombment_path_for {
 	# on the environment's credhub prefix.
 	my $prefix = $self->{credhub_prefix} // $self->env->cpi_credhub_base;
 	my $stub = 'cpi-config-property';
+
+	# A '.' inside a BOSH ((variable)) reference is a sub-key accessor, not part
+	# of the name: the director resolves ((/a/b.c)) by fetching '/a/b' and then
+	# indexing 'c'.  As soon as a kit maps a secret onto a nested config path,
+	# $key arrives dotted (pve.host), and the emitted reference
+	# '...--pve.host--<sha>' is read by the director as the variable
+	# '...--pve' with sub-key 'host--<sha>'.  That lookup 404s and every
+	# director-side CPI call through the cpi-config dies at interpolation:
+	#
+	#   Failed to find variable '/cpi-config/properties/cpi-config-property--pve'
+	#   from config server: HTTP Code '404'
+	#
+	# Flatten dots for the variable NAME only.  The digest still covers the
+	# original dotted $key, so two distinct paths that flatten to the same name
+	# keep distinct references rather than silently sharing one secret.
+	(my $name_key = $key) =~ tr/./-/;
+
 	my $secret_sha = substr(sha1_hex("$stub--$key--".$value),0,8);
-	return "$prefix$stub--$key--$secret_sha";
+	return "$prefix$stub--$name_key--$secret_sha";
 }
 
 1;

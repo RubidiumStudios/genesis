@@ -135,9 +135,12 @@ subtest 'a secret with a >path is not re-emitted in cleartext' => sub {
 		qw/!api_password>credentials.password/,
 	);
 
+	# The name flattens the dotted path to 'credentials-password': a dot here
+	# would be read by the director as a sub-key accessor. See the dedicated
+	# subtest below.
 	like(
 		$config->{credentials}{password},
-		qr{^\(\(/cpi-config/properties/cpi-config-property--credentials\.password--[0-9a-f]{8}\)\)$},
+		qr{^\(\(/cpi-config/properties/cpi-config-property--credentials-password--[0-9a-f]{8}\)\)$},
 		'the mapped path holds a credhub reference, not the secret',
 	);
 	ok(
@@ -193,6 +196,44 @@ subtest 'a fully >path-ed map emits no top-level source keys' => sub {
 	is($config->{pve}{vm_storage}, 'local-lvm-data', 'mapped value is nested under its spec path');
 	is($config->{agent}{mbus}, 'nats://10.115.16.4:4222', 'agent.mbus is nested');
 	is($config->{pve_log_level}, 'debug', 'the unmodelled key is still passed through untouched');
+};
+
+# --- entombed names must survive BOSH's ((variable)) parser ---------------
+# A '.' in a ((variable)) reference is a sub-key accessor, so an entombment
+# name carrying the dotted config path is truncated by the director:
+# ((.../cpi-config-property--pve.host--<sha>)) is looked up as the variable
+# '.../cpi-config-property--pve' with sub-key 'host--<sha>', which 404s and
+# kills every director-side CPI call through the cpi-config.
+subtest 'an entombed secret on a nested path emits a dot-free variable name' => sub {
+	my ($config, $hook) = gather(
+		{ api_host => 'pve.example.com' },
+		qw/!api_host>pve.host/,
+	);
+
+	my $ref = $config->{pve}{host};
+	like($ref, qr{^\(\(/.*\)\)$}, 'the mapped path holds a credhub reference');
+
+	my ($name) = $ref =~ /^\(\((.*)\)\)$/;
+	unlike(
+		$name, qr/\./,
+		'the variable name carries no dot for the director to read as a sub-key',
+	);
+	is_deeply(
+		[sort keys %{$hook->{credhub_secrets}}], [$name],
+		'the secret is stored under exactly the name the reference cites',
+	);
+};
+
+subtest 'paths that flatten to the same name keep distinct references' => sub {
+	my $hook = Test::Hook->new(env => Test::FakeEnv->new(cpi => {}));
+	my $a = $hook->cpi_entombment_path_for('pve.host', 'value');
+	my $b = $hook->cpi_entombment_path_for('pve-host', 'value');
+
+	unlike($a, qr/\./, 'the dotted path flattens');
+	isnt(
+		$a, $b,
+		'the digest still covers the original key, so a flattened path cannot collide with a literal one',
+	);
 };
 
 done_testing;
