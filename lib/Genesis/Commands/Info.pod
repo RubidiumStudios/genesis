@@ -408,7 +408,8 @@ B<Examples:>
 
   # Attempt to list deployment history for an environment:
   # CLI: genesis prod-us-east deployments
-  # bails: The 'deployments' command is not yet fully implemented.
+  # prints nothing and bails: The 'deployments' command is not yet
+  # fully implemented.
 
 =head2 kit_manual($name)
 
@@ -556,7 +557,7 @@ B<Examples:>
   # Emit JSON output:
   # CLI: genesis environments --json
 
-=head1 INTERNAL METHODS
+=head1 INTERNAL FUNCTIONS
 
 These functions are internal to the implementation.  They may change without
 notice and should not be called directly.
@@ -605,6 +606,43 @@ B<Examples:>
   __processing(10, 20, 4, 5);
   # prints:   Processing:  50%: [  *  ]
 
+=head2 _format_feature_compatibility_line($deployment)
+
+Formats the feature opt-in line shown for a deployment, or nothing when the
+deployment records no opt-in.
+
+The source is reported only when the record carries one. Older deployment
+records predate the source being tracked, so the level appears bare rather
+than being attributed to a guess.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$deployment>
+
+A C<Genesis::Env::Deployment> object.
+
+=back
+
+B<Returns:> The formatted line including its trailing newline, or the empty
+string when the deployment has no C<feature_compatibility> recorded.
+Returning C<''> rather than C<undef> lets the caller concatenate it
+unconditionally.
+
+B<Examples:>
+
+  my $line = _format_feature_compatibility_line($deployment);
+  # returns "  feature opt-in v3.1.0 (from environment)\n"
+
+  # A deployment recording a level but no source:
+  my $line = _format_feature_compatibility_line($old_deployment);
+  # returns "  feature opt-in v3.0.0\n"
+
+  # A deployment with no opt-in at all:
+  my $line = _format_feature_compatibility_line($plain_deployment);
+  # returns '' -- nothing is printed for it
+
 =head1 SEE ALSO
 
 L<Genesis::Commands>, L<Genesis::Commands::Ocfp>, L<Genesis::Top>,
@@ -612,9 +650,11 @@ L<Genesis::Env>, L<Genesis::Env::Deployment>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

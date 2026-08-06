@@ -217,6 +217,7 @@ sub _handle_deprecated_feature {
 	return 1;
 }
 
+# }}}
 sub results {
 	bail(
 		"Blueprint hook could not be run"

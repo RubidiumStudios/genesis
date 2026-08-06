@@ -307,8 +307,8 @@ subtest 'has_config - with named config (type@name)' => sub {
 # ======================================================================
 
 subtest 'missing_required_configs - all required when none registered' => sub {
-	# FWT-983 Step 6: required_configs(blueprint) now returns both
-	# cloud only -- cpi is not required, so it never appears here.
+	# required_configs(blueprint) returns cloud only here -- cpi is not
+	# required for this blueprint, so it never appears.
 	plan tests => 1;
 
 	local %ENV = %ENV;
@@ -376,8 +376,8 @@ subtest 'has_required_configs - false when required configs absent' => sub {
 };
 
 subtest 'has_required_configs - true when all required configs present' => sub {
-	# FWT-983 Step 6: cpi joined the required set.  has_required_configs
-	# now only returns true once BOTH cloud and cpi are registered.
+	# cpi is part of the required set, so has_required_configs only
+	# returns true once BOTH cloud and cpi are registered.
 	plan tests => 1;
 
 	local %ENV = %ENV;
@@ -599,11 +599,11 @@ subtest 'non-OCFP director: manifest viability check is not gated out' => sub {
 };
 
 # ======================================================================
-# Env::download_configs - opts threading to the Director (FWT-983)
+# Env::download_configs - opts threading to the Director
 # ======================================================================
 #
-# After Step 3, Director::download_configs accepts `optional => 1`
-# (and `refresh => 1`).  Env::download_configs is the orchestrator
+# Director::download_configs accepts `optional => 1` and `refresh => 1`.
+# Env::download_configs is the orchestrator
 # that walks @specs and dispatches per-type; it needs to forward
 # those opts so env-level callers can use the new knobs without
 # reaching past Env into Director directly.
@@ -613,11 +613,11 @@ subtest 'non-OCFP director: manifest viability check is not gated out' => sub {
 #   $env->download_configs(qw/cloud runtime/, { refresh => 1 });
 
 subtest 'download_configs - silently skips cpi spec when no cpi configs uploaded' => sub {
-	# FWT-983 Step 6: cpi joined the required-configs set, but
-	# single-iaas envs have no cpi configs uploaded.  Rather than
-	# emitting an empty success bullet ("(none uploaded)") or
-	# walking the download path only to no-op, Env consults the
-	# Director's cached listing (has_config_of_type from Step 1)
+	# cpi is in the required-configs set, but single-iaas envs have no
+	# cpi configs uploaded.  Rather than emitting an empty success
+	# bullet ("(none uploaded)") or walking the download path only to
+	# no-op, Env consults the Director's cached listing
+	# (has_config_of_type)
 	# and silently drops the cpi spec when there's nothing to
 	# fetch.  No UI noise, no bogus use_config registration.
 	plan tests => 3;

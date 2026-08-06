@@ -125,11 +125,13 @@ B<Returns:> A two-element list: C<$data> (the merged YAML data structure) and
 C<$file> (the path to the manifest file). Either may be C<undef> if the merge
 did not produce that output.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

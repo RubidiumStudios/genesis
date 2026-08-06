@@ -96,11 +96,10 @@ subtest 'frames returned from within a subtest include caller info' => sub {
 # ---------------------------------------------------------------------------
 # get_scope() tests
 #
-# NOTE: FWT-701 #1 documented a bug where get_scope() called a non-existent
-# _get_stack() helper.  The code in this worktree has been corrected to call
-# get_stack() instead (Log.pm line 587).  The tests below therefore test the
-# corrected, working behaviour.  If the bug is somehow still present the
-# lives_ok assertion will catch it.
+# NOTE: get_scope() once called a non-existent _get_stack() helper, so any
+# call to it died.  It calls get_stack() now.  The tests below assert the
+# corrected behaviour; the lives_ok assertion is what would catch a
+# regression back to a missing helper.
 # ---------------------------------------------------------------------------
 
 subtest 'get_scope(0) returns a defined string' => sub {

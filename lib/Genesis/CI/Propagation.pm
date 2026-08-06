@@ -6,44 +6,6 @@ use warnings;
 use Genesis qw(info warning);
 
 # compute_propagation_targets - determine which envs receive files directly {{{
-#
-# Pure function: no git, no IO.  Given a DAG topology, per-env
-# propagation diffs, and (optionally) per-env deploy diffs, returns
-# which environments are direct entry points for propagation and
-# which files each receives.
-#
-# Two diffs per env:
-#   - propagation_diff: files on control HEAD that aren't yet on this
-#     env's branch.  Used to decide what to copy when the env is an
-#     entry point.
-#   - deploy_diff: files on control HEAD that haven't yet been
-#     DEPLOYED from this env (branch may have them, but exodus
-#     audit shows an older commit).  Used to detect ancestors that
-#     have in-flight propagations — descendants must wait.
-#
-# An environment is a direct entry point when:
-#   1. Its propagation_diff is non-empty, AND
-#   2. NONE of its propagation_diff files overlap with any ancestor's
-#      deploy_diff (i.e., no ancestor is sitting on an undeployed copy
-#      of the same file).
-#
-# This keeps commits travelling as a unit: a file can't cascade past
-# an ancestor that has received it on-branch but not yet deployed it.
-#
-# When deploy_diff is omitted, it falls back to propagation_diff —
-# preserving the original single-diff behaviour for callers that
-# aren't yet deployment-aware.
-#
-# Args (named):
-#   dag_order         => \@ordered_env_names   (topologically sorted)
-#   parent_of         => \%parent_map          (env => parent_env or undef)
-#   env_changed       => \%propagation_diff    (env => \@files to copy)
-#   env_undeployed    => \%deploy_diff         (env => \@files pending deploy)
-#                                               (optional; defaults to env_changed)
-#   scope             => \@scoped_env_names    (optional: subset to consider)
-#
-# Returns: hashref  { env_name => \@files_to_propagate }
-#          Only entry point envs appear in the result.
 sub compute_propagation_targets {
 	my (%args) = @_;
 
@@ -89,52 +51,7 @@ sub compute_propagation_targets {
 }
 
 # }}}
-# propagate_envs - execute propagation to a set of computed targets {{{
-#
-# Iterates targets, applying each propagation either directly to the
-# env branch or via a rolling pr/<env> branch + GitHub PR.  Batches
-# all branch pushes and PR API calls at the end.
-#
-# Provider-agnostic: callers parameterise behavior via the option
-# flags below.  Manual provider sets push_direct_commits=1; Concourse
-# (when wired) sets it to 0 because concourse's `put` step on the env
-# git resource lands the commit upstream.
-#
-# Args (named):
-#   git           => Service::Git instance
-#   github        => Service::Github instance (or undef when no targets need PRs)
-#   owner_repo    => "owner/name" (required when any target has require_pr)
-#   targets       => arrayref of target hashes, each:
-#                    {
-#                      env        => 'staging',
-#                      require_pr => 0|1,
-#                      detail     => {
-#                        changed => [...],   # files to copy from control_sha
-#                        deleted => [...],   # files to remove
-#                        renamed => {...},   # old_path => new_path
-#                      },
-#                    }
-#   control       => control branch name
-#   control_sha   => full SHA of control HEAD
-#   control_short => short SHA
-#
-#   push_direct_commits => bool (default 1) — push direct-to-<env> commits
-#   push_pr_branches    => bool (default 1) — push pr/<env> branches
-#   create_prs          => bool (default 1) — call create_pr / update_pr
-#   no_push             => bool (default 0) — MASTER KILL: forces all push_*
-#                                              and create_prs to 0
-#   dry_run             => bool (default 0) — report intent, no mutations
-#   push_extra_branches => arrayref (default []) — extra branches to include
-#                          in the batched push (e.g., control)
-#
-# Returns: hashref
-#   {
-#     propagated         => N,        # total envs successfully propagated
-#                                     # (includes skipped-idempotent)
-#     skipped_idempotent => [envs],   # envs whose pr/<env> HEAD already
-#                                     # matched this control_sha
-#     errors             => [strings] # any per-env failures (loop bails on first)
-#   }
+# propagate_envs - execute propagation to computed targets, batching pushes and PRs to the end {{{
 sub propagate_envs {
 	my (%args) = @_;
 

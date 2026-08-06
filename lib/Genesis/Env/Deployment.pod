@@ -214,6 +214,17 @@ flat format, fill unrecoverable required fields with C<'unknown'>, coerce an
 unrecognized C<action>/C<result>, and record what was substituted for
 L</is_synthesized()>.  Defaults to false.
 
+Records being B<created> keep the strict checks -- a field missing there is a
+bug in Genesis and must stay loud. Records being B<read> are untrusted input:
+they may have been written years ago by a Genesis predating the current
+schema, or hand-edited since. Refusing them would make old audit history
+unreadable rather than merely incomplete.
+
+When required fields are absent, all of them are collected before reporting,
+so a caller that omitted C<action> gets the complete missing-field list
+rather than a stream of uninitialized-value warnings from the checks that
+follow.
+
 =back
 
 =item $env
@@ -657,8 +668,9 @@ Returns 0 (not die) if the vault is unreachable or throws an error,
 allowing callers to proceed gracefully.
 
 Note: C<committed()> checks the vault path C<'deployments/' . $self-E<gt>timestamp()>,
-which is a relative path. Due to a known issue (FWT-708), this may not match
-the full exodus path used by C<commit()>.
+which is a relative path. That does not match the full exodus path
+C<commit()> writes to, so this may report false for a deployment that has in
+fact been committed -- see C<M#1> under L</KNOWN ISSUES>.
 
 B<Returns:> True if the vault path exists, 0 if the path does not exist or
 if the vault is unreachable.
@@ -686,7 +698,8 @@ If C<started> or C<completed> are not set on the object, they default to the
 deployment's C<timestamp> value (which is generally set during C<new()> and
 therefore often reflects the construction time). If no C<timestamp> is set on
 the object, they instead default to the time that C<commit()> is called. This
-mutation is a side effect of this method (known issue - FWT-708).
+mutation is a side effect of this method, and it is permanent -- see C<M#3>
+under L</KNOWN ISSUES>.
 
 B<Returns:>
 
@@ -709,6 +722,14 @@ Thrown via C<bail()> if C<committed()> returns true before the vault write.
 Thrown via C<bail()> in scalar context if the vault write returns a non-zero
 exit code. The first C<%s> is stdout from the vault command; the second is
 stderr.
+
+=item C<"Could not read %s: %s">
+
+Thrown via C<bail()> when the intermediate artifacts file cannot be reopened
+for chunking, after C<_build_artifacts_file> has written it. C<%s> is the
+temporary file path and C<$!>. Reaching this means the file was created but
+became unreadable between writing and reading -- a full or unwritable
+workdir, or the file being removed underneath the process.
 
 =back
 
@@ -955,6 +976,122 @@ This is a mutable package global (C<our>).  See L</KNOWN ISSUES> I-1.
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _normalize_legacy_fields
+
+  my @synthesized = _normalize_legacy_fields(\%data);
+
+Rewrites the original flat, snake_cased audit format into the nested one
+C<new()> expects. Plain function, not a method. Modifies C<\%data> in place.
+
+Three groups are converted, each only when the nested key is absent and at
+least one legacy key is present, so a record already in the new shape passes
+through untouched:
+
+=over 4
+
+=item *
+
+C<kit_id>, C<kit_name>, C<kit_version>, C<kit_is_dev>, C<kit_features> into
+C<kit>. C<features> is accepted as a fallback source for C<kit_features>.
+
+=item *
+
+C<manifest_type>, C<manifest_sha2>, C<manifest_sha1> into C<manifest>.
+
+=item *
+
+C<deployer> into C<< user.shell >>.
+
+=back
+
+Note the keying: this runs on B<underscored> names, so the C<unflatten> pass
+in C<new()> -- which only fires on dot notation -- never touches these.
+
+The same translation exists in
+L<Genesis::Env::DeploymentManager/synthesize_from_exodus> for the top-level
+exodus blob. Having it here too means both read paths agree on the legacy
+shape, rather than one understanding it and the other treating it as fatal.
+
+B<The SHA-1 case is why this returns anything.> Legacy records stored a
+SHA-1 digest under the C<sha2> name. Rather than silently presenting it as a
+SHA-2, the digest is recorded under C<sha1> as well and flagged with
+C<using_sha1>, so a caller does not compare hashes across digest types and
+conclude a manifest changed when it did not.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%data>
+
+The record being normalised. Modified in place: legacy keys are deleted and
+their nested equivalents added.
+
+=back
+
+B<Returns:> The list of top-level field names that were synthesized -- some
+of C<kit>, C<manifest>, C<user>. Empty when the record needed no conversion.
+C<new()> uses this to distinguish a field it invented from one the record
+actually carried.
+
+B<Examples:>
+
+  my %data = (kit_id => 'bosh/1.2.3', kit_name => 'bosh',
+              kit_version => '1.2.3', deployer => 'dbell');
+  my @synth = _normalize_legacy_fields(\%data);
+  # returns ('kit', 'user'); %data now has nested kit and user hashes
+
+  my %data = (kit => {id => 'bosh/1.2.3'});
+  my @synth = _normalize_legacy_fields(\%data);
+  # returns () -- already in the nested shape
+
+=head2 _apply_unknown_defaults
+
+  _apply_unknown_defaults(\%data, \@missing);
+
+Fills in placeholder values for required fields a stored record does not
+have. Plain function, not a method. Modifies C<\%data> in place.
+
+Only reached for records read back from storage. A record being written keeps
+the strict check and fails loudly, because a field missing there is a bug in
+Genesis rather than an artefact of age. Stored records may have been written
+years ago by a Genesis predating the current schema, or hand-edited; that is
+untrusted input, and refusing to read it would make old audit history
+inaccessible.
+
+Defaults are per-field: C<action> becomes C<'deploy'>, C<result> the
+"assumed" action result, C<user> / C<kit> / C<manifest> minimal hashes with
+their own required sub-fields set to C<'unknown'>, and anything else the
+string C<'unknown'>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%data>
+
+The record being defaulted. Modified in place.
+
+=item C<\@missing>
+
+The field names to fill. Fields already present are skipped, so passing a
+name that turned out to exist is harmless.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+  my %data = (genesis_version => '3.1.0');
+  _apply_unknown_defaults(\%data, ['action', 'user']);
+  # modifies %data in place: action => 'deploy',
+  #                          user   => {shell => 'unknown'}
+
+  my %data = (action => 'terminate');
+  _apply_unknown_defaults(\%data, ['action']);
+  # no change -- the field already exists
 
 =head2 _get_artifact_hash
 
@@ -1206,21 +1343,18 @@ B<Examples:>
 
 =head1 KNOWN ISSUES
 
-The following issues have been identified and tracked in
-L<FWT-708|https://fivetwenty.atlassian.net/browse/FWT-708>.
+Defects that are still present, recorded so callers do not build on the
+current, incorrect behaviour. Resolved entries are removed rather than marked,
+so everything listed here is live.
+
+The C<C#>, C<M#>, C<m#> and C<I#> labels are anchors within this document --
+severity and number, nothing more. They are not references to any tracker.
 
 =head3 Critical
 
 =over
 
-=item C-1: Undef key access before validation (in new(), lines 97-108)
-
-C<$data{action}> is accessed (C<if $data{action} eq 'deploy'>) before the
-C<@missing> check is performed later in C<new()>.  If C<action> is absent,
-this produces an uninitialized-value warning and causes the conditional
-sub-field validation for C<kit> and C<manifest> to be silently skipped.
-
-=item C-3: List-context commit() bypasses error check (in commit(), lines 439-443)
+=item C#3: List-context commit() bypasses error check (in commit())
 
 When C<commit()> is called in list context, it returns the raw
 C<($out, $rc, $err)> triple from the vault query without checking C<$rc>.
@@ -1233,7 +1367,7 @@ the C<bail()> that fires in scalar context.
 
 =over
 
-=item M-1: committed() uses relative vault path (in committed(), lines 363-370)
+=item M#1: committed() uses relative vault path (in committed())
 
 C<committed()> queries the vault path C<deployments/E<lt>timestampE<gt>>,
 while C<commit()> stores data at
@@ -1241,7 +1375,7 @@ C<< $self-E<gt>env-E<gt>exodus_base . '/deployments/' . $timestamp >>.
 The paths are inconsistent, so C<committed()> may always return false,
 allowing duplicate commits.
 
-=item M-2: user_colorized_legend breaks when invoked as a method (in user_colorized_legend(), lines 335-336)
+=item M#2: user_colorized_legend breaks when invoked as a method (in user_colorized_legend())
 
 The sub signature C<my (@roles) = @_> captures the invocant (C<$self> or the
 class name) as the first role element when called as a method, whether as an
@@ -1250,19 +1384,19 @@ a class method (C<< Genesis::Env::Deployment-E<gt>user_colorized_legend(@roles) 
 Must be called as a plain function:
 C<Genesis::Env::Deployment::user_colorized_legend(@roles)>.
 
-=item M-3: commit() permanently mutates $self->{data} (in commit(), lines 389-390)
+=item M#3: commit() permanently mutates $self->{data} (in commit())
 
 C<commit()> obtains C<$data> as a reference to C<< $self-E<gt>{data} >>
 (not a copy) and writes C<completed> and C<started> defaults via C<//=>.
 After C<commit()>, the object's internal data is permanently altered.
 
-=item M-4: Vault set arguments unescaped (in commit(), lines 428-431)
+=item M#4: Vault set arguments unescaped (in commit())
 
 The vault C<set> command is built by interpolating data values directly into
 C<key=value> strings without escaping.  Values containing C<=>, spaces, or
 shell special characters can cause malformed vault commands.
 
-=item M-5: secrets/secrets.json dual-key handling fragile (in _get_artifact_hash(), lines 593-613)
+=item M#5: secrets/secrets.json dual-key handling fragile (in _get_artifact_hash())
 
 In the C<local-file-hash> format, C<secrets> is stored as an array of vault
 paths, but C<secrets.json> refers to the same collected content.  Requesting
@@ -1276,30 +1410,30 @@ C<secrets>/C<secrets.json> mapping differently without clear documentation.
 
 =over
 
-=item m-1: Typo "TDB" should be "TBD" (in new(), line 132)
+=item m#1: Typo "TDB" should be "TBD" (in new())
 
 Comment reads C<# TDB: Should we automate...> instead of C<# TBD: ...>.
 
-=item m-2: Sub-field validation skips when parent has wrong type (in new(), lines 100-108)
+=item m#2: Sub-field validation skips when parent has wrong type (in new())
 
 The guard C<ref($data{kit}) eq 'HASH'> means that if C<kit> is present but
 is not a hashref (e.g., a scalar string), sub-field validation is silently
 skipped without reporting an error.
 
-=item m-3: _get_ts_string called before timestamp conversion (in new(), lines 88-89)
+=item m#3: _get_ts_string called before timestamp conversion (in new())
 
-C<_get_ts_string($data{completed}//Time::Piece-E<gt>new)> is called on line
-89 before C<$data{completed}> is converted from a string to a Time::Piece
-object (lines 155-158).  Works for UTC strings via regex fallback but is
-fragile for non-standard formats.
+C<_get_ts_string($data{completed}//Time::Piece-E<gt>new)> runs before
+C<$data{completed}> is converted from a string to a Time::Piece object later
+in C<new()>.  Works for UTC strings via the regex fallback, but is fragile
+for non-standard formats.
 
-=item m-5: Instance-method guard in _get_ts_string is dead code (in _get_ts_string(), line 837)
+=item m#5: Instance-method guard in _get_ts_string is dead code (in _get_ts_string())
 
 The guard C<$ts = shift if ref($ts) eq 'Genesis::Env::Deployment'> can never
 fire because C<_get_ts_string> is always called as a plain function, never
 as a method.
 
-=item m-6: encode_json fallback unreachable (in _collect_secrets_from_paths(), line 699)
+=item m#6: encode_json fallback unreachable (in _collect_secrets_from_paths())
 
 C<encode_json> always returns a defined string (it dies on error rather than
 returning C<undef>), so the C<// '{}'> fallback is unreachable.
@@ -1310,47 +1444,28 @@ returning C<undef>), so the C<// '{}'> fallback is unreachable.
 
 =over
 
-=item C-2: Dead unreachable timestamp fallback (in new(), lines 160-163)
+=item C#2: Dead unreachable timestamp fallback (in new())
 
-The C<unless (defined($timestamp))> block at line 160 is unreachable because
-C<$timestamp> is always defined after line 89 (C<_get_ts_string> either
-returns a string or calls C<bail()>).  Originally categorized as Critical
-but has zero runtime impact.
+The C<unless (defined($timestamp))> block cannot fire: C<$timestamp> is
+already defined by the C<//= _get_ts_string(...)> line above it, and
+C<_get_ts_string> either returns a string or bails. Categorised as Critical
+when first found, but it has no runtime impact -- hence Info.
 
-=item I-1: Mutable package globals unprotected (package scope, lines 300-307)
+=item I#1: Mutable package globals unprotected (package scope)
 
 C<$user_color_map> and C<@sorted_roles> are declared with C<our> and are
 mutable from any code that can reach the package namespace.
-
-=item I-2: Error message shows $path instead of $target_path (in extract_artifacts_to(), lines 529-530)
-
-B<Resolved> (FWT-726). The error now displays the resolved C<$target_path>.
-
-=back
-
-=head3 Additional Issues (Resolved)
-
-The following issues were discovered during the documentation audit, tracked
-as child tickets of FWT-708, and resolved:
-
-=over
-
-=item L<FWT-723|https://fivetwenty.atlassian.net/browse/FWT-723>: duration() guards missing timestamps (was Major) E<mdash> Fixed
-
-=item L<FWT-724|https://fivetwenty.atlassian.net/browse/FWT-724>: committed() handles vault errors gracefully (was Minor) E<mdash> Fixed
-
-=item L<FWT-725|https://fivetwenty.atlassian.net/browse/FWT-725>: _collect_secrets_from_paths validates paths (was Minor) E<mdash> Fixed
-
-=item L<FWT-726|https://fivetwenty.atlassian.net/browse/FWT-726>: extract_artifacts_to shows resolved path (was Info) E<mdash> Fixed
-
-=item L<FWT-727|https://fivetwenty.atlassian.net/browse/FWT-727>: _build_artifacts_file rejects empty tar (was Minor) E<mdash> Fixed
-
-=item L<FWT-728|https://fivetwenty.atlassian.net/browse/FWT-728>: commit() cleans up temp files on failure (was Major) E<mdash> Fixed
 
 =back
 
 =head1 AUTHOR
 
-Genesis Team E<lt>genesis@starkandwayne.comE<gt>
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
 
 =cut

@@ -46,6 +46,27 @@ summarising its scope.
   # prints 'Partially evaluated environment files only (no kit components)
   #         - will contain any unevaluateable spruce operators'
 
+=head2 source_files
+
+  my $files = $manifest->source_files();
+
+The environment files alone -- no initiation file, no kit files, no cloud
+config, no conclusion.
+
+That is the whole point of this variant: it shows what the operator wrote,
+merged across the environment's inheritance chain, without anything the kit
+contributes. Adding kit files would make it impossible to tell which
+settings came from where.
+
+B<Parameters:> None.
+
+B<Returns:> An arrayref containing the environment files, in merge order.
+
+B<Examples:>
+
+  my $files = $manifest->source_files();
+  # returns [ 'envs/base.yml', 'envs/staging.yml' ] -- environment files only
+
 =head2 merge_options
 
   my $opts = $manifest->merge_options();
@@ -92,11 +113,13 @@ B<Returns:> A two-element list C<($data, $file)> where C<$data> is the
 merged YAML data structure and C<$file> is the path to the written manifest
 file.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

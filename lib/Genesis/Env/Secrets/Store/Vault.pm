@@ -310,4 +310,6 @@ sub remove_all {
 	bail "Remove_all not implemented for Vault store";
 }
 
+# }}}
+
 1;

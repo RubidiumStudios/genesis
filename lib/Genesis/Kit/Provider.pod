@@ -183,6 +183,27 @@ B<Examples:>
   my $p = Genesis::Kit::Provider->default_provider();
   print ref($p); # prints 'Genesis::Kit::Provider::GenesisCommunity'
 
+=head2 opts_slot
+
+  my $slot = Genesis::Kit::Provider->opts_slot();
+
+The key under which this handler's parsed options are stored in the global
+command-options hash.
+
+Subclasses inherit the base value unless they need their options kept
+separate. Because the slot names a shared structure, two providers returning
+the same value would overwrite each other's parsed options.
+
+B<Parameters:> None.
+
+B<Returns:> The slot name string. The base class returns
+C<'kit_provider'>.
+
+B<Examples:>
+
+  my $slot = Genesis::Kit::Provider->opts_slot();
+  # returns 'kit_provider'
+
 =head2 opts
 
   my @option_specs = Genesis::Kit::Provider->opts();
@@ -778,11 +799,13 @@ base class terminates the process via C<bug()>.
 See the individual method entries in L</METHODS> above for the interface
 contract each subclass must honour.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

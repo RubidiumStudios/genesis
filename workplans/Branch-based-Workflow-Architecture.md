@@ -1,7 +1,6 @@
 # Branch-Based Pipeline Architecture
 
 **Status:** Draft
-**Ticket:** [FWT-606](https://fivetwenty.atlassian.net/browse/FWT-606)
 **Last Updated:** 2026-02-20
 
 ---

@@ -1349,6 +1349,7 @@ sub _remove_secrets {
 
 # }}}
 # }}}
+# }}}
 
 1;
 # vim: fdm=marker:foldlevel=1:noet

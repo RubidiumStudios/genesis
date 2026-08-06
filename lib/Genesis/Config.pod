@@ -703,6 +703,75 @@ B<Examples:>
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
 
+=head2 _is_required
+
+    my $bool = _is_required($req, $siblings);
+
+Decides whether a schema field is required, given the sibling values around
+it. Plain function, not a method.
+
+Requirement is not simply a flag -- it can depend on what else is set, so
+that a field is demanded only when it actually applies. The C<$req> value is
+interpreted by its shape:
+
+=over 4
+
+=item A false value
+
+Not required.
+
+=item A number, or any value that is not a reference and contains no
+non-digits
+
+Always required. This is the plain C<1> case.
+
+=item A hashref
+
+Required when B<any> named sibling holds the value the hashref maps it to.
+C<< { type =E<gt> 'vsphere' } >> means "required when the sibling C<type>
+equals C<vsphere>". Multiple keys are an OR, not an AND.
+
+=item A non-numeric string
+
+Required when the named sibling is truthy -- a presence test rather than an
+equality one.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item C<$req>
+
+The schema's requirement value, in any of the forms above.
+
+=item C<$siblings>
+
+Hashref of the values at the same level, which conditional forms are
+evaluated against.
+
+=back
+
+B<Returns:> 1 when required, 0 when not.
+
+B<Examples:>
+
+    my $bool = _is_required(1, \%siblings);
+    # returns 1 -- unconditionally required
+
+    my $bool = _is_required({ type => 'vsphere' }, { type => 'vsphere' });
+    # returns 1 -- the sibling matches
+
+    my $bool = _is_required({ type => 'vsphere' }, { type => 'aws' });
+    # returns 0 -- the sibling has a different value
+
+    my $bool = _is_required('use_tls', { use_tls => 1 });
+    # returns 1 -- named sibling is truthy
+
+    my $bool = _is_required(0, \%siblings);
+    # returns 0
+
 =head2 _contents
 
     $self->_contents
@@ -901,11 +970,13 @@ C<undef> for that key.
 
 =back
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

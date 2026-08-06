@@ -882,9 +882,9 @@ sub _get_kit_releases {
 	for my $release (@src_spruce_blocks, @src_patch_blocks) {
 		if ($release->{name} && $release->{version}) {
 			$releases->{$release->{name}}{$release->{version}} = $release;
-			push @{$release_versions->{$release->{name}}}, {$release->{version} => $release};
+			push @{ $release_versions->{$release->{name}} }, {$release->{version} => $release};
 		} else {
-			push @{$unversioned_releases->{$release->{name}}}, $release;
+			push @{ $unversioned_releases->{$release->{name}} }, $release;
 		}
 	}
 

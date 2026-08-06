@@ -589,7 +589,7 @@ B<Examples:>
   genesis compare-kits --compare-to /tmp/cf-1.5.0.tar.gz
   # prints: Removed Releases: ...  Added Releases: ...
 
-=head1 INTERNAL METHODS
+=head1 INTERNAL FUNCTIONS
 
 These functions are internal to the implementation.  They may change without
 notice and should not be called directly.
@@ -809,6 +809,12 @@ L<Genesis::Top>, L<Genesis::Commands>, L<Service::Github>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
 
 =cut

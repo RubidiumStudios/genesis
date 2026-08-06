@@ -563,6 +563,59 @@ B<Examples:>
   my $ok = $provider->valid_subset(undef);
   # Returns: undef
 
+=head2 cached_or_build
+
+  my $manifest = $provider->cached_or_build(@types);
+
+Returns the first of the named manifest types that has already been built,
+building the first named type only if none of them has.
+
+The point is to avoid paying for a merge that a cheaper variant can answer.
+A caller wanting whichever of several manifests is already to hand names them
+in preference order and gets one without forcing work.
+
+The special type C<deployment> resolves to the environment's actual
+deployment manifest type. Because that can resolve to a type also named
+explicitly -- a non-vaultified environment deploys its C<unredacted>
+manifest -- the list is de-duplicated after resolution, so the same type is
+not considered twice.
+
+A type counts as built when it has either data or a file; a manifest object
+that exists but holds neither is not a cache hit.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@types>
+
+Manifest type names in preference order. At least one is required.
+
+=back
+
+B<Returns:> The first already-built manifest among C<@types>, or a freshly
+built manifest of the first type when none is.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"cached_or_build: at least one manifest type required"> -- raised via
+C<bug()> when called with no types.
+
+=back
+
+B<Examples:>
+
+  my $m = $provider->cached_or_build(qw/entombed unredacted/);
+  # returns the entombed manifest if already built, else unredacted if
+  # that one is, else builds entombed
+
+  my $m = $provider->cached_or_build('deployment');
+  # returns the environment's deployment manifest type, resolved
+
 =head2 vault_paths
 
   my $paths = $provider->vault_paths(%opts);
@@ -708,11 +761,13 @@ B<Examples:>
   );
   # Returns: ($merged_yaml_string, $warnings_string_or_undef)
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

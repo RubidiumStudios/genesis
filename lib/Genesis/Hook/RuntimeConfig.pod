@@ -207,70 +207,127 @@ B<Examples:>
 
 =head2 dryrun
 
-    my $bool     = $hook->dryrun;
-    my $bool     = $hook->interactive;
-    my $bool     = $hook->print;
-    my $bool     = $hook->remove;
-    my $bosh     = $hook->bosh;
-    my $credhub  = $hook->credhub;
-    my $base     = $hook->credhub_base;
+    my $bool = $hook->dryrun;
 
-Accessor methods for the hook's configuration state.
+The dry-run flag. When true, the hook builds and compares configs but does
+not upload or remove anything.
 
-B<dryrun> -- Returns the dry-run flag. When true, the hook builds and
-compares configs but does not upload or remove anything. Defaults to C<0>.
+B<Parameters:> None.
 
-B<interactive> -- Returns the interactive flag. When true, the hook prompts
-for confirmation before each config upload. Defaults to C<0>.
-
-B<print> -- Returns the print flag. When true, the hook prints generated
-runtime config content to the terminal rather than uploading it. Defaults
-to C<0>.
-
-B<remove> -- Returns the remove flag. When true, the hook removes the
-requested runtime configs from the BOSH director rather than generating and
-uploading them. Defaults to C<0>.
-
-B<bosh> -- Returns the BOSH client object initialized during C<init>. When
-the environment is a BOSH director, returns the self-referencing target BOSH
-object; otherwise returns the environment's associated BOSH director client.
-
-B<credhub> -- Returns the C<Service::Credhub> object initialized from the
-BOSH director during C<init>. May be C<undef> if the BOSH director has no
-associated CredHub.
-
-B<credhub_base> -- Returns the CredHub base path for secret entombment, or
-C<undef> if CredHub entombment is not enabled for this environment.
-Entombment requires Genesis feature compatibility of at least C<3.0.0-rc.1>,
-the C<genesis.entomb> manifest key set to a true value, and a CredHub object
-with a base path available.
-
-B<Returns:>
-
-C<dryrun>, C<interactive>, C<print>, and C<remove> return C<1> if the
-corresponding flag is active, C<0> otherwise.
-
-C<bosh> returns the BOSH client object.
-
-C<credhub> returns a C<Service::Credhub> object, or C<undef>.
-
-C<credhub_base> returns the CredHub base path string, or C<undef>.
+B<Returns:> 1 when dry-run is active, 0 otherwise (default 0).
 
 B<Examples:>
 
     if ($hook->dryrun) {
         print "Would upload config (dry-run mode)\n";
     }
-    # Returns: 1 if dry-run mode is active, 0 otherwise
+    # returns 1 when dry-run mode is active, 0 otherwise
+
+=head2 interactive
+
+    my $bool = $hook->interactive;
+
+The interactive flag. When true, the hook prompts for confirmation before
+each config upload.
+
+B<Parameters:> None.
+
+B<Returns:> 1 when interactive, 0 otherwise (default 0).
+
+B<Examples:>
+
+    my $bool = $hook->interactive;
+    # returns 0 unless the caller asked for prompts
+
+=head2 print
+
+    my $bool = $hook->print;
+
+The print flag. When true, generated runtime config content goes to the
+terminal instead of being uploaded. Mutually exclusive with C<remove>;
+C<init> bails if both are set.
+
+B<Parameters:> None.
+
+B<Returns:> 1 when printing, 0 otherwise (default 0).
+
+B<Examples:>
+
+    my $bool = $hook->print;
+    # returns 1 when the caller asked to see the config rather than ship it
+
+=head2 remove
+
+    my $bool = $hook->remove;
+
+The remove flag. When true, the hook removes the requested runtime configs
+from the BOSH director rather than generating and uploading them. Mutually
+exclusive with C<print>.
+
+B<Parameters:> None.
+
+B<Returns:> 1 when removing, 0 otherwise (default 0).
+
+B<Examples:>
+
+    my $bool = $hook->remove;
+    # returns 1 on a removal run
+
+=head2 bosh
+
+    my $bosh = $hook->bosh;
+
+The BOSH client resolved during C<init>. When the environment is itself a
+BOSH director this is the self-referencing target BOSH object; otherwise it
+is the environment's associated director client.
+
+B<Parameters:> None.
+
+B<Returns:> A C<Service::BOSH::Director> object.
+
+B<Examples:>
 
     my $bosh = $hook->bosh;
     my $configs = $bosh->get_config('runtime', 'my-env.dns');
-    # Returns: the BOSH client object
+    # returns the BOSH client object
+
+=head2 credhub
+
+    my $credhub = $hook->credhub;
+
+The C<Service::Credhub> object built from the BOSH director during C<init>.
+
+B<Parameters:> None.
+
+B<Returns:> A C<Service::Credhub> object, or C<undef> when the director has
+no associated CredHub.
+
+B<Examples:>
+
+    my $credhub = $hook->credhub;
+    # returns undef when the director exposes no CredHub
+
+=head2 credhub_base
+
+    my $base = $hook->credhub_base;
+
+The CredHub base path used for secret entombment.
+
+All three conditions must hold or this returns C<undef>: Genesis feature
+compatibility of at least C<3.0.0-rc.1>, the C<genesis.entomb> manifest key
+set to a true value, and a CredHub object that reports a base path. A
+C<undef> here is the signal that entombment is off, not an error.
+
+B<Parameters:> None.
+
+B<Returns:> The base path string, or C<undef>.
+
+B<Examples:>
 
     if (my $base = $hook->credhub_base) {
         print "Entombing secrets under: $base\n";
     }
-    # Returns: '/bosh-genesis-kit/bosh-us-east-1/' or undef
+    # returns '/bosh-genesis-kit/bosh-us-east-1/', or undef when entombment is off
 
 =head2 config_name_for
 
@@ -685,6 +742,13 @@ In interactive mode, first checks that a controlling terminal is available,
 then prompts the operator for confirmation. If the operator declines, returns
 C<undef> without uploading.
 
+The confirmation prompt passes C<< $invert => 1 >> to
+L<Genesis::UI/prompt_for_boolean>, so the truthy branch is the one that
+B<skips>. That reads backwards at a glance, and is deliberate: the branch
+body is the early return, so "yes" falls through to the upload and "no"
+takes the skip. C<remove_configs> uses the same inversion. Only the default
+differs -- upload defaults to yes, removal to no.
+
 Otherwise, calls the BOSH client's C<upload_config> method. On failure, logs
 the error, discards any secrets registered for this build, and returns
 C<undef>. On success, returns C<1>.
@@ -948,53 +1012,13 @@ B<Examples:>
     my @names = $self->_get_req_names('dns');
     # Returns: ('dns')
 
-=head1 KNOWN ISSUES
-
-The following defects are tracked in FWT-751 and are documented here so
-that callers are aware of the current behaviour.
-
-=over 4
-
-=item RC-1 (critical) E<mdash> B<RESOLVED>
-
-C<validate_runtime_config_requests()> lines 171 and 257: both previously
-called C<get_req_names> but only C<_get_req_names> (with underscore prefix)
-exists. Fixed by correcting both call sites to C<_get_req_names>.
-
-=item RC-2 (critical) E<mdash> B<by-design>
-
-C<upload_runtime_config()> line 390: C<prompt_for_boolean($prompt, 1, 1)>
-passes C<$invert=1> as the third argument. This is intentional E<mdash> the
-C<if(true){skip}> control flow pattern requires the inverted return so that
-a "Yes" answer proceeds with the upload and a "No" answer skips it.
-C<remove_configs()> line 447 uses the same pattern. Both call sites are
-correct.
-
-=item RC-3 (smell) E<mdash> B<RESOLVED>
-
-C<remove_configs()> lines 433 and 444: both log messages previously
-contained the misspelling C<"actve">. Fixed by correcting to C<"active">.
-
-=item RC-4 (logic bug) E<mdash> B<RESOLVED>
-
-C<validate_runtime_config_requests()> line 257: the defined-or operator
-C<//> previously evaluated C<@requests> in scalar context (array length),
-which is always defined even when empty. The fallback was therefore never
-reached. Fixed by using an explicit ternary check on C<@requests>.
-
-=item RC-5 (smell) E<mdash> B<RESOLVED>
-
-C<remove_configs()> lines 442-446: the C<else> block previously used space
-indentation while the rest of the file uses hard tabs. Fixed by converting
-to tab indentation consistent with the vim modeline.
-
-=back
-
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

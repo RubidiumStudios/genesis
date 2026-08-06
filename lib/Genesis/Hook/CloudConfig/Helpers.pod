@@ -22,9 +22,7 @@ list is required.
 
 =head1 FUNCTIONS
 
-=over 4
-
-=item B<megabytes($n)>
+=head2 megabytes
 
     my $mb = megabytes($n);
 
@@ -49,7 +47,7 @@ B<Examples:>
     my $mb = megabytes(4096);
     # Returns: 4096
 
-=item B<gigabytes($n)>
+=head2 gigabytes
 
     my $mb = gigabytes($n);
 
@@ -76,13 +74,13 @@ B<Examples:>
     my $mb = gigabytes(1);
     # Returns: 1024
 
-=back
-
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

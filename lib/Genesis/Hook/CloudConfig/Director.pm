@@ -227,6 +227,7 @@ sub _get_bosh_network_data {
 }
 
 # }}}
+# }}}
 1;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

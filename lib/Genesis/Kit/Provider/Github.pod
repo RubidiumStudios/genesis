@@ -249,65 +249,6 @@ B<Examples:>
 Returns the human-readable label string for this provider.  Used in
 status messages and error output to identify the provider.
 
-Also provides several additional read-only delegation accessors that
-forward to the internal C<Service::Github> remote object:
-
-=over 4
-
-=item C<remote>
-
-Returns the C<Service::Github> remote object used to make API calls.
-
-=item C<domain>
-
-Returns the Github domain string (e.g., C<'github.com'>).
-
-=item C<organization>
-
-Returns the Github organization name string.
-
-=item C<credentials>
-
-Returns the credentials value for authenticated API requests, or C<undef>
-if no credentials are configured.  Credentials are sourced from the
-C<GITHUB_USER> and C<GITHUB_AUTH_TOKEN> environment variables by
-C<Service::Github>.
-
-=item C<tls>
-
-Returns the TLS mode string: one of C<'yes'>, C<'no'>, or C<'skip'>.
-
-=item C<check>
-
-Checks connectivity to the provider.  Accepts an optional URL argument;
-defaults to the organization's repository listing URL.  In list context
-returns C<($http_code, $error_message)>; in scalar context returns the
-error message string or C<undef> on success.
-
-=item C<repos_url>
-
-Returns the API URL for listing the organization's repositories.
-Accepts an optional page number for paginated results.
-
-=item C<releases_url>
-
-Returns the API URL for listing releases for a given repository name
-(without the C<-genesis-kit> suffix).  Accepts an optional page number.
-
-=item C<base_url>
-
-Returns the base API URL for the configured Github domain
-(e.g., C<'https://api.github.com'>).
-
-=item C<config>
-
-Returns a hash of configuration values suitable for serialization and
-later reconstruction via L</new>.  Always includes C<type> (C<'github'>)
-and C<organization>.  Includes C<label>, C<domain>, and C<tls> only when
-they differ from their respective defaults.
-
-=back
-
 B<Returns:> A string.  The default value is C<'Custom Github-based Kit Provider'>.
 
 B<Examples:>
@@ -316,17 +257,216 @@ B<Examples:>
       organization => 'my-org',
       label        => 'My Provider',
   );
-  print $provider->label();        # prints 'My Provider'
-  print $provider->domain();       # prints 'github.com'
-  print $provider->organization(); # prints 'my-org'
-  print $provider->tls();          # prints 'yes'
+  print $provider->label();
+  # prints 'My Provider'
 
-  my %cfg = $provider->config();
-  # %cfg = ( type => 'github', organization => 'my-org' )
+=head2 remote
 
-  print $provider->base_url(); # prints 'https://api.github.com'
+  my $remote = $provider->remote();
+
+The C<Service::Github> object that performs the actual API calls.
+
+Everything below delegates to it. The provider holds configuration and
+kit-shaped conventions; the remote holds the HTTP.
+
+B<Parameters:> None.
+
+B<Returns:> The C<Service::Github> object.
+
+B<Examples:>
+
+  my $remote = $provider->remote();
+  # returns the Service::Github object
+
+=head2 domain
+
+  my $domain = $provider->domain();
+
+The Github domain the provider talks to.
+
+B<Parameters:> None.
+
+B<Returns:> The domain string.
+
+B<Examples:>
+
+  print $provider->domain();
+  # prints 'github.com'
+
+=head2 organization
+
+  my $org = $provider->organization();
+
+The Github organization kits are fetched from.
+
+B<Parameters:> None.
+
+B<Returns:> The organization name string.
+
+B<Examples:>
+
+  print $provider->organization();
+  # prints 'my-org'
+
+=head2 credentials
+
+  my $creds = $provider->credentials();
+
+The credentials used for authenticated API requests.
+
+Sourced by C<Service::Github> from C<GITHUB_USER> and C<GITHUB_AUTH_TOKEN>,
+not from provider configuration -- so credentials never land in a repo's
+C<.genesis/config>.
+
+B<Parameters:> None.
+
+B<Returns:> The credentials value, or C<undef> when none are configured.
+Unauthenticated access still works, at Github's lower rate limit.
+
+B<Examples:>
+
+  my $creds = $provider->credentials();
+  # returns undef when GITHUB_AUTH_TOKEN is unset
+
+=head2 tls
+
+  my $tls = $provider->tls();
+
+The TLS mode for API requests.
+
+B<Parameters:> None.
+
+B<Returns:> One of C<'yes'>, C<'no'>, or C<'skip'>.
+
+B<Examples:>
+
+  print $provider->tls();
+  # prints 'yes'
+
+=head2 check
+
+  my $err          = $provider->check($url);
+  my ($code, $err) = $provider->check($url);
+
+Tests connectivity to the provider.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$url>
+
+B<(optional)> The URL to test. Defaults to the organization's repository
+listing.
+
+=back
+
+B<Returns:> In list context, C<($http_code, $error_message)>. In scalar
+context, the error message, or C<undef> on success -- so a scalar-context
+call reads as false when everything is well.
+
+B<Examples:>
+
+  my $err = $provider->check();
+  # returns undef when the provider is reachable
+
+  my ($code, $err) = $provider->check();
+  # returns (404, '...') for an organization that does not exist
+
+=head2 repos_url
+
+  my $url = $provider->repos_url();
+  my $url = $provider->repos_url($page);
+
+The API URL listing the organization's repositories.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$page>
+
+B<(optional)> Page number, for paginated results.
+
+=back
+
+B<Returns:> The URL string.
+
+B<Examples:>
+
   print $provider->repos_url();
   # prints 'https://api.github.com/users/my-org/repos'
+
+=head2 releases_url
+
+  my $url = $provider->releases_url($name);
+  my $url = $provider->releases_url($name, $page);
+
+The API URL listing releases for a kit.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The kit name B<without> the C<-genesis-kit> suffix -- the provider appends
+it, since that suffix is this provider's naming convention rather than part
+of the kit's identity.
+
+=item C<$page>
+
+B<(optional)> Page number.
+
+=back
+
+B<Returns:> The URL string.
+
+B<Examples:>
+
+  print $provider->releases_url('bosh');
+  # prints the releases URL for bosh-genesis-kit
+
+=head2 base_url
+
+  my $url = $provider->base_url();
+
+The base API URL for the configured domain.
+
+B<Parameters:> None.
+
+B<Returns:> The base URL string.
+
+B<Examples:>
+
+  print $provider->base_url();
+  # prints 'https://api.github.com'
+
+=head2 config
+
+  my %cfg = $provider->config();
+
+The provider's configuration, in the form C<new> accepts -- so a provider can
+be serialised into a repo's config and reconstructed later.
+
+B<Only non-default values are included>, beyond the always-present C<type>
+and C<organization>. A config that recorded every default would pin them,
+and a later change to what Genesis defaults to would not reach repositories
+already configured.
+
+B<Parameters:> None.
+
+B<Returns:> A hash with C<type> and C<organization> always, plus C<label>,
+C<domain> and C<tls> when they differ from their defaults.
+
+B<Examples:>
+
+  my %cfg = $provider->config();
+  # returns ( type => 'github', organization => 'my-org' )
+
+  # With a custom label and domain:
+  my %cfg = $provider->config();
+  # returns those two plus label and domain
 
 =head2 kit_names
 
@@ -890,11 +1030,13 @@ B<Examples:>
 
 None at this time.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

@@ -909,6 +909,7 @@ sub _derive_deploy_reason {
 	);
 }
 
+# }}}
 # _format_pipeline_reason - pure formatter for the derived deploy reason {{{
 #
 # Inputs:

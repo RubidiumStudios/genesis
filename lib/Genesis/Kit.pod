@@ -48,6 +48,75 @@ This class is abstract and cannot be instantiated directly. All usable kit
 objects are instances of one of its concrete subclasses. Subclasses must
 implement C<new>, C<id>, C<name>, C<version>, and C<extract>.
 
+=head1 DESIGN CONSIDERATIONS
+
+=head2 Discovering the configs a kit provides
+
+L</provided_configs> reports which BOSH config types a kit contributes by
+testing for the presence of the C<cloud-config> and C<runtime-config>
+hooks. Four approaches were weighed:
+
+=over 4
+
+=item 1.
+
+B<Detect hook presence.> Simple and free -- no subprocess -- but a kit can
+only provide one config per type, since the answer is a yes/no per hook.
+
+=item 2.
+
+B<Invoke each hook with a C<list> argument> and read back the names of the
+configs it would generate. Supports multiple configs per type, but every
+kit must be rewritten to understand the new argument.
+
+=item 3.
+
+B<Run the hooks and parse their output> to infer the configs produced.
+Also supports multiple configs per type, but pays the full generation cost
+just to answer a discovery question, and makes the answer depend on
+parsing.
+
+=item 4.
+
+B<Adopt a C<< <type>-config-<purpose> >> hook naming convention.> Discovery
+becomes a filename scan -- no execution at all -- and each hook yields
+exactly one config, so nothing needs parsing and a single config can be
+regenerated on its own. Costs a kit-side migration.
+
+=back
+
+Option 1 is what ships. It is sufficient for every kit that exists today,
+since none provides more than one config of a given type, and it keeps
+discovery off the subprocess path -- C<provided_configs> is called during
+routine deploys, where options 2 and 3 would add per-kit hook executions to
+answer a question the filesystem can already answer.
+
+Option 4 is the intended successor rather than a hypothetical: it dominates
+2 and 3 on every axis except the migration, and its cost is a one-time kit
+update rather than a recurring per-deploy expense.
+
+=head1 LIMITATIONS
+
+=over 4
+
+=item *
+
+A kit may provide at most one cloud-config and one runtime-config. This is
+a consequence of hook-presence discovery, not a BOSH constraint. Should
+multi-config support arrive, L</provided_configs> is expected to return
+C<< <type>:<purpose> >> identifiers instead of bare types -- a
+return-value change every caller will need to absorb.
+
+=item *
+
+Conditional configs are not expressible. Because discovery only asks
+whether a hook exists, a kit whose hook decides at runtime that no config
+is needed still advertises that config type, and Genesis uploads an empty
+config for it. There is no way for a kit to say "this config applies only
+under these circumstances."
+
+=back
+
 =head1 METHODS
 
 =head2 new
@@ -721,6 +790,34 @@ B<Examples:>
       print "Kit uses CredHub\n";
   }
 
+=head2 provided_configs
+
+  my @configs = $kit->provided_configs();
+
+Returns the list of BOSH config types this kit contributes, determined by
+which config hooks the kit ships. C<'cloud'> is reported when the kit has a
+C<cloud-config> hook, C<'runtime'> when it has a C<runtime-config> hook.
+
+This is the complement of L</required_configs>: C<required_configs> names
+the configs a kit needs to be I<given>, while C<provided_configs> names the
+ones it will I<produce>.
+
+The hooks are never executed -- only their presence is tested -- so this is
+cheap enough to call on every deploy. See L</DESIGN CONSIDERATIONS> for why
+discovery works this way, and L</LIMITATIONS> for what it cannot express.
+
+B<Returns:>
+
+A list containing zero, one, or both of C<'cloud'> and C<'runtime'>, in
+that order. Empty when the kit provides no configs.
+
+B<Examples:>
+
+  my @provided = $kit->provided_configs();
+  # Returns: ('cloud', 'runtime') for a kit shipping both hooks
+  # Returns: ('cloud')            for a kit shipping only cloud-config
+  # Returns: ()                   for a kit shipping neither
+
 =head2 required_configs
 
   my @configs = $kit->required_configs(@hooks);
@@ -1327,11 +1424,13 @@ Launches an interactive shell within the kit workspace environment.
 
 L<Genesis::Kit::Compiled>, L<Genesis::Kit::Dev>, L<Genesis::Base>
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

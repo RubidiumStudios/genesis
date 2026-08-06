@@ -223,6 +223,7 @@ sub bosh_configs_upload {
 	return 1;
 }
 
+# }}}
 sub bosh_configs_list {
 	my ($env, $bosh, %options) = @_;
 	print "Genesis::Commands::Bosh::bosh_configs_list called - TO BE IMPLEMENTED\n";

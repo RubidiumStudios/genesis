@@ -349,5 +349,9 @@ sub _assemble_vault_operator {
 
 
 sub _required_value_keys {undef}
+
+# }}}
+# }}}
+
 1;
 # vim: fdm=marker:foldlevel=1:noet

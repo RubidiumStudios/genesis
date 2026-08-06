@@ -670,7 +670,7 @@ sub environments {
 							info $msg;
 						}
 						$envs_by_deployments{$repo_label}{$env_info->{name}} = $env_info;
-						push @{$deployments_by_name{$env_info->{name}}}, $env_info;
+						push @{ $deployments_by_name{$env_info->{name}} }, $env_info;
 					}
 				}
 			}

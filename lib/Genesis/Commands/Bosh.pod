@@ -384,13 +384,34 @@ B<Examples:>
   # Returns: result from bosh_configs_summary
   genesis my-env bosh-configs summary
 
-=head1 INTERNAL FUNCTIONS
+B<The C<bosh configs> subcommands.>
+The six functions below implement the actions of
+C<genesis E<lt>envE<gt> bosh configs>. They are not called by name from
+anywhere: C<bosh_configs()> builds the name from the action the operator
+typed and dispatches symbolically, so C<upload> reaches
+C<bosh_configs_upload> purely by that construction.
 
-These functions are internal to the implementation.  They are dispatched by
-C<bosh_configs()> and should not be called directly.
+Two consequences follow, and both matter more than they look:
 
-B<Note:> All functions in this section are stub implementations pending
-future development.  Each prints a diagnostic message and returns C<1>.
+=over 4
+
+=item *
+
+B<Their names are load-bearing.> Renaming one, or adding an underscore to
+mark it internal, silently removes a subcommand -- there is no call site to
+update and nothing to fail at compile time.
+
+=item *
+
+B<The action is validated before the symbolic call.> C<bosh_configs()>
+rejects anything outside its list of valid actions first, which is what
+keeps operator input from resolving to an arbitrary function.
+
+=back
+
+B<All six are currently stubs.> Each prints a diagnostic and returns C<1>;
+none touches the director. They are documented for the behaviour they are
+intended to have, with the stub state stated on each.
 
 =head2 bosh_configs_summary($env, $bosh, %options)
 
@@ -604,6 +625,12 @@ L<Genesis::Top>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
 
 =cut

@@ -34,7 +34,7 @@ from C<STDIN> and write to C<STDERR> (or C<STDOUT> for some formatted output).
 All exported functions loop until the user provides a valid response, printing
 an error and re-prompting on invalid input.
 
-=head1 METHODS
+=head1 FUNCTIONS
 
 =head2 prompt_for_boolean
 
@@ -600,7 +600,8 @@ B<Examples:>
     );
     # Returns: e.g. 'staging'
 
-=head1 INTERNAL METHODS
+
+=head1 INTERNAL FUNCTIONS
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
@@ -680,11 +681,14 @@ B<Examples:>
     );
     # Returns: (header => 'Select env:', choices => [...], default => 'dev', ...)
 
-=head1 AUTHORS
+
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

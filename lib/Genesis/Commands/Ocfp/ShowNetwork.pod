@@ -65,6 +65,31 @@ Hash of command-line options:
 
 Returns nothing.  Outputs directly to the terminal.
 
+B<Examples:>
+
+  Genesis::Commands::Ocfp::ShowNetwork::run($env);
+  # prints the full overview for every subnet
+
+  Genesis::Commands::Ocfp::ShowNetwork::run($env, subnet => 'ocfp-0');
+  # prints the same, narrowed to one subnet
+
+  Genesis::Commands::Ocfp::ShowNetwork::run($env, summary => 1);
+  # prints one row per subnet instead of a block each
+
+  Genesis::Commands::Ocfp::ShowNetwork::run($env, json => 1);
+  # prints the whole structure as JSON, for scripted consumers
+
+=head1 INTERNAL FUNCTIONS
+
+Everything below is internal to this command.  None of it is exported or
+intended for use outside C<run>, and all of it may change without notice.
+
+The command runs in three stages, which is the order these appear in:
+B<gather> the network picture from config and exodus, B<filter> it if the
+caller named one subnet, then B<render> it in whichever shape the caller
+asked for.  The C<_display_*> helpers are the shared building blocks the
+renderers draw with.
+
 =head2 _gather_network_data($env)
 
 Collects all network data into a unified hash structure.  Reads the VPC/net
@@ -98,6 +123,18 @@ ranges, named reservations, and claims
 
 =back
 
+Claims are read from the deploying BOSH director's exodus data, and are
+optional: a director that has never deployed anything, or one Genesis cannot
+reach, yields subnets with no C<claims> key rather than an error. The
+allocated and utilisation views simply show nothing in that case.
+
+B<Examples:>
+
+  my $data = _gather_network_data($env);
+  # returns { env_name => 'my-env', ocfp_type => 'mgmt',
+  #           vpc_cidr => '10.0.0.0/20', vpc_info => {...},
+  #           subnets  => { 'ocfp-0' => {...}, 'ocfp-1' => {...} } }
+
 =head2 _compute_cidr_info($cidr)
 
 Computes a sipcalc-style breakdown of a CIDR block string.
@@ -113,6 +150,15 @@ B<Parameters:>
 B<Returns:> A hashref with keys: C<network>, C<broadcast>, C<netmask>,
 C<wildcard>, C<prefix_length>, C<total_addresses>, C<usable_hosts>,
 C<first_host>, C<last_host>.
+
+B<Examples:>
+
+  my $info = _compute_cidr_info('10.0.0.0/24');
+  # returns { network => '10.0.0.0', broadcast => '10.0.0.255',
+  #           netmask => '255.255.255.0', wildcard => '0.0.0.255',
+  #           prefix_length => 24, total_addresses => 256,
+  #           usable_hosts => 254, first_host => '10.0.0.1',
+  #           last_host => '10.0.0.254' }
 
 =head2 _compute_ranges($subnet)
 
@@ -134,6 +180,15 @@ B<Parameters:>
 B<Returns:> A list of two IPv4 range objects: C<($available_range,
 $reserved_range)>.
 
+Note the order -- available first, reserved second. Getting it the wrong way
+round yields a plausible-looking but inverted picture rather than an error.
+
+B<Examples:>
+
+  my ($available, $reserved) = _compute_ranges($subnet);
+  # returns two IPv4::Range objects; $available excludes everything
+  # named in the subnet's reserved-ips
+
 =head2 _filter_by_subnet($data, $name)
 
 Filters the gathered network data to a single subnet.
@@ -151,11 +206,60 @@ B<Parameters:>
 B<Returns:> A new data hashref containing only the requested subnet.  Calls
 C<bail()> if the subnet name is not found.
 
+The original is not modified -- the result is a shallow copy carrying every
+top-level key, with C<subnets> replaced by a single-entry hash. Renderers
+therefore need no filtered/unfiltered distinction; they always receive the
+same shape.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Unknown subnet '%s'. Available subnets: %s"> -- raised via C<bail()>.
+The second C<%s> lists the subnet names that do exist, sorted, so a typo is
+answered with the correct spelling rather than just a rejection.
+
+=back
+
+B<Examples:>
+
+  my $one = _filter_by_subnet($data, 'ocfp-0');
+  # returns the same structure with subnets => { 'ocfp-0' => {...} }
+
+  my $one = _filter_by_subnet($data, 'ocfp-9');
+  # bails: Unknown subnet 'ocfp-9'. Available subnets: ocfp-0, ocfp-1, ocfp-2
+
 =head2 _output_full($data, %opts)
 
 Renders the full network overview: VPC header with CIDR info, followed by
 per-subnet sections showing CIDR breakdown, reserved IPs, allocated ranges,
 available ranges, and a utilization bar.
+
+This is the default view. C<verbose> adds the sipcalc-style CIDR breakdown
+for the VPC and for each subnet, which is otherwise omitted as detail most
+callers do not want.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data> - Network data from C<_gather_network_data>, optionally filtered
+
+=item C<%opts> - Rendering options; C<verbose> is the only one consulted here
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _output_full($data, verbose => 0);
+  # prints the VPC header, then one block per subnet
+
+  _output_full($data, verbose => 1);
+  # prints the same, plus a CIDR breakdown for the VPC and each subnet
 
 =head2 _output_summary($data, %opts)
 
@@ -163,68 +267,370 @@ Renders a compact single-table summary with one row per subnet showing: subnet
 name, CIDR, AZ, reserved count, allocated count, free count, and utilization
 percentage.
 
+One line per subnet, so a whole environment fits on a screen. Use this to
+find the subnet worth looking at, then the full view for that one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data> - Network data from C<_gather_network_data>
+
+=item C<%opts> - Rendering options
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _output_summary($data);
+  # prints one table, one row per subnet, with utilisation percentages
+
 =head2 _output_reserved($data, %opts)
 
 Renders only the reserved IPs for each subnet, with purpose labels derived
 from the C<reserved-ips> key names.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data> - Network data from C<_gather_network_data>
+
+=item C<%opts> - Rendering options
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _output_reserved($data);
+  # prints, per subnet, each named reservation and the IP it holds
 
 =head2 _output_allocated($data, %opts)
 
 Renders only the allocated/claimed IPs for each subnet, showing the claiming
 deployment network name and the IP range claimed.
 
+Claims come from the director's exodus, so this view is empty on an
+environment that has never been deployed -- which is a true answer, not a
+failure to gather.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data> - Network data from C<_gather_network_data>
+
+=item C<%opts> - Rendering options
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _output_allocated($data);
+  # prints, per subnet, which deployment network holds which range
+
 =head2 _output_available($data, %opts)
 
 Renders only the free (unallocated, unreserved) IP ranges for each subnet.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data> - Network data from C<_gather_network_data>
+
+=item C<%opts> - Rendering options
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _output_available($data);
+  # prints the free ranges per subnet -- what is left to allocate
 
 =head2 _output_json($data, %opts)
 
 Serializes the gathered network data as JSON to standard output.  IPv4 range
 objects are converted to their string representations.
 
-=head1 INTERNAL FUNCTIONS
+The one machine-readable view. Because the structure is serialised rather
+than formatted, it carries fields the human views omit, and is the right
+choice for anything scripted.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data> - Network data from C<_gather_network_data>
+
+=item C<%opts> - Rendering options
+
+=back
+
+B<Returns:> Nothing. Writes JSON to standard output.
+
+B<Examples:>
+
+  _output_json($data);
+  # prints {"env_name":"my-env","subnets":{"ocfp-0":{...}},...}
 
 =head2 _display_cidr_section($label, $info)
 
 Renders a labeled sipcalc-style CIDR breakdown block.
 
+B<Parameters:>
+
+=over 4
+
+=item C<$label> - Heading for the block, e.g. the subnet name or C<VPC>
+
+=item C<$info> - A hashref from C<_compute_cidr_info>
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _display_cidr_section('ocfp-0', $subnet->{cidr_info});
+  # prints the network, broadcast, netmask, wildcard and host range
+
+=head2 _display_assignments_section($subnet_data, %opts)
+
+Renders one table covering both kinds of assignment a subnet carries: named
+reservations and deployment claims, tagged C<reserved> and C<allocated>.
+
+They share a table because the question being answered is "what is spoken
+for, and by what?" -- and splitting it made the reader join two tables to
+answer it. Returns without printing when the subnet has neither, so an
+untouched subnet produces no empty heading.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$subnet_data> - A single subnet's hashref from the gathered data
+
+=item C<%opts> - Rendering options
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal, or writes nothing at all when
+there is neither a named reservation nor a claim.
+
+B<Examples:>
+
+  _display_assignments_section($subnet);
+  # prints a table of reserved names and allocated networks
+
+  _display_assignments_section($fresh_subnet);
+  # prints nothing -- no reservations, no claims
+
+=head2 _display_free_section($subnet_data)
+
+Renders the subnet's free range as a single line.
+
+Prints nothing when the free range is empty or absent, so a fully-consumed
+subnet is silent here rather than showing a zero.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$subnet_data> - A single subnet's hashref from the gathered data
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal, or writes nothing when the
+subnet has no free addresses.
+
+B<Examples:>
+
+  _display_free_section($subnet);
+  # prints "  Free: 10.0.0.32-10.0.0.254"
+
+  _display_free_section($full_subnet);
+  # prints nothing -- nothing left free
+
 =head2 _display_reserved_section($subnet_data)
 
 Renders the reserved IPs table for a single subnet.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$subnet_data> - A single subnet's hashref from the gathered data
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _display_reserved_section($subnet);
+  # prints each named reservation and its IP
 
 =head2 _display_allocated_section($subnet_data)
 
 Renders the allocation/claims table for a single subnet.
 
+B<Parameters:>
+
+=over 4
+
+=item C<$subnet_data> - A single subnet's hashref from the gathered data
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _display_allocated_section($subnet);
+  # prints each claiming deployment network and the range it holds
+
 =head2 _display_available_section($subnet_data)
 
 Renders the free IP ranges for a single subnet.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$subnet_data> - A single subnet's hashref from the gathered data
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _display_available_section($subnet);
+  # prints the unreserved, unclaimed ranges
 
 =head2 _display_utilization_bar($subnet_data)
 
 Renders a visual utilization bar showing the proportions of reserved,
 allocated, and free IPs within the subnet.
 
+B<Parameters:>
+
+=over 4
+
+=item C<$subnet_data> - A single subnet's hashref from the gathered data
+
+=back
+
+B<Returns:> Nothing. Writes to the terminal.
+
+B<Examples:>
+
+  _display_utilization_bar($subnet);
+  # prints a proportional bar of reserved / allocated / free
+
 =head2 _netmask_from_prefix($prefix_length)
 
-Computes a dotted-decimal netmask from a prefix length (e.g., 24 yields
-C<255.255.255.0>).
+Computes a dotted-decimal netmask from a prefix length.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$prefix_length> - Integer prefix length, 0 to 32
+
+=back
+
+B<Returns:> The netmask as a dotted-decimal string.
+
+B<Examples:>
+
+  my $mask = _netmask_from_prefix(24);
+  # returns '255.255.255.0'
+
+  my $mask = _netmask_from_prefix(20);
+  # returns '255.255.240.0'
 
 =head2 _wildcard_from_netmask($netmask)
 
-Computes the wildcard mask by inverting each octet of the netmask (e.g.,
-C<255.255.255.0> yields C<0.0.0.255>).
+Computes the wildcard mask by inverting each octet of the netmask.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$netmask> - A dotted-decimal netmask string
+
+=back
+
+B<Returns:> The wildcard mask as a dotted-decimal string.
+
+B<Examples:>
+
+  my $wild = _wildcard_from_netmask('255.255.255.0');
+  # returns '0.0.0.255'
 
 =head2 _extract_named_reserved($reserved_ips)
 
 Extracts individually named IP reservations from the C<reserved-ips> hash.
-Returns an arrayref of C<< {name => $key, ip => $value} >> entries for keys
-that do not match the C<reserved_*>, C<available_*>, C<*_static> patterns.
+
+The C<reserved-ips> hash mixes two things: range-defining keys
+(C<reserved_*>, C<available_*>, C<*_static>) that describe spans, and
+individually named single-address reservations such as C<bosh_ip> or
+C<vault_ip>. Only the latter are of interest here; the former are consumed
+by C<_compute_ranges>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$reserved_ips> - The subnet's C<reserved-ips> hashref
+
+=back
+
+B<Returns:> An arrayref of C<< {name => $key, ip => $value} >> entries.
+Empty arrayref when the subnet names no individual addresses.
+
+B<Examples:>
+
+  my $named = _extract_named_reserved({
+    bosh_ip => '10.0.0.5', reserved_a => '10.0.0.0', reserved_b => '10.0.0.31',
+  });
+  # returns [ { name => 'bosh_ip', ip => '10.0.0.5' } ]
+  # -- reserved_a and reserved_b define a span, not a named address
 
 =head2 _serialize_for_json($data)
 
 Deep-copies the network data structure, converting IPv4 objects to strings and
 simplifying for JSON serialization.
+
+The copy is what makes this safe to call on live data: the IPv4 objects in
+the original are left intact for any renderer that runs afterwards.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data> - The gathered network data
+
+=back
+
+B<Returns:> A plain-data structure containing only strings, numbers, hashes
+and arrays -- no blessed references.
+
+B<Examples:>
+
+  my $plain = _serialize_for_json($data);
+  # returns the same shape with every IPv4 object replaced by its
+  # string form, ready for encode_json
 
 =head1 SEE ALSO
 
@@ -233,6 +639,12 @@ L<Genesis::Env>, L<IPv4>, L<IPv4::Span>, L<IPv4::Range>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
 
 =cut

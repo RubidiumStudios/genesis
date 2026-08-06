@@ -298,6 +298,29 @@ B<Examples:>
   $vault->shutdown;
   # Returns: nothing; vault processes are now terminated
 
+=head2 connect_and_validate
+
+  my $vault = $vault->connect_and_validate();
+
+Sets this vault as the process's current vault and returns it.
+
+Overrides the parent's implementation, which reaches out to check the target
+is up and authenticated. That check is redundant here: C<create> does not
+return until the local vault is running, unsealed and initialised, so a
+C<Service::Vault::Local> in hand is one already known good.
+
+The method is kept so the two vault kinds stay interchangeable -- callers
+should not need to know which they hold.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>.
+
+B<Examples:>
+
+  my $vault = Service::Vault::Local->create('test-env')->connect_and_validate;
+  # returns the vault, now current for the process
+
 =head1 INTERNAL METHODS
 
 These methods are internal to the implementation. They may change without
@@ -455,6 +478,14 @@ The TCP port to test.
 B<Returns:> True if the port could be bound (the test socket is closed
 again immediately); false otherwise.
 
+B<Examples:>
+
+  my $bool = _port_free(8201);
+  # returns true when nothing is listening there
+
+  my $bool = _port_free(8200);
+  # returns false when a vault already holds it
+
 =head2 _shuffled_ports
 
   my @order = _shuffled_ports($min, $max);
@@ -464,7 +495,7 @@ Returns the ports C<$min..$max> as a permutation, in an order that varies
 per process.
 
 Runs Fisher-Yates against a local linear congruential generator rather
-than Perl's C<rand()>, so it neither depends on nor disturbs the
+than Perl's C<rand>, so it neither depends on nor disturbs the
 process-global PRNG. See L</"CONCURRENCY"> for why that matters.
 
 B<Parameters:>
@@ -498,6 +529,12 @@ measured, a plain modulo put 43 of 2000 runs on one starting port against
 an expected 2.5. C<t/unit-tests/service_vault_local-port_selection.t>
 asserts the spread so that a regression here fails rather than quietly
 eroding the property this exists to provide.
+
+B<Examples:>
+
+  my @ports = _shuffled_ports(8200, 8210);
+  # returns all eleven ports in a fork-distinct order,
+  # e.g. (8207, 8200, 8203, ...)
 
 =head2 _find_free_port
 
@@ -533,6 +570,15 @@ B<Limitations:> The result is only meaningful while the startup lock is
 held; on its own this is a check-then-act race, exactly the one it exists
 to work around in safe.
 
+B<Examples:>
+
+  my $port = _find_free_port(8200, 8299);
+  # returns the first port in the shuffled order that binds, e.g. 8237
+
+  my $port = _find_free_port(8200, 8201);
+  # bails when both are taken: No free port for a local vault in the
+  # range 8200-8201
+
 =head2 _lock_local_vault_startup
 
   my $lock = _lock_local_vault_startup();
@@ -545,9 +591,31 @@ alive for the whole critical section.
 Keyed by uid rather than by C<$HOME> because the port race it guards is
 machine-global: per-home locks would not close it. See L</"CONCURRENCY">.
 
-B<Returns:> An open filehandle holding C<LOCK_EX>.
+B<Returns:> An open filehandle holding C<LOCK_EX>. The caller must keep it in
+scope: the lock lasts only as long as the handle does.
 
-B<Errors:> Bails if the lock file cannot be opened or locked.
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Could not open local vault startup lock %s: %s"> -- raised via C<bail()>
+when the lock file cannot be opened. The substitutions are the lock path and
+C<$!>.
+
+=item *
+
+C<"Could not acquire local vault startup lock %s: %s"> -- raised via
+C<bail()> when the file opens but the exclusive lock cannot be taken. Same
+substitutions.
+
+=back
+
+B<Examples:>
+
+  my $lock = _lock_local_vault_startup();
+  # returns an open filehandle; the lock is held until it goes out of scope
 
 =head2 _process_running
 
@@ -614,13 +682,13 @@ safe's internals.
 Genesis's scan walks the port range in a B<pid-varying> order rather than
 linearly, because concurrent invocations otherwise converge: callers
 under different uids hold different startup locks and so cannot see each
-other, and forked children of a C<rand()>-touched parent inherit
+other, and forked children of a C<rand>-touched parent inherit
 identical PRNG state and would each walk the range identically.
 
 The order comes from L</_shuffled_ports>, which runs Fisher-Yates against
-a B<local> generator rather than Perl's C<rand()>. Perl's C<rand()> is
+a B<local> generator rather than Perl's C<rand>. Perl's C<rand> is
 process-global mutable state, which offers only two bad options: seed it
-for a fork-distinct order and every unrelated C<rand()> consumer in the
+for a fork-distinct order and every unrelated C<rand> consumer in the
 process has its stream rewritten underneath it, or leave it alone and
 forked children shuffle identically. A local generator declines the
 choice -- there is nothing to seed and nothing to restore, and a forked
@@ -671,11 +739,13 @@ narrowed or dropped.
 
 =back
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

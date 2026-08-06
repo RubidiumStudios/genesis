@@ -101,18 +101,6 @@ sub default {
 
 # }}}
 # target - resolve an alias or URL to a vault and connect_and_validate {{{
-#
-# Handles the non-interactive case only: given an alias or URL,
-# resolve to exactly one vault matching that URL and connect to it.
-# The lookup is class-agnostic on purpose -- a target passed as
-# --vault URL_OF_LOCAL_VAULT should resolve to the Local vault
-# living at that URL, not silently fail because the caller happens
-# to be Service::Vault::Remote.
-#
-# Subclasses may override to add extra semantics for the no-target
-# case (e.g. Service::Vault::Remote's interactive picker); when they
-# do, they should still delegate here for the target-given path so
-# the class-agnostic contract is preserved.
 sub target {
 	my ($class, $target, %opts) = @_;
 	bail "Service::Vault->target requires an alias or url (use ".
@@ -190,17 +178,6 @@ sub find_single_match_or_bail {
 
 # }}}
 # rebind - callback-context vault lookup by URL or legacy name {{{
-#
-# Bash hooks that shell back into `genesis lookup|has-feature|...`
-# arrive in a subprocess with $ENV{GENESIS_TARGET_VAULT} set by the
-# outer command.  This method resolves that env var to a concrete
-# vault object, regardless of subclass (Remote or Local).  It lives
-# on the base class deliberately: callback callers cannot know which
-# kind of vault the URL points at, and shouldn't have to.  The
-# previous location (Service::Vault::Remote) class-filtered its
-# find() and silently excluded Local vaults, so any callback under
-# a `safe local -m` vault (kit-validator test runs, proto-BOSH dev
-# loops) failed with "not found in .saferc".
 sub rebind {
 	my ($class) = @_;
 
@@ -535,6 +512,7 @@ sub clear {
 	return 1;
 }
 
+# }}}
 # set_path - writes a set of key value pairs to the vault {{{
 sub set_path {
 	my ($self, $path, $data, %opts) = @_;
@@ -668,30 +646,6 @@ sub status {
 
 # }}}
 # max_json_string_value_length - return the per-string JSON value cap {{{
-#
-# Returns the size, in bytes, of the largest single JSON string value
-# Vault will accept on a write request.  Used by chunked-write callers
-# (e.g. Genesis::Env::Deployment::commit) to derive a safe chunk size
-# that keeps each individual `artifacts[N]` value under the cap.
-#
-# This is Vault's `max_json_string_value_length` listener config option,
-# introduced in Vault 1.21.0 (October 2025), with a compiled-in default
-# of 1 MiB.  It applies per-string within the JSON request body - so
-# each key's value must fit, but the total request body has its own
-# (much larger) limit via `max_request_size`.
-#
-# Sources, in priority order:
-#   1. GENESIS_VAULT_MAX_JSON_STRING_VALUE_LENGTH env var (positive int).
-#   2. Vault server query: safe curl --data-only /sys/config/state/
-#      sanitized; parse JSON; read data.listeners[0].config.
-#      max_json_string_value_length.  Returns the value if present;
-#      otherwise falls through (most Vault setups don't explicitly
-#      configure this, so the field is absent and Vault's compiled-in
-#      default applies).  The query is tolerant of failure (permissions,
-#      malformed response, missing field).
-#   3. Compiled-in Vault default: 1 MiB (1024 * 1024 = 1,048,576).
-#
-# Cached on the instance after first lookup.
 sub max_json_string_value_length {
 	my ($self) = @_;
 
@@ -901,6 +855,7 @@ sub _get_targets {
 	my @names = map {$_->{name}} Service::Vault->find(url => $target, @_);
 	return ($target, @names);
 }
+# }}}
 # }}}
 # }}}
 1;

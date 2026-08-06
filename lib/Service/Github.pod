@@ -65,51 +65,33 @@ string). See L</KNOWN ISSUES> for important cache-interaction defects.
 
 =head1 KNOWN ISSUES
 
-The following defects are tracked in FWT-707 and are documented here so
-that callers are aware of the current behaviour.
+Defects that are still present. They are recorded so callers do not build on
+the current, incorrect behaviour.
 
 =over 4
 
-=item GH-1 (critical) E<mdash> B<RESOLVED>
+=item C<tls =E<gt> 'skip'> is honoured by only one method (medium)
 
-The premature early-return cache check in C<get_release_info()> has been
-removed. The correct guard at line 204 now handles all cache-hit logic.
+C<new> accepts C<tls =E<gt> 'skip'> to disable TLS certificate verification,
+but only C<get_user_ssh_keys> acts on it. Every other request -- C<check>,
+C<repos>, C<get_release_info>, and the release-version fetch -- hard-codes
+the underlying skip-verify argument to off, so certificates are always
+verified regardless of the setting.
 
-=item GH-2 (critical) E<mdash> B<RESOLVED>
+The failure mode is quiet: pointing Genesis at an internal GitHub Enterprise
+with a privately-signed certificate, setting the documented option, and
+getting a verification error anyway, with nothing to indicate the option was
+ignored.
 
-All C<@$versions[0]> occurrences replaced with C<$versions-E<gt>[0]>.
+C<tls =E<gt> 'no'> is unaffected -- that is read separately when choosing the
+URL scheme, and does work.
 
-=item GH-3 (medium) E<mdash> B<RESOLVED>
+=item C<get_release_info> returns a different shape on a cache hit (medium)
 
-C<releases()> now dereferences C<repo_names()> correctly via
-C<@{$self-E<gt>repo_names}>.
-
-=item GH-4 (medium) E<mdash> B<RESOLVED>
-
-C<get_release_info()> now checks C<ref($results) eq 'ARRAY'> before
-pushing, and records an error for unexpected non-array responses.
-
-=item GH-5 (medium)
-
-C<new()>: the C<tls =E<gt> 'skip'> option is intended to disable TLS
-certificate verification, but only C<get_user_ssh_keys()> checks
-C<$self-E<gt>{tls}> to set the C<skip_verify> parameter in the underlying
-HTTP call. All other API methods (C<check>, C<repos>, C<get_release_info>)
-hard-code C<0> for the skip_verify argument, so TLS verification is
-always performed regardless of the C<tls> setting.
-
-=item GH-6 (medium)
-
-C<get_release_info()> lines 194 and 205: on a cache hit, the method
-returns only the cached C<\@results> arrayref without a second
-C<\@errors> element. The normal return path (lines 301-305) returns a
-two-element list C<(\@results, \@errors)>. Callers that unpack both
-values on a cache hit will receive C<undef> for C<\@errors>.
-
-=item GH-7 (medium) E<mdash> B<RESOLVED>
-
-C<latest_version_of()> now passes C<include_prereleases> (plural) to
-C<versions()>, matching the key that C<versions()> checks at line 328.
+The normal return path yields a two-element list, results and errors. The
+cache-hit path returns only the results arrayref, so a caller unpacking both
+receives C<undef> for the errors on any call after the first. Error handling
+that works on a cold cache silently stops working on a warm one.
 
 =back
 
@@ -143,8 +125,8 @@ certificate verification). Any other value is normalised to C<'skip'>.
 Defaults to C<'yes'>.
 
 B<Note:> In the current implementation, C<'skip'> is only honoured by
-C<get_user_ssh_keys>; most API methods hard-code TLS verification
-regardless of this setting. See GH-5 in L</KNOWN ISSUES>.
+C<get_user_ssh_keys>; every other API method hard-codes TLS verification
+regardless of this setting. See L</KNOWN ISSUES>.
 
 =item label
 
@@ -550,7 +532,8 @@ and the C<v>-prefixed form (e.g. C<v1.2.3>) are tried.
 
 =back
 
-See L</KNOWN ISSUES> for remaining open defects (GH-5, GH-6, GH-7).
+See L</KNOWN ISSUES> for the cache-hit return-shape defect that affects this
+method.
 
 B<Parameters:>
 
@@ -595,7 +578,7 @@ B<Returns:> A two-element list C<(\@results, \@errors)> on a fresh fetch.
 On a cache hit, only the cached C<\@results> arrayref is returned; if
 assigned to a two-element list, C<\@errors> will be C<undef>. Callers
 should be prepared for C<\@errors> to be either C<undef> or an arrayref.
-See GH-6 in L</KNOWN ISSUES>.
+See L</KNOWN ISSUES>.
 
 In list mode, C<\@results> is an arrayref of release hash references
 (same structure as returned by the GitHub releases API), and is also stored
@@ -966,15 +949,306 @@ B<Examples:>
   my $ok = $gh->validate_ssh_key(undef);
   # Returns: 0
 
+=head2 pulls_url
+
+  my $url = $gh->pulls_url($owner_repo);
+  my $url = $gh->pulls_url($owner_repo, $number);
+
+Builds the pull-requests API URL for a repository, optionally addressing one
+specific pull request.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form.
+
+=item C<$number>
+
+B<(optional)> A pull request number. When given, the URL addresses that pull
+request rather than the collection.
+
+=back
+
+B<Returns:> The URL string.
+
+B<Examples:>
+
+  my $url = $gh->pulls_url('genesis-community/genesis');
+  # returns 'https://api.github.com/repos/genesis-community/genesis/pulls'
+
+  my $url = $gh->pulls_url('genesis-community/genesis', 42);
+  # returns '.../repos/genesis-community/genesis/pulls/42'
+
+=head2 list_prs
+
+  my $prs = $gh->list_prs($owner_repo, %opts);
+
+Lists pull requests for a repository, following GitHub's C<Link> pagination
+header until every page has been collected.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<%opts>
+
+=over 4
+
+=item C<state>
+
+C<open>, C<closed>, or C<all>. Defaults to C<open>.
+
+=item C<base>
+
+Restrict to pull requests targeting this base branch.
+
+=item C<head>
+
+Restrict to pull requests originating from this head branch. GitHub requires
+C<owner:branch> for this filter, so the owner is taken from C<$owner_repo>
+and prefixed automatically -- pass the bare branch name.
+
+=back
+
+=back
+
+B<Returns:> An arrayref of pull request hashrefs as returned by the API.
+Empty arrayref when none match.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for list_prs"> -- raised via C<bail()>.
+
+=item *
+
+C<"Failed to list pull requests for #C{%s}: HTTP %s - %s"> -- raised via
+C<bail()> on any non-200 response.
+
+=item *
+
+C<"Failed to parse pull request list from GitHub: %s"> -- raised via
+C<bail()> when a page body is not valid JSON.
+
+=back
+
+B<Examples:>
+
+  my $prs = $gh->list_prs('genesis-community/genesis');
+  # returns an arrayref of every open pull request
+
+  my $prs = $gh->list_prs('genesis-community/genesis',
+    state => 'all', base => 'main');
+  # returns every pull request targeting main, open or closed
+
+=head2 open_prs
+
+  my $prs = $gh->open_prs($owner_repo, $base);
+  my $prs = $gh->open_prs($owner_repo, $base, $head);
+
+The open pull requests targeting C<$base>, optionally narrowed to those from
+C<$head>.
+
+When C<$head> is given the result is filtered a second time locally, checking
+each returned pull request really does have that head branch. GitHub's own
+C<head> filter is trusted for the query but not for the answer -- pagination,
+fork heads, or an API change could surface unrelated pull requests, and a
+caller acting on the wrong one would push to the wrong branch.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<$base>
+
+The base branch. Required.
+
+=item C<$head>
+
+B<(optional)> The head branch. Pass the bare name.
+
+=back
+
+B<Returns:> An arrayref of pull request hashrefs.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for open_prs"> -- raised via C<bail()>.
+
+=item *
+
+C<"Missing base branch for open_prs"> -- raised via C<bail()> when C<$base>
+is undefined or empty.
+
+=back
+
+B<Examples:>
+
+  my $prs = $gh->open_prs('genesis-community/genesis', 'main');
+  # returns every open pull request targeting main
+
+  my $prs = $gh->open_prs('genesis-community/genesis', 'main', 'my-feature');
+  # returns only those from my-feature, verified head-side
+
+=head2 create_pr
+
+  my $pr = $gh->create_pr($owner_repo, %opts);
+
+Opens a pull request.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<%opts>
+
+=over 4
+
+=item C<head>
+
+The branch holding the changes. Required.
+
+=item C<base>
+
+The branch to merge into. Required.
+
+=item C<title>
+
+The pull request title. Required.
+
+=item C<body>
+
+B<(optional)> The description. Defaults to the empty string.
+
+=back
+
+=back
+
+B<Returns:> The created pull request as a hashref.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for create_pr">, C<"Missing head branch for create_pr">,
+C<"Missing base branch for create_pr">, C<"Missing title for create_pr"> --
+raised via C<bail()> for each absent required value.
+
+=item *
+
+C<"Failed to create pull request for #C{%s}: HTTP %s - %s"> -- raised via
+C<bail()> on any response other than 201.
+
+=item *
+
+C<"Failed to parse create_pr response from GitHub: %s"> -- raised via
+C<bail()> when the response body is not valid JSON.
+
+=back
+
+B<Examples:>
+
+  my $pr = $gh->create_pr('genesis-community/genesis',
+    head  => 'my-feature',
+    base  => 'main',
+    title => 'Add widget support',
+    body  => 'Implements the widget as discussed.',
+  );
+  # returns the created pull request hashref, including its number
+
+=head2 update_pr
+
+  my $pr = $gh->update_pr($owner_repo, $number, %opts);
+
+Updates an existing pull request. Only the keys supplied are sent, so this
+can retitle without touching the body, or close without touching either.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<$number>
+
+The pull request number. Required.
+
+=item C<%opts>
+
+Any of C<title>, C<body>, and C<state>. Keys that are not defined are
+omitted from the request entirely rather than sent as null.
+
+=back
+
+B<Returns:> The updated pull request as a hashref.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for update_pr"> and C<"Missing PR number for update_pr">
+-- raised via C<bail()>.
+
+=item *
+
+C<"Failed to update pull request #%d for #C{%s}: HTTP %s - %s"> -- raised via
+C<bail()> on any non-200 response.
+
+=item *
+
+C<"Failed to parse update_pr response from GitHub: %s"> -- raised via
+C<bail()> when the response body is not valid JSON.
+
+=back
+
+B<Examples:>
+
+  my $pr = $gh->update_pr('genesis-community/genesis', 42,
+    title => 'Add widget support (revised)');
+  # returns the updated pull request, body untouched
+
+  my $pr = $gh->update_pr('genesis-community/genesis', 42, state => 'closed');
+  # returns the closed pull request
+
 =head1 SEE ALSO
 
 L<Service::Vault>, L<Service::BOSH>
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

@@ -570,6 +570,37 @@ subtest 'has_scope - conditional array fragments' => sub {
 	ok(!has_scope('repo'), "negated value comparison does not match");
 };
 
+subtest 'has_scope - fragments are OR-ed, not first-match-wins' => sub {
+	reset_commands_state();
+
+	# The subtest above notes that "both fragments must be conditional to
+	# prevent fallback matching" -- this is the behaviour that forces it,
+	# and until now nothing asserted it.
+	#
+	# A fragment whose CONDITIONS hold but whose SCOPES do not cover the
+	# request does not decide the answer; evaluation continues to the next
+	# fragment.  A bare string fragment is unconditional wherever it sits,
+	# so it is reached even when an earlier conditional fragment matched.
+	define_command('or-scope', {
+		scope   => [
+			['foo', 'env'],
+			'repo',
+		],
+		options => ['foo' => 'Foo mode'],
+	});
+
+	prepare_command('or-scope', '--foo');
+	ok(has_scope('env'),
+		"the conditional fragment matches its own scope");
+	ok(has_scope('repo'),
+		"the bare fragment is still reached -- first-match-wins would say no");
+
+	# And without the option, the conditional fragment is simply skipped.
+	prepare_command('or-scope');
+	ok(!has_scope('env'), "conditional fragment does not apply when --foo is unset");
+	ok( has_scope('repo'), "bare fragment applies regardless");
+};
+
 # ============================================================================
 # Block D: Environment, Help, Constants & at_exit (Subtests 26-36)
 # ============================================================================

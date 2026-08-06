@@ -76,33 +76,6 @@ sub build_cpi_config_for_iaas {
 sub gather_properties {
 	my ($self, @properties) = @_;
 
-	# This routine allows the properties to be specified in simple string form,
-	# then be parsed into the correct instructions for the CPI config.  The
-	# properties are specified in the form of:
-	#   [!]property_name[@alternate_lookup][:default_value|?][>config_path]
-	#
-	# The property_name is required, and assumed to be the lookup key in both the
-	# 'bosh-configs.cpi' environment configuration, and the 'cpi.properties' section
-	# of the OCFP configuration, and is also assumed to be the key under properties
-	# in the CPI configuration.
-	#
-	# The '!' is used to specify that the property is a secret, and should be
-	# entombed in the secrets vault.
-	#
-	# The alternative_lookup is used to specify a different key in the OCFP
-	# configuration, and can be specified more than one by using separating them
-	# with a comma. The first key that is found will be used.
-	#
-	# The default_value is used if the property is not found.  The default will
-	# be used verbatim, so true, false and null will be their yaml equivalents,
-	# so if you want them to be strings, you need to quote them.  Basically,
-	# the default value should be a valid JSON value.  Alternatively, if you only
-	# want to include that property if it is set, you can use a '?'
-	#
-	# The config_path is used to specify the path in the CPI configuration that
-	# the property should be placed.  This is useful for nested properties, or
-	# properties that have different names than the lookup key.
-
 	# Process:  We will use $self->_lookup_cpi_config to get the value for each
 	# property, except for the secrets (leave them as-is on the first pass).  We
 	# first have to split out the alternative lookups and default values, and

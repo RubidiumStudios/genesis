@@ -358,11 +358,13 @@ resolved feature list to Genesis.
 B<Returns:> Whatever value was passed to C<done>, made available via
 C<results>. The return value of C<perform> itself is not used by Genesis.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

@@ -18,9 +18,9 @@ use Genesis;
 # cannot be followed by a semicolon.  The wrap must use a newline
 # separator instead so `{ CMD & }` remains a valid group.
 #
-# This regression bit us during kit-validator (FWT-1019) integration
-# testing: safe local -m never actually started, then the logfile-
-# slurp bailed with "failed to open <path> for reading".
+# This regression bit us during kit-validator integration testing:
+# safe local -m never actually started, then the logfile-slurp bailed
+# with "failed to open <path> for reading".
 
 subtest 'run("cmd &") -- backgrounded command must not blow up shell wrap' => sub {
 	my $marker = workdir()."/bg-marker-$$";

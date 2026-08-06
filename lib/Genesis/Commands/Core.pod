@@ -23,7 +23,7 @@ and installs a new Genesis release from GitHub.  C<hack> is a developer
 inspection tool that evaluates Perl expressions, invokes object methods, or
 calls module functions against a live Genesis object graph.
 
-=head1 METHODS
+=head1 FUNCTIONS
 
 =head2 version(@fields)
 
@@ -353,16 +353,97 @@ B<Examples:>
   # Call a class method
   genesis hack 'Service::Github->new'
 
+=head1 INTERNAL FUNCTIONS
+
+These are internal to this module and may change without notice.
+
+=head2 _detect_feature_compatibility($env_name)
+
+Determines the feature-compatibility floor in effect, and where it came from,
+for display alongside the version.
+
+Resolution order: an environment's own effective minimum version when
+C<$env_name> is given, otherwise the repository's C<minimum_version>. Outside
+a Genesis repository there is nothing to report.
+
+The whole lookup runs inside an C<eval> and any failure is swallowed. That is
+deliberate: this decorates a version string, and a broken repo, an
+unreadable config or an environment that will not load should leave the
+version unadorned rather than prevent the operator from finding out what
+version they are running.
+
+C<0.0.0> is treated as absent rather than as a floor -- it is the sentinel
+for "no opt-in", and reporting it as a feature level would imply a
+constraint that is not there.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env_name>
+
+An environment name, or C<undef> to report the repository-level floor.
+
+=back
+
+B<Returns:> The two-element list C<($level, $source)>, or C<(undef, undef)>
+when no floor applies, when the sentinel is found, or when anything went
+wrong looking.
+
+B<Examples:>
+
+  my ($level, $source) = _detect_feature_compatibility('my-env');
+  # returns ('3.1.0', 'environment')
+
+  my ($level, $source) = _detect_feature_compatibility(undef);
+  # returns ('3.0.0', 'repository') inside a repo with a minimum_version
+
+  my ($level, $source) = _detect_feature_compatibility(undef);
+  # returns (undef, undef) outside a Genesis repository
+
+=head2 _format_feature_level_tail($fc_level, $fc_source)
+
+Formats the pair from C<_detect_feature_compatibility> into the suffix
+appended to a version line.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$fc_level>
+
+The feature level, or C<undef>.
+
+=item C<$fc_source>
+
+Where the level came from -- C<environment> or C<repository>.
+
+=back
+
+B<Returns:> The formatted suffix, or the empty string when C<$fc_level> is
+C<undef>. Returning C<''> rather than C<undef> is what lets callers
+concatenate the result unconditionally.
+
+B<Examples:>
+
+  my $tail = _format_feature_level_tail('3.1.0', 'environment');
+  # returns ' (feature level: v3.1.0 [environment])'
+
+  my $tail = _format_feature_level_tail(undef, undef);
+  # returns '' -- safe to concatenate either way
+
 =head1 SEE ALSO
 
 L<Genesis::Commands>, L<Genesis::Top>, L<Genesis::Env>,
 L<Service::Github>
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

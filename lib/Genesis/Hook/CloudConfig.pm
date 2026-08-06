@@ -44,8 +44,9 @@ sub _as_list {
 }
 
 # }}}
-# ocfp_reserved_ip_target_aliases - kit hook: return scalar or arrayref of
-# alias target names for $target; base returns nothing.
+# ocfp_reserved_ip_target_aliases - kit hook returning alias target names {{{
+# Returns a scalar or arrayref of alias target names for $target; the base
+# class returns nothing.
 sub ocfp_reserved_ip_target_aliases {
 	my ($self, $target) = @_;
 	return;
@@ -285,24 +286,6 @@ sub relinquish_networks {
 # network_definition - Returns the definition for a given network {{{
 sub network_definition {
 
-	# This one is special compared to vm_type_definition, vm_extension_definition,
-	# and disk_type_definition.  It will query the exodus data of the deploying
-	# BOSH director to get the network definition, as well as what is already
-	# allocated, so that allocations can be grown and shrunk as needed.
-	#
-	# It will also determine the base containing network and subnets, to figure
-	# out what is available for allocation, what AZs are available, dns, gateway,
-	# etc.
-	#
-	# It can support a common network definition per network, or support subnets.
-	#
-	# It also supports definition filters for ocfp and non-ocfp deployments, which
-	# generally support different networking allocations.
-	#
-	# Range of networks will be dynamically determined based on the master range,
-	# the existing allocations, and the static values (which can be outside the
-	# allocation mask-generated range(s)).
-
 	my ($self, $target, %rules) = @_;
 	my $strategy = delete($rules{strategy}) // 'generic';
 	my $name_prefix = delete($rules{name_prefix});
@@ -463,44 +446,8 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 	my $definition = $options{dynamic_subnets};
 
-	# OCFP Network Range Calculations
-	# *-mgmt -
-	#   - Owns .0 to .31 of each subnet
-	#   - bosh is deployed to 5th
-	#   - vault is deployed to 6th
-	#   - jumpbox is deployed to 7th
-	#   - concourse web is 8th ip
-	#   - prometheus is 9th ip
-	#   - shield is 10th ip
-	#   - doomsday/ocfp-ui is 11th ip
-	#   - everything else is dynamic
-	#
-	#   To Facilitate this, we need the following in ocfp config:
-	#   - vpc.subnets.<subnet>.reserved-offsets ie '0-5,7-10'
-	#   - vpc.subnets.<subnet>.available-offsets: ie '12-254' or '31-n' n means
-	#     last in cidr block -- if not supplied, will assume all available
-	#     that are not reserved (generally we do NOT want this)
-	#     we technically only need one of these, but both are supported
-	#
-	#   Note: The 'vpc' path was later changed to 'net' in later versions of the
-	#	  OCFP configuration, so we support both paths for backwards compatibility.
-	#
-	# *-ocfp - Owns .32 to .last of each subnet
-
-	# This will dynamically determine the subnets based on the ocfp
-	# configuration in vault, under
-	# /secrets/{params.ocfp_config_path}.{env-name}/{mgmt|ocfp}/bosh/iaas/subnets/<name>/<id>
-	# with `...ips.[mgmt|ocfp].reserved` for the reserved list.
-
-	# Additional OCFP feature under Dynamic Subnets: Logical Subnet Amalgamation
-	#  - If subnets have the same range (which is not allowed by BOSH), we will
-	#    combine them into a single subnet with the same range, and allocate each
-	#    subnet's static IPs from the same range, dynamically determining the reserved
-	#    IP ranges.
-	#  - The subnets that use the same range must also have the same gateway, and amalgamate
-	#    the DNS servers into a single list with no duplicates.
-	#  - The AZ calculation has to also take joined subnets into account, and cannot use different subnet ids,
-	#    (we ignore the subnet id, and just use the network id).
+	# See the POD for the mgmt/.0-.31 vs ocfp/.32-.last split, the
+	# reserved-/available-offsets keys, and Logical Subnet Amalgamation.
 
 	my $strategy = 'ocfp:dynamic_subnets';
 	my $network_id = $config->{name};
@@ -715,6 +662,7 @@ sub get_network_security_groups {
 }
 
 # }}}
+# lookup_az - resolve an availability zone definition by name {{{
 sub lookup_az {
 	my ($self, $az) = @_;
 	bail(
@@ -1077,20 +1025,6 @@ sub _config_definition {
 sub _subnet_definition {
 	my ($self, $target, $subnet_id, $fields, $strategy) = @_;
 
-	# $target is for named subnets, purely a genesis addition.  It can also be
-	# an integer offset of the subnet, or undefined for no subnet (the network
-	# base configuration).  The kit can define either a common configuration
-	# for a single subnet, or a list of 1 or more subnets, each with their own
-	# configuration.  The network_definition method will call this method for
-	# either the network base configuration, or for each subnet in the network,
-	# providing the map as 'common' for the network base, and target relating
-	# to its source.
-	#
-	# The user's environment can override can specify both a default at the
-	# network layer as well as a subnet array for specific over- rides.  The bosh
-	# exodus network data will contain common and/or subnet defaults, as well as
-	# the existing network allocations, which can be used to determine what is
-	# available for allocation, and what is already allocated.
 	my $base_config = {
 		name => $subnet_id, # Not actually a valid property, but we need it for reference?
 		range => $self->_get_network_subnet_property(
@@ -1695,7 +1629,7 @@ sub _process_network_subnets {
 
 		my $subnets = delete($network->{subnets});
 		my %subnets_by_range = ();
-		push(@{$subnets_by_range{$_->{range}}}, $_) for (@$subnets);
+		push(@{ $subnets_by_range{$_->{range}} }, $_) for (@$subnets);
 
 		my @lsa_subnets = ();
 		my %processed_ranges = ();
@@ -1739,8 +1673,8 @@ sub _build_logical_subnet_amalgamation {
 	# Validate that all subnets have the same range and gateway
 	my (%ranges, %gateways) = ();
 	for my $subnet_name (@subnet_names) {
-		push @{$ranges{$subnet_configs_hash{$subnet_name}->{range}}}, $subnet_name;
-		push @{$gateways{$subnet_configs_hash{$subnet_name}->{gateway}}}, $subnet_name;
+		push @{ $ranges{$subnet_configs_hash{$subnet_name}->{range}} }, $subnet_name;
+		push @{ $gateways{$subnet_configs_hash{$subnet_name}->{gateway}} }, $subnet_name;
 	}
 	bail(
 		"Cannot create LSA for subnets with different ranges:\n%s",
@@ -1839,6 +1773,9 @@ sub _standardized_subnet_cidr {
 sub _plural_of {
 	return count_nouns(2, $_[0], suppress_count => 1);
 }
+
+# }}}
+# }}}
 
 1;
 

@@ -104,18 +104,8 @@ sub new {
 	my $timestamp = delete($data{timestamp});  # TODO: Should we default to current time?
 	$timestamp //= _get_ts_string($data{completed}//Time::Piece->new);
 
-	# Validate the input data has all the required fields.  `action`
-	# itself is collected into @missing on line 1 below; use `// ''` on
-	# subsequent eq checks so callers that forgot `action` get the full
-	# missing-field list in the bug() message instead of a stream of
-	# uninit warnings here first.
-	# `reason` stays required for records being written -- whether a
-	# *meaningful* reason is demanded is a separate policy
-	# (Env::deployment_change_reason_required_size_policy, from OCFP or repo
-	# config), but an audit record Genesis writes should always carry the
-	# field.  Stored records are exempt via $from_storage below: the `state`
-	# compat path never supplied one, so requiring it on read made every
-	# legacy record unreadable.
+	# The `// ''` below is load-bearing: without it a caller who omitted
+	# `action` gets uninit warnings instead of the missing-field list.
 	my @missing = grep { !exists $data{$_} } qw(
 		action result genesis_version reason user
 	);
@@ -245,14 +235,7 @@ sub new {
 }
 
 # }}}
-# _normalize_legacy_fields - fold the original flat audit format into the {{{
-# current nested one, in place.  Returns the names of the fields it filled.
-#
-# The oldest records store kit/manifest/user detail as flat snake_cased keys
-# (kit_id, manifest_sha2, deployer) rather than nested hashes.  The same
-# translation already exists in DeploymentManager::synthesize_from_exodus for
-# the top-level exodus blob; doing it here means both paths agree, instead of
-# one understanding the shape and the other treating it as fatal.
+# _normalize_legacy_fields - fold the flat audit format into the nested one {{{
 sub _normalize_legacy_fields {
 	my ($data) = @_;
 	my @synthesized;
@@ -457,7 +440,7 @@ sub user_description {
 }
 
 # }}}
-# user_colorized_description - Return a colorized description of the user who performed the deployment {{{
+# user role colour map - per-role colours and their display order {{{
 our $user_color_map = {
 	shell => 'y',     # shell is sh-yell-ow
 	repo  => 'r',     # repo is red
@@ -467,6 +450,7 @@ our $user_color_map = {
 };
 our @sorted_roles = qw/shell bosh vault repo concourse/;
 
+# }}}
 # user_colorized_roles - Return a colorized string of user roles {{{
 sub user_colorized_roles {
 	my ($self) = @_;
@@ -1066,6 +1050,8 @@ sub _get_ts_string {
 	# FIXME: Support non-UTC timestamps with timezone offsets?
 	bail("Invalid timestamp format: $ts");
 }
+
+# }}}
 
 1;
 # vim: set ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1:

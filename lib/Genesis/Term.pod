@@ -91,7 +91,7 @@ C<"\e[u"> - Restore the previously saved cursor position.
 
 =back
 
-=head1 METHODS
+=head1 FUNCTIONS
 
 =head2 has_tput
 
@@ -763,6 +763,15 @@ B<Examples:>
          . "| ocfp-1 | 10.0.1.0/24 |       42 |\n";
   print tableify($md);
 
+  # prints (heavy rules framing, light rule under the bold header):
+  #
+  #   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #    Subnet  CIDR         Reserved         <- bold
+  #   ───────────────────────────────────
+  #    ocfp-0  10.0.0.0/24        42
+  #    ocfp-1  10.0.1.0/24        42
+  #   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
   # With colour:
   print tableify($md,
       header    => 'Cu',  # bold cyan underline
@@ -840,6 +849,46 @@ If the document contains any hyperlinks, a C<"### Links"> section listing number
 link targets is appended to the output.
 
 Normalizes Windows-style CRLF line endings before processing.
+
+B<Supported syntax and how it renders:>
+
+=over 4
+
+=item Headers
+
+C<H1> double-underlined and bold; C<H2> single-underlined and bold; C<H3>
+bold; C<H4> italic.
+
+=item Emphasis
+
+C<**bold**> and C<*italic*>.  The underscore forms (C<__bold__>,
+C<_italic_>) are B<not> recognised.
+
+=item Bullets
+
+C<+>, C<->, and C<*> all start a bullet.
+
+=item Blockquotes
+
+Indented and italicised.
+
+=item Code
+
+Indented four spaces, rendered light grey on dark grey.
+
+=item Tables and numbered lists
+
+Supported; tables render through C<build_markdown_table()>.
+
+=item Paragraphs
+
+Separated by blank lines and re-wrapped to the render width.
+
+=back
+
+B<Limitations:> An inline C<< <br> >> is not honoured as a line break.  A blank
+line is currently the only way to force one, so single-spaced content written
+with C<< <br> >> will re-wrap as though the break were not there.
 
 B<Parameters:>
 
@@ -1059,7 +1108,125 @@ B<Examples:>
   reset_stdin();
   print $line;  # prints 'test input'
 
-=head1 METHODS (RENDERING HELPERS)
+=head2 hide_cursor
+
+  hide_cursor();
+
+Hides the terminal cursor by writing the DECTCEM hide sequence to STDERR, and
+records that Genesis did so.  Does nothing if the cursor is already known to be
+hidden.
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+  hide_cursor();
+  # writes the hide sequence to STDERR the first time; no output on repeat calls
+
+=head2 show_cursor
+
+  show_cursor();
+
+Restores the cursor, but only when it is known to be hidden.
+
+The guard matters: C<bail()> and C<bug()> call this defensively on the way out,
+and an unpaired restore sequence interleaves with C<prove>'s progress rewriting
+during tests.  Emitting only when there is something to undo keeps that output
+clean.
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+  show_cursor();
+  # writes the show sequence to STDERR only if the cursor was hidden
+
+=head2 mark_cursor_hidden
+
+  mark_cursor_hidden();
+
+Records that the cursor is hidden without emitting anything.
+
+Use this when the hide sequence reached the terminal by another route -- most
+often embedded in a string passed through L<Genesis::Log>'s C<info> -- so that a later
+L</show_cursor> knows there is something to restore.
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+  info($ansi_hide_cursor . "working...");
+  mark_cursor_hidden();
+  # sets internal state only; no output
+
+=head2 mark_cursor_visible
+
+  mark_cursor_visible();
+
+The inverse of L</mark_cursor_hidden>: records that the cursor is visible
+without emitting anything, so a subsequent L</show_cursor> becomes a no-op.
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+  mark_cursor_visible();
+  # sets internal state only; no output
+
+=head2 terminal_colors
+
+  my $colors = terminal_colors();
+
+Probes the terminal emulator for the foreground and background colours it is
+actually using, via OSC 10 and OSC 11, and returns them in several forms.
+
+Use this to adapt output to the user's colour scheme rather than assuming one.
+The same palette that is legible on a dark background is often unreadable on a
+light one.
+
+B<Returns:> A hashref, or C<undef> when the probe fails.
+
+  {
+    fg => {
+      rgb    => [$r, $g, $b],       # floats, 0..1
+      rgb256 => [$R, $G, $B],       # ints,   0..255
+      hex    => "RRGGBB",
+      ansi   => "\e[38;2;R;G;Bm",   # SGR set-foreground, truecolor
+      simple => {
+        index  => 0..7,             # basic 8-colour index
+        bright => 0|1,              # 1 == aixterm "highcolor" (8..15)
+        ansi   => "\e[3Nm" | "\e[9Nm",
+      },
+    },
+    bg => {                         # same shape as fg
+      ...
+      ansi   => "\e[48;2;R;G;Bm",   # SGR set-background, truecolor
+      simple => { ..., ansi => "\e[4Nm" | "\e[10Nm" },
+    },
+    luma    => $y,                  # BT.601 luminance of bg, 0..1
+    is_dark => 0|1,                 # $luma < 0.5
+  }
+
+The C<simple> sub-hash is the nearest basic-palette approximation, for
+terminals without truecolor support.  C<is_dark> is the value most callers
+want: it answers "should I pick the light or dark variant of my theme".
+
+B<Examples:>
+
+  my $c = terminal_colors();
+  my $accent = ($c && $c->{is_dark}) ? 'Y' : 'y';
+
+B<Limitations:> Returns C<undef> when F</dev/tty> is not accessible, or when
+the terminal does not reply within the timeout -- dumb terminals, cron and CI,
+and older emulators that ignore OSC 10/11.  Callers must handle C<undef>; there
+is no fallback palette.
+
+The result is memoised per process.  Raw-mode I/O against F</dev/tty> is
+comparatively expensive, and the palette does not change mid-run.  A terminal
+whose theme is switched while Genesis is running will therefore keep reporting
+the colours it had at first call.
+
+=head1 FUNCTIONS (RENDERING HELPERS)
 
 The following methods render individual Markdown block types. They are called by
 C<process_markdown_block()> and C<render_markdown()>, but may also be used directly
@@ -1223,10 +1390,116 @@ B<Examples:>
   print $custom;
   # Prints: '    Note'
 
-=head1 INTERNAL METHODS
+=head1 INTERNAL FUNCTIONS
 
 These methods are internal to the implementation. They may change without notice
 and should not be called directly.
+
+=head2 _stty_size
+
+  my $size = _stty_size();
+
+Returns C<[$rows, $cols]> from C<stty size>, or C<undef> when the size cannot
+be determined.  Memoised per process.
+
+Requires C<TERM> to be set before shelling out at all: pseudo-ttys in CI will
+answer C<stty> with a plausible-looking but meaningless size, and a wrong width
+is worse than no width because callers cannot tell it is wrong.
+
+B<Returns:> An arrayref C<[$rows, $cols]>, or C<undef>.
+
+=head2 _probe_terminal_colors
+
+  my $colors = _probe_terminal_colors();
+
+Performs the OSC 10 / OSC 11 query behind L</terminal_colors>.  Puts the
+terminal into raw mode, writes the queries, reads the replies, and restores the
+original C<stty> state.
+
+Under tmux the queries are wrapped in a passthrough sequence, because tmux
+intercepts OSC by default and the reply must be routed back through it.
+
+B<Returns:> The colour hashref described under L</terminal_colors>, or C<undef>
+when F</dev/tty> cannot be opened, C<stty> state cannot be captured, or the
+terminal does not reply.
+
+B<Examples:>
+
+  my $c = _probe_terminal_colors();
+  # returns the colour hashref, or undef on a terminal that will not answer
+
+B<Limitations:> Callers should use L</terminal_colors> instead, which memoises.
+This does the work every time.
+
+The C<$ps> parameter and C<timeout> error reported against this method by
+C<pod-validate> belong to nested closures -- the per-query helper and the
+C<SIGALRM> handler -- not to this method's own signature.
+
+=head2 _build_color_entry
+
+  my $entry = _build_color_entry($resp, $sgr);
+
+Converts one OSC colour reply into the per-channel hash used by
+L</terminal_colors>, deriving the 0..1 floats, the 0..255 ints, the hex form,
+the truecolor SGR, and the nearest basic-palette approximation.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$resp>
+
+The raw OSC reply string.
+
+=item C<$sgr>
+
+The SGR introducer to build against -- C<38> for foreground, C<48> for
+background.
+
+=back
+
+B<Returns:> A hashref, or C<undef> when the reply cannot be parsed.
+
+B<Examples:>
+
+  my $fg = _build_color_entry("\e]10;rgb:ffff/ffff/ffff\e\\", 38);
+  # returns the fg entry for white
+
+=head2 _nearest_ansi16
+
+  my $index = _nearest_ansi16($r, $g, $b);
+
+Returns the index of the closest colour in the 16-colour palette, by squared
+Euclidean distance in RGB.
+
+B<Returns:> An integer 0..15.  Values 8..15 are the bright (aixterm) half.
+
+B<Examples:>
+
+  _nearest_ansi16(255, 0, 0);
+  # returns 9  (bright red)
+
+B<Limitations:> Distance is measured in RGB, which does not match perceived
+difference.  Adequate for choosing between sixteen widely-spaced palette
+entries; not a general colour-matching routine.
+
+=head2 _parse_osc_rgb
+
+  my $rgb = _parse_osc_rgb($resp);
+
+Extracts the three channels from an C<rgb:RRRR/GGGG/BBBB> OSC reply and
+normalises them to floats in 0..1.
+
+Channel width varies by terminal -- one to four hex digits each -- so each is
+scaled by its own maximum rather than an assumed 16-bit range.
+
+B<Returns:> An arrayref of three floats, or C<undef> when the reply does not
+match.
+
+B<Examples:>
+
+  _parse_osc_rgb('rgb:0000/8080/ffff');
+  # returns [0, 0.502, 1]
 
 =head2 _color
 
@@ -1403,11 +1676,13 @@ B<Examples:>
   my $row = _multiline_row(['Alice', '30'], [10, 5], ['l', 'r']);
   # Returns one or more lines of box-bordered text for the row
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

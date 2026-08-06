@@ -52,6 +52,33 @@ B<Examples:>
     my $local_vault = $manifest->local_vault;
     # Returns: a Service::Vault::Local instance for the current environment
 
+=head2 credhub_target
+
+  my $credhub = $manifest->credhub_target();
+
+The CredHub that entombed secrets are written to.
+
+Defaults to the environment's own CredHub -- the one belonging to the
+director that deploys it, or the environment's own when it I<is> a director.
+
+B<This is the override point for self-targeting.>
+C<Genesis::Env::Manifest::EntombedSelf> overrides it to reach the
+newly-deployed environment's CredHub instead, so post-deploy uploads carry
+references the new director can resolve rather than ones only its parent can.
+
+B<Parameters:> None.
+
+B<Returns:> A C<Service::Credhub> object.
+
+B<Examples:>
+
+  my $credhub = $manifest->credhub_target();
+  # returns the deploying director's credhub
+
+  # In EntombedSelf:
+  my $credhub = $manifest->credhub_target();
+  # returns the deployed environment's own credhub
+
 =head1 INTERNAL METHODS
 
 These methods are internal to the implementation. They may change without
@@ -88,10 +115,24 @@ nothing to entomb.
 
 B<Errors:>
 
-Calls C<bail> if any individual secret fails to round-trip through Credhub
-correctly. The error message advises the operator to retry without the
-C<--entomb> option (or with C<--no-entomb> when deploying) and directs them
-to the Genesis GitHub issue tracker (C<$Genesis::GITHUB>).
+=over 4
+
+=item *
+
+C<"Manifest references vault path #C{%s:%s} which has no value in the vault -- populate it (or fix the reference) and redeploy."> --
+raised via C<bail()> when the manifest names a vault path and key that holds
+nothing. Caught here rather than at deploy time because an empty value would
+entomb as an empty credential, and the deployment would fail somewhere far
+less informative. The substitutions are the path and the key.
+
+=item *
+
+C<"Failed to entomb one or more secrets into Credhub.  This may be due to a bug in Genesis, communication or authentication error with Credhub, or a value that Credhub can't support."> --
+raised via C<bail()> when a secret does not round-trip correctly. The message
+advises retrying without C<--entomb> (or with C<--no-entomb> when deploying)
+and points at the Genesis issue tracker.
+
+=back
 
 B<Examples:>
 
@@ -182,6 +223,17 @@ credential name, or C<undef> if no prior value existed.
 
 =back
 
+B<Examples:>
+
+  my ($var, $sha, $action, $color, $existing)
+    = $manifest->_entomb_secret_for_vault(
+        $local_vault, $secret, $key, $value, $credhub, $cred_path, $prefix);
+  # returns ('/genesis-entombed/env/secret_key', 'a1b2c3d4',
+  #          'new', 'gi', undef)
+
+  # Where the credential already holds the same value:
+  # returns $action of 'exists' and $existing equal to $value
+
 =head2 _entomb_secret
 
     my ($credhub_var, $secret_sha, $action, $color, $existing) =
@@ -223,11 +275,23 @@ B<Returns:> A five-element list identical in structure to the return of
 L<"_entomb_secret_for_vault">: C<($credhub_var, $secret_sha, $action,
 $color, $existing)>.
 
-=head1 AUTHORS
+B<Examples:>
+
+  my ($var, $sha, $action, $color, $existing)
+    = $manifest->_entomb_secret($credhub, $path, $key, $value);
+  # returns ('/genesis-entombed/...', 'a1b2c3d4', 'added', 'G', undef)
+
+  # Re-entombing an unchanged value:
+  my ($var, $sha, $action) = $manifest->_entomb_secret(...);
+  # returns $action of 'unchanged' -- the credential was already correct
+
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

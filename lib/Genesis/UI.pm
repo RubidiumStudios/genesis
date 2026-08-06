@@ -186,6 +186,7 @@ sub prompt_for_boolean {
 		error "#r{Invalid response:} you must specify y, yes, true, n, no or false";
 	}
 }
+# prompt_for_choices - select between $min and $max options, returning an arrayref
 sub prompt_for_choices {
 	my ($prompt, $choices, $min, $max, $labels, $err_msg) = @_;
 
@@ -233,21 +234,7 @@ sub prompt_for_choices {
 
 }
 
-# This is a wrapper around prompt_for_choice that allows for multiple selections
-# to be made.  It will return an arrayref of the selected choices.
-# The $min and $max parameters are optional, and will default to 0 and the
-# number of choices, respectively.
-# The $labels parameter is also optional, and will default to the choices
-# themselves.  The labels has to be an array ref, composed of elements that
-# are either strings or array refs.  If the element is an array ref, the first
-# element is the label displayed in the choice list, and the second element is
-# the label displayed on the selecdtion lineafter the user has entered a value.
-# If the label matches the pattern "---(.*)---", it will be treated as a
-# section header, and will be displayed as such, without a selection number.
-# The $err_msg parameter is optional, and will default to a generic error
-# message.
-# The $object_description parameter is optional, and will default to "choice".
-#
+# prompt_for_choice - select exactly one option, with an Enter-selects-default
 sub prompt_for_choice {
 	my ($prompt, $choices, $default, $labels, $err_msg, $object_description) = @_;
 
@@ -360,31 +347,7 @@ sub prompt_for_block {
 	return __prompt_for_block(@_);
 }
 
-# prompt_for_choice - Allows selecting a single option from a list of choices
-#
-# This function can be called in two ways:
-#
-# 1. Traditional (backwards compatibility):
-#    prompt_for_choice($prompt, $choices, $default, $labels, $err_msg, $object_description)
-#
-# 2. Options-based:
-#    prompt_for_choice(
-#       header => "Header text",            # Prompt text displayed above choices
-#       choices => $choices,                # Array of choices (strings or hashrefs)
-#                                           # If hashrefs, expected keys:
-#                                           #  - value: The return value (required, unless separator/section)
-#                                           #  - label: Display text in menu (will use value if not provided)
-#                                           #  - summary: Text displayed after selection (will use label if not provided)
-#                                           #  - section: Section header (string - optional)
-#                                           #  - separator: Separator line (boolean - optional)
-#       default => $default,                # Default choice (value or index)
-#       error => "Custom error message",    # Error message on invalid input
-#       description => "item",              # Object type in prompt (default: "choice")
-#       compact => 1,                       # Display choices in columns (default: 0)
-#       paginate => 1,                      # Enable pagination with N/P commands (default: 0)
-#       none => 1,                          # Allow no selection (default: 0)
-#     )
-#
+# new_prompt_for_choice - single-choice selector taking named options, or legacy positional args
 sub new_prompt_for_choice {
 	my %options = ();
 	my @valid_options = qw(

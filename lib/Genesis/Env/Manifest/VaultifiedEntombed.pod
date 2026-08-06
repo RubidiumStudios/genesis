@@ -111,6 +111,47 @@ B<Examples:>
   my @files = $manifest->source_files();
   # Returns: ('/path/to/init.yml', '/path/to/kit.yml', ...)
 
+=head2 deployable
+
+  my $bool = $manifest->deployable();
+
+Whether this manifest variant can be handed to BOSH as-is.
+
+True here: the vaultified secrets have been entombed into Credhub, leaving
+C<((credhub-var))> references the director resolves at deploy time.
+
+B<Parameters:> None.
+
+B<Returns:> 1.
+
+B<Examples:>
+
+  my $bool = $manifest->deployable();
+  # returns 1
+
+=head2 source_files
+
+  my @files = $manifest->source_files();
+
+The files merged to produce this manifest, in merge order: the initiation
+file, the kit's files, the cloud config, the environment files, and the
+conclusion file.
+
+Cloud config is required here rather than optional -- a deployable manifest
+needs the IaaS shape resolved, so a missing cloud config is an error rather
+than a section left unfilled.
+
+B<Parameters:> None.
+
+B<Returns:> The list of file paths, in merge order. Note this returns a
+list, where the sibling C<Entombed> returns an arrayref.
+
+B<Examples:>
+
+  my @files = $manifest->source_files();
+  # returns the initiation file, kit files, cloud config,
+  # environment files and conclusion file, in that order
+
 =head2 redacted
 
   my $redacted = $manifest->redacted();
@@ -277,11 +318,13 @@ L<Genesis::Env::Manifest::_vaultify_mixin>,
 L<Genesis::Env::Manifest::Vaultified>,
 L<Genesis::Env::Manifest::Entombed>
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

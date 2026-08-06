@@ -70,6 +70,29 @@ C<pr/E<lt>envE<gt>> branches and PR creation still go through
 genesis because there is no concourse resource for creating GitHub
 pull requests).
 
+=head1 DESIGN CONSIDERATIONS
+
+=head2 Why this is a module and not part of the pipelines command
+
+Propagation began inside C<Genesis::Commands::Pipelines> and was extracted
+here for two reasons.
+
+Two callers need the same execution path: the C<genesis propagate> command,
+and the Manual provider's auto-trigger at the end of a deploy.  Leaving the
+logic in a command module would have meant the provider either shelling out
+to a command or keeping a second copy.
+
+The rolling-branch decision -- direct commit versus C<pr/E<lt>envE<gt>>
+branch, and whether an existing PR already carries the change -- is the part
+most likely to be wrong and the hardest to observe in a live pipeline run.
+Separating it from command dispatch is what allows it to be exercised
+directly in tests.
+
+The split within this module follows the same reasoning:
+L</compute_propagation_targets> is pure so the decision can be tested
+without a git tree, and L</propagate_envs> holds everything that touches
+git or the GitHub API.
+
 =head1 FUNCTIONS
 
 =head2 compute_propagation_targets
@@ -89,6 +112,20 @@ of its propagation-diff files overlap with any ancestor's
 undeployed-set.  Descendants of entry-point envs wait for the
 cascade.
 
+Pure function: it performs no git access and no I/O, deciding
+entirely from the topology and diffs it is handed.  Callers are
+responsible for gathering those.
+
+The two diffs answer different questions, and conflating them is
+the mistake this signature is shaped to prevent.  C<env_changed>
+asks "what is on control that this env's branch lacks", and drives
+what gets copied.  C<env_undeployed> asks "what has this env not
+yet B<deployed>" -- its branch may already carry the file while
+exodus still records an older commit -- and is what identifies an
+ancestor sitting on an in-flight propagation.  A file must not
+cascade past an ancestor that has received it but not yet deployed
+it, or commits stop travelling as a unit.
+
 This ancestor-overlap filter is what prevents the
 fast-forward-append cherry-pick problem in C<propagate_envs>: by
 the time a propagation target reaches the rolling C<pr/E<lt>envE<gt>>
@@ -96,6 +133,8 @@ branch, it touches files that are disjoint from anything already
 queued on the branch from prior propagations.
 
 B<Parameters:>
+
+Named arguments, collected as C<%args>:
 
 =over 4
 
@@ -130,7 +169,22 @@ DAG.
 =back
 
 B<Returns:> hashref of C<{ env_name =E<gt> \@files_to_propagate }>.
-Only direct entry-point envs appear.
+
+B<Examples:>
+
+  my $targets = compute_propagation_targets(
+      dag_order   => ['staging', 'prod'],
+      parent_of   => {prod => 'staging'},
+      env_changed => {
+          staging => ['ops/scale.yml'],
+          prod    => ['ops/scale.yml'],
+      },
+  );
+  # returns { staging => ['ops/scale.yml'] }
+  # prod is withheld: its parent staging is an entry point for the
+  # same file, so prod waits for the cascade
+
+Only direct entry-point envs appear in the result.
 
 =head2 propagate_envs
 
@@ -189,6 +243,8 @@ uniqueness for open PRs.
 =back
 
 B<Parameters:>
+
+Named arguments, collected as C<%args>:
 
 =over 4
 
@@ -292,6 +348,168 @@ command) decide whether to bail on errors or proceed.  Push and PR
 API blocks are skipped entirely when C<errors> is non-empty, so the
 remote never sees partial state from a failed propagation event.
 
+B<Errors:>
+
+=over 4
+
+=item C<"propagate_envs: 'git' is required">
+
+Dies when C<git> is absent.  This is a programming error rather than a
+per-env failure, so it is thrown rather than collected into C<errors>
+-- without a working tree there is nothing to iterate.
+
+=back
+
+B<Examples:>
+
+  my $result = propagate_envs(
+      git           => $git,
+      targets       => \@targets,
+      control       => 'control',
+      control_sha   => $sha,
+      control_short => $short,
+      dry_run       => 1,
+  );
+  # returns { propagated => 3, skipped_idempotent => [], errors => [] }
+
+=head1 INTERNAL FUNCTIONS
+
+These are internal to the implementation.  They may change without notice
+and should not be called directly.
+
+=head2 _propagate_one_direct_env
+
+  _propagate_one_direct_env(%args);
+
+Applies one target's propagation straight onto its own branch, for targets
+without C<require_pr>.  Takes C<git>, C<env_name>, C<control_sha>,
+C<control_short> and C<detail>.
+
+B<Returns:> nothing meaningful; the branch is left with the commit applied.
+
+B<Examples:>
+
+  _propagate_one_direct_env(
+      git => $git, env_name => 'staging',
+      control_sha => $sha, control_short => $short, detail => $detail,
+  );
+  # no return value; commits onto the staging branch
+
+=head2 _propagate_one_pr_env
+
+  _propagate_one_pr_env(%args);
+
+Applies one target's propagation onto a rolling C<pr/E<lt>envE<gt>> branch and
+resolves what to do with its pull request.  Takes the same arguments as
+L</_propagate_one_direct_env> plus C<github> and C<owner_repo>.
+
+This is where the decision tree documented under L</propagate_envs> lives:
+count open PRs, then branch fresh, append to the existing one, or full-skip
+when the branch already carries this control SHA.
+
+B<Returns:> a result hashref describing what was queued for the batched push
+and PR phase.
+
+B<Examples:>
+
+  my $r = _propagate_one_pr_env(git => $git, github => $gh, ...);
+  # returns a hashref noting the queued branch and PR action
+
+=head2 _apply_propagation_commit
+
+  _apply_propagation_commit($git, $env_name, $control_sha, $control_short, $detail);
+
+Checks the changed files out of the control commit, removes the deleted ones,
+and commits with the C<[pipeline] control@E<lt>shaE<gt> -E<gt> E<lt>envE<gt>>
+subject.
+
+That subject is not cosmetic -- L</_pr_branch_has_control_sha> parses it to
+decide idempotency, so its format is load-bearing.
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+  _apply_propagation_commit($git, 'staging', $sha, 'a1b2c3d', $detail);
+  # no return value; commits "[pipeline] control@a1b2c3d -> staging"
+
+=head2 _render_detail_lines
+
+  _render_detail_lines($git, $detail);
+
+Prints the per-file lines describing a propagation, resolving renames back to
+their original path so a rename reads as one line rather than an unrelated
+add and delete.  Paths are shown git-prefix-stripped.
+
+B<Returns:> nothing; output goes to the log.
+
+B<Examples:>
+
+  _render_detail_lines($git, $detail);
+  # writes one line per changed, deleted or renamed file
+
+=head2 _report_dry_run
+
+  _report_dry_run($git, $env_name, $require_pr, $detail, $control_short);
+
+Reports what a propagation would do without performing it.
+
+B<Returns:> nothing; output goes to the log.
+
+B<Examples:>
+
+  _report_dry_run($git, 'staging', 0, $detail, 'a1b2c3d');
+  # prints "staging: 3 files to propagate" and the per-file lines
+
+=head2 _pr_branch_has_control_sha
+
+  my $bool = _pr_branch_has_control_sha($git, $branch, $control_short);
+
+Returns true when the branch's most recent commit subject already references
+this control SHA -- the idempotency check that lets a re-run skip an env
+entirely rather than stacking a duplicate commit.
+
+B<Returns:> C<1> or C<0>.  C<0> when the branch does not exist or has no
+commits.
+
+B<Examples:>
+
+  _pr_branch_has_control_sha($git, 'pr/staging', 'a1b2c3d');
+  # returns 1 when pr/staging's newest subject names control@a1b2c3d
+
+B<Limitations:> Inspects only the newest commit.  A propagation for this SHA
+buried under a later commit is not detected, and the env is propagated again.
+
+=head2 _build_pr_body
+
+  my $body = _build_pr_body($env_name, $control);
+
+Builds the pull-request body for a rolling branch.  Deliberately generic: the
+branch accumulates propagations over time, so the body cannot enumerate them
+and points at the commit history instead.
+
+B<Returns:> the body string.  C<$control> defaults to C<'control'>.
+
+B<Examples:>
+
+  my $body = _build_pr_body('staging');
+  # returns "Aggregates pending propagations from `control` to `staging`. ..."
+
+=head2 _find_or_open_pr
+
+  my $pr = _find_or_open_pr($github, $owner_repo, $pr_branch, $env_name,
+                            $title, $body, $existing);
+
+Updates C<$existing> when supplied, otherwise opens a new pull request.
+
+B<Returns:> the pull-request hashref from the GitHub API.
+
+B<Examples:>
+
+  my $pr = _find_or_open_pr($gh, 'acme/widgets', 'pr/staging',
+                            'staging', $title, $body, undef);
+  # returns the newly created PR; pass $existing to update instead
+
 =head1 LIMITATIONS
 
 =head2 GitHub-only for PR-based propagation
@@ -358,16 +576,17 @@ which expect to push the rendered manifest to C<E<lt>envE<gt>>.
 
 C<manifest_store=exodus> is unaffected (writes to vault, not git).
 
-Tracked in FWT-988; design discussion pending.  Workaround:
-configure C<manifest_store=exodus> on envs with
-C<require_pr =E<gt> 1>.
+No resolution is settled yet.  Until one is, configure
+C<manifest_store=exodus> on envs with C<require_pr =E<gt> 1>.
 
 =head1 AUTHOR
 
-Originally part of C<Genesis::Commands::Pipelines>; extracted into
-C<Genesis::CI::Propagation> in FWT-944 to share execution between
-the C<genesis propagate> command and the Manual provider's deploy
-auto-trigger (FWT-987), and to make the rolling-branch decision
-tree unit-testable in isolation.
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
 
 =cut

@@ -154,7 +154,7 @@ our $prompt_handlers = {
 };
 
 # }}}
-
+# ui_prompt_for - prompt for a value of the given type and store it {{{
 sub ui_prompt_for {
 
 	command_usage(1) if @_ < 2; # prompt is optional, type and path are not

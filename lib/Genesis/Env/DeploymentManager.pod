@@ -65,7 +65,8 @@ manager will track.
 
 B<Returns:> A new C<Genesis::Env::DeploymentManager> instance.
 
-  # Example
+B<Examples:>
+
   my $mgr = Genesis::Env::DeploymentManager->new($env);
   print ref($mgr); # prints 'Genesis::Env::DeploymentManager'
 
@@ -81,7 +82,8 @@ B<Returns:> A list of C<Genesis::Env::Deployment> objects. Always returns a
 list (never a reference), to protect against accidental modification of the
 internal cache.
 
-  # Example
+B<Examples:>
+
   my @all = $mgr->all();
   print scalar(@all); # prints the count of deployments
 
@@ -94,7 +96,8 @@ that reads deployments will fetch fresh data from Vault.
 
 B<Returns:> Nothing meaningful.
 
-  # Example
+B<Examples:>
+
   $mgr->reset();
   my @fresh = $mgr->all(); # re-fetches from Vault
 
@@ -179,11 +182,13 @@ B<Returns:> A list of C<Genesis::Env::Deployment> objects, or (when
 C<timestamps_only> is set) a list of timestamp strings. Returns an empty list
 when no deployments match.
 
-  # Example - all successful deploys
+B<Examples:>
+
+  # all successful deploys
   my @deploys = $mgr->find(action => 'deploy');
   print scalar(@deploys); # prints the count of successful deploys
 
-  # Example - timestamps of the 5 most recent successful deployments
+  # timestamps of the 5 most recent successful deployments
   my @ts = $mgr->find(timestamps_only => 1, limit => 5);
   print $ts[0]; # prints the most recent timestamp, e.g. '20240315120000'
 
@@ -206,7 +211,8 @@ The exact timestamp string of the deployment to retrieve.
 B<Returns:> A C<Genesis::Env::Deployment> object, or C<undef> if no
 deployment with that timestamp exists.
 
-  # Example
+B<Examples:>
+
   my $d = $mgr->at('20240315120000');
   print defined($d) ? $d->action : 'not found'; # prints 'deploy' or 'not found'
 
@@ -238,11 +244,13 @@ If true, failed deployments are included in the search. Default: false.
 B<Returns:> The most recent matching C<Genesis::Env::Deployment> object, or
 C<undef> if none is found.
 
-  # Example - most recent successful deployment of any action
+B<Examples:>
+
+  # most recent successful deployment of any action
   my $d = $mgr->latest();
   print $d->action if $d; # prints 'deploy' or 'terminate'
 
-  # Example - most recent attempt regardless of result
+  # most recent attempt regardless of result
   my $last = $mgr->latest(include_failed => 1);
   print $last->lookup('result') if $last;
 
@@ -260,7 +268,8 @@ Accepts the same options as C<find()>.
 B<Returns:> A C<Genesis::Env::Deployment> object, or C<undef> if no
 successful deployment exists.
 
-  # Example
+B<Examples:>
+
   my $last_ok = $mgr->latest_successful();
   print $last_ok->lookup('result') if $last_ok; # prints 'success' or 'post-failed'
 
@@ -283,7 +292,8 @@ C<'terminate'>.
 B<Returns:> One of the strings C<'deployed'>, C<'terminated'>, or
 C<'undeployed'>.
 
-  # Example
+B<Examples:>
+
   my $state = $mgr->current_state();
   print $state; # prints 'deployed', 'terminated', or 'undeployed'
 
@@ -317,7 +327,8 @@ supplied values override the base content for any keys in common.
 
 B<Returns:> A new C<Genesis::Env::Deployment> object.
 
-  # Example
+B<Examples:>
+
   my $d = $mgr->build('deploy', 'success', reason => 'manual release');
   print ref($d); # prints 'Genesis::Env::Deployment'
   $d->commit();  # persist to Vault
@@ -334,7 +345,8 @@ one). Otherwise returns the most recent sequence number incremented by one.
 
 B<Returns:> The next sequence number as a positive integer.
 
-  # Example
+B<Examples:>
+
   my $n = $mgr->next_sequence_number();
   print $n; # prints, e.g., '5'
 
@@ -346,7 +358,8 @@ Returns the C<Genesis::Env> object this deployment manager is associated with.
 
 B<Returns:> A C<Genesis::Env> object.
 
-  # Example
+B<Examples:>
+
   my $env = $mgr->env();
   print $env->name; # prints the environment name
 
@@ -389,13 +402,15 @@ queried. When provided, it is used as-is without querying Vault.
 B<Returns:> A C<Genesis::Env::Deployment> object synthesized from the exodus
 data, or C<undef> if the exodus data hash is empty.
 
-  # Example - synthesize from the current exodus store
+B<Examples:>
+
+  # synthesize from the current exodus store
   my $d = $mgr->synthesize_from_exodus();
   if ($d) {
     print $d->action; # prints 'deploy'
   }
 
-  # Example - synthesize from previously fetched exodus data
+  # synthesize from previously fetched exodus data
   my $exodus = $env->exodus_lookup('.', {});
   my $d = $mgr->synthesize_from_exodus($exodus);
 
@@ -422,7 +437,8 @@ returns an empty list or empty arrayref according to calling context.
 Modifies the object in-place by populating C<{__all_deployments}> on first
 call.
 
-  # Example
+B<Examples:>
+
   my $ref = $mgr->_all();          # scalar context - returns arrayref
   print ref($ref);                  # prints 'ARRAY'
   my @list = $mgr->_all();         # list context - returns list
@@ -467,7 +483,8 @@ content.
 B<Returns:> A hashref of base deployment audit fields suitable for passing to
 C<Genesis::Env::Deployment-E<gt>new()>.
 
-  # Example
+B<Examples:>
+
   my $base = $mgr->_base_deployment_content('deploy', 'success');
   print ref($base); # prints 'HASH'
 
@@ -497,7 +514,8 @@ C<$action>) when given an unrecognised action.
 B<Returns:> A hashref of artifact type names to file paths (or an arrayref for
 C<secrets>).
 
-  # Example
+B<Examples:>
+
   my $artifacts = $mgr->_base_artifacts('deploy');
   print ref($artifacts); # prints 'HASH'
 
@@ -539,7 +557,9 @@ unrecognised range string) when the format is not recognised.
 B<Returns:> An arrayref of integer indices for integer ranges, or C<undef> for
 timestamp ranges (the array was modified in-place).
 
-  # Example - integer range returns deferred index list
+B<Examples:>
+
+  # integer range returns deferred index list
   my $idx = $mgr->_filter_by_range(\@deployments, '0...2');
   print ref($idx); # prints 'ARRAY'
 
@@ -573,7 +593,8 @@ their array indices.
 
 B<Returns:> C<1> when the list is confirmed sorted.
 
-  # Example
+B<Examples:>
+
   $mgr->_confirm_deployments_sorted(\@deployments);
   print 'sorted'; # prints 'sorted' when no bug is triggered
 
@@ -605,7 +626,8 @@ Month number, 1-12.
 B<Returns:> The integer day-of-month of the last day of the given month (e.g.,
 C<31> for January, C<28> or C<29> for February).
 
-  # Example
+B<Examples:>
+
   my $last = Genesis::Env::DeploymentManager::_get_last_day_of_month(2024, 2);
   print $last; # prints '29' (2024 is a leap year)
 
@@ -647,15 +669,19 @@ C<< '<=' >>.
 B<Returns:> A normalised timestamp string formatted according to
 C<EXODUS_TIME_FORMAT_SHORT>.
 
-  # Example - expand a partial year to an end-of-year boundary
+B<Examples:>
+
+  # expand a partial year to an end-of-year boundary
   my $ts = Genesis::Env::DeploymentManager::_parse_into_timestamp_gt_cmp('2024', '>');
   print $ts; # prints a timestamp near '20241231235959'
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

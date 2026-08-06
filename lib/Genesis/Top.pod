@@ -1265,10 +1265,258 @@ B<Examples:>
     $top->download_kit('cf/2.3.0', to => '/tmp/kits');
     # Returns: kit provider fetch result
 
+=head2 register_config_section
+
+    Genesis::Top->register_config_section($section, $handler);
+
+Registers a handler for a top-level section of the repository config, so a
+subsystem can own its own configuration without C<Genesis::Top> knowing
+anything about it.
+
+Class method, and the registry is global. Registering the same section twice
+replaces the first handler rather than erroring, so a module loaded twice is
+harmless but two modules claiming the same section silently means the last
+one wins.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$section>
+
+The top-level config key to claim.
+
+=item C<$handler>
+
+The handler to invoke for it.
+
+=back
+
+B<Returns:> The handler registered.
+
+B<Examples:>
+
+    Genesis::Top->register_config_section('ci', \&ci_handler);
+    # returns the handler; the 'ci' section is now handled by it
+
+=head2 ci_control_branch
+
+    my $branch = $top->ci_control_branch();
+
+The branch pipeline environments are created from and propagate out of.
+
+B<Parameters:> None.
+
+B<Returns:> The configured C<ci.control_branch>, or the built-in default when
+unset.
+
+B<Examples:>
+
+    my $branch = $top->ci_control_branch();
+    # returns 'control' unless the repo configured otherwise
+
+=head2 ci_enabled
+
+    my $bool = $top->ci_enabled();
+
+Whether CI is switched on for this repository.
+
+Note this is weaker than C<ci_configured>: enabled without a provider is a
+half-configured repository, so check that instead before acting.
+
+B<Parameters:> None.
+
+B<Returns:> The configured C<ci.enabled> value.
+
+B<Examples:>
+
+    my $bool = $top->ci_enabled();
+    # returns true in a repo with CI switched on
+
+=head2 ci_configured
+
+    my $bool = $top->ci_configured();
+
+Whether CI is both enabled B<and> has a provider type set.
+
+This is the condition worth gating on. Enabled-without-provider is a
+repository someone started configuring and did not finish, and treating it as
+configured produces failures further along, where the cause is no longer
+obvious.
+
+B<Parameters:> None.
+
+B<Returns:> True when both hold; false otherwise.
+
+B<Examples:>
+
+    my $bool = $top->ci_configured();
+    # returns false in a repo with ci.enabled but no provider
+
+=head2 has_legacy_ci_yml
+
+    my $bool = $top->has_legacy_ci_yml();
+
+Whether the repository has a top-level C<ci.yml> holding a pipeline config
+from the previous generation.
+
+Set at config-load time, and true only when the file both exists and looks
+like a pipeline config. Command dispatch uses it to put the pipeline commands
+behind a migration message while letting everything else run normally against
+the same repository -- so an unmigrated repo is not wholly unusable.
+
+B<Parameters:> None.
+
+B<Returns:> True when a legacy pipeline C<ci.yml> is present.
+
+B<Examples:>
+
+    my $bool = $top->has_legacy_ci_yml();
+    # returns true in a repo not yet migrated off ci.yml
+
+=head2 pipeline_env_names
+
+    my @names = $top->pipeline_env_names();
+
+The environment names participating in the pipeline, sorted.
+
+B<Parameters:> None.
+
+B<Returns:> The sorted list of names, or the empty list when CI is not
+configured.
+
+B<Examples:>
+
+    my @names = $top->pipeline_env_names();
+    # returns ('prod', 'sandbox', 'staging')
+
+    my @names = $top->pipeline_env_names();
+    # returns () when CI is not configured
+
+=head2 fetch_pipeline_envs
+
+    $top->fetch_pipeline_envs($git);
+    $top->fetch_pipeline_envs($git, include_control => 1);
+
+Refreshes the local branches for every pipeline environment from the remote,
+in a single fetch.
+
+B<Fetch failures are fatal, and say which kind they were.> A network failure,
+an authentication failure and anything else each get their own message, and
+each names C<--no-fetch> as the way to proceed regardless. Continuing with
+silently stale branches would mean deploying from an out-of-date view of the
+pipeline, which is the failure this exists to prevent.
+
+No-ops -- returning success -- when CI is not configured, when there is no
+remote, or when there are no environments. None of those is an error.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> for the repository.
+
+=item C<%opts>
+
+=over 4
+
+=item C<include_control>
+
+Also fetch the control branch.
+
+=back
+
+=back
+
+B<Returns:> 1 on success or when there was nothing to do.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to reach #C{%s} when fetching pipeline env branches."> -- raised
+via C<bail()> on a network failure, advising C<--no-fetch> when offline.
+
+=item *
+
+C<"Failed to authenticate to #C{%s} when fetching pipeline env branches.">
+-- raised via C<bail()> on an authentication failure.
+
+=item *
+
+C<"Pipeline env fetch from #C{%s} failed: %s"> -- raised via C<bail()> for
+anything else, carrying git's own message.
+
+=back
+
+B<Examples:>
+
+    $top->fetch_pipeline_envs($git);
+    # returns 1 with every pipeline env branch refreshed
+
+    $top->fetch_pipeline_envs($git, include_control => 1);
+    # returns 1, control branch included
+
 =head1 INTERNAL METHODS
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _is_legacy_ci_file
+
+    my $bool = _is_legacy_ci_file($path);
+
+Whether a file is a previous-generation pipeline config. Plain function, not
+a method.
+
+Decided by reading only as far as the first key that settles it: a
+C<pipeline:> key means yes, while C<kit:> or C<genesis:> mean this is an
+environment file that merely happens to be named C<ci.yml> and the answer is
+no. An unreadable file is treated as not legacy rather than as an error --
+the caller is deciding whether to show a migration message, not validating
+the repository.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The file to inspect.
+
+=back
+
+B<Returns:> 1 when it is a legacy pipeline config, 0 otherwise.
+
+B<Examples:>
+
+    my $bool = _is_legacy_ci_file('ci.yml');
+    # returns 1 for a file whose first significant key is pipeline:
+
+    my $bool = _is_legacy_ci_file('envs/ci.yml');
+    # returns 0 -- it is an environment file, not a pipeline config
+
+=head2 _repo_config_schema_v2
+
+    my $schema = $top->_repo_config_schema_v2();
+
+The schema describing a version 2 repository config: which keys exist, their
+types, which are required, and what each is for.
+
+Used to validate a loaded config and to drive the upgrade from version 1.
+
+B<Parameters:> None.
+
+B<Returns:> The schema as a hashref, keyed by config field.
+
+B<Examples:>
+
+    my $schema = $top->_repo_config_schema_v2();
+    # returns { deployment_type => { type => 'string', required => 1, ... }, ... }
 
 =head2 _build
 
@@ -1509,11 +1757,13 @@ No-op vault used when vault support is disabled.
 
 =back
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

@@ -258,63 +258,129 @@ B<Examples:>
 
 =head2 basename
 
-    my $base   = $self->basename;
-    my $yaml   = $self->contents;
-    my $path   = $self->overrides_base;
-    my $name   = $self->name_for(@parts);
+    my $base = $self->basename;
 
-Accessor methods for common cloud config properties.
+The string used to prefix every component name this hook generates. Set
+at construction time; defaults to C<< env_name.env_type >> unless an
+explicit C<basename> is passed to C<init>.
 
-C<basename> returns the basename string used to prefix all component names.
-It defaults to C<< env_name.env_type >> unless overridden at construction
-time.
+B<Parameters:> None.
 
-C<contents> returns the serialized YAML cloud config string stored by
-C<done>. Returns an empty hashref if C<done> has not been called yet.
-
-C<overrides_base> returns the base lookup path used to find cloud config
-override definitions in the environment file. Always returns
-C<'bosh-configs.cloud'>.
-
-C<name_for> constructs a component name by joining the hook's C<basename>
-with the hyphen-joined C<@parts>, separated by dots. One or more part
-strings should be provided.
-
-B<Returns:>
-
-=over 4
-
-=item C<basename>
-
-A string of the form C<< env_name.env_type >>.
-
-=item C<contents>
-
-A YAML string, or an empty hashref before C<done> is called.
-
-=item C<overrides_base>
-
-The string C<'bosh-configs.cloud'>.
-
-=item C<name_for>
-
-A string of the form C<< basename.part1-part2-... >>.
-
-=back
+B<Returns:> A string of the form C<< env_name.env_type >>.
 
 B<Examples:>
 
     my $base = $self->basename;
     # Returns: 'my-env.bosh'
 
+=head2 contents
+
+    my $yaml = $self->contents;
+
+The serialized YAML cloud config stored by C<done>.
+
+Before C<done> has been called this is the empty hashref C<init> seeded
+it with, B<not> a string -- so a caller that assumes a string will get a
+reference. Check C<completed> first, or call this only after C<done>.
+
+B<Parameters:> None.
+
+B<Returns:> A YAML string once C<done> has run; C<{}> before that.
+
+B<Examples:>
+
     my $yaml = $self->contents;
     # Returns: "azs:\n- name: z1\n  cloud_properties: ...\n"
+
+    # Before done() has been called:
+    my $yaml = $self->contents;
+    # Returns: {} -- an empty hashref, not an empty string
+
+=head2 overrides_base
+
+    my $path = $self->overrides_base;
+
+The base lookup path used to find cloud config override definitions in
+the environment file. Constant.
+
+B<Parameters:> None.
+
+B<Returns:> The string C<'bosh-configs.cloud'>.
+
+B<Examples:>
 
     my $path = $self->overrides_base;
     # Returns: 'bosh-configs.cloud'
 
+=head2 name_for
+
+    my $name = $self->name_for(@parts);
+
+Constructs a component name by joining the hook's C<basename> with the
+hyphen-joined C<@parts>, separated by a dot. This is how every generated
+cloud-config component gets a name that is unique per environment.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@parts>
+
+One or more strings identifying the component. Joined with hyphens.
+Calling with no parts yields a trailing dot and an empty suffix.
+
+=back
+
+B<Returns:> A string of the form C<< basename.part1-part2-... >>.
+
+B<Examples:>
+
     my $name = $self->name_for('vm', 'default');
     # Returns: 'my-env.bosh.vm-default'
+
+    my $name = $self->name_for('compilation');
+    # Returns: 'my-env.bosh.compilation'
+
+=head2 ocfp_reserved_ip_target_aliases
+
+    my @aliases = $self->ocfp_reserved_ip_target_aliases($target);
+
+Override point for kits. Returns the alias target names under which
+C<$target> may also have reserved IPs declared, so a renamed kit still
+finds reservations filed under its old name -- openbao inheriting
+vault's, for example.
+
+The base class returns nothing; kits that have been renamed override
+this. Declaring the alias on the kit itself is preferred over the
+module-level C<%OCFP_RESERVED_IP_TARGET_ALIASES> fallback, so the rename
+story stays with the kit that was renamed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$target>
+
+The reserved-IP target name being resolved.
+
+=back
+
+B<Returns:> A scalar name, an arrayref of names, or nothing. Callers
+normalise the result through C<_as_list>.
+
+B<Examples:>
+
+    # Base class: no aliases.
+    my @aliases = $self->ocfp_reserved_ip_target_aliases('vault');
+    # Returns: () -- nothing
+
+    # In a renamed kit's subclass:
+    sub ocfp_reserved_ip_target_aliases {
+        my ($self, $target) = @_;
+        return 'vault' if $target eq 'openbao';
+        return;
+    }
+    # Returns: 'vault' for the openbao target
 
 =head2 for_scale
 
@@ -537,6 +603,10 @@ B<Returns:> The CPI name string to use for this AZ.
 
 B<Examples:>
 
+    # Base class: every AZ routes to the hook's own CPI.
+    my $cpi = $self->cpi_name_for_az('z1', $az_data);
+    # returns 'my-env.bosh.cpi' -- the same as $self->cpi_name
+
     # In a kit hook, route AZs via an az_map from the environment config:
     sub cpi_name_for_az {
         my ($self, $az_key, $az_data) = @_;
@@ -544,6 +614,7 @@ B<Examples:>
         return $az_map->{$az_key} if exists $az_map->{$az_key};
         return $self->cpi_name;
     }
+    # returns the mapped CPI name for a listed AZ, else the hook's own
 
 =head2 relinquish_networks
 
@@ -580,6 +651,25 @@ B<Examples:>
 Builds and returns a BOSH network definition hashref for the named network
 target. The network strategy is selected via the C<strategy> key in C<%rules>
 and dispatched to the corresponding builder method.
+
+Unlike C<vm_type_definition>, C<vm_extension_definition>, and
+C<disk_type_definition> -- which are pure transformations of the kit's
+declared values -- this method reads live state. It queries the deploying
+BOSH director's exodus data for the network definition B<and> for what is
+already allocated, so allocations can be grown and shrunk across
+deployments rather than being recomputed from scratch each time.
+
+From that it determines the base containing network and its subnets, and
+hence what is available for allocation, which AZs are available, DNS,
+gateway, and so on. Network ranges are derived dynamically from three
+inputs: the master range, the existing allocations, and any static values
+-- and static values may legitimately fall outside the range the
+allocation mask generates.
+
+A network may be defined as a single common definition, or as a set of
+subnets each with their own. Definition filters distinguish OCFP from
+non-OCFP deployments, which generally want different allocation
+behaviour.
 
 Supported strategies:
 
@@ -1039,6 +1129,41 @@ B<Examples:>
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
 
+=head2 _as_list
+
+    my @items = _as_list($value);
+
+Normalises a scalar-or-arrayref config value into a flat list. Plain
+function, not a method -- no invocant.
+
+Several kit-facing config keys accept either a single value or a list of
+them; this collapses that ambiguity at the point of use so callers can
+just iterate.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+A scalar, an arrayref, or C<undef>.
+
+=back
+
+B<Returns:> The arrayref's elements, or the single scalar, or the empty
+list when C<$value> is undefined. Never C<undef> in list context.
+
+B<Examples:>
+
+    my @items = _as_list('vault');
+    # Returns: ('vault')
+
+    my @items = _as_list(['vault', 'safe']);
+    # Returns: ('vault', 'safe')
+
+    my @items = _as_list(undef);
+    # Returns: () -- empty list
+
 =head2 _can_build_cloud_config
 
     my $bool = $class->_can_build_cloud_config($env);
@@ -1272,6 +1397,76 @@ ranges for each OCFP subnet based on existing claims, total VM counts, and
 static IP requirements. Supports Logical Subnet Amalgamation for subnets
 sharing the same CIDR.
 
+B<OCFP address-space convention>
+
+Each subnet is split between the management environment and the OCFP
+environment:
+
+=over 4
+
+=item C<*-mgmt>
+
+Owns C<.0> through C<.31> of each subnet, with fixed offsets for the
+core services:
+
+  offset  service
+  ------  -----------------------
+  5th     bosh
+  6th     vault
+  7th     jumpbox
+  8th     concourse web
+  9th     prometheus
+  10th    shield
+  11th    doomsday / ocfp-ui
+  rest    dynamic
+
+=item C<*-ocfp>
+
+Owns C<.32> through the last address of each subnet.
+
+=back
+
+The split is not inferred -- it is expressed in the OCFP config, per
+subnet:
+
+=over 4
+
+=item C<< net.subnets.<subnet>.reserved-offsets >>
+
+Offsets held back from allocation, e.g. C<'0-5,7-10'>.
+
+=item C<< net.subnets.<subnet>.available-offsets >>
+
+Offsets available for allocation, e.g. C<'12-254'> or C<'31-n'>, where
+C<n> means the last address in the CIDR block. When omitted, everything
+not reserved is assumed available -- which is usually B<not> what you
+want.
+
+=back
+
+Only one of the two is strictly required, but both are supported and
+supplying both is clearer. Older OCFP configurations rooted these under
+C<vpc.> rather than C<net.>; both paths are still honoured for backwards
+compatibility.
+
+Subnets themselves are read from vault, under
+
+  /secrets/{params.ocfp_config_path}.{env-name}/{mgmt|ocfp}/bosh/iaas/subnets/<name>/<id>
+
+with the reserved list at C<< ...ips.[mgmt|ocfp].reserved >>.
+
+B<Logical Subnet Amalgamation>
+
+BOSH does not permit two subnets with the same range. When the OCFP
+config produces subnets that do share a range, they are combined into a
+single subnet and each contributing subnet's static IPs are allocated
+from that shared range, with the reserved ranges recomputed to match.
+
+Amalgamated subnets must also share a gateway; their DNS servers are
+merged into a single de-duplicated list. AZ calculation has to account
+for the join as well, and cannot distinguish by subnet id -- the subnet
+id is ignored and only the network id is used.
+
 B<Parameters:>
 
 =over 4
@@ -1484,13 +1679,44 @@ range, reserved IPs, AZ(s), gateway, DNS, static IPs, and cloud properties
 from C<%fields>, resolving any C<LookupSubnetRef> or C<LookupNetworkRef>
 objects in cloud properties.
 
+C<network_definition> calls this either once for the network's base
+configuration or once per subnet, passing the field map as C<common> for
+the base and a C<$target> that identifies the source in the per-subnet
+case.
+
+Three layers can contribute to the result, which is why the field
+resolution is as involved as it is:
+
+=over 4
+
+=item *
+
+The B<kit> declares either a single common configuration or a list of one
+or more subnets, each with its own.
+
+=item *
+
+The B<environment file> can override at the network layer (a default
+applying to all subnets) and supply a subnet array for specific
+per-subnet overrides.
+
+=item *
+
+The B<BOSH exodus network data> carries common and/or subnet defaults
+along with the existing allocations, which is what makes it possible to
+tell what is already claimed from what is still available.
+
+=back
+
 B<Parameters:>
 
 =over 4
 
 =item C<$target>
 
-The network target name.
+The network target name. C<$target> is a Genesis addition for named
+subnets; it may also be an integer offset of the subnet, or C<undef> for
+no subnet at all -- that last case being the network base configuration.
 
 =item C<$subnet_id>
 
@@ -2281,76 +2507,13 @@ B<Examples:>
     my $plural = _plural_of('network');
     # Returns: 'networks'
 
-=head1 KNOWN ISSUES
-
-The following defects are tracked in FWT-751 and are documented here so
-that callers are aware of the current behaviour.
-
-=over 4
-
-=item CC-1 (critical) E<mdash> B<RESOLVED>
-
-C<_add_extended_cloud_config()> line 970: the cycle detection check
-previously used C<$type> (singular) as the lookup key into
-C<$extended_config>, which is keyed by C<$group_label> (plural). The
-existence check therefore always returned false, making the cycle detection
-bail unreachable. Fixed by changing C<$type> to C<$group_label>.
-
-=item CC-2 (critical) E<mdash> B<RESOLVED>
-
-C<_validate_override_schema()> line 896: C<!ref(...)> previously applied
-C<!> to the C<ref(...)> call before comparing to C<'HASH'>. Because
-C<!ref(...)> yields C<""> or C<"1">, the C<eq 'HASH'> comparison was
-always false. Fixed by changing to C<ref(...) ne 'HASH'>.
-
-=item CC-3 (critical) E<mdash> B<RESOLVED>
-
-C<_build_logical_subnet_amalgamation()> lines 1673 and 1677: both
-C<bail()> calls previously used single-quoted strings, so C<'\n'> was a
-literal backslash-n rather than a newline. Fixed by changing to
-double-quoted strings.
-
-=item CC-4 (critical) E<mdash> B<RESOLVED>
-
-C<_network_cloud_properties_for_iaas()> line 1216: when resolving
-per-subnet cloud-property overrides the code previously appended
-C<'.cloud_properties'> to C<$source_path> which already ended with
-C<'.cloud_properties'>. The doubled suffix never resolved, so all
-explicit per-subnet cloud-property overrides were silently ignored.
-Fixed by removing the redundant suffix.
-
-=item CC-5 (dead code) E<mdash> B<RESOLVED>
-
-C<_evaluate_matching_rule()>: the C<elsif> branch for literal-string
-comparison was previously unreachable, nested inside the regex C<if>
-block. Fixed by restructuring: the literal-string comparison is now an
-C<elsif> on the outer C<if>, and the redundant C<defined($field_value)>
-guard was removed (C<$field_value> is always defined at that point).
-
-=item CC-6 (smell) E<mdash> B<RESOLVED>
-
-Line 226: the fold-marker comment previously read C<# _az_definition_for>
-but the subroutine is C<_add_cpi_to_network_az>. Fixed by correcting the
-fold-marker comment.
-
-=item CC-6b (smell) E<mdash> B<RESOLVED>
-
-Line 177: the C<network_reference> subroutine previously had a fold-marker
-comment that read C<# subnet_reference>. Fixed by correcting the
-fold-marker comment.
-
-=item CC-7 (smell) E<mdash> B<RESOLVED>
-
-C<_add_cpi_to_network_az()> line 230: the assignment statement previously
-had no terminating semicolon. Fixed by adding the missing semicolon.
-
-=back
-
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

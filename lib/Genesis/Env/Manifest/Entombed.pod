@@ -64,6 +64,45 @@ B<Examples:>
   print $manifest->description();
   # prints 'Manifest with secrets entombed into BOSH's Credhub from the single-source-of-truth Vault (default for regular kits)'
 
+=head2 deployable
+
+  my $bool = $manifest->deployable();
+
+Whether this manifest variant can be handed to BOSH as-is.
+
+True here: entombment leaves C<((credhub-var))> references that the director
+resolves at deploy time, so nothing secret is present but nothing is missing
+either.
+
+B<Parameters:> None.
+
+B<Returns:> 1.
+
+B<Examples:>
+
+  my $bool = $manifest->deployable();
+  # returns 1
+
+=head2 redacted
+
+  my $manifest = $manifest->redacted();
+
+Returns the manifest unchanged.
+
+Redaction exists to strip vault secrets before a manifest is shown or
+stored. An entombed manifest never held any -- they were replaced by credhub
+references during entombment -- so there is nothing to remove and the object
+returns itself rather than building a second copy.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>.
+
+B<Examples:>
+
+  my $safe = $manifest->redacted();
+  # returns the same object -- already free of vault secrets
+
 =head2 manifest_lookup_target
 
   my $target = $manifest->manifest_lookup_target();
@@ -180,11 +219,13 @@ B<Returns:> a two-element list C<($data, $file)> where C<$data> is the
 parsed YAML hashref and C<$file> is the path to the written manifest YAML
 file on disk.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

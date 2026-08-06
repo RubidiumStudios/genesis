@@ -35,11 +35,11 @@ unit-tests/service_vault-core.t          # Service::Vault base class + None with
 unit-tests/service_vault_remote-core.t   # Service::Vault::Remote with mocks
 unit-tests/service_vault_admin-core.t    # Service::Vault::Admin + AppRole with mocks
 unit-tests/genesis_top-core.t
-# Kit module tests (POD-driven, FWT-546)
+# Kit module tests (POD-driven)
 unit-tests/genesis_kit-core.t            # Genesis::Kit base class
 unit-tests/genesis_kit_compiled-core.t   # Genesis::Kit::Compiled
 unit-tests/genesis_kit_dev-core.t        # Genesis::Kit::Dev
-unit-tests/genesis_kit_compiler-core.t   # Genesis::Kit::Compiler (POD-driven, FWT-547)
+unit-tests/genesis_kit_compiler-core.t   # Genesis::Kit::Compiler (POD-driven)
 # Temporarily disabled - see test analysis for details
 #unit-tests/kit-compilation.t
 #unit-tests/hooks.t
@@ -54,7 +54,7 @@ unit-tests/genesis_env-build_vault_path_components.t
 unit-tests/genesis_env-deployment_cache.t
 unit-tests/genesis_env-deployment.t
 unit-tests/genesis_env-manifest_helpers.t
-# Genesis::Env method coverage (FWT-569)
+# Genesis::Env method coverage
 unit-tests/genesis_env-lookups.t         # lookup() and lookup_unevaled() variants
 unit-tests/genesis_env-relations.t       # relate() and relate_by_name() environment relationships
 unit-tests/genesis_env-ocfp.t            # is_ocfp(), ocfp_type(), ocfp_env() OCFP configuration
@@ -81,7 +81,7 @@ unit-tests/genesis_secret_userprovided-core.t
 unit-tests/genesis_secret_uuid-core.t
 unit-tests/genesis_secret_x509-core.t
 unit-tests/genesis_term-csize.t
-# Genesis::Term tests (FWT-577)
+# Genesis::Term tests
 unit-tests/genesis_term-terminal_detection.t
 unit-tests/genesis_term-csprintf.t
 unit-tests/genesis_term-color_internals.t
@@ -89,7 +89,7 @@ unit-tests/genesis_term-text_formatting.t
 unit-tests/genesis_term-box_drawing.t
 unit-tests/genesis_term-markdown.t
 unit-tests/genesis_term-utilities.t
-# Genesis::UI tests (FWT-577)
+# Genesis::UI tests
 unit-tests/genesis_ui-boolean_and_line.t
 unit-tests/genesis_ui-choice.t
 unit-tests/genesis_ui-list_and_validation.t
@@ -101,11 +101,11 @@ unit-tests/service_credhub-core.t  # Service::Credhub unit tests (constructor, a
 unit-tests/genesis_commands-core.t  # Genesis::Commands infrastructure (registration, parsing, dispatch deps)
 unit-tests/genesis_commands-feature_compatibility.t  # deploy/info/version renderer helpers for feature opt-in
 unit-tests/genesis-cli.t                              # bin/genesis registration; terminate CLI
-# Kit Provider tests (POD-driven, FWT-548)
+# Kit Provider tests (POD-driven)
 unit-tests/genesis_kit_provider-core.t              # Genesis::Kit::Provider base class/factory
 unit-tests/genesis_kit_provider_github-core.t        # Genesis::Kit::Provider::Github
 unit-tests/genesis_kit_provider_genesiscommunity-core.t  # Genesis::Kit::Provider::GenesisCommunity
-# Genesis::Hook tests (POD-driven, FWT-560)
+# Genesis::Hook tests (POD-driven)
 unit-tests/genesis_hook-core.t               # Genesis::Hook base class
 unit-tests/genesis_hook_addon-core.t         # Genesis::Hook::Addon
 unit-tests/genesis_hook_blueprint-core.t     # Genesis::Hook::Blueprint
@@ -206,7 +206,7 @@ integration-tests/genesis_env-core.t         # Comprehensive env operations (loa
 integration-tests/genesis_commands_env-deploy.t  # CLI/UX surface for `genesis deploy` (reactions, orchestration)
 integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
-# Genesis::Env workflow integration tests (FWT-568)
+# Genesis::Env workflow integration tests
 integration-tests/genesis_env-deploy_workflow.t      # Deploy and post-deploy workflow
 integration-tests/genesis_env-terminate_workflow.t   # Terminate and cleanup workflow
 integration-tests/genesis_env-check_workflow.t       # Pre-deployment validation workflow
@@ -235,7 +235,7 @@ e2e-tests/params.t
 #e2e-tests/pipeline.t             # disabled: pipeline subsystem is being reworked for 3.2
 e2e-tests/secrets.t
 e2e-tests/yamls.t
-# Genesis::Commands E2E tests (FWT-571)
+# Genesis::Commands E2E tests
 e2e-tests/deploy.t
 e2e-tests/check.t
 e2e-tests/bosh-commands.t

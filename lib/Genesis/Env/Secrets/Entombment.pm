@@ -1,38 +1,5 @@
 package Genesis::Env::Secrets::Entombment;
 
-# Unified credhub entombment primitives.
-#
-# Three layers of API:
-#
-#   Naming layer:
-#     credhub_var_name($path, $key, $value, $prefix)
-#       Pure function.  Returns a deterministic credhub variable name
-#       from the inputs.  Used wherever Genesis decides "what name
-#       should this secret have in credhub."
-#
-#   Write layer:
-#     put_secret($credhub, $cred_name, $value)
-#       Idempotent put.  Checks existing value (via credhub's cache
-#       when preloaded), writes only when missing or changed, verifies
-#       the write succeeded.  Returns one of:
-#         'new'      first-time write
-#         'exists'   value already matched; no write made
-#         'altered'  value changed; write made
-#         'failed'   write made but verify did not match
-#
-#     entomb_one_secret($credhub, $path, $key, $value, $prefix)
-#       Composition of credhub_var_name + put_secret.  Returns
-#       ("(($var))", $action) for inline substitution callers.
-#
-#     prime_credhub_cache($credhub)
-#       Idempotent preload of the credhub cache so subsequent
-#       put_secret existing-checks are O(1) cache hits instead of
-#       O(N) subprocesses.  Always called by the bulk APIs;
-#       per-value callers should call this themselves before a batch.
-#
-# Higher layers (local-vault lifecycle, bulk populate, and
-# full-manifest entomb-and-lookup) build on these primitives and
-# are introduced in subsequent tiers of this module.
 
 use strict;
 use warnings;
@@ -52,18 +19,7 @@ our @EXPORT_OK = qw(
 
 our $DEFAULT_PREFIX = 'genesis-entombed/';
 
-# credhub_var_name - deterministic credhub variable name {{{
-#
-# Composes a credhub variable name from (path, key, value, prefix)
-# such that the same inputs always produce the same name, and any
-# change to the value produces a different sha suffix.
-#
-#   credhub_var_name('secret/foo', 'password', 's3cret', '/cpi/')
-#     => "/cpi/secret/foo--password--abc12345"
-#
-# The 8-character sha1 suffix lets multiple distinct values for the
-# same path:key coexist in credhub (e.g. during a rotation) without
-# colliding.
+# credhub_var_name - deterministic credhub variable name, keyed on the value so a rotation gets a new name {{{
 sub credhub_var_name {
 	my ($path, $key, $value, $prefix) = @_;
 	$prefix //= $DEFAULT_PREFIX;
@@ -72,13 +28,7 @@ sub credhub_var_name {
 }
 
 # }}}
-# put_secret - idempotent put returning the action taken {{{
-#
-# Writes $value to $cred_name in $credhub only when it differs from
-# what's currently there.  Returns one of 'new' | 'exists' | 'altered'
-# | 'failed'.  Callers that want batch efficiency should prime the
-# credhub cache via prime_credhub_cache() so the existing-check is
-# a single in-memory lookup instead of a per-call subprocess.
+# put_secret - idempotent put, writing only on a difference and returning the action taken {{{
 sub put_secret {
 	my ($credhub, $cred_name, $value) = @_;
 	my $existing = $credhub->get($cred_name);
@@ -92,13 +42,7 @@ sub put_secret {
 }
 
 # }}}
-# entomb_one_secret - name + put in one call {{{
-#
-# Convenience wrapper that combines credhub_var_name and put_secret
-# for callers that want to entomb a single (path, key, value) without
-# managing the var name explicitly.  Returns a 2-tuple of the
-# parenthesized credhub-var reference (suitable for direct YAML
-# substitution) and the action taken.
+# entomb_one_secret - name and put in one call, returning the ((credhub-var)) reference and the action {{{
 sub entomb_one_secret {
 	my ($credhub, $path, $key, $value, $prefix) = @_;
 	my $name   = credhub_var_name($path, $key, $value, $prefix);
@@ -118,14 +62,7 @@ sub prime_credhub_cache {
 }
 
 # }}}
-# make_local_vault - spin up an in-memory vault scoped to one entombment pass {{{
-#
-#   my $lv = make_local_vault(env => $env);                # auto-named
-#   my $lv = make_local_vault(name => 'foo-scratch');      # explicit name
-#
-# Wraps Service::Vault::Local->create.  When `env` is given, the
-# vault name defaults to "${env_name}-entomb" so the caller doesn't
-# have to invent a unique handle.  Returns the local vault object.
+# make_local_vault - spin up a vault scoped to one entombment pass, named for the env unless told otherwise {{{
 sub make_local_vault {
 	my (%opts) = @_;
 	require Service::Vault::Local;
@@ -150,31 +87,7 @@ sub shutdown_local_vault {
 }
 
 # }}}
-# populate_local_vault - bulk path -> credhub-var substitution {{{
-#
-#   populate_local_vault(
-#     paths       => { 'secret/db:password' => [...refs...], ... },
-#     vault       => $source_vault,
-#     credhub     => $target_credhub,
-#     prefix      => '/cpi/',
-#     local_vault => $local_vault,
-#     on_action   => sub { my (%info) = @_; ... },   # optional callback
-#   );
-#
-# For each path:key in `paths`:
-#   1. Fetch the value from `vault`.
-#   2. Entomb it into `credhub` via entomb_one_secret (which uses
-#      the deterministic credhub_var_name and idempotent put_secret).
-#   3. Set the corresponding ((credhub-var)) entry in `local_vault`
-#      so subsequent spruce evaluation substitutes credhub indirection
-#      for the original vault reference.
-#
-# `credhub` is preloaded once at entry so every put_secret existing-
-# check is an in-memory cache hit instead of a subprocess.
-#
-# `on_action`, if provided, is called once per path:key with
-# (path => , key => , value => , credhub_var => , action => ) for
-# progress reporting.
+# populate_local_vault - bulk path -> credhub-var substitution, priming the credhub cache once up front {{{
 sub populate_local_vault {
 	my (%opts) = @_;
 	my $paths       = $opts{paths};

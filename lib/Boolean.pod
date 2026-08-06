@@ -613,4 +613,11 @@ L<overload>, L<JSON::PP::Boolean>
 
 Dennis Bell <dbell@fivetwenty.io>
 
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2024 Rubidium Studios, Ltd.
+
+This library is free software; you can redistribute it and/or modify it under
+the same terms as Perl itself.
+
 =cut

@@ -246,7 +246,7 @@ sub mermaid {
 		# Build outgoing edge map; track which nodes appear in any edge
 		my (%out_edges, %in_any_edge);
 		for my $edge (@$edges) {
-			push @{$out_edges{$edge->{from}}}, $edge->{to};
+			push @{ $out_edges{$edge->{from}} }, $edge->{to};
 			$in_any_edge{$edge->{from}} = 1;
 			$in_any_edge{$edge->{to}}   = 1;
 		}
@@ -1811,7 +1811,7 @@ sub _extract_workflow_data {
 	    %track_bosh_configs);
 
 	for my $edge (@$edges) {
-		push @{$will_trigger{$edge->{from}}}, $edge->{to};
+		push @{ $will_trigger{$edge->{from}} }, $edge->{to};
 		$triggers{$edge->{to}} = $edge->{from};
 	}
 	for my $n (keys %$nodes) {

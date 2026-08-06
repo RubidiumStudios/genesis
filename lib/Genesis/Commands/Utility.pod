@@ -140,10 +140,24 @@ B<Examples:>
     --option us-east-1 --option us-west-2
   # Returns: exits 0; writes selected value to /tmp/choice
 
-=head1 INTERNAL FUNCTIONS
+B<The prompt-type handlers.>
+The functions below implement the prompt types C<ui_prompt_for> accepts. They
+are not reached by name: the package variable C<$prompt_handlers> maps each
+type string an operator can pass -- C<line>, C<boolean>, C<multi-select> and
+the rest -- to one of these code refs, and C<ui_prompt_for> dispatches
+through that table.
 
-These functions are internal to the implementation.  They may change without
-notice and should not be called directly.
+The table is the extension point. Several type names deliberately share a
+handler (C<list>, C<lines> and C<multi-line> all reach
+C<multi_line_prompt_handler>), so adding an alias for an existing prompt type
+means adding a table entry, not a function.
+
+Because the table holds code refs rather than names, renaming a handler is
+caught at compile time -- unlike the symbolic dispatch used elsewhere in the
+command modules.
+
+C<validate_prompt_opts> is the shared guard each handler calls to reject
+options its prompt type does not support.
 
 =head2 validate_prompt_opts($type, $opts, @valid_opts)
 
@@ -643,9 +657,11 @@ L<Genesis::Commands>, L<Genesis::UI>, L<Genesis::Top>, L<Service::Vault::Remote>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

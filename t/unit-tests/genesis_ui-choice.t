@@ -525,7 +525,7 @@ subtest 'new_prompt_for_choice header auto-generated when omitted' => sub {
 	like($out, qr/Select one of the following/, 'auto-generated header shown');
 };
 
-# ── Regression tests for bugs found during FWT-915/919 ──────────────────────
+# ── Regression tests for bugs found while reworking the choice prompts ──────
 
 subtest 'new_prompt_for_choice no default does not auto-select first item' => sub {
 	plan tests => 3;

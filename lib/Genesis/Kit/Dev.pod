@@ -231,11 +231,13 @@ B<Examples:>
 
 L<Genesis::Kit>, L<Genesis::Kit::Compiled>
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

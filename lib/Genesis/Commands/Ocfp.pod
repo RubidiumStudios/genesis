@@ -47,8 +47,55 @@ B<Parameters:>
 
 =back
 
-Calls C<bail()> if the environment is not OCFP-enabled or if the topic/action
-is invalid.
+The topic and action are validated before the environment is loaded, so a
+mistyped subcommand is answered immediately rather than after the cost of
+loading an environment and unlocking its vault.
+
+B<Returns:> Whatever the dispatched topic handler returns. Falls off the end
+returning nothing if the topic passed validation but matched no branch --
+unreachable while C<show> is the only topic, but worth knowing when a second
+one is added.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Environment name, topic, and action are required"> -- raised via
+L<Genesis::Commands/command_usage> when any of the three is missing.
+
+=item *
+
+C<"Too many arguments provided"> -- raised via C<bail()> when arguments
+follow the action.
+
+=item *
+
+C<"Invalid topic: '%s' - expected one of: %s"> -- raised via C<bail()>. The
+second C<%s> lists the valid topics, so the message names the alternatives
+rather than only rejecting the input.
+
+=item *
+
+C<"Environment '%s' is not an OCFP environment.\nThe 'ocfp' command requires an environment with the 'ocfp' feature enabled."> --
+raised via C<bail()> when the environment loads but lacks the feature.
+
+=back
+
+B<Examples:>
+
+  # CLI: genesis my-env ocfp show network
+  ocfp('my-env', 'show', 'network');
+  # prints the network overview
+
+  # CLI: genesis my-env ocfp list network
+  ocfp('my-env', 'list', 'network');
+  # bails: Invalid topic: 'list' - expected one of: show
+
+  # A non-OCFP environment:
+  ocfp('plain-env', 'show', 'network');
+  # bails: Environment 'plain-env' is not an OCFP environment. ...
 
 =head2 ocfp_show($env, $action, %options)
 
@@ -59,6 +106,50 @@ Dispatches C<show> topic actions.  Currently supports:
 =item C<network> - Delegates to L<Genesis::Commands::Ocfp::ShowNetwork/run>
 
 =back
+
+The implementing module is loaded on demand rather than at C<use> time, so
+the cost is paid only by the command that needs it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env>, already loaded and vault-attached by C<ocfp>, and already
+confirmed to be OCFP.
+
+=item C<$action>
+
+The action to run. Currently only C<network>.
+
+=item C<%options>
+
+Parsed command-line options, passed through to the action unchanged.
+
+=back
+
+B<Returns:> Whatever the action returns. As with C<ocfp>, returns nothing if
+the action validated but matched no branch.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Invalid show action: '%s' - expected one of: %s"> -- raised via C<bail()>,
+naming the valid actions.
+
+=back
+
+B<Examples:>
+
+  ocfp_show($env, 'network', %options);
+  # prints the network overview, via ShowNetwork::run
+
+  ocfp_show($env, 'subnets', %options);
+  # bails: Invalid show action: 'subnets' - expected one of: network
 
 =head1 ENVIRONMENT REQUIREMENTS
 
@@ -77,6 +168,12 @@ L<Genesis::Env>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
 
 =cut

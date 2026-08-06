@@ -578,41 +578,14 @@ sub uses_credhub { return $_[0]->secrets_store eq "credhub"; }
 
 # }}}
 
-# provided_configs - what configs does this kit provide to BOSH? {{{
+# provided_configs - what configs this kit provides to BOSH, by hook presence rather than hook output {{{
 sub provided_configs {
 	my ($self) = @_;
 
-	# Option 1:  Detect if the cloud-config hook and/or runtime-config hooks are present
-	#   - Pro: very simple and quick
-	#   - Con: only supports single cloud-config and runtime-config files
-	#
-	# Option 2: Run the cloud-config and runtime-config with a 'list' argument that returns the names of the configs being generated
-	#  - Pro: supports multiple cloud-config and runtime-config files
-	#  - Con: requires the hooks to be written to support this
-	#
-	# Option 3: Run the cloud-config and runtime-config hooks and parse the output to determine the configs being generated
-	# - Pro: supports multiple cloud-config and runtime-config files
-	# - Con: much more time consuming and complex
-	#
-	# Option 4: Support hooks that are named `<type>-config-<purpose>` and return the type and purpose of the config
-	# - Pro: supports multiple cloud-config and runtime-config files
-	#        no need to execute the hooks to determine the configs
-	#        each hook execution will return a single config content, so no extra parsing needed
-	#        each hook can be run independently if only a single config is needed (common routines can be shared in included libraries)
-	# - Con: needs kit to be updated to find and call the correct hooks
-	#
-	# Decision: We're going to go with Option 1 for now.  It's simple and quick,
-	# and we can always add support for the other options later if needed. We can
-	# define a convention to support multiple cloud-config and runtime-config
-	# files but implement the single varient only for now (leaning heavily towards
-	# Option 4).
-	#
-	# FUTURE: when supporting multipe files per type, return <type>:<purpose> for each file
-	#
-	# TBD: How do we support conditional configurations? Currently we can only
-	# upload empty configs if there is a hook, but nothing is determined to be
-	# needed.
-
+	# FUTURE: when a kit may provide several configs of a type, return
+	#         <type>:<purpose> per file rather than a bare type.
+	# TBD:    conditional configs -- a hook that decides at runtime it has
+	#         nothing to contribute still gets an empty config uploaded.
 	my @configs = ();
 	push(@configs, 'cloud') if $self->has_hook('cloud-config');
 	push(@configs, 'runtime') if $self->has_hook('runtime-config');
@@ -920,6 +893,7 @@ sub _dereference_param {
 sub is_dev {
 	return 0;
 }
+# }}}
 # }}}
 
 1;

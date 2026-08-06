@@ -67,9 +67,9 @@ sub make_deployment {
 
 
 # ===========================================================================
-# FWT-723: duration() guards missing timestamps
+# duration() guards missing timestamps
 # ===========================================================================
-subtest 'FWT-723: duration() guards missing timestamps' => sub {
+subtest 'duration() guards missing timestamps' => sub {
 
 	subtest 'returns correct seconds with both timestamps present' => sub {
 		my $d = make_deployment();
@@ -134,9 +134,9 @@ subtest 'FWT-723: duration() guards missing timestamps' => sub {
 
 
 # ===========================================================================
-# FWT-724: committed() handles vault errors
+# committed() handles vault errors
 # ===========================================================================
-subtest 'FWT-724: committed() handles vault errors' => sub {
+subtest 'committed() handles vault errors' => sub {
 
 	subtest 'returns 0 when vault throws exception' => sub {
 		my $error_vault = Mock->new(
@@ -172,9 +172,9 @@ subtest 'FWT-724: committed() handles vault errors' => sub {
 
 
 # ===========================================================================
-# FWT-725: _collect_secrets_from_paths validates paths
+# _collect_secrets_from_paths validates paths
 # ===========================================================================
-subtest 'FWT-725: _collect_secrets_from_paths validates paths' => sub {
+subtest '_collect_secrets_from_paths validates paths' => sub {
 
 	subtest 'valid path:key works' => sub {
 		my $mock_vault = Mock->new(
@@ -240,9 +240,9 @@ subtest 'FWT-725: _collect_secrets_from_paths validates paths' => sub {
 
 
 # ===========================================================================
-# FWT-726: extract_artifacts_to shows resolved path in errors
+# extract_artifacts_to shows resolved path in errors
 # ===========================================================================
-subtest 'FWT-726: extract_artifacts_to shows resolved path in errors' => sub {
+subtest 'extract_artifacts_to shows resolved path in errors' => sub {
 
 	subtest 'error message contains resolved absolute path' => sub {
 		# Use a relative path that will be resolved to an absolute path
@@ -267,9 +267,9 @@ subtest 'FWT-726: extract_artifacts_to shows resolved path in errors' => sub {
 
 
 # ===========================================================================
-# FWT-727: _build_artifacts_file rejects empty tar
+# _build_artifacts_file rejects empty tar
 # ===========================================================================
-subtest 'FWT-727: _build_artifacts_file rejects empty tar' => sub {
+subtest '_build_artifacts_file rejects empty tar' => sub {
 
 	subtest 'bails when no artifacts would be added' => sub {
 		my $d = make_deployment();
@@ -314,9 +314,9 @@ subtest 'FWT-727: _build_artifacts_file rejects empty tar' => sub {
 
 
 # ===========================================================================
-# FWT-728: commit() cleans up temp files on failure
+# commit() cleans up temp files on failure
 # ===========================================================================
-subtest 'FWT-728: commit() cleans up temp files on failure' => sub {
+subtest 'commit() cleans up temp files on failure' => sub {
 
 	subtest 'temp artifact file cleaned up after successful commit' => sub {
 		my $tmpdir = tempdir(CLEANUP => 1);

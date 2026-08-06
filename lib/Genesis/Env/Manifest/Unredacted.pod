@@ -147,11 +147,13 @@ B<Returns:> a two-element list of C<($data, $file)>, where C<$data> is the
 parsed manifest data structure and C<$file> is the path to the written YAML
 file on disk.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

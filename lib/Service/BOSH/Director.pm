@@ -136,14 +136,7 @@ sub from_exodus {
 }
 
 # }}}
-# _derive_exodus_pointers - shared between from_exodus and from_alias.
-# Given (alias, env, %opts), compute (exodus_path, exodus_vault).  A
-# caller-supplied $opts{exodus_path} / $opts{exodus_vault} wins
-# unchanged; otherwise the value is derived from the env's bosh_env
-# settings and the rel_to_env hint ('self' -> env's own exodus_base,
-# 'parent' (default) -> parent director's exodus_mount + alias +
-# deployment-type).  When $env is undef, only the caller-supplied
-# values are returned (no derivation possible). {{{
+# _derive_exodus_pointers - resolve (exodus_path, exodus_vault) {{{
 sub _derive_exodus_pointers {
 	my ($class, $alias, $env, %opts) = @_;
 	my $exodus_path  = $opts{exodus_path};
@@ -266,13 +259,13 @@ sub deployment {
 }
 
 # }}}
-# alias - specify the name of the bosh director
+# alias - specify the name of the bosh director {{{
 sub alias {
 	return $_[0]->{alias};
 }
 
 # }}}
-# url - give the full url, including the schema, host and port
+# url - give the full url, including the schema, host and port {{{
 sub url {
 	my $self = shift;
 	return $self->{schema}."://".$self->{host}.":".$self->{port};
@@ -303,13 +296,6 @@ sub director_info {
 
 # }}}
 # cpi - the director's latent CPI {{{
-#
-# The CPI *release* the director itself runs (vsphere_cpi, warden_cpi...).
-# This is a third thing, distinct from both a cpi config's name (the --name= on
-# `bosh update-config --type=cpi`) and a cpi name (the `name:` of an entry in a
-# cpi config's cpis[] list, sentinel '<default>').  It cannot satisfy an az_map
-# reference or any other named-cpi lookup -- it identifies the IaaS the
-# director talks to, not a routing target.  Reporting only.
 sub cpi {
 	return $_[0]->director_info->{cpi};
 }
@@ -437,13 +423,9 @@ sub configs {
 	}
 	return wantarray ? %{$self->{_configs_cache}} : $self->{_configs_cache};
 }
+
+# }}}
 # has_config_of_type - cheap "any configs of $type uploaded?" check {{{
-#
-# Derived from the cached configs() listing -- no per-call BOSH
-# round-trip beyond the initial configs() fetch.  Use to short-
-# circuit code paths that only matter when at least one config of
-# $type exists (e.g. the CPI check on single-iaas envs where no
-# named cpi-configs are uploaded).
 sub has_config_of_type {
 	my ($self, $type) = @_;
 	return 0 unless defined $type;
@@ -500,23 +482,6 @@ sub get_config {
 
 # }}}
 # download_configs - assemble & deliver BOSH config(s) of the given type {{{
-#
-# Public API (signature) preserved.  Internally, name resolution
-# now uses the cached configs() listing (Step 1) and content uses
-# the memoized get_config (Step 2).  The assembled output is
-# cached in the director's workdir; subsequent calls for the same
-# (type, name) reuse the cache and just copy the file into the
-# caller-supplied $path.
-#
-# %opts:
-#   optional => 1  - tolerate "no configs of this type" by
-#                    returning an empty list instead of bailing.
-#                    Used by cpi-prefetch on single-iaas envs.
-#   refresh => 1   - invalidate caches and re-fetch.  Cascades to
-#                    configs() listing (unconditionally -- the
-#                    requested name may itself be a new upload not
-#                    yet in the cached listing) and to the per-
-#                    name content cache as each name is resolved.
 sub download_configs {
 	my ($self, $path, $type, $name, %opts) = @_;
 	$name ||= '*';
@@ -575,20 +540,9 @@ sub download_configs {
 		push @config_contents, $content;
 	}
 
-	# Assemble.  For most types the long-standing spruce-merge
-	# behaviour is correct: merge-by-name on keyed entries (azs,
-	# networks, vm_types, addons, releases, ...) reflects how BOSH
-	# actually composes them at deploy time.
-	#
-	# `cpi` is the exception: BOSH (CpiManifestParser.merge_configs)
-	# concatenates the cpis: arrays across all active cpi configs
-	# and ERRORS on duplicate cpi names.  Spruce's default
-	# merge-by-name would silently dedupe those duplicates and
-	# hide the divergence from operators.  Take the manual concat
-	# path for cpi: parse each config, concat the cpis: arrays,
-	# bail locally with file-attributed error when duplicates
-	# would result -- more actionable than waiting for BOSH's
-	# terser CpiDuplicateName at deploy.
+	# cpi must concat, not spruce-merge -- see the POD.  BOSH's
+	# CpiManifestParser.merge_configs errors on duplicate cpi names;
+	# merge-by-name would silently dedupe them.
 	my $assembled;
 	if ($type eq 'cpi' && @config_contents > 1) {
 		my @all_cpis;
@@ -774,25 +728,6 @@ sub upload_stemcell {
 }
 
 # cpis - sorted list of CPI names registered with this director {{{
-#
-#   my @cpis = $director->cpis;                 # cached after first call
-#   my @cpis = $director->cpis(refresh => 1);   # force a fresh query
-#
-# Live-queries the director for every cpi-typed config slot, parses
-# each config's YAML body, and unions the cpis[].name fields across
-# them.  Result is memoized on the Director instance so repeated
-# calls within the same process don't reissue the bosh subprocesses.
-# Pass `refresh => 1` to invalidate the memo (use this after a known
-# upload that changed the director's CPI inventory).
-#
-# This always queries the director live -- exodus is intentionally
-# NOT used as a fast-path source.  Exodus only reflects what Genesis
-# advertised at deploy time; non-OCFP envs may have CPI configs
-# uploaded out-of-band, and the director's own state is the
-# authoritative answer to "what CPIs are available here?".
-#
-# Analogous to L</stemcells> -- a fact about the director, not about
-# any particular environment that consumes it.
 sub cpis {
 	my ($self, %opts) = @_;
 	delete $self->{_cpis_cache} if $opts{refresh};
@@ -935,7 +870,7 @@ sub cleanup {
 						$last_name = $name;
 						$name_length = length($name) if length($name) > $name_length;
 					}
-					push @{$results{$name}{$release->{'Stemcell OS'}}}, $release->{'Stemcell Version'};
+					push @{ $results{$name}{$release->{'Stemcell OS'}} }, $release->{'Stemcell Version'};
 				}
 
 				$name_length += 2; # for the ': '
@@ -971,6 +906,7 @@ sub cleanup {
 	return wantarray ? ($out, $rc, $err) : !$rc;
 }
 
+# }}}
 # check_network_lock - check for existing network lock {{{
 sub check_network_lock {
 	my ($self, %opts) = @_;
@@ -1214,6 +1150,7 @@ sub env {
 	return $_[0]->{env};
 }
 
+# }}}
 # }}}
 1;
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

@@ -305,8 +305,9 @@ EOF
 # layer that lives in Commands::Env::deploy BEFORE the call to
 # $env->deploy() at the bottom of the sub.
 #
-# Pure CLI-surface unit tests for these scenarios are blocked until
-# FWT-1011 (phased command refactor) lands.  Until then, this
+# Pure CLI-surface unit tests for these scenarios are blocked until the
+# command layer is split into distinct phases, so that validation can be
+# exercised without standing up a deployment.  Until then, this
 # integration block carries the coverage with a shared real vault +
 # fake_bosh + Genesis::Top fixture.
 
@@ -400,8 +401,8 @@ EOF
 	#                                            alias inside
 	#                                            Commands::Env.
 	#
-	# FWT-1011 (phased command refactor) will move validation to
-	# bail()-based exits, eliminating the override entirely.
+	# Once validation moves to bail()-based exits, this override can go
+	# away entirely.
 	local $ENV{GENESIS_IGNORE_EVAL} = 1;
 
 	no warnings 'redefine', 'once';
@@ -453,8 +454,8 @@ EOF
 	# Deferred: needs a bosh-director kit fixture so `use_create_env`
 	# returns true (the simple-3.0.0 fixture isn't a bosh-director
 	# kit, so the create-env code path is unreachable through it).
-	# Tracked under FWT-1011 follow-up; t/src/bosh-3.0.0-create-env
-	# is the right kit but needs the env shape worked out.
+	# t/src/bosh-3.0.0-create-env is the right kit, but the env shape
+	# still needs working out.
 
 	# ----------- Step 13: kit IaaS support enforcement --------------------
 	#
@@ -469,7 +470,7 @@ EOF
 	# from the OCFP config or repo `.genesis/config` (see Env.pm:2042),
 	# not from the env file — so wiring it up needs a config-level
 	# fixture.  Trivial to add but distinct from this batch's option-
-	# validation focus.  FWT-1011's phased refactor will isolate this
+	# validation focus.  A phased command refactor would isolate this
 	# check inside _deploy_validate, making the bail straightforward
 	# to exercise.
 

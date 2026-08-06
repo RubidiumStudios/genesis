@@ -1,0 +1,1365 @@
+=head1 NAME
+
+Service::Git - Git operations for a deployment repository
+
+=head1 SYNOPSIS
+
+  use Service::Git;
+
+  # One instance per repository, whatever path you name inside it
+  my $git = Service::Git->new('.');
+  my $git = Service::Git->new($path, track_branch => 1);
+
+  # Branches
+  $git->checkout('staging') if $git->branch_exists('staging');
+  $git->create_branch('prod', 'control');
+  $git->restore_branch;
+
+  # Queries
+  my $sha   = $git->sha('HEAD', short => 1);
+  my $clean = $git->is_clean;
+  my $diff  = $git->diff_files($from, $to, @paths);
+
+  # Working tree
+  $git->checkout_file($sha, 'ops/thing.yml');
+  $git->commit('[pipeline] control@abc1234 -> staging (pulled)', @files);
+
+  # Remotes
+  my ($self, $result) = $git->fetch_branches(\@branches);
+  my $pushed = $git->push(@branches);
+
+=head1 DESCRIPTION
+
+C<Service::Git> wraps the git commands Genesis needs to manage a deployment
+repository: branch handling for the pipeline model, structured diffs for
+propagation, and the remote operations that move branches between a working
+copy and its origin.
+
+It is deliberately thin. Each method is one git invocation and a little
+parsing; nothing here caches file content or models the repository beyond
+what git itself reports. What it does add is the handful of decisions that
+would otherwise be repeated at every call site -- which failures are fatal,
+which are ordinary answers, and how paths are spelled.
+
+=head2 One instance per repository
+
+C<new> is a flyweight: it resolves the git top-level for whatever path it is
+given, and returns the existing instance when one already exists for that
+root. Two callers naming different subdirectories of the same repository get
+the same object.
+
+That matters because instances carry mutable state -- the branch to restore,
+the branch-existence cache, the resolved default remote. Independent objects
+for one repository would each track a different "original" branch and undo
+each other's work.
+
+=head2 Two path spellings
+
+Git reports paths relative to the B<git root>. Genesis works in a deployment
+repository that may sit in a subdirectory of it, and speaks to operators in
+paths relative to that B<deployment root>.
+
+C<prefix> is the offset between them, and C<prefixed> / C<unprefixed> convert
+between the two. Getting this wrong does not error: a pathspec in the wrong
+spelling simply matches nothing, and a diff comes back empty as though there
+were no changes.
+
+=head2 Branch tracking
+
+With C<< track_branch => 1 >>, the branch checked out at construction is
+remembered and restored -- explicitly via C<restore_branch>, or at process
+exit via C<DESTROY>. Commands that check out an environment branch to do
+their work use this so an operator is not left somewhere unexpected.
+
+Because the instance is a flyweight held for the process lifetime, C<DESTROY>
+fires during global destruction rather than when a caller drops its
+reference.
+
+=head1 METHODS
+
+=head2 new
+
+  my $git = Service::Git->new;
+  my $git = Service::Git->new($path);
+  my $git = Service::Git->new($path, track_branch => 1);
+
+Returns the C<Service::Git> for the repository containing C<$path>, creating
+it on first call and returning the existing instance thereafter.
+
+Requesting C<track_branch> on a repository that already has an untracked
+instance upgrades that instance in place rather than creating a second one,
+recording the current branch as the one to restore.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+Any path inside the repository. Defaults to the current directory.
+
+=item C<%opts>
+
+=over 4
+
+=item C<track_branch>
+
+Remember the current branch and restore it on C<restore_branch> or at process
+exit.
+
+=back
+
+=back
+
+B<Returns:> The C<Service::Git> instance for that repository.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Not a git repository: %s"> -- raised via C<bail()> when C<$path> is not
+under git control. C<%s> is the path given.
+
+=back
+
+B<Examples:>
+
+  my $git = Service::Git->new('.');
+  # returns the instance for the repository containing the cwd
+
+  my $a = Service::Git->new('repo/bosh');
+  my $b = Service::Git->new('repo/vault');
+  # returns the same object for both -- one repository, one instance
+
+=head2 create
+
+  my $git = Service::Git->create($path);
+  my $git = Service::Git->create($path, initial_branch => 'control');
+
+Initialises a git repository at C<$path> and returns an instance for it.
+
+When C<initial_branch> is given, the branch is set with
+C<git symbolic-ref> rather than C<git init -b>, because the latter requires
+git 2.28 or newer and this must work against older installations.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+Where to initialise. Defaults to the current directory.
+
+=item C<%opts>
+
+C<initial_branch> as above; any other options are passed to C<new>.
+
+=back
+
+B<Returns:> The C<Service::Git> instance for the new repository.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to initialize git in %s"> -- raised via C<run>'s C<onfailure> when
+C<git init> fails.
+
+=back
+
+B<Examples:>
+
+  my $git = Service::Git->create($dir, initial_branch => 'control');
+  # returns an instance whose HEAD points at refs/heads/control
+
+=head2 DESTROY
+
+Restores the tracked branch at process exit.
+
+Only acts when C<track_branch> was requested and the branch has actually
+changed. Working-tree changes are discarded first -- a checkout would fail
+against a dirty tree, and leaving the operator on the wrong branch is the
+worse outcome.
+
+Both commands run in pass/fail mode: this runs during global destruction,
+where dying achieves nothing useful.
+
+B<Returns:> Nothing.
+
+=head2 root
+
+  my $path = $git->root;
+
+The absolute path of the git top-level directory.
+
+B<Parameters:> None.
+
+B<Returns:> The git root path.
+
+B<Examples:>
+
+  my $path = $git->root;
+  # returns '/home/me/deployments'
+
+=head2 prefix
+
+  my $prefix = $git->prefix;
+
+The offset from the git root to the directory the instance was created in,
+as git reports it -- with a trailing slash, or empty when they are the same.
+
+B<Parameters:> None.
+
+B<Returns:> The prefix string, possibly empty.
+
+B<Examples:>
+
+  my $prefix = $git->prefix;
+  # returns 'bosh/' for a deployment repo inside a larger git repository
+
+  my $prefix = $git->prefix;
+  # returns '' when the deployment repo is the git root
+
+=head2 current_branch
+
+  my $branch = $git->current_branch;
+
+The name of the branch at HEAD.
+
+B<Parameters:> None.
+
+B<Returns:> The branch name. On a detached HEAD git reports C<HEAD>, and that
+is what comes back.
+
+B<Examples:>
+
+  my $branch = $git->current_branch;
+  # returns 'staging'
+
+=head2 checkout
+
+  $git->checkout($branch);
+
+Switches to C<$branch>.
+
+When tracking is enabled and no original branch has been recorded yet, the
+branch being left is recorded first -- so the first checkout is what
+C<restore_branch> later undoes.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to switch to.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to checkout '%s'"> -- raised via C<run>'s C<onfailure>. C<%s> is
+the branch name.
+
+=back
+
+B<Examples:>
+
+  $git->checkout('staging');
+  # returns $self, with HEAD now on staging
+
+=head2 restore_branch
+
+  $git->restore_branch;
+
+Returns to the branch recorded when tracking began.
+
+No-op when nothing was recorded, or when that branch is already checked out.
+Runs in pass/fail mode: this is cleanup, and a failure here should not mask
+whatever the caller was actually doing.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>, or nothing when no original branch was recorded.
+
+B<Examples:>
+
+  $git->checkout('staging');
+  $git->restore_branch;
+  # returns to whatever was checked out when tracking began
+
+=head2 create_branch
+
+  $git->create_branch($name);
+  $git->create_branch($name, $ref);
+
+Creates a branch, at C<$ref> when given and at HEAD otherwise. Does not check
+it out.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The branch to create.
+
+=item C<$ref>
+
+Where to start it. Defaults to HEAD.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to create branch '%s'"> -- raised via C<run>'s C<onfailure>,
+including when the branch already exists.
+
+=back
+
+B<Examples:>
+
+  $git->create_branch('prod', 'control');
+  # returns $self; prod now exists at control's tip
+
+=head2 branch_exists
+
+  my $bool = $git->branch_exists($name);
+
+Whether a local branch exists. Memoized, and the cache is updated by
+C<create_branch>, C<fetch_branch> and C<fetch_branches> so a branch created
+or fetched through this object is known without re-querying.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The branch name.
+
+=back
+
+B<Returns:> 1 or 0.
+
+B<Examples:>
+
+  my $bool = $git->branch_exists('staging');
+  # returns 1
+
+=head2 sha
+
+  my $sha = $git->sha($ref);
+  my $sha = $git->sha($ref, short => 1);
+
+Resolves a ref to a commit sha. Convenience wrapper over C<rev_parse>,
+defaulting to HEAD.
+
+Because it resolves rather than merely formats, it also expands an
+abbreviated sha to its full form.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+Any ref git understands. Defaults to HEAD.
+
+=item C<%opts>
+
+C<short> for the abbreviated form.
+
+=back
+
+B<Returns:> The sha, or C<undef> when the ref does not resolve.
+
+B<Examples:>
+
+  my $sha = $git->sha('HEAD', short => 1);
+  # returns 'a1b2c3d'
+
+  my $sha = $git->sha('a1b2c3d');
+  # returns the full 40-character sha
+
+=head2 rev_parse
+
+  my $sha = $git->rev_parse($ref);
+  my $sha = $git->rev_parse($ref, short => 1);
+
+The underlying C<git rev-parse>. Prefer C<sha> unless you need the raw call.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The ref to resolve.
+
+=item C<%opts>
+
+C<short> for the abbreviated form.
+
+=back
+
+B<Returns:> The resolved sha, or C<undef>.
+
+B<Examples:>
+
+  my $sha = $git->rev_parse('origin/main');
+  # returns the full sha of that ref
+
+=head2 merge_base
+
+  my $sha = $git->merge_base($a, $b);
+
+The best common ancestor of two refs.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$a>, C<$b>
+
+The refs to compare.
+
+=back
+
+B<Returns:> The ancestor's sha, or C<undef> when the histories are unrelated.
+
+B<Examples:>
+
+  my $sha = $git->merge_base('staging', 'control');
+  # returns the commit they diverged from
+
+=head2 is_ancestor
+
+  my $bool = $git->is_ancestor($maybe_ancestor, $descendant);
+
+Whether the first ref is reachable from the second. A ref is its own
+ancestor, so identical refs are true.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$maybe_ancestor>
+
+The ref that might be behind.
+
+=item C<$descendant>
+
+The ref that might be ahead.
+
+=back
+
+B<Returns:> 1 or 0. Returns 0 rather than erroring when either argument is
+undefined.
+
+B<Examples:>
+
+  my $bool = $git->is_ancestor($deployed_sha, 'HEAD');
+  # returns 1 when HEAD contains that commit -- nothing has been reverted
+
+  my $bool = $git->is_ancestor($sha, $sha);
+  # returns 1 -- a commit is its own ancestor
+
+=head2 is_clean
+
+  my $bool = $git->is_clean;
+
+Whether the working tree has no modified, staged or conflicted files.
+
+B<Untracked files do not count as dirty.> The question this answers is
+whether it is safe to switch branches, and untracked files survive a
+checkout untouched. Use C<status> when you need to see them.
+
+B<Parameters:> None.
+
+B<Returns:> 1 when clean, 0 otherwise.
+
+B<Examples:>
+
+  my $bool = $git->is_clean;
+  # returns 1 even with untracked files present
+
+=head2 status
+
+  my $unclean = $git->status;
+  my $unclean = $git->status(@pathspecs);
+
+The working tree's state as a hashref of path to two-character porcelain
+status code.
+
+Unlike C<is_clean>, this B<does> include untracked files, reported as C<??>.
+Callers wanting only tracked changes should filter them out.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@pathspecs>
+
+Optional paths to limit the report to, relative to the git root -- so pass
+them through C<prefixed> if they are deployment-relative.
+
+=back
+
+B<Returns:> A hashref keyed by path. Empty when nothing is reported.
+
+B<Examples:>
+
+  my $unclean = $git->status;
+  # returns { 'ops/thing.yml' => ' M', 'scratch.txt' => '??' }
+
+  my $unclean = $git->status($git->prefixed('ops/thing.yml'));
+  # returns only that path's state, or {} when it is unchanged
+
+=head2 pull_ff_only
+
+  $git->pull_ff_only($branch);
+  $git->pull_ff_only($branch, $remote);
+
+Fast-forwards a branch from a remote, refusing anything that would require a
+merge.
+
+Divergence is treated as fatal rather than resolved automatically: this runs
+against branches a pipeline owns, where divergence means something is wrong
+that a merge would paper over.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to fast-forward.
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> C<$self>. No-op when no remote is configured.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to fast-forward %s from %s -- resolve the divergence and retry"> --
+raised via C<run>'s C<onfailure>.
+
+=back
+
+B<Examples:>
+
+  $git->pull_ff_only('control');
+  # returns $self, or bails if control has diverged from the remote
+
+=head2 pull_rebase
+
+  $git->pull_rebase($branch);
+  $git->pull_rebase($branch, $remote);
+
+Rebases the current branch onto C<remote/branch>, to integrate concurrent
+updates before pushing.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to rebase onto.
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> C<$self>. No-op when no remote is configured.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to rebase %s on %s/%s -- resolve the divergence and push manually">
+-- raised via C<run>'s C<onfailure>.
+
+=back
+
+B<Examples:>
+
+  $git->pull_rebase('staging');
+  # returns $self with local commits replayed on the remote tip
+
+=head2 diff_files
+
+  my $diff = $git->diff_files($from, $to);
+  my $diff = $git->diff_files($from, $to, @pathspecs);
+
+A structured diff between two refs.
+
+Renames are reported three ways at once, deliberately: the old path appears
+in C<deleted>, the new one in C<changed>, and the pair in C<renamed>. A
+caller copying C<changed> and removing C<deleted> therefore handles a rename
+correctly without knowing it was one, while a caller that cares can consult
+C<renamed>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$from>, C<$to>
+
+The refs to compare.
+
+=item C<@pathspecs>
+
+Optional paths to limit the diff to, relative to the git root.
+
+=back
+
+B<Returns:> A hashref with keys C<changed> (added, modified or type-changed),
+C<deleted>, C<renamed> (old path to new), and C<all> (changed plus deleted).
+
+B<Examples:>
+
+  my $diff = $git->diff_files('staging', $sha, @paths);
+  # returns { changed => ['ops/new.yml'], deleted => [],
+  #           renamed => {}, all => ['ops/new.yml'] }
+
+  # A rename from a.yml to b.yml:
+  my $diff = $git->diff_files($from, $to);
+  # returns { changed => ['b.yml'], deleted => ['a.yml'],
+  #           renamed => { 'a.yml' => 'b.yml' }, all => ['b.yml','a.yml'] }
+
+=head2 diff_names
+
+  my @files = $git->diff_names($from, $to);
+  my @files = $git->diff_names($from, $to, @pathspecs);
+
+The names of files that differ between two refs, without classification.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$from>, C<$to>
+
+The refs to compare.
+
+=item C<@pathspecs>
+
+Optional git-root-relative paths.
+
+=back
+
+B<Returns:> The list of changed paths. Empty when identical.
+
+B<Examples:>
+
+  my @files = $git->diff_names('HEAD~1', 'HEAD');
+  # returns ('ops/thing.yml')
+
+=head2 ls_tree
+
+  my @files = $git->ls_tree($ref);
+  my @files = $git->ls_tree($ref, $path);
+
+Lists the files present on a ref, recursively.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The ref to list.
+
+=item C<$path>
+
+Optional path to list under. Defaults to the whole tree.
+
+=back
+
+B<Returns:> The list of paths.
+
+B<Examples:>
+
+  my @files = $git->ls_tree('control', 'ops');
+  # returns every file under ops/ on the control branch
+
+=head2 log_subjects
+
+  my @lines = $git->log_subjects($branch);
+  my @lines = $git->log_subjects($branch, limit => 50, paths => \@paths);
+
+Commit lines for a branch, newest first.
+
+The C<paths> filter is what makes this usable in a repository deploying more
+than one thing from a single branch: without it, the history returned
+includes commits belonging to sibling deployments.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch or revision range to log.
+
+=item C<%opts>
+
+=over 4
+
+=item C<limit>
+
+Maximum number of commits.
+
+=item C<format>
+
+A git format string. Defaults to C<'%H %s'> -- sha and subject.
+
+=item C<paths>
+
+Arrayref of git-root-relative paths; only commits touching them are returned.
+
+=back
+
+=back
+
+B<Returns:> The formatted lines, newest first. Empty when nothing matches.
+
+B<Examples:>
+
+  my @lines = $git->log_subjects('staging', limit => 5);
+  # returns ('a1b2c3d... Bump kit version', ...)
+
+  my ($subject) = $git->log_subjects($sha, limit => 1, format => '%s');
+  # returns just that commit's subject
+
+=head2 show_file
+
+  my $content = $git->show_file($ref, $path);
+
+The contents of a file as of a given ref, without touching the working tree.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The ref to read from.
+
+=item C<$path>
+
+The file's path, relative to the git root.
+
+=back
+
+B<Returns:> The file's contents, or C<undef> when it does not exist on that
+ref. Absence is an ordinary answer here, not an error.
+
+B<Examples:>
+
+  my $content = $git->show_file('control', 'ops/thing.yml');
+  # returns the file as it is on control, whatever is checked out
+
+=head2 checkout_file
+
+  $git->checkout_file($ref, $file);
+
+Extracts one file from a ref into the working tree, creating its parent
+directories if needed.
+
+That last part is why this exists rather than a bare C<git checkout>: a file
+propagating from another branch may live in a directory that does not exist
+here yet.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The ref to take the file from.
+
+=item C<$file>
+
+The path, relative to the git root.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to checkout %s from %s"> -- raised via C<run>'s C<onfailure>.
+
+=back
+
+B<Examples:>
+
+  $git->checkout_file($sha, 'ops/new/thing.yml');
+  # returns $self; ops/new/ is created if it did not exist
+
+=head2 add
+
+  $git->add(@files);
+
+Stages files.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@files>
+
+Paths to stage.
+
+=back
+
+B<Returns:> C<$self>, or nothing when called with no files.
+
+B<Examples:>
+
+  $git->add('ops/thing.yml');
+  # returns $self
+
+=head2 rm
+
+  $git->rm(@files);
+
+Removes files from the index and the working tree.
+
+Runs in pass/fail mode, so removing a file that is already gone is not
+fatal -- which is what makes it safe to apply a diff's C<deleted> list
+without checking each path first.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@files>
+
+Paths to remove.
+
+=back
+
+B<Returns:> C<$self>, or nothing when called with no files.
+
+B<Examples:>
+
+  $git->rm(@{$diff->{deleted}});
+  # returns $self
+
+=head2 commit
+
+  $git->commit($message);
+  $git->commit($message, @files);
+
+Commits, staging C<@files> first when given.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$message>
+
+The commit message.
+
+=item C<@files>
+
+Optional paths to stage before committing.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to commit"> -- raised via C<run>'s C<onfailure>, including when
+there is nothing staged to commit.
+
+=back
+
+B<Examples:>
+
+  $git->commit('[pipeline] control@a1b2c3d -> staging (pulled)', @files);
+  # returns $self
+
+=head2 cherry_pick
+
+  $git->cherry_pick($sha);
+
+Applies a commit onto the current branch.
+
+B<A conflict is cleaned up before bailing.> The in-progress cherry-pick is
+aborted, so the caller is not left in a conflicted state they did not ask
+for and may not know how to exit. The conflicting paths are named in the
+error, having been read from git's own output.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$sha>
+
+The commit to apply.
+
+=back
+
+B<Returns:> C<$self> on success. Does not return on failure.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"cherry-pick of #C{%s} produced conflict(s):"> followed by the conflicting
+paths -- raised via C<bail()> after aborting.
+
+=item *
+
+C<"cherry-pick of #C{%s} failed: %s"> -- raised via C<bail()> for any other
+failure, carrying git's own message.
+
+=back
+
+B<Examples:>
+
+  $git->cherry_pick($sha);
+  # returns $self
+
+  $git->cherry_pick($conflicting_sha);
+  # aborts the cherry-pick, then bails naming the conflicting files
+
+=head2 reset_working_tree
+
+  $git->reset_working_tree;
+
+Discards working-tree changes to tracked files. Untracked files are left
+alone.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>.
+
+B<Examples:>
+
+  $git->reset_working_tree;
+  # returns $self with tracked files back to their committed state
+
+=head2 default_remote
+
+  my $remote = $git->default_remote;
+
+The first configured remote, memoized.
+
+Every remote-taking method falls back to this, and every one of them treats
+C<undef> as "nothing to do" rather than an error -- a repository with no
+remote is a legitimate local-only deployment repo, not a misconfiguration.
+
+B<Parameters:> None.
+
+B<Returns:> The remote name, or C<undef> when none is configured.
+
+B<Examples:>
+
+  my $remote = $git->default_remote;
+  # returns 'origin', or undef in a repository with no remotes
+
+=head2 remote_url
+
+  my $url = $git->remote_url;
+  my $url = $git->remote_url($remote);
+
+The fetch URL for a remote.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> The URL, or C<undef> when no remote is configured.
+
+B<Examples:>
+
+  my $url = $git->remote_url;
+  # returns 'git@github.com:org/deployments.git'
+
+=head2 remote_branch_exists
+
+  my $bool = $git->remote_branch_exists($branch);
+  my $bool = $git->remote_branch_exists($branch, $remote);
+
+Whether a branch exists on the remote.
+
+B<A failed lookup bails rather than returning false.> Authentication
+failures, network problems and bad remotes would otherwise be
+indistinguishable from "the branch is not there", and a caller acting on
+that answer would create a branch that already exists or skip work that
+still needs doing.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to look for.
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> 1 or 0. Returns 0 when no remote is configured -- there is
+nothing to check against.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"ls-remote against #C{%s} failed: %s"> -- raised via C<bail()> carrying
+git's message.
+
+=back
+
+B<Examples:>
+
+  my $bool = $git->remote_branch_exists('staging');
+  # returns 1
+
+  my $bool = $git->remote_branch_exists('staging');
+  # bails when credentials are missing, rather than reporting 0
+
+=head2 delete_remote_branch
+
+  $git->delete_remote_branch($branch);
+  $git->delete_remote_branch($branch, $remote);
+
+Deletes a branch on the remote.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to delete.
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> C<$self>. No-op when no remote is configured.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to delete remote branch #C{%s} on #C{%s}: %s"> -- raised via
+C<bail()> carrying git's message.
+
+=back
+
+B<Examples:>
+
+  $git->delete_remote_branch('old-env');
+  # returns $self
+
+=head2 fetch_branch
+
+  $git->fetch_branch($branch);
+  $git->fetch_branch($branch, $remote);
+
+Fetches one branch into the matching local ref.
+
+Uses a forced refspec, so the local ref is created or overwritten regardless
+of fast-forward status. That is safe for the branches this is used on --
+propagation branches are written once and never rebased -- and would not be
+for a branch someone commits to locally.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to fetch.
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> C<$self>. No-op when no remote is configured.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to fetch '%s' from '%s'"> -- raised via C<run>'s C<onfailure>.
+
+=back
+
+B<Examples:>
+
+  $git->fetch_branch('staging');
+  # returns $self; refs/heads/staging now matches the remote
+
+=head2 fetch_branches
+
+  $git->fetch_branches(\@names);
+  my ($self, $result) = $git->fetch_branches(\@names, $remote);
+
+Fetches several branches in one git invocation.
+
+B<One invocation, so credentials are prompted once> regardless of how many
+branches are listed. Fetching them individually turns a ten-branch refresh
+into ten prompts.
+
+The currently checked-out branch is skipped: git refuses to update an active
+branch through a refspec, and including it would fail the whole fetch.
+
+B<Failures are classified rather than merely reported.> In list context the
+result distinguishes a network problem from an authentication problem from
+anything else, so a caller can tell an operator which one they are looking
+at. Scalar context returns C<$self> alone, which is what earlier callers
+expect.
+
+Outside a controlling terminal, C<GIT_TERMINAL_PROMPT=0> is set so a missing
+credential fails immediately instead of hanging on a prompt nobody can
+answer.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\@names>
+
+The branches to fetch.
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> In scalar context, C<$self>. In list context,
+C<($self, \%result)>, where the hashref carries C<ok> (1 on success or
+no-op, 0 on a real failure), C<kind> (C<success>, C<network>, C<auth> or
+C<unknown>), and C<err> (git's stderr, only when C<ok> is 0).
+
+B<Examples:>
+
+  my ($git, $r) = $git->fetch_branches(['staging', 'prod']);
+  # returns ($self, { ok => 1, kind => 'success' })
+
+  my ($git, $r) = $git->fetch_branches(\@branches);
+  # returns ($self, { ok => 0, kind => 'auth', err => '...' })
+  # when credentials are missing
+
+  $git->fetch_branches([]);
+  # returns $self -- nothing to fetch is a success, not a failure
+
+=head2 push
+
+  my $results = $git->push(@branches);
+  my $results = $git->push($remote, @branches);
+
+Pushes branches, reporting the outcome per branch.
+
+B<The remote argument is detected, not declared.> If the first argument is
+not a known local branch, it is taken to be a remote name. A branch whose
+name collides with a remote's would therefore be misread -- in practice
+branches are not named C<origin>.
+
+Each branch is pushed separately and a failure does not stop the rest, so a
+partial push is reported rather than aborted midway.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@args>
+
+An optional leading remote name followed by the branches to push. The two are
+not distinguished by position but by lookup: the first element is treated as
+a remote only when C<branch_exists> says it is not a local branch. Passing
+branches alone is the common case.
+
+=back
+
+B<Returns:> A hashref of branch name to 1 or 0. Empty hashref when no remote
+is configured.
+
+B<Examples:>
+
+  my $results = $git->push('staging', 'prod');
+  # returns { staging => 1, prod => 1 }
+
+  my $results = $git->push(@branches);
+  # returns { staging => 1, prod => 0 } when only prod was rejected
+
+=head2 prefixed
+
+  my @git_paths = $git->prefixed(@repo_paths);
+
+Converts deployment-root-relative paths to git-root-relative ones, which is
+the spelling every pathspec argument in this class expects.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@paths>
+
+Paths relative to the deployment root.
+
+=back
+
+B<Returns:> The converted paths. Unchanged when the prefix is empty.
+
+B<Examples:>
+
+  my @git_paths = $git->prefixed('ops/thing.yml');
+  # returns ('bosh/ops/thing.yml') when the prefix is 'bosh/'
+
+=head2 unprefixed
+
+  my @user_paths = $git->unprefixed(@git_paths);
+
+The inverse of C<prefixed>, for showing paths to an operator.
+
+Paths that do not start with the prefix are returned untouched rather than
+mangled, so a path from outside the deployment root stays recognisable
+instead of being silently truncated.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@paths>
+
+Paths relative to the git root.
+
+=back
+
+B<Returns:> The converted paths. Unchanged when the prefix is empty or does
+not match.
+
+B<Examples:>
+
+  my @user_paths = $git->unprefixed('bosh/ops/thing.yml');
+  # returns ('ops/thing.yml') when the prefix is 'bosh/'
+
+  my @user_paths = $git->unprefixed('vault/ops/other.yml');
+  # returns ('vault/ops/other.yml') -- outside this deployment, left alone
+
+=head2 in_repo
+
+  my $bool = $git->in_repo;
+
+Whether the instance resolved a git root. Always true for a constructed
+instance, since C<new> bails otherwise.
+
+B<Parameters:> None.
+
+B<Returns:> True when a root is set.
+
+B<Examples:>
+
+  my $bool = $git->in_repo;
+  # returns 1
+
+=head2 is_inside_work_tree
+
+  my $bool = Service::Git->is_inside_work_tree;
+  my $bool = Service::Git->is_inside_work_tree($path);
+
+Whether a path is inside a git work tree. A class method, so it can be
+called before deciding whether constructing an instance would succeed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path to test. Defaults to the current directory.
+
+=back
+
+B<Returns:> True when inside a work tree, false otherwise.
+
+B<Examples:>
+
+  my $bool = Service::Git->is_inside_work_tree($dir);
+  # returns false rather than bailing, unlike new()
+
+=head1 SEE ALSO
+
+L<Genesis::Top>, L<Genesis::Commands::Env>, L<Genesis::CI::Propagation>
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut

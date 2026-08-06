@@ -242,8 +242,67 @@ B<Examples:>
     my $r = $hook->results;
     # Returns: 'some output'
 
+=head2 completed
+
+    my $bool = $hook->completed;
+
+Whether C<done> has been called on this hook.
+
+C<results> consults this before handing anything back, so a hook that has
+not completed reports C<undef> results rather than partial ones.
+
+B<Parameters:> None.
+
+B<Returns:> The C<complete> flag -- truthy once C<done> has run, false or
+C<undef> before that.
+
+B<Examples:>
+
+    $hook->done('some output');
+    my $bool = $hook->completed;
+    # returns 1
+
+=head2 check_minimum_genesis_version
+
+    $hook->check_minimum_genesis_version($min_version);
+
+Asserts that the running Genesis is at least C<$min_version>, and bails with
+an upgrade instruction if not. Kits call this from a hook that depends on
+behaviour newer than the oldest Genesis they otherwise support.
+
+The check requires both versions to parse as semver; if either does not,
+the assertion fails and the hook bails. That is deliberate -- an
+unparseable version is not evidence of being new enough.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$min_version>
+
+The minimum acceptable Genesis version, as a semver string.
+
+=back
+
+B<Returns:> Nothing meaningful on success.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"The %s kit %s hook requires Genesis v%s or higher -- cannot continue.  Please upgrade using #G{%s upgrade}">
+-- raised via C<bail()>. The substitutions are the kit id, the hook name
+from C<GENESIS_KIT_HOOK>, the required version, and the invoking binary
+from C<GENESIS_CALL_BIN>.
+
+=back
+
+B<Examples:>
+
     $hook->check_minimum_genesis_version('3.0.0');
-    # Returns: nothing on success; dies if version requirement not met
+    # returns nothing when Genesis is new enough; bails otherwise
 
 =head2 env
 
@@ -291,6 +350,28 @@ B<Examples:>
         # this is a proto/create-env environment
     }
     # Returns: 1 if using create-env, undef otherwise
+
+=head2 deployed
+
+    my $bool = $hook->deployed;
+
+Whether the environment has been deployed, per its deployment state.
+
+Note this asks the environment's recorded state, not the director. A hook
+that needs to know what is actually on the director should query it rather
+than rely on this.
+
+B<Parameters:> None.
+
+B<Returns:> 1 when the environment's current state is C<'deployed'>, 0
+otherwise.
+
+B<Examples:>
+
+    if ($hook->deployed) {
+        # an earlier deployment exists to compare against
+    }
+    # returns 1 when the environment reports state 'deployed', else 0
 
 =head2 features
 
@@ -462,11 +543,148 @@ B<Examples:>
     }
     # Returns: 1 if active, undef otherwise
 
+=head2 iaas
+
     my $iaas = $hook->iaas;
-    # Returns: 'aws'
+
+The IaaS the environment targets. One of a small set of "universal"
+features -- properties every environment has, as opposed to the opt-in
+feature flags C<want_feature> tests.
+
+B<Parameters:> None.
+
+B<Returns:> The IaaS string, or a false value when the hook has no
+environment.
+
+B<Examples:>
+
+    my $iaas = $hook->iaas;
+    # returns 'aws'
+
+=head2 scale
+
+    my $scale = $hook->scale;
+
+The environment's scale profile.
+
+B<Parameters:> None.
+
+B<Returns:> The scale string, or a false value when the hook has no
+environment.
+
+B<Examples:>
+
+    my $scale = $hook->scale;
+    # returns 'dev'
+
+=head2 is_ocfp
+
+    my $bool = $hook->is_ocfp;
+
+Whether the environment is an OCFP deployment.
+
+B<Parameters:> None.
+
+B<Returns:> Truthy for OCFP environments, false otherwise or when the hook
+has no environment.
+
+B<Examples:>
+
+    my $bool = $hook->is_ocfp;
+    # returns 1 under OCFP
+
+=head2 cpi_name
+
+    my $name = $hook->cpi_name;
+
+The environment's CPI name -- the routing target used in cpi configs, not
+the CPI release the director runs.
+
+B<Parameters:> None.
+
+B<Returns:> The cpi name string, or a false value when the hook has no
+environment.
+
+B<Examples:>
+
+    my $name = $hook->cpi_name;
+    # returns 'my-env.bosh.cpi'
+
+=head2 cpi_enabled
+
+    my $bool = $hook->cpi_enabled;
+
+Whether CPI config generation is enabled for the environment.
+
+B<Parameters:> None.
+
+B<Returns:> Truthy when enabled, false otherwise or when the hook has no
+environment.
+
+B<Examples:>
+
+    my $bool = $hook->cpi_enabled;
+    # returns 1 when the environment generates a cpi config
+
+=head2 kit
+
+    my $kit = $hook->kit;
+
+The kit backing this hook, reached through the environment.
+
+B<Parameters:> None.
+
+B<Returns:> A C<Genesis::Kit> object, or a false value when the hook has no
+environment.
+
+B<Examples:>
+
+    my $kit = $hook->kit;
+    # returns the Genesis::Kit object
+
+=head2 kit_bug
+
+    $hook->kit_bug($msg, @args);
+
+Reports a defect in the kit -- the error is the kit author's to fix, not the
+operator's -- and terminates.
+
+Delegates to the kit's own C<kit_bug>, which frames the message that way. If
+the kit cannot be determined it bails on that instead, since a kit bug with
+no kit to attribute it to would be a less useful message.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$msg>
+
+A C<sprintf> format string.
+
+=item C<@args>
+
+Arguments for the format string.
+
+=back
+
+B<Returns:> Never returns.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Kit bug detected, but cannot determine kit for %s/%s"> -- raised via
+C<bail()> when C<kit> is unavailable. The substitutions are the environment
+name and type.
+
+=back
+
+B<Examples:>
 
     $hook->kit_bug("Unexpected option value %s: %s", 'mode', $mode);
-    # Returns: never (always dies)
+    # prints the kit-attributed message and never returns
 
 =head2 kit_has_file
 
@@ -550,6 +768,48 @@ B<Examples:>
 
     my @t = titleize('hello world');
     # Returns: ('Hello World')
+
+=head2 label
+
+    my $label = $hook->label;
+
+A display prefix identifying this hook, used to attribute its output.
+
+An explicit C<label> passed to C<init> is returned as-is. Otherwise it is
+derived from the class name, which must match
+C<Genesis::Hook::E<lt>typeE<gt>::E<lt>kit-nameE<gt>> with an optional
+C<::E<lt>subcommandE<gt>>. The kit name and type are emitted in that order
+-- kit first, then type -- with the subcommand appended after a slash when
+present, and the module version when one is set.
+
+The naming rule is enforced rather than assumed: a module outside that shape
+is a kit-authoring mistake and reports as a kit bug.
+
+B<Parameters:> None.
+
+B<Returns:> A formatted label string, e.g. C<"[#M{my-kit cloud-config}] ">.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Invalid Genesis Hook module: %s -- expected Genesis::Hook::E<lt>typeE<gt>::E<lt>kit-nameE<gt>[::E<lt>subcommandE<gt>]">
+-- raised via the kit's C<kit_bug> when the class name does not match.
+C<%s> is the offending class name.
+
+=back
+
+B<Examples:>
+
+    # In Genesis::Hook::CloudConfig::my_kit
+    my $label = $hook->label;
+    # returns '[my_kit CloudConfig] '
+
+    # With an explicit label passed to init
+    my $label = $hook->label;
+    # returns whatever was passed, unchanged
 
 =head2 spruce_merge
 
@@ -657,24 +917,61 @@ B<Examples:>
 
 =head2 TRUE
 
-    my $true  = Genesis::Hook->TRUE($ops, @required);
-    my $false = Genesis::Hook->FALSE;
-    my $null  = Genesis::Hook->NULL;
+    my $true = $hook->TRUE;
 
-JSON/YAML boolean and null helpers. These four methods are documented
-together because they appear in the source as a group with C<check_for_required_args>.
+The JSON boolean true singleton, for data structures destined for JSON or
+YAML serialization. A bare C<1> there would serialize as the number 1, not
+as C<true>.
 
-B<TRUE> returns the JSON boolean true value, suitable for use in data
-structures that will be serialized to JSON or YAML.
+B<Parameters:> None.
 
-B<FALSE> returns the JSON boolean false value.
+B<Returns:> C<JSON::PP::true>.
 
-B<NULL> returns the JSON null value.
+B<Examples:>
 
-B<check_for_required_args> validates that all keys listed in C<@required>
-are present in the hash reference C<$ops>. See L</check_for_required_args>
-under L</INTERNAL METHODS> for details; it is documented there in full
-because it is grouped with these methods in the source.
+    my $data = { enabled => $hook->TRUE };
+    # returns a hash whose 'enabled' serializes as `true`, not `1`
+
+=head2 FALSE
+
+    my $false = $hook->FALSE;
+
+The JSON boolean false singleton. A bare C<0> would serialize as the number
+0, and Perl's empty-string false as C<"">.
+
+B<Parameters:> None.
+
+B<Returns:> C<JSON::PP::false>.
+
+B<Examples:>
+
+    my $data = { debug => $hook->FALSE };
+    # returns a hash whose 'debug' serializes as `false`, not `0`
+
+=head2 NULL
+
+    my $null = $hook->NULL;
+
+The JSON null singleton. Distinct from Perl's C<undef>, which serializers
+generally drop rather than emit as C<null>.
+
+B<Parameters:> None.
+
+B<Returns:> C<JSON::PP::null>.
+
+B<Examples:>
+
+    my $data = { comment => $hook->NULL };
+    # returns a hash whose 'comment' serializes as `null`, not omitted
+
+=head2 check_for_required_args
+
+    $class->check_for_required_args($ops, @required);
+
+Validates that every key in C<@required> is defined in C<$ops>. Subclass
+C<init> methods call this before delegating to C<SUPER::init>, so a kit that
+omits a required argument fails with a named error rather than letting an
+undefined value surface somewhere later.
 
 B<Parameters:>
 
@@ -682,23 +979,16 @@ B<Parameters:>
 
 =item C<$ops>
 
-For C<check_for_required_args>: a hash reference of constructor options to
-validate. Not used by C<TRUE>, C<FALSE>, or C<NULL>.
+A hashref of the options to check -- a reference, not a flat list.
+Subclasses typically pass C<{@_}>.
 
 =item C<@required>
 
-For C<check_for_required_args>: the list of key names that must be defined
-in C<$ops>.
+The key names that must be defined.
 
 =back
 
-B<Returns:>
-
-C<TRUE> returns the JSON boolean true singleton (JSON::PP::true).
-
-C<FALSE> returns the JSON boolean false singleton (JSON::PP::false).
-
-C<NULL> returns the JSON null singleton (JSON::PP::null).
+B<Returns:> C<1> when every required key is present.
 
 B<Errors:>
 
@@ -707,19 +997,14 @@ B<Errors:>
 =item *
 
 C<"Missing required arguments for a perl-based kit hook call: %s"> -- raised
-via C<bug()> by C<check_for_required_args> if any required keys are absent.
-C<%s> is replaced with the comma-separated list of missing key names.
+via C<bug()>. C<%s> is the comma-separated list of missing key names.
 
 =back
 
 B<Examples:>
 
-    my $data = {
-        enabled => $hook->TRUE,
-        debug   => $hook->FALSE,
-        comment => $hook->NULL,
-    };
-    # Returns: a hash with JSON-compatible boolean and null values
+    $class->check_for_required_args({@_}, qw/env kit/);
+    # returns 1 when both are present; bugs out naming whichever is missing
 
 =head2 require_hook_lib
 
@@ -1065,71 +1350,13 @@ B<Returns:> Whatever value was passed to C<done>, made available via
 C<results>. The return value of C<perform> itself is not used by Genesis;
 only the value recorded via C<done> matters.
 
-=head1 INTERNAL METHODS
-
-These methods are internal to the implementation. They may change without
-notice and should not be called directly.
-
-=head2 check_for_required_args
-
-    Genesis::Hook->check_for_required_args(\%opts, @required);
-
-Validates that all keys listed in C<@required> are present (defined) in
-C<%opts>. Used by C<init> to enforce required constructor arguments.
-
-B<Parameters:>
-
-=over 4
-
-=item C<\%opts>
-
-A hash reference of the options to check.
-
-=item C<@required>
-
-The list of key names that must be defined in C<%opts>.
-
-=back
-
-B<Returns:> C<1> if all required keys are present.
-
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"Missing required arguments for a perl-based kit hook call: %s"> -- raised
-via C<bug()> if any required keys are absent. C<%s> is replaced with the
-comma-separated list of missing key names.
-
-=back
-
-B<Examples:>
-
-    Genesis::Hook->check_for_required_args(\%opts, qw/env/);
-    # Returns: 1 if 'env' is present in %opts; dies otherwise
-
-=head1 KNOWN ISSUES
-
-The following defects are tracked in FWT-751 and are documented here so
-that callers are aware of the current behaviour.
-
-=over 4
-
-=item HK-1 (smell) E<mdash> B<RESOLVED>
-
-Lines 5 and 42: C<mkdir_or_fail> was previously absent from the explicit
-import list despite being called in C<tempdir()>. Fixed by adding
-C<mkdir_or_fail> to the C<use Genesis qw(...)> import list.
-
-=back
-
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

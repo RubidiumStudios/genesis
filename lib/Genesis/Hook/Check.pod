@@ -59,10 +59,16 @@ This class inherits from L<Genesis::Hook>. See L<Genesis::Hook> for the
 full lifecycle description, including C<init>, C<done>, C<env>, C<features>,
 and all other base class methods.
 
-B<Note:> C<Genesis::Hook::Check> itself never calls C<< $self->done >>.
-Subclasses must call C<done> explicitly at the end of their C<perform>
-method, or the hook will remain in an incomplete state and C<completed>
-will return false. See CHK-1 in L</KNOWN ISSUES>.
+B<Completion is the subclass's job.> C<Genesis::Hook::Check> never calls
+C<< $self->done >> itself. Being an abstract base that delegates C<perform>
+to its subclasses, it has no way to know when a check has finished or what
+its result was. Each subclass must call C<< $self->done($result) >> before
+returning from C<perform>; a subclass that forgets leaves the hook in an
+incomplete state and C<completed> reports false.
+
+This is the intended lifecycle for this class, not an oversight -- worth
+stating because the absence of any C<done> call in this file reads like
+one.
 
 =head1 METHODS
 
@@ -505,28 +511,13 @@ B<Examples:>
         deployment => 'bosh/bosh');
     # Returns: (1) if director_url exists in exodus for bosh/bosh
 
-=head1 KNOWN ISSUES
-
-The following defects are tracked in FWT-751 and are documented here so
-that callers are aware of the current behaviour.
-
-=over 4
-
-=item CHK-1 (inconsistency) E<mdash> B<by-design>
-
-C<done> is never called within C<Genesis::Hook::Check> itself.
-C<Genesis::Hook::Check> is an abstract base class that delegates C<perform>
-to subclasses. Subclasses are responsible for calling
-C<< $self->done($result) >> before returning from C<perform>. This is the
-intended lifecycle pattern, not a bug.
-
-=back
-
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

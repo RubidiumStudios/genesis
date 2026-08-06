@@ -48,14 +48,6 @@ sub create {
 
 # }}}
 # target - builder for vault based on locally available vaults {{{
-#
-# Two code paths:
-#   1. Target given (alias or url): delegates to the parent
-#      Service::Vault->target, whose lookup is class-agnostic so a
-#      local vault at that url is honored.
-#   2. Target absent: interactive picker for the user to choose from
-#      the Remote vaults on this system.  Remote-specific and stays
-#      here.
 sub target {
 	my ($class, $target, %opts) = @_;
 
@@ -207,7 +199,6 @@ sub find {
 }
 
 # }}}
-# }}}
 
 ### Instance Methods {{{
 
@@ -319,10 +310,6 @@ sub authenticate {
 
 # }}}
 # _on_auth_success - common return path for a successful authenticate() {{{
-#
-# Called from every "return $self" point in authenticate() so that the
-# token renewer is armed regardless of which auth method succeeded (or
-# whether we short-circuited on an already-authenticated session).
 sub _on_auth_success {
 	my ($self) = @_;
 	$self->start_token_renewer;
@@ -345,20 +332,6 @@ sub renewer_pid {
 
 # }}}
 # start_token_renewer - fork a child that keeps the vault token alive {{{
-#
-# Returns the child PID on success, or undef when:
-#   - The token is not renewable (or has zero/undef TTL).
-#   - fork() fails.
-#
-# Dead-man switches:
-#   - Idempotent: any prior renewer is stopped before a new one starts,
-#     so repeated authenticate() calls don't leak children.
-#   - Child body is eval-wrapped.  Every exit path goes through
-#     POSIX::_exit, so a `die` cannot fall through to Perl's normal exit
-#     machinery (which would run END blocks).
-#   - Child's parent-liveness check honours both `kill 0` AND getppid().
-#     getppid() == 1 (reparented to init) is a reliable orphan signal
-#     immune to PID reuse on long-running systems.
 sub start_token_renewer {
 	my ($self) = @_;
 
@@ -409,15 +382,6 @@ sub start_token_renewer {
 
 # }}}
 # stop_token_renewer - signal and reap the background renewer child {{{
-#
-# Idempotent: no-op when no renewer PID is stored.  Always clears the
-# stored PID regardless of whether kill/waitpid succeed, so a second
-# call is safe.
-#
-# Dead-man switch: TERM is polled with WNOHANG for ~2 seconds; if the
-# child refuses to exit (or is stuck in an uninterruptible syscall) the
-# stop path escalates to SIGKILL.  Without this, a stuck child would
-# block DESTROY and hang Genesis at command exit.
 sub stop_token_renewer {
 	my ($self) = @_;
 	my $pid = delete $self->{__renewer_pid};
@@ -441,27 +405,6 @@ sub stop_token_renewer {
 
 # }}}
 # _run_renewer_loop - testable renewer loop body {{{
-#
-# Returns an exit code (0 or 1) instead of calling POSIX::_exit directly
-# so the body can be unit-tested without forking.  All side-effecting
-# operations are injected so tests can drive the loop in-process:
-#
-#   parent_pid  parent PID to monitor (kill 0 => $parent_pid)
-#   ttl         initial token ttl, seconds
-#   sleep_fn    invoked with the computed sleep duration
-#   kill_fn     invoked with parent_pid; truthy => alive, false => dead
-#   query_fn    invoked with ('vault', 'token', 'renew');
-#               returns ($out, $rc, $err)
-#   info_fn     invoked after each renew; returns token_info hash
-#
-# Termination:
-#   - parent reported dead       => return 0
-#   - renew returned non-zero rc => return 1 (parent re-auths next call)
-#   - token becomes non-renewable
-#     or ttl decays to 0/undef   => return 0
-#
-# Sleep computation: half-life with a 60s floor so pathologically short
-# tokens don't busy-renew.
 sub _run_renewer_loop {
 	my ($self, %opts) = @_;
 	my $parent_pid = $opts{parent_pid};
@@ -488,16 +431,6 @@ sub _run_renewer_loop {
 
 # }}}
 # _authenticate_interactively - prompt-driven re-auth flow {{{
-#
-# Walks the operator through choosing an auth method and entering
-# credentials, then issues the same `safe auth $method` query the
-# env-var path uses.  Sensitive fields (tokens, passwords, secret-ids)
-# are collected via prompt_for_password (hidden input); identity
-# fields (role-id, username) via prompt_for_line.
-#
-# Returns truthy when $self->authenticated() agrees the new
-# credentials worked.  Returns 0 when the operator aborts, enters a
-# blank credential, or the safe call fails post-prompt.
 sub _authenticate_interactively {
 	my ($self) = @_;
 	my $ref = $self->ref;
@@ -567,15 +500,6 @@ sub _authenticate_interactively {
 
 # }}}
 # _interactive_auth_available - pure: can we prompt the operator? {{{
-#
-# True only when:
-#   - We're attached to a controlling terminal.
-#   - We're not running inside a Genesis kit-hook callback
-#     (the parent Genesis owns the user interaction in that case).
-#   - GENESIS_QUIET is not set.
-#   - GENESIS_NONINTERACTIVE is not set (explicit operator opt-out
-#     even when a TTY happens to be attached, e.g. some CI runners).
-#   - GENESIS_TESTING is not set (test harnesses must never prompt).
 sub _interactive_auth_available {
 	return 0 unless in_controlling_terminal();
 	return 0 if in_callback();

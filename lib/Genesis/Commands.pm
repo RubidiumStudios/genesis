@@ -258,14 +258,7 @@ sub run_command { # {{{
 	exit 0
 } # }}}
 
-# _gate_pipeline_on_legacy_ci_yml - PIPELINE-group dispatch gate {{{
-#
-# When the loaded deployment repo still carries a legacy pipeline
-# ci.yml (see Genesis::Top::has_legacy_ci_yml), refuse to run
-# PIPELINE-group commands and print a concrete migration message.
-# Non-pipeline commands (deploy, check, manifest, secrets ops, etc.)
-# continue to run against the same repo without a pipeline block
-# interfering.
+# _gate_pipeline_on_legacy_ci_yml - refuse PIPELINE-group commands in a repo still carrying a legacy ci.yml {{{
 sub _gate_pipeline_on_legacy_ci_yml {
 	# Only PIPELINE-group commands need the gate.
 	my $fg = command_properties()->{function_group} // {};
@@ -968,47 +961,13 @@ sub build_command_environment  { # {{{
 } # }}}
 
 sub has_scope { # {{{
-# has_scope returns true if any of the specified scopes are true for the
-# current command with its specified options.
+# Fragments are OR'd: a fragment whose conditions hold but whose scopes
+# don't cover the request falls through rather than deciding the answer.
 #
-# The scope is determined by checking the commands scope specification against
-# the options of the given call.
-#
-# In the simplest situation, if the command scope specification is a string,
-# that is compared to the queried scopes and returns true if it matcheds any of
-# them.
-#
-# If however, the command scope is an array, then each element is checked in
-# order.  Each array element is a scope fragment, consisting of an option
-# compariton (or an arrao of option comparisons), and a list of scopes.  The
-# option comparisons each can be one of the following expression types*:
-#   opt_name - matches boolean true
-#  !opt_name - matches boolean false
-#   opt_name=value - true if option 'opt_name' is set to the given value 'value'
-#  !opt_name=value - true if option 'opt_name' is any other value than 'value'
-#
-# For the scopes to be considered applicable, all option comparisons must be true.
-# The final element can be a single string, indicating a default scope, with no
-# option comparisons to be applied.  The first match (or default) will be
-# considered the only valid scopes for the current options of the current call.
-#
-# * if needed, support for regex or value comparisons can be easily added in the
-# future
-#
-# TODO:  Support complex requests such as:
-#   has_scope(['all' => [<list of scopes>]]) : all scopes specified must be applicable
-#     - work-around: has_scope('scope1') && has_scope('scope2') && ...
-#   has_scope(['any' => [<list of scopes>]]) : any scopes specified must be applicable
-#     - default if arrays is specified
-#   has_scope(['none' => [<list of scopes>]]) : no scope specified must be applicable
-#     - work around: (!any)
-#   has_scope(['not' => [<list of scopes>]]) : all of these scopes specified must not be applicable
-#     - work around: (!all)
-#   has_scope(['any_other' => [<list of scopes>]]) : at least one scope OTHER than those specified must be applicable
-#     - no work around at this time
-#   has_scope(['any_but' => [<list of scopes>]]) : at least one scope excluding any specified must be applicable
-#     - other & !any
-#
+# TODO: support combining forms -- has_scope([all => [...]]), [any => [...]],
+#       [none => [...]], [not => [...]].  Workable today by composing calls:
+#       all is && , any is the current default for a list, none/not are
+#       negations of those.
 	my @allowed_scopes = @_;
 	my $command_scopes = $PROPS{$COMMAND}{scope} or return 0; # no scope required
 	$command_scopes = [$command_scopes] unless ref($command_scopes) eq 'ARRAY';

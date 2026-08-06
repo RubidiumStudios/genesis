@@ -140,14 +140,8 @@ sub setup_from_configs {
 
 	my $logger = $class->new;
 
-	# Ensure <terminal> is configured at the default level (matching
-	# the lazy `Genesis::Log->new()->configure_log()` chain used by
-	# the `logger` helper).  Without this, an empty $log_configs
-	# leaves the singleton with no `<terminal>` entry, so the first
-	# `bail()` would create one at level FATAL via its own fallback
-	# and permanently suppress subsequent info/warning/debug output.
-	# configure_log() is internally idempotent (`unless ($self->{logs}{$log})`
-	# at the top of configure_log), so re-calls are safe.
+	# Must precede the loop: an empty $log_configs would otherwise let
+	# bail()'s FATAL-level fallback claim <terminal> permanently.
 	$logger->configure_log;
 
 	for my $i (0 .. $#$log_configs) {
@@ -217,34 +211,11 @@ sub setup_from_configs {
 }
 
 # parse_lifespan - parse a lifespan config string into a structured policy.
-#
-# Pure function: no IO, no globals.  Returns:
-#   {
-#     mode        => 'none' | 'union' | 'intersection' | 'truncate',
-#     count       => N | undef,
-#     age_seconds => S | undef,
-#     warnings    => [strings],  # caller emits subject to
-#                                # suppress_warnings.deprecations
-#   }
-#
-# Dies on unparseable input with the offending substring named.
-# (NOT Genesis::bail -- bail routes through the logger, so it's a
-# circular dep when called from within Log itself.)
-#
-# Modes:
-#   'none'         - no cleanup pass (value 'forever')
-#   'union'        - keep file if EITHER count or age would keep
-#                    ('min of ...', bare 'or', bare count, bare duration)
-#   'intersection' - keep file only if BOTH count and age would keep
-#                    ('max of ...')
-#   'truncate'     - reserved; not currently produced (kept for forward
-#                    compat with the design doc)
 sub parse_lifespan {
 	my ($value) = @_;
 
-	# Use die, NOT Genesis::bail: bail dispatches through the logger,
-	# so calling bail from inside Log is a circular dep that explodes
-	# at fatal-message format time.
+	# die, not Genesis::bail: bail dispatches through the logger, so
+	# calling it from inside Log explodes at fatal-message format time.
 	die "Invalid lifespan: empty value\n"
 		unless defined($value) && length($value);
 
@@ -338,22 +309,7 @@ sub _time_unit_to_seconds {
 	return undef;
 }
 
-# template_to_glob_pattern - convert a log path template into a filesystem
-# glob pattern suitable for Perl's built-in glob() operator.
-#
-# Pure function: no IO.  For each {name} in the template, if `name` is a
-# key in %concrete the value is substituted directly; otherwise the
-# variable is replaced with a shape-matching wildcard from the table:
-#
-#   {timestamp} -> YYYYMMDDTHHMMSS.mmmZ digit pattern
-#   {date}      -> YYYYMMDD digit pattern
-#   {time}      -> HHMMSS digit pattern
-#   {pid}       -> [0-9]* (variable-length numeric)
-#   {env}       -> *
-#   {command}   -> *
-#
-# Tilde-prefixed paths are expanded via Genesis::expand_path before
-# variable substitution.
+# template_to_glob_pattern - convert a log path template into a glob pattern.
 sub template_to_glob_pattern {
 	my ($template, %concrete) = @_;
 
@@ -403,18 +359,6 @@ sub template_to_glob_pattern {
 }
 
 # find_log_files - locate log files matching a template, with metadata.
-#
-# Args:
-#   $template - log path template (e.g. '~/.genesis/logs/{env}/{timestamp}.log')
-#   %concrete - optional substitutions for specific template variables
-#
-# Uses Perl's built-in glob() operator (portable across Linux/POSIX/BSD).
-#
-# Returns: arrayref of hashrefs sorted by mtime descending (newest first):
-#   [ { path => '...', mtime => <epoch> }, ... ]
-#
-# Skips non-files (directories, symlinks to nothing, etc.) and any path
-# whose stat() fails.  Empty arrayref when nothing matches.
 sub find_log_files {
 	my ($template, %concrete) = @_;
 
@@ -433,25 +377,6 @@ sub find_log_files {
 }
 
 # apply_retention_policy - decide which files to delete from a list.
-#
-# Pure function: no IO.  Given a candidate file list (as produced by
-# find_log_files) and a parsed retention policy (as produced by
-# parse_lifespan), returns the subset of files that should be deleted.
-#
-# Args:
-#   $files  - arrayref of { path, mtime } hashrefs
-#   $policy - hashref { mode, count, age_seconds, ... }
-#
-# Returns: arrayref of file hashrefs (subset of $files)
-#
-# Semantics by mode:
-#   'none'         - keep all (forever); returns empty arrayref
-#   'truncate'     - reserved forward-compat; returns empty arrayref
-#   'union'        - keep file if EITHER count or age bound votes keep
-#   'intersection' - keep file only if BOTH count and age bounds vote keep
-#
-# A bound that is undef contributes "no opinion" - the result collapses
-# to the other bound alone.
 sub apply_retention_policy {
 	my ($files, $policy) = @_;
 
@@ -507,28 +432,6 @@ sub apply_retention_policy {
 sub _now { time() }
 
 # cleanup_old_logs - find + decide + unlink for a single log config.
-#
-# Side-effect-ful orchestrator that composes parse_lifespan,
-# find_log_files, and apply_retention_policy, then unlinks the
-# resulting set.  Tolerant of failures: parser bails and unlink
-# errors are recorded in the result, never propagated.
-#
-# Args:
-#   $log_config - hashref with at least `file` and `lifespan` keys
-#                 (other keys are ignored)
-#
-#   %opts:
-#     active_path    => path-string  - protect from deletion (current
-#                                       session's running log; never
-#                                       unlinked even if selected)
-#     reserve_slots  => N            - subtract from policy count to
-#                                       reserve budget for upcoming
-#                                       new files (Subtask F caller
-#                                       decides based on on_reuse mode)
-#     concrete       => hashref      - per-template-var substitutions
-#                                       passed through to find_log_files
-#
-# Returns: { deleted => [paths], errors => [strings] }
 sub cleanup_old_logs {
 	my ($log_config, %opts) = @_;
 
@@ -601,30 +504,6 @@ sub cleanup_old_logs {
 sub _unlink { CORE::unlink($_[0]) }
 
 # apply_on_reuse - file-collision behavior for a single log path.
-#
-# Runs BEFORE log content is written.  Operates on the realized log
-# path; orchestrator (Subtask H) calls this once per configured log
-# at startup.
-#
-# Args:
-#   $path - the realized log path
-#   $mode - one of 'truncate' (default), 'append', 'rotate'
-#
-# Behavior:
-#   truncate - zero an existing file's size; no-op if it doesn't exist
-#   append   - no filesystem action regardless of existence
-#   rotate   - cascade rotation: highest .N -> .N+1, ..., file -> .1.
-#              mtimes preserved on archives.  No fixed cascade depth;
-#              relies on family-level lifespan cleanup to drop ancient
-#              archives.  No-op if the file doesn't exist.
-#
-# Returns:
-#   {
-#     mode             => $mode,
-#     action           => 'none' | 'truncated' | 'rotated',
-#     archives_shifted => N,        # rotate only
-#     error            => string,   # only when something failed
-#   }
 sub apply_on_reuse {
 	my ($path, $mode) = @_;
 
@@ -683,16 +562,6 @@ sub _truncate { CORE::truncate($_[0], 0) }
 sub _rename   { CORE::rename($_[0], $_[1]) }
 
 # Child-process safety: per-index GENESIS_ACTIVE_LOG_<N>.
-#
-# The user's .genesis/config logs array is invariant across a Genesis
-# process tree (parent and child read the same file).  Each log config
-# has a stable array index.  Parent records its realized log path at
-# that index; child consults the same index to inherit.  No count or
-# bookkeeping - the config itself is the shared ground truth.
-#
-# When the child finds a non-empty value at its log's index, it treats
-# the inherited path as on_reuse=append + lifespan=forever, preserving
-# call-stack continuity in operator log triage.
 sub set_active_log_path {
 	my ($index, $path) = @_;
 	$ENV{"GENESIS_ACTIVE_LOG_$index"} = $path;
@@ -704,18 +573,7 @@ sub get_active_log_path {
 	return $ENV{"GENESIS_ACTIVE_LOG_$index"};
 }
 
-# _context_suppressed - decide whether an entry's context is suppressed
-# for a given log target.  Called per-target in flush_logs.
-#
-# Sources, in priority order:
-#   1. Per-target `suppress_contexts` list - AUTHORITATIVE when present.
-#      If the list is configured, the target has explicitly stated which
-#      contexts it suppresses; global defaults are not consulted.
-#   2. Env var GENESIS_SUPPRESS_<CONTEXT>S (only when target has no list)
-#   3. suppress_warnings.<context>s in the loaded Genesis::Config
-#      (only when target has no list)
-#
-# Returns truthy if the entry should NOT be emitted to this target.
+# _context_suppressed - is this entry's context suppressed for this target?
 sub _context_suppressed {
 	my ($log_name, $log_config, $context) = @_;
 	return 0 unless defined($context) && length($context);

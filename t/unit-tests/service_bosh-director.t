@@ -341,8 +341,8 @@ subtest 'bosh has_config - check config existence' => sub {
 
 	local $ENV{GENESIS_BOSH_COMMAND};
 
-	# has_config now derives from the cached configs() listing (FWT-983
-	# Step 1) -- no per-call (type, name) round-trip.  The mock therefore
+	# has_config derives from the cached configs() listing -- no per-call
+	# (type, name) round-trip.  The mock therefore
 	# responds to the listing call `bosh configs -r=99999 --json` with
 	# all rows in one shot; `has_config` calls thereafter are hash
 	# lookups against that cache.
@@ -599,7 +599,7 @@ SCRIPT
 };
 
 
-# === NEW SUBTESTS: FWT-573 ===
+# === Constructor, environment, stemcells and config upload ===
 
 subtest 'new() constructor URL parsing' => sub {
 	plan tests => 12;

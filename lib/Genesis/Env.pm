@@ -579,7 +579,7 @@ sub exists {
 	return scalar __PACKAGE__->is_valid_env_file($args{name}, $args{top});
 }
 
-#}}}
+# }}}
 # is_valid_env_file - check if a named environment file is valid without instantiation {{{
 sub is_valid_env_file {
 	my ($class, $name, $top) = @_;
@@ -705,7 +705,7 @@ sub is_valid_env_file {
 	return wantarray ? @result : $result[0];
 }
 
-#}}}
+# }}}
 # search_for_env_file - search for an environment file in known deployment root(s) {{{
 sub search_for_env_file {
 	my ($class, $env, $deployment) = @_;
@@ -821,8 +821,9 @@ sub search_for_env_file {
 	my $deployment_root = $1;
 	return ($deployment_root, $files[0][1]);
 }
-#}}}
-#}}}
+
+# }}}
+# }}}
 
 ### Private Class Methods {{{
 
@@ -870,7 +871,7 @@ sub file   { $_[0]->{file};   }
 sub kit    { $_[0]->{kit}    || bug("Incompletely initialized environment '".$_[0]->name."': no kit specified"); }
 sub top    { $_[0]->{top}    || bug("Incompletely initialized environment '".$_[0]->name."': no top specified"); }
 
-# }}
+# }}}
 # Delegations: type, path {{{
 sub type   { $_[0]->top->type; }
 sub path   { shift->top->path(@_); }
@@ -1216,6 +1217,7 @@ sub get_call_path_with_env {
 	return wantarray ? @$bits : join(' ', @$bits);
 }
 
+# }}}
 # workpath - provide the path to the temporary file storage for this envionment {{{
 sub workpath {
 	my ($self, $relative) = @_;
@@ -1291,15 +1293,6 @@ sub actual_environment_files {
 
 # }}}
 # propagation_files - git-root-relative paths this env depends on for pipeline propagation {{{
-#
-# Returns the unified pathspec that propagation and pruning operate
-# over: kit dependencies (env file hierarchy, kit archive, config,
-# reaction scripts) prefixed with the git prefix so they're
-# git-root-relative, plus any `genesis.pipeline.required_files`
-# declared on the env (already git-root-relative).
-#
-# All returned paths are relative to the git root — no caller
-# should apply `Service::Git->prefixed` on top.
 sub propagation_files {
 	my ($self) = @_;
 	my %files;
@@ -1351,21 +1344,6 @@ sub propagation_files {
 
 # }}}
 # required_files - list additional paths that should travel with this env's branch {{{
-#
-# Reads `genesis.pipeline.required_files` (inherited via env file
-# hierarchy — so pipeline-wide defaults can be declared in a parent
-# env file like `lmelt.yml` and apply to every child that doesn't
-# override).
-#
-# Path templates (user-facing, Top-root-relative):
-#   - `<env>` is substituted with the environment's name
-#   - Glob metacharacters (`*`, `?`, `[`) are expanded against the
-#     deployment top root (i.e., the kit subdirectory)
-#   - Anything else is used verbatim as a Top-root-relative path
-#
-# Returns git-root-relative paths for internal use — callers pass
-# them straight to git.  User-facing output should strip the git
-# prefix before display.
 sub required_files {
 	my ($self) = @_;
 
@@ -1391,21 +1369,7 @@ sub required_files {
 }
 
 # _resolve_required_files - pure helper for required_files path resolution {{{
-#
-# Takes a list of raw path templates, an env name, and a root path
-# (conceptually the deployment Top root).  Returns sorted unique
-# paths relative to that root:
-#   - `<env>` is substituted with the env name
-#   - Glob patterns are expanded against the filesystem under the
-#     provided root
-#   - Literal paths are passed through verbatim
-#
-# Rejects entries that would escape the root (absolute paths,
-# `~/...`, or any `..` segment).  Bail()s on violation so config
-# errors surface loudly.
-#
-# Exposed as a class method so unit tests can exercise the logic
-# without constructing an Env or touching Service::Git.
+# Class method so the resolution can be tested without an Env or Service::Git.
 sub _resolve_required_files {
 	my ($class, $entries, $env_name, $root) = @_;
 	return () unless ref($entries) eq 'ARRAY' && @$entries;
@@ -1442,27 +1406,6 @@ sub _resolve_required_files {
 
 # }}}
 # prepare_branch - create or reconcile this env's branch with the files it needs {{{
-#
-# Reconciles the environment branch with this env's propagation_files set:
-#
-#   1. Creates the branch from the current commit if it doesn't yet exist
-#      (so that newly-created envs land on a fresh branch off control HEAD).
-#   2. Adds any files this env needs that aren't already on the branch
-#      (the multi-deployment-per-repo case: branch was created when only
-#      the bosh deployment existed; now we're adding a vault env file
-#      that needs to land on the same branch).
-#   3. Removes tracked files under our git prefix that this env no longer
-#      depends on, keeping .genesis/ wholesale.  Files outside our prefix
-#      are left alone — other deployments sharing this repo own them.
-#
-# All add/remove changes land in a single commit on the env branch and
-# the original branch is restored before returning.
-#
-# Options:
-#   dry_run => 1   — return the planned add/remove sets without changing
-#                    anything on disk or in git
-#
-# Returns: ($added_arrayref, $removed_arrayref).  Either may be empty.
 sub prepare_branch {
 	my ($self, %opts) = @_;
 
@@ -1561,14 +1504,7 @@ sub prepare_branch {
 }
 
 # }}}
-# propagation_diff - files that changed between this env branch and a control commit {{{
-#
-# Compares this environment's branch against a target commit on the
-# control branch, filtered to only files this env depends on.
-# Returns a list of repo-relative paths that need propagating.
-#
-# The target_sha is embedded in the propagation commit message so
-# downstream environments can trace which control state they deployed.
+# propagation_diff - files differing between this env's branch and a control commit, filtered to what it depends on {{{
 sub propagation_diff {
 	my ($self, $target_sha) = @_;
 	$target_sha ||= 'control';
@@ -1742,21 +1678,7 @@ sub lookup {
 }
 
 # }}}
-# lookup_entombed_self - lookup against the env's own-credhub-entombed manifest {{{
-#
-# Triggers (or reuses) the EntombedSelf manifest variant — which runs
-# the standard entombment dance but targets the deployed director's own
-# Credhub instead of the parent's — and returns a value from it.
-#
-# Intended for post-deploy callers that upload env-file data into the
-# new director (e.g. bosh-configs.director-cpi.cpis).  The resulting
-# data carries ((credhub-var)) references that the new director's own
-# Credhub can resolve.
-#
-# Falls back to lookup_unevaled when the EntombedSelf manifest can't
-# be built (pre-deploy, unit-test fixtures); the unevaluated form
-# preserves vault refs as literal strings so callers never silently
-# end up with plaintext.
+# lookup_entombed_self - lookup against the env's own-credhub-entombed manifest, falling back to lookup_unevaled when it cannot be built {{{
 sub lookup_entombed_self {
 	my ($self, $key, $default) = @_;
 	$key //= '.';
@@ -1918,14 +1840,7 @@ sub scale {
 }
 
 # }}}
-# iaas - returns the iaas for the environment {{{
-#
-# Resolution order:
-#   1. kit.iaas (explicit — works for both OCFP and non-OCFP)
-#   2. kit.features (non-OCFP only: silently upconvert IaaS feature)
-#   3. Director exodus data (inherited from parent BOSH director)
-#   4. Bail with context-appropriate message
-#
+# iaas - the environment's iaas, from kit.iaas, then kit.features, then director exodus {{{
 my @_known_iaas = qw(vsphere aws azure google openstack warden);
 sub iaas {
 	my ($self) = @_;
@@ -2073,6 +1988,8 @@ sub user_provided_bosh_creds_policy {
 	});
 }
 
+# }}}
+
 # BOSH config stuff - Generic
 
 sub bosh_config_name {
@@ -2135,15 +2052,7 @@ sub cpi_credhub_base {
 	return $base // ($self->credhub->base."genesis-entombed/");
 }
 
-# instance_group_azs - sorted unique AZ names used across the env's manifest {{{
-#
-# Reads the merged manifest's instance_groups and returns the sorted,
-# deduped list of AZ names that appear across all groups' `azs:` lists.
-# Empty list when instance_groups is absent or no group declares any AZ.
-#
-# Tolerates non-hash entries in the instance_groups array (filtered) and
-# missing/empty `azs:` keys (skipped).  Caller-facing answer to the
-# question "which AZs do my workloads run in?".
+# instance_group_azs - sorted unique AZ names used across the env's manifest; which AZs the workloads run in {{{
 sub instance_group_azs {
 	my $self = shift;
 	my $igs  = scalar $self->manifest_lookup('instance_groups', []);
@@ -2184,75 +2093,23 @@ sub instance_group_azs {
 
 # }}}
 # needed_cpis - sorted unique CPI names this env's workloads run as {{{
-#
-# Joins instance_group_azs against the merged-manifest cloud-config
-# `azs:` section and returns the deduped, sorted list of CPI names
-# that appear on the AZs this env actually uses.
-#
-# AZs in cloud-config that have no `cpi:` field (i.e. fall through to
-# the director's default CPI) emit the sentinel string '<default>' --
-# the same sentinel Service::BOSH::Director::stemcells uses for
-# default-CPI stemcells, so consumer-side validation can do a straight
-# set intersection.  This is important for mixed envs where some AZs
-# are pinned to named CPIs and others rely on the director default;
-# without the sentinel, the "we also need the default CPI" requirement
-# would be silently lost.
-#
-# AZs referenced by instance_groups but absent from the cloud-config
-# are filtered out -- those are configuration errors that will surface
-# as an AZ-resolution error from BOSH at deploy time, not a CPI gap.
-#
-# Empty list = "this env has no instance_groups, or none of them
-# declare any azs".  A single ['<default>'] = "all my workloads use
-# the director's default CPI" (today's common case for single-CPI
-# directors).
-#
-# Pre-deploy validation pattern (parallel to stemcells):
-#   for my $cpi (@{$env->needed_cpis}) {
-#       bail("missing CPI on director") unless $env->bosh->has_cpi($cpi);
-#   }
 sub needed_cpis {
 	my $self = shift;
 	return sort keys %{$self->cpi_az_map};
 }
 
 # }}}
-# cpi_az_map - hashref of CPI name => sorted list of AZs that use it {{{
-#
-# Joins instance_group_azs against the merged-manifest cloud-config
-# `azs:` section.  Same input semantics as needed_cpis (which now
-# delegates here): AZs with no `cpi:` field bucket under the
-# '<default>' sentinel; AZs referenced by instance_groups but
-# absent from the cloud-config bail.
-#
-# Returned shape:
-#   { '<default>'       => ['z1', 'z2'],
-#     'vsphere-east'    => ['z3'],
-#     'aws-gov'         => ['z4', 'z5'] }
-#
-# Empty hashref = "this env has no instance_groups, or none of them
-# declare any azs".  Useful for callers that need both the CPI list
-# and the AZ provenance (e.g. _check_cpis' per-CPI fan-out display).
+# cpi_az_map - hashref of CPI name => sorted AZs using it; pure data, unresolvable AZs bucket under <default> {{{
 sub cpi_az_map {
 	my $self = shift;
 	my @azs = $self->instance_group_azs;
 	return {} unless @azs;
 
-	# Best-effort AZ set: manifest first, then parent director's
-	# /network exodus for director-deployed envs whose kit doesn't
-	# merge cloud-config into the manifest.  Silent empty (not a bail)
-	# here -- pure data.  _check_cpis owns "was this resolution
-	# complete" via _unresolvable_azs; _get_stemcell_status just needs
-	# the best-effort fan-out set.
 	my $cloud_azs = $self->_resolve_cloud_azs;
 	my %az_cpi = map  { $_->{name} => $_->{cpi} }
 	             grep { ref($_) eq 'HASH' && defined($_->{name}) }
 	             @{$cloud_azs || []};
 
-	# Pure data: unresolvable AZs bucket under <default> so callers that
-	# just want the fan-out set (stemcell checks) can proceed.  Callers
-	# that need to enforce "every AZ resolves" (_check_cpis) query
-	# _unresolvable_azs and bail themselves.
 	my %map;
 	for my $az (@azs) {
 		my $cpi = $az_cpi{$az};
@@ -2265,13 +2122,6 @@ sub cpi_az_map {
 
 # }}}
 # _resolve_cloud_azs - get cloud-config azs from manifest or exodus fallback {{{
-#
-# Returns the merged cloud-config `azs:` array for this env.  Preference:
-# manifest_lookup (fastest, standard case), falling back to the parent
-# director's /network exodus for director-deployed envs whose kit does not
-# include `cloud` in required_configs('blueprint') (so the manifest carries
-# no azs).  Returns an empty arrayref when no resolution succeeds -- pure
-# data; callers decide whether that's an error (via _unresolvable_azs).
 sub _resolve_cloud_azs {
 	my $self = shift;
 	my $cloud_azs = scalar $self->manifest_lookup('azs', []);
@@ -2287,12 +2137,6 @@ sub _resolve_cloud_azs {
 
 # }}}
 # _azs_from_director_network - invert exodus /network into cloud-config azs {{{
-#
-# Exodus /network has one entry per internal AZ key, each with a `.name`
-# (rendered under the mgmt's default CPI) and an optional `.for_cpi.<cpi>`
-# map (rendered under named CPIs).  Both are valid AZ names a child env's
-# instance_groups can reference.  Inverts to the [{name, cpi?}, ...] array
-# shape cpi_az_map's downstream extraction consumes.
 sub _azs_from_director_network {
 	my ($self, $network) = @_;
 	my @cloud_azs;
@@ -2313,13 +2157,6 @@ sub _azs_from_director_network {
 
 # }}}
 # _unresolvable_azs - instance_group AZs not declared in cloud-config {{{
-#
-# Returns the sorted list of instance_group AZs that have no entry in
-# either the manifest cloud-config or the director's /network exodus
-# fallback.  Callers that need to enforce complete AZ resolution
-# (_check_cpis) bail on non-empty; callers that just need best-effort
-# CPI fan-out (_get_stemcell_status via needed_cpis) ignore this and
-# let cpi_az_map bucket unresolvables under <default>.
 sub _unresolvable_azs {
 	my $self = shift;
 	my @azs = $self->instance_group_azs;
@@ -2334,10 +2171,7 @@ sub _unresolvable_azs {
 
 # }}}
 
-# Builds the cpi-related portion of the deploy-time exodus override hash.
-# Returns {} unless this is a bosh director with cpi_enabled. When inline
-# director-cpi is declared, also publishes the available_cpis inventory and
-# the bosh config slot name for forward-compat with AZ-aware consumers.
+# _cpi_exodus_overrides - CPI portion of the deploy-time exodus overrides, advertising an inventory only for an inline list we uploaded {{{
 sub _cpi_exodus_overrides {
 	my $self = shift;
 	return {} unless $self->is_bosh_director && $self->cpi_enabled;
@@ -2346,10 +2180,8 @@ sub _cpi_exodus_overrides {
 	my $primary = $self->default_cpi_name;
 	$overrides->{default_cpi_config} = $primary if defined $primary;
 
-	# Inventory advertisement only applies when we uploaded a known list.
-	# The advertise-only path (director-cpi.default without cpis:) leaves
-	# available_cpis and cpi_config_name unset, since genesis doesn't know
-	# what the externally-uploaded director actually contains.
+	# Advertise inventory only for an inline list we uploaded ourselves; the
+	# advertise-only path can't know what an external director contains.
 	my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef);
 	if (defined($inline) && ref($inline) eq 'ARRAY' && @$inline) {
 		$overrides->{available_cpis} = [
@@ -2362,9 +2194,8 @@ sub _cpi_exodus_overrides {
 	return $overrides;
 }
 
-# Returns the name this env publishes to its own exodus as default_cpi_config —
-# the "primary CPI" advertisement for downstream consumer deployments. Separate
-# from cpi_name to avoid changing the meaning of cpi_name's existing callers.
+# }}}
+# default_cpi_name - the primary CPI this env advertises as exodus default_cpi_config, kept separate from cpi_name {{{
 sub default_cpi_name {
 	my $self = shift;
 	return undef unless $self->cpi_enabled;
@@ -2384,9 +2215,8 @@ sub default_cpi_name {
 	return $self->cpi_name;
 }
 
-# Returns ($config, $secrets, $source, $bosh_config_name, $errors?) describing
-# the post-deploy self-upload payload, or () if there's nothing to do.
-# Inline bosh-configs.director-cpi takes precedence over the cpi-config hook.
+# }}}
+# _resolve_director_cpi_config - the post-deploy CPI self-upload payload, inline director-cpi taking precedence over the hook {{{
 sub _resolve_director_cpi_config {
 	my ($self, %opts) = @_;
 	return () unless $self->cpi_enabled;
@@ -2442,9 +2272,8 @@ sub _resolve_director_cpi_config {
 	return ();
 }
 
-# I/O wrapper around _resolve_director_cpi_config. Performs the post-deploy
-# self-upload of the CPI config to the newly-deployed BOSH director and
-# entombs any credhub secrets that came back from the cpi-config hook.
+# }}}
+# upload_director_cpi_config - I/O wrapper that uploads the resolved CPI config to the new director and entombs its secrets {{{
 sub upload_director_cpi_config {
 	my ($self, %opts) = @_;
 
@@ -2474,15 +2303,8 @@ sub upload_director_cpi_config {
 	return 1;
 }
 
-# Genesis-driven fallback for older bosh kits whose post-deploy hook predates
-# inline director-cpi awareness (kits < 4.0.0). Kits >= 4.0.0 (and dev kits,
-# which we assume track latest) handle the upload themselves by delegating
-# Genesis::Hook::PostDeploy::upload_director_cpi_config to Env, so we no-op
-# for them to avoid double-uploading.
-#
-# Note: the older kit's own cpi-config-hook + post-deploy flow still runs
-# unchanged for OCFP. This helper only fires for the inline declaration that
-# the older kit doesn't know how to consume.
+# }}}
+# _upload_director_cpi_if_necessary - genesis-side fallback for bosh kits older than 4.0.0, which cannot consume an inline director-cpi {{{
 sub _upload_director_cpi_if_necessary {
 	my ($self) = @_;
 
@@ -2498,6 +2320,8 @@ sub _upload_director_cpi_if_necessary {
 	return $self->upload_director_cpi_config;
 }
 
+# }}}
+# _commit_config_credhub_secrets - entomb config-derived secrets into the new director's own credhub {{{
 sub _commit_config_credhub_secrets {
 	my ($self, $secrets) = @_;
 	my @paths = keys %{$secrets || {}};
@@ -2522,6 +2346,8 @@ sub _commit_config_credhub_secrets {
 	info("#G{done}" . pretty_duration(gettimeofday - $start, 2, 5));
 	return 1;
 }
+
+# }}}
 
 # Bosh Config stuff - TODO: sort later
 # bosh_config_names - returns a hash of bosh config names proved by the environment {{{
@@ -3305,19 +3131,7 @@ sub _expand_config_hooks {
 }
 
 # }}}
-# prefetch_configs - required configs, plus the ones worth fetching anyway {{{
-#
-# Everything required_configs returns, plus cpi for hooks that build toward a
-# deployable manifest.  cpi is deliberately NOT in required_configs: a BOSH
-# director always has a latent CPI of its own, so a director with no cpi
-# configs uploaded is a complete, valid state rather than an unmet
-# prerequisite.  Treating cpi as required makes missing_required_configs
-# permanently non-empty on single-iaas directors, which silently disables the
-# manifest viability check that gates on it.
-#
-# What cpi is here is opportunistic: fetching it up front surfaces the whole
-# director inventory in the "Downloading configs from..." block instead of
-# having cpi fetches happen implicitly later inside _check_cpis.
+# prefetch_configs - required configs plus opportunistic cpi; drives downloads, never gating {{{
 sub prefetch_configs {
 	my ($self, @hooks) = @_;
 	return () if $self->use_create_env;
@@ -3360,16 +3174,6 @@ sub download_required_configs {
 	return $self unless @configs;
 	debug "Missing configs: ".join(', ', @configs);
 
-	# cpi is auto-appended by Env::required_configs's opportunistic
-	# prefetch (kits don't declare it themselves) so real deployments
-	# benefit from the pre-warmed cpi listing.  When a caller supplies
-	# cloud/runtime by hand (kit-validator, dev iteration, air-gapped
-	# smoke tests) and the director isn't reachable, honor the
-	# "opportunistic" contract already documented on the prefetch:
-	# skip the download silently instead of bailing.
-	#
-	# Any non-cpi missing config is a genuine kit requirement and must
-	# still bail loud so the user knows why the deployment can't move.
 	my @required = grep { !/^cpi(\@|$)/ } @configs;
 
 	eval { $self->with_bosh };
@@ -3481,31 +3285,9 @@ sub has_config {
 
 # }}}
 # config_file - retrieve the path of the local file (provided or downloaded) being used for the named BOSH config {{{
-#
-# FIXME: contract is fragile.  Returns the empty string when
-# (a) no prior caller registered the config via use_config (typically
-# via download_configs), AND (b) no enclosing genesis -> shell call
-# pre-set GENESIS_<TYPE>_CONFIG[_NAME] in the env.  Callers that
-# treat an empty string as "no config" silently degrade; callers that
-# feed it into spruce-merge (Env::_cc_yaml_files) explode at merge
-# time with a confusing "file not found" error rather than a clear
-# "you forgot to download_configs".
-#
-# Two future paths if/when this bites:
-#   1. Bug-gate: bail loudly when neither overlay, env var, NOR
-#      $self->bosh->config_file($type, $name) (Director cache) has
-#      anything.  Requires adding a Director::config_file getter --
-#      see plans/fwt-983-director-config-cache-refactor.md (AC 6).
-#   2. Auto-fallback: silently consult the Director cache as a third
-#      lookup layer.  Lower friction but hides the missing-download
-#      bug class entirely.
-#
-# Neither is needed for the current call flows -- Env::download_configs
-# always calls use_config on success, so every code path that reaches
-# config_file has populated the overlay first.  Documented here so
-# the next caller that hits this footgun knows where to look.
-# has_config and config_contents delegate here and inherit the same
-# contract.
+# FIXME: returns '' when nothing is registered, so callers cannot tell "no
+# config" from "you forgot to download_configs".  See LIMITATIONS in the POD
+# for the two ways out.
 sub config_file {
 	my ($self, $type, $name) = @_;
 	my $label = $type ||= 'cloud';
@@ -3647,41 +3429,10 @@ sub prunable_keys {
 sub last_deployed_manifest {
 	my ($self, %opts) = @_;
 
-	# Deployed manifest data is found in three places:
-	# 1. In the environment's exodus data under the deployed/<timestamp>/ subpath
-	#    under the nominal exodus mount path (ie /secret/exodus/<env>/<type>)
-	#    It contains keys for manifest package, type, and sha1sum, as well as who
-	#    deployed it.  The manifest package is a tarball, containing the
-	#    manifest.yml and other support files, such as vars, state and store.
-	#
-	# 2. In the environment's exodus data at the nominal exodus mount path, under
-	#    the keys 'manifest', 'manifest_type', 'manifest_sha1'. This is the
-	#    most recent deployed manifest, implemented in v3.0.0, but being phased
-	#    out in favor of the deployed/<timestamp> method.
-	#
-	# 3. In the .genesis/manifests/ directory in the deployment repository, under
-	#    the name of the environment, with a .yml extension.  This is the legacy
-	#    method of storing the manifest, and is being phased out in favor of the
-	#    exodus method, though may still be used by setting the deployment
-	#    config file's 'manifest_store' to 'repository'.
-	#
-	# Returns depend on options sent in:
-	# - just => 'manifest' or 'manifest_file' to return just the manifest or the
-	#  path to the manifest file, along with the type, sha1sum, and source.  If
-	#  an error occurs, it will return the error message as the fifth element if
-	#  fail_on_error option is true.
-	#
-	# - files => 1 to include the paths to the files in the results (default is
-	#   false)
-	#
-	# - contents => 1 to include the contents of the files in the results (default
-	#   is true, set to 0 to not include the contents)
-
-	# REFACTOR:  Now that we have Env::Deployments, we should use that unified
-	#            interface to retrieve deployment data, including files, and for
-	#            legacy deployments, manufacture a local-file-hash formatted
-	#            deployment object that can be used to retrieve the manifest
-	#            and other files.
+	# REFACTOR: Env::Deployment is now the unified interface for deployment
+	#           data; this should go through it, synthesising a deployment
+	#           object from the local-file form for legacy environments
+	#           rather than reading the three shapes directly.
 
 	$self->notify('retrieving previously deployed manifest data:');
 
@@ -4743,14 +4494,6 @@ sub _post_deploy {
 		my $git    = $state->{pipeline_git};
 		my $branch = $state->{pipeline_branch};
 
-		# Commit and push manifest artifacts that landed under
-		# .genesis/manifests/ during this deploy.  When manifest_store
-		# is 'repository' or 'hybrid' (the default), genesis writes
-		# the rendered manifest plus state/creds files there; without
-		# this step those files would be left untracked on the env
-		# branch and either lost on the next checkout or clobbered by
-		# the auto-cascade's checkout of control below.  No-op when
-		# nothing new ended up under .genesis/manifests/.
 		if ($deployment_ok && $git && $branch) {
 			my $pre = $state->{pre_deploy_unclean} || {};
 			my $prefix = $git->prefix // '';
@@ -4849,15 +4592,6 @@ sub _post_deploy {
 
 # }}}
 # _ensure_vault_ready_for_exodus - fail fast when exodus cannot be recorded {{{
-#
-# After a successful deploy, the exodus update needs a reachable, unsealed,
-# authenticated vault.  A sealed vault gets one unseal attempt - this covers
-# a self-hosted provider (BOSH kit openbao feature) that came back sealed
-# from its own VM recreate.  If the vault is still not usable and there is
-# no controlling terminal (or --yes was given), bail with recovery guidance
-# instead of letting a downstream safe call block forever on an interactive
-# vault-auth prompt.  Returns 1 when the vault is ready, 0 when it is not
-# but an operator is present to answer the prompt.
 sub _ensure_vault_ready_for_exodus {
 	my ($self, $noprompt) = @_;
 
@@ -5339,19 +5073,6 @@ sub terminate {
 			my ($env, $results) = @_;
 			my $error_message = "Deployment failed with the following issues:\n";
 
-			# Analyze the results hash to determine the error sources
-			# $results keys and their contents:
-			# - delete_env: Hash containing output and return code from `bosh delete-env` command
-			#   - msg: Output from the command (string)
-			#   - rc: Return code from the command (integer)
-			# - delete_deployment: Hash containing output and return code from `bosh delete-deployment` command
-			#   - msg: Output from the command (string)
-			#   - rc: Return code from the command (integer)
-			# - hook: Hash containing results from running termination hooks
-			#   - success: Boolean indicating if the hook succeeded
-			#   - error: Error message if the hook failed (string)
-			# --or--
-			# - hook: Boolean indicating if the hook succeeded (true) or failed (false)
 
 			if ($results->{delete_env} && ref($results->{delete_env}) eq 'HASH' && !$results->{delete_env}{rc}) {
 				$error_message .= sprintf(
@@ -5994,16 +5715,6 @@ sub _check_environment_viability {
 }
 
 sub _check_cpi_config {
-	# Check that the cpi config is available and unchanged on the director.
-	# Returns a hash:
-	#  state => 'ok' | 'changed' | 'missing'
-	#  fatal => 1 | 0
-	#  fix_data => {
-	#    cpi_config => <yaml config string>,
-	#    name => <name of the config>,
-	#    director => <bosh director>
-	#  }
-	#  msg => <message to display>
 	my ($self) = @_;
 
 	return {
@@ -6239,6 +5950,7 @@ sub _fix_cpi_config {
 	};
 }
 
+# }}}
 # _check_cloud_config - check the cloud config {{{
 sub _check_cloud_config {
 	my ($self) = @_;
@@ -6365,11 +6077,6 @@ sub _fix_secrets {
 
 # }}}
 # _manifest_secret_credhub_conflicts - manifest secrets still live in credhub {{{
-# Returns the sorted list of non-entombed credhub paths (relative to the
-# credhub base) that correspond to manifest-sourced secrets.  These are the
-# only paths for which regenerating a secret is unsafe in a vaultified
-# environment; disjoint credhub paths are ignored.  Mirrors the var_name-based
-# matching used by Genesis::Env::Secrets::Plan::_unused_credhub_secrets.
 sub _manifest_secret_credhub_conflicts {
 	my ($self) = @_;
 	return () unless $self->is_vaultified;
@@ -6530,29 +6237,7 @@ sub _check_release_overrides {
 }
 
 # }}}
-# _check_stemcells - check the stemcells {{{
 # _check_cpis - validate the env's needed CPIs are present on its director {{{
-#
-# Returns a {state, msg} hashref matching the shape Genesis::Env::check
-# expects (parallel to _check_stemcells).  state is one of 'ok' or
-# 'error'.
-#
-# Output style follows the cloud-config / stemcell convention:
-# `running CPI checks...` header, one indented bullet per (CPI, AZs)
-# pair, then a green/red summary line.  msg is undef when this
-# function has already printed its own output; the Env::check caller
-# skips its notify() in that case.  The "skipped" paths (create-env,
-# no instance_groups) still return msg => '...' so the caller emits
-# a single notify line explaining the skip.
-#
-# Logic:
-#   - create-env envs are skipped (no parent director to validate against).
-#   - Empty cpi_az_map (no instance_groups declare azs) skips the check.
-#   - The '<default>' sentinel for azs without an explicit cpi: field
-#     is always satisfied -- every director has SOME default CPI by
-#     definition, so it always renders with a check.
-#   - For the remaining (named) cpis, $env->bosh->cpis is the
-#     authoritative answer to "what's actually on the director".
 sub _check_cpis {
 	my ($self) = @_;
 
@@ -6596,14 +6281,6 @@ sub _check_cpis {
 		};
 	}
 
-	# Short-circuit: if the env requires at least one NAMED cpi (not
-	# just '<default>') but the director has zero cpi configs uploaded
-	# of any kind, fail fast with an actionable message.  No point
-	# walking ->cpis (which would merge an empty union) or fanning
-	# out per-cpi bullets that all read "missing" for the same
-	# underlying reason -- the operator needs to know the director
-	# has nothing uploaded, not that named cpis are individually
-	# absent.
 	my @real_needed = grep { $_ ne '<default>' } @needed;
 	if (@real_needed && !$self->bosh->has_config_of_type('cpi')) {
 		return {
@@ -6657,6 +6334,7 @@ sub _check_cpis {
 }
 
 # }}}
+# _check_stemcells - check the stemcells {{{
 sub _check_stemcells {
 	my ($self) = @_;
 
@@ -6865,6 +6543,8 @@ sub _fix_stemcells {
 	};
 }
 
+# }}}
+# _advise_stemcell_updates - report which stemcells need uploading {{{
 sub _advise_stemcell_updates {
 	my ($self, $fix_data) = @_;
 	unless ($fix_data) {
@@ -6921,6 +6601,7 @@ sub _advise_stemcell_updates {
 	);
 }
 
+# }}}
 # _genesis_inherits - return the list of inherited files (recursive) {{{
 sub _genesis_inherits {
 	my ($self,$file, @files) = @_;
@@ -7279,15 +6960,6 @@ sub _create_deployment_audit_log {
 # }}}
 # _get_stemcell_status - get the status of the stemcells {{{
 sub _get_stemcell_status {
-	# This will return an array of stemcell statuses (in the order given)
-	# that will contain a hash of the following keys:
-	#  - alias: the alias of the stemcell (specified in the manifest)
-	#  - found: the stemcell that satisfies the request, or undef if not found
-	#  - alt: the recommended stemcell to use if cpi not found
-	#  - latest: true if searching for the latest.
-	#  - cpi: the cpi name (or <default> if not specified)
-	#  - search_type: exact, latest, or latest-minor
-	#  - search_term: the stemcell version requested
 
 	my ($self, $recalculate) = @_;
 	require Service::BOSH::Stemcell;
@@ -7471,6 +7143,7 @@ sub _cleanup_and_bail {
 	bail({offset => 1}, @_);
 }
 
+# }}}
 # }}}
 
 1;

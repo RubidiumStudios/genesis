@@ -84,6 +84,124 @@ Exported symbols (via C<use Genesis::Log>):
 
 =back
 
+=head1 TEMPLATE SYNTAX
+
+Log file paths use a template grammar that allows variables and optional
+separator characters. The grammar is:
+
+  {[<sep>]<name>[<sep>]}
+
+Where C<E<lt>sepE<gt>> is a single character from the set C<-_.~/>.
+
+When the variable resolves to a non-empty value, the leading and
+trailing separators (if present) are emitted alongside the value. When
+the variable is empty, both the value AND its separators are dropped.
+
+Variables: C<command>, C<timestamp>, C<date>, C<time>, C<pid>, C<env>,
+C<type>.  C<type> resolves to C<$ENV{GENESIS_TYPE}> at runtime (the kit
+type slug, e.g. C<bosh>, C<vault>, C<shield>, C<cf>).
+
+=head2 Default values: C<{name||default}>
+
+An optional C<||default> suffix inside the braces provides a fallback
+literal when the variable resolves to empty:
+
+  Template                  GENESIS_TYPE=vault   GENESIS_TYPE unset
+  ------------------------- -------------------- -------------------
+  genesis-{type||bosh}.log  genesis-vault.log    genesis-bosh.log
+  {env||local}-{command}    staging-deploy       local-deploy
+
+The default is also used during glob construction in
+C<template_to_glob_pattern> when the variable would otherwise be
+wildcarded - but only as the substituted text alongside the wildcard;
+the runtime semantics of "use default when empty" don't translate to a
+glob pattern.
+
+B<Mutual exclusivity with separators:> the separator syntax
+C<{[sep]name[sep]}> and the default syntax C<{name||default}> are
+mutually exclusive. An operator providing a default has guaranteed a
+non-empty value, so any separators belong outside the braces.
+Templates combining them (e.g. C<{-env||local}>) trigger a
+deprecation-context warning and the separators are dropped; the
+default takes precedence.
+
+B<Examples (with env=staging, cmd=deploy):>
+
+  Template                        Result
+  -------------------------------+--------------------------------------
+  genesis-{command}{-env}.log    | genesis-deploy-staging.log
+  {env-}{command}.log            | staging-deploy.log
+  logs/{env/}{command}.log       | logs/staging/deploy.log
+  {-env-}{command}               | -staging-deploy
+
+B<Examples (with env unset, cmd=ping):>
+
+  Template                        Result
+  -------------------------------+--------------------------------------
+  genesis-{command}{-env}.log    | genesis-ping.log
+  {env-}{command}.log            | ping.log
+  logs/{env/}{command}.log       | logs/ping.log
+  {-env-}{command}               | ping     (both separators drop)
+
+The bare form C<{name}> (no separators) remains supported and behaves
+as before - the variable is substituted with its value, or with the
+empty string when the value is empty.
+
+B<Deprecated:> the implicit C<{env}/> slash-removal special case (where
+the slash adjacent to a bare C<{env}> is automatically stripped when
+env is empty) is preserved for back-compat but emits a deprecation
+warning. Operators should migrate to the explicit C<{env/}>, C</{env}>,
+or C<{-env-}> forms.
+
+=head1 CONTEXT TAGS
+
+Log entries can carry a C<context> tag (e.g. C<deprecation>) via the
+options hashref accepted by the convenience methods:
+
+  $logger->warning({context => 'deprecation', label => 'DEPRECATED'},
+                   "Template '%s' uses implicit ...", $template);
+
+At flush time, each target's emission is gated by
+C<_context_suppressed($log_name, $log_config, $context)>:
+
+=over 4
+
+=item *
+
+If the target's config has a C<suppress_contexts> list, that list is
+B<authoritative>: contexts in the list are suppressed for that target,
+contexts not in the list are emitted (the per-target list overrides any
+global default).
+
+=item *
+
+Otherwise, the global env var C<GENESIS_SUPPRESS_E<lt>CONTEXTE<gt>S> (e.g.
+C<GENESIS_SUPPRESS_DEPRECATIONS>) is consulted. If set to a truthy value,
+the context is suppressed.
+
+=item *
+
+Otherwise, the loaded C<Genesis::Config> is consulted:
+C<suppress_warnings.E<lt>contextE<gt>s>.
+
+=back
+
+This lets different log targets independently suppress different
+contexts - the terminal output can suppress C<deprecation> to keep the
+console clean while file logs keep them for auditing.
+
+=head2 Genesis::deprecation
+
+  Genesis::deprecation("Template ... is deprecated; use ...", @args);
+
+A shim parallel to C<Genesis::warning> that tags the entry with
+C<context =E<gt> 'deprecation'>. Callers outside the C<Genesis::Log>
+module should use this in preference to calling
+C<$logger-E<gt>warning({context =E<gt> 'deprecation'}, ...)> directly.
+Code B<inside> C<Genesis::Log> calls the singleton's C<warning> with the
+context option directly (to avoid the C<Log -E<gt> Genesis -E<gt> Log>
+circular dependency).
+
 =head1 METHODS
 
 =head2 new
@@ -220,12 +338,22 @@ When both C<path> and C<file> are present, they are combined into an
 absolute path. The C<path> and C<file> keys are removed before the
 remaining options are passed to C<configure_log>.
 
+Before processing the array, the C<'E<lt>terminalE<gt>'> target is
+configured at the default level. This matters even when C<@log_configs>
+is empty: without it the singleton has no C<'E<lt>terminalE<gt>'> entry,
+so the first C<bail()> would create one at level C<FATAL> through its own
+fallback and permanently suppress every subsequent C<info>, C<warning>,
+and C<debug>. C<configure_log> is idempotent per target, so the extra
+call is harmless when a terminal config follows in the array.
+
 B<Returns:> Nothing (returns implicitly after configuring all targets).
 
 B<Errors:>
 
-Calls Genesis::bail with C<"Configuration error - logs entry must be an array">
-if C<\@log_configs> is not an array reference.
+Dies with C<"Configuration error - logs entry must be an array">
+if C<\@log_configs> is not an array reference. C<die>, not
+C<Genesis::bail> -- see C<parse_lifespan> for why C<Genesis::Log> cannot
+route failures through the logger.
 
 B<Examples:>
 
@@ -244,8 +372,13 @@ B<Examples:>
   my $policy = Genesis::Log::parse_lifespan($lifespan_value);
 
 Parses a C<lifespan> configuration string into a structured retention
-policy. Pure function: no IO, no globals. Bails (C<Genesis::bail>) on
-unparseable input with the offending substring named.
+policy. Pure function: no IO, no globals. Dies on unparseable input with
+the offending substring named.
+
+Note that this uses C<die>, not C<Genesis::bail>: C<bail> dispatches
+through the logger, so calling it from inside C<Genesis::Log> is a
+circular dependency that explodes at fatal-message format time. Callers
+that want the usual Genesis exit behaviour must wrap the call.
 
 Returns a hashref with these keys:
 
@@ -312,94 +445,60 @@ both bounds hold
 
 =back
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Invalid lifespan: empty value"> -- raised via C<die> when the value is
+undefined, zero-length, or entirely whitespace.
+
+=item *
+
+C<"Invalid lifespan: '%s' (expected '<count> or <duration>')"> -- raised
+via C<die> when a compound form (C<min of ...>, C<max of ...>, bare
+C<or>) does not split into exactly two bounds. C<%s> is the original
+value as given.
+
+=item *
+
+C<"Invalid lifespan component: '%s' in '%s'"> -- raised via C<die> when
+one half of a compound form is neither a count nor a duration. The first
+C<%s> is the offending component, the second the original value.
+
+=item *
+
+C<"Invalid lifespan: '%s'"> -- raised via C<die> when a single, non-compound
+value matches neither the count nor the duration grammar. C<%s> is the
+original value.
+
+=back
+
 B<Examples:>
 
   my $p = Genesis::Log::parse_lifespan('forever');
-  # { mode => 'none', count => undef, age_seconds => undef, warnings => [] }
+  # returns { mode => 'none', count => undef, age_seconds => undef,
+  #           warnings => [] }
 
   my $p = Genesis::Log::parse_lifespan('current');
-  # { mode => 'union', count => 1, age_seconds => undef,
-  #   warnings => ['lifespan: current is deprecated; ...'] }
+  # returns { mode => 'union', count => 1, age_seconds => undef,
+  #           warnings => ['lifespan: current is deprecated; ...'] }
 
   my $p = Genesis::Log::parse_lifespan('5');
-  # { mode => 'union', count => 5, age_seconds => undef, warnings => [] }
+  # returns { mode => 'union', count => 5, age_seconds => undef,
+  #           warnings => [] }
 
   my $p = Genesis::Log::parse_lifespan('7d');
-  # { mode => 'union', count => undef, age_seconds => 604800,
-  #   warnings => [] }
+  # returns { mode => 'union', count => undef, age_seconds => 604800,
+  #           warnings => [] }
 
   my $p = Genesis::Log::parse_lifespan('max of 5 or 2 weeks');
-  # { mode => 'intersection', count => 5, age_seconds => 1209600,
-  #   warnings => [] }
+  # returns { mode => 'intersection', count => 5, age_seconds => 1209600,
+  #           warnings => [] }
 
-=head2 Template syntax
-
-Log file paths use a template grammar that allows variables and optional
-separator characters. The grammar is:
-
-  {[<sep>]<name>[<sep>]}
-
-Where C<E<lt>sepE<gt>> is a single character from the set C<-_.~/>.
-
-When the variable resolves to a non-empty value, the leading and
-trailing separators (if present) are emitted alongside the value. When
-the variable is empty, both the value AND its separators are dropped.
-
-Variables: C<command>, C<timestamp>, C<date>, C<time>, C<pid>, C<env>,
-C<type>.  C<type> resolves to C<$ENV{GENESIS_TYPE}> at runtime (the kit
-type slug, e.g. C<bosh>, C<vault>, C<shield>, C<cf>).
-
-=head3 Default values: C<{name||default}>
-
-An optional C<||default> suffix inside the braces provides a fallback
-literal when the variable resolves to empty:
-
-  Template                  GENESIS_TYPE=vault   GENESIS_TYPE unset
-  ------------------------- -------------------- -------------------
-  genesis-{type||bosh}.log  genesis-vault.log    genesis-bosh.log
-  {env||local}-{command}    staging-deploy       local-deploy
-
-The default is also used during glob construction in
-C<template_to_glob_pattern> when the variable would otherwise be
-wildcarded - but only as the substituted text alongside the wildcard;
-the runtime semantics of "use default when empty" don't translate to a
-glob pattern.
-
-B<Mutual exclusivity with separators:> the separator syntax
-C<{[sep]name[sep]}> and the default syntax C<{name||default}> are
-mutually exclusive. An operator providing a default has guaranteed a
-non-empty value, so any separators belong outside the braces.
-Templates combining them (e.g. C<{-env||local}>) trigger a
-deprecation-context warning and the separators are dropped; the
-default takes precedence.
-
-B<Examples (with env=staging, cmd=deploy):>
-
-  Template                        Result
-  -------------------------------+--------------------------------------
-  genesis-{command}{-env}.log    | genesis-deploy-staging.log
-  {env-}{command}.log            | staging-deploy.log
-  logs/{env/}{command}.log       | logs/staging/deploy.log
-  {-env-}{command}               | -staging-deploy
-
-B<Examples (with env unset, cmd=ping):>
-
-  Template                        Result
-  -------------------------------+--------------------------------------
-  genesis-{command}{-env}.log    | genesis-ping.log
-  {env-}{command}.log            | ping.log
-  logs/{env/}{command}.log       | logs/ping.log
-  {-env-}{command}               | ping     (both separators drop)
-
-The bare form C<{name}> (no separators) remains supported and behaves
-as before - the variable is substituted with its value, or with the
-empty string when the value is empty.
-
-B<Deprecated:> the implicit C<{env}/> slash-removal special case (where
-the slash adjacent to a bare C<{env}> is automatically stripped when
-env is empty) is preserved for back-compat but emits a deprecation
-warning. Operators should migrate to the explicit C<{env/}>, C</{env}>,
-or C<{-env-}> forms.
+  my $p = eval { Genesis::Log::parse_lifespan('7 fortnights') };
+  # dies: Invalid lifespan: '7 fortnights'
 
 =head2 template_to_glob_pattern
 
@@ -422,8 +521,12 @@ This lets callers control the grouping
 axis: pass C<env =E<gt> ...> and C<command =E<gt> ...> to scope cleanup
 to a per-env-command group; omit them to glob the broad family.
 
-Tilde-prefixed paths are expanded against C<$ENV{HOME}> (or
-C<getpwnam($user)> for C<~user/...> forms).
+A leading C<~/> or a bare C<~> is expanded against C<$ENV{HOME}> by plain
+string substitution. C<~user/...> forms are B<not> expanded -- this is
+deliberately a pure string transformation rather than C<Cwd::abs_path>,
+which resolves symlinks and returns C<undef> for paths that don't exist,
+and templates routinely reference subdirectories that won't exist until
+cleanup time.
 
 Shape-matching wildcards:
 
@@ -434,6 +537,10 @@ Shape-matching wildcards:
   {pid}       -> [0-9]*                                     (variable-length numeric)
   {env}       -> *
   {command}   -> *
+  {type}      -> *
+
+A variable that is neither in C<%concrete> nor in the wildcard table is
+left in the pattern untouched, braces and all.
 
 B<Parameters:>
 
@@ -449,16 +556,22 @@ to insert.
 
 =back
 
+B<Returns:> A glob pattern string. Never C<undef>; a template containing
+no variables comes back unchanged apart from tilde expansion.
+
 B<Examples:>
 
-  Genesis::Log::template_to_glob_pattern('~/.genesis/{timestamp}.log');
-  # /Users/.../genesis/[0-9]{...}T[0-9]{...}.log
+  Genesis::Log::template_to_glob_pattern('~/.genesis/{date}.log');
+  # returns '/Users/dbell/.genesis/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].log'
 
   Genesis::Log::template_to_glob_pattern(
-    '/var/log/{env}/{command}/{timestamp}.log',
+    '/var/log/{env}/{command}/{date}.log',
     env => 'staging',
   );
-  # /var/log/staging/*/[0-9]{...}T[0-9]{...}.log
+  # returns '/var/log/staging/*/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].log'
+
+  Genesis::Log::template_to_glob_pattern('/var/log/genesis{-env}.log');
+  # returns '/var/log/genesis-*.log'   (separator kept literally)
 
 =head2 find_log_files
 
@@ -490,6 +603,20 @@ C<template_to_glob_pattern>)
 variables (same as C<template_to_glob_pattern>)
 
 =back
+
+B<Examples:>
+
+  my $files = Genesis::Log::find_log_files(
+    '~/.genesis/logs/{env}/{command}/{timestamp}.log',
+    env => 'staging',
+  );
+  # returns [ { path => '.../staging/deploy/20260805T101500.000Z.log',
+  #             mtime => 1785438900 },
+  #           { path => '.../staging/check/20260804T093000.000Z.log',
+  #             mtime => 1785345000 } ]
+
+  my $files = Genesis::Log::find_log_files('/nonexistent/{date}.log');
+  # returns []
 
 =head2 apply_retention_policy
 
@@ -537,11 +664,12 @@ ascending (oldest first). Empty arrayref when nothing should be deleted.
 
 B<Examples:>
 
-  # Keep last 5; delete the rest
+  # Keep last 5; delete the rest.  Given 8 candidate files:
   my $delete = Genesis::Log::apply_retention_policy(
     $files,
     Genesis::Log::parse_lifespan('5'),
   );
+  # returns the 3 oldest files, oldest first
 
   # Keep files newer than 7 days OR the 10 most-recent (whichever is
   # more); delete the rest
@@ -549,6 +677,7 @@ B<Examples:>
     $files,
     Genesis::Log::parse_lifespan('min of 10 or 7d'),
   );
+  # returns only files that are both outside the top 10 and older than 7d
 
   # Keep ONLY files that are both in the top 5 AND newer than 2 weeks;
   # delete everything else
@@ -556,6 +685,13 @@ B<Examples:>
     $files,
     Genesis::Log::parse_lifespan('max of 5 or 2 weeks'),
   );
+  # returns every file failing either bound, oldest first
+
+  my $delete = Genesis::Log::apply_retention_policy(
+    $files,
+    Genesis::Log::parse_lifespan('forever'),
+  );
+  # returns []
 
 =head2 cleanup_old_logs
 
@@ -563,8 +699,9 @@ B<Examples:>
 
 Side-effect-ful orchestrator. Composes C<parse_lifespan>,
 C<find_log_files>, and C<apply_retention_policy> and unlinks the
-resulting file set. Tolerant of failures: parser bails and unlink
-errors are recorded in the result, never propagated. Callers
+resulting file set. Tolerant of failures: the C<parse_lifespan> C<die>
+is trapped, and both it and unlink errors are recorded in the result
+rather than propagated. Callers
 (typically the higher-level startup integration) may emit a warning
 summary but should not bail on cleanup errors.
 
@@ -612,6 +749,9 @@ B<Examples:>
     file     => '~/.genesis/logs/{timestamp}.log',
     lifespan => '50',
   });
+  # removes everything past the 50 most recent
+  # returns { deleted => ['/Users/dbell/.genesis/logs/2026....log', ...],
+  #           errors  => [] }
 
   # Per-env-command scoped cleanup with a reservation for the new write
   # about to happen (on_reuse: rotate or templated-new path).
@@ -624,6 +764,16 @@ B<Examples:>
     concrete      => { env => 'staging', command => 'deploy' },
     active_path   => '/Users/me/.genesis/logs/staging/deploy/20260603T....log',
   );
+  # returns { deleted => [...], errors => [] }; active_path is never
+  # unlinked even when the policy selects it
+
+  # Unparseable lifespan: nothing is deleted, the die is captured
+  my $r = Genesis::Log::cleanup_old_logs({
+    file     => '~/.genesis/logs/{timestamp}.log',
+    lifespan => '7 fortnights',
+  });
+  # returns { deleted => [],
+  #           errors  => ["lifespan parse: Invalid lifespan: '7 fortnights'"] }
 
 =head2 apply_on_reuse
 
@@ -686,64 +836,27 @@ B<Examples:>
 
   # First run, file doesn't exist: rotate is a no-op
   apply_on_reuse('/var/log/genesis.log', 'rotate');
-  # { mode => 'rotate', action => 'none' }
+  # returns { mode => 'rotate', action => 'none' }
 
   # Second run, file exists: rotate renames it to .1
   apply_on_reuse('/var/log/genesis.log', 'rotate');
-  # { mode => 'rotate', action => 'rotated', archives_shifted => 0 }
+  # returns { mode => 'rotate', action => 'rotated', archives_shifted => 0 }
 
   # N+1th run: existing .1, .2, ... cascade to .2, .3, ...
   apply_on_reuse('/var/log/genesis.log', 'rotate');
-  # { mode => 'rotate', action => 'rotated', archives_shifted => 5 }
+  # returns { mode => 'rotate', action => 'rotated', archives_shifted => 5 }
 
-=head2 Context-tagged log entries
+  # truncate zeroes the file in place
+  apply_on_reuse('/var/log/genesis.log', 'truncate');
+  # returns { mode => 'truncate', action => 'truncated' }
 
-Log entries can carry a C<context> tag (e.g. C<deprecation>) via the
-options hashref accepted by the convenience methods:
+  # append never touches the filesystem
+  apply_on_reuse('/var/log/genesis.log', 'append');
+  # returns { mode => 'append', action => 'none' }
 
-  $logger->warning({context => 'deprecation', label => 'DEPRECATED'},
-                   "Template '%s' uses implicit ...", $template);
-
-At flush time, each target's emission is gated by
-C<_context_suppressed($log_name, $log_config, $context)>:
-
-=over 4
-
-=item *
-
-If the target's config has a C<suppress_contexts> list, that list is
-B<authoritative>: contexts in the list are suppressed for that target,
-contexts not in the list are emitted (the per-target list overrides any
-global default).
-
-=item *
-
-Otherwise, the global env var C<GENESIS_SUPPRESS_E<lt>CONTEXTE<gt>S> (e.g.
-C<GENESIS_SUPPRESS_DEPRECATIONS>) is consulted. If set to a truthy value,
-the context is suppressed.
-
-=item *
-
-Otherwise, the loaded C<Genesis::Config> is consulted:
-C<suppress_warnings.E<lt>contextE<gt>s>.
-
-=back
-
-This lets different log targets independently suppress different
-contexts - the terminal output can suppress C<deprecation> to keep the
-console clean while file logs keep them for auditing.
-
-=head3 Genesis::deprecation
-
-  Genesis::deprecation("Template ... is deprecated; use ...", @args);
-
-A shim parallel to C<Genesis::warning> that tags the entry with
-C<context =E<gt> 'deprecation'>. Callers outside the C<Genesis::Log>
-module should use this in preference to calling
-C<$logger-E<gt>warning({context =E<gt> 'deprecation'}, ...)> directly.
-Code B<inside> C<Genesis::Log> calls the singleton's C<warning> with the
-context option directly (to avoid the C<Log -E<gt> Genesis -E<gt> Log>
-circular dependency).
+  # An unknown mode falls back to truncate
+  apply_on_reuse('/var/log/genesis.log', 'archive');
+  # returns { mode => 'truncate', action => 'truncated' }
 
 =head2 set_active_log_path
 
@@ -755,6 +868,16 @@ corresponds to the log's position in the user's C<.genesis/config>
 C<logs:> array; child Genesis invocations read this same env var to
 know which configured log they are inheriting from the parent.
 
+B<Returns:> the C<$path> it was given, so the call can be used inline.
+
+B<Examples:>
+
+  Genesis::Log::set_active_log_path(0, '/tmp/genesis/run.log');
+  # sets $ENV{GENESIS_ACTIVE_LOG_0}; returns '/tmp/genesis/run.log'
+
+  my $p = Genesis::Log::set_active_log_path(2, $realized);
+  # returns $realized, and any child process now inherits it at index 2
+
 =head2 get_active_log_path
 
   my $inherited = Genesis::Log::get_active_log_path($index);
@@ -762,6 +885,15 @@ know which configured log they are inheriting from the parent.
 Reads C<GENESIS_ACTIVE_LOG_E<lt>indexE<gt>> from the environment.
 Returns the parent-set path if present; C<undef> if the slot is unset
 (top-level invocation, or no inheritance for this log).
+
+B<Examples:>
+
+  Genesis::Log::set_active_log_path(0, '/tmp/genesis/run.log');
+  my $p = Genesis::Log::get_active_log_path(0);
+  # returns '/tmp/genesis/run.log'
+
+  my $p = Genesis::Log::get_active_log_path(3);
+  # returns undef (slot unset; this is a top-level invocation)
 
 The user's C<.genesis/config> C<logs:> array is invariant across a
 Genesis process tree (parent and child read the same file), so the
@@ -1036,28 +1168,120 @@ B<Returns:> Nothing.
 B<Examples:>
 
   $logger->output("Deployment complete.\n");
-  # Returns: nothing (prints to STDOUT)
+  # prints to STDOUT
+
+=head2 info
+
+  $logger->info($format, @args);
+
+Level C<INFO>, to STDERR.  Carries no prefix or colouring on a terminal, so it
+reads as ordinary program output rather than as a log line.
+
+B<Returns:> nothing.  Format handling is as for L</output>.
+
+B<Examples:>
 
   $logger->info("Environment %s is ready\n", $env_name);
-  # Returns: nothing (prints to STDERR)
+  # prints to STDERR
+
+=head2 debug
+
+  $logger->debug($format, @args);
+
+Level C<DEBUG>, to STDERR.  Emitted only when the terminal threshold is
+C<DEBUG> or C<TRACE>; otherwise the call is a no-op.
+
+B<Returns:> nothing.  Format handling is as for L</output>.
+
+B<Examples:>
 
   $logger->debug("Vault path resolved to: %s", $path);
-  # Returns: nothing (printed only if terminal is at DEBUG or TRACE level)
+  # prints to STDERR only at DEBUG or TRACE threshold
+
+=head2 notice
+
+  $logger->notice($format, @args);
+
+Level C<NOTICE>, to STDERR.  Sits between C<info> and C<warning>: worth
+drawing the eye to, without implying anything is wrong.
+
+B<Returns:> nothing.  Format handling is as for L</output>.
+
+B<Examples:>
+
+  $logger->notice("Reusing cached kit %s", $kit_id);
+  # prints to STDERR
+
+=head2 warning
+
+  $logger->warning($format, @args);
+
+Level C<WARNING>, to STDERR.
+
+B<Returns:> nothing.  Format handling is as for L</output>.
+
+B<Examples:>
 
   $logger->warning("Certificate expires in %d days", $days);
-  # Returns: nothing (prints to STDERR)
+  # prints to STDERR
+
+  $logger->warning({context => 'deprecation'}, "%s is deprecated", $thing);
+  # prints to STDERR unless the deprecation context is suppressed
+
+=head2 error
+
+  $logger->error($format, @args);
+
+Level C<ERROR>, to STDERR.
+
+B<Returns:> nothing.  Format handling is as for L</output>.
+
+B<Examples:>
 
   $logger->error("Could not connect to vault at %s", $url);
-  # Returns: nothing (prints to STDERR)
+  # prints to STDERR
+
+=head2 fatal
+
+  $logger->fatal($format, @args);
+
+Level C<FATAL>, to STDERR.  B<Reports> a fatal condition; it does not
+terminate the process.  The caller decides what to do next.
+
+B<Returns:> nothing.  Format handling is as for L</output>.
+
+B<Examples:>
 
   $logger->fatal("Unrecoverable error: %s", $msg);
-  # Returns: nothing (prints to STDERR; caller must exit)
+  # prints to STDERR; the caller must still exit
+
+=head2 trace
+
+  $logger->trace($format, @args);
+
+Level C<TRACE>, to STDERR, with the current call location appended
+automatically -- its style sets C<show_stack> to C<'current'>.
+
+B<Returns:> nothing.  Format handling is as for L</output>.
+
+B<Examples:>
 
   $logger->trace("Entering %s with args: %s", $method, join(', ', @args));
-  # Returns: nothing (prints to STDERR with call location appended)
+  # prints to STDERR with the call location appended
+
+=head2 qtrace
+
+  $logger->qtrace($format, @args);
+
+Level C<TRACE>, to STDERR, without the automatic location annotation.  Use it
+where C<trace> would repeat the same location on every line of a loop.
+
+B<Returns:> nothing.  Format handling is as for L</output>.
+
+B<Examples:>
 
   $logger->qtrace("Loop iteration %d: value=%s", $i, $val);
-  # Returns: nothing (prints to STDERR at TRACE level, no location appended)
+  # prints to STDERR at TRACE threshold, no location appended
 
 =head2 dump_var
 
@@ -1464,11 +1688,150 @@ The map includes both user-facing levels (C<NONE>, C<OUTPUT>, C<ERROR>,
 C<WARNING>, C<INFO>, C<DEBUG>, C<TRACE>) and internal levels (C<FATAL>,
 C<NOTICE>, C<VALUE>, C<STACK>).
 
-=head1 AUTHORS
+=head2 _time_unit_to_seconds
+
+  my $secs = _time_unit_to_seconds($unit);
+
+Converts a lifespan unit to a count of seconds, matching on the first letter
+only and case-insensitively, so C<d>, C<day> and C<Days> are all one day.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$unit>
+
+The unit as written in a lifespan: day, week, month, or year.
+
+=back
+
+B<Returns:> the number of seconds -- 86,400, 604,800, 2,592,000, or
+31,536,000 -- or C<undef> for anything unrecognised.  A month is treated as
+30 days and a year as 365; neither tracks the calendar.
+
+B<Examples:>
+
+  _time_unit_to_seconds('weeks');
+  # returns 604800
+
+  _time_unit_to_seconds('fortnight');
+  # returns undef
+
+=head2 _context_suppressed
+
+  my $skip = _context_suppressed($log_name, $log_config, $context);
+
+Decides whether a context-tagged entry should be withheld from one target.
+
+A target's own C<suppress_contexts> list is authoritative when present: the
+target has stated its position, and the global defaults are not consulted.
+Only when the target is silent are the two global sources tried, in order:
+the C<GENESIS_SUPPRESS_E<lt>CONTEXTE<gt>S> environment variable, then
+C<suppress_warnings.E<lt>contextE<gt>s> in the loaded C<$Genesis::RC>
+config. The first truthy source wins; if none is set the entry is emitted.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$log_name>
+
+The target's name. Accepted for symmetry with the per-target call in
+C<flush_logs>, but not currently consulted by the decision.
+
+=item C<$log_config>
+
+That target's configuration hashref.
+
+=item C<$context>
+
+The entry's context tag.  An empty or undefined tag is never suppressed.
+
+=back
+
+B<Returns:> true when the entry should B<not> be emitted to this target.
+
+B<Examples:>
+
+  _context_suppressed('audit', {suppress_contexts => ['deprecation']}, 'deprecation');
+  # returns 1
+
+  _context_suppressed('audit', {}, 'deprecation');
+  # returns 1 when GENESIS_SUPPRESS_DEPRECATIONS is set, or when the
+  # loaded config has suppress_warnings.deprecations; otherwise 0
+
+  _context_suppressed('audit', {suppress_contexts => []}, 'deprecation');
+  # returns 0 -- an empty list is still a stated position, so neither
+  # the env var nor the config is consulted
+
+=head2 _now
+
+  my $t = _now();
+
+One-line indirection over C<time>.
+
+B<Returns:> the current epoch seconds.
+
+B<Examples:>
+
+  # in a test, pin the clock so retention is decided against a known "now"
+  no warnings 'redefine';
+  local *Genesis::Log::_now = sub { 1_700_000_000 };
+  # returns 1700000000 for every subsequent call
+
+=head2 _unlink
+
+  my $ok = _unlink($path);
+
+One-line indirection over C<unlink>.
+
+B<Returns:> the number of files deleted, as C<unlink> does -- C<1> on success,
+C<0> on failure.
+
+B<Examples:>
+
+  _unlink('/var/log/genesis.log.9');
+  # returns 1 when the file was removed
+
+=head2 _truncate
+
+  my $ok = _truncate($path);
+
+One-line indirection over C<truncate>, always to zero length.
+
+B<Returns:> true on success, false on failure, as C<truncate> does.
+
+B<Examples:>
+
+  _truncate('/var/log/genesis.log');
+  # returns true; the file is emptied but not removed
+
+=head2 _rename
+
+  my $ok = _rename($from, $to);
+
+One-line indirection over C<rename>.
+
+B<Returns:> true on success, false on failure, as C<rename> does.
+
+B<Examples:>
+
+  _rename('/var/log/genesis.log', '/var/log/genesis.log.1');
+  # returns true; used to cascade archives during rotation
+
+The four above exist so tests can stub the clock and the filesystem.
+Retention and rotation are decided from file ages and enacted by deleting and
+renaming, none of which a test can exercise honestly against the real
+builtins.  Production paths call these rather than the builtins so the seam is
+always in place.
+
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

@@ -1535,7 +1535,7 @@ subtest 'extract_artifacts_to()' => sub {
 		done_testing;
 	};
 
-	subtest 'error message contains resolved path (FWT-726)' => sub {
+	subtest 'error message contains resolved path' => sub {
 		my $d = make_deployment();
 		local $ENV{GENESIS_CALLER_DIR} = '/tmp';
 		my $nonexistent = "nonexistent-dir-$$";

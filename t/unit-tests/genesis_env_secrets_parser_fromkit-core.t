@@ -42,7 +42,7 @@ sub parse_invalid {
 	return grep { $_->isa('Genesis::Secret::Invalid') } parse_metadata($metadata, @features);
 }
 
-subtest 'FWT-687: features defaulting does not have dead code' => sub {
+subtest 'features defaulting does not have dead code' => sub {
 	# This is a code-review regression test — verify parse() works
 	# with a mock environment that returns an empty features list
 	my $env = MockEnv->new(
@@ -61,7 +61,7 @@ subtest 'FWT-687: features defaulting does not have dead code' => sub {
 	ok($secrets[0]->valid, "produced secret is valid");
 };
 
-subtest 'FWT-685: unrecognized credential key uses correct subject label' => sub {
+subtest 'unrecognized credential key uses correct subject label' => sub {
 	my @secrets = parse_metadata({
 		credentials => {
 			base => {
@@ -84,7 +84,7 @@ subtest 'FWT-685: unrecognized credential key uses correct subject label' => sub
 		"error message does NOT say 'Bad generate-password'");
 };
 
-subtest 'FWT-682: parse_provided does not mutate caller metadata' => sub {
+subtest 'parse_provided does not mutate caller metadata' => sub {
 	my $metadata = {
 		provided => {
 			base => {
@@ -113,7 +113,7 @@ subtest 'FWT-682: parse_provided does not mutate caller metadata' => sub {
 	isa_ok($secrets[0], 'Genesis::Secret::UserProvided');
 };
 
-subtest 'FWT-684: path-level random/uuid produce specific error messages' => sub {
+subtest 'path-level random/uuid produce specific error messages' => sub {
 	my @secrets = parse_metadata({
 		credentials => {
 			base => {
@@ -144,7 +144,7 @@ subtest 'FWT-684: path-level random/uuid produce specific error messages' => sub
 		"uuid path-level error does NOT give generic message");
 };
 
-subtest 'FWT-683: bare ssh/rsa without size defaults to 2048' => sub {
+subtest 'bare ssh/rsa without size defaults to 2048' => sub {
 	my @secrets = parse_metadata({
 		credentials => {
 			base => {
@@ -182,7 +182,7 @@ subtest 'FWT-683: bare ssh/rsa without size defaults to 2048' => sub {
 	is($rsa_fixed->get('fixed'), 1, "'rsa 1024 fixed' has fixed=1");
 };
 
-subtest 'FWT-681 Cat1: undefined data returns empty list, not bare next' => sub {
+subtest 'undefined data returns empty list, not bare next' => sub {
 	# Test that each parser method returns () when data is undef,
 	# rather than using bare next which escapes the subroutine scope
 
@@ -205,7 +205,7 @@ subtest 'FWT-681 Cat1: undefined data returns empty list, not bare next' => sub 
 	is(scalar @creds, 0, "_parse_credential_definition returns empty list for undef data");
 };
 
-subtest 'FWT-681 Cat2: _validate_feature_block passes complete args to _invalid_secret' => sub {
+subtest '_validate_feature_block passes complete args to _invalid_secret' => sub {
 	# When a feature block exists but is not a hashref, the resulting
 	# Invalid secret should have data and _feature populated
 	my @secrets = parse_metadata({
@@ -231,7 +231,7 @@ subtest 'FWT-681 Cat2: _validate_feature_block passes complete args to _invalid_
 	like($desc, qr/base/, "describe() mentions the feature name");
 };
 
-subtest 'FWT-681 Cat3: _parse_x509_subpaths does not mutate caller hashref' => sub {
+subtest '_parse_x509_subpaths does not mutate caller hashref' => sub {
 	my $subdata = {
 		valid_for => '1y',
 		names     => ['server.example.com'],
@@ -254,7 +254,7 @@ subtest 'FWT-681 Cat3: _parse_x509_subpaths does not mutate caller hashref' => s
 		"caller's hashref not mutated: signed_by not rewritten");
 };
 
-subtest 'FWT-686: arbitrary X.509 subpath names are accepted' => sub {
+subtest 'arbitrary X.509 subpath names are accepted' => sub {
 	# Kit authors can use any subpath name — no whitelist restriction
 	my @secrets = parse_metadata({
 		certificates => {

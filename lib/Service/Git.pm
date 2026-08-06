@@ -14,18 +14,6 @@ my %_instances;  # keyed by resolved git root path
 ### Constructor & Lifecycle {{{
 
 # new - get or create a Git service instance for a repository {{{
-#
-# Flyweight: returns the existing instance if one already exists for
-# the same .git-controlled repo.  This prevents competing objects
-# from stepping on each other's branch tracking or caches.
-#
-#   my $git = Service::Git->new($path);   # or ->new() for cwd
-#   my $git = Service::Git->new($path, track_branch => 1);
-#
-# With track_branch => 1, the current branch is saved and restored
-# when the object goes out of scope (DESTROY).  If the instance
-# already exists and track_branch is requested, it upgrades the
-# existing instance.
 sub new {
 	my ($class, $path, %opts) = @_;
 	$path ||= '.';
@@ -66,12 +54,6 @@ sub new {
 
 # }}}
 # create - initialize a new git repository and return an instance {{{
-#
-#   my $git = Service::Git->create($path);
-#   my $git = Service::Git->create($path, initial_branch => 'control');
-#
-# Runs git init at the given path, optionally setting the initial
-# branch name.  Returns a Service::Git instance for the new repo.
 sub create {
 	my ($class, $path, %opts) = @_;
 	$path ||= '.';
@@ -254,12 +236,6 @@ sub is_clean {
 
 # }}}
 # status - working-tree state as a {path => XY-code} hashref {{{
-#
-# Wraps `git status --porcelain` and parses each line into the
-# two-character status code and the path.  Optional pathspec args
-# limit the report to those paths (relative to git root).  Includes
-# untracked files (`??`) -- callers can filter if they only want
-# tracked-file changes.
 sub status {
 	my ($self, @pathspecs) = @_;
 	my @cmd = ('git', 'status', '--porcelain');
@@ -313,16 +289,6 @@ sub pull_rebase {
 
 # }}}
 # diff_files - structured diff between two refs, filtered by pathspecs {{{
-#
-# Returns a hashref:
-#   {
-#     changed => \@files,     # added, modified, or type-changed
-#     deleted => \@files,
-#     renamed => \%old_to_new,
-#     all     => \@all_files, # union of changed + deleted
-#   }
-#
-# Pathspecs are relative to git root (caller should prefix if needed).
 sub diff_files {
 	my ($self, $from, $to, @pathspecs) = @_;
 	my @cmd = ('git', 'diff', '--name-status', $from, $to);
@@ -454,12 +420,6 @@ sub commit {
 
 # }}}
 # cherry_pick - apply the given commit by sha onto the current branch {{{
-#
-# Runs `git cherry-pick <sha>`.  On success returns $self.  On
-# conflict, runs `git cherry-pick --abort` to clean up the
-# working tree state and bails with a message naming the
-# conflicting file(s).  On any other failure, bails with the
-# underlying git error.
 sub cherry_pick {
 	my ($self, $sha) = @_;
 	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
@@ -524,12 +484,6 @@ sub remote_url {
 
 # }}}
 # remote_branch_exists - check whether a branch exists on the remote {{{
-#
-# Uses `git ls-remote --heads <remote> <branch>`.  Non-empty stdout
-# means the branch is present remotely.  Returns 0 when no default
-# remote is configured (nothing to check against).  Bails on
-# ls-remote failure (auth/network/bad-remote) so a transient error
-# isn't silently misclassified as "branch doesn't exist".
 sub remote_branch_exists {
 	my ($self, $branch, $remote) = @_;
 	$remote //= $self->default_remote;
@@ -577,27 +531,6 @@ sub fetch_branch {
 
 # }}}
 # fetch_branches - fetch multiple branches from remote in one call {{{
-#
-#   $git->fetch_branches(\@names)           # use default remote
-#   $git->fetch_branches(\@names, $remote)  # explicit remote
-#
-# Builds all refspecs and issues a single git fetch so credentials are
-# only prompted once regardless of how many branches are listed.
-# Force-updates local refs to match remote; safe for pipeline env
-# branches because local divergence there is a bug, not a workflow.
-# Silently skips the currently checked-out branch (git refuses to
-# update an active branch via refspec).
-#
-# In list context returns ($self, \%result) where %result carries:
-#   ok    - 1 on success or no-op; 0 on a real fetch failure
-#   kind  - 'success' | 'network' | 'auth' | 'unknown'
-#   err   - the git stderr (only when ok=0)
-#
-# In scalar context returns $self for backwards compatibility.
-#
-# Non-interactive contexts (no controlling terminal) get
-# GIT_TERMINAL_PROMPT=0 injected so a missing-cred situation exits
-# fast instead of hanging on a stdin prompt.
 sub fetch_branches {
 	my ($self, $names, $remote) = @_;
 	$remote //= $self->default_remote;
@@ -679,13 +612,6 @@ sub prefixed {
 
 # }}}
 # unprefixed - strip the git prefix from git-root-relative paths {{{
-#
-# Inverse of `prefixed`.  Converts git-root-relative paths into
-# Top-root-relative paths for user-facing display.  Paths that don't
-# start with the prefix are left untouched (so sibling-dir paths
-# outside the deployment Top root remain identifiable).
-#
-#   my @user_paths = $git->unprefixed(@git_paths);
 sub unprefixed {
 	my ($self, @paths) = @_;
 	my $p = $self->{prefix};

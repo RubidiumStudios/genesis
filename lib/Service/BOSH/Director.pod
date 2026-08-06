@@ -806,13 +806,34 @@ B<Examples:>
 
 =head2 configs
 
-  my %configs  = $director->configs();   # list context
-  my $configs  = $director->configs();   # scalar context
+  my %configs  = $director->configs(%opts);   # list context
+  my $configs  = $director->configs(%opts);   # scalar context
 
 Lists all configurations on the BOSH director.
 
+The listing is memoized on first call, so repeated queries during one
+Genesis run cost a single C<bosh configs> invocation.
+
 In list context, returns a flat hash. In scalar context, returns a
 reference to the same hash.
+
+B<Parameters:>
+
+=over 4
+
+=item %opts
+
+=over 4
+
+=item C<refresh>
+
+Discard the memoized listing and re-query the director. Needed after an
+upload or delete, since the cache would otherwise still describe the
+director as it was.
+
+=back
+
+=back
 
 The returned structure is nested:
 
@@ -874,10 +895,15 @@ B<Examples:>
 
 =head2 get_config
 
-  my $content = $director->get_config($type, $name);
+  my $content = $director->get_config($type, $name, %opts);
 
 Returns the content string of the named configuration, or C<undef> when
 no matching configuration is found.
+
+Memoized per C<(type, name)> pair. A C<undef> result is cached as well as
+a hit, so a config that did not exist is not re-queried on every call --
+which is why C<upload_config_from_file> explicitly invalidates this cache
+for the pair it just uploaded.
 
 B<Parameters:>
 
@@ -891,6 +917,16 @@ The configuration type (e.g. C<'cloud'>, C<'runtime'>).
 
 The configuration name.
 
+=item %opts
+
+=over 4
+
+=item C<refresh>
+
+Discard the memoized content for this C<(type, name)> and re-query.
+
+=back
+
 =back
 
 B<Returns:> A YAML string of the configuration content, or C<undef>.
@@ -900,21 +936,102 @@ B<Examples:>
   my $yaml = $director->get_config('cloud', 'default');
   # Returns: '--- # cloud config YAML ...'
 
+  my $yaml = $director->get_config('cloud', 'default', refresh => 1);
+  # Returns: the config as it is on the director right now
+
+=head2 cpis
+
+  my @names = $director->cpis(%opts);   # list context
+  my $names = $director->cpis(%opts);   # scalar context
+
+The names of every CPI defined across all of the director's cpi configs.
+
+This is the live inventory, read from the director rather than from what
+Genesis believes it advertised. Each cpi config is fetched and parsed, and
+the C<name> field of each entry in its C<cpis> array is collected;
+the union is returned sorted and de-duplicated.
+
+Exodus is deliberately B<not> used as a fast path here. Exodus records only
+what Genesis advertised at deploy time, and cpi configs may have been
+uploaded out of band -- which is routine outside OCFP. The director's own
+state is the authoritative answer to "what CPIs are available here?". In
+that respect this is a sibling of C<stemcells>: a fact about the director,
+not about any environment that consumes it.
+
+Failures are swallowed deliberately -- a config that cannot be fetched,
+does not parse, or has no C<cpis> array contributes nothing rather than
+aborting the inventory. A director with no cpi configs yields an empty
+list, not an error.
+
+Note that a I<cpi name> here is the C<name> of an entry inside a cpi
+config, not the name the cpi config itself was uploaded under. One cpi
+config may contribute several.
+
+B<Parameters:>
+
+=over 4
+
+=item %opts
+
+=over 4
+
+=item C<refresh>
+
+Discard the memoized inventory and re-read every cpi config.
+
+=back
+
+=back
+
+B<Returns:> In list context, a sorted list of cpi name strings. In scalar
+context, an arrayref of the same.
+
+B<Examples:>
+
+  my @cpis = $director->cpis;
+  # Returns: ('aws-us-east-1', 'aws-us-west-2', 'vsphere-dc1')
+
+  my @cpis = $director->cpis(refresh => 1);
+  # Returns: the same, re-read from the director
+
+  # Director with no cpi configs:
+  my @cpis = $director->cpis;
+  # Returns: ()
+
 =head2 download_configs
 
-  my @configs  = $director->download_configs($path, $type, $name);  # list context
-  my $configs  = $director->download_configs($path, $type, $name);  # scalar context
+  my @configs  = $director->download_configs($path, $type, $name, %opts);
+  my $configs  = $director->download_configs($path, $type, $name, %opts);
 
 Downloads one or more configurations to C<$path> on the local filesystem.
 
 When C<$name> is C<'*'> (or omitted), all configs of the given type are
-fetched and merged into a single file using C<spruce merge>. Otherwise
-the single named config is written directly.
+fetched and assembled into a single file. Otherwise the single named
+config is written directly.
 
-Dies when the target file is empty after writing (i.e. no matching
-configs were found on the director).
+B<Assembly differs by type.> For most types the long-standing
+C<spruce merge> behaviour is correct: merge-by-name on keyed entries
+(C<azs>, C<networks>, C<vm_types>, C<addons>, C<releases>, ...) mirrors
+how BOSH composes them at deploy time.
 
-Dies when the BOSH or JSON parsing commands fail.
+C<cpi> is the exception. BOSH concatenates the C<cpis> arrays across all
+active cpi configs and B<errors on duplicate cpi names>. Spruce's
+merge-by-name would silently dedupe exactly those duplicates and hide the
+divergence, so cpi takes a manual concatenation path instead: each config
+is parsed, the C<cpis> arrays are concatenated, and a duplicate cpi name
+bails locally with the offending name attributed to the cpi configs it
+came from. That is more actionable than waiting for BOSH's terser
+duplicate-name error at deploy time.
+
+Note the distinction the error message keeps: the B<cpi config name> is
+what the config was uploaded as, while the B<cpi name> is the C<name>
+field of an entry inside its C<cpis> array. It is duplicate I<cpi names>
+that BOSH rejects, and one cpi config can contribute several.
+
+B<Results are memoized.> The assembled output is written to a
+director-internal cache path and then copied to C<$path>; later calls for
+the same C<(type, name)> pair pay only the copy. Pass C<< refresh => 1 >>
+to discard that cache.
 
 Each config entry in the returned list is a hashref with keys:
 
@@ -951,33 +1068,50 @@ The configuration type to download.
 Optional. The configuration name to download. Defaults to C<'*'> (all
 configs of the given type).
 
+=item %opts
+
+=over 4
+
+=item C<refresh>
+
+Discard the cached assembly for this C<(type, name)> and re-fetch. The
+config I<listing> is refreshed unconditionally too, even when a specific
+name was requested -- that name may be a fresh upload absent from the
+cached listing.
+
+=item C<optional>
+
+When no configs of C<$type> exist on the director, return empty instead
+of bailing. Single-IaaS environments with no named cpi configs rely on
+this; without it the legacy bail stands.
+
+=back
+
 =back
 
 B<Returns:> In list context, a list of config entry hashrefs. In scalar
-context, an arrayref of the same entries.
+context, an arrayref of the same entries. With C<< optional => 1 >> and no
+matching configs, an empty list or arrayref.
 
 B<Errors:>
 
-Dies with C<"Could not determine available #C{$type} configurations: $err">
-when the BOSH configs query or JSON parsing fails.
+Dies with C<"No matching %s configurations defined on '#M{%s}' BOSH director">
+when no configs of the type exist and C<optional> was not set, or when the
+downloaded file is empty. C<%s> is the config type and the director alias.
 
-Dies with C<"No matching $type configurations defined on '#M{%s}' BOSH director">
-when the downloaded file is empty. C<%s> is the director alias.
-
-Dies with C<"No $_->{label} contents."> when a fetched configuration entry
-has empty content. C<$_-E<gt>{label}> is the human-readable label of the
+Dies with C<"No $c->{label} contents."> when a fetched configuration entry
+has empty content. C<$c-E<gt>{label}> is the human-readable label of the
 config entry (e.g. C<"default cloud config">).
 
-Dies (via C<bug()>) with C<"BOSH returned multiple entries for $_-E<gt>{label} - Genesis doesn't know how to process this">
-when the BOSH C<config> command returns more than one table row for a single
-named configuration. This indicates an unexpected BOSH API response (note
-C<download-configs-garbled-message> in L</KNOWN ISSUES>: the error message
-string uses C<$_-E<gt>label> without braces, producing a garbled label like
-C<"HASH(0x...)-E<gt>label">; the intended form is C<$_-E<gt>{label}>).
+Dies with C<"Duplicate cpi name(s) found across uploaded cpi configs on '#M{%s}' BOSH director:">
+followed by each duplicated cpi name and the cpi configs it appears in,
+when assembling C<cpi> configs. C<%s> is the director alias. BOSH will
+refuse to deploy until the duplicate is resolved, by deleting the
+redundant config or renaming the cpi entry.
 
 Dies with C<"Failed to converge the active $type configurations: $err"> when
-C<spruce merge> fails while merging multiple configs. C<$type> is the config
-type and C<$err> is the error output.
+C<spruce merge> fails while merging multiple non-cpi configs. C<$type> is
+the config type and C<$err> is the error output.
 
 B<Examples:>
 
@@ -986,6 +1120,18 @@ B<Examples:>
     print "Downloaded: $e->{label}\n";
   }
   # Returns: ({ type => 'cloud', name => 'default', label => 'default cloud config' }, ...)
+
+  # Tolerate a director with no cpi configs at all.
+  my @entries = $director->download_configs(
+    '/tmp/cpi.yml', 'cpi', '*', optional => 1,
+  );
+  # Returns: () when the director has no cpi configs
+
+  # Force a re-fetch after uploading a new config.
+  my @entries = $director->download_configs(
+    '/tmp/cpi.yml', 'cpi', '*', refresh => 1,
+  );
+  # Returns: the entries, with both the listing and assembly re-read
 
 =head2 upload_config
 
@@ -1867,43 +2013,93 @@ B<Examples:>
   print "Exit code: $result->{exit_code}\n";
   # Returns: { target => 'api/0', exit_code => 0, ... }
 
-=head1 KNOWN ISSUES
+=head1 INTERNAL METHODS
 
-The following defects are documented here to
-prevent callers from relying on the current (incorrect) behavior.
+=head2 _derive_exodus_pointers
+
+  my ($path, $vault) = $class->_derive_exodus_pointers($alias, $env, %opts);
+
+Works out which exodus path and which vault a director's data should be
+read from. Shared by the C<from_*> constructors so they agree on the
+answer.
+
+Explicit C<exodus_path> and C<exodus_vault> options always win. With no
+C<$env> to consult, they are returned unchanged -- including when both are
+C<undef>.
+
+Otherwise the C<rel_to_env> option decides whose exodus is meant:
 
 =over 4
 
-=item deployment-setter-guard (high)
+=item C<'self'>
 
-C<deployment()> setter guard never fires. The C<shift> on the preceding
-line has already consumed the second argument from C<@_> by the time the
-C<if @_> check runs, so extra arguments are silently ignored rather than
-triggering C<bug()>.
+The environment's own exodus. Path is C<< $env->exodus_base >> and the
+vault is the environment's own.
+
+=item C<'parent'> (default)
+
+The exodus of the BOSH director this environment deploys I<through>,
+assembled as C<< mount . alias . '/' . deployment_type >>. Each part falls
+back in turn: the explicit option, then the environment's C<bosh_env>
+record, then the environment's own value -- with the deployment type
+defaulting to C<'bosh'>.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item C<$alias>
+
+The director alias, used to build the parent-relative path.
+
+=item C<$env>
+
+A C<Genesis::Env>, or a false value to skip derivation entirely.
+
+=item C<%opts>
+
+C<exodus_path>, C<exodus_vault>, C<exodus_mount>, C<bosh_deployment_type>,
+and C<rel_to_env> as described above.
+
+=back
+
+B<Returns:> The two-element list C<($exodus_path, $exodus_vault)>.
+
+B<Examples:>
+
+  # Parent-relative (the default).
+  my ($p, $v) = $class->_derive_exodus_pointers('prod-bosh', $env);
+  # Returns: ('secret/exodus/prod-bosh/bosh', $env->vault-ish)
+
+  # The environment's own exodus.
+  my ($p, $v) = $class->_derive_exodus_pointers('x', $env, rel_to_env => 'self');
+  # Returns: ($env->exodus_base, $env->vault)
+
+  # No env: explicit values pass straight through.
+  my ($p, $v) = $class->_derive_exodus_pointers('x', undef, exodus_path => 'a/b');
+  # Returns: ('a/b', undef)
+
+=head1 KNOWN ISSUES
+
+Defects that are still present. They are recorded so callers do not build
+on the current, incorrect behaviour.
+
+=over 4
 
 =item errand-wrong-method-name (low)
 
 C<run_errand()>: the error message says C<"Missing errand name in call to
 deploy()"> but should say C<run_errand()>.
 
-=item errand-discards-exit-code (medium)
+=item errand-discards-return-value (low)
 
-C<run_errand()> always returns C<1> regardless of the errand's exit code.
-The result of C<$self-E<gt>execute(...)> is discarded before the C<return 1>
-statement.
-
-=item download-configs-garbled-message (medium)
-
-C<download_configs()>: C<$_-E<gt>label> inside a double-quoted string
-interpolates C<$_> as the stringified hashref (e.g. C<HASH(0x...)>)
-followed by the literal text C<-E<gt>label>, producing a garbled error
-message. The correct form is C<$_-E<gt>{label}>.
-
-=item upload-config-discards-return (medium)
-
-C<upload_config()> calls C<upload_config_from_file()> but discards its
-return value, so callers of C<upload_config()> cannot determine whether
-the upload succeeded.
+C<run_errand()> discards the result of C<< $self->execute(...) >> and
+always returns C<1>. In practice a failing errand does not slip past --
+the call sets C<onfailure>, so a non-zero exit bails rather than
+returning. The defect is that the return value carries no information, so
+it cannot be used to distinguish outcomes that do not bail.
 
 =item upload-config-asymmetric-bail (medium)
 
@@ -1946,11 +2142,13 @@ The Vault client used for exodus data retrieval and network locking.
 
 =back
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

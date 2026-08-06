@@ -74,4 +74,6 @@ sub _get_token_for {
 	return "__$sub";
 }
 
+# }}}
+
 1;

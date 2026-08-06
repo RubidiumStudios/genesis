@@ -95,7 +95,7 @@ sub deployment {
 }
 
 # }}}
-# base_manifest - the manifest to use to look data up (ie not entombified)
+# base_manifest - the manifest to use to look data up (ie not entombified) {{{
 sub base_manifest {
 	my ($self, @args) = @_;
 	my $lookup_type = $self->_memoize(sub {
@@ -106,7 +106,7 @@ sub base_manifest {
 }
 
 # }}}
-# cached_or_build - reuse any already-built variant in the listed types;
+# cached_or_build - reuse any already-built variant in the listed types {{{
 # otherwise build the first one.  Always returns an unsubsetted
 # manifest; chain ->subset_of('foo') for a slice.
 #

@@ -53,6 +53,32 @@ B<Returns:> a string.
   print $manifest->description();
   # prints 'Raw merged manifest template with no interpolation (merged, but spruce operators still in place)'
 
+=head2 source_files
+
+  my $files = $manifest->source_files();
+
+The files merged to produce this manifest, in merge order: the initiation
+file, the kit's files, the cloud config, the environment files, and the
+conclusion file.
+
+Cloud config is B<optional> here, unlike in the deployable variants. This
+manifest is not evaluated, so an absent cloud config leaves operators
+unresolved rather than producing a broken result -- which is exactly what
+this variant is for.
+
+B<Parameters:> None.
+
+B<Returns:> An arrayref of file paths, in merge order.
+
+B<Examples:>
+
+  my $files = $manifest->source_files();
+  # returns [ initiation, kit files..., cloud config, env files..., conclusion ]
+
+  # In a repo with no cloud config:
+  my $files = $manifest->source_files();
+  # returns the same list without it -- optional, not an error
+
 =head2 merge_options
 
   my $opts = $manifest->merge_options();
@@ -109,11 +135,13 @@ disk.
   my ($data, $file) = $manifest->_merge();
   print ref($data); # prints 'HASH'
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

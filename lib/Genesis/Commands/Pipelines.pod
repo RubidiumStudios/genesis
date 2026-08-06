@@ -621,7 +621,7 @@ B<Examples:>
   genesis ci-pipeline-run-errand
   # Returns: exits 0 on success
 
-=head1 INTERNAL METHODS
+=head1 INTERNAL FUNCTIONS
 
 These functions are internal to the implementation.  They may change without
 notice and should not be called directly.
@@ -873,6 +873,12 @@ L<Service::Vault::Remote>, L<Genesis::Commands>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
 
 =cut

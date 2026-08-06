@@ -73,7 +73,7 @@ sub _validate_value {
 }
 
 # }}}
-# __get_safe_command_for_generate - get command components to add or rotate secret {{{{
+# __get_safe_command_for_generate - get command components to add or rotate secret {{{
 sub __get_safe_command_for_generate {
 	my ($self, $action, %opts) = @_;
 	debug("%s __get_safe_command_for_generate: unconsumed opts: %s", ref($self), join(', ', sort keys %opts)) if %opts;
@@ -95,9 +95,6 @@ sub process_command_output {
 	}
 	return ($out, $rc, $err);
 }
-# }}}
-
-# }}}
 # }}}
 
 1;

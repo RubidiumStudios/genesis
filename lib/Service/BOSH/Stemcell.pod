@@ -147,10 +147,14 @@ Dies with C<"No stemcells found for %s on the %s CPI"> if the resolved CPI
 prefix is empty (i.e. the IaaS is not recognised). C<%s> is the OS slug;
 the second C<%s> is the (empty) CPI string.
 
-B<Note:> The HTTP response status from the bosh.io API is not checked. If the
-request fails (network error, non-200 status), the response body is passed
-to C<JSON::PP-E<gt>decode> unchanged, which will die with an unhandled
-exception on malformed input.
+Dies with C<"Unable to reach bosh.io to list stemcells for #C{%s} on the #C{%s} CPI (HTTP status: %s)."> --
+followed by advice to pin an already-uploaded stemcell version or retry --
+when the bosh.io request returns anything other than success. The
+substitutions are the OS slug, the CPI, and the HTTP status, or C<none> when
+the request produced no status at all.
+
+The status is checked before the body is parsed, so an unreachable bosh.io
+reports as unreachable rather than as a JSON parse failure.
 
 B<Examples:>
 
@@ -657,11 +661,13 @@ C<$type_filter>.
 
 L<Service::BOSH>, L<Service::BOSH::Director>
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

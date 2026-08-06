@@ -83,6 +83,7 @@ sub status {
 # Rest inherited from Genesis::Kit::Provider::Github
 
 # }}}
+# }}}
 1;
 
 # vim: fdm=marker:foldlevel=1:noet

@@ -665,11 +665,13 @@ loaded C<ci/test_params.yml> content on the object. Similarly, C<validate>
 sets C<git_clean> state that is consumed by C<compile>. Create a new
 instance for each distinct kit source directory.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

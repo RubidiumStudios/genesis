@@ -61,39 +61,6 @@ The environment variable C<GENESIS_SHOW_CREDHUB_SECRETS> controls redaction.
 When set, credential values are shown in plain text in command output;
 otherwise they are redacted.
 
-=head1 KNOWN ISSUES
-
-The following defects are tracked in FWT-707 and are documented here so
-that callers are aware of the current behaviour.
-
-=over 4
-
-=item CH-1 (critical) E<mdash> B<RESOLVED>
-
-C<query()>: the C<delete> key now matches the condition key (C<_data>).
-
-=item CH-2 (medium) E<mdash> B<RESOLVED>
-
-C<set()> error messages now report only the missing keys via
-C<sentence_join(@$missing)>, and the double-space typo is fixed.
-
-=item CH-3 (medium) E<mdash> B<RESOLVED>
-
-C<preload()> now uses C<$self-E<gt>base()> (via a local variable) with
-C<\Q...\E> quoting in the regex substitution.
-
-=item CH-4 (low) E<mdash> B<RESOLVED>
-
-C<set()> now updates the in-memory cache after a successful write when the
-cache is populated.
-
-=item CH-5 (low) E<mdash> B<RESOLVED>
-
-C<is_preloaded()> now returns true when the cache has been initialised,
-even if the credential store is empty.
-
-=back
-
 =head1 CLASS METHODS
 
 =head2 new
@@ -296,7 +263,7 @@ the object's connection details. This hash is passed to every C<credhub>
 subprocess spawned by the module.
 
 B<Returns:> A hash reference suitable for passing as the C<env> option to
-C<run()>.
+L<Genesis/run>.
 
 B<Examples:>
 
@@ -897,11 +864,13 @@ B<Examples:>
 
 L<Service::Vault>, L<Service::BOSH>
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

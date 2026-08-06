@@ -1342,7 +1342,7 @@ EOF
 	is($result[0], undef, 'invalid name returns undef');
 	like($result[1], qr/Invalid environment name/i, 'error mentions invalid environment name');
 
-	# Test 15: Trailing whitespace on `kit:` line is tolerated (FWT-984)
+	# Test 15: Trailing whitespace on `kit:` line is tolerated
 	# YAML permits whitespace between the colon and the line terminator;
 	# the kit-info regex must not require `kit:` to be immediately followed
 	# by a newline.
@@ -1359,7 +1359,7 @@ EOF
 	$result = Genesis::Env->is_valid_env_file('trailing-ws-crlf', $top);
 	ok($result, 'env file with trailing whitespace after `kit:` (CRLF) is valid');
 
-	# Test 17: Trailing whitespace on `genesis:` line is also tolerated (FWT-984)
+	# Test 17: Trailing whitespace on `genesis:` line is also tolerated
 	# The genesis.env extraction regex must not require `genesis:` to be
 	# immediately followed by a newline either.
 	put_file $top->path("trailing-ws-genesis.yml"),

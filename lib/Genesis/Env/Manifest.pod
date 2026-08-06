@@ -68,45 +68,68 @@ manifest is treated as a subset view built from a parent manifest
 
 B<Returns:> a blessed manifest object of the calling class.
 
+B<Examples:>
+
   my $manifest = Genesis::Env::Manifest::Unredacted->new($builder, undef);
   print ref($manifest); # prints 'Genesis::Env::Manifest::Unredacted'
 
 =head2 builder
 
-  my $builder  = $manifest->builder();
-  my $env      = $manifest->env();
-  my $type_str = $manifest->type();
+  my $builder = $manifest->builder();
 
-Three accessors that describe the manifest's identity and context:
+The builder this manifest was constructed with, which provides the
+environment, the merge source files, and the other manifest variants.
 
-B<builder> returns the builder object passed to C<new>. The builder provides
-access to the environment, merge source files, and other manifest variants.
+B<Parameters:> None.
 
-B<env> returns the C<Genesis::Env> object for the deployment environment.
-Delegates to C<< $manifest->builder->env >>.
+B<Returns:> The builder object passed to C<new>.
 
-B<type> derives the manifest type name from the class name. Strips the package
-prefix, lowercases the first letter, and inserts underscores before interior
-uppercase letters to produce a snake_case identifier. For example:
-
-=over 4
-
-=item * C<Genesis::Env::Manifest::Unredacted> returns C<'unredacted'>
-
-=item * C<Genesis::Env::Manifest::VaultifiedEntombed> returns C<'vaultified_entombed'>
-
-=item * C<Genesis::Env::Manifest::PartialEnvironment> returns C<'partial_environment'>
-
-=back
+B<Examples:>
 
   my $builder = $manifest->builder();
-  print ref($builder);       # prints the builder class name
+  # returns the Genesis::Env::ManifestProvider
+
+=head2 env
+
+  my $env = $manifest->env();
+
+The deployment environment, reached through the builder.
+
+B<Parameters:> None.
+
+B<Returns:> The C<Genesis::Env> object.
+
+B<Examples:>
 
   my $name = $manifest->env()->name();
-  print $name;               # prints the environment name
+  # returns the environment name
+
+=head2 type
 
   my $type = $manifest->type();
-  print $type;               # prints e.g. 'unredacted'
+
+The manifest type as a snake_case identifier, derived from the class name:
+the package prefix is stripped, the first letter lowercased, and underscores
+inserted before interior capitals.
+
+B<It is derived, never stored.> That is what lets C<subset_of> rebase off the
+unsubsetted parent type rather than nesting subsets -- the type of a subset
+manifest is still its parent's.
+
+B<Parameters:> None.
+
+B<Returns:> The type string.
+
+B<Examples:>
+
+  my $type = $manifest->type();
+  # returns 'unredacted' for Genesis::Env::Manifest::Unredacted
+
+  my $type = $manifest->type();
+  # returns 'vaultified_entombed' for ::VaultifiedEntombed
+
+  my $type = $manifest->type();
+  # returns 'partial_environment' for ::PartialEnvironment
 
 =head2 label
 
@@ -144,9 +167,15 @@ the base class or any subclass that has not overridden it, where C<%s> is the
 manifest's label (e.g. for the partial environment type the message would be
 C<"redacted: Not implemented for partial environment manifest types">).
 
-  # Example of a subclass override:
+B<Examples:>
+
+  # On a subclass that implements it:
   my $redacted = $manifest->redacted();
-  # Returns: the companion redacted manifest object for this manifest type
+  # returns the companion redacted manifest for this type
+
+  # On the base class, or a type that does not implement it:
+  my $redacted = $manifest->redacted();
+  # bugs out: redacted: Not implemented for <label> manifest types
 
 =head2 manifest_lookup_target
 
@@ -183,6 +212,37 @@ source files and produce the data.
 
   my $data = $manifest->data();
   print $data->{name}; # prints the deployment name
+
+=head2 data
+
+  my $data = $manifest->data();
+
+The manifest as a data structure. Memoized.
+
+Build strategy, in order:
+
+=over 4
+
+=item 1. If a file has already been written, load it.
+
+=item 2. If this is a subset, ask the builder for the subset.
+
+=item 3. Otherwise merge, via the C<_merge> each subclass implements.
+
+=back
+
+C<data> and C<file> are two views of the same manifest and each fills in the
+other: building via C<data> stores the file it produced, and building via
+C<file> stores the data. Asking for one therefore makes the other free.
+
+B<Parameters:> None.
+
+B<Returns:> The manifest as a hashref.
+
+B<Examples:>
+
+  my $data = $manifest->data();
+  # returns the merged manifest structure, and populates file() too
 
 =head2 file
 
@@ -299,6 +359,216 @@ B<Parameters for notify:>
   print $manifest->get_build_notice();
   # prints 'building deployment manifest...'
 
+=head2 has_data
+
+  my $bool = $manifest->has_data();
+
+Whether the manifest structure is already in memory.
+
+B<Parameters:> None.
+
+B<Returns:> True when data is loaded, false otherwise.
+
+B<Examples:>
+
+  my $bool = $manifest->has_data();
+  # returns false on a manifest that has not been built or loaded
+
+=head2 has_file
+
+  my $bool = $manifest->has_file();
+
+Whether a file path has been recorded for this manifest.
+
+B<Parameters:> None.
+
+B<Returns:> True when a file is recorded, false otherwise.
+
+B<Examples:>
+
+  my $bool = $manifest->has_file();
+  # returns true after data() has built and saved one
+
+=head2 set_data
+
+  $manifest->set_data($data);
+
+Records the manifest structure without building it.
+
+Used when a manifest has been produced elsewhere -- a subset retrieval or a
+merge whose result is being handed back -- so it can be stored without
+re-deriving it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The manifest structure.
+
+=back
+
+B<Returns:> The value set.
+
+B<Examples:>
+
+  $manifest->set_data($merged);
+  # returns $merged; has_data() is now true
+
+=head2 set_file
+
+  $manifest->set_file($path);
+
+Records the file path for this manifest without writing it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path to record.
+
+=back
+
+B<Returns:> The value set.
+
+B<Examples:>
+
+  $manifest->set_file($path);
+  # returns $path; has_file() is now true
+
+=head2 write_to
+
+  $manifest->write_to($destination);
+
+Copies the manifest file to another path, building it first if necessary.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$destination>
+
+Where to write the copy.
+
+=back
+
+B<Returns:> Whatever the underlying copy returns.
+
+B<Errors:> Bails via C<copy_or_fail> when the copy cannot be made.
+
+B<Examples:>
+
+  $manifest->write_to('/tmp/manifest.yml');
+  # builds the manifest if needed, then copies it there
+
+=head2 reset
+
+  $manifest->reset();
+
+Discards the built manifest so the next request rebuilds it, deleting the
+generated file if one exists.
+
+Needed whenever the inputs change underneath a manifest that has already been
+built -- secrets rotated, cloud config re-uploaded -- since both C<data> and
+C<file> are memoized and would otherwise keep answering from the stale build.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>.
+
+B<Examples:>
+
+  $manifest->reset();
+  # returns $self; has_data() and has_file() are now false
+
+=head2 subset_of
+
+  my $subset = $manifest->subset_of($name);
+
+A sibling subset manifest of the same parent type -- equivalent to asking the
+builder for C<< <type>(subset => $name) >>, but callable on the manifest so
+requests can be chained.
+
+B<Subsets never nest.> C<type> derives from the class name alone, so calling
+this on a manifest that is itself a subset rebases off the unsubsetted parent
+type rather than subsetting a subset.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The subset to retrieve.
+
+=back
+
+B<Returns:> The subset manifest, from cache when the builder already has it.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"subset_of requires a subset name"> -- raised via C<bug()> when called with
+nothing, or with an empty string.
+
+=back
+
+B<Examples:>
+
+  my $releases = $provider->cached_or_build(qw/unredacted deployment/)
+                          ->subset_of('releases');
+  # returns the releases subset of whichever type was used
+
+=head2 notify
+
+  $manifest->notify();
+  $manifest->notify($message);
+
+Sets the message shown while this manifest is being built.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$message>
+
+B<(optional)> The notice to display. Defaults to a generated
+C<"generating <label> manifest...">.
+
+=back
+
+B<Returns:> The message set.
+
+B<Examples:>
+
+  $manifest->notify();
+  # returns 'generating unredacted manifest...'
+
+  $manifest->notify('building deployment manifest...');
+  # returns that message
+
+=head2 get_build_notice
+
+  my $notice = $manifest->get_build_notice();
+
+The message set by C<notify>.
+
+B<Parameters:> None.
+
+B<Returns:> The notice, or C<undef> when C<notify> has not been called. Use
+C<has_notice> to distinguish "not set" from a false value.
+
+B<Examples:>
+
+  my $notice = $manifest->get_build_notice();
+  # returns 'generating unredacted manifest...'
+
 =head2 dewrap
 
   my $clean = Genesis::Env::Manifest::dewrap($msg);
@@ -321,6 +591,8 @@ from an C<eval> block
 
 B<Returns:> the cleaned message string, or the original string if no label
 decoration is present.
+
+B<Examples:>
 
   my $clean = Genesis::Env::Manifest::dewrap($@);
   print $clean; # prints the error message without ANSI codes or label prefix
@@ -395,13 +667,19 @@ B<Parameters for _get_subset:>
 Dies with C<"Expected %s to define private _merge method"> if not overridden,
 where C<%s> is the calling class name.
 
+B<Examples:>
+
   # In a derived class:
   sub _merge {
       my $self = shift;
       my ($data, $file, $warnings, $errors) = $self->builder->merge(...);
       return ($data, $file);
-      # Returns: ($data_hashref, '/path/to/manifest.yml')
   }
+  # returns ($data_hashref, '/path/to/manifest.yml')
+
+  # On the base class, which does not implement it:
+  $manifest->_merge();
+  # bugs out: Expected <class> to define private _merge method
 
 =head1 OVERRIDE POINTS
 
@@ -465,11 +743,42 @@ C<"transient-"> to the filename
 
 =back
 
+B<Examples:>
+
   my $path = $manifest->_generate_file_name();
-  # Returns e.g. '/tmp/genesis/manifest-myenv-abc123-unredacted.yml'
+  # returns '/tmp/genesis/manifest-myenv-abc123-unredacted.yml'
 
   my $path = $manifest->_generate_file_name(1);
-  # Returns e.g. '/tmp/genesis/transient-manifest-myenv-abc123-unredacted.yml'
+  # returns '/tmp/genesis/transient-manifest-myenv-abc123-unredacted.yml'
+
+=head2 _get_subset
+
+  my ($data, $file) = $manifest->_get_subset($req);
+
+Asks the builder for this manifest's subset, in whichever form the caller
+needs.
+
+Called by C<data> and C<file> when C<is_subset> is true, in place of a merge:
+a subset is derived from an already-built parent manifest rather than merged
+from source files.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$req>
+
+Which form is wanted -- C<'data'> or C<'file'>. The other element of the
+returned pair may be undefined, and the caller stores whichever it got.
+
+=back
+
+B<Returns:> The pair C<($data, $file)>.
+
+B<Examples:>
+
+  my ($data, $file) = $manifest->_get_subset('data');
+  # returns the subset's data, and its file if the builder had one
 
 =head2 _load_file
 
@@ -493,11 +802,13 @@ written file.
   my $path = $manifest->_save_data_to_file();
   print $path; # prints the path of the written YAML file
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

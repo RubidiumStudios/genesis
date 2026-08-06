@@ -167,7 +167,7 @@ may interact with a BOSH director.
 
 =back
 
-=head1 METHODS
+=head1 FUNCTIONS
 
 =head2 define_command
 
@@ -938,8 +938,20 @@ directly.  Array scope fragments allow conditional scoping based on the
 current parsed options: each fragment is a two-element arrayref of
 C<[$conditions, $scopes]>, where conditions are option expressions
 (C<opt_name>, C<!opt_name>, C<opt_name=value>, C<!opt_name=value>) and
-scopes is a string or arrayref of scope names.  The first matching
-fragment determines the active scopes.
+scopes is a string or arrayref of scope names.  B<All> conditions in a
+fragment must hold for that fragment to apply.
+
+Fragments are OR'd, not first-match-wins.  Every fragment is considered:
+a fragment whose conditions hold but whose scopes do not include any
+requested scope does not stop the search -- evaluation continues to the
+next fragment.  A bare string fragment is unconditional and behaves the
+same wherever it appears in the list; it is not a fallback that applies
+only when no other fragment matched.
+
+So given C<scope =E<gt> [['--foo' =E<gt> 'env'], 'repo']> with C<--foo>
+set, C<has_scope('repo')> returns true: the first fragment's conditions
+hold but do not cover C<'repo'>, so the bare C<'repo'> fragment is still
+reached.
 
 B<Parameters:>
 
@@ -977,6 +989,33 @@ B<Examples:>
   # In a command registered with scope => 'any'
   has_scope('pipeline');
   # Returns: undef  ('any' excludes pipeline)
+
+B<Limitations:> Multiple C<@scopes> are combined with I<any> semantics
+only -- the call is true when at least one applies.  There is no way to
+express other combinations through the argument list; compose them at the
+call site instead:
+
+=over 4
+
+=item all of
+
+C<has_scope('a') && has_scope('b')>
+
+=item none of
+
+C<!has_scope('a', 'b')>
+
+=item not all of
+
+C<!(has_scope('a') && has_scope('b'))>
+
+=back
+
+"At least one scope other than these" has no equivalent composition and
+would need a change here.
+
+Option conditions compare literal values only.  Regex and relational
+comparisons are not supported.
 
 =head2 check_embedded_genesis
 
@@ -1209,6 +1248,27 @@ B<Examples:>
   # Returns: (nothing)
   # $COMMAND_OPTIONS{dry-run} = 1; @COMMAND_ARGS = ('my-env')
 
+B<Errors:>
+
+Both concern C<extended_handlers>, and both are contract violations by the
+command's own registration rather than anything the user typed -- which is why
+they bail here, at parse time, instead of failing later inside the handler.
+
+=over 4
+
+=item C<"Extended handler %s for command %s could not be loaded:\n%s">
+
+The handler class named in C<extended_handlers> could not be C<require>d.
+C<%s> carries the load error.
+
+=item C<"Extended handler %s for command %s does not implement the required %s method.">
+
+The class loaded but is missing one of C<parse_opts>, C<opts_help>, or
+C<opts_slot>.  All three are required; a handler providing only some of them
+would parse options it could not then describe or store.
+
+=back
+
 =head2 set_logging_state
 
   set_logging_state();
@@ -1289,6 +1349,45 @@ B<Examples:>
   # Returns: undef  (if curl meets the minimum version)
   # Returns: "curl v7.29.0 is installed at /usr/bin/curl, ..."  (if too old)
 
+=head1 INTERNAL FUNCTIONS
+
+These are internal to the implementation.  They may change without notice and
+should not be called directly.
+
+=head2 _gate_pipeline_on_legacy_ci_yml
+
+  _gate_pipeline_on_legacy_ci_yml();
+
+Blocks pipeline commands in a repository still carrying a legacy F<ci.yml>,
+bailing with migration instructions.
+
+Returns early -- allowing the command through -- in three cases: the command
+is not in the C<Pipelines> group; it has no repo or env scope, so there is no
+C<Genesis::Top> to inspect (C<help>, C<version>, C<ping>); or the C<Top> could
+not be loaded at all.
+
+That last case is deliberate.  A repository too broken to load is reported by
+whatever the command does next, which will say something more useful than a
+migration notice.
+
+B<Returns:> nothing.  Bails when the gate applies.
+
+B<Errors:>
+
+=over 4
+
+=item C<"This repository still has a legacy CI configuration at ci.yml...">
+
+The full message names the provider, git URI, branch, pipeline name and vault
+URL to carry across, and the C<genesis repo-update> invocation that does it.
+
+=back
+
+B<Examples:>
+
+  _gate_pipeline_on_legacy_ci_yml();
+  # no return value; bails if a legacy ci.yml blocks a pipeline command
+
 =head1 SEE ALSO
 
 L<Genesis>, L<Genesis::State>, L<Genesis::Log>, L<Genesis::Top>,
@@ -1299,9 +1398,11 @@ L<Genesis::Commands::Core>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

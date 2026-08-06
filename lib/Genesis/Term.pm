@@ -123,44 +123,9 @@ sub _stty_size {
 	return $__stty_size = undef;
 }
 
-# terminal_colors - probe the terminal emulator for its actual
-# foreground and background colors via OSC 10 / OSC 11.  Returns a
-# hashref (or undef if the probe fails):
-#
-#   {
-#     fg => {
-#       rgb    => [$r, $g, $b],       # floats, 0..1
-#       rgb256 => [$R, $G, $B],       # ints,   0..255
-#       hex    => "RRGGBB",
-#       ansi   => "\e[38;2;R;G;Bm",   # SGR set-foreground truecolor
-#       simple => {
-#         index  => 0..7,             # basic 8-color index
-#         bright => 0|1,              # 1 == aixterm "highcolor" (8..15)
-#         ansi   => "\e[3Nm" | "\e[9Nm",   # ready-to-print SGR (fg)
-#       },
-#     },
-#     bg => {
-#       rgb    => [$r, $g, $b],
-#       rgb256 => [$R, $G, $B],
-#       hex    => "RRGGBB",
-#       ansi   => "\e[48;2;R;G;Bm",   # SGR set-background truecolor
-#       simple => {
-#         index  => 0..7,
-#         bright => 0|1,
-#         ansi   => "\e[4Nm" | "\e[10Nm",  # ready-to-print SGR (bg)
-#       },
-#     },
-#     luma    => $y,                  # BT.601 luminance of bg, 0..1
-#     is_dark => 0|1,                 # $luma < 0.5
-#   }
-#
-# Returns undef when /dev/tty isn't accessible or the terminal
-# doesn't reply within the timeout (dumb terminals, cron, older
-# emulators that ignore OSC 10/11).
-#
-# Response is memoized per-process because raw-mode I/O against
-# /dev/tty is comparatively expensive and the palette doesn't
-# change mid-run.
+# Memoised: the probe costs raw-mode I/O on /dev/tty, and the palette
+# doesn't change mid-run.  _probed is separate so a failed probe (undef)
+# isn't retried on every call.
 my $__terminal_colors;
 my $__terminal_colors_probed;
 sub terminal_colors {
@@ -236,15 +201,7 @@ sub _probe_terminal_colors {
 	};
 }
 
-# _build_color_entry - turn an OSC 10/11 reply into the full
-# per-color hashref (rgb / rgb256 / hex / ansi / simple).  $sgr
-# is 38 for foreground or 48 for background -- the SGR 24-bit
-# truecolor introducer, so callers can print $color->{ansi}
-# without knowing which side they're on.  The `simple` sub-hash
-# additionally provides the basic-8-color approximation with its
-# own aixterm-compatible SGR for callers that need to work on
-# terminals without truecolor support.  Returns undef if the
-# reply didn't parse.
+# _build_color_entry - turn an OSC 10/11 reply into a per-color hashref {{{
 sub _build_color_entry {
 	my ($resp, $sgr) = @_;
 	my $rgb = _parse_osc_rgb($resp);
@@ -278,14 +235,8 @@ sub _build_color_entry {
 	};
 }
 
-# _nearest_ansi16 - map a 24-bit RGB triple to the closest classic
-# 16-colour palette entry (0..15, low half = dim, high half =
-# aixterm bright).  Uses squared Euclidean distance in sRGB byte
-# space -- crude but adequate for the "which basic colour is this
-# background closest to" question the simple sub-hash exists to
-# answer.  Values are the VGA/xterm defaults; if a caller cares
-# about a specific palette variant they should stick with the
-# truecolour `ansi` field.
+# }}}
+# _nearest_ansi16 - map an RGB triple to the nearest entry of the VGA/xterm 16-colour palette {{{
 my @_ansi16_palette = (
 	[0,0,0],       # 0  black
 	[170,0,0],     # 1  dark red
@@ -318,12 +269,8 @@ sub _nearest_ansi16 {
 	return $best_idx;
 }
 
-# _parse_osc_rgb - extract [R,G,B] as 0..1 floats from an OSC
-# 10/11 reply.  Terminals emit variable hex widths per channel
-# (rgb:ff/aa/bb, rgb:ffff/aaaa/bbbb, rgb:fff/aaa/bbb, ...), each
-# padded to the max value at that width -- divide by (16^N - 1)
-# with N = actual hex length.  Returns undef on any parse miss so
-# callers get a clean "no data" signal.
+# }}}
+# _parse_osc_rgb - extract [R,G,B] as 0..1 floats from an OSC 10/11 reply {{{
 sub _parse_osc_rgb {
 	my ($resp) = @_;
 	return undef unless defined $resp
@@ -331,6 +278,8 @@ sub _parse_osc_rgb {
 	my @hex = ($1, $2, $3);
 	return [ map { my $n = length $_; hex($_) / (16 ** $n - 1) } @hex ];
 }
+
+# }}}
 
 my $__is_highcolour = $ENV{TERM} && $ENV{TERM} =~ /256color/;
 sub _color {
@@ -785,30 +734,7 @@ sub build_markdown_table {
 		boxify(bot => 'right')."\n";
 }
 
-# tableify - render a markdown table in a rule-only, edge-free style.
-#
-# Accepts the same input as build_markdown_table (pipe-delimited
-# rows with an optional `:---` alignment row), but renders without
-# left/right borders, column dividers, or inter-row dividers:
-#
-#   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#    Subnet  CIDR         AZ   Reserved  ...     <- bold
-#   ─────────────────────────────────────────
-#    ocfp-0  10.0.0.0/24  az1  42        ...
-#    ocfp-1  10.0.1.0/24  az2  25        ...
-#   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#
-# Heavy rule (━ / =) frames the table top and bottom; a light rule
-# (─ / -) separates the bold header from the data rows.  Columns
-# are sized to fit content (no wrapping or fractional expand mode
-# -- this is for compact summaries, not narrative tables).
-#
-# Optional %opts (all csprintf-style colour markers; passing an empty
-# string disables a default that would otherwise apply):
-#   header     - colour for the header row (default: bold via [1m)
-#   row        - colour for data rows
-#   other_row  - colour for every other data row (zebra stripe)
-#   line       - colour for both heavy and light rules
+# tableify - rule-only, edge-free variant of build_markdown_table
 sub tableify {
 	my ($table, %opts) = @_;
 
@@ -1244,40 +1170,14 @@ sub string_to_hex {
 	}
 }
 
-# TODO:
-# - paint:
-#   - takes a string that contains color codes and allows the uncolored
-#     sections to be colorized with the given color.
-#   - paint("This is #C{very} important", "w") => "#w{This is }#C{very}#w{ important}"
+# TODO: paint($str, $colour) -- recolour only the uncoloured runs of a string
+#       that already carries colour codes, so a caller can tint a whole block
+#       (alternating table rows, say) without disturbing the styling already
+#       in it.  Open: whether it overrides a default-colour dash, and whether
+#       italic/underline can be applied the same way.
 #
-#   - To be determined:
-#     - Does it paint over dashes (default color) -- ie with "#C{}" become
-#       "#CY{}" if painted with '-Y' or 'kY'
-#     - Can you apply italic and underline with it
-#
-#   Motive: To be able to paint blocks of output that may already contain
-#           stylizing, such as alternating color of table rows
-#
-# - markdown (DONE):
-#   - render markdown document
-#   - support for bullets, tables, numbering, headers, blockquotes
-#   - H1 is double underlined, bold
-#   - H2 is single underlined, bold
-#   - H3 is bold
-#   - H4 is italicized
-#
-#   - blockquotes are indented and italicized
-#   - inline bold and italics supported with ** and * respectively (not __ and _)
-#   - bullets use +, -, and *
-#   - code is indented 4 spaces and rendered as light grey on a dark grey
-#     background
-#
-#   - Paragraphs are separated with blank lines, and will be rerendered wrapped
-#     to terminal width. Internal <br> will be replaced with a newline without
-#     needing blank lines <- TODO the last part
-#
-#   Motive: render help docs and release notes created in markdown, needed for
-#           help refactor phase 2
+# TODO: markdown rendering handles paragraph rewrapping, but an internal <br>
+#       should become a newline without requiring a surrounding blank line.
 
 ### STDIN Manipulation Functions {{{
 

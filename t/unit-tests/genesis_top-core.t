@@ -988,9 +988,9 @@ EOF
 		"finds vault from deep ancestor (multiple hierarchy levels)");
 };
 
-subtest 'create() kits_path stores relative path not boolean (FWT-697)' => sub {
+subtest 'create() kits_path stores relative path not boolean' => sub {
 	local $Genesis::VERSION = '3.1.0';
-	my $basedir = workdir('fwt-697-test');
+	my $basedir = workdir('kits-path-relative');
 
 	# kits_path inside the repo: humanize_path returns a relative path.
 	# Bug: operator precedence causes $rel_path to get boolean 1, not the
@@ -1008,22 +1008,22 @@ subtest 'create() kits_path stores relative path not boolean (FWT-697)' => sub {
 
 	my $stored = $top->config->get('kits_path');
 	ok(defined($stored), "kits_path is defined in config");
-	unlike($stored, qr{^/}, "kits_path is relative, not absolute (FWT-697)");
+	unlike($stored, qr{^/}, "kits_path is relative, not absolute");
 	is($stored, 'custom-kits', "kits_path is the humanized relative path");
 };
 
-subtest '_validate_config returns truthy (FWT-698)' => sub {
-	my $tmp = make_test_repo(workdir('fwt-698-test'));
+subtest '_validate_config returns truthy' => sub {
+	my $tmp = make_test_repo(workdir('validate-config-truthy'));
 	my $top = Genesis::Top->new($tmp, no_vault => 1);
 
 	my $result = $top->_validate_config;
 	ok($result, "_validate_config returns truthy for valid v2 config");
-	is($result, 1, "_validate_config explicitly returns 1 (FWT-698)");
+	is($result, 1, "_validate_config explicitly returns 1");
 };
 
-subtest 'set_kit_provider sets updater_version for GenesisCommunity (FWT-699)' => sub {
+subtest 'set_kit_provider sets updater_version for GenesisCommunity' => sub {
 	local $Genesis::VERSION = '3.2.0';
-	my $tmp = workdir('fwt-699-test');
+	my $tmp = workdir('kit-provider-updater-version');
 
 	# Create repo with a custom kit_provider already set
 	system("mkdir -p $tmp/.genesis");
@@ -1053,11 +1053,11 @@ EOF
 	ok(!$saved->get('kit_provider'),
 		"kit_provider cleared from saved config on disk");
 	is($saved->get('updater_version'), '3.2.0',
-		"updater_version set in saved config (FWT-699)");
+		"updater_version set in saved config");
 };
 
-subtest 'repo_vault returns vault object not boolean (FWT-696)' => sub {
-	my $tmp = workdir('fwt-696-test');
+subtest 'repo_vault returns vault object not boolean' => sub {
+	my $tmp = workdir('repo-vault-object');
 
 	system("mkdir -p $tmp/.genesis");
 	mkfile_or_fail("$tmp/.genesis/config", <<EOF);
@@ -1096,7 +1096,7 @@ EOF
 
 	my $result = $top->repo_vault();
 	isa_ok($result, 'Service::Vault::Remote',
-		"repo_vault() returns a vault object (FWT-696)");
+		"repo_vault() returns a vault object");
 };
 
 done_testing;

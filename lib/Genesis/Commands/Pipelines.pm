@@ -145,7 +145,7 @@ sub pipeline_status {
 
 	my (%children, %has_parent, %parent_of);
 	for my $edge (@$edges) {
-		push @{$children{$edge->{from}}}, $edge->{to};
+		push @{ $children{$edge->{from}} }, $edge->{to};
 		$has_parent{$edge->{to}} = 1;
 		$parent_of{$edge->{to}} = $edge->{from};
 	}
@@ -406,7 +406,7 @@ sub propagate {
 
 	my (%children, %has_parent, %parent_of);
 	for my $edge (@$edges) {
-		push @{$children{$edge->{from}}}, $edge->{to};
+		push @{ $children{$edge->{from}} }, $edge->{to};
 		$has_parent{$edge->{to}} = 1;
 		$parent_of{$edge->{to}} = $edge->{from};
 	}
@@ -1323,6 +1323,7 @@ EOF
 	popd;
 }
 
+# ci_generate_cache - build the pipeline's kit and release cache {{{
 sub ci_generate_cache {
 	info("[#G{genesis} ci-generate-cache] v#G{$Genesis::VERSION}\n");
 
@@ -1366,6 +1367,8 @@ sub ci_generate_cache {
 	_commit_changes($ENV{WORKING_DIR}, $ENV{OUT_DIR}, $ENV{GIT_BRANCH}, "generated cache for $ENV{CURRENT_ENV}");
 }
 
+# }}}
+# ci_pipeline_run_errand - run a named errand from within the pipeline {{{
 sub ci_pipeline_run_errand {
 	info("[#G{genesis} ci-pipeline-run-errand] v#G{$Genesis::VERSION}\n");
 
@@ -1614,7 +1617,7 @@ sub _describe_topology {
 	my %children;
 	my %has_parent;
 	for my $edge (@$edges) {
-		push @{$children{$edge->{from}}}, $edge->{to};
+		push @{ $children{$edge->{from}} }, $edge->{to};
 		$has_parent{$edge->{to}} = 1;
 	}
 

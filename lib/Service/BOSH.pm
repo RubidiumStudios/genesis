@@ -220,5 +220,7 @@ sub dryrun_of {
 	return $self->execute({%$opts, interactive => $interactive}, @cmd);
 }
 # }}}
+# }}}
+# }}}
 1
 # vim: fdm=marker:foldlevel=1:noet

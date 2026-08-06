@@ -96,7 +96,17 @@ Similarly, when you add or subtract an integer from an Address, it will return a
 
 =back
 
-=head1 METHODS
+=head1 FUNCTIONS
+
+C<IPv4> is a factory, not a class. Nothing is ever blessed into it -- every
+function here returns an object of one of the child classes, and none takes
+an invocant.
+
+They may still be written with arrow syntax: C<__strip_call_ref> discards a
+leading C<IPv4> argument, so C<< IPv4->address(...) >> and
+C<IPv4::address(...)> are equivalent. The arrow form reads better and is used
+throughout, but it is a convenience, not method dispatch -- there is no
+inheritance here and nothing to override.
 
 =head2 new
 
@@ -130,13 +140,13 @@ Creates a new C<IPv4::Range> object. Accepts any combination of IP addresses, CI
 
 Dies if the input is not a valid IPv4 range. See L<IPv4::Range/new> for details.
 
-=head1 INTERNAL METHODS
+=head1 INTERNAL FUNCTIONS
 
 =head2 __strip_call_ref
 
   my @args = __strip_call_ref(@args);
 
-Strips the leading class name from C<@args> if it matches C<IPv4>. This allows methods to work both as class methods (C<< IPv4->new(...) >>) and as plain function calls. Returns the remaining arguments as a list. This is an internal method and should not be called directly.
+Strips the leading class name from C<@args> if it matches C<IPv4>. This allows the factory functions to be called both as class methods (C<< IPv4->new(...) >>) and as plain function calls. Returns the remaining arguments as a list. This is internal and should not be called directly.
 
 B<Parameters:>
 
@@ -164,7 +174,7 @@ B<Examples:>
 
   if (IPv4::__is_integer($value)) { ... }
 
-Returns true if C<$value> is a plain scalar (not a reference) that matches the pattern C</^-?\d+$/>. Used by child classes to distinguish integer arguments from IPv4 strings or objects when handling operator overloading and method dispatch. This is an internal method and should not be called directly.
+Returns true if C<$value> is a plain scalar (not a reference) that matches the pattern C</^-?\d+$/>. Used by child classes to distinguish integer arguments from IPv4 strings or objects when handling operator overloading and method dispatch. This is internal and should not be called directly.
 
 B<Parameters:>
 
@@ -233,6 +243,9 @@ Dennis J. Bell <dennis.j.bell@gmail.com>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2024 by Rubidium Studios, Ltd.
+Copyright 2024 Rubidium Studios, Ltd.
 
-This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
+This library is free software; you can redistribute it and/or modify it under
+the same terms as Perl itself.
+
+=cut

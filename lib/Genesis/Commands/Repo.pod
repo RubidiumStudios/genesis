@@ -5,13 +5,15 @@ Genesis::Commands::Repo - Command handlers for Genesis repository management
 =head1 SYNOPSIS
 
   # Registered in bin/genesis via define_command:
-  genesis init [options] [<name>]
+  genesis repo-init [options] [<name>]      # alias: genesis init
+  genesis repo-configure-ci [options]
+  genesis repo-update [options]
   genesis secrets-provider [options] [<target>]
   genesis kit-provider [options]
 
   # Perl import (for testing or internal dispatch):
   use Genesis::Commands::Repo;
-  Genesis::Commands::Repo::init(@ARGV);
+  Genesis::Commands::Repo::repo_init(@ARGV);
   Genesis::Commands::Repo::secrets_provider(@ARGV);
   Genesis::Commands::Repo::kit_provider(@ARGV);
 
@@ -46,29 +48,49 @@ L<Genesis::Top>.
 
 =head1 FUNCTIONS
 
-=head2 init([$name])
+=head2 repo_init
 
-  genesis init [options] [<name>]
+  genesis repo-init [options] [<name>]
+  genesis init [options] [<name>]        # alias
 
-Creates a new Genesis deployment repository named C<$name> in the current
-working directory.  Validates git identity, creates the repository directory
-structure via L<Genesis::Top>, embeds the genesis binary, sets up
-the chosen kit, initializes a git repository, and commits the initial state.
+Creates a new Genesis deployment repository named C<$name>.  Validates git
+identity, creates the repository structure via L<Genesis::Top>, embeds the
+genesis binary, sets up the chosen kit, initialises git, and commits the
+initial state.
 
-C<$name> is optional when a C<--kit> or C<--link-dev-kit> option is
-provided, because the name can be inferred from the kit name or the
-development link target path.
+C<$name> is optional when C<--kit> or C<--link-dev-kit> is given, because the
+name can be inferred from the kit name or the link target path.
 
-B<Parameters:>
+B<The command is named C<repo-init>, not C<repo init>.> Genesis has no
+subcommand support, so the grouping that a nested form would express is
+carried in the hyphenated name instead. C<init> is registered as an alias, so
+the older invocation keeps working -- and because aliases resolve to the
+I<command>, both names dispatch here.
+
+B<Three phases, in order.> The split is what keeps the command safe to
+interrupt:
 
 =over 4
 
-=item C<$name> (optional)
+=item 1. B<Validate> -- C<_repo_init_validate>
 
-The deployment repository name.  May be omitted when C<--kit> or
-C<--link-dev-kit> is supplied; required otherwise.
+Parses options, checks combinations, gathers local state, runs the network
+checks, prompts for anything missing, and prints the plan. Everything that
+can refuse the request happens here, before anything is created.
+
+=item 2. B<Execute> -- C<_repo_init_execute>
+
+Does the work. No prompts, no user-input bails: a failure at this stage is an
+unexpected error, not a rejected request.
+
+=item 3. B<Report> -- C<_repo_init_report>
+
+Summarises the outcome, or cleans up after a failed execution.
 
 =back
+
+B<Parameters:> None directly; the name is read from the positional arguments
+and options from C<get_options>.
 
 B<Options> (parsed from C<@_> via C<Genesis::Kit::Provider> and C<get_options>):
 
@@ -90,7 +112,30 @@ Override the local kits cache directory (defaults to C<~/.genesis/kits>).
 When specified, the directory is created if it does not already exist and is
 used as the kit storage location for the new repository.
 
+=item C<--vault> I<target>
+
+The safe target to configure as the repository's secrets vault. When omitted
+and running interactively, the validation phase offers to select one; when
+declined, vault configuration is deferred and the plan says so.
+
+=item C<--directory|-d> I<name>
+
+Create the repository in a directory of this name, rather than one derived
+from the repository name.
+
+=item C<--no-commit>
+
+Stage the initial state but do not commit it.
+
+=item C<--reason> I<text>
+
+Override the initial commit message.
+
 =back
+
+Genesis detects whether the target sits inside an existing Genesis
+repository, and creates a subdirectory repo -- sharing the enclosing C<.git>
+rather than nesting one -- when it does.
 
 B<Returns:>
 
@@ -98,38 +143,29 @@ Does not return to the caller -- calls C<exit 0> on success.
 
 B<Errors:>
 
-=over 4
-
-=item C<"Link target '%s' cannot be found from $pwd!">
-
-The path given to C<--link-dev-kit> could not be resolved to an absolute path
-from the current working directory.  C<%s> is the value of C<--link-dev-kit>.
-
-=item C<"Local compiled kit file %s not found">
-
-The C<--kit> value looks like a local archive path but the file does not exist
-on disk.  C<%s> is the kit path.
-
-=back
-
-Additional errors are propagated from L<Genesis::Top> (repository creation,
-kit download) and from C<git init> / C<git commit> failures.  If any
-post-directory-creation step fails, the partially created directory is removed
-before re-raising the error.
+Every refusal comes from the validation phase -- see
+L</_repo_init_validate> for the full list. Errors are otherwise propagated
+from L<Genesis::Top> (repository creation, kit download) and from
+C<git init> / C<git commit>; if any step after directory creation fails, the
+partially created repository is removed before the error is re-raised.
 
 B<Examples:>
 
   # Create a repo named "my-env" with a kit from the default provider
-  genesis init --kit cf my-env
-  # prints: Initialized empty Genesis repository in my-env
+  genesis repo-init --kit cf my-env
+  # prints the plan, then: Initialized empty Genesis repository in my-env
 
   # Create a repo, linking a local dev kit; name inferred from link target
-  genesis init --link-dev-kit ~/src/cf-genesis-kit
+  genesis repo-init --link-dev-kit ~/src/cf-genesis-kit
   # prints: Initialized empty Genesis repository in cf-genesis-kit
 
   # Create a repo with an explicit name, no kit (empty ./dev directory created)
-  genesis init my-env
+  genesis repo-init my-env
   # prints: Initialized empty Genesis repository in my-env
+
+  # The alias still works
+  genesis init my-env
+  # prints the same; init resolves to repo-init
 
 =head2 secrets_provider([$target])
 
@@ -283,15 +319,596 @@ B<Examples:>
   genesis kit-provider --kit-provider my-github-org --verbose
   # prints: Type: my-github-org
 
+=head2 repo_configure_ci
+
+  genesis repo-configure-ci [options]
+
+Sets up CI configuration for a repository that has none: runs the wizard,
+writes the C<ci> section of C<.genesis/config>, and creates the
+C<.genesis/ci/> scaffold.
+
+B<Refuses to run when a provider is already configured>, pointing at
+C<repo-update> instead. The two commands differ in exactly that: this one
+starts from empty defaults, C<repo_update> starts from what is already there.
+
+B<Parameters:> None; options are read from C<get_options>.
+
+B<Returns:> Does not return -- calls C<exit 0> on success.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"CI provider already configured (#C{%s}).\nUse #C{genesis repo-update} to modify the existing configuration."> --
+raised via C<bail()>. C<%s> is the configured provider.
+
+=back
+
+B<Examples:>
+
+  genesis repo-configure-ci
+  # prints "CI configuration initialized" with the provider and paths,
+  # then exits 0
+
+=head2 repo_update
+
+  genesis repo-update [options]
+
+Modifies an existing CI configuration.
+
+B<Behaviour depends on whether flags were given.> With flags, only those
+settings are applied and everything else is left alone -- which is what makes
+it usable from a script. Without flags, the full wizard runs with existing
+values pre-filled, so an operator can review everything.
+
+Warns rather than bails when no provider is configured, pointing at
+C<repo-init>: the command still has useful work to do on a partially
+configured repository.
+
+B<Parameters:> None; options are read from C<get_options>.
+
+B<Returns:> Does not return -- calls C<exit 0> on success.
+
+B<Examples:>
+
+  genesis repo-update
+  # runs the wizard with current values pre-filled
+
+  genesis repo-update --ci-provider concourse
+  # sets just that, leaving every other setting untouched
+
+=head1 INTERNAL FUNCTIONS
+
+These are internal to this module and may change without notice.
+
+=head2 _repo_init_validate
+
+  _repo_init_validate();
+
+Phase 1 of C<repo_init>: everything that can refuse the request, before
+anything is created.
+
+Runs in a deliberate order -- parse and derive first (fast, no side effects),
+then invalid-combination checks, then local gathering, then the subdirectory
+preflight, then destructive prerequisites, then the network checks, and only
+then the prompts. Cheap rejections come before expensive ones, and nothing
+touches the network until the request is known to be otherwise valid.
+
+Derived values are stored back into the options hash under underscore-prefixed
+keys (C<_name>, C<_target_path>, C<_kit_provider> and so on) for the execute
+phase to read, and the phase ends by printing the plan it intends to carry
+out.
+
+B<Parameters:> None; reads C<get_options> and C<get_args>.
+
+B<Returns:> 1 when validation passed.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Dev kit link target '%s' not found."> -- the C<--link-dev-kit> path does
+not exist.
+
+=item *
+
+C<"Dev kit link target '%s' is not a valid kit (missing kit.yml)."> --
+followed by a note that C<repo-init E<lt>nameE<gt>> without C<-l> is how you
+ask for an empty dev kit. The distinction matters: pointing at the wrong
+directory and wanting a fresh kit look identical otherwise.
+
+=item *
+
+C<"Dev kit link target '%s' has an unreadable kit.yml:\n%s"> -- the file
+exists but could not be parsed.
+
+=item *
+
+C<"Dev kit link target '%s' has a kit.yml that is missing the required #C{name:} field.">
+
+=item *
+
+C<"You must specify a deployment name, a kit (-k), or a dev link target (-l)."> --
+none of the three ways to determine a name was given.
+
+=item *
+
+C<"You can only specify one of kit (-k) or link to a kit (-l).">
+
+=item *
+
+C<"Configuring a CI provider requires the enclosing git repository to be on a branch named #C{%s}, but it is currently on #C{%s}."> --
+followed by an instruction to switch branches. Raised when creating a
+CI-enabled repository inside an existing one that is not on its control
+branch, because the new repository's pipeline would otherwise be rooted on
+whatever branch happened to be checked out.
+
+=item *
+
+C<"Cannot specify both --vault and --skip-vault.">
+
+=item *
+
+C<"Local compiled kit file '%s' not found."> -- the C<--kit> value looks like
+a local archive path, but no such file exists.
+
+=item *
+
+C<"Kit '%s' not found or no versions available from %s."> and
+C<"Kit '%s/%s' not found from %s."> -- the named kit, or that specific
+version of it, is not available from the provider. These are the network
+checks, and they run before any prompting.
+
+=item *
+
+C<"Could not initialize kit provider: %s">
+
+=item *
+
+C<"Cannot create repository: directory #C{%s} already exists. Use -f to force replacement."> --
+raised only when non-interactive; interactively the operator is asked whether
+to replace it.
+
+=item *
+
+C<"Cannot create a Genesis deployment repository inside an ..."> -- raised
+when the target sits inside another repository in a way Genesis will not
+nest.
+
+=back
+
+All are raised via C<bail()>.
+
+B<Examples:>
+
+  _repo_init_validate();
+  # prints the plan and returns 1, or bails with the reason it cannot proceed
+
+=head2 _repo_init_execute
+
+  my $result = _repo_init_execute();
+
+Phase 2 of C<repo_init>: does the work.
+
+No prompts and no user-input bails -- validation has already settled what
+should happen, so a failure here is an unexpected error rather than a rejected
+request. Reads the underscore-prefixed values the validation phase derived.
+
+B<Parameters:> None; reads C<get_options>.
+
+B<Returns:> A result hashref describing what happened, including C<root>,
+C<target_path>, C<parent_dir>, C<use_subdir>, and C<error> when something
+failed.
+
+B<Examples:>
+
+  my $result = _repo_init_execute();
+  # returns { root => '/path/to/my-env', use_subdir => 0, ... }
+
+=head2 _repo_init_report
+
+  _repo_init_report($result);
+
+Phase 3 of C<repo_init>: reports the outcome, or cleans up after a failure.
+
+B<The cleanup is why this phase exists separately.> On failure the partially
+created directory is removed -- and in subdirectory mode, anything staged into
+the enclosing repository's index is unstaged first, with the reset scoped by
+pathspec to just what was staged. Without that, a failed init would leave the
+parent repository's index dirty with files that no longer exist. Validation
+having established the parent had no other pending changes is what makes the
+reset safe.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$result>
+
+The hashref from C<_repo_init_execute>.
+
+=back
+
+B<Returns:> Nothing on success; bails on a recorded error.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to create Genesis repository at #C{%s}:\n%s"> -- raised via
+C<bail()> after cleanup. The substitutions are the repository path and the
+underlying error.
+
+=back
+
+B<Examples:>
+
+  _repo_init_report(scalar _repo_init_execute());
+  # prints the summary, or cleans up and bails
+
+=head2 _find_enclosing_genesis_repo
+
+  my $root = _find_enclosing_genesis_repo();
+
+Walks up from the current directory looking for a Genesis repository.
+
+Used to decide whether a new repository should be created as a subdirectory
+of an existing one, sharing its C<.git>, rather than nesting a second
+repository inside the first.
+
+B<Parameters:> None.
+
+B<Returns:> The absolute path of the enclosing repository root, or C<undef>
+when there is none.
+
+B<Examples:>
+
+  my $root = _find_enclosing_genesis_repo();
+  # returns '/home/me/deployments', or undef at the filesystem root
+
+=head2 _select_vault_target
+
+  my $vault = _select_vault_target();
+
+Offers to configure a secrets vault, and runs the target picker if the
+operator accepts.
+
+Declining is a legitimate answer, not a failure: the repository is created
+with vault configuration deferred, which the plan output says explicitly.
+
+B<Parameters:> None.
+
+B<Returns:> A C<Service::Vault::Remote>, or C<undef> when declined or when
+selection failed.
+
+B<Examples:>
+
+  my $vault = _select_vault_target();
+  # returns undef when the operator answers no
+
+=head2 _create_ci_scaffold
+
+  _create_ci_scaffold($top, %opts);
+
+Writes the C<ci> section of the repository config during init.
+
+Accepts a provider either as an object or as a bare type name, taking the
+object's own C<config> when given one, so the same call works whether the
+provider was selected interactively or defaulted.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> for the new repository.
+
+=item C<%opts>
+
+C<provider> (object or type string) and optionally C<root>.
+
+=back
+
+B<Returns:> Nothing; the config is written to disk.
+
+B<Examples:>
+
+  _create_ci_scaffold($top, provider => 'manual');
+  # writes ci.enabled, ci.provider and ci.name, then saves
+
+=head2 _empty_ci_defaults
+
+  my $defaults = _empty_ci_defaults($top);
+
+The starting values for the CI wizard on a repository with no existing
+configuration.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top>, used for the default pipeline name.
+
+=back
+
+B<Returns:> A hashref of defaults -- C<ci_provider>, C<git_uri>,
+C<git_branch>, C<vault_url>, C<pipeline_name>.
+
+B<Examples:>
+
+  my $defaults = _empty_ci_defaults($top);
+  # returns { ci_provider => 'concourse', git_branch => 'main', ... }
+
+=head2 _existing_ci_defaults
+
+  my $defaults = _existing_ci_defaults($top);
+
+The starting values for the CI wizard on a repository that is already
+configured: the empty defaults, overlaid with whatever the config and the
+existing scaffold hold.
+
+Values are recovered from C<.genesis/ci/integrations.yml> by reading the
+file, scoped to the block they belong to -- so a C<url:> key elsewhere in the
+file is not mistaken for the vault's.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top>.
+
+=back
+
+B<Returns:> A hashref in the same shape as C<_empty_ci_defaults>.
+
+B<Examples:>
+
+  my $defaults = _existing_ci_defaults($top);
+  # returns the empty defaults with configured values overlaid
+
+=head2 _ci_wizard
+
+  my $cfg = _ci_wizard($options, $top, $defaults);
+
+Prompts for CI settings, starting from C<$defaults> and skipping anything
+already supplied as an option.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$options>
+
+The parsed command options.
+
+=item C<$top>
+
+The C<Genesis::Top>.
+
+=item C<$defaults>
+
+Starting values, from C<_empty_ci_defaults> or C<_existing_ci_defaults>.
+
+=back
+
+B<Returns:> A config hashref ready for C<_write_ci_config>.
+
+B<Examples:>
+
+  my $cfg = _ci_wizard(\%options, $top, _empty_ci_defaults($top));
+  # returns the answered configuration
+
+=head2 _apply_ci_flags
+
+  _apply_ci_flags($options, $top);
+
+Applies CI settings from options alone, without prompting.
+
+This is the non-interactive path of C<repo_update>: only the settings named
+are touched, so it is safe to run from a script against a configured
+repository.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$options>
+
+The parsed command options.
+
+=item C<$top>
+
+The C<Genesis::Top>.
+
+=back
+
+B<Returns:> Nothing; the config is written.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Unknown CI provider '#R{%s}'. Valid values: concourse, github-actions, none."> --
+raised via C<bail()>. The message lists the accepted values rather than only
+rejecting the given one.
+
+=back
+
+B<Examples:>
+
+  _apply_ci_flags({'ci-provider' => 'concourse'}, $top);
+  # sets ci.provider and leaves everything else alone
+
+=head2 _write_ci_config
+
+  _write_ci_config($top, $cfg);
+
+Writes the answered configuration: the C<ci> section of C<.genesis/config>,
+and the C<.genesis/ci/> scaffold files.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top>.
+
+=item C<$cfg>
+
+The configuration from C<_ci_wizard>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+  _write_ci_config($top, $cfg);
+  # writes the config and the scaffold
+
+=head2 _write_integrations
+
+  _write_integrations($ci_dir, $cfg);
+
+Writes C<integrations.yml> into the CI scaffold directory from the answered
+configuration.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ci_dir>
+
+The scaffold directory to write into -- the path itself, not the
+C<Genesis::Top> that resolved it.
+
+=item C<$cfg>
+
+The configuration.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+  _write_integrations($top->path('.genesis/ci'), $cfg);
+  # writes .genesis/ci/integrations.yml
+
+=head2 _write_if_absent
+
+  _write_if_absent($path, $content);
+
+Writes a file only when it does not already exist.
+
+Every scaffold file goes through this, which is what makes the CI setup
+re-runnable: an operator who has since edited C<targets.yml> does not lose
+that work by running the wizard again.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+Where to write.
+
+=item C<$content>
+
+What to write.
+
+=back
+
+B<Returns:> Nothing. Writes nothing at all when the file exists.
+
+B<Examples:>
+
+  _write_if_absent("$ci_dir/targets.yml", _targets_scaffold());
+  # writes the scaffold, or leaves an edited file untouched
+
+=head2 _targets_scaffold
+
+  my $yaml = _targets_scaffold();
+
+The commented starter content for C<.genesis/ci/targets.yml>, which declares
+the BOSH directors pipeline deployments target.
+
+The scaffold is comments and an example rather than working configuration:
+the key names have to match environment names, which only the operator knows.
+
+B<Parameters:> None.
+
+B<Returns:> The YAML content as a string.
+
+B<Examples:>
+
+  my $yaml = _targets_scaffold();
+  # returns the commented targets.yml template
+
+=head2 _resources_scaffold
+
+  my $yaml = _resources_scaffold();
+
+The starter content for the pipeline's resources file.
+
+B<Parameters:> None.
+
+B<Returns:> The YAML content as a string.
+
+B<Examples:>
+
+  my $yaml = _resources_scaffold();
+  # returns the commented resources template
+
+=head2 _overrides_scaffold
+
+  my $yaml = _overrides_scaffold($provider);
+
+The starter content for the pipeline's overrides file, which varies by
+provider.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$provider>
+
+The CI provider the scaffold is being written for.
+
+=back
+
+B<Returns:> The YAML content as a string.
+
+B<Examples:>
+
+  my $yaml = _overrides_scaffold('concourse');
+  # returns the overrides template for concourse
+
 =head1 SEE ALSO
 
 L<Genesis::Top>, L<Genesis::Kit::Provider>, L<Genesis::Commands>
 
 =head1 AUTHOR
 
-FiveTwenty, LLC
+Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

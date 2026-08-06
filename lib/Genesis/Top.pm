@@ -1107,6 +1107,7 @@ sub local_kits_path {
 	);
 }
 
+# }}}
 # has_dev_kit - returns true if the repo has an embedded dev kit {{{
 sub has_dev_kit {
 	my ($self) = @_;
@@ -1574,6 +1575,7 @@ sub _is_legacy_ci_file {
 	return 0;
 }
 
+# }}}
 # }}}
 
 1;

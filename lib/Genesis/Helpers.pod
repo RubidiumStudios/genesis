@@ -120,11 +120,16 @@ B<Examples:>
     Genesis::Helpers::log_from_script('@fatal', 'Something went wrong');
     # Returns: nothing (logs at the fatal level via Genesis::fatal())
 
-=head1 BASH HELPER FUNCTIONS
+=head1 BASH HELPERS
 
-The following functions are available in every Genesis kit hook script after
-Genesis writes and sources the helper library.  They are defined in the
-C<__DATA__> section of this module and exported to the shell environment via
+Everything below documents the B<shell library> this module emits, not its
+Perl interface -- that is C<write> and C<log_from_script>, above, and nothing
+else. These are bash functions living in the C<__DATA__> section, written out
+and sourced by kit hook scripts; they are not callable from Perl and have no
+Perl subs behind them.
+
+They are available in every Genesis kit hook script after Genesis writes and
+sources the helper library, exported to the shell environment via
 C<export -f>.
 
 When C<GENESIS_TRACE=y> is set, the helper script prints all environment
@@ -1474,10 +1479,10 @@ B<Examples:>
     # In a kit's hooks/addon file:
     run_extended_addon "$@"
 
-=head1 INTERNAL BASH FUNCTIONS
+=head1 INTERNAL BASH HELPERS
 
-These functions are used internally by the helper library.  Kit hook
-scripts should not call them directly.
+Also bash, also from the emitted library. These are used internally by the
+helper library itself; kit hook scripts should not call them directly.
 
 =head2 __ip2dec
 
@@ -1679,11 +1684,13 @@ When set, C<genesis_config_block> includes a C<credhub_env:> key.
 
 =back
 
-=head1 AUTHORS
+=head1 AUTHOR
 
 Written by the Genesis team.
 
-=head1 COPYRIGHT
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
 
 This module is free software, distributed under the same terms as Perl itself.
 

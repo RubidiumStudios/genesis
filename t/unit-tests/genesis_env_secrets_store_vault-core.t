@@ -7,7 +7,7 @@ use lib 'lib';
 use helper;
 
 # Test Genesis::Env::Secrets::Store::Vault
-# Regression tests for code defects found during FWT-729 POD review
+# Regression tests for code defects found while documenting this module
 
 use_ok 'Genesis::Env::Secrets::Store::Vault';
 
