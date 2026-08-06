@@ -9,6 +9,8 @@ t/repos/compiled-kit-test/new-env.yml
 
 /genesis-*
 /artifacts
+/docs/api.html
+/docs/api-*.html
 .*.sw?
 .sw?
 /cover_db

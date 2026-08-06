@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Genesis API Reference</title>
+<style>
+  /* Palette borrows from Genesis' own terminal vocabulary: the cyan it uses
+     for environment names becomes the accent; neutrals carry a cool bias
+     toward it so nothing reads as default grey. */
+  :root {
+    --ground:    #f8fafb;
+    --raised:    #eef2f4;
+    --ink:       #10161a;
+    --ink-soft:  #55636d;
+    --ink-faint: #8695a0;
+    --rule:      #dde4e8;
+    --rule-soft: #e9eef1;
+    --accent:    #0d7c8a;
+    --accent-bg: #e2f2f4;
+    --code:      #eaeff2;
+    --danger:    #a03e2f;
+
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    /* Syntax tokens sit around the teal accent rather than against it: the
+       hash-key hue IS the accent, since fat-comma keys are the structural
+       spine of most examples here. */
+    --syn-comment: #77858f;
+    --syn-string:  #8a6420;
+    --syn-var:     #2f6ea8;
+    --syn-kw:      #7047a6;
+    --syn-num:     #a8552b;
+    --syn-key:     #0d7c8a;
+
+    /* Two palettes that deliberately do not overlap, so a hue means exactly
+       one thing wherever it appears. Contract blocks live in the document
+       pane; module kinds live in the index. */
+    --sh-params:   #9a6b1a;
+    --sh-returns:  #2f7d4f;
+    --sh-errors:   #a03e2f;
+    --sh-examples: #2f6ea8;
+
+    --k-class:  #0d7c8a;
+    --k-base:   #7047a6;
+    --k-mixin:  #2f6a2f;
+    --k-lib:    #a8437a;
+    --k-module: #8695a0;
+
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+
+    /* Every type size below is a px literal scaled by one of these, so the
+       index and the document pane can be tuned independently without hunting
+       through individual rules.  The document runs larger than the index
+       because it is what you actually read; the index is only scanned. */
+    --fs-side: 1.25;
+    --fs-doc:  1.5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:    #14181c;
+      --raised:    #1a1f24;
+      --ink:       #dce3e8;
+      --ink-soft:  #93a1ab;
+      --ink-faint: #66757f;
+      --rule:      #262d33;
+      --rule-soft: #1f252a;
+      --accent:    #4fd1c5;
+      --accent-bg: #16302f;
+      --code:      #1d2429;
+      --danger:    #e08b7d;
+
+      --syn-comment: #6b7a85;
+      --syn-string:  #d9b878;
+      --syn-var:     #83b8e8;
+      --syn-kw:      #c4a6ea;
+      --syn-num:     #e0a07e;
+      --syn-key:     #4fd1c5;
+
+      --sh-params:   #e0b768;
+      --sh-returns:  #6ecf9a;
+      --sh-errors:   #e08b7d;
+      --sh-examples: #83b8e8;
+
+      --k-class:  #4fd1c5;
+      --k-base:   #c4a6ea;
+      --k-mixin:  #7fc98a;
+      --k-lib:    #e79ac4;
+      --k-module: #66757f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:    #14181c;
+    --raised:    #1a1f24;
+    --ink:       #dce3e8;
+    --ink-soft:  #93a1ab;
+    --ink-faint: #66757f;
+    --rule:      #262d33;
+    --rule-soft: #1f252a;
+    --accent:    #4fd1c5;
+    --accent-bg: #16302f;
+    --code:      #1d2429;
+    --danger:    #e08b7d;
+
+    --syn-comment: #6b7a85;
+    --syn-string:  #d9b878;
+    --syn-var:     #83b8e8;
+    --syn-kw:      #c4a6ea;
+    --syn-num:     #e0a07e;
+    --syn-key:     #4fd1c5;
+
+    --sh-params:   #e0b768;
+    --sh-returns:  #6ecf9a;
+    --sh-errors:   #e08b7d;
+    --sh-examples: #83b8e8;
+
+    --k-class:  #4fd1c5;
+    --k-base:   #c4a6ea;
+    --k-mixin:  #7fc98a;
+    --k-lib:    #e79ac4;
+    --k-module: #66757f;
+  }
+  :root[data-theme="light"] {
+    --ground:    #f8fafb;
+    --raised:    #eef2f4;
+    --ink:       #10161a;
+    --ink-soft:  #55636d;
+    --ink-faint: #8695a0;
+    --rule:      #dde4e8;
+    --rule-soft: #e9eef1;
+    --accent:    #0d7c8a;
+    --accent-bg: #e2f2f4;
+    --code:      #eaeff2;
+    --danger:    #a03e2f;
+
+    --syn-comment: #77858f;
+    --syn-string:  #8a6420;
+    --syn-var:     #2f6ea8;
+    --syn-kw:      #7047a6;
+    --syn-num:     #a8552b;
+    --syn-key:     #0d7c8a;
+
+    --sh-params:   #9a6b1a;
+    --sh-returns:  #2f7d4f;
+    --sh-errors:   #a03e2f;
+    --sh-examples: #2f6ea8;
+
+    --k-class:  #0d7c8a;
+    --k-base:   #7047a6;
+    --k-mixin:  #2f6a2f;
+    --k-lib:    #a8437a;
+    --k-module: #8695a0;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 15px/1.65 var(--sans);
+    display: grid;
+    grid-template-columns: minmax(calc(250px * var(--fs-side)), 22%) 1fr;
+    /* An explicit row track is load-bearing: without it the implicit track is
+       auto-sized to content, both panes grow past the viewport, and neither
+       scrolls.  minmax(0,1fr) also lets the tracks shrink below content size,
+       which is what allows the overflow to engage at all. */
+    grid-template-rows: minmax(0, 1fr);
+    height: 100dvh;
+    overflow: hidden;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+  /* ---------- index ---------- */
+  #side {
+    background: var(--raised);
+    font-size: calc(15px * var(--fs-side));   /* base for anything not sized below */
+    border-right: 1px solid var(--rule);
+    display: flex; flex-direction: column;
+    min-width: 0; min-height: 0; overflow: hidden;
+  }
+  #side header {
+    padding: var(--s4) var(--s4) var(--s3); display: grid; gap: var(--s2);
+    flex: none;   /* header stays put; only the list below it scrolls */
+  }
+  .wordmark { display: flex; align-items: baseline; gap: var(--s2); }
+  .wordmark b { font: 600 calc(14px * var(--fs-side)) / 1 var(--mono); letter-spacing: -0.02em; }
+  .wordmark span {
+    font: 500 calc(10px * var(--fs-side)) / 1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .search { position: relative; display: flex; align-items: center; }
+  #filter {
+    width: 100%; padding: 6px 30px 6px 9px;
+    border: 1px solid var(--rule); border-radius: 5px;
+    background: var(--ground); color: var(--ink); font: calc(13px * var(--fs-side)) var(--sans);
+  }
+  #filter::placeholder { color: var(--ink-faint); }
+  #filter::-webkit-search-cancel-button { display: none; }
+  .search kbd {
+    position: absolute; right: 7px; pointer-events: none;
+    font: 500 calc(10px * var(--fs-side)) / 1 var(--mono); color: var(--ink-faint);
+    border: 1px solid var(--rule); border-radius: 3px; padding: 2px 4px;
+    background: var(--raised);
+  }
+  .search.active kbd { display: none; }
+  /* Occupies the same slot as the kbd hint: the hint is only useful before
+     you type, the clear button only after. */
+  #clear {
+    position: absolute; right: 5px; display: none;
+    width: calc(18px * var(--fs-side)); height: calc(18px * var(--fs-side)); padding: 0;
+    border: 1px solid transparent; border-radius: 3px;
+    background: none; color: var(--ink-faint);
+    font: calc(15px * var(--fs-side)) / calc(16px * var(--fs-side)) var(--sans); text-align: center;
+    cursor: pointer;
+  }
+  .search.active #clear { display: block; }
+  #clear:hover { color: var(--ink); border-color: var(--rule); background: var(--raised); }
+  #clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  #tree, #results {
+    overflow-y: auto; overscroll-behavior: contain;
+    flex: 1 1 auto; min-height: 0; padding-bottom: var(--s6);
+  }
+  #results { display: none; }
+  body.searching #tree { display: none; }
+  body.searching #results { display: block; }
+
+  .rescount {
+    padding: var(--s2) var(--s4) var(--s1);
+    font: 500 calc(10px * var(--fs-side)) / 1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .hit {
+    display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+    gap: 2px var(--s2); width: 100%;
+    padding: 5px var(--s4); border: 0; background: none; text-align: left;
+    cursor: pointer; color: var(--ink); border-left: 2px solid transparent;
+  }
+  .hit:hover, .hit.on { background: var(--accent-bg); border-left-color: var(--accent); }
+  .hit .what { font: calc(13px * var(--fs-side)) / 1.3 var(--mono); overflow: hidden; text-overflow: ellipsis; }
+  .hit .where {
+    grid-column: 1 / -1; font: calc(11px * var(--fs-side)) / 1.3 var(--mono); color: var(--ink-faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .hit .kind {
+    font: 500 calc(9px * var(--fs-side)) / 1 var(--sans); letter-spacing: .07em; text-transform: uppercase;
+    color: var(--ink-faint); border: 1px solid var(--rule);
+    border-radius: 3px; padding: 2px 4px; flex: none;
+  }
+  .hit mark { background: none; color: var(--accent); font-weight: 600; }
+  .hit.on mark { text-decoration: underline; text-underline-offset: 2px; }
+  .noresults { padding: var(--s5) var(--s4); color: var(--ink-faint); font-size: calc(12.5px * var(--fs-side)); }
+
+  .mod { border-top: 1px solid var(--rule-soft); }
+  .mod:first-child { border-top: 0; }
+  .mod-name {
+    display: flex; align-items: baseline; gap: var(--s2); width: 100%;
+    padding: 7px var(--s4); border: 0; background: none; color: var(--ink);
+    font: calc(13px * var(--fs-side)) / 1.35 var(--mono); text-align: left; cursor: pointer;
+    min-width: 0;   /* let the name shrink instead of pushing the count out */
+  }
+  /* Deep namespaces run long (Genesis::Env::Secrets::Entombment). Truncate the
+     head of the name rather than the tail: the leaf is the part that
+     distinguishes it, and direction:rtl puts the ellipsis on the left. */
+  .mod-name .mname {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    direction: rtl; text-align: left;
+  }
+  .mod-name .mname bdi { direction: ltr; unicode-bidi: isolate; }
+  .mod-name:hover { background: var(--accent-bg); }
+  .mod.sel .mod-name { background: var(--accent-bg); font-weight: 600; }
+
+  /* Kind carries both a hue and a distinct sigil: colour alone would not
+     survive a colourblind reader, and the sigil shapes are meant to be read
+     literally -- filled for something you instantiate, hollow for something
+     you must fill in by subclassing, f for a function library. */
+  .sigil { flex: none; width: calc(9px * var(--fs-side)); font: calc(10px * var(--fs-side)) / 1 var(--mono); text-align: center; }
+  .mod[data-kind="class"]  .sigil { color: var(--k-class); }
+  .mod[data-kind="base"]   .sigil { color: var(--k-base); }
+  .mod[data-kind="mixin"]  .sigil { color: var(--k-mixin); }
+  .mod[data-kind="lib"]    .sigil { color: var(--k-lib); }
+  .mod[data-kind="module"] .sigil { color: var(--k-module); }
+  .mod[data-kind="class"]  .sigil::before { content: "\25CF"; }  /* ● */
+  .mod[data-kind="base"]   .sigil::before { content: "\25C7"; }  /* ◇ */
+  .mod[data-kind="mixin"]  .sigil::before { content: "\25D0"; }  /* ◐ */
+  .mod[data-kind="lib"]    .sigil::before { content: "\0192"; }  /* ƒ */
+  .mod[data-kind="module"] .sigil::before { content: "\00B7"; }  /* · */
+
+  .mod[data-kind="class"].sel  .mod-name { color: var(--k-class); }
+  .mod[data-kind="base"].sel   .mod-name { color: var(--k-base); }
+  .mod[data-kind="mixin"].sel  .mod-name { color: var(--k-mixin); }
+  .mod[data-kind="lib"].sel    .mod-name { color: var(--k-lib); }
+  .mod[data-kind="module"].sel .mod-name { color: var(--k-module); }
+
+  /* Five kinds have to fit a 250px rail; a fixed grid keeps them aligned in
+     two tidy columns rather than wrapping into a ragged orphan. */
+  .legend {
+    display: grid; grid-template-columns: repeat(3, auto); justify-content: start;
+    gap: 2px var(--s2);
+    font: calc(9.5px * var(--fs-side)) / 1.4 var(--mono); color: var(--ink-faint);
+  }
+  .legend span {
+    display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap;
+  }
+  .legend b { font-weight: 400; }
+  .legend .c { color: var(--k-class); }
+  .legend .b { color: var(--k-base); }
+  .legend .x { color: var(--k-mixin); }
+  .legend .l { color: var(--k-lib); }
+  .legend .m { color: var(--k-module); }
+  .caret { flex: none; align-self: center; width: 10px; height: 10px; position: relative; }
+  .caret::before {
+    content: ""; position: absolute; top: 1px; left: 0;
+    width: 6px; height: 6px;
+    border-right: 2px solid var(--ink-soft);
+    border-bottom: 2px solid var(--ink-soft);
+    transform: rotate(-45deg);
+    transition: transform .12s ease;
+  }
+  .mod.open .caret::before { transform: rotate(45deg); }
+  .mod-name:hover .caret::before,
+  .mod.sel .caret::before {
+    border-right-color: var(--accent); border-bottom-color: var(--accent);
+  }
+  .mod-name .count {
+    flex: none; font-size: calc(10.5px * var(--fs-side)); color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .mod-secs { display: none; padding-bottom: var(--s2); }
+  .mod.open .mod-secs { display: block; }
+  .mod-secs a {
+    display: block; padding: 2px var(--s4) 2px 30px; color: var(--ink-soft);
+    text-decoration: none; font-size: calc(12px * var(--fs-side));
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .mod-secs a.lv1 {
+    font: 500 calc(10px * var(--fs-side)) / 1.8 var(--mono); letter-spacing: .09em; text-transform: uppercase;
+    color: var(--ink-faint); padding-left: var(--s4); margin-top: var(--s2);
+  }
+  .mod-secs a.lv2 { font-family: var(--mono); font-size: calc(11.5px * var(--fs-side)); }
+  .mod-secs a.priv { color: var(--ink-faint); }
+  .mod-secs a:hover { color: var(--accent); background: var(--accent-bg); }
+
+  /* ---------- document ---------- */
+  #main { overflow-y: auto; overscroll-behavior: contain; min-width: 0; min-height: 0; }
+  #bar {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--ground); border-bottom: 1px solid var(--rule);
+    padding: var(--s3) var(--s5);
+    display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
+  }
+  #title { margin: 0; font: 600 calc(17px * var(--fs-doc)) / 1.3 var(--mono); letter-spacing: -0.015em; }
+  #abstract { color: var(--ink-soft); font-size: calc(13px * var(--fs-doc)); flex: 1 1 240px; min-width: 0; }
+  .tools { display: flex; gap: var(--s1); flex: none; }
+  .tools button {
+    border: 1px solid var(--rule); background: var(--ground); color: var(--ink-soft);
+    padding: 3px 9px; border-radius: 5px; cursor: pointer;
+    font: 500 calc(11.5px * var(--fs-doc)) var(--sans);
+  }
+  .tools button:hover { border-color: var(--accent); color: var(--accent); }
+  /* Sets the base the rendered POD inherits; max-width is in ch so the measure
+     holds at whatever --fs-doc is dialled to. */
+  #doc { padding: var(--s2) var(--s5) 60vh; max-width: 78ch; font-size: calc(15px * var(--fs-doc)); }
+
+  details.sec { border-bottom: 1px solid var(--rule-soft); }
+  details.sec > summary {
+    cursor: pointer; list-style: none;
+    display: flex; align-items: baseline; gap: var(--s2);
+    padding: 9px 0;
+  }
+  details.sec > summary::-webkit-details-marker { display: none; }
+  /* Drawn rather than typeset: the small-triangle codepoints (U+25B8/25BE) are
+     tiny by definition and near-indistinguishable at body size.  Two borders
+     on a rotated box give a chevron whose size and stroke we actually control. */
+  details.sec > summary::before {
+    content: ""; flex: none; align-self: center;
+    width: 7px; height: 7px; margin-right: 2px;
+    border-right: 2px solid var(--ink-soft);
+    border-bottom: 2px solid var(--ink-soft);
+    transform: rotate(-45deg);          /* points right when closed */
+    transition: transform .12s ease;
+  }
+  details.sec[open] > summary::before {
+    transform: rotate(45deg);           /* points down when open */
+  }
+  details.sec > summary:hover { color: var(--accent); }
+  details.sec > summary:hover::before {
+    border-right-color: var(--accent); border-bottom-color: var(--accent);
+  }
+
+  .sec.lv1 > summary .sec-title {
+    font: 600 calc(11px * var(--fs-doc)) / 1.5 var(--mono); letter-spacing: .11em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .sec.lv2 > summary .sec-title { font: 600 calc(14.5px * var(--fs-doc)) var(--mono); color: var(--ink); }
+  .sec.lv2.priv > summary .sec-title { color: var(--ink-soft); font-weight: 500; }
+  .sec.lv2.priv > summary .sec-title::before {
+    content: "internal "; font: italic 400 calc(11px * var(--fs-doc)) / 1 var(--sans);
+    letter-spacing: 0; text-transform: none; color: var(--ink-faint);
+  }
+  /* The POD sweep standardised every method on the same four blocks; surface
+     which ones a method actually has so its shape reads before its prose.
+     These are labels, not controls -- no chrome, or they read as buttons and
+     invite a click that belongs to the summary row. */
+  .shape { margin-left: auto; display: flex; gap: var(--s2); flex: none; }
+  .shape i {
+    font: 400 calc(10.5px * var(--fs-doc)) / 1 var(--sans); font-style: normal;
+    letter-spacing: .01em; white-space: nowrap;
+  }
+  .shape i.params   { color: var(--sh-params); }
+  .shape i.returns  { color: var(--sh-returns); }
+  .shape i.err      { color: var(--sh-errors); }
+  .shape i.examples { color: var(--sh-examples); }
+  /* Hold their own colour on hover; picking up the accent alongside the title
+     would put them back to looking clickable. */
+  details.sec > summary:hover .shape i.params   { color: var(--sh-params); }
+  details.sec > summary:hover .shape i.returns  { color: var(--sh-returns); }
+  details.sec > summary:hover .shape i.err      { color: var(--sh-errors); }
+  details.sec > summary:hover .shape i.examples { color: var(--sh-examples); }
+  .sec-body { padding: 0 0 var(--s4) 16px; }
+  .sec .sec { border-bottom: 0; }
+
+  /* rendered pod */
+  .sec-body p { margin: .55em 0; }
+  .sec-body pre {
+    background: var(--code); padding: 9px 11px; border-radius: 5px;
+    overflow-x: auto; font: calc(12.5px * var(--fs-doc)) / 1.55 var(--mono); margin: .6em 0;
+  }
+  .sec-body code, .sec-body tt {
+    background: var(--code); padding: 1px 4px; border-radius: 3px;
+    font: calc(12.5px * var(--fs-doc)) var(--mono);
+  }
+  .sec-body pre code, .sec-body pre tt { background: none; padding: 0; }
+  .t-comment { color: var(--syn-comment); font-style: italic; }
+  .t-string  { color: var(--syn-string); }
+  .t-var     { color: var(--syn-var); }
+  .t-kw      { color: var(--syn-kw); }
+  .t-num     { color: var(--syn-num); }
+  .t-key     { color: var(--syn-key); }
+  .sec-body ul, .sec-body ol { margin: .5em 0; padding-left: 1.3em; }
+  .sec-body li { margin: .25em 0; }
+  .sec-body dl { margin: .5em 0; }
+  .sec-body dt { font-family: var(--mono); font-weight: 600; margin-top: .6em; font-size: calc(13px * var(--fs-doc)); }
+  .sec-body dd { margin: .2em 0 .2em 1.1em; color: var(--ink-soft); }
+  .sec-body a { color: var(--accent); text-underline-offset: 2px; }
+  .sec-body b { font-weight: 600; }
+  .sec-body table { border-collapse: collapse; display: block; overflow-x: auto; margin: .6em 0; }
+  .sec-body td, .sec-body th { border: 1px solid var(--rule); padding: 4px 9px; text-align: left; }
+
+  #empty { padding: 20vh var(--s5); color: var(--ink-faint); text-align: center; }
+  .hidden { display: none !important; }
+
+  @media (max-width: 760px) {
+    body {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(0, 38dvh) minmax(0, 1fr);
+    }
+    #side { border-right: 0; border-bottom: 1px solid var(--rule); }
+    #doc { padding-left: var(--s4); padding-right: var(--s4); }
+  }
+</style>
+</head>
+<body>
+
+<nav id="side">
+  <header>
+    <div class="wordmark"><b>Genesis</b><span>api reference</span></div>
+    <div class="wordmark"><span id="ver">v{{VERSION}}</span></div>
+    <div class="search">
+      <input id="filter" type="search" placeholder="Search modules and methods"
+             autocomplete="off" spellcheck="false" aria-label="Search modules and methods">
+      <kbd>/</kbd>
+      <button id="clear" type="button" tabindex="-1"
+              aria-label="Clear search" title="Clear search (Esc)">&times;</button>
+    </div>
+    <div class="legend">
+      <span class="c">●&nbsp;<b>class</b></span>
+      <span class="b">◇&nbsp;<b>base</b></span>
+      <span class="x">◐&nbsp;<b>mixin</b></span>
+      <span class="l">ƒ&nbsp;<b>lib</b></span>
+      <span class="m">·&nbsp;<b>module</b></span>
+    </div>
+  </header>
+  <div id="tree"></div>
+  <div id="results" role="listbox" aria-label="Search results"></div>
+</nav>
+
+<main id="main">
+  <div id="bar">
+    <h1 id="title">Genesis API Reference</h1>
+    <span id="abstract"></span>
+    <span class="tools">
+      <button id="expand" type="button">Expand all</button>
+      <button id="collapse" type="button">Collapse all</button>
+      <button id="theme" type="button" title="Switch theme" aria-label="Switch theme">Theme</button>
+    </span>
+  </div>
+  <div id="doc"><div id="empty">Choose a module from the index.</div></div>
+</main>
+
+<script type="application/json" id="payload">{{PAYLOAD}}</script>
+<script>
+(function () {
+  "use strict";
+
+  var DATA    = JSON.parse(document.getElementById("payload").textContent);
+  var tree    = document.getElementById("tree");
+  var doc     = document.getElementById("doc");
+  var titleEl = document.getElementById("title");
+  var absEl   = document.getElementById("abstract");
+  var current = null;
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) { n.className = cls; }
+    if (text != null) { n.textContent = text; }
+    return n;
+  }
+  function isPrivate(title) { return /^_/.test(title); }
+
+  var KIND_HELP = {
+    "class":  "a class you instantiate",
+    "base":   "an abstract base you subclass",
+    "mixin":  "methods composed into another class",
+    "lib":    "a library you import functions from",
+    "module": "a plain namespace"
+  };
+
+  // ---- Perl highlighting ---------------------------------------------------
+  // Verbatim POD blocks here are almost entirely Perl, and Pod::Simple emits
+  // them as plain text, so a single-pass tokenizer over textContent is enough.
+  // Ordering in the alternation is the whole design: comments and strings must
+  // win before anything inside them can be mistaken for code.
+
+  var KEYWORDS = /^(?:my|our|local|sub|return|if|elsif|else|unless|while|until|for|foreach|do|use|no|require|package|bless|ref|defined|exists|delete|wantarray|last|next|redo|undef|scalar|eval|qw|and|or|not|eq|ne|lt|gt|le|ge|cmp|x)$/;
+  var BUILTINS = /^(?:print|printf|sprintf|push|pop|shift|unshift|join|split|map|grep|sort|reverse|keys|values|die|warn|open|close|chomp|length|uniq)$/;
+
+  var TOKEN = new RegExp([
+    "(#[^\\n]*)",                              // 1 comment
+    "('(?:\\\\.|[^'\\\\])*')",                 // 2 single-quoted
+    '("(?:\\\\.|[^"\\\\])*")',                 // 3 double-quoted
+    "(\\bqw\\s*[([{/|]\\s*[^)\\]}/|]*[)\\]}/|])", // 4 qw list
+    "([$@%][#$]?[A-Za-z_][\\w:]*|[$@%]\\{)",   // 5 variable
+    "(\\b\\d+(?:\\.\\d+)?\\b)",                // 6 number
+    "([A-Za-z_]\\w*)"                          // 7 bareword
+  ].join("|"), "g");
+
+  function highlight(pre) {
+    var src = pre.textContent;
+    if (!src) { return; }
+    var frag = document.createDocumentFragment();
+    var last = 0, m;
+    TOKEN.lastIndex = 0;
+
+    while ((m = TOKEN.exec(src)) !== null) {
+      if (m.index > last) {
+        frag.appendChild(document.createTextNode(src.slice(last, m.index)));
+      }
+      var cls = null;
+      if (m[1])      { cls = "t-comment"; }
+      else if (m[2] || m[3]) { cls = "t-string"; }
+      else if (m[4]) { cls = "t-string"; }
+      else if (m[5]) { cls = "t-var"; }
+      else if (m[6]) { cls = "t-num"; }
+      else if (m[7]) {
+        // A bareword is a hash key when a fat comma follows it, a keyword or
+        // builtin when it is one, and otherwise just a word.
+        var rest = src.slice(m.index + m[0].length);
+        if (/^\s*=>/.test(rest))        { cls = "t-key"; }
+        else if (KEYWORDS.test(m[7]))   { cls = "t-kw"; }
+        else if (BUILTINS.test(m[7]))   { cls = "t-kw"; }
+      }
+      frag.appendChild(cls ? el("span", cls, m[0]) : document.createTextNode(m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < src.length) {
+      frag.appendChild(document.createTextNode(src.slice(last)));
+    }
+    pre.textContent = "";
+    pre.appendChild(frag);
+  }
+
+  // Which of the four standard blocks a method documents. Read off the
+  // rendered html because that is what a reader will actually see, and label
+  // each with the exact word the body uses -- a badge reading "args" over a
+  // section headed "Parameters:" makes the reader stop and reconcile them.
+  function shapeOf(sec) {
+    var h = sec.html || "";
+    var out = [];
+    if (/Parameters:/.test(h))   { out.push(["parameters", "params"]); }
+    if (/Returns:/.test(h))      { out.push(["returns", "returns"]); }
+    if (/Errors:|Bails/.test(h)) { out.push(["errors", "err"]); }
+    if (/Examples:/.test(h))     { out.push(["examples", "examples"]); }
+    return out;
+  }
+
+  // What a =head2 actually is depends on the =head1 it sits under: a child of
+  // METHODS is a method, a child of FUNCTIONS is a function, and a child of
+  // DESIGN CONSIDERATIONS is neither -- it is a prose topic that happens to
+  // carry a heading.  Labelling those "method" is simply wrong.
+  function kindOf(parentTitle, title) {
+    var p = (parentTitle || "").toUpperCase();
+    if (/\bINTERNAL\b/.test(p) || /^_/.test(title))      { return "internal"; }
+    if (/\bFUNCTIONS?\b/.test(p))                        { return "function"; }
+    if (/\bMETHODS?\b|CONSTRUCTORS|OVERRIDE POINTS|OVERLOAD|\bHOOKS?\b/.test(p)) {
+      return "method";
+    }
+    if (/\bVARIABLES?\b/.test(p))                        { return "variable"; }
+    return "topic";
+  }
+
+  function navEntries(mod) {
+    var out = [];
+    mod.sections.forEach(function (s, i) {
+      out.push({ path: [i], level: s.level, title: s.title, kind: "section" });
+      s.children.forEach(function (c, j) {
+        out.push({
+          path: [i, j], level: c.level, title: c.title,
+          kind: kindOf(s.title, c.title)
+        });
+      });
+    });
+    return out;
+  }
+  function methodCount(mod) {
+    return mod.sections.reduce(function (n, s) { return n + s.children.length; }, 0);
+  }
+
+  function buildTree() {
+    tree.textContent = "";
+    DATA.modules.forEach(function (mod, mi) {
+      var wrap = el("div", "mod");
+      wrap.dataset.kind = mod.kind || "module";
+
+      var btn = el("button", "mod-name");
+      btn.type = "button";
+      btn.title = mod.name + " — " + KIND_HELP[mod.kind || "module"];
+      btn.appendChild(el("span", "caret"));   // glyph comes from CSS per state
+      btn.appendChild(el("span", "sigil"));   // glyph + hue come from CSS per kind
+      var nm = el("span", "mname");
+      nm.appendChild(el("bdi", null, mod.name));   // keep :: reading LTR
+      btn.appendChild(nm);
+      var n = methodCount(mod);
+      if (n) { btn.appendChild(el("span", "count", String(n))); }
+      btn.addEventListener("click", function () {
+        var wasOpen = wrap.classList.contains("open");
+        select(mi);
+        wrap.classList.toggle("open", !wasOpen || current !== mi);
+      });
+      wrap.appendChild(btn);
+
+      var secs = el("div", "mod-secs");
+      navEntries(mod).forEach(function (e) {
+        var cls = "lv" + e.level + (isPrivate(e.title) ? " priv" : "");
+        var a = el("a", cls, e.title);
+        a.href = "#" + e.title;
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          if (current !== mi) { select(mi); }
+          reveal(e.path.join("-"));
+        });
+        secs.appendChild(a);
+      });
+      wrap.appendChild(secs);
+      tree.appendChild(wrap);
+    });
+  }
+
+  function renderSection(sec, path) {
+    var priv = sec.level === 2 && isPrivate(sec.title);
+    var d = el("details", "sec lv" + sec.level + (priv ? " priv" : ""));
+    d.id = "s-" + path.join("-");
+
+    var sum = el("summary");
+    sum.appendChild(el("span", "sec-title", sec.title));
+    if (sec.level === 2) {
+      var shape = shapeOf(sec);
+      if (shape.length) {
+        var box = el("span", "shape");
+        shape.forEach(function (s) { box.appendChild(el("i", s[1], s[0])); });
+        sum.appendChild(box);
+      }
+    }
+    d.appendChild(sum);
+
+    var body = el("div", "sec-body");
+    if (sec.html) {
+      var host = el("div");
+      host.innerHTML = sec.html;
+      Array.prototype.forEach.call(host.querySelectorAll("pre"), highlight);
+      body.appendChild(host);
+    }
+    sec.children.forEach(function (c, i) {
+      body.appendChild(renderSection(c, path.concat(i)));
+    });
+    d.appendChild(body);
+    return d;
+  }
+
+  function select(mi) {
+    current = mi;
+    var mod = DATA.modules[mi];
+
+    Array.prototype.forEach.call(tree.children, function (node, i) {
+      node.classList.toggle("sel", i === mi);
+    });
+
+    titleEl.textContent = mod.name;
+    absEl.textContent = mod.abstract || "";
+    doc.textContent = "";
+    mod.sections.forEach(function (s, i) {
+      var node = renderSection(s, [i]);
+      if (s.level === 1) { node.open = true; }
+      doc.appendChild(node);
+    });
+    document.getElementById("main").scrollTop = 0;
+  }
+
+  function reveal(anchor) {
+    var target = document.getElementById("s-" + anchor);
+    if (!target) { return; }
+    var n = target;
+    while (n && n !== doc) {
+      if (n.tagName === "DETAILS") { n.open = true; }
+      n = n.parentNode;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function setAll(open) {
+    Array.prototype.forEach.call(doc.querySelectorAll("details.sec"), function (d) {
+      d.open = open;
+    });
+  }
+
+  // Pod::Simple renders L</foo> as <a href="#foo">, but sections are keyed by
+  // tree position, so those anchors point at nothing. Resolve by title: this
+  // module first, then across modules for L<Other::Module>.
+  doc.addEventListener("click", function (ev) {
+    var a = ev.target.closest && ev.target.closest("a[href^='#']");
+    if (!a) { return; }
+    ev.preventDefault();
+    var want = decodeURIComponent(a.getAttribute("href").slice(1))
+                 .replace(/^["']|["']$/g, "").trim().toLowerCase();
+    if (!want) { return; }
+
+    var here = navEntries(DATA.modules[current]);
+    for (var i = 0; i < here.length; i++) {
+      if (here[i].title.toLowerCase() === want) { return reveal(here[i].path.join("-")); }
+    }
+    for (var m = 0; m < DATA.modules.length; m++) {
+      if (DATA.modules[m].name.toLowerCase() === want) { return select(m); }
+    }
+  });
+
+  document.getElementById("expand").addEventListener("click", function () { setAll(true); });
+  document.getElementById("collapse").addEventListener("click", function () { setAll(false); });
+  document.getElementById("theme").addEventListener("click", function () {
+    var r = document.documentElement;
+    var now = r.getAttribute("data-theme");
+    var dark = now ? now === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    r.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+
+  // ---- search --------------------------------------------------------------
+  // One flat index over every module and every documented section, built once.
+  // At ~1700 entries a linear scan per keystroke is imperceptible, so ranking
+  // quality matters far more than lookup speed.
+
+  var INDEX = [];
+  DATA.modules.forEach(function (mod, mi) {
+    INDEX.push({ mi: mi, path: null, label: mod.name, lc: mod.name.toLowerCase(),
+                 where: mod.abstract || "", kind: "module" });
+    navEntries(mod).forEach(function (e) {
+      INDEX.push({
+        mi: mi, path: e.path.join("-"), label: e.title,
+        lc: e.title.toLowerCase(), where: mod.name, kind: e.kind
+      });
+    });
+  });
+
+  // Rank so that what you typed exactly comes first, then things starting with
+  // it, then a match at a word/underscore boundary, then anything containing
+  // it. Shorter labels win ties: `kit` should outrank `kit_files` for "kit".
+  function score(entry, q) {
+    var i = entry.lc.indexOf(q);
+    if (i < 0) { return -1; }
+    var base;
+    if (entry.lc === q)      { base = 1000; }
+    else if (i === 0)        { base = 700; }
+    else if (/[_:]/.test(entry.lc.charAt(i - 1))) { base = 500; }
+    else                     { base = 300; }
+    if (entry.kind === "method" || entry.kind === "function") { base += 60; }
+    if (entry.kind === "module")   { base += 40; }
+    if (entry.kind === "variable") { base += 10; }
+    if (entry.kind === "internal") { base -= 40; }
+    if (entry.kind === "section")  { base -= 20; }
+    if (entry.kind === "topic")    { base -= 60; }   // prose, not an API name
+    return base - Math.min(entry.label.length, 60);
+  }
+
+  function markup(label, q) {
+    var i = label.toLowerCase().indexOf(q);
+    var span = document.createElement("span");
+    span.className = "what";
+    if (i < 0) { span.textContent = label; return span; }
+    span.appendChild(document.createTextNode(label.slice(0, i)));
+    span.appendChild(el("mark", null, label.slice(i, i + q.length)));
+    span.appendChild(document.createTextNode(label.slice(i + q.length)));
+    return span;
+  }
+
+  var results = document.getElementById("results");
+  var filter  = document.getElementById("filter");
+  var hits = [];
+  var cursor = -1;
+
+  function runSearch(q) {
+    document.body.classList.toggle("searching", !!q);
+    filter.parentNode.classList.toggle("active", !!q);
+    if (!q) { results.textContent = ""; hits = []; cursor = -1; return; }
+
+    var scored = [];
+    for (var i = 0; i < INDEX.length; i++) {
+      var s = score(INDEX[i], q);
+      if (s >= 0) { scored.push([s, INDEX[i]]); }
+    }
+    scored.sort(function (a, b) { return b[0] - a[0]; });
+    hits = scored.slice(0, 80).map(function (p) { return p[1]; });
+    cursor = hits.length ? 0 : -1;
+
+    results.textContent = "";
+    if (!hits.length) {
+      results.appendChild(el("div", "noresults", "Nothing matches “" + q + "”."));
+      return;
+    }
+    var head = scored.length > hits.length
+      ? hits.length + " of " + scored.length + " matches"
+      : scored.length + (scored.length === 1 ? " match" : " matches");
+    results.appendChild(el("div", "rescount", head));
+
+    hits.forEach(function (h, i) {
+      var b = el("button", "hit" + (i === cursor ? " on" : ""));
+      b.type = "button";
+      b.setAttribute("role", "option");
+      b.appendChild(markup(h.label, q));
+      b.appendChild(el("span", "kind", h.kind));
+      if (h.where) { b.appendChild(el("span", "where", h.where)); }
+      b.addEventListener("click", function () { go(h); });
+      results.appendChild(b);
+    });
+  }
+
+  function go(h) {
+    select(h.mi);
+    if (h.path) { reveal(h.path); }
+    Array.prototype.forEach.call(tree.children, function (n, i) {
+      if (i === h.mi) { n.classList.add("open"); }
+    });
+  }
+
+  function moveCursor(delta) {
+    if (!hits.length) { return; }
+    var nodes = results.querySelectorAll(".hit");
+    if (nodes[cursor]) { nodes[cursor].classList.remove("on"); }
+    cursor = (cursor + delta + hits.length) % hits.length;
+    nodes[cursor].classList.add("on");
+    nodes[cursor].scrollIntoView({ block: "nearest" });
+  }
+
+  filter.addEventListener("input", function (ev) {
+    runSearch(ev.target.value.trim().toLowerCase());
+  });
+
+  // Same effect as Escape, but reachable with the mouse.  Focus returns to the
+  // field: clearing is nearly always a prelude to retyping, not to leaving.
+  document.getElementById("clear").addEventListener("click", function () {
+    filter.value = "";
+    runSearch("");
+    filter.focus();
+  });
+
+  filter.addEventListener("keydown", function (ev) {
+    if (ev.key === "ArrowDown")      { ev.preventDefault(); moveCursor(1); }
+    else if (ev.key === "ArrowUp")   { ev.preventDefault(); moveCursor(-1); }
+    else if (ev.key === "Enter" && hits[cursor]) { ev.preventDefault(); go(hits[cursor]); }
+    else if (ev.key === "Escape")    { filter.value = ""; runSearch(""); filter.blur(); }
+  });
+
+  // `/` is the vim-shaped reflex for a Perl audience; ⌘K/^K for everyone else.
+  document.addEventListener("keydown", function (ev) {
+    var typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+    if (ev.key === "/" && !typing) { ev.preventDefault(); filter.focus(); filter.select(); }
+    else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
+      ev.preventDefault(); filter.focus(); filter.select();
+    }
+  });
+
+  buildTree();
+  if (DATA.modules.length) { select(0); }
+})();
+</script>
+</body>
+</html>

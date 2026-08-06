@@ -1,0 +1,247 @@
+#!/usr/bin/env perl
+# pod-spa - build a self-contained HTML browser for the library's POD
+#
+# Walks lib/**/*.pod, parses each into a section tree keyed on =head level,
+# renders each section body to HTML, and writes a single HTML file with the
+# whole corpus inlined as JSON.  No server, no external assets: the output
+# opens from file://.
+#
+# Usage:
+#   t/bin/pod-spa [--out FILE] [--lib DIR] [MODULE ...]
+#
+# With no MODULE arguments, every .pod under --lib is included.
+
+use strict;
+use warnings;
+use File::Find;
+use File::Basename qw(dirname);
+use Getopt::Long;
+use JSON::PP;
+use Pod::Simple::HTML;
+
+my $out = 'docs/api.html';
+my $lib = 'lib';
+my $template;
+GetOptions(
+	'out=s'      => \$out,
+	'lib=s'      => \$lib,
+	'template=s' => \$template,
+) or die "usage: $0 [--out FILE] [--lib DIR] [MODULE ...]\n";
+
+$template //= dirname(__FILE__).'/pod-spa.html.tmpl';
+
+my %wanted = map { $_ => 1 } @ARGV;
+
+# -- collect ------------------------------------------------------------------
+
+my @pods;
+find({ no_chdir => 1, wanted => sub {
+	return unless /\.pod$/;
+	push @pods, $File::Find::name;
+}}, $lib);
+@pods = sort @pods;
+
+my @modules;
+for my $path (@pods) {
+	my $name = $path;
+	$name =~ s{^\Q$lib\E/}{};
+	$name =~ s{\.pod$}{};
+	$name =~ s{/}{::}g;
+	next if %wanted && !$wanted{$name};
+	my $mod = parse_pod($path, $name) or next;
+	push @modules, $mod;
+}
+
+die "No modules matched\n" unless @modules;
+
+# -- render -------------------------------------------------------------------
+
+my $version = read_version() // 'unknown';
+my $payload = {
+	generated => scalar(gmtime).' UTC',
+	version   => $version,
+	modules   => \@modules,
+};
+
+my $json = JSON::PP->new->canonical->utf8(0)->encode($payload);
+# Guard against an embedded </script> terminating the host tag early.
+$json =~ s{</}{<\\/}g;
+
+open my $tfh, '<:encoding(UTF-8)', $template
+	or die "Cannot read template $template: $!\n";
+my $html = do { local $/; <$tfh> };
+close $tfh;
+
+$html =~ s/\{\{PAYLOAD\}\}/$json/;
+$html =~ s/\{\{VERSION\}\}/$version/g;
+
+open my $ofh, '>:encoding(UTF-8)', $out or die "Cannot write $out: $!\n";
+print $ofh $html;
+close $ofh;
+
+printf "%s: %d modules, %d sections, %.1f KiB\n",
+	$out, scalar(@modules), count_sections(\@modules), (-s $out) / 1024;
+
+# -- helpers ------------------------------------------------------------------
+
+# Split a .pod into a tree of sections nested by =head level.  Each section's
+# body is everything up to the next =head of any level; that body is rendered
+# on its own so a collapsed section costs nothing to skip.
+sub parse_pod {
+	my ($path, $name) = @_;
+
+	open my $fh, '<:encoding(UTF-8)', $path or do {
+		warn "Skipping $path: $!\n";
+		return undef;
+	};
+	my @lines = <$fh>;
+	close $fh;
+
+	my @flat;
+	my $cur;
+	for my $line (@lines) {
+		if ($line =~ /^=head([1-4])\s+(.*?)\s*$/) {
+			push @flat, $cur if $cur;
+			$cur = { level => $1 + 0, title => $2, body => '' };
+		} elsif ($cur) {
+			$cur->{body} .= $line;
+		}
+	}
+	push @flat, $cur if $cur;
+	return undef unless @flat;
+
+	# NAME's body is the one-line abstract every POD opens with.
+	my $abstract = '';
+	if ($flat[0]{title} eq 'NAME') {
+		($abstract = $flat[0]{body}) =~ s/^\s+|\s+$//g;
+		$abstract =~ s/^\Q$name\E\s*-\s*//;
+		$abstract =~ s/\s+/ /g;
+	}
+
+	$_->{html} = render_pod($_->{title}, $_->{body}) for @flat;
+	delete $_->{body} for @flat;
+
+	return {
+		name     => $name,
+		path     => $path,
+		abstract => $abstract,
+		kind     => classify($path, \@flat),
+		sections => nest(\@flat),
+	};
+}
+
+# What a reader needs to know before opening a module: do I instantiate this,
+# subclass it, or import from it?  The sibling .pm carries the strongest
+# signals, so consult it where present and fall back to POD structure.
+sub classify {
+	my ($path, $flat) = @_;
+	my %head = map { uc($_->{title}) => 1 } @$flat;
+
+	# A module that calls itself a mixin in its NAME is one, whatever its
+	# source looks like -- the author's declaration beats inference, and this
+	# is the same signal pod-validate keys on.
+	my ($name_sec) = grep { uc($_->{title}) eq 'NAME' } @$flat;
+	return 'mixin'
+		if $name_sec && ($name_sec->{html} // '') =~ /\bmixin\b/i;
+
+	# Abstract first: a base class may also define new(), but "must be
+	# subclassed" is the more useful thing to say about it.
+	return 'base' if $head{'ABSTRACT METHODS'} || $head{'OVERRIDE POINTS'};
+
+	(my $pm = $path) =~ s/\.pod$/.pm/;
+	my $src = '';
+	if (-r $pm) {
+		if (open my $fh, '<:encoding(UTF-8)', $pm) {
+			local $/;
+			$src = <$fh> // '';
+			close $fh;
+		}
+	}
+
+	return 'lib'   if $src =~ /^\s*our\s+\@EXPORT/m;
+
+	# A bare `bless` is not evidence of a class.  Blessing into some *other*
+	# package is how you mint a sentinel -- `bless({}, "NotFound")` gives a
+	# value no caller can forge or collide with -- and a module that does
+	# that once is not thereby object-oriented.  What marks a class is
+	# blessing into itself: an explicit $class or __PACKAGE__, a ref($proto)
+	# clone, or the one-argument form that blesses into the current package.
+	my $blesses_into_self =
+		   $src =~ /\bbless\s*\(?\s*[^,()]+,\s*(?:\$class\b|\$proto\b|__PACKAGE__|ref\s*\(?\s*\$)/
+		|| $src =~ /\bbless\s*\(?\s*[\$\\%\{][^,;()]*\s*\)?\s*;/;
+	return 'class' if $src =~ /^sub new\b/m || $blesses_into_self;
+
+	# Mixin: never constructed and never inherited from, yet its subs operate on
+	# an invocant -- so it only means anything once composed into a class.
+	my $inherits  = $src =~ /^\s*use\s+(?:parent|base)\b/m;
+	my @subs      = $src =~ /^sub\s+\w+\s*\{([^\n]*(?:\n(?!sub\s)[^\n]*)*)/mg;
+	my $invocants = grep { /my\s*\(\s*\$self|my\s+\$self\s*=\s*shift|\$_\[0\]->/ } @subs;
+	return 'mixin' if !$inherits && @subs && $invocants > @subs / 2;
+
+	return 'lib'   if $head{FUNCTIONS} && !$head{METHODS};
+	return 'class' if $head{METHODS} && $head{SYNOPSIS} && $inherits;
+	return 'module';
+}
+
+# Fold a flat, level-tagged list into a tree.  A section becomes the child of
+# the nearest preceding section of a lower level.
+sub nest {
+	my ($flat) = @_;
+	my @roots;
+	my @stack;
+	for my $s (@$flat) {
+		$s->{children} = [];
+		pop @stack while @stack && $stack[-1]{level} >= $s->{level};
+		if (@stack) { push @{ $stack[-1]{children} }, $s }
+		else        { push @roots, $s }
+		push @stack, $s;
+	}
+	return \@roots;
+}
+
+# Render one section body through Pod::Simple::HTML.  The parser needs a
+# =head to anchor on, so the title is fed back in and its rendered heading
+# stripped -- the SPA draws its own headings.
+sub render_pod {
+	my ($title, $body) = @_;
+	return '' unless defined $body && $body =~ /\S/;
+
+	my $doc = "=head1 $title\n\n$body\n";
+	my $html = '';
+	my $p = Pod::Simple::HTML->new;
+	$p->output_string(\$html);
+	$p->html_header_before_title('');
+	$p->html_header_after_title('');
+	$p->html_footer('');
+	$p->index(0);
+	$p->no_errata_section(1);
+	eval { $p->parse_string_document($doc); 1 } or return '';
+
+	$html =~ s{.*?<h1[^>]*>.*?</h1>}{}s;   # drop the anchor heading we injected
+	$html =~ s{<a name='[^']*'\s*></a>}{}g;
+	$html =~ s/^\s+|\s+$//g;
+	return $html;
+}
+
+sub count_sections {
+	my ($mods) = @_;
+	my $n = 0;
+	my $walk; $walk = sub { $n++, $walk->($_->{children}) for @{ $_[0] } };
+	$walk->($_->{sections}) for @$mods;
+	return $n;
+}
+
+# Genesis.pm declares $VERSION bare and assigns it with //= so a release-time
+# pin survives; unpinned working copies read "(development)".
+sub read_version {
+	return $ENV{GENESIS_DEV_VERSION} if $ENV{GENESIS_DEV_VERSION};
+	open my $fh, '<', 'lib/Genesis.pm' or return undef;
+	while (<$fh>) {
+		next unless /\$VERSION\s*(?:\/\/)?=/;
+		# Take the last quoted literal on the line: a release-time pin is the
+		# only literal present, and an unpinned copy ends in "(development)".
+		my @lit = /["']([^"']+)["']/g;
+		return $lit[-1] if @lit;
+	}
+	return undef;
+}
