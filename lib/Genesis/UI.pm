@@ -21,6 +21,7 @@ use Genesis;
 use Genesis::Term;
 
 use POSIX qw//;
+use List::Util qw//;
 
 sub __prompt_for_line {
 	my ($prompt,$validation,$err_msg,$default,$allow_blank,$hide_response) = @_;
@@ -459,7 +460,7 @@ sub new_prompt_for_choice {
 				next;
 			}
 			my $label = $choice->{label} // $choice->{value};
-			$max_label_len = max($max_label_len, length($label)+ $max_number_width + 2); # 2 for column separator 
+			$max_label_len = List::Util::max($max_label_len, length($label)+ $max_number_width + 2); # 2 for column separator
 			push @{$sections->{$section_headers[-1] //= []}}, $choice;
 		}
 		$columns = int($max_width / $max_label_len);
@@ -512,7 +513,7 @@ sub new_prompt_for_choice {
 		my ($start_idx, $end_idx) = (0, $num_choices - 1);
 		if ($options{paginate}) {
 			$start_idx = $current_page * $options{page_size};
-			$end_idx = min($start_idx + $options{page_size} - 1, $num_choices - 1);
+			$end_idx = List::Util::min($start_idx + $options{page_size} - 1, $num_choices - 1);
 		}
 		
 		if ($options{compact}) {
@@ -521,11 +522,11 @@ sub new_prompt_for_choice {
 			for my $i ($start_idx .. $end_idx) {
 				my $label = $choices->[$i]->{label} //= $choices->[$i]->{value};
 				next if $label =~ /^---.*---$/;  # Skip section headers
-				$max_label_len = max($max_label_len, length($label) + $iw + 4); # num) label
+				$max_label_len = List::Util::max($max_label_len, length($label) + $iw + 4); # num) label
 			}
 			
 			# Calculate number of columns that fit
-			my $cols = max(1, int(terminal_width() / ($max_label_len + 2)));
+			my $cols = List::Util::max(1, int(terminal_width() / ($max_label_len + 2)));
 			
 			# Display items in columns
 			my $col = 0;
@@ -607,18 +608,6 @@ sub new_prompt_for_choice {
 		info("\n%s\n",$form);
 		return \%selection_map;
 	};
-	
-	# Helper function to get max value
-	sub max {
-		my ($a, $b) = @_;
-		return $a > $b ? $a : $b;
-	}
-	
-	# Helper function to get min value
-	sub min {
-		my ($a, $b) = @_;
-		return $a < $b ? $a : $b;
-	}
 	
 	# Display choices and get selection
 	while (1) {
