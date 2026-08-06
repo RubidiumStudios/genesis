@@ -6805,7 +6805,7 @@ sub _fix_stemcells {
 	my @failed_required = ();
 	$self->notify("uploading $type stemcells:");
 	my %uploaded = ();
-	my $indent = $opts{indent} // 4;;
+	my $indent = $opts{indent} // 4;
 	for my $stemcell (uniq(@downloadable)) {
 		my $alias = $stemcell->{alias};
 		my $id = $stemcell->{os}.'@'.$stemcell->{alt}{version};
