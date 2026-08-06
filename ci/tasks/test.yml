@@ -15,6 +15,11 @@ params:
   CI_ROOT:           git-ci
   GITHUB_USER:       ((github.username))
   GITHUB_AUTH_TOKEN: ((github.access_token))
+  # Newline-separated regexes matching references to resources a reader of
+  # this repository cannot reach.  Held as a credential rather than in the
+  # tree: publishing the shape of the identifiers here would defeat the
+  # check that looks for them.  See t/sanity-tests/no-private-refs.t.
+  GENESIS_PRIVATE_REF_PATTERNS: ((ci.private_ref_patterns))
 
 run:
   path: "git/ci/scripts/test"

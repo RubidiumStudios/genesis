@@ -9,6 +9,7 @@
 # Meta-tests that validate prerequisite conditions
 # These must pass before functional tests can run
 sanity-tests/modules-compile.t   # Verify all Perl modules compile and load
+sanity-tests/no-private-refs.t   # No references to private resources (skips unless configured)
 
 [unit-tests]
 # Library/module-level tests (formerly numeric-prefixed)
