@@ -14,6 +14,12 @@ our @EXPORT_OK = qw/extract_module/;
 # first is assumed to be the invocant and the rest are numbered.
 my @POSITIONAL = qw/$self $arg1 $arg2 $arg3 $arg4 $arg5/;
 
+# Perl calls these; nobody documents them as API.  Named once, on purpose --
+# the reference implementation repeats the list at six call sites and one of
+# them drifted, which is how a documented DESTROY came to read as POD for a
+# method that did not exist.  Marked here, exempted by the checks.
+my %SPECIAL = map {$_ => 1} qw/BEGIN END DESTROY AUTOLOAD/;
+
 sub extract_module {
 	my ($file) = @_;
 
@@ -36,6 +42,7 @@ sub _method {
 		line          => $sub->line_number,
 		code          => $code,
 		is_private    => ($sub->name =~ /^_/) ? 1 : 0,
+		is_special    => $SPECIAL{$sub->name} ? 1 : 0,
 		params        => _params($sub, $code),
 		defaults      => _defaults($sub),
 		die_messages  => _die_messages($code),

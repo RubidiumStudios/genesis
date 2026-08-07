@@ -63,4 +63,16 @@ sub _private_helper {
 	return 42;
 }
 
+sub AUTOLOAD {
+	my ($self) = @_;
+	our $AUTOLOAD;
+	return if $AUTOLOAD =~ /::DESTROY$/;
+	return $self->{stash};
+}
+
+sub DESTROY {
+	my ($self) = @_;
+	return;
+}
+
 1;

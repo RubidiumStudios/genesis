@@ -19,7 +19,8 @@ subtest 'happy path: every parameter form' => sub {
 	cmp_deeply(
 		[sort keys %by_name],
 		[sort qw/new listed_params shifted_params indexed_params raises
-		         context_sensitive mutates to_string equals _private_helper/],
+		         context_sensitive mutates to_string equals _private_helper
+		         AUTOLOAD DESTROY/],
 		"finds every sub and nothing else"
 	);
 
@@ -58,6 +59,22 @@ subtest 'happy path: method properties' => sub {
 		"no error messages invented for a sub that raises none");
 
 	is($by_name{new}{line}, 16, "line number points at the sub");
+};
+
+subtest 'special subs are marked, not dropped' => sub {
+	# Perl's named blocks are exempt from *requiring* POD, but they must
+	# still be extracted: dropping them makes a documented DESTROY look
+	# like POD for a method that does not exist.  Exemption is the check's
+	# job, not the extractor's.
+	my $m = extract_module("$FIXTURES/Sample.pm");
+	my %by_name = map {$_->{name} => $_} @{$m->{methods}};
+
+	ok($by_name{AUTOLOAD}{is_special}, "AUTOLOAD marked special");
+	ok($by_name{DESTROY}{is_special},  "DESTROY marked special");
+	ok(!$by_name{new}{is_special},     "an ordinary sub is not");
+
+	ok(!$by_name{DESTROY}{is_private},
+		"special does not imply private -- they are separate questions");
 };
 
 subtest 'module context' => sub {
