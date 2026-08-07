@@ -1,0 +1,120 @@
+#!/usr/bin/env perl
+# Fail the build when a module's POD is missing, incomplete, misfiled, or
+# unparseable.
+#
+# Usage: pod-gate [OPTIONS] [MODULE ...]
+#
+# Options:
+#   --quiet, -q       Summary only; suppress per-failure detail
+#   --exclusions, -x  Path to the exclusion manifest
+#   --lib, -l         Directory to scan (default: lib)
+#   --help, -h        This
+#
+# Exit codes:
+#   0  every module in scope passes
+#   1  at least one does not
+#   2  the run itself could not be trusted (bad manifest, unreadable tree)
+
+use strict;
+use warnings;
+
+use FindBin;
+use lib "$FindBin::Bin/..";
+
+use File::Find;
+use Getopt::Long;
+use PodGate::Check qw/check_module load_exclusions module_name_for/;
+
+my %opt = (exclusions => 't/pod-gate-exclusions.txt', lib => 'lib');
+GetOptions(
+	'quiet|q'        => \$opt{quiet},
+	'exclusions|x=s' => \$opt{exclusions},
+	'lib|l=s'        => \$opt{lib},
+	'help|h'         => \$opt{help},
+) or exit 2;
+
+if ($opt{help}) {
+	open my $me, '<', $0 or exit 2;
+	while (<$me>) {last unless s/^#\s?//; print unless $. == 1}
+	exit 0;
+}
+
+my $excluded = eval {load_exclusions($opt{exclusions})};
+if ($@) {
+	print STDERR $@;
+	exit 2;
+}
+
+my @files;
+if (@ARGV) {
+	# Named modules may be given as paths or as Foo::Bar.
+	for my $arg (@ARGV) {
+		my $path = $arg;
+		unless (-f $path) {
+			$path = $arg;
+			$path =~ s{::}{/}g;
+			$path = "$opt{lib}/$path.pm";
+		}
+		unless (-f $path) {
+			print STDERR "pod-gate: no such module: $arg\n";
+			exit 2;
+		}
+		push @files, $path;
+	}
+} else {
+	find(sub {push @files, $File::Find::name if /\.pm$/}, $opt{lib});
+	@files = sort @files;
+	unless (@files) {
+		print STDERR "pod-gate: no modules found under $opt{lib}\n";
+		exit 2;
+	}
+}
+
+my (@failed, %skipped, %by_check);
+my $checked = 0;
+
+for my $pm (@files) {
+	my $module = module_name_for($pm);
+
+	if (my $x = $excluded->{$module}) {
+		push @{$skipped{$x->{kind}}}, $module;
+		next;
+	}
+
+	$checked++;
+	my $result = check_module($pm);
+	next if $result->{ok};
+
+	push @failed, $result;
+	$by_check{$_->{check}}++ for @{$result->{failures}};
+}
+
+unless ($opt{quiet}) {
+	for my $result (@failed) {
+		printf "%s (%s)\n", $result->{module}, $result->{pod} // $result->{pm};
+		for my $f (@{$result->{failures}}) {
+			printf "    %-18s %s\n", $f->{check}, $f->{detail};
+		}
+		print "\n";
+	}
+}
+
+printf "%d module%s checked, %d passed, %d failed\n",
+	$checked, ($checked == 1 ? '' : 's'), $checked - @failed, scalar @failed;
+
+if (%by_check) {
+	printf "  %s\n", join(', ', map {"$_: $by_check{$_}"} sort keys %by_check);
+}
+
+# Deferred exclusions are announced every run.  Vendored and placeholder
+# stay quiet -- those are settled.  A deferral that nobody is reminded of
+# is a permanent exemption wearing a temporary label.
+if (my $deferred = $skipped{deferred}) {
+	printf "\n%d module%s deferred, still undocumented: %s\n",
+		scalar @$deferred, (@$deferred == 1 ? '' : 's'),
+		join(', ', @$deferred[0 .. ($#$deferred > 4 ? 4 : $#$deferred)])
+		. ($#$deferred > 4 ? sprintf(" and %d more", $#$deferred - 4) : '');
+	printf "See %s.\n", $opt{exclusions};
+}
+
+exit(@failed ? 1 : 0);

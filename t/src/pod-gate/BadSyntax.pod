@@ -1,0 +1,23 @@
+=head1 NAME
+
+BadSyntax - POD that does not parse
+
+=head1 DESCRIPTION
+
+The list below opens and never closes, and the L<> below it is malformed.
+podchecker reports both; the gate must fail on them even though every sub
+here is otherwise documented.
+
+=over 4
+
+=item C<$thing>
+
+Never closed.
+
+=head1 METHODS
+
+=head2 thing
+
+B<Returns:> True.
+
+=cut

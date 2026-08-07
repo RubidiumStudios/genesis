@@ -30,19 +30,32 @@ my $METHOD_HEADING = qr/^([A-Za-z_]\w*)\s*(?:\([^)]*\))?$/;
 # overload docs ("=head2 Stringification"), the bash helper library in
 # Genesis::Helpers, and every future prose section from being read as
 # missing Perl subs.
-# Keyed on the noun, because qualifiers accumulate on both sides of it in
-# the tree already -- CLASS HELPER FUNCTIONS, FUNCTIONS (RENDERING HELPERS),
-# METHODS - DEPRECATED.  Pinning whole strings means every new qualifier
-# silently reclassifies a section as prose and stops checking its methods.
+# A grammar rather than a keyword search, so a prose heading that happens
+# to contain the word METHODS is not mistaken for an API section:
+#
+#     [QUALIFIER ...] (METHODS|FUNCTIONS) [ - CATEGORY | (CATEGORY) ]
+#
+# The trailing " - CATEGORY" form exists to group a large API -- some
+# modules carry enough functions that one flat list is unreadable. The
+# parenthesised form is the same idea, spelled the way the tree already
+# spells it in one place.
 #
 # Order matters: the interface rules run first so INTERNAL METHODS is not
-# read as an api section.  INTERNAL is required to sit with the noun, or
-# INTERNAL BASH HELPERS -- shell functions, not subs -- comes along too.
+# read as api. INTERNAL has to sit with the noun, or INTERNAL BASH
+# HELPERS -- shell functions, not subs -- is dragged in with it.
+# Enumerated, not "any capitalised word".  An open-ended prefix makes
+# NOTES ON METHODS an API section, and the gate then demands subs to back
+# a paragraph of prose.
+my $QUALIFIER = qr/(?:(?:CLASS|INSTANCE|HELPER)\s+)*/;
+my $CATEGORY  = qr/(?:\s+-\s+[A-Z0-9][A-Z0-9 -]*|\s*\([^)]*\))?/;
+my $NOUN      = qr/(?:METHODS|FUNCTIONS)/;
+
 my @SECTION_KIND = (
-	[qr/\bINTERNAL\b.*\b(?:METHODS|FUNCTIONS)\b/     => 'interface'],
-	[qr/\bABSTRACT\b.*\bMETHODS\b/                   => 'interface'],
-	[qr/\bOVERRIDE\b.*\bPOINTS\b/                    => 'interface'],
-	[qr/\b(?:METHODS|FUNCTIONS|CONSTRUCTORS?)\b/     => 'api'],
+	[qr/^${QUALIFIER}INTERNAL\s+${QUALIFIER}${NOUN}${CATEGORY}$/ => 'interface'],
+	[qr/^${QUALIFIER}ABSTRACT\s+${QUALIFIER}${NOUN}${CATEGORY}$/ => 'interface'],
+	[qr/^OVERRIDE\s+POINTS$/                                     => 'interface'],
+	[qr/^${QUALIFIER}${NOUN}${CATEGORY}$/                        => 'api'],
+	[qr/^CONSTRUCTORS?$/                                         => 'api'],
 );
 
 my %CONTRACT = (

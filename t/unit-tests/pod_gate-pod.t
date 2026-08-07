@@ -30,7 +30,9 @@ subtest 'method entries' => sub {
 
 	cmp_deeply(
 		[sort keys %{$p->{methods}}],
-		[sort qw/new listed_params raises mutates _private_helper/],
+		[sort qw/new listed_params raises mutates _private_helper
+		         shifted_params indexed_params context_sensitive
+		         to_string equals/],
 		"only head2 headings that name a method are methods"
 	);
 
@@ -132,6 +134,16 @@ subtest 'section names actually used in the tree' => sub {
 		'KNOWN ISSUES'                 => 'prose',
 		'SEE ALSO'                     => 'prose',
 		'DESIGN CONSIDERATIONS'        => 'prose',
+		# The noun has to be the heading, not a word inside it.  A
+		# keyword search reads these as API sections and then demands
+		# that whatever prose they contain be backed by subs.
+		'NOTES ON METHODS'             => 'prose',
+		'COMPARISON TO OTHER MODULES'  => 'prose',
+		'GENESIS KIT HOOKS'            => 'prose',
+		# Grouped forms, which is the point of the category suffix.
+		'FUNCTIONS - VAULT PATHS'      => 'api',
+		'METHODS - BOSH CONFIGS'       => 'api',
+		'INTERNAL METHODS - CACHING'   => 'interface',
 	);
 	for my $name (sort keys %expect) {
 		my $p = parse_pod_text("=head1 $name\n\n=head2 thing\n\nBody.\n");

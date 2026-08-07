@@ -1,0 +1,43 @@
+=head1 NAME
+
+Faulty - error-path fixture
+
+=head1 DESCRIPTION
+
+Deliberately defective. See Faulty.pm.
+
+=head1 METHODS
+
+=head2 documented
+
+B<Returns:> True.
+
+=head2 _private_but_public_section
+
+A private sub documented in a public section.
+
+B<Returns:> True.
+
+=head2 orphan_in_api_section
+
+Documented here, defined nowhere.
+
+B<Returns:> Nothing, since it does not exist.
+
+=head1 INTERNAL METHODS
+
+=head2 public_but_internal_section
+
+A public sub filed as internal.
+
+B<Returns:> True.
+
+=head1 AUTHOR
+
+Genesis Community
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright the Genesis Community.
+
+=cut

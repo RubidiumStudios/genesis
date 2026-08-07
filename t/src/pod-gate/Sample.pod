@@ -110,6 +110,57 @@ Value to stash.
 
 B<Returns:> The invocant.
 
+=head2 shifted_params($only)
+
+    my $v = $s->shifted_params($only);
+
+Returns its one argument.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$only>
+
+The value to return.
+
+=back
+
+B<Returns:> C<$only>.
+
+=head2 indexed_params
+
+    my $v = $s->indexed_params($flag, $value);
+
+Reads C<@_> by index rather than unpacking it.
+
+B<Returns:> The third argument when the second is true, C<undef> otherwise.
+
+=head2 context_sensitive
+
+    my @all = $s->context_sensitive;
+    my $n   = $s->context_sensitive;
+
+Returns a list in list context and its length in scalar context.
+
+B<Returns:> The list, or its count.
+
+=head2 to_string
+
+    my $str = "$s";
+
+Backs the C<""> overload.
+
+B<Returns:> The string C<sample>.
+
+=head2 equals
+
+    my $same = ($a == $b);
+
+Backs the C<==> overload.
+
+B<Returns:> False, always.
+
 =head1 INTERNAL METHODS
 
 =head2 _private_helper
