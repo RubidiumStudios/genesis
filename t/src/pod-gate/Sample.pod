@@ -1,0 +1,131 @@
+=head1 NAME
+
+Sample - happy-path POD fixture for the gate's parser
+
+=head1 SYNOPSIS
+
+    my $s = Sample->new(size => 3);
+    print $s->listed_params(1, 2);
+
+=head1 DESCRIPTION
+
+Documents Sample.pm. Every construct here exists to exercise one
+parsing rule; failure cases live in their own fixtures.
+
+=head1 METHODS
+
+=head2 new
+
+    my $s = Sample->new(%opts);
+
+Builds a Sample.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+Arbitrary options, stashed on the object.
+
+=back
+
+B<Returns:> A blessed Sample.
+
+B<Examples:>
+
+    Sample->new(size => 3);
+    # Returns: a Sample with size 3
+
+=head2 listed_params
+
+    my $sum = $s->listed_params($first, $second);
+
+Adds two numbers.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$first>
+
+The first addend.
+
+=item C<$second>
+
+The second addend.
+
+=back
+
+B<Returns:> The sum.
+
+=head2 raises
+
+    $s->raises($path);
+
+Checks a path.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+Path to check.
+
+=back
+
+B<Returns:> True.
+
+B<Errors:> Dies with C<no such path> when the path does not exist.
+Bails with C<cannot read> when it exists but cannot be read.
+
+=head2 Notes on argument handling
+
+This heading is prose, not a method. A parser that reads every
+C<=head2> as a method name invents one called "Notes" and then
+demands that Sample.pm define it.
+
+=head3 A nested heading
+
+Section attribution is by the nearest enclosing C<=head1>, not by the
+last heading of any level. Treating C<=head3> as a boundary drops the
+methods that follow it out of METHODS entirely.
+
+=head2 mutates
+
+    $s->mutates($v);
+
+Stores a value.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$v>
+
+Value to stash.
+
+=back
+
+B<Returns:> The invocant.
+
+=head1 INTERNAL METHODS
+
+=head2 _private_helper
+
+    $s->_private_helper;
+
+Returns the answer.
+
+B<Returns:> 42.
+
+=head1 AUTHOR
+
+Genesis Community
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright the Genesis Community.
+
+=cut
