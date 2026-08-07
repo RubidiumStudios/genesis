@@ -37,7 +37,7 @@ B<Examples:>
     Sample->new(size => 3);
     # Returns: a Sample with size 3
 
-=head2 listed_params
+=head2 listed_params($first, $second)
 
     my $sum = $s->listed_params($first, $second);
 
@@ -119,6 +119,14 @@ B<Returns:> The invocant.
 Returns the answer.
 
 B<Returns:> 42.
+
+=head1 OPERATOR OVERLOADING
+
+=head2 Stringification
+
+Overloads C<""> to return the string C<sample>. Headed by the concept
+rather than the operator, which reads better but is not a method name --
+Sample.pm has no sub called Stringification and never will.
 
 =head1 AUTHOR
 

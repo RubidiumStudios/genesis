@@ -7,15 +7,44 @@ use Exporter qw/import/;
 
 our @EXPORT_OK = qw/parse_pod parse_pod_text/;
 
-# A =head2 names a method when its text is a bare identifier and nothing
-# else.  Genesis' POD also uses =head2 for prose headings ("Notes on
-# argument handling", "The bosh configs subcommands"); reading those as
-# methods invents names like "Notes" and "The", and the gate then demands
-# the module define them.
-my $METHOD_HEADING = qr/^([A-Za-z_]\w*)$/;
+# A =head2 names a method when its text is an identifier, optionally
+# followed by an argument list, and nothing else.  Most of the tree heads
+# methods with their signature -- "=head2 deploy($env_name, $reason)".
+#
+# The trailing anchor is what keeps prose out.  Genesis also heads prose
+# with =head2 ("Notes on argument handling", "The C<bosh configs>
+# subcommands"); matching a leading word alone would invent methods called
+# "Notes" and "The" and then demand the module define them.
+my $METHOD_HEADING = qr/^([A-Za-z_]\w*)\s*(?:\([^)]*\))?$/;
 
 # Contract blocks are bold lead-ins rather than headings, deliberately:
 # =head3 would nest, and a nested heading is what breaks attribution.
+# What a =head2 means depends on the section it sits under, and only three
+# kinds matter:
+#
+#   api        documents a sub that must exist in this file
+#   interface  documents a sub that may live in a subclass instead
+#   prose      documents something that is not a sub at all
+#
+# Classifying by section rather than by heading text is what keeps the
+# overload docs ("=head2 Stringification"), the bash helper library in
+# Genesis::Helpers, and every future prose section from being read as
+# missing Perl subs.
+# Keyed on the noun, because qualifiers accumulate on both sides of it in
+# the tree already -- CLASS HELPER FUNCTIONS, FUNCTIONS (RENDERING HELPERS),
+# METHODS - DEPRECATED.  Pinning whole strings means every new qualifier
+# silently reclassifies a section as prose and stops checking its methods.
+#
+# Order matters: the interface rules run first so INTERNAL METHODS is not
+# read as an api section.  INTERNAL is required to sit with the noun, or
+# INTERNAL BASH HELPERS -- shell functions, not subs -- comes along too.
+my @SECTION_KIND = (
+	[qr/\bINTERNAL\b.*\b(?:METHODS|FUNCTIONS)\b/     => 'interface'],
+	[qr/\bABSTRACT\b.*\bMETHODS\b/                   => 'interface'],
+	[qr/\bOVERRIDE\b.*\bPOINTS\b/                    => 'interface'],
+	[qr/\b(?:METHODS|FUNCTIONS|CONSTRUCTORS?)\b/     => 'api'],
+);
+
 my %CONTRACT = (
 	has_params   => qr/^B<Parameters:>/m,
 	has_returns  => qr/^B<Returns:>/m,
@@ -59,12 +88,15 @@ sub parse_pod_text {
 			my $heading = $1;
 			(my $body = $chunk) =~ s/^=head2\s+.+?\n//;
 
-			if ($heading =~ $METHOD_HEADING) {
+			my $kind = _section_kind($section);
+			if ($kind ne 'prose' && $heading =~ $METHOD_HEADING) {
 				my $name = $1;
 				$methods{$name} = {
-					name    => $name,
-					section => $section,
-					body    => $body,
+					name         => $name,
+					section      => $section,
+					section_kind => $kind,
+					is_interface => ($kind eq 'interface') ? 1 : 0,
+					body         => $body,
 				};
 				$cursor = $name;
 			} else {
@@ -96,9 +128,19 @@ sub parse_pod_text {
 		file           => $file,
 		head1          => \%head1,
 		head1_order    => \@head1_order,
+		section_kind   => {map {$_ => _section_kind($_)} @head1_order},
 		methods        => \%methods,
 		prose_headings => \@prose_headings,
 	};
+}
+
+sub _section_kind {
+	my ($section) = @_;
+	return 'prose' unless defined $section && length $section;
+	for my $rule (@SECTION_KIND) {
+		return $rule->[1] if $section =~ $rule->[0];
+	}
+	return 'prose';
 }
 
 # Parameter names come from the =item entries of the =over list that follows
