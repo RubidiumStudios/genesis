@@ -1853,6 +1853,10 @@ An octal permission mode (e.g., C<0755>).
 
 B<Returns:> C<$path> on success.
 
+B<Errors:> Bails when the directory cannot be created, naming the path and
+the underlying error. There is no partial-success case: either the full
+path exists afterwards or the process stops.
+
 B<Examples:>
 
     mkdir_or_fail('/tmp/work/subdir');

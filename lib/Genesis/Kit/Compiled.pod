@@ -307,7 +307,7 @@ in order, halting at the first failure:
 
 =item 1. Missing archive option
 
-Dies with C<"Missing required option: archive"> if C<$opts->{archive}> is not
+B<Errors:> Dies with C<"Missing required option: archive"> if C<$opts->{archive}> is not
 set.
 
 =item 2. Archive file existence

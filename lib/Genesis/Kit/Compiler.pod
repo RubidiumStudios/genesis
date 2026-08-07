@@ -420,6 +420,16 @@ B<Returns:>
 A list of relative file paths (without leading C<./>) to include in the
 archive.
 
+B<Errors:> Bails when C<git clean -xdn> cannot be run, since the exclusion
+list would then be incomplete and the kit would ship files that were meant
+to be left out. Silently shipping too much is worse than not shipping.
+
+B<Examples:>
+
+    my @files = $cc->_select_files();
+    # Returns: ('kit.yml', 'manifests/base.yml', 'hooks/blueprint', ...)
+    #          with ci/, .git/, spec/ and devtools/ omitted
+
 =head2 _update_hook_packages
 
     $cc->_update_hook_packages($name, $version)

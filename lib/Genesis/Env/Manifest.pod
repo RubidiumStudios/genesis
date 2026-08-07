@@ -162,7 +162,7 @@ contain unredacted secrets must override this to return the appropriate
 redacted variant. Subclasses that already represent a redacted or secret-free
 form should return C<$self>.
 
-Dies with C<"redacted: Not implemented for %s manifest types"> if called on
+B<Errors:> Dies with C<"redacted: Not implemented for %s manifest types"> if called on
 the base class or any subclass that has not overridden it, where C<%s> is the
 manifest's label (e.g. for the partial environment type the message would be
 C<"redacted: Not implemented for partial environment manifest types">).
@@ -664,7 +664,7 @@ B<Parameters for _get_subset:>
 
 =back
 
-Dies with C<"Expected %s to define private _merge method"> if not overridden,
+B<Errors:> Dies with C<"Expected %s to define private _merge method"> if not overridden,
 where C<%s> is the calling class name.
 
 B<Examples:>

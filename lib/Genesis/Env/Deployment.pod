@@ -1211,6 +1211,12 @@ decompression fails.
 
 B<Returns:> An Archive::Tar object.
 
+B<Errors:> Bails when the deployment record carries no compressed
+artifacts, and again when the artifacts are present but cannot be
+decompressed. Both are unrecoverable here: there is no partial tarball to
+hand back, and returning C<undef> would push the same failure onto every
+caller.
+
 B<Examples:>
 
     my $tar = $self->_get_artifact_tarball();
@@ -1332,6 +1338,10 @@ Genesis::Env::Deployment object, the object argument is consumed and the next
 argument is used as the timestamp.
 
 B<Returns:> String - timestamp in EXODUS_TIME_FORMAT_SHORT format.
+
+B<Errors:> Bails when the timestamp cannot be parsed, quoting the value it
+was given. Exodus timestamps are written by Genesis itself, so an
+unparseable one means the record is corrupt rather than merely unexpected.
 
 B<Examples:>
 

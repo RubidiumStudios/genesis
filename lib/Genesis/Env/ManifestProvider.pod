@@ -360,6 +360,12 @@ error), C<$warnings> is a string of warnings from spruce in adaptive mode
 (or C<undef>), and C<$errors> is a string of error output if the merge failed
 (or C<undef> on success).
 
+B<Errors:> Spruce's own merge failures come back in C<$errors> rather than
+raising -- callers are expected to read them and decide. Bails only when
+the spruce invocation itself cannot be completed, naming the manifest type
+and environment; that is a broken toolchain rather than a bad manifest, and
+there is nothing for the caller to recover from.
+
 B<Examples:>
 
   my ($data, $file, $warnings, $errors) = $provider->merge(

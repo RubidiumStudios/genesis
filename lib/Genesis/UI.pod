@@ -630,7 +630,7 @@ The C<E<lt>STDINE<gt>> read is defensive against C<undef> on EOF; combined
 with C<$allow_blank>, this prevents an EOF on a closed pipe from spinning the
 retry loop.
 
-Dies with C<"Error compiling param regex: $!"> if the C<$validation> string is
+B<Errors:> Dies with C<"Error compiling param regex: $!"> if the C<$validation> string is
 a regex-format specifier and the pattern fails to compile.
 
 B<Examples:>

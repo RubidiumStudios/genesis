@@ -46,7 +46,7 @@ Creates a new C<IPv4::Address> object. The input can be:
 
 =back
 
-Dies if the input is invalid:
+B<Errors:> Dies if the input is invalid:
 
 =over 4
 
@@ -76,7 +76,7 @@ B<Examples:>
 
 Returns all IPv4 addresses associated with the given hostname. In list context, returns an array of C<IPv4::Address> objects. In scalar context, returns an array reference.
 
-Dies with C<"Invalid host: `...`"> if the hostname cannot be resolved.
+B<Errors:> Dies with C<"Invalid host: `...`"> if the hostname cannot be resolved.
 
 
 B<Examples:>
@@ -223,7 +223,7 @@ Returns the integer difference between two IPv4 addresses.
 
 B<Returns:> The integer difference between the two address values (C<$self->int - $other->int>).
 
-Dies with C<"Cannot diff an address with an integer - did you mean to call `->subtract`?"> if C<$other_address> is an integer rather than an address.
+B<Errors:> Dies with C<"Cannot diff an address with an integer - did you mean to call `->subtract`?"> if C<$other_address> is an integer rather than an address.
 
 
 B<Examples:>
@@ -428,7 +428,7 @@ Private methods used internally and for overloading support. These should not be
 
 Internal method called by the overloaded C<-> operator. When C<$other> is an integer, returns a new C<IPv4::Address> decremented by that amount. When C<$other> is another C<IPv4::Address>, returns the integer difference between the two addresses. When C<$other> is a span or range, delegates to C<< IPv4::Range->subtract >>. Dies on address space underflow or if C<$swap> is true with an integer (cannot subtract an address from a number). When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__minus> method would be used.
 
-Dies with C<"Cannot subtract an address from an integer"> if C<$swap> is true (i.e., an integer appeared on the left side of the C<-> operator).
+B<Errors:> Dies with C<"Cannot subtract an address from an integer"> if C<$swap> is true (i.e., an integer appeared on the left side of the C<-> operator).
 
 Dies with C<"IPv4 Address space underflow when subtracting %d from %s"> if the integer to subtract is larger than the address's integer value. C<%d> is the integer being subtracted and C<%s> is the address string.
 
@@ -451,7 +451,7 @@ B<Examples:>
 
 Internal method called by the overloaded C<+> operator. When C<$other> is an integer, returns a new C<IPv4::Address> incremented by that amount. When C<$other> is a span or range, delegates to C<< $other->add($self) >>. When C<$other> is another address, returns a simplified range containing both. Dies on address space overflow or if C<$swap> is true with an integer (cannot add an address to a number). When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__plus> method would be used.
 
-Dies with C<"Cannot add an address to an integer"> if C<$swap> is true (i.e., an integer appeared on the left side of the C<+> operator).
+B<Errors:> Dies with C<"Cannot add an address to an integer"> if C<$swap> is true (i.e., an integer appeared on the left side of the C<+> operator).
 
 Dies with C<"IPv4 Address space overflow when adding %d to %s"> if the result would exceed 255.255.255.255. C<%d> is the integer being added and C<%s> is the address string.
 

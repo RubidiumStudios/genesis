@@ -46,7 +46,7 @@ Creates a new C<IPv4::Range> object. The resulting range is automatically compac
 - IPv4::Span objects
 - Arrays of the above (2-element arrays are treated as spans, 4-element arrays as address octets)
 
-Dies if the input is invalid:
+B<Errors:> Dies if the input is invalid:
 
 =over 4
 
@@ -390,7 +390,7 @@ Private methods used internally and for overloading support. These should not be
 
 Internal method called by the overloaded C<-> operator. When C<$other> is an IPv4 object, subtracts it from the range (or vice versa if C<$swap> is true). Returns a new C<IPv4::Range> with the subtracted addresses removed. When called via Perl's operator overloading, C<$swap> indicates whether C<$other> was the original receiver of the operator and the operands were swapped so that this object's C<__minus> method would be used.
 
-Dies if C<$other> is an integer, since adding/subtracting integers on ranges is undefined:
+B<Errors:> Dies if C<$other> is an integer, since adding/subtracting integers on ranges is undefined:
 
 =over 4
 

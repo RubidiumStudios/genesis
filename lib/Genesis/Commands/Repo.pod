@@ -504,6 +504,11 @@ B<Returns:> A result hashref describing what happened, including C<root>,
 C<target_path>, C<parent_dir>, C<use_subdir>, and C<error> when something
 failed.
 
+B<Errors:> Most failures are reported through the C<error> key rather than
+raised, so the caller can clean up the half-built repository. The exception
+is the initial commit: if C<git commit> fails the repository exists but is
+in a state no later step can reason about, so it bails naming the root.
+
 B<Examples:>
 
   my $result = _repo_init_execute();
