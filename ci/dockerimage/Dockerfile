@@ -60,19 +60,13 @@ RUN curl -Lo /usr/bin/genesis "https://github.com/${GENESIS_OWNER}/genesis/relea
 # JSON::PP, and File::Temp are already in Ubuntu's perl-base.
 # Genesis's own Perl lib is discovered at runtime under ~/.genesis/lib
 # via the self-extract path -- no PERL5LIB gymnastics required.
-#
-# PPI belongs to neither: t/sanity-tests/pod-complete.t parses every
-# module with it.  That test fails rather than skips when PPI is absent,
-# so leaving it out of this image turns the whole suite red rather than
-# quietly disabling the POD gate.
 ARG KIT_VALIDATOR_REF=main
 RUN apt-get update && apt-get install -y --no-install-recommends cpanminus \
- && cpanm --no-man-pages --notest Test::Deep Test::Output Test::Exit PPI \
+ && cpanm --no-man-pages --notest Test::Deep Test::Output Test::Exit \
  && cpanm --no-man-pages --notest \
       "https://github.com/genesis-community/genesis-kit-validator/archive/${KIT_VALIDATOR_REF}.tar.gz" \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
 RUN genesis -v \
- && perl -MGenesis::Kit::Validator -e 'print "Genesis::Kit::Validator ", Genesis::Kit::Validator->VERSION, " loaded OK\n"' \
- && perl -MPPI -e 'print "PPI ", PPI->VERSION, " loaded OK\n"'
+ && perl -MGenesis::Kit::Validator -e 'print "Genesis::Kit::Validator ", Genesis::Kit::Validator->VERSION, " loaded OK\n"'
