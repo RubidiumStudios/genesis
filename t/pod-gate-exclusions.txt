@@ -1,0 +1,47 @@
+# POD Gate Exclusion Manifest
+#
+# Modules the POD gate does not hold to the standard, and why.
+#
+# Format: one module per line, followed by a required reason comment.
+# An entry without a reason is a manifest error, not a silent pass --
+# an exclusion nobody can justify is an exclusion nobody will remove.
+#
+# Sections are lifetimes, not severities, and the gate treats them
+# differently:
+#
+#   [vendored]     Not ours to document. Silent.
+#   [placeholder]  Not yet a module. Silent.
+#   [deferred]     Ours, undocumented, waiting on other work. Reported
+#                  as a count on every run, so it stays visible.
+#
+# List modules individually. Do not add namespace globs: Genesis::CI::*
+# would have swept in CI::Propagation and CI::Legacy, both of which are
+# documented and clean, and neither would ever have been noticed again.
+
+[vendored]
+UUID::Tiny                                    # Third-party module imported wholesale; upstream owns its documentation
+
+[placeholder]
+Genesis::Env::Secrets::Store::Credhub         # Zero-byte .pm reserving the name; nothing to document until it has a body
+
+[deferred]
+# The CI compiler and providers are being reworked. Documenting them
+# against the current shape would be throwing the work away. Remove
+# these entries as the rework lands -- the count printed on every run
+# is the reminder.
+Genesis::CI                                   # No .pod; pipeline rework pending
+Genesis::CI::Compiler                         # No .pod; pipeline rework pending
+Genesis::CI::Compiler::AST                    # No .pod; pipeline rework pending
+Genesis::CI::Compiler::ASTBuilder             # No .pod; pipeline rework pending
+Genesis::CI::Compiler::Parser                 # No .pod; pipeline rework pending
+Genesis::CI::Compiler::PipelineDescriptor     # No .pod; pipeline rework pending
+Genesis::CI::Compiler::PipelineProvider       # No .pod; pipeline rework pending
+Genesis::CI::Compiler::Providers::Concourse   # No .pod; pipeline rework pending
+Genesis::CI::Compiler::ScriptDiscovery        # No .pod; pipeline rework pending
+Genesis::CI::Compiler::Validator              # No .pod; pipeline rework pending
+Genesis::CI::Layout                           # No .pod; pipeline rework pending
+Genesis::CI::Provider                         # No .pod; pipeline rework pending
+Genesis::CI::Provider::Concourse              # No .pod; pipeline rework pending
+Genesis::CI::Provider::GithubActions          # No .pod; pipeline rework pending
+Genesis::CI::Provider::Manual                 # No .pod; pipeline rework pending
+Genesis::Commands::Pipelines                  # Has .pod; commands are a mix of new and superseded ci-* forms, rework pending
