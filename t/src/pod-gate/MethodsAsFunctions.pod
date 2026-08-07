@@ -1,0 +1,38 @@
+=head1 NAME
+
+MethodsAsFunctions - error-path fixture for section vocabulary
+
+=head1 DESCRIPTION
+
+Every one of these takes an invocant, so they are methods. The heading
+below says FUNCTIONS.
+
+=head1 FUNCTIONS
+
+=head2 alpha
+
+    my $n = $obj->alpha;
+
+B<Returns:> C<1>.
+
+=head2 beta
+
+    my $n = $obj->beta;
+
+B<Returns:> C<2>.
+
+=head2 gamma
+
+    my $n = $obj->gamma;
+
+B<Returns:> C<3>.
+
+=head1 AUTHOR
+
+Genesis Community
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright the Genesis Community.
+
+=cut

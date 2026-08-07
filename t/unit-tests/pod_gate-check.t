@@ -130,6 +130,36 @@ subtest 'arity tolerates the way optional parameters are written' => sub {
 		"documenting fewer arguments than the sub declares is not a defect");
 };
 
+subtest 'section vocabulary' => sub {
+	# Perl has no syntax separating a method from a function; the heading
+	# is the only record of which one a module provides, and copying
+	# another module's skeleton is how it goes wrong.
+	my $f = check_module("$FIXTURES/FunctionsAsMethods.pm");
+	cmp_deeply(failures_of($f, 'section_vocabulary'), [''],
+		"subs that take no invocant filed under METHODS are reported");
+	like($f->{failures}[0]{detail}, qr/functions/,
+		"and the report says which way round it is");
+
+	my $m = check_module("$FIXTURES/MethodsAsFunctions.pm");
+	cmp_deeply(failures_of($m, 'section_vocabulary'), [''],
+		"subs that all take an invocant filed under FUNCTIONS are reported");
+	like($m->{failures}[0]{detail}, qr/methods/,
+		"and likewise");
+};
+
+subtest 'section vocabulary stands down where it cannot tell' => sub {
+	# A class that also exports a few helpers legitimately carries both
+	# headings, and a module with two subs can go either way.  Guessing
+	# in those cases produces failures nobody can act on.
+	my $r = check_module("$FIXTURES/Sample.pm");
+	cmp_deeply(failures_of($r, 'section_vocabulary'), [],
+		"a module whose headings match its shape passes");
+
+	my $d = check_module("$FIXTURES/Decoys.pm");
+	cmp_deeply(failures_of($d, 'section_vocabulary'), [],
+		"a module with too few subs to infer intent is not judged");
+};
+
 subtest 'exclusion manifest' => sub {
 	my $x = load_exclusions('t/pod-gate-exclusions.txt');
 

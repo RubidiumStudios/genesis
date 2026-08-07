@@ -72,6 +72,7 @@ sub check_module {
 	my $doc  = parse_pod($pod);
 	push @{$result->{failures}}, _coverage_failures($code, $doc);
 	push @{$result->{failures}}, _contract_failures($code, $doc);
+	push @{$result->{failures}}, _vocabulary_failure($code, $doc) // ();
 
 	# Advisory findings are split out rather than filtered away: they stay
 	# visible on every run, which is the only thing stopping a known
@@ -223,6 +224,61 @@ sub _contract_failures {
 	}
 
 	return @failures;
+}
+
+# Perl draws no syntactic line between a method and a function -- the
+# difference is only whether the sub takes an invocant -- so the heading is
+# the sole record of which one a module provides.  That makes it easy to
+# get wrong by starting from another module's skeleton, and impossible for
+# a reader to detect.
+#
+# Judged for the module rather than per sub, and only where the answer is
+# not in doubt:
+#
+#   - under three subs says nothing; a two-sub module can go either way
+#   - a mixin's subs become methods of whatever composes it, whatever they
+#     look like here
+#   - a module carrying both headings is a class that also exports
+#     helpers, which is legitimate
+#   - anything between the extremes is a genuine mix
+#
+# What is left is a module whose subs are uniformly one thing and whose
+# heading says the other.
+sub _vocabulary_failure {
+	my ($code, $doc) = @_;
+
+	return undef if $code->{context}{is_mixin};
+
+	my @methods = grep {!$_->{is_special}} @{$code->{methods}};
+	return undef if @methods < 3;
+
+	my $with_invocant = grep {
+		@{$_->{params}} && $INVOCANT{$_->{params}[0]}
+	} @methods;
+	my $ratio = $with_invocant / scalar(@methods);
+
+	my $says_methods   = grep {/\bMETHODS\b/}   @{$doc->{head1_order}};
+	my $says_functions = grep {/\bFUNCTIONS\b/} @{$doc->{head1_order}};
+	return undef if $says_methods && $says_functions;
+
+	if ($ratio <= 0.1 && $says_methods) {
+		return {
+			check  => 'section_vocabulary',
+			detail => sprintf(
+				"%d of %d subs take no invocant, so these are functions; the heading says METHODS",
+				scalar(@methods) - $with_invocant, scalar(@methods)),
+		};
+	}
+	if ($ratio >= 0.9 && $says_functions) {
+		return {
+			check  => 'section_vocabulary',
+			detail => sprintf(
+				"%d of %d subs take an invocant, so these are methods; the heading says FUNCTIONS",
+				$with_invocant, scalar(@methods)),
+		};
+	}
+
+	return undef;
 }
 
 # The mirror of orphaned_pod, for error strings.
