@@ -59,6 +59,11 @@ The second addend.
 
 B<Returns:> The sum.
 
+B<Examples:>
+
+    $s->listed_params(1, 2);
+    # Returns: 3
+
 =head2 raises
 
     $s->raises($path);
@@ -79,6 +84,14 @@ B<Returns:> True.
 
 B<Errors:> Dies with C<no such path> when the path does not exist.
 Bails with C<cannot read> when it exists but cannot be read.
+
+B<Examples:>
+
+    $s->raises("/etc/hosts");
+    # Returns: 1
+
+    $s->raises("/no/such/file");
+    # dies: no such path: /no/such/file
 
 =head2 Notes on argument handling
 
@@ -110,6 +123,11 @@ Value to stash.
 
 B<Returns:> The invocant.
 
+B<Examples:>
+
+    $s->mutates("cached value");
+    # Returns: the same Sample, with {cached} set
+
 =head2 shifted_params($only)
 
     my $v = $s->shifted_params($only);
@@ -128,6 +146,11 @@ The value to return.
 
 B<Returns:> C<$only>.
 
+B<Examples:>
+
+    $s->shifted_params("value");
+    # Returns: value
+
 =head2 indexed_params
 
     my $v = $s->indexed_params($flag, $value);
@@ -145,6 +168,14 @@ Returns a list in list context and its length in scalar context.
 
 B<Returns:> The list, or its count.
 
+B<Examples:>
+
+    my @all = $s->context_sensitive;
+    # Returns: (1, 2, 3)
+
+    my $n = $s->context_sensitive;
+    # Returns: 3
+
 =head2 to_string
 
     my $str = "$s";
@@ -160,6 +191,43 @@ B<Returns:> The string C<sample>.
 Backs the C<==> overload.
 
 B<Returns:> False, always.
+
+=head2 optional_second($first, $second)
+
+    my $s1 = $s->optional_second($first);
+    my $s2 = $s->optional_second($first, $second);
+
+Joins two strings; the second defaults when omitted.
+
+Documented at both arities on purpose. Perl marks an optional parameter
+with C<//=> or a C<defined> test rather than in the parameter list, so
+the shorter call cannot be derived from the code -- and a check that
+insists every documented call passes every parameter rejects the normal
+way of showing an optional argument.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$first>
+
+Required.
+
+=item C<$second>
+
+Optional; defaults to C<default>.
+
+=back
+
+B<Returns:> The two joined with a slash.
+
+B<Examples:>
+
+    $s->optional_second("a");
+    # Returns: a/default
+
+    $s->optional_second("a", "b");
+    # Returns: a/b
 
 =head1 INTERNAL METHODS
 

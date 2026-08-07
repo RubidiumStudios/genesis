@@ -32,7 +32,7 @@ subtest 'method entries' => sub {
 		[sort keys %{$p->{methods}}],
 		[sort qw/new listed_params raises mutates _private_helper
 		         shifted_params indexed_params context_sensitive
-		         to_string equals/],
+		         to_string equals optional_second/],
 		"only head2 headings that name a method are methods"
 	);
 
@@ -82,8 +82,13 @@ subtest 'documented contract blocks' => sub {
 	ok($p->{methods}{new}{has_examples}, "Examples block detected");
 	ok(!$p->{methods}{new}{has_errors},  "and Errors not claimed where absent");
 
-	ok($p->{methods}{raises}{has_errors},    "Errors block detected");
-	ok(!$p->{methods}{raises}{has_examples}, "Examples not claimed where absent");
+	ok($p->{methods}{raises}{has_errors}, "Errors block detected");
+	ok(!$p->{methods}{new}{has_errors},   "Errors not claimed where absent");
+
+	# indexed_params documents no parameters and raises nothing, so it
+	# carries no worked example -- the signature line says it all.
+	ok(!$p->{methods}{indexed_params}{has_examples},
+		"Examples not claimed where absent");
 
 	cmp_deeply($p->{methods}{listed_params}{params}, ['$first','$second'],
 		"documented parameter names read out of the =item list");

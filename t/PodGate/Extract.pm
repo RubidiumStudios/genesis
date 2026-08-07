@@ -36,14 +36,16 @@ sub extract_module {
 sub _method {
 	my ($sub) = @_;
 	my $code = $sub->content;
+	my ($params, $source) = _params($sub, $code);
 
 	return {
+		params        => $params,
+		param_source  => $source,
 		name          => $sub->name,
 		line          => $sub->line_number,
 		code          => $code,
 		is_private    => ($sub->name =~ /^_/) ? 1 : 0,
 		is_special    => $SPECIAL{$sub->name} ? 1 : 0,
-		params        => _params($sub, $code),
 		defaults      => _defaults($sub),
 		die_messages  => _die_messages($code),
 		has_wantarray => ($code =~ /\bwantarray\b/)          ? 1 : 0,
@@ -55,6 +57,17 @@ sub _method {
 # Four ways a sub can take arguments, tried in the order that recovers the
 # most information.  Only the first that yields anything is used -- a sub
 # that unpacks @_ and then also touches $_[0] is described by the unpacking.
+#
+# Returns the source alongside the names, because they are not equally
+# trustworthy.  A signature or a `my (...) = @_` is the whole parameter
+# list.  A shift chain is whatever shifts happened to appear, which for
+#
+#     my $ref = shift if @_ % 2 == 1;
+#     my %args = @_;
+#
+# is one name for a sub that takes an entire options hash.  Anything
+# checking arity has to know the difference; guessing from a partial list
+# produces confident, wrong failures.
 sub _params {
 	my ($sub, $code) = @_;
 
@@ -66,17 +79,17 @@ sub _params {
 		$text =~ s/\)$//;
 		my @named = grep {defined}
 			map {/^\s*([\$\@\%]\w+)/ ? $1 : undef} split(/,/, $text);
-		return \@named if @named;
+		return (\@named, 'signature') if @named;
 	}
 
-	if ($code =~ /my\s*\(([^)]+)\)\s*=\s*\@_/) {
+	if ($code =~ /my\s*\(([^)]+)\)\s*=\s*\@_\s*;/) {
 		my @named = grep {/^[\$\@\%]/} map {s/^\s+|\s+$//gr} split(/,/, $1);
-		return \@named if @named;
+		return (\@named, 'unpack') if @named;
 	}
 
 	my @shifts;
 	push @shifts, $1 while $code =~ /my\s+([\$\@\%]\w+)\s*=\s*shift\b/g;
-	return \@shifts if @shifts;
+	return (\@shifts, 'shift') if @shifts;
 
 	# Index access names nothing, but the highest index still fixes the
 	# arity, which is what signature_arity needs to check the POD against.
@@ -84,10 +97,10 @@ sub _params {
 	$seen{$1} = 1 while $code =~ /\$_\[(\d+)\]/g;
 	if (%seen) {
 		my ($max) = sort {$b <=> $a} keys %seen;
-		return [map {$POSITIONAL[$_] // "\$arg$_"} 0 .. $max];
+		return ([map {$POSITIONAL[$_] // "\$arg$_"} 0 .. $max], 'index');
 	}
 
-	return [];
+	return ([], 'none');
 }
 
 sub _defaults {
@@ -108,6 +121,11 @@ sub _defaults {
 	return \%defaults;
 }
 
+# Every way a sub in this tree tells its caller it failed.  onfailure is
+# one of them: run({onfailure => '...'}) bails with that message when the
+# command fails, which reaches the caller exactly as a bail does.
+my $RAISES = qr/(?:die|croak|confess|bail|bug)/;
+
 # A die inside a signal handler unwinds to a surrounding alarm or eval and
 # never reaches the caller.  Reporting it would send the author off to
 # document something no caller can observe.
@@ -116,9 +134,11 @@ sub _die_messages {
 	(my $scan = $code) =~ s/\$SIG\{\w+\}\s*=\s*sub\s*\{.*?\}//gs;
 
 	my @messages;
-	push @messages, $1 while $scan =~ /\b(?:die|croak|bail|bug)\s*\(?\s*"((?:[^"\\]|\\.)*)"/g;
-	push @messages, $1 while $scan =~ /\b(?:die|croak|bail|bug)\s*\(?\s*'((?:[^'\\]|\\.)*)'/g;
-	push @messages, $1 while $scan =~ /\b(?:die|croak|bail|bug)\s+sprintf\s*\(\s*"((?:[^"\\]|\\.)*)"/g;
+	push @messages, $1 while $scan =~ /\b$RAISES\s*\(?\s*"((?:[^"\\]|\\.)*)"/g;
+	push @messages, $1 while $scan =~ /\b$RAISES\s*\(?\s*'((?:[^'\\]|\\.)*)'/g;
+	push @messages, $1 while $scan =~ /\b$RAISES\s+sprintf\s*\(\s*"((?:[^"\\]|\\.)*)"/g;
+	push @messages, $1 while $scan =~ /onfailure\s*=>\s*"((?:[^"\\]|\\.)*)"/g;
+	push @messages, $1 while $scan =~ /onfailure\s*=>\s*'((?:[^'\\]|\\.)*)'/g;
 	return \@messages;
 }
 

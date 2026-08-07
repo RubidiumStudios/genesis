@@ -58,6 +58,12 @@ sub mutates {
 sub to_string { return "sample" }
 sub equals    { return 0 }
 
+sub optional_second {
+	my ($self, $first, $second) = @_;
+	$second //= 'default';
+	return "$first/$second";
+}
+
 sub _private_helper {
 	my ($self) = @_;
 	return 42;

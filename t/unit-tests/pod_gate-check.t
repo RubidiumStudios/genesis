@@ -18,6 +18,12 @@ sub failures_of {
 	        grep {$_->{check} eq $check} @{$result->{failures}}];
 }
 
+sub advisories_of {
+	my ($result, $check) = @_;
+	return [sort map {$_->{method} // ''}
+	        grep {$_->{check} eq $check} @{$result->{advisory}}];
+}
+
 subtest 'a clean module passes' => sub {
 	my $r = check_module("$FIXTURES/Sample.pm");
 	ok($r->{ok}, "Sample reports ok")
@@ -66,6 +72,62 @@ subtest 'unparseable POD fails the module' => sub {
 	ok(!$r->{ok}, "does not pass despite every sub being documented");
 	ok(scalar @{failures_of($r, 'pod_syntax')} >= 1,
 		"the syntax error is a failure like any other");
+};
+
+subtest 'contract failures' => sub {
+	my $r = check_module("$FIXTURES/Contract.pm");
+
+	ok(!$r->{ok}, "Contract does not pass");
+
+	cmp_deeply(failures_of($r, 'errors_documented'), ['raises_undocumented'],
+		"a sub that dies with no Errors block is reported");
+
+	cmp_deeply(failures_of($r, 'has_examples'), ['takes_args_without_examples'],
+		"a sub with documented parameters and no example is reported");
+
+	cmp_deeply(failures_of($r, 'examples_show_output'), [],
+		"whether an example states its outcome is not gated -- see Check.pm");
+
+	cmp_deeply(failures_of($r, 'signature_arity'), ['wrong_arity'],
+		"a documented arity the code cannot accept is reported");
+
+	# Advisory, not fatal: the tree carries a backlog of these from the
+	# comment-to-POD migration, so the check reports without failing until
+	# that is cleared.  It still has to fire.
+	cmp_deeply(advisories_of($r, 'stale_error_quote'), ['stale_error_quote'],
+		"an Errors block quoting a string the code cannot emit is reported");
+	cmp_deeply(failures_of($r, 'stale_error_quote'), [],
+		"and does not fail the module while it is advisory");
+};
+
+subtest 'error accuracy is only checked where it is decidable' => sub {
+	# Sample::raises documents its errors in prose, quoting fragments
+	# rather than whole messages.  That is legitimate, and undecidable --
+	# the check must stand down rather than guess at the wording.
+	my $r = check_module("$FIXTURES/Sample.pm");
+	cmp_deeply(advisories_of($r, 'stale_error_quote'), [],
+		"a quoted fragment that does appear in the code is accepted");
+};
+
+subtest 'contract checks stay quiet where they do not apply' => sub {
+	# Sample is fully documented; every one of these must pass on it, or
+	# the check is really a style preference wearing a gate's clothes.
+	my $r = check_module("$FIXTURES/Sample.pm");
+
+	for my $check (qw/errors_documented has_examples examples_show_output
+	                  signature_arity/) {
+		cmp_deeply(failures_of($r, $check), [], "$check clean on Sample");
+	}
+};
+
+subtest 'arity tolerates the way optional parameters are written' => sub {
+	# Perl marks optional parameters in the body, not the parameter list,
+	# so a call documented with fewer arguments is correct documentation
+	# rather than a contradiction.  Sample::optional_second documents both
+	# arities; failing that rejects the idiom across most of the tree.
+	my $r = check_module("$FIXTURES/Sample.pm");
+	cmp_deeply(failures_of($r, 'signature_arity'), [],
+		"documenting fewer arguments than the sub declares is not a defect");
 };
 
 subtest 'exclusion manifest' => sub {

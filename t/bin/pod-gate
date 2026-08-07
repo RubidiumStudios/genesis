@@ -6,6 +6,7 @@
 #
 # Options:
 #   --quiet, -q       Summary only; suppress per-failure detail
+#   --show-advisory   Also list advisory findings (reported, never fatal)
 #   --exclusions, -x  Path to the exclusion manifest
 #   --lib, -l         Directory to scan (default: lib)
 #   --help, -h        This
@@ -27,7 +28,8 @@ use PodGate::Check qw/check_module load_exclusions module_name_for/;
 
 my %opt = (exclusions => 't/pod-gate-exclusions.txt', lib => 'lib');
 GetOptions(
-	'quiet|q'        => \$opt{quiet},
+	'quiet|q'          => \$opt{quiet},
+	'show-advisory'    => \$opt{show_advisory},
 	'exclusions|x=s' => \$opt{exclusions},
 	'lib|l=s'        => \$opt{lib},
 	'help|h'         => \$opt{help},
@@ -70,7 +72,7 @@ if (@ARGV) {
 	}
 }
 
-my (@failed, %skipped, %by_check);
+my (@failed, %skipped, %by_check, %advisory, %seen);
 my $checked = 0;
 
 for my $pm (@files) {
@@ -83,6 +85,8 @@ for my $pm (@files) {
 
 	$checked++;
 	my $result = check_module($pm);
+	$seen{$pm} = $result;
+	$advisory{$_->{check}}++ for @{$result->{advisory}};
 	next if $result->{ok};
 
 	push @failed, $result;
@@ -97,6 +101,15 @@ unless ($opt{quiet}) {
 		}
 		print "\n";
 	}
+	if ($opt{show_advisory}) {
+		for my $pm (@files) {
+			my $r = $seen{$pm} or next;
+			next unless @{$r->{advisory}};
+			printf "%s (advisory)\n", $r->{module};
+			printf "    %-18s %s\n", $_->{check}, $_->{detail} for @{$r->{advisory}};
+			print "\n";
+		}
+	}
 }
 
 printf "%d module%s checked, %d passed, %d failed\n",
@@ -104,6 +117,15 @@ printf "%d module%s checked, %d passed, %d failed\n",
 
 if (%by_check) {
 	printf "  %s\n", join(', ', map {"$_: $by_check{$_}"} sort keys %by_check);
+}
+
+# Reported on every run whether or not anything failed.  These are known
+# defects the gate cannot enforce yet; going quiet about them is how a
+# backlog turns into the accepted state.
+if (%advisory) {
+	printf "\nadvisory (not failing the build): %s\n",
+		join(', ', map {"$_: $advisory{$_}"} sort keys %advisory);
+	print "Run with --show-advisory for detail.\n" unless $opt{show_advisory};
 }
 
 # Deferred exclusions are announced every run.  Vendored and placeholder

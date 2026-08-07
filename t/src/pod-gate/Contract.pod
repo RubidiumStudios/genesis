@@ -1,0 +1,140 @@
+=head1 NAME
+
+Contract - error-path fixture for contract blocks
+
+=head1 DESCRIPTION
+
+Every sub is documented and correctly filed. What is wrong is what the
+entries say about parameters, errors, examples and arity.
+
+=head1 METHODS
+
+=head2 raises_undocumented($path)
+
+    $c->raises_undocumented($path);
+
+Checks a path. Dies when it cannot be reached, and says nothing about it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path.
+
+=back
+
+B<Returns:> True.
+
+B<Examples:>
+
+    $c->raises_undocumented("/tmp");
+    # Returns: 1
+
+=head2 takes_args_without_examples($first, $second)
+
+    my $joined = $c->takes_args_without_examples($first, $second);
+
+Joins two strings. Documented parameters but no worked example.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$first>
+
+The first string.
+
+=item C<$second>
+
+The second string.
+
+=back
+
+B<Returns:> The two strings joined.
+
+=head2 example_without_outcome($v)
+
+    my $up = $c->example_without_outcome($v);
+
+Upper-cases a string.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$v>
+
+The string.
+
+=back
+
+B<Returns:> The string, upper-cased.
+
+B<Examples:>
+
+    $c->example_without_outcome("hello");
+
+=head2 wrong_arity($one, $two, $three)
+
+    my $pair = $c->wrong_arity($one, $two, $three);
+
+Takes two arguments; the heading and signature both claim three.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$one>
+
+First.
+
+=item C<$two>
+
+Second.
+
+=back
+
+B<Returns:> An arrayref of both.
+
+B<Examples:>
+
+    $c->wrong_arity(1, 2);
+    # Returns: [1, 2]
+
+=head2 stale_error_quote($path)
+
+    $c->stale_error_quote($path);
+
+Documents an error string the code no longer produces.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path.
+
+=back
+
+B<Returns:> True.
+
+B<Errors:> Dies with C<"the old wording nobody emits"> when the path is
+missing.
+
+B<Examples:>
+
+    $c->stale_error_quote("/tmp");
+    # Returns: 1
+
+=head1 AUTHOR
+
+Genesis Community
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright the Genesis Community.
+
+=cut

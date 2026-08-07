@@ -19,8 +19,8 @@ subtest 'happy path: every parameter form' => sub {
 	cmp_deeply(
 		[sort keys %by_name],
 		[sort qw/new listed_params shifted_params indexed_params raises
-		         context_sensitive mutates to_string equals _private_helper
-		         AUTOLOAD DESTROY/],
+		         context_sensitive mutates to_string equals optional_second
+		         _private_helper AUTOLOAD DESTROY/],
 		"finds every sub and nothing else"
 	);
 

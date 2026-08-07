@@ -134,7 +134,8 @@ sub parse_pod_text {
 
 	for my $m (values %methods) {
 		$m->{$_} = ($m->{body} =~ $CONTRACT{$_}) ? 1 : 0 for keys %CONTRACT;
-		$m->{params} = _documented_params($m->{body});
+		$m->{params}  = _documented_params($m->{body});
+		$m->{regions} = _regions($m->{body});
 	}
 
 	return {
@@ -154,6 +155,29 @@ sub _section_kind {
 		return $rule->[1] if $section =~ $rule->[0];
 	}
 	return 'prose';
+}
+
+# Splits an entry at its bold lead-ins.  The regions matter separately:
+# the signature to check arity against lives in the preamble, and a call
+# written in an example is not a signature -- reading them as one makes
+# every worked example look like a contradictory declaration.
+sub _regions {
+	my ($body) = @_;
+
+	my %regions = (preamble => '');
+	my $current = 'preamble';
+	for my $line (split /\n/, $body, -1) {
+		# The content usually starts on the lead-in's own line --
+		# "B<Returns:> The sum." -- so the remainder is kept, not dropped.
+		if ($line =~ /^B<(\w+):?>\s*(.*)$/) {
+			$current = $1;
+			$regions{$current} //= '';
+			$regions{$current} .= "$2\n" if length $2;
+			next;
+		}
+		$regions{$current} .= "$line\n";
+	}
+	return \%regions;
 }
 
 # Parameter names come from the =item entries of the =over list that follows

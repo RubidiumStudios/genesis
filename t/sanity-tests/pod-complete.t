@@ -36,7 +36,7 @@ find(sub {push @modules, $File::Find::name if /\.pm$/}, 'lib');
 @modules = sort @modules;
 BAIL_OUT("no modules found under lib/") unless @modules;
 
-my %deferred;
+my (%deferred, %advisory);
 for my $pm (@modules) {
 	my $module = module_name_for($pm);
 
@@ -50,6 +50,7 @@ for my $pm (@modules) {
 		diag(sprintf("    %-18s %s", $_->{check}, $_->{detail}))
 			for @{$result->{failures}};
 	}
+	$advisory{$_->{check}} += 1 for @{$result->{advisory}};
 }
 
 # Announced, not asserted.  These are known gaps with a recorded reason;
@@ -57,6 +58,15 @@ for my $pm (@modules) {
 if (%deferred) {
 	diag(sprintf("%d module(s) deferred and still undocumented; see %s",
 		scalar keys %deferred, $MANIFEST));
+}
+
+# Same reasoning as the deferred count: these are known defects the gate
+# cannot enforce yet, and saying so every run is what keeps them from
+# settling in as normal.
+if (%advisory) {
+	diag(sprintf("advisory, not failing the build -- %s",
+		join(', ', map {"$_: $advisory{$_}"} sort keys %advisory)));
+	diag("run t/bin/pod-gate --show-advisory for detail");
 }
 
 done_testing;
