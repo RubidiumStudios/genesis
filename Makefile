@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage
+.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -23,6 +23,11 @@ compile-check:
 		echo "$$failed module(s) failed to compile"; \
 		exit 1; \
 	fi
+
+# The gate that t/sanity-tests/pod-complete.t runs, with a readable report.
+# Takes module names or paths; no arguments checks everything.
+pod-gate:
+	@t/bin/pod-gate $(MODULES)
 
 pod-check:
 	@echo "Checking POD coverage for all modules..."
@@ -129,7 +134,7 @@ test-deps:
 		exit 1; \
 	}
 	brew install shellcheck perl cpanminus
-	cpanm -n Carp::Always Expect PadWalker \
+	cpanm -n Carp::Always Expect PadWalker PPI \
 		Test::Deep Test::Differences Test::Exception \
 		Test::Exit Test::Output Test::TCP
 

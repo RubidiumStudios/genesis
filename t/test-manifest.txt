@@ -10,6 +10,7 @@
 # These must pass before functional tests can run
 sanity-tests/modules-compile.t   # Verify all Perl modules compile and load
 sanity-tests/no-private-refs.t   # No references to private resources (skips unless configured)
+sanity-tests/pod-complete.t      # Every module's POD present, complete, filed correctly, and parseable
 
 [unit-tests]
 # Library/module-level tests (formerly numeric-prefixed)
