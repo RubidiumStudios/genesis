@@ -115,6 +115,7 @@ unit-tests/genesis_hook_check-core.t         # Genesis::Hook::Check
 unit-tests/genesis_hook_cpiconfig-core.t     # Genesis::Hook::CpiConfig
 unit-tests/genesis_hook_features-core.t      # Genesis::Hook::Features
 unit-tests/genesis_hook_postdeploy-core.t    # Genesis::Hook::PostDeploy
+unit-tests/genesis_hook_postdeploy-steps.t   # Genesis::Hook::PostDeploy step runner
 unit-tests/genesis_hook_runtimeconfig-core.t # Genesis::Hook::RuntimeConfig
 unit-tests/genesis_hook_terminate-core.t     # Genesis::Hook::Terminate
 # Genesis::Hook::CloudConfig sub-area tests
