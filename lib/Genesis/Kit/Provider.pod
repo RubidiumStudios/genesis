@@ -364,7 +364,7 @@ B<Errors:>
 
 =over 4
 
-=item C<"Abstract Method: Expecting %s class to define concrete '%' method">
+=item C<"Abstract Method: Expecting %s class to define concrete '%s' method">
 
 Thrown via C<bug()> when called on the base class. The first C<%s> is the
 class name and C<'%'> is the method name C<config>.
@@ -395,7 +395,7 @@ B<Errors:>
 
 =over 4
 
-=item C<"Abstract Method: Expecting %s class to define concrete '%' method">
+=item C<"Abstract Method: Expecting %s class to define concrete '%s' method">
 
 Thrown via C<bug()> when called on the base class. The first C<%s> is the
 class name and C<'%'> is the method name C<config>.
@@ -439,7 +439,7 @@ B<Errors:>
 
 =over 4
 
-=item C<"Abstract Method: Expecting %s class to define concrete '%' method">
+=item C<"Abstract Method: Expecting %s class to define concrete '%s' method">
 
 Thrown via C<bug()> when called on the base class. The first C<%s> is the
 class name and C<'%'> is the method name C<kits>.
@@ -483,7 +483,7 @@ B<Errors:>
 
 =over 4
 
-=item C<"Abstract Method: Expecting %s class to define concrete '%' method">
+=item C<"Abstract Method: Expecting %s class to define concrete '%s' method">
 
 Thrown via C<bug()> when called on the base class. The first C<%s> is the
 class name and C<'%'> is the method name C<kit_releases>.
@@ -556,7 +556,7 @@ B<Errors:>
 
 =over 4
 
-=item C<"Abstract Method: Expecting %s class to define concrete '%' method">
+=item C<"Abstract Method: Expecting %s class to define concrete '%s' method">
 
 Thrown via C<bug()> when called on the base class. The first C<%s> is the
 class name and C<'%'> is the method name C<kit_versions>.
@@ -615,7 +615,7 @@ B<Errors:>
 
 =over 4
 
-=item C<"Abstract Method: Expecting %s class to define concrete '%' method">
+=item C<"Abstract Method: Expecting %s class to define concrete '%s' method">
 
 Thrown via C<bug()> when called on the base class. The first C<%s> is the
 class name and C<'%'> is the method name C<fetch_kit_version>.
@@ -670,7 +670,7 @@ B<Errors:>
 
 =over 4
 
-=item C<"Abstract Method: Expecting %s class to define concrete '%' method">
+=item C<"Abstract Method: Expecting %s class to define concrete '%s' method">
 
 Thrown via C<bug()> when called on the base class. The first C<%s> is the
 class name and C<'%'> is the method name C<fetch_kit_version_src>.
