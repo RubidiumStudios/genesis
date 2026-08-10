@@ -116,7 +116,7 @@ sub _stty_size {
 	$__stty_probed = 1;
 	# Pseudo-ttys in CI can lie; require a TERM signal.
 	return $__stty_size = undef unless $ENV{TERM};
-	my $out = `stty size </dev/tty 2>/dev/null`;
+	my $out = `stty size 2>/dev/null </dev/tty`;
 	if (defined $out && $out =~ /^(\d+)\s+(\d+)/) {
 		return $__stty_size = [$1, $2];
 	}
@@ -139,7 +139,7 @@ sub _probe_terminal_colors {
 	open(my $tty, '+<', '/dev/tty') or return undef;
 
 	# Snapshot stty state so we can restore even on die().
-	my $orig_stty = `stty -g </dev/tty 2>/dev/null`;
+	my $orig_stty = `stty -g 2>/dev/null </dev/tty`;
 	chomp $orig_stty if defined $orig_stty;
 	unless (defined $orig_stty && length $orig_stty) {
 		close $tty;
@@ -149,7 +149,7 @@ sub _probe_terminal_colors {
 	# Raw mode: no echo, no canonical line-buffering.  Without this
 	# the OSC reply would either wait for a newline or echo to the
 	# user's screen.
-	unless (system('stty raw -echo </dev/tty 2>/dev/null') == 0) {
+	unless (system('stty raw -echo 2>/dev/null </dev/tty') == 0) {
 		close $tty;
 		return undef;
 	}
@@ -185,7 +185,7 @@ sub _probe_terminal_colors {
 	my $fg_resp = $query->(10);
 	my $bg_resp = $query->(11);
 
-	system("stty '$orig_stty' </dev/tty 2>/dev/null");
+	system("stty '$orig_stty' 2>/dev/null </dev/tty");
 	close $tty;
 
 	my $bg = _build_color_entry($bg_resp, 48);
