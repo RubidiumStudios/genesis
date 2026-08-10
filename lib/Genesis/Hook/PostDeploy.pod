@@ -143,6 +143,23 @@ B<Examples:>
     $data->{custom_key} = 'custom_value';
     # Returns: {} on first call, then the same hash reference on subsequent calls
 
+=head2 interactive
+
+    my $bool = $hook->interactive;
+
+Returns whether the hook is running interactively, as recorded by the
+C<interactive> value passed to C<init>. Mirrors the accessor of the same
+name on C<Genesis::Hook::RuntimeConfig>.
+
+B<Returns:> The stored interactive flag, or C<0> when none was set.
+
+B<Examples:>
+
+    if ($hook->interactive) {
+        # safe to prompt the operator
+    }
+    # Returns: 1 when running interactively, 0 otherwise
+
 =head2 update_director_network_config
 
     $hook->update_director_network_config;
@@ -173,13 +190,17 @@ C</network>.
 
 =back
 
-B<Returns:> Nothing. Returns immediately (without completing the upload) if
-the environment does not support building cloud configs.
+B<Returns:> C<1> on success. Returns nothing (without completing the upload)
+if the environment does not support building cloud configs -- the
+"nothing to do" convention shared by the post-deploy step methods.
+Failures in the underlying hook, upload, or vault write report by raising
+rather than by return value.
 
 B<Examples:>
 
     $hook->update_director_network_config;
-    # Returns: nothing; uploads config and stores network details in exodus
+    # Returns: 1 after uploading the config and storing network details
+    # in exodus; nothing when the env cannot build cloud configs
 
 =head2 command
 
@@ -389,7 +410,8 @@ C<0> and logs an error if the C<runtime-config> hook fails.
 
 =item *
 
-The result of C<$self->done(1)> on success.
+C<1> on success. (A plain boolean, not C<< $self->done(1) >>: marking the
+hook complete is the caller's decision, not a side effect of one step.)
 
 =back
 
@@ -423,7 +445,7 @@ with a formatted list of the invalid entries.
 B<Examples:>
 
     $hook->upload_runtime_configs;
-    # Returns: result of done(1) on success, 0 on hook failure, nothing if unconfigured
+    # Returns: 1 on success, 0 on hook failure, nothing if unconfigured
 
 =head2 results
 

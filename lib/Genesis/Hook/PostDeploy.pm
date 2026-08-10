@@ -31,6 +31,10 @@ sub data {
 	return $_[0]->{data} ||= {};
 }
 
+sub interactive {
+	return $_[0]->{interactive} // 0;
+}
+
 sub update_director_network_config {
 	my $self = shift;
 	my $env = $self->env;
@@ -60,6 +64,12 @@ sub update_director_network_config {
 	$tstart = gettimeofday;
 	$env->vault->set_path($env->exodus_base.'/network', $network, flatten => 1, clear => 1);
 	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 1, 3));
+
+	# Explicit success: without it the return value is whatever info()
+	# returned, and a fully successful upload reads as "nothing to do" to
+	# a caller honouring the 1/0/undef step convention.  Failures above
+	# report by bailing.
+	return 1;
 }
 
 sub command {
@@ -258,7 +268,9 @@ sub upload_runtime_configs {
 		return 0;
 	}
 	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
-	return $self->done(1);
+	# A plain boolean, not $self->done(1): marking the whole hook complete
+	# is the caller's decision, not a side effect of one step.
+	return 1;
 }
 
 sub results {
