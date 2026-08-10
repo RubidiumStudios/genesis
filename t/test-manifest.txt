@@ -144,6 +144,8 @@ unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi
 unit-tests/genesis_env-cpis.t                             # multi-cpi accessors
 unit-tests/genesis_env-stop_renewer_for_self_deploy.t     # vault token-renewer pause during self-deploy
+unit-tests/genesis_env-cpi_az_map_exodus_fallback.t       # cpi_az_map falling back to exodus data
+unit-tests/genesis_env-ensure_vault_ready_for_exodus.t    # vault unseal before an exodus write
 unit-tests/genesis_env_deployment-artifact_chunking.t     # exodus artifact chunking
 unit-tests/genesis_env_deployment-core.t                  # Deployment core
 unit-tests/genesis_env_deploymentmanager-core.t           # DeploymentManager core
@@ -183,12 +185,17 @@ unit-tests/service_vault_local-port_selection.t            # Local vault free-po
 
 # Other unit tests not yet in any thematic block
 unit-tests/genesis-init_forked_child.t       # forked-child defensive init
+unit-tests/genesis-cwd_restore.t             # working directory restored after pushd/popd
 unit-tests/genesis_secret_rsa-core.t         # Genesis::Secret::RSA
 unit-tests/genesis_term-tableify.t           # tableify rule-only table renderer
 unit-tests/genesis_top-pipeline.t            # Top::pipeline()
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/kit-core.t                        # kit operations (network-dependent at present)
+# POD gate internals; the gate itself runs as a sanity test
+unit-tests/pod_gate-extract.t                # PPI method extraction from .pm sources
+unit-tests/pod_gate-pod.t                    # .pod section and contract-block parsing
+unit-tests/pod_gate-check.t                  # the checks, and what stays advisory
 
 [integration-tests]
 # Multi-component interaction tests that require system interaction
@@ -201,6 +208,8 @@ integration-tests/service_github-api.t   # GitHub/GitLab API integration (SSH ke
 integration-tests/service_bosh_stemcells.t  # BOSH stemcell API integration (bosh.io)
 integration-tests/service_bosh_director.t   # BOSH Director constructor patterns (from_exodus, from_alias, from_environment)
 integration-tests/genesis_top-complete.t    # Genesis::Top with external vault and GitHub dependencies
+integration-tests/genesis_top-ci_yml_soft_gate.t              # stale ci.yml warns rather than blocks
+integration-tests/genesis_commands-pipeline_ci_yml_gate.t     # pipeline commands gated on a legacy ci.yml
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
 # Genesis::Env integration tests - require vault/BOSH mocks
