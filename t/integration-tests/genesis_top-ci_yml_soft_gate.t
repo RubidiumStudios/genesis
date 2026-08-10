@@ -114,7 +114,11 @@ subtest 'v3 config + legacy ci.yml + ci already configured -> flag is 0, warning
 	ok($top, 'Top loads cleanly (no bail)');
 	is($has_flag, 0,
 		'has_legacy_ci_yml is 0 -- v3 config wins, ci.yml is ignored');
-	like($stderr, qr/Legacy.*present alongside.*v3 CI configuration/s,
+	# \s+ between the words, not a literal space: the message interpolates
+	# a temp path and the logger wraps the result, so where the line breaks
+	# moves with the length of $TMPDIR.  Matching a literal space passes or
+	# fails depending on the machine it runs on.
+	like($stderr, qr/Legacy.*present\s+alongside.*v3\s+CI\s+configuration/s,
 		'warning emitted about the stale ci.yml');
 };
 

@@ -104,9 +104,11 @@ subtest 'PIPELINE command in a repo with legacy ci.yml -> bail' => sub {
 		ci_yml => $legacy_pipeline_yml);
 	my $err = run_gate_in($tmp);
 	ok($err, 'gate refused to let the command run');
-	like($err // '', qr/legacy CI configuration/i,
+	# \s+ rather than literal spaces: the bail text is wrapped for the
+	# terminal, so any phrase asserted here can arrive split across lines.
+	like($err // '', qr/legacy\s+CI\s+configuration/i,
 		'bail message names the legacy CI configuration');
-	like($err // '', qr/genesis repo-update --ci-provider/,
+	like($err // '', qr/genesis\s+repo-update\s+--ci-provider/,
 		'bail message hands the user a concrete migration command');
 };
 
