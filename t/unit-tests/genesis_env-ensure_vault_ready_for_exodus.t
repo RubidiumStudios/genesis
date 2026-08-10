@@ -9,6 +9,7 @@ use helper;
 
 use Test::More;
 use Test::Exception;
+use Test::Output;
 
 use_ok 'Genesis::Env';
 use Genesis;
@@ -106,8 +107,15 @@ with_env_stubs {
 			statuses => ['sealed', 'ok'], unseal_rc => 0,
 		);
 		my $env = make_env_stub(vault => $vault);
-		is $env->_ensure_vault_ready_for_exodus(1), 1,
+		my $rc;
+		my ($out, $err) = output_from {
+			$rc = $env->_ensure_vault_ready_for_exodus(1);
+		};
+		is $rc, 1,
 			'sealed vault that unseals cleanly: ready for exodus';
+		like $err, qr/unsealed\s+successfully/i,
+			'says so on stderr rather than recovering silently';
+		is $out, '', 'nothing on stdout';
 		is $vault->unseals, 1, 'exactly one unseal attempt';
 	};
 
@@ -117,9 +125,14 @@ with_env_stubs {
 			statuses => ['sealed'], unseal_rc => 1,
 		);
 		my $env = make_env_stub(vault => $vault);
-		throws_ok { $env->_ensure_vault_ready_for_exodus(0) }
-			qr/re-run this deploy/i,
-			'sealed vault, no terminal: bails with re-run guidance';
+		my ($out, $err) = output_from {
+			throws_ok { $env->_ensure_vault_ready_for_exodus(0) }
+				qr/re-run this deploy/i,
+				'sealed vault, no terminal: bails with re-run guidance';
+		};
+		like $err, qr/failed\s+to\s+unseal/i,
+			'reports the unseal failure on stderr before bailing';
+		is $out, '', 'nothing on stdout';
 		is $vault->unseals, 1, 'unseal was still attempted first';
 	};
 
@@ -142,9 +155,16 @@ with_env_stubs {
 		);
 		my $env = make_env_stub(vault => $vault);
 		my $rc;
-		lives_ok { $rc = $env->_ensure_vault_ready_for_exodus(0) }
-			'sealed vault with a terminal: proceeds to the auth prompt';
+		my ($out, $err) = output_from {
+			lives_ok { $rc = $env->_ensure_vault_ready_for_exodus(0) }
+				'sealed vault with a terminal: proceeds to the auth prompt';
+		};
 		is $rc, 0, 'returns 0 so the caller knows the vault is not ready';
+		like $err, qr/failed\s+to\s+unseal/i,
+			'the operator is told on stderr that the unseal failed';
+		like $err, qr/may\s+fail\s+due\s+to\s+sealed\s+vault/i,
+			'and what that means for the exodus write';
+		is $out, '', 'nothing on stdout';
 	};
 };
 

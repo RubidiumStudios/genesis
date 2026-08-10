@@ -245,10 +245,16 @@ subtest 'kit_bug() message differs from compiled kit_bug()' => sub {
 	};
 
 	# Compiled kit mentions GitHub issues URL; dev kit mentions "you".
-	like($compiled_err, qr{github\.com.*/issues}i,
+	#
+	# Both patterns require the /issues path rather than the host alone.
+	# Carp::Always appends a stack trace to these messages, so the error
+	# carries the paths of the files it passed through -- and a checkout
+	# living under a directory named github.com then fails a bare
+	# qr{github\.com} match on content it never emitted.
+	like($compiled_err, qr{github\.com\S*/issues}i,
 		'compiled kit_bug() mentions the GitHub issues URL');
-	unlike($dev_err, qr{github\.com}i,
-		'dev kit_bug() does NOT mention GitHub');
+	unlike($dev_err, qr{github\.com\S*/issues}i,
+		'dev kit_bug() does NOT point at the GitHub issues URL');
 	like($dev_err, qr{you}i,
 		'dev kit_bug() tells the developer to contact themselves');
 };

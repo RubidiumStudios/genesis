@@ -321,10 +321,13 @@ subtest 'create_env() - CEP-2: missing dryrun path (known defect)' => sub {
 	# Current behaviour: create_env() ignores dryrun and executes bosh.
 	bosh_runs_as('create-env --state state.json manifest.yml');
 	my $proxy = get_create_env_proxy(undef);
-	my ($out, $rc) = $proxy->create_env('manifest.yml',
-		state  => 'state.json',
-		dryrun => 1,       # CEP-2: this option is silently ignored
-	);
+	my ($out, $rc);
+	quietly {
+		($out, $rc) = $proxy->create_env('manifest.yml',
+			state  => 'state.json',
+			dryrun => 1,       # CEP-2: this option is silently ignored
+		);
+	};
 	ok !$rc,
 		'CEP-2: create_env() executes bosh even when dryrun => 1 is passed'
 		. ' (should be a no-op -- this test documents the bug)';

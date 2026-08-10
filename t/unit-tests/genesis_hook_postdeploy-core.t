@@ -8,6 +8,7 @@ use helper;
 use Test::More;
 use Test::Exception;
 use Test::Deep;
+use Test::Output;
 use Genesis qw(bail);
 use Cwd qw(abs_path);
 
@@ -465,7 +466,7 @@ subtest 'upload_runtime_configs - method exists' => sub {
 # users configuring via defaults + per-env overrides had no way to
 # disable a config that a shared default turned on.
 subtest 'upload_runtime_configs - accepts per-config false to disable' => sub {
-	plan tests => 2;
+	plan tests => 4;
 
 	my @hook_calls;
 	my $env = mock_env(
@@ -486,8 +487,10 @@ subtest 'upload_runtime_configs - accepts per-config false to disable' => sub {
 	);
 	my $hook = Genesis::Hook::PostDeploy::test_kit->init(env => $env, rc => 0);
 
-	eval { $hook->upload_runtime_configs };
+	my ($out, $err) = output_from { eval { $hook->upload_runtime_configs } };
 	is $@, '', 'no bail when a per-config value is false';
+	like $err, qr/done/, 'reports completion on stderr';
+	is $out, '', 'nothing on stdout';
 	is_deeply $hook_calls[0]{args},
 		{ blacksmith => JSON::PP::false, dns => JSON::PP::true },
 		'runtime-config hook receives the full opts hash including false values';
