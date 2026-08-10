@@ -1103,7 +1103,17 @@ Checks the following external tools:
 
 =item safe E<gt>= 1.6.1
 
-=item vault E<gt>= 0.9.0
+=item a secrets engine: vault E<gt>= 1.9.0, I<or> bao E<gt>= 2.6.0 when
+safe E<gt>= 1.20.0
+
+Either engine satisfies Genesis, because safe drives both. OpenBao is only
+accepted alongside safe 1.20.0 or newer, which is the release that learned
+to drive it; on an older safe a C<bao> on the PATH is reported as unusable
+rather than accepted, since accepting it would move the failure into
+C<safe local> where the cause is much harder to see.
+
+Vault is preferred when both are installed, matching safe's own resolution
+order.
 
 =item openssl E<gt>= 1.1.1
 
@@ -1349,10 +1359,89 @@ B<Examples:>
   # Returns: undef  (if curl meets the minimum version)
   # Returns: "curl v7.29.0 is installed at /usr/bin/curl, ..."  (if too old)
 
+=head2 check_secrets_engine
+
+  my @errors = check_secrets_engine();
+
+Checks that a secrets engine safe can drive is installed and new enough.
+
+Not exported.  Called internally by C<check_prereqs>, which checks this
+separately from the other prerequisites because which engines are acceptable
+depends on the version of safe that has to drive them.
+
+Tries C<vault> first and C<bao> second, matching safe's own resolution order,
+and stops at the first that satisfies its minimum. C<bao> is only considered
+when safe is new enough to drive OpenBao; an installed C<bao> that safe
+cannot drive is reported as such rather than passed over silently.
+
+B<Returns:> An empty list when an engine satisfies the requirement, otherwise
+a single string listing why each candidate was rejected.
+
+B<Examples:>
+
+  check_secrets_engine();
+  # Returns: ()  (vault 1.14.4 is installed)
+
+  check_secrets_engine();
+  # Returns: a string naming the missing vault and the too-old safe,
+  #          when neither engine is usable
+
+=head2 which_binary
+
+  my $path = which_binary($name);
+
+Resolves an executable on the C<PATH>.
+
+Not exported.  Used to tell an absent tool apart from one that is present but
+unusable, so the two can be reported differently.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The executable to look for.
+
+=back
+
+B<Returns:> The absolute path, or C<undef> when the name is not on the
+C<PATH>.
+
+B<Examples:>
+
+  which_binary('bao');
+  # Returns: /opt/homebrew/bin/bao
+
+  which_binary('nonesuch');
+  # Returns: undef
+
 =head1 INTERNAL FUNCTIONS
 
 These are internal to the implementation.  They may change without notice and
 should not be called directly.
+
+=head2 _safe_drives_openbao
+
+  my $ok = _safe_drives_openbao();
+
+Reports whether the installed safe is new enough to drive OpenBao.
+
+OpenBao support arrived in safe 1.20.0. Below that, safe shells out to
+C<vault> unconditionally, so a C<bao> on the PATH is of no use to Genesis
+however new it is.
+
+B<Returns:> 1 when safe is 1.20.0 or newer, 0 otherwise -- including when
+safe is absent or its version cannot be parsed, since neither case can be
+shown to support OpenBao.
+
+B<Examples:>
+
+  _safe_drives_openbao();
+  # Returns: 1  (safe v1.20.0)
+
+  _safe_drives_openbao();
+  # Returns: 0  (safe v1.9.0, which predates engine selection)
 
 =head2 _gate_pipeline_on_legacy_ci_yml
 

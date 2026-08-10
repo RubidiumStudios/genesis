@@ -1101,6 +1101,58 @@ sub check_version { # {{{
 	return; # no error
 } # }}}
 
+# safe drives either Vault or OpenBao, taking whichever it finds first on
+# $PATH, so either satisfies Genesis.  OpenBao is only offered when safe is
+# new enough to drive it: accepting it against an older safe would pass this
+# check and fail later inside `safe local`, where the cause is far less
+# obvious.
+my $SAFE_OPENBAO_MIN = '1.20.0';
+my @SECRETS_ENGINES = (
+	# Name,  Version, Command,             Pattern                    Source
+	["vault", "1.9.0", "vault -v 2>/dev/null", qr(.*vault v(\S+).*)i, "https://developer.hashicorp.com/vault/install"],
+	["bao",   "2.6.0", "bao -v   2>/dev/null", qr(.*bao v?(\d\S*).*)i, "https://github.com/openbao/openbao/releases"],
+);
+
+sub check_secrets_engine { # {{{
+	my @failures;
+	for my $engine (@SECRETS_ENGINES) {
+		my ($name) = @$engine;
+
+		if ($name eq 'bao' && !_safe_drives_openbao()) {
+			push @failures, sprintf(
+				"#C{bao} is present, but driving OpenBao needs safe #R{at least %s}",
+				$SAFE_OPENBAO_MIN
+			) if which_binary('bao');
+			next;
+		}
+
+		my $err = check_version(@$engine);
+		return () unless $err;   # this engine satisfies the requirement
+		debug $err;
+		push @failures, $err;
+	}
+
+	return join(
+		"\n         ",
+		"#R{No usable secrets engine} -- Genesis needs one of:",
+		@failures
+	);
+} # }}}
+
+# Reported separately from check_version so a bao that is installed but
+# undriveable says so, rather than being silently ignored.
+sub which_binary { # {{{
+	my ($name) = @_;
+	my ($path) = run({stderr => undef}, 'type -p $1', $name);
+	return $path && $path !~ /not found/ ? $path : undef;
+} # }}}
+
+sub _safe_drives_openbao { # {{{
+	my ($out) = run({stderr => undef}, 'safe -v 2>&1 >/dev/null');
+	return 0 unless $out && $out =~ qr(safe v(\S+));
+	return new_enough($1, $SAFE_OPENBAO_MIN) ? 1 : 0;
+} # }}}
+
 sub check_prereqs { # {{{
 	CORE::state $prereqs_checked = 0; # static variables
 	return 1 if envset("GENESIS_IS_HELPING_YOU") || $prereqs_checked;
@@ -1116,7 +1168,8 @@ sub check_prereqs { # {{{
 		["jq",        "1.6", "jq --version    2>/dev/null",                     qr(^jq-([\.0-9]+)),       "https://stedolan.github.io/jq/download/"],
 		["spruce", "1.28.0", "spruce -v       2>/dev/null",                     qr(.*version\s+(\S+).*)i, "https://github.com/geofffranks/spruce/releases"],
 		["safe",    "1.6.1", "safe -v         2>&1 >/dev/null",                 qr(safe v(\S+)),          "https://github.com/starkandwayne/safe/releases"],
-		["vault",   "0.9.0", "vault -v        2>/dev/null",                     qr(.*vault v(\S+).*)i,    "https://www.vaultproject.io/downloads.html"],
+		# The secrets engine is checked separately: which ones are acceptable
+		# depends on the version of safe that has to drive it.
 		["openssl", "1.1.1", "openssl version 2>/dev/null",                     qr(OpenSSL ([\.0-9]+) .*),"https://www.openssl.org/source/"],
 		["credhub", "2.7.0", "CREDHUB_SERVER='' credhub --version 2>/dev/null", qr(CLI Version: (\S+)),   "https://github.com/cloudfoundry-incubator/credhub-cli/releases"],
 	];
@@ -1126,6 +1179,8 @@ sub check_prereqs { # {{{
 		debug $err if $err;
 		$err
 	} @$reqs;
+
+	push @errors, grep {$_} check_secrets_engine();
 
 	# Check that we have some required but not necessarily available Perl modules
 	my $perl_modules = [
