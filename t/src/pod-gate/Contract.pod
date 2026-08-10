@@ -103,32 +103,6 @@ B<Examples:>
     $c->wrong_arity(1, 2);
     # Returns: [1, 2]
 
-=head2 stale_error_quote($path)
-
-    $c->stale_error_quote($path);
-
-Documents an error string the code no longer produces.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$path>
-
-The path.
-
-=back
-
-B<Returns:> True.
-
-B<Errors:> Dies with C<"the old wording nobody emits"> when the path is
-missing.
-
-B<Examples:>
-
-    $c->stale_error_quote("/tmp");
-    # Returns: 1
-
 =head1 AUTHOR
 
 Genesis Community

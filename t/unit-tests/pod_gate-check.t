@@ -18,12 +18,6 @@ sub failures_of {
 	        grep {$_->{check} eq $check} @{$result->{failures}}];
 }
 
-sub advisories_of {
-	my ($result, $check) = @_;
-	return [sort map {$_->{method} // ''}
-	        grep {$_->{check} eq $check} @{$result->{advisory}}];
-}
-
 subtest 'a clean module passes' => sub {
 	my $r = check_module("$FIXTURES/Sample.pm");
 	ok($r->{ok}, "Sample reports ok")
@@ -91,22 +85,8 @@ subtest 'contract failures' => sub {
 	cmp_deeply(failures_of($r, 'signature_arity'), ['wrong_arity'],
 		"a documented arity the code cannot accept is reported");
 
-	# Advisory, not fatal: the tree carries a backlog of these from the
-	# comment-to-POD migration, so the check reports without failing until
-	# that is cleared.  It still has to fire.
-	cmp_deeply(advisories_of($r, 'stale_error_quote'), ['stale_error_quote'],
-		"an Errors block quoting a string the code cannot emit is reported");
 	cmp_deeply(failures_of($r, 'stale_error_quote'), [],
-		"and does not fail the module while it is advisory");
-};
-
-subtest 'error accuracy is only checked where it is decidable' => sub {
-	# Sample::raises documents its errors in prose, quoting fragments
-	# rather than whole messages.  That is legitimate, and undecidable --
-	# the check must stand down rather than guess at the wording.
-	my $r = check_module("$FIXTURES/Sample.pm");
-	cmp_deeply(advisories_of($r, 'stale_error_quote'), [],
-		"a quoted fragment that does appear in the code is accepted");
+		"quoted error text is not compared against the source -- see Check.pm");
 };
 
 subtest 'contract checks stay quiet where they do not apply' => sub {

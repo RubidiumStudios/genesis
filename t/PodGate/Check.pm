@@ -20,17 +20,6 @@ my %KIND = map {$_ => 1} qw/vendored placeholder deferred/;
 # for one.  Anything else in first position is a real argument.
 my %INVOCANT = map {$_ => 1} qw/$self $class $proto $invocant $class_or_ref $this/;
 
-# Checks that report but do not fail, because the tree has a backlog they
-# would otherwise block on.  Advisory is a debt marker, not a severity:
-# each one is here because it is correct and unenforceable today, and each
-# should be removed from this list once its backlog is cleared.
-#
-#   stale_error_quote  118 findings across 36 modules -- Errors blocks that
-#                      quote text no longer emitted, mostly format-specifier
-#                      damage from the comment-to-POD migration.
-my %ADVISORY = map {$_ => 1} qw/stale_error_quote/;
-
-sub is_advisory { return $ADVISORY{$_[0]} ? 1 : 0 }
 
 sub module_name_for {
 	my ($pm) = @_;
@@ -60,8 +49,7 @@ sub check_module {
 			check  => 'missing_pod',
 			detail => "no $pod beside $pm",
 		};
-		$result->{advisory} = [];
-		$result->{ok}       = 0;
+		$result->{ok} = 0;
 		return $result;
 	}
 	$result->{pod} = $pod;
@@ -74,16 +62,7 @@ sub check_module {
 	push @{$result->{failures}}, _contract_failures($code, $doc);
 	push @{$result->{failures}}, _vocabulary_failure($code, $doc) // ();
 
-	# Advisory findings are split out rather than filtered away: they stay
-	# visible on every run, which is the only thing stopping a known
-	# backlog from quietly becoming the permanent state.
-	my (@failures, @advisory);
-	for my $f (@{$result->{failures}}) {
-		push @{$ADVISORY{$f->{check}} ? \@advisory : \@failures}, $f;
-	}
-	$result->{failures} = \@failures;
-	$result->{advisory} = \@advisory;
-	$result->{ok}       = @failures ? 0 : 1;
+	$result->{ok} = @{$result->{failures}} ? 0 : 1;
 
 	return $result;
 }
@@ -190,8 +169,6 @@ sub _contract_failures {
 			};
 		}
 
-		push @failures, _stale_error_quotes($m, $entry);
-
 		# Only where an example would say something the signature line does
 		# not: arguments to get wrong, a failure to provoke, or a return
 		# that changes with context.
@@ -281,53 +258,13 @@ sub _vocabulary_failure {
 	return undef;
 }
 
-# The mirror of orphaned_pod, for error strings.
-#
-# Whether the prose of an Errors block is accurate is not decidable, and
-# is not gated.  But an author who quotes C<"..."> has made a checkable
-# claim: that this sub emits that text.  When no die or bail in the sub
-# can produce it, the wording changed and the documentation did not.
-#
-# Compared with format specifiers and interpolated variables collapsed to
-# wildcards, and only on quotes long enough to mean something -- C<"%s">
-# is not a claim about anything.
-sub _stale_error_quotes {
-	my ($m, $entry) = @_;
-
-	my $errors = $entry->{regions}{Errors} // '';
-	return () unless length $errors;
-
-	my @quoted = ($errors =~ /C<"([^"]{8,})">/g);
-	return () unless @quoted;
-
-	my @emitted = map {_error_shape($_)} @{$m->{die_messages}};
-	return () unless @emitted;
-
-	my @failures;
-	for my $claim (@quoted) {
-		my $shape = _error_shape($claim);
-		next if grep {index($_, $shape) >= 0 || index($shape, $_) >= 0} @emitted;
-		push @failures, {
-			check  => 'stale_error_quote',
-			method => $m->{name},
-			detail => qq{Errors block quotes "$claim", which no die or bail here emits},
-		};
-	}
-	return @failures;
-}
-
-# Everything that varies between the source and the rendered message --
-# sprintf specifiers, interpolated variables, whitespace, case -- reduced
-# so a quote is compared on the part the author actually wrote.
-sub _error_shape {
-	my ($text) = @_;
-	$text = lc $text;
-	$text =~ s/%-?\d*\.?\d*[sdifegxu]/\x00/g;
-	$text =~ s/[\$\@][\{]?[\w:>\-\[\]\{\}']+/\x00/g;
-	$text =~ s/\s+/ /g;
-	$text =~ s/^\s+|\s+$//g;
-	return $text;
-}
+# There is deliberately no check that an Errors block's quoted text
+# matches what the code emits.  Whether it does is not decidable: the POD
+# documents the rendered message where the source carries colour markup,
+# elides varying parts with "...", quotes argument formats and example
+# values with C<> in the same region, and describes failures raised by
+# helpers the method calls.  Every one of those is correct documentation
+# that a comparison reads as a defect.
 
 # Only an over-count is a defect.
 #

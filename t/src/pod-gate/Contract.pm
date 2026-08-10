@@ -22,12 +22,6 @@ sub example_without_outcome {
 	return uc $v;
 }
 
-sub stale_error_quote {
-	my ($self, $path) = @_;
-	die "no such path: $path" unless -e $path;
-	return 1;
-}
-
 sub wrong_arity {
 	my ($self, $one, $two) = @_;
 	return [$one, $two];
