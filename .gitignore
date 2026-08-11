@@ -9,6 +9,9 @@ t/repos/compiled-kit-test/new-env.yml
 
 /genesis-*
 /artifacts
+# The POD browser is a build product, never committed.  ci/scripts/release
+# generates it per release and attaches it as genesis-api-v<version>.html,
+# so a copy in the tree would only ever be one someone forgot to refresh.
 /docs/api.html
 /docs/api-*.html
 .*.sw?

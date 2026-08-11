@@ -66,6 +66,13 @@ echo "v${VERSION} -> ${RELEASE_ROOT}/name"
 echo "v${VERSION}"            > "${RELEASE_ROOT}/name"
 cp -av "${BUILD_ROOT}/genesis-${VERSION}" "${RELEASE_ROOT}/artifacts/genesis"
 
+header "Building the API documentation browser"
+api_doc="$(cd "${RELEASE_ROOT}/artifacts" && pwd)/genesis-api-docs.html"
+( cd "${REPO_ROOT}" && ./t/bin/pod-spa --version "${VERSION}" --out "${api_doc}" )
+test -s "${api_doc}" || bail "POD browser generation produced no output at ${api_doc}."
+grep -q "v${VERSION}" "${api_doc}" || bail "POD browser at ${api_doc} does not carry v${VERSION}."
+echo "$(wc -c < "${api_doc}") bytes -> ${RELEASE_ROOT}/artifacts/genesis-api-docs.html"
+
 header "Release Notes for v${VERSION}"
 header="$(sed -i -e '1{w /dev/stdout' -e 'd}' "${RELEASE_NOTES_PATH}")"
 re="^<!--- Release Notes for v${VERSION} -- Do not move --->$"

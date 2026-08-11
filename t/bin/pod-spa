@@ -7,9 +7,14 @@
 # opens from file://.
 #
 # Usage:
-#   t/bin/pod-spa [--out FILE] [--lib DIR] [MODULE ...]
+#   t/bin/pod-spa [--out FILE] [--lib DIR] [--version VERSION] [MODULE ...]
 #
 # With no MODULE arguments, every .pod under --lib is included.
+#
+# --version states what the output documents.  A release has to say so
+# explicitly: the checkout is unpinned until pack brands it, and the
+# packed binary carries no .pod files to read a version out of, so there
+# is nothing in the tree to infer it from at the moment it matters.
 
 use strict;
 use warnings;
@@ -22,11 +27,13 @@ use Pod::Simple::HTML;
 my $out = 'docs/api.html';
 my $lib = 'lib';
 my $template;
+my $want_version;
 GetOptions(
 	'out=s'      => \$out,
 	'lib=s'      => \$lib,
 	'template=s' => \$template,
-) or die "usage: $0 [--out FILE] [--lib DIR] [MODULE ...]\n";
+	'version=s'  => \$want_version,
+) or die "usage: $0 [--out FILE] [--lib DIR] [--version VERSION] [MODULE ...]\n";
 
 $template //= dirname(__FILE__).'/pod-spa.html.tmpl';
 
@@ -56,7 +63,7 @@ die "No modules matched\n" unless @modules;
 
 # -- render -------------------------------------------------------------------
 
-my $version = read_version() // 'unknown';
+my $version = $want_version // read_version() // 'unknown';
 my $payload = {
 	generated => scalar(gmtime).' UTC',
 	version   => $version,
