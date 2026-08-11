@@ -25,23 +25,28 @@ use Genesis;
 
 $ENV{NOCOLOR} = 1;
 
-# Writes an executable that answers -v with $version, or omits the binary
-# entirely when $version is undef.
-#
 # safe reports its version on stderr and the engines report theirs on
 # stdout, which is why the prereq commands redirect differently.  The fakes
 # have to match, or the checks read an empty string and every answer here
 # is about the fake rather than the code.
 my %VERSION_STREAM = (safe => 2, vault => 1, bao => 1);
 
+# Every tool gets a stub on every run, including the ones a case wants
+# absent -- those print nothing, which is what check_version reads as
+# missing.  Leaving them out instead would let the host's own binaries
+# answer: the PATH below keeps /usr/bin for ordinary utilities, and an
+# image that installs vault there satisfies the check for cases built to
+# assert it cannot be satisfied.
 sub fake_engines {
 	my (%versions) = @_;
 	my $bin = workdir();
-	for my $name (keys %versions) {
-		next unless defined $versions{$name};
+	for my $name (keys %VERSION_STREAM) {
+		my $version  = $versions{$name};
 		my $redirect = $VERSION_STREAM{$name} == 2 ? ' >&2' : '';
 		open my $fh, '>', "$bin/$name" or die "cannot write fake $name: $!";
-		print $fh "#!/bin/sh\nprintf '%s\\n' '$versions{$name}'$redirect\n";
+		print $fh defined $version
+			? "#!/bin/sh\nprintf '%s\\n' '$version'$redirect\n"
+			: "#!/bin/sh\nexit 1\n";
 		close $fh;
 		chmod 0755, "$bin/$name";
 	}
