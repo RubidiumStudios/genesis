@@ -8,20 +8,61 @@ use MIME::Base64 qw(encode_base64);
 use POSIX qw(strftime);
 
 ######################################################################
-if (grep {/^(-h|--help)$/} @ARGV) {
-	printf STDERR "usage: ./pack [--keep-pod] [<version> [<output path/file>]]\n\n";
-	printf STDERR "  --keep-pod  Leave the .pod files in the runtime archive.\n".
-	              "              They are stripped by default: the documentation\n".
-	              "              is larger than the code, nothing reads it at\n".
-	              "              runtime, and releases publish it separately as\n".
-	              "              genesis-api-docs.html.\n\n";
-	exit 0;
+# Same grammar as Genesis::semver, so pack accepts exactly what genesis
+# will later call a version.
+my $SEMVER = qr/^v?\d+(?:\.\d+(?:\.\d+(?:[\.-]rc[\.-]?\d+)?)?)?(?:\+[0-9A-Za-z.-]+)?$/i;
+
+sub usage {
+	my ($error) = @_;
+	print STDERR "pack: $error\n\n" if $error;
+	print STDERR <<'USAGE';
+usage: ./pack [--keep-pod] [VERSION [OUTFILE]]
+
+Builds the self-extracting genesis executable.
+
+Arguments:
+  VERSION     Version to brand the build with; a leading "v" is optional.
+              Omitted, it builds a dev snapshot stamped with the git sha.
+  OUTFILE     Where to write the executable, path and filename together.
+              Omitted, it writes ./genesis-VERSION (or ./genesis-dev-SHA),
+              with "-dirty" appended when bin/ or lib/ have uncommitted
+              changes.  Set GENESIS_PACK_PATH to change only the directory.
+
+Options:
+  --keep-pod  Leave the .pod files in the runtime archive.  They are
+              stripped by default: the documentation is larger than the
+              code, nothing reads it at runtime, and releases publish it
+              separately as genesis-api-docs.html.
+
+Examples:
+  ./pack                     -> ./genesis-dev-a1b2c3d4e5
+  ./pack 3.2.0               -> ./genesis-3.2.0
+  ./pack v3.2.0 ~/bin/g32    -> ~/bin/g32
+  ./pack --keep-pod v3.2.0   -> ./genesis-3.2.0, documentation included
+
+USAGE
+	exit($error ? 1 : 0);
 }
+
+usage() if grep {/^(-h|--help)$/} @ARGV;
 
 # Removed from @ARGV before the positional version/output are read, so the
 # flag can appear anywhere on the command line.
 my $keep_pod = 0;
 @ARGV = grep {$_ eq '--keep-pod' ? do {$keep_pod = 1; 0} : 1} @ARGV;
+
+if (my ($opt) = grep {/^-/} @ARGV) {
+	usage("unrecognised option '$opt'");
+}
+
+# Caught rather than ignored: an extra argument means one of these was
+# meant to be something else, and silently taking the first two writes the
+# executable somewhere the caller did not ask for.
+usage(sprintf("expected at most 2 arguments, got %d: %s", scalar @ARGV, join(' ', @ARGV)))
+	if @ARGV > 2;
+
+usage("'$ARGV[0]' is not a version")
+	if @ARGV && $ARGV[0] !~ $SEMVER;
 
 system "perl -c -Ilib bin/genesis";
 die "Perl compilation failed, not packing\n" if $?;
