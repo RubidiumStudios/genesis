@@ -9,9 +9,19 @@ use POSIX qw(strftime);
 
 ######################################################################
 if (grep {/^(-h|--help)$/} @ARGV) {
-	printf STDERR "usage: ./pack [<version> [<output path/file>]]\n\n";
+	printf STDERR "usage: ./pack [--keep-pod] [<version> [<output path/file>]]\n\n";
+	printf STDERR "  --keep-pod  Leave the .pod files in the runtime archive.\n".
+	              "              They are stripped by default: the documentation\n".
+	              "              is larger than the code, nothing reads it at\n".
+	              "              runtime, and releases publish it separately as\n".
+	              "              genesis-api-docs.html.\n\n";
 	exit 0;
 }
+
+# Removed from @ARGV before the positional version/output are read, so the
+# flag can appear anywhere on the command line.
+my $keep_pod = 0;
+@ARGV = grep {$_ eq '--keep-pod' ? do {$keep_pod = 1; 0} : 1} @ARGV;
 
 system "perl -c -Ilib bin/genesis";
 die "Perl compilation failed, not packing\n" if $?;
@@ -27,6 +37,11 @@ die "Could not copy library into the package staging area\n" if $?;
 
 system 'for f in $(find pkg/lib -name ".*.sw?") ; do rm "$f"; done';
 die "Could not remove swap files in the package staging area\n" if $?;
+
+unless ($keep_pod) {
+	system 'find pkg/lib -name "*.pod" -delete';
+	die "Could not strip documentation from the package staging area\n" if $?;
+}
 
 # ---
 # Version Handling
