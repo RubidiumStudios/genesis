@@ -142,6 +142,7 @@ unit-tests/genesis_hook_cloudconfig-resources.t # Resource (vm/disk type) handli
 # CI pipeline-descriptor tests
 unit-tests/genesis_ci_pipeline_descriptor-auto-update.t   # auto-update pipeline descriptor
 unit-tests/genesis_ci_pipeline_descriptor-bosh-configs.t  # bosh-configs descriptor
+unit-tests/genesis_ci_pipeline_descriptor-deploy_task.t   # plain-CLI deploy task + env branch
 unit-tests/genesis_ci_pipeline_descriptor-notifications.t # notifications descriptor
 unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library descriptor
 # Failing - feature implementation incomplete; re-enable once green

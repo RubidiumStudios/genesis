@@ -213,6 +213,15 @@ sub describe {
 		}
 	}
 
+	# The control-branch resource used to back every deploy task, which ran
+	# the CLI out of its checkout.  A CLI deploy reads the env branch
+	# instead, so it is now only wanted by the jobs that genuinely act on
+	# the control branch -- redeploy, notify, auto-update, and propagation
+	# once that lands.  Decided by reference rather than by feature flags so
+	# it stays correct as those jobs are reworked.
+	my $referenced = _referenced_resources(\@jobs);
+	@resources = grep { $_->{name} ne 'git' || $referenced->{git} } @resources;
+
 	my $pipeline = {
 		resource_types => \@resource_types,
 		resources      => \@resources,
@@ -573,32 +582,15 @@ sub _env_resources {
 		}
 	}
 
-	# Changes resource
-	my @paths;
-	if ($trigger_from) {
-		@paths = map { "$pr$_" } _unique_env_files($env, $trigger_from);
-	} else {
-		@paths = (
-			(map { "$pr$_" } _env_file_patterns($env)),
-			"${pr}ops/*", "${pr}kit-overrides.yml",
-		);
-	}
+	# Env branch resource.  Under branch propagation the branch itself is
+	# the change signal, so there is nothing to path-filter: anything that
+	# reaches this branch is by definition intended for this env.  Replaces
+	# both the path-filtered changes resource and the cache resource that
+	# carried an upstream env's files inside the control branch.
 	push @resources, {
-		name => "$alias-changes", type => 'git', icon => 'github',
-		source => { %gs, paths => \@paths },
+		name => "$alias-branch", type => 'git', icon => 'github',
+		source => { %gs, branch => $env },
 	};
-
-	# Cache resource (triggered envs only)
-	if ($trigger_from) {
-		my @cpaths = map { "$pr.genesis/cached/$trigger_from/$_" }
-			_shared_env_files($env, $trigger_from);
-		push @cpaths, "$pr.genesis/cached/$trigger_from/ops/*";
-		push @cpaths, "$pr.genesis/cached/$trigger_from/kit-overrides.yml";
-		push @resources, {
-			name => "$alias-cache", type => 'git', icon => 'github',
-			source => { %gs, paths => \@cpaths },
-		};
-	}
 
 	# BOSH config resources — emitted only when track_bosh_configs is configured
 	unless ($is_create_env) {
@@ -792,23 +784,14 @@ sub _deploy_job {
 			push @gets, { get => "$alias-$_bc_suffix{$type}", %to, trigger => JSON::PP::true };
 		}
 	}
+	# The env's branch is the only input: it carries the env's files and its
+	# push is the trigger.  Upstream ordering moves to branch propagation
+	# rather than a passed cache resource.
 	if ($is_auto || !$inline) {
-		push @gets, { get => "$alias-changes", trigger => $trigger };
+		push @gets, { get => "$alias-branch", trigger => $trigger };
 	} else {
-		push @gets, { get => "$alias-changes", trigger => JSON::PP::false,
+		push @gets, { get => "$alias-branch", trigger => JSON::PP::false,
 			passed => ["notify-$alias-$deploy_type-changes"] };
-	}
-	if ($trigger_from) {
-		my %cg = (get => "$alias-cache",
-			trigger => ($is_auto ? JSON::PP::true : JSON::PP::false));
-		$cg{passed} = [$passed_job] if $pass_cache && $passed_job;
-		push @gets, \%cg;
-	}
-	if ($trigger_from && !$pass_cache) {
-		my $gp = ($is_auto || !$inline) ? $passed_job
-			: "notify-$alias-$deploy_type-changes";
-		push @gets, { get => 'git', passed => [$gp], trigger => JSON::PP::false }
-			if $gp;
 	}
 
 	# Task library (optional external git resource with custom task files)
@@ -816,23 +799,16 @@ sub _deploy_job {
 		push @gets, $tl_get;
 	}
 
-	# Deploy task
+	# Deploy task -- the same command an operator would run by hand.  No
+	# commit-back: the deploy's own state lands in exodus.
 	my $deploy_task = {
 		task => 'bosh-deploy', %to,
 		config => $self->_task_config($ast, $env, $alias, $trigger_from, $wf_data,
-			{ command => 'ci-pipeline-deploy',
+			{ cli_args => [$env, 'deploy', '-SFy'],
 			  genesis_bindir => $bindir, genesis_srcdir => $srcdir }),
-		ensure => { put => 'git', params => { repository => 'out/git' } },
 	};
 	my @priv = @{$config->{task}{privileged} || []};
 	$deploy_task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
-
-	# Cache task
-	my $cache_task = {
-		task => 'generate-cache', %to,
-		config => $self->_cache_task_config($ast, $env, $alias, $trigger_from, $wf_data,
-			{ genesis_bindir => $bindir, genesis_srcdir => $srcdir }),
-	};
 
 	# Locker steps
 	my @lock_steps;
@@ -901,18 +877,9 @@ sub _deploy_job {
 		}
 	}
 
-	push @do, $cache_task;
-	push @do, { put => 'git', params => { repository => 'cache-out/git' } };
-
-	for my $push_env (@{$wf_data->{will_trigger}{$env} || []}) {
-		my $pa = $wf_data->{aliases}{$push_env} || $push_env;
-		if ($pass_cache) {
-			push @do, { put => "$pa-cache",
-				params => { repository => 'cache-out/git' } };
-		} else {
-			push @do, { get => "$pa-cache", %to };
-		}
-	}
+	# Cache generation and downstream cache fan-out belonged to the
+	# copy-files-within-one-branch propagation model.  Branch propagation
+	# replaces both; the cascade arrives in its own right later.
 
 	my %hooks = $self->_outcome_hooks($ast, $env, $alias, $deploy_type, $wf_data, 0);
 	my $plan_step = {};
@@ -1484,6 +1451,9 @@ sub _task_config {
 	my $sc      = $ast->integrations->{source_control} || {};
 	my $vault   = $ast->integrations->{vault} || {};
 	my $root    = $sc->{root} || '.';
+	# Deploy tasks invoke the plain CLI resolved from PATH; the shim shape
+	# below survives only for the pre-deploy show-changes task.
+	my $cli     = $opts->{cli_args};
 	my $cmd     = $opts->{command} || 'ci-pipeline-deploy';
 	my $bindir  = $opts->{genesis_bindir} || 'git';
 	my $srcdir  = $opts->{genesis_srcdir} || 'git';
@@ -1503,21 +1473,26 @@ sub _task_config {
 	}
 
 	my %params = (
-		GENESIS_HONOR_ENV    => 1,
-		CI_NO_REDACT         => $config->{unredacted} || 0,
-		CURRENT_ENV          => $env,
-		PREVIOUS_ENV         => $passed || '~',
-		CACHE_DIR            => "$alias-cache",
-		OUT_DIR              => 'out/git',
-		WORKING_DIR          => "$alias-changes",
-		GIT_BRANCH           => $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main',
-		GIT_AUTHOR_NAME      => ($sc->{commit_author} ? $sc->{commit_author}{name}  : undef)
+		CI_NO_REDACT     => $config->{unredacted} || 0,
+		CURRENT_ENV      => $env,
+		GIT_BRANCH       => $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main',
+		GIT_AUTHOR_NAME  => ($sc->{commit_author} ? $sc->{commit_author}{name}  : undef)
 			|| 'Concourse Bot',
-		GIT_AUTHOR_EMAIL     => ($sc->{commit_author} ? $sc->{commit_author}{email} : undef)
+		GIT_AUTHOR_EMAIL => ($sc->{commit_author} ? $sc->{commit_author}{email} : undef)
 			|| 'concourse@pipeline',
-		BOSH_NON_INTERACTIVE => 'true',
-		VAULT_ADDR           => $vault->{url} || '',
+		VAULT_ADDR       => $vault->{url} || '',
 	);
+
+	# Directory and mode vars addressed the retired ci-* commands' notion of
+	# an input/output/cache workspace.  The plain CLI has none of that.
+	unless ($cli) {
+		$params{GENESIS_HONOR_ENV}    = 1;
+		$params{PREVIOUS_ENV}         = $passed || '~';
+		$params{CACHE_DIR}            = "$alias-cache";
+		$params{OUT_DIR}              = 'out/git';
+		$params{WORKING_DIR}          = "$alias-changes";
+		$params{BOSH_NON_INTERACTIVE} = 'true';
+	}
 
 	if ($vault->{auth}) {
 		$params{VAULT_ROLE_ID}   = _unwrap_ref($vault->{auth}{role_id});
@@ -1537,12 +1512,16 @@ sub _task_config {
 			$params{GIT_PASSWORD} = _unwrap_ref($sc->{auth}{password});
 		}
 	}
-	$params{GIT_GENESIS_ROOT} = $root if $root ne '.';
+	$params{GIT_GENESIS_ROOT} = $root if !$cli && $root ne '.';
 	$params{DEBUG}            = $config->{debug} if $config->{debug};
 
-	my @inputs = ({ name => "$alias-changes" });
-	push @inputs, { name => "$alias-cache" } if $passed;
-	push @inputs, { name => 'git' } unless $config->{'require-passed-caches'};
+	# A CLI deploy reads the env's own branch and nothing else; the branch
+	# is both the change trigger and the source of record.
+	my @inputs = $cli ? ({ name => "$alias-branch" }) : ({ name => "$alias-changes" });
+	unless ($cli) {
+		push @inputs, { name => "$alias-cache" } if $passed;
+		push @inputs, { name => 'git' } unless $config->{'require-passed-caches'};
+	}
 
 	# Task library input — expose library files to the running task
 	if (my $tl = $config->{task_library}) {
@@ -1558,9 +1537,13 @@ sub _task_config {
 		platform       => 'linux',
 		image_resource => { type => 'registry-image', source => $img_src },
 		params         => \%params,
-		run            => { path => "$bindir/.genesis/bin/genesis", args => [$cmd] },
+		run            => $cli
+			? { path => 'genesis', args => $cli }
+			: { path => "$bindir/.genesis/bin/genesis", args => [$cmd] },
 		inputs         => \@inputs,
-		outputs        => [{ name => 'out' }],
+		# 'out' existed to stage the commit-back; exodus carries deploy
+		# state now, so a CLI deploy produces no artifact.
+		($cli ? () : (outputs => [{ name => 'out' }])),
 	};
 }
 
@@ -1866,6 +1849,31 @@ sub _extract_workflow_data {
 
 # }}}
 # _git_uri - build git URI from source_control config {{{
+# _referenced_resources - resource names any job actually uses {{{
+#
+# Walks job plans for get/put steps and task inputs.  Steps nest
+# arbitrarily (do, in_parallel, try, ensure, on_success and friends), so
+# the walk is structural rather than keyed on known step types.
+sub _referenced_resources {
+	my ($node, $seen) = @_;
+	$seen ||= {};
+
+	if (ref($node) eq 'ARRAY') {
+		_referenced_resources($_, $seen) for @$node;
+	} elsif (ref($node) eq 'HASH') {
+		$seen->{$node->{get}} = 1 if defined $node->{get} && !ref $node->{get};
+		$seen->{$node->{put}} = 1 if defined $node->{put} && !ref $node->{put};
+		$seen->{$_->{name}} = 1
+			for grep { ref eq 'HASH' && defined $_->{name} }
+				@{ $node->{inputs} || [] };
+		_referenced_resources($node->{$_}, $seen)
+			for grep { ref $node->{$_} } keys %$node;
+	}
+
+	return $seen;
+}
+
+# }}}
 sub _git_uri {
 	my ($self, $source_control) = @_;
 
