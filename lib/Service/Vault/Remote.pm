@@ -15,6 +15,33 @@ use base 'Service::Vault';
 
 ### Class Variables {{{
 my (@all_vaults, $default_vault, $current_vault);
+
+# Auth methods authenticate() will try in order, and that _has_env_creds
+# consults when gating attach()'s auto-provision fallback. Single source
+# of truth for "supported env-var-driven auth."
+my @AUTH_TYPES = (
+	{method => 'approle',  label => "AppRole",                     vars => [qw/VAULT_ROLE_ID VAULT_SECRET_ID/]},
+	{method => 'token',    label => "Vault Token",                 vars => [qw/VAULT_AUTH_TOKEN/]},
+	{method => 'userpass', label => "Username/Password",           vars => [qw/VAULT_USERNAME VAULT_PASSWORD/]},
+	{method => 'github',   label => "Github Peronal Access Token", vars => [qw/VAULT_GITHUB_TOKEN/]},
+);
+
+sub _has_env_creds {
+	for my $auth (@AUTH_TYPES) {
+		my @vars = @{$auth->{vars}};
+		return 1 if scalar(grep { $ENV{$_} } @vars) == scalar(@vars);
+	}
+	return 0;
+}
+
+sub _derive_target_name {
+	my ($url) = @_;
+	# Strip scheme, drop port, sanitize host → foo.bar.com:8200 becomes foo-bar-com.
+	my ($host) = $url =~ m{^\w+://([^/:]+)};
+	return 'vault' unless $host;
+	$host =~ tr/./-/;
+	return $host;
+}
 # }}}
 
 ### Class Methods {{{
@@ -154,13 +181,27 @@ sub attach {
 			}
 			bail $msg."\nAlter your ~/.saferc or .genesis/config to match, or add a matching target.\n";
 		} else {
-			# TODO: If alias and url was given, and in a controlling terminal, create safe target
 			return if $allow_no_vault;
-			bail "Safe target for #M{%s} not found.  Please run\n\n".
-					 "  #G{safe target <name> \"%s\"%s}\n\n".
-					 "then authenticate against it using the correct auth method before ".
-					 "re-attempting this command.",
-					 $url, $url,($opts{verify}?"":" -k");
+			if (_has_env_creds()) {
+				# .saferc has no matching target, but the deployment's secrets
+				# provider is authoritative — auto-provision from the caller's
+				# URL+opts. Gated on env creds so authenticate() will succeed
+				# on the connect_and_validate() call below.
+				my $name = $alias || _derive_target_name($url);
+				$class->create(
+					$url, $name,
+					skip_verify  => (defined($opts{verify})    ? !$opts{verify}    : 0),
+					namespace    => $opts{namespace},
+					no_strongbox => (defined($opts{strongbox}) ? !$opts{strongbox} : 0),
+				);
+				@targets = Service::Vault->find(%filter);
+			} else {
+				bail "Safe target for #M{%s} not found.  Please run\n\n".
+						 "  #G{safe target <name> \"%s\"%s}\n\n".
+						 "then authenticate against it using the correct auth method before ".
+						 "re-attempting this command.",
+						 $url, $url,($opts{verify}?"":" -k");
+			}
 		}
 	}
 	if (scalar(@targets) >1) {
@@ -248,16 +289,10 @@ sub connect_and_validate {
 sub authenticate {
 	my $self = shift;
 	my $ref = $self->ref();
-	my $auth_types = [
-		{method => 'approle',  label => "AppRole",                     vars => [qw/VAULT_ROLE_ID VAULT_SECRET_ID/]},
-		{method => 'token',    label => "Vault Token",                 vars => [qw/VAULT_AUTH_TOKEN/]},
-		{method => 'userpass', label => "Username/Password",           vars => [qw/VAULT_USERNAME VAULT_PASSWORD/]},
-		{method => 'github',   label => "Github Peronal Access Token", vars => [qw/VAULT_GITHUB_TOKEN/]},
-	];
 
 	return $self->_on_auth_success if $self->authenticated;
 	my %failed;
-	for my $auth (@$auth_types) {
+	for my $auth (@AUTH_TYPES) {
 		my @vars = @{$auth->{vars}};
 		if (scalar(grep {$ENV{$_}} @vars) == scalar(@vars)) {
 			debug "Attempting to authenticate with $auth->{label} to #M{$ref} vault";
@@ -304,7 +339,7 @@ sub authenticate {
 				join(' and ', map {"#y{\$$_}"} @{$a->{vars}}),
 				($failed{$a->{method}}) ? " #R{[present, but failed]}" : ""
 			)
-		} @{$auth_types})
+		} @AUTH_TYPES)
 	);
 }
 

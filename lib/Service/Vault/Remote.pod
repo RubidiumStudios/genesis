@@ -233,6 +233,15 @@ and an C<alias> is provided that matches one of them, that specific target
 is selected. If no alias match is found among multiple candidates, an error
 is raised.
 
+When no matching target is found in C<~/.saferc> and no similar-URL targets
+exist either, C<attach> will auto-provision a target from the caller-supplied
+C<url> and options I<if> at least one complete set of authentication
+environment variables is present (see L</"Auto-provisioning">). The
+deployment's secrets provider is treated as the authoritative source; the
+C<.saferc> file is a local cache and may be re-populated on demand. When no
+close targets exist and no env credentials are present, the historical
+"safe target not found" error is still raised.
+
 B<Parameters:>
 
 =over 4
@@ -297,9 +306,10 @@ Includes a listing of the similar targets with their differing properties.
 
 =item C<"Safe target for %s not found.  Please run\n\n  safe target <name> \"%s\"%s\n\nthen authenticate against it using the correct auth method before re-attempting this command.">
 
-Raised when no target matches and no similar targets exist. The first two
-C<%s> are the URL, and the third C<%s> is C<""> when C<verify> is true or
-C<" -k"> otherwise.
+Raised when no target matches, no similar targets exist, and no environment
+credentials are set to permit auto-provisioning. The first two C<%s> are
+the URL, and the third C<%s> is C<""> when C<verify> is true or C<" -k">
+otherwise.
 
 =item C<"Multiple safe targets found for %s:\n%s\n\nYour ~/.saferc file cannot have more than one target for the given url, namespace, insecure or strongbox combination.  ...">
 
@@ -322,6 +332,52 @@ B<Examples:>
     url      => '$VAULT_ADDR',
     no_vault => 1,
   );
+
+=head3 Auto-provisioning
+
+C<attach> fills a missing C<.saferc> target from its own arguments when:
+
+=over 4
+
+=item * No target matches the full filter (URL, namespace, strongbox, verify), AND
+
+=item * No target matches the URL alone (no "similar" targets to reconcile), AND
+
+=item * At least one complete environment-variable credential set is present:
+
+=over 4
+
+=item - AppRole:  C<VAULT_ROLE_ID> + C<VAULT_SECRET_ID>
+
+=item - Token:    C<VAULT_AUTH_TOKEN>
+
+=item - Userpass: C<VAULT_USERNAME> + C<VAULT_PASSWORD>
+
+=item - GitHub:   C<VAULT_GITHUB_TOKEN>
+
+=back
+
+=back
+
+The created target's alias is C<$alias> when supplied by the caller;
+otherwise it is derived from the URL host with dots replaced by dashes
+(e.g., C<https://vault.example.com:8200> becomes C<vault-example-com>).
+
+After C<create> writes the target, C<attach> re-runs its filtered search
+and proceeds with C<connect_and_validate>, which invokes C<authenticate>
+against the same environment variables that gated the auto-provision.
+
+The env-credentials gate exists because C<authenticate> would otherwise
+fail immediately on the auto-provisioned target with no credentials to
+try. Callers that want a target created without an authentication attempt
+(e.g., operator-driven provisioning workflows) should call
+C<Service::Vault::Remote-E<gt>create> directly instead.
+
+Bulk-provisioning CLI callers, Concourse pipeline tasks, and other
+non-interactive contexts that ship both the vault URL (via
+C<.genesis/config> or C<genesis.vault>) and one auth-method credential
+set benefit from this path: they no longer need a pre-configured
+C<.saferc> in the working directory.
 
 =head2 find
 
@@ -670,6 +726,60 @@ on, and because three of them (L</_run_renewer_loop>,
 L</_token_renewal_available>, L</renewer_pid>) exist specifically as
 test seams.
 
+=head2 _has_env_creds
+
+  return 1 if _has_env_creds();
+
+Returns true when at least one complete environment-variable credential
+set for L</authenticate> is present (all vars in one method's list are
+set to a true value).  Called by L</attach>'s auto-provision branch to
+gate creation of a C<.saferc> target from the caller-supplied URL: an
+auto-provisioned target with no credentials to try would immediately
+fail C<connect_and_validate>, so the fallback is short-circuited when
+no method could succeed.
+
+Package-scoped C<@AUTH_TYPES> (the same array L</authenticate> iterates)
+is the single source of truth for the supported methods:
+
+=over 4
+
+=item * AppRole -- C<VAULT_ROLE_ID> + C<VAULT_SECRET_ID>
+
+=item * Token -- C<VAULT_AUTH_TOKEN>
+
+=item * Userpass -- C<VAULT_USERNAME> + C<VAULT_PASSWORD>
+
+=item * GitHub -- C<VAULT_GITHUB_TOKEN>
+
+=back
+
+B<Parameters:> None.
+
+B<Returns:> C<1> if any method's env-var set is fully present, C<0>
+otherwise.
+
+=head2 _derive_target_name
+
+  my $name = _derive_target_name($url);
+
+Derives a stable, human-readable target alias from a Vault URL when the
+caller of L</attach> did not supply one for auto-provisioning.  The
+scheme and port are stripped, and dots in the host are replaced by
+dashes so the result is a valid C<safe target> alias.
+
+B<Parameters:>
+
+=over 4
+
+=item $url
+
+A Vault URL, e.g. C<https://vault.example.com:8200>.
+
+=back
+
+B<Returns:> A dashed-host string (e.g. C<vault-example-com>), or the
+literal C<'vault'> if the URL cannot be parsed to a host.
+
 =head2 _on_auth_success
 
   return $self->_on_auth_success;
@@ -950,9 +1060,34 @@ direct C<safe> CLI invocations bypassing this module) will surface a
 token expiry as a normal vault failure rather than triggering the
 prompt.
 
+=item *
+
+B<Auto-provisioning does not reconcile mismatched targets.>
+When a C<.saferc> target exists for the same URL but with a different
+namespace, strongbox, or verify setting, C<attach> raises the historical
+"similar targets" error rather than adding a second target or overwriting
+the existing one. The operator must edit C<.saferc> (or the caller's
+options) so that URL + namespace + strongbox + verify agree.
+
+=item *
+
+B<Auto-provisioned targets survive auth failure.>
+The env-credentials gate on C<attach>'s auto-provision path only checks
+that a credential set is I<present>, not that it I<works>. If
+C<connect_and_validate> subsequently fails to authenticate, the newly
+created target still lives in C<~/.saferc> for future runs. Interactive
+callers may want to remove such stale targets with C<safe target -d>.
+
+=item *
+
+B<Multi-worker C<HOME> collisions are the caller's responsibility.>
+Parallel workers that share a C<HOME> race on C<.saferc>. C<attach>'s
+auto-provision does not guard against this. Test harnesses and CI runners
+that fork per-env workers should isolate C<HOME> per worker.
+
 =back
 
-=head1 AUTHOR
+=head1 AUTHORS
 
 Written by the Genesis team.
 

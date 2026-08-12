@@ -537,6 +537,176 @@ subtest 'attach() - multiple matches without alias match throws' => sub {
 };
 
 # -------------------------------------------------------------------------
+# attach() - no match, env creds present, auto-provisions target
+# -------------------------------------------------------------------------
+subtest 'attach() - no match, approle env creds present, auto-provisions' => sub {
+	plan tests => 4;
+
+	local $ENV{VAULT_ROLE_ID}   = 'role-id';
+	local $ENV{VAULT_SECRET_ID} = 'secret-id';
+	delete local $ENV{VAULT_AUTH_TOKEN};
+	delete local $ENV{VAULT_USERNAME};
+	delete local $ENV{VAULT_PASSWORD};
+	delete local $ENV{VAULT_GITHUB_TOKEN};
+
+	my $created = make_remote(
+		url  => 'https://vault.example.com:8200',
+		name => 'my-alias',
+	);
+	my $find_call = 0;
+	my $created_flag = 0;
+	my %create_args;
+
+	no warnings 'redefine';
+	# find(): empty until create() has run, then returns the created vault.
+	# attach() calls find twice pre-create (filter, then url-only for
+	# close-target check) and once more post-create to re-locate.
+	local *Service::Vault::find = sub {
+		my ($class, %filter) = @_;
+		$find_call++;
+		return $created_flag ? ($created) : ();
+	};
+	local *Service::Vault::Remote::create = sub {
+		my ($class, $url, $name, %opts) = @_;
+		%create_args = (url => $url, name => $name, %opts);
+		$created_flag = 1;
+		return $created;
+	};
+	local *Service::Vault::Remote::connect_and_validate = sub { $_[0] };
+	use warnings 'redefine';
+
+	my $ret;
+	quietly {
+		$ret = Service::Vault::Remote->attach(
+			url   => 'https://vault.example.com:8200',
+			alias => 'my-alias',
+		);
+	};
+	ok(defined($ret), 'attach() returns a vault after auto-provisioning');
+	is($ret->{name}, 'my-alias', 'attach() returns the auto-provisioned vault');
+	is($create_args{url}, 'https://vault.example.com:8200',
+		'create() called with the attach()-supplied URL');
+	is($create_args{name}, 'my-alias',
+		'create() uses the supplied alias as target name');
+};
+
+# -------------------------------------------------------------------------
+# attach() - no match, no env creds, still throws (regression)
+# -------------------------------------------------------------------------
+subtest 'attach() - no match, no env creds, still throws' => sub {
+	plan tests => 2;
+
+	delete local $ENV{VAULT_ROLE_ID};
+	delete local $ENV{VAULT_SECRET_ID};
+	delete local $ENV{VAULT_AUTH_TOKEN};
+	delete local $ENV{VAULT_USERNAME};
+	delete local $ENV{VAULT_PASSWORD};
+	delete local $ENV{VAULT_GITHUB_TOKEN};
+
+	my $create_called = 0;
+	no warnings 'redefine';
+	local *Service::Vault::find = sub { () };
+	local *Service::Vault::Remote::create = sub { $create_called++; die 'create should not be called' };
+	use warnings 'redefine';
+
+	quietly {
+		throws_ok {
+			Service::Vault::Remote->attach(url => 'https://missing.example.com:8200')
+		} qr/Safe target for.*not found/i,
+			'attach() throws when no match and no env creds present';
+	};
+	ok(!$create_called, 'create() is not called when env creds are absent');
+};
+
+# -------------------------------------------------------------------------
+# attach() - no match, close targets present, mismatch bail wins over auto-create
+# -------------------------------------------------------------------------
+subtest 'attach() - close targets present, no auto-provision' => sub {
+	plan tests => 2;
+
+	local $ENV{VAULT_ROLE_ID}   = 'role-id';
+	local $ENV{VAULT_SECRET_ID} = 'secret-id';
+	delete local $ENV{VAULT_AUTH_TOKEN};
+	delete local $ENV{VAULT_USERNAME};
+	delete local $ENV{VAULT_PASSWORD};
+	delete local $ENV{VAULT_GITHUB_TOKEN};
+
+	my $close = make_remote(
+		url       => 'https://vault.example.com:8200',
+		name      => 'mismatched',
+		namespace => 'wrong-ns',
+		strongbox => 1,
+		verify    => 1,
+	);
+	my $find_call = 0;
+	my $create_called = 0;
+
+	no warnings 'redefine';
+	# First find() (filtered) returns empty; second find() (by URL only)
+	# returns the close-but-mismatched target.
+	local *Service::Vault::find = sub {
+		my ($class, %filter) = @_;
+		$find_call++;
+		return $find_call == 1 ? () : ($close);
+	};
+	local *Service::Vault::Remote::create = sub { $create_called++; die 'create should not be called' };
+	use warnings 'redefine';
+
+	quietly {
+		throws_ok {
+			Service::Vault::Remote->attach(
+				url       => 'https://vault.example.com:8200',
+				namespace => 'correct-ns',
+			)
+		} qr/Could not find matching safe target/i,
+			'attach() throws mismatch when close-but-different targets exist';
+	};
+	ok(!$create_called,
+		'create() is not called when close-mismatched targets are already present');
+};
+
+# -------------------------------------------------------------------------
+# attach() - no alias, auto-provisions target with derived name
+# -------------------------------------------------------------------------
+subtest 'attach() - no alias, name derived from URL host' => sub {
+	plan tests => 2;
+
+	local $ENV{VAULT_AUTH_TOKEN} = 'hvs.EXAMPLE';
+	delete local $ENV{VAULT_ROLE_ID};
+	delete local $ENV{VAULT_SECRET_ID};
+	delete local $ENV{VAULT_USERNAME};
+	delete local $ENV{VAULT_PASSWORD};
+	delete local $ENV{VAULT_GITHUB_TOKEN};
+
+	my $created = make_remote(url => 'https://vault.example.com:8200', name => 'vault-example-com');
+	my $created_flag = 0;
+	my $created_name;
+
+	no warnings 'redefine';
+	local *Service::Vault::find = sub {
+		return $created_flag ? ($created) : ();
+	};
+	local *Service::Vault::Remote::create = sub {
+		my ($class, $url, $name, %opts) = @_;
+		$created_name = $name;
+		$created_flag = 1;
+		return $created;
+	};
+	local *Service::Vault::Remote::connect_and_validate = sub { $_[0] };
+	use warnings 'redefine';
+
+	my $ret;
+	quietly {
+		$ret = Service::Vault::Remote->attach(
+			url => 'https://vault.example.com:8200',
+		);
+	};
+	ok(defined($ret), 'attach() auto-provisions without an alias');
+	is($created_name, 'vault-example-com',
+		'create() uses a URL-host-derived name when no alias supplied');
+};
+
+# -------------------------------------------------------------------------
 # target() - known alias, single result
 # -------------------------------------------------------------------------
 subtest 'target() - known alias, single result' => sub {
