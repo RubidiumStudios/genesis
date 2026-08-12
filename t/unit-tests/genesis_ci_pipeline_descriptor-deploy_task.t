@@ -143,9 +143,14 @@ subtest 'deploy task run shape is independent of source_control root' => sub {
 # =========================================================================
 
 subtest 'shim-era task params are gone' => sub {
+	# GENESIS_HONOR_ENV is deliberately NOT in this list: it has live
+	# consumers outside the retired shim.  See the subtest below.
+	# BOSH_NON_INTERACTIVE is dropped because Genesis::Env sets it itself,
+	# and PREVIOUS_ENV because its only readers resolve .genesis/cached
+	# paths, which the branch model removes.
 	my @retired = qw(
 		WORKING_DIR OUT_DIR CACHE_DIR PREVIOUS_ENV
-		GIT_GENESIS_ROOT BOSH_NON_INTERACTIVE GENESIS_HONOR_ENV
+		GIT_GENESIS_ROOT BOSH_NON_INTERACTIVE
 	);
 	plan tests => scalar @retired;
 
@@ -167,6 +172,21 @@ subtest 'params the plain CLI still consumes are kept' => sub {
 		'VAULT_ADDR survives for attach auto-provision';
 	ok exists $params->{CI_NO_REDACT},          'CI_NO_REDACT survives';
 	is $params->{GIT_BRANCH}, 'control',        'GIT_BRANCH survives';
+};
+
+subtest 'GENESIS_HONOR_ENV survives the shim retirement' => sub {
+	plan tests => 1;
+
+	# It reads as a shim-era var but is not one.  Service::BOSH strips
+	# HTTPS_PROXY/https_proxy from the environment unless it is set, which
+	# would cut a proxied network's pipeline off from its director; and
+	# Genesis::Commands::Env treats its absence as "an operator ran this at
+	# a terminal", warning on every pipeline deploy without it.
+	my $params = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh")
+		->{config}{params};
+
+	ok $params->{GENESIS_HONOR_ENV},
+		'GENESIS_HONOR_ENV is still passed to the deploy task';
 };
 
 # =========================================================================
