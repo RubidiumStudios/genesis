@@ -90,6 +90,11 @@ Requesting C<track_branch> on a repository that already has an untracked
 instance upgrades that instance in place rather than creating a second one,
 recording the current branch as the one to restore.
 
+Also calls L</provision_ci_credentials>, so a process that constructs a
+C<Service::Git> can perform remote operations with credentials supplied
+through the environment. A no-op when none are set, which is every local
+run.
+
 B<Parameters:>
 
 =over 4
@@ -1347,6 +1352,215 @@ B<Examples:>
 
   my $bool = Service::Git->is_inside_work_tree($dir);
   # returns false rather than bailing, unlike new()
+
+=head1 FUNCTIONS
+
+These are plain functions rather than methods -- credentials are a
+property of the process, not of any one repository instance.
+
+=head2 CI credentials
+
+A CI task receives git credentials as environment variables, which git
+itself cannot use: a private key has to exist as a file with restrictive
+permissions, and a password has to be answerable when git prompts for it.
+These functions bridge that gap.
+
+They exist because the retired C<ci-*> task commands used to do this work
+before handing off to Genesis. With those gone, a pipeline task invoking
+the plain CLI has no configured git credentials, so every fetch and push
+fails.
+
+=head2 Why HOME is left alone
+
+The retired task commands pointed C<HOME> at a temporary directory and
+wrote C<~/.ssh/> beneath it. That was safe when the command owned the
+whole process. It is not safe here: the same process resolves
+C<~/.saferc> and C<~/.genesis>, so relocating C<HOME> would break vault
+and repository configuration. Everything below is expressed through
+git's own environment variables instead, touching neither C<HOME> nor
+the repository's config.
+
+=head2 provision_ci_credentials
+
+  Service::Git::provision_ci_credentials();
+
+Makes environment-supplied git credentials usable, then returns. Called
+automatically by L</new>, so callers rarely invoke it directly.
+
+When C<GIT_AUTHOR_NAME> or C<GIT_AUTHOR_EMAIL> is set, mirrors it to the
+corresponding C<GIT_COMMITTER_*> variable unless that is already set. Git
+requires both identities, and a CI container rarely has C<user.name> or
+C<user.email> configured, so without this every commit fails with
+"Please tell me who you are".
+
+B<Everything else happens only when the environment carries transport
+credentials> -- that is, when C<GIT_PRIVATE_KEY> or C<GIT_USERNAME> is
+set, which in practice means a CI task and nothing else. A repository
+with no remote, or one whose operator authenticates through a credential
+helper, an ssh agent, or an interactive prompt, is left exactly as
+configured.
+
+That restraint is deliberate. Suppressing prompts unconditionally would
+turn a local workflow that asks for a password into one that fails
+outright whenever the operator's credential helper missed.
+
+Having established that it is answering prompts itself, sets
+C<GIT_TERMINAL_PROMPT> to C<0> and defaults C<GIT_ASKPASS> to
+F</bin/false>, so git fails visibly rather than blocking forever on a
+prompt no one can answer. A CI task has no terminal, which turns an
+interactive prompt into an indefinite hang. Both are set with C<//=>, so
+a caller that has already chosen values keeps them.
+
+When C<GIT_PRIVATE_KEY> is set, writes the key to a private temporary
+directory at mode C<0600> alongside an ssh config selecting it, and
+points C<GIT_SSH_COMMAND> at that config.
+
+When C<GIT_USERNAME> is set, writes an askpass helper and points
+C<GIT_ASKPASS> at it. The helper reads C<GIT_USERNAME> and
+C<GIT_PASSWORD> from its own environment rather than having them baked
+into the script, so a password containing shell metacharacters is neither
+mangled nor written to disk.
+
+Idempotent: the temporary directory is created once per process and
+subsequent calls return immediately. The directory is removed when the
+process exits.
+
+Does nothing beyond identity mirroring when neither C<GIT_PRIVATE_KEY>
+nor C<GIT_USERNAME> is present, which is every local run -- including a
+freshly initialised repository with no remote at all.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot write git ssh key: %s">
+
+Bails when the key file cannot be created, carrying the system error.
+
+=item C<"Cannot write git ssh config: %s">
+
+Bails when the ssh config cannot be created.
+
+=item C<"Cannot write git askpass helper: %s">
+
+Bails when the askpass helper cannot be created.
+
+All three are fatal rather than warnings: continuing would leave git
+without the credentials it was told to use, and the resulting failure
+would surface far from its cause as an authentication error.
+
+=back
+
+B<Examples:>
+
+  # In a CI task, with the pipeline supplying credentials:
+  #   GIT_PRIVATE_KEY=... genesis <env> deploy -SFy
+  Service::Git::provision_ci_credentials();
+  # $ENV{GIT_SSH_COMMAND} is now "ssh -F /tmp/genesis-git-creds.XXXX/ssh_config"
+
+  # Locally, or against a repository with no remote:
+  Service::Git::provision_ci_credentials();
+  # nothing is written and no git behaviour changes
+
+=head2 reset_ci_credentials
+
+  Service::Git::reset_ci_credentials();
+
+Discards the record of provisioned credentials so the next
+L</provision_ci_credentials> call materialises them again. Intended for
+tests that need to exercise several credential shapes in one process;
+production code has no reason to call it.
+
+Releasing the temporary directory also deletes it, so any path previously
+published in C<GIT_SSH_COMMAND> or C<GIT_ASKPASS> becomes invalid.
+
+B<Errors:>
+
+None.
+
+B<Examples:>
+
+  local %ENV = (%ENV);
+  $ENV{GIT_USERNAME} = 'ci-bot';
+  Service::Git::reset_ci_credentials();
+  Service::Git::provision_ci_credentials();
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _provision_ssh_key
+
+Writes C<GIT_PRIVATE_KEY> to F<key> at mode C<0600> in the supplied
+directory, writes an ssh config selecting it with C<IdentityFile> and
+C<IdentitiesOnly>, and sets C<GIT_SSH_COMMAND>.
+
+The config disables C<StrictHostKeyChecking> and discards
+C<UserKnownHostsFile>, because a CI worker is ephemeral and has no
+known_hosts to check against -- the key is the authentication.
+
+B<Errors:> as documented under L</provision_ci_credentials>.
+
+B<Examples:>
+
+  Service::Git::_provision_ssh_key('/tmp/genesis-git-creds.ab12cd');
+
+=head2 _provision_askpass
+
+Writes an executable askpass helper into the supplied directory and sets
+C<GIT_ASKPASS>. Git invokes the helper with the prompt text as its only
+argument and reads one line from stdout; the helper answers a C<Username>
+prompt with C<GIT_USERNAME> and anything else with C<GIT_PASSWORD>.
+
+B<Errors:> as documented under L</provision_ci_credentials>.
+
+B<Examples:>
+
+  Service::Git::_provision_askpass('/tmp/genesis-git-creds.ab12cd');
+  # $ENV{GIT_ASKPASS} now answers git's credential prompts
+
+=head1 LIMITATIONS
+
+=over 4
+
+=item Credentials are process-wide, not per-repository
+
+C<provision_ci_credentials> sets environment variables, so one set of
+credentials applies to every repository this process touches. A task
+operating on two repositories with different credentials is not
+supported. No current caller does that.
+
+=item The askpass helper answers any non-username prompt with the password
+
+Git prompts for more than usernames and passwords -- an ssh key
+passphrase, for instance. The helper cannot distinguish those, so it
+answers with C<GIT_PASSWORD>. Harmless in practice, since a pipeline
+supplies either a passphraseless key or a username/password pair, but it
+would misbehave with an encrypted key.
+
+=item Host key verification is disabled for ssh
+
+Deliberate, and appropriate for an ephemeral CI worker, but it means an
+ssh connection is not protected against a substituted host. A long-lived
+worker with a managed known_hosts would be better served by leaving
+C<GIT_SSH_COMMAND> unset and configuring ssh normally.
+
+=item Provisioning happens on construction, not on demand
+
+L</new> calls it, so a process that never constructs a C<Service::Git>
+never provisions credentials even if the environment carries them. That
+matches current usage, where every remote operation goes through this
+class.
+
+=item Presence of credentials is the only signal that this is CI
+
+There is no explicit "running under CI" flag; C<GIT_PRIVATE_KEY> or
+C<GIT_USERNAME> being set is taken to mean the caller wants Genesis to
+answer git's credential prompts. An operator who exports those variables
+for their own reasons would also get the prompt suppression, and would
+see a failure where they expected to be asked. Setting C<GIT_ASKPASS> or
+C<GIT_TERMINAL_PROMPT> explicitly opts back out, since both are applied
+only when unset.
+
+=back
 
 =head1 SEE ALSO
 

@@ -207,6 +207,7 @@ unit-tests/genesis_secret_rsa-core.t         # Genesis::Secret::RSA
 unit-tests/genesis_term-tableify.t           # tableify rule-only table renderer
 unit-tests/genesis_top-pipeline.t            # Top::pipeline()
 unit-tests/genesis_commands_dev-pipeline_compile.t  # dev-pipeline-compile stage renderer
+unit-tests/service_git-ci_credentials.t      # git credentials supplied via CI env vars
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/kit-core.t                        # kit operations (network-dependent at present)

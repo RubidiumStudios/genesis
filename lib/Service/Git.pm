@@ -9,6 +9,124 @@ use File::Basename qw/dirname/;
 
 ### Class State {{{
 my %_instances;  # keyed by resolved git root path
+my $_ci_credentials_dir;  # temp dir holding materialised CI credentials
+# }}}
+
+### CI Credentials {{{
+
+# provision_ci_credentials - make environment-supplied git creds usable {{{
+#
+# A CI task receives git credentials as environment variables, which git
+# itself cannot consume: a key has to exist as a file with the right mode,
+# and a password has to be answerable at prompt time.  Materialise both
+# into a private temp directory and point git at them.
+#
+# Deliberately does not move HOME.  The retired ci-* task commands did,
+# because they owned the whole process; here the same process also
+# resolves ~/.saferc and ~/.genesis, so relocating HOME would break vault
+# and repository configuration.  Everything below is therefore expressed
+# through git's own environment variables, touching neither HOME nor the
+# repository's config.
+sub provision_ci_credentials {
+	return if $_ci_credentials_dir;
+
+	# Author identity is supplied without a committer identity, and git
+	# needs both.  A CI container rarely has user.name/user.email set, so
+	# without this every commit fails with "Please tell me who you are".
+	$ENV{GIT_COMMITTER_NAME}  //= $ENV{GIT_AUTHOR_NAME}  if $ENV{GIT_AUTHOR_NAME};
+	$ENV{GIT_COMMITTER_EMAIL} //= $ENV{GIT_AUTHOR_EMAIL} if $ENV{GIT_AUTHOR_EMAIL};
+
+	# Everything below assumes a remote reached over ssh or https with
+	# credentials handed in through the environment -- which is a CI task,
+	# and nothing else.  A repository with no remote, or one whose operator
+	# authenticates through a credential helper or an agent, must be left
+	# exactly as configured: suppressing prompts there would turn a
+	# workflow that asks for a password into one that simply fails.
+	return unless $ENV{GIT_PRIVATE_KEY} || $ENV{GIT_USERNAME};
+
+	# Having established we are answering prompts ourselves, refuse to
+	# block on one we cannot answer.  A CI task has no terminal, so an
+	# interactive prompt hangs indefinitely rather than failing visibly.
+	$ENV{GIT_TERMINAL_PROMPT} //= '0';
+	$ENV{GIT_ASKPASS}         //= '/bin/false';
+
+	require File::Temp;
+	my $dir = File::Temp->newdir('genesis-git-creds.XXXXXX', TMPDIR => 1);
+	chmod 0700, "$dir";
+
+	_provision_ssh_key("$dir")  if $ENV{GIT_PRIVATE_KEY};
+	_provision_askpass("$dir")  if $ENV{GIT_USERNAME};
+
+	# Hold the object, not the path: File::Temp removes the directory when
+	# the last reference goes away, and these files must outlive this sub.
+	$_ci_credentials_dir = $dir;
+	trace("Service::Git: provisioned CI credentials in %s", "$dir");
+	return;
+}
+
+# }}}
+# reset_ci_credentials - discard provisioned credentials (testing) {{{
+sub reset_ci_credentials {
+	$_ci_credentials_dir = undef;
+	return;
+}
+
+# }}}
+# _provision_ssh_key - write the key and an ssh config that selects it {{{
+sub _provision_ssh_key {
+	my ($dir) = @_;
+
+	my $key = "$dir/key";
+	open my $fh, '>', $key or bail("Cannot write git ssh key: %s", $!);
+	print $fh $ENV{GIT_PRIVATE_KEY};
+	close $fh;
+	chmod 0600, $key;
+
+	# Host key checking is disabled because a CI worker is ephemeral and
+	# has no known_hosts to check against; the key itself is the
+	# authentication.
+	my $config = "$dir/ssh_config";
+	open my $cfh, '>', $config or bail("Cannot write git ssh config: %s", $!);
+	print $cfh <<EOF;
+Host *
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  LogLevel QUIET
+  IdentityFile $key
+  IdentitiesOnly yes
+EOF
+	close $cfh;
+
+	$ENV{GIT_SSH_COMMAND} = "ssh -F $config";
+	return;
+}
+
+# }}}
+# _provision_askpass - answer git's credential prompts from the env {{{
+sub _provision_askpass {
+	my ($dir) = @_;
+
+	# git passes the prompt text as the sole argument, and reads one line
+	# of stdout.  The script reads the values from the environment rather
+	# than having them written into it, so a password containing shell
+	# metacharacters cannot be mangled or leak via the file.
+	my $script = "$dir/askpass";
+	open my $fh, '>', $script or bail("Cannot write git askpass helper: %s", $!);
+	print $fh <<'EOF';
+#!/bin/sh
+case "$1" in
+  Username*|username*) printf '%s\n' "$GIT_USERNAME" ;;
+  *)                   printf '%s\n' "$GIT_PASSWORD" ;;
+esac
+EOF
+	close $fh;
+	chmod 0700, $script;
+
+	$ENV{GIT_ASKPASS} = $script;
+	return;
+}
+
+# }}}
 # }}}
 
 ### Constructor & Lifecycle {{{
@@ -17,6 +135,10 @@ my %_instances;  # keyed by resolved git root path
 sub new {
 	my ($class, $path, %opts) = @_;
 	$path ||= '.';
+
+	# Before any remote operation can work under CI.  A no-op when the
+	# environment carries no credentials, which is every local run.
+	provision_ci_credentials();
 
 	my ($root) = run({}, 'git', '-C', $path, 'rev-parse', '--show-toplevel');
 	chomp $root if defined $root;
