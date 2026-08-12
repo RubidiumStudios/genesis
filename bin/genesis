@@ -2442,6 +2442,44 @@ define_command("env-shell", {
 });
 
 # }}}
+# genesis dev-pipeline-compile - render one CI compiler stage from a stored AST {{{
+define_command("dev-pipeline-compile", {
+	summary => "Render a CI pipeline compiler stage from a stored AST.",
+	usage   => "dev-pipeline-compile --from <ast-file> [options]",
+	description =>
+		'This is a special command that is not intended to be used by end '.
+		'users, but rather by developers of Genesis itself.  It renders a '.
+		'single stage of the CI pipeline compiler (not the kit compiler) '.
+		"from a stored AST to stdout.\n".
+		"\n".
+		'Capture an AST with #C{genesis pipeline-apply --dry-run --skip-vault '.
+		"--debug-dir <dir>}, then render the stage you are changing: \n".
+		" #g{genesis} #G{dev-pipeline-compile} --from <dir>/02-ast-source.json\n".
+		"\n".
+		'Because the input file is fixed, rendering before and after an '.
+		'emitter change produces a diff of that change alone, with no '.
+		'repository, vault, or CI provider in the loop.',
+	function_group => Genesis::Commands::DEV,
+	scope          => 'any',
+	option_group   => Genesis::Commands::BASE_OPTIONS,
+	options => [
+		'from=s' =>
+			"Path to a stored AST, as written to 02-ast-source.json by ".
+			"`pipeline-apply --debug-dir`.  Required.",
+
+		'stage=s' =>
+			"Compiler stage to render: 'ast', 'descriptor' (default), or ".
+			"'output'.",
+
+		'format=s' =>
+			"Output format: 'yaml' (default) or 'json'.",
+
+		'platform|provider|p=s' =>
+			"CI provider to realize the pipeline through.  Consulted only ".
+			"by `--stage output`.  Defaults to 'concourse'.",
+	],
+}, 'Genesis::Commands::Dev::dev_pipeline_compile');
+# }}}
 # genesis hack - run a method with arguments inside the genesis environment {{{
 #
 define_command("hack", {

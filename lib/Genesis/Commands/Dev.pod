@@ -1,0 +1,386 @@
+=head1 NAME
+
+Genesis::Commands::Dev - developer commands for inspecting the CI pipeline
+compiler
+
+=head1 SYNOPSIS
+
+  # 1. Capture a repository's AST once
+  genesis pipeline-apply --dry-run --skip-vault --debug-dir /tmp/dbg
+
+  # 2. Render the stage you are changing
+  genesis dev-pipeline-compile --from /tmp/dbg/02-ast-source.json > before.yml
+
+  # 3. Edit the emitter, then render again and diff
+  genesis dev-pipeline-compile --from /tmp/dbg/02-ast-source.json > after.yml
+  diff -u before.yml after.yml
+
+  # Other stages and formats
+  genesis dev-pipeline-compile --from ast.json --stage ast
+  genesis dev-pipeline-compile --from ast.json --stage output --platform concourse
+  genesis dev-pipeline-compile --from ast.json --format json
+
+=head1 DESCRIPTION
+
+C<genesis dev-pipeline-compile> renders a single stage of the CI pipeline
+compiler from a stored AST and writes it to stdout.  It exists so that
+emitter changes can be inspected as a diff without a repository, a vault,
+or a Concourse target in the loop.
+
+Note that "compiler" here means C<Genesis::CI::Compiler>, which turns
+pipeline configuration into provider YAML.  It is unrelated to kit
+compilation (C<genesis compile-kit>); the C<pipeline> in the command name
+marks that distinction.
+
+The CI pipeline compiler runs seven stages: parse, validate, discover scripts, build
+AST, resolve the generic pipeline (C<PipelineDescriptor>), run the
+provider, and apply provider overrides.  C<pipeline-apply --debug-dir>
+already writes every stage to a directory.  What it cannot do is start
+from a I<hypothetical> topology, and it re-runs the whole chain on every
+invocation.  C<dev-pipeline-compile> starts at the AST, so:
+
+=over 4
+
+=item *
+
+A synthetic topology can be hand-written as JSON and rendered directly.
+Test fixtures such as F<t/fixtures/ci/lmelt-topology.json> double as
+C<dev-pipeline-compile> inputs.
+
+=item *
+
+The input is fixed across an edit, so a diff of two renders isolates the
+emitter change from repository or vault drift.
+
+=item *
+
+Neither git, vault, nor a CI provider needs to be reachable.
+
+=back
+
+This is a C<DEV> function-group command.  Like C<genesis hack>, it is not
+intended for end users and does not appear in C<genesis help>.
+
+=head1 DESIGN CONSIDERATIONS
+
+=head2 Why --from is mandatory
+
+C<dev-pipeline-compile> deliberately refuses to compile from the current
+repository.  That path already exists as C<pipeline-apply --debug-dir>,
+and duplicating its C<Genesis::Top> and vault plumbing here would create a
+second definition of "how a repository becomes an AST" that could drift
+from the real one.  Requiring C<--from> keeps this command a pure function
+of its input file.
+
+=head2 Why 'parsed' is not a stage
+
+The C<parsed> stage precedes AST construction.  A stored AST is downstream
+of it and cannot reproduce it, so offering C<--stage parsed> would either
+lie or require the repository path this command exists to avoid.  Use
+C<pipeline-apply --debug-dir> and read F<01-parsed.json> instead.
+
+=head2 Why the house YAML serializer
+
+C<--format yaml> renders through
+C<Genesis::CI::Compiler::PipelineProvider::dump_yaml>, the same serializer
+the providers use.  A different YAML encoder would produce cosmetic
+differences (key order, quoting, flow style) that show up as diff noise
+and obscure the emitter change being reviewed.
+
+=head1 FUNCTIONS
+
+=head2 dev_pipeline_compile
+
+Command entry point for C<genesis dev-pipeline-compile>.  Reads options via
+C<get_options>, renders the requested stage, and prints it to stdout.
+Returns true.
+
+Options:
+
+=over 4
+
+=item C<--from> I<file> (required)
+
+Path to a JSON file in the shape of C<pipeline-apply --debug-dir>'s
+F<02-ast-source.json>.  Bails with a message naming that command when
+omitted.
+
+=item C<--stage> I<name> (default C<descriptor>)
+
+One of C<ast>, C<descriptor>, or C<output>.  See L</stage_data>.
+
+=item C<--format> I<name> (default C<yaml>)
+
+One of C<yaml> or C<json>.  See L</render>.
+
+=item C<--platform> I<name> (default C<concourse>)
+
+Provider to realize the pipeline through.  Consulted only by
+C<--stage output>.
+
+=back
+
+B<Errors:>
+
+=over 4
+
+=item C<"--from <file> is required">
+
+Bails when C<--from> is absent.  The message names C<pipeline-apply
+--debug-dir> as the way to produce one, because that is the only
+supported source of a well-formed AST file.
+
+=back
+
+Errors raised by the functions below propagate unchanged.
+
+B<Examples:>
+
+  # Render the descriptor (the default) as YAML
+  genesis dev-pipeline-compile --from /tmp/dbg/02-ast-source.json
+
+  # Diff an emitter change
+  genesis dev-pipeline-compile --from ast.json > before.yml
+  # ... edit lib/Genesis/CI/Compiler/PipelineDescriptor.pm ...
+  genesis dev-pipeline-compile --from ast.json > after.yml
+  diff -u before.yml after.yml
+
+=head2 load_ast_file
+
+  my $ast = Genesis::Commands::Dev::load_ast_file($path);
+
+Decodes a JSON file and returns a C<Genesis::CI::Compiler::AST>.
+
+The file's top-level keys are passed to C<< AST->new >> verbatim.  This
+works because C<pipeline-apply --debug-dir> writes exactly the keys that
+constructor accepts (C<branches>, C<integrations>, C<targets>,
+C<workflows>, C<configuration>, C<provider_config>, C<triggers>,
+C<resources>, C<metadata>, C<scripts>) -- the dump is a round-trip, not a
+separate format.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot read AST file %s: no such file">
+
+Bails when the path is undefined or is not a regular file.
+
+=item C<"Cannot parse AST file %s: %s">
+
+Bails when the file is not valid JSON, carrying the decoder's own
+message.
+
+=item C<"AST file %s must contain a JSON object">
+
+Bails when the file decodes to something other than a hash -- typically a
+bare array, from dumping the wrong debug artifact.
+
+All three bail rather than returning an empty AST, so a bad path or a
+stale dump fails immediately instead of rendering an empty pipeline that
+looks like an emitter regression.
+
+=back
+
+B<Examples:>
+
+  my $ast = Genesis::Commands::Dev::load_ast_file(
+      '/tmp/dbg/02-ast-source.json'
+  );
+  # returns a Genesis::CI::Compiler::AST
+
+=head2 stage_data
+
+  my $data = Genesis::Commands::Dev::stage_data($ast, $stage, $platform);
+
+Returns one compiler stage as a plain Perl data structure.
+
+=over 4
+
+=item C<ast>
+
+The AST's Genesis-semantic half -- C<metadata>, C<scripts>, and each
+C<_source> accessor.  Round-trips through L</load_ast_file>, so it is also
+the way to normalize a hand-written fixture.
+
+=item C<descriptor>
+
+The generic pipeline from C<< PipelineDescriptor->describe() >>:
+C<resource_types>, C<resources>, C<jobs>, C<groups>.  This is the stage
+most emitter work changes, and the default.
+
+=item C<output>
+
+The descriptor realized through a provider -- for Concourse, the
+C<pipeline.yml> that C<fly> consumes.  Returns a filename-to-content hash.
+Publishes the descriptor onto the AST first, since providers read only the
+generic half.
+
+=back
+
+B<Errors:>
+
+=over 4
+
+=item C<"Unknown stage %s: expected one of %s">
+
+Bails on an unrecognized stage name rather than returning empty, so a
+typo fails loudly instead of looking like an emitter that produced
+nothing.  The message lists the valid stages.
+
+=back
+
+C<--stage output> additionally propagates errors from
+L</_provider_output>.
+
+B<Examples:>
+
+  my $ast  = Genesis::Commands::Dev::load_ast_file($path);
+
+  my $src  = Genesis::Commands::Dev::stage_data($ast, 'ast');
+  # { metadata => {...}, workflows => {...}, ... }
+
+  my $desc = Genesis::Commands::Dev::stage_data($ast, 'descriptor');
+  # { resource_types => [...], resources => [...], jobs => [...] }
+
+  my $out  = Genesis::Commands::Dev::stage_data($ast, 'output', 'concourse');
+  # { 'pipeline.yml' => "---\ngroups:\n..." }
+
+=head2 render
+
+  my $text = Genesis::Commands::Dev::render($data, $format);
+
+Serializes a data structure for stdout.  C<yaml> (the default) uses the
+providers' own serializer; C<json> is pretty-printed and canonical, so
+key order is stable across runs and diffs stay minimal.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Unknown format %s: expected one of %s">
+
+Bails on an unrecognized format name.  The message lists the valid
+formats.
+
+=back
+
+B<Examples:>
+
+  print Genesis::Commands::Dev::render($descriptor, 'yaml');
+  # ---
+  # jobs:
+  #   - name: lmelt-vsphere-canwest-1-lab-bosh
+  # ...
+
+  print Genesis::Commands::Dev::render($descriptor, 'json');
+  # pretty-printed, canonical key order
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _source_data
+
+Collects the AST's source half into a plain hash.  Accessors absent from
+the AST class are skipped rather than stored as undef, so the output
+tracks whatever C<_source> keys the AST actually defines.
+
+B<Errors:>
+
+None.  Missing accessors are skipped rather than raised, since the set of
+C<_source> keys is the AST class's to define.
+
+B<Examples:>
+
+  my $source = Genesis::Commands::Dev::_source_data($ast);
+  # { metadata => {...}, scripts => {...}, branches => {...}, ... }
+
+=head2 _provider_output
+
+Resolves and instantiates a provider, then runs C<generate_from_ast>.
+Normalizes a scalar return into a C<< { 'pipeline.yml' => $content } >>
+hash so callers see one shape.
+
+Constructs the provider without a C<top>.  A stored AST carries no
+repository, so provider paths that require repo state are unavailable
+here -- see L</LIMITATIONS>.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Unknown CI provider %s.  Valid types: %s">
+
+Bails when the platform name does not resolve to a provider class.  The
+valid list comes from C<< PipelineProvider->known_providers >>, so it
+stays correct as providers are added.
+
+=item C<"Failed to load CI provider '%s': %s">
+
+Bails when the provider class resolves but its file will not load,
+carrying the C<require> error.  Distinguished from the above so a typo in
+a provider name is not confused with a broken provider module.
+
+=back
+
+B<Examples:>
+
+  $ast->set_pipeline($descriptor);
+  my $files = Genesis::Commands::Dev::_provider_output($ast, 'concourse');
+  # { 'pipeline.yml' => "---\ngroups:\n..." }
+
+=head1 LIMITATIONS
+
+=over 4
+
+=item Legacy-sourced ASTs cannot render C<--stage output>
+
+C<Providers::Concourse::generate_from_ast> routes ASTs whose
+C<metadata.source> is C<legacy> and whose C<provider_config> carries
+C<_legacy_pipeline_raw> through C<_generate_from_legacy_ast>, which
+requires a C<top>.  Because C<_provider_output> passes none, such an AST
+falls through to native generation instead, which will not match what
+C<pipeline-apply> produces for the same repository.  C<--stage ast> and
+C<--stage descriptor> are unaffected.  Use C<pipeline-apply --debug-dir>
+for legacy pipelines.
+
+=item Provider options are not settable
+
+C<_provider_output> passes an empty C<provider_opts>.  A pipeline whose
+output depends on C<ci.provider.*> settings, or on C<--ci-*> CLI flags,
+will render with provider defaults rather than the repository's
+configuration.  Provider-option plumbing is deferred until an emitter
+change actually needs it.
+
+=item Reaches into a private resolver
+
+C<_provider_output> calls
+C<< Genesis::CI::Compiler->_resolve_provider_class >>, which is private by
+convention.  It is used rather than a local provider-name table so that
+the set of valid providers has exactly one definition; the coupling should
+be revisited if that resolver is ever promoted to a public API.
+
+=item No C<parsed> stage
+
+By construction -- see L</Why 'parsed' is not a stage>.
+
+=item Not covered by the pipeline provider's override step
+
+C<--stage output> stops after C<generate_from_ast>.  Compiler stage 7
+(C<_apply_provider_overrides>) is not applied, so a repository using
+provider overrides will see a difference between
+C<dev-pipeline-compile --stage output> and the deployed pipeline.
+
+=back
+
+=head1 AUTHOR
+
+Genesis Community
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2025 Genesis Community
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
+
+=cut
