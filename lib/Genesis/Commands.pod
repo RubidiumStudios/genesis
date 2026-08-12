@@ -239,6 +239,20 @@ descriptions for help output.
 
 =item C<deprecated> - If set, the command is flagged as deprecated.  The
 value may be a replacement command name string to include in the warning.
+The command still runs after the warning is emitted.  Mutually exclusive
+with C<retired>.
+
+=item C<retired> - If set, the command is registered so C<has_command>
+still recognizes it and dispatch bails with a targeted retirement
+message, but the command is hidden from the default C<genesis help>
+catalog.  It is re-surfaced under C<genesis help --all>, parallel to
+commands in the DEPRECATED function group.  The value may be a scalar
+message or a hashref of the form C<{message =E<gt> "..."}>; the message
+is included in the bail output.  Use for commands that must not execute
+under this Genesis version (e.g., pipeline tasks that would produce a
+silent-but-wrong deploy if the pipeline has not been migrated first).
+Mutually exclusive with C<deprecated>; declaring both causes
+C<define_command> to bail with a bug diagnostic.
 
 =item C<extended_usage> - A coderef returning extended usage text appended
 to command-specific help.
@@ -255,6 +269,20 @@ and the command name with hyphens replaced by underscores.
 =back
 
 B<Returns:> Nothing.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Command %s declares both retired and deprecated; use retired alone once the command no longer runs.">
+
+Raised via C<bug> when a single C<define_command> call supplies both
+the C<retired> and C<deprecated> properties.  The two are mutually
+exclusive -- C<retired>'s refuse-to-run always trumps C<deprecated>'s
+warn-and-run, so declaring both leaves the intent ambiguous.  Remove
+C<deprecated> once the command has been retired.
+
+=back
 
 B<Examples:>
 
@@ -376,14 +404,30 @@ B<Examples:>
   run_command();
 
 Dispatches execution to the closure registered for the current command.
-Prints a deprecation warning if the command has a C<deprecated> property,
-then calls the registered function with C<@COMMAND_ARGS> and exits with
+If the command has a C<retired> property, C<run_command> bails with the
+retirement message and never invokes the function.  Otherwise, prints
+a deprecation warning if the command has a C<deprecated> property, then
+calls the registered function with C<@COMMAND_ARGS> and exits with
 status 0 on success.
 
 If the current command has no registered handler, prints an error via
 C<command_help> and exits with status 1.
 
 B<Returns:> Does not return -- calls C<exit 0> on success.
+
+B<Errors:>
+
+=over 4
+
+=item C<"The %s command has been retired and cannot be run.%s">
+
+Raised via C<bail> when the current command has a C<retired> property.
+The first C<%s> is the canonical command name; the second is the
+retirement message from the property value (blank if the property was
+set to a true scalar with no message), preceded by two newlines.  See
+C<retired> under L</define_command> for how commands opt in.
+
+=back
 
 B<Examples:>
 

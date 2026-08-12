@@ -816,4 +816,102 @@ subtest 'constants' => sub {
 	is(Genesis::Commands::ENV_OPTIONS, 3, "ENV_OPTIONS is 3");
 };
 
+# ============================================================================
+# Retired-command dispatch
+# ============================================================================
+
+subtest 'retired command - run_command refuses and function not invoked' => sub {
+	reset_commands_state();
+
+	my $ran = 0;
+	# The sub dies after setting the flag so run_command's own exit 0
+	# doesn't escape throws_ok in the RED path where the check is absent.
+	define_command('retired-cmd', {
+		retired => "This command has been retired. Migrate the pipeline first.",
+	}, sub { $ran = 1; die "sub should not have been invoked when retired\n" });
+
+	prepare_command('retired-cmd');
+
+	quietly {
+		throws_ok { run_command() }
+			qr/retired-cmd.*retired.*cannot be run/is,
+			'run_command bails when the command is marked retired';
+	};
+	is($ran, 0, 'the command function is not invoked when retired');
+};
+
+subtest 'retired command - registry still records the command' => sub {
+	reset_commands_state();
+
+	define_command('retired-visible', {
+		retired => "gone in v3.2",
+	}, sub { });
+
+	ok(has_command('retired-visible'),
+		'has_command() still returns true so --help can annotate the command');
+	is(scalar(grep { $_ eq 'retired-visible' } commands()), 1,
+		'commands() lists the retired command');
+};
+
+subtest 'retired command - hidden from command_help listing' => sub {
+	reset_commands_state();
+
+	define_command('visible-cmd', {
+		summary        => 'A visible command',
+		function_group => Genesis::Commands::GENESIS,
+	});
+	define_command('retired-cmd', {
+		summary        => 'A retired command',
+		function_group => Genesis::Commands::GENESIS,
+		retired        => "gone in v3.2",
+	}, sub { });
+
+	my ($stdout, $stderr) = output_from {
+		exits_zero { command_help() } "command_help exits 0";
+	};
+
+	like($stderr,   qr/visible-cmd/,  "non-retired commands appear in help");
+	unlike($stderr, qr/retired-cmd/,  "retired commands do not appear in help");
+};
+
+subtest 'retired command - surfaced by help --all (parallel to DEPRECATED)' => sub {
+	reset_commands_state();
+
+	define_command('visible-cmd', {
+		summary        => 'A visible command',
+		function_group => Genesis::Commands::GENESIS,
+	});
+	define_command('retired-cmd', {
+		summary        => 'A retired command',
+		function_group => Genesis::Commands::GENESIS,
+		retired        => "gone in v3.2",
+	}, sub { });
+
+	# Simulate `genesis help --all`
+	$Genesis::Commands::COMMAND_OPTIONS = { all => 1 };
+
+	my ($stdout, $stderr) = output_from {
+		exits_zero { command_help() } "command_help --all exits 0";
+	};
+
+	like($stderr, qr/visible-cmd/,
+		"non-retired commands still appear under --all");
+	like($stderr, qr/retired-cmd/,
+		"retired commands are surfaced under --all");
+};
+
+subtest 'define_command - retired + deprecated together is rejected' => sub {
+	reset_commands_state();
+
+	quietly {
+		throws_ok {
+			define_command('confused-cmd', {
+				retired    => "gone",
+				deprecated => "replacement",
+			}, sub { })
+		} qr/retired.*deprecated|deprecated.*retired/i,
+			'define_command dies when both retired and deprecated are set';
+	};
+};
+
 done_testing;

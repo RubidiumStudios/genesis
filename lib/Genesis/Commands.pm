@@ -183,6 +183,14 @@ sub define_command { # {{{
 	if ($PROPS{$name}{extended_handlers}) {
 		$PROPS{$name}{option_passthrough} = 1;
 	}
+
+	# retired and deprecated are mutually exclusive — retired's refuse-to-run
+	# always trumps deprecated's warn-and-run, so declaring both is a bug.
+	bug(
+		"Command #C{$name} declares both #y{retired} and #y{deprecated}; ".
+		"use #y{retired} alone once the command no longer runs."
+	) if $PROPS{$name}{retired} && defined($PROPS{$name}{deprecated});
+
 	my $fn_require = '';
 	if (ref($fn) ne "CODE") {
 		if (defined($fn)) {
@@ -244,6 +252,13 @@ sub prepare_command { # {{{
 sub run_command { # {{{
 	command_help("Unrecognized command '$CALLED'")
 		unless defined($RUN{$COMMAND});
+	if (my $retired = command_properties()->{retired}) {
+		my $reason = ref($retired) ? ($retired->{message} // '') : $retired;
+		bail(
+			"The #G{$COMMAND} command has been retired and cannot be run.%s",
+			$reason ? "\n\n$reason" : ''
+		);
+	}
 	if (defined(command_properties()->{deprecated})) {
 		my $msg =
 			"The #G{$COMMAND} command has been deprecated, and will be ".
@@ -516,9 +531,19 @@ sub command_help { # {{{
 		)."\n".
 		"\n";
 
-	my @commands = grep {defined($PROPS{$_}) && $PROPS{$_}{function_group}{order} >= 0} (commands);
-	push @commands, (grep {defined($PROPS{$_}) && $PROPS{$_}{function_group}{order} < 0} (commands))
-		if get_options->{all};
+	# Retired commands stay registered so dispatch bails with a targeted
+	# message, but they don't belong in the default operator-facing help
+	# catalog.  Parallel to the DEPRECATED function group: hidden by default,
+	# surfaced by --all.
+	my @commands = grep {
+		defined($PROPS{$_})
+		&& $PROPS{$_}{function_group}{order} >= 0
+		&& !$PROPS{$_}{retired}
+	} (commands);
+	push @commands, (grep {
+		defined($PROPS{$_})
+		&& ($PROPS{$_}{function_group}{order} < 0 || $PROPS{$_}{retired})
+	} (commands)) if get_options->{all};
 
 	my %function_groups;
 	$function_groups{$_->{order} < 0 ? 100 - $_->{order} : $_->{order}} = $_->{label} || $_->{module} for (
