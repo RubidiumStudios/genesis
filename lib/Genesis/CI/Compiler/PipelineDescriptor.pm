@@ -1473,6 +1473,11 @@ sub _task_config {
 	}
 
 	my %params = (
+		# Two live consumers, both of which the pipeline needs: Service::BOSH
+		# preserves HTTPS_PROXY only when it is set (a proxied network cannot
+		# reach its director otherwise), and deploy reads it to tell a CI run
+		# from an operator at a terminal.
+		GENESIS_HONOR_ENV => 1,
 		CI_NO_REDACT     => $config->{unredacted} || 0,
 		CURRENT_ENV      => $env,
 		GIT_BRANCH       => $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main',
@@ -1486,7 +1491,6 @@ sub _task_config {
 	# Directory and mode vars addressed the retired ci-* commands' notion of
 	# an input/output/cache workspace.  The plain CLI has none of that.
 	unless ($cli) {
-		$params{GENESIS_HONOR_ENV}    = 1;
 		$params{PREVIOUS_ENV}         = $passed || '~';
 		$params{CACHE_DIR}            = "$alias-cache";
 		$params{OUT_DIR}              = 'out/git';
