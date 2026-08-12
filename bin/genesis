@@ -1886,8 +1886,25 @@ define_command("describe", {
 	]
 });
 # }}}
+# Shared retirement rationale for the legacy ci-* pipeline commands.
+# They stay registered so `genesis <cmd> --help` still explains what they
+# used to do, but run_command refuses to invoke them so a legacy pipeline
+# fires loudly instead of producing a silent-but-inconsistent deploy on
+# a Genesis version whose implementation may diverge from what compiled
+# the pipeline.
+my $CI_LEGACY_RETIRED = join("\n",
+	"This deployment repository's Concourse pipeline was compiled against",
+	"a prior Genesis version and calls a task that no longer runs.  ",
+	"Refusing here avoids a silent-but-inconsistent deploy caused by ".
+	"behavior drift between Genesis versions.",
+	"",
+	"Migrate the pipeline (or regenerate it against a compatible Genesis",
+	"version) before allowing it to run again.",
+);
+
 # genesis ci-pipeline-deploy - Deploy via the CI/CD Pipeline {{{
 define_command("ci-pipeline-deploy", {
+	retired => $CI_LEGACY_RETIRED,
 	summary => "Deploy an environment.",
 	usage => "ci-pipeline-deploy [<options...>]",
 	description =>
@@ -1965,6 +1982,7 @@ define_command("ci-pipeline-deploy", {
 # }}}
 # genesis ci-show-changes - Show what changes would be deployed based on changes and upstream cache via the CI/CD Pipeline {{{
 define_command("ci-show-changes", {
+	retired => $CI_LEGACY_RETIRED,
 	summary => "Show what changes would be deployed based on changes and upstream cache via the CI/CD Pipeline",
 	usage => "ci-show-changes [<options...>]",
 	description => "",
@@ -1977,6 +1995,7 @@ define_command("ci-show-changes", {
 # }}}
 # genesis ci-generate-cache - Generate cache for an environment via the CI/CD Pipeline {{{
 define_command("ci-generate-cache", {
+	retired => $CI_LEGACY_RETIRED,
 	summary => "Generate cache for an environment via the CI/CD Pipeline",
 	usage => "ci-generate-cache [<options...>]",
 	description => "",
@@ -2022,6 +2041,7 @@ define_command("ci-generate-cache", {
 # genesis ci-pipeline-run-errand - Run arbitrary errands via the CI/CD Pipeline {{{
 
 define_command("ci-pipeline-run-errand", {
+	retired => $CI_LEGACY_RETIRED,
 	summary => "Run arbitrary errands via the CI/CD Pipeline",
 	usage => "ci-pipeline-run-errand [<options...>]",
 	function_group => Genesis::Commands::PIPELINE,
