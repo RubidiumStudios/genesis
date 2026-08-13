@@ -19,6 +19,13 @@ set -ue
 
 DRY_RUN="${DRY_RUN:-}"
 
+# Repository root, from this script's own location (t/bin/end-testing).
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+
+# Where t/bin/vault puts the versioned binary it downloads.  Only vaults
+# started from here belong to the test suite.
+VAULT_DIR="$ROOT/t/vaults/"
+
 # Test scripts, and the Test::TCP forks that share their command line.
 # Matched on the manifest's directory layout rather than on "perl", which
 # would catch unrelated work.
@@ -27,8 +34,13 @@ TEST_PATTERN='t/(sanity|unit|integration|e2e)-tests/.*\.t'
 # The runner itself, so it stops scheduling new files.
 RUNNER_PATTERN='prove .*(sanity|unit|integration|e2e)-tests'
 
-# Same patterns helper.pm uses when it reaps orphaned vaults on import;
-# kept identical so the two cannot drift.
+# helper.pm reaps orphaned vaults on import using these patterns alone.
+# That is too broad: an operator's own `safe local -m` runs as
+#   vault server -config /var/folders/.../kazoo…
+# which matches, so a test run kills a vault it did not start.  These are
+# kept for the command-line match but are ALWAYS paired with the
+# executable living under t/vaults (see reap_vaults), which is what makes
+# the distinction.
 VAULT_PATTERNS=('vault.*server.*-config' 'vault-.*listen')
 
 # pids_for <pattern> [exe-regex] -- pids whose command line matches the
@@ -43,11 +55,18 @@ VAULT_PATTERNS=('vault.*server.*-config' 'vault-.*listen')
 # 16 characters: long enough to render t/vaults/vault-1.0.2-darwin as
 # "/Users/dennis.be", which matches nothing and reaps no vaults.
 pids_for() {
-	local pattern=$1 exe_re=${2:-.}
+	local pattern=$1 exe_re=${2:-.} exe_prefix=${3:-}
 	ps -eo pid=,command= \
-		| awk -v p="$pattern" -v e="$exe_re" \
-			'{ if ($2 ~ e && $0 ~ p) print $1 }'
+		| awk -v p="$pattern" -v e="$exe_re" -v x="$exe_prefix" \
+			'{
+				if (x != "" && index($2, x) != 1) next
+				if ($2 ~ e && $0 ~ p) print $1
+			}'
 }
+
+# exe_prefix is an exact string compared with index(), not a regex: a
+# repository path may contain regex metacharacters, and escaping them to
+# decide what to kill is a poor trade against a literal comparison.
 
 describe() {
 	local pid=$1
@@ -57,10 +76,10 @@ describe() {
 # reap <signal> <exe-regex> <pattern...> -- signal everything matching,
 # reporting each
 reap() {
-	local sig=$1 exe_re=$2; shift 2
+	local sig=$1 exe_re=$2 exe_prefix=$3; shift 3
 	local found=0 pid pattern
 	for pattern in "$@"; do
-		for pid in $(pids_for "$pattern" "$exe_re"); do
+		for pid in $(pids_for "$pattern" "$exe_re" "$exe_prefix"); do
 			found=1
 			if [[ -n "$DRY_RUN" ]]; then
 				printf '  would %-5s %s\n' "$sig" "$(describe "$pid")"
@@ -86,13 +105,14 @@ PERL_EXE='(perl|prove)$'
 VAULT_EXE='(vault|safe)'
 
 echo "test runners:"
-reap TERM "$PERL_EXE" "$RUNNER_PATTERN" && any=1 || echo "  none"
+reap TERM "$PERL_EXE" "" "$RUNNER_PATTERN" && any=1 || echo "  none"
 
 echo "test processes and their forks:"
-reap TERM "$PERL_EXE" "$TEST_PATTERN" && any=1 || echo "  none"
+reap TERM "$PERL_EXE" "" "$TEST_PATTERN" && any=1 || echo "  none"
 
-echo "vault servers:"
-reap TERM "$VAULT_EXE" "${VAULT_PATTERNS[@]}" && any=1 || echo "  none"
+echo "vault servers (only those under t/vaults):"
+reap TERM "$VAULT_EXE" "$VAULT_DIR" "${VAULT_PATTERNS[@]}" && any=1 \
+	|| echo "  none"
 
 if [[ -n "$DRY_RUN" ]]; then
 	echo "dry run -- nothing terminated"
@@ -107,22 +127,35 @@ if [[ $any -eq 1 ]]; then
 
 	echo "survivors:"
 	{
-		reap KILL "$PERL_EXE"  "$RUNNER_PATTERN" "$TEST_PATTERN"
-		reap KILL "$VAULT_EXE" "${VAULT_PATTERNS[@]}"
+		reap KILL "$PERL_EXE"  ""           "$RUNNER_PATTERN" "$TEST_PATTERN"
+		reap KILL "$VAULT_EXE" "$VAULT_DIR" "${VAULT_PATTERNS[@]}"
 	} | grep . || echo "  none"
 fi
 
-# The symptom that sends people looking for a code bug.  Report it rather
-# than leaving it to surface as four failing files.
-echo "ports:"
+# A held port is the symptom that sends people looking for a code bug, so
+# report it rather than leaving it to surface as four failing files.
+#
+# Reported by ownership, not by port number: t/bin/vault scans upward from
+# 8200 for a free port, and an operator's own vault sits in the same
+# range, so the number alone cannot say whose it is.
+echo "ports still held by this repository:"
 held=0
-for port in 25555 8200 8201; do
-	if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-		held=1
-		echo "  $port STILL HELD:"
-		lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | tail -n +2 | sed 's/^/    /'
-	fi
+
+# 25555 is the fake BOSH director's fixed port -- always ours.
+if lsof -nP -iTCP:25555 -sTCP:LISTEN >/dev/null 2>&1; then
+	held=1
+	lsof -nP -iTCP:25555 -sTCP:LISTEN 2>/dev/null | tail -n +2 | sed 's/^/  /'
+fi
+
+# Any listener whose executable came out of t/vaults.
+for pid in $(lsof -nP -iTCP -sTCP:LISTEN -t 2>/dev/null | sort -u); do
+	exe=$(ps -p "$pid" -o command= 2>/dev/null | awk '{print $1}')
+	[[ -n "$exe" && "$exe" == "$VAULT_DIR"* ]] || continue
+	held=1
+	ps -p "$pid" -o pid=,command= 2>/dev/null | cut -c1-110 | sed 's/^/  /'
 done
-[[ $held -eq 0 ]] && echo "  25555, 8200, 8201 free"
+
+[[ $held -eq 0 ]] && echo "  none"
+exit 0
 
 echo "Done."
