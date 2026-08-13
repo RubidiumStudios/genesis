@@ -1,0 +1,128 @@
+#!/bin/bash
+#
+# Terminate a test run and everything it spawned.
+#
+# An interrupted `make test` leaves children behind: fake BOSH directors
+# are Test::TCP forks of the test script, and vault servers are
+# backgrounded by t/bin/vault, so neither dies with the runner.  An
+# orphan holding port 25555 makes the next run fail in four unrelated
+# files with "Address already in use", which reads as a code regression
+# rather than a stale process.
+#
+# helper.pm reaps orphaned vaults on import but nothing reaps the test
+# processes themselves.  This does both.
+#
+# Usage:
+#   make end-testing            terminate
+#   make end-testing DRY_RUN=1  list what would be terminated
+set -ue
+
+DRY_RUN="${DRY_RUN:-}"
+
+# Test scripts, and the Test::TCP forks that share their command line.
+# Matched on the manifest's directory layout rather than on "perl", which
+# would catch unrelated work.
+TEST_PATTERN='t/(sanity|unit|integration|e2e)-tests/.*\.t'
+
+# The runner itself, so it stops scheduling new files.
+RUNNER_PATTERN='prove .*(sanity|unit|integration|e2e)-tests'
+
+# Same patterns helper.pm uses when it reaps orphaned vaults on import;
+# kept identical so the two cannot drift.
+VAULT_PATTERNS=('vault.*server.*-config' 'vault-.*listen')
+
+# pids_for <pattern> [exe-regex] -- pids whose command line matches the
+# pattern AND whose executable matches exe-regex (default: any).
+#
+# The executable filter is not decoration.  A command line merely
+# CONTAINING a test path matches the pattern -- including the shell that
+# launched the run, or a `bash -c` mentioning one -- so filtering on the
+# command line alone will happily kill the caller.
+#
+# It compares argv[0] rather than `ps -o comm=`, which macOS truncates to
+# 16 characters: long enough to render t/vaults/vault-1.0.2-darwin as
+# "/Users/dennis.be", which matches nothing and reaps no vaults.
+pids_for() {
+	local pattern=$1 exe_re=${2:-.}
+	ps -eo pid=,command= \
+		| awk -v p="$pattern" -v e="$exe_re" \
+			'{ if ($2 ~ e && $0 ~ p) print $1 }'
+}
+
+describe() {
+	local pid=$1
+	ps -p "$pid" -o pid=,etime=,command= 2>/dev/null | cut -c1-110
+}
+
+# reap <signal> <exe-regex> <pattern...> -- signal everything matching,
+# reporting each
+reap() {
+	local sig=$1 exe_re=$2; shift 2
+	local found=0 pid pattern
+	for pattern in "$@"; do
+		for pid in $(pids_for "$pattern" "$exe_re"); do
+			found=1
+			if [[ -n "$DRY_RUN" ]]; then
+				printf '  would %-5s %s\n' "$sig" "$(describe "$pid")"
+			else
+				printf '  %-5s %s\n' "$sig" "$(describe "$pid")"
+				kill "-$sig" "$pid" 2>/dev/null || true
+			fi
+		done
+	done
+	return $((1 - found))
+}
+
+echo "Ending test run..."
+
+any=0
+
+# prove is itself a perl script, so both run as perl.
+PERL_EXE='(perl|prove)$'
+
+# Unanchored: t/bin/vault downloads a versioned binary, so the executable
+# is t/vaults/vault-1.0.2-darwin rather than plain "vault".  Matching the
+# executable path (never a shell's) keeps this from catching callers.
+VAULT_EXE='(vault|safe)'
+
+echo "test runners:"
+reap TERM "$PERL_EXE" "$RUNNER_PATTERN" && any=1 || echo "  none"
+
+echo "test processes and their forks:"
+reap TERM "$PERL_EXE" "$TEST_PATTERN" && any=1 || echo "  none"
+
+echo "vault servers:"
+reap TERM "$VAULT_EXE" "${VAULT_PATTERNS[@]}" && any=1 || echo "  none"
+
+if [[ -n "$DRY_RUN" ]]; then
+	echo "dry run -- nothing terminated"
+	exit 0
+fi
+
+# Give the TERM handlers a chance before insisting.  Test::TCP children
+# and vault both clean up their sockets on TERM; killing immediately
+# leaves the port in TIME_WAIT and the next run fails anyway.
+if [[ $any -eq 1 ]]; then
+	sleep 2
+
+	echo "survivors:"
+	{
+		reap KILL "$PERL_EXE"  "$RUNNER_PATTERN" "$TEST_PATTERN"
+		reap KILL "$VAULT_EXE" "${VAULT_PATTERNS[@]}"
+	} | grep . || echo "  none"
+fi
+
+# The symptom that sends people looking for a code bug.  Report it rather
+# than leaving it to surface as four failing files.
+echo "ports:"
+held=0
+for port in 25555 8200 8201; do
+	if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+		held=1
+		echo "  $port STILL HELD:"
+		lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | tail -n +2 | sed 's/^/    /'
+	fi
+done
+[[ $held -eq 0 ]] && echo "  25555, 8200, 8201 free"
+
+echo "Done."

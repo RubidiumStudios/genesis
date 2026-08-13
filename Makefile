@@ -53,6 +53,12 @@ test: sanity-test
 
 test-all: sanity-test unit-tests integration-tests e2e-tests
 
+# Terminate a test run and the children it leaves behind -- fake BOSH
+# directors are Test::TCP forks and vault servers are backgrounded, so
+# neither dies with the runner.  DRY_RUN=1 lists without terminating.
+end-testing:
+	@t/bin/end-testing
+
 unit-tests: sanity-test
 	@echo "Running unit tests (library/module level)..."
 	@SKIP_SECRETS_TESTS=yes prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests)
