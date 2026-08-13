@@ -71,10 +71,19 @@ sub import {
 		exit 2
 	}
 
-	# Kill orphaned vault and fake BOSH processes from prior test runs
-	for my $pattern ('vault.*server.*-config', 'vault-.*listen') {
-		my @pids = map { /^\s*(\d+)/ ? $1 : () } `ps ax | grep '$pattern' | grep -v grep`;
-		kill 'TERM', @pids if @pids;
+	# Kill orphaned vaults from prior test runs -- but only ones this
+	# suite started.  Matching the command line alone also matches an
+	# operator's own `safe local -m`, which runs as
+	#   vault server -config /var/folders/.../kazoo...
+	# so importing helper anywhere killed a vault the suite never owned.
+	# t/bin/vault puts its binary under t/vaults, so requiring the
+	# executable to live there is what distinguishes ours.
+	my $vault_dir = "${TOPDIR}/t/vaults/";
+	for my $line (`ps -eo pid=,command= 2>/dev/null`) {
+		my ($pid, $exe) = $line =~ /^\s*(\d+)\s+(\S+)/ or next;
+		next unless index($exe, $vault_dir) == 0;
+		next unless $line =~ /vault.*server.*-config|vault-.*listen/;
+		kill 'TERM', $pid;
 	}
 
 	# Clear out t/tmp each test
