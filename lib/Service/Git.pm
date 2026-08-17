@@ -656,36 +656,69 @@ sub fetch_branch {
 sub fetch_branches {
 	my ($self, $names, $remote) = @_;
 	$remote //= $self->default_remote;
-	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self
+	my $noop = { ok => 1, kind => 'success', fetched => [], absent => [] };
+	return wantarray ? ($self, $noop) : $self
 		unless $remote && $names && @$names;
-	my $current  = $self->current_branch // '';
-	my @refspecs = map { "+refs/heads/$_:refs/heads/$_" }
-	               grep { $_ ne $current } @$names;
-	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self
-		unless @refspecs;
+	my $current = $self->current_branch // '';
+	my @want    = grep { $_ ne $current } @$names;
+	return wantarray ? ($self, $noop) : $self unless @want;
 
 	my %env;
 	$env{GIT_TERMINAL_PROMPT} = '0' unless in_controlling_terminal();
+	my %opts = (dir => $self->{root}, (%env ? (env => \%env) : ()));
 
-	my ($out, $rc, $err) = run({
-		dir => $self->{root},
-		(%env ? (env => \%env) : ()),
-	}, 'git', 'fetch', $remote, @refspecs);
+	# Ask the remote what it has before fetching.  A refspec naming a
+	# branch the remote lacks aborts the entire fetch, so one absent env
+	# branch would leave every other branch unrefreshed.  Patterns are
+	# fully qualified because ls-remote matches the tail of a ref: a bare
+	# "qa" would also match refs/heads/team/qa.
+	my ($out, $rc, $err) = run({%opts},
+		'git', 'ls-remote', '--heads', $remote,
+		map { "refs/heads/$_" } @want);
+	return wantarray
+		? ($self, { ok => 0, kind => _classify_remote_error($err), err => $err // '',
+		            fetched => [], absent => [] })
+		: $self
+		if $rc;
 
-	if ($rc) {
-		my $emsg = $err // '';
-		my $kind = $emsg =~ /could not resolve host|network is unreachable|operation timed out|connection refused/i
-			? 'network'
-			: $emsg =~ /authentication failed|permission denied|terminal prompts disabled|could not read username|could not read password/i
-				? 'auth'
-				: 'unknown';
+	my %on_remote;
+	for my $line (split /\n/, ($out // '')) {
+		$on_remote{$1} = 1 if $line =~ m{\srefs/heads/(\S+)\s*$};
+	}
+	my @present = grep {  $on_remote{$_} } @want;
+	my @absent  = grep { !$on_remote{$_} } @want;
+
+	if (@present) {
+		my ($fout, $frc, $ferr) = run({%opts}, 'git', 'fetch', $remote,
+			map { "+refs/heads/$_:refs/heads/$_" } @present);
 		return wantarray
-			? ($self, { ok => 0, kind => $kind, err => $emsg })
-			: $self;
+			? ($self, { ok => 0, kind => _classify_remote_error($ferr), err => $ferr // '',
+			            fetched => [], absent => \@absent })
+			: $self
+			if $frc;
+
+		# Only branches actually fetched are known to exist.  Absent on
+		# the remote says nothing about local state -- pipeline-prepare
+		# creates env branches before anything pushes them -- so leave
+		# those cache entries for branch_exists to resolve locally.
+		$self->{_branch_cache}{$_} = 1 for @present;
 	}
 
-	$self->{_branch_cache}{$_} = 1 for grep { $_ ne $current } @$names;
-	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self;
+	return wantarray
+		? ($self, { ok => 1, kind => 'success', fetched => \@present, absent => \@absent })
+		: $self;
+}
+
+# }}}
+# _classify_remote_error - bucket a git transport error for the caller {{{
+sub _classify_remote_error {
+	my ($err) = @_;
+	my $emsg = $err // '';
+	return 'network'
+		if $emsg =~ /could not resolve host|network is unreachable|operation timed out|connection refused/i;
+	return 'auth'
+		if $emsg =~ /authentication failed|permission denied|terminal prompts disabled|could not read username|could not read password/i;
+	return 'unknown';
 }
 
 # }}}

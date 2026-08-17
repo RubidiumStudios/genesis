@@ -1168,11 +1168,37 @@ B<Examples:>
   $git->fetch_branches(\@names);
   my ($self, $result) = $git->fetch_branches(\@names, $remote);
 
-Fetches several branches in one git invocation.
+Fetches several branches in one git invocation, reporting which of them the
+remote actually has.
+
+B<The remote is asked before it is fetched from.> A refspec naming a branch
+the remote lacks aborts the entire fetch -- git reports
+C<couldn't find remote ref> and updates nothing, so a single absent branch
+would leave every other branch in the list unrefreshed. An C<ls-remote>
+probe resolves the set first, and only branches the remote confirms are
+fetched. The rest come back in C<absent>, which is a report and not an
+error.
+
+B<Absence on the remote says nothing about local state.> A branch may exist
+locally and nowhere else -- C<pipeline-prepare> creates env branches before
+anything pushes them. So a branch listed in C<absent> leaves the branch
+cache untouched, and C<branch_exists> continues to answer for it from local
+refs. Only branches actually fetched are recorded as known-to-exist.
+
+B<Callers use C<absent> to decide whether a branch may be created.> Local
+absence alone is not grounds: the clone may simply be fresh or stale, and
+creating a branch that already exists on the remote forks it from the real
+history. C<absent> is the authoritative answer to "does this branch exist
+anywhere". See C<Genesis::Env::prepare_branch>, which will not create a
+branch the remote already has.
 
 B<One invocation, so credentials are prompted once> regardless of how many
 branches are listed. Fetching them individually turns a ten-branch refresh
-into ten prompts.
+into ten prompts. The probe adds one round trip, not one per branch.
+
+Probe patterns are fully qualified (C<refs/heads/qa>, not C<qa>) because
+C<ls-remote> matches the tail of a ref: a bare C<qa> also matches
+C<refs/heads/team/qa>.
 
 The currently checked-out branch is skipped: git refuses to update an active
 branch through a refspec, and including it would fail the whole fetch.
@@ -1180,12 +1206,12 @@ branch through a refspec, and including it would fail the whole fetch.
 B<Failures are classified rather than merely reported.> In list context the
 result distinguishes a network problem from an authentication problem from
 anything else, so a caller can tell an operator which one they are looking
-at. Scalar context returns C<$self> alone, which is what earlier callers
-expect.
+at. Both stages are classified the same way. Scalar context returns C<$self>
+alone, which is what earlier callers expect.
 
-Outside a controlling terminal, C<GIT_TERMINAL_PROMPT=0> is set so a missing
-credential fails immediately instead of hanging on a prompt nobody can
-answer.
+Outside a controlling terminal, C<GIT_TERMINAL_PROMPT=0> is set on both the
+probe and the fetch, so a missing credential fails immediately instead of
+hanging on a prompt nobody can answer.
 
 B<Parameters:>
 
@@ -1204,12 +1230,25 @@ Defaults to C<default_remote>.
 B<Returns:> In scalar context, C<$self>. In list context,
 C<($self, \%result)>, where the hashref carries C<ok> (1 on success or
 no-op, 0 on a real failure), C<kind> (C<success>, C<network>, C<auth> or
-C<unknown>), and C<err> (git's stderr, only when C<ok> is 0).
+C<unknown>), C<fetched> and C<absent> (arrayrefs partitioning the requested
+names by what the remote had), and C<err> (git's stderr, only when C<ok> is
+0).
+
+B<Errors:> Never raises. Transport failures are returned as C<ok =E<gt> 0>
+with a C<kind>; a branch the remote does not have is returned in C<absent>.
+Callers that want a hard failure -- C<Genesis::Top::fetch_pipeline_envs> --
+raise on the classified result themselves.
 
 B<Examples:>
 
   my ($git, $r) = $git->fetch_branches(['staging', 'prod']);
-  # returns ($self, { ok => 1, kind => 'success' })
+  # returns ($self, { ok => 1, kind => 'success',
+  #                   fetched => ['staging','prod'], absent => [] })
+
+  my ($git, $r) = $git->fetch_branches(['staging', 'brand-new']);
+  # returns ($self, { ok => 1, kind => 'success',
+  #                   fetched => ['staging'], absent => ['brand-new'] })
+  # staging is still refreshed -- the absent branch does not poison it
 
   my ($git, $r) = $git->fetch_branches(\@branches);
   # returns ($self, { ok => 0, kind => 'auth', err => '...' })
@@ -1486,6 +1525,45 @@ B<Examples:>
   Service::Git::provision_ci_credentials();
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _classify_remote_error
+
+  my $kind = _classify_remote_error($stderr);
+
+Buckets a git transport error into C<network>, C<auth> or C<unknown>.
+
+Shared by the probe and fetch stages of L</fetch_branches> so the two cannot
+drift into classifying the same failure differently -- the operator-facing
+advice ("you are offline" versus "fix your credentials") depends on it.
+
+Matching is on git's stderr text, which is not a stable interface. An
+unrecognised message lands in C<unknown>, which callers surface verbatim, so
+a missed pattern degrades to a less helpful message rather than a wrong one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$stderr>
+
+Git's stderr. C<undef> is treated as empty.
+
+=back
+
+B<Returns:> One of C<network>, C<auth>, C<unknown>.
+
+B<Errors:> None. Every input yields a bucket.
+
+B<Examples:>
+
+  _classify_remote_error('fatal: Could not resolve host: github.com');
+  # returns 'network'
+
+  _classify_remote_error('fatal: Authentication failed for ...');
+  # returns 'auth'
+
+  _classify_remote_error(undef);
+  # returns 'unknown'
 
 =head2 _provision_ssh_key
 
