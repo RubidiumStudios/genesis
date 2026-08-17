@@ -186,6 +186,26 @@ sub capture_log {
 	($warns, $debugs);
 }
 
+subtest 'fetch_pipeline_envs - a branch the remote lacks is not a failure' => sub {
+	plan tests => 1;
+
+	# An environment whose branch exists nowhere yet is the ordinary state
+	# of a repository that has not been prepared, and it is what propagate's
+	# missing-branch bail exists to diagnose.  Raising here would preempt
+	# that bail with a raw git error and leave the operator without the
+	# pipeline-prepare hint.
+	my $top = make_ci_top();
+	put_env($top, $_) for qw(qa lab);
+	my $git = mock_git(
+		default_remote => 'origin',
+		result         => { ok => 1, kind => 'success',
+		                    fetched => ['qa'], absent => ['lab'] },
+	);
+
+	is $top->fetch_pipeline_envs($git), 1,
+		'absent branches are reported by fetch_branches, not raised here';
+};
+
 subtest 'fetch_pipeline_envs - network failure bails with --no-fetch hint' => sub {
 	plan tests => 1;
 
