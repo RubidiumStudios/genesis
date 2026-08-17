@@ -9,6 +9,12 @@ t/repos/compiled-kit-test/new-env.yml
 
 /genesis-*
 /artifacts
+
+# Written by `make test` on success, read by .githooks/pre-push.  Local
+# to each checkout: it records what THIS machine has verified.
+/.test-state
+/.test-state.pending
+
 # The POD browser is a build product, never committed.  ci/scripts/release
 # generates it per release and attaches it as genesis-api-v<version>.html,
 # so a copy in the tree would only ever be one someone forgot to refresh.

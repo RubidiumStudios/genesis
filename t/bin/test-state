@@ -1,0 +1,204 @@
+#!/bin/bash
+#
+# Record that the suite passed, and check whether that record still
+# applies to the working tree.
+#
+# `make test` calls `begin` before the run and `commit` after it passes;
+# the pre-push hook calls `check`.  The record is promoted ONLY on green,
+# so its absence or staleness is itself the failure signal -- there is no
+# separate failures file to keep in sync.
+#
+# Staleness is decided on content, and only on content.
+#
+# An earlier version compared mtimes first as a fast path.  Measured on
+# 845 tracked files that saved 60ms -- 20ms against 80ms -- on an
+# operation that then spends seconds on the network.  It cost a great
+# deal more than it saved: mtime has one-second granularity, so an edit
+# landing in the same second as the snapshot compared equal and was
+# waved through, and avoiding that meant reasoning about which side of
+# the comparison was allowed to be lenient.  Hashing is the authority,
+# so it is now the only thing consulted.
+#
+# Hashing is also what makes a rebase survivable: checkout, rebase and
+# stash rewrite mtimes on files whose content never changed, and a gate
+# that refused after every rebase would train everyone to reach for
+# --no-verify.
+#
+# Usage:
+#   t/bin/test-state begin      # snapshot the tree about to be tested
+#   t/bin/test-state commit     # promote that snapshot after a green run
+#   t/bin/test-state record     # snapshot and promote in one step
+#   t/bin/test-state check      # exit 0 if the record covers the tree
+#   t/bin/test-state hash       # print the current content hash
+#
+# begin/commit exist because a full run takes minutes, and hashing at the
+# end would record whatever the tree looks like by then -- including
+# edits made while the suite was running, which it never tested.  The
+# snapshot is taken up front and only promoted if the run passes.
+set -ue
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+STATE="$ROOT/.test-state"
+PENDING="$ROOT/.test-state.pending"
+
+# Is this path prose that no test reads?
+#
+# The rule is "documentation, unless it lives in the test tree".  An
+# extension match alone is not safe: t/repos/compile-test-genesis-kit
+# carries a README.md and a ci/release_notes.md that the kit-compilation
+# tests consume, so a .md under t/ can absolutely change a result.
+#
+# Everything else blocks, and the exclusions are deliberate:
+#
+#   .pod    t/sanity-tests/pod-complete.t validates POD structure, so a
+#           POD edit can genuinely fail the suite.
+#   .pm     even comment-only.  A comment may be commented-out code, and
+#           POD blocks and heredocs change how the file parses.
+#   Makefile, t/bin/*, t/test-manifest.txt
+#           they decide what runs and how.
+#   .gitignore
+#           it changes `git ls-files`, which is what the manifest below
+#           is built from.
+#   .githooks/*
+#           the gate itself.
+#   ci/, examples/ (non-prose)
+#           pipeline and sample configuration; not prose, and either
+#           could become a fixture.
+# Legal and governance files are never documentation for this purpose,
+# whatever they are named.  A licence is plausibly written as Markdown,
+# so leaving it to the extension rule would let LICENSE.md through as
+# prose -- and a licence being quietly swapped is precisely the change
+# that should not ride along unnoticed in a documentation push.
+#
+# This does not PREVENT such a change; it only denies it the quiet path,
+# so it has to go through a full run. Preventing it is a review concern
+# -- CODEOWNERS on these paths.
+LEGAL_FILES='LICENSE|LICENCE|COPYING|NOTICE|PATENTS|AUTHORS'
+
+is_doc() {
+	local path=$1 name=${path##*/}
+
+	# Kit fixtures under t/ carry prose the tests actually read.
+	[[ $path == t/* ]] && return 1
+
+	[[ $name =~ ^(${LEGAL_FILES})(\..*)?$ ]] && return 1
+
+	[[ $path == *.md ]]
+}
+
+# One line per tracked file: "<sha>  <path>".  Stored in full rather than
+# reduced to a digest so `check` can report WHICH files moved, and decide
+# whether they were only documentation.
+manifest() {
+	cd "$ROOT"
+	git ls-files -z | xargs -0 shasum 2>/dev/null
+}
+
+# Digest of that manifest, for the cheap same-or-not comparison.
+content_hash() {
+	manifest | shasum | awk '{print $1}'
+}
+
+stored_manifest() {
+	sed -n '/^--$/,$p' "$STATE" 2>/dev/null | tail -n +2
+}
+
+# Paths differing between the record and the tree.  sed rather than awk
+# so a path containing spaces survives.
+changed_paths() {
+	diff <(stored_manifest) <(manifest) 2>/dev/null \
+		| sed -n 's/^[<>] [0-9a-f]*  //p' \
+		| sort -u
+}
+
+stored_hash() {
+	awk '/^hash /{print $2; exit}' "$STATE" 2>/dev/null
+}
+
+case "${1:-}" in
+
+(begin)
+	{
+		echo "# Written by 'make test' on success.  Do not edit."
+		echo "# Consulted by .githooks/pre-push -- see t/bin/test-state."
+		echo "date $(date -u +%FT%TZ)"
+		echo "head $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+		echo "hash $(content_hash)"
+		echo "--"
+		manifest
+	} > "$PENDING"
+	;;
+
+(commit)
+	if [[ ! -f "$PENDING" ]]; then
+		echo "No pending test state -- run 'make test' rather than this directly." >&2
+		exit 2
+	fi
+	mv "$PENDING" "$STATE"
+	echo "Recorded passing test state."
+	;;
+
+(record)
+	"$0" begin && "$0" commit
+	;;
+
+(check)
+	if [[ ! -f "$STATE" ]]; then
+		cat >&2 <<-EOF
+
+		[test-gate] No record of a passing test run.
+
+		  Run 'make test'.  It records success automatically.
+		  To push anyway: git push --no-verify
+
+		EOF
+		exit 1
+	fi
+
+	if [[ "$(content_hash)" == "$(stored_hash)" ]]; then
+		exit 0
+	fi
+
+	# Content genuinely differs.  Before refusing, ask what moved: a
+	# change confined to files no test reads cannot have changed a
+	# result, and demanding a twelve minute suite for a typo in a README
+	# is how a gate teaches people to bypass it.
+	changed=$(changed_paths)
+	blocking=0
+	while IFS= read -r path; do
+		[[ -n "$path" ]] || continue
+		is_doc "$path" || blocking=1
+	done <<<"$changed"
+
+	if [[ -n "$changed" && $blocking -eq 0 ]]; then
+		echo "[test-gate] documentation only, allowing:" >&2
+		sed 's/^/  /' <<<"$changed" >&2
+		exit 0
+	fi
+
+	cat >&2 <<-EOF
+
+	[test-gate] The tree has changed since the last passing run.
+
+	  Recorded: $(awk '/^date /{print $2}' "$STATE" 2>/dev/null || echo unknown)
+	  Run 'make test' to re-verify.
+	  To push anyway: git push --no-verify
+
+	Changed:
+	EOF
+	# Documentation listed too, so it is clear it was not the deciding
+	# factor -- the entries that are not documentation are.
+	sed 's/^/  /' <<<"$changed" >&2
+	echo >&2
+	exit 1
+	;;
+
+(hash)
+	content_hash
+	;;
+
+(*)
+	echo "usage: t/bin/test-state {begin|commit|record|check|hash}" >&2
+	exit 2
+	;;
+esac

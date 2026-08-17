@@ -1,0 +1,90 @@
+#!/bin/bash
+#
+# Refuse to push code the suite has not passed on, and refuse outright to
+# push a change to a legal document.
+#
+# Installed by `make hooks`, which points core.hooksPath here.  Hooks
+# live outside the working tree by default and are never cloned, so
+# keeping them tracked is the only way they reach anyone else.
+#
+# Bypass with `git push --no-verify`.
+set -ue
+
+ROOT=$(git rev-parse --show-toplevel)
+REMOTE=${1:-origin}
+
+# Legal and governance documents, whatever their extension.  Kept in step
+# with t/bin/test-state, which also refuses to treat them as prose.
+LEGAL_RE='(^|/)(LICENSE|LICENCE|COPYING|NOTICE|PATENTS|AUTHORS)(\.[^/]*)?$'
+
+# A passing suite says the code works.  It says nothing about whether
+# relicensing the project was intended, so testing must not be able to
+# authorise it.  That is why this compares against what is already
+# published rather than against the test record: re-running the suite
+# regenerates that record, and would otherwise unlock the change.
+check_legal() {
+	local base=$1 tip=$2 changed
+
+	changed=$(git diff --name-only "$base" "$tip" 2>/dev/null | grep -E "$LEGAL_RE" || true)
+	[[ -n "$changed" ]] || return 0
+
+	cat >&2 <<-EOF
+
+	[test-gate] This push changes a legal document.
+
+	EOF
+	sed 's/^/  /' <<<"$changed" >&2
+	cat >&2 <<-EOF
+
+	  Running the test suite does not clear this: a passing suite says
+	  the code works, not that relicensing was intended.
+
+	  If the change is deliberate: git push --no-verify
+
+	EOF
+	return 1
+}
+
+# git feeds us one line per ref:  <local ref> <local sha> <remote ref> <remote sha>
+# A deletion has an all-zero local sha and carries no code, so it needs
+# no test run -- refusing those would make cleaning up a merged branch
+# require an eleven minute suite.
+deletions_only=yes
+legal_ok=yes
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+	[[ -n "${local_sha:-}" ]] || continue
+	[[ "$local_sha" =~ ^0+$ ]] && continue
+	deletions_only=no
+
+	# What is already published, to diff against.  For a branch the
+	# remote has never seen, fall back to where it forks from the
+	# remote's default branch.
+	base=$remote_sha
+	if [[ "$base" =~ ^0+$ ]]; then
+		base=$(git merge-base "$local_sha" "refs/remotes/$REMOTE/HEAD" 2>/dev/null || true)
+	fi
+
+	if [[ -z "$base" ]]; then
+		# No baseline, so whether this push introduces a legal change is
+		# unanswerable.  Fail closed: the alternative is to wave through
+		# exactly the case this check exists for.
+		cat >&2 <<-EOF
+
+		[test-gate] Cannot determine what '$REMOTE' already has for this
+		branch, so a legal-document change cannot be ruled out.
+
+		  Fetch from '$REMOTE' and retry, or: git push --no-verify
+
+		EOF
+		legal_ok=no
+		continue
+	fi
+
+	check_legal "$base" "$local_sha" || legal_ok=no
+done
+
+[[ "$legal_ok" == yes ]] || exit 1
+[[ "$deletions_only" == yes ]] && exit 0
+
+exec "$ROOT/t/bin/test-state" check

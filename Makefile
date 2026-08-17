@@ -49,7 +49,19 @@ coverage:
 
 test: sanity-test
 	@echo "Running all tests from manifest..."
+	@t/bin/test-state begin
 	@prove -lf $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests unit-tests integration-tests e2e-tests)
+	@t/bin/test-state commit
+
+# Point git at the tracked hooks.  Hooks live in .git/hooks by default,
+# which is neither tracked nor cloned, so this is what makes them apply
+# to anyone but their author.  Worktrees share the common git directory,
+# so one invocation covers all of them.
+hooks:
+	@git config core.hooksPath .githooks
+	@echo "core.hooksPath -> .githooks"
+	@echo "pre-push now requires a passing 'make test' for the current tree."
+	@echo "Bypass an individual push with: git push --no-verify"
 
 test-all: sanity-test unit-tests integration-tests e2e-tests
 
