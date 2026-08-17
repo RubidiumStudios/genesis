@@ -473,16 +473,24 @@ sub propagate {
 	# list when the branch is absent -- so without this the run reports
 	# "nothing to propagate" and exits successfully having done nothing.
 	if (my @missing = _missing_env_branches($git, \@scope)) {
+		# Not `genesis new <env>`: these environments already exist on the
+		# control branch, and only their branches are missing.  Creating
+		# them is what pipeline-prepare is for.
+		my $one = (@missing == 1);
 		bail(
 			"No branch exists for %s:\n%s\n\n".
 			"Propagation compares each environment's branch against %s, so an\n".
 			"absent branch cannot be told apart from one with no changes.\n\n".
-			"Create them with #C{genesis new <env>} on the %s branch%s.",
-			(@missing == 1 ? "this environment" : "these environments"),
+			"Create %s with #C{%s}%s.",
+			($one ? "this environment" : "these environments"),
 			join("\n", map {"  #C{$_}"} @missing),
-			$control, $control,
+			$control,
+			($one ? "it" : "them"),
+			($one ? "genesis $missing[0] pipeline-prepare"
+			      : "genesis pipeline-prepare"),
 			($opts->{'no-fetch'}
-				? ", or drop #C{--no-fetch} if they exist on the remote"
+				? ($one ? ", or drop #C{--no-fetch} if it exists on the remote"
+				        : ", or drop #C{--no-fetch} if they exist on the remote")
 				: "")
 		);
 	}
