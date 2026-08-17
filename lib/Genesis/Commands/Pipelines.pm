@@ -505,6 +505,26 @@ sub propagate {
 		@scope = @dag_order;
 	}
 
+	# An env branch that does not exist is a broken topology, not an env
+	# with nothing to do.  The per-env diff below is
+	# `git diff <env-branch>..<sha>`, which fails and returns an empty
+	# list when the branch is absent -- so without this the run reports
+	# "nothing to propagate" and exits successfully having done nothing.
+	if (my @missing = _missing_env_branches($git, \@scope)) {
+		bail(
+			"No branch exists for %s:\n%s\n\n".
+			"Propagation compares each environment's branch against %s, so an\n".
+			"absent branch cannot be told apart from one with no changes.\n\n".
+			"Create them with #C{genesis new <env>} on the %s branch%s.",
+			(@missing == 1 ? "this environment" : "these environments"),
+			join("\n", map {"  #C{$_}"} @missing),
+			$control, $control,
+			($opts->{'no-fetch'}
+				? ", or drop #C{--no-fetch} if they exist on the remote"
+				: "")
+		);
+	}
+
 	my $control_short = $git->sha($control_sha, short => 1);
 	if ($after_env) {
 		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s} #G{(certified by %s)}\n",
@@ -525,7 +545,8 @@ sub propagate {
 	#                    deployed it.
 	my (%env_changed, %env_changed_detail, %env_undeployed, %env_skipped_ahead);
 	for my $env_name (@scope) {
-		next unless $git->branch_exists($env_name);
+		# Every env in scope is known to have a branch: the guard above
+		# bails otherwise, rather than skipping and reporting nothing.
 		my $env = eval { $top->load_env($env_name) };
 		next unless $env;
 
@@ -725,6 +746,17 @@ sub _summarize_load_error {
 	return $reason;
 }
 
+# _missing_env_branches - envs in scope that have no branch {{{
+#
+# Kept separate from propagate() so the decision can be tested without a
+# repository: the command needs a working tree, a DAG and a vault before
+# it reaches this point.
+sub _missing_env_branches {
+	my ($git, $scope) = @_;
+	return grep {!$git->branch_exists($_)} @$scope;
+}
+
+# }}}
 sub _resolve_propagation_base {
 	my ($branch, $git) = @_;
 	$git ||= Service::Git->new('.');
