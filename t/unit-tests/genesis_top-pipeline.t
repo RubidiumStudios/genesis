@@ -234,6 +234,113 @@ subtest 'fetch_pipeline_envs - unknown failure bails with raw err' => sub {
 		'unknown failure bails with raw err and --no-fetch hint';
 };
 
+# ======================================================================
+# pipeline_topology
+#
+# The single answer to "what environments are in this pipeline, and in
+# what order".  Before this existed the question had two implementations
+# -- Top::envs by glob, and ASTBuilder::_build_from_env_files by DAG --
+# which agreed by coincidence rather than by construction, and the DAG
+# one was private and called from four places.
+# ======================================================================
+
+# Helper: env yaml carrying a genesis.pipeline.prior_env edge.
+sub put_env_after {
+	my ($top, $name, $prior) = @_;
+	put_file($top->path("$name.yml"), <<"EOF");
+---
+kit:
+  name:    dev
+  version: latest
+  features: []
+genesis:
+  env: $name
+  pipeline:
+    prior_env: $prior
+EOF
+}
+
+subtest 'pipeline_topology - empty when CI is not configured' => sub {
+	plan tests => 2;
+
+	my $top = make_top(name => 'no-ci', no_vault => 1);
+	my $topo = $top->pipeline_topology;
+
+	is_deeply $topo->{nodes}, {}, 'no nodes without CI configured';
+	is_deeply $topo->{order}, [],  'no order without CI configured';
+};
+
+subtest 'pipeline_topology - every valid env is a node' => sub {
+	plan tests => 2;
+
+	# Envs with no genesis.pipeline block still belong: pipeline-status
+	# reports on them, and pipeline-prepare must give them branches.
+	my $top = make_ci_top();
+	put_env($top, $_) for qw(alpha beta);
+
+	my $topo = $top->pipeline_topology;
+	is_deeply [sort keys %{$topo->{nodes}}], [qw(alpha beta)],
+		'envs without pipeline metadata are still nodes';
+	is_deeply $topo->{edges}, [], 'and carry no edges';
+};
+
+subtest 'pipeline_topology - prior_env becomes an edge' => sub {
+	plan tests => 3;
+
+	my $top = make_ci_top();
+	put_env($top, 'mgmt');
+	put_env_after($top, 'lab', 'mgmt');
+
+	my $topo = $top->pipeline_topology;
+	is_deeply $topo->{edges}, [{from => 'mgmt', to => 'lab'}],
+		'prior_env produces one edge';
+	is $topo->{parent_of}{lab}, 'mgmt', 'parent_of resolves upward';
+	is_deeply $topo->{children}{mgmt}, ['lab'], 'children resolves downward';
+};
+
+subtest 'pipeline_topology - order is topological, roots first' => sub {
+	plan tests => 1;
+
+	# Deliberately created out of order: a caller iterating this must
+	# see mgmt before lab, and lab before its own children.
+	my $top = make_ci_top();
+	put_env_after($top, 'qa',  'lab');
+	put_env_after($top, 'lab', 'mgmt');
+	put_env($top, 'mgmt');
+
+	is_deeply $top->pipeline_topology->{order}, [qw(mgmt lab qa)],
+		'ancestors precede descendants regardless of file order';
+};
+
+subtest 'pipeline_topology - siblings are ordered deterministically' => sub {
+	plan tests => 1;
+
+	# Two envs at the same depth must not come back in hash order, or
+	# output and test expectations wobble between runs.
+	my $top = make_ci_top();
+	put_env($top, 'mgmt');
+	put_env_after($top, 'qa',  'mgmt');
+	put_env_after($top, 'lab', 'mgmt');
+
+	is_deeply $top->pipeline_topology->{order}, [qw(mgmt lab qa)],
+		'siblings sort by name';
+};
+
+subtest 'pipeline_env_names agrees with the topology' => sub {
+	plan tests => 2;
+
+	# The point of the consolidation: one source, so these cannot drift.
+	my $top = make_ci_top();
+	put_env($top, 'mgmt');
+	put_env_after($top, 'lab', 'mgmt');
+
+	my @names = $top->pipeline_env_names;
+	is_deeply [@names], [qw(lab mgmt)],
+		'pipeline_env_names stays sorted for its existing callers';
+	is_deeply [sort @names], [sort keys %{$top->pipeline_topology->{nodes}}],
+		'and covers exactly the topology nodes';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet

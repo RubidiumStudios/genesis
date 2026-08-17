@@ -132,34 +132,15 @@ sub pipeline_status {
 	my $git     = Service::Git->new('.');
 	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 
-	# Build the DAG
-	require Genesis::CI::Compiler::ASTBuilder;
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-		top     => $top,
-		env_dir => $top->path,
-	);
-	my ($nodes, $edges) = $builder->_build_from_env_files($top->path);
-
+	my $topo = $top->pipeline_topology;
 	bail("No environments with pipeline metadata found.")
-		unless %$nodes;
+		unless %{$topo->{nodes}};
 
-	my (%children, %has_parent, %parent_of);
-	for my $edge (@$edges) {
-		push @{ $children{$edge->{from}} }, $edge->{to};
-		$has_parent{$edge->{to}} = 1;
-		$parent_of{$edge->{to}} = $edge->{from};
-	}
-
-	# Topological order
-	my @dag_order;
-	my @queue = sort grep { !$has_parent{$_} } keys %$nodes;
-	my %visited;
-	while (@queue) {
-		my $env = shift @queue;
-		next if $visited{$env}++;
-		push @dag_order, $env;
-		push @queue, sort @{$children{$env} || []};
-	}
+	my $nodes     = $topo->{nodes};
+	my $edges     = $topo->{edges};
+	my %children  = %{$topo->{children}};
+	my %parent_of = %{$topo->{parent_of}};
+	my @dag_order = @{$topo->{order}};
 
 	# Refresh env branch refs from remote before reading status so the
 	# display reflects teammate commits, not just local state.
@@ -393,34 +374,15 @@ sub propagate {
 		"before running propagate."
 	) unless $git->is_clean;
 
-	# Build the DAG from control branch env files
-	require Genesis::CI::Compiler::ASTBuilder;
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-		top     => $top,
-		env_dir => $top->path,
-	);
-	my ($nodes, $edges) = $builder->_build_from_env_files($top->path);
-
+	# The pipeline's environments, as read from the control branch.
+	my $topo = $top->pipeline_topology;
 	bail("No environments with pipeline metadata found.")
-		unless %$nodes;
+		unless %{$topo->{nodes}};
 
-	my (%children, %has_parent, %parent_of);
-	for my $edge (@$edges) {
-		push @{ $children{$edge->{from}} }, $edge->{to};
-		$has_parent{$edge->{to}} = 1;
-		$parent_of{$edge->{to}} = $edge->{from};
-	}
-
-	# Topological order (BFS from roots)
-	my @dag_order;
-	my @queue = sort grep { !$has_parent{$_} } keys %$nodes;
-	my %visited;
-	while (@queue) {
-		my $env = shift @queue;
-		next if $visited{$env}++;
-		push @dag_order, $env;
-		push @queue, sort @{$children{$env} || []};
-	}
+	my $nodes     = $topo->{nodes};
+	my %children  = %{$topo->{children}};
+	my %parent_of = %{$topo->{parent_of}};
+	my @dag_order = @{$topo->{order}};
 
 	# Refresh env branch refs so diff computations see teammate commits.
 	$top->fetch_pipeline_envs($git)
@@ -857,14 +819,8 @@ sub pipeline_graph {
 
 	# For env-file topology, build the DAG directly.
 	if ($top->ci_configured) {
-		my $env_dir = $top->path;
-		require Genesis::CI::Compiler::ASTBuilder;
-		my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-			top     => $top,
-			env_dir => $env_dir,
-		);
-		my ($nodes, $edges) = $builder->_build_from_env_files($env_dir);
-		my $md = _topology_to_mermaid_md($top, $nodes, $edges);
+		my $topo = $top->pipeline_topology;
+		my $md = _topology_to_mermaid_md($top, $topo->{nodes}, $topo->{edges});
 		mkfile_or_fail('pipeline.md', $md);
 		info("Wrote #C{pipeline.md}");
 		exit 0;
@@ -897,14 +853,8 @@ sub pipeline_describe {
 	# For env-file topology (manual provider or genesis-config CI),
 	# build the DAG directly without the full compiler/provider chain.
 	if ($top->ci_configured) {
-		my $env_dir = $top->path;
-		require Genesis::CI::Compiler::ASTBuilder;
-		my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-			top     => $top,
-			env_dir => $env_dir,
-		);
-		my ($nodes, $edges) = $builder->_build_from_env_files($env_dir);
-		_describe_topology($top, $nodes, $edges);
+		my $topo = $top->pipeline_topology;
+		_describe_topology($top, $topo->{nodes}, $topo->{edges});
 		exit 0;
 	}
 

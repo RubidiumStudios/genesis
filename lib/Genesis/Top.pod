@@ -1380,10 +1380,18 @@ B<Examples:>
 
 The environment names participating in the pipeline, sorted.
 
+A convenience wrapper over L</pipeline_topology> for callers that want
+names and nothing else.  Sorted rather than topological, because its
+existing callers -- notably L</fetch_pipeline_envs> -- do not care about
+order and their output reads better alphabetically.
+
 B<Parameters:> None.
 
 B<Returns:> The sorted list of names, or the empty list when CI is not
 configured.
+
+B<Errors:> None.  An unconfigured repository yields an empty list rather
+than an error, so callers can iterate unconditionally.
 
 B<Examples:>
 
@@ -1392,6 +1400,79 @@ B<Examples:>
 
     my @names = $top->pipeline_env_names();
     # returns () when CI is not configured
+
+=head2 pipeline_topology
+
+    my $topo = $top->pipeline_topology();
+
+The single answer to "what environments are in this pipeline, and in
+what order".
+
+Until this existed the question had two implementations that agreed only
+by coincidence: C<pipeline_env_names> globbed F<*.yml> through
+L</envs>, while
+C<Genesis::CI::Compiler::ASTBuilder::_build_from_env_files> walked the
+same directory building a DAG.  The latter was private and called from
+four places in C<Genesis::Commands::Pipelines>, each repeating the same
+edge-collection and breadth-first ordering.  Everything reading pipeline
+membership now comes through here.
+
+Membership is every environment C<Genesis::Top::has_env> accepts,
+whether or not it declares a C<genesis.pipeline> block -- an environment
+with no pipeline metadata still has a branch, still appears in
+C<pipeline-status>, and still needs preparing.
+
+B<Parameters:> None.  The environment directory is always the
+repository root.
+
+B<Returns:> A hashref:
+
+=over 4
+
+=item C<nodes>
+
+Hashref of environment name to its C<genesis.pipeline> data.
+
+=item C<edges>
+
+Arrayref of C<< {from => ..., to => ...} >>, derived from C<prior_env>.
+
+=item C<children>
+
+Hashref of environment name to the arrayref of environments downstream
+of it.
+
+=item C<parent_of>
+
+Hashref of environment name to the environment it follows.
+
+=item C<order>
+
+Arrayref of names, breadth-first from the roots.  Siblings are sorted by
+name so the order is stable across runs -- callers print it and tests
+compare against it.
+
+=back
+
+Every field is empty when CI is not configured, or when no environment
+files are found, so callers may iterate without checking first.
+
+B<Errors:> None.  Deciding that an empty topology is fatal belongs to
+the caller: C<pipeline-status> and C<propagate> bail on it, while
+C<pipeline_env_names> returns an empty list.
+
+B<Examples:>
+
+    my $topo = $top->pipeline_topology();
+    for my $env (@{$topo->{order}}) {
+        printf "%s (after %s)\n", $env, $topo->{parent_of}{$env} // 'control';
+    }
+    # mgmt (after control)
+    # lab (after mgmt)
+    # qa (after lab)
+
+    # Roots are the environments with no parent
+    my @roots = grep {!$topo->{parent_of}{$_}} @{$topo->{order}};
 
 =head2 fetch_pipeline_envs
 

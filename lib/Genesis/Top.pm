@@ -1046,8 +1046,70 @@ sub has_legacy_ci_yml {
 # Delegates to envs() for the canonical name-and-validation logic.
 sub pipeline_env_names {
 	my $self = shift;
-	return () unless $self->ci_configured;
-	return sort map { $_->name } $self->envs;
+	return sort keys %{$self->pipeline_topology->{nodes}};
+}
+
+# }}}
+# pipeline_topology - the pipeline's environments, edges and order {{{
+#
+# The single answer to "what environments are in this pipeline, and in
+# what order".  Previously that question had two implementations that
+# agreed only by coincidence: this method globbed *.yml, while
+# Genesis::CI::Compiler::ASTBuilder::_build_from_env_files walked the
+# same directory building a DAG -- and the DAG one, though private, was
+# called from four places in Genesis::Commands::Pipelines.  Anything
+# reading pipeline membership now goes through here.
+#
+# Returns a hashref:
+#
+#   nodes      env name => its genesis.pipeline data
+#   edges      [ {from => ..., to => ...}, ... ] from prior_env
+#   children   env => [ envs downstream of it ]
+#   parent_of  env => the env it follows
+#   order      topological, roots first, siblings by name
+#
+# Empty in every field when CI is not configured, so callers can iterate
+# unconditionally.
+sub pipeline_topology {
+	my ($self) = @_;
+
+	my %empty = (nodes => {}, edges => [], children => {}, parent_of => {}, order => []);
+	return \%empty unless $self->ci_configured;
+
+	require Genesis::CI::Compiler::ASTBuilder;
+	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
+		top     => $self,
+		env_dir => $self->path,
+	);
+	my ($nodes, $edges) = $builder->_build_from_env_files($self->path);
+	return \%empty unless $nodes && %$nodes;
+
+	my (%children, %has_parent, %parent_of);
+	for my $edge (@$edges) {
+		push @{$children{$edge->{from}}}, $edge->{to};
+		$has_parent{$edge->{to}} = 1;
+		$parent_of{$edge->{to}}  = $edge->{from};
+	}
+
+	# Breadth-first from the roots.  Sorted at every step so siblings
+	# come back in a stable order -- callers print this, and tests
+	# compare it.
+	my (@order, %visited);
+	my @queue = sort grep {!$has_parent{$_}} keys %$nodes;
+	while (@queue) {
+		my $env = shift @queue;
+		next if $visited{$env}++;
+		push @order, $env;
+		push @queue, sort @{$children{$env} || []};
+	}
+
+	return {
+		nodes     => $nodes,
+		edges     => $edges,
+		children  => \%children,
+		parent_of => \%parent_of,
+		order     => \@order,
+	};
 }
 
 # }}}
