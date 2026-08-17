@@ -42,6 +42,20 @@ sub install_run_stub {
 
 sub reset_stub { @run_calls = (); @run_results = (); }
 
+# fetch_branches probes the remote with ls-remote before fetching, so
+# every test queues that probe's output first.  Pass the branch names the
+# remote is pretending to have.
+sub queue_heads {
+	my @names = @_;
+	push @run_results, [
+		join("\n", map {sprintf "%040d\trefs/heads/%s", 1, $_} @names),
+		0, ''
+	];
+}
+
+# Command line of the Nth captured run() call, minus the opts hashref.
+sub run_argv { my ($n) = @_; my @a = @{$run_calls[$n]}; shift @a; return \@a; }
+
 # Also stub current_branch and default_remote on this instance — both
 # normally consult git via run, but we want deterministic test values.
 sub override_inspections {
@@ -56,10 +70,11 @@ sub override_inspections {
 # ======================================================================
 
 subtest 'fetch_branches - success returns ($self, kind=success)' => sub {
-	plan tests => 3;
+	plan tests => 5;
 	reset_stub();
 	install_run_stub();
 	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(qa lab));
 	push @run_results, ['Fetching origin', 0, ''];
 
 	my $git = make_git();
@@ -68,6 +83,121 @@ subtest 'fetch_branches - success returns ($self, kind=success)' => sub {
 	is $returned, $git, 'returns $self as first list element';
 	is $result->{ok},   1,         'ok=1 on success';
 	is $result->{kind}, 'success', 'kind=success on rc=0';
+	cmp_deeply $result->{fetched}, [qw(qa lab)], 'both branches reported fetched';
+	cmp_deeply $result->{absent},  [],           'nothing absent';
+};
+
+# ======================================================================
+# Remote-authoritative existence
+#
+# A refspec naming a branch the remote does not have aborts the whole
+# fetch (git: "couldn't find remote ref"), taking every other branch down
+# with it.  So the remote is probed first, and absence is reported rather
+# than raised.
+# ======================================================================
+
+subtest 'fetch_branches - probes the remote with fully-qualified refs' => sub {
+	plan tests => 2;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(qa lab));
+	push @run_results, ['', 0, ''];
+
+	my $git = make_git();
+	$git->fetch_branches([qw(qa lab)], 'origin');
+
+	# refs/heads/qa, not qa: ls-remote patterns match the tail of a ref,
+	# so a bare "qa" also matches refs/heads/team/qa.
+	cmp_deeply run_argv(0),
+		[qw(git ls-remote --heads origin refs/heads/qa refs/heads/lab)],
+		'probe runs first, with fully-qualified ref patterns';
+	is scalar @run_calls, 2, 'probe then fetch';
+};
+
+subtest 'fetch_branches - fetches only the branches the remote has' => sub {
+	plan tests => 4;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(qa prod));           # lab is absent on the remote
+	push @run_results, ['', 0, ''];
+
+	my $git = make_git();
+	my (undef, $result) = $git->fetch_branches([qw(qa lab prod)], 'origin');
+
+	is $result->{ok}, 1, 'ok=1 — an absent branch is not an error';
+	cmp_deeply run_argv(1), [
+		'git', 'fetch', 'origin',
+		'+refs/heads/qa:refs/heads/qa',
+		'+refs/heads/prod:refs/heads/prod',
+	], 'refspec omits the branch the remote lacks';
+	cmp_deeply $result->{fetched}, [qw(qa prod)], 'fetched lists what was refreshed';
+	cmp_deeply $result->{absent},  [qw(lab)],     'absent lists what the remote lacks';
+};
+
+subtest 'fetch_branches - no fetch at all when the remote has none of them' => sub {
+	plan tests => 3;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads();                      # remote has nothing
+
+	my $git = make_git();
+	my (undef, $result) = $git->fetch_branches([qw(qa lab)], 'origin');
+
+	is $result->{ok}, 1, 'ok=1';
+	is scalar @run_calls, 1, 'probed, but never fetched';
+	cmp_deeply $result->{absent}, [qw(qa lab)], 'both reported absent';
+};
+
+subtest 'fetch_branches - caches fetched branches, not absent ones' => sub {
+	plan tests => 2;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(qa));
+	push @run_results, ['', 0, ''];
+
+	my $git = make_git();
+	$git->fetch_branches([qw(qa lab)], 'origin');
+
+	is $git->{_branch_cache}{qa}, 1, 'fetched branch is known to exist';
+	# Absent on the remote does not mean absent locally: pipeline-prepare
+	# creates env branches before anything pushes them.  Poisoning the
+	# cache with 0 would make branch_exists lie about local state.
+	ok !exists $git->{_branch_cache}{lab},
+		'branch absent on the remote leaves the local cache untouched';
+};
+
+subtest 'fetch_branches - probe failure is classified and reported' => sub {
+	plan tests => 3;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	push @run_results, ['', 128, 'fatal: Authentication failed for https://example/x.git'];
+
+	my $git = make_git();
+	my (undef, $result) = $git->fetch_branches([qw(qa)], 'origin');
+
+	is $result->{ok},   0,      'ok=0';
+	is $result->{kind}, 'auth', 'probe failure classified like a fetch failure';
+	is scalar @run_calls, 1, 'no fetch attempted after a failed probe';
+};
+
+subtest 'fetch_branches - fetch failure after a good probe is classified' => sub {
+	plan tests => 2;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(qa));
+	push @run_results, ['', 128, 'fatal: unable to access: Could not resolve host: example'];
+
+	my $git = make_git();
+	my (undef, $result) = $git->fetch_branches([qw(qa)], 'origin');
+
+	is $result->{ok},   0,         'ok=0';
+	is $result->{kind}, 'network', 'classified from the fetch stage error';
 };
 
 subtest 'fetch_branches - network failure classified' => sub {
