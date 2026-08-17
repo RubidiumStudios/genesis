@@ -28,4 +28,56 @@ subtest 'bin/genesis' => sub {
 
 };
 
+subtest 'genesis pipeline-prepare' => sub {
+	plan tests => 13;
+
+	ok(has_command('pipeline-prepare'), "pipeline-prepare command is registered");
+
+	is(command_properties('pipeline-prepare')->{function_group},
+		Genesis::Commands::PIPELINE,
+		"pipeline-prepare belongs to the pipeline group, alongside pipeline-status");
+
+	# The scope IS the feature.  A ['repo','env'] command is handed the
+	# environment name by the dispatcher when invoked as
+	# `genesis <env> pipeline-prepare`, and nothing when invoked bare --
+	# which is how repo mode and env mode are told apart without a flag.
+	cmp_deeply(command_properties('pipeline-prepare')->{scope},
+		bag('repo', 'env'),
+		"pipeline-prepare accepts both repo and env scope");
+
+	is(command_properties('pipeline-prepare')->{option_group},
+		Genesis::Commands::REPO_OPTIONS,
+		"pipeline-prepare uses REPO_OPTIONS");
+
+	my %opts = command_properties('pipeline-prepare')->{options}->@*;
+	ok(exists $opts{'dry-run|n'}, "pipeline-prepare has a dry-run option");
+	ok(exists $opts{'no-fetch'},  "pipeline-prepare has a no-fetch option");
+	is(scalar(keys %opts), 2, "pipeline-prepare has only the two options above");
+
+	# No positional environment argument: the env comes from the scope,
+	# not from `pipeline-prepare <env>`, so that it reads the same way as
+	# every other env-scoped command.
+	my $args = command_properties('pipeline-prepare')->{arguments};
+	ok(!$args || !@$args, "pipeline-prepare takes no positional arguments");
+
+	not_ok(command_properties('pipeline-prepare')->{deprecated},
+		"pipeline-prepare is not deprecated");
+	not_ok(command_properties('pipeline-prepare')->{retired},
+		"pipeline-prepare is not retired");
+
+	my $subref = $Genesis::Commands::RUN{'pipeline-prepare'};
+	is(ref($subref), 'CODE', "pipeline-prepare has a subroutine reference");
+	cmp_deeply(scalar(closed_over($subref)), {
+		'$fn' => \'Genesis::Commands::Pipelines::pipeline_prepare',
+		'$fn_require' => \'Genesis/Commands/Pipelines.pm',
+		'$name' => \'pipeline-prepare',
+	}, "pipeline-prepare resolves to the right handler");
+
+	# It repairs what propagate refuses to guess about, so it should be
+	# findable from that bail's wording.
+	like(command_properties('pipeline-prepare')->{description},
+		qr/propagate/i,
+		"pipeline-prepare's description points back at propagate");
+};
+
 done_testing;
