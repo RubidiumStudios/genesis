@@ -2090,6 +2090,42 @@ define_command("pipeline-graph", {
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_graph');
 # }}}
+# genesis pipeline-prepare - create or reconcile environment branches {{{
+define_command("pipeline-prepare", {
+	summary => "Create or reconcile pipeline environment branches.",
+	usage   => "pipeline-prepare",
+	description =>
+		"Creates the branch for any environment that lacks one, and ".
+		"reconciles existing branches with the files their environment ".
+		"depends on.\n".
+		"\n".
+		"Run without an environment it prepares every environment in the ".
+		"pipeline; run as #C{genesis <env> pipeline-prepare} it prepares ".
+		"only that one.\n".
+		"\n".
+		"This is the repair for #C{genesis propagate} refusing to run.  ".
+		"Propagation compares each environment's branch against the control ".
+		"branch, and cannot tell an absent branch apart from one with no ".
+		"changes, so it bails rather than silently doing nothing.  Use ".
+		"#C{genesis new <env>} to create an environment; use this when the ".
+		"environment already exists and only its branch is missing.\n".
+		"\n".
+		"Must be run from the control branch, since it copies files into ".
+		"each environment branch from the current branch's HEAD.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => ['repo','env'],
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'dry-run|n' =>
+			"Report what would change without creating branches or commits.",
+
+		'no-fetch' =>
+			"Skip refreshing environment branches from the remote first.  ".
+			"Without it, a branch that exists on the remote but not locally ".
+			"would be created a second time.",
+	],
+}, 'Genesis::Commands::Pipelines::pipeline_prepare');
+# }}}
 # genesis pipeline-status - show propagation state across all environments {{{
 define_command("pipeline-status", {
 	summary => "Show propagation status for all pipeline environments.",

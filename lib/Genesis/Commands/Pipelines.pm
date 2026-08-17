@@ -719,6 +719,120 @@ sub _missing_env_branches {
 }
 
 # }}}
+# pipeline_prepare - create or reconcile environment branches {{{
+#
+# Repairs what propagate refuses to guess about.  Propagation compares
+# each environment against control with `git diff <env-branch>..<sha>`,
+# which fails and yields nothing when the branch is absent, so it bails
+# rather than reporting "nothing to propagate".  This is how the branch
+# gets made.
+#
+# `genesis new <env>` is the wrong tool for that: the environment
+# already exists on control, only its branch is missing.
+sub pipeline_prepare {
+	my ($env_name) = @_;
+
+	my $opts    = get_options;
+	my $dry_run = $opts->{'dry-run'};
+	my $top     = Genesis::Top->new('.');
+
+	bail("CI is not configured for this repository.")
+		unless $top->ci_configured;
+
+	my $git     = Service::Git->new('.', track_branch => !$dry_run);
+	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+
+	# prepare_branch copies files INTO each env branch from the current
+	# branch's HEAD, so the current branch has to be the one they are
+	# meant to follow.
+	bail(
+		"Preparation must be run from the #C{%s} branch (currently on #C{%s}).",
+		$control, $git->current_branch // '<detached>'
+	) unless ($git->current_branch // '') eq $control;
+
+	bail(
+		"Working tree has uncommitted changes.  Commit or stash them\n".
+		"before preparing environment branches."
+	) unless $git->is_clean;
+
+	$top->fetch_pipeline_envs($git)
+		unless $opts->{'no-fetch'};
+
+	my $topo  = $top->pipeline_topology;
+	my @scope = _prepare_scope($topo, $env_name);
+
+	unless (@scope) {
+		info "\n#Yi{No environments found in this pipeline - nothing to prepare.}";
+		return;
+	}
+
+	info "\n#G{Preparing environment branches from} #C{%s}%s\n",
+		$control, ($dry_run ? ' #Yi{(dry run)}' : '');
+
+	my ($created, $reconciled, $untouched) = (0, 0, 0);
+	for my $name (@scope) {
+		my $env = eval {$top->load_env($name)};
+		unless ($env) {
+			warning("Could not load #C{%s}; skipping.", $name);
+			next;
+		}
+
+		my $existed = $git->branch_exists($name);
+		my ($added, $removed) = $env->prepare_branch(dry_run => $dry_run);
+
+		if (!$existed) {
+			$created++;
+			info "  #G{created} #C{%s} (%d added, %d removed)",
+				$name, scalar(@$added), scalar(@$removed);
+		} elsif (@$added || @$removed) {
+			$reconciled++;
+			info "  #Y{reconciled} #C{%s} (%d added, %d removed)",
+				$name, scalar(@$added), scalar(@$removed);
+		} else {
+			$untouched++;
+			info "  #K{ok} %s", $name;
+		}
+	}
+
+	info "\n%s: %d created, %d reconciled, %d already current.\n",
+		($dry_run ? "Would prepare" : "Prepared"),
+		$created, $reconciled, $untouched;
+
+	info "Push the new branches with #C{git push --all} to make them ".
+		"visible to the pipeline.\n"
+		if $created && !$dry_run;
+
+	return;
+}
+
+# }}}
+# _prepare_scope - which environments pipeline-prepare should touch {{{
+#
+# Genesis' dispatcher decides the mode for us: a ['repo','env'] command
+# is handed the environment name when invoked as
+# `genesis <env> pipeline-prepare`, and nothing when invoked bare.
+#
+# Separated from the command body because reaching that body needs a
+# working tree, a vault and a git repository, while this is where the
+# behaviour that matters lives.
+sub _prepare_scope {
+	my ($topo, $env_name) = @_;
+
+	return @{$topo->{order}} unless defined $env_name && length $env_name;
+
+	# Ignoring an unknown name would report success having prepared
+	# nothing -- the same silent-success this command exists to end.
+	bail(
+		"Environment #C{%s} is not part of this pipeline.\n".
+		"Known environments: %s",
+		$env_name,
+		(@{$topo->{order}} ? join(', ', @{$topo->{order}}) : '(none)')
+	) unless $topo->{nodes}{$env_name};
+
+	return ($env_name);
+}
+
+# }}}
 sub _resolve_propagation_base {
 	my ($branch, $git) = @_;
 	$git ||= Service::Git->new('.');
