@@ -777,7 +777,7 @@ sub pipeline_prepare {
 	info "\n#G{Preparing environment branches from} #C{%s}%s\n",
 		$control, ($dry_run ? ' #Yi{(dry run)}' : '');
 
-	my ($created, $reconciled, $untouched) = (0, 0, 0);
+	my ($created, $fetched, $reconciled, $untouched, $skipped) = (0) x 5;
 	for my $name (@scope) {
 		my $env = eval {$top->load_env($name)};
 		unless ($env) {
@@ -785,13 +785,28 @@ sub pipeline_prepare {
 			next;
 		}
 
-		my $existed = $git->branch_exists($name);
-		my ($added, $removed) = $env->prepare_branch(dry_run => $dry_run);
+		my ($added, $removed, $origin) = $env->prepare_branch(
+			dry_run  => $dry_run,
+			no_fetch => $opts->{'no-fetch'},
+		);
 
-		if (!$existed) {
+		if ($origin eq 'unverifiable') {
+			$skipped++;
+			warning(
+				"  #Y{skipped} #C{%s}: no branch here, and #C{--no-fetch} means ".
+				"the remote cannot be checked.\n".
+				"  Creating it blind would fork it from the real branch if one exists.",
+				$name
+			);
+		} elsif ($origin eq 'absent') {
 			$created++;
 			info "  #G{created} #C{%s} (%d added, %d removed)",
 				$name, scalar(@$added), scalar(@$removed);
+		} elsif ($origin eq 'fetched') {
+			$fetched++;
+			info "  #C{fetched} #C{%s} #K{from %s} (%d added, %d removed)",
+				$name, $git->default_remote,
+				scalar(@$added), scalar(@$removed);
 		} elsif (@$added || @$removed) {
 			$reconciled++;
 			info "  #Y{reconciled} #C{%s} (%d added, %d removed)",
@@ -802,13 +817,19 @@ sub pipeline_prepare {
 		}
 	}
 
-	info "\n%s: %d created, %d reconciled, %d already current.\n",
+	info "\n%s: %d created, %d fetched, %d reconciled, %d already current%s.\n",
 		($dry_run ? "Would prepare" : "Prepared"),
-		$created, $reconciled, $untouched;
+		$created, $fetched, $reconciled, $untouched,
+		($skipped ? sprintf(", %d skipped", $skipped) : '');
 
 	info "Push the new branches with #C{git push --all} to make them ".
 		"visible to the pipeline.\n"
 		if $created && !$dry_run;
+
+	info "Re-run without #C{--no-fetch} to prepare the %d skipped ".
+		"environment%s.\n",
+		$skipped, ($skipped == 1 ? '' : 's')
+		if $skipped;
 
 	return;
 }

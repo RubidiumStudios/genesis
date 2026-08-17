@@ -618,6 +618,32 @@ sub remote_branch_exists {
 }
 
 # }}}
+# resolve_branch - locate a branch, fetching it if only the remote has it {{{
+#
+# Returns 'local', 'fetched', 'absent' or 'unverifiable'.  Only 'absent'
+# licenses a caller to create the branch.
+sub resolve_branch {
+	my ($self, @args) = @_;
+	my $opts = ref($args[0]) eq 'HASH' ? shift @args : {};
+	my ($branch, $remote) = @args;
+	return 'local' if $self->branch_exists($branch);
+
+	# Offline withholds the answer rather than guessing at it.
+	return 'unverifiable' if $opts->{offline};
+
+	# Nothing to consult: local absence is the whole truth.
+	$remote //= $self->default_remote;
+	return 'absent' unless $remote;
+
+	# Bails rather than reporting absence when ls-remote fails, so an
+	# unreachable remote never reads as "safe to create".
+	return 'absent' unless $self->remote_branch_exists($branch, $remote);
+
+	$self->fetch_branch($branch, $remote);
+	return 'fetched';
+}
+
+# }}}
 # delete_remote_branch - delete a branch on the remote {{{
 #
 # Uses `git push <remote> --delete <branch>`.  Returns $self on
@@ -667,11 +693,8 @@ sub fetch_branches {
 	$env{GIT_TERMINAL_PROMPT} = '0' unless in_controlling_terminal();
 	my %opts = (dir => $self->{root}, (%env ? (env => \%env) : ()));
 
-	# Ask the remote what it has before fetching.  A refspec naming a
-	# branch the remote lacks aborts the entire fetch, so one absent env
-	# branch would leave every other branch unrefreshed.  Patterns are
-	# fully qualified because ls-remote matches the tail of a ref: a bare
-	# "qa" would also match refs/heads/team/qa.
+	# A refspec naming a branch the remote lacks aborts the entire fetch.
+	# Patterns are fully qualified: ls-remote matches the tail of a ref.
 	my ($out, $rc, $err) = run({%opts},
 		'git', 'ls-remote', '--heads', $remote,
 		map { "refs/heads/$_" } @want);
@@ -697,10 +720,8 @@ sub fetch_branches {
 			: $self
 			if $frc;
 
-		# Only branches actually fetched are known to exist.  Absent on
-		# the remote says nothing about local state -- pipeline-prepare
-		# creates env branches before anything pushes them -- so leave
-		# those cache entries for branch_exists to resolve locally.
+		# Absent on the remote says nothing about local state, so only
+		# fetched branches are cached.
 		$self->{_branch_cache}{$_} = 1 for @present;
 	}
 

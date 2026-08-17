@@ -2099,6 +2099,10 @@ define_command("pipeline-prepare", {
 		"reconciles existing branches with the files their environment ".
 		"depends on.\n".
 		"\n".
+		"A branch missing from this clone is never created on that basis ".
+		"alone: the remote is checked first, and a branch it already has ".
+		"is fetched rather than forked.\n".
+		"\n".
 		"Run without an environment it prepares every environment in the ".
 		"pipeline; run as #C{genesis <env> pipeline-prepare} it prepares ".
 		"only that one.\n".
@@ -2120,9 +2124,10 @@ define_command("pipeline-prepare", {
 			"Report what would change without creating branches or commits.",
 
 		'no-fetch' =>
-			"Skip refreshing environment branches from the remote first.  ".
-			"Without it, a branch that exists on the remote but not locally ".
-			"would be created a second time.",
+			"Work offline.  Branches already in this clone are reconciled ".
+			"as usual, but an environment whose branch is missing here is ".
+			"skipped rather than created, since without the remote there is ".
+			"no way to tell a new environment from a stale clone.",
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_prepare');
 # }}}

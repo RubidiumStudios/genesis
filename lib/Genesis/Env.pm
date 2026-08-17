@@ -1426,11 +1426,14 @@ sub prepare_branch {
 	# propagation_files returns git-root-relative paths already
 	my %keep_set = map { $_ => 1 } @keep;
 
-	# Compute the add/remove sets.  When the branch doesn't exist yet, we
-	# treat the current HEAD as its starting tree (so "tracked" is what
-	# the new branch would inherit before reconciliation).
-	my $branch_exists = $git->branch_exists($branch);
-	my $tree_ref      = $branch_exists ? $branch : 'HEAD';
+	# The remote decides: creating off HEAD because the branch is missing
+	# locally would fork it from the real one.
+	my $origin = $git->resolve_branch({offline => $opts{no_fetch}}, $branch);
+	return ([], [], $origin) if $origin eq 'unverifiable';
+	my $branch_exists = $origin ne 'absent';
+
+	# A branch that doesn't exist yet starts from the current HEAD's tree.
+	my $tree_ref = $branch_exists ? $branch : 'HEAD';
 	my @tracked       = $git->ls_tree($tree_ref, $git->prefix);
 	my %tracked_set   = map { $_ => 1 } @tracked;
 
@@ -1449,8 +1452,8 @@ sub prepare_branch {
 	}
 
 	# Nothing to do AND branch already exists: idempotent no-op.
-	return ([], []) if $branch_exists && !@to_add && !@to_remove;
-	return (\@to_add, \@to_remove) if $opts{dry_run};
+	return ([], [], $origin) if $branch_exists && !@to_add && !@to_remove;
+	return (\@to_add, \@to_remove, $origin) if $opts{dry_run};
 
 	# Source SHA for any add operations: whatever the current branch
 	# points at.  For a brand-new branch this is also the branch's HEAD.
@@ -1500,7 +1503,7 @@ sub prepare_branch {
 	$git->restore_branch;
 	popd;
 
-	return (\@to_add, \@to_remove);
+	return (\@to_add, \@to_remove, $origin);
 }
 
 # }}}

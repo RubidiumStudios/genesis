@@ -1081,6 +1081,97 @@ B<Examples:>
   my $bool = $git->remote_branch_exists('staging');
   # bails when credentials are missing, rather than reporting 0
 
+=head2 resolve_branch
+
+  my $where = $git->resolve_branch($branch);
+  my $where = $git->resolve_branch($branch, $remote);
+  my $where = $git->resolve_branch({offline => 1}, $branch);
+
+Locates a branch, fetching it when only the remote has it. Returns
+C<local>, C<fetched>, C<absent> or C<unverifiable>.
+
+B<A branch missing from this clone is not a branch that does not exist.>
+The clone may be fresh or stale -- in CI it is always fresh, holding only
+the control branch. Creating the branch in that case forks it from the real
+one: the new branch starts at the wrong commit, and the first push either is
+rejected as a non-fast-forward or, if forced, destroys the deployment anchor
+propagation depends on. So the remote is the authority, and B<only C<absent>
+licenses a caller to create the branch>.
+
+B<An unreachable remote is not absence.> The probe raises rather than
+returning C<absent>, because degrading to "assume it does not exist" is
+exactly the mistake this guards against -- it would create branches whenever
+the network is down. A caller that wants to proceed offline must decide that
+explicitly; it cannot get there by accident.
+
+A repository with no remote configured has no authority to consult, so local
+absence is the whole truth and C<absent> is returned without a probe.
+
+B<C<offline> withholds the answer instead of guessing.> Working offline is a
+legitimate reason not to contact the remote, but it is not a reason to
+assume the branch does not exist. C<offline> therefore yields
+C<unverifiable> -- distinct from C<absent> precisely so a caller cannot
+treat "we did not look" as "there is nothing there". Callers reconcile the
+branches they already have and report the rest as skipped. A branch already
+present locally still resolves to C<local> offline, since nothing needs
+confirming.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%opts>
+
+Optional leading hashref. C<offline> suppresses the remote probe, yielding
+C<unverifiable> for any branch not already local.
+
+=item C<$branch>
+
+The branch to locate.
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> C<local> when the branch is already in this clone (the remote is
+not consulted); C<fetched> when the remote had it and it has now been
+fetched into a local ref; C<absent> when it exists neither here nor on the
+remote, or when no remote is configured; C<unverifiable> under C<offline>
+when the branch is not already local.
+
+B<Errors:>
+
+=over 4
+
+=item C<"ls-remote against #C{%s} failed: %s">
+
+Raised via C<remote_branch_exists> when the remote cannot be reached or
+authenticated against. Deliberately not caught: see above.
+
+=item C<"Failed to fetch '%s' from '%s'">
+
+Raised via C<fetch_branch> when the remote confirmed the branch but the
+fetch itself failed.
+
+=back
+
+B<Examples:>
+
+  my $where = $git->resolve_branch('staging');
+  # returns 'local' -- already here, no round trip
+
+  my $where = $git->resolve_branch('staging');
+  # returns 'fetched' -- the remote had it; refs/heads/staging now exists
+
+  if ($git->resolve_branch('brand-new') eq 'absent') {
+      $git->create_branch('brand-new');   # the only safe path to a create
+  }
+
+  my $where = $git->resolve_branch({offline => 1}, 'brand-new');
+  # returns 'unverifiable' -- reconcile what is here, skip the rest
+
 =head2 delete_remote_branch
 
   $git->delete_remote_branch($branch);
