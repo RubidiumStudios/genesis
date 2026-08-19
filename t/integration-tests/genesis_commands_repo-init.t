@@ -79,7 +79,7 @@ require './bin/genesis';
 # ---------------------------------------------------------------------------
 
 subtest 'validate phase' => sub {
-	plan tests => 13;
+	plan tests => 15;
 
 	require Genesis::Commands::Repo;
 	delete $ENV{GENESIS_IGNORE_EVAL};       # let bail() die instead of exit
@@ -208,6 +208,21 @@ subtest 'validate phase' => sub {
 		qr/unreadable kit\.yml/i,
 		'invalid: -l target with malformed kit.yml rejected';
 
+	# Absent paths are rejected before any kit.yml inspection, so the
+	# operator is told the target is missing rather than that it is
+	# malformed.
+	prepare_command('repo-init', '-l', "$sandbox/no-such-kit", '--skip-vault', 'my-bosh');
+	build_command_environment;
+	throws_ok { run_validate() }
+		qr/Dev kit link target .* not found/,
+		'invalid: -l target that does not exist rejected';
+
+	prepare_command('repo-init', '-k', "$sandbox/absent-1.0.0.tar.gz", '--skip-vault', 'my-bosh');
+	build_command_environment;
+	throws_ok { run_validate() }
+		qr/Local compiled kit file .* not found/,
+		'invalid: -k compiled kit file that does not exist rejected';
+
 	popd;
 };
 
@@ -216,7 +231,7 @@ subtest 'validate phase' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'execute phase' => sub {
-	plan tests => 41;
+	plan tests => 46;
 
 	require Genesis::Commands::Repo;
 	local $Genesis::VERSION = '3.2.0-rc2';
@@ -436,6 +451,38 @@ subtest 'execute phase' => sub {
 		'with-ci: ci.enabled is true');
 	is($rwc->{ci_provider}, 'manual',
 		'with-ci: result ci_provider is manual (full provider config deferred to `repo config ci`)');
+
+	# The v3 ci: block carries the whole topology.  The multi-file
+	# .genesis/ci/ layout is a separate, older source that repo-init
+	# does not produce -- asserted so a reintroduction is caught here.
+	ok(!-d "$wc/bosh/.genesis/ci",
+		'with-ci: no .genesis/ci directory is created');
+
+	# Pipeline topology cuts environment branches from the control
+	# branch, so the repo has to start on it rather than on whatever
+	# init.defaultBranch happens to be.
+	my $wc_branch = run('git -C "$1" symbolic-ref --short HEAD', "$wc/bosh");
+	chomp $wc_branch;
+	is($wc_branch, Genesis::Top::DEFAULT_CONTROL_BRANCH(),
+		'with-ci: initial commit lands on the control branch');
+	popd;
+
+	# ----- without --with-ci, no CI state is written at all -----
+
+	my $nc = workdir('execute-no-ci');
+	pushd($nc);
+	prepare_command('repo-init', '-l', $devkit, '--skip-vault', 'bosh');
+	build_command_environment;
+	run_validate();
+	my ($rnc) = run_execute();
+
+	my $cfg_nc = slurp("$nc/bosh/.genesis/config");
+	unlike($cfg_nc, qr/^ci:/m,
+		'no-ci: config has no ci: section');
+	is($rnc->{ci_provider}, undef,
+		'no-ci: result ci_provider is undef');
+	ok(!-d "$nc/bosh/.genesis/ci",
+		'no-ci: no .genesis/ci directory is created');
 	popd;
 };
 
