@@ -80,4 +80,42 @@ subtest 'genesis pipeline-prepare' => sub {
 		"pipeline-prepare's description points back at propagate");
 };
 
+subtest 'genesis propagate' => sub {
+	plan tests => 11;
+
+	ok(has_command('propagate'), "propagate command is registered");
+
+	is(command_properties('propagate')->{function_group},
+		Genesis::Commands::PIPELINE,
+		"propagate belongs to the pipeline group");
+
+	# Repo scope only: propagate takes the environment it cascades from as
+	# a positional, because it means "start from here", not "operate on
+	# this one" -- which is what env scope would imply.
+	is(command_properties('propagate')->{scope}, 'repo',
+		"propagate is repo-scoped");
+
+	is(command_properties('propagate')->{option_group},
+		Genesis::Commands::REPO_OPTIONS,
+		"propagate uses REPO_OPTIONS");
+
+	my %opts = command_properties('propagate')->{options}->@*;
+	ok(exists $opts{'dry-run|n'}, "propagate has a dry-run option");
+	ok(exists $opts{'commit=s'},  "propagate has a commit option");
+	ok(exists $opts{'no-push'},   "propagate has a no-push option");
+	ok(exists $opts{'no-fetch'},  "propagate has a no-fetch option");
+
+	# -y authorizes creating a branch for an environment that has none.
+	# It follows deploy/terminate/repipe/pipeline-apply rather than
+	# inventing a propagate-specific spelling.
+	ok(exists $opts{'yes|y'},
+		"propagate has the conventional yes option");
+
+	is(scalar(keys %opts), 5, "propagate has only the five options above");
+
+	my $args = command_properties('propagate')->{arguments};
+	cmp_deeply($args, ['env?', ignore()],
+		"propagate takes one optional positional environment");
+};
+
 done_testing;

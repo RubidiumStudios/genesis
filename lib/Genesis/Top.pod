@@ -54,6 +54,30 @@ A C<Top> object manages:
 Inherits from L<Genesis::Base>, which provides memoization helpers
 (C<_memoize>, C<_set_memo>, C<_clear_memo>, C<_get_memo>).
 
+=head1 CONSTANTS
+
+=head2 DEFAULT_CONTROL_BRANCH
+
+The branch a branch-based pipeline treats as authoritative when
+C<ci.control_branch> is not configured. Read through
+L</ci_control_branch> rather than directly.
+
+=head2 PROPAGATE_NO_BRANCH_EXIT
+
+The exit status C<genesis propagate> uses when it refuses to run because
+an environment in scope has no branch anywhere.
+
+B<It exists so a refusal can be told apart from a breakage.> C<deploy>
+runs C<propagate> as a subprocess and sees only an exit status. Reporting
+a raw non-zero code sends the operator debugging, when a missing branch
+is a known condition one flag from resolution. C<Genesis::Env> matches on
+this value to say so plainly, and treats every other non-zero status as
+an unexpected failure. See
+L<Genesis::Commands::Pipelines/_authorize_branch_creation>.
+
+Values below 9 are avoided because the shell and Perl already ascribe
+meaning to them; a distinctive value keeps the match unambiguous.
+
 =head1 METHODS
 
 =head2 new

@@ -211,6 +211,165 @@ B<Examples:>
   # Describe a specific pipeline layout
   genesis describe sandbox
 
+=head1 INTERNAL FUNCTIONS
+
+=head2 _missing_env_branches
+
+  my @missing = _missing_env_branches($git, \@scope);
+
+Returns the environments in C<@scope> that have no local branch, in the
+order given.
+
+Kept apart from C<propagate> so the decision can be tested without a
+repository: reaching it in situ needs a working tree, a DAG and a vault.
+
+B<Returns:> The subset of C<@scope> lacking a branch; empty when all are
+present.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my @missing = _missing_env_branches($git, ['mgmt','lab','qa']);
+  # returns ('lab') when only lab has no branch
+
+=head2 _authorize_branch_creation
+
+  _authorize_branch_creation($opts, \@missing, $control);
+
+Decides whether propagation may create the branches it found absent.
+Returns true when authorized and raises otherwise, so callers proceed
+directly to creation.
+
+B<Creating a branch is incidental to propagating, so it is opted into
+rather than assumed.> C<propagate>'s purpose is to move files between
+branches that already exist; making one is a repair it happens to be
+positioned to perform. The operator therefore authorizes it explicitly
+with C<-y>, or by answering a prompt.
+
+B<Outside a controlling terminal it refuses rather than guessing.> There
+is no one to ask, and creating branches unattended is exactly the
+silent, hard-to-notice change this ought not make on its own. The
+refusal names both C<-y> and C<pipeline-prepare>, because an operator
+told only that something is wrong has been given a complaint rather than
+a remedy.
+
+B<The refusal exits with C<Genesis::Top/PROPAGATE_NO_BRANCH_EXIT>>
+rather than the default 1, so a C<deploy> running C<propagate> as a
+subprocess can distinguish "refused, and here is the one-command fix"
+from "propagation actually broke". See L<Genesis::Env/_post_deploy>.
+
+The environment list is printed before the question rather than folded
+into it: approving a list you cannot see is not consent, and
+C<prompt_for_boolean> collapses a multi-line prompt onto its question
+line.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$opts>
+
+The parsed command options. Only C<yes> is consulted.
+
+=item C<\@missing>
+
+Environments whose branches are absent. Named in full in the output.
+
+=item C<$control>
+
+The control branch, named in both the prompt and the refusal as the
+source the new branches would be built from.
+
+=back
+
+B<Returns:> True when creation is authorized. Does not return otherwise.
+
+B<Errors:>
+
+=over 4
+
+=item C<"No branch exists for ...">
+
+Raised with exit code C<PROPAGATE_NO_BRANCH_EXIT> when there is no
+terminal to ask and C<-y> was not given.
+
+=item C<"Aborted - no branches were created.">
+
+Raised when the operator declines the prompt. Continuing would propagate
+against a branch they just refused to create.
+
+=back
+
+B<Examples:>
+
+  _authorize_branch_creation({yes => 1}, ['lab'], 'control');
+  # returns 1 without asking
+
+  _authorize_branch_creation({}, ['lab'], 'control');
+  # prompts when interactive; raises otherwise
+
+=head2 _create_missing_branches
+
+  my @created = _create_missing_branches($top, \@missing, $dry_run);
+
+Builds a branch for each environment, via
+L<Genesis::Env/prepare_branch>.
+
+B<Creating the branch is the propagation for that environment.>
+C<prepare_branch> seeds the new branch with the environment's
+propagation files copied from control HEAD, so the diff computed
+immediately afterwards is empty by construction and the environment
+never appears in the propagation targets. There is no second step.
+
+B<Which is why the caller must push these explicitly.> Receiving no
+propagation commit, a created branch never reaches C<@pushed_branches>
+in L<Genesis::CI::Propagation/propagate_envs>, and would be left local:
+the pipeline would never see it, and the next run would find it
+local-only and proceed quietly. C<propagate> passes the returned names
+as C<push_extra_branches>, which C<--no-push> still suppresses.
+
+Creation is safe to perform implicitly because C<prepare_branch>
+resolves existence through the remote and will not fork a branch that
+already exists there.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> used to load each environment.
+
+=item C<\@missing>
+
+Environments to create branches for.
+
+=item C<$dry_run>
+
+Reports what would be created without committing.
+
+=back
+
+B<Returns:> The names created, for the caller to add to the push set.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not load ... to create its branch">
+
+Raised when the environment cannot be loaded. Deliberately fatal rather
+than skipped: a skipped environment would leave the branch absent while
+the run reported success, which is the failure this whole path exists to
+end.
+
+=back
+
+B<Examples:>
+
+  my @created = _create_missing_branches($top, ['lab'], 0);
+  # returns ('lab'); refs/heads/lab now exists with a seed commit
 
 =head1 SEE ALSO
 
