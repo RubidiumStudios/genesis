@@ -4592,12 +4592,34 @@ sub _post_deploy {
 
 			$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
 			my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
-			system($bin, 'propagate', $self->name);
-			warning(
-				"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
-				"run #C{genesis propagate %s} manually to retry.",
-				($? >> 8), $self->name
-			) if $? != 0;
+			my @cmd = ($bin, 'propagate', $self->name);
+			push @cmd, '-y' if $opts{'fix-checks'};
+
+			# Stdin from /dev/null: propagation must never stop a deploy
+			# to ask something, and the child inherits this terminal.
+			my $rc = do {
+				local *STDIN;
+				open(STDIN, '<', '/dev/null')
+					or die "Cannot open /dev/null for propagation: $!\n";
+				system(@cmd);
+				$? >> 8;
+			};
+
+			if ($rc == Genesis::Top->PROPAGATE_NO_BRANCH_EXIT) {
+				warning(
+					"Nothing was propagated: a downstream environment has no branch.\n".
+					"The deployment of #C{%s} succeeded and is complete.\n\n".
+					"Create the branch with #C{genesis pipeline-prepare}, or\n".
+					"re-deploy with #C{-F} to have Genesis create it during propagation.",
+					$self->name
+				);
+			} elsif ($rc != 0) {
+				warning(
+					"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
+					"run #C{genesis propagate %s} manually to retry.",
+					$rc, $self->name
+				);
+			}
 		}
 	}
 
