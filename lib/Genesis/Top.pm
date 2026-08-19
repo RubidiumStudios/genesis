@@ -30,6 +30,8 @@ use constant DEFAULT_CONTROL_BRANCH  => 'control';
 use constant CI_PIPELINE_CONTROL_KEY => 'control'; # key in pipeline.branches{} hash for the control branch
 use constant LATEST_CONFIG_VERSION   => 3;
 
+use constant PROPAGATE_NO_BRANCH_EXIT => 9;
+
 ### Config Section Delegation Registry {{{
 # Modules may register themselves as handlers for specific top-level keys in
 # .genesis/config.  Top.pm owns the core schema; registered handlers own their

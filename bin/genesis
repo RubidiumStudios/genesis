@@ -2170,6 +2170,11 @@ define_command("propagate", {
 		'dry-run|n' =>
 			"Show what would be propagated without making changes.",
 
+		'yes|y' =>
+			"Create the branch for any environment that has none, without ".
+			"asking.  Interactively you are prompted instead; outside a ".
+			"terminal, propagation refuses rather than guessing.",
+
 		'commit=s' =>
 			"Control branch commit SHA to propagate from.  Defaults to ".
 			"HEAD of the control branch.",
