@@ -105,8 +105,10 @@ unit-tests/genesis_commands-feature_compatibility.t  # deploy/info/version rende
 unit-tests/genesis_commands-secrets_engine.t  # vault-or-openbao prereq, gated on the safe version
 unit-tests/pack-arguments.t                   # pack's argument validation and usage text
 unit-tests/genesis-cli.t                              # bin/genesis loads; cross-command definition sanity
+unit-tests/genesis_core-cli.t                         # Commands::Core CLI registration (config)
 unit-tests/genesis_env-cli.t                          # Commands::Env CLI registration (terminate)
 unit-tests/genesis_repo-cli.t                         # Commands::Repo CLI registration (repo-init)
+unit-tests/genesis_commands_core-config.t             # Commands::Core::config behaviour
 # Kit Provider tests (POD-driven)
 unit-tests/genesis_kit_provider-core.t              # Genesis::Kit::Provider base class/factory
 unit-tests/genesis_kit_provider_github-core.t        # Genesis::Kit::Provider::Github

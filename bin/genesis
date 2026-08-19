@@ -1354,6 +1354,28 @@ define_command("repo-init", {
 });
 
 # }}}
+# genesis config - get or set repository configuration values {{{
+define_command("config", {
+	summary => "Get or set values in the deployment repository configuration.",
+	usage => "config [<key> [<value>]]",
+	description =>
+		"Reads and writes #C{.genesis/config}, the deployment repository's ".
+		"configuration file.",
+	function_group => Genesis::Commands::REPOSITORY,
+	scope => 'repo',
+	option_group => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'set=s@{2}' =>
+			"Set #C{<key>} to #C{<value>}.  Repeat to set more than one key ".
+			"in a single run.\n".
+			"\n".
+			"Writing requires this flag so that bare arguments are always ".
+			"reads: #C{genesis config a b} retrieves two keys rather than ".
+			"silently assigning one to the other.",
+	],
+}, 'Genesis::Commands::Core::config');
+
+# }}}
 # genesis secrets-provider - set, clear or get the secret provider information {{{
 define_command("secrets-provider", {
 	summary => "Check or set the secrets provider for the Genesis deployment repo.",

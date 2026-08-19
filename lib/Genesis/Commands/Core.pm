@@ -7,8 +7,27 @@ use Genesis;
 use Genesis::Term;
 use Genesis::UI;
 use Genesis::Commands;
+use Genesis::Top;
 use JSON::PP qw/encode_json/;
 use POSIX qw/strftime mktime/;
+
+sub config {
+	my ($key) = @_;
+	my $top = Genesis::Top->new('.', no_vault => 1);
+
+	return output(to_yaml($top->config->get_all)) unless defined $key;
+
+	# Absent keys report on stderr and exit non-zero: a bare empty line on
+	# stdout would be indistinguishable from a key set to the empty string.
+	unless ($top->config->has($key)) {
+		error("#Y{%s} is #Ki{(unset)}", $key);
+		return 1;
+	}
+
+	my $value = $top->config->get($key);
+	output(ref($value) ? to_yaml($value) : $value);
+	return 0;
+}
 
 sub version {
 	my @args = @_;
