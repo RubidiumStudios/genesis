@@ -12,42 +12,63 @@ use JSON::PP qw/encode_json/;
 use POSIX qw/strftime mktime/;
 
 sub config {
-	my ($key) = @_;
+	my (@keys) = @_;
 	my $top = Genesis::Top->new('.', no_vault => 1);
 
 	my ($pairs, $removals) = @{get_options()}{qw/set unset/};
-	if ($pairs || $removals) {
+	my $writing = ($pairs || $removals) ? 1 : 0;
+
+	command_usage(1, "Reading and writing cannot be combined in one run")
+		if $writing && @keys;
+	command_usage(1, "Only one key can be read at a time")
+		if @keys > 1;
+
+	if ($writing) {
 		my $config = $top->config;
 
 		# Arity of 2 per occurrence, so the pairs arrive flat and even.
 		my @pairs = @{$pairs || []};
 
-		# Each option is collected into its own list, so the order the two
-		# were typed in is not recoverable: --set a 1 --unset a and its
-		# reverse arrive identical.  Refuse rather than pick one.
-		my %setting = map {$pairs->[$_ * 2] => 1} (0 .. $#{$pairs || []} / 2);
-		my @contested = grep {$setting{$_}} @{$removals || []};
+		# The order the two were typed in is not recoverable, so either
+		# answer would be wrong half the time.
+		my @set_keys;
+		for (my $i = 0; $i < @pairs; $i += 2) {
+			push @set_keys, $pairs[$i];
+		}
+		my @contested;
+		for my $unset (@{$removals || []}) {
+			# A shared prefix is only an overlap when one path contains
+			# the other; ci.enabled and ci.provider are unrelated.
+			push @contested, map {"$_ / $unset"}
+				grep {$_ eq $unset || _contains($unset, $_) || _contains($_, $unset)}
+				@set_keys;
+		}
 		bail(
-			"Cannot set and unset the same key in one run: %s",
+			"Cannot set and unset overlapping keys in one run: %s",
 			join(', ', map {"#Y{$_}"} @contested)
 		) if @contested;
 		$config->set(splice(@pairs, 0, 2)) while @pairs;
 
-		for my $key (@{$removals || []}) {
-			bail("#Y{%s} is #Ki{(unset)} - nothing to remove", $key)
-				unless $config->has($key);
-			$config->clear($key);
+		# Validity, not presence: a typo is always absent, so only the
+		# schema can catch one.
+		if (my @unknown = grep {$config->schema && !$config->schema_has($_)} @{$removals || []}) {
+			bail(
+				"Cannot unset unknown configuration key%s: %s",
+				(@unknown > 1 ? 's' : ''), join(', ', map {"#Y{$_}"} @unknown)
+			);
 		}
+		$config->clear($_) for grep {$config->has($_)} @{$removals || []};
 
-		# Validate the whole config before persisting any of it: validate
-		# bails, so a rejected value leaves the file untouched rather than
-		# half-written into a state Genesis::Top would refuse to load.
+		# Validate before persisting: validate bails, so a rejected value
+		# leaves the file untouched rather than half-written.
 		$config->validate($config->schema) if $config->schema;
 		$config->save;
 		return 0;
 	}
 
-	return output(to_yaml($top->config->get_all)) unless defined $key;
+	return output(to_yaml($top->config->get_all)) unless @keys;
+
+	my $key = $keys[0];
 
 	# Absent keys report on stderr and exit non-zero: a bare empty line on
 	# stdout would be indistinguishable from a key set to the empty string.
@@ -399,6 +420,12 @@ sub hack {
 # _detect_feature_compatibility - returns ($level, $source) for the current
 # repo (and optional $env_name).  Returns (undef, undef) outside a repo,
 # when nothing is declared, or when the env can't be loaded.
+sub _contains {
+	my ($ancestor, $key) = @_;
+	# The separator may be a dot or an index, so 'ab' is not inside 'a'.
+	return $key =~ /^\Q$ancestor\E[\.\[]/ ? 1 : 0;
+}
+
 sub _detect_feature_compatibility {
 	my ($env_name) = @_;
 	my ($fc_level, $fc_source);

@@ -147,9 +147,14 @@ C<ci.enabled false> records a false boolean rather than the string
 C<'false'>, which Perl would treat as true.  See
 L<Genesis::Config/_coerce_to_schema_type>.
 
-C<--unset> removes a key, and may also be repeated.  Removing a key
-that is not set is an error rather than a no-op, so a misspelled key is
-reported instead of appearing to succeed.
+C<--unset> removes a key, and may also be repeated.
+
+B<A key that is not set is accepted; a key the schema does not define
+is not.> Unset states a desired end state, and a key that was never
+there already satisfies it -- so C<--unset a.b --unset a> is redundant
+rather than wrong.  The check that matters is validity: a misspelling
+is always absent, so only the schema can tell one from a key that
+simply is not in use.
 
 B<Nothing is written until the whole result validates.> Every set and
 unset is applied in memory, the configuration is checked, and only then
@@ -208,14 +213,27 @@ Raised by L<Genesis::Config/validate> when a value written with
 C<--set> does not satisfy the schema.  The message names the offending
 key.  The file is left untouched.
 
-=item C<"%s is (unset) - nothing to remove">
+=item C<"Cannot unset unknown configuration key%s: %s">
 
-Raised when C<--unset> names a key that is not set.
+Raised when C<--unset> names a key the schema does not define.  Names
+every unrecognised key, not just the first.
 
-=item C<"Cannot set and unset the same key in one run: %s">
+=item C<"Cannot set and unset overlapping keys in one run: %s">
 
-Raised before anything is applied when a key is named by both
-C<--set> and C<--unset>.
+Raised before anything is applied when a key named by C<--set> and one
+named by C<--unset> are the same, or one contains the other.  Keys that
+merely share a prefix -- C<ci.enabled> and C<ci.provider> -- do not
+overlap and are allowed together.
+
+=item C<"Reading and writing cannot be combined in one run">
+
+Raised as a usage error when a key is given alongside C<--set> or
+C<--unset>.
+
+=item C<"Only one key can be read at a time">
+
+Raised as a usage error when more than one key is given.  The full
+configuration is available by giving none.
 
 =back
 
@@ -477,6 +495,30 @@ B<Examples:>
 
 These are internal to this module and may change without notice.
 
+=head2 _contains($ancestor, $key)
+
+  _contains('ci', 'ci.enabled');       # 1
+  _contains('ci', 'ci');               # 0 -- equal, not contained
+  _contains('a',  'ab');               # 0
+
+Reports whether one dotted path lies inside another.
+
+B<A shared prefix is not containment.> The next character has to be a
+separator, so C<a> does not contain C<ab>.  Both C<.> and C<[> count,
+so an indexed path such as C<a[0].b> is recognised as inside C<a>.
+
+Equality is deliberately not containment: callers test for it
+separately, because the two cases usually warrant different wording.
+
+B<Returns:> C<1> when C<$key> lies inside C<$ancestor>, C<0> otherwise.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _contains('ci.provider', 'ci.provider.type');   # 1
+  _contains('ci.enabled',  'ci.provider');        # 0
+
 =head2 _detect_feature_compatibility($env_name)
 
 Determines the feature-compatibility floor in effect, and where it came from,
@@ -566,7 +608,7 @@ C<default>), so this is a rendering gap rather than a missing capability.
 Marking the sources, filtering by source, and a machine-readable form
 carrying value and source together are all deferred.
 
-=head2 Setting and unsetting one key in a single run is refused
+=head2 Setting and unsetting overlapping keys is refused
 
 Getopt::Long collects each option into its own list, so the order the
 two were typed in is not recoverable: C<--set a 1 --unset a> and
@@ -575,6 +617,18 @@ arity, ordering and attribution together -- a shared array loses which
 option supplied a value, and a callback destination forces a single
 value per occurrence, discarding the arity.  Rather than pick an order
 and be wrong half the time, the invocation is rejected.
+
+The same applies when one key contains the other: unsetting C<ci>
+removes what C<--set ci.enabled> just wrote, and which of the two wins
+again depends on the order that was lost.  Keys that only share a
+prefix are unrelated and remain allowed.
+
+=head2 Reading and writing cannot be combined
+
+There is no output contract for printing one value while changing
+another, so an invocation naming a key alongside C<--set> or
+C<--unset> is a usage error.  Only one key may be read at a time; the
+whole configuration is available by naming none.
 
 =head2 An arity option cannot be abbreviated
 

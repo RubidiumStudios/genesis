@@ -7,6 +7,7 @@ use lib 't';
 use helper;
 use Test::More;
 use Test::Output;
+use Test::Exit;
 
 # Explicit import: Genesis exports its own workdir() which would otherwise
 # clobber helper's.
@@ -222,6 +223,122 @@ subtest 'config refuses to set and unset the same key' => sub {
 	like($err.$raised, qr/manifest_store/, "names the contested key");
 	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*exodus/,
 		"leaves the file exactly as it was");
+};
+
+subtest 'config will not read and write in the same run' => sub {
+	plan tests => 2;
+
+	# There is no sensible output contract for "print this and also change
+	# that", and silently dropping the read is how the argument used to
+	# disappear without comment.
+	my $dir = config_repo('config-read-and-write');
+	pushd $dir;
+	prepare_command('config', 'deployment_type', '--set', 'manifest_store', 'repository');
+	build_command_environment;
+	output_from {
+		exits_nonzero { Genesis::Commands::Core::config(get_args()) }
+			"exits non-zero rather than picking one";
+	};
+	popd;
+
+	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*exodus/,
+		"and writes nothing");
+};
+
+subtest 'config will not read more than one key' => sub {
+	plan tests => 1;
+
+	my $dir = config_repo('config-multi-get');
+	pushd $dir;
+	prepare_command('config', 'manifest_store', 'deployment_type');
+	build_command_environment;
+	output_from {
+		exits_nonzero { Genesis::Commands::Core::config(get_args()) }
+			"exits non-zero rather than silently ignoring the rest";
+	};
+	popd;
+};
+
+subtest 'config --unset accepts a key that is already unset' => sub {
+	plan tests => 2;
+
+	# Unset states a desired end state, and the end state is the same
+	# whether or not the key happened to be there.
+	my $dir = config_repo('config-unset-absent');
+	pushd $dir;
+	prepare_command('config', '--unset', 'kits_path');
+	build_command_environment;
+	my $raised = '';
+	output_from {
+		eval { Genesis::Commands::Core::config() };
+		$raised = $@;
+	};
+	popd;
+
+	is($raised, '', "does not complain about a key that was not set");
+	like(slurp("$dir/.genesis/config"), qr/^deployment_type:/m,
+		"leaves the rest of the config alone");
+};
+
+subtest 'config --unset rejects a key the schema does not know' => sub {
+	plan tests => 2;
+
+	# The check is validity, not presence: an unknown key is a typo, and
+	# the old presence check could never catch one because a typo is
+	# always absent.
+	my $dir = config_repo('config-unset-bogus');
+	pushd $dir;
+	prepare_command('config', '--unset', 'manifest_stroe');
+	build_command_environment;
+	my $raised = '';
+	my ($out, $err) = output_from {
+		eval { Genesis::Commands::Core::config() };
+		$raised = $@;
+	};
+	popd;
+
+	like($err.$raised, qr/manifest_stroe/, "names the key it does not recognise");
+	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*exodus/,
+		"writes nothing");
+};
+
+subtest 'config refuses to set inside a key it is unsetting' => sub {
+	plan tests => 2;
+
+	# Unsetting the parent removes what the set just wrote into, and which
+	# of the two wins depends on an order that was not preserved.
+	my $dir = config_repo('config-set-under-unset');
+	pushd $dir;
+	prepare_command('config', '--set', 'ci.provider.type', 'concourse',
+	                          '--unset', 'ci.provider');
+	build_command_environment;
+	my $raised = '';
+	my ($out, $err) = output_from {
+		eval { Genesis::Commands::Core::config() };
+		$raised = $@;
+	};
+	popd;
+
+	like($err.$raised, qr/ci\.provider/, "names the overlapping keys");
+	like(slurp("$dir/.genesis/config"), qr/type:\s*manual/,
+		"leaves the file as it was");
+};
+
+subtest 'config allows set and unset of unrelated nested keys' => sub {
+	plan tests => 2;
+
+	# A shared prefix is not an overlap: neither key contains the other.
+	my $dir = config_repo('config-set-unset-siblings');
+	pushd $dir;
+	prepare_command('config', '--set', 'ci.provider.type', 'concourse',
+	                          '--unset', 'ci.enabled');
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	my $cfg = slurp("$dir/.genesis/config");
+	like($cfg, qr/type:\s*concourse/, "the set is applied");
+	unlike($cfg, qr/^\s+enabled:/m,   "the unset is applied");
 };
 
 done_testing;

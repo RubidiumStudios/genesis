@@ -384,10 +384,8 @@ sub parse_options { # {{{
 		? qw(pass_through no_auto_abbrev)
 		: qw(no_pass_through auto_abbrev);
 
-	# Options declaring a fixed arity, as '--set <key> <value>' does.
-	# Getopt::Long rejects these outright while bundling, without checking
-	# whether the option could ever be bundled -- only a single-letter
-	# name can be, and it never inspects the name.  See _parse_two_pass.
+	# Getopt::Long rejects a fixed arity while bundling, whatever the
+	# option is named.  See _parse_two_pass.
 	my @arity_spec = grep {/\{\d/} @opts_spec;
 
 	Getopt::Long::Configure(
@@ -464,9 +462,8 @@ sub _parse_two_pass { # {{{
 	);
 	my $ok = GetOptionsFromArray($args, $COMMAND_OPTIONS, @$specs);
 
-	# Bundling on for what is left, with the arity specs withheld so the
-	# guard has nothing to object to.  Unknown options are rejected here
-	# rather than passed through, so a typo still fails.
+	# Bundling on for what is left, arity specs withheld so the guard has
+	# nothing to object to.  Unknown options still fail here.
 	Getopt::Long::Configure(
 		qw(no_ignore_case bundling no_pass_through auto_abbrev), $order
 	);

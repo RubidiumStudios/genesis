@@ -101,6 +101,13 @@ sub schema {
 }
 
 # }}}
+# schema_has - whether the schema declares a dotted path {{{
+sub schema_has {
+	my ($self, $key) = @_;
+	return defined($self->_schema_for_key($key)) ? 1 : 0;
+}
+
+# }}}
 # has - check if a key exists in the configuration {{{
 sub has {
 	my ($self, $key) = @_;
@@ -198,10 +205,8 @@ sub clear {
 	struct_set_value($self->{loaded_values}, $key, undef, 1);
 	struct_set_value($self->{set_values}, $key, undef, 1);
 
-	# Walking a dotted path creates the parents it passes through, so
-	# clearing a nested key can leave an empty hash behind.  In the
-	# higher-priority source that empty hash wins the merge outright and
-	# takes the key's siblings with it.
+	# An empty parent left behind wins the merge outright and takes the
+	# key's siblings with it.
 	$self->_prune_empty_parents($_, $key)
 		for ($self->{loaded_values}, $self->{set_values});
 
@@ -320,6 +325,22 @@ sub validate {
 
 ### Instance Private Methods {{{
 
+# _schema_for_key - the schema entry a dotted path names, if any {{{
+sub _schema_for_key {
+	my ($self, $key) = @_;
+
+	return undef unless $self->{schema};
+
+	my $spec = $self->{schema};
+	for my $part (split /\./, $key) {
+		$spec = $spec->{schema} if exists $spec->{schema};
+		return undef unless ref($spec) eq 'HASH' && exists $spec->{$part};
+		$spec = $spec->{$part};
+	}
+	return $spec;
+}
+
+# }}}
 # _prune_empty_parents - drop hashes a cleared key left empty behind it {{{
 sub _prune_empty_parents {
 	my ($self, $struct, $key) = @_;
@@ -346,13 +367,7 @@ sub _coerce_to_schema_type {
 	return $value if ref($value) || !defined($value);
 	return $value unless $self->{schema};
 
-	# Walk the dotted path through nested sub-schemas.
-	my $spec = $self->{schema};
-	for my $part (split /\./, $key) {
-		$spec = $spec->{schema} if exists $spec->{schema};
-		return $value unless ref($spec) eq 'HASH' && exists $spec->{$part};
-		$spec = $spec->{$part};
-	}
+	my $spec = $self->_schema_for_key($key);
 	my $type = ref($spec) eq 'HASH' ? ($spec->{type} // '') : '';
 	my %types = map {$_ => 1} split(/\|\|/, $type);
 

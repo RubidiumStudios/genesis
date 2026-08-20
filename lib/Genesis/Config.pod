@@ -721,10 +721,54 @@ B<Examples:>
     $cfg->validate($cfg->schema);   # re-check before persisting
     $cfg->save;
 
+=head2 schema_has
+
+    my $known = $cfg->schema_has('ci.provider.type');
+
+Reports whether the schema declares a dotted path.
+
+B<Distinct from C<has()>, which reports presence.> A misspelled key is
+always absent, so presence can never tell a typo from a key that simply
+is not in use. Removal in particular needs this: unsetting a key that
+was never set is legitimate, while unsetting a key that does not exist
+in the schema is a mistake worth reporting.
+
+Returns false for every key when C<validate()> has not been called,
+since there is no schema to consult.
+
+B<Returns:> C<1> when the schema declares the path, C<0> otherwise.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $cfg->schema_has('manifest_store');   # 1
+    $cfg->schema_has('manifest_stroe');   # 0 -- a typo, not a spare key
+
 =head1 INTERNAL METHODS
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _schema_for_key
+
+    my $spec = $cfg->_schema_for_key('ci.provider.type');
+
+Returns the schema entry a dotted path names, or C<undef> if the schema
+does not declare it.
+
+Walks the path segment by segment, stepping through each level's
+C<schema> sub-hash. Shared by C<schema_has()> and
+C<_coerce_to_schema_type()>, so both agree on what a key means.
+
+B<Returns:> The schema entry hash reference, or C<undef>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $spec = $cfg->_schema_for_key('manifest_store');
+    # { type => 'enum', values => [...], default => 'hybrid', ... }
 
 =head2 _prune_empty_parents
 

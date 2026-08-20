@@ -1381,8 +1381,9 @@ define_command("config", {
 			"Remove #C{<key>} from the configuration.  Repeat to remove ".
 			"more than one.\n".
 			"\n".
-			"A key that is not set is an error rather than a no-op, so a ".
-			"misspelled key is reported instead of appearing to succeed.",
+			"A key that is not set is accepted -- the end state is the same ".
+			"either way -- but a key the schema does not define is refused, ".
+			"so a misspelling is reported rather than quietly doing nothing.",
 	],
 }, 'Genesis::Commands::Core::config');
 
