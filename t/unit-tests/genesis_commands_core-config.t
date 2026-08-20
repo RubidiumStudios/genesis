@@ -153,4 +153,75 @@ subtest 'config --set refuses a value the schema rejects' => sub {
 		"names the offending key");
 };
 
+subtest 'config --unset removes a key' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-unset');
+	pushd $dir;
+	prepare_command('config', '--unset', 'manifest_store');
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	my $cfg = slurp("$dir/.genesis/config");
+	unlike($cfg, qr/^manifest_store:/m, "the key is gone from the file");
+	like($cfg, qr/^deployment_type:/m, "the rest of the config is left alone");
+};
+
+subtest 'config --unset removes several keys' => sub {
+	plan tests => 3;
+
+	my $dir = config_repo('config-unset-many');
+	pushd $dir;
+	prepare_command('config', '--unset', 'manifest_store', '--unset', 'ci.enabled');
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	my $cfg = slurp("$dir/.genesis/config");
+	unlike($cfg, qr/^manifest_store:/m, "the first key is gone");
+	unlike($cfg, qr/^\s+enabled:/m,     "the nested key is gone");
+	like($cfg, qr/type:\s*manual/,      "its sibling is untouched");
+};
+
+subtest 'config mixes --set and --unset in one run' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-set-and-unset');
+	pushd $dir;
+	prepare_command('config', '--set', 'manifest_store', 'repository',
+	                          '--unset', 'ci.enabled');
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	my $cfg = slurp("$dir/.genesis/config");
+	like($cfg, qr/manifest_store:\s*repository/, "the set is applied");
+	unlike($cfg, qr/^\s+enabled:/m,              "the unset is applied");
+};
+
+subtest 'config refuses to set and unset the same key' => sub {
+	plan tests => 2;
+
+	# Getopt::Long collects each option into its own list, so the order the
+	# two were typed in cannot be recovered: '--set a 1 --unset a' and
+	# '--unset a --set a 1' arrive identical.  Rather than pick one and be
+	# wrong half the time, refuse the invocation.
+	my $dir = config_repo('config-set-unset-clash');
+	pushd $dir;
+	prepare_command('config', '--set', 'manifest_store', 'repository',
+	                          '--unset', 'manifest_store');
+	build_command_environment;
+	my $raised = '';
+	my ($out, $err) = output_from {
+		eval { Genesis::Commands::Core::config() };
+		$raised = $@;
+	};
+	popd;
+
+	like($err.$raised, qr/manifest_store/, "names the contested key");
+	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*exodus/,
+		"leaves the file exactly as it was");
+};
+
 done_testing;

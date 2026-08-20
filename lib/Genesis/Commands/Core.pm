@@ -15,11 +15,29 @@ sub config {
 	my ($key) = @_;
 	my $top = Genesis::Top->new('.', no_vault => 1);
 
-	# Arity of 2 per occurrence, so the pairs arrive flat and even.
-	if (my $pairs = get_options->{set}) {
-		my @pairs = @$pairs;
+	my ($pairs, $removals) = @{get_options()}{qw/set unset/};
+	if ($pairs || $removals) {
 		my $config = $top->config;
+
+		# Arity of 2 per occurrence, so the pairs arrive flat and even.
+		my @pairs = @{$pairs || []};
+
+		# Each option is collected into its own list, so the order the two
+		# were typed in is not recoverable: --set a 1 --unset a and its
+		# reverse arrive identical.  Refuse rather than pick one.
+		my %setting = map {$pairs->[$_ * 2] => 1} (0 .. $#{$pairs || []} / 2);
+		my @contested = grep {$setting{$_}} @{$removals || []};
+		bail(
+			"Cannot set and unset the same key in one run: %s",
+			join(', ', map {"#Y{$_}"} @contested)
+		) if @contested;
 		$config->set(splice(@pairs, 0, 2)) while @pairs;
+
+		for my $key (@{$removals || []}) {
+			bail("#Y{%s} is #Ki{(unset)} - nothing to remove", $key)
+				unless $config->has($key);
+			$config->clear($key);
+		}
 
 		# Validate the whole config before persisting any of it: validate
 		# bails, so a rejected value leaves the file untouched rather than

@@ -1376,6 +1376,13 @@ define_command("config", {
 			"Writing requires this flag so that bare arguments are always ".
 			"reads: #C{genesis config a b} retrieves two keys rather than ".
 			"silently assigning one to the other.",
+
+		'unset=s@' =>
+			"Remove #C{<key>} from the configuration.  Repeat to remove ".
+			"more than one.\n".
+			"\n".
+			"A key that is not set is an error rather than a no-op, so a ".
+			"misspelled key is reported instead of appearing to succeed.",
 	],
 }, 'Genesis::Commands::Core::config');
 
