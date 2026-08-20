@@ -379,20 +379,29 @@ sub parse_options { # {{{
 
 	$COMMAND_OPTIONS->{color} = 1 unless exists $COMMAND_OPTIONS->{color};
 
-	Getopt::Long::Configure(
-		qw(no_ignore_case bundling),
-		$PROPS{$COMMAND}{option_passthrough}
+	my $order = $PROPS{$COMMAND}{option_require_order} ? 'require_order' : 'permute';
+	my @passthrough = $PROPS{$COMMAND}{option_passthrough}
 		? qw(pass_through no_auto_abbrev)
-		: qw(no_pass_through auto_abbrev),
-		$PROPS{$COMMAND}{option_require_order} ? 'require_order' : 'permute'
-	);
+		: qw(no_pass_through auto_abbrev);
+
+	# Options declaring a fixed arity, as '--set <key> <value>' does.
+	# Getopt::Long rejects these outright while bundling, without checking
+	# whether the option could ever be bundled -- only a single-letter
+	# name can be, and it never inspects the name.  See _parse_two_pass.
+	my @arity_spec = grep {/\{\d/} @opts_spec;
+
+	Getopt::Long::Configure(
+		qw(no_ignore_case bundling), @passthrough, $order
+	) unless @arity_spec;
 
 	my $parsing_ok = 1;
 	my @option_warnings = ();
 	{
 		$COMMAND_OPTIONS = {};
 		local $SIG{__WARN__} = sub { push @option_warnings, @_; };
-		$parsing_ok = GetOptionsFromArray($args, $COMMAND_OPTIONS, (@base_spec,@opts_spec));
+		$parsing_ok = @arity_spec
+			? _parse_two_pass($args, [@base_spec,@opts_spec], $order)
+			: GetOptionsFromArray($args, $COMMAND_OPTIONS, (@base_spec,@opts_spec));
 	}
 
 	unless ($parsing_ok) {
@@ -441,6 +450,27 @@ sub parse_options { # {{{
 	delete($COMMAND_OPTIONS->{no_cwd});
 	dump_var 'Received Arguments' => \@COMMAND_ARGS;
 	return;
+} # }}}
+
+sub _parse_two_pass { # {{{
+	my ($args, $specs, $order) = @_;
+
+	my @without_arity = grep {!/\{\d/} @$specs;
+
+	# Bundling off so the arity specs are legal; pass_through leaves
+	# anything unrecognised -- notably short-flag clusters -- in place.
+	Getopt::Long::Configure(
+		qw(no_ignore_case no_bundling pass_through no_auto_abbrev), $order
+	);
+	my $ok = GetOptionsFromArray($args, $COMMAND_OPTIONS, @$specs);
+
+	# Bundling on for what is left, with the arity specs withheld so the
+	# guard has nothing to object to.  Unknown options are rejected here
+	# rather than passed through, so a typo still fails.
+	Getopt::Long::Configure(
+		qw(no_ignore_case bundling no_pass_through auto_abbrev), $order
+	);
+	return GetOptionsFromArray($args, $COMMAND_OPTIONS, @without_arity) && $ok;
 } # }}}
 
 sub get_options { # {{{
