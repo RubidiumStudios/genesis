@@ -128,9 +128,30 @@ B<Examples:>
   config('manifest_store')
   config('ci.provider.type')
 
-Reads the deployment repository's configuration from
+  genesis config --set manifest_store exodus
+  genesis config --set manifest_store exodus --set ci.enabled false
+
+Reads and writes the deployment repository's configuration in
 F<.genesis/config>.  With no argument, prints the whole configuration as
 YAML; with a key, prints just that key's value.
+
+B<Writing requires C<--set>, so a bare argument never assigns
+anything.> C<genesis config a b> reads two keys; it does not set C<a> to
+C<b>.  The alternative -- taking a second bare argument as a value, as
+C<git config> does -- turns a mistyped read into a silent write, and a
+surprising read is recoverable in a way a surprising write is not.
+
+C<--set> takes a key and a value, and may be repeated.  Values are
+coerced to the type the schema declares before being stored, so
+C<ci.enabled false> records a false boolean rather than the string
+C<'false'>, which Perl would treat as true.  See
+L<Genesis::Config/_coerce_to_schema_type>.
+
+B<Nothing is written until every pair validates.> The whole
+configuration is checked after the values are applied in memory and
+before it is persisted, so a rejected value leaves the file exactly as
+it was rather than half-updated into a state L<Genesis::Top> would
+refuse to load.
 
 B<The configuration is reported as Genesis will actually use it>, not as
 the file literally reads.  Schema defaults and environment overrides are
@@ -162,8 +183,8 @@ A dotted path into the configuration.  Omit it to dump everything.
 
 =back
 
-B<Returns:> C<0> when the key was found (or when dumping), C<1> when the
-key is not set.
+B<Returns:> C<0> when the key was found, when dumping, or after a
+successful write; C<1> when the key is not set.
 
 B<Errors:>
 
@@ -175,6 +196,12 @@ Reported on standard error, with a return of C<1>, when the key is
 absent.  Deliberately not silent-and-zero: printing an empty line to
 standard output would be indistinguishable from a key legitimately set
 to the empty string, leaving a caller unable to tell the two apart.
+
+=item C<"Configuration validation failed for %s">
+
+Raised by L<Genesis::Config/validate> when a value written with
+C<--set> does not satisfy the schema.  The message names the offending
+key.  The file is left untouched.
 
 =back
 
@@ -525,12 +552,16 @@ C<default>), so this is a rendering gap rather than a missing capability.
 Marking the sources, filtering by source, and a machine-readable form
 carrying value and source together are all deferred.
 
-=head2 C<config> is read-only
+=head2 C<config> cannot remove a key
 
-Writing is not implemented.  L<Genesis::Config/set> and
-L<Genesis::Config/save> exist, but C<set> does not yet validate against
-the schema, so a write path would happily persist a value that
-L<Genesis::Top> refuses to load afterwards.
+C<--unset> is not implemented, so a key can be changed but not taken
+back out.  L<Genesis::Config/clear> exists to build it on.
+
+=head2 An arity option cannot be abbreviated
+
+C<--set> is parsed in a first pass configured with C<no_auto_abbrev>, so
+C<--se> does not resolve to it.  Every other option still abbreviates.
+See L<Genesis::Commands/_parse_two_pass>.
 
 =head2 C<config> is repository-scoped only
 

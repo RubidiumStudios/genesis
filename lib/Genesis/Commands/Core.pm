@@ -15,6 +15,20 @@ sub config {
 	my ($key) = @_;
 	my $top = Genesis::Top->new('.', no_vault => 1);
 
+	# Arity of 2 per occurrence, so the pairs arrive flat and even.
+	if (my $pairs = get_options->{set}) {
+		my @pairs = @$pairs;
+		my $config = $top->config;
+		$config->set(splice(@pairs, 0, 2)) while @pairs;
+
+		# Validate the whole config before persisting any of it: validate
+		# bails, so a rejected value leaves the file untouched rather than
+		# half-written into a state Genesis::Top would refuse to load.
+		$config->validate($config->schema) if $config->schema;
+		$config->save;
+		return 0;
+	}
+
 	return output(to_yaml($top->config->get_all)) unless defined $key;
 
 	# Absent keys report on stderr and exit non-zero: a bare empty line on

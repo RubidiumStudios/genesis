@@ -1357,10 +1357,14 @@ define_command("repo-init", {
 # genesis config - get or set repository configuration values {{{
 define_command("config", {
 	summary => "Get or set values in the deployment repository configuration.",
-	usage => "config [<key> [<value>]]",
+	usage => "config [<key> ...] [--set <key> <value>] [--unset <key>]",
 	description =>
 		"Reads and writes #C{.genesis/config}, the deployment repository's ".
-		"configuration file.",
+		"configuration file.\n".
+		"\n".
+		"Bare arguments only ever read, so a value is never written by ".
+		"accident: #C{genesis config a b} retrieves both keys rather than ".
+		"assigning one to the other.",
 	function_group => Genesis::Commands::REPOSITORY,
 	scope => 'repo',
 	option_group => Genesis::Commands::REPO_OPTIONS,

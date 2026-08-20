@@ -10,7 +10,7 @@ use Test::Output;
 
 # Explicit import: Genesis exports its own workdir() which would otherwise
 # clobber helper's.
-use Genesis qw/mkdir_or_fail mkfile_or_fail pushd popd/;
+use Genesis qw/mkdir_or_fail mkfile_or_fail slurp pushd popd/;
 use Genesis::Commands;
 use Genesis::Commands::Core;
 
@@ -115,6 +115,42 @@ subtest 'config reports an unset key without pretending it is empty' => sub {
 	is($out, '', "prints nothing to stdout, so a script capturing it gets nothing");
 	like($err, qr/\(unset\)/, "says the key is unset, on stderr");
 	isnt($rc, 0, "exits non-zero so callers can branch on it");
+};
+
+subtest 'config --set persists a value' => sub {
+	plan tests => 1;
+
+	my $dir = config_repo('config-set');
+	pushd $dir;
+	prepare_command('config', '--set', 'manifest_store', 'repository');
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*repository/,
+		"writes the new value to .genesis/config");
+};
+
+subtest 'config --set refuses a value the schema rejects' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-set-invalid');
+	pushd $dir;
+	prepare_command('config', '--set', 'manifest_store', 'nonsense');
+	build_command_environment;
+	# $@ has to be taken inside the block: popd runs before the assertions
+	# and clears it.
+	my $raised = '';
+	my ($out, $err) = output_from {
+		eval { Genesis::Commands::Core::config() };
+		$raised = $@;
+	};
+	popd;
+
+	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*exodus/,
+		"leaves the original value on disk");
+	like($err.$raised, qr/manifest_store/,
+		"names the offending key");
 };
 
 done_testing;
