@@ -954,6 +954,67 @@ subtest 'conditional required (polymorphic)' => sub {
 	);
 };
 
+subtest 'set() coerces string values to their schema type' => sub {
+	my $schema = {
+		enabled => {type => 'boolean', default => Genesis::Config::FALSE()},
+		count   => {type => 'integer'},
+		name    => {type => 'string'},
+		nested  => {type => 'hash', schema => {
+			on => {type => 'boolean'},
+		}},
+	};
+
+	my $c = Genesis::Config->new("$tmp/coerce.yml");
+	$c->validate($schema);
+
+	# Values arriving from a command line are always strings, and every
+	# non-empty string is true in Perl -- 'false' most of all.
+	$c->set('enabled', 'false');
+	ok(!$c->get('enabled'), "the string 'false' becomes a false boolean");
+
+	$c->set('enabled', 'true');
+	ok($c->get('enabled'), "the string 'true' becomes a true boolean");
+
+	# is() compares as strings, so '42' and 42 look identical; encoding is
+	# what reveals whether the value would persist quoted.
+	$c->set('count', '42');
+	like(JSON::PP->new->encode({v => $c->get('count')}), qr/"v":42[,}]/,
+		"a numeric string becomes a number, not a quoted string");
+
+	$c->set('name', 'false');
+	is($c->get('name'), 'false', "a string-typed key keeps the literal text");
+
+	$c->set('nested.on', 'no');
+	ok(!$c->get('nested.on'), "coercion follows a dotted path into a sub-schema");
+};
+
+subtest 'set() coercion respects union types' => sub {
+	my $schema = {
+		maybe_str  => {type => 'string||null'},
+		maybe_bool => {type => 'boolean||null'},
+		maybe_int  => {type => 'integer||null'},
+	};
+
+	my $c = Genesis::Config->new("$tmp/coerce-union.yml");
+	$c->validate($schema);
+
+	# 'false' is a perfectly good string, so a union admitting strings
+	# keeps it verbatim rather than guessing at a boolean.
+	$c->set('maybe_str', 'false');
+	is($c->get('maybe_str'), 'false', "string||null keeps the literal text");
+
+	$c->set('maybe_bool', 'false');
+	ok(!$c->get('maybe_bool'), "boolean||null still coerces to a boolean");
+
+	$c->set('maybe_int', '7');
+	like(JSON::PP->new->encode({v => $c->get('maybe_int')}), qr/"v":7[,}]/,
+		"integer||null still coerces to a number");
+
+	# The only way to express null on a command line.
+	$c->set('maybe_str', 'null');
+	ok(!defined($c->get('maybe_str')), "the literal 'null' becomes undef when the union allows it");
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

@@ -94,6 +94,13 @@ sub get_all {
 }
 
 # }}}
+# schema - the schema this configuration was last validated against {{{
+sub schema {
+	my ($self) = @_;
+	return $self->{schema};
+}
+
+# }}}
 # has - check if a key exists in the configuration {{{
 sub has {
 	my ($self, $key) = @_;
@@ -167,6 +174,8 @@ sub set {
 	# TODO: Validate key and value against schema
 
 	bug("Cannot save configuration without a path") if $save && ! $self->{path};
+
+	$value = $self->_coerce_to_schema_type($key, $value);
 
 	# Use _update_source to handle cache invalidation
 	$self->_update_source('set', $key, $value);
@@ -304,6 +313,41 @@ sub validate {
 
 ### Instance Private Methods {{{
 
+# _coerce_to_schema_type - convert a string value to the type its schema declares {{{
+sub _coerce_to_schema_type {
+	my ($self, $key, $value) = @_;
+
+	return $value if ref($value) || !defined($value);
+	return $value unless $self->{schema};
+
+	# Walk the dotted path through nested sub-schemas.
+	my $spec = $self->{schema};
+	for my $part (split /\./, $key) {
+		$spec = $spec->{schema} if exists $spec->{schema};
+		return $value unless ref($spec) eq 'HASH' && exists $spec->{$part};
+		$spec = $spec->{$part};
+	}
+	my $type = ref($spec) eq 'HASH' ? ($spec->{type} // '') : '';
+	my %types = map {$_ => 1} split(/\|\|/, $type);
+
+	# The only spelling of null available on a command line.
+	return undef if $types{null} && $value =~ /^(?:null|~)$/i;
+
+	# A union admitting strings keeps the text: it validates either way, and
+	# guessing at a boolean would discard what the operator actually typed.
+	return $value if $types{string};
+
+	if ($types{boolean}) {
+		# Every non-empty string is true in Perl, so the spellings a person
+		# would actually type for false have to be recognised explicitly.
+		return $value =~ /^(?:false|no|off|0|)$/i ? FALSE : TRUE;
+	}
+	return 0 + $value
+		if ($types{integer} || $types{number}) && $value =~ /^-?\d+(?:\.\d+)?$/;
+	return $value;
+}
+
+# }}}
 # _contents - the contents of the configuration object computed from source structures {{{
 sub _contents {
 	my ($self) = @_;
