@@ -712,7 +712,10 @@ sub command_usage { # {{{
 		my ($source,$options,$label) = @{$source_details};
 		my $type = $label || 'Option';
 		my $section=0;
-		while (my ($opt_def, $opt_desc) = splice(@$options,0,2)) {
+		# Walk the pairs rather than consume them: these are the live
+		# command definition, not a copy of it.
+		for (my $i = 0; $i < @$options; $i += 2) {
+			my ($opt_def, $opt_desc) = @{$options}[$i, $i+1];
 
 			my $opt_arg;
 			if (ref($opt_desc) eq "HASH") {
