@@ -24,7 +24,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 require './bin/genesis';
 
 subtest 'genesis config' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	ok(has_command('config'), "config command is registered");
 
@@ -37,6 +37,9 @@ subtest 'genesis config' => sub {
 	# One value per occurrence, so no arity clause is needed here.
 	ok(exists $opts{'unset=s@'},
 		"config has a repeatable --unset taking a key");
+
+	ok(exists $opts{'set-from-file=s@{2}'},
+		"config has a repeatable --set-from-file taking a key and a path");
 
 	# Dispatch resolves the handler lazily, so a wrong name here only
 	# surfaces when someone runs the command.

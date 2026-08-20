@@ -341,4 +341,75 @@ subtest 'config allows set and unset of unrelated nested keys' => sub {
 	unlike($cfg, qr/^\s+enabled:/m,   "the unset is applied");
 };
 
+subtest 'config --set-from-file reads a scalar, less one newline' => sub {
+	plan tests => 1;
+
+	my $dir = config_repo('config-from-file-scalar');
+	mkfile_or_fail("$dir/value.txt", "repository\n");
+	pushd $dir;
+	prepare_command('config', '--set-from-file', 'manifest_store', "$dir/value.txt");
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*repository\s*$/m,
+		"stores the text without its trailing newline");
+};
+
+subtest 'config --set-from-file parses a collection' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-from-file-collection');
+	mkfile_or_fail("$dir/provider.yml", "type: concourse\ntarget: prod\n");
+	pushd $dir;
+	prepare_command('config', '--set-from-file', 'ci.provider', "$dir/provider.yml");
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	my $cfg = slurp("$dir/.genesis/config");
+	like($cfg, qr/type:\s*concourse/, "the parsed structure is stored");
+	like($cfg, qr/target:\s*prod/,    "including its other keys");
+};
+
+subtest 'config --set-from-file will not overlap --set or --unset' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-from-file-overlap');
+	mkfile_or_fail("$dir/value.txt", "concourse\n");
+	pushd $dir;
+	prepare_command('config', '--set-from-file', 'ci.provider.type', "$dir/value.txt",
+	                          '--unset', 'ci.provider');
+	build_command_environment;
+	my $raised = '';
+	my ($out, $err) = output_from {
+		eval { Genesis::Commands::Core::config() };
+		$raised = $@;
+	};
+	popd;
+
+	like($err.$raised, qr/ci\.provider/, "names the overlapping keys");
+	like(slurp("$dir/.genesis/config"), qr/type:\s*manual/,
+		"leaves the file as it was");
+};
+
+subtest 'config --set-from-file reports a file it cannot read' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-from-file-missing');
+	pushd $dir;
+	prepare_command('config', '--set-from-file', 'manifest_store', "$dir/no-such-file");
+	build_command_environment;
+	my $raised = '';
+	my ($out, $err) = output_from {
+		eval { Genesis::Commands::Core::config() };
+		$raised = $@;
+	};
+	popd;
+
+	like($err.$raised, qr/no-such-file/, "names the file");
+	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*exodus/,
+		"writes nothing");
+};
+
 done_testing;

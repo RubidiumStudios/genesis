@@ -147,6 +147,12 @@ C<ci.enabled false> records a false boolean rather than the string
 C<'false'>, which Perl would treat as true.  See
 L<Genesis::Config/_coerce_to_schema_type>.
 
+C<--set-from-file> takes a key and a path, and may be repeated.  It
+exists because a value worth putting in a file is usually one that is
+painful to quote on a command line -- a multi-line block, or text with
+shell metacharacters in it.  The file is read according to the key's
+declared type; see L</_pairs_from_files($config, $from_files)>.
+
 C<--unset> removes a key, and may also be repeated.
 
 B<A key that is not set is accepted; a key the schema does not define
@@ -494,6 +500,70 @@ B<Examples:>
 =head1 INTERNAL FUNCTIONS
 
 These are internal to this module and may change without notice.
+
+=head2 _pairs_from_files($config, $from_files)
+
+  my @pairs = _pairs_from_files($config, ['ci.provider', './provider.yml']);
+
+Turns C<--set-from-file> arguments into the same flat key/value pairs
+C<--set> produces, so both reach the write path identically and are
+covered by the same overlap and validation rules.
+
+B<How the file is read follows the key's declared type.> A key holding
+a collection has its file parsed as YAML, which covers JSON too; any
+other key takes the text verbatim. Nothing is guessed from the
+content, so a string-typed key whose file happens to contain
+C<key: value> stores that text rather than a structure.
+
+B<Exactly one trailing newline is removed from scalars.> Editors add
+one and the value almost never wants it; removing more would corrupt a
+value that genuinely ends in blank lines. Collections are unaffected,
+having been parsed rather than trimmed.
+
+A collection replaces what was there rather than merging into it,
+matching what C<--set> means everywhere else. To change one field,
+name that field.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+The configuration whose schema decides how each file is read. Without a
+schema every value is treated as text.
+
+=item C<$from_files>
+
+The flat key/path list, two entries per occurrence.
+
+=back
+
+B<Returns:> A flat list of key/value pairs, values already typed.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot read %s for %s: %s">
+
+The file is missing or unreadable. Raised before anything is applied,
+so the configuration is untouched.
+
+=item C<"Could not read %s as YAML for %s">
+
+The file was to be parsed as a collection and would not parse. The
+underlying parser error is included.
+
+=back
+
+B<Examples:>
+
+  # a collection key: parsed, and replaces the whole block
+  _pairs_from_files($cfg, ['ci.provider', './provider.yml']);
+
+  # a scalar key: text as-is, less the trailing newline
+  _pairs_from_files($cfg, ['manifest_store', './store.txt']);
 
 =head2 _contains($ancestor, $key)
 

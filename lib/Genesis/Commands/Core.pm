@@ -15,8 +15,9 @@ sub config {
 	my (@keys) = @_;
 	my $top = Genesis::Top->new('.', no_vault => 1);
 
-	my ($pairs, $removals) = @{get_options()}{qw/set unset/};
-	my $writing = ($pairs || $removals) ? 1 : 0;
+	my ($pairs, $from_files, $removals) =
+		@{get_options()}{qw/set set-from-file unset/};
+	my $writing = ($pairs || $from_files || $removals) ? 1 : 0;
 
 	command_usage(1, "Reading and writing cannot be combined in one run")
 		if $writing && @keys;
@@ -27,7 +28,7 @@ sub config {
 		my $config = $top->config;
 
 		# Arity of 2 per occurrence, so the pairs arrive flat and even.
-		my @pairs = @{$pairs || []};
+		my @pairs = (@{$pairs || []}, _pairs_from_files($config, $from_files));
 
 		# The order the two were typed in is not recoverable, so either
 		# answer would be wrong half the time.
@@ -420,6 +421,34 @@ sub hack {
 # _detect_feature_compatibility - returns ($level, $source) for the current
 # repo (and optional $env_name).  Returns (undef, undef) outside a repo,
 # when nothing is declared, or when the env can't be loaded.
+sub _pairs_from_files {
+	my ($config, $from_files) = @_;
+	my @pairs;
+
+	my @args = @{$from_files || []};
+	while (my ($key, $file) = splice(@args, 0, 2)) {
+		bail("Cannot read #C{%s} for #Y{%s}: %s", $file, $key, $!)
+			unless -f $file && -r _;
+		my $content = slurp($file);
+
+		my $spec = $config->schema ? $config->_schema_for_key($key) : undef;
+		my $type = ref($spec) eq 'HASH' ? ($spec->{type} // '') : '';
+		if ($type =~ /\b(?:hash|array|hasharray)\b/) {
+			my ($parsed, $rc, $err) = load_yaml($content);
+			bail(
+				"Could not read #C{%s} as YAML for #Y{%s}:\n%s",
+				$file, $key, $err
+			) if $rc;
+			push @pairs, $key, $parsed;
+		} else {
+			# One trailing newline is the editor's, not the value's.
+			$content =~ s/\n\z//;
+			push @pairs, $key, $content;
+		}
+	}
+	return @pairs;
+}
+
 sub _contains {
 	my ($ancestor, $key) = @_;
 	# The separator may be a dot or an index, so 'ab' is not inside 'a'.

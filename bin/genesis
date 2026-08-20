@@ -1377,6 +1377,14 @@ define_command("config", {
 			"reads: #C{genesis config a b} retrieves two keys rather than ".
 			"silently assigning one to the other.",
 
+		'set-from-file=s@{2}' =>
+			"Set #C{<key>} to the contents of #C{<file>}.  Repeat to set ".
+			"more than one key in a single run.\n".
+			"\n".
+			"How the file is read follows the key's declared type: a key ".
+			"holding a collection reads it as YAML or JSON, and a scalar ".
+			"key takes the text as-is, less one trailing newline.",
+
 		'unset=s@' =>
 			"Remove #C{<key>} from the configuration.  Repeat to remove ".
 			"more than one.\n".
