@@ -198,6 +198,13 @@ sub clear {
 	struct_set_value($self->{loaded_values}, $key, undef, 1);
 	struct_set_value($self->{set_values}, $key, undef, 1);
 
+	# Walking a dotted path creates the parents it passes through, so
+	# clearing a nested key can leave an empty hash behind.  In the
+	# higher-priority source that empty hash wins the merge outright and
+	# takes the key's siblings with it.
+	$self->_prune_empty_parents($_, $key)
+		for ($self->{loaded_values}, $self->{set_values});
+
 	# Invalidate caches
 	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
 	delete $self->{_contents};
@@ -313,6 +320,25 @@ sub validate {
 
 ### Instance Private Methods {{{
 
+# _prune_empty_parents - drop hashes a cleared key left empty behind it {{{
+sub _prune_empty_parents {
+	my ($self, $struct, $key) = @_;
+
+	my @parts = split(/\./, $key);
+	pop @parts;
+	while (@parts) {
+		my $node = $struct;
+		$node = $node->{$_} for @parts[0..$#parts-1];
+		last unless ref($node) eq 'HASH';
+		my $leaf = $parts[-1];
+		last unless ref($node->{$leaf}) eq 'HASH' && !keys %{$node->{$leaf}};
+		delete $node->{$leaf};
+		pop @parts;
+	}
+	return;
+}
+
+# }}}
 # _coerce_to_schema_type - convert a string value to the type its schema declares {{{
 sub _coerce_to_schema_type {
 	my ($self, $key, $value) = @_;

@@ -1015,6 +1015,31 @@ subtest 'set() coercion respects union types' => sub {
 	ok(!defined($c->get('maybe_str')), "the literal 'null' becomes undef when the union allows it");
 };
 
+subtest 'clear() on a nested key keeps its siblings' => sub {
+	my $path = "$tmp/clear-nested.yml";
+	put_file($path, <<'EOF');
+---
+ci:
+  enabled: true
+  provider:
+    type: manual
+deployment_type: test-kit
+EOF
+
+	my $c = Genesis::Config->new($path);
+	$c->clear('ci.enabled');
+
+	ok(!$c->has('ci.enabled'), "the cleared key is gone");
+	is($c->get('ci.provider.type'), 'manual', "its sibling survives");
+	is($c->get('deployment_type'), 'test-kit', "unrelated keys survive");
+
+	# What gets written back is the explicit view, so an empty parent left
+	# behind in set_values would erase the branch on save.
+	my $explicit = $c->_explicit_contents;
+	is($explicit->{ci}{provider}{type}, 'manual',
+		"the sibling is still in what would be persisted");
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

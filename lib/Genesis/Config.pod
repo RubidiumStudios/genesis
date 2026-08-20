@@ -726,6 +726,48 @@ B<Examples:>
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
 
+=head2 _prune_empty_parents
+
+    $cfg->_prune_empty_parents($struct, $key);
+
+Removes hashes that clearing C<$key> left empty behind it, walking back
+up the dotted path.
+
+B<Walking a dotted path creates the parents it passes through.> So
+clearing C<ci.enabled> leaves C<ci =E<gt> {}> in whichever source
+structure did not hold the key. That empty hash is not harmless: the
+merge is by priority rather than depth, so an empty C<ci> in the higher
+priority source wins outright and takes the key's siblings with it --
+C<ci.provider> would vanish from what C<save()> writes, without ever
+having been touched.
+
+Pruning stops at the first parent that still has keys, so a branch is
+only removed when clearing genuinely emptied it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$struct>
+
+The source structure to prune, modified in place.
+
+=item C<$key>
+
+The dotted path that was cleared. Only its ancestors are considered.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> None. A path that is absent or already pruned is left alone.
+
+B<Examples:>
+
+    # after clearing ci.enabled from a config also holding ci.provider
+    $cfg->_prune_empty_parents($cfg->{set_values}, 'ci.enabled');
+    # ci is left in place, still carrying provider
+
 =head2 _coerce_to_schema_type
 
     my $typed = $cfg->_coerce_to_schema_type($key, $value);
