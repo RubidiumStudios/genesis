@@ -292,16 +292,17 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	Genesis::bail(
 		"This repository still has a legacy CI configuration at #C{ci.yml}.\n".
 		"Pipeline commands are unavailable until the ci configuration is\n".
-		"migrated by hand to the v3 repo config.  To migrate:\n\n".
+		"migrated to the v3 repo config.  To migrate:\n\n".
 		"  1. Read the pipeline: block in ci.yml and note the provider,\n".
-		"     git URI, branch, pipeline name, vault URL you were using.\n".
-		"  2. Run:  #g{genesis repo-update --ci-provider PROVIDER}  \\\n".
-		"               [--git-uri URI] [--git-branch BRANCH]   \\\n".
-		"               [--pipeline-name NAME] [--vault-url URL]\n".
-		"     to set those values in the v3 config.\n".
+		"     git URI, branch, pipeline name and vault URL you were using.\n".
+		"  2. Run:  #g{genesis config --set ci.enabled true} \\\n".
+		"               #g{--set ci.provider.type PROVIDER}\n".
 		"  3. Remove ci.yml (#g{git rm ci.yml}).\n\n".
-		"Pipeline commands become available again once ci.yml is gone\n".
-		"and the v3 config declares ci.provider.type."
+		"That restores pipeline commands.  The remaining values from step 1\n".
+		"-- git URI, branch, pipeline name and vault URL -- are not yet\n".
+		"settable: the config schema does not declare them, so they must be\n".
+		"written into the #C{ci:} block of #C{.genesis/config} by hand until\n".
+		"it does."
 	);
 } # }}}
 

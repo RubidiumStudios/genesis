@@ -1511,8 +1511,11 @@ B<Errors:>
 
 =item C<"This repository still has a legacy CI configuration at ci.yml...">
 
-The full message names the provider, git URI, branch, pipeline name and vault
-URL to carry across, and the C<genesis repo-update> invocation that does it.
+The full message names the values to carry across from the C<pipeline:>
+block, and the C<genesis config> invocation that sets the two keys the gate
+checks.  It says plainly that the rest -- git URI, branch, pipeline name and
+vault URL -- must be written into F<.genesis/config> by hand, the schema not
+yet declaring them.
 
 =back
 
