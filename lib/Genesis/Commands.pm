@@ -1173,7 +1173,7 @@ sub which_binary { # {{{
 } # }}}
 
 sub _safe_drives_openbao { # {{{
-	my ($out) = run({stderr => undef}, 'safe -v 2>&1 >/dev/null');
+	my ($out) = run({stderr => undef}, 'safe -v 2>&1');
 	return 0 unless $out && $out =~ qr(safe v(\S+));
 	return new_enough($1, $SAFE_OPENBAO_MIN) ? 1 : 0;
 } # }}}
@@ -1192,7 +1192,7 @@ sub check_prereqs { # {{{
 		["git",     "1.8.0", "git --version   2>/dev/null",                     qr(.*version\s+(\S+).*)],
 		["jq",        "1.6", "jq --version    2>/dev/null",                     qr(^jq-([\.0-9]+)),       "https://stedolan.github.io/jq/download/"],
 		["spruce", "1.28.0", "spruce -v       2>/dev/null",                     qr(.*version\s+(\S+).*)i, "https://github.com/geofffranks/spruce/releases"],
-		["safe",    "1.6.1", "safe -v         2>&1 >/dev/null",                 qr(safe v(\S+)),          "https://github.com/starkandwayne/safe/releases"],
+		["safe",    "1.6.1", "safe -v         2>&1",                            qr(safe v(\S+)),          "https://github.com/starkandwayne/safe/releases"],
 		# The secrets engine is checked separately: which ones are acceptable
 		# depends on the version of safe that has to drive it.
 		["openssl", "1.1.1", "openssl version 2>/dev/null",                     qr(OpenSSL ([\.0-9]+) .*),"https://www.openssl.org/source/"],
