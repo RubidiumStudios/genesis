@@ -544,6 +544,33 @@ sub _await_keys {
 	return;
 }
 
+sub _await_empty {
+	my ($self, $path) = @_;
+
+	# clear is a delete, and the write that follows merges into whatever a
+	# read returns.  A read that has not yet seen the delete hands the first
+	# part the old value as its base, and those keys survive into the new
+	# one -- as extras, so _await_keys does not notice them.
+	my $deadline = time + 10;
+	my @left;
+	while (1) {
+		@left = $self->keys($path);
+		last unless @left;
+		last if time >= $deadline;
+		select(undef, undef, undef, 0.25);
+	}
+	bail(
+		"Cleared #C{%s} in the vault at #M{%s}, but %s of its keys were ".
+		"still readable after 10s.\n\n".
+		"The write that follows a clear merges into what a read returns, so ".
+		"continuing would carry those keys into the new value.\n\n".
+		"This usually means the vault target is a standby node whose reads ".
+		"lag the leader; pointing it at the cluster leader avoids it.",
+		$path, $self->{url}, scalar(@left)
+	) if @left;
+	return;
+}
+
 # }}}
 # set_path - write a hash of keys to a path in the vault {{{
 sub set_path {
@@ -556,7 +583,10 @@ sub set_path {
 		$data->{__flattened__} = JSON::PP::true;
 	}
 
-	$self->clear($path, !$flatten) if ($clear);
+	if ($clear) {
+		$self->clear($path, !$flatten);
+		$self->_await_empty($path);
+	}
 
 	my @set_data = ();
 	my @written = ();
@@ -607,6 +637,11 @@ sub set_path {
 		"Could not write #C{%s} to vault at #M{%s}:\n%s",
 		$path,$self->{url},$out
 	) unless $rc == 0;
+	# The final part has no part after it, so nothing else would ever
+	# confirm it -- and a payload small enough not to chunk reaches here
+	# as its only write.
+	push(@written, @set_data);
+	$self->_await_keys($path, @written);
 	return $data;
 }
 
