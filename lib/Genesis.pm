@@ -211,22 +211,37 @@ sub deployment_roots_map {
 
 	# Process the roots list, validating root labels and expanding paths.
 	for my $root (@roots) {
+		my ($label, $given, $path);
 		if (ref($root) eq 'ARRAY') {
-			my ($label, $path) = @$root;
+			($label, $given) = @$root;
 			bail(
 				"Deployment root labels cannot start with a '\@' character.  This is ".
 				"reserved for Genesis internal use.  Please check your configuration ".
 				"file or GENSIS_DEPLOYMENT_ROOTS environment variable."
 			) if $label =~ /^@/;
-			$path = expand_path($path);
-			push @expanded_roots, { label => $label, path => $path };
+			$path = expand_path($given);
 		} else {
-			# Check if unlabeled roots are in the extras list
-			my $path = expand_path($root);
-			my ($extra_label) = map {$_->[0]} grep {$_->[1] eq $path} @extras;
-			my $label = $extra_label // $path;
-			push @expanded_roots, { label => $label, path => $path };
+			$given = $root;
+			$path = expand_path($given);
 		}
+
+		# expand_path ends in abs_path, which yields undef for a path that
+		# is not there.  Carrying that undef leaves every later reader of
+		# the map to warn about it instead.
+		unless (defined $path) {
+			warning(
+				"Deployment root %s does not exist -- skipping it.",
+				defined($label) ? "#C{$label} (#C{$given})" : "#C{$given}"
+			);
+			next;
+		}
+
+		# Check if unlabeled roots are in the extras list
+		unless (defined $label) {
+			my ($extra_label) = map {$_->[0]} grep {$_->[1] eq $path} @extras;
+			$label = $extra_label // $path;
+		}
+		push @expanded_roots, { label => $label, path => $path };
 	}
 
 	# Check for any duplicate labels

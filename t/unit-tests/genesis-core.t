@@ -309,6 +309,31 @@ subtest 'fake_tty on darwin passes arguments through unmodified' => sub {
 		'darwin form stays a plain argument list';
 };
 
+subtest 'deployment_roots_map skips a root that does not exist' => sub {
+	plan tests => 4;
+
+	# abs_path returns undef for a path that is not there, so an
+	# unresolvable root used to reach the map with an undef value and
+	# warn from every place that later touched it.
+	local $Genesis::RC = Genesis::Config->new();
+	$Genesis::RC->set('deployment_roots', [
+		['gone',   '/no/such/deployment/root'],
+		['exists', $ENV{HOME}],
+	]);
+
+	my ($labels, $map, $err);
+	my ($out, $stderr) = output_from {
+		($labels, $map) = Genesis::deployment_roots_map();
+	};
+
+	ok(!grep({$_ eq 'gone'} @$labels), "the unresolvable root is not in the labels");
+	ok(!exists $map->{gone},            "and not in the map");
+	like($stderr, qr{/no/such/deployment/root},
+		"the operator is told which root was skipped");
+
+	ok(exists $map->{exists}, "a root that does exist is kept");
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
