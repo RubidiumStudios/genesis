@@ -3883,6 +3883,24 @@ sub deployment_cache_cleanup {
 }
 
 # }}}
+# deployment_cache_preserve - copy cached state and store files into the repository {{{
+sub deployment_cache_preserve {
+	my ($self) = @_;
+	return unless defined $self->{__deployment_cache_path};
+	mkdir_or_fail($self->path(".genesis/manifests")) unless -d $self->path(".genesis/manifests");
+	for (qw/state store/) {
+		my $cached_file = $self->deployment_cache_path_lookup($_);
+		next unless -f $cached_file;
+		my $file = basename($cached_file);
+		eval {
+			copy_or_fail($cached_file, $self->path(".genesis/manifests/$file"));
+		};
+		warning("Failed to copy $file to repository: $@") if ($@);
+	}
+	return;
+}
+
+# }}}
 # deployment_cache_path_lookup - return the path to a file in the deployment cache {{{
 sub deployment_cache_path_lookup {
 	my ($self, $descriptor) = @_;
@@ -4377,15 +4395,7 @@ sub _post_deploy {
 				if -e $state->{cached_redacted_vars_path};
 		};
 		warning("Failed to copy manifest to repository: $@") if ($@);
-		for ('state', 'store') {
-			my $cached_file = $self->deployment_cache_path_lookup($_);
-			next unless -f $cached_file;
-			my $file = basename($cached_file);
-			eval {
-				copy_or_fail("$cached_file", $self->path(".genesis/manifests/$file"));
-			};
-			warning("Failed to copy $file to repository: $@") if ($@);
-		}
+		$self->deployment_cache_preserve;
 	}
 
 	# bail out early if the deployment failed;
@@ -4418,6 +4428,11 @@ sub _post_deploy {
 		} else {
 			$msg = "Deployment failed.";
 		}
+		# A failed create-env can still have created or changed cloud
+		# resources, and bosh records them only in the cached state file.
+		# Preserve the state and store files before the cache is cleaned
+		# up, or those resources can never be recovered or deleted.
+		$self->deployment_cache_preserve unless $opts{"dry-run"};
 		$self->_create_deployment_audit_log(
 			'deploy'      => Genesis::Env::Deployment::action_failed,
 			reason        => $opts{reason},
