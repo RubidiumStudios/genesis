@@ -889,4 +889,97 @@ subtest 'rebind() throws when URL is not found in .saferc' => sub {
 	};
 };
 
+# -------------------------------------------------------------------------
+# set_path() - a chunked write must not race its own visibility
+# -------------------------------------------------------------------------
+subtest 'set_path() confirms a chunk landed before writing the next' => sub {
+	plan tests => 3;
+
+	# safe set is read-modify-write.  Against a standby node a read can
+	# lag the leader, so a second chunk issued immediately merges into a
+	# stale base and drops everything the first chunk wrote.
+	my $v = make_vault(name => 'chunk-vault', url => 'https://c.vault.local:8200');
+
+	my @calls;
+	my %written;        # what the "leader" holds
+	my $lag = 1;        # reads are stale until this many polls have passed
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub {
+		my ($self, $cmd, @args) = @_;
+		push @calls, $cmd;
+		if ($cmd eq 'set') {
+			my ($path, @pairs) = @args;
+			$written{$_} = 1 for map {(split /=/, $_, 2)[0]} @pairs;
+			$lag = 1;   # freshly written; not visible to readers yet
+			return ('', 0, '');
+		}
+		if ($cmd eq 'paths') {
+			# Serve a stale (empty) view until the lag has elapsed.
+			return ('', 0, '') if $lag-- > 0;
+			return (join("\n", sort keys %written), 0, '');
+		}
+		return ('', 0, '');
+	};
+	use warnings 'redefine';
+
+	# Big enough to cross the 900-character guard and chunk.
+	my %data = map {("key-with-a-reasonably-long-name-$_" => "value-$_" x 4)} (1..30);
+	$v->set_path('secret/chunked', \%data);
+
+	my @sets = grep {$_ eq 'set'} @calls;
+	cmp_ok(scalar(@sets), '>', 1, "the payload chunked into more than one write");
+
+	# Between the first and second set there must be at least one read.
+	my ($first_set) = grep {$calls[$_] eq 'set'} (0..$#calls);
+	my ($second_set) = grep {$calls[$_] eq 'set' && $_ > $first_set} (0..$#calls);
+	my @between = grep {$_ eq 'paths'} @calls[$first_set+1 .. $second_set-1];
+	cmp_ok(scalar(@between), '>=', 1,
+		"a confirming read separates one chunk from the next");
+
+	ok(scalar(@between) >= 2,
+		"and it polls until the write is actually visible");
+};
+
+subtest 'set_path() confirms every chunk so far, not just the last' => sub {
+	plan tests => 3;
+
+	# Three chunks, a/b then c/d then e/f.  Checking only the newest chunk
+	# would miss the failure that matters: if c/d merged into a stale base
+	# it would drop a/b, and a check looking only for c/d still passes.
+	my $v = make_vault(name => 'tri-vault', url => 'https://t.vault.local:8200');
+
+	my (@reads, %store);
+	my $sets = 0;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';   # let bail() die so eval can catch it
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub {
+		my ($self, $cmd, @args) = @_;
+		if ($cmd eq 'set') {
+			my ($path, @pairs) = @args;
+			$sets++;
+			# Simulate the race once: the second chunk merges into an empty
+			# base, discarding everything written before it.
+			%store = () if $sets == 2;
+			$store{$_} = 1 for map {(split /=/, $_, 2)[0]} @pairs;
+			return ('', 0, '');
+		}
+		if ($cmd eq 'paths') {
+			push @reads, [sort keys %store];
+			return (join("\n", sort keys %store), 0, '');
+		}
+		return ('', 0, '');
+	};
+	use warnings 'redefine';
+
+	my %data = map {("key-with-a-reasonably-long-name-$_" => "value-$_" x 4)} (1..45);
+	my $err = '';
+	eval { $v->set_path('secret/tri', \%data); 1 } or $err = $@;
+
+	cmp_ok(scalar(@reads), '>=', 2, "confirmed after more than one chunk");
+	ok($err, "a chunk that lost earlier keys is caught rather than ignored");
+	like($err, qr/not readable/, "and reported as unreadable keys");
+};
+
 done_testing;

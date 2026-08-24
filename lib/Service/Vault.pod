@@ -948,6 +948,13 @@ Writes a hash of key/value pairs to the vault at C<$path>. Handles nested
 hashes and arrays recursively. Batches writes to stay under the command-line
 length limit.
 
+B<A batched write waits for each part to become readable before sending the
+next.> C<safe set> is read-modify-write: it merges the pairs it is given into
+whatever a read returns. Against a standby node that read can lag the leader,
+so a part sent immediately after another would merge into a base that does not
+yet contain it, and the earlier part would be lost from the result. See
+L</_await_keys>.
+
 B<Parameters:>
 
 =over 4
@@ -1425,6 +1432,69 @@ trace logs from a failed unseal as sensitive material.
 
 These methods are internal to the implementation and may change without
 notice.
+
+=head2 _await_keys
+
+  $vault->_await_keys($path, @pairs);
+
+Waits until every key in C<@pairs> is readable at C<$path>, polling four
+times a second for up to ten seconds.
+
+B<C<@pairs> is every key written so far, not just the most recent part.>
+A part that merged into a stale base has dropped the parts before it, so
+checking only the newest would report success on precisely the failure this
+guards against: the keys just sent are present, and the earlier ones are
+gone.
+
+B<Why a write needs confirming before the next one.> A payload longer than
+the command-line limit is sent as several C<safe set> calls. C<safe set>
+merges rather than replaces, but it merges into what a I<read> returns --
+and reads served by a standby node lag the leader. A second part sent
+before the first is visible therefore merges into a stale base, and the
+first part's keys are absent from the result. Nothing errors: the write
+succeeds and the data is simply not there.
+
+C<clear =E<gt> 1> makes that total rather than partial, because the stale
+base the later part merges into is the emptied path.
+
+B<It bails rather than continuing.> Ten seconds is far longer than the
+sub-second replication lag that causes this, so a timeout means something
+is wrong with the target rather than merely slow. Continuing would write
+the remaining parts into a base known to be incomplete, producing exactly
+the silent loss this exists to prevent -- and the damage would surface
+much later, on an unrelated deployment, pointing at the wrong place.
+
+B<Parameters:>
+
+=over 4
+
+=item $path
+
+The vault path just written.
+
+=item @pairs
+
+The C<key=value> arguments that were sent. Only the key names are used.
+
+=back
+
+B<Returns:> Nothing. Returns as soon as every key is readable.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Wrote %s to the vault at %s, but %s of its %s keys were still not readable after 10s.">
+
+Raised when the deadline passes with keys still missing. The message names
+the standby-node cause, since that is what it almost always is.
+
+=back
+
+B<Examples:>
+
+  $vault->_await_keys('secret/exodus/env/bosh/network', 'azs.z1.name=z1');
+  # returns once azs.z1.name reads back
 
 =head2 _target_is_url
 
