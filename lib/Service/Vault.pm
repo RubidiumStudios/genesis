@@ -514,38 +514,6 @@ sub clear {
 
 # }}}
 # set_path - writes a set of key value pairs to the vault {{{
-sub _await_keys {
-	my ($self, $path, @pairs) = @_;
-	my @want = map {(split /=/, $_, 2)[0]} @pairs;
-	return unless @want;
-
-	# safe set is read-modify-write, so the next chunk merges into whatever
-	# a read returns.  Against a standby node that read can lag the leader,
-	# and the chunk would merge into a stale base and drop this one.
-	my $deadline = time + 10;
-	my @missing;
-	while (1) {
-		my %have = map {my $k = $_; $k =~ s/^\Q$path\E://; ($k => 1)} $self->keys($path);
-		@missing = grep {!$have{$_}} @want;
-		last unless @missing;
-		last if time >= $deadline;
-		select(undef, undef, undef, 0.25);
-	}
-	bail(
-		"Wrote #C{%s} to the vault at #M{%s}, but %s of its %s keys were still ".
-		"not readable after 10s.\n\n".
-		"A large write is sent in several parts, and each part merges into what ".
-		"a read returns.  Continuing would silently discard the parts already ".
-		"written, so this stops here.\n\n".
-		"This usually means the vault target is a standby node whose reads lag ".
-		"the leader; pointing it at the cluster leader avoids it.",
-		$path, $self->{url}, scalar(@missing), scalar(@want)
-	) if @missing;
-	return;
-}
-
-# }}}
-# set_path - write a hash of keys to a path in the vault {{{
 sub set_path {
 	my ($self, $path, $data, %opts) = @_;
 
@@ -559,7 +527,6 @@ sub set_path {
 	$self->clear($path, !$flatten) if ($clear);
 
 	my @set_data = ();
-	my @written = ();
 	for my $key (sort keys %$data) {
 		my $value = $data->{$key};
 
@@ -592,11 +559,6 @@ sub set_path {
 				"Could not write #C{%s} to vault at #M{%s}:\n%s",
 				$path,$self->{url},$out
 			) unless $rc == 0;
-			# Everything written so far, not just this part: a part that
-			# merged into a stale base drops the earlier ones, and checking
-			# only the newest would not notice.
-			push(@written, @set_data);
-			$self->_await_keys($path, @written);
 			@set_data = @new_set_data;
 		}
 	}
