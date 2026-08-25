@@ -982,4 +982,43 @@ subtest 'set_path() confirms every chunk so far, not just the last' => sub {
 	like($err, qr/not readable/, "and reported as unreadable keys");
 };
 
+subtest 'set_path() matches keys against the path safe echoes back' => sub {
+	plan tests => 2;
+
+	# safe answers `paths --keys` with `path:key`, and it prints the path it
+	# stored rather than the one it was handed: an exodus base carries a
+	# leading slash on the way in and comes back without one.  Stripping the
+	# requested path off the reply therefore stripped nothing, and every key
+	# of a write that had landed compared as missing.
+	my $v = make_vault(name => 'slash-vault', url => 'https://s.vault.local:8200');
+
+	my %store;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';   # let bail() die so eval can catch it
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub {
+		my ($self, $cmd, @args) = @_;
+		if ($cmd eq 'set') {
+			my ($path, @pairs) = @args;
+			$store{$_} = 1 for map {(split /=/, $_, 2)[0]} @pairs;
+			return ('', 0, '');
+		}
+		if ($cmd eq 'paths') {
+			# `--keys` is args[0]; the requested path is args[1].
+			my $asked = $args[1] // '';
+			(my $echoed = $asked) =~ s{^/+}{};
+			return (join("\n", map {"$echoed:$_"} sort keys %store), 0, '');
+		}
+		return ('', 0, '');
+	};
+	use warnings 'redefine';
+
+	my %data = map {("key-with-a-reasonably-long-name-$_" => "value-$_" x 4)} (1..30);
+	my $err = '';
+	eval { $v->set_path('/secret/exodus/some-env/bosh/network', \%data); 1 } or $err = $@;
+
+	is($err, '', "a leading slash on the path does not fail a landed write");
+	is(scalar(keys %store), scalar(keys %data), "and every key was written");
+};
+
 done_testing;

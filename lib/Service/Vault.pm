@@ -525,7 +525,13 @@ sub _await_keys {
 	my $deadline = time + 10;
 	my @missing;
 	while (1) {
-		my %have = map {my $k = $_; $k =~ s/^\Q$path\E://; ($k => 1)} $self->keys($path);
+		# safe reports a key as `path:key`, and it prints the path the way it
+		# stores it, which is not necessarily the way it was asked for: a
+		# leading slash on the request is absent from the reply.  Matching on
+		# the requested path therefore stripped nothing, every key compared
+		# unequal, and a write that had landed read back as entirely missing.
+		# A path holds no colon, so the first one always ends it.
+		my %have = map {my $k = $_; $k =~ s/^[^:]*://; ($k => 1)} $self->keys($path);
 		@missing = grep {!$have{$_}} @want;
 		last unless @missing;
 		last if time >= $deadline;
