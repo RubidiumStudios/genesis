@@ -463,21 +463,30 @@ sub get_path {
 # }}}
 # set - write a secret to the vault (prompts for value if not given) {{{
 sub set {
-	my ($self, $path, $key, $value) = @_;
+	my ($self, $path, @args) = @_;
 	$path =~ s/\/{2,}/\//g; # Clean up any double slashes from joins
-	# FIXME: If the path contains a :<key>, then the content of $key
-	#        should be moved to $value and $path and $key should be split
-	#        from the path.  This allows users to call set with an already
-	#        joined path:key pair.  This should not impact existing code
-	#        because currently passing in a path:key pair results in an error.
-	if (defined($value)) {
-		my ($out,$rc) = $self->query('set', $path, "${key}=${value}");
+
+	# A joined path:key names the key, so what follows is a value -- and
+	# only one, since pairs after it would name a second key.
+	if ($path =~ /:/) {
+		my ($base, $key) = $path =~ m/^(.*?):([^:]*)$/;
 		bail(
-			"Could not write #C{%s:%s} to vault at #M{%s}:\n%s",
-			$path, $key,$self->{url},$out
-		) unless $rc == 0;
-		return $value;
-	} else {
+			"Could not write to #C{%s} in vault at #M{%s}: a joined path:key ".
+			"names a single key, so it takes at most one value.",
+			$path, $self->{url}
+		) if @args > 1;
+		($path, @args) = ($base, $key, @args);
+	}
+
+	bail(
+		"Could not write to #C{%s} in vault at #M{%s}: no key was given.",
+		$path, $self->{url}
+	) unless @args;
+
+	# A lone key, or an explicit undef value, means "prompt for it" -- the
+	# undef case would otherwise read as a pair with an empty value.
+	if (@args == 1 || (@args == 2 && !defined($args[1]))) {
+		my $key = $args[0];
 		# Interactive - you must supply the prompt before hand
 		die_unless_controlling_terminal
 			"#R{[ERROR]} Cannot interactively provide secrets unless in a controlling terminal - terminating!";
@@ -488,6 +497,130 @@ sub set {
 		) unless $rc == 0;
 		return $self->get($path,$key);
 	}
+
+	bail(
+		"Could not write to #C{%s} in vault at #M{%s}: set() takes key/value ".
+		"pairs, but was given an odd number of arguments.",
+		$path, $self->{url}
+	) if @args % 2;
+
+	my %pairs = @args;
+	$self->_write_pairs($path, \%pairs);
+	return @args == 2 ? $args[1] : \%pairs;
+}
+
+# }}}
+# _write_pairs - write key/value pairs, in as few commands as safe allows {{{
+sub _write_pairs {
+	my ($self, $path, $pairs) = @_;
+
+	my (@batch, %written);
+	for my $key (sort CORE::keys %$pairs) {
+		push(@batch, sprintf("%s=%s", $key, $pairs->{$key} // ''));
+		next if length(join(' ', @batch)) <= 900;
+
+		# The pair that crossed the line starts the next batch -- unless it
+		# is alone, since there is no smaller write to fall back to.
+		my @carry = (@batch > 1) ? (pop @batch) : ();
+		$self->_write_batch($path, \@batch, \%written);
+		@batch = @carry;
+	}
+	$self->_write_batch($path, \@batch, \%written) if @batch;
+	return;
+}
+
+# }}}
+# _write_batch - send one `safe set`, then confirm all of it is readable {{{
+sub _write_batch {
+	my ($self, $path, $batch, $written) = @_;
+	return unless @$batch;
+
+	my ($out,$rc) = $self->query('set', $path, @$batch);
+	bail(
+		"Could not write #C{%s} to vault at #M{%s}:\n%s",
+		$path,$self->{url},$out
+	) unless $rc == 0;
+
+	# Confirm everything written so far, not just this batch: a batch that
+	# merged into a stale base drops the earlier ones, not itself.
+	for my $pair (@$batch) {
+		my ($key, $value) = split /=/, $pair, 2;
+		$written->{$key} = $value;
+	}
+	$self->_confirm_written($path, $written);
+	return;
+}
+
+# }}}
+# _confirm_timeout - how long a read-back may take before giving up {{{
+sub _confirm_timeout {
+	my $t = $ENV{GENESIS_VAULT_CONFIRM_TIMEOUT};
+	return $t if defined($t) && $t =~ /^\d+(?:\.\d+)?$/ && $t > 0;
+	return 10;
+}
+
+# }}}
+# _confirm_written - wait until a write reads back with the values sent {{{
+sub _confirm_written {
+	my ($self, $path, $written) = @_;
+	return unless $self->needs_write_confirmation;
+
+	# Values, not key names: a batch that merged into a stale base carries
+	# the right names and the wrong contents.
+	my $timeout = _confirm_timeout();
+	my $deadline = gettimeofday() + $timeout;
+	my @wrong;
+	while (1) {
+		my $have = $self->get($path);
+		$have = {} unless ref($have) eq 'HASH';
+		@wrong = grep {
+			!defined($have->{$_}) || $have->{$_} ne $written->{$_}
+		} CORE::keys %$written;
+		last unless @wrong;
+		last if gettimeofday() >= $deadline;
+		select(undef, undef, undef, 0.25);
+	}
+	bail(
+		"Wrote #C{%s} to the vault at #M{%s}, but %s of its %s keys did not ".
+		"read back within %ss.\n\n".
+		"A write merges into whatever a read returns, so continuing would ".
+		"discard what has already been written.\n\n".
+		"This usually means the vault target is a standby node whose reads ".
+		"lag the leader; pointing it at the cluster leader avoids it.",
+		$path, $self->{url}, scalar(@wrong),
+		scalar(CORE::keys %$written), $timeout
+	) if @wrong;
+	return;
+}
+
+# }}}
+# _confirm_cleared - wait until a cleared path reads back empty {{{
+sub _confirm_cleared {
+	my ($self, $path) = @_;
+	return unless $self->needs_write_confirmation;
+
+	# The write after a clear merges into what a read returns, so keys that
+	# outlive the delete are carried straight into the new value.
+	my $timeout = _confirm_timeout();
+	my $deadline = gettimeofday() + $timeout;
+	my @left;
+	while (1) {
+		my $have = $self->get($path);
+		@left = ref($have) eq 'HASH' ? CORE::keys %$have : ();
+		last unless @left;
+		last if gettimeofday() >= $deadline;
+		select(undef, undef, undef, 0.25);
+	}
+	bail(
+		"Cleared #C{%s} in the vault at #M{%s}, but %s of its keys were still ".
+		"readable after %ss.\n\n".
+		"The write that follows a clear merges into what a read returns, so ".
+		"continuing would carry those keys into the new value.\n\n".
+		"This usually means the vault target is a standby node whose reads ".
+		"lag the leader; pointing it at the cluster leader avoids it.",
+		$path, $self->{url}, scalar(@left), $timeout
+	) if @left;
+	return;
 }
 
 # }}}
@@ -500,6 +633,9 @@ sub clear {
 		($out,$rc,$err) = $self->query('rm', '-rf', $path);
 	} elsif (!$self->has($path)) {
 		debug("Path #C{%s} does not exist in vault at #M{%s} - no need to clear", $path, $self->{url});
+		# A stale read can call a path absent while its keys are still there
+		# for the next write to merge into, so this is checked not trusted.
+		$self->_confirm_cleared($path);
 		return;
 	} else {
 		debug("Clearing #C{%s} in vault at #M{%s}", $path, $self->{url});
@@ -509,6 +645,7 @@ sub clear {
 		"Could not clear #C{%s} in vault at #M{%s}:\n%s",
 		$path,$self->{url},$out.$err
 	) unless $rc == 0;
+	$self->_confirm_cleared($path);
 	return 1;
 }
 
@@ -526,7 +663,7 @@ sub set_path {
 
 	$self->clear($path, !$flatten) if ($clear);
 
-	my @set_data = ();
+	my %pairs;
 	for my $key (sort keys %$data) {
 		my $value = $data->{$key};
 
@@ -543,32 +680,19 @@ sub set_path {
 				if (ref($value->[$i]) eq 'HASH') {
 					$self->set_path("$path/$key/$i", $value->[$i]);
 				} else {
-					push(@set_data, "${key}[${i}]=$value->[$i]");
+					$pairs{"${key}[${i}]"} = $value->[$i] // '';
 				}
 			}
 			next;  # Don't fall through to scalar handling
 		}
 
-		push(@set_data, "$key=$value");
-
-		# make sure the command isn't too long (<900 characters)
-		if (length(join(' ', @set_data)) > 900) {
-			my @new_set_data = pop(@set_data);
-			my ($out,$rc) = $self->query('set', $path, @set_data);
-			bail(
-				"Could not write #C{%s} to vault at #M{%s}:\n%s",
-				$path,$self->{url},$out
-			) unless $rc == 0;
-			@set_data = @new_set_data;
-		}
+		$pairs{$key} = $value // '';
 	}
 
-  return $data unless scalar(@set_data);
-	my ($out,$rc) = $self->query('set', $path, @set_data);
-	bail(
-		"Could not write #C{%s} to vault at #M{%s}:\n%s",
-		$path,$self->{url},$out
-	) unless $rc == 0;
+	return $data unless %pairs;
+	# Straight to the writer: these keys are already the ones to store, so
+	# set()'s path:key splitting would only mangle one containing a colon.
+	$self->_write_pairs($path, \%pairs);
 	return $data;
 }
 
@@ -683,6 +807,45 @@ sub max_json_string_value_length {
 
 	# Vault's compiled-in default for max_json_string_value_length.
 	return $self->{__max_json_string_value_length} = 1024 * 1024;
+}
+
+# }}}
+# needs_write_confirmation - whether a write must be read back to be trusted {{{
+sub needs_write_confirmation {
+	my ($self) = @_;
+
+	return $self->{__needs_write_confirmation}
+		if defined $self->{__needs_write_confirmation};
+
+	if (defined($ENV{GENESIS_VAULT_CONFIRM_WRITES})
+		&& $ENV{GENESIS_VAULT_CONFIRM_WRITES} =~ /^[01]$/)
+	{
+		return $self->{__needs_write_confirmation}
+			= $ENV{GENESIS_VAULT_CONFIRM_WRITES} + 0;
+	}
+
+	# ha_enabled decides it, never is_self: leadership fails over, and the
+	# target is usually a load balancer fronting more than one node.
+	my ($out, $rc, $err) = $self->query(
+		{redact_output => 1, stderr => 0},
+		'curl', '--data-only', '/sys/leader'
+	);
+	if ($rc == 0 && defined($out) && length($out)) {
+		my $decoded = eval {decode_json($out)};
+		if (ref($decoded) eq 'HASH') {
+			# sys endpoints answer flat, but the response envelope survives
+			# on some builds, so accept the key in either position.
+			my $ha = $decoded->{ha_enabled};
+			$ha = $decoded->{data}{ha_enabled}
+				if !defined($ha) && ref($decoded->{data}) eq 'HASH';
+			return $self->{__needs_write_confirmation} = ($ha ? 1 : 0)
+				if defined($ha);
+		}
+	}
+
+	# A confirm that was not needed costs one read.  Skipping one that was
+	# needed loses data with no error, so an unusable answer confirms.
+	return $self->{__needs_write_confirmation} = 1;
 }
 
 # }}}

@@ -390,6 +390,9 @@ subtest 'get() splits combined path:key from single arg' => sub {
 subtest 'set($path, $key, $value) writes and returns value' => sub {
 	plan tests => 2;
 
+	# These are about what reaches safe.  Reading it back is
+	# service_vault-write_confirmation.t's subject.
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
 	my $v = make_vault();
 	my @query_args;
 
@@ -410,6 +413,7 @@ subtest 'set($path, $key, $value) writes and returns value' => sub {
 subtest 'set() dies on failure' => sub {
 	plan tests => 1;
 
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
 	my $v = make_vault();
 
 	no warnings 'redefine';
@@ -430,6 +434,7 @@ subtest 'set() dies on failure' => sub {
 subtest 'clear($path) non-recursive: skips if path absent' => sub {
 	plan tests => 1;
 
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
 	my $v = make_vault();
 	my $query_called = 0;
 
@@ -445,6 +450,7 @@ subtest 'clear($path) non-recursive: skips if path absent' => sub {
 subtest 'clear($path) non-recursive: runs rm -f when path exists' => sub {
 	plan tests => 2;
 
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
 	my $v = make_vault();
 	my @query_args;
 
@@ -466,6 +472,7 @@ subtest 'clear($path) non-recursive: runs rm -f when path exists' => sub {
 subtest 'clear($path, 1) recursive: runs rm -rf' => sub {
 	plan tests => 1;
 
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
 	my $v = make_vault();
 	my @query_args;
 
@@ -887,6 +894,213 @@ subtest 'rebind() throws when URL is not found in .saferc' => sub {
 			qr/Cannot rebind to vault at address/i,
 			'rebind() throws when URL is unknown';
 	};
+};
+
+# -------------------------------------------------------------------------
+# set() - key/value pairs, and the chunking that writing them requires
+#
+# Confirmation is suppressed throughout: what a write reads back is
+# service_vault-write_confirmation.t's subject, and these are about the
+# shape of the write itself.
+# -------------------------------------------------------------------------
+
+# Capture what set() hands to safe, one entry per `safe set` call.
+sub capture_sets {
+	my ($v) = @_;
+	my $calls = [];
+	$v->{__sets} = $calls;
+	return $calls;
+}
+
+# Named so each subtest can install it with `local`, as the rest of this
+# file does -- a file-scoped override would outlive them.
+sub mock_capture_query {
+	my $self = shift;
+	shift if ref($_[0]) eq 'HASH';
+	my ($cmd, @args) = @_;
+	push(@{$self->{__sets}}, [@args]) if $cmd eq 'set' && $self->{__sets};
+	return ('', 0, '');
+}
+
+subtest 'set() still takes a single key and value' => sub {
+	plan tests => 3;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = \&mock_capture_query;
+	use warnings 'redefine';
+
+	my $v = make_vault(name => 'single');
+	my $calls = capture_sets($v);
+	my $got = $v->set('secret/one', 'password', 'hunter2');
+
+	is scalar(@$calls), 1, 'one write';
+	eq_or_diff $calls->[0], ['secret/one', 'password=hunter2'],
+		'sent as a single key=value pair';
+	is $got, 'hunter2', 'and returns the value, as it always did';
+};
+
+subtest 'set() takes a list of key/value pairs' => sub {
+	plan tests => 3;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = \&mock_capture_query;
+	use warnings 'redefine';
+
+	my $v = make_vault(name => 'multi');
+	my $calls = capture_sets($v);
+	my $got = $v->set('secret/many', alpha => 1, beta => 2, gamma => 3);
+
+	is scalar(@$calls), 1, 'small enough to go in one write';
+	my ($path, @pairs) = @{$calls->[0]};
+	is $path, 'secret/many', 'written to the given path';
+	eq_or_diff [sort @pairs], ['alpha=1', 'beta=2', 'gamma=3'],
+		'every pair present';
+};
+
+subtest 'set() refuses an odd number of arguments' => sub {
+	plan tests => 1;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = \&mock_capture_query;
+	use warnings 'redefine';
+
+	my $v = make_vault(name => 'odd');
+	capture_sets($v);
+	# Three trailing args cannot be pairs, and treating the last as a
+	# value would silently drop one -- exactly the class of bug this
+	# ticket exists for.
+	quietly {
+		throws_ok { $v->set('secret/odd', 'a', 1, 'b') }
+			qr/pairs|odd number/i,
+			'an unpaired argument is an error, not a silent drop';
+	};
+};
+
+subtest 'set() still prompts when no value is given' => sub {
+	plan tests => 2;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = \&mock_capture_query;
+	use warnings 'redefine';
+
+	my $v = make_vault(name => 'prompt');
+	capture_sets($v);
+
+	# A lone key means "ask me for it".
+	quietly {
+		throws_ok { $v->set('secret/p', 'password') }
+			qr/controlling terminal/i,
+			'a bare key takes the interactive path';
+	};
+
+	# And so does an explicit undef value: that reached the interactive
+	# branch before pair lists existed, and a 2-element list must not
+	# quietly turn it into a write of the empty string.
+	quietly {
+		throws_ok { $v->set('secret/p', 'password', undef) }
+			qr/controlling terminal/i,
+			'an explicit undef value does too';
+	};
+};
+
+subtest 'set() accepts a joined path:key' => sub {
+	plan tests => 4;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	# get() already splits this form, so set() matching it is consistency
+	# rather than new syntax.  The key comes from the path, which makes
+	# the argument after it a value.
+	no warnings 'redefine';
+	local *Service::Vault::query = \&mock_capture_query;
+	use warnings 'redefine';
+
+	my $v = make_vault(name => 'joined');
+	my $calls = capture_sets($v);
+	$v->set('secret/foo:password', 'hunter2');
+	eq_or_diff $calls->[0], ['secret/foo', 'password=hunter2'],
+		'the key is taken from the path and the argument is its value';
+
+	# With nothing after it, there is still a key but no value.
+	quietly {
+		throws_ok { $v->set('secret/foo:password') }
+			qr/controlling terminal/i,
+			'a joined path with no value prompts for it';
+	};
+
+	# A joined path names one key, so pairs after it would name a second
+	# and contradict it.
+	quietly {
+		throws_ok { $v->set('secret/foo:password', 'a', 'b') }
+			qr/one value|one key/i,
+			'more than one value after a joined path is an error';
+	};
+
+	quietly {
+		throws_ok { $v->set('secret/foo:password', a => 1, b => 2) }
+			qr/one value|one key/i,
+			'and so are pairs';
+	};
+};
+
+subtest 'set() refuses a path with no key at all' => sub {
+	plan tests => 1;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = \&mock_capture_query;
+	use warnings 'redefine';
+
+	my $v = make_vault(name => 'keyless');
+	my $calls = capture_sets($v);
+	# An empty pair list would otherwise write nothing and report success.
+	quietly {
+		throws_ok { $v->set('secret/nokey') }
+			qr/no key|key.*given/i,
+			'a bare path is an error rather than a silent no-op';
+	};
+};
+
+subtest 'set() chunks a payload too large for one command' => sub {
+	plan tests => 3;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = \&mock_capture_query;
+	use warnings 'redefine';
+
+	my $v = make_vault(name => 'chunky');
+	my $calls = capture_sets($v);
+
+	# 900 characters is where safe was empirically found to corrupt a
+	# write; this is comfortably past it.
+	my %data = map {("key-with-a-reasonably-long-name-$_" => "value-$_" x 4)} (1..45);
+	$v->set('secret/chunky', %data);
+
+	cmp_ok scalar(@$calls), '>', 1, 'the payload was split across writes';
+
+	my $longest = 0;
+	for my $call (@$calls) {
+		my (undef, @pairs) = @$call;
+		my $len = length(join(' ', @pairs));
+		$longest = $len if $len > $longest;
+	}
+	cmp_ok $longest, '<=', 900, 'no single write exceeds the guard';
+
+	my %seen;
+	for my $call (@$calls) {
+		my (undef, @pairs) = @$call;
+		$seen{(split /=/, $_, 2)[0]} = 1 for @pairs;
+	}
+	eq_or_diff [sort keys %seen], [sort keys %data],
+		'and every key was written exactly once across the chunks';
 };
 
 done_testing;

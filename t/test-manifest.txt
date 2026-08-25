@@ -183,6 +183,7 @@ unit-tests/service_git-fetch_branches.t                    # fetch_branches help
 unit-tests/service_git-remote_branch.t                     # remote_branch helper
 unit-tests/service_github-pr.t                             # Github PR helpers
 unit-tests/service_vault-max_json_string_value_length.t    # JSON value length guard
+unit-tests/service_vault-write_confirmation.t              # HA read-back confirmation
 unit-tests/service_vault_remote-reauth.t                   # Remote vault re-auth
 unit-tests/service_vault_remote-token_renewer.t            # Background token renewer
 unit-tests/service_vault_local-port_selection.t            # Local vault free-port scan

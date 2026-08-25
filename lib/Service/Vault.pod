@@ -840,13 +840,26 @@ B<Examples:>
 
 =head2 set
 
-  $vault->set($path, $key, $value);   # non-interactive
-  $vault->set($path, $key);           # interactive (prompts for value)
+  $vault->set($path, $key, $value);       # one key
+  $vault->set($path, %pairs);             # several keys
+  $vault->set($path, $key);               # interactive (prompts for value)
+  $vault->set("$path:$key", $value);      # key joined onto the path
 
-Writes a secret to the vault. When C<$value> is provided, writes it
-directly. When C<$value> is omitted, starts an interactive C<safe set>
-prompt that hides input and requires confirmation; the caller must be in
-a controlling terminal.
+Writes one or more secrets to the vault. Trailing arguments are an
+even-sized list of key/value pairs, of which the single C<($key, $value)>
+form is the one-pair case.
+
+A lone key, or an explicit C<undef> value, starts an interactive C<safe
+set> prompt that hides input and requires confirmation; the caller must be
+in a controlling terminal.
+
+If C<$path> contains a colon, the portion after the last one is taken as
+the key, as C<get> already does. That form names a single key, so it
+accepts at most one value.
+
+Pairs are written in as few C<safe set> commands as the command-length
+limit allows, and each command is confirmed against a read before the next
+is sent -- see L</needs_write_confirmation> and L</_confirm_written>.
 
 B<Parameters:>
 
@@ -854,49 +867,59 @@ B<Parameters:>
 
 =item $path
 
-The vault secret path.
+The vault secret path, optionally with C<:key> appended.
 
-=item $key
+=item %pairs
 
-The key name within the path.
-
-=item $value
-
-Optional. The string value to store. If omitted, interactive mode is used.
+An even-sized list of key names and string values. Undefined values are
+written as the empty string, except in the two-argument form where an
+explicit C<undef> selects interactive mode.
 
 =back
 
-B<Returns:> The stored C<$value> in non-interactive mode. The value re-read
-from the vault via C<get> in interactive mode.
+B<Returns:> The stored C<$value> when exactly one pair was given. A hash
+reference of everything written when more than one was given. The value
+re-read from the vault via C<get> in interactive mode.
 
 B<Errors:>
 
-Dies with C<"Could not write #C{%s:%s} to vault at #M{%s}:\n%s"> if the
-write fails in non-interactive mode. The placeholders are the path, key,
-vault URL, and command output.
+Dies with C<"Could not write #C{%s} to vault at #M{%s}:\n%s"> if a write
+fails. The placeholders are the path, vault URL, and command output.
 
 Dies with C<"Could not write #C{%s:%s} to vault at #M{%s}"> if the write
 fails in interactive mode.
+
+Dies with C<"Could not write to #C{%s} in vault at #M{%s}: set() takes
+key/value pairs, but was given an odd number of arguments."> when the
+trailing arguments cannot be paired.
+
+Dies with C<"Could not write to #C{%s} in vault at #M{%s}: a joined
+path:key names a single key, so it takes at most one value."> when more
+than one value follows a joined path.
+
+Dies with C<"Could not write to #C{%s} in vault at #M{%s}: no key was
+given."> when no key is supplied at all.
 
 Dies with C<"#R{[ERROR]} Cannot interactively provide secrets unless in a
 controlling terminal - terminating!"> if no controlling terminal is available
 when attempting interactive mode.
 
+May also die from the read-back confirmation; see L</_confirm_written>.
+
 B<Examples:>
 
-  # Non-interactive
   $vault->set('secret/myapp', 'password', 'hunter2');
+  # Returns: 'hunter2'
+
+  $vault->set('secret/myapp', user => 'admin', password => 'hunter2');
+  # Returns: { user => 'admin', password => 'hunter2' }
+
+  $vault->set('secret/myapp:password', 'hunter2');
   # Returns: 'hunter2'
 
   # Interactive (prompts the user)
   $vault->set('secret/myapp', 'password');
   # Returns: value read back from vault after interactive entry
-
-B<Limitations:>
-
-C<$path> and C<$key> must be passed separately.  A pre-joined C<path:key>
-string in C<$path> is not split and results in an error rather than a write to
-the intended location.
 
 =head2 clear
 
@@ -908,6 +931,11 @@ and all subpaths using C<safe rm -rf>.
 
 If the path does not exist and C<$recursive> is false, returns without
 error.
+
+On a target that needs it, the removal is confirmed against a read before
+returning, including in the "path does not exist" case -- a stale read can
+report a path absent while its keys are still there for the next write to
+merge into. See L</_confirm_cleared>.
 
 B<Parameters:>
 
@@ -932,6 +960,8 @@ Dies with C<"Could not clear #C{%s} in vault at #M{%s}:\n%s"> if the
 removal fails. The placeholders are the path, vault URL, and combined
 stdout/stderr.
 
+May also die from the read-back confirmation; see L</_confirm_cleared>.
+
 B<Examples:>
 
   $vault->clear('secret/myapp');
@@ -939,6 +969,11 @@ B<Examples:>
 
   $vault->clear('secret/myapp', 1);
   # Returns: 1 (recursive removal)
+
+B<Limitations:>
+
+The confirmation covers C<$path>'s own keys only. A recursive removal also
+deletes subpaths, and those are not read back.
 
 =head2 set_path
 
@@ -1201,6 +1236,79 @@ B<Example:>
   my $cap   = $vault->max_json_string_value_length();   # => 2097152
   my $chunk = $cap - 2048;                              # 2 KiB headroom
 
+=head2 needs_write_confirmation
+
+  if ($vault->needs_write_confirmation) { ... }
+
+Whether a write to this target has to be read back before it can be
+treated as landed.
+
+C<safe set> is read-modify-write. On a highly-available vault, a read
+served by a raft standby can lag the leader, so a write merges into a base
+that is already out of date and silently discards what was written before
+it. Reading each write back before sending the next one prevents that: the
+next read-modify-write cannot see a stale base if the previous write is
+already visible.
+
+Sources, in priority order:
+
+=over 4
+
+=item 1.
+
+C<GENESIS_VAULT_CONFIRM_WRITES> environment variable, when set to C<0> or
+C<1>.
+
+=item 2.
+
+The server's C</sys/leader> endpoint via C<safe curl --data-only>, which
+reports C<ha_enabled>.
+
+=item 3.
+
+Fail safe: confirm. A confirmation that was not needed costs one read,
+while skipping one that was needed loses data with no error, so an
+unreachable, unparseable or unrecognised answer resolves to confirming.
+
+=back
+
+The decision is made on C<ha_enabled> and nothing else. It is deliberately
+B<not> made on C<is_self>: leadership fails over, and the target URL is
+usually a load balancer fronting several nodes, so C<is_self> describes
+whichever node answered that one request rather than the one that will
+serve the next.
+
+Both Vault and OpenBao report C<ha_enabled> at this endpoint, so no
+engine detection is involved.
+
+The result is cached on the instance after the first call, so a chunked
+write does not re-probe per chunk.
+
+B<Returns:> C<1> if writes must be confirmed, C<0> otherwise.
+
+B<Errors:>
+
+None. Every probe failure resolves to C<1> rather than raising.
+
+B<Examples:>
+
+  # Single-node or dev vault
+  $vault->needs_write_confirmation;   # => 0
+
+  # Suppress it regardless of the server's answer
+  local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '0';
+  $vault->needs_write_confirmation;   # => 0
+
+B<Limitations:>
+
+Confirming through a read only proves that the node which answered holds
+the write. Where the target URL fronts several standbys, the node serving
+the next read-modify-write may still be behind. With a single standby the
+confirmations are monotonic and this is airtight; with several it narrows
+the window rather than closing it. OpenBao exposes no C<X-Vault-Index>
+equivalent for a client to detect staleness directly (openbao/openbao#3877,
+RFC openbao/openbao#1528), so polling is the only available mechanism.
+
 =head2 token_info
 
   my $info = $vault->token_info();
@@ -1446,6 +1554,205 @@ B<Examples:>
 
   my ($url, @aliases) = Service::Vault::_get_targets('prod-vault');
   # Returns: ('https://vault.example.com:8200', 'prod-vault', 'prod-vault-alt')
+
+=head2 _write_pairs
+
+  $vault->_write_pairs($path, \%pairs);
+
+Writes C<%pairs> to C<$path> in as few C<safe set> commands as the
+command-length limit allows, confirming each one before sending the next.
+
+A command longer than 900 characters was found empirically to corrupt the
+write, so pairs are accumulated until the next one would cross that mark;
+the pair that crosses it starts the following batch. A single pair longer
+than the limit on its own is sent anyway, since there is no smaller write
+to fall back to.
+
+Called by both C<set> and C<set_path>. C<set_path> uses it directly rather
+than going through C<set>, because its keys are already the ones to store
+and C<set>'s C<path:key> splitting would mangle any key containing a colon.
+
+B<Parameters:>
+
+=over 4
+
+=item $path
+
+The vault secret path.
+
+=item \%pairs
+
+Hash reference of key names to string values. Undefined values are written
+as the empty string.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:>
+
+Propagates the errors of L</_write_batch>.
+
+B<Examples:>
+
+  $vault->_write_pairs('secret/myapp', {user => 'admin', port => 8080});
+
+=head2 _write_batch
+
+  $vault->_write_batch($path, \@batch, \%written);
+
+Sends one C<safe set> for C<@batch>, then confirms everything written so
+far is readable.
+
+C<@batch> is a list of pre-joined C<"key=value"> strings. Each is folded
+into C<%written>, which accumulates across every batch of a single
+C<_write_pairs> call, and the confirmation checks that whole accumulation
+rather than just this batch -- a batch that merged into a stale base drops
+its predecessors, not itself, so checking only the newest would not notice.
+
+B<Parameters:>
+
+=over 4
+
+=item $path
+
+The vault secret path.
+
+=item \@batch
+
+Array reference of C<"key=value"> strings to write in this command. An
+empty batch is a no-op.
+
+=item \%written
+
+Hash reference accumulating every key and value written to C<$path> so
+far. Modified in place.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:>
+
+Dies with C<"Could not write #C{%s} to vault at #M{%s}:\n%s"> if the
+command exits non-zero.
+
+May also die from the confirmation; see L</_confirm_written>.
+
+B<Examples:>
+
+  my %written;
+  $vault->_write_batch('secret/myapp', ['user=admin'], \%written);
+  # %written is now (user => 'admin')
+
+=head2 _confirm_timeout
+
+  my $seconds = Service::Vault::_confirm_timeout();
+
+How long a read-back may take before it is treated as a failure.
+
+Reads C<GENESIS_VAULT_CONFIRM_TIMEOUT>, which accepts a positive number of
+seconds and may be fractional. Anything else yields the default of C<10>.
+
+B<Returns:> A number of seconds.
+
+B<Errors:>
+
+None. An unusable value falls through to the default.
+
+B<Examples:>
+
+  Service::Vault::_confirm_timeout();                  # => 10
+  local $ENV{GENESIS_VAULT_CONFIRM_TIMEOUT} = '0.5';
+  Service::Vault::_confirm_timeout();                  # => 0.5
+
+=head2 _confirm_written
+
+  $vault->_confirm_written($path, \%written);
+
+Polls C<$path> until every key in C<%written> reads back with the value
+that was sent, or the timeout expires.
+
+The comparison is on B<values>, not key names. A batch that merged into a
+stale base carries the right key names and the wrong contents, so a
+presence check would pass while the result is wrong. Comparing values also
+avoids matching against a returned path prefix, which C<safe> normalises.
+
+Returns immediately when L</needs_write_confirmation> is false, which is
+what keeps single-node and development vaults free of extra round-trips.
+
+Polls every 250ms up to L</_confirm_timeout>.
+
+B<Parameters:>
+
+=over 4
+
+=item $path
+
+The vault secret path just written.
+
+=item \%written
+
+Hash reference of every key and value written to C<$path> so far.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:>
+
+Dies with C<"Wrote #C{%s} to the vault at #M{%s}, but %s of its %s keys
+did not read back within %ss."> when the timeout expires with keys still
+missing or holding a different value. A lost merge cannot be repaired
+afterwards, so this stops rather than continuing.
+
+B<Examples:>
+
+  $vault->_confirm_written('secret/myapp', {user => 'admin'});
+  # Returns normally once the value is readable
+
+=head2 _confirm_cleared
+
+  $vault->_confirm_cleared($path);
+
+Polls C<$path> until it reads back with no keys, or the timeout expires.
+
+A write that follows a clear merges into whatever a read returns, so keys
+outliving the delete are carried straight into the new value. Those keys
+are extras rather than missing ones, which is why L</_confirm_written>
+cannot detect this case and it needs its own check.
+
+Returns immediately when L</needs_write_confirmation> is false. Polls every
+250ms up to L</_confirm_timeout>.
+
+B<Parameters:>
+
+=over 4
+
+=item $path
+
+The vault secret path just cleared.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:>
+
+Dies with C<"Cleared #C{%s} in the vault at #M{%s}, but %s of its keys
+were still readable after %ss."> when the timeout expires with keys still
+present.
+
+B<Examples:>
+
+  $vault->clear('secret/myapp');
+  $vault->_confirm_cleared('secret/myapp');
+  # Returns normally once the path reads empty
+
+B<Limitations:>
+
+Checks C<$path>'s own keys only. A recursive clear also removes subpaths,
+and those are not read back.
 
 =head1 AUTHOR
 
