@@ -1544,8 +1544,18 @@ sub _get_reserved_allocation {
 		last;
 	}
 
+	# The "_a"/"_b" keys are exclusive bounds, not addresses: a reservation
+	# written at offset N carries its neighbours at N-1 and N+1 so that the
+	# bracket-pair loop above can recover the single address between them.
+	# They must not be matched here as if they were addresses themselves.
+	# Because reserved-ip offset catalogs are consecutive, one reservation's
+	# "_b" bound is the next reservation's address, so sweeping the bounds
+	# into this allocation makes a target's static range claim addresses
+	# belonging to neighbouring services.
 	for my $candidate (@candidates) {
-		my @ip_keys = grep {$_ =~ m/${candidate}_ip/} keys %$reserved_ips;
+		my @ip_keys = grep {
+			$_ =~ m/\Q${candidate}\E_ip/ && $_ !~ m/_(?:a|b)$/
+		} keys %$reserved_ips;
 		next unless @ip_keys;
 		$allocation += IPv4->new(map {$reserved_ips->{$_}} @ip_keys);
 		last;

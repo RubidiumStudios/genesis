@@ -1053,6 +1053,101 @@ subtest 'network_definition - unaliased target with no reservations drops and wa
 		'warning names at least one dropped subnet for the unaliased target');
 };
 
+# ---------------------------------------------------------------------------
+# Reserved-ip "_a"/"_b" bounds must not be swept into the static allocation
+# ---------------------------------------------------------------------------
+# Records written under the current offset catalog key every reservation as a
+# triple: "<role>_ip" at offset N, plus "<role>_ip_a" at N-1 and "<role>_ip_b"
+# at N+1 as exclusive bounds. Because the catalog is consecutive, one role's
+# "_b" bound is the next role's address, so an unanchored "<target>_ip" match
+# makes a target's static range absorb its neighbours' reserved addresses.
+#
+# The fixture below is a live-shaped mgmt subnet: bastion at .3, bosh at .4,
+# and vault at .5, so bosh's bounds land exactly on the bastion's and vault's
+# addresses. rustfs and its smoke errand are included because the errand's
+# dedicated key ("rustfs_ip_smoke") is read by the same deployment and must
+# keep matching, while its bounds must not.
+my $bounded_ocfp_config = {
+	vpc => {
+		azs => {
+			'az1' => { cloud_properties => '{"zone": "us-east-1a"}' },
+		},
+		cidr_block => '10.9.3.0/24',
+		dns        => '1.1.1.1',
+		id         => 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxx10',
+		region     => 'us-east-1',
+		sgs => {
+			default => {
+				'description' => 'Default security group',
+				'id'          => 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx10',
+				'name'        => 'default',
+			},
+		},
+		subnets => {
+			'ocfp-0' => {
+				az => 'az1', cidr_block => '10.9.3.0/24',
+				gateway => '10.9.3.1', dns => '10.9.3.2',
+				'reserved-ips' => {
+					'bastion_ip'          => '10.9.3.3',
+					'bastion_ip_a'        => '10.9.3.2',
+					'bastion_ip_b'        => '10.9.3.4',
+					'bosh_ip'             => '10.9.3.4',
+					'bosh_ip_a'           => '10.9.3.3',
+					'bosh_ip_b'           => '10.9.3.5',
+					'vault_ip'            => '10.9.3.5',
+					'vault_ip_a'          => '10.9.3.4',
+					'vault_ip_b'          => '10.9.3.6',
+					'rustfs_ip'           => '10.9.3.14',
+					'rustfs_ip_a'         => '10.9.3.13',
+					'rustfs_ip_b'         => '10.9.3.15',
+					'rustfs_ip_smoke'     => '10.9.3.21',
+					'rustfs_ip_smoke_a'   => '10.9.3.20',
+					'rustfs_ip_smoke_b'   => '10.9.3.22',
+				},
+			},
+		},
+	},
+};
+
+subtest '_get_reserved_allocation - bound keys stay out of the allocation' => sub {
+	plan tests => 4;
+
+	my $env  = make_deploy_env(ocfp_config => $bounded_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+	my $subnet = $hook->subnets->{'ocfp-0'};
+
+	my ($bosh_alloc) = $hook->_get_reserved_allocation('bosh', $subnet);
+	is($bosh_alloc->range, '10.9.3.4',
+		'bosh resolves to its own address alone, not the .3 to .5 span its bounds describe');
+
+	my ($vault_alloc) = $hook->_get_reserved_allocation('vault', $subnet);
+	is($vault_alloc->range, '10.9.3.5',
+		'vault resolves to its own address alone, and does not claim bosh at .4');
+
+	my ($openbao_alloc) = $hook->_get_reserved_allocation('openbao', $subnet);
+	is($openbao_alloc->range, '10.9.3.5',
+		'the openbao alias resolves through vault to the same single address');
+
+	my ($bastion_alloc) = $hook->_get_reserved_allocation('bastion', $subnet);
+	is($bastion_alloc->range, '10.9.3.3',
+		'bastion resolves to its own address alone, and does not claim bosh at .4');
+};
+
+subtest '_get_reserved_allocation - custom errand keys still resolve' => sub {
+	plan tests => 2;
+
+	my $env  = make_deploy_env(ocfp_config => $bounded_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+	my $subnet = $hook->subnets->{'ocfp-0'};
+
+	my ($rustfs_alloc) = $hook->_get_reserved_allocation('rustfs', $subnet);
+	cmp_deeply([map {$_->range} $rustfs_alloc->spans], ['10.9.3.14', '10.9.3.21'],
+		'rustfs keeps both its own address and its smoke errand address, and neither set of bounds');
+
+	is($rustfs_alloc->size, 2,
+		'rustfs allocates exactly two addresses, not the six its keys mention');
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
