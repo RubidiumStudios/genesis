@@ -293,6 +293,41 @@ subtest 'shell_quote prevents command injection' => sub {
 	ok !-e $canary, 'injected command did not execute';
 };
 
+subtest 'run() passes arguments through without rewriting them' => sub {
+	local $ENV{PROBE_VAR} = 'SUBSTITUTED';
+
+	# Single-quoted throughout, so Perl interpolates nothing here and
+	# anything that differs was changed by run() itself.
+	my @args = (
+		'plain-value',
+		'P@ss$word123',              # unset name: the span would be deleted
+		'value-is-$PROBE_VAR-end',   # set name: the span would be replaced
+		'value-is-${PROBE_VAR}-end',
+		'cost$5.00',                 # digits match the name character class
+		'ends-with$',                # so does the empty name
+	);
+	my ($out, $rc) = run({stderr => 0}, 'printf', '%s\n', @args);
+	is $rc, 0, 'command runs';
+	eq_or_diff [split /\n/, $out], \@args,
+		'every argument reaches the child byte-for-byte';
+};
+
+subtest 'run() interpolates arguments only when asked' => sub {
+	local $ENV{PROBE_VAR} = 'SUBSTITUTED';
+
+	my ($out, $rc) = run({stderr => 0, eval_var_args => 1}, 'printf', '%s\n',
+		'value-is-$PROBE_VAR-end',
+		'value-is-${PROBE_VAR}-end',
+		'literal-\$PROBE_VAR-end',
+	);
+	is $rc, 0, 'command runs';
+	eq_or_diff [split /\n/, $out], [
+		'value-is-SUBSTITUTED-end',
+		'value-is-SUBSTITUTED-end',
+		'literal-\$PROBE_VAR-end',
+	], 'opt-in still substitutes, and still honours the backslash escape';
+};
+
 subtest 'fake_tty on linux quotes the flattened subcommand' => sub {
 	local $^O = 'linux';
 	my @cmd = Genesis::fake_tty('/tmp/out.log', 'spruce', 'diff', 'a file', 'pipe|arg');

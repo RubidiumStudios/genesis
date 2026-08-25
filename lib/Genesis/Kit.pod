@@ -430,7 +430,10 @@ the hook, in addition to those from C<env-E<gt>get_environment_variables>.
 
 =item C<eval_var_args>
 
-Optional. Passed through to the underlying shell runner for bash hooks.
+Optional. Passed through to C<Genesis::run> for bash hooks, where it expands
+environment variable references in the hook's arguments. Off unless asked
+for; see C<eval_var_args> in L<Genesis> for what it does to a value holding a
+literal C<$>.
 
 =item C<shell>
 

@@ -1364,6 +1364,22 @@ If true, suppresses output from trace/debug logs.
 
 If true, redacts environment variable values in trace/debug logs.
 
+=item C<eval_var_args>
+
+If true, expands environment variable references in C<@args> before the
+command runs: C<$NAME> and C<${NAME}> are replaced with the variable's value,
+and a name that is not set becomes the empty string. A backslash-escaped
+C<\$> is left alone.
+
+Off by default. Arguments are handed to the shell positionally, so they are
+data rather than shell source, and expanding them unasked corrupts any value
+containing a literal C<$> -- passwords and generated secrets especially. Turn
+this on only where the caller genuinely wants its arguments treated as
+templates, as the kit hook runners do for addon and reaction arguments.
+
+    # $HOME is expanded and arrives as $1; $$ is left for the shell itself
+    run({eval_var_args => 1}, 'echo "Home: $1, process: $$"', '$HOME');
+
 =back
 
 =item C<$command>

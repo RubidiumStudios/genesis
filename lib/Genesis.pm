@@ -691,7 +691,10 @@ sub run {
 			$cmd_arg = $cmd_arg->{redact};
 		}
 		# FIXME: How to handle undefined values
-		$cmd_arg =~ s/(?<!\\)\$(?:{([^\}]+)}|([A-Za-z0-9_]*))/my $v = $ENV{$1||$2}; defined($v) ? $v : ""/eg;
+		# Opt-in only: arguments are handed to the shell positionally, so they
+		# are data, and expanding them unasked corrupts any value holding a $.
+		$cmd_arg =~ s/(?<!\\)\$(?:{([^\}]+)}|([A-Za-z0-9_]*))/my $v = $ENV{$1||$2}; defined($v) ? $v : ""/eg
+			if $opts{eval_var_args};
 
 		# Normal flow, assume arg is string-equivalent as before
 		push(@trace_args, $trace_arg//$cmd_arg);
