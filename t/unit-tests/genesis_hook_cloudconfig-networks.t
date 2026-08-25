@@ -1148,6 +1148,31 @@ subtest '_get_reserved_allocation - custom errand keys still resolve' => sub {
 		'rustfs allocates exactly two addresses, not the six its keys mention');
 };
 
+subtest 'network_definition - rendered static range holds one address' => sub {
+	plan tests => 2;
+
+	my $env  = make_deploy_env(ocfp_config => $bounded_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $net = $hook->network_definition('bosh',
+		strategy => 'ocfp',
+		dynamic_subnets => {
+			allocation => { size => 0, statics => 0 },
+			cloud_properties_for_iaas => {
+				openstack => {
+					'net_id'          => $hook->network_reference('id'),
+					'security_groups' => ['default'],
+				},
+			},
+		},
+	);
+
+	is(scalar @{$net->{subnets}}, 1, 'the bosh network keeps its one subnet');
+
+	cmp_deeply($net->{subnets}[0]{static}, ['10.9.3.4'],
+		'rendered static is the single director address, not the .3 to .5 span its bounds describe');
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
