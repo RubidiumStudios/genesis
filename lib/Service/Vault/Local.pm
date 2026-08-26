@@ -74,9 +74,12 @@ sub create {
 
 	# Restore default vault target?
 
-	my $vault_info = read_json_from(run({env => {SAFE_TARGET => undef}},
-			"safe targets --json | jq '.[] | select(.name==\"$alias\")'"
-	));
+	# Polled, not read once: safe registers the target in ~/.saferc a moment
+	# after the server process itself is up, so a single read races the writer
+	# and comes back empty.  That reaches read_json_from as '' and dies with
+	# "malformed JSON string, neither array, object, number, string or atom, at
+	# character offset 0", which names nothing an operator can act on.
+	my $vault_info = _lookup_vault_target($alias, 100);
 	bail(
 		"Failed to find vault alias after starting local vault."
 	)	unless ($vault_info && ref($vault_info) eq 'HASH' && $vault_info->{url});
@@ -140,9 +143,9 @@ sub rebind {
 	my $alias = _generate_alias($name);
 	return $local_vaults->{$alias} if $local_vaults->{$alias};
 
-	my $vault_info = read_json_from(run({env => {SAFE_TARGET => undef}},
-			"safe targets --json | jq '.[] | select(.name==\"$alias\")'"
-	));
+	# Single read, unlike create(): rebind is only reached for a vault that is
+	# already registered, so an absent target is an answer, not a race to wait out.
+	my $vault_info = _lookup_vault_target($alias);
 	return unless ($vault_info && ref($vault_info) eq 'HASH' && $vault_info->{url});
 
 	my $safe_process = _get_safe_process($alias);
@@ -401,14 +404,43 @@ sub _generate_alias {
 	return "local_vault_${name}_${pid}";
 }
 
+# _lookup_vault_target - read a local vault's target out of ~/.saferc {{{
+# Tries up to $tries times, 100ms apart, so a caller that has just started safe
+# can wait out the gap between the server coming up and safe registering it.
+# An empty or unparseable read is a not-yet, not a failure: returning undef lets
+# the caller report the real problem by name.
+sub _lookup_vault_target {
+	my ($alias, $tries) = @_;
+	$tries ||= 1;
+
+	my $vault_info;
+	for my $attempt (1..$tries) {
+		my $raw = run({env => {SAFE_TARGET => undef}},
+			"safe targets --json | jq '.[] | select(.name==\"$alias\")'"
+		);
+		$vault_info = eval {read_json_from($raw)}
+			if defined($raw) && $raw =~ /\S/;
+		last if ($vault_info && ref($vault_info) eq 'HASH' && $vault_info->{url});
+		select(undef,undef,undef,0.1) if $attempt < $tries;
+	}
+	return $vault_info;
+}
+
+# }}}
+# `ps -eo pid,ppid,command` reports a process by the path it was exec'd with.
+# safe >= 1.20.0 resolves the server binary before spawning it, so the command
+# column reads /home/linuxbrew/.linuxbrew/bin/vault server rather than a bare
+# `vault server`, and a filter anchored on the bare name never matches.  create()
+# then bails with "Could not start local memory-backed vault" over a vault that
+# is running normally.  Allow a leading path on both binaries.
 sub _get_safe_process {
 	my ($alias, $timeout) = @_;
-	return _get_process("\\s\\+[s]afe local -m --as $alias", $timeout);
+	return _get_process("\\s\\+[^ ]*[s]afe local -m --as $alias", $timeout);
 }
 
 sub _get_vault_process {
 	my ($ppid, $timeout) = @_;
-	return _get_process("\\s\\+$ppid\\s\\+[v]ault server", $timeout);
+	return _get_process("\\s\\+$ppid\\s\\+[^ ]*[v]ault server", $timeout);
 }
 
 sub _get_process {

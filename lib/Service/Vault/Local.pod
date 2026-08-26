@@ -356,6 +356,49 @@ B<Examples:>
   my $alias = _generate_alias('local_vault_dev_99');
   # Returns: 'local_vault_dev_99'  (PID preserved from existing alias)
 
+=head2 _lookup_vault_target
+
+  my $info = _lookup_vault_target($alias);
+  my $info = _lookup_vault_target($alias, $tries);
+
+Reads a local vault's target entry out of C<~/.saferc> via
+C<safe targets --json>, retrying while the entry is absent.
+
+C<safe local> registers the new target a moment after its server process is
+up, so a caller that has just started safe can read the file before the
+entry lands.  A single read of that window returns an empty string, which
+reaches C<read_json_from> as malformed JSON and dies naming nothing an
+operator can act on.  Retrying waits the window out instead.
+
+An empty or unparseable read is treated as a not-yet rather than a failure,
+so the caller decides what an absent target means.
+
+B<Parameters:>
+
+=over 4
+
+=item $alias
+
+The local vault alias to look up.
+
+=item $tries
+
+Optional.  How many times to read before giving up, 100ms apart.  Defaults
+to 1, a single read with no retry -- which is what C<rebind> wants, since it
+is only reached for a vault that is already registered.  C<create> passes
+100, roughly ten seconds.
+
+=back
+
+B<Returns:> The target as a hash reference (with keys C<url>, C<name>,
+C<verify>, C<namespace>, C<strongbox>, and C<mount>) once it appears, or
+C<undef> if it has not appeared by the last try.
+
+B<Examples:>
+
+  my $info = _lookup_vault_target('local_vault_dev_12345', 100);
+  # Returns: { name => 'local_vault_dev_12345', url => 'http://127.0.0.1:8201', ... }
+
 =head2 _get_safe_process
 
   my $info = _get_safe_process($alias);
@@ -364,6 +407,10 @@ B<Examples:>
 Searches the process table for a running C<safe local -m --as ALIAS>
 process, delegating to C<_get_process> with a filter pattern built from
 C<$alias>.
+
+The pattern tolerates a leading path on the binary: C<ps> reports a process
+by the path it was exec'd with, so C<safe> appears as an absolute path
+whenever it was resolved before being spawned.
 
 B<Parameters:>
 
@@ -396,6 +443,12 @@ B<Examples:>
 Searches the process table for a C<vault server> process whose parent PID
 is C<$ppid>, delegating to C<_get_process> with a filter pattern built
 from C<$ppid>.
+
+The pattern tolerates a leading path on the binary.  C<safe> 1.20.0 and
+later resolve the server binary before spawning it, so C<ps> reports the
+child as C</path/to/vault server>; a pattern anchored on the bare name
+misses it entirely, and C<create> then reports a healthy vault as failed to
+start.
 
 B<Parameters:>
 
