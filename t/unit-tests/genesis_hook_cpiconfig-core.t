@@ -492,6 +492,40 @@ subtest 'cpi_entombment_path_for - dotted keys are flattened out of the path' =>
 		'a key that flattens alike still gets its own path, since the sha covers the original key');
 };
 
+subtest 'cpi_entombment_path_for - array indices are flattened too' => sub {
+	plan tests => 2;
+
+	# An output path may address an array element: unflatten turns
+	# nics[0].ip into nics => [{ip => ...}].  Brackets have no business in
+	# a CredHub name either, so the flattening cannot be dots alone.
+	my $hook = make_hook();
+	my $path = $hook->cpi_entombment_path_for('nics[0].ip', '10.0.0.1');
+
+	unlike($path, qr/[\[\]]/, 'no brackets survive into the CredHub name');
+	like($path, qr/--nics_0__ip--/, 'each offending character becomes an underscore');
+};
+
+subtest 'cpi_entombment_path_for - a path needing no flattening is untouched' => sub {
+	plan tests => 2;
+
+	# The whole reason this is safe to land is that it only moves entries
+	# that were already broken.  A path that is already legal must hash
+	# and render exactly as it did before the flattening was introduced.
+	my $hook  = make_hook();
+	my $key   = 'vcenter_password';
+	my $value = 's3cr3t';
+
+	my $stub = 'cpi-config-property';
+	my $sha  = substr(sha1_hex("$stub--$key--$value"), 0, 8);
+
+	is($hook->cpi_entombment_path_for($key, $value),
+		"/bosh/my-env/${stub}--${key}--${sha}",
+		'an already-legal path is unchanged, so existing entries do not move');
+	is($hook->cpi_entombment_path_for('a-b_c', 'v'),
+		$hook->cpi_entombment_path_for('a-b_c', 'v'),
+		'hyphens and underscores are legal and pass through');
+};
+
 subtest 'cpi_entombment_path_for - different values produce different paths' => sub {
 	plan tests => 1;
 

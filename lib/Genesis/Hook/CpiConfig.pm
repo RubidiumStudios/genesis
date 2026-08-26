@@ -165,7 +165,9 @@ sub gather_properties {
 }
 
 sub cpi_entombment_path_for {
-	my ($self, $key, $value) = @_;
+	# Both callers pass an output path, not a source key: the CPI-side
+	# address, which is structural and may carry dots or array indices.
+	my ($self, $path, $value) = @_;
 	# This is different between being deployed as a director's default cpi config
 	# and a child cpi config.  They always have to be absolute paths, so we need
 	# to prefix them with the credhub prefix.
@@ -176,17 +178,18 @@ sub cpi_entombment_path_for {
 	# on the environment's credhub prefix.
 	my $prefix = $self->{credhub_prefix} // $self->env->cpi_credhub_base;
 	my $stub = 'cpi-config-property';
-	my $secret_sha = substr(sha1_hex("$stub--$key--".$value),0,8);
+	my $secret_sha = substr(sha1_hex("$stub--$path--".$value),0,8);
 
 	# BOSH resolves ((name.subkey)) by splitting the reference on its first dot,
-	# so a nested property key such as pve.host would have the director ask the
+	# so a nested property path such as pve.host would have the director ask the
 	# config server for a truncated credential name and get a 404 back. Flatten
 	# anything outside [A-Za-z0-9_-] so the stored name and the manifest
-	# reference agree and carry no dot. The sha still covers the original key,
-	# so two keys that flatten alike keep distinct paths.
-	(my $safe_key = $key) =~ s/[^A-Za-z0-9_-]/_/g;
+	# reference agree and carry no dot -- array indices such as nics[0].ip need
+	# it too.  The sha still covers the original path, so two paths that flatten
+	# alike keep distinct entries.
+	(my $safe_name = $path) =~ s/[^A-Za-z0-9_-]/_/g;
 
-	return "$prefix$stub--$safe_key--$secret_sha";
+	return "$prefix$stub--$safe_name--$secret_sha";
 }
 
 1;

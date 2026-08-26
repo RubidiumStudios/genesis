@@ -497,30 +497,48 @@ B<Examples:>
 
 =head2 cpi_entombment_path_for
 
-    my $path = $hook->cpi_entombment_path_for($key, $value);
+    my $credhub_path = $hook->cpi_entombment_path_for($path, $value);
 
 Computes a deterministic CredHub credential path for a CPI config property
-value. The path is of the form:
+value. The result is of the form:
 
-    $prefix . 'cpi-config-property--' . $key . '--' . $sha1
+    $prefix . 'cpi-config-property--' . $flattened . '--' . $sha1
 
 where C<$prefix> is taken from C<< $self->{credhub_prefix} >> if set,
-otherwise from C<< $env->cpi_credhub_base >>, and C<$sha1> is the first 8
-hex characters of the SHA-1 digest of the string
-C<"cpi-config-property--$key--$value">.
+otherwise from C<< $env->cpi_credhub_base >>; C<$flattened> is C<$path>
+with every character outside C<[A-Za-z0-9_-]> replaced by an underscore;
+and C<$sha1> is the first 8 hex characters of the SHA-1 digest of the
+string C<"cpi-config-property--$path--$value">, built from the B<original>
+path rather than the flattened one.
+
+The flattening exists because BOSH resolves a C<(( name.subkey ))>
+reference by splitting it on the first dot. A credential whose name
+contains a dot is therefore asked for under a truncated name, and the
+director gets a 404 -- which fails every read of the affected config, not
+just the one property. Array indices need the same treatment, since an
+output path may address an array element such as C<< nics[0].ip >>. See
+L</PROPERTY MAPPING> for why an output path carries these characters in
+the first place.
+
+Because the digest covers the unflattened path, two paths that flatten
+alike -- C<pve.host> and C<pve_host> -- still receive distinct entries. A
+path already within C<[A-Za-z0-9_-]> is returned unchanged, so introducing
+the flattening moved only entries that were already unusable.
 
 This method is used internally by C<gather_properties> to generate stable,
-unique CredHub paths for secret values. The path is the same for a given
-combination of key and value, making it safe to call idempotently.
+unique CredHub paths for secret values. The result is the same for a given
+combination of path and value, making it safe to call idempotently.
 
 B<Parameters:>
 
 =over 4
 
-=item C<$key>
+=item C<$path>
 
-The property name or config path for which a CredHub credential is being
-created.
+The output path the property occupies in the emitted CPI config -- the
+C<< > >> side of a descriptor, or the property name where no C<< > >> was
+given. Note this is the CPI-side address rather than the operator-facing
+key; see L</PROPERTY MAPPING>.
 
 =item C<$value>
 
@@ -530,12 +548,34 @@ per distinct value.
 =back
 
 B<Returns:> A CredHub credential path string of the form
-C<"${prefix}cpi-config-property--$key--$sha1">.
+C<"${prefix}cpi-config-property--$flattened--$sha1">.
+
+B<Errors:>
+
+None. Every input yields a path; a C<$path> consisting entirely of
+characters outside C<[A-Za-z0-9_-]> flattens to a run of underscores and
+is still distinguished by its digest.
 
 B<Examples:>
 
-    my $path = $hook->cpi_entombment_path_for('vcenter_password', 's3cr3t');
+    $hook->cpi_entombment_path_for('vcenter_password', 's3cr3t');
     # Returns: '/bosh/cpi-config-property--vcenter_password--a1b2c3d4'
+
+    $hook->cpi_entombment_path_for('pve.host', 'pve.example.com');
+    # Returns: '/bosh/cpi-config-property--pve_host--e5f6a7b8'
+
+B<Limitations:>
+
+The entombed name is Genesis's own bookkeeping, but is derived from the
+CPI-side path rather than the operator-facing key. A CPI release that
+renames one of its nested properties therefore renames the corresponding
+CredHub entry, orphaning the old one and entombing afresh on the next
+deploy.
+
+The name is also what an operator is shown when a secret is missing --
+C<Genesis::Env> extracts it from between the C<--> delimiters for that
+message -- so the reported name is the flattened CPI-side path rather than
+the name they set in their environment file.
 
 
 =head1 AUTHOR
