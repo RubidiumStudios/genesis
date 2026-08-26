@@ -44,6 +44,169 @@ L<Genesis::Hook> for inherited methods including C<init>, C<perform>,
 C<completed>, C<env>, C<iaas>, C<features>, C<want_feature>, and BOSH
 integration helpers.
 
+=head1 PROPERTY MAPPING
+
+A kit's property map is a translation table between two vocabularies that
+do not agree, and most of its behaviour follows from which side of that
+translation a given part belongs to.
+
+    !pve_host@host>pve.host
+     |______||__| |_______|
+        |      |      `-- CPI vocabulary: what the release's job spec calls it
+        |      `--------- operator vocabulary, superseded spelling
+        `---------------- operator vocabulary, current spelling
+
+In full, a descriptor is:
+
+    [!]key[@alt1,alt2][:default|?][>path]
+
+     !            marks the property secret
+     key          primary lookup name
+     @alt1,alt2   further lookup names, tried in order after key
+     :default     value to use when no lookup finds one
+     ?            optional; omit from the output entirely instead
+     >path        where the value lands in the emitted properties
+
+Every part except C<key> is optional. C<:default> and C<?> are mutually
+exclusive. Omitting C<< >path >> makes the output path the same as C<key>.
+
+The B<operator vocabulary> is flat, Genesis-namespaced, and chosen by the
+kit author as their contract with whoever writes the environment file. The
+B<CPI vocabulary> is whatever the CPI release declares, frequently nested,
+and not Genesis's to choose.
+
+C<< > >> exists only where the two disagree. C<access_key_id> needs no
+C<< > >> because the operator and the AWS CPI happen to use the same word;
+C<< http_endpoint>metadata_options.http_endpoint >> needs one because the
+CPI namespaces it and an operator should not have to type that.
+
+=head2 What each part means, and who supplies it
+
+=over 4
+
+=item C<key>
+
+I<What does the operator call this?> Written by the kit author; read by the
+environment and OCFP lookups. It is the stable, operator-facing identifier,
+and by convention it is flat.
+
+=item C<@alts>
+
+I<What did we used to call it?> Written by the kit author, almost always
+because a name changed and existing environments still use the old one.
+Tried in order after C<key>.
+
+=item C<:default>
+
+I<What if the operator says nothing?> The kit author's opinion. Decoded as
+JSON when it parses as such, so C<["bosh"]> arrives as an array rather than
+a string.
+
+=item C<?>
+
+I<Is it required?> Marks the property genuinely optional: absent from the
+output entirely rather than present and empty, which is a distinction the
+CPI can act on.
+
+=item C<!>
+
+I<Must this stay out of the manifest?> Routes the value through CredHub
+entombment, leaving a C<(( reference ))> behind.
+
+=item C<< >path >>
+
+I<What does the CPI call this?> The only part Genesis does not choose. It
+is dictated by the CPI release's job spec, and changing a CPI can change
+it.
+
+=back
+
+=head2 Where values come from
+
+Resolved in strict precedence order, stopping at the first hit:
+
+=over 4
+
+=item 1.
+
+C<bosh-configs.cpi.E<lt>key|altE<gt>> in the environment file -- the operator.
+
+=item 2.
+
+C<cpi.E<lt>iaasE<gt>.E<lt>key|altE<gt>> in the OCFP configuration.
+
+=item 3.
+
+The descriptor's C<:default> -- the kit author.
+
+=back
+
+A non-optional property with no value from any of the three is fatal.
+
+=head2 A dot means different things on each side
+
+On the B<lookup> side a dot is a nested lookup: C<struct_lookup> descends
+C<bosh-configs.cpi.E<lt>keyE<gt>>, so a dotted key reads a nested value
+from the environment file.
+
+On the B<output> side a dot is structure. The resolved pairs are collected
+flat and handed to C<Genesis::unflatten>, which splits on dots to build the
+nesting the CPI expects:
+
+    {pve.host, pve.user, agent.mbus, flat_key}
+      => {pve => {host, user}, agent => {mbus}, flat_key}
+
+So dots in C<< >path >> are not decoration and cannot simply be removed --
+they are the only way to emit a nested CPI property.
+
+Where a literal dot is wanted in an output key rather than nesting,
+C<unflatten> treats C<~> as an escape: C<a~b> yields the single key
+C<a.b>, and C<p.q~r> yields C<p> containing the single key C<q.r>.
+
+=head2 Constraints and traps in the descriptor grammar
+
+=over 4
+
+=item *
+
+C<key> may not contain C<@>, C<:>, C<?> or C<< > >>. It B<may> contain a
+dot, which makes it a nested lookup as above.
+
+=item *
+
+C<@alts> may not contain C<:>, C<?> or C<< > >>, but C<@> B<is> accepted
+inside it. That asymmetry with C<key> is incidental rather than designed.
+
+=item *
+
+C<:default> may not contain C<< > >>, and this fails silently rather than
+loudly: C<< key:a>b >> parses as default C<a> and path C<b> with no error.
+A default holding a URL or comparison containing C<< > >> will be
+misparsed.
+
+=item *
+
+With no C<< > >>, the output path defaults to C<key>, so a dotted key is
+simultaneously a nested lookup and a nested output.
+
+=back
+
+=head2 Where the results go
+
+Resolved non-secret values become the flattened C<%config>, which is
+unflattened into the C<properties> of a single entry in C<cpis>, and from
+there into the director's CPI config.
+
+Secret values are replaced in that structure by a C<(( path ))> reference,
+with the value itself collected into C<credhub_secrets> and committed to
+the director's CredHub under C<bosh-configs.cpi.credhub_base>, or under
+C<< <credhub base>genesis-entombed/ >> when that is not set.
+
+The entombed secret's name is Genesis's own bookkeeping and belongs to
+neither vocabulary. It is currently derived from the CPI-side path, which
+couples Genesis's records to a name the CPI owns; see
+L</cpi_entombment_path_for> for the consequences.
+
 =head1 METHODS
 
 =head2 init
