@@ -41,18 +41,29 @@ sub new {
 # gather_properties calls lookup in list context and treats the second
 # element as "found", so the found flag has to be real: a bare undef value
 # would send every lookup down the ocfp_config_lookup fallback instead.
+#
+# Traversal is struct_lookup, as Genesis::Env::lookup does.  An earlier
+# version of this double checked a flat hash key, which agrees with the
+# real thing only while nothing is nested -- and every interesting case
+# here is nested.
 sub lookup {
 	my ($self, $key, $default) = @_;
-	my ($prefix, $rest) = $key =~ /^(bosh-configs\.cpi)\.?(.*)$/;
-	return (wantarray ? ($default, 0) : $default) unless defined $prefix;
-	return (wantarray ? ($self->{cpi}, 1) : $self->{cpi}) unless length $rest;
-	return (wantarray ? ($self->{cpi}{$rest}, 1) : $self->{cpi}{$rest})
-		if exists $self->{cpi}{$rest};
-	return wantarray ? ($default, 0) : $default;
+	my ($rest) = $key =~ /^bosh-configs\.cpi\.?(.*)$/;
+	return (wantarray ? ($default, undef) : $default) unless defined $rest;
+	return (wantarray ? ($self->{cpi}, '.') : $self->{cpi}) unless length $rest;
+	my ($value, $found) = Genesis::struct_lookup($self->{cpi}, $rest);
+	return (wantarray ? ($default, undef) : $default) unless $found;
+	return wantarray ? ($value, $found) : $value;
 }
 
 # The override pass deliberately reads raw, unevaluated values.
-sub lookup_unevaled { return $_[0]->{cpi} }
+sub lookup_unevaled {
+	my ($self, $key) = @_;
+	my ($rest) = ($key // '') =~ /^bosh-configs\.cpi\.?(.*)$/;
+	return $self->{cpi} unless defined($rest) && length $rest;
+	my ($value) = Genesis::struct_lookup($self->{cpi}, $rest);
+	return $value;
+}
 
 sub ocfp_config_lookup { return (undef, 0) }
 
@@ -195,6 +206,107 @@ subtest 'a fully >path-ed map emits no top-level source keys' => sub {
 	is($config->{pve}{vm_storage}, 'local-lvm-data', 'mapped value is nested under its spec path');
 	is($config->{agent}{mbus}, 'nats://10.115.16.4:4222', 'agent.mbus is nested');
 	is($config->{pve_log_level}, 'debug', 'the unmodelled key is still passed through untouched');
+};
+
+# =======================================================================
+# CHARACTERISATION -- what the two-pass implementation does TODAY.
+#
+# These are not statements of intent.  Several pin behaviour that is
+# wrong, so that the change which corrects it has to say so out loud
+# rather than quietly altering something nobody wrote down.  Each is
+# marked with whether it is expected to survive.
+# =======================================================================
+
+subtest 'CHARACTERISATION: passthrough hands whole subtrees through by reference' => sub {
+	plan tests => 3;
+
+	# CHANGES: leaf-level flattening replaces subtree-by-reference, which
+	# is what lets a vault ref nested inside a hash go un-entombed today.
+	my ($config) = gather(
+		{
+			pve  => {host => 'h', node => 'n'},
+			deep => {a => {b => 'nested'}},
+			nics => [{ip => '1.1.1.1'}, {ip => '2.2.2.2'}],
+		},
+	);
+
+	is_deeply($config->{pve}, {host => 'h', node => 'n'},
+		'a two-level hash passes through intact');
+	is($config->{deep}{a}{b}, 'nested', 'and arbitrary depth does too');
+	is($config->{nics}[1]{ip}, '2.2.2.2', 'as do arrays');
+};
+
+subtest 'CHARACTERISATION: the emitted config aliases the operator data' => sub {
+	plan tests => 2;
+
+	# DEFECT.  unflatten assigns the passthrough hashref into its result
+	# by reference, and the mapped path then writes through it -- so
+	# building a CPI config rewrites the environment's own parameters.
+	# Anything reading bosh-configs.cpi afterwards sees the rewrite.
+	my %operator = (pve => {host => 'DIRECT', extra => 'x'});
+	my ($config) = gather({%operator}, '!pve_host@host>pve.host');
+
+	# The value handed in is gone from the caller's own structure.
+	isnt($operator{pve}{host}, 'DIRECT',
+		'the input hash no longer holds what the caller put there');
+	like($operator{pve}{host}, qr/^\(\(/,
+		'it has been overwritten with the credhub reference');
+};
+
+subtest 'CHARACTERISATION: a literal dotted key at a mapped path loses its value' => sub {
+	plan tests => 2;
+
+	# DEFECT.  pve_host is not found, so the property takes its empty
+	# default and files it at pve.host -- which makes the override pass
+	# see the operator's own key as "already handled" and skip it.
+	my ($config) = gather({'pve.host' => 'DIRECT'}, 'pve_host>pve.host');
+
+	is($config->{pve}{host}, '',
+		'the kit default ships instead of the operator value');
+	isnt($config->{pve}{host}, 'DIRECT',
+		'the value the operator set is discarded silently');
+};
+
+subtest 'CHARACTERISATION: an undef override is dropped, not emitted' => sub {
+	plan tests => 2;
+
+	# SURVIVES.  The override pass deletes rather than emitting undef.
+	# The warning that comes with it is the next subtest's subject, so it
+	# is swallowed here rather than left to litter the run.
+	local $SIG{__WARN__} = sub {};
+	my ($config) = gather({known => 'v', gone => undef}, 'known');
+
+	is($config->{known}, 'v', 'a defined override is emitted');
+	ok(!exists $config->{gone}, 'an undef override is absent from the output');
+};
+
+subtest 'CHARACTERISATION: an undef override warns from the vault regex' => sub {
+	plan tests => 1;
+
+	# DEFECT, cosmetic but operator-visible: raw Perl noise on stderr for
+	# any null-valued key, because the guard is !ref($value) with no
+	# defined($value).
+	my @warnings;
+	local $SIG{__WARN__} = sub {push @warnings, $_[0]};
+	gather({gone => undef}, 'unrelated:x');
+
+	ok(scalar(grep {/uninitialized value/} @warnings),
+		'a null override produces an uninitialized-value warning');
+};
+
+subtest 'CHARACTERISATION: an explicit null at a mapped path takes the kit default' => sub {
+	plan tests => 1;
+
+	# DECIDE.  Setting a key to null means "skip the platform default and
+	# use the kit's" -- a third behaviour nobody declared.  It is reached
+	# because `last if $src` fires on the key merely existing.
+	my ($config) = gather(
+		{read_timeout => undef},
+		'read_timeout:100>connection_options.read_timeout',
+	);
+
+	is($config->{connection_options}{read_timeout}, 100,
+		'an explicitly null value falls through to the declared default');
 };
 
 done_testing;
