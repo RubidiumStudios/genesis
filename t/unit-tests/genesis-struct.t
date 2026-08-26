@@ -219,6 +219,31 @@ subtest 'unflatten() - arrays' => sub {
 	is $nested->{array}[2], 'three', 'array element 2 correct';
 };
 
+subtest 'unflatten() - a structural conflict names the offending key' => sub {
+	# A key cannot be both a scalar and a branch.  Whoever hits this is
+	# reading their own config to find the culprit, so the message has to
+	# carry the key they wrote -- not the name of a variable in here.
+	plan tests => 4;
+
+	throws_ok {unflatten({pve => 'scalar', 'pve.host' => 'nested'})}
+		qr/\(at pve\)/, 'top level names the key';
+
+	# $branch is already interpolated, so a fabricated leaf here reads as a
+	# real path and sends the reader looking for a key that never existed.
+	throws_ok {unflatten({'a.pve' => 'scalar', 'a.pve.host' => 'nested'})}
+		qr/\(at a\.pve\)/, 'nested names the full path';
+
+	# Order matters: the branch may be seen before or after the scalar,
+	# and both orderings reach a different die.
+	throws_ok {unflatten({'pve.host' => 'nested', pve => 'scalar'})}
+		qr/\(at pve\)/, 'named whichever way round the keys arrive';
+
+	# A key holding a literal dot is restored before it is reported, so
+	# the reader sees the form they typed rather than the escaped one.
+	throws_ok {unflatten({'a~b' => 'scalar', 'a~b.c' => 'nested'})}
+		qr/\(at a\.b\)/, 'a literal-dot key is reported unescaped';
+};
+
 subtest 'unflatten() - does not mutate the source hash' => sub {
 	# Regression: unflatten used to `delete $data->{$k}` while building
 	# the nested result, so the caller's flat hash came back empty and
