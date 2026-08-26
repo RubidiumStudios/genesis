@@ -135,9 +135,11 @@ subtest 'a secret with a >path is not re-emitted in cleartext' => sub {
 		qw/!api_password>credentials.password/,
 	);
 
+	# The name flattens the dotted path: a dot in a CredHub name is read by
+	# the director as a sub-key accessor, so the reference would 404.
 	like(
 		$config->{credentials}{password},
-		qr{^\(\(/cpi-config/properties/cpi-config-property--credentials\.password--[0-9a-f]{8}\)\)$},
+		qr{^\(\(/cpi-config/properties/cpi-config-property--credentials_password--[0-9a-f]{8}\)\)$},
 		'the mapped path holds a credhub reference, not the secret',
 	);
 	ok(
