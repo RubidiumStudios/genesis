@@ -286,6 +286,124 @@ B<Examples:>
     # { key => 'host', alts => ['addr'], lookups => ['host','addr'],
     #   default => 'def', optional => 0, secret => 1, path => 'a.b.c' }
 
+=head2 _resolve
+
+    my ($value, $found) = $hook->_resolve($spec, $routed_leaf);
+
+Finds the value for one property spec.
+
+Consults B<every> name the operator might have used before B<any> name
+the platform might have used. Doing it the other way -- both sources per
+name -- lets an OCFP value under the primary beat an operator value under
+an C<@alt>, so an operator still using an older spelling is silently
+overridden by the platform default. Preventing that is what an C<@alt> is
+for.
+
+The operator side reads through C<lookup_entombed_self>, so a
+C<(( vault ))> reference in the environment file arrives already entombed.
+The platform side reads C<ocfp_config_lookup> and JSON-decodes when it
+can, falling back to the raw string.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$spec>
+
+A spec from L</_parse_property>.
+
+=item C<$routed_leaf>
+
+Optional. When the operator addressed the property by its CPI path rather
+than by its key, the leaf where the value sits. Given, only that leaf is
+consulted on the operator side; omitted, the spec's names are swept in
+order.
+
+=back
+
+B<Returns:> C<($value, $found)>. C<$found> reports whether anything
+B<stopped the search>, not whether there is a usable value: a key that
+exists settles the question whatever it holds, which is what makes an
+explicit null able to discard an OCFP value. Callers wanting "is there a
+value" must test C<defined($value)>, not C<$found>.
+
+B<Errors:>
+
+None. An unresolvable property is reported as not found.
+
+B<Examples:>
+
+    $hook->_resolve($spec);              # sweep the spec's own names
+    $hook->_resolve($spec, 'pve.host');  # the operator used the CPI path
+
+=head2 _entomb_if_needed
+
+    my $value = $hook->_entomb_if_needed($spec, $value);
+
+Applies the entombment rule to one resolved value, in this order:
+
+=over 4
+
+=item 1.
+
+A value already matching C<((...))> is returned untouched, B<regardless of
+C<!>>. Entombment has happened upstream, and doing it again would store a
+reference to a reference.
+
+=item 2.
+
+Without C<!>, the value is returned as-is.
+
+=item 3.
+
+An undefined or empty value B<dies>. An empty secret cannot be stored, and
+failing here names the property; left alone it surfaces much later as a
+missing CredHub value, naming a path instead.
+
+=item 4.
+
+Otherwise the value is entombed via L</cpi_entombment_path_for>, recorded
+in C<credhub_secrets>, and replaced by its C<(( reference ))>.
+
+=back
+
+C<!> exists chiefly for values drawn from the B<OCFP config>, which lives
+in vault and can hold credentials and certificates: there is no other way
+to place one in custom CredHub entombment. An operator value overriding
+such a property is entombed too, so that the same property does not land
+in CredHub or in the clear depending on which source supplied it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$spec>
+
+A spec from L</_parse_property>; only C<secret>, C<key> and C<path> are
+consulted.
+
+=item C<$value>
+
+The resolved value.
+
+=back
+
+B<Returns:> The value to emit -- unchanged, or a C<(( reference ))>.
+
+B<Errors:>
+
+Dies with C<"Cannot entomb CPI property #C{%s}: no value was found for it
+in #C{bosh-configs.cpi} or the OCFP config, and an empty secret cannot be
+stored."> when a C<!> property resolves to undef or the empty string.
+
+B<Examples:>
+
+    $hook->_entomb_if_needed($spec, 's3cr3t');
+    # '((/cpi-config/properties/cpi-config-property--api_key--a1b2c3d4))'
+
+    $hook->_entomb_if_needed($spec, '((genesis-entombed/x--y--abc12345))');
+    # unchanged -- already a reference
+
 =head1 METHODS
 
 =head2 init

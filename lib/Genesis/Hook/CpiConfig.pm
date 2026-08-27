@@ -98,12 +98,36 @@ sub _parse_property {
 	};
 }
 
+sub _entomb_if_needed {
+	my ($self, $spec, $value) = @_;
+
+	# Already a reference, so entombment has happened upstream -- doing it
+	# again would store a pointer to a pointer.
+	return $value if defined($value) && !ref($value) && $value =~ /^\(\(.*\)\)$/;
+	return $value unless $spec->{secret};
+
+	bail(
+		"Cannot entomb CPI property #C{%s}: no value was found for it in ".
+		"#C{bosh-configs.cpi} or the OCFP config, and an empty secret cannot ".
+		"be stored.",
+		$spec->{key}
+	) if !defined($value) || (!ref($value) && $value eq '');
+
+	my $credhub_path = $self->cpi_entombment_path_for($spec->{path}, $value);
+	$self->{credhub_secrets}{$credhub_path} = $value;
+	return "(($credhub_path))";
+}
+
 sub _resolve {
-	my ($self, $spec) = @_;
+	my ($self, $spec, $routed) = @_;
+
+	# When the operator addressed the property by its CPI path rather than
+	# its key, that leaf is where the value is; otherwise sweep the names.
+	my @names = defined($routed) ? ($routed) : @{$spec->{lookups}};
 
 	# All operator names before any platform name: consulting both per
 	# name lets an OCFP primary beat an operator alt.
-	for my $name (@{$spec->{lookups}}) {
+	for my $name (@names) {
 		# Entombed-self, so an env-file (( vault )) arrives already entombed.
 		# Presence, not definedness: a null clears the OCFP value.
 		my ($value, $found) = $self->env->lookup_entombed_self("bosh-configs.cpi.$name");
@@ -124,95 +148,57 @@ sub _resolve {
 sub gather_properties {
 	my ($self, @properties) = @_;
 
-	# Process:  We will use $self->_lookup_cpi_config to get the value for each
-	# property, except for the secrets (leave them as-is on the first pass).  We
-	# first have to split out the alternative lookups and default values, and
-	# storage locations.
-	# %config is keyed by output path, but the manual-override pass below is
-	# keyed by source key. Those agree only while every property leaves >path
-	# unset. %consumed records the source keys this map read, so the override
-	# pass can tell "the kit does not model this key" from "the kit read this
-	# key and emitted it somewhere else".
-	my (%config,%secrets,%consumed) = ();
-	for my $property (@properties) {
-		my $spec = $self->_parse_property($property);
-		my ($is_secret, $key, $default, $optional, $path) =
-			@{$spec}{qw/secret key default optional path/};
-		my @lookups = @{$spec->{lookups}};
-		$consumed{$_} = 1 for @lookups;
-		my $value = undef;
-		my $iaas = $self->iaas;
-		for my $lookup (@lookups) {
-			($value, my $src) = $self->env->lookup("bosh-configs.cpi.$lookup");
-			last if $src;
-			if (!defined $value) {
-				# If we didn't find it in the environment, lets try the OCFP config
-				my ($json,$src) = $self->env->ocfp_config_lookup("cpi.$iaas.$lookup",undef);
-				next unless $src;
-				$value = eval {
-					# If the value is a JSON string, decode it
-					JSON::PP->new->utf8->allow_nonref->decode($json);
-				};
-				$value = $json if $@;
-				last;
-			}
-		}
-		if (!defined $value) {
-			next if ($optional);
-
-			bail(
-				"Missing default for CPI config value for %s, and none found in environment",
-				$key
-			) unless defined $default;
-
-			# Lets try to parse the default value as JSON
-			eval {
-				$value = JSON::PP->new->utf8->allow_nonref->decode($default);
-			};
-			my $err = $@;
-			$value = $default if ($err);
-		}
-
-		if ($is_secret) {
-			my $credhub_path = $self->cpi_entombment_path_for($path,$value);
-			$self->{credhub_secrets}{$credhub_path} = $value;
-			$value = "(($credhub_path))";
-		}
-
-		$config{$path} = $value;
+	my @specs = map {$self->_parse_property($_)} @properties;
+	my (%by_key, %by_path);
+	for my $spec (@specs) {
+		$by_key{$_} = $spec for @{$spec->{lookups}};
+		$by_path{$spec->{path}} = $spec;
 	}
 
-	# Now we need to add in any manual overrides for keys that don't exist in
-	# in the kit, but the environment wants to set.
-	my $overrides = $self->env->lookup_unevaled('bosh-configs.cpi');
-	for my $override (keys %$overrides) {
+	# Flattened to leaves so a nested block can carry modelled and
+	# unmodelled properties together, and each is judged on its own.
+	my $raw = Genesis::flatten({}, '', $self->env->lookup_unevaled('bosh-configs.cpi') // {});
 
-		# If we already got this value, skip it.  Checking %consumed as well as
-		# %config matters as soon as a property declares a >path: the value is
-		# then filed under the path, so the source key is absent from %config
-		# and the operator's own setting gets copied back in at the top level
-		# -- unevaluated (a spruce operator reaches the director as a literal
-		# and is rejected as a BOSH variable name) and un-entombed (a '!'
-		# secret lands in cleartext beside the credhub reference that was
-		# supposed to replace it).
-		next if exists $config{$override} || $consumed{$override};
+	my (%routed, %extra);
+	for my $leaf (CORE::keys %$raw) {
+		# flatten escapes a literal dot as ~, and that escape does not
+		# survive a round trip, so the quoted form is refused outright.
+		bail(
+			"Cannot set #C{%s} in #C{bosh-configs.cpi}: a quoted key holding a ".
+			"literal dot is not supported -- nest it instead.",
+			$leaf =~ s/~/./gr
+		) if $leaf =~ /~/;
 
-		my $value = $overrides->{$override};
-		# FIXME: Need to handle hashes that may contain vault references
-		if (!ref($value) && $value =~ /^\(\( ?vault ([^"]* )?"(.*)" ?\)\)$/) {
-			# This is a vault reference, so we need to entomb it
-			my $vault_base = $1; # TODO: Do we need to resolve this or is the relative path sufficient?
-			$value = $self->env->lookup("bosh-configs.cpi.$override");
-			my $path = $self->cpi_entombment_path_for($override,$value);
-			$self->{credhub_secrets}{$path} = $value;
-			$value = "(($vault_base $path))";
-		}
-
-		if (defined $value) {
-			$config{$override} = $value;
+		my $spec = $by_key{$leaf} // $by_path{$leaf};
+		if ($spec) {
+			bail(
+				"CPI property #C{%s} is set more than one way in ".
+				"#C{bosh-configs.cpi}; use its key #C{%s} or its path #C{%s}, ".
+				"not both.",
+				$spec->{key}, $spec->{key}, $spec->{path}
+			) if $routed{$spec->{path}};
+			$routed{$spec->{path}} = $leaf;
 		} else {
-			delete($config{$override});
+			$extra{$leaf} = 1;
 		}
+	}
+
+	my %config;
+	for my $spec (@specs) {
+		# _resolve's found flag governs whether the platform was consulted,
+		# not whether there is a value: a null clears, and lands here.
+		my ($value) = $self->_resolve($spec, $routed{$spec->{path}});
+		if (!defined $value) {
+			next if $spec->{optional};
+			$value = eval {JSON::PP->new->utf8->allow_nonref->decode($spec->{default})};
+			$value = $spec->{default} if $@;
+		}
+		$config{$spec->{path}} = $self->_entomb_if_needed($spec, $value);
+	}
+
+	for my $leaf (CORE::keys %extra) {
+		my ($value) = $self->env->lookup_entombed_self("bosh-configs.cpi.$leaf");
+		$config{$leaf} = $value if defined $value;
 	}
 
 	# Finally, unflatten the config hash

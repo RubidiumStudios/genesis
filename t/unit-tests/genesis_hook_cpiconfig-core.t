@@ -43,6 +43,20 @@ require_ok 'Genesis::Hook::CpiConfig';
 # Shared kit and bosh mocks
 # ---------------------------------------------------------------------------
 
+# lookup and lookup_entombed_self read different manifests in production;
+# for a plain value the two agree, so one body answers both -- two copies
+# is how a double starts disagreeing with itself.
+sub fixed_lookups {
+	my (%values) = @_;
+	my $read = sub {
+		my ($self, $key, $default) = @_;
+		return wantarray ? ($values{$key}, 'env-file') : $values{$key}
+			if exists $values{$key};
+		return wantarray ? ($default, undef) : $default;
+	};
+	return (lookup => $read, lookup_entombed_self => $read);
+}
+
 my $kit = mock "Genesis::Kit::CpiConfig" => {
 	name                => 'test-kit',
 	version             => '1.0.0',
@@ -101,6 +115,10 @@ sub mock_env {
 		lookup_unevaled => sub {
 			my ($self, $key) = @_;
 			return {};
+		},
+		lookup_entombed_self => sub {
+			my ($self, $key, $default) = @_;
+			return wantarray ? ($default, undef) : $default;
 		},
 		exodus_lookup => sub {
 			my ($self, $key, $default) = @_;
@@ -591,14 +609,7 @@ subtest 'gather_properties - value found in env lookup (bosh-configs.cpi.*)' => 
 		deployments     => mock("Genesis::Env::CpiConfig::GP1Deployments" => {
 			current_state => 'deployed',
 		}),
-		lookup => sub {
-			my ($self, $key, $default) = @_;
-			# Return a value + source for bosh-configs.cpi.region
-			if ($key eq 'bosh-configs.cpi.region') {
-				return wantarray ? ('us-east-1', 'env-file') : 'us-east-1';
-			}
-			return wantarray ? ($default, undef) : $default;
-		},
+		fixed_lookups('bosh-configs.cpi.region' => 'us-east-1'),
 		ocfp_config_lookup => sub {
 			my ($self, $key, $default) = @_;
 			return wantarray ? ($default, undef) : $default;
@@ -691,13 +702,7 @@ subtest 'gather_properties - secret property entombed in credhub_secrets' => sub
 		deployments     => mock("Genesis::Env::CpiConfig::Sec1Deployments" => {
 			current_state => 'deployed',
 		}),
-		lookup => sub {
-			my ($self, $key, $default) = @_;
-			if ($key eq 'bosh-configs.cpi.api_key') {
-				return wantarray ? ('my-secret-value', 'env-file') : 'my-secret-value';
-			}
-			return wantarray ? ($default, undef) : $default;
-		},
+		fixed_lookups('bosh-configs.cpi.api_key' => 'my-secret-value'),
 		ocfp_config_lookup => sub {
 			my ($self, $key, $default) = @_;
 			return wantarray ? ($default, undef) : $default;
@@ -740,13 +745,7 @@ subtest 'gather_properties - config_path override (>) places value under alterna
 		deployments     => mock("Genesis::Env::CpiConfig::Path1Deployments" => {
 			current_state => 'deployed',
 		}),
-		lookup => sub {
-			my ($self, $key, $default) = @_;
-			if ($key eq 'bosh-configs.cpi.ntp') {
-				return wantarray ? ('ntp.example.com', 'env-file') : 'ntp.example.com';
-			}
-			return wantarray ? ($default, undef) : $default;
-		},
+		fixed_lookups('bosh-configs.cpi.ntp' => 'ntp.example.com'),
 		ocfp_config_lookup => sub {
 			my ($self, $key, $default) = @_;
 			return wantarray ? ($default, undef) : $default;

@@ -55,6 +55,61 @@ my $kit = mock "Genesis::Kit::CpiConfigGP" => {
 	kit_bug => sub {my ($self,$msg,@a) = @_; bail("Throwing a kit bug: ".$msg, @a)},
 };
 
+# struct_lookup traversal over a dataset, as Genesis::Env::lookup does.
+# gather_properties reads in list context and treats the second element as
+# "found", so the flag has to be real -- a bare undef would send every
+# lookup down the OCFP fallback instead.
+sub reader_over {
+	my ($data, $prefix) = @_;
+	return sub {
+		my ($self, $key, $default) = @_;
+		my ($rest) = $key =~ /^\Q$prefix\E\.?(.*)$/;
+		return (wantarray ? ($default, undef) : $default) unless defined $rest;
+		return (wantarray ? ($data, '.') : $data) unless length $rest;
+		my ($value, $found) = struct_lookup($data, $rest);
+		return (wantarray ? ($default, undef) : $default) unless $found;
+		return wantarray ? ($value, $found) : $value;
+	};
+}
+
+# One env entry has three views, and the hook depends on their being
+# different: unevaluated shows the operator as written, merged shows the
+# resolved value, entombed shows the credhub reference.
+sub vaulted {
+	my (%o) = @_;
+	return bless {
+		raw      => sprintf('(( vault "%s" ))', $o{path}),
+		resolved => $o{secret},
+		entombed => sprintf('((%s))', $o{ref}),
+	}, 'Test::Vaulted';
+}
+
+# A plain scalar reads the same in all three; only a vaulted value differs.
+sub project {
+	my ($data, $view) = @_;
+	return $data->{$view}                                      if ref($data) eq 'Test::Vaulted';
+	return {map {($_ => project($data->{$_}, $view))} CORE::keys %$data}
+	                                                           if ref($data) eq 'HASH';
+	return [map {project($_, $view)} @$data]                   if ref($data) eq 'ARRAY';
+	return $data;
+}
+
+sub operator_lookups {
+	my ($cpi) = @_;
+	my $unevaled = project($cpi, 'raw');
+	return (
+		lookup               => reader_over(project($cpi, 'resolved'), 'bosh-configs.cpi'),
+		lookup_entombed_self => reader_over(project($cpi, 'entombed'), 'bosh-configs.cpi'),
+		lookup_unevaled      => sub {
+			my ($self, $key) = @_;
+			my ($rest) = ($key // '') =~ /^bosh-configs\.cpi\.?(.*)$/;
+			return $unevaled unless defined($rest) && length $rest;
+			my ($value) = struct_lookup($unevaled, $rest);
+			return $value;
+		},
+	);
+}
+
 # One env per call so each subtest gets a fresh hook from init().
 my $seq = 0;
 sub mock_env {
@@ -70,31 +125,7 @@ sub mock_env {
 		cpi_credhub_base => '/cpi-config/properties/',
 		file             => 'gp-env.yml',
 
-		# gather_properties reads lookup in list context and treats the
-		# second element as "found", so the flag has to be real: a bare
-		# undef would send every lookup down the OCFP fallback instead.
-		#
-		# Traversal is struct_lookup, as Genesis::Env::lookup does.  A
-		# flat hash-key check agrees with the real thing only while
-		# nothing is nested, and every interesting case here is nested.
-		lookup => sub {
-			my ($self, $key, $default) = @_;
-			my ($rest) = $key =~ /^bosh-configs\.cpi\.?(.*)$/;
-			return (wantarray ? ($default, undef) : $default) unless defined $rest;
-			return (wantarray ? ($cpi, '.') : $cpi) unless length $rest;
-			my ($value, $found) = struct_lookup($cpi, $rest);
-			return (wantarray ? ($default, undef) : $default) unless $found;
-			return wantarray ? ($value, $found) : $value;
-		},
-
-		# The override pass deliberately reads raw, unevaluated values.
-		lookup_unevaled => sub {
-			my ($self, $key) = @_;
-			my ($rest) = ($key // '') =~ /^bosh-configs\.cpi\.?(.*)$/;
-			return $cpi unless defined($rest) && length $rest;
-			my ($value) = struct_lookup($cpi, $rest);
-			return $value;
-		},
+		operator_lookups($cpi),
 
 		ocfp_config_lookup => sub {
 			my ($self, $key, $default) = @_;
@@ -175,33 +206,7 @@ sub mock_env_with_ocfp {
 		name => "gpo-env-$seq", type => 'bosh', kit => $kit,
 		iaas => 'test-iaas', cpi_name => 'test_cpi',
 		cpi_credhub_base => '/cpi-config/properties/', file => 'gpo-env.yml',
-		lookup => sub {
-			my ($self, $key, $default) = @_;
-			my ($rest) = $key =~ /^bosh-configs\.cpi\.?(.*)$/;
-			return (wantarray ? ($default, undef) : $default) unless defined $rest;
-			return (wantarray ? ($cpi, '.') : $cpi) unless length $rest;
-			my ($value, $found) = struct_lookup($cpi, $rest);
-			return (wantarray ? ($default, undef) : $default) unless $found;
-			return wantarray ? ($value, $found) : $value;
-		},
-		lookup_unevaled => sub {
-			my ($self, $key) = @_;
-			my ($rest) = ($key // '') =~ /^bosh-configs\.cpi\.?(.*)$/;
-			return $cpi unless defined($rest) && length $rest;
-			my ($value) = struct_lookup($cpi, $rest);
-			return $value;
-		},
-		# The env-file side is read from the manifest that has already
-		# entombed its vault references, so this double is the same data.
-		lookup_entombed_self => sub {
-			my ($self, $key, $default) = @_;
-			my ($rest) = $key =~ /^bosh-configs\.cpi\.?(.*)$/;
-			return (wantarray ? ($default, undef) : $default) unless defined $rest;
-			return (wantarray ? ($cpi, '.') : $cpi) unless length $rest;
-			my ($value, $found) = struct_lookup($cpi, $rest);
-			return (wantarray ? ($default, undef) : $default) unless $found;
-			return wantarray ? ($value, $found) : $value;
-		},
+		operator_lookups($cpi),
 		ocfp_config_lookup => sub {
 			my ($self, $key, $default) = @_;
 			my ($rest) = $key =~ /^cpi\.test-iaas\.(.*)$/;
@@ -273,6 +278,124 @@ subtest '_resolve - nothing anywhere is reported as not found' => sub {
 	my ($v, $found) = resolve_with('missing', cpi => {}, ocfp => {});
 	ok(!$found, 'absent from both sources reports not found');
 	ok(!defined($v), 'with no value');
+};
+
+# =======================================================================
+# Single-pass resolution: every operator leaf is classified once, against
+# the map's source keys and its output paths, and emitted once.
+# =======================================================================
+
+subtest 'a mapped path may be set directly, and resolves the property' => sub {
+	plan tests => 3;
+
+	# The CPI address is a second route into the same property, not a
+	# passthrough.  If it were passthrough the ! would never apply and the
+	# secret would ship in the clear.
+	my ($config, $hook) = gather(
+		{pve => {host => 's3cr3t'}},
+		'!pve_host@host>pve.host',
+	);
+
+	like($config->{pve}{host}, qr/^\(\(.*cpi-config-property--pve_host--/,
+		'the value set by its path is entombed like the key form');
+	my %entombed = map {$_ => 1} values %{$hook->{credhub_secrets}};
+	ok($entombed{'s3cr3t'}, 'and the secret reached credhub');
+	ok(!exists $config->{pve_host}, 'nothing is left at the source key');
+};
+
+subtest 'known and unknown leaves in one block are split' => sub {
+	plan tests => 3;
+
+	# The reason the path form is allowed at all: an operator writing one
+	# nested block should not have to split it across two spellings.
+	my ($config) = gather(
+		{pve => {host => 'h', unknown => 'passed'}},
+		'pve_host>pve.host',
+	);
+
+	is($config->{pve}{host}, 'h', 'the modelled leaf resolves its property');
+	is($config->{pve}{unknown}, 'passed', 'the unmodelled leaf passes through');
+	ok(!exists $config->{pve_host}, 'and the source key is not duplicated');
+};
+
+subtest 'one property may not be set two ways' => sub {
+	plan tests => 1;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	quietly {
+		throws_ok {
+			gather({pve_host => 'by-key', pve => {host => 'by-path'}},
+				'pve_host>pve.host')
+		} qr/set (?:both|two)|more than one/i,
+			'setting a property by key and by path at once is refused';
+	};
+};
+
+subtest 'a quoted dotted key is refused' => sub {
+	plan tests => 1;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	# The ~ escape flatten would need for this is broken -- a key holding a
+	# literal tilde round-trips to a dot -- so the form is prohibited.
+	quietly {
+		throws_ok {gather({'pve.host' => 'literal'}, 'unrelated:x')}
+			qr/quoted|literal dot|nested instead/i,
+			'a literally-dotted operator key is refused';
+	};
+};
+
+subtest 'entombment: an env-file vault value is not re-entombed' => sub {
+	plan tests => 3;
+
+	# Written as (( vault ... )), so it reaches the hook already entombed
+	# by the manifest.  ! has nothing left to do -- re-entombing would
+	# store a reference to a reference.
+	my $secret = vaulted(
+		path   => 'secret/pve:host',
+		secret => '10.115.16.1',
+		ref    => 'genesis-entombed/pve--host--abc12345',
+	);
+	my ($config, $hook) = gather({pve_host => $secret}, '!pve_host>pve.host');
+
+	is($config->{pve}{host}, '((genesis-entombed/pve--host--abc12345))',
+		'the reference from the entombed manifest is emitted as-is');
+	is_deeply($hook->{credhub_secrets}, {}, 'nothing new was entombed');
+	unlike($config->{pve}{host}, qr/10\.115\.16\.1/,
+		'and the secret itself does not appear');
+};
+
+subtest 'entombment: a passthrough vault value arrives entombed too' => sub {
+	plan tests => 2;
+
+	# The unmodelled side reads the same manifest, so a vault reference
+	# nested anywhere is already a credhub reference by the time it is
+	# emitted -- which is what retired the hand-rolled regex.
+	my ($config, $hook) = gather({
+		pve => {custom => vaulted(
+			path   => 'secret/pve:custom',
+			secret => 'do-not-leak',
+			ref    => 'genesis-entombed/pve--custom--def67890',
+		)},
+	});
+
+	is($config->{pve}{custom}, '((genesis-entombed/pve--custom--def67890))',
+		'an unmodelled vault value is emitted as its reference');
+	unlike($config->{pve}{custom}, qr/do-not-leak/,
+		'and never in the clear');
+};
+
+subtest 'entombment: an empty value cannot be entombed' => sub {
+	plan tests => 1;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	# Today this is not caught here: the default is always defined, so an
+	# unfound secret becomes '' and fails much later as "N missing secret
+	# values", naming a credhub path rather than the property.
+	quietly {
+		throws_ok {gather({}, '!api_password>credentials.password')}
+			qr/api_password/,
+			'an unresolvable secret names the property that could not be set';
+	};
 };
 
 # --- baseline: no >path, behaviour is unchanged ------------------------
@@ -421,35 +544,19 @@ subtest 'CHARACTERISATION: passthrough hands whole subtrees through by reference
 	is($config->{nics}[1]{ip}, '2.2.2.2', 'as do arrays');
 };
 
-subtest 'CHARACTERISATION: the emitted config aliases the operator data' => sub {
+subtest 'the emitted config does not alias the operator data' => sub {
 	plan tests => 2;
 
-	# DEFECT.  unflatten assigns the passthrough hashref into its result
-	# by reference, and the mapped path then writes through it -- so
-	# building a CPI config rewrites the environment's own parameters.
-	# Anything reading bosh-configs.cpi afterwards sees the rewrite.
+	# It used to: unflatten assigned the passthrough hashref into its
+	# result by reference and the mapped path wrote through it, so
+	# building a CPI config rewrote the environment's own parameters.
 	my %operator = (pve => {host => 'DIRECT', extra => 'x'});
-	my ($config) = gather({%operator}, '!pve_host@host>pve.host');
+	my ($config) = gather(\%operator, '!pve_host@host>pve.host');
 
-	# The value handed in is gone from the caller's own structure.
-	isnt($operator{pve}{host}, 'DIRECT',
-		'the input hash no longer holds what the caller put there');
-	like($operator{pve}{host}, qr/^\(\(/,
-		'it has been overwritten with the credhub reference');
-};
-
-subtest 'CHARACTERISATION: a literal dotted key at a mapped path loses its value' => sub {
-	plan tests => 2;
-
-	# DEFECT.  pve_host is not found, so the property takes its empty
-	# default and files it at pve.host -- which makes the override pass
-	# see the operator's own key as "already handled" and skip it.
-	my ($config) = gather({'pve.host' => 'DIRECT'}, 'pve_host>pve.host');
-
-	is($config->{pve}{host}, '',
-		'the kit default ships instead of the operator value');
-	isnt($config->{pve}{host}, 'DIRECT',
-		'the value the operator set is discarded silently');
+	is($operator{pve}{host}, 'DIRECT',
+		'the input hash still holds what the caller put there');
+	like($config->{pve}{host}, qr/^\(\(/,
+		'while the emitted config holds the credhub reference');
 };
 
 subtest 'CHARACTERISATION: an undef override is dropped, not emitted' => sub {
@@ -465,18 +572,16 @@ subtest 'CHARACTERISATION: an undef override is dropped, not emitted' => sub {
 	ok(!exists $config->{gone}, 'an undef override is absent from the output');
 };
 
-subtest 'CHARACTERISATION: an undef override warns from the vault regex' => sub {
+subtest 'a null override produces no Perl warnings' => sub {
 	plan tests => 1;
 
-	# DEFECT, cosmetic but operator-visible: raw Perl noise on stderr for
-	# any null-valued key, because the guard is !ref($value) with no
-	# defined($value).
+	# It used to: the hand-rolled vault regex guarded !ref($value) without
+	# defined($value), so any null-valued key printed raw Perl noise.
 	my @warnings;
 	local $SIG{__WARN__} = sub {push @warnings, $_[0]};
 	gather({gone => undef}, 'unrelated:x');
 
-	ok(scalar(grep {/uninitialized value/} @warnings),
-		'a null override produces an uninitialized-value warning');
+	is_deeply(\@warnings, [], 'no warnings reach the operator');
 };
 
 subtest 'an explicit null clears the OCFP value, leaving the kit default' => sub {
