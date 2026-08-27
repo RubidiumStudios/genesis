@@ -98,6 +98,29 @@ sub _parse_property {
 	};
 }
 
+sub _resolve {
+	my ($self, $spec) = @_;
+
+	# All operator names before any platform name: consulting both per
+	# name lets an OCFP primary beat an operator alt.
+	for my $name (@{$spec->{lookups}}) {
+		# Entombed-self, so an env-file (( vault )) arrives already entombed.
+		# Presence, not definedness: a null clears the OCFP value.
+		my ($value, $found) = $self->env->lookup_entombed_self("bosh-configs.cpi.$name");
+		return ($value, 1) if $found;
+	}
+
+	my $iaas = $self->iaas;
+	for my $name (@{$spec->{lookups}}) {
+		my ($json, $found) = $self->env->ocfp_config_lookup("cpi.$iaas.$name", undef);
+		next unless $found;
+		my $value = eval {JSON::PP->new->utf8->allow_nonref->decode($json)};
+		return (($@ ? $json : $value), 1);
+	}
+
+	return (undef, 0);
+}
+
 sub gather_properties {
 	my ($self, @properties) = @_;
 

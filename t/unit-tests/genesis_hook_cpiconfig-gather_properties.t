@@ -161,6 +161,120 @@ subtest '_parse_property - the parts a descriptor can carry' => sub {
 	};
 };
 
+# =======================================================================
+# _resolve -- spec to (value, found).  Consults the operator's namespace
+# across every name before the OCFP config across every name.
+# =======================================================================
+
+# An env whose OCFP side is populated too, so precedence is observable.
+sub mock_env_with_ocfp {
+	my (%opts) = @_;
+	my ($cpi, $ocfp) = ($opts{cpi} // {}, $opts{ocfp} // {});
+	$seq++;
+	return mock "Genesis::Env::CpiConfigGPO::$seq" => {
+		name => "gpo-env-$seq", type => 'bosh', kit => $kit,
+		iaas => 'test-iaas', cpi_name => 'test_cpi',
+		cpi_credhub_base => '/cpi-config/properties/', file => 'gpo-env.yml',
+		lookup => sub {
+			my ($self, $key, $default) = @_;
+			my ($rest) = $key =~ /^bosh-configs\.cpi\.?(.*)$/;
+			return (wantarray ? ($default, undef) : $default) unless defined $rest;
+			return (wantarray ? ($cpi, '.') : $cpi) unless length $rest;
+			my ($value, $found) = struct_lookup($cpi, $rest);
+			return (wantarray ? ($default, undef) : $default) unless $found;
+			return wantarray ? ($value, $found) : $value;
+		},
+		lookup_unevaled => sub {
+			my ($self, $key) = @_;
+			my ($rest) = ($key // '') =~ /^bosh-configs\.cpi\.?(.*)$/;
+			return $cpi unless defined($rest) && length $rest;
+			my ($value) = struct_lookup($cpi, $rest);
+			return $value;
+		},
+		# The env-file side is read from the manifest that has already
+		# entombed its vault references, so this double is the same data.
+		lookup_entombed_self => sub {
+			my ($self, $key, $default) = @_;
+			my ($rest) = $key =~ /^bosh-configs\.cpi\.?(.*)$/;
+			return (wantarray ? ($default, undef) : $default) unless defined $rest;
+			return (wantarray ? ($cpi, '.') : $cpi) unless length $rest;
+			my ($value, $found) = struct_lookup($cpi, $rest);
+			return (wantarray ? ($default, undef) : $default) unless $found;
+			return wantarray ? ($value, $found) : $value;
+		},
+		ocfp_config_lookup => sub {
+			my ($self, $key, $default) = @_;
+			my ($rest) = $key =~ /^cpi\.test-iaas\.(.*)$/;
+			return (wantarray ? ($default, undef) : $default) unless defined $rest;
+			my ($value, $found) = struct_lookup($ocfp, $rest);
+			return (wantarray ? ($default, undef) : $default) unless $found;
+			return wantarray ? ($value, $found) : $value;
+		},
+	};
+}
+
+sub resolve_with {
+	my ($descriptor, %sources) = @_;
+	my $hook = Genesis::Hook::CpiConfig::gp_kit->init(env => mock_env_with_ocfp(%sources));
+	return $hook->_resolve($hook->_parse_property($descriptor));
+}
+
+subtest '_resolve - the operator is consulted before the platform' => sub {
+	plan tests => 3;
+
+	my ($v, $found) = resolve_with('region',
+		cpi => {region => 'operator'}, ocfp => {region => 'platform'});
+	is($v, 'operator', 'an operator value wins over the OCFP config');
+	ok($found, 'and reports found');
+
+	($v) = resolve_with('region', ocfp => {region => 'platform'});
+	is($v, 'platform', 'the OCFP config supplies it when the operator does not');
+};
+
+subtest '_resolve - every operator name precedes every platform name' => sub {
+	plan tests => 2;
+
+	# The defect this replaces consulted both sources per name, so an OCFP
+	# value under the primary beat an operator value under an alt -- an
+	# operator using the older spelling was silently overridden by the
+	# platform, which is the one thing an alt must not do.
+	my ($v) = resolve_with('default_key_name@keypair_name',
+		cpi  => {keypair_name     => 'operator-old-spelling'},
+		ocfp => {default_key_name => 'platform'});
+	is($v, 'operator-old-spelling',
+		'an operator value under an alt beats a platform value under the key');
+
+	# Within a source, the primary still precedes its alts.
+	($v) = resolve_with('default_key_name@keypair_name',
+		cpi => {default_key_name => 'primary', keypair_name => 'alt'});
+	is($v, 'primary', 'the primary name wins over its alt within a source');
+};
+
+subtest '_resolve - presence is what stops the search, not definedness' => sub {
+	plan tests => 3;
+
+	# Nulling a key is how an operator discards an OCFP value and falls
+	# back to the kit.  A defined-based test would quietly remove that.
+	my ($v, $found) = resolve_with('read_timeout:100',
+		cpi => {read_timeout => undef}, ocfp => {read_timeout => 1500});
+	ok($found, 'a null operator value counts as found');
+	ok(!defined($v), 'and resolves to undef rather than the platform value');
+
+	# The first name that is PRESENT settles it: a null on the name the
+	# operator wrote is not overridden by an alt they did not.
+	($v) = resolve_with('read_timeout@timeout',
+		cpi => {read_timeout => undef, timeout => 'alt-value'});
+	ok(!defined($v), 'a null on the primary is not rescued by a set alt');
+};
+
+subtest '_resolve - nothing anywhere is reported as not found' => sub {
+	plan tests => 2;
+
+	my ($v, $found) = resolve_with('missing', cpi => {}, ocfp => {});
+	ok(!$found, 'absent from both sources reports not found');
+	ok(!defined($v), 'with no value');
+};
+
 # --- baseline: no >path, behaviour is unchanged ------------------------
 subtest 'without >path the source key is the output key, as before' => sub {
 	my ($config) = gather(
@@ -365,19 +479,21 @@ subtest 'CHARACTERISATION: an undef override warns from the vault regex' => sub 
 		'a null override produces an uninitialized-value warning');
 };
 
-subtest 'CHARACTERISATION: an explicit null at a mapped path takes the kit default' => sub {
+subtest 'an explicit null clears the OCFP value, leaving the kit default' => sub {
 	plan tests => 1;
 
-	# DECIDE.  Setting a key to null means "skip the platform default and
-	# use the kit's" -- a third behaviour nobody declared.  It is reached
-	# because `last if $src` fires on the key merely existing.
+	# SURVIVES, and is the point rather than a side effect: nulling a key
+	# is how an operator discards whatever the platform put in the OCFP
+	# config and falls back to what the kit declares.  So presence has to
+	# be tested apart from definedness -- a key that exists stops the
+	# search whatever it holds, and only an absent key reaches OCFP.
 	my ($config) = gather(
 		{read_timeout => undef},
 		'read_timeout:100>connection_options.read_timeout',
 	);
 
 	is($config->{connection_options}{read_timeout}, 100,
-		'an explicitly null value falls through to the declared default');
+		'a null operator value discards OCFP and takes the kit default');
 };
 
 done_testing;
