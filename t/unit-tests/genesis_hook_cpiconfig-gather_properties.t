@@ -29,6 +29,7 @@ use utf8;
 use lib 't';
 use helper;
 use Test::More;
+use Test::Exception;
 use Genesis qw(bail struct_lookup);
 use Cwd qw(abs_path);
 
@@ -110,6 +111,55 @@ sub gather {
 	my $config = $hook->gather_properties(@map);
 	return ($config, $hook);
 }
+
+# =======================================================================
+# _parse_property -- descriptor string to spec.  Pure; no lookups.
+# =======================================================================
+
+subtest '_parse_property - the parts a descriptor can carry' => sub {
+	plan tests => 7;
+
+	my $hook = Genesis::Hook::CpiConfig::gp_kit->init(env => mock_env());
+
+	is_deeply($hook->_parse_property('region'), {
+		key => 'region', alts => [], default => '', optional => 0,
+		secret => 0, path => 'region', lookups => ['region'],
+	}, 'a bare key defaults its path to itself and reads nothing else');
+
+	is_deeply($hook->_parse_property('!api_key'), {
+		key => 'api_key', alts => [], default => '', optional => 0,
+		secret => 1, path => 'api_key', lookups => ['api_key'],
+	}, 'a leading ! marks it secret');
+
+	is_deeply($hook->_parse_property('key@a,b'), {
+		key => 'key', alts => ['a','b'], default => '', optional => 0,
+		secret => 0, path => 'key', lookups => ['key','a','b'],
+	}, 'alts are comma-separated and follow the key in lookup order');
+
+	is_deeply($hook->_parse_property('region:us-east-1'), {
+		key => 'region', alts => [], default => 'us-east-1', optional => 0,
+		secret => 0, path => 'region', lookups => ['region'],
+	}, 'a default is taken verbatim, JSON decoding happens at resolve time');
+
+	is_deeply($hook->_parse_property('endpoint?'), {
+		key => 'endpoint', alts => [], default => '', optional => 1,
+		secret => 0, path => 'endpoint', lookups => ['endpoint'],
+	}, 'a trailing ? marks it optional');
+
+	is_deeply($hook->_parse_property('!host@addr:def>a.b.c'), {
+		key => 'host', alts => ['addr'], default => 'def', optional => 0,
+		secret => 1, path => 'a.b.c', lookups => ['host','addr'],
+	}, 'every part at once, with the path overriding the key');
+
+	# The descriptor comes from a kit's hook, so its author is the one who
+	# has to fix it -- the message repeats the grammar for that reason.
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	quietly {
+		throws_ok {$hook->_parse_property('@nokey')}
+			qr/Invalid CPI config property specification/,
+			'a descriptor with no key is refused';
+	};
+};
 
 # --- baseline: no >path, behaviour is unchanged ------------------------
 subtest 'without >path the source key is the output key, as before' => sub {

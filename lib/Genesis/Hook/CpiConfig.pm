@@ -73,6 +73,31 @@ sub build_cpi_config_for_iaas {
 	}
 }
 
+sub _parse_property {
+	my ($self, $property) = @_;
+
+	my ($secret, $key, $alts, $default, $optional, $path) =
+		$property =~ /^(!?)([^\@:\?\>]+)(?:\@([^:\?\>]+))?(?:(?::([^>]+))|(\?))?(?:>(.+))?$/;
+	bail(
+		"Invalid CPI config property specification '%s' in kit cpi-config hook "
+		. "(expected [!]key[\@alt][:default|?][>path])",
+		$property
+	) unless defined $key;
+
+	# The lookup order is the key then its alts; `path` is where the value
+	# lands, and defaults to the key when the two vocabularies agree.
+	my @alts = split(/,/, $alts // '');
+	return {
+		key      => $key,
+		alts     => \@alts,
+		default  => $default // '',
+		optional => $optional ? 1 : 0,
+		secret   => $secret  ? 1 : 0,
+		path     => $path // $key,
+		lookups  => [$key, @alts],
+	};
+}
+
 sub gather_properties {
 	my ($self, @properties) = @_;
 
@@ -87,16 +112,10 @@ sub gather_properties {
 	# key and emitted it somewhere else".
 	my (%config,%secrets,%consumed) = ();
 	for my $property (@properties) {
-		my ($is_secret, $key, $alts, $default, $optional, $path) =
-			$property =~ /^(!?)([^\@:\?\>]+)(?:\@([^:\?\>]+))?(?:(?::([^>]+))|(\?))?(?:>(.+))?$/;
-		bail(
-			"Invalid CPI config property specification '%s' in kit cpi-config hook "
-			. "(expected [!]key[\@alt][:default|?][>path])",
-			$property
-		) unless defined $key;
-		$path //= $key;
-		$default //= '';
-		my @lookups = ($key, (split /,/, $alts//''));
+		my $spec = $self->_parse_property($property);
+		my ($is_secret, $key, $default, $optional, $path) =
+			@{$spec}{qw/secret key default optional path/};
+		my @lookups = @{$spec->{lookups}};
 		$consumed{$_} = 1 for @lookups;
 		my $value = undef;
 		my $iaas = $self->iaas;

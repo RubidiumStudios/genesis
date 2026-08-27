@@ -207,6 +207,85 @@ neither vocabulary. It is currently derived from the CPI-side path, which
 couples Genesis's records to a name the CPI owns; see
 L</cpi_entombment_path_for> for the consequences.
 
+=head1 INTERNAL METHODS
+
+These are internal to the implementation and may change without notice.
+
+=head2 _parse_property
+
+    my $spec = $hook->_parse_property($descriptor);
+
+Splits one property descriptor into its parts. Pure: performs no lookups
+and touches no state.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$descriptor>
+
+A descriptor string in the grammar described under L</PROPERTY MAPPING>.
+
+=back
+
+B<Returns:> A hash reference with the keys:
+
+=over 4
+
+=item C<key>
+
+The primary lookup name -- the operator-facing spelling.
+
+=item C<alts>
+
+Array reference of alternate lookup names, in the order they were
+declared. Empty when none were given.
+
+=item C<lookups>
+
+C<key> followed by C<alts>, which is the order they are consulted in.
+Provided so callers do not rebuild it, and so the set of names a map
+consumes is available without reassembling it from two fields.
+
+=item C<default>
+
+The declared default, verbatim. JSON decoding happens at resolution
+time, not here, so a default of C<["bosh"]> is still a string at this
+point.
+
+=item C<optional>
+
+C<1> when the descriptor ended in C<?>, else C<0>.
+
+=item C<secret>
+
+C<1> when the descriptor began with C<!>, else C<0>.
+
+=item C<path>
+
+Where the value lands in the emitted properties -- the C<< > >> side, or
+C<key> when the two vocabularies agree.
+
+=back
+
+B<Errors:>
+
+Dies with C<"Invalid CPI config property specification '%s' in kit
+cpi-config hook (expected [!]key[@alt][:default|?][>path])"> when the
+descriptor does not parse. The message repeats the grammar because the
+descriptor comes from a kit's C<cpi-config> hook, so its author is the
+one who has to correct it.
+
+B<Examples:>
+
+    $hook->_parse_property('region');
+    # { key => 'region', alts => [], lookups => ['region'], default => '',
+    #   optional => 0, secret => 0, path => 'region' }
+
+    $hook->_parse_property('!host@addr:def>a.b.c');
+    # { key => 'host', alts => ['addr'], lookups => ['host','addr'],
+    #   default => 'def', optional => 0, secret => 1, path => 'a.b.c' }
+
 =head1 METHODS
 
 =head2 init
