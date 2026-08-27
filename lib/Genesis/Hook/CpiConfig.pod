@@ -141,7 +141,22 @@ The descriptor's C<:default> -- the kit author.
 
 =back
 
-A non-optional property with no value from any of the three is fatal.
+B<Every operator name is tried before any platform name.> The two sources
+are not consulted per name in step, which would let a platform value under
+the primary key beat an operator value under an C<@alt> -- silently
+overriding an operator who used the older spelling, which is the one thing
+an alt must not do.
+
+B<Presence decides, not definedness.> Within the operator's namespace the
+first name that B<exists> settles the question, whatever it holds. A key
+set to null is therefore how an operator discards a value the platform put
+in the OCFP configuration and falls back to what the kit declares -- so a
+null on the name the operator wrote is not rescued by an alt they did not.
+A C<defined>-based test would quietly remove that mechanism.
+
+A non-optional property found nowhere takes its C<:default>, which is the
+empty string when the descriptor declares none. That is fatal only for a
+C<!> secret, which cannot be entombed empty; see L</_entomb_if_needed>.
 
 =head2 A dot means different things on each side
 
@@ -162,6 +177,76 @@ they are the only way to emit a nested CPI property.
 Where a literal dot is wanted in an output key rather than nesting,
 C<unflatten> treats C<~> as an escape: C<a~b> yields the single key
 C<a.b>, and C<p.q~r> yields C<p> containing the single key C<q.r>.
+
+That escape is B<not> available on the input side. C<Genesis::flatten> does
+not escape a literal C<~> on the way in, so C<unflatten> turns it into a dot
+on the way out and a key written C<we~ird> returns as
+C<we.ird>. Rather than build on a mechanism that does not round-trip, an
+operator key holding a literal dot -- C<"pve.host": value> -- is refused,
+with the nested spelling offered instead.
+
+=head2 How an operator addresses a property
+
+C<bosh-configs.cpi> is flattened to its leaves, and each leaf is classified
+once against two sets -- the map's source keys (with their C<@alts>) and the
+map's output paths:
+
+=over 4
+
+=item *
+
+A leaf matching a source key or an C<@alt> resolves that mapped property.
+
+=item *
+
+A leaf matching a mapped C<< >path >> B<also> resolves that mapped
+property. It is not passthrough.
+
+=item *
+
+A leaf matching neither passes through to the CPI config untouched.
+
+=back
+
+Both spellings are routes into the same property, with identical
+entombment, defaults and optionality. The second rule is not a convenience:
+for C<< !pve_host@host>pve.host >>, an operator writing C<pve: {host:
+E<lt>secretE<gt>}> must have that entombed. Routing a mapped path to
+passthrough instead would mean C<!> never applies -- it lives on the
+descriptor -- and the secret would ship in cleartext.
+
+Because every route is equivalent, a property may be addressed B<exactly
+once>. Its source key, any of its C<@alts>, and its C<< >path >> are three
+spellings of one thing, so setting any two of them together is fatal --
+key with path, key with alt, or alt with path alike. The ambiguity is
+precisely what the rule removes, and it does not become less ambiguous for
+being spelled with an alt.
+
+The error names the two leaves that collided rather than the key and the
+path, since which pair of routes was used varies and a message that assumed
+one pair would misdescribe the other two.
+
+The path form exists so that a nested block carrying both modelled and
+unmodelled properties need not be split across two spellings:
+
+    pve:
+      host: x          # mapped
+      unknown: y       # passthrough -- the block justifies the path form
+
+Where that justification is absent -- every leaf under the same parent
+resolves to a mapped property -- the operator has taken on the exposure
+below and gained nothing, so a warning names the key that would have done
+instead. Granularity is same-parent: the most local rule, and the easiest
+to explain.
+
+B<The exposure, stated:> if a CPI renames a property and the kit's map
+follows, a leaf using the B<path> form silently becomes a passthrough at a
+dead address. The value stops reaching the property, the default takes
+over, and nothing errors -- because "meant the mapped path, which moved" is
+indistinguishable from "wants a passthrough here". The key form has no such
+exposure, as the map absorbs the rename. This is the same bargain
+passthrough already offers, which is why it is a warning rather than a
+refusal.
 
 =head2 Constraints and traps in the descriptor grammar
 
@@ -629,22 +714,38 @@ properties using dot-notation (e.g., C<< connection_options.connect_timeout >>).
 
 =back
 
-Values are resolved in this priority order: C<bosh-configs.cpi.*> in the
-environment manifest, then C<cpi.E<lt>iaasE<gt>.*> in the OCFP
-configuration, then the descriptor's default. After the declared properties
-are resolved, any additional keys present in C<bosh-configs.cpi> that were
-not already resolved are merged in as overrides. A scalar override whose
-value is a C<(( vault ... ))> reference is entombed in CredHub the same way
-a C<!>-prefixed declared property is, and the override is rewritten to
-point at the entombed path.
+B<Resolution is a single pass.> The operator's C<bosh-configs.cpi> is read
+once, flattened to leaves, and each leaf is classified exactly once -- as a
+route into a mapped property, or as passthrough. Every property is then
+resolved and emitted once, from one manifest, under one ruleset. See
+L</How an operator addresses a property> for the classification, and
+L</Where values come from> for the precedence within a resolution.
 
-B<Limitation:> only scalar override values are scanned for vault
-references. An override whose value is a hash or array is passed through
-untouched, so any vault reference nested inside one reaches the CPI config
-un-entombed. See the C<FIXME> at the override loop in C<CpiConfig.pm>.
+That partition is the whole of the method's logic. It replaces an earlier
+arrangement in which the operator's namespace was read B<twice> -- once
+through C<lookup> against the merged, evaluated manifest for the declared
+properties, and again through C<lookup_unevaled> against the raw
+environment files for anything left over. A single operator setting was not
+merely read twice but resolved into two different values from two different
+manifests, both of which could reach the output: a C<!> secret could be
+re-emitted in cleartext beside the CredHub reference meant to replace it,
+and a spruce operator could reach the director as a literal, where it is
+parsed as a BOSH variable reference and fails every deployment against that
+director.
+
+Operator values are read through C<lookup_entombed_self>, so a C<(( vault
+))> reference in the environment file -- explicit or implicit, at any depth
+-- arrives already entombed. This is what retired the hand-rolled vault
+regex that scanned only scalars, and with it the limitation that a vault
+reference nested inside a hash or array reached the CPI config
+un-entombed.
 
 The resulting flat hash is passed through C<unflatten> to produce a nested
-structure when dot-notation config paths are used.
+structure when dot-notation config paths are used. Leaf-level flattening
+also means passthrough no longer hands whole subtrees through by reference,
+which previously let C<unflatten> alias the environment's own parameters
+into the emitted config -- so building a CPI config rewrote the
+environment's view of itself.
 
 B<Parameters:>
 
@@ -673,12 +774,36 @@ author is the one who has to correct it.
 
 =item *
 
-C<"Missing default for CPI config value for %s, and none found in environment">
--- raised via C<bail()> when a non-optional property has no value in the
-manifest, no value in the OCFP configuration, and no default in its
-descriptor. C<%s> is replaced with the property name.
+C<"Cannot set %s in bosh-configs.cpi: a quoted key holding a literal dot is
+not supported -- nest it instead."> -- raised via C<bail()> when an operator
+key contains a literal dot, detected as a C<~> in the flattened leaf. The
+message offers the nested spelling, which is the supported form.
+
+=item *
+
+C<"CPI property %s is set more than one way in bosh-configs.cpi: %s and %s
+both address it -- set only one."> -- raised via C<bail()> when one property
+is addressed twice, by any two of its source key, its C<@alts>, and its
+C<< >path >>. The second and third C<%s> are the two colliding leaves, in
+sorted order so the message does not vary with hash ordering.
+
+=item *
+
+C<"Cannot entomb CPI property %s: ..."> -- raised via C<bail()> from
+L</_entomb_if_needed> when a C<!> property resolves to nothing and no
+default supplies one, since an empty secret cannot be stored. This is the
+error the dead C<"Missing default for CPI config value"> bail was meant to
+catch and never could: C<:default> defaults to the empty string, so the
+value was always defined by the time that test ran, and the failure instead
+surfaced much later as C<"N missing secret values"> -- naming a CredHub path
+rather than the property, after the config had already been built.
 
 =back
+
+B<Warnings:> a modelled property addressed by its C<< >path >> where no
+unmodelled leaf shares its parent warns, naming the source key that would
+have avoided the rename exposure. See L</How an operator addresses a
+property>.
 
 B<Examples:>
 

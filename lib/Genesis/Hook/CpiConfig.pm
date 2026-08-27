@@ -159,7 +159,7 @@ sub gather_properties {
 	# unmodelled properties together, and each is judged on its own.
 	my $raw = Genesis::flatten({}, '', $self->env->lookup_unevaled('bosh-configs.cpi') // {});
 
-	my (%routed, %extra);
+	my (%routed, %extra, %unmodelled_under, @path_routed);
 	for my $leaf (CORE::keys %$raw) {
 		# flatten escapes a literal dot as ~, and that escape does not
 		# survive a round trip, so the quoted form is refused outright.
@@ -169,18 +169,38 @@ sub gather_properties {
 			$leaf =~ s/~/./gr
 		) if $leaf =~ /~/;
 
+		my $parent = $leaf =~ /^(.*)\.[^.]*$/ ? $1 : '';
 		my $spec = $by_key{$leaf} // $by_path{$leaf};
 		if ($spec) {
-			bail(
-				"CPI property #C{%s} is set more than one way in ".
-				"#C{bosh-configs.cpi}; use its key #C{%s} or its path #C{%s}, ".
-				"not both.",
-				$spec->{key}, $spec->{key}, $spec->{path}
-			) if $routed{$spec->{path}};
+			# Names the two leaves rather than the key and the path: a key
+			# colliding with an @alt is the same fault, described wrongly.
+			if (my $first = $routed{$spec->{path}}) {
+				bail(
+					"CPI property #C{%s} is set more than one way in ".
+					"#C{bosh-configs.cpi}: #C{%s} and #C{%s} both address it ".
+					"-- set only one.",
+					$spec->{key}, sort($first, $leaf)
+				);
+			}
 			$routed{$spec->{path}} = $leaf;
+			push @path_routed, [$leaf, $parent, $spec] unless $by_key{$leaf};
 		} else {
 			$extra{$leaf} = 1;
+			$unmodelled_under{$parent} = 1;
 		}
+	}
+
+	# The path form is only worth its rename exposure in a block that also
+	# carries unmodelled leaves; alone, the key addresses the same property.
+	for my $route (sort {$a->[0] cmp $b->[0]} @path_routed) {
+		my ($leaf, $parent, $spec) = @$route;
+		next if $unmodelled_under{$parent};
+		warning(
+			"#C{bosh-configs.cpi.%s} sets a modelled CPI property by its CPI ".
+			"path; #C{%s} names the same property and keeps working if the ".
+			"CPI renames it.",
+			$leaf, $spec->{key}
+		);
 	}
 
 	my %config;

@@ -30,6 +30,7 @@ use lib 't';
 use helper;
 use Test::More;
 use Test::Exception;
+use Test::Output;
 use Genesis qw(bail struct_lookup);
 use Cwd qw(abs_path);
 
@@ -291,10 +292,15 @@ subtest 'a mapped path may be set directly, and resolves the property' => sub {
 	# The CPI address is a second route into the same property, not a
 	# passthrough.  If it were passthrough the ! would never apply and the
 	# secret would ship in the clear.
-	my ($config, $hook) = gather(
-		{pve => {host => 's3cr3t'}},
-		'!pve_host@host>pve.host',
-	);
+	# Warns, since nothing unmodelled shares the block; swallowed here
+	# because the warning is its own subtest's subject.
+	my ($config, $hook);
+	stderr_from {
+		($config, $hook) = gather(
+			{pve => {host => 's3cr3t'}},
+			'!pve_host@host>pve.host',
+		);
+	};
 
 	like($config->{pve}{host}, qr/^\(\(.*cpi-config-property--pve_host--/,
 		'the value set by its path is entombed like the key form');
@@ -318,16 +324,70 @@ subtest 'known and unknown leaves in one block are split' => sub {
 	ok(!exists $config->{pve_host}, 'and the source key is not duplicated');
 };
 
-subtest 'one property may not be set two ways' => sub {
+subtest 'the path form warns when no sibling justifies it' => sub {
+	plan tests => 3;
+
+	# The path form exists so a mixed block need not be split across two
+	# spellings.  Alone, it only buys the rename exposure: if the kit's map
+	# follows a CPI rename, the leaf silently becomes a dead passthrough.
+	my $config;
+	my $err = stderr_from {
+		($config) = gather({pve => {host => 'h'}}, 'pve_host>pve.host');
+	};
+
+	like($err, qr/pve\.host/, 'the warning names the path that was written');
+	like($err, qr/pve_host/, 'and the key that would have done instead');
+	is($config->{pve}{host}, 'h', 'while the value still resolves');
+};
+
+subtest 'the path form is silent when an unmodelled sibling justifies it' => sub {
+	plan tests => 2;
+
+	my $config;
+	my $err = stderr_from {
+		($config) = gather(
+			{pve => {host => 'h', unknown => 'y'}},
+			'pve_host>pve.host',
+		);
+	};
+
+	is($err, '', 'a block carrying both kinds of leaf warns nothing');
+	is($config->{pve}{unknown}, 'y', 'and the unmodelled leaf passes through');
+};
+
+subtest 'the key form takes no rename exposure, so never warns' => sub {
 	plan tests => 1;
+
+	my $err = stderr_from {gather({pve_host => 'h'}, 'pve_host>pve.host')};
+	is($err, '', 'addressing a property by its key is silent');
+};
+
+subtest 'one property may not be set two ways' => sub {
+	plan tests => 3;
 	local $ENV{GENESIS_IGNORE_EVAL} = '';
 
+	# Every pair of routes into one property collides, so the message names
+	# the two leaves that did it rather than assuming which forms they were.
 	quietly {
 		throws_ok {
 			gather({pve_host => 'by-key', pve => {host => 'by-path'}},
 				'pve_host>pve.host')
-		} qr/set (?:both|two)|more than one/i,
-			'setting a property by key and by path at once is refused';
+		} qr/pve\.host\s+and\s+pve_host/s,
+			'the key and its path together are refused, naming both';
+
+		# The lookbehind matters: without it the `host` inside `pve.host`
+		# satisfies the match and a message naming the wrong pair passes.
+		throws_ok {
+			gather({pve_host => 'by-key', host => 'by-alt'},
+				'pve_host@host>pve.host')
+		} qr/(?<![\w.])host\s+and\s+pve_host/s,
+			'the key and one of its alts together are refused, naming both';
+
+		throws_ok {
+			gather({host => 'by-alt', pve => {host => 'by-path'}},
+				'pve_host@host>pve.host')
+		} qr/(?<![\w.])host\s+and\s+pve\.host/s,
+			'an alt and the path together are refused, naming both';
 	};
 };
 
