@@ -663,23 +663,30 @@ subtest 'gather_properties - optional property omitted when not found' => sub {
 		'optional property is absent from result when not found in any source');
 };
 
-subtest 'gather_properties - missing required property falls back to empty string default' => sub {
-	# NOTE: The bail("Missing default...") in CpiConfig.pm is unreachable dead
-	# code because $default //= '' is set unconditionally before the defined
-	# check.  A property with no ':' separator and no lookup match silently
-	# falls through to empty string, not bail.  This test documents that
-	# actual runtime behavior.
-	plan tests => 2;
+subtest 'gather_properties - a required property with no default bails' => sub {
+	# This previously pinned the dead-code behaviour: the bail tested
+	# `defined $default` but `$default //= ''` ran three statements earlier,
+	# so it could never fire and an unset required property shipped ''.
+	# The descriptor always distinguished "no default" from "empty default";
+	# only the parser collapsed them.  Now `key` is required, `key:` declares
+	# an empty default, and `key?` is omitted when unset.
+	plan tests => 3;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
 
-	my $hook = make_hook();  # all lookups return undef / no source
+	quietly {
+		throws_ok {make_hook()->gather_properties('required_prop')}
+			qr/required_prop/,
+			'a required property found in no source names itself';
 
-	my $props;
-	lives_ok {
-		$props = $hook->gather_properties('required_prop');
-	} 'gather_properties() does not die for required property not found (falls back to empty string)';
+		throws_ok {make_hook()->gather_properties('required_prop')}
+			qr/required|no default/i,
+			'and says why, rather than emitting an empty value';
+	};
 
+	# How a kit opts into the old behaviour, now that it has to say so.
+	my $props = make_hook()->gather_properties('required_prop:');
 	is($props->{required_prop}, '',
-		'required property not found falls back to empty string (bail is unreachable dead code)');
+		'an explicit empty default still yields an empty string');
 };
 
 subtest 'gather_properties - secret property entombed in credhub_secrets' => sub {

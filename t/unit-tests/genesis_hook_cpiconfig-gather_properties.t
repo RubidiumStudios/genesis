@@ -149,22 +149,25 @@ sub gather {
 # =======================================================================
 
 subtest '_parse_property - the parts a descriptor can carry' => sub {
-	plan tests => 7;
+	plan tests => 9;
 
 	my $hook = Genesis::Hook::CpiConfig::gp_kit->init(env => mock_env());
 
+	# An absent `:` clause is undef, not ''.  Collapsing the two is what
+	# made the kit's "this property is required" statement unenforceable:
+	# the descriptor could no longer say whether a default was declared.
 	is_deeply($hook->_parse_property('region'), {
-		key => 'region', alts => [], default => '', optional => 0,
+		key => 'region', alts => [], default => undef, optional => 0,
 		secret => 0, path => 'region', lookups => ['region'],
-	}, 'a bare key defaults its path to itself and reads nothing else');
+	}, 'no : clause means no default, which makes the property required');
 
 	is_deeply($hook->_parse_property('!api_key'), {
-		key => 'api_key', alts => [], default => '', optional => 0,
+		key => 'api_key', alts => [], default => undef, optional => 0,
 		secret => 1, path => 'api_key', lookups => ['api_key'],
 	}, 'a leading ! marks it secret');
 
 	is_deeply($hook->_parse_property('key@a,b'), {
-		key => 'key', alts => ['a','b'], default => '', optional => 0,
+		key => 'key', alts => ['a','b'], default => undef, optional => 0,
 		secret => 0, path => 'key', lookups => ['key','a','b'],
 	}, 'alts are comma-separated and follow the key in lookup order');
 
@@ -173,10 +176,22 @@ subtest '_parse_property - the parts a descriptor can carry' => sub {
 		secret => 0, path => 'region', lookups => ['region'],
 	}, 'a default is taken verbatim, JSON decoding happens at resolve time');
 
+	# An empty default is a declaration, so the clause may be empty.  This
+	# form did not parse at all before: the default demanded a character.
+	is_deeply($hook->_parse_property('region:'), {
+		key => 'region', alts => [], default => '', optional => 0,
+		secret => 0, path => 'region', lookups => ['region'],
+	}, 'an empty : clause declares an empty default');
+
+	is_deeply($hook->_parse_property('pve_host:>pve.host'), {
+		key => 'pve_host', alts => [], default => '', optional => 0,
+		secret => 0, path => 'pve.host', lookups => ['pve_host'],
+	}, 'an empty default may be followed by a path');
+
 	is_deeply($hook->_parse_property('endpoint?'), {
-		key => 'endpoint', alts => [], default => '', optional => 1,
+		key => 'endpoint', alts => [], default => undef, optional => 1,
 		secret => 0, path => 'endpoint', lookups => ['endpoint'],
-	}, 'a trailing ? marks it optional');
+	}, 'a trailing ? marks it optional, which is not the same as defaulted');
 
 	is_deeply($hook->_parse_property('!host@addr:def>a.b.c'), {
 		key => 'host', alts => ['addr'], default => 'def', optional => 0,
@@ -448,14 +463,53 @@ subtest 'entombment: an empty value cannot be entombed' => sub {
 	plan tests => 1;
 	local $ENV{GENESIS_IGNORE_EVAL} = '';
 
-	# Today this is not caught here: the default is always defined, so an
-	# unfound secret becomes '' and fails much later as "N missing secret
-	# values", naming a credhub path rather than the property.
+	# Declared with an empty default, so it survives the required check and
+	# reaches entombment holding '' -- which cannot be stored as a secret.
 	quietly {
-		throws_ok {gather({}, '!api_password>credentials.password')}
-			qr/api_password/,
-			'an unresolvable secret names the property that could not be set';
+		throws_ok {gather({}, '!api_password:>credentials.password')}
+			qr/entomb.*api_password/is,
+			'a secret defaulting to empty is refused at entombment';
 	};
+};
+
+# =======================================================================
+# The three ways a kit says what happens when a property is not set.
+# The descriptor has always carried this distinction; nothing enforced it,
+# because the parser collapsed "no : clause" into "default of ''".
+# =======================================================================
+
+subtest 'no : clause means required, and an unset required property bails' => sub {
+	plan tests => 2;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	# The original code meant to do this -- it bailed `unless defined
+	# $default` -- but set `$default //= ''` three statements earlier, so
+	# the guard could never fire.  It has been dead since the feature
+	# landed, which is why an unset required property shipped as ''.
+	quietly {
+		throws_ok {gather({}, 'pve_host>pve.host')}
+			qr/pve_host/,
+			'a required property found nowhere names itself';
+
+		throws_ok {gather({}, 'pve_host>pve.host')}
+			qr/required|no default/i,
+			'and says why it failed rather than shipping an empty value';
+	};
+};
+
+subtest 'an empty : clause means default to empty, which is not an error' => sub {
+	plan tests => 2;
+
+	my ($config) = gather({}, 'pve_node:>pve.node');
+	ok(exists $config->{pve}{node}, 'the property is emitted');
+	is($config->{pve}{node}, '', 'holding the empty default the kit declared');
+};
+
+subtest 'a ? means omit entirely when unset' => sub {
+	plan tests => 1;
+
+	my ($config) = gather({}, 'pve_node?>pve.node');
+	ok(!exists $config->{pve}, 'nothing is emitted for an unset optional property');
 };
 
 # --- baseline: no >path, behaviour is unchanged ------------------------

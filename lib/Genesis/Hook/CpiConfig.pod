@@ -102,6 +102,10 @@ I<What if the operator says nothing?> The kit author's opinion. Decoded as
 JSON when it parses as such, so C<["bosh"]> arrives as an array rather than
 a string.
 
+The clause may be empty. C<key:> and C<< key:>path >> declare a default of
+C<''> -- which is a different statement from declaring none at all, and
+the two must not be conflated. See L</What a kit says by omission> below.
+
 =item C<?>
 
 I<Is it required?> Marks the property genuinely optional: absent from the
@@ -154,9 +158,44 @@ in the OCFP configuration and falls back to what the kit declares -- so a
 null on the name the operator wrote is not rescued by an alt they did not.
 A C<defined>-based test would quietly remove that mechanism.
 
-A non-optional property found nowhere takes its C<:default>, which is the
-empty string when the descriptor declares none. That is fatal only for a
-C<!> secret, which cannot be entombed empty; see L</_entomb_if_needed>.
+=head2 What a kit says by omission
+
+A property found in no source falls to the descriptor, and the descriptor
+has three ways to say what should happen. They are distinguished by what
+the kit wrote, not by what the value turned out to be:
+
+=over 4
+
+=item C<key> -- B<required>
+
+No C<:> clause at all. The kit is asserting the CPI cannot be configured
+without this, so a property found nowhere is fatal, naming itself.
+
+=item C<< key: >> or C<< key:>path >> -- B<defaults to empty>
+
+An empty C<:> clause. The kit has considered the question and decided
+C<''> is a legitimate value, so the property is emitted holding it.
+
+=item C<key?> -- B<omitted>
+
+The property is left out of the emitted config entirely, which is not the
+same as present-and-empty and is a distinction the CPI can act on.
+
+=back
+
+B<This was unenforceable until recently, and the history matters when
+reading older kits.> The check existed from the first commit -- it bailed
+C<unless defined $default> -- but C<< $default //= '' >> ran three
+statements earlier and guaranteed the test could never fail. So for the
+whole life of the feature, a required property found nowhere silently
+became C<''> and shipped an invalid CPI config to the director, where it
+failed later and less legibly. The empty-clause spelling did not parse at
+all, because the default was required to hold at least one character.
+
+The consequence for kit authors: a descriptor written before this was
+enforced may say "required" while meaning "optional", having never been
+tested against the difference. A property that is genuinely optional must
+now say so -- C<nsxt@nsxt?>, with the C<?> after the alts.
 
 =head2 A dot means different things on each side
 
@@ -702,10 +741,16 @@ default is parsed as JSON if possible; otherwise used verbatim. Use C<true>,
 C<false>, and C<null> for their JSON/YAML equivalents. Quoted strings are
 parsed as JSON strings.
 
+The clause may be empty -- C<key:> and C<< key:>path >> declare a default
+of C<''>. B<Omitting the clause entirely is not the same thing:> it makes
+the property required, and a required property found in no source is
+fatal. See L</What a kit says by omission>.
+
 =item C<?>
 
 Makes the property optional. If not found via any lookup, the property is
-omitted from the output entirely (no error, no default).
+omitted from the output entirely (no error, no default). Written after the
+alts when both are present: C<< nsxt@nsxt? >>.
 
 =item C<< >config_path >>
 
@@ -789,14 +834,23 @@ sorted order so the message does not vary with hash ordering.
 
 =item *
 
+C<"CPI property %s is required: no value was found for it in
+bosh-configs.cpi or the OCFP config, and the kit declares no default..."> --
+raised via C<bail()> when a property with no C<:> clause and no C<?> is
+found in no source. The message names both remedies open to a kit author,
+since a descriptor predating enforcement may say "required" while meaning
+"optional".
+
+=item *
+
 C<"Cannot entomb CPI property %s: ..."> -- raised via C<bail()> from
-L</_entomb_if_needed> when a C<!> property resolves to nothing and no
-default supplies one, since an empty secret cannot be stored. This is the
-error the dead C<"Missing default for CPI config value"> bail was meant to
-catch and never could: C<:default> defaults to the empty string, so the
-value was always defined by the time that test ran, and the failure instead
-surfaced much later as C<"N missing secret values"> -- naming a CredHub path
-rather than the property, after the config had already been built.
+L</_entomb_if_needed> when a C<!> property holds nothing at entombment
+time, since an empty secret cannot be stored. With the required check
+above in place this is reached only when a secret declares an empty
+default explicitly, as C<< !key: >>. Before it existed, an unresolvable
+secret was entombed empty and surfaced much later as C<"N missing secret
+values"> -- naming a CredHub path rather than the property, after the
+config had already been built.
 
 =back
 

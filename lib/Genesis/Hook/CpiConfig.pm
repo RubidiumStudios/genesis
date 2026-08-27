@@ -76,8 +76,10 @@ sub build_cpi_config_for_iaas {
 sub _parse_property {
 	my ($self, $property) = @_;
 
+	# The default clause may be empty -- `key:` and `key:>path` declare a
+	# default of ''.  Absent, the group stays undef, which means required.
 	my ($secret, $key, $alts, $default, $optional, $path) =
-		$property =~ /^(!?)([^\@:\?\>]+)(?:\@([^:\?\>]+))?(?:(?::([^>]+))|(\?))?(?:>(.+))?$/;
+		$property =~ /^(!?)([^\@:\?\>]+)(?:\@([^:\?\>]+))?(?:(?::([^>]*))|(\?))?(?:>(.+))?$/;
 	bail(
 		"Invalid CPI config property specification '%s' in kit cpi-config hook "
 		. "(expected [!]key[\@alt][:default|?][>path])",
@@ -90,7 +92,7 @@ sub _parse_property {
 	return {
 		key      => $key,
 		alts     => \@alts,
-		default  => $default // '',
+		default  => $default,
 		optional => $optional ? 1 : 0,
 		secret   => $secret  ? 1 : 0,
 		path     => $path // $key,
@@ -210,6 +212,13 @@ sub gather_properties {
 		my ($value) = $self->_resolve($spec, $routed{$spec->{path}});
 		if (!defined $value) {
 			next if $spec->{optional};
+			bail(
+				"CPI property #C{%s} is required: no value was found for it in ".
+				"#C{bosh-configs.cpi} or the OCFP config, and the kit declares ".
+				"no default. Set it, or have the kit declare #C{%s:} for an ".
+				"empty default or #C{%s?} to omit it when unset.",
+				$spec->{key}, $spec->{key}, $spec->{key}
+			) unless defined $spec->{default};
 			$value = eval {JSON::PP->new->utf8->allow_nonref->decode($spec->{default})};
 			$value = $spec->{default} if $@;
 		}
