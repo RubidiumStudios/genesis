@@ -24,68 +24,89 @@
 # what the override pass is for -- so this asserts both directions.
 use strict;
 use warnings;
+use utf8;
+
 use lib 't';
+use helper;
 use Test::More;
+use Genesis qw(bail struct_lookup);
+use Cwd qw(abs_path);
 
-use_ok('Genesis::Hook::CpiConfig') or BAIL_OUT('Genesis::Hook::CpiConfig failed to load');
+$ENV{GENESIS_CALLBACK_BIN} ||= abs_path('bin/genesis');
+$ENV{GENESIS_LIB} ||= abs_path('lib');
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
 
-# --- Test doubles ------------------------------------------------------
+require_ok 'Genesis::Hook::CpiConfig';
 
-package Test::FakeEnv;
-
-sub new {
-	my ($class, %opts) = @_;
-	return bless { cpi => $opts{cpi} // {} }, $class;
+# Genesis::Hook requires the class name to match
+# Genesis::Hook::<Type>::<KitName> so label() can parse it.
+{
+	package Genesis::Hook::CpiConfig::gp_kit;
+	use parent -norequire, 'Genesis::Hook::CpiConfig';
+	sub perform {$_[0]->done({})}
 }
 
-# gather_properties calls lookup in list context and treats the second
-# element as "found", so the found flag has to be real: a bare undef value
-# would send every lookup down the ocfp_config_lookup fallback instead.
-#
-# Traversal is struct_lookup, as Genesis::Env::lookup does.  An earlier
-# version of this double checked a flat hash key, which agrees with the
-# real thing only while nothing is nested -- and every interesting case
-# here is nested.
-sub lookup {
-	my ($self, $key, $default) = @_;
-	my ($rest) = $key =~ /^bosh-configs\.cpi\.?(.*)$/;
-	return (wantarray ? ($default, undef) : $default) unless defined $rest;
-	return (wantarray ? ($self->{cpi}, '.') : $self->{cpi}) unless length $rest;
-	my ($value, $found) = Genesis::struct_lookup($self->{cpi}, $rest);
-	return (wantarray ? ($default, undef) : $default) unless $found;
-	return wantarray ? ($value, $found) : $value;
+my $kit = mock "Genesis::Kit::CpiConfigGP" => {
+	name    => 'gp-kit',
+	version => '1.0.0',
+	id      => sub {$_[0]->name.'/'.$_[0]->version},
+	kit_bug => sub {my ($self,$msg,@a) = @_; bail("Throwing a kit bug: ".$msg, @a)},
+};
+
+# One env per call so each subtest gets a fresh hook from init().
+my $seq = 0;
+sub mock_env {
+	my (%opts) = @_;
+	my $cpi = $opts{cpi} // {};
+	$seq++;
+	return mock "Genesis::Env::CpiConfigGP::$seq" => {
+		name             => "gp-env-$seq",
+		type             => 'bosh',
+		kit              => $kit,
+		iaas             => 'test-iaas',
+		cpi_name         => 'test_cpi',
+		cpi_credhub_base => '/cpi-config/properties/',
+		file             => 'gp-env.yml',
+
+		# gather_properties reads lookup in list context and treats the
+		# second element as "found", so the flag has to be real: a bare
+		# undef would send every lookup down the OCFP fallback instead.
+		#
+		# Traversal is struct_lookup, as Genesis::Env::lookup does.  A
+		# flat hash-key check agrees with the real thing only while
+		# nothing is nested, and every interesting case here is nested.
+		lookup => sub {
+			my ($self, $key, $default) = @_;
+			my ($rest) = $key =~ /^bosh-configs\.cpi\.?(.*)$/;
+			return (wantarray ? ($default, undef) : $default) unless defined $rest;
+			return (wantarray ? ($cpi, '.') : $cpi) unless length $rest;
+			my ($value, $found) = struct_lookup($cpi, $rest);
+			return (wantarray ? ($default, undef) : $default) unless $found;
+			return wantarray ? ($value, $found) : $value;
+		},
+
+		# The override pass deliberately reads raw, unevaluated values.
+		lookup_unevaled => sub {
+			my ($self, $key) = @_;
+			my ($rest) = ($key // '') =~ /^bosh-configs\.cpi\.?(.*)$/;
+			return $cpi unless defined($rest) && length $rest;
+			my ($value) = struct_lookup($cpi, $rest);
+			return $value;
+		},
+
+		ocfp_config_lookup => sub {
+			my ($self, $key, $default) = @_;
+			return wantarray ? ($default, undef) : $default;
+		},
+	};
 }
 
-# The override pass deliberately reads raw, unevaluated values.
-sub lookup_unevaled {
-	my ($self, $key) = @_;
-	my ($rest) = ($key // '') =~ /^bosh-configs\.cpi\.?(.*)$/;
-	return $self->{cpi} unless defined($rest) && length $rest;
-	my ($value) = Genesis::struct_lookup($self->{cpi}, $rest);
-	return $value;
-}
-
-sub ocfp_config_lookup { return (undef, 0) }
-
-sub cpi_credhub_base { '/cpi-config/properties/' }
-
-package Test::Hook;
-
-our @ISA = ('Genesis::Hook::CpiConfig');
-
-sub new {
-	my ($class, %opts) = @_;
-	return bless { env => $opts{env}, credhub_secrets => {} }, $class;
-}
-
-sub env  { $_[0]->{env} }
-sub iaas { 'test-iaas' }
-
-package main;
-
+# Constructed through init(), not blessed directly: a double that skips
+# real construction stays green while production breaks.
 sub gather {
 	my ($cpi, @map) = @_;
-	my $hook = Test::Hook->new(env => Test::FakeEnv->new(cpi => $cpi));
+	my $hook = Genesis::Hook::CpiConfig::gp_kit->init(env => mock_env(cpi => $cpi));
 	my $config = $hook->gather_properties(@map);
 	return ($config, $hook);
 }
