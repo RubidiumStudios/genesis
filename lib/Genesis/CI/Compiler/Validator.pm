@@ -779,9 +779,10 @@ DAG acyclicity.
 
 =head2 Warnings
 
-Warnings are collected alongside errors and surfaced by
-C<Genesis::Commands::Pipelines::_compile_pipeline>. Unlike errors they do
-not stop compilation.
+Warnings are collected alongside errors and printed by
+C<Genesis::CI::Compiler::compile> immediately after C<validate> returns,
+each prefixed C<warning:>. Unlike errors they do not stop compilation, so
+a pipeline carrying warnings still compiles and can still be applied.
 
 =over 4
 
