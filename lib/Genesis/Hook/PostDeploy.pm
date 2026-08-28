@@ -5,7 +5,7 @@ use warnings;
 use parent qw(Genesis::Hook);
 
 use Genesis;
-use Genesis::Term qw/in_controlling_terminal/;
+use Genesis::Term qw/in_controlling_terminal decolorize/;
 use Genesis::UI qw/prompt_for_boolean/;
 use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
@@ -29,6 +29,215 @@ sub deploy_successful {
 
 sub data {
 	return $_[0]->{data} ||= {};
+}
+
+sub interactive {
+	return $_[0]->{interactive} // 0;
+}
+
+sub validate_post_deploy_steps {
+	my ($self, $steps) = @_;
+	bug("validate_post_deploy_steps takes an arrayref of steps")
+		unless ref($steps) eq 'ARRAY';
+
+	my (%position, $i);
+	$position{$_->{id}} = $i++ for grep {defined $_->{id}} @$steps;
+
+	my %seen;
+	for my $step (@$steps) {
+		bug("post-deploy step is not a hashref") unless ref($step) eq 'HASH';
+		for my $key (qw/id label method retry/) {
+			bug(
+				"post-deploy step %s is missing its '%s' key",
+				defined($step->{id}) ? "'$step->{id}'" : '(unnamed)', $key
+			) unless defined $step->{$key};
+		}
+		my $id = $step->{id};
+		bug("duplicate post-deploy step id '%s'", $id) if $seen{$id}++;
+
+		my $method = $step->{method};
+		bug(
+			"post-deploy step '%s' has method '%s', which this hook cannot resolve",
+			$id, $method
+		) unless ref($method) eq 'CODE' || $self->can($method);
+
+		bug("post-deploy step '%s' has a non-arrayref args", $id)
+			if defined($step->{args}) && ref($step->{args}) ne 'ARRAY';
+
+		for my $dep (sort keys %{$step->{needs} // {}}) {
+			# A prerequisite absent from the list entirely is legal: kits build
+			# step lists conditionally, and a step that was never declared
+			# cannot have failed.  A prerequisite declared LATER is an ordering
+			# bug -- list order is execution order.
+			bug(
+				"post-deploy step '%s' needs '%s', which runs later -- list order ".
+				"is dependency order", $id, $dep
+			) if exists $position{$dep} && $position{$dep} >= $position{$id};
+			my $policy = $step->{needs}{$dep};
+			bug(
+				"post-deploy step '%s' has unknown policy '%s' for prerequisite ".
+				"'%s' (expected skip, run, or abort)", $id, $policy // '', $dep
+			) unless ($policy // '') =~ /^(skip|run|abort)$/;
+		}
+	}
+	return 1;
+}
+
+sub run_post_deploy_steps {
+	my ($self, $steps, %opts) = @_;
+	$self->validate_post_deploy_steps($steps);
+
+	my %status = map {($_->{id} => 'unrun')} @$steps;
+	my (%root, @failed, @skipped, @notes, %durations, $aborted);
+	my $report = sub {
+		return {
+			failed    => \@failed,
+			skipped   => \@skipped,
+			notes     => \@notes,
+			aborted   => $aborted,
+			status    => \%status,
+			durations => \%durations,
+		};
+	};
+
+	# Post-deploy steps configure the thing that was just deployed; after a
+	# failed deploy there is nothing to configure, and the runner owns that
+	# gate so no kit can forget it.  Cleanup-style step lists opt out.
+	return $report->()
+		unless $self->deploy_successful || $opts{even_if_failed};
+
+	STEP: for my $i (0..$#$steps) {
+		my $step = $steps->[$i];
+		my ($id, $label, $retry) = @{$step}{qw/id label retry/};
+
+		# Resolve ALL triggered edges before acting, strongest policy wins
+		# (abort > skip > run) -- resolving edges one at a time would let the
+		# alphabetical order of prerequisite ids decide whether an abort
+		# fires, and a step could end up both noted and skipped.
+		my %rank = (run => 1, skip => 2, abort => 3);
+		my ($policy, $trigger) = ('', undef);
+		for my $dep (sort keys %{$step->{needs} // {}}) {
+			next unless ($status{$dep} // '') =~ /^(failed|skipped)$/;
+			if (($rank{$step->{needs}{$dep}} // 0) > ($rank{$policy} // 0)) {
+				($policy, $trigger) = ($step->{needs}{$dep}, $dep);
+			}
+		}
+
+		if ($policy eq 'abort') {
+			$aborted = $id;
+			$status{$id} = 'skipped';
+			push @skipped, {
+				id => $id, label => $label, retry => $retry,
+				reason => 'aborted', blocked_by => $trigger,
+				root_cause => $root{$trigger} // $trigger,
+			};
+			push @skipped, map {
+				+{id => $_->{id}, label => $_->{label}, retry => $_->{retry},
+					reason => 'aborted'}
+			} @{$steps}[$i+1..$#$steps];
+			last STEP;
+		} elsif ($policy eq 'skip') {
+			$status{$id} = 'skipped';
+			$root{$id} = $root{$trigger} // $trigger;
+			push @skipped, {
+				id => $id, label => $label, retry => $retry,
+				reason => 'blocked', blocked_by => $trigger,
+				root_cause => $root{$id},
+			};
+			next STEP;
+		} elsif ($policy eq 'run') {
+			push @notes, {id => $id, label => $label, blocked_by => $trigger};
+		}
+
+		my $method = $step->{method};
+		my @args = @{$step->{args} // []};
+		my $tstart = gettimeofday;
+		my ($result, $error);
+		# Two-variable eval on purpose: `my $r = eval {...}` would turn a
+		# dying step into undef and misread it as "nothing to do".
+		my $ok = eval {
+			$result = ref($method) eq 'CODE'
+				? $method->($self, @args)
+				: $self->$method(@args);
+			1;
+		};
+		$durations{$id} = gettimeofday - $tstart;
+		if (!$ok) {
+			my $err = $@ // '';
+			# bail() and bug() mean "stop genesis now"; swallowing them into
+			# the report would silently change their meaning for every kit
+			# (and discard bail's exit code).  Only foreign exceptions are
+			# step failures.
+			die $err if decolorize($err) =~ /^\s*\[FATAL\]/;
+			($error = decolorize($err)) =~ s/\s+/ /g;
+			$error =~ s/^\s+|\s+$//g;
+			$error = substr($error, 0, 197).'...' if length($error) > 200;
+			$result = 0;
+		}
+		$status{$id} = !defined($result) ? 'noop' : $result ? 'ok' : 'failed';
+		if ($status{$id} eq 'failed') {
+			$root{$id} = $id;
+			push @failed, {
+				id => $id, label => $label, retry => $retry,
+				(defined $error ? (error => $error) : ()),
+			};
+		}
+	}
+	return $report->();
+}
+
+sub report_post_deploy_results {
+	my ($self, $report, %opts) = @_;
+	my @failed  = @{$report->{failed}  // []};
+	my @skipped = @{$report->{skipped} // []};
+	my @notes   = @{$report->{notes}   // []};
+	return 1 unless @failed || @skipped;
+
+	my %label = map {($_->{id} => $_->{label})} @failed, @skipped;
+	my $cmd = scalar $self->env->get_call_path_with_env;
+	# Literal token substitution, not sprintf: retry commands that need no
+	# call path (plain bosh/safe commands) must not warn, and a literal %
+	# in a template must survive.
+	my $render_retry = sub {
+		(my $out = $_[0]) =~ s/\Q%s\E/$cmd/g;
+		return $out;
+	};
+
+	my $count = @failed + @skipped;
+	my $intro = $opts{intro} // sprintf(
+		"The deployment succeeded, but %d post-deploy step%s did not complete:",
+		$count, $count == 1 ? '' : 's'
+	);
+	my $outro = $opts{outro} //
+		"The deployment itself is recorded.  Fix the cause, then re-run the ".
+		"deploy or complete the steps individually with the commands above.";
+
+	error(
+		"\n%s\n%s\n\n%s",
+		$intro,
+		join("\n",
+			(map {
+				sprintf("[[  - >>#R{%s}%s - retry with #G{%s}",
+					$_->{label},
+					defined $_->{error} ? " ($_->{error})" : '',
+					$render_retry->($_->{retry}))
+			} @failed),
+			(map {
+				sprintf("[[  - >>#Y{%s} - not run (%s); once fixed: #G{%s}",
+					$_->{label},
+					$_->{reason} eq 'aborted' && !defined $_->{blocked_by}
+						? 'post-deploy aborted'
+						: 'blocked by '.($label{$_->{blocked_by}} // $_->{blocked_by}),
+					$render_retry->($_->{retry}))
+			} @skipped),
+			(map {
+				sprintf("[[  - >>#C{%s} ran although %s had failed",
+					$_->{label}, ($label{$_->{blocked_by}} // $_->{blocked_by}))
+			} @notes),
+		),
+		$outro
+	);
+	return 0;
 }
 
 sub update_director_network_config {
@@ -60,6 +269,11 @@ sub update_director_network_config {
 	$tstart = gettimeofday;
 	$env->vault->set_path($env->exodus_base.'/network', $network, flatten => 1, clear => 1);
 	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 1, 3));
+
+	# Explicit success: without it the return value is whatever info()
+	# returned, and a fully successful upload reads as "nothing to do" to
+	# run_post_deploy_steps.  Failures above report by bailing.
+	return 1;
 }
 
 sub command {
@@ -258,7 +472,9 @@ sub upload_runtime_configs {
 		return 0;
 	}
 	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
-	return $self->done(1);
+	# A plain boolean, not $self->done(1): marking the whole hook complete
+	# is the caller's decision, not a side effect of one step.
+	return 1;
 }
 
 sub results {

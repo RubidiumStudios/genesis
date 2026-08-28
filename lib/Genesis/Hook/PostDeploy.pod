@@ -143,6 +143,25 @@ B<Examples:>
     $data->{custom_key} = 'custom_value';
     # Returns: {} on first call, then the same hash reference on subsequent calls
 
+=head2 interactive
+
+    my $bool = $hook->interactive;
+
+Returns whether the hook is running interactively, as recorded by the
+C<interactive> value passed to C<init>. Mirrors the accessor of the same
+name on C<Genesis::Hook::RuntimeConfig>; coderef steps run by
+C<run_post_deploy_steps> receive C<$self> and can consult it before
+prompting.
+
+B<Returns:> The stored interactive flag, or C<0> when none was set.
+
+B<Examples:>
+
+    if ($hook->interactive) {
+        # safe to prompt the operator
+    }
+    # Returns: 1 when running interactively, 0 otherwise
+
 =head2 update_director_network_config
 
     $hook->update_director_network_config;
@@ -173,13 +192,17 @@ C</network>.
 
 =back
 
-B<Returns:> Nothing. Returns immediately (without completing the upload) if
-the environment does not support building cloud configs.
+B<Returns:> C<1> on success. Returns nothing (without completing the upload)
+if the environment does not support building cloud configs -- the
+"nothing to do" convention of C<run_post_deploy_steps>. Failures in the
+underlying hook, upload, or vault write report by raising rather than by
+return value.
 
 B<Examples:>
 
     $hook->update_director_network_config;
-    # Returns: nothing; uploads config and stores network details in exodus
+    # Returns: 1 after uploading the config and storing network details
+    # in exodus; nothing when the env cannot build cloud configs
 
 =head2 command
 
@@ -389,7 +412,9 @@ C<0> and logs an error if the C<runtime-config> hook fails.
 
 =item *
 
-The result of C<$self->done(1)> on success.
+C<1> on success. (A plain boolean, not C<< $self->done(1) >>: marking the
+hook complete is the caller's decision, and this method is run as one step
+among several by C<run_post_deploy_steps>.)
 
 =back
 
@@ -423,7 +448,239 @@ with a formatted list of the invalid entries.
 B<Examples:>
 
     $hook->upload_runtime_configs;
-    # Returns: result of done(1) on success, 0 on hook failure, nothing if unconfigured
+    # Returns: 1 on success, 0 on hook failure, nothing if unconfigured
+
+=head2 run_post_deploy_steps
+
+    my $report = $hook->run_post_deploy_steps(\@steps, %opts);
+
+Executes a declared list of post-deploy steps in order, honouring
+prerequisite edges between them, and returns a structured report of what
+ran, what failed, and what was deliberately not run. Kits use this instead
+of a hand-rolled loop so that a step whose prerequisite failed can be
+skipped, tolerated, or turned into a hard stop -- declaratively.
+
+Each step is a hash reference:
+
+    {
+      id     => 'dns-rc',                     # unique within the list
+      label  => 'bosh-dns runtime config',    # operator-facing name
+      method => '_upload_dns_runtime_config', # method name or coderef
+      args   => [@args],                      # optional invocation arguments
+      retry  => '%s do rc dns -y',            # operator retry command
+      needs  => { 'rc-releases' => 'skip' },  # optional prerequisite edges
+    }
+
+C<method> is either the name of a method on the hook (validated with
+C<< $self->can >>) invoked as C<< $self->$method(@args) >>, or a code
+reference invoked as C<< $code->($self, @args) >>. In C<retry>, every
+literal C<%s> token is later replaced by the environment's call path (see
+C<report_post_deploy_results>); templates without the token are legal.
+
+A step method returns C<1> for success, a defined false value for failure,
+and C<undef> for "nothing to do" (a noop). A noop never blocks dependent
+steps. Exceptions raised by a step are handled in two classes: fatals from
+C<bail()> or C<bug()> propagate out of the runner unchanged (they mean
+"stop genesis now", and capturing them would silently change their meaning
+for every kit), while any other exception marks the step failed with the
+error message recorded -- decolorized, collapsed to one line, and
+truncated -- so one dying step cannot destroy the report the operator
+needs.
+
+List order is execution order and therefore also dependency order:
+C<needs> may only reference an id declared B<earlier> in the list. An id
+absent from the list entirely is treated as satisfied -- kits build step
+lists conditionally, and a step that was never declared cannot have
+failed. Each C<needs> entry maps a prerequisite id to the policy applied
+when that prerequisite has failed or was itself blocked:
+
+=over 4
+
+=item C<skip>
+
+Do not run this step; report it as blocked (with its retry command), and
+block its own dependents transitively.
+
+=item C<run>
+
+Run the step anyway, recording a note that names the failed prerequisite.
+
+=item C<abort>
+
+Stop the runner: this step and every remaining step are reported as not
+run.
+
+=back
+
+When more than one edge on a step has triggered, all edges are resolved
+before acting and the strongest policy wins: C<abort> beats C<skip> beats
+C<run>. A step therefore has exactly one outcome.
+
+By default, nothing is invoked when the deployment itself failed
+(C<deploy_successful> is false): every step is reported as C<unrun>. Pass
+C<< even_if_failed => 1 >> for step lists that should run regardless, such
+as cleanup steps.
+
+The runner prints nothing; steps own their own progress output. Wall-time
+per invoked step is recorded in the report's C<durations> map.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\@steps>
+
+Array reference of step hash references, as described above.
+
+=item C<%opts>
+
+C<< even_if_failed => 1 >> runs the steps even when the deploy failed.
+
+=back
+
+B<Returns:> A hash reference:
+
+    {
+      failed    => [ {id, label, retry, error?} ... ],
+      skipped   => [ {id, label, retry, reason, blocked_by?, root_cause?} ... ],
+      notes     => [ {id, label, blocked_by} ... ],  # ran under `run` policy
+      aborted   => $step_id_or_undef,   # step whose abort edge fired
+      status    => { $id => 'ok'|'failed'|'skipped'|'noop'|'unrun', ... },
+      durations => { $id => $seconds, ... },  # invoked steps only
+    }
+
+C<reason> is C<blocked> or C<aborted>; C<blocked_by> is the immediate
+prerequisite id (present for blocked steps and for the step that tripped
+an abort); C<root_cause> is the id of the originating failure when
+blocking was transitive. C<status> holds a value for B<every> declared
+step, including those never reached after an abort (C<unrun>).
+
+B<Errors:>
+
+Raises (via C<bug()>, through C<validate_post_deploy_steps>) on a
+malformed step list, and re-raises any C<bail()>/C<bug()> escaping a step
+method.
+
+B<Examples:>
+
+    my $report = $hook->run_post_deploy_steps([
+      { id => 'rc-releases', label => 'runtime-config releases',
+        method => 'upload_runtime_config_releases', retry => '%s deploy' },
+      { id => 'dns-rc', label => 'bosh-dns runtime config',
+        method => '_upload_dns_runtime_config', retry => '%s do rc dns -y',
+        needs => { 'rc-releases' => 'skip' } },
+    ]);
+    # Returns: report hashref; dns-rc is skipped if rc-releases failed
+
+=head2 validate_post_deploy_steps
+
+    $hook->validate_post_deploy_steps(\@steps);
+
+Validates a step list for C<run_post_deploy_steps> (which calls this
+itself); public so kits and their tests can check declarations statically.
+Violations are developer errors in the kit's step list, not runtime
+conditions, so they raise immediately instead of turning into a
+half-executed post-deploy.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\@steps>
+
+Array reference of step hash references (see C<run_post_deploy_steps>).
+
+=back
+
+B<Returns:> C<1> when the list is valid.
+
+B<Errors:>
+
+All raised via C<bug()>, naming the offending step id:
+
+=over 4
+
+=item *
+
+A step is not a hash reference, or is missing one of the required keys
+C<id>, C<label>, C<method>, or C<retry>.
+
+=item *
+
+Two steps share an id.
+
+=item *
+
+C<method> is a string that the hook cannot resolve
+(C<< $self->can($method) >> is false), or is neither a string nor a code
+reference; C<args> is defined but not an array reference.
+
+=item *
+
+A C<needs> entry references an id declared later in the list (list order
+is dependency order), or carries a policy other than C<skip>, C<run>, or
+C<abort>.
+
+=back
+
+B<Examples:>
+
+    $hook->validate_post_deploy_steps([
+      { id => 'a', label => 'A', method => 'step_a', retry => '%s deploy' },
+    ]);
+    # Returns: 1; raises via bug() on any malformed declaration
+
+=head2 report_post_deploy_results
+
+    my $ok = $hook->report_post_deploy_results($report, %opts);
+
+Renders the operator-facing report for a C<run_post_deploy_steps> result
+and adjudicates it: returns C<1> (rendering nothing) when no step failed
+or was blocked, otherwise renders the report and returns C<0>. The return
+value is shaped for the tail of a kit's C<perform>:
+
+    return $self->done($self->report_post_deploy_results($report));
+
+The rendered block lists every failed step (with its captured error, if
+any) and every blocked step (with what blocked it), each with its retry
+command -- C<%s> tokens in retry templates are replaced with the
+environment's call path (C<< scalar $env->get_call_path_with_env >>).
+Steps that ran under a C<run> policy despite a failed prerequisite are
+rendered as informational notes.
+
+Note that when C<perform> subsequently returns false through C<done(0)>,
+C<Genesis::Kit::run_hook> bails with a generic "Could not run
+'post-deploy' hook successfully!" B<after> this report -- deliberate, and
+the only failure signal that reaches the caller.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$report>
+
+The hash reference returned by C<run_post_deploy_steps>.
+
+=item C<%opts>
+
+C<< intro => $text >> and C<< outro => $text >> replace the default lead
+and tail sentences. Both are used verbatim -- they are B<not> format
+strings, so counts, percent signs, and step lists need no escaping. The
+defaults are kit-neutral ("The deployment succeeded, but N post-deploy
+step(s) did not complete:" / "The deployment itself is recorded. ...");
+director-specific wording belongs in the kit's override.
+
+=back
+
+B<Returns:> C<1> when the report is clean, C<0> after rendering failures
+and blocked steps.
+
+B<Examples:>
+
+    my $ok = $hook->report_post_deploy_results($report,
+      outro => 'The director is up and its exodus data is recorded.  '.
+               'Fix the cause, then re-run the deploy.');
+    # Returns: 1 on a clean report; 0 after rendering the failure block
 
 =head2 results
 
