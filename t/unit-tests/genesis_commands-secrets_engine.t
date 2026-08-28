@@ -97,6 +97,18 @@ subtest 'bao alone, safe too old' => sub {
 		'an installed-but-undriveable bao is not reported as absent';
 };
 
+subtest 'bao alone, safe is a dev build' => sub {
+	# A dev build reports `safe vdev/<branch>/<sha>`, which carries no ordinal
+	# to compare against -- new_enough reads it as older than everything.  It
+	# is the build an operator is most likely to be running while OpenBao
+	# support is still being worked on, so refusing it denies the engine to
+	# exactly the people testing it.
+	is engine_check_with(
+		bao  => 'OpenBao v2.6.1 (abc)',
+		safe => 'safe vdev/perf-improvements/d6a138d',
+	), '', 'a dev safe is taken to be new enough to drive OpenBao';
+};
+
 subtest 'bao too old, safe new enough' => sub {
 	my $err = engine_check_with(
 		bao  => 'OpenBao v2.5.0 (abc)',

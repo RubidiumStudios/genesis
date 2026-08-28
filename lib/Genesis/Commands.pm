@@ -1117,7 +1117,9 @@ sub check_embedded_genesis { # {{{
 } # }}}
 
 sub check_version { # {{{
-	my ($name, $min, $cmd, @remainder) = @_;
+	my $opts = {};
+	%$opts = (%$opts, %$_) for (grep {ref($_) eq 'HASH'} @_);
+	my ($name, $min, $cmd, @remainder) = grep {ref($_) ne 'HASH'} @_;
 	my ($version, $regex, $url, $path);
 	if ($cmd) {
 		($regex, $url, my $path_src) = @remainder;
@@ -1142,8 +1144,16 @@ sub check_version { # {{{
 	if ($regex) {
 		$version =~ $regex; $v = $1;
 		if ($v && $v =~ /^dev\b/) {
-			debug("#Y{Version $v} of #C{$name} (development) being used - minimum of #W{$min} needed.");
-			return;
+			# A build from source reports no ordinal, so there is nothing to
+			# compare.  A caller that knows which release such a build must
+			# postdate says so, and the comparison happens against that; the
+			# rest keep the older reading, where the minimum is only a floor.
+			unless ($opts->{dev_version}) {
+				debug("#Y{Version $v} of #C{$name} (development) being used - minimum of #W{$min} needed.");
+				return;
+			}
+			debug("#Y{Version $v} of #C{$name} (development) being read as #W{$opts->{dev_version}}.");
+			$v = $opts->{dev_version};
 		}
 		return "Could not determine version of $name from `#M{$cmd}`: Got '#C{$version}'"
 			unless $v && semver($v);
@@ -1163,6 +1173,14 @@ sub check_version { # {{{
 # check and fail later inside `safe local`, where the cause is far less
 # obvious.
 my $SAFE_OPENBAO_MIN = '1.20.0';
+
+# A safe built from source reports `safe vdev/<branch>/<sha>`, which carries
+# no ordinal: new_enough reads it as older than every release, and the
+# OpenBao gate would deny the engine to exactly the people building safe to
+# work on it.  Read such a build as the first release that could have
+# produced it.  Mapped rather than waved through, so raising the minimum
+# past this stops qualifying dev builds instead of silently passing them.
+my $SAFE_DEV_VERSION = '1.20.1';
 my @SECRETS_ENGINES = (
 	# Name,  Version, Command,             Pattern                    Source
 	["vault", "1.9.0", "vault -v 2>/dev/null", qr(.*vault v(\S+).*)i, "https://developer.hashicorp.com/vault/install"],
@@ -1206,7 +1224,9 @@ sub which_binary { # {{{
 sub _safe_drives_openbao { # {{{
 	my ($out) = run({stderr => undef}, 'safe -v 2>&1');
 	return 0 unless $out && $out =~ qr(safe v(\S+));
-	return new_enough($1, $SAFE_OPENBAO_MIN) ? 1 : 0;
+	my $v = $1;
+	$v = $SAFE_DEV_VERSION if $v =~ /^dev\b/;
+	return new_enough($v, $SAFE_OPENBAO_MIN) ? 1 : 0;
 } # }}}
 
 sub check_prereqs { # {{{
@@ -1223,7 +1243,8 @@ sub check_prereqs { # {{{
 		["git",     "1.8.0", "git --version   2>/dev/null",                     qr(.*version\s+(\S+).*)],
 		["jq",        "1.6", "jq --version    2>/dev/null",                     qr(^jq-([\.0-9]+)),       "https://stedolan.github.io/jq/download/"],
 		["spruce", "1.28.0", "spruce -v       2>/dev/null",                     qr(.*version\s+(\S+).*)i, "https://github.com/geofffranks/spruce/releases"],
-		["safe",    "1.6.1", "safe -v         2>&1",                            qr(safe v(\S+)),          "https://github.com/starkandwayne/safe/releases"],
+		[{dev_version => $SAFE_DEV_VERSION},
+		 "safe",    "1.6.1", "safe -v         2>&1",                            qr(safe v(\S+)),          "https://github.com/starkandwayne/safe/releases"],
 		# The secrets engine is checked separately: which ones are acceptable
 		# depends on the version of safe that has to drive it.
 		["openssl", "1.1.1", "openssl version 2>/dev/null",                     qr(OpenSSL ([\.0-9]+) .*),"https://www.openssl.org/source/"],

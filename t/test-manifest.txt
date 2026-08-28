@@ -104,6 +104,7 @@ unit-tests/service_credhub-core.t  # Service::Credhub unit tests (constructor, a
 unit-tests/genesis_commands-core.t  # Genesis::Commands infrastructure (registration, parsing, dispatch deps)
 unit-tests/genesis_commands-feature_compatibility.t  # deploy/info/version renderer helpers for feature opt-in
 unit-tests/genesis_commands-secrets_engine.t  # vault-or-openbao prereq, gated on the safe version
+unit-tests/genesis_commands-check_version.t  # version comparison, including builds reporting no ordinal
 unit-tests/pack-arguments.t                   # pack's argument validation and usage text
 unit-tests/genesis-cli.t                              # bin/genesis loads; cross-command definition sanity
 unit-tests/genesis_core-cli.t                         # Commands::Core CLI registration (config)

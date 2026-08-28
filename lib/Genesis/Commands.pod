@@ -1356,6 +1356,7 @@ B<Returns:> Nothing.
 
   my $err = check_version($name, $min, $cmd, $regex, $url, $path_src);
   my $err = check_version($name, $min, '', $version, $path, $url);
+  my $err = check_version(\%opts, $name, $min, $cmd, $regex, $url);
 
 Checks whether a tool meets a minimum version requirement.
 
@@ -1369,9 +1370,22 @@ C<$version> and C<$path>.
 In development mode (C<GENESIS_DEV_MODE> set) a version string containing
 C<'development'> is accepted unconditionally.
 
+A version beginning C<dev> -- what a tool built from source reports, such as
+C<safe vdev/E<lt>branchE<gt>/E<lt>shaE<gt>> -- carries no ordinal to compare
+against.  By default such a build is accepted, treating the minimum as a
+floor a source build is assumed to clear.  A caller that knows which release
+a dev build must postdate passes C<dev_version>, and the comparison is made
+against that instead of skipped, so raising C<$min> past it stops qualifying
+dev builds rather than passing them silently.
+
 B<Parameters:>
 
 =over 4
+
+=item C<\%opts>
+
+Optional, and may appear in any position; several are merged.  Recognises
+C<dev_version>, the release to read a C<dev> version as.
 
 =item C<$name>
 
@@ -1402,6 +1416,11 @@ B<Examples:>
     qr(^curl\s+(\S+)));
   # Returns: undef  (if curl meets the minimum version)
   # Returns: "curl v7.29.0 is installed at /usr/bin/curl, ..."  (if too old)
+
+  my $err = check_version({dev_version => '1.20.1'}, 'safe', '1.6.1',
+    'safe -v 2>&1', qr(safe v(\S+)));
+  # `safe vdev/perf-improvements/d6a138d` is compared as 1.20.1
+  # Returns: undef  (1.20.1 clears the 1.6.1 minimum)
 
 =head2 check_secrets_engine
 
@@ -1475,6 +1494,14 @@ OpenBao support arrived in safe 1.20.0. Below that, safe shells out to
 C<vault> unconditionally, so a C<bao> on the PATH is of no use to Genesis
 however new it is.
 
+A safe built from source reports C<safe vdevE<sol>E<lt>branchE<gt>E<sol>E<lt>shaE<gt>>,
+which has no ordinal to compare and would otherwise read as older than every
+release -- denying OpenBao to the people most likely to be building safe in
+order to work on it.  Such a build is read as 1.20.1, the first release that
+could have produced one carrying OpenBao support.  It is mapped rather than
+waved through, so raising the minimum past 1.20.1 correctly stops qualifying
+dev builds.
+
 B<Returns:> 1 when safe is 1.20.0 or newer, 0 otherwise -- including when
 safe is absent or its version cannot be parsed, since neither case can be
 shown to support OpenBao.
@@ -1486,6 +1513,9 @@ B<Examples:>
 
   _safe_drives_openbao();
   # Returns: 0  (safe v1.9.0, which predates engine selection)
+
+  _safe_drives_openbao();
+  # Returns: 1  (safe vdev/perf-improvements/d6a138d, read as 1.20.1)
 
 =head2 _gate_pipeline_on_legacy_ci_yml
 
