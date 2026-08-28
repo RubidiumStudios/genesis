@@ -168,6 +168,94 @@ subtest 'deployment_cache_cleanup - safe when not set up' => sub {
 };
 
 # ===========================================================================
+# deployment_cache_preserve - copies state and store files to the repository
+# ===========================================================================
+subtest 'deployment_cache_preserve' => sub {
+	local $ENV{GENESIS_TESTING} = 1;
+
+	my $env = make_env_with_kit('t/src/simple', 'test-env');
+	my $top = $env->top;
+
+	$env->deployment_cache_setup();
+	my $files = $env->{__deployment_cache_files};
+	put_file($files->{state}, '{"current_vm_cid": "vm-1234"}');
+	put_file($files->{store}, "store: contents\n");
+
+	my $manifests_dir = $top->path('.genesis/manifests');
+	rmtree($manifests_dir) if -d $manifests_dir;
+
+	$env->deployment_cache_preserve();
+
+	ok(-d $manifests_dir, "manifests directory created");
+	ok(-f "$manifests_dir/test-env-state.json", "state file preserved to repository");
+	is(slurp("$manifests_dir/test-env-state.json"), '{"current_vm_cid": "vm-1234"}',
+		"state file contents preserved");
+	ok(-f "$manifests_dir/test-env-store.yml", "store file preserved to repository");
+	is(slurp("$manifests_dir/test-env-store.yml"), "store: contents\n",
+		"store file contents preserved");
+
+	done_testing;
+};
+
+# ===========================================================================
+# deployment_cache_preserve - overwrites a stale repository copy
+# ===========================================================================
+subtest 'deployment_cache_preserve - overwrites stale copy' => sub {
+	local $ENV{GENESIS_TESTING} = 1;
+
+	my $env = make_env_with_kit('t/src/simple', 'test-env');
+	my $top = $env->top;
+
+	$env->deployment_cache_setup();
+	put_file($env->{__deployment_cache_files}{state}, '{"current_vm_cid": "vm-new"}');
+	put_file($top->path('.genesis/manifests/test-env-state.json'), '{"current_vm_cid": "vm-old"}');
+
+	$env->deployment_cache_preserve();
+
+	is(slurp($top->path('.genesis/manifests/test-env-state.json')), '{"current_vm_cid": "vm-new"}',
+		"stale repository state file replaced by the cached one");
+
+	done_testing;
+};
+
+# ===========================================================================
+# deployment_cache_preserve - skips files missing from the cache
+# ===========================================================================
+subtest 'deployment_cache_preserve - skips missing files' => sub {
+	local $ENV{GENESIS_TESTING} = 1;
+
+	my $env = make_env_with_kit('t/src/simple', 'test-env');
+	my $top = $env->top;
+
+	$env->deployment_cache_setup();
+	put_file($env->{__deployment_cache_files}{state}, '{"current_vm_cid": "vm-1234"}');
+	# no store file in the cache
+
+	my $manifests_dir = $top->path('.genesis/manifests');
+	rmtree($manifests_dir) if -d $manifests_dir;
+
+	lives_ok { $env->deployment_cache_preserve() } "preserve succeeds with only a state file";
+
+	ok(-f "$manifests_dir/test-env-state.json", "state file preserved");
+	ok(!-e "$manifests_dir/test-env-store.yml", "no store file created");
+
+	done_testing;
+};
+
+# ===========================================================================
+# deployment_cache_preserve - safe when cache not set up
+# ===========================================================================
+subtest 'deployment_cache_preserve - safe when not set up' => sub {
+	local $ENV{GENESIS_TESTING} = 1;
+
+	my $env = make_env_with_kit('t/src/simple', 'test-env');
+
+	lives_ok { $env->deployment_cache_preserve() } "preserve without setup does not error";
+
+	done_testing;
+};
+
+# ===========================================================================
 # deployment_cache_setup - hyphenated environment names
 # ===========================================================================
 subtest 'deployment_cache_setup - hyphenated env name' => sub {
