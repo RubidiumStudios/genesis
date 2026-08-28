@@ -4143,6 +4143,33 @@ sub _pre_deploy {
 }
 
 # }}}
+# _last_manifest_integrity_issue - report a stale locally-stored manifest {{{
+sub _last_manifest_integrity_issue {
+	my ($self, $last_manifest) = @_;
+
+	# Deployment archives carry their own manifest, so there is no local copy
+	# that could have drifted from what was deployed.
+	return undef unless ref($last_manifest) eq 'HASH'
+		&& ($last_manifest->{source}||'') ne 'exodus-deployments'
+		&& ref($last_manifest->{manifest}) eq 'HASH'
+		&& $last_manifest->{manifest}{path};
+
+	my $expected_sha1 = $last_manifest->{manifest_sha1};
+	return
+		"Cannot confirm local cached deployment manifest pertains to ".
+		"the current deployment (sha1 sum missing from exodus data)."
+		unless defined($expected_sha1) && $expected_sha1 ne '';
+
+	return
+		"Manifest in the deployment archive does not match the manifest in the ".
+		"local repository; perhaps you need to perform a #C{git pull}.  #y{Differences ".
+		"will not be accurate for this deployment compared to what was last deployed.}"
+		unless ($last_manifest->{manifest}{sha1}||'') eq $expected_sha1;
+
+	return undef;
+}
+
+# }}}
 # _deploy_create_env - handle create-env deployment {{{
 sub _deploy_create_env {
 	my ($self, %opts) = @_;
@@ -4173,35 +4200,19 @@ sub _deploy_create_env {
 	}
 
 	# Validate manifest consistency
-	if ($last_manifest_path && ($last_manifest->{source}||'') ne 'exodus-deployments') {
-		# Legacy method of storing state files, and possibly manifests
-		my $last_state_path = $last_manifest->{state}{path};
-		my $last_manifest_repo_path = $last_state_path =~ s/-state\.yml$/.yml/r;
-		my $last_repo_sha1 = sha1_hex(slurp($last_manifest_repo_path));
-		my $issue = '';
-
-		if (!defined($last_manifest_sha1) || $last_manifest_sha1 eq '') {
-			$issue = "Cannot confirm local cached deployment manifest pertains to ".
-			         "the current deployment (sha1 sum missing from exodus data).";
-		} elsif ($last_repo_sha1 ne $last_manifest_sha1) {
-			$issue = "Manifest in the deployment archive does not match the manifest in the ".
-			         "local repository; perhaps you need to perform a #C{git pull}.  #y{Differences ".
-			         "will not be accurate for this deployment compared to what was last deployed.}";
-		}
-		if ($issue) {
-			$issue .= "  #R{This may mean your state file is also out of date!}";
-			if (in_controlling_terminal || !$noprompt) {
-				warning("\n".$issue);
-				prompt_for_boolean(
-					"Proceed with BOSH create-env for the #C{${\($self->name)}} anyways? [y|n] ",
-					0
-				) or $self->_cleanup_and_bail("Aborted!\n");
-				$self->notify("\nchecking for the currently deployed manifest...");
-			} else {
-				bail(
-					"$issue\n\nRefusing to deploy to protect integrity of the environment."
-				);
-			}
+	if (my $issue = $self->_last_manifest_integrity_issue($last_manifest)) {
+		$issue .= "  #R{This may mean your state file is also out of date!}";
+		if (in_controlling_terminal || !$noprompt) {
+			warning("\n".$issue);
+			prompt_for_boolean(
+				"Proceed with BOSH create-env for the #C{${\($self->name)}} anyways? [y|n] ",
+				0
+			) or $self->_cleanup_and_bail("Aborted!\n");
+			$self->notify("\nchecking for the currently deployed manifest...");
+		} else {
+			bail(
+				"$issue\n\nRefusing to deploy to protect integrity of the environment."
+			);
 		}
 	}
 
