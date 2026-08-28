@@ -893,6 +893,93 @@ my $alias_ocfp_config = {
 	},
 };
 
+# A catalog whose keys are well-formed, but where one target's name occurs
+# inside another key.  `_ip` denotes a single value and `_a`/`_b` a range; a
+# target uses one form or the other, never both, and never `_ip_a`.
+my $embedded_name_ocfp_config = {
+	vpc => {
+		azs => {
+			'az1' => { cloud_properties => '{"zone": "us-east-1a"}' },
+		},
+		cidr_block => '10.8.0.0/20',
+		dns        => '1.1.1.1',
+		id         => 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxx08',
+		region     => 'us-east-1',
+		sgs => {
+			default => {
+				'description' => 'Default security group',
+				'id'          => 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx08',
+				'name'        => 'default',
+			},
+		},
+		subnets => {
+			'ocfp-0' => {
+				az => 'az1', cidr_block => '10.8.0.0/24',
+				gateway => '10.8.0.1', dns => '10.8.0.2',
+				'reserved-ips' => {
+					'bosh_ip'      => '10.8.0.5',
+					# A different target whose key contains "bosh_ip".
+					'ocfp_bosh_ip' => '10.8.0.9',
+				},
+			},
+		},
+	},
+};
+
+subtest '_get_reserved_allocation - another target key containing the name is not claimed' => sub {
+	plan tests => 2;
+
+	# The match is against the start of the key, not anywhere within it:
+	# ocfp_bosh_ip belongs to ocfp_bosh, and sweeping it into bosh's
+	# allocation hands bosh a static range covering someone else's address.
+	my $env  = make_deploy_env(ocfp_config => $embedded_name_ocfp_config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+	my $subnet = $hook->subnets->{'ocfp-0'};
+
+	my ($bosh_alloc) = $hook->_get_reserved_allocation('bosh', $subnet);
+	is($bosh_alloc->range, '10.8.0.5',
+		'bosh claims only its own bosh_ip, not the ocfp_bosh_ip beside it');
+
+	my ($ocfp_alloc) = $hook->_get_reserved_allocation('ocfp_bosh', $subnet);
+	is($ocfp_alloc->range, '10.8.0.9',
+		'ocfp_bosh still resolves its own key');
+};
+
+subtest '_get_reserved_allocation - malformed _ip_<suffix> keys are reported' => sub {
+	plan tests => 2;
+
+	# `bosh_ip_a` is neither spelling: the bracket-pair loop looks for
+	# `bosh_a` and never sees it, so such a key silently alters the
+	# allocation instead of being rejected.  Say so rather than absorb it.
+	my $config = {%$embedded_name_ocfp_config};
+	$config->{vpc} = {%{$config->{vpc}}};
+	$config->{vpc}{subnets} = {
+		'ocfp-0' => {
+			az => 'az1', cidr_block => '10.8.0.0/24',
+			gateway => '10.8.0.1', dns => '10.8.0.2',
+			'reserved-ips' => {
+				'bosh_ip'   => '10.8.0.5',
+				'bosh_ip_a' => '10.8.0.4',
+				'bosh_ip_b' => '10.8.0.6',
+			},
+		},
+	};
+
+	my $env  = make_deploy_env(ocfp_config => $config);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	# Genesis::warning writes to STDERR directly rather than through warn.
+	my $alloc;
+	my $warn = stderr_from {
+		($alloc) = $hook->_get_reserved_allocation('bosh', $hook->subnets->{'ocfp-0'});
+	};
+
+	is($alloc->range, '10.8.0.5',
+		'only the well-formed bosh_ip is claimed; the malformed bounds are ignored');
+	like($warn, qr/bosh_ip_a.*bosh_ip_b/s,
+		'and the malformed keys are named rather than silently changing the allocation');
+};
+
 subtest '_get_reserved_allocation - openbao falls back to vault reserved-ips' => sub {
 	plan tests => 3;
 

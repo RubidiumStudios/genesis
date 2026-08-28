@@ -1544,8 +1544,30 @@ sub _get_reserved_allocation {
 		last;
 	}
 
+	# Anchored: the key belongs to this target only when it starts with the
+	# target's name.  Unanchored, `ocfp_bosh_ip` answers for `bosh` and its
+	# neighbour's address lands in this target's static range.  The name is
+	# quoted because a target may carry regex metacharacters.
 	for my $candidate (@candidates) {
-		my @ip_keys = grep {$_ =~ m/${candidate}_ip/} keys %$reserved_ips;
+		my @ip_keys = grep {$_ =~ m/^\Q${candidate}\E_ip/} keys %$reserved_ips;
+
+		# `_ip` names a single value and `_a`/`_b` a range; a target declares
+		# one form or the other.  `<target>_ip_a` is neither, and the
+		# bracket-pair loop above never sees it -- it looks for
+		# `<target>_a` -- so it would silently widen this allocation.
+		my @malformed = grep {$_ =~ m/_ip_[a-z]$/} @ip_keys;
+		if (@malformed) {
+			warning(
+				"Ignoring malformed reserved-ip key%s %s: use #C{%s_ip} for a ".
+				"single address or #C{%s_a}/#C{%s_b} for a range, not both.",
+				(@malformed > 1 ? 's' : ''),
+				join(', ', map {"#Y{$_}"} sort @malformed),
+				$candidate, $candidate, $candidate
+			);
+			my %skip = map {$_ => 1} @malformed;
+			@ip_keys = grep {!$skip{$_}} @ip_keys;
+		}
+
 		next unless @ip_keys;
 		$allocation += IPv4->new(map {$reserved_ips->{$_}} @ip_keys);
 		last;

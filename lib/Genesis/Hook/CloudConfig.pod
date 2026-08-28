@@ -2170,11 +2170,37 @@ B<Examples:>
 
     my ($allocation, $static) = $self->_get_reserved_allocation($target, \%subnet);
 
-Retrieves the pre-reserved IPs for a named network target within a subnet.
-Reserved ranges are read from C<< $subnet->{'reserved-ips'} >> keys matching
-C<< ${target}_a >>, C<< ${target}_b >>, etc. (as inclusive pairs) and
-C<< ${target}_ip* >> keys (individual IPs). Also returns the static flag
+Retrieves the pre-reserved IPs for a named network target within a subnet,
+read from C<< $subnet->{'reserved-ips'} >>. Also returns the static flag
 C<< ${target}_static >> (defaults to C<1>).
+
+A target declares its reservation in one of two spellings, never both:
+
+=over 4
+
+=item C<< ${target}_a >>, C<< ${target}_b >> (and C<_c>, C<_d>, ...)
+
+A B<range>, given as B<exclusive> bounds: the addresses either side of what
+is being reserved. C<< bosh_a >> of C<.63> with C<< bosh_b >> of C<.65>
+yields the single address C<.64>.
+
+=item C<< ${target}_ip >>
+
+A B<single> address. Keys sharing that prefix (C<< ${target}_ip_smoke >>,
+say) name further single addresses belonging to the same target.
+
+=back
+
+The C<_ip> match is anchored at the start of the key, so a key belongs to a
+target only when it begins with that target's name: C<< ocfp_bosh_ip >> is
+C<ocfp_bosh>'s address and is never claimed by C<bosh>. Unanchored, a
+neighbouring target's reservation would be absorbed into this target's
+static range.
+
+C<< ${target}_ip_a >> and its siblings are neither spelling. The bracket-pair
+loop looks for C<< ${target}_a >> and so never sees them, which leaves them
+to the C<_ip> match, where they would silently widen the allocation. They are
+excluded and reported instead.
 
 B<Parameters:>
 
