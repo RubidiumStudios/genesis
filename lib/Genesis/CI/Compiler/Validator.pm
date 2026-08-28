@@ -36,6 +36,8 @@ sub validate {
 		$self->_validate_multi_file($parsed);
 	}
 
+	$self->_validate_manifest_store;
+
 	return $self;
 }
 
@@ -735,6 +737,31 @@ sub _warn {
 }
 
 # }}}
+# _validate_manifest_store - warn when an automated provider still writes
+# manifests into the repository {{{
+sub _validate_manifest_store {
+	my ($self) = @_;
+
+	my $top = $self->{top} or return;
+
+	# Same key Genesis::Env's cascade gate reads, so the two cannot drift.
+	my $provider = $top->config->get('ci.provider.type', '') // '';
+	return if $provider eq '' || $provider eq 'manual';
+
+	# Same default Env applies, so an unset key means git writes happen.
+	my $store = $top->config->get('manifest_store', 'hybrid') // 'hybrid';
+	return if $store eq 'exodus';
+
+	$self->_warn(sprintf(
+		"manifest_store is '%s', so each deploy commits manifests to the "
+		. "env branch that the %s provider also advances, leaving two "
+		. "writers on one branch. Set manifest_store to 'exodus' to leave "
+		. "the branch to propagation.",
+		$store, $provider
+	));
+}
+
+# }}}
 # }}}
 
 1;
@@ -749,6 +776,40 @@ Genesis::CI::Compiler::Validator validates parsed CI configuration for
 both legacy single-file and new multi-file formats. It checks required
 fields, allowed keys, cross-references, and semantic constraints like
 DAG acyclicity.
+
+=head2 Warnings
+
+Warnings are collected alongside errors and surfaced by
+C<Genesis::Commands::Pipelines::_compile_pipeline>. Unlike errors they do
+not stop compilation.
+
+=over 4
+
+=item Manifest store versus provider
+
+An automated (non-C<manual>) provider paired with a C<manifest_store>
+other than C<exodus> warns. Under C<hybrid> or C<repository> each deploy
+commits manifests into the environment's own branch, which is also the
+branch the propagate job advances -- two writers on one branch.
+
+C<ignore_paths> on the C<< <alias>-branch >> resource stops those commits
+retriggering the deploy that made them, but it does not remove the second
+writer; only C<exodus> does, by making the deploy stop writing to git at
+all.
+
+This is deliberately a warning rather than a bail, so repositories still
+on C<hybrid> keep compiling. Both keys are read from
+C<< $top->config >> -- C<ci.provider.type> is the same key
+C<Genesis::Env::_post_deploy> gates its cascade on, and C<manifest_store>
+is read with the same C<hybrid> default C<Genesis::Env> applies, so an
+unset key is treated as "git writes are happening" rather than as absent.
+
+B<Limitation:> the check is repository-wide. It cannot distinguish an
+environment that is PR-gated from one that is not, so the broader policy
+question -- which manifest store a PR-gated environment should use --
+is not settled here.
+
+=back
 
 =head1 SYNOPSIS
 

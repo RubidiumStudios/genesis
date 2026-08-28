@@ -145,6 +145,7 @@ unit-tests/genesis_ci_pipeline_descriptor-bosh-configs.t  # bosh-configs descrip
 unit-tests/genesis_ci_pipeline_descriptor-deploy_task.t   # plain-CLI deploy task + env branch
 unit-tests/genesis_ci_pipeline_descriptor-notifications.t # notifications descriptor
 unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library descriptor
+unit-tests/genesis_ci_compiler_validator-manifest_store.t # manifest store vs provider warning
 # Failing - feature implementation incomplete; re-enable once green
 #unit-tests/genesis_ci_pipeline_descriptor-bosh-locks.t
 #unit-tests/genesis_ci_pipeline_descriptor-redeploy.t
