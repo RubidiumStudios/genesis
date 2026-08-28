@@ -698,10 +698,189 @@ B<Examples:>
     $cfg->show_diff($baseline_cfg);
     # prints: diff between $baseline_cfg contents and $cfg contents
 
+=head2 schema
+
+    my $schema = $cfg->schema;
+
+Returns the schema this configuration was last validated against, or
+C<undef> if C<validate()> has not been called.
+
+C<validate()> retains the schema it was given, which makes the declared
+type of every key available afterwards. C<set()> uses it to coerce
+incoming values; callers holding a validated config can re-validate
+without having to obtain the schema from wherever it was defined.
+
+B<Returns:> The schema hash reference, or C<undef>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $cfg->validate($schema);
+    $cfg->set('manifest_store', 'exodus');
+    $cfg->validate($cfg->schema);   # re-check before persisting
+    $cfg->save;
+
+=head2 schema_has
+
+    my $known = $cfg->schema_has('ci.provider.type');
+
+Reports whether the schema declares a dotted path.
+
+B<Distinct from C<has()>, which reports presence.> A misspelled key is
+always absent, so presence can never tell a typo from a key that simply
+is not in use. Removal in particular needs this: unsetting a key that
+was never set is legitimate, while unsetting a key that does not exist
+in the schema is a mistake worth reporting.
+
+Returns false for every key when C<validate()> has not been called,
+since there is no schema to consult.
+
+B<Returns:> C<1> when the schema declares the path, C<0> otherwise.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $cfg->schema_has('manifest_store');   # 1
+    $cfg->schema_has('manifest_stroe');   # 0 -- a typo, not a spare key
+
 =head1 INTERNAL METHODS
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _schema_for_key
+
+    my $spec = $cfg->_schema_for_key('ci.provider.type');
+
+Returns the schema entry a dotted path names, or C<undef> if the schema
+does not declare it.
+
+Walks the path segment by segment, stepping through each level's
+C<schema> sub-hash. Shared by C<schema_has()> and
+C<_coerce_to_schema_type()>, so both agree on what a key means.
+
+B<Returns:> The schema entry hash reference, or C<undef>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $spec = $cfg->_schema_for_key('manifest_store');
+    # { type => 'enum', values => [...], default => 'hybrid', ... }
+
+=head2 _prune_empty_parents
+
+    $cfg->_prune_empty_parents($struct, $key);
+
+Removes hashes that clearing C<$key> left empty behind it, walking back
+up the dotted path.
+
+B<Walking a dotted path creates the parents it passes through.> So
+clearing C<ci.enabled> leaves C<ci =E<gt> {}> in whichever source
+structure did not hold the key. That empty hash is not harmless: the
+merge is by priority rather than depth, so an empty C<ci> in the higher
+priority source wins outright and takes the key's siblings with it --
+C<ci.provider> would vanish from what C<save()> writes, without ever
+having been touched.
+
+Pruning stops at the first parent that still has keys, so a branch is
+only removed when clearing genuinely emptied it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$struct>
+
+The source structure to prune, modified in place.
+
+=item C<$key>
+
+The dotted path that was cleared. Only its ancestors are considered.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> None. A path that is absent or already pruned is left alone.
+
+B<Examples:>
+
+    # after clearing ci.enabled from a config also holding ci.provider
+    $cfg->_prune_empty_parents($cfg->{set_values}, 'ci.enabled');
+    # ci is left in place, still carrying provider
+
+=head2 _coerce_to_schema_type
+
+    my $typed = $cfg->_coerce_to_schema_type($key, $value);
+
+Converts a value to the type its schema declares.
+
+B<Values arriving from a command line are always strings>, and in Perl
+every non-empty string is true -- C<'false'> included. Without this,
+C<set('ci.enabled', 'false')> would store a true boolean, which validates
+cleanly and is therefore never reported. Coercion happens on the way in,
+so what is stored is what the schema says the key holds.
+
+Type unions (C<string||null>) are resolved conservatively, in this order:
+
+=over 4
+
+=item *
+
+The literal C<null> or C<~> becomes C<undef>, but only where the union
+admits C<null> -- it is the only way to express null on a command line.
+
+=item *
+
+A union admitting C<string> keeps the text verbatim. C<'false'> is a
+valid string, and guessing at a boolean would discard what was typed.
+
+=item *
+
+C<boolean> accepts C<false>, C<no>, C<off>, C<0> and the empty string as
+false, case-insensitively; anything else is true.
+
+=item *
+
+C<integer> and C<number> convert only when the text actually looks
+numeric, so a malformed value reaches C<validate()> and is reported
+rather than silently becoming C<0>.
+
+=back
+
+Values that are already references, and keys absent from the schema, are
+returned untouched. Without a schema (C<validate()> never called) nothing
+is coerced.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$key>
+
+A dotted path; each segment is walked through the nested sub-schemas.
+
+=item C<$value>
+
+The value to coerce.
+
+=back
+
+B<Returns:> The value converted to its declared type, or unchanged if no
+rule applies.
+
+B<Errors:> None. An unconvertible value is passed through for
+C<validate()> to reject, so the error names the schema violation rather
+than a coercion failure.
+
+B<Examples:>
+
+    $cfg->_coerce_to_schema_type('ci.enabled', 'false');   # JSON::PP::false
+    $cfg->_coerce_to_schema_type('count', '42');           # 42, not '42'
+    $cfg->_coerce_to_schema_type('name', 'false');         # 'false' (string type)
 
 =head2 _is_required
 

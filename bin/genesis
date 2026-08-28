@@ -1354,6 +1354,48 @@ define_command("repo-init", {
 });
 
 # }}}
+# genesis config - get or set repository configuration values {{{
+define_command("config", {
+	summary => "Get or set values in the deployment repository configuration.",
+	usage => "config [<key> ...] [--set <key> <value>] [--unset <key>]",
+	description =>
+		"Reads and writes #C{.genesis/config}, the deployment repository's ".
+		"configuration file.\n".
+		"\n".
+		"Bare arguments only ever read, so a value is never written by ".
+		"accident: #C{genesis config a b} retrieves both keys rather than ".
+		"assigning one to the other.",
+	function_group => Genesis::Commands::REPOSITORY,
+	scope => 'repo',
+	option_group => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'set=s@{2}' =>
+			"Set #C{<key>} to #C{<value>}.  Repeat to set more than one key ".
+			"in a single run.\n".
+			"\n".
+			"Writing requires this flag so that bare arguments are always ".
+			"reads: #C{genesis config a b} retrieves two keys rather than ".
+			"silently assigning one to the other.",
+
+		'set-from-file=s@{2}' =>
+			"Set #C{<key>} to the contents of #C{<file>}.  Repeat to set ".
+			"more than one key in a single run.\n".
+			"\n".
+			"How the file is read follows the key's declared type: a key ".
+			"holding a collection reads it as YAML or JSON, and a scalar ".
+			"key takes the text as-is, less one trailing newline.",
+
+		'unset=s@' =>
+			"Remove #C{<key>} from the configuration.  Repeat to remove ".
+			"more than one.\n".
+			"\n".
+			"A key that is not set is accepted -- the end state is the same ".
+			"either way -- but a key the schema does not define is refused, ".
+			"so a misspelling is reported rather than quietly doing nothing.",
+	],
+}, 'Genesis::Commands::Core::config');
+
+# }}}
 # genesis secrets-provider - set, clear or get the secret provider information {{{
 define_command("secrets-provider", {
 	summary => "Check or set the secrets provider for the Genesis deployment repo.",
@@ -1411,83 +1453,6 @@ define_command("kit-provider", {
 	extended_handlers => ['Genesis::Kit::Provider'],
 });
 
-# }}}
-# PARKED: Tristan's CI-only repo-init define_command block -- kept
-# verbatim here for the upcoming merge meeting, but commented out so
-# it does NOT override our phased repo-init definition earlier in this
-# file.  The handler sub has been renamed in lib/Genesis/Commands/Repo.pm
-# to repo_configure_ci.  If this block is ever re-enabled, the final
-# dispatcher arg below must be updated to match that new name.
-#
-# genesis repo-init - one-time CI provider setup {{{
-# define_command("repo-init", {
-# 	summary => "Initialize CI configuration for this Genesis deployment repository.",
-# 	usage   => "repo-init [--ci-provider PROVIDER] [--git-uri URI] [--git-branch BRANCH] [--vault-url URL] [--pipeline-name NAME]",
-# 	description =>
-# 		"One-time setup that writes a #C{ci:} section to #C{.genesis/config} and ".
-# 		"generates the #C{.genesis/ci/} scaffold files required by the pipeline ".
-# 		"compiler.\n".
-# 		"\n".
-# 		"Errors if CI is already configured for this repository. Use ".
-# 		"#C{genesis repo-update} to modify an existing configuration.\n".
-# 		"\n".
-# 		"When required flags are omitted an interactive wizard collects them.",
-# 	function_group => Genesis::Commands::REPOSITORY,
-# 	scope          => 'repo',
-# 	option_group   => Genesis::Commands::REPO_OPTIONS,
-# 	options => [
-# 		'ci-provider|P=s' =>
-# 			"CI provider to configure: #C{concourse} (default), ".
-# 			"#C{github-actions}, or #C{none}.",
-#
-# 		'git-uri|g=s' =>
-# 			"Git repository URI (e.g. #C{git\@github.com:org/repo.git}).",
-#
-# 		'git-branch|b=s' =>
-# 			"Default branch for the source-control integration. Defaults to #C{main}.",
-#
-# 		'vault-url|V=s' =>
-# 			"Vault URL for the secrets integration ".
-# 			"(e.g. #C{https://vault.example.com:8200}).",
-#
-# 		'pipeline-name|n=s' =>
-# 			"Name written into #C{pipeline.yml} metadata. Defaults to the ".
-# 			"deployment type.",
-# 	],
-# }, 'Genesis::Commands::Repo::repo_configure_ci');
-# }}}
-# genesis repo-update - idempotent CI config update {{{
-define_command("repo-update", {
-	summary => "Update CI configuration for this Genesis deployment repository.",
-	usage   => "repo-update [--ci-provider PROVIDER] [--git-uri URI] [--git-branch BRANCH] [--vault-url URL] [--pipeline-name NAME]",
-	description =>
-		"Idempotent counterpart to #C{genesis repo-init}. Updates the CI ".
-		"configuration in #C{.genesis/config} and regenerates missing scaffold ".
-		"files in #C{.genesis/ci/}.\n".
-		"\n".
-		"When called with flags, only the specified values are changed; ".
-		"everything else is left as-is. A bare invocation (no flags) launches ".
-		"an interactive wizard pre-populated with the current configuration.",
-	function_group => Genesis::Commands::REPOSITORY,
-	scope          => 'repo',
-	option_group   => Genesis::Commands::REPO_OPTIONS,
-	options => [
-		'ci-provider|P=s' =>
-			"CI provider to configure: #C{concourse}, #C{github-actions}, or #C{none}.",
-
-		'git-uri|g=s' =>
-			"Git repository URI.",
-
-		'git-branch|b=s' =>
-			"Default branch for the source-control integration.",
-
-		'vault-url|V=s' =>
-			"Vault URL for the secrets integration.",
-
-		'pipeline-name|n=s' =>
-			"Name written into #C{pipeline.yml} metadata.",
-	],
-}, 'Genesis::Commands::Repo::repo_update');
 # }}}
 # }}}
 

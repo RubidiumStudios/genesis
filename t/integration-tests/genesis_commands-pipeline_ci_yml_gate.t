@@ -108,8 +108,10 @@ subtest 'PIPELINE command in a repo with legacy ci.yml -> bail' => sub {
 	# terminal, so any phrase asserted here can arrive split across lines.
 	like($err // '', qr/legacy\s+CI\s+configuration/i,
 		'bail message names the legacy CI configuration');
-	like($err // '', qr/genesis\s+repo-update\s+--ci-provider/,
+	like($err // '', qr/genesis\s+config\s+--set\s+ci\.enabled/,
 		'bail message hands the user a concrete migration command');
+	like($err // '', qr/ci\.provider\.type/,
+		'and names the other key the gate checks');
 };
 
 subtest 'PIPELINE command in a v3 repo with no ci.yml -> passes cleanly' => sub {

@@ -7,8 +7,81 @@ use Genesis;
 use Genesis::Term;
 use Genesis::UI;
 use Genesis::Commands;
+use Genesis::Top;
 use JSON::PP qw/encode_json/;
 use POSIX qw/strftime mktime/;
+
+sub config {
+	my (@keys) = @_;
+	my $top = Genesis::Top->new('.', no_vault => 1);
+
+	my ($pairs, $from_files, $removals) =
+		@{get_options()}{qw/set set-from-file unset/};
+	my $writing = ($pairs || $from_files || $removals) ? 1 : 0;
+
+	command_usage(1, "Reading and writing cannot be combined in one run")
+		if $writing && @keys;
+	command_usage(1, "Only one key can be read at a time")
+		if @keys > 1;
+
+	if ($writing) {
+		my $config = $top->config;
+
+		# Arity of 2 per occurrence, so the pairs arrive flat and even.
+		my @pairs = (@{$pairs || []}, _pairs_from_files($config, $from_files));
+
+		# The order the two were typed in is not recoverable, so either
+		# answer would be wrong half the time.
+		my @set_keys;
+		for (my $i = 0; $i < @pairs; $i += 2) {
+			push @set_keys, $pairs[$i];
+		}
+		my @contested;
+		for my $unset (@{$removals || []}) {
+			# A shared prefix is only an overlap when one path contains
+			# the other; ci.enabled and ci.provider are unrelated.
+			push @contested, map {"$_ / $unset"}
+				grep {$_ eq $unset || _contains($unset, $_) || _contains($_, $unset)}
+				@set_keys;
+		}
+		bail(
+			"Cannot set and unset overlapping keys in one run: %s",
+			join(', ', map {"#Y{$_}"} @contested)
+		) if @contested;
+		$config->set(splice(@pairs, 0, 2)) while @pairs;
+
+		# Validity, not presence: a typo is always absent, so only the
+		# schema can catch one.
+		if (my @unknown = grep {$config->schema && !$config->schema_has($_)} @{$removals || []}) {
+			bail(
+				"Cannot unset unknown configuration key%s: %s",
+				(@unknown > 1 ? 's' : ''), join(', ', map {"#Y{$_}"} @unknown)
+			);
+		}
+		$config->clear($_) for grep {$config->has($_)} @{$removals || []};
+
+		# Validate before persisting: validate bails, so a rejected value
+		# leaves the file untouched rather than half-written.
+		$config->validate($config->schema) if $config->schema;
+		$config->save;
+		return 0;
+	}
+
+	return output(to_yaml($top->config->get_all)) unless @keys;
+
+	my $key = $keys[0];
+
+	# Absent keys report on stderr and exit non-zero: a bare empty line on
+	# stdout would be indistinguishable from a key set to the empty string.
+	unless ($top->config->has($key)) {
+		error("#Y{%s} is #Ki{(unset)}", $key);
+		return 1;
+	}
+
+	my $value = $top->config->get($key);
+	output(ref($value) ? to_yaml($value) : $value);
+	return 0;
+}
 
 sub version {
 	my @args = @_;
@@ -348,6 +421,40 @@ sub hack {
 # _detect_feature_compatibility - returns ($level, $source) for the current
 # repo (and optional $env_name).  Returns (undef, undef) outside a repo,
 # when nothing is declared, or when the env can't be loaded.
+sub _pairs_from_files {
+	my ($config, $from_files) = @_;
+	my @pairs;
+
+	my @args = @{$from_files || []};
+	while (my ($key, $file) = splice(@args, 0, 2)) {
+		bail("Cannot read #C{%s} for #Y{%s}: %s", $file, $key, $!)
+			unless -f $file && -r _;
+		my $content = slurp($file);
+
+		my $spec = $config->schema ? $config->_schema_for_key($key) : undef;
+		my $type = ref($spec) eq 'HASH' ? ($spec->{type} // '') : '';
+		if ($type =~ /\b(?:hash|array|hasharray)\b/) {
+			my ($parsed, $rc, $err) = load_yaml($content);
+			bail(
+				"Could not read #C{%s} as YAML for #Y{%s}:\n%s",
+				$file, $key, $err
+			) if $rc;
+			push @pairs, $key, $parsed;
+		} else {
+			# One trailing newline is the editor's, not the value's.
+			$content =~ s/\n\z//;
+			push @pairs, $key, $content;
+		}
+	}
+	return @pairs;
+}
+
+sub _contains {
+	my ($ancestor, $key) = @_;
+	# The separator may be a dot or an index, so 'ab' is not inside 'a'.
+	return $key =~ /^\Q$ancestor\E[\.\[]/ ? 1 : 0;
+}
+
 sub _detect_feature_compatibility {
 	my ($env_name) = @_;
 	my ($fc_level, $fc_source);

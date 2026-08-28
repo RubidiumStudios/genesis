@@ -10,18 +10,26 @@ Genesis::Commands::Core - Command handlers for Genesis core operations
   genesis ping
   genesis update [--version <ver>] [--check] [--pre] [--force] [--details]
   genesis hack [<env>] [<cmd> [<args> ...]]
+  genesis config [<key>]
 
 =head1 DESCRIPTION
 
 Implements the built-in core commands available to all Genesis invocations
-regardless of environment context: C<version>, C<ping>, C<update>, and
-C<hack>.
+regardless of environment context: C<version>, C<ping>, C<update>,
+C<hack>, and C<config>.
 
 C<version> reports or queries structured build metadata for the running
 Genesis executable.  C<ping> is a connectivity probe.  C<update> downloads
 and installs a new Genesis release from GitHub.  C<hack> is a developer
 inspection tool that evaluates Perl expressions, invokes object methods, or
-calls module functions against a live Genesis object graph.
+calls module functions against a live Genesis object graph.  C<config>
+reads the deployment repository's configuration.
+
+C<config> lives here rather than beside the repository commands because
+the configuration it reads is not exclusively a repository concern: the
+same L<Genesis::Config> class backs the user-level configuration, and a
+scope selector is the intended way to reach it.  Filing the handler with
+the core commands keeps that door open.
 
 =head1 FUNCTIONS
 
@@ -113,6 +121,142 @@ B<Examples:>
   # Output all version fields as JSON
   genesis version --json
   # Returns: {"semver":"3.1.0","is_dev":false,"major":3,...}
+
+=head2 config($key)
+
+  config()
+  config('manifest_store')
+  config('ci.provider.type')
+
+  genesis config --set manifest_store exodus
+  genesis config --set manifest_store exodus --set ci.enabled false
+
+Reads and writes the deployment repository's configuration in
+F<.genesis/config>.  With no argument, prints the whole configuration as
+YAML; with a key, prints just that key's value.
+
+B<Writing requires C<--set>, so a bare argument never assigns
+anything.> C<genesis config a b> reads two keys; it does not set C<a> to
+C<b>.  The alternative -- taking a second bare argument as a value, as
+C<git config> does -- turns a mistyped read into a silent write, and a
+surprising read is recoverable in a way a surprising write is not.
+
+C<--set> takes a key and a value, and may be repeated.  Values are
+coerced to the type the schema declares before being stored, so
+C<ci.enabled false> records a false boolean rather than the string
+C<'false'>, which Perl would treat as true.  See
+L<Genesis::Config/_coerce_to_schema_type>.
+
+C<--set-from-file> takes a key and a path, and may be repeated.  It
+exists because a value worth putting in a file is usually one that is
+painful to quote on a command line -- a multi-line block, or text with
+shell metacharacters in it.  The file is read according to the key's
+declared type; see L</_pairs_from_files($config, $from_files)>.
+
+C<--unset> removes a key, and may also be repeated.
+
+B<A key that is not set is accepted; a key the schema does not define
+is not.> Unset states a desired end state, and a key that was never
+there already satisfies it -- so C<--unset a.b --unset a> is redundant
+rather than wrong.  The check that matters is validity: a misspelling
+is always absent, so only the schema can tell one from a key that
+simply is not in use.
+
+B<Nothing is written until the whole result validates.> Every set and
+unset is applied in memory, the configuration is checked, and only then
+is it persisted -- so a rejected value leaves the file exactly as it
+was rather than half-updated into a state L<Genesis::Top> would refuse
+to load.  The two can be combined in one run, and a key appearing in
+both is refused; see L</LIMITATIONS>.
+
+B<The configuration is reported as Genesis will actually use it>, not as
+the file literally reads.  Schema defaults and environment overrides are
+merged in, so C<ci.provider.insecure> is reported even when the file
+never mentions it.  This answers "what value is in effect", which is the
+question an operator debugging a deployment is asking.  It does mean the
+output cannot be diffed against the file on disk.  Distinguishing the
+sources visually is deferred; see L</LIMITATIONS>.
+
+Keys are dotted paths, resolved by L<Genesis::Config/get>, so
+C<ci.provider.type> walks into nested sections.
+
+B<A key naming a section prints that section as YAML> rather than
+stringifying the reference.  A scalar prints bare, with no YAML framing,
+so C<$(genesis config manifest_store)> yields the value and nothing else.
+
+B<Values go to standard output and everything else to standard error>,
+so the command composes in a pipeline.  This falls out of C<output()>
+being the only reporting call used here: L<Genesis::Log> routes the
+C<OUTPUT> level to C<STDOUT> and every other level to C<STDERR>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$key> (optional)
+
+A dotted path into the configuration.  Omit it to dump everything.
+
+=back
+
+B<Returns:> C<0> when the key was found, when dumping, or after a
+successful write; C<1> when the key is not set.
+
+B<Errors:>
+
+=over 4
+
+=item C<"%s is (unset)">
+
+Reported on standard error, with a return of C<1>, when the key is
+absent.  Deliberately not silent-and-zero: printing an empty line to
+standard output would be indistinguishable from a key legitimately set
+to the empty string, leaving a caller unable to tell the two apart.
+
+=item C<"Configuration validation failed for %s">
+
+Raised by L<Genesis::Config/validate> when a value written with
+C<--set> does not satisfy the schema.  The message names the offending
+key.  The file is left untouched.
+
+=item C<"Cannot unset unknown configuration key%s: %s">
+
+Raised when C<--unset> names a key the schema does not define.  Names
+every unrecognised key, not just the first.
+
+=item C<"Cannot set and unset overlapping keys in one run: %s">
+
+Raised before anything is applied when a key named by C<--set> and one
+named by C<--unset> are the same, or one contains the other.  Keys that
+merely share a prefix -- C<ci.enabled> and C<ci.provider> -- do not
+overlap and are allowed together.
+
+=item C<"Reading and writing cannot be combined in one run">
+
+Raised as a usage error when a key is given alongside C<--set> or
+C<--unset>.
+
+=item C<"Only one key can be read at a time">
+
+Raised as a usage error when more than one key is given.  The full
+configuration is available by giving none.
+
+=back
+
+B<Examples:>
+
+  genesis config
+  # prints: the whole configuration as YAML
+
+  genesis config manifest_store
+  # prints: exodus
+
+  genesis config ci
+  # prints: the ci section as YAML, defaults included
+
+  genesis config no_such_key
+  # prints (stderr): no_such_key is (unset)
+  # exits: 1
 
 =head2 ping()
 
@@ -357,6 +501,94 @@ B<Examples:>
 
 These are internal to this module and may change without notice.
 
+=head2 _pairs_from_files($config, $from_files)
+
+  my @pairs = _pairs_from_files($config, ['ci.provider', './provider.yml']);
+
+Turns C<--set-from-file> arguments into the same flat key/value pairs
+C<--set> produces, so both reach the write path identically and are
+covered by the same overlap and validation rules.
+
+B<How the file is read follows the key's declared type.> A key holding
+a collection has its file parsed as YAML, which covers JSON too; any
+other key takes the text verbatim. Nothing is guessed from the
+content, so a string-typed key whose file happens to contain
+C<key: value> stores that text rather than a structure.
+
+B<Exactly one trailing newline is removed from scalars.> Editors add
+one and the value almost never wants it; removing more would corrupt a
+value that genuinely ends in blank lines. Collections are unaffected,
+having been parsed rather than trimmed.
+
+A collection replaces what was there rather than merging into it,
+matching what C<--set> means everywhere else. To change one field,
+name that field.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+The configuration whose schema decides how each file is read. Without a
+schema every value is treated as text.
+
+=item C<$from_files>
+
+The flat key/path list, two entries per occurrence.
+
+=back
+
+B<Returns:> A flat list of key/value pairs, values already typed.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot read %s for %s: %s">
+
+The file is missing or unreadable. Raised before anything is applied,
+so the configuration is untouched.
+
+=item C<"Could not read %s as YAML for %s">
+
+The file was to be parsed as a collection and would not parse. The
+underlying parser error is included.
+
+=back
+
+B<Examples:>
+
+  # a collection key: parsed, and replaces the whole block
+  _pairs_from_files($cfg, ['ci.provider', './provider.yml']);
+
+  # a scalar key: text as-is, less the trailing newline
+  _pairs_from_files($cfg, ['manifest_store', './store.txt']);
+
+=head2 _contains($ancestor, $key)
+
+  _contains('ci', 'ci.enabled');       # 1
+  _contains('ci', 'ci');               # 0 -- equal, not contained
+  _contains('a',  'ab');               # 0
+
+Reports whether one dotted path lies inside another.
+
+B<A shared prefix is not containment.> The next character has to be a
+separator, so C<a> does not contain C<ab>.  Both C<.> and C<[> count,
+so an indexed path such as C<a[0].b> is recognised as inside C<a>.
+
+Equality is deliberately not containment: callers test for it
+separately, because the two cases usually warrant different wording.
+
+B<Returns:> C<1> when C<$key> lies inside C<$ancestor>, C<0> otherwise.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _contains('ci.provider', 'ci.provider.type');   # 1
+  _contains('ci.enabled',  'ci.provider');        # 0
+
 =head2 _detect_feature_compatibility($env_name)
 
 Determines the feature-compatibility floor in effect, and where it came from,
@@ -432,10 +664,61 @@ B<Examples:>
   my $tail = _format_feature_level_tail(undef, undef);
   # returns '' -- safe to concatenate either way
 
+=head1 LIMITATIONS
+
+=head2 C<config> reports no provenance
+
+The configuration is reported fully realized -- file, schema defaults and
+environment overrides merged -- with nothing to distinguish them.  A
+value coming from C<GENESIS_*> in the caller's environment looks
+identical to one written in F<.genesis/config>, which is precisely the
+case an operator is likely to be hunting.  L<Genesis::Config/get_source>
+already reports the winning source per key (C<env>, C<set>, C<loaded>,
+C<default>), so this is a rendering gap rather than a missing capability.
+Marking the sources, filtering by source, and a machine-readable form
+carrying value and source together are all deferred.
+
+=head2 Setting and unsetting overlapping keys is refused
+
+Getopt::Long collects each option into its own list, so the order the
+two were typed in is not recoverable: C<--set a 1 --unset a> and
+C<--unset a --set a 1> arrive identical.  No destination preserves
+arity, ordering and attribution together -- a shared array loses which
+option supplied a value, and a callback destination forces a single
+value per occurrence, discarding the arity.  Rather than pick an order
+and be wrong half the time, the invocation is rejected.
+
+The same applies when one key contains the other: unsetting C<ci>
+removes what C<--set ci.enabled> just wrote, and which of the two wins
+again depends on the order that was lost.  Keys that only share a
+prefix are unrelated and remain allowed.
+
+=head2 Reading and writing cannot be combined
+
+There is no output contract for printing one value while changing
+another, so an invocation naming a key alongside C<--set> or
+C<--unset> is a usage error.  Only one key may be read at a time; the
+whole configuration is available by naming none.
+
+=head2 An arity option cannot be abbreviated
+
+C<--set> is parsed in a first pass configured with C<no_auto_abbrev>, so
+C<--se> does not resolve to it.  Every other option still abbreviates.
+See L<Genesis::Commands/_parse_two_pass>.
+
+=head2 C<config> is repository-scoped only
+
+Only F<.genesis/config> is reachable.  The user-level
+F<~/.genesis/config> uses the same L<Genesis::Config> class and has its
+own schema, including per-key environment-variable bindings, but no
+option selects it.  The command name is deliberately unqualified so that
+a scope selector can be added without renaming it; repository scope
+remains the default if one is.
+
 =head1 SEE ALSO
 
-L<Genesis::Commands>, L<Genesis::Top>, L<Genesis::Env>,
-L<Service::Github>
+L<Genesis::Commands>, L<Genesis::Config>, L<Genesis::Top>,
+L<Genesis::Env>, L<Service::Github>
 
 =head1 AUTHOR
 

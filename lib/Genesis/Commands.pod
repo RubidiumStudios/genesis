@@ -1511,8 +1511,11 @@ B<Errors:>
 
 =item C<"This repository still has a legacy CI configuration at ci.yml...">
 
-The full message names the provider, git URI, branch, pipeline name and vault
-URL to carry across, and the C<genesis repo-update> invocation that does it.
+The full message names the values to carry across from the C<pipeline:>
+block, and the C<genesis config> invocation that sets the two keys the gate
+checks.  It says plainly that the rest -- git URI, branch, pipeline name and
+vault URL -- must be written into F<.genesis/config> by hand, the schema not
+yet declaring them.
 
 =back
 
@@ -1520,6 +1523,73 @@ B<Examples:>
 
   _gate_pipeline_on_legacy_ci_yml();
   # no return value; bails if a legacy ci.yml blocks a pipeline command
+
+=head2 _parse_two_pass
+
+  my $ok = _parse_two_pass($args, \@specs, $order);
+
+Parses options for a command that declares a fixed-arity option, such as
+C<--set E<lt>keyE<gt> E<lt>valueE<gt>>.
+
+B<Getopt::Long refuses any C<{n}> arity specification while bundling.>
+The check is on the configured bundling flag alone; it never inspects the
+option's name, although only a single-letter option can appear in a
+bundle and so only that case is genuinely ambiguous.  A long-form option
+taking a counted pair is therefore rejected despite being unambiguous.
+
+Two passes work around it without giving up either feature:
+
+=over 4
+
+=item 1.
+
+Bundling off, C<pass_through> on, with every specification.  The arity
+options are legal here and are consumed; anything unrecognised --
+notably clustered short flags like C<-qT> -- is left in the array.
+
+=item 2.
+
+Bundling on, arity specifications withheld so the guard has nothing to
+object to, C<no_pass_through> so an unknown option is still an error.
+This pass claims the clusters the first one skipped.
+
+=back
+
+The result is that C<--set a 1 --set b 2> and C<-qT> both parse in the
+same invocation, C<--> still terminates, and positionals survive for the
+command to read.  An arity option cannot be abbreviated, because the
+first pass runs with C<no_auto_abbrev>.
+
+Engaged only when a command declares an arity specification; every other
+command takes the original single-pass route unchanged.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$args>
+
+The argument array, consumed in place.
+
+=item C<\@specs>
+
+All option specifications, base and command.
+
+=item C<$order>
+
+C<require_order> or C<permute>, matching the command's declaration.
+
+=back
+
+B<Returns:> True when both passes succeeded.
+
+B<Errors:> None directly.  Parsing warnings are collected by the caller,
+which reports them through C<command_usage>.
+
+B<Examples:>
+
+  _parse_two_pass(\@args, [@base_spec, @opts_spec], 'permute');
+  # '--set a 1 -qT' => set => ['a','1'], quiet => 1, trace => 1
 
 =head1 SEE ALSO
 

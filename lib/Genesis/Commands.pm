@@ -292,16 +292,17 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	Genesis::bail(
 		"This repository still has a legacy CI configuration at #C{ci.yml}.\n".
 		"Pipeline commands are unavailable until the ci configuration is\n".
-		"migrated by hand to the v3 repo config.  To migrate:\n\n".
+		"migrated to the v3 repo config.  To migrate:\n\n".
 		"  1. Read the pipeline: block in ci.yml and note the provider,\n".
-		"     git URI, branch, pipeline name, vault URL you were using.\n".
-		"  2. Run:  #g{genesis repo-update --ci-provider PROVIDER}  \\\n".
-		"               [--git-uri URI] [--git-branch BRANCH]   \\\n".
-		"               [--pipeline-name NAME] [--vault-url URL]\n".
-		"     to set those values in the v3 config.\n".
+		"     git URI, branch, pipeline name and vault URL you were using.\n".
+		"  2. Run:  #g{genesis config --set ci.enabled true} \\\n".
+		"               #g{--set ci.provider.type PROVIDER}\n".
 		"  3. Remove ci.yml (#g{git rm ci.yml}).\n\n".
-		"Pipeline commands become available again once ci.yml is gone\n".
-		"and the v3 config declares ci.provider.type."
+		"That restores pipeline commands.  The remaining values from step 1\n".
+		"-- git URI, branch, pipeline name and vault URL -- are not yet\n".
+		"settable: the config schema does not declare them, so they must be\n".
+		"written into the #C{ci:} block of #C{.genesis/config} by hand until\n".
+		"it does."
 	);
 } # }}}
 
@@ -379,20 +380,27 @@ sub parse_options { # {{{
 
 	$COMMAND_OPTIONS->{color} = 1 unless exists $COMMAND_OPTIONS->{color};
 
-	Getopt::Long::Configure(
-		qw(no_ignore_case bundling),
-		$PROPS{$COMMAND}{option_passthrough}
+	my $order = $PROPS{$COMMAND}{option_require_order} ? 'require_order' : 'permute';
+	my @passthrough = $PROPS{$COMMAND}{option_passthrough}
 		? qw(pass_through no_auto_abbrev)
-		: qw(no_pass_through auto_abbrev),
-		$PROPS{$COMMAND}{option_require_order} ? 'require_order' : 'permute'
-	);
+		: qw(no_pass_through auto_abbrev);
+
+	# Getopt::Long rejects a fixed arity while bundling, whatever the
+	# option is named.  See _parse_two_pass.
+	my @arity_spec = grep {/\{\d/} @opts_spec;
+
+	Getopt::Long::Configure(
+		qw(no_ignore_case bundling), @passthrough, $order
+	) unless @arity_spec;
 
 	my $parsing_ok = 1;
 	my @option_warnings = ();
 	{
 		$COMMAND_OPTIONS = {};
 		local $SIG{__WARN__} = sub { push @option_warnings, @_; };
-		$parsing_ok = GetOptionsFromArray($args, $COMMAND_OPTIONS, (@base_spec,@opts_spec));
+		$parsing_ok = @arity_spec
+			? _parse_two_pass($args, [@base_spec,@opts_spec], $order)
+			: GetOptionsFromArray($args, $COMMAND_OPTIONS, (@base_spec,@opts_spec));
 	}
 
 	unless ($parsing_ok) {
@@ -441,6 +449,26 @@ sub parse_options { # {{{
 	delete($COMMAND_OPTIONS->{no_cwd});
 	dump_var 'Received Arguments' => \@COMMAND_ARGS;
 	return;
+} # }}}
+
+sub _parse_two_pass { # {{{
+	my ($args, $specs, $order) = @_;
+
+	my @without_arity = grep {!/\{\d/} @$specs;
+
+	# Bundling off so the arity specs are legal; pass_through leaves
+	# anything unrecognised -- notably short-flag clusters -- in place.
+	Getopt::Long::Configure(
+		qw(no_ignore_case no_bundling pass_through no_auto_abbrev), $order
+	);
+	my $ok = GetOptionsFromArray($args, $COMMAND_OPTIONS, @$specs);
+
+	# Bundling on for what is left, arity specs withheld so the guard has
+	# nothing to object to.  Unknown options still fail here.
+	Getopt::Long::Configure(
+		qw(no_ignore_case bundling no_pass_through auto_abbrev), $order
+	);
+	return GetOptionsFromArray($args, $COMMAND_OPTIONS, @without_arity) && $ok;
 } # }}}
 
 sub get_options { # {{{
@@ -682,7 +710,10 @@ sub command_usage { # {{{
 		my ($source,$options,$label) = @{$source_details};
 		my $type = $label || 'Option';
 		my $section=0;
-		while (my ($opt_def, $opt_desc) = splice(@$options,0,2)) {
+		# Walk the pairs rather than consume them: these are the live
+		# command definition, not a copy of it.
+		for (my $i = 0; $i < @$options; $i += 2) {
+			my ($opt_def, $opt_desc) = @{$options}[$i, $i+1];
 
 			my $opt_arg;
 			if (ref($opt_desc) eq "HASH") {
