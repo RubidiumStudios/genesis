@@ -50,6 +50,24 @@ my $BARE = <<'EOT';
 EOT
 chomp $BARE;
 
+# safe 1.20 drives OpenBao as readily as Vault -- whichever of `vault` or
+# `bao` it finds first on $PATH, or as pinned by --engine/SAFE_ENGINE -- and
+# the server it spawns is then `bao server`.  Genesis gates OpenBao on that
+# same 1.20, so this is the only engine spelling some hosts ever produce.
+my $BAO = <<'EOT';
+  PID  PPID COMMAND
+ 7241  7240 safe local -m --as local_vault_test_7240 --port 8299
+ 7242  7241 /opt/homebrew/bin/bao server -config=/tmp/bao-7241.hcl
+EOT
+chomp $BAO;
+
+my $BAO_BARE = <<'EOT';
+  PID  PPID COMMAND
+ 8241  8240 safe local -m --as local_vault_test_8240 --port 8299
+ 8242  8241 bao server -config=/tmp/bao-8241.hcl
+EOT
+chomp $BAO_BARE;
+
 subtest 'finds the vault child that safe 1.20 exec\'d by absolute path' => sub {
 	plan tests => 4;
 
@@ -90,6 +108,29 @@ subtest 'still finds them when safe execs a bare vault off PATH' => sub {
 
 		my $vault = Service::Vault::Local::_get_vault_process(5241, 0.2);
 		is(($vault||{})->{pid}, 5242, 'a bare `vault server` still matches');
+	});
+};
+
+subtest 'finds the server when safe drives OpenBao' => sub {
+	plan tests => 4;
+
+	with_fake_ps($BAO, sub {
+		my $safe = Service::Vault::Local::_get_safe_process('local_vault_test_7240', 0.2);
+		is(($safe||{})->{pid}, 7241, 'safe is found regardless of the engine it drives');
+
+		my $vault = Service::Vault::Local::_get_vault_process(7241, 0.2);
+		ok($vault, 'a resolved `bao server` is found') or return;
+		is($vault->{pid}, 7242, 'the bao child is read out of the process table');
+		is($vault->{ppid}, 7241, 'the bao child is matched to its safe parent');
+	});
+};
+
+subtest 'finds a bare bao server off PATH' => sub {
+	plan tests => 1;
+
+	with_fake_ps($BAO_BARE, sub {
+		my $vault = Service::Vault::Local::_get_vault_process(8241, 0.2);
+		is(($vault||{})->{pid}, 8242, 'a bare `bao server` matches too');
 	});
 };
 

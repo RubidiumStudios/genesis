@@ -438,9 +438,14 @@ sub _get_safe_process {
 	return _get_process("\\s\\+[^ ]*[s]afe local -m --as $alias", $timeout);
 }
 
+# The server is whichever engine safe chose, and safe >= 1.20.0 will drive
+# OpenBao -- taking whichever of `vault` or `bao` it finds first on $PATH, or
+# the one pinned by --engine/SAFE_ENGINE.  Genesis gates OpenBao on that same
+# version, so naming one engine here made the OpenBao path unreachable: the
+# server started, went unseen, and create() abandoned it.
 sub _get_vault_process {
 	my ($ppid, $timeout) = @_;
-	return _get_process("\\s\\+$ppid\\s\\+[^ ]*[v]ault server", $timeout);
+	return _get_process("\\s\\+$ppid\\s\\+[^ ]*\\([v]ault\\|[b]ao\\) server", $timeout);
 }
 
 sub _get_process {

@@ -440,7 +440,7 @@ B<Examples:>
   my $info = _get_vault_process($ppid);
   my $info = _get_vault_process($ppid, $timeout);
 
-Searches the process table for a C<vault server> process whose parent PID
+Searches the process table for the secrets server process whose parent PID
 is C<$ppid>, delegating to C<_get_process> with a filter pattern built
 from C<$ppid>.
 
@@ -449,6 +449,17 @@ later resolve the server binary before spawning it, so C<ps> reports the
 child as C</path/to/vault server>; a pattern anchored on the bare name
 misses it entirely, and C<create> then reports a healthy vault as failed to
 start.
+
+It also matches either engine.  C<safe> 1.20.0 and later drive OpenBao as
+well as HashiCorp Vault, taking whichever of C<vault> or C<bao> appears
+first on C<$PATH> unless pinned with C<--engine> or C<SAFE_ENGINE>, so the
+child may be C<bao server>.  Genesis gates OpenBao support on that same
+C<safe> version, so a pattern naming only C<vault> put the OpenBao path out
+of reach entirely: the server started, went unseen, and C<create>
+abandoned it along with the C<safe> process and its C<.saferc> entry.
+
+The alternation is a basic-regex one (C<\(...\|...\)>), which is what the
+C<grep> in C<_get_process>'s pipeline is given.
 
 B<Parameters:>
 
@@ -473,6 +484,10 @@ B<Examples:>
 
   my $info = _get_vault_process(23456, 1);
   # Returns: { pid => 34567, ppid => 23456, cmd => 'vault server ...' }
+
+  # The same call against a safe driving OpenBao:
+  # Returns: { pid => 34567, ppid => 23456,
+  #            cmd => '/opt/homebrew/bin/bao server ...' }
 
 =head2 _get_process
 
