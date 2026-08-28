@@ -587,9 +587,16 @@ sub _env_resources {
 	# reaches this branch is by definition intended for this env.  Replaces
 	# both the path-filtered changes resource and the cache resource that
 	# carried an upstream env's files inside the control branch.
+	# ignore_paths, not gated on manifest_store: a deploy that commits
+	# manifests to the branch it triggers on would retrigger itself, and
+	# the stores that still write them are the ones needing the guard.
 	push @resources, {
 		name => "$alias-branch", type => 'git', icon => 'github',
-		source => { %gs, branch => $env },
+		source => {
+			%gs,
+			branch       => $env,
+			ignore_paths => ["${pr}.genesis/manifests/*"],
+		},
 	};
 
 	# BOSH config resources — emitted only when track_bosh_configs is configured
