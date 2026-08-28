@@ -102,6 +102,10 @@ I<What if the operator says nothing?> The kit author's opinion. Decoded as
 JSON when it parses as such, so C<["bosh"]> arrives as an array rather than
 a string.
 
+The clause may be empty. C<key:> and C<< key:>path >> declare a default of
+C<''> -- which is a different statement from declaring none at all, and
+the two must not be conflated. See L</What a kit says by omission> below.
+
 =item C<?>
 
 I<Is it required?> Marks the property genuinely optional: absent from the
@@ -141,7 +145,57 @@ The descriptor's C<:default> -- the kit author.
 
 =back
 
-A non-optional property with no value from any of the three is fatal.
+B<Every operator name is tried before any platform name.> The two sources
+are not consulted per name in step, which would let a platform value under
+the primary key beat an operator value under an C<@alt> -- silently
+overriding an operator who used the older spelling, which is the one thing
+an alt must not do.
+
+B<Presence decides, not definedness.> Within the operator's namespace the
+first name that B<exists> settles the question, whatever it holds. A key
+set to null is therefore how an operator discards a value the platform put
+in the OCFP configuration and falls back to what the kit declares -- so a
+null on the name the operator wrote is not rescued by an alt they did not.
+A C<defined>-based test would quietly remove that mechanism.
+
+=head2 What a kit says by omission
+
+A property found in no source falls to the descriptor, and the descriptor
+has three ways to say what should happen. They are distinguished by what
+the kit wrote, not by what the value turned out to be:
+
+=over 4
+
+=item C<key> -- B<required>
+
+No C<:> clause at all. The kit is asserting the CPI cannot be configured
+without this, so a property found nowhere is fatal, naming itself.
+
+=item C<< key: >> or C<< key:>path >> -- B<defaults to empty>
+
+An empty C<:> clause. The kit has considered the question and decided
+C<''> is a legitimate value, so the property is emitted holding it.
+
+=item C<key?> -- B<omitted>
+
+The property is left out of the emitted config entirely, which is not the
+same as present-and-empty and is a distinction the CPI can act on.
+
+=back
+
+B<This was unenforceable until recently, and the history matters when
+reading older kits.> The check existed from the first commit -- it bailed
+C<unless defined $default> -- but C<< $default //= '' >> ran three
+statements earlier and guaranteed the test could never fail. So for the
+whole life of the feature, a required property found nowhere silently
+became C<''> and shipped an invalid CPI config to the director, where it
+failed later and less legibly. The empty-clause spelling did not parse at
+all, because the default was required to hold at least one character.
+
+The consequence for kit authors: a descriptor written before this was
+enforced may say "required" while meaning "optional", having never been
+tested against the difference. A property that is genuinely optional must
+now say so -- C<nsxt@nsxt?>, with the C<?> after the alts.
 
 =head2 A dot means different things on each side
 
@@ -162,6 +216,76 @@ they are the only way to emit a nested CPI property.
 Where a literal dot is wanted in an output key rather than nesting,
 C<unflatten> treats C<~> as an escape: C<a~b> yields the single key
 C<a.b>, and C<p.q~r> yields C<p> containing the single key C<q.r>.
+
+That escape is B<not> available on the input side. C<Genesis::flatten> does
+not escape a literal C<~> on the way in, so C<unflatten> turns it into a dot
+on the way out and a key written C<we~ird> returns as
+C<we.ird>. Rather than build on a mechanism that does not round-trip, an
+operator key holding a literal dot -- C<"pve.host": value> -- is refused,
+with the nested spelling offered instead.
+
+=head2 How an operator addresses a property
+
+C<bosh-configs.cpi> is flattened to its leaves, and each leaf is classified
+once against two sets -- the map's source keys (with their C<@alts>) and the
+map's output paths:
+
+=over 4
+
+=item *
+
+A leaf matching a source key or an C<@alt> resolves that mapped property.
+
+=item *
+
+A leaf matching a mapped C<< >path >> B<also> resolves that mapped
+property. It is not passthrough.
+
+=item *
+
+A leaf matching neither passes through to the CPI config untouched.
+
+=back
+
+Both spellings are routes into the same property, with identical
+entombment, defaults and optionality. The second rule is not a convenience:
+for C<< !pve_host@host>pve.host >>, an operator writing C<pve: {host:
+E<lt>secretE<gt>}> must have that entombed. Routing a mapped path to
+passthrough instead would mean C<!> never applies -- it lives on the
+descriptor -- and the secret would ship in cleartext.
+
+Because every route is equivalent, a property may be addressed B<exactly
+once>. Its source key, any of its C<@alts>, and its C<< >path >> are three
+spellings of one thing, so setting any two of them together is fatal --
+key with path, key with alt, or alt with path alike. The ambiguity is
+precisely what the rule removes, and it does not become less ambiguous for
+being spelled with an alt.
+
+The error names the two leaves that collided rather than the key and the
+path, since which pair of routes was used varies and a message that assumed
+one pair would misdescribe the other two.
+
+The path form exists so that a nested block carrying both modelled and
+unmodelled properties need not be split across two spellings:
+
+    pve:
+      host: x          # mapped
+      unknown: y       # passthrough -- the block justifies the path form
+
+Where that justification is absent -- every leaf under the same parent
+resolves to a mapped property -- the operator has taken on the exposure
+below and gained nothing, so a warning names the key that would have done
+instead. Granularity is same-parent: the most local rule, and the easiest
+to explain.
+
+B<The exposure, stated:> if a CPI renames a property and the kit's map
+follows, a leaf using the B<path> form silently becomes a passthrough at a
+dead address. The value stops reaching the property, the default takes
+over, and nothing errors -- because "meant the mapped path, which moved" is
+indistinguishable from "wants a passthrough here". The key form has no such
+exposure, as the map absorbs the rename. This is the same bargain
+passthrough already offers, which is why it is a warning rather than a
+refusal.
 
 =head2 Constraints and traps in the descriptor grammar
 
@@ -206,6 +330,203 @@ The entombed secret's name is Genesis's own bookkeeping and belongs to
 neither vocabulary. It is currently derived from the CPI-side path, which
 couples Genesis's records to a name the CPI owns; see
 L</cpi_entombment_path_for> for the consequences.
+
+=head1 INTERNAL METHODS
+
+These are internal to the implementation and may change without notice.
+
+=head2 _parse_property
+
+    my $spec = $hook->_parse_property($descriptor);
+
+Splits one property descriptor into its parts. Pure: performs no lookups
+and touches no state.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$descriptor>
+
+A descriptor string in the grammar described under L</PROPERTY MAPPING>.
+
+=back
+
+B<Returns:> A hash reference with the keys:
+
+=over 4
+
+=item C<key>
+
+The primary lookup name -- the operator-facing spelling.
+
+=item C<alts>
+
+Array reference of alternate lookup names, in the order they were
+declared. Empty when none were given.
+
+=item C<lookups>
+
+C<key> followed by C<alts>, which is the order they are consulted in.
+Provided so callers do not rebuild it, and so the set of names a map
+consumes is available without reassembling it from two fields.
+
+=item C<default>
+
+The declared default, verbatim. JSON decoding happens at resolution
+time, not here, so a default of C<["bosh"]> is still a string at this
+point.
+
+=item C<optional>
+
+C<1> when the descriptor ended in C<?>, else C<0>.
+
+=item C<secret>
+
+C<1> when the descriptor began with C<!>, else C<0>.
+
+=item C<path>
+
+Where the value lands in the emitted properties -- the C<< > >> side, or
+C<key> when the two vocabularies agree.
+
+=back
+
+B<Errors:>
+
+Dies with C<"Invalid CPI config property specification '%s' in kit
+cpi-config hook (expected [!]key[@alt][:default|?][>path])"> when the
+descriptor does not parse. The message repeats the grammar because the
+descriptor comes from a kit's C<cpi-config> hook, so its author is the
+one who has to correct it.
+
+B<Examples:>
+
+    $hook->_parse_property('region');
+    # { key => 'region', alts => [], lookups => ['region'], default => '',
+    #   optional => 0, secret => 0, path => 'region' }
+
+    $hook->_parse_property('!host@addr:def>a.b.c');
+    # { key => 'host', alts => ['addr'], lookups => ['host','addr'],
+    #   default => 'def', optional => 0, secret => 1, path => 'a.b.c' }
+
+=head2 _resolve
+
+    my ($value, $found) = $hook->_resolve($spec, $routed_leaf);
+
+Finds the value for one property spec.
+
+Consults B<every> name the operator might have used before B<any> name
+the platform might have used. Doing it the other way -- both sources per
+name -- lets an OCFP value under the primary beat an operator value under
+an C<@alt>, so an operator still using an older spelling is silently
+overridden by the platform default. Preventing that is what an C<@alt> is
+for.
+
+The operator side reads through C<lookup_entombed_self>, so a
+C<(( vault ))> reference in the environment file arrives already entombed.
+The platform side reads C<ocfp_config_lookup> and JSON-decodes when it
+can, falling back to the raw string.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$spec>
+
+A spec from L</_parse_property>.
+
+=item C<$routed_leaf>
+
+Optional. When the operator addressed the property by its CPI path rather
+than by its key, the leaf where the value sits. Given, only that leaf is
+consulted on the operator side; omitted, the spec's names are swept in
+order.
+
+=back
+
+B<Returns:> C<($value, $found)>. C<$found> reports whether anything
+B<stopped the search>, not whether there is a usable value: a key that
+exists settles the question whatever it holds, which is what makes an
+explicit null able to discard an OCFP value. Callers wanting "is there a
+value" must test C<defined($value)>, not C<$found>.
+
+B<Errors:>
+
+None. An unresolvable property is reported as not found.
+
+B<Examples:>
+
+    $hook->_resolve($spec);              # sweep the spec's own names
+    $hook->_resolve($spec, 'pve.host');  # the operator used the CPI path
+
+=head2 _entomb_if_needed
+
+    my $value = $hook->_entomb_if_needed($spec, $value);
+
+Applies the entombment rule to one resolved value, in this order:
+
+=over 4
+
+=item 1.
+
+A value already matching C<((...))> is returned untouched, B<regardless of
+C<!>>. Entombment has happened upstream, and doing it again would store a
+reference to a reference.
+
+=item 2.
+
+Without C<!>, the value is returned as-is.
+
+=item 3.
+
+An undefined or empty value B<dies>. An empty secret cannot be stored, and
+failing here names the property; left alone it surfaces much later as a
+missing CredHub value, naming a path instead.
+
+=item 4.
+
+Otherwise the value is entombed via L</cpi_entombment_path_for>, recorded
+in C<credhub_secrets>, and replaced by its C<(( reference ))>.
+
+=back
+
+C<!> exists chiefly for values drawn from the B<OCFP config>, which lives
+in vault and can hold credentials and certificates: there is no other way
+to place one in custom CredHub entombment. An operator value overriding
+such a property is entombed too, so that the same property does not land
+in CredHub or in the clear depending on which source supplied it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$spec>
+
+A spec from L</_parse_property>; only C<secret>, C<key> and C<path> are
+consulted.
+
+=item C<$value>
+
+The resolved value.
+
+=back
+
+B<Returns:> The value to emit -- unchanged, or a C<(( reference ))>.
+
+B<Errors:>
+
+Dies with C<"Cannot entomb CPI property #C{%s}: no value was found for it
+in #C{bosh-configs.cpi} or the OCFP config, and an empty secret cannot be
+stored."> when a C<!> property resolves to undef or the empty string.
+
+B<Examples:>
+
+    $hook->_entomb_if_needed($spec, 's3cr3t');
+    # '((/cpi-config/properties/cpi-config-property--api_key--a1b2c3d4))'
+
+    $hook->_entomb_if_needed($spec, '((genesis-entombed/x--y--abc12345))');
+    # unchanged -- already a reference
 
 =head1 METHODS
 
@@ -420,10 +741,16 @@ default is parsed as JSON if possible; otherwise used verbatim. Use C<true>,
 C<false>, and C<null> for their JSON/YAML equivalents. Quoted strings are
 parsed as JSON strings.
 
+The clause may be empty -- C<key:> and C<< key:>path >> declare a default
+of C<''>. B<Omitting the clause entirely is not the same thing:> it makes
+the property required, and a required property found in no source is
+fatal. See L</What a kit says by omission>.
+
 =item C<?>
 
 Makes the property optional. If not found via any lookup, the property is
-omitted from the output entirely (no error, no default).
+omitted from the output entirely (no error, no default). Written after the
+alts when both are present: C<< nsxt@nsxt? >>.
 
 =item C<< >config_path >>
 
@@ -432,22 +759,38 @@ properties using dot-notation (e.g., C<< connection_options.connect_timeout >>).
 
 =back
 
-Values are resolved in this priority order: C<bosh-configs.cpi.*> in the
-environment manifest, then C<cpi.E<lt>iaasE<gt>.*> in the OCFP
-configuration, then the descriptor's default. After the declared properties
-are resolved, any additional keys present in C<bosh-configs.cpi> that were
-not already resolved are merged in as overrides. A scalar override whose
-value is a C<(( vault ... ))> reference is entombed in CredHub the same way
-a C<!>-prefixed declared property is, and the override is rewritten to
-point at the entombed path.
+B<Resolution is a single pass.> The operator's C<bosh-configs.cpi> is read
+once, flattened to leaves, and each leaf is classified exactly once -- as a
+route into a mapped property, or as passthrough. Every property is then
+resolved and emitted once, from one manifest, under one ruleset. See
+L</How an operator addresses a property> for the classification, and
+L</Where values come from> for the precedence within a resolution.
 
-B<Limitation:> only scalar override values are scanned for vault
-references. An override whose value is a hash or array is passed through
-untouched, so any vault reference nested inside one reaches the CPI config
-un-entombed. See the C<FIXME> at the override loop in C<CpiConfig.pm>.
+That partition is the whole of the method's logic. It replaces an earlier
+arrangement in which the operator's namespace was read B<twice> -- once
+through C<lookup> against the merged, evaluated manifest for the declared
+properties, and again through C<lookup_unevaled> against the raw
+environment files for anything left over. A single operator setting was not
+merely read twice but resolved into two different values from two different
+manifests, both of which could reach the output: a C<!> secret could be
+re-emitted in cleartext beside the CredHub reference meant to replace it,
+and a spruce operator could reach the director as a literal, where it is
+parsed as a BOSH variable reference and fails every deployment against that
+director.
+
+Operator values are read through C<lookup_entombed_self>, so a C<(( vault
+))> reference in the environment file -- explicit or implicit, at any depth
+-- arrives already entombed. This is what retired the hand-rolled vault
+regex that scanned only scalars, and with it the limitation that a vault
+reference nested inside a hash or array reached the CPI config
+un-entombed.
 
 The resulting flat hash is passed through C<unflatten> to produce a nested
-structure when dot-notation config paths are used.
+structure when dot-notation config paths are used. Leaf-level flattening
+also means passthrough no longer hands whole subtrees through by reference,
+which previously let C<unflatten> alias the environment's own parameters
+into the emitted config -- so building a CPI config rewrote the
+environment's view of itself.
 
 B<Parameters:>
 
@@ -476,12 +819,45 @@ author is the one who has to correct it.
 
 =item *
 
-C<"Missing default for CPI config value for %s, and none found in environment">
--- raised via C<bail()> when a non-optional property has no value in the
-manifest, no value in the OCFP configuration, and no default in its
-descriptor. C<%s> is replaced with the property name.
+C<"Cannot set %s in bosh-configs.cpi: a quoted key holding a literal dot is
+not supported -- nest it instead."> -- raised via C<bail()> when an operator
+key contains a literal dot, detected as a C<~> in the flattened leaf. The
+message offers the nested spelling, which is the supported form.
+
+=item *
+
+C<"CPI property %s is set more than one way in bosh-configs.cpi: %s and %s
+both address it -- set only one."> -- raised via C<bail()> when one property
+is addressed twice, by any two of its source key, its C<@alts>, and its
+C<< >path >>. The second and third C<%s> are the two colliding leaves, in
+sorted order so the message does not vary with hash ordering.
+
+=item *
+
+C<"CPI property %s is required: no value was found for it in
+bosh-configs.cpi or the OCFP config, and the kit declares no default..."> --
+raised via C<bail()> when a property with no C<:> clause and no C<?> is
+found in no source. The message names both remedies open to a kit author,
+since a descriptor predating enforcement may say "required" while meaning
+"optional".
+
+=item *
+
+C<"Cannot entomb CPI property %s: ..."> -- raised via C<bail()> from
+L</_entomb_if_needed> when a C<!> property holds nothing at entombment
+time, since an empty secret cannot be stored. With the required check
+above in place this is reached only when a secret declares an empty
+default explicitly, as C<< !key: >>. Before it existed, an unresolvable
+secret was entombed empty and surfaced much later as C<"N missing secret
+values"> -- naming a CredHub path rather than the property, after the
+config had already been built.
 
 =back
+
+B<Warnings:> a modelled property addressed by its C<< >path >> where no
+unmodelled leaf shares its parent warns, naming the source key that would
+have avoided the rename exposure. See L</How an operator addresses a
+property>.
 
 B<Examples:>
 

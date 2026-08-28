@@ -43,6 +43,20 @@ require_ok 'Genesis::Hook::CpiConfig';
 # Shared kit and bosh mocks
 # ---------------------------------------------------------------------------
 
+# lookup and lookup_entombed_self read different manifests in production;
+# for a plain value the two agree, so one body answers both -- two copies
+# is how a double starts disagreeing with itself.
+sub fixed_lookups {
+	my (%values) = @_;
+	my $read = sub {
+		my ($self, $key, $default) = @_;
+		return wantarray ? ($values{$key}, 'env-file') : $values{$key}
+			if exists $values{$key};
+		return wantarray ? ($default, undef) : $default;
+	};
+	return (lookup => $read, lookup_entombed_self => $read);
+}
+
 my $kit = mock "Genesis::Kit::CpiConfig" => {
 	name                => 'test-kit',
 	version             => '1.0.0',
@@ -101,6 +115,10 @@ sub mock_env {
 		lookup_unevaled => sub {
 			my ($self, $key) = @_;
 			return {};
+		},
+		lookup_entombed_self => sub {
+			my ($self, $key, $default) = @_;
+			return wantarray ? ($default, undef) : $default;
 		},
 		exodus_lookup => sub {
 			my ($self, $key, $default) = @_;
@@ -591,14 +609,7 @@ subtest 'gather_properties - value found in env lookup (bosh-configs.cpi.*)' => 
 		deployments     => mock("Genesis::Env::CpiConfig::GP1Deployments" => {
 			current_state => 'deployed',
 		}),
-		lookup => sub {
-			my ($self, $key, $default) = @_;
-			# Return a value + source for bosh-configs.cpi.region
-			if ($key eq 'bosh-configs.cpi.region') {
-				return wantarray ? ('us-east-1', 'env-file') : 'us-east-1';
-			}
-			return wantarray ? ($default, undef) : $default;
-		},
+		fixed_lookups('bosh-configs.cpi.region' => 'us-east-1'),
 		ocfp_config_lookup => sub {
 			my ($self, $key, $default) = @_;
 			return wantarray ? ($default, undef) : $default;
@@ -652,23 +663,30 @@ subtest 'gather_properties - optional property omitted when not found' => sub {
 		'optional property is absent from result when not found in any source');
 };
 
-subtest 'gather_properties - missing required property falls back to empty string default' => sub {
-	# NOTE: The bail("Missing default...") in CpiConfig.pm is unreachable dead
-	# code because $default //= '' is set unconditionally before the defined
-	# check.  A property with no ':' separator and no lookup match silently
-	# falls through to empty string, not bail.  This test documents that
-	# actual runtime behavior.
-	plan tests => 2;
+subtest 'gather_properties - a required property with no default bails' => sub {
+	# This previously pinned the dead-code behaviour: the bail tested
+	# `defined $default` but `$default //= ''` ran three statements earlier,
+	# so it could never fire and an unset required property shipped ''.
+	# The descriptor always distinguished "no default" from "empty default";
+	# only the parser collapsed them.  Now `key` is required, `key:` declares
+	# an empty default, and `key?` is omitted when unset.
+	plan tests => 3;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
 
-	my $hook = make_hook();  # all lookups return undef / no source
+	quietly {
+		throws_ok {make_hook()->gather_properties('required_prop')}
+			qr/required_prop/,
+			'a required property found in no source names itself';
 
-	my $props;
-	lives_ok {
-		$props = $hook->gather_properties('required_prop');
-	} 'gather_properties() does not die for required property not found (falls back to empty string)';
+		throws_ok {make_hook()->gather_properties('required_prop')}
+			qr/required|no default/i,
+			'and says why, rather than emitting an empty value';
+	};
 
+	# How a kit opts into the old behaviour, now that it has to say so.
+	my $props = make_hook()->gather_properties('required_prop:');
 	is($props->{required_prop}, '',
-		'required property not found falls back to empty string (bail is unreachable dead code)');
+		'an explicit empty default still yields an empty string');
 };
 
 subtest 'gather_properties - secret property entombed in credhub_secrets' => sub {
@@ -691,13 +709,7 @@ subtest 'gather_properties - secret property entombed in credhub_secrets' => sub
 		deployments     => mock("Genesis::Env::CpiConfig::Sec1Deployments" => {
 			current_state => 'deployed',
 		}),
-		lookup => sub {
-			my ($self, $key, $default) = @_;
-			if ($key eq 'bosh-configs.cpi.api_key') {
-				return wantarray ? ('my-secret-value', 'env-file') : 'my-secret-value';
-			}
-			return wantarray ? ($default, undef) : $default;
-		},
+		fixed_lookups('bosh-configs.cpi.api_key' => 'my-secret-value'),
 		ocfp_config_lookup => sub {
 			my ($self, $key, $default) = @_;
 			return wantarray ? ($default, undef) : $default;
@@ -740,13 +752,7 @@ subtest 'gather_properties - config_path override (>) places value under alterna
 		deployments     => mock("Genesis::Env::CpiConfig::Path1Deployments" => {
 			current_state => 'deployed',
 		}),
-		lookup => sub {
-			my ($self, $key, $default) = @_;
-			if ($key eq 'bosh-configs.cpi.ntp') {
-				return wantarray ? ('ntp.example.com', 'env-file') : 'ntp.example.com';
-			}
-			return wantarray ? ($default, undef) : $default;
-		},
+		fixed_lookups('bosh-configs.cpi.ntp' => 'ntp.example.com'),
 		ocfp_config_lookup => sub {
 			my ($self, $key, $default) = @_;
 			return wantarray ? ($default, undef) : $default;

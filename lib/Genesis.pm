@@ -1509,11 +1509,11 @@ sub unflatten {
 			$pk =~ s/~/./g;
 			if (defined $sk) {
 				# If $h_data{$pk} is an array ref,
-				die "Hash cannot have scalar and non-scalar values (at ".join('.', grep $_, ($branch, "pk")).")"
+				die "Hash cannot have scalar and non-scalar values (at ".join('.', grep $_, ($branch, $pk)).")"
 					if defined $h_data{$pk} && ref($h_data{$pk}) ne 'HASH';
 				$h_data{$pk}->{$sk} = $data->{$k};
 			} else {
-				die "Hash cannot have scalar and non-scalar values (at ".join('.', grep $_, ($branch, "pk")).")"
+				die "Hash cannot have scalar and non-scalar values (at ".join('.', grep $_, ($branch, $pk)).")"
 					if defined $h_data{$pk};
 				$h_data{$pk} = $data->{$k};
 			}
