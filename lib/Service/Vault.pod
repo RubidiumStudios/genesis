@@ -773,6 +773,21 @@ When no key is given, fetches the entire path and returns a hash reference
 of all key/value pairs at that path. Returns an empty hash reference C<{}>
 on error.
 
+B<What counts as an error.> A non-zero exit from C<safe> is a failure. A
+zero exit is not automatically a success: C<safe> has not reliably set a
+non-zero exit code on failure, so the payload is the deciding evidence --
+if it parses as a hash the read succeeded, and if it does not the read is
+treated as failed and the C<safe> output is reported.
+
+Anything C<safe> writes to standard error while exiting zero is
+B<not> treated as failure. Some builds emit a TLS notice on every call
+against a C<noverify> target, and treating that as an error discarded
+otherwise complete reads and reported them as missing permissions. What
+was written is recorded at trace level rather than dropped. The same
+reasoning is applied to the JSON paths by
+C<Genesis::read_json_from>, which overrides its error on a zero exit for
+exactly this reason.
+
 B<Parameters:>
 
 =over 4

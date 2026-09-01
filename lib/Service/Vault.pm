@@ -410,6 +410,21 @@ sub get {
 	}
 	my $start = gettimeofday();
 	my ($yaml,$rc,$err) = $self->query({stderr => 0, redact_output => 1}, 'get', $path);
+	my $values;
+	unless ($rc) {
+		# safe exited cleanly, so let the payload decide rather than stderr:
+		# a noverify target draws a TLS warning on every call, and treating
+		# that as failure discards a perfectly good read.  stderr is still
+		# the signal when safe fails without saying so in its exit code --
+		# an unparseable payload keeps the error below.  Same reasoning as
+		# read_json_from, which overrides $err for the JSON paths.
+		trace(
+			"safe wrote to stderr but exited 0; deferring to the payload: %s", $err
+		) if $err;
+		local $@;
+		eval {$values = load_yaml($yaml)};
+		$err = $@;
+	}
 	if ($rc || $err) {
 		debug(
 			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}:%s\nexit code: %s",
@@ -417,7 +432,6 @@ sub get {
 		);
 		return {};
 	}
-	my $values = load_yaml($yaml);
 	bail(
 		"Expected #C{%s} to return a hash of key/value pairs, but got a %s",
 		$path, ref($values)

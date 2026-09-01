@@ -361,6 +361,82 @@ subtest 'get($path) without key returns empty hash on error' => sub {
 	is(scalar(keys %$result), 0, 'get() returns empty hash on error');
 };
 
+# safe writes a TLS warning to stderr for every noverify target.  The read
+# succeeds -- exit 0, full payload -- but stderr is not empty, and the
+# guard below treats any stderr as failure, so a good read was discarded
+# and reported as a permissions problem.
+my $TLS_WARNING =
+	"WARNING: TLS certificate verification disabled - connections to ".
+	"Vault are not authenticated\n";
+
+subtest 'a benign warning on stderr does not discard a good read' => sub {
+	plan tests => 3;
+
+	my $v = make_vault();
+	my $yaml = "password: hunter2\nuser: admin\n";
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub { return ($yaml, 0, $TLS_WARNING) };
+	use warnings 'redefine';
+
+	my $result = $v->get('/secret/myapp');
+	is(ref($result), 'HASH', 'get() returns a hash ref');
+	is(scalar(keys %$result), 2, 'the payload is kept, not thrown away');
+	is($result->{password}, 'hunter2', 'and its values are intact');
+};
+
+subtest 'get_path keeps a good read despite a stderr warning' => sub {
+	plan tests => 2;
+
+	# Same defect, same shape, in the sibling gate.
+	my $v = make_vault();
+	my $json = '{"secret/myapp":{"password":"hunter2"}}';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub { return ($json, 0, $TLS_WARNING) };
+	use warnings 'redefine';
+
+	my $result = $v->get_path('/secret/myapp');
+	is(ref($result), 'HASH', 'get_path() returns a hash ref');
+	isnt(scalar(keys %$result), 0, 'the exported data is kept');
+};
+
+subtest 'a real error on stderr still fails, even when safe exits 0' => sub {
+	plan tests => 2;
+
+	# This is why the stderr check exists: safe has not reliably set a
+	# non-zero exit code on failure, so stderr was the more trustworthy
+	# signal.  Suppressing the benign warning must not blind the guard to
+	# a genuine failure that exits 0.
+	my $v = make_vault();
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub {
+		return ('', 0, "!! permission denied reading /secret/myapp\n");
+	};
+	use warnings 'redefine';
+
+	my $result = $v->get('/secret/myapp');
+	is(ref($result), 'HASH', 'get() still returns a hash ref');
+	is(scalar(keys %$result), 0, 'a genuine exit-0 failure is still caught');
+};
+
+subtest 'a warning alongside a real error still fails' => sub {
+	plan tests => 1;
+
+	# Filtering the known-benign line must not swallow what accompanies it.
+	my $v = make_vault();
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub {
+		return ('', 0, $TLS_WARNING."!! could not reach vault\n");
+	};
+	use warnings 'redefine';
+
+	is(scalar(keys %{$v->get('/secret/myapp')}), 0,
+		'the unrecognised line keeps the read fatal');
+};
+
 subtest 'get() splits combined path:key from single arg' => sub {
 	plan tests => 2;
 
