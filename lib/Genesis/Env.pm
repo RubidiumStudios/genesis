@@ -2994,6 +2994,7 @@ sub get_target_bosh {
 	my $options = ref($_[0]) eq 'HASH' ? shift : {@_}; # allow for explicit or implicit option hash
 	my $bosh;
 	my $bosh_exodus_path;
+	my $bosh_lookup_error;
 
 	my $is_director = $self->is_bosh_director;
 	my $is_create_env = $self->use_create_env;
@@ -3062,6 +3063,26 @@ sub get_target_bosh {
 	if ($target eq 'self') {
 		$bosh_exodus_path=$self->exodus_base;
 		my $exodus_data = eval {$self->vault->get($bosh_exodus_path)};
+		# Keep why this failed.  The bail below fires for three different
+		# reasons and used to report all of them as a permissions problem,
+		# while this eval discarded the one thing that said otherwise.
+		if ($@) {
+			# First line only: under Carp::Always the rest is a backtrace,
+			# which buries the sentence that says what went wrong.
+			my $read_error = (split /\n/, "$@")[0] // 'unknown error';
+			$read_error =~ s/ at \S+ line \d+\.?\s*$//;
+			$bosh_lookup_error = sprintf("reading it failed: %s", $read_error);
+		} elsif (ref($exodus_data) ne 'HASH' || !CORE::keys %$exodus_data) {
+			$bosh_lookup_error =
+				"it is empty -- the director may not have been deployed yet, ".
+				"or its exodus data was never uploaded";
+		} elsif (!$exodus_data->{url} || !$exodus_data->{admin_password}) {
+			$bosh_lookup_error = sprintf(
+				"it is incomplete: missing %s",
+				join(' and ', map {"#y{$_}"}
+					grep {!$exodus_data->{$_}} qw/url admin_password/)
+			);
+		}
 		if ($exodus_data->{url} && $exodus_data->{admin_password}) {
 			$bosh = Service::BOSH::Director->from_exodus($self->name, $self,
 				exodus_data => $exodus_data,
@@ -3080,9 +3101,15 @@ sub get_target_bosh {
 		$bosh_exodus_path = $self->exodus_base;
 	}
 	bail(
-		"No BOSH connection details found.  This may be due to not having read ".
-		"access to the BOSH deployment's exodus data in vault (#M{%s}).",
-		$bosh_exodus_path
+		"No BOSH connection details found for #C{%s}.\n\n".
+		"Looked in #M{%s}, and %s.\n".
+		"%s",
+		$self->name,
+		$bosh_exodus_path,
+		$bosh_lookup_error // "no usable connection details were found there",
+		$target eq 'self'
+			? "No BOSH alias named #C{".$self->name."} is configured locally either."
+			: ""
 	) unless $bosh;
 
 	return wantarray ? ($bosh, $target, $bosh_exodus_path) : $bosh;
