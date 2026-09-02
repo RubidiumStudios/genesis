@@ -295,9 +295,15 @@ sub get_vault_from_descriptor {
 sub parse_vault_descriptor {
 	my ($class, $vault_info, $source) = @_;
 	$source ||= 'genesis.vault';
+	# strongbox stays undef until a clause says otherwise: a descriptor that
+	# omits it has stated nothing, and build_descriptor omits it for both
+	# unstated and enabled.  Defaulting to 1 here turned every such env into
+	# one that had asked for Strongbox.
 	my ($url, $verify, $alias, $namespace, $strongbox, $tls, $domain, $port);
-	$strongbox = 1;
-	$vault_info =~ s/ as ([^ ]*) / / and $alias = $1;
+	# The alias may be the last thing in the descriptor, so the trailing
+	# separator has to be optional -- requiring it left 'as' and the alias
+	# behind as clauses and killed the parse.
+	$vault_info =~ s/\s+as\s+(\S+)(?:\s|$)/ / and $alias = $1;
 	for my $clause (split(' ',$vault_info)) {
 		if ($clause =~ /^(no-)?strongbox$/) {
 			$strongbox = $1 ? 0 : 1;
@@ -968,9 +974,11 @@ sub build_descriptor {
 	$descriptor .= ("/".$self->namespace) if $self->namespace;
 	$descriptor .= " as ".$self->name;
 	$descriptor .= " no-verify" if $self->tls && !$self->verify;
-	# Only an explicit disable earns a clause.  The parser reads no-strongbox
-	# as a decision, and a target that never stated the flag has not made one.
-	$descriptor .= " no-strongbox" if defined($self->strongbox) && !$self->strongbox;
+	# Only a stated setting earns a clause, in either direction.  A target
+	# that never stated the flag emits nothing, so the descriptor carries
+	# all three states and parse_vault_descriptor reads back what was meant.
+	$descriptor .= $self->strongbox ? " strongbox" : " no-strongbox"
+		if defined($self->strongbox);
 	return $descriptor;
 }
 

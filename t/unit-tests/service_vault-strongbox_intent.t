@@ -172,7 +172,7 @@ subtest 'all_vaults trusts the file over safe\'s conclusion' => sub {
 };
 
 subtest 'the descriptor does not turn silence into a disable' => sub {
-	plan tests => 3;
+	plan tests => 6;
 
 	# build_descriptor feeds BOSH_EXODUS_VAULT and the vault descriptor
 	# handed to kits and CI, and the parser on the other end reads a
@@ -194,8 +194,20 @@ subtest 'the descriptor does not turn silence into a disable' => sub {
 	my $on = Service::Vault->new(
 		'https://vault.example.com', 'ops', 1, '', 1, '/secret/'
 	);
-	unlike($on->build_descriptor, qr/no-strongbox/,
-		'an explicit enable does not');
+	like($on->build_descriptor, qr/(?<!no-)strongbox/,
+		'an explicit enable emits a positive clause, not silence');
+
+	# Round-trips in all three states, so a descriptor cannot quietly
+	# promote an unstated flag to enabled on the way back in.
+	for my $state (undef, 0, 1) {
+		my $v = Service::Vault->new(
+			'https://vault.example.com', 'ops', 1, '', $state, '/secret/'
+		);
+		my $back = Service::Vault->parse_vault_descriptor($v->build_descriptor);
+		is($back->{strongbox}, $state,
+			sprintf('%s survives a descriptor round-trip',
+				defined($state) ? "strongbox=$state" : 'unstated'));
+	}
 };
 
 done_testing;

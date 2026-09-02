@@ -1262,7 +1262,7 @@ kit:
 
 genesis:
   env:            $name
-  vault:          $VAULT_URL as $vault_target no-strongbox
+  vault:          $VAULT_URL as $vault_target
   min_version:    3.0.0-rc.1
 
 params:

@@ -113,7 +113,11 @@ subtest 'parse_vault_descriptor() - scalar context' => sub {
 	ok($r->{tls},                                          'tls true for https');
 	is($r->{domain},    'vault.example.com',               'domain extracted');
 	is($r->{port},      '8200',                            'port extracted');
-	is($r->{strongbox}, 1,                                 'strongbox defaults to 1');
+	# Not 1.  A descriptor with no strongbox clause has not stated one, and
+	# defaulting to enabled here made every env whose descriptor omits the
+	# clause -- now the common case -- look like it had asked for Strongbox,
+	# producing a spurious warning against targets that simply say nothing.
+	is($r->{strongbox}, undef,                             'strongbox unstated when no clause');
 	# verify defaults to tls when not explicitly set
 	ok($r->{verify},    'verify defaults to tls value (true for https)');
 	ok(!defined($r->{alias}), 'alias undef when not specified');
@@ -130,6 +134,24 @@ subtest 'parse_vault_descriptor() - list context' => sub {
 	is($ns,     'ns1',                   'namespace in list context');
 	is($alias,  'local',                 'alias in list context');
 	is($sb,     0,                       'no-strongbox -> 0');
+};
+
+subtest 'parse_vault_descriptor() - alias at end of descriptor' => sub {
+	plan tests => 4;
+
+	# The alias was extracted with s/ as ([^ ]*) / /, which needs a space
+	# after the alias -- so a descriptor ending at the alias left 'as' and
+	# the alias behind as unparsed clauses and died on "Unknown clause".
+	# Every case above happens to put a clause after the alias, which is
+	# why this went unnoticed until descriptors stopped always carrying a
+	# trailing no-strongbox.
+	my $r = Service::Vault->parse_vault_descriptor(
+		'http://127.0.0.1:8200 as genesis-ci-unit-tests'
+	);
+	is(ref($r), 'HASH',                  'a trailing alias parses at all');
+	is($r->{alias}, 'genesis-ci-unit-tests', 'alias is extracted');
+	is($r->{url},   'http://127.0.0.1:8200', 'url is still parsed');
+	ok(!defined($r->{namespace}),        'and nothing is mistaken for a namespace');
 };
 
 subtest 'parse_vault_descriptor() - clauses' => sub {

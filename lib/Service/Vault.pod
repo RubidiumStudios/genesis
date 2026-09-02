@@ -604,6 +604,16 @@ C<alias>, C<namespace>, C<strongbox>, C<tls>, C<domain>, and C<port>.
 
 In list context, returns C<($url, $verify, $namespace, $alias, $strongbox)>.
 
+C<strongbox> is tri-state and has B<no default>: a descriptor carrying
+neither clause has stated nothing, and is reported as C<undef>. It formerly
+defaulted to enabled, which meant every environment whose descriptor omitted
+the clause -- now the common case, since L</build_descriptor> emits one only
+for a stated setting -- looked as though it had asked for Strongbox, and
+drew a warning against targets that had simply said nothing.
+
+The alias may be the last element of the descriptor; it is not required to
+be followed by another clause.
+
 B<Parameters:>
 
 =over 4
@@ -1511,19 +1521,16 @@ format accepted by C<parse_vault_descriptor>. Includes the URL, namespace
 (if set), alias name, and the C<no-verify> and C<no-strongbox> flags if
 applicable.
 
-C<no-strongbox> is emitted only for an B<explicitly> disabled Strongbox. A
-vault whose flag is unstated emits no clause, because the receiving parser
-reads C<no-strongbox> as a decision, and propagating one that nobody made
-would stamp it onto every consumer of the descriptor -- among them
-C<BOSH_EXODUS_VAULT> and the vault descriptor handed to kits and CI.
+A strongbox clause is emitted only for a B<stated> setting, in either
+direction: C<strongbox> when enabled, C<no-strongbox> when disabled, and
+nothing at all when unstated. The descriptor therefore carries all three
+states, and L</parse_vault_descriptor> reads back exactly what was meant.
 
-B<Limitation:> the descriptor grammar has no way to express the unstated
-third state. Both C<undef> and an explicit C<1> serialise to no clause, and
-C<parse_vault_descriptor> reads that back as enabled, since C<1> is its
-default. A vault that round-trips through a descriptor therefore comes back
-with an unstated flag promoted to stated-enabled. Fixing this properly means
-changing C<parse_vault_descriptor>'s default to C<undef>, which affects
-every descriptor consumer and has been left alone deliberately.
+This matters because the descriptor is how the setting reaches
+C<BOSH_EXODUS_VAULT> and the vault descriptor handed to kits and CI.
+Emitting a clause for a target that never stated the flag would propagate
+an opinion nobody holds; emitting nothing for one that did would let the
+reader's default overwrite a real decision.
 
 B<Returns:> A descriptor string such as
 C<'https://vault.example.com:8200 as prod-vault no-verify'>.
@@ -1533,10 +1540,13 @@ B<Examples:>
   my $desc = $vault->build_descriptor();
   # Returns: 'https://vault.example.com:8200 as prod-vault'
 
+  # strongbox => 1 (explicitly enabled)
+  # Returns: 'https://vault.example.com:8200 as prod-vault strongbox'
+
   # strongbox => 0 (explicitly disabled)
   # Returns: 'https://vault.example.com:8200 as prod-vault no-strongbox'
 
-  # strongbox => undef (unstated) -- no clause
+  # strongbox => undef (unstated) -- no clause at all
   # Returns: 'https://vault.example.com:8200 as prod-vault'
 
 =head2 set_as_current

@@ -55,10 +55,14 @@ subtest 'init' => sub {
 		deployment_type => 'jumpbox',
 		manifest_store => 'exodus',
 		minimum_version => '3.1.0',
+		# No strongbox key: the harness creates its target with a plain
+		# `safe target`, which states nothing about Strongbox, and an
+		# unstated flag is no longer recorded as a decision.  These
+		# fixtures previously asserted false, which was safe's default
+		# being mistaken for a statement -- the defect under test.
 		secrets_provider => {
 			url => $VAULT_URL,
 			insecure => bool(0),
-			strongbox => bool(0),
 			namespace => "",
 			alias => $vault_target
 		}
@@ -499,7 +503,6 @@ deployment_type: test
 secrets_provider:
   url: $VAULT_URL{$vault_target}
   insecure: false
-  strongbox: false
   namespace: ""
   alias: $vault_target
 updater_version: 99.99.99
@@ -513,7 +516,6 @@ EOF
 			"secrets_provider" => {
 				"url" => $VAULT_URL{$vault_target},
 				"insecure" => bool(0),
-				"strongbox" => bool(0),
 				"namespace" => "",
 				"alias" => $vault_target,
 			}
@@ -531,7 +533,6 @@ deployment_type: test
 secrets_provider:
   url: $VAULT_URL{$vault_target}
   insecure: false
-  strongbox: false
   namespace: ""
   alias: $vault_target
 updater_version: 99.99.99
@@ -545,7 +546,6 @@ EOF
 			"secrets_provider" => {
 				"url" => $VAULT_URL{$vault_target},
 				"insecure" => bool(0),
-				"strongbox" => bool(0),
 				"namespace" => "",
 				"alias" => $vault_target
 			}
@@ -565,7 +565,6 @@ deployment_type: test
 secrets_provider:
   url: $VAULT_URL{$other_vault_name}
   insecure: false
-  strongbox: false
   namespace: ""
   alias: $other_vault_name
 updater_version: 99.99.99
@@ -579,7 +578,6 @@ EOF
 			"secrets_provider" => {
 				"url" => $VAULT_URL{$other_vault_name},
 				"insecure" => bool(0),
-				"strongbox" => bool(0),
 				"namespace" => "",
 				"alias" => $other_vault_name
 			}
