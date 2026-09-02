@@ -26,7 +26,10 @@ sub new {
 			name      => $name,
 			verify    => $verify ? 1 : 0, # Cleans out JSON::Boolean types
 			namespace => $namespace || '',
-			strongbox => !defined($strongbox) || $strongbox ? 1 : 0, # defaults to true
+			# Tri-state: undef means no safe target ever stated it.  Coercing
+			# to true here is what made safe's old default indistinguishable
+			# from a deliberate choice -- see strongbox_intent below.
+			strongbox => defined($strongbox) ? ($strongbox ? 1 : 0) : undef,
 			mount     => $mount || '/secret/',
 			id        => sprintf("%s-%06d",$name,rand(1000000))
 		}, $class);
@@ -41,6 +44,37 @@ sub create {
 	# FIXME:  Should subclasses call this to add a created vault to the @all_vaults class property?
   bug "Expected $class to provide 'create' method, but it did not (or called SUPER)"
     if $class eq __PACKAGE__;
+}
+
+# }}}
+# strongbox_intent - what ~/.saferc states about a target, if anything {{{
+sub strongbox_intent {
+	my ($alias) = @_;
+	return undef unless defined $alias;
+
+	# safe locates its rc at $HOME/.saferc in every version that has ever
+	# shipped, with no environment override, so this needs no discovery.
+	my $rc = ($ENV{HOME} // '') . '/.saferc';
+	return undef unless -f $rc;
+
+	# The file belongs to safe.  An unreadable or unparseable one says
+	# nothing about intent, and must not take down a command over a flag
+	# that only affects seal-state reporting.
+	my $config = eval {load_yaml_file($rc)};
+	return undef unless ref($config) eq 'HASH';
+
+	my $target = ($config->{vaults} // {})->{$alias};
+	return undef unless ref($target) eq 'HASH';
+
+	# Two keys, two eras.  v1.20.0+ writes `strongbox` and omits it when
+	# off; v1.4.0 through v1.10.0 wrote `no_strongbox` and omitted it when
+	# on.  Absence therefore means opposite things depending on who wrote
+	# the file, which is why neither key present has to stay undef rather
+	# than pick a side.  `strongbox` wins when both appear: safe's own
+	# migration rewrites the legacy key into it, so it is the newer intent.
+	return $target->{strongbox} ? 1 : 0 if exists $target->{strongbox};
+	return $target->{no_strongbox} ? 0 : 1 if exists $target->{no_strongbox};
+	return undef;
 }
 
 # }}}
@@ -930,7 +964,9 @@ sub build_descriptor {
 	$descriptor .= ("/".$self->namespace) if $self->namespace;
 	$descriptor .= " as ".$self->name;
 	$descriptor .= " no-verify" if $self->tls && !$self->verify;
-	$descriptor .= " no-strongbox" unless $self->strongbox;
+	# Only an explicit disable earns a clause.  The parser reads no-strongbox
+	# as a decision, and a target that never stated the flag has not made one.
+	$descriptor .= " no-strongbox" if defined($self->strongbox) && !$self->strongbox;
 	return $descriptor;
 }
 

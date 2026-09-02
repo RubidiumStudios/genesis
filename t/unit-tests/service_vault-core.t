@@ -22,7 +22,7 @@ sub make_vault {
 	my $name      = $args{name}      // 'test-vault';
 	my $verify    = $args{verify}    // 1;
 	my $namespace = $args{namespace} // '';
-	my $strongbox = $args{strongbox};   # undef means "use default (true)"
+	my $strongbox = $args{strongbox};   # undef means "unstated" (see below)
 	my $mount     = $args{mount}     // '/secret/';
 	return Service::Vault->new($url, $name, $verify, $namespace, $strongbox, $mount);
 }
@@ -39,7 +39,10 @@ subtest 'new() constructor' => sub {
 	is($v->name,      'test-vault',                     'name stored correctly');
 	is($v->verify,    1,                                'verify coerced to 1');
 	is($v->namespace, '',                               'namespace defaults to empty string');
-	is($v->strongbox, 1,                                'strongbox defaults to 1');
+	# Deliberately not 1.  safe omits the key for whichever state is its
+	# default, and the two eras default opposite ways, so an unstated
+	# strongbox has to stay unstated rather than inherit either one.
+	is($v->strongbox, undef,                            'strongbox is undef when unstated');
 
 	# mount normalisation: must be /xxx/ with leading and trailing slash
 	my $v2 = make_vault(mount => 'secret');
