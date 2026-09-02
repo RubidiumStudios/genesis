@@ -1348,6 +1348,31 @@ Pass C<undef> to let stderr reach the terminal unredirected. Pass C<0> to
 capture stderr separately (returned as the third list element, or as the
 scalar return value on non-zero exit).
 
+Any B<other> value is used verbatim as the shell redirect target, so the
+command is run as C<< 2>$value >>. That allows an explicit destination:
+
+    run({stderr => '/dev/null'}, 'some-noisy-command')
+
+A bare positive integer is the exception: it is read as the file descriptor
+it plainly means, and coerced accordingly.
+
+    run({stderr => 1},    ...)  # 2>&1 -- coerced, with a debug note
+    run({stderr => '&1'}, ...)  # 2>&1 -- written explicitly
+
+Without that coercion C<stderr =E<gt> 1> would render C<< 2>1 >> and write a
+file called C<1> into the working directory instead of merging the streams.
+It is a silent failure -- the command still succeeds and nothing reports the
+stray file -- and it has happened in a shipped kit hook, whose output file
+was committed to a deployment repository before anyone noticed.
+
+The coercion is logged at debug rather than warned about: an operator running
+a deploy cannot fix a hook's arguments, but whoever maintains that hook
+should find it in the trace. Note that C<0> is B<not> coerced; it retains its
+meaning above.
+
+Prefer writing C<'&1'> explicitly. The coercion is a safety net for a mistake
+that is otherwise invisible, not an idiom to rely on.
+
 =item C<dir>
 
 Change to this directory before executing the command.

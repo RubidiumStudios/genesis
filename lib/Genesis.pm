@@ -622,6 +622,21 @@ sub run {
 	my %opts = %{((ref($args[0]) eq 'HASH') ? shift @args: {})};
 	$opts{stderr} = '&1' unless exists $opts{stderr};
 
+	# stderr is a shell redirect target, so `stderr => 1` renders `2>1` and
+	# writes a file called "1" into the working directory -- silently, since
+	# the command still succeeds.  Nobody names a file after a file
+	# descriptor, so take the integer as the descriptor it plainly means.
+	# 0 is exempt: it already means "capture separately", and callers
+	# throughout the tree depend on that.
+	if (defined($opts{stderr}) && $opts{stderr} =~ /^[1-9][0-9]*$/) {
+		debug(
+			"run() was given #C{stderr => %s}; reading it as file descriptor ".
+			"#C{&%s}, since a bare integer is a descriptor and not a filename",
+			$opts{stderr}, $opts{stderr}
+		);
+		$opts{stderr} = '&'.$opts{stderr};
+	}
+
 	my $err_file = $opts{stderr} = workdir().sprintf("/run-%09d.stderr",rand(1000000000))
 		if (defined($opts{stderr}) && $opts{stderr} eq '0' && !$opts{interactive});
 
