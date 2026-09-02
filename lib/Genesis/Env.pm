@@ -1318,6 +1318,10 @@ sub propagation_files {
 	# Config
 	$files{'.genesis/config'} = 1;
 
+	# Kit overrides, which Genesis::Kit::metadata picks up by existence alone
+	# and which carry the credential, certificate and provided definitions.
+	$files{'kit-overrides.yml'} = 1 if -f $self->path('kit-overrides.yml');
+
 	# Reaction scripts
 	my $reactions = $self->lookup('genesis.reactions', {});
 	if (ref($reactions) eq 'HASH') {
