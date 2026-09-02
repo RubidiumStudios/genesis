@@ -133,6 +133,44 @@ subtest 'new() keeps an unstated strongbox unstated' => sub {
 	is($off->strongbox, 0, 'an explicit 0 is preserved');
 };
 
+subtest 'all_vaults trusts the file over safe\'s conclusion' => sub {
+	plan tests => 3;
+
+	# Reading the intent is worthless unless the objects everything else
+	# uses actually carry it.  all_vaults builds them from `safe targets
+	# --json`, which reports only the conclusion safe reached after
+	# applying its own default -- so a target that states nothing arrives
+	# as a definite false, and every consumer treats a non-answer as a
+	# decision.  This was missed once because the tests around attach
+	# built their vault objects directly.
+	my $home = workdir;
+	local $ENV{HOME} = $home;
+	open my $fh, '>', "$home/.saferc" or die $!;
+	print $fh saferc_with("");   # ops: neither key
+	close $fh;
+
+	no warnings 'redefine';
+	local *Service::Vault::read_json_from = sub {
+		# What the new safe reports for a target whose rc says nothing.
+		return [{
+			name => 'ops', url => 'https://vault.example.com',
+			verify => 1, namespace => '', strongbox => 0,
+		}];
+	};
+	local *Service::Vault::run = sub {('', 0, '')};
+	local *Service::Vault::Local::valid_local_vault = sub {0};
+	use warnings 'redefine';
+
+	Service::Vault->clear_all;
+	my ($vault) = Service::Vault::all_vaults();
+	Service::Vault->clear_all;
+
+	ok($vault, 'a vault is built');
+	is($vault->name, 'ops', 'for the expected target');
+	is($vault->strongbox, undef,
+		'strongbox is unstated, not the false safe inferred');
+};
+
 subtest 'the descriptor does not turn silence into a disable' => sub {
 	plan tests => 3;
 

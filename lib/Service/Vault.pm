@@ -93,9 +93,13 @@ sub all_vaults {
 				|| Service::Vault::Local->create($_->{name})
 			);
 		} else {
-			push @available_vaults, Service::Vault::Remote->new(@{$_}{qw(
-				url name verify namespace strongbox mount
-			)})
+			# strongbox comes from the rc rather than from this listing:
+			# safe reports the conclusion its own default produced, which
+			# cannot distinguish an unstated flag from a disabled one.
+			push @available_vaults, Service::Vault::Remote->new(
+				$_->{url}, $_->{name}, $_->{verify}, $_->{namespace},
+				strongbox_intent($_->{name}), $_->{mount}
+			)
 		}
 	}
 	return @available_vaults;

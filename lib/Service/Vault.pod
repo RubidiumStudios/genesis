@@ -287,6 +287,13 @@ Returns all vault targets defined in the C<safe> configuration as a list
 of C<Service::Vault> objects sorted by name. Local vaults are returned as
 C<Service::Vault::Local> objects; all others as C<Service::Vault::Remote>.
 
+The target list comes from C<safe targets --json>, but the C<strongbox>
+value does not: that listing reports the conclusion safe reached after
+applying its own default, which cannot distinguish an unstated flag from a
+disabled one. It is read from C<~/.saferc> via L</strongbox_intent> instead,
+so the objects every caller works with carry the tri-state rather than a
+definite C<0> for a target that said nothing.
+
 B<Returns:> A list of C<Service::Vault> objects.
 
 =head2 strongbox_intent
