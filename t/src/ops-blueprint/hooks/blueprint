@@ -1,0 +1,5 @@
+#!/bin/bash
+set -eu
+# manifest.yml is kit-internal and travels inside the kit; the ops file lives
+# in the deployment repository and has to reach the environment branch.
+echo "manifest.yml $GENESIS_ROOT/ops/extra.yml"

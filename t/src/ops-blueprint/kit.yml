@@ -1,0 +1,10 @@
+---
+name:   ops-blueprint
+author: FiveTwenty <agents@fivetwenty.io>
+
+genesis_version_min: 2.8.0
+
+description: |
+  Fixture kit whose blueprint returns both a kit-internal fragment and a
+  repository-side one, so tests can tell which of the two propagates to an
+  environment branch.
