@@ -68,6 +68,7 @@ unit-tests/genesis_env-ocfp.t            # is_ocfp(), ocfp_type(), ocfp_env() OC
 unit-tests/genesis_env-bosh.t            # _parse_bosh_env(), is_bosh_director(), bosh_env(), bosh_alias()
 unit-tests/genesis_env-exodus.t          # Path construction: secrets/exodus/ci/ocfp_config mount/slug/base
 unit-tests/genesis_env-configs.t         # configs(), required_configs(), has_config() BOSH config mgmt
+unit-tests/genesis_env-propagation_files.t # which repo files travel with an env's pipeline branch
 unit-tests/genesis_env-vault_ops.t       # get_ancestral_vault(), exodus_lookup(), vault_paths()
 unit-tests/genesis_env-get_target_bosh.t # director lookup: which of the three failures is reported
 unit-tests/genesis_env-fix_secrets_conflicts.t  # _fix_secrets manifest/credhub conflict detection

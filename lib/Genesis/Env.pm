@@ -1315,6 +1315,18 @@ sub propagation_files {
 		}
 	}
 
+	# Manifest fragments the kit's blueprint draws from the repository -- ops
+	# files and the like.  The blueprint hook is the authority on which files
+	# the merge consumes.  It needs no BOSH configs, but running any hook
+	# needs a reachable vault, which propagation already establishes before
+	# it gets here.  Fragments that live inside the kit are skipped: they
+	# already travel in the kit source above.
+	my $root = $self->path;
+	for my $f ($self->kit_files(1)) {
+		next unless $f =~ s{^\Q$root\E/}{};
+		$files{$f} = 1;
+	}
+
 	# Config
 	$files{'.genesis/config'} = 1;
 
