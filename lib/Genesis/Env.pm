@@ -3156,7 +3156,11 @@ sub _expand_config_hooks {
 		return \@h;
 	})};
 	my @expanded;
-	push(@expanded, ($_ eq 'deploy' ? @deploy_hooks : $_)) for (@hooks);
+	# Keep the literal 'deploy' alongside what it expands to: kits declare
+	# requirements against it (vault-2.0.1 ships cloud: [blueprint, deploy,
+	# check, manifest]), and consuming it here leaves those declarations
+	# unmatched and silently dead.
+	push(@expanded, ($_ eq 'deploy' ? (@deploy_hooks, 'deploy') : $_)) for (@hooks);
 	return @expanded;
 }
 
@@ -3820,8 +3824,10 @@ sub check {
 	}
 
 	if ($opts{check_yamls}) {
+		# Gated on blueprint because listing the files runs that hook.  Most
+		# kits declare nothing for it, so this passes without a director.
 		if (my @missing = $self->missing_required_configs('blueprint')) {
-			$self->notify("#Y{Required BOSH configs not provided - can't check manifest viability: %s}", join(', ', @missing));
+			$self->notify("#Y{Required BOSH configs not provided - can't list manifest YAML files: %s}", join(', ', @missing));
 		} else {
 			$self->notify("inspecting YAML files used to build manifest...");
 			my @yaml_files = $self->format_yaml_files('include-kit' => 1, padding => '  ', kit_files => $kit_files);
@@ -6807,9 +6813,13 @@ sub _cc_yaml_files {
 	} else {
 		trace("[env $self->{name}] in _yaml_files(): not a create-env, we need cloud-config");
 
-		my @cloud_configs = grep {$_ =~ /^cloud(\@.*)?$/} $self->required_configs('blueprint');
+		# Ask as the manifest action, not the blueprint hook: this is the
+		# merge assembling its own inputs.  Keyed on blueprint, a kit that
+		# declares nothing would yield an empty list here and skip the block
+		# entirely -- merging with no cloud config instead of bailing.
+		my @cloud_configs = grep {$_ =~ /^cloud(\@.*)?$/} $self->required_configs('manifest');
 		if (@cloud_configs) {
-			$self->download_required_configs('blueprint') if $self->missing_required_configs('blueprint');
+			$self->download_required_configs('manifest') if $self->missing_required_configs('manifest');
 			my @cc_files = uniq sort map {$self->config_file($_)} @cloud_configs;
 			bail(
 				"No cloud-config specified for this environment\n"

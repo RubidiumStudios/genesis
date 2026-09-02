@@ -604,8 +604,11 @@ sub required_configs {
 
 	my $required_configs = $self->metadata->{required_configs};
 	unless ($required_configs) {
-		return ('cloud') if (grep {$_ eq 'manifest'} @hooks); # Erroneous, should be blueprint - need to fix in callers
-		return ('cloud') if (grep {$_ eq 'blueprint'} @hooks);
+		# The cloud config belongs to the manifest action, which merges
+		# against it -- not to the blueprint hook, which only reports which
+		# files that merge will consume.  A kit whose blueprint genuinely
+		# needs a config declares it in kit.yml.
+		return ('cloud') if (grep {$_ eq 'manifest'} @hooks);
 		return ('cloud') if (grep {$_ eq 'check'} @hooks) && !$ENV{GENESIS_CONFIG_NO_CHECK};
 		return ();
 	}

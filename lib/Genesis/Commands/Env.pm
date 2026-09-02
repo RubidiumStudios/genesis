@@ -1472,7 +1472,7 @@ sub deploy {
 	# Checking yaml files - more of a visual dump than a validation
 	if (envset("GENESIS_CHECK_YAML_ON_DEPLOY")) {
 		if (my @missing = $env->missing_required_configs('blueprint')) {
-			$env->notify("#Y{Required BOSH configs not provided - can't check manifest viability: %s}", join(', ', @missing));
+			$env->notify("#Y{Required BOSH configs not provided - can't list manifest YAML files: %s}", join(', ', @missing));
 		} else {
 			$env->notify("inspecting YAML files used to build manifest...");
 			my @yaml_files = $env->format_yaml_files('include-kit' => 1, padding => '  ', kit_files => $kit_files);

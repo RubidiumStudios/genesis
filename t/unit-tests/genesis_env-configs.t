@@ -170,21 +170,21 @@ subtest 'required_configs - returns empty list for create-env environments' => s
 	is(scalar(@required), 0, 'required_configs(blueprint) returns empty list for create-env');
 };
 
-subtest 'required_configs - blueprint hook requires only cloud' => sub {
-	# required_configs is STRICT: what the kit cannot build without.
-	# cpi is deliberately absent -- a director always has a latent CPI
-	# of its own, so "no cpi configs uploaded" is a complete state, not
-	# an unmet prerequisite.  The opportunistic cpi entry lives in
-	# prefetch_configs instead; see the prefetch_configs block below.
+subtest 'required_configs - blueprint hook requires nothing by default' => sub {
+	# blueprint is a hook, not an action.  It reports which yaml files the
+	# merge will consume, chosen from the requested features -- static
+	# information that needs no director.  The cloud config is a
+	# requirement of the manifest action; see the next subtest.  A kit that
+	# genuinely needs a config for its blueprint declares it in kit.yml.
 	plan tests => 2;
 
 	my $env = make_simple_env('req-blueprint');
 
 	my @required = $env->required_configs('blueprint');
-	is_deeply [sort @required], [qw(cloud)],
-		'required_configs(blueprint) returns cloud only';
-	ok(!(grep { $_ eq 'cpi' } @required),
-		'cpi is NOT required -- it would permanently gate out validation');
+	is_deeply [sort @required], [],
+		'required_configs(blueprint) returns nothing when the kit declares none';
+	ok(!(grep { $_ eq 'cloud' } @required),
+		'cloud is NOT required -- blueprint never reads it');
 };
 
 subtest 'required_configs - manifest hook requires only cloud' => sub {
@@ -228,15 +228,34 @@ subtest 'required_configs - check hook requires nothing when GENESIS_CONFIG_NO_C
 	is(scalar(@required), 0, 'required_configs(check) returns empty when GENESIS_CONFIG_NO_CHECK set');
 };
 
-subtest 'required_configs - explicit blueprint hook requires only cloud when called directly' => sub {
+subtest 'required_configs - deploy action requires cloud via manifest' => sub {
+	# deploy is an action that expands into the hooks and actions it runs.
+	# manifest is among them, so a deploy still requires the cloud config --
+	# by way of the action that reads it rather than the blueprint hook.
 	plan tests => 2;
 
-	my $env = make_simple_env('req-direct');
+	my $env = make_simple_env('req-deploy');
 
-	my @required = $env->required_configs('blueprint');
-	is_deeply [sort @required], [qw(cloud)],
-		'required_configs(blueprint) called directly returns cloud only';
+	my @required = $env->required_configs('deploy');
+	ok((grep { $_ eq 'cloud' } @required),
+		'required_configs(deploy) still requires cloud');
 	ok(!(grep { $_ eq 'cpi' } @required), 'cpi is NOT required');
+};
+
+subtest 'required_configs - literal deploy survives hook expansion' => sub {
+	# Kits declare requirements against 'deploy' (vault-2.0.1 ships
+	# cloud: [blueprint, deploy, check, manifest]).  If the expansion
+	# consumes the literal, those declarations never match and are silently
+	# dead -- a kit declaring only cloud: [deploy] would get nothing.
+	plan tests => 2;
+
+	my $env = make_simple_env('req-deploy-literal');
+
+	my @expanded = $env->_expand_config_hooks('deploy');
+	ok((grep { $_ eq 'deploy' } @expanded),
+		'_expand_config_hooks(deploy) retains the literal deploy');
+	ok((grep { $_ eq 'manifest' } @expanded),
+		'_expand_config_hooks(deploy) still includes manifest');
 };
 
 # ======================================================================
@@ -307,9 +326,10 @@ subtest 'has_config - with named config (type@name)' => sub {
 # ======================================================================
 
 subtest 'missing_required_configs - all required when none registered' => sub {
-	# required_configs(blueprint) returns cloud only here -- cpi is not
-	# required for this blueprint, so it never appears.
-	plan tests => 1;
+	# Asked as the manifest action, which is what requires cloud -- cpi is
+	# not required for it, so it never appears.  Blueprint requires nothing,
+	# so it reports nothing missing even with no configs registered.
+	plan tests => 2;
 
 	local %ENV = %ENV;
 	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
@@ -317,9 +337,13 @@ subtest 'missing_required_configs - all required when none registered' => sub {
 	my $env = make_simple_env('missing-all');
 	$env->{__configs} = {};
 
-	my @missing = $env->missing_required_configs('blueprint');
+	my @missing = $env->missing_required_configs('manifest');
 	is_deeply [sort @missing], [qw(cloud)],
-		'missing_required_configs(blueprint) returns cloud when nothing registered';
+		'missing_required_configs(manifest) returns cloud when nothing registered';
+
+	my @bp_missing = $env->missing_required_configs('blueprint');
+	is_deeply [sort @bp_missing], [],
+		'missing_required_configs(blueprint) reports nothing missing';
 };
 
 subtest 'missing_required_configs - nothing missing when cloud registered and no cpi uploaded' => sub {
@@ -363,7 +387,7 @@ subtest 'missing_required_configs - empty for create-env environments' => sub {
 # ======================================================================
 
 subtest 'has_required_configs - false when required configs absent' => sub {
-	plan tests => 1;
+	plan tests => 2;
 
 	local %ENV = %ENV;
 	delete $ENV{$_} for grep { /^GENESIS_[A-Z0-9_]+_CONFIG/ } keys %ENV;
@@ -371,8 +395,13 @@ subtest 'has_required_configs - false when required configs absent' => sub {
 	my $env = make_simple_env('hrc-false');
 	$env->{__configs} = {};
 
-	ok(!$env->has_required_configs('blueprint'),
-		'has_required_configs(blueprint) is false when cloud config not registered');
+	ok(!$env->has_required_configs('manifest'),
+		'has_required_configs(manifest) is false when cloud config not registered');
+
+	# Blueprint needs nothing, so it is satisfied even with no configs --
+	# this is what lets `yamls` and propagation run without a director.
+	ok($env->has_required_configs('blueprint'),
+		'has_required_configs(blueprint) is true with no configs registered');
 };
 
 subtest 'has_required_configs - true when all required configs present' => sub {
@@ -524,14 +553,18 @@ subtest 'prefetch_configs - includes cpi for manifest hook' => sub {
 		'... but not in required_configs');
 };
 
-subtest 'prefetch_configs - includes cpi for blueprint hook' => sub {
+subtest 'prefetch_configs - fetches nothing for the blueprint hook alone' => sub {
+	# Blueprint requires nothing, so there is no config to fetch and no
+	# reason to opportunistically add cpi.  This is what keeps `yamls` and
+	# pipeline propagation working without reaching the director; the cpi
+	# prefetch still happens for the deploy expansion, covered below.
 	plan tests => 2;
 	my $env = make_simple_env('rc-blueprint');
 	my @configs = $env->prefetch_configs('blueprint');
-	ok((grep { $_ eq 'cpi' } @configs),
-		'cpi appears in prefetch_configs for the blueprint hook');
+	is_deeply [sort @configs], [],
+		'prefetch_configs(blueprint) fetches nothing';
 	ok(!(grep { $_ eq 'cpi' } $env->required_configs('blueprint')),
-		'... but not in required_configs');
+		'cpi is not in required_configs either');
 };
 
 subtest 'prefetch_configs - includes cpi for deploy expansion' => sub {
