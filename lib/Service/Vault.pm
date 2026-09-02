@@ -1020,12 +1020,22 @@ sub unseal {
 	my @keys_to_use = @{$self->{unseal_keys}}[0..2];
 	my $keys_input = join("\n", @keys_to_use) . "\n";
 
-	# Use the stdin option with query to pass keys to safe unseal
-	my ($out, $rc);
+	# Use the stdin option with query to pass keys to safe unseal.  safe's
+	# stderr is kept: it is where safe reports that Strongbox was off and
+	# only the targeted address was reached.
+	my ($out, $rc, $err);
 	my ($tries, $max_tries) = (0, 3);
 	while ($tries++ < $max_tries) {
-		($out, $rc) = $self->query({stdin => $keys_input, redact_stdin => 1}, 'unseal');
-		return ($out, 0, '') if ($rc == 0) || ($out =~ /Vault is already unsealed/);
+		($out, $rc, $err) = $self->query({stdin => $keys_input, redact_stdin => 1}, 'unseal');
+		if (($rc == 0) || ($out =~ /Vault is already unsealed/)) {
+			# A success here may only cover one node.  The caller checks
+			# status next, which also sees only that node, so nothing
+			# downstream can tell an unsealed cluster from an unsealed
+			# member of a sealed one.
+			my @caveat = $self->_strongbox_unseal_caveat;
+			warning(@caveat) if @caveat;
+			return ($out, 0, '');
+		}
 
 		# RISK: If the unseal fails, we log all available keys for recovery purposes
 		# This is a security risk, as it exposes the unseal keys in logs, but is
@@ -1034,10 +1044,36 @@ sub unseal {
 			"[Attempt %s] Failed to unseal vault cluster at #M{%s} - all available keys (first three used):\n%s",
 			$tries, $self->{url}, join("\n", map {sprintf("#C{%s}", $_)} @{$self->{unseal_keys}})
 		);
-		sleep(2); # brief pause before retrying
+		sleep(2) if $tries < $max_tries; # nothing to wait for before giving up
 	}
+
 	# If we reach here, all attempts failed
-	return ('', $rc // 1, $out || "Failed to unseal vault cluster");
+	my @reason = ($out || "Failed to unseal vault cluster");
+	unshift(@reason, $err) if $err;
+	my @caveat = $self->_strongbox_unseal_caveat;
+	push(@reason, csprintf(@caveat)) if @caveat;
+	return ('', $rc // 1, join("\n\n", @reason));
+}
+
+# }}}
+# _strongbox_unseal_caveat - why an unseal may have covered only one node {{{
+sub _strongbox_unseal_caveat {
+	my ($self) = @_;
+
+	# Nothing to say when Strongbox is on: safe walked the cluster.
+	return () if $self->strongbox;
+
+	return (
+		"Strongbox is not enabled for safe target #C{%s}, so #C{safe unseal} ".
+		"only reached #M{%s}; any other nodes in the cluster were left as they ".
+		"were.%s\n".
+		"Enable it with #G{safe target %s--strongbox %s %s}.",
+		$self->name, $self->url,
+		defined($self->strongbox) ? ''
+			: "  The target does not state the flag at all, which is how every ".
+			  "target written before safe made Strongbox opt-in appears.",
+		$self->verify ? '' : '-k ', $self->url, $self->name
+	);
 }
 
 # }}}

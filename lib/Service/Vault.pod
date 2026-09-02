@@ -1603,16 +1603,32 @@ B<Examples:>
 
 Unseals the vault cluster using the unseal keys previously fetched by
 C<fetch_unseal_keys>. Uses the first three stored keys (as required by
-C<safe unseal>). Retries up to three times on failure, with a brief pause
-between attempts.
+C<safe unseal>). Retries up to three times on failure, pausing briefly
+between attempts but not after the last one.
 
 Returns immediately with success if the vault is already unsealed.
 
 C<fetch_unseal_keys> must be called first.
 
+B<How far this reaches:> C<safe unseal> only covers the whole cluster when
+Strongbox is enabled for the target -- it asks Strongbox for every node's
+seal state and unseals each sealed one. Without Strongbox it falls back to
+the single address it is targeting. A successful return therefore does not
+by itself mean the cluster is unsealed, and nothing downstream can tell the
+difference: C<status> also consults only the targeted node. When Strongbox
+is not enabled, this method emits a warning saying so on success, and
+includes the same explanation in C<$error> on failure. See
+L</_strongbox_unseal_caveat>.
+
+safe's own stderr is preserved and included in C<$error>, rather than being
+discarded as it was previously; it is where safe reports that Strongbox was
+off and only the targeted address was reached.
+
 B<Returns:> A three-element list C<($output, $exit_code, $error)>.
-On success, C<$exit_code> is C<0>. On failure after all retries,
-C<$exit_code> is non-zero.
+On success, C<$exit_code> is C<0> and C<$error> is empty. On failure after
+all retries, C<$exit_code> is non-zero and C<$error> carries safe's stderr,
+safe's output, and the Strongbox caveat where it applies, joined by blank
+lines.
 
 B<Examples:>
 
@@ -1637,6 +1653,35 @@ trace logs from a failed unseal as sensitive material.
 
 These methods are internal to the implementation and may change without
 notice.
+
+=head2 _strongbox_unseal_caveat
+
+  my @caveat = $vault->_strongbox_unseal_caveat();
+
+Builds the explanation of why an unseal may have covered only one node,
+returned as a C<(format, @args)> pair suitable for passing straight to
+C<warning> or C<csprintf> -- the message carries colour markup, so it must
+be formatted rather than interpolated.
+
+Returns nothing when Strongbox is enabled, since safe walked the cluster and
+there is no caveat to make. When the flag is unstated rather than explicitly
+off, the message says so, because that is the fingerprint of a target
+written before safe made Strongbox opt-in and the remedy differs from a
+deliberate choice.
+
+B<Returns:> A C<(format, @args)> list, or the empty list when Strongbox is
+enabled.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my @caveat = $vault->_strongbox_unseal_caveat();
+  warning(@caveat) if @caveat;
+
+  # Strongbox enabled
+  my @none = $vault->_strongbox_unseal_caveat();
+  # Returns: ()
 
 =head2 _target_is_url
 

@@ -35,7 +35,10 @@ unit-tests/service_bosh-director.t
 unit-tests/service_bosh-stemcell.t
 unit-tests/service_vault-core.t          # Service::Vault base class + None with MockWrapper
 unit-tests/service_vault-strongbox_intent.t  # tri-state strongbox read from ~/.saferc
+unit-tests/service_vault-unseal_strongbox.t  # unseal keeps safe's stderr, flags partial unseal
 unit-tests/service_vault_remote-core.t   # Service::Vault::Remote with mocks
+unit-tests/service_vault_remote-strongbox_attach.t  # strongbox never gates resolution
+unit-tests/service_vault_remote-create_strongbox.t  # create can enable strongbox, not just disable
 unit-tests/service_vault_admin-core.t    # Service::Vault::Admin + AppRole with mocks
 unit-tests/genesis_top-core.t
 unit-tests/genesis_top-secrets_provider_strongbox.t  # re-point must not disarm strongbox

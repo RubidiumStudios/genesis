@@ -91,9 +91,26 @@ If true, TLS certificate verification is skipped (passes C<-k> to C<safe target>
 
 The Vault namespace to use (passes C<-n NAMESPACE> to C<safe target>).
 
+=item strongbox
+
+Tri-state. C<1> passes C<--strongbox> to C<safe target>, C<0> passes
+C<--no-strongbox>, and C<undef> (or omitting the option) passes neither, so
+the created target inherits whatever that build of safe defaults to.
+
+Both flags are correct against either era of safe: each build ignores the
+one naming its own default, because it omits the key for that state anyway.
+Passing whichever matches the intent therefore works everywhere.
+
+Genesis previously had no way to say C<--strongbox> at all, which was
+harmless while safe defaulted Strongbox on and became a real gap when it
+did not: no target Genesis created could have Strongbox enabled.
+
 =item no_strongbox
 
-If true, disables strongbox support (passes C<--no-strongbox> to C<safe target>).
+Deprecated two-state form of C<strongbox>, still honoured for callers that
+have not moved over. If true, disables Strongbox; if false, enables it.
+C<strongbox> takes precedence when both are supplied. Prefer C<strongbox>,
+which can also express "no opinion".
 
 =item mount
 
@@ -228,10 +245,33 @@ time.
 TLS mode is inferred from the URL scheme (C<https> implies TLS) unless
 C<tls> is provided explicitly.
 
-When multiple targets share the same URL, namespace, and strongbox setting,
-and an C<alias> is provided that matches one of them, that specific target
-is selected. If no alias match is found among multiple candidates, an error
-is raised.
+When multiple targets share the same URL and namespace, and an C<alias> is
+provided that matches one of them, that specific target is selected. If no
+alias match is found among multiple candidates, an error is raised.
+
+B<Strongbox is not part of the match.> It selects a seal-state sidecar
+rather than a vault, and changes nothing about which secrets exist or where
+they are read from, so two targets alike but for that flag address the same
+vault and it must never be the reason none is found. It was formerly in the
+filter, which made every deployment that recorded Strongbox as enabled stop
+resolving the moment safe changed its default.
+
+It still carries information, and is used in two narrower ways:
+
+=over 4
+
+=item *
+
+As a tie-breaker. When several targets match, a strongbox value supplied by
+the caller narrows them -- but only when narrowing leaves something behind,
+so it disambiguates without ever excluding.
+
+=item *
+
+As a consistency check, once a candidate is settled. See
+L</_reconcile_strongbox>.
+
+=back
 
 When no matching target is found in C<~/.saferc> and no similar-URL targets
 exist either, C<attach> will auto-provision a target from the caller-supplied
@@ -725,6 +765,67 @@ each one carries a behavioural contract that the public methods depend
 on, and because three of them (L</_run_renewer_loop>,
 L</_token_renewal_available>, L</renewer_pid>) exist specifically as
 test seams.
+
+=head2 _reconcile_strongbox
+
+  _reconcile_strongbox($vault, $wanted);
+
+Compares the Strongbox setting a deployment has recorded against what the
+safe target states, once L</attach> has settled on a candidate. Does nothing
+when the caller supplied no value.
+
+The two disagreements are not equivalent, and are not treated alike:
+
+=over 4
+
+=item Target silent, deployment stated
+
+Warns. This is the upgrade case: safe omits the key for whichever state is
+its default, that default flipped, and so every target written before
+v1.20.0 with Strongbox on now looks like it says nothing. The deployment's
+recorded value is the better evidence, and resolution proceeds -- but safe
+will not use Strongbox until the target says so, and nothing else would tell
+the operator. The warning names the exact C<safe target --strongbox>
+command.
+
+=item Both stated, and contradicting
+
+Bails. Two deliberate statements that conflict is a real contradiction, as
+opposed to one side simply having no opinion. The message names both values
+and both ways to reconcile them.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item $vault
+
+The C<Service::Vault::Remote> candidate. Its C<strongbox> is the target's
+side of the comparison, and may be C<undef>.
+
+=item $wanted
+
+The value the deployment recorded, or C<undef> if it recorded none.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> Bails when both sides state a value and the values differ. Never
+bails when either side is silent.
+
+B<Examples:>
+
+  # Deployment records enabled, ~/.saferc says nothing -- warns, proceeds
+  _reconcile_strongbox($vault, 1);
+
+  # Deployment records enabled, ~/.saferc states disabled -- bails
+  _reconcile_strongbox($vault, 1);
+
+  # Deployment records nothing -- returns immediately
+  _reconcile_strongbox($vault, undef);
 
 =head2 _has_env_creds
 

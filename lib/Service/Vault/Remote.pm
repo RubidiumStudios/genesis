@@ -52,17 +52,25 @@ sub create {
 
 	my $default = $class->default(1);
 
+	# Tri-state, with the older no_strongbox option still honoured.  Both
+	# flags are safe to pass to either era of safe: each build ignores the
+	# one naming its own default, since it omits the key for that state.
+	my $strongbox = exists($opts{strongbox})    ? $opts{strongbox}
+	              : exists($opts{no_strongbox}) ? ($opts{no_strongbox} ? 0 : 1)
+	              : undef;
+
 	my @cmd = ('safe', 'target', $url, $name);
 	push(@cmd, '-k') if $opts{skip_verify};
 	push(@cmd, '-n', $opts{namespace}) if $opts{namespace};
-	push(@cmd, '--no-strongbox') if $opts{no_strongbox};
+	push(@cmd, $strongbox ? '--strongbox' : '--no-strongbox')
+		if defined($strongbox);
 	my ($out,$rc,$err) = run({stderr => 0, env => {VAULT_ADDR => "", SAFE_TARGET => ""}}, @cmd);
 	run('safe','target',$default->{name}) if $default; # restore original system target if there was one
 	bail(
 		"Could not create new Safe target #C{%s} pointing at #M{%s}:\n %s",
 		$name, $url, $err
 	) if $rc;
-	my $vault = $class->new($url, $name, !$opts{skip_verify}, $opts{namespace}, !$opts{no_strongbox}, $opts{mount});
+	my $vault = $class->new($url, $name, !$opts{skip_verify}, $opts{namespace}, $strongbox, $opts{mount});
 	for (0..scalar(@all_vaults)-1) {
 		if ($all_vaults[$_]->{name} eq $name) {
 			$all_vaults[$_] = $vault;
@@ -160,11 +168,13 @@ sub attach {
 	bail "Expecting vault target '$url' to be a url"
 		unless Service::Vault::_target_is_url($url);
 
+	# Strongbox is deliberately absent from the filter.  It selects a
+	# seal-state sidecar, not a vault, so it must never be the reason a
+	# target cannot be found -- it is reconciled below once a candidate is
+	# in hand.
 	my %filter = (url => $url);
 	$filter{verify} = (($opts{tls} && $opts{verify}) ? 1 : 0) if $opts{tls};
-	for (qw/namespace strongbox/) {
-		$filter{$_} = $opts{$_} if defined($opts{$_});
-	}
+	$filter{namespace} = $opts{namespace} if defined($opts{namespace});
 
 	my @targets = Service::Vault->find(%filter);
 	if (scalar(@targets) <1) {
@@ -174,8 +184,14 @@ sub attach {
 			for my $target (@close_targets) {
 				$msg .= "\nAlias:     '$target->{name}'\n";
 				for my $property (qw/url namespace strongbox verify/) { # TODO: support name and mount in filter
-					$msg .= sprintf("%-11s'%s'", ucfirst($property.":"),$target->{$property});
-					$msg .= " (expected '$filter{$property}')" if ($filter{$property} ne $target->{$property});
+					my $have = $target->{$property};
+					$msg .= sprintf("%-11s'%s'", ucfirst($property.":"), defined($have) ? $have : '');
+					# Only properties actually filtered on have an expectation
+					# to report; the rest are context.  Comparing them all was
+					# warning on undef and claiming an expected value of ''.
+					$msg .= sprintf(" (expected '%s')", $filter{$property})
+						if exists($filter{$property})
+						&& (!defined($have) || $have ne $filter{$property});
 					$msg .= "\n";
 				}
 			}
@@ -190,9 +206,12 @@ sub attach {
 				my $name = $alias || _derive_target_name($url);
 				$class->create(
 					$url, $name,
-					skip_verify  => (defined($opts{verify})    ? !$opts{verify}    : 0),
+					skip_verify  => (defined($opts{verify}) ? !$opts{verify} : 0),
 					namespace    => $opts{namespace},
-					no_strongbox => (defined($opts{strongbox}) ? !$opts{strongbox} : 0),
+					# Passed through as-is: undef means the deployment did not
+					# record a strongbox setting, and inventing one here would
+					# stamp it onto a target that will outlive this command.
+					strongbox    => $opts{strongbox},
 				);
 				@targets = Service::Vault->find(%filter);
 			} else {
@@ -204,6 +223,15 @@ sub attach {
 			}
 		}
 	}
+	if (scalar(@targets) >1 && defined($opts{strongbox})) {
+		# Strongbox no longer filters, but it can still tell two otherwise
+		# identical targets apart.  Narrowing only when it leaves something
+		# behind keeps it a tie-breaker rather than an exclusion.
+		my @stated = grep {
+			defined($_->{strongbox}) && $_->{strongbox} == ($opts{strongbox} ? 1 : 0)
+		} @targets;
+		@targets = @stated if @stated;
+	}
 	if (scalar(@targets) >1) {
 		my ($named_target) = grep {$_->name eq $alias} @targets;
 		if ($named_target) {
@@ -213,7 +241,7 @@ sub attach {
 				"Multiple safe targets found for #M{%s}:\n%s\n".
 				"\n".
 				"Your ~/.saferc file cannot have more than one target for the given ".
-				"url, namespace, insecure or strongbox combination.  If you don't, it ".
+				"url, namespace and insecure combination.  If you don't, it ".
 				"may be that your selected secrets provider is out of date - please ".
 				"rerun #G{genesis sp -i}\n".
 				"\n".
@@ -222,7 +250,52 @@ sub attach {
 			);
 		}
 	}
+	_reconcile_strongbox($targets[0], $opts{strongbox});
 	return $targets[0]->connect_and_validate($opts{silent});
+}
+
+# }}}
+# _reconcile_strongbox - compare a repository's recorded strongbox to the target's {{{
+sub _reconcile_strongbox {
+	my ($vault, $wanted) = @_;
+	return unless defined($wanted);
+
+	my $stated = $vault->strongbox;
+
+	# ~/.saferc says nothing, which is what every target written by a safe
+	# older than v1.20.0 with Strongbox on looks like.  safe will not use
+	# Strongbox until the target says so, and the operator has no other way
+	# to find that out -- `safe unseal` would quietly reach one node.
+	unless (defined($stated)) {
+		warning(
+			"This deployment records Strongbox as #C{%s} for #C{%s}, but the safe ".
+			"target does not state it, so safe will not use Strongbox for this ".
+			"vault -- seal status and #C{safe unseal} will only see the targeted ".
+			"node, not the rest of the cluster.\n".
+			"Run #G{safe target %s--strongbox %s %s} to record it.",
+			$wanted ? 'enabled' : 'disabled', $vault->name,
+			$vault->verify ? '' : '-k ', $vault->url, $vault->name
+		) if $wanted;
+		return;
+	}
+
+	# Both sides made a statement and they contradict each other.  Unlike
+	# silence, that is a genuine conflict worth stopping for.
+	bail(
+		"Strongbox setting for #C{%s} disagrees: this deployment records it as ".
+		"#C{%s}, while #M{~/.saferc} states #C{%s}.\n\n".
+		"Strongbox does not affect which secrets are readable, but the two ".
+		"must agree. Reconcile them with #G{safe target %s%s %s %s}, or by ".
+		"updating the deployment's secrets provider.",
+		$vault->name,
+		$wanted ? 'enabled' : 'disabled',
+		$stated ? 'enabled' : 'disabled',
+		$vault->verify ? '' : '-k ',
+		$wanted ? '--strongbox' : '--no-strongbox',
+		$vault->url, $vault->name
+	) if ($stated ? 1 : 0) != ($wanted ? 1 : 0);
+
+	return;
 }
 
 # }}}
