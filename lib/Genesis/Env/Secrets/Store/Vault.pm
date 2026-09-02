@@ -110,9 +110,13 @@ sub store_data {
 		%opts = (%opts, %{shift @_});
 	}
 	unless (exists $self->{__data}) {
-		my $data = read_json_from(
+		# stderr is captured rather than merged: safe writes its skip-verify
+		# warning there, and merging puts it at the head of the JSON.  Called
+		# in list context so a missing path (the normal case for a new env)
+		# returns undef instead of bailing on the captured stderr.
+		my ($data, $rc, $err) = read_json_from(
 			$self->service->query(
-				{stderr => '&1', redact_output => 1},
+				{stderr => 0, redact_output => 1},
 				'export',
 				grep {$_} ($self->base, $self->root_ca_path)
 			)
@@ -124,6 +128,15 @@ sub store_data {
 			# unexpectedly returns nothing.  Callers that already
 			# know the store should be empty (fresh env's purge or
 			# initial add_secrets) opt out via quiet_if_empty.
+			# The warning text is user-facing and asserted by the e2e
+			# goldens, so the exit code and stderr go to the debug log
+			# rather than being discarded.
+			debug(
+				"safe export of %s exited %s%s", $self->base, $rc // 0,
+				defined($err) && $err =~ /\S/
+					? sprintf(": %s", $err =~ s/^\s+|\s+$//gr)
+					: ' with no error output'
+			);
 			warning("Vault export returned no data for %s", $self->base)
 				if $self->env->exists && !$opts{quiet_if_empty};
 		}
