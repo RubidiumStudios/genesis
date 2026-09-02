@@ -1466,6 +1466,58 @@ B<Examples:>
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
 
+=head2 _strongbox_for_config
+
+    my $sb = $top->_strongbox_for_config($vault);
+
+Decides what to record for C<secrets_provider.strongbox> when writing the
+provider block, given the vault the block is being written from.
+
+Every write path rebuilds the whole block, so an edit that only meant to
+change the alias and URL also rewrites Strongbox from whatever the vault
+object happens to carry. While safe defaulted Strongbox on, a vault always
+carried a value and this was invisible. Since safe made it opt-in, a target
+that never stated the flag reports nothing -- and re-pointing a deployment
+would silently record Strongbox as disabled for a vault that runs one, with
+no prompt and no mention in the output.
+
+So an unstated flag is not treated as a statement that Strongbox is off.
+When the vault has no value, whatever the repository already records is kept,
+on the grounds that it was written when something did know. When nothing is
+recorded either, nothing is written, and the absent key means unstated.
+
+B<Parameters:>
+
+=over 4
+
+=item $vault
+
+The vault whose settings are being recorded. Its C<strongbox> may be
+C<undef>.
+
+=back
+
+B<Returns:> C<Genesis::Config::TRUE> or C<Genesis::Config::FALSE> when the
+vault states a value; otherwise the currently recorded value, which is
+C<undef> when the repository has none. Callers must omit the C<strongbox>
+key entirely when this returns C<undef>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    # Vault states enabled
+    $top->_strongbox_for_config($vault);
+    # Returns: Genesis::Config::TRUE
+
+    # Vault says nothing, repository records enabled
+    $top->_strongbox_for_config($vault);
+    # Returns: the recorded true value, preserved
+
+    # Vault says nothing, repository records nothing
+    $top->_strongbox_for_config($vault);
+    # Returns: undef -- caller writes no strongbox key
+
 =head2 _is_legacy_ci_file
 
     my $bool = _is_legacy_ci_file($path);
@@ -1706,6 +1758,11 @@ recognized top-level keys:
 =item C<kit_provider> - optional hash with sub-keys C<type>, C<organization>, C<label>, C<tls>, C<domain>
 
 =item C<secrets_provider> - optional hash with sub-keys C<url> (required), C<insecure>, C<strongbox>, C<namespace>, C<alias>
+
+C<strongbox> deliberately has B<no schema default>. An absent key means no
+one has stated the setting, which is a third state rather than a synonym for
+enabled. Defaulting it would re-create on read the ambiguity the writer goes
+to some trouble to avoid -- see L</_strongbox_for_config>.
 
 =item C<deployment_change_reason_required_size> - optional number; default C<0>
 

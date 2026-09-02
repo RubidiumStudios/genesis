@@ -193,13 +193,15 @@ sub create {
 			bail("no_vault option can only be used in test contexts")
 				if $opts{no_vault} && $ENV{GENESIS_COMMAND};
 		} else {
-			$self->config->set('secrets_provider', {
+			my %provider = (
 				url       => $self->vault->url,
-				insecure  => $self->vault->verify    ? Genesis::Config::FALSE : Genesis::Config::TRUE,
+				insecure  => $self->vault->verify ? Genesis::Config::FALSE : Genesis::Config::TRUE,
 				namespace => $self->vault->namespace,
-				strongbox => $self->vault->strongbox ? Genesis::Config::TRUE  : Genesis::Config::FALSE,
 				alias     => $self->vault->name
-			});
+			);
+			my $strongbox = $self->_strongbox_for_config($self->vault);
+			$provider{strongbox} = $strongbox if defined($strongbox);
+			$self->config->set('secrets_provider', \%provider);
 		}
 
 		$self->config->set('kit_provider', $self->kit_provider->config)
@@ -806,6 +808,21 @@ sub has_vault {
 }
 
 # }}}
+# _strongbox_for_config - the strongbox value to record for a vault {{{
+sub _strongbox_for_config {
+	my ($self, $vault) = @_;
+
+	# An unstated flag is not a statement that Strongbox is off.  safe omits
+	# the key for whichever state is its own default, and that default
+	# flipped, so a vault object with nothing to say must not overwrite a
+	# value that was recorded here when something did know.
+	return $self->config->get('secrets_provider.strongbox')
+		unless defined($vault->strongbox);
+
+	return $vault->strongbox ? Genesis::Config::TRUE : Genesis::Config::FALSE;
+}
+
+# }}}
 # set_vault - set the secret provider to the specified vault. {{{
 sub set_vault {
 	my ($self,%opts) = @_;
@@ -834,13 +851,15 @@ sub set_vault {
 	return if $opts{session_only};
 
 	if ($new_vault) {
-		$self->config->set('secrets_provider', {
+		my %provider = (
 			url       => $new_vault->url,
-			insecure  => $new_vault->verify    ? Genesis::Config::FALSE : Genesis::Config::TRUE,
-			strongbox => $new_vault->strongbox ? Genesis::Config::TRUE  : Genesis::Config::FALSE,
+			insecure  => $new_vault->verify ? Genesis::Config::FALSE : Genesis::Config::TRUE,
 			namespace => $new_vault->namespace,
 			alias     => $new_vault->name
-		});
+		);
+		my $strongbox = $self->_strongbox_for_config($new_vault);
+		$provider{strongbox} = $strongbox if defined($strongbox);
+		$self->config->set('secrets_provider', \%provider);
 		$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
 		$self->_validate_config;
 		$self->config->save;
@@ -1394,13 +1413,15 @@ sub _upgrade_config_to_v2 {
 	if ($self->config->has('secrets_provider')) {
 		$new_config->set('secrets_provider', $self->config->get('secrets_provider'))
 	} elsif ($self->config->has('vault')) {
-		$new_config->set('secrets_provider', {
+		my %provider = (
 			url       => $self->vault->url,
-			insecure  => $self->vault->verify    ? Genesis::Config::FALSE : Genesis::Config::TRUE,
-			strongbox => $self->vault->strongbox ? Genesis::Config::TRUE  : Genesis::Config::FALSE,
+			insecure  => $self->vault->verify ? Genesis::Config::FALSE : Genesis::Config::TRUE,
 			namespace => $self->vault->namespace,
 			alias     => $self->vault->name
-		});
+		);
+		my $strongbox = $self->_strongbox_for_config($self->vault);
+		$provider{strongbox} = $strongbox if defined($strongbox);
+		$new_config->set('secrets_provider', \%provider);
 	}
 
 	if ($self->config->has('allow_oversized_secrets')) {
@@ -1492,7 +1513,10 @@ sub _repo_config_schema_v2 {
 			schema => {
 				url          => {type => 'string', required => 1},
 				insecure     => {type => 'boolean', default => Genesis::Config::FALSE},
-				strongbox    => {type => 'boolean', default => Genesis::Config::TRUE},
+				# No default: an absent key means no one stated it, which is
+				# a third state and not a synonym for on.  Defaulting here
+				# would re-create on read the ambiguity the writer avoids.
+				strongbox    => {type => 'boolean'},
 				namespace    => {type => 'string'},
 				alias        => {type => 'string'}
 			}
