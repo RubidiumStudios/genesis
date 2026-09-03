@@ -192,6 +192,7 @@ unit-tests/genesis_commands_repo-compile.t     # module compiles without operato
 # Additional Service::* tests
 unit-tests/service_bosh-director_configs.t                 # Director config CRUD
 unit-tests/service_bosh-director_cpis.t                    # Director CPI inventory
+unit-tests/service_git-checkout_cwd.t                      # checkout survives losing the cwd
 unit-tests/service_git-cherry_pick.t                       # cherry-pick helper
 unit-tests/service_git-fetch_branches.t                    # fetch_branches helper
 unit-tests/service_git-remote_branch.t                     # remote_branch helper
