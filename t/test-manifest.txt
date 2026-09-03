@@ -196,6 +196,7 @@ unit-tests/service_bosh-director_cpis.t                    # Director CPI invent
 unit-tests/service_git-checkout_cwd.t                      # checkout survives losing the cwd
 unit-tests/service_git-cherry_pick.t                       # cherry-pick helper
 unit-tests/service_git-fetch_branches.t                    # fetch_branches helper
+unit-tests/service_git-fetch_preserves_local.t             # fetch must not discard unpushed local commits
 unit-tests/service_git-remote_branch.t                     # remote_branch helper
 unit-tests/service_github-pr.t                             # Github PR helpers
 unit-tests/service_vault-max_json_string_value_length.t    # JSON value length guard

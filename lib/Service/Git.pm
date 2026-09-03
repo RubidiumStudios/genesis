@@ -725,8 +725,21 @@ sub fetch_branches {
 	my @absent  = grep { !$on_remote{$_} } @want;
 
 	if (@present) {
+		# The remote is authoritative for which branches exist, not for
+		# what they contain.  A branch we already have locally may carry
+		# commits that have not been pushed -- a propagation held back for
+		# review, most often -- so it only updates its remote-tracking ref.
+		# Branches we lack are materialised locally, which is what makes
+		# remote-only environments visible.
+		my ($heads) = run({%opts},
+			'git', 'for-each-ref', '--format=%(refname:strip=2)', 'refs/heads/');
+		my %is_local = map { $_ => 1 } grep { /\S/ } split(/\n/, $heads // '');
+
 		my ($fout, $frc, $ferr) = run({%opts}, 'git', 'fetch', $remote,
-			map { "+refs/heads/$_:refs/heads/$_" } @present);
+			(map { "+refs/heads/$_:refs/remotes/$remote/$_" }
+				grep {  $is_local{$_} } @present),
+			(map { "+refs/heads/$_:refs/heads/$_" }
+				grep { !$is_local{$_} } @present));
 		return wantarray
 			? ($self, { ok => 0, kind => _classify_remote_error($ferr), err => $ferr // '',
 			            fetched => [], absent => \@absent })

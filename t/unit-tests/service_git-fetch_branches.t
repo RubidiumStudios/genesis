@@ -102,7 +102,8 @@ subtest 'fetch_branches - probes the remote with fully-qualified refs' => sub {
 	install_run_stub();
 	override_inspections(current_branch => 'control', default_remote => 'origin');
 	queue_heads(qw(qa lab));
-	push @run_results, ['', 0, ''];
+	push @run_results, ['', 0, ''];     # for-each-ref: no local branches
+	push @run_results, ['', 0, ''];     # fetch
 
 	my $git = make_git();
 	$git->fetch_branches([qw(qa lab)], 'origin');
@@ -112,7 +113,10 @@ subtest 'fetch_branches - probes the remote with fully-qualified refs' => sub {
 	cmp_deeply run_argv(0),
 		[qw(git ls-remote --heads origin refs/heads/qa refs/heads/lab)],
 		'probe runs first, with fully-qualified ref patterns';
-	is scalar @run_calls, 2, 'probe then fetch';
+	# Which branches are already local decides whether each one updates a
+	# local head or only its remote-tracking ref, so they are enumerated
+	# between the probe and the fetch.
+	is scalar @run_calls, 3, 'probe, enumerate local heads, then fetch';
 };
 
 subtest 'fetch_branches - fetches only the branches the remote has' => sub {
@@ -121,13 +125,16 @@ subtest 'fetch_branches - fetches only the branches the remote has' => sub {
 	install_run_stub();
 	override_inspections(current_branch => 'control', default_remote => 'origin');
 	queue_heads(qw(qa prod));           # lab is absent on the remote
-	push @run_results, ['', 0, ''];
+	push @run_results, ['', 0, ''];     # for-each-ref: neither is local yet
+	push @run_results, ['', 0, ''];     # fetch
 
 	my $git = make_git();
 	my (undef, $result) = $git->fetch_branches([qw(qa lab prod)], 'origin');
 
 	is $result->{ok}, 1, 'ok=1 — an absent branch is not an error';
-	cmp_deeply run_argv(1), [
+	# Neither branch exists locally here, so both are materialised as local
+	# heads; the split refspec is covered in its own subtest below.
+	cmp_deeply run_argv(2), [
 		'git', 'fetch', 'origin',
 		'+refs/heads/qa:refs/heads/qa',
 		'+refs/heads/prod:refs/heads/prod',
@@ -191,6 +198,7 @@ subtest 'fetch_branches - fetch failure after a good probe is classified' => sub
 	install_run_stub();
 	override_inspections(current_branch => 'control', default_remote => 'origin');
 	queue_heads(qw(qa));
+	push @run_results, ['', 0, ''];     # for-each-ref
 	push @run_results, ['', 128, 'fatal: unable to access: Could not resolve host: example'];
 
 	my $git = make_git();
@@ -198,6 +206,29 @@ subtest 'fetch_branches - fetch failure after a good probe is classified' => sub
 
 	is $result->{ok},   0,         'ok=0';
 	is $result->{kind}, 'network', 'classified from the fetch stage error';
+};
+
+subtest 'fetch_branches - a branch already local only updates its tracking ref' => sub {
+	# The remote is authoritative for which branches exist, not for what
+	# they contain.  Writing refs/heads for a branch we already have would
+	# discard unpushed commits on it -- a propagation held back for review,
+	# most often.  Only branches we lack are materialised locally.
+	plan tests => 1;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(qa lab));
+	push @run_results, ["qa\ncontrol\n", 0, ''];   # for-each-ref: qa is local
+	push @run_results, ['', 0, ''];                # fetch
+
+	my $git = make_git();
+	$git->fetch_branches([qw(qa lab)], 'origin');
+
+	cmp_deeply run_argv(2), [
+		'git', 'fetch', 'origin',
+		'+refs/heads/qa:refs/remotes/origin/qa',
+		'+refs/heads/lab:refs/heads/lab',
+	], 'local branch updates tracking only; missing one becomes a local head';
 };
 
 subtest 'fetch_branches - network failure classified' => sub {
