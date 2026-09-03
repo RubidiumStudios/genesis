@@ -141,6 +141,7 @@ unit-tests/genesis_hook_cloudconfig-networks.t  # Network/subnet handling
 unit-tests/genesis_hook_cloudconfig-resources.t # Resource (vm/disk type) handling
 
 # CI pipeline-descriptor tests
+unit-tests/genesis_ci_propagation-no_push.t               # --no-push suppresses every remote write
 unit-tests/genesis_ci_pipeline_descriptor-auto-update.t   # auto-update pipeline descriptor
 unit-tests/genesis_ci_pipeline_descriptor-bosh-configs.t  # bosh-configs descriptor
 unit-tests/genesis_ci_pipeline_descriptor-deploy_task.t   # plain-CLI deploy task + env branch
