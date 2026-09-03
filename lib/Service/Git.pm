@@ -6,6 +6,7 @@ use warnings;
 use Genesis qw/run bail debug trace/;
 use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
+use Cwd qw/getcwd/;
 
 ### Class State {{{
 my %_instances;  # keyed by resolved git root path
@@ -247,8 +248,20 @@ sub checkout {
 	my ($self, $branch) = @_;
 	$self->{_original_branch} //= $self->current_branch
 		if $self->{_track_branch};
-	run({ dir => $self->{root}, onfailure => "Failed to checkout '$branch'" },
+
+	# The branch being checked out may not carry the directory we are
+	# standing in -- a deployment root that exists only on the branch we are
+	# leaving.  Run from the repository root so the checkout cannot delete
+	# the ground under us, and return to where we were only if it survived;
+	# run({dir => ...}) would restore unconditionally and die on a directory
+	# the checkout just removed.
+	my $cwd = getcwd();
+	chdir($self->{root})
+		or bail("Unable to enter git root %s: %s", $self->{root}, $!);
+	run({ onfailure => "Failed to checkout '$branch'" },
 		'git', 'checkout', $branch);
+	chdir($cwd) if -d $cwd;
+
 	delete $self->{_current_branch};
 	return $self;
 }
