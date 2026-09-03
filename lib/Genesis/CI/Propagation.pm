@@ -70,11 +70,15 @@ sub propagate_envs {
 	my $create_prs          = $args{create_prs}          // 1;
 	my @extra_push          = @{$args{push_extra_branches} || []};
 
-	# no_push is the master kill switch — forces all writes off
+	# no_push is the master kill switch — forces all writes off.  The extras
+	# have to go too: they carry the control branch, and honouring the flag
+	# for environment branches while still pushing control is worse than not
+	# offering the flag at all.
 	if ($no_push) {
 		$push_direct_commits = 0;
 		$push_pr_branches    = 0;
 		$create_prs          = 0;
+		@extra_push          = ();
 	}
 
 	my $propagated = 0;
