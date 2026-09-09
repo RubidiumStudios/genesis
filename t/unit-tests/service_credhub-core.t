@@ -821,9 +821,10 @@ subtest 'Phase 4: Write operations — set()' => sub {
 			'rejects undef for explicit value type';
 	};
 
-	subtest 'value type — dollar sign escaping' => sub {
+	subtest 'value type — a dollar sign passes through untouched' => sub {
 		my $ch = make_credhub();
-		$set_result_json = encode_json({ id => 'dollar-id', value => 'pa$$word' });
+		my $hash = '$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012345';
+		$set_result_json = encode_json({ id => 'dollar-id', value => $hash });
 		my $captured_env;
 
 		no warnings 'redefine';
@@ -834,13 +835,13 @@ subtest 'Phase 4: Write operations — set()' => sub {
 		};
 		use warnings 'redefine';
 
-		$ch->set('db/pass', 'pa$$word');
-		ok(exists $captured_env->{env}{__dollar_symbol__},
-			'__dollar_symbol__ env var set for dollar escaping');
-		is($captured_env->{env}{__dollar_symbol__}, '$',
-			'__dollar_symbol__ maps to $');
+		# run() passes arguments positionally, so nothing expands a $ and the
+		# value must reach credhub exactly as stored in vault; the old
+		# ${__dollar_symbol__} rewrite left a literal placeholder in credhub.
+		$ch->set('webui/password-bcrypt', $hash);
+		ok(!exists $captured_env->{env}{__dollar_symbol__},
+			'no __dollar_symbol__ env var is injected');
 
-		# Verify the -v payload was actually rewritten with ${__dollar_symbol__}
 		my $v_arg;
 		for (my $i = 0; $i < @set_captured_cmd - 1; $i++) {
 			next if ref $set_captured_cmd[$i];
@@ -850,10 +851,8 @@ subtest 'Phase 4: Write operations — set()' => sub {
 			}
 		}
 		ok(defined $v_arg, 'captured -v argument');
-		# set() wraps the value in {redact => $escaped_value}
 		is(ref($v_arg), 'HASH', '-v arg is a redact hashref');
-		like($v_arg->{redact}, qr/\$\{__dollar_symbol__\}/,
-			'-v payload uses ${__dollar_symbol__} for dollar escaping');
+		is($v_arg->{redact}, $hash, '-v payload is the value verbatim');
 	};
 
 	subtest 'json type — auto-detected for hashref' => sub {

@@ -219,7 +219,8 @@ sub set {
 			"You must specify a non-empty string when creating a CredHub ".
 			"'value' value"
 		) unless defined($value) and ref($value) eq '' && $value ne '';
-		$value =~ s/\$/\${__dollar_symbol__}/g if $value =~ /\$/;
+		# run() hands arguments to the shell positionally, so a value is data
+		# and a $ inside it (a bcrypt or crypt hash, say) needs no escaping.
 		push @args, '-v', {redact => $value};
 
 	} else {
@@ -230,10 +231,7 @@ sub set {
 	}
 	unshift @args, "-n", $self->_full_path($path), "-t", $type;
 	my ($out,$rc, $err) =run({
-			env => {
-				%{$self->env()},
-				__dollar_symbol__ => '$'
-			},
+			env => $self->env(),
 			redact_output => envset('GENESIS_SHOW_CREDHUB_SECRETS') ? 0 : 1,
 			redact_env => 1,
 			stderr => 0
