@@ -1098,6 +1098,9 @@ The check is skipped entirely when:
 
 =item C<GENESIS_USING_EMBEDDED> is already set (prevents recursive invocation).
 
+=item The embedded archive carries no recognisable version marker (a debug
+line is logged instead of a warning).
+
 =item The embedded binary path matches C<$GENESIS_CALLBACK_BIN>.
 
 =item The embedded version equals the running version.

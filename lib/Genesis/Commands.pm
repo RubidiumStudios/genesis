@@ -1091,8 +1091,17 @@ sub check_embedded_genesis { # {{{
 	my $tar = do { local $/; <$z>};
 	close $z;
 
-	(grep {/^\$Genesis::VERSION = \"(.*)\"/} split("\n",$tar))[0] =~ /^\$Genesis::VERSION = \"(.*)\"/;
-	my $embedded_version = $1;
+	# pack rewrites the `$VERSION //= ...` default in Genesis.pm to a literal
+	# `$VERSION = "X.Y.Z";`, so that is the marker a released build carries.
+	# Copies embedded by earlier releases wrote `$Genesis::VERSION = "..."`
+	# instead, so accept both forms.
+	my ($embedded_version) = map {
+		/^\$(?:Genesis::)?VERSION\s*=\s*"([^"]*)"/ ? ($1) : ()
+	} split("\n", $tar);
+	unless (defined $embedded_version) {
+		debug "Could not determine the version of the embedded genesis - skipping check";
+		return;
+	}
 	return if ($embedded_version eq $Genesis::VERSION);
 	if ($Genesis::RC->get('embedded_genesis','ignore') ne "use" || command_properties->{no_use_embedded_genesis}) {
 		warning(
