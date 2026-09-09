@@ -241,6 +241,14 @@ sub save {
 		"Failed to convert configuration file %s to yaml: %s",
 		$self->{path}, $err
 	) if $rc;
+
+	# graft, which many hosts install as spruce, starts its merge output
+	# with a document marker where spruce prints none.  Drop one leading
+	# marker (and any blank lines under it) so the header printed below
+	# is the only "---" in the file; otherwise the comment block becomes
+	# its own empty document and `spruce json` refuses to load the file.
+	$out =~ s/\A---[ \t]*\n(?:[ \t]*\n)*//;
+
 	mkdir_or_fail(dirname($self->{path}));
 
 	my $now = strftime("%Y-%m-%d at %H:%M:%S UTC", gmtime());
