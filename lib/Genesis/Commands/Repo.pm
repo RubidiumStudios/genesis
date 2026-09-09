@@ -133,18 +133,25 @@ sub _repo_init_validate {
 	# link-dev-kit existence + kit.yml presence are validated earlier
 	# (moved up so name derivation can read kit.yml safely).
 
-	# Check git author config
-	if ($ENV{GIT_AUTHOR_NAME}) {
-		$ENV{GIT_COMMITTER_NAME} ||= $ENV{GIT_AUTHOR_NAME};
-	} else {
-		run({ onfailure => 'Please setup git: git config --global user.name "Your Name"' },
-			'git config user.name');
-	}
-	if ($ENV{GIT_AUTHOR_EMAIL}) {
-		$ENV{GIT_COMMITTER_EMAIL} ||= $ENV{GIT_AUTHOR_EMAIL};
-	} else {
-		run({ onfailure => 'Please setup git: git config --global user.email your@email.com' },
-			'git config user.email');
+	# Check git author config.  A git identity is only consumed by the
+	# initial commit, so it is only required when we are going to make
+	# one.  With #C{--no-commit} the execute phase stages the new
+	# repository and stops (the same option gates the commit there), so
+	# provisioning tools that stage a repository on a fresh host can run
+	# before any operator has configured git.
+	unless ($opts{'no-commit'}) {
+		if ($ENV{GIT_AUTHOR_NAME}) {
+			$ENV{GIT_COMMITTER_NAME} ||= $ENV{GIT_AUTHOR_NAME};
+		} else {
+			run({ onfailure => 'Please setup git: git config --global user.name "Your Name"' },
+				'git config user.name');
+		}
+		if ($ENV{GIT_AUTHOR_EMAIL}) {
+			$ENV{GIT_COMMITTER_EMAIL} ||= $ENV{GIT_AUTHOR_EMAIL};
+		} else {
+			run({ onfailure => 'Please setup git: git config --global user.email your@email.com' },
+				'git config user.email');
+		}
 	}
 
 	# Guardrail: forbid creating a new Genesis repo inside (or under) an
