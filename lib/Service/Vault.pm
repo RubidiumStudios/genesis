@@ -632,7 +632,8 @@ sub _confirm_written {
 		my $have = $self->get($path);
 		$have = {} unless ref($have) eq 'HASH';
 		@wrong = grep {
-			!defined($have->{$_}) || $have->{$_} ne $written->{$_}
+			!defined($have->{$_})
+			|| _readback_value($have->{$_}) ne _readback_value($written->{$_})
 		} CORE::keys %$written;
 		last unless @wrong;
 		last if gettimeofday() >= $deadline;
@@ -649,6 +650,18 @@ sub _confirm_written {
 		scalar(CORE::keys %$written), $timeout
 	) if @wrong;
 	return;
+}
+
+# }}}
+# _readback_value - flatten a read-back value for comparison with what was sent {{{
+sub _readback_value {
+	my ($value) = @_;
+	# A path outside a kv mount (an approle role, for one) hands a
+	# comma-separated list back as a list and a numeric string back as a
+	# number, so we compare the flattened forms rather than the raw ones.
+	return join(',', map {defined($_) ? "$_" : ''} @$value)
+		if ref($value) eq 'ARRAY';
+	return defined($value) ? "$value" : '';
 }
 
 # }}}

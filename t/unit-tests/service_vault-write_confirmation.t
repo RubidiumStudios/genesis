@@ -320,6 +320,36 @@ subtest 'a write that merged into a stale base is caught' => sub {
 	like $err, qr/read back|did not/i, 'and named as a failed read-back';
 };
 
+subtest 'a value that reads back normalised still counts as landed' => sub {
+	plan tests => 2;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '1';
+	local $ENV{GENESIS_VAULT_CONFIRM_TIMEOUT} = '1';
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	# An approle role hands a comma-separated list back as a list and a
+	# numeric string back as a number.  Neither is a lost write.
+	my $v = make_vault(name => 'normalised');
+	my $state = install_lagging_vault($v);
+	my $inner_get = $v->{__get};
+	$v->{__get} = sub {
+		my $answer = $inner_get->(@_);
+		$answer->{token_policies} = [split /,/, $answer->{token_policies}]
+			if defined($answer->{token_policies}) && !ref($answer->{token_policies});
+		$answer->{token_ttl} += 0 if defined($answer->{token_ttl});
+		return $answer;
+	};
+
+	my $err = '';
+	eval {
+		$v->set('auth/approle/role/ci',
+			token_policies => 'default,ci', token_ttl => '3600');
+		1;
+	} or $err = $@;
+
+	is $err, '', 'a list and a number that match what was sent are accepted';
+	cmp_ok $state->{reads}, '>=', 1, 'and the write was still read back';
+};
+
 subtest 'clear is confirmed before anything writes over it' => sub {
 	plan tests => 2;
 	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '1';
