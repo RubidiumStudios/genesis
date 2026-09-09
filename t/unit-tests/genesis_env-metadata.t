@@ -395,6 +395,52 @@ EOF
 		'multi-level hierarchy merges features from all levels');
 };
 
+subtest 'explicit inheritance from a subdirectory' => sub {
+	plan tests => 4;
+
+	# A shared ops file that lives outside the deployment root's name-based
+	# hierarchy.  Only genesis.inherits can reach it, so this exercises the
+	# explicit-inheritance path on its own.
+	mkdir $top->path('ops');
+	put_file $top->path('ops/shared-bloc.yml'), <<EOF;
+---
+kit:
+  name: dev
+  version: latest
+  features:
+    - shared1
+params:
+  shared_setting: from-ops
+  dns:
+    - 10.0.0.2
+    - 10.0.0.3
+bosh-configs:
+  cpi:
+    pve_network_bridge: vlan54
+EOF
+
+	put_file $top->path('subdir-inherit-child.yml'), <<EOF;
+---
+genesis:
+  env: subdir-inherit-child
+  inherits:
+    - ./ops/shared-bloc
+params:
+  own_setting: from-child
+EOF
+
+	my $env = $top->load_env('subdir-inherit-child');
+	my @files = $env->actual_environment_files;
+	ok((grep {m{ops/shared-bloc\.yml$}} @files),
+		'inherited file from a subdirectory is part of the environment hierarchy');
+	is($env->lookup('params.shared_setting'), 'from-ops',
+		'params from a subdirectory parent are visible');
+	is($env->lookup('bosh-configs.cpi.pve_network_bridge'), 'vlan54',
+		'bosh-configs from a subdirectory parent are visible');
+	is_deeply([$env->features], ['shared1'],
+		'features from a subdirectory parent are inherited');
+};
+
 subtest 'has_feature() - checks for feature presence' => sub {
 	plan tests => 7;
 

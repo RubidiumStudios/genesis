@@ -1282,7 +1282,14 @@ sub actual_environment_files {
 					$seen->{$ancestor}++;
 				}
 
-				# Get name-based files for the inherited environment
+				# The name-based scan above only finds files in the deployment root,
+				# so an inherited file that lives in a subdirectory (./ops/bloc.yml)
+				# is never returned by it.  Add the inherited file itself, after its
+				# own ancestors, unless the scan already placed it.
+				unless ($seen->{$inherited_file}) {
+					push(@files, $inherited_file);
+					$seen->{$inherited_file}++;
+				}
 			}
 			push( @files, $ancestor_file);
 		};
