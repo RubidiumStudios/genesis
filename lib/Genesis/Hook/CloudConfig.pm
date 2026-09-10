@@ -939,7 +939,10 @@ sub _add_extended_cloud_config {
 			my $defn = $extended_config->{$group_label}{$target} // {};
 			my $explicit_name = delete($defn->{'<explicit-name>'});
 			my $name = ($explicit_name || $type_mapping{$type}{explicit_name}) ? $target : $self->name_for($prefix, $target);
-			next if (exists $config->{$group_label} && grep { $_->{name} eq $name } @{$config->{$group_label}});
+			# A kit may register an entry under its bare target name (network_definition
+			# with an empty name_prefix does this for names a release hardcodes), so an
+			# override keyed by that target is a match, not an addition.
+			next if (exists $config->{$group_label} && grep { $_->{name} eq $name || $_->{name} eq $target } @{$config->{$group_label}});
 
 			# Additional networks aren't supported yet
 			if ($type eq 'network') {
