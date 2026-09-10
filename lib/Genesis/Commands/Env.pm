@@ -1358,7 +1358,8 @@ sub deploy {
 						}
 					} elsif ($dryrun) {
 						dryrun(
-							"Cloud config missing.  This would be created and uploaded if not in dry-run mode.",
+							"Cloud config #C{%s} missing.  This would be created and uploaded if not in dry-run mode.  Content:\n\n%s",
+							$cloud_config_name, slurp($new_path_diff)
 						);
 					} else {
 						info(
