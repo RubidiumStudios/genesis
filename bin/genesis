@@ -721,7 +721,7 @@ define_command("bosh-configs", {
 			"and cpi.",
 		# TBD: Add options for the various actions as needed
 	]
-}, "Genesis::Commands::BOSH::bosh_configs");
+}, "Genesis::Commands::Bosh::bosh_configs");
 
 # }}}
 # genesis ocfp - OCFP environment management and inspection {{{
