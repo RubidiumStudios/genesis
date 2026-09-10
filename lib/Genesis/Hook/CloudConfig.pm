@@ -275,9 +275,11 @@ sub _add_cpi_to_network_az {
 sub relinquish_networks {
 	my ($self, @networks) = @_;
 	my $network = $self->network;
-	for (@networks) {
-		my $network_id = $self->name_for('net', $_);
-		delete($network->{subnets}{$_}{claims}{$network_id})
+	for my $target (@networks) {
+		# Kits can name a network without the prefix (see update_network), so
+		# both the bare and the prefixed key are released.
+		my @keys = ($target, $self->name_for('net', $target));
+		delete(@{$network->{subnets}{$_}{claims}}{@keys})
 			for keys %{ $network->{subnets} };
 	}
 }
@@ -402,6 +404,8 @@ sub _build_ocfp_network_model_greedy_subnets {
 
 	# Get existing allocations from exodus data
 	my $existing_allocations = $self->_get_existing_allocations();
+	# A claim recorded by an earlier release under the prefixed name is ours too.
+	my @own_claim_keys = ($network_id, $self->name_for('net', $target));
 	for my $subnet_name (@ocfp_subnet_names) {
 		my $subnet = $subnets->{$subnet_name};
 		my $full_range = IPv4->new($subnet->{cidr_block});
@@ -410,13 +414,17 @@ sub _build_ocfp_network_model_greedy_subnets {
 		# Remove existing allocations from available range that are not for the
 		# target network
 		for my $claiming_network (keys %$existing_allocations) {
-			next if ($network_id eq $claiming_network);
+			next if grep {$_ eq $claiming_network} @own_claim_keys;
 			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name};
 			$available -= $alloc if ($alloc);
 		}
 
 		# Find any existing allocations, but ignore those explicitly reserved
-		my $existing = $existing_allocations->{$network_id}{$subnet_name} // IPv4->new();
+		my $existing = IPv4->new();
+		for my $key (@own_claim_keys) {
+			my $claim = $existing_allocations->{$key}{$subnet_name};
+			$existing += $claim if $claim;
+		}
 		$existing -= $reserved if $existing && $reserved;
 
 		my $allocated_range = $available - $existing - $reserved;
@@ -501,6 +509,8 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 	# Get existing allocations from exodus data
 	my $existing_allocations = $self->_get_existing_allocations(); # Different for director and non-drector deployments; prototyping in director
+	# A claim recorded by an earlier release under the prefixed name is ours too.
+	my @own_claim_keys = ($network_id, $self->name_for('net', $target));
 
 	for my $subnet_name (@ocfp_subnet_names) {
 		my $subnet = $subnets->{$subnet_name};
@@ -511,13 +521,17 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		# Remove existing allocations from available range that are not for the
 		# target network
 		for my $claiming_network (keys %$existing_allocations) {
-			next if ($network_id eq $claiming_network);
+			next if grep {$_ eq $claiming_network} @own_claim_keys;
 			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name};
 			$available -= $alloc if ($alloc);
 		}
 
 		# Find any existing allocations, but ignore those explicitly reserved
-		my $existing = $existing_allocations->{$network_id}{$subnet_name} // IPv4->new();
+		my $existing = IPv4->new();
+		for my $key (@own_claim_keys) {
+			my $claim = $existing_allocations->{$key}{$subnet_name};
+			$existing += $claim if $claim;
+		}
 		$existing -= $reserved if $existing && $reserved;
 
 		# Compare existing and desired allocations, and adjust as needed
@@ -607,10 +621,17 @@ sub network {
 # update_network - Updates the network definitions for the environment {{{
 sub update_network {
 	my ($self, $target, $config, %options) = @_;
-	my $network = $self->name_for('net', $target);
+
+	# Claims are keyed by the network name that ends up in the cloud config.
+	# Kits may pass a name_prefix (including an empty one), so that name is not
+	# always the prefixed form name_for produces.  Earlier releases keyed the
+	# claim by the prefixed form regardless, so both keys are cleared here and
+	# the claim is rewritten under the real name.
+	my $network = $config->{name} // $self->name_for('net', $target);
+	my @stale_keys = grep {$_ ne $network} ($self->name_for('net', $target));
 
 	# clear out any existing allocations for this network
-	delete($_->{claims}{$network}) for (values %{$self->network->{subnets}});
+	delete(@{$_->{claims}}{$network, @stale_keys}) for (values %{$self->network->{subnets}});
 
   	# Don't record claims for greedy networks - they consume all available IPs
   	# without specific allocations and don't need claims tracking
