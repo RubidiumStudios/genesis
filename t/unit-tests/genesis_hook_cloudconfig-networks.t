@@ -314,6 +314,68 @@ subtest 'lookup_az - also resolves by canonical full name' => sub {
 		'lookup_az() also resolves canonical full name to itself');
 };
 
+subtest 'lookup_az - resolves the short form of a rendered name by AZ index' => sub {
+	plan tests => 2;
+
+	my $env  = make_deploy_env();
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	is($hook->lookup_az('z2'), 'test-env-mgmt-z2',
+		'lookup_az("z2") resolves to the AZ whose rendered name ends in 2');
+
+	throws_ok {
+		$hook->lookup_az('z9')
+	} qr/Availability zone z9 not found in the available AZs for the network/,
+		'lookup_az() still bails for a short form with no matching index';
+};
+
+subtest 'az_cloud_properties - decodes the AZ cloud properties for any AZ identifier' => sub {
+	plan tests => 5;
+
+	my $env  = make_deploy_env();
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	cmp_deeply($hook->az_cloud_properties('az1'), { zone => 'us-east-1a' },
+		'az_cloud_properties() resolves by AZ key and decodes the JSON string');
+
+	cmp_deeply($hook->az_cloud_properties('test-env-mgmt-z2'), { zone => 'us-east-1b' },
+		'az_cloud_properties() resolves by canonical full name');
+
+	cmp_deeply($hook->az_cloud_properties('z3'), { zone => 'us-east-1c' },
+		'az_cloud_properties() resolves by the short form of the rendered name');
+
+	my $first = $hook->az_cloud_properties('z1');
+	$first->{extra} = 'mine';
+	cmp_deeply($hook->az_cloud_properties('z1'), { zone => 'us-east-1a' },
+		'az_cloud_properties() hands back a fresh hashref each call, so callers may extend it');
+
+	throws_ok {
+		$hook->az_cloud_properties('az99')
+	} qr/Availability zone az99 not found in the available AZs for the network/,
+		'az_cloud_properties() bails with the lookup_az message for an unknown AZ';
+};
+
+subtest 'az_cloud_properties - empty and malformed cloud properties' => sub {
+	plan tests => 3;
+
+	my $env  = make_deploy_env();
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	$hook->network->{azs}{az1}{cloud_properties} = '{}';
+	cmp_deeply($hook->az_cloud_properties('az1'), {},
+		'az_cloud_properties() returns an empty hashref for "{}"');
+
+	delete $hook->network->{azs}{az1}{cloud_properties};
+	cmp_deeply($hook->az_cloud_properties('az1'), {},
+		'az_cloud_properties() returns an empty hashref when the AZ has no cloud_properties');
+
+	$hook->network->{azs}{az2}{cloud_properties} = '{"zone": ';
+	throws_ok {
+		$hook->az_cloud_properties('az2')
+	} qr/Invalid JSON in the cloud properties for availability zone az2/,
+		'az_cloud_properties() bails on cloud properties that are not valid JSON';
+};
+
 subtest 'get_available_azs_in_network - returns AZs for allocated network' => sub {
 	plan tests => 5;
 

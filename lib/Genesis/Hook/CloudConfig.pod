@@ -866,8 +866,9 @@ B<Examples:>
     my $az_name = $self->lookup_az($az);
 
 Resolves an AZ identifier to the canonical AZ name used by BOSH. Searches by
-exact key, by the C<name> field in the AZ definition, and by the CPI-specific
-AZ mapping if CPI is enabled. Returns the CPI-specific name when CPI is
+exact key, by the C<name> field in the AZ definition, by the CPI-specific
+AZ mapping if CPI is enabled, and by the short form C<zN> of the rendered
+name. Returns the CPI-specific name when CPI is
 enabled.
 
 B<Parameters:>
@@ -902,6 +903,73 @@ B<Examples:>
 
     my $az_name = $self->lookup_az('z1');
     # Returns: 'us-east-1a'  (the canonical AZ name from BOSH director data)
+
+=head2 az_cloud_properties
+
+    my $cloud_properties = $self->az_cloud_properties($az);
+
+Returns the decoded cloud properties of an availability zone from the BOSH
+director network data. Resolves C<$az> the same way C<lookup_az> does, so
+the AZ key, its rendered name, its CPI-specific name, and the short form
+C<zN> all work. The director stores each AZ's cloud properties as a JSON
+string; this decodes it into a fresh hashref on every call, so a kit may
+extend the result without altering the shared network data.
+
+Use this when a kit has to emit an AZ under a name a release hardcodes (a
+bare C<z1>, for instance) but wants that AZ to carry the placement pins of
+one of the director's own zones, such as a Proxmox C<target_node> or a
+vSphere datacenter and cluster.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$az>
+
+The AZ identifier to resolve (e.g., C<'z1'>, C<'my-env-z1'>, or the AZ key
+from the OCFP config such as C<'pvea'>).
+
+=back
+
+B<Returns:> A hashref of the AZ's cloud properties, or an empty hashref when
+the AZ defines none.
+
+B<Errors:>
+
+=over 4
+
+=item C<"No availability zones available; you may need to run a deploy on the %s BOSH director to update its network information.">
+
+Thrown when the network data contains no AZs at all. C<%s> is replaced with
+the BOSH director alias.
+
+=item C<"Availability zone %s not found in the available AZs for the network">
+
+Thrown when the given AZ identifier does not match any known AZ. C<%s> is
+replaced with the C<$az> argument.
+
+=item C<"Invalid JSON in the cloud properties for availability zone %s: %s">
+
+Thrown when the stored cloud properties cannot be decoded. The placeholders
+are the C<$az> argument and the decoder's error.
+
+=item C<"Cloud properties for availability zone %s must be a JSON object, got %s">
+
+Thrown when the stored cloud properties decode to something other than a
+JSON object. The placeholders are the C<$az> argument and the type found.
+
+=back
+
+B<Examples:>
+
+    my $cloud_properties = $self->az_cloud_properties('z1');
+    # Returns: { target_node => 'pvupvecf101' }  (on a Proxmox bloc)
+
+    # Emit a bare z1 AZ that lands where the director's own -z1 zone does
+    my $az = {
+      name             => 'z1',
+      cloud_properties => $self->az_cloud_properties('z1'),
+    };
 
 =head2 get_available_azs
 
@@ -2223,6 +2291,52 @@ B<Examples:>
 
     my ($reserved_ips, $is_static) = $self->_get_reserved_allocation('bosh', $subnet);
     # Returns: (IPv4 range of bosh-reserved IPs, 1)
+
+=head2 _find_az_key
+
+    my $az_key = $self->_find_az_key($az);
+
+Resolves an AZ identifier to its key in the director network AZ data. Tries,
+in order, an exact key match, the AZ's rendered C<name>, the CPI-specific
+name when CPI is enabled, and finally the short form C<zN>, which is matched
+on the AZ's index so it holds whatever prefix the director rendered with.
+Shared by C<lookup_az> and C<az_cloud_properties>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$az>
+
+The AZ identifier to resolve (e.g., C<'pvea'>, C<'my-env-z1'>, or C<'z1'>).
+
+=back
+
+B<Returns:> The key of the matching AZ in C<< $self->network->{azs} >>.
+
+B<Errors:>
+
+=over 4
+
+=item C<"No availability zones available; you may need to run a deploy on the %s BOSH director to update its network information.">
+
+Thrown when the network data contains no AZs at all. C<%s> is replaced with
+the BOSH director alias.
+
+=item C<"Availability zone %s not found in the available AZs for the network">
+
+Thrown when the given AZ identifier does not match any known AZ. C<%s> is
+replaced with the C<$az> argument.
+
+=back
+
+B<Examples:>
+
+    my $key = $self->_find_az_key('my-env-z1');
+    # Returns: 'pvea'  (the OCFP config key whose AZ renders as my-env-z1)
+
+    my $key = $self->_find_az_key('z2');
+    # Returns: 'pveb'  (matched on the AZ index)
 
 =head2 _get_bosh_network_data
 

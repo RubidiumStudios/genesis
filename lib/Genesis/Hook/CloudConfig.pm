@@ -686,33 +686,77 @@ sub get_network_security_groups {
 # lookup_az - resolve an availability zone definition by name {{{
 sub lookup_az {
 	my ($self, $az) = @_;
+	my $base_az = $self->_find_az_key($az);
+	my $azs = $self->network->{azs};
+	my $az_name = $azs->{$base_az}{for_cpi}{$self->cpi_name} if $self->cpi_enabled;
+	return $az_name//$azs->{$base_az}{name}; # Director cpi is default
+}
+
+# }}}
+# az_cloud_properties - Returns the decoded cloud properties of an availability zone {{{
+sub az_cloud_properties {
+	my ($self, $az) = @_;
+	my $base_az = $self->_find_az_key($az);
+	my $encoded = $self->network->{azs}{$base_az}{cloud_properties};
+	return {} unless defined($encoded) && length($encoded);
+
+	# The director stores each AZ's cloud properties as a JSON string.  Decoding
+	# hands the caller a fresh structure every time, so a kit can extend the
+	# result for its own AZ entries without touching the shared network data.
+	my $json = JSON::PP->new;
+	$encoded = $json->encode($encoded) if ref($encoded) eq 'HASH';
+	my $cloud_properties = eval {$json->decode($encoded)};
+	bail(
+		"Invalid JSON in the cloud properties for availability zone %s: %s",
+		$az, $@
+	) if $@;
+	bail(
+		"Cloud properties for availability zone %s must be a JSON object, got %s",
+		$az, ref($cloud_properties) || 'a scalar'
+	) unless ref($cloud_properties) eq 'HASH';
+	return $cloud_properties;
+}
+
+# }}}
+# _find_az_key - Resolves an availability zone identifier to its key in the network AZ data {{{
+sub _find_az_key {
+	my ($self, $az) = @_;
 	bail(
 		"No availability zones available; you may need to run a deploy on the ".
 		"#M{%s} BOSH director to update its network information.",
 		$self->env->bosh->alias
 	) unless keys %{$self->network->{azs}};
-	# This code is autoviving the azs hash, so we need to check for the key
-	# TBD: Should we check for the full name as well in all the existing azs?
-	my $azs = $self->network->{azs};
-	my $base_az = exists $azs->{$az} ? $az : undef;
 
-	# Find the base_az that contains the given az as a name
-	($base_az) = grep {
-		$azs->{$_}{name} eq $az
-	} keys %$azs if !$base_az;
+	# This code is autoviving the azs hash, so we need to check for the key
+	my $azs = $self->network->{azs};
+	return $az if exists $azs->{$az};
+
+	# Find the key whose AZ carries the given az as its rendered name
+	my ($base_az) = grep {
+		($azs->{$_}{name}//'') eq $az
+	} sort keys %$azs;
 
 	# Check if its a cpi-specific az
 	($base_az) = grep {
 		($azs->{$_}{for_cpi}{$self->cpi_name}//'') eq $az
-	} keys %$azs if !$base_az && $self->cpi_enabled;
+	} sort keys %$azs if !$base_az && $self->cpi_enabled;
+
+	# Accept the short form of a rendered name (z2 for <env>-z2), matched on
+	# the AZ index so it holds whatever prefix the director rendered with.
+	if (!$base_az && $az =~ m/^z([0-9]+)$/) {
+		my $idx = $1;
+		($base_az) = grep {
+			my $az_idx = $azs->{$_}{index} // (($azs->{$_}{name}//'') =~ m/([0-9]+)$/)[0];
+			defined($az_idx) && $az_idx eq $idx
+		} sort keys %$azs;
+	}
 
 	bail(
 		"Availability zone %s not found in the available AZs for the network",
 		$az
 	) unless $base_az;
 
-	my $az_name = $azs->{$base_az}{for_cpi}{$self->cpi_name} if $self->cpi_enabled;
-	return $az_name//$self->network->{azs}{$base_az}{name}; # Director cpi is default
+	return $base_az;
 }
 
 # }}}
