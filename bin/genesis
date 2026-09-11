@@ -696,30 +696,54 @@ define_command("bosh", {
 });
 
 # }}}
-# bosh-configs - create, list, compare, view or delete bosh configs {{{
+# bosh-configs - upload, summarize, list, view, compare or delete bosh configs {{{
 define_command("bosh-configs", {
-	summary => "Create, update, list, view and delete bosh configs",
-	usage => "<env> bosh-configs <action> [<options...>]",
+	summary => "Upload, summarize, list, view, compare and delete bosh configs",
+	usage => "<env> bosh-configs [<action>] [<options...>]",
 	aliases => ['bc','configs'],
 	description =>
-		"Upload the bosh configs needed for the given environment.  Optionally, ".
-		"you can generate without uploading, list the bosh configs already ".
-		"uploaded, view the current config already uploaded, compare the current ".
-		"config with the one you would upload, or delete the config already ".
-		"uploaded.",
-	function_group => Genesis::Commands::WIP,
+		"Manage the bosh configs that the kit synthesizes for the environment ".
+		"through its cloud-config, runtime-config, and cpi-config hooks, and ".
+		"compare them with the copies the BOSH director holds.  On the director, ".
+		"cloud configs are named #C{<env>.<deployment-type>}, runtime configs add ".
+		"a #C{.<build>} suffix to that name, and cpi configs use the environment's ".
+		"cpi name.".
+		"\n\n".
+		"The actions are:\n".
+		"\n".
+		"[[  #C{upload}  >>Upload the synthesized configs to the director, showing ".
+		"the change and asking for confirmation for each one.  This is the default ".
+		"action.\n".
+		"[[  #C{summary} >>List each config the environment provides with its type, ".
+		"name, and whether the director holds an identical, different, or no copy.\n".
+		"[[  #C{list}    >>List the configs on the director that belong to this ".
+		"environment.\n".
+		"[[  #C{view}    >>Print the synthesized configs, or the director's copies ".
+		"with #y{--uploaded}.\n".
+		"[[  #C{compare} >>Show the differences between each synthesized config and ".
+		"the director's copy.\n".
+		"[[  #C{delete}  >>Remove the config given by #y{--name} from the director.",
+	function_group => Genesis::Commands::BOSH,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	arguments => [
 		"action" =>
-			"The action to take: upload (default), view, compare, or delete."
+			"The action to take: upload (default), summary, list, view, compare, ".
+			"or delete."
 	],
 	options => [
 		"type|t=s" =>
-			"Specify the type of bosh config. If not specified, it will perform the ".
-			"action on all types of bosh configs.  Valid types are: cloud, runtime, ".
-			"and cpi.",
-		# TBD: Add options for the various actions as needed
+			"Restrict the action to one type of bosh config: cloud, runtime, or ".
+			"cpi.  Without it, the action covers every type the kit provides.",
+		"name|n=s" =>
+			"Restrict the action to the config with this name, as shown by the ".
+			"summary and list actions.  Required by the delete action.",
+		"uploaded|u" =>
+			"With the view action, print the director's copy of each config ".
+			"instead of the synthesized one.",
+		"yes|y" =>
+			"Do not ask for confirmation before uploading or deleting configs.  ".
+			"Required when running outside a controlling terminal.",
 	]
 }, "Genesis::Commands::Bosh::bosh_configs");
 

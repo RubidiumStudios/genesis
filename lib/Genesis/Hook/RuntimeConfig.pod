@@ -141,6 +141,13 @@ B<(optional)> When true, the hook removes the requested runtime configs from
 the BOSH director instead of generating and uploading them. Cannot be
 combined with C<print>. Defaults to C<0>.
 
+=item C<collect>
+
+B<(optional)> When true, C<perform> synthesizes the requested configs and
+returns them (see L</collect_configs>) instead of printing, comparing, or
+uploading them. Cannot be combined with C<print> or C<remove>. Defaults to
+C<0>.
+
 =item C<args>
 
 B<(optional)> Runtime config request arguments. May be a boolean true value,
@@ -185,6 +192,12 @@ is replaced with the comma-separated list of invalid argument names.
 
 C<"Cannot specify both 'print' and 'remove' options."> -- raised via
 C<bail()> if both C<print> and C<remove> are set to true values.
+
+=item *
+
+C<"Cannot specify the 'collect' option with the 'print' or 'remove' options.">
+-- raised via C<bail()> if C<collect> is set together with C<print> or
+C<remove>.
 
 =back
 
@@ -272,6 +285,16 @@ B<Examples:>
 
     my $bool = $hook->remove;
     # returns 1 on a removal run
+
+=head2 collect
+
+    my $bool = $hook->collect;
+
+Returns the collect flag: true when C<perform> should synthesize the
+requested configs and hand them back instead of acting on the director.
+Defaults to C<0>.
+
+B<Returns:> C<1> when collect mode is on, otherwise C<0>.
 
 =head2 bosh
 
@@ -365,6 +388,9 @@ Executes the runtime config hook. Notifies the operator of the action being
 taken, then either removes or generates-and-uploads the requested runtime
 configs depending on the hook's flags.
 
+When collection is requested (C<collect> is true), delegates entirely to
+L</collect_configs> and returns its result before anything else happens.
+
 When removal is requested (C<remove> is true), delegates entirely to
 C<remove_configs> and returns its result.
 
@@ -408,6 +434,48 @@ B<Examples:>
     $hook->validate_runtime_config_requests;
     $hook->perform;
     # Returns: the result of $self->done()
+
+=head2 collect_configs
+
+    my $configs = $hook->collect_configs;
+
+Synthesizes every requested runtime config by calling C<build> for it, and
+records the results with C<done> without printing, comparing, uploading, or
+storing secrets.  This is how C<genesis bosh-configs> obtains the runtime
+configs a kit would upload, so it can report and diff them alongside the
+cloud and cpi configs.
+
+B<Returns:> An array reference, in request order, of hashes with these keys:
+
+=over 4
+
+=item C<build>
+
+The build name that was requested (for example C<dns>).
+
+=item C<name>
+
+The BOSH config name the build uploads as, from C<config_name_for>.
+
+=item C<description>
+
+The registered description of the build.
+
+=item C<content>
+
+The synthesized YAML string, or C<undef> when the build failed or was
+skipped (C<build> has already reported why).
+
+=back
+
+The same array reference is available afterwards from C<results>.
+
+B<Examples:>
+
+    $hook->validate_runtime_config_requests;
+    my $configs = $hook->collect_configs;
+    # Returns: [{build => 'dns', name => 'my-env.bosh.dns',
+    #            description => 'Dns', content => "releases:\n..."}]
 
 =head2 register_runtime_config_builds
 

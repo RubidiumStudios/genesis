@@ -9,7 +9,8 @@ Genesis::Commands::Bosh - Command handlers for Genesis BOSH director interaction
   genesis <env> credhub [--raw] <cmd> [credhub-args...]
   genesis <env> logs [extra-args...]
   genesis <env> broadcast [--on <instance>] <cmd> [extra-args...]
-  genesis <env> bosh-configs [upload|list|view|compare|delete|summary]
+  genesis <env> bosh-configs [upload|summary|list|view|compare|delete] \
+      [--type <cloud|runtime|cpi>] [--name <config>] [--uploaded] [--yes]
 
   # In Perl (dispatch layer):
   use Genesis::Commands::Bosh;
@@ -32,9 +33,6 @@ management (C<bosh-configs>).
 
 All functions load the named environment from the current directory's Genesis
 top-level and connect to Vault before performing their work.
-
-B<Note:> Several C<bosh-configs> sub-actions are stub implementations
-pending future development.  See the INTERNAL FUNCTIONS section for details.
 
 =head1 FUNCTIONS
 
@@ -323,15 +321,21 @@ B<Examples:>
 
   bosh_configs($env_name, $action, @extra_args)
 
-Entry point for the C<genesis E<lt>envE<gt> bosh-configs> command.  Dispatches
-to one of the C<bosh_configs_*> sub-action functions based on C<$action>.
+Entry point for the C<genesis E<lt>envE<gt> bosh-configs> command.  Validates
+the action and the C<--type> option, loads the environment, connects to the
+director that deploys it, and dispatches to the C<bosh_configs_*> function
+for the action.
 
-Valid actions are: C<upload>, C<list>, C<view>, C<compare>, C<delete>,
-C<summary>.  The default action (when C<$action> is omitted) is C<upload>.
+Valid actions are C<upload>, C<summary>, C<list>, C<view>, C<compare>, and
+C<delete>.  The default action (when C<$action> is omitted) is C<upload>.
 
-B<Note:> All sub-actions except the dispatcher itself are stub
-implementations pending future development.  See the INTERNAL FUNCTIONS
-section for details.
+The configs an environment provides come from the kit's hooks: the
+C<cloud-config> hook yields one cloud config named C<< <env>.<type> >>, the
+C<runtime-config> hook yields one runtime config per build enabled under
+C<bosh-configs.runtime>, named C<< <env>.<type>.<build> >>, and the
+C<cpi-config> hook yields one cpi config named for the environment's cpi.
+Cloud and cpi configs live on the director that deploys the environment;
+runtime configs live on the environment itself when it is a BOSH director.
 
 B<Parameters:>
 
@@ -343,15 +347,20 @@ The Genesis environment name.
 
 =item C<$action>
 
-One of C<upload>, C<list>, C<view>, C<compare>, C<delete>, C<summary>.
+One of C<upload>, C<summary>, C<list>, C<view>, C<compare>, C<delete>.
 Defaults to C<upload> when not supplied.
 
 =item C<@extra_args>
 
-No extra arguments are currently accepted.  The function calls C<bail()> if
-any are provided.
+No extra arguments are accepted.  The function calls C<bail()> if any are
+provided.
 
 =back
+
+The command options reach the sub-actions as C<%options>: C<type> restricts
+the action to one config type, C<name> restricts it to one config name,
+C<uploaded> makes C<view> show the director's copy, and C<yes> skips the
+confirmation prompts of C<upload> and C<delete>.
 
 B<Errors:>
 
@@ -360,11 +369,19 @@ B<Errors:>
 =item C<"Invalid action: %s - expected one of: %s (leave blank for 'upload')">
 
 Raised (via C<bail()>) when C<$action> is not one of the valid action strings.
-The first C<%s> is the supplied action; the second is the list of valid actions.
 
 =item C<"Too many arguments provided">
 
 Raised (via C<bail()>) when C<@extra_args> is non-empty.
+
+=item C<"Invalid config type: %s - expected one of: %s">
+
+Raised (via C<bail()>) when C<--type> is not C<cloud>, C<runtime>, or C<cpi>.
+
+=item C<"Environment %s is deployed with create-env and is not a BOSH director, so there is no BOSH director to hold bosh configs for it.">
+
+Raised (via C<bail()>) for a create-env environment that is not itself a
+director.  A create-env director is accepted; only its runtime configs apply.
 
 =back
 
@@ -372,21 +389,21 @@ B<Returns:> Returns the result of the dispatched sub-action function.
 
 B<Examples:>
 
-  # Upload BOSH configs for an environment (default action)
-  # Returns: result from bosh_configs_upload
+  # Upload the synthesized configs, confirming each change (default action)
   genesis my-env bosh-configs
 
-  # List current BOSH configs on the director
-  # Returns: result from bosh_configs_list
-  genesis my-env bosh-configs list
-
-  # Show a summary of environment and director configs
-  # Returns: result from bosh_configs_summary
+  # Show what the environment provides and how the director compares
   genesis my-env bosh-configs summary
 
-B<The C<bosh configs> subcommands.>
+  # Diff only the cloud config
+  genesis my-env bosh-configs compare --type cloud
+
+  # Delete one runtime config without prompting
+  genesis my-env bosh-configs delete --name my-env.cf.dns --yes
+
+B<The C<bosh-configs> sub-actions.>
 The six functions below implement the actions of
-C<genesis E<lt>envE<gt> bosh configs>. They are not called by name from
+C<genesis E<lt>envE<gt> bosh-configs>. They are not called by name from
 anywhere: C<bosh_configs()> builds the name from the action the operator
 typed and dispatches symbolically, so C<upload> reaches
 C<bosh_configs_upload> purely by that construction.
@@ -409,20 +426,20 @@ keeps operator input from resolving to an arbitrary function.
 
 =back
 
-B<All six are currently stubs.> Each prints a diagnostic and returns C<1>;
-none touches the director. They are documented for the behaviour they are
-intended to have, with the stub state stated on each.
+All six take the same arguments: the loaded C<Genesis::Env>, the
+C<Service::BOSH::Director> that deploys it (C<undef> for a create-env
+director), and the parsed command options.
 
 =head2 bosh_configs_summary($env, $bosh, %options)
 
   bosh_configs_summary($env, $bosh, %options)
 
-Stub -- not yet implemented.  Intended to display a summary of BOSH
-configs provided by the environment or kit and their status on the director,
-covering which configs are present locally (cloud-config, runtime-config
-hooks), which are provided by the director itself, and which director configs
-are not kit-managed.  Currently prints a diagnostic message to stdout and
-returns C<1>.
+Synthesizes every config the environment provides (honoring C<--type> and
+C<--name>), compares each with the director's copy, and prints a table of
+type, name, director, and status.  The status is C<identical>, C<different>,
+C<missing> (the director holds no copy), or C<not synthesized> (the hook
+reported a failure for it).  Config types the kit does not provide, or that
+do not apply to the environment, are explained in notes after the table.
 
 B<Parameters:>
 
@@ -434,29 +451,41 @@ A C<Genesis::Env> object for the target environment.
 
 =item C<$bosh>
 
-A BOSH service object for the target director.
+The C<Service::BOSH::Director> that deploys the environment.
 
 =item C<%options>
 
-Parsed command-line options hash.
+Parsed command-line options hash (C<type>, C<name>).
 
 =back
 
-B<Returns:> Returns C<1> (stub return value).
+B<Returns:> C<1>.
 
 B<Examples:>
 
   # Dispatched internally by bosh_configs():
-  # Returns: 1
-  bosh_configs_summary($env, $bosh, %options);
+  bosh_configs_summary($env, $bosh, type => 'runtime');
+  # Prints one row per enabled runtime config
 
 =head2 bosh_configs_upload($env, $bosh, %options)
 
   bosh_configs_upload($env, $bosh, %options)
 
-Stub -- not yet implemented.  Intended to upload BOSH configs from
-the environment to the director.  Currently prints a diagnostic message to
-stdout and returns C<1>.
+Synthesizes the provided configs and uploads those that differ from, or are
+missing on, the director.  For each such config it shows the diff (or the
+whole content when the director has none) and asks for confirmation unless
+C<--yes> was given; outside a controlling terminal C<--yes> is required.
+Configs that are already identical are reported and skipped.
+
+Cloud configs are handled the way the deploy path handles them: the network
+claims lock is taken on the director before the cloud config is synthesized,
+the config is uploaded with C<upload_config>, the network map the hook
+produced is written to the director's exodus data, and the lock is released
+even when something fails.  Cpi configs go through
+C<< Genesis::Env->_fix_cpi_config >>, which also creates the CredHub secrets
+the config references.  Runtime configs are uploaded by running the kit's
+C<runtime-config> hook for the confirmed builds, so the hook can store the
+secrets it generated.
 
 B<Parameters:>
 
@@ -468,28 +497,44 @@ A C<Genesis::Env> object.
 
 =item C<$bosh>
 
-A BOSH service object.
+The C<Service::BOSH::Director> that deploys the environment.
 
 =item C<%options>
 
-Parsed command-line options hash.
+Parsed command-line options hash (C<type>, C<name>, C<yes>).
 
 =back
 
-B<Returns:> Returns C<1> (stub return value).
+B<Errors:>
+
+=over 4
+
+=item C<"%d bosh config%s could not be synthesized, so %s not uploaded.">
+
+Raised (via C<bail()>) after the other configs have been handled, when one
+or more hooks failed to produce a config.
+
+=back
+
+Errors from the helpers it calls (lock contention, a failed upload, a lost
+lock, a refused prompt) propagate after the network claims lock is released.
+
+B<Returns:> C<1>.
 
 B<Examples:>
 
   # Dispatched internally by bosh_configs():
-  # Returns: 1
-  bosh_configs_upload($env, $bosh, %options);
+  bosh_configs_upload($env, $bosh, yes => 1);
+  # Uploads every changed or missing config without prompting
 
 =head2 bosh_configs_list($env, $bosh, %options)
 
   bosh_configs_list($env, $bosh, %options)
 
-Stub -- not yet implemented.  Intended to list BOSH configs on the
-director.  Currently prints a diagnostic message to stdout and returns C<1>.
+Lists the configs on the director (and, for a BOSH director environment, on
+the environment's own director) whose names belong to this environment, as
+a table of type, name, director, current id, upload date, and version
+count.  Honors C<--type> and C<--name>.
 
 B<Parameters:>
 
@@ -501,29 +546,30 @@ A C<Genesis::Env> object.
 
 =item C<$bosh>
 
-A BOSH service object.
+The C<Service::BOSH::Director> that deploys the environment.
 
 =item C<%options>
 
-Parsed command-line options hash.
+Parsed command-line options hash (C<type>, C<name>).
 
 =back
 
-B<Returns:> Returns C<1> (stub return value).
+B<Returns:> C<1>.
 
 B<Examples:>
 
   # Dispatched internally by bosh_configs():
-  # Returns: 1
-  bosh_configs_list($env, $bosh, %options);
+  bosh_configs_list($env, $bosh);
+  # Prints the environment's configs held by the director
 
 =head2 bosh_configs_view($env, $bosh, %options)
 
   bosh_configs_view($env, $bosh, %options)
 
-Stub -- not yet implemented.  Intended to display the content of a
-specific BOSH config.  Currently prints a diagnostic message to stdout and
-returns C<1>.
+Prints the synthesized configs on standard output, each under a heading on
+standard error so the YAML can be redirected.  With C<--uploaded> it prints
+the director's current copy of each config that belongs to the environment
+instead.  Honors C<--type> and C<--name>.
 
 B<Parameters:>
 
@@ -535,29 +581,59 @@ A C<Genesis::Env> object.
 
 =item C<$bosh>
 
-A BOSH service object.
+The C<Service::BOSH::Director> that deploys the environment.
 
 =item C<%options>
 
-Parsed command-line options hash.
+Parsed command-line options hash (C<type>, C<name>, C<uploaded>).
 
 =back
 
-B<Returns:> Returns C<1> (stub return value).
+B<Errors:>
+
+=over 4
+
+=item C<"No bosh configs belonging to %s%s were found on %s.">
+
+Raised (via C<bail()>) with C<--uploaded> when the director holds nothing
+matching the filters.
+
+=item C<"%s config %s on %s BOSH director has no current version to show.">
+
+Raised (via C<bail()>) with C<--uploaded> when the director lists the config
+but cannot return its content.
+
+=item C<"No bosh configs are provided for %s%s.">
+
+Raised (via C<bail()>) when the environment provides nothing matching the
+filters.
+
+=item C<"%d bosh config%s could not be synthesized.">
+
+Raised (via C<bail()>) after printing the others, when a hook failed to
+produce a config.
+
+=back
+
+B<Returns:> C<1>.
 
 B<Examples:>
 
   # Dispatched internally by bosh_configs():
-  # Returns: 1
-  bosh_configs_view($env, $bosh, %options);
+  bosh_configs_view($env, $bosh, type => 'cloud');
+  # Prints the synthesized cloud config YAML on stdout
+
+  bosh_configs_view($env, $bosh, uploaded => 1, name => 'my-env.cf');
+  # Prints the director's copy instead
 
 =head2 bosh_configs_compare($env, $bosh, %options)
 
   bosh_configs_compare($env, $bosh, %options)
 
-Stub -- not yet implemented.  Intended to compare BOSH configs
-between the environment and the director.  Currently prints a diagnostic
-message to stdout and returns C<1>.
+Synthesizes the provided configs and reports, for each, whether the
+director's copy is identical, different (with the C<spruce diff> output), or
+missing (with the synthesized content).  Honors C<--type> and C<--name>.
+Nothing is changed on the director.
 
 B<Parameters:>
 
@@ -569,28 +645,30 @@ A C<Genesis::Env> object.
 
 =item C<$bosh>
 
-A BOSH service object.
+The C<Service::BOSH::Director> that deploys the environment.
 
 =item C<%options>
 
-Parsed command-line options hash.
+Parsed command-line options hash (C<type>, C<name>).
 
 =back
 
-B<Returns:> Returns C<1> (stub return value).
+B<Returns:> C<1>.
 
 B<Examples:>
 
   # Dispatched internally by bosh_configs():
-  # Returns: 1
-  bosh_configs_compare($env, $bosh, %options);
+  bosh_configs_compare($env, $bosh, name => 'my-env.cf.dns');
+  # Prints the diff for the dns runtime config
 
 =head2 bosh_configs_delete($env, $bosh, %options)
 
   bosh_configs_delete($env, $bosh, %options)
 
-Stub -- not yet implemented.  Intended to delete a BOSH config from
-the director.  Currently prints a diagnostic message to stdout and returns C<1>.
+Removes the config named by C<--name> from the director after confirmation
+(skipped with C<--yes>).  Only configs whose names belong to this
+environment can be removed here; when the same name exists under more than
+one type, C<--type> chooses.
 
 B<Parameters:>
 
@@ -602,21 +680,568 @@ A C<Genesis::Env> object.
 
 =item C<$bosh>
 
-A BOSH service object.
+The C<Service::BOSH::Director> that deploys the environment.
 
 =item C<%options>
 
-Parsed command-line options hash.
+Parsed command-line options hash (C<name>, C<type>, C<yes>).
 
 =back
 
-B<Returns:> Returns C<1> (stub return value).
+B<Errors:>
+
+=over 4
+
+=item C<"The delete action needs the name of the config to remove; give it with --name (the list action shows the names the director holds).">
+
+Raised (via C<bail()>) when C<--name> is absent.
+
+=item C<"No bosh config named %s%s belonging to %s was found on %s.  Only configs named for this environment can be deleted here; use genesis %s bosh delete-config for anything else.">
+
+Raised (via C<bail()>) when the name is not held by the director, or does
+not belong to the environment.
+
+=item C<"Config name %s matches %d configs (%s); specify --type to pick one.">
+
+Raised (via C<bail()>) when the name exists under several types and
+C<--type> was not given.
+
+=back
+
+B<Returns:> C<1>.
 
 B<Examples:>
 
   # Dispatched internally by bosh_configs():
+  bosh_configs_delete($env, $bosh, name => 'my-env.cf.dns', yes => 1);
+  # Removes the runtime config without prompting
+
+=head1 INTERNAL FUNCTIONS
+
+Helpers shared by the C<bosh-configs> actions.  A "config record" below is
+the hash the helpers pass around: C<type>, C<name>, C<bosh> (the director
+that holds it), C<content> (the synthesized YAML, or C<undef>), and, once
+C<_bosh_configs_status> has run, C<status>, C<uploaded>, and C<diff>.  Cloud
+records also carry C<network_map>, cpi records C<cpi_config>, and runtime
+records C<build> and C<description>.
+
+=head2 _bosh_configs_provided($env, $bosh, %options)
+
+  my ($configs, $notes) = _bosh_configs_provided($env, $bosh, %options);
+
+Runs the kit hooks to synthesize the configs the environment provides,
+restricted by C<$options{type}> and C<$options{name}>.  The cloud config
+comes from the C<cloud-config> hook when the environment can build cloud
+configs, the cpi config from the C<cpi-config> hook when the environment is
+OCFP with the cpi enabled, and the runtime configs from the
+C<runtime-config> hook in collect mode for the builds returned by
+C<_bosh_configs_runtime_requests>.  Runtime configs of a BOSH director
+environment target the environment's own director.  A runtime hook failure
+becomes a note rather than an error, so the other types still report.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<$bosh>
+
+The C<Service::BOSH::Director> that deploys the environment.
+
+=item C<%options>
+
+The command options; C<type> and C<name> are consulted.
+
+=back
+
+B<Errors:>
+
+=over 4
+
+=item C<"The cpi-config hook reported errors: %s">
+
+Raised (via C<bail()>) when the cpi-config hook returns an error.
+
+=back
+
+B<Returns:> A list of two array references: the config records, and the
+notes explaining each type that was left out.
+
+B<Examples:>
+
+  my ($configs, $notes) = _bosh_configs_provided($env, $bosh, type => 'cloud');
+  # $configs holds at most one cloud record; $notes is empty
+
+=head2 _bosh_configs_runtime_requests($env, $name)
+
+  my $requests = _bosh_configs_runtime_requests($env, $name);
+
+Builds the C<args> for the C<runtime-config> hook.  Without C<$name> it is
+the C<bosh-configs.runtime> hash from the environment file, or C<undef>
+when that hash is absent or empty (the same rule the post-deploy hook
+applies).  With C<$name> it is a one-entry hash for the build the name
+denotes (the part after C<< <env>.<type>. >>), carrying that build's options
+from C<bosh-configs.runtime> when present, or C<undef> when the name cannot
+be a runtime config of this environment.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<$name>
+
+An optional BOSH config name.
+
+=back
+
+B<Returns:> A hash reference of build name to options, or C<undef>.
+
+B<Examples:>
+
+  _bosh_configs_runtime_requests($env, 'my-env.cf.dns');
+  # Returns: { dns => {} }
+
+=head2 _bosh_configs_status($config)
+
+  my $status = _bosh_configs_status($config);
+
+Compares a config record with the director's copy and records the outcome
+on it: C<unsynthesized> when C<content> is undefined, C<missing> when the
+director has no current config of that type and name, otherwise
+C<identical> or C<different> from C<spruce_diff>.  Sets C<uploaded> and
+C<diff> on the record when a comparison was made.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+A config record.
+
+=back
+
+B<Returns:> The status string, also stored in C<< $config->{status} >>.
+
+B<Examples:>
+
+  _bosh_configs_status($config);
+  # Returns: 'different'; $config->{diff} holds the spruce diff output
+
+=head2 _bosh_configs_status_label($config)
+
+  my $label = _bosh_configs_status_label($config);
+
+The colored status word for the summary table.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+A config record that has been through C<_bosh_configs_status>.
+
+=back
+
+B<Returns:> A string with Genesis color markup.
+
+B<Examples:>
+
+  _bosh_configs_status_label({status => 'missing'});
+  # Returns: '#R{missing}'
+
+=head2 _bosh_configs_label($config)
+
+  my $label = _bosh_configs_label($config);
+
+Describes a config record for progress lines, as
+C<< <type> config <name> on <director> >>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+A config record.
+
+=back
+
+B<Returns:> A string with Genesis color markup.
+
+B<Examples:>
+
+  _bosh_configs_label($config);
+  # Returns: 'cloud config #C{my-env.cf} on #M{parent}'
+
+=head2 _bosh_configs_filter_description(%options)
+
+  my $suffix = _bosh_configs_filter_description(%options);
+
+Describes the C<--type> and C<--name> filters in effect, for messages that
+say nothing matched.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%options>
+
+The command options.
+
+=back
+
+B<Returns:> An empty string when no filter applies, otherwise a phrase
+starting with a space, such as C<< of type cloud and named my-env.cf >>.
+
+B<Examples:>
+
+  _bosh_configs_filter_description(type => 'cpi');
+  # Returns: ' of type #C{cpi}'
+
+=head2 _bosh_configs_notes($notes)
+
+  _bosh_configs_notes($notes);
+
+Prints each note collected by C<_bosh_configs_provided> as an informational
+line.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$notes>
+
+An array reference of note strings; C<undef> is treated as empty.
+
+=back
+
+B<Returns:> C<1>.
+
+B<Examples:>
+
+  _bosh_configs_notes(['cloud configs do not apply to a create-env director.']);
+  # Prints one Note: line
+
+=head2 _bosh_configs_print($config, $content, $source)
+
+  _bosh_configs_print($config, $content, $source);
+
+Prints a heading naming the config and its source on standard error, then
+the content unwrapped on standard output.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+A config record (only C<type> and C<name> are used).
+
+=item C<$content>
+
+The YAML string to print.
+
+=item C<$source>
+
+A short phrase for the heading, such as C<synthesized>.
+
+=back
+
+B<Returns:> C<1>.
+
+B<Examples:>
+
+  _bosh_configs_print($config, $yaml, 'synthesized');
+  # Prints the heading to stderr and $yaml to stdout
+
+=head2 _bosh_configs_confirm($question, $yes, $default)
+
+  my $ok = _bosh_configs_confirm($question, $yes, $default);
+
+Asks the operator a yes/no question before the director is changed.
+Returns true at once when C<$yes> is set; otherwise prompts, and refuses to
+continue when there is no controlling terminal to prompt on.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$question>
+
+The prompt text, ending in C<[y|n]>.
+
+=item C<$yes>
+
+True when C<--yes> was given.
+
+=item C<$default>
+
+The answer offered when the operator presses enter.
+
+=back
+
+B<Errors:>
+
+=over 4
+
+=item C<"Not in a controlling terminal, so cannot prompt for confirmation.  Use --yes to skip the confirmation prompt.">
+
+Raised (via C<bail()>) when a prompt is needed but no terminal is attached.
+
+=back
+
+B<Returns:> C<1> when the change may proceed, otherwise C<0>.
+
+B<Examples:>
+
+  _bosh_configs_confirm("Upload cloud config my-env.cf? [y|n]", 0, 1);
+  # Returns: 1 when the operator answers yes
+
+=head2 _bosh_configs_directors($env, $bosh)
+
+  my @directors = _bosh_configs_directors($env, $bosh);
+
+The directors that may hold this environment's configs: the deploying
+director, plus the environment's own director when the environment is a
+BOSH director and it can be reached.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<$bosh>
+
+The deploying C<Service::BOSH::Director>, or C<undef>.
+
+=back
+
+B<Returns:> A list of distinct director objects.
+
+B<Examples:>
+
+  my @directors = _bosh_configs_directors($env, $bosh);
+  # Returns: ($bosh) for an ordinary deployment
+
+=head2 _bosh_configs_belongs_to_env($env, $type, $name)
+
+  my $ours = _bosh_configs_belongs_to_env($env, $type, $name);
+
+Whether a config name on a director is one this environment owns: the
+environment's C<bosh_config_name>, any name under it with a dot, or, for
+the C<cpi> type, the environment's cpi name when the kit provides a
+cpi-config hook and the cpi is enabled.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<$type>
+
+The config type as the director reports it.
+
+=item C<$name>
+
+The config name as the director reports it.
+
+=back
+
+B<Returns:> C<1> or C<0>.
+
+B<Examples:>
+
+  _bosh_configs_belongs_to_env($env, 'runtime', 'my-env.cf.dns');
   # Returns: 1
-  bosh_configs_delete($env, $bosh, %options);
+
+=head2 _bosh_configs_uploaded($env, $bosh, %options)
+
+  my @rows = _bosh_configs_uploaded($env, $bosh, %options);
+
+The environment's configs currently held by the directors, from the cached
+C<configs> listing, restricted by C<$options{type}> and C<$options{name}>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<$bosh>
+
+The deploying C<Service::BOSH::Director>, or C<undef>.
+
+=item C<%options>
+
+The command options; C<type> and C<name> are consulted.
+
+=back
+
+B<Returns:> A list of hashes with C<type>, C<name>, C<bosh>, and C<entry>
+(the director's listing entry, with C<current> and C<entries>).
+
+B<Examples:>
+
+  my @rows = _bosh_configs_uploaded($env, $bosh, type => 'runtime');
+  # Returns: one row per runtime config named for the environment
+
+=head2 _bosh_configs_acquire_network_lock($env, $bosh, $yes)
+
+  _bosh_configs_acquire_network_lock($env, $bosh, $yes);
+
+Takes the network claims lock on the director before a cloud config is
+synthesized, following the deploy path: a live lock stops the upload, a
+stale lock is cleared after confirmation (or at once with C<--yes>), and
+then the lock is acquired.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<$bosh>
+
+The C<Service::BOSH::Director> holding the network claims.
+
+=item C<$yes>
+
+True when C<--yes> was given.
+
+=back
+
+B<Errors:>
+
+=over 4
+
+=item C<"Network claims are currently locked -- cannot upload a cloud config now!">
+
+Raised (via C<bail()>) when another process holds a live lock.
+
+=item C<"Aborted by user!">
+
+Raised (via C<bail()>) when the operator declines to clear a stale lock.
+
+=item C<"Network claims are locked with a stale lock: %s\n\nRerun with --yes to clear it.">
+
+Raised (via C<bail()>) when a stale lock is found outside a controlling
+terminal without C<--yes>.
+
+=back
+
+B<Returns:> C<1>.
+
+B<Examples:>
+
+  _bosh_configs_acquire_network_lock($env, $bosh, 1);
+  # Clears a stale lock without asking, then acquires the lock
+
+=head2 _bosh_configs_upload_cloud($env, $config)
+
+  _bosh_configs_upload_cloud($env, $config);
+
+Uploads a cloud config record and records its network claims, as the deploy
+path does: checks the lock is still held, uploads with C<upload_config>,
+then writes the record's C<network_map> under the director's exodus
+C</network> path.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<$config>
+
+A cloud config record with C<content>, C<name>, C<bosh>, and
+C<network_map>.
+
+=back
+
+B<Errors:>
+
+=over 4
+
+=item C<"Network claims lock was lost since it was acquired (it may have become stale and been removed) -- cannot upload the cloud config!">
+
+Raised (via C<bail()>) when the lock is gone at upload time.
+
+=item C<"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s">
+
+Raised (via C<bail()>) when the bosh upload fails.
+
+=item C<"Cloud config %s was uploaded, but the network map could not be updated:\n\n%s">
+
+Raised (via C<bail()>) when the exodus write fails after the upload.
+
+=back
+
+B<Returns:> C<1>.
+
+B<Examples:>
+
+  _bosh_configs_upload_cloud($env, $config);
+  # Uploads my-env.cf and submits its network claims
+
+=head2 _bosh_configs_upload_cpi($env, $config)
+
+  _bosh_configs_upload_cpi($env, $config);
+
+Uploads a cpi config record through C<< Genesis::Env->_fix_cpi_config >>,
+which also creates the CredHub secrets the config references.  The prompt
+has already been answered here, so the fixer runs with C<noprompt>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<$config>
+
+A cpi config record with C<status>, C<name>, C<bosh>, and C<cpi_config>.
+
+=back
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not upload cpi config %s: %s">
+
+Raised (via C<bail()>) when the fixer reports anything but C<ok>.
+
+=back
+
+B<Returns:> C<1>.
+
+B<Examples:>
+
+  _bosh_configs_upload_cpi($env, $config);
+  # Uploads the cpi config and its missing CredHub secrets
 
 =head1 SEE ALSO
 

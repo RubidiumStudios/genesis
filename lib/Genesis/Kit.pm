@@ -269,6 +269,7 @@ sub run_hook {
 			dryrun => $opts{dryrun} || 0, # whether to run the hook in dry-run mode
 			remove => $opts{remove} || 0, # whether to remove the runtime configs
 			print => $opts{print} || 0, # whether to show the runtime configs
+			collect => $opts{collect} || 0, # whether to return the synthesized runtime configs instead of acting on them
 		);
 		@args = ref($opts{args}) eq 'ARRAY' ? $opts{args}->@*
 		      : ref($opts{args}) eq 'HASH'  ? $opts{args}->%*

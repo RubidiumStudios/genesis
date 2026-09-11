@@ -15,7 +15,7 @@ use Time::HiRes qw/gettimeofday/;
 sub init {
 	my ($class, %opts) = @_;
 	my @required_opts = qw/env kit/;
-	my @optional_opts = qw/interactive dryrun print remove args file label/;
+	my @optional_opts = qw/interactive dryrun print remove collect args file label/;
 	my @missing = grep {!defined($opts{$_})} @required_opts;
 	bug(
 		"Missing required arguments for a perl-based runtime-config hook call: %s",
@@ -30,6 +30,9 @@ sub init {
 	bail(
 		"Cannot specify both 'print' and 'remove' options."
 	) if ($opts{print} && $opts{remove});
+	bail(
+		"Cannot specify the 'collect' option with the 'print' or 'remove' options."
+	) if ($opts{collect} && ($opts{print} || $opts{remove}));
 
 
 	my $obj = $class->SUPER::init(%opts);
@@ -61,6 +64,10 @@ sub print {return $_[0]->{print} // 0}
 sub remove {return $_[0]->{remove} // 0}
 
 # }}}
+# collect - Get collect flag {{{
+sub collect {return $_[0]->{collect} // 0}
+
+# }}}
 # bosh - Get BOSH object {{{
 sub bosh {return $_[0]->{bosh}}
 
@@ -89,6 +96,8 @@ sub config_name_for {
 sub perform {
 	my $self = shift;
 	my $env = $self->env;
+
+	return $self->collect_configs() if ($self->collect);
 
 	# FIXME: May need to revisit this output when called through post-deploy as it looks redundant
 	$env->notify(
@@ -125,6 +134,31 @@ sub perform {
 	# Clean up?
 	success("\nDone!\n");
 	return $self->done();
+}
+
+# }}}
+# collect_configs - Synthesize the requested runtime configs and return them without touching the director {{{
+sub collect_configs {
+	my ($self) = @_;
+	my $env = $self->env;
+
+	$env->notify(
+		"synthesizing runtime config(s): %s",
+		join(", ", $self->{requests}->@*)
+	);
+
+	my @collected = ();
+	for my $config ($self->{requests}->@*) {
+		my $config_name = $self->config_name_for($config);
+		my $config_data = $self->build($config, $config_name);
+		push @collected, {
+			build       => $config,
+			name        => $config_name,
+			description => $self->{builds}{$config}{description} // $config,
+			content     => $config_data, # undef when the build failed or was skipped
+		};
+	}
+	return $self->done(\@collected);
 }
 
 # }}}

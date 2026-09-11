@@ -518,6 +518,12 @@ Used with the C<runtime-config> hook. Defaults to C<0>.
 
 Used with the C<runtime-config> hook. Defaults to C<0>.
 
+=item C<collect>
+
+Used with the C<runtime-config> hook. When true the hook returns the
+synthesized runtime configs instead of printing, comparing, or uploading
+them. Defaults to C<0>.
+
 =back
 
 =back

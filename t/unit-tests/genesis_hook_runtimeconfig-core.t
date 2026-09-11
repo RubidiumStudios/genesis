@@ -691,6 +691,60 @@ subtest 'credhub_base - returns undef when feature_compatibility is false' => su
 };
 
 # ---------------------------------------------------------------------------
+# Accessor: collect
+# ---------------------------------------------------------------------------
+subtest 'collect - defaults to 0' => sub {
+	plan tests => 1;
+	my $hook = make_hook();
+	is($hook->collect, 0, 'collect() returns 0 by default');
+};
+
+subtest 'collect - returns 1 when set' => sub {
+	plan tests => 1;
+	my $hook = make_hook();
+	$hook->{collect} = 1;
+	is($hook->collect, 1, 'collect() returns 1 when collect is set');
+};
+
+subtest 'init - collect cannot be combined with print or remove' => sub {
+	plan tests => 2;
+	my $env = mock_env();
+	throws_ok {
+		Genesis::Hook::RuntimeConfig::test_kit->init(env => $env, kit => $kit, collect => 1, print => 1)
+	} qr/Cannot specify the 'collect' option/,
+		'collect with print dies';
+	throws_ok {
+		Genesis::Hook::RuntimeConfig::test_kit->init(env => $env, kit => $kit, collect => 1, remove => 1)
+	} qr/Cannot specify the 'collect' option/,
+		'collect with remove dies';
+};
+
+# ---------------------------------------------------------------------------
+# collect_configs / perform in collect mode
+# ---------------------------------------------------------------------------
+subtest 'collect_configs - returns the synthesized configs without touching the director' => sub {
+	plan tests => 9;
+	my $env = mock_env(notify => sub { 1 });
+	my $hook = make_hook(env => $env);
+	$hook->{collect} = 1;
+	$hook->register_runtime_config_builds('dns', 'logging', 'skipped');
+	$hook->{requests} = ['dns', 'logging', 'skipped'];
+
+	my $result;
+	my $out = stderr_from { $result = $hook->perform };
+
+	is(ref($result), 'ARRAY', 'perform in collect mode returns an array reference');
+	is(scalar(@$result), 3, 'one entry per requested build');
+	is($result->[0]{build}, 'dns', 'entries keep request order');
+	is($result->[0]{name}, 'test-env-bosh.dns', 'each entry carries the BOSH config name');
+	like($result->[0]{content}, qr/bosh-dns/, 'hash builds are rendered to YAML');
+	like($result->[1]{content}, qr/loggregator/, 'string builds are passed through');
+	ok(!defined $result->[2]{content}, 'a skipped build yields undefined content');
+	ok($hook->completed, 'the hook is marked complete');
+	unlike($out, qr/uploading|removing/, 'nothing is uploaded or removed');
+};
+
+# ---------------------------------------------------------------------------
 # done testing
 # ---------------------------------------------------------------------------
 done_testing;

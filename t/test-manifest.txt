@@ -118,6 +118,8 @@ unit-tests/genesis-cli.t                              # bin/genesis loads; cross
 unit-tests/genesis_core-cli.t                         # Commands::Core CLI registration (config)
 unit-tests/genesis_env-cli.t                          # Commands::Env CLI registration (terminate)
 unit-tests/genesis_repo-cli.t                         # Commands::Repo CLI registration (repo-init)
+unit-tests/genesis_bosh-cli.t                         # Commands::Bosh CLI registration (bosh-configs)
+unit-tests/genesis_commands_bosh-configs.t            # bosh-configs actions against a mocked env and director
 unit-tests/genesis_commands_core-config.t             # Commands::Core::config behaviour
 # Kit Provider tests (POD-driven)
 unit-tests/genesis_kit_provider-core.t              # Genesis::Kit::Provider base class/factory
