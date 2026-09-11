@@ -1877,6 +1877,48 @@ B<Examples:>
   $vault->_confirm_written('secret/myapp', {user => 'admin'});
   # Returns normally once the value is readable
 
+=head2 _readback_value
+
+  my $flat = Service::Vault::_readback_value($value);
+
+Flattens a value read back from the vault so it can be compared with what
+was sent.
+
+A write always sends a string, but a read does not always return one. A
+path outside a kv mount, an approle role for one, hands a comma-separated
+list back as an array reference and a numeric string back as a number, so
+comparing the raw forms reports a difference where the contents match.
+Both sides of the comparison in L</_confirm_written> go through this, which
+is what keeps a correct write from being read as a lost one.
+
+An array reference is joined with commas and every other value is
+stringified. An undefined value, and an undefined element within an array
+reference, both flatten to the empty string, so a missing value compares
+equal to an empty one rather than raising.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+The value to flatten. A scalar, an array reference, or undef.
+
+=back
+
+B<Returns:> The flattened value as a string.
+
+B<Errors:>
+
+None. Every input has a flattened form.
+
+B<Examples:>
+
+  Service::Vault::_readback_value('admin');        # => 'admin'
+  Service::Vault::_readback_value(['a', 'b']);     # => 'a,b'
+  Service::Vault::_readback_value(42);             # => '42'
+  Service::Vault::_readback_value(undef);          # => ''
+
 =head2 _confirm_cleared
 
   $vault->_confirm_cleared($path);
