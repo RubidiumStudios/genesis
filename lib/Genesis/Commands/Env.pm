@@ -1299,17 +1299,7 @@ sub deploy {
 							$out =~ s/\(root level\)/<root>/m;
 							info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
 							if ($dryrun) {
-								warning(
-									"A dry-run never uploads cloud configs, so the #M{%s} BOSH ".
-									"director will validate the manifest against its current copy ".
-									"of cloud config #C{%s} rather than the updated one shown above.  ".
-									"Errors from bosh about networks, vm types, disk types, vm ".
-									"extensions, or availability zones that only the updated cloud ".
-									"config defines are expected here and do not indicate a manifest ".
-									"problem.  Deploy without #y{--dry-run} to upload the updated cloud ".
-									"config before the manifest is validated.",
-									$env->bosh->{alias}, $cloud_config_name
-								);
+								_deploy_dryrun_cloud_config_warning($env, $cloud_config_name, 'outdated');
 								dryrun(
 									"Cloud config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
 									$out
@@ -1342,16 +1332,7 @@ sub deploy {
 							info "[[  - >>no changes required in cloud config; proceeding with deploy.\n";
 						}
 					} elsif ($dryrun) {
-						warning(
-							"A dry-run never uploads cloud configs, and the #M{%s} BOSH director ".
-							"does not hold a cloud config named #C{%s}.  When bosh validates the ".
-							"manifest it will only see the cloud configs already on the director, ".
-							"so errors about unknown networks, vm types, disk types, vm extensions, ".
-							"or availability zones are expected here and do not indicate a manifest ".
-							"problem.  Deploy without #y{--dry-run} to create and upload the cloud ".
-							"config before the manifest is validated.",
-							$env->bosh->{alias}, $cloud_config_name
-						);
+						_deploy_dryrun_cloud_config_warning($env, $cloud_config_name, 'missing');
 						dryrun(
 							"Cloud config #C{%s} missing.  This would be created and uploaded if not in dry-run mode.  Content:\n\n%s",
 							$cloud_config_name, slurp($new_path_diff)
@@ -1828,6 +1809,40 @@ sub _format_deploy_feature_opt_in {
 	);
 }
 
+# _deploy_dryrun_cloud_config_warning - say that a dry run validates against the director's copy of the cloud config {{{
+sub _deploy_dryrun_cloud_config_warning {
+	my ($env, $cloud_config_name, $state) = @_;
+
+	if ($state eq 'outdated') {
+		warning(
+			"A dry-run never uploads cloud configs, so the #M{%s} BOSH ".
+			"director will validate the manifest against its current copy ".
+			"of cloud config #C{%s} rather than the updated one shown above.  ".
+			"Errors from bosh about networks, vm types, disk types, vm ".
+			"extensions, or availability zones that only the updated cloud ".
+			"config defines are expected here and do not indicate a manifest ".
+			"problem.  Deploy without #y{--dry-run} to upload the updated cloud ".
+			"config before the manifest is validated.",
+			$env->bosh->{alias}, $cloud_config_name
+		);
+	} elsif ($state eq 'missing') {
+		warning(
+			"A dry-run never uploads cloud configs, and the #M{%s} BOSH director ".
+			"does not hold a cloud config named #C{%s}.  When bosh validates the ".
+			"manifest it will only see the cloud configs already on the director, ".
+			"so errors about unknown networks, vm types, disk types, vm extensions, ".
+			"or availability zones are expected here and do not indicate a manifest ".
+			"problem.  Deploy without #y{--dry-run} to create and upload the cloud ".
+			"config before the manifest is validated.",
+			$env->bosh->{alias}, $cloud_config_name
+		);
+	} else {
+		bug("Unknown cloud config state '%s' for a dry-run warning", $state);
+	}
+	return 1;
+}
+
+# }}}
 # _deploy_network_claims_lock - check the network claims lock on the director and take it for a real deploy {{{
 sub _deploy_network_claims_lock {
 	my ($env, %opts) = @_;

@@ -188,6 +188,7 @@ unit-tests/genesis_log-template_separators.t
 unit-tests/genesis_commands_env_reason-core.t  # deploy-driven reason and cascade
 unit-tests/genesis_commands_env-network_lock.t  # network claims lock around the deploy cloud config check
 unit-tests/genesis_commands_env-deploy_confirm.t  # deploy questions: --yes answers, a terminal asks, a pipe stops
+unit-tests/genesis_commands_env-dryrun_cloud_config_warning.t  # dry-run warnings about the director's cloud config
 unit-tests/genesis_commands_repo-init.t        # repo-init CLI (registration + option parsing; validate + execute in integration-tests/)
 unit-tests/genesis_commands_check-embedded-genesis_version.t  # embedded version read from packed $VERSION line; legacy form still accepted
 unit-tests/genesis_commands_repo-init_no_commit_identity.t  # --no-commit needs no git identity; committing still does
