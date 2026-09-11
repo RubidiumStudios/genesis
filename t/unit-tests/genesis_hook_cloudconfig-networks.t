@@ -1202,6 +1202,90 @@ subtest 'network_definition - unaliased target with no reservations drops and wa
 		'warning names at least one dropped subnet for the unaliased target');
 };
 
+# ---------------------------------------------------------------------------
+# a network's own claim is never one of the "other networks"
+# ---------------------------------------------------------------------------
+# A dry run reported a subnet as claimed by other networks, and the number
+# looked large enough to include the deployment's own claim on that subnet --
+# a network counted against itself, which would shrink every redeploy.  The
+# env file carried an allocation override, so the question is whether an
+# override changes the key a claim is filed under.  It does not: the override
+# only sets how many addresses are wanted, and the claim stays under the
+# network's own name.
+#
+# Written as a comparison rather than a fixed number, because the figure that
+# matters is the difference a self-claim makes to it, and that difference must
+# be nothing.
+subtest 'network_definition - an allocation override does not count a network\'s own claim against it' => sub {
+	plan tests => 6;
+
+	my $own_claim = '10.0.1.100-10.0.1.163'; # 64 addresses, ours, on ocfp-1
+
+	# size_ocfp_1 - ask for the bosh network with an allocation override in the
+	# env file, optionally with a claim of our own already on ocfp-1, and give
+	# back the "claimed by other networks" figure out of the drop warning.
+	my $size_ocfp_1 = sub {
+		my ($with_own_claim) = @_;
+		my $env = make_deploy_env(
+			config => {
+				params => {cloud_config_prefix => 'test-env.test'},
+				# The override the operator wrote, under the base the hook reads.
+				'bosh-configs' => {
+					cloud => {networks => {bosh => {allocation => {size => 0}}}},
+				},
+			},
+			director_exodus_lookup => sub {
+				my ($self, $key) = @_;
+				die "Unknown exodus key: $key" unless $key eq '/network';
+				my $network = dclone($director_network_exodus);
+				# Filed under this network's own name, which is what the sizing
+				# code has to recognise as ours.
+				$network->{subnets}{'ocfp-1'}{claims}{$self->name.'.bosh.net-bosh'} = $own_claim
+					if $with_own_claim;
+				return $network;
+			},
+		);
+		my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+		my ($net, $warn);
+		$warn = stderr_from {
+			$net = $hook->network_definition('bosh',
+				strategy => 'ocfp',
+				dynamic_subnets => {
+					# Overridden to 0 by the env file, which is what drops the
+					# subnet and prints the figure this subtest is about.
+					allocation => {size => 8, statics => 0},
+					cloud_properties_for_iaas => {
+						openstack => {
+							'net_id'          => $hook->network_reference('id'),
+							'security_groups' => ['default'],
+						},
+					},
+				},
+			);
+		};
+		return ($warn, $net);
+	};
+
+	my ($alone_warn) = $size_ocfp_1->(0);
+	like($alone_warn, qr/Dropping subnet ocfp-1.*net-bosh/s,
+		'the override is read: a size of 0 drops ocfp-1 rather than allocating the 8 the kit asked for');
+	my ($alone) = $alone_warn =~ /(\d+)\s+claimed\s+by\s+other\s+networks/s;
+	ok(defined $alone, 'the drop warning reports what other networks have claimed');
+	is($alone, 4,
+		'which is the director\'s four-address compilation claim and nothing else');
+
+	my ($with_own_warn) = $size_ocfp_1->(1);
+	like($with_own_warn, qr/Dropping subnet ocfp-1.*net-bosh/s,
+		'the same run with a claim of our own already on ocfp-1 still drops it');
+	my ($with_own) = $with_own_warn =~ /(\d+)\s+claimed\s+by\s+other\s+networks/s;
+	ok(defined $with_own, 'and still reports what other networks have claimed');
+
+	is($with_own, $alone,
+		'the figure is unchanged, so the network\'s own claim is not counted against it');
+};
+
 done_testing;
+
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
