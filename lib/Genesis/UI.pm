@@ -37,6 +37,19 @@ sub __bail_on_eof {
 	);
 }
 
+# __prompt_needs_terminal_copy - true when a prompt on STDERR would not be seen
+sub __prompt_needs_terminal_copy {
+	# STDIN is a terminal, so someone is there to answer, but STDERR is a pipe
+	# or a file, so the question written there never reaches them.
+	return (-t STDIN && !-t STDERR) ? 1 : 0;
+}
+
+# __open_controlling_terminal - the controlling terminal, or undef when there is none
+sub __open_controlling_terminal {
+	open(my $tty, '>', '/dev/tty') or return undef;
+	return $tty;
+}
+
 # __prompt_print - write prompt text where the person answering can see it
 sub __prompt_print {
 	my ($text) = @_;
@@ -45,8 +58,15 @@ sub __prompt_print {
 	# terminal but STDERR is not (stderr sent through a pipe or to a file),
 	# the question would be swallowed and the read would wait on an answer to
 	# something nobody saw, so write it to the controlling terminal as well.
-	return unless -t STDIN && !-t STDERR;
-	open(my $tty, '>', '/dev/tty') or return;
+	return unless __prompt_needs_terminal_copy();
+	# With no terminal to write to, the question cannot be shown to anyone, and
+	# the read that follows would wait forever on an answer nobody was asked for.
+	my $tty = __open_controlling_terminal() or bail(
+		"Cannot reach a terminal to ask a question, and standard error is ".
+		"redirected, so the question cannot be shown.  Run this command with its ".
+		"standard error attached to a terminal, or use #y{--yes} where the command ".
+		"supports it."
+	);
 	my $previous = select($tty); $| = 1; select($previous);
 	print $tty $text;
 	close($tty);
@@ -148,7 +168,7 @@ sub __prompt_for_line {
 			system('stty', 'echo');
 			# Their Enter was not echoed; emit one so the next line of
 			# output is not glued to the prompt.
-			print STDERR "\n";
+			__prompt_print("\n");
 		}
 		# <STDIN> returns undef on EOF: nobody is going to answer.  A default
 		# or an allowed blank still resolves below; anything else stops here
@@ -186,7 +206,7 @@ sub __prompt_for_block {
 	my ($prompt) = @_;
 	$prompt = "$prompt (Enter <CTRL-D> to end)";
 	(my $line = $prompt) =~ s/./-/g;
-	print csprintf("%s","\n$prompt\n$line\n");
+	__prompt_print(csprintf("%s","\n$prompt\n$line\n"));
 	my $in;
 	open($in, '<&', fileno(STDIN)) or $in = \*STDIN;
 	my @data = <$in>;
@@ -238,7 +258,7 @@ sub prompt_for_choices {
 	die "Illegal list maximum count specified. Please contact your kit author for a fix.\n"
 		if $max < $min;
 
-	print csprintf($prompt."\n\nMake your selections (leave $line_prompt empty to end):\n");
+	__prompt_print(csprintf($prompt."\n\nMake your selections (leave $line_prompt empty to end):\n"));
 
 	my @ll;
 	while (1) {
@@ -263,7 +283,7 @@ sub prompt_for_choices {
 		}
 		push @ll, $choices->[$v-1];
 		$chosen{$v} = 1;
-		print(csprintf("\033[1A%s%s > #C{%s}\n",ordify(scalar(@ll)), $line_prompt, (ref($labels->[$v-1]) eq "ARRAY" ? $labels->[$v-1][1] : $labels->[$v-1])));
+		__prompt_print(csprintf("\033[1A%s%s > #C{%s}\n",ordify(scalar(@ll)), $line_prompt, (ref($labels->[$v-1]) eq "ARRAY" ? $labels->[$v-1][1] : $labels->[$v-1])));
 		last if scalar(@ll) == $max;
 	}
 	return \@ll;
@@ -277,7 +297,7 @@ sub prompt_for_choice {
 	my $default_choice;
 	my $object = $object_description//"choice";
 	my $num_choices = scalar(@{$choices});
-	print csprintf("%s","\n$prompt");
+	__prompt_print(csprintf("%s","\n$prompt"));
 	my $iw = length($#$choices + 1);
 	my $section_offset = 0;
 	my %selection_map=();
@@ -294,45 +314,45 @@ sub prompt_for_choice {
 			if ($label =~ /^---(.*)---$/) {
 				my $section_header = $1;
 				$section_offset += 1;
-				print csprintf("\n\n  %s", $section_header);
+				__prompt_print(csprintf("\n\n  %s", $section_header));
 				next;
 			} elsif ($label eq '---') {
 				my $section_header = '';
 				$section_offset += 1;
-				print csprintf("\n");
+				__prompt_print(csprintf("\n"));
 				next;
 			}
 			$selection_map{$i} = $selected;
 			last;
 		}
-		print csprintf("\n  %*s) %s", $iw, ($i+1), $label);
+		__prompt_print(csprintf("\n  %*s) %s", $iw, ($i+1), $label));
 		if ($default && $default eq $choices->[$i]) {
-			print csprintf(" #G{(default)}");
+			__prompt_print(csprintf(" #G{(default)}"));
 			$default_choice = $i+1;
 		}
 	}
-	print "\n\n";
+	__prompt_print("\n\n");
 	my $c = __prompt_for_line(
 		"Select $object",
 		"1-$num_choices",
 		$err_msg || "enter a number between 1 and $num_choices",
 		$default_choice);
 
-	print(csprintf("\033[1ASelect $object > #C{%s}\n", $selection_map{$c-1}));
+	__prompt_print(csprintf("\033[1ASelect $object > #C{%s}\n", $selection_map{$c-1}));
 	return $choices->[$c-1];
 }
 
 sub prompt_for_line {
 	my ($prompt,$label,$default,$validation,$err_msg,$hide_response) = @_;
 	if ($prompt) {
-		print csprintf("%s","\n$prompt");
+		__prompt_print(csprintf("%s","\n$prompt"));
 		my $padding = ($prompt =~ /\s$/) ? "" : " ";
-		print(csprintf("%s", "${padding}#g{(default: $default)}")) if (defined($default) && $default ne '');
+		__prompt_print(csprintf("%s", "${padding}#g{(default: $default)}")) if (defined($default) && $default ne '');
 	} elsif (defined($default) && defined($label) && $default ne '') {
 		my $padding = ($label =~ /\s$/) ? "" : " ";
 		$label .= csprintf("%s", "${padding}#g{(default: $default)}");
 	}
-	print "\n";
+	__prompt_print("\n");
 	my $allow_blank = (defined($default) && $default eq "");
 	return __prompt_for_line(defined($label) ? $label : "", $validation, $err_msg, $default, $allow_blank, $hide_response);
 }
@@ -355,7 +375,7 @@ sub prompt_for_list {
 	die "Illegal list maximum count specified. Please contact your kit author for a fix.\n"
 		if (defined($max) and $max < 1);
 
-	print csprintf("\n%s %s\n", $prompt, $end_prompt);
+	__prompt_print(csprintf("\n%s %s\n", $prompt, $end_prompt));
 
 	my @ll;
 	while (1) {
@@ -380,7 +400,7 @@ sub prompt_for_list {
 }
 
 sub prompt_for_block {
-	printf("\n");
+	__prompt_print("\n");
 	return __prompt_for_block(@_);
 }
 

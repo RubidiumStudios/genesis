@@ -29,7 +29,10 @@ Genesis::UI - Interactive text user interface prompts for Genesis and kit hooks
 
 This module provides utilities for the text user interfaces used by C<Genesis>
 and its C<hooks/*> scripts. It exports interactive prompt functions that read
-from C<STDIN> and write to C<STDERR> (or C<STDOUT> for some formatted output).
+from C<STDIN> and write their questions, menus, and banners through
+L</__prompt_print>, which goes to C<STDERR> and to the controlling terminal.
+Nothing a prompt writes goes to C<STDOUT>, so a caller can pipe the command's
+output into a parser without a menu landing in it.
 
 All exported functions loop until the user provides a valid response, printing
 an error and re-prompting on invalid input.
@@ -632,6 +635,37 @@ B<Examples:>
     __bail_on_eof("Continue? [y|n]");
     # stops when STDIN is exhausted; returns otherwise
 
+=head2 __prompt_needs_terminal_copy
+
+    __prompt_needs_terminal_copy()
+
+True when a prompt written to C<STDERR> would not be seen: C<STDIN> is a
+terminal, so someone is there to answer, but C<STDERR> is a pipe or a file,
+so the question written there never reaches them.  L</__prompt_print>
+consults this before writing its copy to the controlling terminal.
+
+B<Returns:> C<1> when the terminal copy is needed, C<0> otherwise.
+
+B<Examples:>
+
+    __prompt_needs_terminal_copy();
+    # 1 under `genesis ... 2>&1 | tee log`, run from a terminal
+    # 0 when STDERR is the terminal, and 0 when STDIN is not
+
+=head2 __open_controlling_terminal
+
+    __open_controlling_terminal()
+
+Opens C</dev/tty> for writing and returns the handle, or C<undef> when the
+process has no controlling terminal.
+
+B<Returns:> A write handle on the controlling terminal, or C<undef>.
+
+B<Examples:>
+
+    my $tty = __open_controlling_terminal();
+    # a filehandle, or undef when there is no controlling terminal
+
 =head2 __prompt_print
 
     __prompt_print($text)
@@ -641,8 +675,27 @@ Writes prompt text to C<STDERR>, and also to the controlling terminal
 run as C<genesis ... 2E<gt>&1 | tee log | grep ...> sends its prompts into
 the pipe, where a filter can drop them, while the read that follows waits on
 the terminal for an answer to a question nobody saw; writing the prompt to
-the terminal as well keeps it visible.  When C</dev/tty> cannot be opened
-the C<STDERR> copy is all there is.
+the terminal as well keeps it visible.
+
+Every prompt and every banner in this module goes through here, so nothing a
+prompt writes lands on C<STDOUT>.  That keeps C<--json> output, and anything
+else a caller pipes into a parser, free of menus and questions.
+
+When L</__prompt_needs_terminal_copy> is true and
+L</__open_controlling_terminal> returns C<undef>, there is nowhere left to
+show the question, so the command stops here rather than waiting on an
+answer nobody was asked for.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot reach a terminal to ask a question, and standard error is redirected, so the question cannot be shown.  Run this command with its standard error attached to a terminal, or use --yes where the command supports it.">
+
+Raised (via C<bail()>) when the terminal copy is needed and C</dev/tty>
+cannot be opened.
+
+=back
 
 B<Examples:>
 
