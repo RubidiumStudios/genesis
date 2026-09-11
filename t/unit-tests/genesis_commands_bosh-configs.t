@@ -362,6 +362,55 @@ subtest 'bosh_configs_compare - reports identical, different, and missing' => su
 };
 
 # ---------------------------------------------------------------------------
+# read-only actions and the network claims lock
+# ---------------------------------------------------------------------------
+subtest 'summary, list, view, and compare never touch the network claims lock' => sub {
+	plan tests => 12;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+
+	# A stale lock left by someone else is on the director; a read-only
+	# action must neither clear it nor take one of its own, and must not even
+	# ask about it.
+	my $stale = {status => 'stale', description => 'about 11 minutes ago by ubuntu@bastion (env: ocf, pid: 229665)'};
+	my $director = make_director('parent',
+		{
+			cloud   => {'test-env.cf' => entry(3)},
+			runtime => {'test-env.cf.dns' => entry(7)},
+		},
+		contents => {
+			'cloud|test-env.cf'       => "azs: []\n",
+			'runtime|test-env.cf.dns' => "releases: []\n",
+		},
+		check_network_lock   => sub { push @director_calls, ['check_network_lock', 'parent']; return $stale },
+		network_locked_by_me => sub { push @director_calls, ['network_locked_by_me', 'parent']; return 0 },
+	);
+	my %actions = (
+		summary => sub { Genesis::Commands::Bosh::bosh_configs_summary(@_) },
+		list    => sub { Genesis::Commands::Bosh::bosh_configs_list(@_) },
+		view    => sub { Genesis::Commands::Bosh::bosh_configs_view(@_) },
+		compare => sub { Genesis::Commands::Bosh::bosh_configs_compare(@_) },
+	);
+	for my $action (sort keys %actions) {
+		my $env = make_env(
+			hooks   => {'cloud-config' => 1, 'runtime-config' => 1},
+			cloud   => "azs: [z1]\n",
+			runtime => [
+				{build => 'dns', name => 'test-env.cf.dns', description => 'Dns', content => "releases:\n- name: bosh-dns\n"},
+			],
+			lookups => {'bosh-configs.runtime' => {dns => {}}},
+		);
+		@director_calls = ();
+		my ($out, $err) = output_from { $actions{$action}->($env, $director) };
+		my @lock_calls = grep {$_->[0] =~ /network_lock/} @director_calls;
+		is(scalar(@lock_calls), 0, "$action makes no network claims lock calls on the director")
+			or diag explain \@lock_calls;
+		unlike($out.$err, qr/network claims lock/i, "$action says nothing about the network claims lock");
+		unlike($out.$err, qr/\[y\|n\]/, "$action asks no question");
+	}
+};
+
+# ---------------------------------------------------------------------------
 # delete
 # ---------------------------------------------------------------------------
 subtest 'bosh_configs_delete - needs a name, refuses foreign names, resolves the type' => sub {

@@ -272,6 +272,11 @@ sub bosh_configs_upload {
 		&& $env->has_hook('cloud-config')
 		&& $env->can_build_cloud_configs;
 
+	# A signal while the lock is held has to unwind through the release below
+	# instead of killing the process with the lock still on the director.
+	local $SIG{INT}  = sub { die "Interrupted by user\n" };
+	local $SIG{TERM} = sub { die "Terminated\n" };
+
 	eval {
 		if ($wants_cloud) {
 			_bosh_configs_acquire_network_lock($env, $bosh, $yes);

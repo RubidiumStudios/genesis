@@ -1252,44 +1252,20 @@ sub deploy {
 			# Refactor this to use _check_cloud_config and _fix_cloud_config like the cpi stuff above
 			if ($env->has_hook('cloud-config')) {
 				$env->notify("checking cloud configs for #C{%s} deployment...", $env->name);
-				info({pending=>1},
-					"[[  - >>checking for existing network claims lock on #M{%s} BOSH director...",
-					$env->bosh->{alias}
-				);
-				my $current_lock = $env->bosh->check_network_lock;
-				if ($current_lock->{status} eq 'unlocked') {
-					info "#G{available}";
-				} elsif ($current_lock->{status} eq 'locked') {
-					info "#r{locked} %s", $current_lock->{description};
-					bail(
-						"Network claims are currently locked -- cannot proceed with deployment!"
-					);
-				} elsif ($current_lock->{status} eq 'stale') {
-					info "#y{locked (stale)} %s", $current_lock->{description};
-					if ($dryrun) {
-						dryrun(
-							"Network claims are locked with a stale lock: %s\n\nThis would be fixed if not in dry-run mode.",
-							$current_lock->{description}
-						);
-					} else {
-						if (in_controlling_terminal || !$options{'yes'}) {
-							prompt_for_boolean(
-								"Clear the stale network claims lock and continue with deployment? [y|n]",
-								0
-							) or bail "Aborted by user!";
-						}
-						$env->bosh->clear_network_lock;
-						$env->notify("checking cloud configs for #C{%s} deployment (continued)...", $env->name);
-						info "[[  - >>stale network claims lock cleared.";
-					}
-				}
 
-				# Place network-update lock here, to prevent concurrent updates to the network data
-				info({pending=>1},
-					"[[  - >>acquiring network claims lock on #M{%s} BOSH director...", $env->bosh->{alias}
+				# The cloud config synthesis reads the network claims on the
+				# director and a real deploy rewrites them, so the deploy holds
+				# the network claims lock from here until the claims are
+				# submitted.  A dry run only reads, so it takes no lock.
+				my $lock_held = _deploy_network_claims_lock(
+					$env, dryrun => $dryrun, yes => $options{yes}
 				);
-				$env->bosh->acquire_network_lock();
-				info "#G{done}";
+
+				# While the lock is held, a signal has to unwind through the
+				# release below instead of killing the process with the lock
+				# still recorded on the director.
+				local $SIG{INT}  = $lock_held ? sub { die "Interrupted by user\n" } : $SIG{INT};
+				local $SIG{TERM} = $lock_held ? sub { die "Terminated\n" }         : $SIG{TERM};
 
 				eval {
 					($cloud_config, $network_map) = $env->run_hook('cloud-config');
@@ -1422,19 +1398,11 @@ sub deploy {
 					}
 				}; # end eval
 
-				if ($@) {
-					my $err = $@;
-					# Clear network-update lock here (even if there was an error)
-					if ($env->bosh->network_locked_by_me) {
-						$env->notify("cleaning up...");
-						info({pending=>1},
-							"[[  - >>releasing network claims lock on #M{%s} BOSH director...", $env->bosh->{alias}
-						);
-						$env->bosh->clear_network_lock();
-						info "#G{done}";
-					}
-					die $err;
-				}
+				# Release the lock on every exit path.  A successful deploy already
+				# released it when the network claims were submitted.
+				my $err = $@;
+				_deploy_release_network_claims_lock($env) if $lock_held;
+				die $err if $err;
 			} else {
 				warning(
 					"Kit #C{%s} does not provide a cloud-config hook, so cloud configs ".
@@ -1861,6 +1829,82 @@ sub _format_deploy_feature_opt_in {
 		$fc, $env->effective_minimum_version_source
 	);
 }
+
+# _deploy_network_claims_lock - check the network claims lock on the director and take it for a real deploy {{{
+sub _deploy_network_claims_lock {
+	my ($env, %opts) = @_;
+	my $bosh = $env->bosh;
+
+	info({pending => 1},
+		"[[  - >>checking for existing network claims lock on #M{%s} BOSH director...",
+		$bosh->alias
+	);
+	my $current_lock = $bosh->check_network_lock;
+	if ($current_lock->{status} eq 'unlocked') {
+		info "#G{available}";
+	} elsif ($current_lock->{status} eq 'locked') {
+		info "#r{locked} %s", $current_lock->{description};
+		bail(
+			"Network claims are currently locked -- cannot proceed with deployment!"
+		);
+	} elsif ($current_lock->{status} eq 'stale') {
+		info "#y{locked (stale)} %s", $current_lock->{description};
+		if ($opts{dryrun}) {
+			dryrun(
+				"Network claims are locked with a stale lock: %s\n\nThis would be ".
+				"cleared if not in dry-run mode.", $current_lock->{description}
+			);
+		} elsif ($opts{yes}) {
+			# --yes clears the stale lock without asking.
+		} elsif (in_controlling_terminal) {
+			prompt_for_boolean(
+				"Clear the stale network claims lock and continue with deployment? [y|n]",
+				0
+			) or bail "Aborted by user!";
+		} else {
+			bail(
+				"Network claims are locked with a stale lock: %s\n\nRerun with ".
+				"#y{--yes} to clear it, or run this command in a terminal to be ".
+				"asked.", $current_lock->{description}
+			);
+		}
+		unless ($opts{dryrun}) {
+			$bosh->clear_network_lock;
+			$env->notify("checking cloud configs for #C{%s} deployment (continued)...", $env->name);
+			info "[[  - >>stale network claims lock cleared.";
+		}
+	}
+
+	if ($opts{dryrun}) {
+		info "[[  - >>a dry run reads the network claims without taking the lock.";
+		return 0;
+	}
+
+	info({pending => 1},
+		"[[  - >>acquiring network claims lock on #M{%s} BOSH director...", $bosh->alias
+	);
+	$bosh->acquire_network_lock();
+	info "#G{done}";
+	return 1;
+}
+
+# }}}
+# _deploy_release_network_claims_lock - release the network claims lock if this process still holds it {{{
+sub _deploy_release_network_claims_lock {
+	my ($env) = @_;
+	my $bosh = $env->bosh;
+	return 0 unless $bosh->network_locked_by_me;
+
+	$env->notify("cleaning up...");
+	info({pending => 1},
+		"[[  - >>releasing network claims lock on #M{%s} BOSH director...", $bosh->alias
+	);
+	$bosh->clear_network_lock();
+	info "#G{done}";
+	return 1;
+}
+
+# }}}
 
 1;
 # vim: fdm=marker:foldlevel=1:noet
