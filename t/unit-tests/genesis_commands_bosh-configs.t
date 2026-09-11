@@ -536,4 +536,83 @@ subtest 'bosh_configs_upload - cpi goes through the shared fixer' => sub {
 	is($fix->[2]{name}, 'test-env.aws.cf', 'under the environment\'s cpi name');
 };
 
+# ---------------------------------------------------------------------------
+# releasing the lock on every exit path
+# ---------------------------------------------------------------------------
+# A lock left on the director outlives the process that took it, and the next
+# operator finds it and has to decide whether it is real.  The upload holds the
+# lock across the synthesis and the upload, so every way out of that stretch --
+# a return, an error, and a signal -- has to run the release.
+subtest 'bosh_configs_upload - the network claims lock is released when the upload fails' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $director = make_director('parent', {},
+		upload_config => sub {
+			my ($self, @args) = @_;
+			push @director_calls, ['upload_config', 'parent', @args[1,2]];
+			die "director refused the cloud config\n";
+		},
+	);
+	my $env = make_env(
+		hooks       => {'cloud-config' => 1},
+		cloud       => "azs: []\n",
+		network_map => {subnets => {'ocfp-0' => {claims => {}}}},
+	);
+
+	@director_calls = ();
+	throws_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1) }
+	} qr/director refused the cloud config/, 'the error the upload raised is re-raised to the caller';
+
+	my @seen = map {$_->[0]} @director_calls;
+	ok(grep({$_ eq 'acquire_network_lock'} @seen), 'the lock was taken');
+	ok(grep({$_ eq 'clear_network_lock'} @seen), 'and released again despite the failure');
+	ok(!$director->network_locked_by_me, 'so the director is left with no lock of ours');
+};
+
+subtest 'bosh_configs_upload - the network claims lock is released on a signal' => sub {
+	# Signals the command is expected to survive with the lock cleaned up.
+	# HUP is the one that matters most in practice: these run over ssh from a
+	# bastion, and a dropped session hangs up every process in it.
+	my @signals = (
+		[INT  => qr/Interrupted by user/],
+		[TERM => qr/Terminated/],
+		[HUP  => qr/Hung up/],
+		[QUIT => qr/Quit/],
+	);
+	plan tests => 4 * scalar(@signals);
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+
+	for my $case (@signals) {
+		my ($signal, $message) = @$case;
+		my $director = make_director('parent', {},
+			upload_config => sub {
+				my ($self, @args) = @_;
+				push @director_calls, ['upload_config', 'parent', @args[1,2]];
+				# Delivered to ourselves while the lock is held, which is the
+				# only way to exercise the handler the command installs.
+				kill $signal => $$;
+				return ('', 0, '');
+			},
+		);
+		my $env = make_env(
+			hooks       => {'cloud-config' => 1},
+			cloud       => "azs: []\n",
+			network_map => {subnets => {'ocfp-0' => {claims => {}}}},
+		);
+
+		@director_calls = ();
+		throws_ok {
+			output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1) }
+		} $message, "$signal stops the upload with its own message";
+
+		my @seen = map {$_->[0]} @director_calls;
+		ok(grep({$_ eq 'acquire_network_lock'} @seen), "$signal: the lock was taken");
+		ok(grep({$_ eq 'clear_network_lock'} @seen), "$signal: and released on the way out");
+		ok(!$director->network_locked_by_me, "$signal: so no lock of ours is left behind");
+	}
+};
+
 done_testing;

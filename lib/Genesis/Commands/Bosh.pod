@@ -481,7 +481,11 @@ Cloud configs are handled the way the deploy path handles them: the network
 claims lock is taken on the director before the cloud config is synthesized,
 the config is uploaded with C<upload_config>, the network map the hook
 produced is written to the director's exodus data, and the lock is released
-even when something fails.  Cpi configs go through
+even when something fails.  C<INT>, C<TERM>, C<HUP>, and C<QUIT> are turned
+into errors for as long as the lock is held, so a cancelled command, a
+killed one, and an ssh session that drops out from under a bastion all
+unwind through that release rather than leaving the lock behind.  Cpi
+configs go through
 C<< Genesis::Env->_fix_cpi_config >>, which also creates the CredHub secrets
 the config references.  Runtime configs are uploaded by running the kit's
 C<runtime-config> hook for the confirmed builds, so the hook can store the

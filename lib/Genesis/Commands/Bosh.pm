@@ -273,9 +273,14 @@ sub bosh_configs_upload {
 		&& $env->can_build_cloud_configs;
 
 	# A signal while the lock is held has to unwind through the release below
-	# instead of killing the process with the lock still on the director.
+	# instead of killing the process with the lock still on the director.  HUP
+	# is in the list because this runs over ssh from a bastion, and a dropped
+	# session hangs up every process in it -- which is how a lock outlives the
+	# process that took it.
 	local $SIG{INT}  = sub { die "Interrupted by user\n" };
 	local $SIG{TERM} = sub { die "Terminated\n" };
+	local $SIG{HUP}  = sub { die "Hung up\n" };
+	local $SIG{QUIT} = sub { die "Quit\n" };
 
 	eval {
 		if ($wants_cloud) {

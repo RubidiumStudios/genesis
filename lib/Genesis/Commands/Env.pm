@@ -1263,9 +1263,14 @@ sub deploy {
 
 				# While the lock is held, a signal has to unwind through the
 				# release below instead of killing the process with the lock
-				# still recorded on the director.
+				# still recorded on the director.  HUP is in the list because
+				# these deploys are run over ssh from a bastion, and a dropped
+				# session hangs up every process in it -- which is how a lock
+				# outlives the process that took it.
 				local $SIG{INT}  = $lock_held ? sub { die "Interrupted by user\n" } : $SIG{INT};
 				local $SIG{TERM} = $lock_held ? sub { die "Terminated\n" }         : $SIG{TERM};
+				local $SIG{HUP}  = $lock_held ? sub { die "Hung up\n" }            : $SIG{HUP};
+				local $SIG{QUIT} = $lock_held ? sub { die "Quit\n" }               : $SIG{QUIT};
 
 				eval {
 					($cloud_config, $network_map) = $env->run_hook('cloud-config');

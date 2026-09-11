@@ -150,4 +150,41 @@ subtest 'release clears only a lock this process holds' => sub {
 	is_deeply(\@calls, ['mine'], 'the director is only asked whose lock it is');
 };
 
+# ---------------------------------------------------------------------------
+# every acquire sits under the same signal coverage
+# ---------------------------------------------------------------------------
+# The deploy path holds the lock across an eval whose release runs on every
+# exit, and the signals that would otherwise kill the process mid-hold are
+# turned into errors so they unwind through that release.  The coverage is
+# only as good as the next lock site that gets written, so this reads the
+# tree rather than one function: a file that takes the lock and does not
+# localize all four signals is the defect this catches.
+#
+# HUP and QUIT are in the list for the bastion.  Genesis deploys are run over
+# ssh, a dropped session hangs up every process in it, and a lock left on the
+# director then outlives the process that took it -- which is exactly the
+# stale lock an operator finds and cannot safely clear.
+subtest 'every file that takes the network claims lock covers INT, TERM, HUP, and QUIT' => sub {
+	my @takers;
+	for my $pm (sort glob('lib/Genesis/Commands/*.pm')) {
+		open my $fh, '<', $pm or die "cannot read $pm: $!";
+		my $src = do {local $/; <$fh>};
+		close $fh;
+		push @takers, [$pm, $src] if $src =~ /->acquire_network_lock\b/;
+	}
+
+	plan tests => 1 + 5 * scalar(@takers);
+	ok(scalar(@takers), 'at least one command takes the network claims lock');
+
+	for my $taker (@takers) {
+		my ($pm, $src) = @$taker;
+		for my $signal (qw/INT TERM HUP QUIT/) {
+			like($src, qr/local \$SIG\{\Q$signal\E\}/,
+				"$pm localizes \$SIG{$signal} around the lock");
+		}
+		like($src, qr/->clear_network_lock\b/,
+			"$pm releases the lock it takes");
+	}
+};
+
 done_testing;
