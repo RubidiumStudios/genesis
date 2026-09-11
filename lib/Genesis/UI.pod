@@ -606,6 +606,49 @@ B<Examples:>
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
 
+=head2 __bail_on_eof
+
+    __bail_on_eof($prompt)
+
+Stops with a clear message when the last read in L</__prompt_for_line> hit
+EOF on C<STDIN>.  The prompt loops that treat a blank answer as "ask again"
+(L</prompt_for_boolean> with no default, and L</prompt_for_choices> and
+L</prompt_for_list> below their minimum) call this before asking again, so
+an exhausted standard input ends the command instead of spinning through
+the question forever.  Does nothing when the last read returned a line.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot read an answer to \"%s\": standard input is exhausted and no terminal is attached.  Run this command in a terminal, or use --yes where the command supports it.">
+
+Raised (via C<bail()>) when the last read hit EOF.
+
+=back
+
+B<Examples:>
+
+    __bail_on_eof("Continue? [y|n]");
+    # stops when STDIN is exhausted; returns otherwise
+
+=head2 __prompt_print
+
+    __prompt_print($text)
+
+Writes prompt text to C<STDERR>, and also to the controlling terminal
+(C</dev/tty>) when C<STDIN> is a terminal but C<STDERR> is not.  A command
+run as C<genesis ... 2E<gt>&1 | tee log | grep ...> sends its prompts into
+the pipe, where a filter can drop them, while the read that follows waits on
+the terminal for an answer to a question nobody saw; writing the prompt to
+the terminal as well keeps it visible.  When C</dev/tty> cannot be opened
+the C<STDERR> copy is all there is.
+
+B<Examples:>
+
+    __prompt_print("Continue? [y|n] > ");
+    # Appears on STDERR, and on the terminal when STDERR is redirected
+
 =head2 __prompt_for_line
 
     __prompt_for_line($prompt, $validation, $err_msg, $default, $allow_blank, $hide_response)
@@ -626,12 +669,28 @@ disabled around the C<STDIN> read so the typed value is not displayed. In
 non-TTY environments (tests, piped input) the read happens normally so test
 harnesses driving the function via a piped C<STDIN> are unaffected.
 
-The C<E<lt>STDINE<gt>> read is defensive against C<undef> on EOF; combined
-with C<$allow_blank>, this prevents an EOF on a closed pipe from spinning the
-retry loop.
+EOF on C<STDIN> means nobody is going to answer.  A defined C<$default> is
+taken as the answer, and C<$allow_blank> returns C<"">; otherwise the prompt
+stops with a message that standard input is exhausted and no terminal is
+attached, rather than spinning the retry loop or waiting forever.  The
+prompt text itself goes through L</__prompt_print>, so it reaches the
+terminal even when C<STDERR> is redirected.
 
-B<Errors:> Dies with C<"Error compiling param regex: $!"> if the C<$validation> string is
-a regex-format specifier and the pattern fails to compile.
+B<Errors:>
+
+=over 4
+
+=item C<"Error compiling param regex: $!">
+
+Dies if the C<$validation> string is a regex-format specifier and the
+pattern fails to compile.
+
+=item C<"Cannot read an answer to \"%s\": standard input is exhausted and no terminal is attached.  Run this command in a terminal, or use --yes where the command supports it.">
+
+Raised (via C<bail()>) on EOF when there is no default and a blank answer
+is not allowed.
+
+=back
 
 B<Examples:>
 

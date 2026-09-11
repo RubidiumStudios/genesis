@@ -309,6 +309,36 @@ subtest 'prompt_for_line - list and exclusion validation' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# EOF on STDIN: nobody will answer, so the prompt must not wait or spin
+# ---------------------------------------------------------------------------
+subtest 'prompts fail fast on EOF instead of looping' => sub {
+	set_stdin("");
+	my $result;
+	stderr_from { $result = prompt_for_line("Region:", undef, "us-east-1") };
+	reset_stdin();
+	is($result, 'us-east-1', "EOF with a default takes the default");
+
+	set_stdin("");
+	stderr_from { $result = prompt_for_boolean("Enable feature? [y|n]", "n") };
+	reset_stdin();
+	is($result, JSON::PP::false, "EOF on a boolean with a default takes the default");
+
+	set_stdin("");
+	throws_ok {
+		stderr_from { prompt_for_line("Region:", "region") }
+	} qr/standard\s+input\s+is\s+exhausted\s+and\s+no\s+terminal\s+is\s+attached/,
+		"EOF without a default stops with a clear message";
+	reset_stdin();
+
+	set_stdin("");
+	throws_ok {
+		stderr_from { prompt_for_boolean("Enable feature? [y|n]", undef) }
+	} qr/Cannot read an answer to "Enable feature\?/,
+		"EOF on a boolean without a default names the question";
+	reset_stdin();
+};
+
+# ---------------------------------------------------------------------------
 # prompt_for_block
 # ---------------------------------------------------------------------------
 subtest 'prompt_for_block - reads until EOF' => sub {

@@ -1315,12 +1315,10 @@ sub deploy {
 									$out
 								);
 							} else {
-								if (in_controlling_terminal || !$options{'yes'}) {
-									prompt_for_boolean(
-										"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
-										1
-									) or bail "Aborted by user!";
-								}
+								_deploy_confirm(
+									"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
+									yes => $options{yes}, default => 1
+								) or bail "Aborted by user!";
 								my $last_check = $env->bosh->check_network_lock;
 								bail(
 									"Network claims lock was lost since last checked (may have become stale and removed) -- cannot proceed with deployment!"
@@ -1886,6 +1884,20 @@ sub _deploy_network_claims_lock {
 	$bosh->acquire_network_lock();
 	info "#G{done}";
 	return 1;
+}
+
+# }}}
+# _deploy_confirm - answer a yes/no question for the deploy: --yes says yes, a terminal asks, a pipe stops {{{
+sub _deploy_confirm {
+	my ($question, %opts) = @_;
+	return 1 if $opts{yes};
+	return prompt_for_boolean($question, $opts{default} // 1) ? 1 : 0
+		if in_controlling_terminal;
+	bail(
+		"Cannot ask \"%s\" without a controlling terminal.\n\nRerun with #y{--yes} ".
+		"to answer yes, or run this command in a terminal to be asked.",
+		$question =~ s/\s*\[y\|n\]\s*$//r
+	);
 }
 
 # }}}

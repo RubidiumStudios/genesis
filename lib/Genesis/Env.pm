@@ -4224,7 +4224,7 @@ sub _deploy_create_env {
 		}
 		if ($issue) {
 			$issue .= "  #R{This may mean your state file is also out of date!}";
-			if (in_controlling_terminal || !$noprompt) {
+			if (in_controlling_terminal) {
 				warning("\n".$issue);
 				prompt_for_boolean(
 					"Proceed with BOSH create-env for the #C{${\($self->name)}} anyways? [y|n] ",
@@ -4233,7 +4233,8 @@ sub _deploy_create_env {
 				$self->notify("\nchecking for the currently deployed manifest...");
 			} else {
 				bail(
-					"$issue\n\nRefusing to deploy to protect integrity of the environment."
+					"$issue\n\nRefusing to deploy to protect integrity of the environment.  ".
+					"Run this command in a terminal to be asked whether to proceed anyway."
 				);
 			}
 		}
@@ -4367,6 +4368,10 @@ sub _deploy_to_bosh {
 
 	my @bosh_opts = ('--tty');
 	push @bosh_opts, "--$_"             for grep { $opts{$_} } qw/fix fix-releases recreate dry-run/;
+	# A dry run changes nothing, so there is nothing for bosh to confirm.
+	# Without -n, bosh waits on its "Continue?" question, which never shows
+	# when stdout is a pipe.
+	push @bosh_opts, '-n'               if  $opts{'dry-run'};
 	push @bosh_opts, "--no-redact"      if  !$opts{redact};
 	push @bosh_opts, '--skip-drain'     if grep {$_ eq ''} @{$opts{'skip-drain'}};
 	push @bosh_opts, "--skip-drain=$_"  for grep {$_} @{$opts{'skip-drain'} || []};

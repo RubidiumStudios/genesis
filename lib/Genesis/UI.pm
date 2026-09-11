@@ -23,6 +23,36 @@ use Genesis::Term;
 use POSIX qw//;
 use List::Util qw//;
 
+my $stdin_eof = 0; # whether the last read in __prompt_for_line hit EOF
+
+# __bail_on_eof - stop when the last read hit EOF, since no answer is coming
+sub __bail_on_eof {
+	my ($prompt) = @_;
+	return unless $stdin_eof;
+	bail(
+		"Cannot read an answer%s: standard input is exhausted and no terminal is ".
+		"attached.  Run this command in a terminal, or use #y{--yes} where the ".
+		"command supports it.",
+		defined($prompt) && length($prompt) ? " to \"$prompt\"" : ''
+	);
+}
+
+# __prompt_print - write prompt text where the person answering can see it
+sub __prompt_print {
+	my ($text) = @_;
+	print STDERR $text;
+	# A prompt has to reach the person at the terminal.  When STDIN is a
+	# terminal but STDERR is not (stderr sent through a pipe or to a file),
+	# the question would be swallowed and the read would wait on an answer to
+	# something nobody saw, so write it to the controlling terminal as well.
+	return unless -t STDIN && !-t STDERR;
+	open(my $tty, '>', '/dev/tty') or return;
+	my $previous = select($tty); $| = 1; select($previous);
+	print $tty $text;
+	close($tty);
+	return;
+}
+
 sub __prompt_for_line {
 	my ($prompt,$validation,$err_msg,$default,$allow_blank,$hide_response) = @_;
 	$prompt = join(' ', grep {defined($_) && $_ ne ""} ($prompt, '>')) . " ";
@@ -106,7 +136,7 @@ sub __prompt_for_line {
 	}
 
 	while (1) {
-		print STDERR csprintf("%s", $prompt);
+		__prompt_print(csprintf("%s", $prompt));
 		# When asked to hide the response and we are actually attached to
 		# a controlling terminal, drop terminal echo around the read so the
 		# typed value is not displayed.  In non-TTY environments (tests,
@@ -120,15 +150,19 @@ sub __prompt_for_line {
 			# output is not glued to the prompt.
 			print STDERR "\n";
 		}
-		# Defensive: <STDIN> returns undef on EOF, and chomp on undef
-		# emits an uninit warning.  Coerce to empty string so the
-		# allow_blank short-circuit below can fire cleanly instead of
-		# spinning the loop on a closed pipe.
-		$in = '' unless defined $in;
+		# <STDIN> returns undef on EOF: nobody is going to answer.  A default
+		# or an allowed blank still resolves below; anything else stops here
+		# instead of spinning the loop on a closed pipe.
+		$stdin_eof = !defined($in);
+		$in = '' if $stdin_eof;
 		chomp $in;
 		if ($in eq "" && defined($default)) {
 			$in = $default;
-			print STDERR (csprintf("\033[1A%s#C{%s}\n",$prompt, $in));
+			__prompt_print(csprintf("\033[1A%s#C{%s}\n",$prompt, $in));
+		} elsif (!($in eq "" && $allow_blank)) {
+			# Callers that allow a blank answer decide for themselves what an
+			# empty answer means, and check __bail_on_eof when it means "ask again".
+			__bail_on_eof($prompt =~ s/\s*>\s*$//r);
 		}
 		$in =~ s/^\s+|\s+$//g;
 
@@ -175,14 +209,15 @@ sub prompt_for_boolean {
 		# Allow a single line boolean prompt
 		$prompt =~ s/\[y\|n\]/$val_prompt/;
 		$val_prompt = $prompt;
-		print STDERR "\n";
+		__prompt_print("\n");
 	} else {
-		print STDERR csprintf("%s","\n$prompt\n");
+		__prompt_print(csprintf("%s","\n$prompt\n"));
 	}
 	while (1) {
 		my $answer = __prompt_for_line($val_prompt,undef,undef,$default,'allow_blank');
 		return ($invert ? $f : $t) if $answer =~ $true_re;
 		return ($invert ? $t : $f) if $answer =~ $false_re;
+		__bail_on_eof($val_prompt) if $answer eq '';
 		error "#r{Invalid response:} you must specify y, yes, true, n, no or false";
 	}
 }
@@ -220,6 +255,7 @@ sub prompt_for_choices {
 		}
 		if ($v eq "") {
 			if (scalar(@ll) < $min) {
+				__bail_on_eof();
 				error "#r{ERROR:} Insufficient items provided - at least $min required.";
 				next;
 			}
@@ -331,6 +367,7 @@ sub prompt_for_list {
 		}
 		if ($v eq "") {
 			if (scalar(@ll) < $min) {
+				__bail_on_eof();
 				error "#r{ERROR:} Insufficient items provided - at least $min required.";
 				next;
 			}
