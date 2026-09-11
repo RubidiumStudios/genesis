@@ -3,9 +3,11 @@ use strict;
 use warnings;
 
 # The network claims lock around the deploy path's cloud config check: a dry
-# run reads the claims without taking the lock, a real deploy takes it, a
-# stale lock is cleared only with --yes or a confirmed answer at a terminal,
-# and the release helper clears only a lock this process holds.
+# run reads the claims without taking the lock, and warns rather than stops
+# when someone else holds it; a real deploy takes the lock and stops when
+# someone else holds it; a stale lock is cleared only with --yes or a
+# confirmed answer at a terminal; and the release helper clears only a lock
+# this process holds.
 
 use lib 'lib';
 use lib 't';
@@ -70,10 +72,21 @@ subtest 'dry run with a stale lock leaves it in place' => sub {
 	unlike($text, qr/\[y\|n\]/, 'nothing is asked');
 };
 
-subtest 'dry run with a live lock stops, like a real deploy' => sub {
+subtest 'dry run with a live lock warns and carries on' => sub {
+	plan tests => 5;
+	$status = 'locked';
+	my ($result, $text) = lock_for(make_env(), dryrun => 1, yes => 0);
+	is($result, 0, 'reports that no lock is held');
+	is_deeply(\@calls, ['check'], 'the live lock is neither cleared nor replaced');
+	like($text, qr/Another deploy holds the network claims lock/, 'says another deploy holds the lock');
+	like($text, qr/can change those claims while this dry run is reading them/, 'says the claims may change under the dry run');
+	unlike($text, qr/cannot proceed with deployment/, 'the dry run is not stopped');
+};
+
+subtest 'real deploy with a live lock stops' => sub {
 	plan tests => 2;
 	$status = 'locked';
-	throws_ok { lock_for(make_env(), dryrun => 1, yes => 1) } qr/currently locked/, 'a live lock stops the dry run';
+	throws_ok { lock_for(make_env(), dryrun => 0, yes => 1) } qr/currently locked/, 'a live lock stops a real deploy';
 	is_deeply(\@calls, ['check'], 'nothing else is done to the lock');
 };
 

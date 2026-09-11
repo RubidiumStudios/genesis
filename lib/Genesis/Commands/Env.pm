@@ -1842,9 +1842,20 @@ sub _deploy_network_claims_lock {
 		info "#G{available}";
 	} elsif ($current_lock->{status} eq 'locked') {
 		info "#r{locked} %s", $current_lock->{description};
-		bail(
-			"Network claims are currently locked -- cannot proceed with deployment!"
-		);
+		if ($opts{dryrun}) {
+			warning(
+				"Another deploy holds the network claims lock: %s\n\nA dry run only ".
+				"reads the network claims, so it carries on, but the deploy that holds ".
+				"the lock can change those claims while this dry run is reading them.  ".
+				"Any addresses this dry run reports may therefore differ from the ones ".
+				"a real deploy would claim once the lock is free.",
+				$current_lock->{description}
+			);
+		} else {
+			bail(
+				"Network claims are currently locked -- cannot proceed with deployment!"
+			);
+		}
 	} elsif ($current_lock->{status} eq 'stale') {
 		info "#y{locked (stale)} %s", $current_lock->{description};
 		if ($opts{dryrun}) {
