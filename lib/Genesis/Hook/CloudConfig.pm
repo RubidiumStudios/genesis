@@ -484,6 +484,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 	# FIXME: Really should know used and free ips, so we can properly balance
 	#        allocations across subnets, but this is a good start.
 	my %vms_per_subnet = ();
+	my $allocation_source; # how the per-subnet count was derived, for diagnostics
 	if (defined $allocation->{total_size}) {
 		my $vm_count = $allocation->{total_size};
 		my $total_subnets = scalar(@ocfp_subnet_names);
@@ -493,16 +494,24 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			$vms_per_subnet{$subnet_name} = $per_subnet_count;
 			$vms_per_subnet{$subnet_name}++ if $remaining-- > 0;
 		}
+		$allocation_source = sprintf(
+			"allocation.total_size of %d spread across %d subnets",
+			$vm_count, $total_subnets
+		);
 	} elsif (defined $allocation->{vms_per_subnet}) {
 		for my $subnet_name (@ocfp_subnet_names) {
 			$vms_per_subnet{$subnet_name} = $allocation->{vms_per_subnet}{$subnet_name} // 0;
 		}
+		$allocation_source = "allocation.vms_per_subnet";
 	} else {
 		my $vm_count = $allocation->{size} // 0;
 		$vm_count = 2**(32 - $1) if $vm_count =~ m#^/(\d+)$#;
 		for my $subnet_name (@ocfp_subnet_names) {
 			$vms_per_subnet{$subnet_name} = $vm_count;
 		}
+		$allocation_source = defined($allocation->{size})
+			? sprintf("allocation.size of %s", $allocation->{size})
+			: "no allocation given";
 	}
 	my $statics = $allocation->{statics} // 0; # Does not include the reserved ips based on network name (ie bosh_ip, vault_a, vault_b, etc)
 	$statics = 2**(32 - $1) if $statics =~ m#^/(\d+)$#;
@@ -517,6 +526,8 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		my $vm_count = $vms_per_subnet{$subnet_name} // 0;
 		my $full_range = IPv4->new($subnet->{cidr_block});
 		my ($available, $reserved) = $self->_get_subnet_ranges($subnet);
+		my $preset_reserved_size = $reserved->size;
+		my $unclaimed_size = $available->size;
 
 		# Remove existing allocations from available range that are not for the
 		# target network
@@ -525,6 +536,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name};
 			$available -= $alloc if ($alloc);
 		}
+		my $other_claims_size = $unclaimed_size - $available->size;
 
 		# Find any existing allocations, but ignore those explicitly reserved
 		my $existing = IPv4->new();
@@ -592,12 +604,44 @@ sub _build_ocfp_network_model_dynamic_subnets {
 
 		if ($full_range->size > $reserved->size) {
 			push @{$config->{subnets}}, $subnet_config;
-		} else {
+		} elsif ($allocated_range->size || $static_range->size) {
+			# Every address in the subnet is still reserved even though this
+			# network was handed addresses, so those addresses cannot lie inside
+			# the subnet's range.  They came from an exodus claim recorded for
+			# this network or from the target's reserved-ips records.
+			my $outside = IPv4->new($allocated_range)->add($static_range)->simplify;
 			warning(
-				"Dropping subnet %s from network %s: no reserved IP allocation ".
-				"found for target '%s' (checked reserved-ips keys %s_a/_b/../_ip".
-				", and any registered alias targets)",
-				$subnet_name, $network_id, $target, $target
+				"Dropping subnet #C{%s} from network #C{%s}: the %d address%s ".
+				"allocated to it (%s) fall outside the subnet range %s, so the ".
+				"subnet would have no usable addresses.  Check the reserved-ips ".
+				"records for target '%s' in subnet %s and the network claims ".
+				"recorded in the director's exodus data for network %s.",
+				$subnet_name, $network_id, $outside->size,
+				($outside->size == 1 ? '' : 'es'), $outside->range,
+				$subnet->{cidr_block}, $target, $subnet_name, $network_id
+			);
+		} else {
+			# Nothing was allocated to this network in this subnet and no
+			# reserved-ips records for the target land inside it, so every
+			# address would be reserved.
+			warning(
+				"Dropping subnet #C{%s} from network #C{%s}: it would have no ".
+				"usable addresses.  The subnet range %s holds %d addresses, with ".
+				"%d reserved by the subnet definition and %d claimed by other ".
+				"networks, leaving %d available, but the allocation for this ".
+				"network (%s) requests %d address%s in this subnet and no ".
+				"reserved-ips records for target '%s' (keys %s_a/%s_b or %s_ip, ".
+				"or those of an alias target) fall inside it.  To keep the ".
+				"subnet, give network %s a non-zero allocation under ".
+				"#C{%s.networks.%s.allocation} (size, total_size, or ".
+				"vms_per_subnet), or add reserved-ips records for '%s' to ".
+				"subnet %s.",
+				$subnet_name, $network_id, $subnet->{cidr_block},
+				$full_range->size, $preset_reserved_size, $other_claims_size,
+				$available->size, $allocation_source, $vm_count,
+				($vm_count == 1 ? '' : 'es'), $target, $target, $target,
+				$target, $network_id, $self->overrides_base, $target, $target,
+				$subnet_name
 			);
 		}
 	}
