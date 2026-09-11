@@ -43,6 +43,17 @@ my $BOTH_RESOLVED = <<'EOT';
 EOT
 chomp $BOTH_RESOLVED;
 
+# The same resolution on a Mac, where safe comes from Homebrew and execs
+# /opt/homebrew/bin/vault.  Kept as its own table rather than folded into the
+# linuxbrew one, because this is the command line a kit spec suite on this
+# platform actually produces, and it is the one that was reported failing.
+my $HOMEBREW = <<'EOT';
+  PID  PPID COMMAND
+ 9241  9240 /opt/homebrew/bin/safe local -m --as local_vault_test_9240 --port 8299
+ 9242  9241 /opt/homebrew/bin/vault server -config=/tmp/vault-9241.hcl
+EOT
+chomp $HOMEBREW;
+
 my $BARE = <<'EOT';
   PID  PPID COMMAND
  5241  5240 safe local -m --as local_vault_test_5240 --port 8299
@@ -131,6 +142,19 @@ subtest 'finds a bare bao server off PATH' => sub {
 	with_fake_ps($BAO_BARE, sub {
 		my $vault = Service::Vault::Local::_get_vault_process(8241, 0.2);
 		is(($vault||{})->{pid}, 8242, 'a bare `bao server` matches too');
+	});
+};
+
+subtest 'finds the vault child Homebrew\'s safe execs on a Mac' => sub {
+	plan tests => 3;
+
+	with_fake_ps($HOMEBREW, sub {
+		my $safe = Service::Vault::Local::_get_safe_process('local_vault_test_9240', 0.2);
+		is(($safe||{})->{pid}, 9241, 'a Homebrew `safe local` matches');
+
+		my $vault = Service::Vault::Local::_get_vault_process(9241, 0.2);
+		ok($vault, 'the Homebrew vault child is found by its absolute path') or return;
+		is($vault->{pid}, 9242, 'and is read out of the process table by pid');
 	});
 };
 
