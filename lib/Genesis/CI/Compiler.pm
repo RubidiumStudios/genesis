@@ -204,19 +204,28 @@ sub validate_config_section {
 	if (my $provider_data = $data->{provider}) {
 		bail("'pipeline.provider' must be a hash")
 			unless ref($provider_data) eq 'HASH';
-		# The 'manual' provider has no compiler class — skip validation.
-		return if ($provider_data->{type} || '') eq 'manual';
 
 		my $type = $provider_data->{type};
 		bail("'pipeline.provider.type' is required") unless $type;
 
-		# Load provider class to get its schema
-		my $provider_info = eval { $class->_resolve_provider_class($type) };
-		if ($@) {
-			bail("'pipeline.provider.type' is '%s', which is not a known CI provider type.  ".
-				"Valid types: %s", $type,
-				join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers()));
-		}
+		# Ask the registry itself rather than catching the resolver's bail.
+		# Catching it reported a type the registry holds as one it does not,
+		# and then listed that same type among the valid ones.
+		require Genesis::CI::Compiler::PipelineProvider;
+		my $provider_info =
+			Genesis::CI::Compiler::PipelineProvider->provider_info($type);
+		bail(
+			"'pipeline.provider.type' is '%s', which is not a known CI provider ".
+			"type.  Valid types: %s", $type,
+			join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers())
+		) unless $provider_info;
+
+		# A type with no compiler class has no provider schema to validate
+		# against, which is true of manual and, until its compiler lands, of
+		# github-actions.  Both are configurations Genesis accepts, so the
+		# refusal for compiling one belongs at the compile itself, which is
+		# _resolve_provider_class below.
+		return unless $provider_info->{class};
 
 		eval { require $provider_info->{file} };  ## no critic
 		if ($@) {
@@ -314,7 +323,8 @@ sub _resolve_provider_class {
 	) unless $info;
 
 	bail(
-		"The '%s' provider has no pipeline to compile.", $type
+		"Genesis knows the '%s' provider but has no compiler for it yet, so ".
+		"there is no pipeline to compile until that provider lands.", $type
 	) unless $info->{class};
 
 	return $info;

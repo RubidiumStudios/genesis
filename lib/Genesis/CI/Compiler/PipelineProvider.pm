@@ -376,7 +376,7 @@ sub all_cli_opts_help {
 	return <<EOF;
 CI PROVIDER OPTIONS
 
-  --ci-provider <type>  (optional, defaults to "concourse")
+  --ci-provider <type>  (optional, defaults to "manual")
       The CI provider to use for pipeline generation and deployment.
       Available types: ${\ join(', ', known_providers()) }
 

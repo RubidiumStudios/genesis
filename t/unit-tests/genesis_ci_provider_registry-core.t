@@ -19,6 +19,7 @@ provide_rc();
 use_ok 'Genesis::Top';
 use_ok 'Genesis::CI::Compiler::PipelineProvider';
 use_ok 'Genesis::CI::Provider';
+use_ok 'Genesis::CI::Compiler';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -63,7 +64,7 @@ subtest 'the two spellings cannot drift' => sub {
 };
 
 subtest 'one resolver answers for every caller' => sub {
-	plan tests => 3;
+	plan tests => 5;
 
 	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
 	is $info->{class}, 'Genesis::CI::Concourse',
@@ -74,6 +75,18 @@ subtest 'one resolver answers for every caller' => sub {
 	is Genesis::CI::Provider->provider_class('manual'),
 		'Genesis::CI::Provider::Manual',
 		'manual resolves to its CLI class and has no compiler class';
+
+	# The compiler's class resolution has two refusals rather than one, so a
+	# type the registry holds is never reported as one it does not.
+	throws_ok {
+		Genesis::CI::Compiler->_resolve_provider_class('github-actions')
+	} qr/knows\s+the\s+'github-actions'\s+provider\s+but\s+has\s+no\s+compiler/s,
+		'a known type with no compiler class is told it has no compiler';
+
+	throws_ok {
+		Genesis::CI::Compiler->_resolve_provider_class('jenkins')
+	} qr/Valid\s+types:\s+concourse,\s+github-actions,\s+manual/s,
+		'a type the registry does not hold gets the valid-types list';
 };
 
 subtest 'the provider type defaults to manual' => sub {
