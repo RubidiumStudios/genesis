@@ -228,4 +228,67 @@ subtest 'an arrayref renders as a YAML list at either depth' => sub {
 	is($merged->{genesis}{pipeline}{auto}, 1, 'with the genesis key above them');
 };
 
+# Proves the setup half of T118: a delivery can be left carrying a path that
+# has since fallen out of the tracked set.
+subtest 'a delivery whose tracked set has since shrunk' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], root => 'bosh');
+	my $source = stale_set_delivery($h);
+
+	ok($source, 'the control commit whose delivery must remove a path');
+	my $delivered = files_at($h, $h->slug('qa'));
+	ok(exists $delivered->{'bosh/ops/extra.yml'},
+		'the branch still holds the path that fell out of the set');
+	my @now = propagation_set($h, 'qa', at => $source);
+	ok(!(grep {$_ eq 'bosh/ops/extra.yml'} @now),
+		'and the set at the new control commit no longer names it');
+};
+
+# The tracked list is what narrows the set, so the reader has to answer for a
+# path the environment file names and for one under the same kind that it
+# leaves out.
+subtest 'a declared tracked list decides which ops paths are in' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	write_env_file($h, 'qa',
+		genesis => {track_additional_files => ['ops/named.yml']});
+	my $control = commit_on_control($h,
+		files   => {
+			'ops/named.yml' => "---\nnamed: true\n",
+			'ops/other.yml' => "---\nother: true\n",
+		},
+		message => 'Add two ops files',
+		push    => 1,
+	);
+
+	my @set = propagation_set($h, 'qa', at => $control);
+	ok(scalar(grep {$_ eq 'ops/named.yml'} @set),
+		'the path the list names is in the set');
+	is_deeply([grep {$_ eq 'ops/other.yml'} @set], [],
+		'and the one under the same kind that it leaves out is not');
+};
+
+# Proves the setup half of T204 and T205: a file can be put in copy A's index
+# or edited in its working tree with its path handed back.
+subtest 'a staged path and an edited path each hand their path back' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+
+	my $staged = stage_unrelated($h, 'notes.txt');
+	is($staged, 'notes.txt', 'the staged path is handed back');
+	my ($index) = run({dir => $h->a}, 'git', 'diff', '--cached', '--name-only');
+	chomp $index;
+	like($index, qr/\bnotes\.txt\b/, 'and it is in the index');
+
+	my $edited = modify_unrelated($h, 'qa.yml');
+	is($edited, 'qa.yml', 'the edited path is handed back');
+	my ($tree) = run({dir => $h->a}, 'git', 'diff', '--name-only');
+	chomp $tree;
+	like($tree, qr/\bqa\.yml\b/, 'and it is modified and not staged');
+};
+
+
 done_testing;

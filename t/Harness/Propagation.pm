@@ -9,7 +9,7 @@ use Exporter qw/import/;
 use Cwd ();
 use JSON::PP;
 use POSIX ();
-use Genesis qw/run/;
+use Genesis qw/run load_yaml_file/;
 use Service::Git;
 
 # require rather than use, because helper's import resets HOME and the test
@@ -86,6 +86,10 @@ push @EXPORT, qw/
 	held_harness held_prod tracked_harness two_env_harness inherited_harness
 	ready with_open_pr two_roots a_delivery seeded two_due three_due three
 	chain gated proposed automated top_for
+/;
+
+push @EXPORT, qw/
+	stale_set_delivery stage_unrelated modify_unrelated
 /;
 
 # ref_in - one ref's sha in a repository at a path, or undef {{{
@@ -968,9 +972,18 @@ sub propagation_set {
 		qr{^\Q$prefix\E\Q$env\E(?:[.-].*)?\.yml$},   # the env file hierarchy
 		qr{^\Q$prefix\E\.genesis/config$},           # non-triggering
 		qr{^\Q$prefix\E\.genesis/bin/genesis$},      # the embedded genesis
-		qr{^\Q$prefix\E(?:bin|ops|dev)/},            # reactions, ops, kit source
 		qr{^\Q$prefix\Ekit-overrides\.yml$},
 	);
+	# The reactions, the ops files, and the kit source are one kind, and the
+	# environment file's own tracked list narrows that kind wherever the file
+	# at $at declares one, so a delivery made under a wider list leaves behind
+	# paths the next delivery has to remove.  Where the file declares no list
+	# at all the kind stands unnarrowed, which is every environment the suite
+	# writes without saying otherwise.
+	my $tracked = $self->_tracked_files($at, "$prefix$env.yml");
+	push @kinds, defined $tracked
+		? (map {qr{^\Q$prefix$_\E$}} @$tracked)
+		: qr{^\Q$prefix\E(?:bin|ops|dev)/};
 	# track_additional_files joins the set git-root-relative, in one form, so
 	# the walk and the writer name a tracked path the same way.
 	push @kinds, map {qr{^\Q$_\E$}}
@@ -978,6 +991,38 @@ sub propagation_set {
 
 	my @set = grep {my $p = $_; grep {$p =~ $_} @kinds} @all;
 	return sort @set;
+}
+
+# }}}
+# _tracked_files - the tracked list an environment file declares at a commit {{{
+#
+# D69 reads the set from the tree at the commit being delivered, so the list
+# that narrows it is read there too and never from the working tree.  The
+# answer is the list's deployment-root-relative paths where the file declares
+# one, and undef where it declares none, which is how propagation_set tells a
+# narrowed kind from an untouched one.
+#
+# The parse is cached on the file's own text, because spruce is a process per
+# call and every delivery reads the set.
+my %TRACKED;
+sub _tracked_files {
+	my ($self, $at, $path) = @_;
+
+	my ($body, $rc) = run({dir => $self->_repo_holding($at), stderr => 0},
+		'git', 'show', "$at:$path");
+	return undef unless defined $rc && $rc == 0 && defined $body;
+	return $TRACKED{$body} if exists $TRACKED{$body};
+
+	my $tmp = "$self->{base}/env-" . int(rand(1_000_000)) . '.yml';
+	helper::put_file($tmp, $body);
+	my ($yaml, $failed) = load_yaml_file($tmp);
+	unlink $tmp;
+
+	my $declared = $failed ? undef
+	             : ((($yaml || {})->{genesis} || {})->{track_additional_files});
+	return $TRACKED{$body} = ref $declared eq 'ARRAY' ? $declared
+	                       : defined $declared        ? [$declared]
+	                       :                            undef;
 }
 
 # }}}
@@ -1538,6 +1583,7 @@ sub _yaml_pair {
 	my $pad = '  ' x $depth;
 	return sprintf("%s%s: %s\n", $pad, $key, $value)
 		unless ref $value eq 'ARRAY';
+	return sprintf("%s%s: []\n", $pad, $key) unless @$value;
 	return sprintf("%s%s:\n", $pad, $key)
 		. join('', map {sprintf("%s  - %s\n", $pad, $_)} @$value);
 }
@@ -2943,6 +2989,85 @@ sub two_roots {
 	$h->ready_envs(%opts, envs => \@envs);
 	$h->ready_envs(%opts, envs => \@envs, type => $second, root => $second);
 	return $h;
+}
+
+# }}}
+# The three one-off shapes the writer and the command classes need {{{
+#
+# stale_set_delivery stands up the one shape the writer's removing half needs,
+# which is a branch delivered under a tracked set that control has since
+# narrowed.  It is built in two control commits, because the whole point of
+# the shape is that the branch was delivered under the wider set and control
+# now declares the narrower one.  It is not a_delivery, which is one plain
+# delivery at control's tip, so it takes a name of its own.
+sub stale_set_delivery {
+	my ($self, %opts) = @_;
+	my $env  = $opts{env}  // 'qa';
+	my $root = $opts{root} // $self->{root};
+	my $file = $opts{file} // 'ops/extra.yml';
+	my $path = $opts{path} // join('/', grep {length} $root, $file);
+
+	$self->fixture_vault;
+	$self->init_branch($env, %opts);
+
+	# The wider set: the extra file is tracked, and the delivery carries it.
+	# The environment file is staged rather than committed on its own, so the
+	# tracked list and the file it names arrive in the same control commit.
+	$self->_stage_env_file($env, %opts, root => $root,
+		genesis => {track_additional_files => [$file]});
+	my $wide = $self->commit_on_control(
+		files   => {$path => "---\nextra: true\n"},
+		message => 'Track an extra file',
+		push    => 1,
+	);
+	$self->deliver($env, %opts, control => $wide);
+
+	# The narrower set: the extra file is dropped from the tracked list and
+	# stays on the branch until a delivery removes it.
+	$self->_stage_env_file($env, %opts, root => $root,
+		genesis => {track_additional_files => []});
+	my $narrow = $self->commit_on_control(
+		files   => {},
+		message => 'Stop tracking the extra file',
+		push    => 1,
+	);
+	$self->refresh('a');
+
+	return $narrow;
+}
+
+# _stage_env_file writes the environment file without committing it and puts
+# it in copy A's index, so the commit that follows carries it.  write_env_file
+# either commits the file alone or leaves it unstaged, and neither of those
+# lets a tracked list ride into the control commit that acts on it.
+sub _stage_env_file {
+	my ($self, $env, %opts) = @_;
+	my $path = $self->write_env_file($env, %opts, commit => 0);
+	run({dir => $self->{a}, onfailure => "Failed to stage $path"},
+		'git', 'add', '--', $path);
+	return $path;
+}
+
+# T204 refuses on a staged index and T205 ignores an unstaged edit, and both
+# refusals name the file, so each helper hands its path back rather than
+# leaving the row to repeat the literal.
+sub stage_unrelated {
+	my ($self, $path, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	helper::put_file("$self->{$copy}/$path",
+		$opts{content} // "a change nobody asked about\n");
+	run({dir => $self->{$copy}, onfailure => "Failed to stage $path"},
+		'git', 'add', '--', $path);
+	return $path;
+}
+
+sub modify_unrelated {
+	my ($self, $path, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	my $was  = slurp("$self->{$copy}/$path") // '';
+	helper::put_file("$self->{$copy}/$path",
+		$was . ($opts{content} // "# edited in the working tree\n"));
+	return $path;
 }
 
 # }}}
