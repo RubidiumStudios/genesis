@@ -73,6 +73,15 @@ push @EXPORT, qw/
 	shuttle_spy shuttle_requests fixture_kit skip_on
 /;
 
+# The scenarios and the one-line shapes.  staged, held_prod, and
+# with_open_pr land beside them once their callers have fixed their shapes.
+push @EXPORT, qw/
+	ready_envs ready_harness seeded_harness due_harness gated_harness
+	held_harness tracked_harness two_env_harness inherited_harness
+	ready two_roots a_delivery seeded two_due three_due three chain
+	gated proposed automated top_for
+/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -2540,6 +2549,285 @@ fi
 exec $real "\$@"
 EOS
 	return $dir;
+}
+
+# }}}
+
+# ready_envs - the five things every walking row needs first {{{
+#
+# The init branch on R per environment, the applied record, each
+# environment's pipeline record, the delivery, and the certified commit.
+# The delivered and certified lists say which environments get which, each
+# defaulting to every environment, so a row can stand an unseeded or an
+# uncertified environment up without building the tree by hand.  Without it
+# eleven test files repeat eight setup lines per subtest, and the helper
+# rule forbids wrapping those beside a test.
+sub ready_envs {
+	my ($self, %opts) = @_;
+	my @envs    = @{$opts{envs} // $self->{envs}};
+	my $control = $opts{control} // $self->git('a')->sha($self->{control});
+	my %delivered = map {($_ => 1)} @{$opts{delivered} // \@envs};
+	my %certified = map {($_ => 1)} @{$opts{certified} // \@envs};
+
+	$self->fixture_vault;
+	$self->fixture_applied(control => $control,
+		provider => $opts{provider} // $self->{provider}, %opts)
+		unless defined $opts{applied} && !$opts{applied};
+
+	for my $env (@envs) {
+		$self->init_branch($env, %opts);
+		$self->fixture_pipeline_record($env, %opts,
+			dependencies => $opts{dependencies}{$env} // []);
+		$self->deliver($env, %opts, control => $control) if $delivered{$env};
+		$self->certify($env, %opts, control_commit => $control)
+			if $certified{$env};
+	}
+	$self->refresh('a', $self->{control}, map {$self->slug($_, %opts)} @envs);
+
+	return $self;
+}
+
+# }}}
+# deliver_all - one delivery per environment at control's tip {{{
+#
+# A method rather than an exported name, because a row asks a scenario for
+# its shape and only the harness's own composition wants the whole set
+# delivered in one line.
+sub deliver_all {
+	my ($self, %opts) = @_;
+	my $control = $opts{control} // $self->git('a')->sha($self->{control});
+	$self->deliver($_, %opts, control => $control)
+		for @{$opts{envs} // $self->{envs}};
+	return $self;
+}
+
+# }}}
+# The named shapes {{{
+#
+# Each is make_harness, then ready_envs, then the one thing its name says.
+# Every one passes its options through, so a row that wants PR mode, a
+# second type, or a third environment asks for it in the call.
+sub ready_harness {
+	my (%opts) = @_;
+	my $h = make_harness(%opts, envs => $opts{envs} // ['lab', 'qa']);
+	return $h->ready_envs(%opts);
+}
+
+# seeded_harness is the same shape over one environment, and its applied
+# option turned off leaves the applied record out, which is the shape a row
+# proving the membership test of D43 and D103 needs, since the undef stands
+# in for a roster.
+sub seeded_harness {
+	my (%opts) = @_;
+	return ready_harness(%opts, envs => $opts{envs} // ['qa']);
+}
+
+# due_harness answers the harness and its control commits in list context,
+# because the rows that name a commit index into them, and the harness alone
+# in scalar context, because the rows that only want the shape say so.
+sub due_harness {
+	my (%opts) = @_;
+	my $h = ready_harness(%opts, envs => $opts{envs} // ['qa']);
+	my @due = map {
+		$h->commit_on_control(
+			files   => {"due-$_.yml" => "---\nn: $_\n"},
+			message => "A change due to propagate, $_",
+			push    => 1,
+		)
+	} 1 .. ($opts{count} // 2);
+	$h->refresh('a');
+	return wantarray ? ($h, @due) : $h;
+}
+
+# gated_harness lays four control commits, of which the third carries the
+# Genesis-Stage trailer, and answers in the same two shapes due_harness does.
+sub gated_harness {
+	my (%opts) = @_;
+	my $h = ready_harness(%opts, envs => $opts{envs} // ['qa']);
+	my @shas;
+	for my $n (1 .. 4) {
+		push @shas, $h->commit_on_control(
+			files    => {"change-$n.yml" => "---\nn: $n\n"},
+			message  => "A change on control, $n",
+			($n == 3 ? (trailers => {'Genesis-Stage' => $opts{stage} // 'prod'}) : ()),
+			push     => 1,
+		);
+	}
+	$h->refresh('a');
+	return wantarray ? ($h, @shas) : $h;
+}
+
+sub held_harness {
+	my (%opts) = @_;
+	my $h = ready_harness(%opts, envs => $opts{envs} // ['lab', 'prod']);
+	$h->fixture_hold($opts{env} // 'prod', reason => $opts{reason} // 'on-hold');
+	return $h;
+}
+
+# tracked_harness names its prerequisites positionally, because every call
+# reads as a list of environment names and an options hash around two of
+# them would say nothing the list does not.
+sub tracked_harness {
+	my (@prereqs) = @_;
+	@prereqs = ('lab') unless @prereqs;
+	my $h = make_harness(envs => [@prereqs, 'qa']);
+	$h->write_env_file('qa', genesis => {
+		track_dependencies => [map {$h->slug($_)} @prereqs]});
+	return $h->ready_envs;
+}
+
+sub two_env_harness {
+	my (%opts) = @_;
+	return ready_harness(%opts, envs => $opts{envs} // ['lab', 'qa']);
+}
+
+# inherited_harness writes its pipeline keys at a site file rather than at
+# the leaf, which is the merged read D79 asks for, and leaf_keys puts a
+# second set at the leaf so a row can watch the two meet.
+sub inherited_harness {
+	my (%opts) = @_;
+	my $h = make_harness(%opts, envs => $opts{envs} // ['qa']);
+	my $site = $opts{site} // 'site';
+	$h->write_env_file($site, site => $site,
+		pipeline => $opts{pipeline_keys} // {manual_gate => 1});
+	$h->write_env_file($_, pipeline => $opts{leaf_keys})
+		for $opts{leaf_keys} ? @{$opts{envs} // ['qa']} : ();
+	return $h->ready_envs(%opts);
+}
+
+# ready is the PR-mode shape.  admin off is a site whose token the
+# protection endpoints refuse, which is how a row means "could not grant the
+# merge method", and due lays one control commit the branch has yet to
+# receive.
+sub ready {
+	my (%opts) = @_;
+	my $h = make_harness(%opts, envs => $opts{envs} // ['prod'],
+		mode => 'pr', github => 1);
+	$h->ready_envs(%opts);
+	gh_protection($h->{gh}, admin => (defined $opts{admin} ? $opts{admin} : 1));
+
+	$h->commit_on_control(
+		files   => $opts{due},
+		message => $opts{message} // 'A change due to propagate',
+		push    => 1,
+	) if $opts{due};
+	$h->refresh('a');
+
+	return $h;
+}
+
+# two_roots is the lab and prod pair across a second deployment root.
+sub two_roots {
+	my (%opts) = @_;
+	my @envs = @{$opts{envs} // ['lab', 'prod']};
+	my $h = make_harness(%opts, envs => \@envs);
+	add_deployment_root($h, type => $opts{second} // 'vault', envs => \@envs);
+	$h->ready_envs(%opts, envs => \@envs);
+	$h->ready_envs(%opts, envs => \@envs, type => $opts{second} // 'vault');
+	return $h;
+}
+
+# }}}
+# The one-line shapes a row stands on top of a scenario {{{
+sub a_delivery {
+	my ($h, $env, %opts) = @_;
+	return $h->deliver($env, %opts,
+		control => $opts{control} // $h->git('a')->sha($h->{control}));
+}
+
+sub seeded {
+	my (%opts) = @_;
+	my $h = make_harness(envs => $opts{envs} // ['qa'], vault => 0, %opts);
+	$h->init_branch($_, %opts) for @{$opts{envs} // ['qa']};
+	my $control = $h->commit_on_control(
+		files   => $opts{files} // {'qa.yml' => "---\nkit: dev\n"},
+		message => $opts{message} // 'change qa',
+		push    => 1,
+	);
+	my $delivered = $h->deliver(($opts{envs} // ['qa'])->[0], %opts,
+		control => $control);
+	return ($h, $control, $delivered);
+}
+
+sub two_due   {return _due(shift, 2, @_)}
+sub three_due {return _due(shift, 3, @_)}
+
+# three is three_due under the name the rows that want a run of three use,
+# and it is the same sub rather than a second body saying the same thing.
+*three = \&three_due;
+
+sub chain {
+	my ($h, %opts) = @_;
+	my @envs = @{$opts{envs} // $h->{envs}};
+	return map {
+		$h->commit_on_control(
+			files   => {"$_.yml" => "---\nkit: {name: dev}\n"},
+			message => "Tune $_",
+			push    => 1,
+		)
+	} @envs;
+}
+
+sub _due {
+	my ($h, $n, %opts) = @_;
+	return map {
+		$h->commit_on_control(
+			files   => {"due-$_.yml" => "---\nn: $_\n"},
+			message => "A change due to propagate, $_",
+			push    => 1,
+		)
+	} 1 .. $n;
+}
+
+sub gated {
+	my ($h, %opts) = @_;
+	return $h->commit_on_control(%opts,
+		trailers => {'Genesis-Stage' => $opts{stage} // 'prod'},
+		message  => $opts{message} // 'Gate the change',
+		push     => 1,
+	);
+}
+
+sub proposed {
+	my ($h, $env, %opts) = @_;
+	return $h->fixture_proposed($env, %opts);
+}
+
+sub automated {
+	my ($h, %opts) = @_;
+	$h->set_repo_config('pipeline.provider.type', $opts{provider} // 'concourse');
+	return $h;
+}
+
+# top_for's config option writes the whole .genesis/config on control before
+# the Top is built, so a row can ask for the shape with no provider key at
+# all rather than editing one key of the file make_harness left.
+sub top_for {
+	my ($h, %opts) = @_;
+	require Genesis::Top;
+	my $root = $opts{root} // $h->{root};
+	_write_whole_config($h, $opts{config}, root => $root) if $opts{config};
+	return Genesis::Top->new(join('/', grep {length} $h->a, $root));
+}
+
+# }}}
+# _write_whole_config - replace .genesis/config and commit it on control {{{
+sub _write_whole_config {
+	my ($h, $config, %opts) = @_;
+	my $root = $opts{root} // $h->{root};
+	my $path = ($root ? "$root/" : '') . '.genesis/config';
+
+	unlink "$h->{a}/$path";
+	require Genesis::Config;
+	my $written = Genesis::Config->new("$h->{a}/$path");
+	$written->set($_ => $config->{$_}) for sort keys %$config;
+	$written->save;
+
+	run({dir => $h->{a}}, 'git', 'add', '--', $path);
+	run({dir => $h->{a}, onfailure => "Failed to write $path"},
+		'git', 'commit', '-q', '-m', "write $path");
+
+	return $path;
 }
 
 # }}}

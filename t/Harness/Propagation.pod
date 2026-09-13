@@ -735,6 +735,146 @@ makes every call from the nth onward the armed one, and C<return>, which says
 what the skipped call answers.  C<fail_on> cannot make this shape, because a
 death is not a silence.
 
+=head2 ready_envs($h, %opts)
+
+The five things every walking row needs before it can run a command, which
+are the init branch on R per environment, the applied record, each
+environment's pipeline record, the delivery, and the certified commit.  Every
+named scenario below is this plus the one thing its own name says.  The
+options are C<envs>, C<control>, C<type>, C<provider>, C<dependencies> as a
+hashref of environment to its ancestors, C<delivered> and C<certified>, each
+an arrayref naming the environments that get one and each defaulting to every
+environment, and C<applied>, which turned off leaves the applied record out.
+Every scenario passes them through, so a row stands an unseeded or an
+uncertified environment up without building the tree by hand.
+
+=head2 ready_harness(%opts)
+
+  my $h = ready_harness(envs => ['lab', 'qa']);
+  my $n = ready_harness(delivered => [], certified => ['lab']);
+
+The scenario most walking rows start from, which is C<lab> and C<qa> walked,
+delivered, and certified.  It hands its options on to C<make_harness> and to
+C<ready_envs>, so a row that wants a third environment, a second deployment
+type, or a narrower delivery set asks for it in the call.
+
+=head2 seeded_harness(%opts)
+
+C<ready_harness> over one environment, which is C<qa> unless the call says
+otherwise.  Its C<applied> option turned off leaves the applied record out,
+whose absence is the membership test that stands in for a roster.
+
+=head2 due_harness(%opts)
+
+  my ($h, @due) = due_harness();
+  my $shape     = due_harness();
+
+The walked tree with two control commits the branches have not taken, or
+C<count> of them.  It answers the harness and those commits in list context,
+because the rows that name a commit index into them, and the harness alone in
+scalar context, because the rows that only want the shape say so.
+
+=head2 gated_harness(%opts)
+
+  my ($h, @shas) = gated_harness();
+
+The walked tree with four control commits, of which the third carries the
+C<Genesis-Stage> trailer that C<stage> names and C<prod> supplies by default.
+It answers in the same two shapes C<due_harness> does.
+
+=head2 held_harness(%opts)
+
+The C<lab> and C<prod> tree carrying a hold record, whose environment and
+reason the C<env> and C<reason> options name.
+
+=head2 tracked_harness(@prereqs)
+
+  my $h = tracked_harness(qw/lab ops/);
+
+A tree whose C<qa> environment tracks the prerequisites the call names.  They
+arrive positionally, because every call reads as a list of environment names
+and an options hash around two of them would say nothing the list does not.
+
+=head2 two_env_harness(%opts)
+
+The C<lab> and C<qa> pair, walked and delivered, under the name the rows that
+care about the pair rather than about the walk use.
+
+=head2 inherited_harness(%opts)
+
+Writes its pipeline keys at a site file rather than at the leaf, which is the
+merged read the hierarchy rows need.  C<site> names the file, C<pipeline_keys>
+are the keys that go on it, and C<leaf_keys> are the keys that go on each
+environment file beneath it.
+
+=head2 ready(%opts)
+
+The PR-mode shape, which is a harness in C<pr> mode with the GitHub double
+standing, the vault fixture, an init branch, one delivery, and the applied
+record.  C<admin> turned off is a site whose token the protection endpoints
+refuse, which is how a row means that it could not grant the merge method, and
+C<due> with C<message> lays one control commit the branch has yet to receive.
+
+=head2 two_roots(%opts)
+
+The C<lab> and C<prod> pair across two deployment roots, the second of the
+type C<second> names and C<vault> by default, with both roots readied.
+
+=head2 a_delivery($h, $env, %opts)
+
+One delivery onto an environment's branch at control's tip, and the delivered
+commit's sha.
+
+=head2 seeded(%opts)
+
+  my ($h, $control, $delivered) = seeded();
+
+Builds a harness with no vault fixture, cuts the branch, writes one control
+commit, delivers it, and answers all three, so a row that compares a delivery
+against its source has both shas without reading either back.
+
+=head2 two_due($h, %opts)
+
+Two undelivered control commits, in order, and their shas.
+
+=head2 three_due($h, %opts)
+
+Three undelivered control commits, in order, and their shas.
+
+=head2 three($h, %opts)
+
+The same sub as C<three_due>, under the name the rows that want a run of three
+use, so that neither name can drift from the other.
+
+=head2 chain($h, %opts)
+
+One control commit per environment, each touching the file the next
+environment's row reads, and their shas in the order the environments were
+named.
+
+=head2 gated($h, %opts)
+
+One control commit carrying the C<Genesis-Stage> trailer that C<stage> names,
+and its sha.  The files it writes come from the call, as they do for
+C<commit_on_control>.
+
+=head2 proposed($h, $env, %opts)
+
+The proposed record for an environment, written through C<fixture_proposed>,
+and its path.
+
+=head2 automated($h, %opts)
+
+Puts the repository under an automated provider, which is C<concourse> unless
+C<provider> names another, and answers the harness.
+
+=head2 top_for($h, %opts)
+
+A C<Genesis::Top> for the harness's deployment root, or for the root C<root>
+names.  Its C<config> option writes the whole C<.genesis/config> on control
+first, replacing what was there, so a row can build the shape with no provider
+key at all rather than editing one key of the file C<make_harness> left.
+
 =head1 METHODS
 
 C<r>, C<a>, and C<b> return the three paths.  C<git> returns a
@@ -742,6 +882,9 @@ C<Service::Git> handle for a copy.  C<type>, C<control>, and C<envs> return
 the declared values.  C<slug> and C<pr_branch> render the deployment slug and
 its pull request branch.  C<exodus_mount>, C<applied_path>, and C<env_path>
 render the vault addresses.  C<gh> returns the GitHub double once
-C<github_double> has stood one up, and undef before that.
+C<github_double> has stood one up, and undef before that.  C<deliver_all>
+writes one delivery per environment at control's tip and answers the
+harness, and it is a method rather than an exported name because only the
+harness's own composition wants the whole set delivered in one line.
 
 =cut
