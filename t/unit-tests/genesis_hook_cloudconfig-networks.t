@@ -1007,27 +1007,34 @@ subtest '_get_reserved_allocation - another target key containing the name is no
 		'ocfp_bosh still resolves its own key');
 };
 
-subtest '_get_reserved_allocation - malformed _ip_<suffix> keys are reported' => sub {
-	plan tests => 2;
-
-	# `bosh_ip_a` is neither spelling: the bracket-pair loop looks for
-	# `bosh_a` and never sees it, so such a key silently alters the
-	# allocation instead of being rejected.  Say so rather than absorb it.
+# Build a one-subnet config whose only reservations are the given keys, so a
+# subtest can say exactly what shape it is exercising.
+sub reserved_ip_config {
+	my (%reserved) = @_;
 	my $config = {%$embedded_name_ocfp_config};
 	$config->{vpc} = {%{$config->{vpc}}};
 	$config->{vpc}{subnets} = {
 		'ocfp-0' => {
 			az => 'az1', cidr_block => '10.8.0.0/24',
 			gateway => '10.8.0.1', dns => '10.8.0.2',
-			'reserved-ips' => {
-				'bosh_ip'   => '10.8.0.5',
-				'bosh_ip_a' => '10.8.0.4',
-				'bosh_ip_b' => '10.8.0.6',
-			},
+			'reserved-ips' => \%reserved,
 		},
 	};
+	return $config;
+}
 
-	my $env  = make_deploy_env(ocfp_config => $config);
+subtest '_get_reserved_allocation - unexplained _ip_<suffix> keys are reported' => sub {
+	plan tests => 2;
+
+	# `bosh_ip_a` is neither spelling: the bracket-pair loop looks for
+	# `bosh_a` and never sees it, so such a key silently alters the
+	# allocation instead of being rejected.  Say so rather than absorb it.
+	# These two are far from bosh_ip, so they describe nothing we recognise.
+	my $env  = make_deploy_env(ocfp_config => reserved_ip_config(
+		'bosh_ip'   => '10.8.0.5',
+		'bosh_ip_a' => '10.8.0.40',
+		'bosh_ip_b' => '10.8.0.60',
+	));
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
 	# Genesis::warning writes to STDERR directly rather than through warn.
@@ -1040,6 +1047,79 @@ subtest '_get_reserved_allocation - malformed _ip_<suffix> keys are reported' =>
 		'only the well-formed bosh_ip is claimed; the malformed bounds are ignored');
 	like($warn, qr/bosh_ip_a.*bosh_ip_b/s,
 		'and the malformed keys are named rather than silently changing the allocation');
+};
+
+subtest '_get_reserved_allocation - neighbour annotations are dropped quietly' => sub {
+	plan tests => 3;
+
+	# An OCFP carve written under scheme_version 2 records the address on
+	# either side of the reservation, so `_a` holds bosh_ip's predecessor and
+	# `_b` its successor.  Those addresses belong to whichever target sits
+	# beside bosh in the run, so ignoring them is correct, and every bloc in
+	# the fleet writes this shape.  Warning about it on every lookup teaches
+	# operators to ignore the warning.
+	my $env  = make_deploy_env(ocfp_config => reserved_ip_config(
+		'bosh_ip'   => '10.8.0.5',
+		'bosh_ip_a' => '10.8.0.4',
+		'bosh_ip_b' => '10.8.0.6',
+	));
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $alloc;
+	my $warn = stderr_from {
+		($alloc) = $hook->_get_reserved_allocation('bosh', $hook->subnets->{'ocfp-0'});
+	};
+
+	is($alloc->range, '10.8.0.5',
+		'the neighbours are still left out of the allocation');
+	unlike($warn, qr/bosh_ip_a/,
+		'the predecessor is not reported as malformed');
+	unlike($warn, qr/bosh_ip_b/,
+		'nor is the successor');
+};
+
+subtest '_get_reserved_allocation - a neighbour on the wrong side still warns' => sub {
+	plan tests => 2;
+
+	# `_a` is the address below and `_b` the address above.  A pair written
+	# the other way round is not the shape we recognise, so it goes back to
+	# being reported rather than quietly assumed to be deliberate.
+	my $env  = make_deploy_env(ocfp_config => reserved_ip_config(
+		'bosh_ip'   => '10.8.0.5',
+		'bosh_ip_a' => '10.8.0.6',
+		'bosh_ip_b' => '10.8.0.4',
+	));
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $alloc;
+	my $warn = stderr_from {
+		($alloc) = $hook->_get_reserved_allocation('bosh', $hook->subnets->{'ocfp-0'});
+	};
+
+	is($alloc->range, '10.8.0.5', 'the allocation is unchanged either way');
+	like($warn, qr/bosh_ip_a.*bosh_ip_b/s, 'and both keys are still named');
+};
+
+subtest '_get_reserved_allocation - an annotation without its anchor still warns' => sub {
+	plan tests => 2;
+
+	# With no `bosh_ip` to sit beside, `bosh_ip_a` describes nothing and the
+	# operator has no way to know it was dropped unless we say so.
+	my $env  = make_deploy_env(ocfp_config => reserved_ip_config(
+		'bosh_a'    => '10.8.0.3',
+		'bosh_b'    => '10.8.0.7',
+		'bosh_ip_a' => '10.8.0.4',
+	));
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $alloc;
+	my $warn = stderr_from {
+		($alloc) = $hook->_get_reserved_allocation('bosh', $hook->subnets->{'ocfp-0'});
+	};
+
+	is($alloc->range, '10.8.0.4-10.8.0.6',
+		'the bracket pair still gives the interior range');
+	like($warn, qr/bosh_ip_a/, 'and the orphaned annotation is named');
 };
 
 subtest '_get_reserved_allocation - openbao falls back to vault reserved-ips' => sub {

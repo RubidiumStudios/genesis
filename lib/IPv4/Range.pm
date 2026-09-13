@@ -82,7 +82,13 @@ sub compact($self) {
 	my @compacted = shift @spans;
 	for my $span (@spans) {
 		if ($span->start->int <= $compacted[-1]->end()->int()+1) {
-			$compacted[-1]= IPv4->span($compacted[-1]->start->address.'-'.$span->end->address);
+			# Take the further of the two ends.  A span that sits wholly inside
+			# the one before it ends earlier, and using its end unconditionally
+			# would shorten the range instead of leaving it alone.
+			my $end = $span->end->int > $compacted[-1]->end->int
+				? $span->end->address
+				: $compacted[-1]->end->address;
+			$compacted[-1]= IPv4->span($compacted[-1]->start->address.'-'.$end);
 		} else {
 			push @compacted, $span;
 		}

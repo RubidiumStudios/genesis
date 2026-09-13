@@ -1452,4 +1452,38 @@ subtest 'IPv4::Range' => sub {
   };
 };
 
+# A span that sits wholly inside the one before it must leave the range alone.
+# Genesis folds a reserved address into a static range with `+=`, and when that
+# address is already inside the range, compaction used to rewrite the enclosing
+# span to end at the contained one, quietly dropping every address after it.
+subtest 'compaction with contained spans' => sub {
+  plan tests => 8;
+
+  my $range = IPv4->new();
+  $range += '10.0.0.0-10.0.0.2';
+  my ($three) = $range->slice(3);
+
+  is("".($three + IPv4->address('10.0.0.1')), '10.0.0.0-10.0.0.2',
+    'adding an address inside the range leaves it unchanged');
+  is("".($three + IPv4->address('10.0.0.0')), '10.0.0.0-10.0.0.2',
+    'adding the first address of the range leaves it unchanged');
+  is("".($three + IPv4->address('10.0.0.2')), '10.0.0.0-10.0.0.2',
+    'adding the last address of the range leaves it unchanged');
+  is("".($three + IPv4->address('10.0.0.3')), '10.0.0.0-10.0.0.3',
+    'an adjacent address still extends the range');
+  is("".($three + IPv4->address('10.0.0.9')), '10.0.0.0-10.0.0.2,10.0.0.9',
+    'a disjoint address still becomes its own span');
+
+  my $wide = IPv4->new('10.0.0.0-10.0.0.31');
+  is("".IPv4->new($wide)->add(IPv4->new('10.0.0.8-10.0.0.15')), '10.0.0.0-10.0.0.31',
+    'a contained span leaves the enclosing span alone');
+  is("".IPv4->new($wide)->add(IPv4->new('10.0.0.16-10.0.0.63')), '10.0.0.0-10.0.0.63',
+    'an overlapping span that reaches further still extends the range');
+
+  my $split = IPv4->new('10.0.0.0-10.0.0.7,10.0.0.16-10.0.0.23');
+  $split += IPv4->new('10.0.0.2-10.0.0.4');
+  is("".$split, '10.0.0.0-10.0.0.7,10.0.0.16-10.0.0.23',
+    'a contained span does not disturb the spans that follow it');
+};
+
 done_testing();

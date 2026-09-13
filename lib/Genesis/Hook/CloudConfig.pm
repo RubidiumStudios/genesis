@@ -37,6 +37,26 @@ my %OCFP_RESERVED_IP_TARGET_ALIASES = (
 
 # }}}
 # _as_list - normalize scalar-or-arrayref into a list {{{
+# _is_neighbour_annotation - true when a <target>_ip_<suffix> key records the
+# address immediately before or after <target>_ip {{{
+#
+# An OCFP carve written under scheme_version 2 stores the neighbouring address
+# on either side of a single reservation: `_a` is the one below `<target>_ip`
+# and `_b` the one above.  Those keys are still ignored for allocation, because
+# the neighbour belongs to another target, but they are deliberate rather than
+# malformed and do not deserve a warning on every lookup.
+sub _is_neighbour_annotation {
+	my ($key, $value, $anchor) = @_;
+	return 0 unless defined($value) && defined($anchor);
+	my ($suffix) = $key =~ m/_ip_([a-z])$/;
+	return 0 unless defined($suffix) && $suffix =~ /^[ab]$/;
+	my ($v, $a);
+	eval { $v = IPv4->address($value)->int; $a = IPv4->address($anchor)->int; 1 } or return 0;
+	return $suffix eq 'a' ? ($v + 1 == $a) : ($v - 1 == $a);
+}
+
+# }}}
+
 sub _as_list {
 	my ($v) = @_;
 	return () unless defined $v;
@@ -1667,15 +1687,26 @@ sub _get_reserved_allocation {
 		# one form or the other.  `<target>_ip_a` is neither, and the
 		# bracket-pair loop above never sees it -- it looks for
 		# `<target>_a` -- so it would silently widen this allocation.
+		#
+		# One shape of `<target>_ip_a`/`_b` is not a mistake, though: an OCFP
+		# carve written under scheme_version 2 records the address either side
+		# of `<target>_ip` as context, so `_a` holds its predecessor and `_b`
+		# its successor.  Those neighbours belong to whatever sits next to the
+		# target in a densely packed run -- vault_ip_a is the director's
+		# address, bosh_ip_b is vault's -- so dropping them is right, and
+		# saying so on every call is noise.  Warn only about the keys we cannot
+		# read that way.
 		my @malformed = grep {$_ =~ m/_ip_[a-z]$/} @ip_keys;
 		if (@malformed) {
+			my $anchor = $reserved_ips->{$candidate."_ip"};
+			my @unexplained = grep {!_is_neighbour_annotation($_, $reserved_ips->{$_}, $anchor)} @malformed;
 			warning(
 				"Ignoring malformed reserved-ip key%s %s: use #C{%s_ip} for a ".
 				"single address or #C{%s_a}/#C{%s_b} for a range, not both.",
-				(@malformed > 1 ? 's' : ''),
-				join(', ', map {"#Y{$_}"} sort @malformed),
+				(@unexplained > 1 ? 's' : ''),
+				join(', ', map {"#Y{$_}"} sort @unexplained),
 				$candidate, $candidate, $candidate
-			);
+			) if @unexplained;
 			my %skip = map {$_ => 1} @malformed;
 			@ip_keys = grep {!$skip{$_}} @ip_keys;
 		}
