@@ -100,12 +100,28 @@ sub _fault {
 }
 
 # }}}
+# _act - the command an armed entry runs before the step goes through {{{
+#
+# An action is not a fault, so the step still happens and the wrapper goes on
+# to delegate.  A row arms one to have a teammate move a branch on R at the
+# step the row names, in the middle of this run, so the push the run then makes
+# is rejected rather than absorbed by the run's own refresh.
+sub _act {
+	my ($armed) = @_;
+	require Genesis;
+	Genesis::run({dir => $armed->{in}}, 'git', @{$armed->{action}});
+	return;
+}
+
+# }}}
 # Install one counting wrapper per step {{{
 #
 # Each wrapper logs the call, counts it, consults the plan, and otherwise
 # delegates to SUPER:: so the real work still happens.  A step nobody armed
 # behaves exactly as it does without the subclass, which is what lets a row
-# assert that no other git step behaved differently.
+# assert that no other git step behaved differently.  An entry carrying an
+# action runs that command at the armed call and then delegates as it always
+# would, where a fault never returns at all.
 {
 	no strict 'refs';
 	for my $step (@STEPS) {
@@ -114,8 +130,10 @@ sub _fault {
 			$self->_record($step, @args);
 
 			my ($n, $armed) = $self->_bump($step);
-			return $self->_fault($step, $n, $armed)
-				if $armed && _hits($armed, $n);
+			if ($armed && _hits($armed, $n)) {
+				return $self->_fault($step, $n, $armed) unless $armed->{action};
+				_act($armed);
+			}
 
 			my $super = "SUPER::$step";
 			return $self->$super(@args);

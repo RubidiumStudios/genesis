@@ -38,6 +38,11 @@ push @EXPORT, qw/
 /;
 
 push @EXPORT, qw/
+	amend_tip local_branch local_branch_only unset_control
+	set_remotes set_repo_config move_on_r_at
+/;
+
+push @EXPORT, qw/
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed break_vault restore_vault
 /;
@@ -226,6 +231,7 @@ sub make_harness {
 		mode      => $opts{mode}      // 'direct',
 		root      => $opts{root}      // '',
 		pipeline  => defined $opts{pipeline} ? $opts{pipeline} : 1,
+		source_control => $opts{source_control},
 		kit       => $opts{kit},
 		roots     => {},
 		mount     => $opts{exodus_mount} // '/secret/exodus/',
@@ -329,6 +335,11 @@ sub _seed_control {
 	helper::mkdir_or_fail($root) unless -d $root;
 	$self->_create_root($root);
 
+	# create writes no pipeline section at all, and every row that reads a
+	# provider reads it out of this file, so the section is written afterwards
+	# from the options the harness was declared with.
+	$self->_seed_pipeline_section($root);
+
 	# The environment files land through write_env_file and are committed with
 	# the root, so the control branch's first commit is a repository a command
 	# can be run against rather than a deployment root with nothing in it.
@@ -343,6 +354,36 @@ sub _seed_control {
 	run({dir => $self->{b}, onfailure => "Failed to track control in copy B"},
 		'git', 'checkout', '-q', '-B', $self->{control},
 		'--track', "origin/$self->{control}");
+
+	return $self;
+}
+
+# }}}
+# _seed_pipeline_section - the pipeline block the declared options ask for {{{
+#
+# The pipeline option takes three values rather than two.  1 is an enabled
+# pipeline, 0 is a section whose enabled is false, and the string none is a
+# configuration with no pipeline section at all, because those are two
+# different refusals and one boolean cannot tell them apart.  A hashref means
+# an enabled pipeline with those repository-wide keys set.
+sub _seed_pipeline_section {
+	my ($self, $root) = @_;
+	my $want = $self->{pipeline};
+	return $self if defined $want && $want eq 'none';
+
+	require Genesis::Config;
+	my $config = Genesis::Config->new("$root/.genesis/config");
+	my %keys = (ref $want eq 'HASH') ? %$want : ();
+
+	$config->set('pipeline.enabled' => (ref $want eq 'HASH') ? 1 : ($want ? 1 : 0));
+	$config->set('pipeline.provider.type' => $self->{provider});
+	$config->set('pipeline.mode' => $self->{mode});
+	$config->set('pipeline.source_control.control_branch' => $self->{control});
+	$config->set('pipeline.source_control.pr_prefix' => $self->{pr_prefix});
+	$config->set("pipeline.source_control.$_" => $self->{source_control}{$_})
+		for sort keys %{$self->{source_control} || {}};
+	$config->set("pipeline.$_" => $keys{$_}) for sort keys %keys;
+	$config->save;
 
 	return $self;
 }
@@ -991,6 +1032,197 @@ sub rewrite_branch {
 }
 
 # }}}
+# amend_tip - amend a branch tip in place and force-push it {{{
+#
+# T85 needs the amend case, in which the subject a reader would walk is
+# replaced and the message it replaced is pushed down into the body, so a
+# marker that was in the subject is now in the body alone.
+sub amend_tip {
+	my ($self, $branch, %opts) = @_;
+	my $copy = $opts{copy} // 'b';
+	my $dir  = $self->{$copy};
+
+	run({dir => $dir}, 'git', 'fetch', '-q', 'origin', $branch);
+	run({dir => $dir}, 'git', 'checkout', '-q', '-B', $branch,
+		"refs/remotes/origin/$branch");
+
+	if (my $files = $opts{files}) {
+		helper::put_file("$dir/$_", $files->{$_}) for keys %$files;
+		run({dir => $dir}, 'git', 'add', '-A');
+	}
+
+	my $message = $opts{message};
+	if (!defined $message && defined $opts{subject}) {
+		my ($old) = run({dir => $dir}, 'git', 'log', '-1', '--format=%B', $branch);
+		$message = "$opts{subject}\n\n$old";
+	}
+
+	run({dir => $dir, onfailure => "Failed to amend $branch"},
+		'git', 'commit', '-q', '--amend', '--allow-empty',
+		($message ? ('-m', $message) : ('--no-edit')));
+
+	run({dir => $dir, onfailure => "Failed to force-push $branch"},
+		'git', 'push', '-q', '--force', 'origin', $branch)
+		if (defined $opts{push} ? $opts{push} : 1);
+
+	return ref_in($dir, "refs/heads/$branch");
+}
+
+# }}}
+# local_branch - a branch that no delivery created {{{
+sub local_branch {
+	my ($self, $branch, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	my $at   = $opts{at} // branch_of($self->{$copy});
+	my $sha  = ref_in($self->{$copy}, $at) // $at;
+
+	run({dir => $self->{$copy}}, 'git', 'update-ref', "refs/heads/$branch", $sha);
+	$self->push_from($copy, $branch) if $opts{push};
+	return $sha;
+}
+
+# }}}
+# local_branch_only - a deployment branch R has never had {{{
+#
+# T97 and the no-remote arm of T89 turn on a branch this clone made and never
+# published, which is a different shape from unrelated_branch, where R has the
+# branch and the two share no ancestor.
+sub local_branch_only {
+	my ($self, $env, %opts) = @_;
+	return $self->local_branch($self->slug($env, %opts), %opts, push => 0);
+}
+
+# }}}
+# unset_control - a repository whose control branch exists nowhere {{{
+#
+# T100 needs control gone from R, from both copies' local refs, and from their
+# remote-tracking refs, because the refresh never prunes and a surviving
+# remote-tracking ref would re-create the local branch.
+sub unset_control {
+	my ($self, %opts) = @_;
+	my $control = $self->{control};
+
+	for my $copy (qw/a b/) {
+		run({dir => $self->{$copy}}, 'git', 'checkout', '-q', '-B',
+			"parked-$copy");
+		run({dir => $self->{$copy}, passfail => 1},
+			'git', 'update-ref', '-d', "refs/heads/$control");
+		run({dir => $self->{$copy}, passfail => 1},
+			'git', 'update-ref', '-d', "refs/remotes/origin/$control");
+	}
+	run({dir => $self->{r}, passfail => 1},
+		'git', 'update-ref', '-d', "refs/heads/$control");
+
+	return $self;
+}
+
+# }}}
+# set_remotes - shape a copy's remotes and its control upstream {{{
+#
+# T57 needs a repository whose remotes are dev and origin and whose control
+# branch has no upstream, which is what a site that clones from one remote and
+# pushes to another looks like.
+sub set_remotes {
+	my ($self, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	my $dir  = $self->{$copy};
+
+	if (my $remotes = $opts{remotes}) {
+		my ($existing) = run({dir => $dir}, 'git', 'remote');
+		chomp $existing if defined $existing;
+		run({dir => $dir}, 'git', 'remote', 'remove', $_)
+			for grep {length} split /\n/, ($existing // '');
+		run({dir => $dir}, 'git', 'remote', 'add', $_, $remotes->{$_})
+			for sort keys %$remotes;
+		run({dir => $dir}, 'git', 'fetch', '-q', $_) for sort keys %$remotes;
+	}
+
+	if (exists $opts{upstream}) {
+		my $key = "branch.$self->{control}";
+		if ($opts{upstream}) {
+			run({dir => $dir}, 'git', 'config', "$key.remote", $opts{upstream});
+			run({dir => $dir}, 'git', 'config', "$key.merge",
+				"refs/heads/$self->{control}");
+		} else {
+			run({dir => $dir, passfail => 1},
+				'git', 'config', '--unset', "$key.remote");
+			run({dir => $dir, passfail => 1},
+				'git', 'config', '--unset', "$key.merge");
+		}
+	}
+
+	return $self->git($copy);
+}
+
+# }}}
+# set_repo_config - write one key into .genesis/config and commit it {{{
+#
+# make_harness takes the pipeline options it knows about, and the rows that
+# turn one arbitrary key on need a way in that does not rebuild the harness.
+#
+# The path is computed once, relative to the git root, and the same path is
+# what the write, the commit, and the return all use, so a row that reads the
+# file back reads the file the commit carries.
+sub set_repo_config {
+	my ($self, $key, $value, %opts) = @_;
+	my $root = $opts{root} // $self->{root};
+	my $path = ($root ? "$root/" : '') . '.genesis/config';
+
+	require Genesis::Config;
+	my $config = Genesis::Config->new("$self->{a}/$path");
+	$config->set($key => $value);
+	$config->save;
+
+	if (defined $opts{commit} ? $opts{commit} : 1) {
+		run({dir => $self->{a}}, 'git', 'add', '--', $path);
+		run({dir => $self->{a}, onfailure => "Failed to write $path"},
+			'git', 'commit', '-q', '-m', "set $key");
+	}
+
+	return $path;
+}
+
+# }}}
+# move_on_r_at - arm a push to R for a named step of the next run {{{
+#
+# move_on_r acts at once, which the run's own refresh then absorbs, so no push
+# is ever rejected.  This commits in copy B straight away, so it can return the
+# sha, and leaves the push to R for the step the row names, which is the fault
+# plan carrying an action rather than a death.
+#
+# The plan is armed here where a row armed none of its own, because the row
+# wants a teammate to move a branch and should not have to know that the way
+# the harness times that is the fault plan.
+sub move_on_r_at {
+	my ($self, $branch, %opts) = @_;
+
+	run({dir => $self->{b}}, 'git', 'fetch', '-q', 'origin', $branch);
+	run({dir => $self->{b}}, 'git', 'checkout', '-q', '-B', $branch,
+		"refs/remotes/origin/$branch");
+	my $sha = $self->_commit_in('b', $branch,
+		files   => $opts{files} // {'armed.yml' => "---\narmed: true\n"},
+		message => $opts{message} // 'a teammate moved the branch',
+		push    => 0,
+	);
+
+	# The plan file is the one fault_git arms, keyed by step name.  This entry
+	# carries an action rather than a death, so the subclass runs it and then
+	# delegates to SUPER:: as it would have anyway.
+	$self->fault_git unless $ENV{GENESIS_HARNESS_GIT_PLAN};
+	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN};
+	my $plan = JSON::PP->new->decode(helper::get_file($file));
+	$plan->{$opts{at} // 'push'} = {
+		n      => $opts{nth} // 1,
+		from   => 0,
+		action => ['push', '-q', '--force', 'origin', $branch],
+		in     => $self->{b},
+	};
+	helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+
+	return $sha;
+}
+
+# }}}
 # add_deployment_root - a second root sharing an environment name {{{
 #
 # The H32 shape: one repository, two deployment roots, one environment name.
@@ -1038,21 +1270,31 @@ sub add_deployment_root {
 # the leaf, which is what the merged-read rows of D79 need.  The type option is
 # taken for symmetry with the helpers that compose a slug and is not written,
 # because nothing in the file body names a deployment type.
+#
+# A value that is an arrayref renders as a YAML list rather than a scalar,
+# because genesis.pipeline.track_dependencies and its neighbours are lists and
+# sprintf of a reference writes an address into the file.
+#
+# The genesis key is written wherever anything is to be nested under it, and
+# not only where the env key is.  A site file carrying genesis or pipeline
+# entries used to emit those entries with no parent above them, which is a
+# file no YAML reader will load.
 sub write_env_file {
 	my ($self, $env, %opts) = @_;
 	my $root   = $opts{root} // $self->{root};
 	my $prefix = $root ? "$root/" : '';
 	my $name   = $opts{site} // $env;
 	my $path   = "$prefix$name.yml";
+	my $nested = %{$opts{genesis} || {}} || $opts{pipeline};
 
 	my $body = "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n";
-	$body .= "genesis:\n  env: $name\n" unless $opts{site};
-	for my $key (sort keys %{$opts{genesis} || {}}) {
-		$body .= sprintf("  %s: %s\n", $key, $opts{genesis}{$key});
-	}
+	$body .= "genesis:\n" if !$opts{site} || $nested;
+	$body .= "  env: $name\n" unless $opts{site};
+	$body .= _yaml_pair($_, $opts{genesis}{$_}, 1)
+		for sort keys %{$opts{genesis} || {}};
 	if (my $pipeline = $opts{pipeline}) {
 		$body .= "  pipeline:\n";
-		$body .= sprintf("    %s: %s\n", $_, $pipeline->{$_}) for sort keys %$pipeline;
+		$body .= _yaml_pair($_, $pipeline->{$_}, 2) for sort keys %$pipeline;
 	}
 
 	helper::put_file("$self->{a}/$path", $body);
@@ -1063,6 +1305,17 @@ sub write_env_file {
 	}
 
 	return $path;
+}
+
+# }}}
+# _yaml_pair - one key and its value at a depth, list or scalar {{{
+sub _yaml_pair {
+	my ($key, $value, $depth) = @_;
+	my $pad = '  ' x $depth;
+	return sprintf("%s%s: %s\n", $pad, $key, $value)
+		unless ref $value eq 'ARRAY';
+	return sprintf("%s%s:\n", $pad, $key)
+		. join('', map {sprintf("%s  - %s\n", $pad, $_)} @$value);
 }
 
 # }}}
