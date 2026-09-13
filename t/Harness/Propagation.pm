@@ -64,6 +64,10 @@ push @EXPORT, qw/
 	gh_protection gh_unreachable gh_reachable gh_no_token gh_calls
 /;
 
+push @EXPORT, qw/
+	record_at vault_read_log fixture_preflight
+/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -1339,6 +1343,12 @@ sub _yaml_pair {
 # fixture clears the exodus mount as it attaches and each harness starts on an
 # empty record tree rather than on whatever the subtest above it wrote.  The
 # removal is forced, because the first harness of a run finds nothing there.
+#
+# A recording safe is laid down beside the target, so vault_read_log can say
+# what a run read.  Only a wrapper on the path can see the reads a child
+# process makes, and _path_prefix already names the directory the wrapper sits
+# in, so the wrapper reaches a spawned command through run_genesis and the
+# parent's own path is left exactly as it was.
 sub fixture_vault {
 	my ($self) = @_;
 	return $self->{vault_target} if $self->{vault_target};
@@ -1350,7 +1360,40 @@ sub fixture_vault {
 	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
 		'safe', 'rm', '-rf', $self->exodus_mount);
 
+	$self->{vault_log} = "$self->{base}/vault-reads.log";
+	my $bin = "$self->{base}/bin";
+	helper::mkdir_or_fail($bin) unless -d $bin;
+	helper::put_file("$bin/safe", 0755, <<"EOS");
+#!/usr/bin/env bash
+# Records a read and hands the call on to the real safe.  Only a wrapper on
+# the path can see what a spawned genesis child reads.
+case "\$1" in
+	get|read|export) echo "\$2" >> "$self->{vault_log}" ;;
+esac
+exec @{[_real_safe()]} "\$@"
+EOS
+
 	return $target;
+}
+
+# }}}
+# _real_safe - the safe the recording wrapper hands its call on to {{{
+sub _real_safe { return _real_tool('safe') }
+
+# }}}
+# _real_tool - the tool on the path underneath the harness's own wrappers {{{
+#
+# A wrapper is written with the real tool's path baked into it, and the
+# harness's own fixture directories are stepped over while that path is being
+# found, so a wrapper written while those directories sit on the path still
+# reaches the tool underneath rather than calling itself.
+sub _real_tool {
+	my ($name) = @_;
+	for my $dir (split /:/, ($ENV{PATH} // '')) {
+		next if $dir =~ m{/ph-\d+-\d+/(bin|gh-bin)$};
+		return "$dir/$name" if -x "$dir/$name";
+	}
+	return $name;
 }
 
 # }}}
@@ -1502,6 +1545,145 @@ sub restore_vault {
 			'safe', 'move', $pair->[1], $pair->[0]);
 	}
 	return $self;
+}
+
+# }}}
+# record_at - read one vault path back, or undef {{{
+#
+# The harness writes records through five fixtures and read none of them back,
+# so every row that asserted on a written record had to reach for safe itself.
+#
+# The read runs on the parent's own path, which the recording wrapper is
+# deliberately kept off, so a row reading a record to assert on it never counts
+# as one of the reads the run under test made.
+sub record_at {
+	my ($self, $path) = @_;
+	$self->fixture_vault;
+	my ($out, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
+			stderr => 0, passfail => 0},
+		'safe', 'export', $path);
+	return undef if $rc || !$out;
+	my $exported = eval {JSON::PP->new->decode($out)} or return undef;
+	my ($record) = values %$exported;
+	return $record;
+}
+
+# }}}
+# vault_read_log - every vault path the last run read, in order {{{
+#
+# T326 asserts that a predecessor's record is read exactly once, and only the
+# wrapper on the path can see the reads a child process makes, so the log is a
+# file the wrapper appends to and this reads.  run_genesis empties it as each
+# run starts, which is what makes the answer the last run's reads rather than
+# every read since the harness was built.
+sub vault_read_log {
+	my ($self) = @_;
+	my $file = $self->{vault_log} or return [];
+	return [] unless -f $file;
+	return [grep {length} split /\n/, (helper::get_file($file) // '')];
+}
+
+# }}}
+# fixture_preflight - the three shapes the pre-flight classifies {{{
+#
+# D80 has the pre-flight name a safe.directory refusal, a missing committer
+# identity, and a repository with no commits, each with its fix.  Each shape is
+# built in a fresh repository beside the harness rather than in either clone,
+# because the safe.directory shape needs an ownership git will actually refuse
+# and neither clone can be given one.
+#
+# The first two shapes leave a marker in the repository and lean on the fixture
+# git for the rest, because neither an ownership git refuses nor a missing
+# global identity can be arranged by a process running as the one user that
+# owns everything the suite writes.
+sub fixture_preflight {
+	my ($self, $kind, %opts) = @_;
+	my $dir = $opts{copy} ? $self->{$opts{copy}}
+	        : "$self->{base}/preflight-$kind-" . int(rand(1_000_000));
+
+	unless ($opts{copy}) {
+		helper::mkdir_or_fail($dir);
+		run({dir => $dir}, 'git', 'init', '-q');
+	}
+	$self->_preflight_git;
+
+	if ($kind eq 'no_commits') {
+		run({dir => $dir}, 'git', 'config', 'user.email', 'nobody@example.com');
+		run({dir => $dir}, 'git', 'config', 'user.name', 'Nobody');
+
+	} elsif ($kind eq 'no_identity') {
+		helper::put_file("$dir/a-file", "a line\n");
+		run({dir => $dir}, 'git', 'config', 'user.email', 'nobody@example.com');
+		run({dir => $dir}, 'git', 'config', 'user.name', 'Nobody');
+		run({dir => $dir}, 'git', 'add', '-A');
+		run({dir => $dir}, 'git', 'commit', '-q', '-m', 'a commit');
+		run({dir => $dir}, 'git', 'config', '--unset', 'user.email');
+		run({dir => $dir}, 'git', 'config', '--unset', 'user.name');
+		helper::put_file("$dir/.git/harness-no-identity", "1\n");
+
+	} elsif ($kind eq 'safe_directory') {
+		helper::put_file("$dir/a-file", "a line\n");
+		run({dir => $dir}, 'git', 'config', 'user.email', 'nobody@example.com');
+		run({dir => $dir}, 'git', 'config', 'user.name', 'Nobody');
+		run({dir => $dir}, 'git', 'add', '-A');
+		run({dir => $dir}, 'git', 'commit', '-q', '-m', 'a commit');
+		helper::put_file("$dir/.git/harness-dubious", "1\n");
+
+	} else {
+		die "fixture_preflight does not know the shape $kind\n";
+	}
+
+	return $dir;
+}
+
+# }}}
+# _preflight_git - the git that makes a marked repository behave {{{
+#
+# It finds the repository a call is about, from a -C or from the working
+# directory, and turns whichever marker that repository carries into the
+# environment the real git reads the shape out of.  A dubious ownership is what
+# git refuses the safe.directory case on, and an empty home with no global and
+# no system configuration is what leaves a committer identity missing even
+# though helper::import wrote the suite one.
+#
+# run_genesis already puts this directory first for the command under test, so
+# a whole run meets the shape, and a row that reads the shape itself puts the
+# same directory first for the length of the row.
+sub _preflight_git {
+	my ($self) = @_;
+	my $bin = "$self->{base}/bin";
+	return "$bin/git" if -x "$bin/git";
+
+	helper::mkdir_or_fail($bin) unless -d $bin;
+	my $home = "$self->{base}/preflight-home";
+	helper::mkdir_or_fail($home) unless -d $home;
+
+	helper::put_file("$bin/git", 0755, <<"EOS");
+#!/usr/bin/env bash
+# The repository a call is about is the one -C names, or the one the working
+# directory sits in, and each shape is a marker file that repository carries.
+dir="\$PWD"
+prev=
+for arg in "\$@"; do
+  [ "\$prev" = "-C" ] && dir="\$arg"
+  prev="\$arg"
+done
+while [ -n "\$dir" ] && [ "\$dir" != "/" ] && [ "\$dir" != "." ]; do
+  if [ -f "\$dir/.git/harness-dubious" ]; then
+    export GIT_TEST_ASSUME_DIFFERENT_OWNER=1
+    break
+  fi
+  if [ -f "\$dir/.git/harness-no-identity" ]; then
+    export HOME="$home"
+    export GIT_CONFIG_GLOBAL="$home/.gitconfig"
+    export GIT_CONFIG_NOSYSTEM=1
+    break
+  fi
+  dir="\$(dirname "\$dir")"
+done
+exec @{[_real_tool('git')]} "\$@"
+EOS
+	return "$bin/git";
 }
 
 # }}}
@@ -1687,6 +1869,10 @@ sub run_genesis {
 	$dir .= "/$opts{dir}" if $opts{dir};
 
 	my $w = $self->snapshot_w(copy => $copy);
+
+	# vault_read_log answers for the last run, so the log starts every run
+	# empty and nothing the harness read before this one is counted in it.
+	helper::put_file($self->{vault_log}, '') if $self->{vault_log};
 
 	my %env = (
 		GENESIS_TOPDIR => $helper::TOPDIR,
