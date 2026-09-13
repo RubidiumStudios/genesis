@@ -149,6 +149,71 @@ agree with, and a copy is read only where R has no such ref at all.  A caller
 comparing trees in one copy names that copy, so the marker and the trees come
 out of the same repository.
 
+=head2 hand_commit($h, $branch, %opts)
+
+Writes a commit carrying no marker, which is the emergency hatch of D33.  It
+is written from copy B by default and pushed, because the interesting case is
+a hand edit that the operator's own clone has not yet seen.  The options are
+C<copy>, C<files>, C<message>, and C<push>, which defaults on.  Where the
+copy has never seen the branch, it is cut from R's tip first, so the commit
+lands where the caller named it.
+
+=head2 local_only_commit($h, $branch, %opts)
+
+Writes a commit in copy A that is never pushed.  C<marker> takes a control
+sha to give the commit a marker subject, or 0 to give it none, and C<files>
+and C<message> say what it carries.
+
+=head2 squash_merge($h, $env, %opts)
+
+Squashes the environment's pull request branch onto its deployment branch, so
+the tip's subject is the merger's and the marker survives in the body alone,
+and returns the squash commit.  C<subject> is the merger's title, C<control>
+names the control commit the aggregate carried, C<keep_marker> off is the
+site that lost the marker altogether, and C<push> defaults on.  Where copy A
+has no pull request branch yet, one is cut off the deployment branch and the
+aggregate delivered onto it, which is the shape the product leaves behind.
+
+=head2 unrelated_branch($h, $env, %opts)
+
+Makes a local branch of the slug's name in copy A that shares no ancestor
+with R's branch of the same name, and returns its orphan root commit.
+
+=head2 diverge($h, $branch, %opts)
+
+Leaves L and T each holding commits the other lacks, C<local> of the first
+and C<remote> of the second, each defaulting to one.  The teammate's commits
+are published and copy A is refreshed before the local ones are written, so
+the divergence is one copy A can read from its own refs.
+
+=head2 move_on_r($h, $branch, %opts)
+
+Has copy B advance a branch on R after copy A's refresh, which is how a row
+makes an expected-tip push fail, and returns the commit R now carries.
+C<files> and C<message> say what that commit holds.
+
+=head2 delete_on_r($h, @branches)
+
+Takes branches away from R.
+
+=head2 delete_local($h, $copy, @branches)
+
+Takes branches away from one copy's local refs.
+
+=head2 rewrite_control($h, %opts)
+
+Force-pushes the control branch with one commit dropped, and returns the sha
+that is now unreachable.  It is C<rewrite_branch> on the control branch and
+takes the same options.
+
+=head2 rewrite_branch($h, $branch, %opts)
+
+Force-pushes any branch with one commit dropped, and returns the sha that is
+now unreachable.  C<drop> names the commit to remove, and where it is left
+out the commit behind the tip is taken; C<count> says how many commits to
+consider and defaults to one.  The rewrite runs in copy B, because a rebase
+checks out and copy A's working state is what the rows assert on.
+
 =head2 add_deployment_root($h, %opts)
 
 Adds a second deployment root to the same repository, so a row can build two

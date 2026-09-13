@@ -28,6 +28,12 @@ push @EXPORT, qw/
 /;
 
 push @EXPORT, qw/
+	hand_commit local_only_commit squash_merge unrelated_branch
+	diverge move_on_r delete_on_r delete_local
+	rewrite_control rewrite_branch
+/;
+
+push @EXPORT, qw/
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed break_vault restore_vault
 /;
@@ -662,6 +668,239 @@ sub harness_marker {
 		return $full || undef;
 	}
 	return undef;
+}
+
+# }}}
+# _ensure_branch - give a copy a local branch it has never seen {{{
+#
+# _commit_in checks the branch out, and a checkout of a name the copy holds
+# nowhere fails, so a helper that writes a deployment branch in copy B has to
+# put the branch there first.  _branch_parent already answers the right
+# commit, which is the copy's own branch where it has one and R's tip
+# otherwise, and it brings the objects across by path so no
+# remote-tracking ref moves.  Where neither repository has the branch there
+# is nothing to create and the caller is left to fail on its own terms.
+sub _ensure_branch {
+	my ($self, $copy, $branch) = @_;
+	return $self if ref_in($self->{$copy}, "refs/heads/$branch");
+
+	my $at = $self->_branch_parent($copy, $branch) or return $self;
+	run({dir => $self->{$copy}, onfailure => "Failed to write $branch in copy $copy"},
+		'git', 'update-ref', "refs/heads/$branch", $at);
+	return $self;
+}
+
+# }}}
+# hand_commit - a commit on a branch carrying no marker {{{
+#
+# D33 keeps the emergency hatch open, so a row needs a commit an operator
+# made by hand.  It is written from copy B by default, because a hand edit
+# the operator's own clone has not seen is the interesting case.
+sub hand_commit {
+	my ($self, $branch, %opts) = @_;
+	my $copy = $opts{copy} // 'b';
+	$self->_ensure_branch($copy, $branch) if defined $branch;
+	return $self->_commit_in($copy, $branch,
+		files   => $opts{files} // {'by-hand.yml' => "---\nby: hand\n"},
+		message => $opts{message} // 'Fix it by hand',
+		push    => defined $opts{push} ? $opts{push} : 1,
+	);
+}
+
+# }}}
+# local_only_commit - a commit in copy A that is never pushed {{{
+#
+# The marker option takes a control sha to give the commit a marker subject
+# or 0 to give it none, because T92 and T93 need both kinds of local commit
+# standing in front of a refresh.
+sub local_only_commit {
+	my ($self, $branch, %opts) = @_;
+	my $message = $opts{message} // 'a local change';
+	$message = sprintf('[pipeline] control@%s -> local',
+		substr($opts{marker}, 0, 12)) if $opts{marker};
+	$self->_ensure_branch('a', $branch) if defined $branch;
+	return $self->_commit_in('a', $branch,
+		files   => $opts{files} // {'local.yml' => "---\nlocal: true\n"},
+		message => $message,
+		push    => 0,
+	);
+}
+
+# }}}
+# squash_merge - squash the PR branch onto the deployment branch {{{
+#
+# A squash keeps the merger's title as the subject and pushes the merged
+# message down into the body, which is the shape the marker reader of M6
+# has to survive.  keep_marker off is the site that lost it altogether.
+sub squash_merge {
+	my ($self, $env, %opts) = @_;
+	my $branch  = $self->slug($env, %opts);
+	my $pr      = $self->pr_branch($env, %opts);
+	my $control = $opts{control} // $self->git('a')->sha($self->{control});
+	my $keep    = defined $opts{keep_marker} ? $opts{keep_marker} : 1;
+
+	# A row that has not built the pull request branch for itself gets the
+	# aggregate built here, because the squash is about what the merge does
+	# to the marker and not about how the branch came to exist.  The branch
+	# is cut off the deployment branch first, which is where the product
+	# opens it, and the delivery is written in copy A, which is the copy the
+	# plumbing below reads its tree out of.
+	unless (ref_in($self->{a}, "refs/heads/$pr")) {
+		my $base = $self->_branch_parent('a', $branch);
+		run({dir => $self->{a}, onfailure => "Failed to cut $pr"},
+			'git', 'update-ref', "refs/heads/$pr", $base) if $base;
+		$self->deliver($env, %opts,
+			control => $control, pr => 1, copy => 'a', push => 0);
+	}
+
+	my ($tree) = run({dir => $self->{a}}, 'git', 'rev-parse', "$pr^{tree}");
+	chomp $tree;
+	my $parent = ref_in($self->{a}, "refs/heads/$branch");
+
+	my $message = $opts{subject} // "Merge pull request from $pr";
+	$message .= sprintf("\n\n[pipeline] control@%s -> %s\n",
+		substr($control, 0, 12), $env) if $keep;
+
+	my ($sha) = run({dir => $self->{a}, onfailure => "Failed to squash $pr"},
+		'git', 'commit-tree', $tree, ($parent ? ('-p', $parent) : ()),
+		'-m', $message);
+	chomp $sha;
+	run({dir => $self->{a}}, 'git', 'update-ref', "refs/heads/$branch", $sha);
+	$self->push_from('a', $branch) if (defined $opts{push} ? $opts{push} : 1);
+	return $sha;
+}
+
+# }}}
+# unrelated_branch - a local branch of the slug's name sharing no history {{{
+#
+# T98 refuses on this shape, which is a branch of the right name whose
+# counterpart on R exists and shares no ancestor with it.  An orphan root
+# commit is the only way to build one.
+sub unrelated_branch {
+	my ($self, $env, %opts) = @_;
+	my $branch = $self->slug($env, %opts);
+	my $dir    = $self->{a};
+
+	my $index = "$self->{base}/idx-" . int(rand(1_000_000));
+	local $ENV{GIT_INDEX_FILE} = $index;
+	run({dir => $dir}, 'git', 'read-tree', '--empty');
+	my $tmp = "$self->{base}/blob-" . int(rand(1_000_000));
+	helper::put_file($tmp, "an unrelated history\n");
+	my ($blob) = run({dir => $dir}, 'git', 'hash-object', '-w', $tmp);
+	chomp $blob;
+	run({dir => $dir}, 'git', 'update-index', '--add', '--cacheinfo',
+		"100644,$blob,unrelated");
+	my ($tree) = run({dir => $dir}, 'git', 'write-tree');
+	chomp $tree;
+	unlink $index;
+
+	my ($sha) = run({dir => $dir}, 'git', 'commit-tree', $tree,
+		'-m', 'an unrelated root');
+	chomp $sha;
+	run({dir => $dir}, 'git', 'update-ref', "refs/heads/$branch", $sha);
+	return $sha;
+}
+
+# }}}
+# diverge - leave L and T each holding commits the other lacks {{{
+#
+# The refresh in the middle is what makes the divergence one copy A can
+# read: the teammate's commits have to reach copy A's remote-tracking ref
+# before the local ones are written, or the left-right count answers two
+# ahead of a T that never moved.
+sub diverge {
+	my ($self, $branch, %opts) = @_;
+	my $local  = defined $opts{local}  ? $opts{local}  : 1;
+	my $remote = defined $opts{remote} ? $opts{remote} : 1;
+
+	$self->_ensure_branch('b', $branch) if defined $branch;
+	$self->_commit_in('b', $branch,
+		files   => {"from-b-$_.yml" => "---\nn: $_\n"},
+		message => "a teammate's change $_",
+		push    => 1,
+	) for 1 .. $remote;
+
+	$self->refresh('a', $branch // $self->{control}) if $remote;
+
+	$self->_ensure_branch('a', $branch) if defined $branch;
+	$self->_commit_in('a', $branch,
+		files   => {"from-a-$_.yml" => "---\nn: $_\n"},
+		message => "a local change $_",
+		push    => 0,
+	) for 1 .. $local;
+
+	return $self;
+}
+
+# }}}
+# move_on_r - have copy B advance a branch on R behind copy A's back {{{
+#
+# This is how a row makes an expected-tip push fail under D51 and D83.  Copy
+# A is not refreshed afterwards, so its remote-tracking ref still names the
+# commit the run will offer git as the expected tip.
+sub move_on_r {
+	my ($self, $branch, %opts) = @_;
+	run({dir => $self->{b}}, 'git', 'fetch', '-q', 'origin', $branch);
+	run({dir => $self->{b}}, 'git', 'update-ref', "refs/heads/$branch",
+		"refs/remotes/origin/$branch");
+	return $self->_commit_in('b', $branch,
+		files   => $opts{files} // {'moved.yml' => "---\nmoved: true\n"},
+		message => $opts{message} // 'a teammate moved the branch',
+		push    => 1,
+	);
+}
+
+# }}}
+# delete_on_r, delete_local - take branches away {{{
+sub delete_on_r {
+	my ($self, @branches) = @_;
+	run({dir => $self->{r}, onfailure => "Failed to delete $_ from R"},
+		'git', 'update-ref', '-d', "refs/heads/$_") for @branches;
+	return $self;
+}
+
+sub delete_local {
+	my ($self, $copy, @branches) = @_;
+	run({dir => $self->{$copy}}, 'git', 'update-ref', '-d', "refs/heads/$_")
+		for @branches;
+	return $self;
+}
+
+# }}}
+# rewrite_control, rewrite_branch - force-push with one commit dropped {{{
+#
+# T135 and T292 read a control commit that a rewrite made unreachable, and
+# T245 wants the same thing done to a deployment branch, so the two share
+# one body.  The returned sha is the commit that is now unreachable.
+sub rewrite_control {
+	my ($self, %opts) = @_;
+	return $self->rewrite_branch($self->{control}, %opts);
+}
+
+sub rewrite_branch {
+	my ($self, $branch, %opts) = @_;
+	my $count = $opts{count} // 1;
+
+	# The rewrite runs in copy B, because a rebase checks out and copy A's
+	# working state is what the rows assert on.
+	my $dir = $self->{b};
+	run({dir => $dir}, 'git', 'fetch', '-q', 'origin', $branch);
+	my ($listed) = run({dir => $dir}, 'git', 'rev-list',
+		'--max-count=' . ($count + 2), "origin/$branch");
+	my @shas = split /\n/, ($listed // '');
+	my $drop = $opts{drop} // $shas[1];
+	die "There is no commit to drop from $branch\n" unless $drop;
+
+	run({dir => $dir}, 'git', 'checkout', '-q', '-B', "rewrite-$branch",
+		"origin/$branch");
+	run({dir => $dir, env => {GIT_SEQUENCE_EDITOR => 'true'},
+			onfailure => "Failed to rewrite $branch"},
+		'git', 'rebase', '--onto', "$drop~1", $drop, "rewrite-$branch");
+	run({dir => $dir, onfailure => "Failed to force-push $branch"},
+		'git', 'push', '-q', '--force', 'origin', "HEAD:$branch");
+	run({dir => $dir}, 'git', 'checkout', '-q', $self->{control});
+
+	return $drop;
 }
 
 # }}}
