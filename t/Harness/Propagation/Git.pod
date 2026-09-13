@@ -32,4 +32,10 @@ C<checkout>, C<checkout_file>, C<add>, C<rm>, C<commit>, C<create_branch>,
 C<fetch_branch>, C<fetch_branches>, C<push>, C<delete_remote_branch>, and
 C<reset_working_tree>.
 
+Some of these steps call others, and the wrappers catch the inner call as
+readily as the outer one.  C<< $git->commit($message, @files) >> stages the
+files by calling C<add> itself, so a row that commits with files sees
+C<commit> and then C<add> in the log, and the C<add> counter moves as well.
+A row that arms C<add> arms that inner call too.
+
 =cut
