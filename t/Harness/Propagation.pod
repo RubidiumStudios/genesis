@@ -360,6 +360,10 @@ C<token>, which defaults to C<harness-token>, C<admin>, which defaults to 1,
 and C<repository>, which defaults to C<owner/repo>.  C<make_harness> calls it
 for you under C<< github => 1 >>.
 
+A pull request created through the double lands in that state file, so a
+listing taken after the create sees what was made, and a request for one
+pull request's reviews answers its reviews rather than the collection.
+
 =head2 gh_pull_request($gh, %opts)
 
 Declares an open pull request and returns its number.  Options are C<env>,
