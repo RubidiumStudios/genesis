@@ -168,6 +168,7 @@ unit-tests/harness_propagation-github.t             # the GitHub double on the p
 unit-tests/harness_propagation-branch_state.t       # the nine branch-state helpers
 unit-tests/harness_propagation-readers.t            # the six shared readers beside the first two
 unit-tests/harness_propagation-shaping.t            # the repository shapes the later rows want
+unit-tests/harness_propagation-records.t            # the record reader, the read log, and the shapes
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

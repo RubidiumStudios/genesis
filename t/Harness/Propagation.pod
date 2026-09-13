@@ -364,6 +364,12 @@ fixture clears the exodus mount as it attaches.  Each harness therefore starts
 on an empty record tree rather than on whatever the subtest above it wrote, and
 a row that proves a record's absence proves it of its own harness.
 
+A recording C<safe> is laid down beside the target, in the directory
+C<run_genesis> puts first on the path of the command under test, and that
+wrapper is what C<vault_read_log> reads its answer out of.  The parent's own
+path is left exactly as it was, so the harness's own reads still reach the
+C<safe> underneath and are never counted as reads a run made.
+
 =head2 fixture_applied($h, %opts)
 
 Writes the applied record at C<< $h->applied_path >>, carrying the control
@@ -593,6 +599,41 @@ Returns every call the run made, each as a hashref of the C<method>, the
 C<url>, the C<body>, and the C<token> the caller's environment held, so a row
 can assert that a preview was read-only, that exactly one client was built,
 or that a run went out unauthenticated.
+
+=head2 record_at($h, $path)
+
+Reads one vault path back as a hashref, or undef where nothing is written
+there.  The harness writes records through C<certify>, C<fixture_applied>,
+C<fixture_proposed>, C<fixture_pipeline_record>, and C<fixture_hold>, and this
+is the one way a row reads one of them back.
+
+The read is made on the parent's own path, which the recording C<safe> is
+deliberately kept off, so a row that reads a record in order to assert on it
+never counts as one of the reads the run under test made.
+
+=head2 vault_read_log($h)
+
+Every vault path the last run read, in order, as an arrayref.  The reads are
+made by a child process, so the log is a file the wrapper on the path appends
+to rather than a counter on this object, and C<run_genesis> empties it as each
+run starts so that the answer is that run's reads and nothing earlier.
+
+=head2 fixture_preflight($h, $kind, %opts)
+
+Returns the path of a repository in one of the three shapes the pre-flight
+classifies, which are C<safe_directory>, C<no_identity>, and C<no_commits>.
+The one option is C<copy>, which shapes one of the harness's own clones in
+place instead of building a repository beside them.
+
+Each shape is built in a fresh repository beside the harness, because the
+C<safe.directory> shape needs an ownership git will actually refuse and neither
+clone can be given one.  The first two shapes leave a marker in the repository
+and lean on the fixture C<git> the harness puts first on the path of the
+command under test, because a process running as the one user that owns
+everything the suite writes can neither hand a directory to another owner nor
+lose the global identity C<helper::import> wrote it.  A row that reads a shape
+itself puts that same directory first on its own path for the length of the
+row.
 
 =head1 METHODS
 
