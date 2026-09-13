@@ -841,9 +841,9 @@ B<Examples:>
   command_usage(0);
   # prints: full usage screen with description and options, then exits 0
 
-  # Show brief usage and error, then exit 1
+  # Show brief usage and error, then exit 2
   command_usage(1, "missing required argument");
-  # prints: brief usage hint and error message, then exits 1
+  # prints: brief usage hint and error message, then exits 2
 
   # Show usage with global options included
   command_usage(0, undef, 1);
