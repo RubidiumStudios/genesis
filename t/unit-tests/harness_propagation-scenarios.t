@@ -51,6 +51,66 @@ subtest 'the named shapes each add the one thing their name says' => sub {
 	ok($pr->{gh}, 'ready stands the GitHub double up for PR mode');
 };
 
+# Proves the reconciling half of T2: each scenario answers in the shape its
+# callers use it in, which is a narrowed delivery set, a list of control
+# commits in list context and the harness alone in scalar context, and the
+# three shapes whose arguments the step files fixed.
+subtest 'a scenario can be narrowed to some environments' => sub {
+	plan tests => 4;
+
+	my $full = ready_harness();
+	isnt(harness_marker($full, $full->slug('qa')), undef,
+		'everything is delivered by default');
+
+	my $narrow = ready_harness(delivered => [], certified => ['lab']);
+	is(harness_marker($narrow, $narrow->slug('qa')), undef,
+		'nothing delivered leaves qa at its init commit');
+	ok(record_at($narrow, $narrow->env_path('lab')),
+		'lab is certified');
+	is(record_at($narrow, $narrow->env_path('qa')), undef,
+		'and qa is not');
+};
+
+subtest 'the two scenarios that carry commits answer in both contexts' => sub {
+	plan tests => 6;
+
+	my ($gated, @shas) = gated_harness();
+	is(scalar(@shas), 4, 'gated_harness lays four control commits');
+	is(trailers_of($gated, $shas[2])->{'Genesis-Stage'}, 'prod',
+		'and the third of them carries the gate');
+	is_deeply(trailers_of($gated, $shas[0]), {},
+		'while a commit carrying none reads back empty');
+
+	my $alone = gated_harness();
+	isa_ok($alone, 'Harness::Propagation',
+		'scalar context answers the harness alone');
+
+	my ($due, @due) = due_harness();
+	is(scalar(@due), 2, 'due_harness stands two commits up');
+	isa_ok(scalar(due_harness()), 'Harness::Propagation',
+		'and answers the harness alone in scalar context');
+};
+
+subtest 'the three shapes whose arguments the step files fixed' => sub {
+	plan tests => 6;
+
+	my $unseeded = staged(envs => ['lab']);
+	ok(remote_sha($unseeded, $unseeded->slug('lab')),
+		'staged cuts the init branch');
+	is(harness_marker($unseeded, $unseeded->slug('lab')), undef,
+		'and delivers nothing onto it');
+
+	my $prod = held_prod();
+	ok(record_at($prod, $prod->applied_path),
+		'held_prod writes the applied record');
+	ok(remote_sha($prod, $prod->slug('prod')), 'and cuts prod');
+
+	my ($pr_h, $gh, $pr, $control) = with_open_pr();
+	ok($pr, 'with_open_pr answers the pull request number');
+	is(record_at($pr_h, $pr_h->env_path('qa') . '/proposed')->{number}, $pr,
+		'and the proposed record names it');
+};
+
 subtest 'a row that wants something else passes options through' => sub {
 	plan tests => 2;
 

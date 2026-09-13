@@ -31,6 +31,8 @@ push @EXPORT, qw/
 	newest_record
 /;
 
+push @EXPORT, qw/trailers_of/;
+
 push @EXPORT, qw/
 	init_branch deliver propagation_set harness_marker
 	add_deployment_root write_env_file
@@ -78,13 +80,12 @@ push @EXPORT, qw/
 	shuttle_spy shuttle_requests fixture_kit skip_on
 /;
 
-# The scenarios and the one-line shapes.  staged, held_prod, and
-# with_open_pr land beside them once their callers have fixed their shapes.
+# The scenarios and the one-line shapes.
 push @EXPORT, qw/
-	ready_envs ready_harness seeded_harness due_harness gated_harness
-	held_harness tracked_harness two_env_harness inherited_harness
-	ready two_roots a_delivery seeded two_due three_due three chain
-	gated proposed automated top_for
+	ready_envs ready_harness seeded_harness staged due_harness gated_harness
+	held_harness held_prod tracked_harness two_env_harness inherited_harness
+	ready with_open_pr two_roots a_delivery seeded two_due three_due three
+	chain gated proposed automated top_for
 /;
 
 # ref_in - one ref's sha in a repository at a path, or undef {{{
@@ -364,6 +365,34 @@ sub _newest_entry {
 	$key =~ s{/$}{};
 	my ($newest) = reverse sort grep {m{^\Q$key\E/[^/]+$}} keys %$exported;
 	return defined $newest ? $exported->{$newest} : undef;
+}
+
+# }}}
+# trailers_of - one commit's trailers, as git itself parses them {{{
+#
+# A row proving a gate has to read the trailer back, and picking the message
+# apart here would prove this file's own regex rather than what git sees, so
+# the message is handed to `git interpret-trailers --parse`, which is the
+# reader the gate itself will use.  A commit carrying no trailer, and a
+# commit the copy does not hold, each answer an empty hashref, so a row
+# proving an absence reads it rather than trapping a death.
+sub trailers_of {
+	my ($self, $ref, %opts) = @_;
+	my $dir = $self->{$opts{copy} // 'a'};
+	return {} unless _has_commit($dir, $ref);
+
+	my ($message) = run({dir => $dir}, 'git', 'log', '-1', '--format=%B', $ref);
+	my $file = "$self->{base}/trailers.msg";
+	helper::put_file($file, $message // '');
+
+	my ($parsed) = run({dir => $dir},
+		'git', 'interpret-trailers', '--parse', $file);
+
+	my %trailers;
+	for my $line (split /\n/, ($parsed // '')) {
+		$trailers{$1} = $2 if $line =~ /^(\S[^:]*):\s*(.*)$/;
+	}
+	return \%trailers;
 }
 
 # }}}
@@ -2765,6 +2794,14 @@ sub seeded_harness {
 	return ready_harness(%opts, envs => $opts{envs} // ['qa']);
 }
 
+# staged is the pipeline that has been applied and has propagated nothing
+# yet, which is the unseeded reading the walk has to answer for.  The name is
+# the step files'.
+sub staged {
+	my (%opts) = @_;
+	return ready_harness(%opts, delivered => [], certified => []);
+}
+
 # due_harness answers the harness and its control commits in list context,
 # because the rows that name a commit index into them, and the harness alone
 # in scalar context, because the rows that only want the shape say so.
@@ -2799,6 +2836,16 @@ sub held_harness {
 	my $h = ready_harness(%opts, envs => $opts{envs} // ['lab', 'prod']);
 	$h->fixture_hold($opts{env} // 'prod', reason => $opts{reason} // 'on-hold');
 	return $h;
+}
+
+# held_prod is the one-environment prod tree the hold rows stand on, and it
+# writes no hold of its own, because every one of those rows writes the hold
+# through the command it is testing.  The name says whose tree it is.
+sub held_prod {
+	my (%opts) = @_;
+	return ready_harness(%opts, envs => $opts{envs} // ['prod'],
+		delivered => $opts{delivered} // [],
+		certified => $opts{certified} // []);
 }
 
 # tracked_harness names its prerequisites positionally, because every call
@@ -2858,6 +2905,29 @@ sub ready {
 	$h->refresh('a');
 
 	return $h;
+}
+
+# with_open_pr is ready with one commit due, a pull request open on the
+# double, and a proposed record naming it, which is the whole shape a pull
+# request column reads.  The record takes the number under pr, because that
+# is what the double and every row that opens one call it.
+sub with_open_pr {
+	my (%opts) = @_;
+	my $env = $opts{env} // 'qa';
+	my $h = ready(%opts, envs => $opts{envs} // [$env],
+		due => $opts{due} // {"$env.yml" => "---\nkit: dev\nn: 2\n"});
+	my $gh = $h->{gh};
+	my $control = $h->git('a')->sha($h->control);
+
+	my $number = gh_pull_request($gh,
+		env    => $env,
+		head   => $h->pr_branch($env),
+		base   => $h->slug($env),
+		review => $opts{review} // 'none',
+	);
+	$h->fixture_proposed($env, pr => $number, control => $control);
+
+	return ($h, $gh, $number, $control);
 }
 
 # two_roots is the lab and prod pair across a second deployment root.  The
