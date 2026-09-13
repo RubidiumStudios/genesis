@@ -51,8 +51,12 @@ The same commit in copy B, never published.
 
 =head2 publish_from_b($h, %opts)
 
-The same commit in copy B, published with a real C<git push>, so copy B's
-remote-tracking ref moves with it.
+Commits in copy B and publishes it with a real C<git push>.  The push is per
+branch, carries no forced refspec, and sets the upstream where the branch has
+none, so copy B's own remote-tracking ref moves with the publish.  A
+divergence read taken straight after therefore reports in-sync with no second
+refresh, while copy A's refs stay where they were until copy A fetches or
+pushes.
 
 =head2 push_from($h, $copy, @branches)
 
