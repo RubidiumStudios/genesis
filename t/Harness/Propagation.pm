@@ -724,13 +724,23 @@ sub write_env_file {
 # helper::vault_start is the TAP-free half of helper::vault_ok, and the fixture
 # calls that half, because a fixture that emitted a test of its own would add
 # to the plan of whatever subtest happened to build the harness.
+#
+# The vault is spun once and then shared by every harness in the file, so the
+# fixture clears the exodus mount as it attaches and each harness starts on an
+# empty record tree rather than on whatever the subtest above it wrote.  The
+# removal is forced, because the first harness of a run finds nothing there.
 sub fixture_vault {
 	my ($self) = @_;
 	return $self->{vault_target} if $self->{vault_target};
 
-	$self->{vault_target} = helper::vault_start('genesis-propagation-harness');
-	$self->{vault_url}    = $helper::VAULT_URL;
-	return $self->{vault_target};
+	my $target = helper::vault_start('genesis-propagation-harness');
+	$self->{vault_target} = $target;
+	$self->{vault_url}    = $helper::VAULT_URL{$target};
+
+	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
+		'safe', 'rm', '-rf', $self->exodus_mount);
+
+	return $target;
 }
 
 # }}}
@@ -850,8 +860,14 @@ sub fixture_proposed {
 # its own decides the environment list even where that list is empty, so
 # break_vault($h, envs => [], applied => 1) takes the applied record alone
 # while break_vault($h, applied => 1) takes it along with every environment.
+#
+# Both movers name the fixture's target outright, so a harness that never built
+# the fixture is refused rather than left to move records in whatever vault the
+# ambient safe target happens to be.
 sub break_vault {
 	my ($self, %opts) = @_;
+	die "break_vault needs a vault fixture, and this harness has none\n"
+		unless $self->{vault_target};
 	my $envs = exists $opts{envs} ? $opts{envs} : $self->{envs};
 	my @paths = map {$self->env_path($_)} @{$envs || []};
 	push @paths, $self->applied_path if $opts{applied};
@@ -869,6 +885,8 @@ sub break_vault {
 # restore_vault - put back what break_vault moved aside {{{
 sub restore_vault {
 	my ($self) = @_;
+	die "restore_vault needs a vault fixture, and this harness has none\n"
+		unless $self->{vault_target};
 	for my $pair (@{delete($self->{broken}) || []}) {
 		run({env => {SAFE_TARGET => $self->{vault_target}}, passfail => 1},
 			'safe', 'move', $pair->[1], $pair->[0]);
