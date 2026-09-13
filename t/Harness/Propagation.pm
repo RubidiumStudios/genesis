@@ -167,6 +167,11 @@ sub _create_root {
 #
 # The first root sits at copy A's own git root, so the repository the rows run
 # against and the deployment root are one directory.
+#
+# Copy B's control branch is created from origin's, with the upstream set, so
+# that every push from copy B moves copy B's own remote-tracking ref.  A push
+# that leaves T behind would make a divergence read straight after a publish
+# report `ahead`, which is a fault in the harness and not in the code.
 sub _seed_control {
 	my ($self) = @_;
 
@@ -187,8 +192,9 @@ sub _seed_control {
 	run({dir => $self->{a}, onfailure => "Failed to publish control"},
 		'git', 'push', '-q', '-u', 'origin', $self->{control});
 	run({dir => $self->{b}}, 'git', 'fetch', '-q', 'origin');
-	run({dir => $self->{b}}, 'git', 'checkout', '-q', '-B', $self->{control},
-		"origin/$self->{control}");
+	run({dir => $self->{b}, onfailure => "Failed to track control in copy B"},
+		'git', 'checkout', '-q', '-B', $self->{control},
+		'--track', "origin/$self->{control}");
 
 	return $self;
 }
@@ -252,6 +258,10 @@ sub _write_tree {
 # leaves it undefined, because the branch is the one thing every caller names
 # and an option that most callers must remember to set is an option that some
 # caller will forget.
+#
+# The push is per branch and carries no forced refspec, and it sets the
+# upstream, so the pushing copy's own remote-tracking ref moves with every
+# publish and a divergence read taken straight after reports in-sync.
 sub _commit_in {
 	my ($self, $copy, $branch, %opts) = @_;
 	my $dir = $self->{$copy};
@@ -275,7 +285,7 @@ sub _commit_in {
 	my ($sha) = run({dir => $dir}, 'git', 'rev-parse', 'HEAD');
 	chomp $sha;
 	run({dir => $dir, onfailure => "Failed to push $branch from copy $copy"},
-		'git', 'push', '-q', 'origin', $branch) if $opts{push};
+		'git', 'push', '-q', '-u', 'origin', $branch) if $opts{push};
 
 	return $sha;
 }
