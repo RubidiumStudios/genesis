@@ -43,28 +43,42 @@ subtest 'every written record reads back through one reader' => sub {
 		'a path nothing was written to reads undef');
 };
 
+subtest 'a record still reads as itself once it has children' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa']);
+	certify($h, 'qa', commit => 'deadbeef', control_commit => 'cafebabe');
+	fixture_pipeline_record($h, 'qa', dependencies => ['lab/bosh']);
+
+	# safe export answers with the whole subtree, so the reader has to pick
+	# the record out by its own address rather than take whatever came back.
+	my $deployed = record_at($h, $h->env_path('qa'));
+	is($deployed->{'git.commit'}, 'deadbeef',
+		'the deployment record reads back with a pipeline record beneath it');
+	is(record_at($h, $h->env_path('qa') . '/pipeline')->{dependencies},
+		'lab/bosh', 'and the record beneath it reads back as itself');
+
+	is(record_at($h, $h->exodus_mount . 'qa'), undef,
+		'a path holding nothing of its own reads undef whatever it carries');
+};
+
 subtest 'the reads are counted in order' => sub {
-	# One of the six is the restoration the run asserts for itself.
-	plan tests => 6;
+	# One of the nine is the restoration the run asserts for itself.
+	plan tests => 9;
 
 	my $h = make_harness(envs => ['qa']);
 	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	certify($h, 'qa', control_commit => $h->git('a')->sha($h->control));
 
-	# A row reading a record to assert on it is no part of what the run read,
-	# so the reader the harness owns runs on the parent's own path, and the
-	# log a run answers for is emptied as that run starts.
-	record_at($h, $h->applied_path);
-	run_genesis($h, 'ping');
-	is_deeply(vault_read_log($h), [],
-		"the harness's own reader is no part of what a run read");
-
 	# The reads a command makes are made by a child process, and the recording
 	# safe first on that child's path is the only thing that can see them, so
 	# the row makes its read the way the child makes one.
-	local $ENV{PATH} = join(':',
-		Harness::Propagation::_path_prefix($h), $ENV{PATH});
-	my ($shown) = run({}, 'safe', 'get', $h->applied_path);
+	my $shown;
+	{
+		local $ENV{PATH} = join(':',
+			Harness::Propagation::_path_prefix($h), $ENV{PATH});
+		($shown) = run({}, 'safe', 'get', $h->applied_path);
+	}
 
 	my $read = vault_read_log($h);
 	ok(scalar(@$read), 'a read made on the path a run is given is counted');
@@ -73,6 +87,21 @@ subtest 'the reads are counted in order' => sub {
 	is($read->[-1], $h->applied_path, 'the log answers in the order read');
 	like($shown, qr/control_commit/,
 		'and the record still comes back through the recording safe');
+
+	# A run empties the log as it starts, so what the log answers is that
+	# run's reads and never what a row read before it.  The read above is what
+	# the emptying has to clear for the assertion below to mean anything.
+	my (undef, undef, $exit) = run_genesis($h, 'environments');
+	is($exit, 0, 'a default harness is a repository a whole command runs in');
+	is_deeply(vault_read_log($h), [],
+		'and the run started on an empty log');
+
+	# The reader the harness owns runs on the parent's own path, which the
+	# recording safe is kept off, so a row reading a record to assert on it is
+	# no part of what the run read.
+	ok(record_at($h, $h->applied_path), 'the record reads back after the run');
+	is_deeply(vault_read_log($h), [],
+		"and the harness's own reader counted for nothing");
 };
 
 subtest 'the applied record alone can be made unreadable' => sub {

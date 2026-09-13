@@ -41,6 +41,14 @@ section whose C<enabled> is false, the string C<none> writes no section, and a
 hashref is an enabled pipeline with those repository-wide keys set.
 C<source_control> is a hashref merged under C<pipeline.source_control>.
 
+C<pipeline> defaults to C<none>, so a harness nobody asked for a section from
+carries none.  The C<.genesis/config> schema does not know the C<pipeline> key
+yet, and a repository whose configuration carries an unknown key fails
+validation before any command reaches its work, so a default harness would
+otherwise be one no whole run could be made against.  The default flips back to
+an enabled section once the schema declares the key, and until then a row that
+wants a section asks for it by name.
+
 C<vault> defaults on, and the harness spins the suite's own vault through
 C<fixture_vault> when it does.  A row that wants no vault at all passes
 C<vault =E<gt> 0>.
@@ -607,6 +615,12 @@ there.  The harness writes records through C<certify>, C<fixture_applied>,
 C<fixture_proposed>, C<fixture_pipeline_record>, and C<fixture_hold>, and this
 is the one way a row reads one of them back.
 
+C<safe export> answers with the whole subtree under the path it is given, so
+the record asked for is picked out by its own key and the children beneath it
+are left where they are.  A deployment record still reads back as itself once a
+pipeline record or a hold has been written under it, and a path that holds
+nothing of its own answers undef even where its children hold something.
+
 The read is made on the parent's own path, which the recording C<safe> is
 deliberately kept off, so a row that reads a record in order to assert on it
 never counts as one of the reads the run under test made.
@@ -617,6 +631,12 @@ Every vault path the last run read, in order, as an arrayref.  The reads are
 made by a child process, so the log is a file the wrapper on the path appends
 to rather than a counter on this object, and C<run_genesis> empties it as each
 run starts so that the answer is that run's reads and nothing earlier.
+
+The log holds the address C<safe> was handed, so a read of a whole record
+appears as the record's path while a read of a single field appears as
+C<path:key>, which is how C<Service::Vault::get> asks for one field.  A row
+counting reads of a whole record matches the path, and a row counting keyed
+reads matches the longer form.
 
 =head2 fixture_preflight($h, $kind, %opts)
 
