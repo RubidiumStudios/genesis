@@ -1,0 +1,78 @@
+=head1 NAME
+
+Genesis::Exit - The named exit codes Genesis commands end with
+
+=head1 SYNOPSIS
+
+    use Genesis::Exit qw/DATAERR TEMPFAIL/;
+
+    bail({exitcode => DATAERR},
+      "control is behind its remote-tracking ref; refresh and try again");
+
+    exit TEMPFAIL if grep {$_->{outcome} ne 'published'} @results;
+
+=head1 DESCRIPTION
+
+Genesis had no exit-code table, only scattered numbers, so a caller could
+not tell a refusal from a partial result from a crash and could act on none
+of them.  This module is the one place the named codes live.
+
+Each code is taken from C<sysexits.h> where that file has the meaning, and
+from established shell convention where it does not.  A command names the
+cause of every non-zero exit it specifies, so that a pipeline job reading
+the status knows whether to retry, to page someone, or to stop.
+
+Three numbers are not here on purpose.  A fatal system error, where nothing
+the caller could have done differently would have helped, exits a bare C<1>.
+Usage and option errors exit C<2>, and the prerequisites check exits C<86>.
+All three are Genesis precedent that a caller may already be testing for,
+and a code is never renumbered once it has shipped.
+
+=head1 CONSTANTS
+
+=head2 TEMPFAIL
+
+C<75>.  A partial propagation: the run completed, and some environment ended
+C<failed>, C<not attempted>, or C<publish rejected>, so the next run repairs
+it.  Also the unsurvivable abort, an error no environment survives but a
+retry may fix, such as an unreachable remote or a rejected credential.
+
+=head2 DATAERR
+
+C<65>.  An illegal initial state, where the repository is the run's input and
+the refusal names the fix: control behind or ahead of its remote-tracking
+ref, a hand commit on a deployment branch, a staged index where a clean one
+was required, or a command run off a branch it may not run from.
+
+=head2 ABORTED
+
+C<130>.  The operator was asked to confirm and answered no.
+
+=head2 NOPERM
+
+C<77>.  The provider gate: work the pipeline owns, attempted by hand without
+C<--force>.
+
+=head2 CONFIG
+
+C<78>.  An unconfigured or misconfigured state, which covers an invalid
+pipeline block, a dependency cycle, a pipeline flag used where no pipeline is
+enabled, and a pipeline whose provider changed under it.
+
+=head2 UNAVAILABLE
+
+C<69>.  A service could not answer, such as an unreadable review state or a
+failed write to the secrets store.
+
+=head2 SOFTWARE
+
+C<70>.  An internal software error, which is the one non-zero exit that
+follows a success: the deployment worked and something wrote into the
+repository behind it.
+
+=head1 EXPORTS
+
+Nothing is exported by default.  Import the codes you spend by name, or ask
+for C<:all>.
+
+=cut
