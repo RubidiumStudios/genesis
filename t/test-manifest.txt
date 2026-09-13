@@ -158,6 +158,7 @@ unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library 
 unit-tests/genesis_ci_propagation-core.t            # propagation engine core
 unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
 unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
+unit-tests/harness_propagation-pair.t               # harness pair, bare remote and two copies
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

@@ -1,0 +1,81 @@
+=head1 NAME
+
+Harness::Propagation - the scenario harness for the propagation rows
+
+=head1 SYNOPSIS
+
+  use lib 't';
+  use Harness::Propagation;
+
+  my $h = make_harness(envs => ['qa', 'lab']);
+  my $sha = publish_from_b($h, files => {'ops/shared.yml' => "---\n"});
+
+=head1 DESCRIPTION
+
+The harness is a bare repository standing as R plus two real clones of it.
+Copy A belongs to the operator and every command under test runs there.  Copy
+B belongs to a teammate, and the publish helpers write from it, because most
+of the hazards only show themselves once somebody else has published.
+
+Every helper that builds repository, vault, or API state lives in this module
+and nowhere else.  A helper that asserts lives beside the test that uses it,
+except for the two invariant assertions, which every row reads through.
+
+=head1 FUNCTIONS
+
+=head2 make_harness(%opts)
+
+Builds R, clones copy A and copy B, writes the deployment root through
+C<Genesis::Top-E<gt>create>, and publishes the control branch.  Returns the
+harness object.  Takes C<envs>, C<type>, C<control>, C<pr_prefix>,
+C<provider>, C<mode>, C<root>, C<pipeline>, C<vault>, C<github>, and C<kit>.
+
+The first deployment root sits at copy A's own git root, so the repository and
+the deployment root are one directory.  C<Genesis::Top-E<gt>create> appends the
+deployment name to the path it is handed and refuses a directory that already
+exists, so the harness lets it build the root under a scratch directory and
+moves what it wrote into place.  The configuration is still the one the real
+code path writes.
+
+=head2 commit_on_control($h, %opts)
+
+Commits a file set in copy A and returns the new sha.  Takes C<files>,
+C<message>, C<trailers>, C<branch>, and C<push>.
+
+=head2 commit_from_b($h, %opts)
+
+The same commit in copy B, never published.
+
+=head2 publish_from_b($h, %opts)
+
+The same commit in copy B, published with a real C<git push>, so copy B's
+remote-tracking ref moves with it.
+
+=head2 push_from($h, $copy, @branches)
+
+Pushes each named branch on its own and returns a hashref of branch to 1 or 0.
+
+=head2 refresh($h, $copy, @branches)
+
+Fetches in the named copy so that T moves and L does not.
+
+=head2 ref_in($dir, $ref)
+
+Returns the sha the named ref stands at in the repository at C<$dir>, or undef
+where the ref is absent, so a row proving an absence reads it rather than
+trapping a death.
+
+=head2 tree_of($dir, $ref)
+
+Returns the commit's paths as a sorted arrayref, or an empty arrayref where the
+ref is absent.
+
+=head1 METHODS
+
+C<r>, C<a>, and C<b> return the three paths.  C<git> returns a
+C<Service::Git> handle for a copy.  C<type>, C<control>, and C<envs> return
+the declared values.  C<slug> and C<pr_branch> render the deployment slug and
+its pull request branch.  C<exodus_mount>, C<applied_path>, and C<env_path>
+render the vault addresses.
+
+=cut
