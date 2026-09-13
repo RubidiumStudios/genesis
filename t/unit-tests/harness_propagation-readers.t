@@ -74,7 +74,7 @@ subtest 'the remote option reads T rather than L' => sub {
 };
 
 subtest 'the readers answer for what is absent' => sub {
-	plan tests => 5;
+	plan tests => 7;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 
@@ -86,6 +86,14 @@ subtest 'the readers answer for what is absent' => sub {
 	is_deeply(files_at($h, 'no/such/branch'), {},
 		'a commit that is not there reads an empty set of files');
 	is(slurp($h->a . '/no-such-file'), undef, 'and a missing file reads undef');
+
+	my $unborn = helper::workdir() . '/unborn';
+	helper::mkdir_or_fail($unborn);
+	run({dir => $unborn}, 'git', 'init', '-q');
+
+	is(branch_of($unborn), undef,
+		'a repository with no commits names no branch');
+	is_deeply(refs_in($unborn), {}, 'and lists no refs at all');
 };
 
 done_testing;
