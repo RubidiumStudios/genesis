@@ -1261,7 +1261,13 @@ sub check_prereqs { # {{{
 		# Name,     Version, Command,                                 Pattern                   Source
 		["perl",   "5.20.0", "", $perl_version, $^X],
 		["curl",   "7.30.0", "curl --version  2>/dev/null | head -n1",          qr(^curl\s+(\S+))],
-		["git",     "1.8.0", "git --version   2>/dev/null",                     qr(.*version\s+(\S+).*)],
+		# 2.34.1 is what Ubuntu jammy ships, jammy being the lowest supported
+		# image, and what the CI image carries.  Declared for every command
+		# rather than for the ones that lean on it: two floors would be two
+		# things to keep true, and a command that changed class would change
+		# its requirement silently.  It is also what refuses a task image
+		# whose git has regressed.
+		["git",    "2.34.1", "git --version   2>/dev/null",                     qr(.*version\s+(\S+).*)],
 		["jq",        "1.6", "jq --version    2>/dev/null",                     qr(^jq-([\.0-9]+)),       "https://stedolan.github.io/jq/download/"],
 		["spruce", "1.28.0", "spruce -v       2>/dev/null",                     qr(.*version\s+(\S+).*)i, "https://github.com/geofffranks/spruce/releases"],
 		[{dev_version => $SAFE_DEV_VERSION},

@@ -1142,7 +1142,12 @@ Checks the following external tools:
 
 =item curl E<gt>= 7.30.0
 
-=item git E<gt>= 1.8.0
+=item git E<gt>= 2.34.1
+
+The version Ubuntu jammy ships, jammy being the lowest supported image.
+Declared for every Genesis command rather than only for the ones that lean
+on recent git, so there is one requirement to keep true rather than one per
+command, and so an image whose git has regressed is refused here.
 
 =item jq E<gt>= 1.6
 
