@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
-# Proves T2, the branch halves: the harness cuts each environment on R as the
-# init branch the apply would leave, and a second deployment root sharing an
-# environment name can be built beside the first.
+# Proves T2: the harness cuts each environment on R as the init branch the
+# apply would leave, a second deployment root sharing an environment name can
+# be built beside the first, and the vault fixture answers a read at the two
+# addresses the design fixes.
 use strict;
 use warnings;
 use utf8;
@@ -135,6 +136,59 @@ subtest "the set is the harness's own read and a delivery mirrors it" => sub {
 	my $delivered = deliver($h, 'qa', control => $control);
 	is_deeply(tree_of($h->r, $delivered), [sort @set],
 		'the delivered tree is the set and nothing besides');
+};
+
+# Proves T2, the vault half: the fixture answers a read of the certified
+# commit and of the applied record at the two addresses D103 fixes.
+subtest 'the fixture answers the two vault addresses' => sub {
+	plan tests => 8;
+
+	my $h = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+	my $delivered = deliver($h, 'qa', control => $control);
+
+	is($h->applied_path, '/secret/exodus/_pipelines/bosh',
+		'the applied record sits where D103 puts it');
+	is($h->env_path('qa'), '/secret/exodus/qa/bosh',
+		"the environment's own record sits beside it");
+
+	fixture_applied($h, control => $control, provider => 'manual');
+	have_secret($h->applied_path . ':control_commit');
+	is(secret($h->applied_path . ':control_commit'), $control,
+		'the applied record names the control commit it applied from');
+	like(secret($h->applied_path . ':at'),
+		qr/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [-+]\d{4}$/,
+		'applied.at is in EXODUS_TIME_FORMAT');
+
+	certify($h, 'qa', commit => $delivered, control_commit => $control);
+	is(secret($h->env_path('qa') . ':git.commit'), $delivered,
+		'the deploy record names the deployed commit');
+	is(secret($h->env_path('qa') . ':git.control_commit'), $control,
+		'the deploy record names the certified commit');
+
+	fixture_pipeline_record($h, 'qa',
+		dependencies => ['lab/bosh'], discovery => 'complete');
+	is(secret($h->env_path('qa') . '/pipeline:discovery'), 'complete',
+		"the environment's compiled pipeline facts sit under a pipeline subpath");
+};
+
+subtest 'a broken read refuses rather than answering stale' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa']);
+	certify($h, 'qa', commit => 'deadbeef', control_commit => 'cafebabe');
+	have_secret($h->env_path('qa') . ':git.commit');
+
+	break_vault($h, envs => ['qa']);
+	no_secret($h->env_path('qa') . ':git.commit');
+
+	restore_vault($h);
 };
 
 done_testing;

@@ -817,6 +817,32 @@ sub have_env($;$) {
 my %VAULT_PID;
 our %VAULT_URL;
 our $VAULT_URL;
+
+# vault_start spins the suite's own vault and emits no TAP of its own, so a
+# fixture can build one without adding tests to whatever subtest happens to be
+# running.  It dies where vault_ok fails, and vault_ok is the thin assertion
+# wrapper that turns each of those deaths back into the test it has always
+# emitted.
+sub vault_start {
+	my $target = shift || "genesis-ci-unit-tests";
+	return $target if defined $VAULT_PID{$target};
+
+	my $pid = qx(SAFE_TARGET= $ENV{GENESIS_TOPDIR}/t/bin/vault $target);
+	my $rc = $? >> 8;
+	die "failed to spin a vault server: pid='$pid' rc=$rc\n"
+		if $rc > 0 || $pid eq "";
+	die "expected numeric value for Vault pid, but got this:\n$pid\n"
+		unless $pid =~ /^[0-9]+$/;
+
+	chomp($pid);
+	$VAULT_PID{$target} = $pid;
+	kill(-0, $pid)
+		or die "failed to spin a vault server: couldn't signal pid $pid.\n";
+	chomp($VAULT_URL = `SAFE_TARGET=$target safe env --json | jq -r '.VAULT_ADDR'`);
+	$VAULT_URL{$target} = $VAULT_URL;  # track the latest
+	return $target;
+}
+
 sub vault_ok {
 	my $target = shift || "genesis-ci-unit-tests";
 	local $Test::Builder::Level = $Test::Builder::Level + 1;
@@ -825,23 +851,13 @@ sub vault_ok {
 		return $target;
 	}
 
-	my $pid = qx(SAFE_TARGET= $ENV{GENESIS_TOPDIR}/t/bin/vault $target);
-	my $rc = $? >> 8;
-	if ($rc > 0 || $pid eq "") {
-		fail "failed to spin a vault server: pid='$pid' rc=$rc";
+	unless (eval {vault_start($target); 1}) {
+		my $err = $@;
+		$err =~ s/\n\z//;
+		fail $err;
 		die "Cannot continue\n";
-	};
-	fail "expected numeric value for Vault pid, but got this:\n$pid\n" unless $pid =~ /^[0-9]+$/;
-
-	chomp($pid);
-	$VAULT_PID{$target} = $pid;
-	kill -0, $pid or do {
-		fail "failed to spin a vault server: couldn't signal pid $pid.";
-		die "Cannot continue\n";
-	};
-	pass "vault running [pid $pid]";
-	chomp($VAULT_URL = `SAFE_TARGET=$target safe env --json | jq -r '.VAULT_ADDR'`);
-	$VAULT_URL{$target} = $VAULT_URL;  # track the latest
+	}
+	pass "vault running [pid $VAULT_PID{$target}]";
 	return $target;
 }
 
