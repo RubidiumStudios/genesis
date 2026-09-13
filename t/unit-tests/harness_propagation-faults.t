@@ -96,7 +96,7 @@ subtest 'a handle taken before the fault faults too' => sub {
 	like($@, qr/the harness stopped here/, 'with the armed message');
 };
 
-subtest 'the plan reaches a spawned command' => sub {
+subtest 'an armed plan leaves an unaffected command alone' => sub {
 	plan tests => 2;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
@@ -110,6 +110,61 @@ subtest 'the plan reaches a spawned command' => sub {
 	ok(!(grep {$_->[0] eq 'push'} @steps),
 		'and the armed step was never reached');
 };
+
+subtest 'the plan reaches a spawned command' => sub {
+	# genesis ping builds no git handle, so the row above says only that the
+	# plan disturbs nothing.  This one spawns a child that does take a git
+	# step, under the environment run_genesis builds, and shows that the
+	# override intercepted the step in the child and that an armed fault
+	# fired there.
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $git = fault_git($h);
+
+	my ($out, $rc, $err) = _fetch_in_child($h);
+	is($rc, 0, 'the child took the step and lived');
+	my @steps = step_log($git);
+	is(scalar(grep {$_->[0] eq 'fetch_branch'} @steps), 1,
+		'the step the child took is in the log');
+
+	reset_steps($git);
+	fail_on($git, 'fetch_branch', 1, message => 'the harness stopped the fetch');
+
+	($out, $rc, $err) = _fetch_in_child($h);
+	isnt($rc, 0, 'the child armed against dies');
+	like($err, qr/the harness stopped the fetch/,
+		'with the armed message on its stderr');
+
+	@steps = step_log($git);
+	is(scalar(grep {$_->[0] eq 'fetch_branch'} @steps), 1,
+		'and the step was recorded before it died');
+};
+
+# _fetch_in_child - fetch one branch from a child perl, under the environment
+# run_genesis builds for a spawned command.  It is the machinery the rows
+# above need rather than repository state, so it sits beside them.
+sub _fetch_in_child {
+	my ($h) = @_;
+	# Not the control branch, which copy A has checked out, because git
+	# refuses a forced fetch into the branch the working tree is on.
+	my $branch = $h->slug('qa');
+	return run({
+			dir      => $h->a,
+			stderr   => 0,
+			passfail => 0,
+			env      => {
+				GENESIS_HARNESS_GIT_PLAN => $ENV{GENESIS_HARNESS_GIT_PLAN},
+				GENESIS_HARNESS_GIT_LOG  => $ENV{GENESIS_HARNESS_GIT_LOG},
+				PERL5OPT => join(' ',
+					'-I' . $helper::TOPDIR . '/t', '-I' . $helper::TOPDIR . '/lib',
+					'-MHarness::Propagation::Git'),
+			},
+		}, 'perl', '-e',
+		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branch($ARGV[1]);',
+		$h->a, $branch);
+}
 
 subtest 'the remote can be severed and restored' => sub {
 	plan tests => 4;
