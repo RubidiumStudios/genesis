@@ -22,6 +22,11 @@ our @EXPORT = qw/
 	ref_in tree_of upstream_of counts
 /;
 
+push @EXPORT, qw/
+	init_branch deliver propagation_set harness_marker
+	add_deployment_root write_env_file
+/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -209,12 +214,10 @@ sub _seed_control {
 	helper::mkdir_or_fail($root) unless -d $root;
 	$self->_create_root($root);
 
-	# The environment files land through write_env_file, which the repository
-	# shaping brings with it.  Until then the deployment root alone seeds the
-	# control branch.
-	if ($self->can('write_env_file')) {
-		$self->write_env_file($_, commit => 0) for @{$self->{envs}};
-	}
+	# The environment files land through write_env_file and are committed with
+	# the root, so the control branch's first commit is a repository a command
+	# can be run against rather than a deployment root with nothing in it.
+	$self->write_env_file($_, commit => 0) for @{$self->{envs}};
 
 	run({dir => $self->{a}}, 'git', 'add', '-A');
 	run({dir => $self->{a}, onfailure => "Failed to seed control"},
@@ -372,6 +375,337 @@ sub refresh {
 	run({dir => $self->{$copy}, passfail => 1},
 		'git', 'fetch', '-q', 'origin', @refspecs);
 	return $self;
+}
+
+# }}}
+# _has_commit - whether a repository holds a commit, without dying on absence {{{
+sub _has_commit {
+	my ($dir, $commitish) = @_;
+	return run({dir => $dir, passfail => 1, stderr => 0},
+		'git', 'cat-file', '-e', "$commitish^{commit}") ? 1 : 0;
+}
+
+# }}}
+# _repo_holding - the first of the three repositories that holds a commit {{{
+#
+# A control commit is written in copy A, but a row is free to publish one from
+# copy B or to name one that only R still has, and a reader that looked in one
+# repository alone would answer an empty set rather than say so.  Copy A is
+# asked first, because that is where the operator's commits are made.
+sub _repo_holding {
+	my ($self, $commitish) = @_;
+	for my $dir ($self->{a}, $self->{r}, $self->{b}) {
+		return $dir if _has_commit($dir, $commitish);
+	}
+	die "No repository in the harness holds $commitish\n";
+}
+
+# }}}
+# _fetch_commit - bring a commit's objects into one copy, touching no ref {{{
+#
+# A delivery written in copy B reads the control commit's blobs out of copy B's
+# own object database, and copy B has not fetched since the control commit was
+# published.  The fetch names the source repository by path rather than by the
+# remote's name, because a path carries no configured refspec and so no
+# remote-tracking ref moves: only `refresh` is allowed to move T.
+sub _fetch_commit {
+	my ($self, $copy, $commitish, @branches) = @_;
+	my $dir = $self->{$copy};
+	@branches = ($self->{control}) unless @branches;
+
+	return $dir if _has_commit($dir, $commitish);
+	for my $source ($self->{r}, map {$self->{$_}} grep {$_ ne $copy} qw/a b/) {
+		run({dir => $dir, passfail => 1, stderr => 0},
+			'git', 'fetch', '-q', '--no-tags', $source, @branches);
+		return $dir if _has_commit($dir, $commitish);
+	}
+	die "The commit $commitish is in none of the harness's repositories\n";
+}
+
+# }}}
+# _branch_parent - the commit a delivery should sit on, in the writing copy {{{
+#
+# The copy's own branch wins where it has one, so a row that has deliberately
+# left the copy behind or ahead keeps the shape it built.  Where the copy has
+# never seen the branch, R's tip stands in, and the objects come with it, so
+# the push that follows fast-forwards rather than being refused.
+sub _branch_parent {
+	my ($self, $copy, $branch) = @_;
+
+	my $local = ref_in($self->{$copy}, "refs/heads/$branch");
+	return $local if $local;
+
+	my $on_r = ref_in($self->{r}, "refs/heads/$branch");
+	return undef unless $on_r;
+
+	$self->_fetch_commit($copy, $on_r, $branch);
+	return $on_r;
+}
+
+# }}}
+# init_branch - cut an environment's branch on R as the apply would {{{
+#
+# D42 makes the missing deployment branch an orphan whose root commit adds a
+# single init file and carries [ci skip], and D80 has the apply create it with
+# plumbing and no checkout.  We write the objects straight into copy A's
+# database with a private index and push the ref, so no working tree moves.
+sub init_branch {
+	my ($self, $env, %opts) = @_;
+	my $branch = $self->slug($env, %opts);
+	my $dir    = $self->{a};
+
+	my $seed = "$self->{base}/init-" . int(rand(1_000_000));
+	helper::put_file($seed, "This branch is managed by genesis pipeline-apply.\n");
+
+	my ($blob) = run({dir => $dir, onfailure => "Failed to write the init blob"},
+		'git', 'hash-object', '-w', $seed);
+	chomp $blob;
+
+	my $index = "$self->{base}/idx-" . int(rand(1_000_000));
+	my $tree  = do {
+		local $ENV{GIT_INDEX_FILE} = $index;
+		run({dir => $dir}, 'git', 'update-index', '--add', '--cacheinfo',
+			"100644,$blob,init");
+		my ($t) = run({dir => $dir}, 'git', 'write-tree');
+		chomp $t;
+		$t;
+	};
+	unlink $index;
+
+	my ($sha) = run({dir => $dir, onfailure => "Failed to write the init commit"},
+		'git', 'commit-tree', $tree, '-m',
+		sprintf('Initialize %s branch [ci skip]', $branch));
+	chomp $sha;
+
+	run({dir => $dir, onfailure => "Failed to write refs/heads/$branch"},
+		'git', 'update-ref', "refs/heads/$branch", $sha);
+	if (defined $opts{push} ? $opts{push} : 1) {
+		run({dir => $dir, onfailure => "Failed to push $branch"},
+			'git', 'push', '-q', '-u', 'origin', $branch);
+	}
+
+	return $sha;
+}
+
+# }}}
+# deliver - write one delivered commit onto a deployment branch {{{
+#
+# A delivery is a mirror under D69, so the commit's tree is the propagation set
+# as it stood at the delivered control commit and nothing else.  The keep and
+# corrupt options exist so a row can stop the mirror's removing half or land a
+# file at the wrong content, which is what the snapshot assertion has to catch.
+#
+# It is written in copy B by default, because a delivery is a teammate's
+# published work and the operator's clone is meant to read behind it until it
+# refreshes.  There is no remove_init option: the mirror starts from an empty
+# index, so the init file goes by construction.
+sub deliver {
+	my ($self, $env, %opts) = @_;
+	my $copy    = $opts{copy} // 'b';
+	my $branch  = $opts{pr} ? $self->pr_branch($env, %opts)
+	                        : $self->slug($env, %opts);
+	my $dir     = $self->{$copy};
+	my $control = $opts{control} or die "deliver needs a control commit\n";
+
+	my @set = $self->propagation_set($env, at => $control, %opts);
+	my %keep = map {$_ => 1} @{$opts{keep} || []};
+
+	$self->_fetch_commit($copy, $control);
+	my $parent = $self->_branch_parent($copy, $branch);
+
+	my $index = "$self->{base}/idx-" . int(rand(1_000_000));
+	local $ENV{GIT_INDEX_FILE} = $index;
+
+	if ($parent && %keep) {
+		run({dir => $dir}, 'git', 'read-tree', $parent);
+		my ($held) = run({dir => $dir}, 'git', 'ls-files');
+		chomp $held if defined $held;
+		for my $path (split /\n/, ($held // '')) {
+			next if $keep{$path};
+			run({dir => $dir}, 'git', 'update-index', '--force-remove', '--', $path);
+		}
+	} else {
+		run({dir => $dir}, 'git', 'read-tree', '--empty');
+	}
+
+	my $corrupt = $opts{corrupt} || {};
+	my $files   = $opts{files}   || {};
+	for my $path (@set) {
+		my $content = exists $corrupt->{$path} ? $corrupt->{$path}
+		            : exists $files->{$path}   ? $files->{$path}
+		            : undef;
+		my $blob;
+		if (defined $content) {
+			my $tmp = "$self->{base}/blob-" . int(rand(1_000_000));
+			helper::put_file($tmp, $content);
+			($blob) = run({dir => $dir}, 'git', 'hash-object', '-w', $tmp);
+		} else {
+			($blob) = run({dir => $dir}, 'git', 'rev-parse', "$control:$path");
+		}
+		chomp $blob;
+		run({dir => $dir}, 'git', 'update-index', '--add', '--cacheinfo',
+			"100644,$blob,$path");
+	}
+
+	my ($tree) = run({dir => $dir}, 'git', 'write-tree');
+	chomp $tree;
+	unlink $index;
+
+	my $message = sprintf("[pipeline] control@%s -> %s",
+		substr($control, 0, 12), $env);
+	$message .= "\n\n" . $opts{body} if $opts{body};
+
+	my ($sha) = run({dir => $dir, onfailure => "Failed to write the delivery"},
+		'git', 'commit-tree', $tree, ($parent ? ('-p', $parent) : ()),
+		'-m', $message);
+	chomp $sha;
+
+	run({dir => $dir}, 'git', 'update-ref', "refs/heads/$branch", $sha);
+	if (defined $opts{push} ? $opts{push} : 1) {
+		run({dir => $dir, onfailure => "Failed to push $branch"},
+			'git', 'push', '-q', '-u', 'origin', $branch);
+	}
+
+	return $sha;
+}
+
+# }}}
+# propagation_set - the set's paths, read by the harness from a commit's tree {{{
+#
+# The harness computes the set itself rather than calling propagation_files,
+# because a row that asserts a delivery against the product's own reader would
+# be asserting the reader against itself.  M4 changes propagation_files and
+# must not silently change what the snapshot assertion compares.
+sub propagation_set {
+	my ($self, $env, %opts) = @_;
+	my $at   = $opts{at} // $self->{control};
+	my $root = $opts{root} // $self->{root};
+	my $prefix = $root ? "$root/" : '';
+
+	my ($listing) = run({dir => $self->_repo_holding($at)},
+		'git', 'ls-tree', '-r', '--name-only', $at);
+	chomp $listing if defined $listing;
+	my @all = split /\n/, ($listing // '');
+
+	my @kinds = (
+		qr{^\Q$prefix\E\Q$env\E(?:[.-].*)?\.yml$},   # the env file hierarchy
+		qr{^\Q$prefix\E\.genesis/config$},           # non-triggering
+		qr{^\Q$prefix\E\.genesis/bin/genesis$},      # the embedded genesis
+		qr{^\Q$prefix\E(?:bin|ops|dev)/},            # reactions, ops, kit source
+		qr{^\Q$prefix\Ekit-overrides\.yml$},
+	);
+	# track_additional_files joins the set git-root-relative, in one form, so
+	# the walk and the writer name a tracked path the same way.
+	push @kinds, map {qr{^\Q$_\E$}}
+		@{$opts{extra} || ($self->{extra} || {})->{$env} || []};
+
+	my @set = grep {my $p = $_; grep {$p =~ $_} @kinds} @all;
+	return sort @set;
+}
+
+# }}}
+# harness_marker - the harness's own read of a branch's newest marker {{{
+#
+# Deliberately separate from the product's marker reader, for the same reason
+# propagation_set is: a row must not assert a reader against itself.  It walks
+# subjects and bodies alike, because a squash puts the marker in the body.
+#
+# R is asked first, because a delivery is published and R is what every copy
+# eventually agrees with; a copy is only read where R has no such ref at all.
+sub harness_marker {
+	my ($self, $ref, %opts) = @_;
+	my $limit = $opts{limit} // 20;
+
+	my ($dir) = grep {defined ref_in($_, $ref)} ($self->{r}, $self->{a}, $self->{b});
+	return undef unless defined $dir;
+
+	my ($log) = run({dir => $dir},
+		'git', 'log', "-$limit", '--format=%H%x00%B%x01', $ref);
+	for my $entry (split /\x01\n?/, ($log // '')) {
+		my (undef, $body) = split /\x00/, $entry, 2;
+		next unless defined $body;
+		next unless $body =~ m{\[pipeline\] control\@([0-9a-f]{7,40}) -> };
+		my ($full) = run({dir => $dir, passfail => 0, stderr => 0},
+			'git', 'rev-parse', $1);
+		chomp $full if defined $full;
+		return $full || undef;
+	}
+	return undef;
+}
+
+# }}}
+# add_deployment_root - a second root sharing an environment name {{{
+#
+# The H32 shape: one repository, two deployment roots, one environment name.
+# Under D66 each root composes its own slug, so the two never share a branch.
+#
+# Genesis::Top->create appends a directory to the path it is handed, so naming
+# that directory outright lands the second root at its repository-relative path
+# with no scratch directory and no move.  The first root sits at copy A's git
+# root and so cannot be built that way, which is why _create_root exists.
+sub add_deployment_root {
+	my ($self, %opts) = @_;
+	my $type = $opts{type} or die "add_deployment_root needs a type\n";
+	my $path = $opts{path} // $type;
+
+	require Genesis::Top;
+
+	no warnings 'once';
+	helper::provide_rc() unless defined $Genesis::RC;
+
+	# create points GENESIS_ROOT at the root it has just built and names the
+	# repository's vault in GENESIS_TARGET_VAULT and SAFE_TARGET.  The first
+	# root is the one the rows run against, so all three go back as they were.
+	my %was = map {$_ => $ENV{$_}} qw/GENESIS_ROOT GENESIS_TARGET_VAULT SAFE_TARGET/;
+	Genesis::Top->create($self->{a}, $type, no_vault => 1, directory => $path);
+	for my $var (keys %was) {
+		defined $was{$var} ? ($ENV{$var} = $was{$var}) : delete $ENV{$var};
+	}
+
+	$self->{roots}{$type} = {path => $path, envs => $opts{envs} // []};
+	$self->write_env_file($_, root => $path, type => $type, commit => 0)
+		for @{$opts{envs} || []};
+
+	run({dir => $self->{a}}, 'git', 'add', '-A');
+	run({dir => $self->{a}, onfailure => "Failed to add the $type root"},
+		'git', 'commit', '-q', '-m', "add the $type deployment root");
+	run({dir => $self->{a}}, 'git', 'push', '-q', 'origin', $self->{control});
+
+	return $path;
+}
+
+# }}}
+# write_env_file - write an environment file on control {{{
+#
+# The site option writes the file at a level of the hierarchy rather than at
+# the leaf, which is what the merged-read rows of D79 need.  The type option is
+# taken for symmetry with the helpers that compose a slug and is not written,
+# because nothing in the file body names a deployment type.
+sub write_env_file {
+	my ($self, $env, %opts) = @_;
+	my $root   = $opts{root} // $self->{root};
+	my $prefix = $root ? "$root/" : '';
+	my $name   = $opts{site} // $env;
+	my $path   = "$prefix$name.yml";
+
+	my $body = "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n";
+	$body .= "genesis:\n  env: $name\n" unless $opts{site};
+	for my $key (sort keys %{$opts{genesis} || {}}) {
+		$body .= sprintf("  %s: %s\n", $key, $opts{genesis}{$key});
+	}
+	if (my $pipeline = $opts{pipeline}) {
+		$body .= "  pipeline:\n";
+		$body .= sprintf("    %s: %s\n", $_, $pipeline->{$_}) for sort keys %$pipeline;
+	}
+
+	helper::put_file("$self->{a}/$path", $body);
+	if (defined $opts{commit} ? $opts{commit} : 1) {
+		run({dir => $self->{a}}, 'git', 'add', '--', $path);
+		run({dir => $self->{a}, onfailure => "Failed to write $path"},
+			'git', 'commit', '-q', '-m', "write $path");
+	}
+
+	return $path;
 }
 
 # }}}
