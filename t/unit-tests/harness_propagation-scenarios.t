@@ -13,6 +13,7 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
+use Service::Github;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -92,23 +93,39 @@ subtest 'the two scenarios that carry commits answer in both contexts' => sub {
 };
 
 subtest 'the three shapes whose arguments the step files fixed' => sub {
-	plan tests => 6;
+	plan tests => 10;
 
 	my $unseeded = staged(envs => ['lab']);
 	ok(remote_sha($unseeded, $unseeded->slug('lab')),
 		'staged cuts the init branch');
 	is(harness_marker($unseeded, $unseeded->slug('lab')), undef,
 		'and delivers nothing onto it');
+	is(record_at($unseeded, $unseeded->env_path('lab')), undef,
+		'and certifies nothing either');
 
 	my $prod = held_prod();
 	ok(record_at($prod, $prod->applied_path),
 		'held_prod writes the applied record');
 	ok(remote_sha($prod, $prod->slug('prod')), 'and cuts prod');
+	is(record_at($prod, $prod->env_path('prod') . '/hold'), undef,
+		'and writes no hold of its own, which the rows write themselves');
 
 	my ($pr_h, $gh, $pr, $control) = with_open_pr();
 	ok($pr, 'with_open_pr answers the pull request number');
 	is(record_at($pr_h, $pr_h->env_path('qa') . '/proposed')->{number}, $pr,
 		'and the proposed record names it');
+	like(files_at($pr_h, $control)->{'qa.yml'}, qr/^n: 2$/m,
+		'the control commit it answers is the one the due file landed on');
+
+	# The double is read through the client the product uses, because a row
+	# that read the state file would prove the fixture rather than what an
+	# open pull request looks like from the outside.
+	local $ENV{PATH} = join ':', $gh->{bin}, $ENV{PATH};
+	local $ENV{GITHUB_AUTH_TOKEN} = $gh->{token};
+	my $open = Service::Github->new(domain => $gh->{domain}, tls => 'no')
+		->list_prs($gh->{repository}, state => 'open');
+	is_deeply([map {$_->{number}} @$open], [$pr],
+		'and that pull request is the one standing open on the double');
 };
 
 subtest 'a row that wants something else passes options through' => sub {
