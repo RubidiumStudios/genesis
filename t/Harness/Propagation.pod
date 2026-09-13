@@ -51,13 +51,15 @@ C<broken-blueprint>, whose blueprint refuses any environment whose file sets
 C<genesis.kit_blueprint_fails>.  A row that wants a kit of its own shape
 writes one with C<fixture_kit> instead.
 
-C<pipeline> defaults to C<none>, so a harness nobody asked for a section from
-carries none.  The C<.genesis/config> schema does not know the C<pipeline> key
-yet, and a repository whose configuration carries an unknown key fails
-validation before any command reaches its work, so a default harness would
-otherwise be one no whole run could be made against.  The default flips back to
-an enabled section once the schema declares the key, and until then a row that
-wants a section asks for it by name.
+C<pipeline> defaults to 1, so a default harness carries an enabled section,
+which is what nearly every row runs against now that the C<.genesis/config>
+schema declares the key.  A row that wants the section switched off, or wants
+no section at all, says which it wants.
+
+C<mode> writes nothing into C<.genesis/config>, because whether a delivery
+goes through a pull request is a per-environment question and there is no
+repository-wide key for it.  A harness declared as C<mode =E<gt> 'pr'> gets
+C<genesis.pipeline.require_pr> on each of its environment files instead.
 
 C<vault> defaults on, and the harness spins the suite's own vault through
 C<fixture_vault> when it does.  A row that wants no vault at all passes
@@ -435,6 +437,10 @@ neighbours are lists and a reference printed as a scalar writes an address
 into the file.  The C<genesis> key is written wherever anything is to be
 nested under it, so a site file carrying C<genesis> or C<pipeline> entries is
 a file a YAML reader will load.
+
+A harness declared in pr mode adds C<require_pr> to the C<pipeline> block of
+every environment file it writes, so a row asks for pr mode once rather than
+naming the key on every environment.
 
 =head2 fixture_vault($h)
 

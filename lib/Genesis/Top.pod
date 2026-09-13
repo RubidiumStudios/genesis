@@ -1296,8 +1296,8 @@ B<Returns:> The handler registered.
 
 B<Examples:>
 
-    Genesis::Top->register_config_section('ci', \&ci_handler);
-    # returns the handler; the 'ci' section is now handled by it
+    Genesis::Top->register_config_section('pipeline', \&pipeline_handler);
+    # returns the handler; the 'pipeline' section is now handled by it
 
 =head2 ci_control_branch
 
@@ -1307,8 +1307,8 @@ The branch pipeline environments are created from and propagate out of.
 
 B<Parameters:> None.
 
-B<Returns:> The configured C<ci.control_branch>, or the built-in default when
-unset.
+B<Returns:> The configured C<pipeline.source_control.control_branch>, or the
+built-in default when unset.
 
 B<Examples:>
 
@@ -1326,7 +1326,7 @@ half-configured repository, so check that instead before acting.
 
 B<Parameters:> None.
 
-B<Returns:> The configured C<ci.enabled> value.
+B<Returns:> The configured C<pipeline.enabled> value.
 
 B<Examples:>
 
@@ -1351,7 +1351,7 @@ B<Returns:> True when both hold; false otherwise.
 B<Examples:>
 
     my $bool = $top->ci_configured();
-    # returns false in a repo with ci.enabled but no provider
+    # returns false in a repo with pipeline.enabled but no provider
 
 =head2 has_legacy_ci_yml
 
@@ -1735,15 +1735,23 @@ B<Examples:>
 
     $self->_repo_config_schema
 
-Returns the schema hash used to validate a v2 C<.genesis/config> file.
-Consumed by C<< $self->config->validate() >>. The schema covers all
-recognized top-level keys:
+Returns the version 3 configuration schema, which is the version 2 schema with
+C<version> pinned to C<"3"> and the C<pipeline> section added. The section is
+built by L</_pipeline_config_schema>, so its whole shape is stated in one
+place.
+
+The section is named C<pipeline> while the C<Genesis::CI> code namespace is
+deliberately left where it is, because the compiler genuinely is CI. There is
+no C<pipeline.repo.root>, because the git prefix already locates the
+deployment root. There are no compatibility aliases either, so a key written
+under its old C<ci.> spelling is refused by name rather than moved onto its
+replacement, and that is safe because the version 3 schema is unreleased.
+
+Every version 2 key is inherited unchanged:
 
 =over 4
 
 =item C<deployment_type> - required string
-
-=item C<version> - required literal C<"2">
 
 =item C<creator_version> - required; semver, C<"(development)">, or C<"Unknown">
 
@@ -1773,6 +1781,23 @@ to some trouble to avoid -- see L</_strongbox_for_config>.
 =item C<confirm_release_overrides> - optional enum: C<always>, C<outdated>, C<never>
 
 =back
+
+B<Returns:> A hash reference.
+
+=head2 _pipeline_config_schema
+
+    $self->_pipeline_config_schema
+
+Returns the C<pipeline> block of the version 3 schema, in the shape
+C<< $self->config->validate() >> consumes. Every key the pipeline reads is
+declared here, so C<Genesis::Config> refuses an undeclared key by name as the
+configuration loads, for every command rather than only for the pipeline ones.
+
+The block declares C<enabled>, which is the gate and defaults to false, the
+C<provider> hash, which is required once the gate is on and carries the
+automation's C<type>, C<target>, C<url>, C<team>, and C<insecure>, and
+C<name>, which is the pipeline's own label in its provider and falls back to
+the deployment type.
 
 B<Returns:> A hash reference.
 

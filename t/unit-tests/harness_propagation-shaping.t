@@ -179,7 +179,6 @@ subtest 'the seeded pipeline section takes the shapes the option names' => sub {
 	is($rc, 0, 'the seeded configuration parses');
 	is($enabled->{pipeline}{enabled}, 1, 'one is an enabled pipeline');
 	is($enabled->{pipeline}{provider}{type}, 'manual', 'carrying the provider');
-	is($enabled->{pipeline}{mode}, 'direct', 'and the mode');
 	is($enabled->{pipeline}{source_control}{control_requires_pr}, 'true',
 		'with the source_control keys the harness was declared with');
 
@@ -196,6 +195,11 @@ subtest 'the seeded pipeline section takes the shapes the option names' => sub {
 		pipeline => {track_dependencies => 1})->a . '/.genesis/config');
 	is($keys->{pipeline}{track_dependencies}, 1,
 		'and a hashref sets the repository-wide keys');
+
+	my $pr = make_harness(envs => ['qa'], vault => 0, mode => 'pr');
+	my ($env) = load_yaml_file($pr->a . '/qa.yml');
+	ok($env->{genesis}{pipeline}{require_pr},
+		'pr mode lands on the environment file rather than the section');
 };
 
 subtest 'an arrayref renders as a YAML list at either depth' => sub {

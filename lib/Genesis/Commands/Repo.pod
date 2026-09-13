@@ -535,11 +535,13 @@ B<Examples:>
   my $vault = _select_vault_target();
   # returns undef when the operator answers no
 
-=head2 _create_ci_scaffold
+=head2 _create_pipeline_scaffold
 
-  _create_ci_scaffold($top, %opts);
+  _create_pipeline_scaffold($top, %opts);
 
-Writes the C<ci> section of the repository config during init.
+Writes the C<pipeline> section of the repository config during init. No
+repository-root key is written, because the git prefix already locates the
+deployment root.
 
 Accepts a provider either as an object or as a bare type name, taking the
 object's own C<config> when given one, so the same call works whether the
@@ -555,7 +557,7 @@ The C<Genesis::Top> for the new repository.
 
 =item C<%opts>
 
-C<provider> (object or type string) and optionally C<root>.
+C<provider>, either an object or a type string.
 
 =back
 
@@ -563,8 +565,8 @@ B<Returns:> Nothing; the config is written to disk.
 
 B<Examples:>
 
-  _create_ci_scaffold($top, provider => 'manual');
-  # writes ci.enabled, ci.provider and ci.name, then saves
+  _create_pipeline_scaffold($top, provider => 'manual');
+  # writes pipeline.enabled, pipeline.provider and pipeline.name, then saves
 
 =head1 SEE ALSO
 

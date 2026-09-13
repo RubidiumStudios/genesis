@@ -46,12 +46,12 @@ sub apply {
 	# Short-circuit on the 'manual' provider: it has no pipeline to apply
 	# — Genesis is the CLI you run at your terminal, there is no CI to
 	# generate or deploy.
-	if (($top->config->get('ci.provider.type') // '') eq 'manual') {
+	if (($top->config->get('pipeline.provider.type') // '') eq 'manual') {
 		bail(
 			"Manual provider has no pipeline to apply.\n\n".
 			"#i{Genesis is your CLI - deploys happen at your terminal, ".
 			"not in a hosted pipeline.}\n\n".
-			"To use a real CI provider, change #C{ci.provider.type} in ".
+			"To use a real CI provider, change #C{pipeline.provider.type} in ".
 			"#C{.genesis/config} to one of: #C{concourse}, #C{github-actions}, ".
 			"then re-run #C{genesis pipeline-apply}."
 		);
@@ -274,8 +274,8 @@ sub pipeline_status {
 	}
 
 	# Display
-	my $pipeline_name = $top->config->get('ci.name') || $top->type;
-	my $provider_type = $top->config->get('ci.provider.type') || 'manual';
+	my $pipeline_name = $top->config->get('pipeline.name') || $top->type;
+	my $provider_type = $top->config->get('pipeline.provider.type') || 'manual';
 
 	output "\n#G{Pipeline}: #C{%s}  #Yi{provider}: %s  #Yi{control}: %s",
 		$pipeline_name, $provider_type, $head_short;
@@ -1300,7 +1300,7 @@ sub _ast_to_mermaid_md {
 sub _topology_to_mermaid_md {
 	my ($top, $nodes, $edges) = @_;
 
-	my $name  = $top->config->get('ci.name') || $top->type;
+	my $name  = $top->config->get('pipeline.name') || $top->type;
 	my @lines = (
 		"---",
 		"config:",
@@ -1332,8 +1332,8 @@ sub _topology_to_mermaid_md {
 sub _describe_topology {
 	my ($top, $nodes, $edges) = @_;
 
-	my $name = $top->config->get('ci.name') || $top->type;
-	my $provider_type = $top->config->get('ci.provider.type') || 'manual';
+	my $name = $top->config->get('pipeline.name') || $top->type;
+	my $provider_type = $top->config->get('pipeline.provider.type') || 'manual';
 	output "\n#G{Pipeline}: #C{%s}", $name;
 	output "  #Yi{Provider}: %s", $provider_type;
 	output "";
@@ -1429,7 +1429,7 @@ sub _describe_ast {
 # }}}
 # _concourse_fly_flags - derive (target, k_flag) from compiled result + CLI opts {{{
 #
-# Target resolution: explicit --target CLI opt > ci.provider.target config > pipeline name.
+# Target resolution: explicit --target CLI opt > pipeline.provider.target config > pipeline name.
 # k_flag is ' -k' when insecure is set, '' otherwise.
 sub _concourse_fly_flags {
 	my ($result, $opts, $name) = @_;
