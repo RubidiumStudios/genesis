@@ -1,0 +1,5 @@
+---
+name: broken-blueprint
+
+params:
+  rendered: true

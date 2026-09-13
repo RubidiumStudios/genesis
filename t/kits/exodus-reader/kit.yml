@@ -1,0 +1,9 @@
+name:    exodus-reader
+version: 0.0.1
+
+genesis_version_min: 3.0.0
+
+description: |
+  A kit that reads the exodus record of every deployment its environment
+  names, so a row can weigh what a run read, and that refuses to render at
+  all where a deployment it was told to require has no record.

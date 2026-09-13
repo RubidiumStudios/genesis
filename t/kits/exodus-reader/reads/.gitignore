@@ -1,0 +1,5 @@
+# The blueprint hook writes one fragment here for each deployment the
+# environment reads, and a generated fragment must never show up as a change
+# in the copy the run was made in, because every run asserts that its
+# working state came back exactly as it was.
+*.yml

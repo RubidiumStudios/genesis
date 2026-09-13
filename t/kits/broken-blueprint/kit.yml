@@ -1,0 +1,9 @@
+name:    broken-blueprint
+version: 0.0.1
+
+genesis_version_min: 3.0.0
+
+description: |
+  A kit whose blueprint hook refuses any environment whose file asks it to,
+  so a row can have one environment of a set render and another raise while
+  everything else about the two stays the same.

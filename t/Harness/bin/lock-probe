@@ -1,0 +1,40 @@
+#!/usr/bin/env perl
+# The switch-lock probe as a standalone script.  A kit hook cannot call a sub
+# in the test's own process, so the probe is also a command that takes a label
+# and appends its answer to the harness's log, and a row reads those answers
+# back through lock_probe_log.
+#
+# The lock file and the log are named by the environment, which is how both
+# reach a hook running several processes down from the row that armed them.
+use strict;
+use warnings;
+
+use Fcntl qw/:flock/;
+use JSON::PP;
+
+my ($label) = @ARGV;
+my $file = $ENV{GENESIS_HARNESS_LOCK_FILE};
+my $log  = $ENV{GENESIS_HARNESS_LOCK_LOG};
+
+my %answer = (label => (defined $label ? $label : ''), held => 0);
+
+# A non-blocking flock, so the probe answers rather than waiting.  Failing to
+# take it is what says somebody else holds it, and the holder's pid and
+# command are inside the file for the answer to name.
+if (defined $file && -f $file) {
+	if (open my $fh, '<', $file) {
+		unless (flock($fh, LOCK_EX | LOCK_NB)) {
+			my $held = do {local $/; <$fh>};
+			my ($pid, $command) = split /\n/, (defined $held ? $held : ''), 2;
+			chomp $command if defined $command;
+			%answer = (%answer, held => 1, pid => $pid, command => $command);
+		}
+		close $fh;
+	}
+}
+
+if (defined $log && open(my $out, '>>', $log)) {
+	print $out JSON::PP->new->canonical->encode(\%answer), "\n";
+	close $out;
+}
+exit 0;

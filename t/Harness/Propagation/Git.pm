@@ -122,6 +122,10 @@ sub _act {
 # assert that no other git step behaved differently.  An entry carrying an
 # action runs that command at the armed call and then delegates as it always
 # would, where a fault never returns at all.
+#
+# An entry carrying a skip returns without delegating, so the step is reported
+# in the log and its write never lands.  T119 needs that shape, because a
+# death is not a silence and a fault cannot make one.
 {
 	no strict 'refs';
 	for my $step (@STEPS) {
@@ -131,6 +135,8 @@ sub _act {
 
 			my ($n, $armed) = $self->_bump($step);
 			if ($armed && _hits($armed, $n)) {
+				return defined $armed->{return} ? $armed->{return} : 1
+					if $armed->{skip};
 				return $self->_fault($step, $n, $armed) unless $armed->{action};
 				_act($armed);
 			}
