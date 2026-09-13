@@ -164,6 +164,7 @@ unit-tests/harness_propagation-fixtures.t           # branch, delivery, and vaul
 unit-tests/harness_propagation-w_restored.t         # working state restored across a whole command
 unit-tests/harness_propagation-snapshot.t           # a delivery read back against its source
 unit-tests/harness_propagation-faults.t             # a named git step made to fail partway
+unit-tests/harness_propagation-github.t             # the GitHub double on the path
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

@@ -44,6 +44,11 @@ push @EXPORT, qw/
 	hold_session_lock release_session_lock
 /;
 
+push @EXPORT, qw/
+	github_double gh_pull_request gh_close_pr gh_merge_pr
+	gh_protection gh_unreachable gh_reachable gh_no_token gh_calls
+/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -273,6 +278,8 @@ sub pr_branch {
 	my ($self, $env, %opts) = @_;
 	return $self->{pr_prefix} . $self->slug($env, %opts);
 }
+
+sub gh { $_[0]->{gh} }
 
 sub exodus_mount { $_[0]->{mount} }
 
@@ -1104,8 +1111,15 @@ sub run_genesis {
 	);
 	$env{GENESIS_PIPELINE_TASK} = $opts{pipeline_task} if $opts{pipeline_task};
 	$env{PATH} = join(':', $self->_path_prefix(%opts), $ENV{PATH});
-	$env{GITHUB_AUTH_TOKEN} = $self->{gh}{token}
-		if $self->{gh} && !$opts{no_token} && !$self->{gh}{no_token};
+	# gh_no_token is one shot.  The flag is consumed here whatever this run
+	# decides, so the token is missing from this command's environment alone
+	# and the run after it carries the token again.  The per-run no_token
+	# option withholds it without arming anything.
+	if ($self->{gh}) {
+		my $armed = delete $self->{gh}{no_token};
+		$env{GITHUB_AUTH_TOKEN} = $self->{gh}{token}
+			unless $opts{no_token} || $armed;
+	}
 
 	# The fault plan reaches a spawned command through the environment, and the
 	# subclass installs itself in the child through PERL5OPT.  The child's own
@@ -1301,6 +1315,164 @@ sub release_session_lock {
 	waitpid($pid, 0);
 	$self->{holders} = [grep {$_ != $pid} @{$self->{holders} || []}];
 	return $self;
+}
+
+# }}}
+# github_double - a fixture curl first on the path, with a state file {{{
+#
+# A double stands in for the GitHub API and for nothing else besides vault.
+# It has to reach a spawned command, so it is a binary on the path rather than
+# an object, and every call lands in a log the row reads back.  The two
+# environment variables are the only thing the parent's environment gains: the
+# path entry is added by _path_prefix for the run under test alone.
+sub github_double {
+	my ($self, %opts) = @_;
+
+	my $bin = "$self->{base}/gh-bin";
+	helper::mkdir_or_fail($bin);
+	my $curl = "$bin/curl";
+	helper::put_file($curl, 0755, helper::get_file("$helper::TOPDIR/t/Harness/bin/curl"));
+
+	# The readers below take the double rather than the harness, because that
+	# is how a row names them, so the double carries a way back to the state
+	# file it is written in terms of.
+	my $gh = $self->{gh} = {
+		harness    => $self,
+		bin        => $bin,
+		state      => "$self->{base}/gh-state.json",
+		log        => "$self->{base}/gh-calls.log",
+		token      => $opts{token}      // 'harness-token',
+		repository => $opts{repository} // 'owner/repo',
+		domain     => 'github.test',
+		admin      => defined $opts{admin} ? ($opts{admin} ? 1 : 0) : 1,
+	};
+
+	$self->_gh_write({prs => [], protection => {}, admin => $gh->{admin},
+		domain => $gh->{domain}});
+	helper::put_file($gh->{log}, '');
+
+	$ENV{GENESIS_HARNESS_GH_STATE} = $gh->{state};
+	$ENV{GENESIS_HARNESS_GH_LOG}   = $gh->{log};
+
+	return $gh;
+}
+
+# }}}
+# _gh_read and _gh_write - the double's state, kept in one file {{{
+sub _gh_read {
+	my ($self) = @_;
+	return JSON::PP->new->decode(helper::get_file($self->{gh}{state}));
+}
+
+sub _gh_write {
+	my ($self, $state) = @_;
+	helper::put_file($self->{gh}{state}, JSON::PP->new->canonical->encode($state));
+	return $state;
+}
+
+# }}}
+# gh_pull_request - declare an open pull request with a review state {{{
+#
+# An environment names the two branches the propagation flow would have used,
+# so a row that cares about neither says env and no more.
+sub gh_pull_request {
+	my ($gh, %opts) = @_;
+	my $self  = $gh->{harness};
+	my $state = $self->_gh_read;
+
+	my $env = $opts{env};
+	my $number = scalar(@{$state->{prs}}) + 1;
+	push @{$state->{prs}}, {
+		number  => $number,
+		state   => 'open',
+		merged  => JSON::PP::false,
+		head    => {ref => $opts{head} // ($env ? $self->pr_branch($env) : '')},
+		base    => {ref => $opts{base} // ($env ? $self->slug($env)      : '')},
+		title   => $opts{title} // '',
+		body    => $opts{body}  // '',
+		created_at => $opts{at} // '2026-09-13T00:00:00Z',
+		reviews => [($opts{review} && $opts{review} ne 'none') ? {
+			state       => uc($opts{review}),
+			user        => {login => $opts{reviewer} // 'reviewer'},
+			body        => $opts{review_body} // '',
+			submitted_at=> $opts{at} // '2026-09-13T00:00:00Z',
+		} : ()],
+	};
+	$self->_gh_write($state);
+	return $number;
+}
+
+# }}}
+# gh_close_pr and gh_merge_pr - the two ways a pull request leaves the open set {{{
+sub gh_close_pr {
+	my ($gh, $number, %opts) = @_;
+	my $self  = $gh->{harness};
+	my $state = $self->_gh_read;
+	for my $pr (@{$state->{prs}}) {
+		next unless $pr->{number} == $number;
+		$pr->{state}  = 'closed';
+		$pr->{merged} = $opts{merged} ? JSON::PP::true : JSON::PP::false;
+		$pr->{merged_at} = $opts{merged} ? ($opts{at} // '2026-09-13T00:00:00Z') : undef;
+	}
+	return $self->_gh_write($state);
+}
+
+sub gh_merge_pr {
+	my ($gh, $number, %opts) = @_;
+	my $self  = $gh->{harness};
+	my $state = $self->_gh_read;
+	$state->{merge_method}{$number} = $opts{method} // 'rebase';
+	$self->_gh_write($state);
+	gh_close_pr($gh, $number, merged => 1, at => $opts{at});
+	return $self->_gh_read;
+}
+
+# }}}
+# gh_protection - what the protection endpoints answer and record {{{
+sub gh_protection {
+	my ($gh, %opts) = @_;
+	my $self  = $gh->{harness};
+	my $state = $self->_gh_read;
+	$state->{admin} = ($opts{admin} ? 1 : 0) if defined $opts{admin};
+	$state->{protection}{$opts{branch}} = $opts{settings} if $opts{branch};
+	$self->_gh_write($state);
+	return $state->{protection};
+}
+
+# }}}
+# gh_unreachable, gh_reachable, gh_no_token, gh_calls {{{
+#
+# gh_no_token takes the harness rather than the double, because the token is
+# a fact about the environment a run is given and not about the API, and it is
+# one shot: run_genesis consumes the flag, so the command after it carries the
+# token again and the fixture curl stays where it is.
+sub gh_unreachable {
+	my ($gh) = @_;
+	my $self  = $gh->{harness};
+	my $state = $self->_gh_read;
+	$state->{unreachable} = 1;
+	return $self->_gh_write($state);
+}
+
+sub gh_reachable {
+	my ($gh) = @_;
+	my $self  = $gh->{harness};
+	my $state = $self->_gh_read;
+	delete $state->{unreachable};
+	return $self->_gh_write($state);
+}
+
+sub gh_no_token {
+	my ($self) = @_;
+	$self->{gh}{no_token} = 1;
+	return $self;
+}
+
+sub gh_calls {
+	my ($gh) = @_;
+	return () unless -f $gh->{log};
+	my $json = JSON::PP->new;
+	return map {$json->decode($_)} grep {/\S/} split /\n/, helper::get_file($gh->{log});
 }
 
 # }}}
