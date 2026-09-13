@@ -557,7 +557,7 @@ subtest 'mixed direct + PR envs: direct envs and pr/ branches batched in one pus
 	};
 }
 
-sub _failing_env {
+sub _git_failing_on {
 	my ($env, %opts) = @_;
 	my $git = mock_git(%opts);
 	$git->{_fail_env} = $env;
@@ -617,16 +617,19 @@ TODO: {
 		my $h = make_harness(envs => ['qa'], vault => 0);
 		init_branch($h, 'qa');
 
-		my $w = snapshot_w($h);
 		my $git = Service::Git->new($h->a, track_branch => 1);
 		$git->checkout($h->slug('qa'));
 		helper::put_file($h->a . '/init', "edited so the restore cannot run\n");
-		$git->restore_branch;
 
-		my ($branch) = run({dir => $h->a}, 'git', 'rev-parse', '--abbrev-ref', 'HEAD');
-		chomp $branch;
-		isnt($branch, $h->control, 'the restore did not return to the starting branch');
-		assert_w_restored($w, 'H2: the swallowed restore is named rather than silent');
+		# The restore cannot run, because the edited file the environment
+		# branch carries would be overwritten by the checkout back.  Today
+		# it returns anyway and says nothing, which is the whole shape.
+		my $returned = eval {$git->restore_branch; 1};
+		my $died     = $@;
+
+		ok(!$returned, 'H2: a restore that could not run dies rather than returning');
+		like($died // '', qr/\Q@{[$h->control]}\E/,
+			'H2: the death names the branch it could not return to');
 	};
 }
 
@@ -636,7 +639,7 @@ TODO: {
 	subtest 'H3: the loop stops at the first failing environment' => sub {
 		plan tests => 2;
 
-		my $git = _failing_env('lab');
+		my $git = _git_failing_on('lab');
 		my $result = propagate_envs_captured(
 			base_args(),
 			git     => $git,
@@ -651,7 +654,7 @@ TODO: {
 			'H3: every environment in scope has an outcome');
 		ok(
 			(grep {$_->[1] eq 'prod'} $git->calls('checkout')),
-			'H3: the environment after the failure was reported');
+			'H3: the loop reached the environment after the failure');
 	};
 }
 
