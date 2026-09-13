@@ -554,7 +554,8 @@ B<Examples:>
 Validates the configuration against a schema hash and applies environment
 variable overrides and default values. On success, stores the schema on the
 object and returns true. On failure, calls C<bail()> with a formatted list
-of all validation errors.
+of all validation errors, exiting C<Genesis::Exit::CONFIG> so that a caller
+can tell a refused configuration from a crash.
 
 The schema is a hash reference keyed by top-level configuration key names.
 Each value is a hash reference describing that key's constraints:
@@ -636,10 +637,10 @@ B<Errors:>
 
 =item *
 
-C<"Configuration validation failed for #C{%s}:%s"> - raised via C<bail()> if
-any validation errors are found. The first C<%s> is the config file path
-(wrapped in C<#C{}> for color highlighting); the second is a formatted
-bullet-list of all error messages.
+C<"Configuration validation failed for #C{%s}:%s"> - raised via C<bail()> at
+C<Genesis::Exit::CONFIG> if any validation errors are found. The first C<%s>
+is the config file path (wrapped in C<#C{}> for color highlighting); the
+second is a formatted bullet-list of all error messages.
 
 =back
 

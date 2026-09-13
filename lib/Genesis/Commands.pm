@@ -289,20 +289,17 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	return unless $top->has_legacy_ci_yml;
 
 	require Genesis;
-	Genesis::bail(
+	require Genesis::Exit;
+	Genesis::bail({exitcode => Genesis::Exit::CONFIG()},
 		"This repository still has a legacy CI configuration at #C{ci.yml}.\n".
-		"Pipeline commands are unavailable until the ci configuration is\n".
-		"migrated to the v3 repo config.  To migrate:\n\n".
-		"  1. Read the pipeline: block in ci.yml and note the provider,\n".
-		"     git URI, branch, pipeline name and vault URL you were using.\n".
-		"  2. Run:  #g{genesis config --set pipeline.enabled true} \\\n".
-		"               #g{--set pipeline.provider.type PROVIDER}\n".
+		"Pipeline commands are unavailable until it is migrated to the v3\n".
+		"repository configuration.  To migrate:\n\n".
+		"  1. Read the pipeline: block in ci.yml and note the provider, the\n".
+		"     git URI, the branch, the pipeline name and the vault URL.\n".
+		"  2. Write them into the #C{pipeline:} block of\n".
+		"     #C{.genesis/config}, which declares every one of them.\n".
 		"  3. Remove ci.yml (#g{git rm ci.yml}).\n\n".
-		"That restores pipeline commands.  The remaining values from step 1\n".
-		"-- git URI, branch, pipeline name and vault URL -- are not yet\n".
-		"settable: the config schema does not declare them, so they must be\n".
-		"written into the #C{pipeline:} block of #C{.genesis/config} by\n".
-		"hand until it does."
+		"That restores pipeline commands."
 	);
 } # }}}
 
