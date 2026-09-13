@@ -2628,13 +2628,7 @@ sub seeded_harness {
 sub due_harness {
 	my (%opts) = @_;
 	my $h = ready_harness(%opts, envs => $opts{envs} // ['qa']);
-	my @due = map {
-		$h->commit_on_control(
-			files   => {"due-$_.yml" => "---\nn: $_\n"},
-			message => "A change due to propagate, $_",
-			push    => 1,
-		)
-	} 1 .. ($opts{count} // 2);
+	my @due = _due($h, $opts{count} // 2);
 	$h->refresh('a');
 	return wantarray ? ($h, @due) : $h;
 }
@@ -2673,6 +2667,10 @@ sub tracked_harness {
 	my $h = make_harness(envs => [@prereqs, 'qa']);
 	$h->write_env_file('qa', genesis => {
 		track_dependencies => [map {$h->slug($_)} @prereqs]});
+	# write_env_file commits in copy A and pushes nothing, and the commit a
+	# delivery's marker names has to be on R, so control goes up before the
+	# walk reads it.
+	$h->push_from('a', $h->control);
 	return $h->ready_envs;
 }
 
@@ -2692,6 +2690,9 @@ sub inherited_harness {
 		pipeline => $opts{pipeline_keys} // {manual_gate => 1});
 	$h->write_env_file($_, pipeline => $opts{leaf_keys})
 		for $opts{leaf_keys} ? @{$opts{envs} // ['qa']} : ();
+	# Both writes commit in copy A alone, so control goes up before the walk
+	# reads the commit a delivery's marker will name.
+	$h->push_from('a', $h->control);
 	return $h->ready_envs(%opts);
 }
 
@@ -2716,14 +2717,18 @@ sub ready {
 	return $h;
 }
 
-# two_roots is the lab and prod pair across a second deployment root.
+# two_roots is the lab and prod pair across a second deployment root.  The
+# second ready names that root's path as well as its type, because the
+# propagation set is read under a prefix and a delivery given the type alone
+# would mirror the first root's files onto the second root's branch.
 sub two_roots {
 	my (%opts) = @_;
-	my @envs = @{$opts{envs} // ['lab', 'prod']};
+	my @envs   = @{$opts{envs} // ['lab', 'prod']};
+	my $second = $opts{second} // 'vault';
 	my $h = make_harness(%opts, envs => \@envs);
-	add_deployment_root($h, type => $opts{second} // 'vault', envs => \@envs);
+	add_deployment_root($h, type => $second, envs => \@envs);
 	$h->ready_envs(%opts, envs => \@envs);
-	$h->ready_envs(%opts, envs => \@envs, type => $opts{second} // 'vault');
+	$h->ready_envs(%opts, envs => \@envs, type => $second, root => $second);
 	return $h;
 }
 

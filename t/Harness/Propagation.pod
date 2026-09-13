@@ -794,6 +794,8 @@ reason the C<env> and C<reason> options name.
 A tree whose C<qa> environment tracks the prerequisites the call names.  They
 arrive positionally, because every call reads as a list of environment names
 and an options hash around two of them would say nothing the list does not.
+The environment file it writes is published before the walk reads it, because
+the commit a delivery's marker names has to be one R holds.
 
 =head2 two_env_harness(%opts)
 
@@ -805,7 +807,8 @@ care about the pair rather than about the walk use.
 Writes its pipeline keys at a site file rather than at the leaf, which is the
 merged read the hierarchy rows need.  C<site> names the file, C<pipeline_keys>
 are the keys that go on it, and C<leaf_keys> are the keys that go on each
-environment file beneath it.
+environment file beneath it.  Both writes are published before the walk reads
+them, for the reason C<tracked_harness> gives.
 
 =head2 ready(%opts)
 
@@ -818,7 +821,10 @@ C<due> with C<message> lays one control commit the branch has yet to receive.
 =head2 two_roots(%opts)
 
 The C<lab> and C<prod> pair across two deployment roots, the second of the
-type C<second> names and C<vault> by default, with both roots readied.
+type C<second> names and C<vault> by default, with both roots readied.  The
+second ready names that root's path as well as its type, because a propagation
+set is read under a prefix and a delivery given the type alone would mirror the
+first root's files onto the second root's branch.
 
 =head2 a_delivery($h, $env, %opts)
 
