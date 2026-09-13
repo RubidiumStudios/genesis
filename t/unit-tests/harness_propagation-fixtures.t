@@ -179,9 +179,12 @@ subtest 'the fixture answers the two vault addresses' => sub {
 };
 
 subtest 'a broken read refuses rather than answering stale' => sub {
-	plan tests => 2;
+	plan tests => 4;
 
 	my $h = make_harness(envs => ['qa']);
+	no_secret($h->env_path('qa') . ':git.commit',
+		'a fresh harness starts on an empty exodus mount');
+
 	certify($h, 'qa', commit => 'deadbeef', control_commit => 'cafebabe');
 	have_secret($h->env_path('qa') . ':git.commit');
 
@@ -189,6 +192,55 @@ subtest 'a broken read refuses rather than answering stale' => sub {
 	no_secret($h->env_path('qa') . ':git.commit');
 
 	restore_vault($h);
+	have_secret($h->env_path('qa') . ':git.commit',
+		'the restore puts the broken record back');
+};
+
+subtest 'break_vault takes the environments and the applied record apart' => sub {
+	plan tests => 8;
+
+	my $h = make_harness(envs => ['qa', 'lab']);
+	certify($h, $_, commit => 'deadbeef', control_commit => 'cafebabe')
+		for qw/qa lab/;
+	fixture_applied($h, control => 'cafebabe');
+
+	break_vault($h);
+	no_secret($h->env_path('qa') . ':git.commit',
+		'a break naming no environments takes qa');
+	no_secret($h->env_path('lab') . ':git.commit',
+		'and takes lab along with it');
+	have_secret($h->applied_path . ':control_commit',
+		'and leaves the applied record where it stands');
+
+	restore_vault($h);
+	have_secret($h->env_path('qa') . ':git.commit',
+		'the restore puts qa back');
+	have_secret($h->env_path('lab') . ':git.commit',
+		'and puts lab back');
+
+	break_vault($h, envs => [], applied => 1);
+	no_secret($h->applied_path . ':control_commit',
+		'an empty environment list with applied takes the applied record');
+	have_secret($h->env_path('qa') . ':git.commit',
+		'and leaves every environment readable');
+
+	restore_vault($h);
+	have_secret($h->applied_path . ':control_commit',
+		'the restore puts the applied record back');
+};
+
+subtest 'a harness with no vault refuses to break one' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+
+	eval {break_vault($h); 1};
+	like($@, qr/^break_vault needs a vault fixture, and this harness has none$/m,
+		'the break refuses rather than moving records in the ambient vault');
+
+	eval {restore_vault($h); 1};
+	like($@, qr/^restore_vault needs a vault fixture, and this harness has none$/m,
+		'and so does the restore');
 };
 
 done_testing;

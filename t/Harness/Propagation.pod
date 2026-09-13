@@ -175,6 +175,11 @@ without one.  C<helper::vault_start> is the TAP-free half of
 C<helper::vault_ok>, so building the fixture adds nothing to the plan of the
 subtest that builds it.
 
+The vault is spun once and then shared by every harness in the file, so the
+fixture clears the exodus mount as it attaches.  Each harness therefore starts
+on an empty record tree rather than on whatever the subtest above it wrote, and
+a row that proves a record's absence proves it of its own harness.
+
 =head2 fixture_applied($h, %opts)
 
 Writes the applied record at C<< $h->applied_path >>, carrying the control
@@ -228,10 +233,15 @@ than falling back to the default, so C<break_vault($h, envs =E<gt> [], applied
 =E<gt> 1)> breaks the applied record alone while C<break_vault($h, applied
 =E<gt> 1)> breaks it along with every environment.
 
+Both movers name the fixture's target outright, so a harness built with
+C<vault =E<gt> 0> is refused with a plain death rather than left to move
+records in whatever vault the ambient C<safe> target happens to be.
+
 =head2 restore_vault($h)
 
 Puts back everything C<break_vault> moved aside, so the same row can assert the
-run succeeding once its input is readable again.
+run succeeding once its input is readable again.  It refuses a harness with no
+vault fixture for the reason C<break_vault> does.
 
 =head1 METHODS
 
