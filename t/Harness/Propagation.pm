@@ -1208,8 +1208,13 @@ sub move_on_r_at {
 	# The plan file is the one fault_git arms, keyed by step name.  This entry
 	# carries an action rather than a death, so the subclass runs it and then
 	# delegates to SUPER:: as it would have anyway.
-	$self->fault_git unless $ENV{GENESIS_HARNESS_GIT_PLAN};
-	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN};
+	#
+	# The guard reads this harness's own plan rather than the environment,
+	# because the environment is global to the file and a second harness that
+	# read it would arm its entry in the first harness's plan and leave its own
+	# copy A handle unblessed, where no wrapper fires at all.
+	$self->fault_git unless $self->{fault}{plan};
+	my $file = $self->{fault}{plan};
 	my $plan = JSON::PP->new->decode(helper::get_file($file));
 	$plan->{$opts{at} // 'push'} = {
 		n      => $opts{nth} // 1,

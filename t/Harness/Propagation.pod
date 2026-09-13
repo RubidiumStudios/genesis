@@ -314,9 +314,14 @@ Commits in copy B straight away, so it can return the sha, and arms the push
 to R for a named step of copy A's next run, so the push is rejected rather
 than absorbed by the run's own refresh.  C<at> names the step and defaults to
 C<push>, C<nth> says which call of it and defaults to the first, and C<files>
-and C<message> shape the commit.  Where no fault plan is armed yet this arms
-one through C<fault_git>, so a row need not know that the way the harness
-times a teammate's push is the fault plan.
+and C<message> shape the commit.  Where this harness has no fault plan yet
+this arms one through C<fault_git>, so a row need not know that the way the
+harness times a teammate's push is the fault plan.
+
+C<nth> counts from the moment the plan was armed, not from the start of the
+run.  The counter lives in the plan file so that it survives into a spawned
+command, which means calls a row made before it armed are already counted; a
+row that wants the count to start again calls C<reset_steps> first.
 
 =head2 add_deployment_root($h, %opts)
 
