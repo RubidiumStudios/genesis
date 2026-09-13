@@ -28,7 +28,18 @@ except for the two invariant assertions, which every row reads through.
 Builds R, clones copy A and copy B, writes the deployment root through
 C<Genesis::Top-E<gt>create>, and publishes the control branch.  Returns the
 harness object.  Takes C<envs>, C<type>, C<control>, C<pr_prefix>,
-C<provider>, C<mode>, C<root>, C<pipeline>, C<vault>, C<github>, and C<kit>.
+C<provider>, C<mode>, C<root>, C<pipeline>, C<source_control>, C<vault>,
+C<github>, and C<kit>.
+
+C<Genesis::Top-E<gt>create> writes no pipeline section at all, and every row
+that reads a provider reads it out of that file, so the harness writes the
+section afterwards from the options it was declared with.  C<pipeline> takes
+three values rather than two, because an enabled pipeline, a section whose
+C<enabled> is false, and a configuration with no pipeline section are three
+states and one boolean cannot tell the last two apart.  1 is enabled, 0 is a
+section whose C<enabled> is false, the string C<none> writes no section, and a
+hashref is an enabled pipeline with those repository-wide keys set.
+C<source_control> is a hashref merged under C<pipeline.source_control>.
 
 C<vault> defaults on, and the harness spins the suite's own vault through
 C<fixture_vault> when it does.  A row that wants no vault at all passes
@@ -255,6 +266,58 @@ out the commit behind the tip is taken; C<count> says how many commits to
 consider and defaults to one.  The rewrite runs in copy B, because a rebase
 checks out and copy A's working state is what the rows assert on.
 
+=head2 amend_tip($h, $branch, %opts)
+
+Amends a branch tip in place and force-pushes it, returning the new sha.
+C<subject> replaces the subject and pushes the old message down into the
+body, which is the shape a marker reader has to survive, and C<message>
+replaces the message outright.  Also takes C<copy>, which defaults to B,
+C<files>, and C<push>, which defaults on.
+
+=head2 local_branch($h, $branch, %opts)
+
+Makes a branch that no delivery created, under any name, and returns the sha
+it was written at.  C<copy> defaults to A and C<at> names the commit to write
+it at, defaulting to wherever that copy is standing.  C<push> defaults off,
+so the branch stays local unless the row asks for it on R.
+
+=head2 local_branch_only($h, $env, %opts)
+
+Makes the environment's deployment branch in copy A alone, so R has never had
+it, and returns its sha.  This is a different shape from C<unrelated_branch>,
+where R has the branch and the two share no ancestor.
+
+=head2 unset_control($h, %opts)
+
+Takes the configured control branch away from R, from both copies' local
+refs, and from their remote-tracking refs, and parks each copy on a branch of
+its own.  The remote-tracking ref has to go too, because the refresh never
+prunes and would re-create the local branch from it.
+
+=head2 set_remotes($h, %opts)
+
+Replaces a copy's configured remotes and sets or clears the control branch's
+upstream, returning that copy's handle.  C<copy> defaults to A, C<remotes> is
+a hashref of name to URL, and C<upstream> names the remote the control branch
+should track or clears the tracking where it is false.
+
+=head2 set_repo_config($h, $key, $value, %opts)
+
+Writes one key into the deployment root's C<.genesis/config> and commits it on
+control, returning the config file's git-root-relative path.  Takes C<root>
+and C<commit>, which defaults on.  The rows that turn a single arbitrary key
+on use this rather than rebuilding the harness for it.
+
+=head2 move_on_r_at($h, $branch, %opts)
+
+Commits in copy B straight away, so it can return the sha, and arms the push
+to R for a named step of copy A's next run, so the push is rejected rather
+than absorbed by the run's own refresh.  C<at> names the step and defaults to
+C<push>, C<nth> says which call of it and defaults to the first, and C<files>
+and C<message> shape the commit.  Where no fault plan is armed yet this arms
+one through C<fault_git>, so a row need not know that the way the harness
+times a teammate's push is the fault plan.
+
 =head2 add_deployment_root($h, %opts)
 
 Adds a second deployment root to the same repository, so a row can build two
@@ -272,6 +335,13 @@ takes C<root>, C<genesis> and C<pipeline> as hashrefs merged into the file,
 and C<commit>, which defaults on.  C<type> is taken for symmetry with the
 helpers that compose a slug and is not written into the file, because nothing
 in the file body names a deployment type.
+
+A value in either hashref that is an arrayref renders as a YAML list rather
+than a scalar, because C<genesis.pipeline.track_dependencies> and its
+neighbours are lists and a reference printed as a scalar writes an address
+into the file.  The C<genesis> key is written wherever anything is to be
+nested under it, so a site file carrying C<genesis> or C<pipeline> entries is
+a file a YAML reader will load.
 
 =head2 fixture_vault($h)
 

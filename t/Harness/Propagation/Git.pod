@@ -15,6 +15,13 @@ fail partway and the row then asserts the invariants hold.  This subclass
 counts each intercepted step, appends it to a log, and dies where the plan
 arms it, delegating to C<Service::Git> otherwise.
 
+A plan entry can carry an action instead of a death.  The wrapper runs that
+command at the armed call and then delegates as it always would, so the step
+itself still happens.  That is how C<move_on_r_at> has a teammate move a
+branch on R in the middle of a run, at the step the row names, rather than
+before it, where the run's own refresh would absorb the move and no push
+would ever be rejected.
+
 The plan and the log are files named by the environment rather than fields on
 an object, because the rows run whole commands and a spawned C<genesis> child
 builds its own handle.  The child loads this module through C<PERL5OPT> and
