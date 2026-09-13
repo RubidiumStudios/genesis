@@ -116,7 +116,8 @@ a ref pattern that narrows the read to one namespace, as in C<refs/heads>.
 
 =head2 branch_of($dir)
 
-Returns the name of the branch the repository at C<$dir> is standing on.
+Returns the name of the branch the repository at C<$dir> is standing on, or
+undef where the read fails, as it does for a repository whose HEAD is unborn.
 
 =head2 files_at($h, $ref, %opts)
 
@@ -124,13 +125,18 @@ Returns the commit's paths with their contents, as a hashref, or an empty
 hashref where the ref is absent.  It reads R unless it is told otherwise, and
 takes C<copy> to read one of the two copies and C<dir> to read a repository by
 path.  The rows that assert a mirror want the whole tree in one hashref, so they
-can compare a branch against its source without a call per file.
+can compare a branch against its source without a call per file.  The contents
+come back with their trailing whitespace stripped, because C<run> strips it, so
+a row comparing against a literal that ends in a newline should read its other
+side through the same reader.
 
 =head2 slurp($path)
 
 Returns the file's whole contents, or undef where the file is not there.
 C<Genesis> exports a C<slurp> of its own that bails on a missing file, so a test
-file that wants this one imports C<Genesis> before the harness.
+file that wants this one imports C<Genesis> before the harness.  Under C<perl
+-w> Exporter reports that second import as a redefinition, which the lexical
+C<use warnings> of a test file does not.
 
 =head2 init_branch($h, $env, %opts)
 

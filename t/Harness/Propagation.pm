@@ -157,12 +157,19 @@ sub refs_in {
 }
 
 # }}}
-# branch_of - the branch a repository is standing on {{{
+# branch_of - the branch a repository is standing on, or undef {{{
+#
+# The read is guarded the way tree_of and upstream_of are, because a
+# repository whose HEAD is unborn prints a fatal to stderr and the word HEAD
+# to stdout, and a reader that folds the two together answers git's complaint
+# as though it were a branch name.
 sub branch_of {
 	my ($dir) = @_;
-	my ($branch) = run({dir => $dir}, 'git', 'rev-parse', '--abbrev-ref', 'HEAD');
-	chomp $branch;
-	return $branch;
+	my ($out, $rc) = run({dir => $dir, stderr => 0},
+		'git', 'rev-parse', '--abbrev-ref', 'HEAD');
+	return undef if $rc || !defined $out;
+	chomp $out;
+	return $out;
 }
 
 # }}}
