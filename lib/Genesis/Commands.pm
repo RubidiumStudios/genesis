@@ -54,6 +54,7 @@ use Genesis;
 use Genesis::State;
 use Genesis::Term qw/wrap terminal_width csprintf decolorize csize/;
 use Genesis::Log;
+use Genesis::Exit qw/CONFIG/;
 
 our ($COMMAND, $CALLED, %RUN, %PROPS, %GENESIS_COMMANDS, @COMMANDS, @COMMAND_ARGS);
 our $COMMAND_OPTIONS = {};
@@ -289,8 +290,7 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	return unless $top->has_legacy_ci_yml;
 
 	require Genesis;
-	require Genesis::Exit;
-	Genesis::bail({exitcode => Genesis::Exit::CONFIG()},
+	Genesis::bail({exitcode => CONFIG},
 		"This repository still has a legacy CI configuration at #C{ci.yml}.\n".
 		"Pipeline commands are unavailable until it is migrated to the v3\n".
 		"repository configuration.  To migrate:\n\n".

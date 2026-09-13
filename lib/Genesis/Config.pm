@@ -4,6 +4,7 @@ use warnings;
 
 use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff priority_merge flatten unflatten/;
 use Genesis::Term qw/bullet decolorize/;
+use Genesis::Exit qw/CONFIG/;
 
 use JSON::PP ();
 use Digest::SHA qw/sha1_hex/;
@@ -322,8 +323,7 @@ sub validate {
 		# so it carries CONFIG rather than the bare 1 a fatal system error
 		# uses.  A pipeline job reads the code to decide whether to retry,
 		# to page someone, or to stop.
-		require Genesis::Exit;
-		bail({exitcode => Genesis::Exit::CONFIG()},
+		bail({exitcode => CONFIG},
 			"Configuration validation failed for #C{%s}:%s",
 			$self->{path} // '<in-memory config>',
 			join('', map {"\n[[".bullet('', inline => 1, indent => 0).">>$_"} @errors));
