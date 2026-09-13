@@ -6,11 +6,14 @@ use utf8;
 use lib 'lib';
 use lib 't';
 use helper;
+use Harness::Propagation;
+
 use Test::More;
 use Test::Deep;
 use Test::Output;
 
 use Genesis;
+use Service::Git;
 use_ok 'Genesis::CI::Propagation';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
@@ -526,6 +529,131 @@ subtest 'mixed direct + PR envs: direct envs and pr/ branches batched in one pus
 	ok( (grep { $_ eq 'staging' }    @branches), 'direct env staging in push' );
 	ok( (grep { $_ eq 'pr/preprod' } @branches), 'PR branch pr/preprod in push' );
 };
+
+# =========================================================================
+# The baseline shapes, read through the harness assertions
+#
+# Every row above asserts on the structure propagate_envs returns and none
+# of them reads working state, which is how a run that reported its files
+# propagated and lost them passed.  The three rows below read what the run
+# left behind instead.  Each of the three fails on an assertion that names
+# the breach, which is the point of writing them now.
+# =========================================================================
+
+# A git double that dies while committing to one named environment, so a
+# walk meets its failure in the middle of its targets rather than at the
+# end.  It sits on the recording double so every other call is still
+# recorded, which is what the row after the failure reads.
+{
+	no strict 'refs';
+	no warnings 'redefine';
+	my $pkg = 'Test::Mock::PropEnvs::Git::Failing';
+	@{"${pkg}::ISA"} = ('Test::Mock::PropEnvs::Git');
+	*{"${pkg}::commit"} = sub {
+		my ($self, @args) = @_;
+		die "the write to $self->{_current_branch} failed\n"
+			if ($self->{_fail_env} // '') eq ($self->{_current_branch} // '');
+		return Test::Mock::PropEnvs::Git::commit($self, @args);
+	};
+}
+
+sub _failing_env {
+	my ($env, %opts) = @_;
+	my $git = mock_git(%opts);
+	$git->{_fail_env} = $env;
+	return bless $git, 'Test::Mock::PropEnvs::Git::Failing';
+}
+
+# The three rows below fail against the tree as it stands.  They are marked
+# rather than skipped, because a skipped row is one nobody looks at and the
+# whole reason these exist is that the shapes stayed invisible until a real
+# loss surfaced one of them.  Each mark names the step whose commit removes
+# it.
+TODO: {
+	local $TODO = 'H1 closes at M5, when the session owns the write sequence';
+
+	subtest 'H1: propagated content is left staged after a failure' => sub {
+		plan tests => 2;
+
+		my $h = make_harness(envs => ['qa'], vault => 0);
+		init_branch($h, 'qa');
+		my $control = commit_on_control($h,
+			files   => {'qa.yml' => "---\nkit: dev\n", 'ops/one.yml' => "---\none: 1\n"},
+			message => 'two files',
+			push    => 1,
+		);
+
+		my $git = fault_git($h);
+		fail_on($git, 'commit', 1, message => 'the harness stopped before the commit');
+
+		my $w = snapshot_w($h);
+		my $result = propagate_envs_captured(
+			base_args(
+				control_sha   => $control,
+				control_short => substr($control, 0, 7),
+				no_push       => 1,
+			),
+			git     => $git,
+			github  => undef,
+			targets => [
+				direct_target($h->slug('qa'),
+					changed => ['qa.yml', 'ops/one.yml']),
+			],
+		);
+
+		like(
+			($result->{errors} || [])->[0] // '',
+			qr/stopped before the commit/, 'the write sequence failed as armed');
+		assert_w_restored($w, 'H1: the failed delivery left nothing staged');
+	};
+}
+
+TODO: {
+	local $TODO = 'H2 closes at M5, when a failed restore dies loudly';
+
+	subtest 'H2: a failed restore is silent' => sub {
+		plan tests => 2;
+
+		my $h = make_harness(envs => ['qa'], vault => 0);
+		init_branch($h, 'qa');
+
+		my $w = snapshot_w($h);
+		my $git = Service::Git->new($h->a, track_branch => 1);
+		$git->checkout($h->slug('qa'));
+		helper::put_file($h->a . '/init', "edited so the restore cannot run\n");
+		$git->restore_branch;
+
+		my ($branch) = run({dir => $h->a}, 'git', 'rev-parse', '--abbrev-ref', 'HEAD');
+		chomp $branch;
+		isnt($branch, $h->control, 'the restore did not return to the starting branch');
+		assert_w_restored($w, 'H2: the swallowed restore is named rather than silent');
+	};
+}
+
+TODO: {
+	local $TODO = 'H3 closes at M10, when the walk reports every environment';
+
+	subtest 'H3: the loop stops at the first failing environment' => sub {
+		plan tests => 2;
+
+		my $git = _failing_env('lab');
+		my $result = propagate_envs_captured(
+			base_args(),
+			git     => $git,
+			github  => undef,
+			targets => [
+				direct_target('qa'), direct_target('lab'), direct_target('prod'),
+			],
+		);
+
+		is(
+			$result->{propagated} + scalar(@{$result->{errors} || []}), 3,
+			'H3: every environment in scope has an outcome');
+		ok(
+			(grep {$_->[1] eq 'prod'} $git->calls('checkout')),
+			'H3: the environment after the failure was reported');
+	};
+}
 
 done_testing;
 
