@@ -18,7 +18,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'the harness builds a bare remote and two copies' => sub {
-	plan tests => 6;
+	plan tests => 9;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 
@@ -37,6 +37,16 @@ subtest 'the harness builds a bare remote and two copies' => sub {
 	my ($remote_b) = run({dir => $h->b}, 'git', 'remote', 'get-url', 'origin');
 	chomp $remote_b;
 	is($remote_b, $h->r, "copy B's remote points at R");
+
+	ok(-f $h->a . '/.genesis/config',
+		"the deployment root sits at copy A's own git root");
+	ok(!-e $h->a . '/bosh',
+		'the root was not left in a directory of its own below it');
+
+	my $base = $h->a;
+	$base =~ s{/[^/]+$}{};
+	is_deeply([glob("$base/top-*")], [],
+		'the scratch directory the root was built in is gone');
 };
 
 subtest 'a publish from copy B moves R and leaves copy A alone' => sub {
@@ -60,6 +70,17 @@ subtest 'a publish from copy B moves R and leaves copy A alone' => sub {
 		"copy A's local ref is unchanged until it fetches");
 	is(ref_in($h->a, "refs/remotes/origin/$control"), $before_t,
 		"copy A's remote-tracking ref is unchanged until it fetches");
+};
+
+subtest 'the readers answer for a ref that is not there' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+
+	is_deeply(tree_of($h->a, 'refs/heads/nowhere'), [],
+		'tree_of answers an empty list rather than a complaint from git');
+	is(ref_in($h->a, 'refs/heads/nowhere'), undef,
+		'ref_in answers undef');
 };
 
 done_testing;

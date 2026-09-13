@@ -36,12 +36,16 @@ sub ref_in {
 }
 
 # }}}
-# tree_of - a commit's paths, sorted {{{
+# tree_of - a commit's paths, sorted, or an empty list where the ref is absent {{{
+#
+# The stderr of the read is captured separately rather than folded into the
+# output, because a row proving an absence has to read an empty list back and
+# not git's complaint about the name it asked for.
 sub tree_of {
 	my ($dir, $ref) = @_;
-	my ($out) = run({dir => $dir, passfail => 0},
+	my ($out, $rc) = run({dir => $dir, passfail => 0, stderr => 0},
 		'git', 'ls-tree', '-r', '--name-only', $ref);
-	return [] unless defined $out;
+	return [] if $rc || !defined $out;
 	chomp $out;
 	return [sort grep {length} split /\n/, $out];
 }
@@ -129,7 +133,19 @@ sub _create_root {
 	my $scratch = sprintf('%s/top-%06d', $self->{base}, int(rand(1_000_000)));
 	helper::mkdir_or_fail($scratch);
 
+	# The create points GENESIS_ROOT at the root it just built and names the
+	# repository's vault in GENESIS_TARGET_VAULT and SAFE_TARGET.  Under
+	# no_vault that name is the empty string, which is not the same as having
+	# no target at all, so both are put back as they were and GENESIS_ROOT is
+	# pointed at where the root actually ends up.
+	my %was = map {$_ => $ENV{$_}} qw/GENESIS_TARGET_VAULT SAFE_TARGET/;
+
 	my $made = Genesis::Top->create($scratch, $self->{type}, no_vault => 1)->path;
+
+	for my $var (keys %was) {
+		defined $was{$var} ? ($ENV{$var} = $was{$var}) : delete $ENV{$var};
+	}
+
 	opendir(my $dh, $made)
 		or die "Failed to read the new deployment root at $made: $!";
 	my @entries = grep {$_ ne '.' && $_ ne '..'} readdir($dh);
@@ -141,6 +157,7 @@ sub _create_root {
 	}
 	rmdir($made);
 	rmdir($scratch);
+	$ENV{GENESIS_ROOT} = $root;
 
 	return $root;
 }
@@ -267,14 +284,16 @@ sub _commit_in {
 # commit_on_control - the operator's own commit in copy A {{{
 sub commit_on_control {
 	my ($self, %opts) = @_;
-	return $self->_commit_in('a', delete $opts{branch}, %opts);
+	my $branch = delete $opts{branch};
+	return $self->_commit_in('a', $branch, %opts);
 }
 
 # }}}
 # commit_from_b - a teammate's commit, made and left unpublished {{{
 sub commit_from_b {
 	my ($self, %opts) = @_;
-	return $self->_commit_in('b', delete $opts{branch}, %opts, push => 0);
+	my $branch = delete $opts{branch};
+	return $self->_commit_in('b', $branch, %opts, push => 0);
 }
 
 # }}}
@@ -285,7 +304,8 @@ sub commit_from_b {
 # refs stay put until copy A fetches.
 sub publish_from_b {
 	my ($self, %opts) = @_;
-	return $self->_commit_in('b', delete $opts{branch}, %opts, push => 1);
+	my $branch = delete $opts{branch};
+	return $self->_commit_in('b', $branch, %opts, push => 1);
 }
 
 # }}}
