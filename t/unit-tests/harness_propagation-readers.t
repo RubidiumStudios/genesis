@@ -1,7 +1,9 @@
 #!/usr/bin/env perl
-# Proves the reading half of T1: the eight shared readers answer one way
-# about a ref, a tip, a sha on R, a repository's refs, its current branch,
-# a commit's paths, a commit's contents, and a file.
+# Proves the reading half of T1: the fourteen shared readers answer one way
+# about a ref, a tip, a sha on R, a repository's refs, its current branch, a
+# commit's paths, a commit's contents, a file, R's branch list, a clone made
+# now, a branch's last subjects, every local head, whether a commit is
+# reachable on R, and a record set's newest entry.
 use strict;
 use warnings;
 use utf8;
@@ -100,9 +102,9 @@ subtest 'the readers answer for what is absent' => sub {
 # branch list, a fresh clone, a branch's recent subjects, a record set's
 # newest entry, every local head, and whether a commit is reachable on R.
 subtest 'the six later readers answer about the fixture' => sub {
-	# The eight are the seven rows below and the restoration that the one
+	# The eleven are the ten rows below and the restoration that the one
 	# run asserts for itself.
-	plan tests => 8;
+	plan tests => 11;
 
 	my $h = make_harness(envs => ['lab', 'qa'], vault => 0);
 	init_branch($h, 'lab');
@@ -134,19 +136,33 @@ subtest 'the six later readers answer about the fixture' => sub {
 		['First change', 'Second change'],
 		'subjects_of reads the last subjects in the order they were committed');
 
+	is_deeply([subjects_of($h, 'no/such/branch', 2)], [],
+		'and a branch nobody has reads back as no subjects at all');
+
 	ok(reachable_on_r($h, $second), 'a pushed commit is reachable on R');
 
 	my $local = local_only_commit($h, $h->control, marker => 0,
 		files => {'never-pushed.yml' => "---\nlocal: true\n"});
 	ok(!reachable_on_r($h, $local), 'and one that was never pushed is not');
 
+	# The list is read for its contents and not only against itself, because
+	# a reader that answered an empty list every time would pass a
+	# comparison of one call against another and say nothing.
 	my $before = heads_in($h);
+	ok(scalar(grep {$_ eq 'refs/heads/' . $h->control . " $local"} @$before),
+		'heads_in names the control branch as its ref name and its sha');
+
 	run_genesis($h, 'pipeline-status');
-	is_deeply(heads_in($h), $before, 'heads_in reads every local head, so a row can compare');
+	is_deeply(heads_in($h), $before,
+		'a command that writes no ref leaves the whole list where it was');
+
+	local_branch($h, 'scratch');
+	is_deeply(heads_in($h), [@$before, "refs/heads/scratch $local"],
+		'and a branch made since reads back beside it, so a row can compare');
 };
 
 subtest 'the newest entry of a record set reads back nested' => sub {
-	plan tests => 3;
+	plan tests => 5;
 
 	my $h = make_harness(envs => ['qa']);
 	my $target = fixture_vault($h);
@@ -171,6 +187,19 @@ subtest 'the newest entry of a record set reads back nested' => sub {
 		'and the newest entry is the one answered');
 	is(newest_record($h, $h->env_path('lab')), undef,
 		'a path nothing was written to reads undef');
+
+	# The harness's own writers lay one record down at the path itself, and
+	# that record is a set of one.  It is written last, under the two dated
+	# entries above, so the row proves which of the two shapes is preferred
+	# where a path has both.
+	certify($h, 'qa', commit => $control, control_commit => $control,
+		at => '2026-09-11 10:00:00 +0000');
+
+	my $one = newest_record($h, $h->env_path('qa'));
+	is($one->{git}{control_commit}, $control,
+		'a record sitting at the path itself reads back nested too');
+	is($one->{dated}, '2026-09-11 10:00:00 +0000',
+		'and it is the entry answered, rather than a child of the path');
 };
 
 done_testing;
