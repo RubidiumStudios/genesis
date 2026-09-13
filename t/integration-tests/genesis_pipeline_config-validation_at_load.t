@@ -74,7 +74,11 @@ subtest 'a stale ci.yml beside a version 3 pipeline only warns' => sub {
 			'---', 'deployment_type: bosh', 'version: "3"',
 			'creator_version: 3.2.0',
 			'pipeline:', '  enabled: true',
-			'  provider:', '    type: manual', ''),
+			'  provider:', '    type: manual',
+			# Copy A is cloned from a bare repository at a filesystem path,
+			# so the origin URL carries no GitHub owner/repo pair and the
+			# source-control block cannot derive one.
+			'  source_control:', '    repository: genesis/bosh-deployments', ''),
 		'ci.yml' => "---\npipeline:\n  name: bosh\n",
 	});
 

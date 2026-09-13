@@ -42,6 +42,15 @@ sub config_yaml {
 	);
 }
 
+# The harness clones copy A from a bare repository at a filesystem path, so
+# the origin URL carries no GitHub owner/repo pair for the source-control
+# block to derive one from, and a row that enables a pipeline names the
+# repository itself.
+sub enabled_pipeline {
+	return join("\n", 'pipeline:', '  enabled: true',
+		'  source_control:', '    repository: genesis/bosh-deployments');
+}
+
 sub load_with {
 	my ($body) = @_;
 	commit_on_control($h, files => {'.genesis/config' => config_yaml($body)});
@@ -54,7 +63,7 @@ subtest 'the pipeline section loads and the ci section does not' => sub {
 	plan tests => 3;
 
 	my $top;
-	lives_ok {$top = load_with("pipeline:\n  enabled: true")}
+	lives_ok {$top = load_with(enabled_pipeline())}
 		'pipeline.enabled validates';
 	is $top->config->get('pipeline.enabled'), 1,
 		'the gate reads back through the new name';
@@ -81,7 +90,7 @@ subtest 'the repository-root key is gone' => sub {
 		qr/pipeline\.repo: unknown configuration key/,
 		'pipeline.repo.root is refused by name';
 
-	my $top = load_with("pipeline:\n  enabled: true");
+	my $top = load_with(enabled_pipeline());
 	Genesis::Commands::Repo::_create_pipeline_scaffold($top);
 	ok !$top->config->has('pipeline.repo.root'),
 		'the scaffold writes no repository-root key';

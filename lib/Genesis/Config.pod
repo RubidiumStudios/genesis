@@ -885,7 +885,7 @@ B<Examples:>
 
 =head2 _is_required
 
-    my $bool = _is_required($req, $siblings);
+    my $bool = _is_required($req, $siblings, $config);
 
 Decides whether a schema field is required, given the sibling values around
 it. Plain function, not a method.
@@ -916,6 +916,17 @@ equals C<vsphere>". Multiple keys are an OR, not an AND.
 Required when the named sibling is truthy -- a presence test rather than an
 equality one.
 
+=item A code reference
+
+Required when the predicate returns true. It is handed C<$siblings> and
+C<$config>, in that order, so it can read a key anywhere in the
+configuration by its dotted name. This is the form for a rule the other
+three cannot state, where what makes a key required is not a sibling's
+value but something further off -- a block that only an automated pipeline
+provider needs, say, where the provider sits two levels away from the block
+it governs. A hash reference is still a dependency match, so the two
+reference forms do not collide.
+
 =back
 
 B<Parameters:>
@@ -930,6 +941,12 @@ The schema's requirement value, in any of the forms above.
 
 Hashref of the values at the same level, which conditional forms are
 evaluated against.
+
+=item C<$config>
+
+B<(optional)> The C<Genesis::Config> being validated, passed on to a
+predicate so it can read keys the siblings hash does not hold. The other
+forms ignore it.
 
 =back
 
@@ -948,6 +965,9 @@ B<Examples:>
 
     my $bool = _is_required('use_tls', { use_tls => 1 });
     # returns 1 -- named sibling is truthy
+
+    my $bool = _is_required(\&_automated_provider_configured, \%siblings, $cfg);
+    # returns 1 -- the predicate read the provider out of $cfg and said so
 
     my $bool = _is_required(0, \%siblings);
     # returns 0

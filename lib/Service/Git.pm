@@ -472,6 +472,25 @@ sub default_remote {
 }
 
 # }}}
+# branch_upstream_remote - the remote a branch is configured to track {{{
+sub branch_upstream_remote {
+	my ($self, $branch) = @_;
+	my ($out) = run({dir => $self->{root}, passfail => 0, stderr => 0},
+		'git', 'config', '--get', "branch.$branch.remote");
+	chomp $out if defined $out;
+	return (defined $out && length $out) ? $out : undef;
+}
+
+# }}}
+# has_remote - whether a remote of this name is configured {{{
+sub has_remote {
+	my ($self, $remote) = @_;
+	my ($out) = run({dir => $self->{root}}, 'git', 'remote');
+	return 0 unless defined $out;
+	return scalar(grep {$_ eq $remote} split(/\n/, $out)) ? 1 : 0;
+}
+
+# }}}
 # remote_url - fetch the fetch URL for a named (or default) remote {{{
 sub remote_url {
 	my ($self, $remote) = @_;

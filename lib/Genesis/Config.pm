@@ -301,7 +301,7 @@ sub validate {
 			# Set default only if not loaded or explicitly set
 			$self->_update_source('default', $key, $schema->{$key}{default});
 		} elsif ($schema->{$key}{required} and ! struct_has($self->{loaded_values}, $key) and ! struct_has($self->{set_values}, $key)) {
-			if (_is_required($schema->{$key}{required}, $self->_contents)) {
+			if (_is_required($schema->{$key}{required}, $self->_contents, $self)) {
 				push @errors, "#R{$key}: missing required key";
 				next;
 			}
@@ -478,13 +478,24 @@ sub _signature {
 #   1              → always required
 #   'sibling'      → required when sibling is truthy
 #   { sibling => v } → required when sibling eq v
+#   sub {...}      → required when the predicate says so
 #
 # Multiple hash keys are OR'd together.  Future: support arrayref values
 # for multi-match on a single sibling, and negation (e.g. { '!key' => v }).
+#
+# The predicate form is for a rule the other three cannot state, where what
+# makes a key required is not a sibling's value but something further off in
+# the configuration.  It is handed the siblings and the configuration object
+# itself, in that order, so it can read a key at any depth by its dotted
+# name.  A hash reference is still a dependency match, so the two reference
+# forms do not collide.
 sub _is_required {
-	my ($req, $siblings) = @_;
+	my ($req, $siblings, $config) = @_;
 	return 0 unless $req;
 	return 1 unless ref($req) || $req =~ /\D/;
+	if (ref($req) eq 'CODE') {
+		return $req->($siblings, $config) ? 1 : 0;
+	}
 	if (ref($req) eq 'HASH') {
 		for my $dep (keys %$req) {
 			return 1 if exists($siblings->{$dep}) && defined($siblings->{$dep})
@@ -549,7 +560,7 @@ sub _validate_key {
 					my $source = $loaded_is_empty_hash ? 'loaded' : 'default';
 					$self->_update_source($source, "$key.$subkey", $subschema->{default});
 				} elsif ($subschema->{required} and ! exists($value->{$subkey})) {
-					if (_is_required($subschema->{required}, $value)) {
+					if (_is_required($subschema->{required}, $value, $self)) {
 						push @errors, "#R{$key}: missing required key #ri{$subkey}";
 					}
 				}

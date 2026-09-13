@@ -57,6 +57,14 @@ sub make_v3_repo {
 		}
 	}
 	mkfile_or_fail("$genesis_dir/config", $content);
+
+	# An enabled pipeline derives its remote and its repository from git, so
+	# the fixture is a checkout with a GitHub remote rather than a bare
+	# directory holding a configuration file.
+	run({dir => $dir}, 'git', 'init', '-q');
+	run({dir => $dir}, 'git', 'remote', 'add', 'origin',
+		'https://github.com/genesis/test-kit-deployments.git');
+
 	return $dir;
 }
 

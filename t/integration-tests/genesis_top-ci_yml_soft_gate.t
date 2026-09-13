@@ -58,6 +58,13 @@ EOF
 	if (defined $o{ci_yml}) {
 		mkfile_or_fail("$tmp/ci.yml", $o{ci_yml});
 	}
+
+	# An enabled pipeline derives its remote and its repository from git, so
+	# the skeleton is a checkout with a GitHub remote rather than a bare
+	# directory holding a configuration file.
+	run({dir => $tmp}, 'git', 'init', '-q');
+	run({dir => $tmp}, 'git', 'remote', 'add', 'origin',
+		'https://github.com/genesis/testkit-deployments.git');
 	return $tmp;
 }
 
