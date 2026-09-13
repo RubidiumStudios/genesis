@@ -624,11 +624,18 @@ sub propagation_set {
 #
 # R is asked first, because a delivery is published and R is what every copy
 # eventually agrees with; a copy is only read where R has no such ref at all.
+# A caller that is comparing trees in one copy names that copy instead, so the
+# marker and the trees it is read against come out of the same repository.
 sub harness_marker {
 	my ($self, $ref, %opts) = @_;
 	my $limit = $opts{limit} // 20;
+	my $only  = $opts{copy};
+	die "harness_marker was given the copy $only, which is none of a, b, or r\n"
+		if defined $only && !grep {$only eq $_} qw/a b r/;
 
-	my ($dir) = grep {defined ref_in($_, $ref)} ($self->{r}, $self->{a}, $self->{b});
+	my @search = defined $only ? ($self->{$only})
+	                           : ($self->{r}, $self->{a}, $self->{b});
+	my ($dir) = grep {defined ref_in($_, $ref)} @search;
 	return undef unless defined $dir;
 
 	my ($log) = run({dir => $dir},
@@ -987,7 +994,7 @@ sub assert_snapshot_invariant {
 	my $at      = $opts{commit} // $branch;
 	my $name    = $opts{name} // "$branch mirrors its marker's control commit";
 
-	my $control = $self->harness_marker($at);
+	my $control = $self->harness_marker($at, copy => $opts{copy});
 	unless ($control) {
 		my $ok = $builder->ok(0, $name);
 		$builder->diag("    no marker on $branch, so nothing names a source");
@@ -1008,11 +1015,19 @@ sub assert_snapshot_invariant {
 		push @differed, sprintf("%s differs from control@%s", $path, substr($control, 0, 12));
 	}
 
-	my ($listing) = run({dir => $dir}, 'git', 'ls-tree', '-r', '--name-only', $at);
-	chomp $listing if defined $listing;
-	for my $path (split /\n/, ($listing // '')) {
-		next if $in_set{$path};
-		push @differed, sprintf("%s is on the branch and not in the set", $path);
+	my ($listing, $rc) = run({dir => $dir, passfail => 0},
+		'git', 'ls-tree', '-r', '--name-only', $at);
+	if ($rc) {
+		# git writes its complaint to the same handle as the listing, so a
+		# failed read whose output was walked would report the words of an
+		# error message as leftover paths.
+		push @differed, sprintf("%s is not a tree in the repository read", $at);
+	} else {
+		chomp $listing if defined $listing;
+		for my $path (split /\n/, ($listing // '')) {
+			next if $in_set{$path};
+			push @differed, sprintf("%s is on the branch and not in the set", $path);
+		}
 	}
 
 	my $ok = $builder->ok(!@differed, $name);

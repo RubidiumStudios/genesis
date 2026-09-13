@@ -141,10 +141,13 @@ commit published from copy B reads the same as one made in copy A.
 
 Returns the control commit the newest marker at C<$ref> names, walking
 subjects and bodies alike, or undef where no marker stands.  Also the
-harness's own read, for the same reason.  The one option is C<limit>, which
-defaults to twenty commits.  R is asked for the ref first, since a delivery is
-published and R is what the copies eventually agree with, and a copy is read
-only where R has no such ref at all.
+harness's own read, for the same reason.  The options are C<limit>, which
+defaults to twenty commits, and C<copy>, which names C<a>, C<b>, or C<r> and
+reads that repository alone.  Where no copy is named, R is asked for the ref
+first, since a delivery is published and R is what the copies eventually
+agree with, and a copy is read only where R has no such ref at all.  A caller
+comparing trees in one copy names that copy, so the marker and the trees come
+out of the same repository.
 
 =head2 add_deployment_root($h, %opts)
 
@@ -272,7 +275,13 @@ propagation set's paths, and the branch holds nothing outside the set.  The
 second is the half that fires in practice, because a copy-only writer never
 removes a leftover C<init> or a path that dropped out of the set.  Every
 difference is named, and a branch with no marker fails rather than passing
-vacuously.
+vacuously.  Options are C<commit>, which defaults to the branch tip, C<copy>,
+C<type>, and C<name>.  A named C<copy> is where the trees are read and is
+passed through to the marker read, so both come out of one repository; where
+none is named the trees are read in copy A and the marker search order
+stands.  Where the listing of the branch cannot be read at all, the second
+comparison fails naming the ref rather than reading git's complaint as a list
+of paths.
 
 =head2 fixture_command($h, $kind, %opts)
 
