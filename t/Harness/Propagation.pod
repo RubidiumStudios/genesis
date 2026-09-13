@@ -33,6 +33,10 @@ C<provider>, C<mode>, C<root>, C<pipeline>, C<vault>, C<github>, and C<kit>.
 C<vault> defaults on, but the vault fixture it reaches for lands in a later
 change, so until then every caller passes C<vault =E<gt> 0>.
 
+The named environments get their files through C<write_env_file>, and they are
+committed along with the deployment root, so the control branch's first commit
+is a repository a command can be run against.
+
 The first deployment root sits at copy A's own git root, so the repository and
 the deployment root are one directory.  C<Genesis::Top-E<gt>create> appends the
 deployment name to the path it is handed and refuses a directory that already
@@ -91,6 +95,71 @@ Returns the two numbers C<git rev-list --left-right --count> prints for the
 branch against its remote-tracking ref, ahead first and behind second.  The
 read names the remote-tracking ref outright rather than the upstream, so it
 answers even where no upstream is configured.
+
+=head2 init_branch($h, $env, %opts)
+
+Cuts the environment's branch on R as C<pipeline-apply> would, which is an
+orphan root commit adding a single C<init> file under the subject
+C<Initialize E<lt>slugE<gt> branch [ci skip]>.  It is written with plumbing
+and checks nothing out in either copy, so the rows that assert on working
+state are not disturbed by their own setup.  Takes C<root>, C<type>, and
+C<push>, which defaults on.
+
+=head2 deliver($h, $env, %opts)
+
+Writes one delivered commit onto the deployment branch, mirroring the
+propagation set as it stood at the delivered control commit and carrying the
+marker.  C<keep> leaves named paths standing so a row can stop the mirror's
+removing half, and C<corrupt> lands a named path at the wrong content, which
+is what the snapshot assertion has to catch.  Also takes C<control>, which is
+required, C<files>, C<body>, C<type>, C<pr>, which writes onto the
+environment's pull request branch instead of its deployment branch, C<copy>,
+which defaults to C<b>, and C<push>, which defaults on.
+
+The delivery is a teammate's published work, so it is written in copy B and
+the operator's clone reads behind it until the row refreshes.  Copy B is given
+whatever objects it lacks with a fetch that names its source by path, so no
+remote-tracking ref moves behind the row's back, and it sits its delivery on
+its own branch tip where it has one and on R's where it has not, so the push
+that follows fast-forwards.  There is no C<remove_init> option, because the
+mirror starts from an empty index and the C<init> file goes by construction.
+
+=head2 propagation_set($h, $env, %opts)
+
+Returns the set's git-root-relative paths as a list, computed by the harness
+from the tree at a control commit.  It is deliberately not
+C<propagation_files>, because a row that asserted a delivery through the
+product's own reader would be asserting that reader against itself.  Takes
+C<at>, which defaults to control's tip, C<root>, and C<extra>.  The tree is
+read in whichever of the three repositories holds the commit, so a control
+commit published from copy B reads the same as one made in copy A.
+
+=head2 harness_marker($h, $ref, %opts)
+
+Returns the control commit the newest marker at C<$ref> names, walking
+subjects and bodies alike, or undef where no marker stands.  Also the
+harness's own read, for the same reason.  The one option is C<limit>, which
+defaults to twenty commits.  R is asked for the ref first, since a delivery is
+published and R is what the copies eventually agree with, and a copy is read
+only where R has no such ref at all.
+
+=head2 add_deployment_root($h, %opts)
+
+Adds a second deployment root to the same repository, so a row can build two
+roots that share an environment name, and returns its repository-relative
+path.  Takes C<type>, which is required, C<envs>, and C<path>, which defaults
+to the type.  C<Genesis::Top-E<gt>create> is told the directory to write, so
+the second root lands where it belongs with no scratch directory and no move;
+only the first root, which has to sit at copy A's own git root, needs that.
+
+=head2 write_env_file($h, $env, %opts)
+
+Writes an environment file on control and returns its git-root-relative path.
+C<site> writes it at a level of the hierarchy rather than at the leaf.  Also
+takes C<root>, C<genesis> and C<pipeline> as hashrefs merged into the file,
+and C<commit>, which defaults on.  C<type> is taken for symmetry with the
+helpers that compose a slug and is not written into the file, because nothing
+in the file body names a deployment type.
 
 =head1 METHODS
 
