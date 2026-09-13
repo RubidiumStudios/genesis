@@ -1,0 +1,157 @@
+#!/usr/bin/env perl
+# The recording genesis the harness copies onto the fixture path, where it
+# stands in front of the real one under the name every child resolves.  It
+# writes one JSON line per child, with what the child was handed and what the
+# switch lock was doing around it, and then either runs the real genesis or
+# answers with the forced exit the row asked for.
+#
+# It is a script rather than a sub in the test's own process, for the same
+# reason the GitHub double is a fixture curl, which is that the thing being
+# watched is a child process and a double living in the parent's memory would
+# never see one.  The plan the harness wrote is named by the environment, so
+# it reaches a child spawned in the middle of a whole command.
+use strict;
+use warnings;
+
+use Cwd ();
+use Fcntl qw/:flock/;
+use IO::Handle ();
+use JSON::PP;
+use POSIX ();
+
+my $plan = read_json($ENV{GENESIS_HARNESS_CHILD_PLAN}) || {};
+
+# The stranger takes the lock before anything is read, so the window D46
+# leaves open is already occupied when the child's own start is recorded.
+my $holder = $plan->{hold_lock} ? hold_the_lock($plan) : undef;
+
+my %record = (
+	argv          => [@ARGV],
+	pid           => $$,
+	started       => time,
+	cwd           => Cwd::getcwd(),
+	stdin_is_tty  => (-t STDIN ? 1 : 0),
+	lock_at_start => probe($plan->{lock}),
+	lock_seen     => [],
+);
+
+my $exit = 0;
+if (defined $plan->{exit}) {
+	$exit = $plan->{exit};
+	push @{$record{lock_seen}}, probe($plan->{lock}) if $plan->{probe};
+
+} elsif ($plan->{exec} && $plan->{real}) {
+	# A run that is polled has to be waited on rather than handed the whole
+	# process, because what the lock was doing while the child ran can only be
+	# read by something still running beside it.
+	if ($plan->{probe}) {
+		my $pid = fork();
+		die "the recorder could not fork the real genesis: $!\n"
+			unless defined $pid;
+		unless ($pid) {
+			exec {$plan->{real}} $plan->{real}, @ARGV;
+			POSIX::_exit(127);
+		}
+		until (waitpid($pid, POSIX::WNOHANG()) == $pid) {
+			push @{$record{lock_seen}}, probe($plan->{lock});
+			select undef, undef, undef, 0.05;
+		}
+		$exit = $? >> 8;
+
+	} else {
+		system {$plan->{real}} $plan->{real}, @ARGV;
+		$exit = $? >> 8;
+	}
+}
+
+$record{ended}       = time;
+$record{exit}        = $exit;
+$record{lock_at_end} = probe($plan->{lock});
+
+release_the_lock($holder) if $holder;
+
+if ($plan->{log} && open(my $fh, '>>', $plan->{log})) {
+	print $fh JSON::PP->new->canonical->encode(\%record), "\n";
+	close $fh;
+}
+exit $exit;
+
+# read_json - one file's contents as a hashref, or undef {{{
+sub read_json {
+	my ($file) = @_;
+	return undef unless defined $file && -f $file;
+	open my $fh, '<', $file or return undef;
+	my $body = do {local $/; <$fh>};
+	close $fh;
+	return eval {JSON::PP->new->decode($body)};
+}
+
+# }}}
+# probe - is the switch lock held, and by whom {{{
+#
+# A non-blocking flock, so the recorder answers rather than waiting.  The
+# holder writes its pid on the first line and its command on the second, which
+# is how a recorded child can name the stranger standing in the window.
+sub probe {
+	my ($file) = @_;
+	return undef unless defined $file && -f $file;
+
+	open my $fh, '<', $file or return undef;
+	if (flock($fh, LOCK_EX | LOCK_NB)) {
+		flock($fh, LOCK_UN);
+		close $fh;
+		return undef;
+	}
+	my $held = do {local $/; <$fh>};
+	close $fh;
+
+	my ($pid, $command) = split /\n/, (defined $held ? $held : ''), 2;
+	chomp $command if defined $command;
+	return {pid => $pid, command => $command};
+}
+
+# }}}
+# hold_the_lock - take the switch lock in a process of its own {{{
+#
+# The holder is a separate process because a lock this process took would be
+# a lock the child inherits rather than one it meets, and the window D46
+# leaves open is a window somebody else is standing in.
+sub hold_the_lock {
+	my ($plan) = @_;
+
+	my $pid = fork();
+	die "the recorder could not fork a lock holder: $!\n" unless defined $pid;
+	unless ($pid) {
+		open my $fh, '>', $plan->{lock} or POSIX::_exit(2);
+		flock($fh, LOCK_EX) or POSIX::_exit(2);
+		print $fh sprintf("%d\n%s\n", $$, $plan->{hold_lock});
+		$fh->flush;
+
+		# Held until the recorder releases us, and never outliving the
+		# recorder, so a child that dies leaves no process behind.
+		my $parent = getppid();
+		for (1 .. 3000) {
+			POSIX::_exit(0) if getppid() != $parent;
+			select undef, undef, undef, 0.1;
+		}
+		POSIX::_exit(0);
+	}
+
+	# Wait for the holder to have the lock, so the child never races it.
+	for (1 .. 100) {
+		last if -s $plan->{lock};
+		select undef, undef, undef, 0.05;
+	}
+	return $pid;
+}
+
+# }}}
+# release_the_lock - let the holder go and reap it {{{
+sub release_the_lock {
+	my ($pid) = @_;
+	kill 'TERM', $pid;
+	waitpid($pid, 0);
+	return;
+}
+
+# }}}

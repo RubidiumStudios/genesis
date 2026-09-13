@@ -6,6 +6,7 @@ Harness::Propagation::Git - the Service::Git test subclass with a step counter
 
   my $git = fault_git($h);
   fail_on($git, 'checkout_file', 3);
+  skip_on($git, 'push', 1);
   my @steps = step_log($git);
 
 =head1 DESCRIPTION
@@ -21,6 +22,13 @@ itself still happens.  That is how C<move_on_r_at> has a teammate move a
 branch on R in the middle of a run, at the step the row names, rather than
 before it, where the run's own refresh would absorb the move and no push
 would ever be rejected.
+
+A plan entry can also carry a skip, which C<skip_on> arms.  The wrapper
+returns at the armed call without delegating, so the step is reported in the
+log and its write never lands, and the run carries on as though the write had
+gone through.  A fault cannot make that shape, because a death is not a
+silence, and the rows that weigh a write reported and never made need the
+silence rather than the death.
 
 The plan and the log are files named by the environment rather than fields on
 an object, because the rows run whole commands and a spawned C<genesis> child

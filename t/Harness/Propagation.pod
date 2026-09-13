@@ -41,6 +41,16 @@ section whose C<enabled> is false, the string C<none> writes no section, and a
 hashref is an enabled pipeline with those repository-wide keys set.
 C<source_control> is a hashref merged under C<pipeline.source_control>.
 
+C<kit> names one of the kits the suite ships under C<t/kits/>, and the harness
+copies it in as the deployment root's dev kit before the seeding commit, so a
+row runs against a repository whose kit is part of the control branch.  The
+two kits written for these rows are C<exodus-reader>, whose manifest reads the
+exodus record of every deployment the environment names and whose blueprint
+refuses to render where a deployment it was told to require has none, and
+C<broken-blueprint>, whose blueprint refuses any environment whose file sets
+C<genesis.kit_blueprint_fails>.  A row that wants a kit of its own shape
+writes one with C<fixture_kit> instead.
+
 C<pipeline> defaults to C<none>, so a harness nobody asked for a section from
 carries none.  The C<.genesis/config> schema does not know the C<pipeline> key
 yet, and a repository whose configuration carries an unknown key fails
@@ -654,6 +664,71 @@ everything the suite writes can neither hand a directory to another owner nor
 lose the global identity C<helper::import> wrote it.  A row that reads a shape
 itself puts that same directory first on its own path for the length of the
 row.
+
+=head2 child_recorder($h, %opts) and child_runs($h)
+
+Puts a recording wrapper first on the path of the run under test and points
+C<GENESIS_CALLBACK_BIN> at it, so every genesis child a command spawns is
+logged, and reads those children back in order.  Each run carries its
+arguments, its pid, when it started and ended, its exit, its working
+directory, whether its standard input was a terminal, and what the switch lock
+was doing at its start, at its end, and while it ran.
+
+The options are C<copy>, which says whose switch lock is watched, C<exec>,
+which defaults on and runs the real genesis underneath, C<exit>, which answers
+a chosen code without running anything, C<probe>, which polls the lock while
+the child runs and fills C<lock_seen>, and C<hold_lock>, a command string that
+has the wrapper take the lock from a process of its own for the child's whole
+life.  That last is how a row puts a stranger in the window D46 leaves open
+between the session's finish and the child's own start.
+
+The wrapper is the committed C<t/Harness/bin/genesis-recorder> rather than a
+sub in this process, for the same reason the GitHub double is a fixture
+C<curl>: the thing being watched is a child process, and a double living in
+the parent's memory would never see one.  The parent's own path is left
+exactly as it was, because C<run_genesis> carries the fixture directory to the
+command under test alone.
+
+=head2 lock_probe($h, %opts), lock_probe_bin, and lock_probe_log($h)
+
+Asks whether the switch lock is held and by whom, without waiting.  The probe
+answers undef for a free lock and a hashref of C<pid> and C<command> for a held
+one, reading both out of the lock file, where the holder writes its pid on the
+first line and its command on the second.  The one option is C<copy>.
+
+C<lock_probe_bin> is the same probe as a standalone script, so a kit hook or
+any other child can call it with a label of its own, and C<lock_probe_log>
+returns those answers in order, each a hashref of C<label>, C<held>, C<pid>,
+and C<command>.
+
+=head2 shuttle_spy($h) and shuttle_requests($spy)
+
+Records what a run put to the shuttle, so a row can tell a run that made no
+request from a run that had nowhere to make one.  Under the manual provider
+there is no backend at all and D23 refuses a file one, which is why that
+difference needs an observer rather than a reading of the tree.
+
+=head2 fixture_kit($h, %opts)
+
+Writes a dev kit into the deployment root with the hook bodies a row needs and
+returns its path.  The options are C<hooks>, a hashref of hook name to shell
+body, C<name>, which defaults to C<pipeline>, C<version>, which defaults to
+C<0.0.1>, and C<root>.  Each hook is written executable with a C<bash> shebang
+and C<set -eu> above the body it was given.
+
+C<helper::mk_test_kit> builds a kit with no hooks at all, so a row that needs a
+blueprint that raises, or a hook that probes the lock, or a hook that spawns a
+genesis child of its own has nothing else to build on.  A row that wants one of
+the two kits the suite ships names it through C<make_harness>'s C<kit> option
+instead.
+
+=head2 skip_on($git, $step, $n, %opts)
+
+Makes the nth call of a named git step return without delegating, so the write
+is reported in the step log and never lands.  The options are C<from>, which
+makes every call from the nth onward the armed one, and C<return>, which says
+what the skipped call answers.  C<fail_on> cannot make this shape, because a
+death is not a silence.
 
 =head1 METHODS
 

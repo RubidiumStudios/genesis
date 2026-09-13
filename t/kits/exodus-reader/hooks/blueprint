@@ -1,0 +1,35 @@
+#!/bin/bash
+set -eu
+
+env_file="$GENESIS_ROOT/$GENESIS_ENVIRONMENT.yml"
+reads="$GENESIS_KIT_PATH/reads"
+type="${GENESIS_TYPE:-bosh}"
+
+# The two lists sit under genesis: in the environment file as plain lists of
+# deployment names, and the hook reads them out of the file itself rather than
+# asking Genesis for them, because asking would spawn a genesis child and the
+# rows that count children would then be counting this hook.
+list_of() {
+  sed -n "/^  $1:/,/^  [a-z]/p" "$env_file" | sed -n 's/^ *- *//p'
+}
+
+# A deployment the environment requires but that has never deployed has no
+# exodus record, and the render is refused naming it rather than left to fail
+# later on an empty reference.
+for deployment in $(list_of requires_exodus) ; do
+  if ! safe exists "secret/exodus/$deployment/$type" ; then
+    echo >&2 "$GENESIS_ENVIRONMENT requires $deployment, which has no exodus record"
+    exit 1
+  fi
+done
+
+echo manifest.yml
+
+for deployment in $(list_of reads_exodus) ; do
+  cat > "$reads/$deployment.yml" <<FRAGMENT
+---
+exodus:
+  $deployment: (( vault "secret/exodus/$deployment/$type:dated" ))
+FRAGMENT
+  echo "reads/$deployment.yml"
+done

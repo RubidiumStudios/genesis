@@ -1,0 +1,13 @@
+#!/bin/bash
+set -eu
+
+# The environment file is the only thing the hook is handed that a row can
+# write, so the refusal is spelled there and read back here.  A row asks for
+# it by writing genesis.kit_blueprint_fails into the environment it wants to
+# fail, and every other environment of the set renders as it always did.
+if grep -q 'kit_blueprint_fails' "$GENESIS_ROOT/$GENESIS_ENVIRONMENT.yml" ; then
+  echo >&2 "the blueprint hook refuses to render $GENESIS_ENVIRONMENT"
+  exit 1
+fi
+
+echo manifest.yml

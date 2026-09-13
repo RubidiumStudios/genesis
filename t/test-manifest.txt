@@ -169,6 +169,7 @@ unit-tests/harness_propagation-branch_state.t       # the nine branch-state help
 unit-tests/harness_propagation-readers.t            # the six shared readers beside the first two
 unit-tests/harness_propagation-shaping.t            # the repository shapes the later rows want
 unit-tests/harness_propagation-records.t            # the record reader, the read log, and the shapes
+unit-tests/harness_propagation-children.t           # the child, the lock, the shuttle, and the kits
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

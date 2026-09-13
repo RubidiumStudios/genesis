@@ -68,6 +68,11 @@ push @EXPORT, qw/
 	record_at vault_read_log fixture_preflight
 /;
 
+push @EXPORT, qw/
+	child_recorder child_runs lock_probe lock_probe_log
+	shuttle_spy shuttle_requests fixture_kit skip_on
+/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -349,6 +354,11 @@ sub _seed_control {
 	# from the options the harness was declared with.
 	$self->_seed_pipeline_section($root);
 
+	# The kit goes in before the seeding commit, so a row that named one runs
+	# against a repository whose kit is part of the control branch rather than
+	# against a working tree carrying a directory nothing tracks.
+	$self->_install_kit($root);
+
 	# The environment files land through write_env_file and are committed with
 	# the root, so the control branch's first commit is a repository a command
 	# can be run against rather than a deployment root with nothing in it.
@@ -393,6 +403,25 @@ sub _seed_pipeline_section {
 		for sort keys %{$self->{source_control} || {}};
 	$config->set("pipeline.$_" => $keys{$_}) for sort keys %keys;
 	$config->save;
+
+	return $self;
+}
+
+# }}}
+# _install_kit - put one of the kits the suite ships in as the dev kit {{{
+#
+# make_harness's kit option names a kit rather than describing one, so a row
+# that wants the blueprint that raises or the manifest that reads exodus says
+# so in a word.  The copy lands at the deployment root's dev directory, which
+# is where the kit reference every environment file carries points.
+sub _install_kit {
+	my ($self, $root) = @_;
+	my $name = $self->{kit} or return $self;
+
+	my $from = "$helper::TOPDIR/t/kits/$name";
+	die "make_harness does not know the kit $name\n" unless -d $from;
+	run({dir => $self->{base}, onfailure => "Failed to install the $name kit"},
+		'cp', '-R', $from, "$root/dev");
 
 	return $self;
 }
@@ -1702,6 +1731,34 @@ EOS
 }
 
 # }}}
+# fixture_kit - a dev kit with the hook bodies a row needs {{{
+#
+# helper::mk_test_kit builds a kit with no hooks at all, so a row that needs a
+# blueprint that raises, or a hook that probes the lock, or a hook that spawns
+# a genesis child of its own has nothing else to build on.  A row that wants
+# one of the two kits the suite ships names it through make_harness's kit
+# option instead, and those two are exodus-reader and broken-blueprint.
+sub fixture_kit {
+	my ($self, %opts) = @_;
+	my $name    = $opts{name}    // 'pipeline';
+	my $version = $opts{version} // '0.0.1';
+	my $root    = $opts{root} // $self->{root};
+	my $dir     = join('/', grep {length} $self->{a}, $root, 'dev');
+
+	helper::mkdir_or_fail($dir) unless -d $dir;
+	helper::mkdir_or_fail("$dir/hooks") unless -d "$dir/hooks";
+	helper::put_file("$dir/kit.yml",
+		"name: $name\nversion: $version\ngenesis_version_min: 3.0.0\n");
+
+	for my $hook (sort keys %{$opts{hooks} || {}}) {
+		helper::put_file("$dir/hooks/$hook", 0755,
+			"#!/bin/bash\nset -eu\n" . $opts{hooks}{$hook});
+	}
+
+	return $dir;
+}
+
+# }}}
 
 # snapshot_w - read the five parts of working state {{{
 #
@@ -1999,6 +2056,26 @@ sub fail_on {
 }
 
 # }}}
+# skip_on - make the nth call of a step report and not land {{{
+#
+# The armed call returns without delegating, so the write is reported in the
+# step log and never reaches the repository.  fail_on cannot make that shape,
+# because a death is not a silence, and T119 needs the silence.  The return
+# option says what the skipped call answers, for a step whose caller weighs
+# the answer rather than trusting the absence of a death.
+sub skip_on {
+	my ($git, $step, $n, %opts) = @_;
+	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN}
+		or die "skip_on needs fault_git to have run first\n";
+
+	my $plan = JSON::PP->new->decode(helper::get_file($file));
+	$plan->{$step} = {n => $n, from => $opts{from} ? 1 : 0,
+		skip => 1, return => $opts{return}};
+	helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+	return $git;
+}
+
+# }}}
 # step_log - every intercepted call, in order {{{
 sub step_log {
 	my ($git) = @_;
@@ -2258,6 +2335,160 @@ sub gh_calls {
 	return () unless -f $gh->{log};
 	my $json = JSON::PP->new;
 	return map {$json->decode($_)} grep {/\S/} split /\n/, helper::get_file($gh->{log});
+}
+
+# }}}
+# child_recorder - watch every genesis child a command spawns {{{
+#
+# M14 asks that a run spawn no second genesis process and M15 asks that it
+# spawn exactly one, so both want the same observer and the harness carries
+# one rather than two.  The wrapper is t/Harness/bin/genesis-recorder, copied
+# onto the directory _path_prefix already names, and GENESIS_CALLBACK_BIN
+# points at it, so a child spawned through the hook helper's genesis function
+# and a child that resolves the bare name on the path are each recorded.
+#
+# The parent's own path is left exactly as it was.  run_genesis carries the
+# fixture directory to the run under test alone, which is what keeps the
+# harness's own calls on the real binaries.
+#
+# hold_lock has the wrapper put a stranger in the window D46 leaves open
+# between the session's finish and the child's own start, and probe has it
+# poll the lock while the child runs.
+sub child_recorder {
+	my ($self, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	my $bin  = "$self->{base}/bin";
+	helper::mkdir_or_fail($bin) unless -d $bin;
+
+	$self->{child_copy} = $copy;
+	$self->{child_log}  = "$self->{base}/children.jsonl";
+	$self->{child_plan} = "$self->{base}/child-plan.json";
+
+	my $path = "$bin/genesis";
+	helper::put_file($path, 0755,
+		helper::get_file("$helper::TOPDIR/t/Harness/bin/genesis-recorder"));
+	helper::put_file($self->{child_log}, '');
+	helper::put_file($self->{child_plan}, JSON::PP->new->canonical->encode({
+		exec      => (defined $opts{exec} ? $opts{exec} : 1) ? 1 : 0,
+		exit      => $opts{exit},
+		probe     => $opts{probe} ? 1 : 0,
+		hold_lock => $opts{hold_lock},
+		real      => _real_genesis(),
+		lock      => "$self->{$copy}/.git/genesis-session.lock",
+		log       => $self->{child_log},
+	}));
+
+	$ENV{GENESIS_HARNESS_CHILD_PLAN} = $self->{child_plan};
+	$ENV{GENESIS_CALLBACK_BIN}       = $path;
+
+	return $path;
+}
+
+# }}}
+# _real_genesis - the genesis the recording wrapper hands its call on to {{{
+#
+# The wrapper stands where the bare name resolves, so the real binary is named
+# outright as the git root's own bin/genesis rather than looked up on a path
+# the wrapper is sitting on.
+sub _real_genesis { return "$helper::TOPDIR/bin/genesis" }
+
+# }}}
+# child_runs - each recorded child, in order {{{
+sub child_runs {
+	my ($self) = @_;
+	my $log = $self->{child_log} or return ();
+	return () unless -f $log;
+	my $json = JSON::PP->new;
+	return map {$json->decode($_)}
+		grep {/\S/} split /\n/, (helper::get_file($log) // '');
+}
+
+# }}}
+# lock_probe - is the switch lock held, and by whom {{{
+#
+# A non-blocking flock, so the probe answers rather than waiting.  The pid and
+# the command are written inside the lock file by whoever took it, the pid on
+# the first line and the command on the second, which is how a row can name
+# the stranger standing in the window.
+sub lock_probe {
+	my ($self, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	my $file = "$self->{$copy}/.git/genesis-session.lock";
+	return undef unless -f $file;
+
+	require Fcntl;
+	open my $fh, '<', $file or return undef;
+	if (flock($fh, Fcntl::LOCK_EX() | Fcntl::LOCK_NB())) {
+		flock($fh, Fcntl::LOCK_UN());
+		close $fh;
+		return undef;
+	}
+	my $held = do {local $/; <$fh>};
+	close $fh;
+
+	my ($pid, $command) = split /\n/, ($held // ''), 2;
+	chomp $command if defined $command;
+	return {pid => $pid, command => $command};
+}
+
+# }}}
+# lock_probe_bin, lock_probe_log - the same probe as a script {{{
+#
+# A kit hook cannot call a sub in this process, so the probe is also the
+# committed t/Harness/bin/lock-probe, copied onto the fixture directory and
+# taking a label.  The lock file and the log reach it through the environment,
+# which is how they reach a hook running several processes down from the row.
+sub lock_probe_bin {
+	my ($self) = @_;
+	return $self->{lock_probe_bin} if $self->{lock_probe_bin};
+
+	my $bin = "$self->{base}/bin";
+	helper::mkdir_or_fail($bin) unless -d $bin;
+	my $path = "$bin/lock-probe";
+	$self->{lock_probe_log} = "$self->{base}/lock-probe.jsonl";
+
+	helper::put_file($path, 0755,
+		helper::get_file("$helper::TOPDIR/t/Harness/bin/lock-probe"));
+	helper::put_file($self->{lock_probe_log}, '');
+
+	$ENV{GENESIS_HARNESS_LOCK_FILE} = "$self->{a}/.git/genesis-session.lock";
+	$ENV{GENESIS_HARNESS_LOCK_LOG}  = $self->{lock_probe_log};
+
+	return $self->{lock_probe_bin} = $path;
+}
+
+sub lock_probe_log {
+	my ($self) = @_;
+	my $log = $self->{lock_probe_log} or return ();
+	return () unless -f $log;
+	my $json = JSON::PP->new;
+	return map {$json->decode($_)}
+		grep {/\S/} split /\n/, (helper::get_file($log) // '');
+}
+
+# }}}
+# shuttle_spy, shuttle_requests - what a run put to the shuttle {{{
+#
+# Under the manual provider there is no backend at all and D23 refuses a file
+# one, so nothing in the tree can tell a run that made no request from a run
+# that had nowhere to make one.  The spy is that difference: the log it names
+# is empty until something writes a request into it, and a row reading an
+# empty log is reading an answer rather than an absence.
+sub shuttle_spy {
+	my ($self, %opts) = @_;
+	my $log = "$self->{base}/shuttle.jsonl";
+	unlink $log;
+	$ENV{GENESIS_SHUTTLE_SPY} = $log;
+	return $self->{shuttle} = bless {harness => $self, log => $log},
+		'Harness::Propagation::Spy';
+}
+
+sub shuttle_requests {
+	my ($spy) = @_;
+	return () unless -f $spy->{log};
+	my $json = JSON::PP->new;
+	return map {$json->decode($_)}
+		grep {/\S/} split /\n/, (helper::get_file($spy->{log}) // '');
 }
 
 # }}}
