@@ -37,6 +37,8 @@ push @EXPORT, qw/
 	run_genesis run_genesis_in stand_on
 /;
 
+push @EXPORT, qw/assert_snapshot_invariant/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -962,6 +964,56 @@ sub assert_w_restored {
 		unless $now->{status} eq $w->{status};
 	push @differed, sprintf("index: %s", $now->{index})
 		unless $now->{index} eq $w->{index};
+
+	my $ok = $builder->ok(!@differed, $name);
+	$builder->diag("    $_") for @differed;
+	return $ok;
+}
+
+# }}}
+# assert_snapshot_invariant - I7, read through {{{
+#
+# Two comparisons and not one, for D82's reason.  The source tree at the
+# delivered control commit carries every environment's files, so no
+# whole-tree comparison is possible: the branch has to match the source over
+# the set's paths, and hold nothing outside the set.  The second is the half
+# that fires in practice, because a copy-only writer never removes a leftover
+# init or a path that dropped out of the set.
+sub assert_snapshot_invariant {
+	my ($self, $env, %opts) = @_;
+	my $builder = $BUILDER // Test::More->builder;
+	my $dir     = $self->{$opts{copy} // 'a'};
+	my $branch  = $self->slug($env, %opts);
+	my $at      = $opts{commit} // $branch;
+	my $name    = $opts{name} // "$branch mirrors its marker's control commit";
+
+	my $control = $self->harness_marker($at);
+	unless ($control) {
+		my $ok = $builder->ok(0, $name);
+		$builder->diag("    no marker on $branch, so nothing names a source");
+		return $ok;
+	}
+
+	my @set = $self->propagation_set($env, at => $control, %opts);
+	my %in_set = map {$_ => 1} @set;
+
+	my @differed;
+	for my $path (@set) {
+		my ($want) = run({dir => $dir, passfail => 0},
+			'git', 'rev-parse', "$control:$path");
+		my ($got)  = run({dir => $dir, passfail => 0},
+			'git', 'rev-parse', "$at:$path");
+		chomp for grep {defined} ($want, $got);
+		next if defined $want && defined $got && $want eq $got;
+		push @differed, sprintf("%s differs from control@%s", $path, substr($control, 0, 12));
+	}
+
+	my ($listing) = run({dir => $dir}, 'git', 'ls-tree', '-r', '--name-only', $at);
+	chomp $listing if defined $listing;
+	for my $path (split /\n/, ($listing // '')) {
+		next if $in_set{$path};
+		push @differed, sprintf("%s is on the branch and not in the set", $path);
+	}
 
 	my $ok = $builder->ok(!@differed, $name);
 	$builder->diag("    $_") for @differed;
