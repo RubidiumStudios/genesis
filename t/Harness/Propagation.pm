@@ -39,6 +39,11 @@ push @EXPORT, qw/
 
 push @EXPORT, qw/assert_snapshot_invariant/;
 
+push @EXPORT, qw/
+	fault_git fail_on step_log reset_steps sever_remote restore_remote
+	hold_session_lock release_session_lock
+/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -1102,6 +1107,18 @@ sub run_genesis {
 	$env{GITHUB_AUTH_TOKEN} = $self->{gh}{token}
 		if $self->{gh} && !$opts{no_token} && !$self->{gh}{no_token};
 
+	# The fault plan reaches a spawned command through the environment, and the
+	# subclass installs itself in the child through PERL5OPT.  The child's own
+	# -I has to name lib/ as well as t/, because PERL5OPT is read before
+	# bin/genesis compiles and puts GENESIS_LIB on @INC itself.
+	if ($self->{fault}) {
+		$env{GENESIS_HARNESS_GIT_PLAN} = $self->{fault}{plan};
+		$env{GENESIS_HARNESS_GIT_LOG}  = $self->{fault}{log};
+		$env{PERL5OPT} = join(' ',
+			'-I' . $helper::TOPDIR . '/t', '-I' . $helper::TOPDIR . '/lib',
+			'-MHarness::Propagation::Git', ($ENV{PERL5OPT} // ()));
+	}
+
 	helper::set_stdin(join("\n", @{$opts{answers}}, '')) if $opts{answers};
 	my ($out, $rc, $err) = run({
 			dir      => $dir,
@@ -1133,6 +1150,156 @@ sub stand_on {
 	run({dir => $dir, onfailure => "Failed to stand on $branch"},
 		'git', 'checkout', '-q', $branch);
 	chdir "$dir/$opts{dir}" or die "cannot enter $opts{dir}: $!\n" if $opts{dir};
+	return $self;
+}
+
+# }}}
+# fault_git - a subclass handle, with the plan and the log armed {{{
+#
+# The plan and the log are files named by the environment, so a command the
+# harness spawns picks both up.  run_genesis carries them and PERL5OPT to the
+# child, which is how a whole command meets an injected fault.
+#
+# Service::Git caches one instance per repository and answers every later
+# caller with it, whatever class that caller named, so a copy that was read
+# before the fault was armed already holds a plain handle.  We re-bless the
+# cached instance rather than building a second one, and drop the harness's
+# own cached handle, so every handle onto that copy faults from here on.
+sub fault_git {
+	my ($self, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+
+	$self->{fault}{plan} //= "$self->{base}/git-plan.json";
+	$self->{fault}{log}  //= "$self->{base}/git-steps.log";
+	helper::put_file($self->{fault}{plan}, '{}');
+	helper::put_file($self->{fault}{log}, '');
+
+	$ENV{GENESIS_HARNESS_GIT_PLAN} = $self->{fault}{plan};
+	$ENV{GENESIS_HARNESS_GIT_LOG}  = $self->{fault}{log};
+
+	require Harness::Propagation::Git;
+	my $git = Harness::Propagation::Git->new($self->{$copy});
+	bless $git, 'Harness::Propagation::Git';
+	delete $self->{"_git_$copy"};
+
+	return $self->{"_fault_git_$copy"} = $git;
+}
+
+# }}}
+# fail_on - arm one named git step to die on its nth call {{{
+sub fail_on {
+	my ($git, $step, $n, %opts) = @_;
+	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN}
+		or die "fail_on needs fault_git to have run first\n";
+
+	my $plan = JSON::PP->new->decode(helper::get_file($file));
+	$plan->{$step} = {n => $n, from => $opts{from} ? 1 : 0,
+		message => $opts{message}};
+	helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+	return $git;
+}
+
+# }}}
+# step_log - every intercepted call, in order {{{
+sub step_log {
+	my ($git) = @_;
+	my $file = $ENV{GENESIS_HARNESS_GIT_LOG} or return ();
+	return () unless -f $file;
+	my $json = JSON::PP->new;
+	return map {$json->decode($_)} grep {/\S/} split /\n/, helper::get_file($file);
+}
+
+# }}}
+# reset_steps - empty the log and the counters between a row's phases {{{
+sub reset_steps {
+	my ($git) = @_;
+	helper::put_file($ENV{GENESIS_HARNESS_GIT_LOG}, '') if $ENV{GENESIS_HARNESS_GIT_LOG};
+	if (my $file = $ENV{GENESIS_HARNESS_GIT_PLAN}) {
+		my $plan = JSON::PP->new->decode(helper::get_file($file));
+		delete $plan->{_counts};
+		helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+	}
+	return $git;
+}
+
+# }}}
+# sever_remote - make every remote step fail as an unreachable remote would {{{
+#
+# The text is the one a real unreachable remote emits, because the code that
+# tells a network failure from an authentication one reads stderr, and a row
+# asserts that the run named the network as the reason.  The after option
+# severs the remote partway through a run, which the unsurvivable rows need.
+sub sever_remote {
+	my ($self, %opts) = @_;
+	my $git = $self->{"_fault_git_a"} // $self->fault_git;
+	my $message = "fatal: unable to access '$self->{r}': "
+		. "Could not resolve host: the remote is unreachable";
+	fail_on($git, $_, $opts{after} // 1, from => 1, message => $message)
+		for qw/fetch_branch fetch_branches push delete_remote_branch/;
+	return $self;
+}
+
+# }}}
+# restore_remote - disarm the remote steps again {{{
+sub restore_remote {
+	my ($self) = @_;
+	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN} or return $self;
+	my $plan = JSON::PP->new->decode(helper::get_file($file));
+	delete $plan->{$_} for qw/fetch_branch fetch_branches push delete_remote_branch/;
+	helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+	return $self;
+}
+
+# }}}
+# hold_session_lock - take the switch lock in a child process {{{
+#
+# The lock lands at M5, so here the harness takes the flock the design fixes,
+# on genesis-session.lock in the git directory, and writes the pid and the
+# command inside for the refusal message to read.  The pid is the first line
+# and the command the second, so a reader that splits on newline gets both
+# whatever the command holds.  A row that wants the lock released by the
+# kernel kills the holder rather than letting it finish.
+sub hold_session_lock {
+	my ($self, %opts) = @_;
+	my $dir  = $self->{$opts{copy} // 'a'};
+	my $lock = "$dir/.git/genesis-session.lock";
+
+	my $pid = fork();
+	die "cannot fork a lock holder: $!\n" unless defined $pid;
+	unless ($pid) {
+		open my $fh, '>', $lock or POSIX::_exit(2);
+		require Fcntl;
+		flock($fh, Fcntl::LOCK_EX()) or POSIX::_exit(2);
+		print $fh sprintf("%d\n%s\n", $$, $opts{command} // 'genesis propagate');
+		require IO::Handle;
+		$fh->flush;
+
+		# Hold it until the row releases us, and never outlive the test that
+		# forked us, so a row that dies leaves no process behind.
+		my $parent = getppid();
+		for (1 .. 300) {
+			POSIX::_exit(0) if getppid() != $parent;
+			sleep 1;
+		}
+		POSIX::_exit(0);
+	}
+
+	# Wait for the child to have the lock, so a row never races its own setup.
+	for (1 .. 100) {
+		last if -s $lock;
+		select undef, undef, undef, 0.05;
+	}
+	push @{$self->{holders}}, $pid;
+	return $pid;
+}
+
+# }}}
+# release_session_lock - let the holder finish, or kill it outright {{{
+sub release_session_lock {
+	my ($self, $pid, %opts) = @_;
+	kill($opts{hard} ? 'KILL' : 'TERM', $pid);
+	waitpid($pid, 0);
+	$self->{holders} = [grep {$_ != $pid} @{$self->{holders} || []}];
 	return $self;
 }
 

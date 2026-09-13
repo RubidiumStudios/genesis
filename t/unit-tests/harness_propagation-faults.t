@@ -1,0 +1,166 @@
+#!/usr/bin/env perl
+# Proves T5: a row can ask for the third checkout_file to die, and nothing
+# else behaves differently.
+use strict;
+use warnings;
+use utf8;
+
+use lib 'lib';
+use lib 't';
+use helper;
+use Harness::Propagation;
+
+use Test::More;
+
+use Genesis;
+
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
+
+subtest 'the third checkout_file dies and the first two ran' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files => {
+			'qa.yml'          => "---\nkit: dev\n",
+			'ops/one.yml'     => "---\none: 1\n",
+			'ops/two.yml'     => "---\ntwo: 2\n",
+			'ops/three.yml'   => "---\nthree: 3\n",
+		},
+		message => 'four files',
+		push    => 1,
+	);
+
+	my $git = fault_git($h);
+	fail_on($git, 'checkout_file', 3, message => 'the harness stopped here');
+
+	$git->checkout($h->slug('qa'));
+	my @wrote;
+	for my $path (qw(qa.yml ops/one.yml ops/two.yml ops/three.yml)) {
+		eval {$git->checkout_file($control, $path); push @wrote, $path; 1}
+			or last;
+	}
+
+	is(scalar @wrote, 2, 'the first two calls ran');
+	like($@, qr/the harness stopped here/, 'the third died with the given message');
+
+	my @steps = step_log($git);
+	my @files = grep {$_->[0] eq 'checkout_file'} @steps;
+	is(scalar @files, 3, 'exactly three checkout_file calls were made');
+
+	is($steps[0][0], 'checkout', 'the checkout before them ran');
+	ok(!(grep {$_->[0] eq 'commit'} @steps), 'no later step of the sequence ran');
+};
+
+subtest 'no other git step behaves differently' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'one file',
+		push    => 1,
+	);
+
+	my $git = fault_git($h);
+	fail_on($git, 'checkout_file', 3);
+
+	$git->checkout($h->slug('qa'));
+	ok(eval {$git->checkout_file($control, 'qa.yml'); 1},
+		'a checkout_file below the armed count still runs');
+
+	my ($content) = run({dir => $h->a}, 'git', 'show', ':qa.yml');
+	like($content, qr/kit: dev/, 'and it did the real work');
+};
+
+subtest 'a handle taken before the fault faults too' => sub {
+	# Service::Git caches one instance per repository and hands it to every
+	# later caller, so a row that read the repository before it armed a fault
+	# would otherwise keep a handle that never faults.
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+
+	my $early = $h->git('a');
+	isa_ok($early, 'Service::Git', 'the handle taken before the fault');
+
+	fault_git($h);
+	fail_on($h->git('a'), 'checkout', 1, message => 'the harness stopped here');
+
+	ok(!eval {$early->checkout($h->slug('qa')); 1},
+		'the handle the row already held dies');
+	like($@, qr/the harness stopped here/, 'with the armed message');
+};
+
+subtest 'the plan reaches a spawned command' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $git = fault_git($h);
+	fail_on($git, 'push', 1, message => 'the harness stopped the push');
+
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'ping');
+	is($exit, 0, 'a command that takes no git step is unaffected');
+
+	my @steps = step_log($git);
+	ok(!(grep {$_->[0] eq 'push'} @steps),
+		'and the armed step was never reached');
+};
+
+subtest 'the remote can be severed and restored' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+
+	my $git = fault_git($h);
+	sever_remote($h);
+
+	ok(!eval {$git->push('origin', $h->control); 1}, 'a push to a severed remote dies');
+	like($@, qr/Could not resolve host/,
+		'with the text a real unreachable remote emits');
+	my $remote = $h->r;
+	like($@, qr/\Q$remote\E/, 'and it names the remote it could not reach');
+
+	restore_remote($h);
+	reset_steps($git);
+	ok(eval {$git->push('origin', $h->control); 1},
+		'and the push works again once the remote is restored');
+};
+
+subtest 'the session lock is held by a child and dropped with it' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $lock = $h->a . '/.git/genesis-session.lock';
+
+	my $pid = hold_session_lock($h, command => 'genesis propagate');
+	ok($pid > 0, 'the holder is a real process');
+
+	my ($held_pid, $held_command) = split /\n/, helper::get_file($lock);
+	is($held_pid, $pid, 'the first line is the holder pid');
+	is($held_command, 'genesis propagate', 'the second line is its command');
+
+	ok(!_can_lock($lock), 'a second taker cannot have the lock');
+
+	release_session_lock($h, $pid, hard => 1);
+	ok(_can_lock($lock), 'and the kernel drops it when the holder is killed');
+};
+
+# _can_lock - whether this process can take the lock without waiting.  It is
+# an assertion helper for the rows above, so it sits beside them.
+sub _can_lock {
+	my ($file) = @_;
+	require Fcntl;
+	open my $fh, '>>', $file or return 0;
+	my $got = flock($fh, Fcntl::LOCK_EX() | Fcntl::LOCK_NB()) ? 1 : 0;
+	flock($fh, Fcntl::LOCK_UN()) if $got;
+	close $fh;
+	return $got;
+}
+
+done_testing;

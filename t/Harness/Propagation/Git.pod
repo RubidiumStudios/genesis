@@ -1,0 +1,35 @@
+=head1 NAME
+
+Harness::Propagation::Git - the Service::Git test subclass with a step counter
+
+=head1 SYNOPSIS
+
+  my $git = fault_git($h);
+  fail_on($git, 'checkout_file', 3);
+  my @steps = step_log($git);
+
+=head1 DESCRIPTION
+
+Fault injection is the technique in which the harness makes a chosen git step
+fail partway and the row then asserts the invariants hold.  This subclass
+counts each intercepted step, appends it to a log, and dies where the plan
+arms it, delegating to C<Service::Git> otherwise.
+
+The plan and the log are files named by the environment rather than fields on
+an object, because the rows run whole commands and a spawned C<genesis> child
+builds its own handle.  The child loads this module through C<PERL5OPT> and
+C<import> makes C<< Service::Git->new >> answer with a subclass instance.  No
+file under C<lib/> changes.
+
+C<Service::Git> caches one instance per repository and answers every later
+caller with it, whatever class that caller asked for, so C<fault_git>
+re-blesses the cached instance rather than building a second one.  A row that
+read a copy before it armed a fault still meets the fault.
+
+=head1 STEPS
+
+C<checkout>, C<checkout_file>, C<add>, C<rm>, C<commit>, C<create_branch>,
+C<fetch_branch>, C<fetch_branches>, C<push>, C<delete_remote_branch>, and
+C<reset_working_tree>.
+
+=cut

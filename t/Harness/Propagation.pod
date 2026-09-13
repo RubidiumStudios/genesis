@@ -317,6 +317,39 @@ C<run_genesis_in> is the same run in a named copy.
 Puts a copy on a branch, and optionally in a subdirectory of it.  Options are
 C<copy>, default C<a>, and C<dir>.
 
+=head2 fault_git($h, %opts)
+
+Returns a C<Harness::Propagation::Git> handle for a copy and arms the plan
+file and the step log, which a spawned command picks up.  The one option is
+C<copy>, default C<a>.  C<Service::Git> hands every caller the one instance it
+caches per repository, so the handle a row already held is re-blessed and
+faults from here on as well.
+
+=head2 fail_on($git, $step, $n, %opts)
+
+Arms one named git step to die on its nth call.  C<from> makes every call
+from the nth onward die rather than the nth alone, and C<message> fixes what
+it dies with.
+
+=head2 step_log($git) and reset_steps($git)
+
+Return every intercepted call in order, each an arrayref of the step's name
+and its arguments, and empty the log and the counters between a row's phases.
+
+=head2 sever_remote($h, %opts) and restore_remote($h)
+
+Make every remote step fail with the text a real unreachable remote emits,
+and disarm them again.  C<after> severs the remote partway through a run.
+
+=head2 hold_session_lock($h, %opts) and release_session_lock($h, $pid, %opts)
+
+Take the switch lock in a child process and release it.  The lock is the
+C<flock> on C<genesis-session.lock> in the git directory, and the holder
+writes its pid on the first line and its command on the second for the
+refusal message to read.  Options are C<copy> and C<command>.  C<hard> kills
+the holder without letting it finish, so a row can show that the kernel drops
+the lock with the process.
+
 =head1 METHODS
 
 C<r>, C<a>, and C<b> return the three paths.  C<git> returns a
