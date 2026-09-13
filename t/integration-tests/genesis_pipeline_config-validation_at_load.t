@@ -83,7 +83,7 @@ subtest 'a stale ci.yml beside a version 3 pipeline only warns' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--no-fetch');
 	like $err, qr/Legacy\s+\S*ci\.yml\s+present alongside a v3/s,
 		'the stale file warns';
-	isnt $exit, Genesis::Exit::CONFIG, 'the warning is not a refusal';
+	is $exit, 0, 'the warning is not a refusal';
 	unlike $err, qr/Pipeline commands are unavailable/,
 		'and the command carries on';
 };

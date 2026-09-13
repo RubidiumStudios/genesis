@@ -15,6 +15,7 @@ use Genesis::Kit::Provider;
 use Service::Vault::Remote;
 use Service::Vault::None;
 use Genesis::Config;
+use Genesis::Exit qw/CONFIG/;
 
 use Cwd ();
 use File::Path qw/rmtree/;
@@ -1386,8 +1387,7 @@ sub _validate_config {
 				if $handler->can('validate_config_section');
 		}
 	} else {
-		require Genesis::Exit;
-		bail({exitcode => Genesis::Exit::CONFIG()},
+		bail({exitcode => CONFIG},
 			"Genesis deployment repo configuration version %s is not supported",
 			$config_version
 		);

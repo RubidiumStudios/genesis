@@ -1655,10 +1655,16 @@ settings.
 A version 3 configuration is validated against L</_repo_config_schema>,
 which carries the C<pipeline> section, so C<genesis E<lt>envE<gt> deploy>
 and C<genesis propagate> meet the same refusal in the same words. A
-refusal exits C<Genesis::Exit::CONFIG>. A version 2 configuration errors
-for every pipeline command, naming the migration, and a C<ci.yml> left
-beside a version 3 configuration that enables a pipeline warns that the
-file is a stale leftover.
+refusal exits C<Genesis::Exit::CONFIG>.
+
+This method does not itself refuse a version 2 configuration or a stale
+F<ci.yml>; it records what it found, and two other places act on the
+record. It sets the flag that L</has_legacy_ci_yml> reports, which
+C<Genesis::Commands::_gate_pipeline_on_legacy_ci_yml> reads to error for
+every pipeline command, naming the migration. And where a C<ci.yml> sits
+beside a version 3 configuration that already enables a pipeline, it
+warns here that the file is a stale leftover and lets the command
+through.
 
 B<Returns:> C<1> on success. Raises on invalid or unsupported config versions.
 
