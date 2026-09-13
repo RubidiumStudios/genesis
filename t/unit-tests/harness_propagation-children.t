@@ -1,10 +1,11 @@
 #!/usr/bin/env perl
 # Proves the setup of T119, T242, T248, and T164: a spawned child is
 # recorded with its arguments and what the lock was doing around it, the
-# lock probe answers about a free and a held lock, the shuttle spy tells
-# no request from no backend, a skipped git step reports and does not
-# land, and the broken-blueprint kit fails one environment and not the
-# other.
+# lock probe answers about a free and a held lock in this process and from
+# a child of its own, the shuttle spy tells no request from no backend and
+# reads a request back where one was made, a skipped git step reports and
+# does not land, and the broken-blueprint kit fails one environment and not
+# the other.
 use strict;
 use warnings;
 use utf8;
@@ -16,6 +17,7 @@ use Harness::Propagation;
 
 use Test::More;
 
+use Cwd ();
 use Genesis;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
@@ -39,7 +41,12 @@ EOS
 	run_genesis($h, 'qa', 'lookup', '--env', 'genesis');
 	my @runs = child_runs($h);
 	is(scalar(@runs), 1, 'exactly one child was spawned');
-	ok(scalar(@{$runs[0]{argv}}), 'its argument list was recorded');
+
+	# The hook helper's genesis function puts -C and the deployment root in
+	# front of whatever the hook asked for, so the whole list is named here
+	# rather than counted, and the root is named as the child was handed it.
+	is_deeply($runs[0]{argv}, ['-C', Cwd::abs_path($h->a), 'version'],
+		'its argument list was recorded exactly as the hook passed it');
 	ok(exists $runs[0]{lock_at_start},
 		'and what the lock was doing when it started');
 };
@@ -58,6 +65,28 @@ subtest 'the lock probe answers for a free and a held lock' => sub {
 	release_session_lock($h, $pid);
 };
 
+subtest 'the probe script answers from a child of its own' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $probe = $h->lock_probe_bin;
+
+	# A kit hook cannot call a sub in this process, so the probe a hook would
+	# call is run here the way a hook runs it, which is as a command taking a
+	# label, and the answers are read back out of the harness's own log.
+	my $pid = hold_session_lock($h, command => 'genesis pipeline-apply');
+	run({}, $probe, 'while it is held');
+	release_session_lock($h, $pid);
+	run({}, $probe, 'once it is free');
+
+	my @samples = lock_probe_log($h);
+	is(scalar(@samples), 2, 'the probe logged an answer for each label');
+	is($samples[0]{pid}, $pid, 'the first answer names the holder');
+	is($samples[0]{command}, 'genesis pipeline-apply',
+		'and the command it is running');
+	is($samples[1]{held}, 0, 'and the second answers a free lock');
+};
+
 subtest 'the shuttle spy tells no request from no backend' => sub {
 	# One of the three is the restoration the run asserts for itself.
 	plan tests => 3;
@@ -72,8 +101,32 @@ subtest 'the shuttle spy tells no request from no backend' => sub {
 		'and a manual-provider deploy made none either');
 };
 
+subtest 'the shuttle spy reads back a request a child made' => sub {
+	# One of the three is the restoration the run asserts for itself.
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa']);
+	my $spy = shuttle_spy($h);
+
+	# The request is written by a child of the run rather than by this
+	# process, because that is where a shuttle request will be written from,
+	# and the spy is named to that child through the environment alone.
+	fixture_kit($h, hooks => {features => <<'EOS'});
+printf '{"action":"trigger","environment":"%s","provider":"manual"}\n' \
+	"$GENESIS_ENVIRONMENT" >> "$GENESIS_SHUTTLE_SPY"
+for feature in "$@" ; do echo "$feature" ; done
+EOS
+
+	run_genesis($h, 'qa', 'lookup', '--env', 'genesis');
+	my @requests = shuttle_requests($spy);
+	is(scalar(@requests), 1, 'the one request the child made is read back');
+	is_deeply($requests[0],
+		{action => 'trigger', environment => 'qa', provider => 'manual'},
+		'and it carries every field the child wrote');
+};
+
 subtest 'a skipped git step reports and does not land' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	my $branch = $h->slug('qa');
@@ -93,6 +146,13 @@ subtest 'a skipped git step reports and does not land' => sub {
 	is(remote_sha($h, $branch), $before, 'R did not move');
 	is(scalar(grep {$_->[0] eq 'push'} step_log($git)), 1,
 		'and the step reported itself as taken');
+
+	# The refresh above ran before the local commit and nothing has moved R
+	# since, so the remote-tracking ref still holds what R holds and the ahead
+	# count is the distance between copy A and R.  A push that quietly did
+	# nothing at all would leave the same two shas but no commit in front.
+	my ($ahead) = counts($h->a, $branch);
+	is($ahead, 1, 'and copy A still stands one commit in front of R');
 };
 
 subtest 'the broken-blueprint kit fails one environment and not the other' => sub {

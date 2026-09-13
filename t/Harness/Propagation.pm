@@ -2474,10 +2474,19 @@ sub lock_probe_log {
 # that had nowhere to make one.  The spy is that difference: the log it names
 # is empty until something writes a request into it, and a row reading an
 # empty log is reading an answer rather than an absence.
+#
+# The log is written empty rather than removed, so a row that reads no
+# requests back has read a file the spy really laid down.  A reader that
+# short-circuited on a missing file would answer the same empty list for a
+# spy that was never stood up at all, which is the one answer it must not be
+# able to give.
+#
+# A request is one JSON object on a line of its own, which is the form every
+# other log the harness owns takes.
 sub shuttle_spy {
 	my ($self, %opts) = @_;
 	my $log = "$self->{base}/shuttle.jsonl";
-	unlink $log;
+	helper::put_file($log, '');
 	$ENV{GENESIS_SHUTTLE_SPY} = $log;
 	return $self->{shuttle} = bless {harness => $self, log => $log},
 		'Harness::Propagation::Spy';

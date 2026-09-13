@@ -708,6 +708,11 @@ request from a run that had nowhere to make one.  Under the manual provider
 there is no backend at all and D23 refuses a file one, which is why that
 difference needs an observer rather than a reading of the tree.
 
+The spy names its log in C<GENESIS_SHUTTLE_SPY> and lays the file down empty,
+so a row that reads no requests back has read a file the spy really wrote.  A
+request is one JSON object on a line of its own, and C<shuttle_requests>
+returns them decoded and in the order they were made.
+
 =head2 fixture_kit($h, %opts)
 
 Writes a dev kit into the deployment root with the hook bodies a row needs and
