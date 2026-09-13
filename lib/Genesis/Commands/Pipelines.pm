@@ -10,6 +10,7 @@ use Genesis::Top;
 use Genesis::Env;
 use Genesis::CI::Legacy qw//;
 use Genesis::CI::Compiler;
+use Genesis::CI::Compiler::PipelineProvider;
 use Genesis::CI::Propagation;
 use Service::Git;
 use Service::Github;
@@ -46,14 +47,16 @@ sub apply {
 	# Short-circuit on the 'manual' provider: it has no pipeline to apply
 	# — Genesis is the CLI you run at your terminal, there is no CI to
 	# generate or deploy.
-	if (($top->config->get('pipeline.provider.type') // '') eq 'manual') {
+	if (($top->config->get('pipeline.provider.type') // 'manual') eq 'manual') {
 		bail(
 			"Manual provider has no pipeline to apply.\n\n".
 			"#i{Genesis is your CLI - deploys happen at your terminal, ".
 			"not in a hosted pipeline.}\n\n".
 			"To use a real CI provider, change #C{pipeline.provider.type} in ".
-			"#C{.genesis/config} to one of: #C{concourse}, #C{github-actions}, ".
-			"then re-run #C{genesis pipeline-apply}."
+			"#C{.genesis/config} to one of: %s, then re-run ".
+			"#C{genesis pipeline-apply}.",
+			join(', ', map {"#C{$_}"}
+				Genesis::CI::Compiler::PipelineProvider->automated_providers())
 		);
 	}
 

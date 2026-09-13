@@ -1321,8 +1321,9 @@ B<Examples:>
 
 Whether CI is switched on for this repository.
 
-Note this is weaker than C<ci_configured>: enabled without a provider is a
-half-configured repository, so check that instead before acting.
+This says the same thing as C<ci_configured> now that an absent provider block
+resolves to the manual provider, so a repository can no longer be enabled and
+provider-less at the same time.
 
 B<Parameters:> None.
 
@@ -1339,10 +1340,9 @@ B<Examples:>
 
 Whether CI is both enabled B<and> has a provider type set.
 
-This is the condition worth gating on. Enabled-without-provider is a
-repository someone started configuring and did not finish, and treating it as
-configured produces failures further along, where the cause is no longer
-obvious.
+The two halves no longer come apart. C<pipeline.provider.type> defaults to
+C<manual>, so every enabled section has a provider type and the half-configured
+repository this once guarded against cannot be written.
 
 B<Parameters:> None.
 
@@ -1351,7 +1351,8 @@ B<Returns:> True when both hold; false otherwise.
 B<Examples:>
 
     my $bool = $top->ci_configured();
-    # returns false in a repo with pipeline.enabled but no provider
+    # returns true in a repo with pipeline.enabled and no provider block,
+    # because the absent block is the manual provider
 
 =head2 has_legacy_ci_yml
 
@@ -1797,9 +1798,15 @@ The block declares C<enabled>, which is the gate and defaults to false, the
 C<provider> hash, which is optional even once the gate is on and carries the
 automation's C<type>, C<target>, C<url>, C<team>, and C<insecure>, and
 C<name>, which is the pipeline's own label in its provider and falls back to
-the deployment type. A pipeline with no provider type is a manual one that
-an operator drives by hand, so an absent block means manual rather than no
-pipeline at all.
+the deployment type.
+
+The enum for C<pipeline.provider.type> is built from
+C<< Genesis::CI::Compiler::PipelineProvider->known_providers >>, so the schema
+and every class lookup read one list and cannot spell a provider two ways.
+The type defaults to C<manual>, and the C<provider> block itself defaults to
+an empty hash so that the type's own default still applies when the operator
+writes no provider block at all. A section that is enabled with no provider
+block is therefore a manual pipeline rather than no pipeline.
 
 B<Returns:> A hash reference.
 

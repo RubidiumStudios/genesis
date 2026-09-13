@@ -1576,6 +1576,11 @@ sub _repo_config_schema {
 # pipeline at all.
 sub _pipeline_config_schema {
 	my ($self) = @_;
+
+	# The one registry under D28, so the enum below is the registry's list
+	# rather than a literal beside it.
+	require Genesis::CI::Compiler::PipelineProvider;
+
 	return {
 		type        => 'hash',
 		description => 'Pipeline configuration',
@@ -1585,13 +1590,18 @@ sub _pipeline_config_schema {
 				default     => Genesis::Config::FALSE,
 				description => 'Whether this repository has a pipeline'
 			},
+			# The block defaults to an empty hash so that the type below
+			# takes its own default when the operator writes no provider
+			# block at all, which under D15 is a manual pipeline.
 			provider => {
 				type        => 'hash',
+				default     => {},
 				description => 'The automation that owns the pipeline',
 				schema => {
 					type => {
 						type        => 'enum',
-						values      => ['concourse', 'gha', 'manual'],
+						values      => [Genesis::CI::Compiler::PipelineProvider->known_providers()],
+						default     => 'manual',
 						description => 'Which automation owns the pipeline'
 					},
 					target   => {type => 'string',  description => 'Provider target name (e.g., fly target)'},

@@ -111,7 +111,8 @@ subtest 'v3 config treats an enabled gate with no provider as manual' => sub {
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 	lives_ok { $top->config } "an enabled gate with no provider still loads";
 	ok $top->ci_enabled, "the gate reads back as on";
-	ok !$top->ci_configured, "and the repository is not configured until one is named";
+	is $top->config->get('pipeline.provider.type'), 'manual',
+		"and the absent provider block reads back as a manual pipeline";
 };
 
 subtest 'v3 config with ci.yml and CI configured warns' => sub {
