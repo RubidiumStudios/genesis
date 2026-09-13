@@ -7,23 +7,57 @@ use JSON::PP;
 use Getopt::Long qw/GetOptionsFromArray/;
 
 ### Provider Registry {{{
-# Maps provider type strings to their class and file paths.
-# Used by parse_cli_opts(), all_cli_opts_help(), and the compiler itself.
+#
+# The one registry.  Under D28 the schema's enum, every class lookup, and
+# every "valid types" message read this map, so a provider cannot be
+# spelled one way in the schema and another in the code, which is the
+# drift H26 names.  The manual provider has no compiler class, because
+# under D43 pipeline-apply sets no pipeline for it, and under D100 it has
+# no schema fragment either.  The github-actions provider has no compiler
+# class yet either: the type validates and resolves on the CLI side, and
+# the compiler class arrives with the provider itself.
 
 my %_providers = (
 	'concourse' => {
-		class => 'Genesis::CI::Concourse',
-		file  => 'Genesis/CI/Compiler/Providers/Concourse.pm',
+		class     => 'Genesis::CI::Concourse',
+		file      => 'Genesis/CI/Compiler/Providers/Concourse.pm',
+		cli_class => 'Genesis::CI::Provider::Concourse',
+		cli_file  => 'Genesis/CI/Provider/Concourse.pm',
 	},
 	'github-actions' => {
-		class => 'Genesis::CI::GithubActions',
-		file  => 'Genesis/CI/Compiler/Providers/GithubActions.pm',
+		cli_class => 'Genesis::CI::Provider::GithubActions',
+		cli_file  => 'Genesis/CI/Provider/GithubActions.pm',
+	},
+	'manual' => {
+		cli_class => 'Genesis::CI::Provider::Manual',
+		cli_file  => 'Genesis/CI/Provider/Manual.pm',
 	},
 );
 
 # known_providers - return list of known provider type strings {{{
 sub known_providers {
 	return sort keys %_providers;
+}
+
+# }}}
+# provider_info - return one registry entry, or undef {{{
+#
+# The entry's class and file name the compiler-side class, which the
+# manual and github-actions providers do not have, and cli_class and
+# cli_file name the class the CLI builds, which every type has.
+sub provider_info {
+	my ($class, $type) = @_;
+	return undef unless defined $type && exists $_providers{$type};
+	return $_providers{$type};
+}
+
+# }}}
+# automated_providers - the types that are not manual {{{
+#
+# The list a required-under-an-automated-provider check reads, so no
+# caller writes "not manual" by hand.
+sub automated_providers {
+	return grep {$_ ne 'manual'} known_providers();
 }
 
 # }}}
@@ -258,8 +292,9 @@ sub parse_cli_opts {
 		$provider_type = $opts->{'ci-provider'} // $opts->{platform};
 	}
 
-	# Pass 2: load provider and parse provider-specific flags
-	if ($provider_type && exists $_providers{$provider_type}) {
+	# Pass 2: load provider and parse provider-specific flags.  A type with
+	# no compiler class, which manual is, contributes no flags.
+	if ($provider_type && $_providers{$provider_type} && $_providers{$provider_type}{file}) {
 		my $info = $_providers{$provider_type};
 		eval { require $info->{file} }  ## no critic
 			or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
@@ -312,7 +347,9 @@ sub normalize_provider_opts {
 # hardcoding provider-specific names.
 sub cli_opt_keys {
 	my ($class, $provider_type) = @_;
-	my $info = $_providers{$provider_type} or return ();
+	my $info = $class->provider_info($provider_type) or return ();
+	# A type with no compiler class, which manual is, has no flags to name.
+	return () unless $info->{file};
 	eval { require $info->{file} }  ## no critic
 		or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
 	return map { (split /[=!+:]/, $_)[0] } $info->{class}->cli_opts();
@@ -326,17 +363,14 @@ sub cli_opt_keys {
 sub all_cli_opts_help {
 	my ($class, %config) = @_;
 
-	$config{valid_types} ||= [sort keys %_providers];
-
-	# Load all provider classes for their help text
-	for my $type (sort keys %_providers) {
-		eval { require $_providers{$type}{file} };  ## no critic
-	}
+	# Every type is named where the types are enumerated, and only the ones
+	# with a compiler class are asked for help text, because manual has none.
+	$config{valid_types} ||= [known_providers()];
 
 	my $provider_help = join('',
 		map  { $_providers{$_}{class}->cli_opts_help(%config) }
-		grep { eval { require $_providers{$_}{file}; 1 } }  ## no critic
-		sort keys %_providers
+		grep { $_providers{$_}{file} && eval { require $_providers{$_}{file}; 1 } }  ## no critic
+		known_providers()
 	);
 
 	return <<EOF;
@@ -344,7 +378,7 @@ CI PROVIDER OPTIONS
 
   --ci-provider <type>  (optional, defaults to "concourse")
       The CI provider to use for pipeline generation and deployment.
-      Available types: ${\ join(', ', sort keys %_providers) }
+      Available types: ${\ join(', ', known_providers()) }
 
 $provider_help
 EOF

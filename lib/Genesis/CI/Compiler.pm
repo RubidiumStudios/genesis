@@ -298,24 +298,26 @@ sub _apply_provider_overrides {
 }
 
 # }}}
-# _resolve_provider_class - map type name to provider package and file {{{
+# _resolve_provider_class - the registry entry for a provider type {{{
+#
+# One registry under D28, so this is a lookup rather than a second map.
+# A type with no compiler class, which manual is, is not a compilable
+# provider and says so.
 sub _resolve_provider_class {
 	my ($self, $type) = @_;
 
-	my %providers = (
-		'concourse'      => {
-			class => 'Genesis::CI::Concourse',
-			file  => 'Genesis/CI/Compiler/Providers/Concourse.pm',
-		},
-		'github-actions' => {
-			class => 'Genesis::CI::GithubActions',
-			file  => 'Genesis/CI/Compiler/Providers/GithubActions.pm',
-		},
-	);
+	require Genesis::CI::Compiler::PipelineProvider;
+	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
+	bail(
+		"Unknown CI provider type '%s'. Valid types: %s", $type // '<undefined>',
+		join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers())
+	) unless $info;
 
-	return $providers{$type}
-		|| bail("Unknown CI provider type '%s'. Valid types: %s",
-			$type, join(', ', sort keys %providers));
+	bail(
+		"The '%s' provider has no pipeline to compile.", $type
+	) unless $info->{class};
+
+	return $info;
 }
 
 # }}}

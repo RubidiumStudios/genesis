@@ -7,6 +7,28 @@ use Getopt::Long qw/GetOptionsFromArray/;
 
 ### Class Methods {{{
 
+# provider_class - load and return the CLI class for a provider type {{{
+#
+# The one place a type becomes a class on this side, reading the registry
+# in Genesis::CI::Compiler::PipelineProvider so the valid list is the same
+# list the schema's enum is built from.
+sub provider_class {
+	my ($class, $type) = @_;
+
+	require Genesis::CI::Compiler::PipelineProvider;
+	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
+	bail(
+		"Unknown CI provider type '%s'. Valid types: %s", $type // '<undefined>',
+		join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers())
+	) unless $info;
+
+	eval { require $info->{cli_file} }  ## no critic
+		or bail("Failed to load CI provider '%s': %s", $type, $@);
+
+	return $info->{cli_class};
+}
+
+# }}}
 # new - builder for creating new instance of derived class based on config {{{
 sub new {
 	my ($class, %config) = @_;
@@ -14,20 +36,7 @@ sub new {
 		if $class ne __PACKAGE__;
 
 	my $type = $config{type} || 'manual';
-
-	my $obj;
-	if ($type eq 'concourse') {
-		require Genesis::CI::Provider::Concourse;
-		$obj = Genesis::CI::Provider::Concourse->new(%config);
-	} elsif ($type eq 'github-actions') {
-		require Genesis::CI::Provider::GithubActions;
-		$obj = Genesis::CI::Provider::GithubActions->new(%config);
-	} elsif ($type eq 'manual') {
-		require Genesis::CI::Provider::Manual;
-		$obj = Genesis::CI::Provider::Manual->new(%config);
-	} else {
-		bail("Unknown CI provider type '%s'. Valid types: concourse, github-actions, manual", $type);
-	}
+	my $obj  = $class->provider_class($type)->new(%config);
 
 	my @errors = $obj->validate_config;
 	bail(
@@ -46,19 +55,7 @@ sub init {
 		if $class ne __PACKAGE__;
 
 	my $type = $opts{'ci-provider'} || 'manual';
-
-	if ($type eq 'concourse') {
-		require Genesis::CI::Provider::Concourse;
-		return Genesis::CI::Provider::Concourse->init(%opts);
-	} elsif ($type eq 'github-actions') {
-		require Genesis::CI::Provider::GithubActions;
-		return Genesis::CI::Provider::GithubActions->init(%opts);
-	} elsif ($type eq 'manual') {
-		require Genesis::CI::Provider::Manual;
-		return Genesis::CI::Provider::Manual->init(%opts);
-	} else {
-		bail("Unknown CI provider type '%s'. Valid types: concourse, github-actions, manual", $type);
-	}
+	return $class->provider_class($type)->init(%opts);
 }
 
 # }}}
@@ -77,20 +74,9 @@ sub parse_opts {
 	GetOptionsFromArray($opt_args, $ci_opts, qw/ci-provider=s/);
 	my $type = $ci_opts->{'ci-provider'};
 
-	# Second pass: extract provider-specific flags
-	my @extra_opts;
-	if (!$type || $type eq 'manual') {
-		require Genesis::CI::Provider::Manual;
-		@extra_opts = Genesis::CI::Provider::Manual->opts();
-	} elsif ($type eq 'concourse') {
-		require Genesis::CI::Provider::Concourse;
-		@extra_opts = Genesis::CI::Provider::Concourse->opts();
-	} elsif ($type eq 'github-actions') {
-		require Genesis::CI::Provider::GithubActions;
-		@extra_opts = Genesis::CI::Provider::GithubActions->opts();
-	} else {
-		bail("Unknown CI provider type '%s'. Valid types: concourse, github-actions, manual", $type);
-	}
+	# Second pass: extract provider-specific flags, through the same
+	# registry lookup, so this reads no third list of valid types.
+	my @extra_opts = $class->provider_class($type || 'manual')->opts();
 
 	GetOptionsFromArray($opt_args, $ci_opts, @extra_opts) if @extra_opts;
 
@@ -117,12 +103,18 @@ sub opts_help {
 	bug("%s->opts_help is calling %s->opts_help illegally", $class, __PACKAGE__)
 		if $class ne __PACKAGE__;
 
-	require Genesis::CI::Provider::Concourse;
-	require Genesis::CI::Provider::GithubActions;
-	require Genesis::CI::Provider::Manual;
+	require Genesis::CI::Compiler::PipelineProvider;
+	my @types = Genesis::CI::Compiler::PipelineProvider->known_providers();
 
 	$config{type_default_msg} ||= '(optional, defaults to "manual")';
-	$config{valid_types}      ||= [qw(concourse github-actions manual)];
+	$config{valid_types}      ||= [@types];
+
+	# The types and their help text both come from the registry, so this
+	# text cannot name a provider the schema's enum does not hold.
+	my $type_list     = join(', ', @types);
+	my $provider_help = join('',
+		map {$class->provider_class($_)->opts_help(%config)} @types
+	);
 
 	<<EOF;
 CI PROVIDERS
@@ -134,12 +126,9 @@ Each provider type requires its own set of options.
 
     --ci-provider <type> $config{type_default_msg}
         The type of CI provider to configure.  Valid types:
-        concourse, github-actions, manual.
+        $type_list.
 
-${\Genesis::CI::Provider::Concourse->opts_help(%config)
-}${\Genesis::CI::Provider::GithubActions->opts_help(%config)
-}${\Genesis::CI::Provider::Manual->opts_help(%config)
-}
+$provider_help
 EOF
 }
 
