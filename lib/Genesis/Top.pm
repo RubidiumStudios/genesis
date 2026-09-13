@@ -1386,7 +1386,11 @@ sub _validate_config {
 				if $handler->can('validate_config_section');
 		}
 	} else {
-		bail "Genesis deployment repo configuration version $config_version is not supported";
+		require Genesis::Exit;
+		bail({exitcode => Genesis::Exit::CONFIG()},
+			"Genesis deployment repo configuration version %s is not supported",
+			$config_version
+		);
 	}
 	return 1;
 }

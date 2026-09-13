@@ -318,7 +318,13 @@ sub validate {
 	}
 
 	if (@errors) {
-		bail("Configuration validation failed for #C{%s}:%s",
+		# Under D98 an invalid configuration is a refusal and not a crash,
+		# so it carries CONFIG rather than the bare 1 a fatal system error
+		# uses.  A pipeline job reads the code to decide whether to retry,
+		# to page someone, or to stop.
+		require Genesis::Exit;
+		bail({exitcode => Genesis::Exit::CONFIG()},
+			"Configuration validation failed for #C{%s}:%s",
 			$self->{path} // '<in-memory config>',
 			join('', map {"\n[[".bullet('', inline => 1, indent => 0).">>$_"} @errors));
 	}

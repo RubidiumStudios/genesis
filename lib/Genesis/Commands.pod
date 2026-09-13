@@ -1532,7 +1532,7 @@ B<Examples:>
   _gate_pipeline_on_legacy_ci_yml();
 
 Blocks pipeline commands in a repository still carrying a legacy F<ci.yml>,
-bailing with migration instructions.
+bailing with migration instructions at C<Genesis::Exit::CONFIG>.
 
 Returns early -- allowing the command through -- in three cases: the command
 is not in the C<Pipelines> group; it has no repo or env scope, so there is no
@@ -1552,10 +1552,10 @@ B<Errors:>
 =item C<"This repository still has a legacy CI configuration at ci.yml...">
 
 The full message names the values to carry across from the C<pipeline:>
-block, and the C<genesis config> invocation that sets the two keys the gate
-checks.  It says plainly that the rest -- git URI, branch, pipeline name and
-vault URL -- must be written into F<.genesis/config> by hand, the schema not
-yet declaring them.
+block, which are the provider, the git URI, the branch, the pipeline name
+and the vault URL, and it says to write them into the C<pipeline:> block of
+F<.genesis/config>, which declares every one of them.  The bail exits
+C<Genesis::Exit::CONFIG>.
 
 =back
 

@@ -1644,11 +1644,21 @@ B<Examples:>
 
     $self->_validate_config
 
-Validates the repository configuration schema version. If the version is C<1>
-or an old-style semver string, upgrades to v2 (interactively or automatically
-based on RC settings). If the version is C<2>, validates against the schema
-returned by C<_repo_config_schema()>. Any other version causes an immediate
-error.
+Validates C<.genesis/config> against the schema its C<version> selects,
+and runs on the first access to L</config>, so every command validates
+whether or not it is a pipeline command.
+
+A version 1 configuration, or an old-style semver string in the C<version>
+field, is upgraded to v2, interactively or automatically according to the RC
+settings.
+
+A version 3 configuration is validated against L</_repo_config_schema>,
+which carries the C<pipeline> section, so C<genesis E<lt>envE<gt> deploy>
+and C<genesis propagate> meet the same refusal in the same words. A
+refusal exits C<Genesis::Exit::CONFIG>. A version 2 configuration errors
+for every pipeline command, naming the migration, and a C<ci.yml> left
+beside a version 3 configuration that enables a pipeline warns that the
+file is a stale leftover.
 
 B<Returns:> C<1> on success. Raises on invalid or unsupported config versions.
 
@@ -1664,9 +1674,10 @@ and automatic upgrade is disabled.
 
 =item *
 
-C<"Genesis deployment repo configuration version $config_version is not supported">
-- raised when the version is not 1, 2, or a recognized semver string.
-C<$config_version> is the literal version value from the config file.
+C<"Genesis deployment repo configuration version %s is not supported">
+- raised at C<Genesis::Exit::CONFIG> when the version is not 1, 2, 3, or a
+recognized semver string. The C<%s> is the literal version value from the
+config file.
 
 =back
 

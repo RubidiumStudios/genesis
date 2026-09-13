@@ -1,0 +1,91 @@
+#!perl
+# Proves T30 and T28: one invalid key in the pipeline block refuses the
+# same way under deploy, propagate, and pipeline-status, each naming the
+# key and exiting CONFIG; a version 2 configuration errors for a pipeline
+# command naming the migration; and a stale ci.yml beside a version 3
+# configuration warns and lets the command carry on.
+use strict;
+use warnings;
+use utf8;
+
+use lib 'lib';
+use lib 't';
+use helper;
+use Harness::Propagation;
+use Test::More;
+
+use Genesis;
+use Genesis::Exit;
+
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
+
+my $h = make_harness(envs => ['qa'], provider => 'manual');
+
+subtest 'one invalid key, three commands, one refusal' => sub {
+	# Nine explicit rows, and one more for each of the three runs, because
+	# run_genesis asserts for itself that the working state came back.  A
+	# command that refuses at configuration load has touched nothing, so
+	# the row may as well say so.
+	plan tests => 12;
+
+	commit_on_control($h, files => {
+		'.genesis/config' => join("\n",
+			'---', 'deployment_type: bosh', 'version: "3"',
+			'creator_version: 3.2.0',
+			'pipeline:', '  enabled: true', '  frobnicate: yes', ''),
+	});
+
+	for my $argv (['qa', 'deploy'], ['propagate'], ['pipeline-status']) {
+		my ($out, $err, $exit) = run_genesis($h, @$argv);
+		my $what = join(' ', 'genesis', @$argv);
+		like $err, qr/pipeline\.frobnicate: unknown configuration key/,
+			"$what names the key it refused";
+		is $exit, Genesis::Exit::CONFIG,
+			"$what exits CONFIG";
+		like $err, qr/Configuration validation failed/,
+			"$what refuses in the same words as the others";
+	}
+};
+
+subtest 'a version 2 configuration errors for a pipeline command' => sub {
+	# Three explicit rows and one for the run's own restoration assertion.
+	plan tests => 4;
+
+	commit_on_control($h, files => {
+		'.genesis/config' => join("\n",
+			'---', 'deployment_type: bosh', 'version: "2"',
+			'creator_version: 3.2.0', ''),
+		'ci.yml' => "---\npipeline:\n  name: bosh\n",
+	});
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
+	like $err, qr/legacy CI configuration/, 'the error names the legacy file';
+	like $err, qr/migrate/i,                'the error names the migration';
+	is $exit, Genesis::Exit::CONFIG,        'and it exits CONFIG';
+};
+
+subtest 'a stale ci.yml beside a version 3 pipeline only warns' => sub {
+	# Three explicit rows and one for the run's own restoration assertion.
+	plan tests => 4;
+
+	commit_on_control($h, files => {
+		'.genesis/config' => join("\n",
+			'---', 'deployment_type: bosh', 'version: "3"',
+			'creator_version: 3.2.0',
+			'pipeline:', '  enabled: true',
+			'  provider:', '    type: manual', ''),
+		'ci.yml' => "---\npipeline:\n  name: bosh\n",
+	});
+
+	# --no-fetch is the shape that stops soonest once the load has let the
+	# command through, so the row proves the load and not the status read.
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--no-fetch');
+	like $err, qr/Legacy\s+\S*ci\.yml\s+present alongside a v3/s,
+		'the stale file warns';
+	isnt $exit, Genesis::Exit::CONFIG, 'the warning is not a refusal';
+	unlike $err, qr/Pipeline commands are unavailable/,
+		'and the command carries on';
+};
+
+done_testing;
