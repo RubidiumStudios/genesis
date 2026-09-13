@@ -167,6 +167,55 @@ file that wants this one imports C<Genesis> before the harness.  Under C<perl
 -w> Exporter reports that second import as a redefinition, which the lexical
 C<use warnings> of a test file does not.
 
+=head2 branches_on_r($h)
+
+Returns R's branch names, short and sorted, as an arrayref, so a row asserting
+that nothing was created compares against a plain list rather than against a
+hashref of full ref names.
+
+=head2 fresh_clone($h, %opts)
+
+Clones R again, now, into a directory beside the two copies, and returns that
+directory.  The clone carries none of the fixture's own history of fetches,
+which neither copy does once the harness is built, so a row asking what a
+clone made today can still fetch reads it here.  A clone cuts one local branch
+for itself whatever R holds, so what it sees of R is its remote-tracking refs
+under C<refs/remotes/origin>.
+
+=head2 subjects_of($h, $branch, $n, %opts)
+
+Returns the branch's last C<$n> commit subjects as a list, oldest first, or an
+empty list where the branch is not there.  It reads the copy's remote-tracking
+ref, because a row asking what a run wrote is asking what reached R, so a row
+refreshes before it reads.  Takes C<copy>, which defaults to C<a>, and
+C<local>, which reads the name given as it stands rather than its
+remote-tracking ref.
+
+=head2 heads_in($h, %opts)
+
+Returns every local head in a copy as a sorted arrayref of C<E<lt>ref nameE<gt>
+E<lt>shaE<gt>> lines, so a row proving that a command left L alone takes this
+before and after the run and compares the two.  Takes C<copy>, which defaults
+to C<a>.
+
+=head2 reachable_on_r($h, $sha)
+
+Returns true where R holds the commit and some branch of R can reach it, and
+false otherwise, including where the commit was never handed in.  A record
+naming a commit R cannot reach is a breach the pre-flight has to catch, and a
+row proves it by asking R rather than by trusting the record.
+
+=head2 newest_record($h, $path)
+
+Returns the record set's newest entry as a nested hashref, or undef where the
+path holds nothing.  The fixtures write a record flat, because an exodus record
+is flat, so the dotted keys are inflated here and a row reads
+C<$record-E<gt>{git}{commit}> the way the product does.  A set is either one
+record at the path itself, which is what the harness's writers lay down, or a
+path whose children are its entries, one per deploy and named for when it
+happened, which is what a deploy writes; the path's own record is preferred,
+and where there is none the newest child by name is the entry.
+
 =head2 init_branch($h, $env, %opts)
 
 Cuts the environment's branch on R as C<pipeline-apply> would, which is an
