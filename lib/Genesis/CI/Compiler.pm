@@ -9,12 +9,15 @@ use Genesis::CI::Compiler::ScriptDiscovery;
 use Genesis::CI::Compiler::ASTBuilder;
 use Genesis::CI::Compiler::PipelineDescriptor;
 
-# Register as the owner of the ci: section in .genesis/config.
+# Register as the owner of the pipeline: section in .genesis/config.
 # This runs at module load time so Top.pm's _validate_config() can
-# delegate ci: section validation to us when we're loaded.
+# delegate pipeline: section validation to us when we're loaded.
+# The section is named pipeline while this namespace is not, because the
+# compiler genuinely is CI and renaming it would be churn with nothing
+# user-visible to show for it.
 {
 	require Genesis::Top;
-	Genesis::Top->register_config_section('ci', __PACKAGE__);
+	Genesis::Top->register_config_section('pipeline', __PACKAGE__);
 }
 
 ### Constructor {{{
@@ -98,7 +101,7 @@ sub compile {
 	eval { require $provider_info->{file} } ## no critic
 		or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
 
-	# Extract provider options from parsed config (ci.provider: section)
+	# Extract provider options from parsed config (pipeline.provider: section)
 	# and merge with any caller-supplied opts.  Normalize caller opts from their
 	# CLI form (ci-* prefixed, hyphenated) to config/schema form (unprefixed, underscored)
 	# so that provider_option() and provider_config() always see consistent keys.
@@ -192,24 +195,24 @@ sub validate_config_section {
 	my ($class, $data, $top) = @_;
 
 	return unless defined $data;
-	bail("'ci' configuration in .genesis/config must be a hash")
+	bail("'pipeline' configuration in .genesis/config must be a hash")
 		unless ref($data) eq 'HASH';
 
-	# Validate ci.provider section against the provider's own schema.
+	# Validate pipeline.provider section against the provider's own schema.
 	# The 'manual' provider has no compiler class — skip validation.
 	if (my $provider_data = $data->{provider}) {
-		bail("'ci.provider' must be a hash")
+		bail("'pipeline.provider' must be a hash")
 			unless ref($provider_data) eq 'HASH';
 		# The 'manual' provider has no compiler class — skip validation.
 		return if ($provider_data->{type} || '') eq 'manual';
 
 		my $type = $provider_data->{type};
-		bail("'ci.provider.type' is required") unless $type;
+		bail("'pipeline.provider.type' is required") unless $type;
 
 		# Load provider class to get its schema
 		my $provider_info = eval { $class->_resolve_provider_class($type) };
 		if ($@) {
-			bail("'ci.provider.type' is '%s', which is not a known CI provider type.  ".
+			bail("'pipeline.provider.type' is '%s', which is not a known CI provider type.  ".
 				"Valid types: %s", $type,
 				join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers()));
 		}
@@ -226,14 +229,14 @@ sub validate_config_section {
 		for my $key (sort keys %$schema) {
 			my $spec = $schema->{$key};
 			next unless $spec->{required};
-			bail("'ci.provider.%s' is required for provider type '%s'", $key, $type)
+			bail("'pipeline.provider.%s' is required for provider type '%s'", $key, $type)
 				unless defined $provider_data->{$key};
 		}
 
 		# Check unknown keys
 		for my $key (sort keys %$provider_data) {
 			next if exists $schema->{$key};
-			bail("'ci.provider.%s' is not a recognized option for provider type '%s'.  ".
+			bail("'pipeline.provider.%s' is not a recognized option for provider type '%s'.  ".
 				"Valid options: %s",
 				$key, $type, join(', ', sort keys %$schema));
 		}

@@ -34,9 +34,9 @@ use constant LATEST_CONFIG_VERSION   => 3;
 # Modules may register themselves as handlers for specific top-level keys in
 # .genesis/config.  Top.pm owns the core schema; registered handlers own their
 # section's schema and validation.  This pattern is reusable for any future
-# section beyond ci:.
+# section beyond pipeline:.
 #
-#   Genesis::Top->register_config_section('ci', 'Genesis::CI::Compiler');
+#   Genesis::Top->register_config_section('pipeline', 'Genesis::CI::Compiler');
 #
 # The handler class must implement:
 #   validate_config_section($data, $top)  # called after core schema validation
@@ -993,30 +993,30 @@ sub type {
 }
 
 # }}}
-# ci_control_branch - return the configured CI control branch name {{{
+# ci_control_branch - return the configured control branch name {{{
 #
 # Returns the branch name that Genesis pipeline tooling treats as the
 # source of truth for this deployment repository.  Reads from
-# #C{ci.control_branch} in #C{.genesis/config}, defaulting to the
-# value of the #C{DEFAULT_CONTROL_BRANCH} constant.  Intentionally
-# not exposed as a user-facing option at this time.
+# #C{pipeline.source_control.control_branch} in #C{.genesis/config}
+# under D19, defaulting to the value of the
+# #C{DEFAULT_CONTROL_BRANCH} constant.
 sub ci_control_branch {
 	my ($self) = @_;
-	return $self->config->get('ci.control_branch', DEFAULT_CONTROL_BRANCH);
+	return $self->config->get('pipeline.source_control.control_branch', DEFAULT_CONTROL_BRANCH);
 }
 
 # }}}
-# ci_enabled - return whether CI pipeline is enabled {{{
+# ci_enabled - return whether a pipeline is configured {{{
 sub ci_enabled {
 	my ($self) = @_;
-	return $self->config->get('ci.enabled');
+	return $self->config->get('pipeline.enabled');
 }
 
 # }}}
-# ci_configured - return whether CI is enabled AND has a provider configured {{{
+# ci_configured - return whether a pipeline is enabled and has a provider {{{
 sub ci_configured {
 	my ($self) = @_;
-	return $self->config->get('ci.enabled') && $self->config->has('ci.provider.type');
+	return $self->config->get('pipeline.enabled') && $self->config->has('pipeline.provider.type');
 }
 
 # }}}
@@ -1349,7 +1349,7 @@ sub _validate_config {
 		# Augment in-memory with v3 defaults so downstream code sees
 		# a uniform v3 shape.  These go into the 'default' layer and
 		# will NOT be persisted to disk on save.
-		$self->config->_update_source('default', 'ci', {
+		$self->config->_update_source('default', 'pipeline', {
 			enabled => Genesis::Config::FALSE,
 		});
 
@@ -1359,14 +1359,15 @@ sub _validate_config {
 
 		# Detect legacy ci.yml alongside v3 config -- flag it for the
 		# dispatch gate.  Two sub-cases surface at load time:
-		#   * v3 config already declares ci.enabled + ci.provider.type
+		#   * v3 config already declares pipeline.enabled and
+		#     pipeline.provider.type
 		#     -> stale ci.yml, warn once and keep going; the v3 config
 		#     wins downstream.
-		#   * v3 config has no ci configured -> flag as legacy CI so
+		#   * v3 config has no pipeline configured -> flag as legacy CI so
 		#     pipeline commands gate on migration; other commands run.
 		my $ci_yml = $self->path('ci.yml');
 		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
-			if ($self->config->get('ci.enabled') && $self->config->has('ci.provider.type')) {
+			if ($self->config->get('pipeline.enabled') && $self->config->has('pipeline.provider.type')) {
 				warning(
 					"Legacy #C{%s} present alongside a v3 CI configuration; ".
 					"the v3 config wins.  Remove #C{%s} to clear this warning.",
@@ -1556,33 +1557,54 @@ sub _repo_config_schema {
 			required       => 1,
 			description    => 'Configuration schema version'
 		},
-		ci => {
-			type           => 'hash',
-			description    => 'CI pipeline configuration',
-			schema => {
-				enabled => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Whether CI pipeline is active'},
-				provider => {
-					type        => 'hash',
-					required    => 'enabled',
-					description => 'CI provider connection details',
-					schema => {
-						type     => {type => 'enum', values => ['concourse', 'gha', 'manual'], description => 'CI system type'},
-						target   => {type => 'string', description => 'Provider target name (e.g., fly target)'},
-						url      => {type => 'string', description => 'Provider API URL'},
-						team     => {type => 'string', description => 'Provider team/org'},
-						insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS verification'},
-					}
-				},
-				name => {type => 'string', description => 'Pipeline name (defaults to deployment_type)'},
-				repo => {
-					type        => 'hash',
-					description => 'Repository layout settings',
-					schema => {
-						root => {type => 'string', default => '.', description => 'Path to deployment root within the git repo'},
-					}
-				},
-			}
-		},
+		pipeline => $self->_pipeline_config_schema(),
+	};
+}
+
+# }}}
+# _pipeline_config_schema - the pipeline section of the v3 schema {{{
+#
+# Under D18 the section is named pipeline while the Genesis::CI code
+# namespace stays where it is, and under D28 the schema is the contract:
+# every key the compiler reads is declared here, so Genesis::Config's own
+# recursion refuses an undeclared key by name at configuration load, for
+# every command and not only for the pipeline ones.  There are no
+# compatibility aliases, because the v3 schema is unreleased.
+#
+# The provider block is not required beside an enabled gate, because
+# under D15 an absent provider type is a manual pipeline rather than no
+# pipeline at all.
+sub _pipeline_config_schema {
+	my ($self) = @_;
+	return {
+		type        => 'hash',
+		description => 'Pipeline configuration',
+		schema => {
+			enabled => {
+				type        => 'boolean',
+				default     => Genesis::Config::FALSE,
+				description => 'Whether this repository has a pipeline'
+			},
+			provider => {
+				type        => 'hash',
+				description => 'The automation that owns the pipeline',
+				schema => {
+					type => {
+						type        => 'enum',
+						values      => ['concourse', 'gha', 'manual'],
+						description => 'Which automation owns the pipeline'
+					},
+					target   => {type => 'string',  description => 'Provider target name (e.g., fly target)'},
+					url      => {type => 'string',  description => 'Provider API URL'},
+					team     => {type => 'string',  description => 'Provider team or org'},
+					insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS verification'},
+				}
+			},
+			name => {
+				type        => 'string',
+				description => "The pipeline's name in its provider (defaults to deployment_type)"
+			},
+		}
 	};
 }
 

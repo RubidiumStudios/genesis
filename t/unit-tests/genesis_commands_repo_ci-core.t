@@ -23,8 +23,8 @@ sub make_repo {
 	mkdir_or_fail($genesis_dir);
 
 	my $content = "---\ncreator_version: 3.0.0\ndeployment_type: test-kit\nversion: 2\n";
-	if ($opts{ci_provider}) {
-		$content .= "ci:\n  provider: $opts{ci_provider}\n";
+	if ($opts{pipeline_provider}) {
+		$content .= "pipeline:\n  provider: $opts{pipeline_provider}\n";
 	}
 	mkfile_or_fail("$genesis_dir/config", $content);
 	return $dir;
@@ -42,10 +42,10 @@ sub make_v3_repo {
 
 	my $version = $opts{version} // 3;
 	my $content = "---\ncreator_version: 3.2.0\ndeployment_type: test-kit\nversion: $version\n";
-	if ($opts{ci}) {
-		$content .= "ci:\n";
-		for my $key (sort keys %{$opts{ci}}) {
-			my $val = $opts{ci}{$key};
+	if ($opts{pipeline}) {
+		$content .= "pipeline:\n";
+		for my $key (sort keys %{$opts{pipeline}}) {
+			my $val = $opts{pipeline}{$key};
 			if (ref($val) eq 'HASH') {
 				$content .= "  $key:\n";
 				for my $subkey (sort keys %$val) {
@@ -60,14 +60,14 @@ sub make_v3_repo {
 	return $dir;
 }
 
-subtest 'v2 config loads and augments ci.enabled default' => sub {
+subtest 'v2 config loads and augments pipeline.enabled default' => sub {
 	my $dir = make_v3_repo(workdir("v2-augment"), version => 2);
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 	ok !$top->ci_enabled, "ci_enabled is false for v2 config";
 	ok !$top->ci_configured, "ci_configured is false for v2 config";
-	is $top->config->get('ci.enabled'), 0, "ci.enabled defaults to false";
-	is $top->config->get_source('ci'), 'default', "ci section comes from default layer";
+	is $top->config->get('pipeline.enabled'), 0, "pipeline.enabled defaults to false";
+	is $top->config->get_source('pipeline'), 'default', "the pipeline section comes from the default layer";
 };
 
 subtest 'v2 config with ci.yml flags as legacy' => sub {
@@ -83,7 +83,7 @@ subtest 'v2 config with ci.yml flags as legacy' => sub {
 };
 
 subtest 'v3 config validates with CI disabled' => sub {
-	my $dir = make_v3_repo(workdir("v3-disabled"), ci => { enabled => 'false' });
+	my $dir = make_v3_repo(workdir("v3-disabled"), pipeline => { enabled => 'false' });
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 	ok !$top->ci_enabled, "ci_enabled is false";
@@ -91,7 +91,7 @@ subtest 'v3 config validates with CI disabled' => sub {
 };
 
 subtest 'v3 config validates with CI enabled and provider' => sub {
-	my $dir = make_v3_repo(workdir("v3-enabled"), ci => {
+	my $dir = make_v3_repo(workdir("v3-enabled"), pipeline => {
 		enabled  => 'true',
 		provider => { type => 'concourse', target => 'pipes/lmelt', url => 'https://pipes.example.com', team => 'lmelt' },
 		name => 'bosh',
@@ -100,24 +100,24 @@ subtest 'v3 config validates with CI enabled and provider' => sub {
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 	ok $top->ci_enabled, "ci_enabled is true";
 	ok $top->ci_configured, "ci_configured is true";
-	is $top->config->get('ci.provider.type'), 'concourse', "provider type is concourse";
-	is $top->config->get('ci.provider.target'), 'pipes/lmelt', "provider target correct";
-	is $top->config->get('ci.name'), 'bosh', "ci name correct";
+	is $top->config->get('pipeline.provider.type'), 'concourse', "provider type is concourse";
+	is $top->config->get('pipeline.provider.target'), 'pipes/lmelt', "provider target correct";
+	is $top->config->get('pipeline.name'), 'bosh', "pipeline name correct";
 };
 
-subtest 'v3 config bails when enabled but no provider' => sub {
-	my $dir = make_v3_repo(workdir("v3-no-provider"), ci => { enabled => 'true' });
+subtest 'v3 config treats an enabled gate with no provider as manual' => sub {
+	my $dir = make_v3_repo(workdir("v3-no-provider"), pipeline => { enabled => 'true' });
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
-	eval { $top->config };
-	like $@, qr/missing required key/, "bails when enabled without provider";
-	like $@, qr/provider/, "bail message references provider";
+	lives_ok { $top->config } "an enabled gate with no provider still loads";
+	ok $top->ci_enabled, "the gate reads back as on";
+	ok !$top->ci_configured, "and the repository is not configured until one is named";
 };
 
 subtest 'v3 config with ci.yml and CI configured warns' => sub {
 	# v3 already declares CI; the stale ci.yml is a noise warning, not
 	# a bail.  The v3 config wins downstream.
-	my $dir = make_v3_repo(workdir("v3-conflict"), ci => {
+	my $dir = make_v3_repo(workdir("v3-conflict"), pipeline => {
 		enabled  => 'true',
 		provider => { type => 'concourse', target => 'pipes/test', url => 'https://ci.example.com', team => 'test' },
 	});
@@ -140,7 +140,7 @@ subtest 'v3 config with ci.yml and CI configured warns' => sub {
 };
 
 subtest 'v3 config with ci.yml and CI not configured flags as legacy' => sub {
-	my $dir = make_v3_repo(workdir("v3-migrate"), ci => { enabled => 'false' });
+	my $dir = make_v3_repo(workdir("v3-migrate"), pipeline => { enabled => 'false' });
 	mkfile_or_fail("$dir/ci.yml", "---\npipeline:\n  layouts:\n    - sandbox\n");
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
@@ -148,7 +148,7 @@ subtest 'v3 config with ci.yml and CI not configured flags as legacy' => sub {
 	ok $top->has_legacy_ci_yml, "has_legacy_ci_yml flag is set";
 };
 
-subtest 'v3 config rejects unknown ci keys' => sub {
+subtest 'v3 config rejects unknown pipeline keys' => sub {
 	my $dir = workdir("v3-unknown-key");
 	mkdir_or_fail("$dir/.genesis");
 	mkfile_or_fail("$dir/.genesis/config", <<EOF);
@@ -156,14 +156,14 @@ subtest 'v3 config rejects unknown ci keys' => sub {
 creator_version: 3.2.0
 deployment_type: test-kit
 version: 3
-ci:
+pipeline:
   enabled: false
   bogus_key: should_fail
 EOF
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 	eval { $top->config };
-	like $@, qr/unknown configuration key/, "rejects unknown key in ci section";
+	like $@, qr/unknown configuration key/, "rejects unknown key in the pipeline section";
 	like $@, qr/bogus_key/, "error mentions the offending key";
 };
 
@@ -175,7 +175,7 @@ subtest 'v3 config rejects invalid provider type' => sub {
 creator_version: 3.2.0
 deployment_type: test-kit
 version: 3
-ci:
+pipeline:
   enabled: true
   provider:
     type: jenkins
@@ -186,16 +186,16 @@ EOF
 	like $@, qr/jenkins|expected/, "rejects invalid provider type enum value";
 };
 
-subtest 'v2 config write-back does not persist ci defaults' => sub {
+subtest 'v2 config write-back does not persist pipeline defaults' => sub {
 	my $dir = make_v3_repo(workdir("v2-writeback"), version => 2);
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 	# ci.enabled should be accessible
-	is $top->config->get('ci.enabled'), 0, "ci.enabled is available via get";
+	is $top->config->get('pipeline.enabled'), 0, "pipeline.enabled is available via get";
 
 	# But _explicit_contents (what gets saved) should NOT have ci
 	my $explicit = $top->config->_explicit_contents;
-	ok !exists $explicit->{ci}, "ci section not in explicit contents (won't persist)";
+	ok !exists $explicit->{pipeline}, "pipeline section not in explicit contents (won't persist)";
 };
 
 subtest 'new repos created with LATEST_CONFIG_VERSION' => sub {
@@ -203,7 +203,7 @@ subtest 'new repos created with LATEST_CONFIG_VERSION' => sub {
 };
 
 subtest 'ci_control_branch returns constant for MVP' => sub {
-	my $dir = make_v3_repo(workdir("v3-control"), ci => {
+	my $dir = make_v3_repo(workdir("v3-control"), pipeline => {
 		enabled  => 'true',
 		provider => { type => 'concourse', target => 'pipes/test', url => 'https://ci.example.com', team => 'test' },
 	});

@@ -24,8 +24,8 @@ $ENV{NOCOLOR} = 1;
 sub make_ci_top {
 	my $top = make_top(name => 'pipeline-test', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
-	$top->config->set('ci.enabled',       1);
-	$top->config->set('ci.provider.type', 'manual');
+	$top->config->set('pipeline.enabled',       1);
+	$top->config->set('pipeline.provider.type', 'manual');
 	return $top;
 }
 
@@ -50,7 +50,8 @@ EOF
 subtest 'pipeline_env_names - empty list when CI is not configured' => sub {
 	plan tests => 1;
 
-	# make_top creates .genesis/config with no ci.* keys → ci_configured false
+	# make_top creates .genesis/config with no pipeline.* keys, so
+	# ci_configured is false
 	my $top = make_top(name => 'no-ci', no_vault => 1);
 	is_deeply [$top->pipeline_env_names], [],
 		'no-CI top returns empty env list';

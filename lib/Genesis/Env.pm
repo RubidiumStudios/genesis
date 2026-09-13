@@ -4589,7 +4589,7 @@ sub _post_deploy {
 		}
 
 		# Auto-cascade propagation (manual-provider only).
-		if (($self->top->config->get('ci.provider.type') || '') eq 'manual'
+		if (($self->top->config->get('pipeline.provider.type') || '') eq 'manual'
 			&& !$opts{'no-propagate'}) {
 
 			require Service::Git;

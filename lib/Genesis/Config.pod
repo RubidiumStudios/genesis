@@ -723,7 +723,7 @@ B<Examples:>
 
 =head2 schema_has
 
-    my $known = $cfg->schema_has('ci.provider.type');
+    my $known = $cfg->schema_has('pipeline.provider.type');
 
 Reports whether the schema declares a dotted path.
 
@@ -752,7 +752,7 @@ notice and should not be called directly.
 
 =head2 _schema_for_key
 
-    my $spec = $cfg->_schema_for_key('ci.provider.type');
+    my $spec = $cfg->_schema_for_key('pipeline.provider.type');
 
 Returns the schema entry a dotted path names, or C<undef> if the schema
 does not declare it.
@@ -778,11 +778,11 @@ Removes hashes that clearing C<$key> left empty behind it, walking back
 up the dotted path.
 
 B<Walking a dotted path creates the parents it passes through.> So
-clearing C<ci.enabled> leaves C<ci =E<gt> {}> in whichever source
+clearing C<pipeline.enabled> leaves C<pipeline =E<gt> {}> in whichever source
 structure did not hold the key. That empty hash is not harmless: the
-merge is by priority rather than depth, so an empty C<ci> in the higher
+merge is by priority rather than depth, so an empty C<pipeline> in the higher
 priority source wins outright and takes the key's siblings with it --
-C<ci.provider> would vanish from what C<save()> writes, without ever
+C<pipeline.provider> would vanish from what C<save()> writes, without ever
 having been touched.
 
 Pruning stops at the first parent that still has keys, so a branch is
@@ -808,9 +808,9 @@ B<Errors:> None. A path that is absent or already pruned is left alone.
 
 B<Examples:>
 
-    # after clearing ci.enabled from a config also holding ci.provider
-    $cfg->_prune_empty_parents($cfg->{set_values}, 'ci.enabled');
-    # ci is left in place, still carrying provider
+    # after clearing pipeline.enabled from a config also holding pipeline.provider
+    $cfg->_prune_empty_parents($cfg->{set_values}, 'pipeline.enabled');
+    # pipeline is left in place, still carrying provider
 
 =head2 _coerce_to_schema_type
 
@@ -820,7 +820,7 @@ Converts a value to the type its schema declares.
 
 B<Values arriving from a command line are always strings>, and in Perl
 every non-empty string is true -- C<'false'> included. Without this,
-C<set('ci.enabled', 'false')> would store a true boolean, which validates
+C<set('pipeline.enabled', 'false')> would store a true boolean, which validates
 cleanly and is therefore never reported. Coercion happens on the way in,
 so what is stored is what the schema says the key holds.
 
@@ -878,7 +878,7 @@ than a coercion failure.
 
 B<Examples:>
 
-    $cfg->_coerce_to_schema_type('ci.enabled', 'false');   # JSON::PP::false
+    $cfg->_coerce_to_schema_type('pipeline.enabled', 'false');   # JSON::PP::false
     $cfg->_coerce_to_schema_type('count', '42');           # 42, not '42'
     $cfg->_coerce_to_schema_type('name', 'false');         # 'false' (string type)
 

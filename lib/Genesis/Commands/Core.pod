@@ -126,10 +126,10 @@ B<Examples:>
 
   config()
   config('manifest_store')
-  config('ci.provider.type')
+  config('pipeline.provider.type')
 
   genesis config --set manifest_store exodus
-  genesis config --set manifest_store exodus --set ci.enabled false
+  genesis config --set manifest_store exodus --set pipeline.enabled false
 
 Reads and writes the deployment repository's configuration in
 F<.genesis/config>.  With no argument, prints the whole configuration as
@@ -143,7 +143,7 @@ surprising read is recoverable in a way a surprising write is not.
 
 C<--set> takes a key and a value, and may be repeated.  Values are
 coerced to the type the schema declares before being stored, so
-C<ci.enabled false> records a false boolean rather than the string
+C<pipeline.enabled false> records a false boolean rather than the string
 C<'false'>, which Perl would treat as true.  See
 L<Genesis::Config/_coerce_to_schema_type>.
 
@@ -171,14 +171,14 @@ both is refused; see L</LIMITATIONS>.
 
 B<The configuration is reported as Genesis will actually use it>, not as
 the file literally reads.  Schema defaults and environment overrides are
-merged in, so C<ci.provider.insecure> is reported even when the file
+merged in, so C<pipeline.provider.insecure> is reported even when the file
 never mentions it.  This answers "what value is in effect", which is the
 question an operator debugging a deployment is asking.  It does mean the
 output cannot be diffed against the file on disk.  Distinguishing the
 sources visually is deferred; see L</LIMITATIONS>.
 
 Keys are dotted paths, resolved by L<Genesis::Config/get>, so
-C<ci.provider.type> walks into nested sections.
+C<pipeline.provider.type> walks into nested sections.
 
 B<A key naming a section prints that section as YAML> rather than
 stringifying the reference.  A scalar prints bare, with no YAML framing,
@@ -228,7 +228,7 @@ every unrecognised key, not just the first.
 
 Raised before anything is applied when a key named by C<--set> and one
 named by C<--unset> are the same, or one contains the other.  Keys that
-merely share a prefix -- C<ci.enabled> and C<ci.provider> -- do not
+merely share a prefix -- C<pipeline.enabled> and C<pipeline.provider> -- do not
 overlap and are allowed together.
 
 =item C<"Reading and writing cannot be combined in one run">
@@ -503,7 +503,7 @@ These are internal to this module and may change without notice.
 
 =head2 _pairs_from_files($config, $from_files)
 
-  my @pairs = _pairs_from_files($config, ['ci.provider', './provider.yml']);
+  my @pairs = _pairs_from_files($config, ['pipeline.provider', './provider.yml']);
 
 Turns C<--set-from-file> arguments into the same flat key/value pairs
 C<--set> produces, so both reach the write path identically and are
@@ -560,14 +560,14 @@ underlying parser error is included.
 B<Examples:>
 
   # a collection key: parsed, and replaces the whole block
-  _pairs_from_files($cfg, ['ci.provider', './provider.yml']);
+  _pairs_from_files($cfg, ['pipeline.provider', './provider.yml']);
 
   # a scalar key: text as-is, less the trailing newline
   _pairs_from_files($cfg, ['manifest_store', './store.txt']);
 
 =head2 _contains($ancestor, $key)
 
-  _contains('ci', 'ci.enabled');       # 1
+  _contains('ci', 'pipeline.enabled');       # 1
   _contains('ci', 'ci');               # 0 -- equal, not contained
   _contains('a',  'ab');               # 0
 
@@ -586,8 +586,8 @@ B<Errors:> None.
 
 B<Examples:>
 
-  _contains('ci.provider', 'ci.provider.type');   # 1
-  _contains('ci.enabled',  'ci.provider');        # 0
+  _contains('pipeline.provider', 'pipeline.provider.type');   # 1
+  _contains('pipeline.enabled',  'pipeline.provider');        # 0
 
 =head2 _detect_feature_compatibility($env_name)
 
@@ -688,8 +688,8 @@ option supplied a value, and a callback destination forces a single
 value per occurrence, discarding the arity.  Rather than pick an order
 and be wrong half the time, the invocation is rejected.
 
-The same applies when one key contains the other: unsetting C<ci>
-removes what C<--set ci.enabled> just wrote, and which of the two wins
+The same applies when one key contains the other: unsetting C<pipeline>
+removes what C<--set pipeline.enabled> just wrote, and which of the two wins
 again depends on the order that was lost.  Keys that only share a
 prefix are unrelated and remain allowed.
 

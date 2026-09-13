@@ -295,14 +295,14 @@ sub _gate_pipeline_on_legacy_ci_yml {
 		"migrated to the v3 repo config.  To migrate:\n\n".
 		"  1. Read the pipeline: block in ci.yml and note the provider,\n".
 		"     git URI, branch, pipeline name and vault URL you were using.\n".
-		"  2. Run:  #g{genesis config --set ci.enabled true} \\\n".
-		"               #g{--set ci.provider.type PROVIDER}\n".
+		"  2. Run:  #g{genesis config --set pipeline.enabled true} \\\n".
+		"               #g{--set pipeline.provider.type PROVIDER}\n".
 		"  3. Remove ci.yml (#g{git rm ci.yml}).\n\n".
 		"That restores pipeline commands.  The remaining values from step 1\n".
 		"-- git URI, branch, pipeline name and vault URL -- are not yet\n".
 		"settable: the config schema does not declare them, so they must be\n".
-		"written into the #C{ci:} block of #C{.genesis/config} by hand until\n".
-		"it does."
+		"written into the #C{pipeline:} block of #C{.genesis/config} by\n".
+		"hand until it does."
 	);
 } # }}}
 

@@ -28,13 +28,13 @@ sub config_repo {
 	mkdir_or_fail("$dir/.genesis");
 	mkfile_or_fail("$dir/.genesis/config", <<'EOF');
 ---
-ci:
-  enabled: true
-  provider:
-    type: manual
 creator_version: 3.2.0
 deployment_type: test-kit
 manifest_store: exodus
+pipeline:
+  enabled: true
+  provider:
+    type: manual
 version: 3
 EOF
 	return $dir;
@@ -71,7 +71,7 @@ subtest 'config resolves a dotted path' => sub {
 	pushd config_repo('config-get-dotted');
 	prepare_command('config');
 	build_command_environment;
-	my $out = stdout_from { Genesis::Commands::Core::config('ci.provider.type') };
+	my $out = stdout_from { Genesis::Commands::Core::config('pipeline.provider.type') };
 	popd;
 
 	is($out, "manual\n", "walks into nested keys");
@@ -83,7 +83,7 @@ subtest 'config renders a non-scalar key as YAML' => sub {
 	pushd config_repo('config-get-section');
 	prepare_command('config');
 	build_command_environment;
-	my $out = stdout_from { Genesis::Commands::Core::config('ci') };
+	my $out = stdout_from { Genesis::Commands::Core::config('pipeline') };
 	popd;
 
 	like($out, qr/^provider:\n(?:.*\n)*?\s+type:\s*manual$/m,
@@ -174,7 +174,7 @@ subtest 'config --unset removes several keys' => sub {
 
 	my $dir = config_repo('config-unset-many');
 	pushd $dir;
-	prepare_command('config', '--unset', 'manifest_store', '--unset', 'ci.enabled');
+	prepare_command('config', '--unset', 'manifest_store', '--unset', 'pipeline.enabled');
 	build_command_environment;
 	output_from { Genesis::Commands::Core::config() };
 	popd;
@@ -191,7 +191,7 @@ subtest 'config mixes --set and --unset in one run' => sub {
 	my $dir = config_repo('config-set-and-unset');
 	pushd $dir;
 	prepare_command('config', '--set', 'manifest_store', 'repository',
-	                          '--unset', 'ci.enabled');
+	                          '--unset', 'pipeline.enabled');
 	build_command_environment;
 	output_from { Genesis::Commands::Core::config() };
 	popd;
@@ -309,8 +309,8 @@ subtest 'config refuses to set inside a key it is unsetting' => sub {
 	# of the two wins depends on an order that was not preserved.
 	my $dir = config_repo('config-set-under-unset');
 	pushd $dir;
-	prepare_command('config', '--set', 'ci.provider.type', 'concourse',
-	                          '--unset', 'ci.provider');
+	prepare_command('config', '--set', 'pipeline.provider.type', 'concourse',
+	                          '--unset', 'pipeline.provider');
 	build_command_environment;
 	my $raised = '';
 	my ($out, $err) = output_from {
@@ -319,7 +319,7 @@ subtest 'config refuses to set inside a key it is unsetting' => sub {
 	};
 	popd;
 
-	like($err.$raised, qr/ci\.provider/, "names the overlapping keys");
+	like($err.$raised, qr/pipeline\.provider/, "names the overlapping keys");
 	like(slurp("$dir/.genesis/config"), qr/type:\s*manual/,
 		"leaves the file as it was");
 };
@@ -330,8 +330,8 @@ subtest 'config allows set and unset of unrelated nested keys' => sub {
 	# A shared prefix is not an overlap: neither key contains the other.
 	my $dir = config_repo('config-set-unset-siblings');
 	pushd $dir;
-	prepare_command('config', '--set', 'ci.provider.type', 'concourse',
-	                          '--unset', 'ci.enabled');
+	prepare_command('config', '--set', 'pipeline.provider.type', 'concourse',
+	                          '--unset', 'pipeline.enabled');
 	build_command_environment;
 	output_from { Genesis::Commands::Core::config() };
 	popd;
@@ -362,7 +362,7 @@ subtest 'config --set-from-file parses a collection' => sub {
 	my $dir = config_repo('config-from-file-collection');
 	mkfile_or_fail("$dir/provider.yml", "type: concourse\ntarget: prod\n");
 	pushd $dir;
-	prepare_command('config', '--set-from-file', 'ci.provider', "$dir/provider.yml");
+	prepare_command('config', '--set-from-file', 'pipeline.provider', "$dir/provider.yml");
 	build_command_environment;
 	output_from { Genesis::Commands::Core::config() };
 	popd;
@@ -378,8 +378,8 @@ subtest 'config --set-from-file will not overlap --set or --unset' => sub {
 	my $dir = config_repo('config-from-file-overlap');
 	mkfile_or_fail("$dir/value.txt", "concourse\n");
 	pushd $dir;
-	prepare_command('config', '--set-from-file', 'ci.provider.type', "$dir/value.txt",
-	                          '--unset', 'ci.provider');
+	prepare_command('config', '--set-from-file', 'pipeline.provider.type', "$dir/value.txt",
+	                          '--unset', 'pipeline.provider');
 	build_command_environment;
 	my $raised = '';
 	my ($out, $err) = output_from {
@@ -388,7 +388,7 @@ subtest 'config --set-from-file will not overlap --set or --unset' => sub {
 	};
 	popd;
 
-	like($err.$raised, qr/ci\.provider/, "names the overlapping keys");
+	like($err.$raised, qr/pipeline\.provider/, "names the overlapping keys");
 	like(slurp("$dir/.genesis/config"), qr/type:\s*manual/,
 		"leaves the file as it was");
 };

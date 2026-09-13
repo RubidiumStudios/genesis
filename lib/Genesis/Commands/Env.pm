@@ -108,7 +108,7 @@ sub create {
 	# Runs interactively when in a controlling terminal; honours --prior-env,
 	# --require-pr, and --manual flags for non-interactive (scripted) use.
 	if ($ci_configured) {
-		my $ci_type = $top->config->get('ci.provider.type') // 'unknown';
+		my $ci_type = $top->config->get('pipeline.provider.type') // 'unknown';
 		info(
 			"\n#G{Pipeline configuration} (ci provider: #C{%s})\n",
 			$ci_type
@@ -239,7 +239,7 @@ sub create {
 
 			# For automated CI providers, the pipeline needs to be
 			# rebuilt to include a job for the new environment branch.
-			my $provider_type = $top->config->get('ci.provider.type') || 'manual';
+			my $provider_type = $top->config->get('pipeline.provider.type') || 'manual';
 			if ($provider_type ne 'manual') {
 				if (in_controlling_terminal) {
 					if (prompt_for_boolean(
@@ -1038,7 +1038,7 @@ sub deploy {
 			# Skip the warning when the configured provider is 'manual' --
 			# in that mode the operator IS the pipeline, so the warning
 			# is just noise.
-			my $provider_type = $top->config->get('ci.provider.type') || '';
+			my $provider_type = $top->config->get('pipeline.provider.type') || '';
 			if ($provider_type ne 'manual' && !$ENV{GENESIS_HONOR_ENV}) {
 				warning(
 					"\nManually deploying #C{%s}, which is managed by a Genesis pipeline.\n".

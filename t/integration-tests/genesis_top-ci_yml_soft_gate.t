@@ -48,7 +48,7 @@ EOF
 		open my $fh, '>>', "$tmp/.genesis/config" or die $!;
 		print $fh "manifest_store: exodus\n";
 		if ($o{v3_ci_configured}) {
-			print $fh "ci:\n";
+			print $fh "pipeline:\n";
 			print $fh "  enabled: true\n";
 			print $fh "  provider:\n";
 			print $fh "    type: concourse\n";

@@ -424,12 +424,11 @@ sub make_harness {
 		provider  => $opts{provider}  // 'manual',
 		mode      => $opts{mode}      // 'direct',
 		root      => $opts{root}      // '',
-		# The default is no pipeline section at all, because the .genesis/config
-		# schema does not know the pipeline key yet and a repository carrying
-		# one fails validation before any command reaches its work.  A row that
-		# wants the section asks for it, and the default flips back to an
-		# enabled section once M3 declares the key.
-		pipeline  => defined $opts{pipeline} ? $opts{pipeline} : 'none',
+		# The default is an enabled pipeline section, because the .genesis/config
+		# schema declares the pipeline key and nearly every row runs against a
+		# repository that has one.  A row that wants the section switched off,
+		# or wants no section at all, says so.
+		pipeline  => defined $opts{pipeline} ? $opts{pipeline} : 1,
 		source_control => $opts{source_control},
 		kit       => $opts{kit},
 		roots     => {},
@@ -570,6 +569,16 @@ sub _seed_control {
 # configuration with no pipeline section at all, because those are two
 # different refusals and one boolean cannot tell them apart.  A hashref means
 # an enabled pipeline with those repository-wide keys set.
+#
+# The mode option writes nothing here.  Whether a delivery goes through a
+# pull request is a per-environment question, so make_harness's pr mode is
+# written as genesis.pipeline.require_pr on each environment file instead.
+#
+# The control branch and the pull-request prefix are not written either.
+# The schema does not declare the source-control block yet, and a default
+# harness has to be one a whole command can be run against, so the harness
+# leans on the same defaults the code does and writes the block only where
+# a row named source_control keys of its own.
 sub _seed_pipeline_section {
 	my ($self, $root) = @_;
 	my $want = $self->{pipeline};
@@ -581,9 +590,6 @@ sub _seed_pipeline_section {
 
 	$config->set('pipeline.enabled' => (ref $want eq 'HASH') ? 1 : ($want ? 1 : 0));
 	$config->set('pipeline.provider.type' => $self->{provider});
-	$config->set('pipeline.mode' => $self->{mode});
-	$config->set('pipeline.source_control.control_branch' => $self->{control});
-	$config->set('pipeline.source_control.pr_prefix' => $self->{pr_prefix});
 	$config->set("pipeline.source_control.$_" => $self->{source_control}{$_})
 		for sort keys %{$self->{source_control} || {}};
 	$config->set("pipeline.$_" => $keys{$_}) for sort keys %keys;
@@ -1548,22 +1554,29 @@ sub add_deployment_root {
 # not only where the env key is.  A site file carrying genesis or pipeline
 # entries used to emit those entries with no parent above them, which is a
 # file no YAML reader will load.
+#
+# A harness declared in pr mode writes genesis.pipeline.require_pr on every
+# environment file it writes, because whether a delivery needs a pull request
+# is a per-environment question and there is no repository-wide key for it.
 sub write_env_file {
 	my ($self, $env, %opts) = @_;
 	my $root   = $opts{root} // $self->{root};
 	my $prefix = $root ? "$root/" : '';
 	my $name   = $opts{site} // $env;
 	my $path   = "$prefix$name.yml";
-	my $nested = %{$opts{genesis} || {}} || $opts{pipeline};
+	my %pipeline = %{$opts{pipeline} || {}};
+	$pipeline{require_pr} = 'true'
+		if $self->{mode} eq 'pr' && !$opts{site};
+	my $nested = %{$opts{genesis} || {}} || %pipeline;
 
 	my $body = "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n";
 	$body .= "genesis:\n" if !$opts{site} || $nested;
 	$body .= "  env: $name\n" unless $opts{site};
 	$body .= _yaml_pair($_, $opts{genesis}{$_}, 1)
 		for sort keys %{$opts{genesis} || {}};
-	if (my $pipeline = $opts{pipeline}) {
+	if (%pipeline) {
 		$body .= "  pipeline:\n";
-		$body .= _yaml_pair($_, $pipeline->{$_}, 2) for sort keys %$pipeline;
+		$body .= _yaml_pair($_, $pipeline{$_}, 2) for sort keys %pipeline;
 	}
 
 	helper::put_file("$self->{a}/$path", $body);

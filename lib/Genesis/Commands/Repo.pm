@@ -413,7 +413,7 @@ sub _repo_init_execute {
 
 		# CI: write manual provider to config
 		if ($with_ci) {
-			_create_ci_scaffold($top, root => ($use_subdir ? $dir : '.'));
+			_create_pipeline_scaffold($top);
 		}
 
 		# Only create a new .git when we're not already sitting inside
@@ -606,7 +606,12 @@ sub _select_vault_target {
 	return $vault;
 }
 
-sub _create_ci_scaffold {
+# _create_pipeline_scaffold - write the pipeline section on a new repo {{{
+#
+# There is no repo.root key to write, because the git prefix already
+# locates the deployment root, and an absent provider type is a manual
+# pipeline rather than no pipeline.
+sub _create_pipeline_scaffold {
 	my ($top, %opts) = @_;
 
 	my %provider_cfg;
@@ -616,17 +621,17 @@ sub _create_ci_scaffold {
 		%provider_cfg = (type => $opts{provider} || 'manual');
 	}
 
-	my %ci = (
+	my %pipeline = (
 		enabled  => Genesis::Config::TRUE,
 		provider => \%provider_cfg,
 		name     => $top->config->get('deployment_type'),
 	);
-	$ci{repo} = { root => $opts{root} } if $opts{root};
 
-	$top->config->set('ci', \%ci);
+	$top->config->set('pipeline', \%pipeline);
 	$top->config->save;
 }
 
+# }}}
 
 # ==============================================================================
 # Other repo commands
