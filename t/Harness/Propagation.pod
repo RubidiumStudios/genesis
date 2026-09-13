@@ -350,12 +350,72 @@ refusal message to read.  Options are C<copy> and C<command>.  C<hard> kills
 the holder without letting it finish, so a row can show that the kernel drops
 the lock with the process.
 
+=head2 github_double($h, %opts)
+
+Stands the GitHub double up as a fixture C<curl> first on the path, backed by
+a state file the harness writes and a call log it reads back, and returns the
+double.  It is a binary rather than an object because C<Genesis::curl> shells
+out, so an in-process double could not reach a spawned command.  Options are
+C<token>, which defaults to C<harness-token>, C<admin>, which defaults to 1,
+and C<repository>, which defaults to C<owner/repo>.  C<make_harness> calls it
+for you under C<< github => 1 >>.
+
+=head2 gh_pull_request($gh, %opts)
+
+Declares an open pull request and returns its number.  Options are C<env>,
+which names the environment whose pull request branch and deployment branch
+the request runs between, C<head> and C<base>, which override those two,
+C<title>, C<body>, C<review>, which takes C<none>, C<approved>, or
+C<changes_requested>, C<reviewer>, C<review_body>, and C<at>.
+
+=head2 gh_close_pr($gh, $number, %opts)
+
+Closes a pull request.  C<merged> marks it merged rather than abandoned and
+C<at> dates it.
+
+=head2 gh_merge_pr($gh, $number, %opts)
+
+Merges a pull request by a named method, which C<method> gives and which
+defaults to C<rebase>, and closes it as merged.
+
+=head2 gh_protection($gh, %opts)
+
+Declares what the protection endpoints answer and returns what the run has
+set, so a row can read the settings back.  C<branch> and C<settings> name one
+branch's protection, and C<admin> off makes every protection call answer 403,
+which is the non-admin case.
+
+=head2 gh_unreachable($gh)
+
+Takes the API away, so every call reads as a failed C<curl> rather than as an
+answer with a status.
+
+=head2 gh_reachable($gh)
+
+Gives the API back again.
+
+=head2 gh_no_token($h)
+
+Runs the next command with no token in its environment.  It takes the harness
+rather than the double, because the token is a fact about the environment a
+run is given, and it is one shot: C<run_genesis> consumes the flag, so the
+command after it carries the token again and the fixture C<curl> stays where
+it is.
+
+=head2 gh_calls($gh)
+
+Returns every call the run made, each as a hashref of the C<method>, the
+C<url>, the C<body>, and the C<token> the caller's environment held, so a row
+can assert that a preview was read-only, that exactly one client was built,
+or that a run went out unauthenticated.
+
 =head1 METHODS
 
 C<r>, C<a>, and C<b> return the three paths.  C<git> returns a
 C<Service::Git> handle for a copy.  C<type>, C<control>, and C<envs> return
 the declared values.  C<slug> and C<pr_branch> render the deployment slug and
 its pull request branch.  C<exodus_mount>, C<applied_path>, and C<env_path>
-render the vault addresses.
+render the vault addresses.  C<gh> returns the GitHub double once
+C<github_double> has stood one up, and undef before that.
 
 =cut
