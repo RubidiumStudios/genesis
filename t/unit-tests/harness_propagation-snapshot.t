@@ -99,4 +99,33 @@ subtest 'a leftover path outside the set fails' => sub {
 	like($said, qr{\binit\b}, 'it names the leftover path');
 };
 
+subtest 'the copy option picks the repository the marker is read in' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+
+	my $published = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'the published content',
+		push    => 1,
+	);
+	deliver($h, 'qa', control => $published);
+
+	# Copy A delivers a later control commit and keeps it to itself, so the
+	# two repositories now name different sources for the same branch.
+	my $local = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: local\n"},
+		message => 'the content copy A holds alone',
+		push    => 1,
+	);
+	deliver($h, 'qa', control => $local, copy => 'a', push => 0);
+
+	my ($read_a) = invariant_outcome_of($h, 'qa', copy => 'a');
+	ok($read_a, 'the marker is read in the copy the caller named');
+
+	my ($read_r) = invariant_outcome_of($h, 'qa');
+	ok(!$read_r, 'and R still answers first where no copy is named');
+};
+
 done_testing;
