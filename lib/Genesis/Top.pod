@@ -1825,7 +1825,165 @@ an empty hash so that the type's own default still applies when the operator
 writes no provider block at all. A section that is enabled with no provider
 block is therefore a manual pipeline rather than no pipeline.
 
+The block also declares C<source_control>, which is what the pipeline needs
+to know about the repository, in three tiers. C<remote>, C<uri>, and
+C<repository> are derived from git with an explicit override; C<control_branch>,
+C<pr_prefix>, and C<control_requires_pr> are defaulted; and C<auth> and
+C<identity> are required wherever an automation has to clone and commit
+unattended, which is what L</_automated_provider_configured> decides. Two
+things take no key at all. The deployment root is a fact of the checkout,
+read from the git prefix, and the branch a command runs from is runtime
+state, so it is checked rather than configured. L</_source_control> resolves
+the tiers.
+
 B<Returns:> A hash reference.
+
+=head2 _automated_provider_configured
+
+    my $bool = _automated_provider_configured($siblings, $config);
+
+Whether the pipeline is owned by an automation rather than by a person. It
+is the predicate the C<required> flag of the source-control blocks reads,
+so that a block a pipeline task cannot do without is demanded only once
+somebody names the automation that has to do the work unattended. An absent
+provider type is a manual pipeline, so an absent block is no defect there.
+
+Plain function, not a method: C<Genesis::Config> calls it through the
+C<required> flag rather than through an object.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$siblings>
+
+Hash reference of the values beside the key being judged. Unused here,
+because the provider sits elsewhere in the configuration.
+
+=item C<$config>
+
+The C<Genesis::Config> being validated, which the predicate reads
+C<pipeline.enabled> and C<pipeline.provider.type> from by their dotted
+names.
+
+=back
+
+B<Returns:> 1 when an automation owns the pipeline, 0 otherwise.
+
+B<Examples:>
+
+    my $bool = _automated_provider_configured({}, $config);
+    # returns 1 where pipeline.provider.type is concourse
+    # returns 0 where the pipeline is off, or the provider is manual
+
+=head2 _source_control
+
+    my $sc = $top->_source_control();
+
+Returns the resolved source-control values as a hash reference, whose keys
+are C<remote>, C<uri>, C<repository>, C<control_branch>, and C<pr_prefix>.
+Precedence is explicit over derived over default.
+
+The remote is the control branch's configured upstream, else C<origin>
+where it exists, and otherwise refused by name; it is never the first
+C<git remote>, which is alphabetical order. The repository is the GitHub
+C<owner/repo> the remote's URL carries, github.com or GitHub Enterprise
+alike, and any other host must name it explicitly. An empty C<pr_prefix>
+is refused, because it would give the pull request branch the deployment
+branch's own name. Every refusal exits C<Genesis::Exit::CONFIG>.
+
+The answer is resolved once and kept, so the refusals land at configuration
+load rather than at the first read.
+
+B<Returns:> A hash reference of the five resolved values.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"pipeline.source_control.pr_prefix must not be empty"> - raised when the
+override is present and holds an empty string.
+
+=item *
+
+C<"pipeline is enabled, but ... is not a git checkout"> - raised when the
+deployment repository is not under git at all, which leaves the derivations
+with nothing to read.
+
+=item *
+
+C<"pipeline.source_control.remote could not be derived"> - raised when the
+control branch has no configured upstream and there is no remote named
+C<origin>.
+
+=item *
+
+C<"pipeline.source_control.repository could not be derived"> - raised when
+the remote's URL carries no GitHub C<owner/repo> pair and no override names
+one. There is no exception under the manual provider.
+
+=back
+
+B<Examples:>
+
+    my $sc = $top->_source_control;
+    # returns {remote => 'origin', uri => 'git@github.com:team/bosh.git',
+    #          repository => 'team/bosh', control_branch => 'control',
+    #          pr_prefix => 'pr/'}
+
+=head2 _github_owner_repo
+
+    my $pair = _github_owner_repo($uri);
+
+The GitHub C<owner/repo> a remote's URL carries, or C<undef> where it
+carries none. Both the https and the ssh forms parse, and GitHub Enterprise
+parses the same way as github.com, because its URLs carry the pair in the
+same shape and only the host differs. The host is what says GitHub: every
+https URL on earth has two path segments, so a URL that names some other
+forge answers C<undef> and its repository has to be configured by hand.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$uri>
+
+The remote's fetch URL, in either form. An undefined or empty value answers
+C<undef>.
+
+=back
+
+B<Returns:> The C<owner/repo> string, or C<undef>.
+
+B<Examples:>
+
+    my $pair = _github_owner_repo('git@github.com:team/bosh.git');
+    # returns 'team/bosh'
+
+    my $pair = _github_owner_repo('https://github.example.com/team/bosh');
+    # returns 'team/bosh' -- GitHub Enterprise parses the same way
+
+    my $pair = _github_owner_repo('https://git.example.com/team/bosh.git');
+    # returns undef -- that host is not GitHub
+
+=head2 _validate_pipeline_config
+
+    $top->_validate_pipeline_config();
+
+Runs the checks on the pipeline section that a declarative schema cannot
+state. It is called from L</_validate_config> for every command, straight
+after C<< Genesis::Config::validate >>, so that a repository meets the same
+refusal in the same words whichever command loaded it.
+
+A section that is off is left alone. Otherwise the source-control block is
+resolved, which is where the derivations and their refusals are raised; the
+refusals themselves belong to L</_source_control>.
+
+B<Returns:> 1.
 
 =head1 SEE ALSO
 

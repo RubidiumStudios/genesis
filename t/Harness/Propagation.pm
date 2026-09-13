@@ -574,11 +574,15 @@ sub _seed_control {
 # pull request is a per-environment question, so make_harness's pr mode is
 # written as genesis.pipeline.require_pr on each environment file instead.
 #
-# The control branch and the pull-request prefix are not written either.
-# The schema does not declare the source-control block yet, and a default
-# harness has to be one a whole command can be run against, so the harness
-# leans on the same defaults the code does and writes the block only where
-# a row named source_control keys of its own.
+# The control branch and the pull-request prefix are written as the options
+# name them, so a row that asked for a control branch of its own gets a
+# repository whose configuration agrees with the branch the harness built.
+#
+# The repository is written too, and it is the one value the harness cannot
+# leave to the code.  Copy A is cloned from a bare repository at a
+# filesystem path, so its origin URL carries no GitHub owner/repo pair and
+# the derivation has nothing to read.  A row that proves that refusal takes
+# the override away by naming repository as undef.
 sub _seed_pipeline_section {
 	my ($self, $root) = @_;
 	my $want = $self->{pipeline};
@@ -587,11 +591,17 @@ sub _seed_pipeline_section {
 	require Genesis::Config;
 	my $config = Genesis::Config->new("$root/.genesis/config");
 	my %keys = (ref $want eq 'HASH') ? %$want : ();
+	my %sc   = (
+		control_branch => $self->{control},
+		pr_prefix      => $self->{pr_prefix},
+		repository     => sprintf('genesis/%s-deployments', $self->{type}),
+		%{$self->{source_control} || {}},
+	);
 
 	$config->set('pipeline.enabled' => (ref $want eq 'HASH') ? 1 : ($want ? 1 : 0));
 	$config->set('pipeline.provider.type' => $self->{provider});
-	$config->set("pipeline.source_control.$_" => $self->{source_control}{$_})
-		for sort keys %{$self->{source_control} || {}};
+	$config->set("pipeline.source_control.$_" => $sc{$_})
+		for grep {defined $sc{$_}} sort keys %sc;
 	$config->set("pipeline.$_" => $keys{$_}) for sort keys %keys;
 	$config->save;
 

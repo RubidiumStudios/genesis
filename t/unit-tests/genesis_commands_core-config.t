@@ -11,7 +11,7 @@ use Test::Exit;
 
 # Explicit import: Genesis exports its own workdir() which would otherwise
 # clobber helper's.
-use Genesis qw/mkdir_or_fail mkfile_or_fail slurp pushd popd/;
+use Genesis qw/mkdir_or_fail mkfile_or_fail slurp pushd popd run/;
 use Genesis::Commands;
 use Genesis::Commands::Core;
 
@@ -37,6 +37,14 @@ pipeline:
     type: manual
 version: 3
 EOF
+
+	# The enabled pipeline derives its remote and its repository from git, so
+	# the fixture is a checkout with a GitHub remote rather than a bare
+	# directory holding a configuration file.
+	run({dir => $dir}, 'git', 'init', '-q');
+	run({dir => $dir}, 'git', 'remote', 'add', 'origin',
+		'https://github.com/genesis/test-kit-deployments.git');
+
 	return $dir;
 }
 

@@ -32,6 +32,16 @@ sub config_yaml {
 		'creator_version: 3.2.0', $body, '');
 }
 
+# The harness clones copy A from a bare repository at a filesystem path, so
+# the origin URL carries no GitHub owner/repo pair for the source-control
+# block to derive one from, and a row that enables a pipeline names the
+# repository itself.
+sub enabled_pipeline {
+	my (@extra) = @_;
+	return join("\n", 'pipeline:', '  enabled: true', @extra,
+		'  source_control:', '    repository: genesis/bosh-deployments');
+}
+
 sub load_with {
 	my ($body) = @_;
 	commit_on_control($h, files => {'.genesis/config' => config_yaml($body)});
@@ -48,7 +58,7 @@ subtest 'the two spellings cannot drift' => sub {
 		'the registry holds the three types';
 
 	# The schema's enum is the registry's list, not a literal beside it.
-	my $top    = load_with("pipeline:\n  enabled: true");
+	my $top    = load_with(enabled_pipeline());
 	my $schema = $top->_repo_config_schema;
 	is_deeply $schema->{pipeline}{schema}{provider}{schema}{type}{values},
 		[@known],
@@ -58,8 +68,14 @@ subtest 'the two spellings cannot drift' => sub {
 		qr/pipeline\.provider\.type: unknown value/,
 		'gha is refused, because no registry entry spells it that way';
 
+	# An automated provider has to clone and commit unattended, so the row
+	# that names one carries the credential and the committer identity the
+	# source-control block requires of it.
 	lives_ok {
-		load_with("pipeline:\n  enabled: true\n  provider:\n    type: github-actions")
+		load_with(join("\n",
+			enabled_pipeline('  provider:', '    type: github-actions'),
+			'    auth:', '      vault: secret/ci/git',
+			'    identity:', '      name: Genesis', '      email: ci@example.com'))
 	} 'github-actions validates, because the registry spells it that way';
 };
 
@@ -92,7 +108,7 @@ subtest 'one resolver answers for every caller' => sub {
 subtest 'the provider type defaults to manual' => sub {
 	plan tests => 3;
 
-	my $top = load_with("pipeline:\n  enabled: true");
+	my $top = load_with(enabled_pipeline());
 	is $top->config->get('pipeline.provider.type'), 'manual',
 		'an absent provider block resolves to a manual pipeline';
 	ok $top->config->get('pipeline.enabled'),

@@ -1358,6 +1358,11 @@ sub _validate_config {
 		$self->config->validate($self->_repo_config_schema());
 		$self->{__config_disk_version} = 3;
 
+		# The checks a declarative schema cannot state, under D28, run for
+		# every command and right after the schema.  Later work extends
+		# _validate_pipeline_config and never touches this call.
+		$self->_validate_pipeline_config;
+
 		# Detect legacy ci.yml alongside v3 config -- flag it for the
 		# dispatch gate.  Two sub-cases surface at load time:
 		#   * v3 config already declares pipeline.enabled and
@@ -1618,8 +1623,161 @@ sub _pipeline_config_schema {
 				type        => 'string',
 				description => "The pipeline's name in its provider (defaults to deployment_type)"
 			},
+			source_control => {
+				type        => 'hash',
+				description => 'What the pipeline needs to know about the repository',
+				schema => {
+					# Derived from git, with an explicit override, because each
+					# is a choice with a good default rather than a fact of the
+					# checkout.  The deployment root takes no key, being a fact
+					# of the checkout, and neither does the branch a command
+					# runs from, that being runtime state.
+					remote     => {type => 'string', description => "The remote CI clones from; derived from the control branch's upstream"},
+					uri        => {type => 'string', description => "That remote's fetch URL"},
+					repository => {type => 'string', description => "The GitHub owner/repo the API targets"},
+
+					# Defaulted, and read through one accessor apiece.
+					control_branch      => {type => 'string',  default => DEFAULT_CONTROL_BRANCH, description => "The control branch's name"},
+					pr_prefix           => {type => 'string',  default => 'pr/', description => 'The pull request branch prefix'},
+					control_requires_pr => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Whether control accepts direct pushes'},
+
+					# CI only, and required wherever a pipeline task has to
+					# clone and commit on its own.
+					auth => {
+						type        => 'hash',
+						required    => \&_automated_provider_configured,
+						description => 'Vault references for the clone credential',
+						schema => {
+							type     => {type => 'enum', values => [qw/ssh https/], default => 'ssh', description => 'How the task authenticates'},
+							vault    => {type => 'string', description => 'Vault path holding the credential'},
+							username => {type => 'string', description => 'Username for the https form'},
+						}
+					},
+					identity => {
+						type        => 'hash',
+						required    => \&_automated_provider_configured,
+						description => 'The name and email a pipeline task commits under',
+						schema => {
+							name  => {type => 'string', required => 1, description => 'Committer name'},
+							email => {type => 'string', required => 1, description => 'Committer email'},
+						}
+					},
+				}
+			},
 		}
 	};
+}
+
+# }}}
+# _automated_provider_configured - true when the pipeline is not manual {{{
+#
+# The predicate the required flag of source_control.auth, identity,
+# shuttle, vault, and locker reads.  Under D15 an absent provider type is
+# manual, so an absent block is only required once somebody names an
+# automation that has to do the work unattended.
+sub _automated_provider_configured {
+	my ($siblings, $config) = @_;
+	return 0 unless $config && $config->get('pipeline.enabled');
+	my $type = $config->get('pipeline.provider.type', 'manual') // 'manual';
+	return $type eq 'manual' ? 0 : 1;
+}
+
+# }}}
+# _source_control - the resolved source-control values {{{
+#
+# Precedence is explicit over derived over default, under D29.  The remote
+# is the control branch's configured upstream, else origin where it
+# exists, and never "the first git remote", because that is alphabetical
+# order and a repository holding dev and origin would pick dev.  The
+# repository is the GitHub owner/repo the remote's URL carries; under D102
+# the MVP supports GitHub alone, whether github.com or GitHub Enterprise,
+# so any other host needs the override and is refused by name without it,
+# with no exception under the manual provider.
+sub _source_control {
+	my ($self) = @_;
+
+	return $self->{__source_control} if $self->{__source_control};
+
+	require Service::Git;
+	my $config = $self->config;
+	my %sc = (
+		control_branch => $config->get('pipeline.source_control.control_branch', DEFAULT_CONTROL_BRANCH),
+		pr_prefix      => $config->get('pipeline.source_control.pr_prefix', 'pr/'),
+	);
+
+	bail({exitcode => CONFIG},
+		"#C{pipeline.source_control.pr_prefix} must not be empty.\n".
+		"An empty prefix gives the pull request branch the deployment ".
+		"branch's own name, so the two could not be told apart."
+	) unless length $sc{pr_prefix};
+
+	# Service::Git reports a root it could not find as the text of git's own
+	# complaint, so the check is on the root rather than on the object, and
+	# it comes before anything is asked of it.
+	my $git = Service::Git->new($self->path);
+	bail({exitcode => CONFIG},
+		"#C{pipeline} is enabled, but #C{%s} is not a git checkout.\n".
+		"A pipeline is a set of branches, so the deployment repository has ".
+		"to be under git before one can be configured.",
+		$self->path
+	) unless -d $git->{root};
+
+	$sc{remote} = $config->get('pipeline.source_control.remote')
+		// $git->branch_upstream_remote($sc{control_branch})
+		// ($git->has_remote('origin') ? 'origin' : undef);
+	bail({exitcode => CONFIG},
+		"#C{pipeline.source_control.remote} could not be derived.\n".
+		"The control branch #C{%s} has no configured upstream and there is ".
+		"no remote named #C{origin}.  Name the remote explicitly.",
+		$sc{control_branch}
+	) unless $sc{remote};
+
+	$sc{uri} = $config->get('pipeline.source_control.uri')
+		// $git->remote_url($sc{remote});
+
+	$sc{repository} = $config->get('pipeline.source_control.repository')
+		// _github_owner_repo($sc{uri});
+	bail({exitcode => CONFIG},
+		"#C{pipeline.source_control.repository} could not be derived from ".
+		"#C{%s}.\nThe MVP supports GitHub, github.com or GitHub Enterprise, ".
+		"and that URL carries no #C{owner/repo} pair.  Name the repository ".
+		"explicitly, or move the pipeline to a GitHub remote.",
+		$sc{uri} // '<no remote url>'
+	) unless $sc{repository};
+
+	return $self->{__source_control} = \%sc;
+}
+
+# }}}
+# _github_owner_repo - the owner/repo a GitHub URL carries, or undef {{{
+#
+# Enterprise parses the same way, because its URLs carry the pair in the
+# same shape and only the host differs.  The host is what says GitHub: any
+# https URL at all carries two path segments, so without a host test every
+# forge on earth would parse and the D102 refusal would never fire.
+sub _github_owner_repo {
+	my ($uri) = @_;
+	return undef unless defined $uri && length $uri;
+	return "$1/$2" if $uri =~ m{^https?://[^/]*github[^/]*/([^/]+)/([^/]+?)(?:\.git)?/?$}i;
+	return "$1/$2" if $uri =~ m{^(?:ssh://)?[^@]+\@[^:/]*github[^:/]*[:/]([^/]+)/([^/]+?)(?:\.git)?/?$}i;
+	return undef;
+}
+
+# }}}
+# _validate_pipeline_config - the checks a declarative schema cannot state {{{
+#
+# Runs from _validate_config after Genesis::Config::validate, for every
+# command, under D28.  It grows through this step; today it resolves the
+# source-control block, which is where the two derivations of D29 and the
+# GitHub refusal of D102 are raised.  Later work extends this sub and
+# leaves the one call site in _validate_config alone.
+sub _validate_pipeline_config {
+	my ($self) = @_;
+
+	return 1 unless $self->config->get('pipeline.enabled');
+	$self->_source_control;
+
+	return 1;
 }
 
 # }}}

@@ -1003,6 +1003,60 @@ B<Examples:>
   my $remote = $git->default_remote;
   # returns 'origin', or undef in a repository with no remotes
 
+=head2 branch_upstream_remote
+
+  my $remote = $git->branch_upstream_remote($branch);
+
+The remote a branch is configured to track, read from
+C<branch.E<lt>branchE<gt>.remote>.
+
+This is the answer to "which remote does this branch belong to", which
+C<default_remote> is not: that one is alphabetical order, so a repository
+holding both C<dev> and C<origin> answers C<dev>. A caller that needs the
+remote a particular branch was set up against asks here first.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch name, with no C<refs/heads/> prefix.
+
+=back
+
+B<Returns:> The remote name, or C<undef> when the branch has no configured
+upstream, including when there is no such branch.
+
+B<Examples:>
+
+  my $remote = $git->branch_upstream_remote('control');
+  # returns 'origin' for a branch pushed with -u
+  # returns undef for a branch that has never been pushed
+
+=head2 has_remote
+
+  my $bool = $git->has_remote($remote);
+
+Whether a remote of this name is configured.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote>
+
+The remote name to look for.
+
+=back
+
+B<Returns:> 1 when the remote is configured, 0 when it is not.
+
+B<Examples:>
+
+  my $bool = $git->has_remote('origin');
+  # returns 1 in a cloned repository, 0 in one made by git init
+
 =head2 remote_url
 
   my $url = $git->remote_url;
