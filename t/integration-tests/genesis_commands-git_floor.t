@@ -62,6 +62,24 @@ subtest 'a command outside the pipeline group refuses identically' => sub {
 	like($said, qr/at least 2\.34\.1/, 'and the same floor');
 };
 
+subtest 'a git at the floor is accepted' => sub {
+	# The three are the restoration the run asserts for itself and the two
+	# rows below it.
+	plan tests => 3;
+
+	# Exactly the floor, because a comparison that asked for more than the
+	# version it names would refuse this run and every row above it would
+	# still be green.  The command is the one the row above drives, so the
+	# only thing that differs between them is the git.
+	my ($out, $err, $exit) = run_genesis($h, {git_version => '2.34.1'},
+		'lookup', 'qa', 'params.env');
+	my $said = flatten($err);
+
+	isnt($exit, 86, 'the prerequisites check does not refuse it');
+	unlike($said, qr/at least 2\.34\.1/,
+		'and nothing asks for a git it already has');
+};
+
 subtest 'the floor is declared once, for every command' => sub {
 	plan tests => 3;
 
