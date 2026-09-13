@@ -234,7 +234,12 @@ sub make_harness {
 		provider  => $opts{provider}  // 'manual',
 		mode      => $opts{mode}      // 'direct',
 		root      => $opts{root}      // '',
-		pipeline  => defined $opts{pipeline} ? $opts{pipeline} : 1,
+		# The default is no pipeline section at all, because the .genesis/config
+		# schema does not know the pipeline key yet and a repository carrying
+		# one fails validation before any command reaches its work.  A row that
+		# wants the section asks for it, and the default flips back to an
+		# enabled section once M3 declares the key.
+		pipeline  => defined $opts{pipeline} ? $opts{pipeline} : 'none',
 		source_control => $opts{source_control},
 		kit       => $opts{kit},
 		roots     => {},
@@ -1556,6 +1561,13 @@ sub restore_vault {
 # The read runs on the parent's own path, which the recording wrapper is
 # deliberately kept off, so a row reading a record to assert on it never counts
 # as one of the reads the run under test made.
+#
+# safe export answers with the whole subtree under the path it was given, so a
+# deployment record that has a pipeline record and a hold beneath it comes back
+# as three entries and only one of them is the record that was asked for.  The
+# entry is picked out by its key, which safe writes without the leading slash,
+# and a path with nothing of its own at it answers undef even where its
+# children answered.
 sub record_at {
 	my ($self, $path) = @_;
 	$self->fixture_vault;
@@ -1564,8 +1576,11 @@ sub record_at {
 		'safe', 'export', $path);
 	return undef if $rc || !$out;
 	my $exported = eval {JSON::PP->new->decode($out)} or return undef;
-	my ($record) = values %$exported;
-	return $record;
+
+	(my $key = $path) =~ s{/{2,}}{/}g;
+	$key =~ s{^/}{};
+	$key =~ s{/$}{};
+	return $exported->{$key};
 }
 
 # }}}

@@ -173,11 +173,11 @@ subtest 'a second harness arms its own plan, not the first harness plan' => sub 
 subtest 'the seeded pipeline section takes the shapes the option names' => sub {
 	plan tests => 9;
 
-	my $on = make_harness(envs => ['qa'], vault => 0,
+	my $on = make_harness(envs => ['qa'], vault => 0, pipeline => 1,
 		source_control => {control_requires_pr => 'true'});
 	my ($enabled, $rc) = load_yaml_file($on->a . '/.genesis/config');
 	is($rc, 0, 'the seeded configuration parses');
-	is($enabled->{pipeline}{enabled}, 1, 'the default is an enabled pipeline');
+	is($enabled->{pipeline}{enabled}, 1, 'one is an enabled pipeline');
 	is($enabled->{pipeline}{provider}{type}, 'manual', 'carrying the provider');
 	is($enabled->{pipeline}{mode}, 'direct', 'and the mode');
 	is($enabled->{pipeline}{source_control}{control_requires_pr}, 'true',
