@@ -39,7 +39,8 @@ sub config {
 		my @contested;
 		for my $unset (@{$removals || []}) {
 			# A shared prefix is only an overlap when one path contains
-			# the other; ci.enabled and ci.provider are unrelated.
+			# the other; pipeline.enabled and pipeline.provider are
+			# unrelated.
 			push @contested, map {"$_ / $unset"}
 				grep {$_ eq $unset || _contains($unset, $_) || _contains($_, $unset)}
 				@set_keys;

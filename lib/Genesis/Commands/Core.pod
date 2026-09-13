@@ -171,8 +171,8 @@ both is refused; see L</LIMITATIONS>.
 
 B<The configuration is reported as Genesis will actually use it>, not as
 the file literally reads.  Schema defaults and environment overrides are
-merged in, so C<pipeline.provider.insecure> is reported even when the file
-never mentions it.  This answers "what value is in effect", which is the
+merged in, so C<pipeline.provider.insecure> is reported even when the
+file never mentions it.  This answers "what value is in effect", which is
 question an operator debugging a deployment is asking.  It does mean the
 output cannot be diffed against the file on disk.  Distinguishing the
 sources visually is deferred; see L</LIMITATIONS>.
@@ -228,8 +228,8 @@ every unrecognised key, not just the first.
 
 Raised before anything is applied when a key named by C<--set> and one
 named by C<--unset> are the same, or one contains the other.  Keys that
-merely share a prefix -- C<pipeline.enabled> and C<pipeline.provider> -- do not
-overlap and are allowed together.
+merely share a prefix -- C<pipeline.enabled> and C<pipeline.provider> --
+do not overlap and are allowed together.
 
 =item C<"Reading and writing cannot be combined in one run">
 
@@ -567,9 +567,9 @@ B<Examples:>
 
 =head2 _contains($ancestor, $key)
 
-  _contains('ci', 'pipeline.enabled');       # 1
-  _contains('ci', 'ci');               # 0 -- equal, not contained
-  _contains('a',  'ab');               # 0
+  _contains('pipeline', 'pipeline.enabled');  # 1
+  _contains('pipeline', 'pipeline');          # 0 -- equal, not contained
+  _contains('a',        'ab');                # 0
 
 Reports whether one dotted path lies inside another.
 
@@ -689,8 +689,8 @@ value per occurrence, discarding the arity.  Rather than pick an order
 and be wrong half the time, the invocation is rejected.
 
 The same applies when one key contains the other: unsetting C<pipeline>
-removes what C<--set pipeline.enabled> just wrote, and which of the two wins
-again depends on the order that was lost.  Keys that only share a
+removes what C<--set pipeline.enabled> just wrote, and which of the two
+wins again depends on the order that was lost.  Keys that only share a
 prefix are unrelated and remain allowed.
 
 =head2 Reading and writing cannot be combined

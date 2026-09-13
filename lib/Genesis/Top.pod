@@ -1794,10 +1794,12 @@ declared here, so C<Genesis::Config> refuses an undeclared key by name as the
 configuration loads, for every command rather than only for the pipeline ones.
 
 The block declares C<enabled>, which is the gate and defaults to false, the
-C<provider> hash, which is required once the gate is on and carries the
+C<provider> hash, which is optional even once the gate is on and carries the
 automation's C<type>, C<target>, C<url>, C<team>, and C<insecure>, and
 C<name>, which is the pipeline's own label in its provider and falls back to
-the deployment type.
+the deployment type. A pipeline with no provider type is a manual one that
+an operator drives by hand, so an absent block means manual rather than no
+pipeline at all.
 
 B<Returns:> A hash reference.
 

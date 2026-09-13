@@ -186,11 +186,12 @@ sub can_compile_from_genesis_config {
 }
 
 # }}}
-# validate_config_section - validate the ci: section delegated by Top.pm {{{
+# validate_config_section - validate the pipeline: section delegated by Top.pm {{{
 #
-# Called by Top::_validate_config() when this module is loaded and a ci: key
-# exists in .genesis/config.  Performs structural validation; detailed
-# cross-reference checks happen later in Compiler::Validator during compile().
+# Called by Top::_validate_config() when this module is loaded and a
+# pipeline: key exists in .genesis/config.  Performs structural
+# validation; detailed cross-reference checks happen later in
+# Compiler::Validator during compile().
 sub validate_config_section {
 	my ($class, $data, $top) = @_;
 

@@ -445,14 +445,14 @@ subtest 'execute phase' => sub {
 	my ($rwc) = run_execute();
 
 	my $cfg_wc = slurp("$wc/bosh/.genesis/config");
-	like($cfg_wc, qr/^ci:/m,
-		'with-ci: config has a ci: section');
+	like($cfg_wc, qr/^pipeline:/m,
+		'with-ci: config has a pipeline: section');
 	like($cfg_wc, qr/enabled: true/,
-		'with-ci: ci.enabled is true');
+		'with-ci: pipeline.enabled is true');
 	is($rwc->{ci_provider}, 'manual',
 		'with-ci: result ci_provider is manual (full provider config deferred to `repo config ci`)');
 
-	# The v3 ci: block carries the whole topology.  The multi-file
+	# The v3 pipeline: block carries the whole topology.  The multi-file
 	# .genesis/ci/ layout is a separate, older source that repo-init
 	# does not produce -- asserted so a reintroduction is caught here.
 	ok(!-d "$wc/bosh/.genesis/ci",
@@ -477,8 +477,8 @@ subtest 'execute phase' => sub {
 	my ($rnc) = run_execute();
 
 	my $cfg_nc = slurp("$nc/bosh/.genesis/config");
-	unlike($cfg_nc, qr/^ci:/m,
-		'no-ci: config has no ci: section');
+	unlike($cfg_nc, qr/^pipeline:/m,
+		'no-ci: config has no pipeline: section');
 	is($rnc->{ci_provider}, undef,
 		'no-ci: result ci_provider is undef');
 	ok(!-d "$nc/bosh/.genesis/ci",
