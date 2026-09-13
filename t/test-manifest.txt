@@ -251,6 +251,7 @@ integration-tests/service_bosh_director.t   # BOSH Director constructor patterns
 integration-tests/genesis_top-complete.t    # Genesis::Top with external vault and GitHub dependencies
 integration-tests/genesis_top-ci_yml_soft_gate.t              # stale ci.yml warns rather than blocks
 integration-tests/genesis_commands-pipeline_ci_yml_gate.t     # pipeline commands gated on a legacy ci.yml
+integration-tests/genesis_exit-command_codes.t                # usage exits 2, prerequisites exit 86, no invented codes
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
 # Genesis::Env integration tests - require vault/BOSH mocks

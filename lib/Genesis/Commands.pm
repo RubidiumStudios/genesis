@@ -531,6 +531,13 @@ sub append_options { # {{{
 sub command_help { # {{{
 	my ($msg, $rc) = @_;
 	$rc = $msg ? 1 : 0 unless defined($rc);
+
+	# Usage and option errors exit 2, whatever number the caller passed.
+	# Every caller here means the same thing by a non-zero code, and a
+	# caller that cannot tell a usage error from a crash cannot act on
+	# either.  D98 keeps 2 because it is Genesis precedent.
+	$rc = 2 if $rc;
+
 	$msg ||= ''; # TODO: a summary blurb about genesis
 
 	my $hr = "#${\($rc ? 'r' : 'K')}\{" . ("=" x terminal_width) ."}";
@@ -643,6 +650,11 @@ sub command_help { # {{{
 
 sub command_usage { # {{{
 	my ($rc, $msg, $show_global) = @_;
+
+	# The same rule as command_help: a non-zero code here is a usage or an
+	# option error, and it exits 2.
+	$rc = 2 if $rc;
+
 	my $called = $CALLED;
 	my $command = $GENESIS_COMMANDS{$called};
 
@@ -1326,7 +1338,12 @@ sub check_prereqs { # {{{
 
 	debug "Terminal encoding: '%s'", $ENV{LANG} || '<undefined>';
 
+	# The prerequisites check keeps 86, which is the code the kit and
+	# provider checks at Commands/Env.pm and Commands/Pipelines.pm already
+	# exit with.  A missing or too-old tool is not a crash, and a caller
+	# that reads 86 knows the environment is the thing to fix.
 	bail(
+		{exitcode => 86},
 		"#R{GENESIS PRE-REQUISITES CHECKS FAILED!!}\n".
 		"\n".
 		"Encountered the following errors:\n".
