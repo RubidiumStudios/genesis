@@ -163,6 +163,7 @@ unit-tests/harness_propagation-refs.t               # remote-tracking refs acros
 unit-tests/harness_propagation-fixtures.t           # branch, delivery, and vault-record fixtures
 unit-tests/harness_propagation-w_restored.t         # working state restored across a whole command
 unit-tests/harness_propagation-snapshot.t           # a delivery read back against its source
+unit-tests/harness_propagation-faults.t             # a named git step made to fail partway
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi
