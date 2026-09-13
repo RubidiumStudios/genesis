@@ -27,6 +27,11 @@ push @EXPORT, qw/
 /;
 
 push @EXPORT, qw/
+	branches_on_r fresh_clone subjects_of heads_in reachable_on_r
+	newest_record
+/;
+
+push @EXPORT, qw/
 	init_branch deliver propagation_set harness_marker
 	add_deployment_root write_env_file
 /;
@@ -221,6 +226,144 @@ sub slurp {
 	my ($path) = @_;
 	return undef unless -f $path;
 	return helper::get_file($path);
+}
+
+# }}}
+# branches_on_r - R's branch names, short and sorted {{{
+#
+# refs_in answers full refnames in a hashref, and the rows that ask this ask
+# it against a plain list, so the shortening and the sort live here rather
+# than in five copies at the call sites.
+sub branches_on_r {
+	my ($self) = @_;
+	my $refs = refs_in($self->{r}, prefix => 'refs/heads');
+	return [sort map {substr($_, length 'refs/heads/')} keys %$refs];
+}
+
+# }}}
+# fresh_clone - a third clone of R, made now {{{
+#
+# A row that asks what a clone made today can still fetch needs a clone that
+# carries none of the fixture's own history of fetches, which neither copy A
+# nor copy B is once the harness has been built.  What such a clone sees of R
+# is its remote-tracking refs, since a clone cuts exactly one local branch
+# for itself whatever R holds.
+sub fresh_clone {
+	my ($self, %opts) = @_;
+	my $dir = "$self->{base}/clone-" . int(rand(1_000_000));
+	run({dir => $self->{base}, onfailure => "Failed to clone R"},
+		'git', 'clone', '-q', $self->{r}, $dir);
+	run({dir => $dir}, 'git', 'config', 'user.email', 'clone@genesis.example.com');
+	run({dir => $dir}, 'git', 'config', 'user.name', 'A fresh clone');
+	return $dir;
+}
+
+# }}}
+# subjects_of - the last n subjects on a branch, oldest first {{{
+#
+# The remote-tracking ref rather than the local one, because a row asking
+# what a run wrote is asking what reached R.  The reverse puts them in the
+# order they were committed, which is how the rows read them.
+#
+# The read is stderr-suppressed and its status is checked, the way the eight
+# readers above are, so a branch that is not there answers an empty list
+# rather than git's complaint split into subjects.
+sub subjects_of {
+	my ($self, $branch, $n, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	my $ref  = $opts{local} ? $branch : "refs/remotes/origin/$branch";
+	my ($out, $rc) = run({dir => $self->{$copy}, stderr => 0, passfail => 0},
+		'git', 'log', "--max-count=$n", '--format=%s', $ref);
+	return () if $rc || !defined $out;
+	chomp $out;
+	return reverse grep {length} split /\n/, $out;
+}
+
+# }}}
+# heads_in - every local head in a copy, as a sorted list of lines {{{
+#
+# A row that proves a command left L alone takes this before and after and
+# compares the two, so the shape only has to be stable and readable.
+sub heads_in {
+	my ($self, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	my $refs = refs_in($self->{$copy}, prefix => 'refs/heads');
+	return [map {"$_ $refs->{$_}"} sort keys %$refs];
+}
+
+# }}}
+# reachable_on_r - can R reach this commit at all {{{
+#
+# A record naming a commit R cannot reach is the breach D103's staleness read
+# and M13's pre-flight both have to catch, and a row proves it by asking R
+# rather than by trusting the record.  The object is looked for first,
+# because merge-base cannot be asked about a commit the repository does not
+# hold.
+sub reachable_on_r {
+	my ($self, $sha) = @_;
+	return 0 unless $sha;
+	my $ok = run({dir => $self->{r}, passfail => 1},
+		'git', 'cat-file', '-e', "$sha^{commit}");
+	return 0 unless $ok;
+	for my $branch (@{$self->branches_on_r}) {
+		return 1 if run({dir => $self->{r}, passfail => 1},
+			'git', 'merge-base', '--is-ancestor', $sha, $branch);
+	}
+	return 0;
+}
+
+# }}}
+# newest_record - the newest entry of a record set, read back nested {{{
+#
+# The fixture writes a flat record, because an exodus record is flat, and a
+# row reads it as $record->{git}{commit}, so the dotted keys are inflated
+# here.
+#
+# A record set is either one record at the path itself, which is what the
+# harness's own writers lay down, or a path whose children are the entries,
+# one per deploy and named for when it happened, which is what the deploy
+# writes.  record_at reads the first shape and has no notion of the second,
+# so where it answers nothing the children are listed through safe and the
+# newest of them by name is the entry.  The path's own record is preferred,
+# because an environment's record has children of its own that are not
+# entries of its set, such as its hold and its proposal.
+sub newest_record {
+	my ($self, $path) = @_;
+	my $flat = $self->record_at($path) // $self->_newest_entry($path);
+	return undef unless $flat;
+
+	my %nested;
+	for my $key (sort keys %$flat) {
+		my @parts = split /\./, $key;
+		my $leaf  = pop @parts;
+		my $at    = \%nested;
+		$at = ($at->{$_} //= {}) for @parts;
+		$at->{$leaf} = $flat->{$key};
+	}
+	return \%nested;
+}
+
+# }}}
+# _newest_entry - the newest child of a record set, flat, or undef {{{
+#
+# safe export answers the whole subtree under the path it was given, keyed by
+# each entry's own path without the leading slash, so the set's entries are
+# the keys one segment below the path and the newest is the last of them in
+# name order.
+sub _newest_entry {
+	my ($self, $path) = @_;
+	$self->fixture_vault;
+	my ($out, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
+			stderr => 0, passfail => 0},
+		'safe', 'export', $path);
+	return undef if $rc || !$out;
+	my $exported = eval {JSON::PP->new->decode($out)} or return undef;
+
+	(my $key = $path) =~ s{/{2,}}{/}g;
+	$key =~ s{^/}{};
+	$key =~ s{/$}{};
+	my ($newest) = reverse sort grep {m{^\Q$key\E/[^/]+$}} keys %$exported;
+	return defined $newest ? $exported->{$newest} : undef;
 }
 
 # }}}

@@ -96,4 +96,81 @@ subtest 'the readers answer for what is absent' => sub {
 	is_deeply(refs_in($unborn), {}, 'and lists no refs at all');
 };
 
+# Proves the second reading half of T1: the six later readers answer for R's
+# branch list, a fresh clone, a branch's recent subjects, a record set's
+# newest entry, every local head, and whether a commit is reachable on R.
+subtest 'the six later readers answer about the fixture' => sub {
+	# The eight are the seven rows below and the restoration that the one
+	# run asserts for itself.
+	plan tests => 8;
+
+	my $h = make_harness(envs => ['lab', 'qa'], vault => 0);
+	init_branch($h, 'lab');
+	init_branch($h, 'qa');
+	refresh($h, 'a');
+
+	is_deeply(branches_on_r($h), [$h->control, $h->slug('lab'), $h->slug('qa')],
+		'branches_on_r names R\'s branches, short and sorted');
+
+	my $clone = fresh_clone($h);
+	isnt($clone, $h->a, 'fresh_clone is a third clone, not copy A');
+	# A clone holds R's branches as remote-tracking refs and stands on one
+	# local head of its own, so the comparison is against what it tracks.
+	# Its origin/HEAD is a symbolic ref onto one of those and names no
+	# branch R does not already have.
+	is_deeply(branches_on_r($h), [sort
+			map {substr($_, length 'refs/remotes/origin/')}
+			grep {!m{^refs/remotes/origin/HEAD$}}
+			keys %{refs_in($clone, prefix => 'refs/remotes/origin')}],
+		'and it sees what R holds');
+
+	commit_on_control($h, files => {'qa.yml' => "---\none\n"},
+		message => 'First change', push => 1);
+	my $second = commit_on_control($h, files => {'qa.yml' => "---\ntwo\n"},
+		message => 'Second change', push => 1);
+	refresh($h, 'a');
+
+	is_deeply([subjects_of($h, $h->control, 2)],
+		['First change', 'Second change'],
+		'subjects_of reads the last subjects in the order they were committed');
+
+	ok(reachable_on_r($h, $second), 'a pushed commit is reachable on R');
+
+	my $local = local_only_commit($h, $h->control, marker => 0,
+		files => {'never-pushed.yml' => "---\nlocal: true\n"});
+	ok(!reachable_on_r($h, $local), 'and one that was never pushed is not');
+
+	my $before = heads_in($h);
+	run_genesis($h, 'pipeline-status');
+	is_deeply(heads_in($h), $before, 'heads_in reads every local head, so a row can compare');
+};
+
+subtest 'the newest entry of a record set reads back nested' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa']);
+	my $target = fixture_vault($h);
+	my $control = $h->git('a')->sha($h->control);
+	my $set = $h->env_path('qa') . '/deployments';
+
+	# The harness's own record writers put one flat record at a path, so the
+	# two dated entries of a record set are written here through safe rather
+	# than through a fixture that cannot make more than one of them.
+	for my $entry (['2026-09-12-100000', '2026-09-12 10:00:00 +0000'],
+	               ['2026-09-13-100000', '2026-09-13 10:00:00 +0000']) {
+		run({env => {SAFE_TARGET => $target},
+		     onfailure => "Failed to write $set/$entry->[0]"},
+			'safe', 'set', "$set/$entry->[0]",
+			"git.commit=$control", "dated=$entry->[1]");
+	}
+
+	my $record = newest_record($h, $set);
+	is($record->{git}{commit}, $control,
+		'a dotted field reads back as a nested hashref');
+	is($record->{dated}, '2026-09-13 10:00:00 +0000',
+		'and the newest entry is the one answered');
+	is(newest_record($h, $h->env_path('lab')), undef,
+		'a path nothing was written to reads undef');
+};
+
 done_testing;
