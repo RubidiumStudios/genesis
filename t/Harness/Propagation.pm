@@ -27,6 +27,11 @@ push @EXPORT, qw/
 	add_deployment_root write_env_file
 /;
 
+push @EXPORT, qw/
+	fixture_vault fixture_applied fixture_pipeline_record certify
+	fixture_hold fixture_proposed break_vault restore_vault
+/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -706,6 +711,169 @@ sub write_env_file {
 	}
 
 	return $path;
+}
+
+# }}}
+# fixture_vault - spin the suite's own vault and point the harness at it {{{
+#
+# A real vault rather than a double, because the rows run whole commands and a
+# genesis child cannot read a double that lives in the parent's memory.  The
+# suite already owns one, under t/bin/vault, so we spin that rather than a
+# second kind of fixture.
+#
+# helper::vault_start is the TAP-free half of helper::vault_ok, and the fixture
+# calls that half, because a fixture that emitted a test of its own would add
+# to the plan of whatever subtest happened to build the harness.
+sub fixture_vault {
+	my ($self) = @_;
+	return $self->{vault_target} if $self->{vault_target};
+
+	$self->{vault_target} = helper::vault_start('genesis-propagation-harness');
+	$self->{vault_url}    = $helper::VAULT_URL;
+	return $self->{vault_target};
+}
+
+# }}}
+# _write_record - write one flat record under a vault path {{{
+sub _write_record {
+	my ($self, $path, %fields) = @_;
+	$self->fixture_vault;
+	for my $key (sort keys %fields) {
+		next unless defined $fields{$key};
+		run({env => {SAFE_TARGET => $self->{vault_target}},
+		     onfailure => "Failed to write $path:$key"},
+			'safe', 'set', $path, "$key=$fields{$key}");
+	}
+	return $path;
+}
+
+# }}}
+# _now - the one timestamp form a record's value takes {{{
+#
+# EXODUS_TIME_FORMAT under D58, which is the value form.  A path never carries
+# one of these, and the two forms are kept apart on purpose.
+sub _now {
+	my ($self, $at) = @_;
+	return $at if defined $at;
+	my @t = localtime(time);
+	return POSIX::strftime('%Y-%m-%d %H:%M:%S %z', @t);
+}
+
+# }}}
+# fixture_applied - the pipeline's own facts, at <exodus mount>_pipelines/<type> {{{
+#
+# The leading underscore makes the address unreachable from any environment,
+# because Genesis::Env::_env_name_errors requires a name to start with a
+# lowercase letter.  That is D103's reason for choosing it.
+sub fixture_applied {
+	my ($self, %opts) = @_;
+	return $self->_write_record($self->applied_path(%opts),
+		control_commit => $opts{control},
+		provider       => $opts{provider} // $self->{provider},
+		at             => $self->_now($opts{at}),
+	);
+}
+
+# }}}
+# fixture_pipeline_record - an environment's compiled pipeline facts {{{
+#
+# Beside that environment's own exodus record, under a pipeline subpath.  Its
+# absence is how the walk knows the applied record does not know the
+# environment, so a row that wants that case simply does not call this.
+sub fixture_pipeline_record {
+	my ($self, $env, %opts) = @_;
+	return $self->_write_record($self->env_path($env, %opts) . '/pipeline',
+		dependencies => join(',', @{$opts{dependencies} || []}),
+		discovery    => $opts{discovery} // 'complete',
+	);
+}
+
+# }}}
+# certify - write or advance an environment's exodus deployment record {{{
+#
+# git.commit is the deployment-branch commit the deploy stood on and
+# git.control_commit is the control commit that tip's newest marker names,
+# which D87 makes the pair the hatch case has to tell apart.
+#
+# dependencies_read is the fact half of the staleness comparison under D77, and
+# it is written as one comma-joined value rather than as a list, because that
+# is the one form a flat exodus record can carry.
+sub certify {
+	my ($self, $env, %opts) = @_;
+	return $self->_write_record($self->env_path($env, %opts),
+		'git.commit'         => $opts{commit},
+		'git.control_commit' => $opts{control_commit},
+		'dated'              => $self->_now($opts{at}),
+		'state'              => $opts{state} // 'success',
+		'dependencies_read'  => exists $opts{dependencies_read}
+			? join(',', @{$opts{dependencies_read} || []}) : undef,
+	);
+}
+
+# }}}
+# fixture_hold - the hold record, with four fields and nothing else {{{
+sub fixture_hold {
+	my ($self, $env, %opts) = @_;
+	die "fixture_hold needs a reason\n" unless defined $opts{reason};
+	return $self->_write_record($self->env_path($env, %opts) . '/hold',
+		reason   => $opts{reason},
+		user     => $opts{user}     // 'operator',
+		hostname => $opts{hostname} // 'harness.example.com',
+		at       => $self->_now($opts{at}),
+	);
+}
+
+# }}}
+# fixture_proposed - the record naming what an open pull request proposes {{{
+#
+# The pull request's number arrives under pr, which is what the GitHub double
+# and every row that opens one call it, and lands in the record's own field
+# name, which is number.  A caller that has the record's spelling to hand may
+# use number instead.
+sub fixture_proposed {
+	my ($self, $env, %opts) = @_;
+	return $self->_write_record($self->env_path($env, %opts) . '/proposed',
+		control_commit => $opts{control},
+		number         => $opts{pr} // $opts{number},
+		url            => $opts{url},
+		at             => $self->_now($opts{at}),
+	);
+}
+
+# }}}
+# break_vault - make a read refuse, so a row can assert the refusal {{{
+#
+# The records are moved aside rather than deleted, so restore_vault can put
+# them back and a row can assert on both sides of the break in one fixture.
+#
+# applied is additive to envs rather than an alternative to it, and an envs of
+# its own decides the environment list even where that list is empty, so
+# break_vault($h, envs => [], applied => 1) takes the applied record alone
+# while break_vault($h, applied => 1) takes it along with every environment.
+sub break_vault {
+	my ($self, %opts) = @_;
+	my $envs = exists $opts{envs} ? $opts{envs} : $self->{envs};
+	my @paths = map {$self->env_path($_)} @{$envs || []};
+	push @paths, $self->applied_path if $opts{applied};
+
+	for my $path (@paths) {
+		my $aside = $path . '-aside';
+		run({env => {SAFE_TARGET => $self->{vault_target}}, passfail => 1},
+			'safe', 'move', $path, $aside);
+		push @{$self->{broken}}, [$path, $aside];
+	}
+	return $self;
+}
+
+# }}}
+# restore_vault - put back what break_vault moved aside {{{
+sub restore_vault {
+	my ($self) = @_;
+	for my $pair (@{delete($self->{broken}) || []}) {
+		run({env => {SAFE_TARGET => $self->{vault_target}}, passfail => 1},
+			'safe', 'move', $pair->[1], $pair->[0]);
+	}
+	return $self;
 }
 
 # }}}

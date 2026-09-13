@@ -30,8 +30,9 @@ C<Genesis::Top-E<gt>create>, and publishes the control branch.  Returns the
 harness object.  Takes C<envs>, C<type>, C<control>, C<pr_prefix>,
 C<provider>, C<mode>, C<root>, C<pipeline>, C<vault>, C<github>, and C<kit>.
 
-C<vault> defaults on, but the vault fixture it reaches for lands in a later
-change, so until then every caller passes C<vault =E<gt> 0>.
+C<vault> defaults on, and the harness spins the suite's own vault through
+C<fixture_vault> when it does.  A row that wants no vault at all passes
+C<vault =E<gt> 0>.
 
 The named environments get their files through C<write_env_file>, and they are
 committed along with the deployment root, so the control branch's first commit
@@ -162,6 +163,75 @@ takes C<root>, C<genesis> and C<pipeline> as hashrefs merged into the file,
 and C<commit>, which defaults on.  C<type> is taken for symmetry with the
 helpers that compose a slug and is not written into the file, because nothing
 in the file body names a deployment type.
+
+=head2 fixture_vault($h)
+
+Spins the suite's own local vault through C<helper::vault_start> and points the
+harness's environments at it, returning the safe target.  A real vault rather
+than a double, because the rows run whole commands and a C<genesis> child
+cannot read a double living in the parent's memory.  C<make_harness> calls it
+when C<vault> is on, and a row calls it directly where it built its harness
+without one.  C<helper::vault_start> is the TAP-free half of
+C<helper::vault_ok>, so building the fixture adds nothing to the plan of the
+subtest that builds it.
+
+=head2 fixture_applied($h, %opts)
+
+Writes the applied record at C<< $h->applied_path >>, carrying the control
+commit the apply applied from, the provider, and the time, and returns that
+path.  Takes C<control>, C<provider>, which defaults to the harness's own,
+C<type>, and C<at>.
+
+=head2 fixture_pipeline_record($h, $env, %opts)
+
+Writes that environment's compiled pipeline facts beside its own exodus
+record, under a C<pipeline> subpath, and returns that path.  Its absence is how
+the walk knows the applied record does not know the environment, so a row that
+wants that case simply does not call this.  Takes C<dependencies> as an
+arrayref written as one comma-joined value, C<discovery>, which is C<complete>
+or C<incomplete> and defaults to C<complete>, and C<type>.
+
+=head2 certify($h, $env, %opts)
+
+Writes the environment's exodus deployment record, so a row can give it a
+certified commit or advance one, and returns its path.  C<commit> is the
+deployment-branch commit the deploy stood on and C<control_commit> is the
+control commit that tip's newest marker names, which are the pair the hatch
+case has to tell apart.  Also takes C<state>, which defaults to C<success>,
+C<type>, C<at>, and C<dependencies_read> as an arrayref of deployment slugs,
+written as one comma-joined value and left out of the record altogether where
+the row does not give it.
+
+=head2 fixture_hold($h, $env, %opts)
+
+Writes the hold record with C<reason>, C<user>, C<hostname>, and C<at> and
+nothing else, and returns its path.  The reason is required.  C<user> defaults
+to C<operator> and C<hostname> to C<harness.example.com>.
+
+=head2 fixture_proposed($h, $env, %opts)
+
+Writes the record naming the pull request an environment has open, as the four
+fields C<control_commit>, C<number>, C<url>, and C<at>, and returns its path.
+The pull request's number arrives under C<pr>, which is what the GitHub double
+and the rows that open one call it, and C<number> is taken as an alias for a
+caller that has the record's own spelling to hand.  Also takes C<control>,
+C<url>, C<type>, and C<at>.
+
+=head2 break_vault($h, %opts)
+
+Moves records aside so a read of them refuses, so a row can assert that an
+unreadable input makes the run refuse.  C<envs> is an arrayref naming the
+environments to break and defaults to every environment the harness declares,
+and C<applied> is a boolean that adds the applied record to whatever C<envs>
+named.  An C<envs> given as an empty arrayref means no environments rather
+than falling back to the default, so C<break_vault($h, envs =E<gt> [], applied
+=E<gt> 1)> breaks the applied record alone while C<break_vault($h, applied
+=E<gt> 1)> breaks it along with every environment.
+
+=head2 restore_vault($h)
+
+Puts back everything C<break_vault> moved aside, so the same row can assert the
+run succeeding once its input is readable again.
 
 =head1 METHODS
 
