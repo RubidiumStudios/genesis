@@ -264,6 +264,16 @@ that wants to read a deliberate failure as a result rather than a failure of
 its own file sets C<$Harness::Propagation::BUILDER> to a private
 C<Test::Builder> for the length of the call.
 
+=head2 assert_snapshot_invariant($h, $env, %opts)
+
+Compares the deployment branch against the control commit its newest marker
+names.  Two comparisons and not one: the branch matches the source over the
+propagation set's paths, and the branch holds nothing outside the set.  The
+second is the half that fires in practice, because a copy-only writer never
+removes a leftover C<init> or a path that dropped out of the set.  Every
+difference is named, and a branch with no marker fails rather than passing
+vacuously.
+
 =head2 fixture_command($h, $kind, %opts)
 
 Returns a coderef for one of four shapes of working state, C<restores>,
