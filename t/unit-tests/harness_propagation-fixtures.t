@@ -78,11 +78,18 @@ subtest 'a delivery mirrors the set and carries the marker' => sub {
 };
 
 subtest 'a second deployment root shares an environment name' => sub {
-	plan tests => 4;
+	plan tests => 7;
 
 	my $h = make_harness(envs => ['lmelt-vsphere-canwest-1-mgmt'], vault => 0);
-	add_deployment_root($h, type => 'vault',
+	my $root = add_deployment_root($h, type => 'vault',
 		envs => ['lmelt-vsphere-canwest-1-mgmt']);
+
+	is($root, 'vault', 'the second root answers its repository-relative path');
+	ok(-f $h->a."/vault/.genesis/config",
+		'the second root carries a configuration the real code path wrote');
+	ok(scalar(grep {$_ eq 'vault/lmelt-vsphere-canwest-1-mgmt.yml'}
+		@{tree_of($h->a, $h->control)}),
+		"control's tree carries the second root's environment file");
 
 	init_branch($h, 'lmelt-vsphere-canwest-1-mgmt');
 	init_branch($h, 'lmelt-vsphere-canwest-1-mgmt', type => 'vault');
@@ -98,6 +105,36 @@ subtest 'a second deployment root shares an environment name' => sub {
 			'git', 'show-ref', '--verify', '--quiet', "refs/heads/$branch");
 		ok($ok, "R carries $branch");
 	}
+};
+
+subtest "the set is the harness's own read and a delivery mirrors it" => sub {
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+
+	my $path = write_env_file($h, 'qa-lab', commit => 1);
+	is($path, 'qa-lab.yml', 'the writer answers the git-root-relative path');
+	ok(scalar(grep {$_ eq $path} @{tree_of($h->a, $h->control)}),
+		"control's tree carries the file the writer committed");
+
+	my $control = commit_on_control($h,
+		files   => {'notes.md' => "not part of the set\n"},
+		message => 'add a note',
+		push    => 1,
+	);
+
+	my @set = propagation_set($h, 'qa', at => $control);
+	is(scalar @set, scalar(grep {!ref} @set),
+		'the set comes back as a plain list of paths and not an arrayref');
+	ok(scalar(grep {$_ eq $path} @set),
+		'the set holds the environment file the writer added');
+	is_deeply([grep {$_ eq 'notes.md'} @set], [],
+		'the set leaves a file outside it where it stands');
+
+	my $delivered = deliver($h, 'qa', control => $control);
+	is_deeply(tree_of($h->r, $delivered), [sort @set],
+		'the delivered tree is the set and nothing besides');
 };
 
 done_testing;

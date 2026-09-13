@@ -103,7 +103,9 @@ orphan root commit adding a single C<init> file under the subject
 C<Initialize E<lt>slugE<gt> branch [ci skip]>.  It is written with plumbing
 and checks nothing out in either copy, so the rows that assert on working
 state are not disturbed by their own setup.  Takes C<root>, C<type>, and
-C<push>, which defaults on.
+C<push>, which defaults on.  C<root> is taken for symmetry with the helpers
+that write into a deployment root and has no effect today, because a slug is
+composed from the environment and the type alone and no root appears in it.
 
 =head2 deliver($h, $env, %opts)
 
