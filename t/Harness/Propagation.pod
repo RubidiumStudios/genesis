@@ -30,6 +30,9 @@ C<Genesis::Top-E<gt>create>, and publishes the control branch.  Returns the
 harness object.  Takes C<envs>, C<type>, C<control>, C<pr_prefix>,
 C<provider>, C<mode>, C<root>, C<pipeline>, C<vault>, C<github>, and C<kit>.
 
+C<vault> defaults on, but the vault fixture it reaches for lands in a later
+change, so until then every caller passes C<vault =E<gt> 0>.
+
 The first deployment root sits at copy A's own git root, so the repository and
 the deployment root are one directory.  C<Genesis::Top-E<gt>create> appends the
 deployment name to the path it is handed and refuses a directory that already
