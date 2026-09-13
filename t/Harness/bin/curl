@@ -59,16 +59,38 @@ my $status = 200;
 if (!defined $url) {
 	$status = 404;
 	$answer = {message => 'No url was given to the fixture curl'};
-} elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls\b}) {
-	my $want = $url =~ /state=(\w+)/ ? $1 : 'open';
-	$answer = [grep {$want eq 'all' || $_->{state} eq $want} @{$state->{prs} || []}];
-	if ($method ne 'GET' && $method ne 'HEAD') {
-		$status = 201;
-		$answer = {number => scalar(@{$state->{prs} || []}) + 1};
-	}
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls/(\d+)/reviews$}) {
 	my ($pr) = grep {$_->{number} == $1} @{$state->{prs} || []};
 	$answer = $pr ? ($pr->{reviews} || []) : [];
+} elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls(?:\?|$)}) {
+	# The collection is anchored, so a request for one pull request's reviews
+	# reaches the branch above rather than reading as a listing.
+	if ($method eq 'GET' || $method eq 'HEAD') {
+		my $want = $url =~ /state=(\w+)/ ? $1 : 'open';
+		$answer = [grep {$want eq 'all' || $_->{state} eq $want} @{$state->{prs} || []}];
+	} else {
+		# A create lands in the state, so the listing after it sees what was
+		# made rather than an empty set.
+		my $sent = {};
+		eval {$sent = $json->decode($body // '{}'); 1} or $sent = {};
+		my $number = scalar(@{$state->{prs} || []}) + 1;
+		push @{$state->{prs}}, {
+			number  => $number,
+			state   => 'open',
+			merged  => JSON::PP::false,
+			head    => {ref => $sent->{head} // ''},
+			base    => {ref => $sent->{base} // ''},
+			title   => $sent->{title} // '',
+			body    => $sent->{body}  // '',
+			created_at => '2026-09-13T00:00:00Z',
+			reviews => [],
+		};
+		open my $fh, '>', $state_file or exit 2;
+		print $fh $json->encode($state);
+		close $fh;
+		$status = 201;
+		$answer = {number => $number};
+	}
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/branches/(.+)/protection$}) {
 	unless ($state->{admin}) {
 		$status = 403;

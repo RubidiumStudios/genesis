@@ -12,6 +12,8 @@ use Harness::Propagation;
 
 use Test::More;
 
+use JSON::PP;
+
 use Genesis;
 use Service::Github;
 
@@ -99,6 +101,55 @@ subtest 'a closed request and the protection endpoints' => sub {
 	my ($code) = Genesis::curl('GET', sprintf('%s/repos/%s/branches/%s/protection',
 		$client->base_url, $gh->{repository}, $branch));
 	is($code, 403, 'a token without admin is refused the protection endpoint');
+};
+
+subtest 'a review reads back as a review' => sub {
+	plan tests => 3;
+
+	my $h  = make_harness(envs => ['prod'], vault => 0, github => 1);
+	my $gh = $h->gh;
+	my $number = gh_pull_request($gh, env => 'prod',
+		review => 'approved', reviewer => 'someone');
+
+	local $ENV{PATH} = join ':', $gh->{bin}, $ENV{PATH};
+	local $ENV{GITHUB_AUTH_TOKEN} = $gh->{token};
+	my $client = Service::Github->new(domain => $gh->{domain}, tls => 'no');
+
+	my ($code, undef, $data) = Genesis::curl('GET',
+		$client->pulls_url($gh->{repository}, $number) . '/reviews');
+	is($code, 200, 'the reviews endpoint answers');
+
+	my $reviews = JSON::PP->new->decode($data);
+	is(scalar @$reviews, 1,
+		'one review, and not the listing the collection would have given');
+	is($reviews->[0]{state}, 'APPROVED', 'in the state the row declared');
+};
+
+subtest 'a created pull request is there when the collection is listed' => sub {
+	plan tests => 4;
+
+	my $h  = make_harness(envs => ['prod'], vault => 0, github => 1);
+	my $gh = $h->gh;
+
+	local $ENV{PATH} = join ':', $gh->{bin}, $ENV{PATH};
+	local $ENV{GITHUB_AUTH_TOKEN} = $gh->{token};
+	my $client = Service::Github->new(domain => $gh->{domain}, tls => 'no');
+
+	my $pr = $client->create_pr($gh->{repository},
+		head  => $h->pr_branch('prod'),
+		base  => $h->slug('prod'),
+		title => '[pipeline] control@abcdef012345 -> prod',
+		body  => 'the aggregate this branch is owed',
+	);
+	ok($pr->{number}, 'the create answered a number');
+
+	my $open = $client->list_prs($gh->{repository}, state => 'open');
+	is(scalar @$open, 1, 'and the listing after it sees what was made');
+	is($open->[0]{number}, $pr->{number}, 'under the number the create gave');
+
+	my ($post) = grep {$_->{method} eq 'POST'} gh_calls($gh);
+	like($post->{body}, qr/control\@abcdef012345/,
+		'and the POST was recorded with its body');
 };
 
 subtest 'a token withheld from one run and back for the next' => sub {
