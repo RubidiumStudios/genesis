@@ -52,7 +52,8 @@ sub _resolve_provider_class {
 	) unless $info;
 
 	bail(
-		"The '%s' provider has no pipeline to compile.", $type
+		"Genesis knows the '%s' provider but has no compiler for it yet, so ".
+		"there is no pipeline to compile until that provider lands.", $type
 	) unless $info->{class};
 
 	return $info;
