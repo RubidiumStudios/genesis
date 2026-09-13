@@ -52,8 +52,8 @@ The same commit in copy B, never published.
 =head2 publish_from_b($h, %opts)
 
 Commits in copy B and publishes it with a real C<git push>.  The push is per
-branch, carries no forced refspec, and sets the upstream where the branch has
-none, so copy B's own remote-tracking ref moves with the publish.  A
+branch, carries no forced refspec, and sets the upstream, so copy B's own
+remote-tracking ref moves with the publish.  A
 divergence read taken straight after therefore reports in-sync with no second
 refresh, while copy A's refs stay where they were until copy A fetches or
 pushes.
@@ -61,6 +61,8 @@ pushes.
 =head2 push_from($h, $copy, @branches)
 
 Pushes each named branch on its own and returns a hashref of branch to 1 or 0.
+The push sets the upstream, as the push behind the commit helpers does, so the
+harness's two push paths leave a branch in the same state.
 
 =head2 refresh($h, $copy, @branches)
 
@@ -76,6 +78,19 @@ trapping a death.
 
 Returns the commit's paths as a sorted arrayref, or an empty arrayref where the
 ref is absent.
+
+=head2 upstream_of($dir, $branch)
+
+Returns the upstream the named branch tracks, as C<origin/E<lt>branchE<gt>>,
+or undef where the branch has no upstream, so a row proving that absence reads
+it rather than trapping git's complaint.
+
+=head2 counts($dir, $branch)
+
+Returns the two numbers C<git rev-list --left-right --count> prints for the
+branch against its remote-tracking ref, ahead first and behind second.  The
+read names the remote-tracking ref outright rather than the upstream, so it
+answers even where no upstream is configured.
 
 =head1 METHODS
 

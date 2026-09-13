@@ -19,7 +19,7 @@ require helper;
 our @EXPORT = qw/
 	make_harness
 	commit_on_control commit_from_b publish_from_b push_from refresh
-	ref_in tree_of
+	ref_in tree_of upstream_of counts
 /;
 
 # ref_in - one ref's sha in a repository at a path, or undef {{{
@@ -48,6 +48,36 @@ sub tree_of {
 	return [] if $rc || !defined $out;
 	chomp $out;
 	return [sort grep {length} split /\n/, $out];
+}
+
+# }}}
+# upstream_of - the upstream a branch tracks in a repository, or undef {{{
+#
+# The read is stderr-suppressed and its status is checked, because a branch
+# with no upstream is a state several rows prove rather than an accident, and
+# git complains to stderr when it is asked for one that is not there.
+sub upstream_of {
+	my ($dir, $branch) = @_;
+	my ($out, $rc) = run({dir => $dir, stderr => 0},
+		'git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name',
+		"$branch\@{upstream}");
+	return undef if $rc || !defined $out;
+	chomp $out;
+	return $out;
+}
+
+# }}}
+# counts - how far a branch is ahead of and behind its remote-tracking ref {{{
+#
+# The two numbers come back in the order git prints them, ahead first, and the
+# read names the remote-tracking ref outright rather than the upstream, so a
+# row can weigh the refs even where no upstream is configured.
+sub counts {
+	my ($dir, $branch) = @_;
+	my ($out) = run({dir => $dir}, 'git', 'rev-list', '--left-right', '--count',
+		"refs/heads/$branch...refs/remotes/origin/$branch");
+	chomp $out;
+	return split /\s+/, $out;
 }
 
 # }}}
@@ -320,12 +350,16 @@ sub publish_from_b {
 
 # }}}
 # push_from - push named branches from one copy, per branch {{{
+#
+# The push sets the upstream, as the push inside _commit_in does, so that the
+# harness's two push paths leave a branch in the same state whichever one of
+# them put it on R.
 sub push_from {
 	my ($self, $copy, @branches) = @_;
 	my %results;
 	for my $branch (@branches) {
 		$results{$branch} = run({dir => $self->{$copy}, passfail => 1},
-			'git', 'push', '-q', 'origin', $branch) ? 1 : 0;
+			'git', 'push', '-q', '-u', 'origin', $branch) ? 1 : 0;
 	}
 	return \%results;
 }

@@ -17,23 +17,6 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-sub upstream_of {
-	my ($dir, $branch) = @_;
-	my ($out, $rc) = run({dir => $dir, passfail => 0, stderr => 0},
-		'git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', "$branch\@{upstream}");
-	return undef if $rc || !defined $out;
-	chomp $out;
-	return $out;
-}
-
-sub counts {
-	my ($dir, $branch) = @_;
-	my ($out) = run({dir => $dir}, 'git', 'rev-list', '--left-right', '--count',
-		"refs/heads/$branch...refs/remotes/origin/$branch");
-	chomp $out;
-	return split /\s+/, $out;
-}
-
 subtest "copy B's publish moves its own remote-tracking ref" => sub {
 	plan tests => 4;
 
@@ -88,7 +71,8 @@ subtest "copy A's own publish moves copy A's tracking ref" => sub {
 
 	publish_from_b($h, files => {'ops/shared.yml' => "---\n"}, message => 'theirs');
 	refresh($h, 'a', $control);
-	run({dir => $h->a}, 'git', 'merge', '--ff-only', "origin/$control");
+	run({dir => $h->a, onfailure => 'Failed to fast-forward copy A'},
+		'git', 'merge', '--ff-only', "origin/$control");
 
 	my $mine = commit_on_control($h,
 		files   => {'ops/mine.yml' => "---\nfrom: the operator\n"},
