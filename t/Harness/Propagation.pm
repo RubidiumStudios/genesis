@@ -23,6 +23,10 @@ our @EXPORT = qw/
 /;
 
 push @EXPORT, qw/
+	tip_of remote_sha refs_in branch_of files_at slurp
+/;
+
+push @EXPORT, qw/
 	init_branch deliver propagation_set harness_marker
 	add_deployment_root write_env_file
 /;
@@ -111,6 +115,82 @@ sub counts {
 		"refs/heads/$branch...refs/remotes/origin/$branch");
 	chomp $out;
 	return split /\s+/, $out;
+}
+
+# }}}
+# tip_of - a branch's tip in one of the two copies, or undef {{{
+#
+# The remote option reads the copy's remote-tracking ref instead, which is
+# T, and is how a row tells L from T without reaching for git itself.
+sub tip_of {
+	my ($self, $branch, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	my $ref  = $opts{remote} ? "refs/remotes/origin/$branch"
+	                         : "refs/heads/$branch";
+	return ref_in($self->{$copy}, $ref);
+}
+
+# }}}
+# remote_sha - a branch's sha on R, or undef {{{
+sub remote_sha {
+	my ($self, $branch) = @_;
+	return ref_in($self->{r}, "refs/heads/$branch");
+}
+
+# }}}
+# refs_in - every ref in a repository, as a hashref of name to sha {{{
+#
+# The prefix option is handed to git as a ref pattern, so a caller wanting
+# one namespace reads that namespace back rather than sorting the rest out
+# for itself.
+sub refs_in {
+	my ($dir, %opts) = @_;
+	my @args = ('git', 'for-each-ref', '--format=%(refname) %(objectname)');
+	push @args, $opts{prefix} if $opts{prefix};
+	my ($out) = run({dir => $dir}, @args);
+	my %refs;
+	for my $line (split /\n/, ($out // '')) {
+		my ($name, $sha) = split /\s+/, $line, 2;
+		$refs{$name} = $sha if $name;
+	}
+	return \%refs;
+}
+
+# }}}
+# branch_of - the branch a repository is standing on {{{
+sub branch_of {
+	my ($dir) = @_;
+	my ($branch) = run({dir => $dir}, 'git', 'rev-parse', '--abbrev-ref', 'HEAD');
+	chomp $branch;
+	return $branch;
+}
+
+# }}}
+# files_at - a commit's paths with their contents {{{
+#
+# The rows that assert a mirror want the whole tree in one hashref, so they
+# can compare a branch against its source without a call per file.  The ref
+# that is not there reads back an empty set, because tree_of hands one up.
+sub files_at {
+	my ($self, $ref, %opts) = @_;
+	my $dir = $opts{dir} // ($opts{copy} ? $self->{$opts{copy}} : $self->{r});
+	my %files;
+	for my $path (@{tree_of($dir, $ref)}) {
+		my ($content) = run({dir => $dir}, 'git', 'show', "$ref:$path");
+		$files{$path} = $content;
+	}
+	return \%files;
+}
+
+# }}}
+# slurp - a file's whole contents, or undef {{{
+#
+# Genesis exports a slurp of its own that bails where the file is absent, so
+# a test file that wants this one imports Genesis before the harness.
+sub slurp {
+	my ($path) = @_;
+	return undef unless -f $path;
+	return helper::get_file($path);
 }
 
 # }}}

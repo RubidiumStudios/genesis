@@ -97,6 +97,41 @@ branch against its remote-tracking ref, ahead first and behind second.  The
 read names the remote-tracking ref outright rather than the upstream, so it
 answers even where no upstream is configured.
 
+=head2 tip_of($h, $branch, %opts)
+
+Returns the branch's tip in one of the two copies, or undef where that copy has
+no such ref.  Takes C<copy>, which defaults to C<a>, and C<remote>, which reads
+the copy's remote-tracking ref instead, so a row can tell L from T without
+reaching for git itself.
+
+=head2 remote_sha($h, $branch)
+
+Returns the branch's sha on R, or undef where R has never had the branch.
+
+=head2 refs_in($dir, %opts)
+
+Returns every ref in the repository at C<$dir> as a hashref of the full ref name
+to its sha, or an empty hashref where the repository has none.  Takes C<prefix>,
+a ref pattern that narrows the read to one namespace, as in C<refs/heads>.
+
+=head2 branch_of($dir)
+
+Returns the name of the branch the repository at C<$dir> is standing on.
+
+=head2 files_at($h, $ref, %opts)
+
+Returns the commit's paths with their contents, as a hashref, or an empty
+hashref where the ref is absent.  It reads R unless it is told otherwise, and
+takes C<copy> to read one of the two copies and C<dir> to read a repository by
+path.  The rows that assert a mirror want the whole tree in one hashref, so they
+can compare a branch against its source without a call per file.
+
+=head2 slurp($path)
+
+Returns the file's whole contents, or undef where the file is not there.
+C<Genesis> exports a C<slurp> of its own that bails on a missing file, so a test
+file that wants this one imports C<Genesis> before the harness.
+
 =head2 init_branch($h, $env, %opts)
 
 Cuts the environment's branch on R as C<pipeline-apply> would, which is an
