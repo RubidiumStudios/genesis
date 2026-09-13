@@ -748,7 +748,8 @@ Displays the global Genesis help screen listing all registered commands
 grouped by function area, then exits.
 
 When C<$msg> is provided, it is printed as a fatal error message before
-exiting with the given return code (default C<1>).  When C<$msg> is
+exiting.  A non-zero C<$rc> is normalised to C<2>, the code Genesis uses for
+usage and option errors, whatever number the caller passed.  When C<$msg> is
 omitted, the help screen is shown and the process exits with code C<0>.
 
 Commands with a function group of negative order (C<DEPRECATED>, C<DEV>,
@@ -764,7 +765,8 @@ Optional error message to display before exiting.
 
 =item C<$rc>
 
-Optional exit code.  Defaults to C<1> if C<$msg> is set, C<0> otherwise.
+Optional exit code.  Any non-zero value exits C<2>.  Defaults to C<2> if
+C<$msg> is set, C<0> otherwise.
 
 =back
 
@@ -776,12 +778,8 @@ B<Examples:>
   command_help();
   # prints: full command listing grouped by function area, then exits 0
 
-  # Show an error message and exit 1
+  # Show an error message and exit 2
   command_help("Unrecognized command 'frobnicate'");
-  # prints: error message, then exits 1
-
-  # Show an error with a specific exit code
-  command_help("Bad argument", 2);
   # prints: error message, then exits 2
 
 =head2 command_usage
@@ -796,7 +794,9 @@ sections for arguments, environment variables, options, and optionally
 global options.
 
 When C<$rc> is non-zero and the process is not under test, prints a brief
-usage hint and a fatal error message before exiting.
+usage hint and a fatal error message before exiting.  A non-zero C<$rc>
+exits C<2>, which is the code Genesis uses for every usage and option
+error, so callers need not agree on a number.
 
 When C<$rc> is zero, the full usage screen including description and option
 listings is shown.
@@ -807,7 +807,7 @@ B<Parameters:>
 
 =item C<$rc>
 
-Exit code.  Non-zero triggers error output mode.
+Exit code.  Non-zero triggers error output mode and exits C<2>.
 
 =item C<$msg>
 
@@ -1213,8 +1213,10 @@ Thrown via C<bug()> if called before C<prepare_command> has been called.
 
 =item C<"#R{GENESIS PRE-REQUISITES CHECKS FAILED!!}\nEncountered the following errors:\n...">
 
-Thrown via C<bail()> if any prerequisite check fails.  The message lists
-all failures encountered.
+Thrown via C<bail()> with exit code C<86> if any prerequisite check fails.
+The message lists all failures encountered.  C<86> is the code the kit and
+provider prerequisite checks already use, and it tells a caller that the
+environment is what has to be fixed.
 
 =back
 
