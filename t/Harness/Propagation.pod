@@ -243,6 +243,61 @@ Puts back everything C<break_vault> moved aside, so the same row can assert the
 run succeeding once its input is readable again.  It refuses a harness with no
 vault fixture for the reason C<break_vault> does.
 
+=head2 snapshot_w($h, %opts)
+
+Reads the branch, the HEAD sha, the current directory, the porcelain status,
+and the index, and returns them as one hashref.  The one option is C<copy>,
+which defaults to C<a>.  The directory is read before the rest, because a
+command that switched away can leave the process standing in a directory the
+switch removed, and the git reads below run through C<pushd>, which cannot
+return to a directory that is gone.  Where that has happened the snapshot
+steps back into the copy and still answers the directory as undefined.
+
+=head2 assert_w_restored($w, $name)
+
+Compares all five against the snapshot and fails naming every one that
+differs.  It runs on success and on failure alike, because I1 promises
+restoration on every exit path and an assertion that runs only on success
+proves nothing about the paths that matter.  It is the one helper here that
+emits TAP, since it is an assertion rather than a builder of state, and a test
+that wants to read a deliberate failure as a result rather than a failure of
+its own file sets C<$Harness::Propagation::BUILDER> to a private
+C<Test::Builder> for the length of the call.
+
+=head2 fixture_command($h, $kind, %opts)
+
+Returns a coderef for one of four shapes of working state, C<restores>,
+C<leaves_branch>, C<leaves_staged>, and C<loses_cwd>, which exercise the
+assertion itself rather than a genesis command.  The one option is C<copy>.
+
+=head2 run_genesis($h, @argv) and run_genesis_in($h, $copy, @argv)
+
+Run a whole genesis command in a copy, taking the W snapshot before it and
+asserting the restoration after it, and return the output, the error, and the
+exit code, in that order.  The exit code is the one the command really exited
+with, because C<Genesis::run> has already shifted C<$?> and shifting it again
+would read every real code as a zero.
+
+A leading hashref takes C<copy>, default C<a>, C<dir> for a subdirectory to
+run from, C<answers> as an arrayref, C<pipeline_task>, which sets
+C<GENESIS_PIPELINE_TASK>, C<git_version>, which puts a fixture git reporting
+that version first on the path for this run alone, C<no_token>, which leaves
+C<GITHUB_AUTH_TOKEN> out of the child's environment while leaving every
+fixture binary on its path, C<restore>, default 1, which a row turns off where
+it asserts the restoration in its own words, and C<terminal>, default 1, which
+is accepted and does nothing today.
+
+The fixture binaries the harness writes reach the child through the path this
+run builds and through nothing else, so no helper puts a fixture on the
+parent's own C<PATH> and a run that asks for none sees none.
+
+C<run_genesis_in> is the same run in a named copy.
+
+=head2 stand_on($h, $branch, %opts)
+
+Puts a copy on a branch, and optionally in a subdirectory of it.  Options are
+C<copy>, default C<a>, and C<dir>.
+
 =head1 METHODS
 
 C<r>, C<a>, and C<b> return the three paths.  C<git> returns a

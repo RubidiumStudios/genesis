@@ -161,6 +161,7 @@ unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
 unit-tests/harness_propagation-pair.t               # harness pair, bare remote and two copies
 unit-tests/harness_propagation-refs.t               # remote-tracking refs across a publish
 unit-tests/harness_propagation-fixtures.t           # branch, delivery, and vault-record fixtures
+unit-tests/harness_propagation-w_restored.t         # working state restored across a whole command
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

@@ -32,6 +32,11 @@ push @EXPORT, qw/
 	fixture_hold fixture_proposed break_vault restore_vault
 /;
 
+push @EXPORT, qw/
+	snapshot_w assert_w_restored fixture_command
+	run_genesis run_genesis_in stand_on
+/;
+
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -892,6 +897,218 @@ sub restore_vault {
 			'safe', 'move', $pair->[1], $pair->[0]);
 	}
 	return $self;
+}
+
+# }}}
+
+# snapshot_w - read the five parts of working state {{{
+#
+# Branch, HEAD sha, current directory, porcelain status, and index.  The
+# status and the index are read separately, because a file staged and then
+# restored in the tree shows in one and not the other.
+#
+# The current directory is read before anything else, because a command that
+# switched away can leave us standing in a directory the switch removed, and
+# every reader below runs through pushd, which cannot return to a directory
+# that is no longer there.  Where that has happened we step back into the copy
+# and still answer the directory as undefined, which is what it is.
+sub snapshot_w {
+	my ($self, %opts) = @_;
+	my $dir = $self->{$opts{copy} // 'a'};
+
+	my $cwd = Cwd::getcwd();
+	chdir $dir or die "cannot return to $dir: $!\n" unless defined $cwd;
+
+	my ($branch) = run({dir => $dir}, 'git', 'rev-parse', '--abbrev-ref', 'HEAD');
+	my $head     = ref_in($dir, 'HEAD');
+	my ($status) = run({dir => $dir}, 'git', 'status', '--porcelain');
+	my ($index)  = run({dir => $dir}, 'git', 'diff-index', '--cached', '--name-status', 'HEAD');
+	chomp for grep {defined} ($branch, $status, $index);
+
+	return {
+		dir    => $dir,
+		cwd    => $cwd,
+		branch => $branch,
+		head   => $head,
+		status => $status // '',
+		index  => $index  // '',
+	};
+}
+
+# }}}
+# assert_w_restored - I1, read through {{{
+#
+# Compares all five parts against the snapshot and names every one that
+# differs.  It runs on success and on failure alike, because I1 promises
+# restoration on every exit path and an assertion that only runs when the
+# command succeeded proves nothing about the paths that matter.
+our $BUILDER;
+sub assert_w_restored {
+	my ($w, $name) = @_;
+	my $builder = $BUILDER // Test::More->builder;
+	$name //= 'working state is restored';
+
+	my $now = snapshot_w(bless {a => $w->{dir}}, __PACKAGE__);
+
+	my @differed;
+	push @differed, sprintf("branch: %s, was %s", $now->{branch}, $w->{branch})
+		unless $now->{branch} eq $w->{branch};
+	push @differed, sprintf("HEAD: %s, was %s", $now->{head} // '(none)', $w->{head} // '(none)')
+		unless ($now->{head} // '') eq ($w->{head} // '');
+	push @differed, sprintf("current directory: %s, was %s",
+			$now->{cwd} // '(none)', $w->{cwd} // '(none)')
+		unless ($now->{cwd} // '') eq ($w->{cwd} // '');
+	push @differed, sprintf("tree: %s", $now->{status})
+		unless $now->{status} eq $w->{status};
+	push @differed, sprintf("index: %s", $now->{index})
+		unless $now->{index} eq $w->{index};
+
+	my $ok = $builder->ok(!@differed, $name);
+	$builder->diag("    $_") for @differed;
+	return $ok;
+}
+
+# }}}
+# fixture_command - the four shapes of working state that T3 drives {{{
+#
+# Not genesis commands.  T3 exercises the assertion itself, so each shape is
+# the smallest piece of git that produces it.
+sub fixture_command {
+	my ($self, $kind, %opts) = @_;
+	my $dir = $self->{$opts{copy} // 'a'};
+
+	return sub {
+		run({dir => $dir}, 'git', 'checkout', '-q', $self->slug('qa'));
+		run({dir => $dir}, 'git', 'checkout', '-q', $self->{control});
+	} if $kind eq 'restores';
+
+	return sub {
+		run({dir => $dir}, 'git', 'checkout', '-q', $self->slug('qa'));
+	} if $kind eq 'leaves_branch';
+
+	return sub {
+		helper::put_file("$dir/left-behind.yml", "---\nstaged: true\n");
+		run({dir => $dir}, 'git', 'add', '--', 'left-behind.yml');
+	} if $kind eq 'leaves_staged';
+
+	# The last checkout names the repository with -C rather than running from
+	# it, because a run that pushd's out of only-here has nowhere to return to
+	# once the checkout has removed it.
+	return sub {
+		helper::mkdir_or_fail("$dir/only-here");
+		helper::put_file("$dir/only-here/thing.yml", "---\n");
+		run({dir => $dir}, 'git', 'add', '-A');
+		run({dir => $dir}, 'git', 'commit', '-q', '-m', 'a directory on one branch');
+		chdir "$dir/only-here" or die "cannot enter only-here: $!\n";
+		run({}, 'git', '-C', $dir, 'checkout', '-q', 'HEAD~1');
+	} if $kind eq 'loses_cwd';
+
+	die "fixture_command does not know the kind '$kind'\n";
+}
+
+# }}}
+# run_genesis - run a whole command in a copy and assert the restoration {{{
+#
+# Every row that runs a command goes through here, so the W snapshot and the
+# assertion cannot be forgotten.  A row that asserts the restoration itself
+# passes restore => 0 and calls the assertion in its own words.
+#
+# The exit code is handed back exactly as run gives it, because run has
+# already shifted $?, and shifting it a second time turns every real code into
+# a zero.
+sub run_genesis {
+	my ($self, @argv) = @_;
+	my %opts = %{ref($argv[0]) eq 'HASH' ? shift @argv : {}};
+	my $copy = $opts{copy} // 'a';
+	my $dir  = $self->{$copy};
+	$dir .= "/$opts{dir}" if $opts{dir};
+
+	my $w = $self->snapshot_w(copy => $copy);
+
+	my %env = (
+		GENESIS_TOPDIR => $helper::TOPDIR,
+		GENESIS_LIB    => "$helper::TOPDIR/lib",
+		SAFE_TARGET    => $self->{vault_target},
+	);
+	$env{GENESIS_PIPELINE_TASK} = $opts{pipeline_task} if $opts{pipeline_task};
+	$env{PATH} = join(':', $self->_path_prefix(%opts), $ENV{PATH});
+	$env{GITHUB_AUTH_TOKEN} = $self->{gh}{token}
+		if $self->{gh} && !$opts{no_token} && !$self->{gh}{no_token};
+
+	helper::set_stdin(join("\n", @{$opts{answers}}, '')) if $opts{answers};
+	my ($out, $rc, $err) = run({
+			dir      => $dir,
+			env      => \%env,
+			stderr   => 0,
+			passfail => 0,
+		}, "$helper::TOPDIR/bin/genesis", @argv);
+	helper::reset_stdin if $opts{answers};
+
+	assert_w_restored($w, "working state is restored after `genesis @argv`")
+		if ($opts{restore} // 1);
+
+	return ($out, $err, $rc);
+}
+
+# }}}
+# run_genesis_in - the same run, in a named copy {{{
+sub run_genesis_in {
+	my ($self, $copy, @argv) = @_;
+	my %opts = %{ref($argv[0]) eq 'HASH' ? shift @argv : {}};
+	return $self->run_genesis({%opts, copy => $copy}, @argv);
+}
+
+# }}}
+# stand_on - put a copy on a branch, and optionally in a subdirectory {{{
+sub stand_on {
+	my ($self, $branch, %opts) = @_;
+	my $dir = $self->{$opts{copy} // 'a'};
+	run({dir => $dir, onfailure => "Failed to stand on $branch"},
+		'git', 'checkout', '-q', $branch);
+	chdir "$dir/$opts{dir}" or die "cannot enter $opts{dir}: $!\n" if $opts{dir};
+	return $self;
+}
+
+# }}}
+# _path_prefix - the fixture binaries one run sees, and no other {{{
+#
+# The fixture git, the fixture curl, and the wrappers the observers write sit
+# first on the path for the run under test alone, so the harness's own git
+# calls still reach the real git and no fixture is left on the parent's path
+# once the run is over.  The two directories are named whether or not they
+# have been written yet, because a path entry that is not there is one the
+# child steps over.
+sub _path_prefix {
+	my ($self, %opts) = @_;
+	my @prefix;
+	push @prefix, $self->_fake_git_dir($opts{git_version}) if $opts{git_version};
+	push @prefix, "$self->{base}/gh-bin", "$self->{base}/bin";
+	return @prefix;
+}
+
+# }}}
+# _fake_git_dir - a git that reports a chosen version and passes the rest on {{{
+#
+# The prerequisites check asks git for its version through the shell, so a
+# fixture on the path is what a row drives the floor with.  Everything else is
+# handed to the real git, so the run still does real work on real refs.
+sub _fake_git_dir {
+	my ($self, $version) = @_;
+	my $dir = "$self->{base}/git-$version";
+	return $dir if -d $dir;
+
+	helper::mkdir_or_fail($dir);
+	my ($real) = run({}, 'bash', '-c', 'command -v git');
+	chomp $real;
+	helper::put_file("$dir/git", 0755, <<"EOS");
+#!/usr/bin/env bash
+if [ "\$1" = "--version" ]; then
+  echo "git version $version"
+  exit 0
+fi
+exec $real "\$@"
+EOS
+	return $dir;
 }
 
 # }}}
