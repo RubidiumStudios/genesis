@@ -1343,18 +1343,24 @@ sub propagation_files {
 	# Prefix kit-relative paths to git-root-relative
 	my %out = map { $_ => 1 } $git->prefixed(sort keys %files);
 
-	# Merge required_files — already git-root-relative, validated
-	$out{$_} = 1 for $self->required_files;
+	# Merge track_additional_files — already git-root-relative, validated
+	$out{$_} = 1 for $self->track_additional_files;
 
 	return sort keys %out;
 }
 
 # }}}
-# required_files - list additional paths that should travel with this env's branch {{{
-sub required_files {
+# track_additional_files - extra paths that travel with this env's branch {{{
+#
+# D24 renamed genesis.pipeline.required_files to
+# genesis.pipeline.track_additional_files and changed nothing else: the
+# paths stay deployment-root-relative, <env> substitutes the
+# environment's name and never the deployment slug, and a glob expands as
+# it did.  Under D79 the key is read from the merged environment.
+sub track_additional_files {
 	my ($self) = @_;
 
-	my $entries = $self->lookup('genesis.pipeline.required_files', []);
+	my $entries = $self->lookup('genesis.pipeline.track_additional_files', []);
 	return () unless ref($entries) eq 'ARRAY' && @$entries;
 
 	require Service::Git;
@@ -1369,15 +1375,15 @@ sub required_files {
 		$top_root = "$root/$p" if length $p;
 	}
 
-	my @top_relative = __PACKAGE__->_resolve_required_files(
+	my @top_relative = __PACKAGE__->_resolve_track_additional_files(
 		$entries, $self->name, $top_root
 	);
 	return $git->prefixed(@top_relative);
 }
 
-# _resolve_required_files - pure helper for required_files path resolution {{{
+# _resolve_track_additional_files - the pure resolution behind it {{{
 # Class method so the resolution can be tested without an Env or Service::Git.
-sub _resolve_required_files {
+sub _resolve_track_additional_files {
 	my ($class, $entries, $env_name, $root) = @_;
 	return () unless ref($entries) eq 'ARRAY' && @$entries;
 	return () unless defined $root && length $root;
@@ -1390,8 +1396,9 @@ sub _resolve_required_files {
 		(my $path = $raw) =~ s/<env>/$env_name/g;
 
 		bail(
-			"genesis.pipeline.required_files entry #C{%s} escapes the deployment root.\n".
-			"  Paths must be relative to the deployment root — no #R{/}, #R{~/}, or #R{..} allowed.",
+			"genesis.pipeline.track_additional_files escapes the deployment root.\n".
+			"  The entry #C{%s} must be relative to the deployment root, with ".
+			"no #R{/}, #R{~/}, or #R{..}.",
 			$raw
 		) if $path =~ m{^/} || $path =~ m{^~} || $path =~ m{(?:^|/)\.\.(?:/|$)};
 

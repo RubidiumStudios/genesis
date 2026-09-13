@@ -1838,6 +1838,29 @@ the tiers.
 
 B<Returns:> A hash reference.
 
+=head2 _pipeline_env_keys_schema
+
+    my $schema = $top->_pipeline_env_keys_schema();
+
+Returns the declared shape of an environment file's C<genesis.pipeline>
+block, in the shape C<< Genesis::Config::validate >> consumes. Validation
+runs once per environment against that environment's merged parameters,
+never against the leaf file alone, because an inherited key is absent from
+the leaf and a leaf-only read would answer wrongly with no error.
+
+The block declares C<prior_env>, which is the topology edge, C<require_pr>
+and C<manual>, which are the two per-environment gates, C<redeploy_cron>,
+which is a list of crontab expressions in UTC, C<track_dependencies>,
+C<track_additional_files>, and C<track_bosh_configs>, which are the three
+sources the propagation set and the redeploy triggers are built from, and
+C<notifications>, which overrides the repository's own notification style
+for this environment alone.
+
+Two of those carry a shape the declaration cannot state, and
+L</_validate_env_pipeline_block> checks both beside it.
+
+B<Returns:> A hash reference.
+
 =head2 _automated_provider_configured
 
     my $bool = _automated_provider_configured($siblings, $config);
@@ -1980,10 +2003,155 @@ after C<< Genesis::Config::validate >>, so that a repository meets the same
 refusal in the same words whichever command loaded it.
 
 A section that is off is left alone. Otherwise the source-control block is
-resolved, which is where the derivations and their refusals are raised; the
-refusals themselves belong to L</_source_control>.
+resolved, which is where the derivations and their refusals are raised, and
+then every environment the deployment root holds has its
+C<genesis.pipeline> block checked, read merged through
+L</_merged_env_params>. The refusals themselves belong to
+L</_source_control> and to L</_validate_env_pipeline_block>.
 
 B<Returns:> 1.
+
+=head2 _merged_env_params
+
+    my $params = $top->_merged_env_params('us-east-prod');
+
+Returns an environment's merged parameters as a hash reference, loaded from
+its file hierarchy with the nearer file winning. It is the load-time form of
+the read every C<genesis.pipeline.*> key gets: an inherited key is absent
+from the leaf file, so a leaf-only read answers wrongly and says nothing
+about it.
+
+The hierarchy comes from C<< Genesis::Env::relate_by_name >>, which is given
+the deployment root as both of its bases, because with no other environment
+to relate to every token of the name is unique. Files that are not there are
+skipped, and so is one that will not load, so the merge is over what the
+root actually holds. No C<Genesis::Env> is built and no kit is needed, which
+is what lets the check run as the configuration loads.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env_name>
+
+The environment's name, which is also the stem of its leaf file.
+
+=back
+
+B<Returns:> A hash reference of the merged parameters, empty where the
+environment has no files at all.
+
+B<Examples:>
+
+    my $params = $top->_merged_env_params('us-east-prod');
+    # returns the merge of us.yml, us-east.yml, and us-east-prod.yml,
+    # with the nearest file winning
+
+=head2 _env_file_names
+
+    my @names = $top->_env_file_names();
+
+Returns the environment names the deployment root holds, as the stems of its
+top-level C<.yml> files, sorted. It is what the load can see without building
+a C<Genesis::Env>, and it is enough for a check that only reads the merged
+parameters.
+
+B<Returns:> A sorted list of names, empty where the root holds no C<.yml>
+files.
+
+=head2 _validate_env_pipeline_block
+
+    $top->_validate_env_pipeline_block('us-east-prod', $block);
+
+Checks one environment's C<genesis.pipeline> block against
+L</_pipeline_env_keys_schema>, and refuses it by name where it does not fit.
+
+The block is validated through a throw-away in-memory C<Genesis::Config>, so
+the types, the defaults, the required flags, and the unknown-key refusal are
+the ones the repository configuration already gets and there is no second
+validator to keep in step with the first. A block that is not a hash at all
+is handed over as it stands, so the answer is the declaration's own refusal
+rather than a Perl error. A bare string written where one of the three list
+keys is declared is normalised to a one-element list first, because an
+operator may still write a single entry, and nothing is split on the way,
+since a crontab expression carries commas of its own.
+
+Two shapes the declaration cannot state are checked beside it. A
+C<track_dependencies> entry is a deployment type at this environment or an
+C<< <env>/<type> >> pair elsewhere, and C<track_bosh_configs> is a boolean or
+a list of config type names.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env_name>
+
+The environment the block belongs to, which the refusal names.
+
+=item C<$block>
+
+Hash reference of the merged C<genesis.pipeline> block.
+
+=back
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Configuration validation failed for environment ..."> - raised at
+C<Genesis::Exit::CONFIG> with one bullet per fault, which are the schema's
+own refusals with their keys named as the environment file spells them, and
+the two shape refusals above.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_env_pipeline_block('us-east-prod', {manual => 1});
+    # returns 1
+
+    $top->_validate_env_pipeline_block('us-east-prod', {manual => 'maybe'});
+    # exits CONFIG: genesis.pipeline.manual: expected a boolean
+
+=head2 _first_errors
+
+    my @errors = _first_errors($@);
+
+The bullet lines out of a caught C<< Genesis::Config::validate >> refusal.
+That refusal arrives already formatted and wrapped to the terminal, so the
+text is split on the bullet the formatter itself uses, each error is folded
+back onto one line, and the heading above the first bullet is dropped. The
+bullet is asked for rather than assumed, because which glyph it is depends on
+what the terminal can render.
+
+Each error's C<pipeline.> prefix is rewritten to C<genesis.pipeline.>, so the
+key is named the way the environment file spells it rather than the way the
+throw-away configuration was built.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$caught>
+
+The caught text, normally C<$@>. An undefined or empty value answers an empty
+list.
+
+=back
+
+B<Returns:> A list of one-line error strings.
+
+B<Examples:>
+
+    my @errors = _first_errors($@);
+    # returns ('genesis.pipeline.manual: expected a boolean, not maybe')
 
 =head1 SEE ALSO
 

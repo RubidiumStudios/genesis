@@ -1669,6 +1669,73 @@ sub _pipeline_config_schema {
 }
 
 # }}}
+# _pipeline_env_keys_schema - the genesis.pipeline block of an env file {{{
+#
+# Declared as its own schema rather than folded into the repository's,
+# because it is validated once per environment against that environment's
+# merged parameters.  Under D79 the read is merged and never leaf-only: a
+# leaf-only read finds an inherited key absent, silently, and answers
+# wrongly with no error, and most of these keys live high in the
+# hierarchy, typically in the site file.
+sub _pipeline_env_keys_schema {
+	my ($self) = @_;
+	return {
+		type        => 'hash',
+		description => "The environment's pipeline settings",
+		schema => {
+			prior_env  => {type => 'string',  description => 'The topology edge, the environment this one follows'},
+			require_pr => {type => 'boolean', description => 'Propagate through a pull request rather than directly'},
+			manual     => {type => 'boolean', description => "The deploy job waits for a human trigger"},
+
+			# D21 replaced the shipped redeploy key, the two flat cron keys,
+			# and the boolean-or-block form with one crontab expression, or a
+			# list of them, in UTC.  A bare string is normalised to a
+			# one-element list before validation, so the declaration stays a
+			# list of strings and the operator may still write one.
+			redeploy_cron => {
+				type        => 'array',
+				subtype     => 'string',
+				envsplit    => ',',
+				description => 'Crontab expressions, in UTC, that trigger the redeploy job'
+			},
+
+			# D26: two sources, no opt-out.  An entry is a deployment type at
+			# this environment, or <env>/<type> elsewhere, and the shape is
+			# checked beside the declaration because the validator has no
+			# pattern of its own.
+			track_dependencies => {
+				type        => 'array',
+				subtype     => 'string',
+				envsplit    => ',',
+				description => 'Deployments whose exodus records this one reads'
+			},
+
+			# D24: renamed, with its path semantics unchanged.
+			track_additional_files => {
+				type        => 'array',
+				subtype     => 'string',
+				envsplit    => ',',
+				description => 'Extra deployment-root-relative paths for the propagation set'
+			},
+
+			# D27: per environment only; the global fallback went with the
+			# multi-file layout.  A boolean turns every config type on, and a
+			# list names them, so the declaration is permissive here and the
+			# shape is checked beside it.
+			track_bosh_configs => {
+				type        => 'any',
+				description => 'BOSH config types whose change triggers a redeploy'
+			},
+
+			notifications => {
+				type        => 'any',
+				description => "This environment's override of the repository's notification style"
+			},
+		}
+	};
+}
+
+# }}}
 # _automated_provider_configured - true when the pipeline is not manual {{{
 #
 # The predicate the required flag of source_control.auth, identity,
@@ -1777,7 +1844,154 @@ sub _validate_pipeline_config {
 	return 1 unless $self->config->get('pipeline.enabled');
 	$self->_source_control;
 
+	# Every environment's genesis.pipeline block, read merged under D79.
+	# A file whose genesis key is not a hash at all carries no block to
+	# check, and is left to whatever reads the environment itself.
+	for my $env_name ($self->_env_file_names) {
+		my $params  = $self->_merged_env_params($env_name);
+		my $genesis = $params->{genesis};
+		next unless ref($genesis) eq 'HASH';
+		my $block = $genesis->{pipeline} or next;
+		$self->_validate_env_pipeline_block($env_name, $block);
+	}
+
 	return 1;
+}
+
+# }}}
+# _merged_env_params - an environment's merged parameters, without a kit {{{
+#
+# Genesis resolves an environment by merging its ancestral hierarchy, with
+# the nearer file winning, and under D79 every genesis.pipeline.* read
+# follows that rule.  This is the load-time form of that read: it works
+# from the name through Genesis::Env::relate_by_name, loads the files that
+# exist, and deep-merges them.  It builds no Genesis::Env and needs no
+# kit, so validation at load stays a read of the files on disk.
+sub _merged_env_params {
+	my ($self, $env_name) = @_;
+
+	require Genesis::Env;
+
+	# The deployment root is handed over as both bases, because with no
+	# other environment to relate to every token of the name is unique and
+	# the whole hierarchy comes back off the unique base.  Naming the root
+	# once would leave those files relative to the working directory.
+	my %merged;
+	for my $file (Genesis::Env::relate_by_name(
+			$env_name, undef, $self->path, $self->path)) {
+		next unless -f $file;
+		my $params = load_yaml_file($file) or next;
+		%merged = %{deep_merge(\%merged, $params)};
+	}
+	return \%merged;
+}
+
+# }}}
+# _env_file_names - the environment names the deployment root holds {{{
+#
+# A glob of the root's *.yml files, which is what the load can see without
+# building a Genesis::Env, and which is enough for a check that only reads
+# the merged parameters.
+sub _env_file_names {
+	my ($self) = @_;
+	my @names;
+	require File::Glob;
+	for my $path (File::Glob::bsd_glob($self->path('*.yml'))) {
+		my $name = (split m{/}, $path)[-1];
+		$name =~ s/\.yml$//;
+		push @names, $name;
+	}
+	return sort @names;
+}
+
+# }}}
+# _validate_env_pipeline_block - check one environment's block {{{
+#
+# The same declarative rules Genesis::Config applies to the repository's
+# own section, applied to a block that lives in an environment file.  The
+# block is validated through a throw-away in-memory Genesis::Config, so
+# the types, the defaults, the required flags, and the unknown-key refusal
+# are the ones the repository configuration already gets, and there is no
+# second validator to keep in step with the first.  We catch its bail so
+# the message can name the environment and carry the CONFIG code.
+sub _validate_env_pipeline_block {
+	my ($self, $env_name, $block) = @_;
+
+	# A block that is not a hash at all goes to the validator as it stands,
+	# so the answer is the declaration's own refusal rather than a Perl
+	# error out of the checks below.
+	my %block = ref($block) eq 'HASH' ? %$block : ();
+
+	# D21 lets an operator write one crontab expression where a list is
+	# declared, and the other list keys are owed the same courtesy, so a
+	# bare string becomes a one-element list first.  Nothing is split on
+	# the way, because a crontab expression carries commas of its own.
+	for my $key (qw/redeploy_cron track_dependencies track_additional_files/) {
+		$block{$key} = [$block{$key}]
+			if defined $block{$key} && !ref $block{$key};
+	}
+
+	my @errors;
+	my $probe = Genesis::Config->new(undef, 0,
+		{pipeline => ref($block) eq 'HASH' ? \%block : $block});
+	eval {$probe->validate({pipeline => $self->_pipeline_env_keys_schema}); 1}
+		or push @errors, _first_errors($@);
+
+	# Two shapes the declaration cannot state.  A dependency entry is a
+	# deployment type here or <env>/<type> elsewhere, and the BOSH-config
+	# key is a boolean or a list of config type names.
+	for my $entry (@{$block{track_dependencies} || []}) {
+		push @errors, sprintf(
+			"#R{genesis.pipeline.track_dependencies}: not a deployment ".
+			"type or an #ri{<env>/<type>} pair: #ri{%s}",
+			ref($entry) ? ref($entry).' reference' : $entry
+		) unless !ref($entry) && $entry =~ m{^[^/]+(?:/[^/]+)?$};
+	}
+	if (exists $block{track_bosh_configs}) {
+		my $v = $block{track_bosh_configs};
+		push @errors, "#R{genesis.pipeline.track_bosh_configs}: expected a ".
+			"boolean or a list of config types"
+			unless !ref($v) || ref($v) eq 'ARRAY';
+	}
+
+	bail({exitcode => CONFIG},
+		"Configuration validation failed for environment #C{%s}:%s",
+		$env_name,
+		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
+	) if @errors;
+
+	return 1;
+}
+
+# }}}
+# _first_errors - the bullet lines out of a caught validation bail {{{
+#
+# Genesis::Config::validate bails with the errors already formatted and
+# wrapped to the terminal, so the caught text is split on the bullet the
+# formatter itself uses, each error is folded back onto one line, and the
+# pipeline. prefix is rewritten to the genesis.pipeline. one the operator
+# actually wrote.  The bullet is asked for rather than assumed, because
+# which glyph it is depends on what the terminal can render.
+sub _first_errors {
+	my ($caught) = @_;
+
+	my $mark = decolorize(csprintf(
+		Genesis::Term::bullet('', inline => 1, indent => 0)));
+	$mark =~ s/\s+//g;
+	return () unless length $mark;
+
+	my @parts = split /\Q$mark\E/, decolorize($caught // '');
+	shift @parts;  # the heading above the first bullet
+
+	my @errors;
+	for my $part (@parts) {
+		$part =~ s/\s+/ /g;
+		$part =~ s/^\s+|\s+$//g;
+		next unless length $part;
+		$part =~ s/(?<![\w.])pipeline(?![\w])/genesis.pipeline/g;
+		push @errors, $part;
+	}
+	return @errors;
 }
 
 # }}}
