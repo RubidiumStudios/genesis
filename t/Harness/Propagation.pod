@@ -216,6 +216,17 @@ path whose children are its entries, one per deploy and named for when it
 happened, which is what a deploy writes; the path's own record is preferred,
 and where there is none the newest child by name is the entry.
 
+=head2 trailers_of($h, $ref, %opts)
+
+  my $stage = trailers_of($h, $sha)->{'Genesis-Stage'};
+
+Returns the commit's trailers as a hashref of name to value, read by handing
+the commit message to C<git interpret-trailers --parse> rather than by picking
+the message apart here, so a row asserting on a gate agrees with what git
+itself sees.  The one option is C<copy>, which is C<a> by default.  A commit
+carrying no trailer, and a commit the copy does not hold, each answer an empty
+hashref, so a row proving an absence reads it rather than trapping a death.
+
 =head2 init_branch($h, $env, %opts)
 
 Cuts the environment's branch on R as C<pipeline-apply> would, which is an
@@ -813,6 +824,15 @@ C<ready_harness> over one environment, which is C<qa> unless the call says
 otherwise.  Its C<applied> option turned off leaves the applied record out,
 whose absence is the membership test that stands in for a roster.
 
+=head2 staged(%opts)
+
+  my $h = staged(envs => ['lab']);
+
+The applied pipeline that has propagated nothing yet, which is
+C<ready_harness> with every init branch cut and neither a delivery nor a
+certified commit on any of them.  It is the unseeded reading a walk has to
+answer for, and the name is the one the step files use.
+
 =head2 due_harness(%opts)
 
   my ($h, @due) = due_harness();
@@ -835,6 +855,13 @@ It answers in the same two shapes C<due_harness> does.
 
 The C<lab> and C<prod> tree carrying a hold record, whose environment and
 reason the C<env> and C<reason> options name.
+
+=head2 held_prod(%opts)
+
+The single-environment C<prod> tree the hold rows stand on, walked and cut but
+neither delivered nor certified.  It writes no hold of its own, because every
+one of those rows writes the hold through the command it is testing, and
+C<delivered> and C<certified> take a list back where a row wants one.
 
 =head2 tracked_harness(@prereqs)
 
@@ -866,6 +893,18 @@ standing, the vault fixture, an init branch, one delivery, and the applied
 record.  C<admin> turned off is a site whose token the protection endpoints
 refuse, which is how a row means that it could not grant the merge method, and
 C<due> with C<message> lays one control commit the branch has yet to receive.
+
+=head2 with_open_pr(%opts)
+
+  my ($h, $gh, $number, $control) = with_open_pr();
+
+C<ready> with one commit due, a pull request open on the GitHub double, and
+the proposed record naming it, which is the whole shape a pull request column
+reads.  It answers the harness, the double, the pull request number, and the
+control commit the pull request proposes.  C<env> names the environment, which
+is C<qa> by default and which the default C<envs> and the default C<due> file
+both follow, and C<review> is the review state the pull request opens with.
+The rest of the options go on to C<ready>.
 
 =head2 two_roots(%opts)
 
