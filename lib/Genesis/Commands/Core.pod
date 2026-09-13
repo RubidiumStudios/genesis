@@ -173,8 +173,8 @@ B<The configuration is reported as Genesis will actually use it>, not as
 the file literally reads.  Schema defaults and environment overrides are
 merged in, so C<pipeline.provider.insecure> is reported even when the
 file never mentions it.  This answers "what value is in effect", which is
-question an operator debugging a deployment is asking.  It does mean the
-output cannot be diffed against the file on disk.  Distinguishing the
+the question an operator debugging a deployment is asking.  It does mean
+the output cannot be diffed against the file on disk.  Distinguishing the
 sources visually is deferred; see L</LIMITATIONS>.
 
 Keys are dotted paths, resolved by L<Genesis::Config/get>, so
