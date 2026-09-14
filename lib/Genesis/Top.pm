@@ -1784,6 +1784,19 @@ sub _provider_options_schema {
 		next if $key eq 'type';
 		$schema{$key} = $fragment->{$key};
 	}
+
+	# D101: output_layout is offered by a provider that declares
+	# multi_file_output and by nobody else, so the merged fragment carries
+	# it only there and the capability gate names it where it does not.
+	if ($info->{class}->capabilities->{multi_file_output}) {
+		$schema{output_layout} = {
+			type        => 'enum',
+			values      => [qw/single multiple/],
+			default     => 'single',
+			description => 'Whether the override file is named per emitted file'
+		};
+	}
+
 	return \%schema;
 }
 

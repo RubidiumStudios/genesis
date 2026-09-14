@@ -869,7 +869,6 @@ resolved path (C<E<lt>resource_nameE<gt>> or C<E<lt>resource_nameE<gt>/E<lt>path
 
   # Via compiler pipeline
   my $result = Genesis::CI->compile(
-    ci_dir   => '.genesis/ci',
     provider => 'concourse',
     top      => $top_obj,
   );

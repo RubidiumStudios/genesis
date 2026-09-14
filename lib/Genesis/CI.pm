@@ -160,7 +160,6 @@ implementations based on the C<type> parameter.
 
   # Or use the compiler pipeline
   my $output = Genesis::CI->compile(
-    ci_dir   => '.genesis/ci',
     provider => 'concourse',
     top      => $top_obj,
   );

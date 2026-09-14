@@ -1821,6 +1821,14 @@ default still applies when the operator writes no provider block at all. A
 section that is enabled with no provider block is therefore a manual pipeline
 rather than no pipeline.
 
+C<pipeline.provider.output_layout> is C<single> or C<multiple>, and it
+appears in the merged schema only for a provider that declares the
+C<multi_file_output> capability. It decides the override file's name: the
+single form is C<.genesis/pipeline-overrides-E<lt>providerE<gt>.yml>, and
+the multiple form is one file per emitted output, named by that output's
+base name without its extension. The name follows the effective choice
+and not the capability.
+
 The block also declares C<source_control>, which is what the pipeline needs
 to know about the repository, in three tiers. C<remote>, C<uri>, and
 C<repository> are derived from git with an explicit override; C<control_branch>,

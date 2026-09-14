@@ -1940,28 +1940,40 @@ subtest 'Compiler - can_compile' => sub {
 ### Compiler - _apply_provider_overrides
 ### ============================================================ ###
 
-subtest 'Compiler - override skipped when file absent' => sub {
+# The override moved beside .genesis/config under D27, so these rows build a
+# deployment root with a configuration in it and put the override there.
+sub _override_top {
 	my $tmp = tempdir(CLEANUP => 1);
-	mkpath("$tmp/ci");
+	mkpath("$tmp/.genesis");
+	open my $fh, '>', "$tmp/.genesis/config" or die $!;
+	print $fh "---\ndeployment_type: bosh\nversion: \"3\"\ncreator_version: 3.2.0\n";
+	close $fh;
+	return ($tmp, Genesis::Top->new($tmp, no_vault => 1));
+}
 
-	my $compiler = Genesis::CI::Compiler->new(ci_dir => "$tmp/ci");
+sub _write_override {
+	my ($tmp, $body) = @_;
+	open my $fh, '>', "$tmp/.genesis/pipeline-overrides-concourse.yml" or die $!;
+	print $fh $body;
+	close $fh;
+}
+
+subtest 'Compiler - override skipped when file absent' => sub {
+	my ($tmp, $top) = _override_top();
+
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
 	my $output = { 'pipeline.yml' => "---\njobs: []\n" };
 
 	my $result = $compiler->_apply_provider_overrides($output, 'concourse');
 	is_deeply $result, $output,
-		"output unchanged when ci-overrides-concourse.yml is absent";
+		"output unchanged when the override file is absent";
 };
 
 subtest 'Compiler - override skipped for non-YAML files' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
-	mkpath("$tmp/ci");
+	my ($tmp, $top) = _override_top();
+	_write_override($tmp, "---\nfoo: overridden\n");
 
-	# Create override file
-	open my $fh, '>', "$tmp/ci/ci-overrides-concourse.yml" or die $!;
-	print $fh "---\nfoo: overridden\n";
-	close $fh;
-
-	my $compiler = Genesis::CI::Compiler->new(ci_dir => "$tmp/ci");
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
 	my $output = { 'pipeline.sh' => "#!/bin/bash\necho hi\n" };
 
 	my $result = $compiler->_apply_provider_overrides($output, 'concourse');
@@ -1976,14 +1988,10 @@ subtest 'Compiler - override applied via spruce merge' => sub {
 		return;
 	}
 
-	my $tmp = tempdir(CLEANUP => 1);
-	mkpath("$tmp/ci");
+	my ($tmp, $top) = _override_top();
+	_write_override($tmp, "---\nextra_key: injected_by_override\n");
 
-	open my $fh, '>', "$tmp/ci/ci-overrides-concourse.yml" or die $!;
-	print $fh "---\nextra_key: injected_by_override\n";
-	close $fh;
-
-	my $compiler = Genesis::CI::Compiler->new(ci_dir => "$tmp/ci");
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
 	my $output = { 'pipeline.yml' => "---\nbase_key: base_value\n" };
 
 	my $result = $compiler->_apply_provider_overrides($output, 'concourse');
@@ -1994,22 +2002,21 @@ subtest 'Compiler - override applied via spruce merge' => sub {
 		"override key added by merge";
 };
 
-subtest 'Compiler - override lookup uses ci_dir' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
-	mkpath("$tmp/ci");
+subtest 'Compiler - override lookup sits beside the configuration' => sub {
+	my ($tmp, $top) = _override_top();
 	mkpath("$tmp/other");
 
-	# Override only in $tmp/other, not in $tmp/ci
-	open my $fh, '>', "$tmp/other/ci-overrides-concourse.yml" or die $!;
+	# The override is in the wrong place, so nothing finds it.
+	open my $fh, '>', "$tmp/other/pipeline-overrides-concourse.yml" or die $!;
 	print $fh "---\nshould_not: appear\n";
 	close $fh;
 
-	my $compiler = Genesis::CI::Compiler->new(ci_dir => "$tmp/ci");
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
 	my $output = { 'pipeline.yml' => "---\njobs: []\n" };
 
 	my $result = $compiler->_apply_provider_overrides($output, 'concourse');
 	is_deeply $result, $output,
-		"override in wrong directory is not applied";
+		"an override anywhere but beside .genesis/config is not applied";
 };
 
 ### ============================================================ ###
@@ -2150,18 +2157,18 @@ subtest 'Compiler - can_compile_from_genesis_config: false without top' => sub {
 	), "returns false when top has no config method";
 };
 
-subtest 'Compiler - can_compile_from_genesis_config: detects ci: in config' => sub {
-	my $top_with_ci = MockTop->new(
-		config => MockConfig->new(ci => $_ci_data),
+subtest 'Compiler - can_compile_from_genesis_config: detects pipeline: in config' => sub {
+	my $top_with_pipeline = MockTop->new(
+		config => MockConfig->new(pipeline => $_ci_data),
 	);
-	ok(Genesis::CI::Compiler->can_compile_from_genesis_config($top_with_ci),
-		"returns true when top->config has ci: key");
+	ok(Genesis::CI::Compiler->can_compile_from_genesis_config($top_with_pipeline),
+		"returns true when top->config has pipeline: key");
 
-	my $top_without_ci = MockTop->new(
+	my $top_without_pipeline = MockTop->new(
 		config => MockConfig->new(deployment_type => 'cf'),
 	);
-	ok(!Genesis::CI::Compiler->can_compile_from_genesis_config($top_without_ci),
-		"returns false when top->config has no ci: key");
+	ok(!Genesis::CI::Compiler->can_compile_from_genesis_config($top_without_pipeline),
+		"returns false when top->config has no pipeline: key");
 };
 
 subtest 'Compiler - validate_config_section: accepts valid ci structure' => sub {

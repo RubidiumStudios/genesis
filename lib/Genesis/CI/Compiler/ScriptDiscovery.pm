@@ -34,7 +34,7 @@ sub discover {
 	}
 
 	# 2. Auto-discover scripts with inline metadata
-	my @script_dirs = ("$self->{repo_path}/scripts", "$self->{repo_path}/.genesis/ci/scripts");
+	my @script_dirs = ("$self->{repo_path}/scripts");
 	for my $dir (@script_dirs) {
 		next unless -d $dir;
 		for my $file (glob("$dir/*.sh"), glob("$dir/**/*.sh")) {
@@ -237,7 +237,7 @@ sub _path_to_id {
 	my ($self, $path) = @_;
 
 	# Remove scripts/ prefix and .sh extension
-	(my $id = $path) =~ s{^(?:\.genesis/ci/)?scripts/}{};
+	(my $id = $path) =~ s{^scripts/}{};
 	$id =~ s{\.sh$}{};
 
 	return $id;
