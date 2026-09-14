@@ -252,4 +252,46 @@ subtest 'the blueprint refuses on the key and not the bare word' => sub {
 	isnt($asked, 0, 'and the one that sets the key does not');
 };
 
+subtest 'a list is read to the end of its own block' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0, kit => 'exodus-reader');
+
+	# The list is the last key of the genesis block, with a block of its own
+	# below it, which is the shape a range that ends only on a key at the
+	# list key's own indent runs straight past.
+	helper::put_file($h->a . '/qa.yml', <<'ENV');
+---
+kit:
+  name:    dev
+  version: latest
+  features: []
+genesis:
+  env: qa
+  reads_exodus:
+    - beta
+params:
+  - gamma
+  - delta
+ENV
+
+	# The hook is run as a hook runs it rather than through a command,
+	# because what a command would spawn is a genesis child and the rows
+	# above count those.
+	my ($out) = run({
+			dir => $h->a,
+			env => {
+				GENESIS_ROOT        => $h->a,
+				GENESIS_ENVIRONMENT => 'qa',
+				GENESIS_KIT_PATH    => $h->a . '/dev',
+			},
+		}, $h->a . '/dev/hooks/blueprint');
+
+	is_deeply([grep {length} split /\n/, ($out // '')],
+		['manifest.yml', 'reads/beta.yml'],
+		'the list ends with its own block');
+	ok(!-f $h->a . '/dev/reads/gamma.yml',
+		'so no entry of the block below it was read as one of its own');
+};
+
 done_testing;
