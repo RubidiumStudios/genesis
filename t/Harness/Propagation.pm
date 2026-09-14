@@ -1514,6 +1514,10 @@ sub local_branch {
 # branch and the two share no ancestor.
 sub local_branch_only {
 	my ($self, $env, %opts) = @_;
+	# copy is not forwarded, because the helper's name says the branch is one
+	# this clone made and never published, and this clone is copy A.  A row
+	# that wants the branch in copy B calls local_branch and names it.
+	delete $opts{copy};
 	return $self->local_branch($self->slug($env, %opts), %opts, push => 0);
 }
 

@@ -395,7 +395,9 @@ so the branch stays local unless the row asks for it on R.
 
 Makes the environment's deployment branch in copy A alone, so R has never had
 it, and returns its sha.  This is a different shape from C<unrelated_branch>,
-where R has the branch and the two share no ancestor.
+where R has the branch and the two share no ancestor.  C<copy> is not passed
+on, so the branch is always copy A's, and a row that wants one in copy B calls
+C<local_branch> and names the branch itself.
 
 =head2 unset_control($h, %opts)
 
