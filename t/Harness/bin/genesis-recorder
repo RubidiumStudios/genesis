@@ -119,8 +119,13 @@ sub read_json {
 # A print and an exit rather than a die, because a die leaves the status to
 # errno and a row reads whatever the recorder exits with as the exit of the
 # command it was watching.
+#
+# A refusal takes the lock holder down with it where one is still running,
+# because the holder is a process of its own and an orphan that goes on to
+# take the switch lock is a stranger the next row never asked for.
 sub refuse {
-	my ($message) = @_;
+	my ($message, $holder) = @_;
+	release_the_lock($holder) if defined $holder;
 	print STDERR $message;
 	exit REFUSED;
 }
@@ -161,16 +166,26 @@ sub hold_the_lock {
 	my $pid = fork();
 	die "the recorder could not fork a lock holder: $!\n" unless defined $pid;
 	unless ($pid) {
+		# The recorder's pid is read before the lock is asked for, because
+		# flock waits as long as it has to and a holder that read the pid
+		# afterwards would read 1 wherever the recorder had gone in the
+		# meantime, then compare 1 against 1 for the rest of its turns and
+		# hold a lock nobody is waiting on it to release.
+		my $parent = getppid();
 		open my $fh, '>', $plan->{lock} or POSIX::_exit(2);
 		flock($fh, LOCK_EX) or POSIX::_exit(2);
+
+		# The recorder may have refused and gone while we waited, and a
+		# lock taken for a run that is over is a lock held for nothing, so
+		# we let go of it at once rather than announcing ourselves.
+		POSIX::_exit(0) unless _parent_is_alive($parent);
 		print $fh sprintf("%d\n%s\n", $$, $plan->{hold_lock});
 		$fh->flush;
 
 		# Held until the recorder releases us, and never outliving the
 		# recorder, so a child that dies leaves no process behind.
-		my $parent = getppid();
 		for (1 .. 3000) {
-			POSIX::_exit(0) if getppid() != $parent;
+			POSIX::_exit(0) unless _parent_is_alive($parent);
 			select undef, undef, undef, 0.1;
 		}
 		POSIX::_exit(0);
@@ -190,13 +205,27 @@ sub hold_the_lock {
 			$taken = 1;
 			last;
 		}
+		# This refusal hands no holder on, because the wait above has just
+		# answered that there is no holder left to take down.
 		refuse("the recorder's lock holder exited before it took the lock\n")
 			if waitpid($pid, POSIX::WNOHANG()) != 0;
 		select undef, undef, undef, 0.05;
 	}
-	refuse("the recorder's lock holder did not take the lock in five seconds\n")
-		unless $taken;
+	refuse("the recorder's lock holder did not take the lock in five seconds\n",
+		$pid) unless $taken;
 	return $pid;
+}
+
+# }}}
+# _parent_is_alive - is the recorder that forked us still there {{{
+#
+# Two questions rather than one, because a recorder that has gone leaves us
+# reparented, which the first catches, and a recorder that is still ours but
+# no longer running is what the second catches.
+sub _parent_is_alive {
+	my ($parent) = @_;
+	return 0 unless getppid() == $parent;
+	return kill(0, $parent) ? 1 : 0;
 }
 
 # }}}
