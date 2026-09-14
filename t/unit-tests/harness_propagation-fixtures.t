@@ -246,6 +246,16 @@ subtest 'a harness with no vault refuses to break one' => sub {
 # Last in the file on purpose.  Before the refusal existed this row cleared
 # the whole of /secret/ in the shared fixture vault, so it is kept behind
 # every row that stands on a record.
+subtest 'the empty repository shape cannot be built in a clone' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	ok(!eval {fixture_preflight($h, 'no_commits', copy => 'a'); 1},
+		'a clone that already has commits cannot be the empty shape');
+	like($@, qr/already carry the seeding commit/,
+		'and the refusal says what is in the way');
+};
+
 subtest 'a mount wider than the default is refused' => sub {
 	plan tests => 2;
 

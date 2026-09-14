@@ -765,7 +765,10 @@ reads matches the longer form.
 Returns the path of a repository in one of the three shapes the pre-flight
 classifies, which are C<safe_directory>, C<no_identity>, and C<no_commits>.
 The one option is C<copy>, which shapes one of the harness's own clones in
-place instead of building a repository beside them.
+place instead of building a repository beside them.  It cannot be paired with
+C<no_commits>, because both clones already carry the seeding commit, and that
+pairing is refused by name rather than answered with a repository that has
+commits.
 
 Each shape is built in a fresh repository beside the harness, because the
 C<safe.directory> shape needs an ownership git will actually refuse and neither
