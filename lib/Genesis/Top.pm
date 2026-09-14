@@ -1127,6 +1127,63 @@ sub pr_prefix {
 }
 
 # }}}
+# _pipeline_exodus_mount - the one exodus mount the pipeline shares {{{
+#
+# D103 puts the applied record at <exodus mount>_pipelines/<type>, so a
+# pipeline whose environments kept separate mounts would have no single
+# home for it.  Configuration load already refuses a repository whose
+# environments resolve the mount differently, in
+# _validate_one_exodus_mount, so reading it from the first pipeline
+# environment through the merged hierarchy is enough, and exodus_mount
+# normalises to a trailing slash.
+sub _pipeline_exodus_mount {
+	my ($self) = @_;
+	return $self->_memoize(sub {
+		my ($self) = @_;
+		my ($first) = $self->pipeline_env_names;
+		bail(
+			{exitcode => CONFIG},
+			"This repository has a pipeline but no environment to resolve ".
+			"#C{genesis.exodus_mount} from, so the pipeline's own record ".
+			"has no address.\n".
+			"Add an environment file, or disable the pipeline."
+		) unless $first;
+		return Genesis::Env->bare($first, $self)->exodus_mount;
+	});
+}
+
+# }}}
+# applied_record_path - the vault path of the pipeline's own facts {{{
+#
+# <exodus mount>_pipelines/<type>, which reads /secret/exodus/_pipelines/bosh
+# under the nominal mount.  The leading underscore makes the address
+# unreachable by any environment, because Env::_env_name_errors requires a
+# name to start with a lowercase letter (D103).
+sub applied_record_path {
+	my ($self) = @_;
+	return sprintf(
+		'%s_pipelines/%s', $self->_pipeline_exodus_mount, $self->type
+	);
+}
+
+# }}}
+# applied_record - the control commit the pipeline was applied from {{{
+#
+# The three flat fields pipeline-apply writes, or undef when the path is
+# absent.  The deploy rewrites its own exodus record every run, which is
+# why these live at their own path rather than beside the deployments.
+sub applied_record {
+	my ($self) = @_;
+	my $data = $self->vault->get($self->applied_record_path);
+	return undef unless ref($data) eq 'HASH' && keys %$data;
+	return {
+		map  {($_ => $data->{$_})}
+		grep {defined $data->{$_}}
+		qw/control_commit provider at/
+	};
+}
+
+# }}}
 # has_legacy_ci_yml - return true when a legacy pipeline ci.yml is present {{{
 #
 # Set at config-load time when a top-level `ci.yml` file exists AND its

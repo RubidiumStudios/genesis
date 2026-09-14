@@ -2941,6 +2941,53 @@ sub exodus_base {
 }
 
 # }}}
+# pipeline_record_path - the vault path of this environment's compiled pipeline facts {{{
+#
+# Beside the environment's own exodus record, under a pipeline subpath,
+# so the deploy's rewrite of its record cannot clobber what the apply
+# left (D103).
+sub pipeline_record_path {
+	my ($self) = @_;
+	return $self->exodus_base . '/pipeline';
+}
+
+# }}}
+# pipeline_record - this environment's compiled dependency set and discovery mark {{{
+#
+# Returns the two fields the apply writes, or undef when the subpath is
+# absent, and that undef is the membership test D43 and D103 put in place
+# of a roster: an environment the applied record does not know is one
+# with no pipeline subpath, and the walk asks about its own environment
+# rather than searching a list.
+sub pipeline_record {
+	my ($self) = @_;
+	my $data = $self->top->vault->get($self->pipeline_record_path);
+	return undef unless ref($data) eq 'HASH' && keys %$data;
+	return {
+		dependencies => _decode_path_list($data->{dependencies}),
+		discovery    => $data->{discovery} // 'complete',
+	};
+}
+
+# }}}
+# _decode_path_list - read a vault field holding a list of deployment slugs {{{
+#
+# A vault field is a string, so a list reaches it in one of two forms.  An
+# exodus record is flat, so the records hold a set as one comma-joined
+# value, and a JSON array is accepted as well so that a record written by
+# hand still reads.
+sub _decode_path_list {
+	my ($raw) = @_;
+	return [] unless defined($raw);
+	return [@$raw] if ref($raw) eq 'ARRAY';
+	return [] unless length($raw);
+	require JSON::PP;
+	my $decoded = eval { JSON::PP->new->decode($raw) };
+	return [@$decoded] if ref($decoded) eq 'ARRAY';
+	return [grep {length} split(/\s*,\s*/, $raw)];
+}
+
+# }}}
 # ci_mount - returns the Vault path under which all CI secrets are stored (env: GENESIS_CI_MOUNT) {{{
 sub default_ci_mount { $_[0]->secrets_mount . 'ci/'; }
 sub ci_mount {
