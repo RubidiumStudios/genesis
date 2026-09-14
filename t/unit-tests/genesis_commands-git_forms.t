@@ -11,17 +11,19 @@ use lib 't';
 use helper;
 use Test::More;
 
-use File::Find;
-
 $ENV{NOCOLOR} = 1;
 
 # An assertion helper, beside the test that uses it.  A file is read whole
 # rather than line by line, because an argument list is often spread over
-# several lines, and --porcelain alone is not the offence: `status
-# --porcelain` is everywhere and is older than the floor.  So a --porcelain
-# is reported only when a fetch sits within the same stretch of source.
+# several lines, and neither option is the offence on its own: `status
+# --porcelain` is everywhere and is older than the floor, and the name of
+# either form can be written in prose about it.  So a match counts only
+# where the git command it belongs to sits within the same stretch of
+# source, and every trailing comment is taken out of the text first, with
+# the line breaks left where they were so a finding still names its line.
 sub forbidden_forms_in {
 	my (@files) = @_;
+	my $top = $ENV{GENESIS_TOPDIR};
 
 	my @found;
 	for my $file (@files) {
@@ -35,22 +37,41 @@ sub forbidden_forms_in {
 		$text = substr($text, 0, $-[0])
 			if $text =~ /^__(?:DATA|END)__[ \t]*$/m;
 
+		$text = join("\n", map {strip_comment($_)} split(/\n/, $text, -1));
+
+		my $short = $file;
+		$short =~ s{^\Q$top\E/}{} if defined $top;
+
 		while ($text =~ /ahead-behind/g) {
 			my $at = pos($text);
+			next unless near($text, $at) =~ /\bgit\b/;
 			push @found, sprintf('%s:%d for-each-ref ahead-behind',
-				$file, 1 + (substr($text, 0, $at) =~ tr/\n//));
+				$short, 1 + (substr($text, 0, $at) =~ tr/\n//));
 		}
 
 		while ($text =~ /--porcelain/g) {
 			my $at = pos($text);
-			my $from = $at > 240 ? $at - 240 : 0;
-			my $window = substr($text, $from, 480);
-			next unless $window =~ /\bfetch\b/;
+			next unless near($text, $at) =~ /\bfetch\b/;
 			push @found, sprintf('%s:%d fetch --porcelain',
-				$file, 1 + (substr($text, 0, $at) =~ tr/\n//));
+				$short, 1 + (substr($text, 0, $at) =~ tr/\n//));
 		}
 	}
 	return sort @found;
+}
+
+# The stretch of source an argument list can reasonably spread over, which
+# is what tells a real invocation apart from a mention of the same words.
+sub near {
+	my ($text, $at) = @_;
+	my $from = $at > 240 ? $at - 240 : 0;
+	return substr($text, $from, 480);
+}
+
+# The forms a run found, with the file and the line taken off, so the two
+# are compared as a set and not in whatever order the file names sorted in.
+sub forms_of {
+	my (@found) = @_;
+	return sort map {my $form = $_; $form =~ s/^\S+:\d+ //; $form} @found;
 }
 
 subtest 'the scan reports both forms where they appear' => sub {
@@ -74,8 +95,10 @@ EOS
 
 	my @found = forbidden_forms_in("$dir/ahead.pm", "$dir/fetch.pm");
 	is(scalar(@found), 2, 'both forms are caught');
-	like(join("\n", @found), qr/for-each-ref ahead-behind.*fetch --porcelain/s,
-		'and each is named by the form it used');
+	is_deeply([forms_of(@found)],
+		['fetch --porcelain', 'for-each-ref ahead-behind'],
+		'and each is named by the form it used')
+		or diag(join("\n", map {"  $_"} @found));
 };
 
 # A guard rather than a row that starts red: neither form appears under lib/
@@ -86,11 +109,7 @@ EOS
 subtest 'neither form is in the tree' => sub {
 	plan tests => 1;
 
-	my @files;
-	find(sub {push @files, $File::Find::name if -f && /\.pm$/}, 'lib');
-	push @files, 'bin/genesis';
-
-	my @found = forbidden_forms_in(sort @files);
+	my @found = forbidden_forms_in(sweep_files());
 	is_deeply(\@found, [],
 		'nothing under lib/ reaches past the declared git floor')
 		or diag(join("\n", map {"  $_"} @found));
