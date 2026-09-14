@@ -371,6 +371,56 @@ B<Examples:>
   my @created = _create_missing_branches($top, ['lab'], 0);
   # returns ('lab'); refs/heads/lab now exists with a seed commit
 
+=head2 _resolve_propagation_base
+
+  my ($sha, $depth) = _resolve_propagation_base($branch, $git, $control);
+
+Finds the control-branch commit an environment branch was last brought
+up to, so propagation knows what to diff against.
+
+It reads the branch's own log first, looking for the most recent
+C<[pipeline] control@E<lt>shaE<gt>> marker, and warns when that marker is
+not the tip, since commits on top of it were made by hand. A branch
+carrying no marker was spawned from control and never propagated to, so
+the merge base with the control branch is used instead.
+
+B<The control branch is passed in rather than assumed.> Its name is
+configured per repository at C<pipeline.source_control.control_branch>,
+every caller has already read it through
+L<Genesis::Top/ci_control_branch>, and taking a merge base against the
+wrong branch would silently change what the diff is computed from.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The environment branch to resolve a base for.
+
+=item C<$git>
+
+The C<Service::Git> handle to read through. Defaults to one opened on
+the current directory.
+
+=item C<$control>
+
+The repository's control branch, as its configuration names it.
+
+=back
+
+B<Returns:> The full control sha and the number of manual commits
+sitting on top of it. Both are C<(undef, 0)> when the branch shares no
+history with control.
+
+B<Errors:> None. An unresolvable base comes back as C<undef>.
+
+B<Examples:>
+
+  my ($sha, $depth) = _resolve_propagation_base('qa', $git, 'trunk');
+  # returns the sha from qa's newest [pipeline] marker, and 0
+  # returns the merge base with trunk, and 0, when qa has no marker
+
 =head1 SEE ALSO
 
 L<Genesis::CI::Legacy>, L<Genesis::Top>, L<Genesis::Env>,

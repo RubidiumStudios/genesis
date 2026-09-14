@@ -251,6 +251,7 @@ unit-tests/genesis_commands_dev-pipeline_compile.t  # dev-pipeline-compile stage
 unit-tests/service_git-ci_credentials.t      # git credentials supplied via CI env vars
 unit-tests/genesis_commands_pipelines-prepare.t  # pipeline-prepare scope selection
 unit-tests/genesis_commands_pipelines-branch_authorization.t  # propagate: may it create a missing branch
+unit-tests/genesis_commands_pipelines-control_branch.t  # commands read the configured control branch
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/genesis_ui-prompt_output_stream.t  # prompts write to stderr and the terminal, never stdout
