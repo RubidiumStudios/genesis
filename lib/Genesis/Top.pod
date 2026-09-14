@@ -2467,7 +2467,8 @@ C<"Failed to load CI provider ..."> - raised when the registry names a
 compiler class whose file will not load, which leaves the fragment
 unreadable and the provider's keys undeclared. What the failed C<require>
 said is carried through L</_without_backtrace>, so the operator reads the
-message without the line it was raised on or the frames behind it.
+message without the line it was raised on or the frames behind it. It exits
+C<Genesis::Exit::CONFIG>, like every other refusal the load raises.
 
 =back
 
@@ -2969,7 +2970,8 @@ C<"Failed to load CI provider ..."> - raised when the registry names a
 compiler class whose file will not compile. The schema build normally meets
 that first. What the failed C<require> said is carried through
 L</_without_backtrace>, so the operator reads the message without the line it
-was raised on or the frames behind it.
+was raised on or the frames behind it. It exits C<Genesis::Exit::CONFIG>,
+like every other refusal the load raises.
 
 =item *
 
