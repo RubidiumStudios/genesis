@@ -124,6 +124,18 @@ subtest 'an empty pull request prefix is refused' => sub {
 		'an explicit prefix passes';
 };
 
+subtest 'an empty control branch is refused' => sub {
+	plan tests => 2;
+
+	throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+		'  source_control:', "    control_branch: ''"))}
+		qr/pipeline\.source_control\.control_branch.*empty/s,
+		'an empty control branch is refused by name';
+	lives_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+		'  source_control:', '    control_branch: trunk'))}
+		'and a named one passes';
+};
+
 subtest 'the MVP supports GitHub and says so' => sub {
 	plan tests => 4;
 

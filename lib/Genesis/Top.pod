@@ -2462,7 +2462,9 @@ C<git remote>, which is alphabetical order. The repository is the GitHub
 C<owner/repo> the remote's URL carries, github.com or GitHub Enterprise
 alike, and any other host must name it explicitly. An empty C<pr_prefix>
 is refused, because it would give the pull request branch the deployment
-branch's own name. Every refusal exits C<Genesis::Exit::CONFIG>.
+branch's own name, and an empty C<control_branch> is refused beside it,
+because nothing can be read from a branch with no name. Every refusal exits
+C<Genesis::Exit::CONFIG>.
 
 The answer is resolved once and kept, so the refusals land at configuration
 load rather than at the first read.
@@ -2477,6 +2479,12 @@ B<Errors:>
 
 C<"pipeline.source_control.pr_prefix must not be empty"> - raised when the
 override is present and holds an empty string.
+
+=item *
+
+C<"pipeline.source_control.control_branch must not be empty"> - raised on
+the same terms, because a branch with no name names nothing to read the
+repository from.
 
 =item *
 
