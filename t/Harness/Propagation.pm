@@ -1734,9 +1734,16 @@ sub write_env_file {
 		if $self->{mode} eq 'pr' && !$opts{site};
 	# One file carries one pipeline key, so entries handed in under genesis
 	# fold into the pipeline block wherever a row fills both, and the pipeline
-	# option wins a key the two of them name together.
-	%pipeline = (%{delete $genesis{pipeline}}, %pipeline)
-		if %pipeline && ref $genesis{pipeline} eq 'HASH';
+	# option wins a key the two of them name together.  Anything other than a
+	# hash under genesis cannot fold, and writing it beside a pipeline block
+	# would put two pipeline keys in one file, so the row hears about it by
+	# name rather than reading a file no YAML reader will load.
+	if (%pipeline && exists $genesis{pipeline}) {
+		die "write_env_file cannot write $name.yml, because genesis.pipeline "
+		  . "is not a hash and so cannot fold into the pipeline block\n"
+			unless ref $genesis{pipeline} eq 'HASH';
+		%pipeline = (%{delete $genesis{pipeline}}, %pipeline);
+	}
 	my $nested = %genesis || %pipeline;
 
 	my $body = "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n";
@@ -1767,20 +1774,25 @@ sub write_env_file {
 # because sprintf of a reference writes an address into the file and a row
 # that asked for it should hear so rather than read HASH(0x...) back.
 sub _yaml_pair {
-	my ($key, $value, $depth) = @_;
-	my $pad = '  ' x $depth;
+	my ($key, $value, $depth, $parent) = @_;
+	my $pad  = '  ' x $depth;
+	# The path the sub is standing on, so a refusal about a list names the
+	# whole of it the way the hash branch already names key.inner.  A row
+	# that asked for genesis.pipeline.track_additional_files should hear that
+	# name rather than the leaf alone.
+	my $path = defined $parent ? "$parent.$key" : $key;
 	if (ref $value eq 'HASH') {
 		my $block = sprintf("%s%s:\n", $pad, $key);
 		for my $inner (sort keys %$value) {
-			die "write_env_file cannot write $key.$inner, because a value "
+			die "write_env_file cannot write $path.$inner, because a value "
 			  . "nested more than one level deep is not supported\n"
 				if ref $value->{$inner} && ref $value->{$inner} ne 'ARRAY';
-			$block .= _yaml_pair($inner, $value->{$inner}, $depth + 1);
+			$block .= _yaml_pair($inner, $value->{$inner}, $depth + 1, $path);
 		}
 		return $block;
 	}
 	if (ref $value eq 'ARRAY') {
-		die "write_env_file cannot write the list $key, because an entry of "
+		die "write_env_file cannot write the list $path, because an entry of "
 		  . "it is a reference rather than a scalar\n"
 			if grep {ref} @$value;
 		return sprintf("%s%s: []\n", $pad, $key) unless @$value;
