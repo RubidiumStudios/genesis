@@ -71,13 +71,43 @@ subtest 'a prefix that collides is refused by name' => sub {
 		'and the refusal names the branch it would have collided with');
 };
 
+subtest 'the refusal exits CONFIG' => sub {
+	plan tests => 1;
+
+	my $h = make_harness(
+		envs => ['lab', 'pr-lab'], pr_prefix => 'pr-', vault => 0,
+	);
+
+	# An exit code only exists in a process that exits, and bail dies
+	# instead of exiting whenever it is reached from inside an eval, which
+	# a test file always is.  So the refusal is provoked in a process of
+	# its own and its status is read back from there.
+	my $cmd = sprintf(
+		q{%s -I%s/lib -MGenesis::Top -e '}.
+		q{Genesis::Top->new($ARGV[0], no_vault => 1)->pr_branch_for(q{lab})}.
+		q{' %s},
+		$^X, $helper::TOPDIR, $h->a
+	);
+	run_fails($cmd, Genesis::Exit::CONFIG,
+		'the refusal exits Genesis::Exit::CONFIG');
+};
+
 subtest 'the two baseline literals are gone' => sub {
 	plan tests => 3;
 
 	my (@prefix_literals, @head_patterns, @prefix_readers);
 	for my $file (modules_under_lib()) {
 		my $source = slurp($file);
-		push @prefix_literals, $file if $source =~ m{["']pr/\$};
+		# A join puts something after the prefix, which is an interpolated
+		# variable, a format placeholder, or a closing quote and a
+		# concatenation.  A declared default closes on the slash and is
+		# followed by a comma or a semicolon, and prose about the name
+		# carries an ordinary word after it, so the sweep passes over the
+		# constant, the schema entry, and the comments, and catches only
+		# the compositions.  It does not ask what comes before the prefix,
+		# because a hand-composed name can sit anywhere in a string.
+		push @prefix_literals, $file
+			if $source =~ m{pr/(?: \$ | % | ["']\s*\. )}x;
 		push @head_patterns,   $file if $source =~ m{\^propagate/};
 		push @prefix_readers,  $file
 			if $file ne 'lib/Genesis/Top.pm'
