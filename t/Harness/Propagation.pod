@@ -29,7 +29,7 @@ Builds R, clones copy A and copy B, writes the deployment root through
 C<Genesis::Top-E<gt>create>, and publishes the control branch.  Returns the
 harness object.  Takes C<envs>, C<type>, C<control>, C<pr_prefix>,
 C<provider>, C<mode>, C<root>, C<pipeline>, C<source_control>, C<vault>,
-C<github>, and C<kit>.
+C<github>, C<kit>, and C<embed>.
 
 C<Genesis::Top-E<gt>create> writes no pipeline section at all, and every row
 that reads a provider reads it out of that file, so the harness writes the
@@ -43,7 +43,11 @@ C<source_control> is a hashref merged under C<pipeline.source_control>.
 
 C<kit> names one of the kits the suite ships under C<t/kits/>, and the harness
 copies it in as the deployment root's dev kit before the seeding commit, so a
-row runs against a repository whose kit is part of the control branch.  The
+row runs against a repository whose kit is part of the control branch.  A
+value carrying a slash is read as a path under the checkout root instead, so a
+row that wants a kit the suite already ships elsewhere, such as
+C<t/src/ops-blueprint>, names that path rather than a copy of the kit written
+for these rows alone.  The
 two kits written for these rows are C<exodus-reader>, whose manifest reads the
 exodus record of every deployment the environment names and whose blueprint
 refuses to render where a deployment it was told to require has none, and
@@ -64,6 +68,12 @@ C<genesis.pipeline.require_pr> on each of its environment files instead.
 C<vault> defaults on, and the harness spins the suite's own vault through
 C<fixture_vault> when it does.  A row that wants no vault at all passes
 C<vault =E<gt> 0>.
+
+C<embed =E<gt> 1> writes an executable stub at C<.genesis/bin/genesis> and
+commits it with the deployment root, which is where C<Genesis::Top::embed>
+puts the running genesis for CI to call.  A row that asserts the eighth kind
+of the propagation set, in the set itself or in a delivered tree, needs a file
+there to find, and the stub stands in for the megabytes of the real one.
 
 The named environments get their files through C<write_env_file>, and they are
 committed along with the deployment root, so the control branch's first commit
