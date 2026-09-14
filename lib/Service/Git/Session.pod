@@ -34,6 +34,25 @@ and not the repository behind it. C<switch> is the one verb that takes it and
 C<finish> is the one that lets it go, so a command that opens a session and
 never switches never touches it at all.
 
+=head1 EXIT PATHS
+
+The session restores on every exit path, not only the one where the command
+succeeded. C<finish> covers the success path and C<abort> covers a die or a
+failed verification, and the paths nobody calls a verb on are covered by a
+last-resort C<abort> the session registers through
+C<< Genesis::Commands::at_exit >> when it opens.
+
+Those hooks run from an C<END> block, which is what makes them reach a bail,
+an uncaught die, and a signal, since F<bin/genesis> routes SIGINT and SIGTERM
+to C<bail>. It is deliberately not hung on C<DESTROY>: C<bail> exits when it
+is not inside an eval, Perl runs C<END> before global destruction, and the
+order of destruction after that is undefined, so a net there fires too late to
+be of use.
+
+What Perl cannot give us is a hook on SIGKILL, and nothing here pretends
+otherwise. The switch lock covers that case instead, because the kernel
+releases it with the process.
+
 =head1 METHODS
 
 =head2 new($git, %opts)
@@ -98,12 +117,12 @@ The order matters: every refusal above happens before the session writes
 anything at all, so a command that is going to be turned away is turned away
 while the repository is still exactly as the operator left it.
 
-A last-resort restore is registered through C<< Genesis::Commands::at_exit >>,
+A last-resort C<abort> is registered through C<< Genesis::Commands::at_exit >>,
 whose hooks run from an C<END> block, so a session still open when the process
-ends is put back rather than left standing on a branch nobody asked for. The
-exit status is saved and put back around that restore, because the hooks run
-with C<$?> already holding the code the command chose and the git the restore
-shells out to would otherwise overwrite it.
+ends is discarded, reset, and put back rather than left standing on a branch
+nobody asked for. The exit status is saved and put back around it, because the
+hooks run with C<$?> already holding the code the command chose and the git
+the abort shells out to would otherwise overwrite it.
 
 B<Parameters:> None.
 
@@ -404,6 +423,34 @@ B<Examples:>
   # returns ('qa/bosh') after a commit on that branch
 
 =head1 INTERNAL METHODS
+
+=head2 _register_net
+
+  $session->_register_net;
+
+Hangs the last-resort C<abort> on C<< Genesis::Commands::at_exit >>, so that a
+session still open when the process ends is discarded, reset, and put back.
+C<begin> is the only caller and it registers once, so a session that is opened
+and closed again hangs one hook and no more.
+
+The hook does nothing on a session that is no longer open, which is what makes
+an ordinary run pay nothing for it. Nobody is left to catch a die inside an
+C<END> block, so the abort is wrapped and whatever it could not do is printed
+to standard error instead. The exit status is saved and put back around the
+whole of it, because the git the abort shells out to would otherwise overwrite
+the code the command chose.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>, so it chains.
+
+B<Examples:>
+
+  $session->_register_net;
+  # returns $self, with the net hung and the session covered on every exit path
+
+  $session->_register_net;
+  # returns $self unchanged on a session that already registered one
 
 =head2 _take_lock($restore)
 
