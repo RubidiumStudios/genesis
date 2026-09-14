@@ -1701,6 +1701,24 @@ B<Parameters:> None.
 B<Returns:> An array reference of five rows, in the order C<remote>, C<uri>,
 C<repository>, C<control_branch>, C<pr_prefix>.
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"pipeline.source_control.control_branch must not be empty.">,
+C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
+enabled, but %s is not a git checkout.">,
+C<"pipeline.source_control.remote could not be derived.">, and
+C<"pipeline.source_control.repository could not be derived from %s."> -
+raised by L</_source_control>, which this reader calls like the three
+single-value readers beside it.
+
+=back
+
+Every one of them exits C<Genesis::Exit::CONFIG>.
+
 B<Examples:>
 
     my $rows = $top->source_control_resolved();
