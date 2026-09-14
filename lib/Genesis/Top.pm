@@ -1604,10 +1604,25 @@ sub _pipeline_config_schema {
 				description => 'The automation that owns the pipeline',
 				schema      => $self->_provider_options_schema(),
 			},
+			# D66 released the label from the branch, so it names the
+			# provider's pipeline and nothing else, and it is deliberately
+			# not checked as a git ref component.
 			name => {
 				type        => 'string',
 				description => "The pipeline's name in its provider (defaults to deployment_type)"
 			},
+
+			# D101: a BOSH flag rather than a provider feature, so no
+			# capability gates it.  Repository-wide, because a key that
+			# changes how a deployment progresses must be uniform or the
+			# earlier environments stop rehearsing the later ones.
+			recreate_on_deploy => {
+				type        => 'enum',
+				values      => [qw/never redeploy-only always/],
+				default     => 'never',
+				description => 'Which runs pass --recreate to the BOSH deploy'
+			},
+
 			source_control => {
 				type        => 'hash',
 				description => 'What the pipeline needs to know about the repository',

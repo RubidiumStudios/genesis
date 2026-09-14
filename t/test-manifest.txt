@@ -235,6 +235,7 @@ unit-tests/genesis_top-pipeline_section.t    # the pipeline section of the v3 .g
 unit-tests/genesis_top-pipeline_source_control.t  # the source-control block, its tiers, and its derivations
 unit-tests/genesis_top-pipeline_env_keys.t   # the genesis.pipeline block of an environment file, read merged
 unit-tests/genesis_top-pipeline_blocks.t     # the shuttle, vault, locker and notification blocks of the pipeline section
+unit-tests/genesis_top-pipeline_repo_keys.t  # the pipeline label and the repository-wide recreate key
 unit-tests/genesis_top-provider_fragment.t   # the configured provider's own schema fragment, merged at load
 unit-tests/genesis_top-provider_capabilities.t  # the six capabilities a provider declares, and the keys they gate
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
