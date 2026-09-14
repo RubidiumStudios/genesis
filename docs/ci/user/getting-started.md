@@ -138,9 +138,13 @@ section of `.genesis/config`, so every operator working in the same
 repository compiles for the same CI system. There is no flag that
 overrides it, and passing one is a usage error.
 
-Where the repository has no `pipeline:` section, the compiler reads the
-`ci.yml` file named by `--config` instead, which is how an older
-repository keeps working until it is migrated.
+Where the repository has no enabled `pipeline:` section there is nothing
+for the compiler to read, and `repipe` refuses rather than falling back
+to `ci.yml`. A repository that still carries a `ci.yml` with a top-level
+`pipeline:` key is refused before that, by a check that tells you to
+move its settings into `.genesis/config`. Migrating is how an older
+repository starts working again, and there is no path that keeps reading
+the old file.
 
 ## Visualizing the Pipeline
 
