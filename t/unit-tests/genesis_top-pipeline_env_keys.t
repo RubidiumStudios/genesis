@@ -250,6 +250,29 @@ subtest 'a caught refusal is folded into readable bullets' => sub {
 		'and a file and line trailing the error is cut away with its trace';
 };
 
+subtest 'a caught message is cut at the first file and line' => sub {
+	plan tests => 4;
+
+	# The one cut, which _first_errors makes to each bullet and which the
+	# provider refusals make to whatever they caught.
+	is Genesis::Top::_without_backtrace(
+		"Can't locate Nope.pm in \@INC (\@INC entries checked: lib)"
+		." at lib/Genesis/Top.pm line 2128.\n"
+		."\tGenesis::Top::_provider_options_schema() called at x line 9\n"),
+		"Can't locate Nope.pm in \@INC (\@INC entries checked: lib)",
+		'the message stands without the line it was raised on';
+
+	is Genesis::Top::_without_backtrace("the provider fell over\n"),
+		'the provider fell over',
+		'a message with nothing behind it is left as it is';
+
+	is Genesis::Top::_without_backtrace("one\ntwo\n"), 'one two',
+		'and what is left is folded onto a line';
+
+	is Genesis::Top::_without_backtrace(undef), '',
+		'an undefined text answers an empty string';
+};
+
 subtest 'a refusal with no bullets carries only its first line' => sub {
 	plan tests => 2;
 

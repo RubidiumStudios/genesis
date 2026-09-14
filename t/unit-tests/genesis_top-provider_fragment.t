@@ -250,10 +250,37 @@ PAIRC
 	}
 };
 
+# Both provider-load refusals interpolate what the failed require said, and
+# under Carp::Always that is the message plus the frames behind it.
+subtest 'a provider that will not load is refused without its stack' => sub {
+	plan tests => 4;
+
+	my $top = load_with(concourse());
+
+	# The file is loaded by now, so marking its entry as one that failed is
+	# what makes the next require of it fail the way a broken provider would.
+	local $INC{'Genesis/CI/Compiler/Providers/Concourse.pm'} = undef;
+
+	for my $probe (
+		['_provider_options_schema', 'the schema build'],
+		['_validate_capability_gates', 'the capability gates'],
+	) {
+		my ($method, $what) = @$probe;
+		my $refusal = '';
+		eval {$top->$method; 1} or $refusal = $@;
+		(my $flat = Genesis::Term::decolorize($refusal)) =~ s/\s+/ /g;
+
+		like $flat, qr/Failed to load CI provider 'concourse'/,
+			"$what names the provider whose file would not load";
+		unlike $flat, qr/Compilation failed in require at \S+ line/,
+			"and $what cuts the line the require failed on";
+	}
+};
+
 # A provider's own check runs inside the load, so what it does when it goes
 # wrong is the load's problem rather than the operator's.
 subtest 'a provider that goes wrong is still a configuration refusal' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	put_file('t/tmp/lib/Genesis/CI/Provider/Boom.pm', <<'BOOM');
 package Genesis::CI::Provider::Boom;
@@ -283,6 +310,8 @@ QUIET
 		'a provider that dies is reported as the refusal it is';
 	like $refusal, qr/the provider fell over/,
 		'and the operator is told what the provider said';
+	unlike $refusal, qr/Provider::Boom::validate_config/,
+		'without the frames Carp::Always folded in behind it';
 
 	lives_ok {load_with(automated_config('quiet'))}
 		'a provider that answers with a bare undef reports no error at all';
