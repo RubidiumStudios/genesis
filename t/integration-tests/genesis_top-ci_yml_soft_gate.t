@@ -6,6 +6,7 @@ use utf8;
 use lib 'lib';
 use lib 't';
 use helper;
+use Harness::Propagation;
 use Test::More;
 use Test::Output;
 use Genesis;
@@ -55,13 +56,7 @@ EOF
 			print $fh "    target: ci\n";
 			# An automated provider does the work unattended, so the
 			# skeleton carries the three blocks the schema requires of it.
-			print $fh "  shuttle:\n";
-			print $fh "    backend: s3\n";
-			print $fh "    bucket: pipes\n";
-			print $fh "  vault:\n";
-			print $fh "    url: https://vault.example.com\n";
-			print $fh "  locker:\n";
-			print $fh "    url: https://locker.example.com\n";
+			print $fh "$_\n" for automation_block_lines();
 		}
 		close $fh;
 	}
