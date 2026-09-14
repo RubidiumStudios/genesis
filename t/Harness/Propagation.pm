@@ -3249,12 +3249,23 @@ sub automation_blocks {
 	);
 }
 
+# without names blocks to leave out, because a row that proves what the schema
+# refuses of an automation needs a configuration with one of the three missing
+# and has nowhere else to get it.  The lines are rendered off the hash form, so
+# the two cannot drift apart.
 sub automation_block_lines {
-	return (
-		'  shuttle:', '    backend: s3', '    bucket: pipes',
-		'  vault:', '    url: https://vault.example.com',
-		'  locker:', '    url: https://locker.example.com',
-	);
+	my (%opts) = @_;
+	my %without = map {($_ => 1)} @{$opts{without} || []};
+	my %blocks  = automation_blocks();
+
+	my @lines;
+	for my $block (qw/shuttle vault locker/) {
+		next if $without{$block};
+		push @lines, "  $block:";
+		push @lines, sprintf('    %s: %s', $_, $blocks{$block}{$_})
+			for sort keys %{$blocks{$block}};
+	}
+	return @lines;
 }
 
 # }}}

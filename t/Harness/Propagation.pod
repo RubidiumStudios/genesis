@@ -919,6 +919,11 @@ under a C<pipeline:> key, for a file that writes the configuration as text.
 Neither answers the C<pipeline:> key itself, so a caller puts the blocks
 beside whatever else its own pipeline block holds.
 
+C<automation_block_lines> takes C<without>, an arrayref naming blocks to leave
+out, so a row that proves what the schema refuses of an automation missing one
+of the three builds that shape here rather than writing the lines itself.  The
+lines are rendered off the hash form, so the two answers cannot drift apart.
+
 =head2 ready_envs($h, %opts)
 
 The five things every walking row needs before it can run a command, which
