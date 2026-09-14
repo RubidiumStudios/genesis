@@ -2466,6 +2466,11 @@ branch's own name, and an empty C<control_branch> is refused beside it,
 because nothing can be read from a branch with no name. Every refusal exits
 C<Genesis::Exit::CONFIG>.
 
+The url is asked of git only where C<repository> was not configured, since
+the repository is the one value derived from the url and asking costs a fork
+on every command. So a configured repository is the only way C<uri> comes
+back undef.
+
 The answer is resolved once and kept, so the refusals land at configuration
 load rather than at the first read.
 

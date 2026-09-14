@@ -158,6 +158,21 @@ subtest 'the MVP supports GitHub and says so' => sub {
 		'the ssh form parses to owner/repo';
 };
 
+subtest 'the url is asked of git only where it is needed' => sub {
+	plan tests => 2;
+
+	with_remote('git@github.com:team/bosh.git');
+
+	my $named = load_with("pipeline:\n  enabled: true");
+	is $named->source_control_uri, undef,
+		'a named repository leaves the fetch url unasked for';
+
+	my $derived = load_with("pipeline:\n  enabled: true",
+		derive_repository => 1);
+	is $derived->source_control_uri, 'git@github.com:team/bosh.git',
+		'and the url is read where the repository comes out of it';
+};
+
 subtest 'a required flag can be a predicate' => sub {
 	plan tests => 3;
 
