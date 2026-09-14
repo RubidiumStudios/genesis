@@ -188,6 +188,25 @@ subtest 'a second harness arms its own plan, not the first harness plan' => sub 
 		'which the second one never wrote into');
 };
 
+subtest 'the two shapes an environment file refuses are named' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+
+	ok(!eval {write_env_file($h, 'qa',
+			genesis  => {pipeline => 'a scalar'},
+			pipeline => {manual_gate => 1}); 1},
+		'a scalar under genesis beside a pipeline block is refused');
+	like($@, qr/genesis\.pipeline is not a hash/,
+		'and the refusal names the key that cannot fold');
+
+	ok(!eval {write_env_file($h, 'qa',
+			genesis => {pipeline => {track_additional_files => [[]]}}); 1},
+		'a list holding a reference is refused');
+	like($@, qr/the list pipeline\.track_additional_files/,
+		'and the refusal names the whole path, not the leaf alone');
+};
+
 subtest 'a whole configuration can be staged without a commit' => sub {
 	plan tests => 2;
 
