@@ -10,6 +10,32 @@ require_ok "IPv4::Address";
 require_ok "IPv4::Span";
 require_ok "IPv4::Range";
 
+# Every ordering of a list, so a test can assert that a result does not depend
+# on the order its inputs arrive in.  Kept local rather than pulled from CPAN so
+# these tests travel with the modules if they are extracted.
+sub permutations {
+  my @items = @_;
+  return ([]) unless @items;
+  my @out;
+  for my $i (0 .. $#items) {
+    my @rest = @items;
+    my ($pick) = splice(@rest, $i, 1);
+    push @out, [$pick, @$_] for permutations(@rest);
+  }
+  return @out;
+}
+
+# The set of addresses a range covers, as a hash, for comparing coverage
+# without depending on how the range chose to divide itself into spans.
+sub address_set {
+  my (@ranges) = @_;
+  my %set;
+  for my $r (@ranges) {
+    $set{$_->address} = 1 for IPv4::Range->new($r)->addresses;
+  }
+  return \%set;
+}
+
 # Test IPv4->new
 subtest 'IPv4' => sub {
   plan tests => 4;
@@ -1035,8 +1061,21 @@ subtest 'IPv4::Range' => sub {
     dies_ok { IPv4::Range->new(bless({}, 'Unknown')) } 'new() with invalid object type dies';
   };
 
+  # compact() is a union: the result covers every address its inputs covered and
+  # no others, whatever order those inputs arrive in.  Two properties of the
+  # method make it easy to test far less than that name suggests.  It sorts its
+  # spans by (start, end) first, so a contained span that shares its container's
+  # start is hoisted to the front and becomes the container, which turns the
+  # interesting case into the trivial one; a contained span therefore only
+  # reaches the merge branch when it starts strictly later.  And IPv4->new()
+  # returns an Address, a Span or a Range according to the value it is given, so
+  # a receiver built from a contiguous literal is a Span and never enters this
+  # method at all.  The cases below construct Ranges explicitly and vary the
+  # offset of the contained span for that reason.
   subtest 'compact method' => sub {
-    plan tests => 4;
+    plan tests => 20;
+
+    # The basic contract: overlapping spans become one, separate spans stay so.
     my $range = IPv4::Range->new(
       '192.168.1.1-192.168.1.5',
       '192.168.1.6-192.168.1.10',
@@ -1053,6 +1092,60 @@ subtest 'IPv4::Range' => sub {
     $range->compact();
     is($range->spans, 2, 'compact() maintains separate non-contiguous spans');
     is($range->range, '192.168.1.1-192.168.1.5,192.168.2.1-192.168.2.5', 'compact() returns correct range for non-contiguous spans');
+
+    # The boundary of the merge condition, which admits a span starting at
+    # end + 1.
+    is("".IPv4::Range->new('10.0.0.0-10.0.0.7', '10.0.0.8-10.0.0.9'), '10.0.0.0-10.0.0.9',
+      'a span starting one past the end is adjacent and merges');
+    is("".IPv4::Range->new('10.0.0.0-10.0.0.7', '10.0.0.9-10.0.0.10'), '10.0.0.0-10.0.0.7,10.0.0.9-10.0.0.10',
+      'a span leaving a gap of one address stays separate');
+    is("".IPv4::Range->new('10.0.0.0-10.0.0.7', '10.0.0.0-10.0.0.7'), '10.0.0.0-10.0.0.7',
+      'two identical spans collapse to one');
+
+    # A span wholly inside the one before it must leave the range alone.  Adding
+    # a single address to a range is the common way to reach this, and the
+    # address almost never lands on the range's first address.
+    is("".(IPv4::Range->new('10.0.0.0-10.0.0.2') + IPv4->address('10.0.0.1')), '10.0.0.0-10.0.0.2',
+      'an address inside the range leaves it unchanged');
+    is("".(IPv4::Range->new('10.0.0.0-10.0.0.2') + IPv4->address('10.0.0.0')), '10.0.0.0-10.0.0.2',
+      'the first address of the range leaves it unchanged');
+    is("".(IPv4::Range->new('10.0.0.0-10.0.0.2') + IPv4->address('10.0.0.2')), '10.0.0.0-10.0.0.2',
+      'the last address of the range leaves it unchanged');
+    is("".(IPv4::Range->new('10.0.0.0-10.0.0.2') + IPv4->address('10.0.0.3')), '10.0.0.0-10.0.0.3',
+      'an adjacent address still extends the range');
+    is("".(IPv4::Range->new('10.0.0.0-10.0.0.2') + IPv4->address('10.0.0.9')), '10.0.0.0-10.0.0.2,10.0.0.9',
+      'a disjoint address still becomes its own span');
+
+    is("".IPv4::Range->new('10.0.0.0-10.0.0.31')->add(IPv4->new('10.0.0.8-10.0.0.15')), '10.0.0.0-10.0.0.31',
+      'a contained span leaves the enclosing span alone');
+    is("".IPv4::Range->new('10.0.0.0-10.0.0.31')->add(IPv4->new('10.0.0.16-10.0.0.63')), '10.0.0.0-10.0.0.63',
+      'an overlapping span that reaches further still extends the range');
+    is("".IPv4::Range->new('10.0.0.0-10.0.0.31', '10.0.0.8-10.0.0.10', '10.0.0.20-10.0.0.22'), '10.0.0.0-10.0.0.31',
+      'several contained spans in sequence all leave the range alone');
+    is("".(IPv4::Range->new('10.0.0.0-10.0.0.7,10.0.0.16-10.0.0.23') + IPv4->new('10.0.0.2-10.0.0.4')),
+      '10.0.0.0-10.0.0.7,10.0.0.16-10.0.0.23',
+      'a contained span does not disturb the spans that follow it');
+
+    # Shortening the range on a contained span also suppresses a later merge that
+    # should have happened, so the two failures are worth separating.
+    is("".IPv4::Range->new('10.0.0.0-10.0.0.31', '10.0.0.8-10.0.0.15', '10.0.0.20-10.0.0.40'), '10.0.0.0-10.0.0.40',
+      'a contained span does not prevent a later span from merging');
+
+    # Order independence is the property the sort makes easy to lose sight of,
+    # and it holds whatever geometry the spans have.
+    my @spans = ('10.0.0.0-10.0.0.31', '10.0.0.8-10.0.0.15', '10.0.0.40-10.0.0.47');
+    my %results;
+    $results{"".IPv4::Range->new(@$_)}++ for permutations(@spans);
+    is_deeply([sort keys %results], ['10.0.0.0-10.0.0.31,10.0.0.40-10.0.0.47'],
+      'compact() gives the same range for every ordering of the same spans');
+
+    # Coverage, stated as a set so it does not care how the spans were divided.
+    my $want = address_set(@spans);
+    my %have = map { $_->address => 1 } IPv4::Range->new(@spans)->addresses;
+    is_deeply([sort grep { !$have{$_} } keys %$want], [],
+      'compact() loses no address its inputs covered');
+    is_deeply([sort grep { !$want->{$_} } keys %have], [],
+      'compact() invents no address its inputs did not cover');
   };
 
   subtest 'simplify method' => sub {
@@ -1450,40 +1543,6 @@ subtest 'IPv4::Range' => sub {
     $cidr_count = $range->cidrs();
     is($cidr_count, 0, 'cidrs() in scalar context returns count of 0 for empty range');
   };
-};
-
-# A span that sits wholly inside the one before it must leave the range alone.
-# Genesis folds a reserved address into a static range with `+=`, and when that
-# address is already inside the range, compaction used to rewrite the enclosing
-# span to end at the contained one, quietly dropping every address after it.
-subtest 'compaction with contained spans' => sub {
-  plan tests => 8;
-
-  my $range = IPv4->new();
-  $range += '10.0.0.0-10.0.0.2';
-  my ($three) = $range->slice(3);
-
-  is("".($three + IPv4->address('10.0.0.1')), '10.0.0.0-10.0.0.2',
-    'adding an address inside the range leaves it unchanged');
-  is("".($three + IPv4->address('10.0.0.0')), '10.0.0.0-10.0.0.2',
-    'adding the first address of the range leaves it unchanged');
-  is("".($three + IPv4->address('10.0.0.2')), '10.0.0.0-10.0.0.2',
-    'adding the last address of the range leaves it unchanged');
-  is("".($three + IPv4->address('10.0.0.3')), '10.0.0.0-10.0.0.3',
-    'an adjacent address still extends the range');
-  is("".($three + IPv4->address('10.0.0.9')), '10.0.0.0-10.0.0.2,10.0.0.9',
-    'a disjoint address still becomes its own span');
-
-  my $wide = IPv4->new('10.0.0.0-10.0.0.31');
-  is("".IPv4->new($wide)->add(IPv4->new('10.0.0.8-10.0.0.15')), '10.0.0.0-10.0.0.31',
-    'a contained span leaves the enclosing span alone');
-  is("".IPv4->new($wide)->add(IPv4->new('10.0.0.16-10.0.0.63')), '10.0.0.0-10.0.0.63',
-    'an overlapping span that reaches further still extends the range');
-
-  my $split = IPv4->new('10.0.0.0-10.0.0.7,10.0.0.16-10.0.0.23');
-  $split += IPv4->new('10.0.0.2-10.0.0.4');
-  is("".$split, '10.0.0.0-10.0.0.7,10.0.0.16-10.0.0.23',
-    'a contained span does not disturb the spans that follow it');
 };
 
 done_testing();
