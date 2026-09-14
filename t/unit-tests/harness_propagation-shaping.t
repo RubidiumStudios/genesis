@@ -188,6 +188,21 @@ subtest 'a second harness arms its own plan, not the first harness plan' => sub 
 		'which the second one never wrote into');
 };
 
+subtest 'a whole configuration can be staged without a commit' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $before = ref_in($h->a, $h->control);
+	Harness::Propagation::_write_whole_config($h,
+		{deployment_type => 'bosh', version => '3'}, commit => 0);
+
+	is(ref_in($h->a, $h->control), $before,
+		'the control branch has not moved');
+	my ($staged) = run({dir => $h->a}, 'git', 'diff', '--cached',
+		'--name-only');
+	like($staged, qr{\.genesis/config}, 'and the file is waiting in the index');
+};
+
 subtest 'a kit lands its contents at dev, not a directory below it' => sub {
 	plan tests => 2;
 
