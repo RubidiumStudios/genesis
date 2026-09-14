@@ -1851,8 +1851,8 @@ sub _validate_pipeline_config {
 		my $params  = $self->_merged_env_params($env_name);
 		my $genesis = $params->{genesis};
 		next unless ref($genesis) eq 'HASH';
-		my $block = $genesis->{pipeline} or next;
-		$self->_validate_env_pipeline_block($env_name, $block);
+		next unless exists $genesis->{pipeline};
+		$self->_validate_env_pipeline_block($env_name, $genesis->{pipeline});
 	}
 
 	return 1;
@@ -1880,7 +1880,21 @@ sub _merged_env_params {
 	for my $file (Genesis::Env::relate_by_name(
 			$env_name, undef, $self->path, $self->path)) {
 		next unless -f $file;
-		my $params = load_yaml_file($file) or next;
+
+		# A file that will not parse is refused rather than skipped: under
+		# D79 a key can live anywhere in the hierarchy, so a file nobody
+		# could read is a key nobody can see, which is the silent wrong
+		# answer this read exists to prevent.
+		my ($params, $rc, $err) = load_yaml_file($file);
+		bail({exitcode => CONFIG},
+			"An environment file could not be read as YAML.\n".
+			"  #C{%s}%s\n".
+			"Every environment file has to parse before anything can be ".
+			"said about what the pipeline reads from it.",
+			humanize_path($file), ($err ? "\n$err" : '')
+		) if $rc;
+		next unless ref($params) eq 'HASH';
+
 		%merged = %{deep_merge(\%merged, $params)};
 	}
 	return \%merged;
@@ -1926,21 +1940,50 @@ sub _validate_env_pipeline_block {
 	# declared, and the other list keys are owed the same courtesy, so a
 	# bare string becomes a one-element list first.  Nothing is split on
 	# the way, because a crontab expression carries commas of its own.
-	for my $key (qw/redeploy_cron track_dependencies track_additional_files/) {
+	my @list_keys = qw/redeploy_cron track_dependencies track_additional_files/;
+	for my $key (@list_keys) {
 		$block{$key} = [$block{$key}]
 			if defined $block{$key} && !ref $block{$key};
 	}
+
+	# The shape checks below read the block as the operator wrote it.  Each
+	# list key declares envsplit, and Genesis::Config answers a value that
+	# is not a list by splitting it as though it came from the environment,
+	# which turns a mapping into the address of a reference and hides the
+	# fault from anything that reads the block afterwards.
+	my %raw = map {$_ => $block{$_}} @list_keys;
 
 	my @errors;
 	my $probe = Genesis::Config->new(undef, 0,
 		{pipeline => ref($block) eq 'HASH' ? \%block : $block});
 	eval {$probe->validate({pipeline => $self->_pipeline_env_keys_schema}); 1}
-		or push @errors, _first_errors($@);
+		or do {
+			# The caught text is taken before anything else is called,
+			# because the readers below run evals of their own and would
+			# clear it.  A refusal we cannot pick apart is still a refusal,
+			# so that text stands in wherever there are no bullets in it to
+			# read; without the fallback an eval that failed would leave
+			# nothing behind and the block would pass.
+			my $caught = $@;
+			my @found  = _first_errors($caught);
+			push @errors, @found ? @found
+			                     : decolorize($caught // 'validation failed');
+		};
+
+	# A mapping written where a list is declared is refused outright,
+	# before any entry of it is read.
+	for my $key (@list_keys) {
+		next unless defined $raw{$key};
+		next unless ref($raw{$key}) && ref($raw{$key}) ne 'ARRAY';
+		push @errors, sprintf(
+			"#R{genesis.pipeline.%s}: expected a list of strings", $key);
+	}
 
 	# Two shapes the declaration cannot state.  A dependency entry is a
 	# deployment type here or <env>/<type> elsewhere, and the BOSH-config
 	# key is a boolean or a list of config type names.
-	for my $entry (@{$block{track_dependencies} || []}) {
+	for my $entry (@{ref($raw{track_dependencies}) eq 'ARRAY'
+			? $raw{track_dependencies} : []}) {
 		push @errors, sprintf(
 			"#R{genesis.pipeline.track_dependencies}: not a deployment ".
 			"type or an #ri{<env>/<type>} pair: #ri{%s}",

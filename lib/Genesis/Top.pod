@@ -2024,9 +2024,11 @@ about it.
 The hierarchy comes from C<< Genesis::Env::relate_by_name >>, which is given
 the deployment root as both of its bases, because with no other environment
 to relate to every token of the name is unique. Files that are not there are
-skipped, and so is one that will not load, so the merge is over what the
-root actually holds. No C<Genesis::Env> is built and no kit is needed, which
-is what lets the check run as the configuration loads.
+skipped, so the merge is over what the root actually holds, but a file that
+is there and will not parse is refused rather than skipped: a key can live
+anywhere in the hierarchy, so a file nobody can read is a key nobody can
+see. No C<Genesis::Env> is built and no kit is needed, which is what lets
+the check run as the configuration loads.
 
 B<Parameters:>
 
@@ -2040,6 +2042,18 @@ The environment's name, which is also the stem of its leaf file.
 
 B<Returns:> A hash reference of the merged parameters, empty where the
 environment has no files at all.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"An environment file could not be read as YAML."> - raised at
+C<Genesis::Exit::CONFIG>, naming the file on the line below and carrying what
+the parser said, when a file in the hierarchy is there and will not parse.
+
+=back
 
 B<Examples:>
 
@@ -2081,6 +2095,17 @@ C<track_dependencies> entry is a deployment type at this environment or an
 C<< <env>/<type> >> pair elsewhere, and C<track_bosh_configs> is a boolean or
 a list of config type names.
 
+Those checks read the block as the operator wrote it, taken before the
+validator runs. Each list key declares C<envsplit>, and C<Genesis::Config>
+answers a value that is not a list by splitting it as though it came from the
+environment, which turns a mapping into the address of a reference. A mapping
+written where a list belongs is therefore refused outright, before any entry
+of it is read.
+
+A refusal the validator raises that carries no bullets to pick apart is
+reported as it stands, so an C<eval> that failed never leaves the block
+looking valid.
+
 B<Parameters:>
 
 =over 4
@@ -2105,8 +2130,9 @@ B<Errors:>
 
 C<"Configuration validation failed for environment ..."> - raised at
 C<Genesis::Exit::CONFIG> with one bullet per fault, which are the schema's
-own refusals with their keys named as the environment file spells them, and
-the two shape refusals above.
+own refusals with their keys named as the environment file spells them, the
+shape refusals above, and C<"genesis.pipeline.<key>: expected a list of
+strings"> where a mapping was written in a list's place.
 
 =back
 
@@ -2146,7 +2172,9 @@ list.
 
 =back
 
-B<Returns:> A list of one-line error strings.
+B<Returns:> A list of one-line error strings, empty where the text carries no
+bullet at all, which is the caller's cue to report the caught text as it
+stands.
 
 B<Examples:>
 

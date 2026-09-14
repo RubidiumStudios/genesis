@@ -1361,6 +1361,11 @@ sub track_additional_files {
 	my ($self) = @_;
 
 	my $entries = $self->lookup('genesis.pipeline.track_additional_files', []);
+
+	# The declaration is a list and the validator promotes a bare string to
+	# a one-element one, so the reader does the same.  An operator who
+	# named a single path got no refusal, and used to get no file either.
+	$entries = [$entries] if defined $entries && !ref $entries;
 	return () unless ref($entries) eq 'ARRAY' && @$entries;
 
 	require Service::Git;
