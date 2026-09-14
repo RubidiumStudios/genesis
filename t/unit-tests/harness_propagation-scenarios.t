@@ -259,4 +259,21 @@ subtest 'the automation blocks answer in both forms' => sub {
 		'the line form says the same thing, ready to sit under a pipeline key');
 };
 
+subtest 'the automated shape carries what an automation requires' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	automated($h);
+
+	my ($config) = load_yaml_file($h->a . '/.genesis/config');
+	is($config->{pipeline}{provider}{type}, 'concourse',
+		'the provider is an automated one');
+	is($config->{pipeline}{source_control}{auth}{vault}, 'secret/ci/git',
+		'the clone credential is seeded beside it');
+	is($config->{pipeline}{source_control}{identity}{email},
+		'ci@genesis.example.com', 'and so is the committer identity');
+	is($config->{pipeline}{shuttle}{backend}, 's3',
+		'along with the three blocks the schema requires of an automation');
+};
+
 done_testing;
