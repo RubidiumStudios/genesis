@@ -1344,6 +1344,11 @@ sub diverge {
 	my $local  = defined $opts{local}  ? $opts{local}  : 1;
 	my $remote = defined $opts{remote} ? $opts{remote} : 1;
 
+	# Copy A's branch is cut before the teammate publishes anything, because
+	# a branch cut afterwards starts at the teammate's tip and a call with
+	# no local commits then reads in-sync rather than behind.
+	$self->_ensure_branch('a', $branch) if defined $branch;
+
 	$self->_ensure_branch('b', $branch) if defined $branch;
 	$self->_commit_in('b', $branch,
 		files   => {"from-b-$_.yml" => "---\nn: $_\n"},
@@ -1353,7 +1358,6 @@ sub diverge {
 
 	$self->refresh('a', $branch // $self->{control}) if $remote;
 
-	$self->_ensure_branch('a', $branch) if defined $branch;
 	$self->_commit_in('a', $branch,
 		files   => {"from-a-$_.yml" => "---\nn: $_\n"},
 		message => "a local change $_",

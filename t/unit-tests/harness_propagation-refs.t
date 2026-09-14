@@ -87,4 +87,23 @@ subtest "copy A's own publish moves copy A's tracking ref" => sub {
 	is("$ahead $behind", '0 0', 'copy A reads in-sync with no second refresh');
 };
 
+subtest 'a divergence with no local commits still reads behind' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $branch = $h->slug('qa');
+	# Copy A is left without the branch, which is the shape that shows where
+	# the branch is cut from: a branch cut after the teammate publishes
+	# starts at the teammate's tip and reads in-sync.
+	delete_local($h, 'a', $branch);
+	refresh($h, 'a', $branch);
+	refresh($h, 'b', $branch);
+
+	diverge($h, $branch, local => 0, remote => 2);
+	my ($ahead, $behind) = counts($h->a, $branch);
+	is($ahead, 0, 'copy A wrote nothing of its own');
+	is($behind, 2, 'and it stands two commits behind what the teammate published');
+};
+
 done_testing;
