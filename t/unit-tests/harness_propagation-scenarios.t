@@ -260,7 +260,7 @@ subtest 'a configuration can be loaded through one pipeline block' => sub {
 };
 
 subtest 'the automation blocks answer in both forms' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my %blocks = automation_blocks();
 	is_deeply([sort keys %blocks], ['locker', 'shuttle', 'vault'],
@@ -272,6 +272,11 @@ subtest 'the automation blocks answer in both forms' => sub {
 		'  vault:', '    url: https://vault.example.com',
 		'  locker:', '    url: https://locker.example.com'],
 		'the line form says the same thing, ready to sit under a pipeline key');
+
+	is_deeply([automation_block_lines(without => ['vault'])],
+		['  shuttle:', '    backend: s3', '    bucket: pipes',
+		 '  locker:', '    url: https://locker.example.com'],
+		'and a named block can be left out, for a row about what is missing');
 };
 
 subtest 'the automated shape carries what an automation requires' => sub {
