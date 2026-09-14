@@ -115,8 +115,12 @@ B<Errors:>
 
 =item *
 
-C<< "A branch session is already open in %s, and sessions are never nested." >>
--- raised on a second C<begin>. C<%s> is the working tree root.
+C<< "A branch session is already open in %s.  Sessions are sequential and are
+never nested, so a command that needs another branch finishes the open session
+first." >> -- raised on a second C<begin>. C<%s> is the working tree root.
+Sessions are keyed on the C<Service::Git> handle, so this refusal is about one
+working tree, and a caller holding a handle for a second working tree opens a
+session there at the same time.
 
 =item *
 

@@ -67,13 +67,13 @@ were no changes.
 =head2 Branch tracking
 
 With C<< track_branch => 1 >>, the branch checked out at construction is
-remembered and restored -- explicitly via C<restore_branch>, or at process
-exit via C<DESTROY>. Commands that check out an environment branch to do
-their work use this so an operator is not left somewhere unexpected.
+remembered, and C<restore_branch> puts the operator back on it. Commands that
+check out an environment branch to do their work call it so an operator is not
+left somewhere unexpected.
 
-Because the instance is a flyweight held for the process lifetime, C<DESTROY>
-fires during global destruction rather than when a caller drops its
-reference.
+C<DESTROY> restores nothing. The last-resort net for a command that exits
+partway through belongs to the branch session, which registers it through
+C<at_exit>. See L<Service::Git::Session>.
 
 =head1 METHODS
 
@@ -191,15 +191,18 @@ B<Examples:>
 
 =head2 DESTROY
 
-Restores the tracked branch at process exit.
+Drops the handle's session and evicts its entry from the flyweight table, so
+a process that lets a handle go does not leave a session behind claiming to be
+open.
 
-Only acts when C<track_branch> was requested and the branch has actually
-changed. Working-tree changes are discarded first -- a checkout would fail
-against a dirty tree, and leaving the operator on the wrong branch is the
-worse outcome.
+No branch is restored here. That safety net has moved to the session, which
+registers a last-resort abort through C<at_exit> instead. A net in C<DESTROY>
+fires too late to be useful, because C<bail> exits when it is not inside an
+C<eval>, Perl runs C<END> before global destruction, and the order after that
+is undefined.
 
-Both commands run in pass/fail mode: this runs during global destruction,
-where dying achieves nothing useful.
+Because the instance is a flyweight held for the process lifetime, this fires
+during global destruction rather than when a caller drops its reference.
 
 B<Returns:> Nothing.
 
@@ -275,14 +278,15 @@ B<Examples:>
 
 =head2 session
 
-  my $session = $git->session(control => 'main');
+  my $session = $git->session(control => $top->control_branch);
 
-The one branch session for this handle, built on the first ask and answered
-with afterwards. Every branch change Genesis makes goes through it.
+The one branch session for this handle, built on the first ask and returned
+unchanged afterwards. Every branch change Genesis makes goes through it.
 
-It is keyed on the handle rather than on the repository, so a caller holding
-two handles for two working trees holds one session on each, and the two never
-tread on one another.
+The session is keyed on the handle rather than on the repository, which is what
+makes sessions sequential within a working tree and independent between two of
+them. A caller holding handles for two working trees holds one session on each
+at the same time, while a second C<begin> on one handle is refused.
 
 The session is returned closed. Nothing is read from the repository and
 nothing is written to it until C<< $session->begin >> runs. See
@@ -303,7 +307,7 @@ B<Returns:> The session for this handle.
 
 B<Examples:>
 
-  my $session = $git->session(control => 'main');
+  my $session = $git->session(control => $top->control_branch);
   # returns the session, closed
 
   my $same = $git->session;

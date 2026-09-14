@@ -79,8 +79,15 @@ sub begin {
 	my ($self) = @_;
 	my $git = $self->{git};
 
-	bail("A branch session is already open in %s, and sessions are never ".
-		"nested.", $git->root) if $self->{active};
+	# I9: within one working tree sessions are sequential and never nested.
+	# A command that needs control after a deployment branch finishes the
+	# first session before it begins the second.
+	bail(
+		"A branch session is already open in #C{%s}.\n\n".
+		"Sessions are sequential and are never nested, so a command that ".
+		"needs another branch finishes the open session first.",
+		$git->root
+	) if $self->{active};
 
 	$git->preflight;
 
