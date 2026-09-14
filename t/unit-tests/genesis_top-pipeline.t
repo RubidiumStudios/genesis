@@ -19,8 +19,8 @@ use_ok 'Genesis::Top';
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# Helper: top with CI config primed (so ci_configured is true) and a
-# dev kit linked so env-file validation passes.
+# Helper: top with the pipeline block primed, so pipeline_enabled is true,
+# and a dev kit linked so env-file validation passes.
 sub make_ci_top {
 	my $top = make_top(name => 'pipeline-test', no_vault => 1);
 	$top->link_dev_kit('t/src/simple');
@@ -51,7 +51,7 @@ subtest 'pipeline_env_names - empty list when CI is not configured' => sub {
 	plan tests => 1;
 
 	# make_top creates .genesis/config with no pipeline.* keys, so
-	# ci_configured is false
+	# pipeline_enabled is false
 	my $top = make_top(name => 'no-ci', no_vault => 1);
 	is_deeply [$top->pipeline_env_names], [],
 		'no-CI top returns empty env list';
