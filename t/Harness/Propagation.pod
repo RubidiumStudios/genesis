@@ -933,7 +933,7 @@ makes every call from the nth onward the armed one, and C<return>, which says
 what the skipped call answers.  C<fail_on> cannot make this shape, because a
 death is not a silence.
 
-=head2 load_with($h, $body)
+=head2 load_with($h, $body, %opts)
 
 Commits C<$body> as the repository's whole pipeline block on the control
 branch, builds a C<Genesis::Top> on copy A, reads its configuration, and
@@ -942,6 +942,11 @@ configuration is written round it, so a row says what it is proving and
 nothing else.  Each load carries a count of its own beside the configuration,
 because two rows in a row can ask for the same block and a commit needs a
 delta to make.
+
+The one option is C<deployment_type>, which names the type the configuration
+declares and defaults to C<bosh>.  The type is a top-level key rather than
+part of the pipeline block, so a file whose rows vary it has nowhere in the
+body to say so and names it in the call instead.
 
 =head2 automated_config($type, @lines)
 
