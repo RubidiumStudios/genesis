@@ -58,7 +58,7 @@ sub manual_config {
 }
 
 subtest "the label is the provider's alone" => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	# A value that is a fine Concourse pipeline name and a hopeless git
 	# ref component, so a ref check would have refused it.
@@ -76,16 +76,32 @@ subtest "the label is the provider's alone" => sub {
 	# provider's own label, so the sweep reads each line that names it
 	# together with the two lines below it rather than the whole file,
 	# which would flag every one of those legitimate reads.
+	#
+	# Both spellings of the read open the window, because the label is
+	# reached through the dotted key in some files and walked out of the
+	# parsed configuration in others, and a branch built at either one is
+	# the thing D66 rules out.  A branch is named by the word, by a ref
+	# path, by the two porcelain forms that create one without saying
+	# branch at all, and by the HEAD refspec a push composes.  The two
+	# porcelain forms allow punctuation between the verb and its flag,
+	# because git is called here as a list of arguments far more often
+	# than as a command line.
+	my @pms = sort split /\n/, qx{find lib -name '*.pm'};
+	cmp_ok scalar(@pms), '>', 0,
+		'the sweep has files to read, so a green row means something';
+
 	my @offenders;
-	for my $pm (sort split /\n/, qx{find lib -name '*.pm'}) {
+	for my $pm (@pms) {
 		open my $fh, '<', $pm or next;
 		my @lines = <$fh>;
 		close $fh;
 		for my $i (0 .. $#lines) {
-			next unless $lines[$i] =~ m{pipeline\.name};
+			next unless $lines[$i] =~ m{pipeline\.name}
+			         || $lines[$i] =~ m{\{pipeline\}\s*(?:->)?\s*\{name\}};
 			my $last = $i + 2 > $#lines ? $#lines : $i + 2;
 			push @offenders, sprintf('%s:%d', $pm, $i + 1)
-				if join('', @lines[$i .. $last]) =~ m{branch|refs/heads};
+				if join('', @lines[$i .. $last]) =~
+					m{branch|refs/heads|checkout\W+-b\b|switch\W+-c\b|HEAD:};
 		}
 	}
 	is_deeply \@offenders, [], 'and no branch name is composed from it'
@@ -93,7 +109,7 @@ subtest "the label is the provider's alone" => sub {
 };
 
 subtest 'the two progression keys are repository-wide' => sub {
-	plan tests => 6;
+	plan tests => 7;
 
 	my $top = load_with(manual_config());
 	is $top->config->get('pipeline.recreate_on_deploy'), 'never',
@@ -102,6 +118,12 @@ subtest 'the two progression keys are repository-wide' => sub {
 		lives_ok {load_with(manual_config("recreate_on_deploy: $value"))}
 			"$value validates";
 	}
+
+	# The three rows above would pass against a free string, so one row
+	# holds the key to its three values.
+	throws_ok {load_with(manual_config('recreate_on_deploy: sometimes'))}
+		qr/pipeline\.recreate_on_deploy:\s+unknown\s+value:\s+sometimes/s,
+		'a fourth value is refused by name';
 
 	write_env_file($h, 'qa', pipeline => {recreate_on_deploy => 'always'});
 	throws_ok {load_with(manual_config())}
