@@ -150,6 +150,10 @@ subtest 'a mapping written where a list belongs is refused' => sub {
 	# The key declares envsplit, so without a check on the block as it was
 	# written the validator splits the mapping as though it came from the
 	# environment and leaves the address of a reference behind.
+	#
+	# The row rewrites an environment file, and the rows below load the same
+	# repository, so what was there is put back.
+	my $env_file = slurp($h->a.'/qa.yml');
 	throws_ok {
 		commit_on_control($h, files => {'qa.yml' => join("\n",
 			'---', 'kit:', '  name:    dev', '  version: latest',
@@ -158,6 +162,7 @@ subtest 'a mapping written where a list belongs is refused' => sub {
 		Genesis::Top->new($h->a, no_vault => 1)->config;
 	} qr/genesis\.pipeline\.track_dependencies: expected a list of strings/,
 		'the mapping is refused by name rather than stringified';
+	commit_on_control($h, files => {'qa.yml' => $env_file});
 };
 
 subtest 'a refusal with no bullets in it is still a refusal' => sub {
