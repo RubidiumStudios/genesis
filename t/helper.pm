@@ -1167,6 +1167,32 @@ sub strip_comment {
 	return $line;
 }
 
+# A stand-in for an environment's own vault.  A row that reads through
+# Genesis::Env::vault cannot spin a real vault, because spinning one switches
+# the safe target the repository's default vault resolves through, so it hands
+# this object in instead.  The stand-in records the path it was asked for in
+# the ledger the caller passes and answers the same fixed set every time, and
+# it asserts nothing of its own, so what the row means stays in the row.
+sub standin_vault {
+	my ($asked, $answer) = @_;
+	return helper::StandinVault->new($asked, $answer);
+}
+
+{
+	package helper::StandinVault;
+
+	sub new {
+		my ($class, $asked, $answer) = @_;
+		return bless({asked => $asked, answer => $answer}, $class);
+	}
+
+	sub get {
+		my ($self, $path) = @_;
+		push @{$self->{asked}}, $path;
+		return $self->{answer};
+	}
+}
+
 sub wrap_obj {
 	my ($obj, %overrides) = @_;
 	return MockWrapper->new($obj, %overrides);
