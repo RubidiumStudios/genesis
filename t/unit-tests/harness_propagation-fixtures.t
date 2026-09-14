@@ -243,4 +243,16 @@ subtest 'a harness with no vault refuses to break one' => sub {
 		'and so does the restore');
 };
 
+# Last in the file on purpose.  Before the refusal existed this row cleared
+# the whole of /secret/ in the shared fixture vault, so it is kept behind
+# every row that stands on a record.
+subtest 'a mount wider than the default is refused' => sub {
+	plan tests => 2;
+
+	ok(!eval {make_harness(envs => ['qa'], exodus_mount => '/secret/'); 1},
+		'a mount the clearing would reach past is refused');
+	like($@, qr/shorter than the default/,
+		'and the refusal says what is wrong with it');
+};
+
 done_testing;

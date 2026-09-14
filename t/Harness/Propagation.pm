@@ -92,6 +92,13 @@ push @EXPORT, qw/
 	stale_set_delivery stage_unrelated modify_unrelated
 /;
 
+# $DEFAULT_EXODUS_MOUNT - the exodus mount a harness clears and owns {{{
+#
+# The vault fixture clears this subtree whole as it attaches, so a row may
+# name a mount below it and may not name one above it.
+our $DEFAULT_EXODUS_MOUNT = '/secret/exodus/';
+
+# }}}
 # _guard_env, _release_env - the fixture variables the parent has to hold {{{
 #
 # A fixture that arms a spawned command sets its variables in the parent
@@ -405,7 +412,7 @@ sub _newest_entry {
 	$self->fixture_vault;
 	my ($out, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
 			stderr => 0},
-		'safe', 'export', $path);
+		_real_safe(), 'export', $path);
 	return undef if $rc || !$out;
 	my $exported = eval {JSON::PP->new->decode($out)} or return undef;
 
@@ -483,7 +490,7 @@ sub make_harness {
 		kit       => $opts{kit},
 		embed     => $opts{embed},
 		roots     => {},
-		mount     => $opts{exodus_mount} // '/secret/exodus/',
+		mount     => $opts{exodus_mount} // $DEFAULT_EXODUS_MOUNT,
 	}, __PACKAGE__;
 
 	run({dir => $base, onfailure => "Failed to build R"},
@@ -1777,12 +1784,21 @@ sub fixture_vault {
 	my ($self) = @_;
 	return $self->{vault_target} if $self->{vault_target};
 
+	# The mount is cleared whole as the fixture attaches, so a mount shorter
+	# than the harness's own default is refused.  A row that named /secret/
+	# would take every record the fixture vault holds with it, including the
+	# ones another harness in the same file is standing on.
+	die sprintf("make_harness will not clear the exodus mount %s, because "
+		. "it is shorter than the default %s and the clearing takes the "
+		. "whole subtree\n", $self->exodus_mount, $DEFAULT_EXODUS_MOUNT)
+		if length($self->exodus_mount) < length($DEFAULT_EXODUS_MOUNT);
+
 	my $target = helper::vault_start('genesis-propagation-harness');
 	$self->{vault_target} = $target;
 	$self->{vault_url}    = $helper::VAULT_URL{$target};
 
 	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
-		'safe', 'rm', '-rf', $self->exodus_mount);
+		_real_safe(), 'rm', '-rf', $self->exodus_mount);
 
 	$self->{vault_log} = "$self->{base}/vault-reads.log";
 	my $bin = "$self->{base}/bin";
@@ -1829,7 +1845,7 @@ sub _write_record {
 		next unless defined $fields{$key};
 		run({env => {SAFE_TARGET => $self->{vault_target}},
 		     onfailure => "Failed to write $path:$key"},
-			'safe', 'set', $path, "$key=$fields{$key}");
+			_real_safe(), 'set', $path, "$key=$fields{$key}");
 	}
 	return $path;
 }
@@ -1951,8 +1967,11 @@ sub break_vault {
 
 	for my $path (@paths) {
 		my $aside = $path . '-aside';
-		run({env => {SAFE_TARGET => $self->{vault_target}}, passfail => 1},
-			'safe', 'move', $path, $aside);
+		my ($said, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
+				stderr => 0, passfail => 0},
+			_real_safe(), 'move', $path, $aside);
+		die "break_vault could not move $path aside: " . ($said // '') . "\n"
+			if $rc;
 		push @{$self->{broken}}, [$path, $aside];
 	}
 	return $self;
@@ -1965,8 +1984,11 @@ sub restore_vault {
 	die "restore_vault needs a vault fixture, and this harness has none\n"
 		unless $self->{vault_target};
 	for my $pair (@{delete($self->{broken}) || []}) {
-		run({env => {SAFE_TARGET => $self->{vault_target}}, passfail => 1},
-			'safe', 'move', $pair->[1], $pair->[0]);
+		my ($said, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
+				stderr => 0, passfail => 0},
+			_real_safe(), 'move', $pair->[1], $pair->[0]);
+		die "restore_vault could not put $pair->[0] back: " . ($said // '')
+		  . "\n" if $rc;
 	}
 	return $self;
 }
@@ -1992,7 +2014,7 @@ sub record_at {
 	$self->fixture_vault;
 	my ($out, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
 			stderr => 0, passfail => 0},
-		'safe', 'export', $path);
+		_real_safe(), 'export', $path);
 	return undef if $rc || !$out;
 	my $exported = eval {JSON::PP->new->decode($out)} or return undef;
 
