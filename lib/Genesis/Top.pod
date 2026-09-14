@@ -3105,6 +3105,10 @@ top-level C<.yml> files, sorted. It is what the load can see without building
 a C<Genesis::Env>, and it is enough for a check that only reads the merged
 parameters.
 
+Only plain files are counted. A directory whose own name ends in C<.yml> is
+not an environment file however much it looks like one, and three later
+checks read this list and open whatever it hands them.
+
 B<Returns:> A sorted list of names, empty where the root holds no C<.yml>
 files.
 

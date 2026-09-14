@@ -160,6 +160,21 @@ subtest 'a block switched off still joins the pipeline' => sub {
 	lives_ok {load_with_type('bosh')} 'and the repository is well formed again';
 };
 
+subtest 'a directory named like an environment file is not one' => sub {
+	plan tests => 2;
+
+	my $dir = $h->a . '/notes.yml';
+	mkdir $dir or die "cannot create $dir: $!";
+
+	my $top = load_with_type('bosh');
+	ok !(grep {$_ eq 'notes'} $top->_env_file_names),
+		'a directory is left out of the names the checks walk';
+	ok scalar(grep {$_ eq 'qa'} $top->_env_file_names),
+		'while the environment file beside it is still there';
+
+	rmdir $dir;
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
