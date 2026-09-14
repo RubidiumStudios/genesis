@@ -62,8 +62,11 @@ sub config {
 		$config->clear($_) for grep {$config->has($_)} @{$removals || []};
 
 		# Validate before persisting: validate bails, so a rejected value
-		# leaves the file untouched rather than half-written.
-		$config->validate($config->schema) if $config->schema;
+		# leaves the file untouched rather than half-written.  The schema
+		# is rebuilt rather than re-used, because the configured provider's
+		# own fragment is merged as it is built and this run may just have
+		# changed which provider that is.
+		$config->validate($top->_current_config_schema) if $config->schema;
 		$config->save;
 		return 0;
 	}

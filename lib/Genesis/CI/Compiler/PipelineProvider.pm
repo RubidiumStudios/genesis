@@ -61,6 +61,17 @@ sub automated_providers {
 }
 
 # }}}
+# register_provider - add a registry entry at run time {{{
+#
+# For tests that stand a provider class up and for a future out-of-tree
+# provider.  The registry is otherwise fixed at compile time.
+sub register_provider {
+	my ($class, $type, $info) = @_;
+	$_providers{$type} = $info;
+	return 1;
+}
+
+# }}}
 # }}}
 ### Constructor {{{
 
@@ -164,29 +175,24 @@ sub cli_opts_help {
 }
 
 # }}}
-# provider_options_schema - schema for the ci.provider: config section {{{
+# provider_options_schema - schema for the pipeline.provider: config section {{{
 #
 # Returns a hashref whose structure mirrors Top::_repo_config_schema():
 #
 #   {
-#     type      => { type => 'string', required => 1, description => '...' },
-#     target    => { type => 'string', description => '...' },
-#     team      => { type => 'string', default => 'main', description => '...' },
-#     expose    => { type => 'boolean', default => 0,    description => '...' },
+#     target => {type => 'string', required => 1, description => '...'},
+#     team   => {type => 'string', default => 'main', description => '...'},
 #     ...
 #   }
 #
-# The base class always contributes the common 'type' key; subclasses add
-# their own keys.  Used by validate_config_section() in Compiler.pm and
-# _validate_multi_file() in Validator.pm.
+# Under D86 this is the declarative half of the provider configuration
+# contract and it is mandatory: Top merges it into the pipeline schema at
+# configuration load, so a class that omits it has no declared keys and
+# every key an operator writes for it would be refused.  That is a bug at
+# load rather than a discovery at run time, so the base says so.
 sub provider_options_schema {
-	return {
-		type => {
-			type        => 'string',
-			required    => 1,
-			description => 'CI provider type (concourse, github-actions)',
-		},
-	};
+	my ($self) = @_;
+	bug("Subclass '%s' must implement provider_options_schema()", ref($self) || $self);
 }
 
 # }}}
@@ -640,6 +646,15 @@ Genesis::CI::Compiler::AST and generates platform-specific configuration.
 
   sub output_files {
     return { 'pipeline.yml' => 'Pipeline definition' };
+  }
+
+  # Mandatory: Genesis::Top merges this into the pipeline.provider
+  # schema at configuration load, so a provider that leaves it out has
+  # no declared keys and every key an operator writes is refused.
+  sub provider_options_schema {
+    return {
+      target => {type => 'string', description => 'Where to set it'},
+    };
   }
 
 =head1 SHARED HELPERS

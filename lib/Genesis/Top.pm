@@ -1586,10 +1586,6 @@ sub _repo_config_schema {
 sub _pipeline_config_schema {
 	my ($self) = @_;
 
-	# The one registry under D28, so the enum below is the registry's list
-	# rather than a literal beside it.
-	require Genesis::CI::Compiler::PipelineProvider;
-
 	return {
 		type        => 'hash',
 		description => 'Pipeline configuration',
@@ -1606,18 +1602,7 @@ sub _pipeline_config_schema {
 				type        => 'hash',
 				default     => {},
 				description => 'The automation that owns the pipeline',
-				schema => {
-					type => {
-						type        => 'enum',
-						values      => [Genesis::CI::Compiler::PipelineProvider->known_providers()],
-						default     => 'manual',
-						description => 'Which automation owns the pipeline'
-					},
-					target   => {type => 'string',  description => 'Provider target name (e.g., fly target)'},
-					url      => {type => 'string',  description => 'Provider API URL'},
-					team     => {type => 'string',  description => 'Provider team or org'},
-					insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS verification'},
-				}
+				schema      => $self->_provider_options_schema(),
 			},
 			name => {
 				type        => 'string',
@@ -1666,6 +1651,67 @@ sub _pipeline_config_schema {
 			},
 		}
 	};
+}
+
+# }}}
+# _current_config_schema - the schema for the version on disk {{{
+#
+# Built on demand rather than read back off the config object.  Under D86
+# the configured provider's own fragment is merged as the schema is built,
+# so a command that changes the provider type changes the schema its keys
+# have to be judged against, and the copy the load left behind is a
+# version out of date.  Every writer that re-validates asks for this one.
+sub _current_config_schema {
+	my ($self) = @_;
+
+	$self->config unless $self->{__config_disk_version};
+	return ($self->{__config_disk_version} // 0) >= 3
+		? $self->_repo_config_schema
+		: $self->_repo_config_schema_v2;
+}
+
+# }}}
+# _provider_options_schema - the provider block, with its fragment merged {{{
+#
+# Under D86 the generic schema declares the one key every provider shares,
+# which is the type, and merges the configured provider's own fragment for
+# the rest, so the per-provider key table is derived from the provider
+# classes instead of being hand-listed beside them.  Under D100 the manual
+# provider has no class and so no fragment, which means a provider key
+# left beside type: manual is an undeclared key and is refused by name,
+# with no exception: the one situation the old ignore provided for was
+# removed when both commands gained --force.
+sub _provider_options_schema {
+	my ($self) = @_;
+
+	require Genesis::CI::Compiler::PipelineProvider;
+	my %schema = (
+		type => {
+			type        => 'enum',
+			values      => [Genesis::CI::Compiler::PipelineProvider->known_providers()],
+			default     => 'manual',
+			description => 'Which automation owns the pipeline'
+		},
+	);
+
+	# The raw read, because the schema is what validation is about to be
+	# run against and there is no validated value to read yet.
+	my $type = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
+	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
+	return \%schema unless $info && $info->{class};
+
+	unless (eval {require $info->{file}; 1}) {  ## no critic
+		# Copied first, because bail's own readers run evals that clear it.
+		my $err = $@;
+		bail("Failed to load CI provider '%s': %s", $type, $err);
+	}
+
+	my $fragment = $info->{class}->provider_options_schema;
+	for my $key (keys %$fragment) {
+		next if $key eq 'type';
+		$schema{$key} = $fragment->{$key};
+	}
+	return \%schema;
 }
 
 # }}}

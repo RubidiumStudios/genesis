@@ -186,12 +186,12 @@ sub can_compile_from_genesis_config {
 }
 
 # }}}
-# validate_config_section - validate the pipeline: section delegated by Top.pm {{{
+# validate_config_section - the pipeline section's owner check {{{
 #
-# Called by Top::_validate_config() when this module is loaded and a
-# pipeline: key exists in .genesis/config.  Performs structural
-# validation; detailed cross-reference checks happen later in
-# Compiler::Validator during compile().
+# Under D86 the declarative half runs in Top, which merges this provider's
+# fragment into the schema before Genesis::Config::validate sees it, so
+# there is no per-key loop here any more.  What is left is the shape check
+# the schema cannot state, which the next task fills in.
 sub validate_config_section {
 	my ($class, $data, $top) = @_;
 
@@ -199,58 +199,7 @@ sub validate_config_section {
 	bail("'pipeline' configuration in .genesis/config must be a hash")
 		unless ref($data) eq 'HASH';
 
-	# Validate pipeline.provider section against the provider's own schema.
-	# The 'manual' provider has no compiler class — skip validation.
-	if (my $provider_data = $data->{provider}) {
-		bail("'pipeline.provider' must be a hash")
-			unless ref($provider_data) eq 'HASH';
-
-		my $type = $provider_data->{type};
-		bail("'pipeline.provider.type' is required") unless $type;
-
-		# Ask the registry itself rather than catching the resolver's bail.
-		# Catching it reported a type the registry holds as one it does not,
-		# and then listed that same type among the valid ones.
-		require Genesis::CI::Compiler::PipelineProvider;
-		my $provider_info =
-			Genesis::CI::Compiler::PipelineProvider->provider_info($type);
-		bail(
-			"'pipeline.provider.type' is '%s', which is not a known CI provider ".
-			"type.  Valid types: %s", $type,
-			join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers())
-		) unless $provider_info;
-
-		# A type with no compiler class has no provider schema to validate
-		# against, which is true of manual and, until its compiler lands, of
-		# github-actions.  Both are configurations Genesis accepts, so the
-		# refusal for compiling one belongs at the compile itself, which is
-		# _resolve_provider_class below.
-		return unless $provider_info->{class};
-
-		eval { require $provider_info->{file} };  ## no critic
-		if ($@) {
-			bail("Failed to load CI provider '%s' for config validation: %s", $type, $@);
-		}
-
-		my $schema   = $provider_info->{class}->provider_options_schema();
-		my $defaults = $provider_info->{class}->provider_options_defaults();
-
-		# Check required keys
-		for my $key (sort keys %$schema) {
-			my $spec = $schema->{$key};
-			next unless $spec->{required};
-			bail("'pipeline.provider.%s' is required for provider type '%s'", $key, $type)
-				unless defined $provider_data->{$key};
-		}
-
-		# Check unknown keys
-		for my $key (sort keys %$provider_data) {
-			next if exists $schema->{$key};
-			bail("'pipeline.provider.%s' is not a recognized option for provider type '%s'.  ".
-				"Valid options: %s",
-				$key, $type, join(', ', sort keys %$schema));
-		}
-	}
+	return 1;
 }
 
 # }}}

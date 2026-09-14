@@ -500,8 +500,11 @@ sub _validate_provider_section {
 			unless defined $provider->{$key};
 	}
 
-	# Check unknown keys
+	# Check unknown keys.  The type is the one key every provider shares, so
+	# under D86 the generic schema declares it and no fragment does; reading
+	# a fragment alone would report the type itself as unrecognised.
 	for my $key (sort keys %$provider) {
+		next if $key eq 'type';
 		unless (exists $schema->{$key}) {
 			$self->_error(sprintf(
 				"'provider.%s' is not a recognized option for provider type '%s'.  Valid options: %s",

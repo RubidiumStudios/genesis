@@ -2370,11 +2370,10 @@ subtest 'Concourse - cli_opts_help hidden when type not in valid_types' => sub {
 subtest 'Concourse - provider_options_schema has correct structure' => sub {
 	my $schema = Genesis::CI::Concourse->provider_options_schema();
 	ok ref($schema) eq 'HASH',            "schema is a hash";
-	ok exists $schema->{type},            "'type' key present";
-	ok $schema->{type}{required},         "'type' is required";
+	ok !exists $schema->{type},           "'type' is the generic block's key, not this one's";
 	ok exists $schema->{target},          "'target' key present";
 	ok exists $schema->{team},            "'team' key present";
-	ok exists $schema->{expose},          "'expose' key present";
+	ok exists $schema->{public},          "'public' key present";
 	ok exists $schema->{pause_after_set}, "'pause_after_set' key present";
 	is $schema->{team}{default}, 'main',  "team default is 'main'";
 };
@@ -2383,7 +2382,7 @@ subtest 'Concourse - provider_options_defaults returns expected defaults' => sub
 	my $defaults = Genesis::CI::Concourse->provider_options_defaults();
 	ok ref($defaults) eq 'HASH',          "defaults is a hash";
 	is $defaults->{team},            'main', "team default is 'main'";
-	is $defaults->{expose},          0,      "expose default is false";
+	is $defaults->{public},          0,      "public default is false";
 	is $defaults->{pause_after_set}, 0,      "pause_after_set default is false";
 };
 
@@ -2396,7 +2395,7 @@ subtest 'Concourse - provider_config omits default values' => sub {
 			type   => 'concourse',
 			target => 'my-target',
 			team   => 'main',      # this IS the default — should be omitted
-			expose => 0,           # this IS the default — should be omitted
+			public => 0,           # this IS the default — should be omitted
 		},
 	);
 	my $config = $provider->provider_config();
@@ -2404,7 +2403,7 @@ subtest 'Concourse - provider_config omits default values' => sub {
 	is $config->{type},   'concourse',  "type always present";
 	is $config->{target}, 'my-target',  "non-default target included";
 	ok !exists $config->{team},         "default team omitted";
-	ok !exists $config->{expose},       "default expose omitted";
+	ok !exists $config->{public},       "default public omitted";
 };
 
 subtest 'Concourse - provider_config includes non-default values' => sub {
@@ -2427,7 +2426,7 @@ subtest 'Concourse - provider_option applies defaults when not set' => sub {
 	my $provider = Genesis::CI::Concourse->new(ast => $ast);
 
 	is $provider->provider_option('team'),   'main', "team defaults to 'main'";
-	is $provider->provider_option('expose'),  0,     "expose defaults to 0";
+	is $provider->provider_option('public'),  0,     "public defaults to 0";
 	is $provider->provider_option('target'), undef,  "target has no default";
 };
 
@@ -2719,14 +2718,14 @@ subtest 'PipelineProvider - provider_config skips undef opts' => sub {
 
 subtest 'PipelineProvider - provider_config keeps boolean false when non-default' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	# expose default is 0; setting expose=>0 explicitly should still omit it
+	# public default is 0; setting public=>0 explicitly should still omit it
 	# insecure default is 0; setting insecure=>1 should include it
 	my $provider = Genesis::CI::Concourse->new(
 		ast           => $ast,
-		provider_opts => { type => 'concourse', expose => 0, insecure => 1 },
+		provider_opts => { type => 'concourse', public => 0, insecure => 1 },
 	);
 	my $config = $provider->provider_config();
-	ok !exists $config->{expose},  "expose=0 (matches default) omitted";
+	ok !exists $config->{public},  "public=0 (matches default) omitted";
 	is $config->{insecure}, 1,     "insecure=1 (non-default) included";
 };
 
