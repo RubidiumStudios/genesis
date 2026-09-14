@@ -3243,8 +3243,11 @@ sub inherited_harness {
 	my $site = $opts{site} // 'site';
 	$h->write_env_file($site, site => $site,
 		pipeline => $opts{pipeline_keys} // {manual_gate => 1});
-	$h->write_env_file($_, pipeline => $opts{leaf_keys})
-		for $opts{leaf_keys} ? @{$opts{envs} // ['qa']} : ();
+	if ($opts{leaf_keys}) {
+		for my $env (@{$opts{envs} // ['qa']}) {
+			$h->write_env_file($env, pipeline => $opts{leaf_keys});
+		}
+	}
 	# Both writes commit in copy A alone, so control goes up before the walk
 	# reads the commit a delivery's marker will name.
 	$h->push_from('a', $h->control);
