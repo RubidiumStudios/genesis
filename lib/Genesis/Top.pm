@@ -2649,16 +2649,18 @@ sub _validate_capability_gates {
 sub _validate_manifest_store {
 	my ($self) = @_;
 
-	# One fallback, and it is here for a repository whose version 2
-	# configuration was written before the schema declared a default for
-	# the key, where the schema has nothing of its own to supply.
-	my $store = $self->config->get('manifest_store', 'exodus');
+	# The key is read with no fallback of its own, because the schema
+	# declares the default and a second one here would read an explicit null
+	# as exodus instead of refusing it by name.  A configuration that has
+	# not met the version 2 schema yet, which is a version 1 file on its way
+	# through _upgrade_config_to_v2, is the case where nothing supplies it.
+	my $store = $self->config->get('manifest_store');
 	bail({exitcode => CONFIG},
 		"#R{manifest_store: %s} cannot be used under a pipeline.\n".
 		"The certified commit and the applied, hold and proposed records ".
 		"live in exodus, so the store must be #C{exodus}.",
-		$store
-	) unless $store eq 'exodus';
+		$store // '<unset>'
+	) unless defined $store && $store eq 'exodus';
 
 	# The floor a deploy actually honours is the effective one, which is
 	# the higher of the repository's own minimum and the environment's, the
