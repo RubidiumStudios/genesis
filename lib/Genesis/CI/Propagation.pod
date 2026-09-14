@@ -53,7 +53,7 @@ which files each receives.  No git, no IO.
 
 B<Execution> (C<propagate_envs>) - applies a computed target list to
 a real git working tree and (optionally) the GitHub API.  Implements
-the rolling C<pr/E<lt>envE<gt>> branch model with idempotent
+the rolling C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch model with idempotent
 re-runs, mode-parameterised push behavior, and batched push + PR
 API calls.
 
@@ -66,7 +66,7 @@ deploy postlude with C<push_direct_commits =E<gt> 1>; the Concourse
 provider's per-env pipeline task invokes it with
 C<push_direct_commits =E<gt> 0> (because the concourse C<put> step
 on the env's git resource handles direct-mode pushes, while
-C<pr/E<lt>envE<gt>> branches and PR creation still go through
+C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branches and PR creation still go through
 genesis because there is no concourse resource for creating GitHub
 pull requests).
 
@@ -82,9 +82,10 @@ and the Manual provider's auto-trigger at the end of a deploy.  Leaving the
 logic in a command module would have meant the provider either shelling out
 to a command or keeping a second copy.
 
-The rolling-branch decision -- direct commit versus C<pr/E<lt>envE<gt>>
-branch, and whether an existing PR already carries the change -- is the part
-most likely to be wrong and the hardest to observe in a live pipeline run.
+The rolling-branch decision -- direct commit versus a
+C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch, and whether an existing PR
+already carries the change -- is the part most likely to be wrong and
+the hardest to observe in a live pipeline run.
 Separating it from command dispatch is what allows it to be exercised
 directly in tests.
 
@@ -128,8 +129,9 @@ it, or commits stop travelling as a unit.
 
 This ancestor-overlap filter is what prevents the
 fast-forward-append cherry-pick problem in C<propagate_envs>: by
-the time a propagation target reaches the rolling C<pr/E<lt>envE<gt>>
-branch, it touches files that are disjoint from anything already
+the time a propagation target reaches the rolling
+C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch, it touches files that are
+disjoint from anything already
 queued on the branch from prior propagations.
 
 B<Parameters:>
