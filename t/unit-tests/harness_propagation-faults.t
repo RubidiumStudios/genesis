@@ -265,6 +265,27 @@ subtest 'a holder that never takes the lock is refused, not waited out' => sub {
 	chmod 0700, "$where/.git";
 };
 
+subtest 'the wait answers on this holder and not on a file with content' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $lock = $h->a . '/.git/genesis-session.lock';
+
+	my $first = hold_session_lock($h, command => 'genesis propagate');
+	is((split /\n/, helper::get_file($lock))[0], $first,
+		'the first holder wrote its own pid into the lock file');
+
+	# The lock file now has something in it and the first holder still holds
+	# the flock, so a second holder cannot have it.  A wait that asked only
+	# whether the file had content would read the first holder's line and
+	# answer at once with a pid that holds nothing.
+	ok(!eval {hold_session_lock($h); 1},
+		'a second holder that cannot have the lock is refused');
+	like($@, qr/never took/, 'rather than answered on what the first wrote');
+
+	release_session_lock($h, $first, hard => 1);
+};
+
 subtest 'a holder the lock never reaches goes down with the refusal' => sub {
 	plan tests => 3;
 
