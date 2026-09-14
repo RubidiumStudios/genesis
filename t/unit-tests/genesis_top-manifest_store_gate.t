@@ -105,6 +105,18 @@ subtest 'an old kit floor cannot reach the repository store' => sub {
 	unlink $h->a . "/$path";
 };
 
+subtest 'the schema supplies the store where nobody named one' => sub {
+	plan tests => 2;
+
+	# The gate reads the key with no fallback of its own, so the schema's
+	# default is the only thing standing between an unwritten key and a
+	# refusal, and this row is what says so.
+	my $top = load_with(undef);
+	is $top->config->get('manifest_store'), 'exodus',
+		'an unnamed store resolves to exodus out of the schema alone';
+	lives_ok {load_with(undef)} 'and the gate is satisfied by it';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
