@@ -2019,6 +2019,28 @@ subtest 'Compiler - override lookup sits beside the configuration' => sub {
 		"an override anywhere but beside .genesis/config is not applied";
 };
 
+subtest 'Compiler - multi-file override names keep the directory' => sub {
+	# Two outputs that share a base name but sit in different directories
+	# must not collapse onto one override file, so the directory travels
+	# into the name with its separators flattened.
+	my @names = Genesis::CI::Compiler->override_file_names(
+		'concourse', ['qa/deploy.yml', 'prod/deploy.yml'], 'multiple');
+
+	is scalar(@names), 2, "one override name per emitted file";
+	isnt $names[0], $names[1],
+		"outputs in different directories get different override files";
+	is_deeply [sort @names], [
+		'.genesis/pipeline-overrides-concourse-prod-deploy.yml',
+		'.genesis/pipeline-overrides-concourse-qa-deploy.yml',
+	], "the directory survives in the name with its separator flattened";
+
+	is_deeply [
+		Genesis::CI::Compiler->override_file_names(
+			'concourse', ['pipeline.yml'], 'multiple')
+	], ['.genesis/pipeline-overrides-concourse-pipeline.yml'],
+		"an output with no directory keeps its plain base name";
+};
+
 ### ============================================================ ###
 ### AST - glob metacharacter safety
 ### ============================================================ ###

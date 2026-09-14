@@ -223,6 +223,12 @@ sub validate_config_section {
 # D101 the form follows the effective output_layout rather than the
 # capability, so a multi-file provider set to single takes the single
 # form.
+#
+# The whole output name goes into the override name, directory and all,
+# with the separators flattened to dashes so the result is still one
+# path segment.  Dropping the directory would let a provider that emits
+# qa/deploy.yml and prod/deploy.yml merge both against the same override
+# file, and nothing in the run would say so.
 sub override_file_names {
 	my ($class, $provider_type, $output_names, $layout) = @_;
 
@@ -230,8 +236,9 @@ sub override_file_names {
 		unless ($layout // 'single') eq 'multiple';
 
 	return map {
-		(my $base = $_) =~ s{^.*/}{};
-		$base =~ s{\.[^.]+$}{};
+		(my $base = $_) =~ s{\.[^./]+$}{};
+		$base =~ s{^\./+}{};
+		$base =~ s{/+}{-}g;
 		".genesis/pipeline-overrides-${provider_type}-${base}.yml"
 	} @$output_names;
 }
