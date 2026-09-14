@@ -596,6 +596,24 @@ sub bare {
 	my ($class, $name, $top) = @_;
 	my ($env, @errors) = $class->_bare_with_errors($name, $top);
 	bail("%s", join("\n", @errors)) if @errors;
+
+	# A name and a top are not enough to read through.  The merged read
+	# renders its intermediate manifests under the environment's own scratch
+	# directory, so an object with no __tmp writes them at the filesystem
+	# root, and file is the name every path helper composes from.  Only an
+	# environment that answers lookup needs either, so they are added here
+	# rather than in the half is_valid_env_file also runs, which would make
+	# every validation pay for a directory it never opens.
+	#
+	# The scratch directory is this object's own rather than the process-wide
+	# one new takes, because a manifest there is named for the environment
+	# and its signature, and that signature covers the leaf file alone.  Two
+	# bare reads of one environment across two checkouts carry the same name
+	# and the same signature while their ancestors differ, so a shared
+	# directory would answer the second read with the first one's merge.
+	$env->{file}  = "$env->{name}.yml";
+	$env->{__tmp} = workdir();
+
 	return $env;
 }
 
@@ -620,23 +638,10 @@ sub _bare_with_errors {
 		"Environment file #C{%s} does not exist.", humanize_path($path)
 	)) unless -f $path;
 
-	# The name and the top are not enough to read through.  The merged read
-	# renders its intermediate manifests under the environment's own scratch
-	# directory, so an object with no __tmp writes them at the filesystem
-	# root, and file is the name every path helper composes from.
-	#
-	# The scratch directory is this object's own rather than the process-wide
-	# one new takes, because a manifest there is named for the environment
-	# and its signature, and that signature covers the leaf file alone.  Two
-	# bare reads of one environment across two checkouts carry the same name
-	# and the same signature while their ancestors differ, so a shared
-	# directory would answer the second read with the first one's merge.
-	return (bless({
-		name  => $name,
-		file  => "$name.yml",
-		top   => $top,
-		__tmp => workdir(),
-	}, $class));
+	# Nothing beyond the name and the top, because is_valid_env_file walks
+	# the ancestors on what comes back and needs no more than that.  bare
+	# adds what an environment that answers lookup also needs.
+	return (bless({name => $name, top => $top}, $class));
 }
 
 # }}}
