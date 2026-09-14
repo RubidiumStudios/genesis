@@ -410,6 +410,14 @@ upstream, returning that copy's handle.  C<copy> defaults to A, C<remotes> is
 a hashref of name to URL, and C<upstream> names the remote the control branch
 should track or clears the tracking where it is false.
 
+Every remote named is fetched as it goes in, so that a row reading a
+divergence straight afterwards has the remote-tracking refs to read it from.
+C<fetch>, which defaults on, turns that off.  A row whose remote is a URL
+something only has to parse, such as a github URL a derivation reads an owner
+and repository out of, passes C<fetch =E<gt> 0> and gets the remote without
+the conversation, which keeps the row off the network and out of the hands of
+whatever that machine's git configuration rewrites a github URL into.
+
 =head2 set_repo_config($h, $key, $value, %opts)
 
 Writes one key into the deployment root's C<.genesis/config> and commits it on

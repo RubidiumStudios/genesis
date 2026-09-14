@@ -1453,6 +1453,14 @@ sub unset_control {
 # T57 needs a repository whose remotes are dev and origin and whose control
 # branch has no upstream, which is what a site that clones from one remote and
 # pushes to another looks like.
+#
+# Every remote is fetched as it goes in, so a row that reads a divergence
+# straight afterwards has the remote-tracking refs to read it from.  A row
+# whose remote is a url something only has to parse, such as the github url
+# a derivation reads an owner and repository out of, says fetch => 0 and
+# gets the remote without the conversation, which keeps the row off the
+# network and off whatever that machine's git configuration rewrites a
+# github url into.
 sub set_remotes {
 	my ($self, %opts) = @_;
 	my $copy = $opts{copy} // 'a';
@@ -1465,7 +1473,9 @@ sub set_remotes {
 			for grep {length} split /\n/, ($existing // '');
 		run({dir => $dir}, 'git', 'remote', 'add', $_, $remotes->{$_})
 			for sort keys %$remotes;
-		run({dir => $dir}, 'git', 'fetch', '-q', $_) for sort keys %$remotes;
+		if (defined $opts{fetch} ? $opts{fetch} : 1) {
+			run({dir => $dir}, 'git', 'fetch', '-q', $_) for sort keys %$remotes;
+		}
 	}
 
 	if (exists $opts{upstream}) {

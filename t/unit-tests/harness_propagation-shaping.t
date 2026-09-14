@@ -76,6 +76,24 @@ subtest 'the remotes can be renamed and the upstream cleared' => sub {
 	isa_ok($git, 'Service::Git', 'set_remotes hands back the handle');
 };
 
+subtest 'a remote can be added without being talked to' => sub {
+	plan tests => 2;
+
+	# A row that hands the copy a url only so that something can read it,
+	# such as the github url a derivation parses, wants the remote and not
+	# the conversation.  The tracking refs are the evidence, because a
+	# fetch that ran would have written them and a fetch that never ran
+	# leaves the namespace empty.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	set_remotes($h, remotes => {origin => $h->r, mirror => $h->r}, fetch => 0);
+	ok(!grep({m{^refs/remotes/mirror/}} keys %{refs_in($h->a)}),
+		'fetch => 0 leaves the remote with no tracking refs');
+
+	set_remotes($h, remotes => {origin => $h->r, mirror => $h->r});
+	ok(scalar grep({m{^refs/remotes/mirror/}} keys %{refs_in($h->a)}),
+		'and the default still fetches every remote it is given');
+};
+
 subtest 'one config key, a plain branch, and an armed push to R' => sub {
 	plan tests => 4;
 
