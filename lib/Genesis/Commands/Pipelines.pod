@@ -254,8 +254,15 @@ B<Examples:>
 
   _describe_source_control($top);
   # Source control
-  #   remote          derived   origin
-  #   repository      derived   fivetwenty-io/lmelt
+  #   remote         derived origin
+  #   uri            derived https://github.com/fivetwenty-io/lmelt.git
+  #   repository     derived fivetwenty-io/lmelt
+  #   control_branch default control
+  #   pr_prefix      default pr/
+
+Every key the block resolves is printed, so the report is five rows and
+not two, and both column widths come from those rows.  A repository that
+overrides one of them widens the tier column to hold C<explicit>.
 
 =head2 _missing_env_branches
 
