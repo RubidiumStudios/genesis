@@ -140,29 +140,51 @@ subtest 'the armed push moves R in the middle of the run' => sub {
 };
 
 # _push_in_child - push one branch from a child perl, under the environment a
-# spawned command runs in.  It is machinery the row above needs rather than
-# repository state, so it sits beside it.  The child prints the result rather
-# than exiting on it, because a wrapper that ran the armed action and then
-# failed to delegate would answer undef and exit just as a rejected push does.
+# spawned command runs in.  It is machinery the rows around it need rather
+# than repository state, so it sits beside them.  The child prints the result
+# rather than exiting on it, because a wrapper that ran the armed action and
+# then failed to delegate would answer undef and exit just as a rejected push
+# does.
+#
+# The environment comes from the harness it was handed, which reads the plan
+# and the log off that harness rather than off the environment, so a file
+# holding two harnesses pushes under the plan the one it names armed and not
+# under whichever armed last.
 sub _push_in_child {
 	my ($h, $branch) = @_;
-	return run({
-			dir      => $h->a,
-			stderr   => 0,
-			passfail => 0,
-			env      => {
-				GENESIS_HARNESS_GIT_PLAN => $ENV{GENESIS_HARNESS_GIT_PLAN},
-				GENESIS_HARNESS_GIT_LOG  => $ENV{GENESIS_HARNESS_GIT_LOG},
-				PERL5OPT => join(' ',
-					'-I' . $helper::TOPDIR . '/t', '-I' . $helper::TOPDIR . '/lib',
-					'-MHarness::Propagation::Git'),
-			},
-		}, 'perl', '-e',
+	return $h->run_in_child(
 		'use Service::Git;
 		 my $r = Service::Git->new($ARGV[0])->push("origin", $ARGV[1]);
 		 print "result:", (defined $r->{$ARGV[1]} ? $r->{$ARGV[1]} : "none"), "\n";',
 		$h->a, $branch);
 }
+
+subtest 'a pushing child runs under its own harness plan' => sub {
+	plan tests => 3;
+
+	my $one    = make_harness(envs => ['qa'], vault => 0);
+	my $branch = $one->slug('qa');
+	init_branch($one, 'qa');
+	refresh($one, 'a', $branch);
+	commit_on_control($one, branch => $branch,
+		files => {'mine.yml' => "---\nmine: true\n"}, push => 0);
+	my $armed = move_on_r_at($one, $branch, at => 'push');
+
+	# A second harness arms after the first, so the environment every child
+	# would read names the second harness's plan and its log.
+	my $two = make_harness(envs => ['dev'], vault => 0);
+	init_branch($two, 'dev');
+	refresh($two, 'a', $two->slug('dev'));
+	move_on_r_at($two, $two->slug('dev'), at => 'push');
+
+	my ($out) = _push_in_child($one, $branch);
+
+	is(remote_sha($one, $branch), $armed,
+		"the action the first harness armed fired in the first harness's child");
+	like($out, qr/result:0/, "so copy A's own push found R moved");
+	like(slurp($one->{fault}{log}), qr/\["push"/,
+		"and the call landed in the first harness's own step log");
+};
 
 subtest 'a second harness arms its own plan, not the first harness plan' => sub {
 	plan tests => 4;
