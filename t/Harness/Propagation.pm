@@ -54,6 +54,8 @@ our @EXPORT = qw/
 	github_double gh_pull_request gh_close_pr gh_merge_pr
 	gh_protection gh_unreachable gh_reachable gh_no_token gh_calls
 
+	automation_blocks automation_block_lines
+
 	ready_envs ready_harness seeded_harness staged due_harness gated_harness
 	held_harness held_prod tracked_harness two_env_harness inherited_harness
 	ready with_open_pr two_roots a_delivery seeded two_due three_due three
@@ -3115,6 +3117,35 @@ sub deliver_all {
 	$self->deliver($_, %opts, control => $control)
 		for @{$opts{envs} // $self->{envs}};
 	return $self;
+}
+
+# }}}
+# automation_blocks, automation_block_lines - what an automation requires {{{
+#
+# Under D23 an automated provider reaches a shuttle, a vault, and a locker,
+# and the configuration schema requires all three of it, so a fixture that
+# names an automation has to carry them.  Six test files write the same nine
+# lines out by hand today, which means the next key an automation requires
+# has to be added in six places.  This is the one answer.
+#
+# The hash form is for a file that builds the configuration as a structure,
+# and the line form is for a file that writes it as text.  The lines come back
+# indented to sit under a `pipeline:` key, without that key, so a caller puts
+# them beside whatever else its own pipeline block holds.
+sub automation_blocks {
+	return (
+		shuttle => {backend => 's3', bucket => 'pipes'},
+		vault   => {url     => 'https://vault.example.com'},
+		locker  => {url     => 'https://locker.example.com'},
+	);
+}
+
+sub automation_block_lines {
+	return (
+		'  shuttle:', '    backend: s3', '    bucket: pipes',
+		'  vault:', '    url: https://vault.example.com',
+		'  locker:', '    url: https://locker.example.com',
+	);
 }
 
 # }}}

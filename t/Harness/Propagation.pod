@@ -850,6 +850,17 @@ makes every call from the nth onward the armed one, and C<return>, which says
 what the skipped call answers.  C<fail_on> cannot make this shape, because a
 death is not a silence.
 
+=head2 automation_blocks() and automation_block_lines()
+
+Answer the three blocks the configuration schema requires of an automated
+provider, which are the shuttle, the vault, and the locker.
+C<automation_blocks> answers them as a list of key and hashref pairs, for a
+file that builds the configuration as a structure, and
+C<automation_block_lines> answers the same thing as YAML lines indented to sit
+under a C<pipeline:> key, for a file that writes the configuration as text.
+Neither answers the C<pipeline:> key itself, so a caller puts the blocks
+beside whatever else its own pipeline block holds.
+
 =head2 ready_envs($h, %opts)
 
 The five things every walking row needs before it can run a command, which
