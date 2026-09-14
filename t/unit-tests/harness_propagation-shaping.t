@@ -253,6 +253,34 @@ subtest 'a delivery whose tracked set has since shrunk' => sub {
 # path the environment file names and for one under the same kind that it
 # leaves out.
 subtest 'a declared tracked list decides which ops paths are in' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $path = write_env_file($h, 'qa',
+		genesis => {pipeline => {track_additional_files => ['ops/named.yml']}});
+	my $control = commit_on_control($h,
+		files   => {
+			'ops/named.yml' => "---\nnamed: true\n",
+			'ops/other.yml' => "---\nother: true\n",
+		},
+		message => 'Add two ops files',
+		push    => 1,
+	);
+
+	like(slurp($h->a . '/' . $path),
+		qr{^  pipeline:\n    track_additional_files:\n      - ops/named\.yml$}m,
+		'the list is written under genesis.pipeline');
+	my @set = propagation_set($h, 'qa', at => $control);
+	ok(scalar(grep {$_ eq 'ops/named.yml'} @set),
+		'the path the list names is in the set');
+	is_deeply([grep {$_ eq 'ops/other.yml'} @set], [],
+		'and the one under the same kind that it leaves out is not');
+};
+
+# The product reads the list from genesis.pipeline, so a list written at the
+# old top-level spelling is a key the reader never looks at and the kind it
+# used to narrow stands whole.
+subtest 'a tracked list at the old spelling narrows nothing' => sub {
 	plan tests => 2;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
@@ -269,9 +297,9 @@ subtest 'a declared tracked list decides which ops paths are in' => sub {
 
 	my @set = propagation_set($h, 'qa', at => $control);
 	ok(scalar(grep {$_ eq 'ops/named.yml'} @set),
-		'the path the list names is in the set');
-	is_deeply([grep {$_ eq 'ops/other.yml'} @set], [],
-		'and the one under the same kind that it leaves out is not');
+		'the path the old spelling names is in the set anyway');
+	ok(scalar(grep {$_ eq 'ops/other.yml'} @set),
+		'and so is the one it leaves out, because nothing narrowed the kind');
 };
 
 # Proves the setup half of T204 and T205: a file can be put in copy A's index
