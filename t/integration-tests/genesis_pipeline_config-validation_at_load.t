@@ -123,4 +123,50 @@ subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
 	is $exit, Genesis::Exit::CONFIG, 'and it exits CONFIG by name';
 };
 
+subtest "a provider whose file will not load exits CONFIG" => sub {
+	# Three explicit rows and one for the run's own restoration assertion.
+	plan tests => 4;
+
+	commit_on_control($h, files => {
+		'.genesis/config' => join("\n",
+			'---', 'deployment_type: bosh', 'version: "3"',
+			'creator_version: 3.2.0',
+			'pipeline:', '  enabled: true',
+			'  source_control:',
+			'    repository: genesis/bosh-deployments',
+			'    auth:', '      type: ssh', '      vault: secret/ci/git',
+			'    identity:', '      name: Genesis CI',
+			'      email: ci@genesis.example.com',
+			'  provider:', '    type: concourse', '    target: ci',
+			'  shuttle:', '    backend: s3', '    bucket: pipes',
+			'  vault:', '    url: https://vault.example.com',
+			'  locker:', '    url: https://locker.example.com', ''),
+	});
+
+	# bin/genesis puts GENESIS_LIB in front of PERL5LIB with use lib, so a
+	# directory holding a shadow of the provider's file cannot win on @INC
+	# alone.  PERL5OPT reaches the child before bin/genesis compiles, and
+	# the module it names marks the provider's file as one that has already
+	# failed, which makes the require inside the load fail the way a broken
+	# provider file would.
+	my $shadow = workdir();
+	put_file("$shadow/ShadowProvider.pm", join("\n",
+		'package ShadowProvider;',
+		"\$INC{'Genesis/CI/Compiler/Providers/Concourse.pm'} = undef;",
+		'1;', ''));
+	local $ENV{PERL5OPT} = join(' ',
+		"-I$shadow", '-MShadowProvider', ($ENV{PERL5OPT} // ()));
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
+	# The refusal is wrapped to the terminal before it reaches stderr, so it
+	# is folded back onto one line before anything is read out of it.
+	(my $flat = $err) =~ s/\s+/ /g;
+
+	like $flat, qr/Failed to load CI provider 'concourse'/,
+		'the refusal names the provider whose file would not load';
+	is $exit, Genesis::Exit::CONFIG, 'and it exits CONFIG by name';
+	unlike $flat, qr/Compilation failed in require at \S+ line/,
+		'with the line the require failed on cut away';
+};
+
 done_testing;
