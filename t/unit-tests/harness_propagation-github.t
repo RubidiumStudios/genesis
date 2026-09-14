@@ -210,6 +210,33 @@ SCRIPT
 	is(scalar @posts, 6, 'and every one of the six lines is in the call log');
 };
 
+subtest 'a torn line in the log fails a row and not the file' => sub {
+	plan tests => 3;
+
+	my $h  = make_harness(envs => ['prod'], vault => 0, github => 1);
+	my $gh = $h->gh;
+	gh_pull_request($gh, env => 'prod', review => 'approved');
+
+	local $ENV{PATH} = join ':', $gh->{bin}, $ENV{PATH};
+	local $ENV{GITHUB_AUTH_TOKEN} = $gh->{token};
+	my $client = Service::Github->new(domain => $gh->{domain}, tls => 'no');
+	$client->list_prs($gh->{repository}, state => 'open');
+
+	# Half a line, which is what the row above would read if two writers
+	# ever landed on the log at once.  A reader that died inside the decoder
+	# would take this file down where the row that asked should have failed.
+	helper::put_file($gh->{log}, helper::get_file($gh->{log})
+		. '{"method":"POST","url":"https://api.github.te');
+
+	my @calls;
+	ok(eval {@calls = gh_calls($gh); 1},
+		'the reader answers rather than dying inside the decoder');
+	is(scalar(grep {($_->{method} // '') eq 'GET'} @calls), 1,
+		'the whole lines still read back as themselves');
+	is(scalar(grep {$_->{torn}} @calls), 1,
+		'and the half line is one record a row can fail on');
+};
+
 subtest 'a token withheld from one run and back for the next' => sub {
 	# Two of the six are the restoration each run asserts for itself.
 	plan tests => 6;

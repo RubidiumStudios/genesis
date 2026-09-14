@@ -811,6 +811,13 @@ C<url>, the C<body>, and the C<token> the caller's environment held, so a row
 can assert that a preview was read-only, that exactly one client was built,
 or that a run went out unauthenticated.
 
+A line the decoder refuses comes back as C<{torn =E<gt> the line}> rather than
+taking the read down, because two writers landing on the log at once would
+leave half a line behind and a reader that died inside the decoder would stop
+the whole file where the row that asked should have failed.  Such a record
+carries no C<method>, so a row counting calls of a kind reads one fewer and
+fails its own assertion.
+
 =head2 record_at($h, $path)
 
 Reads one vault path back as a hashref, or undef where nothing is written
