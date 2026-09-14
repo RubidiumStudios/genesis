@@ -13,10 +13,13 @@ deploys it to a CI platform. It is aliased as `genesis push`.
 genesis repipe [<pipeline-layout>] [options]
 ```
 
-Without any flags, `repipe` reads `ci.yml`, generates Concourse pipeline
-YAML through the legacy code path, and uploads it to Concourse via `fly
-set-pipeline`. It prompts for confirmation before uploading unless you
-pass `--yes`.
+`repipe` compiles the pipeline your repository configures and uploads it
+to the CI system that pipeline names, through `fly set-pipeline` where
+that system is Concourse. It prompts for confirmation before uploading
+unless you pass `--yes`. The configuration is the `pipeline:` section of
+`.genesis/config`, or the `ci.yml` file named by `--config` where the
+repository has no such section, and the provider is read from
+`pipeline.provider.type` rather than from any flag.
 
 The optional positional argument selects which pipeline layout to deploy
 when your configuration defines multiple layouts via `pipeline.layouts`.
@@ -43,21 +46,14 @@ to `ci.yml`.
 `--paused` or `-P` keeps the pipeline paused after uploading. By default,
 Genesis unpauses the pipeline after a successful `set-pipeline`.
 
-`--platform` or `--provider` or `-p` activates the compiler pipeline
-instead of the legacy code path. Valid values are `concourse` and
-`github-actions`. When this flag is present, Genesis reads the
-`pipeline:` section of `.genesis/config`. If the repository has no such
-section, it falls back to the `ci.yml` file specified by `--config`.
-
 `--output-dir` or `-o` writes compiled pipeline artifacts to a directory
 instead of deploying. This produces the pipeline YAML, an `ast.json` file
-containing the full AST, and any other provider output files. Requires
-`--platform`.
+containing the full AST, and any other provider output files.
 
 `--skip-vault` bypasses Vault connectivity during compilation. When set,
 the pipeline is compiled without connecting to Vault, which means spruce
 vault operators will not be resolved. This is useful for local inspection
-of the generated YAML. Requires `--platform`.
+of the generated YAML.
 
 `--debug-dir` writes intermediate compiler artifacts to a directory for
 debugging. The artifacts are numbered by compilation stage:
@@ -71,45 +67,35 @@ debugging. The artifacts are numbered by compilation stage:
 06-output-pipeline.yml # Final provider output
 ```
 
-Requires `--platform`.
-
 ### Examples
 
-Deploy using the legacy code path:
+Compile and deploy the pipeline:
 
 ```bash
 genesis repipe
 ```
 
-Preview what the legacy path generates:
+Preview what is generated without deploying:
 
 ```bash
 genesis repipe --dry-run > pipeline.yml
 ```
 
-Deploy using the compiler pipeline for Concourse:
-
-```bash
-genesis repipe --platform concourse
-```
-
-Generate GitHub Actions workflow without deploying:
-
-```bash
-genesis repipe --platform github-actions --dry-run
-```
-
 Write all compiler artifacts to a directory for inspection:
 
 ```bash
-genesis repipe --platform concourse --output-dir ./debug --skip-vault
+genesis repipe --output-dir ./debug --skip-vault
 ```
 
 Dump every intermediate stage of compilation:
 
 ```bash
-genesis repipe --platform concourse --debug-dir ./stages --skip-vault
+genesis repipe --debug-dir ./stages --skip-vault
 ```
+
+To compile for GitHub Actions rather than Concourse, set
+`pipeline.provider.type` to `github-actions` in `.genesis/config` and run
+`genesis repipe` again.
 
 ## genesis graph
 
@@ -120,18 +106,18 @@ topology. Pipe the output through a Graphviz renderer to produce an image.
 genesis graph [<pipeline-layout>] [options]
 ```
 
-Without `--platform`, this uses the legacy code path. With `--platform`,
-it uses the compiler pipeline.
+`graph` reads `ci.yml` and draws the legacy topology. For the Mermaid
+flowchart the compiler writes, use `genesis pipeline-graph` instead.
 
 ```bash
 # Generate a PNG image
 genesis graph | dot -Tpng > pipeline.png
 
 # Generate SVG
-genesis graph --platform concourse | dot -Tsvg > pipeline.svg
+genesis graph | dot -Tsvg > pipeline.svg
 ```
 
-Options: `--config`, `--platform`, `--debug-dir` (same as `repipe`).
+Options: `--config` (same as `repipe`).
 
 ## genesis describe
 
@@ -153,7 +139,7 @@ Workflow: my-cf-deployments
   production           production-deployment  [manual] (triggered by staging)
 ```
 
-Options: `--config`, `--platform`, `--debug-dir` (same as `repipe`).
+Options: `--config` (same as `repipe`).
 
 ## Internal Pipeline Commands
 
@@ -196,19 +182,13 @@ The errand name is specified by the `ERRAND_NAME` environment variable.
 
 ```mermaid
 flowchart TD
-    A[genesis repipe] --> B{--platform?}
-    B -->|No| C[Legacy Code Path]
-    B -->|Yes| D[Compiler Pipeline]
-    C --> E[Genesis::CI::Legacy::parse]
-    E --> F[Genesis::CI::Legacy::generate_pipeline_concourse_yaml]
-    F --> G[fly set-pipeline]
-    D --> H[Genesis::CI::Compiler::Parser]
+    A[genesis repipe] --> H[Genesis::CI::Compiler::Parser]
     H --> I[Genesis::CI::Compiler::Validator]
     I --> J[Genesis::CI::Compiler::ASTBuilder]
     J --> K[Genesis::CI::Compiler::PipelineDescriptor]
-    K --> L{Platform}
+    K --> L{pipeline.provider.type}
     L -->|concourse| M[Genesis::CI::Concourse]
     L -->|github-actions| N[Genesis::CI::GithubActions]
-    M --> G
+    M --> G[fly set-pipeline]
     N --> O[Write .github/workflows/]
 ```
