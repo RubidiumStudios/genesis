@@ -133,7 +133,7 @@ sub pipeline_status {
 		unless $top->ci_configured;
 
 	my $git     = Service::Git->new('.');
-	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+	my $control = $top->ci_control_branch;
 
 	my $topo = $top->pipeline_topology;
 	bail("No environments with pipeline metadata found.")
@@ -168,7 +168,7 @@ sub pipeline_status {
 		# Branch column: the CONTROL sha that was most recently propagated
 		# to this env (read from the `[pipeline] control@<sha>` marker on
 		# the env branch) — not the env-branch's own HEAD sha.
-		my ($branch_ctl) = _resolve_propagation_base($env_name, $git);
+		my ($branch_ctl) = _resolve_propagation_base($env_name, $git, $control);
 		$state{branch_sha} = $branch_ctl
 			? $git->sha($branch_ctl, short => 1)
 			: undef;
@@ -362,7 +362,7 @@ sub propagate {
 		unless $top->ci_configured;
 
 	my $git     = Service::Git->new('.', track_branch => !$dry_run);
-	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+	my $control = $top->ci_control_branch;
 
 	bail(
 		"Propagation must be run from the #C{%s} branch (currently on #C{%s}).",
@@ -411,7 +411,7 @@ sub propagate {
 			unless $nodes->{$after_env};
 
 		# Verify the after_env has been propagated AND deployed
-		my ($last_sync) = _resolve_propagation_base($after_env, $git);
+		my ($last_sync) = _resolve_propagation_base($after_env, $git, $control);
 		bail(
 			"Environment #C{%s} has never been propagated to.\n".
 			"Run #C{genesis propagate} without arguments first.",
@@ -514,7 +514,7 @@ sub propagate {
 		# as "ahead of cascade source" rather than getting silently
 		# rolled back.
 		if ($after_env) {
-			my ($env_last_sync) = _resolve_propagation_base($env_name, $git);
+			my ($env_last_sync) = _resolve_propagation_base($env_name, $git, $control);
 			if ($env_last_sync
 				&& $git->is_ancestor($control_sha, $env_last_sync)) {
 				$env_skipped_ahead{$env_name} = $git->sha($env_last_sync, short => 1);
@@ -669,6 +669,9 @@ sub propagate {
 #   2. No propagation commit found → branch was spawned from control, use
 #      git merge-base as the starting point
 #
+# The control branch is passed in rather than assumed, because the name is
+# configured per repository and every caller has already read it.
+#
 # Returns: ($control_sha_full, $manual_commits_on_top)
 # _summarize_load_error - extract a short, actionable reason from a
 # load_env failure for the pipeline-status display.  bail() output is
@@ -793,7 +796,7 @@ sub pipeline_prepare {
 		unless $top->ci_configured;
 
 	my $git     = Service::Git->new('.', track_branch => !$dry_run);
-	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+	my $control = $top->ci_control_branch;
 
 	# prepare_branch copies files INTO each env branch from the current
 	# branch's HEAD, so the current branch has to be the one they are
@@ -908,9 +911,8 @@ sub _prepare_scope {
 
 # }}}
 sub _resolve_propagation_base {
-	my ($branch, $git) = @_;
+	my ($branch, $git, $control) = @_;
 	$git ||= Service::Git->new('.');
-	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 
 	# Scan log for propagation markers
 	my @lines = $git->log_subjects($branch);
