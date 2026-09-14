@@ -223,6 +223,28 @@ subtest 'a new harness takes back the variables the last one armed' => sub {
 		'and takes the spy away with it');
 };
 
+subtest 'a holder that never takes the lock is refused, not waited out' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+
+	# A git directory the holder cannot write, so it exits without ever
+	# taking the lock.  That is the fixture failing rather than the code
+	# under test, and the wait has to say so.
+	my $where = "$h->{base}/unwritable";
+	mkdir $where or die "cannot make $where: $!";
+	mkdir "$where/.git" or die "cannot make $where/.git: $!";
+	$h->{unwritable} = $where;
+	chmod 0500, "$where/.git";
+
+	ok(!eval {hold_session_lock($h, copy => 'unwritable'); 1},
+		'the wait refuses rather than handing back a holder of nothing');
+	like($@, qr/exited before it took/,
+		'and the refusal names what the holder did');
+
+	chmod 0700, "$where/.git";
+};
+
 # _can_lock - whether this process can take the lock without waiting.  It is
 # an assertion helper for the rows above, so it sits beside them.
 sub _can_lock {
