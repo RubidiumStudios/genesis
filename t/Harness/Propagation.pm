@@ -1620,15 +1620,14 @@ sub move_on_r_at {
 	# read it would arm its entry in the first harness's plan and leave its own
 	# copy A handle unblessed, where no wrapper fires at all.
 	$self->fault_git unless $self->{fault}{plan};
-	my $file = $self->{fault}{plan};
-	my $plan = JSON::PP->new->decode(helper::get_file($file));
-	$plan->{$opts{at} // 'push'} = {
-		n      => $opts{nth} // 1,
-		from   => 0,
-		action => ['push', '-q', '--force', 'origin', $branch],
-		in     => $self->{b},
-	};
-	helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+	_with_plan($self->{fault}{plan}, sub {
+		$_[0]->{$opts{at} // 'push'} = {
+			n      => $opts{nth} // 1,
+			from   => 0,
+			action => ['push', '-q', '--force', 'origin', $branch],
+			in     => $self->{b},
+		};
+	});
 
 	return $sha;
 }
@@ -2468,16 +2467,46 @@ sub fault_git {
 }
 
 # }}}
+# _with_plan - read, change, and write the fault plan under one lock {{{
+#
+# The parent arms a step through this file and every spawned child counts its
+# own calls through the same file, so a read followed by a write is a window
+# in which one of them writes over the other's change.  The lock is exclusive
+# and it is taken on the plan file itself rather than on a file beside it, and
+# one handle does the read and the write, because a second handle opened to
+# truncate would land outside the lock the first one holds.
+sub _with_plan {
+	my ($file, $change) = @_;
+	require Fcntl;
+	open my $fh, '+<', $file
+		or die "cannot open the fault plan $file: $!\n";
+	flock($fh, Fcntl::LOCK_EX())
+		or die "cannot lock the fault plan $file: $!\n";
+
+	my $body = do {local $/; <$fh>};
+	my $plan = JSON::PP->new->decode($body || '{}');
+	$change->($plan);
+
+	seek($fh, 0, 0)    or die "cannot rewind the fault plan $file: $!\n";
+	truncate($fh, 0)   or die "cannot empty the fault plan $file: $!\n";
+	print $fh JSON::PP->new->canonical->encode($plan);
+	close $fh          or die "cannot write the fault plan $file: $!\n";
+
+	return $plan;
+}
+
+# }}}
 # fail_on - arm one named git step to die on its nth call {{{
 sub fail_on {
 	my ($git, $step, $n, %opts) = @_;
 	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN}
 		or die "fail_on needs fault_git to have run first\n";
 
-	my $plan = JSON::PP->new->decode(helper::get_file($file));
-	$plan->{$step} = {n => $n, from => $opts{from} ? 1 : 0,
-		message => $opts{message}};
-	helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+	_with_plan($file, sub {
+		my ($plan) = @_;
+		$plan->{$step} = {n => $n, from => $opts{from} ? 1 : 0,
+			message => $opts{message}};
+	});
 	return $git;
 }
 
@@ -2494,10 +2523,11 @@ sub skip_on {
 	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN}
 		or die "skip_on needs fault_git to have run first\n";
 
-	my $plan = JSON::PP->new->decode(helper::get_file($file));
-	$plan->{$step} = {n => $n, from => $opts{from} ? 1 : 0,
-		skip => 1, return => $opts{return}};
-	helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+	_with_plan($file, sub {
+		my ($plan) = @_;
+		$plan->{$step} = {n => $n, from => $opts{from} ? 1 : 0,
+			skip => 1, return => $opts{return}};
+	});
 	return $git;
 }
 
@@ -2517,9 +2547,7 @@ sub reset_steps {
 	my ($git) = @_;
 	helper::put_file($ENV{GENESIS_HARNESS_GIT_LOG}, '') if $ENV{GENESIS_HARNESS_GIT_LOG};
 	if (my $file = $ENV{GENESIS_HARNESS_GIT_PLAN}) {
-		my $plan = JSON::PP->new->decode(helper::get_file($file));
-		delete $plan->{_counts};
-		helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+		_with_plan($file, sub {delete $_[0]->{_counts}});
 	}
 	return $git;
 }
@@ -2546,9 +2574,10 @@ sub sever_remote {
 sub restore_remote {
 	my ($self) = @_;
 	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN} or return $self;
-	my $plan = JSON::PP->new->decode(helper::get_file($file));
-	delete $plan->{$_} for qw/fetch_branch fetch_branches push delete_remote_branch/;
-	helper::put_file($file, JSON::PP->new->canonical->encode($plan));
+	_with_plan($file, sub {
+		delete $_[0]->{$_}
+			for qw/fetch_branch fetch_branches push delete_remote_branch/;
+	});
 	return $self;
 }
 
@@ -2670,6 +2699,32 @@ sub _gh_write {
 	return $state;
 }
 
+# _gh_change reads the state, hands it to the caller to change, and writes it
+# back under one exclusive lock on the state file itself.  The fixture curl
+# takes the same lock for the whole of a call, so a create made from a spawned
+# command and a change made here cannot lose each other, and the parent simply
+# waits behind a call in flight.
+sub _gh_change {
+	my ($self, $change) = @_;
+	my $file = $self->{gh}{state};
+	require Fcntl;
+	open my $fh, '+<', $file
+		or die "cannot open the GitHub state $file: $!\n";
+	flock($fh, Fcntl::LOCK_EX())
+		or die "cannot lock the GitHub state $file: $!\n";
+
+	my $body  = do {local $/; <$fh>};
+	my $state = JSON::PP->new->decode($body || '{}');
+	my $answer = $change->($state);
+
+	seek($fh, 0, 0)  or die "cannot rewind the GitHub state $file: $!\n";
+	truncate($fh, 0) or die "cannot empty the GitHub state $file: $!\n";
+	print $fh JSON::PP->new->canonical->encode($state);
+	close $fh        or die "cannot write the GitHub state $file: $!\n";
+
+	return defined $answer ? $answer : $state;
+}
+
 # }}}
 # gh_pull_request - declare an open pull request with a review state {{{
 #
@@ -2677,52 +2732,56 @@ sub _gh_write {
 # so a row that cares about neither says env and no more.
 sub gh_pull_request {
 	my ($gh, %opts) = @_;
-	my $self  = $gh->{harness};
-	my $state = $self->_gh_read;
-
-	my $env = $opts{env};
-	my $number = scalar(@{$state->{prs}}) + 1;
-	push @{$state->{prs}}, {
-		number  => $number,
-		state   => 'open',
-		merged  => JSON::PP::false,
-		head    => {ref => $opts{head} // ($env ? $self->pr_branch($env) : '')},
-		base    => {ref => $opts{base} // ($env ? $self->slug($env)      : '')},
-		title   => $opts{title} // '',
-		body    => $opts{body}  // '',
-		created_at => $opts{at} // '2026-09-13T00:00:00Z',
-		reviews => [($opts{review} && $opts{review} ne 'none') ? {
-			state       => uc($opts{review}),
-			user        => {login => $opts{reviewer} // 'reviewer'},
-			body        => $opts{review_body} // '',
-			submitted_at=> $opts{at} // '2026-09-13T00:00:00Z',
-		} : ()],
-	};
-	$self->_gh_write($state);
-	return $number;
+	my $self = $gh->{harness};
+	my $env  = $opts{env};
+	return $self->_gh_change(sub {
+		my ($state) = @_;
+		my $number = scalar(@{$state->{prs}}) + 1;
+		push @{$state->{prs}}, {
+			number  => $number,
+			state   => 'open',
+			merged  => JSON::PP::false,
+			head    => {ref => $opts{head} // ($env ? $self->pr_branch($env) : '')},
+			base    => {ref => $opts{base} // ($env ? $self->slug($env)      : '')},
+			title   => $opts{title} // '',
+			body    => $opts{body}  // '',
+			created_at => $opts{at} // '2026-09-13T00:00:00Z',
+			reviews => [($opts{review} && $opts{review} ne 'none') ? {
+				state       => uc($opts{review}),
+				user        => {login => $opts{reviewer} // 'reviewer'},
+				body        => $opts{review_body} // '',
+				submitted_at=> $opts{at} // '2026-09-13T00:00:00Z',
+			} : ()],
+		};
+		return $number;
+	});
 }
 
 # }}}
 # gh_close_pr and gh_merge_pr - the two ways a pull request leaves the open set {{{
 sub gh_close_pr {
 	my ($gh, $number, %opts) = @_;
-	my $self  = $gh->{harness};
-	my $state = $self->_gh_read;
-	for my $pr (@{$state->{prs}}) {
-		next unless $pr->{number} == $number;
-		$pr->{state}  = 'closed';
-		$pr->{merged} = $opts{merged} ? JSON::PP::true : JSON::PP::false;
-		$pr->{merged_at} = $opts{merged} ? ($opts{at} // '2026-09-13T00:00:00Z') : undef;
-	}
-	return $self->_gh_write($state);
+	my $self = $gh->{harness};
+	return $self->_gh_change(sub {
+		my ($state) = @_;
+		for my $pr (@{$state->{prs}}) {
+			next unless $pr->{number} == $number;
+			$pr->{state}  = 'closed';
+			$pr->{merged} = $opts{merged} ? JSON::PP::true : JSON::PP::false;
+			$pr->{merged_at} = $opts{merged}
+				? ($opts{at} // '2026-09-13T00:00:00Z') : undef;
+		}
+		return undef;
+	});
 }
 
 sub gh_merge_pr {
 	my ($gh, $number, %opts) = @_;
-	my $self  = $gh->{harness};
-	my $state = $self->_gh_read;
-	$state->{merge_method}{$number} = $opts{method} // 'rebase';
-	$self->_gh_write($state);
+	my $self = $gh->{harness};
+	$self->_gh_change(sub {
+		$_[0]->{merge_method}{$number} = $opts{method} // 'rebase';
+		return undef;
+	});
 	gh_close_pr($gh, $number, merged => 1, at => $opts{at});
 	return $self->_gh_read;
 }
@@ -2731,12 +2790,13 @@ sub gh_merge_pr {
 # gh_protection - what the protection endpoints answer and record {{{
 sub gh_protection {
 	my ($gh, %opts) = @_;
-	my $self  = $gh->{harness};
-	my $state = $self->_gh_read;
-	$state->{admin} = ($opts{admin} ? 1 : 0) if defined $opts{admin};
-	$state->{protection}{$opts{branch}} = $opts{settings} if $opts{branch};
-	$self->_gh_write($state);
-	return $state->{protection};
+	my $self = $gh->{harness};
+	return $self->_gh_change(sub {
+		my ($state) = @_;
+		$state->{admin} = ($opts{admin} ? 1 : 0) if defined $opts{admin};
+		$state->{protection}{$opts{branch}} = $opts{settings} if $opts{branch};
+		return $state->{protection};
+	});
 }
 
 # }}}
@@ -2748,18 +2808,14 @@ sub gh_protection {
 # token again and the fixture curl stays where it is.
 sub gh_unreachable {
 	my ($gh) = @_;
-	my $self  = $gh->{harness};
-	my $state = $self->_gh_read;
-	$state->{unreachable} = 1;
-	return $self->_gh_write($state);
+	my $self = $gh->{harness};
+	return $self->_gh_change(sub {$_[0]->{unreachable} = 1; return undef});
 }
 
 sub gh_reachable {
 	my ($gh) = @_;
-	my $self  = $gh->{harness};
-	my $state = $self->_gh_read;
-	delete $state->{unreachable};
-	return $self->_gh_write($state);
+	my $self = $gh->{harness};
+	return $self->_gh_change(sub {delete $_[0]->{unreachable}; return undef});
 }
 
 sub gh_no_token {
