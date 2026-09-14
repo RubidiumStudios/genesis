@@ -1054,7 +1054,12 @@ sub pipeline_describe {
 
 	# For env-file topology (manual provider or genesis-config CI),
 	# build the DAG directly without the full compiler/provider chain.
+	#
+	# The source-control values come first, and only on this branch,
+	# because a repository with no pipeline configured has nothing for the
+	# derivations to read and should not be asked.
 	if ($top->pipeline_enabled) {
+		_describe_source_control($top);
 		my $topo = $top->pipeline_topology;
 		_describe_topology($top, $topo->{nodes}, $topo->{edges});
 		exit 0;
@@ -1507,6 +1512,26 @@ sub _topology_to_mermaid_md {
 }
 
 # }}}
+# _describe_source_control - print each source-control value and its tier {{{
+#
+# D29 has pipeline-describe open with the resolved source-control values,
+# so an override that has drifted away from what git says is visible
+# rather than silent.  Genesis::Top resolves them and says which tier each
+# came from; this only lays them out.
+sub _describe_source_control {
+	my ($top) = @_;
+
+	output "\n#G{Source control}";
+	for my $row (@{$top->source_control_resolved}) {
+		output "  %-16s %-40s #Yi{%s}",
+			$row->{key}, $row->{value}, $row->{source};
+	}
+	output "";
+
+	return 1;
+}
+
+# }}}
 # _describe_topology - human-readable env-file topology description {{{
 sub _describe_topology {
 	my ($top, $nodes, $edges) = @_;
@@ -1660,7 +1685,10 @@ Compile pipeline and write C<pipeline.md> containing a Mermaid flowchart.
 
 =item B<pipeline-describe> [--platform PROVIDER]
 
-Compile pipeline and print a human-readable ordered progression.
+Print a human-readable ordered progression.  Where the repository
+configures a pipeline, the report opens with the resolved source-control
+values and the tier each of them came from, so an override that has
+drifted away from what git says can be seen.
 
 =item B<pipeline-diff> [--target TARGET]
 

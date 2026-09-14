@@ -1127,6 +1127,68 @@ sub pr_prefix {
 }
 
 # }}}
+# source_control_remote - the remote the pipeline derives its url from {{{
+#
+# The public reader over the resolved block, so a caller asks for the one
+# value it wants instead of reaching into a private hash.  Precedence is
+# explicit over derived over default, under D29, and the derivation and
+# every refusal live in _source_control, which resolves once and keeps
+# its answer.
+sub source_control_remote {
+	my ($self) = @_;
+	return $self->_source_control->{remote};
+}
+
+# }}}
+# source_control_uri - the url a pipeline task clones {{{
+sub source_control_uri {
+	my ($self) = @_;
+	return $self->_source_control->{uri};
+}
+
+# }}}
+# source_control_repository - the owner/repo the GitHub API targets {{{
+sub source_control_repository {
+	my ($self) = @_;
+	return $self->_source_control->{repository};
+}
+
+# }}}
+# source_control_resolved - every source-control value and its tier {{{
+#
+# What pipeline-describe prints, so an override that has drifted away from
+# what git says is visible rather than silent, under D29.  A value is
+# explicit where the operator wrote the key, derived where git answered
+# for it, and default where neither did.
+#
+# is_set decides the explicit tier rather than get, the way
+# _validate_capability_gates does, because the schema fills control_branch
+# and pr_prefix in for every repository and a filled default is the
+# schema's answer rather than anybody's choice.
+sub source_control_resolved {
+	my ($self) = @_;
+
+	my $sc = $self->_source_control;
+	my %derived = map {($_ => 1)} qw/remote uri repository/;
+
+	my @rows;
+	for my $key (qw/remote uri repository control_branch pr_prefix/) {
+		push @rows, {
+			key   => $key,
+			# A remote git reports with no fetch url leaves the uri
+			# unresolved, and a report says so rather than printing a
+			# blank column the reader has to interpret.
+			value => $sc->{$key} // '(none)',
+			source => $self->config->is_set("pipeline.source_control.$key")
+				? 'explicit'
+				: ($derived{$key} ? 'derived' : 'default'),
+		};
+	}
+
+	return \@rows;
+}
+
+# }}}
 # _pipeline_exodus_mount - the one exodus mount the pipeline shares {{{
 #
 # D103 puts the applied record at <exodus mount>_pipelines/<type>, so a
