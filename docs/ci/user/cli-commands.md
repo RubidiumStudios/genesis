@@ -17,9 +17,14 @@ genesis repipe [<pipeline-layout>] [options]
 to the CI system that pipeline names, through `fly set-pipeline` where
 that system is Concourse. It prompts for confirmation before uploading
 unless you pass `--yes`. The configuration is the `pipeline:` section of
-`.genesis/config`, or the `ci.yml` file named by `--config` where the
-repository has no such section, and the provider is read from
+`.genesis/config`, and the provider is read from
 `pipeline.provider.type` rather than from any flag.
+
+There is no fallback to `ci.yml`. A repository whose `pipeline:` section
+is absent or not enabled has no pipeline to apply, and `repipe` says so
+instead of compiling anything. A repository that still carries a
+`ci.yml` with a top-level `pipeline:` key is refused earlier still, by a
+check that names the migration, so no pipeline command reads that file.
 
 The optional positional argument selects which pipeline layout to deploy
 when your configuration defines multiple layouts via `pipeline.layouts`.
