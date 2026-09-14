@@ -99,4 +99,55 @@ subtest 'the propagation base is taken from the branch it is given' => sub {
 		'and it was taken against the control branch passed in';
 };
 
+subtest 'a cascade resolves a base for the env it names and for each child' => sub {
+	# propagate resolves a base twice, once for the environment the
+	# cascade is named after and once for every environment in its
+	# scope, and both reads have to reach the marker in the branch's own
+	# log rather than the merge base underneath it.  Each branch here
+	# carries a marker with one hand-made commit on top, which is the
+	# shape that makes the marker path say so out loud, so a warning
+	# naming the branch is proof the marker was read on that branch.
+	plan tests => 4;
+
+	my $c = make_harness(envs => ['qa', 'prod'], control => 'trunk',
+		kit => 'omega-v2.7.0');
+	$c->write_env_file('prod', pipeline => {prior_env => 'qa'});
+
+	my ($trunk) = Harness::Propagation::run(
+		{dir => $c->a, onfailure => 'Failed to read trunk'},
+		'git', 'rev-parse', 'trunk');
+	chomp $trunk;
+
+	# propagate names an environment branch by the environment alone, so
+	# the two branches are cut here rather than through the harness's
+	# deployment-branch helpers, which spell the longer name.
+	Harness::Propagation::run(
+		{dir => $c->a, onfailure => "Failed to cut $_"},
+		'git', 'branch', $_, 'trunk') for qw/qa prod/;
+
+	for my $env (qw/qa prod/) {
+		local_only_commit($c, $env, marker => $trunk,
+			files => {"$env-marker.yml" => "---\npropagated: true\n"});
+		hand_commit($c, $env, copy => 'a', push => 0,
+			files => {"$env-by-hand.yml" => "---\nby: hand\n"});
+	}
+	stand_on($c, 'trunk');
+
+	# The control commit is named outright, which is what lets the run
+	# source the cascade without a deployment record standing behind qa.
+	# What is under test is where each base is read from, not what
+	# certifies the source, and the harness writes no deployment audit.
+	my (undef, $err) = $c->run_genesis({restore => 0},
+		'propagate', 'qa', '--commit', $trunk, '--dry-run', '--no-fetch');
+
+	like $err, qr/Branch qa has 1 manual commit on top of the last propagation/,
+		'the base for the named environment came off its own marker';
+	like $err, qr/Branch prod has 1 manual commit on top of the last propagation/,
+		"and so did the base for the environment downstream of it";
+	unlike $err, qr/has never been propagated to/,
+		'neither read fell through to an unresolved base';
+	unlike $err, qr/must be run from the control branch/,
+		'and the run was measured against trunk, not the schema default';
+};
+
 done_testing;
