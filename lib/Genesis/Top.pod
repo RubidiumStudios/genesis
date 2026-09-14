@@ -1545,11 +1545,30 @@ C<dev>.
 
 The resolution, and every refusal it can raise, belongs to
 L</_source_control>, which settles all five values at once and keeps the
-answer, so the refusals land at configuration load rather than here.
+answer. The refusal is raised by the first reader that touches the block, so
+it lands here whenever nothing has asked for a source-control value before.
 
 B<Parameters:> None.
 
 B<Returns:> The remote's name.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"pipeline.source_control.control_branch must not be empty.">,
+C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
+enabled, but %s is not a git checkout.">,
+C<"pipeline.source_control.remote could not be derived.">, and
+C<"pipeline.source_control.repository could not be derived from %s."> -
+raised by L</_source_control>, whichever of the five values the caller asked
+for, because it settles all of them at once.
+
+=back
+
+Every one of them exits C<Genesis::Exit::CONFIG>.
 
 B<Examples:>
 
@@ -1564,10 +1583,36 @@ The url a pipeline task clones, which is the fetch url of the remote
 L</source_control_remote> resolved, unless C<pipeline.source_control.uri>
 names one.
 
+The url is asked of git only where C<pipeline.source_control.repository> is
+unset, because the repository is the one value derived from it and asking
+costs a fork on every command. So an explicit repository is the only way undef
+comes back here, and the only way L</source_control_resolved> shows C<(none)>
+in the uri row. Without that override a url git cannot answer for is refused
+rather than returned, because the repository then has nothing to parse.
+
 B<Parameters:> None.
 
-B<Returns:> The url, as a string, or undef where the remote carries no fetch
-url at all.
+B<Returns:> The url, as a string, or undef where
+C<pipeline.source_control.repository> was named and neither
+C<pipeline.source_control.uri> nor git supplied one.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"pipeline.source_control.control_branch must not be empty.">,
+C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
+enabled, but %s is not a git checkout.">,
+C<"pipeline.source_control.remote could not be derived.">, and
+C<"pipeline.source_control.repository could not be derived from %s."> -
+raised by L</_source_control>, whichever of the five values the caller asked
+for, because it settles all of them at once.
+
+=back
+
+Every one of them exits C<Genesis::Exit::CONFIG>.
 
 B<Examples:>
 
@@ -1587,6 +1632,24 @@ url does not carry the pair needs the override.
 B<Parameters:> None.
 
 B<Returns:> The pair, as a string.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"pipeline.source_control.control_branch must not be empty.">,
+C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
+enabled, but %s is not a git checkout.">,
+C<"pipeline.source_control.remote could not be derived.">, and
+C<"pipeline.source_control.repository could not be derived from %s."> -
+raised by L</_source_control>, whichever of the five values the caller asked
+for, because it settles all of them at once.
+
+=back
+
+Every one of them exits C<Genesis::Exit::CONFIG>.
 
 B<Examples:>
 
