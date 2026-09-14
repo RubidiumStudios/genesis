@@ -246,6 +246,20 @@ subtest 'a harness with no vault refuses to break one' => sub {
 # Last in the file on purpose.  Before the refusal existed this row cleared
 # the whole of /secret/ in the shared fixture vault, so it is kept behind
 # every row that stands on a record.
+subtest 'the tool underneath is found past every fixture directory' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $fake = Harness::Propagation::_fake_git_dir($h, '2.30.0');
+	local $ENV{PATH} = join(':', $fake, "$h->{base}/tmp/bin", $ENV{PATH});
+
+	my $found = Harness::Propagation::_real_tool('git');
+	unlike($found, qr{/git-2\.30\.0/},
+		'the git that only reports a version is stepped over');
+	unlike($found, qr{/tmp/bin/},
+		'and so is the directory the wrappers are written into');
+};
+
 subtest 'the empty repository shape cannot be built in a clone' => sub {
 	plan tests => 2;
 

@@ -1848,7 +1848,7 @@ sub fixture_vault {
 case "\$1" in
 	get|read|export) echo "\$2" >> "$self->{vault_log}" ;;
 esac
-exec @{[_real_safe()]} "\$@"
+exec "@{[_real_safe()]}" "\$@"
 EOS
 
 	return $target;
@@ -1864,11 +1864,14 @@ sub _real_safe { return _real_tool('safe') }
 # A wrapper is written with the real tool's path baked into it, and the
 # harness's own fixture directories are stepped over while that path is being
 # found, so a wrapper written while those directories sit on the path still
-# reaches the tool underneath rather than calling itself.
+# reaches the tool underneath rather than calling itself.  The version
+# directory _fake_git_dir writes is one of those directories: a wrapper
+# written while it sits first on the path would otherwise bake in the git that
+# only reports a version.
 sub _real_tool {
 	my ($name) = @_;
 	for my $dir (split /:/, ($ENV{PATH} // '')) {
-		next if $dir =~ m{/ph-\d+-\d+/tmp/(bin|gh-bin)$};
+		next if $dir =~ m{/ph-\d+-\d+/tmp/(?:bin|gh-bin|git-[^/]+)$};
 		return "$dir/$name" if -x "$dir/$name";
 	}
 	return $name;
@@ -2183,7 +2186,7 @@ while [ -n "\$dir" ] && [ "\$dir" != "/" ] && [ "\$dir" != "." ]; do
   fi
   dir="\$(dirname "\$dir")"
 done
-exec @{[_real_tool('git')]} "\$@"
+exec "@{[_real_tool('git')]}" "\$@"
 EOS
 	return "$bin/git";
 }
@@ -3076,7 +3079,7 @@ if [ "\$1" = "--version" ]; then
   echo "git version $version"
   exit 0
 fi
-exec $real "\$@"
+exec "$real" "\$@"
 EOS
 	return $dir;
 }
