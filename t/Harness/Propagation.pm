@@ -3486,8 +3486,13 @@ sub _write_whole_config {
 	$written->save;
 
 	run({dir => $h->{a}}, 'git', 'add', '--', $path);
-	run({dir => $h->{a}, onfailure => "Failed to write $path"},
-		'git', 'commit', '-q', '-m', "write $path");
+	# The commit option is write_env_file's, defaulting to 1, so a row can
+	# put a whole configuration into the index and commit it alongside
+	# whatever else that one control commit is meant to carry.
+	if (defined $opts{commit} ? $opts{commit} : 1) {
+		run({dir => $h->{a}, onfailure => "Failed to write $path"},
+			'git', 'commit', '-q', '-m', "write $path");
+	}
 
 	return $path;
 }
