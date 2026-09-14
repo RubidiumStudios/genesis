@@ -2365,11 +2365,12 @@ required, and C<namespace>, C<auth>, and C<options> are optional. It is
 required under an automated provider for the same reason the shuttle is,
 because a task nobody is watching cannot be asked where to write.
 
-C<locker> is the locker behind the two deploy locks, which are mandatory and
-take no key of their own, so an operator cannot turn one off. Its C<url> is
-required, C<username>, C<password>, and C<ca_cert> are optional, and
-C<skip_ssl_validation> defaults to false. It is required under an automated
-provider as well.
+C<locker> is the locker the two deploy locks use. The block declares the
+locker and its credentials and says nothing about either lock, so how a
+pipeline takes them is settled where the pipeline is compiled rather than
+here. Its C<url> is required, C<username>, C<password>, and C<ca_cert> are
+optional, and C<skip_ssl_validation> defaults to false. It is required under
+an automated provider as well.
 
 C<notifications> is optional under every provider. Its C<style> is the
 repository default rendering and defaults to C<default>, and C<slack> and
