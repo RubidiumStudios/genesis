@@ -2562,6 +2562,49 @@ subtest 'Concourse - provider_config includes non-default values' => sub {
 	is $config->{pause_after_set}, 1,         "non-default pause_after_set included";
 };
 
+subtest 'Concourse - pipeline.public still decides visibility' => sub {
+	# provider_option('expose') answers undef, because the schema spells
+	# the key public rather than expose, so the legacy pipeline.public
+	# fallback below it is the one that decides.  A fake fly records the
+	# subcommand it was handed.
+	my $dir = tempdir(CLEANUP => 1);
+	mkpath("$dir/bin");
+	my $log = "$dir/fly.log";
+	open my $fly, '>', "$dir/bin/fly" or die $!;
+	print $fly "#!/bin/sh\necho \"\$@\" >> \"$log\"\nexit 0\n";
+	close $fly;
+	chmod 0755, "$dir/bin/fly";
+
+	my $ast = Genesis::CI::Compiler::AST->new(
+		metadata     => { name => 'test', version => '2.0', source => 'modern' },
+		branches     => { control => 'main', target_prefix => 'target/' },
+		integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
+		targets      => {},
+		workflows    => {},
+	);
+
+	my $flown = sub {
+		my ($public) = @_;
+		unlink $log;
+		my $p = Genesis::CI::Concourse->new(
+			ast => $ast, top => undef, provider_opts => {});
+		$p->{config} = {
+			pipeline => {
+				name => 'test',
+				(defined $public ? (public => $public) : ()),
+			},
+		};
+		local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
+		output_from { $p->deploy(target => 'ci', yes => 1) };
+		return -f $log ? do { local (@ARGV, $/) = ($log); <> } : '';
+	};
+
+	like $flown->(1), qr/expose-pipeline/,
+		"pipeline.public exposes the pipeline when nothing above it says otherwise";
+	like $flown->(undef), qr/hide-pipeline/,
+		"and the built-in default hides it";
+};
+
 subtest 'Concourse - provider_option applies defaults when not set' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
 	my $provider = Genesis::CI::Concourse->new(ast => $ast);
