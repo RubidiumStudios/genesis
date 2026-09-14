@@ -2885,14 +2885,26 @@ sub _validate_env_pipeline_block {
 #
 # A caught $@ ends in the file and line it was raised at, and under
 # Carp::Always the frames behind it follow, so a refusal that interpolates
-# one hands the operator a stack to read instead of a sentence.  The text
-# is folded onto one line and cut at the first "at <file> line <n>", which
-# is the one cut every refusal in this file makes to what it caught.
+# one hands the operator a stack to read instead of a sentence.  This is
+# the one cut every refusal in this file makes to what it caught.
+#
+# Only the location that ends the message goes.  A provider pointing an
+# operator at a file and a line of their own is an ordinary thing for a
+# validator to do, so "see the setting at config.yml line 12 and fix it"
+# has to come back whole, and cutting at the first location anywhere would
+# take the rest of that sentence with it.
+#
+# The frames go first, because Carp writes a tab in front of every one of
+# them and that is what tells a frame from a sentence.  What is left then
+# ends in the location the message was raised at, if it has one at all,
+# and only a location at the end is taken.  The fold comes last, so that
+# neither pattern has to allow for a wrap that the terminal put in.
 sub _without_backtrace {
 	my ($text) = @_;
 	return '' unless defined $text;
+	$text =~ s/\n\t.*\z//s;
+	$text =~ s/ at \S+ line \d+\.?\s*\z//s;
 	$text =~ s/\s+/ /g;
-	$text =~ s/ at \S+ line \d+.*$//;
 	$text =~ s/^\s+|\s+$//g;
 	return $text;
 }

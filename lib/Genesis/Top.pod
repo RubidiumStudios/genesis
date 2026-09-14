@@ -3241,8 +3241,8 @@ B<Examples:>
 
     my $message = _without_backtrace($@);
 
-A caught message with everything from its first C<< at <file> line <n> >>
-onward cut away, folded onto one line and trimmed.
+A caught message with its trailing C<< at <file> line <n> >> and any
+C<Carp> frames behind it cut away, folded onto one line and trimmed.
 
 A caught C<$@> ends in the file and line it was raised at, and under
 C<Carp::Always> the calling frames follow it, so a refusal that interpolates
@@ -3251,6 +3251,14 @@ cut, and L</_first_errors> makes it to each bullet it pulls out of a
 validation refusal while L</_provider_options_schema>,
 L</_validate_capability_gates>, and L</_validate_provider_config> each make it
 to whatever they caught.
+
+Only a location that ends the message goes. A provider is entitled to point
+an operator at a file and a line of its own and go on talking, so a message
+reading C<"see the setting at config.yml line 12 and fix it"> comes back
+whole. The frames are taken first, since C<Carp> writes a tab in front of
+every one of them and that is what tells a frame from a sentence, and the
+fold is left until last so that neither pattern has to allow for a wrap the
+terminal put in.
 
 Plain function, not a method.
 
@@ -3271,6 +3279,10 @@ B<Examples:>
     my $message = _without_backtrace(
         "Can't locate Nope.pm in \@INC at lib/Genesis/Top.pm line 2128.\n");
     # returns "Can't locate Nope.pm in \@INC"
+
+    my $message = _without_backtrace(
+        "see the setting at config.yml line 12 and fix it\n");
+    # returns it whole, because that location ends no message
 
 =head2 _first_errors
 
