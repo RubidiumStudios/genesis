@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
-# Proves the pull request branch refusing to collide with a deployment
-# branch, and the branch name being composed in one place with both
-# baseline literals gone.
+# Proves T47, the pull request branch refusing to collide with a
+# deployment branch, and T49, the branch name being composed in one place
+# with both baseline literals gone.
 use strict;
 use warnings;
 use utf8;
@@ -63,12 +63,21 @@ subtest 'a prefix that collides is refused by name' => sub {
 		"the environment pr-lab owns the branch the join would take");
 
 	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	# The refusal is wrapped for the terminal before it is raised, so
+	# reading the message back would rest on where a line break happened to
+	# land.  The arguments are read as the refusal composed them instead.
+	my @raised;
+	no warnings 'redefine';
+	local *Genesis::Top::bail = sub {push @raised, [@_]; die "refused\n"};
+
 	my $branch = eval { $top->pr_branch_for('lab') };
-	my $err = $@;
 
 	is($branch, undef, 'the join does not answer');
-	like($err, qr{pr-lab/bosh},
-		'and the refusal names the branch it would have collided with');
+	ok(scalar(grep {!ref($_) && $_ eq 'pr-lab/bosh'} @{$raised[0] || []}),
+		'and the refusal names the branch it would have collided with')
+		or diag('the refusal was raised with: '
+			. join(', ', map {ref($_) ? ref($_) : $_} @{$raised[0] || []}));
 };
 
 subtest 'the refusal exits CONFIG' => sub {
@@ -99,15 +108,17 @@ subtest 'the two baseline literals are gone' => sub {
 	for my $file (modules_under_lib()) {
 		my $source = slurp($file);
 		# A join puts something after the prefix, which is an interpolated
-		# variable, a format placeholder, or a closing quote and a
-		# concatenation.  A declared default closes on the slash and is
+		# variable, a format placeholder, or a closing delimiter and a
+		# concatenation.  The delimiter is whichever one the quote opened
+		# on, so q{pr/} and q(pr/) and q[pr/] are caught beside the two
+		# ordinary quotes.  A declared default closes on the slash and is
 		# followed by a comma or a semicolon, and prose about the name
 		# carries an ordinary word after it, so the sweep passes over the
 		# constant, the schema entry, and the comments, and catches only
 		# the compositions.  It does not ask what comes before the prefix,
 		# because a hand-composed name can sit anywhere in a string.
 		push @prefix_literals, $file
-			if $source =~ m{pr/(?: \$ | % | ["']\s*\. )}x;
+			if $source =~ m{pr/(?: \$ | % | ["'\}\)\]>]\s*\. )}x;
 		push @head_patterns,   $file if $source =~ m{\^propagate/};
 		push @prefix_readers,  $file
 			if $file ne 'lib/Genesis/Top.pm'
