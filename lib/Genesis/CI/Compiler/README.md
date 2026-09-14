@@ -189,7 +189,7 @@ All providers must implement:
 
 ```perl
 package Genesis::CI::<Platform>;
-use parent 'Genesis::CI';
+use parent 'Genesis::CI', 'Genesis::CI::Compiler::PipelineProvider';
 
 # Initialize provider instance
 sub init { ... }
@@ -208,7 +208,24 @@ sub platform_name { ... }
 
 # Return file extension for generated config
 sub file_extension { ... }
+
+# Declare the keys this provider takes under pipeline.provider, in the
+# shape Top's repository schema uses, so the configuration layer can
+# merge them in and validate them for you.
+sub provider_options_schema { ... }
+
+# Declare what this provider is able to do, as the six booleans the
+# base class names, so a key whose ability the provider lacks is
+# refused at load rather than discovered at run time.
+sub capabilities { ... }
 ```
+
+`provider_options_schema` and `capabilities` are abstract on the base
+class and every provider has to answer both. A class that leaves either
+one out fails when its configuration loads, because the base raises
+rather than guessing: a provider with no declared keys would have every
+key an operator wrote refused by name, and a provider whose abilities
+are unknown cannot have those keys gated at all.
 
 ### How It Works
 
