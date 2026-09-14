@@ -217,8 +217,16 @@ sub provider_options_schema {
 
 # }}}
 # The six names D101 fixes, held in one place so that the declaration
-# below, the contract check beside it, and the gate map cannot drift.
-my @_capabilities = qw/
+# below and the contract check beside it cannot drift.  The gate map at
+# the foot of this section still spells the names it gates as literals,
+# so a seventh capability has to be added there by hand, and nothing
+# here will say so if it is not.
+#
+# Sorted here rather than at the comparison, because the check below asks
+# whether two sorted lists are the same text and a name written in the
+# obvious place rather than in alphabetical order would otherwise fail
+# every provider in the tree.
+my @_capabilities = sort qw/
 	cross_pipeline_events deployment_locks multi_file_output
 	optional_git_triggers per_commit_runs scheduled_jobs
 /;
