@@ -323,7 +323,8 @@ what lands direct-mode commits upstream.
 
 =item C<push_pr_branches> (default 1)
 
-Whether to queue C<pr/E<lt>envE<gt>> branches for the batched push.
+Whether to queue C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branches for the
+batched push.
 Always 1 in current usage: concourse cannot push these branches
 itself (no PR resource), and manual operators rely on this to make
 the PR visible.
@@ -378,6 +379,14 @@ B<Errors:>
 Dies when C<git> is absent.  This is a programming error rather than a
 per-env failure, so it is thrown rather than collected into C<errors>
 -- without a working tree there is nothing to iterate.
+
+=item C<"propagate_envs: 'top' is required to name a pull request branch">
+
+Dies when a target asks for a pull request and C<top> is absent.  It is
+raised before the target loop starts, so it reaches the caller as the
+programming error it is instead of being caught by the per-target
+C<eval> and reported as one environment's failure.  A run whose targets
+are all direct needs no C<top> and never meets it.
 
 =back
 
@@ -446,7 +455,12 @@ B<Errors:>
 
 Dies when C<top> is absent.  A pull request branch is named through the
 top and nowhere else, so a caller that reaches this path without one has
-a programming error rather than a per-env failure.
+a programming error rather than a per-env failure.  Reached through
+L</propagate_envs> it never fires, because that function raises the same
+requirement before its target loop and outside the C<eval> that wraps
+each target.  This guard answers a direct caller, and it does sit inside
+that C<eval>, so were it ever to fire there it would be collected into
+C<errors> as an environment's failure.
 
 =back
 

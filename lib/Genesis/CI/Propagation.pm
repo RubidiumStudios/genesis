@@ -93,9 +93,17 @@ sub propagate_envs {
 	# configuration error as a transient one and exit on the wrong code.
 	# The dry run reads these names too, so --dry-run prints the branch
 	# the real run would open and meets the same refusal.
+	#
+	# The top is what names them, and a caller that asks for a pull
+	# request without one is told so here rather than inside the loop,
+	# where the same omission would surface as a method call on an
+	# undefined value.
+	my @wants_pr = grep {$_->{require_pr}} @targets;
+	die "propagate_envs: 'top' is required to name a pull request branch\n"
+		if @wants_pr && !$top;
 	my %pr_branch = map {
 		($_->{env} => $top->pr_branch_for($_->{env}))
-	} grep {$_->{require_pr}} @targets;
+	} @wants_pr;
 
 	my $propagated = 0;
 	my @skipped_idempotent;
