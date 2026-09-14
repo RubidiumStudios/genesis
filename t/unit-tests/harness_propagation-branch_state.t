@@ -119,6 +119,81 @@ subtest 'diverge, move_on_r, the deletions, and the rewrite' => sub {
 	is(ref_in($h->r, 'refs/heads/' . $h->slug('qa')), undef, 'and gone from R');
 };
 
+subtest 'diverge can leave the remote exactly where it stands' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $branch = $h->slug('qa');
+	refresh($h, 'a', $branch);
+
+	my $before = ref_in($h->a, "refs/remotes/origin/$branch");
+
+	# No teammate commits at all, which is the shape a row reaches for when
+	# it wants copy A ahead and nothing else moved.  The refresh in the
+	# middle belongs to the teammate's commits and is skipped with them.
+	diverge($h, $branch, local => 2, remote => 0);
+
+	my ($counts) = run({dir => $h->a}, 'git', 'rev-list',
+		'--left-right', '--count', "$branch...origin/$branch");
+	chomp $counts;
+	is($counts, "2\t0", 'L is two ahead and T holds nothing of its own');
+	is(ref_in($h->a, "refs/remotes/origin/$branch"), $before,
+		'the remote-tracking ref never moved');
+	is(remote_sha($h, $branch), $before, 'and neither did R');
+};
+
+subtest 'a rewrite can be told which commit to drop' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $branch = $h->slug('qa');
+	refresh($h, 'a', $branch);
+
+	# Three commits, so the one the row names is deeper than the second from
+	# the tip the rewrite would have taken on its own.
+	my $named = commit_on_control($h, branch => $branch,
+		files => {'ops/one.yml' => "---\none: 1\n"},
+		message => 'the commit the row names', push => 1);
+	commit_on_control($h, branch => $branch,
+		files => {'ops/two.yml' => "---\ntwo: 2\n"},
+		message => 'the commit above it', push => 1);
+	commit_on_control($h, branch => $branch,
+		files => {'ops/three.yml' => "---\nthree: 3\n"},
+		message => 'the tip', push => 1);
+
+	my $dropped = rewrite_branch($h, $branch, drop => $named);
+	is($dropped, $named, 'the rewrite answers the commit it was told to drop');
+
+	my $reachable = run({dir => $h->r, passfail => 1}, 'git', 'merge-base',
+		'--is-ancestor', $named, "refs/heads/$branch");
+	ok(!$reachable, 'the named commit is unreachable on R');
+
+	ok(!scalar(grep {$_ eq 'ops/one.yml'} @{tree_of($h->r, "refs/heads/$branch")}),
+		'and the file it added went with it');
+};
+
+subtest 'an amend can be made in the copy the row names' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $branch = $h->slug('qa');
+	refresh($h, 'a', $branch);
+	my $before = ref_in($h->r, "refs/heads/$branch");
+
+	my $sha = amend_tip($h, $branch, copy => 'a',
+		subject => 'the operator amended the tip');
+
+	is(ref_in($h->a, "refs/heads/$branch"), $sha,
+		'the amend was made in the copy the row named');
+	isnt($sha, $before, 'and it left a commit of its own');
+	is(remote_sha($h, $branch), $sha, 'which the force-push carried to R');
+	is(ref_in($h->b, "refs/heads/$branch"), undef,
+		'while the copy the helper amends by default was never touched');
+};
+
 subtest 'a fetch that names no branch is refused' => sub {
 	plan tests => 2;
 
