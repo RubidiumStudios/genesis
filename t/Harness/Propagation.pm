@@ -370,12 +370,12 @@ sub newest_record {
 	return undef unless $flat;
 
 	my %nested;
-	for my $key (sort keys %$flat) {
-		my @parts = split /\./, $key;
+	for my $dotted (sort keys %$flat) {
+		my @parts = split /\./, $dotted;
 		my $leaf  = pop @parts;
 		my $at    = \%nested;
 		$at = ($at->{$_} //= {}) for @parts;
-		$at->{$leaf} = $flat->{$key};
+		$at->{$leaf} = $flat->{$dotted};
 	}
 	return \%nested;
 }
@@ -2019,7 +2019,7 @@ sub break_vault {
 	for my $path (@paths) {
 		my $aside = $path . '-aside';
 		my ($said, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
-				stderr => 0, passfail => 0},
+				stderr => 0},
 			_real_safe(), 'move', $path, $aside);
 		die "break_vault could not move $path aside: " . ($said // '') . "\n"
 			if $rc;
@@ -2036,7 +2036,7 @@ sub restore_vault {
 		unless $self->{vault_target};
 	for my $pair (@{delete($self->{broken}) || []}) {
 		my ($said, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
-				stderr => 0, passfail => 0},
+				stderr => 0},
 			_real_safe(), 'move', $pair->[1], $pair->[0]);
 		die "restore_vault could not put $pair->[0] back: " . ($said // '')
 		  . "\n" if $rc;
@@ -2566,7 +2566,6 @@ sub run_in_child {
 	return run({
 			dir      => $self->{a},
 			stderr   => 0,
-			passfail => 0,
 			env      => {
 				GENESIS_HARNESS_GIT_PLAN => $fault->{plan},
 				GENESIS_HARNESS_GIT_LOG  => $fault->{log},
