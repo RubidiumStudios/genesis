@@ -16,79 +16,48 @@ use Service::Git;
 # file has already run it.  We want the package loaded and nothing else.
 require helper;
 
+# Everything the harness exports, in one list.  A name pushed on in a
+# statement of its own drifts away from the rest, and the file had accumulated
+# sixteen such pushes, so the next reader looking for a name had sixteen places
+# to look.  The blank lines group the readers, the writers, the fixtures, the
+# runners, the doubles, and the scenarios.
 our @EXPORT = qw/
 	make_harness
-	commit_on_control commit_from_b publish_from_b push_from refresh
 	ref_in tree_of upstream_of counts
-/;
-
-push @EXPORT, qw/
 	tip_of remote_sha refs_in branch_of files_at slurp
-/;
-
-push @EXPORT, qw/
 	branches_on_r fresh_clone subjects_of heads_in reachable_on_r
-	newest_record
-/;
+	newest_record trailers_of
 
-push @EXPORT, qw/trailers_of/;
-
-push @EXPORT, qw/
+	commit_on_control commit_from_b publish_from_b push_from refresh
 	init_branch deliver propagation_set harness_marker
 	add_deployment_root write_env_file
-/;
-
-push @EXPORT, qw/
 	hand_commit local_only_commit squash_merge unrelated_branch
 	diverge move_on_r delete_on_r delete_local
 	rewrite_control rewrite_branch
-/;
-
-push @EXPORT, qw/
 	amend_tip local_branch local_branch_only unset_control
 	set_remotes set_repo_config move_on_r_at
-/;
 
-push @EXPORT, qw/
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed break_vault restore_vault
-/;
+	record_at vault_read_log fixture_preflight fixture_kit
+	fixture_command
 
-push @EXPORT, qw/
-	snapshot_w assert_w_restored fixture_command
+	snapshot_w assert_w_restored assert_snapshot_invariant
 	run_genesis run_genesis_in stand_on
-/;
 
-push @EXPORT, qw/assert_snapshot_invariant/;
-
-push @EXPORT, qw/
-	fault_git fail_on step_log reset_steps sever_remote restore_remote
+	fault_git fail_on skip_on step_log reset_steps
+	sever_remote restore_remote
 	hold_session_lock release_session_lock
-/;
+	child_recorder child_runs lock_probe lock_probe_log
+	shuttle_spy shuttle_requests
 
-push @EXPORT, qw/
 	github_double gh_pull_request gh_close_pr gh_merge_pr
 	gh_protection gh_unreachable gh_reachable gh_no_token gh_calls
-/;
 
-push @EXPORT, qw/
-	record_at vault_read_log fixture_preflight
-/;
-
-push @EXPORT, qw/
-	child_recorder child_runs lock_probe lock_probe_log
-	shuttle_spy shuttle_requests fixture_kit skip_on
-/;
-
-# The scenarios and the one-line shapes.
-push @EXPORT, qw/
 	ready_envs ready_harness seeded_harness staged due_harness gated_harness
 	held_harness held_prod tracked_harness two_env_harness inherited_harness
 	ready with_open_pr two_roots a_delivery seeded two_due three_due three
 	chain gated proposed automated top_for
-/;
-
-push @EXPORT, qw/
 	stale_set_delivery stage_unrelated modify_unrelated
 /;
 
@@ -457,11 +426,11 @@ sub trailers_of {
 	return {} unless _has_commit($dir, $ref);
 
 	my ($message) = run({dir => $dir}, 'git', 'log', '-1', '--format=%B', $ref);
-	my $file = "$self->{tmp}/trailers.msg";
-	helper::put_file($file, $message // '');
-
-	my ($parsed) = run({dir => $dir},
-		'git', 'interpret-trailers', '--parse', $file);
+	# The message goes in on stdin rather than through a file of a fixed
+	# name, so two readers running at once cannot write over one another and
+	# nothing is left standing in the scratch directory afterwards.
+	my ($parsed) = run({dir => $dir, stdin => ($message // '') . "\n"},
+		'git', 'interpret-trailers', '--parse');
 
 	my %trailers;
 	for my $line (split /\n/, ($parsed // '')) {
