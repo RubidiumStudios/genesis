@@ -59,7 +59,13 @@ sub automated_config {
 		'      name: Genesis CI',
 		'      email: ci@genesis.example.com',
 		'  provider:', "    type: $type",
-		map {"    $_"} @lines);
+		(map {"    $_"} @lines),
+		# The shuttle, the vault, and the locker are required of an
+		# automation for the same reason the credential is, so every row
+		# that names one carries them too.
+		'  shuttle:', '    backend: s3', '    bucket: pipes',
+		'  vault:', '    url: https://vault.example.com',
+		'  locker:', '    url: https://locker.example.com');
 }
 
 sub concourse {

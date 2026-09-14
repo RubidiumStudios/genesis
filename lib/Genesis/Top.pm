@@ -1649,6 +1649,64 @@ sub _pipeline_config_schema {
 					},
 				}
 			},
+
+			# D23: one backend for every environment's request queue and
+			# _ran event, and never a directory, because a directory on one
+			# worker cannot trigger across pipelines.
+			shuttle => {
+				type        => 'hash',
+				required    => \&_automated_provider_configured,
+				description => "The object store behind every deployment's queue and event",
+				schema => {
+					backend   => {type => 'enum', values => [qw/s3 gcs/], required => 1, description => 'Which object store, and never a directory'},
+					bucket    => {type => 'string', required => 1, description => 'The bucket the resources live in'},
+					region    => {type => 'string', description => 'The bucket region'},
+					endpoint  => {type => 'string', description => 'A non-default endpoint'},
+					auth      => {type => 'string', description => 'Vault reference for the credentials'},
+					image     => {type => 'string', default => 'cfcommunity/shuttle-resource', description => 'The resource image'},
+					image_tag => {type => 'string', default => 'latest', description => 'The resource image tag'},
+				}
+			},
+
+			# D17 and D27: the vault a pipeline task writes exodus through.
+			vault => {
+				type        => 'hash',
+				required    => \&_automated_provider_configured,
+				description => 'The vault a pipeline task writes exodus through',
+				schema => {
+					url       => {type => 'string', required => 1, description => 'Vault URL'},
+					namespace => {type => 'string', description => 'Vault namespace'},
+					auth      => {type => 'string', description => 'Vault reference for the task credential'},
+					options   => {type => 'any',    description => 'Provider-specific vault options'},
+				}
+			},
+
+			# D22 and D74: the locker behind the two mandatory deploy locks,
+			# read by the compiler for the emitted resources and by the CLI.
+			locker => {
+				type        => 'hash',
+				required    => \&_automated_provider_configured,
+				description => 'The locker behind the two mandatory deploy locks',
+				schema => {
+					url                  => {type => 'string',  required => 1, description => 'Locker URL'},
+					username             => {type => 'string',  description => 'Locker username'},
+					password             => {type => 'string',  description => 'Locker password, as a vault reference'},
+					ca_cert              => {type => 'string',  description => 'CA certificate for the locker'},
+					skip_ssl_validation  => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS verification'},
+				}
+			},
+
+			# D27: optional, with a repository default the environment's own
+			# genesis.pipeline.notifications.* overrides.
+			notifications => {
+				type        => 'hash',
+				description => 'How the pipeline notifies, and where',
+				schema => {
+					style => {type => 'string', default => 'default', description => 'The repository default rendering'},
+					slack => {type => 'any', description => 'Slack entries'},
+					email => {type => 'any', description => 'Email entries'},
+				}
+			},
 		}
 	};
 }

@@ -52,6 +52,16 @@ EOF
 			print $fh "  enabled: true\n";
 			print $fh "  provider:\n";
 			print $fh "    type: concourse\n";
+			print $fh "    target: ci\n";
+			# An automated provider does the work unattended, so the
+			# skeleton carries the three blocks the schema requires of it.
+			print $fh "  shuttle:\n";
+			print $fh "    backend: s3\n";
+			print $fh "    bucket: pipes\n";
+			print $fh "  vault:\n";
+			print $fh "    url: https://vault.example.com\n";
+			print $fh "  locker:\n";
+			print $fh "    url: https://locker.example.com\n";
 		}
 		close $fh;
 	}
