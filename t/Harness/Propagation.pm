@@ -1377,15 +1377,15 @@ sub diverge {
 # commit the run will offer git as the expected tip.
 sub move_on_r {
 	my ($self, $branch, %opts) = @_;
-	# The ref is moved with update-ref, which leaves the working tree and the
-	# index where they are, so copy B must not be standing on the branch.  It
-	# would come back with an index that no longer matches its own HEAD, and
-	# every commit made in it afterwards would carry the difference.
-	die "move_on_r cannot move $branch, because copy B has it checked out\n"
-		if (branch_of($self->{b}) // '') eq $branch;
-
+	# The branch is moved with a checkout rather than with update-ref, so
+	# copy B's working tree and its index move with the ref.  update-ref
+	# leaves both where they were, and a copy that was standing on the branch
+	# came back with an index that no longer matched its own HEAD, so the
+	# commit made below recorded the removal of everything the branch had
+	# gained since.  This is what move_on_r_at beside it already does.
 	run({dir => $self->{b}}, 'git', 'fetch', '-q', 'origin', $branch);
-	run({dir => $self->{b}}, 'git', 'update-ref', "refs/heads/$branch",
+	run({dir => $self->{b}, onfailure => "Failed to move $branch in copy B"},
+		'git', 'checkout', '-q', '-B', $branch,
 		"refs/remotes/origin/$branch");
 	return $self->_commit_in('b', $branch,
 		files   => $opts{files} // {'moved.yml' => "---\nmoved: true\n"},
