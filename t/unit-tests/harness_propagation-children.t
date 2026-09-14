@@ -227,4 +227,29 @@ subtest 'a child whose status was lost is recorded as lost' => sub {
 		'and carries the same status, not the success it cannot vouch for');
 };
 
+subtest 'the blueprint refuses on the key and not the bare word' => sub {
+	# Two of the four are the restorations the runs assert for themselves.
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['lab', 'qa'], kit => 'broken-blueprint');
+	write_env_file($h, 'qa', genesis => {kit_blueprint_fails => 1});
+
+	# The word stands in lab's file twice without ever being set, which is
+	# what a match on the bare word cannot tell from an environment that
+	# asked to be refused.
+	my $lab = $h->a . '/lab.yml';
+	helper::put_file($lab, helper::get_file($lab)
+		. "# kit_blueprint_fails: a note about the key\n"
+		. "# see kit_blueprint_fails for what this kit refuses\n");
+	run({dir => $h->a}, 'git', 'add', '--', 'lab.yml');
+	run({dir => $h->a, onfailure => 'Failed to commit the mention'},
+		'git', 'commit', '-q', '-m', 'mention the key without setting it');
+
+	my (undef, undef, $mentioned) = run_genesis($h, 'lab', 'check-secrets');
+	is($mentioned, 0, 'an environment that only mentions the word renders');
+
+	my (undef, undef, $asked) = run_genesis($h, 'qa', 'check-secrets');
+	isnt($asked, 0, 'and the one that sets the key does not');
+};
+
 done_testing;
