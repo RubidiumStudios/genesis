@@ -263,6 +263,68 @@ B<Examples:>
   $session->finish;
   # returns $self unchanged where begin never ran
 
+=head2 abort($error)
+
+  $session->abort($@);
+
+Discards whatever the session wrote and did not commit, naming the modified
+files first so the evidence reaches the operator, resets every deployment
+branch the session committed to back to its remote-tracking ref, returns to
+the branch C<begin> recorded, releases the lock, verifies the result, and then
+dies with the error it was given.
+
+Control is never reset and its local ref is never force-written, because
+committed work on control is never discarded. Where control is behind its
+remote-tracking ref the operator rebases it by hand.
+
+C<git clean> is never run, so the discard reaches tracked changes only and an
+untracked file survives.
+
+When the return itself fails the session is stuck, and it dies naming the
+original error, the restore failure, and the branch we are standing on,
+because the alternative is an operator running every later command against the
+wrong branch with nothing having been raised.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$error>
+
+The error the session is being aborted over, which is what the process
+finally dies with. Where it is missing or empty the session says it was
+aborted and dies on that.
+
+=back
+
+B<Returns:> Nothing. C<abort> always raises.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+The error it was handed, which is re-raised once the discard, the resets, and
+the restore are done. A session that is not open re-raises it and does
+nothing else.
+
+=item *
+
+C<< "We then failed to return to %s: %s  You are standing on %s." >> -- raised
+in place of the above where the return failed. It names the original error,
+the restore failure, and the branch we are stuck on, all three at once.
+
+=back
+
+B<Examples:>
+
+  $session->abort($@);
+  # discards, resets the branches it wrote, returns to control, and dies on $@
+
+  $session->abort('the writer could not finish');
+  # dies naming that error and the branch we are stuck on, where the return failed
+
 =head2 active
 
   my $open = $session->active;
@@ -427,6 +489,52 @@ B<Examples:>
 
   my $what = Service::Git::Session::_command_line();
   # returns 'genesis propagate' inside that command
+
+=head2 _reset_to_remote($branch)
+
+  $session->_reset_to_remote('qa/bosh');
+
+Puts one branch back at its remote-tracking ref. It is a ref write rather
+than a switch, so it takes no lock and needs no checkout, except on the
+branch we are standing on, where a hard reset is what puts the tree and HEAD
+back together.
+
+A repository with no remote, or a branch with no remote-tracking ref, is left
+exactly as it is, since there is no C<T> to go back to.
+
+The control branch never reaches here, because C<committed_branches> is the
+set this session moved and that accessor filters control out of it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The deployment branch to put back.
+
+=back
+
+B<Returns:> C<$self>, so it chains.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Failed to reset %s" >> -- raised where the reset or the ref write
+itself failed. C<%s> is the branch name.
+
+=back
+
+B<Examples:>
+
+  $session->_reset_to_remote('qa/bosh');
+  # returns $self, with qa/bosh sitting back at origin/qa/bosh
+
+  $session->_reset_to_remote('qa/bosh');
+  # returns $self unchanged where there is no remote-tracking ref to go back to
 
 =head2 _restore
 

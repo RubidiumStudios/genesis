@@ -1,0 +1,215 @@
+#!/usr/bin/env perl
+# Proves T60, a failed restore is loud; T61, a fault between the first file
+# write and the commit leaves nothing staged; T65, an abort resets what the
+# session wrote and leaves control alone; and T66, nothing force-writes the
+# local control ref.
+use strict;
+use warnings;
+use utf8;
+
+use lib 'lib';
+use lib 't';
+use helper;
+use Harness::Propagation;
+
+use Test::More;
+use Genesis;
+use_ok 'Service::Git::Session';
+
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
+
+subtest 'the baseline swallowed a failed restore' => sub {
+	plan tests => 2;
+
+	# H2's shape, read where it lived.  Once restore_branch is gone at the
+	# last task of this step there is nothing left to run, so the evidence
+	# is the code itself: passfail set and the result dropped on the floor.
+	my $baseline = `git show 048a9933:lib/Service/Git.pm`;
+	my ($sub) = $baseline =~ /sub restore_branch \{(.*?)\n\}/s;
+	like($sub, qr/passfail\s*=>\s*1/,
+		'the baseline restore ran its checkout with passfail set');
+	unlike($sub, qr/bail|die|onfailure/,
+		'and raised nothing when it failed, which is H2');
+};
+
+subtest 'a failed restore reaches the stuck state and dies naming both' => sub {
+	plan tests => 5;
+
+	my $h   = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $git = fault_git($h, copy => 'a');
+	my $session = $git->session(control => $h->control);
+
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	# The step counter is persistent by design, and the switch above spent
+	# checkout call one, so the count goes back to nought before the fault
+	# is armed and the restore's checkout is the call the row names.
+	reset_steps($git);
+
+	# The restore itself fails, which is the case the baseline swallowed.
+	fail_on($git, 'checkout', 1, from => 1, message => 'index is in the way');
+	my $err = exception(sub { $session->abort('the writer could not finish') });
+
+	like($err, qr/the writer could not finish/,
+		'the stuck error names the original error');
+	like($err, qr/index is in the way/,
+		'and the restore failure beside it');
+	like($err, qr/\Q@{[$h->control]}\E/,
+		'and the branch we could not return to');
+	like($err, qr/\Q@{[$h->slug('qa')]}\E/,
+		'and the branch we are stuck on');
+	ok(!$session->active, 'the session is closed, stuck rather than open');
+};
+
+subtest 'a fault between the first write and the commit leaves nothing staged' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files => {
+			'qa.yml'     => "---\nkit: dev\n",
+			'ops/one.yml' => "---\none: true\n",
+		},
+		message => 'two files for qa',
+		push    => 1,
+	);
+
+	my $git = fault_git($h, copy => 'a');
+	my $session = $git->session(control => $h->control);
+	my $w = snapshot_w($h, copy => 'a');
+
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	# Fail after the first checkout_file and before the commit, which is
+	# exactly the window H1 names.
+	fail_on($git, 'checkout_file', 2, message => 'disk went away');
+	my $err = exception(sub {
+		eval {
+			$git->checkout_file($control, 'qa.yml');
+			$git->checkout_file($control, 'ops/one.yml');
+			$git->commit('deliver qa', 'qa.yml', 'ops/one.yml');
+			1;
+		} or $session->abort($@);
+	});
+
+	like($err, qr/disk went away/, 'the fault reached the caller');
+	ok($git->is_clean,
+		'the tree and the index are both clean, so nothing stayed staged');
+	is($git->current_branch, $h->control,
+		'and we stand on the branch begin recorded');
+	assert_w_restored($w, 'working state is whole after the fault');
+};
+
+subtest 'abort resets every branch it committed to and leaves control alone' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa', 'prod']);
+	init_branch($h, 'qa');
+	init_branch($h, 'prod');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+
+	my $git = $h->git('a');
+	my $qa_t   = $git->sha('refs/remotes/origin/' . $h->slug('qa'));
+	my $prod_t = $git->sha('refs/remotes/origin/' . $h->slug('prod'));
+	my $control_before = $git->sha($h->control);
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	for my $env (qw/qa prod/) {
+		$session->switch($h->slug($env));
+		$git->checkout_file($control, 'qa.yml');
+		$git->commit("deliver to $env", 'qa.yml');
+	}
+	exception(sub { $session->abort('the run failed') });
+
+	is($git->sha($h->slug('qa')), $qa_t,
+		'qa/bosh sits back at its remote-tracking ref');
+	is($git->sha($h->slug('prod')), $prod_t,
+		'prod/bosh sits back at its remote-tracking ref');
+	is($git->sha($h->control), $control_before,
+		"control's local ref is untouched");
+	is($git->current_branch, $h->control, 'and we are back on control');
+	ok($git->is_clean, 'with a clean tree');
+};
+
+subtest 'control behind its remote-tracking ref is still left alone' => sub {
+	plan tests => 3;
+
+	# The session never rebases control and never says anything about it.
+	# The message that tells the operator to rebase by hand belongs to the
+	# pre-flight of M7, which refuses a control that is behind or ahead.
+	my $h = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	publish_from_b($h,
+		files   => {'ahead.yml' => "---\nahead: true\n"},
+		message => 'a teammate publishes',
+		branch  => $h->control,
+	);
+	refresh($h, 'a', $h->control);
+
+	my $git = $h->git('a');
+	my $before = $git->sha($h->control);
+	isnt($before, $git->sha('refs/remotes/origin/' . $h->control),
+		'control is behind its remote-tracking ref');
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	exception(sub { $session->abort('the run failed') });
+
+	is($git->sha($h->control), $before,
+		'and the abort did not move it in either direction');
+	ok(!grep({$_ eq $h->control} $session->committed_branches),
+		'control is never in the set the abort resets');
+};
+
+subtest 'a local commit on control survives the session' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $mine = local_only_commit($h, $h->control,
+		marker  => 0,
+		files   => {'mine.yml' => "---\nmine: true\n"},
+		message => 'work I have not pushed',
+	);
+
+	my $git = $h->git('a');
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	$git->checkout_file($mine, 'mine.yml');
+	$git->commit('deliver mine.yml', 'mine.yml');
+	exception(sub { $session->abort('the run failed') });
+
+	is($git->sha($h->control), $mine,
+		'the unpushed commit on control is still control HEAD');
+	ok($git->is_ancestor($mine, $git->sha($h->control)),
+		'and it was never discarded');
+
+	# I2 is a rule about refs, so the last assertion reads the verbs: no
+	# verb of the session writes the control ref under any name.  The path
+	# is absolute because the stuck subtest above leaves us standing in the
+	# repository it could not put back, which is the point of being stuck.
+	my $module = get_file($helper::TOPDIR . '/lib/Service/Git/Session.pm');
+	unlike($module, qr/update-ref[^\n]*control|reset --hard[^\n]*control/,
+		'no verb of the session force-writes the local control ref');
+};
+
+sub exception {
+	my ($code) = @_;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	eval { $code->(); 1 } and return '';
+	return $@;
+}
+
+done_testing;
