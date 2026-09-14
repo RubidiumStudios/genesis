@@ -2059,13 +2059,64 @@ after C<< Genesis::Config::validate >>, so that a repository meets the same
 refusal in the same words whichever command loaded it.
 
 A section that is off is left alone. Otherwise the source-control block is
-resolved, which is where the derivations and their refusals are raised, and
-then every environment the deployment root holds has its
-C<genesis.pipeline> block checked, read merged through
+resolved, which is where the derivations and their refusals are raised, then
+the configured provider's own programmatic check runs through
+L</_validate_provider_config>, and then every environment the deployment
+root holds has its C<genesis.pipeline> block checked, read merged through
 L</_merged_env_params>. The refusals themselves belong to
-L</_source_control> and to L</_validate_env_pipeline_block>.
+L</_source_control>, to L</_validate_provider_config>, and to
+L</_validate_env_pipeline_block>.
 
 B<Returns:> 1.
+
+=head2 _validate_provider_config
+
+    $top->_validate_provider_config();
+
+Runs the configured provider's own C<validate_config> and refuses at
+C<Genesis::Exit::CONFIG> when it returns errors.
+
+This is the programmatic half of the provider configuration contract, and
+it is deliberately narrow: it states what a declaration cannot, such as
+"one of these two keys is required". It runs after the generic validation,
+so every key it reads has already been typed and defaulted, and it makes no
+network call, because a load that dialled a provider would make every
+command wait on that provider being up.
+
+The provider is built from the C<pipeline.provider> block with the resolved
+C<repository> alongside it, since under D102 the repository the pipeline
+acts on lives in the source-control block rather than the provider block.
+The check gathers every error string the provider returns, so the refusal
+names the provider once and lists everything wrong with it.
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Invalid configuration for the ... provider"> - raised when the
+provider's C<validate_config> returns one or more error strings, which are
+listed under it, one per line.
+
+=item *
+
+C<"Unknown CI provider type ..."> - raised by
+L<Genesis::CI::Provider/provider_class> when no registry entry holds the
+configured type. The schema's enum normally refuses that first.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_provider_config;
+    # returns 1 where the provider is happy with its configuration
+
+    $top->_validate_provider_config;
+    # exits CONFIG (78) where pipeline.provider.type is concourse and
+    # pipeline.provider.target is unset
 
 =head2 _merged_env_params
 

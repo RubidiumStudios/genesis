@@ -157,10 +157,18 @@ sub check_prereqs {
 # }}}
 # validate_config - check stored config fields; returns list of error strings {{{
 #
-# Called by Provider->new after the subclass object is constructed.
+# Called by Provider->new after the subclass object is constructed, and by
+# Genesis::Top::_validate_provider_config at configuration load, which is
+# where D86 puts the programmatic half of the provider contract.
 # Subclasses override this to assert that all required fields are present and
 # well-formed.  Returning an empty list means the config is valid.
-# No network calls should be made here — this is a fast, local check only.
+#
+# It states the rules a declaration cannot, which is a rule like "target or
+# url but not neither", or a key required only when another is set, and it
+# leaves everything a schema can already say to the schema.  No network
+# calls are made here: every command loads the configuration, so a check
+# that dialled the provider would make every command wait on that provider
+# being up.
 sub validate_config {
 	return ();
 }

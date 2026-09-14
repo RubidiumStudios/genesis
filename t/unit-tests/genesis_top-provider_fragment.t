@@ -172,4 +172,63 @@ TERSE
 		'and the same configuration loads once the key is written';
 };
 
+# Proves T37: the provider's programmatic check runs after the generic
+# validation, returns error strings rather than bailing, and makes no
+# network call.
+subtest 'the programmatic check is narrow and runs second' => sub {
+	plan tests => 4;
+
+	# A CLI-side provider class whose validate_config states the one rule
+	# a declaration cannot: target or url, but not neither.
+	put_file('t/tmp/lib/Genesis/CI/Provider/Pair.pm', <<'PAIR');
+package Genesis::CI::Provider::Pair;
+our @CALLS;
+sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
+sub validate_config {
+	my ($self) = @_;
+	push @CALLS, {%$self};
+	return ("'target' or 'url' is required for the Pair provider")
+		unless $self->{target} || $self->{url};
+	return ();
+}
+1;
+PAIR
+	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Pair.pm', <<'PAIRC');
+package Genesis::CI::Compiler::Providers::Pair;
+use parent 'Genesis::CI::Compiler::PipelineProvider';
+sub provider_type {'pair'}
+sub provider_options_schema {
+	return {
+		target => {type => 'string', description => 'One of the pair'},
+		url    => {type => 'string', description => 'The other of the pair'},
+	};
+}
+1;
+PAIRC
+	local @INC = ('t/tmp/lib', @INC);
+	Genesis::CI::Compiler::PipelineProvider->register_provider('pair', {
+		class     => 'Genesis::CI::Compiler::Providers::Pair',
+		file      => 'Genesis/CI/Compiler/Providers/Pair.pm',
+		cli_class => 'Genesis::CI::Provider::Pair',
+		cli_file  => 'Genesis/CI/Provider/Pair.pm',
+	});
+
+	throws_ok {load_with(automated_config('pair'))}
+		qr/'target' or 'url' is required for the Pair provider/,
+		'the programmatic rule is raised at load';
+	lives_ok {load_with(automated_config('pair', 'url: https://ci'))}
+		'and one of the pair satisfies it';
+
+	# It runs second, so the generic refusal wins and the check is never
+	# reached with an undeclared key in hand.
+	{
+		local @Genesis::CI::Provider::Pair::CALLS = ();
+		throws_ok {load_with(automated_config('pair', 'nonesuch: 1'))}
+			qr/pipeline\.provider\.nonesuch: unknown configuration key/,
+			'the generic validation refuses first';
+		is scalar(@Genesis::CI::Provider::Pair::CALLS), 0,
+			'so the programmatic check never ran';
+	}
+};
+
 done_testing;
