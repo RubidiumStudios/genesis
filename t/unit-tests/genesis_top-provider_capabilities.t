@@ -184,6 +184,8 @@ subtest 'a capability that is true admits the key it gates' => sub {
 	# there is nothing to gate against and nothing to refuse.  The
 	# source-control block is still named, because the repository cannot be
 	# derived from the harness's filesystem remote whatever the provider is.
+	# The qa environment was left silent by the row above and stays that
+	# way, so this row stands on the write that row made.
 	lives_ok {load_with($h, automated_config('manual'))}
 		'and a provider with no class is left alone';
 };
