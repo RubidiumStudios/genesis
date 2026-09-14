@@ -1366,6 +1366,120 @@ subtest 'network_definition - an allocation override does not count a network\'s
 };
 
 # ---------------------------------------------------------------------------
+# Claim keys under a name_prefix
+#
+# A claim is keyed by the name that reaches the cloud config.  Where a kit
+# passes a name_prefix -- including an empty one -- that is not the prefixed
+# form name_for produces, which is what earlier releases keyed by regardless.
+# The two subtests below cover the halves of that migration: the writer
+# retires the old spelling, and the readers treat a claim still recorded under
+# it as their own rather than as a foreign claim to allocate around.  Both
+# geometries are invisible to a fixture that lets the naming default, because
+# there the two spellings are the same string.
+# ---------------------------------------------------------------------------
+
+subtest 'update_network - a name_prefix claim replaces the legacy spelling' => sub {
+	plan tests => 5;
+
+	my $env  = make_deploy_env(
+		director_exodus_lookup => sub {
+			my ($self, $key) = @_;
+			die "Unknown exodus key: $key" unless $key eq '/network';
+			my $network = dclone($director_network_exodus);
+			# What an earlier release recorded for this same network.
+			$network->{subnets}{'ocfp-0'}{claims}{$self->name.'.bosh.net-bosh'} = '10.0.0.5';
+			return $network;
+		},
+	);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+	my $legacy = $hook->basename.'.net-bosh';
+
+	ok(exists $hook->_get_existing_allocations()->{$legacy},
+		'the legacy claim is on the director before the deploy');
+
+	expect_bosh_drop { $hook->network_definition('bosh',
+		strategy => 'ocfp',
+		name_prefix => 'ocfp-',
+		dynamic_subnets => {
+			allocation => { size => 0, statics => 0 },
+			cloud_properties_for_iaas => {
+				openstack => {
+					'net_id'          => $hook->network_reference('id'),
+					'security_groups' => ['default'],
+				},
+			},
+		},
+	) };
+
+	my $claims = $hook->network->{subnets}{'ocfp-0'}{claims};
+	is($claims->{'ocfp-bosh'}, '10.0.0.5',
+		'the claim is recorded under the name that reaches the cloud config');
+	ok(!exists $claims->{$legacy},
+		'and the legacy spelling is deleted rather than left beside it');
+	cmp_deeply($hook->network->{subnets}{'ocfp-1'}{claims}, {
+		'test-env-mgmt.bosh.net-compilation' => '10.0.1.37-10.0.1.40',
+	}, 'another network\'s claim is untouched by the migration');
+};
+
+subtest 'network_definition - a legacy-keyed claim is still our own' => sub {
+	plan tests => 3;
+
+	my $own_claim = '10.0.1.100-10.0.1.163'; # 64 addresses, ours, on ocfp-1
+
+	# As the self-claim subtest above, but the claim is filed under the
+	# spelling an earlier release used while the network now answers to a
+	# name_prefix.  Counting it as foreign is what shrank the pool and bailed
+	# with 'Not enough available IPs' on the second deploy.
+	my $size_ocfp_1 = sub {
+		my ($with_legacy_claim) = @_;
+		my $env = make_deploy_env(
+			config => {
+				params => {cloud_config_prefix => 'test-env.test'},
+				'bosh-configs' => {
+					cloud => {networks => {bosh => {allocation => {size => 0}}}},
+				},
+			},
+			director_exodus_lookup => sub {
+				my ($self, $key) = @_;
+				die "Unknown exodus key: $key" unless $key eq '/network';
+				my $network = dclone($director_network_exodus);
+				$network->{subnets}{'ocfp-1'}{claims}{$self->name.'.bosh.net-bosh'} = $own_claim
+					if $with_legacy_claim;
+				return $network;
+			},
+		);
+		my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+		my ($net, $warn);
+		$warn = stderr_from {
+			$net = $hook->network_definition('bosh',
+				strategy => 'ocfp',
+				name_prefix => 'ocfp-',
+				dynamic_subnets => {
+					allocation => {size => 8, statics => 0},
+					cloud_properties_for_iaas => {
+						openstack => {
+							'net_id'          => $hook->network_reference('id'),
+							'security_groups' => ['default'],
+						},
+					},
+				},
+			);
+		};
+		return $warn;
+	};
+
+	my ($alone) = $size_ocfp_1->(0) =~ /(\d+)\s+claimed\s+by\s+other\s+networks/s;
+	is($alone, 4,
+		'with no claim of ours, other networks hold the director\'s four addresses');
+
+	my ($with_legacy) = $size_ocfp_1->(1) =~ /(\d+)\s+claimed\s+by\s+other\s+networks/s;
+	ok(defined $with_legacy, 'the run with a legacy-keyed claim still reports the figure');
+	is($with_legacy, $alone,
+		'which is unchanged, so the legacy spelling is recognised as our own claim');
+};
+
+# ---------------------------------------------------------------------------
 # Logical Subnet Amalgamation
 #
 # BOSH refuses two subnets that share a range inside one network, so Genesis
