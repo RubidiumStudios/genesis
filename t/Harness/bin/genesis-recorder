@@ -172,13 +172,18 @@ sub hold_the_lock {
 		# meantime, then compare 1 against 1 for the rest of its turns and
 		# hold a lock nobody is waiting on it to release.
 		my $parent = getppid();
-		open my $fh, '>', $plan->{lock} or POSIX::_exit(2);
+		# Opened for append and emptied once the lock is in hand, rather
+		# than truncated by the open itself, because a holder that wiped
+		# the file on the way in would take away the line the holder before
+		# it is still standing on while it waits.
+		open my $fh, '>>', $plan->{lock} or POSIX::_exit(2);
 		flock($fh, LOCK_EX) or POSIX::_exit(2);
 
 		# The recorder may have refused and gone while we waited, and a
 		# lock taken for a run that is over is a lock held for nothing, so
 		# we let go of it at once rather than announcing ourselves.
 		POSIX::_exit(0) unless _parent_is_alive($parent);
+		truncate($fh, 0) or POSIX::_exit(2);
 		print $fh sprintf("%d\n%s\n", $$, $plan->{hold_lock});
 		$fh->flush;
 
@@ -192,16 +197,21 @@ sub hold_the_lock {
 	}
 
 	# Wait for the holder to have the lock, so the child never races it.
-	# The holder writes its pid as soon as it has the lock, so a file with
-	# something in it is a lock that is held.  Every turn asks whether the
-	# holder is still running as well, because a holder that could not open
-	# the lock file exits and no amount of waiting will grow the file, and
-	# a wait that ran out is a lock nobody took either.  Both say so here
-	# rather than letting a row assert a refusal against a lock that was
-	# never held.
+	# What the wait watches for is this holder's own pid, which it writes
+	# once it has the lock and never before, rather than a file with
+	# something in it, because a line an earlier holder left behind would
+	# otherwise end the wait at once and let the run go ahead against a lock
+	# it never took.  That is the same token the harness waits on, so the
+	# two halves of the protocol agree about what proof looks like.
+	#
+	# Every turn asks whether the holder is still running as well, because a
+	# holder that could not open the lock file exits and no amount of waiting
+	# will grow the file, and a wait that ran out is a lock nobody took
+	# either.  Both say so here rather than letting a row assert a refusal
+	# against a lock that was never held.
 	my $taken = 0;
 	for (1 .. 100) {
-		if (-s $plan->{lock}) {
+		if (lock_taken_by($plan->{lock}, $pid)) {
 			$taken = 1;
 			last;
 		}
@@ -214,6 +224,24 @@ sub hold_the_lock {
 	refuse("the recorder's lock holder did not take the lock in five seconds\n",
 		$pid) unless $taken;
 	return $pid;
+}
+
+# }}}
+# lock_taken_by - has this holder written its own pid into the lock file {{{
+#
+# The holder's pid is the token, because it goes into the file only once the
+# lock is in hand, so a file that merely has something in it is not mistaken
+# for a lock this holder took.  The harness waits on the same token, and the
+# two have to agree or a run reads one of them as proof of the other.
+sub lock_taken_by {
+	my ($file, $pid) = @_;
+	return 0 unless defined $file && -s $file;
+	open my $fh, '<', $file or return 0;
+	my $first = <$fh>;
+	close $fh;
+	return 0 unless defined $first;
+	chomp $first;
+	return $first eq "$pid" ? 1 : 0;
 }
 
 # }}}

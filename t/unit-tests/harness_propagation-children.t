@@ -205,6 +205,30 @@ subtest 'a fixture that cannot go on answers with one status' => sub {
 	chmod 0700, "$where/.git";
 };
 
+subtest 'the recorder waits for its own holder to take the lock' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+
+	# The lock is already held and the holder's line is already in the file,
+	# so the holder the recorder forks blocks where it asks for it and never
+	# writes a line of its own.  A wait that asked only whether the file had
+	# content would read the line that is already there and let the run
+	# proceed against a lock it never took.
+	my $first = hold_session_lock($h, command => 'genesis propagate');
+
+	my $recorder = child_recorder($h, exec => 0, hold_lock => 'a stranger');
+	my (undef, $rc, $err) = run({stderr => 0, passfail => 0},
+		$recorder, 'version');
+
+	is($rc, 99, 'the recorder refuses rather than take that line as proof');
+	like($err, qr/did not take the lock/, 'and says its holder never got it');
+	is_deeply([child_runs($h)], [],
+		'while no record was written for a run that never went ahead');
+
+	release_session_lock($h, $first, hard => 1);
+};
+
 subtest 'a child whose status was lost is recorded as lost' => sub {
 	plan tests => 5;
 
