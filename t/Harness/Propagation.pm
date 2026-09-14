@@ -723,10 +723,17 @@ sub type { $_[0]->{type} }
 sub control { $_[0]->{control} }
 sub envs { $_[0]->{envs} }
 
+# The options are handed to Service::Git and keyed into the cache beside the
+# copy, so a caller that asks for a tracking handle and a caller that asks for
+# a plain one are not answered with one another's.  A row that wants a handle
+# of a shape the harness does not build would otherwise build it itself, which
+# is state-building outside the harness.
 sub git {
-	my ($self, $copy) = @_;
+	my ($self, $copy, %opts) = @_;
 	$copy //= 'a';
-	return $self->{"_git_$copy"} //= Service::Git->new($self->{$copy});
+	my $key = join('|', "_git_$copy",
+		map {"$_=" . (defined $opts{$_} ? $opts{$_} : '')} sort keys %opts);
+	return $self->{$key} //= Service::Git->new($self->{$copy}, %opts);
 }
 
 sub slug {
