@@ -87,6 +87,21 @@ subtest "copy A's own publish moves copy A's tracking ref" => sub {
 	is("$ahead $behind", '0 0', 'copy A reads in-sync with no second refresh');
 };
 
+subtest 'a branch copy B is standing on is not moved under it' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $branch = $h->slug('qa');
+	run({dir => $h->b}, 'git', 'fetch', '-q', 'origin', $branch);
+	run({dir => $h->b}, 'git', 'checkout', '-q', '-B', $branch,
+		"refs/remotes/origin/$branch");
+
+	ok(!eval {move_on_r($h, $branch); 1},
+		'moving the branch copy B stands on is refused');
+	like($@, qr/has it checked out/, 'and the refusal says why');
+};
+
 subtest 'a divergence with no local commits still reads behind' => sub {
 	plan tests => 2;
 
