@@ -2749,6 +2749,10 @@ sub _env_file_names {
 	my @names;
 	require File::Glob;
 	for my $path (File::Glob::bsd_glob($self->path('*.yml'))) {
+		# Three later checks read this list and every one of them opens what
+		# it is handed, and a directory whose name ends in .yml is not an
+		# environment file however much it looks like one.
+		next unless -f $path;
 		my $name = (split m{/}, $path)[-1];
 		$name =~ s/\.yml$//;
 		push @names, $name;
