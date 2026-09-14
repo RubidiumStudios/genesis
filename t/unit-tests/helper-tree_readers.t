@@ -108,4 +108,26 @@ subtest 'sweep_files refuses to answer quietly where the anchor is wrong' => sub
 	}
 };
 
+subtest 'strip_comment takes the comment and leaves the code' => sub {
+	plan tests => 5;
+
+	is(strip_comment(q{exit TEMPFAIL; # the partial run a retry repairs}),
+		q{exit TEMPFAIL; },
+		'a trailing comment goes');
+
+	is(strip_comment(q{exit TEMPFAIL;}), q{exit TEMPFAIL;},
+		'a line with no comment is handed back whole');
+
+	is(strip_comment(q{my $note = "exit 75 # here"; # and here}),
+		q{my $note = "exit 75 # here"; },
+		'a hash inside a quoted string is not a comment');
+
+	is(strip_comment(q{$slug =~ s#^/?(.*?)/?$#$1#; # trim the slashes}),
+		q{$slug =~ s#^/?(.*?)/?$#$1#; },
+		'a hash that delimits a regex is not a comment either');
+
+	is(strip_comment(q{my $last = $#codes;}), q{my $last = $#codes;},
+		'and neither is the last-index sigil');
+};
+
 done_testing;

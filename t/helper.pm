@@ -1155,11 +1155,25 @@ sub sweep_files {
 	return @sorted;
 }
 
-# Remove a trailing comment from a line of Perl before a sweep matches a
-# pattern against it, so a note that names a bare code or a forbidden git
-# option is not reported as a call site.  A '#' only opens a comment where it
-# sits outside a quoted string and is not the last-index sigil of $#array, and
-# the rest of the line, whitespace and all, is handed back unchanged.
+# strip_comment removes a trailing comment from a line of Perl before a sweep
+# matches a pattern against it, so a note that merely names a bare code or a
+# forbidden git option is not reported as a call site.  A '#' opens a comment
+# only where it sits outside a quoted string, is not escaped, is not the
+# last-index sigil of $#array, and does not open the delimiters of a
+# quote-like operator such as s#a#b# or m#^/#.  Everything before it comes
+# back, whitespace and all, because a caller matches against the text rather
+# than printing it.
+#
+# This is a scanner rather than a parser, and it can be wrong in both
+# directions, so it is worth knowing which way.  Where a line ends while a
+# quote is still open, which happens on a line carrying a lone quote character
+# inside a regex, the scanner never reaches the '#' and the comment stays
+# standing, and a sweep can then match against comment text and report a call
+# site that is not there.  Where a regex uses a delimiter the scanner does not
+# follow, the line can be cut short instead and a real call site goes unseen.
+# Neither costs anything in the tree as it stands, and a guard that reports a
+# comment is the louder of the two, so the false positive is the one a reader
+# will meet first.
 sub strip_comment {
 	my ($line) = @_;
 	return $line unless defined $line;
@@ -1180,8 +1194,31 @@ sub strip_comment {
 			next;
 		}
 		next unless $c eq '#';
-		next if $i > 0 && substr($line, $i - 1, 1) eq '$';
-		return substr($line, 0, $i);
+
+		my $before = substr($line, 0, $i);
+		next if $before =~ /[\$\\]\z/;      # $#array, or an escaped hash
+
+		# A quote-like operator can take '#' for its delimiter, and the tree
+		# is full of s#...#...# and m#...#.  Step over as many delimited
+		# sections as the operator takes and carry on from the far side.
+		if ($before =~ /(?:^|[^A-Za-z0-9_\$\@\%])(qq|qw|qr|tr|s|m|y|q)\z/) {
+			my $sections = ($1 =~ /^(?:s|tr|y)\z/) ? 2 : 1;
+			my $at = $i;
+			SECTION: for (1 .. $sections) {
+				my $from = $at + 1;
+				while (1) {
+					$at = index($line, '#', $from);
+					last SECTION if $at < 0;
+					last if substr($line, $at - 1, 1) ne '\\';
+					$from = $at + 1;
+				}
+			}
+			return $line if $at < 0;       # the operator runs off the end
+			$i = $at;
+			next;
+		}
+
+		return $before;
 	}
 	return $line;
 }
