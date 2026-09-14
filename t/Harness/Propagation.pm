@@ -1412,16 +1412,19 @@ sub rewrite_control {
 	return $self->rewrite_branch($self->{control}, %opts);
 }
 
+# One commit is dropped, and which one it is is the second from the tip
+# unless the caller names it outright through drop.  There is no count, since
+# a count only widened the window the second commit was read through and
+# never changed how many commits the rebase took out.
 sub rewrite_branch {
 	my ($self, $branch, %opts) = @_;
-	my $count = $opts{count} // 1;
 
 	# The rewrite runs in copy B, because a rebase checks out and copy A's
 	# working state is what the rows assert on.
 	my $dir = $self->{b};
 	run({dir => $dir}, 'git', 'fetch', '-q', 'origin', $branch);
 	my ($listed) = run({dir => $dir}, 'git', 'rev-list',
-		'--max-count=' . ($count + 2), "origin/$branch");
+		'--max-count=2', "origin/$branch");
 	my @shas = split /\n/, ($listed // '');
 	my $drop = $opts{drop} // $shas[1];
 	die "There is no commit to drop from $branch\n" unless $drop;

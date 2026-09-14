@@ -370,10 +370,11 @@ takes the same options.
 =head2 rewrite_branch($h, $branch, %opts)
 
 Force-pushes any branch with one commit dropped, and returns the sha that is
-now unreachable.  C<drop> names the commit to remove, and where it is left
-out the commit behind the tip is taken; C<count> says how many commits to
-consider and defaults to one.  The rewrite runs in copy B, because a rebase
-checks out and copy A's working state is what the rows assert on.
+now unreachable.  C<drop> names the commit to remove, and where it is left out
+the commit behind the tip is taken.  One commit is dropped whichever way the
+call is written, and there is no option that changes how many.  The rewrite
+runs in copy B, because a rebase checks out and copy A's working state is what
+the rows assert on.
 
 =head2 amend_tip($h, $branch, %opts)
 
