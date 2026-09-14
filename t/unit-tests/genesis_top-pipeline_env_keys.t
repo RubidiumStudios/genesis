@@ -250,8 +250,8 @@ subtest 'a caught refusal is folded into readable bullets' => sub {
 		'and a file and line trailing the error is cut away with its trace';
 };
 
-subtest 'a caught message is cut at the first file and line' => sub {
-	plan tests => 4;
+subtest 'a caught message is cut at the location that ends it' => sub {
+	plan tests => 6;
 
 	# The one cut, which _first_errors makes to each bullet and which the
 	# provider refusals make to whatever they caught.
@@ -271,6 +271,24 @@ subtest 'a caught message is cut at the first file and line' => sub {
 
 	is Genesis::Top::_without_backtrace(undef), '',
 		'an undefined text answers an empty string';
+
+	# A provider pointing an operator at a file and a line of their own is
+	# an ordinary thing for a validator to do, and the cut is for the
+	# location that ends a message rather than for every one in it.
+	is Genesis::Top::_without_backtrace(
+		"target is required; see the setting at config.yml line 12"
+		." and fix it\n"),
+		'target is required; see the setting at config.yml line 12'
+		.' and fix it',
+		'a location the message goes on talking past is left alone';
+
+	is Genesis::Top::_without_backtrace(
+		"target is required; see the setting at config.yml line 12"
+		." and fix it\n at lib/Genesis/CI/Provider/Pair.pm line 7.\n"
+		."\tGenesis::CI::Provider::Pair::validate_config() called at x line 3\n"),
+		'target is required; see the setting at config.yml line 12'
+		.' and fix it',
+		'and the trailing location behind it goes with its frames';
 };
 
 subtest 'a refusal with no bullets carries only its first line' => sub {
