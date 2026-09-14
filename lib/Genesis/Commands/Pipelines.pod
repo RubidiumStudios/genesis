@@ -387,7 +387,7 @@ the merge base with the control branch is used instead.
 B<The control branch is passed in rather than assumed.> Its name is
 configured per repository at C<pipeline.source_control.control_branch>,
 every caller has already read it through
-L<Genesis::Top/ci_control_branch>, and taking a merge base against the
+L<Genesis::Top/control_branch>, and taking a merge base against the
 wrong branch would silently change what the diff is computed from.
 
 B<Parameters:>

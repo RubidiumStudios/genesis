@@ -41,8 +41,10 @@ sub apply {
 
 	# D27 took --platform away, so the provider is the one the repository
 	# is configured for and nothing else, and under D15 an absent type is
-	# the manual provider.
-	my $platform = $top->config->get('pipeline.provider.type') // 'manual';
+	# the manual provider.  A repository that declares no pipeline reads as
+	# manual here as well, because there is no automation to apply to it
+	# either, and the bail below says so in the words the operator needs.
+	my $platform = $top->pipeline_provider_type // 'manual';
 
 	# Short-circuit on the 'manual' provider: it has no pipeline to apply
 	# — Genesis is the CLI you run at your terminal, there is no CI to
@@ -130,10 +132,10 @@ sub pipeline_status {
 
 	my $top = Genesis::Top->new('.');
 	bail("CI is not configured for this repository.")
-		unless $top->ci_configured;
+		unless $top->pipeline_enabled;
 
 	my $git     = Service::Git->new('.');
-	my $control = $top->ci_control_branch;
+	my $control = $top->control_branch;
 
 	my $topo = $top->pipeline_topology;
 	bail("No environments with pipeline metadata found.")
@@ -259,7 +261,7 @@ sub pipeline_status {
 
 	# Display
 	my $pipeline_name = $top->config->get('pipeline.name') || $top->type;
-	my $provider_type = $top->config->get('pipeline.provider.type') || 'manual';
+	my $provider_type = $top->pipeline_provider_type // 'manual';
 
 	output "\n#G{Pipeline}: #C{%s}  #Yi{provider}: %s  #Yi{control}: %s",
 		$pipeline_name, $provider_type, $head_short;
@@ -359,10 +361,10 @@ sub propagate {
 	my $top     = Genesis::Top->new('.');
 
 	bail("CI is not configured for this repository.")
-		unless $top->ci_configured;
+		unless $top->pipeline_enabled;
 
 	my $git     = Service::Git->new('.', track_branch => !$dry_run);
-	my $control = $top->ci_control_branch;
+	my $control = $top->control_branch;
 
 	bail(
 		"Propagation must be run from the #C{%s} branch (currently on #C{%s}).",
@@ -793,10 +795,10 @@ sub pipeline_prepare {
 	my $top     = Genesis::Top->new('.');
 
 	bail("CI is not configured for this repository.")
-		unless $top->ci_configured;
+		unless $top->pipeline_enabled;
 
 	my $git     = Service::Git->new('.', track_branch => !$dry_run);
-	my $control = $top->ci_control_branch;
+	my $control = $top->control_branch;
 
 	# prepare_branch copies files INTO each env branch from the current
 	# branch's HEAD, so the current branch has to be the one they are
@@ -1008,7 +1010,7 @@ sub pipeline_graph {
 	my $top  = Genesis::Top->new('.');
 
 	# For env-file topology, build the DAG directly.
-	if ($top->ci_configured) {
+	if ($top->pipeline_enabled) {
 		my $topo = $top->pipeline_topology;
 		my $md = _topology_to_mermaid_md($top, $topo->{nodes}, $topo->{edges});
 		mkfile_or_fail('pipeline.md', $md);
@@ -1042,7 +1044,7 @@ sub pipeline_describe {
 
 	# For env-file topology (manual provider or genesis-config CI),
 	# build the DAG directly without the full compiler/provider chain.
-	if ($top->ci_configured) {
+	if ($top->pipeline_enabled) {
 		my $topo = $top->pipeline_topology;
 		_describe_topology($top, $topo->{nodes}, $topo->{edges});
 		exit 0;
@@ -1500,7 +1502,7 @@ sub _describe_topology {
 	my ($top, $nodes, $edges) = @_;
 
 	my $name = $top->config->get('pipeline.name') || $top->type;
-	my $provider_type = $top->config->get('pipeline.provider.type') || 'manual';
+	my $provider_type = $top->pipeline_provider_type // 'manual';
 	output "\n#G{Pipeline}: #C{%s}", $name;
 	output "  #Yi{Provider}: %s", $provider_type;
 	output "";

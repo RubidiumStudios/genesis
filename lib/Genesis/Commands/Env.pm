@@ -74,9 +74,9 @@ sub create {
 	# Pipeline-aware repos require new environments to be created on the
 	# control branch so the topology is visible to pipeline tooling and
 	# the environment branch can be cut from the right point.
-	my $ci_configured = $top->ci_configured;
+	my $pipeline_enabled = $top->pipeline_enabled;
 	my $git;
-	if ($ci_configured) {
+	if ($pipeline_enabled) {
 		require Service::Git;
 		# track_branch so that prepare_branch's checkout to the env
 		# branch is restored back to control before we return.
@@ -104,14 +104,14 @@ sub create {
 	my $env = $top->create_env($name, $kit, %{get_options()});
 	bail "Failed to create environment $name" unless $env;
 
-	# Phase C: write pipeline metadata when CI provider is configured.
+	# Phase C: write pipeline metadata when the repository declares a pipeline.
 	# Runs interactively when in a controlling terminal; honours --prior-env,
 	# --require-pr, and --manual flags for non-interactive (scripted) use.
-	if ($ci_configured) {
-		my $ci_type = $top->config->get('pipeline.provider.type') // 'unknown';
+	if ($pipeline_enabled) {
+		my $provider = $top->pipeline_provider_type // 'unknown';
 		info(
-			"\n#G{Pipeline configuration} (ci provider: #C{%s})\n",
-			$ci_type
+			"\n#G{Pipeline configuration} (pipeline provider: #C{%s})\n",
+			$provider
 		);
 
 		my %cli_opts = %{get_options()};
@@ -209,9 +209,9 @@ sub create {
 	}
 
 	# Git operations: stage, commit, and create an environment branch.
-	# Only when CI is configured and --no-commit is not set.
+	# Only when the repository declares a pipeline and --no-commit is not set.
 	my %cli_opts_git = %{get_options()};
-	if ($ci_configured) {
+	if ($pipeline_enabled) {
 		my $env_file = $env->file;
 		$git->add($git->prefixed($env_file));
 
@@ -239,8 +239,7 @@ sub create {
 
 			# For automated CI providers, the pipeline needs to be
 			# rebuilt to include a job for the new environment branch.
-			my $provider_type = $top->config->get('pipeline.provider.type') || 'manual';
-			if ($provider_type ne 'manual') {
+			if (!$top->manual_pipeline) {
 				if (in_controlling_terminal) {
 					if (prompt_for_boolean(
 						"Rebuild the CI pipeline to include #C{$name}? [y|n]", "y"
@@ -278,7 +277,7 @@ sub create {
 	}
 
 	# let the user know
-	if ($ci_configured && !$cli_opts_git{'no-commit'}) {
+	if ($pipeline_enabled && !$cli_opts_git{'no-commit'}) {
 		info(
 			"\nNew environment #C{%s} provisioned!\n\n".
 			"To deploy, switch to the environment branch and run:\n\n".
@@ -983,7 +982,7 @@ sub deploy {
 	my $top = Genesis::Top->new('.');
 	my $pipeline_git;
 	my $pipeline_branch;
-	if ($top->ci_configured) {
+	if ($top->pipeline_enabled) {
 		require Service::Git;
 		$pipeline_git = Service::Git->new('.', track_branch => 1);
 		(my $branch_name = $env_name) =~ s{^.*/}{};
@@ -1023,7 +1022,7 @@ sub deploy {
 	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
 	# CI-only checks for pipeline-managed environments.
-	if ($top->ci_configured) {
+	if ($top->pipeline_enabled) {
 		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
 		if ($prior) {
 			# Hard invariant (no --yes override): the pipeline predecessor must
@@ -1038,7 +1037,7 @@ sub deploy {
 			# Skip the warning when the configured provider is 'manual' --
 			# in that mode the operator IS the pipeline, so the warning
 			# is just noise.
-			my $provider_type = $top->config->get('pipeline.provider.type') || '';
+			my $provider_type = $top->pipeline_provider_type // '';
 			if ($provider_type ne 'manual' && !$ENV{GENESIS_HONOR_ENV}) {
 				warning(
 					"\nManually deploying #C{%s}, which is managed by a Genesis pipeline.\n".
@@ -1059,8 +1058,8 @@ sub deploy {
 
 	# --pull: pull propagated files from the prior env (or control HEAD for
 	# entry points) onto the env branch before deploying.  No-op when the
-	# env branch is already current or when CI is not configured.
-	if ($do_pull && $top->ci_configured && $pipeline_git) {
+	# env branch is already current or when the repository declares none.
+	if ($do_pull && $top->pipeline_enabled && $pipeline_git) {
 		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
 
 		# Upgrade to track_branch so DESTROY returns us to the branch we were
