@@ -144,7 +144,7 @@ END {_release_env(); _reap_holders()}
 # in each of them.  The rest of the shared readers land beside it.
 sub ref_in {
 	my ($dir, $ref) = @_;
-	my ($sha) = run({dir => $dir, passfail => 0},
+	my ($sha) = run({dir => $dir},
 		'git', 'rev-parse', '--verify', '--quiet', $ref);
 	chomp $sha if defined $sha;
 	return $sha || undef;
@@ -158,7 +158,7 @@ sub ref_in {
 # not git's complaint about the name it asked for.
 sub tree_of {
 	my ($dir, $ref) = @_;
-	my ($out, $rc) = run({dir => $dir, passfail => 0, stderr => 0},
+	my ($out, $rc) = run({dir => $dir, stderr => 0},
 		'git', 'ls-tree', '-r', '--name-only', $ref);
 	return [] if $rc || !defined $out;
 	chomp $out;
@@ -322,7 +322,7 @@ sub subjects_of {
 	my ($self, $branch, $n, %opts) = @_;
 	my $copy = $opts{copy} // 'a';
 	my $ref  = $opts{local} ? $branch : "refs/remotes/origin/$branch";
-	my ($out, $rc) = run({dir => $self->{$copy}, stderr => 0, passfail => 0},
+	my ($out, $rc) = run({dir => $self->{$copy}, stderr => 0},
 		'git', 'log', "--max-count=$n", '--format=%s', $ref);
 	return () if $rc || !defined $out;
 	chomp $out;
@@ -404,7 +404,7 @@ sub _newest_entry {
 	my ($self, $path) = @_;
 	$self->fixture_vault;
 	my ($out, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
-			stderr => 0, passfail => 0},
+			stderr => 0},
 		'safe', 'export', $path);
 	return undef if $rc || !$out;
 	my $exported = eval {JSON::PP->new->decode($out)} or return undef;
@@ -2336,9 +2336,11 @@ sub run_genesis {
 	# empty and nothing the harness read before this one is counted in it.
 	helper::put_file($self->{vault_log}, '') if $self->{vault_log};
 
+	# GENESIS_LIB is not named here, because helper::import sets it for the
+	# whole process and the child inherits it.  Two places owning one
+	# variable is how the two come to disagree.
 	my %env = (
 		GENESIS_TOPDIR => $helper::TOPDIR,
-		GENESIS_LIB    => "$helper::TOPDIR/lib",
 		SAFE_TARGET    => $self->{vault_target},
 	);
 	$env{GENESIS_PIPELINE_TASK} = $opts{pipeline_task} if $opts{pipeline_task};
