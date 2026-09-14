@@ -1603,10 +1603,30 @@ dependency set is compared with the set its last deploy recorded reading.
 A repository C<pipeline-apply> has never run against reports nothing, because
 there is no commit to be stale against.
 
+A repository with no pipeline reports nothing as well, and it answers before
+the applied record's address is composed. The deploy pre-flight asks this on
+every deploy, and addressing that record where there is no pipeline reaches
+the refusal in L</_pipeline_exodus_mount>, which would stop an ordinary
+deploy with a sentence about a pipeline the operator does not have.
+
 B<Parameters:> A C<Service::Git> for the repository.
 
 B<Returns:> An arrayref of hashrefs, each with C<env> and C<reason>, where
 the reason is C<configuration-changed> or C<dependencies-changed>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Cannot compare <commit> against <branch>" >> - raised (via
+C<Service::Git::diff_names>) when git cannot take the path diff, because the
+applied commit is not in the local repository or the control branch has no
+local ref. A clean answer there would be a wrong answer, so the query
+refuses instead.
+
+=back
 
 B<Examples:>
 

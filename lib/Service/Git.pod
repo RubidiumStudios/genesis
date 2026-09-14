@@ -685,6 +685,20 @@ Optional git-root-relative paths.
 
 B<Returns:> The list of changed paths. Empty when identical.
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Cannot diff <from> against <to> in <root>" >> - raised with the
+C<Genesis::Exit::DATAERR> exit code when git cannot take the diff, because a
+ref names nothing the local repository holds. A caller that compared an
+empty list against a known set would read it as "nothing changed", so the
+refusal is raised here rather than handed on as a clean answer.
+
+=back
+
 B<Examples:>
 
   my @files = $git->diff_names('HEAD~1', 'HEAD');

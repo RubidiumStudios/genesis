@@ -2984,9 +2984,15 @@ sub pipeline_record {
 # apply's compiled set is a prediction (D77).  An environment that has
 # not deployed since the recording landed reads an empty set, which
 # matches an empty compiled set and so is not stale on this input.
+#
+# The read goes through this environment's own vault, for the reason
+# pipeline_record reads through it.  The two are the two halves of one
+# comparison and both address under exodus_base, so an environment that
+# sets genesis.vault would otherwise have its prediction read from one
+# vault and its fact from another, and the two would never agree.
 sub last_read_dependencies {
 	my ($self) = @_;
-	my $data = $self->top->vault->get($self->exodus_base);
+	my $data = $self->vault->get($self->exodus_base);
 	return [] unless ref($data) eq 'HASH';
 	return _decode_path_list($data->{dependencies_read});
 }
