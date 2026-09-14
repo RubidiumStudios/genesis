@@ -1223,10 +1223,10 @@ sub strip_comment {
 	return $line;
 }
 
-# A stand-in for an environment's own vault.  A row that reads through
-# Genesis::Env::vault cannot spin a real vault, because spinning one switches
-# the safe target the repository's default vault resolves through, so it hands
-# this object in instead.  The stand-in records the path it was asked for in
+# standin_vault builds a stand-in for an environment's own vault.  A row that
+# reads through Genesis::Env::vault cannot spin a real vault, because spinning
+# one switches the safe target the repository's default vault resolves
+# through, so it hands this object in instead.  The stand-in records the path it was asked for in
 # the ledger the caller passes and answers the same fixed set every time, and
 # it asserts nothing of its own, so what the row means stays in the row.
 sub standin_vault {
