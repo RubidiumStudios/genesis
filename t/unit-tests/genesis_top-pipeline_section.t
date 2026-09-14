@@ -81,17 +81,25 @@ subtest 'there are no compatibility aliases' => sub {
 	plan tests => 4;
 
 	# One renamed key per decision that renamed one.  Each is refused
-	# under its old spelling rather than accepted and moved.
+	# under its old spelling rather than accepted and moved, and each row
+	# reads the key the refusal names as well, because a refusal over some
+	# other key would otherwise satisfy every one of them.
+	#
+	# The name a refusal carries is the outermost key the schema does not
+	# know, so all three ci. spellings are refused as ci, and the one under
+	# an enabled pipeline is refused as pipeline.repo.
 	my %old = (
-		'ci.enabled'            => "ci:\n  enabled: true",
-		'pipeline.repo.root'    => "pipeline:\n  enabled: true\n  repo:\n    root: .",
-		'ci.control_branch'     => "ci:\n  control_branch: control",
-		'ci.name'               => "ci:\n  name: bosh",
+		'ci.enabled'         => ["ci:\n  enabled: true", 'ci'],
+		'pipeline.repo.root' => ["pipeline:\n  enabled: true\n  repo:\n    root: .",
+		                         'pipeline.repo'],
+		'ci.control_branch'  => ["ci:\n  control_branch: control", 'ci'],
+		'ci.name'            => ["ci:\n  name: bosh", 'ci'],
 	);
 	for my $key (sort keys %old) {
-		throws_ok {load_with($h, $old{$key})}
-			qr/unknown configuration key/,
-			"$key is refused rather than translated";
+		my ($body, $refused) = @{$old{$key}};
+		throws_ok {load_with($h, $body)}
+			qr/\Q$refused\E:\s+unknown\s+configuration\s+key/,
+			"$key is refused as $refused rather than translated";
 	}
 };
 
