@@ -409,6 +409,47 @@ subtest 'config --set coerces against the provider the same run names' => sub {
 		"and the boolean saves as what was typed, on the run that names it");
 };
 
+subtest 'config --unset of the provider type refuses what it orphans' => sub {
+	plan tests => 3;
+
+	# The provider type is one of the values the schema is built from, so
+	# clearing it takes the fragment that declares every other provider key
+	# away with it.  The check that guards the save has to read the schema
+	# as it stands after the removal, or the run saves a file whose next
+	# reader cannot load it.
+	my $dir = config_repo('config-unset-provider-type', enabled => 0);
+	mkfile_or_fail("$dir/.genesis/config", <<'CFG');
+---
+creator_version: 3.2.0
+deployment_type: test-kit
+manifest_store: exodus
+pipeline:
+  enabled: false
+  provider:
+    target: ci
+    type: concourse
+version: 3
+CFG
+
+	pushd $dir;
+	prepare_command('config', '--unset', 'pipeline.provider.type');
+	build_command_environment;
+
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	my ($out, $err, $code);
+	($out, $err) = output_from {
+		$code = exit_code { Genesis::Commands::Core::config() };
+	};
+	popd;
+
+	is($code, Genesis::Exit::CONFIG,
+		"the run is refused at the configuration exit code");
+	like($err, qr/pipeline\.provider\.target: unknown configuration key/,
+		"because target is declarable only while the provider that declares it is named");
+	like(slurp("$dir/.genesis/config"), qr/type:\s*concourse/,
+		"and the file is left exactly as it was");
+};
+
 subtest 'config --unset still refuses a key no schema declares' => sub {
 	plan tests => 2;
 

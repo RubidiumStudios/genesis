@@ -47,7 +47,7 @@ sub load_with {
 # committer identity are required beside it.  Every row that names a
 # provider other than manual goes through here, so a row adds provider
 # lines rather than a whole configuration of its own.
-sub automated {
+sub automated_config {
 	my ($type, @lines) = @_;
 	return join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:',
@@ -64,7 +64,7 @@ sub automated {
 
 sub concourse {
 	my (@lines) = @_;
-	return automated('concourse', 'target: ci', @lines);
+	return automated_config('concourse', 'target: ci', @lines);
 }
 
 subtest "the configured provider's fragment is merged at load" => sub {
@@ -165,10 +165,10 @@ TERSE
 		cli_file  => 'Genesis/CI/Provider/Manual.pm',
 	});
 
-	throws_ok {load_with(automated('terse'))}
+	throws_ok {load_with(automated_config('terse'))}
 		qr/pipeline\.provider:\s+missing\s+required\s+key\s+token/s,
 		"the fragment's required flag is enforced, and names the key";
-	lives_ok {load_with(automated('terse', 'token: abc'))}
+	lives_ok {load_with(automated_config('terse', 'token: abc'))}
 		'and the same configuration loads once the key is written';
 };
 

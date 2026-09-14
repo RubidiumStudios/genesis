@@ -66,21 +66,25 @@ sub automated_providers {
 # For tests that stand a provider class up and for a future out-of-tree
 # provider.  The registry is otherwise fixed at compile time.
 #
-# Two guards, because a registry that quietly accepts either mistake is
-# the drift H26 names.  A name already registered is refused rather than
-# replaced, since replacing the real concourse entry for the rest of the
-# process would leave the enum saying one thing and the class lookup
-# doing another.  An entry with no cli_class is refused because every
-# type has a CLI-side class and a resolver that finds none behaves like
-# manual instead of saying so; the compiler-side class is a different
-# matter, being legitimately absent for manual and, until its compiler
-# lands, for github-actions.
+# Three guards, because a registry that quietly accepts any of these
+# mistakes is the drift H26 names.  A missing name is refused because the
+# assignment would otherwise register the entry under the empty string,
+# where nothing could ever look it up.  A name already registered is
+# refused rather than replaced, since replacing the real concourse entry
+# for the rest of the process would leave the enum saying one thing and
+# the class lookup doing another.  An entry with no cli_class is refused
+# because every type has a CLI-side class and a resolver that finds none
+# behaves like manual instead of saying so; the compiler-side class is a
+# different matter, being legitimately absent for manual and, until its
+# compiler lands, for github-actions.
 sub register_provider {
 	my ($class, $type, $info) = @_;
 
+	bug("A CI provider must be registered under a name")
+		unless defined $type && length $type;
 	bug("CI provider '%s' is already registered", $type)
-		if defined $type && exists $_providers{$type};
-	bug("CI provider '%s' must be registered with a cli_class", $type // '<undef>')
+		if exists $_providers{$type};
+	bug("CI provider '%s' must be registered with a cli_class", $type)
 		unless ref($info) eq 'HASH' && $info->{cli_class};
 
 	$_providers{$type} = $info;

@@ -77,8 +77,14 @@ sub config {
 		$config->clear($_) for grep {$config->has($_)} @{$removals || []};
 
 		# Validate before persisting: validate bails, so a rejected value
-		# leaves the file untouched rather than half-written.
-		$config->validate($config->schema) if $config->schema;
+		# leaves the file untouched rather than half-written.  Derived a
+		# second time, because an unset moves the schema as surely as a set
+		# does and this is the first look after the clears.  Clearing the
+		# provider type takes the fragment declaring every other provider
+		# key away with it, and a check reading the schema from before that
+		# removal would accept keys nothing declares any more and save a
+		# file the next command could not load.
+		$config->validate($top->_current_config_schema) if $config->schema;
 		$config->save;
 		return 0;
 	}

@@ -120,7 +120,17 @@ subtest 'the provider type defaults to manual' => sub {
 };
 
 subtest 'the registry refuses a bad entry rather than taking it' => sub {
-	plan tests => 3;
+	plan tests => 4;
+
+	# Without a name the entry would land under the empty string, where
+	# nothing could ever look it up again.
+	throws_ok {
+		Genesis::CI::Compiler::PipelineProvider->register_provider(undef, {
+			cli_class => 'Genesis::CI::Provider::Manual',
+			cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		})
+	} qr/must\s+be\s+registered\s+under\s+a\s+name/s,
+		'an entry with no name is refused';
 
 	# A name already registered is refused rather than replaced.  Replacing
 	# the concourse entry for the rest of the process would leave the enum
