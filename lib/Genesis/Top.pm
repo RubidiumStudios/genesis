@@ -2380,7 +2380,7 @@ sub _validate_slug_components {
 	# blow the check up on its way past.
 	for my $env_name ($self->_env_file_names) {
 		my $genesis = $self->_merged_env_params($env_name)->{genesis};
-		next unless ref($genesis) eq 'HASH' && $genesis->{pipeline};
+		next unless ref($genesis) eq 'HASH' && exists $genesis->{pipeline};
 		my $why = _ref_component_errors($env_name) or next;
 		bail({exitcode => CONFIG},
 			"The environment name #R{%s} is not a git ref component: %s.\n".
@@ -2406,7 +2406,7 @@ sub _validate_one_exodus_mount {
 	my %by_mount;
 	for my $env_name ($self->_env_file_names) {
 		my $genesis = $self->_merged_env_params($env_name)->{genesis};
-		next unless ref($genesis) eq 'HASH' && $genesis->{pipeline};
+		next unless ref($genesis) eq 'HASH' && exists $genesis->{pipeline};
 
 		# The default is the one Genesis::Env::default_exodus_mount answers,
 		# which is the secrets mount with exodus/ under it, and the secrets

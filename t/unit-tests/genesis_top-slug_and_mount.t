@@ -140,6 +140,26 @@ subtest 'an empty exodus mount is the mount it names' => sub {
 	lives_ok {load_with_type('bosh')} 'and one shared mount passes again';
 };
 
+subtest 'a block switched off still joins the pipeline' => sub {
+	plan tests => 2;
+
+	# The block loop decides membership with exists, so the two readers
+	# above it have to agree, or an environment that turns its block off
+	# escapes both of them.
+	my $path = $h->a . '/qa..off.yml';
+	put_file($path, join("\n",
+		'---', 'kit:', '  name:    dev', '  version: latest',
+		'  features: []', 'genesis:', '  env: qa..off',
+		'  pipeline: false', ''));
+
+	throws_ok {load_with_type('bosh')}
+		qr{environment name\s+qa\.\.off\s+.*is\s+not\s+a\s+git\s+ref\s+component}s,
+		'an environment whose block is off is read like any other';
+
+	unlink $path;
+	lives_ok {load_with_type('bosh')} 'and the repository is well formed again';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
