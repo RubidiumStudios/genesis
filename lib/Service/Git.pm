@@ -4,7 +4,7 @@ use strict;
 use warnings;
 
 use Genesis qw/run bail debug trace/;
-use Genesis::Exit qw/DATAERR/;
+use Genesis::Exit qw/CONFIG DATAERR/;
 use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
 use Cwd qw/getcwd/;
@@ -133,6 +133,30 @@ EOF
 
 ### Constructor & Lifecycle {{{
 
+# _refuse_dubious_ownership - the one safe.directory refusal {{{
+#
+# A working tree git will not touch is refused while the handle is being
+# built as readily as at the pre-flight, because the very first question the
+# constructor asks git is one it declines to answer.  H20 is that the
+# operator meets the condition late and generically, so both callers raise
+# this one refusal and the message, the fix it names, and the code it exits
+# with are written once.
+#
+# Silent unless git's own words name the condition, so a caller hands over
+# whatever git said and carries on with its own classification when this
+# returns.
+sub _refuse_dubious_ownership {
+	my ($said, $path) = @_;
+	return unless defined($said) && $said =~ /dubious ownership|safe\.directory/i;
+
+	bail({exitcode => CONFIG},
+		"Git refuses to work in #C{%s} because it is owned by another user.\n\n".
+		"    git config --global --add safe.directory %s\n\n".
+		"Run that, then run this command again.",
+		$path, $path);
+}
+
+# }}}
 # new - get or create a Git service instance for a repository {{{
 sub new {
 	my ($class, $path, %opts) = @_;
@@ -142,9 +166,18 @@ sub new {
 	# environment carries no credentials, which is every local run.
 	provision_ci_credentials();
 
-	my ($root) = run({}, 'git', '-C', $path, 'rev-parse', '--show-toplevel');
+	my ($root, $rc, $err) = run({}, 'git', '-C', $path, 'rev-parse', '--show-toplevel');
 	chomp $root if defined $root;
-	bail("Not a git repository: %s", $path) unless $root;
+
+	# git answers a failure with its complaint rather than with nothing, and
+	# a complaint is as true as a path, so the return code is what says
+	# whether there is a root here at all.  A refusal over ownership is named
+	# for what it is before the generic message gets a chance at it.
+	if ($rc || !defined($root) || $root !~ /\S/) {
+		_refuse_dubious_ownership(
+			join("\n", grep {defined && /\S/} ($err, $root)), $path);
+		bail("Not a git repository: %s", $path);
+	}
 
 	# Return existing instance for this repo
 	if (my $existing = $_instances{$root}) {
@@ -404,16 +437,10 @@ sub preflight {
 		'git', 'rev-parse', '--verify', 'HEAD');
 	my $said = join("\n", grep {defined && /\S/} ($err, $out));
 
-	if ($rc && $said =~ /dubious ownership|safe\.directory/i) {
-		bail({exitcode => Genesis::Exit::CONFIG},
-			"Git refuses to work in #C{%s} because it is owned by another user.\n\n".
-			"    git config --global --add safe.directory %s\n\n".
-			"Run that, then run this command again.",
-			$self->{root}, $self->{root});
-	}
-
 	if ($rc) {
-		bail({exitcode => Genesis::Exit::DATAERR},
+		_refuse_dubious_ownership($said, $self->{root});
+
+		bail({exitcode => DATAERR},
 			"The repository at #C{%s} has no commits, so there is no branch to ".
 			"leave and nothing to come back to.\n\n".
 			"    git commit --allow-empty -m 'Initial commit'\n\n".
@@ -433,7 +460,7 @@ sub preflight {
 	$name  ||= $ENV{GIT_COMMITTER_NAME}  // $ENV{GIT_AUTHOR_NAME}  // '';
 	$email ||= $ENV{GIT_COMMITTER_EMAIL} // $ENV{GIT_AUTHOR_EMAIL} // '';
 
-	bail({exitcode => Genesis::Exit::CONFIG},
+	bail({exitcode => CONFIG},
 		"This process has no committer identity, so git cannot record a ".
 		"commit in #C{%s}.\n\n".
 		"    git config user.name  \"Your Name\"\n".
