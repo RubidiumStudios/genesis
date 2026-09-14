@@ -1853,8 +1853,13 @@ sub _build_logical_subnet_amalgamation {
 	my ($range) = keys %ranges;
 	my ($gateway) = keys %gateways;
 
-	# Deduplicate and merge AZs and DNS entries
-	my @azs = uniq sort map {$_->{az}} @$subnet_configs;
+	# Deduplicate and merge AZs and DNS entries.  A child carries either a
+	# single `az` or an `azs` list, depending on which branch of
+	# _subnet_definition built it, so take whichever one it has rather than
+	# reading `az` alone and contributing an undef for the other shape.
+	my @azs = uniq sort grep {defined} map {
+		$_->{azs} ? $_->{azs}->@* : $_->{az}
+	} @$subnet_configs;
 	my @dns_servers = uniq sort map { @{$_->{dns} // []} } @$subnet_configs;
 
 	# Build amalgamated configuration
@@ -1881,11 +1886,65 @@ sub _build_logical_subnet_amalgamation {
 		map {($_->{static}->@*)} grep {$_->{static}} @$subnet_configs
 	];
 
-	# Use cloud properties from first subnet (they should be similar for same range)
-	# FIXME: We should validate that all subnets have the same cloud properties
-	if ($subnet_configs->[0]{cloud_properties}) {
-		$lsa_config->{cloud_properties} = $subnet_configs->[0]{cloud_properties};
+	# Cloud properties describe the wire, exactly as the range and the gateway
+	# do, so the children have to agree on them.  A BOSH subnet carries one
+	# cloud_properties hash and BOSH applies no per-AZ constraint inside a
+	# subnet, so once the children are merged there is no way to say that one
+	# AZ sits on one bridge and another AZ sits on a different one.  Taking the
+	# first child's properties would quietly attach the other AZ's VMs to the
+	# wrong network, and that surfaces as intermittent connectivity days after
+	# the deploy rather than as a failed upload, so stop here instead.
+	#
+	# Compare on flattened keys so the message can name the exact leaf that
+	# differs, including one element of a list.  flatten() returns an empty
+	# hash for both a missing cloud_properties key and an empty one, which is
+	# what we want, because _subnet_definition deletes the key when the IaaS
+	# branch resolves to nothing.
+	my %flat_cloud_properties = map {
+		$_ => flatten($subnet_configs_hash{$_}{cloud_properties} // {})
+	} @subnet_names;
+
+	my @cloud_property_differences = ();
+	for my $property (uniq sort map {keys %$_} values %flat_cloud_properties) {
+		my %carriers = ();
+		for my $subnet_name (@subnet_names) {
+			my $flat = $flat_cloud_properties{$subnet_name};
+			my $value = $flat->{$property};
+			my $signature =
+				!exists($flat->{$property}) ? '(not set)' :
+				!defined($value)            ? '(null)'    :
+				ref($value) eq 'ARRAY'      ? '(empty list)' :
+				ref($value) eq 'HASH'       ? '(empty map)'  :
+				                              "'$value'";
+			push @{ $carriers{$signature} }, $subnet_name;
+		}
+		next if keys(%carriers) == 1;
+		push @cloud_property_differences, sprintf(
+			"  %s: %s", $property, join('; ', map {
+				sprintf("%s on %s", $_, join(', ', @{$carriers{$_}}))
+			} sort keys %carriers)
+		);
 	}
+
+	bail(
+		"Cannot create LSA for subnets with different cloud properties in ".
+		"network #C{%s}:\n%s\n".
+		"Subnets that share a range and a gateway are describing one wire, and ".
+		"a BOSH subnet applies its cloud properties to every AZ in it, so ".
+		"these subnets cannot be merged.  Either give every subnet in the ".
+		"range the same cloud properties, or put them on separate ranges.  ".
+		"Per-subnet overrides live under ".
+		"#C{%s.networks.<target>.subnets.<subnet>.cloud_properties}.",
+		$target, join("\n", @cloud_property_differences), $self->overrides_base
+	) if @cloud_property_differences;
+
+	# Every child agrees by this point, so any of them will serve; read the
+	# first by sorted name, matching the ordering the range and gateway checks
+	# above already use.  An empty hash is left off entirely, the same way
+	# _subnet_definition drops the key when the IaaS branch resolves to
+	# nothing, so the merge does not invent a property BOSH never asked for.
+	$lsa_config->{cloud_properties} = $subnet_configs_hash{$subnet_names[0]}{cloud_properties}
+		if keys %{$flat_cloud_properties{$subnet_names[0]}};
 
 	# Check if LSA has any available IPs (not all reserved)
 	return $range_span->size > $reserved->size ? $lsa_config : undef;

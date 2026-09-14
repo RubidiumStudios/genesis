@@ -1365,6 +1365,186 @@ subtest 'network_definition - an allocation override does not count a network\'s
 		'the figure is unchanged, so the network\'s own claim is not counted against it');
 };
 
+# ---------------------------------------------------------------------------
+# Logical Subnet Amalgamation
+#
+# BOSH refuses two subnets that share a range inside one network, so Genesis
+# folds same-range subnets into a single subnet carrying a list of AZs.  The
+# shape below is the one the OCFP CLI's PVE provider writes: bridge mode
+# adopts an existing vnet and never brings up per-child L3, so every child
+# record carries the parent range and the parent gateway, and only the AZ and
+# the available band distinguish them.
+# ---------------------------------------------------------------------------
+
+# lsa_subnet - one child of an amalgamation, in the shape _subnet_definition
+# builds and _build_logical_subnet_amalgamation consumes.  The reserved spans
+# leave a single 24-address window open, mirroring how the provider carves one
+# band per AZ out of a shared parent range.
+sub lsa_subnet {
+	my (%overrides) = @_;
+	return {
+		name             => 'ocfp-0',
+		range            => '10.0.0.0/22',
+		gateway          => '10.0.0.1',
+		az               => 'z1',
+		dns              => ['10.0.0.2'],
+		reserved         => ['10.0.0.0-10.0.0.95', '10.0.0.120-10.0.3.255'],
+		static           => ['10.0.0.96-10.0.0.98'],
+		cloud_properties => {bridge => 'vmbr0'},
+		%overrides,
+	};
+}
+
+subtest '_build_logical_subnet_amalgamation - folds two same-range subnets into one' => sub {
+	plan tests => 6;
+
+	my $env  = make_deploy_env();
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $lsa = $hook->_build_logical_subnet_amalgamation('test.net-ocf', [
+		lsa_subnet(),
+		lsa_subnet(
+			name     => 'ocfp-1',
+			az       => 'z2',
+			reserved => ['10.0.0.0-10.0.1.95', '10.0.1.120-10.0.3.255'],
+			static   => ['10.0.1.96-10.0.1.98'],
+		),
+	]);
+
+	ok($lsa, 'the amalgamation returns a subnet');
+	is($lsa->{range}, '10.0.0.0/22', 'the merged subnet keeps the shared range');
+	is($lsa->{gateway}, '10.0.0.1', 'and the shared gateway');
+	cmp_deeply($lsa->{azs}, ['z1', 'z2'],
+		'both AZs come through on the single merged subnet');
+	cmp_deeply($lsa->{reserved}, [
+		'10.0.0.0-10.0.0.95', '10.0.0.120-10.0.1.95', '10.0.1.120-10.0.3.255'
+	], 'the reserved spans are the parent range minus both available bands, so neither band is lost');
+	cmp_deeply($lsa->{cloud_properties}, {bridge => 'vmbr0'},
+		'the agreed cloud properties survive the merge');
+};
+
+subtest '_build_logical_subnet_amalgamation - unions an azs list as well as a bare az' => sub {
+	plan tests => 1;
+
+	# _subnet_definition builds a child with either an `az` scalar or an `azs`
+	# list, depending on which key the network fields declare.  Reading `az`
+	# alone put an undef in the merged list for the second shape.
+	my $env  = make_deploy_env();
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $second = lsa_subnet(
+		name     => 'ocfp-1',
+		reserved => ['10.0.0.0-10.0.1.95', '10.0.1.120-10.0.3.255'],
+		static   => ['10.0.1.96-10.0.1.98'],
+		azs      => ['z2', 'z3'],
+	);
+	delete $second->{az};
+
+	my $lsa = $hook->_build_logical_subnet_amalgamation('test.net-ocf', [
+		lsa_subnet(), $second,
+	]);
+
+	cmp_deeply($lsa->{azs}, ['z1', 'z2', 'z3'],
+		'every AZ is listed once and no undef entry creeps in');
+};
+
+subtest '_build_logical_subnet_amalgamation - refuses subnets that disagree on cloud properties' => sub {
+	plan tests => 4;
+
+	# A BOSH subnet carries one cloud_properties hash for every AZ in it, so
+	# two children naming different bridges are describing two wires and
+	# cannot be represented as one subnet.  Taking the first child's bridge
+	# would attach the other AZ's VMs to the wrong network silently.
+	my $env  = make_deploy_env();
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	throws_ok {
+		$hook->_build_logical_subnet_amalgamation('test.net-ocf', [
+			lsa_subnet(),
+			lsa_subnet(
+				name             => 'ocfp-1',
+				az               => 'z2',
+				reserved         => ['10.0.0.0-10.0.1.95', '10.0.1.120-10.0.3.255'],
+				static           => ['10.0.1.96-10.0.1.98'],
+				cloud_properties => {bridge => 'vmbr1'},
+			),
+		]);
+	} qr/Cannot create LSA for subnets with different cloud properties/,
+		'the merge bails rather than picking one child\'s properties';
+
+	my $err = $@;
+	like($err, qr/bridge/, 'the message names the property that differs');
+	like($err, qr/'vmbr0' on ocfp-0/, 'and which subnet carries which value');
+	like($err, qr/'vmbr1' on ocfp-1/, 'for both of them');
+};
+
+subtest '_build_logical_subnet_amalgamation - an absent cloud_properties key is not a difference' => sub {
+	plan tests => 2;
+
+	# _subnet_definition deletes cloud_properties outright when the IaaS branch
+	# resolves to nothing, so a child with no key and a child with an empty one
+	# describe the same wire and must still merge.
+	my $env  = make_deploy_env();
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $bare = lsa_subnet(
+		name     => 'ocfp-1',
+		az       => 'z2',
+		reserved => ['10.0.0.0-10.0.1.95', '10.0.1.120-10.0.3.255'],
+		static   => ['10.0.1.96-10.0.1.98'],
+	);
+	delete $bare->{cloud_properties};
+
+	my $lsa;
+	lives_ok {
+		$lsa = $hook->_build_logical_subnet_amalgamation('test.net-ocf', [
+			lsa_subnet(cloud_properties => {}), $bare,
+		]);
+	} 'an empty hash and a missing key merge without complaint';
+	ok(!exists $lsa->{cloud_properties},
+		'and the merged subnet carries no cloud_properties of its own');
+};
+
+subtest '_process_network_subnets - groups by range and leaves distinct ranges alone' => sub {
+	plan tests => 4;
+
+	my $env  = make_deploy_env();
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+
+	my $network = {
+		name    => 'test.net-ocf',
+		subnets => [
+			lsa_subnet(),
+			lsa_subnet(
+				name     => 'ocfp-1',
+				az       => 'z2',
+				reserved => ['10.0.0.0-10.0.1.95', '10.0.1.120-10.0.3.255'],
+				static   => ['10.0.1.96-10.0.1.98'],
+			),
+			lsa_subnet(
+				name     => 'ocfp-2',
+				az       => 'z3',
+				range    => '10.0.8.0/22',
+				gateway  => '10.0.8.1',
+				reserved => ['10.0.8.0-10.0.8.95', '10.0.8.120-10.0.11.255'],
+				static   => ['10.0.8.96-10.0.8.98'],
+			),
+		],
+	};
+
+	$hook->_process_network_subnets([$network]);
+
+	is(scalar @{$network->{subnets}}, 2,
+		'the two subnets sharing a range become one, and the third stays on its own');
+	cmp_deeply($network->{subnets}[0]{azs}, ['z1', 'z2'],
+		'the merged subnet carries both of its AZs');
+	is($network->{subnets}[1]{range}, '10.0.8.0/22',
+		'the unmerged subnet keeps its own range');
+	ok(!exists $network->{subnets}[1]{name},
+		'and loses the name, which BOSH has no use for');
+};
+
+
 done_testing;
 
 

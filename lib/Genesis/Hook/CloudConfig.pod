@@ -2520,6 +2520,14 @@ Thrown when input subnets have different CIDR ranges.
 
 Thrown when input subnets have different gateways.
 
+=item C<"Cannot create LSA for subnets with different cloud properties in network %s:\n%s\n...">
+
+Thrown when the input subnets do not all carry the same cloud properties. A
+BOSH subnet holds one C<cloud_properties> hash and applies it to every AZ in
+the subnet, so subnets that disagree cannot be merged. The message lists each
+differing flattened property key with the value each subnet carries for it,
+and names the override path that can reconcile them.
+
 =back
 
 B<Examples:>
