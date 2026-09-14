@@ -240,6 +240,7 @@ unit-tests/genesis_top-pipeline_repo_keys.t  # the pipeline label and the reposi
 unit-tests/genesis_top-provider_fragment.t   # the configured provider's own schema fragment, merged at load
 unit-tests/genesis_top-provider_capabilities.t  # the six capabilities a provider declares, and the keys they gate
 unit-tests/genesis_top-manifest_store_gate.t # the manifest store and the kit floor, refused at configuration load
+unit-tests/genesis_top-slug_and_mount.t      # both halves of the deployment slug as git ref components, and one exodus mount per pipeline
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/genesis_ui-prompt_output_stream.t  # prompts write to stderr and the terminal, never stdout

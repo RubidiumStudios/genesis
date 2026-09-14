@@ -2094,6 +2094,147 @@ B<Examples:>
     my $pair = _github_owner_repo('https://git.example.com/team/bosh.git');
     # returns undef -- that host is not GitHub
 
+=head2 _ref_component_errors
+
+    my $why = _ref_component_errors($value);
+
+Why a value cannot be a component of a git ref, or C<undef> where it can.
+
+A value must match C<^[A-Za-z0-9][A-Za-z0-9._-]*$>, and three shapes that
+the pattern admits but git then rejects are refused beside it: a trailing
+dot, any C<..> sequence, and a C<.lock> suffix. The answer is a phrase that
+reads on after a colon, so the caller writes the refusal and this says only
+what is wrong with the value.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+The candidate ref component. An undefined or empty value answers the
+empty-value reason rather than passing.
+
+=back
+
+B<Returns:> A reason string, or C<undef> where the value is a well-formed
+ref component.
+
+B<Examples:>
+
+    my $why = _ref_component_errors('us-east-prod');
+    # returns undef -- that name composes a ref
+
+    my $why = _ref_component_errors('bosh.lock');
+    # returns 'it must not end in ".lock"'
+
+    my $why = _ref_component_errors('-bosh');
+    # returns 'it must match ^[A-Za-z0-9][A-Za-z0-9._-]*$'
+
+=head2 _validate_slug_components
+
+    $top->_validate_slug_components();
+
+Refuses, at C<Genesis::Exit::CONFIG>, a C<deployment_type> or an
+environment name that is not a git ref component.
+
+The deployment branch is the deployment slug C<< <env>/<type> >>, so both
+halves become ref components and neither is trusted over the other. A value
+must match C<^[A-Za-z0-9][A-Za-z0-9._-]*$> and must not end in a dot or in
+C<.lock> or contain C<..>, which is what L</_ref_component_errors> decides.
+The refusal names the branch the value would have composed, because that is
+what makes it obvious why a name that was fine before this release is not
+fine now.
+
+Both halves already reach vault through the exodus slug and BOSH through
+the deployment name, so the check is narrow in practice and it catches a
+value that was never safe in those places either.
+
+The environment names are the ones the deployment root holds, read merged
+through L</_merged_env_params>, and a file carrying no C<genesis.pipeline>
+block is passed over, so a legacy C<ci.yml> beside the environments is not
+read as one. It does not read C<pipeline.enabled> itself, because
+L</_validate_pipeline_config> is its only caller and has already returned
+where the section is off.
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"The deployment type ... is not a git ref component"> - raised when
+C<deployment_type> cannot compose a ref, naming the value, the reason, and
+the branch C<< <env>/<type> >> it would have named for every environment.
+
+=item *
+
+C<"The environment name ... is not a git ref component"> - raised when an
+environment of the pipeline cannot compose a ref, naming the environment,
+the reason, and the branch it would have composed.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_slug_components;
+    # returns 1 where the type and every environment name compose a ref
+
+    $top->_validate_slug_components;
+    # exits CONFIG (78) where .genesis/config says deployment_type: bosh.lock
+
+=head2 _validate_one_exodus_mount
+
+    $top->_validate_one_exodus_mount();
+
+Refuses, at C<Genesis::Exit::CONFIG>, a pipeline whose environments resolve
+C<genesis.exodus_mount> to more than one value, naming every mount and the
+environments that resolved it.
+
+The pipeline's applied record lives at
+C<< <exodus mount>_pipelines/<type> >>, so two mounts would leave it with
+no single home. The merged hierarchy makes a file the environments inherit
+the natural place to set the mount once, and that is the remedy the refusal
+carries.
+
+Each environment is read merged through L</_merged_env_params> and one that
+carries no C<genesis.pipeline> block is passed over. Where an environment
+names no mount of its own, the value resolved is the one the run time would
+answer, which is C<genesis.secrets_mount> with C<exodus/> under it and
+C</secret/> where that is unset too. Every resolved value is normalised to
+leading and trailing slashes before the comparison, so two spellings of one
+mount are one mount. It does not read C<pipeline.enabled> itself, because
+L</_validate_pipeline_config> is its only caller and has already returned
+where the section is off.
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Every environment of a pipeline must resolve one genesis.exodus_mount">
+- raised when the environments of the pipeline resolve two or more mounts,
+listing each mount with the environments that resolved it and carrying the
+remedy of setting the mount once in a file they all inherit.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_one_exodus_mount;
+    # returns 1 where every environment resolves /secret/exodus/
+
+    $top->_validate_one_exodus_mount;
+    # exits CONFIG (78) where qa resolves /secret/exodus/ and prod
+    # resolves /other/exodus/
+
 =head2 _validate_pipeline_config
 
     $top->_validate_pipeline_config();
@@ -2103,16 +2244,22 @@ state. It is called from L</_validate_config> for every command, straight
 after C<< Genesis::Config::validate >>, so that a repository meets the same
 refusal in the same words whichever command loaded it.
 
-A section that is off is left alone. Otherwise the source-control block is
-resolved, which is where the derivations and their refusals are raised, then
-the configured provider's own programmatic check runs through
+A section that is off is left alone. Otherwise the checks run in this
+order. Both halves of the deployment slug are checked as git ref components
+by L</_validate_slug_components>, first, because they name the branches
+everything else here is about. Then the source-control block is resolved,
+which is where the derivations and their refusals are raised. Then the
+configured provider's own programmatic check runs through
 L</_validate_provider_config>, then the capability gates of
 L</_validate_capability_gates>, then the manifest store and the kit floors
-of L</_validate_manifest_store>, and then every environment the deployment
-root holds has its C<genesis.pipeline> block checked, read merged through
-L</_merged_env_params>. The refusals themselves belong to
-L</_source_control>, to L</_validate_provider_config>, to
-L</_validate_capability_gates>, to L</_validate_manifest_store>, and to
+of L</_validate_manifest_store>, and then the one exodus mount of
+L</_validate_one_exodus_mount>, which comes after the store because the
+mount is where that store keeps the pipeline's applied record. Last, every
+environment the deployment root holds has its C<genesis.pipeline> block
+checked, read merged through L</_merged_env_params>. The refusals
+themselves belong to L</_validate_slug_components>, to L</_source_control>,
+to L</_validate_provider_config>, to L</_validate_capability_gates>, to
+L</_validate_manifest_store>, to L</_validate_one_exodus_mount>, and to
 L</_validate_env_pipeline_block>.
 
 B<Returns:> 1.
