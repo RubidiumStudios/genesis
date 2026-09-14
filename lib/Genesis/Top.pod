@@ -1696,9 +1696,9 @@ answered for it, C<unset> where the key takes a derivation that was never
 run, and C<default> where the key takes no derivation at all. A row with no
 value carries C<(none)>, which is what the uri row shows wherever
 C<pipeline.source_control.repository> was named, since L</source_control_uri>
-is then never asked of git. The explicit tier is read
-with C<Genesis::Config::is_set> rather than with C<get>, because the schema
-fills C<control_branch> and C<pr_prefix> in for every repository and a filled
+is then never asked of git. The explicit tier is read with
+C<Genesis::Config::is_set> rather than with C<get>, because the schema fills
+C<control_branch> and C<pr_prefix> in for every repository and a filled
 default is the schema's answer rather than anybody's choice.
 
 B<Parameters:> None.
@@ -2737,9 +2737,9 @@ so an environment that switches its block off with C<false> still belongs to
 the pipeline and is still checked. A key written as a YAML null is the one
 spelling no reader can see, because L</_merged_env_params> deep-merges the
 hierarchy and a key whose value is undef is dropped in that merge, before any
-of the three is asked about it. It does not read C<pipeline.enabled> itself, because
-L</_validate_pipeline_config> is its only caller and has already returned
-where the section is off.
+of the three is asked about it. It does not read C<pipeline.enabled> itself,
+because L</_validate_pipeline_config> is its only caller and has already
+returned where the section is off.
 
 B<Returns:> 1.
 
