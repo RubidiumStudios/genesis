@@ -175,6 +175,19 @@ subtest 'a directory named like an environment file is not one' => sub {
 	rmdir $dir;
 };
 
+subtest 'an environment is merged once and the answer kept' => sub {
+	plan tests => 2;
+
+	# Three checks walk every environment, and each of them used to pay for
+	# its own spruce run, so the read is memoised on the instance.
+	my $top    = load_with_type('bosh');
+	my $first  = $top->_merged_env_params('qa');
+	my $second = $top->_merged_env_params('qa');
+
+	is $second, $first, "the second read answers with the first read's hash";
+	is_deeply $second, $first, 'which is the merge the first read built';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

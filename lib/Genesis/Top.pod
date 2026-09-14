@@ -3065,6 +3065,11 @@ anywhere in the hierarchy, so a file nobody can read is a key nobody can
 see. No C<Genesis::Env> is built and no kit is needed, which is what lets
 the check run as the configuration loads.
 
+The answer is kept on the object, one entry per environment name. Three
+checks walk every environment, and without the memo each pass spawned one
+C<spruce> run per file in the hierarchy, so an ancestor was parsed once per
+descendant per pass.
+
 B<Parameters:>
 
 =over 4
