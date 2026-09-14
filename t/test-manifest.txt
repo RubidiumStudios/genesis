@@ -252,6 +252,7 @@ unit-tests/genesis_top-pipeline_accessors.t  # the three pipeline accessors and 
 unit-tests/genesis_top-deployment_slug.t     # one builder for the deployment slug, and the branch names that render from it
 unit-tests/genesis_top-pr_branch.t           # the pull request branch, composed in one place and refused when it collides
 unit-tests/genesis_top-pipeline_records.t    # the pipeline's own record and each environment's, with two paths and two owners
+unit-tests/genesis_top-pipeline_staleness.t  # the one staleness comparison, reading the applied commit, the path diff, and each compiled set
 unit-tests/genesis_commands_dev-pipeline_compile.t  # dev-pipeline-compile stage renderer
 unit-tests/service_git-ci_credentials.t      # git credentials supplied via CI env vars
 unit-tests/genesis_commands_pipelines-prepare.t  # pipeline-prepare scope selection

@@ -2977,6 +2977,21 @@ sub pipeline_record {
 }
 
 # }}}
+# last_read_dependencies - the dependency set this environment's last deploy read {{{
+#
+# The fact half of the staleness comparison.  Every deploy records the
+# exodus paths it actually read into its own exodus record, where the
+# apply's compiled set is a prediction (D77).  An environment that has
+# not deployed since the recording landed reads an empty set, which
+# matches an empty compiled set and so is not stale on this input.
+sub last_read_dependencies {
+	my ($self) = @_;
+	my $data = $self->top->vault->get($self->exodus_base);
+	return [] unless ref($data) eq 'HASH';
+	return _decode_path_list($data->{dependencies_read});
+}
+
+# }}}
 # _decode_path_list - read a vault field holding a list of deployment slugs {{{
 #
 # A vault field is a string, so a list reaches it in one of two forms.  An

@@ -1584,6 +1584,35 @@ B<Examples:>
     my $record = $top->applied_record();
     # returns undef in a repository pipeline-apply has never run against
 
+=head2 pipeline_staleness
+
+    my $changes = $top->pipeline_staleness($git);
+
+The environments whose pipeline no longer matches what is on control.
+
+This is the one home of the comparison. The propagate pre-flight, the deploy
+pre-flight, and C<pipeline-status> all ask it, because three copies of a
+comparison drift three ways.
+
+It reads three things. The applied commit comes from L</applied_record>. A
+path diff between that commit and the control branch covers
+C<.genesis/config> and every file of each environment's hierarchy, which is
+what the pipeline's definition is made of. And each environment's compiled
+dependency set is compared with the set its last deploy recorded reading.
+
+A repository C<pipeline-apply> has never run against reports nothing, because
+there is no commit to be stale against.
+
+B<Parameters:> A C<Service::Git> for the repository.
+
+B<Returns:> An arrayref of hashrefs, each with C<env> and C<reason>, where
+the reason is C<configuration-changed> or C<dependencies-changed>.
+
+B<Examples:>
+
+    my $changes = $top->pipeline_staleness($git);
+    # returns [] where the pipeline is current
+
 =head2 has_legacy_ci_yml
 
     my $bool = $top->has_legacy_ci_yml();
