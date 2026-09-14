@@ -15,6 +15,7 @@ use Test::More;
 use Test::Exception;
 
 use Genesis;
+use Genesis::Exit qw/CONFIG/;
 provide_rc();
 use_ok 'Genesis::Top';
 
@@ -238,6 +239,46 @@ subtest 'a required flag can be a predicate' => sub {
 	Genesis::Config::_is_required(sub {$seen = $_[0]; 0}, {type => 'concourse'});
 	is_deeply $seen, {type => 'concourse'},
 		'the predicate is handed the siblings around the key';
+};
+
+subtest 'a pipeline outside a git checkout is refused by name' => sub {
+	plan tests => 3;
+
+	# A directory under no git control at all, built beside the harness
+	# because both harness copies are checkouts.  The refusal has to say
+	# what a pipeline needs a repository for, since an operator who has
+	# just turned one on is not asking about paths.
+	my $dir = workdir() . '/no-checkout-' . int(rand(1_000_000));
+	mkdir_or_fail($dir);
+	mkdir_or_fail("$dir/.genesis");
+	mkfile_or_fail("$dir/.genesis/config", join("\n",
+		'---', 'deployment_type: bosh', 'version: "3"',
+		'creator_version: 3.2.0',
+		'pipeline:', '  enabled: true',
+		'  source_control:',
+		'    control_branch: trunk',
+		'    repository: team/bosh', ''));
+
+	my $top = Genesis::Top->new($dir, no_vault => 1);
+
+	# The refusal is wrapped for the terminal before it is raised, so
+	# reading the message back would rest on where a line break landed.
+	# The arguments are read as the refusal composed them instead.
+	my @raised;
+	# once as well as redefine, because Genesis::Top is required at run time
+	# here and the glob is therefore new at compile time.
+	no warnings qw/once redefine/;
+	local *Genesis::Top::bail = sub {push @raised, [@_]; die "refused\n"};
+
+	my $sc = eval { $top->_source_control };
+
+	is($sc, undef, 'the resolution does not answer');
+	ok(scalar(grep {!ref($_) && /is not a git checkout/} @{$raised[0] || []}),
+		'the refusal names the repository as the thing that is missing')
+		or diag('the refusal was raised with: '
+			. join(', ', map {ref($_) ? ref($_) : $_} @{$raised[0] || []}));
+	is((ref($raised[0][0]) eq 'HASH' ? $raised[0][0]{exitcode} : undef), CONFIG,
+		'and it exits CONFIG, the misconfigured environment');
 };
 
 done_testing;
