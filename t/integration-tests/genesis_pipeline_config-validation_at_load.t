@@ -169,4 +169,37 @@ subtest "a provider whose file will not load exits CONFIG" => sub {
 		'with the line the require failed on cut away';
 };
 
+# The bullets an operator reads are built out of a refusal caught inside the
+# load, so what the cut leaves in them is worth one row through a command.
+subtest "an environment block refusal carries no backtrace" => sub {
+	# Four explicit rows and one for the run's own restoration assertion.
+	plan tests => 5;
+
+	commit_on_control($h, files => {
+		'.genesis/config' => join("\n",
+			'---', 'deployment_type: bosh', 'version: "3"',
+			'creator_version: 3.2.0',
+			'pipeline:', '  enabled: true',
+			'  source_control:',
+			'    repository: genesis/bosh-deployments', ''),
+	});
+	write_env_file($h, 'qa', pipeline => {manual => 'maybe'});
+
+	# The frames the cut takes out exist only where something has loaded
+	# Carp::Always, and the child loads nothing of the sort on its own, so
+	# the row arms it for the one command it runs.
+	local $ENV{PERL5OPT} = join(' ', '-MCarp::Always', ($ENV{PERL5OPT} // ()));
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
+	(my $flat = $err) =~ s/\s+/ /g;
+
+	like $flat, qr/genesis\.pipeline\.manual: expected a boolean/,
+		'the refusal names the key the environment got wrong';
+	is $exit, Genesis::Exit::CONFIG, 'and it exits CONFIG';
+	unlike $flat, qr/expected a boolean at \S+ line \d+/,
+		'with no location left standing behind the bullet';
+	unlike $flat, qr/Genesis::Config::validate/,
+		'and no frame behind that';
+};
+
 done_testing;
