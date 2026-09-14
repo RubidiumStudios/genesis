@@ -377,7 +377,7 @@ sub _base_deployment_content {
 		};
 
 		# Git context for pipeline propagation tracking (CI-only)
-		if ($env->top->ci_configured) {
+		if ($env->top->pipeline_enabled) {
 			eval {
 				require Service::Git;
 				my $git = Service::Git->new('.');
@@ -399,7 +399,7 @@ sub _base_deployment_content {
 				# marker — this is the normal path for them.  Also covers bootstrap
 				# and emergency manual deploys of downstream envs.
 				unless ($base->{git}{control_commit}) {
-					my $control_branch = $env->top->ci_control_branch;
+					my $control_branch = $env->top->control_branch;
 					my $sha = eval { $git->sha($control_branch) };
 					$base->{git}{control_commit} = $sha if $sha;
 				}

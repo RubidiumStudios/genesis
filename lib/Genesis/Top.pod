@@ -59,8 +59,14 @@ Inherits from L<Genesis::Base>, which provides memoization helpers
 =head2 DEFAULT_CONTROL_BRANCH
 
 The branch a branch-based pipeline treats as authoritative when
-C<ci.control_branch> is not configured. Read through
-L</ci_control_branch> rather than directly.
+C<pipeline.source_control.control_branch> is not configured. Read through
+L</control_branch> rather than directly.
+
+=head2 DEFAULT_PR_PREFIX
+
+The prefix a pull request branch carries when
+C<pipeline.source_control.pr_prefix> is not configured. Read through
+L</pr_prefix> rather than directly.
 
 =head2 PROPAGATE_NO_BRANCH_EXIT
 
@@ -1323,60 +1329,98 @@ B<Examples:>
     Genesis::Top->register_config_section('pipeline', \&pipeline_handler);
     # returns the handler; the 'pipeline' section is now handled by it
 
-=head2 ci_control_branch
+=head2 pipeline_enabled
 
-    my $branch = $top->ci_control_branch();
+    my $bool = $top->pipeline_enabled();
 
-The branch pipeline environments are created from and propagate out of.
+Whether this repository declares a pipeline.
+
+Reads C<pipeline.enabled> and nothing else. It replaces C<ci_configured> and
+C<ci_enabled>, which paired an enabled check with a provider check and so
+could not tell a repository with no pipeline from one with a manual pipeline.
+
+B<Parameters:> None.
+
+B<Returns:> True when C<pipeline.enabled> is set; false otherwise.
+
+B<Examples:>
+
+    my $bool = $top->pipeline_enabled();
+    # returns true in a repository with a pipeline, manual or not
+
+=head2 pipeline_provider_type
+
+    my $type = $top->pipeline_provider_type();
+
+Which automation owns this repository's pipeline.
+
+Checks L</pipeline_enabled> first, so one read answers both questions and no
+caller needs a guard beside it. The default is C<manual>, which means
+C<pipeline.enabled> on its own is a manual pipeline rather than a
+half-configured one. The name is qualified because Genesis classifies
+providers of several kinds and a bare name would not say which is meant.
+
+B<Parameters:> None.
+
+B<Returns:> C<undef> when the pipeline is not enabled, otherwise the
+configured C<pipeline.provider.type>, defaulting to C<manual>.
+
+B<Examples:>
+
+    my $type = $top->pipeline_provider_type();
+    # returns undef where there is no pipeline, 'manual' where there is
+    # one with no provider key, and the provider's name otherwise
+
+=head2 manual_pipeline
+
+    my $bool = $top->manual_pipeline();
+
+Whether the enabled pipeline is the manual one, under which the operator's
+own successful deploy spawns the propagate child and nothing watches the
+remote.
+
+B<Parameters:> None.
+
+B<Returns:> True only when L</pipeline_provider_type> is defined and equals
+C<manual>.
+
+B<Examples:>
+
+    my $bool = $top->manual_pipeline();
+    # returns false both for concourse and for no pipeline at all
+
+=head2 control_branch
+
+    my $branch = $top->control_branch();
+
+The branch that is control, which every pipeline command reads through here.
 
 B<Parameters:> None.
 
 B<Returns:> The configured C<pipeline.source_control.control_branch>, or the
-built-in default when unset.
+C<DEFAULT_CONTROL_BRANCH> constant when unset.
 
 B<Examples:>
 
-    my $branch = $top->ci_control_branch();
-    # returns 'control' unless the repo configured otherwise
+    my $branch = $top->control_branch();
+    # returns 'control' unless the repository configured otherwise
 
-=head2 ci_enabled
+=head2 pr_prefix
 
-    my $bool = $top->ci_enabled();
+    my $prefix = $top->pr_prefix();
 
-Whether CI is switched on for this repository.
-
-This says the same thing as C<ci_configured> now that an absent provider block
-resolves to the manual provider, so a repository can no longer be enabled and
-provider-less at the same time.
+The prefix every pull request branch carries, which is joined onto the
+deployment slug to name that branch.
 
 B<Parameters:> None.
 
-B<Returns:> The configured C<pipeline.enabled> value.
+B<Returns:> The configured C<pipeline.source_control.pr_prefix>, or the
+C<DEFAULT_PR_PREFIX> constant C<pr/> when unset.
 
 B<Examples:>
 
-    my $bool = $top->ci_enabled();
-    # returns true in a repo with CI switched on
-
-=head2 ci_configured
-
-    my $bool = $top->ci_configured();
-
-Whether CI is both enabled B<and> has a provider type set.
-
-The two halves no longer come apart. C<pipeline.provider.type> defaults to
-C<manual>, so every enabled section has a provider type and the half-configured
-repository this once guarded against cannot be written.
-
-B<Parameters:> None.
-
-B<Returns:> True when both hold; false otherwise.
-
-B<Examples:>
-
-    my $bool = $top->ci_configured();
-    # returns true in a repo with pipeline.enabled and no provider block,
-    # because the absent block is the manual provider
+    my $prefix = $top->pr_prefix();
+    # returns 'pr/' unless the repository configured otherwise
 
 =head2 has_legacy_ci_yml
 

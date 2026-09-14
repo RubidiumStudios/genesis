@@ -82,8 +82,9 @@ subtest 'v2 config loads and augments pipeline.enabled default' => sub {
 	my $dir = make_v3_repo(workdir("v2-augment"), version => 2);
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
-	ok !$top->ci_enabled, "ci_enabled is false for v2 config";
-	ok !$top->ci_configured, "ci_configured is false for v2 config";
+	ok !$top->pipeline_enabled, "pipeline_enabled is false for v2 config";
+	is $top->pipeline_provider_type, undef,
+		"pipeline_provider_type is undef for v2 config";
 	is $top->config->get('pipeline.enabled'), 0, "pipeline.enabled defaults to false";
 	is $top->config->get_source('pipeline'), 'default', "the pipeline section comes from the default layer";
 };
@@ -104,8 +105,9 @@ subtest 'v3 config validates with CI disabled' => sub {
 	my $dir = make_v3_repo(workdir("v3-disabled"), pipeline => { enabled => 'false' });
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
-	ok !$top->ci_enabled, "ci_enabled is false";
-	ok !$top->ci_configured, "ci_configured is false";
+	ok !$top->pipeline_enabled, "pipeline_enabled is false";
+	is $top->pipeline_provider_type, undef,
+		"pipeline_provider_type is undef with the pipeline switched off";
 };
 
 subtest 'v3 config validates with CI enabled and provider' => sub {
@@ -117,8 +119,8 @@ subtest 'v3 config validates with CI enabled and provider' => sub {
 	});
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
-	ok $top->ci_enabled, "ci_enabled is true";
-	ok $top->ci_configured, "ci_configured is true";
+	ok $top->pipeline_enabled, "pipeline_enabled is true";
+	ok !$top->manual_pipeline, "a concourse pipeline is not the manual one";
 	is $top->config->get('pipeline.provider.type'), 'concourse', "provider type is concourse";
 	is $top->config->get('pipeline.provider.target'), 'pipes/lmelt', "provider target correct";
 	is $top->config->get('pipeline.name'), 'bosh', "pipeline name correct";
@@ -129,7 +131,7 @@ subtest 'v3 config treats an enabled gate with no provider as manual' => sub {
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 	lives_ok { $top->config } "an enabled gate with no provider still loads";
-	ok $top->ci_enabled, "the gate reads back as on";
+	ok $top->pipeline_enabled, "the gate reads back as on";
 	is $top->config->get('pipeline.provider.type'), 'manual',
 		"and the absent provider block reads back as a manual pipeline";
 };
@@ -156,7 +158,7 @@ subtest 'v3 config with ci.yml and CI configured warns' => sub {
 	is $err, '', "v3 + ci.yml + configured CI loads without bailing";
 	like $out, qr/Legacy .*ci\.yml.* present alongside a v3 CI configuration/,
 		"and warns that the stale ci.yml is being ignored";
-	ok $top->ci_configured, "v3 CI config still wins";
+	ok $top->pipeline_enabled, "v3 CI config still wins";
 	ok !$top->has_legacy_ci_yml, "legacy flag not set when v3 CI is configured";
 };
 
@@ -221,17 +223,6 @@ subtest 'v2 config write-back does not persist pipeline defaults' => sub {
 
 subtest 'new repos created with LATEST_CONFIG_VERSION' => sub {
 	is Genesis::Top::LATEST_CONFIG_VERSION(), 3, "LATEST_CONFIG_VERSION is 3";
-};
-
-subtest 'ci_control_branch returns constant for MVP' => sub {
-	my $dir = make_v3_repo(workdir("v3-control"), pipeline => {
-		enabled  => 'true',
-		provider => { type => 'concourse', target => 'pipes/test', url => 'https://ci.example.com', team => 'test' },
-		automation_blocks(),
-	});
-
-	my $top = Genesis::Top->new($dir, no_vault => 1);
-	is $top->ci_control_branch, 'control', "ci_control_branch returns 'control'";
 };
 
 done_testing;

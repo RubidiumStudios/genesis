@@ -28,6 +28,7 @@ use File::Path qw/rmtree/;
 # (and a config key) so it can change without rippling through the
 # codebase; not currently exposed to end users.
 use constant DEFAULT_CONTROL_BRANCH  => 'control';
+use constant DEFAULT_PR_PREFIX       => 'pr/';
 use constant CI_PIPELINE_CONTROL_KEY => 'control'; # key in pipeline.branches{} hash for the control branch
 use constant LATEST_CONFIG_VERSION   => 3;
 
@@ -996,30 +997,67 @@ sub type {
 }
 
 # }}}
-# ci_control_branch - return the configured control branch name {{{
+# pipeline_enabled - whether this repository declares a pipeline {{{
 #
-# Returns the branch name that Genesis pipeline tooling treats as the
-# source of truth for this deployment repository.  Reads from
-# #C{pipeline.source_control.control_branch} in #C{.genesis/config}
-# under D19, defaulting to the value of the
-# #C{DEFAULT_CONTROL_BRANCH} constant.
-sub ci_control_branch {
+# Reads pipeline.enabled and nothing else, under D70.  It replaces
+# ci_configured and ci_enabled, which are removed rather than kept as a
+# guard beside the provider read, because pairing the two is what let a
+# repository with no pipeline and one with a manual pipeline read alike.
+sub pipeline_enabled {
 	my ($self) = @_;
-	return $self->config->get('pipeline.source_control.control_branch', DEFAULT_CONTROL_BRANCH);
+	return $self->config->get('pipeline.enabled') ? 1 : 0;
 }
 
 # }}}
-# ci_enabled - return whether a pipeline is configured {{{
-sub ci_enabled {
+# pipeline_provider_type - the pipeline's provider, or undef when there is none {{{
+#
+# Checks pipeline_enabled first and answers undef when the pipeline is not
+# enabled, so one read answers both questions and no call site needs a
+# guard beside it.  The default is manual, under D15, so pipeline.enabled
+# on its own is a manual pipeline rather than a half-configured one.  The
+# name is qualified because Genesis classifies providers of several kinds
+# (D64, D70).
+sub pipeline_provider_type {
 	my ($self) = @_;
-	return $self->config->get('pipeline.enabled');
+	return undef unless $self->pipeline_enabled;
+	return $self->config->get('pipeline.provider.type', 'manual') // 'manual';
 }
 
 # }}}
-# ci_configured - return whether a pipeline is enabled and has a provider {{{
-sub ci_configured {
+# manual_pipeline - whether the enabled pipeline is the manual one {{{
+#
+# True only when pipeline_provider_type is defined and equals manual, so
+# the check stays out of every call site (D70).
+sub manual_pipeline {
 	my ($self) = @_;
-	return $self->config->get('pipeline.enabled') && $self->config->has('pipeline.provider.type');
+	my $type = $self->pipeline_provider_type;
+	return (defined($type) && $type eq 'manual') ? 1 : 0;
+}
+
+# }}}
+# control_branch - the name of the branch that is control {{{
+#
+# The one reader of pipeline.source_control.control_branch, under D19.
+# The constant is its default and nothing more, so a site that reads the
+# constant instead of this accessor contradicts the design.
+sub control_branch {
+	my ($self) = @_;
+	return $self->config->get(
+		'pipeline.source_control.control_branch', DEFAULT_CONTROL_BRANCH
+	);
+}
+
+# }}}
+# pr_prefix - the prefix every pull request branch carries {{{
+#
+# The one reader of pipeline.source_control.pr_prefix, defaulting to
+# 'pr/', under D19.  It is joined onto the deployment slug to name the
+# pull request branch.
+sub pr_prefix {
+	my ($self) = @_;
+	return $self->config->get(
+		'pipeline.source_control.pr_prefix', DEFAULT_PR_PREFIX
+	);
 }
 
 # }}}
@@ -1071,13 +1109,13 @@ sub pipeline_env_names {
 #   parent_of  env => the env it follows
 #   order      topological, roots first, siblings by name
 #
-# Empty in every field when CI is not configured, so callers can iterate
-# unconditionally.
+# Empty in every field where the repository declares no pipeline, so
+# callers can iterate unconditionally.
 sub pipeline_topology {
 	my ($self) = @_;
 
 	my %empty = (nodes => {}, edges => [], children => {}, parent_of => {}, order => []);
-	return \%empty unless $self->ci_configured;
+	return \%empty unless $self->pipeline_enabled;
 
 	require Genesis::CI::Compiler::ASTBuilder;
 	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
@@ -1122,8 +1160,9 @@ sub pipeline_topology {
 #   $top->fetch_pipeline_envs($git, include_control => 1);
 #
 # Calls $git->fetch_branches with the env-name list (and optionally the
-# control branch) so credentials are only prompted once.  No-op when CI
-# is not configured, no remote is configured, or there are no envs.
+# control branch) so credentials are only prompted once.  No-op where the
+# repository declares no pipeline, no remote is configured, or there are
+# no envs.
 #
 # Returns 1 on success and no-op cases.  Bails on real fetch failure
 # (network / auth / unknown) so the operator can't accidentally act
@@ -1131,12 +1170,12 @@ sub pipeline_topology {
 # --no-fetch at the command surface to skip this entirely.
 sub fetch_pipeline_envs {
 	my ($self, $git, %opts) = @_;
-	return 1 unless $self->ci_configured;
+	return 1 unless $self->pipeline_enabled;
 	my $remote = $git->default_remote;
 	return 1 unless $remote;
 	my @names = $self->pipeline_env_names;
 	return 1 unless @names;
-	unshift @names, DEFAULT_CONTROL_BRANCH if $opts{include_control};
+	unshift @names, $self->control_branch if $opts{include_control};
 
 	my (undef, $result) = $git->fetch_branches(\@names, $remote);
 	return 1 if $result->{ok};
@@ -1429,15 +1468,17 @@ sub _validate_config {
 
 		# Detect legacy ci.yml alongside v3 config -- flag it for the
 		# dispatch gate.  Two sub-cases surface at load time:
-		#   * v3 config already declares pipeline.enabled and
-		#     pipeline.provider.type
+		#   * v3 config already declares a pipeline
 		#     -> stale ci.yml, warn once and keep going; the v3 config
 		#     wins downstream.
 		#   * v3 config has no pipeline configured -> flag as legacy CI so
 		#     pipeline commands gate on migration; other commands run.
+		#
+		# The configuration is memoized before _validate_config runs, so
+		# the accessor reads it back rather than re-entering the load.
 		my $ci_yml = $self->path('ci.yml');
 		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
-			if ($self->config->get('pipeline.enabled') && $self->config->has('pipeline.provider.type')) {
+			if ($self->pipeline_enabled) {
 				warning(
 					"Legacy #C{%s} present alongside a v3 CI configuration; ".
 					"the v3 config wins.  Remove #C{%s} to clear this warning.",
@@ -1965,7 +2006,7 @@ sub _source_control {
 	my $config = $self->config;
 	my %sc = (
 		control_branch => $config->get('pipeline.source_control.control_branch', DEFAULT_CONTROL_BRANCH),
-		pr_prefix      => $config->get('pipeline.source_control.pr_prefix', 'pr/'),
+		pr_prefix      => $config->get('pipeline.source_control.pr_prefix', DEFAULT_PR_PREFIX),
 	);
 
 	bail({exitcode => CONFIG},

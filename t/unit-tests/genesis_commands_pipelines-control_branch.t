@@ -2,7 +2,7 @@
 #
 # The control branch is a name the repository chooses, not a constant.
 # It is declared at pipeline.source_control.control_branch and read back
-# through Genesis::Top::ci_control_branch, so a repository that calls its
+# through Genesis::Top::control_branch, so a repository that calls its
 # control branch anything other than the schema default must still be
 # understood by the commands that work from it.
 #

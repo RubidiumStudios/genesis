@@ -4149,7 +4149,7 @@ sub _pre_deploy {
 	# produced.  Branch checkout + pull happens earlier (in
 	# Genesis::Commands::Env::deploy) so the preflight checks above
 	# this method run on the env-branch view.
-	if ($self->top->ci_configured) {
+	if ($self->top->pipeline_enabled) {
 		require Service::Git;
 		my $git    = Service::Git->new('.');
 		my $branch = $self->name;
@@ -4593,7 +4593,7 @@ sub _post_deploy {
 	# (manual-provider only).  Non-manual providers (concourse, gha)
 	# own their own cascade, so we skip the cascade in those cases
 	# but still commit + push the manifest.
-	if ($self->top->ci_configured) {
+	if ($self->top->pipeline_enabled) {
 		my $git    = $state->{pipeline_git};
 		my $branch = $state->{pipeline_branch};
 
@@ -4653,8 +4653,7 @@ sub _post_deploy {
 		}
 
 		# Auto-cascade propagation (manual-provider only).
-		if (($self->top->config->get('pipeline.provider.type') || '') eq 'manual'
-			&& !$opts{'no-propagate'}) {
+		if ($self->top->manual_pipeline && !$opts{'no-propagate'}) {
 
 			require Service::Git;
 			require Genesis::Top;

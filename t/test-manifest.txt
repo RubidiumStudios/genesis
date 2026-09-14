@@ -247,6 +247,7 @@ unit-tests/genesis_top-provider_fragment.t   # the configured provider's own sch
 unit-tests/genesis_top-provider_capabilities.t  # the six capabilities a provider declares, and the keys they gate
 unit-tests/genesis_top-manifest_store_gate.t # the manifest store and the kit floor, refused at configuration load
 unit-tests/genesis_top-slug_and_mount.t      # both halves of the deployment slug as git ref components, and one exodus mount per pipeline
+unit-tests/genesis_top-pipeline_accessors.t  # the three pipeline accessors and the two source-control readers
 unit-tests/genesis_commands_dev-pipeline_compile.t  # dev-pipeline-compile stage renderer
 unit-tests/service_git-ci_credentials.t      # git credentials supplied via CI env vars
 unit-tests/genesis_commands_pipelines-prepare.t  # pipeline-prepare scope selection
