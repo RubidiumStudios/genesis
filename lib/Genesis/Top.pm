@@ -2708,6 +2708,13 @@ sub _validate_manifest_store {
 sub _merged_env_params {
 	my ($self, $env_name) = @_;
 
+	# Three checks walk every environment, and every pass used to spawn one
+	# spruce run per file, so an ancestor was parsed once per descendant per
+	# pass.  The answer is kept on the instance instead, which leaves all
+	# three callers as they were written.
+	return $self->{__merged_env_params}{$env_name}
+		if $self->{__merged_env_params}{$env_name};
+
 	require Genesis::Env;
 
 	# The deployment root is handed over as both bases, because with no
@@ -2735,7 +2742,7 @@ sub _merged_env_params {
 
 		%merged = %{deep_merge(\%merged, $params)};
 	}
-	return \%merged;
+	return $self->{__merged_env_params}{$env_name} = \%merged;
 }
 
 # }}}
