@@ -39,6 +39,40 @@ subtest 'the builder composes the slug from a name and the declared type' => sub
 		'the builder takes a name string and loads no environment');
 };
 
+# A refusal is wrapped for the terminal before it is raised, so a line
+# break can land in the middle of any phrase.  The text is folded back onto
+# one line before a row reads it.  The name is the test file's own, because
+# Genesis exports a flatten of its own that means something else.
+sub one_line {
+	my ($text) = @_;
+	$text //= '';
+	$text =~ s/\s+/ /g;
+	return $text;
+}
+
+subtest 'the builder refuses what it cannot compose a slug from' => sub {
+	plan tests => 4;
+
+	my $h   = make_harness(envs => ['qa'], type => 'bosh', vault => 0);
+	my $top = Genesis::Top->new($h->a, no_vault => 1);
+
+	# The guards raise through bug, which dies rather than exiting whenever
+	# it is reached from inside an eval, and a test file always is.
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	my $from_ref = eval {$top->deployment_slug_for(Genesis::Env->bare('qa', $top))};
+	my $ref_err  = one_line($@);
+	is($from_ref, undef, 'an environment object composes nothing');
+	like($ref_err, qr/deployment_slug_for expects an environment name/,
+		'and the refusal says a name is what it takes');
+
+	my $from_empty = eval {$top->deployment_slug_for('')};
+	my $empty_err  = one_line($@);
+	is($from_empty, undef, 'an empty name composes nothing');
+	like($empty_err, qr/deployment_slug_for called without an environment name/,
+		'and the refusal says the name was missing');
+};
+
 subtest 'the object form delegates and the renderings agree' => sub {
 	plan tests => 4;
 
