@@ -81,10 +81,10 @@ subtest 'every environment name is checked too' => sub {
 };
 
 subtest 'one exodus mount serves the whole pipeline' => sub {
-	# Five explicit rows and one for the run's own restoration assertion,
+	# Six explicit rows and one for the run's own restoration assertion,
 	# because a command that refuses at configuration load has touched
 	# nothing and run_genesis says so for itself.
-	plan tests => 6;
+	plan tests => 7;
 
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => '/secret/exodus/'},
@@ -111,6 +111,27 @@ subtest 'one exodus mount serves the whole pipeline' => sub {
 		genesis => {exodus_mount => '/secret/exodus/'},
 		pipeline => {manual => 'false'});
 	lives_ok {load_with_type('bosh')} 'one shared mount passes';
+
+	# An environment that names no exodus mount derives one from its secrets
+	# mount, with exodus/ under it, and the secrets mount is normalised
+	# before anything is appended to it.  So a secrets mount written without
+	# its slashes has to land on the same mount the environment beside it
+	# names in full, or the two are two mounts and the load is refused.
+	write_env_file($h, 'qa',
+		genesis => {secrets_mount => 'foo'},
+		pipeline => {manual => 'false'});
+	write_env_file($h, 'prod',
+		genesis => {exodus_mount => '/foo/exodus/'},
+		pipeline => {manual => 'false'});
+	lives_ok {load_with_type('bosh')}
+		'a derived mount meets a named one, so the two are one mount';
+
+	write_env_file($h, 'qa',
+		genesis => {exodus_mount => '/secret/exodus/'},
+		pipeline => {manual => 'false'});
+	write_env_file($h, 'prod',
+		genesis => {exodus_mount => '/secret/exodus/'},
+		pipeline => {manual => 'false'});
 };
 
 subtest 'an empty exodus mount is the mount it names' => sub {
