@@ -7,7 +7,7 @@ package Service::Git::Session;
 use strict;
 use warnings;
 
-use Genesis qw/bail trace/;
+use Genesis qw/bail run trace/;
 use Genesis::Exit qw/TEMPFAIL DATAERR/;
 use Cwd qw/getcwd/;
 use Fcntl qw/:flock/;
@@ -60,9 +60,10 @@ sub on { $_[0]->{on} }
 sub committed_branches {
 	my ($self) = @_;
 	my $git = $self->{git};
+	my $control = $self->{control} // '';
 	return grep {
 		my $now = eval { $git->sha($_) } // '';
-		$now && $now ne ($self->{switched}{$_} // '');
+		$_ ne $control && $now && $now ne ($self->{switched}{$_} // '');
 	} sort keys %{$self->{switched}};
 }
 
@@ -198,6 +199,69 @@ sub finish {
 }
 
 # }}}
+# abort - discard, reset, restore, verify, and die {{{
+#
+# D32 fixes what it reaches: every deployment branch this session committed
+# to goes back to T, and control is never touched, because committed work on
+# control in L is never discarded.  The discard reaches the index as well as
+# the tree, which is H1, and it names the modified files before it throws
+# them away so the evidence reaches the operator.  Nothing here removes an
+# untracked file, so an operator's scratch file survives under D84.
+sub abort {
+	my ($self, $error) = @_;
+	my $git = $self->{git};
+	$error = 'the session was aborted' unless defined $error && length $error;
+	$error =~ s/\s+$//;
+
+	unless ($self->{active}) {
+		bail("%s", $error);
+	}
+	$self->{active} = 0;
+
+	# Name what is about to go, before it goes.
+	my $status = $git->status;
+	my @modified = sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
+	Genesis::error("Discarding uncommitted changes in #C{%s}:\n%s",
+		$git->root, join("", map {"  - $_\n"} @modified)) if @modified;
+
+	my @reset = $self->committed_branches;
+	my $restore_error;
+	eval {
+		chdir($git->root)
+			or die sprintf("unable to enter the git root %s: %s\n",
+				$git->root, $!);
+
+		# The tree and the index both, which is the half the baseline
+		# cleanup missed.
+		run({ dir => $git->root, passfail => 1 },
+			'git', 'reset', '--hard', 'HEAD');
+
+		$self->_reset_to_remote($_) for @reset;
+		$self->_restore;
+		1;
+	} or do {
+		$restore_error = $@ || 'the restore failed for an unknown reason';
+		$restore_error =~ s/\s+$//;
+	};
+
+	$self->_release_lock;
+
+	# H2: a restore that fails is loud.  We are on the wrong branch, and
+	# nothing a retry does moves us, so the operator is told all three
+	# facts at once rather than discovering them one command later.
+	bail(
+		"%s\n\n".
+		"We then failed to return to #C{%s}: %s\n\n".
+		"You are standing on #C{%s}.  Put the working tree back by hand ".
+		"before running anything else here.",
+		$error, $self->{origin}{branch}, $restore_error,
+		$git->current_branch // '<detached>'
+	) if $restore_error;
+
+	bail("%s", $error);
+}
+
+# }}}
 # }}}
 
 ### Internals {{{
@@ -271,6 +335,37 @@ sub _command_line {
 	return join(' ', 'genesis', grep {defined && length} ($command))
 		if $command;
 	return join(' ', $0, @ARGV);
+}
+
+# }}}
+# _reset_to_remote - put one branch back at T {{{
+#
+# A ref write rather than a switch, so it takes no lock and needs no
+# checkout.  The control branch never reaches here, because
+# committed_branches is the set this session moved and it filters that name
+# out of it.
+sub _reset_to_remote {
+	my ($self, $branch) = @_;
+	my $git    = $self->{git};
+	my $remote = $git->default_remote or return $self;
+	my $t      = "refs/remotes/$remote/$branch";
+
+	my ($tip) = run({ dir => $git->root, passfail => 0 },
+		'git', 'rev-parse', '--verify', '--quiet', $t);
+	chomp $tip if defined $tip;
+	return $self unless $tip;
+
+	# On the branch itself a ref write alone would leave the tree ahead of
+	# HEAD, so a hard reset is what puts the two back together.
+	if (($git->current_branch // '') eq $branch) {
+		run({ dir => $git->root, onfailure => "Failed to reset $branch" },
+			'git', 'reset', '--hard', $tip);
+	} else {
+		run({ dir => $git->root, onfailure => "Failed to reset $branch" },
+			'git', 'update-ref', "refs/heads/$branch", $tip);
+	}
+	trace("Service::Git::Session: reset %s to %s", $branch, $t);
+	return $self;
 }
 
 # }}}
