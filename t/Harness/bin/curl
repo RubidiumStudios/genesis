@@ -4,6 +4,7 @@
 # Every call is appended to the log and every answer comes from the state file.
 use strict;
 use warnings;
+use Fcntl qw/:flock/;
 use JSON::PP;
 
 my %REASON = (
@@ -24,15 +25,16 @@ my $state = $json->decode(do {
 
 # HEAD is a flag letter inside the first bundle rather than a method, because
 # that is how Genesis::curl spells it, and it wants its headers on stdout.
-my ($method, $url, $body, $head) = ('GET', undef, undef, 0);
+my ($method, $url, $body, $head, $outfile) = ('GET', undef, undef, 0, undef);
 my @argv = @ARGV;
 while (@argv) {
 	my $arg = shift @argv;
-	if    ($arg eq '-X')            {$method = shift @argv}
-	elsif ($arg eq '-d')            {$body   = shift @argv}
-	elsif ($arg =~ m{^https?://})   {$url    = $arg}
-	elsif ($arg eq '-H' || $arg eq '-u' || $arg eq '-D' || $arg eq '-o') {shift @argv}
-	elsif ($arg =~ m{^-[a-zA-Z]*I})  {$head  = 1}
+	if    ($arg eq '-X')            {$method  = shift @argv}
+	elsif ($arg eq '-d')            {$body    = shift @argv}
+	elsif ($arg eq '-o')            {$outfile = shift @argv}
+	elsif ($arg =~ m{^https?://})   {$url     = $arg}
+	elsif ($arg eq '-H' || $arg eq '-u' || $arg eq '-D') {shift @argv}
+	elsif ($arg =~ m{^-[a-zA-Z]*I})  {$head   = 1}
 }
 
 # The token is read off the environment rather than off the Authorization
@@ -107,6 +109,16 @@ if ($head) {
 	print $line;
 } else {
 	print STDERR $line;
-	print $json->encode($answer);
+	# A caller that asked for -o gets the body in the file it named and
+	# nothing on stdout, which is what the real curl does and what
+	# Genesis::curl expects when it is handed a file to write.
+	my $payload = $json->encode($answer);
+	if (defined $outfile) {
+		open my $fh, '>', $outfile or exit 2;
+		print $fh $payload;
+		close $fh;
+	} else {
+		print $payload;
+	}
 }
 exit 0;
