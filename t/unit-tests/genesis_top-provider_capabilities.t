@@ -158,8 +158,11 @@ subtest 'a capability that is true admits the key it gates' => sub {
 
 	local @INC = ('t/tmp/lib', @INC);
 
-	# The two files the merged-hierarchy row left behind go back to saying
+	# The site file the merged-hierarchy row wrote goes back to saying
 	# nothing, so a row below can only refuse over what it wrote itself.
+	# That is the one file written here.  The leaf beside it is already
+	# silent, and a harness write of a file that is already what it would
+	# write has no commit to make, so writing it again would fail.
 	write_env_file($h, 'ocfp-qa', site => 'ocfp', pipeline => {});
 
 	my $able = provider_with();
