@@ -84,7 +84,7 @@ subtest 'the two spellings cannot drift' => sub {
 };
 
 subtest 'one resolver answers for every caller' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
 	is $info->{class}, 'Genesis::CI::Concourse',
@@ -103,10 +103,16 @@ subtest 'one resolver answers for every caller' => sub {
 	} qr/knows\s+the\s+'github-actions'\s+provider\s+but\s+has\s+no\s+compiler/s,
 		'a known type with no compiler class is told it has no compiler';
 
+	# The list alone would be satisfied by a refusal that lost the type on
+	# its way out, so the row reads the type it asked about as well.
+	throws_ok {
+		Genesis::CI::Compiler->_resolve_provider_class('jenkins')
+	} qr/Unknown\s+CI\s+provider\s+type\s+'jenkins'/s,
+		'a type the registry does not hold is named in the refusal';
 	throws_ok {
 		Genesis::CI::Compiler->_resolve_provider_class('jenkins')
 	} qr/Valid\s+types:\s+concourse,\s+github-actions,\s+manual/s,
-		'a type the registry does not hold gets the valid-types list';
+		'and the refusal carries the types it does hold';
 };
 
 subtest 'the provider type defaults to manual' => sub {
