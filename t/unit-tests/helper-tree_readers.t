@@ -148,4 +148,68 @@ subtest 'standin_vault answers a fixed set and keeps a ledger' => sub {
 		'while every path it was asked for lands in the ledger, in order');
 };
 
+subtest 'local_env sets what it is given and puts it all back' => sub {
+	plan tests => 6;
+
+	local $ENV{HELPER_T_HELD} = 'before';
+	delete $ENV{HELPER_T_ABSENT};
+
+	{
+		my $guard = local_env(
+			HELPER_T_HELD   => 'during',
+			HELPER_T_ABSENT => 'new',
+		);
+		is($ENV{HELPER_T_HELD}, 'during', 'a variable that was set is replaced');
+		is($ENV{HELPER_T_ABSENT}, 'new', 'one that was unset is created');
+	}
+
+	is($ENV{HELPER_T_HELD}, 'before', 'the replaced value comes back');
+	ok(!exists $ENV{HELPER_T_ABSENT},
+		'and one that was never there is removed, not left standing empty');
+
+	my $guard = local_env(HELPER_T_HELD => 'again');
+	$guard->restore;
+	is($ENV{HELPER_T_HELD}, 'before', 'an explicit teardown puts it back too');
+
+	$guard->restore;
+	is($ENV{HELPER_T_HELD}, 'before', 'and a second teardown changes nothing');
+};
+
+subtest 'local_env puts it back even where the row dies' => sub {
+	plan tests => 3;
+
+	local $ENV{HELPER_T_THROWN} = 'before';
+
+	my $err;
+	eval {
+		my $guard = local_env(HELPER_T_THROWN => 'during');
+		die "the row gave up partway\n";
+	} or $err = $@;
+
+	like($err, qr/gave up partway/, 'the death reaches the caller');
+	is($ENV{HELPER_T_THROWN}, 'before',
+		'and the variable is back to what it held before the row ran');
+
+	local $ENV{HELPER_T_REMOVED} = 'present';
+	{
+		my $guard = local_env(HELPER_T_REMOVED => undef);
+		ok(!exists $ENV{HELPER_T_REMOVED},
+			'an undefined value takes the variable away for the guard\'s life');
+	}
+};
+
+subtest 'local_env refuses a call that throws its guard away' => sub {
+	plan tests => 2;
+
+	local $ENV{HELPER_T_VOID} = 'before';
+
+	my $err;
+	eval {local_env(HELPER_T_VOID => 'during'); 1} or $err = $@;
+
+	like($err, qr/guard/,
+		'a call in void context is a death, because it would arm nothing');
+	is($ENV{HELPER_T_VOID}, 'before',
+		'and the variable is left exactly as it was');
+};
+
 done_testing;

@@ -1249,16 +1249,28 @@ sub standin_vault {
 	}
 }
 
-# A saver for the environment variables a fixture has to set in the parent
+# local_env saves the environment variables a fixture has to set in the parent
 # process, where `local` will not reach because the value has to outlive the
-# sub that armed it.  local_env sets each variable it is given, records the
-# value it replaced, and hands back a guard.  When that guard goes out of
-# scope, or when restore is called on it, every variable goes back to what it
-# held, and one that was never set is removed rather than left standing empty.
-# A guard can be grown with set, and it unwinds in reverse, so a fixture may
-# keep one guard for its whole life and still leave the parent as it found it.
+# sub that armed it.  It sets each variable it is given, records the value it
+# replaced, and hands back a guard.  When that guard goes out of scope, or
+# when restore is called on it, every variable goes back to what it held, and
+# one that was never set is removed rather than left standing empty.  A guard
+# can be grown with set, and it unwinds in reverse, so a fixture may keep one
+# guard for its whole life and still leave the parent as it found it.
+#
+# The guard is the whole point, so a call that throws it away is a death
+# rather than a silent no-op.  In void context the guard would be built and
+# destroyed on the same statement, the variables would be set and put straight
+# back, and a fixture written that way would read as correct and arm nothing.
+#
+# Passing undef as a value removes the variable for the guard's life and puts
+# it back afterwards.  That is an extension beyond setting and restoring, and
+# it is here because a fixture as often needs a variable out of the way as it
+# needs one set.
 sub local_env {
 	my (%vars) = @_;
+	die "local_env returns a guard that the caller must keep\n"
+		unless defined wantarray;
 	return helper::EnvGuard->new->set(%vars);
 }
 
