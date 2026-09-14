@@ -909,7 +909,7 @@ sub manifest_store {
 	# the manifest store is always 'repository' because earlier versions of Genesis
 	# cannot update the exodus deployment audit data.
 	my $min_version = '3.1.0';
-	return $self->top->config->get('manifest_store','hybrid')
+	return $self->top->config->get('manifest_store','exodus')
 		if ($self->feature_compatibility($min_version));
 
 	debug(
@@ -4412,7 +4412,7 @@ sub _post_deploy {
 	$self->notify("#G{Deployment successful.}") if $deployment_ok;
 
 	# Save deployment log
-	my $manifest_store = $self->top->config->get('manifest_store','hybrid');
+	my $manifest_store = $self->top->config->get('manifest_store','exodus');
 	mkfile_or_fail(
 		$self->deployment_cache_path_lookup('deploy_log'),
 		decode_utf8($state->{results}[0]//'No output received')
