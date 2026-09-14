@@ -379,14 +379,23 @@ sub reachable_on_r {
 # A record set is either one record at the path itself, which is what the
 # harness's own writers lay down, or a path whose children are the entries,
 # one per deploy and named for when it happened, which is what the deploy
-# writes.  record_at reads the first shape and has no notion of the second,
-# so where it answers nothing the children are listed through safe and the
-# newest of them by name is the entry.  The path's own record is preferred,
-# because an environment's record has children of its own that are not
-# entries of its set, such as its hold and its proposal.
+# writes.  One export answers both questions, because safe hands back the
+# whole subtree under the path in a single call, so the path's own record and
+# the children below it are read together rather than exported twice.  The
+# path's own record is preferred, because an environment's record has children
+# of its own that are not entries of its set, such as its hold and its
+# proposal.
 sub newest_record {
 	my ($self, $path) = @_;
-	my $flat = $self->record_at($path) // $self->_newest_entry($path);
+	my $exported = $self->_exported($path) or return undef;
+
+	my $key  = _export_key($path);
+	my $flat = $exported->{$key};
+	unless ($flat) {
+		my ($newest) = reverse sort
+			grep {m{^\Q$key\E/[^/]+$}} keys %$exported;
+		$flat = defined $newest ? $exported->{$newest} : undef;
+	}
 	return undef unless $flat;
 
 	my %nested;
@@ -401,26 +410,36 @@ sub newest_record {
 }
 
 # }}}
-# _newest_entry - the newest child of a record set, flat, or undef {{{
+# _exported - the whole subtree under a vault path, decoded, or undef {{{
 #
 # safe export answers the whole subtree under the path it was given, keyed by
-# each entry's own path without the leading slash, so the set's entries are
-# the keys one segment below the path and the newest is the last of them in
-# name order.
-sub _newest_entry {
+# each entry's own path without the leading slash, so one call answers both
+# what sits at the path and what sits below it.
+#
+# The read runs on the parent's own path, which the recording wrapper is
+# deliberately kept off, so a row reading a record to assert on it never
+# counts as one of the reads the run under test made.
+sub _exported {
 	my ($self, $path) = @_;
 	$self->fixture_vault;
 	my ($out, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
 			stderr => 0},
 		_real_safe(), 'export', $path);
 	return undef if $rc || !$out;
-	my $exported = eval {JSON::PP->new->decode($out)} or return undef;
+	return eval {JSON::PP->new->decode($out)} || undef;
+}
 
+# }}}
+# _export_key - the key safe writes a path under in its export {{{
+#
+# safe drops the leading slash and keeps no trailing one, and a caller may
+# write either, so both are taken off here rather than at each reader.
+sub _export_key {
+	my ($path) = @_;
 	(my $key = $path) =~ s{/{2,}}{/}g;
 	$key =~ s{^/}{};
 	$key =~ s{/$}{};
-	my ($newest) = reverse sort grep {m{^\Q$key\E/[^/]+$}} keys %$exported;
-	return defined $newest ? $exported->{$newest} : undef;
+	return $key;
 }
 
 # }}}
@@ -2056,17 +2075,8 @@ sub restore_vault {
 # children answered.
 sub record_at {
 	my ($self, $path) = @_;
-	$self->fixture_vault;
-	my ($out, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
-			stderr => 0, passfail => 0},
-		_real_safe(), 'export', $path);
-	return undef if $rc || !$out;
-	my $exported = eval {JSON::PP->new->decode($out)} or return undef;
-
-	(my $key = $path) =~ s{/{2,}}{/}g;
-	$key =~ s{^/}{};
-	$key =~ s{/$}{};
-	return $exported->{$key};
+	my $exported = $self->_exported($path) or return undef;
+	return $exported->{_export_key($path)};
 }
 
 # }}}
