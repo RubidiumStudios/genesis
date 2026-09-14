@@ -1,4 +1,8 @@
 #!/usr/bin/env perl
+# Proves T6: the baseline propagate tests, read through the two assertions.
+# Each of the three shapes passes the structural assertions the file already
+# makes and fails the invariant assertion, which is the point.  Their
+# closures land at M5 and M10.
 use strict;
 use warnings;
 use utf8;
