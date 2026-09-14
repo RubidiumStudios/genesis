@@ -289,7 +289,6 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	return unless $top;                 # if Top load itself failed
 	return unless $top->has_legacy_ci_yml;
 
-	require Genesis;
 	Genesis::bail({exitcode => CONFIG},
 		"This repository still has a legacy CI configuration at #C{ci.yml}.\n".
 		"Pipeline commands are unavailable until it is migrated to the v3\n".
@@ -655,7 +654,7 @@ sub command_usage { # {{{
 	my $called = $CALLED;
 	my $command = $GENESIS_COMMANDS{$called};
 
-	my $hr = "#${\($rc ? 'K' : 'K')}\{" . ("=" x terminal_width) ."}";
+	my $hr = "#K{" . ("=" x terminal_width) ."}";
 	my $bc = $Genesis::BUILD =~ /\+\)/ ? 'R' : 'G';
 	my $ver = "#gi{genesis v$Genesis::VERSION}#${bc}i{$Genesis::BUILD}\n";
 
