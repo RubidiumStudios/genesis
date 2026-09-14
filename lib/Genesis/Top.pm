@@ -2256,10 +2256,19 @@ sub _source_control {
 	# this call and the two accessors below it meet the memo and not the
 	# validation that is still on the stack above them.
 	my $config = $self->config;
+
+	# Through the accessors, because each of those two keys has one reader
+	# and a second read here would make that untrue.
 	my %sc = (
-		control_branch => $config->get('pipeline.source_control.control_branch', DEFAULT_CONTROL_BRANCH),
-		pr_prefix      => $config->get('pipeline.source_control.pr_prefix', DEFAULT_PR_PREFIX),
+		control_branch => $self->control_branch,
+		pr_prefix      => $self->pr_prefix,
 	);
+
+	bail({exitcode => CONFIG},
+		"#C{pipeline.source_control.control_branch} must not be empty.\n".
+		"The control branch is the branch every pipeline command reads the ".
+		"repository from, so there is nothing to name without it."
+	) unless defined $sc{control_branch} && length $sc{control_branch};
 
 	bail({exitcode => CONFIG},
 		"#C{pipeline.source_control.pr_prefix} must not be empty.\n".
