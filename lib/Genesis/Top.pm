@@ -2128,7 +2128,8 @@ sub _provider_options_schema {
 	unless (eval {require $info->{file}; 1}) {  ## no critic
 		# Copied first, because bail's own readers run evals that clear it.
 		my $err = $@;
-		bail("Failed to load CI provider '%s': %s", $type, $err);
+		bail({exitcode => CONFIG},
+			"Failed to load CI provider '%s': %s", $type, $err);
 	}
 
 	my $fragment = $info->{class}->provider_options_schema;
@@ -2543,7 +2544,8 @@ sub _validate_capability_gates {
 	unless (eval {require $info->{file}; 1}) {  ## no critic
 		# Copied first, because bail's own readers run evals that clear it.
 		my $err = $@;
-		bail("Failed to load CI provider '%s': %s", $type, $err);
+		bail({exitcode => CONFIG},
+			"Failed to load CI provider '%s': %s", $type, $err);
 	}
 
 	my $caps  = Genesis::CI::Compiler::PipelineProvider
