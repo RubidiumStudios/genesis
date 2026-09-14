@@ -1889,6 +1889,7 @@ sub _validate_pipeline_config {
 
 	return 1 unless $self->config->get('pipeline.enabled');
 	$self->_source_control;
+	$self->_validate_provider_config;
 
 	# Every environment's genesis.pipeline block, read merged under D79.
 	# A file whose genesis key is not a hash at all carries no block to
@@ -1902,6 +1903,44 @@ sub _validate_pipeline_config {
 	}
 
 	return 1;
+}
+
+# }}}
+# _validate_provider_config - the provider's own programmatic check {{{
+#
+# The second half of D86's contract, and the narrow one.  It runs after
+# Genesis::Config::validate, so every key it reads has been typed and
+# defaulted, it collects error strings rather than bailing per rule, and
+# it makes no network call, because a load that dialled a provider would
+# make every command wait on that provider being up.
+sub _validate_provider_config {
+	my ($self) = @_;
+
+	require Genesis::CI::Provider;
+	my $config = $self->config;
+	my $type   = $config->get('pipeline.provider.type', 'manual') // 'manual';
+	my $class  = Genesis::CI::Provider->provider_class($type);
+	return 1 unless $class->can('validate_config');
+
+	my %opts = %{$config->get('pipeline.provider') // {}};
+	delete $opts{type};
+
+	# Under D102 the repository the pipeline acts on lives in the
+	# source-control block rather than the provider block, so a provider
+	# whose own rules still speak of the repository is handed the resolved
+	# value instead of being asked for a key the schema does not declare.
+	# The provider's own keys come last, because an explicit setting is
+	# never overridden by a derivation.
+	my $sc = $self->_source_control;
+	my @errors = $class->new(
+		type => $type, repo => $sc->{repository}, %opts
+	)->validate_config;
+	return 1 unless @errors;
+
+	bail({exitcode => CONFIG},
+		"Invalid configuration for the #C{%s} provider:\n%s",
+		$type, join("\n", map {"  - $_"} @errors)
+	);
 }
 
 # }}}
