@@ -23,11 +23,11 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 
-# Two rows in a row can ask for the same configuration, and the harness's
-# commit needs a delta, so each load carries its own count beside the file
-# under test.
-my $loads = 0;
-
+# What a row here varies is the store, the repository's own floor, and
+# whether there is a pipeline at all, so this composes those three into the
+# configuration text and hands it to the harness loader, which builds the
+# repository round it.  It builds no state itself.
+#
 # Every row here leaves the provider at manual, so the shuttle, the vault,
 # and the locker are not required beside it.
 #
@@ -35,42 +35,35 @@ my $loads = 0;
 # a bare repository at a filesystem path, whose URL carries no GitHub
 # owner/repo pair, and the derivation's own refusal belongs to the
 # source-control rows rather than to these.
-sub load_with {
+sub load_store {
 	my ($store, %opts) = @_;
-	my @lines = ('---', 'deployment_type: bosh', 'version: "3"',
-		'creator_version: 3.2.0');
+	my @lines;
 	push @lines, "minimum_version: $opts{minimum_version}"
 		if $opts{minimum_version};
 	push @lines, "manifest_store: $store" if $store;
 	push @lines, 'pipeline:', '  enabled: true',
 		'  source_control:', '    repository: genesis/bosh-deployments'
 		unless $opts{no_pipeline};
-	commit_on_control($h, files => {
-		'.genesis/config' => join("\n", @lines, ''),
-		'.load-count'     => sprintf("%d\n", ++$loads),
-	});
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
+	return load_with($h, join("\n", @lines));
 }
 
 subtest 'the store must be exodus under a pipeline' => sub {
 	plan tests => 4;
 
 	for my $store (qw/repository hybrid/) {
-		throws_ok {load_with($store)}
+		throws_ok {load_store($store)}
 			qr/manifest_store:\s+$store.*cannot\s+be\s+used\s+under\s+a\s+pipeline/s,
 			"$store is refused naming the value";
 	}
-	lives_ok {load_with('exodus')} 'exodus passes';
-	lives_ok {load_with('repository', no_pipeline => 1)}
+	lives_ok {load_store('exodus')} 'exodus passes';
+	lives_ok {load_store('repository', no_pipeline => 1)}
 		'and a repository with no pipeline is left alone';
 };
 
 subtest 'a fresh repository is initialised with exodus' => sub {
 	plan tests => 1;
 
-	my $top = load_with(undef);
+	my $top = load_store(undef);
 	is $top->config->get('manifest_store'), 'exodus',
 		'the 3.2.0 default is exodus';
 };
@@ -85,10 +78,10 @@ subtest 'an old kit floor cannot reach the repository store' => sub {
 	my $path = write_env_file($h, 'legacy',
 		genesis => {min_version => '3.0.0'}, commit => 0);
 
-	throws_ok {load_with('exodus')}
+	throws_ok {load_store('exodus')}
 		qr/environment legacy uses\s+a\s+kit\s+whose\s+Genesis\s+floor\s+is\s+below\s+3\.1\.0/i,
 		'the floor case is refused by name';
-	throws_ok {load_with('exodus')}
+	throws_ok {load_store('exodus')}
 		qr/Raise\s+the\s+kit's\s+floor\s+to\s+3\.1\.0/,
 		'and the refusal carries the remedy';
 
@@ -96,10 +89,10 @@ subtest 'an old kit floor cannot reach the repository store' => sub {
 	# the repository's own minimum and the environment's, so a repository
 	# that declares nothing better is refused and one that already declares
 	# 3.1.0 is not refused over a line the run time would never honour.
-	throws_ok {load_with('exodus', minimum_version => '3.0.0')}
+	throws_ok {load_store('exodus', minimum_version => '3.0.0')}
 		qr/environment legacy uses\s+a\s+kit\s+whose\s+Genesis\s+floor\s+is\s+below\s+3\.1\.0/i,
 		'a repository floor below 3.1.0 leaves the refusal standing';
-	lives_ok {load_with('exodus', minimum_version => '3.1.0')}
+	lives_ok {load_store('exodus', minimum_version => '3.1.0')}
 		'and a repository floor of 3.1.0 lifts the environment that declares less';
 
 	unlink $h->a . "/$path";
@@ -111,10 +104,10 @@ subtest 'the schema supplies the store where nobody named one' => sub {
 	# The gate reads the key with no fallback of its own, so the schema's
 	# default is the only thing standing between an unwritten key and a
 	# refusal, and this row is what says so.
-	my $top = load_with(undef);
+	my $top = load_store(undef);
 	is $top->config->get('manifest_store'), 'exodus',
 		'an unnamed store resolves to exodus out of the schema alone';
-	lives_ok {load_with(undef)} 'and the gate is satisfied by it';
+	lives_ok {load_store(undef)} 'and the gate is satisfied by it';
 };
 
 done_testing;

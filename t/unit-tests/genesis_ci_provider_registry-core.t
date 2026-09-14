@@ -26,12 +26,6 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 
-sub config_yaml {
-	my ($body) = @_;
-	return join("\n", '---', 'deployment_type: bosh', 'version: "3"',
-		'creator_version: 3.2.0', $body, '');
-}
-
 # The harness clones copy A from a bare repository at a filesystem path, so
 # the origin URL carries no GitHub owner/repo pair for the source-control
 # block to derive one from, and a row that enables a pipeline names the
@@ -42,14 +36,6 @@ sub enabled_pipeline {
 		'  source_control:', '    repository: genesis/bosh-deployments');
 }
 
-sub load_with {
-	my ($body) = @_;
-	commit_on_control($h, files => {'.genesis/config' => config_yaml($body)});
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
-}
-
 subtest 'the two spellings cannot drift' => sub {
 	plan tests => 4;
 
@@ -58,13 +44,13 @@ subtest 'the two spellings cannot drift' => sub {
 		'the registry holds the three types';
 
 	# The schema's enum is the registry's list, not a literal beside it.
-	my $top    = load_with(enabled_pipeline());
+	my $top    = load_with($h, enabled_pipeline());
 	my $schema = $top->_repo_config_schema;
 	is_deeply $schema->{pipeline}{schema}{provider}{schema}{type}{values},
 		[@known],
 		'the enum is the registry list';
 
-	throws_ok {load_with("pipeline:\n  enabled: true\n  provider:\n    type: gha")}
+	throws_ok {load_with($h, "pipeline:\n  enabled: true\n  provider:\n    type: gha")}
 		qr/pipeline\.provider\.type: unknown value/,
 		'gha is refused, because no registry entry spells it that way';
 
@@ -73,7 +59,7 @@ subtest 'the two spellings cannot drift' => sub {
 	# source-control block requires of it, and the three blocks the work
 	# cannot be done without either.
 	lives_ok {
-		load_with(join("\n",
+		load_with($h, join("\n",
 			enabled_pipeline('  provider:', '    type: github-actions'),
 			'    auth:', '      vault: secret/ci/git',
 			'    identity:', '      name: Genesis', '      email: ci@example.com',
@@ -112,13 +98,13 @@ subtest 'one resolver answers for every caller' => sub {
 subtest 'the provider type defaults to manual' => sub {
 	plan tests => 3;
 
-	my $top = load_with(enabled_pipeline());
+	my $top = load_with($h, enabled_pipeline());
 	is $top->config->get('pipeline.provider.type'), 'manual',
 		'an absent provider block resolves to a manual pipeline';
 	ok $top->config->get('pipeline.enabled'),
 		'the gate stays true with no provider key';
 
-	my $off = load_with("pipeline:\n  enabled: false");
+	my $off = load_with($h, "pipeline:\n  enabled: false");
 	ok !$off->config->get('pipeline.enabled'),
 		'a disabled section is still a disabled section';
 };

@@ -31,16 +31,6 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 
-sub load_with {
-	my ($body) = @_;
-	commit_on_control($h, files => {'.genesis/config' => join("\n",
-		'---', 'deployment_type: bosh', 'version: "3"',
-		'creator_version: 3.2.0', $body, '')});
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
-}
-
 # The harness clones copy A from a bare repository at a filesystem path, so
 # the source-control block names the repository rather than deriving it,
 # and an automated provider is the case where the clone credential and the
@@ -76,7 +66,7 @@ sub concourse {
 subtest "the configured provider's fragment is merged at load" => sub {
 	plan tests => 5;
 
-	my $top      = load_with(concourse());
+	my $top      = load_with($h, concourse());
 	my $provider = $top->_repo_config_schema->{pipeline}{schema}{provider}{schema};
 	my $fragment = Genesis::CI::Concourse->provider_options_schema;
 
@@ -101,10 +91,10 @@ subtest "the configured provider's fragment is merged at load" => sub {
 subtest 'a key no fragment declares is refused by name' => sub {
 	plan tests => 2;
 
-	throws_ok {load_with(concourse('nonesuch: 1'))}
+	throws_ok {load_with($h, concourse('nonesuch: 1'))}
 		qr/pipeline\.provider\.nonesuch: unknown configuration key/,
 		'an undeclared provider key is refused by name';
-	throws_ok {load_with(concourse('team: [a, b]'))}
+	throws_ok {load_with($h, concourse('team: [a, b]'))}
 		qr/pipeline\.provider\.team: expected a string/,
 		"and a declared key's type is enforced";
 };
@@ -127,7 +117,7 @@ MUTE
 		cli_file  => 'Genesis/CI/Provider/Manual.pm',
 	});
 
-	throws_ok {load_with("pipeline:\n  enabled: true\n  provider:\n    type: mute")}
+	throws_ok {load_with($h, "pipeline:\n  enabled: true\n  provider:\n    type: mute")}
 		qr/must implement\s+provider_options_schema/,
 		'the omission is a bug at load and not a discovery at run time';
 };
@@ -136,7 +126,7 @@ subtest 'the manual provider admits no provider key' => sub {
 	plan tests => 5;
 
 	for my $key (qw/target url team insecure public/) {
-		throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+		throws_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',
 			'  provider:', '    type: manual', "    $key: x"))}
 			qr/pipeline\.provider\.$key: unknown configuration key/,
 			"$key is refused beside a manual provider";
@@ -179,10 +169,10 @@ TERSE
 		cli_file  => 'Genesis/CI/Provider/Manual.pm',
 	});
 
-	throws_ok {load_with(automated_config('terse'))}
+	throws_ok {load_with($h, automated_config('terse'))}
 		qr/pipeline\.provider:\s+missing\s+required\s+key\s+token/s,
 		"the fragment's required flag is enforced, and names the key";
-	lives_ok {load_with(automated_config('terse', 'token: abc'))}
+	lives_ok {load_with($h, automated_config('terse', 'token: abc'))}
 		'and the same configuration loads once the key is written';
 };
 
@@ -232,17 +222,17 @@ PAIRC
 		cli_file  => 'Genesis/CI/Provider/Pair.pm',
 	});
 
-	throws_ok {load_with(automated_config('pair'))}
+	throws_ok {load_with($h, automated_config('pair'))}
 		qr/'target' or 'url' is required for the Pair provider/,
 		'the programmatic rule is raised at load';
-	lives_ok {load_with(automated_config('pair', 'url: https://ci'))}
+	lives_ok {load_with($h, automated_config('pair', 'url: https://ci'))}
 		'and one of the pair satisfies it';
 
 	# It runs second, so the generic refusal wins and the check is never
 	# reached with an undeclared key in hand.
 	{
 		local @Genesis::CI::Provider::Pair::CALLS = ();
-		throws_ok {load_with(automated_config('pair', 'nonesuch: 1'))}
+		throws_ok {load_with($h, automated_config('pair', 'nonesuch: 1'))}
 			qr/pipeline\.provider\.nonesuch: unknown configuration key/,
 			'the generic validation refuses first';
 		is scalar(@Genesis::CI::Provider::Pair::CALLS), 0,
@@ -255,7 +245,7 @@ PAIRC
 subtest 'a provider that will not load is refused without its stack' => sub {
 	plan tests => 4;
 
-	my $top = load_with(concourse());
+	my $top = load_with($h, concourse());
 
 	# The file is loaded by now, so marking its entry as one that failed is
 	# what makes the next require of it fail the way a broken provider would.
@@ -314,7 +304,7 @@ QUIET
 	});
 
 	my $refusal = '';
-	eval {load_with(automated_config('boom')); 1} or $refusal = $@;
+	eval {load_with($h, automated_config('boom')); 1} or $refusal = $@;
 	like $refusal, qr/Invalid configuration for the boom provider/,
 		'a provider that dies is reported as the refusal it is';
 	like $refusal, qr/the provider fell over/,
@@ -322,7 +312,7 @@ QUIET
 	unlike $refusal, qr/Provider::Boom::validate_config/,
 		'without the frames Carp::Always folded in behind it';
 
-	lives_ok {load_with(automated_config('quiet'))}
+	lives_ok {load_with($h, automated_config('quiet'))}
 		'a provider that answers with a bare undef reports no error at all';
 };
 

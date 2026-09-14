@@ -27,21 +27,10 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 
-# Assert helpers live beside the test that uses them, so these two are
-# here rather than in the harness: they build no state, they only drive a
-# load and report what it said.
-sub config_yaml {
-	my ($body) = @_;
-	return join("\n",
-		'---',
-		'deployment_type: bosh',
-		'version: "3"',
-		'creator_version: 3.2.0',
-		$body,
-		''
-	);
-}
-
+# A row's own configuration text lives beside the row rather than in the
+# harness, because it builds no state: it says what the load is handed and
+# the harness loader builds the repository round it.
+#
 # The harness clones copy A from a bare repository at a filesystem path, so
 # the origin URL carries no GitHub owner/repo pair for the source-control
 # block to derive one from, and a row that enables a pipeline names the
@@ -51,24 +40,16 @@ sub enabled_pipeline {
 		'  source_control:', '    repository: genesis/bosh-deployments');
 }
 
-sub load_with {
-	my ($body) = @_;
-	commit_on_control($h, files => {'.genesis/config' => config_yaml($body)});
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
-}
-
 subtest 'the pipeline section loads and the ci section does not' => sub {
 	plan tests => 3;
 
 	my $top;
-	lives_ok {$top = load_with(enabled_pipeline())}
+	lives_ok {$top = load_with($h, enabled_pipeline())}
 		'pipeline.enabled validates';
 	is $top->config->get('pipeline.enabled'), 1,
 		'the gate reads back through the new name';
 
-	throws_ok {load_with("ci:\n  enabled: true")}
+	throws_ok {load_with($h, "ci:\n  enabled: true")}
 		qr/\bci\b.*unknown configuration key/s,
 		'the ci section is refused by name';
 };
@@ -86,11 +67,11 @@ subtest 'the code namespace is unchanged' => sub {
 subtest 'the repository-root key is gone' => sub {
 	plan tests => 2;
 
-	throws_ok {load_with("pipeline:\n  enabled: true\n  repo:\n    root: .")}
+	throws_ok {load_with($h, "pipeline:\n  enabled: true\n  repo:\n    root: .")}
 		qr/pipeline\.repo: unknown configuration key/,
 		'pipeline.repo.root is refused by name';
 
-	my $top = load_with(enabled_pipeline());
+	my $top = load_with($h, enabled_pipeline());
 	Genesis::Commands::Repo::_create_pipeline_scaffold($top);
 	ok !$top->config->has('pipeline.repo.root'),
 		'the scaffold writes no repository-root key';
@@ -108,7 +89,7 @@ subtest 'there are no compatibility aliases' => sub {
 		'ci.name'               => "ci:\n  name: bosh",
 	);
 	for my $key (sort keys %old) {
-		throws_ok {load_with($old{$key})}
+		throws_ok {load_with($h, $old{$key})}
 			qr/unknown configuration key/,
 			"$key is refused rather than translated";
 	}
