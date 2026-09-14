@@ -2897,13 +2897,20 @@ sub _validate_env_pipeline_block {
 # The frames go first, because Carp writes a tab in front of every one of
 # them and that is what tells a frame from a sentence.  What is left then
 # ends in the location the message was raised at, if it has one at all,
-# and only a location at the end is taken.  The fold comes last, so that
-# neither pattern has to allow for a wrap that the terminal put in.
+# and only a location at the end is taken.
+#
+# Both patterns allow for the wrap.  A caught text that has been through
+# Genesis::Term::wrap carries the wrap's indent in front of every line it
+# folded, Carp's tabbed frames included, and a location near the end of a
+# line can be folded across two of them.  So the frame pattern takes the
+# spaces in front of the tab and the location pattern takes any whitespace
+# between its words.  The fold is last, because a pattern that ran after
+# it would have no newline left to anchor on.
 sub _without_backtrace {
 	my ($text) = @_;
 	return '' unless defined $text;
-	$text =~ s/\n\t.*\z//s;
-	$text =~ s/ at \S+ line \d+\.?\s*\z//s;
+	$text =~ s/\n[ ]*\t.*\z//s;
+	$text =~ s/\s+at\s+\S+\s+line\s+\d+\.?\s*\z//s;
 	$text =~ s/\s+/ /g;
 	$text =~ s/^\s+|\s+$//g;
 	return $text;
