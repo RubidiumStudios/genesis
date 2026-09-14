@@ -1505,7 +1505,13 @@ sub propagation_files {
 	my ($self, %opts) = @_;
 	my $kinds = $self->_propagation_file_kinds;
 
-	return sort keys %$kinds unless exists $opts{triggering};
+	# Guarded on defined rather than on exists, because a caller that means
+	# the whole set often reaches here as triggering => $want with $want
+	# undefined, and the two spellings are indistinguishable at the call
+	# site.  Under exists that call answers the non-triggering half and says
+	# nothing, which is a deployment branch carrying neither the environment
+	# file nor the kit.
+	return sort keys %$kinds unless defined $opts{triggering};
 
 	my $want = $opts{triggering} ? 1 : 0;
 	return sort grep {($kinds->{$_} ? 1 : 0) == $want} keys %$kinds;
