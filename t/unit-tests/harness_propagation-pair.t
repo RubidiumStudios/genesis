@@ -98,18 +98,20 @@ subtest 'the base holds the repositories and one scratch directory' => sub {
 	ok(-d "$h->{base}/tmp", 'and the scratch directory is where they went');
 };
 
-subtest 'the git accessor takes the options Service::Git takes' => sub {
-	plan tests => 3;
+subtest 'one handle per copy, and the options say what it becomes' => sub {
+	plan tests => 4;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	my $plain = $h->git('a');
-	ok(!$plain->{_track_branch}, 'a plain handle restores no branch');
+	ok(!$plain->{_track_branch}, 'a handle asked for plainly restores no branch');
 
 	my $tracking = $h->git('a', track_branch => 1);
+	is($tracking, $plain,
+		'asking for a tracking one answers the handle already there');
 	ok($tracking->{_track_branch},
-		'and the accessor can ask for one that does');
-	is($h->git('a', track_branch => 1), $tracking,
-		'the same options answer the same handle');
+		'which the option upgraded in place rather than building a second');
+	is($h->git('a'), $tracking,
+		'and asking plainly again answers that same upgraded handle');
 };
 
 done_testing;
