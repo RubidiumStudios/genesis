@@ -187,6 +187,40 @@ subtest 'the uri row says whether git was asked' => sub {
 		'and the row carries what git said';
 };
 
+subtest 'the remote is derived down a ladder' => sub {
+	plan tests => 4;
+
+	# Copy A is a clone, so it answers on the first rung of the ladder and
+	# every row above this one stops there.  These rows take the rungs away
+	# one at a time and put them back, so the file is left as it was found.
+	my ($origin) = run({dir => $h->a}, 'git', 'remote', 'get-url', 'origin');
+	chomp $origin;
+	run({dir => $h->a}, 'git', 'remote', 'add', 'upstream', $origin);
+	run({dir => $h->a}, 'git', 'config', 'branch.control.remote', 'upstream');
+
+	my $tracked = load_control("pipeline:\n  enabled: true");
+	is $tracked->source_control_remote, 'upstream',
+		"the control branch's own upstream is the first rung";
+
+	run({dir => $h->a}, 'git', 'config', '--unset', 'branch.control.remote');
+	my $fallen = load_control("pipeline:\n  enabled: true");
+	is $fallen->source_control_remote, 'origin',
+		'a branch with no upstream falls back to the remote named origin';
+
+	# git drops a branch's upstream with the remote it names, so origin goes
+	# last and there is nothing left below it.
+	run({dir => $h->a}, 'git', 'remote', 'remove', 'upstream');
+	run({dir => $h->a}, 'git', 'remote', 'remove', 'origin');
+	throws_ok {load_control("pipeline:\n  enabled: true")}
+		qr/pipeline\.source_control\.remote.*could\s+not\s+be\s+derived/s,
+		'and with neither rung left the refusal names the key';
+
+	run({dir => $h->a}, 'git', 'remote', 'add', 'origin', $origin);
+	run({dir => $h->a}, 'git', 'config', 'branch.control.remote', 'origin');
+	lives_ok {load_control("pipeline:\n  enabled: true")}
+		'the checkout is back on its first rung';
+};
+
 subtest 'a required flag can be a predicate' => sub {
 	plan tests => 3;
 
