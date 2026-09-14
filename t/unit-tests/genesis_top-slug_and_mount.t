@@ -81,10 +81,10 @@ subtest 'every environment name is checked too' => sub {
 };
 
 subtest 'one exodus mount serves the whole pipeline' => sub {
-	# Four explicit rows and one for the run's own restoration assertion,
+	# Five explicit rows and one for the run's own restoration assertion,
 	# because a command that refuses at configuration load has touched
 	# nothing and run_genesis says so for itself.
-	plan tests => 5;
+	plan tests => 6;
 
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => '/secret/exodus/'},
@@ -102,6 +102,10 @@ subtest 'one exodus mount serves the whole pipeline' => sub {
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
 	is $exit, Genesis::Exit::CONFIG, 'and the refusal exits CONFIG';
+	# The exit code alone is satisfied by any other CONFIG refusal on the
+	# path, so the row reads what the run said as well.
+	like $err, qr{must\s+resolve\s+one\s+genesis\.exodus_mount}s,
+		'and the run refuses over the mounts rather than anything else';
 
 	write_env_file($h, 'prod',
 		genesis => {exodus_mount => '/secret/exodus/'},
