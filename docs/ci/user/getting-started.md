@@ -124,26 +124,23 @@ genesis repipe --dry-run
 The `--dry-run` flag prints the full Concourse pipeline YAML to stdout. This
 is useful for review or for piping into other tools.
 
-## Using the Compiler Pipeline
+## How the Pipeline Is Compiled
 
-The legacy code path generates Concourse YAML directly through string
-concatenation and spruce operator injection. A newer compiler pipeline
-exists that parses your configuration through a multi-stage compiler
-(Parser, Validator, ASTBuilder, PipelineDescriptor, Provider). To use it,
-pass the `--platform` flag:
+`repipe` runs your configuration through a multi-stage compiler, which
+is made up of a Parser, a Validator, an ASTBuilder, a
+PipelineDescriptor, and a Provider. The Provider is the stage that turns
+the compiled pipeline into something a CI system understands, and
+Genesis ships one for Concourse and one for GitHub Actions.
 
-```bash
-genesis repipe --platform concourse
-```
+Which Provider runs is decided by the repository and not by the command
+line. Genesis reads `pipeline.provider.type` from the `pipeline:`
+section of `.genesis/config`, so every operator working in the same
+repository compiles for the same CI system. There is no flag that
+overrides it, and passing one is a usage error.
 
-The compiler pipeline supports two platforms: `concourse` and
-`github-actions`. When `--platform` is specified, Genesis reads the
-`pipeline:` section of `.genesis/config` and falls back to `ci.yml` if
-the repository has no such section.
-
-Without `--platform`, Genesis always uses the legacy code path, which
-only generates Concourse pipelines. This ensures backward compatibility
-with existing deployments.
+Where the repository has no `pipeline:` section, the compiler reads the
+`ci.yml` file named by `--config` instead, which is how an older
+repository keeps working until it is migrated.
 
 ## Visualizing the Pipeline
 
@@ -159,8 +156,7 @@ Or describe it in human-readable text:
 genesis describe
 ```
 
-Both commands accept the same `--platform` and `--config` options as
-`repipe`.
+Both commands accept the same `--config` option as `repipe`.
 
 ## Next Steps
 
