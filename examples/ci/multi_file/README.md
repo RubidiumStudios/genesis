@@ -8,17 +8,20 @@ This directory holds one example file per block of the `pipeline:` section of `.
 
 ```
 pipeline:
-├── pipeline:             # ✅ REQUIRED - Main pipeline definition
 ├── targets:              # ✅ REQUIRED - Deployment targets (BOSH directors)
 └── integrations:         # ✅ REQUIRED - Vault, Git, notifications
 ```
 
-**Minimum viable configuration requires only these 3 blocks.**
+**Minimum viable configuration requires only these 2 blocks.**
 
 ### 📋 OPTIONAL Blocks
 
 ```
 pipeline:
+├── provider:                     # 📋 OPTIONAL - Provider type and its options
+├── pipeline:                     # 📋 OPTIONAL - Main pipeline definition
+│                                 #              (absent means the topology comes
+│                                 #               from your environment files)
 ├── scripts:                      # 📋 OPTIONAL - Explicit script metadata
 │                                 #              (scripts auto-discovered if not present)
 └── provider_config:              # 📋 OPTIONAL - Provider-specific overrides
@@ -32,9 +35,10 @@ Shell scripts themselves live under `scripts/` at the root of the deployment rep
 
 ```
 pipeline:                           # The pipeline section of .genesis/config
-├── pipeline:                       # ✅ REQUIRED
 ├── targets:                        # ✅ REQUIRED
 ├── integrations:                   # ✅ REQUIRED
+├── provider:                       # 📋 OPTIONAL - Provider type and its options
+├── pipeline:                       # 📋 OPTIONAL - Main pipeline definition
 ├── scripts:                        # 📋 OPTIONAL - Explicit script definitions
 └── provider_config:                # 📋 OPTIONAL
     ├── concourse:                  # 📋 OPTIONAL - Concourse overrides
@@ -50,16 +54,20 @@ scripts/                            # 📋 OPTIONAL - at the repository root
     └── update-kit.sh               # 📋 OPTIONAL - Kit updater
 ```
 
-## Required Block Details
+## Block Details
 
-### 1. ✅ pipeline - Main Pipeline Definition
+### 1. 📋 pipeline - Main Pipeline Definition
 
-**Required sections:**
-- ✅ `metadata.name` - Pipeline name
-- ✅ `branches.live` - Main branch to monitor
-- ✅ `workflows` - At least one workflow
+Leave this block out and the pipeline topology is read from the
+`genesis.pipeline.*` keys in your environment files instead. Write it when
+you want to name the pipeline and lay its workflows out by hand.
+
+**Checked when present:**
+- ✅ `metadata.name` - Pipeline name, required once `metadata` is present
+- ✅ `branches.live` - Main branch to monitor, required once `branches` is present
 
 **Optional sections:**
+- 📋 `workflows` - Absent means the topology comes from the environment files
 - 📋 `metadata.version`, `metadata.description`
 - 📋 `branches.target_prefix`
 - 📋 `configuration.*` - All configuration is optional
@@ -77,7 +85,7 @@ workflows:
       - name: sandbox
 ```
 
-See [pipeline.yml](pipeline.yml) for full example with all optional features.
+See [pipeline.yml](pipeline.yml) for this block's full contents, with all optional features.
 
 ### 2. ✅ targets - Deployment Targets
 
@@ -107,7 +115,7 @@ targets:
       ca_cert: ((bosh-ca-cert))
 ```
 
-See [targets.yml](targets.yml) for multi-region, multi-tier example.
+See [targets.yml](targets.yml) for this block's multi-region, multi-tier contents.
 
 ### 3. ✅ integrations - External Services
 
@@ -136,7 +144,7 @@ notifications:
     channel: "#deployments"
 ```
 
-See [integrations.yml](integrations.yml) for full example.
+See [integrations.yml](integrations.yml) for this block's full contents.
 
 ## Optional Features
 
@@ -144,8 +152,8 @@ See [integrations.yml](integrations.yml) for full example.
 
 Scripts are discovered automatically using **three methods in priority order:**
 
-#### Method 1: Explicit Manifest (Highest Priority)
-The `scripts:` block, shown in [scripts/manifest.yml](scripts/manifest.yml) - Full control over script metadata
+#### Method 1: The `scripts:` Block (Highest Priority)
+Full control over script metadata. [scripts/manifest.yml](scripts/manifest.yml) shows what the block holds.
 
 #### Method 2: Inline Annotations
 Scripts with `@genesis-script` annotations:
@@ -158,7 +166,7 @@ Scripts with `@genesis-script` annotations:
 ```
 
 #### Method 3: Convention-Based (Fallback)
-Auto-discovery from filename:
+Auto-discovery from filename, under `scripts/` at the repository root:
 - `scripts/deploy.sh` → ID: `deploy`
 - `scripts/test/smoke.sh` → ID: `test/smoke`
 
@@ -210,26 +218,33 @@ notifications:
     channel: "#ci"
 ```
 
-Then compile:
+Then apply it:
 ```bash
-genesis repipe --platform concourse
+genesis pipeline-apply
 ```
 
 ## Usage
 
-### Compile to Concourse Pipeline
+### Compile and Deploy the Pipeline
 
 ```bash
 cd /path/to/deployment-repo
 
-# Compile using the compiler
-genesis repipe --platform concourse
+# Compile and deploy the pipeline
+genesis pipeline-apply
 ```
+
+The provider is not a flag. `genesis pipeline-apply` reads
+`pipeline.provider.type` from `.genesis/config`, so set that key to
+`concourse` or to `github-actions` and the same command compiles for
+whichever one you named.
 
 ### Compile to GitHub Actions Workflow
 
+Set `pipeline.provider.type` to `github-actions` in `.genesis/config`, then run the same command:
+
 ```bash
-genesis repipe --platform github-actions
+genesis pipeline-apply
 ```
 
 ### Generate Pipeline from Legacy Format
@@ -238,7 +253,7 @@ If you have an existing `ci.yml`, you can migrate:
 
 ```bash
 # The compiler handles both formats automatically
-genesis repipe --platform concourse --config ci.yml
+genesis pipeline-apply --config ci.yml
 ```
 
 ## Secret References
@@ -316,29 +331,31 @@ Scheduled kit updates:
 
 The compiler automatically normalizes legacy `ci.yml` to this structure:
 
-| Legacy `ci.yml` | Multi-File Format |
-|-----------------|-------------------|
-| `pipeline.name` | `metadata.name` in `pipeline.yml` |
-| `pipeline.vault` | `vault` section in `integrations.yml` |
-| `pipeline.git` | `source_control` in `integrations.yml` |
-| `pipeline.boshes` | `targets` in `targets.yml` |
-| `pipeline.slack` | `notifications` in `integrations.yml` |
-| `pipeline.layout` | `workflows.deploy.stages` in `pipeline.yml` |
+| Legacy `ci.yml` | The `pipeline:` section |
+|-----------------|-------------------------|
+| `pipeline.name` | `pipeline.metadata.name` |
+| `pipeline.vault` | `integrations.vault` |
+| `pipeline.git` | `integrations.source_control` |
+| `pipeline.boshes` | `targets` |
+| `pipeline.slack` | `integrations.notifications` |
+| `pipeline.layout` | `pipeline.workflows.deploy.stages` |
+
+Operators in a legacy `ci.yml` are evaluated at parse time, because the parser loads that file through `spruce merge`. The `pipeline:` section is not, because Genesis reads `.genesis/config` through `spruce json`, so write credential references in the form your CI provider resolves and expect every other value to arrive exactly as you wrote it.
 
 ## Configuration Checklist
 
 ### ✅ Required (Minimum Viable Pipeline)
-- [ ] `pipeline.yml` with `metadata.name`, `branches.live`, `workflows`
-- [ ] `targets.yml` with at least one BOSH director
-- [ ] `integrations.yml` with `vault`, `source_control`, `notifications`
-- [ ] Secrets in Vault for all `((...))` references
+- [ ] A `pipeline:` section in `.genesis/config`
+- [ ] A `targets` block with at least one BOSH director
+- [ ] An `integrations` block with `vault.url` and `source_control`
+- [ ] Credentials loaded into your CI provider for all `((...))` references
 
 ### 📋 Recommended (Production-Ready)
 - [ ] Multiple environments (sandbox, preprod, prod)
 - [ ] Email notifications in addition to Slack
 - [ ] Auto-triggering for sandbox, manual for production
 - [ ] Locker integration for deployment coordination
-- [ ] Script metadata (manifest or inline annotations)
+- [ ] Script metadata, either the `scripts` block or inline annotations
 
 ### 🎯 Advanced (Enterprise)
 - [ ] Multiple workflows (deploy, test, maintenance)
@@ -350,20 +367,20 @@ The compiler automatically normalizes legacy `ci.yml` to this structure:
 ## Troubleshooting
 
 ### "Missing required 'vault' section"
-→ Add `vault:` with `url` in `integrations.yml`
+→ Add `vault:` with a `url` under the `integrations` block
 
 ### "Pipeline must have at least one workflow"
-→ Add workflow under `workflows:` in `pipeline.yml`
+→ Add a workflow under `pipeline.workflows`, or leave the `pipeline` block out and let the topology come from your environment files
 
 ### "Target 'X' is missing 'connection.url'"
 → BOSH targets need `connection.url`, `connection.auth`, `connection.ca_cert`
 
 ### "No notification stanzas defined"
-→ Add Slack or Email notification in `integrations.yml`
+→ Add a Slack or Email notification under the `integrations` block
 
 ### Script not found
-→ Scripts auto-discover from `scripts/` directory
-→ Use `@genesis-script` annotations or `scripts/manifest.yml`
+→ Scripts auto-discover from the `scripts/` directory at the repository root
+→ Use `@genesis-script` annotations or declare the script in the `scripts` block
 
 ## See Also
 
