@@ -91,5 +91,19 @@ subtest 'propagation_files - still carries the env file and config' => sub {
 		'.genesis/config is propagated');
 };
 
+subtest 'propagation_files - carries the embedded genesis' => sub {
+	# The eighth kind sits beside the other seven, so the two files that
+	# cover the set read as one story.
+	plan tests => 2;
+
+	my $env = make_ops_env('ops-embedded');
+
+	ok((grep { $_ eq '.genesis/bin/genesis' } $env->propagation_files),
+		'the embedded genesis is propagated');
+	ok((grep { $_ eq '.genesis/bin/genesis' }
+		$env->propagation_files(triggering => 1)),
+		'and it triggers, because a genesis version changes rendering');
+};
+
 teardown_vault();
 done_testing;
