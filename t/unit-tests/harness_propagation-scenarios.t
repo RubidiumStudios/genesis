@@ -244,4 +244,19 @@ subtest 'top_for can replace the whole configuration first' => sub {
 		'and the config option writes the whole file over it');
 };
 
+subtest 'the automation blocks answer in both forms' => sub {
+	plan tests => 3;
+
+	my %blocks = automation_blocks();
+	is_deeply([sort keys %blocks], ['locker', 'shuttle', 'vault'],
+		'the hash form names the three blocks the schema requires');
+	is($blocks{shuttle}{backend}, 's3', 'and carries a backend for the shuttle');
+
+	my @lines = automation_block_lines();
+	is_deeply(\@lines, ['  shuttle:', '    backend: s3', '    bucket: pipes',
+		'  vault:', '    url: https://vault.example.com',
+		'  locker:', '    url: https://locker.example.com'],
+		'the line form says the same thing, ready to sit under a pipeline key');
+};
+
 done_testing;
