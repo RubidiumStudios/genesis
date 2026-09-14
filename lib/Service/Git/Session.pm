@@ -112,35 +112,7 @@ sub begin {
 	};
 	$self->{active}   = 1;
 	$self->{switched} = {};
-
-	# RF12: DESTROY is the wrong place for the safety net, because bail
-	# exits outside an eval and Perl runs END before global destruction,
-	# after which the order is undefined.  at_exit runs from END.  The task
-	# that adds abort replaces this restore with the full discard and reset.
-	unless ($self->{net}) {
-		require Genesis::Commands;
-		my $me = $self;
-		Genesis::Commands::at_exit(sub {
-			return unless $me->{active};
-
-			# The hooks run from END with $? already holding the code the
-			# command chose, and the process exits on whatever $? reads
-			# once they are done.  The restore shells out to git, so
-			# without this the net would hand every refusal git's nought
-			# and a caller waiting on a switch would be told it succeeded.
-			# It is saved and put back by hand because the obvious
-			# localisation, local $? = $?, loses the value: assigning a
-			# magic variable to its own freshly localised self does not
-			# preserve it.  An explicit save says what it does at the one
-			# point where getting it wrong is invisible.
-			my $status = $?;
-
-			$me->{active} = 0;
-			eval { $me->_restore; 1 } or print STDERR "\n$@\n";
-			$? = $status;
-		});
-		$self->{net} = 1;
-	}
+	$self->_register_net;
 
 	trace("Service::Git::Session: began on %s", $self->{origin}{branch});
 	return $self;
@@ -276,6 +248,56 @@ sub abort {
 
 ### Internals {{{
 
+# _register_net - the last-resort abort, from an END block {{{
+#
+# RF12 put this here rather than in DESTROY.  bail exits when it is not
+# inside an eval, Perl runs END before global destruction, and the order of
+# destruction after that is undefined, so a net hung on DESTROY fires late
+# or never.  at_exit hooks run from END, which is early enough to still
+# have a working tree to put back.
+#
+# The hook is registered once per session and is a no-op on a session that
+# finished, so an ordinary run pays nothing for it.
+sub _register_net {
+	my ($self) = @_;
+	return $self if $self->{net};
+
+	require Genesis::Commands;
+	my $me = $self;
+	Genesis::Commands::at_exit(sub {
+		return unless $me->{active};
+
+		# The hooks run from END with $? already holding the code the
+		# command chose, and the process exits on whatever $? reads once
+		# they are done.  The abort shells out to git several times, so
+		# without this the net would hand every refusal git's nought and a
+		# caller waiting on a switch would be told it succeeded.  It is
+		# saved and put back by hand because the obvious localisation,
+		# local $? = $?, loses the value: assigning a magic variable to its
+		# own freshly localised self does not preserve it.  An explicit save
+		# says what it does at the one point where getting it wrong is
+		# invisible.
+		my $status = $?;
+
+		# Inside an END block there is nobody left to catch a die, so the
+		# abort is wrapped and whatever it could not do is printed here.
+		eval {
+			$me->abort("the process exited with a branch session still open");
+			1;
+		} or do {
+			my $err = $@ || 'the restore failed';
+			$err =~ s/\s+$//;
+			print STDERR "\n$err\n";
+		};
+
+		$? = $status;
+	});
+
+	$self->{net} = 1;
+	return $self;
+}
+
+# }}}
 # _take_lock - the flock D46 fixes, on genesis-session.lock {{{
 #
 # Per working tree, because git_dir resolves under .git/worktrees/<name>/
