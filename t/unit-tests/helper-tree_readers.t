@@ -130,4 +130,22 @@ subtest 'strip_comment takes the comment and leaves the code' => sub {
 		'and neither is the last-index sigil');
 };
 
+subtest 'standin_vault answers a fixed set and keeps a ledger' => sub {
+	plan tests => 3;
+
+	my @asked;
+	my $vault = standin_vault(\@asked, {dependencies => 'other/bosh'});
+
+	is_deeply($vault->get('/secret/exodus/qa/bosh'),
+		{dependencies => 'other/bosh'},
+		'the set it was built with is the set it answers');
+
+	is_deeply($vault->get('/secret/exodus/lab/bosh'),
+		{dependencies => 'other/bosh'},
+		'and it answers the same set at a second path');
+
+	is_deeply(\@asked, ['/secret/exodus/qa/bosh', '/secret/exodus/lab/bosh'],
+		'while every path it was asked for lands in the ledger, in order');
+};
+
 done_testing;
