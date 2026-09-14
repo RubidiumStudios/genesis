@@ -284,6 +284,7 @@ integration-tests/genesis_commands-pipeline_ci_yml_gate.t     # pipeline command
 integration-tests/genesis_pipeline_config-validation_at_load.t # every command meets the same pipeline refusal at load
 integration-tests/genesis_exit-command_codes.t                # usage exits 2, prerequisites exit 86, no invented codes
 integration-tests/genesis_commands-git_floor.t                # the declared git floor is 2.34.1, for every command
+integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
 # Genesis::Env integration tests - require vault/BOSH mocks

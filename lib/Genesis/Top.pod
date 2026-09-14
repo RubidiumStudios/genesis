@@ -1530,6 +1530,94 @@ B<Examples:>
     my $prefix = $top->pr_prefix();
     # returns 'pr/' unless the repository configured otherwise
 
+=head2 source_control_remote
+
+    my $remote = $top->source_control_remote();
+
+Which remote this pipeline derives its url from.
+
+Precedence is explicit over derived over default. The derivation is the
+control branch's configured upstream, and then C<origin> where it exists.
+
+It is never "the first configured remote", because C<git remote> lists them
+alphabetically and a repository holding C<dev> and C<origin> would pick
+C<dev>.
+
+The resolution, and every refusal it can raise, belongs to
+L</_source_control>, which settles all five values at once and keeps the
+answer, so the refusals land at configuration load rather than here.
+
+B<Parameters:> None.
+
+B<Returns:> The remote's name.
+
+B<Examples:>
+
+    my $remote = $top->source_control_remote();
+    # returns 'dev' where the control branch tracks dev
+
+=head2 source_control_uri
+
+    my $uri = $top->source_control_uri();
+
+The url a pipeline task clones, which is the fetch url of the remote
+L</source_control_remote> resolved, unless C<pipeline.source_control.uri>
+names one.
+
+B<Parameters:> None.
+
+B<Returns:> The url, as a string, or undef where the remote carries no fetch
+url at all.
+
+B<Examples:>
+
+    my $uri = $top->source_control_uri();
+    # returns 'https://github.com/fivetwenty-io/lmelt.git'
+
+=head2 source_control_repository
+
+    my $repo = $top->source_control_repository();
+
+The C<< <owner>/<repo> >> pair the GitHub API targets.
+
+Parsed from the remote's url, in either the https or the ssh shape. GitHub
+Enterprise parses the same way, since only the host differs. A mirror whose
+url does not carry the pair needs the override.
+
+B<Parameters:> None.
+
+B<Returns:> The pair, as a string.
+
+B<Examples:>
+
+    my $repo = $top->source_control_repository();
+    # returns 'fivetwenty-io/lmelt'
+
+=head2 source_control_resolved
+
+    my $rows = $top->source_control_resolved();
+
+Every source-control value together with the tier it came from, which is
+what C<genesis pipeline-describe> prints so that an override which has
+drifted away from what git says is visible rather than silent.
+
+Each row is a hash reference carrying C<key>, C<value>, and C<source>. The
+source is C<explicit> where the operator wrote the key, C<derived> where git
+answered for it, and C<default> where neither did. The explicit tier is read
+with C<Genesis::Config::is_set> rather than with C<get>, because the schema
+fills C<control_branch> and C<pr_prefix> in for every repository and a filled
+default is the schema's answer rather than anybody's choice.
+
+B<Parameters:> None.
+
+B<Returns:> An array reference of five rows, in the order C<remote>, C<uri>,
+C<repository>, C<control_branch>, C<pr_prefix>.
+
+B<Examples:>
+
+    my $rows = $top->source_control_resolved();
+    # [{key => 'remote', value => 'origin', source => 'derived'}, ...]
+
 =head2 applied_record_path
 
     my $path = $top->applied_record_path();

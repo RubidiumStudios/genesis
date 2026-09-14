@@ -180,6 +180,11 @@ B<Examples:>
 Parses the pipeline configuration and prints a human-readable description
 of the environments and their pass/trigger relationships.
 
+Where the repository configures a pipeline, the report opens with the
+resolved source-control values, each beside the tier it came from, so an
+override that has drifted away from what git says is visible rather than
+silent.
+
 B<Parameters:>
 
 =over 4
@@ -212,6 +217,38 @@ B<Examples:>
   genesis describe sandbox
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _describe_source_control
+
+  _describe_source_control($top);
+
+Prints the repository's source-control values, one to a line, each beside
+the tier it resolved from.
+
+The resolution belongs to C<< $top->source_control_resolved >>, which
+settles what every value is and whether the operator wrote it, git answered
+for it, or nobody set it at all.  This lays those rows out and nothing more.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> for the repository being described.
+
+=back
+
+B<Returns:> 1, having printed the block to standard output.
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+  _describe_source_control($top);
+  # Source control
+  #   remote           origin                    derived
+  #   repository       fivetwenty-io/lmelt       derived
 
 =head2 _missing_env_branches
 
