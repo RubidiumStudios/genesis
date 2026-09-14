@@ -52,19 +52,22 @@ subtest 'checkout survives losing the current directory' => sub {
 
 	my $root = make_repo();
 	my $git  = Service::Git->new($root);
+	my $session = $git->session(control => 'control');
 
 	my $origin = getcwd();
 	chdir("$root/doomsday") or die "cannot enter doomsday/: $!";
 
-	eval { $git->checkout('env-branch'); 1 }
-		or do { chdir($origin); fail("checkout died: $@"); return };
-	pass('checkout did not die');
+	$session->begin;
+	eval { $session->switch('env-branch'); 1 }
+		or do { chdir($origin); fail("switch died: $@"); return };
+	pass('the switch did not die');
 
 	is($git->current_branch, 'env-branch', 'the branch actually switched');
 
 	my $landed = getcwd();
 	ok(-d $landed, "left in a directory that exists ($landed)");
 
+	$session->finish;
 	chdir($origin);
 };
 
@@ -75,16 +78,19 @@ subtest 'checkout keeps the current directory when it survives' => sub {
 
 	my $root = make_repo();
 	my $git  = Service::Git->new($root);
+	my $session = $git->session(control => 'control');
 
 	my $origin = getcwd();
 	mkdir_or_fail("$root/shared");
 	chdir("$root/shared") or die "cannot enter shared/: $!";
 	my $before = getcwd();
 
-	$git->checkout('env-branch');
+	$session->begin;
+	$session->switch('env-branch');
 	is($git->current_branch, 'env-branch', 'the branch switched');
 	is(getcwd(), $before, 'still in the same directory');
 
+	$session->finish;
 	chdir($origin);
 };
 

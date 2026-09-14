@@ -7,7 +7,7 @@ package Service::Git::Session;
 use strict;
 use warnings;
 
-use Genesis qw/run bail debug trace/;
+use Genesis qw/bail trace/;
 use Genesis::Exit qw/TEMPFAIL DATAERR/;
 use Cwd qw/getcwd/;
 use Fcntl qw/:flock/;
@@ -114,8 +114,19 @@ sub begin {
 		my $me = $self;
 		Genesis::Commands::at_exit(sub {
 			return unless $me->{active};
+
+			# The hooks run from END with $? already holding the code the
+			# command chose, and the process exits on whatever $? reads
+			# once they are done.  The restore shells out to git, so
+			# without this the net would hand every refusal git's nought
+			# and a caller waiting on a switch would be told it succeeded.
+			# It is saved and put back by hand rather than localised,
+			# because a local restores too late to be read here.
+			my $status = $?;
+
 			$me->{active} = 0;
 			eval { $me->_restore; 1 } or print STDERR "\n$@\n";
+			$? = $status;
 		});
 		$self->{net} = 1;
 	}
@@ -129,7 +140,14 @@ sub begin {
 #
 # Runs from the repository root, because the branch being checked out may
 # not carry the directory we are standing in, and returns to that directory
-# only if the checkout kept it.  The lock lands in the next task.
+# only if the checkout kept it.
+#
+# The lock is taken here and nowhere else, because D46 has it guard
+# switching alone: a command that never switches never touches it, so a kit
+# hook that shells out to genesis inside a deploy is unaffected while one
+# that tries to switch under that deploy is refused by name.  The directory
+# we came from is handed along, so a refusal stands us back where we were
+# rather than leaving us at the root.
 sub switch {
 	my ($self, $target) = @_;
 	my $git = $self->{git};
@@ -140,6 +158,7 @@ sub switch {
 	chdir($git->root)
 		or bail("Unable to enter git root %s: %s", $git->root, $!);
 
+	$self->_take_lock($cwd);
 	$git->checkout($target);
 	chdir($cwd) if -d $cwd;
 
@@ -163,6 +182,7 @@ sub finish {
 		$git->root) unless $git->is_clean;
 
 	$self->_restore;
+	$self->_release_lock;
 	$self->{active} = 0;
 	return $self;
 }
@@ -172,6 +192,78 @@ sub finish {
 
 ### Internals {{{
 
+# _take_lock - the flock D46 fixes, on genesis-session.lock {{{
+#
+# Per working tree, because git_dir resolves under .git/worktrees/<name>/
+# in a linked working tree.  The pid and the command go inside so that the
+# refusal can name a live holder, and there is no break-lock option: the
+# kernel drops the flock when the holder dies, so an abandoned lock cannot
+# arise and a refusal always names somebody who is still running.
+#
+# The pid is the first line and the command the second, which is the form
+# every reader of this file already agrees on, so a command carrying spaces
+# or a colon cannot be mistaken for part of the pid.
+sub _take_lock {
+	my ($self, $restore) = @_;
+	return $self if $self->{lock};
+
+	my $path = $self->{git}->git_dir . '/genesis-session.lock';
+	open(my $fh, '+>>', $path)
+		or bail("Unable to open the session lock at %s: %s", $path, $!);
+
+	unless (flock($fh, LOCK_EX | LOCK_NB)) {
+		my $holder = do { seek($fh, 0, 0); local $/; <$fh> } // '';
+		close $fh;
+		my ($pid, $command) = split /\n/, $holder, 2;
+		chomp $command if defined $command;
+		$pid = 'unknown' unless defined $pid && $pid =~ /^\d+$/;
+		$command = 'an unknown command'
+			unless defined $command && $command =~ /\S/;
+
+		# I1 promises the directory we exit in is the one we came in on,
+		# and a refusal is an exit, so we stand back where switch found us
+		# before we say anything.
+		chdir($restore) if defined $restore && -d $restore;
+
+		bail({exitcode => TEMPFAIL},
+			"Another Genesis process is using this working tree.\n\n".
+			"  process %s is running: %s\n\n".
+			"Only one session may switch branches in #C{%s} at a time.  Wait ".
+			"for that command to finish and run this one again.",
+			$pid, $command, $self->{git}->root);
+	}
+
+	truncate($fh, 0);
+	seek($fh, 0, 0);
+	print $fh sprintf("%d\n%s\n", $$, _command_line());
+	$fh->flush;
+
+	$self->{lock} = $fh;
+	trace("Service::Git::Session: took the switch lock at %s", $path);
+	return $self;
+}
+
+# }}}
+# _release_lock - finish lets go, and nothing else does {{{
+sub _release_lock {
+	my ($self) = @_;
+	my $fh = delete $self->{lock} or return $self;
+	flock($fh, LOCK_UN);
+	close $fh;
+	return $self;
+}
+
+# }}}
+# _command_line - what the refusal names the holder as {{{
+sub _command_line {
+	require Genesis::Commands;
+	my $command = eval { Genesis::Commands::current_command() };
+	return join(' ', 'genesis', grep {defined && length} ($command))
+		if $command;
+	return join(' ', $0, @ARGV);
+}
+
+# }}}
 # _restore - return to the branch begin recorded, from the root {{{
 sub _restore {
 	my ($self) = @_;

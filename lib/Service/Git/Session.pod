@@ -28,8 +28,11 @@ Clean means what C<< $git->is_clean >> means: no tracked modification and
 nothing staged, with untracked files ignored. A scratch file in the working
 tree blocks no session and no session deletes one.
 
-No lock is taken here. Switching is what the lock guards, so a command that
-opens a session and never switches never touches it.
+Switching is what the switch lock guards, and the lock is a C<flock> on
+F<genesis-session.lock> in the git directory, so it covers one working tree
+and not the repository behind it. C<switch> is the one verb that takes it and
+C<finish> is the one that lets it go, so a command that opens a session and
+never switches never touches it at all.
 
 =head1 METHODS
 
@@ -97,7 +100,10 @@ while the repository is still exactly as the operator left it.
 
 A last-resort restore is registered through C<< Genesis::Commands::at_exit >>,
 whose hooks run from an C<END> block, so a session still open when the process
-ends is put back rather than left standing on a branch nobody asked for.
+ends is put back rather than left standing on a branch nobody asked for. The
+exit status is saved and put back around that restore, because the hooks run
+with C<$?> already holding the code the command chose and the git the restore
+shells out to would otherwise overwrite it.
 
 B<Parameters:> None.
 
@@ -137,10 +143,25 @@ B<Examples:>
 
   $session->switch('qa/bosh');
 
-Changes branch, or stands on a commit with a detached HEAD. It runs the
-checkout from the repository root, because the branch being checked out may
-not carry the directory we are standing in, and it returns to that directory
-only where the checkout kept it.
+Changes to the repository root, takes the switch lock, checks the branch out,
+and returns to the original directory when the checkout kept it. It stands on
+a commit with a detached HEAD where the target is one. The run happens from
+the root because the branch being checked out may not carry the directory we
+are standing in.
+
+The switch lock is a C<flock> on F<genesis-session.lock> in the git directory,
+which makes it per working tree: a linked working tree resolves it under
+F<< .git/worktrees/<name>/ >>, so two working trees of one repository never
+contend. The holder's pid and command are written inside, and a second process
+whose C<switch> meets a held lock fails at once naming both. A command that
+never switches never touches the lock, so a kit hook shelling out to genesis
+inside a deploy is unaffected while one that tries to switch is refused.
+
+There is no break-lock option and none is needed, because the kernel releases
+the C<flock> when its holder dies, so a refusal always names a live process.
+
+A refusal puts us back in the directory we were standing in before it says
+anything, since the directory we exit in is the one we came in on.
 
 The tip of the target is recorded the first time the session lands on it, so
 C<committed_branches> can say afterwards which branches this session moved.
@@ -173,6 +194,13 @@ cannot be entered.
 
 =item *
 
+C<< "Another Genesis process is using this working tree." >> -- raised where
+another process holds the switch lock, naming that process's pid and the
+command it is running. It exits on C<TEMPFAIL>, because the holder will let go
+and the same command run again will get through.
+
+=item *
+
 Whatever C<< $git->checkout >> raises, which is a failed checkout naming the
 target.
 
@@ -194,6 +222,10 @@ Closes the session and puts back what C<begin> recorded. The branch and the
 cleanliness are both re-read rather than assumed, the return to the recorded
 branch is made from the repository root, and the result is verified before the
 session reports itself closed.
+
+The switch lock is released last, after the restore has been verified, so no
+other process can switch this working tree until this one is genuinely back
+where it started.
 
 Calling it on a session that was never opened is a no-op, so a caller may
 finish unconditionally on its way out.
@@ -295,6 +327,102 @@ B<Examples:>
   # returns ('qa/bosh') after a commit on that branch
 
 =head1 INTERNAL METHODS
+
+=head2 _take_lock($restore)
+
+  $session->_take_lock($cwd);
+
+Takes the switch lock, which is a non-blocking C<flock> on
+F<genesis-session.lock> in the git directory. It writes the holder's pid on
+the first line of that file and the command the holder is running on the
+second, which is the form every reader of the file agrees on, so a command
+carrying spaces cannot be mistaken for part of the pid.
+
+Taking it twice in one session is a no-op, so a session that has already
+switched switches again without asking for what it holds.
+
+There is no break-lock option. The kernel drops the C<flock> when its holder
+dies, so an abandoned lock cannot arise and a refusal always names a process
+that is still running.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$restore>
+
+The directory to stand back in before refusing, which is where C<switch> was
+called from. A refusal is an exit, and the directory we exit in has to be the
+one we came in on. It may be omitted, and a directory that is gone is left
+alone.
+
+=back
+
+B<Returns:> C<$self>, so it chains.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Unable to open the session lock at %s: %s" >> -- raised where the lock
+file in the git directory cannot be opened.
+
+=item *
+
+C<< "Another Genesis process is using this working tree." >> -- raised where
+another process holds the lock. It names that process's pid and its command,
+reading both out of the lock file, and falls back to saying they are unknown
+where the file holds neither. It exits on C<TEMPFAIL>.
+
+=back
+
+B<Examples:>
+
+  $session->_take_lock($cwd);
+  # returns $self, holding the lock, with our pid and command written inside
+
+  $session->_take_lock($cwd);
+  # stands back in $cwd and exits TEMPFAIL, naming the process that holds it
+
+=head2 _release_lock
+
+  $session->_release_lock;
+
+Lets the switch lock go and closes the handle on it. C<finish> is the only
+caller, so the lock is held for the whole of a session and released once the
+restore has been verified.
+
+Releasing a lock that is not held is a no-op, so a session that never switched
+may be finished like any other.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>, so it chains.
+
+B<Examples:>
+
+  $session->_release_lock;
+  # returns $self, and another process may now switch this working tree
+
+=head2 _command_line
+
+  my $what = Service::Git::Session::_command_line();
+
+What the lock file names the holder as, so that a process refused by the lock
+can say which command is standing in its way. It is the genesis command being
+run where there is one, and the program name with its arguments otherwise,
+which is what a child process spawned outside a command has to offer.
+
+B<Parameters:> None.
+
+B<Returns:> A one-line description of the running command.
+
+B<Examples:>
+
+  my $what = Service::Git::Session::_command_line();
+  # returns 'genesis propagate' inside that command
 
 =head2 _restore
 
