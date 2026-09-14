@@ -997,6 +997,46 @@ sub type {
 }
 
 # }}}
+# deployment_slug_for - the deployment slug for an environment name {{{
+#
+# <env>/<type>, the one identity the branch, the vault path, and the BOSH
+# deployment name all render (D66, D71).  The argument is a name as a
+# string and never an environment object, so that a caller holding only a
+# name composes the slug without loading one, which is what pipeline-apply
+# creating branches and pipeline-status listing them both do.
+sub deployment_slug_for {
+	my ($self, $env_name) = @_;
+	bug(
+		"deployment_slug_for expects an environment name, got a %s",
+		ref($env_name)
+	) if ref($env_name);
+	bug("deployment_slug_for called without an environment name")
+		unless defined($env_name) && length($env_name);
+	return sprintf('%s/%s', $env_name, $self->type);
+}
+
+# }}}
+# branch_for - the deployment branch for an environment name {{{
+#
+# The deployment branch is the slug, with no decoration of its own (D66).
+sub branch_for {
+	my ($self, $env_name) = @_;
+	return $self->deployment_slug_for($env_name);
+}
+
+# }}}
+# pr_branch_for - the pull request branch for an environment name {{{
+#
+# The prefix joined onto the slug, with no second argument, so the branch
+# reads pr/qa/bosh under the defaults (D19, D66, D71).  The collision the
+# join can produce, where a joined name lands on the control branch or on a
+# deployment branch, is refused where the branch is created.
+sub pr_branch_for {
+	my ($self, $env_name) = @_;
+	return $self->pr_prefix . $self->deployment_slug_for($env_name);
+}
+
+# }}}
 # pipeline_enabled - whether this repository declares a pipeline {{{
 #
 # Reads pipeline.enabled and nothing else, under D70.  It replaces
