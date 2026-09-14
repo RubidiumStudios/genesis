@@ -3308,24 +3308,29 @@ sub stale_set_delivery {
 	my $file = $opts{file} // 'ops/extra.yml';
 	my $path = $opts{path} // join('/', grep {length} $root, $file);
 
+	# env, file, and path are this helper's own, and the three helpers below
+	# know none of them, so only the keys they do know are passed on.
+	my %pass = map {exists $opts{$_} ? ($_ => $opts{$_}) : ()}
+		qw/type copy push/;
+
 	$self->fixture_vault;
-	$self->init_branch($env, %opts);
+	$self->init_branch($env, %pass);
 
 	# The wider set: the extra file is tracked, and the delivery carries it.
 	# The environment file is staged rather than committed on its own, so the
 	# tracked list and the file it names arrive in the same control commit.
-	$self->_stage_env_file($env, %opts, root => $root,
+	$self->_stage_env_file($env, %pass, root => $root,
 		genesis => {pipeline => {track_additional_files => [$file]}});
 	my $wide = $self->commit_on_control(
 		files   => {$path => "---\nextra: true\n"},
 		message => 'Track an extra file',
 		push    => 1,
 	);
-	$self->deliver($env, %opts, control => $wide);
+	$self->deliver($env, %pass, control => $wide);
 
 	# The narrower set: the extra file is dropped from the tracked list and
 	# stays on the branch until a delivery removes it.
-	$self->_stage_env_file($env, %opts, root => $root,
+	$self->_stage_env_file($env, %pass, root => $root,
 		genesis => {pipeline => {track_additional_files => []}});
 	my $narrow = $self->commit_on_control(
 		files   => {},
