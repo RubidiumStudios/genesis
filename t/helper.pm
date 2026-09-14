@@ -42,6 +42,7 @@ use Config;
 use Encode;
 use File::Temp qw/tempdir/;
 use File::Basename qw/dirname/;
+use File::Find ();
 use IO::Handle;
 use JSON::PP;
 unified_diff;
@@ -1106,6 +1107,64 @@ $genesis_block
 EOF
 
 	return $top->load_env($env_name);
+}
+
+# The tree sweeps that hunt a forbidden form -- a bare exit code, a git option
+# that post-dates the declared floor -- all want the same list of files, and
+# three copies of it drifted apart.  This is the one reader.  It is anchored on
+# $ENV{GENESIS_TOPDIR} rather than on the current directory, so a sweep finds
+# the same tree wherever the test happens to have chdir'd to, and it covers
+# every executable under bin/ as well as every module under lib/, so a second
+# script or a module in a new corner cannot invent a form and stay unseen.
+# The paths come back absolute and sorted; a caller that wants to print a short
+# name strips the topdir prefix itself.
+sub sweep_files {
+	my $top = $ENV{GENESIS_TOPDIR}
+		or die "sweep_files needs GENESIS_TOPDIR, which helper sets on import\n";
+
+	my @files;
+	File::Find::find({
+		no_chdir => 1,
+		wanted   => sub {push @files, $File::Find::name if -f $_ && /\.pm$/},
+	}, "$top/lib") if -d "$top/lib";
+
+	File::Find::find({
+		no_chdir => 1,
+		wanted   => sub {push @files, $File::Find::name if -f $_ && -x $_},
+	}, "$top/bin") if -d "$top/bin";
+
+	return sort @files;
+}
+
+# Remove a trailing comment from a line of Perl before a sweep matches a
+# pattern against it, so a note that names a bare code or a forbidden git
+# option is not reported as a call site.  A '#' only opens a comment where it
+# sits outside a quoted string and is not the last-index sigil of $#array, and
+# the rest of the line, whitespace and all, is handed back unchanged.
+sub strip_comment {
+	my ($line) = @_;
+	return $line unless defined $line;
+
+	my $quote;
+	for (my $i = 0; $i < length($line); $i++) {
+		my $c = substr($line, $i, 1);
+		if (defined $quote) {
+			if ($c eq '\\') {
+				$i++;                      # whatever follows is escaped
+			} elsif ($c eq $quote) {
+				undef $quote;
+			}
+			next;
+		}
+		if ($c eq "'" || $c eq '"' || $c eq '`') {
+			$quote = $c;
+			next;
+		}
+		next unless $c eq '#';
+		next if $i > 0 && substr($line, $i - 1, 1) eq '$';
+		return substr($line, 0, $i);
+	}
+	return $line;
 }
 
 sub wrap_obj {
