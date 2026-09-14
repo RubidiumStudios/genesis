@@ -2238,9 +2238,12 @@ B<Examples:>
 
     $top->_validate_manifest_store();
 
-Refuses, at C<Genesis::Exit::CONFIG>, a repository whose pipeline is
-enabled and whose C<manifest_store> is not C<exodus>, and any environment
-whose kit declares a Genesis floor below 3.1.0.
+Refuses, at C<Genesis::Exit::CONFIG>, a C<manifest_store> that is not
+C<exodus>, and any environment whose effective Genesis floor is below
+3.1.0. It does not read C<pipeline.enabled> itself, because
+L</_validate_pipeline_config> is its only caller and has already returned
+where the section is off, so everything below is said of a repository
+whose pipeline is known to be on.
 
 Under a pipeline the deploy must not be a git writer on a deployment
 branch, because the propagation writer already advances it. The certified
@@ -2250,12 +2253,20 @@ limit the MVP lifts later.
 
 The check sits here rather than in the compiler's validator, which is
 where a deploy would never meet it. That gap is what let an environment on
-an old kit keep both writers on the branch: a kit whose Genesis floor is
-below 3.1.0 is forced onto the repository store at run time whatever the
-configuration says, because earlier versions cannot update the exodus
-deployment audit data. Each environment is therefore read merged through
-L</_merged_env_params> and refused by name, with the remedy of raising the
-kit's floor rather than changing the store's value.
+an old kit keep both writers on the branch, because a kit whose Genesis
+floor is below 3.1.0 is forced onto the repository store at run time
+whatever the configuration says, since earlier versions cannot update the
+exodus deployment audit data.
+
+The floor compared is the effective one, which is the higher of the
+repository's own C<minimum_version> and the environment's merged
+C<genesis.min_version>, or C<genesis.minimum_version>, the same pair
+C<< Genesis::Env::effective_minimum_version >> takes the maximum of.
+Reading the environment's line alone would refuse a repository whose own
+floor already lifts it, over a number no deploy would ever honour. Each
+environment is read merged through L</_merged_env_params> and refused by
+name, with the remedy of raising the kit's floor rather than changing the
+store's value.
 
 B<Returns:> 1.
 
@@ -2272,9 +2283,10 @@ C<hybrid>, naming the value that was configured.
 =item *
 
 C<"The environment ... uses a kit whose Genesis floor is below 3.1.0"> -
-raised when an environment's merged C<genesis.min_version>, or its
-C<genesis.minimum_version>, is older than 3.1.0, naming the environment
-and carrying the remedy.
+raised when an environment's effective floor, the higher of its own merged
+C<genesis.min_version>, or C<genesis.minimum_version>, and the
+repository's C<minimum_version>, is older than 3.1.0, naming the
+environment and carrying the remedy.
 
 =back
 
