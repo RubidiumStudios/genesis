@@ -532,8 +532,7 @@ sub _create_root {
 	# Genesis::Top->create reads the global configuration, which a real command
 	# sets up at startup and which a test file otherwise has to provide for
 	# itself.  The harness provides it, so no row has to remember to.
-	no warnings 'once';
-	helper::provide_rc() unless defined $Genesis::RC;
+	helper::provide_rc() unless defined do {no warnings 'once'; $Genesis::RC};
 
 	my $scratch = sprintf('%s/top-%06d', $self->{base}, int(rand(1_000_000)));
 	helper::mkdir_or_fail($scratch);
@@ -541,15 +540,17 @@ sub _create_root {
 	# The create points GENESIS_ROOT at the root it just built and names the
 	# repository's vault in GENESIS_TARGET_VAULT and SAFE_TARGET.  Under
 	# no_vault that name is the empty string, which is not the same as having
-	# no target at all, so both are put back as they were and GENESIS_ROOT is
-	# pointed at where the root actually ends up.
-	my %was = map {$_ => $ENV{$_}} qw/GENESIS_TARGET_VAULT SAFE_TARGET/;
-
-	my $made = Genesis::Top->create($scratch, $self->{type}, no_vault => 1)->path;
-
-	for my $var (keys %was) {
-		defined $was{$var} ? ($ENV{$var} = $was{$var}) : delete $ENV{$var};
-	}
+	# no target at all, so both are guarded and GENESIS_ROOT is pointed at
+	# where the root actually ends up.  The guard rather than a pair of reads
+	# and writes around the call, because a create that dies would otherwise
+	# leave the fixture's vault names standing in the parent.
+	my $made = do {
+		my $guard = helper::local_env(
+			GENESIS_TARGET_VAULT => $ENV{GENESIS_TARGET_VAULT},
+			SAFE_TARGET          => $ENV{SAFE_TARGET},
+		);
+		Genesis::Top->create($scratch, $self->{type}, no_vault => 1)->path;
+	};
 
 	opendir(my $dh, $made)
 		or die "Failed to read the new deployment root at $made: $!";
@@ -1635,16 +1636,16 @@ sub add_deployment_root {
 
 	require Genesis::Top;
 
-	no warnings 'once';
-	helper::provide_rc() unless defined $Genesis::RC;
+	helper::provide_rc() unless defined do {no warnings 'once'; $Genesis::RC};
 
 	# create points GENESIS_ROOT at the root it has just built and names the
 	# repository's vault in GENESIS_TARGET_VAULT and SAFE_TARGET.  The first
-	# root is the one the rows run against, so all three go back as they were.
-	my %was = map {$_ => $ENV{$_}} qw/GENESIS_ROOT GENESIS_TARGET_VAULT SAFE_TARGET/;
-	Genesis::Top->create($self->{a}, $type, no_vault => 1, directory => $path);
-	for my $var (keys %was) {
-		defined $was{$var} ? ($ENV{$var} = $was{$var}) : delete $ENV{$var};
+	# root is the one the rows run against, so all three are guarded and go
+	# back when the call is done, whether it answered or died.
+	{
+		my $guard = helper::local_env(map {($_ => $ENV{$_})}
+			qw/GENESIS_ROOT GENESIS_TARGET_VAULT SAFE_TARGET/);
+		Genesis::Top->create($self->{a}, $type, no_vault => 1, directory => $path);
 	}
 
 	$self->{roots}{$type} = {path => $path, envs => $opts{envs} // []};
