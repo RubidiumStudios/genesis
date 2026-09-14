@@ -56,6 +56,9 @@ sub propagate_envs {
 	my (%args) = @_;
 
 	my $git           = $args{git}     or die "propagate_envs: 'git' is required\n";
+	# The top names every pull request branch, so a run that opens one
+	# needs it and a run with only direct targets never asks for it.
+	my $top           = $args{top};
 	my $github        = $args{github};
 	my $owner_repo    = $args{owner_repo};
 	my @targets       = @{$args{targets} || []};
@@ -107,6 +110,7 @@ sub propagate_envs {
 					git           => $git,
 					github        => $github,
 					owner_repo    => $owner_repo,
+					top           => $top,
 					env_name      => $env_name,
 					control_sha   => $control_sha,
 					control_short => $control_short,
@@ -244,12 +248,14 @@ sub _propagate_one_pr_env {
 	my $git           = $a{git};
 	my $github        = $a{github};
 	my $owner_repo    = $a{owner_repo};
+	my $top           = $a{top}
+		or die "_propagate_one_pr_env: 'top' is required\n";
 	my $env_name      = $a{env_name};
 	my $control_sha   = $a{control_sha};
 	my $control_short = $a{control_short};
 	my $detail        = $a{detail};
 
-	my $pr_branch = "pr/$env_name";
+	my $pr_branch = $top->pr_branch_for($env_name);
 
 	# Query open PRs from the API — authoritative on PR state.
 	# Branch presence (local or remote) is a separate concern.

@@ -160,6 +160,31 @@ sub mock_github {
 }
 
 # =========================================================================
+# Mock Genesis::Top
+#
+# propagate_envs asks the top for the branch a pull request opens on, and
+# nothing else.  Every row below is about the decision tree and the
+# batched push rather than about how a branch is named, so the mock
+# answers with the short pr/<env> name those rows were written against
+# and leaves the composition itself to genesis_top-pr_branch.t.
+# =========================================================================
+sub mock_top {
+	my $self = bless {}, 'Test::Mock::PropEnvs::Top';
+	$self;
+}
+
+{
+	no strict 'refs';
+	no warnings 'redefine';
+	my $pkg = 'Test::Mock::PropEnvs::Top';
+
+	*{"${pkg}::pr_branch_for"} = sub {
+		my ($self, $env_name) = @_;
+		return "pr/$env_name";
+	};
+}
+
+# =========================================================================
 # Helpers
 # =========================================================================
 sub direct_target {
@@ -205,6 +230,7 @@ sub propagate_envs_captured {
 sub base_args {
 	my (%over) = @_;
 	return (
+		top           => mock_top(),
 		control       => 'control',
 		control_sha   => 'abcdef1234567890',
 		control_short => 'abcdef1',

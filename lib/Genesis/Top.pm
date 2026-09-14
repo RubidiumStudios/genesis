@@ -1028,13 +1028,38 @@ sub branch_for {
 # pr_branch_for - the pull request branch for an environment name {{{
 #
 # The prefix joined onto the slug, with no second argument, so the branch
-# reads pr/qa/bosh under the defaults (D19, D66, D71).  The join can land
-# on a name that is already the control branch or already a deployment
-# branch, and refusing that collision belongs here, in the one place a
-# pull request branch is named, rather than in each caller.
+# reads pr/qa/bosh under the defaults (D19, D66, D71).  The join can take
+# a name that is already the control branch or that a deployment branch
+# already owns, and the second of those needs an environment whose name
+# is the prefix followed by another environment's name, as with the
+# prefix pr- and the environments lab and pr-lab.  Both the prefix and
+# the type append, so the type cancels on both sides and the comparison
+# is against the composed branch names.  Refusing the collision belongs
+# here, in the one place a pull request branch is named, rather than in
+# each caller.
 sub pr_branch_for {
 	my ($self, $env_name) = @_;
-	return $self->pr_prefix . $self->deployment_slug_for($env_name);
+	my $branch = $self->pr_prefix . $self->deployment_slug_for($env_name);
+
+	bail(
+		{exitcode => CONFIG},
+		"The pull request branch for #C{%s} would be #R{%s}, which is the ".
+		"deployment branch of the environment #C{%s}.\n".
+		"Change #C{pipeline.source_control.pr_prefix} to a prefix no ".
+		"environment name begins with.",
+		$env_name, $branch, $_
+	) for grep {$branch eq $self->branch_for($_)} $self->pipeline_env_names;
+
+	bail(
+		{exitcode => CONFIG},
+		"The pull request branch for #C{%s} would be #R{%s}, which is the ".
+		"control branch.\n".
+		"Change #C{pipeline.source_control.pr_prefix} so the two names ".
+		"cannot meet.",
+		$env_name, $branch
+	) if $branch eq $self->control_branch;
+
+	return $branch;
 }
 
 # }}}

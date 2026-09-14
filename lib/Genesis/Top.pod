@@ -867,14 +867,48 @@ joined onto its slug.
 There is no second argument, because the prefix is configuration rather than
 a caller's choice.
 
+The join can produce a name another branch already owns, and that is refused
+here rather than in each caller, so this is the one place a pull request
+branch is named and the one place the collision is caught. Both the prefix
+and the deployment type append, so the type cancels on both sides and the
+comparison is against the composed branch names.
+
 B<Parameters:> The environment's name, as a string.
 
 B<Returns:> The branch name, such as C<pr/qa/bosh>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"The pull request branch for ... would be ..., which is the deployment
+branch of the environment ..."> - raised when the joined name is a branch
+some environment already owns, which needs an environment whose name is the
+prefix followed by another environment's name. With the prefix C<pr-> and
+the environments C<lab> and C<pr-lab>, the pull request branch for C<lab>
+and the deployment branch for C<pr-lab> are both C<pr-lab/bosh>.
+
+=item *
+
+C<"The pull request branch for ... would be ..., which is the control
+branch."> - raised when the joined name is the control branch itself.
+
+=back
+
+Both refusals exit C<Genesis::Exit::CONFIG> and name the branch they
+would have collided with, and both are answered by changing
+C<pipeline.source_control.pr_prefix>.
 
 B<Examples:>
 
     my $branch = $top->pr_branch_for('qa');
     # returns 'pr/qa/bosh' under the default prefix
+
+    # with pr_prefix 'pr-' and an environment named pr-lab
+    my $branch = $top->pr_branch_for('lab');
+    # exits Genesis::Exit::CONFIG, naming pr-lab/bosh
 
 =head2 version
 
