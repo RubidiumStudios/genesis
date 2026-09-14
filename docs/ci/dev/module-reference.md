@@ -83,8 +83,11 @@ result.
 **Public API:**
 
 `Genesis::CI::Compiler->new(ci_dir => $dir, file => $file, top => $top)` —
-constructor. Provide `ci_dir` for multi-file format or `file` for legacy
-format. `top` is a `Genesis::Top` object.
+constructor. Provide `ci_dir` for a named configuration directory or
+`file` for the legacy format. `top` is a `Genesis::Top` object, and a
+caller that names neither `ci_dir` nor `file` is asking for the
+`pipeline:` section of `.genesis/config`, which the parser reads through
+that object.
 
 `$compiler->compile(provider => $type)` — runs all stages. `$type` is
 `concourse` or `github-actions`. Returns:
@@ -101,7 +104,21 @@ format. `top` is a `Genesis::Top` object.
 **Class Methods:**
 
 `Genesis::CI::Compiler->can_compile($ci_dir)` — returns true if `$ci_dir`
-exists and contains `pipeline.yml`. Used for format detection.
+exists and contains `pipeline.yml`. The caller names the directory,
+because there is no conventional one to fall back on.
+
+`Genesis::CI::Compiler->can_compile_from_env_files($ci_dir)` — returns
+true if `$ci_dir` holds `targets.yml` and `integrations.yml` but no
+`pipeline.yml`, meaning the topology comes from the environment files.
+
+`Genesis::CI::Compiler->can_compile_from_genesis_config($top)` — returns
+true if `$top`'s config carries a `pipeline` key. This is the check
+`_compile_pipeline()` makes first, so it is where format detection starts
+for an ordinary run.
+
+`Genesis::CI::Compiler->validate_config_section($data, $top)` — the
+owner check for the `pipeline:` section, called by `Genesis::Top` during
+configuration validation.
 
 **Internal:**
 
@@ -113,22 +130,33 @@ exists and contains `pipeline.yml`. Used for format detection.
 
 **File:** `lib/Genesis/CI/Compiler/Parser.pm`
 
-**Purpose:** Loads CI configuration from either the multi-file directory or
-a single legacy file and normalizes it into a common intermediate structure.
+**Purpose:** Loads CI configuration from a named configuration directory,
+from the `pipeline:` section of `.genesis/config`, or from a single legacy
+file, and normalizes any of the three into a common intermediate structure.
 
 **Public API:**
 
 `Genesis::CI::Compiler::Parser->new(ci_dir => $dir, file => $file, top => $top)` —
 constructor.
 
-`$parser->parse()` — detects format and delegates to `_parse_multi_file()`
-or `_parse_legacy_file()`. Returns a hashref.
+`$parser->parse()` — detects format and delegates to `_parse_multi_file()`,
+`_parse_genesis_config()`, or `_parse_legacy_file()`, tried in that order.
+Returns a hashref. The middle branch is taken when `top`'s config has a
+`ci` key, which is the old spelling rather than the `pipeline` one
+`can_compile_from_genesis_config()` asks for, because this parser reads
+the old section's shape.
 
 **Internal Methods:**
 
 `_parse_multi_file($ci_dir)` — loads `pipeline.yml`, `targets.yml`,
 `integrations.yml`, optionally `scripts/manifest.yml` and
 `provider-config/*.yml`.
+
+`_parse_genesis_config($data)` — maps the section's `pipeline`, `targets`,
+`integrations`, `scripts`, `provider`, and `provider_config` blocks onto
+the same structure `_parse_multi_file()` produces, accepting `vault` and
+`source_control` flat as well as nested under `integrations`. Sets
+`_source_format` to `genesis-config`.
 
 `_parse_legacy_file($file)` — loads single YAML file and normalizes it.
 Calls `_normalize_legacy_boshes()`, `_normalize_legacy_integrations()`,

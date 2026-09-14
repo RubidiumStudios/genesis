@@ -30,24 +30,42 @@ flowchart LR
 
 **Module:** `Genesis::CI::Compiler::Parser`
 
-**Input:** The `pipeline:` section of `.genesis/config`, or the path to a
-single `ci.yml`
+**Input:** The `pipeline:` section of `.genesis/config`, the path to a
+named configuration directory, or the path to a single `ci.yml`
 
 **Output:** A Perl hashref with normalized configuration
 
-The parser detects which configuration format is present and loads it
-accordingly. For the `pipeline:` section, it reads the `pipeline`,
-`targets`, and `integrations` blocks, and optionally the `scripts` and
-`provider_config` blocks. For the legacy format, it loads the single
-`ci.yml` file and normalizes its contents into the same structure that
-the section produces.
+`parse()` is a three-way choice, tried in order. A caller that names a
+configuration directory gets `_parse_multi_file()`. A caller that names
+none, but hands over a `Genesis::Top` whose config carries the key,
+gets `_parse_genesis_config()`, which reads the `pipeline`, `targets`,
+and `integrations` blocks and optionally the `scripts`, `provider`, and
+`provider_config` blocks. A caller that names a file gets
+`_parse_legacy_file()`, which normalizes `ci.yml` into the same structure
+the other two produce. `_compile_pipeline()` in
+`Genesis::Commands::Pipelines` names no directory, so it asks
+`can_compile_from_genesis_config()` first and falls back to a file when
+the answer is no.
 
-Every file is loaded through `spruce merge`, which means spruce operators
-like `(( grab ... ))`, `(( vault ... ))`, and `(( concat ... ))` are
-evaluated at parse time. This is significant because it means the parsed
-configuration contains resolved values, not spruce expressions. The one
-exception is when `--skip-vault` is used, in which case vault operators
-remain unresolved and appear as their literal `(( vault ... ))` form.
+The two reads disagree about the key, and the disagreement is deliberate.
+`can_compile_from_genesis_config()` asks for `pipeline`, the name D18 gave
+the section, while `parse()` asks for `ci`, the old name, because
+`_parse_genesis_config()` parses the old section's shape and the new one
+is shaped differently. A reader pointed at the new section would misread
+it quietly, where this one finds nothing and says so. Until the two names
+meet, a repository whose section is spelled `pipeline` is announced as
+inline configuration and then parsed from `ci.yml`.
+
+Where a file is involved, the parser loads it through `spruce merge`,
+which means spruce operators like `(( grab ... ))`, `(( vault ... ))`,
+and `(( concat ... ))` are evaluated at parse time, so the parsed
+configuration holds resolved values rather than spruce expressions. The
+one exception is `--skip-vault`, which leaves vault operators unresolved
+and appearing in their literal `(( vault ... ))` form. The `pipeline:`
+section takes no such pass. `Genesis::Config::_load` reads
+`.genesis/config` through `Genesis::load_yaml_file`, which shells out to
+`spruce json` and evaluates no operator at all, so every value in the
+section reaches the compiler exactly as it was written.
 
 The legacy normalization is extensive. The parser converts `boshes` into
 a `targets` structure with `type` and `connection` fields. It converts
@@ -66,7 +84,7 @@ The parsed output always contains these keys:
   integrations    => { vault => {...}, source_control => {...}, notifications => [...], ... },
   scripts         => { ... },
   provider_config => { ... },
-  _source_format  => 'legacy' | 'multi-file',
+  _source_format  => 'legacy' | 'multi-file' | 'genesis-config',
   _source_path    => '/path/to/source',
   _legacy_raw     => { ... },  # Only present for legacy format
 }
@@ -102,9 +120,10 @@ triggers which other environments. The output for each layout is:
 **Output:** Same hashref (validated in place); errors and warnings collected
 
 The validator performs structural checks, required-field validation,
-allowed-key enforcement, and cross-reference validation. It dispatches to
-`_validate_legacy()` or `_validate_multi_file()` based on the
-`_source_format` field.
+allowed-key enforcement, and cross-reference validation. It dispatches on
+the `_source_format` field, and the test is for `legacy` alone, so
+`genesis-config` and `multi-file` both fall through to
+`_validate_multi_file()` and are checked the same way.
 
 For legacy format, the validator checks every section of the original
 `pipeline` structure: required top-level keys (`name`, `vault`, `git`,
@@ -117,11 +136,16 @@ top level permits exactly these keys: `name`, `public`, `tagged`, `errands`,
 `layouts`, `groups`, `debug`, `locker`, `unredacted`, `notifications`,
 `auto-update`, `registry`, `require-passed-caches`.
 
-For multi-file format, the validator checks the pipeline section (metadata
-name required, branches live required, workflows required), targets section
-(connection URL required for bosh-director type), integrations section
-(vault and source_control required), and cross-references (workflow trigger
-patterns must match at least one target, script references must resolve).
+For the other two, the validator checks the targets section (connection URL
+required for bosh-director type), the integrations section (`vault.url` and
+`source_control` required), and cross-references (workflow trigger patterns
+that match no target raise a warning, and script references must resolve).
+The pipeline section is optional. `_validate_pipeline_section()` returns as
+soon as it sees an empty one, because an empty section means the topology
+comes from the `genesis.pipeline.*` keys in the environment files, and
+workflows are optional for the same reason. What it does check is
+conditional: a `metadata` block needs a `name`, and a `branches` block needs
+its control branch.
 
 The validator also checks for DAG cycles in workflow graphs using a standard
 depth-first search with temporary marks. If a cycle is found, an error is
@@ -183,8 +207,9 @@ because legacy pipelines use Genesis built-in CI commands (`ci-pipeline-deploy`,
 **Output:** `Genesis::CI::Compiler::AST` object
 
 The ASTBuilder constructs the AST source representation from the parsed
-configuration. It dispatches to `_build_from_legacy()` or
-`_build_from_multi_file()` based on the source format.
+configuration. It dispatches on the source format the same way the
+validator does, testing for `legacy` alone, so `genesis-config` and
+`multi-file` both reach `_build_from_multi_file()`.
 
 For legacy format, the builder extracts metadata (pipeline name, version,
 source type), branches, integrations (passed through from the parser),
