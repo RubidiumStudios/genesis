@@ -116,6 +116,30 @@ subtest 'one exodus mount serves the whole pipeline' => sub {
 	lives_ok {load_with_type('bosh')} 'one shared mount passes';
 };
 
+subtest 'an empty exodus mount is the mount it names' => sub {
+	plan tests => 3;
+
+	# The run time reads genesis.exodus_mount as written and normalises what
+	# it finds, so an empty value is a mount of its own rather than a key
+	# nobody set.  prod already resolves the default mount from the row
+	# above, so only qa changes here and the commit has a delta to carry.
+	write_env_file($h, 'qa',
+		genesis => {exodus_mount => "''"},
+		pipeline => {manual => 'false'});
+
+	my $refusal = '';
+	eval {load_with_type('bosh'); 1} or $refusal = $@;
+	like $refusal, qr{//\s+for\s+qa}s,
+		'an empty mount normalises the way the run time normalises it';
+	like $refusal, qr{/secret/exodus/\s+for\s+prod}s,
+		'rather than collapsing into the mount prod resolved';
+
+	write_env_file($h, 'qa',
+		genesis => {exodus_mount => '/secret/exodus/'},
+		pipeline => {manual => 'false'});
+	lives_ok {load_with_type('bosh')} 'and one shared mount passes again';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
