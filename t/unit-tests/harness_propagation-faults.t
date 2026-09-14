@@ -206,6 +206,23 @@ subtest 'the session lock is held by a child and dropped with it' => sub {
 	ok(_can_lock($lock), 'and the kernel drops it when the holder is killed');
 };
 
+subtest 'a new harness takes back the variables the last one armed' => sub {
+	plan tests => 4;
+
+	my $one = make_harness(envs => ['qa'], vault => 0);
+	fault_git($one);
+	shuttle_spy($one);
+	is($ENV{GENESIS_HARNESS_GIT_PLAN}, $one->{fault}{plan},
+		'arming a fault names the plan in the parent, where a child reads it');
+	ok(exists $ENV{GENESIS_SHUTTLE_SPY}, 'and the spy names its log there too');
+
+	make_harness(envs => ['qa'], vault => 0);
+	ok(!exists $ENV{GENESIS_HARNESS_GIT_PLAN},
+		'building a second harness takes the plan away again');
+	ok(!exists $ENV{GENESIS_SHUTTLE_SPY},
+		'and takes the spy away with it');
+};
+
 # _can_lock - whether this process can take the lock without waiting.  It is
 # an assertion helper for the rows above, so it sits beside them.
 sub _can_lock {

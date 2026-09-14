@@ -92,6 +92,34 @@ push @EXPORT, qw/
 	stale_set_delivery stage_unrelated modify_unrelated
 /;
 
+# _guard_env, _release_env - the fixture variables the parent has to hold {{{
+#
+# A fixture that arms a spawned command sets its variables in the parent
+# process, because the child reads them out of the environment it inherits
+# and a `local` in the arming sub would be undone before the command ever
+# ran.  helper::local_env hands back a guard that puts each variable back as
+# it found it, and the guards are kept here, so a fixture arms a variable and
+# forgets it.
+#
+# They are released when a new harness is built and again when the file ends.
+# Without that release a second harness in one file arms its own files and
+# then reads the first harness's, and a file that armed anything at all hands
+# the next file an environment it never asked for.
+our @ENV_GUARDS;
+sub _guard_env {
+	my (%vars) = @_;
+	push @ENV_GUARDS, helper::local_env(%vars);
+	return;
+}
+
+sub _release_env {
+	pop(@ENV_GUARDS)->restore while @ENV_GUARDS;
+	return;
+}
+
+END {_release_env()}
+
+# }}}
 # ref_in - one ref's sha in a repository at a path, or undef {{{
 #
 # The first reader the harness owns, because every row below reads a ref and
@@ -408,6 +436,11 @@ sub trailers_of {
 # has published.
 sub make_harness {
 	my (%opts) = @_;
+
+	# Whatever the harness above this one armed in the parent goes back before
+	# the new one arms anything of its own, so no fixture of this harness is
+	# read through a variable naming the last harness's file.
+	_release_env();
 
 	my $base = helper::workdir() . sprintf('/ph-%d-%06d', $$, int(rand(1_000_000)));
 	helper::mkdir_or_fail($base);
@@ -2369,8 +2402,10 @@ sub fault_git {
 	helper::put_file($self->{fault}{plan}, '{}');
 	helper::put_file($self->{fault}{log}, '');
 
-	$ENV{GENESIS_HARNESS_GIT_PLAN} = $self->{fault}{plan};
-	$ENV{GENESIS_HARNESS_GIT_LOG}  = $self->{fault}{log};
+	_guard_env(
+		GENESIS_HARNESS_GIT_PLAN => $self->{fault}{plan},
+		GENESIS_HARNESS_GIT_LOG  => $self->{fault}{log},
+	);
 
 	require Harness::Propagation::Git;
 	my $git = Harness::Propagation::Git->new($self->{$copy});
@@ -2552,8 +2587,10 @@ sub github_double {
 		domain => $gh->{domain}});
 	helper::put_file($gh->{log}, '');
 
-	$ENV{GENESIS_HARNESS_GH_STATE} = $gh->{state};
-	$ENV{GENESIS_HARNESS_GH_LOG}   = $gh->{log};
+	_guard_env(
+		GENESIS_HARNESS_GH_STATE => $gh->{state},
+		GENESIS_HARNESS_GH_LOG   => $gh->{log},
+	);
 
 	return $gh;
 }
@@ -2717,8 +2754,10 @@ sub child_recorder {
 		log       => $self->{child_log},
 	}));
 
-	$ENV{GENESIS_HARNESS_CHILD_PLAN} = $self->{child_plan};
-	$ENV{GENESIS_CALLBACK_BIN}       = $path;
+	_guard_env(
+		GENESIS_HARNESS_CHILD_PLAN => $self->{child_plan},
+		GENESIS_CALLBACK_BIN       => $path,
+	);
 
 	return $path;
 }
@@ -2790,8 +2829,10 @@ sub lock_probe_bin {
 		helper::get_file("$helper::TOPDIR/t/Harness/bin/lock-probe"));
 	helper::put_file($self->{lock_probe_log}, '');
 
-	$ENV{GENESIS_HARNESS_LOCK_FILE} = "$self->{a}/.git/genesis-session.lock";
-	$ENV{GENESIS_HARNESS_LOCK_LOG}  = $self->{lock_probe_log};
+	_guard_env(
+		GENESIS_HARNESS_LOCK_FILE => "$self->{a}/.git/genesis-session.lock",
+		GENESIS_HARNESS_LOCK_LOG  => $self->{lock_probe_log},
+	);
 
 	return $self->{lock_probe_bin} = $path;
 }
@@ -2826,7 +2867,7 @@ sub shuttle_spy {
 	my ($self, %opts) = @_;
 	my $log = "$self->{base}/shuttle.jsonl";
 	helper::put_file($log, '');
-	$ENV{GENESIS_SHUTTLE_SPY} = $log;
+	_guard_env(GENESIS_SHUTTLE_SPY => $log);
 	return $self->{shuttle} = bless {harness => $self, log => $log},
 		'Harness::Propagation::Spy';
 }
