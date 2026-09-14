@@ -265,7 +265,7 @@ subtest 'a holder that never takes the lock is refused, not waited out' => sub {
 	chmod 0700, "$where/.git";
 };
 
-subtest 'the wait answers on this holder and not on a file with content' => sub {
+subtest 'the wait answers on this holder, not a full file' => sub {
 	plan tests => 3;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
