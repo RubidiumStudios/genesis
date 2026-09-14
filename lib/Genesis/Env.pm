@@ -671,8 +671,11 @@ sub is_valid_env_file {
 
 	while (1) {
 		# The name and the file, through the one constructor every pipeline
-		# reader uses, so the pattern exists once (D79).
-		($env, @errors) = $class->_bare_with_errors($name, $top);
+		# reader uses, so the pattern exists once (D79).  Appended rather
+		# than assigned, so a check added above this line keeps its errors.
+		my ($bare, @bare_errors) = $class->_bare_with_errors($name, $top);
+		$env = $bare;
+		push @errors, @bare_errors;
 		last if @errors;
 
 		# Check if the environment file has genesis.env declaration
