@@ -580,6 +580,66 @@ sub exists {
 }
 
 # }}}
+# bare - build an environment with no deployment behind it {{{
+#
+# The named constructor D79 extracts from is_valid_env_file.  It performs
+# the name check and the file-existence check that sub already performs
+# and nothing else, and the object it returns resolves its ancestral
+# hierarchy through lookup, with no kit loaded and nothing connected, so
+# every genesis.pipeline.* read is the merged read rather than the leaf
+# file alone.  A leaf-only read finds an inherited key absent, silently,
+# and answers wrongly with no error, which is H35.
+#
+# The name is bare and not shallow, because shallow would read as
+# skipping the hierarchy, which is the one thing it must not do.
+sub bare {
+	my ($class, $name, $top) = @_;
+	my ($env, @errors) = $class->_bare_with_errors($name, $top);
+	bail("%s", join("\n", @errors)) if @errors;
+	return $env;
+}
+
+# }}}
+# _bare_with_errors - the name and file checks, with their errors {{{
+#
+# The one home of the pattern.  bare bails on what comes back and
+# is_valid_env_file collects it, so neither reader invents its own path.
+sub _bare_with_errors {
+	my ($class, $name, $top) = @_;
+
+	bug("No 'top' specified in call to Genesis::Env->bare!!") unless $top;
+
+	$name =~ s/\.yml$//;
+
+	my $name_err = _env_name_errors($name);
+	return (undef, "Invalid environment name #ri{$name}:$name_err")
+		if $name_err;
+
+	my $path = $top->path("$name.yml");
+	return (undef, sprintf(
+		"Environment file #C{%s} does not exist.", humanize_path($path)
+	)) unless -f $path;
+
+	# The name and the top are not enough to read through.  The merged read
+	# renders its intermediate manifests under the environment's own scratch
+	# directory, so an object with no __tmp writes them at the filesystem
+	# root, and file is the name every path helper composes from.
+	#
+	# The scratch directory is this object's own rather than the process-wide
+	# one new takes, because a manifest there is named for the environment
+	# and its signature, and that signature covers the leaf file alone.  Two
+	# bare reads of one environment across two checkouts carry the same name
+	# and the same signature while their ancestors differ, so a shared
+	# directory would answer the second read with the first one's merge.
+	return (bless({
+		name  => $name,
+		file  => "$name.yml",
+		top   => $top,
+		__tmp => workdir(),
+	}, $class));
+}
+
+# }}}
 # is_valid_env_file - check if a named environment file is valid without instantiation {{{
 sub is_valid_env_file {
 	my ($class, $name, $top) = @_;
@@ -590,7 +650,7 @@ sub is_valid_env_file {
 	) unless $top;
 
 	# Strip .yml extension if present
-	$name =~ s/.yml$//;
+	$name =~ s/\.yml$//;
 	my $path = $top->path("$name.yml");
 
 	# Check validation cache
@@ -602,17 +662,12 @@ sub is_valid_env_file {
 	# Collect all errors
 	my @errors;
 	my $yaml_src;
+	my $env;
 
 	while (1) {
-		# Validate environment name
-		my $name_err = _env_name_errors($name);
-		push @errors, "Invalid environment name #ri{$name}:$name_err" if $name_err;
-		last if @errors;
-
-		push @errors, sprintf(
-			"Environment file #C{%s} does not exist.",
-			humanize_path($path)
-		) unless -f $path;
+		# The name and the file, through the one constructor every pipeline
+		# reader uses, so the pattern exists once (D79).
+		($env, @errors) = $class->_bare_with_errors($name, $top);
 		last if @errors;
 
 		# Check if the environment file has genesis.env declaration
@@ -660,8 +715,7 @@ sub is_valid_env_file {
 
 		# If kit info not complete in main file, check hierarchical files
 		unless ($has_kit_name && $has_kit_version) {
-			my $env_obj = bless({name => $name, top => $top}, 'Genesis::Env');
-			my @env_files = $env_obj->actual_environment_files();
+			my @env_files = $env->actual_environment_files();
 			pop @env_files; # Remove main file, already checked
 			while (my $ancestor_file = pop @env_files) {
 				next unless -f $top->path($ancestor_file);
