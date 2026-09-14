@@ -152,6 +152,29 @@ subtest 'a created pull request is there when the collection is listed' => sub {
 		'and the POST was recorded with its body');
 };
 
+subtest 'a call that names a file gets the body there' => sub {
+	plan tests => 4;
+
+	my $h  = make_harness(envs => ['prod'], vault => 0, github => 1);
+	my $gh = $h->gh;
+
+	local $ENV{PATH} = join ':', $gh->{bin}, $ENV{PATH};
+	local $ENV{GITHUB_AUTH_TOKEN} = $gh->{token};
+	my $client = Service::Github->new(domain => $gh->{domain}, tls => 'no');
+
+	# This is the shape the real curl takes when it is handed a file, and
+	# the one Genesis::curl reads back, so the double has to take it too.
+	my $into = "$h->{tmp}/the-user.json";
+	my ($code, undef, $answered) = Genesis::curl(
+		{method => 'GET', file => $into}, $client->base_url . '/user');
+
+	is($code, 200, 'the call answers');
+	is($answered, $into, 'and hands back the file it was told to write');
+	ok(-f $into, 'which the double created');
+	like(helper::get_file($into), qr/"login"/,
+		'and wrote the body into rather than onto stdout');
+};
+
 subtest 'a token withheld from one run and back for the next' => sub {
 	# Two of the six are the restoration each run asserts for itself.
 	plan tests => 6;
