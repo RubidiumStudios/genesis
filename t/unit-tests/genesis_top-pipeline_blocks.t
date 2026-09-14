@@ -42,12 +42,8 @@ sub automated_pipeline_block {
 		'    repository: team/bosh',
 		'    auth:', '      vault: secret/ci/git',
 		'    identity:', '      name: Genesis', '      email: ci@example.com';
-	push @lines, '  shuttle:', '    backend: s3', '    bucket: pipes'
-		unless $opts{shuttle};
-	push @lines, '  vault:', '    url: https://vault.example.com'
-		unless $opts{vault};
-	push @lines, '  locker:', '    url: https://locker.example.com'
-		unless $opts{locker};
+	push @lines, automation_block_lines(
+		without => [grep {$opts{$_}} qw/shuttle vault locker/]);
 	return join("\n", @lines);
 }
 

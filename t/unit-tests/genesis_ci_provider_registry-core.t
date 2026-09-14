@@ -63,9 +63,7 @@ subtest 'the two spellings cannot drift' => sub {
 			enabled_pipeline('  provider:', '    type: github-actions'),
 			'    auth:', '      vault: secret/ci/git',
 			'    identity:', '      name: Genesis', '      email: ci@example.com',
-			'  shuttle:', '    backend: s3', '    bucket: pipes',
-			'  vault:', '    url: https://vault.example.com',
-			'  locker:', '    url: https://locker.example.com'))
+			automation_block_lines()))
 	} 'github-actions validates, because the registry spells it that way';
 };
 
