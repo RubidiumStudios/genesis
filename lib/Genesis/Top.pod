@@ -852,6 +852,23 @@ B<Parameters:> The environment's name, as a string.
 
 B<Returns:> The branch name, such as C<qa/bosh>.
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"deployment_slug_for expects an environment name, got a %s"> - raised (via
+C<bug()>) when the argument is a reference, because the name is passed
+straight into L</deployment_slug_for>.
+
+=item *
+
+C<"deployment_slug_for called without an environment name"> - raised (via
+C<bug()>) when the argument is missing or empty, for the same reason.
+
+=back
+
 B<Examples:>
 
     my $branch = $top->branch_for('qa');
@@ -894,6 +911,14 @@ and the deployment branch for C<pr-lab> are both C<pr-lab/bosh>.
 
 C<"The pull request branch for ... would be ..., which is the control
 branch."> - raised when the joined name is the control branch itself.
+
+=item *
+
+C<"deployment_slug_for expects an environment name, got a %s"> and
+C<"deployment_slug_for called without an environment name"> - raised (via
+C<bug()>) when the argument is a reference or is missing, because the name is
+passed straight into L</deployment_slug_for> before anything is joined onto
+it.
 
 =back
 
