@@ -155,6 +155,14 @@ sub provider_options_schema {
 		},
 	};
 }
+# The capability declaration is mandatory beside the fragment, and this
+# file is about the fragment, so the fixture claims every ability and none
+# of what it writes is gated away.
+sub capabilities {
+	return {map {($_ => 1)} qw/cross_pipeline_events deployment_locks
+		multi_file_output optional_git_triggers per_commit_runs
+		scheduled_jobs/};
+}
 1;
 TERSE
 	local @INC = ('t/tmp/lib', @INC);
@@ -202,6 +210,11 @@ sub provider_options_schema {
 		target => {type => 'string', description => 'One of the pair'},
 		url    => {type => 'string', description => 'The other of the pair'},
 	};
+}
+sub capabilities {
+	return {map {($_ => 1)} qw/cross_pipeline_events deployment_locks
+		multi_file_output optional_git_triggers per_commit_runs
+		scheduled_jobs/};
 }
 1;
 PAIRC

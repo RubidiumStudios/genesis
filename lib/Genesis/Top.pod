@@ -2061,11 +2061,12 @@ refusal in the same words whichever command loaded it.
 A section that is off is left alone. Otherwise the source-control block is
 resolved, which is where the derivations and their refusals are raised, then
 the configured provider's own programmatic check runs through
-L</_validate_provider_config>, and then every environment the deployment
+L</_validate_provider_config>, then the capability gates of
+L</_validate_capability_gates>, and then every environment the deployment
 root holds has its C<genesis.pipeline> block checked, read merged through
 L</_merged_env_params>. The refusals themselves belong to
-L</_source_control>, to L</_validate_provider_config>, and to
-L</_validate_env_pipeline_block>.
+L</_source_control>, to L</_validate_provider_config>, to
+L</_validate_capability_gates>, and to L</_validate_env_pipeline_block>.
 
 B<Returns:> 1.
 
@@ -2117,6 +2118,60 @@ B<Examples:>
     $top->_validate_provider_config;
     # exits CONFIG (78) where pipeline.provider.type is concourse and
     # pipeline.provider.target is unset
+
+=head2 _validate_capability_gates
+
+    $top->_validate_capability_gates();
+
+Refuses, at C<Genesis::Exit::CONFIG>, any configuration key whose provider
+capability is false, naming both the key and the capability.
+
+A capability is what a provider is able to do and a key is the operator's
+choice inside that ability, so a key with no ability behind it cannot mean
+anything. Four of the six capabilities gate a key:
+C<optional_git_triggers> gates C<genesis.pipeline.manual>,
+C<scheduled_jobs> gates C<genesis.pipeline.redeploy_cron>,
+C<per_commit_runs> gates C<pipeline.provider.group_commits>, and
+C<multi_file_output> gates C<pipeline.provider.output_layout>. The other two
+are structural and gate nothing configurable.
+
+A provider with no compiler class declares no capabilities and is left
+alone, which is the manual provider and, until its own compiler lands, the
+github-actions one. The two repository-wide keys are read off the validated
+configuration, and the two per-environment keys are read out of each
+environment's merged C<genesis.pipeline> block, so every gate that fires is
+gathered before the refusal is raised.
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Configuration validation failed for ..."> - raised when at least one
+configured key is gated on a capability the provider does not declare. Each
+one is listed under it, naming the key, the provider, and the capability,
+and the environment as well where the key lives in an environment file.
+
+=item *
+
+C<"Failed to load CI provider ..."> - raised when the registry names a
+compiler class whose file will not compile. The schema build normally meets
+that first.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_capability_gates;
+    # returns 1 where every configured key has its capability behind it
+
+    $top->_validate_capability_gates;
+    # exits CONFIG (78) where pipeline.provider.type is concourse and an
+    # environment sets genesis.pipeline.manual under a provider that
+    # declares optional_git_triggers false
 
 =head2 _merged_env_params
 
