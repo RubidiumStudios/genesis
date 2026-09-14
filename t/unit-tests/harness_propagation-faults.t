@@ -156,6 +156,31 @@ sub _fetch_in_child {
 		$h->a, $h->slug('qa'));
 }
 
+subtest 'a step stands above the steps it takes' => sub {
+	plan tests => 3;
+
+	my $h   = make_harness(envs => ['qa'], vault => 0);
+	my $git = fault_git($h);
+
+	# A commit handed files takes the add itself, so the pair is one outer
+	# step and one inner, and the log says which is which by their order.
+	helper::put_file($h->a . '/by-the-row.yml', "---\nwritten: true\n");
+	$git->commit('a commit the row made', 'by-the-row.yml');
+
+	is_deeply([map {$_->[0]} step_log($git)], ['commit', 'add'],
+		'the outer call is logged ahead of the step it takes');
+
+	# The line is written before the plan is consulted as well, so a step
+	# the plan fails is in the log as surely as one that went through.
+	reset_steps($git);
+	fail_on($git, 'add', 1, message => 'the harness stopped the add');
+
+	ok(!eval {$git->commit('a commit that never lands', 'by-the-row.yml'); 1},
+		'the armed step takes the commit down');
+	is_deeply([map {$_->[0]} step_log($git)], ['commit', 'add'],
+		'and the step the plan failed is in the log with the one above it');
+};
+
 subtest 'the remote can be severed and restored' => sub {
 	plan tests => 4;
 
