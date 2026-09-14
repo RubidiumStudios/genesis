@@ -233,22 +233,17 @@ sub create {
 }
 
 # }}}
-# DESTROY - restore original branch on process exit {{{
+# DESTROY - evict the flyweight entry {{{
 #
-# With flyweight caching, the instance lives for the process lifetime.
-# DESTROY fires during global cleanup, restoring the branch if needed.
+# The branch restore that used to live here has moved to the session, which
+# registers its last-resort abort through at_exit.  RF12 is why: bail exits
+# when it is not inside an eval, Perl runs END before global destruction,
+# and the order after that is undefined, so a net here fires too late or
+# not at all.
 sub DESTROY {
 	my ($self) = @_;
-	return unless $self->{_track_branch} && $self->{_original_branch};
-	my $current = eval { $self->current_branch };
-	return unless $current && $current ne $self->{_original_branch};
-	# Reset any partial changes before switching
-	run({ dir => $self->{root}, passfail => 1 },
-		'git', 'checkout', '--', '.');
-	run({ dir => $self->{root}, passfail => 1 },
-		'git', 'checkout', $self->{_original_branch});
-	trace("Service::Git: restored branch %s", $self->{_original_branch});
-	delete $_instances{$self->{root}};
+	delete $self->{_session};
+	delete $_instances{$self->{root}} if $self->{root};
 }
 
 # }}}

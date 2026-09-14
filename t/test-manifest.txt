@@ -232,6 +232,7 @@ unit-tests/service_git-preflight.t                         # the pre-flight clas
 unit-tests/service_git-remote_branch.t                     # remote_branch helper
 unit-tests/service_git_session-lifecycle.t                 # begin and finish on a clean run
 unit-tests/service_git_session-lock.t                      # the switch lock, per working tree
+unit-tests/service_git_session-sequencing.t                # sessions are sequential and keyed on the handle
 unit-tests/service_github-pr.t                             # Github PR helpers
 unit-tests/service_vault-max_json_string_value_length.t    # JSON value length guard
 unit-tests/service_vault-write_confirmation.t              # HA read-back confirmation
