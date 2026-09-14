@@ -2228,8 +2228,12 @@ sub assert_w_restored {
 	my $now = snapshot_w(bless {a => $w->{dir}}, __PACKAGE__);
 
 	my @differed;
-	push @differed, sprintf("branch: %s, was %s", $now->{branch}, $w->{branch})
-		unless $now->{branch} eq $w->{branch};
+	# Guarded with // '', the way the HEAD and the directory below are, so a
+	# copy standing on a detached or an unborn HEAD reports the difference
+	# rather than warning about an undefined value.
+	push @differed, sprintf("branch: %s, was %s",
+			$now->{branch} // '(none)', $w->{branch} // '(none)')
+		unless ($now->{branch} // '') eq ($w->{branch} // '');
 	push @differed, sprintf("HEAD: %s, was %s", $now->{head} // '(none)', $w->{head} // '(none)')
 		unless ($now->{head} // '') eq ($w->{head} // '');
 	push @differed, sprintf("current directory: %s, was %s",
