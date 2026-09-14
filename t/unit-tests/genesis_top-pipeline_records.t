@@ -20,22 +20,6 @@ use Genesis::Env;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# A stand-in for an environment's own vault, which records the path it was
-# asked for and answers whatever the row handed it.  It asserts nothing of
-# its own, so it belongs beside the one row that reads through it.
-{
-	package StandinVault;
-	sub new {
-		my ($class, $asked, $answer) = @_;
-		return bless({asked => $asked, answer => $answer}, $class);
-	}
-	sub get {
-		my ($self, $path) = @_;
-		push @{$self->{asked}}, $path;
-		return $self->{answer};
-	}
-}
-
 subtest 'the two records have two paths' => sub {
 	plan tests => 5;
 
@@ -128,9 +112,10 @@ subtest "the environment reads its record through its own vault" => sub {
 	# safe target the repository's default vault resolves through and the two
 	# stop being tellable apart in one process.  So the environment's own
 	# vault is stood in for, and the stand-in answers a set the harness never
-	# wrote.
+	# wrote.  The stand-in is the shared one, because more than one row in
+	# the suite reads through a vault it did not spin.
 	my @asked;
-	my $own = StandinVault->new(\@asked,
+	my $own = standin_vault(\@asked,
 		{dependencies => 'other/bosh', discovery => 'incomplete'});
 	no warnings 'redefine';
 	local *Genesis::Env::vault = sub {$own};
