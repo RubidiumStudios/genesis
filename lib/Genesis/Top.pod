@@ -2752,14 +2752,17 @@ the natural place to set the mount once, and that is the remedy the refusal
 carries.
 
 Each environment is read merged through L</_merged_env_params> and one that
-carries no C<genesis.pipeline> block is passed over. Where an environment
-names no mount of its own, the value resolved is the one the run time would
-answer, which is C<genesis.secrets_mount> with C<exodus/> under it and
-C</secret/> where that is unset too. Every resolved value is normalised to
-leading and trailing slashes before the comparison, so two spellings of one
-mount are one mount. It does not read C<pipeline.enabled> itself, because
-L</_validate_pipeline_config> is its only caller and has already returned
-where the section is off.
+does not carry a C<genesis.pipeline> key at all is passed over, membership
+being the key being there rather than what it holds. Where an environment
+names no mount, the value resolved is the one the run time would answer,
+which is C<genesis.secrets_mount> with C<exodus/> under it and C</secret/>
+where that is unset too. An empty value is a mount rather than an absent
+one, because C<< Genesis::Env::exodus_mount >> takes it as written, and two
+mounts the run time tells apart have to be two mounts here as well. Every
+resolved value is normalised to leading and trailing slashes before the
+comparison, so two spellings of one mount are one mount. It does not read
+C<pipeline.enabled> itself, because L</_validate_pipeline_config> is its only
+caller and has already returned where the section is off.
 
 B<Returns:> 1.
 

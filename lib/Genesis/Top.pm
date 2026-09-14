@@ -2413,8 +2413,11 @@ sub _validate_one_exodus_mount {
 		# mount is normalised before anything is appended to it so that a
 		# value written without its slashes lands where the run time would
 		# put it rather than one segment short.
+		# An empty value is taken as written rather than as unset, because
+		# Genesis::Env::exodus_mount takes it as written too, and two mounts
+		# the run time tells apart have to be two mounts here as well.
 		my $mount = $genesis->{exodus_mount};
-		unless (defined $mount && length $mount) {
+		unless (defined $mount) {
 			(my $secrets = $genesis->{secrets_mount} // '/secret/')
 				=~ s{^/?(.*?)/?$}{/$1/};
 			$mount = $secrets.'exodus/';
