@@ -40,7 +40,11 @@ subtest 'the harness builds a bare remote and two copies' => sub {
 
 	ok(-f $h->a . '/.genesis/config',
 		"the deployment root sits at copy A's own git root");
-	ok(!-e $h->a . '/bosh',
+	# The directory a root of its own would sit in is named for the
+	# deployment type, so the type is read off the harness rather than
+	# spelled out.  A harness built as another type would otherwise ask
+	# about a path that was never going to be there.
+	ok(!-e $h->a . '/' . $h->type,
 		'the root was not left in a directory of its own below it');
 
 	my $base = $h->a;
