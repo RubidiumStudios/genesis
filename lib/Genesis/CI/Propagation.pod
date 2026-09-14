@@ -266,6 +266,13 @@ A C<Genesis::Top> for the repository.  It composes every pull request
 branch, so it is required when any target has C<require_pr =E<gt> 1> and
 unused otherwise.
 
+The names are composed for all such targets before the first target is
+touched, and outside the per-target C<eval>.  Composing a name is what
+refuses a prefix that collides with a branch name, and that refusal has
+to reach the caller rather than be caught and reported as a per-env
+propagation failure.  The dry run reads the same names, so C<dry_run>
+prints the branch the real run would open and meets the same refusal.
+
 =item C<github>
 
 A C<Service::Github> instance with credentials authorised for the
@@ -483,16 +490,25 @@ B<Examples:>
 
 =head2 _report_dry_run
 
-  _report_dry_run($git, $env_name, $require_pr, $detail, $control_short);
+  _report_dry_run($git, $env_name, $pr_branch, $detail, $control_short);
 
 Reports what a propagation would do without performing it.
+
+The third argument is the pull request branch this target would open, or
+undef for a target that propagates directly.  It arrives already composed
+rather than being built here, so a dry run names the branch the real run
+would open even under a prefix that is not the default, and a prefix that
+cannot be used is refused before the dry run prints a plan.
 
 B<Returns:> nothing; output goes to the log.
 
 B<Examples:>
 
-  _report_dry_run($git, 'staging', 0, $detail, 'a1b2c3d');
+  _report_dry_run($git, 'staging', undef, $detail, 'a1b2c3d');
   # prints "staging: 3 files to propagate" and the per-file lines
+
+  _report_dry_run($git, 'staging', 'pr/staging/bosh', $detail, 'a1b2c3d');
+  # adds "PR: would open pr/staging/bosh -> staging"
 
 =head2 _pr_branch_has_control_sha
 

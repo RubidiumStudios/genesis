@@ -169,7 +169,9 @@ sub mock_github {
 # and leaves the composition itself to genesis_top-pr_branch.t.
 # =========================================================================
 sub mock_top {
-	my $self = bless {}, 'Test::Mock::PropEnvs::Top';
+	my (%opts) = @_;
+	my $self = bless {_refuse => $opts{refuse} // 0},
+		'Test::Mock::PropEnvs::Top';
 	$self;
 }
 
@@ -180,6 +182,12 @@ sub mock_top {
 
 	*{"${pkg}::pr_branch_for"} = sub {
 		my ($self, $env_name) = @_;
+		# The real accessor refuses a prefix that collides with a branch
+		# some environment already owns, and it refuses by dying, because
+		# Genesis::bail dies rather than exits wherever an eval is open.
+		# The refuse option stands in for that refusal.
+		die "pr/$env_name would collide with a deployment branch\n"
+			if $self->{_refuse};
 		return "pr/$env_name";
 	};
 }
@@ -554,6 +562,37 @@ subtest 'mixed direct + PR envs: direct envs and pr/ branches batched in one pus
 	my @branches = @{$pushes[0]}[2..$#{$pushes[0]}];
 	ok( (grep { $_ eq 'staging' }    @branches), 'direct env staging in push' );
 	ok( (grep { $_ eq 'pr/preprod' } @branches), 'PR branch pr/preprod in push' );
+};
+
+subtest 'a refusal to name a PR branch reaches the caller' => sub {
+	plan tests => 3;
+	my $git    = mock_git();
+	my $github = mock_github();
+
+	# The per-target eval turns whatever a target throws into a propagation
+	# failure, which is right for a failed checkout and wrong for a prefix
+	# the repository cannot use at all.  So the branch names are composed
+	# before the loop, and a refusal to compose one leaves by the front
+	# door, where the command can exit on the code the refusal chose.
+	my ($result, $err);
+	output_from {
+		$result = eval {
+			Genesis::CI::Propagation::propagate_envs(
+				base_args(),
+				top     => mock_top(refuse => 1),
+				git     => $git,
+				github  => $github,
+				targets => [ direct_target('staging'), pr_target('preprod') ],
+			);
+		};
+		$err = $@;
+	};
+
+	is $result, undef, 'the call does not answer';
+	like $err, qr{would collide with a deployment branch},
+		'the refusal reaches the caller unchanged';
+	is scalar($git->calls('commit')), 0,
+		'and nothing was committed before it was raised';
 };
 
 # =========================================================================

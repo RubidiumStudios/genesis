@@ -84,6 +84,19 @@ sub propagate_envs {
 		@extra_push          = ();
 	}
 
+	# Every target that opens a pull request has its branch composed here,
+	# before the first target is touched.  Composing the name is what
+	# refuses a prefix that collides with a branch a deployment or the
+	# control branch already owns, and that refusal has to reach the
+	# caller: the per-target eval below catches whatever a target throws
+	# and turns it into a propagation failure, which would report a
+	# configuration error as a transient one and exit on the wrong code.
+	# The dry run reads these names too, so --dry-run prints the branch
+	# the real run would open and meets the same refusal.
+	my %pr_branch = map {
+		($_->{env} => $top->pr_branch_for($_->{env}))
+	} grep {$_->{require_pr}} @targets;
+
 	my $propagated = 0;
 	my @skipped_idempotent;
 	my @pushed_branches;
@@ -97,8 +110,8 @@ sub propagate_envs {
 			|| { changed => [], deleted => [], renamed => {} };
 
 		if ($dry_run) {
-			_report_dry_run($git, $env_name, $require_pr, $detail,
-				$control_short);
+			_report_dry_run($git, $env_name, $pr_branch{$env_name},
+				$detail, $control_short);
 			$propagated++;
 			next;
 		}
@@ -340,7 +353,7 @@ sub _render_detail_lines {
 # }}}
 # _report_dry_run - print what would happen without doing it {{{
 sub _report_dry_run {
-	my ($git, $env_name, $require_pr, $detail, $control_short) = @_;
+	my ($git, $env_name, $pr_branch, $detail, $control_short) = @_;
 	my @to_copy = @{$detail->{changed} || []};
 	my @to_rm   = @{$detail->{deleted} || []};
 	my %renames = %{$detail->{renamed} || {}};
@@ -358,8 +371,8 @@ sub _report_dry_run {
 	info "    #R{D} %s", $_ for $git->unprefixed(@to_rm);
 	my $msg = sprintf("[pipeline] control\@%s -> %s", $control_short, $env_name);
 	info "    #Yi{commit}: %s", $msg;
-	info "    #Yi{PR}: would open pr/%s -> %s", $env_name, $env_name
-		if $require_pr;
+	info "    #Yi{PR}: would open %s -> %s", $pr_branch, $env_name
+		if defined $pr_branch;
 }
 # }}}
 # _pr_branch_has_control_sha - idempotency check for pr/<env> {{{
