@@ -1403,18 +1403,32 @@ sub actual_environment_files {
 }
 
 # }}}
-# propagation_files - git-root-relative paths this env depends on for pipeline propagation {{{
-sub propagation_files {
+# _propagation_file_kinds - the propagation set with each path marked {{{
+#
+# The one place the triggering split is decided (D68).  A triggering path is
+# one whose change means deploy me.  A non-triggering path must be current on
+# the deployment branch without its change meaning deploy me, and those are
+# .genesis/config, since nothing in it reaches the manifest, and the reaction
+# scripts under bin/, since a changed script takes effect at the next deploy
+# whenever that comes.
+#
+# The pipeline overrides file and .genesis/manifests appear nowhere here.  The
+# first is compiler input, read only when compiling, which happens on control,
+# and the second exists only where a deploy wrote it.
+#
+# Returns a hashref of git-root-relative path to 1 for triggering and 0 for
+# not.
+sub _propagation_file_kinds {
 	my ($self) = @_;
 	my %files;
 
-	# Env file hierarchy (ancestors + self) — kit-relative
+	# Env file hierarchy (ancestors + self) — kit-relative, triggering
 	for my $f ($self->actual_environment_files) {
 		$f =~ s{^\./}{};
 		$files{$f} = 1;
 	}
 
-	# Kit source (compiled tarball or dev directory)
+	# Kit source (compiled tarball or dev directory) — triggering
 	if ($self->kit->is_dev) {
 		$files{'dev/'} = 1;
 	} else {
@@ -1427,32 +1441,39 @@ sub propagation_files {
 	}
 
 	# Manifest fragments the kit's blueprint draws from the repository -- ops
-	# files and the like.  The blueprint hook is the authority on which files
-	# the merge consumes.  It needs no BOSH configs, but running any hook
-	# needs a reachable vault, which propagation already establishes before
-	# it gets here.  Fragments that live inside the kit are skipped: they
-	# already travel in the kit source above.
+	# files and the like -- triggering.  The blueprint hook is the authority
+	# on which files the merge consumes.  It needs no BOSH configs, but
+	# running any hook needs a reachable vault, which propagation already
+	# establishes before it gets here.  Fragments that live inside the kit
+	# are skipped: they already travel in the kit source above.
 	my $root = $self->path;
 	for my $f ($self->kit_files(1)) {
 		next unless $f =~ s{^\Q$root\E/}{};
 		$files{$f} = 1;
 	}
 
-	# Config
-	$files{'.genesis/config'} = 1;
+	# Config — non-triggering
+	$files{'.genesis/config'} = 0;
+
+	# The embedded genesis Top::embed writes for CI use, which is the eighth
+	# kind and reaches no branch at all today.  Triggering, because a genesis
+	# version can change rendering and hook behaviour, which is the thing a
+	# pipeline exists to prove in lab before prod.
+	$files{'.genesis/bin/genesis'} = 1;
 
 	# Kit overrides, which Genesis::Kit::metadata picks up by existence alone
-	# and which carry the credential, certificate and provided definitions.
+	# and which carry the credential, certificate and provided definitions --
+	# triggering.
 	$files{'kit-overrides.yml'} = 1 if -f $self->path('kit-overrides.yml');
 
-	# Reaction scripts
+	# Reaction scripts — non-triggering
 	my $reactions = $self->lookup('genesis.reactions', {});
 	if (ref($reactions) eq 'HASH') {
 		for my $phase (values %$reactions) {
 			next unless ref($phase) eq 'ARRAY';
 			for my $action (@$phase) {
 				next unless ref($action) eq 'HASH' && $action->{script};
-				$files{"bin/$action->{script}"} = 1;
+				$files{"bin/$action->{script}"} = 0;
 			}
 		}
 	}
@@ -1460,13 +1481,34 @@ sub propagation_files {
 	require Service::Git;
 	my $git = Service::Git->new('.');
 
-	# Prefix kit-relative paths to git-root-relative
-	my %out = map { $_ => 1 } $git->prefixed(sort keys %files);
+	# Prefix kit-relative paths to git-root-relative, keeping each mark
+	my %out;
+	for my $path (sort keys %files) {
+		my ($prefixed) = $git->prefixed($path);
+		$out{$prefixed} = $files{$path};
+	}
 
-	# Merge track_additional_files — already git-root-relative, validated
+	# The tracked extra paths are already git-root-relative and validated,
+	# and they default to triggering, because an operator declares them
+	# precisely because the deployment needs them (D68).
 	$out{$_} = 1 for $self->track_additional_files;
 
-	return sort keys %out;
+	return \%out;
+}
+
+# }}}
+# propagation_files - git-root-relative paths this env depends on for pipeline propagation {{{
+#
+# The whole set with no option, the triggering subset with triggering => 1,
+# and the non-triggering subset with triggering => 0 (D68).
+sub propagation_files {
+	my ($self, %opts) = @_;
+	my $kinds = $self->_propagation_file_kinds;
+
+	return sort keys %$kinds unless exists $opts{triggering};
+
+	my $want = $opts{triggering} ? 1 : 0;
+	return sort grep {($kinds->{$_} ? 1 : 0) == $want} keys %$kinds;
 }
 
 # }}}
