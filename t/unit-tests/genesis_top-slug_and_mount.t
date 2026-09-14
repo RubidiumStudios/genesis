@@ -25,28 +25,21 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 1, vault => 0);
 
-# Two rows in a row can ask for the same deployment type, and the harness's
-# commit needs a delta, so each load carries its own count beside the file
-# under test.
-my $loads = 0;
-
+# The deployment type is the one thing these rows vary, so the load goes
+# through the harness loader and names the type in the call, and the block
+# below is the configuration every row here shares.
+#
 # The repository is named rather than derived because copy A is cloned from
 # a bare repository at a filesystem path, whose URL carries no GitHub
 # owner/repo pair, and the derivation's own refusal belongs to the
 # source-control rows rather than to these.
 sub load_with_type {
 	my ($type) = @_;
-	commit_on_control($h, files => {
-		'.genesis/config' => join("\n",
-			'---', "deployment_type: $type", 'version: "3"',
-			'creator_version: 3.2.0', 'manifest_store: exodus',
-			'pipeline:', '  enabled: true',
-			'  source_control:', '    repository: genesis/bosh-deployments', ''),
-		'.load-count' => sprintf("%d\n", ++$loads),
-	});
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
+	return load_with($h, join("\n",
+		'manifest_store: exodus',
+		'pipeline:', '  enabled: true',
+		'  source_control:', '    repository: genesis/bosh-deployments'),
+		deployment_type => $type);
 }
 
 subtest 'the deployment type is a git ref component' => sub {

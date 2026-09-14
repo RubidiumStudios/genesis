@@ -3201,13 +3201,19 @@ sub deliver_all {
 # delta to make, so each load carries a count of its own beside the file under
 # test.  The count belongs to the harness rather than to the file, so two
 # harnesses in one file do not share one counter.
+#
+# deployment_type names the type the configuration declares, because the type
+# is a top-level key rather than part of the pipeline block, and a file whose
+# rows vary it has nowhere in the body to say so.  It defaults to bosh, which
+# is what every other caller wants.
 sub load_with {
-	my ($h, $body) = @_;
+	my ($h, $body, %opts) = @_;
 	require Genesis::Top;
 
 	$h->commit_on_control(files => {
 		'.genesis/config' => join("\n",
-			'---', 'deployment_type: bosh', 'version: "3"',
+			'---', 'deployment_type: ' . ($opts{deployment_type} // 'bosh'),
+			'version: "3"',
 			'creator_version: 3.2.0', $body, ''),
 		'.load-count' => sprintf("%d\n", ++$h->{loads}),
 	});
