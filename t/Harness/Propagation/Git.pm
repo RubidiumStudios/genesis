@@ -123,6 +123,13 @@ sub _act {
 # action runs that command at the armed call and then delegates as it always
 # would, where a fault never returns at all.
 #
+# The call is logged before it is delegated, and before the plan is consulted,
+# so a step the plan fails is in the log as surely as one that went through,
+# and a step that calls another step stands above the steps it calls rather
+# than below it.  That is why a commit carrying files reads as commit and then
+# add, which is the outer call first rather than the order the work finished
+# in.
+#
 # An entry carrying a skip returns without delegating, so the step is reported
 # in the log and its write never lands.  T119 needs that shape, because a
 # death is not a silence and a fault cannot make one.
