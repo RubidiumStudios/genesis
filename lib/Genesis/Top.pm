@@ -1184,6 +1184,56 @@ sub applied_record {
 }
 
 # }}}
+# pipeline_staleness - the environments whose pipeline no longer matches control {{{
+#
+# The one home of the comparison (D103).  The propagate pre-flight, the
+# deploy pre-flight, and pipeline-status all ask this rather than each
+# computing its own, because three copies would drift three ways.
+#
+# Three inputs go in.  The applied commit comes from the applied record.
+# The second is a path diff between that commit and control over D43's
+# known set, which is .genesis/config and every file of each
+# environment's hierarchy.  The third is each environment's compiled
+# dependency set against the set its last deploy recorded reading, which
+# is a fact where the compile's answer was a prediction (D77).
+#
+# A repository the apply has never run against reports nothing, because
+# there is no commit to be stale against; that case is the awaiting
+# pipeline-apply outcome, which is a different read.
+sub pipeline_staleness {
+	my ($self, $git) = @_;
+
+	my $applied = $self->applied_record;
+	return [] unless $applied && $applied->{control_commit};
+
+	my %changed = map {($_ => 1)} $git->diff_names(
+		$applied->{control_commit}, $self->control_branch
+	);
+
+	my @changes;
+	for my $name ($self->pipeline_env_names) {
+		my $env = Genesis::Env->bare($name, $self);
+
+		my @defining = $git->prefixed(
+			'.genesis/config',
+			map {s{^\./}{}r} $env->actual_environment_files
+		);
+		if (grep {$changed{$_}} @defining) {
+			push @changes, {env => $name, reason => 'configuration-changed'};
+			next;
+		}
+
+		my $record = $env->pipeline_record or next;
+		my $compiled  = join("\n", sort @{$record->{dependencies}});
+		my $last_read = join("\n", sort @{$env->last_read_dependencies});
+		push @changes, {env => $name, reason => 'dependencies-changed'}
+			if $compiled ne $last_read;
+	}
+
+	return \@changes;
+}
+
+# }}}
 # has_legacy_ci_yml - return true when a legacy pipeline ci.yml is present {{{
 #
 # Set at config-load time when a top-level `ci.yml` file exists AND its
