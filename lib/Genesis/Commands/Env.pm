@@ -81,6 +81,12 @@ sub create {
 		# track_branch so that prepare_branch's checkout to the env
 		# branch is restored back to control before we return.
 		$git = Service::Git->new('.', track_branch => 1);
+
+		# D80: genesis new opens no session, because it writes on the branch
+		# the operator chose and there is nothing to leave.  What it does
+		# share with begin is the pre-flight, so H20 closes for it too.
+		$git->preflight;
+
 		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 		my $branch = $git->current_branch;
 		if (!defined($branch) || $branch ne $control) {
