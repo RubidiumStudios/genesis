@@ -243,28 +243,32 @@ sub pipeline_status {
 	{
 		my $has_require_pr = grep { ($nodes->{$_}{require_pr} // 0) } keys %$nodes;
 		if ($has_require_pr && $ENV{GITHUB_AUTH_TOKEN}) {
-			my ($gh_owner, $gh_repo) = _github_owner_repo_from_remote($git);
-			if ($gh_owner && $gh_repo) {
-				my $github = Service::Github->new(org => $gh_owner);
-				# The head is matched against the branch each environment
-				# would be given, so the name this column reads and the
-				# name propagation opens come from the same accessor and
-				# cannot disagree.  The names are composed outside the
-				# eval below, because that eval is there to let missing
-				# credentials and a failed API call degrade quietly, and
-				# a prefix that collides with a branch name is neither.
-				my %pr_branch_env = map {
-					($top->pr_branch_for($_) => $_)
-				} $top->pipeline_env_names;
-				eval {
-					my $prs = $github->list_prs("$gh_owner/$gh_repo", state => 'open');
-					for my $pr (@$prs) {
-						my $env = $pr_branch_env{$pr->{head}{ref} // ''};
-						$gh_open_prs{$env} //= $pr if defined $env;
-					}
-				};
-				# Silently degrade on error — status output continues without PR info
-			}
+			# The pair the API targets is the one the source-control block
+			# resolves, so an override is honoured and the remote read is
+			# the one the pipeline uses rather than whichever remote git
+			# happens to list first.  A pair it cannot resolve was refused
+			# by name at configuration load, so there is nothing to guard.
+			my $repository = $top->source_control_repository;
+			my ($gh_owner) = split m{/}, $repository, 2;
+			my $github = Service::Github->new(org => $gh_owner);
+			# The head is matched against the branch each environment
+			# would be given, so the name this column reads and the
+			# name propagation opens come from the same accessor and
+			# cannot disagree.  The names are composed outside the
+			# eval below, because that eval is there to let missing
+			# credentials and a failed API call degrade quietly, and
+			# a prefix that collides with a branch name is neither.
+			my %pr_branch_env = map {
+				($top->pr_branch_for($_) => $_)
+			} $top->pipeline_env_names;
+			eval {
+				my $prs = $github->list_prs($repository, state => 'open');
+				for my $pr (@$prs) {
+					my $env = $pr_branch_env{$pr->{head}{ref} // ''};
+					$gh_open_prs{$env} //= $pr if defined $env;
+				}
+			};
+			# Silently degrade on error — status output continues without PR info
 		}
 	}
 
@@ -589,11 +593,10 @@ sub propagate {
 			$env_propagate->{$_} && ($nodes->{$_}{require_pr} // 0)
 		} @scope;
 		if ($needs_github) {
-			($gh_owner, $gh_repo) = _github_owner_repo_from_remote($git);
-			bail(
-				"Could not determine GitHub owner/repo from remote URL.\n".
-				"Ensure the origin remote points to a GitHub repository."
-			) unless $gh_owner && $gh_repo;
+			# Resolved rather than read off whichever remote git lists
+			# first, so the override is honoured and a repository that
+			# carries no pair was already refused by name, at load.
+			($gh_owner, $gh_repo) = split m{/}, $top->source_control_repository, 2;
 
 			unless ($no_push) {
 				bail(
@@ -996,20 +999,6 @@ sub _verify_deployed {
 	}
 }
 # }}}
-# _github_owner_repo_from_remote - parse owner and repo from the git remote URL {{{
-#
-# Supports SSH (git@github.com:owner/repo.git) and HTTPS formats.
-# Returns (owner, repo) or (undef, undef) on failure.
-sub _github_owner_repo_from_remote {
-	my ($git) = @_;
-	my $url = $git->remote_url($git->default_remote) or return (undef, undef);
-	if ($url =~ m{github\.com[:/]([^/]+)/([^/.]+?)(?:\.git)?\s*$}) {
-		return ($1, $2);
-	}
-	return (undef, undef);
-}
-# }}}
-
 # }}}
 # pipeline_graph - write pipeline.md with Mermaid flowchart {{{
 sub pipeline_graph {
