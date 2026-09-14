@@ -37,7 +37,7 @@ sub enabled_pipeline {
 }
 
 subtest 'the two spellings cannot drift' => sub {
-	plan tests => 4;
+	plan tests => 6;
 
 	my @known = Genesis::CI::Compiler::PipelineProvider->known_providers;
 	is_deeply [@known], [qw/concourse github-actions manual/],
@@ -65,6 +65,22 @@ subtest 'the two spellings cannot drift' => sub {
 			'    identity:', '      name: Genesis', '      email: ci@example.com',
 			automation_block_lines()))
 	} 'github-actions validates, because the registry spells it that way';
+
+	# Two lists that agree today agree by construction only if one is built
+	# out of the other, so the row puts a type into the registry and reads
+	# the enum the next load builds.  The name sorts after every registered
+	# type, so the rows below that read the valid-types list in order are
+	# left as they were.
+	Genesis::CI::Compiler::PipelineProvider->register_provider('zeppelin',
+		{cli_class => 'Genesis::CI::Provider::Manual'});
+
+	my $after = load_with($h, enabled_pipeline())->_repo_config_schema
+		->{pipeline}{schema}{provider}{schema}{type}{values};
+	ok scalar(grep {$_ eq 'zeppelin'} @$after),
+		'a type registered here is in the enum the next load built';
+	is_deeply $after,
+		[Genesis::CI::Compiler::PipelineProvider->known_providers],
+		'and the enum is still the whole registry and nothing else';
 };
 
 subtest 'one resolver answers for every caller' => sub {
@@ -110,6 +126,11 @@ subtest 'the provider type defaults to manual' => sub {
 subtest 'the registry refuses a bad entry rather than taking it' => sub {
 	plan tests => 4;
 
+	# Read before the two refusals rather than written out, because the row
+	# below is about what a refusal leaves behind and not about which types
+	# happen to be registered by the time it runs.
+	my @before = Genesis::CI::Compiler::PipelineProvider->known_providers;
+
 	# Without a name the entry would land under the empty string, where
 	# nothing could ever look it up again.
 	throws_ok {
@@ -144,7 +165,7 @@ subtest 'the registry refuses a bad entry rather than taking it' => sub {
 		'an entry with no CLI class is refused';
 
 	is_deeply [Genesis::CI::Compiler::PipelineProvider->known_providers],
-		[qw/concourse github-actions manual/],
+		[@before],
 		'and neither refusal left anything behind in the registry';
 };
 
