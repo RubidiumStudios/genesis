@@ -284,6 +284,18 @@ sub git_dir {
 }
 
 # }}}
+# session - the one branch session for this handle {{{
+#
+# Keyed on the handle rather than on the repository, so a caller holding two
+# handles for two working trees holds one session on each, which is what I9
+# says.  Built on the first ask and reused afterwards.
+sub session {
+	my ($self, %opts) = @_;
+	require Service::Git::Session;
+	return $self->{_session} //= Service::Git::Session->new($self, %opts);
+}
+
+# }}}
 # }}}
 
 ### Branch Operations {{{
