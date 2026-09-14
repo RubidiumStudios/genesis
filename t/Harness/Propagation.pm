@@ -990,6 +990,18 @@ sub propagation_set {
 		qr{^\Q$prefix\E\.genesis/bin/genesis$},      # the embedded genesis
 		qr{^\Q$prefix\Ekit-overrides\.yml$},
 	);
+	# The hierarchy is the ancestors and the environment's own file, which is
+	# what propagation_files joins from actual_environment_files, and Genesis
+	# names an ancestor by a cumulative hyphen-prefix of the environment.  A
+	# pattern anchored on the environment's own name alone matches the leaf
+	# and nothing above it, and a delivery written from that leaves the site
+	# file off the branch, so every genesis.pipeline.* key set there reads as
+	# absent to a command standing on the deployment branch.
+	my @tokens = split /-/, $env;
+	for my $i (0 .. $#tokens - 1) {
+		my $ancestor = join('-', @tokens[0 .. $i]);
+		push @kinds, qr{^\Q$prefix$ancestor\E\.yml$};
+	}
 	# The reactions, the ops files, and the kit source are one kind, and the
 	# environment file's own tracked list narrows that kind wherever the file
 	# at $at declares one, so a delivery made under a wider list leaves behind
