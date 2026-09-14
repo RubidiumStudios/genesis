@@ -7,7 +7,7 @@ use Genesis qw/run bail debug trace/;
 use Genesis::Exit qw/CONFIG DATAERR/;
 use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
-use Cwd qw/getcwd/;
+use Cwd qw/abs_path getcwd/;
 
 ### Class State {{{
 my %_instances;  # keyed by resolved git root path
@@ -174,8 +174,12 @@ sub new {
 	# whether there is a root here at all.  A refusal over ownership is named
 	# for what it is before the generic message gets a chance at it.
 	if ($rc || !defined($root) || $root !~ /\S/) {
+		# Named as git resolves it, which is the spelling the pre-flight
+		# names and the one git compares a safe.directory entry against, so
+		# an operator meeting this twice is handed one command both times.
 		_refuse_dubious_ownership(
-			join("\n", grep {defined && /\S/} ($err, $root)), $path);
+			join("\n", grep {defined && /\S/} ($err, $root)),
+			abs_path($path) // $path);
 		bail("Not a git repository: %s", $path);
 	}
 

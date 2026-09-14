@@ -1545,7 +1545,6 @@ sub track_additional_files {
 	require Service::Git;
 	my $git  = Service::Git->new('.');
 	my $root = $git->root;
-	return () unless $root;
 
 	# Top root = git root + git prefix (e.g., "$repo/bosh" for a bosh/ kit)
 	my $top_root = $root;

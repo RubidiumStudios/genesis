@@ -61,10 +61,15 @@ subtest 'the handle refuses to be built there for the same reason' => sub {
 	my $h    = make_harness(envs => ['qa']);
 	my $path = fixture_preflight($h, 'safe_directory');
 
+	# The same spelling the pre-flight names, because both refusals resolve
+	# the path git resolves and an operator who meets this twice should be
+	# handed one command rather than two that differ by a symlink.
+	my $resolved = Cwd::abs_path($path);
+
 	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
 
 	my ($err, $exit) = bail_from(sub { Service::Git->new($path) });
-	like($err, qr/git config --global --add safe\.directory \Q$path\E/,
+	like($err, qr/git config --global --add safe\.directory \Q$resolved\E/,
 		'the constructor names the same fix the pre-flight names');
 	unlike($err, qr/Not a git repository/,
 		'and not the generic complaint, which says the wrong thing here');

@@ -2285,16 +2285,18 @@ sub _source_control {
 		"branch's own name, so the two could not be told apart."
 	) unless length $sc{pr_prefix};
 
-	# Service::Git reports a root it could not find as the text of git's own
-	# complaint, so the check is on the root rather than on the object, and
-	# it comes before anything is asked of it.
-	my $git = Service::Git->new($self->path);
+	# Asked before the handle is built, because the constructor refuses a
+	# path under no git control with a message about the path, and what an
+	# operator who turned a pipeline on needs to hear is what a pipeline
+	# needs a repository for.
 	bail({exitcode => CONFIG},
 		"#C{pipeline} is enabled, but #C{%s} is not a git checkout.\n".
 		"A pipeline is a set of branches, so the deployment repository has ".
 		"to be under git before one can be configured.",
 		$self->path
-	) unless -d $git->{root};
+	) unless Service::Git->is_inside_work_tree($self->path);
+
+	my $git = Service::Git->new($self->path);
 
 	$sc{remote} = $config->get('pipeline.source_control.remote')
 		// $git->branch_upstream_remote($sc{control_branch})

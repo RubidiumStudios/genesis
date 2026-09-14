@@ -1828,7 +1828,9 @@ is treated as no match.
 =item C<$path>
 
 The working tree to name, and to name in the C<safe.directory> command the
-message prints.
+message prints. Both callers hand over the path as git resolves it, so an
+operator who meets this refusal twice is handed the same command both times,
+and git compares a C<safe.directory> entry against the resolved path anyway.
 
 =back
 
