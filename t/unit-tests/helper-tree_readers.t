@@ -212,4 +212,24 @@ subtest 'local_env refuses a call that throws its guard away' => sub {
 		'and the variable is left exactly as it was');
 };
 
+subtest 'vault_ok folds a multi-line failure onto one line' => sub {
+	plan tests => 3;
+
+	my @failed;
+	{
+		no warnings 'redefine';
+		local *helper::fail = sub {push @failed, $_[0]};
+		local *helper::vault_start = sub {
+			die "expected numeric value for Vault pid, but got this:\n\tnot-a-pid\n";
+		};
+		eval {helper::vault_ok('helper-t-folding-check'); 1};
+	}
+
+	is(scalar(@failed), 1, 'the failure is reported once');
+	unlike($failed[0], qr/\s\s|\n|\t/,
+		'the text handed to fail carries no newline and no run of whitespace');
+	like($failed[0], qr/numeric value for Vault pid, but got this: not-a-pid/,
+		'because the whole message folded onto one readable line');
+};
+
 done_testing;
