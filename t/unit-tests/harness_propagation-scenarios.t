@@ -244,6 +244,21 @@ subtest 'top_for can replace the whole configuration first' => sub {
 		'and the config option writes the whole file over it');
 };
 
+subtest 'a configuration can be loaded through one pipeline block' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $top = load_with($h, automated_config('concourse', 'target: ci'));
+	is($top->config->get('pipeline.provider.type'), 'concourse',
+		'the block reaches the Top the load returns');
+	is($top->config->get('pipeline.source_control.identity.name'),
+		'Genesis CI', 'the committer identity comes with it');
+
+	my $again = load_with($h, automated_config('github-actions'));
+	is($again->config->get('pipeline.provider.type'), 'github-actions',
+		'and a second load of a second block still has a delta to commit');
+};
+
 subtest 'the automation blocks answer in both forms' => sub {
 	plan tests => 3;
 

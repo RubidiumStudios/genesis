@@ -54,7 +54,7 @@ our @EXPORT = qw/
 	github_double gh_pull_request gh_close_pr gh_merge_pr
 	gh_protection gh_unreachable gh_reachable gh_no_token gh_calls
 
-	automation_blocks automation_block_lines
+	automation_blocks automation_block_lines load_with automated_config
 
 	ready_envs ready_harness seeded_harness staged due_harness gated_harness
 	held_harness held_prod tracked_harness two_env_harness inherited_harness
@@ -3129,6 +3129,61 @@ sub deliver_all {
 	$self->deliver($_, %opts, control => $control)
 		for @{$opts{envs} // $self->{envs}};
 	return $self;
+}
+
+# }}}
+# load_with - commit one pipeline block on control and load a Top on it {{{
+#
+# Eight test files declare a sub of this name and this body, which is a state
+# builder and so belongs here under the helper rule.  The body it is handed is
+# the pipeline block alone, and the rest of the configuration is written round
+# it, so a row says what it is proving and nothing else.
+#
+# Two rows in a row can ask for the same configuration, and a commit needs a
+# delta to make, so each load carries a count of its own beside the file under
+# test.  The count belongs to the harness rather than to the file, so two
+# harnesses in one file do not share one counter.
+sub load_with {
+	my ($h, $body) = @_;
+	require Genesis::Top;
+
+	$h->commit_on_control(files => {
+		'.genesis/config' => join("\n",
+			'---', 'deployment_type: bosh', 'version: "3"',
+			'creator_version: 3.2.0', $body, ''),
+		'.load-count' => sprintf("%d\n", ++$h->{loads}),
+	});
+
+	my $top = Genesis::Top->new($h->a, no_vault => 1);
+	$top->config;
+	return $top;
+}
+
+# }}}
+# automated_config - the pipeline block of an automated provider {{{
+#
+# Three test files declare this one, and it is the block load_with is most
+# often handed.  The repository is named rather than derived, because copy A
+# is cloned from a bare repository at a filesystem path whose URL carries no
+# GitHub owner and repo pair, and the derivation's own refusal belongs to the
+# source-control rows rather than to the rows that want a valid automation.
+#
+# The extra lines go under the provider, indented to that depth, so a row that
+# wants a target or a team on the provider says so in a word.
+sub automated_config {
+	my ($type, @lines) = @_;
+	return join("\n", 'pipeline:', '  enabled: true',
+		'  source_control:',
+		'    repository: genesis/bosh-deployments',
+		'    auth:',
+		'      type: ssh',
+		'      vault: secret/ci/git',
+		'    identity:',
+		'      name: Genesis CI',
+		'      email: ci@genesis.example.com',
+		'  provider:', "    type: $type",
+		(map {"    $_"} @lines),
+		automation_block_lines());
 }
 
 # }}}
