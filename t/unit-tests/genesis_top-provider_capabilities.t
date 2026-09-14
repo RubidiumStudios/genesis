@@ -34,31 +34,6 @@ my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 my @NAMES = qw/cross_pipeline_events deployment_locks multi_file_output
                optional_git_triggers per_commit_runs scheduled_jobs/;
 
-# The harness clones copy A from a bare repository at a filesystem path, so
-# the source-control block names the repository rather than deriving it,
-# and every provider here is an automated one, which is the case where the
-# clone credential and the committer identity are required beside it.
-sub automated_config {
-	my ($type, @lines) = @_;
-	return join("\n", 'pipeline:', '  enabled: true',
-		'  source_control:',
-		'    repository: genesis/bosh-deployments',
-		'    auth:',
-		'      type: ssh',
-		'      vault: secret/ci/git',
-		'    identity:',
-		'      name: Genesis CI',
-		'      email: ci@genesis.example.com',
-		'  provider:', "    type: $type",
-		(map {"    $_"} @lines),
-		# The shuttle, the vault, and the locker are required of an
-		# automation for the same reason the credential is, so every row
-		# that names one carries them too.
-		'  shuttle:', '    backend: s3', '    bucket: pipes',
-		'  vault:', '    url: https://vault.example.com',
-		'  locker:', '    url: https://locker.example.com');
-}
-
 # An assert helper: write a provider class whose capabilities are the six
 # defaults with the named ones overridden, register it, and answer with its
 # type.  Its fragment declares both repository-wide gated keys itself, for

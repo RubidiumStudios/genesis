@@ -31,33 +31,6 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 
-# The harness clones copy A from a bare repository at a filesystem path, so
-# the source-control block names the repository rather than deriving it,
-# and an automated provider is the case where the clone credential and the
-# committer identity are required beside it.  Every row that names a
-# provider other than manual goes through here, so a row adds provider
-# lines rather than a whole configuration of its own.
-sub automated_config {
-	my ($type, @lines) = @_;
-	return join("\n", 'pipeline:', '  enabled: true',
-		'  source_control:',
-		'    repository: genesis/bosh-deployments',
-		'    auth:',
-		'      type: ssh',
-		'      vault: secret/ci/git',
-		'    identity:',
-		'      name: Genesis CI',
-		'      email: ci@genesis.example.com',
-		'  provider:', "    type: $type",
-		(map {"    $_"} @lines),
-		# The shuttle, the vault, and the locker are required of an
-		# automation for the same reason the credential is, so every row
-		# that names one carries them too.
-		'  shuttle:', '    backend: s3', '    bucket: pipes',
-		'  vault:', '    url: https://vault.example.com',
-		'  locker:', '    url: https://locker.example.com');
-}
-
 sub concourse {
 	my (@lines) = @_;
 	return automated_config('concourse', 'target: ci', @lines);

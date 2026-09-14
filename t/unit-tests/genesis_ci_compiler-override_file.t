@@ -37,29 +37,6 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], provider => 'manual');
 
-# The harness clones copy A from a bare repository at a filesystem path, so
-# the source-control block names the repository rather than deriving it,
-# and every provider here is an automated one, which is the case where the
-# clone credential and the committer identity are required beside it, as
-# are the shuttle, the vault, and the locker.
-sub automated_config {
-	my ($type, @lines) = @_;
-	return join("\n", 'pipeline:', '  enabled: true',
-		'  source_control:',
-		'    repository: genesis/bosh-deployments',
-		'    auth:',
-		'      type: ssh',
-		'      vault: secret/ci/git',
-		'    identity:',
-		'      name: Genesis CI',
-		'      email: ci@genesis.example.com',
-		'  provider:', "    type: $type",
-		(map {"    $_"} @lines),
-		'  shuttle:', '    backend: s3', '    bucket: pipes',
-		'  vault:', '    url: https://vault.example.com',
-		'  locker:', '    url: https://locker.example.com');
-}
-
 # The merge rows want a deployment root of their own, because an override
 # one row writes must not be there for the next, and the harness's copy A
 # is shared by every row in the file.  A configuration is all these rows
