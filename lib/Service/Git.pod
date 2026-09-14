@@ -229,6 +229,42 @@ B<Examples:>
   my $prefix = $git->prefix;
   # returns '' when the deployment repo is the git root
 
+=head2 git_dir
+
+  my $dir = $git->git_dir;
+
+The absolute path of this working tree's git directory, as
+C<git rev-parse --absolute-git-dir> reports it. For an ordinary clone this is
+C<< <root>/.git >>; for a linked working tree it resolves under
+C<< .git/worktrees/<name>/ >>, which is what makes anything written there
+per working tree rather than per repository.
+
+Resolved once and remembered, since it cannot change while the handle lives.
+
+B<Parameters:> None.
+
+B<Returns:> The absolute git directory path.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Unable to resolve the git directory of %s" >> -- raised when git answers
+nothing. C<%s> is the working tree root.
+
+=back
+
+B<Examples:>
+
+  my $dir = $git->git_dir;
+  # returns '/home/me/deployments/.git'
+
+  my $dir = $git->git_dir;
+  # returns '/home/me/deployments/.git/worktrees/feature' in a linked
+  # working tree, so a lock written there is that working tree's alone
+
 =head2 current_branch
 
   my $branch = $git->current_branch;
@@ -504,6 +540,65 @@ B<Examples:>
 
   my $bool = $git->is_clean;
   # returns 1 even with untracked files present
+
+=head2 preflight
+
+  $git->preflight;
+
+Asks git one cheap question and classifies the answer, so that three common
+failures name their cause and their fix instead of surfacing later as a failed
+checkout or a failed commit.
+
+The three are a working tree git refuses under C<safe.directory>, a process
+with no committer identity, and a repository with no commits. The first two
+exit C<CONFIG>, because the environment is misconfigured; the third exits
+C<DATAERR>, because the repository's state is the input.
+
+The identity is asked for separately from the head, because a repository that
+has commits answers C<rev-parse> happily and only fails at the commit itself.
+An identity supplied through C<GIT_COMMITTER_*> or C<GIT_AUTHOR_*> counts, so
+a CI task that carries one in its environment passes.
+
+Returns the handle, so it chains. The branch session calls it in C<begin>, and
+C<genesis new>, which opens no session, calls it directly; they share this one
+helper rather than each classifying its own failures.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Git refuses to work in %s because it is owned by another user." >> --
+exits C<CONFIG>, and names C<git config --global --add safe.directory> as the
+fix.
+
+=item *
+
+C<< "The repository at %s has no commits, so there is no branch to leave and
+nothing to come back to." >> -- exits C<DATAERR>, and names C<git commit> as
+the fix.
+
+=item *
+
+C<< "This process has no committer identity, so git cannot record a commit in
+%s." >> -- exits C<CONFIG>, and names both C<git config user.name> and
+C<git config user.email> as the fix.
+
+=back
+
+B<Examples:>
+
+  my $git = $git->preflight;
+  # returns $self, so the session's begin chains straight on
+
+  $git->preflight;
+  # exits CONFIG naming the safe.directory command, where the working tree
+  # is owned by another user
 
 =head2 status
 

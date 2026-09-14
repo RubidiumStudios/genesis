@@ -1229,4 +1229,10 @@ that.  C<deliver_all> writes one delivery per environment at control's tip and
 answers the harness, and it is a method rather than an exported name because
 only the harness's own composition wants the whole set delivered in one line.
 
+C<preflight_bin> returns the directory the fixture C<git> sits in, and builds
+it on the first ask.  C<run_genesis> puts that directory first on the path of
+the command it runs, so a whole run meets whichever shape C<fixture_preflight>
+built; a row that calls into the library instead has no command to arrange it
+for, and puts the directory first on its own path for the length of the call.
+
 =cut

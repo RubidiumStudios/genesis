@@ -741,6 +741,18 @@ sub git {
 	return Service::Git->new($self->{$copy}, %opts);
 }
 
+# The directory the fixture git sits in, so a row that reads a pre-flight
+# shape itself can put it first on its own path for the length of the call.
+# run_genesis already arranges that for a whole command, and a row calling
+# into the library is the one caller the harness cannot arrange it for.  The
+# directory is built on the first ask, so a row may reach for it before it has
+# asked for a shape.
+sub preflight_bin {
+	my ($self) = @_;
+	$self->_preflight_git;
+	return "$self->{tmp}/bin";
+}
+
 sub slug {
 	my ($self, $env, %opts) = @_;
 	return sprintf('%s/%s', $env, $opts{type} // $self->{type});

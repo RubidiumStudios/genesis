@@ -227,6 +227,24 @@ sub root { $_[0]->{root} }
 sub prefix { $_[0]->{prefix} }
 
 # }}}
+# git_dir - the absolute git directory of this working tree {{{
+#
+# Not the same as the working tree root, and deliberately so: in a linked
+# working tree this resolves under .git/worktrees/<name>/, so a lock written
+# here is per working tree and two working trees of one repository never
+# contend, which is the scope D46 gives the switch lock.
+sub git_dir {
+	my ($self) = @_;
+	return $self->{_git_dir} if $self->{_git_dir};
+	my ($dir) = run({ dir => $self->{root} },
+		'git', 'rev-parse', '--absolute-git-dir');
+	chomp $dir if defined $dir;
+	bail("Unable to resolve the git directory of %s", $self->{root})
+		unless $dir;
+	return $self->{_git_dir} = $dir;
+}
+
+# }}}
 # }}}
 
 ### Branch Operations {{{
@@ -368,6 +386,63 @@ sub is_clean {
 	my ($status) = run({ dir => $self->{root} }, 'git', 'status', '--porcelain');
 	my @dirty = grep { /^[^?]/ } split /\n/, ($status || '');
 	return !@dirty;
+}
+
+# }}}
+# preflight - classify the three failures a switch or a commit hides {{{
+#
+# D80 keeps this in the session's begin and shares it with genesis new, the
+# one writer that never switches, so H20 closes for both without either
+# growing its own copy.  One cheap git command asks the question, and its
+# stderr is what tells the three apart: git itself names dubious ownership,
+# reports an empty HEAD, and complains about an unknown committer, and each
+# of those becomes a message naming the fix rather than a failed checkout.
+sub preflight {
+	my ($self) = @_;
+
+	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
+		'git', 'rev-parse', '--verify', 'HEAD');
+	my $said = join("\n", grep {defined && /\S/} ($err, $out));
+
+	if ($rc && $said =~ /dubious ownership|safe\.directory/i) {
+		bail({exitcode => Genesis::Exit::CONFIG},
+			"Git refuses to work in #C{%s} because it is owned by another user.\n\n".
+			"    git config --global --add safe.directory %s\n\n".
+			"Run that, then run this command again.",
+			$self->{root}, $self->{root});
+	}
+
+	if ($rc) {
+		bail({exitcode => Genesis::Exit::DATAERR},
+			"The repository at #C{%s} has no commits, so there is no branch to ".
+			"leave and nothing to come back to.\n\n".
+			"    git commit --allow-empty -m 'Initial commit'\n\n".
+			"Make the first commit, then run this command again.",
+			$self->{root});
+	}
+
+	# Identity is asked for separately, because a repository with commits
+	# answers rev-parse happily and only fails at the commit itself, which
+	# is exactly the late generic error H20 names.
+	my ($name)  = run({ dir => $self->{root}, passfail => 0 },
+		'git', 'config', '--get', 'user.name');
+	my ($email) = run({ dir => $self->{root}, passfail => 0 },
+		'git', 'config', '--get', 'user.email');
+	$name  = '' unless defined $name  && $name  =~ /\S/;
+	$email = '' unless defined $email && $email =~ /\S/;
+	$name  ||= $ENV{GIT_COMMITTER_NAME}  // $ENV{GIT_AUTHOR_NAME}  // '';
+	$email ||= $ENV{GIT_COMMITTER_EMAIL} // $ENV{GIT_AUTHOR_EMAIL} // '';
+
+	bail({exitcode => Genesis::Exit::CONFIG},
+		"This process has no committer identity, so git cannot record a ".
+		"commit in #C{%s}.\n\n".
+		"    git config user.name  \"Your Name\"\n".
+		"    git config user.email \"you\@example.com\"\n\n".
+		"Set both, then run this command again.",
+		$self->{root}
+	) unless length($name) && length($email);
+
+	return $self;
 }
 
 # }}}
