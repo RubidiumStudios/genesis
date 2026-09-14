@@ -1,6 +1,6 @@
 ---
 # Multi-File CI Pipeline Configuration
-# This is the main pipeline definition file for .genesis/ci/
+# This is the pipeline block of the pipeline: section in .genesis/config
 #
 # See: lib/Genesis/CI/Compiler/README.md for full documentation
 

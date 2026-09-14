@@ -45,10 +45,9 @@ Genesis unpauses the pipeline after a successful `set-pipeline`.
 
 `--platform` or `--provider` or `-p` activates the compiler pipeline
 instead of the legacy code path. Valid values are `concourse` and
-`github-actions`. When this flag is present, Genesis first looks for a
-`.genesis/ci/` directory. If that directory contains `pipeline.yml`, it
-uses the multi-file format. Otherwise it falls back to the `ci.yml` file
-specified by `--config`.
+`github-actions`. When this flag is present, Genesis reads the
+`pipeline:` section of `.genesis/config`. If the repository has no such
+section, it falls back to the `ci.yml` file specified by `--config`.
 
 `--output-dir` or `-o` writes compiled pipeline artifacts to a directory
 instead of deploying. This produces the pipeline YAML, an `ast.json` file

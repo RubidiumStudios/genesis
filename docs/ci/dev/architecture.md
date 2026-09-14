@@ -176,6 +176,6 @@ to it. This ensures that legacy configurations produce bit-identical output
 regardless of whether they go through the compiler pipeline or the direct
 legacy path.
 
-For non-legacy ASTs (from the multi-file `.genesis/ci/` format), the
-Concourse provider calls `_generate_native()` which serializes the
+For non-legacy ASTs (from the `pipeline:` section of `.genesis/config`),
+the Concourse provider calls `_generate_native()` which serializes the
 generic pipeline from `PipelineDescriptor` directly to YAML.

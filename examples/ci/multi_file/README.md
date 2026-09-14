@@ -1,56 +1,58 @@
-# Multi-File CI Configuration Example
+# Pipeline Section Configuration Example
 
-This directory contains a complete example of the Genesis CI multi-file configuration format.
+This directory holds one example file per block of the `pipeline:` section of `.genesis/config`, so you can read each block on its own before assembling the section.
 
-## Required vs Optional Files
+## Required vs Optional Blocks
 
-### ✅ REQUIRED Files
-
-```
-.genesis/ci/
-├── pipeline.yml          # ✅ REQUIRED - Main pipeline definition
-├── targets.yml           # ✅ REQUIRED - Deployment targets (BOSH directors)
-└── integrations.yml      # ✅ REQUIRED - Vault, Git, notifications
-```
-
-**Minimum viable configuration requires only these 3 files.**
-
-### 📋 OPTIONAL Files
+### ✅ REQUIRED Blocks
 
 ```
-.genesis/ci/
-├── scripts/                      # 📋 OPTIONAL - Custom scripts
-│   └── manifest.yml              # 📋 OPTIONAL - Explicit script metadata
+pipeline:
+├── pipeline:             # ✅ REQUIRED - Main pipeline definition
+├── targets:              # ✅ REQUIRED - Deployment targets (BOSH directors)
+└── integrations:         # ✅ REQUIRED - Vault, Git, notifications
+```
+
+**Minimum viable configuration requires only these 3 blocks.**
+
+### 📋 OPTIONAL Blocks
+
+```
+pipeline:
+├── scripts:                      # 📋 OPTIONAL - Explicit script metadata
 │                                 #              (scripts auto-discovered if not present)
-└── provider-config/              # 📋 OPTIONAL - Provider-specific overrides
-    ├── concourse.yml             # 📋 OPTIONAL - Concourse settings
-    └── github-actions.yml        # 📋 OPTIONAL - GitHub Actions settings
+└── provider_config:              # 📋 OPTIONAL - Provider-specific overrides
+    ├── concourse:                # 📋 OPTIONAL - Concourse settings
+    └── github-actions:           # 📋 OPTIONAL - GitHub Actions settings
 ```
+
+Shell scripts themselves live under `scripts/` at the root of the deployment repository, and nothing reads a `.genesis/ci/` directory any more.
 
 ### Complete Example Structure
 
 ```
-.genesis/ci/                        # CI configuration directory
-├── pipeline.yml                    # ✅ REQUIRED
-├── targets.yml                     # ✅ REQUIRED
-├── integrations.yml                # ✅ REQUIRED
-├── scripts/                        # 📋 OPTIONAL
-│   ├── manifest.yml                # 📋 OPTIONAL - Explicit script definitions
-│   ├── deploy/ 
-│   │   └── genesis-deploy.sh       # 📋 OPTIONAL - Deployment script
-│   ├── test/ 
-│   │   └── smoke-tests.sh          # 📋 OPTIONAL - Smoke test script
-│   └── maintenance/ 
-│       ├── check-kit-updates.sh    # 📋 OPTIONAL - Kit update checker
-│       └── update-kit.sh           # 📋 OPTIONAL - Kit updater
-└── provider-config/                # 📋 OPTIONAL
-    ├── concourse.yml               # 📋 OPTIONAL - Concourse overrides
-    └── github-actions.yml          # 📋 OPTIONAL - GitHub Actions overrides
+pipeline:                           # The pipeline section of .genesis/config
+├── pipeline:                       # ✅ REQUIRED
+├── targets:                        # ✅ REQUIRED
+├── integrations:                   # ✅ REQUIRED
+├── scripts:                        # 📋 OPTIONAL - Explicit script definitions
+└── provider_config:                # 📋 OPTIONAL
+    ├── concourse:                  # 📋 OPTIONAL - Concourse overrides
+    └── github-actions:             # 📋 OPTIONAL - GitHub Actions overrides
+
+scripts/                            # 📋 OPTIONAL - at the repository root
+├── deploy/
+│   └── genesis-deploy.sh           # 📋 OPTIONAL - Deployment script
+├── test/
+│   └── smoke-tests.sh              # 📋 OPTIONAL - Smoke test script
+└── maintenance/
+    ├── check-kit-updates.sh        # 📋 OPTIONAL - Kit update checker
+    └── update-kit.sh               # 📋 OPTIONAL - Kit updater
 ```
 
-## Required File Details
+## Required Block Details
 
-### 1. ✅ pipeline.yml - Main Pipeline Definition
+### 1. ✅ pipeline - Main Pipeline Definition
 
 **Required sections:**
 - ✅ `metadata.name` - Pipeline name
@@ -77,7 +79,7 @@ workflows:
 
 See [pipeline.yml](pipeline.yml) for full example with all optional features.
 
-### 2. ✅ targets.yml - Deployment Targets
+### 2. ✅ targets - Deployment Targets
 
 **Required:**
 - ✅ `targets` - At least one deployment target
@@ -107,7 +109,7 @@ targets:
 
 See [targets.yml](targets.yml) for multi-region, multi-tier example.
 
-### 3. ✅ integrations.yml - External Services
+### 3. ✅ integrations - External Services
 
 **Required:**
 - ✅ `vault.url`
@@ -143,7 +145,7 @@ See [integrations.yml](integrations.yml) for full example.
 Scripts are discovered automatically using **three methods in priority order:**
 
 #### Method 1: Explicit Manifest (Highest Priority)
-[scripts/manifest.yml](scripts/manifest.yml) - Full control over script metadata
+The `scripts:` block, shown in [scripts/manifest.yml](scripts/manifest.yml) - Full control over script metadata
 
 #### Method 2: Inline Annotations
 Scripts with `@genesis-script` annotations:
@@ -162,14 +164,14 @@ Auto-discovery from filename:
 
 ### 📋 Provider-Specific Overrides
 
-- [provider-config/concourse.yml](provider-config/concourse.yml) - Concourse-only settings
-- [provider-config/github-actions.yml](provider-config/github-actions.yml) - GitHub Actions-only settings
+- [provider-config/concourse.yml](provider-config/concourse.yml) - Concourse-only settings, under `provider_config.concourse`
+- [provider-config/github-actions.yml](provider-config/github-actions.yml) - GitHub Actions-only settings, under `provider_config.github-actions`
 
 ## Quick Start - Minimal Configuration
 
-Create these 3 files to get started:
+Write these 3 blocks into the `pipeline:` section of `.genesis/config` to get started:
 
-**`.genesis/ci/pipeline.yml`:**
+**The `pipeline` block:**
 ```yaml
 metadata:
   name: my-pipeline
@@ -182,7 +184,7 @@ workflows:
       - name: sandbox
 ```
 
-**`.genesis/ci/targets.yml`:**
+**The `targets` block:**
 ```yaml
 targets:
   sandbox:
@@ -195,7 +197,7 @@ targets:
       ca_cert: ((bosh-ca-cert))
 ```
 
-**`.genesis/ci/integrations.yml`:**
+**The `integrations` block:**
 ```yaml
 vault:
   url: https://vault.example.com
@@ -210,7 +212,7 @@ notifications:
 
 Then compile:
 ```bash
-genesis ci compile --provider concourse --ci-dir .genesis/ci
+genesis repipe --platform concourse
 ```
 
 ## Usage
@@ -221,13 +223,13 @@ genesis ci compile --provider concourse --ci-dir .genesis/ci
 cd /path/to/deployment-repo
 
 # Compile using the compiler
-genesis ci compile --provider concourse --ci-dir .genesis/ci
+genesis repipe --platform concourse
 ```
 
 ### Compile to GitHub Actions Workflow
 
 ```bash
-genesis ci compile --provider github-actions --ci-dir .genesis/ci
+genesis repipe --platform github-actions
 ```
 
 ### Generate Pipeline from Legacy Format
@@ -236,7 +238,7 @@ If you have an existing `ci.yml`, you can migrate:
 
 ```bash
 # The compiler handles both formats automatically
-genesis ci compile --provider concourse --file ci.yml
+genesis repipe --platform concourse --config ci.yml
 ```
 
 ## Secret References

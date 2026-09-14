@@ -7,7 +7,7 @@ Genesis pipelines can emit Slack notifications for pipeline events. Four styles 
 Notification config lives in the `slack:` block of your pipeline integrations:
 
 ```yaml
-# .genesis/ci/integrations.yml  (multi-file format)
+# integrations.slack in the pipeline: section of .genesis/config
 # — or —
 # integrations section of ci.yml  (legacy format)
 

@@ -15,7 +15,7 @@ for your Genesis environments, start here:
 | [Getting Started](user/getting-started.md) | Writing your first `ci.yml` and deploying a pipeline |
 | [Configuration Reference](user/configuration-reference.md) | Every option available in legacy `ci.yml` format |
 | [Layout DSL](user/layout-dsl.md) | The pipeline layout language for defining environment progression |
-| [Multi-File Configuration](user/multi-file-configuration.md) | The new `.genesis/ci/` directory format |
+| [Pipeline Section Configuration](user/multi-file-configuration.md) | The `pipeline:` section of `.genesis/config` |
 | [CLI Commands](user/cli-commands.md) | The `genesis repipe`, `graph`, and `describe` commands |
 
 ## For Developers
