@@ -99,7 +99,7 @@ subtest 'a branch only this clone has is always copy A branch' => sub {
 		'and copy B never gets one');
 };
 
-subtest 'a branch copy B is standing on is not moved under it' => sub {
+subtest 'a branch copy B stands on moves with its working tree' => sub {
 	plan tests => 2;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
@@ -109,9 +109,16 @@ subtest 'a branch copy B is standing on is not moved under it' => sub {
 	run({dir => $h->b}, 'git', 'checkout', '-q', '-B', $branch,
 		"refs/remotes/origin/$branch");
 
-	ok(!eval {move_on_r($h, $branch); 1},
-		'moving the branch copy B stands on is refused');
-	like($@, qr/has it checked out/, 'and the refusal says why');
+	# The branch gains a commit copy B has never seen, so the move has
+	# something to catch up to and the working tree has to come with it.
+	hand_commit($h, $branch, copy => 'a', push => 1);
+
+	my $moved = move_on_r($h, $branch);
+	my $files = files_at($h, $moved, copy => 'b');
+	ok(exists $files->{'by-hand.yml'},
+		'the commit the move wrote still carries what the branch had gained');
+	my ($status) = run({dir => $h->b}, 'git', 'status', '--porcelain');
+	is($status // '', '', 'and copy B is left with nothing outstanding');
 };
 
 subtest 'a divergence with no local commits still reads behind' => sub {
