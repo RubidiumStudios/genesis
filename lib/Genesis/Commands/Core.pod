@@ -147,6 +147,15 @@ C<pipeline.enabled false> records a false boolean rather than the string
 C<'false'>, which Perl would treat as true.  See
 L<Genesis::Config/_coerce_to_schema_type>.
 
+B<The sets are applied twice, around a rebuild of the schema.> Part of
+the schema is built from the configuration's own values, because the
+provider's keys are declared by whichever provider
+C<pipeline.provider.type> names.  A run that writes that type therefore
+changes the schema its other values have to be judged against, so the
+first pass puts the new type in place, the schema is rebuilt and
+installed, and the second pass coerces everything against the schema
+that is now true.  See L</_apply_pairs($config, $pairs)>.
+
 C<--set-from-file> takes a key and a path, and may be repeated.  It
 exists because a value worth putting in a file is usually one that is
 painful to quote on a command line -- a multi-line block, or text with
@@ -221,8 +230,11 @@ key.  The file is left untouched.
 
 =item C<"Cannot unset unknown configuration key%s: %s">
 
-Raised when C<--unset> names a key the schema does not define.  Names
-every unrecognised key, not just the first.
+Raised at C<Genesis::Exit::CONFIG> when C<--unset> names a key the
+schema does not define.  Names every unrecognised key, not just the
+first.  The schema consulted is the one this run has made true, so a
+key belonging to a provider the same run names with C<--set> is a key
+the same run may unset.
 
 =item C<"Cannot set and unset overlapping keys in one run: %s">
 
@@ -564,6 +576,49 @@ B<Examples:>
 
   # a scalar key: text as-is, less the trailing newline
   _pairs_from_files($cfg, ['manifest_store', './store.txt']);
+
+=head2 _apply_pairs($config, $pairs)
+
+  _apply_pairs($cfg, ['pipeline.provider.type', 'concourse']);
+
+Writes a flat key/value list onto a configuration, in order, through
+L<Genesis::Config/set> so each value is coerced to the type its schema
+declares.
+
+B<The list is read by index rather than consumed>, because
+L</config($key)> writes it twice, once on either side of a schema
+rebuild. Part of the schema is built from the configuration's own
+values -- the provider's keys are declared by whichever provider
+C<pipeline.provider.type> names -- so a run that writes that type makes
+the schema stale at the moment it writes it. The second pass coerces
+every value against the schema the first pass made true.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+The configuration to write onto.
+
+=item C<$pairs>
+
+An array reference of key/value pairs, two entries per assignment.
+
+=back
+
+B<Returns:> C<1>.
+
+B<Errors:> None of its own; C<set()> raises where it cannot write.
+
+B<Examples:>
+
+  my @pairs = ('pipeline.provider.type', 'concourse',
+               'pipeline.provider.insecure', 'false');
+  _apply_pairs($cfg, \@pairs);
+  $cfg->schema($top->_current_config_schema);
+  _apply_pairs($cfg, \@pairs);
+  # insecure is now a false boolean rather than the string 'false'
 
 =head2 _contains($ancestor, $key)
 

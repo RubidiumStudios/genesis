@@ -118,7 +118,7 @@ sub cli_opts_help {
     Deploys Genesis pipelines to a Concourse CI server using the fly CLI.
     Requires a configured fly target (see: fly login).
 
-    --ci-target <name>  (required if not set in .genesis/config ci.provider.target)
+    --ci-target <name>  (required if not set in .genesis/config pipeline.provider.target)
         The fly target alias that identifies the Concourse server.
         Create a target with: fly login -t <name> -c <url>
 
@@ -126,9 +126,10 @@ sub cli_opts_help {
         The Concourse team to use when setting the pipeline.
         Must match an existing team on the target Concourse server.
 
-    --ci-pipeline-name <name>  (optional, default: deployment type from .genesis/config)
-        Override the pipeline name used in Concourse.
-        Defaults to the repository's deployment_type (e.g., "cf", "bosh").
+    --ci-pipeline-name <name>  (optional, default: pipeline.name, else deployment type)
+        Override the pipeline name used in Concourse for this run alone.
+        Falls back to pipeline.name in .genesis/config, and then to the
+        repository's deployment_type (e.g., "cf", "bosh").
 
     --ci-pause  (optional, default: false)
         Leave the pipeline in a paused state after fly set-pipeline completes.
@@ -192,12 +193,18 @@ sub provider_options_schema {
 		target   => {type => 'string',  description => 'Fly target alias (fly login -t <target>)'},
 		url      => {type => 'string',  description => 'Concourse API URL, used by fly login'},
 		team     => {type => 'string',  default => DEFAULT_TEAM, description => 'Concourse team name'},
-		insecure => {type => 'boolean', default => DEFAULT_INSECURE, description => 'Skip TLS certificate verification'},
+		insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS certificate verification'},
 
 		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
 		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},
+
+		# The block defaults to an empty hash for the same reason the
+		# provider block itself does: validation only walks into a hash
+		# that is present, so without it the two defaults below are never
+		# reached and never resolve.
 		task     => {
 			type        => 'hash',
+			default     => {},
 			description => 'The image every emitted task runs in',
 			schema => {
 				image   => {type => 'string', default => 'genesiscommunity/concourse', description => 'Task image repository'},
@@ -205,7 +212,7 @@ sub provider_options_schema {
 			}
 		},
 
-		pause_after_set => {type => 'boolean', default => DEFAULT_PAUSE_AFTER_SET, description => 'Leave the pipeline paused after fly set-pipeline'},
+		pause_after_set => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Leave the pipeline paused after fly set-pipeline'},
 		group_commits   => {type => 'boolean', default => Genesis::Config::TRUE, description => 'Deploy the tip of what arrived rather than each commit in turn'},
 	};
 }
@@ -377,7 +384,7 @@ sub generate {
 #
 # Option resolution priority (highest to lowest):
 #   1. Caller-supplied %opts (from command-line flags via parse_cli_opts)
-#   2. provider_opts stored in $self (loaded from ci.provider: in .genesis/config)
+#   2. provider_opts stored in $self (loaded from pipeline.provider: in .genesis/config)
 #   3. Legacy $self->{layout} (backward compat)
 #   4. Built-in defaults (team: main, etc.)
 sub deploy {
@@ -394,7 +401,7 @@ sub deploy {
 	my $target = $opts{target}
 		// $self->provider_option('target')
 		// $self->{layout};
-	bail("No Concourse target specified.  Use --ci-target or set ci.provider.target in .genesis/config")
+	bail("No Concourse target specified.  Use --ci-target or set pipeline.provider.target in .genesis/config")
 		unless $target;
 
 	# Team: call-site override > provider_opts > default
@@ -407,7 +414,7 @@ sub deploy {
 		// $self->provider_option('pipeline_name')
 		// $self->{config}{pipeline}{name}
 		// ($self->{top} ? $self->{top}->type : undef);
-	bail("Cannot determine pipeline name — set ci.provider.pipeline_name or ensure deployment_type is set")
+	bail("Cannot determine pipeline name — set pipeline.name or ensure deployment_type is set")
 		unless $pipeline_name;
 
 	# Pause/expose/dry-run/insecure: call-site override > provider_opts > defaults
@@ -455,7 +462,7 @@ sub deploy {
 		$target, $pipeline_name, $dir
 	);
 
-	# Unpause pipeline (unless ci.provider.pause or --ci-pause override)
+	# Unpause pipeline (unless pipeline.provider.pause_after_set or --ci-pause)
 	unless ($pause) {
 		run({
 			interactive => 1,

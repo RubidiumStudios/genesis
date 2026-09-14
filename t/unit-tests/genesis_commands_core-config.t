@@ -13,6 +13,7 @@ use Test::Exit;
 # clobber helper's.
 use Genesis qw/mkdir_or_fail mkfile_or_fail slurp pushd popd run/;
 use Genesis::Commands;
+use Genesis::Exit;
 use Genesis::Commands::Core;
 
 $ENV{NOCOLOR} = 1;
@@ -23,16 +24,22 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 require './bin/genesis';
 
 sub config_repo {
-	my ($name) = @_;
+	my ($name, %opts) = @_;
 	my $dir = workdir($name);
+
+	# A row that switches the provider type wants the gate off, because an
+	# enabled pipeline under an automated provider also requires the clone
+	# credential and the committer identity, which is a different subject.
+	my $enabled = (exists $opts{enabled} ? $opts{enabled} : 1) ? 'true' : 'false';
+
 	mkdir_or_fail("$dir/.genesis");
-	mkfile_or_fail("$dir/.genesis/config", <<'EOF');
+	mkfile_or_fail("$dir/.genesis/config", <<EOF);
 ---
 creator_version: 3.2.0
 deployment_type: test-kit
 manifest_store: exodus
 pipeline:
-  enabled: true
+  enabled: $enabled
   provider:
     type: manual
 version: 3
@@ -378,6 +385,72 @@ subtest 'config --set-from-file parses a collection' => sub {
 	my $cfg = slurp("$dir/.genesis/config");
 	like($cfg, qr/type:\s*concourse/, "the parsed structure is stored");
 	like($cfg, qr/target:\s*prod/,    "including its other keys");
+};
+
+subtest 'config --set coerces against the provider the same run names' => sub {
+	plan tests => 2;
+
+	# Part of the schema is built from the configuration's own values: the
+	# provider's keys are declared by whichever provider the type names.  A
+	# run that writes the type and one of that provider's keys together has
+	# to coerce the second against the schema the first has just made true,
+	# or the string "false" is stored, and every non-empty string is true.
+	my $dir = config_repo('config-set-provider-boolean', enabled => 0);
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.provider.type', 'concourse',
+	                          '--set', 'pipeline.provider.insecure', 'false');
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	my $cfg = slurp("$dir/.genesis/config");
+	like($cfg, qr/type:\s*concourse/, "the provider type is saved");
+	like($cfg, qr/insecure:\s*false/,
+		"and the boolean saves as what was typed, on the run that names it");
+};
+
+subtest 'config --unset still refuses a key no schema declares' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-unset-unknown');
+	pushd $dir;
+	prepare_command('config', '--unset', 'pipeline.provider.nonesuch');
+	build_command_environment;
+
+	# The refusal exits rather than dies, so the eval Test::Exit wraps the
+	# block in has to be told to let it through.
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	my ($out, $err, $code);
+	($out, $err) = output_from {
+		$code = exit_code { Genesis::Commands::Core::config() };
+	};
+	popd;
+
+	like($err, qr/Cannot unset unknown configuration key/,
+		"a key no schema declares is still refused by name");
+	is($code, Genesis::Exit::CONFIG,
+		"and the refusal carries the configuration exit code");
+};
+
+subtest 'config --unset reads the schema the same run makes true' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-unset-new-provider-key', enabled => 0);
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.provider.type', 'concourse',
+	                          '--unset', 'pipeline.provider.team');
+	build_command_environment;
+	my $raised = '';
+	my ($out, $err) = output_from {
+		eval { Genesis::Commands::Core::config() };
+		$raised = $@;
+	};
+	popd;
+
+	unlike($err.$raised, qr/unknown configuration key/,
+		"a key the newly named provider declares is not refused as unknown");
+	like(slurp("$dir/.genesis/config"), qr/type:\s*concourse/,
+		"and the run saves what it set");
 };
 
 subtest 'config --set-from-file will not overlap --set or --unset' => sub {
