@@ -437,10 +437,12 @@ default left behind would keep answering C<has()> and C<get()> for a key
 the caller has just removed, which reads as the removal having silently
 failed.
 
-Removing a key whose ancestor holds a scalar does nothing, rather than
-failing. A schema may declare a scalar default at a top-level key, and
-nothing is stored beneath a scalar, so a path under one names no value in
-the I<default> store and there is nothing there to remove.
+Removing a key whose ancestor holds a scalar in the I<default> store does
+nothing in that store, rather than failing. A schema may declare a scalar
+default at a top-level key, and nothing is stored beneath a scalar, so a
+path under one names no value in the I<default> store and there is
+nothing there to remove. The loaded and set stores keep their older
+behaviour and still fail on such a path.
 
 The I<env> layer is not modified, so a key an environment variable
 supplies remains accessible after C<clear()>. That layer is not the
