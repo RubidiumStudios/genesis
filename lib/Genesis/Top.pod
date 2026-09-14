@@ -1812,18 +1812,14 @@ declared here, so C<Genesis::Config> refuses an undeclared key by name as the
 configuration loads, for every command rather than only for the pipeline ones.
 
 The block declares C<enabled>, which is the gate and defaults to false, the
-C<provider> hash, which is optional even once the gate is on and carries the
-automation's C<type>, C<target>, C<url>, C<team>, and C<insecure>, and
-C<name>, which is the pipeline's own label in its provider and falls back to
-the deployment type.
+C<provider> hash, which is optional even once the gate is on and whose keys
+L</_provider_options_schema> supplies, and C<name>, which is the pipeline's
+own label in its provider and falls back to the deployment type.
 
-The enum for C<pipeline.provider.type> is built from
-C<< Genesis::CI::Compiler::PipelineProvider->known_providers >>, so the schema
-and every class lookup read one list and cannot spell a provider two ways.
-The type defaults to C<manual>, and the C<provider> block itself defaults to
-an empty hash so that the type's own default still applies when the operator
-writes no provider block at all. A section that is enabled with no provider
-block is therefore a manual pipeline rather than no pipeline.
+The C<provider> block itself defaults to an empty hash so that the type's own
+default still applies when the operator writes no provider block at all. A
+section that is enabled with no provider block is therefore a manual pipeline
+rather than no pipeline.
 
 The block also declares C<source_control>, which is what the pipeline needs
 to know about the repository, in three tiers. C<remote>, C<uri>, and
@@ -1837,6 +1833,66 @@ state, so it is checked rather than configured. L</_source_control> resolves
 the tiers.
 
 B<Returns:> A hash reference.
+
+=head2 _current_config_schema
+
+    my $schema = $top->_current_config_schema();
+
+Returns the configuration schema for the version this repository holds on
+disk, which is L</_repo_config_schema> for version 3 and
+L</_repo_config_schema_v2> for anything older.
+
+It is built afresh on every call rather than read back off the
+C<Genesis::Config>. The configured provider's own fragment is merged into
+the schema as the schema is built -- see L</_provider_options_schema> --
+so a command that writes a new provider type changes the schema its keys
+have to be judged against, and the copy the load left behind is a version
+out of date. Every writer that re-validates before saving asks for this
+one.
+
+B<Returns:> A hash reference.
+
+=head2 _provider_options_schema
+
+    my $schema = $top->_provider_options_schema();
+
+Returns the schema for C<pipeline.provider>, which is the C<type> key
+every provider shares with the configured provider's own
+C<provider_options_schema> merged over it.
+
+The per-provider key table is therefore derived from the provider classes
+rather than hand-listed beside them, and a key no fragment declares is
+refused by name. The C<manual> provider has no class and so no fragment,
+so a provider key written beside C<type: manual> is refused with no
+exception. A provider class that omits its fragment is a bug at load.
+
+The enum for C<type> is built from
+C<< Genesis::CI::Compiler::PipelineProvider->known_providers >>, so the
+schema and every class lookup read one list and cannot spell a provider
+two ways, and the type defaults to C<manual>. The configured type is read
+straight off the loaded values, because this builds the schema that
+validation is about to run against and there is no validated value yet.
+
+B<Returns:> A hash reference of the provider block's declared keys.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to load CI provider ..."> - raised when the registry names a
+compiler class whose file will not load, which leaves the fragment
+unreadable and the provider's keys undeclared.
+
+=back
+
+B<Examples:>
+
+    my $schema = $top->_provider_options_schema();
+    # under type: concourse, returns the type key plus target, url, team,
+    # insecure, public, tagged, task, pause_after_set and group_commits
+    # under type: manual, returns the type key alone
 
 =head2 _pipeline_env_keys_schema
 

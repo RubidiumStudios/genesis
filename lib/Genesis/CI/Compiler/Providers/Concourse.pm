@@ -6,6 +6,7 @@ use parent 'Genesis::CI', 'Genesis::CI::Compiler::PipelineProvider';
 
 use Genesis;
 use Genesis::Top;
+use Genesis::Config;
 use Genesis::CI::Legacy;
 use Genesis::CI::Compiler::PipelineDescriptor;
 use JSON::PP;
@@ -170,66 +171,58 @@ EOF
 }
 
 # }}}
-# provider_options_schema - schema for ci.provider: when type=concourse {{{
+# provider_options_schema - schema for pipeline.provider: when type=concourse {{{
 #
-# Keys map directly to the ci.provider: sub-keys in .genesis/config.
-# This schema is used by:
-#   - Genesis::CI::Compiler::validate_config_section()
-#   - Genesis::CI::Compiler::Validator::_validate_multi_file()
+# Keys map directly to the pipeline.provider: sub-keys in .genesis/config.
+# Under D86 this fragment is the only place these keys are declared: Top
+# merges it into the generic provider block at configuration load, and the
+# generic block declares the type alone.  Under D100 that is why target,
+# url, team and insecure live here rather than beside the type, where they
+# sat unread under every other provider.
+#
+# pipeline_name is gone, because under D25 and D28 pipeline.name is the one
+# label the compiler and the status commands read, and expose is public
+# under D27 with no alias behind it.
 #
 # NOTE: notification styles, BOSH upgrade locks, and task library are
-# configuration-level features (ci/configuration.yml), not provider-level
-# options — they are documented in the cli_opts_help and POD below.
+# configuration-level features, not provider-level options — they are
+# documented in the cli_opts_help and POD below.
 sub provider_options_schema {
 	return {
-		type => {
-			type        => 'string',
-			required    => 1,
-			description => 'Provider type (must be "concourse")',
+		target   => {type => 'string',  description => 'Fly target alias (fly login -t <target>)'},
+		url      => {type => 'string',  description => 'Concourse API URL, used by fly login'},
+		team     => {type => 'string',  default => DEFAULT_TEAM, description => 'Concourse team name'},
+		insecure => {type => 'boolean', default => DEFAULT_INSECURE, description => 'Skip TLS certificate verification'},
+
+		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
+		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},
+		task     => {
+			type        => 'hash',
+			description => 'The image every emitted task runs in',
+			schema => {
+				image   => {type => 'string', default => 'genesiscommunity/concourse', description => 'Task image repository'},
+				version => {type => 'string', default => 'latest', description => 'Task image tag'},
+			}
 		},
-		target => {
-			type        => 'string',
-			description => 'Fly target alias (fly login -t <target>)',
-		},
-		url => {
-			type        => 'string',
-			description => 'Concourse API URL (informational; used by fly login)',
-		},
-		team => {
-			type        => 'string',
-			default     => DEFAULT_TEAM,
-			description => 'Concourse team name',
-		},
-		pipeline_name => {
-			type        => 'string',
-			description => 'Pipeline name override (defaults to deployment_type)',
-		},
-		expose => {
-			type        => 'boolean',
-			default     => DEFAULT_EXPOSE,
-			description => 'Make pipeline publicly viewable (fly expose-pipeline)',
-		},
-		pause_after_set => {
-			type        => 'boolean',
-			default     => DEFAULT_PAUSE_AFTER_SET,
-			description => 'Leave pipeline paused after fly set-pipeline',
-		},
-		insecure => {
-			type        => 'boolean',
-			default     => DEFAULT_INSECURE,
-			description => 'Skip TLS certificate verification (fly --skip-ssl-validation)',
-		},
+
+		pause_after_set => {type => 'boolean', default => DEFAULT_PAUSE_AFTER_SET, description => 'Leave the pipeline paused after fly set-pipeline'},
+		group_commits   => {type => 'boolean', default => Genesis::Config::TRUE, description => 'Deploy the tip of what arrived rather than each commit in turn'},
 	};
 }
 
 # }}}
 # provider_options_defaults - default values for all Concourse options {{{
+#
+# Read off the fragment rather than listed again beside it, so the two
+# cannot drift: a key whose default the fragment declares is a key whose
+# default this answers with, and a nested block states its defaults where
+# its own sub-keys are declared.
 sub provider_options_defaults {
+	my ($class) = @_;
+	my $schema  = $class->provider_options_schema();
 	return {
-		team            => DEFAULT_TEAM,
-		expose          => DEFAULT_EXPOSE,
-		pause_after_set => DEFAULT_PAUSE_AFTER_SET,
-		insecure        => DEFAULT_INSECURE,
+		map  {($_ => $schema->{$_}{default})}
+		grep {exists $schema->{$_}{default}} keys %$schema
 	};
 }
 
