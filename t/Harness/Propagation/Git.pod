@@ -36,6 +36,13 @@ builds its own handle.  The child loads this module through C<PERL5OPT> and
 C<import> makes C<< Service::Git->new >> answer with a subclass instance.  No
 file under C<lib/> changes.
 
+Both files are shared with every child, so both are written under a lock.  The
+counter's read, increment, and write happen under one exclusive lock on the
+plan file, which the harness also takes when it arms a fault from the parent,
+and a log line is appended under an exclusive lock of its own.  A row therefore
+meets its fault on the call it armed rather than a call or two later, and never
+reads back a line that two writers wrote over each other.
+
 C<Service::Git> caches one instance per repository and answers every later
 caller with it, whatever class that caller asked for, so C<fault_git>
 re-blesses the cached instance rather than building a second one.  A row that
