@@ -226,4 +226,50 @@ subtest 'the reader promotes a bare string the way the validator does' => sub {
 		'one path declared as a string still joins the propagation set';
 };
 
+# The refusal an operator reads is built out of the one the declarative
+# validator raised, so what survives that rewrite is worth its own rows.
+subtest 'a caught refusal is folded into readable bullets' => sub {
+	plan tests => 3;
+
+	my $mark = Genesis::Term::decolorize(Genesis::Term::csprintf(
+		Genesis::Term::bullet('', inline => 1, indent => 0)));
+	my $caught = join('',
+		"Configuration validation failed:\n",
+		"${mark}pipeline.require_pr: expected a boolean, got pipeline\n",
+		"${mark}pipeline.manual: expected a boolean",
+		" at lib/Genesis/Config.pm line 412.\n",
+		"\tGenesis::Config::validate called at lib/Genesis/Top.pm line 27\n");
+
+	my @errors = Genesis::Top::_first_errors($caught);
+
+	is scalar(@errors), 2, 'one error comes back per bullet';
+	is $errors[0],
+		'genesis.pipeline.require_pr: expected a boolean, got pipeline',
+		'only the key the line opens with is requalified';
+	is $errors[1], 'genesis.pipeline.manual: expected a boolean',
+		'and a file and line trailing the error is cut away with its trace';
+};
+
+subtest 'a refusal with no bullets carries only its first line' => sub {
+	plan tests => 2;
+
+	# A row above this one leaves qa carrying a block the schema refuses, so
+	# the load is given a block it accepts before the validator is replaced.
+	my $top = load_env_with({manual => 'false', require_pr => 'false'});
+
+	no warnings qw/redefine once/;
+	local *Genesis::Config::validate = sub {
+		die "the validator gave up\nand said a great deal more\nbesides\n";
+	};
+
+	my $refusal = '';
+	eval {$top->_validate_env_pipeline_block('qa', {manual => 'false'}); 1}
+		or $refusal = $@;
+
+	like $refusal, qr/the validator gave up/,
+		'the first line stands in where there is no bullet to read';
+	unlike $refusal, qr/besides/,
+		'and the rest of the caught text does not travel with it';
+};
+
 done_testing;

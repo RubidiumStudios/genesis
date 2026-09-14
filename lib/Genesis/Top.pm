@@ -2821,8 +2821,9 @@ sub _validate_env_pipeline_block {
 			# nothing behind and the block would pass.
 			my $caught = $@;
 			my @found  = _first_errors($caught);
-			push @errors, @found ? @found
-			                     : decolorize($caught // 'validation failed');
+			my ($first) = grep {length}
+				split /\n/, decolorize($caught // 'validation failed');
+			push @errors, @found ? @found : ($first // 'validation failed');
 		};
 
 	# A mapping written where a list is declared is refused outright,
@@ -2884,9 +2885,16 @@ sub _first_errors {
 	my @errors;
 	for my $part (@parts) {
 		$part =~ s/\s+/ /g;
+		# Carp::Always folds its backtrace into the bullet it was raised
+		# under, so the error is cut at the first file and line behind it
+		# and the stack stays out of what the operator reads.
+		$part =~ s/ at \S+ line \d+.*$//;
 		$part =~ s/^\s+|\s+$//g;
 		next unless length $part;
-		$part =~ s/(?<![\w.])pipeline(?![\w])/genesis.pipeline/g;
+		# Anchored to the head of the folded line, because the rewrite is
+		# for the key the error opens with and a value of the operator's
+		# that happens to carry the word is not a key.
+		$part =~ s/^pipeline(?![\w])/genesis.pipeline/;
 		push @errors, $part;
 	}
 	return @errors;
