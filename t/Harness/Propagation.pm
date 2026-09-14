@@ -129,11 +129,11 @@ sub ref_in {
 }
 
 # }}}
-# tree_of - a commit's paths, sorted, or an empty list where the ref is absent {{{
+# tree_of - a commit's paths, sorted, or an empty arrayref where the ref is absent {{{
 #
 # The stderr of the read is captured separately rather than folded into the
-# output, because a row proving an absence has to read an empty list back and
-# not git's complaint about the name it asked for.
+# output, because a row proving an absence has to read an empty arrayref back
+# and not git's complaint about the name it asked for.
 sub tree_of {
 	my ($dir, $ref) = @_;
 	my ($out, $rc) = run({dir => $dir, stderr => 0},
