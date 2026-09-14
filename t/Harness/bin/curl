@@ -17,11 +17,16 @@ my %REASON = (
 my $state_file = $ENV{GENESIS_HARNESS_GH_STATE} or exit 2;
 my $log_file   = $ENV{GENESIS_HARNESS_GH_LOG};
 
-my $json  = JSON::PP->new->canonical;
-my $state = $json->decode(do {
-	open my $fh, '<', $state_file or exit 2;
-	local $/; <$fh>;
-});
+my $json = JSON::PP->new->canonical;
+
+# The state file is read, changed, and written under one exclusive lock held
+# from here until the answer is settled, because a create rewrites the file
+# whole and the parent's own helpers read and change it too, so two unlocked
+# read-modify-writes lose one another's change.  The parent takes the same
+# lock when it reaches in.
+open my $state_fh, '+<', $state_file or exit 2;
+flock($state_fh, LOCK_EX) or exit 2;
+my $state = $json->decode(do {local $/; <$state_fh>});
 
 # HEAD is a flag letter inside the first bundle rather than a method, because
 # that is how Genesis::curl spells it, and it wants its headers on stdout.
@@ -41,7 +46,12 @@ while (@argv) {
 # header, because a row asking whether a run carried one is asking about the
 # environment the run was given.
 if ($log_file) {
+	# The lock is held for the append, because two calls running at once
+	# would otherwise interleave a line and leave a reader decoding half of
+	# each.
 	open my $fh, '>>', $log_file or exit 2;
+	flock($fh, LOCK_EX) or exit 2;
+	seek($fh, 0, 2);
 	print $fh $json->encode({
 		method => $method, url => $url, body => $body,
 		token  => $ENV{GITHUB_AUTH_TOKEN},
@@ -87,9 +97,10 @@ if (!defined $url) {
 			created_at => '2026-09-13T00:00:00Z',
 			reviews => [],
 		};
-		open my $fh, '>', $state_file or exit 2;
-		print $fh $json->encode($state);
-		close $fh;
+		seek($state_fh, 0, 0);
+		truncate($state_fh, 0);
+		print $state_fh $json->encode($state);
+		close $state_fh;
 		$status = 201;
 		$answer = {number => $number};
 	}
