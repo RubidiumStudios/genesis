@@ -13,11 +13,28 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
+use Genesis::Exit;
 use Genesis::Top;
 use Genesis::Env;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
+
+# A stand-in for an environment's own vault, which records the path it was
+# asked for and answers whatever the row handed it.  It asserts nothing of
+# its own, so it belongs beside the one row that reads through it.
+{
+	package StandinVault;
+	sub new {
+		my ($class, $asked, $answer) = @_;
+		return bless({asked => $asked, answer => $answer}, $class);
+	}
+	sub get {
+		my ($self, $path) = @_;
+		push @{$self->{asked}}, $path;
+		return $self->{answer};
+	}
+}
 
 subtest 'the two records have two paths' => sub {
 	plan tests => 5;
@@ -91,6 +108,69 @@ subtest 'no environment can claim the applied record address' => sub {
 	my $name = '_pipelines';
 	isnt($top->applied_record_path, $top->deployment_slug_for($name),
 		'and the record address is reachable by no environment slug');
+};
+
+subtest "the environment reads its record through its own vault" => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	fixture_pipeline_record($h, 'qa', dependencies => ['lab/bosh']);
+
+	my $top = Genesis::Top->new($h->a);
+	my $env = Genesis::Env->bare('qa', $top);
+	my $path = $env->pipeline_record_path;
+
+	# An environment that sets genesis.vault keeps its exodus record, and so
+	# the pipeline subpath beside it, in a vault of its own, and reading that
+	# subpath through the repository's vault would answer undef and drop the
+	# environment out of the walk.  The harness cannot stand a second live
+	# vault up beside its own to show that, because spinning one switches the
+	# safe target the repository's default vault resolves through and the two
+	# stop being tellable apart in one process.  So the environment's own
+	# vault is stood in for, and the stand-in answers a set the harness never
+	# wrote.
+	my @asked;
+	my $own = StandinVault->new(\@asked,
+		{dependencies => 'other/bosh', discovery => 'incomplete'});
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub {$own};
+
+	my $record = $env->pipeline_record;
+
+	is_deeply(\@asked, [$path],
+		"the environment's own vault is the one asked, at its own path");
+	is_deeply($record->{dependencies}, ['other/bosh'],
+		'and the set that vault holds is the one that comes back');
+	is($record->{discovery}, 'incomplete', 'with the mark beside it');
+};
+
+subtest 'a pipeline with no environment cannot address its record' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => [], vault => 0);
+
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	my $path = eval {
+		Genesis::Top->new($h->a, no_vault => 1)->applied_record_path
+	};
+	my $err = $@;
+
+	is($path, undef, 'the address does not answer');
+	like($err, qr{no environment to resolve},
+		'and the refusal says there is nothing to read the mount from');
+
+	# An exit code only exists in a process that exits, and bail dies rather
+	# than exiting whenever it is reached from inside an eval, which a test
+	# file always is.  So the refusal is provoked in a process of its own and
+	# its status is read back from there.
+	my $cmd = sprintf(
+		q{%s -I%s/lib -MGenesis::Top -e '}.
+		q{Genesis::Top->new($ARGV[0], no_vault => 1)->applied_record_path}.
+		q{' %s},
+		$^X, $helper::TOPDIR, $h->a
+	);
+	run_fails($cmd, Genesis::Exit::CONFIG,
+		'the refusal exits Genesis::Exit::CONFIG');
 };
 
 done_testing;
