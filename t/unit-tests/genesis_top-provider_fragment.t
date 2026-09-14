@@ -250,4 +250,42 @@ PAIRC
 	}
 };
 
+# A provider's own check runs inside the load, so what it does when it goes
+# wrong is the load's problem rather than the operator's.
+subtest 'a provider that goes wrong is still a configuration refusal' => sub {
+	plan tests => 3;
+
+	put_file('t/tmp/lib/Genesis/CI/Provider/Boom.pm', <<'BOOM');
+package Genesis::CI::Provider::Boom;
+sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
+sub validate_config {die "the provider fell over\n"}
+1;
+BOOM
+	put_file('t/tmp/lib/Genesis/CI/Provider/Quiet.pm', <<'QUIET');
+package Genesis::CI::Provider::Quiet;
+sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
+sub validate_config {return (undef)}
+1;
+QUIET
+	local @INC = ('t/tmp/lib', @INC);
+	Genesis::CI::Compiler::PipelineProvider->register_provider('boom', {
+		cli_class => 'Genesis::CI::Provider::Boom',
+		cli_file  => 'Genesis/CI/Provider/Boom.pm',
+	});
+	Genesis::CI::Compiler::PipelineProvider->register_provider('quiet', {
+		cli_class => 'Genesis::CI::Provider::Quiet',
+		cli_file  => 'Genesis/CI/Provider/Quiet.pm',
+	});
+
+	my $refusal = '';
+	eval {load_with(automated_config('boom')); 1} or $refusal = $@;
+	like $refusal, qr/Invalid configuration for the boom provider/,
+		'a provider that dies is reported as the refusal it is';
+	like $refusal, qr/the provider fell over/,
+		'and the operator is told what the provider said';
+
+	lives_ok {load_with(automated_config('quiet'))}
+		'a provider that answers with a bare undef reports no error at all';
+};
+
 done_testing;
