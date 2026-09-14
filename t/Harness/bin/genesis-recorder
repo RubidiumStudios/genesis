@@ -52,11 +52,17 @@ if (defined $plan->{exit}) {
 			exec {$plan->{real}} $plan->{real}, @ARGV;
 			POSIX::_exit(127);
 		}
-		until (waitpid($pid, POSIX::WNOHANG()) == $pid) {
+		# The loop ends on any answer other than 0, because 0 is the one
+		# answer that means the child is still running.  A child somebody
+		# else has already reaped answers -1, and a loop that waits for
+		# the pid it forked would spin on that until the suite's own
+		# timeout took it.
+		my $reaped = 0;
+		while (!($reaped = waitpid($pid, POSIX::WNOHANG()))) {
 			push @{$record{lock_seen}}, probe($plan->{lock});
 			select undef, undef, undef, 0.05;
 		}
-		$exit = $? >> 8;
+		$exit = $reaped == $pid ? $? >> 8 : 0;
 
 	} else {
 		system {$plan->{real}} $plan->{real}, @ARGV;
@@ -138,10 +144,25 @@ sub hold_the_lock {
 	}
 
 	# Wait for the holder to have the lock, so the child never races it.
+	# The holder writes its pid as soon as it has the lock, so a file with
+	# something in it is a lock that is held.  Every turn asks whether the
+	# holder is still running as well, because a holder that could not open
+	# the lock file exits and no amount of waiting will grow the file, and
+	# a wait that ran out is a lock nobody took either.  Both say so here
+	# rather than letting a row assert a refusal against a lock that was
+	# never held.
+	my $taken = 0;
 	for (1 .. 100) {
-		last if -s $plan->{lock};
+		if (-s $plan->{lock}) {
+			$taken = 1;
+			last;
+		}
+		die "the recorder's lock holder exited before it took the lock\n"
+			if waitpid($pid, POSIX::WNOHANG()) != 0;
 		select undef, undef, undef, 0.05;
 	}
+	die "the recorder's lock holder did not take the lock in five seconds\n"
+		unless $taken;
 	return $pid;
 }
 
