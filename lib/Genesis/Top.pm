@@ -2719,10 +2719,17 @@ sub _validate_manifest_store {
 sub _merged_env_params {
 	my ($self, $env_name) = @_;
 
-	# Three checks walk every environment, and every pass used to spawn one
-	# spruce run per file, so an ancestor was parsed once per descendant per
-	# pass.  The answer is kept on the instance instead, which leaves all
-	# three callers as they were written.
+	# Five call sites walk every environment, and every pass used to spawn
+	# one spruce run per file, so an ancestor was parsed once per descendant
+	# per pass.  The answer is kept on the instance instead, which leaves
+	# every one of those callers as it was written.
+	#
+	# There is no invalidator and none is wanted yet.  All five run from
+	# _validate_pipeline_config, config runs that once behind its own memo,
+	# and nothing writes an environment file between the first read and the
+	# last.  _validate_env_pipeline_block is the only caller that writes
+	# into what it was handed, and it copies the top level before it does.
+	# A caller added after a file is written would need one.
 	return $self->{__merged_env_params}{$env_name}
 		if $self->{__merged_env_params}{$env_name};
 
