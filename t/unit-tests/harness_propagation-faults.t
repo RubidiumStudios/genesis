@@ -143,27 +143,17 @@ subtest 'the plan reaches a spawned command' => sub {
 };
 
 # _fetch_in_child - fetch one branch from a child perl, under the environment
-# run_genesis builds for a spawned command.  It is the machinery the rows
-# above need rather than repository state, so it sits beside them.
+# a spawned command runs in.  It is the machinery the rows above need rather
+# than repository state, so it sits beside them.  The environment itself comes
+# from the harness, which composes the same block for a whole command, so what
+# a spawned command needs is said in one place and not in three.
 sub _fetch_in_child {
 	my ($h) = @_;
 	# Not the control branch, which copy A has checked out, because git
 	# refuses a forced fetch into the branch the working tree is on.
-	my $branch = $h->slug('qa');
-	return run({
-			dir      => $h->a,
-			stderr   => 0,
-			passfail => 0,
-			env      => {
-				GENESIS_HARNESS_GIT_PLAN => $ENV{GENESIS_HARNESS_GIT_PLAN},
-				GENESIS_HARNESS_GIT_LOG  => $ENV{GENESIS_HARNESS_GIT_LOG},
-				PERL5OPT => join(' ',
-					'-I' . $helper::TOPDIR . '/t', '-I' . $helper::TOPDIR . '/lib',
-					'-MHarness::Propagation::Git'),
-			},
-		}, 'perl', '-e',
+	return $h->run_in_child(
 		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branch($ARGV[1]);',
-		$h->a, $branch);
+		$h->a, $h->slug('qa'));
 }
 
 subtest 'the remote can be severed and restored' => sub {
