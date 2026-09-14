@@ -188,6 +188,30 @@ subtest 'a second harness arms its own plan, not the first harness plan' => sub 
 		'which the second one never wrote into');
 };
 
+subtest 'a root creation that dies puts the vault names back' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	require Genesis::Top;
+	local $ENV{SAFE_TARGET} = 'the-target-this-row-set';
+
+	# A create that dies after it has pointed the two names at the root it
+	# was building, which is the path a save and a restore written either
+	# side of the call never reaches.
+	no warnings 'redefine';
+	local *Genesis::Top::create = sub {
+		$ENV{SAFE_TARGET}          = 'the-target-the-create-set';
+		$ENV{GENESIS_TARGET_VAULT} = 'the-vault-the-create-set';
+		die "the create refused
+";
+	};
+
+	ok(!eval {add_deployment_root($h, type => 'vault', envs => []); 1},
+		'the create that died took the caller down with it');
+	is($ENV{SAFE_TARGET}, 'the-target-this-row-set',
+		'and the name it set is back as the row left it');
+};
+
 subtest 'the seeded pipeline section takes the shapes the option names' => sub {
 	plan tests => 9;
 
