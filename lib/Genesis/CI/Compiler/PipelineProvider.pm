@@ -216,6 +216,48 @@ sub provider_options_schema {
 }
 
 # }}}
+# capabilities - what this provider can do, as six booleans {{{
+#
+# D101's declaration, and the companion to provider_options_schema.  A
+# capability says what the provider is able to do; a configuration key is
+# the operator's choice inside that ability, and a key whose capability is
+# false is refused at load naming both.  The six names are the abilities
+# rather than any provider's spelling of them:
+#
+#   deployment_locks       serialise jobs against a named BOSH deployment's
+#                          lock pool, with D22's reader-writer semantics
+#   cross_pipeline_events  signal at a distance, so a job in one pipeline
+#                          causes a run in another
+#   optional_git_triggers  emit a branch input that does not fire on a git
+#                          change
+#   scheduled_jobs         run a job on a schedule
+#   per_commit_runs        run once per input version rather than only on
+#                          the newest
+#   multi_file_output      emit more than one file
+#
+# Mandatory for the same reason the fragment is: a provider whose
+# abilities are unknown cannot have its keys gated.
+sub capabilities {
+	my ($self) = @_;
+	bug("Subclass '%s' must implement capabilities()", ref($self) || $self);
+}
+
+# }}}
+# capability_gates - which configuration key each capability gates {{{
+#
+# Two of the six gate nothing configurable, since deployment_locks and
+# cross_pipeline_events are structural and their absence is D74's "no such
+# capability" outcome rather than a refused key.
+sub capability_gates {
+	return {
+		optional_git_triggers => 'genesis.pipeline.manual',
+		scheduled_jobs        => 'genesis.pipeline.redeploy_cron',
+		per_commit_runs       => 'pipeline.provider.group_commits',
+		multi_file_output     => 'pipeline.provider.output_layout',
+	};
+}
+
+# }}}
 # provider_options_defaults - default values for provider options {{{
 #
 # Returns a flat hashref of key => default_value.  Keys match those in

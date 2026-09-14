@@ -1891,6 +1891,11 @@ sub _validate_pipeline_config {
 	$self->_source_control;
 	$self->_validate_provider_config;
 
+	# Before the environment blocks are read for their shape, because a key
+	# with no ability behind it is a fact about the provider rather than
+	# about how the operator wrote the block.
+	$self->_validate_capability_gates;
+
 	# Every environment's genesis.pipeline block, read merged under D79.
 	# A file whose genesis key is not a hash at all carries no block to
 	# check, and is left to whatever reads the environment itself.
@@ -1941,6 +1946,84 @@ sub _validate_provider_config {
 		"Invalid configuration for the #C{%s} provider:\n%s",
 		$type, join("\n", map {"  - $_"} @errors)
 	);
+}
+
+# }}}
+# _validate_capability_gates - refuse a key whose capability is false {{{
+#
+# Under D101 a key is the operator's choice inside an ability the provider
+# has.  Where the ability is absent the key cannot mean anything, so it is
+# refused at load naming both the key and the capability, rather than
+# being accepted and quietly ignored when the pipeline is emitted.
+sub _validate_capability_gates {
+	my ($self) = @_;
+
+	require Genesis::CI::Compiler::PipelineProvider;
+	my $type = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
+	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
+
+	# A provider with no compiler class declares no capabilities, which is
+	# manual under D100 and github-actions until its own compiler lands.
+	# There is no declaration to gate against, so nothing is refused.
+	return 1 unless $info && $info->{class};
+
+	unless (eval {require $info->{file}; 1}) {  ## no critic
+		# Copied first, because bail's own readers run evals that clear it.
+		my $err = $@;
+		bail("Failed to load CI provider '%s': %s", $type, $err);
+	}
+
+	my $caps  = $info->{class}->capabilities;
+	my $gates = Genesis::CI::Compiler::PipelineProvider->capability_gates;
+
+	# The gates that are going to fire are separated by where their key
+	# lives before anything is read, so the environment files are walked
+	# once rather than once for every capability.
+	my (%env_gates, %repo_gates);
+	for my $capability (sort keys %$gates) {
+		next if $caps->{$capability};
+		my $key = $gates->{$capability};
+		if ($key =~ s/^genesis\.pipeline\.//) {
+			$env_gates{$key} = $capability;
+		} else {
+			$repo_gates{$key} = $capability;
+		}
+	}
+	return 1 unless %env_gates || %repo_gates;
+
+	my @errors;
+	for my $key (sort keys %repo_gates) {
+		next unless $self->config->has($key);
+		push @errors, sprintf(
+			"#R{%s}: the #C{%s} provider does not declare the #C{%s} capability",
+			$key, $type, $repo_gates{$key}
+		);
+	}
+
+	if (%env_gates) {
+		for my $env_name ($self->_env_file_names) {
+			my $genesis = $self->_merged_env_params($env_name)->{genesis};
+			next unless ref($genesis) eq 'HASH';
+			my $block = $genesis->{pipeline};
+			next unless ref($block) eq 'HASH';
+			for my $key (sort keys %env_gates) {
+				next unless exists $block->{$key};
+				push @errors, sprintf(
+					"#R{genesis.pipeline.%s} in #C{%s}: the #C{%s} provider ".
+					"does not declare the #C{%s} capability",
+					$key, $env_name, $type, $env_gates{$key}
+				);
+			}
+		}
+	}
+
+	bail({exitcode => CONFIG},
+		"Configuration validation failed for #C{%s}:%s",
+		$self->path('.genesis/config'),
+		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
+	) if @errors;
+
+	return 1;
 }
 
 # }}}
