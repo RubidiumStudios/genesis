@@ -541,12 +541,14 @@ sub _create_root {
 	# The create points GENESIS_ROOT at the root it just built and names the
 	# repository's vault in GENESIS_TARGET_VAULT and SAFE_TARGET.  Under
 	# no_vault that name is the empty string, which is not the same as having
-	# no target at all, so both are guarded and GENESIS_ROOT is pointed at
-	# where the root actually ends up.  The guard rather than a pair of reads
-	# and writes around the call, because a create that dies would otherwise
-	# leave the fixture's vault names standing in the parent.
+	# no target at all, so all three are guarded and GENESIS_ROOT is pointed
+	# at where the root actually ends up once the guard has gone.  The guard
+	# rather than a pair of reads and writes around the call, because a create
+	# that dies would otherwise leave the fixture's vault names standing in the
+	# parent and GENESIS_ROOT naming a scratch directory nothing will keep.
 	my $made = do {
 		my $guard = helper::local_env(
+			GENESIS_ROOT         => $ENV{GENESIS_ROOT},
 			GENESIS_TARGET_VAULT => $ENV{GENESIS_TARGET_VAULT},
 			SAFE_TARGET          => $ENV{SAFE_TARGET},
 		);
