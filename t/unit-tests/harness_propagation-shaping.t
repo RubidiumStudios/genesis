@@ -189,7 +189,7 @@ subtest 'a second harness arms its own plan, not the first harness plan' => sub 
 };
 
 subtest 'the two shapes an environment file refuses are named' => sub {
-	plan tests => 4;
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 
@@ -205,6 +205,12 @@ subtest 'the two shapes an environment file refuses are named' => sub {
 		'a list holding a reference is refused');
 	like($@, qr/the list pipeline\.track_additional_files/,
 		'and the refusal names the whole path, not the leaf alone');
+
+	ok(!eval {write_env_file($h, 'qa',
+			pipeline => {track_additional_files => [[]]}); 1},
+		'the same list handed in through the pipeline option is refused too');
+	like($@, qr/the list pipeline\.track_additional_files/,
+		'and both routes into the writer name the one path');
 };
 
 subtest 'a whole configuration can be staged without a commit' => sub {

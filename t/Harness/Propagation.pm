@@ -1758,7 +1758,11 @@ sub write_env_file {
 	$body .= _yaml_pair($_, $genesis{$_}, 1) for sort keys %genesis;
 	if (%pipeline) {
 		$body .= "  pipeline:\n";
-		$body .= _yaml_pair($_, $pipeline{$_}, 2) for sort keys %pipeline;
+		# The parent is named here as well, so a key refused through the
+		# pipeline option is refused by the same path as the same key handed
+		# in nested under genesis.
+		$body .= _yaml_pair($_, $pipeline{$_}, 2, 'pipeline')
+			for sort keys %pipeline;
 	}
 
 	helper::put_file("$self->{a}/$path", $body);
