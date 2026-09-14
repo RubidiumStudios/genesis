@@ -2800,6 +2800,12 @@ sub _validate_env_pipeline_block {
 	# is not a list by splitting it as though it came from the environment,
 	# which turns a mapping into the address of a reference and hides the
 	# fault from anything that reads the block afterwards.
+	#
+	# The copy is shallow, and that is enough while all three of these keys
+	# are lists of strings: what the checks below read is the reference the
+	# operator's own value came in as, and nothing between here and them
+	# writes through it.  A key that grows a nested subtype would need a
+	# deep copy instead.
 	my %raw = map {$_ => $block{$_}} @list_keys;
 
 	my @errors;
