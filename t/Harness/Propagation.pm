@@ -47,7 +47,7 @@ our @EXPORT = qw/
 
 	fault_git fail_on skip_on step_log reset_steps
 	sever_remote restore_remote
-	hold_session_lock release_session_lock
+	hold_session_lock release_session_lock fork_and_switch
 	child_recorder child_runs lock_probe lock_probe_log
 	shuttle_spy shuttle_requests
 
@@ -2781,6 +2781,40 @@ sub release_session_lock {
 	waitpid($pid, 0);
 	delete $HOLDERS{$pid};
 	return $self;
+}
+
+# }}}
+# fork_and_switch - open a session and switch in a process of its own {{{
+#
+# An flock is held by a process, so a second attempt made in this one would
+# find the handle this one already holds and take the lock rather than meet
+# it.  The switch therefore happens in a whole second process, and the row
+# weighs that process's exit code rather than trapping a death here.
+#
+# The include paths are spelled absolutely through $helper::TOPDIR, because
+# the child runs from a copy of the repository under test and a relative -I
+# would name that copy's own lib rather than the tree's.
+#
+# The exit code is handed back exactly as run gives it, since run has already
+# shifted $?, and shifting it a second time turns every real code into a zero.
+sub fork_and_switch {
+	my ($self, $branch, %opts) = @_;
+	my $dir = $self->{$opts{copy} // 'a'};
+
+	my ($out, $rc, $err) = run({dir => $dir, passfail => 0, stderr => 0},
+		$^X,
+		'-I' . $helper::TOPDIR . '/lib',
+		'-I' . $helper::TOPDIR . '/t',
+		'-e', <<'PERL', $dir, $self->{control}, $branch);
+use Genesis;
+use Service::Git;
+my ($root, $control, $branch) = @ARGV;
+my $session = Service::Git->new($root)->session(control => $control);
+$session->begin;
+$session->switch($branch);
+$session->finish;
+PERL
+	return {out => $out, err => $err, exit => $rc};
 }
 
 # }}}

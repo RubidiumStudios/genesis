@@ -748,6 +748,19 @@ reaps whatever is still registered when the file finishes, so a row that dies
 between forking a holder and releasing it costs the run nothing beyond its own
 failure.
 
+=head2 fork_and_switch($h, $branch, %opts)
+
+Opens a branch session in a process of its own and switches it to C<$branch>,
+answering a hashref of C<out>, C<err>, and C<exit>.  A row uses it because an
+C<flock> is held by a process, so a second attempt made in the test's own
+process would find the handle that process already holds and take the lock
+rather than meet it.  The one option is C<copy>, default C<a>.
+
+The child spells its include paths absolutely, since it runs from a copy of
+the repository under test and a relative C<-I> would name that copy's own
+C<lib>.  The exit code is handed back as C<run> gives it, which is already
+shifted.
+
 =head2 github_double($h, %opts)
 
 Stands the GitHub double up as a fixture C<curl> first on the path, backed by
