@@ -22,13 +22,6 @@ use Genesis::Top;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# The three URL rows hand copy A a github.com remote, and set_remotes fetches
-# every remote it is given.  Neither variable is about what this file proves;
-# they are here so that a fetch nobody wants cannot stop to ask an operator
-# for a password on a machine whose credential helper would prompt.
-$ENV{GIT_TERMINAL_PROMPT} = 0;
-$ENV{GIT_ASKPASS} = '/bin/false';
-
 subtest 'remote is the control branch upstream' => sub {
 	plan tests => 2;
 
@@ -92,7 +85,11 @@ subtest 'repository parses owner and repo from either url shape' => sub {
 			vault          => 0,
 			source_control => {repository => undef},
 		);
-		set_remotes($h, remotes => {origin => $url}, upstream => 'origin');
+		# The url is here to be parsed and never to be talked to, so the
+		# remote goes in without a fetch and the row stays on this
+		# machine.
+		set_remotes($h, remotes => {origin => $url}, upstream => 'origin',
+			fetch => 0);
 		my $top = Genesis::Top->new($h->a, no_vault => 1);
 
 		is($top->source_control_repository, 'fivetwenty-io/lmelt',
@@ -116,10 +113,9 @@ subtest 'pipeline-describe shows what resolved and how' => sub {
 			repository     => 'fivetwenty-io/mirror',
 		},
 	);
-	set_remotes($h,
-		remotes  => {origin => 'https://github.com/fivetwenty-io/lmelt.git'},
-		upstream => 'origin',
-	);
+	# The repository is the override, so nothing here has to read the url
+	# and the harness's own bare repository serves as the remote.
+	set_remotes($h, remotes => {origin => $h->r}, upstream => 'origin');
 
 	my ($out, undef, $exit) = run_genesis($h, 'pipeline-describe');
 
