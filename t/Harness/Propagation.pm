@@ -117,7 +117,24 @@ sub _release_env {
 	return;
 }
 
-END {_release_env()}
+# %HOLDERS - the lock holders this file has forked and not yet released {{{
+#
+# A row that forks a holder and then dies before releasing it leaves that
+# holder sitting on the flock for the five minutes it gives itself, and the
+# next row or the next file that wants the same lock waits the whole of it
+# out.  Whatever is still registered when the file ends is killed and reaped
+# here, so a failing row costs the run nothing beyond its own failure.
+our %HOLDERS;
+sub _reap_holders {
+	for my $pid (sort keys %HOLDERS) {
+		kill('KILL', $pid);
+		waitpid($pid, 0);
+		delete $HOLDERS{$pid};
+	}
+	return;
+}
+
+END {_release_env(); _reap_holders()}
 
 # }}}
 # ref_in - one ref's sha in a repository at a path, or undef {{{
@@ -2534,13 +2551,23 @@ sub hold_session_lock {
 		POSIX::_exit(0);
 	}
 
-	# Wait for the child to have the lock, so a row never races its own setup.
+	$HOLDERS{$pid} = $lock;
+
+	# Wait for the child to take the lock, watching the child as well as the
+	# file.  A holder that exited will never write the file, so a wait that
+	# only watched the file would run its whole length out and then hand back
+	# a pid that holds nothing.  Both refusals name the holder and say which
+	# of the two happened, so a row that meets a broken fixture reads a
+	# complaint about the fixture rather than one about the code under test.
 	for (1 .. 100) {
-		last if -s $lock;
+		return $pid if -s $lock;
+		if (waitpid($pid, POSIX::WNOHANG()) != 0) {
+			delete $HOLDERS{$pid};
+			die "the lock holder $pid exited before it took $lock\n";
+		}
 		select undef, undef, undef, 0.05;
 	}
-	push @{$self->{holders}}, $pid;
-	return $pid;
+	die "the lock holder $pid never took $lock\n";
 }
 
 # }}}
@@ -2549,7 +2576,7 @@ sub release_session_lock {
 	my ($self, $pid, %opts) = @_;
 	kill($opts{hard} ? 'KILL' : 'TERM', $pid);
 	waitpid($pid, 0);
-	$self->{holders} = [grep {$_ != $pid} @{$self->{holders} || []}];
+	delete $HOLDERS{$pid};
 	return $self;
 }
 
