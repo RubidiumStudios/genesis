@@ -375,7 +375,7 @@ sub _report_dry_run {
 		if defined $pr_branch;
 }
 # }}}
-# _pr_branch_has_control_sha - idempotency check for pr/<env> {{{
+# _pr_branch_has_control_sha - idempotency check for pr/<env>/<type> {{{
 #
 # Returns true iff the latest commit on $branch is a propagation
 # commit for $control_short.  Word-boundary anchor prevents a
@@ -389,7 +389,7 @@ sub _pr_branch_has_control_sha {
 	return $subjects[0] =~ /\[pipeline\]\s+control\@\Q$control_short\E\b/ ? 1 : 0;
 }
 # }}}
-# _build_pr_body - generic PR body for rolling pr/<env> branches {{{
+# _build_pr_body - generic PR body for rolling pr/<env>/<type> branches {{{
 #
 # Rolling branches accumulate commits across propagation events; per-
 # propagation file detail lives in the commit history.  The body is a
