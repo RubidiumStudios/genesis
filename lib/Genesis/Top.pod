@@ -1612,7 +1612,8 @@ The url is asked of git only where C<pipeline.source_control.repository> is
 unset, because the repository is the one value derived from it and asking
 costs a fork on every command. So an explicit repository is the only way undef
 comes back here, and the only way L</source_control_resolved> shows C<(none)>
-in the uri row. Without that override a url git cannot answer for is refused
+in the uri row, which it labels C<unset> rather than C<derived> because git
+was never asked. Without that override a url git cannot answer for is refused
 rather than returned, because the repository then has nothing to parse.
 
 B<Parameters:> None.
@@ -1691,7 +1692,11 @@ drifted away from what git says is visible rather than silent.
 
 Each row is a hash reference carrying C<key>, C<value>, and C<source>. The
 source is C<explicit> where the operator wrote the key, C<derived> where git
-answered for it, and C<default> where neither did. The explicit tier is read
+answered for it, C<unset> where the key takes a derivation that was never
+run, and C<default> where the key takes no derivation at all. A row with no
+value carries C<(none)>, which is what the uri row shows wherever
+C<pipeline.source_control.repository> was named, since L</source_control_uri>
+is then never asked of git. The explicit tier is read
 with C<Genesis::Config::is_set> rather than with C<get>, because the schema
 fills C<control_branch> and C<pr_prefix> in for every repository and a filled
 default is the schema's answer rather than anybody's choice.

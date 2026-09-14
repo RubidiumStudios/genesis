@@ -173,6 +173,27 @@ subtest 'the url is asked of git only where it is needed' => sub {
 		'and the url is read where the repository comes out of it';
 };
 
+subtest 'the uri row says whether git was asked' => sub {
+	plan tests => 4;
+
+	with_remote('git@github.com:team/bosh.git');
+
+	my $named = load_with("pipeline:\n  enabled: true");
+	my ($unasked) = grep {$_->{key} eq 'uri'}
+		@{$named->source_control_resolved};
+	is $unasked->{source}, 'unset',
+		'a url nobody asked git for is not reported as derived';
+	is $unasked->{value}, '(none)', 'and the row says it has no value';
+
+	my $derived = load_with("pipeline:\n  enabled: true",
+		derive_repository => 1);
+	my ($answered) = grep {$_->{key} eq 'uri'}
+		@{$derived->source_control_resolved};
+	is $answered->{source}, 'derived', 'a url git answered for is derived';
+	is $answered->{value}, 'git@github.com:team/bosh.git',
+		'and the row carries what git said';
+};
+
 subtest 'a required flag can be a predicate' => sub {
 	plan tests => 3;
 
