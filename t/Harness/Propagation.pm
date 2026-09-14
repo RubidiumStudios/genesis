@@ -2713,6 +2713,12 @@ sub hold_session_lock {
 		}
 		select undef, undef, undef, 0.05;
 	}
+	# The holder gives itself five minutes, so a refusal that left it running
+	# would make every later row wanting the same lock wait the rest of that
+	# out.  It goes down with the refusal, as the one above does.
+	kill('KILL', $pid);
+	waitpid($pid, 0);
+	delete $HOLDERS{$pid};
 	die "the lock holder $pid never took $lock\n";
 }
 
