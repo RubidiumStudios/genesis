@@ -1963,6 +1963,105 @@ sub _github_owner_repo {
 }
 
 # }}}
+# _ref_component_errors - why a value is not a git ref component {{{
+#
+# The pattern admits three shapes git then rejects, so they are refused
+# beside it: a trailing dot, a .lock suffix, and any '..' sequence.
+sub _ref_component_errors {
+	my ($value) = @_;
+	return 'it must not be empty'                unless defined $value && length $value;
+	return 'it must match ^[A-Za-z0-9][A-Za-z0-9._-]*$'
+		unless $value =~ m{^[A-Za-z0-9][A-Za-z0-9._-]*$};
+	return 'it must not end in a dot'            if $value =~ m{\.$};
+	return 'it must not contain ".."'            if $value =~ m{\.\.};
+	return 'it must not end in ".lock"'          if $value =~ m{\.lock$};
+	return undef;
+}
+
+# }}}
+# _validate_slug_components - both halves of the deployment slug {{{
+#
+# Under D66 the deployment branch is <env>/<type>, so both halves become
+# git ref components and neither is trusted over the other.  Both already
+# reach vault through the exodus slug and BOSH through the deployment
+# name, so the check is narrow in practice and catches a value that was
+# never safe in those places either.  The message names the branch the
+# value would have composed, because that is what makes it obvious why a
+# name that was fine before this release is not fine now.
+sub _validate_slug_components {
+	my ($self) = @_;
+
+	my $type = $self->config->get('deployment_type');
+	if (my $why = _ref_component_errors($type)) {
+		bail({exitcode => CONFIG},
+			"The deployment type #R{%s} in #C{.genesis/config} is not a git ".
+			"ref component: %s.\nIt names the branch #C{<env>/%s} for every ".
+			"environment of this repository.",
+			$type // '<unset>', $why, $type // ''
+		);
+	}
+
+	# The same guard every other load-time read of the merged hierarchy
+	# uses, so a legacy ci.yml sitting beside the environments is not read
+	# as an environment and a genesis key that is not a hash at all cannot
+	# blow the check up on its way past.
+	for my $env_name ($self->_env_file_names) {
+		my $genesis = $self->_merged_env_params($env_name)->{genesis};
+		next unless ref($genesis) eq 'HASH' && $genesis->{pipeline};
+		my $why = _ref_component_errors($env_name) or next;
+		bail({exitcode => CONFIG},
+			"The environment name #R{%s} is not a git ref component: %s.\n".
+			"It names the branch #C{%s/%s}.",
+			$env_name, $why, $env_name, $type
+		);
+	}
+
+	return 1;
+}
+
+# }}}
+# _validate_one_exodus_mount - every environment resolves the same mount {{{
+#
+# Under D103 the applied record lives at <exodus mount>_pipelines/<type>,
+# so a pipeline whose environments kept separate mounts would have no
+# single home for it.  The merged hierarchy of D79 makes the root file the
+# natural place to set it, and D101's uniformity rule already argues for
+# it, so the load refuses two mounts by name.
+sub _validate_one_exodus_mount {
+	my ($self) = @_;
+
+	my %by_mount;
+	for my $env_name ($self->_env_file_names) {
+		my $genesis = $self->_merged_env_params($env_name)->{genesis};
+		next unless ref($genesis) eq 'HASH' && $genesis->{pipeline};
+
+		# The default is the one Genesis::Env::default_exodus_mount answers,
+		# which is the secrets mount with exodus/ under it, and the secrets
+		# mount is normalised before anything is appended to it so that a
+		# value written without its slashes lands where the run time would
+		# put it rather than one segment short.
+		my $mount = $genesis->{exodus_mount};
+		unless (defined $mount && length $mount) {
+			(my $secrets = $genesis->{secrets_mount} // '/secret/')
+				=~ s{^/?(.*?)/?$}{/$1/};
+			$mount = $secrets.'exodus/';
+		}
+		$mount =~ s{^/?(.*?)/?$}{/$1/};
+		push @{$by_mount{$mount}}, $env_name;
+	}
+	return 1 if keys(%by_mount) < 2;
+
+	bail({exitcode => CONFIG},
+		"Every environment of a pipeline must resolve one #C{genesis.exodus_mount}, ".
+		"because the pipeline's applied record lives at ".
+		"#C{<exodus mount>_pipelines/<type>}.\nThis repository resolves %s.\n".
+		"Set the mount once, in the root environment file the others inherit.",
+		join('; ', map {sprintf("#R{%s} for %s", $_, join(', ', sort @{$by_mount{$_}}))}
+			sort keys %by_mount)
+	);
+}
+
+# }}}
 # _validate_pipeline_config - the checks a declarative schema cannot state {{{
 #
 # Runs from _validate_config after Genesis::Config::validate, for every
@@ -1974,6 +2073,12 @@ sub _validate_pipeline_config {
 	my ($self) = @_;
 
 	return 1 unless $self->config->get('pipeline.enabled');
+
+	# First, because both halves of the deployment slug name the branches
+	# everything below this is about, and a name that cannot compose a ref
+	# is worth saying before anything is said about what it configures.
+	$self->_validate_slug_components;
+
 	$self->_source_control;
 	$self->_validate_provider_config;
 
@@ -1986,6 +2091,11 @@ sub _validate_pipeline_config {
 	# a fact about the pipeline as a whole rather than about any one
 	# provider, and before the environment blocks are read for their shape.
 	$self->_validate_manifest_store;
+
+	# After the store, because the mount is where that store keeps the
+	# pipeline's own applied record, and before the environment blocks are
+	# read for their shape.
+	$self->_validate_one_exodus_mount;
 
 	# Every environment's genesis.pipeline block, read merged under D79.
 	# A file whose genesis key is not a hash at all carries no block to
