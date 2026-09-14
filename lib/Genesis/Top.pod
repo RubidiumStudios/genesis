@@ -1858,6 +1858,17 @@ C<email> carry whatever entries the notifier reads. An environment overrides
 the style through its own C<genesis.pipeline.notifications> block, which
 L</_pipeline_env_keys_schema> declares.
 
+The section also carries C<pipeline.name>, which is the pipeline's label
+in its provider and nothing more. It composes no branch, since the branch
+is the deployment slug, so it is deliberately not validated as a git ref
+component and keeps whatever character set its provider allows.
+
+C<pipeline.recreate_on_deploy> is C<never>, C<redeploy-only>, or
+C<always>, defaulting to C<never>. It and C<pipeline.provider.group_commits>
+are repository-wide and refused per environment, because a key that
+changes how a deployment progresses has to be uniform or the earlier
+environments stop rehearsing the later ones.
+
 B<Returns:> A hash reference.
 
 =head2 _current_config_schema
