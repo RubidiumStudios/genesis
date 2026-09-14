@@ -53,4 +53,11 @@ files by calling C<add> itself, so a row that commits with files sees
 C<commit> and then C<add> in the log, and the C<add> counter moves as well.
 A row that arms C<add> arms that inner call too.
 
+A wrapper writes its own line before it delegates, so a step's line stands
+above the lines of the steps it delegates to rather than below them.  The log
+therefore reads outermost call first, which is why the C<commit> above sits on
+top of the C<add> it performed, and a row reading the log should weigh it that
+way round.  Writing the line first is also what puts a step the plan fails
+into the log at all, since a fault never returns to write one afterwards.
+
 =cut
