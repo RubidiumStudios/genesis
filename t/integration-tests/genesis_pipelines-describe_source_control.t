@@ -166,7 +166,7 @@ subtest 'a long url cannot carry its tier off the line' => sub {
 	like($out, qr{\Q$uri\E}, 'the url is shown whole');
 	like($out, qr{^ +uri +derived *$}m,
 		'the key and the tier it resolved from share a line');
-	unlike($out, qr{^ *(?:explicit|derived|default) *$}m,
+	unlike($out, qr{^ *(?:explicit|derived|unset|default) *$}m,
 		'and no tier is left standing on a line with nothing to name it');
 };
 
