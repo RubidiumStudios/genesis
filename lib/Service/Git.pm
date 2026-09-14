@@ -272,8 +272,10 @@ sub git_dir {
 	my ($dir) = run({ dir => $self->{root} },
 		'git', 'rev-parse', '--absolute-git-dir');
 	chomp $dir if defined $dir;
+	# --absolute-git-dir always answers an absolute path, and a failure
+	# answers git's complaint, so the leading slash is what tells them apart.
 	bail("Unable to resolve the git directory of %s", $self->{root})
-		unless $dir;
+		unless $dir && $dir =~ m{^/};
 	return $self->{_git_dir} = $dir;
 }
 

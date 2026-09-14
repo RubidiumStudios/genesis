@@ -127,6 +127,43 @@ subtest 'a healthy working tree passes and returns the handle' => sub {
 	ok($git->is_clean, 'and it changed nothing about the working tree');
 };
 
+subtest 'the git directory is the one the lock will live in' => sub {
+	plan tests => 3;
+
+	my $h   = make_harness(envs => ['qa']);
+	my $git = $h->git('a');
+
+	my $dir = $git->git_dir;
+	like($dir, qr{^/}, 'it answers an absolute path');
+	is($dir, $git->root . '/.git',
+		"and in an ordinary clone that is the working tree's own .git");
+	isnt($dir, $git->root,
+		'which is not the working tree root, since the two part company '.
+		'in a linked working tree');
+};
+
+subtest 'a git directory that cannot be resolved is refused' => sub {
+	plan tests => 2;
+
+	# git answers a failure with its complaint rather than with nothing, so
+	# a guard that only asks whether an answer came back would hand the
+	# complaint on as a path, and the lock that follows would be written
+	# somewhere no one could find it.
+	my $h    = make_harness(envs => ['qa']);
+	my $path = fixture_preflight($h, 'safe_directory');
+	my $git  = Service::Git->new($path);
+	my $root = $git->root;
+
+	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
+
+	my $answer = 'untouched';
+	my ($err) = bail_from(sub { $answer = $git->git_dir });
+	like($err, qr/Unable to resolve the git directory of \Q$root\E/,
+		'the refusal names the working tree it could not resolve');
+	is($answer, 'untouched',
+		"and nothing is handed back where a path belongs");
+};
+
 subtest 'genesis new, which opens no session, calls the same helper' => sub {
 	plan tests => 2;
 
