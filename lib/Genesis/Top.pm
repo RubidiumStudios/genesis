@@ -2441,10 +2441,10 @@ sub _validate_one_exodus_mount {
 # _validate_pipeline_config - the checks a declarative schema cannot state {{{
 #
 # Runs from _validate_config after Genesis::Config::validate, for every
-# command, under D28.  It grows through this step; today it resolves the
-# source-control block, which is where the two derivations of D29 and the
-# GitHub refusal of D102 are raised.  Later work extends this sub and
-# leaves the one call site in _validate_config alone.
+# command, under D28.  What it checks, in what order, and what each check
+# refuses is in this module's POD under _validate_pipeline_config, so the
+# account lives in one place as the sub grows.  Later work extends the sub
+# and leaves the one call site in _validate_config alone.
 sub _validate_pipeline_config {
 	my ($self) = @_;
 
