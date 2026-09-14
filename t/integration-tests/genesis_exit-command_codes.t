@@ -12,8 +12,6 @@ use helper;
 use Harness::Propagation;
 use Test::More;
 
-use File::Find;
-
 $ENV{NOCOLOR} = 1;
 
 sub flatten {
@@ -77,23 +75,30 @@ subtest 'no call site invents a code the table does not name' => sub {
 	# else written as a number at an exit is a code nobody can look up.
 	my %allowed = map {$_ => 1} qw/0 1 2 4 86/;
 
-	my @files;
-	find(sub {push @files, $File::Find::name if -f && /\.pm$/}, 'lib');
-	push @files, 'bin/genesis';
+	# The file list comes from the shared sweep reader, so the scan is
+	# anchored on the tree rather than on the current directory and covers
+	# every script under bin/ beside every module under lib/.  The option is
+	# caught however it is spelled, which takes in a quoted key and an
+	# assignment such as `$opts{exitcode} = 75`, and a trailing comment is
+	# removed before the match so a note that names a code in prose is not
+	# read as a call site.
+	my $top = $ENV{GENESIS_TOPDIR};
 
 	my @offenders;
-	for my $file (sort @files) {
-		next if $file eq 'lib/Genesis/Exit.pm';
+	for my $file (sweep_files()) {
+		(my $short = $file) =~ s{^\Q$top\E/}{};
+		next if $short eq 'lib/Genesis/Exit.pm';
 		open my $fh, '<', $file or die "cannot read $file: $!\n";
 		while (my $line = <$fh>) {
 			# Stop at the data section: Genesis::Helpers carries the kit
 			# helper bash script in its __DATA__ block, and a shell exit
 			# there is not a Perl call site the table speaks for.
 			last if $line =~ /^__(?:DATA|END)__\s*$/;
-			next if $line =~ /^\s*#/;
-			for my $code ($line =~ /\bexit\s*\(?\s*(\d+)\b/g,
-			              $line =~ /\bexitcode\s*=>\s*(\d+)\b/g) {
-				push @offenders, "$file:$. exits $code" unless $allowed{$code};
+			my $code_line = strip_comment($line);
+			for my $code ($code_line =~ /\bexit\s*\(?\s*(\d+)\b/g,
+			              $code_line =~ /\bexitcode\b['"]?\s*[\]\}]?\s*
+			                             (?:=>|=(?![=~]))\s*(\d+)\b/gx) {
+				push @offenders, "$short:$. exits $code" unless $allowed{$code};
 			}
 		}
 		close $fh;

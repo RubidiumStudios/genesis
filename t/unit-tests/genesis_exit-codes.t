@@ -11,36 +11,42 @@ use lib 't';
 use helper;
 use Test::More;
 
-use File::Find;
-
 use Genesis::Exit qw/TEMPFAIL DATAERR ABORTED NOPERM CONFIG UNAVAILABLE SOFTWARE/;
 
 $ENV{NOCOLOR} = 1;
 
 # An assertion helper, so it lives beside the test that uses it.  The scan
 # reads a line at a time and looks for a number in an exit position, which is
-# either an `exit` statement or the `exitcode` option bail takes.
+# either an `exit` statement or the `exitcode` option bail takes.  The option
+# is caught however it is spelled, so a quoted key and an assignment such as
+# `$opts{exitcode} = 75` are call sites as much as the fat comma is, and a
+# `==` is passed over because a comparison spends nothing.  The file list
+# comes from the shared sweep reader, which is anchored on the tree rather
+# than on the current directory and covers every script under bin/ as well as
+# every module under lib/, and each finding is named by its path within the
+# tree so a diagnostic stays readable.
 sub bare_exits_of {
 	my (@codes) = @_;
 	my $codes = join('|', @codes);
-
-	my @files;
-	find(sub {push @files, $File::Find::name if -f && /\.pm$/}, 'lib');
-	push @files, 'bin/genesis';
+	my $top   = $ENV{GENESIS_TOPDIR};
 
 	my @found;
-	for my $file (sort @files) {
-		next if $file eq 'lib/Genesis/Exit.pm';
+	for my $file (sweep_files()) {
+		(my $short = $file) =~ s{^\Q$top\E/}{};
+		next if $short eq 'lib/Genesis/Exit.pm';
 		open my $fh, '<', $file or die "cannot read $file: $!\n";
 		while (my $line = <$fh>) {
 			# Stop at the data section: Genesis::Helpers carries the kit
 			# helper bash script in its __DATA__ block, and a shell exit
 			# there is not a Perl call site that could spend a constant.
 			last if $line =~ /^__(?:DATA|END)__\s*$/;
-			next if $line =~ /^\s*#/;
-			push @found, "$file:$."
-				if $line =~ /\bexit\s*\(?\s*(?:$codes)\b/
-				|| $line =~ /\bexitcode\s*=>\s*(?:$codes)\b/;
+			# A trailing comment goes before the match, so a note that
+			# names a code in prose is not read as a call site.
+			my $code = strip_comment($line);
+			push @found, "$short:$."
+				if $code =~ /\bexit\s*\(?\s*(?:$codes)\b/
+				|| $code =~ /\bexitcode\b['"]?\s*[\]\}]?\s*
+				             (?:=>|=(?![=~]))\s*(?:$codes)\b/x;
 		}
 		close $fh;
 	}
