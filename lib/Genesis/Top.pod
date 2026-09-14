@@ -2137,10 +2137,18 @@ are structural and gate nothing configurable.
 
 A provider with no compiler class declares no capabilities and is left
 alone, which is the manual provider and, until its own compiler lands, the
-github-actions one. The two repository-wide keys are read off the validated
-configuration, and the two per-environment keys are read out of each
-environment's merged C<genesis.pipeline> block, so every gate that fires is
-gathered before the refusal is raised.
+github-actions one. Every other provider has its declaration checked
+against the six names through
+L<Genesis::CI::Compiler::PipelineProvider/declared_capabilities> before any
+gate reads it.
+
+The two repository-wide keys are read for what the operator actually wrote,
+through C<< Genesis::Config::is_set >> rather than C<< has >>, because a
+value the schema filled from a provider's own default is nobody's choice
+and cannot be what a refusal is about. The two per-environment keys are
+read out of each environment's merged C<genesis.pipeline> block, where no
+default is ever applied. Every gate that fires is gathered before the
+refusal is raised.
 
 B<Returns:> 1.
 
@@ -2161,6 +2169,13 @@ C<"Failed to load CI provider ..."> - raised when the registry names a
 compiler class whose file will not compile. The schema build normally meets
 that first.
 
+=item *
+
+C<"CI provider ... declares the capabilities ..."> - raised through
+L<Genesis::CI::Compiler::PipelineProvider/declared_capabilities> when the
+provider class answers anything but exactly the six names, which is a bug
+in that class rather than anything an operator wrote.
+
 =back
 
 B<Examples:>
@@ -2169,9 +2184,8 @@ B<Examples:>
     # returns 1 where every configured key has its capability behind it
 
     $top->_validate_capability_gates;
-    # exits CONFIG (78) where pipeline.provider.type is concourse and an
-    # environment sets genesis.pipeline.manual under a provider that
-    # declares optional_git_triggers false
+    # exits CONFIG (78) where an environment sets genesis.pipeline.manual
+    # under a provider that declares optional_git_triggers false
 
 =head2 _merged_env_params
 

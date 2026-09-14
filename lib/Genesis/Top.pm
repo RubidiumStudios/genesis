@@ -1973,7 +1973,8 @@ sub _validate_capability_gates {
 		bail("Failed to load CI provider '%s': %s", $type, $err);
 	}
 
-	my $caps  = $info->{class}->capabilities;
+	my $caps  = Genesis::CI::Compiler::PipelineProvider
+		->declared_capabilities($info->{class});
 	my $gates = Genesis::CI::Compiler::PipelineProvider->capability_gates;
 
 	# The gates that are going to fire are separated by where their key
@@ -1991,9 +1992,16 @@ sub _validate_capability_gates {
 	}
 	return 1 unless %env_gates || %repo_gates;
 
+	# The repository-wide keys are read for what the operator wrote and not
+	# for what the schema filled, because a gate is about the choice inside
+	# an ability and a default is the provider's own answer rather than
+	# anybody's choice.  is_set reads the loaded and set layers alone; has
+	# would look through the merged contents and cannot tell a filled
+	# default from a written key.  The per-environment half needs no such
+	# care, reading the files themselves, where no default is ever applied.
 	my @errors;
 	for my $key (sort keys %repo_gates) {
-		next unless $self->config->has($key);
+		next unless $self->config->is_set($key);
 		push @errors, sprintf(
 			"#R{%s}: the #C{%s} provider does not declare the #C{%s} capability",
 			$key, $type, $repo_gates{$key}

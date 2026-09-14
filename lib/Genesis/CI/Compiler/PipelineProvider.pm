@@ -216,6 +216,13 @@ sub provider_options_schema {
 }
 
 # }}}
+# The six names D101 fixes, held in one place so that the declaration
+# below, the contract check beside it, and the gate map cannot drift.
+my @_capabilities = qw/
+	cross_pipeline_events deployment_locks multi_file_output
+	optional_git_triggers per_commit_runs scheduled_jobs
+/;
+
 # capabilities - what this provider can do, as six booleans {{{
 #
 # D101's declaration, and the companion to provider_options_schema.  A
@@ -240,6 +247,31 @@ sub provider_options_schema {
 sub capabilities {
 	my ($self) = @_;
 	bug("Subclass '%s' must implement capabilities()", ref($self) || $self);
+}
+
+# }}}
+# declared_capabilities - one provider class's declaration, checked {{{
+#
+# The contract behind capabilities(), asked once at configuration load
+# where the gates read it, rather than trusted afresh at every gate.  A
+# declaration that answers anything but exactly the six names is a bug in
+# the provider class, and the two ways to get it wrong both go unnoticed
+# otherwise.  A misspelled name reads as false and refuses the key it
+# gates as though somebody had meant it to, and a name left out loses its
+# ability with nothing said at all, since two of the six gate no key.
+sub declared_capabilities {
+	my ($class, $provider) = @_;
+
+	my $caps = $provider->capabilities;
+	bug("CI provider '%s' must answer capabilities() with a hash reference",
+		$provider) unless ref($caps) eq 'HASH';
+
+	my @declared = sort keys %$caps;
+	bug("CI provider '%s' declares the capabilities %s, and the six are %s",
+		$provider, join(', ', @declared), join(', ', @_capabilities))
+		unless join("\0", @declared) eq join("\0", @_capabilities);
+
+	return $caps;
 }
 
 # }}}
