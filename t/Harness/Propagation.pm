@@ -893,10 +893,18 @@ sub _repo_holding {
 # published.  The fetch names the source repository by path rather than by the
 # remote's name, because a path carries no configured refspec and so no
 # remote-tracking ref moves: only `refresh` is allowed to move T.
+#
+# The caller names the branch the commit is on, and a call that names none is
+# refused.  A fetch asks for a branch, so a guess at the control branch brings
+# the wrong objects across for a commit that lives on a deployment branch, and
+# the sub then says the commit is in none of the repositories when it is in
+# one of them.
 sub _fetch_commit {
 	my ($self, $copy, $commitish, @branches) = @_;
 	my $dir = $self->{$copy};
-	@branches = ($self->{control}) unless @branches;
+	die "_fetch_commit needs the branch $commitish is on, because a fetch "
+	  . "asks for a branch and a guess brings the wrong objects across\n"
+		unless @branches;
 
 	return $dir if _has_commit($dir, $commitish);
 	for my $source ($self->{r}, map {$self->{$_}} grep {$_ ne $copy} qw/a b/) {
@@ -995,7 +1003,7 @@ sub deliver {
 	my @set = $self->propagation_set($env, at => $control, %opts);
 	my %keep = map {$_ => 1} @{$opts{keep} || []};
 
-	$self->_fetch_commit($copy, $control);
+	$self->_fetch_commit($copy, $control, $self->{control});
 	my $parent = $self->_branch_parent($copy, $branch);
 
 	my $index = "$self->{base}/idx-" . int(rand(1_000_000));

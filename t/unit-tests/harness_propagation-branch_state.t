@@ -119,4 +119,15 @@ subtest 'diverge, move_on_r, the deletions, and the rewrite' => sub {
 	is(ref_in($h->r, 'refs/heads/' . $h->slug('qa')), undef, 'and gone from R');
 };
 
+subtest 'a fetch that names no branch is refused' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $control = ref_in($h->a, $h->control);
+
+	ok(!eval {Harness::Propagation::_fetch_commit($h, 'b', $control); 1},
+		'a call that names no branch is refused rather than guessing one');
+	like($@, qr/needs the branch/, 'and the refusal says what is missing');
+};
+
 done_testing;
