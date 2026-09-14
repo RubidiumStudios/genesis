@@ -291,6 +291,33 @@ subtest 'a caught message is cut at the location that ends it' => sub {
 		'and the trailing location behind it goes with its frames';
 };
 
+# The rows above hand the cut a caught text nobody wrapped, and the caught
+# text a refusal really carries has been through Genesis's own wrap, which
+# indents every line it folds and every frame behind them.
+subtest 'a wrapped refusal is cut at any terminal width' => sub {
+	plan tests => 3;
+
+	my $mark = Genesis::Term::decolorize(Genesis::Term::csprintf(
+		Genesis::Term::bullet('', inline => 1, indent => 0)));
+	my $raw = join('',
+		"Configuration validation failed:\n",
+		"${mark}pipeline.require_pr: expected a boolean, got pipeline\n",
+		"${mark}pipeline.manual: expected a boolean",
+		" at lib/Genesis/Config.pm line 412.\n",
+		"\tGenesis::Config::validate called at lib/Genesis/Top.pm line 27\n");
+
+	# Eighty is the ordinary terminal, sixty folds the bullets, and
+	# forty-four is narrow enough to break the location across a line.
+	for my $width (80, 60, 44) {
+		my @errors = Genesis::Top::_first_errors(
+			Genesis::Term::wrap($raw, $width, '[FATAL] '));
+		is_deeply \@errors, [
+			'genesis.pipeline.require_pr: expected a boolean, got pipeline',
+			'genesis.pipeline.manual: expected a boolean',
+		], "the bullets come back with no location and no frame at $width";
+	}
+};
+
 subtest 'a refusal with no bullets carries only its first line' => sub {
 	plan tests => 2;
 

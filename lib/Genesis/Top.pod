@@ -3256,9 +3256,15 @@ Only a location that ends the message goes. A provider is entitled to point
 an operator at a file and a line of its own and go on talking, so a message
 reading C<"see the setting at config.yml line 12 and fix it"> comes back
 whole. The frames are taken first, since C<Carp> writes a tab in front of
-every one of them and that is what tells a frame from a sentence, and the
-fold is left until last so that neither pattern has to allow for a wrap the
-terminal put in.
+every one of them and that is what tells a frame from a sentence.
+
+Both patterns allow for the wrap. A caught text that has been through
+C<< Genesis::Term::wrap >> carries the wrap's indent in front of every line
+it folded, C<Carp>'s tabbed frames included, and a location near the end of a
+line can be folded across two of them. So the frame pattern takes the spaces
+in front of the tab, and the location pattern takes any whitespace between
+its words. The fold is left until last, because a pattern that ran after it
+would have no newline left to anchor on.
 
 Plain function, not a method.
 
