@@ -4,10 +4,12 @@ use warnings;
 
 use Test::More;
 use Test::Output;
+use Test::Exit;
 use File::Temp qw/tempdir/;
 use File::Path qw/mkpath/;
 use JSON::PP;
 use lib 'lib';
+use Genesis::Exit qw/CONFIG/;
 
 # Set up minimal Genesis testing environment
 $ENV{GENESIS_TESTING} = "yes";
@@ -2098,6 +2100,31 @@ subtest 'Compiler - one override notice under the single form' => sub {
 	my $applied = () = ("$out$err" =~ /Applying /g);
 	is $applied, 1,
 		"one override over several files announces itself once";
+};
+
+subtest 'Compiler - a refused merge exits at the configuration code' => sub {
+	my $spruce = do { chomp(my $s = `which spruce 2>/dev/null`); $s };
+	unless ($spruce && -x $spruce) {
+		plan skip_all => "spruce not in PATH";
+		return;
+	}
+
+	my ($tmp, $top) = _override_top();
+	_write_override($tmp, "---\nbroken: [unclosed\n");
+
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
+	my $output = { 'pipeline.yml' => "---\nbase_key: base_value\n" };
+
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	my $code;
+	output_from {
+		$code = exit_code {
+			$compiler->_apply_provider_overrides($output, 'concourse');
+		};
+	};
+
+	is $code, CONFIG,
+		"an override spruce cannot merge is a configuration refusal";
 };
 
 ### ============================================================ ###
