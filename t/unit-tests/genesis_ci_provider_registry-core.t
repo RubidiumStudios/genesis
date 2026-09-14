@@ -68,9 +68,10 @@ subtest 'the two spellings cannot drift' => sub {
 
 	# Two lists that agree today agree by construction only if one is built
 	# out of the other, so the row puts a type into the registry and reads
-	# the enum the next load builds.  The name sorts after every registered
-	# type, so the rows below that read the valid-types list in order are
-	# left as they were.
+	# the enum the next load builds.  The registry is process-wide and
+	# nothing takes an entry out of it again, so every row below this one
+	# reads the registry for what it expects rather than naming the three
+	# types the process started with.
 	Genesis::CI::Compiler::PipelineProvider->register_provider('zeppelin',
 		{cli_class => 'Genesis::CI::Provider::Manual'});
 
@@ -109,10 +110,18 @@ subtest 'one resolver answers for every caller' => sub {
 		Genesis::CI::Compiler->_resolve_provider_class('jenkins')
 	} qr/Unknown\s+CI\s+provider\s+type\s+'jenkins'/s,
 		'a type the registry does not hold is named in the refusal';
+	# The list is built out of the registry rather than written out, so the
+	# row proves the refusal carries the types the registry holds and no
+	# others, and holds wherever a type another row registers happens to
+	# sort.  The separator tolerates a wrap, because the refusal is wrapped
+	# to the terminal width before anything reads it, and the lookahead
+	# rejects a list that runs on past the one the registry answers.
+	my $types = join(',\s+', map {quotemeta}
+		Genesis::CI::Compiler::PipelineProvider->known_providers);
 	throws_ok {
 		Genesis::CI::Compiler->_resolve_provider_class('jenkins')
-	} qr/Valid\s+types:\s+concourse,\s+github-actions,\s+manual/s,
-		'and the refusal carries the types it does hold';
+	} qr/Valid\s+types:\s+$types(?!,)/s,
+		'and the refusal carries every type the registry holds and no others';
 };
 
 subtest 'the provider type defaults to manual' => sub {
