@@ -91,4 +91,30 @@ subtest 'dry_run pushes nothing regardless of extras' => sub {
 	is(scalar @{$git->{pushes}}, 0, 'dry run pushed nothing');
 };
 
+subtest 'a pull request target without a top is refused by name' => sub {
+	# The top names every pull request branch, and a run with only direct
+	# targets never hands one in, so a caller that asks for a pull request
+	# and forgets it has to meet the module's own sentence rather than a
+	# Perl method error on an undefined value.
+	plan tests => 3;
+
+	my $git = FakeGit->new;
+	my $result = eval {
+		Genesis::CI::Propagation::propagate_envs(
+			git           => $git,
+			targets       => [{env => 'qa', require_pr => 1}],
+			control       => 'control',
+			control_sha   => 'abc1234',
+			control_short => 'abc1234',
+		);
+	};
+	my $err = $@;
+
+	is($result, undef, 'the run does not come back with a result');
+	like($err, qr/'top' is required/,
+		'the refusal is the module saying what it needs');
+	unlike($err, qr/unblessed reference|undefined value/,
+		'and not Perl complaining about a method call');
+};
+
 done_testing;
