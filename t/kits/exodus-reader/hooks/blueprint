@@ -9,8 +9,21 @@ type="${GENESIS_TYPE:-bosh}"
 # deployment names, and the hook reads them out of the file itself rather than
 # asking Genesis for them, because asking would spawn a genesis child and the
 # rows that count children would then be counting this hook.
+#
+# A list's entries are indented deeper than the key that names them, so the
+# range ends at the first line that is not, which is the next key of the block
+# or a key of the block below alike, and that line is never printed.  A list
+# written as the last key of the file ends with the file rather than
+# swallowing every line beneath it.
 list_of() {
-  sed -n "/^  $1:/,/^  [a-z]/p" "$env_file" | sed -n 's/^ *- *//p'
+  awk -v key="$1" '
+    $0 ~ "^  " key ":[[:space:]]*$" {inside = 1; next}
+    inside {
+      if ($0 ~ /^[[:space:]]*$/) next
+      if ($0 !~ /^   /) exit
+      if ($0 ~ /^[[:space:]]*-/) {sub(/^[[:space:]]*-[[:space:]]*/, ""); print}
+    }
+  ' "$env_file"
 }
 
 # A deployment the environment requires but that has never deployed has no
