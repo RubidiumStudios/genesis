@@ -1510,11 +1510,25 @@ sub _topology_to_mermaid_md {
 sub _describe_source_control {
 	my ($top) = @_;
 
-	output "\n#G{Source control}";
-	for my $row (@{$top->source_control_resolved}) {
-		output "  %-16s %-40s #Yi{%s}",
-			$row->{key}, $row->{value}, $row->{source};
+	my $rows = $top->source_control_resolved;
+
+	# Both columns are sized from the rows the way the status table sizes
+	# its own, and the tier comes before the value rather than after it.  A
+	# remote url is routinely longer than what is left of an eighty-column
+	# line, and output wraps on whitespace, so a value printed last takes
+	# the next line by itself when it is too long.  Printed after the value
+	# the tier is what moves instead, and it lands on a line with no key
+	# beside it, which is the one thing this report exists to show.
+	my ($key_width, $tier_width) = (0, 0);
+	for my $row (@$rows) {
+		my ($k, $t) = (length($row->{key}), length($row->{source}));
+		$key_width  = $k if $k > $key_width;
+		$tier_width = $t if $t > $tier_width;
 	}
+	my $format = sprintf('  %%-%ds #Yi{%%-%ds} %%s', $key_width, $tier_width);
+
+	output "\n#G{Source control}";
+	output $format, $_->{key}, $_->{source}, $_->{value} for @$rows;
 	output "";
 
 	return 1;
