@@ -37,24 +37,6 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], provider => 'manual');
 
-# Two rows in a row can ask for the same configuration, and the harness's
-# commit needs a delta, so each load carries its own count beside the file
-# under test.
-my $loads = 0;
-
-sub load_with {
-	my ($body) = @_;
-	commit_on_control($h, files => {
-		'.genesis/config' => join("\n",
-			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0', $body, ''),
-		'.load-count' => sprintf("%d\n", ++$loads),
-	});
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
-}
-
 # The harness clones copy A from a bare repository at a filesystem path, so
 # the source-control block names the repository rather than deriving it,
 # and every provider here is an automated one, which is the case where the
@@ -199,7 +181,7 @@ subtest 'the capability gates the key and the key decides the layout' => sub {
 	# capability beside the key is reachable only through a fragment that
 	# declares the key itself, and genesis_top-provider_capabilities.t
 	# proves it there.
-	throws_ok {load_with(automated_config('concourse',
+	throws_ok {load_with($h, automated_config('concourse',
 		'target: ci', 'output_layout: multiple'))}
 		qr/pipeline\.provider\.output_layout: unknown configuration key/s,
 		'the key is refused where the capability is false';
@@ -225,7 +207,7 @@ MANY
 	});
 
 	for my $layout (qw/single multiple/) {
-		lives_ok {load_with(automated_config('many', "output_layout: $layout"))}
+		lives_ok {load_with($h, automated_config('many', "output_layout: $layout"))}
 			"$layout validates where the capability is true";
 	}
 };

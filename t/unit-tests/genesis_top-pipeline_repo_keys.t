@@ -23,24 +23,6 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 
-# Two rows in a row can ask for the same configuration, and the harness's
-# commit needs a delta, so each load carries its own count beside the file
-# under test.
-my $loads = 0;
-
-sub load_with {
-	my ($body) = @_;
-	commit_on_control($h, files => {
-		'.genesis/config' => join("\n",
-			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0', $body, ''),
-		'.load-count' => sprintf("%d\n", ++$loads),
-	});
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
-}
-
 # Every row here leaves the provider at manual, so the shuttle, the vault,
 # and the locker are not required beside it, and a row adds the keys it is
 # about rather than a whole configuration of its own.
@@ -62,7 +44,7 @@ subtest "the label is the provider's alone" => sub {
 
 	# A value that is a fine Concourse pipeline name and a hopeless git
 	# ref component, so a ref check would have refused it.
-	my $top = load_with(manual_config("name: 'bosh..lab.lock'"));
+	my $top = load_with($h, manual_config("name: 'bosh..lab.lock'"));
 	is $top->config->get('pipeline.name'), 'bosh..lab.lock',
 		'the label keeps whatever character set its provider allows';
 
@@ -111,27 +93,27 @@ subtest "the label is the provider's alone" => sub {
 subtest 'the two progression keys are repository-wide' => sub {
 	plan tests => 7;
 
-	my $top = load_with(manual_config());
+	my $top = load_with($h, manual_config());
 	is $top->config->get('pipeline.recreate_on_deploy'), 'never',
 		'recreate_on_deploy defaults to never';
 	for my $value (qw/never redeploy-only always/) {
-		lives_ok {load_with(manual_config("recreate_on_deploy: $value"))}
+		lives_ok {load_with($h, manual_config("recreate_on_deploy: $value"))}
 			"$value validates";
 	}
 
 	# The three rows above would pass against a free string, so one row
 	# holds the key to its three values.
-	throws_ok {load_with(manual_config('recreate_on_deploy: sometimes'))}
+	throws_ok {load_with($h, manual_config('recreate_on_deploy: sometimes'))}
 		qr/pipeline\.recreate_on_deploy:\s+unknown\s+value:\s+sometimes/s,
 		'a fourth value is refused by name';
 
 	write_env_file($h, 'qa', pipeline => {recreate_on_deploy => 'always'});
-	throws_ok {load_with(manual_config())}
+	throws_ok {load_with($h, manual_config())}
 		qr/genesis\.pipeline\.recreate_on_deploy: unknown configuration key/,
 		'and it is refused per environment';
 
 	write_env_file($h, 'qa', pipeline => {group_commits => 0});
-	throws_ok {load_with(manual_config())}
+	throws_ok {load_with($h, manual_config())}
 		qr/genesis\.pipeline\.group_commits: unknown configuration key/,
 		'group_commits stays at pipeline.provider and is refused per environment';
 };

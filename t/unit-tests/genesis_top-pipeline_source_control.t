@@ -35,22 +35,15 @@ sub with_repository {
 	return join("\n", $body, '  source_control:', $override);
 }
 
-# Two rows in a row can ask for the same configuration, and a commit needs
-# a delta, so each load carries its own count beside the file under test.
-my $loads = 0;
-
-sub load_with {
+# Every row here goes through the harness loader, and this puts the named
+# repository into the body on the way, because that is what this file wants
+# of nearly every row and the harness has no business knowing it.  A row
+# that is about the derivation asks for derive_repository and gets the body
+# it wrote.
+sub load_control {
 	my ($body, %opts) = @_;
 	$body = with_repository($body) unless $opts{derive_repository};
-	commit_on_control($h, files => {
-		'.genesis/config' => join("\n",
-			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0', $body, ''),
-		'.load-count' => sprintf("%d\n", ++$loads),
-	});
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
+	return load_with($h, $body);
 }
 
 sub with_remote {
@@ -62,7 +55,7 @@ sub with_remote {
 subtest 'the two branch-naming keys are declared' => sub {
 	plan tests => 4;
 
-	my $top = load_with(join("\n",
+	my $top = load_control(join("\n",
 		'pipeline:', '  enabled: true',
 		'  source_control:', '    control_branch: trunk'));
 	is $top->config->get('pipeline.source_control.control_branch'), 'trunk',
@@ -70,12 +63,12 @@ subtest 'the two branch-naming keys are declared' => sub {
 	is $top->config->get('pipeline.source_control.pr_prefix'), 'pr/',
 		'pr_prefix resolves to pr/ when absent';
 
-	throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:', '    control_branch: [a, b]'))}
 		qr/pipeline\.source_control\.control_branch: expected a string/,
 		'a control_branch outside its type is refused by name';
 
-	throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:', '    pr_prefix: [pr, review]'))}
 		qr/pipeline\.source_control\.pr_prefix/,
 		'a pr_prefix outside its type is refused by name';
@@ -84,7 +77,7 @@ subtest 'the two branch-naming keys are declared' => sub {
 subtest 'the block declares three tiers and refuses runtime state' => sub {
 	plan tests => 5;
 
-	my $top = load_with("pipeline:\n  enabled: true");
+	my $top = load_control("pipeline:\n  enabled: true");
 	my $sc  = $top->_repo_config_schema->{pipeline}{schema}{source_control}{schema};
 	is_deeply [sort grep {!$sc->{$_}{required}} keys %$sc],
 		[qw/control_branch control_requires_pr pr_prefix remote repository uri/],
@@ -94,17 +87,17 @@ subtest 'the block declares three tiers and refuses runtime state' => sub {
 		'auth and identity are the required pair';
 
 	# Required under an automated provider, tolerated as absent under manual.
-	lives_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	lives_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  provider:', '    type: manual'))}
 		'manual tolerates an absent auth and identity';
-	throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  provider:', '    type: concourse', '    target: ci',
 		'  source_control:', '    remote: origin'))}
 		qr/pipeline\.source_control: missing required key/,
 		'an automated provider requires them';
 
 	# The deployment root and the running branch take no key at all.
-	throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:', '    branch: feature/x'))}
 		qr/pipeline\.source_control\.branch: unknown configuration key/,
 		'a key naming the branch a command runs from is refused by name';
@@ -113,13 +106,13 @@ subtest 'the block declares three tiers and refuses runtime state' => sub {
 subtest 'an empty pull request prefix is refused' => sub {
 	plan tests => 3;
 
-	throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:', "    pr_prefix: ''"))}
 		qr/pipeline\.source_control\.pr_prefix.*empty/s,
 		'an empty prefix is refused by name';
-	lives_ok {load_with("pipeline:\n  enabled: true")}
+	lives_ok {load_control("pipeline:\n  enabled: true")}
 		'the default pr/ passes';
-	lives_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	lives_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:', '    pr_prefix: pr-'))}
 		'an explicit prefix passes';
 };
@@ -127,11 +120,11 @@ subtest 'an empty pull request prefix is refused' => sub {
 subtest 'an empty control branch is refused' => sub {
 	plan tests => 2;
 
-	throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:', "    control_branch: ''"))}
 		qr/pipeline\.source_control\.control_branch.*empty/s,
 		'an empty control branch is refused by name';
-	lives_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	lives_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:', '    control_branch: trunk'))}
 		'and a named one passes';
 };
@@ -140,20 +133,20 @@ subtest 'the MVP supports GitHub and says so' => sub {
 	plan tests => 4;
 
 	with_remote('https://git.example.com/team/bosh.git');
-	throws_ok {load_with("pipeline:\n  enabled: true", derive_repository => 1)}
+	throws_ok {load_control("pipeline:\n  enabled: true", derive_repository => 1)}
 		qr/pipeline\.source_control\.repository/,
 		'a non-GitHub host is refused naming the key';
-	throws_ok {load_with(join("\n", 'pipeline:', '  enabled: true',
+	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  provider:', '    type: manual'), derive_repository => 1)}
 		qr/pipeline\.source_control\.repository/,
 		'and the manual provider takes no exception';
 
 	with_remote('https://github.example.com/team/bosh.git');
-	lives_ok {load_with("pipeline:\n  enabled: true", derive_repository => 1)}
+	lives_ok {load_control("pipeline:\n  enabled: true", derive_repository => 1)}
 		'GitHub Enterprise passes, because its URL carries owner/repo';
 
 	with_remote('git@github.com:team/bosh.git');
-	my $top = load_with("pipeline:\n  enabled: true", derive_repository => 1);
+	my $top = load_control("pipeline:\n  enabled: true", derive_repository => 1);
 	is $top->_source_control->{repository}, 'team/bosh',
 		'the ssh form parses to owner/repo';
 };
@@ -163,11 +156,11 @@ subtest 'the url is asked of git only where it is needed' => sub {
 
 	with_remote('git@github.com:team/bosh.git');
 
-	my $named = load_with("pipeline:\n  enabled: true");
+	my $named = load_control("pipeline:\n  enabled: true");
 	is $named->source_control_uri, undef,
 		'a named repository leaves the fetch url unasked for';
 
-	my $derived = load_with("pipeline:\n  enabled: true",
+	my $derived = load_control("pipeline:\n  enabled: true",
 		derive_repository => 1);
 	is $derived->source_control_uri, 'git@github.com:team/bosh.git',
 		'and the url is read where the repository comes out of it';
@@ -178,14 +171,14 @@ subtest 'the uri row says whether git was asked' => sub {
 
 	with_remote('git@github.com:team/bosh.git');
 
-	my $named = load_with("pipeline:\n  enabled: true");
+	my $named = load_control("pipeline:\n  enabled: true");
 	my ($unasked) = grep {$_->{key} eq 'uri'}
 		@{$named->source_control_resolved};
 	is $unasked->{source}, 'unset',
 		'a url nobody asked git for is not reported as derived';
 	is $unasked->{value}, '(none)', 'and the row says it has no value';
 
-	my $derived = load_with("pipeline:\n  enabled: true",
+	my $derived = load_control("pipeline:\n  enabled: true",
 		derive_repository => 1);
 	my ($answered) = grep {$_->{key} eq 'uri'}
 		@{$derived->source_control_resolved};
