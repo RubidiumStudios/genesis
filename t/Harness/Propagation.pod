@@ -730,7 +730,12 @@ the lock with the process.
 
 C<hold_session_lock> watches the holder as well as the lock file while it
 waits, and it refuses rather than answering where the holder is not going to
-take the lock.  It says the holder exited before it took the lock where the
+take the lock.  What it watches the file for is this holder's own pid, and
+not merely a file with something in it, so a line an earlier holder left
+behind cannot end the wait early and hand a row a holder that is still
+blocked.  The holder writes that line only once it has the lock, and it
+empties the file under the lock rather than on the way in, so what an earlier
+holder wrote stands until a later one has actually taken over.  It says the holder exited before it took the lock where the
 child has gone, and that the holder never took it where the wait runs its
 length out with the child alive, so a row that meets a broken fixture reads a
 complaint about the fixture rather than one about the code under test.  The

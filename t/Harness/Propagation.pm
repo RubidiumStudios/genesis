@@ -2691,9 +2691,15 @@ sub hold_session_lock {
 	my $pid = fork();
 	die "cannot fork a lock holder: $!\n" unless defined $pid;
 	unless ($pid) {
-		open my $fh, '>', $lock or POSIX::_exit(2);
+		# The file is opened for append and emptied once the lock is in
+		# hand, rather than truncated by the open itself.  A holder that
+		# truncated on the way in would wipe what the holder before it wrote
+		# while that one still held the lock, and the pid the parent waits
+		# for would be gone from a file the parent is reading.
+		open my $fh, '>>', $lock or POSIX::_exit(2);
 		require Fcntl;
 		flock($fh, Fcntl::LOCK_EX()) or POSIX::_exit(2);
+		truncate($fh, 0) or POSIX::_exit(2);
 		print $fh sprintf("%d\n%s\n", $$, $opts{command} // 'genesis propagate');
 		require IO::Handle;
 		$fh->flush;
@@ -2716,8 +2722,13 @@ sub hold_session_lock {
 	# a pid that holds nothing.  Both refusals name the holder and say which
 	# of the two happened, so a row that meets a broken fixture reads a
 	# complaint about the fixture rather than one about the code under test.
+	#
+	# What the wait watches for is this holder's own pid, and not merely a
+	# file with something in it.  A lock file carrying the line an earlier
+	# holder wrote would otherwise end the wait at once, and the row would be
+	# handed a holder that is still blocked and holds nothing.
 	for (1 .. 100) {
-		return $pid if -s $lock;
+		return $pid if _lock_taken_by($lock, $pid);
 		if (waitpid($pid, POSIX::WNOHANG()) != 0) {
 			delete $HOLDERS{$pid};
 			die "the lock holder $pid exited before it took $lock\n";
@@ -2731,6 +2742,23 @@ sub hold_session_lock {
 	waitpid($pid, 0);
 	delete $HOLDERS{$pid};
 	die "the lock holder $pid never took $lock\n";
+}
+
+# _lock_taken_by - has this holder written its own pid into the lock file
+#
+# The holder's pid is the token, because the holder writes it once it has the
+# lock and never before, so a file that merely has something in it is not
+# mistaken for a lock this holder took.  It sits here rather than beside a row
+# because the wait above is its only caller.
+sub _lock_taken_by {
+	my ($lock, $pid) = @_;
+	return 0 unless -s $lock;
+	open my $fh, '<', $lock or return 0;
+	my $first = <$fh>;
+	close $fh;
+	return 0 unless defined $first;
+	chomp $first;
+	return $first eq "$pid" ? 1 : 0;
 }
 
 # }}}
