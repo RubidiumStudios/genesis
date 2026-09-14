@@ -223,6 +223,26 @@ subtest 'a new harness takes back the variables the last one armed' => sub {
 		'and takes the spy away with it');
 };
 
+subtest 'a child runs under the plan its own harness armed' => sub {
+	plan tests => 3;
+
+	my $one = make_harness(envs => ['qa'], vault => 0);
+	init_branch($one, 'qa');
+	my $git = fault_git($one);
+	fail_on($git, 'fetch_branch', 1, message => 'the armed refusal');
+
+	my ($out, $rc) = $one->run_in_child(
+		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branch($ARGV[1]);',
+		$one->a, $one->slug('qa'));
+	isnt($rc, 0, 'the armed step took the child down');
+	is(scalar(grep {$_->[0] eq 'fetch_branch'} step_log($git)), 1,
+		'and the call landed in this harness own step log');
+
+	my $two = make_harness(envs => ['dev'], vault => 0);
+	ok(!eval {$two->run_in_child('exit 0'); 1},
+		'a harness that has armed no plan refuses to run a child at all');
+};
+
 subtest 'a holder that never takes the lock is refused, not waited out' => sub {
 	plan tests => 2;
 

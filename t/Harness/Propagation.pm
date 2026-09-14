@@ -2537,6 +2537,44 @@ sub _with_plan {
 }
 
 # }}}
+# run_in_child - run a snippet of perl under a spawned command's environment {{{
+#
+# A row that wants a git call made from another process has to stand that
+# process up under the fault plan, the step log, and the subclass, which is
+# the same block run_genesis composes for a whole command.  Two test files
+# build it by hand today, so a change to what a spawned command needs has to
+# be made in three places.
+#
+# The plan and the log are read off this harness rather than off the
+# environment, so a file holding two harnesses runs each child against its own
+# plan and not against whichever harness armed last.  The child's own -I has
+# to name lib/ as well as t/, because PERL5OPT is read before anything the
+# snippet uses is compiled.
+#
+# It answers what run answers, which is the output, the exit code, and the
+# standard error, so a row weighs the child's exit rather than trapping a
+# death in the parent.
+sub run_in_child {
+	my ($self, $code, @args) = @_;
+	my $fault = $self->{fault}
+		or die "run_in_child needs fault_git to have armed a plan first\n";
+
+	return run({
+			dir      => $self->{a},
+			stderr   => 0,
+			passfail => 0,
+			env      => {
+				GENESIS_HARNESS_GIT_PLAN => $fault->{plan},
+				GENESIS_HARNESS_GIT_LOG  => $fault->{log},
+				PERL5OPT => join(' ',
+					'-I' . $helper::TOPDIR . '/t',
+					'-I' . $helper::TOPDIR . '/lib',
+					'-MHarness::Propagation::Git'),
+			},
+		}, 'perl', '-e', $code, @args);
+}
+
+# }}}
 # fail_on - arm one named git step to die on its nth call {{{
 sub fail_on {
 	my ($git, $step, $n, %opts) = @_;

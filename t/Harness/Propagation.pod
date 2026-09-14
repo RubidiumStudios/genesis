@@ -642,6 +642,17 @@ C<copy>, default C<a>.  C<Service::Git> hands every caller the one instance it
 caches per repository, so the handle a row already held is re-blessed and
 faults from here on as well.
 
+=head2 run_in_child($h, $code, @args)
+
+Runs a snippet of perl in a process of its own, under the fault plan, the step
+log, and the subclass that a whole spawned command meets, and answers the
+output, the exit code, and the standard error the way C<run> does.  C<@args>
+reach the snippet in C<@ARGV>.  The plan and the log are read off this harness
+rather than off the environment, so a file holding two harnesses runs each
+child against its own plan rather than against whichever harness armed last.
+It refuses where the harness has armed no plan, since a child that met no
+subclass would report nothing.
+
 =head2 fail_on($git, $step, $n, %opts)
 
 Arms one named git step to die on its nth call.  C<from> makes every call
