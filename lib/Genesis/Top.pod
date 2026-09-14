@@ -3106,10 +3106,17 @@ anywhere in the hierarchy, so a file nobody can read is a key nobody can
 see. No C<Genesis::Env> is built and no kit is needed, which is what lets
 the check run as the configuration loads.
 
-The answer is kept on the object, one entry per environment name. Three
-checks walk every environment, and without the memo each pass spawned one
+The answer is kept on the object, one entry per environment name. Five call
+sites walk every environment, and without the memo each pass spawned one
 C<spruce> run per file in the hierarchy, so an ancestor was parsed once per
 descendant per pass.
+
+Nothing invalidates that memo and nothing wants to yet. All five callers run
+from L</_validate_pipeline_config>, which L</config> runs once behind its own
+memo, so no environment file is written between the first read and the last.
+L</_validate_env_pipeline_block> is the only one that writes into what it was
+handed, and it copies the top level before it does. A caller added after an
+environment file is written would need an invalidator.
 
 B<Parameters:>
 
