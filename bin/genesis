@@ -1791,11 +1791,6 @@ define_command("repipe", {
 		'paused|P' =>
 			"Keep the pipeline paused after repiping.",
 
-		'platform|provider|p=s' =>
-			"CI provider/platform to generate for: 'concourse' or 'github-actions'.\n".
-			"When specified, uses the new compiler pipeline instead of the legacy ".
-			"code path. Looks for .genesis/ci/ directory first, falls back to ci.yml.",
-
 		'dry-run|n' =>
 			"Generate the pipeline configuration, but refrain from deploying ".
 			"it.  Use --output-dir to save the compiled artifacts to disk.",
@@ -1806,13 +1801,12 @@ define_command("repipe", {
 			"pipeline is deployed.",
 
 		'skip-vault' =>
-			"Skip vault connectivity when compiling pipelines.\n".
-			"Requires --platform. Useful for local compilation without a running vault.",
+			"Skip vault connectivity when compiling pipelines.  Useful for ".
+			"local compilation without a running vault.",
 
 		'debug-dir=s' =>
 			"Dump intermediate compiler artifacts (parsed config, AST, resolved ".
-			"pipeline, provider output) to this directory for debugging.\n".
-			"Requires --platform.",
+			"pipeline, provider output) to this directory for debugging.",
 	],
 	deprecated_options => [
 		'vault=s' =>
@@ -2051,8 +2045,8 @@ define_command("pipeline-apply", {
 		"CI provider (Concourse by default).  Replaces `genesis repipe` for ".
 		"the new compiler pipeline.\n".
 		"\n".
-		"Reads from .genesis/ci/ (multi-file format), falling back to ci.yml ".
-		"(legacy format) when the directory is absent.",
+		"The provider comes from pipeline.provider.type in .genesis/config, ".
+		"and the pipeline itself from that file's pipeline: section.",
 	alias          => [qw(pipeline-push)],
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
@@ -2071,14 +2065,10 @@ define_command("pipeline-apply", {
 			"pipeline name.",
 
 		'config|c=s' =>
-			"Path to the legacy pipeline config file.  Defaults to 'ci.yml'. ".
-			"Ignored when .genesis/ci/ is present.",
+			"Path to the legacy pipeline config file.  Defaults to 'ci.yml'.",
 
 		'paused|P' =>
 			"Leave the pipeline paused after applying.",
-
-		'platform|provider|p=s' =>
-			"CI provider: 'concourse' (default) or 'github-actions'.",
 
 		'dry-run|n' =>
 			"Compile and print the pipeline YAML without deploying it.",

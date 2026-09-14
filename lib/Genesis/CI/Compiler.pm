@@ -146,23 +146,28 @@ sub compile {
 # }}}
 ### Class Methods {{{
 
-# can_compile - detect if multi-file config with pipeline.yml exists {{{
+# can_compile - detect if a named directory holds a pipeline.yml {{{
+#
+# D27 took the conventional directory away, so there is no name to fall
+# back on and the caller says which directory it means.  A caller that
+# names none is asking about nowhere, and the answer is no.
 sub can_compile {
 	my ($class, $ci_dir) = @_;
-	$ci_dir ||= '.genesis/ci';
+	return 0 unless $ci_dir;
 
 	return (-d $ci_dir && -f "$ci_dir/pipeline.yml");
 }
 
 # }}}
-# can_compile_from_env_files - detect if .genesis/ci/ exists for env-file topology {{{
+# can_compile_from_env_files - detect a directory built for env-file topology {{{
 #
-# Returns true when the .genesis/ci/ directory is present and contains the
+# Returns true when the named directory is present and contains the
 # required support files (targets.yml + integrations.yml), even if there is
 # no pipeline.yml (topology coming from genesis.pipeline.* in env files).
+# The directory is named by the caller for the same reason as above.
 sub can_compile_from_env_files {
 	my ($class, $ci_dir) = @_;
-	$ci_dir ||= '.genesis/ci';
+	return 0 unless $ci_dir;
 
 	return (
 		-d  $ci_dir &&
@@ -173,15 +178,16 @@ sub can_compile_from_env_files {
 }
 
 # }}}
-# can_compile_from_genesis_config - detect if ci: section exists in .genesis/config {{{
+# can_compile_from_genesis_config - detect the pipeline section in .genesis/config {{{
 #
-# Returns true when $top has a Genesis::Config with a ci: key, meaning
-# CI configuration is embedded inline in .genesis/config rather than in
-# separate files under .genesis/ci/.
+# Returns true when $top has a Genesis::Config with a pipeline: key,
+# meaning the pipeline configuration is embedded inline in .genesis/config
+# rather than in separate files.  The section is named pipeline under D18,
+# so the read is by that name and there is no alias for its old spelling.
 sub can_compile_from_genesis_config {
 	my ($class, $top) = @_;
 	return 0 unless $top && $top->can('config');
-	return 0 unless eval { $top->config->has('ci') };
+	return 0 unless eval { $top->config->has('pipeline') };
 	return 1;
 }
 
@@ -206,33 +212,69 @@ sub validate_config_section {
 # }}}
 ### Internal Methods {{{
 
-# _apply_provider_overrides - deep-merge ci-overrides-<provider>.yml via spruce {{{
+# override_file_names - the override files this run may merge {{{
+#
+# D27 put the override beside .genesis/config and took the old CI
+# subdirectory away, because a file whose name says what it is needs no
+# subdirectory to say it again.  D67 generalised the name for a provider
+# that emits more than one file: that provider takes one override per
+# emitted file, named by the file's base name without its extension,
+# because it would have nothing to merge a single override onto.  Under
+# D101 the form follows the effective output_layout rather than the
+# capability, so a multi-file provider set to single takes the single
+# form.
+sub override_file_names {
+	my ($class, $provider_type, $output_names, $layout) = @_;
+
+	return (".genesis/pipeline-overrides-${provider_type}.yml")
+		unless ($layout // 'single') eq 'multiple';
+
+	return map {
+		(my $base = $_) =~ s{^.*/}{};
+		$base =~ s{\.[^.]+$}{};
+		".genesis/pipeline-overrides-${provider_type}-${base}.yml"
+	} @$output_names;
+}
+
+# }}}
+# _apply_provider_overrides - merge the override files over the output {{{
+#
+# The merge is unchanged: verbatim YAML merged over the generated output
+# after compilation, with a non-YAML output passing through untouched.
+# What changed is where the file is found and what it is called.
 sub _apply_provider_overrides {
 	my ($self, $output, $provider_type) = @_;
 
-	# Locate the ci directory
-	my $ci_dir = $self->{ci_dir};
-	unless ($ci_dir) {
-		my $f = $self->{file} || '';
-		($ci_dir = $f) =~ s{/[^/]+$}{} or $ci_dir = '.';
+	my $top    = $self->{top} or bug("The compiler has no Genesis::Top");
+	my $layout = $top->config->get('pipeline.provider.output_layout', 'single');
+	my @names  = $self->override_file_names(
+		$provider_type, [sort keys %$output], $layout);
+
+	# One override per emitted file under the multi-file form, and one
+	# override for everything under the single form.
+	my %override_for;
+	if (@names == 1) {
+		my $path = $top->path($names[0]);
+		return $output unless -f $path;
+		$override_for{$_} = $path for keys %$output;
+	} else {
+		my @files = sort keys %$output;
+		$override_for{$files[$_]} = $top->path($names[$_]) for 0..$#files;
 	}
-
-	my $override_file = "$ci_dir/ci-overrides-${provider_type}.yml";
-	return $output unless -f $override_file;
-
-	info("Applying ci-overrides-%s.yml...", $provider_type);
 
 	my $dir = workdir;
 	my %merged;
-
 	for my $filename (sort keys %$output) {
-		my $content = $output->{$filename};
+		my $content  = $output->{$filename};
+		my $override = $override_for{$filename};
 
-		# Only spruce-merge YAML files; pass others through unchanged
-		unless ($filename =~ /\.ya?ml$/i) {
+		# Only spruce-merge YAML files; pass others through unchanged.
+		unless ($filename =~ /\.ya?ml$/i && $override && -f $override) {
 			$merged{$filename} = $content;
 			next;
 		}
+
+		info("Applying %s...", humanize_path($override, base_dir => $top->path));
 
 		my $base_path = "$dir/override-base-${filename}";
 		open(my $fh, '>', $base_path)
@@ -242,11 +284,8 @@ sub _apply_provider_overrides {
 		close $fh
 			or bail("Cannot flush temporary override base %s: %s", $base_path, $!);
 
-		my ($merged_yaml, $rc) = run(
-			'spruce', 'merge', $base_path, $override_file
-		);
-		bail("Failed to apply ci-overrides-%s.yml: spruce merge returned non-zero",
-			$provider_type)
+		my ($merged_yaml, $rc) = run('spruce', 'merge', $base_path, $override);
+		bail("Failed to apply %s: spruce merge returned non-zero", $override)
 			unless $rc == 0;
 
 		$merged{$filename} = $merged_yaml;
@@ -298,14 +337,13 @@ Genesis::CI::Compiler orchestrates the full compilation pipeline:
   4. ASTBuilder - Construct platform-agnostic AST
   5. PipelineDescriptor - Resolve generic pipeline from source AST
   6. Provider  - Generate platform-specific output from AST
-  7. Overrides - Deep-merge ci-overrides-<provider>.yml if present
+  7. Overrides - Deep-merge pipeline-overrides-<provider>.yml if present
 
 =head1 SYNOPSIS
 
-  # Compile from new multi-file format
+  # Compile from the pipeline: section of .genesis/config
   my $result = Genesis::CI::Compiler->new(
-    ci_dir => '.genesis/ci',
-    top    => $top_obj,
+    top => $top_obj,
   )->compile(provider => 'concourse');
 
   # Compile from legacy ci.yml
@@ -314,8 +352,8 @@ Genesis::CI::Compiler orchestrates the full compilation pipeline:
     top  => $top_obj,
   )->compile(provider => 'concourse');
 
-  # Check if new format is available
-  if (Genesis::CI::Compiler->can_compile('.genesis/ci')) {
+  # Check whether a named directory holds a compilable pipeline
+  if (Genesis::CI::Compiler->can_compile($some_dir)) {
     # Use compiler pipeline
   }
 

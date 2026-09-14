@@ -34,20 +34,18 @@ sub apply {
 	my ($layout) = @_;
 	option_defaults(config => 'ci.yml');
 
-	my $opts     = get_options;
-	my $platform = $opts->{platform} || 'concourse';
+	my $opts = get_options;
+	my $top  = _get_top($opts);
 
-	bail("--output-dir requires --platform")
-		if $opts->{'output-dir'} && !$opts->{platform};
-	bail("--debug-dir requires --platform")
-		if $opts->{'debug-dir'} && !$opts->{platform};
-
-	my $top = _get_top($opts);
+	# D27 took --platform away, so the provider is the one the repository
+	# is configured for and nothing else, and under D15 an absent type is
+	# the manual provider.
+	my $platform = $top->config->get('pipeline.provider.type') // 'manual';
 
 	# Short-circuit on the 'manual' provider: it has no pipeline to apply
 	# — Genesis is the CLI you run at your terminal, there is no CI to
 	# generate or deploy.
-	if (($top->config->get('pipeline.provider.type') // 'manual') eq 'manual') {
+	if ($platform eq 'manual') {
 		bail(
 			"Manual provider has no pipeline to apply.\n\n".
 			"#i{Genesis is your CLI - deploys happen at your terminal, ".
@@ -1129,15 +1127,10 @@ sub _compile_pipeline {
 
 	my %compiler_opts = (top => $top);
 
-	# Priority order:
-	#   1. .genesis/ci/pipeline.yml or targets.yml  (multi-file)
-	#   2. ci: section in .genesis/config           (genesis-config)
-	#   3. Legacy ci.yml / --config file            (backward compat)
-	my $ci_dir = $top->path('.genesis/ci');
-	if (-d $ci_dir && (-f "$ci_dir/pipeline.yml" || -f "$ci_dir/targets.yml")) {
-		$compiler_opts{ci_dir} = $ci_dir;
-		info("Using multi-file CI configuration from #C{.genesis/ci/}");
-	} elsif (Genesis::CI::Compiler->can_compile_from_genesis_config($top)) {
+	# Priority order, with D27's conventional directory gone:
+	#   1. pipeline: section in .genesis/config  (genesis-config)
+	#   2. Legacy ci.yml / --config file         (backward compat)
+	if (Genesis::CI::Compiler->can_compile_from_genesis_config($top)) {
 		info("Using inline CI configuration from #C{.genesis/config}");
 	} else {
 		$compiler_opts{file} = get_options->{config} || $top->path('ci.yml');

@@ -426,7 +426,7 @@ sub _validate_notifications_style {
 # }}}
 ### Multi-File Format Validation {{{
 
-# _validate_multi_file - validate new .genesis/ci/ format {{{
+# _validate_multi_file - validate the multi-file directory format {{{
 sub _validate_multi_file {
 	my ($self, $parsed) = @_;
 

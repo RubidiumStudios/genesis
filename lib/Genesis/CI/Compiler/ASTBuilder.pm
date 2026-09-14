@@ -695,7 +695,7 @@ Genesis::CI::Compiler::ASTBuilder - Builds AST from parsed configuration
 
 Genesis::CI::Compiler::ASTBuilder constructs a Genesis::CI::Compiler::AST
 from parsed configuration and discovered script metadata. It handles both
-legacy (single ci.yml) and modern (multi-file .genesis/ci/) formats,
+legacy (single ci.yml) and modern (multi-file directory) formats,
 normalizing them into the common AST representation.
 
 =head1 SYNOPSIS

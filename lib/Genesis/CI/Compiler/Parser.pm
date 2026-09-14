@@ -29,9 +29,15 @@ sub parse {
 	my ($self) = @_;
 
 	# Determine parsing mode, in priority order:
-	#   1. .genesis/ci/ directory  (multi-file)
-	#   2. .genesis/config ci: key (inline genesis-config)
-	#   3. Legacy ci.yml file      (single-file legacy)
+	#   1. A named configuration directory (multi-file)
+	#   2. .genesis/config ci: key         (inline genesis-config)
+	#   3. Legacy ci.yml file              (single-file legacy)
+	#
+	# The inline read still names the old ci: section rather than the
+	# pipeline: one D18 renamed, because _parse_genesis_config below parses
+	# the old section's shape and the new one is shaped differently.  A
+	# reader pointed at the new section would mis-parse it quietly, where
+	# this one finds nothing and the bail below says so out loud.
 	if ($self->{ci_dir} && -d $self->{ci_dir}) {
 		return $self->_parse_multi_file($self->{ci_dir});
 	} elsif ($self->{top} && eval { $self->{top}->config->has('ci') }) {
@@ -43,8 +49,8 @@ sub parse {
 	} elsif ($self->{file}) {
 		bail("CI configuration file '%s' not found", $self->{file});
 	} else {
-		bail("No CI configuration found: no .genesis/ci/ directory, no ci: section ".
-			"in .genesis/config, and no ci.yml file");
+		bail("No CI configuration found: no configuration directory, no ci: ".
+			"section in .genesis/config, and no ci.yml file");
 	}
 }
 
@@ -52,7 +58,7 @@ sub parse {
 # }}}
 ### Multi-File Parser {{{
 
-# _parse_multi_file - parse .genesis/ci/ directory structure {{{
+# _parse_multi_file - parse a configuration directory structure {{{
 sub _parse_multi_file {
 	my ($self, $ci_dir) = @_;
 
@@ -459,15 +465,15 @@ Genesis::CI::Compiler::Parser - Multi-format CI configuration parser
 =head1 DESCRIPTION
 
 Genesis::CI::Compiler::Parser loads and normalizes CI configuration from
-either the legacy single-file C<ci.yml> format or the new multi-file
-C<.genesis/ci/> directory structure. Both formats are normalized into a
-common intermediate structure for downstream processing.
+either the legacy single-file C<ci.yml> format or a multi-file
+configuration directory. Both formats are normalized into a common
+intermediate structure for downstream processing.
 
 =head1 SYNOPSIS
 
-  # Parse new multi-file format
+  # Parse the multi-file format out of a named directory
   my $parser = Genesis::CI::Compiler::Parser->new(
-    ci_dir => '.genesis/ci',
+    ci_dir => $some_dir,
     top    => $top_obj,
   );
   my $parsed = $parser->parse();
