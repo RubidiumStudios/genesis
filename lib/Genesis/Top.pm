@@ -1200,8 +1200,17 @@ sub applied_record {
 # A repository the apply has never run against reports nothing, because
 # there is no commit to be stale against; that case is the awaiting
 # pipeline-apply outcome, which is a different read.
+#
+# A repository with no pipeline at all reports nothing too, and it has to
+# answer before the applied record is addressed.  The deploy pre-flight
+# asks this on every deploy, and composing the record's address in a
+# repository with no pipeline reaches the refusal in
+# _pipeline_exodus_mount, which would stop an ordinary deploy with a
+# sentence about a pipeline the operator does not have.
 sub pipeline_staleness {
 	my ($self, $git) = @_;
+
+	return [] unless $self->pipeline_enabled;
 
 	my $applied = $self->applied_record;
 	return [] unless $applied && $applied->{control_commit};

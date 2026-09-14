@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use Genesis qw/run bail debug trace/;
+use Genesis::Exit qw/DATAERR/;
 use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
 use Cwd qw/getcwd/;
@@ -452,11 +453,28 @@ sub diff_files {
 
 # }}}
 # diff_names - simple list of changed file names between two refs {{{
+#
+# The return code is read rather than thrown away, and stderr is kept
+# apart from stdout, because a git that refuses the command writes its
+# reason where the file names would be and an unchecked read hands that
+# reason back as though those lines were changed paths.  No error text
+# matches a real path, so a caller comparing the list against a known set
+# would find nothing in it and conclude that nothing had changed, which is
+# the one wrong answer a diff can give.  Two ordinary states reach it: an
+# applied commit the local repository does not hold, and a branch that
+# exists only as a remote-tracking ref.
 sub diff_names {
 	my ($self, $from, $to, @pathspecs) = @_;
 	my @cmd = ('git', 'diff', '--name-only', $from, $to);
 	push @cmd, '--', @pathspecs if @pathspecs;
-	my ($out) = run({ dir => $self->{root} }, @cmd);
+	my ($out, $rc, $err) = run({ dir => $self->{root}, stderr => 0 }, @cmd);
+	bail(
+		{exitcode => DATAERR},
+		"Cannot diff #C{%s} against #C{%s} in #C{%s}:\n%s\n".
+		"Fetch the missing commit or branch, then try again.",
+		$from, $to, $self->{root},
+		($err // $out // 'git gave no reason')
+	) if $rc;
 	return grep { /\S/ } split /\n/, ($out || '');
 }
 
