@@ -2508,6 +2508,17 @@ subtest 'Concourse - provider_options_schema has correct structure' => sub {
 	is $schema->{team}{default}, 'main',  "team default is 'main'";
 };
 
+subtest 'Concourse - task.privileged is declared beside image and version' => sub {
+	# ASTBuilder and PipelineDescriptor both read
+	# pipeline.provider.task.privileged, so the nested schema has to
+	# declare it or the load refuses the key by name.
+	my $schema = Genesis::CI::Concourse->provider_options_schema();
+	ok exists $schema->{task}{schema}{privileged},
+		"privileged is declared in the nested task schema";
+	is $schema->{task}{schema}{privileged}{type}, 'array',
+		"and it is an array, which is the shape the readers expect";
+};
+
 subtest 'Concourse - provider_options_defaults returns expected defaults' => sub {
 	my $defaults = Genesis::CI::Concourse->provider_options_defaults();
 	ok ref($defaults) eq 'HASH',          "defaults is a hash";
