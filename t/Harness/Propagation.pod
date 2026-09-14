@@ -269,6 +269,14 @@ C<at>, which defaults to control's tip, C<root>, and C<extra>.  The tree is
 read in whichever of the three repositories holds the commit, so a control
 commit published from copy B reads the same as one made in copy A.
 
+The environment file kind is the ancestors and the environment's own file
+together, which is the hierarchy C<propagation_files> joins, and an ancestor
+is a cumulative hyphen-prefix of the environment's name.  A site file has to
+travel for the same reason the leaf does, because a command standing on the
+deployment branch reads every C<genesis.pipeline.*> key through the merged
+hierarchy and finds a key set above the leaf absent wherever the file holding
+it stayed behind.
+
 The reactions under C<bin/>, the ops files, and the kit source under C<dev/>
 are one kind, and the environment file at C<at> narrows that kind wherever it
 declares C<genesis.pipeline.track_additional_files>, which is the key the
