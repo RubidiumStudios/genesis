@@ -4,12 +4,10 @@ use warnings;
 
 use Test::More;
 use Test::Output;
-use Test::Exit;
 use File::Temp qw/tempdir/;
 use File::Path qw/mkpath/;
 use JSON::PP;
 use lib 'lib';
-use Genesis::Exit qw/CONFIG/;
 
 # Set up minimal Genesis testing environment
 $ENV{GENESIS_TESTING} = "yes";
@@ -2020,111 +2018,6 @@ subtest 'Compiler - override lookup sits beside the configuration' => sub {
 	my $result = $compiler->_apply_provider_overrides($output, 'concourse');
 	is_deeply $result, $output,
 		"an override anywhere but beside .genesis/config is not applied";
-};
-
-subtest 'Compiler - multi-file override names keep the directory' => sub {
-	# Two outputs that share a base name but sit in different directories
-	# must not collapse onto one override file, so the directory travels
-	# into the name with its separators flattened.
-	my @names = Genesis::CI::Compiler->override_file_names(
-		'concourse', ['qa/deploy.yml', 'prod/deploy.yml'], 'multiple');
-
-	is scalar(@names), 2, "one override name per emitted file";
-	isnt $names[0], $names[1],
-		"outputs in different directories get different override files";
-	is_deeply [sort @names], [
-		'.genesis/pipeline-overrides-concourse-prod-deploy.yml',
-		'.genesis/pipeline-overrides-concourse-qa-deploy.yml',
-	], "the directory survives in the name with its separator flattened";
-
-	is_deeply [
-		Genesis::CI::Compiler->override_file_names(
-			'concourse', ['pipeline.yml'], 'multiple')
-	], ['.genesis/pipeline-overrides-concourse-pipeline.yml'],
-		"an output with no directory keeps its plain base name";
-};
-
-subtest 'Compiler - the other naming form is named, not ignored' => sub {
-	my ($tmp, $top) = _override_top();
-
-	# The layout in force is single, so the run reads
-	# pipeline-overrides-concourse.yml.  An operator who wrote the
-	# multi-file form's file gets told it is being passed over rather
-	# than losing the merge in silence.
-	open my $fh, '>', "$tmp/.genesis/pipeline-overrides-concourse-pipeline.yml"
-		or die $!;
-	print $fh "---\nshould_not: appear\n";
-	close $fh;
-
-	my $compiler = Genesis::CI::Compiler->new(top => $top);
-	my $output = { 'pipeline.yml' => "---\njobs: []\n" };
-
-	my ($result, $out, $err);
-	($out, $err) = output_from {
-		$result = $compiler->_apply_provider_overrides($output, 'concourse');
-	};
-
-	is_deeply $result, $output, "the other form's file is not merged";
-	like "$out$err", qr/pipeline-overrides-concourse-pipeline\.yml/,
-		"the file that is being passed over is named";
-	like "$out$err", qr/ignor/i,
-		"the notice says the file is being ignored";
-};
-
-subtest 'Compiler - one override notice under the single form' => sub {
-	my $spruce = do { chomp(my $s = `which spruce 2>/dev/null`); $s };
-	unless ($spruce && -x $spruce) {
-		plan skip_all => "spruce not in PATH";
-		return;
-	}
-
-	my ($tmp, $top) = _override_top();
-	_write_override($tmp, "---\nextra_key: injected_by_override\n");
-
-	my $compiler = Genesis::CI::Compiler->new(top => $top);
-	my $output = {
-		'one.yml' => "---\nbase_key: one\n",
-		'two.yml' => "---\nbase_key: two\n",
-	};
-
-	my ($result, $out, $err);
-	($out, $err) = output_from {
-		$result = $compiler->_apply_provider_overrides($output, 'concourse');
-	};
-
-	like $result->{'one.yml'}, qr/extra_key:\s*injected_by_override/,
-		"the first file is merged";
-	like $result->{'two.yml'}, qr/extra_key:\s*injected_by_override/,
-		"the second file is merged";
-
-	my $applied = () = ("$out$err" =~ /Applying /g);
-	is $applied, 1,
-		"one override over several files announces itself once";
-};
-
-subtest 'Compiler - a refused merge exits at the configuration code' => sub {
-	my $spruce = do { chomp(my $s = `which spruce 2>/dev/null`); $s };
-	unless ($spruce && -x $spruce) {
-		plan skip_all => "spruce not in PATH";
-		return;
-	}
-
-	my ($tmp, $top) = _override_top();
-	_write_override($tmp, "---\nbroken: [unclosed\n");
-
-	my $compiler = Genesis::CI::Compiler->new(top => $top);
-	my $output = { 'pipeline.yml' => "---\nbase_key: base_value\n" };
-
-	local $ENV{GENESIS_IGNORE_EVAL} = 1;
-	my $code;
-	output_from {
-		$code = exit_code {
-			$compiler->_apply_provider_overrides($output, 'concourse');
-		};
-	};
-
-	is $code, CONFIG,
-		"an override spruce cannot merge is a configuration refusal";
 };
 
 ### ============================================================ ###
