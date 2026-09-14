@@ -306,7 +306,7 @@ sub branches_on_r {
 # is its remote-tracking refs, since a clone cuts exactly one local branch
 # for itself whatever R holds.
 sub fresh_clone {
-	my ($self, %opts) = @_;
+	my ($self) = @_;
 	my $dir = "$self->{base}/clone-" . int(rand(1_000_000));
 	run({dir => $self->{base}, onfailure => "Failed to clone R"},
 		'git', 'clone', '-q', $self->{r}, $dir);
@@ -489,7 +489,6 @@ sub make_harness {
 		source_control => $opts{source_control},
 		kit       => $opts{kit},
 		embed     => $opts{embed},
-		roots     => {},
 		mount     => $opts{exodus_mount} // $DEFAULT_EXODUS_MOUNT,
 	}, __PACKAGE__;
 
@@ -1663,7 +1662,6 @@ sub add_deployment_root {
 		Genesis::Top->create($self->{a}, $type, no_vault => 1, directory => $path);
 	}
 
-	$self->{roots}{$type} = {path => $path, envs => $opts{envs} // []};
 	$self->write_env_file($_, root => $path, type => $type, commit => 0)
 		for @{$opts{envs} || []};
 

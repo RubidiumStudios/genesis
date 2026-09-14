@@ -185,7 +185,7 @@ Returns R's branch names, short and sorted, as an arrayref, so a row asserting
 that nothing was created compares against a plain list rather than against a
 hashref of full ref names.
 
-=head2 fresh_clone($h, %opts)
+=head2 fresh_clone($h)
 
 Clones R again, now, into a directory beside the two copies, and returns that
 directory.  The clone carries none of the fixture's own history of fetches,
