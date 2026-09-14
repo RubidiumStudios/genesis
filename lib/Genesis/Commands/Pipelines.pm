@@ -246,12 +246,21 @@ sub pipeline_status {
 			my ($gh_owner, $gh_repo) = _github_owner_repo_from_remote($git);
 			if ($gh_owner && $gh_repo) {
 				my $github = Service::Github->new(org => $gh_owner);
+				# The head is matched against the branch each environment
+				# would be given, so the name this column reads and the
+				# name propagation opens come from the same accessor and
+				# cannot disagree.  The names are composed outside the
+				# eval below, because that eval is there to let missing
+				# credentials and a failed API call degrade quietly, and
+				# a prefix that collides with a branch name is neither.
+				my %pr_branch_env = map {
+					($top->pr_branch_for($_) => $_)
+				} $top->pipeline_env_names;
 				eval {
 					my $prs = $github->list_prs("$gh_owner/$gh_repo", state => 'open');
 					for my $pr (@$prs) {
-						if ($pr->{head}{ref} =~ m{^propagate/([^/]+)/}) {
-							$gh_open_prs{$1} //= $pr;
-						}
+						my $env = $pr_branch_env{$pr->{head}{ref} // ''};
+						$gh_open_prs{$env} //= $pr if defined $env;
 					}
 				};
 				# Silently degrade on error — status output continues without PR info
@@ -624,6 +633,7 @@ sub propagate {
 		git           => $git,
 		github        => $github,
 		owner_repo    => $owner_repo,
+		top           => $top,
 		targets       => \@targets,
 		control       => $control,
 		control_sha   => $control_sha,

@@ -192,6 +192,7 @@ Only direct entry-point envs appear in the result.
         git                 => $git,
         github              => $github,
         owner_repo          => 'acme/widgets',
+        top                 => $top,
         targets             => \@targets,
         control             => 'control',
         control_sha         => $sha,
@@ -206,10 +207,16 @@ Only direct entry-point envs appear in the result.
 
 Executes the propagation against the live git working tree and
 optionally the GitHub API.  Iterates the targets; for each, dispatches
-to a direct-to-env-branch commit path or a rolling
-C<pr/E<lt>envE<gt>> branch + PR path based on the target's
-C<require_pr> flag.  Batches branch pushes into a single
-C<git push> at the end, then makes all PR API calls.
+to a direct-to-env-branch commit path or a rolling pull request branch
+and PR path based on the target's C<require_pr> flag.  Batches branch
+pushes into a single C<git push> at the end, then makes all PR API
+calls.
+
+The pull request branch is whatever C<$top-E<gt>pr_branch_for($env)>
+composes, so the name this writes and the name the status command reads
+come from one place.  Under the default prefix that is
+C<pr/E<lt>envE<gt>/E<lt>typeE<gt>>, and the examples below spell it
+C<pr/E<lt>envE<gt>> for brevity.
 
 The rolling-branch decision tree (PR mode):
 
@@ -217,7 +224,8 @@ The rolling-branch decision tree (PR mode):
 
 =item *
 
-Query open PRs from GitHub: C<open_prs(base =E<gt> $env, head =E<gt> "pr/$env")>.
+Query open PRs from GitHub, with the base the env branch and the head
+the branch C<pr_branch_for> composed.
 
 =item *
 
@@ -252,6 +260,12 @@ Named arguments, collected as C<%args>:
 
 A C<Service::Git> instance pointing at the working tree.  Required.
 
+=item C<top>
+
+A C<Genesis::Top> for the repository.  It composes every pull request
+branch, so it is required when any target has C<require_pr =E<gt> 1> and
+unused otherwise.
+
 =item C<github>
 
 A C<Service::Github> instance with credentials authorised for the
@@ -279,8 +293,8 @@ Arrayref of target hashes.  Each:
     }
 
 The C<env> name is also the local git branch name for the target.
-For C<require_pr =E<gt> 1>, the actual propagation branch is
-C<pr/$env>.
+For C<require_pr =E<gt> 1>, the actual propagation branch is the one
+C<top> composes through C<pr_branch_for>.
 
 =item C<control>
 
@@ -399,9 +413,16 @@ B<Examples:>
 
   _propagate_one_pr_env(%args);
 
-Applies one target's propagation onto a rolling C<pr/E<lt>envE<gt>> branch and
+Applies one target's propagation onto a rolling pull request branch and
 resolves what to do with its pull request.  Takes the same arguments as
-L</_propagate_one_direct_env> plus C<github> and C<owner_repo>.
+L</_propagate_one_direct_env> plus C<top>, C<github>, and C<owner_repo>.
+
+The branch is named by asking C<top> for
+C<pr_branch_for($env_name)> rather than by composing a name here, so
+there is one place a pull request branch is named and one place the
+collision with a deployment branch is refused.  C<top> is required, and
+the sub dies when it is absent, because a pull request branch cannot be
+named without it.
 
 This is where the decision tree documented under L</propagate_envs> lives:
 count open PRs, then branch fresh, append to the existing one, or full-skip
@@ -410,9 +431,21 @@ when the branch already carries this control SHA.
 B<Returns:> a result hashref describing what was queued for the batched push
 and PR phase.
 
+B<Errors:>
+
+=over 4
+
+=item C<"_propagate_one_pr_env: 'top' is required">
+
+Dies when C<top> is absent.  A pull request branch is named through the
+top and nowhere else, so a caller that reaches this path without one has
+a programming error rather than a per-env failure.
+
+=back
+
 B<Examples:>
 
-  my $r = _propagate_one_pr_env(git => $git, github => $gh, ...);
+  my $r = _propagate_one_pr_env(git => $git, github => $gh, top => $top, ...);
   # returns a hashref noting the queued branch and PR action
 
 =head2 _apply_propagation_commit
