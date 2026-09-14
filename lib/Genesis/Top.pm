@@ -2117,7 +2117,10 @@ sub _provider_options_schema {
 	);
 
 	# The raw read, because the schema is what validation is about to be
-	# run against and there is no validated value to read yet.
+	# run against and there is no validated value to read yet.  The nested
+	# call terminates rather than recursing, because _memoize installs the
+	# configuration object before _validate_config runs, so this read meets
+	# the memo and not the validation still on the stack above it.
 	my $type = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
 	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
 	return \%schema unless $info && $info->{class};
@@ -2247,6 +2250,11 @@ sub _source_control {
 	return $self->{__source_control} if $self->{__source_control};
 
 	require Service::Git;
+
+	# The nested read terminates rather than recursing, because _memoize
+	# installs the configuration object before _validate_config runs, so
+	# this call and the two accessors below it meet the memo and not the
+	# validation that is still on the stack above them.
 	my $config = $self->config;
 	my %sc = (
 		control_branch => $config->get('pipeline.source_control.control_branch', DEFAULT_CONTROL_BRANCH),
