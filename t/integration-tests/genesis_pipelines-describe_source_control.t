@@ -120,12 +120,43 @@ subtest 'pipeline-describe shows what resolved and how' => sub {
 	my ($out, undef, $exit) = run_genesis($h, 'pipeline-describe');
 
 	is($exit, 0, 'the command succeeds');
-	like($out, qr{remote\s+origin\s+derived},
+	like($out, qr{remote\s+derived\s+origin},
 		'the derived remote shows how it resolved');
-	like($out, qr{repository\s+fivetwenty-io/mirror\s+explicit},
+	like($out, qr{repository\s+explicit\s+fivetwenty-io/mirror},
 		'the override shows as explicit and wins over the derivation');
-	like($out, qr{control_branch\s+control\s+default},
+	like($out, qr{control_branch\s+default\s+control},
 		'and an unset key shows as default');
+};
+
+subtest 'a long url cannot carry its tier off the line' => sub {
+	# The five are the restoration the run asserts for itself and the four
+	# rows below it.
+	plan tests => 5;
+
+	# Fifty-five characters, which is an ordinary length for a remote url
+	# and more than what is left of an eighty-column line once the key and
+	# the tier have had their columns.
+	my $uri = 'https://github.com/fivetwenty-io/genesis-deployments.git';
+
+	my $h = make_harness(
+		envs           => ['qa'],
+		source_control => {
+			control_branch => undef,
+			pr_prefix      => undef,
+			repository     => undef,
+		},
+	);
+	set_remotes($h, remotes => {origin => $uri}, upstream => 'origin',
+		fetch => 0);
+
+	my ($out, undef, $exit) = run_genesis($h, 'pipeline-describe');
+
+	is($exit, 0, 'the command succeeds');
+	like($out, qr{\Q$uri\E}, 'the url is shown whole');
+	like($out, qr{^ +uri +derived *$}m,
+		'the key and the tier it resolved from share a line');
+	unlike($out, qr{^ *(?:explicit|derived|default) *$}m,
+		'and no tier is left standing on a line with nothing to name it');
 };
 
 done_testing;

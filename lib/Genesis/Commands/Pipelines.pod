@@ -229,6 +229,13 @@ The resolution belongs to C<< $top->source_control_resolved >>, which
 settles what every value is and whether the operator wrote it, git answered
 for it, or nobody set it at all.  This lays those rows out and nothing more.
 
+The key column and the tier column are both sized from the rows, and the
+tier is printed before the value rather than after it.  A remote URL is
+routinely longer than what is left of an eighty-column line, and C<output>
+wraps on whitespace, so whichever field comes last is the one that takes a
+line of its own when the line runs long.  That has to be the value, because
+a tier on a line with no key beside it says nothing at all.
+
 B<Parameters:>
 
 =over 4
@@ -247,8 +254,8 @@ B<Examples:>
 
   _describe_source_control($top);
   # Source control
-  #   remote           origin                    derived
-  #   repository       fivetwenty-io/lmelt       derived
+  #   remote          derived   origin
+  #   repository      derived   fivetwenty-io/lmelt
 
 =head2 _missing_env_branches
 
