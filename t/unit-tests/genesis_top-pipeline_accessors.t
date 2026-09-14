@@ -42,15 +42,19 @@ sub scanned_sources {
 # The file's lines with the text that only names a key stripped out, so a
 # sweep for a read does not trip over a comment or over an error message
 # that tells the operator which key to edit.  The double-quoted strings go
-# first, because the '#' that opens a colour code would otherwise cut the
-# line short and hide the code after it.
+# first, because an operator message is written in one and the key it names
+# is not a read.  What is left goes through the shared comment stripper,
+# which finds where a comment opens by reading the quoting rather than by
+# cutting at the first '#', so a colour code inside a single-quoted string
+# no longer takes the rest of the line with it and a read that follows one
+# stays visible.  The single-quoted strings themselves stay, because that
+# is how every key is spelled at the call.
 sub code_lines_of {
 	my ($file) = @_;
 	my @lines;
 	for my $line (split /\n/, (slurp($file) // '')) {
 		(my $code = $line) =~ s{"(?:\\.|[^"\\])*"}{""}g;
-		$code =~ s{#.*$}{};
-		push @lines, $code;
+		push @lines, strip_comment($code);
 	}
 	return @lines;
 }
@@ -69,6 +73,20 @@ sub readers_of {
 		}
 	}
 	return sort @found;
+}
+
+# How many times one sub in one file reads the pattern.  readers_of dedupes
+# on the file and the sub, which is what makes its answer readable, so a
+# second read inside the accessor itself would be deduped away and this is
+# the reader that can still see it.
+sub reads_in {
+	my ($file, $sub, $pattern) = @_;
+	my ($in, $count) = ('<file scope>', 0);
+	for my $code (code_lines_of($file)) {
+		$in = $1 if $code =~ m{^\s*sub\s+(\w+)};
+		$count++ if $in eq $sub && $code =~ $pattern;
+	}
+	return $count;
 }
 
 sub files_matching {
@@ -162,7 +180,7 @@ subtest 'the two source-control readers answer the configuration' => sub {
 };
 
 subtest 'the old guards are gone' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	ok(!Genesis::Top->can('ci_configured'), 'ci_configured no longer exists');
 	ok(!Genesis::Top->can('ci_enabled'),    'ci_enabled no longer exists');
@@ -178,10 +196,16 @@ subtest 'the old guards are gone' => sub {
 	is_deeply(\@control_readers, [],
 		'control_branch is read in one place')
 		or diag("open-coded control branch read: @control_readers");
+
+	my @prefix_readers = grep { $_ ne 'lib/Genesis/Top.pm' }
+		files_matching(qr{pipeline\.source_control\.pr_prefix});
+	is_deeply(\@prefix_readers, [],
+		'pr_prefix is read in one place')
+		or diag("open-coded prefix read: @prefix_readers");
 };
 
 subtest 'no call site pairs a provider read with a separate guard' => sub {
-	plan tests => 1;
+	plan tests => 2;
 
 	# The readers the design allows, and why each one may read the key
 	# rather than ask the accessor:
@@ -213,6 +237,14 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 	is_deeply(\@readers, [sort @allowed],
 		'pipeline.provider.type is read only where the design allows')
 		or diag("open-coded provider read: @readers");
+
+	# The row above dedupes on the file and the sub, so a second read of the
+	# key inside the accessor itself would hide behind the first one.  The
+	# accessor answers the whole tree's question about the provider, and it
+	# needs to ask the configuration exactly once to do it.
+	is(reads_in('lib/Genesis/Top.pm', 'pipeline_provider_type',
+			qr{pipeline\.provider\.type}), 1,
+		'and the accessor reads its own key once');
 };
 
 done_testing;
