@@ -957,8 +957,8 @@ genesis:
 EOF
 
 	my $env = $top1->load_env('modern-env');
-	is($env->manifest_store, 'hybrid',
-		'manifest_store defaults to "hybrid" for Genesis 3.1.0+');
+	is($env->manifest_store, 'exodus',
+		'manifest_store defaults to "exodus" for Genesis 3.1.0+');
 
 	# Test 2: Config value 'exodus' with modern Genesis version
 	my $top2 = make_top(name => 'modern2', manifest_store => 'exodus', minimum_version => undef, creator_version => '3.1.0', no_vault => 1);
@@ -1063,8 +1063,8 @@ genesis:
 EOF
 
 	$env = $top7->load_env('repo-min-env');
-	is($env->manifest_store, 'hybrid',
-		'manifest_store defaults to "hybrid" when repo minimum_version >= 3.1.0');
+	is($env->manifest_store, 'exodus',
+		'manifest_store defaults to "exodus" when repo minimum_version >= 3.1.0');
 
 	# Test 8: Config changes are reflected immediately
 	my $top8 = make_top(name => 'memo-test', minimum_version => '3.1.0', manifest_store => 'exodus', creator_version => '3.1.0', no_vault => 1);

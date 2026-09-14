@@ -1777,7 +1777,7 @@ Every version 2 key is inherited unchanged:
 
 =item C<minimum_version> - optional semver
 
-=item C<manifest_store> - optional enum: C<repository>, C<hybrid>, C<exodus>; default C<hybrid>
+=item C<manifest_store> - optional enum: C<repository>, C<hybrid>, C<exodus>; default C<exodus>
 
 =item C<kits_path> - optional string; default C<$GENESIS_ROOT/.genesis/kits>
 
@@ -2107,11 +2107,13 @@ A section that is off is left alone. Otherwise the source-control block is
 resolved, which is where the derivations and their refusals are raised, then
 the configured provider's own programmatic check runs through
 L</_validate_provider_config>, then the capability gates of
-L</_validate_capability_gates>, and then every environment the deployment
+L</_validate_capability_gates>, then the manifest store and the kit floors
+of L</_validate_manifest_store>, and then every environment the deployment
 root holds has its C<genesis.pipeline> block checked, read merged through
 L</_merged_env_params>. The refusals themselves belong to
 L</_source_control>, to L</_validate_provider_config>, to
-L</_validate_capability_gates>, and to L</_validate_env_pipeline_block>.
+L</_validate_capability_gates>, to L</_validate_manifest_store>, and to
+L</_validate_env_pipeline_block>.
 
 B<Returns:> 1.
 
@@ -2231,6 +2233,58 @@ B<Examples:>
     $top->_validate_capability_gates;
     # exits CONFIG (78) where an environment sets genesis.pipeline.manual
     # under a provider that declares optional_git_triggers false
+
+=head2 _validate_manifest_store
+
+    $top->_validate_manifest_store();
+
+Refuses, at C<Genesis::Exit::CONFIG>, a repository whose pipeline is
+enabled and whose C<manifest_store> is not C<exodus>, and any environment
+whose kit declares a Genesis floor below 3.1.0.
+
+Under a pipeline the deploy must not be a git writer on a deployment
+branch, because the propagation writer already advances it. The certified
+commit and the applied, hold and proposed records live in exodus, so the
+store cannot be anything else, and the refusal is permanent rather than a
+limit the MVP lifts later.
+
+The check sits here rather than in the compiler's validator, which is
+where a deploy would never meet it. That gap is what let an environment on
+an old kit keep both writers on the branch: a kit whose Genesis floor is
+below 3.1.0 is forced onto the repository store at run time whatever the
+configuration says, because earlier versions cannot update the exodus
+deployment audit data. Each environment is therefore read merged through
+L</_merged_env_params> and refused by name, with the remedy of raising the
+kit's floor rather than changing the store's value.
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"manifest_store: ... cannot be used under a pipeline"> - raised when the
+repository's pipeline is enabled and its store is C<repository> or
+C<hybrid>, naming the value that was configured.
+
+=item *
+
+C<"The environment ... uses a kit whose Genesis floor is below 3.1.0"> -
+raised when an environment's merged C<genesis.min_version>, or its
+C<genesis.minimum_version>, is older than 3.1.0, naming the environment
+and carrying the remedy.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_manifest_store;
+    # returns 1 where the store is exodus and every kit floor is 3.1.0 or later
+
+    $top->_validate_manifest_store;
+    # exits CONFIG (78) where .genesis/config says manifest_store: hybrid
 
 =head2 _merged_env_params
 

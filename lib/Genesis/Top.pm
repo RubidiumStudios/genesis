@@ -1498,7 +1498,7 @@ sub _repo_config_schema_v2 {
 		manifest_store => {
 			type           => 'enum',
 			values         => ['repository','hybrid','exodus'],
-			default        => 'hybrid',
+			default        => 'exodus',
 			description    => 'Where to store manifests'
 		},
 		kits_path => {
@@ -1982,6 +1982,11 @@ sub _validate_pipeline_config {
 	# about how the operator wrote the block.
 	$self->_validate_capability_gates;
 
+	# After the provider is settled, because a store that cannot be used is
+	# a fact about the pipeline as a whole rather than about any one
+	# provider, and before the environment blocks are read for their shape.
+	$self->_validate_manifest_store;
+
 	# Every environment's genesis.pipeline block, read merged under D79.
 	# A file whose genesis key is not a hash at all carries no block to
 	# check, and is left to whatever reads the environment itself.
@@ -2116,6 +2121,56 @@ sub _validate_capability_gates {
 		$self->path('.genesis/config'),
 		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
 	) if @errors;
+
+	return 1;
+}
+
+# }}}
+# _validate_manifest_store - the store a pipeline repository may use {{{
+#
+# D14 requires the exodus store under a pipeline and D63 makes the
+# refusal permanent and puts it here, where every command sees it, rather
+# than in the compiler's validator, where a deploy never met it.  The
+# certified commit and the applied, hold and proposed records all live in
+# exodus, so an environment whose manifests live only in git still needs
+# every one of them and the routing cannot run without them.
+#
+# The floor case is the same refusal reached another way.  An environment
+# whose kit declares a Genesis floor below 3.1.0 is forced onto the
+# repository store at runtime whatever the configuration says, because
+# earlier versions cannot update the exodus deployment audit data, so the
+# deploy would commit manifests onto the deployment branch that the
+# propagation writer also advances.  That is the two-writer case, and the
+# remedy is the kit's floor rather than the store's value.
+sub _validate_manifest_store {
+	my ($self) = @_;
+
+	my $store = $self->config->get('manifest_store', 'exodus') // 'exodus';
+	bail({exitcode => CONFIG},
+		"#R{manifest_store: %s} cannot be used under a pipeline.\n".
+		"The certified commit and the applied, hold and proposed records ".
+		"live in exodus, so the store must be #C{exodus}.",
+		$store
+	) unless $store eq 'exodus';
+
+	for my $env_name ($self->_env_file_names) {
+		my $params = $self->_merged_env_params($env_name);
+		my $genesis = $params->{genesis};
+		next unless ref($genesis) eq 'HASH';
+		my $floor = $genesis->{min_version}
+			// $genesis->{minimum_version}
+			// next;
+		$floor =~ s/^v//;
+		next if new_enough($floor, '3.1.0');
+
+		bail({exitcode => CONFIG},
+			"The environment #C{%s} uses a kit whose Genesis floor is below ".
+			"#C{3.1.0}, which forces the repository store whatever ".
+			"#C{manifest_store} says.\nRaise the kit's floor to #C{3.1.0} or ".
+			"later.",
+			$env_name
+		);
+	}
 
 	return 1;
 }

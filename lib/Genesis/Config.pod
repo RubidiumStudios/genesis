@@ -829,7 +829,7 @@ B<Errors:> None.
 B<Examples:>
 
     my $spec = $cfg->_schema_for_key('manifest_store');
-    # { type => 'enum', values => [...], default => 'hybrid', ... }
+    # { type => 'enum', values => [...], default => 'exodus', ... }
 
 =head2 _blocked_by_scalar
 
@@ -867,7 +867,7 @@ B<Errors:> None.
 
 B<Examples:>
 
-    # with manifest_store => 'hybrid' in the default store
+    # with manifest_store => 'exodus' in the default store
     Genesis::Config::_blocked_by_scalar($cfg->{default_values}, 'manifest_store.sub');
     # Returns: 1
 
