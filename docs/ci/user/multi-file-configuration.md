@@ -5,28 +5,43 @@ Pipeline configuration lives in the `pipeline:` section of
 single monolithic `ci.yml`. The compiler pipeline reads this section, and
 it gives a cleaner separation of concerns than the legacy file does.
 
-When you run `genesis repipe --platform concourse`, Genesis reads the
-`pipeline:` section of `.genesis/config`. If the repository has no such
-section, it falls back to reading `ci.yml` in the legacy format. There is
-no conventional `.genesis/ci/` directory any more, and nothing looks for
+When you run `genesis pipeline-apply`, Genesis reads the `pipeline:`
+section of `.genesis/config`. If the repository has no such section, it
+falls back to reading `ci.yml` in the legacy format. There is no
+conventional `.genesis/ci/` directory any more, and nothing looks for
 one.
 
 ## Section Structure
 
 ```
 pipeline:
-  pipeline:            # Required - metadata, branches, workflows, configuration
+  provider:            # Which CI provider this repository uses
   targets:             # Required - BOSH directors and connection info
   integrations:        # Required - vault, git, slack, email, locker
+  pipeline:            # Optional - metadata, branches, workflows, configuration
   scripts:             # Optional - script metadata declarations
   provider_config:
     concourse:         # Optional - Concourse-specific overrides
     github-actions:    # Optional - GitHub Actions-specific overrides
 ```
 
-The three required blocks are `pipeline:`, `targets:`, and
-`integrations:`. Genesis loads `.genesis/config` through `spruce merge`,
-so spruce operators work throughout the section.
+The two blocks a pipeline cannot do without are `targets:` and
+`integrations:`. The validator asks `integrations:` for a `vault.url` and
+for a `source_control` block, and it checks every director it finds under
+`targets:`. An absent or empty `pipeline:` block is legal, and it means
+the topology is read from the `genesis.pipeline.*` keys in your
+environment files instead, which is also why workflows are optional. The
+`provider:` block names the provider and carries its options, and
+`genesis pipeline-apply` reads `provider.type` to decide which provider
+to compile for.
+
+Genesis reads `.genesis/config` through `spruce json`, which converts the
+YAML and evaluates no spruce operator at all, so every value in the
+`pipeline:` section reaches the compiler exactly as you wrote it. Write
+credential references in the form your CI provider resolves, such as
+Concourse's `((credential))`, and keep `(( vault ... ))` and the other
+spruce operators for a legacy `ci.yml`, which the parser does load
+through `spruce merge`.
 
 ## The pipeline Block
 
@@ -101,8 +116,8 @@ targets:
       auth:
         type: basic
         client_id: admin
-        client_secret: (( vault "secret/bosh/sandbox/admin:password" ))
-      ca_cert: (( vault "secret/bosh/sandbox/ssl/ca:certificate" ))
+        client_secret: ((bosh-sandbox-password))
+      ca_cert: ((bosh-sandbox-ca-cert))
 
   proto:
     name: proto
@@ -132,8 +147,8 @@ vault:
   namespace: null
   auth:
     type: approle
-    role_id: (( vault "secret/ci/pipeline:role_id" ))
-    secret_id: (( vault "secret/ci/pipeline:secret_id" ))
+    role_id: ((vault-role-id))
+    secret_id: ((vault-secret-id))
   options:
     tls_verify: true
     no_strongbox: false
@@ -150,12 +165,12 @@ source_control:
     email: concourse@pipeline
   auth:
     type: ssh-key
-    private_key: (( vault "secret/ci/pipeline:git_private_key" ))
+    private_key: ((git-private-key))
 
 notifications:
   - type: slack
     name: slack
-    webhook: (( vault "secret/ci/pipeline:slack_webhook" ))
+    webhook: ((slack-webhook))
     channel: "#deployments"
     username: runwaybot
     icon: http://cl.ly/image/.../concourse-logo.png
@@ -169,13 +184,13 @@ notifications:
     smtp:
       host: smtp.example.com
       username: smtp-user
-      password: (( vault "secret/ci:smtp" ))
+      password: ((smtp-password))
     events: [failed]
 
 locker:
   url: https://locker.example.com
   username: locker-user
-  password: (( vault "secret/ci:locker" ))
+  password: ((locker-password))
   ca_cert: null
   skip_ssl_validation: true
 ```
@@ -279,5 +294,5 @@ and `pipeline.locker` sections all go into the `integrations` block.
 Once migrated, deploy with:
 
 ```bash
-genesis repipe --platform concourse
+genesis pipeline-apply
 ```
