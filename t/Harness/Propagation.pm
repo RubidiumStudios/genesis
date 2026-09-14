@@ -2951,11 +2951,20 @@ sub gh_no_token {
 	return $self;
 }
 
+# A line the decoder refuses comes back as a record of its own rather than
+# taking the reader down.  Two writers landing on the log at once would leave
+# half a line behind, and a read that died inside JSON::PP would stop the
+# whole file where the row that asked should have failed.  The record carries
+# no method and no url, so a row counting calls of a kind reads one fewer and
+# fails its own assertion, and torn holds the text for the diagnostic.
 sub gh_calls {
 	my ($gh) = @_;
 	return () unless -f $gh->{log};
 	my $json = JSON::PP->new;
-	return map {$json->decode($_)} grep {/\S/} split /\n/, helper::get_file($gh->{log});
+	return map {
+		my $line = $_;
+		eval {$json->decode($line)} // {torn => $line};
+	} grep {/\S/} split /\n/, (helper::get_file($gh->{log}) // '');
 }
 
 # }}}
