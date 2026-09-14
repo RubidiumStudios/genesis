@@ -1,8 +1,8 @@
 #!perl
 # Proves T33 and T34: the manifest store is refused at configuration load
 # under a pipeline, a fresh repository is initialised with exodus, and an
-# environment whose kit floor is below 3.1.0 is refused by name with the
-# remedy of raising it.
+# environment whose effective Genesis floor is below 3.1.0 is refused by
+# name with the remedy of raising it.
 use strict;
 use warnings;
 use utf8;
@@ -39,6 +39,8 @@ sub load_with {
 	my ($store, %opts) = @_;
 	my @lines = ('---', 'deployment_type: bosh', 'version: "3"',
 		'creator_version: 3.2.0');
+	push @lines, "minimum_version: $opts{minimum_version}"
+		if $opts{minimum_version};
 	push @lines, "manifest_store: $store" if $store;
 	push @lines, 'pipeline:', '  enabled: true',
 		'  source_control:', '    repository: genesis/bosh-deployments'
@@ -74,16 +76,33 @@ subtest 'a fresh repository is initialised with exodus' => sub {
 };
 
 subtest 'an old kit floor cannot reach the repository store' => sub {
-	plan tests => 2;
+	plan tests => 4;
 
-	write_env_file($h, 'qa', genesis => {min_version => '3.0.0'},
-		pipeline => {});
+	# The old floor goes on an environment of its own, written into the
+	# working tree and taken out again below, so no other row ever sees it
+	# and this one passes wherever it is run.  The harness's own qa.yml is
+	# left exactly as it was.
+	my $path = write_env_file($h, 'legacy',
+		genesis => {min_version => '3.0.0'}, commit => 0);
+
 	throws_ok {load_with('exodus')}
-		qr/environment qa uses\s+a\s+kit\s+whose\s+Genesis\s+floor\s+is\s+below\s+3\.1\.0/i,
+		qr/environment legacy uses\s+a\s+kit\s+whose\s+Genesis\s+floor\s+is\s+below\s+3\.1\.0/i,
 		'the floor case is refused by name';
 	throws_ok {load_with('exodus')}
 		qr/Raise\s+the\s+kit's\s+floor\s+to\s+3\.1\.0/,
 		'and the refusal carries the remedy';
+
+	# The floor that matters is the effective one, which is the higher of
+	# the repository's own minimum and the environment's, so a repository
+	# that declares nothing better is refused and one that already declares
+	# 3.1.0 is not refused over a line the run time would never honour.
+	throws_ok {load_with('exodus', minimum_version => '3.0.0')}
+		qr/environment legacy uses\s+a\s+kit\s+whose\s+Genesis\s+floor\s+is\s+below\s+3\.1\.0/i,
+		'a repository floor below 3.1.0 leaves the refusal standing';
+	lives_ok {load_with('exodus', minimum_version => '3.1.0')}
+		'and a repository floor of 3.1.0 lifts the environment that declares less';
+
+	unlink $h->a . "/$path";
 };
 
 done_testing;

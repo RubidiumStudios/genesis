@@ -1091,6 +1091,56 @@ EOF
 		'manifest_store() reflects config changes (not memoized)');
 };
 
-done_testing;  # 21 subtests + 4 use_ok calls = 25 tests total
+subtest '_remove_repository_manifest_copies - only a store somebody chose' => sub {
+	plan tests => 4;
+
+	# The five files a deploy leaves under .genesis/manifests, laid down so
+	# the removal has something to find.
+	my @suffixes = ('.yml', '.vars', '-state.yml', '-state.json', '-store.yml');
+	my $lay_down = sub {
+		my ($top, $name) = @_;
+		mkdir_or_fail($top->path('.genesis/manifests'));
+		put_file($top->path(".genesis/manifests/$name$_"), "placeholder\n")
+			for @suffixes;
+		return map {$top->path(".genesis/manifests/$name$_")} @suffixes;
+	};
+	my $build = sub {
+		my ($name, %opts) = @_;
+		my $top = make_top(name => $name, minimum_version => '3.1.0',
+			creator_version => '3.1.0', no_vault => 1, %opts);
+		$top->link_dev_kit('t/src/simple');
+		put_file($top->path("$name-env.yml"), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+genesis:
+  env: $name-env
+  min_version: 3.1.0
+EOF
+		return ($top, $top->load_env("$name-env"));
+	};
+
+	# A repository written before the key existed, or upgraded from a
+	# version 1 configuration, carries no manifest_store at all.  It reads
+	# exodus from the schema default, and its kept copies stay put, because
+	# nobody chose that store.
+	my ($keyless_top, $keyless) = $build->('keyless', manifest_store => undef);
+	my @kept = $lay_down->($keyless_top, 'keyless-env');
+	is($keyless->_remove_repository_manifest_copies, 0,
+		'a repository with no manifest_store key removes nothing');
+	is(scalar(grep {-f $_} @kept), 5,
+		'and every copy it was keeping is still there');
+
+	# The same store, written down, is somebody's choice, and the copies go.
+	my ($chosen_top, $chosen) = $build->('chosen', manifest_store => 'exodus');
+	my @doomed = $lay_down->($chosen_top, 'chosen-env');
+	is($chosen->_remove_repository_manifest_copies, 5,
+		'an explicit exodus removes all five copies');
+	is(scalar(grep {-f $_} @doomed), 0,
+		'and none of them survives');
+};
+
+done_testing;  # 22 subtests + 4 use_ok calls = 26 tests total
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

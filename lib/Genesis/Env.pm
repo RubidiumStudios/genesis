@@ -921,6 +921,41 @@ sub manifest_store {
 }
 
 # }}}
+# _remove_repository_manifest_copies - drop the copies exodus does not keep {{{
+#
+# A deploy under the repository or hybrid store leaves the rendered
+# manifest, its vars, and the state and store files under
+# .genesis/manifests, and a deploy under the exodus store takes them away
+# again, because the exodus record is where they live instead.
+#
+# The removal runs only where somebody wrote exodus down, never where the
+# schema supplied it.  A repository created before the key existed, or
+# upgraded from a version 1 configuration, carries no manifest_store at
+# all and has been keeping these copies; it would otherwise lose them on
+# the first deploy after an upgrade with nobody having chosen that.
+# is_set reads the loaded and set layers alone, where get and has look
+# through the filled defaults too and cannot tell a written value from a
+# supplied one.
+sub _remove_repository_manifest_copies {
+	my ($self) = @_;
+
+	my $config = $self->top->config;
+	return 0 unless $config->is_set('manifest_store');
+	return 0 unless ($config->get('manifest_store') // '') eq 'exodus';
+
+	my $name = $self->name;
+	my @found = grep {-f $_} (
+		$self->path(".genesis/manifests/$name.yml"),
+		$self->path(".genesis/manifests/$name.vars"),
+		$self->path(".genesis/manifests/$name-state.yml"),
+		$self->path(".genesis/manifests/$name-state.json"),
+		$self->path(".genesis/manifests/$name-store.yml")
+	);
+	unlink $_ for @found;
+	return scalar @found;
+}
+
+# }}}
 # deployment_state - returns the status of the deployment {{{
 # DEPRECATED: use deployments->current_state instead
 sub deployment_state {
@@ -4526,15 +4561,7 @@ sub _post_deploy {
 	$self->deployment_cache_cleanup;
 
 	# Remove exodus-only manifest files
-	if ($manifest_store eq 'exodus') {
-		unlink $_ for grep {-f $_} (
-			$self->path(".genesis/manifests/".$self->name.".yml"),
-			$self->path(".genesis/manifests/".$self->name.".vars"),
-			$self->path(".genesis/manifests/".$self->name."-state.yml"),
-			$self->path(".genesis/manifests/".$self->name."-state.json"),
-			$self->path(".genesis/manifests/".$self->name."-store.yml")
-		);
-	}
+	$self->_remove_repository_manifest_copies;
 
 	# CI-configured branch finalization: commit + push the deploy's
 	# manifest artifacts on the env branch, then run the auto-cascade

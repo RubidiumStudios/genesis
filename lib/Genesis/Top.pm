@@ -2145,7 +2145,10 @@ sub _validate_capability_gates {
 sub _validate_manifest_store {
 	my ($self) = @_;
 
-	my $store = $self->config->get('manifest_store', 'exodus') // 'exodus';
+	# One fallback, and it is here for a repository whose version 2
+	# configuration was written before the schema declared a default for
+	# the key, where the schema has nothing of its own to supply.
+	my $store = $self->config->get('manifest_store', 'exodus');
 	bail({exitcode => CONFIG},
 		"#R{manifest_store: %s} cannot be used under a pipeline.\n".
 		"The certified commit and the applied, hold and proposed records ".
@@ -2153,14 +2156,28 @@ sub _validate_manifest_store {
 		$store
 	) unless $store eq 'exodus';
 
+	# The floor a deploy actually honours is the effective one, which is
+	# the higher of the repository's own minimum and the environment's, the
+	# same pair Genesis::Env::effective_minimum_version takes the maximum
+	# of.  Reading the environment's line alone would refuse a repository
+	# whose own floor already lifts it, over a number the run time would
+	# never honour.
+	my $repo_min = $self->config->get('minimum_version', '') =~ s/^v//r;
 	for my $env_name ($self->_env_file_names) {
 		my $params = $self->_merged_env_params($env_name);
 		my $genesis = $params->{genesis};
 		next unless ref($genesis) eq 'HASH';
-		my $floor = $genesis->{min_version}
+		my $env_min = $genesis->{min_version}
 			// $genesis->{minimum_version}
-			// next;
-		$floor =~ s/^v//;
+			// '';
+		$env_min =~ s/^v//;
+
+		my @declared = grep {length $_} ($env_min, $repo_min);
+		next unless @declared;
+		my $floor = shift @declared;
+		for my $version (@declared) {
+			$floor = $version if new_enough($version, $floor);
+		}
 		next if new_enough($floor, '3.1.0');
 
 		bail({exitcode => CONFIG},
