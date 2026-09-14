@@ -67,6 +67,7 @@ unit-tests/genesis_env-manifest_helpers.t
 unit-tests/genesis_env-lookups.t         # lookup() and lookup_unevaled() variants
 unit-tests/genesis_env-relations.t       # relate() and relate_by_name() environment relationships
 unit-tests/genesis_env-ocfp.t            # is_ocfp(), ocfp_type(), ocfp_env() OCFP configuration
+unit-tests/genesis_env-bare.t            # Genesis::Env->bare: the merged read for a genesis.pipeline key
 unit-tests/genesis_env-bosh.t            # _parse_bosh_env(), is_bosh_director(), bosh_env(), bosh_alias()
 unit-tests/genesis_env-exodus.t          # Path construction: secrets/exodus/ci/ocfp_config mount/slug/base
 unit-tests/genesis_env-configs.t         # configs(), required_configs(), has_config() BOSH config mgmt
