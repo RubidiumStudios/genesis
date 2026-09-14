@@ -3473,9 +3473,40 @@ sub proposed {
 	return $h->fixture_proposed($env, %opts);
 }
 
+# An automated provider does its work unattended, so the schema requires the
+# clone credential and the committer identity of it, along with the shuttle,
+# the vault, and the locker.  The shape writes all of them, because a row that
+# asks for an automated pipeline and then loads a Genesis::Top means a
+# repository that configuration is valid for.  They land in one commit, since
+# only the last write commits.
 sub automated {
 	my ($h, %opts) = @_;
-	$h->set_repo_config('pipeline.provider.type', $opts{provider} // 'concourse');
+	my %blocks = automation_blocks();
+
+	$h->set_repo_config('pipeline.provider.type',
+		$opts{provider} // 'concourse', commit => 0);
+	$h->set_repo_config('pipeline.source_control.auth.type',
+		$opts{auth_type} // 'ssh', commit => 0);
+	$h->set_repo_config('pipeline.source_control.auth.vault',
+		$opts{auth_vault} // 'secret/ci/git', commit => 0);
+	$h->set_repo_config('pipeline.source_control.identity.name',
+		$opts{identity_name} // 'Genesis CI', commit => 0);
+	$h->set_repo_config('pipeline.source_control.identity.email',
+		$opts{identity_email} // 'ci@genesis.example.com', commit => 0);
+	my $path;
+	for my $block (sort keys %blocks) {
+		for my $key (sort keys %{$blocks{$block}}) {
+			$path = $h->set_repo_config("pipeline.$block.$key",
+				$blocks{$block}{$key}, commit => 0);
+		}
+	}
+
+	# One commit for the whole shape, because the keys are all one file and a
+	# commit apiece would say nothing a reader of the log wants.
+	run({dir => $h->{a}}, 'git', 'add', '--', $path);
+	run({dir => $h->{a}, onfailure => "Failed to write the automated shape"},
+		'git', 'commit', '-q', '-m', 'configure an automated pipeline');
+
 	return $h;
 }
 
