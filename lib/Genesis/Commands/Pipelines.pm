@@ -8,6 +8,7 @@ use Genesis::State;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
 use Genesis::Commands;
+use Genesis::Exit qw/CONFIG/;
 use Genesis::Top;
 use Genesis::Env;
 use Genesis::CI::Legacy qw//;
@@ -50,7 +51,11 @@ sub apply {
 	# — Genesis is the CLI you run at your terminal, there is no CI to
 	# generate or deploy.
 	if ($platform eq 'manual') {
+		# A provider the repository chose is configuration, so the refusal
+		# carries the configuration code rather than the bare one that
+		# stands for a crash, and a pipeline job can tell the two apart.
 		bail(
+			{exitcode => CONFIG},
 			"Manual provider has no pipeline to apply.\n\n".
 			"#i{Genesis is your CLI - deploys happen at your terminal, ".
 			"not in a hosted pipeline.}\n\n".
@@ -260,7 +265,7 @@ sub pipeline_status {
 			# a prefix that collides with a branch name is neither.
 			my %pr_branch_env = map {
 				($top->pr_branch_for($_) => $_)
-			} $top->pipeline_env_names;
+			} keys %$nodes;
 			eval {
 				my $prs = $github->list_prs($repository, state => 'open');
 				for my $pr (@$prs) {
@@ -1303,6 +1308,14 @@ sub _compile_pipeline {
 	my ($top, $platform) = @_;
 
 	my %compiler_opts = (top => $top);
+
+	# D27 took the .genesis/ci/ directory away, so a repository still
+	# carrying one is compiled from somewhere else entirely.  Saying so
+	# here spares the operator an edit that changes nothing and a hunt
+	# for why.
+	info("Ignoring #C{.genesis/ci/}; see the #C{pipeline:} section of ".
+		"#C{.genesis/config}.")
+		if -d $top->path('.genesis/ci');
 
 	# Priority order, with D27's conventional directory gone:
 	#   1. pipeline: section in .genesis/config  (genesis-config)
