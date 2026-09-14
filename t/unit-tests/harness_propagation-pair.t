@@ -83,4 +83,18 @@ subtest 'the readers answer for a ref that is not there' => sub {
 		'ref_in answers undef');
 };
 
+subtest 'the git accessor takes the options Service::Git takes' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $plain = $h->git('a');
+	ok(!$plain->{_track_branch}, 'a plain handle restores no branch');
+
+	my $tracking = $h->git('a', track_branch => 1);
+	ok($tracking->{_track_branch},
+		'and the accessor can ask for one that does');
+	is($h->git('a', track_branch => 1), $tracking,
+		'the same options answer the same handle');
+};
+
 done_testing;
