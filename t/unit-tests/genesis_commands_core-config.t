@@ -374,7 +374,7 @@ subtest 'config --set-from-file reads a scalar, less one newline' => sub {
 subtest 'config --set-from-file parses a collection' => sub {
 	plan tests => 2;
 
-	my $dir = config_repo('config-from-file-collection');
+	my $dir = config_repo('config-from-file-collection', enabled => 0);
 	mkfile_or_fail("$dir/provider.yml", "type: concourse\ntarget: prod\n");
 	pushd $dir;
 	prepare_command('config', '--set-from-file', 'pipeline.provider', "$dir/provider.yml");

@@ -32,6 +32,16 @@ sub make_repo {
 
 ### Config v3 validation tests ################################################
 
+# An automated provider does the work unattended, so a fixture that names
+# one carries the three blocks the schema requires of it.
+sub automation_blocks {
+	return (
+		shuttle => {backend => 's3', bucket => 'pipes'},
+		vault   => {url     => 'https://vault.example.com'},
+		locker  => {url     => 'https://locker.example.com'},
+	);
+}
+
 # Initialize $Genesis::RC for tests that consult global config
 provide_rc();
 
@@ -103,6 +113,7 @@ subtest 'v3 config validates with CI enabled and provider' => sub {
 		enabled  => 'true',
 		provider => { type => 'concourse', target => 'pipes/lmelt', url => 'https://pipes.example.com', team => 'lmelt' },
 		name => 'bosh',
+		automation_blocks(),
 	});
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
@@ -129,6 +140,7 @@ subtest 'v3 config with ci.yml and CI configured warns' => sub {
 	my $dir = make_v3_repo(workdir("v3-conflict"), pipeline => {
 		enabled  => 'true',
 		provider => { type => 'concourse', target => 'pipes/test', url => 'https://ci.example.com', team => 'test' },
+		automation_blocks(),
 	});
 	mkfile_or_fail("$dir/ci.yml", "---\npipeline:\n  layouts:\n    - sandbox\n");
 
@@ -215,6 +227,7 @@ subtest 'ci_control_branch returns constant for MVP' => sub {
 	my $dir = make_v3_repo(workdir("v3-control"), pipeline => {
 		enabled  => 'true',
 		provider => { type => 'concourse', target => 'pipes/test', url => 'https://ci.example.com', team => 'test' },
+		automation_blocks(),
 	});
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);

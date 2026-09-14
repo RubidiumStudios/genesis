@@ -70,12 +70,16 @@ subtest 'the two spellings cannot drift' => sub {
 
 	# An automated provider has to clone and commit unattended, so the row
 	# that names one carries the credential and the committer identity the
-	# source-control block requires of it.
+	# source-control block requires of it, and the three blocks the work
+	# cannot be done without either.
 	lives_ok {
 		load_with(join("\n",
 			enabled_pipeline('  provider:', '    type: github-actions'),
 			'    auth:', '      vault: secret/ci/git',
-			'    identity:', '      name: Genesis', '      email: ci@example.com'))
+			'    identity:', '      name: Genesis', '      email: ci@example.com',
+			'  shuttle:', '    backend: s3', '    bucket: pipes',
+			'  vault:', '    url: https://vault.example.com',
+			'  locker:', '    url: https://locker.example.com'))
 	} 'github-actions validates, because the registry spells it that way';
 };
 

@@ -1832,6 +1832,32 @@ read from the git prefix, and the branch a command runs from is runtime
 state, so it is checked rather than configured. L</_source_control> resolves
 the tiers.
 
+Four more blocks complete the section. C<shuttle> is the object store behind
+every deployment's request queue and its C<_ran> event, and it is required
+wherever an automation has to do the work unattended, which is again what
+L</_automated_provider_configured> decides. Its C<backend> is C<s3> or C<gcs>
+and never a directory, because a directory on one worker cannot trigger
+across pipelines, and its C<bucket> is required beside it. The C<region>,
+C<endpoint>, and C<auth> keys are optional, and the resource C<image> and
+C<image_tag> carry defaults.
+
+C<vault> is the vault a pipeline task writes exodus through. Its C<url> is
+required, and C<namespace>, C<auth>, and C<options> are optional. It is
+required under an automated provider for the same reason the shuttle is,
+because a task nobody is watching cannot be asked where to write.
+
+C<locker> is the locker behind the two deploy locks, which are mandatory and
+take no key of their own, so an operator cannot turn one off. Its C<url> is
+required, C<username>, C<password>, and C<ca_cert> are optional, and
+C<skip_ssl_validation> defaults to false. It is required under an automated
+provider as well.
+
+C<notifications> is optional under every provider. Its C<style> is the
+repository default rendering and defaults to C<default>, and C<slack> and
+C<email> carry whatever entries the notifier reads. An environment overrides
+the style through its own C<genesis.pipeline.notifications> block, which
+L</_pipeline_env_keys_schema> declares.
+
 B<Returns:> A hash reference.
 
 =head2 _current_config_schema
