@@ -144,4 +144,81 @@ subtest 'a declared dependency cycle is accepted at load' => sub {
 		'the load accepts it, because the cycle needs the rendered manifest';
 };
 
+subtest 'a mapping written where a list belongs is refused' => sub {
+	plan tests => 1;
+
+	# The key declares envsplit, so without a check on the block as it was
+	# written the validator splits the mapping as though it came from the
+	# environment and leaves the address of a reference behind.
+	throws_ok {
+		commit_on_control($h, files => {'qa.yml' => join("\n",
+			'---', 'kit:', '  name:    dev', '  version: latest',
+			'genesis:', '  env: qa', '  pipeline:',
+			'    track_dependencies:', '      cf: prod', '')});
+		Genesis::Top->new($h->a, no_vault => 1)->config;
+	} qr/genesis\.pipeline\.track_dependencies: expected a list of strings/,
+		'the mapping is refused by name rather than stringified';
+};
+
+subtest 'a refusal with no bullets in it is still a refusal' => sub {
+	plan tests => 1;
+
+	# Every refusal the validator raises today is bulleted, so the fallback
+	# is provoked by making it fail some other way entirely.
+	my $top = Genesis::Top->new($h->a, no_vault => 1);
+	no warnings qw/redefine once/;
+	local *Genesis::Config::validate = sub {die "the validator fell over\n"};
+	throws_ok {$top->_validate_env_pipeline_block('qa', {manual => 1})}
+		qr/the validator fell over/,
+		'a failure it cannot pick apart is reported rather than swallowed';
+};
+
+subtest 'an environment file that will not parse is refused' => sub {
+	plan tests => 1;
+
+	throws_ok {
+		commit_on_control($h, files => {'broken.yml' =>
+			"genesis:\n  pipeline:\n    manual: [unclosed\n"});
+		Genesis::Top->new($h->a, no_vault => 1)->config;
+	} qr/An environment file could not be read as YAML.*broken\.yml/s,
+		'a file nobody can read is a key nobody can see';
+
+	# Out again, because the rows below load the same repository.
+	commit_on_control($h, files => {'broken.yml' => undef});
+};
+
+subtest 'the read is merged and never leaf-only' => sub {
+	plan tests => 2;
+
+	# Two tokens, so the environment has a site file above it, and the key
+	# is written only there.  A leaf-only read finds it absent and answers
+	# wrongly with no error at all, which is what D79 is about.
+	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
+	write_env_file($g, 'us', site => 'us', pipeline => {manual => 'sometimes'});
+	write_env_file($g, 'us-east');
+
+	my $top = Genesis::Top->new($g->a, no_vault => 1);
+	is $top->_merged_env_params('us-east')->{genesis}{pipeline}{manual},
+		'sometimes', 'the leaf reads a key only its site file declares';
+	throws_ok {$top->_validate_env_pipeline_block('us-east',
+			$top->_merged_env_params('us-east')->{genesis}{pipeline})}
+		qr/environment us-east.*genesis\.pipeline\.manual: expected a boolean/s,
+		'and the refusal names the leaf that never wrote the key';
+};
+
+subtest 'the reader promotes a bare string the way the validator does' => sub {
+	plan tests => 1;
+
+	my $env = bless {name => 'qa'}, 'Genesis::Env';
+	no warnings qw/redefine once/;
+	local *Genesis::Env::lookup = sub {'ops/one.yml'};
+
+	pushd $h->a;
+	my @paths = $env->track_additional_files;
+	popd;
+
+	is_deeply \@paths, ['ops/one.yml'],
+		'one path declared as a string still joins the propagation set';
+};
+
 done_testing;
