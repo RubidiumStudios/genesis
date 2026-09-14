@@ -1022,9 +1022,9 @@ sub pipeline_graph {
 		exit 0;
 	}
 
-	# Full compiler path for legacy/multi-file configurations
-	my $platform = $opts->{platform} || 'concourse';
-	my $result   = _compile_pipeline($top, $platform);
+	# Full compiler path for legacy/multi-file configurations.  There is no
+	# flag to pick a provider, so the legacy branch compiles for Concourse.
+	my $result   = _compile_pipeline($top, 'concourse');
 	my $ast      = $result->{ast};
 	my $provider = $result->{provider};
 
@@ -1059,16 +1059,16 @@ sub pipeline_describe {
 		exit 0;
 	}
 
-	# Full compiler path for legacy/multi-file configurations
-	my $platform = $opts->{platform} || 'concourse';
-	my $result   = _compile_pipeline($top, $platform);
+	# Full compiler path for legacy/multi-file configurations.  There is no
+	# flag to pick a provider, so the legacy branch compiles for Concourse.
+	my $result   = _compile_pipeline($top, 'concourse');
 	my $ast      = $result->{ast};
 	my $provider = $result->{provider};
 
 	if ($provider->can('generate_description')) {
 		$provider->generate_description($ast);
 	} else {
-		_describe_ast($ast, $platform);
+		_describe_ast($ast, 'concourse');
 	}
 	exit 0;
 }
@@ -1078,14 +1078,9 @@ sub pipeline_describe {
 sub diff {
 	option_defaults(config => 'ci.yml');
 
-	my $opts     = get_options;
-	my $platform = $opts->{platform} || 'concourse';
-
-	bail("diff is only supported for the 'concourse' platform")
-		unless $platform eq 'concourse';
-
+	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
-	my $result = _compile_pipeline($top, $platform);
+	my $result = _compile_pipeline($top, 'concourse');
 	my $ast    = $result->{ast};
 	my $output = $result->{output};
 
@@ -1127,14 +1122,9 @@ sub status {
 	my ($filter_env) = @_;
 	option_defaults(config => 'ci.yml');
 
-	my $opts     = get_options;
-	my $platform = $opts->{platform} || 'concourse';
-
-	bail("status is only supported for the 'concourse' platform")
-		unless $platform eq 'concourse';
-
+	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
-	my $result = _compile_pipeline($top, $platform);
+	my $result = _compile_pipeline($top, 'concourse');
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
@@ -1192,14 +1182,9 @@ sub pause {
 	my ($env) = @_;
 	option_defaults(config => 'ci.yml');
 
-	my $opts     = get_options;
-	my $platform = $opts->{platform} || 'concourse';
-
-	bail("pause is only supported for the 'concourse' platform")
-		unless $platform eq 'concourse';
-
+	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
-	my $result = _compile_pipeline($top, $platform);
+	my $result = _compile_pipeline($top, 'concourse');
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
@@ -1227,14 +1212,9 @@ sub resume {
 	my ($env) = @_;
 	option_defaults(config => 'ci.yml');
 
-	my $opts     = get_options;
-	my $platform = $opts->{platform} || 'concourse';
-
-	bail("resume is only supported for the 'concourse' platform")
-		unless $platform eq 'concourse';
-
+	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
-	my $result = _compile_pipeline($top, $platform);
+	my $result = _compile_pipeline($top, 'concourse');
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
@@ -1267,16 +1247,12 @@ sub repipe {
 }
 
 # }}}
-# graph - deprecated; legacy graphviz without --platform, modern pipeline.md with {{{
+# graph - deprecated; legacy graphviz, with pipeline-graph as the successor {{{
 sub graph {
 	warning("'genesis graph' is deprecated and will be removed in a future version.  Use 'genesis pipeline-graph' instead.");
 	option_defaults(config => 'ci.yml');
 	my $layout = $_[0];
 	my $top    = Genesis::Top->new('.');
-
-	if (get_options->{platform}) {
-		return pipeline_graph($layout);
-	}
 
 	(my $pipeline, $layout) = Genesis::CI::Legacy::parse(get_options->{config}, $top, $layout);
 	my $dot = Genesis::CI::Legacy::generate_pipeline_graphviz_source($pipeline);

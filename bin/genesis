@@ -2098,9 +2098,6 @@ define_command("pipeline-graph", {
 	options => [
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
-
-		'platform|provider|p=s' =>
-			"CI provider: 'concourse' (default) or 'github-actions'.",
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_graph');
 # }}}
@@ -2223,9 +2220,6 @@ define_command("pipeline-describe", {
 	options => [
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
-
-		'platform|provider|p=s' =>
-			"CI provider: 'concourse' (default) or 'github-actions'.",
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_describe');
 # }}}
@@ -2246,9 +2240,6 @@ define_command("pipeline-diff", {
 
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
-
-		'platform|provider|p=s' =>
-			"CI provider.  Defaults to 'concourse'.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
@@ -2275,9 +2266,6 @@ define_command("pipeline-jobs", {
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
 
-		'platform|provider|p=s' =>
-			"CI provider.  Defaults to 'concourse'.",
-
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
 	],
@@ -2303,9 +2291,6 @@ define_command("pipeline-pause", {
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
 
-		'platform|provider|p=s' =>
-			"CI provider.  Defaults to 'concourse'.",
-
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
 	],
@@ -2330,9 +2315,6 @@ define_command("pipeline-resume", {
 
 		'config|c=s' =>
 			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
-
-		'platform|provider|p=s' =>
-			"CI provider.  Defaults to 'concourse'.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
@@ -2533,10 +2515,6 @@ define_command("dev-pipeline-compile", {
 
 		'format=s' =>
 			"Output format: 'yaml' (default) or 'json'.",
-
-		'platform|provider|p=s' =>
-			"CI provider to realize the pipeline through.  Consulted only ".
-			"by `--stage output`.  Defaults to 'concourse'.",
 	],
 }, 'Genesis::Commands::Dev::dev_pipeline_compile');
 # }}}
