@@ -2710,8 +2710,11 @@ through L</_merged_env_params>, and a file that does not carry a
 C<genesis.pipeline> key at all is passed over, so a legacy C<ci.yml> beside
 the environments is not read as one. Membership is the key being there and
 not what it holds, which is how L</_validate_pipeline_config> reads it too,
-so an environment that writes the key with nothing under it still belongs to
-the pipeline. It does not read C<pipeline.enabled> itself, because
+so an environment that switches its block off with C<false> still belongs to
+the pipeline and is still checked. A key written as a YAML null is the one
+spelling no reader can see, because L</_merged_env_params> deep-merges the
+hierarchy and a key whose value is undef is dropped in that merge, before any
+of the three is asked about it. It does not read C<pipeline.enabled> itself, because
 L</_validate_pipeline_config> is its only caller and has already returned
 where the section is off.
 
