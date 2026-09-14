@@ -70,6 +70,7 @@ unit-tests/genesis_env-ocfp.t            # is_ocfp(), ocfp_type(), ocfp_env() OC
 unit-tests/genesis_env-bosh.t            # _parse_bosh_env(), is_bosh_director(), bosh_env(), bosh_alias()
 unit-tests/genesis_env-exodus.t          # Path construction: secrets/exodus/ci/ocfp_config mount/slug/base
 unit-tests/genesis_env-configs.t         # configs(), required_configs(), has_config() BOSH config mgmt
+unit-tests/genesis_env-propagation_files.t # which repo files travel with an env's pipeline branch
 unit-tests/genesis_env-vault_ops.t       # get_ancestral_vault(), exodus_lookup(), vault_paths()
 unit-tests/genesis_env-get_target_bosh.t # director lookup: which of the three failures is reported
 unit-tests/genesis_env-fix_secrets_conflicts.t  # _fix_secrets manifest/credhub conflict detection
@@ -147,10 +148,13 @@ unit-tests/genesis_hook_cloudconfig-networks.t  # Network/subnet handling
 unit-tests/genesis_hook_cloudconfig-resources.t # Resource (vm/disk type) handling
 
 # CI pipeline-descriptor tests
+unit-tests/genesis_ci_propagation-no_push.t               # --no-push suppresses every remote write
 unit-tests/genesis_ci_pipeline_descriptor-auto-update.t   # auto-update pipeline descriptor
 unit-tests/genesis_ci_pipeline_descriptor-bosh-configs.t  # bosh-configs descriptor
+unit-tests/genesis_ci_pipeline_descriptor-deploy_task.t   # plain-CLI deploy task + env branch
 unit-tests/genesis_ci_pipeline_descriptor-notifications.t # notifications descriptor
 unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library descriptor
+unit-tests/genesis_ci_compiler_validator-manifest_store.t # manifest store vs provider warning
 # Failing - feature implementation incomplete; re-enable once green
 #unit-tests/genesis_ci_pipeline_descriptor-bosh-locks.t
 #unit-tests/genesis_ci_pipeline_descriptor-redeploy.t
@@ -158,6 +162,7 @@ unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library 
 
 # CI propagation tests
 unit-tests/genesis_ci_propagation-core.t            # propagation engine core
+unit-tests/genesis_commands_pipelines-propagate_guard.t  # missing env branches bail
 unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
 unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
 unit-tests/genesis_ci_provider_registry-core.t      # the one provider registry and its enum
@@ -215,8 +220,10 @@ unit-tests/genesis_commands_repo-compile.t     # module compiles without operato
 # Additional Service::* tests
 unit-tests/service_bosh-director_configs.t                 # Director config CRUD
 unit-tests/service_bosh-director_cpis.t                    # Director CPI inventory
+unit-tests/service_git-checkout_cwd.t                      # checkout survives losing the cwd
 unit-tests/service_git-cherry_pick.t                       # cherry-pick helper
 unit-tests/service_git-fetch_branches.t                    # fetch_branches helper
+unit-tests/service_git-fetch_preserves_local.t             # fetch must not discard unpushed local commits
 unit-tests/service_git-remote_branch.t                     # remote_branch helper
 unit-tests/service_github-pr.t                             # Github PR helpers
 unit-tests/service_vault-max_json_string_value_length.t    # JSON value length guard
@@ -241,6 +248,10 @@ unit-tests/genesis_top-provider_fragment.t   # the configured provider's own sch
 unit-tests/genesis_top-provider_capabilities.t  # the six capabilities a provider declares, and the keys they gate
 unit-tests/genesis_top-manifest_store_gate.t # the manifest store and the kit floor, refused at configuration load
 unit-tests/genesis_top-slug_and_mount.t      # both halves of the deployment slug as git ref components, and one exodus mount per pipeline
+unit-tests/genesis_commands_dev-pipeline_compile.t  # dev-pipeline-compile stage renderer
+unit-tests/service_git-ci_credentials.t      # git credentials supplied via CI env vars
+unit-tests/genesis_commands_pipelines-prepare.t  # pipeline-prepare scope selection
+unit-tests/genesis_commands_pipelines-branch_authorization.t  # propagate: may it create a missing branch
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/genesis_ui-prompt_output_stream.t  # prompts write to stderr and the terminal, never stdout

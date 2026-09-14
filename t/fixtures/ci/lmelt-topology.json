@@ -1,0 +1,91 @@
+{
+   "branches" : {
+      "control" : "control"
+   },
+   "configuration" : {
+      "registry" : {},
+      "task" : {
+         "image" : "genesiscommunity/concourse",
+         "version" : "latest"
+      }
+   },
+   "integrations" : {
+      "source_control" : {
+         "provider" : "github",
+         "repository" : "lmelt/bosh",
+         "root" : "bosh"
+      },
+      "vault" : {
+         "url" : "https://vault.example.com"
+      }
+   },
+   "metadata" : {
+      "deployment_type" : "bosh",
+      "name" : "bosh"
+   },
+   "provider_config" : {},
+   "resources" : {},
+   "scripts" : {},
+   "targets" : {
+      "lmelt-vsphere-canwest-1-lab" : {
+         "connection" : {
+            "auth" : {
+               "client_id" : "admin",
+               "client_secret" : "secret"
+            },
+            "ca_cert" : "fake-ca",
+            "url" : "https://172.20.34.4:25555"
+         },
+         "type" : "bosh-director"
+      }
+   },
+   "triggers" : {},
+   "workflows" : {
+      "default" : {
+         "graph" : {
+            "edges" : [
+               {
+                  "from" : "lmelt-vsphere-canwest-1-mgmt",
+                  "to" : "lmelt-vsphere-canwest-1-lab"
+               }
+            ],
+            "nodes" : {
+               "lmelt-vsphere-canwest-1-lab" : {
+                  "alias" : "lmelt-vsphere-canwest-1-lab",
+                  "auto" : 1,
+                  "bosh_parent" : "lmelt-vsphere-canwest-1-mgmt",
+                  "bosh_upgrade_lock" : 0,
+                  "genesis_env" : "lmelt-vsphere-canwest-1-lab",
+                  "manual" : 0,
+                  "redeploy" : "",
+                  "redeploy_cron_start" : "",
+                  "redeploy_cron_stop" : "",
+                  "require_pr" : 0,
+                  "signal_prefix" : "",
+                  "stage_name" : "lmelt-vsphere-canwest-1-lab",
+                  "status_signal" : "",
+                  "type" : "bosh"
+               },
+               "lmelt-vsphere-canwest-1-mgmt" : {
+                  "alias" : "lmelt-vsphere-canwest-1-mgmt",
+                  "auto" : 0,
+                  "bosh_parent" : "",
+                  "bosh_upgrade_lock" : 1,
+                  "genesis_env" : "lmelt-vsphere-canwest-1-mgmt",
+                  "manual" : 1,
+                  "redeploy" : "",
+                  "redeploy_cron_start" : "",
+                  "redeploy_cron_stop" : "",
+                  "require_pr" : 0,
+                  "signal_prefix" : "",
+                  "stage_name" : "lmelt-vsphere-canwest-1-mgmt",
+                  "status_signal" : "",
+                  "type" : "bosh"
+               }
+            }
+         },
+         "name" : "default",
+         "type" : "bosh"
+      }
+   }
+}

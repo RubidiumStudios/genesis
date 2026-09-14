@@ -417,10 +417,17 @@ subtest 'required_configs' => sub {
 	my $kit = kit(test => '0.0.1');
 	# simple kit.yml has no required_configs key
 
-	# blueprint hook requires cloud config by default
+	# blueprint is a hook: it returns the list of yaml files to merge, based
+	# on the requested features.  That is static, so it needs no cloud config.
+	# The cloud config belongs to the manifest action, tested below.
 	my @bp_req = $kit->required_configs('blueprint');
-	cmp_deeply(\@bp_req, ['cloud'],
-		"required_configs('blueprint') returns ['cloud'] by default");
+	cmp_deeply(\@bp_req, [],
+		"required_configs('blueprint') returns empty list by default");
+
+	# manifest is an action, and merging genuinely needs the cloud config.
+	my @mf_req = $kit->required_configs('manifest');
+	cmp_deeply(\@mf_req, ['cloud'],
+		"required_configs('manifest') returns ['cloud'] by default");
 
 	# cloud-config hook never requires any config
 	my @cc_req = $kit->required_configs('cloud-config');

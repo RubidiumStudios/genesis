@@ -6,9 +6,128 @@ use warnings;
 use Genesis qw/run bail debug trace/;
 use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
+use Cwd qw/getcwd/;
 
 ### Class State {{{
 my %_instances;  # keyed by resolved git root path
+my $_ci_credentials_dir;  # temp dir holding materialised CI credentials
+# }}}
+
+### CI Credentials {{{
+
+# provision_ci_credentials - make environment-supplied git creds usable {{{
+#
+# A CI task receives git credentials as environment variables, which git
+# itself cannot consume: a key has to exist as a file with the right mode,
+# and a password has to be answerable at prompt time.  Materialise both
+# into a private temp directory and point git at them.
+#
+# Deliberately does not move HOME.  The retired ci-* task commands did,
+# because they owned the whole process; here the same process also
+# resolves ~/.saferc and ~/.genesis, so relocating HOME would break vault
+# and repository configuration.  Everything below is therefore expressed
+# through git's own environment variables, touching neither HOME nor the
+# repository's config.
+sub provision_ci_credentials {
+	return if $_ci_credentials_dir;
+
+	# Author identity is supplied without a committer identity, and git
+	# needs both.  A CI container rarely has user.name/user.email set, so
+	# without this every commit fails with "Please tell me who you are".
+	$ENV{GIT_COMMITTER_NAME}  //= $ENV{GIT_AUTHOR_NAME}  if $ENV{GIT_AUTHOR_NAME};
+	$ENV{GIT_COMMITTER_EMAIL} //= $ENV{GIT_AUTHOR_EMAIL} if $ENV{GIT_AUTHOR_EMAIL};
+
+	# Everything below assumes a remote reached over ssh or https with
+	# credentials handed in through the environment -- which is a CI task,
+	# and nothing else.  A repository with no remote, or one whose operator
+	# authenticates through a credential helper or an agent, must be left
+	# exactly as configured: suppressing prompts there would turn a
+	# workflow that asks for a password into one that simply fails.
+	return unless $ENV{GIT_PRIVATE_KEY} || $ENV{GIT_USERNAME};
+
+	# Having established we are answering prompts ourselves, refuse to
+	# block on one we cannot answer.  A CI task has no terminal, so an
+	# interactive prompt hangs indefinitely rather than failing visibly.
+	$ENV{GIT_TERMINAL_PROMPT} //= '0';
+	$ENV{GIT_ASKPASS}         //= '/bin/false';
+
+	require File::Temp;
+	my $dir = File::Temp->newdir('genesis-git-creds.XXXXXX', TMPDIR => 1);
+	chmod 0700, "$dir";
+
+	_provision_ssh_key("$dir")  if $ENV{GIT_PRIVATE_KEY};
+	_provision_askpass("$dir")  if $ENV{GIT_USERNAME};
+
+	# Hold the object, not the path: File::Temp removes the directory when
+	# the last reference goes away, and these files must outlive this sub.
+	$_ci_credentials_dir = $dir;
+	trace("Service::Git: provisioned CI credentials in %s", "$dir");
+	return;
+}
+
+# }}}
+# reset_ci_credentials - discard provisioned credentials (testing) {{{
+sub reset_ci_credentials {
+	$_ci_credentials_dir = undef;
+	return;
+}
+
+# }}}
+# _provision_ssh_key - write the key and an ssh config that selects it {{{
+sub _provision_ssh_key {
+	my ($dir) = @_;
+
+	my $key = "$dir/key";
+	open my $fh, '>', $key or bail("Cannot write git ssh key: %s", $!);
+	print $fh $ENV{GIT_PRIVATE_KEY};
+	close $fh;
+	chmod 0600, $key;
+
+	# Host key checking is disabled because a CI worker is ephemeral and
+	# has no known_hosts to check against; the key itself is the
+	# authentication.
+	my $config = "$dir/ssh_config";
+	open my $cfh, '>', $config or bail("Cannot write git ssh config: %s", $!);
+	print $cfh <<EOF;
+Host *
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  LogLevel QUIET
+  IdentityFile $key
+  IdentitiesOnly yes
+EOF
+	close $cfh;
+
+	$ENV{GIT_SSH_COMMAND} = "ssh -F $config";
+	return;
+}
+
+# }}}
+# _provision_askpass - answer git's credential prompts from the env {{{
+sub _provision_askpass {
+	my ($dir) = @_;
+
+	# git passes the prompt text as the sole argument, and reads one line
+	# of stdout.  The script reads the values from the environment rather
+	# than having them written into it, so a password containing shell
+	# metacharacters cannot be mangled or leak via the file.
+	my $script = "$dir/askpass";
+	open my $fh, '>', $script or bail("Cannot write git askpass helper: %s", $!);
+	print $fh <<'EOF';
+#!/bin/sh
+case "$1" in
+  Username*|username*) printf '%s\n' "$GIT_USERNAME" ;;
+  *)                   printf '%s\n' "$GIT_PASSWORD" ;;
+esac
+EOF
+	close $fh;
+	chmod 0700, $script;
+
+	$ENV{GIT_ASKPASS} = $script;
+	return;
+}
+
+# }}}
 # }}}
 
 ### Constructor & Lifecycle {{{
@@ -17,6 +136,10 @@ my %_instances;  # keyed by resolved git root path
 sub new {
 	my ($class, $path, %opts) = @_;
 	$path ||= '.';
+
+	# Before any remote operation can work under CI.  A no-op when the
+	# environment carries no credentials, which is every local run.
+	provision_ci_credentials();
 
 	my ($root) = run({}, 'git', '-C', $path, 'rev-parse', '--show-toplevel');
 	chomp $root if defined $root;
@@ -125,8 +248,20 @@ sub checkout {
 	my ($self, $branch) = @_;
 	$self->{_original_branch} //= $self->current_branch
 		if $self->{_track_branch};
-	run({ dir => $self->{root}, onfailure => "Failed to checkout '$branch'" },
+
+	# The branch being checked out may not carry the directory we are
+	# standing in -- a deployment root that exists only on the branch we are
+	# leaving.  Run from the repository root so the checkout cannot delete
+	# the ground under us, and return to where we were only if it survived;
+	# run({dir => ...}) would restore unconditionally and die on a directory
+	# the checkout just removed.
+	my $cwd = getcwd();
+	chdir($self->{root})
+		or bail("Unable to enter git root %s: %s", $self->{root}, $!);
+	run({ onfailure => "Failed to checkout '$branch'" },
 		'git', 'checkout', $branch);
+	chdir($cwd) if -d $cwd;
+
 	delete $self->{_current_branch};
 	return $self;
 }
@@ -515,6 +650,32 @@ sub remote_branch_exists {
 }
 
 # }}}
+# resolve_branch - locate a branch, fetching it if only the remote has it {{{
+#
+# Returns 'local', 'fetched', 'absent' or 'unverifiable'.  Only 'absent'
+# licenses a caller to create the branch.
+sub resolve_branch {
+	my ($self, @args) = @_;
+	my $opts = ref($args[0]) eq 'HASH' ? shift @args : {};
+	my ($branch, $remote) = @args;
+	return 'local' if $self->branch_exists($branch);
+
+	# Offline withholds the answer rather than guessing at it.
+	return 'unverifiable' if $opts->{offline};
+
+	# Nothing to consult: local absence is the whole truth.
+	$remote //= $self->default_remote;
+	return 'absent' unless $remote;
+
+	# Bails rather than reporting absence when ls-remote fails, so an
+	# unreachable remote never reads as "safe to create".
+	return 'absent' unless $self->remote_branch_exists($branch, $remote);
+
+	$self->fetch_branch($branch, $remote);
+	return 'fetched';
+}
+
+# }}}
 # delete_remote_branch - delete a branch on the remote {{{
 #
 # Uses `git push <remote> --delete <branch>`.  Returns $self on
@@ -553,36 +714,77 @@ sub fetch_branch {
 sub fetch_branches {
 	my ($self, $names, $remote) = @_;
 	$remote //= $self->default_remote;
-	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self
+	my $noop = { ok => 1, kind => 'success', fetched => [], absent => [] };
+	return wantarray ? ($self, $noop) : $self
 		unless $remote && $names && @$names;
-	my $current  = $self->current_branch // '';
-	my @refspecs = map { "+refs/heads/$_:refs/heads/$_" }
-	               grep { $_ ne $current } @$names;
-	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self
-		unless @refspecs;
+	my $current = $self->current_branch // '';
+	my @want    = grep { $_ ne $current } @$names;
+	return wantarray ? ($self, $noop) : $self unless @want;
 
 	my %env;
 	$env{GIT_TERMINAL_PROMPT} = '0' unless in_controlling_terminal();
+	my %opts = (dir => $self->{root}, (%env ? (env => \%env) : ()));
 
-	my ($out, $rc, $err) = run({
-		dir => $self->{root},
-		(%env ? (env => \%env) : ()),
-	}, 'git', 'fetch', $remote, @refspecs);
+	# A refspec naming a branch the remote lacks aborts the entire fetch.
+	# Patterns are fully qualified: ls-remote matches the tail of a ref.
+	my ($out, $rc, $err) = run({%opts},
+		'git', 'ls-remote', '--heads', $remote,
+		map { "refs/heads/$_" } @want);
+	return wantarray
+		? ($self, { ok => 0, kind => _classify_remote_error($err), err => $err // '',
+		            fetched => [], absent => [] })
+		: $self
+		if $rc;
 
-	if ($rc) {
-		my $emsg = $err // '';
-		my $kind = $emsg =~ /could not resolve host|network is unreachable|operation timed out|connection refused/i
-			? 'network'
-			: $emsg =~ /authentication failed|permission denied|terminal prompts disabled|could not read username|could not read password/i
-				? 'auth'
-				: 'unknown';
+	my %on_remote;
+	for my $line (split /\n/, ($out // '')) {
+		$on_remote{$1} = 1 if $line =~ m{\srefs/heads/(\S+)\s*$};
+	}
+	my @present = grep {  $on_remote{$_} } @want;
+	my @absent  = grep { !$on_remote{$_} } @want;
+
+	if (@present) {
+		# The remote is authoritative for which branches exist, not for
+		# what they contain.  A branch we already have locally may carry
+		# commits that have not been pushed -- a propagation held back for
+		# review, most often -- so it only updates its remote-tracking ref.
+		# Branches we lack are materialised locally, which is what makes
+		# remote-only environments visible.
+		my ($heads) = run({%opts},
+			'git', 'for-each-ref', '--format=%(refname:strip=2)', 'refs/heads/');
+		my %is_local = map { $_ => 1 } grep { /\S/ } split(/\n/, $heads // '');
+
+		my ($fout, $frc, $ferr) = run({%opts}, 'git', 'fetch', $remote,
+			(map { "+refs/heads/$_:refs/remotes/$remote/$_" }
+				grep {  $is_local{$_} } @present),
+			(map { "+refs/heads/$_:refs/heads/$_" }
+				grep { !$is_local{$_} } @present));
 		return wantarray
-			? ($self, { ok => 0, kind => $kind, err => $emsg })
-			: $self;
+			? ($self, { ok => 0, kind => _classify_remote_error($ferr), err => $ferr // '',
+			            fetched => [], absent => \@absent })
+			: $self
+			if $frc;
+
+		# Absent on the remote says nothing about local state, so only
+		# fetched branches are cached.
+		$self->{_branch_cache}{$_} = 1 for @present;
 	}
 
-	$self->{_branch_cache}{$_} = 1 for grep { $_ ne $current } @$names;
-	return wantarray ? ($self, { ok => 1, kind => 'success' }) : $self;
+	return wantarray
+		? ($self, { ok => 1, kind => 'success', fetched => \@present, absent => \@absent })
+		: $self;
+}
+
+# }}}
+# _classify_remote_error - bucket a git transport error for the caller {{{
+sub _classify_remote_error {
+	my ($err) = @_;
+	my $emsg = $err // '';
+	return 'network'
+		if $emsg =~ /could not resolve host|network is unreachable|operation timed out|connection refused/i;
+	return 'auth'
+		if $emsg =~ /authentication failed|permission denied|terminal prompts disabled|could not read username|could not read password/i;
+	return 'unknown';
 }
 
 # }}}

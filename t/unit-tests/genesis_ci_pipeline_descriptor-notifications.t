@@ -180,9 +180,9 @@ subtest 'per-env style: notify jobs created and inlined with deploy' => sub {
 	my $dj = _find_job($pipeline, 'sandbox-deployment');
 	my $gets = $dj->{plan}[0]{do};
 	my ($par) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$gets;
-	my ($changes_get) = grep { ($_->{get}||'') eq 'sandbox-changes' }
+	my ($changes_get) = grep { ($_->{get}||'') eq 'sandbox-branch' }
 		@{$par->{in_parallel}};
-	ok $changes_get->{passed}, 'deploy job gets sandbox-changes with passed dependency';
+	ok $changes_get->{passed}, 'deploy job gets sandbox-branch with passed dependency';
 	like $changes_get->{passed}[0], qr/notify-sandbox/, 'passed references notify job';
 
 	my $rt = _find_rtype($pipeline, 'slack-notification');
@@ -221,9 +221,9 @@ subtest 'grouped style: notify jobs in separate group, deploy gets changes direc
 	my $dj   = _find_job($pipeline, 'sandbox-deployment');
 	my $do   = $dj->{plan}[0]{do};
 	my ($par) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$do;
-	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-changes' }
+	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-branch' }
 		@{$par->{in_parallel}};
-	ok !$cg->{passed}, 'deploy job gets sandbox-changes WITHOUT passed dependency';
+	ok !$cg->{passed}, 'deploy job gets sandbox-branch WITHOUT passed dependency';
 };
 
 # =========================================================================
@@ -414,7 +414,7 @@ subtest 'Legacy notifications: inline maps to per-env (notify job with passed de
 	my $dj   = _find_job($pipeline, 'sandbox-deployment');
 	my $do   = $dj->{plan}[0]{do};
 	my ($par) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$do;
-	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-changes' }
+	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-branch' }
 		@{$par->{in_parallel}};
 	ok $cg->{passed}, 'deploy job has passed dependency (inline/per-env behavior)';
 
@@ -475,7 +475,7 @@ subtest 'minimal style: deploy job gets changes directly' => sub {
 	my $dj   = _find_job($pipeline, 'sandbox-deployment');
 	my $do   = $dj->{plan}[0]{do};
 	my ($par) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$do;
-	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-changes' }
+	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-branch' }
 		@{$par->{in_parallel}};
 	ok !$cg->{passed}, 'minimal: deploy gets changes without passed dependency';
 };

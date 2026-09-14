@@ -1357,8 +1357,24 @@ sub propagation_files {
 		}
 	}
 
+	# Manifest fragments the kit's blueprint draws from the repository -- ops
+	# files and the like.  The blueprint hook is the authority on which files
+	# the merge consumes.  It needs no BOSH configs, but running any hook
+	# needs a reachable vault, which propagation already establishes before
+	# it gets here.  Fragments that live inside the kit are skipped: they
+	# already travel in the kit source above.
+	my $root = $self->path;
+	for my $f ($self->kit_files(1)) {
+		next unless $f =~ s{^\Q$root\E/}{};
+		$files{$f} = 1;
+	}
+
 	# Config
 	$files{'.genesis/config'} = 1;
+
+	# Kit overrides, which Genesis::Kit::metadata picks up by existence alone
+	# and which carry the credential, certificate and provided definitions.
+	$files{'kit-overrides.yml'} = 1 if -f $self->path('kit-overrides.yml');
 
 	# Reaction scripts
 	my $reactions = $self->lookup('genesis.reactions', {});
@@ -1480,11 +1496,14 @@ sub prepare_branch {
 	# propagation_files returns git-root-relative paths already
 	my %keep_set = map { $_ => 1 } @keep;
 
-	# Compute the add/remove sets.  When the branch doesn't exist yet, we
-	# treat the current HEAD as its starting tree (so "tracked" is what
-	# the new branch would inherit before reconciliation).
-	my $branch_exists = $git->branch_exists($branch);
-	my $tree_ref      = $branch_exists ? $branch : 'HEAD';
+	# The remote decides: creating off HEAD because the branch is missing
+	# locally would fork it from the real one.
+	my $origin = $git->resolve_branch({offline => $opts{no_fetch}}, $branch);
+	return ([], [], $origin) if $origin eq 'unverifiable';
+	my $branch_exists = $origin ne 'absent';
+
+	# A branch that doesn't exist yet starts from the current HEAD's tree.
+	my $tree_ref = $branch_exists ? $branch : 'HEAD';
 	my @tracked       = $git->ls_tree($tree_ref, $git->prefix);
 	my %tracked_set   = map { $_ => 1 } @tracked;
 
@@ -1503,8 +1522,8 @@ sub prepare_branch {
 	}
 
 	# Nothing to do AND branch already exists: idempotent no-op.
-	return ([], []) if $branch_exists && !@to_add && !@to_remove;
-	return (\@to_add, \@to_remove) if $opts{dry_run};
+	return ([], [], $origin) if $branch_exists && !@to_add && !@to_remove;
+	return (\@to_add, \@to_remove, $origin) if $opts{dry_run};
 
 	# Source SHA for any add operations: whatever the current branch
 	# points at.  For a brand-new branch this is also the branch's HEAD.
@@ -1554,7 +1573,7 @@ sub prepare_branch {
 	$git->restore_branch;
 	popd;
 
-	return (\@to_add, \@to_remove);
+	return (\@to_add, \@to_remove, $origin);
 }
 
 # }}}
@@ -3207,7 +3226,11 @@ sub _expand_config_hooks {
 		return \@h;
 	})};
 	my @expanded;
-	push(@expanded, ($_ eq 'deploy' ? @deploy_hooks : $_)) for (@hooks);
+	# Keep the literal 'deploy' alongside what it expands to: kits declare
+	# requirements against it (vault-2.0.1 ships cloud: [blueprint, deploy,
+	# check, manifest]), and consuming it here leaves those declarations
+	# unmatched and silently dead.
+	push(@expanded, ($_ eq 'deploy' ? (@deploy_hooks, 'deploy') : $_)) for (@hooks);
 	return @expanded;
 }
 
@@ -3871,8 +3894,10 @@ sub check {
 	}
 
 	if ($opts{check_yamls}) {
+		# Gated on blueprint because listing the files runs that hook.  Most
+		# kits declare nothing for it, so this passes without a director.
 		if (my @missing = $self->missing_required_configs('blueprint')) {
-			$self->notify("#Y{Required BOSH configs not provided - can't check manifest viability: %s}", join(', ', @missing));
+			$self->notify("#Y{Required BOSH configs not provided - can't list manifest YAML files: %s}", join(', ', @missing));
 		} else {
 			$self->notify("inspecting YAML files used to build manifest...");
 			my @yaml_files = $self->format_yaml_files('include-kit' => 1, padding => '  ', kit_files => $kit_files);
@@ -4640,12 +4665,34 @@ sub _post_deploy {
 
 			$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
 			my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
-			system($bin, 'propagate', $self->name);
-			warning(
-				"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
-				"run #C{genesis propagate %s} manually to retry.",
-				($? >> 8), $self->name
-			) if $? != 0;
+			my @cmd = ($bin, 'propagate', $self->name);
+			push @cmd, '-y' if $opts{'fix-checks'};
+
+			# Stdin from /dev/null: propagation must never stop a deploy
+			# to ask something, and the child inherits this terminal.
+			my $rc = do {
+				local *STDIN;
+				open(STDIN, '<', '/dev/null')
+					or die "Cannot open /dev/null for propagation: $!\n";
+				system(@cmd);
+				$? >> 8;
+			};
+
+			if ($rc == Genesis::Top->PROPAGATE_NO_BRANCH_EXIT) {
+				warning(
+					"Nothing was propagated: a downstream environment has no branch.\n".
+					"The deployment of #C{%s} succeeded and is complete.\n\n".
+					"Create the branch with #C{genesis pipeline-prepare}, or\n".
+					"re-deploy with #C{-F} to have Genesis create it during propagation.",
+					$self->name
+				);
+			} elsif ($rc != 0) {
+				warning(
+					"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
+					"run #C{genesis propagate %s} manually to retry.",
+					$rc, $self->name
+				);
+			}
 		}
 	}
 
@@ -6833,9 +6880,13 @@ sub _cc_yaml_files {
 	} else {
 		trace("[env $self->{name}] in _yaml_files(): not a create-env, we need cloud-config");
 
-		my @cloud_configs = grep {$_ =~ /^cloud(\@.*)?$/} $self->required_configs('blueprint');
+		# Ask as the manifest action, not the blueprint hook: this is the
+		# merge assembling its own inputs.  Keyed on blueprint, a kit that
+		# declares nothing would yield an empty list here and skip the block
+		# entirely -- merging with no cloud config instead of bailing.
+		my @cloud_configs = grep {$_ =~ /^cloud(\@.*)?$/} $self->required_configs('manifest');
 		if (@cloud_configs) {
-			$self->download_required_configs('blueprint') if $self->missing_required_configs('blueprint');
+			$self->download_required_configs('manifest') if $self->missing_required_configs('manifest');
 			my @cc_files = uniq sort map {$self->config_file($_)} @cloud_configs;
 			bail(
 				"No cloud-config specified for this environment\n"

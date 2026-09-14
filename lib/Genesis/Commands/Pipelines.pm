@@ -5,6 +5,8 @@ use warnings;
 
 use Genesis;
 use Genesis::State;
+use Genesis::Term qw/in_controlling_terminal/;
+use Genesis::UI qw/prompt_for_boolean/;
 use Genesis::Commands;
 use Genesis::Top;
 use Genesis::Env;
@@ -133,34 +135,15 @@ sub pipeline_status {
 	my $git     = Service::Git->new('.');
 	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 
-	# Build the DAG
-	require Genesis::CI::Compiler::ASTBuilder;
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-		top     => $top,
-		env_dir => $top->path,
-	);
-	my ($nodes, $edges) = $builder->_build_from_env_files($top->path);
-
+	my $topo = $top->pipeline_topology;
 	bail("No environments with pipeline metadata found.")
-		unless %$nodes;
+		unless %{$topo->{nodes}};
 
-	my (%children, %has_parent, %parent_of);
-	for my $edge (@$edges) {
-		push @{ $children{$edge->{from}} }, $edge->{to};
-		$has_parent{$edge->{to}} = 1;
-		$parent_of{$edge->{to}} = $edge->{from};
-	}
-
-	# Topological order
-	my @dag_order;
-	my @queue = sort grep { !$has_parent{$_} } keys %$nodes;
-	my %visited;
-	while (@queue) {
-		my $env = shift @queue;
-		next if $visited{$env}++;
-		push @dag_order, $env;
-		push @queue, sort @{$children{$env} || []};
-	}
+	my $nodes     = $topo->{nodes};
+	my $edges     = $topo->{edges};
+	my %children  = %{$topo->{children}};
+	my %parent_of = %{$topo->{parent_of}};
+	my @dag_order = @{$topo->{order}};
 
 	# Refresh env branch refs from remote before reading status so the
 	# display reflects teammate commits, not just local state.
@@ -394,34 +377,15 @@ sub propagate {
 		"before running propagate."
 	) unless $git->is_clean;
 
-	# Build the DAG from control branch env files
-	require Genesis::CI::Compiler::ASTBuilder;
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-		top     => $top,
-		env_dir => $top->path,
-	);
-	my ($nodes, $edges) = $builder->_build_from_env_files($top->path);
-
+	# The pipeline's environments, as read from the control branch.
+	my $topo = $top->pipeline_topology;
 	bail("No environments with pipeline metadata found.")
-		unless %$nodes;
+		unless %{$topo->{nodes}};
 
-	my (%children, %has_parent, %parent_of);
-	for my $edge (@$edges) {
-		push @{ $children{$edge->{from}} }, $edge->{to};
-		$has_parent{$edge->{to}} = 1;
-		$parent_of{$edge->{to}} = $edge->{from};
-	}
-
-	# Topological order (BFS from roots)
-	my @dag_order;
-	my @queue = sort grep { !$has_parent{$_} } keys %$nodes;
-	my %visited;
-	while (@queue) {
-		my $env = shift @queue;
-		next if $visited{$env}++;
-		push @dag_order, $env;
-		push @queue, sort @{$children{$env} || []};
-	}
+	my $nodes     = $topo->{nodes};
+	my %children  = %{$topo->{children}};
+	my %parent_of = %{$topo->{parent_of}};
+	my @dag_order = @{$topo->{order}};
 
 	# Refresh env branch refs so diff computations see teammate commits.
 	$top->fetch_pipeline_envs($git)
@@ -506,6 +470,14 @@ sub propagate {
 		@scope = @dag_order;
 	}
 
+	# An absent branch is a broken topology, not an env with nothing to
+	# do: the per-env diff below cannot tell the two apart.
+	my @created;
+	if (my @missing = _missing_env_branches($git, \@scope)) {
+		_authorize_branch_creation($opts, \@missing, $control);
+		@created = _create_missing_branches($top, \@missing, $dry_run);
+	}
+
 	my $control_short = $git->sha($control_sha, short => 1);
 	if ($after_env) {
 		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s} #G{(certified by %s)}\n",
@@ -526,7 +498,8 @@ sub propagate {
 	#                    deployed it.
 	my (%env_changed, %env_changed_detail, %env_undeployed, %env_skipped_ahead);
 	for my $env_name (@scope) {
-		next unless $git->branch_exists($env_name);
+		# Every env in scope has a branch by now: the guard above either
+		# created it or bailed.
 		my $env = eval { $top->load_env($env_name) };
 		next unless $env;
 
@@ -658,7 +631,9 @@ sub propagate {
 		create_prs          => 1,
 		no_push             => $no_push,
 		dry_run             => $dry_run,
-		push_extra_branches => @targets ? [$control] : [],
+		# A created branch gets no propagation commit, so it never reaches
+		# @pushed_branches and would otherwise stay local.
+		push_extra_branches => [@created, (@targets ? $control : ())],
 	);
 
 	bail("Propagation aborted due to error.") if @{$result->{errors}};
@@ -726,6 +701,212 @@ sub _summarize_load_error {
 	return $reason;
 }
 
+# _missing_env_branches - envs in scope that have no branch {{{
+#
+# Kept separate from propagate() so the decision can be tested without a
+# repository: the command needs a working tree, a DAG and a vault before
+# it reaches this point.
+sub _missing_env_branches {
+	my ($git, $scope) = @_;
+	return grep {!$git->branch_exists($_)} @$scope;
+}
+
+# }}}
+# _authorize_branch_creation - may propagate create the missing branches? {{{
+sub _authorize_branch_creation {
+	my ($opts, $missing, $control) = @_;
+	return 1 if $opts->{yes};
+
+	my $one = (@$missing == 1);
+	my $list = join("\n", map {"  #C{$_}"} @$missing);
+
+	if (in_controlling_terminal()) {
+		info(
+			"\nNo branch exists for %s:\n%s\n\n".
+			"Genesis can create %s from #C{%s} and push %s.",
+			($one ? "this environment" : "these environments"), $list,
+			($one ? "it" : "them"), $control, ($one ? "it" : "them")
+		);
+		return 1 if prompt_for_boolean(
+			sprintf("Create %s now? [y|n]",
+				$one ? "#C{$missing->[0]}" : scalar(@$missing)." environments"),
+			0
+		);
+		bail("Aborted - no branches were created.");
+	}
+
+	bail(
+		{exitcode => Genesis::Top->PROPAGATE_NO_BRANCH_EXIT},
+		"No branch exists for %s:\n%s\n\n".
+		"Propagation compares each environment's branch against %s, so an\n".
+		"absent branch cannot be told apart from one with no changes.\n\n".
+		"Create %s with #C{%s}, or re-run with #C{-y} to create %s now.",
+		($one ? "this environment" : "these environments"), $list, $control,
+		($one ? "it" : "them"),
+		($one ? "genesis $missing->[0] pipeline-prepare"
+		      : "genesis pipeline-prepare"),
+		($one ? "it" : "them")
+	);
+}
+
+# }}}
+# _create_missing_branches - build the branches propagate was refused {{{
+sub _create_missing_branches {
+	my ($top, $missing, $dry_run) = @_;
+
+	my @created;
+	for my $name (@$missing) {
+		my $env = eval {$top->load_env($name)};
+		bail(
+			"Could not load #C{%s} to create its branch:\n%s",
+			$name, ($@ // 'unknown error') =~ s/\s+$//r
+		) unless $env;
+
+		my ($added, $removed) = $env->prepare_branch(dry_run => $dry_run);
+		info "  #G{%s} #C{%s} (%d added, %d removed)",
+			($dry_run ? 'would create' : 'created'),
+			$name, scalar(@$added), scalar(@$removed);
+		push @created, $name;
+	}
+	return @created;
+}
+
+# }}}
+# pipeline_prepare - create or reconcile environment branches {{{
+#
+# Repairs what propagate refuses to guess about.  Propagation compares
+# each environment against control with `git diff <env-branch>..<sha>`,
+# which fails and yields nothing when the branch is absent, so it bails
+# rather than reporting "nothing to propagate".  This is how the branch
+# gets made.
+#
+# `genesis new <env>` is the wrong tool for that: the environment
+# already exists on control, only its branch is missing.
+sub pipeline_prepare {
+	my ($env_name) = @_;
+
+	my $opts    = get_options;
+	my $dry_run = $opts->{'dry-run'};
+	my $top     = Genesis::Top->new('.');
+
+	bail("CI is not configured for this repository.")
+		unless $top->ci_configured;
+
+	my $git     = Service::Git->new('.', track_branch => !$dry_run);
+	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+
+	# prepare_branch copies files INTO each env branch from the current
+	# branch's HEAD, so the current branch has to be the one they are
+	# meant to follow.
+	bail(
+		"Preparation must be run from the #C{%s} branch (currently on #C{%s}).",
+		$control, $git->current_branch // '<detached>'
+	) unless ($git->current_branch // '') eq $control;
+
+	bail(
+		"Working tree has uncommitted changes.  Commit or stash them\n".
+		"before preparing environment branches."
+	) unless $git->is_clean;
+
+	$top->fetch_pipeline_envs($git)
+		unless $opts->{'no-fetch'};
+
+	my $topo  = $top->pipeline_topology;
+	my @scope = _prepare_scope($topo, $env_name);
+
+	unless (@scope) {
+		info "\n#Yi{No environments found in this pipeline - nothing to prepare.}";
+		return;
+	}
+
+	info "\n#G{Preparing environment branches from} #C{%s}%s\n",
+		$control, ($dry_run ? ' #Yi{(dry run)}' : '');
+
+	my ($created, $fetched, $reconciled, $untouched, $skipped) = (0) x 5;
+	for my $name (@scope) {
+		my $env = eval {$top->load_env($name)};
+		unless ($env) {
+			warning("Could not load #C{%s}; skipping.", $name);
+			next;
+		}
+
+		my ($added, $removed, $origin) = $env->prepare_branch(
+			dry_run  => $dry_run,
+			no_fetch => $opts->{'no-fetch'},
+		);
+
+		if ($origin eq 'unverifiable') {
+			$skipped++;
+			warning(
+				"  #Y{skipped} #C{%s}: no branch here, and #C{--no-fetch} means ".
+				"the remote cannot be checked.\n".
+				"  Creating it blind would fork it from the real branch if one exists.",
+				$name
+			);
+		} elsif ($origin eq 'absent') {
+			$created++;
+			info "  #G{created} #C{%s} (%d added, %d removed)",
+				$name, scalar(@$added), scalar(@$removed);
+		} elsif ($origin eq 'fetched') {
+			$fetched++;
+			info "  #C{fetched} #C{%s} #K{from %s} (%d added, %d removed)",
+				$name, $git->default_remote,
+				scalar(@$added), scalar(@$removed);
+		} elsif (@$added || @$removed) {
+			$reconciled++;
+			info "  #Y{reconciled} #C{%s} (%d added, %d removed)",
+				$name, scalar(@$added), scalar(@$removed);
+		} else {
+			$untouched++;
+			info "  #K{ok} %s", $name;
+		}
+	}
+
+	info "\n%s: %d created, %d fetched, %d reconciled, %d already current%s.\n",
+		($dry_run ? "Would prepare" : "Prepared"),
+		$created, $fetched, $reconciled, $untouched,
+		($skipped ? sprintf(", %d skipped", $skipped) : '');
+
+	info "Push the new branches with #C{git push --all} to make them ".
+		"visible to the pipeline.\n"
+		if $created && !$dry_run;
+
+	info "Re-run without #C{--no-fetch} to prepare the %d skipped ".
+		"environment%s.\n",
+		$skipped, ($skipped == 1 ? '' : 's')
+		if $skipped;
+
+	return;
+}
+
+# }}}
+# _prepare_scope - which environments pipeline-prepare should touch {{{
+#
+# Genesis' dispatcher decides the mode for us: a ['repo','env'] command
+# is handed the environment name when invoked as
+# `genesis <env> pipeline-prepare`, and nothing when invoked bare.
+#
+# Separated from the command body because reaching that body needs a
+# working tree, a vault and a git repository, while this is where the
+# behaviour that matters lives.
+sub _prepare_scope {
+	my ($topo, $env_name) = @_;
+
+	return @{$topo->{order}} unless defined $env_name && length $env_name;
+
+	# Ignoring an unknown name would report success having prepared
+	# nothing -- the same silent-success this command exists to end.
+	bail(
+		"Environment #C{%s} is not part of this pipeline.\n".
+		"Known environments: %s",
+		$env_name,
+		(@{$topo->{order}} ? join(', ', @{$topo->{order}}) : '(none)')
+	) unless $topo->{nodes}{$env_name};
+
+	return ($env_name);
+}
+
+# }}}
 sub _resolve_propagation_base {
 	my ($branch, $git) = @_;
 	$git ||= Service::Git->new('.');
@@ -826,14 +1007,8 @@ sub pipeline_graph {
 
 	# For env-file topology, build the DAG directly.
 	if ($top->ci_configured) {
-		my $env_dir = $top->path;
-		require Genesis::CI::Compiler::ASTBuilder;
-		my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-			top     => $top,
-			env_dir => $env_dir,
-		);
-		my ($nodes, $edges) = $builder->_build_from_env_files($env_dir);
-		my $md = _topology_to_mermaid_md($top, $nodes, $edges);
+		my $topo = $top->pipeline_topology;
+		my $md = _topology_to_mermaid_md($top, $topo->{nodes}, $topo->{edges});
 		mkfile_or_fail('pipeline.md', $md);
 		info("Wrote #C{pipeline.md}");
 		exit 0;
@@ -866,14 +1041,8 @@ sub pipeline_describe {
 	# For env-file topology (manual provider or genesis-config CI),
 	# build the DAG directly without the full compiler/provider chain.
 	if ($top->ci_configured) {
-		my $env_dir = $top->path;
-		require Genesis::CI::Compiler::ASTBuilder;
-		my $builder = Genesis::CI::Compiler::ASTBuilder->new(
-			top     => $top,
-			env_dir => $env_dir,
-		);
-		my ($nodes, $edges) = $builder->_build_from_env_files($env_dir);
-		_describe_topology($top, $nodes, $edges);
+		my $topo = $top->pipeline_topology;
+		_describe_topology($top, $topo->{nodes}, $topo->{edges});
 		exit 0;
 	}
 
