@@ -224,7 +224,7 @@ subtest 'a new harness takes back the variables the last one armed' => sub {
 };
 
 subtest 'a child runs under the plan its own harness armed' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my $one = make_harness(envs => ['qa'], vault => 0);
 	init_branch($one, 'qa');
@@ -237,6 +237,16 @@ subtest 'a child runs under the plan its own harness armed' => sub {
 	isnt($rc, 0, 'the armed step took the child down');
 	is(scalar(grep {$_->[0] eq 'fetch_branch'} step_log($git)), 1,
 		'and the call landed in this harness own step log');
+
+	# What the parent already carries has to reach the child, because the
+	# suite runs under -MCarp::Always and a child that lost it answers a
+	# death with less of the story.
+	{
+		local $ENV{PERL5OPT} = join(' ', ($ENV{PERL5OPT} // ()), '-Mvars');
+		my ($carried) = $one->run_in_child('print $ENV{PERL5OPT};');
+		like($carried, qr/-Mvars/,
+			'a PERL5OPT the parent carries reaches the child as well');
+	}
 
 	my $two = make_harness(envs => ['dev'], vault => 0);
 	ok(!eval {$two->run_in_child('exit 0'); 1},

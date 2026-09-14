@@ -2560,6 +2560,11 @@ sub _with_plan {
 # It answers what run answers, which is the output, the exit code, and the
 # standard error, so a row weighs the child's exit rather than trapping a
 # death in the parent.
+#
+# A PERL5OPT the parent already carries is kept and appended to, the way
+# run_genesis keeps it.  The suite runs under -MCarp::Always, and a child that
+# lost it answers a death with a shorter story than the same code run through
+# a whole command.
 sub run_in_child {
 	my ($self, $code, @args) = @_;
 	my $fault = $self->{fault}
@@ -2574,7 +2579,7 @@ sub run_in_child {
 				PERL5OPT => join(' ',
 					'-I' . $helper::TOPDIR . '/t',
 					'-I' . $helper::TOPDIR . '/lib',
-					'-MHarness::Propagation::Git'),
+					'-MHarness::Propagation::Git', ($ENV{PERL5OPT} // ())),
 			},
 		}, 'perl', '-e', $code, @args);
 }
