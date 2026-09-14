@@ -254,34 +254,53 @@ sub _apply_provider_overrides {
 
 	my $top    = $self->{top} or bug("The compiler has no Genesis::Top");
 	my $layout = $top->config->get('pipeline.provider.output_layout', 'single');
-	my @names  = $self->override_file_names(
-		$provider_type, [sort keys %$output], $layout);
+	my @files  = sort keys %$output;
+	my @names  = $self->override_file_names($provider_type, \@files, $layout);
 
 	# One override per emitted file under the multi-file form, and one
 	# override for everything under the single form.
+	my $single = (@names == 1);
 	my %override_for;
-	if (@names == 1) {
+	if ($single) {
 		my $path = $top->path($names[0]);
-		return $output unless -f $path;
-		$override_for{$_} = $path for keys %$output;
+		$override_for{$_} = $path for @files;
 	} else {
-		my @files = sort keys %$output;
 		$override_for{$files[$_]} = $top->path($names[$_]) for 0..$#files;
 	}
 
+	$self->_report_unread_overrides($top, $provider_type, \@files, $layout,
+		\%override_for);
+
+	# Only YAML files are spruce-merged, and only where the override the
+	# layout names is actually there, so the notice and the loop below
+	# both read the same list.
+	my @mergeable = grep {
+		/\.ya?ml$/i && $override_for{$_} && -f $override_for{$_}
+	} @files;
+	return $output unless @mergeable;
+
+	# Under the single form one override covers every emitted file, so the
+	# notice belongs to the run rather than to each file in it, and
+	# printing it inside the loop would read as several merges where there
+	# was one.
+	info("Applying %s...",
+		humanize_path($override_for{$mergeable[0]}, base_dir => $top->path))
+		if $single;
+
+	my %wanted = map {$_ => 1} @mergeable;
 	my $dir = workdir;
 	my %merged;
-	for my $filename (sort keys %$output) {
+	for my $filename (@files) {
 		my $content  = $output->{$filename};
 		my $override = $override_for{$filename};
 
-		# Only spruce-merge YAML files; pass others through unchanged.
-		unless ($filename =~ /\.ya?ml$/i && $override && -f $override) {
+		unless ($wanted{$filename}) {
 			$merged{$filename} = $content;
 			next;
 		}
 
-		info("Applying %s...", humanize_path($override, base_dir => $top->path));
+		info("Applying %s...", humanize_path($override, base_dir => $top->path))
+			unless $single;
 
 		my $base_path = "$dir/override-base-${filename}";
 		open(my $fh, '>', $base_path)
@@ -299,6 +318,36 @@ sub _apply_provider_overrides {
 	}
 
 	return \%merged;
+}
+
+# }}}
+# _report_unread_overrides - name the file the layout is passing over {{{
+#
+# The two naming forms are a layout apart, so an operator who writes one
+# of them and then changes output_layout loses the merge with nothing
+# said.  Wherever the name the layout reads is absent and the other
+# form's file is on disk, say so, because a silent skip looks exactly
+# like a merge that had nothing to add.
+sub _report_unread_overrides {
+	my ($self, $top, $provider_type, $files, $layout, $override_for) = @_;
+
+	return unless grep {!-f $_} values %$override_for;
+
+	my $other = ($layout // 'single') eq 'multiple' ? 'single' : 'multiple';
+	my %read  = map {$_ => 1} values %$override_for;
+
+	for my $name ($self->override_file_names($provider_type, $files, $other)) {
+		my $path = $top->path($name);
+		next if $read{$path} || !-f $path;
+		warning(
+			"Ignoring %s: the '%s' output layout reads %s instead.",
+			humanize_path($path, base_dir => $top->path), $layout // 'single',
+			join(', ', map {humanize_path($_, base_dir => $top->path)}
+				sort keys %read)
+		);
+	}
+
+	return;
 }
 
 # }}}
