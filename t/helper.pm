@@ -1193,6 +1193,61 @@ sub standin_vault {
 	}
 }
 
+# A saver for the environment variables a fixture has to set in the parent
+# process, where `local` will not reach because the value has to outlive the
+# sub that armed it.  local_env sets each variable it is given, records the
+# value it replaced, and hands back a guard.  When that guard goes out of
+# scope, or when restore is called on it, every variable goes back to what it
+# held, and one that was never set is removed rather than left standing empty.
+# A guard can be grown with set, and it unwinds in reverse, so a fixture may
+# keep one guard for its whole life and still leave the parent as it found it.
+sub local_env {
+	my (%vars) = @_;
+	return helper::EnvGuard->new->set(%vars);
+}
+
+{
+	package helper::EnvGuard;
+
+	sub new {
+		my ($class) = @_;
+		return bless({saved => []}, $class);
+	}
+
+	sub set {
+		my ($self, %vars) = @_;
+		for my $name (sort keys %vars) {
+			push @{$self->{saved}},
+				[$name, exists $ENV{$name}, $ENV{$name}];
+			if (defined $vars{$name}) {
+				$ENV{$name} = $vars{$name};
+			} else {
+				delete $ENV{$name};
+			}
+		}
+		return $self;
+	}
+
+	sub restore {
+		my ($self) = @_;
+		while (my $entry = pop @{$self->{saved}}) {
+			my ($name, $was_set, $value) = @$entry;
+			if ($was_set) {
+				$ENV{$name} = $value;
+			} else {
+				delete $ENV{$name};
+			}
+		}
+		return $self;
+	}
+
+	sub DESTROY {
+		my ($self) = @_;
+		local ($@, $!, $?);
+		$self->restore;
+	}
+}
+
 sub wrap_obj {
 	my ($obj, %overrides) = @_;
 	return MockWrapper->new($obj, %overrides);
