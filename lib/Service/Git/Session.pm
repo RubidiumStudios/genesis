@@ -120,8 +120,11 @@ sub begin {
 			# once they are done.  The restore shells out to git, so
 			# without this the net would hand every refusal git's nought
 			# and a caller waiting on a switch would be told it succeeded.
-			# It is saved and put back by hand rather than localised,
-			# because a local restores too late to be read here.
+			# It is saved and put back by hand because the obvious
+			# localisation, local $? = $?, loses the value: assigning a
+			# magic variable to its own freshly localised self does not
+			# preserve it.  An explicit save says what it does at the one
+			# point where getting it wrong is invisible.
 			my $status = $?;
 
 			$me->{active} = 0;

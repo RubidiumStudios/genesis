@@ -88,7 +88,7 @@ subtest 'a command that never switches proceeds under the lock' => sub {
 };
 
 subtest 'the kernel releases the lock when its holder dies' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $h   = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
@@ -102,6 +102,16 @@ subtest 'the kernel releases the lock when its holder dies' => sub {
 	ok(eval { $session->switch($h->slug('qa')); 1 },
 		'a later switch succeeds with no break-lock option anywhere');
 	is($git->current_branch, $h->slug('qa'), 'and it actually switched');
+
+	# Every refusal above names a pid the harness wrote.  This is the one
+	# row that reads back what the product itself wrote, so the writer and
+	# the readers are held to the same two-line form.
+	open my $lock, '<', $git->git_dir . '/genesis-session.lock'
+		or die "cannot read the session lock: $!\n";
+	chomp(my $wrote = <$lock> // '');
+	close $lock;
+	is($wrote, "$$", 'and our own pid is on the first line of the lock it took');
+
 	$session->finish;
 };
 
@@ -127,10 +137,14 @@ subtest 'the lock is per working tree' => sub {
 		"a held lock in copy A does not reach copy B");
 	$sb->finish;
 
+	# Read the refusal rather than the bare death, since a failed checkout
+	# or an unopened session would die here too and say nothing about the
+	# lock.
 	my $sa = $a->session(control => $h->control);
 	$sa->begin;
-	ok(!eval { $sa->switch($h->slug('qa')); 1 },
-		'while copy A is still refused');
+	my $refused = exception(sub { $sa->switch($h->slug('qa')) });
+	like($refused, qr/\b$pid\b/,
+		'while copy A is still refused, naming the holder in copy A');
 	release_session_lock($h, $pid);
 };
 
@@ -149,8 +163,9 @@ subtest 'the child takes the lock itself after the session has finished' => sub 
 	$session->switch($h->slug('qa'));
 
 	# While the session holds the lock, a second process is refused.
-	my $pid = fork_and_switch($h, $h->slug('qa'));
-	isnt($pid->{exit}, 0, 'a second process is refused while the session holds it');
+	my $second = fork_and_switch($h, $h->slug('qa'));
+	isnt($second->{exit}, 0,
+		'a second process is refused while the session holds it');
 
 	$session->finish;
 
