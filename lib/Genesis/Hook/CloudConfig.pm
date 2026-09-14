@@ -1951,26 +1951,6 @@ sub _build_logical_subnet_amalgamation {
 }
 
 # }}}
-# _get_subnet_ref - Returns the subnet reference for a given name {{{
-sub _get_subnet_ref {
-	my ($self, $name, $all_subnets) = @_;
-	# If $all_subnets is not given, get them from $self->network->{subnets}
-	$all_subnets //= [keys $self->network->{subnets}->%*];
-	return $name if grep {$_ eq $name} @$all_subnets;
-
-	# Check for an LSA (Logical Subnet Amalgamation) containing the name
-	my @lsas = grep {$_ =~ /^LSA\|/} @$all_subnets;
-	for my $lsa (@lsas) {
-		my @subnets = split(/\|/, $lsa);
-		return $lsa if grep {$_ eq $name} @subnets;
-	}
-	bail(
-		"Subnet %s not found in the available subnets: %s",
-		$name, join(', ', @$all_subnets)
-	);
-}
-
-# }}}
 # _standardized_subnet_cidr - Returns a standardized CIDR range for a given subnet {{{
 sub _standardized_subnet_cidr {
 	my ($self, $subnet, $name, $target) = @_;

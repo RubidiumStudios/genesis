@@ -2535,50 +2535,6 @@ B<Examples:>
     my $lsa = $self->_build_logical_subnet_amalgamation('deployment', \@subnet_configs);
     # Returns: { range => '10.0.1.0/24', azs => ['z1','z2'], reserved => [...], ... }
 
-=head2 _get_subnet_ref
-
-    my $ref = $self->_get_subnet_ref($name, \@all_subnets);
-
-Resolves a subnet name to either the direct subnet key or the LSA key that
-contains it. Checks exact match first, then searches LSA keys
-(C<"LSA|subnet1|subnet2|..."> format).
-
-B<Parameters:>
-
-=over 4
-
-=item C<$name>
-
-The subnet name to look up.
-
-=item C<\@all_subnets>
-
-B<(optional)> The list of available subnet keys. Defaults to the keys of
-C<< $self->network->{subnets} >>.
-
-=back
-
-B<Returns:> The matching subnet key or LSA key string.
-
-B<Errors:>
-
-=over 4
-
-=item C<"Subnet %s not found in the available subnets: %s">
-
-Thrown when neither the exact name nor any LSA containing it is found.
-C<%s> are the name and the comma-joined available subnet list.
-
-=back
-
-B<Examples:>
-
-    my $ref = $self->_get_subnet_ref('ocfp-a');
-    # Returns: 'ocfp-a'  (if ocfp-a is a direct subnet key)
-
-    my $ref = $self->_get_subnet_ref('ocfp-a', ['LSA|ocfp-a|ocfp-b', 'ocfp-c']);
-    # Returns: 'LSA|ocfp-a|ocfp-b'
-
 =head2 _standardized_subnet_cidr
 
     my $cidr = $self->_standardized_subnet_cidr(\%subnet, $name, $target);
