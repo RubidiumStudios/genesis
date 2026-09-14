@@ -1028,9 +1028,10 @@ sub branch_for {
 # pr_branch_for - the pull request branch for an environment name {{{
 #
 # The prefix joined onto the slug, with no second argument, so the branch
-# reads pr/qa/bosh under the defaults (D19, D66, D71).  The collision the
-# join can produce, where a joined name lands on the control branch or on a
-# deployment branch, is refused where the branch is created.
+# reads pr/qa/bosh under the defaults (D19, D66, D71).  The join can land
+# on a name that is already the control branch or already a deployment
+# branch, and refusing that collision belongs here, in the one place a
+# pull request branch is named, rather than in each caller.
 sub pr_branch_for {
 	my ($self, $env_name) = @_;
 	return $self->pr_prefix . $self->deployment_slug_for($env_name);
