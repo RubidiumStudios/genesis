@@ -87,6 +87,18 @@ subtest "copy A's own publish moves copy A's tracking ref" => sub {
 	is("$ahead $behind", '0 0', 'copy A reads in-sync with no second refresh');
 };
 
+subtest 'a branch only this clone has is always copy A branch' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	local_branch_only($h, 'qa', copy => 'b');
+
+	ok(ref_in($h->a, 'refs/heads/' . $h->slug('qa')),
+		'the branch is cut in copy A whatever copy the call named');
+	ok(!ref_in($h->b, 'refs/heads/' . $h->slug('qa')),
+		'and copy B never gets one');
+};
+
 subtest 'a branch copy B is standing on is not moved under it' => sub {
 	plan tests => 2;
 
