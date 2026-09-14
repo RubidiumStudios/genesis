@@ -37,17 +37,25 @@ subtest 'a second session inside a first is refused' => sub {
 };
 
 subtest 'control after a deployment branch is a second session' => sub {
-	plan tests => 4;
+	plan tests => 6;
 
-	my $h   = make_harness(envs => ['qa']);
+	# The operator stands on a deployment branch, so every row below reads a
+	# branch the session had to move us to.  With the tree left on control,
+	# both the switch to control and the restore to control are no-ops and
+	# the rows pass whether or not the session does anything at all.
+	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
+	stand_on($h, $h->slug('qa'));
 	my $git = $h->git('a');
 
 	my $first = $git->session(control => $h->control);
 	$first->begin;
-	$first->switch($h->slug('qa'));
+	$first->switch($h->control);
+	is($git->current_branch, $h->control, 'the first session reached control');
 	$first->finish;
 	ok(!$first->active, 'the first session finished');
+	is($git->current_branch, $h->slug('qa'),
+		'and stood us back on the deployment branch');
 
 	my $second = $git->session(control => $h->control);
 	$second->begin;
@@ -55,7 +63,7 @@ subtest 'control after a deployment branch is a second session' => sub {
 	is($git->current_branch, $h->control, 'the second session reached control');
 	ok($second->active, 'and only one session is open at a time');
 	$second->finish;
-	is($git->current_branch, $h->control, 'with the branch restored');
+	is($git->current_branch, $h->slug('qa'), 'with the branch restored');
 };
 
 subtest 'two handles for two working trees hold one session each' => sub {

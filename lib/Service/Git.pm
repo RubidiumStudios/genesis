@@ -308,7 +308,7 @@ sub current_branch {
 # }}}
 # checkout - switch to a branch {{{
 #
-# Saves the original branch for restore_branch / DESTROY.
+# Saves the original branch for restore_branch.
 sub checkout {
 	my ($self, $branch) = @_;
 	$self->{_original_branch} //= $self->current_branch

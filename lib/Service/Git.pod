@@ -109,8 +109,9 @@ Any path inside the repository. Defaults to the current directory.
 
 =item C<track_branch>
 
-Remember the current branch and restore it on C<restore_branch> or at process
-exit.
+Remember the current branch so C<restore_branch> can return to it. Nothing is
+restored at process exit by this flag. The last-resort net at exit belongs to
+the branch session, which registers it through C<at_exit>.
 
 =back
 
@@ -191,18 +192,19 @@ B<Examples:>
 
 =head2 DESTROY
 
-Drops the handle's session and evicts its entry from the flyweight table, so
-a process that lets a handle go does not leave a session behind claiming to be
-open.
+Only fires at global destruction, because the instance table holds a strong
+reference to every handle for the life of the process, so a caller that drops
+its own reference never brings the refcount to zero.
+
+It drops the handle's session and evicts the handle's entry from the instance
+table, so that a handle released by any other route leaves no stale entry
+behind for a later C<new> to answer with.
 
 No branch is restored here. That safety net has moved to the session, which
 registers a last-resort abort through C<at_exit> instead. A net in C<DESTROY>
 fires too late to be useful, because C<bail> exits when it is not inside an
 C<eval>, Perl runs C<END> before global destruction, and the order after that
 is undefined.
-
-Because the instance is a flyweight held for the process lifetime, this fires
-during global destruction rather than when a caller drops its reference.
 
 B<Returns:> Nothing.
 
