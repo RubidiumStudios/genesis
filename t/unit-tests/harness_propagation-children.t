@@ -6,6 +6,13 @@
 # reads a request back where one was made, a skipped git step reports and
 # does not land, and the broken-blueprint kit fails one environment and not
 # the other.
+#
+# The recorder itself is read here too, because it is the fixture behind
+# every one of those children.  It answers with a status of its own where
+# its lock fixture cannot go on and where a child's status was lost, and it
+# says in the record which of the two happened.  The two fixture kits are
+# read the same way, one for the list it takes out of an environment file
+# and one for the key it refuses on.
 use strict;
 use warnings;
 use utf8;
