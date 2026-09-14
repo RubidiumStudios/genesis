@@ -4,19 +4,29 @@
 # --platform is refused as an unknown option, a provider that emits
 # several files takes the per-file form under output_layout: multiple, a
 # non-YAML output passes through untouched, and output_layout is refused
-# where multi_file_output is false.
+# where multi_file_output is false.  It also proves what the override
+# name does with a directory, what the run says about the naming form it
+# is not reading, how often one merge announces itself, and what a merge
+# spruce refuses exits with.
 use strict;
 use warnings;
 use utf8;
 
 use lib 'lib';
 use lib 't';
+# Test::Exit installs the hook that makes an exit catchable in a BEGIN
+# block, and the exit it has to catch is the one Genesis::bail spends, so
+# it comes before anything that compiles Genesis.
+use Test::Exit;
 use helper;
 use Harness::Propagation;
 use Test::More;
 use Test::Exception;
+use Test::Output;
+use File::Temp qw/tempdir/;
 
 use Genesis;
+use Genesis::Exit qw/CONFIG/;
 provide_rc();
 use_ok 'Genesis::Top';
 use_ok 'Genesis::CI::Compiler';
@@ -66,6 +76,30 @@ sub automated_config {
 		'  shuttle:', '    backend: s3', '    bucket: pipes',
 		'  vault:', '    url: https://vault.example.com',
 		'  locker:', '    url: https://locker.example.com');
+}
+
+# The merge rows want a deployment root of their own, because an override
+# one row writes must not be there for the next, and the harness's copy A
+# is shared by every row in the file.  A configuration is all these rows
+# need beside the override.
+sub override_top {
+	my $tmp = tempdir(CLEANUP => 1);
+	put_file("$tmp/.genesis/config", join("\n",
+		'---', 'deployment_type: bosh', 'version: "3"',
+		'creator_version: 3.2.0', ''));
+	return ($tmp, Genesis::Top->new($tmp, no_vault => 1));
+}
+
+sub write_override {
+	my ($tmp, $body) = @_;
+	put_file("$tmp/.genesis/pipeline-overrides-concourse.yml", $body);
+}
+
+# spruce merges the override over the generated output, so the two rows
+# that watch a merge happen have nothing to watch without it.
+sub have_spruce {
+	chomp(my $spruce = `which spruce 2>/dev/null`);
+	return $spruce && -x $spruce;
 }
 
 subtest 'the override sits beside the configuration' => sub {
@@ -166,6 +200,107 @@ MANY
 		lives_ok {load_with(automated_config('many', "output_layout: $layout"))}
 			"$layout validates where the capability is true";
 	}
+};
+
+subtest 'the name of a multi-file override keeps its directory' => sub {
+	plan tests => 4;
+
+	# Two outputs that share a base name but sit in different directories
+	# must not collapse onto one override file, so the directory travels
+	# into the name with its separators flattened.
+	my @names = Genesis::CI::Compiler->override_file_names(
+		'concourse', ['qa/deploy.yml', 'prod/deploy.yml'], 'multiple');
+
+	is scalar(@names), 2, 'one override name per emitted file';
+	isnt $names[0], $names[1],
+		'outputs in different directories get different override files';
+	is_deeply [sort @names], [
+		'.genesis/pipeline-overrides-concourse-prod-deploy.yml',
+		'.genesis/pipeline-overrides-concourse-qa-deploy.yml',
+	], 'the directory survives in the name with its separator flattened';
+
+	is_deeply [
+		Genesis::CI::Compiler->override_file_names(
+			'concourse', ['pipeline.yml'], 'multiple')
+	], ['.genesis/pipeline-overrides-concourse-pipeline.yml'],
+		'an output with no directory keeps its plain base name';
+};
+
+subtest 'the other naming form is named, not passed over in silence' => sub {
+	plan tests => 3;
+
+	my ($tmp, $top) = override_top();
+
+	# The layout in force is single, so the run reads
+	# pipeline-overrides-concourse.yml.  An operator who wrote the
+	# multi-file form's file gets told it is being passed over rather
+	# than losing the merge with nothing said.
+	put_file("$tmp/.genesis/pipeline-overrides-concourse-pipeline.yml",
+		"---\nshould_not: appear\n");
+
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
+	my $output = {'pipeline.yml' => "---\njobs: []\n"};
+
+	my ($result, $out, $err);
+	($out, $err) = output_from {
+		$result = $compiler->_apply_provider_overrides($output, 'concourse');
+	};
+
+	is_deeply $result, $output, "the other form's file is not merged";
+	like "$out$err", qr/pipeline-overrides-concourse-pipeline\.yml/,
+		'the file that is being passed over is named';
+	like "$out$err", qr/ignor/i,
+		'the notice says the file is being ignored';
+};
+
+subtest 'one override over several files announces itself once' => sub {
+	plan skip_all => 'spruce not in PATH' unless have_spruce();
+	plan tests => 3;
+
+	my ($tmp, $top) = override_top();
+	write_override($tmp, "---\nextra_key: injected_by_override\n");
+
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
+	my $output = {
+		'one.yml' => "---\nbase_key: one\n",
+		'two.yml' => "---\nbase_key: two\n",
+	};
+
+	my ($result, $out, $err);
+	($out, $err) = output_from {
+		$result = $compiler->_apply_provider_overrides($output, 'concourse');
+	};
+
+	like $result->{'one.yml'}, qr/extra_key:\s*injected_by_override/,
+		'the first file is merged';
+	like $result->{'two.yml'}, qr/extra_key:\s*injected_by_override/,
+		'the second file is merged';
+
+	my $applied = () = ("$out$err" =~ /Applying /g);
+	is $applied, 1,
+		'the single form announces its one merge once, not once per file';
+};
+
+subtest 'a merge spruce refuses exits at the configuration code' => sub {
+	plan skip_all => 'spruce not in PATH' unless have_spruce();
+	plan tests => 1;
+
+	my ($tmp, $top) = override_top();
+	write_override($tmp, "---\nbroken: [unclosed\n");
+
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
+	my $output = {'pipeline.yml' => "---\nbase_key: base_value\n"};
+
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	my $code;
+	output_from {
+		$code = exit_code {
+			$compiler->_apply_provider_overrides($output, 'concourse');
+		};
+	};
+
+	is $code, CONFIG,
+		'an override spruce cannot merge is a configuration refusal';
 };
 
 done_testing;
