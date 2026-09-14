@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::Exit qw/CONFIG/;
 use Genesis::CI::Compiler::Parser;
 use Genesis::CI::Compiler::Validator;
 use Genesis::CI::Compiler::ScriptDiscovery;
@@ -311,7 +312,11 @@ sub _apply_provider_overrides {
 			or bail("Cannot flush temporary override base %s: %s", $base_path, $!);
 
 		my ($merged_yaml, $rc) = run('spruce', 'merge', $base_path, $override);
-		bail("Failed to apply %s: spruce merge returned non-zero", $override)
+		# A refusal a caller can act on: the override is the operator's
+		# file, so a merge it cannot survive is a configuration problem
+		# rather than the system one a bare 1 would report.
+		bail({exitcode => CONFIG},
+			"Failed to apply %s: spruce merge returned non-zero", $override)
 			unless $rc == 0;
 
 		$merged{$filename} = $merged_yaml;
