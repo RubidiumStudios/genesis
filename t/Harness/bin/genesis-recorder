@@ -19,6 +19,16 @@ use IO::Handle ();
 use JSON::PP;
 use POSIX ();
 
+# The status the recorder answers with where the fixture itself cannot go on,
+# or where a child's own status was lost.  It is a value of the file's own
+# rather than whatever errno happened to hold, because the recorder stands in
+# for a genesis child and a row reads its exit as that child's exit, so a
+# refusal must not borrow 2 and read as a usage error, or 86 and read as the
+# prerequisites check, or one of the codes Genesis::Exit names.  99 is none of
+# those, is no exit the design names, and is not the 127 a failed exec here
+# answers with.
+use constant REFUSED => 99;
+
 my $plan = read_json($ENV{GENESIS_HARNESS_CHILD_PLAN}) || {};
 
 # The stranger takes the lock before anything is read, so the window D46
@@ -33,6 +43,7 @@ my %record = (
 	stdin_is_tty  => (-t STDIN ? 1 : 0),
 	lock_at_start => probe($plan->{lock}),
 	lock_seen     => [],
+	status_lost   => JSON::PP::false,
 );
 
 my $exit = 0;
@@ -62,7 +73,17 @@ if (defined $plan->{exit}) {
 			push @{$record{lock_seen}}, probe($plan->{lock});
 			select undef, undef, undef, 0.05;
 		}
-		$exit = $reaped == $pid ? $? >> 8 : 0;
+		if ($reaped == $pid) {
+			$exit = $? >> 8;
+		} else {
+			# Somebody else reaped the child, so what it answered with is
+			# gone and nothing here can say what it was.  The record says
+			# so in a field of its own and the run answers REFUSED, because
+			# a child whose status nobody saw must not read back as a child
+			# that succeeded.
+			$record{status_lost} = JSON::PP::true;
+			$exit = REFUSED;
+		}
 
 	} else {
 		system {$plan->{real}} $plan->{real}, @ARGV;
@@ -90,6 +111,18 @@ sub read_json {
 	my $body = do {local $/; <$fh>};
 	close $fh;
 	return eval {JSON::PP->new->decode($body)};
+}
+
+# }}}
+# refuse - say why the fixture cannot go on, and answer with one status {{{
+#
+# A print and an exit rather than a die, because a die leaves the status to
+# errno and a row reads whatever the recorder exits with as the exit of the
+# command it was watching.
+sub refuse {
+	my ($message) = @_;
+	print STDERR $message;
+	exit REFUSED;
 }
 
 # }}}
@@ -157,11 +190,11 @@ sub hold_the_lock {
 			$taken = 1;
 			last;
 		}
-		die "the recorder's lock holder exited before it took the lock\n"
+		refuse("the recorder's lock holder exited before it took the lock\n")
 			if waitpid($pid, POSIX::WNOHANG()) != 0;
 		select undef, undef, undef, 0.05;
 	}
-	die "the recorder's lock holder did not take the lock in five seconds\n"
+	refuse("the recorder's lock holder did not take the lock in five seconds\n")
 		unless $taken;
 	return $pid;
 }
