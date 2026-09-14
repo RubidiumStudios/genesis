@@ -202,4 +202,18 @@ subtest 'the newest entry of a record set reads back nested' => sub {
 		'and it is the entry answered, rather than a child of the path');
 };
 
+subtest 'reading trailers leaves nothing behind in the scratch' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	commit_on_control($h,
+		files   => {'a-change.yml' => "---\nn: 1\n"},
+		message => "Do a thing\n\nGenesis-Stage: prod\n");
+
+	my $trailers = trailers_of($h, $h->control);
+	is($trailers->{'Genesis-Stage'}, 'prod', 'the trailer is read back');
+	ok(!-e "$h->{base}/trailers.msg" && !-e "$h->{base}/tmp/trailers.msg",
+		'and no message file is left standing');
+};
+
 done_testing;
