@@ -3147,8 +3147,9 @@ written where a list belongs is therefore refused outright, before any entry
 of it is read.
 
 A refusal the validator raises that carries no bullets to pick apart is
-reported as it stands, so an C<eval> that failed never leaves the block
-looking valid.
+reported by its first line, so an C<eval> that failed never leaves the block
+looking valid and a multi-line failure does not read ragged under a bullet
+of its own.
 
 B<Parameters:>
 
@@ -3201,7 +3202,14 @@ what the terminal can render.
 
 Each error's C<pipeline.> prefix is rewritten to C<genesis.pipeline.>, so the
 key is named the way the environment file spells it rather than the way the
-throw-away configuration was built.
+throw-away configuration was built. The rewrite is anchored to the head of
+the folded line, because it is for the key the error opens with, and a value
+of the operator's that happens to carry the word is not a key.
+
+Each error is also cut at the first C<< at <file> line <n> >> behind it.
+Under C<Carp::Always> the backtrace is folded into the bullet it was raised
+under, and without the cut a developer reads the stack appended to the
+error.
 
 Plain function, not a method.
 
