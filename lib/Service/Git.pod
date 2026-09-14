@@ -1059,6 +1059,10 @@ B<Examples:>
 
 Whether a remote of this name is configured.
 
+git's complaint is captured apart from the list of names, the way
+L</branch_upstream_remote> asks for it, so nothing but a remote's name is
+ever searched for one.
+
 B<Parameters:>
 
 =over 4
@@ -1083,6 +1087,12 @@ B<Examples:>
 
 The fetch URL for a remote.
 
+git writes its complaint on stderr, and that is captured apart from the URL
+rather than merged into it, so a remote git cannot answer for gives back
+nothing rather than the text of the complaint. The exit status is read too,
+so a remote that is not configured is C<undef> and never a string a caller
+would go on to clone.
+
 B<Parameters:>
 
 =over 4
@@ -1093,7 +1103,8 @@ Defaults to C<default_remote>.
 
 =back
 
-B<Returns:> The URL, or C<undef> when no remote is configured.
+B<Returns:> The URL, or C<undef> when no remote is configured or git could
+not answer for the one that was named.
 
 B<Examples:>
 
