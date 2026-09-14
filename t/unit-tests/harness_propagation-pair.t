@@ -83,6 +83,21 @@ subtest 'the readers answer for a ref that is not there' => sub {
 		'ref_in answers undef');
 };
 
+subtest 'the base holds the repositories and one scratch directory' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	fresh_clone($h);
+	unrelated_branch($h, 'qa');
+
+	opendir(my $dh, $h->{base}) or die "cannot read the base: $!";
+	my @entries = sort grep {$_ ne '.' && $_ ne '..'} readdir($dh);
+	closedir($dh);
+	is_deeply(\@entries, ['a', 'b', 'r.git', 'tmp'],
+		'nothing but the three repositories and the scratch directory');
+	ok(-d "$h->{base}/tmp", 'and the scratch directory is where they went');
+};
+
 subtest 'the git accessor takes the options Service::Git takes' => sub {
 	plan tests => 3;
 
