@@ -1158,8 +1158,9 @@ sub source_control_repository {
 #
 # What pipeline-describe prints, so an override that has drifted away from
 # what git says is visible rather than silent, under D29.  A value is
-# explicit where the operator wrote the key, derived where git answered
-# for it, and default where neither did.
+# explicit where the operator wrote the key, derived where git answered for
+# it, unset where a derivation was never run, and default where the key
+# takes no derivation at all.
 #
 # is_set decides the explicit tier rather than get, the way
 # _validate_capability_gates does, because the schema fills control_branch
@@ -1173,15 +1174,21 @@ sub source_control_resolved {
 
 	my @rows;
 	for my $key (qw/remote uri repository control_branch pr_prefix/) {
+		my $value = $sc->{$key};
 		push @rows, {
 			key   => $key,
-			# A remote git reports with no fetch url leaves the uri
-			# unresolved, and a report says so rather than printing a
+			# A value that never resolved shows as (none) rather than as a
 			# blank column the reader has to interpret.
-			value => $sc->{$key} // '(none)',
+			value => $value // '(none)',
+			# A derived key with no value was never derived: under D29 the
+			# url is asked of git only where the repository has to come out
+			# of it, so calling that row derived would tell the reader git
+			# answered when git was never asked.
 			source => $self->config->is_set("pipeline.source_control.$key")
 				? 'explicit'
-				: ($derived{$key} ? 'derived' : 'default'),
+				: $derived{$key}
+					? (defined $value ? 'derived' : 'unset')
+					: 'default',
 		};
 	}
 
