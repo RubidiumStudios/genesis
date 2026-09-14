@@ -92,4 +92,35 @@ subtest 'a stale ci.yml beside a version 3 pipeline only warns' => sub {
 		'and the command carries on';
 };
 
+subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
+	# Three explicit rows and one for the run's own restoration assertion.
+	plan tests => 4;
+
+	# Concourse needs a fly target and this configuration names none, so
+	# the refusal comes from the provider's own validate_config rather than
+	# from the declarative schema above it.
+	commit_on_control($h, files => {
+		'.genesis/config' => join("\n",
+			'---', 'deployment_type: bosh', 'version: "3"',
+			'creator_version: 3.2.0',
+			'pipeline:', '  enabled: true',
+			'  source_control:',
+			'    repository: genesis/bosh-deployments',
+			'    auth:', '      type: ssh', '      vault: secret/ci/git',
+			'    identity:', '      name: Genesis CI',
+			'      email: ci@genesis.example.com',
+			'  provider:', '    type: concourse',
+			'  shuttle:', '    backend: s3', '    bucket: pipes',
+			'  vault:', '    url: https://vault.example.com',
+			'  locker:', '    url: https://locker.example.com', ''),
+	});
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
+	like $err, qr/Invalid configuration for the concourse provider/,
+		'the refusal names the provider whose rule failed';
+	like $err, qr/'target' is required for the Concourse provider/,
+		"and quotes the provider's own words";
+	is $exit, Genesis::Exit::CONFIG, 'and it exits CONFIG by name';
+};
+
 done_testing;
