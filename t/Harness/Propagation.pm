@@ -2092,6 +2092,14 @@ sub vault_read_log {
 # owns everything the suite writes.
 sub fixture_preflight {
 	my ($self, $kind, %opts) = @_;
+	# A copy already carries the seeding commit, so the no_commits shape
+	# cannot be built in one.  The combination is refused rather than
+	# answered with a repository that has commits and a caller that believes
+	# it has none.
+	die "fixture_preflight cannot build the no_commits shape in a copy, "
+	  . "because both copies already carry the seeding commit\n"
+		if $kind eq 'no_commits' && $opts{copy};
+
 	my $dir = $opts{copy} ? $self->{$opts{copy}}
 	        : "$self->{tmp}/preflight-$kind-" . int(rand(1_000_000));
 
