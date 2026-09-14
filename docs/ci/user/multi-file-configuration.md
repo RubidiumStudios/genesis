@@ -1,38 +1,36 @@
-# Multi-File Configuration
+# Pipeline Section Configuration
 
-The multi-file configuration format splits pipeline configuration across
-several files in a `.genesis/ci/` directory. This format is used by the
-compiler pipeline (activated with `--platform`) and provides a cleaner
-separation of concerns than the monolithic `ci.yml`.
+Pipeline configuration lives in the `pipeline:` section of
+`.genesis/config`, split across named blocks rather than gathered into a
+single monolithic `ci.yml`. The compiler pipeline reads this section, and
+it gives a cleaner separation of concerns than the legacy file does.
 
-When you run `genesis repipe --platform concourse`, the system checks for
-`.genesis/ci/` first. If that directory exists and contains a `pipeline.yml`,
-it uses the multi-file format. Otherwise it falls back to reading `ci.yml`
-in the legacy format.
+When you run `genesis repipe --platform concourse`, Genesis reads the
+`pipeline:` section of `.genesis/config`. If the repository has no such
+section, it falls back to reading `ci.yml` in the legacy format. There is
+no conventional `.genesis/ci/` directory any more, and nothing looks for
+one.
 
-## Directory Structure
+## Section Structure
 
 ```
-.genesis/ci/
-  pipeline.yml         # Required - metadata, branches, workflows, configuration
-  targets.yml          # Required - BOSH directors and connection info
-  integrations.yml     # Required - vault, git, slack, email, locker
-  scripts/
-    manifest.yml       # Optional - script metadata declarations
-    deploy.sh          # Optional - custom scripts
-    smoke-test.sh      # Optional - custom scripts
-  provider-config/
-    concourse.yml      # Optional - Concourse-specific overrides
-    github-actions.yml # Optional - GitHub Actions-specific overrides
+pipeline:
+  pipeline:            # Required - metadata, branches, workflows, configuration
+  targets:             # Required - BOSH directors and connection info
+  integrations:        # Required - vault, git, slack, email, locker
+  scripts:             # Optional - script metadata declarations
+  provider_config:
+    concourse:         # Optional - Concourse-specific overrides
+    github-actions:    # Optional - GitHub Actions-specific overrides
 ```
 
-The three required files are `pipeline.yml`, `targets.yml`, and
-`integrations.yml`. The parser loads each through `spruce merge` so
-spruce operators work in all files.
+The three required blocks are `pipeline:`, `targets:`, and
+`integrations:`. Genesis loads `.genesis/config` through `spruce merge`,
+so spruce operators work throughout the section.
 
-## pipeline.yml
+## The pipeline Block
 
-This file defines the pipeline identity, branch configuration, workflows,
+This block defines the pipeline identity, branch configuration, workflows,
 and global settings.
 
 ```yaml
@@ -80,16 +78,16 @@ and the prefix used for target branches.
 The `workflows` section is the heart of the configuration. Each workflow
 is a named deployment topology. When using the legacy layout DSL (via a
 fallback from `ci.yml`), the parser converts the layout into a workflow
-automatically. In the multi-file format, you can define workflows with
+automatically. In the `pipeline:` section, you can define workflows with
 explicit stages and trigger relationships.
 
 The `configuration` section holds global settings that correspond to the
 top-level boolean flags and task/registry/notification settings from the
 legacy format.
 
-## targets.yml
+## The targets Block
 
-This file defines deployment targets (BOSH directors).
+This block defines deployment targets (BOSH directors).
 
 ```yaml
 targets:
@@ -123,9 +121,9 @@ legacy format but uses a structured `auth` map instead of flat
 The `alias` and `genesis_env` fields work the same way as in the legacy
 `boshes` section.
 
-## integrations.yml
+## The integrations Block
 
-This file defines external service integrations: Vault, Git source control,
+This block defines external service integrations: Vault, Git source control,
 notifications, and the optional Locker service.
 
 ```yaml
@@ -192,14 +190,14 @@ used to construct the Git URI automatically from the `repository` field
 (e.g., `github` + `my-org/my-repo` becomes `git@github.com:my-org/my-repo.git`).
 If you need a custom URI, set the `uri` field directly.
 
-## scripts/ Directory
+## The scripts Block
 
-The `scripts/` directory under `.genesis/ci/` can contain shell scripts
-referenced by workflow stages. Scripts can declare their metadata in two
-ways.
+The `scripts/` directory at the root of your deployment repository can
+contain shell scripts referenced by workflow stages. Scripts can declare
+their metadata in two ways.
 
-The first way is through a `scripts/manifest.yml` file that explicitly
-lists each script and its requirements:
+The first way is through the `scripts:` block, which explicitly lists each
+script and its requirements:
 
 ```yaml
 scripts:
@@ -240,24 +238,24 @@ The second way is through inline annotations in the script file itself:
 # @timeout: 60m
 ```
 
-Scripts without either manifest entries or inline annotations are still
+Scripts without either a `scripts:` entry or inline annotations are still
 discovered. The system infers basic metadata from the filename, assigning
 a default description based on the path and assuming `bash` as the executor.
 
-## provider-config/ Directory
+## The provider_config Block
 
-This directory holds platform-specific configuration overrides. Each file
-is named after the provider (`concourse.yml`, `github-actions.yml`) and
-its contents are passed through to the provider during compilation. The
-exact format depends on the provider implementation.
+This block holds platform-specific configuration overrides. Each key is
+named after the provider (`concourse`, `github-actions`) and its contents
+are passed through to the provider during compilation. The exact format
+depends on the provider implementation.
 
 ## Relationship to Legacy Format
 
 When the compiler pipeline reads a legacy `ci.yml`, the parser normalizes
-it into the same internal structure as the multi-file format. The `boshes`
-section becomes `targets`, the `vault`/`git`/`slack`/`email` sections
-become `integrations`, and the `layout` string is parsed into a workflow
-with a graph of nodes and edges.
+it into the same internal structure as the `pipeline:` section. The
+`boshes` section becomes `targets`, the `vault`/`git`/`slack`/`email`
+sections become `integrations`, and the `layout` string is parsed into a
+workflow with a graph of nodes and edges.
 
 This means that both formats flow through the same Validator, ASTBuilder,
 and provider pipeline. The only difference is where the configuration
@@ -265,18 +263,18 @@ comes from initially.
 
 ## Migrating from ci.yml
 
-To migrate an existing `ci.yml` to the multi-file format, split its
-contents according to the sections described above. Here is a mapping:
+To migrate an existing `ci.yml` into the `pipeline:` section, split its
+contents according to the blocks described above. Here is a mapping:
 
 The `pipeline.name`, `pipeline.layout` (or `layouts`), `pipeline.public`,
 `pipeline.tagged`, `pipeline.task`, `pipeline.notifications`, and other
-global settings go into `pipeline.yml`.
+global settings go into the `pipeline` block.
 
-The `pipeline.boshes` section maps to `targets.yml`, with each BOSH
+The `pipeline.boshes` section maps to the `targets` block, with each BOSH
 director becoming a target with a `type` and `connection` block.
 
 The `pipeline.vault`, `pipeline.git`, `pipeline.slack`, `pipeline.email`,
-and `pipeline.locker` sections all go into `integrations.yml`.
+and `pipeline.locker` sections all go into the `integrations` block.
 
 Once migrated, deploy with:
 

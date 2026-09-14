@@ -531,8 +531,8 @@ result. Handles --output-dir, --dry-run, and platform-specific deployment.
 `_describe_compiled($top, $layout)` — runs compiler and outputs description.
 
 `_compile_pipeline($top, $platform)` — shared compilation logic. Detects
-`.genesis/ci/` directory, creates compiler, runs `compile()`, handles
-`--debug-dir`.
+the `pipeline:` section of `.genesis/config`, creates compiler, runs
+`compile()`, handles `--debug-dir`.
 
 `_dump_debug_artifacts($debug_dir, $result, $platform)` — writes numbered
 intermediate files for debugging.

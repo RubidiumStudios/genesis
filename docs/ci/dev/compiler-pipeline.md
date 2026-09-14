@@ -30,16 +30,17 @@ flowchart LR
 
 **Module:** `Genesis::CI::Compiler::Parser`
 
-**Input:** File paths (either a `.genesis/ci/` directory or a single `ci.yml`)
+**Input:** The `pipeline:` section of `.genesis/config`, or the path to a
+single `ci.yml`
 
 **Output:** A Perl hashref with normalized configuration
 
 The parser detects which configuration format is present and loads it
-accordingly. For the multi-file format, it loads `pipeline.yml`,
-`targets.yml`, `integrations.yml`, and optionally `scripts/manifest.yml`
-and any files under `provider-config/`. For the legacy format, it loads
-the single `ci.yml` file and normalizes its contents into the same
-structure that the multi-file format produces.
+accordingly. For the `pipeline:` section, it reads the `pipeline`,
+`targets`, and `integrations` blocks, and optionally the `scripts` and
+`provider_config` blocks. For the legacy format, it loads the single
+`ci.yml` file and normalizes its contents into the same structure that
+the section produces.
 
 Every file is loaded through `spruce merge`, which means spruce operators
 like `(( grab ... ))`, `(( vault ... ))`, and `(( concat ... ))` are
@@ -139,10 +140,11 @@ Errors and warnings are collected separately. The caller checks
 **Output:** Hashref of `script_id => metadata`
 
 Script discovery searches for script metadata from three sources in priority
-order. First, it loads explicit declarations from `scripts/manifest.yml` in
-the parsed config. Second, it scans `scripts/` and `.genesis/ci/scripts/`
-for `.sh` files that contain `@genesis-script` inline annotations. Third,
-for any remaining undiscovered scripts, it infers metadata from the filename.
+order. First, it loads explicit declarations from the `scripts` block of the
+parsed config. Second, it scans `scripts/` at the root of the deployment
+repository for `.sh` files that contain `@genesis-script` inline annotations.
+Third, for any remaining undiscovered scripts, it infers metadata from the
+filename.
 
 Each discovered script gets a metadata record with these fields:
 

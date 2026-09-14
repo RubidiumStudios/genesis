@@ -137,9 +137,9 @@ genesis repipe --platform concourse
 ```
 
 The compiler pipeline supports two platforms: `concourse` and
-`github-actions`. When `--platform` is specified, Genesis looks for a
-`.genesis/ci/` directory first and falls back to `ci.yml` if that
-directory does not exist.
+`github-actions`. When `--platform` is specified, Genesis reads the
+`pipeline:` section of `.genesis/config` and falls back to `ci.yml` if
+the repository has no such section.
 
 Without `--platform`, Genesis always uses the legacy code path, which
 only generates Concourse pipelines. This ensures backward compatibility
@@ -167,6 +167,6 @@ Both commands accept the same `--platform` and `--config` options as
 Read the [Configuration Reference](configuration-reference.md) for a
 complete list of every option you can set in `ci.yml`. If your pipeline
 has multiple layouts or complex environment topologies, read the
-[Layout DSL](layout-dsl.md) documentation. If you want to use the new
-multi-file configuration format, see
-[Multi-File Configuration](multi-file-configuration.md).
+[Layout DSL](layout-dsl.md) documentation. If you want to configure the
+pipeline in `.genesis/config` instead, see
+[Pipeline Section Configuration](multi-file-configuration.md).

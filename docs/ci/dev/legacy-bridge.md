@@ -53,7 +53,8 @@ pattern applies to `graph()` and `describe()`.
 The bridge is activated when all of these conditions are true:
 
 1. The operator uses `--platform concourse` (activating the compiler pipeline)
-2. The configuration source is a legacy `ci.yml` file (not `.genesis/ci/`)
+2. The configuration source is a legacy `ci.yml` file, rather than the
+   `pipeline:` section of `.genesis/config`
 3. The Concourse provider's `generate_from_ast()` is called
 
 Under these conditions, the Parser reads `ci.yml` and normalizes it into
@@ -142,10 +143,11 @@ flowchart TD
 
 ## The Native Path
 
-When the configuration comes from the multi-file `.genesis/ci/` format,
-there is no legacy raw data and no `_legacy_pipeline_raw` marker. In this
-case, `generate_from_ast()` falls through to `_generate_native()`, which
-reads the generic pipeline from the AST and serializes it directly:
+When the configuration comes from the `pipeline:` section of
+`.genesis/config`, there is no legacy raw data and no
+`_legacy_pipeline_raw` marker. In this case, `generate_from_ast()` falls
+through to `_generate_native()`, which reads the generic pipeline from the
+AST and serializes it directly:
 
 ```perl
 sub _generate_native {
