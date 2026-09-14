@@ -325,6 +325,13 @@ sub validate {
 	# fill is skipped when the parent already holds the sub-key, so a warm
 	# cache would leave a nested default dropped from the store and gone
 	# from the contents while the cache went on reporting it.
+	#
+	# The env store is left standing, and that is the exposure to be aware
+	# of rather than a decision to revisit here: a key an old schema's
+	# envvar filled would survive a rebuild and then be reported below as
+	# unknown.  Nothing in the repository schema or in any provider
+	# fragment declares an envvar today, so no key can reach that store
+	# through this path, and the reset stays as it is until one does.
 	$self->{default_values} = {};
 	$self->{cache} = {};
 	delete $self->{_contents};
