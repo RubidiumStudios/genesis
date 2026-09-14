@@ -2447,6 +2447,21 @@ subtest 'Top - register_config_section stores handler' => sub {
 ### Phase E Provider Options System Tests
 ### ============================================================ ###
 
+subtest 'PipelineProvider - provider_info hands back a copy' => sub {
+	# A caller that writes into what it was given must not be able to
+	# rewrite the registry for the rest of the process, because the next
+	# file in the same run would then resolve the real provider to
+	# whatever the writer put there.
+	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
+	is $info->{cli_class}, 'Genesis::CI::Provider::Concourse',
+		"the entry answers the registered CLI class";
+
+	$info->{cli_class} = 'Genesis::CI::Provider::Fixture';
+	my $again = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
+	is $again->{cli_class}, 'Genesis::CI::Provider::Concourse',
+		"writing into the answer leaves the registry as it was";
+};
+
 subtest 'PipelineProvider - known_providers lists registered types' => sub {
 	my @providers = Genesis::CI::Compiler::PipelineProvider->known_providers();
 	ok scalar(@providers) >= 1, "at least one provider registered";

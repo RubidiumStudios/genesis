@@ -45,10 +45,15 @@ sub known_providers {
 # The entry's class and file name the compiler-side class, which the
 # manual and github-actions providers do not have, and cli_class and
 # cli_file name the class the CLI builds, which every type has.
+#
+# A shallow copy rather than the registry's own hash reference, because a
+# caller that writes into what it was given would otherwise rewrite the
+# registry for the rest of the process, and a later lookup of the same
+# type would answer whatever the writer put there.
 sub provider_info {
 	my ($class, $type) = @_;
 	return undef unless defined $type && exists $_providers{$type};
-	return $_providers{$type};
+	return {%{$_providers{$type}}};
 }
 
 # }}}
