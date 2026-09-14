@@ -245,7 +245,7 @@ subtest 'a root creation that dies puts the vault names back' => sub {
 	# A create that dies after it has pointed the two names at the root it
 	# was building, which is the path a save and a restore written either
 	# side of the call never reaches.
-	no warnings 'redefine';
+	no warnings 'redefine', 'once';
 	local *Genesis::Top::create = sub {
 		$ENV{SAFE_TARGET}          = 'the-target-the-create-set';
 		$ENV{GENESIS_TARGET_VAULT} = 'the-vault-the-create-set';
