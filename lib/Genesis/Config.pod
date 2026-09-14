@@ -742,16 +742,14 @@ B<Examples:>
     my $schema = $cfg->schema;
     # returns the hash reference validate() was last given
 
-    $cfg->schema($top->_current_config_schema);
-    $cfg->set('pipeline.provider.insecure', 'false');
-    # coerces against the rebuilt schema, so the value stored is FALSE
-
-B<Examples:>
-
     $cfg->validate($schema);
     $cfg->set('manifest_store', 'exodus');
     $cfg->validate($cfg->schema);   # re-check before persisting
     $cfg->save;
+
+    $cfg->schema($top->_current_config_schema);
+    $cfg->set('pipeline.provider.insecure', 'false');
+    # coerces against the rebuilt schema, so the value stored is FALSE
 
 =head2 schema_has
 
