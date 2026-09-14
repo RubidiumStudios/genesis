@@ -1677,21 +1677,27 @@ C<repipe>, C<graph>, C<describe>, C<embed>, and C<ci-*> commands.
 
 =over 4
 
-=item B<pipeline-apply> [--platform PROVIDER] [--dry-run] [--paused]
+=item B<pipeline-apply> [--dry-run] [--paused]
 
-Compile and deploy the pipeline. Defaults to Concourse. Supports
-C<--dry-run> (print YAML only) and C<--output-dir> (write artifacts).
+Compile and deploy the pipeline.  The provider is the C<type> the
+repository declares under C<pipeline.provider> in C<.genesis/config>,
+and no flag overrides it.  Supports C<--dry-run> (print YAML only) and
+C<--output-dir> (write artifacts).
 
-=item B<pipeline-graph> [--platform PROVIDER]
+=item B<pipeline-graph>
 
 Compile pipeline and write C<pipeline.md> containing a Mermaid flowchart.
+The provider is read from the repository's C<pipeline.provider> block.
 
-=item B<pipeline-describe> [--platform PROVIDER]
+=item B<pipeline-describe>
 
 Print a human-readable ordered progression.  Where the repository
 configures a pipeline, the report opens with the resolved source-control
 values and the tier each of them came from, so an override that has
-drifted away from what git says can be seen.
+drifted away from what git says can be seen.  Where it configures none,
+the legacy configuration is compiled first and the progression is read
+off the compiled result, so the command prints in either case.  The
+provider is read from the repository's C<pipeline.provider> block.
 
 =item B<pipeline-diff> [--target TARGET]
 
@@ -1716,7 +1722,8 @@ Alias for C<pipeline-apply>.
 
 =item B<graph> (deprecated)
 
-Legacy graphviz output without C<--platform>; C<pipeline-graph> with it.
+Legacy graphviz output.  Use C<pipeline-graph> for the Mermaid flowchart
+the compiler writes.
 
 =item B<describe> (deprecated)
 
