@@ -1,0 +1,343 @@
+=head1 NAME
+
+Service::Git::Session - leave a branch, do work, and come back
+
+=head1 SYNOPSIS
+
+  my $session = $git->session(control => $top->control_branch);
+
+  $session->begin;
+  $session->switch($top->branch_for('qa'));
+  # ... work on the branch ...
+  $session->finish;
+
+=head1 DESCRIPTION
+
+One object owns every branch change Genesis makes. It belongs to one
+C<Service::Git> handle, and so to one working tree, and the handle hands out
+the same session however often it is asked.
+
+C<begin> runs the pre-flight, asserts a clean tree and index, and records the
+branch, the HEAD sha, and the current directory. C<switch> changes to the
+repository root, checks out a branch or a commit, and records the tip it
+landed on. C<finish> re-reads the branch and the cleanliness rather than
+assuming either, returns to the branch C<begin> recorded, and verifies the
+return.
+
+Clean means what C<< $git->is_clean >> means: no tracked modification and
+nothing staged, with untracked files ignored. A scratch file in the working
+tree blocks no session and no session deletes one.
+
+No lock is taken here. Switching is what the lock guards, so a command that
+opens a session and never switches never touches it.
+
+=head1 METHODS
+
+=head2 new($git, %opts)
+
+  my $session = Service::Git::Session->new($git, control => 'main');
+
+Builds a session on one handle without opening it. Nothing is read from the
+repository and nothing is written to it until C<begin> runs.
+
+Callers normally reach this through C<< $git->session >>, which builds the
+session on the first ask and answers with that one afterwards.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The C<Service::Git> handle this session belongs to, and so the working tree
+every verb below acts on.
+
+=item C<%opts>
+
+Options. C<control> names the branch a later abort never resets, which is how
+a commit made on control survives an abort whole.
+
+=back
+
+B<Returns:> The new session, which is closed.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "A branch session needs a Service::Git handle" >> -- raised when the
+handle is missing, since a session with no working tree has nothing to leave
+and nothing to come back to.
+
+=back
+
+B<Examples:>
+
+  my $session = Service::Git::Session->new($git, control => 'main');
+  # returns a closed session; nothing has been read or written yet
+
+  my $session = Service::Git::Session->new(undef);
+  # raises, because there is no handle to belong to
+
+=head2 begin
+
+  $session->begin;
+
+Opens the session. It runs the pre-flight first, so that a working tree git
+refuses under C<safe.directory>, a process with no committer identity, and a
+repository with no commits each name their own cause rather than surfacing
+later as a failed checkout. It then asserts a clean tree and index, and only
+then records the branch, the HEAD sha, and the current directory.
+
+The order matters: every refusal above happens before the session writes
+anything at all, so a command that is going to be turned away is turned away
+while the repository is still exactly as the operator left it.
+
+A last-resort restore is registered through C<< Genesis::Commands::at_exit >>,
+whose hooks run from an C<END> block, so a session still open when the process
+ends is put back rather than left standing on a branch nobody asked for.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>, so it chains.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "A branch session is already open in %s, and sessions are never nested." >>
+-- raised on a second C<begin>. C<%s> is the working tree root.
+
+=item *
+
+C<< "Working tree has uncommitted changes, and this command switches
+branches." >> -- raised over a tracked modification or a staged change, and it
+lists the paths. Untracked files are not among them.
+
+=item *
+
+Whatever C<< $git->preflight >> raises, which is the C<safe.directory>
+refusal, the missing committer identity, or the repository with no commits.
+
+=back
+
+B<Examples:>
+
+  $session->begin;
+  # returns $self, and origin now holds the branch, the head, and the cwd
+
+  $session->begin;
+  # raises over a modified qa.yml, naming the file, before any switch
+
+=head2 switch($branch_or_commit)
+
+  $session->switch('qa/bosh');
+
+Changes branch, or stands on a commit with a detached HEAD. It runs the
+checkout from the repository root, because the branch being checked out may
+not carry the directory we are standing in, and it returns to that directory
+only where the checkout kept it.
+
+The tip of the target is recorded the first time the session lands on it, so
+C<committed_branches> can say afterwards which branches this session moved.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch_or_commit>
+
+The branch name to check out, or a commit to stand on.
+
+=back
+
+B<Returns:> C<$self>, so it chains.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "A branch change was attempted with no session open in %s." >> -- raised
+where C<begin> has not run. C<%s> is the working tree root.
+
+=item *
+
+C<< "Unable to enter git root %s: %s" >> -- raised where the repository root
+cannot be entered.
+
+=item *
+
+Whatever C<< $git->checkout >> raises, which is a failed checkout naming the
+target.
+
+=back
+
+B<Examples:>
+
+  $session->switch('qa/bosh');
+  # returns $self, and on now reads 'qa/bosh'
+
+  $session->switch($sha);
+  # stands on a commit with a detached HEAD
+
+=head2 finish
+
+  $session->finish;
+
+Closes the session and puts back what C<begin> recorded. The branch and the
+cleanliness are both re-read rather than assumed, the return to the recorded
+branch is made from the repository root, and the result is verified before the
+session reports itself closed.
+
+Calling it on a session that was never opened is a no-op, so a caller may
+finish unconditionally on its way out.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>, so it chains.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "The working tree in %s holds changes at the end of a session." >> --
+raised over a tracked modification at the end of a session, which is a defect
+rather than a by-product. C<%s> is the working tree root.
+
+=item *
+
+Whatever C<_restore> raises, which is a root or a directory that cannot be
+entered, or a return that did not land on the recorded branch.
+
+=back
+
+B<Examples:>
+
+  $session->finish;
+  # returns $self; the branch, the HEAD, and the directory are back
+
+  $session->finish;
+  # returns $self unchanged where begin never ran
+
+=head2 active
+
+  my $open = $session->active;
+
+Whether the session is open, which is true between a C<begin> that returned
+and the C<finish> that closes it.
+
+B<Parameters:> None.
+
+B<Returns:> True where the session is open, false otherwise.
+
+B<Examples:>
+
+  my $open = $session->active;
+  # returns 0 on a session that has been built but not begun
+
+=head2 origin
+
+  my $branch = $session->origin->{branch};
+
+What C<begin> recorded, as a hashref of C<branch>, C<head>, and C<cwd>. It is
+undefined until C<begin> has run.
+
+B<Parameters:> None.
+
+B<Returns:> A hashref of the branch name, the HEAD sha, and the current
+directory as they were at C<begin>, or undef.
+
+B<Examples:>
+
+  my $head = $session->origin->{head};
+  # returns the sha HEAD carried before anything switched
+
+=head2 on
+
+  my $target = $session->on;
+
+The branch or commit C<switch> last landed on, and undefined where the session
+has not switched.
+
+B<Parameters:> None.
+
+B<Returns:> The last target handed to C<switch>, or undef.
+
+B<Examples:>
+
+  my $target = $session->on;
+  # returns 'qa/bosh' after a switch to that branch
+
+=head2 committed_branches
+
+  my @moved = $session->committed_branches;
+
+The branches this session committed to, which are those whose tip differs from
+the tip recorded when the session switched to them. The session works this out
+for itself rather than being told, so a writer that commits through the handle
+does not have to report what it wrote.
+
+B<Parameters:> None.
+
+B<Returns:> The names, sorted. An empty list where nothing moved.
+
+B<Examples:>
+
+  my @moved = $session->committed_branches;
+  # returns ('qa/bosh') after a commit on that branch
+
+=head1 INTERNAL METHODS
+
+=head2 _restore
+
+  $session->_restore;
+
+Returns to the branch C<begin> recorded, from the repository root, and then to
+the directory C<begin> recorded. Where that directory is gone, because the
+branch we came back to does not carry it, it says so and leaves us at the
+root rather than somewhere the caller did not choose. The branch is read back
+afterwards and a return that did not land raises.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>, and C<$self> unchanged where C<begin> never ran.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Unable to enter git root %s: %s" >> -- raised where the repository root
+cannot be entered.
+
+=item *
+
+C<< "Unable to return to %s: %s" >> -- raised where the recorded directory is
+there but cannot be entered.
+
+=item *
+
+C<< "Failed to return to %s: we are on %s." >> -- raised where the checkout
+reported no failure but we are not on the recorded branch, which is a working
+tree we could not put back.
+
+=back
+
+B<Examples:>
+
+  $session->_restore;
+  # returns $self, standing on the recorded branch in the recorded directory
+
+  $session->_restore;
+  # raises naming the branch we are stuck on, where the return did not land
+
+=cut
