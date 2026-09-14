@@ -96,8 +96,14 @@ sub get_all {
 
 # }}}
 # schema - the schema this configuration was last validated against {{{
+#
+# Also installs one, for a caller that has rebuilt the schema and needs
+# set() to coerce against the new one before the configuration is whole
+# enough to validate.  Installing is not validating: nothing is checked,
+# no default is filled, and the caller still validates before it saves.
 sub schema {
-	my ($self) = @_;
+	my ($self, $schema) = @_;
+	$self->{schema} = $schema if defined $schema;
 	return $self->{schema};
 }
 

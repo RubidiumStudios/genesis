@@ -702,18 +702,49 @@ B<Examples:>
 =head2 schema
 
     my $schema = $cfg->schema;
+    $cfg->schema($rebuilt);
 
 Returns the schema this configuration was last validated against, or
-C<undef> if C<validate()> has not been called.
+C<undef> if C<validate()> has not been called. Given a schema, installs
+that one first and returns it.
 
 C<validate()> retains the schema it was given, which makes the declared
 type of every key available afterwards. C<set()> uses it to coerce
 incoming values; callers holding a validated config can re-validate
 without having to obtain the schema from wherever it was defined.
 
+B<Installing is not validating.> Nothing is checked and no default is
+filled, so a caller that installs a schema still calls C<validate()>
+before it saves. The reason to install one is C<set()>: a schema that is
+itself built from the configuration's own values goes out of date the
+moment a write changes one of those values, and the coercion that runs
+inside C<set()> reads whatever schema is installed at that moment. A
+caller that has rebuilt such a schema installs it, writes again, and
+validates last.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$schema> (optional)
+
+A schema hash reference to install. Omit it to read the current one;
+an undefined value is ignored rather than clearing what is there.
+
+=back
+
 B<Returns:> The schema hash reference, or C<undef>.
 
 B<Errors:> None.
+
+B<Examples:>
+
+    my $schema = $cfg->schema;
+    # returns the hash reference validate() was last given
+
+    $cfg->schema($top->_current_config_schema);
+    $cfg->set('pipeline.provider.insecure', 'false');
+    # coerces against the rebuilt schema, so the value stored is FALSE
 
 B<Examples:>
 

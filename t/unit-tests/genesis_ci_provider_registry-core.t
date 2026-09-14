@@ -119,4 +119,35 @@ subtest 'the provider type defaults to manual' => sub {
 		'a disabled section is still a disabled section';
 };
 
+subtest 'the registry refuses a bad entry rather than taking it' => sub {
+	plan tests => 3;
+
+	# A name already registered is refused rather than replaced.  Replacing
+	# the concourse entry for the rest of the process would leave the enum
+	# saying one thing and the class lookup doing another, which is exactly
+	# the drift the one registry exists to prevent.
+	throws_ok {
+		Genesis::CI::Compiler::PipelineProvider->register_provider('concourse', {
+			cli_class => 'Genesis::CI::Provider::Manual',
+			cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		})
+	} qr/concourse.*is\s+already\s+registered/s,
+		'a name the registry already holds is refused';
+
+	# Every type has a CLI-side class, so an entry with none resolves to
+	# nothing and behaves like manual instead of saying it is broken.  The
+	# compiler-side class is a different matter: manual has none by design.
+	throws_ok {
+		Genesis::CI::Compiler::PipelineProvider->register_provider('nocli', {
+			class => 'Genesis::CI::Compiler::Providers::NoCli',
+			file  => 'Genesis/CI/Compiler/Providers/NoCli.pm',
+		})
+	} qr/must\s+be\s+registered\s+with\s+a\s+cli_class/s,
+		'an entry with no CLI class is refused';
+
+	is_deeply [Genesis::CI::Compiler::PipelineProvider->known_providers],
+		[qw/concourse github-actions manual/],
+		'and neither refusal left anything behind in the registry';
+};
+
 done_testing;

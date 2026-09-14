@@ -7,6 +7,7 @@ use Genesis;
 use Genesis::Term;
 use Genesis::UI;
 use Genesis::Commands;
+use Genesis::Exit qw/CONFIG/;
 use Genesis::Top;
 use JSON::PP qw/encode_json/;
 use POSIX qw/strftime mktime/;
@@ -49,12 +50,26 @@ sub config {
 			"Cannot set and unset overlapping keys in one run: %s",
 			join(', ', map {"#Y{$_}"} @contested)
 		) if @contested;
-		$config->set(splice(@pairs, 0, 2)) while @pairs;
+		# Written twice, around a rebuild of the schema.  Part of the schema
+		# is built from the configuration's own values -- the provider's
+		# keys are declared by whichever provider the type names -- so a run
+		# that writes that type makes the schema it was coerced against out
+		# of date at the moment it is written.  The first pass puts the new
+		# type on the configuration, the rebuild declares the keys it
+		# brings, and the second pass coerces every value against the schema
+		# that is now true.  Without the second pass a boolean typed as
+		# false is stored as the string "false", which Perl reads as true,
+		# and the run saves the operator's own opposite.
+		_apply_pairs($config, \@pairs);
+		$config->schema($top->_current_config_schema) if $config->schema;
+		_apply_pairs($config, \@pairs);
 
 		# Validity, not presence: a typo is always absent, so only the
-		# schema can catch one.
+		# schema can catch one.  Read after the rebuild, so a key the newly
+		# named provider declares is a key this run may also unset.
 		if (my @unknown = grep {$config->schema && !$config->schema_has($_)} @{$removals || []}) {
 			bail(
+				{exitcode => CONFIG},
 				"Cannot unset unknown configuration key%s: %s",
 				(@unknown > 1 ? 's' : ''), join(', ', map {"#Y{$_}"} @unknown)
 			);
@@ -62,11 +77,8 @@ sub config {
 		$config->clear($_) for grep {$config->has($_)} @{$removals || []};
 
 		# Validate before persisting: validate bails, so a rejected value
-		# leaves the file untouched rather than half-written.  The schema
-		# is rebuilt rather than re-used, because the configured provider's
-		# own fragment is merged as it is built and this run may just have
-		# changed which provider that is.
-		$config->validate($top->_current_config_schema) if $config->schema;
+		# leaves the file untouched rather than half-written.
+		$config->validate($config->schema) if $config->schema;
 		$config->save;
 		return 0;
 	}
@@ -451,6 +463,16 @@ sub _pairs_from_files {
 		}
 	}
 	return @pairs;
+}
+
+sub _apply_pairs {
+	my ($config, $pairs) = @_;
+	# Read by index rather than consumed, because the same list is written
+	# twice, once on either side of the schema rebuild.
+	for (my $i = 0; $i < @$pairs; $i += 2) {
+		$config->set($pairs->[$i], $pairs->[$i + 1]);
+	}
+	return 1;
 }
 
 sub _contains {
