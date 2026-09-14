@@ -105,5 +105,19 @@ subtest 'propagation_files - carries the embedded genesis' => sub {
 		'and it triggers, because a genesis version changes rendering');
 };
 
+subtest 'propagation_files - an undefined triggering asks for the whole set' => sub {
+	# A caller that means everything reaches here as triggering => $want
+	# with $want undefined, and passing the key undefined has to read the
+	# same as leaving it out, or that caller silently gets half the set.
+	plan tests => 1;
+
+	my $env = make_ops_env('ops-undefined-triggering');
+	my $want;
+
+	is_deeply([$env->propagation_files(triggering => $want)],
+		[$env->propagation_files],
+		'an undefined value covers the same paths as no option at all');
+};
+
 teardown_vault();
 done_testing;
