@@ -1,6 +1,6 @@
 #!perl
 # Proves T13, T14, and T310: the override file sits beside .genesis/config
-# and is named for the configured provider, nothing looks in .genesis/ci/,
+# and is named for the configured provider, nothing reads .genesis/ci/,
 # --platform is refused as an unknown option, a provider that emits
 # several files takes the per-file form under output_layout: multiple, a
 # non-YAML output passes through untouched, and output_layout is refused
@@ -103,9 +103,9 @@ sub have_spruce {
 }
 
 subtest 'the override sits beside the configuration' => sub {
-	# Three rows, plus the restoration assertion run_genesis makes of its
+	# Four rows, plus the restoration assertion run_genesis makes of its
 	# own accord.
-	plan tests => 4;
+	plan tests => 5;
 
 	put_file($h->a.'/.genesis/pipeline-overrides-concourse.yml',
 		"jobs:\n- name: extra\n");
@@ -114,15 +114,43 @@ subtest 'the override sits beside the configuration' => sub {
 	is_deeply \@names, ['.genesis/pipeline-overrides-concourse.yml'],
 		'the single-file form is named for the provider alone';
 
-	# Nothing looks under .genesis/ci/ any more.
+	# Nothing reads configuration out of .genesis/ci/ any more.  One file
+	# under lib/ still names the directory, which is the compile gate in
+	# Genesis::Commands::Pipelines, and it names it only to tell an
+	# operator that a leftover directory is being ignored.  Saying a
+	# directory is not read is not reading it, so that file is allowed
+	# the mention, while every other module is held to silence.
+	#
+	# What the gate is allowed is a shape and not a token.  A comment is
+	# prose about the directory, the notice is a message to the operator,
+	# and a bare `if -d` asks the filesystem a question whose answer goes
+	# nowhere.  A line that binds the name to anything is refused however
+	# it is guarded, because binding it is what restoring it as a
+	# configuration source looks like.
 	mkdir_or_fail($h->a.'/.genesis/ci');
 	put_file($h->a.'/.genesis/ci/ci-overrides-concourse.yml',
 		"jobs:\n- name: stale\n");
+	my $gate = 'lib/Genesis/Commands/Pipelines.pm';
 	my @offenders = grep {
-		my $body = do {local (@ARGV, $/) = ($_); <>};
-		$body =~ m{\.genesis/ci\b};
+		$_ ne $gate && do {
+			my $body = do {local (@ARGV, $/) = ($_); <>};
+			$body =~ m{\.genesis/ci\b};
+		};
 	} split /\n/, qx{find lib -name '*.pm'};
-	is_deeply \@offenders, [], 'nothing under lib/ reads the old directory';
+	is_deeply \@offenders, [], 'no module reads the old directory';
+
+	my $gate_body = do {local (@ARGV, $/) = ($gate); <>};
+	my @named = grep {m{\.genesis/ci\b}} split /\n/, $gate_body;
+	my $binds = qr{=[^>~=]|=$};
+	my @loose;
+	for my $line (@named) {
+		next if $line =~ m{^\s*#};
+		next if $line =~ m{\binfo\(}                    && $line !~ $binds;
+		next if $line =~ m{^\s*(?:\)\s*)?if\s+-d\s} && $line !~ $binds;
+		push @loose, $line;
+	}
+	is_deeply \@loose, [],
+		'and the gate names it only to say so, never to read it';
 
 	# A usage error prints its own reason only outside test mode, where
 	# command_usage renders the full description instead, so the variable
