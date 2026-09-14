@@ -5,6 +5,7 @@ use warnings;
 use lib 't';
 use helper;
 use Test::Deep;
+use Test::Exception;
 use Test::Output;
 
 use_ok 'Genesis::Config';
@@ -1081,6 +1082,78 @@ EOF
 	ok(!$c->has('pipeline.provider'),
 		"and the block itself is gone");
 	is($c->get('deployment_type'), 'test-kit', "unrelated keys survive");
+};
+
+subtest 'validate() twice keeps the nested defaults its schema declares' => sub {
+	my $path = "$tmp/revalidate-default.yml";
+	put_file($path, <<'EOF');
+---
+deployment_type: test-kit
+pipeline:
+  provider:
+    type: concourse
+EOF
+
+	my $schema = {
+		deployment_type => {type => 'string'},
+		pipeline => {
+			type   => 'hash',
+			schema => {
+				provider => {
+					type   => 'hash',
+					schema => {
+						type => {type => 'string'},
+						team => {type => 'string', default => 'main'},
+					}
+				}
+			}
+		},
+	};
+
+	my $c = Genesis::Config->new($path);
+	$c->validate($schema);
+	is($c->get('pipeline.provider.team'), 'main',
+		"the first validation fills the nested default");
+
+	# Reading the parent hash warms the value cache for it.  The second
+	# validation starts from no defaults at all, and it decides whether to
+	# fill a sub-key by reading the parent, so a parent the cache still
+	# answers for hides the gap and the default is never filled again.
+	my $block = $c->get('pipeline.provider');
+	is($block->{team}, 'main', "and the parent hash carries it");
+
+	$c->validate($schema);
+	is($c->get_all->{pipeline}{provider}{team}, 'main',
+		"the second validation fills the nested default again");
+	is($c->get_source('pipeline.provider.team'), 'default',
+		"and it is still a default rather than a key nobody wrote");
+	is($c->get('pipeline.provider.type'), 'concourse',
+		"the value the operator wrote is untouched");
+};
+
+subtest 'clear() beneath a scalar default is a no-op' => sub {
+	my $path = "$tmp/clear-under-scalar.yml";
+	put_file($path, <<'EOF');
+---
+deployment_type: test-kit
+EOF
+
+	my $c = Genesis::Config->new($path);
+	$c->validate({
+		deployment_type => {type => 'string'},
+		manifest_store  => {type => 'string', default => 'hybrid'},
+	});
+	is($c->get_source('manifest_store'), 'default',
+		"the schema fills a scalar default");
+
+	# Nothing is stored beneath a scalar, so there is nothing there to
+	# remove.  Walking the default store for such a key has to pass over it
+	# rather than treat the scalar it meets on the way down as a fault.
+	lives_ok {$c->clear('manifest_store.sub')}
+		"clearing a key beneath a scalar default does not bail";
+	is($c->get('manifest_store'), 'hybrid',
+		"and the scalar default is left where it was");
+	is($c->get('deployment_type'), 'test-kit', "as are unrelated keys");
 };
 
 done_testing;

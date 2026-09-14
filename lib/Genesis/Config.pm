@@ -216,7 +216,14 @@ sub clear {
 	# reports as unknown and refuses a removal nobody asked it to refuse.
 	struct_set_value($self->{loaded_values},  $key, undef, 1);
 	struct_set_value($self->{set_values},     $key, undef, 1);
-	struct_set_value($self->{default_values}, $key, undef, 1);
+
+	# A schema may declare a scalar default at a key an operator then names
+	# a path beneath.  Nothing is stored under a scalar, so there is nothing
+	# there to remove, and walking down to it would report the scalar it
+	# meets as a type mismatch and turn a removal that does nothing into a
+	# fatal.
+	struct_set_value($self->{default_values}, $key, undef, 1)
+		unless _blocked_by_scalar($self->{default_values}, $key);
 
 	# An empty parent left behind wins the merge outright and takes the
 	# key's siblings with it.
@@ -311,7 +318,15 @@ sub validate {
 	# built from the configuration's own values, so clearing the value the
 	# provider block is built from leaves that provider's filled defaults
 	# behind and refuses a removal nobody asked it to refuse.
+	#
+	# The value cache goes with them, because it is a removal like any
+	# other and every other remover here invalidates it.  A cached parent
+	# hash that still carries a default decides the question below: the
+	# fill is skipped when the parent already holds the sub-key, so a warm
+	# cache would leave a nested default dropped from the store and gone
+	# from the contents while the cache went on reporting it.
 	$self->{default_values} = {};
+	$self->{cache} = {};
 	delete $self->{_contents};
 
 	my @errors = ();
@@ -376,6 +391,27 @@ sub _schema_for_key {
 		$spec = $spec->{$part};
 	}
 	return $spec;
+}
+
+# }}}
+# _blocked_by_scalar - whether a non-hash sits on the way down to a key {{{
+#
+# Answers no for a path that stops short, because an absent ancestor is not
+# a mismatch, and no for anything that is not a plain dotted path, so an
+# array index is left to the walk that understands it.
+sub _blocked_by_scalar {
+	my ($struct, $key) = @_;
+
+	return 0 if $key =~ /[\[\]]/;
+	my @parts = split(/\./, $key);
+	pop @parts;
+	my $node = $struct;
+	for my $part (@parts) {
+		return 0 unless ref($node) eq 'HASH' && exists($node->{$part});
+		$node = $node->{$part};
+		return 1 unless ref($node) eq 'HASH';
+	}
+	return 0;
 }
 
 # }}}
