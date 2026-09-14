@@ -4,6 +4,9 @@ use warnings;
 
 use lib 't';
 use helper;
+# For automation_blocks, the three blocks the schema requires of an
+# automated provider, which the fixtures below carry.
+use Harness::Propagation;
 use Test::Exception;
 use Test::Output;
 
@@ -31,16 +34,6 @@ sub make_repo {
 }
 
 ### Config v3 validation tests ################################################
-
-# An automated provider does the work unattended, so a fixture that names
-# one carries the three blocks the schema requires of it.
-sub automation_blocks {
-	return (
-		shuttle => {backend => 's3', bucket => 'pipes'},
-		vault   => {url     => 'https://vault.example.com'},
-		locker  => {url     => 'https://locker.example.com'},
-	);
-}
 
 # Initialize $Genesis::RC for tests that consult global config
 provide_rc();
