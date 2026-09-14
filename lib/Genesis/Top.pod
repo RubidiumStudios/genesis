@@ -1530,6 +1530,60 @@ B<Examples:>
     my $prefix = $top->pr_prefix();
     # returns 'pr/' unless the repository configured otherwise
 
+=head2 applied_record_path
+
+    my $path = $top->applied_record_path();
+
+The vault path of the pipeline's own facts.
+
+It is the exodus mount, then C<_pipelines>, then the deployment type, which
+reads C<< /secret/exodus/_pipelines/bosh >> under the nominal mount. The
+leading underscore is deliberate, because an environment name must start with
+a lowercase letter, so no environment can ever occupy this address.
+
+B<Parameters:> None.
+
+B<Returns:> The path, as a string.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"This repository has a pipeline but no environment to resolve
+genesis.exodus_mount from, so the pipeline's own record has no address."> -
+raised (via L</_pipeline_exodus_mount>) when the repository declares a
+pipeline and has no environment to read the mount from.
+
+=back
+
+B<Examples:>
+
+    my $path = $top->applied_record_path();
+    # returns '/secret/exodus/_pipelines/bosh' in a bosh repository
+
+=head2 applied_record
+
+    my $record = $top->applied_record();
+
+The control commit C<pipeline-apply> applied from, with the provider it
+applied and the time it did so.
+
+Each environment's own compiled facts live elsewhere, under
+C<Genesis::Env::pipeline_record_path>, because a deploy rewrites its
+environment's exodus record every run and would clobber them.
+
+B<Parameters:> None.
+
+B<Returns:> A hashref of C<control_commit>, C<provider>, and C<at>, or
+C<undef> when the path is absent.
+
+B<Examples:>
+
+    my $record = $top->applied_record();
+    # returns undef in a repository pipeline-apply has never run against
+
 =head2 has_legacy_ci_yml
 
     my $bool = $top->has_legacy_ci_yml();
@@ -2491,6 +2545,43 @@ B<Examples:>
     $top->_validate_one_exodus_mount;
     # exits CONFIG (78) where qa resolves /secret/exodus/ and prod
     # resolves /other/exodus/
+
+=head2 _pipeline_exodus_mount
+
+    my $mount = $top->_pipeline_exodus_mount();
+
+The one exodus mount the pipeline's environments share, which is what
+L</applied_record_path> hangs the pipeline's own record under.
+
+It is read from the first environment the pipeline names, through the merged
+hierarchy, because L</_validate_one_exodus_mount> has already refused a
+repository whose environments resolve the mount differently. The value comes
+back normalised with a trailing slash, so a caller appends to it directly.
+The answer is memoized, since it is the same for every read in a run.
+
+B<Parameters:> None.
+
+B<Returns:> The mount, as a string ending in a slash.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"This repository has a pipeline but no environment to resolve
+genesis.exodus_mount from, so the pipeline's own record has no address."> -
+raised at C<Genesis::Exit::CONFIG> when the repository declares a pipeline
+and names no environment, carrying the remedy of adding an environment file
+or disabling the pipeline.
+
+=back
+
+B<Examples:>
+
+    my $mount = $top->_pipeline_exodus_mount;
+    # returns '/secret/exodus/' where the environments set no mount of
+    # their own
 
 =head2 _validate_pipeline_config
 
