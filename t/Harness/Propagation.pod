@@ -1109,6 +1109,21 @@ and its path.
 Puts the repository under an automated provider, which is C<concourse> unless
 C<provider> names another, and answers the harness.
 
+=head2 git($h, $copy, %opts)
+
+Returns the C<Service::Git> handle for a copy, which defaults to C<a>, and
+hands C<%opts> on to C<Service::Git-E<gt>new>, so a row that wants a handle of
+a shape the harness does not build asks for it here rather than building one
+itself.  C<track_branch> is the option rows ask for.
+
+There is one handle per copy however it is asked for, and the options decide
+what that one handle becomes rather than buying a second one.  C<Service::Git>
+keeps a single instance per repository root, and where a later caller asks for
+C<track_branch> it upgrades the instance it already has and answers with that.
+So a row that asks plainly after another row has asked for a tracking handle
+is answered with the tracking handle, and a row that needs a handle which
+restores no branch has to ask before anything else asks otherwise.
+
 =head2 top_for($h, %opts)
 
 A C<Genesis::Top> for the harness's deployment root, or for the root C<root>
@@ -1118,9 +1133,8 @@ key at all rather than editing one key of the file C<make_harness> left.
 
 =head1 METHODS
 
-C<r>, C<a>, and C<b> return the three paths.  C<git> returns a
-C<Service::Git> handle for a copy.  C<type>, C<control>, and C<envs> return
-the declared values.  C<slug> and C<pr_branch> render the deployment slug and
+C<r>, C<a>, and C<b> return the three paths.  C<type>, C<control>, and
+C<envs> return the declared values.  C<slug> and C<pr_branch> render the deployment slug and
 its pull request branch.  C<exodus_mount>, C<applied_path>, and C<env_path>
 render the vault addresses.  C<gh> returns the GitHub double once
 C<github_double> has stood one up, and undef before that.  C<deliver_all>

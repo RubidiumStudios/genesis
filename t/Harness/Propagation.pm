@@ -722,17 +722,21 @@ sub type { $_[0]->{type} }
 sub control { $_[0]->{control} }
 sub envs { $_[0]->{envs} }
 
-# The options are handed to Service::Git and keyed into the cache beside the
-# copy, so a caller that asks for a tracking handle and a caller that asks for
-# a plain one are not answered with one another's.  A row that wants a handle
-# of a shape the harness does not build would otherwise build it itself, which
-# is state-building outside the harness.
+# The options are handed to Service::Git, so a row that wants a handle of a
+# shape the harness does not build asks for it here rather than building one
+# itself, which would be state-building outside the harness.
+#
+# There is one handle per copy however it is asked for, and the options decide
+# what that one handle becomes rather than buying a second.  Service::Git
+# keeps a single instance per repository root, and where a later caller asks
+# for track_branch it upgrades the instance it already has and answers with
+# that, so a caller asking plainly after somebody asked for a tracking handle
+# is answered with the tracking one.  The harness keeps no cache of its own,
+# because a cache in front of a cache can only disagree with it.
 sub git {
 	my ($self, $copy, %opts) = @_;
 	$copy //= 'a';
-	my $key = join('|', "_git_$copy",
-		map {"$_=" . (defined $opts{$_} ? $opts{$_} : '')} sort keys %opts);
-	return $self->{$key} //= Service::Git->new($self->{$copy}, %opts);
+	return Service::Git->new($self->{$copy}, %opts);
 }
 
 sub slug {
@@ -2483,8 +2487,9 @@ sub stand_on {
 # Service::Git caches one instance per repository and answers every later
 # caller with it, whatever class that caller named, so a copy that was read
 # before the fault was armed already holds a plain handle.  We re-bless the
-# cached instance rather than building a second one, and drop the harness's
-# own cached handle, so every handle onto that copy faults from here on.
+# cached instance rather than building a second one, and because that instance
+# is the one the git accessor answers with, every handle onto that copy faults
+# from here on.
 sub fault_git {
 	my ($self, %opts) = @_;
 	my $copy = $opts{copy} // 'a';
@@ -2502,7 +2507,6 @@ sub fault_git {
 	require Harness::Propagation::Git;
 	my $git = Harness::Propagation::Git->new($self->{$copy});
 	bless $git, 'Harness::Propagation::Git';
-	delete $self->{"_git_$copy"};
 
 	return $self->{"_fault_git_$copy"} = $git;
 }
