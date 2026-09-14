@@ -952,6 +952,16 @@ sub signature {
 	});
 }
 # }}}
+# deployment_slug - this environment's deployment slug {{{
+#
+# The thin object form of Top::deployment_slug_for, so the slug is
+# composed in one place (D71).
+sub deployment_slug {
+	my ($self) = @_;
+	return $self->top->deployment_slug_for($self->name);
+}
+
+# }}}
 # deployment_name - returns the deployment name (env name + env type) {{{
 sub deployment_name {
 	$_[0]->_memoize('__deployment', sub {
@@ -2914,8 +2924,12 @@ sub exodus_mount {
 
 # }}}
 # exodus_slug - returns the component of the Vault path under the Exodus mount for this environment's Exodus data {{{
+#
+# Redefined through deployment_slug rather than composed separately, so
+# the vault path and the deployment branch cannot drift apart (D66).
 sub exodus_slug {
-	sprintf("%s/%s", $_[0]->name, $_[0]->type);
+	my ($self) = @_;
+	return $self->deployment_slug;
 }
 
 # }}}

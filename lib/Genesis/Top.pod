@@ -802,6 +802,80 @@ B<Examples:>
     printf "This is a %s deployment repository\n", $top->type;
     # Returns: This is a cf deployment repository
 
+=head2 deployment_slug_for
+
+    my $slug = $top->deployment_slug_for($env_name);
+
+The deployment slug for an environment name, which is C<< <env>/<type> >>.
+
+This is the one identity a deployment has. The deployment branch, the vault
+path under the exodus mount, and the BOSH deployment name are three
+renderings of it, so composing any of them anywhere else is how they drift.
+
+The argument is a name as a string and never a C<Genesis::Env>, deliberately,
+so that a caller holding only a name composes the slug without loading an
+environment.
+
+B<Parameters:> The environment's name, as a string.
+
+B<Returns:> The slug, such as C<qa/bosh>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"deployment_slug_for expects an environment name, got a %s"> - raised (via
+C<bug()>) when the argument is a reference rather than a name, with C<%s>
+replaced by the kind of reference it was handed.
+
+=item *
+
+C<"deployment_slug_for called without an environment name"> - raised (via
+C<bug()>) when the argument is missing or empty.
+
+=back
+
+B<Examples:>
+
+    my $slug = $top->deployment_slug_for('qa');
+    # returns 'qa/bosh' in a repository whose deployment_type is bosh
+
+=head2 branch_for
+
+    my $branch = $top->branch_for($env_name);
+
+The deployment branch for an environment name, which is its slug.
+
+B<Parameters:> The environment's name, as a string.
+
+B<Returns:> The branch name, such as C<qa/bosh>.
+
+B<Examples:>
+
+    my $branch = $top->branch_for('qa');
+    # returns 'qa/bosh'
+
+=head2 pr_branch_for
+
+    my $branch = $top->pr_branch_for($env_name);
+
+The pull request branch for an environment name, which is L</pr_prefix>
+joined onto its slug.
+
+There is no second argument, because the prefix is configuration rather than
+a caller's choice.
+
+B<Parameters:> The environment's name, as a string.
+
+B<Returns:> The branch name, such as C<pr/qa/bosh>.
+
+B<Examples:>
+
+    my $branch = $top->pr_branch_for('qa');
+    # returns 'pr/qa/bosh' under the default prefix
+
 =head2 version
 
     my $v = $top->version;
