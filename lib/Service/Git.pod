@@ -124,6 +124,14 @@ B<Errors:>
 
 =item *
 
+C<< "Git refuses to work in %s because it is owned by another user." >> --
+exits C<CONFIG> when git declines the working tree under C<safe.directory>,
+and names C<git config --global --add safe.directory> as the fix. Raised
+through L</_refuse_dubious_ownership>, which C<preflight> raises it through
+too, so an operator meets the same words wherever the condition is met.
+
+=item *
+
 C<"Not a git repository: %s"> -- raised via C<bail()> when C<$path> is not
 under git control. C<%s> is the path given.
 
@@ -593,7 +601,7 @@ C<git config user.email> as the fix.
 
 B<Examples:>
 
-  my $git = $git->preflight;
+  my $ready = $git->preflight;
   # returns $self, so the session's begin chains straight on
 
   $git->preflight;
@@ -1790,6 +1798,61 @@ B<Examples:>
   Service::Git::provision_ci_credentials();
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _refuse_dubious_ownership
+
+  _refuse_dubious_ownership($said, $path);
+
+Raises the C<safe.directory> refusal when git's own words name that condition,
+and returns quietly when they do not.
+
+Shared by L</new> and L</preflight>, because a working tree git declines is
+refused while the handle is being built as readily as at the pre-flight, and
+an operator who meets the condition twice should meet the same message, the
+same fix, and the same exit code both times. A caller hands over whatever git
+said and carries on with its own classification when this returns.
+
+Matching is on git's message text, which is not a stable interface. An
+unrecognised wording falls through to the caller's own refusal, so a missed
+pattern degrades to a less helpful message rather than a wrong one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$said>
+
+What git said, standard error and standard output folded together. C<undef>
+is treated as no match.
+
+=item C<$path>
+
+The working tree to name, and to name in the C<safe.directory> command the
+message prints.
+
+=back
+
+B<Returns:> Nothing, and only where git said nothing of the kind.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Git refuses to work in %s because it is owned by another user." >> --
+exits C<CONFIG>. C<%s> is C<$path>, which is also what the C<git config
+--global --add safe.directory> line names.
+
+=back
+
+B<Examples:>
+
+  _refuse_dubious_ownership('fatal: detected dubious ownership', '/repo');
+  # exits CONFIG naming /repo and the command that adds the exception
+
+  _refuse_dubious_ownership('fatal: Needed a single revision', '/repo');
+  # returns, leaving the caller to classify an empty repository
 
 =head2 _classify_remote_error
 

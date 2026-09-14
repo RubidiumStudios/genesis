@@ -10,6 +10,7 @@ use lib 't';
 use helper;
 use Harness::Propagation;
 
+use Cwd ();
 use Test::More;
 use Genesis;
 use Genesis::Exit qw/CONFIG DATAERR/;
@@ -24,26 +25,65 @@ subtest 'a working tree git refuses under safe.directory' => sub {
 	my $h    = make_harness(envs => ['qa']);
 	my $path = fixture_preflight($h, 'safe_directory');
 	my $git  = Service::Git->new($path);
-	my $root = $git->root;
+
+	# git compares a safe.directory entry against the resolved path, so the
+	# resolved spelling is the one the operator has to paste.  The row reads
+	# it off the filesystem rather than off the handle, so a message naming
+	# some other repository would still be caught.
+	my $resolved = Cwd::abs_path($path);
 
 	# The fixture marks the repository and leaves the rest to the harness
 	# git, which turns the marker into the ownership git refuses on.  That
 	# git has to be first on the path for as long as the call runs, which
 	# is what the helper's own comment asks a row reading a shape to do.
+	# The handle is built above it, under the real git, because the shim
+	# refuses the constructor's own first question, which is the row below.
 	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
 
 	my ($err, $exit) = bail_from(sub { $git->preflight });
 	like($err, qr/dubious ownership|safe\.directory/,
 		'the message names the condition git refused on');
-	like($err, qr/git config --global --add safe\.directory \Q$root\E/,
+	like($err, qr/git config --global --add safe\.directory \Q$resolved\E/,
 		'the message names the fix as a command the operator can run');
 	unlike($err, qr/Failed to checkout/,
 		"the generic checkout message H20 names is not what the operator sees");
 	is($exit, CONFIG, 'it exits CONFIG, the misconfigured environment');
 };
 
+subtest 'the handle refuses to be built there for the same reason' => sub {
+	plan tests => 3;
+
+	# The pre-flight is not the first thing that asks git a question.  The
+	# constructor asks for the top level before any caller holds a handle,
+	# and git declines that too, so a classification that lived only in the
+	# pre-flight would never be reached by the command that needs it.  Both
+	# raise the one refusal instead.
+	my $h    = make_harness(envs => ['qa']);
+	my $path = fixture_preflight($h, 'safe_directory');
+
+	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
+
+	my ($err, $exit) = bail_from(sub { Service::Git->new($path) });
+	like($err, qr/git config --global --add safe\.directory \Q$path\E/,
+		'the constructor names the same fix the pre-flight names');
+	unlike($err, qr/Not a git repository/,
+		'and not the generic complaint, which says the wrong thing here');
+	is($exit, CONFIG, 'it exits CONFIG, as the pre-flight does');
+};
+
 subtest 'a process with no committer identity' => sub {
 	plan tests => 3;
+
+	# An identity in this process's own environment is one the fixture git
+	# cannot take away, and provision_ci_credentials copies the author pair
+	# into the committer pair as the handle is built, so all four go before
+	# anything else in the row runs.
+	my @carried = qw/
+		GIT_COMMITTER_NAME GIT_AUTHOR_NAME
+		GIT_COMMITTER_EMAIL GIT_AUTHOR_EMAIL
+	/;
+	local @ENV{@carried};
+	delete @ENV{@carried};
 
 	my $h    = make_harness(envs => ['qa']);
 	my $path = fixture_preflight($h, 'no_identity');
@@ -62,11 +102,11 @@ subtest 'a process with no committer identity' => sub {
 subtest 'a repository with no commits' => sub {
 	plan tests => 3;
 
+	# The only shape that needs no fixture git, because a repository that
+	# has never been committed to has no head whatever git is asked.
 	my $h    = make_harness(envs => ['qa']);
 	my $path = fixture_preflight($h, 'no_commits');
 	my $git  = Service::Git->new($path);
-
-	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
 
 	my ($err, $exit) = bail_from(sub { $git->preflight });
 	like($err, qr/has no commits/,
@@ -111,12 +151,19 @@ sub bail_from {
 	my ($code) = @_;
 
 	my @raised;
+	my $died;
 	{
 		no warnings 'redefine';
 		local *Service::Git::bail = sub { push @raised, [@_]; die "refused\n" };
-		eval { $code->(); 1 };
+		eval { $code->(); 1 } or $died = $@;
 	}
-	return ('', undef) unless @raised;
+	unless (@raised) {
+		# A death with no refusal behind it is something else going wrong,
+		# and a row reading an empty message has no way to say so.
+		diag("nothing was refused, and the code died with: $died")
+			if defined $died;
+		return ('', undef);
+	}
 
 	my @args = @{$raised[0]};
 	my $opts = ref($args[0]) eq 'HASH' ? shift(@args) : {};
