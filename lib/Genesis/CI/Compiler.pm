@@ -359,8 +359,8 @@ sub _report_unread_overrides {
 # _resolve_provider_class - the registry entry for a provider type {{{
 #
 # One registry under D28, so this is a lookup rather than a second map.
-# A type with no compiler class, which manual is, is not a compilable
-# provider and says so.
+# A type with no compiler class, which manual and github-actions both are
+# today, is not a compilable provider and says so.
 sub _resolve_provider_class {
 	my ($self, $type) = @_;
 
