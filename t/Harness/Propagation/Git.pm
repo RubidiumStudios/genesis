@@ -5,6 +5,7 @@ package Harness::Propagation::Git;
 use strict;
 use warnings;
 
+use Fcntl qw/:flock/;
 use JSON::PP;
 
 our @ISA = ('Service::Git');
@@ -59,6 +60,15 @@ sub _record {
 	my ($self, $step, @args) = @_;
 	my $file = $ENV{GENESIS_HARNESS_GIT_LOG} or return;
 	open my $fh, '>>', $file or return;
+
+	# The lock is held for the write, because a spawned command appends to
+	# the same log as the process that spawned it, and two lines that
+	# interleave leave a reader decoding half of each.
+	unless (flock($fh, LOCK_EX)) {
+		close $fh;
+		return;
+	}
+	seek($fh, 0, 2);
 	print $fh JSON::PP->new->canonical->encode([$step, map {_as_text($_)} @args]), "\n";
 	close $fh;
 	return;
@@ -161,12 +171,31 @@ sub _act {
 # spawned command builds its own handle and the count has to survive the
 # process boundary.  Counting and reading the fault happen together so the
 # two cannot disagree about which call this is.
+#
+# The read, the increment, and the write are all under one exclusive lock,
+# because the parent arms through this same file while a spawned command
+# counts through it, and two unlocked read-modify-writes lose one another's
+# change.  The parent takes the same lock when it arms.
 sub _bump {
 	my ($self, $step) = @_;
 	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN} or return (0, undef);
-	my $plan = $self->_plan;
+
+	my $fh;
+	unless (open $fh, '+<', $file) {
+		open $fh, '+>', $file or undef $fh;
+	}
+	undef $fh if $fh && !flock($fh, LOCK_EX);
+	unless ($fh) {
+		my $plan = $self->_plan;
+		my $n = ++$plan->{_counts}{$step};
+		return ($n, $plan->{$step});
+	}
+
+	my $json = do {local $/; <$fh>};
+	my $plan = eval {JSON::PP->new->decode($json // '')} || {};
 	my $n = ++$plan->{_counts}{$step};
-	open my $fh, '>', $file or return ($n, $plan->{$step});
+	seek($fh, 0, 0);
+	truncate($fh, 0);
 	print $fh JSON::PP->new->canonical->encode($plan);
 	close $fh;
 	return ($n, $plan->{$step});
