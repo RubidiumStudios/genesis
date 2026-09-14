@@ -265,6 +265,65 @@ subtest 'a holder that never takes the lock is refused, not waited out' => sub {
 	chmod 0700, "$where/.git";
 };
 
+subtest 'a holder the lock never reaches goes down with the refusal' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $lock = $h->a . '/.git/genesis-session.lock';
+
+	# A process outside the harness sits on the lock and writes nothing, so
+	# the harness's own holder blocks where it asks for it.  That is the
+	# other refusal, and unlike the one above it fires with the holder still
+	# running, which is why the refusal has to take it down.
+	my $stranger = _stranger_holding($lock);
+
+	ok(!eval {hold_session_lock($h); 1},
+		'the wait refuses rather than handing back a holder of nothing');
+	like($@, qr/never took/, 'and the refusal says the holder never took it');
+
+	my ($holder) = $@ =~ /holder (\d+)/;
+	ok($holder && !kill(0, $holder),
+		'while the holder itself is gone rather than left on the lock');
+
+	kill('KILL', $stranger);
+	waitpid($stranger, 0);
+};
+
+# _stranger_holding - a process outside the harness sitting on a lock file,
+# writing nothing into it.  It builds no repository, vault, or API state, so
+# it is machinery of this file rather than a harness helper, and it sits
+# beside the row that needs it.
+sub _stranger_holding {
+	my ($file) = @_;
+	require Fcntl;
+	require POSIX;
+
+	# The parent is told the lock is held down a pipe rather than by polling
+	# the file, because the stranger deliberately writes nothing there.
+	pipe(my $reader, my $writer) or die "cannot open a pipe: $!";
+	my $parent = $$;
+	my $pid = fork();
+	die "cannot fork a stranger: $!" unless defined $pid;
+	unless ($pid) {
+		close $reader;
+		open my $fh, '>>', $file or POSIX::_exit(2);
+		flock($fh, Fcntl::LOCK_EX()) or POSIX::_exit(2);
+		syswrite($writer, "held\n");
+
+		# Never outlive the row that forked us, so a row that dies leaves the
+		# lock free for the next one.
+		for (1 .. 600) {
+			POSIX::_exit(0) if getppid() != $parent;
+			select undef, undef, undef, 0.1;
+		}
+		POSIX::_exit(0);
+	}
+	close $writer;
+	scalar <$reader>;
+	close $reader;
+	return $pid;
+}
+
 # _can_lock - whether this process can take the lock without waiting.  It is
 # an assertion helper for the rows above, so it sits beside them.
 sub _can_lock {
