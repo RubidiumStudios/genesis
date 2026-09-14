@@ -82,7 +82,7 @@ subtest 'the readers answer for a ref that is not there' => sub {
 	my $h = make_harness(envs => ['qa'], vault => 0);
 
 	is_deeply(tree_of($h->a, 'refs/heads/nowhere'), [],
-		'tree_of answers an empty list rather than a complaint from git');
+		'tree_of answers an empty arrayref rather than a complaint from git');
 	is(ref_in($h->a, 'refs/heads/nowhere'), undef,
 		'ref_in answers undef');
 };
