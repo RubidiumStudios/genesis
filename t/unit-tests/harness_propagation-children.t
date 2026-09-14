@@ -169,4 +169,33 @@ subtest 'the broken-blueprint kit fails one environment and not the other' => su
 	isnt($bad, 0, 'and the one whose blueprint raises does not');
 };
 
+subtest 'a fixture that cannot go on answers with one status' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+
+	# A git directory the holder cannot write, so the holder the recorder
+	# forks exits without ever taking the lock.  That is the fixture failing
+	# rather than the command under test, and the recorder has to say so
+	# with a status of its own rather than whatever errno held.
+	my $where = "$h->{base}/unwritable";
+	mkdir $where or die "cannot make $where: $!";
+	mkdir "$where/.git" or die "cannot make $where/.git: $!";
+	$h->{unwritable} = $where;
+	chmod 0500, "$where/.git";
+
+	my $recorder = child_recorder($h, copy => 'unwritable', exec => 0,
+		hold_lock => 'a stranger');
+	my (undef, $rc, $err) = run({stderr => 0, passfail => 0},
+		$recorder, 'version');
+
+	is($rc, 99, 'the refusal answers with the status the fixture keeps');
+	like($err, qr/lock holder exited before it took the lock/,
+		'and says on stderr what the holder did');
+	is_deeply([child_runs($h)], [],
+		'while no record was written for a child that never ran');
+
+	chmod 0700, "$where/.git";
+};
+
 done_testing;
