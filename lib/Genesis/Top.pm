@@ -2297,18 +2297,24 @@ sub _source_control {
 		$sc{control_branch}
 	) unless $sc{remote};
 
-	$sc{uri} = $config->get('pipeline.source_control.uri')
-		// $git->remote_url($sc{remote});
+	$sc{uri} = $config->get('pipeline.source_control.uri');
 
-	$sc{repository} = $config->get('pipeline.source_control.repository')
-		// _github_owner_repo($sc{uri});
-	bail({exitcode => CONFIG},
-		"#C{pipeline.source_control.repository} could not be derived from ".
-		"#C{%s}.\nThe MVP supports GitHub, github.com or GitHub Enterprise, ".
-		"and that URL carries no #C{owner/repo} pair.  Name the repository ".
-		"explicitly, or move the pipeline to a GitHub remote.",
-		$sc{uri} // '<no remote url>'
-	) unless $sc{repository};
+	# The repository is the only value derived from the url, and asking git
+	# for the url costs a fork on every command, so where the operator named
+	# the repository the url is left alone.  That is the one way the uri
+	# comes back undef, and the one way a report shows it as (none).
+	$sc{repository} = $config->get('pipeline.source_control.repository');
+	unless ($sc{repository}) {
+		$sc{uri} //= $git->remote_url($sc{remote});
+		$sc{repository} = _github_owner_repo($sc{uri});
+		bail({exitcode => CONFIG},
+			"#C{pipeline.source_control.repository} could not be derived from ".
+			"#C{%s}.\nThe MVP supports GitHub, github.com or GitHub Enterprise, ".
+			"and that URL carries no #C{owner/repo} pair.  Name the repository ".
+			"explicitly, or move the pipeline to a GitHub remote.",
+			$sc{uri} // '<no remote url>'
+		) unless $sc{repository};
+	}
 
 	return $self->{__source_control} = \%sc;
 }

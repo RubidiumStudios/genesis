@@ -25,16 +25,27 @@ $ENV{NOCOLOR} = 1;
 subtest 'remote is the control branch upstream' => sub {
 	plan tests => 2;
 
-	my $h = make_harness(envs => ['qa'], vault => 0);
+	# The url is asked of git only where the repository has to come out of
+	# it, so the row that reads the url takes the harness's repository
+	# override away.  The urls are here to be read and never to be talked
+	# to, so the remotes go in without a fetch and the row stays on this
+	# machine.
+	my $h = make_harness(envs => ['qa'], vault => 0,
+		source_control => {repository => undef});
 	set_remotes($h,
-		remotes  => {origin => $h->r, dev => $h->r},
+		remotes  => {
+			origin => 'https://github.com/fivetwenty-io/origin-side.git',
+			dev    => 'https://github.com/fivetwenty-io/dev-side.git',
+		},
 		upstream => 'dev',
+		fetch    => 0,
 	);
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
 
 	is($top->source_control_remote, 'dev',
 		"the control branch's configured upstream wins");
-	is($top->source_control_uri, $h->r,
+	is($top->source_control_uri,
+		'https://github.com/fivetwenty-io/dev-side.git',
 		"and the uri is that remote's fetch url");
 };
 
