@@ -272,8 +272,17 @@ subtest 'a provider that will not load is refused without its stack' => sub {
 
 		like $flat, qr/Failed to load CI provider 'concourse'/,
 			"$what names the provider whose file would not load";
-		unlike $flat, qr/Compilation failed in require at \S+ line/,
-			"and $what cuts the line the require failed on";
+
+		# Carp::Always appends bail's own frames to the refusal as well, and
+		# those start at bail's raise site in Genesis.pm, so what bail was
+		# handed is everything between the heading and that.  Reading the
+		# whole refusal would find a file and a line either way.
+		my ($said) = $flat =~
+			m{provider 'concourse': (.*?)(?: at \S*Genesis\.pm line \d+|$)};
+		$said //= '';
+		$said =~ s/^\s+|\s+$//g;
+		unlike $said, qr/ at \S+ line \d+/,
+			"and $what hands the message over with no location in it";
 	}
 };
 
