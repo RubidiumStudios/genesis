@@ -151,6 +151,7 @@ unit-tests/genesis_hook_cloudconfig-resources.t # Resource (vm/disk type) handli
 
 # CI pipeline-descriptor tests
 unit-tests/genesis_ci_propagation-no_push.t               # --no-push suppresses every remote write
+unit-tests/genesis_ci_provider_registry-core.t            # the one provider registry and its enum
 unit-tests/genesis_ci_pipeline_descriptor-auto-update.t   # auto-update pipeline descriptor
 unit-tests/genesis_ci_pipeline_descriptor-bosh-configs.t  # bosh-configs descriptor
 unit-tests/genesis_ci_pipeline_descriptor-deploy_task.t   # plain-CLI deploy task + env branch
@@ -166,7 +167,6 @@ unit-tests/genesis_ci_propagation-core.t            # propagation engine core
 unit-tests/genesis_commands_pipelines-propagate_guard.t  # missing env branches bail
 unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
 unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
-unit-tests/genesis_ci_provider_registry-core.t      # the one provider registry and its enum
 unit-tests/genesis_ci_compiler-override_file.t      # the override file beside .genesis/config, and its name
 unit-tests/helper-tree_readers.t                    # the shared readers and guards in t/helper.pm
 unit-tests/genesis_ci_compiler-provider_contract.t   # the registry entry, the declared keys, and the visibility fallback
