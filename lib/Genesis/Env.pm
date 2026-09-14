@@ -2956,12 +2956,19 @@ sub pipeline_record_path {
 #
 # Returns the two fields the apply writes, or undef when the subpath is
 # absent, and that undef is the membership test D43 and D103 put in place
-# of a roster: an environment the applied record does not know is one
-# with no pipeline subpath, and the walk asks about its own environment
-# rather than searching a list.
+# of a roster, because an environment the applied record does not know is
+# one with no pipeline subpath, and the walk asks about its own
+# environment rather than searching a list.
+#
+# The read goes through this environment's own vault, which is where
+# exodus_base addresses and where every other exodus read and write in
+# this module goes.  An environment that sets genesis.vault keeps its
+# record somewhere the repository's vault cannot see, and reading through
+# the repository's vault would answer undef and drop that environment out
+# of the walk with nothing said.
 sub pipeline_record {
 	my ($self) = @_;
-	my $data = $self->top->vault->get($self->pipeline_record_path);
+	my $data = $self->vault->get($self->pipeline_record_path);
 	return undef unless ref($data) eq 'HASH' && keys %$data;
 	return {
 		dependencies => _decode_path_list($data->{dependencies}),
