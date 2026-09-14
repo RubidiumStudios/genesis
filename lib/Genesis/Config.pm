@@ -208,14 +208,20 @@ sub clear {
 	# Trigger lazy loading
 	$self->_contents;
 
-	# Remove from both loaded_values and set_values (whichever has it)
-	struct_set_value($self->{loaded_values}, $key, undef, 1);
-	struct_set_value($self->{set_values}, $key, undef, 1);
+	# Removed from every source that could answer for the key, defaults
+	# included.  A default outlives nothing: it was filled from a schema,
+	# and a schema built from the configuration's own values changes when
+	# the value it was built from is cleared.  Leaving the defaults behind
+	# leaves keys the operator never wrote, which the next validation
+	# reports as unknown and refuses a removal nobody asked it to refuse.
+	struct_set_value($self->{loaded_values},  $key, undef, 1);
+	struct_set_value($self->{set_values},     $key, undef, 1);
+	struct_set_value($self->{default_values}, $key, undef, 1);
 
 	# An empty parent left behind wins the merge outright and takes the
 	# key's siblings with it.
 	$self->_prune_empty_parents($_, $key)
-		for ($self->{loaded_values}, $self->{set_values});
+		for ($self->{loaded_values}, $self->{set_values}, $self->{default_values});
 
 	# Invalidate caches
 	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
@@ -296,6 +302,18 @@ sub replace {
 sub validate {
 	my ($self, $schema) = @_;
 	$self->{schema} = $schema;
+
+	# A default belongs to the schema that filled it, so validating against
+	# a new schema starts from none.  Every default this schema declares is
+	# filled again below, and one only the previous schema declared would
+	# otherwise survive as a key nobody wrote and be reported here as
+	# unknown.  That is not hypothetical: part of the repository schema is
+	# built from the configuration's own values, so clearing the value the
+	# provider block is built from leaves that provider's filled defaults
+	# behind and refuses a removal nobody asked it to refuse.
+	$self->{default_values} = {};
+	delete $self->{_contents};
+
 	my @errors = ();
 
 	# Ensure all required keys are present, and all defaults are set

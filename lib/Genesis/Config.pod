@@ -426,14 +426,21 @@ B<Examples:>
 
     my $changed = $cfg->clear($key, $save);
 
-Removes C<$key> from both the I<set> and I<loaded> stores. If the object has
-a path and either C<$save> or C<autosave> is enabled, and the removal results
-in a difference from the last persisted state, C<save()> is called
-automatically.
+Removes C<$key> from the I<set>, I<loaded>, and I<default> stores. If the
+object has a path and either C<$save> or C<autosave> is enabled, and the
+removal results in a difference from the last persisted state, C<save()> is
+called automatically.
 
-Keys that exist only in the I<env> or I<default> layers (populated by
-C<validate()>) remain accessible via C<has()> and C<get()> after C<clear()> -
-those layers are not modified.
+B<A removal is a removal in every store that could answer for the key>,
+which is why the I<default> layer is cleared alongside the other two. A
+default left behind would keep answering C<has()> and C<get()> for a key
+the caller has just removed, which reads as the removal having silently
+failed.
+
+The I<env> layer is not modified, so a key an environment variable
+supplies remains accessible after C<clear()>. That layer is not the
+configuration's own state; it is the surroundings the process runs in, and
+a removal in the file cannot reach it.
 
 B<Parameters:>
 
@@ -458,7 +465,7 @@ B<Examples:>
     $cfg->set('temp_key', 'value');
     print $cfg->has('temp_key') ? "yes" : "no";  # Returns: yes
     $cfg->clear('temp_key');
-    print $cfg->has('temp_key') ? "yes" : "no";  # Returns: no (no default layer value)
+    print $cfg->has('temp_key') ? "yes" : "no";  # Returns: no
 
     $cfg->clear('db.host', 1);  # Remove and save immediately
 
@@ -556,6 +563,16 @@ variable overrides and default values. On success, stores the schema on the
 object and returns true. On failure, calls C<bail()> with a formatted list
 of all validation errors, exiting C<Genesis::Exit::CONFIG> so that a caller
 can tell a refused configuration from a crash.
+
+B<The I<default> store is emptied first, so each validation fills only the
+defaults its own schema declares.> A default belongs to the schema that
+filled it. Part of the repository schema is itself built from the
+configuration's own values, because the provider's keys are declared by
+whichever provider C<pipeline.provider.type> names, so a second validation
+against a rebuilt schema would otherwise inherit the departing provider's
+defaults and report them as keys nobody declared. A caller that injects a
+default of its own through C<_update_source()> does so after validating,
+not before.
 
 The schema is a hash reference keyed by top-level configuration key names.
 Each value is a hash reference describing that key's constraints:

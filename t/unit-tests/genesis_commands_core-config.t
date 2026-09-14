@@ -410,7 +410,7 @@ subtest 'config --set coerces against the provider the same run names' => sub {
 };
 
 subtest 'config --unset of the provider type refuses what it orphans' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	# The provider type is one of the values the schema is built from, so
 	# clearing it takes the fragment that declares every other provider key
@@ -446,8 +446,91 @@ CFG
 		"the run is refused at the configuration exit code");
 	like($err, qr/pipeline\.provider\.target: unknown configuration key/,
 		"because target is declarable only while the provider that declares it is named");
+	unlike($err, qr/group_commits|insecure|pause_after_set|tagged|team|public|task/,
+		"and it names only the key the operator wrote, not the departing defaults");
 	like(slurp("$dir/.genesis/config"), qr/type:\s*concourse/,
 		"and the file is left exactly as it was");
+};
+
+# A provider block holding nothing but the type, so removing the type
+# orphans no key at all and every route out of the provider is legitimate.
+sub concourse_repo {
+	my ($name) = @_;
+	my $dir = config_repo($name, enabled => 0);
+	mkfile_or_fail("$dir/.genesis/config", <<'CFG');
+---
+creator_version: 3.2.0
+deployment_type: test-kit
+manifest_store: exodus
+pipeline:
+  enabled: false
+  provider:
+    type: concourse
+version: 3
+CFG
+	return $dir;
+}
+
+# An assertion helper, so it lives beside the rows that use it: it runs the
+# prepared command and reports the exit code and what went to stderr.
+sub run_config {
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	my ($out, $err, $code, $rc);
+	($out, $err) = output_from {
+		$code = exit_code { $rc = Genesis::Commands::Core::config() };
+	};
+	# A refusal exits and a success returns, so the answer is whichever of
+	# the two the command actually gave.
+	return (defined $code ? $code : $rc, $err);
+}
+
+subtest 'config --unset of the provider type orphans nothing and goes through' => sub {
+	plan tests => 3;
+
+	# The departing provider's schema filled defaults the operator never
+	# wrote.  A removal that leaves those behind is reported as a pile of
+	# unknown keys, and there is then no way at all to turn a provider off.
+	my $dir = concourse_repo('config-unset-type-alone');
+	pushd $dir;
+	prepare_command('config', '--unset', 'pipeline.provider.type');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, "the run succeeds, because nothing is orphaned");
+	is($err, '', "and says nothing about keys the operator never wrote");
+	unlike(slurp("$dir/.genesis/config"), qr/provider:/,
+		"the provider block is gone from the saved file");
+};
+
+subtest 'config --unset of the whole provider block goes through' => sub {
+	plan tests => 2;
+
+	my $dir = concourse_repo('config-unset-provider-block');
+	pushd $dir;
+	prepare_command('config', '--unset', 'pipeline.provider');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, "removing the block is not refused");
+	unlike(slurp("$dir/.genesis/config"), qr/provider:/,
+		"and the block is gone from the saved file");
+};
+
+subtest 'config --unset of the whole section goes through' => sub {
+	plan tests => 2;
+
+	my $dir = concourse_repo('config-unset-pipeline-section');
+	pushd $dir;
+	prepare_command('config', '--unset', 'pipeline');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, "removing the section is not refused");
+	unlike(slurp("$dir/.genesis/config"), qr/pipeline:/,
+		"and the section is gone from the saved file");
 };
 
 subtest 'config --unset still refuses a key no schema declares' => sub {
