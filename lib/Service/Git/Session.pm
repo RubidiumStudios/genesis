@@ -179,18 +179,28 @@ sub switch {
 }
 
 # }}}
-# finish - re-read, restore, and verify {{{
+# finish - re-read, restore, verify, and release {{{
 #
 # Re-reads the branch and the cleanliness rather than assuming them, which
 # is the restore clause of I7.  A tracked modification here is a defect and
-# not a by-product under D84, and the task that adds abort routes it there.
+# not a by-product under D84, because the deploy writes no git and the
+# exodus store's own cleanup hands the tree back as it found it, so what is
+# left is a kit hook that wrote into the repository or a deploy that died
+# before cleaning up.  It takes the abort path, which names the files.
 sub finish {
 	my ($self) = @_;
 	my $git = $self->{git};
 	return $self unless $self->{active};
 
-	bail("The working tree in %s holds changes at the end of a session.",
-		$git->root) unless $git->is_clean;
+	unless ($git->is_clean) {
+		my $status = $git->status;
+		my @modified = sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
+		return $self->abort(sprintf(
+			"Something wrote into the repository during this command, which ".
+			"it should not have done:\n%s\nThese changes are being discarded.",
+			join("", map {"  - $_\n"} @modified)
+		));
+	}
 
 	$self->_restore;
 	$self->_release_lock;

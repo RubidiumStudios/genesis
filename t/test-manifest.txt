@@ -231,6 +231,7 @@ unit-tests/service_git-fetch_preserves_local.t             # fetch must not disc
 unit-tests/service_git-preflight.t                         # the pre-flight classifies its three failures
 unit-tests/service_git-remote_branch.t                     # remote_branch helper
 unit-tests/service_git_session-abort.t                     # abort discards, resets to T, and is loud
+unit-tests/service_git_session-clean.t                     # what clean means at begin, finish, and abort
 unit-tests/service_git_session-lifecycle.t                 # begin and finish on a clean run
 unit-tests/service_git_session-lock.t                      # the switch lock, per working tree
 unit-tests/service_git_session-sequencing.t                # sessions are sequential and keyed on the handle

@@ -231,6 +231,15 @@ The switch lock is released last, after the restore has been verified, so no
 other process can switch this working tree until this one is genuinely back
 where it started.
 
+A tracked modification found here is a defect rather than a by-product. The
+deploy writes no git of its own and its cleanup hands the tree back as it
+found it, so what is left is a kit hook that wrote into the repository or a
+deploy that died early. C<finish> sends that through C<abort>, which names the
+files before discarding them and restores the branch, and the error reaches
+the caller so the command can exit on it.
+
+Untracked files are ignored here exactly as they are at C<begin>.
+
 Calling it on a session that was never opened is a no-op, so a caller may
 finish unconditionally on its way out.
 
@@ -244,9 +253,11 @@ B<Errors:>
 
 =item *
 
-C<< "The working tree in %s holds changes at the end of a session." >> --
-raised over a tracked modification at the end of a session, which is a defect
-rather than a by-product. C<%s> is the working tree root.
+C<< "Something wrote into the repository during this command, which it should
+not have done." >> -- raised over a tracked modification at the end of a
+session, which is a defect rather than a by-product. It lists the paths, and
+it comes out of C<abort>, so the changes are discarded and the branch is
+restored before it reaches the caller.
 
 =item *
 
