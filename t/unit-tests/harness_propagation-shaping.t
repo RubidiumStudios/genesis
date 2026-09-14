@@ -323,4 +323,37 @@ subtest 'a staged path and an edited path each hand their path back' => sub {
 };
 
 
+# Proves the setup half of the propagation set's eighth kind: a kit can be
+# named by a path as well as by a bare name, and the embedded genesis the set
+# now carries can be seeded on the control branch.
+subtest 'a kit is named by a bare name or by a path under the checkout' => sub {
+	plan tests => 2;
+
+	my $bare = make_harness(envs => ['qa'], vault => 0, kit => 'exodus-reader');
+	my ($named) = run({dir => $bare->a}, 'git', 'show', 'HEAD:dev/kit.yml');
+	like($named, qr/name:\s+exodus-reader/,
+		'a bare name resolves under t/kits/');
+
+	my $path = make_harness(envs => ['qa'], vault => 0,
+		kit => 't/src/ops-blueprint');
+	my ($by_path) = run({dir => $path->a}, 'git', 'show', 'HEAD:dev/kit.yml');
+	like($by_path, qr/name:\s+ops-blueprint/,
+		'and a value carrying a slash is a path under the checkout root');
+};
+
+subtest 'the embedded genesis is seeded where a row asks for it' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0, embed => 1);
+	ok(scalar(grep {$_ eq '.genesis/bin/genesis'} @{tree_of($h->a, $h->control)}),
+		'the stub is committed on the control branch');
+	ok(-x $h->a . '/.genesis/bin/genesis',
+		'and it is executable, the way the embedded genesis has to be');
+
+	my $without = make_harness(envs => ['qa'], vault => 0);
+	ok(!scalar(grep {$_ eq '.genesis/bin/genesis'}
+		@{tree_of($without->a, $without->control)}),
+		'a harness that did not ask for one has no such file');
+};
+
 done_testing;

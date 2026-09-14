@@ -431,6 +431,7 @@ sub make_harness {
 		pipeline  => defined $opts{pipeline} ? $opts{pipeline} : 1,
 		source_control => $opts{source_control},
 		kit       => $opts{kit},
+		embed     => $opts{embed},
 		roots     => {},
 		mount     => $opts{exodus_mount} // '/secret/exodus/',
 	}, __PACKAGE__;
@@ -543,6 +544,11 @@ sub _seed_control {
 	# against a working tree carrying a directory nothing tracks.
 	$self->_install_kit($root);
 
+	# The embedded genesis goes in before the seeding commit too, so a row
+	# that asserts the eighth kind of the propagation set has a file to find
+	# on the control branch rather than a path nothing tracks.
+	$self->_embed_genesis($root) if $self->{embed};
+
 	# The environment files land through write_env_file and are committed with
 	# the root, so the control branch's first commit is a repository a command
 	# can be run against rather than a deployment root with nothing in it.
@@ -615,14 +621,38 @@ sub _seed_pipeline_section {
 # that wants the blueprint that raises or the manifest that reads exodus says
 # so in a word.  The copy lands at the deployment root's dev directory, which
 # is where the kit reference every environment file carries points.
+#
+# A value carrying a slash is read as a path under the checkout root instead,
+# so a row can name a kit the suite already ships elsewhere, such as
+# t/src/ops-blueprint, rather than a copy of it written for these rows alone.
+# A bare name still resolves under t/kits/.
 sub _install_kit {
 	my ($self, $root) = @_;
 	my $name = $self->{kit} or return $self;
 
-	my $from = "$helper::TOPDIR/t/kits/$name";
+	my $from = $name =~ m{/}
+		? "$helper::TOPDIR/$name"
+		: "$helper::TOPDIR/t/kits/$name";
 	die "make_harness does not know the kit $name\n" unless -d $from;
 	run({dir => $self->{base}, onfailure => "Failed to install the $name kit"},
 		'cp', '-R', $from, "$root/dev");
+
+	return $self;
+}
+
+# }}}
+# _embed_genesis - stand a genesis in at .genesis/bin/genesis {{{
+#
+# Genesis::Top::embed writes the running genesis there for CI to call, and a
+# row that wants that path in a tree wants a file rather than the megabytes of
+# the real one, so the harness writes an executable stub and commits it with
+# the deployment root.
+sub _embed_genesis {
+	my ($self, $root) = @_;
+
+	helper::mkdir_or_fail("$root/.genesis/bin") unless -d "$root/.genesis/bin";
+	helper::put_file("$root/.genesis/bin/genesis", 0755,
+		"#!/bin/sh\n# stands in for the genesis Top::embed writes\nexit 0\n");
 
 	return $self;
 }
