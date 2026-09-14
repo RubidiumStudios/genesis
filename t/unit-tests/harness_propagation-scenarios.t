@@ -280,7 +280,7 @@ subtest 'the automation blocks answer in both forms' => sub {
 };
 
 subtest 'the automated shape carries what an automation requires' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	automated($h);
@@ -295,8 +295,17 @@ subtest 'the automated shape carries what an automation requires' => sub {
 	is($config->{pipeline}{shuttle}{backend}, 's3',
 		'along with the three blocks the schema requires of an automation');
 
+	# Whether the second call has a delta to commit is not something the row
+	# can settle, because the configuration writer stamps the time of the
+	# write into the file and that turns over with the wall clock.  What the
+	# row can drive is that a repository already carrying the shape can be
+	# asked for it again and still reads back complete.
 	ok(eval {automated($h); 1},
-		'asking for the shape again, with nothing to change, is not a death');
+		'asking for the shape a second time answers rather than dying');
+
+	my ($again) = load_yaml_file($h->a . '/.genesis/config');
+	is($again->{pipeline}{provider}{type}, 'concourse',
+		'and the repository still carries the shape afterwards');
 };
 
 done_testing;
