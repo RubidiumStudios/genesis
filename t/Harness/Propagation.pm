@@ -3638,10 +3638,16 @@ sub automated {
 	}
 
 	# One commit for the whole shape, because the keys are all one file and a
-	# commit apiece would say nothing a reader of the log wants.
+	# commit apiece would say nothing a reader of the log wants.  It is made
+	# only where the file changed, so a row that asks for the shape twice, or
+	# asks for it on a repository that already carries it, is not taken down
+	# by a commit with no delta to make.
 	run({dir => $h->{a}}, 'git', 'add', '--', $path);
+	my $unchanged = run({dir => $h->{a}, passfail => 1},
+		'git', 'diff', '--cached', '--quiet', '--', $path);
 	run({dir => $h->{a}, onfailure => "Failed to write the automated shape"},
-		'git', 'commit', '-q', '-m', 'configure an automated pipeline');
+		'git', 'commit', '-q', '-m', 'configure an automated pipeline')
+		unless $unchanged;
 
 	return $h;
 }

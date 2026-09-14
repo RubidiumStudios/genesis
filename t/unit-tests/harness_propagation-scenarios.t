@@ -280,7 +280,7 @@ subtest 'the automation blocks answer in both forms' => sub {
 };
 
 subtest 'the automated shape carries what an automation requires' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	automated($h);
@@ -294,6 +294,9 @@ subtest 'the automated shape carries what an automation requires' => sub {
 		'ci@genesis.example.com', 'and so is the committer identity');
 	is($config->{pipeline}{shuttle}{backend}, 's3',
 		'along with the three blocks the schema requires of an automation');
+
+	ok(eval {automated($h); 1},
+		'asking for the shape again, with nothing to change, is not a death');
 };
 
 done_testing;
