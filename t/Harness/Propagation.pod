@@ -29,7 +29,15 @@ Builds R, clones copy A and copy B, writes the deployment root through
 C<Genesis::Top-E<gt>create>, and publishes the control branch.  Returns the
 harness object.  Takes C<envs>, C<type>, C<control>, C<pr_prefix>,
 C<provider>, C<mode>, C<root>, C<pipeline>, C<source_control>, C<vault>,
-C<github>, C<kit>, and C<embed>.
+C<github>, C<kit>, C<embed>, and C<exodus_mount>.
+
+C<exodus_mount> names the vault subtree the harness's records hang off, and it
+defaults to C</secret/exodus/>.  A mount below that default is taken, and one
+above it is refused by name, because the vault fixture clears the mount whole
+as it attaches and a wider mount would take records the harness does not own.
+The refusal comes when the fixture attaches rather than when the option is
+read, so a harness built with C<vault =E<gt> 0> and a short mount is refused
+by the first call to C<fixture_vault> instead.
 
 C<Genesis::Top-E<gt>create> writes no pipeline section at all, and every row
 that reads a provider reads it out of that file, so the harness writes the
@@ -358,11 +366,25 @@ and C<remote> of the second, each defaulting to one.  The teammate's commits
 are published and copy A is refreshed before the local ones are written, so
 the divergence is one copy A can read from its own refs.
 
+Copy A's branch is cut before the teammate publishes anything, where copy A
+has no branch of that name yet.  A branch cut afterwards would start at the
+teammate's own tip, and a call with C<local =E<gt> 0> would then read in-sync
+rather than behind, which is the one shape that call is for.
+
 =head2 move_on_r($h, $branch, %opts)
 
 Has copy B advance a branch on R after copy A's refresh, which is how a row
 makes an expected-tip push fail, and returns the commit R now carries.
 C<files> and C<message> say what that commit holds.
+
+Copy B is put on the branch with a checkout rather than with C<update-ref>, so
+its working tree and its index move with the ref.  A copy standing on the
+branch under C<update-ref> came back with an index that no longer matched its
+own HEAD, and the commit made straight afterwards recorded the removal of
+everything the branch had gained.  The checkout is the one thing here that can
+fail, so a copy B carrying changes the move would overwrite makes the call die
+by name, where C<update-ref> used to succeed quietly and leave the mismatch
+for a later commit to record.
 
 =head2 delete_on_r($h, @branches)
 
@@ -510,6 +532,11 @@ fixture clears the exodus mount as it attaches.  Each harness therefore starts
 on an empty record tree rather than on whatever the subtest above it wrote, and
 a row that proves a record's absence proves it of its own harness.
 
+Because that clearing takes the whole subtree, a harness whose C<exodus_mount>
+is shorter than the default C</secret/exodus/> is refused by name here rather
+than clearing records it does not own, which would include the records another
+harness in the same file is standing on.
+
 A recording C<safe> is laid down beside the target, in the directory
 C<run_genesis> puts first on the path of the command under test, and that
 wrapper is what C<vault_read_log> reads its answer out of.  The parent's own
@@ -571,13 +598,17 @@ than falling back to the default, so C<break_vault($h, envs =E<gt> [], applied
 
 Both movers name the fixture's target outright, so a harness built with
 C<vault =E<gt> 0> is refused with a plain death rather than left to move
-records in whatever vault the ambient C<safe> target happens to be.
+records in whatever vault the ambient C<safe> target happens to be.  Each move
+is checked, and one that fails is refused by name and says what C<safe> said,
+because a move nobody looked at leaves the row asserting against a vault
+nothing changed.
 
 =head2 restore_vault($h)
 
 Puts back everything C<break_vault> moved aside, so the same row can assert the
 run succeeding once its input is readable again.  It refuses a harness with no
-vault fixture for the reason C<break_vault> does.
+vault fixture for the reason C<break_vault> does, and it checks each move back
+and refuses a failed one by name for the same reason again.
 
 =head2 snapshot_w($h, %opts)
 
@@ -696,6 +727,20 @@ writes its pid on the first line and its command on the second for the
 refusal message to read.  Options are C<copy> and C<command>.  C<hard> kills
 the holder without letting it finish, so a row can show that the kernel drops
 the lock with the process.
+
+C<hold_session_lock> watches the holder as well as the lock file while it
+waits, and it refuses rather than answering where the holder is not going to
+take the lock.  It says the holder exited before it took the lock where the
+child has gone, and that the holder never took it where the wait runs its
+length out with the child alive, so a row that meets a broken fixture reads a
+complaint about the fixture rather than one about the code under test.  The
+holder is killed and reaped on both refusals, since a holder left standing
+would sit on the lock for the five minutes it gives itself.
+
+Every holder is registered as it is forked, and an C<END> block kills and
+reaps whatever is still registered when the file finishes, so a row that dies
+between forking a holder and releasing it costs the run nothing beyond its own
+failure.
 
 =head2 github_double($h, %opts)
 
@@ -1113,6 +1158,18 @@ and its path.
 
 Puts the repository under an automated provider, which is C<concourse> unless
 C<provider> names another, and answers the harness.
+
+It writes five blocks beside the provider type, because the configuration
+schema requires all five of an automated provider and a repository missing any
+of them is refused when a C<Genesis::Top> loads it.  They are the clone
+credential under C<source_control.auth>, which takes C<auth_type> and
+C<auth_vault>, the committer identity under C<source_control.identity>, which
+takes C<identity_name> and C<identity_email>, and the shuttle, the vault, and
+the locker, which come from C<automation_blocks>.
+
+All eleven keys land in one commit on control, and that commit is made only
+where the file changed, so asking for the shape twice, or asking for it on a
+repository that already carries it, is not a death.
 
 =head2 git($h, $copy, %opts)
 
