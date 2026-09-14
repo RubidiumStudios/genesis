@@ -638,7 +638,10 @@ sub branch_upstream_remote {
 # has_remote - whether a remote of this name is configured {{{
 sub has_remote {
 	my ($self, $remote) = @_;
-	my ($out) = run({dir => $self->{root}}, 'git', 'remote');
+	# stderr apart from stdout for the same reason branch_upstream_remote
+	# asks for it: a complaint merged into the output would be one more
+	# line to search for a remote's name in.
+	my ($out) = run({dir => $self->{root}, stderr => 0}, 'git', 'remote');
 	return 0 unless defined $out;
 	return scalar(grep {$_ eq $remote} split(/\n/, $out)) ? 1 : 0;
 }
@@ -649,7 +652,12 @@ sub remote_url {
 	my ($self, $remote) = @_;
 	$remote //= $self->default_remote;
 	return undef unless $remote;
-	my ($url) = run({ dir => $self->{root} }, 'git', 'remote', 'get-url', $remote);
+	# git writes its complaint on stderr, and merging that into stdout would
+	# put the text of the complaint into the url a caller goes on to use, so
+	# it is captured apart and a non-zero exit answers no url at all.
+	my ($url, $rc) = run({dir => $self->{root}, stderr => 0},
+		'git', 'remote', 'get-url', $remote);
+	return undef if $rc;
 	chomp $url if defined $url;
 	return $url;
 }
