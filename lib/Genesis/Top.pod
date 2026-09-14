@@ -2869,7 +2869,14 @@ The provider is built from the C<pipeline.provider> block with the resolved
 C<repository> alongside it, since under D102 the repository the pipeline
 acts on lives in the source-control block rather than the provider block.
 The check gathers every error string the provider returns, so the refusal
-names the provider once and lists everything wrong with it.
+names the provider once and lists everything wrong with it. An entry that is
+undefined or empty is dropped before that list is built, because a rule that
+answered with nothing would otherwise print an empty bullet.
+
+The provider's class is somebody else's code, so building it and running its
+check are wrapped in an C<eval>. A rule that dies is reported as the same
+refusal, naming the provider and carrying what it said, rather than reaching
+the operator as a C<Carp> trace out of the middle of a configuration load.
 
 B<Returns:> 1.
 
@@ -2881,7 +2888,8 @@ B<Errors:>
 
 C<"Invalid configuration for the ... provider"> - raised when the
 provider's C<validate_config> returns one or more error strings, which are
-listed under it, one per line.
+listed under it, one per line, and raised in the same words when the
+provider's own code dies, with what it said as the single entry under it.
 
 =item *
 

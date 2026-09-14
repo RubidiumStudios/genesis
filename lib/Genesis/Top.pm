@@ -2510,10 +2510,27 @@ sub _validate_provider_config {
 	# value instead of being asked for a key the schema does not declare.
 	# The provider's own keys come last, because an explicit setting is
 	# never overridden by a derivation.
+	# The provider's class is somebody else's code, so a rule that dies is
+	# answered with the refusal an operator can act on rather than with a
+	# Carp trace out of the middle of a configuration load.
 	my $sc = $self->_source_control;
-	my @errors = $class->new(
-		type => $type, repo => $sc->{repository}, %opts
-	)->validate_config;
+	my @errors = eval {
+		$class->new(type => $type, repo => $sc->{repository}, %opts)
+			->validate_config;
+	};
+	# Copied first, because bail's own readers run evals that clear it.
+	my $caught = $@;
+	if ($caught) {
+		chomp(my $said = decolorize($caught));
+		bail({exitcode => CONFIG},
+			"Invalid configuration for the #C{%s} provider:\n  - %s",
+			$type, $said
+		);
+	}
+
+	# A rule that answers with a bare undef has said nothing, and printing
+	# it would give the operator an empty bullet to read.
+	@errors = grep {defined($_) && length($_)} @errors;
 	return 1 unless @errors;
 
 	bail({exitcode => CONFIG},
