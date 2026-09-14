@@ -235,6 +235,27 @@ subtest 'a kit lands its contents at dev, not a directory below it' => sub {
 		'and the kit has no directory of its own below it');
 };
 
+subtest 'a root creation that dies leaves no scratch root named' => sub {
+	plan tests => 2;
+
+	require Genesis::Top;
+	local $ENV{GENESIS_ROOT} = 'the-root-this-row-set';
+
+	# The create points GENESIS_ROOT at the scratch directory it is building
+	# in, and the harness points it at the real root only once the move is
+	# done, so a create that dies leaves the scratch name standing.
+	no warnings 'redefine', 'once';
+	local *Genesis::Top::create = sub {
+		$ENV{GENESIS_ROOT} = 'the-scratch-the-create-was-building-in';
+		die "the create refused\n";
+	};
+
+	ok(!eval {make_harness(envs => ['qa'], vault => 0); 1},
+		'the create that died took the harness build down with it');
+	is($ENV{GENESIS_ROOT}, 'the-root-this-row-set',
+		'and the scratch root it named is not left standing');
+};
+
 subtest 'a root creation that dies puts the vault names back' => sub {
 	plan tests => 2;
 
