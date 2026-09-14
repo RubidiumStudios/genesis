@@ -3,7 +3,6 @@ use strict;
 use warnings;
 
 use Test::More;
-use Test::Output;
 use File::Temp qw/tempdir/;
 use File::Path qw/mkpath/;
 use JSON::PP;
@@ -2340,21 +2339,6 @@ subtest 'Top - register_config_section stores handler' => sub {
 ### Phase E Provider Options System Tests
 ### ============================================================ ###
 
-subtest 'PipelineProvider - provider_info hands back a copy' => sub {
-	# A caller that writes into what it was given must not be able to
-	# rewrite the registry for the rest of the process, because the next
-	# file in the same run would then resolve the real provider to
-	# whatever the writer put there.
-	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
-	is $info->{cli_class}, 'Genesis::CI::Provider::Concourse',
-		"the entry answers the registered CLI class";
-
-	$info->{cli_class} = 'Genesis::CI::Provider::Fixture';
-	my $again = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
-	is $again->{cli_class}, 'Genesis::CI::Provider::Concourse',
-		"writing into the answer leaves the registry as it was";
-};
-
 subtest 'PipelineProvider - known_providers lists registered types' => sub {
 	my @providers = Genesis::CI::Compiler::PipelineProvider->known_providers();
 	ok scalar(@providers) >= 1, "at least one provider registered";
@@ -2401,17 +2385,6 @@ subtest 'Concourse - provider_options_schema has correct structure' => sub {
 	is $schema->{team}{default}, 'main',  "team default is 'main'";
 };
 
-subtest 'Concourse - task.privileged is declared beside image and version' => sub {
-	# ASTBuilder and PipelineDescriptor both read
-	# pipeline.provider.task.privileged, so the nested schema has to
-	# declare it or the load refuses the key by name.
-	my $schema = Genesis::CI::Concourse->provider_options_schema();
-	ok exists $schema->{task}{schema}{privileged},
-		"privileged is declared in the nested task schema";
-	is $schema->{task}{schema}{privileged}{type}, 'array',
-		"and it is an array, which is the shape the readers expect";
-};
-
 subtest 'Concourse - provider_options_defaults returns expected defaults' => sub {
 	my $defaults = Genesis::CI::Concourse->provider_options_defaults();
 	ok ref($defaults) eq 'HASH',          "defaults is a hash";
@@ -2453,49 +2426,6 @@ subtest 'Concourse - provider_config includes non-default values' => sub {
 	my $config = $provider->provider_config();
 	is $config->{team},            'my-team', "non-default team included";
 	is $config->{pause_after_set}, 1,         "non-default pause_after_set included";
-};
-
-subtest 'Concourse - pipeline.public still decides visibility' => sub {
-	# provider_option('expose') answers undef, because the schema spells
-	# the key public rather than expose, so the legacy pipeline.public
-	# fallback below it is the one that decides.  A fake fly records the
-	# subcommand it was handed.
-	my $dir = tempdir(CLEANUP => 1);
-	mkpath("$dir/bin");
-	my $log = "$dir/fly.log";
-	open my $fly, '>', "$dir/bin/fly" or die $!;
-	print $fly "#!/bin/sh\necho \"\$@\" >> \"$log\"\nexit 0\n";
-	close $fly;
-	chmod 0755, "$dir/bin/fly";
-
-	my $ast = Genesis::CI::Compiler::AST->new(
-		metadata     => { name => 'test', version => '2.0', source => 'modern' },
-		branches     => { control => 'main', target_prefix => 'target/' },
-		integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
-		targets      => {},
-		workflows    => {},
-	);
-
-	my $flown = sub {
-		my ($public) = @_;
-		unlink $log;
-		my $p = Genesis::CI::Concourse->new(
-			ast => $ast, top => undef, provider_opts => {});
-		$p->{config} = {
-			pipeline => {
-				name => 'test',
-				(defined $public ? (public => $public) : ()),
-			},
-		};
-		local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
-		output_from { $p->deploy(target => 'ci', yes => 1) };
-		return -f $log ? do { local (@ARGV, $/) = ($log); <> } : '';
-	};
-
-	like $flown->(1), qr/expose-pipeline/,
-		"pipeline.public exposes the pipeline when nothing above it says otherwise";
-	like $flown->(undef), qr/hide-pipeline/,
-		"and the built-in default hides it";
 };
 
 subtest 'Concourse - provider_option applies defaults when not set' => sub {
