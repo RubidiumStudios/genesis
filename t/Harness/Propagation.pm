@@ -307,7 +307,7 @@ sub branches_on_r {
 # for itself whatever R holds.
 sub fresh_clone {
 	my ($self) = @_;
-	my $dir = "$self->{base}/clone-" . int(rand(1_000_000));
+	my $dir = "$self->{tmp}/clone-" . int(rand(1_000_000));
 	run({dir => $self->{base}, onfailure => "Failed to clone R"},
 		'git', 'clone', '-q', $self->{r}, $dir);
 	run({dir => $dir}, 'git', 'config', 'user.email', 'clone@genesis.example.com');
@@ -438,7 +438,7 @@ sub trailers_of {
 	return {} unless _has_commit($dir, $ref);
 
 	my ($message) = run({dir => $dir}, 'git', 'log', '-1', '--format=%B', $ref);
-	my $file = "$self->{base}/trailers.msg";
+	my $file = "$self->{tmp}/trailers.msg";
 	helper::put_file($file, $message // '');
 
 	my ($parsed) = run({dir => $dir},
@@ -468,9 +468,14 @@ sub make_harness {
 
 	my $base = helper::workdir() . sprintf('/ph-%d-%06d', $$, int(rand(1_000_000)));
 	helper::mkdir_or_fail($base);
+	# Every scratch path the harness writes goes under this one directory, so
+	# the base holds the three repositories and nothing else and a reader can
+	# tell them from the litter at a glance.
+	helper::mkdir_or_fail("$base/tmp");
 
 	my $self = bless {
 		base      => $base,
+		tmp       => "$base/tmp",
 		r         => "$base/r.git",
 		a         => "$base/a",
 		b         => "$base/b",
@@ -540,7 +545,7 @@ sub _create_root {
 	# itself.  The harness provides it, so no row has to remember to.
 	helper::provide_rc() unless defined do {no warnings 'once'; $Genesis::RC};
 
-	my $scratch = sprintf('%s/top-%06d', $self->{base}, int(rand(1_000_000)));
+	my $scratch = sprintf('%s/top-%06d', $self->{tmp}, int(rand(1_000_000)));
 	helper::mkdir_or_fail($scratch);
 
 	# The create points GENESIS_ROOT at the root it just built and names the
@@ -953,14 +958,14 @@ sub init_branch {
 	my $branch = $self->slug($env, %opts);
 	my $dir    = $self->{a};
 
-	my $seed = "$self->{base}/init-" . int(rand(1_000_000));
+	my $seed = "$self->{tmp}/init-" . int(rand(1_000_000));
 	helper::put_file($seed, "This branch is managed by genesis pipeline-apply.\n");
 
 	my ($blob) = run({dir => $dir, onfailure => "Failed to write the init blob"},
 		'git', 'hash-object', '-w', $seed);
 	chomp $blob;
 
-	my $index = "$self->{base}/idx-" . int(rand(1_000_000));
+	my $index = "$self->{tmp}/idx-" . int(rand(1_000_000));
 	my $tree  = do {
 		local $ENV{GIT_INDEX_FILE} = $index;
 		run({dir => $dir}, 'git', 'update-index', '--add', '--cacheinfo',
@@ -1012,7 +1017,7 @@ sub deliver {
 	$self->_fetch_commit($copy, $control, $self->{control});
 	my $parent = $self->_branch_parent($copy, $branch);
 
-	my $index = "$self->{base}/idx-" . int(rand(1_000_000));
+	my $index = "$self->{tmp}/idx-" . int(rand(1_000_000));
 	local $ENV{GIT_INDEX_FILE} = $index;
 
 	if ($parent && %keep) {
@@ -1035,7 +1040,7 @@ sub deliver {
 		            : undef;
 		my $blob;
 		if (defined $content) {
-			my $tmp = "$self->{base}/blob-" . int(rand(1_000_000));
+			my $tmp = "$self->{tmp}/blob-" . int(rand(1_000_000));
 			helper::put_file($tmp, $content);
 			($blob) = run({dir => $dir}, 'git', 'hash-object', '-w', $tmp);
 		} else {
@@ -1137,17 +1142,19 @@ sub propagation_set {
 # because two readers of one key must not disagree about where it lives.
 #
 # The parse is cached on the file's own text, because spruce is a process per
-# call and every delivery reads the set.
-my %TRACKED;
+# call and every delivery reads the set.  The cache belongs to the harness and
+# not to the package, so it goes when the harness does rather than growing for
+# as long as the process lives.
 sub _tracked_files {
 	my ($self, $at, $path) = @_;
 
 	my ($body, $rc) = run({dir => $self->_repo_holding($at), stderr => 0},
 		'git', 'show', "$at:$path");
 	return undef unless defined $rc && $rc == 0 && defined $body;
-	return $TRACKED{$body} if exists $TRACKED{$body};
+	my $cached = $self->{tracked} //= {};
+	return $cached->{$body} if exists $cached->{$body};
 
-	my $tmp = "$self->{base}/env-" . int(rand(1_000_000)) . '.yml';
+	my $tmp = "$self->{tmp}/env-" . int(rand(1_000_000)) . '.yml';
 	helper::put_file($tmp, $body);
 	my ($yaml, $failed) = load_yaml_file($tmp);
 	unlink $tmp;
@@ -1159,9 +1166,9 @@ sub _tracked_files {
 	my $pipeline = ref $genesis eq 'HASH' ? ($genesis->{pipeline} || {}) : {};
 	my $declared = ref $pipeline eq 'HASH'
 		? $pipeline->{track_additional_files} : undef;
-	return $TRACKED{$body} = ref $declared eq 'ARRAY' ? $declared
-	                       : defined $declared        ? [$declared]
-	                       :                            undef;
+	return $cached->{$body} = ref $declared eq 'ARRAY' ? $declared
+	                        : defined $declared        ? [$declared]
+	                        :                            undef;
 }
 
 # }}}
@@ -1312,13 +1319,14 @@ sub unrelated_branch {
 	my $branch = $self->slug($env, %opts);
 	my $dir    = $self->{a};
 
-	my $index = "$self->{base}/idx-" . int(rand(1_000_000));
+	my $index = "$self->{tmp}/idx-" . int(rand(1_000_000));
 	local $ENV{GIT_INDEX_FILE} = $index;
 	run({dir => $dir}, 'git', 'read-tree', '--empty');
-	my $tmp = "$self->{base}/blob-" . int(rand(1_000_000));
+	my $tmp = "$self->{tmp}/blob-" . int(rand(1_000_000));
 	helper::put_file($tmp, "an unrelated history\n");
 	my ($blob) = run({dir => $dir}, 'git', 'hash-object', '-w', $tmp);
 	chomp $blob;
+	unlink $tmp;
 	run({dir => $dir}, 'git', 'update-index', '--add', '--cacheinfo',
 		"100644,$blob,unrelated");
 	my ($tree) = run({dir => $dir}, 'git', 'write-tree');
@@ -1826,8 +1834,8 @@ sub fixture_vault {
 	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
 		_real_safe(), 'rm', '-rf', $self->exodus_mount);
 
-	$self->{vault_log} = "$self->{base}/vault-reads.log";
-	my $bin = "$self->{base}/bin";
+	$self->{vault_log} = "$self->{tmp}/vault-reads.log";
+	my $bin = "$self->{tmp}/bin";
 	helper::mkdir_or_fail($bin) unless -d $bin;
 	helper::put_file("$bin/safe", 0755, <<"EOS");
 #!/usr/bin/env bash
@@ -1856,7 +1864,7 @@ sub _real_safe { return _real_tool('safe') }
 sub _real_tool {
 	my ($name) = @_;
 	for my $dir (split /:/, ($ENV{PATH} // '')) {
-		next if $dir =~ m{/ph-\d+-\d+/(bin|gh-bin)$};
+		next if $dir =~ m{/ph-\d+-\d+/tmp/(bin|gh-bin)$};
 		return "$dir/$name" if -x "$dir/$name";
 	}
 	return $name;
@@ -2081,7 +2089,7 @@ sub vault_read_log {
 sub fixture_preflight {
 	my ($self, $kind, %opts) = @_;
 	my $dir = $opts{copy} ? $self->{$opts{copy}}
-	        : "$self->{base}/preflight-$kind-" . int(rand(1_000_000));
+	        : "$self->{tmp}/preflight-$kind-" . int(rand(1_000_000));
 
 	unless ($opts{copy}) {
 		helper::mkdir_or_fail($dir);
@@ -2133,11 +2141,11 @@ sub fixture_preflight {
 # same directory first for the length of the row.
 sub _preflight_git {
 	my ($self) = @_;
-	my $bin = "$self->{base}/bin";
+	my $bin = "$self->{tmp}/bin";
 	return "$bin/git" if -x "$bin/git";
 
 	helper::mkdir_or_fail($bin) unless -d $bin;
-	my $home = "$self->{base}/preflight-home";
+	my $home = "$self->{tmp}/preflight-home";
 	helper::mkdir_or_fail($home) unless -d $home;
 
 	helper::put_file("$bin/git", 0755, <<"EOS");
@@ -2469,8 +2477,8 @@ sub fault_git {
 	my ($self, %opts) = @_;
 	my $copy = $opts{copy} // 'a';
 
-	$self->{fault}{plan} //= "$self->{base}/git-plan.json";
-	$self->{fault}{log}  //= "$self->{base}/git-steps.log";
+	$self->{fault}{plan} //= "$self->{tmp}/git-plan.json";
+	$self->{fault}{log}  //= "$self->{tmp}/git-steps.log";
 	helper::put_file($self->{fault}{plan}, '{}');
 	helper::put_file($self->{fault}{log}, '');
 
@@ -2676,7 +2684,7 @@ sub release_session_lock {
 sub github_double {
 	my ($self, %opts) = @_;
 
-	my $bin = "$self->{base}/gh-bin";
+	my $bin = "$self->{tmp}/gh-bin";
 	helper::mkdir_or_fail($bin);
 	my $curl = "$bin/curl";
 	helper::put_file($curl, 0755, helper::get_file("$helper::TOPDIR/t/Harness/bin/curl"));
@@ -2687,8 +2695,8 @@ sub github_double {
 	my $gh = $self->{gh} = {
 		harness    => $self,
 		bin        => $bin,
-		state      => "$self->{base}/gh-state.json",
-		log        => "$self->{base}/gh-calls.log",
+		state      => "$self->{tmp}/gh-state.json",
+		log        => "$self->{tmp}/gh-calls.log",
 		token      => $opts{token}      // 'harness-token',
 		repository => $opts{repository} // 'owner/repo',
 		domain     => 'github.test',
@@ -2872,12 +2880,12 @@ sub gh_calls {
 sub child_recorder {
 	my ($self, %opts) = @_;
 	my $copy = $opts{copy} // 'a';
-	my $bin  = "$self->{base}/bin";
+	my $bin  = "$self->{tmp}/bin";
 	helper::mkdir_or_fail($bin) unless -d $bin;
 
 	$self->{child_copy} = $copy;
-	$self->{child_log}  = "$self->{base}/children.jsonl";
-	$self->{child_plan} = "$self->{base}/child-plan.json";
+	$self->{child_log}  = "$self->{tmp}/children.jsonl";
+	$self->{child_plan} = "$self->{tmp}/child-plan.json";
 
 	my $path = "$bin/genesis";
 	helper::put_file($path, 0755,
@@ -2959,10 +2967,10 @@ sub lock_probe_bin {
 	my ($self) = @_;
 	return $self->{lock_probe_bin} if $self->{lock_probe_bin};
 
-	my $bin = "$self->{base}/bin";
+	my $bin = "$self->{tmp}/bin";
 	helper::mkdir_or_fail($bin) unless -d $bin;
 	my $path = "$bin/lock-probe";
-	$self->{lock_probe_log} = "$self->{base}/lock-probe.jsonl";
+	$self->{lock_probe_log} = "$self->{tmp}/lock-probe.jsonl";
 
 	helper::put_file($path, 0755,
 		helper::get_file("$helper::TOPDIR/t/Harness/bin/lock-probe"));
@@ -3004,7 +3012,7 @@ sub lock_probe_log {
 # other log the harness owns takes.
 sub shuttle_spy {
 	my ($self, %opts) = @_;
-	my $log = "$self->{base}/shuttle.jsonl";
+	my $log = "$self->{tmp}/shuttle.jsonl";
 	helper::put_file($log, '');
 	_guard_env(GENESIS_SHUTTLE_SPY => $log);
 	return $self->{shuttle} = bless {harness => $self, log => $log},
@@ -3032,7 +3040,7 @@ sub _path_prefix {
 	my ($self, %opts) = @_;
 	my @prefix;
 	push @prefix, $self->_fake_git_dir($opts{git_version}) if $opts{git_version};
-	push @prefix, "$self->{base}/gh-bin", "$self->{base}/bin";
+	push @prefix, "$self->{tmp}/gh-bin", "$self->{tmp}/bin";
 	return @prefix;
 }
 
@@ -3044,7 +3052,7 @@ sub _path_prefix {
 # handed to the real git, so the run still does real work on real refs.
 sub _fake_git_dir {
 	my ($self, $version) = @_;
-	my $dir = "$self->{base}/git-$version";
+	my $dir = "$self->{tmp}/git-$version";
 	return $dir if -d $dir;
 
 	helper::mkdir_or_fail($dir);
