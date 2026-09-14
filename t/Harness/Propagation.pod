@@ -1176,7 +1176,12 @@ All eleven keys land in one commit on control, and that commit is made only
 where the file changed, so asking for the shape twice, or asking for it on a
 repository that already carries it, is not a death.
 
-=head2 git($h, $copy, %opts)
+=head2 $h-E<gt>git($copy, %opts)
+
+This one is a method and not an exported name, unlike its neighbours here, so
+it is called on the harness rather than given one as a first argument.  It has
+an entry among them because it takes options and because the one handle per
+copy is worth a paragraph.
 
 Returns the C<Service::Git> handle for a copy, which defaults to C<a>, and
 hands C<%opts> on to C<Service::Git-E<gt>new>, so a row that wants a handle of
