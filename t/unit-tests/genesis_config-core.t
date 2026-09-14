@@ -1040,6 +1040,49 @@ EOF
 		"the sibling is still in what would be persisted");
 };
 
+subtest 'clear() retracts a default alongside the value' => sub {
+	my $path = "$tmp/clear-default.yml";
+	put_file($path, <<'EOF');
+---
+deployment_type: test-kit
+pipeline:
+  provider:
+    type: concourse
+EOF
+
+	my $c = Genesis::Config->new($path);
+	$c->validate({
+		deployment_type => {type => 'string'},
+		pipeline => {
+			type   => 'hash',
+			schema => {
+				provider => {
+					type   => 'hash',
+					schema => {
+						type => {type => 'string'},
+						team => {type => 'string', default => 'main'},
+					}
+				}
+			}
+		},
+	});
+	is($c->get('pipeline.provider.team'), 'main',
+		"validate fills the default the schema declares");
+	is($c->get_source('pipeline.provider.team'), 'default',
+		"and the default is where it came from");
+
+	# A removal has to be a removal in every source.  A default the
+	# departing schema wrote outliving the value it was filled from is a
+	# key nobody asked for, which the next validation reports as unknown.
+	$c->clear('pipeline.provider');
+
+	ok(!$c->has('pipeline.provider.team'),
+		"clearing the parent retracts the filled default too");
+	ok(!$c->has('pipeline.provider'),
+		"and the block itself is gone");
+	is($c->get('deployment_type'), 'test-kit', "unrelated keys survive");
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
