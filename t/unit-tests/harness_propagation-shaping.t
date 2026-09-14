@@ -188,6 +188,19 @@ subtest 'a second harness arms its own plan, not the first harness plan' => sub 
 		'which the second one never wrote into');
 };
 
+subtest 'a kit lands its contents at dev, not a directory below it' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0, kit => 'exodus-reader');
+	# The second install meets a dev directory that is already there, which
+	# is the shape a copy of the directory itself gets wrong.
+	Harness::Propagation::_install_kit($h, $h->a);
+
+	ok(-f $h->a . '/dev/kit.yml', 'the kit file is at dev');
+	ok(!-d $h->a . '/dev/exodus-reader',
+		'and the kit has no directory of its own below it');
+};
+
 subtest 'a root creation that dies puts the vault names back' => sub {
 	plan tests => 2;
 

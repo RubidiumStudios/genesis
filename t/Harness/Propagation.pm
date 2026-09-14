@@ -696,8 +696,12 @@ sub _install_kit {
 		? "$helper::TOPDIR/$name"
 		: "$helper::TOPDIR/t/kits/$name";
 	die "make_harness does not know the kit $name\n" unless -d $from;
+	# The kit's contents land at dev, rather than the kit directory landing
+	# inside a dev that is already there under its own name, which is what a
+	# plain copy of the directory does the second time around.
+	helper::mkdir_or_fail("$root/dev") unless -d "$root/dev";
 	run({dir => $self->{base}, onfailure => "Failed to install the $name kit"},
-		'cp', '-R', $from, "$root/dev");
+		'cp', '-R', "$from/.", "$root/dev");
 
 	return $self;
 }
