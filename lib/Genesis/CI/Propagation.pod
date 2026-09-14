@@ -357,7 +357,7 @@ B<Returns:> hashref
     {
         propagated         => N,         # envs that successfully propagated
                                          # (includes skipped_idempotent)
-        skipped_idempotent => [envs],    # envs whose pr/<env> HEAD already
+        skipped_idempotent => [envs],    # envs whose pr/<env>/<type> HEAD already
                                          # matched this control_sha
         errors             => [strings], # per-env failures (loop bails on
                                          # first error and skips push + PRs)
