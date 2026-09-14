@@ -1196,7 +1196,9 @@ key at all rather than editing one key of the file C<make_harness> left.
 =head1 METHODS
 
 C<r>, C<a>, and C<b> return the three paths.  C<type>, C<control>, and
-C<envs> return the declared values.  C<slug> and C<pr_branch> render the
+C<envs> return the declared values.  C<git> answers the C<Service::Git>
+handle for a copy and has an entry of its own above, because it takes options
+and the one handle per copy is worth a paragraph.  C<slug> and C<pr_branch> render the
 deployment slug and its pull request branch.  C<exodus_mount>,
 C<applied_path>, and C<env_path> render the vault addresses.  C<gh> returns
 the GitHub double once C<github_double> has stood one up, and undef before
