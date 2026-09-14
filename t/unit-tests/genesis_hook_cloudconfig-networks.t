@@ -1658,6 +1658,56 @@ subtest '_process_network_subnets - groups by range and leaves distinct ranges a
 		'and loses the name, which BOSH has no use for');
 };
 
+# ---------------------------------------------------------------------------
+# Overrides against a bare kit target name
+#
+# _add_extended_cloud_config decides whether an override under
+# bosh-configs.cloud names an entry the kit already registered or asks for a
+# new one, and a new network is refused because additional networks are not
+# supported.  A kit registers under the prefixed form name_for produces unless
+# it passes network_definition an empty name_prefix, which the blacksmith kit
+# does for valkey-service because the valkey-forge release hardcodes that
+# network name.  An override keyed by the bare target then has to be
+# recognised as naming that entry; matching only the prefixed form read it as
+# a new network and refused an override an operator legitimately wrote.
+# ---------------------------------------------------------------------------
+
+# extended_env - an environment whose only cloud override is one network, and
+# a cloud config that already carries the entries named.
+sub extended_env {
+	my ($override_target, @registered) = @_;
+	my $env = make_deploy_env(
+		config => {
+			'bosh-configs' => {
+				cloud => {networks => {$override_target => {allocation => {size => 8}}}},
+			},
+		},
+	);
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+	return ($hook, {networks => [map {{name => $_}} @registered]});
+}
+
+subtest '_add_extended_cloud_config - an override keyed by a bare target names the kit entry' => sub {
+	plan tests => 3;
+
+	# The blacksmith case: registered bare, overridden bare.
+	my ($bare, $bare_config) = extended_env('valkey-service', 'valkey-service');
+	lives_ok { $bare->_add_extended_cloud_config($bare_config) }
+		'an override keyed by the bare name the kit registered is a match, not a new network';
+
+	# The ordinary case, where the kit let the naming default.
+	my ($pfx, $pfx_config) = extended_env('bosh');
+	push @{$pfx_config->{networks}}, {name => $pfx->name_for('net', 'bosh')};
+	lives_ok { $pfx->_add_extended_cloud_config($pfx_config) }
+		'an override keyed by the target still matches the prefixed form the kit registered';
+
+	# The guard: accepting the bare target must not accept every override.
+	my ($new, $new_config) = extended_env('nowhere', 'valkey-service');
+	throws_ok { $new->_add_extended_cloud_config($new_config) }
+		qr/network definitions are not supported yet.*nowhere/s,
+		'an override naming no registered entry is still refused as a new network';
+};
+
 
 done_testing;
 
