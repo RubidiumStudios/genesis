@@ -1113,15 +1113,26 @@ EOF
 	return $top->load_env($env_name);
 }
 
-# The tree sweeps that hunt a forbidden form -- a bare exit code, a git option
-# that post-dates the declared floor -- all want the same list of files, and
-# three copies of it drifted apart.  This is the one reader.  It is anchored on
-# $ENV{GENESIS_TOPDIR} rather than on the current directory, so a sweep finds
-# the same tree wherever the test happens to have chdir'd to, and it covers
-# every executable under bin/ as well as every module under lib/, so a second
+# sweep_files answers the list of files a tree sweep should walk.  The sweeps
+# that hunt a forbidden form -- a bare exit code, a git option that post-dates
+# the declared floor -- all want that same list, and three copies of it had
+# drifted apart.  This is the one reader.  It is anchored on
+# $ENV{GENESIS_TOPDIR} rather than on the current directory, so a sweep reads
+# the same tree wherever the test has chdir'd to, and it covers every module
+# and script under lib/ as well as every executable under bin/, so a second
 # script or a module in a new corner cannot invent a form and stay unseen.
 # The paths come back absolute and sorted; a caller that wants to print a short
-# name strips the topdir prefix itself.
+# name strips the topdir prefix itself, and a caller that skips a file by name
+# compares against the whole path rather than against a relative one.
+#
+# What it leaves out is worth saying, because a sweep is only as wide as this
+# list.  Nothing under t/ is swept, since the fixtures there write exit codes
+# and git commands on purpose and a guard that reports them gets weakened by
+# whoever meets it first.  A file under bin/ is swept only when it carries the
+# executable bit, so a script checked in without one is invisible.  And the
+# sub refuses to answer quietly where the anchor is wrong: it dies when
+# GENESIS_TOPDIR is unset, and it dies when the walk finds nothing at all,
+# because an empty list is the one answer that makes every caller pass.
 sub sweep_files {
 	my $top = $ENV{GENESIS_TOPDIR}
 		or die "sweep_files needs GENESIS_TOPDIR, which helper sets on import\n";
@@ -1129,15 +1140,19 @@ sub sweep_files {
 	my @files;
 	File::Find::find({
 		no_chdir => 1,
-		wanted   => sub {push @files, $File::Find::name if -f $_ && /\.pm$/},
-	}, "$top/lib") if -d "$top/lib";
+		wanted   => sub {push @files, $File::Find::name if -f $_ && /\.p[ml]$/},
+	}, "$top/lib");
 
 	File::Find::find({
 		no_chdir => 1,
 		wanted   => sub {push @files, $File::Find::name if -f $_ && -x $_},
-	}, "$top/bin") if -d "$top/bin";
+	}, "$top/bin");
 
-	return sort @files;
+	die "sweep_files found nothing under $top; is GENESIS_TOPDIR right?\n"
+		unless @files;
+
+	my @sorted = sort @files;
+	return @sorted;
 }
 
 # Remove a trailing comment from a line of Perl before a sweep matches a
