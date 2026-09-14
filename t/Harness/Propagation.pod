@@ -41,6 +41,16 @@ section whose C<enabled> is false, the string C<none> writes no section, and a
 hashref is an enabled pipeline with those repository-wide keys set.
 C<source_control> is a hashref merged under C<pipeline.source_control>.
 
+Three source-control keys are seeded whether or not C<source_control> names
+them, and they are C<control_branch>, C<pr_prefix>, and C<repository>.  The
+first two are seeded so the configuration agrees with the branch and the
+prefix the harness actually built.  The third is the one value the harness
+cannot leave to the code, because copy A is cloned from a bare repository at a
+filesystem path and that URL carries no GitHub owner and repo pair for the
+derivation to read.  A row proving that refusal takes the override away by
+naming C<repository> as undef in C<source_control>, which is how a seeded key
+is removed rather than replaced.
+
 C<kit> names one of the kits the suite ships under C<t/kits/>, and the harness
 copies it in as the deployment root's dev kit before the seeding commit, so a
 row runs against a repository whose kit is part of the control branch.  A
@@ -99,10 +109,9 @@ The same commit in copy B, never published.
 
 Commits in copy B and publishes it with a real C<git push>.  The push is per
 branch, carries no forced refspec, and sets the upstream, so copy B's own
-remote-tracking ref moves with the publish.  A
-divergence read taken straight after therefore reports in-sync with no second
-refresh, while copy A's refs stay where they were until copy A fetches or
-pushes.
+remote-tracking ref moves with the publish.  A divergence read taken straight
+after therefore reports in-sync with no second refresh, while copy A's refs
+stay where they were until copy A fetches or pushes.
 
 =head2 push_from($h, $copy, @branches)
 
@@ -280,8 +289,10 @@ read in whichever of the three repositories holds the commit, so a control
 commit published from copy B reads the same as one made in copy A.
 
 The environment file kind is the ancestors and the environment's own file
-together, which is the hierarchy C<propagation_files> joins, and an ancestor
-is a cumulative hyphen-prefix of the environment's name.  A site file has to
+together, where an ancestor is a cumulative hyphen-prefix of the
+environment's name.  That is the name-based ancestors alone and not everything
+C<propagation_files> joins, because the product's reader also picks up files
+an environment inherits explicitly and paths it has cached.  A site file has to
 travel for the same reason the leaf does, because a command standing on the
 deployment branch reads every C<genesis.pipeline.*> key through the merged
 hierarchy and finds a key set above the leaf absent wherever the file holding
@@ -468,11 +479,16 @@ into the file.  A value in the C<genesis> hashref that is itself a hashref of
 scalars and flat lists renders as a block one level in, which is how a row
 writes C<genesis.pipeline.track_additional_files> without composing the body
 itself; anything nested deeper than that dies by name rather than writing an
-address.  Where a row fills both the C<pipeline> key under C<genesis> and the
-C<pipeline> option itself, the two fold into one block and the C<pipeline> option wins a key they name
-together, because one file carries one pipeline key.  The C<genesis> key is
-written wherever anything is to be nested under it, so a site file carrying
-C<genesis> or C<pipeline> entries is a file a YAML reader will load.
+address.  A list holding a reference dies by name too, for the same reason,
+since a reference printed into a list entry writes an address the row never
+asked for.  Where a row fills both the C<pipeline> key under C<genesis> and
+the C<pipeline> option itself, the two fold into one block and the
+C<pipeline> option wins a key they name together, because one file carries
+one pipeline key.  A C<pipeline> key under C<genesis> that is not a hash
+cannot fold at all, and that is refused by name rather than written out as a
+second C<pipeline:> key.  The C<genesis> key is written wherever anything is
+to be nested under it, so a site file carrying C<genesis> or C<pipeline>
+entries is a file a YAML reader will load.
 
 A harness declared in pr mode adds C<require_pr> to the C<pipeline> block of
 every environment file it writes, so a row asks for pr mode once rather than
@@ -566,8 +582,10 @@ vault fixture for the reason C<break_vault> does.
 =head2 snapshot_w($h, %opts)
 
 Reads the branch, the HEAD sha, the current directory, the porcelain status,
-and the index, and returns them as one hashref.  The one option is C<copy>,
-which defaults to C<a>.  The directory is read before the rest, because a
+and the index, and returns them as one hashref.  The hashref carries a sixth
+key, C<dir>, which is the copy the five were read in, and that is how
+C<assert_w_restored> finds the repository to read them again.  The one option
+is C<copy>, which defaults to C<a>.  The directory is read before the rest, because a
 command that switched away can leave the process standing in a directory the
 switch removed, and the git reads below run through C<pushd>, which cannot
 return to a directory that is gone.  Where that has happened the snapshot
@@ -587,8 +605,9 @@ C<Test::Builder> for the length of the call.
 =head2 assert_snapshot_invariant($h, $env, %opts)
 
 Compares the deployment branch against the control commit its newest marker
-names.  Two comparisons and not one: the branch matches the source over the
-propagation set's paths, and the branch holds nothing outside the set.  The
+names.  It makes two comparisons and not one, because the branch has to match
+the source over the propagation set's paths and hold nothing outside the set.
+The
 second is the half that fires in practice, because a copy-only writer never
 removes a leftover C<init> or a path that dropped out of the set.  Every
 difference is named, and a branch with no marker fails rather than passing
@@ -799,6 +818,14 @@ logged, and reads those children back in order.  Each run carries its
 arguments, its pid, when it started and ended, its exit, its working
 directory, whether its standard input was a terminal, and what the switch lock
 was doing at its start, at its end, and while it ran.
+
+Each run also carries C<status_lost>, which is false on an ordinary run and
+true where the recorder could not reap its own child, which happens where
+something else reaped it first.  A child somebody else reaped leaves its
+status nowhere to be read, so the recorder writes an exit of 99 into the
+record and exits 99 itself rather than writing a zero that would read as a
+child that succeeded.  A row that weighs a child's exit should read the field
+as well, because those are the two ways an exit of 99 can arise.
 
 The options are C<copy>, which says whose switch lock is watched, C<exec>,
 which defaults on and runs the real genesis underneath, C<exit>, which answers
