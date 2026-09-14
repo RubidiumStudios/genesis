@@ -625,7 +625,10 @@ sub bare {
 sub _bare_with_errors {
 	my ($class, $name, $top) = @_;
 
-	bug("No 'top' specified in call to Genesis::Env->bare!!") unless $top;
+	# Named for the check rather than for either caller, because bare and
+	# is_valid_env_file both reach it and only one of them is bare.
+	bug("No 'top' specified when checking an environment name and file!!")
+		unless $top;
 
 	$name =~ s/\.yml$//;
 

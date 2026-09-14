@@ -13,6 +13,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use Test::Exception;
 
 use Genesis;
 use Genesis::Top;
@@ -44,7 +45,7 @@ subtest 'an environment can be read without a deployment' => sub {
 };
 
 subtest 'is_valid_env_file runs on the same constructor' => sub {
-	plan tests => 3;
+	plan tests => 5;
 
 	my $h   = make_harness(envs => ['qa'], type => 'bosh', vault => 0);
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
@@ -59,6 +60,19 @@ subtest 'is_valid_env_file runs on the same constructor' => sub {
 	my (undef, @name_errors) = Genesis::Env->is_valid_env_file('Nope', $top);
 	like($name_errors[0], qr{Invalid environment name},
 		'and so is a name the rules refuse');
+
+	# The point of the shared constructor is that the two readers say the
+	# same thing, which no assertion above this one actually compares.
+	my (undef, @bare_errors) =
+		Genesis::Env->_bare_with_errors('nowhere', $top);
+	my (undef, @file_errors) =
+		Genesis::Env->is_valid_env_file('nowhere', $top);
+	is_deeply(\@bare_errors, \@file_errors,
+		'both readers report the missing file in the same words');
+
+	throws_ok {Genesis::Env->_bare_with_errors('qa')}
+		qr{No 'top' specified when checking an environment name and file},
+		'and the check names what it needed, whichever reader called it';
 };
 
 subtest 'the merged read finds an inherited key the leaf lacks' => sub {
