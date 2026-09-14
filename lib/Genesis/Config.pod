@@ -437,6 +437,11 @@ default left behind would keep answering C<has()> and C<get()> for a key
 the caller has just removed, which reads as the removal having silently
 failed.
 
+Removing a key whose ancestor holds a scalar does nothing, rather than
+failing. A schema may declare a scalar default at a top-level key, and
+nothing is stored beneath a scalar, so a path under one names no value in
+the I<default> store and there is nothing there to remove.
+
 The I<env> layer is not modified, so a key an environment variable
 supplies remains accessible after C<clear()>. That layer is not the
 configuration's own state; it is the surroundings the process runs in, and
@@ -573,6 +578,13 @@ against a rebuilt schema would otherwise inherit the departing provider's
 defaults and report them as keys nobody declared. A caller that injects a
 default of its own through C<_update_source()> does so after validating,
 not before.
+
+The value cache is emptied alongside the I<default> store, so the
+invariant holds however warm the cache happens to be. A nested default is
+filled only when the parent does not already carry the sub-key, and the
+parent is read through that cache, so a cached parent still holding the
+departing default would suppress the fill and leave the key reported by
+C<get()> but present in no store at all.
 
 The schema is a hash reference keyed by top-level configuration key names.
 Each value is a hash reference describing that key's constraints:
@@ -816,6 +828,46 @@ B<Examples:>
 
     my $spec = $cfg->_schema_for_key('manifest_store');
     # { type => 'enum', values => [...], default => 'hybrid', ... }
+
+=head2 _blocked_by_scalar
+
+    my $blocked = Genesis::Config::_blocked_by_scalar($struct, $key);
+
+Reports whether a non-hash value sits on the way down to C<$key> in
+C<$struct>, which is how C<clear()> tells a removal that does nothing from
+one that would fail.
+
+B<A path beneath a scalar names no value.> A schema may declare a scalar
+default at a top-level key, and clearing a key under one has nothing to
+remove, so the walk that would otherwise report the scalar as a type
+mismatch is skipped. A path that stops short of a scalar is not blocked,
+because an absent ancestor is simply a key that is not there. A path
+carrying an array index is not blocked either, since only the walk itself
+understands indices.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$struct>
+
+The source structure to look in. It is not modified.
+
+=item C<$key>
+
+The dotted path whose ancestors are examined.
+
+=back
+
+B<Returns:> True when a non-hash ancestor blocks the path, false otherwise.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    # with manifest_store => 'hybrid' in the default store
+    Genesis::Config::_blocked_by_scalar($cfg->{default_values}, 'manifest_store.sub');
+    # Returns: 1
 
 =head2 _prune_empty_parents
 

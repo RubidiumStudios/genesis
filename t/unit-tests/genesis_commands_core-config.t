@@ -617,4 +617,68 @@ subtest 'config --set-from-file reports a file it cannot read' => sub {
 		"writes nothing");
 };
 
+# A version 2 repository: no pipeline section on disk, and the older ci.yml
+# beside it.  The load injects a v3-shaped pipeline default so the rest of
+# Genesis sees a uniform shape, and that injected key is one the version 2
+# schema never declares.
+sub v2_repo {
+	my ($name) = @_;
+	my $dir = workdir($name);
+
+	mkdir_or_fail("$dir/.genesis");
+	mkfile_or_fail("$dir/.genesis/config", <<'CFG');
+---
+creator_version: 3.2.0
+deployment_type: test-kit
+manifest_store: exodus
+version: 2
+CFG
+	mkfile_or_fail("$dir/ci.yml", <<'CI');
+---
+pipeline:
+  name: test-kit
+CI
+
+	run({dir => $dir}, 'git', 'init', '-q');
+	run({dir => $dir}, 'git', 'remote', 'add', 'origin',
+		'https://github.com/genesis/test-kit-deployments.git');
+
+	return $dir;
+}
+
+subtest 'config writes on a version 2 repository are not refused' => sub {
+	plan tests => 6;
+
+	# Loading a version 2 repository injects a pipeline default the version
+	# 2 schema does not declare, and the write path validates again before
+	# it saves.  A validation that inherited that injected default would
+	# report it as an unknown key and refuse every write the repository can
+	# make.
+	my $dir = v2_repo('config-v2-writes');
+
+	pushd $dir;
+	prepare_command('config', '--set', 'minimum_version', '3.0.0');
+	build_command_environment;
+	my ($set_code, $set_err) = run_config();
+	popd;
+
+	is($set_code, 0, "--set goes through on a version 2 repository");
+	unlike($set_err, qr/pipeline: unknown configuration key/,
+		"and the injected pipeline default is not reported as a key nobody declared");
+	like(slurp("$dir/.genesis/config"), qr/minimum_version:\s*3\.0\.0/,
+		"the value is saved");
+
+	pushd $dir;
+	prepare_command('config', '--unset', 'minimum_version');
+	build_command_environment;
+	my ($unset_code, $unset_err) = run_config();
+	popd;
+
+	is($unset_code, 0, "--unset goes through too");
+	unlike($unset_err, qr/pipeline: unknown configuration key/,
+		"for the same reason, on the removal side");
+	unlike(slurp("$dir/.genesis/config"), qr/minimum_version/,
+		"and the key is gone from the saved file");
+};
+
 done_testing;
