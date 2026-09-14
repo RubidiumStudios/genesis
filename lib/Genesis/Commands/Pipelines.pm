@@ -1687,7 +1687,8 @@ C<--output-dir> (write artifacts).
 =item B<pipeline-graph>
 
 Compile pipeline and write C<pipeline.md> containing a Mermaid flowchart.
-The provider is read from the repository's C<pipeline.provider> block.
+Where the repository configures a pipeline, the flowchart is drawn from
+the environment files and no provider is compiled for at all.
 
 =item B<pipeline-describe>
 
@@ -1696,8 +1697,7 @@ configures a pipeline, the report opens with the resolved source-control
 values and the tier each of them came from, so an override that has
 drifted away from what git says can be seen.  Where it configures none,
 the legacy configuration is compiled first and the progression is read
-off the compiled result, so the command prints in either case.  The
-provider is read from the repository's C<pipeline.provider> block.
+off the compiled result, so the command prints in either case.
 
 =item B<pipeline-diff> [--target TARGET]
 
