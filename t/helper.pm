@@ -853,8 +853,12 @@ sub vault_ok {
 	}
 
 	unless (eval {vault_start($target); 1}) {
+		# vault_start raises a message with a newline in its middle, and a
+		# newline anywhere in the text hands TAP a diagnostic line where a
+		# test name belongs, so every one of them folds to a space.
 		my $err = $@;
-		$err =~ s/\n\z//;
+		$err =~ s/\n+\z//;
+		$err =~ s/\n/ /g;
 		fail $err;
 		die "Cannot continue\n";
 	}
