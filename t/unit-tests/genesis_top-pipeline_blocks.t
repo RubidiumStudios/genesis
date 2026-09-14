@@ -47,18 +47,35 @@ sub automated_pipeline_block {
 	return join("\n", @lines);
 }
 
-# An assert helper: write one environment file with a nested genesis
-# block, because the harness's own writer renders a scalar or a flat list
-# and would leave a reference's address behind for anything deeper.
+# A state builder: write one environment file with a nested genesis block.
+# The harness's own write_env_file renders a scalar or a flat list and would
+# leave a reference's address behind for anything deeper, which is the gap
+# this works around, and it should render a nested hash under
+# genesis.pipeline.* to any depth.  Once it does, this goes.
+#
+# Called with no lines it writes the environment back to saying nothing
+# about the pipeline, which is the state the harness built it in, so a
+# subtest that starts here is not reading what another subtest wrote.
+#
+# Each write carries a count of its own beside the environment, because a
+# reset to what the file already holds gives the commit no delta otherwise.
+my $writes = 0;
+
 sub write_nested_env {
 	my ($name, @lines) = @_;
-	commit_on_control($h, files => {"$name.yml" => join("\n",
-		'---', 'kit:', '  name:    dev', '  version: latest',
-		'genesis:', "  env: $name", '  pipeline:', @lines, '')});
+	commit_on_control($h, files => {
+		"$name.yml" => join("\n",
+			'---', 'kit:', '  name:    dev', '  version: latest',
+			'genesis:', "  env: $name",
+			(@lines ? ('  pipeline:', @lines) : ()), ''),
+		'.env-count' => sprintf("%d\n", ++$writes),
+	});
 }
 
 subtest 'three blocks are required under an automation' => sub {
 	plan tests => 4;
+
+	write_nested_env('qa');
 
 	lives_ok {load_with($h, automated_pipeline_block())} 'the complete section validates';
 	for my $block (qw/shuttle vault locker/) {
@@ -71,6 +88,8 @@ subtest 'three blocks are required under an automation' => sub {
 subtest 'and every one of them is optional under manual' => sub {
 	plan tests => 1;
 
+	write_nested_env('qa');
+
 	lives_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',
 		'  provider:', '    type: manual',
 		'  source_control:', '    repository: team/bosh'))}
@@ -79,6 +98,8 @@ subtest 'and every one of them is optional under manual' => sub {
 
 subtest 'the shuttle backend refuses a directory' => sub {
 	plan tests => 3;
+
+	write_nested_env('qa');
 
 	lives_ok {load_with($h, automated_pipeline_block())} 's3 validates';
 	throws_ok {load_with($h, automated_pipeline_block() =~ s/backend: s3/backend: file/r)}
@@ -90,6 +111,8 @@ subtest 'the shuttle backend refuses a directory' => sub {
 
 subtest 'notifications are optional and overridable per environment' => sub {
 	plan tests => 4;
+
+	write_nested_env('qa');
 
 	lives_ok {load_with($h, automated_pipeline_block())}
 		'the whole block may be left out';
@@ -111,6 +134,8 @@ subtest 'notifications are optional and overridable per environment' => sub {
 
 subtest 'the provider-specific keys are validated per provider type' => sub {
 	plan tests => 4;
+
+	write_nested_env('qa');
 
 	lives_ok {load_with($h, automated_pipeline_block(provider_extra => [
 		'    public: true', '    tagged: true',
@@ -134,6 +159,8 @@ subtest 'the provider-specific keys are validated per provider type' => sub {
 
 subtest 'the removed keys are refused by name' => sub {
 	plan tests => 3;
+
+	write_nested_env('qa');
 
 	write_nested_env('qa', '    locks:', '      bosh_upgrade: x');
 	throws_ok {load_with($h, automated_pipeline_block())}
