@@ -175,6 +175,41 @@ subtest 'a call that names a file gets the body there' => sub {
 		'and wrote the body into rather than onto stdout');
 };
 
+subtest 'six calls at once keep every change and every line' => sub {
+	plan tests => 3;
+
+	my $h  = make_harness(envs => ['prod'], vault => 0, github => 1);
+	my $gh = $h->gh;
+
+	local $ENV{PATH} = join ':', $gh->{bin}, $ENV{PATH};
+	local $ENV{GITHUB_AUTH_TOKEN} = $gh->{token};
+	my $client = Service::Github->new(domain => $gh->{domain}, tls => 'no');
+	my $url    = $client->pulls_url($gh->{repository});
+
+	# Six creates from six processes, which is how a spawned command reaches
+	# the double.  Each rewrites the state file whole and appends a line to
+	# the call log, so both are read, changed, and written under a lock of
+	# their own or the six lose one another.
+	my $script = <<'SCRIPT';
+for n in 1 2 3 4 5 6 ; do
+  curl -sSL -X POST -D /dev/null -d "{\"title\":\"pull request $n\"}" \
+    "$1" >/dev/null 2>&1 &
+done
+wait
+SCRIPT
+	run({}, 'bash', '-c', $script, 'six-creates', $url);
+
+	my $open = $client->list_prs($gh->{repository}, state => 'open');
+	is(scalar @$open, 6, 'every one of the six creates is in the state file');
+	is_deeply([sort map {$_->{title}} @$open],
+		[map {"pull request $_"} 1 .. 6], 'each under the title it sent');
+
+	# Every line is decoded on the way back, so a line another call tore in
+	# half would take this read down rather than pass unnoticed.
+	my @posts = grep {$_->{method} eq 'POST'} gh_calls($gh);
+	is(scalar @posts, 6, 'and every one of the six lines is in the call log');
+};
+
 subtest 'a token withheld from one run and back for the next' => sub {
 	# Two of the six are the restoration each run asserts for itself.
 	plan tests => 6;
