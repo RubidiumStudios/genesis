@@ -44,7 +44,7 @@ subtest 'every written record reads back through one reader' => sub {
 };
 
 subtest 'a record still reads as itself once it has children' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my $h = make_harness(envs => ['qa']);
 	certify($h, 'qa', commit => 'deadbeef', control_commit => 'cafebabe');
@@ -55,8 +55,14 @@ subtest 'a record still reads as itself once it has children' => sub {
 	my $deployed = record_at($h, $h->env_path('qa'));
 	is($deployed->{'git.commit'}, 'deadbeef',
 		'the deployment record reads back with a pipeline record beneath it');
-	is(record_at($h, $h->env_path('qa') . '/pipeline')->{dependencies},
-		'lab/bosh', 'and the record beneath it reads back as itself');
+	# The record is read into a lexical and asserted before a field is taken
+	# off it, because record_at answers undef for a path with nothing at it
+	# and a dereference of that would take the file down rather than fail
+	# the one assertion it belongs to.
+	my $pipeline = record_at($h, $h->env_path('qa') . '/pipeline');
+	ok($pipeline, 'the record beneath it is there to be read');
+	is($pipeline && $pipeline->{dependencies},
+		'lab/bosh', 'and it reads back as itself');
 
 	is(record_at($h, $h->exodus_mount . 'qa'), undef,
 		'a path holding nothing of its own reads undef whatever it carries');
