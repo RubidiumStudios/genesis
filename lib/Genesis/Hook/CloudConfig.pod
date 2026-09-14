@@ -2292,6 +2292,67 @@ B<Examples:>
     my ($reserved_ips, $is_static) = $self->_get_reserved_allocation('bosh', $subnet);
     # Returns: (IPv4 range of bosh-reserved IPs, 1)
 
+=head2 _is_neighbour_annotation
+
+    my $bool = _is_neighbour_annotation($key, $value, $anchor);
+
+Returns true when a C<< <target>_ip_<suffix> >> key records the address
+immediately before or after C<< <target>_ip >>. Plain function, not a method
+-- no invocant.
+
+An OCFP carve written under C<scheme_version> 2 stores the neighbouring
+address on either side of a single reservation, C<_a> for the one below
+C<< <target>_ip >> and C<_b> for the one above, so that a densely packed run
+carries its own context. Those keys are left out of the allocation because
+the address belongs to whichever target sits beside this one, but they are
+deliberate rather than malformed, so
+L</_get_reserved_allocation> uses this to tell them from a key it should
+warn about. Every bloc writes the shape, so warning on it would fire on
+every lookup.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$key>
+
+The reservation key being examined, such as C<bosh_ip_a>.
+
+=item C<$value>
+
+The address that key holds.
+
+=item C<$anchor>
+
+The address held by the C<< <target>_ip >> the suffix sits beside.
+
+=back
+
+B<Returns:> A boolean. False unless the key ends in C<_ip_a> or C<_ip_b>,
+both addresses are defined and parseable, and the value is adjacent to the
+anchor on the side the suffix names.
+
+B<Errors:> None. An unparseable address is caught and reported as false, so
+a malformed value falls through to the caller's warning rather than dying.
+
+B<Limitations:> Only C<_a> and C<_b> are recognised, and only at a distance
+of exactly one address. A carve that annotated a neighbour two addresses out,
+or used another letter, would be reported as malformed.
+
+B<Examples:>
+
+    # bosh_ip is 10.8.0.5; _a holds its predecessor
+    my $bool = _is_neighbour_annotation('bosh_ip_a', '10.8.0.4', '10.8.0.5');
+    # Returns: 1
+
+    # the wrong side for the suffix
+    my $bool = _is_neighbour_annotation('bosh_ip_a', '10.8.0.6', '10.8.0.5');
+    # Returns: 0
+
+    # not an annotation at all
+    my $bool = _is_neighbour_annotation('bosh_ip_a', '10.8.0.40', '10.8.0.5');
+    # Returns: 0
+
 =head2 _find_az_key
 
     my $az_key = $self->_find_az_key($az);
