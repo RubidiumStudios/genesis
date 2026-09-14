@@ -198,4 +198,33 @@ subtest 'a fixture that cannot go on answers with one status' => sub {
 	chmod 0700, "$where/.git";
 };
 
+subtest 'a child whose status was lost is recorded as lost' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $recorder = child_recorder($h, probe => 1);
+
+	# The ordinary shape first, so the field below means something read
+	# against it.
+	my (undef, $rc) = run({stderr => 0, passfail => 0}, $recorder, 'version');
+	is($rc, 0, 'a run nobody interfered with answers what its child did');
+	my ($plain) = child_runs($h);
+	ok(!$plain->{status_lost}, 'and records that the status was not lost');
+
+	# With SIGCHLD ignored the kernel reaps the child itself, so the wait can
+	# never answer with the pid it forked, and the loop has to end on that
+	# rather than spin on it.  The recorder is read into a process that has
+	# already ignored the signal rather than handed it across an exec,
+	# because perl puts SIGCHLD back to its default as it starts up.
+	my (undef, $lost) = run({stderr => 0, passfail => 0}, 'perl', '-e',
+		'$SIG{CHLD} = "IGNORE"; my $it = shift @ARGV; do $it; die $@ if $@;',
+		$recorder, 'version');
+	is($lost, 99, 'a run whose child was reaped elsewhere refuses');
+
+	my @runs = child_runs($h);
+	ok($runs[-1]{status_lost}, 'the record says the status was lost');
+	is($runs[-1]{exit}, 99,
+		'and carries the same status, not the success it cannot vouch for');
+};
+
 done_testing;
