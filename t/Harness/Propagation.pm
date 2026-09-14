@@ -1018,6 +1018,10 @@ sub propagation_set {
 # one, and undef where it declares none, which is how propagation_set tells a
 # narrowed kind from an untouched one.
 #
+# The list is genesis.pipeline.track_additional_files, which is the key
+# Genesis::Env::track_additional_files reads out of the merged environment,
+# because two readers of one key must not disagree about where it lives.
+#
 # The parse is cached on the file's own text, because spruce is a process per
 # call and every delivery reads the set.
 my %TRACKED;
@@ -1034,8 +1038,13 @@ sub _tracked_files {
 	my ($yaml, $failed) = load_yaml_file($tmp);
 	unlink $tmp;
 
-	my $declared = $failed ? undef
-	             : ((($yaml || {})->{genesis} || {})->{track_additional_files});
+	# The key is read where the product reads it, which is under
+	# genesis.pipeline, and a file that puts something other than a map there
+	# declares no list at all rather than dying on the read.
+	my $genesis  = $failed ? {} : (($yaml || {})->{genesis} || {});
+	my $pipeline = ref $genesis eq 'HASH' ? ($genesis->{pipeline} || {}) : {};
+	my $declared = ref $pipeline eq 'HASH'
+		? $pipeline->{track_additional_files} : undef;
 	return $TRACKED{$body} = ref $declared eq 'ARRAY' ? $declared
 	                       : defined $declared        ? [$declared]
 	                       :                            undef;
@@ -1558,7 +1567,10 @@ sub add_deployment_root {
 #
 # A value that is an arrayref renders as a YAML list rather than a scalar,
 # because genesis.pipeline.track_dependencies and its neighbours are lists and
-# sprintf of a reference writes an address into the file.
+# sprintf of a reference writes an address into the file.  A value that is a
+# hashref of scalars and flat lists renders as a block one level in, so a row
+# writes genesis.pipeline.track_additional_files through the genesis option
+# without composing the body itself.
 #
 # The genesis key is written wherever anything is to be nested under it, and
 # not only where the env key is.  A site file carrying genesis or pipeline
@@ -1574,16 +1586,21 @@ sub write_env_file {
 	my $prefix = $root ? "$root/" : '';
 	my $name   = $opts{site} // $env;
 	my $path   = "$prefix$name.yml";
+	my %genesis  = %{$opts{genesis}  || {}};
 	my %pipeline = %{$opts{pipeline} || {}};
 	$pipeline{require_pr} = 'true'
 		if $self->{mode} eq 'pr' && !$opts{site};
-	my $nested = %{$opts{genesis} || {}} || %pipeline;
+	# One file carries one pipeline key, so entries handed in under genesis
+	# fold into the pipeline block wherever a row fills both, and the pipeline
+	# option wins a key the two of them name together.
+	%pipeline = (%{delete $genesis{pipeline}}, %pipeline)
+		if %pipeline && ref $genesis{pipeline} eq 'HASH';
+	my $nested = %genesis || %pipeline;
 
 	my $body = "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n";
 	$body .= "genesis:\n" if !$opts{site} || $nested;
 	$body .= "  env: $name\n" unless $opts{site};
-	$body .= _yaml_pair($_, $opts{genesis}{$_}, 1)
-		for sort keys %{$opts{genesis} || {}};
+	$body .= _yaml_pair($_, $genesis{$_}, 1) for sort keys %genesis;
 	if (%pipeline) {
 		$body .= "  pipeline:\n";
 		$body .= _yaml_pair($_, $pipeline{$_}, 2) for sort keys %pipeline;
@@ -1600,15 +1617,35 @@ sub write_env_file {
 }
 
 # }}}
-# _yaml_pair - one key and its value at a depth, list or scalar {{{
+# _yaml_pair - one key and its value at a depth, block, list, or scalar {{{
+#
+# A hashref renders as a block of its own pairs one level in, which is how a
+# row writes genesis.pipeline.track_additional_files through the genesis
+# option.  Anything deeper than a hash of scalars and flat lists dies by name,
+# because sprintf of a reference writes an address into the file and a row
+# that asked for it should hear so rather than read HASH(0x...) back.
 sub _yaml_pair {
 	my ($key, $value, $depth) = @_;
 	my $pad = '  ' x $depth;
-	return sprintf("%s%s: %s\n", $pad, $key, $value)
-		unless ref $value eq 'ARRAY';
-	return sprintf("%s%s: []\n", $pad, $key) unless @$value;
-	return sprintf("%s%s:\n", $pad, $key)
-		. join('', map {sprintf("%s  - %s\n", $pad, $_)} @$value);
+	if (ref $value eq 'HASH') {
+		my $block = sprintf("%s%s:\n", $pad, $key);
+		for my $inner (sort keys %$value) {
+			die "write_env_file cannot write $key.$inner, because a value "
+			  . "nested more than one level deep is not supported\n"
+				if ref $value->{$inner} && ref $value->{$inner} ne 'ARRAY';
+			$block .= _yaml_pair($inner, $value->{$inner}, $depth + 1);
+		}
+		return $block;
+	}
+	if (ref $value eq 'ARRAY') {
+		die "write_env_file cannot write the list $key, because an entry of "
+		  . "it is a reference rather than a scalar\n"
+			if grep {ref} @$value;
+		return sprintf("%s%s: []\n", $pad, $key) unless @$value;
+		return sprintf("%s%s:\n", $pad, $key)
+			. join('', map {sprintf("%s  - %s\n", $pad, $_)} @$value);
+	}
+	return sprintf("%s%s: %s\n", $pad, $key, $value);
 }
 
 # }}}
@@ -3037,7 +3074,7 @@ sub stale_set_delivery {
 	# The environment file is staged rather than committed on its own, so the
 	# tracked list and the file it names arrive in the same control commit.
 	$self->_stage_env_file($env, %opts, root => $root,
-		genesis => {track_additional_files => [$file]});
+		genesis => {pipeline => {track_additional_files => [$file]}});
 	my $wide = $self->commit_on_control(
 		files   => {$path => "---\nextra: true\n"},
 		message => 'Track an extra file',
@@ -3048,7 +3085,7 @@ sub stale_set_delivery {
 	# The narrower set: the extra file is dropped from the tracked list and
 	# stays on the branch until a delivery removes it.
 	$self->_stage_env_file($env, %opts, root => $root,
-		genesis => {track_additional_files => []});
+		genesis => {pipeline => {track_additional_files => []}});
 	my $narrow = $self->commit_on_control(
 		files   => {},
 		message => 'Stop tracking the extra file',

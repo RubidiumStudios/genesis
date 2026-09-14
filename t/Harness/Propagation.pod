@@ -271,7 +271,8 @@ commit published from copy B reads the same as one made in copy A.
 
 The reactions under C<bin/>, the ops files, and the kit source under C<dev/>
 are one kind, and the environment file at C<at> narrows that kind wherever it
-declares C<genesis.track_additional_files>, so a path under those directories
+declares C<genesis.pipeline.track_additional_files>, which is the key the
+product itself reads, so a path under those directories
 is in the set only while the file at that commit names it.  Where the file
 declares no list the kind stands unnarrowed and matches everything under the
 three directories, which is every environment the suite writes without saying
@@ -434,9 +435,15 @@ in the file body names a deployment type.
 A value in either hashref that is an arrayref renders as a YAML list rather
 than a scalar, because C<genesis.pipeline.track_dependencies> and its
 neighbours are lists and a reference printed as a scalar writes an address
-into the file.  The C<genesis> key is written wherever anything is to be
-nested under it, so a site file carrying C<genesis> or C<pipeline> entries is
-a file a YAML reader will load.
+into the file.  A value in the C<genesis> hashref that is itself a hashref of
+scalars and flat lists renders as a block one level in, which is how a row
+writes C<genesis.pipeline.track_additional_files> without composing the body
+itself; anything nested deeper than that dies by name rather than writing an
+address.  Where a row fills both the C<pipeline> key under C<genesis> and the
+C<pipeline> option itself, the two fold into one block and the C<pipeline> option wins a key they name
+together, because one file carries one pipeline key.  The C<genesis> key is
+written wherever anything is to be nested under it, so a site file carrying
+C<genesis> or C<pipeline> entries is a file a YAML reader will load.
 
 A harness declared in pr mode adds C<require_pr> to the C<pipeline> block of
 every environment file it writes, so a row asks for pr mode once rather than
