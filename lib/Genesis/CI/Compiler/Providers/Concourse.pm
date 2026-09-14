@@ -209,6 +209,19 @@ sub provider_options_schema {
 			schema => {
 				image   => {type => 'string', default => 'genesiscommunity/concourse', description => 'Task image repository'},
 				version => {type => 'string', default => 'latest', description => 'Task image tag'},
+
+				# ASTBuilder and PipelineDescriptor both read
+				# task.privileged as the list of environments whose deploy
+				# task runs privileged, so the key has to be declared here
+				# or an operator who writes it has the load refuse it by
+				# name.  No default, because an absent list and an empty
+				# one mean the same thing to the readers.
+				privileged => {
+					type        => 'array',
+					subtype     => 'string',
+					envsplit    => ',',
+					description => "Environments whose deploy task runs privileged",
+				},
 			}
 		},
 
