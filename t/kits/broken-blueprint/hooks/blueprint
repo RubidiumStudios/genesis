@@ -5,7 +5,11 @@ set -eu
 # write, so the refusal is spelled there and read back here.  A row asks for
 # it by writing genesis.kit_blueprint_fails into the environment it wants to
 # fail, and every other environment of the set renders as it always did.
-if grep -q 'kit_blueprint_fails' "$GENESIS_ROOT/$GENESIS_ENVIRONMENT.yml" ; then
+#
+# The match is anchored to the key, because the bare word is a word a comment
+# or another key's value can carry, and an environment that only mentions the
+# refusal is not an environment that asked for it.
+if grep -qE '^[[:space:]]*kit_blueprint_fails:' "$GENESIS_ROOT/$GENESIS_ENVIRONMENT.yml" ; then
   echo >&2 "the blueprint hook refuses to render $GENESIS_ENVIRONMENT"
   exit 1
 fi
