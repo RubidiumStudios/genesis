@@ -2886,9 +2886,15 @@ L</applied_record_path> hangs the pipeline's own record under.
 
 It is read from the first environment the pipeline names, through the merged
 hierarchy, because L</_validate_one_exodus_mount> has already refused a
-repository whose environments resolve the mount differently. The value comes
-back normalised with a trailing slash, so a caller appends to it directly.
-The answer is memoized, since it is the same for every read in a run.
+repository whose environments resolve the mount differently. Where the
+pipeline names none, the first of the root's own environment files answers
+instead. That fallback is what keeps the record readable while
+C<pipeline.enabled> is false, since L</pipeline_env_names> answers nothing
+at all for a disabled pipeline and the disowned repository of D64 is
+precisely one whose key is off while the record still stands. The value
+comes back normalised with a trailing slash, so a caller appends to it
+directly. The answer is memoized, since it is the same for every read in a
+run.
 
 B<Parameters:> None.
 
@@ -2902,9 +2908,9 @@ B<Errors:>
 
 C<"This repository has a pipeline but no environment to resolve
 genesis.exodus_mount from, so the pipeline's own record has no address."> -
-raised at C<Genesis::Exit::CONFIG> when the repository declares a pipeline
-and names no environment, carrying the remedy of adding an environment file
-or disabling the pipeline.
+raised at C<Genesis::Exit::CONFIG> when the repository holds no environment
+file at all, carrying the remedy of adding an environment file or disabling
+the pipeline.
 
 =back
 

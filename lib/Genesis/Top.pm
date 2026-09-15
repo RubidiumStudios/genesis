@@ -1222,11 +1222,21 @@ sub source_control_resolved {
 # _validate_one_exodus_mount, so reading it from the first pipeline
 # environment through the merged hierarchy is enough, and exodus_mount
 # normalises to a trailing slash.
+#
+# The pipeline's environments are asked first and the root's environment
+# files second, because the record has to stay readable when
+# pipeline.enabled reads false.  pipeline_env_names answers nothing at all
+# for a disabled pipeline, and D64's disowned repository is exactly one
+# whose key is off while the record still stands, so an address that only
+# a live pipeline could spell would put that record out of reach of the
+# refusal that exists to find it.  The mount is a repository-wide fact
+# either way, and configuration load refuses a repository whose
+# environments disagree about it.
 sub _pipeline_exodus_mount {
 	my ($self) = @_;
 	return $self->_memoize(sub {
 		my ($self) = @_;
-		my ($first) = $self->pipeline_env_names;
+		my ($first) = ($self->pipeline_env_names, $self->_env_file_names);
 		bail(
 			{exitcode => CONFIG},
 			"This repository has a pipeline but no environment to resolve ".

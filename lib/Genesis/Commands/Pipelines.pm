@@ -6,8 +6,10 @@ use warnings;
 use Genesis;
 use Genesis::State;
 use Genesis::Commands;
-use Genesis::Exit qw/CONFIG/;
+use Genesis::Exit qw/CONFIG NOPERM ABORTED/;
 use Genesis::Config;
+use Genesis::Term qw/in_controlling_terminal/;
+use Genesis::UI qw/prompt_for_boolean/;
 use Genesis::Top;
 use Genesis::Env;
 use Genesis::CI::Legacy qw//;
@@ -548,8 +550,15 @@ sub propagate {
 	my $dry_run = $opts->{'dry-run'};
 	my $top     = Genesis::Top->new('.');
 
-	bail("CI is not configured for this repository.")
-		unless $top->pipeline_enabled;
+	# Both refusals stand ahead of everything else the run does, because a
+	# refusal raised after a walk has started is worse than no refusal at
+	# all.  The disowned pipeline comes first, since a repository whose
+	# configuration contradicts its own applied record has nothing useful
+	# to say about which provider owns the propagation.  A repository that
+	# never had a pipeline passes both and meets the pre-flight, which is
+	# where a repository with nothing configured belongs.
+	assert_not_disowned($top, 'propagate');
+	assert_provider_gate($top, $opts);
 
 	my $git     = Service::Git->new('.');
 	my $control = $top->control_branch;
@@ -1246,6 +1255,91 @@ sub resume {
 		info("Resumed pipeline #C{%s}", $name);
 	}
 	exit 0;
+}
+
+# }}}
+# }}}
+### Refusals {{{
+
+# assert_not_disowned - refuse a pipeline the configuration has disowned {{{
+#
+# D64: where pipeline-apply has left an applied record while pipeline.enabled
+# reads false, the configuration disowns a pipeline that is still live, still
+# watching its branches, and still deploying.  The command refuses and names
+# the two remedies.  The check needs the record and not just the key, because
+# a repository that never had a pipeline has neither, and that repository is
+# not disowning anything: it falls through to the pre-flight, which has its
+# own words for a repository with no pipeline at all.
+sub assert_not_disowned {
+	my ($top, $command) = @_;
+
+	return 1 if $top->pipeline_enabled;
+
+	my $applied = $top->applied_record or return 1;
+
+	bail(
+		{exitcode => CONFIG},
+		"Refusing to run #C{genesis %s}.  The pipeline is disabled in ".
+		"#C{.genesis/config}, but the applied record says ".
+		"#C{pipeline-apply} applied it from control\@%s at %s, so the ".
+		"configuration disowns a pipeline that is still live, still ".
+		"watching its branches, and still deploying.  Set ".
+		"#C{pipeline.enabled: true} again, or tear the pipeline down by ".
+		"hand, which has no command yet.  Nothing was written.",
+		$command, $applied->{control_commit} // '<unknown>',
+		$applied->{at} // '<unknown>'
+	);
+}
+
+# }}}
+# assert_provider_gate - the propagate run's break-glass past the pipeline {{{
+#
+# D95: under an automated provider the pipeline owns propagation, so a bare
+# run refuses before it walks and --force is the only way past.  With the
+# flag at a terminal the operator acknowledges once; outside a terminal the
+# refusal stands, because the pipeline's own job sets GENESIS_PIPELINE_TASK
+# and nothing legitimate reaches the gate unattended.  --dry-run passes
+# because it writes nothing, and -y answers the publish confirmation alone,
+# which is why nothing here reads it.
+sub assert_provider_gate {
+	my ($top, $opts) = @_;
+
+	my $provider = $top->pipeline_provider_type;
+	return 1 unless defined $provider && $provider ne 'manual';
+	return 1 if $ENV{GENESIS_PIPELINE_TASK};
+
+	my $warning = sprintf(
+		"The #C{%s} pipeline owns propagation for this repository.  ".
+		"Running it by hand does the pipeline's work without taking any ".
+		"of the pipeline's locks, so the pipeline has no way to see you.",
+		$provider
+	);
+
+	if ($opts->{'dry-run'}) {
+		warning($warning);
+		return 1;
+	}
+
+	bail(
+		{exitcode => NOPERM},
+		"%s\n\nRun it with #C{--force} at a terminal if you mean to.",
+		$warning
+	) unless $opts->{force};
+
+	bail(
+		{exitcode => NOPERM},
+		"%s\n\n#C{--force} needs a terminal, because the acknowledgement ".
+		"cannot be given without one.",
+		$warning
+	) unless in_controlling_terminal();
+
+	warning($warning);
+	bail(
+		{exitcode => ABORTED},
+		"Aborted at your request.  Nothing was written."
+	) unless prompt_for_boolean("Proceed anyway? [y|n]", 0);
+
+	return 1;
 }
 
 # }}}
