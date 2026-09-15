@@ -226,11 +226,10 @@ Genesis::CI::Provider - CI provider factory and base class
 Genesis::CI::Provider is the factory and abstract base class for CI provider
 configuration management.  It follows the same pattern as Genesis::Kit::Provider.
 
-A provider class answers for both halves of its configuration block. It
-declares the keys it reads, through C<provider_options_schema>, and it
-validates the block an operator wrote for it, through C<validate_config>.
-The two live together so that the check always has the declaration it is
-checking against.
+A provider class declares the keys it reads, through
+C<provider_options_schema>, and validates the block an operator wrote for
+it, through C<validate_config>. The two live together so that the check
+always has the declaration it is checking against.
 
 Validating that block is the provider's own job and not the framework's,
 and the base does it by validating the block against the keys that

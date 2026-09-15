@@ -741,6 +741,11 @@ over. It is a dispatcher and nothing more, so the data dependency is
 declared where a reader can see it rather than performed by a raw read
 inside whatever builds the schema.
 
+A block that is written as anything but a hash is refused before its
+discriminator is read at all, with C<< <path>: expected a hash >>, because
+there is no field to match against the map until there is a block holding
+one.
+
 A value no entry in the map owns is refused in the words C<enum> uses,
 C<< <path>: unknown value: <value>; expected one of <keys> >>, with the
 map's keys sorted. The module the chosen entry names is loaded with
@@ -756,11 +761,11 @@ Validates the block at C<$path> against C<$schema>, filling that schema's
 defaults into the configuration where every other reader will find them,
 and returns the error strings rather than refusing.
 
-It owns the defaults it files at I<default> priority under C<$path>:
+It owns the defaults it files at I<default> priority under C<$path>, so
 whatever a previous call filled there is dropped before this schema fills
-its own, so a block validated against one schema and then another does
-not carry the first one's defaults into the second one's walk and have
-them refused there as keys nobody declared.
+its own. A block validated against one schema and then another therefore
+does not carry the first one's defaults into the second one's walk and
+have them refused there as keys nobody declared.
 
 A block written on disk as an explicit empty hash is the one shape
 outside that ownership. Its defaults are filled at I<loaded> priority, so

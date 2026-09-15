@@ -384,8 +384,8 @@ sub validate_subtree {
 	# one, so the fill the parent gave it has to outlive the sweep below.
 	# Nothing here declares a default for it and nothing here would put it
 	# back, and the discriminator that chose the module doing the
-	# validating is exactly such a key: sweeping it would leave the block
-	# with nothing in it saying what the block is.
+	# validating is exactly such a key, so sweeping it would leave the
+	# block with nothing in it saying what the block is.
 	my %kept;
 	for my $ignored (sort keys %ignore) {
 		next unless struct_has($self->{default_values}, "$path.$ignored");
