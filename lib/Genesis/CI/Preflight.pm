@@ -77,12 +77,17 @@ sub require_control {
 	my ($top, $git, %opts) = @_;
 
 	my $control = $top->control_branch;
-	my $remote  = $git->default_remote // 'the remote';
+	# The remote's own name and the words that stand in for it are kept apart,
+	# because a repository with no remote configured has no name to print and
+	# the words belong in prose rather than inside a command the operator is
+	# told to run.
+	my $remote  = $git->default_remote;
+	my $named   = $remote // 'the remote';
 	my $action  = $opts{action}  // sprintf('run #C{genesis %s}', $opts{command} // 'propagate');
 	my $outcome = $opts{outcome} // 'Nothing was written.';
 
 	my @events;
-	push @events, sprintf('created control from %s/%s', $remote, $control)
+	push @events, sprintf('created control from %s/%s', $named, $control)
 		if grep {$_ eq $control} @{($opts{refreshed} || {})->{created} || []};
 
 	my $div = $git->resolve_branch($control,
@@ -94,20 +99,44 @@ sub require_control {
 		"read the topology.  Create it by hand, with the repository scaffold ".
 		"for a new repository or as the migration describes for a move to v3, ".
 		"push it, then run the command again.  %s",
-		$action, $control, $remote, $outcome
+		$action, $control, $named, $outcome
 	) unless defined $div;
 
 	my $state = {divergence => $div, events => \@events};
 	return $state if ($opts{on_divergence} // 'refuse') eq 'report';
 	return $state if $div->{state} eq 'in-sync';
 
+	if ($div->{state} eq 'no-remote') {
+		# A repository with no remote configured has nothing to name in a push,
+		# so the remedy asks for the remote first rather than printing a command
+		# with prose standing where the remote's name should be.
+		my $publish = defined $remote
+			? sprintf("Push it with #C{git push -u %s %s}", $remote, $control)
+			: "Give the repository a remote and push it there";
+		bail({exitcode => DATAERR},
+			"Refusing to %s.  The control branch #C{%s} exists here and not on ".
+			"#C{%s}, so nothing it holds can be read by a deploy on another ".
+			"machine.  %s, then run the command again.  %s",
+			$action, $control, $named, $publish, $outcome
+		);
+	}
+
+	# The remote has control and this clone does not, which is the one case
+	# D65 asks the refresh to close by writing the local ref.  The refresh gives
+	# the branch the working tree stands on the tracking refspec and nothing
+	# else, so a tree standing on an unborn control leaves the ref unwritten and
+	# the query answers here.  The refusal says the creation did not happen,
+	# rather than reading a staleness out of two counts that are both zero.
 	bail({exitcode => DATAERR},
-		"Refusing to %s.  The control branch #C{%s} exists here and not on ".
-		"#C{%s}, so nothing it holds can be read by a deploy on another ".
-		"machine.  Push it with #C{git push -u %s %s}, then run the command ".
+		"Refusing to %s.  The control branch #C{%s} is on #C{%s/%s} and not in ".
+		"this clone.  The refresh writes the local ref for a branch the remote ".
+		"has and this clone lacks, so something stopped it here, and a working ".
+		"tree standing on #C{%s} with no commit on it is what usually does.  ".
+		"Write the ref with #C{git checkout -B %s %s/%s}, then run the command ".
 		"again.  %s",
-		$action, $control, $remote, $remote, $control, $outcome
-	) if $div->{state} eq 'no-remote';
+		$action, $control, $named, $control, $control, $control, $named, $control,
+		$outcome
+	) if $div->{state} eq 'no-local';
 
 	# The number governs the verb in every one of these, because a refusal
 	# that reads "by 1 commit, which are unpublished" is read past rather
@@ -115,18 +144,22 @@ sub require_control {
 	my $counts = $div->{state} eq 'diverged'
 		? sprintf("is ahead of #C{%s/%s} by %s and behind it by %s, so it is ".
 		          "both unpublished and stale",
-		          $remote, $control, _commits($div->{ahead}), _commits($div->{behind}))
+		          $named, $control, _commits($div->{ahead}), _commits($div->{behind}))
 		: $div->{state} eq 'ahead'
 		? sprintf("is ahead of #C{%s/%s} by %s, which %s unpublished.  A ".
 		          "propagation marker names a control commit by its sha alone, ".
 		          "so a deploy on another machine can read only a commit the ".
 		          "remote has",
-		          $remote, $control, _commits($div->{ahead}),
+		          $named, $control, _commits($div->{ahead}),
 		          $div->{ahead} == 1 ? 'is' : 'are')
 		: sprintf("is behind #C{%s/%s} by %s, so it is stale and propagating ".
 		          "from it would deliver state a teammate has already moved past",
-		          $remote, $control, _commits($div->{behind}));
+		          $named, $control, _commits($div->{behind}));
 
+	# Every arm below names the remote inside a command, and every one of them
+	# is reached only through a tracking ref, which no repository has without a
+	# remote to have written it, so the remote is named here and not stood in
+	# for.
 	my $remedy = $div->{state} eq 'behind'
 		? sprintf("Rebase it with #C{git pull --rebase %s %s}", $remote, $control)
 		: $div->{state} eq 'ahead'

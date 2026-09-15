@@ -149,6 +149,11 @@ subtest 'the query asks refs and never the network' => sub {
 	my ($body) = $src =~ m{sub resolve_branch \{(.+?)\n\}}s;
 	unlike($body, qr{fetch_branches|remote_branch_exists|ls-remote},
 		'and the query neither fetches nor asks the remote');
+
+	# The arming is cleared as well as the counts, because reset_steps empties
+	# the log and the tally and leaves the armed step itself in the plan, and
+	# an arming left standing here would be inherited by every row below.
+	restore_remote($h);
 };
 
 # The sweep asks for the forced form the retired single-branch helper wrote,
