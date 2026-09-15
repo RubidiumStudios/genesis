@@ -10,6 +10,11 @@
 # moved is one the session works out for itself by comparing tips, so the only
 # way to read the record is a commit that leaves the tip where it was, and the
 # row arms exactly that.
+#
+# The last row proves T119, which is the shape of the loss the whole step was
+# written for, in which a run reported its files and a commit while the branch
+# held neither.  It is the row that proves the step as a whole, because it
+# shows the writer stopping before it can report a success it cannot show.
 use strict;
 use warnings;
 use utf8;
@@ -304,6 +309,103 @@ subtest 'a checkout_file that dies leaves the branch at T and clean' => sub {
 	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $before,
 		'the branch is back at T and no commit stands');
 	ok($git->is_clean, 'the tree and the index are clean');
+};
+
+# Proves T119: we reproduce the shape the loss had, in which the writer
+# reports the files and the commit while the branch holds neither, and the
+# next command throws the whole thing away while the success message is still
+# on screen.  With the check in place the writer stops before it can report a
+# success it cannot show, so a reported delivery is one the branch can be
+# asked for.
+subtest 'the loss reports nothing it cannot show' => sub {
+	plan tests => 9;
+
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	my $first = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the fragment the blueprint names',
+		push    => 1,
+	);
+
+	# The branch is delivered and published before the run the row means, so
+	# the six files below are the only paths the next delivery has to write
+	# and the failure names the six the run claimed rather than the whole
+	# set.  That is the loss's own shape, since the run it happened to was
+	# delivering a handful of changed files onto a branch already standing at
+	# an earlier delivery.
+	deliver($h, 'qa', copy => 'a', control => $first, push => 1);
+
+	my %six = map {("bosh/dev/$_.yml" => "---\nname: $_\n")}
+		qw(one two three four five six);
+	my $source = commit_on_control($h,
+		files   => {%six},
+		message => 'add six files under the kit',
+		push    => 1,
+	);
+
+	my $in_root = in_root($h->a . '/bosh');
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+	my $before = ref_in($h->a, 'refs/remotes/origin/' . $h->slug('qa'));
+
+	# The loss's shape is a write that is reported and never lands, which a
+	# step returning without doing anything reproduces exactly.  The arming
+	# runs from the first call onward, so all six of the writes are reported
+	# and none of them reaches the repository.
+	my $fault = fault_git($h, copy => 'a');
+	skip_on($fault, 'checkout_file', 1, from => 1);
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	my $err = do {
+		local $@;
+		eval {
+			$session->apply_files($source,
+				env     => $env,
+				message => Genesis::CI::Marker::build($source, 'qa'),
+			);
+			1;
+		} or $@;
+	};
+
+	isa_ok($err, 'Genesis::CI::RunFailure', 'the run stopped');
+
+	my $failure = failure_of($err);
+	is($failure && $failure->kind, 'run-fatal',
+		'and it stopped as a system failure');
+	like($failure ? $failure->report_line : '',
+		qr{staged propagation set does not match its source},
+		'the first assertion is the one that caught it');
+
+	my @named = $failure ? $failure->paths : ();
+	is(scalar(@named), 6, 'the failure names all six files the run claimed');
+	is_deeply([sort @named], [sort keys %six],
+		'and it names them by the paths the run would have reported');
+
+	# The arming is read as well as its outcome, so a later change that
+	# stopped reaching the writes at all would fail this row rather than
+	# pass it quietly.
+	ok(scalar(grep {$_->[0] eq 'checkout_file'} step_log($fault)),
+		'the writer did write, and the harness kept the writes from landing');
+
+	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $before,
+		'no commit stands, so no report of one exists');
+
+	exception(sub {$session->abort('the row has read what it came for')});
+
+	is(ref_in($h->r, 'refs/heads/' . $h->slug('qa')), $before,
+		'nothing was published');
+	assert_w_restored($w, 'the abort restores the working state');
 };
 
 done_testing;
