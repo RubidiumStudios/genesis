@@ -89,14 +89,15 @@ subtest 'the propagation base is taken from the branch it is given' => sub {
 		'and it was taken against the control branch passed in';
 };
 
-subtest 'a cascade resolves a base for the env it names and for each child' => sub {
-	# propagate resolves a base twice, once for the environment the
-	# cascade is named after and once for every environment in its
-	# scope, and both reads have to reach the marker in the branch's own
-	# log rather than the merge base underneath it.  Each branch here
-	# carries a marker with one hand-made commit on top, which is the
-	# shape that makes the marker path say so out loud, so a warning
-	# naming the branch is proof the marker was read on that branch.
+subtest 'the bare run measures every read against the configured branch' => sub {
+	# D36 retired the <env> argument and the cascade it scoped, so a run
+	# resolves no propagation base any more and the marker warnings that
+	# used to prove where each base came from are unreachable from here.
+	# What is left to prove, and what this file is about, is that the whole
+	# run is measured against the branch the configuration names rather
+	# than against the schema default: the topology is read from trunk, the
+	# source commit is trunk's own tip, and the branch check compares the
+	# run against trunk and so never fires.
 	plan tests => 4;
 
 	my $c = make_harness(envs => ['qa', 'prod'], control => 'trunk',
@@ -105,53 +106,27 @@ subtest 'a cascade resolves a base for the env it names and for each child' => s
 
 	# The env file is committed on trunk and the run reads trunk against the
 	# remote before it reads anything else, so the commit is published here.
-	# An unpushed control refuses the run, and what this row is about is
-	# where each propagation base is read from.
+	# An unpushed control refuses the run before any of this is reached.
 	push_from($c, 'a', 'trunk');
-
-	my ($trunk) = Harness::Propagation::run(
-		{dir => $c->a, onfailure => 'Failed to read trunk'},
-		'git', 'rev-parse', 'trunk');
-	chomp $trunk;
-
-	# The propagation base is still read off a branch named by the
-	# environment alone, so the two branches that carry the markers are cut
-	# here rather than through the harness's deployment-branch helpers,
-	# which spell the longer name.  Nothing here can carry both names at
-	# once, because git refuses refs/heads/qa/bosh while refs/heads/qa
-	# stands.
-	Harness::Propagation::run(
-		{dir => $c->a, onfailure => "Failed to cut $_"},
-		'git', 'branch', $_, 'trunk') for qw/qa prod/;
-
-	for my $env (qw/qa prod/) {
-		local_only_commit($c, $env, marker => $trunk,
-			files => {"$env-marker.yml" => "---\npropagated: true\n"});
-		hand_commit($c, $env, copy => 'a', push => 0,
-			files => {"$env-by-hand.yml" => "---\nby: hand\n"});
-	}
 	stand_on($c, 'trunk');
 
-	# The control commit is named outright, which is what lets the run
-	# source the cascade without a deployment record standing behind qa.
-	# What is under test is where each base is read from, not what
-	# certifies the source, and the harness writes no deployment audit.
-	# Nothing stands between the pre-flight and the walk, so the run
-	# reaches the walk and reads each base off the branch that carries its
-	# marker, which is what this row is about.  The deployment branches
-	# these environments would have are absent, and the walk says so and
-	# carries on rather than refusing.
-	my (undef, $err) = $c->run_genesis({restore => 0},
-		'propagate', 'qa', '--commit', $trunk, '--dry-run');
+	my $short = $c->git('a')->sha('trunk', short => 1);
 
-	like $err, qr/Branch qa has 1 manual commit on top of the last propagation/,
-		'the base for the named environment came off its own marker';
-	like $err, qr/Branch prod has 1 manual commit on top of the last propagation/,
-		"and so did the base for the environment downstream of it";
-	unlike $err, qr/has never been propagated to/,
-		'neither read fell through to an unresolved base';
-	unlike $err, qr/must be run from the control branch/,
-		'and the run was measured against trunk, not the schema default';
+	# The deployment branches these environments would have are absent,
+	# because only pipeline-apply cuts one, and the walk says so and
+	# carries on rather than refusing.  That is what lets the run reach the
+	# walk here with no branch fixture at all.
+	my (undef, $err) = $c->run_genesis({restore => 0},
+		'propagate', '--dry-run');
+
+	like $err, qr/Propagating from trunk \@/,
+		'the run named the configured branch as what it propagates from';
+	like $err, qr/Propagating from trunk \@ \Q$short\E/,
+		'and sourced the commit that branch actually stands on';
+	like $err, qr/qa: awaiting.*prod: awaiting/s,
+		'both environments were read out of the topology trunk carries';
+	unlike $err, qr/must be run from/,
+		'and the branch check was measured against trunk, not the default';
 };
 
 done_testing;

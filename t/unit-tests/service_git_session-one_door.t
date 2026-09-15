@@ -142,7 +142,12 @@ subtest 'the propagate run drives a session end to end' => sub {
 	# is reached, on the grounds that nothing but pipeline-apply cuts one.
 	push_from($h, 'a', $qa);
 
-	my $control = commit_on_control($h,
+	# The run sources whatever control's tip holds, so the change to
+	# propagate is simply made and published there.  Naming a commit is not
+	# open to a caller any more: --commit went with the cascade it fed,
+	# because a caller-chosen source is the one thing that let the
+	# pipeline's run and the operator's run differ.
+	commit_on_control($h,
 		files   => {'qa.yml' => slurp($h->a . '/qa.yml') . "\n# a change\n"},
 		message => 'change qa',
 		push    => 1,
@@ -150,8 +155,7 @@ subtest 'the propagate run drives a session end to end' => sub {
 
 	# run_genesis asserts for itself that the run left the working state as
 	# it found it, which is the fourth row of this plan.
-	my ($out, $err, $exit) = run_genesis($h,
-		'propagate', '--commit', $control);
+	my ($out, $err, $exit) = run_genesis($h, 'propagate');
 
 	is($exit, 0, 'the run delivered and came back');
 

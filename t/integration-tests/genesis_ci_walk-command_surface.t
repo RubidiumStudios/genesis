@@ -12,8 +12,6 @@ use Harness::Propagation;
 
 use Test::More;
 
-use Genesis::Exit;
-
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
