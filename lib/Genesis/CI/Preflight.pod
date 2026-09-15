@@ -27,6 +27,21 @@ the design calls illegal exits C<DATAERR>, and a remote this clone cannot
 reach exits C<TEMPFAIL>, which is the one of the three a pipeline job may
 retry.
 
+=head2 The order the first stage runs in
+
+The stage runs in one order and the order matters.  The refresh comes first,
+so every later question is asked of current remote-tracking refs.  Control is
+settled next, because the topology is read from it.  Then every deployment
+branch in scope is classified and every refusal is raised, before anything is
+written.  Only then does the stage write: a branch whose local-only commits a
+re-run reproduces is reset, and a branch that is merely behind is
+fast-forwarded.
+
+After the stage, a deployment branch in scope is C<in-sync> or it has no local
+ref, which is the fact the walk rests on when it diffs from the local ref.
+Under C<dry_run> nothing is written, and each write the stage would have made
+is reported as a warning saying the report assumes it.
+
 =head1 FUNCTIONS
 
 =head2 local_only_commits($git, $branch)
@@ -235,6 +250,20 @@ C<dry_run> nothing is written; the line is reported as an assumption the real
 run would make, so a report never reads as though the branch had already
 moved.
 
+Last of all, a branch that is merely behind its remote-tracking ref is moved
+up to it by fast-forward, which resolves nothing a human would decide and
+which the deploy's own C<--ff-only> is the precedent for.  The divergence is
+asked again rather than read off the record, because a branch this stage has
+just reset stands where its tracking ref does and the record was written
+before that move.  The fast-forward is reported as an event line too, and
+under C<dry_run> it is reported as an assumption and nothing is written.
+
+Once the stage has run, a deployment branch in scope is C<in-sync> or it has
+no local ref at all.  That is what lets the walk take its diff base from the
+local ref: a delivery a teammate published is already on the branch by then,
+so it is part of what the walk diffs against rather than something the walk
+delivers a second time.
+
 The whole pipeline is classified rather than the environments one run happens
 to touch, because the initial state is a property of the repository and not of
 the run.  A hand-made branch anywhere in the pipeline is a defect the operator
@@ -307,13 +336,14 @@ The divergence record for the control branch.
 
 One record per environment that has a branch on either side, keyed by the
 environment's name.  A branch this stage reset carries C<reset> set on its
-record.
+record, and one it fast-forwarded carries C<fast_forwarded>, whose
+C<state> is then C<in-sync> and whose C<behind> is 0.
 
 =item C<events>
 
 The lines the caller prints.  They are seeded from the control record, and
-the reset lines are appended to them, so the caller prints the whole stage's
-events once and in order.
+the reset and fast-forward lines are appended to them in that order, so the
+caller prints the whole stage's events once and in order.
 
 =back
 
@@ -348,6 +378,13 @@ B<Examples:>
   # $initial->{branches}{qa}{reset} is 1, and $initial->{events} carries
   # 'reset qa/bosh to origin/qa/bosh, discarding 1 commit that the walk
   # reproduces'
+
+  my $initial = Genesis::CI::Preflight::initial_state($top, $git,
+      envs => ['qa'], refreshed => $refreshed, control => $control_state);
+  # where a teammate published a delivery this clone had not seen,
+  # $initial->{branches}{qa}{fast_forwarded} is 1, its state is 'in-sync',
+  # and $initial->{events} carries
+  # 'fast-forwarded qa/bosh to origin/qa/bosh, 1 commit behind'
 
 =head1 INTERNAL FUNCTIONS
 

@@ -332,6 +332,38 @@ sub initial_state {
 		push @{$state->{events}}, $line;
 	}
 
+	# Last, a branch that is merely behind moves by fast-forward, which
+	# resolves nothing a human would decide and which the deploy's own
+	# --ff-only is the precedent for (D5).  After this a deployment branch
+	# is in-sync or it has no local ref at all, which is what lets the diff
+	# base stay the local ref under D2.
+	#
+	# The divergence is asked again rather than read off the record, because
+	# a branch this stage has just reset stands where its tracking ref does
+	# and the record was written before that move.
+	for my $env (@{$opts{envs} // []}) {
+		my $record = $state->{branches}{$env} or next;
+		my $branch = $record->{branch};
+
+		my $div = $git->resolve_branch($branch);
+		next unless $div && $div->{state} eq 'behind';
+
+		my $line = sprintf('fast-forwarded %s to %s/%s, %s behind',
+			$branch, $remote, $branch, _commits($div->{behind}));
+
+		if ($opts{dry_run}) {
+			warning(
+				"#Y{This report assumes the fast-forward of }#C{%s}#Y{ that a ".
+				"real run would make.}  %s", $branch, $line);
+		} else {
+			$git->set_branch_ref($branch, sprintf('refs/remotes/%s/%s', $remote, $branch));
+			$record->{fast_forwarded} = 1;
+		}
+		$record->{state}  = 'in-sync';
+		$record->{behind} = 0;
+		push @{$state->{events}}, $line;
+	}
+
 	return $state;
 }
 
