@@ -79,6 +79,11 @@ EOF
 # triggers on is the control branch that same block names.  So there is
 # nothing for the provider block to declare until this provider's own
 # compiler lands and brings the keys it reads with it.
+#
+# output_layout is among the keys that wait on it.  A provider offers that
+# key by declaring it here, and this one claims no ability to emit several
+# files while it has no compiler class to declare one, so it declares no
+# such key either.
 sub provider_options_schema {
 	return {};
 }

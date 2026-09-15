@@ -294,14 +294,18 @@ sub declared_capabilities {
 # capability_gates - which configuration key each capability gates {{{
 #
 # Two of the six gate nothing configurable, since deployment_locks and
-# cross_pipeline_events are structural and their absence is D74's "no such
-# capability" outcome rather than a refused key.
+# cross_pipeline_events are structural and their absence is D74's "no
+# such capability" outcome rather than a refused key.
+#
+# multi_file_output gates nothing here either, under D105.  The key it
+# gated, output_layout, is declared by the provider that can use it and
+# by nobody else, so a provider that cannot offers no such key and the
+# refusal is the ordinary undeclared-key refusal.
 sub capability_gates {
 	return {
 		optional_git_triggers => 'genesis.pipeline.manual',
 		scheduled_jobs        => 'genesis.pipeline.redeploy_cron',
 		per_commit_runs       => 'pipeline.provider.group_commits',
-		multi_file_output     => 'pipeline.provider.output_layout',
 	};
 }
 

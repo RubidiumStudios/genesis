@@ -1,8 +1,9 @@
 #!perl
 # Proves T39 and T40: a provider declares the six capabilities D101 names,
-# Concourse declares the first five true and multi_file_output false, and
-# a capability that is false refuses the key it gates, naming both the key
-# and the capability.
+# Concourse declares the first five true and multi_file_output false, a
+# capability that is false refuses the key it gates, naming both the key
+# and the capability, and the layout key is declared by the provider that
+# can emit several files rather than offered on its behalf.
 use strict;
 use warnings;
 use utf8;
@@ -18,6 +19,7 @@ use Genesis;
 provide_rc();
 use_ok 'Genesis::Top';
 use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::Provider';
 
 # The Concourse compiler class comes in through the registry's own file
 # entry rather than by package name, because nothing has pulled that file
@@ -38,17 +40,18 @@ my @NAMES = qw/cross_pipeline_events deployment_locks multi_file_output
 # capabilities that are the six defaults with the named ones overridden,
 # register them, and answer with the type.  The compiler-side class carries
 # the capabilities and the CLI-side class carries the fragment, which is
-# where every provider declares one.  That fragment declares both
-# repository-wide gated keys itself, for two reasons.  A key no fragment
-# declares is refused as unknown before any gate is read, so a gate row
-# needs its key declared to reach the gate at all; and output_layout is
-# declared by no real provider's fragment until the output-layout work
-# lands, so the multi_file_output row brings its own declaration of it and
-# the gate fires today.
+# where every provider declares one.  That fragment declares group_commits
+# itself, because a key no fragment declares is refused as unknown before
+# any gate is read, so a gate row needs its key declared to reach the gate
+# at all.
 #
-# The defaulted option gives both of those keys a default in the fragment,
-# for the row that asks what a value the operator never wrote does to a
-# gate.
+# The layout key is declared only where the fixture claims it can emit
+# several files, which is how a provider declares it.  A fixture that
+# emits one file offers no such key, so an operator who writes it is
+# refused by name like anybody writing a key nobody declared.
+#
+# The defaulted option gives group_commits a default in the fragment, for
+# the row that asks what a value the operator never wrote does to a gate.
 my $seq = 0;
 sub provider_with {
 	my (%caps) = @_;
@@ -62,6 +65,17 @@ sub provider_with {
 	$all{$_} = $caps{$_} for keys %caps;
 	my $decl = join(', ', map {"$_ => ".($all{$_} ? 1 : 0)} @NAMES);
 
+	# The ability is what decides whether the key is there to write, and
+	# D67 gives the key the default it carries wherever it is declared.
+	my $layout = $all{multi_file_output} ? <<'LAYOUT' : '';
+		output_layout => {
+			type        => 'enum',
+			values      => [qw/single multiple/],
+			default     => 'single',
+			description => 'How many files the provider emits'
+		},
+LAYOUT
+
 	put_file("t/tmp/lib/$cli_rel", <<"CAPCLI");
 package $cli_pkg;
 use base 'Genesis::CI::Provider';
@@ -74,12 +88,7 @@ sub provider_options_schema {
 			type        => 'boolean',
 			@{[$defaulted ? "default     => 1,\n\t\t\t" : '']}description => 'Deploy the tip of what arrived rather than each commit'
 		},
-		output_layout => {
-			type        => 'enum',
-			values      => [qw/single multiple/],
-			@{[$defaulted ? "default     => 'single',\n\t\t\t" : '']}description => 'How many files the provider emits'
-		},
-	};
+@{[$layout]}	};
 }
 1;
 CAPCLI
@@ -114,7 +123,7 @@ subtest 'the declaration carries six names' => sub {
 };
 
 subtest 'a capability that is false refuses the key it gates' => sub {
-	plan tests => 4;
+	plan tests => 3;
 
 	local @INC = ('t/tmp/lib', @INC);
 
@@ -139,11 +148,29 @@ subtest 'a capability that is false refuses the key it gates' => sub {
 	throws_ok {load_with($h, automated_config($no_per_commit, 'group_commits: false'))}
 		qr/group_commits.*\Q$no_per_commit\E.*per_commit_runs/s,
 		'group_commits names the key, the provider, and the capability';
+};
 
-	my $no_multi_file = provider_with(multi_file_output => 0);
-	throws_ok {load_with($h, automated_config($no_multi_file, 'output_layout: multiple'))}
-		qr/output_layout.*\Q$no_multi_file\E.*multi_file_output/s,
-		'output_layout names the key, the provider, and the capability';
+subtest 'the layout key is offered by the provider that can use it' => sub {
+	plan tests => 3;
+
+	local @INC = ('t/tmp/lib', @INC);
+
+	# A provider that can emit several files declares the key.  Its class
+	# is reached through the registry, which is how every reader of a
+	# fragment reaches one.
+	my $multi  = provider_with(multi_file_output => 1);
+	my $schema = Genesis::CI::Provider->provider_class($multi)
+		->provider_options_schema;
+	is $schema->{output_layout}{type}, 'enum',
+		'a multi-file provider declares the layout key in its own fragment';
+	is $schema->{output_layout}{default}, 'single',
+		'with the default D67 gives it';
+
+	# One that cannot declares nothing, so the key is simply not a key.
+	my $solo = provider_with(multi_file_output => 0);
+	throws_ok {load_with($h, automated_config($solo, 'output_layout: multiple'))}
+		qr/pipeline\.provider\.output_layout: unknown configuration key/,
+		'and a provider that emits one file offers no such key at all';
 };
 
 subtest 'the gated key is read out of the merged hierarchy' => sub {
@@ -185,10 +212,9 @@ subtest 'a capability that is true admits the key it gates' => sub {
 
 	# A gate is about what the operator chose, and a default the fragment
 	# filled is the provider's own answer rather than anybody's choice, so
-	# it cannot be the thing a refusal is about.  Both repository-wide keys
-	# here carry a default and neither capability is declared.
-	my $defaulted = provider_with(defaulted => 1,
-		per_commit_runs => 0, multi_file_output => 0);
+	# it cannot be the thing a refusal is about.  The one repository-wide
+	# gated key here carries a default and its capability is not declared.
+	my $defaulted = provider_with(defaulted => 1, per_commit_runs => 0);
 	write_env_file($h, 'qa', pipeline => {});
 	lives_ok {load_with($h, automated_config($defaulted))}
 		'a key nobody wrote, filled from the fragment, trips no gate';
