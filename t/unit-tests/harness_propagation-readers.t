@@ -161,6 +161,41 @@ subtest 'the six later readers answer about the fixture' => sub {
 		'and a branch made since reads back beside it, so a row can compare');
 };
 
+# clone_copy builds rather than reads, and it is proved here because it is
+# fresh_clone's near neighbour and the two answer the same subject: what a
+# copy cut from R today holds and what it stands on.
+subtest 'a copy cut from R now stands on control and holds only what R reaches' => sub {
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+
+	# The rewrite drops the commit behind the tip, so control needs a tip
+	# above the one that is going to be dropped.
+	commit_on_control($h, files => {'ops/one.yml' => "---\none: 1\n"},
+		message => 'the commit the rewrite drops', push => 1);
+	commit_on_control($h, files => {'ops/two.yml' => "---\ntwo: 2\n"},
+		message => 'the commit the rewrite keeps', push => 1);
+	my $gone = rewrite_control($h);
+	ok(!reachable_on_r($h, $gone), 'the rewrite left a commit no ref of R reaches');
+
+	my $key = clone_copy($h);
+	is($key, 'c', 'clone_copy answers the key it registered the copy under');
+	is($h->git($key)->current_branch, $h->control,
+		'and the copy stands on control, so real code can be run inside it');
+
+	# The two halves of the transfer: a plain local clone hardlinks the whole
+	# object store, so this is the row that says the copy was cut over a
+	# transport that sends what the refs reach and nothing else.
+	ok(!run({dir => $h->{$key}, passfail => 1}, 'git', 'cat-file', '-e', $gone),
+		'the dropped commit is not in the copy at all');
+	ok(run({dir => $h->a, passfail => 1}, 'git', 'cat-file', '-e', $gone),
+		'while copy A still holds it, so the copy is what makes the difference');
+
+	ok(!eval {clone_copy($h, as => 'a'); 1},
+		'and a key the harness already holds is refused rather than taken');
+};
+
 subtest 'the newest entry of a record set reads back nested' => sub {
 	plan tests => 5;
 

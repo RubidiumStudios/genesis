@@ -309,6 +309,14 @@ sub fresh_clone {
 sub clone_copy {
 	my ($self, %opts) = @_;
 	my $key = $opts{as} // 'c';
+
+	# The key names a field of the harness itself, so one that is already
+	# taken would replace a copy, a path, or a fixture for every accessor
+	# that reads it afterwards, and it would do it without a word.  A row
+	# that asks for a key the harness holds is told so instead.
+	die "The harness already holds '$key', so no copy can be registered there\n"
+		if exists $self->{$key};
+
 	my $dir = "$self->{tmp}/copy-" . int(rand(1_000_000));
 
 	run({dir => $self->{base}, onfailure => "Failed to cut a copy from R"},

@@ -258,7 +258,7 @@ sub abort {
 		"You are standing on #C{%s}.  Put the working tree back by hand ".
 		"before running anything else here.",
 		$error, $self->{origin}{branch}, $restore_error,
-		$git->current_branch // '<detached>'
+		$self->_standing_on
 	) if $restore_error;
 
 	bail("%s", $error);
@@ -328,6 +328,35 @@ sub _verify_reachable {
 		"remote and refresh.",
 		$commit, ($record ? "#C{$record}" : 'the record we were given')
 	);
+}
+
+# }}}
+# _standing_on - what to call the place a failed restore left us {{{
+#
+# current_branch runs `git rev-parse --abbrev-ref HEAD`, which answers the
+# literal string HEAD on a detached HEAD rather than answering undefined, so
+# a fallback behind it can never fire and an operator whose restore failed is
+# told they are standing on "HEAD", which names nothing they can act on.
+#
+# Since D94 a detached HEAD is a designed state rather than an accident, so
+# the question is asked here instead.  The commit is the thing the operator
+# can act on, and the target the session last switched to is named beside it
+# where the two are not the same, because that is the target they asked for.
+sub _standing_on {
+	my ($self) = @_;
+	my $git    = $self->{git};
+
+	my $branch = $git->current_branch;
+	return $branch if defined $branch && length $branch && $branch ne 'HEAD';
+
+	my $head = eval { $git->sha('HEAD') };
+	return 'a detached HEAD' unless $head;
+
+	my $on = $self->{on};
+	return sprintf("a detached HEAD at %s, which we switched to as %s",
+		$head, $on) if defined $on && length $on && $on ne $head;
+
+	return sprintf("a detached HEAD at %s", $head);
 }
 
 # }}}
@@ -506,7 +535,7 @@ sub _restore {
 	}
 
 	bail("Failed to return to #C{%s}: we are on #C{%s}.",
-		$origin->{branch}, $git->current_branch // '<detached>')
+		$origin->{branch}, $self->_standing_on)
 		unless ($git->current_branch // '') eq $origin->{branch};
 
 	return $self;

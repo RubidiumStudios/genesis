@@ -218,7 +218,10 @@ control branch, and returns that key.  A row that wants to run real code inside
 the copy wants a C<Service::Git> handle on it, and the C<git> accessor builds a
 handle from a copy key, so registering the copy is what lets every accessor the
 harness already has read it rather than having the row build a handle of its
-own.  Takes C<as>, the key to register it under, which defaults to C<c>.
+own.  Takes C<as>, the key to register it under, which defaults to C<c>.  A key
+the harness already holds is refused rather than taken, because registering a
+copy over C<a> would replace copy A for every accessor that reads it
+afterwards.
 
 The clone is made over C<file://> rather than over the path, because git
 hardlinks the whole object store for a plain local clone and a commit no ref of
