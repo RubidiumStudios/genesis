@@ -231,8 +231,9 @@ sub provider_options_schema { ... }
 
 `provider_options_schema` and `capabilities` are both mandatory, each
 abstract on the base class that owns it, and every provider has to
-answer both. A class that leaves either one out fails when its
-configuration loads, because the base raises rather than guessing: a
+answer both. A provider the compiler loads fails at configuration load
+if it leaves either one out, because the base raises rather than
+guessing: a
 provider with no declared keys would have every key an operator wrote
 refused by name, and a provider whose abilities are unknown cannot have
 those keys gated at all.

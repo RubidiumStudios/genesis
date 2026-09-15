@@ -13,8 +13,9 @@ use Getopt::Long qw/GetOptionsFromArray/;
 # spelled one way in the schema and another in the code, which is the
 # drift H26 names.  The manual provider has no compiler class, because
 # under D43 pipeline-apply sets no pipeline for it, and its CLI class
-# declares an empty fragment, which is how D100's refusal of a provider
-# key beside type: manual falls out of the ordinary rules.  The
+# declares an empty fragment, so that D100's refusal of a provider key
+# beside type: manual will fall out of the ordinary rules once the
+# dispatch reads that fragment at load.  The
 # github-actions provider has no compiler class yet either: the type
 # validates and resolves on the CLI side, and the compiler class arrives
 # with the provider itself.
