@@ -8,7 +8,7 @@ use strict;
 use warnings;
 
 use Genesis qw/bail run trace/;
-use Genesis::Exit qw/TEMPFAIL DATAERR/;
+use Genesis::Exit qw/TEMPFAIL DATAERR SOFTWARE/;
 use Cwd qw/getcwd/;
 use Fcntl qw/:flock/;
 use IO::Handle;
@@ -27,9 +27,11 @@ sub new {
 		git       => $git,
 		control   => $opts{control},
 		active    => 0,
+		finished  => 0,
 		origin    => undef,
 		on        => undef,
 		switched  => {},
+		committed => {},
 		lock      => undef,
 	}, $class;
 }
@@ -39,8 +41,24 @@ sub new {
 
 ### Accessors {{{
 
+# git - the handle this session was built on {{{
+#
+# The writer that lands at M8 already holds the session, and reaching git
+# through it keeps that writer from building a second handle for the same
+# working tree, which would key a second session and break I9.
+sub git { $_[0]->{git} }
+
+# }}}
 # active - is this session open {{{
 sub active { $_[0]->{active} }
+
+# }}}
+# finished - did finish complete its clean path {{{
+#
+# D84 makes a finished session the precondition for the post-deploy child of
+# M15, so a session that went out through abort answers false here and the
+# child is never spawned behind a run that failed.
+sub finished { $_[0]->{finished} ? 1 : 0 }
 
 # }}}
 # origin - the branch, the HEAD sha, and the cwd begin recorded {{{
@@ -51,26 +69,49 @@ sub origin { $_[0]->{origin} }
 sub on { $_[0]->{on} }
 
 # }}}
-# committed_branches - the branches whose tip moved since we switched to them {{{
+# modified_paths - the tracked paths that are modified or staged now {{{
+#
+# The words are git's own, out of `git status --porcelain`, so a caller
+# naming them to an operator names what the operator would see.  Untracked
+# files are left out, because D84 says they block nothing, and this is the
+# one reader the three verbs and the deploy of M13 all ask, so the list an
+# operator is shown is the same list wherever they are shown it.
+sub modified_paths {
+	my ($self) = @_;
+	my $status = $self->{git}->status;
+	return [sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status];
+}
+
+# }}}
+# committed_branches - the branches this session committed to {{{
 #
 # The writer lands at M8, so the session works out for itself what it wrote
 # rather than being told.  A branch whose tip differs from the tip recorded
 # at switch is one this session committed to, which is exactly the set D32
-# has abort reset back to T.
+# has abort reset back to T, and a branch the writer recorded outright joins
+# it, because a commit can leave a tip where it was.
+#
+# Control is filtered out of both halves.  I2 keeps committed work on control
+# whole, so control is never in the set the abort resets, however it got
+# there.
 sub committed_branches {
 	my ($self) = @_;
 	my $git = $self->{git};
 	my $control = $self->{control} // '';
-	return grep {
+
+	my %moved = map {($_ => 1)} grep {
 		my $now = eval { $git->sha($_) } // '';
-		$_ ne $control && $now && $now ne ($self->{switched}{$_} // '');
-	} sort keys %{$self->{switched}};
+		$now && $now ne ($self->{switched}{$_} // '');
+	} keys %{$self->{switched}};
+
+	return grep {$_ ne $control}
+		sort keys %{{%{$self->{committed}}, %moved}};
 }
 
 # }}}
 # }}}
 
-### The four verbs {{{
+### The verbs {{{
 
 # begin - the pre-flight, the clean assertion, and the record {{{
 #
@@ -96,8 +137,7 @@ sub begin {
 	# nothing staged, with untracked files ignored.  An operator's scratch
 	# file blocks no session, and no session removes one.
 	unless ($git->is_clean) {
-		my $status = $git->status;
-		my @dirty = sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
+		my @dirty = @{$self->modified_paths};
 		bail(
 			"Working tree has uncommitted changes, and this command switches ".
 			"branches.\n\nCommit or stash them first:\n%s",
@@ -110,8 +150,15 @@ sub begin {
 		head   => $git->sha('HEAD'),
 		cwd    => getcwd(),
 	};
-	$self->{active}   = 1;
-	$self->{switched} = {};
+	# The three records of what this session did are cleared here rather
+	# than at finish, because the handle hands out one session and a caller
+	# that opens a second one would otherwise read the first one's answers:
+	# a session still open would say it had finished, and an abort would
+	# reset a branch an earlier session wrote.
+	$self->{active}    = 1;
+	$self->{finished}  = 0;
+	$self->{switched}  = {};
+	$self->{committed} = {};
 	$self->_register_net;
 
 	trace("Service::Git::Session: began on %s", $self->{origin}{branch});
@@ -184,19 +231,37 @@ sub finish {
 	return $self unless $self->{active};
 
 	unless ($git->is_clean) {
-		my $status = $git->status;
-		my @modified = sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
+		my @modified = @{$self->modified_paths};
+
+		# The files are named here, in the error the caller is handed, and
+		# abort is told so: one list, in the message that carries the whole
+		# story, rather than the same list twice under two headings.
 		return $self->abort(sprintf(
 			"Something wrote into the repository during this command, which ".
 			"it should not have done:\n%s\nThese changes are being discarded.",
 			join("", map {"  - $_\n"} @modified)
-		));
+		), named => 1);
 	}
 
 	$self->_restore;
 	$self->_release_lock;
-	$self->{active} = 0;
+	$self->{active}   = 0;
+	$self->{finished} = 1;
 	return $self;
+}
+
+# }}}
+# finish_if_clean - finish, or decline and leave the session open {{{
+#
+# M13's deploy wants to name the modified files in its own words before it
+# decides what to do, so it asks for the finish and is given a false back
+# rather than a death.  The session stays open, so the caller can name the
+# files through modified_paths and then abort.
+sub finish_if_clean {
+	my ($self) = @_;
+	return 0 if @{$self->modified_paths};
+	$self->finish;
+	return 1;
 }
 
 # }}}
@@ -209,7 +274,7 @@ sub finish {
 # them away so the evidence reaches the operator.  Nothing here removes an
 # untracked file, so an operator's scratch file survives under D84.
 sub abort {
-	my ($self, $error) = @_;
+	my ($self, $error, %opts) = @_;
 	my $git = $self->{git};
 	$error = 'the session was aborted' unless defined $error && length $error;
 	$error =~ s/\s+$//;
@@ -219,13 +284,15 @@ sub abort {
 	}
 	$self->{active} = 0;
 
-	# Name what is about to go, before it goes.
-	my $status = $git->status;
-	my @modified = sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
+	# Name what is about to go, before it goes, unless the caller has named
+	# it already in the error it handed us, which finish does.
+	my @modified = @{$self->modified_paths};
 	Genesis::error("Discarding uncommitted changes in #C{%s}:\n%s",
-		$git->root, join("", map {"  - $_\n"} @modified)) if @modified;
+		$git->root, join("", map {"  - $_\n"} @modified))
+		if @modified && !$opts{named};
 
 	my @reset = $self->committed_branches;
+	my $discard_error;
 	my $restore_error;
 	eval {
 		chdir($git->root)
@@ -233,9 +300,17 @@ sub abort {
 				$git->root, $!);
 
 		# The tree and the index both, which is the half the baseline
-		# cleanup missed.
-		run({ dir => $git->root, passfail => 1 },
-			'git', 'reset', '--hard', 'HEAD');
+		# cleanup missed.  The answer is read rather than dropped: a
+		# discard that failed leaves those changes in the tree, every
+		# reset and checkout below would fail over them, and carrying on
+		# in silence would either stand the operator back on control with
+		# somebody else's changes or leave them the failed checkout to
+		# puzzle out.
+		unless (run({ dir => $git->root, passfail => 1 },
+			'git', 'reset', '--hard', 'HEAD')) {
+			$discard_error = 1;
+			die "the discard failed\n";
+		}
 
 		$self->_reset_to_remote($_) for @reset;
 		$self->_restore;
@@ -246,6 +321,20 @@ sub abort {
 	};
 
 	$self->_release_lock;
+
+	# Said before the restore failure below, because where both are true
+	# this one is why: nothing could be put back over changes that could
+	# not be thrown away.  It is a defect rather than a condition an
+	# operator caused, so it exits SOFTWARE.
+	bail({exitcode => SOFTWARE},
+		"%s\n\n".
+		"The uncommitted changes in #C{%s} could not be discarded, so the ".
+		"working tree still holds them and we have left it standing on ".
+		"#C{%s}.\n\n".
+		"Put the working tree back by hand before running anything else ".
+		"here.",
+		$error, $git->root, $self->_standing_on
+	) if $discard_error;
 
 	# H2: a restore that fails is loud.  We are on the wrong branch, and
 	# nothing a retry does moves us, so the operator is told all three
@@ -267,6 +356,18 @@ sub abort {
 
 ### Internals {{{
 
+# _record_commit - remember a branch this session committed to {{{
+#
+# committed_branches works the set out for itself by comparing tips, and this
+# is the writer of M8 saying so outright, which covers the one case the
+# comparison cannot see, a commit that leaves the tip where it was.
+sub _record_commit {
+	my ($self, $branch) = @_;
+	$self->{committed}{$branch} = 1 if defined $branch && length $branch;
+	return $self;
+}
+
+# }}}
 # _through_the_door - let the handle's guarded subs run, briefly {{{
 #
 # The handle refuses a checkout, a detached checkout, or a working-tree

@@ -13,20 +13,33 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use Cwd qw/getcwd/;
 use Genesis;
+use Genesis::Exit qw/SOFTWARE/;
 use_ok 'Service::Git::Session';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'the baseline swallowed a failed restore' => sub {
-	plan tests => 2;
+	plan tests => 4;
 
 	# H2's shape, read where it lived.  Once restore_branch is gone at the
 	# last task of this step there is nothing left to run, so the evidence
 	# is the code itself: passfail set and the result dropped on the floor.
-	my $baseline = `git show 048a9933:lib/Service/Git.pm`;
-	my ($sub) = $baseline =~ /sub restore_branch \{(.*?)\n\}/s;
+	#
+	# The read is asked of the repository by name and both halves of its
+	# answer are weighed, because a tree that does not hold the baseline
+	# commit hands back nothing at all, and nothing satisfies the first row
+	# below and fails the second for a reason that has no bearing on what
+	# the baseline actually did.
+	my ($baseline, $rc) = run({dir => $helper::TOPDIR, stderr => 0},
+		'git', 'show', '048a9933:lib/Service/Git.pm');
+	is($rc, 0, 'the baseline commit is in this repository to read');
+	ok(defined $baseline && length $baseline,
+		'and the file it names came back with it');
+
+	my ($sub) = ($baseline // '') =~ /sub restore_branch \{(.*?)\n\}/s;
 	like($sub, qr/passfail\s*=>\s*1/,
 		'the baseline restore ran its checkout with passfail set');
 	unlike($sub, qr/bail|die|onfailure/,
@@ -35,6 +48,13 @@ subtest 'the baseline swallowed a failed restore' => sub {
 
 subtest 'a failed restore reaches the stuck state and dies naming both' => sub {
 	plan tests => 5;
+
+	# A stuck session is one that could not put the working tree back, and
+	# it leaves this process standing in the repository it gave up on, so
+	# the directory is taken now and put back at the end of the row.  A
+	# later row that reads a relative path would otherwise read it against
+	# a temporary repository rather than against the tree under test.
+	my $cwd = getcwd();
 
 	my $h   = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
@@ -62,6 +82,48 @@ subtest 'a failed restore reaches the stuck state and dies naming both' => sub {
 	like($err, qr/\Q@{[$h->slug('qa')]}\E/,
 		'and the branch we are stuck on');
 	ok(!$session->active, 'the session is closed, stuck rather than open');
+
+	chdir($cwd) or die "cannot return to $cwd: $!\n";
+};
+
+subtest 'a reset that cannot run is loud rather than carried through' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'ops/one.yml' => "---\none: true\n"},
+		message => 'an ops file for qa',
+		push    => 1,
+	);
+
+	my $git = $h->git('a');
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	$git->checkout_file($control, 'ops/one.yml');
+	$git->commit('deliver ops/one.yml', 'ops/one.yml');
+
+	# Something wrote into the tree, and the directory it wrote into cannot
+	# be written again, which is a discard git reports and cannot make.  An
+	# abort that read nothing back would go on to check out control over a
+	# tree that still holds those changes.
+	put_file($h->a . '/ops/one.yml', "---\none: written by a hook\n");
+	chmod 0500, $h->a . '/ops';
+	my ($err, $exit) = bail_from(sub {$session->abort('the run failed')});
+	chmod 0700, $h->a . '/ops';
+
+	# The words asked for are the message's own and appear nowhere in this
+	# row's name or in the error handed to abort, because Carp::Always
+	# folds a backtrace into a caught death and a backtrace carries both of
+	# those strings, so a looser pattern would match the row's own name.
+	like($err, qr/\Athe run failed/,
+		'the refusal opens with the original error');
+	like($err, qr/could not be discarded/,
+		'and says the uncommitted changes are still in the tree');
+	like($err, qr/\Q@{[$h->slug('qa')]}\E/,
+		'and names the branch we are left standing on');
+	is($exit, SOFTWARE, 'and it exits SOFTWARE, because this is a defect');
 };
 
 subtest 'a fault between the first write and the commit leaves nothing staged' => sub {
@@ -198,8 +260,9 @@ subtest 'a local commit on control survives the session' => sub {
 
 	# I2 is a rule about refs, so the last assertion reads the verbs: no
 	# verb of the session writes the control ref under any name.  The path
-	# is absolute because the stuck subtest above leaves us standing in the
-	# repository it could not put back, which is the point of being stuck.
+	# is absolute because the rows above stand this process in temporary
+	# repositories of their own, and this one is asking about the module
+	# under test rather than about wherever we happen to be.
 	my $module = get_file($helper::TOPDIR . '/lib/Service/Git/Session.pm');
 	unlike($module, qr/update-ref[^\n]*control|reset --hard[^\n]*control/,
 		'no verb of the session force-writes the local control ref');
@@ -210,6 +273,33 @@ sub exception {
 	local $ENV{GENESIS_IGNORE_EVAL} = '';
 	eval { $code->(); 1 } and return '';
 	return $@;
+}
+
+# The second assertion helper, because a row that weighs an exit code cannot
+# read one out of this process: bail dies rather than exits whenever it is
+# reached from inside an eval, and a test file always is.  The refusal is
+# caught where the code raises it, and the code it would have exited with is
+# read off the arguments it was composed with.
+sub bail_from {
+	my ($code) = @_;
+
+	my @raised;
+	{
+		no warnings 'redefine', 'once';
+		local *Service::Git::Session::bail =
+			sub {push @raised, [@_]; die "refused\n"};
+		eval {$code->(); 1};
+	}
+	unless (@raised) {
+		diag("nothing was raised; the code died of: $@") if $@;
+		return ('', undef);
+	}
+
+	my @args = @{$raised[0]};
+	my $opts = ref($args[0]) eq 'HASH' ? shift(@args) : {};
+	my ($format, @rest) = @args;
+
+	return (sprintf($format, @rest), $opts->{exitcode});
 }
 
 done_testing;
