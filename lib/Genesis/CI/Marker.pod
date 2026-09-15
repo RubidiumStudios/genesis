@@ -98,6 +98,12 @@ Optional.  Where it is given, only the markers addressed to that environment
 answer, and the rest are passed over as though the text did not carry them.
 Where it is left out every marker answers, whichever environment it names.
 
+The whole name has to match, so a marker naming C<qa-west> is no answer to a
+caller asking about C<qa>.  The name runs to the end of its own line rather
+than to the end of the text, and a line may end in a carriage return, which
+is what lets a marker be matched in the middle of an ordinary pull request
+body and in one the GitHub API handed back with CRLF line endings.
+
 =back
 
 B<Returns:> In scalar context the first marker's sha as written, or C<undef>

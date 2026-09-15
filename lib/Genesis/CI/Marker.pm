@@ -65,11 +65,19 @@ sub build {
 # that environment alone.  The name is the marker's own second half, so the
 # one regex reads it rather than a second regex reading it afterwards, and a
 # caller that names nothing gets the pattern it has always got.
+#
+# The tail carries its own /m, because a compiled pattern spliced into
+# another one brings the flags it was compiled with and the outer /m does not
+# reach inside it.  Without that flag the anchor below would mean the end of
+# the whole text rather than the end of a line, and a marker is rarely the
+# last thing a pull request body says.  The carriage return is there for the
+# same caller, since the GitHub API commonly hands a body back with its lines
+# ending CRLF.
 sub in_text {
 	my ($text, $env) = @_;
 	return wantarray ? () : undef unless defined $text;
 
-	my $tail = defined $env ? qr/[ \t]+->[ \t]+\Q$env\E[ \t]*$/ : qr/\b/;
+	my $tail = defined $env ? qr/[ \t]+->[ \t]+\Q$env\E[ \t\r]*$/m : qr/\b/;
 
 	my @written;
 	while ($text =~ /^[ \t]*(?:[-*][ \t]+)?\Q$PREFIX\E([0-9a-f]{4,40})$tail/mg) {
