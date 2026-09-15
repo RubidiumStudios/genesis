@@ -14,6 +14,16 @@ my %REASON = (
 	404 => 'Not Found',
 );
 
+# The prerequisites check asks every tool it names for its version, and this
+# double stands first on the path of any command the harness spawns, so a
+# whole run meets this file before it reaches the API.  The probe is answered
+# here, ahead of the state file and ahead of the log, because it is not an API
+# call and a row counting what a run asked GitHub for should not see it.
+if (grep {$_ eq '--version'} @ARGV) {
+	print "curl 8.7.1 (genesis test harness) libcurl/8.7.1\n";
+	exit 0;
+}
+
 my $state_file = $ENV{GENESIS_HARNESS_GH_STATE} or exit 2;
 my $log_file   = $ENV{GENESIS_HARNESS_GH_LOG};
 

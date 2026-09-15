@@ -32,6 +32,25 @@ sub _unfolded {
 	return $said;
 }
 
+subtest 'a second apply leaves the previous tip an ancestor' => sub {
+	# Three rows, and one restoration assertion for each of the two runs.
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa'], github => 1);
+
+	my (undef, undef, $first) = run_genesis($h, 'pipeline-apply');
+	is($first, 0, 'the first apply exits 0');
+	my $before = ref_in($h->r, 'qa/bosh');
+
+	my (undef, undef, $second) = run_genesis($h, 'pipeline-apply');
+	is($second, 0, 'the second apply exits 0');
+	my $after = ref_in($h->r, 'qa/bosh');
+
+	my $ok = run({dir => $h->r, passfail => 1},
+		'git', 'merge-base', '--is-ancestor', $before, $after);
+	ok($ok, 'the previous tip is still an ancestor of the new tip');
+};
+
 subtest 'Genesis refuses to push a tip that would rewrite the branch' => sub {
 	plan tests => 3;
 

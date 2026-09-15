@@ -101,9 +101,16 @@ or absent, because the command applies a configured pipeline and never
 enables one.  That refusal reads C<.genesis/config> alone, so a repository
 with no pipeline is turned away before a vault is asked for.
 
-Where a pipeline is enabled, the provider comes from
-C<pipeline.provider.type> and an absent type reads as the C<manual>
-provider, which has no pipeline to set and is refused in its own words.
+Where a pipeline is enabled, the branch stage runs first and under every
+provider, because a deployment branch is what a delivery is written to
+whether or not anything hosts a pipeline. It creates each missing branch as
+an orphan named by the deployment slug, publishes it, and leaves a branch the
+remote already carries where it is.
+
+The provider then comes from C<pipeline.provider.type>, and an absent type
+reads as the C<manual> provider. The manual provider has no pipeline to set,
+so the command says which stage it skipped and exits 0 with the branch work
+behind it rather than refusing.
 An automated provider is compiled from the C<pipeline> section of
 C<.genesis/config>, which is the one configuration source, and the
 compiled result is then set on the provider.
@@ -302,6 +309,83 @@ B<Examples:>
   genesis describe sandbox
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 INIT_FILE_BODY
+
+The one line an init commit writes into its C<init> file. It names the
+command that manages the branch, because an operator who meets the branch in
+a fresh clone has nothing else there to read.
+
+=head2 _apply_init_branches
+
+  my $report = _apply_init_branches($top, $git);
+
+Creates and publishes the deployment branch for every environment in the
+pipeline that has none, and leaves a branch the remote already carries where
+it is. The branch is an orphan whose root commit adds a single C<init> file
+under the subject C<Initialize E<lt>slugE<gt> branch [ci skip]>, so the
+pipeline's git resource registers the head as a version and skips the commit.
+The name is the deployment slug, so two deployment roots serving one
+environment get a branch each rather than contending for one ref.
+
+The refresh runs first, so what the remote carries is read from refs this run
+brought down rather than from whatever the clone happened to hold.
+
+Both the clone and the remote are asked whether the branch is there. A branch
+the remote carries is standing and is not touched. A branch the clone holds
+and the remote lacks is published rather than refused, since recreating it is
+not allowed and leaving it would keep it from everybody else. Everything else
+is created and then published.
+
+Every publish goes through C<push_append_only>, so no stage here can rewrite
+a branch the remote already carries.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> for the deployment root the command is running in. It
+names the pipeline's environments and composes each deployment slug.
+
+=item C<$git>
+
+The C<Service::Git> for the repository, which is where the branches are
+written and from which they are published.
+
+=back
+
+B<Returns:> A hashref with three arrayrefs of branch names, which are
+C<created>, C<published>, and C<standing>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+A refusal at C<TEMPFAIL> from C<fetch_pipeline_envs> when the remote cannot be
+reached, naming C<pipeline-apply> and saying that no branch was created and no
+pipeline was set.
+
+=item *
+
+C<"ls-remote against %s failed"> from C<remote_branch_exists> when the remote
+rejects the query.
+
+=item *
+
+Whatever C<create_orphan_branch> and C<push_append_only> raise, which is a
+failed plumbing step, a push the remote rejected, or a refusal to rewrite
+history on a branch that is append-only.
+
+=back
+
+B<Examples:>
+
+  my $report = _apply_init_branches($top, Service::Git->new('.'));
+  # returns {created => ['qa/bosh'], published => [], standing => ['prod/bosh']}
 
 =head2 _compile_pipeline
 

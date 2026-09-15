@@ -284,7 +284,7 @@ unit-tests/genesis_commands_dev-pipeline_compile.t  # dev-pipeline-compile stage
 unit-tests/service_git-ci_credentials.t      # git credentials supplied via CI env vars
 unit-tests/genesis_commands_pipelines-prepare.t  # pipeline-prepare scope selection
 unit-tests/genesis_commands_pipelines-control_branch.t  # commands read the configured control branch
-unit-tests/genesis_commands_pipelines-config_gate.t  # the manual refusal's exit code, and the leftover ci directory that is ignored
+unit-tests/genesis_commands_pipelines-config_gate.t  # the manual provider's skip, and the leftover ci directory that is ignored
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/genesis_ui-prompt_output_stream.t  # prompts write to stderr and the terminal, never stdout
@@ -314,6 +314,7 @@ integration-tests/genesis_exit-command_codes.t                # usage exits 2, p
 integration-tests/genesis_commands-git_floor.t                # the declared git floor is 2.34.1, for every command
 integration-tests/genesis_commands_pipelines-refresh_flags.t   # the refresh is unconditional and only pipeline-status opts out
 integration-tests/genesis_commands_pipelines-apply_refusals.t  # pipeline-apply refuses a disabled or absent pipeline alike
+integration-tests/genesis_commands_pipelines-apply_init_branches.t # the apply cuts each missing deployment branch as an orphan named by its slug
 integration-tests/genesis_commands_pipelines-apply_append_only.t # every push the apply makes to a deployment branch is append-only
 integration-tests/genesis_ci_preflight-control.t             # control exists, and it stands in step with the remote
 integration-tests/genesis_ci_preflight-branch_origin.t        # the two refusals for a branch with no legitimate origin
