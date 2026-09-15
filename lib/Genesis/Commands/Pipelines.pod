@@ -101,6 +101,11 @@ or absent, because the command applies a configured pipeline and never
 enables one.  That refusal reads C<.genesis/config> alone, so a repository
 with no pipeline is turned away before a vault is asked for.
 
+It then refuses a clone that does not carry the control branch, because the
+apply records the commit it applied from and there would be no commit to
+read. That refusal comes before any branch is created, so a run it turns away
+has written nothing anywhere.
+
 Where a pipeline is enabled, the branch stage runs first and under every
 provider, because a deployment branch is what a delivery is written to
 whether or not anything hosts a pipeline. It creates each missing branch as
@@ -206,8 +211,11 @@ because there is then nowhere to publish a deployment branch to.  The refusal
 comes before the first branch is created, so no branch is left standing behind
 it.
 
-Calls C<Genesis::bug()> through C<Genesis::Top::applied_record> when the
-record it is asked to write carries no value for any of its fields.
+Calls C<bail()> with C<Genesis::Exit/CONFIG> when the control branch is not
+in the clone, naming the branch and saying that no branch was created and no
+record was written.  The apply records the commit it applied from, and git
+answers an unresolvable ref with its own error text rather than failing, so a
+run that carried on would write that text into the record.
 
 Calls C<bail()> with C<"No vault specified or configured."> when no vault
 is configured and C<--skip-vault> was not given.
@@ -453,10 +461,17 @@ C<--output-dir> run too, both of which print the pipeline rather than setting
 it, so those runs record what they applied as any other run does.
 
 Where C<skip_vault> is true there is no vault to write to, so it warns,
-names both the record it left unwritten and the flag that stopped it, and
-answers as though it had written one. That is a warning rather than a
-refusal, because the operator asked for a run without a vault and the rest
-of the apply still has work to do.
+names the record it left unwritten and the flag that stopped it, and answers
+as though it had written one. That is a warning rather than a refusal,
+because the operator asked for a run without a vault and the rest of the
+apply still has work to do. The warning names the record in words rather than
+by its vault address, since composing that address reads the repository's
+exodus mount and refuses where there is no environment to read it from, which
+would turn the stage that stands aside into the stage that stopped the run.
+
+The control commit has to be a commit sha. C<apply> refuses a clone without
+the control branch before this is reached, so anything else arriving here is
+a fault between the two, and the record takes a sha or nothing at all.
 
 B<Parameters:>
 
@@ -470,7 +485,7 @@ owns the pipeline's record and composes its address.
 =item C<control_commit>
 
 The commit the apply applied from, which is the tip of the control branch as
-this run read it.
+this run read it. It has to be a forty character hexadecimal sha.
 
 =item C<provider>
 
@@ -489,6 +504,14 @@ B<Returns:> 1, whether it wrote the record or skipped it.
 B<Errors:>
 
 =over 4
+
+=item *
+
+C<< "_apply_records was given <value> as the control commit, which is not a
+commit sha" >> - raised through C<Genesis::bug> when C<control_commit> is
+absent, or is anything other than a forty character hexadecimal sha. The
+value is put back on one line before it is named, because git's error text
+arrives across several.
 
 =item *
 
@@ -512,6 +535,9 @@ B<Examples:>
 
   _apply_records($top, %facts, skip_vault => 1);
   # writes nothing, warns that the record went unwritten, and returns 1
+
+  _apply_records($top, control_commit => 'control', provider => 'manual');
+  # raises a bug, because a branch name is not a commit sha
 
 =head2 _compile_pipeline
 
