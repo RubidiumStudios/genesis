@@ -1782,7 +1782,9 @@ define_command("repipe", {
 			"Write compiled pipeline artifacts to this directory.\n".
 			"On its own, the branch, protection, and record work still runs.  ".
 			"Given with --dry-run, that work is only reported, and this ".
-			"directory is written even so.",
+			"directory is written even so, except under the manual provider, ".
+			"where the run exits before the compile and there is nothing to ".
+			"write here.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling pipelines.  Useful for ".
@@ -2074,7 +2076,9 @@ define_command("pipeline-apply", {
 			"Write compiled artifacts to this directory instead of deploying.  ".
 			"On its own, the branch, protection, and record work still runs.  ".
 			"Given with --dry-run, that work is only reported, and this ".
-			"directory is written even so.",
+			"directory is written even so, except under the manual provider, ".
+			"where the run exits before the compile and there is nothing to ".
+			"write here.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.  Useful for dry runs ".
