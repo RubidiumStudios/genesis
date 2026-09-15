@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
-# Proves T135: a force push of control that drops a commit leaves every marker
-# and every certified commit naming an object no fresh clone can fetch.
+# Proves the reproduction half of T135: a force push of control that drops a
+# commit leaves every marker and every certified commit naming an object no
+# fresh clone can fetch.
 #
 # Genesis never moves control, because control is the operator's own branch, so
 # nothing in the product can stop that rewrite from happening.  The branch
