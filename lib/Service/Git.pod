@@ -598,6 +598,72 @@ B<Examples:>
   $git->set_branch_ref('qa/bosh', 'refs/remotes/origin/qa/bosh');
   # returns $self; qa/bosh now stands where origin/qa/bosh stands
 
+=head2 create_orphan_branch
+
+  my $sha = $git->create_orphan_branch($branch, files => \%files, message => $subject);
+
+Writes a root commit that shares no history with any other branch and points
+C<$branch> at it. Everything is done with plumbing, so nothing is checked out
+and neither the working tree nor the repository's own index moves. The objects
+are staged through a private index of its own, which is what keeps the
+repository's index out of it.
+
+This is how a missing deployment branch is made. The branch has to be an
+orphan because the marker is the only link between control and a deployment
+branch, and sharing control's history would contradict that.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to create. It must not already exist.
+
+=item C<files>
+
+A hashref of git-root-relative path to content. Each entry becomes one blob in
+the root commit's tree, and an empty or absent hashref writes an empty tree.
+
+=item C<message>
+
+The commit message the root commit carries.
+
+=back
+
+B<Returns:> The sha of the new root commit.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Refusing to recreate the branch %s, which already exists"> -- the branch is
+never moved. A caller that wants to publish a branch it already holds pushes
+it instead.
+
+=item *
+
+C<"Failed to write the object for '%s'">, C<"Failed to stage '%s' for '%s'">,
+C<"Failed to write the tree for '%s'">, C<"Failed to write the root commit for
+'%s'">, and C<"Failed to write refs/heads/%s"> -- raised via C<run>'s
+C<onfailure> when git cannot complete the corresponding plumbing step.
+
+=item *
+
+C<"Unable to open %s for writing"> -- raised by C<mkfile_or_fail> when the
+temporary file holding a blob's content cannot be written.
+
+=back
+
+B<Examples:>
+
+  my $sha = $git->create_orphan_branch('qa/bosh',
+    files   => {init => "This branch is managed by genesis pipeline-apply.\n"},
+    message => 'Initialize qa/bosh branch [ci skip]');
+  # returns the new root commit; qa/bosh now holds the init file alone
+
 =head2 branch_exists
 
   my $bool = $git->branch_exists($name);
@@ -1959,6 +2025,74 @@ B<Examples:>
 
   my $results = $git->push(@branches);
   # returns { staging => 1, prod => 0 } when only prod was rejected
+
+=head2 push_append_only
+
+  my $sha = $git->push_append_only($branch);
+  my $sha = $git->push_append_only($branch, remote => 'origin');
+
+Publishes one branch with no force option of any kind, after checking that the
+remote's current tip is an ancestor of the tip being pushed. Control and every
+deployment branch are append-only, so a marker that named a commit stays
+fetchable and recovery there is a new commit that restores the content rather
+than a force push.
+
+The remote is asked for the fully qualified ref rather than for the bare
+branch name, because C<ls-remote> matches the tail of a ref and a bare name
+such as C<qa/bosh> would also match the pull request branch C<pr/qa/bosh>.
+
+A branch the remote does not carry yet has no previous tip to compare against,
+so it is published as it stands.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The local branch to publish. It is pushed to the ref of the same name.
+
+=item C<remote>
+
+The remote to publish to. Defaults to the repository's default remote.
+
+=back
+
+B<Returns:> The sha that was pushed.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"No remote is configured, so %s cannot be published"> -- when no remote was
+named and the repository has none.
+
+=item *
+
+C<"Failed to read %s on %s: ..."> -- when C<ls-remote> cannot reach the remote,
+carrying whatever git said.
+
+=item *
+
+C<"Refusing to push %s, because that would rewrite history on %s"> -- when the
+remote's tip is not an ancestor of the tip being pushed. Nothing is pushed.
+
+=item *
+
+C<"Failed to push '%s' to '%s'"> -- raised via C<run>'s C<onfailure> when git
+itself rejects the push.
+
+=back
+
+B<Examples:>
+
+  my $sha = $git->push_append_only('qa/bosh');
+  # returns the sha now on the remote
+
+  $git->push_append_only('qa/bosh');
+  # refuses, naming qa/bosh, when the local tip rewrites the remote's
 
 =head2 prefixed
 
