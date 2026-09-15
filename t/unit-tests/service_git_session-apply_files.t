@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Proves T110: the writer delivers one control commit to qa/bosh as a mirror,
+# Proves T110 and T112: the writer delivers one control commit to qa/bosh as a mirror,
 # so the branch's tree equals the propagation set as it stood at the delivered
 # commit and a path that dropped out of the set is gone from the branch.
 use strict;
@@ -160,7 +160,6 @@ subtest 'a hand edit is overwritten and named' => sub {
 		files   => {'bosh/ops/extra.yml' => "---\nextra: edited by hand\n"},
 		message => 'fix it on the branch, just this once',
 	);
-	refresh($h, 'a', $h->slug('qa'));
 
 	# The delivered commit moves one other file in the set, so the delivery
 	# has something of its own to write and the row can tell a path the

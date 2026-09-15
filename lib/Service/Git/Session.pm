@@ -372,8 +372,8 @@ sub abort {
 # contract.  The changed and deleted lists a caller passes are the diff it has
 # already computed, and they are there to skip blobs the delivery cannot have
 # moved and to name files in the run's report.  They never decide what is
-# delivered, and nothing here reads them yet; the step that fills overwrote is
-# the one that gives them work.
+# delivered, and changed is read only to keep the paths the delivery was
+# asked to move out of overwrote.
 #
 # The set is still read off the tree the session is standing on, which is the
 # deployment branch, and only the membership is resolved at the source commit.
