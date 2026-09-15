@@ -159,14 +159,22 @@ answers as a ref carrying no marker does.
 
 Arrayref of git-root-relative paths the walk is scoped to.
 
-=back
+=item C<recover_from>
+
+A pull request's body the reader falls back to when the ref carries no
+marker at all.  Where a site could not grant the rebase-only merge method,
+a squash merge can rewrite the aggregate's one commit and take its marker
+with it, and the body still carries what Genesis wrote there.  The branch
+always answers first, so a branch that carries a marker never consults it.
 
 =back
 
-B<Returns:> In scalar context, the control sha, or C<undef> where no marker
-stands.  In list context, three values, which are the sha, the number of
-markerless commits above it, and C<'branch'>.  A ref carrying no marker gives
-C<undef>, the number of commits walked, and C<undef>.
+=back
+
+B<Returns:> In scalar context, the control sha or C<undef>.  In list context,
+the sha, the number of markerless commits above it, and where the answer came
+from, which is C<'branch'> or C<'pull-request'>.  A ref with no marker and no
+recovery gives C<undef>, that count, and C<undef>.
 
 B<Examples:>
 
@@ -175,6 +183,10 @@ B<Examples:>
 
   my (undef, $depth) = Genesis::CI::Marker::newest($git, 'qa/bosh');
   # $depth is 2 when two hand commits stand above the marker
+
+  my (undef, undef, $source) =
+      Genesis::CI::Marker::newest($git, $ref, recover_from => $pr_body);
+  # $source is 'pull-request' when the squash took the marker with it
 
 =head2 trailers
 
@@ -244,9 +256,14 @@ C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
 The newest of the control shas one message's markers name, resolved.
 
 Ancestry decides it rather than position, because git's own squash lists the
-newest commit first and GitHub's lists it last.  A sha this repository cannot
-reach never displaces one it can, so a message whose markers cannot be
-weighed answers with the first of them.
+newest commit first and GitHub's lists it last.
+
+A sha this repository cannot reach is set aside before the weighing begins,
+because every ancestry question asked of one fails.  Were such a sha left in
+and met first it would hold the answer and lose each question that followed,
+and the reachable markers under it could never take the answer back.  A
+message whose markers can none of them be reached answers with the first of
+them.
 
 B<Parameters:>
 
@@ -271,10 +288,15 @@ B<Examples:>
 
 =head2 _resolved
 
-    my $sha = Genesis::CI::Marker::_resolved($git, $written);
+    my $sha            = Genesis::CI::Marker::_resolved($git, $written);
+    my ($sha, $reached) = Genesis::CI::Marker::_resolved($git, $written);
 
 Expands the sha a marker carries where this repository holds the commit, and
 hands back what the marker said where it does not.
+
+Whether the commit was reached matters to a caller weighing several markers
+against each other, because an unreachable sha can be weighed against
+nothing, so list context reports it beside the sha.
 
 B<Parameters:>
 
@@ -290,12 +312,17 @@ The sha exactly as the marker spells it.
 
 =back
 
-B<Returns:> A full 40-character sha, or C<$written> unchanged.
+B<Returns:> In scalar context, a full 40-character sha, or C<$written>
+unchanged.  In list context, that same sha and a true value where the commit
+was reached, false where it was not.
 
 B<Examples:>
 
   Genesis::CI::Marker::_resolved($git, 'a1b2c3d');
   # returns 'a1b2c3d4e5f6...' where the commit is present
+
+  my (undef, $reached) = Genesis::CI::Marker::_resolved($git, 'dead0beef123');
+  # $reached is 0, because no commit of that name is here
 
 =head1 AUTHOR
 

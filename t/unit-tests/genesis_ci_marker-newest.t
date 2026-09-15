@@ -175,7 +175,7 @@ subtest 'a marker a squash bulleted is still a marker' => sub {
 };
 
 subtest 'the newest marker wins whichever order the squash lists them' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	# The two tools disagree.  GitHub bullets each subject and lists the
 	# newest commit last, and git's own squash indents each subject and
@@ -219,6 +219,31 @@ subtest 'the newest marker wins whichever order the squash lists them' => sub {
 
 		is(Genesis::CI::Marker::newest($h->git('a'), 'origin/' . $h->slug('qa')),
 			$newer, 'and where it listed the newest delivery first');
+	}
+
+	# A marker naming a commit this repository cannot reach is weighed
+	# against nothing, so it has to be set aside before the comparison
+	# starts.  Left in, it arrives first, holds the answer, and loses every
+	# ancestry question that follows it, and the reachable marker below it
+	# could never take the answer back.
+	{
+		my ($h, $control) = seeded(copy => 'a');
+		my $newer = commit_on_control($h,
+			files   => {'qa.yml' => "---\nkit: dev\nsecond: true\n"},
+			message => 'change qa again',
+			push    => 1,
+		);
+		squash_merge($h, 'qa',
+			keep_marker => 0,
+			subject     => sprintf(
+				"Merge pull request #17 from pr/qa/bosh\n\n".
+				"* [pipeline] control@%s -> qa\n\n* [pipeline] control@%s -> qa\n",
+				'dead0beef123', substr($newer, 0, 12)),
+		);
+		refresh($h, 'a', $h->slug('qa'));
+
+		is(Genesis::CI::Marker::newest($h->git('a'), 'origin/' . $h->slug('qa')),
+			$newer, 'and where an unreachable marker was listed ahead of it');
 	}
 };
 

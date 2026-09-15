@@ -84,6 +84,9 @@ sub in_text {
 # In list context the walk also reports the number of markerless commits it
 # passed, which is what the propagate base warns about, and where the answer
 # came from.
+#
+# D52's recovery is the one arm that answers from anywhere but the ref, and
+# it stands at the end of the walk so the branch is always asked first.
 sub newest {
 	my ($git, $ref, %opts) = @_;
 
@@ -111,6 +114,21 @@ sub newest {
 		return wantarray ? ($sha, $depth, 'branch') : $sha;
 	}
 
+	# D52's recovery.  Where a site could not grant the rebase-only merge
+	# method, a squash can rewrite the aggregate's one commit and take the
+	# marker with it, and the pull request's body still carries what Genesis
+	# itself wrote there.  The branch always answers first, so this arm is
+	# reached only on a branch that says nothing at all.  A body is weighed
+	# exactly as a commit message is, because a squash of several deliveries
+	# leaves several markers in the body too.
+	if (defined $opts{recover_from}) {
+		my @written = in_text($opts{recover_from});
+		if (@written) {
+			my $sha = _newest_of($git, @written);
+			return wantarray ? ($sha, $depth, 'pull-request') : $sha;
+		}
+	}
+
 	return wantarray ? (undef, $depth, undef) : undef;
 }
 
@@ -123,15 +141,26 @@ sub newest {
 # newest last and bullets each subject, so where a marker sits in the text
 # says nothing about how new it is.  The markers are weighed by ancestry
 # instead, which is a question this repository can answer because the reader
-# holds a git handle, and a marker whose commit the repository cannot reach
-# simply never displaces one it can.  Where nothing can be weighed the first
-# marker stands, which is the order the text gave.
+# holds a git handle.
+#
+# A marker whose commit the repository cannot reach is set aside before the
+# weighing rather than during it.  Every ancestry question asked of such a
+# sha fails, so a marker left in the comparison and reached first would hold
+# the answer and lose each question that followed, and no reachable marker
+# under it could ever take the answer back.  Where none of them can be
+# reached the first marker stands, which is the order the text gave.
 sub _newest_of {
 	my ($git, @written) = @_;
 
-	my @resolved = map {_resolved($git, $_)} @written;
-	my $newest = shift @resolved;
-	for my $candidate (@resolved) {
+	my (@reachable, @unreachable);
+	for my $written (@written) {
+		my ($sha, $reached) = _resolved($git, $written);
+		push @{$reached ? \@reachable : \@unreachable}, $sha;
+	}
+	return $unreachable[0] unless @reachable;
+
+	my $newest = shift @reachable;
+	for my $candidate (@reachable) {
 		next if $candidate eq $newest;
 		$newest = $candidate if $git->is_ancestor($newest, $candidate);
 	}
@@ -200,15 +229,20 @@ sub trailers {
 # because sha echoes an abbreviation this repository cannot reach straight
 # back with git's complaint on stderr, and the answer wanted here is whether
 # the commit is present at all.
+#
+# That answer is worth more than the sha to a caller weighing several markers
+# against each other, because an unreachable sha can be weighed against
+# nothing, so list context hands the reach back beside the sha.
 sub _resolved {
 	my ($git, $written) = @_;
 
 	my ($full, $rc) = run({dir => $git->root, passfail => 0},
 		'git', 'rev-parse', '--verify', '--quiet', "$written^{commit}");
-	return $written if $rc;
 	chomp $full if defined $full;
-	return $written unless defined $full && $full =~ /^[0-9a-f]{40}$/;
-	return $full;
+	my $reached = !$rc && defined $full && $full =~ /^[0-9a-f]{40}$/ ? 1 : 0;
+
+	my $sha = $reached ? $full : $written;
+	return wantarray ? ($sha, $reached) : $sha;
 }
 
 # }}}
