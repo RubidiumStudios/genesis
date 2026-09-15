@@ -266,24 +266,24 @@ sub initial_state {
 			unless _shares_history($git, $branch, $remote);
 	}
 
-	# One refusal for both classes, because a repository can hold a branch
-	# of each and an operator who fixes the first class only to meet the
-	# second on the next run has been told half of what the stage already
-	# knew.  The composed text goes through a '%s' format, because bail
-	# reads its argument as a format and a branch name or a commit subject
-	# can carry a percent sign.
-	bail({exitcode => DATAERR}, '%s',
-		_origin_refusal($action, $outcome, $remote, \@local_only, \@unrelated))
-		if @local_only || @unrelated;
-
 	# Each branch's local-only commits, classified.  A marker means the walk
 	# reproduces the commit, so the branch may be reset; no marker means a
 	# hand edit that belongs on control, so the whole run refuses (D32, D33).
+	#
+	# A branch already refused for its origin is not asked.  Every commit on
+	# a branch the remote has never had is local-only by construction, and so
+	# is every commit on an orphan, so asking would name each of them a hand
+	# edit as well and say the same branch twice in one refusal under two
+	# headings.  What such a branch needs is the remedy its own class gives.
+	my %illegitimate = map {($_ => 1)}
+		(map {$_->{branch}} @local_only), @unrelated;
+
 	my (@reset, @hand);
 	for my $env (@{$opts{envs} // []}) {
 		my $record = $state->{branches}{$env} or next;
 		my $branch = $record->{branch};
 		next if $record->{state} eq 'no-local';
+		next if $illegitimate{$branch};
 
 		my @commits = local_only_commits($git, $branch);
 		next unless @commits;
@@ -298,9 +298,16 @@ sub initial_state {
 		push @reset, {env => $env, branch => $branch, commits => \@commits};
 	}
 
+	# One refusal for every class, because a repository can hold a branch of
+	# each and an operator who fixes one class only to meet the next on the
+	# following run has been told a third of what the stage already knew.
+	# The composed text goes through a '%s' format, because bail reads its
+	# argument as a format and a branch name or a commit subject can carry a
+	# percent sign.
 	bail({exitcode => DATAERR}, '%s',
-		_hand_commit_refusal($action, $outcome, $remote, \@hand))
-		if @hand;
+		_illegal_state_refusal($action, $outcome, $remote,
+			\@local_only, \@unrelated, \@hand))
+		if @local_only || @unrelated || @hand;
 
 	# The first write of the run, and the one forced write onto a deployment
 	# branch that rule 3 of the class table admits beside the session's abort.
@@ -309,11 +316,15 @@ sub initial_state {
 		my $line = sprintf('reset %s to %s/%s, discarding %s that the walk reproduces',
 			$r->{branch}, $remote, $r->{branch}, _commits(scalar @{$r->{commits}}));
 
+		# The warning says only that the reset is assumed, because the event
+		# line below is the one record of what would be done and the caller
+		# prints it either way.  A warning that carried the line as well said
+		# the same sentence twice in a report.
 		if ($opts{dry_run}) {
 			warning(
 				"#Y{This report assumes the reset of }#C{%s}#Y{ that a real ".
-				"run would make.}  %s",
-				$r->{branch}, $line);
+				"run would make.}",
+				$r->{branch});
 		} else {
 			$git->set_branch_ref($r->{branch}, $tracking);
 			$state->{branches}{$r->{env}}{reset} = 1;
@@ -343,20 +354,28 @@ sub _shares_history {
 }
 
 # }}}
-# _origin_refusal - one refusal for both classes of illegitimate branch {{{
+# _illegal_state_refusal - one refusal for every illegal initial state {{{
 #
 # The stage raises at most one refusal, so the act is named once, the
 # closing sentence is said once, and an operator holding a branch of each
-# class hears about both at the same time.  The local-only paragraphs come
-# first and the unrelated-history paragraphs follow, which is the order the
-# two questions are asked in.  M13 raises the same text in its deploy form,
-# which is why the act and the closing sentence are arguments.
-sub _origin_refusal {
-	my ($action, $outcome, $remote, $local_only, $unrelated) = @_;
+# class hears about all of them at the same time.  The three classes come in
+# the order the stage asks about them, which is the branch the remote has
+# never had, the branch that shares no ancestor with the remote's, and then
+# the branch carrying a commit no marker accounts for.  M13 raises the same
+# text in its deploy form, which is why the act and the closing sentence are
+# arguments.
+#
+# It was named for the two origin classes when it carried only those.  The
+# hand commit is not a question about where a branch came from, so the name
+# moved to what the three have in common, which is that each is an initial
+# state D96 calls illegal.
+sub _illegal_state_refusal {
+	my ($action, $outcome, $remote, $local_only, $unrelated, $hand) = @_;
 	return sprintf("Refusing to %s.  %s  %s", $action,
 		join('  ',
 			_local_only_refusal($remote, $local_only),
-			_unrelated_refusal($remote, $unrelated)),
+			_unrelated_refusal($remote, $unrelated),
+			_hand_commit_refusal($remote, $hand)),
 		$outcome);
 }
 
@@ -365,8 +384,8 @@ sub _origin_refusal {
 #
 # One paragraph per branch, so the single-branch case reads exactly as the
 # design quotes it and a run with several names them all.  The act and the
-# closing sentence belong to _origin_refusal, which frames whichever classes
-# the stage found.
+# closing sentence belong to _illegal_state_refusal, which frames whichever
+# classes the stage found.
 sub _local_only_refusal {
 	my ($remote, $offenders) = @_;
 	return map {
@@ -387,7 +406,8 @@ sub _local_only_refusal {
 # }}}
 # _unrelated_refusal - D48's text for a branch that shares no ancestor {{{
 #
-# One paragraph per branch, framed by _origin_refusal like its neighbour.
+# One paragraph per branch, framed by _illegal_state_refusal like its
+# neighbour.
 sub _unrelated_refusal {
 	my ($remote, $branches) = @_;
 	return map {
@@ -405,16 +425,30 @@ sub _unrelated_refusal {
 }
 
 # }}}
-# _hand_commit_refusal - D33's refusal of the whole run {{{
+# _hand_commit_refusal - D33's paragraphs for a branch carrying a hand edit {{{
 #
 # Names each branch, each commit, and the two ways out with the command for
 # each, which is what D96 asks of an illegal initial state.  No flag does the
 # operator's half, because under D38 the right friction is to undo by hand.
+#
+# One block rather than one paragraph per branch, because the opening
+# sentence and the indented list are shared and a per-branch block would say
+# the opening once for every offender.  The act and the closing sentence
+# belong to _illegal_state_refusal, which frames whichever classes the stage
+# found.
+#
+# The counts are the branch's and the list is not.  A branch carrying a
+# marker commit beside a hand commit reads as ahead by two over a list of
+# one, which is right, because the counts say how the branch stands against
+# the remote and the list says what has to be dealt with.  The review that
+# found this asked only that it be recorded, so the text is unchanged and
+# the distinction is written here for the next reader of it.
 sub _hand_commit_refusal {
-	my ($action, $outcome, $remote, $offenders) = @_;
+	my ($remote, $offenders) = @_;
+	return () unless @{$offenders || []};
+
 	return sprintf(
-		"Refusing to %s.  %s\n\n%s\n\n%s  %s",
-		$action,
+		"%s\n\n%s\n\n%s",
 		"These branches carry a commit the remote does not have and that ".
 		"carries no propagation marker, so it is a hand edit that belongs on ".
 		"control.",
@@ -432,8 +466,7 @@ sub _hand_commit_refusal {
 				$_->{branch}, $remote, $_->{branch},
 				_commits($_->{ahead}), _commits($_->{behind}),
 				$remote, $_->{branch}, $_->{branch}, $remote, $_->{branch})
-		} @$offenders),
-		$outcome);
+		} @$offenders));
 }
 
 # }}}

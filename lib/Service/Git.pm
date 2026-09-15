@@ -4,7 +4,7 @@ use strict;
 use warnings;
 
 use Genesis qw/run bail debug trace/;
-use Genesis::Exit qw/CONFIG DATAERR/;
+use Genesis::Exit qw/CONFIG DATAERR SOFTWARE/;
 use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
 use Cwd qw/abs_path getcwd/;
@@ -402,7 +402,12 @@ sub create_branch {
 sub set_branch_ref {
 	my ($self, $branch, $ref) = @_;
 
+	# SOFTWARE, because a caller that asks to move the branch the tree is
+	# standing on has a defect in it.  The two callers the design admits
+	# both know where they are standing, so an operator cannot provoke this
+	# by anything they type.
 	bail(
+		{exitcode => SOFTWARE},
 		"Refusing to force #C{%s}, which is the branch this working tree is ".
 		"on.  Switch away from it first.",
 		$branch
