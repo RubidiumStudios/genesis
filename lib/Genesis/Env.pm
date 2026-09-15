@@ -136,7 +136,7 @@ sub load {
 		if ($env->defines('bosh-configs')) {
 			my $bosh_configs = $env->lookup('bosh-configs');
 			if (ref($bosh_configs) eq 'HASH') {
-				my @valid_keys = qw(cloud director_cloud cpi director-cpi runtime);
+				my @valid_keys = qw(cloud director_cloud cpi director-cpi runtime stemcells);
 				my %valid = map { $_ => 1 } @valid_keys;
 				my @invalid_keys = grep { !$valid{$_} } keys %$bosh_configs;
 
@@ -932,6 +932,36 @@ sub deployment_state {
 sub is_bosh_director {
 	my $self = shift;
 	$self->kit->provides_service('director');
+}
+
+# }}}
+# stemcell_os - the OS this environment's stemcells run, or undef when nothing declares one {{{
+#
+# Resolution order: an explicit bosh-configs.stemcells.os in the environment
+# file, then the first entry of the manifest's stemcells block, then the
+# director's own stemcell on a create-env manifest, which lives under
+# resource_pools and usually points at a ((stemcell_url)) bosh-variable.
+# Nothing here guesses a distribution; a caller that needs an OS and gets
+# undef must say so rather than silently pick one.
+sub stemcell_os {
+	my ($self) = @_;
+	my $os = $self->lookup('bosh-configs.stemcells.os', undef);
+	return $os if $os;
+
+	$os = ($self->manifest_lookup('stemcells', [])->[0] // {})->{os};
+	return $os if $os;
+
+	for my $pool (@{$self->manifest_lookup('resource_pools', []) // []}) {
+		my $stemcell = $pool->{stemcell};
+		next unless ref($stemcell) eq 'HASH';
+		for my $ref (grep {defined} @{$stemcell}{qw/os name url/}) {
+			$ref = $self->manifest_lookup("bosh-variables.$1", $ref)
+				if $ref =~ /^\(\(\s*([^()\s]+)\s*\)\)$/;
+			next unless defined $ref && !ref($ref);
+			return $1 if $ref =~ /(ubuntu-[a-z]+|windows[0-9]+[a-z0-9]*)/;
+		}
+	}
+	return undef;
 }
 
 # }}}

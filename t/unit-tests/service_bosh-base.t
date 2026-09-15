@@ -14,6 +14,7 @@ use Test::Exception;
 # ---------------------------------------------------------------------------
 
 use_ok 'Service::BOSH';
+require Genesis::Env; # stemcell_os() runs against the mock envs below, without imports
 
 # ---------------------------------------------------------------------------
 # Section 2 - command() - env var override
@@ -292,7 +293,7 @@ subtest 'available_stemcells() passes correct options to Stemcell class' => sub 
 	is $captured{all},  1,            'all flag is always set to 1';
 };
 
-subtest 'available_stemcells() defaults os to ubuntu-jammy when not specified' => sub {
+subtest 'available_stemcells() defaults os to ubuntu-noble when not specified' => sub {
 	plan tests => 1;
 
 	my @captured_opts;
@@ -306,8 +307,8 @@ subtest 'available_stemcells() defaults os to ubuntu-jammy when not specified' =
 	Service::BOSH->available_stemcells(iaas => 'azure');
 	my %captured = @captured_opts;
 
-	is $captured{os}, 'ubuntu-jammy',
-		'os defaults to ubuntu-jammy when not given';
+	is $captured{os}, 'ubuntu-noble',
+		'os defaults to ubuntu-noble when not given';
 };
 
 subtest 'available_stemcells() derives iaas, os, type from env object when provided' => sub {
@@ -328,6 +329,8 @@ subtest 'available_stemcells() derives iaas, os, type from env object when provi
 		return 'light' if $key eq 'bosh-configs.stemcells.type';
 		return $default;
 	};
+	local *Mock::GenEnv::name = sub { 'mock-env' };
+	local *Mock::GenEnv::stemcell_os = \&Genesis::Env::stemcell_os;
 
 	my @captured_opts;
 	local *Service::BOSH::Stemcell::available_stemcells = sub {
@@ -342,6 +345,83 @@ subtest 'available_stemcells() derives iaas, os, type from env object when provi
 	is $captured{iaas}, 'google',       'iaas derived from env->iaas';
 	is $captured{os},   'ubuntu-noble', 'os derived from env manifest stemcells';
 	is $captured{type}, 'light',        'type derived from env bosh-configs.stemcells.type';
+};
+
+subtest 'available_stemcells() reads the os from bosh-configs.stemcells.os ahead of the manifest' => sub {
+	plan tests => 1;
+
+	my $mock_env = bless {}, 'Mock::GenEnv';
+	no warnings 'redefine';
+	no warnings 'once';
+	local *Mock::GenEnv::iaas = sub { 'openstack' };
+	local *Mock::GenEnv::name = sub { 'mock-env' };
+	local *Mock::GenEnv::stemcell_os = \&Genesis::Env::stemcell_os;
+	local *Mock::GenEnv::manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{ os => 'ubuntu-jammy' }] if $key eq 'stemcells';
+		return $default;
+	};
+	local *Mock::GenEnv::lookup = sub {
+		my ($self, $key, $default) = @_;
+		return 'ubuntu-noble' if $key eq 'bosh-configs.stemcells.os';
+		return $default;
+	};
+
+	my @captured_opts;
+	local *Service::BOSH::Stemcell::available_stemcells = sub {
+		my ($class, %opts) = @_;
+		@captured_opts = %opts;
+		return [];
+	};
+
+	Service::BOSH->available_stemcells(env => $mock_env);
+	my %captured = @captured_opts;
+	is $captured{os}, 'ubuntu-noble',
+		'bosh-configs.stemcells.os wins over the manifest stemcells block';
+};
+
+subtest 'available_stemcells() derives the os from a create-env director stemcell' => sub {
+	plan tests => 2;
+
+	# A create-env manifest has no stemcells block. The director's own
+	# stemcell sits under resource_pools and points at a bosh-variable.
+	my $mock_env = bless {}, 'Mock::GenEnv';
+	no warnings 'redefine';
+	no warnings 'once';
+	local *Mock::GenEnv::iaas = sub { 'openstack' };
+	local *Mock::GenEnv::name = sub { 'mock-env' };
+	local *Mock::GenEnv::stemcell_os = \&Genesis::Env::stemcell_os;
+	local *Mock::GenEnv::lookup = sub { $_[2] };
+	local *Mock::GenEnv::manifest_lookup = sub {
+		my ($self, $key, $default) = @_;
+		return [{
+			name => 'vms',
+			stemcell => { url => '((stemcell_url))', sha1 => '((stemcell_sha1))' },
+		}] if $key eq 'resource_pools';
+		return 'https://storage.googleapis.com/bosh-core-stemcells/1.585/'.
+			'bosh-stemcell-1.585-openstack-kvm-ubuntu-noble.tgz'
+			if $key eq 'bosh-variables.stemcell_url';
+		return $default;
+	};
+
+	my @captured_opts;
+	local *Service::BOSH::Stemcell::available_stemcells = sub {
+		my ($class, %opts) = @_;
+		@captured_opts = %opts;
+		return [];
+	};
+
+	Service::BOSH->available_stemcells(env => $mock_env);
+	my %captured = @captured_opts;
+	is $captured{os}, 'ubuntu-noble',
+		'os comes from the director stemcell URL resolved through bosh-variables';
+
+	# With nothing to read, the lookup falls back to noble, never jammy.
+	local *Mock::GenEnv::manifest_lookup = sub { $_[2] };
+	Service::BOSH->available_stemcells(env => $mock_env);
+	%captured = @captured_opts;
+	is $captured{os}, 'ubuntu-noble',
+		'an environment that declares no stemcell OS gets ubuntu-noble';
 };
 
 # ---------------------------------------------------------------------------

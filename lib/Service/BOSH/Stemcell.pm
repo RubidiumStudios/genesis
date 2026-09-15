@@ -14,6 +14,7 @@ use JSON::PP ();
 use constant {
 	# bosh.io API URL for stemcells
 	default_stemcell_url => 'https://bosh.io/api/v1/stemcells/',
+	default_stemcell_os  => 'ubuntu-noble', # the current Ubuntu LTS; operators override with --os
 	valid_stemcell_types => [qw/regular light/],
 };
 
@@ -27,7 +28,7 @@ sub available_stemcells {
 		"No IaaS specified for stemcell lookup"
 	) unless $iaas;
 	$iaas =~ s/-cpi$//; # Don't think anyone will use this, but just in case
-	$os //= 'ubuntu-jammy';
+	$os //= default_stemcell_os;
 	$all = $all ? 1 : 0;
 
 	my $cpi = $opts{cpi} // $class->cpi_stemcell_prefix($iaas);

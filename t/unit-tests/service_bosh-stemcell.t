@@ -698,7 +698,7 @@ subtest 'available_stemcells() - custom stemcell_url overrides default' => sub {
 	);
 };
 
-subtest 'available_stemcells() - default os is ubuntu-jammy' => sub {
+subtest 'available_stemcells() - default os is ubuntu-noble' => sub {
 	plan tests => 1;
 
 	my $captured;
@@ -716,7 +716,7 @@ subtest 'available_stemcells() - default os is ubuntu-jammy' => sub {
 		};
 	}
 
-	like($captured, qr/ubuntu-jammy/, 'default OS is ubuntu-jammy');
+	like($captured, qr/ubuntu-noble/, 'default OS is ubuntu-noble');
 };
 
 subtest 'available_stemcells() - unreachable bosh.io bails cleanly' => sub {

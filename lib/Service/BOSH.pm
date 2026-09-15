@@ -82,13 +82,15 @@ sub available_stemcells {
 	if ($opts{env}) {
 		my $env = $opts{env};
 		$iaas //= $env->iaas;
-		$os //= ($env->manifest_lookup('stemcells',[])->[0]//{})->{os};
+		$os //= $env->stemcell_os;
 		$type //= $env->lookup('bosh-configs.stemcells.type', undef);
 	}
-	$os //= 'ubuntu-jammy';
 	bail(
 		"No IaaS specified for stemcell lookup"
 	) unless $iaas;
+	# Out of the box the OS is the current Ubuntu LTS. An operator overrides
+	# it with --os or bosh-configs.stemcells.os; both arrive here as $os.
+	$os //= Service::BOSH::Stemcell::default_stemcell_os();
 
 	my $stemcells = Service::BOSH::Stemcell->available_stemcells(
 		iaas => $iaas,

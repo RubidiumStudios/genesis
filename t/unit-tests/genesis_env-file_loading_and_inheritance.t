@@ -955,7 +955,7 @@ subtest 'bosh-configs validation - valid keys' => sub {
 	$top->link_dev_kit('t/src/simple');
 
 	# Test each valid key individually
-	my @valid_keys = qw(cloud director_cloud cpi runtime);
+	my @valid_keys = qw(cloud director_cloud cpi runtime stemcells);
 
 	foreach my $key (@valid_keys) {
 		put_file $top->path("bosh-config-$key.yml"), <<EOF;
