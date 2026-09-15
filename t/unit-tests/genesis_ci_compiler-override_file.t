@@ -169,7 +169,20 @@ use base 'Genesis::CI::Provider';
 # The base's new is the factory's, and it refuses to build a subclass, so
 # a CLI-side fixture the load path constructs brings its own.
 sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
-sub provider_options_schema {return {}}
+# The block this provider is checked against is the fragment declared
+# here, so a key the operator may write under an ability this provider
+# claims is declared here too, or the check refuses what the schema
+# offered.
+sub provider_options_schema {
+	return {
+		output_layout => {
+			type        => 'enum',
+			values      => [qw/single multiple/],
+			default     => 'single',
+			description => 'Whether the override file is named per emitted file'
+		},
+	};
+}
 1;
 MANYCLI
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Many.pm', <<'MANY');
