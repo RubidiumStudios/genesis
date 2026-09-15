@@ -175,7 +175,7 @@ subtest 'a marker a squash bulleted is still a marker' => sub {
 };
 
 subtest 'the newest marker wins whichever order the squash lists them' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	# The two tools disagree.  GitHub bullets each subject and lists the
 	# newest commit last, and git's own squash indents each subject and
@@ -241,6 +241,11 @@ subtest 'the newest marker wins whichever order the squash lists them' => sub {
 				'dead0beef123', substr($newer, 0, 12)),
 		);
 		refresh($h, 'a', $h->slug('qa'));
+
+		my (undef, $reached) =
+			Genesis::CI::Marker::_resolved($h->git('a'), 'dead0beef123');
+		ok(!$reached,
+			'the sha the first marker names is one this repository cannot reach');
 
 		is(Genesis::CI::Marker::newest($h->git('a'), 'origin/' . $h->slug('qa')),
 			$newer, 'and where an unreachable marker was listed ahead of it');

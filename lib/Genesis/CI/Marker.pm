@@ -60,12 +60,19 @@ sub build {
 # marker in the text answers, in the order the text lists them, which is what
 # lets a caller holding that handle weigh several against each other; in
 # scalar context the first one does.
+#
+# A caller that names an environment is answered by the markers addressed to
+# that environment alone.  The name is the marker's own second half, so the
+# one regex reads it rather than a second regex reading it afterwards, and a
+# caller that names nothing gets the pattern it has always got.
 sub in_text {
-	my ($text) = @_;
+	my ($text, $env) = @_;
 	return wantarray ? () : undef unless defined $text;
 
+	my $tail = defined $env ? qr/[ \t]+->[ \t]+\Q$env\E[ \t]*$/ : qr/\b/;
+
 	my @written;
-	while ($text =~ /^[ \t]*(?:[-*][ \t]+)?\Q$PREFIX\E([0-9a-f]{4,40})\b/mg) {
+	while ($text =~ /^[ \t]*(?:[-*][ \t]+)?\Q$PREFIX\E([0-9a-f]{4,40})$tail/mg) {
 		push @written, $1;
 	}
 	return wantarray ? @written : $written[0];
@@ -94,14 +101,19 @@ sub newest {
 	# read and no marker to find.  The guard asks whether the caller set a
 	# cap rather than whether the cap is true, because a caller that said
 	# zero meant zero and a truth test hands it an uncapped walk instead.
-	return wantarray ? (undef, 0, undef) : undef
-		if defined $opts{limit} && $opts{limit} < 1;
+	#
+	# It skips the walk rather than leaving the sub, because a branch the
+	# reader never read says no marker exactly as loudly as one it read to
+	# the root, and D52's recovery answers for the two of them alike.  A
+	# recovery that turned on how far the caller let the walk read would be
+	# a recovery about the caller rather than about the branch.
+	my $walk = !(defined $opts{limit} && $opts{limit} < 1);
 
-	my @records = $git->log_subjects($ref,
+	my @records = $walk ? $git->log_subjects($ref,
 		body => 1,
 		(defined $opts{limit} ? (limit => $opts{limit}) : ()),
 		($opts{paths} ? (paths => $opts{paths}) : ()),
-	);
+	) : ();
 
 	my $depth = 0;
 	for my $record (@records) {
@@ -121,8 +133,14 @@ sub newest {
 	# reached only on a branch that says nothing at all.  A body is weighed
 	# exactly as a commit message is, because a squash of several deliveries
 	# leaves several markers in the body too.
+	#
+	# A body is also the one place the reader takes a marker from that is
+	# not a commit on the environment's own branch, and a person may edit it
+	# after Genesis wrote it.  A caller that names the environment it is
+	# asking about is therefore answered by the markers addressed to that
+	# environment alone.
 	if (defined $opts{recover_from}) {
-		my @written = in_text($opts{recover_from});
+		my @written = in_text($opts{recover_from}, $opts{env});
 		if (@written) {
 			my $sha = _newest_of($git, @written);
 			return wantarray ? ($sha, $depth, 'pull-request') : $sha;
