@@ -54,15 +54,25 @@ subtest 'a marker-only local commit is reset and reported as an event' => sub {
 
 	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
-	isnt($exit, Genesis::Exit::DATAERR, 'the run is not refused');
+	# The run does not end at zero, because the creation guard further down
+	# propagate still asks branch_exists for the environment's name rather
+	# than for its slug and refuses at PROPAGATE_NO_BRANCH_EXIT.  What this
+	# row reads is that the stage above it did not refuse.
+	isnt($exit, Genesis::Exit::DATAERR, 'this stage did not refuse the run');
 	like($err, qr{reset\s+\Q$qa\E\s+to\s+\S*origin/\Q$qa\E},
 		'the reset is reported as an event line');
+	# This row guards a regression it cannot yet catch.  The outcome column
+	# is printed by the walk, and the walk does not run until Task 7.8 moves
+	# the guard off the environment's name, so nothing can match today and
+	# the row cannot fail.  It is kept rather than deferred because the
+	# claim is about where the reset is reported and the file that makes it
+	# is this one; 7.8's review confirms it discriminates once the walk runs.
 	unlike($err, qr{\Q$qa\E\s+reset\b},
 		'and it is not reported as the environment outcome');
 	isnt(ref_in($h->a, "refs/heads/$qa"), $stranded,
 		'the stranded commit is gone from the branch');
 	is($h->git('a')->resolve_branch($qa)->{behind}, 0,
-		'and the branch is no longer behind what the walk then wrote');
+		'and the branch stands where the remote stands');
 };
 
 subtest 'a dry run reports the reset and moves nothing' => sub {
@@ -87,7 +97,10 @@ subtest 'a dry run reports the reset and moves nothing' => sub {
 		'the dry run left the branch where it stood');
 	is($h->git('a')->resolve_branch($qa)->{state}, 'ahead',
 		'so the stranded commit is still there and still unpublished');
-	like($err, qr/This\s+report\s+assumes\s+the\s+reset\s+of\s+\Q$qa\E/,
+	# The warning says only that the reset is assumed.  The sentence naming
+	# what would be discarded is the event line, which the caller prints
+	# under either kind of run, so the warning does not repeat it.
+	like($err, qr/This\s+report\s+assumes\s+the\s+reset\s+of\s+\Q$qa\E\s+that\s+a\s+real\s+run\s+would\s+make/,
 		'and the report says it assumes the reset a real run would make');
 };
 
@@ -133,15 +146,56 @@ subtest 'a hand commit refuses the whole run and writes nothing' => sub {
 		'and no other environment was written either');
 };
 
+subtest 'a stray branch and a hand commit are named in one refusal' => sub {
+	# Six rows, and one more for the run's own restoration assertion.
+	plan tests => 7;
+
+	my $h   = make_harness(envs => ['qa', 'lab']);
+	my $qa  = $h->slug('qa');
+	my $lab = $h->slug('lab');
+
+	init_branch($h, 'qa');
+	refresh($h, 'a', $qa);
+	# lab/bosh is a branch the remote has never had, which is one class,
+	# and qa/bosh carries a commit no marker accounts for, which is another.
+	local_branch_only($h, 'lab');
+	commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nfrom: the operator\n"},
+		message => 'an operator commit to propagate',
+		push    => 1);
+	local_only_commit($h, $qa,
+		marker => 0, message => 'patch the manifest by hand');
+	stand_on($h, $h->control);
+
+	my (undef, $err, $exit) = run_genesis($h, 'propagate');
+
+	is($exit, Genesis::Exit::DATAERR, 'the run exits DATAERR');
+	like($err, qr/has\s+no\s+counterpart\s+on\s+\S*origin/,
+		'the stray branch is named');
+	like($err, qr/\Qlab\E\s*\/\s*bosh/,
+		'by name, allowing for a wrap at the slash');
+	like($err, qr/patch\s+the\s+manifest\s+by\s+hand/,
+		'and the hand commit is named too');
+
+	# The row that discriminates.  Against a shape where each class raises
+	# its own bail, the first one fires and the operator never hears about
+	# the second, so one opening and one closing is what says they arrived
+	# together.
+	my @openings = $err =~ /(Refusing\s+to\s+run)/g;
+	is(scalar @openings, 1, 'the run is refused once and not twice');
+	my @closings = $err =~ /(Nothing\s+was\s+written)/g;
+	is(scalar @closings, 1, 'and the closing sentence is said once');
+};
+
 subtest 'no option adopts the remote over a hand commit' => sub {
-	# Three rows, and one more for the run's own restoration assertion.
+	# Four rows, and one more for the run's own restoration assertion.
 	#
 	# The claim is read from the product rather than from the absence of
 	# three flags nobody ever wrote: a run that drives three unbuilt
 	# options is green before this task starts, and says nothing about
 	# what the refusal offers.  So the refusal itself is driven, and the
 	# row reads what it puts in front of the operator.
-	plan tests => 4;
+	plan tests => 5;
 
 	my $h  = make_harness(envs => ['qa']);
 	my $qa = $h->slug('qa');
@@ -158,10 +212,15 @@ subtest 'no option adopts the remote over a hand commit' => sub {
 	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
 	is($exit, Genesis::Exit::DATAERR, 'the hand commit refuses the run');
-	unlike($err, qr/--\w/,
-		'and the refusal offers no flag that would do the operator\'s half');
 	like($err, qr{git\s+push\s+origin\s+\Q$qa\E.*git\s+branch\s+-f\s+\Q$qa\E}s,
 		'it offers the two commands the operator runs by hand instead');
+	# Read out of the paragraph that offers the two commands rather than out
+	# of the whole of standard error, so an unrelated line that happened to
+	# carry a long option could not fail this row for the wrong reason.
+	my ($offer) = $err =~ m{(is\s+ahead\s+of.*?if\s+it\s+is\s+not\.)}s;
+	ok($offer, 'the refusal carries that paragraph');
+	unlike($offer // '', qr/--\w/,
+		'and it offers no flag that would do the operator\'s half');
 };
 
 subtest 'the straggler, reproduced' => sub {
@@ -218,7 +277,7 @@ subtest 'the divergence with no exit, reproduced' => sub {
 
 	run_genesis($h, 'propagate');
 	is($h->git('a')->resolve_branch($qa)->{state}, 'in-sync',
-		'a marker-only commit resets itself and the run carries on');
+		'a marker-only commit reset itself rather than refusing the run');
 
 	my $h2  = make_harness(envs => ['qa']);
 	my $qa2 = $h2->slug('qa');

@@ -580,8 +580,11 @@ B<Errors:>
 
 =item *
 
-A refusal when the branch is the one this working tree is on, since the ref
-and the tree would then disagree. The caller switches away first.
+A refusal at C<SOFTWARE> when the branch is the one this working tree is on,
+since the ref and the tree would then disagree. The caller switches away
+first. It is a defect rather than an operator's mistake, because the two
+callers the design admits both know where they are standing and nothing an
+operator types reaches it.
 
 =item *
 

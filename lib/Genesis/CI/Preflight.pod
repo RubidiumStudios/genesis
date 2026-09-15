@@ -317,18 +317,18 @@ events once and in order.
 
 =back
 
-B<Errors:> Bails at C<DATAERR> for a local deployment branch the remote has
-never had, and for one that shares no ancestor with the remote's.  The two
-classes come back in one refusal, which names every offending branch and gives
-the remedy in order, which is to inspect the branch, move anything wanted to
-control, delete the branch, and then run the command the case calls for.
-Genesis deletes nothing itself.  It bails at C<DATAERR> again
-for a branch carrying a local-only commit with no propagation marker, naming
-the branch, every such commit, both counts, and the command for each of the
-two ways out, which are to push the commit or to move the change to control
-and reset the branch.  No option performs either, so the refusal is the whole
-path out.  The refresh and the control check raise their
-own codes where the caller has left them to this stage.
+B<Errors:> Bails once at C<DATAERR> for every illegal initial state the stage
+found, in one refusal that names each offending branch under the class it
+belongs to.  A local deployment branch the remote has never had and one that
+shares no ancestor with the remote's are each given the remedy in order, which
+is to inspect the branch, move anything wanted to control, delete the branch,
+and then run the command the case calls for.  Genesis deletes nothing itself.
+A branch carrying a local-only commit with no propagation marker is named with
+every such commit, both of the branch's counts, and the command for each of
+the two ways out, which are to push the commit or to move the change to
+control and reset the branch.  No option performs either, so the refusal is
+the whole path out.  The refresh and the control check raise their own codes
+where the caller has left them to this stage.
 
 B<Examples:>
 
@@ -399,20 +399,25 @@ B<Examples:>
   Genesis::CI::Preflight::_shares_history($git, 'qa/bosh', 'origin');
   # 0, where the local branch is an orphan of the same name
 
-=head2 _origin_refusal
+=head2 _illegal_state_refusal
 
-    my $text = Genesis::CI::Preflight::_origin_refusal(
-        $action, $outcome, $remote, \@local_only, \@unrelated);
+    my $text = Genesis::CI::Preflight::_illegal_state_refusal(
+        $action, $outcome, $remote, \@local_only, \@unrelated, \@hand);
 
-Frames whichever classes of illegitimate branch the stage found as one
-refusal.
+Frames whichever illegal initial states the stage found as one refusal.
 
 The stage raises at most one refusal, so the act is named once and the closing
 sentence is said once however many branches and however many classes the run
-met.  The local-only paragraphs come first and the unrelated-history
-paragraphs follow, which is the order the two questions are asked in.  The act
-and the closing sentence are arguments, because the deploy raises the same
-text in its own words.
+met.  The three classes come in the order the stage asks about them, which is
+the branch the remote has never had, then the branch that shares no ancestor
+with the remote's, then the branch carrying a commit no marker accounts for.
+The act and the closing sentence are arguments, because the deploy raises the
+same text in its own words.
+
+It was named for the two origin classes while it carried only those.  A hand
+commit is not a question about where a branch came from, so the name moved to
+what all three have in common, which is that each is an initial state the
+design calls illegal.
 
 B<Parameters:>
 
@@ -440,6 +445,11 @@ C<branch>.  It may be empty.
 The names of the branches that share no ancestor with their counterpart.  It
 may be empty.
 
+=item C<\@hand>
+
+The branches carrying a local-only commit with no marker, as
+C<_hand_commit_refusal> takes them.  It may be empty.
+
 =back
 
 B<Returns:> The composed refusal, which the caller hands to C<bail> through a
@@ -447,15 +457,16 @@ C<'%s'> format.
 
 B<Examples:>
 
-  Genesis::CI::Preflight::_origin_refusal(
+  Genesis::CI::Preflight::_illegal_state_refusal(
       'run #C{genesis propagate}', 'Nothing was written.', 'origin',
-      [{env => 'lab', branch => 'lab/bosh'}], []);
+      [{env => 'lab', branch => 'lab/bosh'}], [], []);
   # 'Refusing to run #C{genesis propagate}.  The local branch #C{lab/bosh}
   #  has no counterpart on #C{origin}.  ...  Nothing was written.'
 
-  Genesis::CI::Preflight::_origin_refusal(
+  Genesis::CI::Preflight::_illegal_state_refusal(
       'run #C{genesis propagate}', 'Nothing was written.', 'origin',
-      [{env => 'lab', branch => 'lab/bosh'}], ['qa/bosh']);
+      [{env => 'lab', branch => 'lab/bosh'}], [],
+      [{branch => 'qa/bosh', ahead => 1, behind => 0, commits => \@commits}]);
   # one refusal naming lab/bosh and then qa/bosh, with one opening sentence
   # and one closing sentence
 
@@ -468,7 +479,7 @@ Composes D48's paragraphs for deployment branches the remote has never had.
 
 One paragraph per branch, so a run with one offender reads exactly as the
 design quotes it and a run with several names them all.  The act the refusal
-opens with and the sentence it closes with belong to C<_origin_refusal>, which
+opens with and the sentence it closes with belong to C<_illegal_state_refusal>, which
 frames whichever classes the stage found.
 
 B<Parameters:>
@@ -509,7 +520,7 @@ their counterpart on the remote.
 It says that the marker-only reset never applies across unrelated histories,
 whatever the local commits carry, because that is the question an operator
 reaching this refusal is most likely to ask next.  Like its neighbour, it
-leaves the opening and the closing sentence to C<_origin_refusal>.
+leaves the opening and the closing sentence to C<_illegal_state_refusal>.
 
 B<Parameters:>
 
@@ -539,29 +550,32 @@ B<Examples:>
 
 =head2 _hand_commit_refusal
 
-    my $text = Genesis::CI::Preflight::_hand_commit_refusal(
-        $action, $outcome, $remote, \@offenders);
+    my @block = Genesis::CI::Preflight::_hand_commit_refusal(
+        $remote, \@offenders);
 
-Composes the refusal for deployment branches carrying a local commit that no
-remote has and that carries no propagation marker.
+Composes the paragraphs for deployment branches carrying a local commit that
+no remote has and that carries no propagation marker.
 
 It lists each branch with the short sha and the subject of every markerless
 commit, so the operator can see what has to be dealt with without going to
 look for it, and it then gives both counts and the command for each of the two
-ways out. No flag does the operator's half of either, because the change
+ways out.  No flag does the operator's half of either, because the change
 belongs on control and the friction of moving it there by hand is the point.
+
+It answers with one block rather than a paragraph per branch, since the
+opening sentence and the indented list are shared and a block per branch would
+say the opening once for every offender.  The act the refusal opens with and
+the sentence it closes with belong to C<_illegal_state_refusal>, which frames
+whichever classes the stage found.
+
+The counts belong to the branch and the list does not.  A branch carrying a
+marker commit beside a hand commit reads as ahead by two over a list of one,
+which is right, because the counts say how the branch stands against the
+remote while the list says what has to be dealt with.
 
 B<Parameters:>
 
 =over 4
-
-=item C<$action>
-
-The act the refusal opens with.
-
-=item C<$outcome>
-
-The closing sentence, which says what did not happen.
 
 =item C<$remote>
 
@@ -575,18 +589,20 @@ C<local_only_commits> returns them.
 
 =back
 
-B<Returns:> The composed refusal, which the caller hands to C<bail> through a
-C<'%s'> format.
+B<Returns:> The one composed block, or the empty list where there are no
+offenders, so the frame can join it with its siblings unconditionally.
 
 B<Examples:>
 
-  Genesis::CI::Preflight::_hand_commit_refusal(
-      'run #C{genesis propagate}', 'Nothing was written.', 'origin',
+  Genesis::CI::Preflight::_hand_commit_refusal('origin',
       [{branch => 'qa/bosh', ahead => 1, behind => 0,
         commits => [{short => 'a1b2c3d', subject => 'patch it by hand'}]}]);
-  # 'Refusing to run #C{genesis propagate}.  These branches carry a commit
-  #  the remote does not have ...  #C{qa/bosh} is ahead of #C{origin/qa/bosh}
-  #  by 1 commit and behind it by 0 commits.  ...  Nothing was written.'
+  # 'These branches carry a commit the remote does not have ...
+  #  #C{qa/bosh} is ahead of #C{origin/qa/bosh} by 1 commit and behind it by
+  #  0 commits.  ...'
+
+  Genesis::CI::Preflight::_hand_commit_refusal('origin', []);
+  # ()
 
 =head2 _commits
 
