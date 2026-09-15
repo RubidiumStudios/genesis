@@ -994,14 +994,21 @@ B<Examples:>
 
 =head2 log_subjects
 
-  my @lines = $git->log_subjects($branch);
-  my @lines = $git->log_subjects($branch, limit => 50, paths => \@paths);
+  my @lines   = $git->log_subjects($branch);
+  my @lines   = $git->log_subjects($branch, limit => 50, paths => \@paths);
+  my @records = $git->log_subjects($branch, body => 1);
 
-Commit lines for a branch, newest first.
+Commit lines for a branch, newest first, or whole commit messages when
+C<body> is set.
 
 The C<paths> filter is what makes this usable in a repository deploying more
 than one thing from a single branch: without it, the history returned
 includes commits belonging to sibling deployments.
+
+The C<body> walk is what makes a squash merge readable.  A squash keeps the
+merger's title as the subject and moves the merged message into the body, so
+a propagation marker on such a commit is invisible to a walk over subject
+lines.  L<Genesis::CI::Marker/newest> is its caller.
 
 B<Parameters:>
 
@@ -1021,17 +1028,25 @@ Maximum number of commits.
 
 =item C<format>
 
-A git format string. Defaults to C<'%H %s'> -- sha and subject.
+A git format string. Defaults to C<'%H %s'> -- sha and subject -- or to
+C<'%H\x1f%B'> when C<body> is set.
 
 =item C<paths>
 
 Arrayref of git-root-relative paths; only commits touching them are returned.
 
-=back
+=item C<body>
+
+Return one hashref per commit rather than one line, carrying the whole
+message.
 
 =back
 
-B<Returns:> The formatted lines, newest first. Empty when nothing matches.
+=back
+
+B<Returns:> Without C<body>, the formatted lines, newest first.  With
+C<body>, a list of hashrefs of C<sha> and C<message>, newest first.  Empty
+when nothing matches, either way.
 
 B<Examples:>
 
@@ -1040,6 +1055,9 @@ B<Examples:>
 
   my ($subject) = $git->log_subjects($sha, limit => 1, format => '%s');
   # returns just that commit's subject
+
+  my @records = $git->log_subjects('qa/bosh', body => 1, limit => 1);
+  # returns ({sha => 'a1b2c3d...', message => "Merge pull request #7\n\n..."})
 
 =head2 show_file
 
