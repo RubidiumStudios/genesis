@@ -476,9 +476,15 @@ discovered half goes missing.
 
 Both that read and the record write go through a bare environment, which
 resolves the whole of C<genesis.pipeline> and the record's own address on
-the merged hierarchy with no kit. The record has to be written either way,
-because an environment carrying none at all reads as one the apply never
-reached.
+the merged hierarchy with no kit. The record is written even so, because an
+environment carrying none at all reads as one the apply never reached.
+
+That bare read is itself guarded, because an environment whose files will
+not merge at all refuses it and the record's address alike. Where even the
+bare read fails, the warning says both reads failed and the pass moves on
+with nothing recorded for that environment, which leaves it reading as an
+environment no pipeline knows. A failure while recovering from a failure
+still costs one environment rather than the whole run.
 
 It runs under every provider, including the manual one, since the record says
 what was applied rather than what was hosted. It runs on a dry run and on an

@@ -41,10 +41,14 @@ subtest 'the set is the union of the declared and the discovered' => sub {
 	# secret/exodus/<name>/<this environment's type> for each of them, so the
 	# manifest this row renders reads /secret/exodus/dev/bosh and
 	# /secret/exodus/ops/bosh and the discovered half is those two slugs.
+	# The declared list names this environment's own deployment type as well,
+	# which normalises to its own slug and has to come back out again.  The
+	# expected union is the same either way, so the row holds the exclusion
+	# on the declared side, which nothing else in this file reaches.
 	my $h = make_harness(envs => ['qa'], kit => 'exodus-reader');
 	write_env_file($h, 'qa',
 		genesis  => {reads_exodus       => ['dev', 'ops']},
-		pipeline => {track_dependencies => ['vault', 'dev/bosh']},
+		pipeline => {track_dependencies => ['vault', 'dev/bosh', 'bosh']},
 	);
 	certify($h, 'dev', commit => 'abc123', type => 'bosh');
 	certify($h, 'ops', commit => 'def456', type => 'bosh');
@@ -136,6 +140,32 @@ subtest 'an environment that will not load keeps its declared set' => sub {
 		'the declared half is wired anyway, bare type and pair alike');
 	is(secret($h->env_path('qa') . '/pipeline:discovery'), 'incomplete',
 		'and only the discovery it actually lost is marked incomplete');
+};
+
+subtest 'an environment nothing can read at all costs only itself' => sub {
+	# Four rows, and one more for the run's own restoration assertion.
+	plan tests => 5;
+
+	# The recovery path reads the declared half through a bare environment,
+	# and that read can raise in its turn for an environment whose files
+	# will not merge at all.  This operator is one no merge can work around.
+	# The three names put the broken environment between two healthy ones,
+	# because what the row is really about is the environment that comes
+	# after it in the walk still being recorded.
+	my $h = make_harness(envs => ['qa', 'rogue', 'zulu']);
+	write_env_file($h, 'rogue', genesis => {notes => '(( static_ips(0) ))'});
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	my $said = _unfolded($out, $err);
+
+	is($exit, 0, 'the apply carries on rather than bailing the whole run');
+	like($said, qr{Could not load rogue, and could not read it bare either},
+		'the warning says both reads failed and names the environment');
+
+	no_secret($h->env_path('rogue') . '/pipeline:discovery',
+		'the environment nothing could read carries no record');
+	have_secret($h->env_path('zulu') . '/pipeline:discovery',
+		'and the one after it in the walk still gets one');
 };
 
 subtest 'an environment joins the set at the next apply and not before' => sub {
