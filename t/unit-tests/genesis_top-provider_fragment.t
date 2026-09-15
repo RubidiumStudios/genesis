@@ -208,7 +208,7 @@ TERSE
 # provider's own fragment, that a provider overriding it still gets that
 # pass, and that the two are one call rather than two phases.
 subtest 'the base default validates against the declaration' => sub {
-	plan tests => 5;
+	plan tests => 8;
 
 	# A provider that writes no validation at all, so everything refused
 	# below it is refused by the default the base gives every provider.
@@ -232,6 +232,14 @@ sub provider_options_schema {
 	return {
 		target => {type => 'string', description => 'One of the pair'},
 		url    => {type => 'string', description => 'The other of the pair'},
+		# The key an ability offers is declared by the provider that
+		# claims the ability, and this one claims every one of them.
+		output_layout => {
+			type        => 'enum',
+			values      => [qw/single multiple/],
+			default     => 'single',
+			description => 'How many files the provider emits'
+		},
 	};
 }
 sub validate_config {
@@ -243,10 +251,12 @@ sub validate_config {
 }
 1;
 PAIR
-	# The compiler half of each fixture, because the merged schema is still
-	# built from the compiler class, which reads the declaration off the
-	# CLI class beside it.  Neither claims an ability, so no key of either
-	# fragment is gated away before the block is read.
+	# The compiler half of each fixture, because the capabilities are
+	# declared there while the fragment is declared on the CLI class
+	# beside it.  Plain claims nothing, which is the ordinary case these
+	# rows are about.  Pair claims every ability, so a key an ability
+	# offers is declared in its fragment and read back through the same
+	# walk as every other key of the block.
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Plain.pm', <<'PLAINC');
 package Genesis::CI::Compiler::Providers::Plain;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
@@ -263,7 +273,7 @@ package Genesis::CI::Compiler::Providers::Pair;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'pair'}
 sub capabilities {
-	return {map {($_ => 0)} qw/cross_pipeline_events deployment_locks
+	return {map {($_ => 1)} qw/cross_pipeline_events deployment_locks
 		multi_file_output optional_git_triggers per_commit_runs
 		scheduled_jobs/};
 }
@@ -299,6 +309,29 @@ PAIRC
 	throws_ok {load_with($h, automated_config('pair', 'nonesuch: 1'))}
 		qr/pipeline\.provider\.nonesuch: unknown configuration key/,
 		'and it still gets the generic pass it called up for';
+
+	# A provider that can emit several files declares the layout key
+	# itself, so the block admits what the operator writes there and fills
+	# the fragment's default where nobody wrote anything.
+	$top = load_with($h, automated_config('pair',
+		'target: ci', 'output_layout: multiple'));
+	is $top->config->get('pipeline.provider.output_layout'), 'multiple',
+		'the layout key is admitted by the provider that declares it';
+	$top = load_with($h, automated_config('pair', 'target: ci'));
+	is $top->config->get('pipeline.provider.output_layout'), 'single',
+		'and D67 fills its default where nobody wrote one';
+
+	# The default asked for directly, rather than through the walk that
+	# reaches it, because a class method is what D105 asks a provider for
+	# and a row that only ever loads a configuration cannot tell the two
+	# apart.  The configuration holds the block and nothing else.
+	my $cfg = Genesis::Config->new();
+	$cfg->set('pipeline.provider.type', 'plain');
+	my @refusals = map {Genesis::Term::decolorize($_)}
+		Genesis::CI::Provider::Plain->validate_config(
+			$cfg, 'pipeline.provider', 'type');
+	like join("\n", @refusals), qr/pipeline\.provider: missing required key .*token/,
+		'and the default answers for the block when it is called outright';
 };
 
 # Both provider-load refusals interpolate what the failed require said, and

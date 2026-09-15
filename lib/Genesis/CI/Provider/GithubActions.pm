@@ -89,7 +89,7 @@ sub provider_options_schema {
 }
 
 # }}}
-# validate_config - nothing of its own, and why the old rule went {{{
+# why this provider states no rule of its own {{{
 #
 # Nothing is written here, so the base's default is what runs, and under
 # D105 that validates the block against the fragment above and refuses
@@ -106,7 +106,6 @@ sub provider_options_schema {
 # any of that is derived.  Genesis::Top::_source_control already refuses
 # a pipeline whose repository cannot be named, in the operator's own
 # terms, so nothing an operator relied on is lost with them.
-#
 # }}}
 # }}}
 ### Instance Methods {{{

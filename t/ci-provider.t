@@ -379,9 +379,14 @@ subtest 'check_prereqs: Concourse min_fly_version not satisfied' => sub {
 # the class about it, rather than assembling an object out of the block
 # and asking the object.  The errors come back carrying Genesis's own
 # colour markup, so anything read out of them is rendered first.
+# The section the block sits in is switched on, because a provider asks
+# for the key its pipeline cannot run without once there is a pipeline to
+# run, and a block under a section nobody has turned on is a block an
+# operator is still part way through writing.
 sub provider_block {
 	my (%keys) = @_;
 	my $cfg = Genesis::Config->new();
+	$cfg->set('pipeline.enabled', 1);
 	$cfg->set("pipeline.provider.$_", $keys{$_}) for sort keys %keys;
 	return $cfg;
 }
