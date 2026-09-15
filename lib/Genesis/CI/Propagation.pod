@@ -21,8 +21,10 @@ Genesis::CI::Propagation - DAG-driven propagation of pipeline files between envi
         github        => $github,
         owner_repo    => 'acme/widgets',
         targets       => [
-            { env => 'staging', require_pr => 0, detail => {...} },
-            { env => 'preprod', require_pr => 1, detail => {...} },
+            { env => 'staging', branch => 'staging/bosh',
+              require_pr => 0, detail => {...} },
+            { env => 'preprod', branch => 'preprod/bosh',
+              require_pr => 1, detail => {...} },
         ],
         control       => 'control',
         control_sha   => $sha,
@@ -311,6 +313,7 @@ Arrayref of target hashes.  Each:
 
     {
         env        => 'staging',
+        branch     => 'staging/bosh',
         require_pr => 0|1,
         detail     => {
             changed => [...],     # files to copy from control_sha
@@ -318,6 +321,14 @@ Arrayref of target hashes.  Each:
             renamed => {...},     # old_path => new_path
         },
     }
+
+C<branch> is the environment's deployment branch, which is the deployment
+slug and not the environment's own name, and it is the branch the delivery
+is committed onto, the branch a pull request is cut from and opened against,
+and the branch that is pushed.  C<env> stays the environment's own name,
+which is what the marker records and what the operator reads.  A target that
+names no C<branch> falls back to C<env>, so a caller that has only the one
+name still works.
 
 The C<env> name is also the local git branch name for the target.
 For C<require_pr =E<gt> 1>, the actual propagation branch is the one
@@ -443,18 +454,25 @@ and should not be called directly.
   _propagate_one_direct_env(%args);
 
 Applies one target's propagation straight onto its own branch, for targets
-without C<require_pr>.  Takes C<git>, C<env_name>, C<control_sha>,
-C<control_short> and C<detail>.
+without C<require_pr>.  Takes C<git>, C<session>, C<env_name>, C<branch>,
+C<control_sha>, C<control_short> and C<detail>.
 
-B<Returns:> nothing meaningful; the branch is left with the commit applied.
+The switch and the returned name take C<branch>, which is the deployment
+slug, and the marker and the line the operator reads take C<env_name>,
+because a marker names the environment it delivered to.  C<branch> falls
+back to C<env_name> where the caller names none.
+
+B<Returns:> a hashref whose C<branch> is the branch the commit was applied
+to, which the caller pushes.
 
 B<Examples:>
 
   _propagate_one_direct_env(
-      git => $git, env_name => 'staging',
+      git => $git, session => $session,
+      env_name => 'staging', branch => 'staging/bosh',
       control_sha => $sha, control_short => $short, detail => $detail,
   );
-  # no return value; commits onto the staging branch
+  # commits onto staging/bosh and answers { branch => 'staging/bosh' }
 
 =head2 _propagate_one_pr_env
 
@@ -463,6 +481,11 @@ B<Examples:>
 Applies one target's propagation onto a rolling pull request branch and
 resolves what to do with its pull request.  Takes the same arguments as
 L</_propagate_one_direct_env> plus C<top>, C<github>, and C<owner_repo>.
+
+C<branch> is the deployment branch the pull request is cut from and opened
+against, so a fresh pull request branch forks from the slug and the pull
+request's base is the slug, rather than a ref named for the environment that
+a typed repository does not have.
 
 The branch is named by asking C<top> for
 C<pr_branch_for($env_name)> rather than by composing a name here, so

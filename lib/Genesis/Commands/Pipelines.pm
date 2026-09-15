@@ -559,6 +559,10 @@ sub propagate {
 	#                    has received a change on-branch but not yet
 	#                    deployed it.
 	my (%env_changed, %env_changed_detail, %env_undeployed, %env_skipped_ahead);
+	# The branch the pre-flight settled for each environment, kept so the
+	# targets below carry it and the walk names one branch from the diff it
+	# takes to the commit it writes.
+	my %env_branch;
 	for my $env_name (@scope) {
 		my $env = eval { $top->load_env($env_name) };
 		next unless $env;
@@ -603,6 +607,8 @@ sub propagate {
 		# the diff is taken from there, so the report says what a real run
 		# would deliver rather than naming files a teammate has already
 		# delivered.
+		$env_branch{$env_name} = $settled->{branch};
+
 		my $diff = $git->diff_files(
 			$settled->{assumed} // $settled->{branch}, $control_sha, @dep_files
 		);
@@ -688,6 +694,7 @@ sub propagate {
 		next unless $env_propagate->{$env_name};
 		push @targets, {
 			env        => $env_name,
+			branch     => $env_branch{$env_name},
 			require_pr => $nodes->{$env_name}{require_pr} // 0,
 			detail     => $env_changed_detail{$env_name} || {
 				changed => $env_propagate->{$env_name},

@@ -126,13 +126,21 @@ subtest 'nothing outside the session checks a branch out' => sub {
 subtest 'the propagate run drives a session end to end' => sub {
 	plan tests => 5;
 
-	# The branch is cut by the environment's own name, because that is what
+	# The branch is cut by the deployment slug, because that is what
 	# propagation looks for, and the kit is a real one because the run loads
-	# every environment in scope before it computes a single diff.
-	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	# every environment in scope before it computes a single diff.  The
+	# branch is cut here rather than by the run: propagate creates no
+	# branch, and an environment that has none is reported as awaiting
+	# genesis pipeline-apply and delivered nothing.
+	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $qa = $h->slug('qa');
 	Harness::Propagation::run(
-		{dir => $h->a, onfailure => 'Failed to cut the qa branch'},
-		'git', 'branch', 'qa', $h->control);
+		{dir => $h->a, onfailure => "Failed to cut the $qa branch"},
+		'git', 'branch', $qa, $h->control);
+	# Published, because a deployment branch this clone holds and the
+	# remote has never had is one the pre-flight refuses before the walk
+	# is reached, on the grounds that nothing but pipeline-apply cuts one.
+	push_from($h, 'a', $qa);
 
 	my $control = commit_on_control($h,
 		files   => {'qa.yml' => slurp($h->a . '/qa.yml') . "\n# a change\n"},
@@ -151,7 +159,7 @@ subtest 'the propagate run drives a session end to end' => sub {
 	# report, because a run that decided there was nothing to propagate
 	# also exits nought, on control, with a clean tree, and would pass
 	# every other row here having driven no session at all.
-	my ($subject) = $h->git('a')->log_subjects('qa', limit => 1);
+	my ($subject) = $h->git('a')->log_subjects($qa, limit => 1);
 	like($subject, qr/\[pipeline\] control\@/,
 		'and the target branch carries the commit it delivered');
 
