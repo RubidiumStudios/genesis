@@ -1,7 +1,15 @@
 #!/usr/bin/env perl
-# Proves T110 and T112: the writer delivers one control commit to qa/bosh as a mirror,
-# so the branch's tree equals the propagation set as it stood at the delivered
-# commit and a path that dropped out of the set is gone from the branch.
+# Proves T110, T112, and T117: the writer delivers one control commit to
+# qa/bosh as a mirror, so the branch's tree equals the propagation set as it
+# stood at the delivered commit and a path that dropped out of the set is gone
+# from the branch, it names every hand edit it overwrote, and it commits with
+# the message its caller handed it rather than with one of its own.
+#
+# Two rows below stand behind the writer's two refusals, which are the empty
+# set and the set whose paths the source commit holds none of.  Both end the
+# run at SOFTWARE before anything is written, because a mirror handed nothing
+# to deliver would take every file off the branch and the check that follows
+# would still be happy about it.
 use strict;
 use warnings;
 use utf8;
@@ -16,6 +24,7 @@ use Test::More;
 use Cwd ();
 use Genesis;
 use Genesis::CI::Marker;
+use Genesis::Exit qw/SOFTWARE/;
 use Genesis::Top;
 use Service::Git;
 use Service::Git::Session;
@@ -35,6 +44,36 @@ $ENV{NOCOLOR} = 1;
 sub in_root {
 	my ($dir) = @_;
 	return ChdirGuard->enter($dir);
+}
+
+# bail_from - the refusal one call raised, and the code it would have exited on
+#
+# A row that weighs an exit code cannot read one out of this process, because
+# bail dies rather than exits whenever it is reached from inside an eval, and
+# a test file always is.  The refusal is caught in the package that raises it
+# and the code is read off the arguments it was composed with.  It asserts
+# what a row means rather than building any state, so it lives here beside the
+# rows that use it.
+sub bail_from {
+	my ($code) = @_;
+
+	my @raised;
+	{
+		no warnings 'redefine', 'once';
+		local *Service::Git::Session::bail =
+			sub {push @raised, [@_]; die "refused\n"};
+		eval {$code->(); 1};
+	}
+	unless (@raised) {
+		diag("nothing was raised; the code died of: $@") if $@;
+		return ('', undef);
+	}
+
+	my @args = @{$raised[0]};
+	my $opts = ref($args[0]) eq 'HASH' ? shift(@args) : {};
+	my ($format, @rest) = @args;
+
+	return (sprintf($format, @rest), $opts->{exitcode});
 }
 
 {
@@ -204,6 +243,216 @@ subtest 'a hand edit is overwritten and named' => sub {
 
 	assert_snapshot_invariant($h, 'qa', copy => 'a',
 		name => 'the branch holds its source after the overwrite');
+};
+
+# Proves T117: the writer commits with the message its caller handed it and
+# builds none of its own, so a direct-mode call carries one marker naming the
+# delivered control commit, a PR-mode call carries the aggregate's subject and
+# body, and the check that follows reads the marker the caller wrote.
+subtest "the writer commits with its caller's message" => sub {
+	plan tests => 7;
+
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	# Both branches are cut at the seeded tip of control, so each of them
+	# already carries the set and each delivery below has something of its
+	# own to write.  The pull request branch is cut through deliver rather
+	# than named at the switch, because switch reads a name no branch carries
+	# as a commit and bails on it before the writer is ever reached.
+	my $base = ref_in($h->a, 'refs/heads/' . $h->control);
+	deliver($h, 'qa', copy => 'a', control => $base);
+	deliver($h, 'qa', copy => 'a', pr => 1, control => $base);
+
+	my $one = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the ops file the blueprint names',
+		push    => 1,
+	);
+	my $two = commit_on_control($h,
+		files   => {'bosh/dev/manifest.yml' => "---\nsimple: you know it differently\n"},
+		message => 'edit the kit the branch carries',
+		push    => 1,
+	);
+
+	my $in_root = in_root($h->a . '/bosh');
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+
+	# The fault plan belongs to this harness, and the handle it arms is the
+	# one this row has already built at the deployment root, so the prefix
+	# survives the arming.  A later subtest builds a harness of its own and
+	# inherits the subclass on its own copy rather than on this one.
+	my $fault = fault_git($h);
+	reset_steps($fault);
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	# Direct mode: one call, one control commit, the marker the caller built.
+	my $direct = Genesis::CI::Marker::build($one, 'qa');
+	$session->apply_files($one, env => $env, message => $direct);
+
+	my ($subject) = $git->log_subjects($h->slug('qa'), limit => 1, format => '%s');
+	is($subject, $direct, 'the subject is the message the caller handed it');
+	is(harness_marker($h, $h->slug('qa'), copy => 'a'), $one,
+		'the marker names the delivered control commit');
+
+	my @commits = grep {$_->[0] eq 'commit'} step_log($fault);
+	is(scalar(@commits), 1, 'exactly one commit was made');
+	is($commits[0][1], $direct, 'the writer passed the message through unchanged');
+
+	# PR mode: one call for the aggregate, with a subject and a body.  The
+	# body is what a writer building a subject of its own could not carry,
+	# and it is the half the pull request's reviewer reads.
+	my $aggregate = Genesis::CI::Marker::build($two, 'qa')
+		. "\n\n"
+		. sprintf("%s %s\n", substr($one, 0, 8), 'add the ops file the blueprint names')
+		. sprintf("%s %s\n", substr($two, 0, 8), 'edit the kit the branch carries');
+	$session->switch($h->pr_branch('qa'));
+	$session->apply_files($two, env => $env, message => $aggregate);
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
+
+	my ($body) = run({dir => $h->a}, 'git', 'log', '-1', '--format=%B',
+		$h->pr_branch('qa'));
+	like($body, qr{add the ops file the blueprint names},
+		"the aggregate's body survived");
+	is(harness_marker($h, $h->pr_branch('qa'), copy => 'a'), $two,
+		"the check reads the marker the caller wrote, which names the newest");
+};
+
+# The first of the writer's two refusals.  A delivery is a mirror, so a set
+# with nothing in it would take every file off the branch, and the check that
+# follows would be happy about the emptied branch afterwards.  The writer
+# therefore refuses before it reads the index at all.
+#
+# No repository produces the state, because _propagation_file_kinds always
+# names the configuration and the embedded genesis, so the row makes the
+# reader answer empty for the length of the one call.  That is a localised
+# glob and not a stand-in environment, so everything below the reader is the
+# production writer.
+subtest 'an empty set is refused before anything is written' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	my $base = ref_in($h->a, 'refs/heads/' . $h->control);
+	deliver($h, 'qa', copy => 'a', control => $base);
+
+	# A control commit the writer would have had work to do for, so the row
+	# reads a branch the refusal left alone rather than one there was nothing
+	# to write onto in the first place.
+	my $one = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the ops file the blueprint names',
+		push    => 1,
+	);
+
+	my $in_root = in_root($h->a . '/bosh');
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	my $tip = ref_in($h->a, 'refs/heads/' . $h->slug('qa'));
+	my ($message, $code) = bail_from(sub {
+		no warnings 'redefine';
+		local *Genesis::Env::propagation_files = sub {()};
+		$session->apply_files($one,
+			env     => $env,
+			message => Genesis::CI::Marker::build($one, 'qa'),
+		);
+	});
+
+	is($code, SOFTWARE, 'the empty set ends the run as a system failure');
+	like($message, qr{\Qpropagation set of #C{qa} is empty\E},
+		'the refusal names the environment whose set came back empty');
+	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $tip,
+		'the branch is where the refusal found it');
+	ok($git->is_clean, 'nothing was written and nothing was staged');
+
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
+};
+
+# The second refusal, onto the same ending.  A set can be full and still
+# resolve to nothing, and then every path on the branch falls outside the
+# membership, the whole branch is staged for removal, and the commit succeeds
+# because a removal is something to commit.
+#
+# A handle built at the copy root rather than at the deployment root produces
+# the state on its own, which is why the row builds one there.  The set then
+# comes back deployment-root-relative, it looks entirely plausible, and the
+# tree at the source commit holds none of it.
+subtest 'a set the source commit holds none of is refused' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	my $base = ref_in($h->a, 'refs/heads/' . $h->control);
+	deliver($h, 'qa', copy => 'a', control => $base);
+
+	my $one = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the ops file the blueprint names',
+		push    => 1,
+	);
+
+	# Service::Git keeps one instance per repository and fixes its prefix at
+	# that first construction, so a handle asked for at the copy root here is
+	# the handle propagation_files reaches through Service::Git->new('.')
+	# later, and every path in the set comes back without the bosh/ prefix.
+	my $git = Service::Git->new($h->a);
+	my $in_root = in_root($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	my $tip = ref_in($h->a, 'refs/heads/' . $h->slug('qa'));
+	my ($message, $code) = bail_from(sub {
+		$session->apply_files($one,
+			env     => $env,
+			message => Genesis::CI::Marker::build($one, 'qa'),
+		);
+	});
+
+	is($code, SOFTWARE, 'the unresolvable set ends the run as a system failure');
+	my $counted = qr{\QNone of the\E \d+ \Qpaths in the propagation set of\E};
+	my $located = qr{\Q#C{qa} is in the tree of #C{$one}\E};
+	like($message, qr{$counted $located},
+		'the refusal names the count and the commit the lookup went wrong at');
+	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $tip,
+		'the branch is where the refusal found it');
+	ok($git->is_clean, 'nothing was written and nothing was staged');
+
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
 };
 
 done_testing;
