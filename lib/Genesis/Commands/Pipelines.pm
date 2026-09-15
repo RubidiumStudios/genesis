@@ -14,6 +14,7 @@ use Genesis::Env;
 use Genesis::CI::Legacy qw//;
 use Genesis::CI::Compiler;
 use Genesis::CI::Compiler::PipelineProvider;
+use Genesis::CI::Marker;
 use Genesis::CI::Propagation;
 use Service::Git;
 use Service::Github;
@@ -681,16 +682,21 @@ sub propagate {
 	exit 0;
 }
 
-# _resolve_propagation_base - find the control SHA to diff from for an env branch {{{
+# _resolve_propagation_base - the control commit the branch's marker names {{{
 #
-# Resolution order:
-#   1. Scan commit log for most recent [pipeline] control@<sha> → use that
-#      (warns if it's not the HEAD commit, meaning manual commits were added)
-#   2. No propagation commit found → branch was spawned from control, use
-#      git merge-base as the starting point
+# The marker walk lives in Genesis::CI::Marker, so this asks it rather than
+# scanning subjects with a regex of its own.  The old scan was anchored
+# against a format its caller never passed and it read subject lines alone,
+# so a squash merge that pushed the marker down into the body answered
+# nothing at all.  The walk reads bodies too, and it skips the commits above
+# the marker rather than following them, which is what the warning below
+# counts.
 #
-# The control branch is passed in rather than assumed, because the name is
-# configured per repository and every caller has already read it.
+# The merge-base fallback stays for a branch that has never been delivered
+# to, which is what the callers below still diff against until the walk of
+# M10 gives them the seed.  The control branch is passed in rather than
+# assumed, because the name is configured per repository and every caller
+# has already read it.
 #
 # Returns: ($control_sha_full, $manual_commits_on_top)
 # _summarize_load_error - extract a short, actionable reason from a
@@ -934,21 +940,13 @@ sub _resolve_propagation_base {
 	my ($branch, $git, $control) = @_;
 	$git ||= Service::Git->new('.');
 
-	# Scan log for propagation markers
-	my @lines = $git->log_subjects($branch);
-	my $depth = 0;
-	for my $line (@lines) {
-		if ($line =~ /^[0-9a-f]+ \[pipeline\] control\@([0-9a-f]+)/) {
-			my $full = $git->sha($1);
-			if ($depth > 0) {
-				warning(
-					"Branch #C{%s} has %d manual commit%s on top of the last propagation.",
-					$branch, $depth, $depth == 1 ? '' : 's'
-				);
-			}
-			return ($full, $depth);
-		}
-		$depth++;
+	my ($marker, $depth) = Genesis::CI::Marker::newest($git, $branch);
+	if (defined $marker) {
+		warning(
+			"Branch #C{%s} has %d manual commit%s on top of the last propagation.",
+			$branch, $depth, $depth == 1 ? '' : 's'
+		) if $depth > 0;
+		return ($marker, $depth);
 	}
 
 	# No propagation commit — use merge-base with control

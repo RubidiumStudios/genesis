@@ -12,6 +12,8 @@ use lib 't';
 use helper;
 use Harness::Propagation;
 
+use File::Temp ();
+
 use Test::More;
 use Test::Deep;
 use Test::Output;
@@ -36,6 +38,7 @@ sub mock_git {
 		_branch_exists  => $opts{branch_exists}        // {},
 		_remote_exists  => $opts{remote_branch_exists} // {},
 		_log_subjects   => $opts{log_subjects}         // {},
+		_sha            => $opts{sha}                  // {},
 		_default_remote => $opts{default_remote}       // 'origin',
 		_push_results   => $opts{push_results}         // {},
 		_current_branch => 'control',
@@ -83,6 +86,11 @@ sub mock_git {
 		$self->_record('remote_branch_exists', $b);
 		return $self->{_remote_exists}{$b} ? 1 : 0;
 	};
+	# This double stands in for git, which the design allows only for the
+	# GitHub API and for vault.  It is the recorded exception in
+	# constraints.md, kept because the file is long enough that rewriting it
+	# onto the harness is its own piece of work, and it is retired by
+	# whichever later step does that.  No new file copies it.
 	*{"${pkg}::log_subjects"} = sub {
 		my ($self, $b, %opts) = @_;
 		$self->_record('log_subjects', $b);
@@ -90,7 +98,24 @@ sub mock_git {
 		my @subjects = @$list;
 		@subjects = @subjects[0 .. ($opts{limit} - 1)]
 			if $opts{limit} && @subjects > $opts{limit};
-		return @subjects;
+		return @subjects unless $opts{body};
+		# The body walk returns whole messages; the stub's fixtures are
+		# subjects, and a subject is a message with no body.
+		return map {{sha => sprintf('%040x', $_ + 1), message => $subjects[$_]}}
+			0 .. $#subjects;
+	};
+	# The marker reader expands the sha a marker carries, and it asks the
+	# handle where the repository is.  This double has none, so it answers a
+	# directory holding no repository at all, the expansion fails quietly,
+	# and the sha comes back exactly as the marker wrote it.
+	*{"${pkg}::root"} = sub {
+		my ($self) = @_;
+		return $self->{_root} //= File::Temp::tempdir(CLEANUP => 1);
+	};
+	*{"${pkg}::sha"} = sub {
+		my ($self, $ref, %opts) = @_;
+		return $self->{_sha}{$ref} if exists $self->{_sha}{$ref};
+		return $ref;
 	};
 	*{"${pkg}::current_branch"} = sub {
 		my $self = shift;
@@ -472,6 +497,16 @@ subtest 'PR mode count=1 with new control_sha appends commit and updates PR' => 
 		branch_exists => { 'pr/staging' => 1 },
 		# HEAD references a DIFFERENT control sha (not idempotent)
 		log_subjects  => { 'pr/staging' => ['[pipeline] control@9999999 -> staging'] },
+		# The double's shas are shaped for the check, which compares two
+		# full shas and refuses anything shorter.  Each short sha the row
+		# names is mapped to a full one here rather than padded inside the
+		# double, so the row says what a repository would have answered and
+		# the skip below turns on a mismatch and not on a sha nobody can
+		# expand.
+		sha           => {
+			'9999999' => '9999999'.'0' x 33,
+			'abcdef1' => 'abcdef1'.'0' x 33,
+		},
 	);
 
 	my $result = propagate_envs_captured(
@@ -513,6 +548,9 @@ subtest 'PR mode count=1 idempotent: HEAD matches control_sha → full skip' => 
 	my $git = mock_git(
 		branch_exists => { 'pr/staging' => 1 },
 		log_subjects  => { 'pr/staging' => ['[pipeline] control@abcdef1 -> staging'] },
+		# The double's shas are shaped for the check: the marker and the
+		# control commit are one commit here, so they expand to one sha.
+		sha           => { 'abcdef1' => 'abcdef1'.'0' x 33 },
 	);
 
 	my $result = propagate_envs_captured(
@@ -544,6 +582,13 @@ subtest 'PR mode count>1 warns and uses first PR' => sub {
 	my $git = mock_git(
 		branch_exists => { 'pr/staging' => 1 },
 		log_subjects  => { 'pr/staging' => ['[pipeline] control@9999999 -> staging'] },
+		# The double's shas are shaped for the check, so this row propagates
+		# because the marker names another commit and not because a sha
+		# nobody can expand fell through.
+		sha           => {
+			'9999999' => '9999999'.'0' x 33,
+			'abcdef1' => 'abcdef1'.'0' x 33,
+		},
 	);
 
 	# List-context capture so we can assert on the warning banner.

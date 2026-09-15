@@ -559,20 +559,27 @@ B<Examples:>
 
   my $bool = _pr_branch_has_control_sha($git, $branch, $control_short);
 
-Returns true when the branch's most recent commit subject already references
-this control SHA -- the idempotency check that lets a re-run skip an env
-entirely rather than stacking a duplicate commit.
+Returns true when the branch's newest propagation marker names this control
+commit -- the idempotency check that lets a re-run skip an env entirely
+rather than stacking a duplicate commit.
 
-B<Returns:> C<1> or C<0>.  C<0> when the branch does not exist or has no
-commits.
+The marker is read with L<Genesis::CI::Marker/newest>, which walks subjects
+and bodies and skips commits carrying no marker, so a squash merge, an
+amended subject, and a hand commit pushed on top all leave the answer alone.
+
+Both sides are compared as full shas, because a marker spells its commit at
+whatever width the delivery abbreviated it to.  A side this clone cannot
+expand to forty hex digits is a commit it cannot name, and the check reports
+that the branch is not idempotent rather than guessing.
+
+B<Returns:> C<1> or C<0>.  C<0> when the branch does not exist, when it
+carries no marker at all, when either sha will not expand, or when the marker
+names another commit.
 
 B<Examples:>
 
   _pr_branch_has_control_sha($git, 'pr/staging', 'a1b2c3d');
-  # returns 1 when pr/staging's newest subject names control@a1b2c3d
-
-B<Limitations:> Inspects only the newest commit.  A propagation for this SHA
-buried under a later commit is not detected, and the env is propagated again.
+  # returns 1 when pr/staging's newest marker names control@a1b2c3d
 
 =head2 _build_pr_body
 

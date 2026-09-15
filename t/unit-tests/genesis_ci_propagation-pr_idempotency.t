@@ -1,4 +1,8 @@
 #!/usr/bin/env perl
+# Proves T85 at the call sites: the PR idempotency check and the propagation
+# base both answer through the one reader, so a squash, an amend, and a
+# coincidental short sha give the same answer that the tip's subject used to
+# decide on its own.
 use strict;
 use warnings;
 use utf8;
@@ -6,128 +10,114 @@ use utf8;
 use lib 'lib';
 use lib 't';
 use helper;
+use Harness::Propagation;
+
 use Test::More;
 
 use Genesis;
 use_ok 'Genesis::CI::Propagation';
+use_ok 'Genesis::Commands::Pipelines';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# Stub Service::Git instance with controllable branch_exists / log_subjects.
-sub stub_git {
-	my (%opts) = @_;
-	my $branch_exists = $opts{branch_exists} // {};   # { branch_name => 1 }
-	my $log_subjects  = $opts{log_subjects}  // {};   # { branch_name => [subjects] }
-	my $self = bless {
-		_branch_exists => $branch_exists,
-		_log_subjects  => $log_subjects,
-	}, 'Test::Mock::Git';
+
+subtest 'the idempotency check reads the marker, not the subject' => sub {
+	plan tests => 3;
+
+	# The delivery is written into copy A, because every read below is taken
+	# from copy A's own branch rather than from the ref R holds.
+	my ($h, $control) = seeded(copy => 'a');
+	my $git = $h->git('a');
+	my $short = $git->sha($control, short => 1);
+
+	ok(!Genesis::CI::Propagation::_pr_branch_has_control_sha(
+			$git, $h->pr_branch('qa'), $short),
+		'a branch that does not exist is not idempotent');
+
+	ok(Genesis::CI::Propagation::_pr_branch_has_control_sha(
+			$git, $h->slug('qa'), $short),
+		'a branch whose newest marker names this control commit is');
+
+	my $other = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\nmore: true\n"},
+		message => 'change qa again',
+		push    => 1,
+	);
+	ok(!Genesis::CI::Propagation::_pr_branch_has_control_sha(
+			$git, $h->slug('qa'), $git->sha($other, short => 1)),
+		'and a branch whose marker names another commit is not');
+};
+
+subtest 'a squash, an amend, and a hand commit leave it idempotent' => sub {
+	plan tests => 3;
+
 	{
-		no strict 'refs';
-		no warnings 'redefine';
-		*{'Test::Mock::Git::branch_exists'} = sub {
-			my ($self, $b) = @_;
-			return $self->{_branch_exists}{$b} ? 1 : 0;
-		};
-		*{'Test::Mock::Git::log_subjects'} = sub {
-			my ($self, $b, %opts) = @_;
-			my $list = $self->{_log_subjects}{$b} // [];
-			my @subjects = @$list;
-			@subjects = @subjects[0 .. ($opts{limit} - 1)]
-				if $opts{limit} && @subjects > $opts{limit};
-			return @subjects;
-		};
+		# The squash's parent is the branch R holds, so the push that
+		# follows it fast-forwards rather than being refused.
+		my ($h, $control) = seeded(copy => 'a');
+		my $git = $h->git('a');
+		squash_merge($h, 'qa', control => $control,
+			subject => 'Merge pull request #11 from pr/qa/bosh');
+		ok(Genesis::CI::Propagation::_pr_branch_has_control_sha(
+				$git, $h->slug('qa'), $git->sha($control, short => 1)),
+			'after a squash that left the marker in the body alone');
 	}
-	$self;
-}
 
-# ======================================================================
-# _pr_branch_has_control_sha($git, $branch, $control_short)
-# ----------------------------------------------------------------------
-# Idempotency predicate for rolling-branch PR propagation: returns
-# true iff the latest commit on $branch is the propagation for the
-# given control SHA.  Used to skip duplicate-commit creation when
-# `genesis propagate` is re-run against an unchanged control HEAD.
-# ======================================================================
+	{
+		my ($h, $control) = seeded(copy => 'a');
+		my $git = $h->git('a');
+		amend_tip($h, $h->slug('qa'), copy => 'a',
+			subject => 'tidy the delivered files');
+		# The amend checks the branch out in copy A, so the copy is put
+		# back on control before the row reads anything.
+		stand_on($h, $h->control);
+		ok(Genesis::CI::Propagation::_pr_branch_has_control_sha(
+				$git, $h->slug('qa'), $git->sha($control, short => 1)),
+			'after an amend that rewrote the subject');
+	}
 
-subtest 'returns false when branch does not exist' => sub {
-	plan tests => 1;
-	my $git = stub_git();
-	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
-		'no branch => not idempotent (caller will create the branch)';
+	{
+		my ($h, $control) = seeded(copy => 'a');
+		my $git = $h->git('a');
+		hand_commit($h, $h->slug('qa'), copy => 'a',
+			files   => {'notes.txt' => "see the incident\n"},
+			message => 'note that a1b2c3d4e5f6 broke the build',
+		);
+		stand_on($h, $h->control);
+		ok(Genesis::CI::Propagation::_pr_branch_has_control_sha(
+				$git, $h->slug('qa'), $git->sha($control, short => 1)),
+			'and under a hand commit naming a short sha in passing');
+	}
 };
 
-subtest 'returns false when branch exists but has no commits' => sub {
-	plan tests => 1;
-	my $git = stub_git(
-		branch_exists => { 'pr/staging' => 1 },
-		log_subjects  => { 'pr/staging' => [] },
-	);
-	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
-		'empty branch => not idempotent';
-};
+subtest 'the propagation base answers through the same reader' => sub {
+	plan tests => 4;
 
-subtest 'returns true when latest commit references the same control sha' => sub {
-	plan tests => 1;
-	my $git = stub_git(
-		branch_exists => { 'pr/staging' => 1 },
-		log_subjects  => {
-			'pr/staging' => [
-				'[pipeline] control@abc1234 -> staging',
-				'[pipeline] control@def5678 -> staging',
-			],
-		},
-	);
-	ok Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
-		'matching control sha in latest commit => idempotent (skip duplicate)';
-};
+	my ($h, $control) = seeded(copy => 'a');
+	my $git = $h->git('a');
 
-subtest 'returns false when latest commit is a different control sha' => sub {
-	plan tests => 1;
-	my $git = stub_git(
-		branch_exists => { 'pr/staging' => 1 },
-		log_subjects  => {
-			'pr/staging' => [
-				'[pipeline] control@def5678 -> staging',
-				'[pipeline] control@abc1234 -> staging',
-			],
-		},
-	);
-	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
-		'latest commit is a different sha => not idempotent (even if older commit matches)';
-};
+	# A branch cut off control and never delivered to, so the row below can
+	# read the merge-base arm rather than meeting its zero by accident.
+	local_branch($h, $h->slug('prod'), at => $h->control);
 
-subtest 'returns false when latest commit is unrelated' => sub {
-	plan tests => 1;
-	my $git = stub_git(
-		branch_exists => { 'pr/staging' => 1 },
-		log_subjects  => { 'pr/staging' => ['operator-manual-edit'] },
-	);
-	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
-		'unrelated latest commit => not idempotent';
-};
+	my ($base, $depth) = Genesis::Commands::Pipelines::_resolve_propagation_base(
+		$h->slug('qa'), $git, $h->control);
+	is($base, $control, 'the base is the control commit the marker names');
+	is($depth, 0, 'with nothing standing above it');
 
-subtest 'matches even when control sha is a substring of a longer sha' => sub {
-	# Defensive: control_short is typically 7-8 chars; ensure we
-	# anchor the match so 'abc1234' doesn't accidentally match a
-	# commit message containing 'abc1234567' (a longer sha).
-	plan tests => 2;
-	my $git = stub_git(
-		branch_exists => { 'pr/staging' => 1 },
-		log_subjects  => {
-			'pr/staging' => ['[pipeline] control@abc1234567 -> staging'],
-		},
+	hand_commit($h, $h->slug('qa'), copy => 'a',
+		files   => {'qa.yml' => "---\nkit: dev\nhotfix: true\n"},
+		message => 'raise the instance count for the incident',
 	);
-	# This SHOULD be false: 'abc1234' is a prefix of the actual sha
-	# 'abc1234567', not an equal match.
-	ok !Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234'),
-		'shorter sha does not match a longer sha that starts with the same chars';
-	# And the full sha SHOULD match.
-	ok Genesis::CI::Propagation::_pr_branch_has_control_sha($git, 'pr/staging', 'abc1234567'),
-		'full sha matches its own commit';
+	stand_on($h, $h->control);
+	my (undef, $after) = Genesis::Commands::Pipelines::_resolve_propagation_base(
+		$h->slug('qa'), $git, $h->control);
+	is($after, 1, 'and the hand commit above it is counted, not followed');
+
+	my (undef, $fallback) = Genesis::Commands::Pipelines::_resolve_propagation_base(
+		$h->slug('prod'), $git, $h->control);
+	is($fallback, 0, 'while the merge-base fallback counts nothing at all');
 };
 
 done_testing;
-
-# vim: ts=2 sw=2 sts=2 noet
