@@ -549,7 +549,7 @@ subtest 'a call with no message is refused' => sub {
 # land, and the mirror is the only thing that knows either that list or the
 # list of paths that would go.
 subtest 'a dry run writes nothing and checks nothing' => sub {
-	plan tests => 7;
+	plan tests => 10;
 
 	# The same repository the rows above run against, because the preview has
 	# to read a real set and the blueprint's fragment is the one ops file the
@@ -597,7 +597,7 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
-	my $before = ref_in($h->a, $h->slug('qa'));
+	my $before = ref_in($h->a, 'refs/heads/' . $h->slug('qa'));
 
 	my $result = $session->apply_files($source,
 		env     => $env,
@@ -615,15 +615,26 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 	is($porcelain // '', '',
 		'the tree and the index are clean, so no check could have run');
 
+	# A real delivery leaves the tree clean too, since it commits what it
+	# writes, so the file the source moved is read as well and has to hold
+	# what the branch held before the call.
+	is(slurp($h->a . '/bosh/dev/manifest.yml'), "---\nsimple: you know it\n",
+		'the file the source moved still holds what the branch held');
+
 	$session->finish;
 	assert_w_restored($w, 'the session restores the working state');
 
 	is($result->{commit}, undef, 'no commit was made');
-	ok(@{$result->{delivered}}, 'the preview still says what would land');
+	is($result->{dry_run}, 1, 'the result says it was a preview');
+	is_deeply($result->{delivered}, ['bosh/dev/manifest.yml'],
+		'the preview still says what would land');
+	is_deeply($result->{overwrote}, ['bosh/dev/manifest.yml'],
+		'the preview still names what a delivery would overwrite');
 	is_deeply([sort @{$result->{removed}}], ['init'],
 		'the preview still says what would go');
 
-	is(ref_in($h->a, $h->slug('qa')), $before, 'no branch moved in copy A');
+	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $before,
+		'no branch moved in copy A');
 
 	my @steps = step_log($fault);
 	is_deeply([grep {$_->[0] =~ /^(checkout_file|rm|commit)$/} @steps], [],
