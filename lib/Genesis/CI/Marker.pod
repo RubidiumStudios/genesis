@@ -192,6 +192,16 @@ this returns the value as written.
 Git parses the trailer block, so where a trailer may sit and how a folded
 value unfolds are git's rules and not ours.
 
+A trailer written with nothing after it is still a trailer, so it comes back
+present with an empty string for its value rather than going missing.  That
+is what lets a caller refuse a gate whose reason the operator forgot, which
+it could not do if an empty gate and no gate read the same way.
+
+A key written twice on one commit comes back once, with its values joined by
+a comma, which is the separator git is asked for.  Two release trailers
+therefore give one value that names no commit at all, and a caller that
+resolves the value finds nothing to resolve.
+
 B<Parameters:>
 
 =over 4
@@ -207,12 +217,17 @@ Any ref naming one commit.
 =back
 
 B<Returns:> A hashref carrying only the keys the commit actually has, so a
-commit with neither trailer gives an empty hashref.
+commit with neither trailer gives an empty hashref.  A commit this
+repository cannot resolve gives an empty hashref as well, because a question
+git refused to answer is not a gate.
 
 B<Examples:>
 
   Genesis::CI::Marker::trailers($git, $gate);
   # returns {stage => 'hold: migrate the database'}
+
+  Genesis::CI::Marker::trailers($git, $blank_gate);
+  # returns {stage => ''}
 
   Genesis::CI::Marker::trailers($git, $ordinary);
   # returns {}

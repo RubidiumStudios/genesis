@@ -13,6 +13,17 @@ use Genesis qw/bug run/;
 # goes through this module.
 our $PREFIX = '[pipeline] control@';
 
+# The two trailers D49 gives a control commit, and the keys we answer them
+# under.  Genesis-Stage makes the commit a gate and carries the reason, whose
+# hold form reads "hold: <reason>", and Genesis-Release-Stage releases a gate
+# by naming its control commit.  It sits here beside the prefix, because both
+# are module-level constants and a reader of this file looks for them in one
+# place.
+my %TRAILERS = (
+	stage         => 'Genesis-Stage',
+	release_stage => 'Genesis-Release-Stage',
+);
+
 # build - render the marker subject for one delivery {{{
 #
 # The sha is written exactly as it is handed over, because only the caller
@@ -128,37 +139,51 @@ sub _newest_of {
 }
 # }}}
 
-# The two trailers D49 gives a control commit, and the keys we answer them
-# under.  Genesis-Stage makes the commit a gate and carries the reason, whose
-# hold form reads "hold: <reason>", and Genesis-Release-Stage releases a gate
-# by naming its control commit.
-my %TRAILERS = (
-	stage         => 'Genesis-Stage',
-	release_stage => 'Genesis-Release-Stage',
-);
-
 # trailers - the two Genesis trailers one commit carries {{{
 #
 # Git parses the trailer block, through the %(trailers) format atom, so the
 # rules about where a trailer may sit and how a folded value unfolds stay
-# git's rather than becoming ours.  Only the keys the commit actually carries
-# come back, so a commit carrying neither gives an empty hashref, and what
-# the value means is left to the walk that acts on it.
+# git's rather than becoming ours.  One format string carries both keys, with
+# a separator of our own between the fields, so git still does every piece of
+# key matching and a walk that reads a commit forks git once rather than once
+# per key.
+#
+# Each key is asked for twice, once for the key and once for the value.  The
+# value atom prints nothing at all for a trailer written with no reason after
+# it, and that is byte for byte what an absent trailer prints, so the key
+# atom is what tells presence from absence.  A gate somebody set and left
+# blank therefore comes back present and empty rather than vanishing, and the
+# caller can refuse it instead of failing open.
+#
+# The read goes through run rather than through log_subjects, because run
+# merges stderr into its output by default and hands back no return code
+# there.  A commit this repository cannot resolve would then make git's fatal
+# complaint the value of every key, inventing a gate out of an error message.
 sub trailers {
 	my ($git, $commit) = @_;
 
+	my @keys = sort keys %TRAILERS;
+	my $format = join('%x1f', map {(
+		sprintf('%%(trailers:key=%s,keyonly,separator=%%x2c)', $TRAILERS{$_}),
+		sprintf('%%(trailers:key=%s,valueonly,unfold,separator=%%x2c)', $TRAILERS{$_}),
+	)} @keys);
+
+	my ($out, $rc) = run({dir => $git->root, passfail => 0, stderr => 0},
+		'git', 'log', '-1', "--format=$format", $commit);
+	return {} if $rc || !defined $out;
+
+	# The limit of -1 keeps the trailing empty fields, which Perl drops
+	# otherwise, and a commit carrying neither trailer is nothing else.
+	my @fields = split /\x1f/, $out, -1;
+
 	my %found;
-	for my $key (sort keys %TRAILERS) {
-		my ($value) = $git->log_subjects($commit,
-			limit  => 1,
-			format => sprintf('%%(trailers:key=%s,valueonly,unfold,separator=%%x2c)',
-				$TRAILERS{$key}),
-		);
-		next unless defined $value;
+	for my $i (0 .. $#keys) {
+		my ($key, $value) = @fields[2 * $i, 2 * $i + 1];
+		next unless defined $key && length $key;
+		$value = '' unless defined $value;
 		$value =~ s/\A\s+//;
 		$value =~ s/\s+\z//;
-		next unless length $value;
-		$found{$key} = $value;
+		$found{$keys[$i]} = $value;
 	}
 
 	return \%found;
