@@ -117,16 +117,17 @@ where the repository says its branches live.
 
 With the branches in place the run asks the repository to protect them.
 Control and every deployment branch are told to block force pushes and to
-require linear history, a deployment branch is told to require a pull request
-where its own C<genesis.pipeline.require_pr> is true, control where
-C<pipeline.source_control.control_requires_pr> is true, and a pull request
-into a deployment branch may only be merged by rebase. Each branch gets one
-ruleset named for it, so a re-run replaces rather than accumulates. A user
-whose token cannot grant a setting is told which branch and which settings,
-and the run carries on. A run that carries no C<GITHUB_AUTH_TOKEN> skips the
-stage, names the variable, and carries on as well.
+require linear history. A deployment branch is told to require a pull request
+where its own C<genesis.pipeline.require_pr> is true, and control is told to
+require one where C<pipeline.source_control.control_requires_pr> is true. A
+pull request into a deployment branch may only be merged by rebase. Each
+branch gets one ruleset named for it, so a re-run replaces rather than
+accumulates. A user whose token cannot grant a setting is told which branch
+and which settings, and the run carries on. A run that carries no
+C<GITHUB_AUTH_TOKEN> skips the stage, names the variable, and carries on as
+well.
 
-With the branches in place the run records what it applied, which is the
+With the branches protected the run records what it applied, which is the
 control commit it read, the provider it applied, and the time. That record
 goes to the pipeline's own address in exodus under every provider, because it
 is what a later reader asks to tell an applied pipeline from one nobody has
@@ -425,7 +426,7 @@ B<Errors:>
 =item *
 
 C<"Missing owner/repo for set_ruleset"> and C<"Missing name for set_ruleset">
--- raised via C<bail()> through C<Service::Github::set_ruleset>.
+- raised via C<bail()> through C<Service::Github::set_ruleset>.
 
 =item *
 

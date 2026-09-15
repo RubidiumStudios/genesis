@@ -64,6 +64,20 @@ sub rule_named {
 	return $rule;
 }
 
+# ruleset_calls - the calls the run made to the rulesets endpoint
+#
+# The method is what tells a create from a replace, so a row about whether a
+# re-run accumulates asks for one method at a time.  A line the call log
+# could not decode carries neither a url nor a method, and both are tested
+# before they are matched.
+sub ruleset_calls {
+	my ($gh, $method) = @_;
+	return grep {
+		defined $_->{url} && $_->{url} =~ m{/rulesets}
+			&& ($_->{method} // '') eq $method
+	} gh_calls($gh);
+}
+
 subtest 'force pushes and non-linear history are blocked everywhere' => sub {
 	# Seven rows, and one more for the run's own restoration assertion, which
 	# run_genesis makes unless a row turns it off.
@@ -204,6 +218,33 @@ subtest 'a run with no token asks the repository for nothing' => sub {
 	like($said, qr/GITHUB_AUTH_TOKEN/,
 		'the skip names the variable the stage wanted');
 	is(scalar(gh_calls($gh)), 0, 'and the run asked the API for nothing');
+};
+
+subtest 'a second run replaces the ruleset the first one wrote' => sub {
+	# Three rows, and one more for each of the two runs' restoration
+	# assertions.
+	plan tests => 5;
+
+	my $h  = make_harness(envs => ['qa'], github => 1);
+	my $gh = $h->gh;
+
+	run_genesis($h, 'pipeline-apply');
+	my (undef, undef, $exit) = run_genesis($h, 'pipeline-apply');
+	is($exit, 0, 'the second run exits 0');
+
+	my @replaced = grep {
+		my $body = eval {load_json($_->{body} // '{}')} || {};
+		grep {$_ eq 'refs/heads/qa/bosh'}
+			@{($body->{conditions}{ref_name}{include}) || []};
+	} ruleset_calls($gh, 'PUT');
+	is(scalar @replaced, 1,
+		'the second run replaced the ruleset the first one wrote');
+
+	# Two branches, which are control and the one deployment branch, and one
+	# create each.  A run that stopped listing first and always created would
+	# leave four here and a repository carrying two rulesets per branch.
+	is(scalar(ruleset_calls($gh, 'POST')), 2,
+		'and created nothing the first run had already created');
 };
 
 done_testing;
