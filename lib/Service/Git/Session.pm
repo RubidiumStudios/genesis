@@ -131,22 +131,43 @@ sub begin {
 # that tries to switch under that deploy is refused by name.  The directory
 # we came from is handed along, so a refusal stands us back where we were
 # rather than leaving us at the root.
+#
+# D94 has both flags of D87 share this one path: --redeploy checks the
+# deployed commit out and deploys it, --as-deployed checks the same commit
+# out for a secrets command, and finish restores the branch begin recorded
+# either way, so a detached HEAD never outlives the session.  Standing on a
+# commit is safe because begin asserted the tree clean and finish catches
+# anything that wrote into it.
+#
+# The tip is recorded for a branch and not for a commit, because the record
+# is what committed_branches reads to say which branches this session moved
+# and a commit is not one of them.
 sub switch {
-	my ($self, $target) = @_;
+	my ($self, $target, %opts) = @_;
 	my $git = $self->{git};
 	bail("A branch change was attempted with no session open in %s.",
 		$git->root) unless $self->{active};
+
+	# Asked before anything moves, so a record naming a commit this
+	# repository does not have is refused with the working tree still
+	# exactly as the operator left it.
+	my $is_branch = $self->_is_branch($target);
+	$self->_verify_reachable($target, $opts{record}) unless $is_branch;
 
 	my $cwd = getcwd();
 	chdir($git->root)
 		or bail("Unable to enter git root %s: %s", $git->root, $!);
 
 	$self->_take_lock($cwd);
-	$git->checkout($target);
+	if ($is_branch) {
+		$git->checkout($target);
+	} else {
+		$git->checkout_detached($target);
+	}
 	chdir($cwd) if -d $cwd;
 
 	$self->{on} = $target;
-	$self->{switched}{$target} //= eval { $git->sha($target) };
+	$self->{switched}{$target} //= eval { $git->sha($target) } if $is_branch;
 	return $self;
 }
 
@@ -248,6 +269,68 @@ sub abort {
 
 ### Internals {{{
 
+# _is_branch - is this target a branch, or a commit {{{
+#
+# A narrower question than branch_exists answers, and it is asked here rather
+# than by narrowing that reader, because branch_exists cannot be narrowed
+# under its callers.  It runs `git rev-parse --verify <name>`, which resolves
+# a sha and a tag as readily as a branch name, and resolve_branch and the
+# propagation both lean on exactly that looseness to answer "is this thing
+# here at all".  switch needs the strict question instead, because the whole
+# of D94 turns on telling a branch from a commit, and show-ref --verify
+# answers about a named ref and nothing else.
+#
+# Both halves are asked, because git's own checkout knows a branch it has
+# only fetched and this has to know it too.  `git checkout qa/bosh` against a
+# repository holding refs/remotes/origin/qa/bosh alone cuts the local branch
+# and tracks it, which rev-parse will not do and which the caller means, so a
+# name matched only by the remote-tracking half is a branch here as well.
+# Reading it as a commit would stand us on a detached HEAD, and a commit made
+# there afterwards would belong to no branch at all.
+sub _is_branch {
+	my ($self, $name) = @_;
+	return 0 unless defined $name && length $name;
+	my $git = $self->{git};
+
+	return 1 if run({ dir => $git->root, passfail => 1 },
+		'git', 'show-ref', '--verify', '--quiet', "refs/heads/$name");
+
+	my $remote = $git->default_remote or return 0;
+	return run({ dir => $git->root, passfail => 1 },
+		'git', 'show-ref', '--verify', '--quiet',
+		"refs/remotes/$remote/$name") ? 1 : 0;
+}
+
+# }}}
+# _verify_reachable - a recorded commit the repository no longer has {{{
+#
+# D31's append-only protection makes this rare rather than impossible: a
+# branch rewritten on the remote can leave a commit a record still names.
+# D94 refuses it by name at DATAERR, because the record is the input and
+# the operator needs to know which record is wrong.
+sub _verify_reachable {
+	my ($self, $commit, $record) = @_;
+	my $git = $self->{git};
+
+	# The status is read as well as the output, because run folds git's
+	# stderr into the first slot and a complaint read as an answer would
+	# let a commit we do not have through.
+	my ($found, $rc) = run({ dir => $git->root, passfail => 0 },
+		'git', 'rev-parse', '--verify', '--quiet', "$commit^{commit}");
+	chomp $found if defined $found;
+	return $self if !$rc && $found;
+
+	bail({exitcode => DATAERR},
+		"The commit #C{%s} is not in this repository.\n\n".
+		"It is named by %s, and the branch it sat on has been rewritten or ".
+		"removed on the remote since it was recorded.\n\n".
+		"Deploy from the branch tip instead, or restore the commit on the ".
+		"remote and refresh.",
+		$commit, ($record ? "#C{$record}" : 'the record we were given')
+	);
+}
+
+# }}}
 # _register_net - the last-resort abort, from an END block {{{
 #
 # RF12 put this here rather than in DESTROY.  bail exits when it is not

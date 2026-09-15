@@ -211,6 +211,23 @@ clone made today can still fetch reads it here.  A clone cuts one local branch
 for itself whatever R holds, so what it sees of R is its remote-tracking refs
 under C<refs/remotes/origin>.
 
+=head2 clone_copy($h, %opts)
+
+Cuts a third copy from R now, registers it under a copy key, stands it on the
+control branch, and returns that key.  A row that wants to run real code inside
+the copy wants a C<Service::Git> handle on it, and the C<git> accessor builds a
+handle from a copy key, so registering the copy is what lets every accessor the
+harness already has read it rather than having the row build a handle of its
+own.  Takes C<as>, the key to register it under, which defaults to C<c>.
+
+The clone is made over C<file://> rather than over the path, because git
+hardlinks the whole object store for a plain local clone and a commit no ref of
+R can reach would arrive in the copy anyway.  A row asking what a copy cut
+today does not hold needs the ordinary transfer, which sends what the refs
+reach and nothing else.  Standing it on control is the other half: R is bare
+and its own HEAD never names that branch, so a clone of it lands on an unborn
+HEAD with no local branch.
+
 =head2 subjects_of($h, $branch, $n, %opts)
 
 Returns the branch's last C<$n> commit subjects as a list, oldest first, or an
