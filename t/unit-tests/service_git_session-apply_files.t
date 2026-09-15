@@ -5,11 +5,12 @@
 # from the branch, it names every hand edit it overwrote, and it commits with
 # the message its caller handed it rather than with one of its own.
 #
-# Two rows below stand behind the writer's two refusals, which are the empty
-# set and the set whose paths the source commit holds none of.  Both end the
-# run at SOFTWARE before anything is written, because a mirror handed nothing
-# to deliver would take every file off the branch and the check that follows
-# would still be happy about it.
+# Three rows below stand behind the writer's three refusals.  Two of them are
+# the empty set and the set whose paths the source commit holds none of, and
+# both end the run at SOFTWARE before anything is written, because a mirror
+# handed nothing to deliver would take every file off the branch and the check
+# that follows would still be happy about it.  The third is the caller who
+# hands the writer no message, which is refused before the set is even read.
 #
 # The last row is the preview, which computes the whole delivery and then
 # returns before the first write, so it reports what would land and what would
@@ -254,7 +255,7 @@ subtest 'a hand edit is overwritten and named' => sub {
 # delivered control commit, a PR-mode call carries the aggregate's subject and
 # body, and the check that follows reads the marker the caller wrote.
 subtest "the writer commits with its caller's message" => sub {
-	plan tests => 7;
+	plan tests => 10;
 
 	my $h = make_harness(
 		envs => ['qa'], root => 'bosh',
@@ -300,7 +301,8 @@ subtest "the writer commits with its caller's message" => sub {
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
-	# Direct mode: one call, one control commit, the marker the caller built.
+	# In direct mode the row makes one call, which delivers one control
+	# commit under the marker the caller built.
 	my $direct = Genesis::CI::Marker::build($one, 'qa');
 	$session->apply_files($one, env => $env, message => $direct);
 
@@ -313,7 +315,8 @@ subtest "the writer commits with its caller's message" => sub {
 	is(scalar(@commits), 1, 'exactly one commit was made');
 	is($commits[0][1], $direct, 'the writer passed the message through unchanged');
 
-	# PR mode: one call for the aggregate, with a subject and a body.  The
+	# In pull request mode the row makes one call for the whole aggregate,
+	# and the message it hands over carries a body under its subject.  That
 	# body is what a writer building a subject of its own could not carry,
 	# and it is the half the pull request's reviewer reads.
 	my $aggregate = Genesis::CI::Marker::build($two, 'qa')
@@ -325,12 +328,26 @@ subtest "the writer commits with its caller's message" => sub {
 	$session->finish;
 	assert_w_restored($w, 'the session restores the working state');
 
+	# Both of the aggregate's entries are read, because a writer that kept
+	# the first line and dropped the rest would leave the body looking whole
+	# to a row that only asked about its opening.
 	my ($body) = run({dir => $h->a}, 'git', 'log', '-1', '--format=%B',
 		$h->pr_branch('qa'));
 	like($body, qr{add the ops file the blueprint names},
 		"the aggregate's body survived");
+	like($body, qr{edit the kit the branch carries},
+		"and its second entry survived beside the first");
 	is(harness_marker($h, $h->pr_branch('qa'), copy => 'a'), $two,
 		"the check reads the marker the caller wrote, which names the newest");
+
+	# The step log is read again after the second call, so a writer that
+	# passed a direct-mode message through and rebuilt a pull-request-mode
+	# one is caught here rather than left to the body assertion alone.  The
+	# log was not reset between the two calls, so it holds both commits.
+	my @both = grep {$_->[0] eq 'commit'} step_log($fault);
+	is(scalar(@both), 2, 'the pull request call made one commit of its own');
+	is($both[1][1], $aggregate,
+		'and the writer passed the aggregate through unchanged too');
 };
 
 # The first of the writer's two refusals.  A delivery is a mirror, so a set
@@ -340,9 +357,10 @@ subtest "the writer commits with its caller's message" => sub {
 #
 # No repository produces the state, because _propagation_file_kinds always
 # names the configuration and the embedded genesis, so the row makes the
-# reader answer empty for the length of the one call.  That is a localised
-# glob and not a stand-in environment, so everything below the reader is the
-# production writer.
+# reader answer empty for the length of the closure it passes to bail_from.
+# One call is made inside that closure, and any other call made there would
+# read the same empty answer.  That is a localised glob and not a stand-in
+# environment, so everything below the reader is the production writer.
 subtest 'an empty set is refused before anything is written' => sub {
 	plan tests => 5;
 
@@ -377,6 +395,9 @@ subtest 'an empty set is refused before anything is written' => sub {
 
 	my $tip = ref_in($h->a, 'refs/heads/' . $h->slug('qa'));
 	my ($message, $code) = bail_from(sub {
+		# The glob is localised for the whole of this closure and not for
+		# one statement of it, so the reader answers empty for everything
+		# below, and the one call the closure makes is the delivery.
 		no warnings 'redefine';
 		local *Genesis::Env::propagation_files = sub {()};
 		$session->apply_files($one,
@@ -390,7 +411,12 @@ subtest 'an empty set is refused before anything is written' => sub {
 		'the refusal names the environment whose set came back empty');
 	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $tip,
 		'the branch is where the refusal found it');
-	ok($git->is_clean, 'nothing was written and nothing was staged');
+	# The porcelain is read whole rather than through is_clean, which
+	# filters git's untracked half out.  Both of the writer's writes stage,
+	# so is_clean would catch either one, but the assertion says the tree
+	# and it should read the tree.
+	my ($porcelain) = run({dir => $h->a}, 'git', 'status', '--porcelain');
+	is($porcelain // '', '', 'nothing was written and nothing was staged');
 
 	$session->finish;
 	assert_w_restored($w, 'the session restores the working state');
@@ -453,7 +479,62 @@ subtest 'a set the source commit holds none of is refused' => sub {
 		'the refusal names the count and the commit the lookup went wrong at');
 	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $tip,
 		'the branch is where the refusal found it');
-	ok($git->is_clean, 'nothing was written and nothing was staged');
+	# Read whole, for the reason the row above gives.
+	my ($porcelain) = run({dir => $h->a}, 'git', 'status', '--porcelain');
+	is($porcelain // '', '', 'nothing was written and nothing was staged');
+
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
+};
+
+# The third refusal, and the one a caller meets rather than an operator.  The
+# writer builds no message of its own, so a caller that hands it none has
+# asked for a commit nobody can write, and saying so where the call is made
+# is better than composing a subject the caller never chose.  It is refused
+# before the set is read, so nothing about the repository is even looked at.
+subtest 'a call with no message is refused' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	my $base = ref_in($h->a, 'refs/heads/' . $h->control);
+	deliver($h, 'qa', copy => 'a', control => $base);
+
+	# A control commit the writer would have had work to do for, so the row
+	# reads a branch the refusal left alone rather than one there was
+	# nothing to write onto in the first place.
+	my $one = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the ops file the blueprint names',
+		push    => 1,
+	);
+
+	my $in_root = in_root($h->a . '/bosh');
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	my $tip = ref_in($h->a, 'refs/heads/' . $h->slug('qa'));
+	my ($message) = bail_from(sub {
+		$session->apply_files($one, env => $env);
+	});
+
+	like($message, qr{\Qapply_files needs its caller's commit message\E},
+		'the refusal says the message is the caller\'s to hand over');
+	like($message, qr{\Qsince it builds none\E},
+		'and says why, which is that the writer builds none of its own');
+	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $tip,
+		'the branch is where the refusal found it');
 
 	$session->finish;
 	assert_w_restored($w, 'the session restores the working state');
@@ -527,7 +608,11 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 	# The tree and the index are read before the finish, because finish puts
 	# control's working state back and the state this row asks about is the
 	# one the preview left behind.
-	ok($git->is_clean,
+	# Read whole rather than through is_clean, which filters the untracked
+	# half out, because a preview that wrote a file without staging it is
+	# exactly the shape this row is here to rule out.
+	my ($porcelain) = run({dir => $h->a}, 'git', 'status', '--porcelain');
+	is($porcelain // '', '',
 		'the tree and the index are clean, so no check could have run');
 
 	$session->finish;
