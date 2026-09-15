@@ -1,0 +1,97 @@
+=head1 NAME
+
+Genesis::CI::Preflight - the initial state a propagation run may find
+
+=head1 SYNOPSIS
+
+  use Genesis::CI::Preflight;
+
+  my @stranded = Genesis::CI::Preflight::local_only_commits($git, 'qa/bosh');
+
+=head1 DESCRIPTION
+
+The first stage of a propagation run settles what the repository holds before
+anything is written.  It refreshes, it requires the control branch to exist
+and to be in step with the remote, it refuses a deployment branch with no
+legitimate origin, it resets a branch whose only local commits are ones a
+re-run reproduces, and it fast-forwards a branch that is merely behind.  A
+violation is an illegal initial state, so the run stops before it writes and
+the refusal names the branch and the way out.
+
+Each refusal spends a named exit code rather than a number.  Control that
+exists nowhere is a configuration fault and exits C<CONFIG>, an initial state
+the design calls illegal exits C<DATAERR>, and a remote this clone cannot
+reach exits C<TEMPFAIL>, which is the one of the three a pipeline job may
+retry.
+
+=head1 FUNCTIONS
+
+=head2 local_only_commits($git, $branch)
+
+  my @stranded = Genesis::CI::Preflight::local_only_commits($git, $branch);
+
+Lists the commits the branch holds that no remote has, newest first, as a
+hashref each of C<sha>, C<short>, C<subject>, and C<marker>.  C<marker> is the
+control commit that commit's propagation marker names, and it is C<undef> for
+a hand edit.  That is the whole classification the stage needs: a commit with
+a marker is one a re-run reproduces, so the branch can be reset to its
+tracking ref, and a commit without one is an operator's hand edit, which
+nothing here may discard.
+
+The query runs C<git log E<lt>branchE<gt> --not --remotes>, so what counts as
+local-only is decided against the remote-tracking refs this clone holds.  It
+must therefore run before any prune, because a prune removes exactly the refs
+that answer it and a pruned clone reports every commit on the branch as
+stranded.  C<Service::Git::fetch_branches> never prunes, which is what keeps
+this query honest across a refresh.
+
+Each commit is classified by asking C<Genesis::CI::Marker::newest> for the
+newest marker within a walk of one, so this module carries no second reader
+of the marker.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle on the repository to read.
+
+=item C<$branch>
+
+The branch to walk, named as git names it.
+
+=back
+
+B<Returns:> A list of hashrefs, newest commit first, empty where the branch
+holds nothing a remote lacks.
+
+B<Errors:> Bails when C<git log> fails, which is a branch this repository
+cannot read rather than a state the stage reports.
+
+B<Examples:>
+
+  my @stranded = Genesis::CI::Preflight::local_only_commits($git, 'qa/bosh');
+  # ( { sha => 'a1b2...', short => 'a1b2c3d',
+  #     subject => '[pipeline] control@9f8e7d6 -> qa',
+  #     marker  => '9f8e7d6c5b4a...' } )
+
+  Genesis::CI::Preflight::local_only_commits($git, 'prod/bosh');
+  # () where every commit on the branch has been pushed
+
+=head1 INTERNAL FUNCTIONS
+
+Every public entry of this module goes above this heading, under
+C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut

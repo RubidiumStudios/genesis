@@ -297,6 +297,7 @@ unit-tests/pod_gate-check.t                  # the checks, and what stays adviso
 integration-tests/genesis-command.t  # Command execution (run, curl, lines, fake_tty)
 integration-tests/genesis-data.t     # Data file operations (YAML/JSON load/save)
 integration-tests/genesis-files.t    # File operations (mkfile_or_fail, slurp, humanize_path)
+integration-tests/service_git-refresh_scope.t   # the refresh reaches every branch and never prunes
 integration-tests/service_git_session-exit_paths.t   # the session restores on bail, die, and signal
 integration-tests/service_github-api.t   # GitHub/GitLab API integration (SSH key fetching, API methods)
 integration-tests/service_bosh_stemcells.t  # BOSH stemcell API integration (bosh.io)

@@ -928,15 +928,26 @@ sub delete_remote_branch {
 }
 
 # }}}
-# fetch_branches - fetch multiple branches from remote in one call {{{
+# fetch_branches - refresh branches from a remote in one call {{{
+#
+# The one refresh.  It brings the remote into the remote-tracking refs for
+# every branch it is given, it skips none of them for being checked out,
+# because control usually is the checked-out branch and leaving it out is
+# how a run comes to source from stale state, and it never prunes, because
+# the local-only commit query reads the tracking refs a prune would delete.
 sub fetch_branches {
 	my ($self, $names, $remote) = @_;
 	$remote //= $self->default_remote;
-	my $noop = { ok => 1, kind => 'success', fetched => [], absent => [] };
+	my $noop = {ok => 1, kind => 'success', fetched => [], created => [], absent => []};
 	return wantarray ? ($self, $noop) : $self
 		unless $remote && $names && @$names;
-	my $current = $self->current_branch // '';
-	my @want    = grep { $_ ne $current } @$names;
+
+	# One name asked for twice is one branch, and a caller that prepends the
+	# control branch to a list that may already carry it should not have to
+	# check.  A duplicate would otherwise be reported twice and, where the
+	# clone lacks it, put the same forced refspec on the command line twice.
+	my %seen;
+	my @want = grep {defined && length && !$seen{$_}++} @$names;
 	return wantarray ? ($self, $noop) : $self unless @want;
 
 	my %env;
@@ -947,10 +958,10 @@ sub fetch_branches {
 	# Patterns are fully qualified: ls-remote matches the tail of a ref.
 	my ($out, $rc, $err) = run({%opts},
 		'git', 'ls-remote', '--heads', $remote,
-		map { "refs/heads/$_" } @want);
+		map {"refs/heads/$_"} @want);
 	return wantarray
-		? ($self, { ok => 0, kind => _classify_remote_error($err), err => $err // '',
-		            fetched => [], absent => [] })
+		? ($self, {ok => 0, kind => _classify_remote_error($err), err => $err // '',
+		           fetched => [], created => [], absent => []})
 		: $self
 		if $rc;
 
@@ -958,28 +969,40 @@ sub fetch_branches {
 	for my $line (split /\n/, ($out // '')) {
 		$on_remote{$1} = 1 if $line =~ m{\srefs/heads/(\S+)\s*$};
 	}
-	my @present = grep {  $on_remote{$_} } @want;
-	my @absent  = grep { !$on_remote{$_} } @want;
+	my @present = grep { $on_remote{$_}} @want;
+	my @absent  = grep {!$on_remote{$_}} @want;
+	my @created;
 
 	if (@present) {
 		# The remote is authoritative for which branches exist, not for
 		# what they contain.  A branch we already have locally may carry
-		# commits that have not been pushed -- a propagation held back for
-		# review, most often -- so it only updates its remote-tracking ref.
-		# Branches we lack are materialised locally, which is what makes
-		# remote-only environments visible.
-		my ($heads) = run({%opts},
+		# commits that have not been pushed, so it only updates its
+		# remote-tracking ref, and that is what makes the checked-out
+		# branch safe to include.  Branches we lack are materialised
+		# locally, which is the one creation I2 permits.
+		#
+		# The read is checked rather than trusted.  A read that failed and
+		# answered an empty set would put every confirmed branch on the
+		# forced refspec and overwrite exactly the local commits this sub
+		# exists to protect, which is H17 coming back through inherited
+		# code.  A repository we cannot enumerate is a fault of this clone
+		# rather than of the remote, and the caller's kinds all name the
+		# remote, so it is raised here instead of classified.
+		my ($heads, $hrc, $herr) = run({%opts},
 			'git', 'for-each-ref', '--format=%(refname:strip=2)', 'refs/heads/');
-		my %is_local = map { $_ => 1 } grep { /\S/ } split(/\n/, $heads // '');
+		bail("Failed to list the local branches of #C{%s}: %s",
+			$self->{root}, ($herr || $heads || "rc=$hrc") =~ s/\s+$//r)
+			if $hrc;
+		my %is_local = map {$_ => 1} grep {/\S/} split(/\n/, $heads // '');
+		@created = grep {!$is_local{$_}} @present;
 
 		my ($fout, $frc, $ferr) = run({%opts}, 'git', 'fetch', $remote,
-			(map { "+refs/heads/$_:refs/remotes/$remote/$_" }
-				grep {  $is_local{$_} } @present),
-			(map { "+refs/heads/$_:refs/heads/$_" }
-				grep { !$is_local{$_} } @present));
+			(map {"+refs/heads/$_:refs/remotes/$remote/$_"}
+				grep {$is_local{$_}} @present),
+			(map {"+refs/heads/$_:refs/heads/$_"} @created));
 		return wantarray
-			? ($self, { ok => 0, kind => _classify_remote_error($ferr), err => $ferr // '',
-			            fetched => [], absent => \@absent })
+			? ($self, {ok => 0, kind => _classify_remote_error($ferr), err => $ferr // '',
+			           fetched => [], created => [], absent => \@absent})
 			: $self
 			if $frc;
 
@@ -989,7 +1012,8 @@ sub fetch_branches {
 	}
 
 	return wantarray
-		? ($self, { ok => 1, kind => 'success', fetched => \@present, absent => \@absent })
+		? ($self, {ok => 1, kind => 'success', fetched => \@present,
+		           created => \@created, absent => \@absent})
 		: $self;
 }
 

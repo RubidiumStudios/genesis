@@ -53,8 +53,10 @@ subtest 'a fetch does not discard unpushed local commits' => sub {
 	my ($work, $origin) = make_pair();
 	my $git = Service::Git->new($work);
 
-	# Commit to env-local without pushing, then return to main so the
-	# branch is eligible for fetching (the current branch is skipped).
+	# Commit to env-local without pushing, then return to main, which is
+	# where an operator would be standing.  The refresh no longer cares
+	# either way: a checked-out branch is a local branch and takes the
+	# tracking refspec like every other one.
 	run({ dir => $work }, 'git', 'checkout', '-q', 'env-local');
 	put_file("$work/propagated.yml", "---\nfrom: propagation\n");
 	run({ dir => $work }, 'git', 'add', '-A');
