@@ -841,6 +841,18 @@ sub _seed_control {
 # filesystem path, so its origin URL carries no GitHub owner/repo pair and
 # the derivation has nothing to read.  A row that proves that refusal takes
 # the override away by naming repository as undef.
+#
+# An automated provider gets the whole automated shape as well, which is the
+# provider's target, the clone credential, the committer identity, and the
+# shuttle, the vault, and the locker of D23.  A repository that names an
+# automation and carries none of them is refused by the schema and by the
+# Concourse provider's own validate_config, and both of those run on every
+# load, so a row that asks for an automated provider and nothing else would
+# meet them before it reached whatever it came to prove.  The blocks come
+# from automation_blocks, which is the same answer the automated shape
+# writes, and the target says harness because nothing here talks to a real
+# Concourse.  A row that cares what any of them is writes its own through
+# the pipeline hashref, which is set last.
 sub _seed_pipeline_section {
 	my ($self, $root) = @_;
 	my $want = $self->{pipeline};
@@ -860,6 +872,21 @@ sub _seed_pipeline_section {
 	$config->set('pipeline.provider.type' => $self->{provider});
 	$config->set("pipeline.source_control.$_" => $sc{$_})
 		for grep {defined $sc{$_}} sort keys %sc;
+
+	unless ($self->{provider} eq 'manual') {
+		$config->set('pipeline.provider.target' => 'harness');
+		$config->set('pipeline.source_control.auth.type' => 'ssh');
+		$config->set('pipeline.source_control.auth.vault' => 'secret/ci/git');
+		$config->set('pipeline.source_control.identity.name' => 'Genesis CI');
+		$config->set('pipeline.source_control.identity.email'
+			=> 'ci@genesis.example.com');
+		my %blocks = automation_blocks();
+		for my $block (sort keys %blocks) {
+			$config->set("pipeline.$block.$_" => $blocks{$block}{$_})
+				for sort keys %{$blocks{$block}};
+		}
+	}
+
 	$config->set("pipeline.$_" => $keys{$_}) for sort keys %keys;
 	$config->save;
 
