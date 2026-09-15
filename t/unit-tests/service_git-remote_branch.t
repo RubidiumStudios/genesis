@@ -8,6 +8,7 @@ use lib 't';
 use helper;
 use Test::More;
 use Test::Exception;
+use Test::Deep;
 
 use Genesis;
 use_ok 'Service::Git';
@@ -167,14 +168,17 @@ subtest 'delete_remote_branch - bails on push failure' => sub {
 };
 
 # ======================================================================
-# resolve_branch - where does this branch actually live?
+# resolve_branch - how does this branch stand against the remote's?
 # ======================================================================
 #
-# A branch missing from the local clone is ambiguous: it may never have
-# existed, or the clone may simply be fresh or stale.  Creating it in the
-# second case forks it from the real branch, and the first push either
-# is rejected or overwrites a deployment anchor.  So the remote decides,
-# and callers get a state rather than a boolean.
+# The query compares two refs that are already here, the local branch and
+# its remote-tracking ref, and answers with a state, both counts, and the
+# unverifiable flag.  It reads refs and nothing else.  The refresh is a step
+# of its own, so an answer is about one moment and can be asked for twice.
+#
+# What this file proves is which git commands the query issues and which it
+# does not.  The six states are driven through real repositories in
+# t/unit-tests/service_git-divergence.t, where a state means something.
 
 sub override_branch_exists {
 	my ($exists) = @_;
@@ -182,104 +186,141 @@ sub override_branch_exists {
 	*Service::Git::branch_exists = sub { $exists };
 }
 
-subtest 'resolve_branch - local when the branch is already here' => sub {
-	plan tests => 2;
-	reset_stub(); install_run_stub();
-	override_default_remote('origin');
-	override_branch_exists(1);
+our @ref_asks;
 
-	my $git = make_git();
-	is $git->resolve_branch('qa'), 'local', 'already present locally';
-	is scalar @run_calls, 0, 'the remote is not consulted when we already have it';
-};
+# The tracking ref is a ref this repository either has or lacks, and naming
+# the ones it has says so far more plainly than queueing a git verdict that
+# has to be counted out in order.
+sub override_ref_exists {
+	my (@present) = @_;
+	@ref_asks = ();
+	my %here = map { $_ => 1 } @present;
+	no warnings qw(redefine once);
+	*Service::Git::_ref_exists = sub {
+		my ($self, $ref) = @_;
+		push @ref_asks, $ref;
+		return $here{$ref} ? 1 : 0;
+	};
+}
 
-# The refresh is fetch_branches with the one name, so the probe is followed
-# by that method's own four steps: the branch it is standing on, the probe
-# that keeps an absent name from aborting the whole fetch, the local heads
-# that decide which refspec each name takes, and the fetch itself.
-subtest 'resolve_branch - fetched when the remote has it' => sub {
+subtest 'resolve_branch - both counts come back in one record' => sub {
 	plan tests => 3;
 	reset_stub(); install_run_stub();
 	override_default_remote('origin');
-	override_branch_exists(0);
-	push @run_results, ["abc123\trefs/heads/qa", 0, ''];   # ls-remote
-	push @run_results, ["control\n", 0, ''];               # current branch
-	push @run_results, ["abc123\trefs/heads/qa", 0, ''];   # the refresh probe
-	push @run_results, ['', 0, ''];                        # local heads
-	push @run_results, ['', 0, ''];                        # fetch
+	override_branch_exists(1);
+	override_ref_exists('refs/remotes/origin/qa');
+	push @run_results, ["2\t1\n", 0, ''];
 
 	my $git = make_git();
-	is $git->resolve_branch('qa'), 'fetched',
-		'absent locally but present on the remote is a fetch, never a create';
-	is scalar @run_calls, 5, 'probed, then refreshed through fetch_branches';
-	is $run_calls[4][2], 'fetch', 'the last call is the fetch';
+	cmp_deeply($git->resolve_branch('qa'),
+		{state => 'diverged', ahead => 2, behind => 1, unverifiable => 0},
+		'commits on both sides read diverged, carrying both counts');
+	is scalar @run_calls, 1, 'one git command answers it';
+	is $run_calls[0][2], 'rev-list', 'and that command is the count';
 };
 
-subtest 'resolve_branch - absent when it exists nowhere' => sub {
-	plan tests => 2;
-	reset_stub(); install_run_stub();
-	override_default_remote('origin');
-	override_branch_exists(0);
-	push @run_results, ['', 0, ''];   # ls-remote finds nothing
-
-	my $git = make_git();
-	is $git->resolve_branch('qa'), 'absent',
-		'only absent everywhere licenses a create';
-	is scalar @run_calls, 1, 'nothing fetched';
-};
-
-subtest 'resolve_branch - absent when there is no remote to consult' => sub {
-	plan tests => 2;
-	reset_stub(); install_run_stub();
-	override_default_remote(undef);
-	override_branch_exists(0);
-
-	my $git = make_git();
-	# A local-only repository has no authority to consult, so absence is
-	# the whole truth and creating is safe.
-	is $git->resolve_branch('qa'), 'absent',
-		'no remote means local absence is authoritative';
-	is scalar @run_calls, 0, 'no probe attempted';
-};
-
-subtest 'resolve_branch - offline reports unverifiable, never absent' => sub {
-	plan tests => 2;
-	reset_stub(); install_run_stub();
-	override_default_remote('origin');
-	override_branch_exists(0);
-
-	my $git = make_git();
-	# --no-fetch means "do not talk to the remote", not "assume nothing is
-	# there".  Callers must be able to reconcile local branches offline
-	# without that silently becoming a licence to create.
-	is $git->resolve_branch({offline => 1}, 'qa'), 'unverifiable',
-		'offline withholds the answer rather than guessing at it';
-	is scalar @run_calls, 0, 'the remote is not contacted';
-};
-
-subtest 'resolve_branch - offline still answers for a local branch' => sub {
+subtest 'resolve_branch - equal tips read in-sync' => sub {
 	plan tests => 1;
 	reset_stub(); install_run_stub();
 	override_default_remote('origin');
 	override_branch_exists(1);
+	override_ref_exists('refs/remotes/origin/qa');
+	push @run_results, ["0\t0\n", 0, ''];
 
 	my $git = make_git();
-	is $git->resolve_branch({offline => 1}, 'qa'), 'local',
-		'a branch we already have needs no remote to confirm';
+	cmp_deeply($git->resolve_branch('qa'),
+		{state => 'in-sync', ahead => 0, behind => 0, unverifiable => 0},
+		'neither side is holding anything the other lacks');
 };
 
-subtest 'resolve_branch - a failed probe is not read as absence' => sub {
-	plan tests => 1;
+subtest 'resolve_branch - the two existence answers come before the counts' => sub {
+	plan tests => 4;
+	reset_stub(); install_run_stub();
+	override_default_remote('origin');
+
+	override_branch_exists(1);
+	override_ref_exists();
+	my $git = make_git();
+	cmp_deeply($git->resolve_branch('qa'),
+		{state => 'no-remote', ahead => 0, behind => 0, unverifiable => 0},
+		'a branch this clone alone has reads no-remote');
+	is scalar @run_calls, 0, 'and nothing is counted, because there is no second ref';
+
+	reset_stub();
+	override_branch_exists(0);
+	override_ref_exists('refs/remotes/origin/qa');
+	cmp_deeply($git->resolve_branch('qa'),
+		{state => 'no-local', ahead => 0, behind => 0, unverifiable => 0},
+		'a branch the tracking ref alone has reads no-local');
+	is scalar @run_calls, 0, 'and that one is not counted either';
+};
+
+subtest 'resolve_branch - a branch that is nowhere has no state' => sub {
+	plan tests => 2;
 	reset_stub(); install_run_stub();
 	override_default_remote('origin');
 	override_branch_exists(0);
-	push @run_results, ['', 128, 'fatal: Authentication failed'];
+	override_ref_exists();
 
 	my $git = make_git();
-	# Treating an unreachable remote as "absent" is precisely the mistake
-	# this exists to prevent -- it would create branches offline.
-	throws_ok {$git->resolve_branch('qa')} qr/ls-remote/,
-		'an unreachable remote raises rather than licensing a create';
+	# No state of the six describes a branch that is in neither place, and
+	# inventing one would hand a caller a record to read rather than an
+	# absence to act on.
+	is $git->resolve_branch('qa'), undef,
+		'neither ref exists, so the whole record is undef';
+	is scalar @run_calls, 0, 'nothing is asked of git beyond the two refs';
+};
+
+subtest 'resolve_branch - a repository with no remote is local only' => sub {
+	plan tests => 3;
+	reset_stub(); install_run_stub();
+	override_default_remote(undef);
+	override_branch_exists(1);
+	override_ref_exists();
+
+	my $git = make_git();
+	cmp_deeply($git->resolve_branch('qa'),
+		{state => 'no-remote', ahead => 0, behind => 0, unverifiable => 0},
+		'every branch such a repository holds is a branch it alone holds');
+	is scalar @ref_asks, 0,
+		'no tracking ref is looked for, since no remote names one';
+	is scalar @run_calls, 0, 'and no count is taken';
+};
+
+subtest 'resolve_branch - remote names the ref the branch is measured against' => sub {
+	plan tests => 3;
+	reset_stub(); install_run_stub();
+	override_default_remote('origin');
+	override_branch_exists(1);
+	override_ref_exists('refs/remotes/upstream/qa');
+	push @run_results, ["0\t3\n", 0, ''];
+
+	my $git = make_git();
+	cmp_deeply($git->resolve_branch('qa', remote => 'upstream'),
+		{state => 'behind', ahead => 0, behind => 3, unverifiable => 0},
+		'the named remote answers rather than the default one');
+	cmp_deeply(\@ref_asks, ['refs/remotes/upstream/qa'],
+		'its tracking ref is the one looked for');
+	is $run_calls[0][5], 'refs/heads/qa...refs/remotes/upstream/qa',
+		'and the one the count is taken against';
+};
+
+subtest 'resolve_branch - unverifiable rides on the answer and asks nothing more' => sub {
+	plan tests => 3;
+	reset_stub(); install_run_stub();
+	override_default_remote('origin');
+	override_branch_exists(1);
+	override_ref_exists('refs/remotes/origin/qa');
+	push @run_results, ["1\t0\n", 0, ''];
+
+	my $git = make_git();
+	# The flag is the caller's own admission that it did not refresh first,
+	# so a report can say its counts rest on a tracking ref nobody moved.
+	# It is not a state, and it changes neither the state nor either count.
+	my $div = $git->resolve_branch('qa', unverifiable => 1);
+	is $div->{state}, 'ahead', 'the state is still read and still reported';
+	is $div->{unverifiable}, 1, 'and the flag comes back on the record';
+	is scalar @run_calls, 1, 'the flag makes the query no cheaper and no dearer';
 };
 
 # ======================================================================

@@ -1619,8 +1619,14 @@ sub prepare_branch {
 	my %keep_set = map { $_ => 1 } @keep;
 
 	# The remote decides: creating off HEAD because the branch is missing
-	# locally would fork it from the real one.
-	my $origin = $git->resolve_branch({offline => $opts{no_fetch}}, $branch);
+	# locally would fork it from the real one.  The refresh has already
+	# created L from T where T alone had the branch, so no-local here means
+	# the caller skipped the refresh.  M8 retires this sub with the writer.
+	my $div = $git->resolve_branch($branch, unverifiable => ($opts{no_fetch} ? 1 : 0));
+	my $origin = !defined($div)                ? 'absent'
+	           : $div->{unverifiable}          ? 'unverifiable'
+	           : $div->{state} eq 'no-local'   ? 'fetched'
+	           :                                 'local';
 	return ([], [], $origin) if $origin eq 'unverifiable';
 	my $branch_exists = $origin ne 'absent';
 
