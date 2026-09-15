@@ -948,8 +948,14 @@ sub _derive_deploy_reason {
 #
 # The lines arrive in git's `%H %s` shape, so the subject begins after the
 # commit's own sha.  The reader is anchored to the start of a line, which is
-# what keeps a sha named in passing from matching, so the leading field comes
-# off before the line is read.
+# what keeps a sha named in passing from matching, so the leading field has
+# to come off before the marker is at the start of anything.
+#
+# The line is read as it arrived first and with that field removed second,
+# because a caller that hands over the subject alone would otherwise go
+# silent: the strip would take the marker's own first word and leave a line
+# that reads as carrying nothing.  Both reads are anchored, so the second one
+# adds no way for a sha named in passing to match.
 sub _format_pipeline_reason {
 	my ($log_lines, $short_sha, $subject_of) = @_;
 	require Genesis::CI::Marker;
@@ -957,7 +963,8 @@ sub _format_pipeline_reason {
 	my @controls;
 	for my $line (@{$log_lines || []}) {
 		(my $subject = $line) =~ s/\A\S+[ \t]+//;
-		my $control = Genesis::CI::Marker::in_text($subject);
+		my $control = Genesis::CI::Marker::in_text($line)
+		           // Genesis::CI::Marker::in_text($subject);
 		next unless defined $control;
 		push @controls, $control;
 	}
