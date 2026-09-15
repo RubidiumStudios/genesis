@@ -377,11 +377,11 @@ sub _record_commit {
 # }}}
 # _through_the_door - let the handle's guarded subs run, briefly {{{
 #
-# The handle refuses a checkout, a detached checkout, or a working-tree
-# reset from outside a session, and this is what a session is from the
-# handle's side: the door is open for exactly as long as one of the verbs
-# is running, and it closes again however that verb ends, because the flag
-# is localised rather than set and cleared.
+# The handle refuses a checkout or a detached checkout from outside a
+# session, and this is what a session is from the handle's side: the
+# door is open for exactly as long as one of the verbs is running, and it
+# closes again however that verb ends, because the flag is localised
+# rather than set and cleared.
 sub _through_the_door {
 	my ($self, $code) = @_;
 	my $git = $self->{git};
