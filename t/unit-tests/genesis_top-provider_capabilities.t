@@ -34,14 +34,17 @@ my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 my @NAMES = qw/cross_pipeline_events deployment_locks multi_file_output
                optional_git_triggers per_commit_runs scheduled_jobs/;
 
-# An assert helper: write a provider class whose capabilities are the six
-# defaults with the named ones overridden, register it, and answer with its
-# type.  Its fragment declares both repository-wide gated keys itself, for
-# two reasons.  A key no fragment declares is refused as unknown before any
-# gate is read, so a gate row needs its key declared to reach the gate at
-# all; and output_layout is declared by no real provider's fragment until
-# the output-layout work lands, so the multi_file_output row brings its own
-# declaration of it and the gate fires today.
+# An assert helper: write the pair of classes a provider takes, with
+# capabilities that are the six defaults with the named ones overridden,
+# register them, and answer with the type.  The compiler-side class carries
+# the capabilities and the CLI-side class carries the fragment, which is
+# where every provider declares one.  That fragment declares both
+# repository-wide gated keys itself, for two reasons.  A key no fragment
+# declares is refused as unknown before any gate is read, so a gate row
+# needs its key declared to reach the gate at all; and output_layout is
+# declared by no real provider's fragment until the output-layout work
+# lands, so the multi_file_output row brings its own declaration of it and
+# the gate fires today.
 #
 # The defaulted option gives both of those keys a default in the fragment,
 # for the row that asks what a value the operator never wrote does to a
@@ -50,17 +53,21 @@ my $seq = 0;
 sub provider_with {
 	my (%caps) = @_;
 	my $defaulted = delete $caps{defaulted};
-	my $type = 'cap'.++$seq;
-	my $pkg  = "Genesis::CI::Compiler::Providers::Cap$seq";
-	my $rel  = ($pkg =~ s{::}{/}gr).'.pm';
+	my $type     = 'cap'.++$seq;
+	my $pkg      = "Genesis::CI::Compiler::Providers::Cap$seq";
+	my $rel      = ($pkg =~ s{::}{/}gr).'.pm';
+	my $cli_pkg  = "Genesis::CI::Provider::Cap$seq";
+	my $cli_rel  = ($cli_pkg =~ s{::}{/}gr).'.pm';
 	my %all  = (map {($_ => 1)} @NAMES);
 	$all{$_} = $caps{$_} for keys %caps;
 	my $decl = join(', ', map {"$_ => ".($all{$_} ? 1 : 0)} @NAMES);
 
-	put_file("t/tmp/lib/$rel", <<"CAP");
-package $pkg;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
-sub provider_type {'$type'}
+	put_file("t/tmp/lib/$cli_rel", <<"CAPCLI");
+package $cli_pkg;
+use base 'Genesis::CI::Provider';
+# The base's new is the factory's, and it refuses to build a subclass, so
+# a CLI-side fixture the load path constructs brings its own.
+sub new {my (\$c, %cfg) = \@_; bless {%cfg}, \$c}
 sub provider_options_schema {
 	return {
 		group_commits => {
@@ -74,14 +81,20 @@ sub provider_options_schema {
 		},
 	};
 }
+1;
+CAPCLI
+	put_file("t/tmp/lib/$rel", <<"CAP");
+package $pkg;
+use parent 'Genesis::CI::Compiler::PipelineProvider';
+sub provider_type {'$type'}
 sub capabilities {return {$decl}}
 1;
 CAP
 	Genesis::CI::Compiler::PipelineProvider->register_provider($type, {
 		class     => $pkg,
 		file      => $rel,
-		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		cli_class => $cli_pkg,
+		cli_file  => $cli_rel,
 	});
 	return $type;
 }

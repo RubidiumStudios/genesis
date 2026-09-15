@@ -163,11 +163,19 @@ subtest 'the capability gates the key and the key decides the layout' => sub {
 		qr/pipeline\.provider\.output_layout: unknown configuration key/s,
 		'the key is refused where the capability is false';
 
+	put_file('t/tmp/lib/Genesis/CI/Provider/Many.pm', <<'MANYCLI');
+package Genesis::CI::Provider::Many;
+use base 'Genesis::CI::Provider';
+# The base's new is the factory's, and it refuses to build a subclass, so
+# a CLI-side fixture the load path constructs brings its own.
+sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
+sub provider_options_schema {return {}}
+1;
+MANYCLI
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Many.pm', <<'MANY');
 package Genesis::CI::Compiler::Providers::Many;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'many'}
-sub provider_options_schema {return {}}
 sub capabilities {
 	return {deployment_locks => 1, cross_pipeline_events => 1,
 	        optional_git_triggers => 1, scheduled_jobs => 1,
@@ -179,8 +187,8 @@ MANY
 	Genesis::CI::Compiler::PipelineProvider->register_provider('many', {
 		class     => 'Genesis::CI::Compiler::Providers::Many',
 		file      => 'Genesis/CI/Compiler/Providers/Many.pm',
-		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		cli_class => 'Genesis::CI::Provider::Many',
+		cli_file  => 'Genesis/CI/Provider/Many.pm',
 	});
 
 	for my $layout (qw/single multiple/) {
