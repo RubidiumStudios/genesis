@@ -369,6 +369,59 @@ B<Examples:>
   $git->checkout('staging');
   # returns $self, with HEAD now on staging
 
+=head2 checkout_detached
+
+  $git->checkout_detached($sha);
+
+Stands on a commit, leaving HEAD detached rather than on a branch.
+
+It is kept apart from C<checkout> because the two are different operations
+with different consequences. One puts us on a branch that a later commit
+moves, and this one leaves HEAD attached to nothing, which is only ever safe
+inside a branch session that restores on every exit path. C<Service::Git::Session>
+is its caller, and C<switch> takes this path where its target is a commit
+rather than a branch.
+
+Like C<checkout> it runs from the repository root, because the commit being
+stood on may not carry the directory we are standing in, and it returns to
+that directory only where the checkout kept it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$commit>
+
+The commit to stand on.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Unable to enter git root %s: %s"> -- raised where the repository root
+cannot be entered.
+
+=item *
+
+C<"Failed to check out '%s'"> -- raised via C<run>'s C<onfailure>. C<%s> is
+the commit.
+
+=back
+
+B<Examples:>
+
+  $git->checkout_detached($sha);
+  # returns $self, with HEAD detached at that commit
+
+  $git->checkout_detached('0000000000000000000000000000000000000000');
+  # raises, naming the commit, where the repository does not have it
+
 =head2 restore_branch
 
   $git->restore_branch;

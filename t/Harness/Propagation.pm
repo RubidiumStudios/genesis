@@ -25,7 +25,7 @@ our @EXPORT = qw/
 	make_harness
 	ref_in tree_of upstream_of counts
 	tip_of remote_sha refs_in branch_of files_at slurp
-	branches_on_r fresh_clone subjects_of heads_in reachable_on_r
+	branches_on_r fresh_clone clone_copy subjects_of heads_in reachable_on_r
 	newest_record trailers_of
 
 	commit_on_control commit_from_b publish_from_b push_from refresh
@@ -284,6 +284,42 @@ sub fresh_clone {
 	run({dir => $dir}, 'git', 'config', 'user.email', 'clone@genesis.example.com');
 	run({dir => $dir}, 'git', 'config', 'user.name', 'A fresh clone');
 	return $dir;
+}
+
+# }}}
+# clone_copy - a copy cut from R now, carrying only what R can reach {{{
+#
+# A row that wants to run real code inside a third clone wants a Service::Git
+# handle on it, which the git accessor builds from a copy key, so the clone is
+# registered under a key of its own and every accessor the harness already has
+# -- git, tip_of, snapshot_w, stand_on -- reads it.  The default key is c,
+# because a and b are the two copies the harness builds, and a row that wants
+# a second clone names its own.
+#
+# The clone is made over file://, which fresh_clone does not do and which
+# matters here.  Git clones a plain local path by hardlinking the whole object
+# store, so a commit that no ref of R can reach still arrives in the copy, and
+# a row asking what a clone made today does not have would be handed it
+# anyway.  file:// forces the ordinary transfer, which sends what the refs
+# reach and nothing else.
+#
+# It is then stood on control, because R is bare and its own HEAD never names
+# the control branch, so a clone of it otherwise lands on an unborn HEAD with
+# no local branch at all.
+sub clone_copy {
+	my ($self, %opts) = @_;
+	my $key = $opts{as} // 'c';
+	my $dir = "$self->{tmp}/copy-" . int(rand(1_000_000));
+
+	run({dir => $self->{base}, onfailure => "Failed to cut a copy from R"},
+		'git', 'clone', '-q', "file://$self->{r}", $dir);
+	run({dir => $dir}, 'git', 'config', 'user.email', "copy-$key\@genesis.example.com");
+	run({dir => $dir}, 'git', 'config', 'user.name', "Copy $key");
+	run({dir => $dir, onfailure => "Failed to stand the copy on control"},
+		'git', 'checkout', '-q', $self->{control});
+
+	$self->{$key} = $dir;
+	return $key;
 }
 
 # }}}

@@ -332,6 +332,31 @@ sub checkout {
 }
 
 # }}}
+# checkout_detached - stand on a commit rather than on a branch {{{
+#
+# Separate from checkout rather than folded into it, because the two are
+# different operations with different consequences: one puts us on a branch
+# that a later commit moves, and this one leaves HEAD detached, which is only
+# ever safe inside a branch session that restores on every exit path.
+#
+# It runs from the repository root for the same reason checkout does: the
+# commit being stood on may not carry the directory we are standing in, and a
+# checkout that removes the ground under us would leave the caller nowhere.
+sub checkout_detached {
+	my ($self, $commit) = @_;
+
+	my $cwd = getcwd();
+	chdir($self->{root})
+		or bail("Unable to enter git root %s: %s", $self->{root}, $!);
+	run({ onfailure => "Failed to check out '$commit'" },
+		'git', 'checkout', '--detach', $commit);
+	chdir($cwd) if -d $cwd;
+
+	delete $self->{_current_branch};
+	return $self;
+}
+
+# }}}
 # restore_branch - return to the branch we were on before any checkout {{{
 sub restore_branch {
 	my ($self) = @_;

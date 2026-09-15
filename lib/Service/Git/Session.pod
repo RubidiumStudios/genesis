@@ -162,15 +162,25 @@ B<Examples:>
   $session->begin;
   # raises over a modified qa.yml, naming the file, before any switch
 
-=head2 switch($branch_or_commit)
+=head2 switch($branch_or_commit, %opts)
 
-  $session->switch('qa/bosh');
+  $session->switch($top->branch_for('qa'));
+  $session->switch($record->{git}{commit}, record => $env->exodus_base);
 
-Changes to the repository root, takes the switch lock, checks the branch out,
-and returns to the original directory when the checkout kept it. It stands on
-a commit with a detached HEAD where the target is one. The run happens from
-the root because the branch being checked out may not carry the directory we
-are standing in.
+Takes a branch name or a commit. It changes to the repository root, takes the
+switch lock, checks the target out, and returns to the original directory when
+the checkout kept it. The run happens from the root because the branch being
+checked out may not carry the directory we are standing in.
+
+A branch is checked out as a branch. A commit is checked out detached, and
+C<finish> restores the branch C<begin> recorded either way, so a detached HEAD
+never outlives the session. Standing on one is safe because C<begin> asserted
+the tree clean and C<finish> catches anything that wrote into it.
+
+A commit the repository cannot reach is refused before anything switches,
+naming the commit and, where the caller passes C<record>, the record that
+named it. That happens when a branch has been rewritten or removed on the
+remote since the commit was recorded, and it exits C<DATAERR>.
 
 The switch lock is a C<flock> on F<genesis-session.lock> in the git directory,
 which makes it per working tree: a linked working tree resolves it under
@@ -186,8 +196,10 @@ the C<flock> when its holder dies, so a refusal always names a live process.
 A refusal puts us back in the directory we were standing in before it says
 anything, since the directory we exit in is the one we came in on.
 
-The tip of the target is recorded the first time the session lands on it, so
-C<committed_branches> can say afterwards which branches this session moved.
+The tip of the target is recorded the first time the session lands on a
+branch, so C<committed_branches> can say afterwards which branches this session
+moved. A commit is not recorded, because it is not a branch this session could
+have moved.
 
 B<Parameters:>
 
@@ -195,7 +207,14 @@ B<Parameters:>
 
 =item C<$branch_or_commit>
 
-The branch name to check out, or a commit to stand on.
+The branch name to check out, or a commit to stand on. A name that is a local
+branch here is treated as a branch and anything else as a commit.
+
+=item C<%opts>
+
+Options. C<record> names the record the commit came from, which is the exodus
+path where the caller is following C<git.commit>, and it is what the refusal
+quotes back so the operator knows which record is wrong.
 
 =back
 
@@ -212,6 +231,12 @@ where C<begin> has not run. C<%s> is the working tree root.
 
 =item *
 
+C<< "The commit %s is not in this repository." >> -- raised where the target is
+a commit this repository cannot reach, naming the commit and the record that
+named it. It exits C<DATAERR>, and nothing has switched when it is raised.
+
+=item *
+
 C<< "Unable to enter git root %s: %s" >> -- raised where the repository root
 cannot be entered.
 
@@ -224,8 +249,8 @@ and the same command run again will get through.
 
 =item *
 
-Whatever C<< $git->checkout >> raises, which is a failed checkout naming the
-target.
+Whatever C<< $git->checkout >> or C<< $git->checkout_detached >> raises, which
+is a failed checkout naming the target.
 
 =back
 
@@ -234,8 +259,11 @@ B<Examples:>
   $session->switch('qa/bosh');
   # returns $self, and on now reads 'qa/bosh'
 
-  $session->switch($sha);
-  # stands on a commit with a detached HEAD
+  $session->switch($sha, record => '/secret/exodus/qa/bosh');
+  # stands on that commit with a detached HEAD
+
+  $session->switch($dropped_sha, record => '/secret/exodus/qa/bosh');
+  # exits DATAERR naming both, where the branch was rewritten on the remote
 
 =head2 finish
 
@@ -451,6 +479,102 @@ B<Examples:>
 
   $session->_register_net;
   # returns $self unchanged on a session that already registered one
+
+=head2 _is_branch($name)
+
+  my $branch = $session->_is_branch($target);
+
+Whether the name is a branch of this repository, which is how C<switch> tells
+a branch from a commit.
+
+It asks the strict question here rather than narrowing
+C<< $git->branch_exists >>, because that reader cannot be narrowed under its
+callers. C<branch_exists> runs C<git rev-parse --verify> on the name, which
+resolves a sha and a tag as readily as a branch, and C<resolve_branch> and the
+propagation both lean on that looseness to answer whether a thing is here at
+all. This one reads named refs through C<git show-ref --verify>, so it answers
+about a branch and nothing else.
+
+It asks about the local branch and about the remote-tracking one, because
+git's own checkout knows a branch it has only fetched and this has to know it
+too. C<git checkout qa/bosh> against a repository holding
+C<refs/remotes/origin/qa/bosh> alone cuts the local branch and tracks it,
+which is what the caller means. Reading such a name as a commit would stand us
+on a detached HEAD, and a commit made there afterwards would belong to no
+branch at all.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The target C<switch> was handed.
+
+=back
+
+B<Returns:> True where the name is a branch here or on the remote we track,
+false otherwise, including where it is missing or empty.
+
+B<Examples:>
+
+  my $branch = $session->_is_branch('qa/bosh');
+  # returns 1 where refs/heads/qa/bosh or refs/remotes/origin/qa/bosh is there
+
+  my $branch = $session->_is_branch($sha);
+  # returns 0, so switch stands on it as a commit
+
+=head2 _verify_reachable($commit, $record)
+
+  $session->_verify_reachable($sha, $env->exodus_base);
+
+Refuses a commit this repository cannot reach, before C<switch> moves
+anything. The append-only protection over the deployment branches makes that
+rare rather than impossible: a branch rewritten or removed on the remote
+leaves behind a commit that a record still names.
+
+The refusal names the commit and the record it came from, because the record
+is the input and the operator needs to know which one is wrong, and it exits
+C<DATAERR>. Where the caller passed no record it says so in those words rather
+than naming a path it does not have.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$commit>
+
+The commit to look for.
+
+=item C<$record>
+
+The record that named it, which is quoted back in the refusal. It may be
+omitted.
+
+=back
+
+B<Returns:> C<$self>, so it chains, where the commit is there.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "The commit %s is not in this repository.  It is named by %s, and the
+branch it sat on has been rewritten or removed on the remote since it was
+recorded." >> -- raised where the repository cannot reach the commit. It exits
+C<DATAERR>.
+
+=back
+
+B<Examples:>
+
+  $session->_verify_reachable($sha, '/secret/exodus/qa/bosh');
+  # returns $self where the commit is there
+
+  $session->_verify_reachable($dropped, '/secret/exodus/qa/bosh');
+  # exits DATAERR naming the commit and the record
 
 =head2 _take_lock($restore)
 

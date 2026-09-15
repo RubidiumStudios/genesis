@@ -1,0 +1,165 @@
+#!/usr/bin/env perl
+# Proves T73, a session can stand on a commit, and T74, a commit the
+# refresh cannot reach is refused by name at DATAERR.
+use strict;
+use warnings;
+use utf8;
+
+use lib 'lib';
+use lib 't';
+use helper;
+use Harness::Propagation;
+
+use Test::More;
+use Genesis;
+use Genesis::Exit qw/DATAERR/;
+use_ok 'Service::Git::Session';
+
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
+
+subtest 'a session stands on a commit with a detached HEAD' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+	my $first  = deliver($h, 'qa', control => $control);
+	my $second = deliver($h, 'qa',
+		control => commit_on_control($h,
+			files   => {'qa.yml' => "---\nkit: newer\n"},
+			message => 'change qa again',
+			push    => 1,
+		),
+	);
+	refresh($h, 'a', $h->slug('qa'));
+
+	my $git = $h->git('a');
+	my $w   = snapshot_w($h, copy => 'a');
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($first);
+
+	is($git->sha('HEAD'), $first, 'HEAD is at the commit we asked for');
+	is($git->current_branch, 'HEAD',
+		'and HEAD is detached rather than on the branch');
+
+	# The deliveries were made in copy B and handed to R, so what copy A
+	# holds of that branch is its remote-tracking ref and not a local one.
+	is($h->tip_of($h->slug('qa'), remote => 1), $second,
+		"the branch's own tip is where it was, which is not where we stand");
+	like(get_file($h->a . '/qa.yml'), qr/kit: dev/,
+		'the tree matches the commit and not the tip');
+
+	$session->finish;
+	assert_w_restored($w, 'finish restored the branch begin recorded');
+};
+
+subtest 'finish restores after a commit exactly as after a branch' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+	my $delivered = deliver($h, 'qa', control => $control);
+	refresh($h, 'a', $h->slug('qa'));
+
+	my $git = $h->git('a');
+	stand_on($h, $h->control);
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($delivered);
+	is($session->on, $delivered, 'the session records what it stands on');
+	$session->finish;
+
+	is($git->current_branch, $h->control, 'we are back on control');
+	ok($git->is_clean, 'with a clean tree and no detached HEAD left behind');
+};
+
+subtest 'a commit the refresh cannot reach is refused at DATAERR' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+	deliver($h, 'qa', control => $control);
+	refresh($h, 'a', $h->slug('qa'));
+
+	# A rewritten branch on R is what D31's force-push ban makes rare and
+	# does not make impossible, so the recorded commit can be gone.  The
+	# rewrite drops the commit behind the tip, so control needs a tip above
+	# the one the record names before there is anything to take away.
+	commit_on_control($h,
+		files   => {'ops/later.yml' => "---\nlater: 1\n"},
+		message => 'a later change',
+		push    => 1,
+	);
+	my $gone = rewrite_control($h);
+
+	# The clone is cut after the rewrite, so it never held the dropped
+	# commit at all.  Copy A did hold it, and a fetch moves remote-tracking
+	# refs without taking objects away, so the commit is still there to be
+	# found in the copy the earlier rows use.
+	my $clone = clone_copy($h);
+	my $git   = $h->git($clone);
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+
+	my ($err, $exit) = bail_from(sub {
+		$session->switch($gone, record => $h->env_path('qa'));
+	});
+
+	like($err, qr/\Q$gone\E/, 'the refusal names the commit');
+	like($err, qr/\Q@{[$h->env_path('qa')]}\E/,
+		'and the record it came from');
+	is($exit, DATAERR, 'and it exits DATAERR');
+	is($git->current_branch, $h->control, 'nothing switched');
+	ok($git->is_clean, 'and the tree is untouched');
+
+	$session->finish;
+};
+
+# One local helper, because an assertion helper lives beside its test.  bail
+# dies rather than exits whenever it is reached from inside an eval, which a
+# test file always is, so there is no exit code in this process to read.  The
+# refusal is caught where the code raises it instead, and the code it would
+# have exited with is read off the arguments it was composed with, which is
+# how every other refusal on this branch is read.
+sub bail_from {
+	my ($code) = @_;
+
+	my @raised;
+	{
+		no warnings 'redefine', 'once';
+		local *Service::Git::Session::bail =
+			sub {push @raised, [@_]; die "refused\n"};
+		eval {$code->(); 1};
+	}
+	unless (@raised) {
+		diag("nothing was raised; the code died of: $@") if $@;
+		return ('', undef);
+	}
+
+	my @args = @{$raised[0]};
+	my $opts = ref($args[0]) eq 'HASH' ? shift(@args) : {};
+	my ($format, @rest) = @args;
+
+	return (sprintf($format, @rest), $opts->{exitcode});
+}
+
+done_testing;
