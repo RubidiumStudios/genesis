@@ -18,6 +18,8 @@ management.  C<embed>, C<apply>, C<graph>, and C<describe> are run by a
 Genesis operator to embed the Genesis binary, give the pipeline its shape
 on the configured provider, visualize the pipeline dependency graph, or
 display a human-readable pipeline description.
+C<repipe> is the deprecated name for C<apply>, kept so an operator's habit
+still works, and it warns before it delegates.
 
 The legacy Concourse-facing pipeline task handlers
 (C<ci_pipeline_deploy>, C<ci_show_changes>, C<ci_generate_cache>, and
@@ -200,6 +202,22 @@ B<Examples:>
   # A repository that has not enabled a pipeline
   genesis pipeline-apply
   # Exits: Genesis::Exit::CONFIG, having written nothing
+
+=head2 repipe([$layout])
+
+    genesis repipe
+    genesis repipe sandbox
+
+The deprecated name for L</apply>.  It prints a deprecation warning that
+names C<genesis pipeline-apply> and then delegates to C<apply> with the
+same layout and options, so everything the apply entry says holds here
+too.  It will be removed in a future version.
+
+B<Examples:>
+
+  # The old name still applies the configured pipeline, with a warning
+  genesis repipe
+  # Returns: whatever pipeline-apply returns
 
 =head2 graph([$layout])
 
