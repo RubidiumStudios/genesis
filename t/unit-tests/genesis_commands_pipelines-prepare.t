@@ -120,29 +120,30 @@ subtest 'a branch this clone has is not skipped under --no-fetch' => sub {
 
 	# The branch is this clone's alone, which is the half of --no-fetch that
 	# was answered backwards, because a record comes back for such a branch
-	# and the flag was being read off that record.  The stray file is here to
-	# give the reconciliation something to remove.  What the row reads is the
-	# answer the flag gives and not what the reconciliation then manages,
-	# since prepare_branch takes an empty commit as fatal on this fixture
-	# with the flag and without it alike.
+	# and the flag was being read off that record.  The stray file stands for
+	# whatever else the branch has picked up, so the environment has a real
+	# reconciliation waiting for it rather than nothing to do.
 	local_branch($h, 'qa');
 	hand_commit($h, 'qa', copy => 'a', push => 0,
 		files => {'stray.yml' => "---\nno environment depends on this\n"});
 	stand_on($h, 'control');
 
-	# Genesis reports on standard error, so each run's account of itself
-	# comes back in the second value rather than the first.  What is under
-	# test is the answer the flag gives about a branch that is here, which
-	# is why the two runs are compared on that answer alone.
-	my (undef, $with)    = $h->run_genesis('pipeline-prepare', '--no-fetch');
-	my (undef, $without) = $h->run_genesis('pipeline-prepare');
+	# Both runs are dry, because a dry run reports the answer and stops
+	# there, where a writing run goes on to the reconciliation and dies on
+	# this fixture whatever the flag says.  The answer is decided before
+	# either run parts company with the other, so a dry run is where it can
+	# be read rather than inferred.  Genesis reports on standard error, so
+	# each run's account of itself comes back in the second value.
+	my (undef, $with)    = $h->run_genesis('pipeline-prepare', '-n', '--no-fetch');
+	my (undef, $without) = $h->run_genesis('pipeline-prepare', '-n');
 
+	like $with, qr/reconciled\s+\S*qa/,
+		'the run says it would reconcile the branch, and names it';
+	like $with, qr/Would prepare: .*1 reconciled/,
+		'and counts it among the environments it would prepare';
 	unlike $with, qr/skipped/,
-		'a branch that is here is not withheld for want of the remote';
-	unlike $with, qr/no branch here/,
-		'and the run never claims the branch is absent';
-	unlike $with, qr/\d+ skipped/, 'nothing is counted as skipped';
-	unlike $without, qr/skipped/,
+		'so a branch that is here is not withheld for want of the remote';
+	is scalar($without =~ /reconciled\s+\S*qa/), 1,
 		'which is the same answer the run gives without the flag';
 };
 

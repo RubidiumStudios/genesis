@@ -380,9 +380,13 @@ the pipeline would never see it, and the next run would find it
 local-only and proceed quietly. C<propagate> passes the returned names
 as C<push_extra_branches>, which C<--no-push> still suppresses.
 
-Creation is safe to perform implicitly because C<prepare_branch>
-resolves existence through the remote and will not fork a branch that
-already exists there.
+Creation is safe to perform implicitly because C<prepare_branch> reads
+existence off two refs that are already here, the local branch and its
+remote-tracking ref, and creates only a branch that is in neither. It
+contacts the remote for nothing. The refresh is what brings the tracking
+refs up to date, and it creates the local ref for a branch the remote
+alone had, so by the time this is asked a branch that exists on the
+remote is here and will not be forked.
 
 B<Parameters:>
 
