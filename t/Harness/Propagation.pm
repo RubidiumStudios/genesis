@@ -1228,8 +1228,9 @@ sub propagation_set {
 	push @kinds, qr{^\Q$prefix\E(?:bin|dev)/};
 
 	# The ops files are the one kind the tracked list stands in for here,
-	# because the harness runs no blueprint hook and the list is the only
-	# statement the repository makes about which of them the merge consumes.
+	# because the harness runs no blueprint hook, so the list is the one
+	# statement about which of them the merge consumes that the harness reads,
+	# while the product also consults the blueprint the kit ships.
 	# Where the file at $at declares a list, those paths are the ops files
 	# that are in, and a delivery made under a wider list therefore leaves
 	# behind paths the next delivery has to remove.  Where it declares none

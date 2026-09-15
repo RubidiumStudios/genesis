@@ -347,8 +347,9 @@ list was declared would read a correctly mirrored branch as one that had lost
 its whole kit.
 
 The ops files are the one kind the tracked list stands in for here, because
-the harness runs no blueprint hook and the list is the only statement the
-repository makes about which of them the merge consumes.  Where the
+the harness runs no blueprint hook, so the list is the one statement about
+which of them the merge consumes that the harness reads, while the product
+also consults the blueprint the kit ships.  Where the
 environment file at C<at> declares
 C<genesis.pipeline.track_additional_files>, which is the key the product
 itself reads, those paths are the ops files that are in, and a path under
