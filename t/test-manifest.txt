@@ -163,7 +163,7 @@ unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library 
 #unit-tests/genesis_ci_pipeline_descriptor-signal.t
 
 # CI propagation tests
-unit-tests/genesis_ci_marker-build.t                 # the one marker builder
+unit-tests/genesis_ci_marker-build.t                # the one marker builder
 unit-tests/genesis_ci_propagation-core.t            # propagation engine core
 unit-tests/genesis_commands_pipelines-propagate_guard.t  # missing env branches bail
 unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
