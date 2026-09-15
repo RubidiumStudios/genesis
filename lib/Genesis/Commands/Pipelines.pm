@@ -65,6 +65,21 @@ sub apply {
 	my $git = Service::Git->new('.');
 	info("\n#G{Applying the pipeline} for #C{%s}\n", $top->type);
 
+	# The apply records the commit it applied from, and Service::Git resolves
+	# a ref through git rev-parse, which folds its own error text into the
+	# answer rather than failing.  A clone without the control branch would
+	# therefore record git's complaint as the commit, and every reader below
+	# would compare real shas against a sentence.  The refusal lands here,
+	# ahead of the first write of any kind, so nothing is half done.
+	bail(
+		{exitcode => CONFIG},
+		"Refusing to apply.  The branch #C{%s} is not in this clone, and the ".
+		"apply records the commit it applied from.\n\n".
+		"Fetch it, or create it, then run #C{genesis pipeline-apply} again.  ".
+		"No branch was created and no record was written.",
+		$top->control_branch
+	) unless $git->branch_exists($top->control_branch);
+
 	# D43 gives the branch work to every provider and the pipeline work to
 	# the automated ones alone, so the branches are made before the provider
 	# is asked for anything.  A manual repository still delivers through
@@ -1456,19 +1471,33 @@ sub _apply_records {
 	# The record is written to the vault, and --skip-vault says the operator
 	# has none to write to, so the stage stands aside rather than refusing a
 	# run the flag asked for or dying on a handle that was never built.  The
-	# warning names both the record that went unwritten and the flag that
-	# stopped it, because a missing record is what a later reader meets as a
-	# pipeline nobody has applied.
+	# warning names the record in words rather than by its vault address,
+	# because composing that address reads the repository's exodus mount and
+	# refuses where there is no environment to read it from, which would turn
+	# the stage that stands aside into the stage that stopped the run.
 	if ($opts{skip_vault}) {
 		warning(
-			"Not writing the applied record at #C{%s}, because ".
-			"#C{--skip-vault} was given and that record lives in the vault.  ".
-			"Until an apply writes it, nothing can tell this pipeline from ".
-			"one nobody has applied.",
-			$top->applied_record_path
+			"Not writing the applied record, because #C{--skip-vault} was ".
+			"given and that record lives in the vault.  Until an apply ".
+			"writes it, nothing can tell this pipeline from one nobody has ".
+			"applied."
 		);
 		return 1;
 	}
+
+	# apply refuses a clone without the control branch before it reaches
+	# here, so a value that is not a sha means something between that
+	# refusal and this call went wrong.  The record is what every reader
+	# compares against, so it takes a sha or nothing at all.
+	bug(
+		"_apply_records was given #C{%s} as the control commit, which is not ".
+		"a commit sha.  Git answers an unresolvable ref with its own error ".
+		"text rather than failing, and a record holding that text would ".
+		"match no commit any reader of it knows.",
+		defined $opts{control_commit}
+			? join(' ', split(/\s+/, $opts{control_commit}))
+			: '(undefined)'
+	) unless ($opts{control_commit} // '') =~ m/^[0-9a-f]{40}$/;
 
 	$top->applied_record(
 		control_commit => $opts{control_commit},

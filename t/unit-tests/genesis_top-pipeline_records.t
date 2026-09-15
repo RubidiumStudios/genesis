@@ -161,6 +161,38 @@ subtest 'a write with no value for any field refuses before the vault' => sub {
 	is_deeply(\@reached, [], 'and the vault was never reached');
 };
 
+subtest 'the record stage refuses a control commit that is not a sha' => sub {
+	plan tests => 3;
+
+	require Genesis::Commands::Pipelines;
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	my $top = Genesis::Top->new($h->a);
+
+	# Service::Git resolves a ref through git rev-parse, and that command
+	# folds its own error text into the answer rather than failing, so a
+	# clone missing the branch hands back a sentence beginning `fatal`
+	# instead of a sha or an undef.  The stage refuses that before the
+	# vault, because a record holding it would be compared against real
+	# shas by every reader below and would never match one.
+	my @reached;
+	no warnings 'redefine';
+	local *Genesis::Top::vault = sub {push @reached, 'vault'; return undef};
+
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	my $wrote = eval {
+		Genesis::Commands::Pipelines::_apply_records($top,
+			control_commit => "fatal: ambiguous argument 'control'\ncontrol",
+			provider       => 'manual')
+	};
+	my $err = $@;
+
+	is($wrote, undef, 'the stage answers nothing');
+	like($err, qr{not a commit sha},
+		'and says the value it was given is not a commit sha');
+	is_deeply(\@reached, [], 'and the vault was never reached');
+};
+
 subtest 'a pipeline with no environment cannot address its record' => sub {
 	plan tests => 3;
 
