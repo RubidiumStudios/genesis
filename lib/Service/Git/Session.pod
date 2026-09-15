@@ -793,8 +793,8 @@ where the tree holds it and nothing where it does not.
 B<Returns:> The covered paths, sorted, git-root-relative.
 
 B<Errors:> None of its own. C<< $git->ls_tree >> answers an unreadable commit
-with an empty listing, and the caller's own writes then have nothing to
-deliver.
+with an empty listing, and the caller then refuses the delivery at
+C<SOFTWARE> before it writes anything.
 
 B<Examples:>
 
