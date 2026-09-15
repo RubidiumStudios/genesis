@@ -195,12 +195,12 @@ sub _repo_init_validate {
 	# In subdir mode AND when a CI provider is being configured,
 	# require the enclosing repo to be on the CI control branch.
 	# Genesis pipeline tooling treats this branch as the single source
-	# of truth from which environment branches are cut
-	# (#C{genesis new}) and against which deploys are validated
-	# (#C{genesis deploy}).  We do not rename or create branches in
-	# the enclosing repo -- the user must set this up themselves.  No
-	# #C{--force} bypass: this is a topology requirement, not a safety
-	# check.
+	# of truth that the environment files live on, that the deployment
+	# branches are created for (#C{genesis pipeline-apply}), and against
+	# which deploys are validated (#C{genesis deploy}).  We do not
+	# rename or create branches in the enclosing repo -- the user must
+	# set this up themselves.  No #C{--force} bypass: this is a topology
+	# requirement, not a safety check.
 	#
 	# Without #C{--with-ci}, no pipeline topology is being
 	# established, so the branch name is irrelevant at this point.
