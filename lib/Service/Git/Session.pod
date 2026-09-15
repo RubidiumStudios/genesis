@@ -482,7 +482,11 @@ B<Examples:>
       message => $message);
 
 The single writer. Delivers one control commit onto the branch the session
-stands on, as a mirror of that environment's propagation set.
+stands on, as a mirror of that environment's propagation set as the set stood
+at the delivered commit.  The set is read through
+C<< $env->propagation_files_at >>, so a repository that has restructured
+delivers the set that commit had rather than the one today's configuration
+describes.
 
 A delivery is a mirror and not an overlay, so the postcondition is that the
 branch's tree equals the set, and a path the set no longer holds is removed

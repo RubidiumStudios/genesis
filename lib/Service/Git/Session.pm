@@ -397,7 +397,11 @@ sub apply_files {
 	# environment has a legitimately empty set, so an empty one is a reader
 	# that could not answer rather than an answer, which is D82's system
 	# failure and not this environment's.
-	my @set = $env->propagation_files;
+	# The set is read from the tree at the commit being delivered and never
+	# from the working tree (D69), because a restructure moves the prefix
+	# that defines it and a reader working from today's configuration would
+	# look for that prefix at commits where nothing lives there.
+	my @set = $env->propagation_files_at($source_sha, git => $git);
 	bail({exitcode => SOFTWARE},
 		"The propagation set of #C{%s} is empty, so there is nothing to ".
 		"deliver onto #C{%s}.\n\n".

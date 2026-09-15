@@ -1446,17 +1446,16 @@ sub _propagation_file_kinds {
 		}
 	}
 
+	require Service::Git;
+	my $git = Service::Git->new('.');
+
 	# Manifest fragments the kit's blueprint draws from the repository -- ops
-	# files and the like -- triggering.  The blueprint hook is the authority
-	# on which files the merge consumes.  It needs no BOSH configs, but
-	# running any hook needs a reachable vault, which propagation already
-	# establishes before it gets here.  Fragments that live inside the kit
-	# are skipped: they already travel in the kit source above.
-	my $root = $self->path;
-	for my $f ($self->kit_files(1)) {
-		next unless $f =~ s{^\Q$root\E/}{};
-		$files{$f} = 1;
-	}
+	# files and the like -- triggering.  The enumeration sits in
+	# _blueprint_fragments, so the at-commit reader of D69 names the same
+	# files this one does rather than keeping a second list beside it that
+	# can drift from it.  The handle is handed on rather than built there,
+	# so the prefix below is applied exactly once.
+	$files{$_} = 1 for $self->_blueprint_fragments($git);
 
 	# Config — non-triggering
 	$files{'.genesis/config'} = 0;
@@ -1483,9 +1482,6 @@ sub _propagation_file_kinds {
 			}
 		}
 	}
-
-	require Service::Git;
-	my $git = Service::Git->new('.');
 
 	# Prefix kit-relative paths to git-root-relative, keeping each mark
 	my %out;
@@ -1521,6 +1517,191 @@ sub propagation_files {
 
 	my $want = $opts{triggering} ? 1 : 0;
 	return sort grep {($kinds->{$_} ? 1 : 0) == $want} keys %$kinds;
+}
+
+# }}}
+# propagation_files_at - the propagation set as it stood at a control commit {{{
+#
+# D69 reads the set from the tree at the commit being delivered and never from
+# the working tree, because a restructure moves the prefix that defines the
+# set, and a walk reading today's configuration for every commit would look
+# for bosh/** at commits where nothing lives there.  We materialise the
+# deployment root's config and environment files as they stand at the commit
+# and answer through the ordinary readers over that tree, so the merged
+# hierarchy of D79 decides the reactions and the tracked files as it always
+# does.  The blueprint's repository-side fragments are the one kind read on
+# control instead, under D78, because that is where the kit is.
+sub propagation_files_at {
+	my ($self, $commit, %opts) = @_;
+
+	require Service::Git;
+	require Genesis::Top;
+	my $git = $opts{git} || Service::Git->new('.');
+
+	my $prefix = $self->_deployment_root_at($git, $commit);
+	return () unless defined $prefix;
+
+	my %tree = map {$_ => 1} $git->ls_tree($commit, $prefix eq '' ? '.' : $prefix);
+
+	my $root = workdir();
+	for my $path (keys %tree) {
+		(my $rel = $path) =~ s{^\Q$prefix\E}{};
+		next unless $rel eq '.genesis/config'
+		         || $rel eq 'kit-overrides.yml'
+		         || $rel =~ m{^[^/]+\.yml$};
+		mkfile_or_fail("$root/$rel", $git->show_file($commit, $path));
+	}
+
+	# An environment whose own file the commit does not carry had no set at
+	# that commit, and bare refuses on a file that is not on disk, so the
+	# empty answer is given here rather than left to a refusal that ends the
+	# walk reading the commit.
+	return () unless -f "$root/.genesis/config"
+	              && -f $root.'/'.$self->name.'.yml';
+
+	# The materialised tree is a reading surface and not a repository, so it
+	# is opened with no vault and with its configuration taken as validated.
+	# Both are about the same thing: D28's repository checks ask whether an
+	# enabled pipeline sits in a git checkout with a remote behind it, which
+	# a scratch directory can never answer yes to, and the command doing the
+	# reading has already had those answers from the repository it runs in.
+	my $top = Genesis::Top->new($root, no_vault => 1, silent_vault_check => 1);
+	$top->{__config_validated} = 1;
+	my $env = Genesis::Env->bare($self->name, $top);
+
+	my %files;
+
+	# The environment file hierarchy, as the names and the explicit inherits
+	# stand at the commit.
+	$files{$_ =~ s{^\./}{}r} = 1 for $env->actual_environment_files;
+
+	# The configuration, the overrides, and the embedded genesis.
+	$files{'.genesis/config'} = 1;
+	$files{'kit-overrides.yml'} = 1 if $tree{$prefix.'kit-overrides.yml'};
+	$files{'.genesis/bin/genesis'} = 1 if $tree{$prefix.'.genesis/bin/genesis'};
+
+	# The kit source, which is the compiled tarball the environment names or
+	# the dev directory when it runs a dev kit.  A kit named dev is the dev
+	# directory whatever version stands beside it, which is how
+	# Genesis::Top::local_kit_version reads the same declaration, so the two
+	# readers name the same source for one environment file.
+	my $kit = $env->lookup('kit', {});
+	$kit = {} unless ref($kit) eq 'HASH';
+	if ($kit->{name} && $kit->{name} ne 'dev' && $kit->{version}) {
+		$files{".genesis/kits/$kit->{name}-$kit->{version}.tar.gz"} = 1;
+	} elsif (grep {m{^\Q$prefix\Edev/}} keys %tree) {
+		$files{'dev/'} = 1;
+	}
+
+	# The reaction scripts, which are non-triggering paths under D68 and which
+	# still have to be current on the branch.
+	my $reactions = $env->lookup('genesis.reactions', {});
+	if (ref($reactions) eq 'HASH') {
+		for my $phase (values %$reactions) {
+			next unless ref($phase) eq 'ARRAY';
+			for my $action (@$phase) {
+				next unless ref($action) eq 'HASH' && $action->{script};
+				$files{"bin/$action->{script}"} = 1;
+			}
+		}
+	}
+
+	# The additional files the environment tracks, resolved against the root
+	# as it stands at the commit.  A bare string is promoted to a one-element
+	# list here as the working-tree reader promotes it, because an operator
+	# who named a single path meant that path in both readings.
+	my $tracked = $env->lookup('genesis.pipeline.track_additional_files', []);
+	$tracked = [$tracked] if defined $tracked && !ref $tracked;
+	$files{$_} = 1 for __PACKAGE__->_resolve_track_additional_files(
+		$tracked, $self->name, $root
+	);
+
+	# The blueprint's repository-side fragments, enumerated on control.
+	$files{$_} = 1 for $self->_blueprint_fragments($git);
+
+	# Only what the tree at the commit actually holds travels, and a kind that
+	# is a directory travels whole.
+	my @out = map {"$prefix$_"} keys %files;
+	return sort grep {$tree{$_} || m{/$}} @out;
+}
+
+# }}}
+# _deployment_root_at - where this deployment's root sat at a control commit {{{
+#
+# The prefix that defines the set moves when a flat repository restructures
+# under a deployment root, so we find the root by its own config rather than
+# by where it stands today.  Returns the git-root-relative prefix with its
+# trailing slash, the empty string for a flat repository, or undef where this
+# deployment had no root at that commit.
+sub _deployment_root_at {
+	my ($self, $git, $commit) = @_;
+
+	my $type = $self->top->type;
+	for my $path ($git->ls_tree($commit, '.')) {
+		next unless $path =~ m{^(.*?)\.genesis/config$};
+		my $prefix  = $1;
+		my $content = $git->show_file($commit, $path) // '';
+		my $config  = eval {load_yaml($content)} || {};
+		next unless ($config->{deployment_type} // '') eq $type;
+		return $prefix;
+	}
+	return undef;
+}
+
+# }}}
+# _blueprint_fragments - the manifest fragments the blueprint draws from here {{{
+#
+# The kit's blueprint hook is the authority on which repository-side files the
+# merge consumes, and under D78 propagation enumerates them on control, which
+# is where the kit is.  Running the hook needs no BOSH configs, but it does
+# need a reachable vault, which propagation establishes before it gets here.
+# Factored out of _propagation_file_kinds so the at-commit reader of D69
+# enumerates them the same way.
+#
+# The caller's handle is taken rather than built here, because Service::Git
+# keeps one instance per repository and fixes its prefix at first
+# construction, so a handle built in this sub would answer with whatever
+# prefix the first caller in the process asked for.  Nothing below reads it:
+# it is a parameter so that the prefixing stays with the caller, which is the
+# only place that knows whether it wants git-root-relative paths, and so the
+# prefix is applied exactly once.  The paths come back deployment-root-
+# relative.
+#
+# An environment carrying no loaded kit is answered all the same, by resolving
+# the kit its file declares, because the at-commit reader is built over
+# Genesis::Env->bare and a bare environment has no kit of its own.  A
+# declaration that resolves to no kit on this machine answers with no
+# fragments rather than refusing, since the deployment branch is still owed
+# every other kind.
+sub _blueprint_fragments {
+	my ($self, $git) = @_;
+
+	my $env = $self;
+	unless ($self->{kit}) {
+		my $declared = $self->lookup('kit', {});
+		$declared = {} unless ref($declared) eq 'HASH';
+		my $kit = $self->top->local_kit_version(
+			$declared->{name}, $declared->{version}
+		);
+		return () unless $kit;
+
+		# A shallow copy carries the kit, so the environment the caller
+		# handed us is left as bare as it arrived.
+		$env = bless {%$self}, ref($self);
+		$env->{kit} = $kit;
+	}
+
+	# A fragment that does not lie under the deployment root is the kit's
+	# own, extracted where the kit was unpacked, and it travels inside the
+	# kit source rather than as a repository-side path.
+	my $root = $env->path;
+
+	my %out;
+	for my $f ($env->kit_files(1)) {
+		next unless $f =~ s{^\Q$root\E/}{};
+		$out{$f} = 1;
+	}
+	return sort keys %out;
 }
 
 # }}}
