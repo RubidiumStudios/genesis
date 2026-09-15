@@ -67,6 +67,31 @@ subtest 'the defaults it filled last time do not outlive the schema' => sub {
 		'and the second reports no key the first one filled';
 };
 
+subtest 'an ancestor already read is swept along with the block' => sub {
+	plan tests => 3;
+
+	my $cfg = Genesis::Config->new();
+	$cfg->set('pipeline.provider.type',   'concourse');
+	$cfg->set('pipeline.provider.target', 'ci');
+
+	$cfg->validate_subtree('pipeline.provider', $schema, ignore => ['type']);
+	is $cfg->get('pipeline')->{provider}{team}, 'main',
+		'a read of the parent sees the default the first schema filled';
+
+	# That read cached the parent as the hash it was flattened into, with
+	# the default still inside it.  The call below drops the default out of
+	# the default store directly rather than through the writer that sweeps
+	# as it goes, so a sweep reaching only downwards from the block would
+	# leave the cached parent standing and go on handing every later reader
+	# of it a key that no schema declares any more.
+	my @errors = $cfg->validate_subtree('pipeline.provider',
+		{target => {type => 'string', description => 'The only key now'}},
+		ignore => ['type']);
+	is_deeply [@errors], [], 'the second schema takes the block as it is';
+	ok !exists $cfg->get('pipeline')->{provider}{team},
+		'and the parent has lost the key the second schema does not declare';
+};
+
 subtest 'what is wrong comes back as strings, named in full' => sub {
 	plan tests => 3;
 
