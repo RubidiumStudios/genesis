@@ -37,7 +37,7 @@ our @EXPORT = qw/
 	diverge move_on_r delete_on_r delete_local
 	rewrite_control rewrite_branch
 	amend_tip local_branch local_branch_only unset_control tag_branch
-	set_remotes drop_remotes set_repo_config move_on_r_at
+	set_remotes second_remote drop_remotes set_repo_config move_on_r_at
 
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed break_vault restore_vault
@@ -1865,6 +1865,33 @@ sub set_remotes {
 	}
 
 	return $self->git($copy);
+}
+
+# }}}
+# second_remote - another bare repository, wired onto a copy beside origin {{{
+#
+# A site that clones from one remote and pushes to another has two of them,
+# and which one git lists first is alphabetical rather than anything the
+# operator chose.  A row proving that a command publishes to the remote its
+# configuration names wants the other one to sort ahead of origin, so the
+# default name is one that does.
+#
+# The repository is bare and empty, so a branch that turns up there turned up
+# by mistake, and a row says so by reading its heads.  Nothing is fetched,
+# because a row that wanted the two remotes to share history would be about
+# something else.
+sub second_remote {
+	my ($self, %opts) = @_;
+	my $name = $opts{name} // 'dev';
+	my $copy = $opts{copy} // 'a';
+	my $dir  = "$self->{base}/$name.git";
+
+	run({dir => $self->{base}, onfailure => "Failed to build the $name remote"},
+		'git', 'init', '-q', '--bare', $dir);
+	run({dir => $self->{$copy}, onfailure => "Failed to add the $name remote"},
+		'git', 'remote', 'add', $name, $dir);
+
+	return $dir;
 }
 
 # }}}

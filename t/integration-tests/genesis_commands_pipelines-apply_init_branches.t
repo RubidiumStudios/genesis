@@ -87,7 +87,26 @@ subtest 'a branch the clone alone holds is published' => sub {
 		'and the run reports it as published rather than created');
 };
 
-subtest 'a repository with no remote is refused before anything is cut' => sub {
+subtest 'the publish goes to the remote the configuration names' => sub {
+	# Three rows, and one for the run's own restoration assertion.
+	plan tests => 4;
+
+	# git lists remotes alphabetically, so dev stands ahead of origin, and a
+	# stage that published to the first remote it found would publish there
+	# rather than to the remote pipeline.source_control.remote names.
+	my $h = make_harness(envs => ['qa'], source_control => {remote => 'origin'});
+	my $other = second_remote($h, name => 'dev');
+
+	my (undef, undef, $exit) = run_genesis($h, 'pipeline-apply');
+	is($exit, 0, 'the apply exits 0');
+
+	ok(remote_sha($h, 'qa/bosh'),
+		'the branch landed on the remote the configuration names');
+	is_deeply([sort keys %{refs_in($other, prefix => 'refs/heads')}], [],
+		'and nothing was pushed to the remote git happens to list first');
+};
+
+subtest 'a clone without the configured remote is refused before anything is cut' => sub {
 	# Four rows, and one for the run's own restoration assertion.
 	plan tests => 5;
 
@@ -104,8 +123,8 @@ subtest 'a repository with no remote is refused before anything is cut' => sub {
 
 	is($exit, Genesis::Exit::CONFIG,
 		'the refusal exits Genesis::Exit::CONFIG, because a missing remote is configuration');
-	like($said, qr/no git remote/,
-		'the refusal names what the repository is missing');
+	like($said, qr/no git remote named origin/,
+		'the refusal names the remote it looked for');
 	like($said, qr/No branch was created/,
 		'and says that nothing was written');
 	is(ref_in($h->a, 'refs/heads/qa/bosh'), undef,
