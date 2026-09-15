@@ -46,6 +46,12 @@ the walk delivering it a second time.  Under a dry run the pre-flight moves
 nothing, and the record it leaves names the ref a real run would have left the
 branch on, which is the ref the walk diffs from instead.
 
+The branch the walk diffs from is the branch it writes to.  Each target it
+hands to L<Genesis::CI::Propagation/propagate_envs> carries that branch, so
+the delivery is committed onto it, a pull request is cut from it and opened
+against it, and it is what gets pushed.  The environment's own name stays
+what the marker records and what the operator reads.
+
 Nothing stands between the two stages.  An environment the pre-flight has no
 record for has no branch on either side, and the walk reports it as awaiting
 C<genesis pipeline-apply> and carries on, writing nothing for it.  C<propagate>

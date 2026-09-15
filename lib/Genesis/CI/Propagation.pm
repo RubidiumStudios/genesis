@@ -129,6 +129,11 @@ sub propagate_envs {
 			my $require_pr = $t->{require_pr} ? 1 : 0;
 			my $detail     = $t->{detail}
 				|| { changed => [], deleted => [], renamed => {} };
+			# The environment's deployment branch, which the caller settled
+			# and which is the deployment slug under D66.  A caller that
+			# names no branch means the environment's own name, which is
+			# what the doubles in the unit rows pass.
+			my $branch     = $t->{branch} // $env_name;
 
 			if ($dry_run) {
 				_report_dry_run($git, $env_name, $pr_branch{$env_name},
@@ -147,6 +152,7 @@ sub propagate_envs {
 						owner_repo    => $owner_repo,
 						top           => $top,
 						env_name      => $env_name,
+						branch        => $branch,
 						control_sha   => $control_sha,
 						control_short => $control_short,
 						detail        => $detail,
@@ -158,6 +164,7 @@ sub propagate_envs {
 						git           => $git,
 						session       => $session,
 						env_name      => $env_name,
+						branch        => $branch,
 						control_sha   => $control_sha,
 						detail        => $detail,
 						control_short => $control_short,
@@ -189,6 +196,7 @@ sub propagate_envs {
 				push @pr_targets, {
 					env      => $env_name,
 					branch   => $outcome->{branch},
+					base     => $branch,
 					detail   => $detail,
 					existing => $outcome->{existing_pr},
 				};
@@ -252,7 +260,7 @@ sub propagate_envs {
 			my $body  = _build_pr_body($pt->{env}, $control);
 			eval {
 				my $pr = _find_or_open_pr(
-					$github, $owner_repo, $pt->{branch}, $pt->{env},
+					$github, $owner_repo, $pt->{branch}, $pt->{base},
 					$title, $body, $pt->{existing}
 				);
 				info "  #G{%s}: PR #%d %s",
@@ -278,6 +286,12 @@ sub _propagate_one_direct_env {
 	my $git         = $a{git};
 	my $session     = $a{session};
 	my $env_name    = $a{env_name};
+	# The branch is the deployment slug and the environment's name is the
+	# environment's name, and the two are not the same ref in a typed
+	# repository.  The switch and the push take the branch; the marker and
+	# what the operator reads take the environment, because a marker names
+	# the environment it delivered to.
+	my $branch      = $a{branch} // $env_name;
 	my $control_sha = $a{control_sha};
 	my $detail      = $a{detail};
 	my $short       = $a{control_short};
@@ -286,7 +300,7 @@ sub _propagate_one_direct_env {
 	my @to_rm   = @{$detail->{deleted} || []};
 	my $total   = scalar(@to_copy) + scalar(@to_rm);
 
-	$session->switch($env_name);
+	$session->switch($branch);
 	$git->checkout_file($control_sha, $_) for @to_copy;
 	$git->rm(@to_rm) if @to_rm;
 	my $msg = Genesis::CI::Marker::build($short, $env_name);
@@ -296,7 +310,7 @@ sub _propagate_one_direct_env {
 		$env_name, $total, $total == 1 ? '' : 's';
 	_render_detail_lines($git, $detail);
 
-	return { branch => $env_name };
+	return { branch => $branch };
 }
 # }}}
 # _propagate_one_pr_env - rolling-branch decision tree for require_pr=1 {{{
@@ -309,6 +323,9 @@ sub _propagate_one_pr_env {
 	my $top           = $a{top}
 		or die "_propagate_one_pr_env: 'top' is required\n";
 	my $env_name      = $a{env_name};
+	# The deployment branch the pull request is cut from and opened
+	# against, which is the slug and not the environment's own name.
+	my $branch        = $a{branch} // $env_name;
 	my $control_sha   = $a{control_sha};
 	my $control_short = $a{control_short};
 	my $detail        = $a{detail};
@@ -319,7 +336,7 @@ sub _propagate_one_pr_env {
 	# Branch presence (local or remote) is a separate concern.
 	my @open;
 	if ($github) {
-		my $prs = $github->open_prs($owner_repo, $env_name, $pr_branch);
+		my $prs = $github->open_prs($owner_repo, $branch, $pr_branch);
 		@open = @$prs;
 	}
 
@@ -366,7 +383,7 @@ sub _propagate_one_pr_env {
 				$env_name, $pr_branch;
 			$git->delete_remote_branch($pr_branch);
 		}
-		$session->switch($env_name);
+		$session->switch($branch);
 		$git->create_branch($pr_branch);
 		$session->switch($pr_branch);
 		_apply_propagation_commit($git, $env_name, $control_sha, $control_short, $detail);
