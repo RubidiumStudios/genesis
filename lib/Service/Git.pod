@@ -1071,6 +1071,99 @@ B<Examples:>
   my @paths = $git->ls_files('bosh/ops');
   # returns ('bosh/ops/thing.yml')
 
+=head2 diff_cached_quiet
+
+  my $matches = $git->diff_cached_quiet($ref, @pathspecs);
+
+True when the index matches the named ref's tree over the given paths.
+
+This is git's own quiet exit status, and it reads the index rather than the
+working tree, which is what lets C<< $session->apply_files >> check its
+postcondition before it makes the delivery permanent.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The ref whose tree the index is compared against.
+
+=item C<@pathspecs>
+
+Optional pathspecs to scope the comparison to. With none, the whole index is
+compared.
+
+=back
+
+B<Returns:> 1 when the two agree and 0 when they do not.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Cannot compare the index of %s against %s" >> -- raised where git could
+not take the comparison at all, quoting what git said. It exits C<DATAERR>.
+A source the repository cannot reach is not a mismatch over every path, and
+a caller handed a false for it would report the whole set as differing and
+name a difference nobody made.
+
+=back
+
+B<Examples:>
+
+  $git->diff_cached_quiet('HEAD');
+  # returns 1 on an index nobody has staged anything into
+
+  $git->diff_cached_quiet($control_sha, 'bosh/ops', 'bosh/qa.yml');
+  # returns 0 where the index moved one of those paths away from the source
+
+=head2 diff_cached_names
+
+  my @paths = $git->diff_cached_names($ref, @pathspecs);
+
+The paths over which the index and the ref's tree differ, which is what a
+caller reports when the comparison above comes back false.
+
+The listing is read NUL-separated, so a path holding a byte outside ASCII
+comes back as itself rather than quoted and octal-escaped.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The ref whose tree the index is compared against.
+
+=item C<@pathspecs>
+
+Optional pathspecs to scope the comparison to.
+
+=back
+
+B<Returns:> The differing paths, in git's own order. Empty where the two
+agree.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Cannot compare the index of %s against %s" >> -- raised where git could
+not take the comparison, for the reason its quiet sibling above gives. It
+exits C<DATAERR>.
+
+=back
+
+B<Examples:>
+
+  my @paths = $git->diff_cached_names($control_sha, 'bosh/dev');
+  # returns ('bosh/dev/manifest.yml')
+
 =head2 ls_tree
 
   my @files = $git->ls_tree($ref, $path);

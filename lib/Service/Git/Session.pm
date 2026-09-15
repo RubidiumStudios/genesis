@@ -8,6 +8,7 @@ use strict;
 use warnings;
 
 use Genesis qw/bail run trace/;
+use Genesis::CI::RunFailure;
 use Genesis::Exit qw/TEMPFAIL DATAERR SOFTWARE/;
 use Cwd qw/getcwd/;
 use Fcntl qw/:flock/;
@@ -432,9 +433,9 @@ sub apply_files {
 	#
 	# A removal git refuses is silent, because rm runs under passfail and
 	# hands the handle back whatever git made of it, so nothing here notices a
-	# path that stayed.  The index check M8 adds between these writes and the
-	# commit is what catches that, which is the design's own argument for
-	# asserting the postcondition rather than trusting the sequence.
+	# path that stayed.  A refused removal is caught by the check below
+	# instead, which is the design's own argument for asserting the
+	# postcondition rather than trusting the sequence.
 	my @on_branch = $git->ls_files;
 	my @stale     = grep { !$in_set{$_} } @on_branch;
 
@@ -445,6 +446,39 @@ sub apply_files {
 
 	$git->rm(@stale) if @stale;
 	$git->checkout_file($source_sha, $_) for @to_write;
+
+	# D82 checks the postcondition on the index, before the commit, so a
+	# failed check never becomes a commit.  It is two assertions and not one,
+	# because the source tree carries every environment's files and no
+	# whole-tree comparison is possible.
+	#
+	# The first is that the index matches the source over the set's own
+	# paths, which catches a file the delivery could not write and a blob
+	# somebody else staged in front of it.
+	my $branch = $git->current_branch;
+	unless ($git->diff_cached_quiet($source_sha, @set)) {
+		die Genesis::CI::RunFailure->fatal(
+			message => 'the staged propagation set does not match its source',
+			branch  => $branch,
+			source  => $source_sha,
+			paths   => [$git->diff_cached_names($source_sha, @set)],
+		);
+	}
+
+	# The second is that the index holds nothing outside the set, and it is
+	# the half that fires in practice, because a removal git refuses is
+	# silent and nothing in the sequence above would notice a path that
+	# stayed.  A leftover init, a root-level file after a restructure, and a
+	# path that dropped out of track_additional_files all arrive here.
+	my @outside = grep {!$in_set{$_}} $git->ls_files;
+	if (@outside) {
+		die Genesis::CI::RunFailure->fatal(
+			message => 'the index holds paths outside the propagation set',
+			branch  => $branch,
+			source  => $source_sha,
+			paths   => [@outside],
+		);
+	}
 
 	$git->commit($message);
 
