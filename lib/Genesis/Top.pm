@@ -20,6 +20,7 @@ use Genesis::Exit qw/CONFIG TEMPFAIL/;
 
 use Cwd ();
 use File::Path qw/rmtree/;
+use Time::Piece;
 
 # ---- Constants --------------------------------------------------------------
 #
@@ -1252,20 +1253,52 @@ sub applied_record_path {
 }
 
 # }}}
-# applied_record - the control commit the pipeline was applied from {{{
+# applied_record - read or write the control commit the pipeline was applied from {{{
 #
-# The three flat fields pipeline-apply writes, or undef when the path is
-# absent.  The deploy rewrites its own exodus record every run, which is
-# why these live at their own path rather than beside the deployments.
+# D103 makes this the owner of the pipeline's own facts, so pipeline-apply
+# writes through here and never spells the address for itself.  Called with
+# no arguments it reads the three flat fields, and answers undef where the
+# path is absent.  Called with a field list it writes those fields and
+# returns what it wrote.  The deploy rewrites its own exodus record every
+# run, which is why these live at their own path rather than beside the
+# deployments.
+#
+# D58 makes `at` an EXODUS_TIME_FORMAT value rather than an ISO one, and a
+# write that names no time of its own is stamped with the current time in
+# that format.
 sub applied_record {
-	my ($self) = @_;
-	my $data = $self->vault->get($self->applied_record_path);
-	return undef unless ref($data) eq 'HASH' && keys %$data;
-	return {
-		map  {($_ => $data->{$_})}
-		grep {defined $data->{$_}}
-		qw/control_commit provider at/
-	};
+	my ($self, %fields) = @_;
+	my $path = $self->applied_record_path;
+
+	unless (%fields) {
+		my $data = $self->vault->get($path);
+		return undef unless ref($data) eq 'HASH' && keys %$data;
+		return {
+			map  {($_ => $data->{$_})}
+			grep {defined $data->{$_}}
+			qw/control_commit provider at/
+		};
+	}
+
+	# A caller who hands us nothing but undefined values has nothing to
+	# record, and Service::Vault::set would answer an empty argument list
+	# with "no key was given", which blames the vault for a mistake this
+	# call made.  We say what the fields are instead.
+	bug(
+		"Genesis::Top::applied_record was asked to write the applied record ".
+		"without a value for any of #C{control_commit}, #C{provider}, or ".
+		"#C{at}, so there is nothing to record."
+	) unless grep {defined $fields{$_}} qw/control_commit provider at/;
+
+	$fields{at} //= Time::Piece->new->strftime(EXODUS_TIME_FORMAT);
+
+	my @written =
+		map  {($_ => $fields{$_})}
+		grep {defined $fields{$_}}
+		qw/control_commit provider at/;
+
+	$self->vault->authenticate->set($path, @written);
+	return {@written};
 }
 
 # }}}

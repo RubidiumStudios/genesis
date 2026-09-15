@@ -76,6 +76,16 @@ sub apply {
 	# lacks.  The POD says so where each of those options is described.
 	_apply_init_branches($top, $git);
 
+	# D103 records the pipeline's own facts once the branches are in place,
+	# because a record written ahead of them would claim a shape the
+	# repository does not have yet.  The record is what every reader below
+	# uses to tell an applied pipeline from one nobody has applied, so the
+	# manual provider writes it too and only the pipeline work is skipped.
+	_apply_records($top,
+		control_commit => $git->sha($top->control_branch),
+		provider       => $platform,
+	);
+
 	# The manual provider has no pipeline to set, which is a stage with
 	# nothing to do rather than a run that failed, so the command says which
 	# stage it skipped and exits 0 with the branch work behind it.  The
@@ -1420,6 +1430,34 @@ sub _apply_init_branches {
 	}
 
 	return \%report;
+}
+
+# }}}
+# _apply_records - write what the apply learned to exodus {{{
+#
+# D103 splits the writes across two owners, because the deploy rewrites its
+# own exodus record on every run and would clobber anything the apply left
+# beside it.  The pipeline's own facts go to Genesis::Top's path, and each
+# environment's compiled facts go beside that environment's own record.
+#
+# Neither this helper nor the command spells either address.  Each owner
+# composes its own, so the two writers can never drift apart on where the
+# facts live.
+#
+# The per-environment loop belongs above the return, so the sub keeps the
+# shape of a stage with more than one write in it rather than the shape of
+# a single call.
+sub _apply_records {
+	my ($top, %opts) = @_;
+
+	$top->applied_record(
+		control_commit => $opts{control_commit},
+		provider       => $opts{provider},
+	);
+	info("  #G{recorded} the applied pipeline at #C{%s}",
+		$top->applied_record_path);
+
+	return 1;
 }
 
 # }}}

@@ -110,6 +110,12 @@ the one C<pipeline.source_control.remote> resolves to, and not whichever
 remote git happens to list first, so a clone with two of them still writes
 where the repository says its branches live.
 
+With the branches in place the run records what it applied, which is the
+control commit it read, the provider it applied, and the time. That record
+goes to the pipeline's own address in exodus under every provider, because it
+is what a later reader asks to tell an applied pipeline from one nobody has
+applied.
+
 The provider then comes from C<pipeline.provider.type>, and an absent type
 reads as the C<manual> provider. The manual provider has no pipeline to set,
 so the command says which stage it skipped and exits 0 with the branch work
@@ -191,6 +197,9 @@ by the name C<pipeline.source_control.remote> resolves to, naming that remote,
 because there is then nowhere to publish a deployment branch to.  The refusal
 comes before the first branch is created, so no branch is left standing behind
 it.
+
+Calls C<Genesis::bug()> through C<Genesis::Top::applied_record> when the
+record it is asked to write carries no value for any of its fields.
 
 Calls C<bail()> with C<"No vault specified or configured."> when no vault
 is configured and C<--skip-vault> was not given.
@@ -415,6 +424,69 @@ B<Examples:>
 
   my $report = _apply_init_branches($top, Service::Git->new('.'));
   # returns {created => ['qa/bosh'], published => [], standing => ['prod/bosh']}
+
+=head2 _apply_records
+
+  _apply_records($top, control_commit => $sha, provider => 'concourse');
+
+Writes what the apply learned to exodus.
+
+The writes are split across two owners, because a deploy rewrites its own
+environment's exodus record on every run and would clobber anything the apply
+left beside it. The pipeline's own facts go to C<Genesis::Top>, through
+C<applied_record>, and each environment's compiled facts go beside that
+environment's own record. Neither this helper nor the command spells either
+address, so the two writers cannot drift apart on where the facts live.
+
+It runs under every provider, including the manual one, since the record says
+what was applied rather than what was hosted.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> for the deployment root the command is running in, which
+owns the pipeline's record and composes its address.
+
+=item C<control_commit>
+
+The commit the apply applied from, which is the tip of the control branch as
+this run read it.
+
+=item C<provider>
+
+The provider the repository is configured for, which is C<manual> where the
+configuration names none.
+
+=back
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Genesis::Top::applied_record was asked to write the applied record without
+a value for any of control_commit, provider, or at"> - raised through
+C<Genesis::bug> when neither option carries a value.
+
+=item *
+
+Whatever C<Genesis::Top::applied_record> raises from the vault, which is a
+failed authentication or a failed write.
+
+=back
+
+B<Examples:>
+
+  _apply_records($top,
+    control_commit => $git->sha($top->control_branch),
+    provider       => 'manual');
+  # writes /secret/exodus/_pipelines/bosh and returns 1
 
 =head2 _compile_pipeline
 
