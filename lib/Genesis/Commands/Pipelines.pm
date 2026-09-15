@@ -546,7 +546,6 @@ sub propagate {
 
 	my $opts    = get_options;
 	my $dry_run = $opts->{'dry-run'};
-	my $no_push = $opts->{'no-push'};
 	my $top     = Genesis::Top->new('.');
 
 	bail("CI is not configured for this repository.")
@@ -815,8 +814,8 @@ sub propagate {
 
 	# Pre-flight: build GitHub service once for all require_pr envs in scope.
 	# Owner/repo is resolved from the remote URL; credentials are validated
-	# against the API before touching any branches.  With --no-push, GitHub
-	# is not contacted (no push, no PR) so credentials are not required.
+	# against the API before touching any branches.  A dry run contacts
+	# GitHub for nothing, so it needs no credentials and never gets here.
 	my ($gh_owner, $gh_repo, $github);
 	if (!$dry_run) {
 		my $needs_github = grep {
@@ -828,19 +827,17 @@ sub propagate {
 			# carries no pair was already refused by name, at load.
 			($gh_owner, $gh_repo) = split m{/}, $top->source_control_repository, 2;
 
-			unless ($no_push) {
-				bail(
-					"GitHub credentials required for PR-based propagation.\n".
-					"Set the GITHUB_AUTH_TOKEN environment variable."
-				) unless $ENV{GITHUB_AUTH_TOKEN};
+			bail(
+				"GitHub credentials required for PR-based propagation.\n".
+				"Set the GITHUB_AUTH_TOKEN environment variable."
+			) unless $ENV{GITHUB_AUTH_TOKEN};
 
-				$github = Service::Github->new(org => $gh_owner);
-				my $authed_user = $github->get_authorized_user;
-				bail(
-					"GitHub credentials are invalid or lack sufficient permissions.\n".
-					"Verify GITHUB_AUTH_TOKEN is a valid Personal Access Token."
-				) unless $authed_user;
-			}
+			$github = Service::Github->new(org => $gh_owner);
+			my $authed_user = $github->get_authorized_user;
+			bail(
+				"GitHub credentials are invalid or lack sufficient permissions.\n".
+				"Verify GITHUB_AUTH_TOKEN is a valid Personal Access Token."
+			) unless $authed_user;
 		}
 	}
 
@@ -875,7 +872,6 @@ sub propagate {
 		push_direct_commits => 1,    # manual provider
 		push_pr_branches    => 1,
 		create_prs          => 1,
-		no_push             => $no_push,
 		dry_run             => $dry_run,
 		push_extra_branches => [@targets ? $control : ()],
 	);
