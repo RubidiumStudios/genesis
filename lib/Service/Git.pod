@@ -1578,14 +1578,26 @@ local commits the multi-branch path protects.
 
 B<No branch is skipped for being checked out.> The control branch is
 usually the one the working tree stands on, and a refresh that left it out
-was how a run came to source from whatever the clone already held. A
-checked-out branch is by definition a local branch, so it takes the
-tracking refspec and git is never asked to write the ref C<HEAD> points at.
+was how a run came to source from whatever the clone already held. The
+branch this clone stands on takes the tracking refspec instead, so git is
+never asked to write the ref C<HEAD> points at, which it refuses outright
+and which would fail the whole fetch. That holds for an unborn branch too,
+which is the one checked-out branch C<git for-each-ref> does not list, so
+the branch C<HEAD> names is read separately and never treated as one this
+clone lacks.
 
 B<One name asked for twice is one branch.> A caller assembling the control
 branch and the deployment branches into one list need not check whether
 control is already in it. A duplicate is dropped before the probe, so it is
 reported once and its refspec appears once.
+
+B<What the result reports is read back off the refs.> The probe and the
+fetch are two round trips, so what the remote had when it was asked is not
+what the refs hold once the fetch is done. Both namespaces are read again
+afterwards, and C<fetched> and C<created> are assembled from what is
+actually here rather than from what the probe saw. C<git fetch --porcelain>
+would answer the same question in one call, and it arrived above the git
+floor this tree declares, so the refresh re-reads instead.
 
 B<Nothing here prunes.> The local-only commit query of
 C<Genesis::CI::Preflight> reads the remote-tracking refs to say what a
@@ -1655,6 +1667,13 @@ names by what the remote had), C<created> (the subset of C<fetched> whose
 local ref this refresh wrote for the first time), and C<err> (git's stderr,
 only when C<ok> is 0).
 
+C<fetched> and C<created> mean something only where C<ok> is 1. A fetch
+carrying several refspecs can write some of them and then fail, and the
+failure path reports both lists empty rather than working out which ones
+landed, so a caller composes an event line out of a refresh that succeeded
+and never out of one that did not. C<absent> is read before the fetch and
+is reported either way.
+
 B<Errors:> Transport failures never raise. They are returned as
 C<ok =E<gt> 0> with a C<kind>, and a branch the remote does not have is
 returned in C<absent>; callers that want a hard failure --
@@ -1683,7 +1702,8 @@ B<Examples:>
   # and the remote did
 
   my ($git, $r) = $git->fetch_branches(\@branches);
-  # returns ($self, { ok => 0, kind => 'auth', err => '...' })
+  # returns ($self, { ok => 0, kind => 'auth', err => '...',
+  #                   fetched => [], created => [], absent => [] })
   # when credentials are missing
 
   $git->fetch_branches([]);
@@ -2090,6 +2110,86 @@ B<Examples:>
 
   $git->_ref_exists('qa/bosh');
   # returns 0, because the name is not fully qualified
+
+=head2 _ref_names
+
+  my $heads = $git->_ref_names('refs/heads/', \%opts);
+  my $track = $git->_ref_names('refs/remotes/origin/', \%opts);
+
+The short names under one ref namespace, as a hashref of name to C<1>.
+
+One read rather than one probe per name. L</fetch_branches> asks about every
+branch it was given twice, once to decide which refspec each of them takes and
+once to see what the fetch actually left behind, so a probe per name would turn
+a ten-branch refresh into thirty subprocesses.
+
+How many components the name is stripped of is worked out from the prefix, so
+C<refs/heads/> answers C<qa/bosh> and C<refs/remotes/origin/> answers the same
+name rather than C<origin/qa/bosh>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$prefix>
+
+The namespace to list, with its trailing slash.
+
+=item C<\%opts>
+
+The options handed to C<run>, which carry the repository directory and, outside
+a controlling terminal, C<GIT_TERMINAL_PROMPT>. Defaults to this handle's own
+root where it is omitted.
+
+=back
+
+B<Returns:> A hashref keyed by short name, empty where the namespace holds
+nothing.
+
+B<Errors:> Bails when C<git for-each-ref> fails, naming the namespace, the
+repository, and git's stderr. A failure is not allowed to read as an empty
+namespace, because L</fetch_branches> would then take every branch for one this
+clone lacks and force a write onto each of them.
+
+B<Examples:>
+
+  $git->_ref_names('refs/heads/');
+  # returns { control => 1, 'qa/bosh' => 1 }
+
+  $git->_ref_names('refs/remotes/origin/');
+  # returns { control => 1 }, with the remote's name already stripped
+
+=head2 _checked_out_branch
+
+  my $branch = $git->_checked_out_branch;
+
+The branch C<HEAD> points at, whether or not it has a commit on it yet.
+
+L</current_branch> cannot answer this. It runs C<git rev-parse --abbrev-ref
+HEAD>, which fails on an unborn branch and prints the literal string C<HEAD>,
+so a fresh orphan checkout reads as though it were standing on a branch of that
+name. C<git symbolic-ref> names the branch in that state, and it says nothing at
+all on a detached C<HEAD>, which is what tells the two cases apart.
+
+L</fetch_branches> asks it because git refuses to fetch into the ref C<HEAD>
+points at, and an unborn branch is the one checked-out branch
+C<git for-each-ref> does not list, so without this reader the refresh would
+force a write git declines and lose the whole fetch with it.
+
+B<Parameters:> None.
+
+B<Returns:> The branch name, or C<undef> on a detached C<HEAD>.
+
+B<Errors:> None. A detached C<HEAD> is an answer rather than a failure.
+
+B<Examples:>
+
+  $git->_checked_out_branch;
+  # returns 'control' on an ordinary checkout, and 'newbranch' on a
+  # `git checkout --orphan newbranch` that has committed nothing
+
+  $git->_checked_out_branch;
+  # returns undef where HEAD names a commit rather than a branch
 
 =head2 _provision_ssh_key
 

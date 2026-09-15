@@ -85,7 +85,7 @@ subtest 'the checked-out branch is refreshed like any other' => sub {
 };
 
 subtest 'the refresh never prunes' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $h    = make_harness(envs => ['qa', 'lab'], vault => 0);
 	my $git  = $h->git('a');
@@ -112,6 +112,14 @@ subtest 'the refresh never prunes' => sub {
 	my @local_only = Genesis::CI::Preflight::local_only_commits($git, $lab);
 	cmp_deeply([map { $_->{sha} } @local_only], [$stranded],
 		'the no-prune query lists the commit only copy A has');
+
+	# The marker reader answers a sha, a depth, and where it read from,
+	# and a record that took all three would carry a key named after the
+	# depth.  The key set is asserted rather than the four values, because
+	# a fifth key is the whole defect and the values have their own rows.
+	cmp_deeply([sort keys %{$local_only[0]}],
+		[qw/marker sha short subject/],
+		'and a record carries those four keys and no fifth');
 
 	my $src = slurp('lib/Service/Git.pm');
 	unlike($src, qr{--prune}, 'nothing in the refresh path prunes a ref');

@@ -42,7 +42,11 @@ sub local_only_commits {
 			sha     => $sha,
 			short   => $short,
 			subject => $subject // '',
-			marker  => Genesis::CI::Marker::newest($git, $sha, limit => 1),
+			# scalar, because the last element of a hash constructor is
+			# in list context and newest answers its depth and where it
+			# read the marker from as well, which would land on every
+			# record as a fifth key named after the depth.
+			marker  => scalar Genesis::CI::Marker::newest($git, $sha, limit => 1),
 		};
 	}
 	return @commits;

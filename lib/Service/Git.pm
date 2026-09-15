@@ -911,6 +911,43 @@ sub _ref_exists {
 }
 
 # }}}
+# _ref_names - the short names under one ref namespace {{{
+#
+# One read rather than one probe per name, because the refresh asks about
+# every branch it was given twice, once to decide which refspec each takes
+# and once to see what arrived.  The read is checked rather than trusted: a
+# failure that answered an empty set would tell the refresh that every
+# branch is absent locally, and the refresh would then force a write onto
+# each of them, which is H17 coming back through inherited code.
+sub _ref_names {
+	my ($self, $prefix, $opts) = @_;
+	my $strip = scalar grep {length} split m{/}, $prefix;
+	my ($out, $rc, $err) = run({%{$opts || {dir => $self->{root}}}},
+		'git', 'for-each-ref', "--format=%(refname:strip=$strip)", $prefix);
+	bail("Failed to list #C{%s} in #C{%s}: %s",
+		$prefix, $self->{root}, ($err || $out || "rc=$rc") =~ s/\s+$//r)
+		if $rc;
+	return {map {$_ => 1} grep {/\S/} split(/\n/, $out // '')};
+}
+
+# }}}
+# _checked_out_branch - the branch HEAD points at, born or not {{{
+#
+# current_branch reads `git rev-parse --abbrev-ref HEAD`, which fails on an
+# unborn branch and answers the literal string HEAD, so it cannot name the
+# branch a fresh orphan checkout is standing on.  symbolic-ref names that
+# branch, and it answers nothing at all on a detached HEAD, which tells the
+# two cases apart.
+sub _checked_out_branch {
+	my ($self) = @_;
+	my ($out, $rc) = run({dir => $self->{root}, stderr => 0},
+		'git', 'symbolic-ref', '--short', '-q', 'HEAD');
+	return undef if $rc;
+	chomp(my $branch = $out // '');
+	return length $branch ? $branch : undef;
+}
+
+# }}}
 # delete_remote_branch - delete a branch on the remote {{{
 #
 # Uses `git push <remote> --delete <branch>`.  Returns $self on
@@ -971,7 +1008,7 @@ sub fetch_branches {
 	}
 	my @present = grep { $on_remote{$_}} @want;
 	my @absent  = grep {!$on_remote{$_}} @want;
-	my @created;
+	my (@fetched, @created);
 
 	if (@present) {
 		# The remote is authoritative for which branches exist, not for
@@ -980,39 +1017,50 @@ sub fetch_branches {
 		# remote-tracking ref, and that is what makes the checked-out
 		# branch safe to include.  Branches we lack are materialised
 		# locally, which is the one creation I2 permits.
-		#
-		# The read is checked rather than trusted.  A read that failed and
-		# answered an empty set would put every confirmed branch on the
-		# forced refspec and overwrite exactly the local commits this sub
-		# exists to protect, which is H17 coming back through inherited
-		# code.  A repository we cannot enumerate is a fault of this clone
-		# rather than of the remote, and the caller's kinds all name the
-		# remote, so it is raised here instead of classified.
-		my ($heads, $hrc, $herr) = run({%opts},
-			'git', 'for-each-ref', '--format=%(refname:strip=2)', 'refs/heads/');
-		bail("Failed to list the local branches of #C{%s}: %s",
-			$self->{root}, ($herr || $heads || "rc=$hrc") =~ s/\s+$//r)
-			if $hrc;
-		my %is_local = map {$_ => 1} grep {/\S/} split(/\n/, $heads // '');
-		@created = grep {!$is_local{$_}} @present;
+		my $before = $self->_ref_names('refs/heads/', \%opts);
+		my %is_local = %$before;
+
+		# git refuses outright to fetch into the ref HEAD points at, and it
+		# fails the whole fetch when it does, so the branch this clone is
+		# standing on takes the tracking refspec whatever the read above
+		# said about it.  An unborn branch is the one checked-out branch
+		# for-each-ref does not list, so without this a fresh orphan
+		# checkout would take the forced refspec and lose every other
+		# branch in the list with it.
+		my $here = $self->_checked_out_branch;
+		$is_local{$here} = 1 if defined $here;
 
 		my ($fout, $frc, $ferr) = run({%opts}, 'git', 'fetch', $remote,
 			(map {"+refs/heads/$_:refs/remotes/$remote/$_"}
-				grep {$is_local{$_}} @present),
-			(map {"+refs/heads/$_:refs/heads/$_"} @created));
+				grep { $is_local{$_}} @present),
+			(map {"+refs/heads/$_:refs/heads/$_"}
+				grep {!$is_local{$_}} @present));
 		return wantarray
 			? ($self, {ok => 0, kind => _classify_remote_error($ferr), err => $ferr // '',
 			           fetched => [], created => [], absent => \@absent})
 			: $self
 			if $frc;
 
+		# What the result reports is read back off the refs rather than
+		# taken from the probe.  The probe says what the remote had a round
+		# trip ago, and only a ref says what arrived, so a branch the remote
+		# lost in between is reported by what is here rather than by what
+		# was there.  D9 asks a refresh to re-read for exactly this reason,
+		# since `git fetch --porcelain` arrived above the git floor.
+		my $after_local = $self->_ref_names('refs/heads/', \%opts);
+		my $after_track = $self->_ref_names("refs/remotes/$remote/", \%opts);
+		@created = grep {!$is_local{$_} && $after_local->{$_}} @present;
+		@fetched = grep {
+			$is_local{$_} ? $after_track->{$_} : $after_local->{$_}
+		} @present;
+
 		# Absent on the remote says nothing about local state, so only
 		# fetched branches are cached.
-		$self->{_branch_cache}{$_} = 1 for @present;
+		$self->{_branch_cache}{$_} = 1 for @fetched;
 	}
 
 	return wantarray
-		? ($self, {ok => 1, kind => 'success', fetched => \@present,
+		? ($self, {ok => 1, kind => 'success', fetched => \@fetched,
 		           created => \@created, absent => \@absent})
 		: $self;
 }
