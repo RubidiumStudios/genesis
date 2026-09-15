@@ -181,6 +181,27 @@ a ref pattern that narrows the read to one namespace, as in C<refs/heads>.
 Returns the name of the branch the repository at C<$dir> is standing on, or
 undef where the read fails, as it does for a repository whose HEAD is unborn.
 
+=head2 git_in($dir, @args)
+
+Returns what git printed for the command in the repository at C<$dir>, with
+its trailing newline taken off, or undef where git failed.  The stderr is
+captured apart from the output, so a row running before a ref exists reads
+undef back rather than reading git's complaint as though it were an answer.
+The readers above answer the questions rows ask most often, and a row that
+wants something else, such as a commit's subject or its parent list, reaches
+for this rather than writing the same four lines into its own file.
+
+=head2 blob_at($dir, $ref, $path)
+
+Returns one path's bytes on a ref in the repository at C<$dir>, exactly as the
+object holds them, or undef where the ref or the path is not there.  C<files_at>
+reads through C<Genesis::run>, which strips trailing whitespace from everything
+it hands back, so a row comparing a file against the string the product wrote
+would be comparing a trimmed copy of it.  This one reads git's output straight
+off a pipe and trims nothing, which is what lets a row assert a file's bytes
+rather than its shape.  The tree is asked first, so an absent ref or path
+answers quietly rather than letting git complain to the test's own stderr.
+
 =head2 files_at($h, $ref, %opts)
 
 Returns the commit's paths with their contents, as a hashref, or an empty
@@ -503,6 +524,26 @@ something only has to parse, such as a github URL a derivation reads an owner
 and repository out of, passes C<fetch =E<gt> 0> and gets the remote without
 the conversation, which keeps the row off the network and out of the hands of
 whatever that machine's git configuration rewrites a github URL into.
+
+=head2 second_remote($h, %opts)
+
+Builds another bare repository and wires it onto a copy beside origin,
+returning the new repository's path.  C<name> defaults to C<dev>, and C<copy>
+defaults to A.  git lists remotes alphabetically rather than in the order they
+were added, so the default name sorts ahead of origin, which is what a row
+proving that a command publishes to the remote its configuration names asks
+for.  The repository is bare and empty and nothing is fetched into it, so a
+branch that turns up there turned up by mistake, and a row says so by reading
+its heads.
+
+=head2 drop_remotes($h, %opts)
+
+Takes every remote off a copy, clearing the control branch's upstream with
+them, and returns the harness.  C<copy> defaults to A.  A repository with no
+remote at all is not the state C<sever_remote> arms, where the remote is
+configured and unreachable and a command meets a failed fetch.  Here there is
+nowhere to publish to, and a row reaches for this to prove that a command says
+so before it writes anything.
 
 =head2 set_repo_config($h, $key, $value, %opts)
 
