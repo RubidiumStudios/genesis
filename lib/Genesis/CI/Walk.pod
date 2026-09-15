@@ -209,6 +209,55 @@ B<Examples:>
   my ($files, $carried) = Genesis::CI::Walk::changed_set($git, $env, $sha);
   # returns (['qa.yml'], ['.genesis/config'])
 
+=head2 route_commit
+
+    my $routed = Genesis::CI::Walk::route_commit($git, $env, $commit);
+
+Whether one control commit belongs to one environment, and what of it does.
+
+Only triggering content routes a commit, under D68.  A commit whose content
+for this deployment is only non-triggering is skipped exactly as one that
+touches nothing in the set is, and it records no outcome, because the next
+delivery is a mirror and carries that content with it.  That holds behind a
+hold as well as in front of one, so a configuration change standing behind a
+held commit is not reported as waiting on anything.  The non-triggering paths
+come back beside the triggering ones so that the report can say a script or a
+configuration change rode along.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The handle to read through.
+
+=item C<$env>
+
+The environment the commit is being routed to.
+
+=item C<$commit>
+
+The control commit under consideration.
+
+=back
+
+B<Returns:> A hashref carrying C<triggering> and C<carried>, each an arrayref
+of sorted paths, or C<undef> where the commit has no triggering content for
+this environment.
+
+B<Errors:> Raises whatever reading the set at a commit raises, which is a
+commit carrying no kit the environment declares, a tracked list escaping the
+deployment root, and a read with no vault to lend.
+
+B<Examples:>
+
+  my $routed = Genesis::CI::Walk::route_commit($git, $env, $sha);
+  # returns {triggering => ['qa.yml'], carried => ['.genesis/config']}
+
+  my $quiet = Genesis::CI::Walk::route_commit($git, $env, $config_only);
+  # returns undef, and the commit records nothing at all
+
 =head2 undeployed_set
 
     my @paths
@@ -255,6 +304,41 @@ B<Examples:>
   my @held = Genesis::CI::Walk::undeployed_set($git, $env, undef, $sha);
   # returns the whole triggering set, because nothing is certified
 
+=head2 overlap
+
+    my @shared = Genesis::CI::Walk::overlap($files, $undeployed);
+
+The files a commit and an ancestor's undeployed set have in common.
+
+Only triggering paths reach it, under D68, because a hold exists to stop
+unproven content moving downstream and a reaction script that takes effect at
+the next deploy is not that.  Both lists arrive triggering already, the
+commit's from L</route_commit> and the ancestor's from L</undeployed_set>, so
+nothing is filtered here.  Without the rule a shared C<.genesis/config>
+change would hold every descendant on the commit that touched it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$files>
+
+The triggering paths of the commit being routed.
+
+=item C<$undeployed>
+
+The triggering paths the ancestor holds or is about to hold.
+
+=back
+
+B<Returns:> The paths both lists name, in the order C<$files> gives them, and
+an empty list where they share none.
+
+B<Examples:>
+
+  my @shared = Genesis::CI::Walk::overlap(['qa.yml', 'dev/'], ['dev/']);
+  # returns ('dev/')
+
 =head2 walk_env
 
     Genesis::CI::Walk::walk_env(git => $git, env => $env, record => $rec,
@@ -263,9 +347,11 @@ B<Examples:>
 
 One environment's walk, from its newest marker to control.
 
-Each due commit is routed on its own, in control order.  The first hold ends
-the delivery for that environment, because a mirror at any later commit would
-carry the held one with it, and every commit after the hold is recorded as
+Each due commit is routed on its own, in control order, through
+L</route_commit>, and a commit that routes nowhere records nothing whether it
+stands in front of a hold or behind one.  The first hold ends the delivery
+for that environment, because a mirror at any later commit would carry the
+held one with it, and every routed commit after the hold is recorded as
 C<behind-held-commit> so that no routed commit goes unnamed.
 
 B<Parameters:>
