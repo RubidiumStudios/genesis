@@ -453,6 +453,131 @@ B<Examples:>
   # Report what every environment would receive, and write nothing
   genesis propagate --dry-run
 
+=head2 assert_not_disowned
+
+    assert_not_disowned($top, $command);
+
+Refuses a pipeline the configuration has disowned, under D64.
+
+A repository disowns its pipeline when C<pipeline-apply> has left an applied
+record while C<pipeline.enabled> reads false. The pipeline is still live,
+still watching its branches, and still deploying, and the configuration no
+longer admits that it exists, so every command that would act on it stops
+here rather than acting beside it.
+
+The check reads the record and not only the key, because a repository that
+never had a pipeline has neither and is disowning nothing. Such a repository
+falls through and meets the pre-flight, which has its own words for it.
+
+The refusal names the applied record, the control commit it was applied
+from, the time it was applied, and both remedies, which are to set
+C<pipeline.enabled: true> again or to tear the pipeline down by hand.
+Tearing it down has no command yet, and the message says so rather than
+naming one that does not exist.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The repository, as a C<Genesis::Top>.
+
+=item C<$command>
+
+The command's own name, which the refusal spells back so the operator reads
+the command they ran.
+
+=back
+
+B<Returns:> 1, where the pipeline is enabled or where no applied record
+stands. It does not return otherwise.
+
+B<Errors:>
+
+Calls C<bail()> at C<Genesis::Exit/CONFIG> where an applied record stands
+while C<pipeline.enabled> reads false.
+
+B<Examples:>
+
+  assert_not_disowned($top, 'propagate');
+  # returns 1 where pipeline.enabled is true
+
+  assert_not_disowned($top, 'propagate');
+  # [FATAL] Refusing to run genesis propagate.  The pipeline is disabled
+  #         in .genesis/config, but the applied record says pipeline-apply
+  #         applied it from control@a1b2c3d at 2026-09-15 11:04:22 +0000
+
+=head2 assert_provider_gate
+
+    assert_provider_gate($top, $opts);
+
+The propagate run's break-glass past the pipeline that owns it, under D95.
+
+Under an automated provider the pipeline owns propagation. A hand run does
+the pipeline's work while taking none of the pipeline's locks, so the
+pipeline has no way to see that it is happening and the two can collide on a
+director. A bare run is therefore refused at C<Genesis::Exit/NOPERM> before
+it walks anything.
+
+The gate behaves five ways. C<--force> at a controlling terminal turns the
+refusal into a warning and the question "Proceed anyway?", and a no exits
+C<Genesis::Exit/ABORTED>. Outside a terminal the refusal stands even with
+the flag, because the acknowledgement cannot be given without one.
+C<GENESIS_PIPELINE_TASK> skips the gate, because the pipeline's own job sets
+it and nothing legitimate reaches the gate unattended. C<--dry-run> passes
+with the warning and no question, because it writes nothing. And C<-y> never
+answers the question, since D83 leaves it answering the publish confirmation
+alone. The manual provider is silent, and so is a repository with no
+pipeline at all.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The repository, as a C<Genesis::Top>, which is what the provider is read
+from.
+
+=item C<$opts>
+
+The run's options, as C<get_options> answered them. C<force> and C<dry-run>
+are the two the gate reads.
+
+=back
+
+B<Returns:> 1, where the gate is passed or does not apply. It does not
+return otherwise.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Calls C<bail()> at C<Genesis::Exit/NOPERM> for a bare run under an automated
+provider, and again for a C<--force> run with no controlling terminal.
+
+=item *
+
+Calls C<bail()> at C<Genesis::Exit/ABORTED> where the operator answers no at
+the terminal.
+
+=back
+
+B<Examples:>
+
+  assert_provider_gate($top, {});
+  # returns 1 under the manual provider
+
+  assert_provider_gate($top, {'dry-run' => 1});
+  # warns that this is the pipeline's work, asks nothing, returns 1
+
+  assert_provider_gate($top, {});
+  # [FATAL] The concourse pipeline owns propagation for this repository.
+  #         Run it with --force at a terminal if you mean to.
+
 =head1 INTERNAL FUNCTIONS
 
 =head2 INIT_FILE_BODY

@@ -285,6 +285,7 @@ unit-tests/genesis_commands_dev-pipeline_compile.t  # dev-pipeline-compile stage
 unit-tests/service_git-ci_credentials.t      # git credentials supplied via CI env vars
 unit-tests/genesis_commands_pipelines-control_branch.t  # commands read the configured control branch
 unit-tests/genesis_commands_pipelines-config_gate.t  # the manual provider's skip, and the leftover ci directory that is ignored
+unit-tests/genesis_commands_pipelines-provider_gate.t  # the propagate provider gate's ask, its yes, its no, and the -y that never answers it
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/genesis_ui-prompt_output_stream.t  # prompts write to stderr and the terminal, never stdout
@@ -328,6 +329,7 @@ integration-tests/genesis_ci_preflight-local_commits.t       # the marker-only r
 integration-tests/genesis_ci_preflight-fast_forward.t        # the fast-forward, and the diff base that stays local
 integration-tests/genesis_ci_preflight-invariants.t           # the three invariants, swept across the exit paths
 integration-tests/genesis_ci_walk-command_surface.t           # the propagate command takes no argument and declares three options
+integration-tests/genesis_ci_walk-provider_gate.t             # the disowned pipeline's refusal, and the provider gate a spawned run meets
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
