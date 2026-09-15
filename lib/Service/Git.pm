@@ -666,6 +666,26 @@ sub ls_tree {
 }
 
 # }}}
+# ls_files - list what the index holds, optionally scoped by pathspec {{{
+#
+# The index and not the working tree, which is the difference that matters to
+# every caller here: the mirror asks what the branch holds before it writes,
+# and D82's second assertion asks what the index holds after it has written,
+# and a reader that walked the working tree would answer both questions with
+# the operator's untracked files thrown in.
+#
+# The paths come back git-root-relative whatever directory the caller is
+# standing in, because --full-name fixes them to the root, and the run is made
+# from the root so a pathspec is read against the root as well.
+sub ls_files {
+	my ($self, @pathspecs) = @_;
+	my @cmd = ('git', 'ls-files', '--cached', '--full-name');
+	push @cmd, '--', @pathspecs if @pathspecs;
+	my ($out) = run({ dir => $self->{root} }, @cmd);
+	return grep { /\S/ } split /\n/, ($out || '');
+}
+
+# }}}
 # log_subjects - return commit lines, or whole messages, for a branch {{{
 #
 # Options:

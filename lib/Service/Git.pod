@@ -1018,6 +1018,43 @@ B<Examples:>
   my @files = $git->diff_names('HEAD~1', 'HEAD');
   # returns ('ops/thing.yml')
 
+=head2 ls_files
+
+  my @paths = $git->ls_files;
+  my @paths = $git->ls_files(@pathspecs);
+
+Lists what the index holds, git-root-relative, optionally scoped to pathspecs.
+
+The index and not the working tree, which is the difference every caller here
+cares about. The mirror of C<< $session->apply_files >> asks what the branch
+holds before it writes anything, and the postcondition check asks what the
+index holds once it has written, and a reader that walked the working tree
+would answer both questions with the operator's untracked files thrown in.
+
+The paths come back relative to the repository root whatever directory the
+caller is standing in, and a pathspec is read against that root too.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@pathspecs>
+
+Optional pathspecs to scope the listing to. With none, the whole index is
+listed.
+
+=back
+
+B<Returns:> The list of paths, in git's own order.
+
+B<Examples:>
+
+  my @paths = $git->ls_files;
+  # returns ('bosh/.genesis/config', 'bosh/ops/thing.yml', 'bosh/qa.yml')
+
+  my @paths = $git->ls_files('bosh/ops');
+  # returns ('bosh/ops/thing.yml')
+
 =head2 ls_tree
 
   my @files = $git->ls_tree($ref);

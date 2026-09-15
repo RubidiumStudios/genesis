@@ -240,6 +240,7 @@ unit-tests/service_git-remote_branch.t                     # remote_branch helpe
 unit-tests/service_git-single_branch_refresh.t             # one named branch refreshes T alone
 unit-tests/service_git-set_branch_ref.t                    # the one forced write onto a local branch
 unit-tests/service_git_session-abort.t                     # abort discards, resets to T, and is loud
+unit-tests/service_git_session-apply_files.t               # the single writer delivers a control commit as a mirror
 unit-tests/service_git_session-clean.t                     # what clean means at begin, finish, and abort
 unit-tests/service_git_session-commit.t                    # a session can stand on a commit
 unit-tests/service_git_session-lifecycle.t                 # begin and finish on a clean run
