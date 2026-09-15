@@ -1071,6 +1071,42 @@ B<Examples:>
   my @paths = $git->ls_files('bosh/ops');
   # returns ('bosh/ops/thing.yml')
 
+=head2 ls_tree
+
+  my @files = $git->ls_tree($ref, $path);
+  my @files = $git->ls_tree($ref, '.');
+
+Lists the files present on a ref, recursively.
+
+The listing is read NUL-separated, so a path holding a byte outside ASCII
+comes back as itself rather than quoted and octal-escaped.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The ref to list.
+
+=item C<$path>
+
+The path to list under. A caller who wants the whole tree passes C<'.'>, which
+is git's own spelling for it. Leaving it out hands git an empty pathspec,
+which git refuses by name, and the listing then comes back empty.
+
+=back
+
+B<Returns:> The list of paths.
+
+B<Examples:>
+
+  my @files = $git->ls_tree('control', 'ops');
+  # returns every file under ops/ on the control branch
+
+  my @files = $git->ls_tree('control', '.');
+  # returns every file on the control branch
+
 =head2 diff_cached_quiet
 
   my $matches = $git->diff_cached_quiet($ref, @pathspecs);
@@ -1163,42 +1199,6 @@ B<Examples:>
 
   my @paths = $git->diff_cached_names($control_sha, 'bosh/dev');
   # returns ('bosh/dev/manifest.yml')
-
-=head2 ls_tree
-
-  my @files = $git->ls_tree($ref, $path);
-  my @files = $git->ls_tree($ref, '.');
-
-Lists the files present on a ref, recursively.
-
-The listing is read NUL-separated, so a path holding a byte outside ASCII
-comes back as itself rather than quoted and octal-escaped.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$ref>
-
-The ref to list.
-
-=item C<$path>
-
-The path to list under. A caller who wants the whole tree passes C<'.'>, which
-is git's own spelling for it. Leaving it out hands git an empty pathspec,
-which git refuses by name, and the listing then comes back empty.
-
-=back
-
-B<Returns:> The list of paths.
-
-B<Examples:>
-
-  my @files = $git->ls_tree('control', 'ops');
-  # returns every file under ops/ on the control branch
-
-  my @files = $git->ls_tree('control', '.');
-  # returns every file on the control branch
 
 =head2 log_subjects
 
