@@ -30,6 +30,12 @@ sub install_run_stub {
 	*Service::Git::run = sub {
 		push @run_calls, [@_];
 		my $r = shift @run_results;
+		# A passfail caller is handed a verdict rather than output, so the
+		# queue holds a plain 1 or 0 for those calls.  Answering them the
+		# other way would hand back a three-element list, which is true
+		# whatever it holds, and no row could then say that a ref is absent.
+		return (($r // 1) ? 1 : 0)
+			if ref($_[0]) eq 'HASH' && $_[0]{passfail};
 		$r //= ['', 0, ''];
 		return @$r;
 	};
@@ -176,142 +182,82 @@ subtest 'delete_remote_branch - bails on push failure' => sub {
 # unverifiable flag.  It reads refs and nothing else.  The refresh is a step
 # of its own, so an answer is about one moment and can be asked for twice.
 #
-# What this file proves is which git commands the query issues and which it
-# does not.  The six states are driven through real repositories in
-# t/unit-tests/service_git-divergence.t, where a state means something.
+# What this file proves is the shape of the git commands the query issues.
+# Every row below has both refs in place, or has no remote at all, because
+# those are the paths a command shape can be read off.  The six states are
+# driven through real repositories in t/unit-tests/service_git-divergence.t,
+# which is also where the rows that need a ref to be missing live, since a
+# ref that is missing is repository state and belongs in the harness.
 
-sub override_branch_exists {
-	my ($exists) = @_;
-	no warnings qw(redefine once);
-	*Service::Git::branch_exists = sub { $exists };
-}
-
-our @ref_asks;
-
-# The tracking ref is a ref this repository either has or lacks, and naming
-# the ones it has says so far more plainly than queueing a git verdict that
-# has to be counted out in order.
-sub override_ref_exists {
-	my (@present) = @_;
-	@ref_asks = ();
-	my %here = map { $_ => 1 } @present;
-	no warnings qw(redefine once);
-	*Service::Git::_ref_exists = sub {
-		my ($self, $ref) = @_;
-		push @ref_asks, $ref;
-		return $here{$ref} ? 1 : 0;
-	};
-}
-
-subtest 'resolve_branch - both counts come back in one record' => sub {
-	plan tests => 3;
+subtest 'resolve_branch - two ref probes and one count, and nothing else' => sub {
+	plan tests => 5;
 	reset_stub(); install_run_stub();
 	override_default_remote('origin');
-	override_branch_exists(1);
-	override_ref_exists('refs/remotes/origin/qa');
-	push @run_results, ["2\t1\n", 0, ''];
+	push @run_results, 1;                    # refs/heads/qa is here
+	push @run_results, 1;                    # so is its tracking ref
+	push @run_results, ["2\t1\n", 0, ''];    # and these are the counts
 
 	my $git = make_git();
 	cmp_deeply($git->resolve_branch('qa'),
 		{state => 'diverged', ahead => 2, behind => 1, unverifiable => 0},
 		'commits on both sides read diverged, carrying both counts');
-	is scalar @run_calls, 1, 'one git command answers it';
-	is $run_calls[0][2], 'rev-list', 'and that command is the count';
+	is scalar @run_calls, 3, 'three git commands answer the whole question';
+	is $run_calls[0][2], 'show-ref', 'the local ref is asked for by name';
+	is $run_calls[1][2], 'show-ref', 'and so is the tracking ref';
+	is $run_calls[2][2], 'rev-list', 'and only then are the counts taken';
 };
 
 subtest 'resolve_branch - equal tips read in-sync' => sub {
 	plan tests => 1;
 	reset_stub(); install_run_stub();
 	override_default_remote('origin');
-	override_branch_exists(1);
-	override_ref_exists('refs/remotes/origin/qa');
-	push @run_results, ["0\t0\n", 0, ''];
+	push @run_results, 1, 1, ["0\t0\n", 0, ''];
 
 	my $git = make_git();
+	# Two counts of zero are a state of their own rather than a fall-through,
+	# so the row that reads them is worth having on its own.
 	cmp_deeply($git->resolve_branch('qa'),
 		{state => 'in-sync', ahead => 0, behind => 0, unverifiable => 0},
-		'neither side is holding anything the other lacks');
+		'neither side holds anything the other lacks');
 };
 
-subtest 'resolve_branch - the two existence answers come before the counts' => sub {
-	plan tests => 4;
-	reset_stub(); install_run_stub();
-	override_default_remote('origin');
-
-	override_branch_exists(1);
-	override_ref_exists();
-	my $git = make_git();
-	cmp_deeply($git->resolve_branch('qa'),
-		{state => 'no-remote', ahead => 0, behind => 0, unverifiable => 0},
-		'a branch this clone alone has reads no-remote');
-	is scalar @run_calls, 0, 'and nothing is counted, because there is no second ref';
-
-	reset_stub();
-	override_branch_exists(0);
-	override_ref_exists('refs/remotes/origin/qa');
-	cmp_deeply($git->resolve_branch('qa'),
-		{state => 'no-local', ahead => 0, behind => 0, unverifiable => 0},
-		'a branch the tracking ref alone has reads no-local');
-	is scalar @run_calls, 0, 'and that one is not counted either';
-};
-
-subtest 'resolve_branch - a branch that is nowhere has no state' => sub {
-	plan tests => 2;
-	reset_stub(); install_run_stub();
-	override_default_remote('origin');
-	override_branch_exists(0);
-	override_ref_exists();
-
-	my $git = make_git();
-	# No state of the six describes a branch that is in neither place, and
-	# inventing one would hand a caller a record to read rather than an
-	# absence to act on.
-	is $git->resolve_branch('qa'), undef,
-		'neither ref exists, so the whole record is undef';
-	is scalar @run_calls, 0, 'nothing is asked of git beyond the two refs';
-};
-
-subtest 'resolve_branch - a repository with no remote is local only' => sub {
-	plan tests => 3;
-	reset_stub(); install_run_stub();
-	override_default_remote(undef);
-	override_branch_exists(1);
-	override_ref_exists();
-
-	my $git = make_git();
-	cmp_deeply($git->resolve_branch('qa'),
-		{state => 'no-remote', ahead => 0, behind => 0, unverifiable => 0},
-		'every branch such a repository holds is a branch it alone holds');
-	is scalar @ref_asks, 0,
-		'no tracking ref is looked for, since no remote names one';
-	is scalar @run_calls, 0, 'and no count is taken';
-};
-
-subtest 'resolve_branch - remote names the ref the branch is measured against' => sub {
+subtest 'resolve_branch - remote names the refs the branch is measured against' => sub {
 	plan tests => 3;
 	reset_stub(); install_run_stub();
 	override_default_remote('origin');
-	override_branch_exists(1);
-	override_ref_exists('refs/remotes/upstream/qa');
-	push @run_results, ["0\t3\n", 0, ''];
+	push @run_results, 1, 1, ["0\t3\n", 0, ''];
 
 	my $git = make_git();
 	cmp_deeply($git->resolve_branch('qa', remote => 'upstream'),
 		{state => 'behind', ahead => 0, behind => 3, unverifiable => 0},
 		'the named remote answers rather than the default one');
-	cmp_deeply(\@ref_asks, ['refs/remotes/upstream/qa'],
-		'its tracking ref is the one looked for');
-	is $run_calls[0][5], 'refs/heads/qa...refs/remotes/upstream/qa',
-		'and the one the count is taken against';
+	is $run_calls[1][5], 'refs/remotes/upstream/qa',
+		'its tracking ref is the one asked for';
+	is $run_calls[2][5], 'refs/heads/qa...refs/remotes/upstream/qa',
+		'and the one the counts are taken against';
 };
 
-subtest 'resolve_branch - unverifiable rides on the answer and asks nothing more' => sub {
+subtest 'resolve_branch - a repository with no remote takes no count' => sub {
 	plan tests => 3;
 	reset_stub(); install_run_stub();
+	override_default_remote(undef);
+	push @run_results, 1;                    # refs/heads/qa is here
+
+	my $git = make_git();
+	# No remote names a tracking ref, so there is no second ref to compare
+	# against and every branch the repository holds is one it alone holds.
+	cmp_deeply($git->resolve_branch('qa'),
+		{state => 'no-remote', ahead => 0, behind => 0, unverifiable => 0},
+		'the branch belongs to this clone and to nobody else');
+	is scalar @run_calls, 1, 'only the local ref is asked for';
+	is $run_calls[0][5], 'refs/heads/qa', 'and that is the ref it names';
+};
+
+subtest 'resolve_branch - unverifiable rides on the answer' => sub {
+	plan tests => 2;
+	reset_stub(); install_run_stub();
 	override_default_remote('origin');
-	override_branch_exists(1);
-	override_ref_exists('refs/remotes/origin/qa');
-	push @run_results, ["1\t0\n", 0, ''];
+	push @run_results, 1, 1, ["1\t0\n", 0, ''];
 
 	my $git = make_git();
 	# The flag is the caller's own admission that it did not refresh first,
@@ -320,7 +266,6 @@ subtest 'resolve_branch - unverifiable rides on the answer and asks nothing more
 	my $div = $git->resolve_branch('qa', unverifiable => 1);
 	is $div->{state}, 'ahead', 'the state is still read and still reported';
 	is $div->{unverifiable}, 1, 'and the flag comes back on the record';
-	is scalar @run_calls, 1, 'the flag makes the query no cheaper and no dearer';
 };
 
 # ======================================================================

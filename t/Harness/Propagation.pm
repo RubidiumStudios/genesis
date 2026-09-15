@@ -34,7 +34,7 @@ our @EXPORT = qw/
 	hand_commit local_only_commit squash_merge unrelated_branch
 	diverge move_on_r delete_on_r delete_local
 	rewrite_control rewrite_branch
-	amend_tip local_branch local_branch_only unset_control
+	amend_tip local_branch local_branch_only unset_control tag_branch
 	set_remotes set_repo_config move_on_r_at
 
 	fixture_vault fixture_applied fixture_pipeline_record certify
@@ -1566,6 +1566,24 @@ sub local_branch {
 
 	run({dir => $self->{$copy}}, 'git', 'update-ref', "refs/heads/$branch", $sha);
 	$self->push_from($copy, $branch) if $opts{push};
+	return $sha;
+}
+
+# }}}
+# tag_branch - a tag carrying a branch name in one copy {{{
+#
+# A branch name is not a ref name, and `git rev-parse --verify` answers about a
+# tag as readily as about a branch, so a tag that carries a deployment branch's
+# name is how a loose reader comes to call a branch local when the branch is
+# not there.  The divergence query has to read past that, and this helper is
+# the state a row stands it in.
+sub tag_branch {
+	my ($self, $copy, $name, %opts) = @_;
+	my $at  = $opts{at} // branch_of($self->{$copy});
+	my $sha = ref_in($self->{$copy}, $at) // $at;
+
+	run({dir => $self->{$copy}, onfailure => "Failed to tag $name in copy $copy"},
+		'git', 'tag', '-f', $name, $sha);
 	return $sha;
 }
 

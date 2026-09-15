@@ -1457,6 +1457,13 @@ because the refresh is its own step and an answer that moved refs on its way
 past could not be asked twice about one moment. A caller that wants the remote
 consulted refreshes through L</fetch_branches> and then asks this.
 
+Both halves are read through L</_ref_exists>, which answers about the ref it
+is handed and about nothing else. L</branch_exists> would answer about a tag
+of the same name as readily, and it remembers what it answered, so a handle
+that asked before a refresh would go on reporting C<no-local> after one. The
+counts are taken against C<refs/heads>, so a local half that read a tag would
+name a head that is not there and turn this into a bail.
+
 B<Parameters:>
 
 =over 4
@@ -2029,8 +2036,8 @@ It asks C<git show-ref --verify>, which answers about the ref it is handed and
 about nothing else. L</branch_exists> cannot answer this question, because it
 runs C<git rev-parse --verify> on a short name, and that name resolves a tag or
 a sha as readily as a branch while reaching no remote-tracking ref at all.
-L</resolve_branch> asks this one about the tracking ref, where both halves of
-that looseness would give a wrong answer.
+L</resolve_branch> asks this one about both of the refs it compares, where
+every part of that looseness would give a wrong answer.
 
 B<Parameters:>
 
