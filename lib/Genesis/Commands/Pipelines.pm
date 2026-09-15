@@ -1020,10 +1020,10 @@ sub pipeline_graph {
 		exit 0;
 	}
 
-	# A repository that has not enabled a pipeline still has the one
-	# configuration source to read, which is the pipeline section of
+	# The one configuration source is the pipeline section of
 	# .genesis/config, so the whole compiler runs and draws the graph from
-	# what it finds.  Nothing here chooses a provider, so Concourse stands
+	# what it finds there, and the parser refuses a repository that has no
+	# pipeline section at all.  Nothing here chooses a provider, so Concourse stands
 	# in for the drawing.
 	my $result   = _compile_pipeline($top, 'concourse');
 	my $ast      = $result->{ast};
@@ -1058,10 +1058,10 @@ sub pipeline_describe {
 		exit 0;
 	}
 
-	# A repository that has not enabled a pipeline still has the one
-	# configuration source to read, which is the pipeline section of
+	# The one configuration source is the pipeline section of
 	# .genesis/config, so the whole compiler runs and the description comes
-	# from what it finds.  Nothing here chooses a provider, so Concourse
+	# from what it finds there, and the parser refuses a repository that
+	# has no pipeline section at all.  Nothing here chooses a provider, so Concourse
 	# stands in for the telling.
 	my $result   = _compile_pipeline($top, 'concourse');
 	my $ast      = $result->{ast};
