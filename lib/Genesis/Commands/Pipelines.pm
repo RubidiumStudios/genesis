@@ -7,6 +7,7 @@ use Genesis;
 use Genesis::State;
 use Genesis::Commands;
 use Genesis::Exit qw/CONFIG/;
+use Genesis::Config;
 use Genesis::Top;
 use Genesis::Env;
 use Genesis::CI::Legacy qw//;
@@ -38,13 +39,21 @@ sub apply {
 	option_defaults(config => 'ci.yml');
 
 	my $opts = get_options;
-	my $top  = _get_top($opts);
+
+	# D64 refuses first, because the command applies a configured pipeline
+	# and never enables one.  The refusal reads .genesis/config and builds
+	# no Genesis::Top, so it lands ahead of the vault connection _get_top
+	# makes.  A repository with no pipeline has no reason to hold a vault,
+	# and bailing on the vault first would name the wrong thing entirely.
+	_refuse_disabled_pipeline();
+
+	my $top = _get_top($opts);
 
 	# D27 took --platform away, so the provider is the one the repository
 	# is configured for and nothing else, and under D15 an absent type is
-	# the manual provider.  A repository that declares no pipeline reads as
-	# manual here as well, because there is no automation to apply to it
-	# either, and the bail below says so in the words the operator needs.
+	# the manual provider.  The refusal above has already turned away the
+	# repository that declares no pipeline at all, so what reaches here is
+	# a pipeline the operator enabled and chose a provider for.
 	my $platform = $top->pipeline_provider_type // 'manual';
 
 	# Short-circuit on the 'manual' provider: it has no pipeline to apply
@@ -1319,6 +1328,33 @@ sub _compile_pipeline {
 
 	$result->{provider_cli_opts} = \%provider_cli_opts;
 	return $result;
+}
+
+# }}}
+# _refuse_disabled_pipeline - D64's refusal on a pipeline nobody declared {{{
+#
+# The key is read straight off .genesis/config, the way
+# Genesis::Top::pipeline_enabled reads it, and a Genesis::Top is not built
+# to read it.  That is what puts the refusal ahead of the vault.  Building
+# a Top connects one, and a repository with no pipeline has no reason to
+# hold a vault it would then be asked for.
+#
+# pipeline.enabled is the only key read, so a false key and an absent
+# block answer alike.  Enabling is a configuration change the operator
+# commits to control, and a command that edits configuration on the
+# operator's behalf is the wrong shape, so this refuses rather than
+# writing the key itself.
+sub _refuse_disabled_pipeline {
+	return 1 if Genesis::Config->new('.genesis/config')->get('pipeline.enabled');
+
+	bail(
+		{exitcode => CONFIG},
+		"Refusing to apply.  #C{pipeline.enabled} is false or absent in ".
+		"#C{.genesis/config}, and #C{pipeline-apply} applies a configured ".
+		"pipeline and never enables one.\n\n".
+		"Set #C{pipeline.enabled: true} on control, commit it, then run ".
+		"#C{genesis pipeline-apply} again.  Nothing was written."
+	);
 }
 
 # }}}
