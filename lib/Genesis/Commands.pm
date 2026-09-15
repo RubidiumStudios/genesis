@@ -777,7 +777,11 @@ sub command_usage { # {{{
 			# description.  Right now, they're just undocumented
 		}
 	}
-	my $def_width = (sort {$b <=> $a} map {csize($_)} values(%options_def))[0] + 4;
+	# A command can declare no arguments, no variables, and no options at
+	# all, and then there is no definition to measure.  The empty set reads
+	# as zero here so that such a command renders its help quietly.
+	my $def_width =
+		((sort {$b <=> $a} map {csize($_)} values(%options_def))[0] // 0) + 4;
 
 	for my $source_details (@sources) {
 		my ($source,$options,$label) = @{$source_details};
