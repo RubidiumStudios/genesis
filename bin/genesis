@@ -291,9 +291,8 @@ define_command("create", {
 			"Only used when a CI provider is configured in #C{.genesis/config}.",
 
 		"no-commit" =>
-			"Stage the new environment file but skip the git commit and ".
-			"environment branch creation.  Only applies when a CI ".
-			"provider is configured.",
+			"Stage the new environment file but skip the git commit.  ".
+			"Only applies when a CI provider is configured.",
 
 		"reason=s" =>
 			"Commit message for the environment commit.  Defaults to ".
@@ -2076,42 +2075,6 @@ define_command("pipeline-graph", {
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 }, 'Genesis::Commands::Pipelines::pipeline_graph');
 # }}}
-# genesis pipeline-prepare - create or reconcile environment branches {{{
-define_command("pipeline-prepare", {
-	summary => "Create or reconcile pipeline environment branches.",
-	usage   => "pipeline-prepare",
-	description =>
-		"Creates the branch for any environment that lacks one, and ".
-		"reconciles existing branches with the files their environment ".
-		"depends on.\n".
-		"\n".
-		"A branch missing from this clone is never created on that basis ".
-		"alone: the remote is checked first, and a branch it already has ".
-		"is fetched rather than forked.\n".
-		"\n".
-		"Run without an environment it prepares every environment in the ".
-		"pipeline; run as #C{genesis <env> pipeline-prepare} it prepares ".
-		"only that one.\n".
-		"\n".
-		"This is how a branch #C{genesis propagate} reported as missing ".
-		"gets made.  Propagation compares each environment's branch ".
-		"against the control branch, and cannot tell an absent branch ".
-		"apart from one with no changes, so it reports that environment as ".
-		"awaiting its branch and delivers nothing to it.  Use ".
-		"#C{genesis new <env>} to create an environment; use this when the ".
-		"environment already exists and only its branch is missing.\n".
-		"\n".
-		"Must be run from the control branch, since it copies files into ".
-		"each environment branch from the current branch's HEAD.",
-	function_group => Genesis::Commands::PIPELINE,
-	scope          => ['repo','env'],
-	option_group   => Genesis::Commands::REPO_OPTIONS,
-	options => [
-		'dry-run|n' =>
-			"Report what would change without creating branches or commits.",
-	],
-}, 'Genesis::Commands::Pipelines::pipeline_prepare');
-# }}}
 # genesis pipeline-status - show propagation state across all environments {{{
 define_command("pipeline-status", {
 	summary => "Show propagation status for all pipeline environments.",
@@ -2151,18 +2114,6 @@ define_command("propagate", {
 	options => [
 		'dry-run|n' =>
 			"Show what would be propagated without making changes.",
-
-		# Nothing in propagate reads this option any more.  It is accepted
-		# because Genesis::Env::_post_deploy passes -y to the child
-		# whenever --fix-checks is set, and a propagate that refused it
-		# would turn that deploy into a usage error.  Three things retire
-		# together at the step that rewrites the deploy's pre-flight: this
-		# option, Genesis::Top::PROPAGATE_NO_BRANCH_EXIT, which nothing
-		# raises now, and the deploy's own -F with the warning it guards.
-		'yes|y' =>
-			"Accepted and ignored.  Propagation no longer creates a branch ".
-			"for an environment that has none: it reports the environment ".
-			"as awaiting #C{genesis pipeline-apply} and carries on.",
 
 		'commit=s' =>
 			"Control branch commit SHA to propagate from.  Defaults to ".

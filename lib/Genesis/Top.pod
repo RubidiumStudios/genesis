@@ -68,27 +68,6 @@ The prefix a pull request branch carries when
 C<pipeline.source_control.pr_prefix> is not configured. Read through
 L</pr_prefix> rather than directly.
 
-=head2 PROPAGATE_NO_BRANCH_EXIT
-
-The exit status C<genesis propagate> used when it refused to run because
-an environment in scope had no branch anywhere.
-
-B<It exists so a refusal can be told apart from a breakage.> C<deploy>
-runs C<propagate> as a subprocess and sees only an exit status. Reporting
-a raw non-zero code sends the operator debugging, when a missing branch
-is a known condition one flag from resolution. C<Genesis::Env> matches on
-this value to say so plainly, and treats every other non-zero status as
-an unexpected failure.
-
-B<Nothing raises it today.> C<propagate> no longer refuses a missing
-branch, and no longer offers to cut one: the walk reports the environment
-as awaiting C<genesis pipeline-apply> and the run carries on. The value is
-held because C<Genesis::Env> still matches on it, and the step that
-rewrites the deploy's own pre-flight retires the pair together.
-
-Values below 9 are avoided because the shell and Perl already ascribe
-meaning to them; a distinctive value keeps the match unambiguous.
-
 =head1 METHODS
 
 =head2 new

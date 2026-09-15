@@ -247,9 +247,9 @@ sub initial_state {
 		# Nothing downstream of this stage makes a deployment branch any
 		# more, so a branch this clone holds and the remote has never had
 		# is one a person cut, which is what the refusal below says it is.
-		# Once genesis pipeline-apply exists it is the one command that cuts
-		# a deployment branch, and it publishes what it cuts; until then
-		# pipeline_prepare is where a branch comes from, and it says so.
+		# genesis pipeline-apply is the one command that cuts a deployment
+		# branch, and it publishes what it cuts, so a branch the remote has
+		# never had did not come from there.
 		push(@local_only, {env => $env, branch => $branch}), next
 			if $div->{state} eq 'no-remote';
 

@@ -46,16 +46,6 @@ subtest 'propagate refuses by the configured name' => sub {
 		'and not the schema default it fell back to';
 };
 
-subtest 'pipeline-prepare refuses by the configured name' => sub {
-	plan tests => 2;
-
-	my (undef, $err) = $h->run_genesis({restore => 0}, 'pipeline-prepare');
-	like $err, qr/must be run from the trunk branch/,
-		'the refusal names the branch the repository declared';
-	unlike $err, qr/must be run from the control branch/,
-		'and not the schema default it fell back to';
-};
-
 subtest 'pipeline-status resolves the configured branch head' => sub {
 	plan tests => 2;
 

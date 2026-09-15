@@ -1,10 +1,9 @@
 #!/usr/bin/env perl
-# `genesis new` prepares the environment's branch at the end of its work, and
-# that preparation opens a branch session, which refuses a tree with
-# uncommitted changes.  Met there, the refusal arrives after the environment
-# file has been written and committed onto control.  These rows hold it at
-# the top of the command, beside the branch check, where an operator can act
-# on it.
+# `genesis new` commits the environment file, and a commit takes everything
+# the index already holds, so unrelated work in progress would be swept into
+# the environment's own commit.  These rows hold the refusal at the top of
+# the command, beside the branch check, where an operator can act on it
+# before anything is written.
 use strict;
 use warnings;
 use utf8;

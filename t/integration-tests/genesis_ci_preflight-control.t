@@ -121,15 +121,15 @@ subtest 'control on the remote alone is created and reported' => sub {
 };
 
 subtest 'control nowhere refuses every pipeline command' => sub {
-	# Ten rows, and one more for each of the four runs.
-	plan tests => 14;
+	# Eight rows, and one more for each of the three runs.
+	plan tests => 11;
 
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
 	unset_control($h);
 
 	my $control = $h->control;
-	for my $argv (['propagate'], ['pipeline-status'], ['pipeline-prepare']) {
+	for my $argv (['propagate'], ['pipeline-status']) {
 		my (undef, $err, $exit) = run_genesis($h, @$argv);
 		is($exit, Genesis::Exit::CONFIG, "@$argv exits CONFIG");
 		like($err,
@@ -248,28 +248,31 @@ subtest 'control on the remote that the refresh could not write refuses' => sub 
 		'and it never reads a staleness out of two counts that are zero');
 };
 
-subtest 'a diverged control refuses the seeding command' => sub {
+subtest 'a control diverged both ways refuses the run' => sub {
 	# Four rows, and one more for the run's own restoration assertion.
 	plan tests => 5;
 
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
 
-	# pipeline-prepare copies control's HEAD onto each environment branch and
-	# then tells the operator to push what it wrote, so a control that is both
-	# unpublished and stale is one it must not seed from.
+	# The two rows at the top of this file take the halves one at a time,
+	# and this one takes them together, because a control that is both
+	# unpublished and stale is refused in words of its own rather than in
+	# either half's.  Propagation delivers control's commits onto each
+	# environment branch and then pushes what it wrote, so a control in
+	# this state is one it must not deliver from.
 	diverge($h);
 	my $before_qa = ref_in($h->a, "refs/heads/@{[$h->slug('qa')]}");
 
-	my (undef, $err, $exit) = run_genesis($h, 'pipeline-prepare');
+	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
 	is($exit, Genesis::Exit::DATAERR, 'the run exits DATAERR');
 	like($err, qr/both\s+unpublished\s+and\s+stale/,
 		'the refusal names both halves of the divergence');
-	like($err, qr/Nothing\s+was\s+prepared/,
-		'and closes in the seeding command\'s own words');
+	like($err, qr/Nothing\s+was\s+written/,
+		'and closes in the command\'s own words');
 	is(ref_in($h->a, "refs/heads/@{[$h->slug('qa')]}"), $before_qa,
-		'and no environment branch was seeded');
+		'and no environment branch was written to');
 };
 
 done_testing;

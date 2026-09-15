@@ -1967,117 +1967,6 @@ sub _kit_source_at {
 # }}}
 
 # }}}
-# prepare_branch - create or reconcile this env's branch with the files it needs {{{
-sub prepare_branch {
-	my ($self, %opts) = @_;
-
-	require Service::Git;
-	my $git    = Service::Git->new('.');
-	my $branch = $self->name;
-	my @keep   = $self->propagation_files;
-
-	# Must not be on the env branch (we need to copy files INTO it from
-	# the current branch's HEAD).
-	unless ($opts{dry_run}) {
-		bail(
-			"Cannot prepare #C{%s} while on that branch.  Switch to the control branch first.",
-			$branch
-		) if ($git->current_branch // '') eq $branch;
-	}
-
-	# propagation_files returns git-root-relative paths already
-	my %keep_set = map { $_ => 1 } @keep;
-
-	# Creating off HEAD because the branch is missing locally would fork it
-	# from the real one, so only a branch that is in neither this clone nor
-	# its tracking refs licenses a create.
-	#
-	# Nothing answers 'fetched' or 'unverifiable' any more.  The refresh is
-	# unconditional under D40 and it creates a local ref from the tracking
-	# one, so there is no longer a run that could not tell an absent branch
-	# from an unasked remote, and the refresh is what reports the creation.
-	#
-	# What the refresh guarantees is narrower than it reads here.  It fetches
-	# the deployment branches, which it names by slug through branch_for, and
-	# this sub and propagation_diff below it both address a branch by the
-	# environment's own name.  In a typed repository those are two different
-	# refs, so an absent record here says the environment's name has none and
-	# is not yet proof that the remote has never had the branch.  Both
-	# readers are carried for the steps that rewrite them, and M9 retires
-	# this sub with its last caller.
-	my $div = $git->resolve_branch($branch);
-	my $origin = defined($div) ? 'local' : 'absent';
-	my $branch_exists = $origin ne 'absent';
-
-	# A branch that doesn't exist yet starts from the current HEAD's tree.
-	my $tree_ref = $branch_exists ? $branch : 'HEAD';
-	my @tracked       = $git->ls_tree($tree_ref, $git->prefix);
-	my %tracked_set   = map { $_ => 1 } @tracked;
-
-	my @to_add = grep { !$tracked_set{$_} } @keep;
-
-	my @to_remove;
-	for my $file (@tracked) {
-		next if $file =~ m{^\Q@{[$git->prefix]}\E\.genesis/};
-		next if $keep_set{$file};
-		# Don't touch anything outside our prefix — other deployments in
-		# this repo may own files on this branch (multi-deploy repos),
-		# and users may keep hand-added artifacts (CI config, notes, etc.)
-		# that we don't know about.
-		next if $git->prefix && $file !~ m{^\Q@{[$git->prefix]}\E};
-		push @to_remove, $file;
-	}
-
-	# Nothing to do AND branch already exists: idempotent no-op.
-	return ([], [], $origin) if $branch_exists && !@to_add && !@to_remove;
-	return (\@to_add, \@to_remove, $origin) if $opts{dry_run};
-
-	# Source SHA for any add operations: whatever the current branch
-	# points at.  For a brand-new branch this is also the branch's HEAD.
-	my $source_sha = $git->sha('HEAD');
-
-	# The branch we are moving to may not carry the deployment subdirectory
-	# we are standing in, and the session handles that: switch runs from the
-	# repository root, and finish puts us back where begin found us, on a
-	# branch where that directory exists again.
-	my $session = $git->session(control => $self->top->control_branch);
-	$session->begin;
-
-	# Create the branch off the current commit if it didn't exist.
-	$git->create_branch($branch) unless $branch_exists;
-
-	$session->switch($branch);
-
-	# checkout_file creates any missing parent directories itself, so a
-	# brand-new deployment subdirectory (vault/, jumpbox/, etc.) on a
-	# branch that didn't have it before materializes naturally.
-	$git->checkout_file($source_sha, $_) for @to_add;
-	$git->rm(@to_remove) if @to_remove;
-
-	my $msg;
-	if (!$branch_exists) {
-		# First time we're committing on this branch.  Even with no
-		# add/remove (everything from HEAD already belonged), record an
-		# empty seed commit so the branch has a distinct propagation
-		# anchor.  Skip when there's literally nothing different from
-		# HEAD — the branch already starts there.
-		$msg = sprintf("Initialize %s branch (%d added, %d removed)",
-			$branch, scalar(@to_add), scalar(@to_remove));
-	} else {
-		$msg = sprintf("Reconcile %s branch (%d added, %d removed)",
-			$branch, scalar(@to_add), scalar(@to_remove));
-	}
-
-	if (@to_add || @to_remove) {
-		$git->commit($msg, @to_add);
-	}
-
-	$session->finish;
-
-	return (\@to_add, \@to_remove, $origin);
-}
-
-# }}}
 # propagation_diff - files differing between this env's branch and a control commit, filtered to what it depends on {{{
 sub propagation_diff {
 	my ($self, $target_sha) = @_;
@@ -5349,7 +5238,6 @@ sub _post_deploy {
 			$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
 			my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
 			my @cmd = ($bin, 'propagate', $self->name);
-			push @cmd, '-y' if $opts{'fix-checks'};
 
 			# Stdin from /dev/null: propagation must never stop a deploy
 			# to ask something, and the child inherits this terminal.
@@ -5361,21 +5249,11 @@ sub _post_deploy {
 				$? >> 8;
 			};
 
-			if ($rc == Genesis::Top->PROPAGATE_NO_BRANCH_EXIT) {
-				warning(
-					"Nothing was propagated: a downstream environment has no branch.\n".
-					"The deployment of #C{%s} succeeded and is complete.\n\n".
-					"Create the branch with #C{genesis pipeline-prepare}, or\n".
-					"re-deploy with #C{-F} to have Genesis create it during propagation.",
-					$self->name
-				);
-			} elsif ($rc != 0) {
-				warning(
-					"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
-					"run #C{genesis propagate %s} manually to retry.",
-					$rc, $self->name
-				);
-			}
+			warning(
+				"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
+				"run #C{genesis propagate %s} manually to retry.",
+				$rc, $self->name
+			) if $rc != 0;
 		}
 	}
 

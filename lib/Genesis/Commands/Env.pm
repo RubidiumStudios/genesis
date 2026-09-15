@@ -100,19 +100,17 @@ sub create {
 			);
 		}
 
-		# Asked here, beside the branch check, and not left to the session
-		# that prepare_branch opens at the end of this command.  By then the
-		# environment file has been written and committed onto control, and
-		# an operator with unrelated work in progress would meet the refusal
-		# halfway through something they cannot undo in one step.  The
-		# wording is the session's, because it is the same refusal arriving
-		# earlier.
+		# Asked here, beside the branch check, and before anything is
+		# written.  The command commits the environment file, and a commit
+		# takes everything the index already holds, so an operator with
+		# unrelated work in progress would otherwise find it swept into the
+		# environment's own commit and have to undo a commit to get it back.
 		unless ($git->is_clean) {
 			my $status = $git->status;
 			my @dirty = sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
 			bail(
 				"Working tree has uncommitted changes, and this command ".
-				"switches branches.\n\nCommit or stash them first:\n%s",
+				"commits.\n\nCommit or stash them first:\n%s",
 				join("", map {"  - $_\n"} @dirty)
 			);
 		}
@@ -250,17 +248,17 @@ sub create {
 			my $sha = $git->sha('HEAD', short => 1);
 			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
 
-			# Create the environment branch (if needed) and reconcile it
-			# with the files this env depends on.  prepare_branch handles
-			# both the fresh-create case (cut from current commit, prune
-			# unrelated files) and the existing-branch case (add files
-			# that this env adds without disturbing files owned by other
-			# deployments sharing the same branch).
-			my $branch_existed = $git->branch_exists($name);
-			my ($added, $removed) = $env->prepare_branch;
-			info "Environment branch #C{%s} %s (%d added, %d removed).",
-				$name, $branch_existed ? 'reconciled' : 'created',
-				scalar(@$added), scalar(@$removed);
+			# Branch creation belongs to genesis pipeline-apply and to
+			# nothing else, so this command writes the environment file on
+			# the branch the operator is standing on and touches no
+			# deployment branch.  The environment reaches its branch when a
+			# propagate run delivers this commit onto it.
+			info(
+				"#C{%s} reaches its deployment branch when the next ".
+				"#C{genesis propagate} run delivers this commit.  The branch ".
+				"itself is created by #C{genesis pipeline-apply}.",
+				$name
+			);
 
 			# For automated CI providers, the pipeline needs to be
 			# rebuilt to include a job for the new environment branch.
@@ -1041,8 +1039,8 @@ sub deploy {
 			) unless $pipeline_git->is_clean;
 			bail(
 				"Environment branch #C{%s} does not exist.\n".
-				"Create it with #C{genesis new %s} on the control branch.",
-				$branch_name, $branch_name
+				"Create it with #C{genesis pipeline-apply} on the control branch.",
+				$branch_name
 			) unless $pipeline_git->branch_exists($branch_name);
 			info "\nSwitching to environment branch #C{%s}...", $branch_name;
 			# One way, and deliberately so: the deploy runs from the

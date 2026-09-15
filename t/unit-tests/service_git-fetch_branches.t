@@ -206,9 +206,9 @@ subtest 'fetch_branches - caches fetched branches, not absent ones' => sub {
 	$git->fetch_branches([qw(qa lab)], 'origin');
 
 	is $git->{_branch_cache}{qa}, 1, 'fetched branch is known to exist';
-	# Absent on the remote does not mean absent locally: pipeline-prepare
-	# creates env branches before anything pushes them.  Poisoning the
-	# cache with 0 would make branch_exists lie about local state.
+	# Absent on the remote does not mean absent locally, because a person
+	# can cut a branch by hand and never push it.  Poisoning the cache
+	# with 0 would make branch_exists lie about local state.
 	ok !exists $git->{_branch_cache}{lab},
 		'branch absent on the remote leaves the local cache untouched';
 };
