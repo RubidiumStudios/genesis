@@ -1555,13 +1555,23 @@ sub propagation_files_at {
 	# stand until the process ends.
 	my $scratch = File::Temp->newdir();
 	my $root    = "$scratch";
-	for my $path (keys %tree) {
-		(my $rel = $path) =~ s{^\Q$prefix\E}{};
-		next unless $rel eq '.genesis/config'
-		         || $rel eq 'kit-overrides.yml'
-		         || $rel =~ m{^[^/]+\.yml$};
-		mkfile_or_fail("$root/$rel", $git->show_file($commit, $path));
-	}
+
+	# The deployment root is written out whole rather than a file at a time,
+	# because the kit's blueprint hook runs against this tree and reads the
+	# root it is pointed at, and because an archive carries the bytes and the
+	# modes git holds, which a file read through a pipe does not.  It costs
+	# one extraction for each commit a walk reads, and it is what makes every
+	# answer below the commit's own rather than the working tree's.
+	my $archive = File::Temp->new(SUFFIX => '.tar');
+	run({dir => $git->root,
+		onfailure => "Failed to read the deployment root at $commit"},
+		'git', 'archive', '--format=tar', '-o', "$archive", $commit,
+		($prefix eq '' ? () : $prefix));
+	my $depth = ($prefix =~ tr{/}{});
+	run({dir => $root,
+		onfailure => "Failed to write out the deployment root at $commit"},
+		'tar', '-x', '-f', "$archive",
+		($depth ? ('--strip-components', $depth) : ()));
 
 	# An environment whose own file the commit does not carry had no set at
 	# that commit, and bare refuses on a file that is not on disk, so the
@@ -1579,6 +1589,16 @@ sub propagation_files_at {
 	# around the read and this method leaves the process as it found it.
 	local %ENV = %ENV;
 	my $top = Genesis::Top->new($root, materialised_tree => 1);
+
+	# A blueprint hook asks its environment for a vault, and a tree opened as
+	# a reading surface has none of its own, so the caller's vault stands in
+	# for the length of the read.  It is the vault the fragments were always
+	# enumerated through, since propagation establishes one before it reads a
+	# set at all.
+	my $vault = eval {$self->top->vault};
+	$top->set_vault(vault => $vault, session_only => 1)
+		if ref($vault) eq 'Service::Vault::Remote';
+
 	my $env = Genesis::Env->bare($self->name, $top);
 
 	my %files;
@@ -1634,8 +1654,13 @@ sub propagation_files_at {
 		$tracked, $self->name, $root, \@held
 	);
 
-	# The blueprint's repository-side fragments, enumerated on control.
-	$files{$_} = 1 for $self->_blueprint_fragments($git);
+	# The blueprint's repository-side fragments, enumerated over the tree the
+	# commit holds and checked against its listing below.  They are read here
+	# rather than in the caller's own working tree because the writer reads
+	# its set while the session stands on the deployment branch, where the
+	# kit the blueprint belongs to is not, and a fragment missed there is a
+	# fragment the mirror takes off the branch.
+	$files{$_} = 1 for $env->_blueprint_fragments($git);
 
 	# Only what the tree at the commit actually holds travels, and a kind that
 	# is a directory travels whole.
