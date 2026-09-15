@@ -80,4 +80,19 @@ subtest 'non-marker lines are skipped' => sub {
 	));
 };
 
+subtest 'a bare subject line still answers' => sub {
+	# Every caller reads through log_subjects in its "%H %s" shape, so the
+	# commit's own sha stands in front of the subject and has to come off
+	# before the line-anchored reader sees the marker.  A caller that hands
+	# over the subject alone should not go silent for it, and the reader is
+	# anchored either way round, so the line is read as it arrived first and
+	# with its leading field removed second.
+	my @log = (
+		'[pipeline] control@a1b2c3d4e5f6 -> lmelt-vsphere-canwest-1-mgmt',
+	);
+	my $got = Genesis::Commands::Env::_format_pipeline_reason(\@log, $short, $subject_of);
+	is($got, 'Refactor bosh envs to hierarchical config',
+		'the marker is found on a line carrying no sha in front of it');
+};
+
 done_testing;
