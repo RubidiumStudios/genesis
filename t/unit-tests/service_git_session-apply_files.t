@@ -130,4 +130,81 @@ subtest 'a delivery mirrors the set at the delivered commit' => sub {
 		name => 'the delivered branch holds its source');
 };
 
+# Proves T112: a hand edit to a propagated file that the delivered commit did
+# not change is overwritten, the index check still passes, and the file is
+# reported as overwrote-hand-edit.
+subtest 'a hand edit is overwritten and named' => sub {
+	plan tests => 5;
+
+	# The same repository the mirror row runs against, because the file the
+	# hand edit lands on has to be one the product's own reader puts in the
+	# set, and the blueprint's fragment is the one ops file that is.
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	my $first = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the fragment the blueprint names',
+		push    => 1,
+	);
+	deliver($h, 'qa', copy => 'a', control => $first);
+
+	# The hand edit, on a file the next commit does not touch.  It is written
+	# in copy A, because that is the clone the session opens in and a hand
+	# edit copy B alone holds is not on the branch the writer stands on.
+	hand_commit($h, $h->slug('qa'), copy => 'a',
+		files   => {'bosh/ops/extra.yml' => "---\nextra: edited by hand\n"},
+		message => 'fix it on the branch, just this once',
+	);
+	refresh($h, 'a', $h->slug('qa'));
+
+	# The delivered commit moves one other file in the set, so the delivery
+	# has something of its own to write and the row can tell a path the
+	# commit changed from a path it did not.  It adds a third, which the
+	# branch has never held, so the row also says that an addition is not an
+	# overwrite however new its content is.
+	my $second = commit_on_control($h,
+		files   => {
+			'bosh/dev/manifest.yml'   => "---\nsimple: you know it differently\n",
+			'bosh/dev/extra-spec.yml' => "---\nspec: brand new\n",
+		},
+		message => 'edit the kit and add a file to it',
+		push    => 1,
+	);
+
+	my $in_root = in_root($h->a . '/bosh');
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	my $result = $session->apply_files($second,
+		env     => $env,
+		changed => ['bosh/dev/manifest.yml'],
+		message => Genesis::CI::Marker::build($second, 'qa'),
+	);
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
+
+	ok($result->{commit}, 'the delivery committed, so the check passed');
+
+	is_deeply([@{$result->{overwrote}}], ['bosh/ops/extra.yml'],
+		'the hand-edited file is reported as overwrote-hand-edit');
+
+	is($git->show_file($h->slug('qa'), 'bosh/ops/extra.yml'),
+		$git->show_file($second, 'bosh/ops/extra.yml'),
+		'the hand edit was overwritten from the source');
+
+	assert_snapshot_invariant($h, 'qa', copy => 'a',
+		name => 'the branch holds its source after the overwrite');
+};
+
 done_testing;

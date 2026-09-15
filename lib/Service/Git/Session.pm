@@ -444,6 +444,18 @@ sub apply_files {
 	my %differs = map { $_ => 1 } $git->diff_names('HEAD', $source_sha, @set);
 	my @to_write = grep { $differs{$_} } sort keys %in_set;
 
+	# D33 says an overwrite is never silent.  A path the mirror overwrote that
+	# differed from the source although the delivered commit did not change it
+	# is a hand edit the branch was carrying, so it is named per file.  A path
+	# the branch does not hold at all is not an edit, it is an addition.
+	#
+	# The report is worked out here, above the first write, because afterwards
+	# the branch holds the source and nothing on disk still says what it held
+	# before.
+	my %held    = map {$_ => 1} @on_branch;
+	my %changed = map {$_ => 1} @{$opts{changed} || []};
+	my @overwrote = grep {$held{$_} && !$changed{$_}} @to_write;
+
 	$git->rm(@stale) if @stale;
 	$git->checkout_file($source_sha, $_) for @to_write;
 
@@ -486,7 +498,7 @@ sub apply_files {
 		commit    => $git->sha('HEAD'),
 		delivered => [@to_write],
 		removed   => [@stale],
-		overwrote => [],
+		overwrote => [@overwrote],
 	};
 }
 

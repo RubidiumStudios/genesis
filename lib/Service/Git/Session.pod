@@ -31,7 +31,9 @@ tree blocks no session and no session deletes one.
 The session also owns the one writer. C<apply_files> delivers a control commit
 onto the branch the session stands on, as a mirror of the environment's
 propagation set rather than as an overlay on what the branch already held, so
-a path that has left the set leaves the branch with it.
+a path that has left the set leaves the branch with it. It reports every hand
+edit it overwrote along the way, because a mirror takes such an edit away and
+the run has to say so.
 
 Beside the four verbs the session answers for what it holds, and the commands
 that drive it read those answers rather than asking git themselves. C<git>
@@ -486,9 +488,13 @@ A delivery is a mirror and not an overlay, so the postcondition is that the
 branch's tree equals the set, and a path the set no longer holds is removed
 rather than left standing. The C<changed> and C<deleted> lists are the
 caller's own diff, meant to skip blobs that cannot have moved and to name
-files in the report, and they never decide what is delivered. Today they are
-accepted and not read at all, and the step that fills C<overwrote> is the one
-that gives them work.
+files in the report, and they never decide what is delivered.
+
+A path the mirror overwrites whose content differed from the source although
+the delivered commit did not change it is a hand edit the branch was
+carrying, and it comes back in C<overwrote> so the run can name it. An
+overwrite is never silent. A path the branch does not hold at all is an
+addition rather than an edit and is not reported.
 
 The set is a list of pathspecs rather than a list of files, since a dev kit's
 source is a directory and a fragment the blueprint names is in the set whether
@@ -547,15 +553,17 @@ body.
 
 =item C<changed>, C<deleted>
 
-The caller's diff, optional, and not read yet.
+The caller's diff, both optional. C<changed> is the paths the delivered
+commit itself moved, and it is what keeps those paths out of C<overwrote>,
+since an overwrite the delivery was asked for is not a hand edit. C<deleted>
+is accepted and not read yet.
 
 =back
 
 B<Returns:> A hashref with C<commit>, the commit made, C<delivered> and
-C<removed>, the paths written and taken away, and C<overwrote>, which is meant
-to name the paths whose content differed from the source although the
-delivered commit did not change them and which comes back empty until a later
-step computes it.
+C<removed>, the paths written and taken away, and C<overwrote>, the paths the
+branch held whose content differed from the source although the delivered
+commit did not change them.
 
 B<Errors:>
 
@@ -619,7 +627,12 @@ B<Examples:>
 
   my $result = $session->apply_files($sha, env => $env,
       message => Genesis::CI::Marker::build($sha, 'qa'));
-  # returns {commit => $new_sha, delivered => [...], removed => [...], overwrote => []}
+  # returns {commit => $new_sha, delivered => [...], removed => [...], overwrote => [...]}
+
+  my $result = $session->apply_files($sha, env => $env,
+      changed => ['bosh/dev/manifest.yml'], message => $message);
+  # a hand-edited ops file the delivery did not change comes back in overwrote,
+  # and the kit file the delivery did change does not
 
   $session->apply_files($sha, message => $message);
   # raises, because the writer is not told whose set it delivers
