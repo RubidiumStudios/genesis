@@ -310,32 +310,12 @@ sub validate {
 	my ($self, $schema) = @_;
 	$self->{schema} = $schema;
 
-	# A default belongs to the schema that filled it, so validating against
-	# a new schema starts from none.  Every default this schema declares is
-	# filled again below, and one only the previous schema declared would
-	# otherwise survive as a key nobody wrote and be reported here as
-	# unknown.  That is not hypothetical: part of the repository schema is
-	# built from the configuration's own values, so clearing the value the
-	# provider block is built from leaves that provider's filled defaults
-	# behind and refuses a removal nobody asked it to refuse.
-	#
-	# The value cache goes with them, because it is a removal like any
-	# other and every other remover here invalidates it.  A cached parent
-	# hash that still carries a default decides the question below: the
-	# fill is skipped when the parent already holds the sub-key, so a warm
-	# cache would leave a nested default dropped from the store and gone
-	# from the contents while the cache went on reporting it.
-	#
-	# The env store is left standing, and that is the exposure to be aware
-	# of rather than a decision to revisit here: a key an old schema's
-	# envvar filled would survive a rebuild and then be reported below as
-	# unknown.  Nothing in the repository schema or in any provider
-	# fragment declares an envvar today, so no key can reach that store
-	# through this path, and the reset stays as it is until one does.
-	$self->{default_values} = {};
-	$self->{cache} = {};
-	delete $self->{_contents};
-
+	# Defaults are filled below and nothing is cleared first, because no
+	# part of the schema is built out of the configuration's own values
+	# any more.  A block whose shape depends on one of its values declares
+	# that under D105 and is dispatched during the walk, so there is no
+	# rebuild that could leave a previous provider's filled default
+	# standing in the store.
 	my @errors = ();
 
 	# Ensure all required keys are present, and all defaults are set
@@ -462,12 +442,60 @@ sub _schema_for_key {
 	return undef unless $self->{schema};
 
 	my $spec = $self->{schema};
+	my @walked;
 	for my $part (split /\./, $key) {
+		# A custom_struct declares no sub-keys of its own, so the walk asks
+		# the module the block's own value selects what it declares, and
+		# goes on through that.  The read is of the discriminator as it
+		# stands now, which is the point: a caller that has just written a
+		# new type asks about a key against the shape that type selects.
+		$spec = $self->_custom_struct_subschema(join('.', @walked), $spec)
+			if ref($spec) eq 'HASH' && ($spec->{type} // '') eq 'custom_struct';
+		return undef unless ref($spec) eq 'HASH';
 		$spec = $spec->{schema} if exists $spec->{schema};
 		return undef unless ref($spec) eq 'HASH' && exists $spec->{$part};
 		$spec = $spec->{$part};
+		push @walked, $part;
 	}
 	return $spec;
+}
+
+# }}}
+# _custom_struct_subschema - the hash a custom_struct block resolves to {{{
+#
+# For the readers that ask what one key of the block is, which are the
+# type coercion of set(), the unknown-key check of an unset, and the
+# question of whether a value read off a file is structured.  None of
+# them is validation, so none of them may refuse: a block whose
+# discriminator names no module, or whose module will not load, answers
+# undef here and the key reads as one the schema does not declare, the
+# same answer the walk gave before the block had a module at all.
+#
+# The discriminator itself is declared back as the enum it is, over the
+# map's keys, so a reader that asks about it gets the same answer it got
+# when the block spelled its own type out.
+sub _custom_struct_subschema {
+	my ($self, $path, $spec) = @_;
+
+	my $field  = $spec->{discriminator} or return undef;
+	my $map    = $spec->{modules}       or return undef;
+	my $method = $spec->{schema_method} or return undef;
+
+	my $value = length($path) ? $self->get("$path.$field") : undef;
+	$value = $spec->{discriminator_default} unless defined $value;
+	my $entry = (defined $value && exists $map->{$value}) ? $map->{$value} : undef;
+	return undef unless $entry;
+
+	return undef unless eval {require $entry->{module}; 1};  ## no critic
+	my $declared = eval {$entry->{class}->$method} or return undef;
+
+	return {
+		type   => 'hash',
+		schema => {
+			%$declared,
+			$field => {type => 'enum', values => [sort keys %$map]},
+		},
+	};
 }
 
 # }}}
@@ -943,11 +971,29 @@ sub _validate_custom_struct {
 
 	my $method = $entry->{method} || $schema->{method} || 'validate_config';
 
+	# The module is somebody else's code, so a rule that dies is answered
+	# with an error the operator can act on rather than with a Carp trace
+	# out of the middle of a configuration load.  It is gathered as an
+	# error like every other, under D105, because the module's rules are
+	# the block's rules and not a phase of their own with a heading of
+	# their own.
+	my @errors = eval {$entry->{class}->$method($self, $key, $field)};
+	# Copied first, because the readers below run evals that clear it.
+	my $caught = $@;
+	if ($caught) {
+		# Genesis raises its own fatals already framed, and one of those
+		# says the module is broken rather than that the operator wrote
+		# the block wrongly.  It goes back up as it came, so a defect
+		# keeps the exit code and the stack a defect carries instead of
+		# being answered as a configuration the operator could fix.
+		die $caught if decolorize($caught) =~ m{^\s*\[FATAL\]};
+		return ("#R{$key}: ".without_backtrace(decolorize($caught)));
+	}
+
 	# A rule that answers with a bare undef or an empty string has said
 	# nothing, and printing one gives the operator a bullet with nothing
 	# after it to read, so nothing empty survives the hand back.
-	return grep {defined($_) && length($_)}
-		$entry->{class}->$method($self, $key, $field);
+	return grep {defined($_) && length($_)} @errors;
 }
 
 # }}}

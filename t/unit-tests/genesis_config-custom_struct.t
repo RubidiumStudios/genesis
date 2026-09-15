@@ -14,7 +14,7 @@ use helper;
 use Test::More;
 
 use Genesis;
-use Genesis::Term qw/csprintf/;
+use Genesis::Term qw/csprintf decolorize/;
 use_ok 'Genesis::Config';
 
 # _validate_key hands back the raw strings, colour markup and all, so
@@ -48,6 +48,21 @@ sub validate_config {
 }
 1;
 MUMBLE
+# A module whose rule falls over, which is a fault in somebody else's
+# code reached from the middle of a configuration load.
+put_file('t/tmp/lib/Probe/Boom.pm', <<'BOOM');
+package Probe::Boom;
+sub validate_config {die "the boom probe fell over\n"}
+1;
+BOOM
+# And one that raises a Genesis fatal, which says the module is broken
+# rather than that the operator wrote the block wrongly.
+put_file('t/tmp/lib/Probe/Broken.pm', <<'BROKEN');
+package Probe::Broken;
+use Genesis;
+sub validate_config {bug("the broken probe is broken")}
+1;
+BROKEN
 local @INC = ('t/tmp/lib', @INC);
 
 my $schema = {
@@ -57,6 +72,8 @@ my $schema = {
 		discriminator_default => 'quiet',
 		description           => 'A block whose shape its own kind decides',
 		modules => {
+			boom   => {module => 'Probe/Boom.pm',   class => 'Probe::Boom'},
+			broken => {module => 'Probe/Broken.pm', class => 'Probe::Broken'},
 			loud   => {module => 'Probe/Loud.pm',   class => 'Probe::Loud'},
 			mumble => {module => 'Probe/Mumble.pm', class => 'Probe::Mumble'},
 			quiet  => {module => 'Probe/Quiet.pm',  class => 'Probe::Quiet'},
@@ -89,7 +106,7 @@ subtest 'a value no module owns is refused by name' => sub {
 
 	my @errors = $cfg->_validate_key('block', $schema->{block});
 	like csprintf('%s', join("\n", @errors)),
-		qr/block\.kind: unknown value: nonesuch; expected one of loud, mumble, quiet/,
+		qr/block\.kind: unknown value: nonesuch; expected one of boom, broken, loud, mumble, quiet/,
 		'the map is the valid list, and it reads the way the enum read';
 	is scalar(@errors), 1,
 		'and nothing was handed to a module that does not exist';
@@ -153,6 +170,41 @@ subtest "nothing empty survives out of the module's answer" => sub {
 	is csprintf('%s', $errors[0] // ''),
 		'block: the one thing the mumble probe means to say',
 		'and what the module meant to say is what is left';
+};
+
+subtest 'a module that falls over is answered under its own block' => sub {
+	plan tests => 3;
+
+	my $cfg = Genesis::Config->new();
+	$cfg->set('block.kind', 'boom');
+
+	# The module is somebody else's code, so what it does when it goes
+	# wrong is the load's problem rather than the operator's: the rule is
+	# run inside an eval and what it said becomes one error like any
+	# other, under the block it was asked about.
+	my @errors = $cfg->_validate_key('block', $schema->{block});
+	is scalar(@errors), 1, 'a rule that dies answers with one error';
+	my $said = csprintf('%s', $errors[0] // '');
+	like $said, qr/^block: /, 'filed under the block it was asked about';
+	like $said, qr/the boom probe fell over/, 'carrying what the module said';
+};
+
+subtest "a defect in a module is not the operator's mistake" => sub {
+	plan tests => 2;
+
+	my $cfg = Genesis::Config->new();
+	$cfg->set('block.kind', 'broken');
+
+	# Genesis raises its own fatals already framed, and one of those says
+	# the module is broken.  Gathering it as an error about the block
+	# would tell whoever reads the refusal to go and fix a configuration
+	# that has nothing wrong with it.
+	my $raised = '';
+	eval {$cfg->_validate_key('block', $schema->{block}); 1} or $raised = $@;
+	like decolorize($raised), qr/the broken probe is broken/,
+		'the raise goes up rather than being gathered as an error';
+	like decolorize($raised), qr/bug in Genesis itself/,
+		'and it is still reported as the defect it is';
 };
 
 done_testing;

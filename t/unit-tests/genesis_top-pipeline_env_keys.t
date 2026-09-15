@@ -258,7 +258,7 @@ subtest 'a caught message is cut at the location that ends it' => sub {
 	is Genesis::without_backtrace(
 		"Can't locate Nope.pm in \@INC (\@INC entries checked: lib)"
 		." at lib/Genesis/Top.pm line 2128.\n"
-		."\tGenesis::Top::_provider_options_schema() called at x line 9\n"),
+		."\tGenesis::Config::_validate_custom_struct() called at x line 9\n"),
 		"Can't locate Nope.pm in \@INC (\@INC entries checked: lib)",
 		'the message stands without the line it was raised on';
 

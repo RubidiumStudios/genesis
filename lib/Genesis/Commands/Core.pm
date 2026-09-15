@@ -50,16 +50,18 @@ sub config {
 			"Cannot set and unset overlapping keys in one run: %s",
 			join(', ', map {"#Y{$_}"} @contested)
 		) if @contested;
-		# Written twice, around a rebuild of the schema.  Part of the schema
-		# is built from the configuration's own values -- the provider's
-		# keys are declared by whichever provider the type names -- so a run
-		# that writes that type makes the schema it was coerced against out
-		# of date at the moment it is written.  The first pass puts the new
-		# type on the configuration, the rebuild declares the keys it
-		# brings, and the second pass coerces every value against the schema
-		# that is now true.  Without the second pass a boolean typed as
-		# false is stored as the string "false", which Perl reads as true,
-		# and the run saves the operator's own opposite.
+		# The pairs are applied twice around the schema rebuild, and they stay
+		# that way under D105.  Writing pipeline.provider.type still changes
+		# which keys the block admits, and the block declares that dependency
+		# now rather than having a builder perform it, but a declared
+		# dependency is still a dependency: the second pass is what lets a
+		# pair written after the type meet the schema that type selects.
+		# The first pass puts the new type on the configuration, the rebuild
+		# declares the keys it brings, and the second pass coerces every
+		# value against the schema that is now true.  Without the second
+		# pass a boolean typed as false is stored as the string "false",
+		# which Perl reads as true, and the run saves the operator's own
+		# opposite.
 		_apply_pairs($config, \@pairs);
 		$config->schema($top->_current_config_schema) if $config->schema;
 		_apply_pairs($config, \@pairs);
@@ -455,7 +457,10 @@ sub _pairs_from_files {
 
 		my $spec = $config->schema ? $config->_schema_for_key($key) : undef;
 		my $type = ref($spec) eq 'HASH' ? ($spec->{type} // '') : '';
-		if ($type =~ /\b(?:hash|array|hasharray)\b/) {
+		# custom_struct is a block like the rest of them.  What decides its
+		# shape is declared rather than listed, but a file that fills it
+		# still holds a structure and not a line of text.
+		if ($type =~ /\b(?:hash|array|hasharray|custom_struct)\b/) {
 			my ($parsed, $rc, $err) = load_yaml($content);
 			bail(
 				"Could not read #C{%s} as YAML for #Y{%s}:\n%s",

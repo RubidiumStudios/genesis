@@ -43,12 +43,12 @@ subtest 'the two spellings cannot drift' => sub {
 	is_deeply [@known], [qw/concourse github-actions manual/],
 		'the registry holds the three types';
 
-	# The schema's enum is the registry's list, not a literal beside it.
+	# The map is the registry's list, not a literal beside it.
 	my $top    = load_with($h, enabled_pipeline());
 	my $schema = $top->_repo_config_schema;
-	is_deeply $schema->{pipeline}{schema}{provider}{schema}{type}{values},
+	is_deeply [sort keys %{$schema->{pipeline}{schema}{provider}{modules}}],
 		[@known],
-		'the enum is the registry list';
+		'the map is the registry list';
 
 	throws_ok {load_with($h, "pipeline:\n  enabled: true\n  provider:\n    type: gha")}
 		qr/pipeline\.provider\.type: unknown value/,
@@ -68,20 +68,21 @@ subtest 'the two spellings cannot drift' => sub {
 
 	# Two lists that agree today agree by construction only if one is built
 	# out of the other, so the row puts a type into the registry and reads
-	# the enum the next load builds.  The registry is process-wide and
+	# the map the next load builds.  The registry is process-wide and
 	# nothing takes an entry out of it again, so every row below this one
 	# reads the registry for what it expects rather than naming the three
 	# types the process started with.
 	Genesis::CI::Compiler::PipelineProvider->register_provider('zeppelin',
-		{cli_class => 'Genesis::CI::Provider::Manual'});
+		{cli_class => 'Genesis::CI::Provider::Manual',
+		 cli_file  => 'Genesis/CI/Provider/Manual.pm'});
 
-	my $after = load_with($h, enabled_pipeline())->_repo_config_schema
-		->{pipeline}{schema}{provider}{schema}{type}{values};
+	my $after = [sort keys %{load_with($h, enabled_pipeline())
+		->_repo_config_schema->{pipeline}{schema}{provider}{modules}}];
 	ok scalar(grep {$_ eq 'zeppelin'} @$after),
-		'a type registered here is in the enum the next load built';
+		'a type registered here is in the map the next load built';
 	is_deeply $after,
 		[Genesis::CI::Compiler::PipelineProvider->known_providers],
-		'and the enum is still the whole registry and nothing else';
+		'and the map is still the whole registry and nothing else';
 };
 
 subtest 'one resolver answers for every caller' => sub {
