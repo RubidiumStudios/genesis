@@ -497,7 +497,7 @@ subtest 'a call with no message is refused' => sub {
 		push    => 1,
 	);
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h);
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
@@ -562,7 +562,7 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 		push    => 1,
 	);
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h);
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');

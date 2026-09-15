@@ -26,7 +26,6 @@ use Harness::Propagation;
 
 use Test::More;
 
-use Cwd ();
 use Genesis;
 use Genesis::CI::Marker;
 use Genesis::CI::RunFailure;
@@ -336,7 +335,7 @@ subtest 'the loss reports nothing it cannot show' => sub {
 		push    => 1,
 	);
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h);
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
