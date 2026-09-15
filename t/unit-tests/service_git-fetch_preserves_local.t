@@ -54,9 +54,12 @@ subtest 'a fetch does not discard unpushed local commits' => sub {
 	my $git = Service::Git->new($work);
 
 	# Commit to env-local without pushing, then return to main, which is
-	# where an operator would be standing.  The refresh no longer cares
-	# either way: a checked-out branch is a local branch and takes the
-	# tracking refspec like every other one.
+	# where an operator would be standing.  The checkout back is incidental
+	# now rather than load-bearing, because the refresh no longer drops the
+	# branch it is standing on, and this row still proves only the one way.
+	# The other way is the third subtest of
+	# t/integration-tests/service_git-refresh_scope.t, which refreshes the
+	# checked-out branch and reads both of its refs afterwards.
 	run({ dir => $work }, 'git', 'checkout', '-q', 'env-local');
 	put_file("$work/propagated.yml", "---\nfrom: propagation\n");
 	run({ dir => $work }, 'git', 'add', '-A');
