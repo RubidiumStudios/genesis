@@ -15,7 +15,6 @@ use lib 't';
 use helper;
 use Harness::Propagation;
 
-use File::Find;
 use Test::More;
 
 use Genesis;
@@ -99,43 +98,53 @@ subtest 'a branch with no marker records no control commit' => sub {
 	stand_on($h, $h->control);
 };
 
+# An assertion helper, beside the test that uses it.  The pattern takes the
+# brackets bare or escaped, because a site that renders the marker writes it
+# out as it will read on the commit while a site that matches it escapes the
+# brackets for the regex engine, and the escaped form is the one that matters
+# here: three of the four spellers this step retired were written that way,
+# and a guard blind to that shape is blind to the likeliest next one.
+#
+# A comment that quotes the format is not a second speller.  Nothing reads
+# it, nothing renders from it, and a prose sentence naming the string it is
+# about is how a block beside the code explains itself.  What the row is
+# after is a site that composes or matches the marker for real, so every
+# comment comes out of the line before the match runs.
+sub marker_spellers_in {
+	my (@files) = @_;
+	my $top = $ENV{GENESIS_TOPDIR};
+
+	my @found;
+	for my $file (@files) {
+		my $short = $file;
+		$short =~ s{^\Q$top\E/}{} if defined $top;
+		next if $short eq 'lib/Genesis/CI/Marker.pm';
+
+		open my $fh, '<', $file or die "cannot read $file: $!\n";
+		my $n = 0;
+		while (my $line = <$fh>) {
+			$n++;
+			push @found, "$short:$n"
+				if strip_comment($line) =~ /\[?pipeline\\?\]\s*control\\?\@/;
+		}
+		close $fh;
+	}
+	return sort @found;
+}
+
 subtest 'the builder is the only site that spells the marker' => sub {
-	plan tests => 2;
+	plan tests => 1;
 
-	# A comment that quotes the format is not a second speller.  Nothing
-	# reads it, nothing renders from it, and a prose sentence naming the
-	# string it is about is how the block beside the code explains itself.
-	# What the row is after is a site that composes or matches the marker
-	# for real, so the comment lines go before the match runs.
-	#
-	# The walk is anchored on the checkout root rather than on the working
-	# directory, because a row above this one stands a copy on a branch and
-	# the harness may leave the process somewhere else entirely.  no_chdir
-	# keeps the full name openable, which is what find otherwise takes away
-	# by stepping into each directory as it walks.
-	my $top = $helper::TOPDIR;
-	my (@read, @offenders);
-	my $look = sub {
-		my ($path) = @_;
-		my $name = $path;
-		$name =~ s{\A\Q$top\E/}{};
-		return if $name eq 'lib/Genesis/CI/Marker.pm';
-		push @read, $name;
-		my $text = join('', grep {!/^\s*#/} split /^/, (slurp($path) // ''));
-		push @offenders, $name if $text =~ /\[pipeline\]\s*control\\?\@/;
-	};
-
-	find({no_chdir => 1, wanted => sub {
-		$look->($File::Find::name) if -f $File::Find::name && /\.pm$/;
-	}}, "$top/lib");
-	$look->("$top/bin/genesis");
-
-	# Without this the row passes on a walk that read nothing at all, which
-	# is the shape a sweep fails in rather than the shape it fails out of.
-	cmp_ok(scalar @read, '>', 100,
-		'the walk read the modules under lib/ and the genesis script');
-	is_deeply(\@offenders, [],
-		'no file under lib/ or bin/ spells the marker outside the builder');
+	# sweep_files is the suite's one tree reader.  It is anchored on the
+	# checkout root rather than on the working directory, which matters
+	# because the rows above this one stand a copy on a branch, it covers
+	# every module and script under lib/ and every executable under bin/
+	# rather than the two shapes a hand-rolled walk remembers, and it dies
+	# on an empty walk, so the row cannot pass on having read nothing.
+	my @found = marker_spellers_in(sweep_files());
+	is_deeply(\@found, [],
+		'no file under lib/ or bin/ spells the marker outside the builder')
+		or diag(join("\n", map {"  $_"} @found));
 };
 
 done_testing;

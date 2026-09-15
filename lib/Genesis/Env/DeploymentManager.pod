@@ -460,8 +460,11 @@ includes C<parameters> and a C<manifest.sha2> computed with SHA-256.
 On a repository that has a pipeline, the record also carries a C<git> block,
 which is built by C<_git_context()> and holds the branch, the commit the
 deploy stood on, and the control commit that branch's newest marker names.
-The whole read is wrapped in an C<eval> and nothing is recorded when it
-fails, because the git context supplements the record rather than making it.
+The branch and the commit are stored before the marker is read, so a marker
+read that fails costs the control commit alone and leaves the rest of the
+block standing. The whole read is wrapped in an C<eval> as well, and nothing
+at all is recorded when the repository cannot be opened, because the git
+context supplements the record rather than making it.
 
 The C<bosh_target> key is placed at the top level of the base content
 (C<$base-E<gt>{bosh_target}>), consistent with how it is read from Vault and
@@ -512,7 +515,9 @@ read.
 
 C<control_commit> is absent on a branch carrying no marker at all.  Such a
 branch has been delivered nothing, and recording the control branch's tip in
-its place would turn a label into a claim.
+its place would turn a label into a claim.  It is absent too when the marker
+walk itself fails, because that read is guarded on its own so that the
+branch and the commit still come back.
 
 B<Parameters:>
 

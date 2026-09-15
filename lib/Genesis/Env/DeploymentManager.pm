@@ -433,7 +433,12 @@ sub _git_context {
 		commit => $git->sha('HEAD'),
 	};
 
-	my $control = Genesis::CI::Marker::newest($git, $branch);
+	# The pair is built before the marker is read and the read is guarded on
+	# its own, so a walk that dies costs the control commit alone and leaves
+	# the record still naming the branch and the commit that ran.  Without
+	# the guard the whole block goes, where the baseline had already stored
+	# both of them by the time it went looking for a marker.
+	my $control = eval {Genesis::CI::Marker::newest($git, $branch)};
 	$context->{control_commit} = $control if defined $control;
 
 	return $context;
