@@ -38,7 +38,7 @@ sub embed {
 }
 
 # }}}
-# apply - compile and deploy pipeline (replaces genesis repipe) {{{
+# apply - give the pipeline its shape on every provider (replaces repipe) {{{
 sub apply {
 	my ($layout) = @_;
 
@@ -64,15 +64,44 @@ sub apply {
 
 	my $git = Service::Git->new('.');
 
-	# D44 gives the propagate run a preview that writes nothing at all, and a
-	# preview worth reading follows the same rule everywhere.  The flag is
-	# read once here and handed to every stage below, so no stage has to
+	# D44 gives the propagate run a preview that writes nothing of its own,
+	# and a preview worth reading follows the same rule everywhere.  The flag
+	# is read once here and handed to every stage below, so no stage has to
 	# reach into the options for itself and none of them can disagree about
 	# what a dry run is.
+	#
+	# What a dry run withholds is the repository, the remote, and the vault,
+	# which are the three stores an operator cannot simply throw away again.
+	# --output-dir and --debug-dir write into a directory the operator named
+	# for the purpose, so a run that is given either of them still fills it.
+	#
+	# The banner names whichever of the two the run actually carries, and
+	# says nothing about either where neither was given, because an exception
+	# to a rule is worth reading only where it applies.  The POD describes the
+	# pairing in full, which is where a reader goes to learn what the flags do
+	# together rather than what this run is about to do.
+	#
+	# The manual provider is the one case where neither flag fills anything.
+	# Both directories are written from the compiled result, and the manual
+	# run exits below with the branch work behind it and the compile never
+	# reached, so a manual repository that names a directory gets an empty
+	# one.  Naming the exception there would promise a fill that cannot
+	# happen, which is the same defect in the other direction.
 	my $dry_run = $opts->{'dry-run'} ? 1 : 0;
+	my @scratch = $platform eq 'manual'
+		? ()
+		: grep {$opts->{$_}} qw/output-dir debug-dir/;
 
 	info("\n#G{Applying the pipeline} for #C{%s}\n", $top->type);
-	info("#Yi{This is a dry run.  Nothing below is written.}\n") if $dry_run;
+	info(
+		"#Yi{This is a dry run.  Nothing below is written to the repository, ".
+		"the remote, or the vault%s.}\n",
+		@scratch == 1 ? sprintf(', and --%s still fills its own directory',
+			$scratch[0])
+		: @scratch     ? ', and --output-dir and --debug-dir still fill their '.
+			'own directories'
+		: ''
+	) if $dry_run;
 
 	# The apply records the commit it applied from, and Service::Git resolves
 	# a ref through git rev-parse, which folds its own error text into the
@@ -2028,10 +2057,19 @@ C<repipe>, C<graph>, C<describe>, C<embed>, and C<ci-*> commands.
 
 =item B<pipeline-apply> [--dry-run] [--paused]
 
-Compile and deploy the pipeline.  The provider is the C<type> the
-repository declares under C<pipeline.provider> in C<.genesis/config>,
-and no flag overrides it.  Supports C<--dry-run> (print YAML only) and
-C<--output-dir> (write artifacts).
+Give the pipeline its shape.  It creates each missing deployment branch
+and publishes it, asks the repository to protect control and every
+deployment branch, records what it applied and what each environment
+depends on, and then sets the pipeline on the provider the repository
+chose.  Under the C<manual> provider it does all of that except set a
+pipeline.  The provider is the C<type> the repository declares under
+C<pipeline.provider> in C<.genesis/config>, and no flag overrides it.
+C<--dry-run> reports every one of those steps and writes nothing to the
+repository, the remote, or the vault, and C<--output-dir> writes the
+compiled artifacts to a directory whether or not it is a dry run.  Under
+the C<manual> provider the run exits before the compile, so neither
+C<--output-dir> nor C<--debug-dir> has anything to write and each leaves
+its directory empty.
 
 =item B<pipeline-graph>
 

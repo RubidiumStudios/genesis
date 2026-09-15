@@ -99,8 +99,8 @@ environment's pipeline record, and sets the pipeline where the provider has
 one. Under the C<manual> provider it does all of that except set a pipeline,
 because deploys happen at the operator's terminal and there is no hosted
 pipeline to set. With C<--dry-run> it reports every one of those steps and
-writes nothing at all, neither a branch, nor a protection setting, nor a
-record.
+writes nothing to the repository, the remote, or the vault, neither a branch,
+nor a protection setting, nor a record.
 
 C<genesis repipe> is the deprecated name for the same command, and it
 warns and then delegates here.
@@ -197,25 +197,39 @@ to the pipeline's own name, when not specified.
 
 =item C<--dry-run>
 
-Report the whole run and write nothing at all.  Every stage says what it
-would do and then stands aside, so the run names each branch it would create
-or publish, each branch it would protect and the settings it would send,
-the applied record it would write, and each environment's record with the
-dependencies it counted.  No branch is cut, no ruleset is sent, and no
-record is written.  Under an automated provider the compiled pipeline is
-printed as well, which is the Concourse pipeline YAML or each GitHub Actions
-workflow file under its own name.
+Report the whole run and write nothing to the repository, the remote, or the
+vault.  Every stage says what it would do and then stands aside, so the run
+names each branch it would create or publish, each branch it would protect
+and the settings it would send, the applied record it would write, and each
+environment's record with the dependencies it counted.  No branch is cut, no
+ruleset is sent, and no record is written.  The clone's remote-tracking refs
+are still refreshed before any of that, because the preview reports what the
+remote carries and a stale answer would name the wrong branches.  Under an
+automated provider the compiled pipeline is printed as well, which is the
+Concourse pipeline YAML or each GitHub Actions workflow file under its own
+name.  C<--output-dir> and C<--debug-dir> are the one exception, and a run
+given either of them fills that directory as it always would, since the
+directory is one the operator named for the purpose rather than a store the
+apply owns.
 
 =item C<--output-dir>
 
 Write the compiled artifacts and C<ast.json> to this directory and exit
-without setting anything.  Every stage before the compile still writes, so
-this run creates and publishes any deployment branch the remote lacks,
-applies the protection, and records what it applied before it writes a file.
+without setting anything.  Given on its own, every stage before the compile
+writes as it always does, so the run creates and publishes any deployment
+branch the remote lacks, applies the protection, and records what it applied
+before it writes a file.  Given together with C<--dry-run>, the preview wins
+for the repository, the remote, and the vault, and this directory is written
+even so.  Under the C<manual> provider nothing is written here at all,
+whichever other flag it is given with, because the run exits before the
+compile and there is no compiled artifact to write.
 
 =item C<--debug-dir>
 
-Dump the compiler's intermediates to this directory, and carry on.
+Dump the compiler's intermediates to this directory, and carry on.  The
+directory is filled under C<--dry-run> as well, for the same reason
+C<--output-dir> is, and it is left empty under the C<manual> provider for
+the same reason C<--output-dir> is.
 
 =item C<--yes>
 
@@ -234,9 +248,10 @@ this flag leaves it unwritten and the run says so.
 =back
 
 B<Returns:> Nothing.  Exits 0 on success, and exits 0 early under
-C<--dry-run> and C<--output-dir> alike.  An C<--output-dir> run has the
-branch, protection, and record stages behind it rather than skipped, and a
-dry run has reported all three and written none of them.  Exits 0 under the
+C<--dry-run> and C<--output-dir> alike.  An C<--output-dir> run given on its
+own has the branch, protection, and record stages behind it rather than
+skipped, and a dry run has reported all three and written none of them,
+whether or not a directory flag was given with it.  Exits 0 under the
 C<manual> provider, once those stages have run and the skipped stage has
 been named.  Exits 86 when the provider's prerequisites are not met.
 

@@ -1771,13 +1771,18 @@ define_command("repipe", {
 			"Keep the pipeline paused after repiping.",
 
 		'dry-run|n' =>
-			"Generate the pipeline configuration, but refrain from deploying ".
-			"it.  Use --output-dir to save the compiled artifacts to disk.",
+			"Report every step and write nothing to the repository, the ".
+			"remote, or the vault.  The run names each branch it would create ".
+			"or publish, each branch it would protect and with what, and each ".
+			"record it would write, and it prints the compiled pipeline where ".
+			"the provider has one.  No branch is cut, no protection is sent, ".
+			"and no record is written.",
 
 		'output-dir|o=s' =>
 			"Write compiled pipeline artifacts to this directory.\n".
-			"Independent of --dry-run: artifacts are saved whether or not the ".
-			"pipeline is deployed.",
+			"On its own, the branch, protection, and record work still runs.  ".
+			"Given with --dry-run, that work is only reported, and this ".
+			"directory is written even so.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling pipelines.  Useful for ".
@@ -2055,15 +2060,21 @@ define_command("pipeline-apply", {
 			"Leave the pipeline paused after applying.",
 
 		'dry-run|n' =>
-			"Report every step and write nothing at all.  The run names each ".
-			"branch it would create or publish, each branch it would protect ".
-			"and with what, and each record it would write, and it prints the ".
-			"compiled pipeline where the provider has one.  No branch is cut, ".
-			"no protection is sent, and no record is written.",
+			"Report every step and write nothing to the repository, the ".
+			"remote, or the vault.  The run names each branch it would create ".
+			"or publish, each branch it would protect and with what, and each ".
+			"record it would write, and it prints the compiled pipeline where ".
+			"the provider has one.  No branch is cut, no protection is sent, ".
+			"and no record is written.  --output-dir and --debug-dir still ".
+			"fill their own directories, except under the manual provider, ".
+			"where the run exits before the compile and neither has anything ".
+			"to write.",
 
 		'output-dir|o=s' =>
 			"Write compiled artifacts to this directory instead of deploying.  ".
-			"The branch, protection, and record stages still run.",
+			"On its own, the branch, protection, and record work still runs.  ".
+			"Given with --dry-run, that work is only reported, and this ".
+			"directory is written even so.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.  Useful for dry runs ".
