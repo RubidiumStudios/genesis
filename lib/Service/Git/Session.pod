@@ -532,6 +532,10 @@ run rather than the environment. The writer records each branch it commits to on
 which is what lets C<abort> reset every one of them back to its remote-tracking
 ref and leave control alone.
 
+A dry run is the one preview, and it returns once it has worked the delivery
+out and before it writes anything, so neither assertion is reached and the
+branch is left where the preview found it.
+
 The session must be open and standing on the branch being written, because the
 writer switches nothing itself.
 
@@ -563,12 +567,22 @@ delivered commit itself moved, spelled as C<@set> spells them, and it keeps thos
 since an overwrite the delivery was asked for is not a hand edit. C<deleted>
 is accepted and not read yet.
 
+=item C<dry_run>
+
+When true the writer computes the delivery and writes nothing. No file is
+written or removed, no commit is made, and the two index assertions never
+run, because there is no index to check. The return carries the same
+C<delivered>, C<removed>, and C<overwrote> lists with C<commit> undef, so a
+preview reports what would land without touching the branch.
+
 =back
 
 B<Returns:> A hashref with C<commit>, the commit made, C<delivered> and
 C<removed>, the paths written and taken away, and C<overwrote>, the paths the
 branch held whose content differed from the source although the delivered
-commit did not change them.
+commit did not change them. Under C<dry_run> the same three lists come back,
+C<commit> is undef, and the hashref carries C<dry_run> as well, so a caller
+can tell a preview from a delivery.
 
 B<Errors:>
 
@@ -638,6 +652,11 @@ B<Examples:>
       changed => ['bosh/dev/manifest.yml'], message => $message);
   # a hand-edited ops file the delivery did not change comes back in overwrote,
   # and the kit file the delivery did change does not
+
+  my $preview = $session->apply_files($sha, env => $env,
+      dry_run => 1, message => $message);
+  # returns {commit => undef, dry_run => 1, delivered => [...], ...}
+  # and the branch is where it was
 
   $session->apply_files($sha, message => $message);
   # raises, because the writer is not told whose set it delivers
