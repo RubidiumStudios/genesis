@@ -19,19 +19,6 @@ use Service::Git;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
-# _unfolded - what a refusal said, put back on one line
-#
-# A refusal is wrapped to the terminal's width on its way out, so a phrase
-# this file matches word for word can arrive with a newline and an indent
-# somewhere in the middle of it.  The rows below read what the operator was
-# told rather than where the wrap landed, so the text is collapsed before
-# anything is matched against it.
-sub _unfolded {
-	my $said = join("\n", map {$_ // ''} @_);
-	$said =~ s/\s+/ /g;
-	return $said;
-}
-
 subtest 'a second apply leaves the previous tip an ancestor' => sub {
 	# Six rows, and one restoration assertion for each of the two runs.
 	plan tests => 8;
@@ -91,7 +78,7 @@ subtest 'Genesis refuses to push a tip that would rewrite the branch' => sub {
 		$git->push_append_only('qa/bosh');
 		1;
 	} or $err = $@;
-	my $said = _unfolded($err);
+	my $said = unfolded($err);
 
 	like($said, qr/rewrite history/, 'the push is refused as a history rewrite');
 	like($said, qr/qa\/bosh/, 'the refusal names the branch');

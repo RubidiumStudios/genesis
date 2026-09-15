@@ -28,7 +28,7 @@ our @EXPORT = qw/
 	in_set covered_paths in_root
 	branches_on_r fresh_clone clone_copy subjects_of commits_on heads_in
 	reachable_on_r
-	newest_record trailers_of
+	newest_record trailers_of unfolded
 
 	commit_on_control commit_from_b publish_from_b push_from refresh
 	init_branch deliver propagation_set harness_marker
@@ -620,6 +620,23 @@ sub trailers_of {
 		$trailers{$1} = $2 if $line =~ /^(\S[^:]*):\s*(.*)$/;
 	}
 	return \%trailers;
+}
+
+# }}}
+# unfolded - what a run said, put back on one line {{{
+#
+# A run folds what it says to the terminal's width on its way out, so a phrase
+# a row is looking for can arrive with a newline and an indent somewhere in the
+# middle of it.  A row reads what the operator was told rather than where the
+# fold landed, so the streams it is handed are joined and their whitespace is
+# collapsed before anything is matched against them.  They are joined on a
+# newline, so that no phrase can match across the seam where one stream ends
+# and the next begins, and an undefined stream counts as an empty one, so a
+# row that captured only stderr passes what it has.
+sub unfolded {
+	my $said = join("\n", map {$_ // ''} @_);
+	$said =~ s/\s+/ /g;
+	return $said;
 }
 
 # }}}

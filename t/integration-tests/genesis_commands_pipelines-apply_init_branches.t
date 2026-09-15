@@ -20,20 +20,6 @@ use Genesis::Commands::Pipelines;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
-# _unfolded - what the run said, put back on one line
-#
-# A run folds what it says to the terminal's width on the way out, so a
-# phrase can arrive with a newline and an indent in the middle of it.  The
-# rows below read what the operator was told rather than where the fold
-# landed, so the two streams are joined and their whitespace is collapsed
-# before anything is matched.  The streams are joined on a newline so that no
-# phrase can match across the seam where one ends and the other begins.
-sub _unfolded {
-	my $said = join("\n", map {$_ // ''} @_);
-	$said =~ s/\s+/ /g;
-	return $said;
-}
-
 subtest 'an environment with no branch gets an orphan init branch' => sub {
 	# Seven rows, and one more for the run's own restoration assertion, which
 	# run_genesis makes unless a row turns it off.  The creation is plumbing,
@@ -83,7 +69,7 @@ subtest 'a branch the clone alone holds is published' => sub {
 
 	is(remote_sha($h, 'qa/bosh'), $local,
 		'R now holds the branch at the tip the clone already had');
-	like(_unfolded($out, $err), qr{published qa/bosh},
+	like(unfolded($out, $err), qr{published qa/bosh},
 		'and the run reports it as published rather than created');
 };
 
@@ -119,7 +105,7 @@ subtest 'a clone without the configured remote is refused before anything is cut
 	drop_remotes($h);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, Genesis::Exit::CONFIG,
 		'the refusal exits Genesis::Exit::CONFIG, because a missing remote is configuration');

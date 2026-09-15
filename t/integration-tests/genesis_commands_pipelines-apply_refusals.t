@@ -19,21 +19,6 @@ use Genesis::Exit;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
-# _unfolded - what the run said, put back on one line
-#
-# A refusal is folded to the terminal's width on its way out, so a phrase
-# the design fixes word for word arrives with a newline and an indent
-# somewhere in the middle of it.  Every row below reads what the operator
-# was told rather than where the fold landed, so each run's two streams
-# are joined and their whitespace collapsed before anything is matched.
-# The streams are joined on a newline so that no phrase can match across
-# the seam where one ends and the other begins.
-sub _unfolded {
-	my $said = join("\n", map {$_ // ''} @_);
-	$said =~ s/\s+/ /g;
-	return $said;
-}
-
 subtest 'a disabled pipeline is refused' => sub {
 	# Six rows, and one more for the run's own restoration assertion, which
 	# run_genesis makes unless a row turns it off.  A refusal that leaves the
@@ -43,7 +28,7 @@ subtest 'a disabled pipeline is refused' => sub {
 
 	my $h = make_harness(envs => ['qa'], pipeline => 0);
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, Genesis::Exit::CONFIG, 'the refusal exits Genesis::Exit::CONFIG');
 	like($said, qr/pipeline\.enabled/,
@@ -63,7 +48,7 @@ subtest 'an absent pipeline block is refused the same way' => sub {
 
 	my $h = make_harness(envs => ['qa'], pipeline => 'none');
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, Genesis::Exit::CONFIG, 'the refusal exits Genesis::Exit::CONFIG');
 	like($said, qr/pipeline\.enabled/,

@@ -19,19 +19,6 @@ use Genesis::Exit;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
-# _unfolded - what the run said, put back on one line
-#
-# A warning is folded to the terminal's width on its way out, so a phrase a
-# row is looking for arrives with a newline and an indent somewhere in the
-# middle of it.  The two streams are joined on a newline, so that no phrase
-# can match across the seam where one ends and the other begins, and their
-# whitespace is collapsed before anything is matched.
-sub _unfolded {
-	my $said = join("\n", map {$_ // ''} @_);
-	$said =~ s/\s+/ /g;
-	return $said;
-}
-
 subtest 'the applied record lands at the address D103 fixes' => sub {
 	# Six rows, and one more for the run's own restoration assertion, which
 	# run_genesis makes unless a row turns it off.
@@ -44,7 +31,7 @@ subtest 'the applied record lands at the address D103 fixes' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
 	is($exit, 0, 'the apply exits 0');
 
-	like(_unfolded($out, $err),
+	like(unfolded($out, $err),
 		qr{recorded the applied pipeline at \S*_pipelines/bosh},
 		'the stage says it recorded the pipeline, and names the address');
 
@@ -80,7 +67,7 @@ subtest 'a run told to skip the vault skips the record' => sub {
 
 	my $h = make_harness(envs => ['qa']);
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '--skip-vault');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, 0, 'the apply exits 0 rather than refusing the run');
 	# The warning names the record in words rather than by its vault address,
@@ -110,7 +97,7 @@ subtest 'an apply whose clone has no control branch is refused' => sub {
 		'git', 'branch', '-q', '-D', $h->control);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, Genesis::Exit::CONFIG,
 		'the refusal exits Genesis::Exit::CONFIG');
