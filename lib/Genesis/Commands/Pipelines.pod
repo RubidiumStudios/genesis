@@ -6,17 +6,17 @@ Genesis::Commands::Pipelines - Command handlers for Genesis CI/CD pipeline manag
 
   # Registered in bin/genesis via define_command:
   genesis embed
-  genesis repipe [layout] [--config ci.yml] [--target <fly-target>] [--dry-run] [--yes] [--paused]
+  genesis pipeline-apply [layout] [--target <fly-target>] [--dry-run] [--yes] [--paused]
   genesis graph  [layout] [--config ci.yml]
   genesis describe [layout] [--config ci.yml]
 
 =head1 DESCRIPTION
 
 Provides operator-facing command handlers for Genesis CI/CD pipeline
-management.  C<embed>, C<repipe>, C<graph>, and C<describe> are run by a
-Genesis operator to embed the Genesis binary, configure a Concourse
-pipeline, visualize the pipeline dependency graph, or display a
-human-readable pipeline description.
+management.  C<embed>, C<apply>, C<graph>, and C<describe> are run by a
+Genesis operator to embed the Genesis binary, give the pipeline its shape
+on the configured provider, visualize the pipeline dependency graph, or
+display a human-readable pipeline description.
 
 The legacy Concourse-facing pipeline task handlers
 (C<ci_pipeline_deploy>, C<ci_show_changes>, C<ci_generate_cache>, and
@@ -83,16 +83,28 @@ B<Examples:>
   # Embed the currently running genesis binary into the deployment repo
   genesis embed
 
-=head2 repipe([$layout])
+=head2 apply([$layout])
 
-    genesis repipe
-    genesis repipe sandbox
-    genesis repipe --config ci.yml --target my-concourse --dry-run
+    genesis pipeline-apply
+    genesis pipeline-apply sandbox
+    genesis pipeline-apply --target my-concourse --dry-run
 
-Generates and uploads a Concourse pipeline configuration from the genesis
-CI config file.  Parses the pipeline definition, generates Concourse YAML,
-then pauses, sets, unpauses, and exposes or hides the pipeline via the
-C<fly> CLI.
+Gives the pipeline its shape on the provider the repository configured.
+
+It refuses before it reads anything else when C<pipeline.enabled> is false
+or absent, because the command applies a configured pipeline and never
+enables one.  That refusal reads C<.genesis/config> alone, so a repository
+with no pipeline is turned away before a vault is asked for.
+
+Where a pipeline is enabled, the provider comes from
+C<pipeline.provider.type> and an absent type reads as the C<manual>
+provider, which has no pipeline to set and is refused in its own words.
+An automated provider is compiled from the C<pipeline:> section of
+C<.genesis/config>, or from the legacy C<ci.yml> where the repository
+still carries one, and the compiled result is then set on the provider.
+Concourse has its pipeline uploaded through the C<fly> CLI.  GitHub Actions
+has its workflows written under C<.github/workflows/> for the operator to
+commit.
 
 B<Parameters:>
 
@@ -100,8 +112,9 @@ B<Parameters:>
 
 =item C<$layout> (optional)
 
-The pipeline layout to use.  Defaults to the layout inferred from the CI
-config file when omitted.
+The pipeline layout to use.  It names the Concourse target where
+C<--target> does not, and the pipeline's own name stands in where neither
+of them is given.
 
 =back
 
@@ -111,58 +124,79 @@ B<Options (via C<get_options>):>
 
 =item C<--config> (default: C<ci.yml>)
 
-Path to the CI config file to parse.
+Path to the legacy CI config file, read only where the repository has no
+C<pipeline:> section to compile from.
 
 =item C<--target>
 
-The Concourse C<fly> target to use.  Defaults to the layout name when not
-specified.
+The Concourse C<fly> target to use.  Defaults to the layout name, and then
+to the pipeline's own name, when not specified.
 
 =item C<--dry-run>
 
-Print the generated Concourse YAML to standard output and exit without
-uploading.
+Print what would be set and exit without setting it.  Concourse prints the
+pipeline YAML, and GitHub Actions prints each workflow file under its own
+name.
+
+=item C<--output-dir>
+
+Write the compiled artifacts and C<ast.json> to this directory and exit
+without setting anything.
+
+=item C<--debug-dir>
+
+Dump the compiler's intermediates to this directory, and carry on.
 
 =item C<--yes>
 
-Pass the C<-n> flag to C<fly set-pipeline> to skip interactive confirmation.
+Skip the interactive confirmation the provider would otherwise ask for.
 
 =item C<--paused>
 
-Leave the pipeline paused after uploading instead of unpausing it.
+Leave the pipeline paused after applying it instead of unpausing it.
+
+=item C<--skip-vault>
+
+Build the repository handle without a vault connection, for compiling
+where no vault is running.
 
 =back
 
-B<Returns:> Nothing.  Exits 0 on success.  When C<--dry-run> is specified,
-prints the Concourse YAML to standard output and exits 0 without uploading.
+B<Returns:> Nothing.  Exits 0 on success, and exits 0 early under
+C<--dry-run> and C<--output-dir> alike.  Exits 86 when the provider's
+prerequisites are not met.
 
 B<Errors:>
 
-Calls C<bail()> with C<"No vault specified or configured."> if no Vault is
-configured.
+Calls C<bail()> with C<Genesis::Exit/CONFIG> when C<pipeline.enabled> is
+false or absent, naming the key and saying that nothing was written.
 
-Calls C<bail()> with C<"Could not pause %s pipeline: %s"> (where the first
-C<%s> is the pipeline name and the second is the command output) if
-C<fly pause-pipeline> fails with an error other than
-C<pipeline '...' not found>.
+Calls C<bail()> with C<Genesis::Exit/CONFIG> under the C<manual> provider,
+which has no pipeline to apply, and names the automated providers that do.
 
-Calls C<bail()> via C<onfailure> if C<fly set-pipeline>,
-C<fly unpause-pipeline>, C<fly expose-pipeline>, or C<fly hide-pipeline>
-fails.
+Calls C<bail()> with C<"No vault specified or configured."> when no vault
+is configured and C<--skip-vault> was not given.
+
+Calls C<bail()> when the compiled pipeline has no name, and when the
+provider is one this command cannot set.
 
 B<Examples:>
 
-  # Upload pipeline using defaults
-  genesis repipe
+  # Apply the pipeline the repository configures
+  genesis pipeline-apply
   # Returns: exits 0 on success
 
-  # Preview the generated pipeline YAML without uploading
-  genesis repipe --dry-run
-  # Prints: Concourse YAML to standard output
+  # Preview what would be set, without setting it
+  genesis pipeline-apply --dry-run
+  # Prints: the compiled pipeline to standard output
 
-  # Upload with a specific Concourse target
-  genesis repipe --target prod-concourse
+  # Apply to a named Concourse target
+  genesis pipeline-apply --target prod-concourse
   # Returns: exits 0 on success
+
+  # A repository that has not enabled a pipeline
+  genesis pipeline-apply
+  # Exits: Genesis::Exit::CONFIG, having written nothing
 
 =head2 graph([$layout])
 
@@ -295,6 +329,47 @@ B<Examples:>
 Every key the block resolves is printed, so the report is five rows and
 not two, and both column widths come from those rows.  A repository that
 overrides one of them widens the tier column to hold C<explicit>.
+
+=head2 _refuse_disabled_pipeline
+
+  _refuse_disabled_pipeline();
+
+Refuses when the repository declares no enabled pipeline, naming
+C<pipeline.enabled>, telling the operator to set it on control and commit
+it, and exiting C<Genesis::Exit/CONFIG>.  A false key and an absent block
+are the same refusal, because the command applies a configured pipeline and
+never enables one.
+
+It reads C<.genesis/config> through C<Genesis::Config> and builds no
+C<Genesis::Top>.  That is deliberate, and it is what puts the refusal ahead
+of the vault.  Building a repository handle opens a vault connection, and a
+repository with no pipeline has no reason to hold a vault it would then be
+asked for.  The key is read the way L<Genesis::Top/pipeline_enabled> reads
+it, so the two cannot answer differently.
+
+B<Parameters:> None.  The repository is the current directory, which is
+where the command's own repository handle is built from.
+
+B<Returns:> 1, where the pipeline is enabled.  It does not return
+otherwise.
+
+B<Errors:>
+
+Calls C<bail()> with C<Genesis::Exit/CONFIG> when C<pipeline.enabled> is
+false or absent.
+
+B<Examples:>
+
+  _refuse_disabled_pipeline();
+  # returns 1 where .genesis/config carries pipeline.enabled: true
+
+  _refuse_disabled_pipeline();
+  # [FATAL] Refusing to apply.  pipeline.enabled is false or absent in
+  #         .genesis/config, and pipeline-apply applies a configured
+  #         pipeline and never enables one.
+  #
+  #         Set pipeline.enabled: true on control, commit it, then run
+  #         genesis pipeline-apply again.  Nothing was written.
 
 =head2 _resolve_propagation_base
 
