@@ -553,8 +553,8 @@ body.
 
 =item C<changed>, C<deleted>
 
-The caller's diff, both optional. C<changed> is the paths the delivered
-commit itself moved, and it is what keeps those paths out of C<overwrote>,
+The caller's diff, both optional. C<changed> is the git-root-relative paths the
+delivered commit itself moved, spelled as C<@set> spells them, and it keeps those paths out of C<overwrote>,
 since an overwrite the delivery was asked for is not a hand edit. C<deleted>
 is accepted and not read yet.
 
