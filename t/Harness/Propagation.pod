@@ -798,6 +798,13 @@ fixture binary on its path, C<restore>, default 1, which a row turns off where
 it asserts the restoration in its own words, and C<terminal>, default 1, which
 is accepted and does nothing today.
 
+C<GITHUB_AUTH_TOKEN> is named on every run, and it is handed as undef where
+the run should carry none, which C<Genesis::run> honours by deleting the
+variable from the child's environment rather than setting it empty.  A run
+with no double standing therefore carries no token at all, so a token
+exported in the operator's own shell cannot reach a command under test and
+send it at the real API.
+
 The fixture binaries the harness writes reach the child through the path this
 run builds and through nothing else, so no helper puts a fixture on the
 parent's own C<PATH> and a run that asks for none sees none.
@@ -934,6 +941,13 @@ for you under C<< github => 1 >>.
 A pull request created through the double lands in that state file, so a
 listing taken after the create sees what was made, and a request for one
 pull request's reviews answers its reviews rather than the collection.
+
+The double answers the repository rulesets endpoints as well, which are a
+listing, a create, and a replace.  It refuses all three with a 403 where
+C<admin> is false, which is the same refusal it gives the branch protection
+endpoint, and it lands a create or a replace in that state file, so a second
+call sees what the first one sent and a re-run replaces the ruleset of that
+name rather than adding another beside it.
 
 =head2 gh_pull_request($gh, %opts)
 
