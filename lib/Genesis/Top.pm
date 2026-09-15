@@ -111,11 +111,21 @@ sub new {
 	bail("'$root' is not a Genesis deployment repository")
 		unless $class->is_repo($root);
 
+	# A tree written out of a commit is a reading surface rather than a
+	# repository, so it carries no vault of its own and it cannot answer the
+	# repository questions the configuration checks ask, such as whether an
+	# enabled pipeline sits in a git checkout with a remote behind it.  The
+	# caller that materialised it has already had those answers from the
+	# repository it is running in, so both are skipped together here rather
+	# than each being worked around at the call site.
+	$opts{no_vault} = 1 if $opts{materialised_tree};
+
 	# Build the base object
 	my $self = $class->_build($root, %opts);
+	$self->{__config_validated} = 1 if $opts{materialised_tree};
 
 	# Initialize vault connection and set environment variables
-	$self->_set_vault_env(%opts);
+	$self->_set_vault_env(%opts) unless $opts{materialised_tree};
 
 	return $self;
 }

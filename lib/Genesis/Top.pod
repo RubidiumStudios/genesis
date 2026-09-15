@@ -124,6 +124,18 @@ the change.
 B<(optional)> When true, disables vault connectivity entirely for this
 object. Intended for test contexts.
 
+=item C<materialised_tree>
+
+B<(optional)> When true, says the repository is a tree written out of a
+commit rather than a working checkout. Such a tree carries no vault of its
+own and cannot answer the repository questions the configuration checks ask,
+such as whether an enabled pipeline sits in a git checkout with a remote
+behind it, so vault attachment and configuration validation are both skipped
+and C<$ENV{GENESIS_TARGET_VAULT}> and C<$ENV{SAFE_TARGET}> are left alone.
+The caller that materialised the tree has already had those answers from the
+repository it is running in.  L<Genesis::Env/propagation_files_at> is the
+reader this exists for.
+
 =back
 
 B<Returns:> A new C<Genesis::Top> object.

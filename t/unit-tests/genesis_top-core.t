@@ -1021,6 +1021,40 @@ subtest '_validate_config returns truthy' => sub {
 	is($result, 1, "_validate_config explicitly returns 1");
 };
 
+subtest 'a Top over a materialised tree reads what it cannot validate' => sub {
+	my $tmp = workdir('materialised-tree');
+	system("mkdir -p $tmp/.genesis");
+	mkfile_or_fail("$tmp/.genesis/config", <<EOF);
+---
+version: 2
+creator_version: 3.2.0
+deployment_type: test
+pipeline:
+  enabled: true
+  provider:
+    type: manual
+  source_control:
+    control_branch: control
+    pr_prefix: 'pr/'
+    repository: team/test
+EOF
+
+	# A tree written out of a commit is not a git checkout, and an enabled
+	# pipeline is refused outside one, so the ordinary reader dies on the
+	# first configuration read rather than on construction.
+	my $plain = Genesis::Top->new($tmp, no_vault => 1);
+	ok(!defined(eval {$plain->type}),
+		"a plain Top refuses the configuration when it is read");
+
+	my $top = Genesis::Top->new($tmp, materialised_tree => 1);
+	is($top->type, 'test',
+		"a Top over a materialised tree answers from the same file");
+	ok($top->_validate_config,
+		"and the validation it skipped still answers truthy");
+	ok(!$top->has_vault,
+		"and it attaches no vault of its own");
+};
+
 subtest 'set_kit_provider sets updater_version for GenesisCommunity' => sub {
 	local $Genesis::VERSION = '3.2.0';
 	my $tmp = workdir('kit-provider-updater-version');
