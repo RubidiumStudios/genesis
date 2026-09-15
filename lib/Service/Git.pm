@@ -708,8 +708,8 @@ sub ls_files {
 # diff_cached_quiet - does the index match a ref's tree over these paths {{{
 #
 # D82's first assertion, spelled the way the design spells it.  True when the
-# index and the ref agree, which is git's own quiet exit status: nought where
-# they agree and one where they differ.
+# index and the ref agree, which is git's own quiet exit status, where nought
+# means they agree and one means they differ.
 #
 # Anything above one is a git that could not take the comparison at all, and
 # it is raised rather than answered, the way diff_names raises.  A source the

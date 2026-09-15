@@ -191,7 +191,8 @@ Every environment in scope, in the order the run walks them.
 =item C<$failed>
 
 The environment the run was walking when it failed, or undef where the run
-failed before it reached one.
+failed before it reached one, in which case every environment records that it
+was not attempted.
 
 =back
 
@@ -203,6 +204,9 @@ B<Examples:>
   # returns {dev  => 'not published, run aborted',
   #          qa   => 'not published, run aborted',
   #          prod => 'not attempted'}
+
+  Genesis::CI::RunFailure::abort_outcomes(['dev', 'qa'], undef);
+  # returns {dev => 'not attempted', qa => 'not attempted'}
 
 =head1 AUTHOR
 

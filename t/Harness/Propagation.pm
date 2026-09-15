@@ -1219,16 +1219,27 @@ sub propagation_set {
 		my $ancestor = join('-', @tokens[0 .. $i]);
 		push @kinds, qr{^\Q$prefix$ancestor\E\.yml$};
 	}
-	# The reactions, the ops files, and the kit source are one kind, and the
-	# environment file's own tracked list narrows that kind wherever the file
-	# at $at declares one, so a delivery made under a wider list leaves behind
-	# paths the next delivery has to remove.  Where the file declares no list
-	# at all the kind stands unnarrowed, which is every environment the suite
-	# writes without saying otherwise.
+	# The kit source under dev/ and the reaction scripts under bin/ are kinds
+	# of their own, and they stand whatever the environment file's tracked
+	# list says.  Genesis::Env builds its kinds independently of one another
+	# and adds the tracked paths on top of them, so a reader that took the kit
+	# away wherever a list was declared would read a correctly mirrored branch
+	# as one that had lost its whole kit.
+	push @kinds, qr{^\Q$prefix\E(?:bin|dev)/};
+
+	# The ops files are the one kind the tracked list stands in for here,
+	# because the harness runs no blueprint hook and the list is the only
+	# statement the repository makes about which of them the merge consumes.
+	# Where the file at $at declares a list, those paths are the ops files
+	# that are in, and a delivery made under a wider list therefore leaves
+	# behind paths the next delivery has to remove.  Where it declares none
+	# the kind stands whole, which is every environment the suite writes
+	# without saying otherwise.  The list is read from the tree at $at and
+	# never from the working tree.
 	my $tracked = $self->_tracked_files($at, "$prefix$env.yml");
 	push @kinds, defined $tracked
 		? (map {qr{^\Q$prefix$_\E$}} @$tracked)
-		: qr{^\Q$prefix\E(?:bin|ops|dev)/};
+		: qr{^\Q$prefix\Eops/};
 	# track_additional_files joins the set git-root-relative, in one form, so
 	# the walk and the writer name a tracked path the same way.
 	push @kinds, map {qr{^\Q$_\E$}}

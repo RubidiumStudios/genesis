@@ -339,16 +339,24 @@ deployment branch reads every C<genesis.pipeline.*> key through the merged
 hierarchy and finds a key set above the leaf absent wherever the file holding
 it stayed behind.
 
-The reactions under C<bin/>, the ops files, and the kit source under C<dev/>
-are one kind, and the environment file at C<at> narrows that kind wherever it
-declares C<genesis.pipeline.track_additional_files>, which is the key the
-product itself reads, so a path under those directories
-is in the set only while the file at that commit names it.  Where the file
-declares no list the kind stands unnarrowed and matches everything under the
-three directories, which is every environment the suite writes without saying
-otherwise.  The list is read from the tree at C<at> and never from the working
-tree, because a delivery made under a wider list leaves behind paths the next
-delivery has to remove.
+The kit source under C<dev/> and the reaction scripts under C<bin/> are kinds
+of their own and they stand whatever the environment file says, because
+C<propagation_files> builds its kinds independently of one another and adds
+the tracked paths on top of them.  A reader that took the kit away wherever a
+list was declared would read a correctly mirrored branch as one that had lost
+its whole kit.
+
+The ops files are the one kind the tracked list stands in for here, because
+the harness runs no blueprint hook and the list is the only statement the
+repository makes about which of them the merge consumes.  Where the
+environment file at C<at> declares
+C<genesis.pipeline.track_additional_files>, which is the key the product
+itself reads, those paths are the ops files that are in, and a path under
+C<ops/> that the file does not name is out.  Where the file declares no list
+the kind stands whole and matches everything under C<ops/>, which is every
+environment the suite writes without saying otherwise.  The list is read from
+the tree at C<at> and never from the working tree, because a delivery made
+under a wider list leaves behind paths the next delivery has to remove.
 
 =head2 harness_marker($h, $ref, %opts)
 

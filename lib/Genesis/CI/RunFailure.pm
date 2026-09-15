@@ -1,6 +1,6 @@
 package Genesis::CI::RunFailure;
 # The two classes of failure that end a propagate run, under D82.  They differ
-# in whether a retry can help: a run-fatal failure is the writer's own, which
+# in whether a retry can help.  A run-fatal failure is the writer's own, which
 # nothing the caller could do differently would have fixed, and an unsurvivable
 # failure is an error no environment survives that a retry may fix, the remote
 # being unreachable as the case.  Both abort the run the same way, so both
@@ -94,14 +94,19 @@ sub report_line {
 # }}}
 # abort_outcomes - what every environment records when a run ends early {{{
 #
-# Both classes abort the same way, so the words are the same for both: an
+# Both classes abort the same way, so the words are the same for both.  An
 # environment the run had already walked records that nothing of its was
 # published, and one it never reached records that it was not attempted.
 # Nothing is left out of the report, which is I8.
+#
+# A run that names no environment is one that died before it reached any, so
+# every environment records that it was not attempted.  Walking the list as
+# though the run had reached them all would tell an operator that a run which
+# never started had published nothing for each of them in turn.
 sub abort_outcomes {
 	my ($envs, $failed) = @_;
 	my %outcomes;
-	my $reached = 1;
+	my $reached = defined $failed ? 1 : 0;
 	for my $env (@$envs) {
 		$outcomes{$env} = $reached ? 'not published, run aborted' : 'not attempted';
 		$reached = 0 if defined $failed && $env eq $failed;

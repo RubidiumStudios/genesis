@@ -1,9 +1,9 @@
 #!/usr/bin/env perl
 # The three index reads D82's two assertions are written on.  Each row proves
-# that the answer comes from the index rather than from the working tree,
-# which is the whole reason the writer checks its postcondition before it
-# commits: at that moment the index is the delivery and the working tree is
-# only what the checkouts happened to leave behind.
+# that the answer comes from the index rather than from the working tree.
+# That is why the writer checks its postcondition before it commits, because
+# at that moment the index is the delivery and the working tree is only what
+# the checkouts happened to leave behind.
 use strict;
 use warnings;
 use utf8;

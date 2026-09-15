@@ -4,13 +4,16 @@
 # makes no commit when the branch keeps a path the set does not hold, while
 # the mirror removes a leftover init and a path that left the set.
 #
-# Each row composes its own scene out of harness primitives rather than
-# through stale_set_delivery, for two reasons.  That helper narrows
-# genesis.pipeline.track_additional_files to empty, and the harness's own
-# reader of the set treats a declared list as narrowing the kit and ops kinds
-# away, so with a kit loaded the two readers disagree about a branch the
-# writer delivered correctly.  It also delivers with nothing kept, and the
-# init file the mirror has to remove is gone by the time it returns.
+# The first three rows compose their scenes out of harness primitives rather
+# than through stale_set_delivery, because that helper delivers with nothing
+# kept and the init file the mirror has to remove is gone by the time it
+# returns.  The fourth row does use it, because the path it needs removed is
+# one the tracked list dropped rather than the init file.
+#
+# The last row is the outcome words the run records when it ends on either of
+# these refusals.  It sits here because this file is where the failure class
+# is first raised, and the walk that reads those words end to end is a later
+# task's row in a file of its own.
 use strict;
 use warnings;
 use utf8;
@@ -41,6 +44,11 @@ $ENV{NOCOLOR} = 1;
 # enough, since a failure inside the session skips it and the next row would
 # then start from the harness workdir.  The guard is handed back rather than
 # kept here, so it lets go at the end of the caller's scope.
+#
+# This pair is a verbatim copy of the one in
+# t/unit-tests/service_git_session-apply_files.t, and the lift of both into
+# the harness is landing from another worktree.  Whichever of the two commits
+# second drops its copy and calls the harness's.
 sub in_root {
 	my ($dir) = @_;
 	return ChdirGuard->enter($dir);
@@ -80,7 +88,7 @@ sub exception {
 }
 
 subtest 'the index check refuses a staged file that left its source' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	# The kit's blueprint names one repository-side fragment, so ops/extra.yml
 	# is in the set for as long as control holds it, and the embedded genesis
@@ -154,10 +162,15 @@ subtest 'the index check refuses a staged file that left its source' => sub {
 	# else fails the assertions below rather than dying on a method call.
 	my $failure = failure_of($err);
 	is($failure && $failure->kind, 'run-fatal', 'it is the run-fatal class');
+
+	# The one exit D82 leaves unnamed, asserted by value because there is no
+	# constant to assert by name.
+	is($failure && $failure->exit_code, 1, 'and it exits a bare 1');
+
 	is(ref_in($h->a, $h->slug('qa')), $before, 'no commit was made');
 	like($failure ? $failure->report_line : '',
-		qr{qa/bosh.*bosh/dev/manifest\.yml},
-		'the failure names the branch and the difference');
+		qr{staged propagation set does not match its source.*qa/bosh.*bosh/dev/manifest\.yml},
+		'the failure names the first assertion, the branch, and the difference');
 
 	exception(sub {$session->abort('the row has read what it came for')});
 	assert_w_restored($w, 'the session restores the working state');
@@ -210,8 +223,11 @@ subtest 'the mirror removes what the set no longer holds' => sub {
 	);
 
 	# Read before the finish, because finish puts control's index back and
-	# the index this row is asking about is the one the writer left.
-	my @left = grep {!m{^bosh/}} $git->ls_files;
+	# the index this row is asking about is the one the writer left.  The set
+	# is the harness's own read of it and not the product's, so the row is
+	# not asserting the writer's reader against itself.
+	my %in_set = map {$_ => 1} propagation_set($h, 'qa', at => $source);
+	my @left = grep {!$in_set{$_}} $git->ls_files;
 	is_deeply([@left], [], 'git ls-files minus the set comes back empty');
 
 	$session->finish;
@@ -284,11 +300,80 @@ subtest 'the second assertion fires when the removal is stopped' => sub {
 
 	my $failure = failure_of($err);
 	is(ref_in($h->a, $h->slug('qa')), $before, 'no commit was made');
-	like($failure ? $failure->report_line : '', qr{:\s*init$},
-		'the failure names the path the index still holds');
+	# The message is read as well as the path, so the row says which of the
+	# two refusals it means rather than leaving them to be told apart by the
+	# paths they happen to name.
+	like($failure ? $failure->report_line : '',
+		qr{index holds paths outside the propagation set.*:\s*init$},
+		'the failure names the second assertion and the path the index holds');
 
 	exception(sub {$session->abort('the row has read what it came for')});
 	assert_w_restored($w, 'the session restores the working state');
+};
+
+subtest 'a path that dropped out of the tracked list is removed' => sub {
+	plan tests => 4;
+
+	# The tracked path is named outside ops/, bin/, and dev/, so the only
+	# thing putting it in the set at the wider commit is the tracked list
+	# itself and nothing puts it back once the list lets go of it.
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	my $source = stale_set_delivery($h, copy => 'a', file => 'extras/stale.yml');
+
+	my $in_root = in_root($h->a . '/bosh');
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	my $result = $session->apply_files($source,
+		env     => $env,
+		message => Genesis::CI::Marker::build($source, 'qa'),
+	);
+
+	my %in_set = map {$_ => 1} propagation_set($h, 'qa', at => $source);
+	my @left = grep {!$in_set{$_}} $git->ls_files;
+	is_deeply([@left], [], 'git ls-files minus the set comes back empty');
+
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
+
+	# Control still holds the file, and the writer takes it off the branch
+	# anyway, because membership and not the file's existence is what the
+	# mirror decides by.
+	is_deeply($result->{removed}, ['bosh/extras/stale.yml'],
+		'the path the tracked list let go of is gone from the branch');
+
+	assert_snapshot_invariant($h, 'qa', copy => 'a',
+		name => 'the branch holds its source');
+};
+
+subtest 'an aborted run records one word for every environment' => sub {
+	plan tests => 3;
+
+	my $walked = Genesis::CI::RunFailure::abort_outcomes(
+		['dev', 'qa', 'prod'], 'qa');
+	is_deeply($walked, {
+		dev  => 'not published, run aborted',
+		qa   => 'not published, run aborted',
+		prod => 'not attempted',
+	}, 'the environments already walked are told nothing of theirs was published');
+
+	# A run that names no environment died before it reached one, so there is
+	# nothing for any of them to have published.
+	my $none = Genesis::CI::RunFailure::abort_outcomes(['dev', 'qa'], undef);
+	is_deeply($none, {dev => 'not attempted', qa => 'not attempted'},
+		'and a run that reached none of them says so for every one');
+
+	is_deeply(Genesis::CI::RunFailure::abort_outcomes([], 'qa'), {},
+		'an empty list of environments answers with an empty report');
 };
 
 done_testing;
