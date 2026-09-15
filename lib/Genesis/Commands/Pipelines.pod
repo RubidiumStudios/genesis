@@ -126,8 +126,8 @@ The same stage then walks the pipeline in order and works out each
 environment's dependency set, which is the declared list and the exodus
 paths of that environment's own manifest taken together. Each set is written
 beside that environment's exodus record, and an environment that would not
-render or would not load is warned about, marked incomplete, and left behind
-rather than stopping the run.
+render or would not load is warned about, wired from its declared list
+alone, marked incomplete, and left behind rather than stopping the run.
 
 Under C<--skip-vault> there is no vault to write it to, so the run warns,
 names the record it left unwritten and the flag that stopped it, and carries
@@ -469,11 +469,16 @@ walk itself reads, so the report comes out top down.
 
 An environment that will not load is answered the way one that will not
 render is. It is warned about by name with the reason, its record is written
-with an empty set and its discovery marked incomplete, and the pass carries
-on to the next environment. The record is still written, through a bare
-environment that resolves the address on the merged hierarchy with no kit,
-because an environment carrying no record at all reads as one the apply
-never reached.
+with the declared set alone and its discovery marked incomplete, and the
+pass carries on to the next environment. A load failure costs the manifest
+and nothing else, so the declared half is still read, and only the
+discovered half goes missing.
+
+Both that read and the record write go through a bare environment, which
+resolves the whole of C<genesis.pipeline> and the record's own address on
+the merged hierarchy with no kit. The record has to be written either way,
+because an environment carrying none at all reads as one the apply never
+reached.
 
 It runs under every provider, including the manual one, since the record says
 what was applied rather than what was hosted. It runs on a dry run and on an

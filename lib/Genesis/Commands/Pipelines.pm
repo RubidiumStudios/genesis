@@ -1521,15 +1521,22 @@ sub _apply_records {
 		} else {
 			# An environment that will not load is the same case as one
 			# that will not render, which D77 answers with a warning and an
-			# incomplete mark rather than a refusal.  The record is still
-			# written, through a bare environment that resolves the address
-			# on the merged hierarchy with no kit, because an environment
-			# with no record at all reads as one the apply never reached.
+			# incomplete mark rather than a refusal.  A failure here costs
+			# the manifest and nothing else, so the declared half is still
+			# read, and only the discovered half goes missing.
+			#
+			# Both the declared read and the record write go through a bare
+			# environment, which resolves the whole of genesis.pipeline and
+			# the record's own address on the merged hierarchy with no kit.
+			# The record has to be written either way, because an
+			# environment carrying none at all reads as one the apply never
+			# reached.
 			my $err = $@;
-			$env = Genesis::Env->bare($name, $top);
+			$env  = Genesis::Env->bare($name, $top);
+			$deps = [$env->_declared_dependencies];
 			warning(
-				"Could not load #C{%s}, so nothing was discovered for it: ".
-				"%s\n".
+				"Could not load #C{%s}, so only its declared dependencies ".
+				"are wired: %s\n".
 				"Re-run #C{genesis pipeline-apply} once it loads.",
 				$name, _summarize_load_error($err)
 			);

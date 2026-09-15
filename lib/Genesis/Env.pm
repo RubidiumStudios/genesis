@@ -3392,7 +3392,6 @@ sub dependency_set {
 
 	my $own = $self->deployment_slug;
 	my %set = map {$_ => 1} $self->_declared_dependencies;
-	delete $set{$own};
 
 	# The render is the one thing here that can fail, so it is the only
 	# thing the eval covers, and the failure is reported rather than raised.
@@ -3524,13 +3523,29 @@ sub _decode_path_list {
 # environment's name and a pair is taken as it was written.  A key holding
 # a single scalar is read as a list of one, because a list of one is what
 # an operator who wrote a scalar meant.
+#
+# The list comes back sorted, with duplicates dropped and the deployment's
+# own path removed, so it is the finished declared set rather than a
+# fragment its one caller has to tidy.  That matters because the whole
+# read goes through lookup and reaches no kit, so an environment that will
+# not load can still be asked for it, and pipeline-apply asks exactly that
+# of an environment whose kit it could not resolve.
 sub _declared_dependencies {
 	my ($self) = @_;
 
 	my $declared = $self->lookup('genesis.pipeline.track_dependencies', []);
 	$declared = [$declared] unless ref($declared) eq 'ARRAY';
 
-	return map {m{/} ? $_ : sprintf('%s/%s', $self->name, $_)} @$declared;
+	my %set;
+	for my $entry (@$declared) {
+		my $slug = $entry =~ m{/}
+			? $entry
+			: sprintf('%s/%s', $self->name, $entry);
+		$set{$slug} = 1;
+	}
+	delete $set{$self->deployment_slug};
+
+	return sort keys %set;
 }
 
 # }}}
