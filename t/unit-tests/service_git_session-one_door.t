@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # Proves T76: the session's verbs are the only branch changers left, so
 # track_branch and restore_branch have no callers, DESTROY restores nothing,
-# and checkout and reset_working_tree are reached through the session alone.
+# and checkout is reached through the session alone.
 use strict;
 use warnings;
 use utf8;
