@@ -413,7 +413,7 @@ sub propagate {
 	# The stage's events are not printed here.  The whole list is printed
 	# once, where the deployment branches are settled, and a line printed
 	# twice is worse than a line printed late.
-	Genesis::CI::Preflight::require_control($top, $git,
+	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
 		refreshed => $refreshed, command => 'propagate');
 
 	bail(
@@ -438,6 +438,22 @@ sub propagate {
 	my %children  = %{$topo->{children}};
 	my %parent_of = %{$topo->{parent_of}};
 	my @dag_order = @{$topo->{order}};
+
+	# The rest of D96's first stage, now that the topology is known.  Every
+	# refusal below is collected before anything is written, so a run that
+	# stops here has left nothing partial behind.  It classifies the whole
+	# DAG rather than the cascade's scope, because the initial state is a
+	# property of the repository and not of the run, and it stands ahead of
+	# the creation guard further down, which makes a deployment branch the
+	# remote has never had and never publishes it, and so builds the very
+	# shape the first of the two refusals below exists to refuse.
+	my $initial = Genesis::CI::Preflight::initial_state($top, $git,
+		envs      => \@dag_order,
+		refreshed => $refreshed,
+		control   => $control_state,
+		command   => 'propagate',
+		dry_run   => $dry_run);
+	info("  #Gi{%s}", $_) for @{$initial->{events}};
 
 	# Resolve the control SHA that will be the source of this propagation.
 	#
