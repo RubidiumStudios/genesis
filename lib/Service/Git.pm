@@ -3,7 +3,7 @@ package Service::Git;
 use strict;
 use warnings;
 
-use Genesis qw/run bail debug trace/;
+use Genesis qw/run bail debug trace tmpfile mkfile_or_fail/;
 use Genesis::Exit qw/CONFIG DATAERR SOFTWARE/;
 use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
@@ -417,6 +417,63 @@ sub set_branch_ref {
 		'git', 'branch', '-f', $branch, $ref);
 	$self->{_branch_cache}{$branch} = 1;
 	return $self;
+}
+
+# }}}
+# create_orphan_branch - write a root commit with plumbing and no checkout {{{
+#
+# D42 makes a missing deployment branch an orphan whose root commit adds a
+# single init file, and D80 has pipeline-apply create it with plumbing and
+# no checkout, so the command needs no session and the operator's working
+# tree never moves.  The objects go into the database through a private
+# index, so the repository's own index is untouched too.
+sub create_orphan_branch {
+	my ($self, $branch, %opts) = @_;
+
+	bail("Refusing to recreate the branch #C{%s}, which already exists", $branch)
+		if $self->branch_exists($branch);
+
+	my $files = $opts{files} || {};
+
+	# The index is named and then taken away again, because git writes the
+	# file itself and an empty one left where the name points is an index
+	# git refuses to read.
+	my $index = tmpfile(template => 'genesis-orphan-XXXXXXXX');
+	unlink $index;
+	local $ENV{GIT_INDEX_FILE} = $index;
+
+	for my $path (sort keys %$files) {
+		my $source = tmpfile(template => 'genesis-blob-XXXXXXXX');
+		mkfile_or_fail($source, $files->{$path});
+
+		my ($blob) = run({dir => $self->{root},
+			onfailure => "Failed to write the object for '$path'"},
+			'git', 'hash-object', '-w', $source);
+		chomp $blob;
+
+		run({dir => $self->{root},
+			onfailure => "Failed to stage '$path' for '$branch'"},
+			'git', 'update-index', '--add', '--cacheinfo', "100644,$blob,$path");
+	}
+
+	my ($tree) = run({dir => $self->{root},
+		onfailure => "Failed to write the tree for '$branch'"},
+		'git', 'write-tree');
+	chomp $tree;
+
+	# No parent is named, which is what makes the commit a root and the
+	# branch an orphan.
+	my ($sha) = run({dir => $self->{root},
+		onfailure => "Failed to write the root commit for '$branch'"},
+		'git', 'commit-tree', $tree, '-m', $opts{message});
+	chomp $sha;
+
+	run({dir => $self->{root},
+		onfailure => "Failed to write refs/heads/$branch"},
+		'git', 'update-ref', "refs/heads/$branch", $sha);
+	$self->{_branch_cache}{$branch} = 1;
+
+	return $sha;
 }
 
 # }}}
@@ -1215,6 +1272,54 @@ sub push {
 		$results{$branch} = $ok ? 1 : 0;
 	}
 	return \%results;
+}
+
+# }}}
+# push_append_only - publish a branch without ever rewriting its history {{{
+#
+# D31 makes control and every deployment branch append-only on R, so the
+# previous tip is always an ancestor of the new tip and Genesis never
+# force-pushes either class.  The push carries no force option of any kind,
+# and the ancestry is checked against the remote's own tip first, so a
+# refusal names the branch and says what the remedy is rather than leaving
+# a rejected push to be read out of git's stderr.
+#
+# The remote is asked for the fully qualified ref rather than for the bare
+# branch name, because ls-remote matches the tail of a ref and a bare name
+# such as qa/bosh also matches the pull request branch pr/qa/bosh.
+sub push_append_only {
+	my ($self, $branch, %opts) = @_;
+
+	my $remote = $opts{remote} // $self->default_remote
+		or bail("No remote is configured, so #C{%s} cannot be published", $branch);
+
+	my $local = $self->sha($branch);
+	my ($out, $rc, $err) = run({dir => $self->{root}, passfail => 0},
+		'git', 'ls-remote', '--heads', $remote, "refs/heads/$branch");
+	bail("Failed to read #C{%s} on #C{%s}: %s",
+		$branch, $remote, ($err || $out || "rc=$rc") =~ s/\s+$//r) if $rc;
+
+	my $previous;
+	for my $line (split /\n/, ($out // '')) {
+		next unless $line =~ m{^([0-9a-f]{40})\s+refs/heads/(\S+)\s*$};
+		next unless $2 eq $branch;
+		$previous = $1;
+		last;
+	}
+
+	bail(
+		"Refusing to push #C{%s}, because that would rewrite history on ".
+		"#C{%s}.\n\n".
+		"That branch is append-only, so recovery is a new commit that ".
+		"restores the content and never a force push.",
+		$branch, $remote
+	) if $previous && !$self->is_ancestor($previous, $local);
+
+	run({dir => $self->{root},
+		onfailure => "Failed to push '$branch' to '$remote'"},
+		'git', 'push', $remote, "refs/heads/$branch:refs/heads/$branch");
+
+	return $local;
 }
 
 # }}}

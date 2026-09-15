@@ -314,6 +314,7 @@ integration-tests/genesis_exit-command_codes.t                # usage exits 2, p
 integration-tests/genesis_commands-git_floor.t                # the declared git floor is 2.34.1, for every command
 integration-tests/genesis_commands_pipelines-refresh_flags.t   # the refresh is unconditional and only pipeline-status opts out
 integration-tests/genesis_commands_pipelines-apply_refusals.t  # pipeline-apply refuses a disabled or absent pipeline alike
+integration-tests/genesis_commands_pipelines-apply_append_only.t # every push the apply makes to a deployment branch is append-only
 integration-tests/genesis_ci_preflight-control.t             # control exists, and it stands in step with the remote
 integration-tests/genesis_ci_preflight-branch_origin.t        # the two refusals for a branch with no legitimate origin
 integration-tests/genesis_ci_preflight-local_commits.t       # the marker-only reset, and the hand-commit refusal
