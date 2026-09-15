@@ -61,6 +61,132 @@ B<Examples:>
   Genesis::CI::Marker::build('a1b2c3d', 'qa');
   # returns '[pipeline] control@a1b2c3d -> qa'
 
+=head2 in_text
+
+    my $sha = Genesis::CI::Marker::in_text($message);
+
+The control sha of the newest marker in one commit message, or C<undef>.
+
+This is the one regex.  It anchors to the start of a line, so a subject
+mentioning a short sha in passing cannot match, and it runs over a whole
+message rather than a subject line, so a squash merge that moved the marker
+into the body still answers.
+
+The sha comes back exactly as the marker carries it, abbreviated or not,
+because only a caller holding a git handle can expand one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$message>
+
+A commit message, a pull request body, or any other text.
+
+=back
+
+B<Returns:> The sha as written, or C<undef> when the text carries no marker.
+
+B<Examples:>
+
+  Genesis::CI::Marker::in_text("Merge pull request #7\n\n[pipeline] control\@a1b2c3d -> qa\n");
+  # returns 'a1b2c3d'
+
+  Genesis::CI::Marker::in_text('note that a1b2c3d broke the build');
+  # returns undef
+
+=head2 newest
+
+    my $sha = Genesis::CI::Marker::newest($git, $ref);
+    my ($sha, $depth, $source) = Genesis::CI::Marker::newest($git, $ref);
+
+The control commit named by the newest marker on C<$ref>, resolved to a full
+sha where this repository holds the commit.
+
+The walk skips every commit above the marker that carries none.  A hand
+commit on a deployment branch is legal and temporary, and skipping it is
+what keeps the branch certified to the control commit it actually mirrors.
+
+There is no fallback to a control tip.  A ref with no marker anywhere has
+been delivered nothing, and C<undef> is what says so.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle.
+
+=item C<$ref>
+
+Any ref the walk can log, local branch or remote-tracking alike.  Reading
+the remote-tracking ref is what gives a caller the marker as R has it rather
+than as a lagging local branch has it.
+
+=item C<%opts>
+
+=over 4
+
+=item C<limit>
+
+Cap the walk at this many commits.  Uncapped by default, because a marker
+buried under a long stack of hand commits is still the marker.
+
+=item C<paths>
+
+Arrayref of git-root-relative paths the walk is scoped to.
+
+=back
+
+=back
+
+B<Returns:> In scalar context, the control sha, or C<undef> where no marker
+stands.  In list context, three values, which are the sha, the number of
+markerless commits above it, and C<'branch'>.  A ref carrying no marker gives
+C<undef>, the number of commits walked, and C<undef>.
+
+B<Examples:>
+
+  my $sha = Genesis::CI::Marker::newest($git, 'origin/qa/bosh');
+  # returns the control commit qa/bosh currently mirrors
+
+  my (undef, $depth) = Genesis::CI::Marker::newest($git, 'qa/bosh');
+  # $depth is 2 when two hand commits stand above the marker
+
+=head1 INTERNAL FUNCTIONS
+
+Every public entry of this module goes above this heading, under
+C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
+
+=head2 _resolved
+
+    my $sha = Genesis::CI::Marker::_resolved($git, $written);
+
+Expands the sha a marker carries where this repository holds the commit, and
+hands back what the marker said where it does not.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle.
+
+=item C<$written>
+
+The sha exactly as the marker spells it.
+
+=back
+
+B<Returns:> A full 40-character sha, or C<$written> unchanged.
+
+B<Examples:>
+
+  Genesis::CI::Marker::_resolved($git, 'a1b2c3d');
+  # returns 'a1b2c3d4e5f6...' where the commit is present
+
 =head1 AUTHOR
 
 Written by the Genesis team.
