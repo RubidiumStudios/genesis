@@ -65,6 +65,7 @@ B<Examples:>
 
     my $sha  = Genesis::CI::Marker::in_text($message);
     my @shas = Genesis::CI::Marker::in_text($message);
+    my @mine = Genesis::CI::Marker::in_text($message, 'qa');
 
 The control shas the markers in one commit message name.
 
@@ -91,6 +92,12 @@ B<Parameters:>
 
 A commit message, a pull request body, or any other text.
 
+=item C<$env>
+
+Optional.  Where it is given, only the markers addressed to that environment
+answer, and the rest are passed over as though the text did not carry them.
+Where it is left out every marker answers, whichever environment it names.
+
 =back
 
 B<Returns:> In scalar context the first marker's sha as written, or C<undef>
@@ -107,6 +114,9 @@ B<Examples:>
 
   Genesis::CI::Marker::in_text('note that a1b2c3d broke the build');
   # returns undef
+
+  Genesis::CI::Marker::in_text("[pipeline] control\@a1b2c3d -> prod\n", 'qa');
+  # returns undef, because the marker is addressed to another environment
 
 =head2 newest
 
@@ -153,7 +163,7 @@ than as a lagging local branch has it.
 Cap the walk at this many commits.  Uncapped by default, because a marker
 buried under a long stack of hand commits is still the marker.  A cap of
 zero is a cap at nothing rather than no cap, so the walk reads no commit and
-answers as a ref carrying no marker does.
+answers as a ref carrying no marker does, C<recover_from> and all.
 
 =item C<paths>
 
@@ -161,11 +171,23 @@ Arrayref of git-root-relative paths the walk is scoped to.
 
 =item C<recover_from>
 
-A pull request's body the reader falls back to when the ref carries no
-marker at all.  Where a site could not grant the rebase-only merge method,
-a squash merge can rewrite the aggregate's one commit and take its marker
-with it, and the body still carries what Genesis wrote there.  The branch
-always answers first, so a branch that carries a marker never consults it.
+A pull request's body the reader falls back to when the walk finds no
+marker.  Where a site could not grant the rebase-only merge method, a squash
+merge can rewrite the aggregate's one commit and take its marker with it,
+and the body still carries what Genesis wrote there.  The branch always
+answers first, so a branch whose walk meets a marker never consults the
+body.  A walk the caller narrowed with C<limit> or C<paths> can of course
+miss a marker the branch does carry, and the body is then consulted, so a
+caller that wants the branch to have the last word narrows neither.
+
+=item C<env>
+
+Optional, and read only alongside C<recover_from>.  The environment the
+caller is asking about.  Where it is given, a marker in the body addressed
+to some other environment is not recovered.  A body is the one place the
+reader takes a marker from that is not a commit on the environment's own
+branch, and a person can edit it after Genesis wrote it, so the caller at
+M16 should pass the environment it is propagating.
 
 =back
 
@@ -175,6 +197,12 @@ B<Returns:> In scalar context, the control sha or C<undef>.  In list context,
 the sha, the number of markerless commits above it, and where the answer came
 from, which is C<'branch'> or C<'pull-request'>.  A ref with no marker and no
 recovery gives C<undef>, that count, and C<undef>.
+
+The count means markerless commits above the marker only where the answer
+came from the branch.  On a recovery no commit the walk read stands above
+anything, so the count is simply every commit the walk read, and a caller
+that warns about hand commits should read the source before it reads the
+count.
 
 B<Examples:>
 

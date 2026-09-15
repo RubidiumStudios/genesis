@@ -21,7 +21,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'a squash that lost the marker recovers from the pull request' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $h  = make_harness(envs => ['qa'], vault => 0);
 	my $gh = github_double($h);
@@ -78,9 +78,10 @@ subtest 'a squash that lost the marker recovers from the pull request' => sub {
 	is($source, 'pull-request',
 		'and says where it came from, so the run can report the recovery');
 
-	my (undef, undef, $plain) = Genesis::CI::Marker::newest($git, $ref,
+	my ($none, undef, $plain) = Genesis::CI::Marker::newest($git, $ref,
 		recover_from => 'no marker in this body either');
-	is($plain, undef, 'while a body carrying no marker recovers nothing');
+	is($none, undef, 'while a body carrying no marker recovers nothing');
+	is($plain, undef, 'and says it came from nowhere rather than from a body');
 };
 
 subtest 'the branch still wins where it carries a marker' => sub {
@@ -105,6 +106,105 @@ subtest 'the branch still wins where it carries a marker' => sub {
 		recover_from => '[pipeline] control@0000000 -> qa');
 	is($sha, $control, 'the branch answers and the body is never consulted');
 	is($source, 'branch', 'and the source says so');
+};
+
+subtest 'a body carrying two markers answers the newer' => sub {
+	plan tests => 2;
+
+	# A pull request that collected two deliveries carries both markers in
+	# its body, for the reason a squashed commit message carries both, and
+	# GitHub lists the newest commit last.  The recovery weighs them by
+	# ancestry exactly as the branch walk weighs them, so the order the body
+	# happens to list them in decides nothing.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+	my $newer = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\nsecond: true\n"},
+		message => 'change qa again',
+		push    => 1,
+	);
+	squash_merge($h, 'qa',
+		control     => $newer,
+		subject     => 'Merge pull request #3 from ' . $h->pr_branch('qa'),
+		keep_marker => 0,
+	);
+	refresh($h, 'a', $h->slug('qa'));
+
+	my $body = sprintf(
+		"Carries two control commits.\n\n".
+		"* [pipeline] control\@%s -> qa\n\n* [pipeline] control\@%s -> qa\n",
+		substr($control, 0, 12), substr($newer, 0, 12));
+
+	my ($sha, undef, $source) = Genesis::CI::Marker::newest($h->git('a'),
+		'origin/' . $h->slug('qa'), recover_from => $body);
+	is($sha, $newer, "the recovery weighs the body's markers by ancestry");
+	is($source, 'pull-request', 'and still says where the answer came from');
+};
+
+subtest 'a walk capped at nothing recovers from the body' => sub {
+	plan tests => 3;
+
+	# A cap of nothing reads no commit, so the branch says no marker, and a
+	# branch saying no marker is the whole condition the recovery answers.
+	# A cap that suppressed the recovery would make the recovery turn on how
+	# far the caller let the walk read rather than on what the branch holds.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+	refresh($h, 'a', $h->slug('qa'));
+
+	my $git  = $h->git('a');
+	my $ref  = 'origin/' . $h->slug('qa');
+	my $body = sprintf('[pipeline] control@%s -> qa', substr($control, 0, 12));
+
+	my ($sha, undef, $source) = Genesis::CI::Marker::newest($git, $ref,
+		limit => 0, recover_from => $body);
+	is($sha, $control, 'the reader still takes the marker from the body');
+	is($source, 'pull-request', 'and says the body is where it came from');
+
+	is(Genesis::CI::Marker::newest($git, $ref, limit => 0), undef,
+		'while a cap of nothing with no body answers nothing, as it did');
+};
+
+subtest 'a marker naming another environment is not recovered' => sub {
+	plan tests => 3;
+
+	# A pull request body is text a person can edit after Genesis wrote it,
+	# and it is the only place the reader takes a marker from that is not a
+	# commit on the environment's own branch.  A caller that knows which
+	# environment it is asking about says so, and a marker addressed
+	# elsewhere is then no answer at all.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+	refresh($h, 'a', $h->slug('qa'));
+
+	my $git   = $h->git('a');
+	my $ref   = 'origin/' . $h->slug('qa');
+	my $short = substr($control, 0, 12);
+
+	my ($sha, undef, $source) = Genesis::CI::Marker::newest($git, $ref,
+		recover_from => "[pipeline] control\@$short -> prod", env => 'qa');
+	is($sha, undef, 'a body naming another environment recovers nothing');
+	is($source, undef, 'and the answer says it came from nowhere');
+
+	is(Genesis::CI::Marker::newest($git, $ref,
+		recover_from => "[pipeline] control\@$short -> qa", env => 'qa'),
+		$control, 'while the environment the caller named is recovered');
 };
 
 done_testing;
