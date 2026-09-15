@@ -63,17 +63,25 @@ B<Examples:>
 
 =head2 in_text
 
-    my $sha = Genesis::CI::Marker::in_text($message);
+    my $sha  = Genesis::CI::Marker::in_text($message);
+    my @shas = Genesis::CI::Marker::in_text($message);
 
-The control sha of the newest marker in one commit message, or C<undef>.
+The control shas the markers in one commit message name.
 
 This is the one regex.  It anchors to the start of a line, so a subject
 mentioning a short sha in passing cannot match, and it runs over a whole
 message rather than a subject line, so a squash merge that moved the marker
-into the body still answers.
+into the body still answers.  One list bullet may stand between the anchor
+and the marker, because a squash that collects several commit subjects
+writes each of them as a bulleted line.
 
 The sha comes back exactly as the marker carries it, abbreviated or not,
 because only a caller holding a git handle can expand one.
+
+A squash leaves more than one marker in one message, and nothing in the text
+says which of them is the newest, so this sub does not choose.  It answers
+every marker in the order the text lists them, and C<newest> is where a
+caller holding a git handle weighs them.
 
 B<Parameters:>
 
@@ -85,12 +93,17 @@ A commit message, a pull request body, or any other text.
 
 =back
 
-B<Returns:> The sha as written, or C<undef> when the text carries no marker.
+B<Returns:> In scalar context the first marker's sha as written, or C<undef>
+where the text carries no marker.  In list context every marker's sha, in the
+order the text lists them, and an empty list where there is none.
 
 B<Examples:>
 
   Genesis::CI::Marker::in_text("Merge pull request #7\n\n[pipeline] control\@a1b2c3d -> qa\n");
   # returns 'a1b2c3d'
+
+  Genesis::CI::Marker::in_text("* [pipeline] control\@a1b2c3d -> qa\n");
+  # returns 'a1b2c3d', because a squash may bullet the line
 
   Genesis::CI::Marker::in_text('note that a1b2c3d broke the build');
   # returns undef
@@ -106,6 +119,13 @@ sha where this repository holds the commit.
 The walk skips every commit above the marker that carries none.  A hand
 commit on a deployment branch is legal and temporary, and skipping it is
 what keeps the branch certified to the control commit it actually mirrors.
+
+Where one message carries several markers, which is what a squash of more
+than one delivery leaves behind, the newest is the one every other names an
+ancestor of.  The order the text lists them in is no guide, because git's
+own squash lists the newest commit first and GitHub's lists it last.  A
+marker naming a commit this repository cannot reach is not weighed at all,
+and where none of them can be weighed the first marker in the text stands.
 
 There is no fallback to a control tip.  A ref with no marker anywhere has
 been delivered nothing, and C<undef> is what says so.
@@ -131,7 +151,9 @@ than as a lagging local branch has it.
 =item C<limit>
 
 Cap the walk at this many commits.  Uncapped by default, because a marker
-buried under a long stack of hand commits is still the marker.
+buried under a long stack of hand commits is still the marker.  A cap of
+zero is a cap at nothing rather than no cap, so the walk reads no commit and
+answers as a ref carrying no marker does.
 
 =item C<paths>
 
@@ -158,6 +180,38 @@ B<Examples:>
 
 Every public entry of this module goes above this heading, under
 C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
+
+=head2 _newest_of
+
+    my $sha = Genesis::CI::Marker::_newest_of($git, @written);
+
+The newest of the control shas one message's markers name, resolved.
+
+Ancestry decides it rather than position, because git's own squash lists the
+newest commit first and GitHub's lists it last.  A sha this repository cannot
+reach never displaces one it can, so a message whose markers cannot be
+weighed answers with the first of them.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle.
+
+=item C<@written>
+
+The shas as their markers spell them, in the order the message lists them.
+
+=back
+
+B<Returns:> One sha, resolved where this repository holds the commit.
+
+B<Examples:>
+
+  Genesis::CI::Marker::_newest_of($git, 'a1b2c3d', 'e4f5a6b');
+  # returns the full sha of e4f5a6b where a1b2c3d is its ancestor
 
 =head2 _resolved
 

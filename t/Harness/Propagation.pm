@@ -853,7 +853,11 @@ sub _commit_in {
 
 	my ($current) = run({dir => $dir}, 'git', 'rev-parse', '--abbrev-ref', 'HEAD');
 	chomp $current;
-	run({dir => $dir}, 'git', 'checkout', '-q', $branch) unless $current eq $branch;
+	# The checkout says so when it fails.  Without that, a copy asked to
+	# commit on a branch it holds nowhere stays on the control branch and
+	# commits there instead, and the push that follows publishes it.
+	run({dir => $dir, onfailure => "Failed to stand copy $copy on $branch"},
+		'git', 'checkout', '-q', $branch) unless $current eq $branch;
 
 	$self->_write_tree($dir, $opts{files});
 
@@ -899,6 +903,10 @@ sub commit_from_b {
 sub publish_from_b {
 	my ($self, %opts) = @_;
 	my $branch = delete $opts{branch};
+	# Copy B is given the branch first, as hand_commit gives it one, because
+	# a deployment branch cut or delivered in copy A is a branch copy B has
+	# never held and the checkout below cannot make one out of nothing.
+	$self->_ensure_branch('b', $branch) if defined $branch;
 	return $self->_commit_in('b', $branch, %opts, push => 1);
 }
 

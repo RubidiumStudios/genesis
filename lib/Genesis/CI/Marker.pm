@@ -32,19 +32,32 @@ sub build {
 }
 
 # }}}
-# in_text - the control sha of the newest marker in one commit message {{{
+# in_text - the control shas the markers in one commit message name {{{
 #
 # The one regex.  It anchors to the start of a line, so a subject that
 # mentions a short sha in passing can never match, which is the coincidental
 # half of H7, and it runs over a whole message rather than a subject, so a
 # squash merge that pushed the marker into the body still answers, which is
-# D49.  The sha comes back exactly as the marker carries it, because only a
-# caller with a git handle can resolve an abbreviation.
+# D49.  One list bullet may stand between the anchor and the prefix, because
+# a squash that collects several commit subjects writes each of them as a
+# bulleted line and the marker is still the marker with a bullet in front of
+# it.  The literal prefix rather than the anchor is what defeats a
+# coincidental short sha, so the bullet costs nothing.
+#
+# A sha comes back exactly as its marker carries it, because only a caller
+# with a git handle can resolve an abbreviation.  In list context every
+# marker in the text answers, in the order the text lists them, which is what
+# lets a caller holding that handle weigh several against each other; in
+# scalar context the first one does.
 sub in_text {
 	my ($text) = @_;
-	return undef unless defined $text;
-	return $1 if $text =~ /^[ \t]*\Q$PREFIX\E([0-9a-f]{4,40})\b/m;
-	return undef;
+	return wantarray ? () : undef unless defined $text;
+
+	my @written;
+	while ($text =~ /^[ \t]*(?:[-*][ \t]+)?\Q$PREFIX\E([0-9a-f]{4,40})\b/mg) {
+		push @written, $1;
+	}
+	return wantarray ? @written : $written[0];
 }
 
 # }}}
@@ -63,24 +76,55 @@ sub in_text {
 sub newest {
 	my ($git, $ref, %opts) = @_;
 
+	# A cap of nothing caps the walk at nothing, so there is no commit to
+	# read and no marker to find.  The guard asks whether the caller set a
+	# cap rather than whether the cap is true, because a caller that said
+	# zero meant zero and a truth test hands it an uncapped walk instead.
+	return wantarray ? (undef, 0, undef) : undef
+		if defined $opts{limit} && $opts{limit} < 1;
+
 	my @records = $git->log_subjects($ref,
 		body => 1,
-		($opts{limit} ? (limit => $opts{limit}) : ()),
+		(defined $opts{limit} ? (limit => $opts{limit}) : ()),
 		($opts{paths} ? (paths => $opts{paths}) : ()),
 	);
 
 	my $depth = 0;
 	for my $record (@records) {
-		my $written = in_text($record->{message});
-		unless (defined $written) {
+		my @written = in_text($record->{message});
+		unless (@written) {
 			$depth++;
 			next;
 		}
-		my $sha = _resolved($git, $written);
+		my $sha = _newest_of($git, @written);
 		return wantarray ? ($sha, $depth, 'branch') : $sha;
 	}
 
 	return wantarray ? (undef, $depth, undef) : undef;
+}
+
+# }}}
+# _newest_of - the newest of the markers one message carries {{{
+#
+# A squash leaves every delivery's marker in one message, and the two tools
+# that write those messages disagree about the order.  Git's own squash lists
+# the newest commit first and indents each subject, and GitHub's lists the
+# newest last and bullets each subject, so where a marker sits in the text
+# says nothing about how new it is.  The markers are weighed by ancestry
+# instead, which is a question this repository can answer because the reader
+# holds a git handle, and a marker whose commit the repository cannot reach
+# simply never displaces one it can.  Where nothing can be weighed the first
+# marker stands, which is the order the text gave.
+sub _newest_of {
+	my ($git, @written) = @_;
+
+	my @resolved = map {_resolved($git, $_)} @written;
+	my $newest = shift @resolved;
+	for my $candidate (@resolved) {
+		next if $candidate eq $newest;
+		$newest = $candidate if $git->is_ancestor($newest, $candidate);
+	}
+	return $newest;
 }
 
 # }}}
