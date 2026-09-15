@@ -549,8 +549,8 @@ B<Examples:>
   my $bool = $git->branch_exists($name);
 
 Whether a local branch exists. Memoized, and the cache is updated by
-C<create_branch>, C<fetch_branch> and C<fetch_branches> so a branch created
-or fetched through this object is known without re-querying.
+C<create_branch> and C<fetch_branches> so a branch created or fetched
+through this object is known without re-querying.
 
 B<Parameters:>
 
@@ -1455,6 +1455,13 @@ explicitly; it cannot get there by accident.
 A repository with no remote configured has no authority to consult, so local
 absence is the whole truth and C<absent> is returned without a probe.
 
+The fetch itself goes through C<fetch_branches> with the one name, which
+writes the remote-tracking ref for a branch this clone already holds and
+creates the local ref only where the clone lacks it. A transport failure
+comes back in that method's result rather than as a raise, and the answer
+here is still C<fetched>, so a caller never reads a failed refresh as
+"safe to create".
+
 B<C<offline> withholds the answer instead of guessing.> Working offline is a
 legitimate reason not to contact the remote, but it is not a reason to
 assume the branch does not exist. C<offline> therefore yields
@@ -1497,11 +1504,6 @@ B<Errors:>
 
 Raised via C<remote_branch_exists> when the remote cannot be reached or
 authenticated against. Deliberately not caught: see above.
-
-=item C<"Failed to fetch '%s' from '%s'">
-
-Raised via C<fetch_branch> when the remote confirmed the branch but the
-fetch itself failed.
 
 =back
 
@@ -1559,56 +1561,20 @@ B<Examples:>
   $git->delete_remote_branch('old-env');
   # returns $self
 
-=head2 fetch_branch
-
-  $git->fetch_branch($branch);
-  $git->fetch_branch($branch, $remote);
-
-Fetches one branch into the matching local ref.
-
-Uses a forced refspec, so the local ref is created or overwritten regardless
-of fast-forward status. That is safe for the branches this is used on --
-propagation branches are written once and never rebased -- and would not be
-for a branch someone commits to locally.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$branch>
-
-The branch to fetch.
-
-=item C<$remote>
-
-Defaults to C<default_remote>.
-
-=back
-
-B<Returns:> C<$self>. No-op when no remote is configured.
-
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"Failed to fetch '%s' from '%s'"> -- raised via C<run>'s C<onfailure>.
-
-=back
-
-B<Examples:>
-
-  $git->fetch_branch('staging');
-  # returns $self; refs/heads/staging now matches the remote
-
 =head2 fetch_branches
 
-  $git->fetch_branches(\@names);
-  my ($self, $result) = $git->fetch_branches(\@names, $remote);
+  my ($git, $result) = $git->fetch_branches(\@branches);
+  my ($git, $result) = $git->fetch_branches(\@branches, $remote);
 
-Fetches several branches in one git invocation, reporting which of them the
-remote actually has.
+Refreshes the named branches in one round trip, reporting which of them the
+remote actually has. A branch already present locally updates its
+remote-tracking ref alone, so an unpushed local commit survives the refresh.
+A branch the clone lacks is materialised locally from the remote.
+
+This is the only refresh, and it takes one name as readily as many, because
+the forced single-branch helper that wrote C<refs/heads/E<lt>branchE<gt>>
+for any name it was handed has been removed, since it overwrote exactly the
+local commits the multi-branch path protects.
 
 B<The remote is asked before it is fetched from.> A refspec naming a branch
 the remote lacks aborts the entire fetch -- git reports

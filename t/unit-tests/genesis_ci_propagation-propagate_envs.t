@@ -76,8 +76,12 @@ sub mock_git {
 		return grep { $_->[0] eq $name } @{$self->{_calls}};
 	};
 
-	# Mutating ops — record + return $self (chainable) or sensible default
-	for my $m (qw(checkout create_branch checkout_file rm commit fetch_branch
+	# Mutating ops — record + return $self (chainable) or sensible default.
+	# The refresh is named fetch_branches, because the forced single-branch
+	# helper is gone and the pull request path takes the multi-branch one
+	# with a single name.  This double stands in for git, which is the
+	# exception constraints.md records rather than a shape a new file copies.
+	for my $m (qw(checkout create_branch checkout_file rm commit fetch_branches
 	             delete_remote_branch)) {
 		*{"${pkg}::${m}"} = sub {
 			my $self = shift;

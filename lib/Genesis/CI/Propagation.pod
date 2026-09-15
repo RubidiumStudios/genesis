@@ -657,8 +657,8 @@ then, the failure is caught and surfaced rather than papered over.
 =head2 C<--no-push> semantics are master-kill-switch
 
 C<no_push =E<gt> 1> currently allows read-only network operations
-(C<open_prs> queries the GitHub API, C<fetch_branch> contacts the
-remote) but skips all writes.  Local C<pr/E<lt>envE<gt>> branches
+(C<open_prs> queries the GitHub API, and C<fetch_branches> contacts the
+remote for the one pull request branch) but skips all writes.  Local C<pr/E<lt>envE<gt>> branches
 are left with the propagation commit applied; mixing C<no_push>
 runs with normal runs may require manual local-branch cleanup.
 

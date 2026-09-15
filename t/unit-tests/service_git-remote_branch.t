@@ -193,19 +193,26 @@ subtest 'resolve_branch - local when the branch is already here' => sub {
 	is scalar @run_calls, 0, 'the remote is not consulted when we already have it';
 };
 
+# The refresh is fetch_branches with the one name, so the probe is followed
+# by that method's own four steps: the branch it is standing on, the probe
+# that keeps an absent name from aborting the whole fetch, the local heads
+# that decide which refspec each name takes, and the fetch itself.
 subtest 'resolve_branch - fetched when the remote has it' => sub {
 	plan tests => 3;
 	reset_stub(); install_run_stub();
 	override_default_remote('origin');
 	override_branch_exists(0);
 	push @run_results, ["abc123\trefs/heads/qa", 0, ''];   # ls-remote
+	push @run_results, ["control\n", 0, ''];               # current branch
+	push @run_results, ["abc123\trefs/heads/qa", 0, ''];   # the refresh probe
+	push @run_results, ['', 0, ''];                        # local heads
 	push @run_results, ['', 0, ''];                        # fetch
 
 	my $git = make_git();
 	is $git->resolve_branch('qa'), 'fetched',
 		'absent locally but present on the remote is a fetch, never a create';
-	is scalar @run_calls, 2, 'probed, then fetched';
-	is $run_calls[1][2], 'fetch', 'second call is the fetch';
+	is scalar @run_calls, 5, 'probed, then refreshed through fetch_branches';
+	is $run_calls[4][2], 'fetch', 'the last call is the fetch';
 };
 
 subtest 'resolve_branch - absent when it exists nowhere' => sub {

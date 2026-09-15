@@ -143,11 +143,11 @@ subtest 'the plan reaches a spawned command' => sub {
 	my ($out, $rc, $err) = _fetch_in_child($h);
 	is($rc, 0, 'the child took the step and lived');
 	my @steps = step_log($git);
-	is(scalar(grep {$_->[0] eq 'fetch_branch'} @steps), 1,
+	is(scalar(grep {$_->[0] eq 'fetch_branches'} @steps), 1,
 		'the step the child took is in the log');
 
 	reset_steps($git);
-	fail_on($git, 'fetch_branch', 1, message => 'the harness stopped the fetch');
+	fail_on($git, 'fetch_branches', 1, message => 'the harness stopped the fetch');
 
 	($out, $rc, $err) = _fetch_in_child($h);
 	isnt($rc, 0, 'the child armed against dies');
@@ -155,7 +155,7 @@ subtest 'the plan reaches a spawned command' => sub {
 		'with the armed message on its stderr');
 
 	@steps = step_log($git);
-	is(scalar(grep {$_->[0] eq 'fetch_branch'} @steps), 1,
+	is(scalar(grep {$_->[0] eq 'fetch_branches'} @steps), 1,
 		'and the step was recorded before it died');
 };
 
@@ -166,10 +166,11 @@ subtest 'the plan reaches a spawned command' => sub {
 # a spawned command needs is said in one place and not in three.
 sub _fetch_in_child {
 	my ($h) = @_;
-	# Not the control branch, which copy A has checked out, because git
-	# refuses a forced fetch into the branch the working tree is on.
+	# Not the control branch, which copy A has checked out, because the
+	# refresh skips the branch the working tree is on and would take no
+	# step at all.
 	return $h->run_in_child(
-		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branch($ARGV[1]);',
+		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branches([$ARGV[1]]);',
 		$h->a, $h->slug('qa'));
 }
 
@@ -261,13 +262,13 @@ subtest 'a child runs under the plan its own harness armed' => sub {
 	my $one = make_harness(envs => ['qa'], vault => 0);
 	init_branch($one, 'qa');
 	my $git = fault_git($one);
-	fail_on($git, 'fetch_branch', 1, message => 'the armed refusal');
+	fail_on($git, 'fetch_branches', 1, message => 'the armed refusal');
 
 	my ($out, $rc) = $one->run_in_child(
-		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branch($ARGV[1]);',
+		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branches([$ARGV[1]]);',
 		$one->a, $one->slug('qa'));
 	isnt($rc, 0, 'the armed step took the child down');
-	is(scalar(grep {$_->[0] eq 'fetch_branch'} step_log($git)), 1,
+	is(scalar(grep {$_->[0] eq 'fetch_branches'} step_log($git)), 1,
 		'and the call landed in this harness own step log');
 
 	# What the parent already carries has to reach the child, because the
