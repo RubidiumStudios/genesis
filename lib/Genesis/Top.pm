@@ -2556,9 +2556,11 @@ sub _validate_pipeline_config {
 }
 
 # }}}
-# _validate_provider_config - the provider's own programmatic check {{{
+# _validate_provider_config - the provider's rules for its own block {{{
 #
-# The second half of D86's contract, and the narrow one.  It runs after
+# Under D105 the provider's rules are the whole of what its block is
+# checked against, so this asks the class for them rather than sorting
+# them into categories of its own.  It runs after
 # Genesis::Config::validate, so every key it reads has been typed and
 # defaulted, it collects error strings rather than bailing per rule, and
 # it makes no network call, because a load that dialled a provider would
@@ -2570,24 +2572,26 @@ sub _validate_provider_config {
 	my $config = $self->config;
 	my $type   = $config->get('pipeline.provider.type', 'manual') // 'manual';
 	my $class  = Genesis::CI::Provider->provider_class($type);
-	return 1 unless $class->can('validate_config');
 
-	my %opts = %{$config->get('pipeline.provider') // {}};
-	delete $opts{type};
-
-	# Under D102 the repository the pipeline acts on lives in the
-	# source-control block rather than the provider block, so a provider
-	# whose own rules still speak of the repository is handed the resolved
-	# value instead of being asked for a key the schema does not declare.
-	# The provider's own keys come last, because an explicit setting is
-	# never overridden by a derivation.
+	# Asked outright, with no branch here on whether the provider has
+	# anything to say.  Under D105 every provider class answers, because
+	# the base gives one the declaration it made as its rules, so a branch
+	# testing for the method would be validation asking whether it had
+	# anything to check.
+	#
+	# The class is handed the configuration and the path of the block it
+	# owns, so it reads what the operator wrote where the operator wrote
+	# it, rather than being handed an object assembled out of the block
+	# with a value derived from somewhere else folded in.  Under D102 the
+	# repository the pipeline acts on lives in the source-control block,
+	# and _source_control above refuses a pipeline that cannot name one,
+	# so no provider rule needs it passed down here.
+	#
 	# The provider's class is somebody else's code, so a rule that dies is
 	# answered with the refusal an operator can act on rather than with a
 	# Carp trace out of the middle of a configuration load.
-	my $sc = $self->_source_control;
 	my @errors = eval {
-		$class->new(type => $type, repo => $sc->{repository}, %opts)
-			->validate_config;
+		$class->validate_config($config, 'pipeline.provider', 'type');
 	};
 	# Copied first, because bail's own readers run evals that clear it.
 	my $caught = $@;

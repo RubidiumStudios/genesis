@@ -400,6 +400,19 @@ sub validate_subtree {
 	my %ignore = map {($_ => 1)} @{$opts{ignore} || []};
 	my %declared = (%$schema, map {($_ => {type => 'any'})} keys %ignore);
 
+	# An ignored key belongs to the parent's schema rather than to this
+	# one, so the fill the parent gave it has to outlive the sweep below.
+	# Nothing here declares a default for it and nothing here would put it
+	# back, and the discriminator that chose the module doing the
+	# validating is exactly such a key: sweeping it would leave the block
+	# with nothing in it saying what the block is.
+	my %kept;
+	for my $ignored (sort keys %ignore) {
+		next unless struct_has($self->{default_values}, "$path.$ignored");
+		$kept{$ignored} =
+			struct_lookup($self->{default_values}, "$path.$ignored");
+	}
+
 	# This owns the defaults it files at default priority under the path,
 	# which is what lets validate() above stop clearing every default in
 	# the configuration before it walks.  A default filled from the schema
@@ -427,6 +440,12 @@ sub validate_subtree {
 		for grep {$_ =~ /^\Q$path\E($|[\.\[])/ || $path =~ /^\Q$_\E[\.\[]/}
 			keys %{$self->{cache}};
 	delete $self->{_contents};
+
+	# Put back after the sweep rather than held out of it, because the
+	# writer sweeps the caches as it goes and a value slipped past the
+	# removal would leave them saying two different things.
+	$self->_update_source('default', "$path.$_", $kept{$_})
+		for sort keys %kept;
 
 	return $self->_validate_key($path, {type => 'hash', schema => \%declared});
 }

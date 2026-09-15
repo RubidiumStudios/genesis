@@ -2950,23 +2950,31 @@ B<Returns:> 1.
 Runs the configured provider's own C<validate_config> and refuses at
 C<Genesis::Exit::CONFIG> when it returns errors.
 
-This is the programmatic half of the provider configuration contract, and
-it is deliberately narrow: it states what a declaration cannot, such as
-"one of these two keys is required". It runs after the generic validation,
-so every key it reads has already been typed and defaulted, and it makes no
-network call, because a load that dialled a provider would make every
-command wait on that provider being up.
+Under D105 the provider's own rules are the whole of what its block is
+checked against, rather than the second half of a contract whose first
+half the framework ran. The class is asked for them directly, and its
+default validates the block against the keys that provider declared, so a
+provider with no cross-field rule writes no validation and its block is
+still typed, defaulted, and refused by name where an operator wrote a key
+it does not know. It runs after the generic validation, so every key it
+reads has already been typed and defaulted, and it makes no network call,
+because a load that dialled a provider would make every command wait on
+that provider being up.
 
-The provider is built from the C<pipeline.provider> block with the resolved
-C<repository> alongside it, since under D102 the repository the pipeline
-acts on lives in the source-control block rather than the provider block.
-The check gathers every error string the provider returns, so the refusal
-names the provider once and lists everything wrong with it. An entry that is
-undefined or empty is dropped before that list is built, because a rule that
-answered with nothing would otherwise print an empty bullet.
+The class is handed the configuration object and the dotted path of the
+block it owns, C<pipeline.provider>, along with the name of the key that
+chose it, so it reads what the operator wrote where the operator wrote it.
+Nothing is assembled out of the block first and nothing derived from
+elsewhere is folded in: under D102 the repository the pipeline acts on
+lives in the source-control block, and L</_source_control> has already
+refused a pipeline that cannot name one. The check gathers every error
+string the provider returns, so the refusal names the provider once and
+lists everything wrong with it. An entry that is undefined or empty is
+dropped before that list is built, because a rule that answered with
+nothing would otherwise print an empty bullet.
 
-The provider's class is somebody else's code, so building it and running its
-check are wrapped in an C<eval>. A rule that dies is reported as the same
+The provider's class is somebody else's code, so the call is wrapped in an
+C<eval>. A rule that dies is reported as the same
 refusal, naming the provider and carrying what it said, rather than reaching
 the operator as a C<Carp> trace out of the middle of a configuration load.
 What it said goes through L<Genesis/without_backtrace> first, so the frames

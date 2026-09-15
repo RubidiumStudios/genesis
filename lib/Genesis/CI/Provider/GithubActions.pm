@@ -84,23 +84,30 @@ sub provider_options_schema {
 }
 
 # }}}
+# validate_config - nothing of its own, and why the old rule went {{{
+#
+# Nothing is written here, so the base's default is what runs, and under
+# D105 that validates the block against the fragment above and refuses
+# anything else by name.  With an empty fragment that means no provider
+# key is admitted beside this type at all, which is the whole of what
+# this provider has to say about its block today.
+#
+# The two rules that stood here both spoke of repo.  Under D102 the
+# repository a pipeline acts on lives in
+# pipeline.source_control.repository rather than in the provider block,
+# so the fragment declares no such key and an operator has nowhere to
+# write one.  They worked only because the caller resolved the source
+# control first and handed the value in, and the dispatch now runs before
+# any of that is derived.  Genesis::Top::_source_control already refuses
+# a pipeline whose repository cannot be named, in the operator's own
+# terms, so nothing an operator relied on is lost with them.
+#
+# }}}
 # }}}
 ### Instance Methods {{{
 
 # label - human-readable name for this provider {{{
 sub label { 'GitHub Actions' }
-
-# }}}
-# validate_config - assert required fields are present in stored config {{{
-sub validate_config {
-	my ($self) = @_;
-	my @errors;
-	push @errors, "'repo' is required for the GitHub Actions provider"
-		unless $self->{repo};
-	push @errors, "'repo' must be in 'org/repo' format"
-		if $self->{repo} && $self->{repo} !~ m{^[^/]+/[^/]+$};
-	return @errors;
-}
 
 # }}}
 # config - returns hash for .genesis/config ci.provider section {{{

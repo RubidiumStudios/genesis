@@ -768,6 +768,12 @@ a module uses when it has been handed one block and owns the rules for
 it. The C<ignore> list names keys the parent schema declared, which is
 the discriminator a C<custom_struct> has already checked.
 
+An ignored key is neither typed nor called unknown, and the fill the
+parent gave it outlives the sweep above. Nothing here declares a default
+for it and nothing here would put it back, and the discriminator that
+chose the module doing the validating is exactly such a key, so sweeping
+it would leave the block with nothing in it saying what the block is.
+
 =head2 show_diff
 
     $cfg->show_diff;

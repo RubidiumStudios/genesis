@@ -92,6 +92,28 @@ subtest 'an ancestor already read is swept along with the block' => sub {
 		'and the parent has lost the key the second schema does not declare';
 };
 
+subtest 'a key it was told to ignore keeps the fill it came with' => sub {
+	plan tests => 2;
+
+	my $cfg = Genesis::Config->new();
+
+	# The ignore list is for a key the parent declared and this schema did
+	# not, and the discriminator a dispatching block picked its module by
+	# is exactly that key.  The parent filled it from its own default, and
+	# the sweep that clears this schema's fills would take it too, so the
+	# block would come back out of the call with nothing in it saying what
+	# it is.
+	$cfg->_update_source('default', 'pipeline.provider.type', 'concourse');
+	$cfg->set('pipeline.provider.target', 'ci');
+
+	my @errors = $cfg->validate_subtree('pipeline.provider', $schema,
+		ignore => ['type']);
+	is_deeply [@errors], [],
+		'the ignored key is neither typed nor called unknown';
+	is $cfg->get('pipeline.provider.type'), 'concourse',
+		'and it still reads back as what the parent filled it with';
+};
+
 subtest 'what is wrong comes back as strings, named in full' => sub {
 	plan tests => 3;
 
