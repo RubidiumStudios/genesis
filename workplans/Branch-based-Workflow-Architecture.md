@@ -425,7 +425,7 @@ The manual provider (the `genesis propagate` command) passes `push_direct_commit
 
 Pushes are batched into a single `git push` at the end of the run, and PR API calls happen after that. If any environment failed, both blocks are skipped entirely — a partial remote state is worse than none. The command bails on a non-empty error list; the module itself collects errors and returns them rather than bailing, so other callers can decide.
 
-`--no-push` currently still permits read-only network calls: `open_prs` queries the API and `fetch_branch` contacts the remote. Local `pr/<env>` branches are left with the commit applied, so mixing `--no-push` runs with normal runs can require manual local cleanup.
+`--no-push` currently still permits read-only network calls: `open_prs` queries the API and `fetch_branches` contacts the remote for the one pull request branch. Local `pr/<env>` branches are left with the commit applied, so mixing `--no-push` runs with normal runs can require manual local cleanup.
 
 ### Preconditions
 

@@ -493,6 +493,14 @@ each target.  This guard answers a direct caller, and it does sit inside
 that C<eval>, so were it ever to fire there it would be collected into
 C<errors> as an environment's failure.
 
+=item C<"Failed to fetch '%s' from the remote: %s">
+
+Dies when the refresh of an open pull request branch reports a failure.
+That refresh runs only where this clone lacks the branch, so the switch
+that follows it would have nothing to switch to.  It sits inside the
+per-target C<eval>, so it stops this environment and comes back in
+C<errors> rather than ending the run.
+
 =back
 
 B<Examples:>
@@ -657,10 +665,11 @@ then, the failure is caught and surfaced rather than papered over.
 =head2 C<--no-push> semantics are master-kill-switch
 
 C<no_push =E<gt> 1> currently allows read-only network operations
-(C<open_prs> queries the GitHub API, and C<fetch_branches> contacts the
-remote for the one pull request branch) but skips all writes.  Local C<pr/E<lt>envE<gt>> branches
-are left with the propagation commit applied; mixing C<no_push>
-runs with normal runs may require manual local-branch cleanup.
+(C<open_prs> queries the GitHub API, and C<fetch_branches>
+contacts the remote for the one pull request branch) but skips
+all writes.  Local C<pr/E<lt>envE<gt>> branches are left with the
+propagation commit applied; mixing C<no_push> runs with normal
+runs may require manual local-branch cleanup.
 
 The alternative interpretation - skip all network including reads,
 so the decision tree degrades to "always create local branch from

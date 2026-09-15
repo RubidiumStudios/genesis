@@ -54,6 +54,7 @@ sub mock_git {
 		_sha            => $opts{sha}                  // {},
 		_default_remote => $opts{default_remote}       // 'origin',
 		_push_results   => $opts{push_results}         // {},
+		_fetch_result   => $opts{fetch_result},
 		_current_branch => 'control',
 	}, 'Test::Mock::PropEnvs::Git';
 	$self;
@@ -77,11 +78,9 @@ sub mock_git {
 	};
 
 	# Mutating ops — record + return $self (chainable) or sensible default.
-	# The refresh is named fetch_branches, because the forced single-branch
-	# helper is gone and the pull request path takes the multi-branch one
-	# with a single name.  This double stands in for git, which is the
-	# exception constraints.md records rather than a shape a new file copies.
-	for my $m (qw(checkout create_branch checkout_file rm commit fetch_branches
+	# This double stands in for git, which is the exception constraints.md
+	# records rather than a shape a new file copies.
+	for my $m (qw(checkout create_branch checkout_file rm commit
 	             delete_remote_branch)) {
 		*{"${pkg}::${m}"} = sub {
 			my $self = shift;
@@ -91,6 +90,21 @@ sub mock_git {
 			$self;
 		};
 	}
+
+	# The refresh is named fetch_branches, because the forced single-branch
+	# helper is gone and the pull request path takes the multi-branch one
+	# with a single name.  It reports rather than raising, so the double
+	# answers with the pair the product reads, and a row that wants a
+	# failed refresh arms one through fetch_result.
+	*{"${pkg}::fetch_branches"} = sub {
+		my ($self, $names, $remote) = @_;
+		$self->_record('fetch_branches', $names, $remote);
+		my $result = $self->{_fetch_result} // {
+			ok => 1, kind => 'success',
+			fetched => [@{$names // []}], absent => [],
+		};
+		return wantarray ? ($self, $result) : $self;
+	};
 
 	# Read ops
 	*{"${pkg}::branch_exists"} = sub {
@@ -685,6 +699,44 @@ subtest 'mixed direct + PR envs: direct envs and pr/ branches batched in one pus
 	my @branches = @{$pushes[0]}[2..$#{$pushes[0]}];
 	ok( (grep { $_ eq 'staging' }    @branches), 'direct env staging in push' );
 	ok( (grep { $_ eq 'pr/preprod' } @branches), 'PR branch pr/preprod in push' );
+};
+
+subtest 'a refresh the remote failed stops the environment' => sub {
+	plan tests => 4;
+	my $github = mock_github(
+		open_prs => {
+			'staging/pr/staging' => [
+				{ number => 21, head => { ref => 'pr/staging' },
+				  html_url => 'https://example/pr/21' },
+			],
+		},
+	);
+
+	# The pull request branch is open on the remote and absent here, which
+	# is the one shape that refreshes.  The refresh reports a failure, and
+	# the row asks what the run does with the report: the switch that
+	# follows would have nothing to switch to, so the environment has to
+	# stop before it rather than carry on into git's own message.
+	my $git = mock_git(
+		branch_exists => { 'pr/staging' => 0 },
+		fetch_result  => { ok => 0, kind => 'network', err =>
+			'fatal: unable to access: Could not resolve host', fetched => [],
+			absent => [] },
+	);
+
+	my $result = propagate_envs_captured(
+		base_args(),
+		git     => $git,
+		github  => $github,
+		targets => [ pr_target('staging') ],
+	);
+
+	is $result->{propagated}, 0, 'the environment is not counted propagated';
+	is scalar(@{$result->{errors}}), 1, 'and it reaches the caller as an error';
+	like $result->{errors}[0], qr/Could not resolve host/,
+		'naming what the remote said';
+	is scalar($git->calls('checkout')), 0,
+		'and no checkout followed the refresh that failed';
 };
 
 subtest 'a refusal to name a PR branch reaches the caller' => sub {
