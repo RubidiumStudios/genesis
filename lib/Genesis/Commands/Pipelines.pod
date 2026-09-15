@@ -414,6 +414,11 @@ because the C<E<lt>envE<gt>> argument went with the cascade it scoped under
 D36, and a commit held behind an ancestor is released by the next bare run
 rather than by a run aimed at it.
 
+The run may be started from any branch.  It switches to control inside its
+own session under D65, walks from there, and puts the operator back on the
+branch they were standing on, so nobody has to move before running it.  See
+L</open_control_session>.
+
 B<Options (via C<get_options>):>
 
 =over 4
@@ -577,6 +582,36 @@ B<Examples:>
   assert_provider_gate($top, {});
   # [FATAL] The concourse pipeline owns propagation for this repository.
   #         Run it with --force at a terminal if you mean to.
+
+=head2 open_control_session
+
+    my $session = open_control_session($top, $git);
+
+Begins the run's session and switches it to the control branch, under D65.
+Creates the local ref from the remote-tracking ref where the copy lacks one,
+which I2 permits, and refuses at C<Genesis::Exit::DATAERR> when control
+exists nowhere.
+
+The run no longer refuses to start off control.  C<finish> returns the
+operator to the branch they stood on, exactly as a deploy that switches to
+its own deployment branch already does, so where the operator was standing
+stops mattering.  The session comes from the handle rather than being built
+here, because the handle keeps one session per working tree and that is what
+I9 asks for.
+
+The clean-tree refusal that used to stand beside the branch refusal is gone
+with it.  It guarded a run that read the working tree, and it refused a dry
+run that writes nothing, which D44 does not allow.  What is left of it is
+the session's own assertion in C<begin>, which names the files it found.
+
+B<Returns:> The open session, standing on control.
+
+B<Examples:>
+
+  my $session = open_control_session($top, $git);
+  # ... the walk ...
+  $session->finish;
+  # the operator is back on the branch they ran this from
 
 =head1 INTERNAL FUNCTIONS
 

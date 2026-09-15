@@ -35,6 +35,10 @@ $ENV{NOCOLOR} = 1;
 	sub new    { bless {begun => 0, finished => 0}, shift }
 	sub begin  { $_[0]{begun}++;    $_[0] }
 	sub finish { $_[0]{finished}++; $_[0] }
+	# The walk asks whether the session is open before it opens one, because
+	# its caller may have opened the run's session already.  Nothing here
+	# does, so this one is always shut and the walk owns what it opens.
+	sub active { $_[0]{begun} > $_[0]{finished} ? 1 : 0 }
 }
 
 subtest 'no_push suppresses the control branch push' => sub {

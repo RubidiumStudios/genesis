@@ -6,7 +6,7 @@ use warnings;
 use Genesis;
 use Genesis::State;
 use Genesis::Commands;
-use Genesis::Exit qw/CONFIG NOPERM ABORTED/;
+use Genesis::Exit qw/CONFIG NOPERM ABORTED DATAERR/;
 use Genesis::Config;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
@@ -580,22 +580,28 @@ sub propagate {
 	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
 		refreshed => $refreshed, command => 'propagate');
 
-	bail(
-		"Propagation must be run from the #C{%s} branch (currently on #C{%s}).",
-		$control, $git->current_branch // '<detached>'
-	) unless ($git->current_branch // '') eq $control;
+	# The run stands itself on control rather than asking the operator to,
+	# which is D65.  Everything below reads the environment files off the
+	# working tree, so the switch is what makes a run from a feature branch
+	# read the same topology as a run from control, and finish puts the
+	# operator back on the branch they started from.
+	#
+	# The clean-tree refusal that stood here went with the branch refusal.
+	# It guarded a run that read the working tree, and it refused a dry run
+	# that writes nothing, which D44 does not allow.  What is left of it is
+	# the session's own assertion in begin, which names the files it found
+	# and is the same guard stated where D84 puts it.
+	my $session = open_control_session($top, $git);
 
-	# Bail on uncommitted changes — even on --dry-run.  Propagation
-	# operates on committed state; uncommitted edits to env files
-	# would silently make a dry-run misrepresent reality.
-	bail(
-		"Working tree has uncommitted changes.  Commit or stash them\n".
-		"before running propagate."
-	) unless $git->is_clean;
+	# A refusal from here on owes the operator their branch back before it
+	# tells them why the run stopped.  The session's exit net would restore
+	# it either way, but it would say so in a second error printed on top of
+	# the refusal, so a refusal below closes the session and then speaks.
+	my $refuse = sub { $session->finish; bail(@_) };
 
 	# The pipeline's environments, as read from the control branch.
 	my $topo = $top->pipeline_topology;
-	bail("No environments with pipeline metadata found.")
+	$refuse->("No environments with pipeline metadata found.")
 		unless %{$topo->{nodes}};
 
 	my $nodes     = $topo->{nodes};
@@ -836,14 +842,14 @@ sub propagate {
 			# carries no pair was already refused by name, at load.
 			($gh_owner, $gh_repo) = split m{/}, $top->source_control_repository, 2;
 
-			bail(
+			$refuse->(
 				"GitHub credentials required for PR-based propagation.\n".
 				"Set the GITHUB_AUTH_TOKEN environment variable."
 			) unless $ENV{GITHUB_AUTH_TOKEN};
 
 			$github = Service::Github->new(org => $gh_owner);
 			my $authed_user = $github->get_authorized_user;
-			bail(
+			$refuse->(
 				"GitHub credentials are invalid or lack sufficient permissions.\n".
 				"Verify GITHUB_AUTH_TOKEN is a valid Personal Access Token."
 			) unless $authed_user;
@@ -884,6 +890,11 @@ sub propagate {
 		dry_run             => $dry_run,
 		push_extra_branches => [@targets ? $control : ()],
 	);
+
+	# The walk is over, so the operator goes back on the branch they started
+	# this run from, before a word of the summary is printed and whether or
+	# not a delivery failed.  Nothing below reads the working tree.
+	$session->finish;
 
 	bail("Propagation aborted due to error.") if @{$result->{errors}};
 	my $propagated = $result->{propagated};
@@ -1340,6 +1351,54 @@ sub assert_provider_gate {
 	) unless prompt_for_boolean("Proceed anyway? [y|n]", 0);
 
 	return 1;
+}
+
+# }}}
+# }}}
+### The Session {{{
+
+# open_control_session - begin a session and stand it on control {{{
+#
+# D65: the run switches to control inside its session rather than refusing
+# off it, and finish puts the operator back where they stood.  The switch is
+# what makes the run read the same topology wherever the operator was
+# standing, because the environment files are read off the working tree and
+# a feature branch carries whichever of them its author happened to touch.
+#
+# Where the copy holds no local ref for control we create it from the
+# remote-tracking ref first, which I2 permits because the branch already
+# exists on the remote and we are inventing nothing.  The refresh writes
+# that ref for itself in the ordinary case, so this is the fallback for a
+# copy the refresh could not write, and it costs one query.
+#
+# Where control exists nowhere the run refuses, since the environment files
+# live on it and nothing can read the topology without it.
+#
+# The session comes from the handle rather than being built here, because
+# the handle memoises one session per working tree, and that is what makes
+# the one-session-per-run claim of I9 checkable rather than asserted.
+sub open_control_session {
+	my ($top, $git) = @_;
+
+	my $control = $top->control_branch;
+
+	unless ($git->branch_exists($control)) {
+		my $remote = $git->default_remote;
+		bail(
+			{exitcode => DATAERR},
+			"The control branch #C{%s} exists neither here nor on #C{%s}.  ".
+			"Every environment file lives on it, so nothing can read the ".
+			"topology without it.  Create it and push it, then run this ".
+			"again.",
+			$control, $remote // 'the remote'
+		) unless $remote && $git->remote_branch_exists($control, $remote);
+		$git->create_branch($control, "$remote/$control");
+	}
+
+	my $session = $git->session(control => $control);
+	$session->begin;
+	$session->switch($control);
+	return $session;
 }
 
 # }}}
