@@ -534,6 +534,14 @@ sub pipeline_status {
 #
 # Always sources files from control HEAD (or --commit).
 sub propagate {
+	# D36 retired the <env> argument together with the cascade it scoped,
+	# because one run walks every environment and a commit held behind an
+	# ancestor is released by the next bare run rather than by a run aimed
+	# at it.  A caller that still passes one is told so, rather than having
+	# it quietly ignored.  Nothing below can see an argument from here on,
+	# so the cascade the variable feeds is unreachable until the walk
+	# replaces it.
+	command_usage(1) if @_;
 	my ($after_env) = @_;
 
 	my $opts    = get_options;

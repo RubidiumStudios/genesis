@@ -29,7 +29,7 @@ subtest 'bin/genesis' => sub {
 };
 
 subtest 'genesis propagate' => sub {
-	plan tests => 10;
+	plan tests => 11;
 
 	ok(has_command('propagate'), "propagate command is registered");
 
@@ -37,9 +37,8 @@ subtest 'genesis propagate' => sub {
 		Genesis::Commands::PIPELINE,
 		"propagate belongs to the pipeline group");
 
-	# Repo scope only: propagate takes the environment it cascades from as
-	# a positional, because it means "start from here", not "operate on
-	# this one" -- which is what env scope would imply.
+	# Repo scope only: one run walks every environment in the repository,
+	# so there is nothing for env scope to scope it to.
 	is(command_properties('propagate')->{scope}, 'repo',
 		"propagate is repo-scoped");
 
@@ -49,19 +48,27 @@ subtest 'genesis propagate' => sub {
 
 	my %opts = command_properties('propagate')->{options}->@*;
 	ok(exists $opts{'dry-run|n'}, "propagate has a dry-run option");
-	ok(exists $opts{'commit=s'},  "propagate has a commit option");
-	ok(exists $opts{'no-push'},   "propagate has a no-push option");
 
-	# -y is gone.  It was accepted and read by nothing, held only because
-	# the deploy passed it whenever --fix-checks was set, and the deploy
-	# passes it no longer, so a run that gives it is a usage error.
-	ok(!exists $opts{'yes|y'}, "propagate no longer accepts a yes option");
+	# -y is back, with a new meaning under D83.  It was retired when the
+	# only thing that passed it was the deploy, and it returns as the
+	# publish preview's pre-approval, which is the one question it answers
+	# and the provider gate is not it.
+	ok(exists $opts{'yes|y'},     "propagate has a yes option");
+
+	ok(exists $opts{'force'},     "propagate has a force option");
+
+	# The commit override and the push switch are gone.  Both let a caller
+	# change what the run did, and a run the pipeline and the operator can
+	# both make has to be the same run either way.
+	ok(!exists $opts{'commit=s'},
+		"propagate no longer accepts a commit option");
+	ok(!exists $opts{'no-push'},
+		"propagate no longer accepts a no-push option");
 
 	is(scalar(keys %opts), 3, "propagate has only the three options above");
 
 	my $args = command_properties('propagate')->{arguments};
-	cmp_deeply($args, ['env?', ignore()],
-		"propagate takes one optional positional environment");
+	cmp_deeply($args, [], "propagate takes no positional arguments");
 };
 
 done_testing;
