@@ -33,18 +33,35 @@ sub _unfolded {
 }
 
 subtest 'a second apply leaves the previous tip an ancestor' => sub {
-	# Three rows, and one restoration assertion for each of the two runs.
-	plan tests => 5;
+	# Six rows, and one restoration assertion for each of the two runs.
+	plan tests => 8;
 
 	my $h = make_harness(envs => ['qa'], github => 1);
 
 	my (undef, undef, $first) = run_genesis($h, 'pipeline-apply');
 	is($first, 0, 'the first apply exits 0');
 	my $before = ref_in($h->r, 'qa/bosh');
+	ok($before, 'and it published the branch');
+
+	# R loses the branch while the clone carries it on, which is the one
+	# state that has the apply push a branch it has pushed before.  Without
+	# it the second run finds the branch standing on the remote and pushes
+	# nothing at all, and an ancestry read taken between two equal shas
+	# would say nothing about whether a publish can rewrite anything.
+	delete_on_r($h, 'qa/bosh');
+	my $carried = local_only_commit($h, 'qa/bosh');
+	# The commit checked the deployment branch out, and that branch carries
+	# the init file and nothing else, so the copy goes back to control
+	# before the next run.  A command run from a tree with no .genesis/config
+	# in it is refused for a reason that has nothing to do with this row.
+	stand_on($h, $h->control);
 
 	my (undef, undef, $second) = run_genesis($h, 'pipeline-apply');
 	is($second, 0, 'the second apply exits 0');
 	my $after = ref_in($h->r, 'qa/bosh');
+
+	isnt($after, $before, 'the second apply moved the branch on R');
+	is($after, $carried, 'to the tip the clone was carrying');
 
 	my $ok = run({dir => $h->r, passfail => 1},
 		'git', 'merge-base', '--is-ancestor', $before, $after);
