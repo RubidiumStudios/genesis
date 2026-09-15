@@ -196,8 +196,8 @@ subtest 'every divergence refusal names the branch and both counts' => sub {
 };
 
 subtest 'one class action leaves the other two classes alone' => sub {
-	# Eight rows, and one more for each of the two runs.
-	plan tests => 10;
+	# Nine rows, and one more for each of the two runs.
+	plan tests => 11;
 
 	# The kit is here so the walk can reach an environment at all.  Each
 	# environment is loaded before it is diffed, and a kitless harness leaves
@@ -248,10 +248,17 @@ subtest 'one class action leaves the other two classes alone' => sub {
 	my $before_control  = ref_in($h->a, "refs/heads/@{[$h->control]}");
 	my $before_prod_now = ref_in($h->a, "refs/heads/$prod");
 
-	my (undef, $err) = run_genesis($h, 'propagate');
+	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
-	# The walk is where an environment is judged due or not due, so the row
-	# below rests on a walk that ran rather than on one that skipped
+	# The exit code is read because the three rows below it are all rows
+	# about something that did not move, and a run that fell over would
+	# satisfy every one of them.  Should prod ever fall due here again, the
+	# writer would switch to the environment's own name and fail on a branch
+	# a typed repository cannot hold, and without this row the subtest would
+	# stay green across that run.
+	is($exit, 0, 'the run finishes cleanly');
+	# The walk is where an environment is judged due or not due, so the rows
+	# below rest on a walk that ran rather than on one that skipped
 	# everything before it decided anything.
 	like($err, qr{Propagating from}, 'the run reaches the walk');
 	is(ref_in($h->a, "refs/heads/@{[$h->control]}"), $before_control,
