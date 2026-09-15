@@ -203,7 +203,7 @@ B<Examples:>
     genesis repipe
     genesis repipe sandbox
 
-The deprecated name for L</apply>.  It prints a deprecation warning that
+The deprecated name for L</"apply([$layout])">.  It prints a deprecation warning that
 names C<genesis pipeline-apply> and then delegates to C<apply> with the
 same layout and options, so everything the apply entry says holds here
 too.  It will be removed in a future version.

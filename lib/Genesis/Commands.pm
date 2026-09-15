@@ -890,7 +890,9 @@ sub show_global_options { # {{{
 		}
 	}
 
-	my $def_width = (sort {$b <=> $a} map {csize($_)} values(%options_def))[0] + 4;
+	# The same empty set can reach here, so it reads as zero here too.
+	my $def_width =
+		((sort {$b <=> $a} map {csize($_)} values(%options_def))[0] // 0) + 4;
 
 	if (defined $options_order{global}) {
 		$out .= "\n#Wku{Global Options}\n";
