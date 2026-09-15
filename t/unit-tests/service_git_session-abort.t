@@ -89,41 +89,61 @@ subtest 'a failed restore reaches the stuck state and dies naming both' => sub {
 subtest 'a reset that cannot run is loud rather than carried through' => sub {
 	plan tests => 4;
 
-	my $h = make_harness(envs => ['qa']);
-	init_branch($h, 'qa');
-	my $control = commit_on_control($h,
-		files   => {'ops/one.yml' => "---\none: true\n"},
-		message => 'an ops file for qa',
-		push    => 1,
-	);
+	# The discard is made to fail by taking the write bit off the directory
+	# git has to unlink in, and root is not subject to that bit: as root
+	# the discard would succeed, the abort would take its ordinary path,
+	# and two of these rows would go red over a permission rather than over
+	# the code.  The harness cannot arm this fault instead, because its
+	# plan wraps Service::Git methods and the discard is a bare run inside
+	# the session.
+	SKIP: {
+		skip 'cannot fail a discard as root', 4 if $> == 0;
 
-	my $git = $h->git('a');
-	my $session = $git->session(control => $h->control);
-	$session->begin;
-	$session->switch($h->slug('qa'));
-	$git->checkout_file($control, 'ops/one.yml');
-	$git->commit('deliver ops/one.yml', 'ops/one.yml');
+		my $cwd = getcwd();
 
-	# Something wrote into the tree, and the directory it wrote into cannot
-	# be written again, which is a discard git reports and cannot make.  An
-	# abort that read nothing back would go on to check out control over a
-	# tree that still holds those changes.
-	put_file($h->a . '/ops/one.yml', "---\none: written by a hook\n");
-	chmod 0500, $h->a . '/ops';
-	my ($err, $exit) = bail_from(sub {$session->abort('the run failed')});
-	chmod 0700, $h->a . '/ops';
+		my $h = make_harness(envs => ['qa']);
+		init_branch($h, 'qa');
+		my $control = commit_on_control($h,
+			files   => {'ops/one.yml' => "---\none: true\n"},
+			message => 'an ops file for qa',
+			push    => 1,
+		);
 
-	# The words asked for are the message's own and appear nowhere in this
-	# row's name or in the error handed to abort, because Carp::Always
-	# folds a backtrace into a caught death and a backtrace carries both of
-	# those strings, so a looser pattern would match the row's own name.
-	like($err, qr/\Athe run failed/,
-		'the refusal opens with the original error');
-	like($err, qr/could not be discarded/,
-		'and says the uncommitted changes are still in the tree');
-	like($err, qr/\Q@{[$h->slug('qa')]}\E/,
-		'and names the branch we are left standing on');
-	is($exit, SOFTWARE, 'and it exits SOFTWARE, because this is a defect');
+		my $git = $h->git('a');
+		my $session = $git->session(control => $h->control);
+		$session->begin;
+		$session->switch($h->slug('qa'));
+		$git->checkout_file($control, 'ops/one.yml');
+		$git->commit('deliver ops/one.yml', 'ops/one.yml');
+
+		# Something wrote into the tree, and the directory it wrote into
+		# cannot be written again, which is a discard git reports and
+		# cannot make.  An abort that read nothing back would go on to
+		# check out control over a tree that still holds those changes.
+		my $ops  = $h->a . '/ops';
+		my $mode = (stat($ops))[2] & 07777;
+		put_file($h->a . '/ops/one.yml', "---\none: written by a hook\n");
+		chmod 0500, $ops;
+		my ($err, $exit) = bail_from(sub {$session->abort('the run failed')});
+		chmod $mode, $ops;
+
+		# The words asked for are the message's own and appear nowhere in
+		# this row's name or in the error handed to abort, because
+		# Carp::Always folds a backtrace into a caught death and a
+		# backtrace carries both of those strings, so a looser pattern
+		# would match the row's own name.
+		like($err, qr/\Athe run failed/,
+			'the refusal opens with the original error');
+		like($err, qr/could not be discarded/,
+			'and says the uncommitted changes are still in the tree');
+		like($err, qr/\Q@{[$h->slug('qa')]}\E/,
+			'and names the branch we are left standing on');
+		is($exit, SOFTWARE, 'and it exits SOFTWARE, because this is a defect');
+
+		# The refusal comes before the restore, so this process is still
+		# standing in the repository the abort gave up on.
+		chdir($cwd) or die "cannot return to $cwd: $!\n";
+	}
 };
 
 subtest 'a fault between the first write and the commit leaves nothing staged' => sub {

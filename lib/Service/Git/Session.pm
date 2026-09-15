@@ -150,13 +150,15 @@ sub begin {
 		head   => $git->sha('HEAD'),
 		cwd    => getcwd(),
 	};
-	# The three records of what this session did are cleared here rather
-	# than at finish, because the handle hands out one session and a caller
-	# that opens a second one would otherwise read the first one's answers:
-	# a session still open would say it had finished, and an abort would
-	# reset a branch an earlier session wrote.
+	# Everything the last session recorded is cleared here rather than at
+	# finish, because the handle hands out one session and a caller that
+	# opens a second one would otherwise read the first one's answers: a
+	# session still open would say it had finished, one that had not
+	# switched would name the branch the last one stood on, and an abort
+	# would reset a branch an earlier session wrote.
 	$self->{active}    = 1;
 	$self->{finished}  = 0;
+	$self->{on}        = undef;
 	$self->{switched}  = {};
 	$self->{committed} = {};
 	$self->_register_net;
@@ -257,11 +259,16 @@ sub finish {
 # decides what to do, so it asks for the finish and is given a false back
 # rather than a death.  The session stays open, so the caller can name the
 # files through modified_paths and then abort.
+#
+# The answer is read back off the session rather than assumed from the clean
+# tree, so that a true answer means what it says.  finish is a no-op on a
+# session that never opened and on one that went out through abort, and
+# either of those would otherwise be reported as a finish that happened.
 sub finish_if_clean {
 	my ($self) = @_;
 	return 0 if @{$self->modified_paths};
 	$self->finish;
-	return 1;
+	return $self->finished;
 }
 
 # }}}

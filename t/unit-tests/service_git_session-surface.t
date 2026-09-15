@@ -20,7 +20,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'a clean finish answers finished and finish_if_clean' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	init_branch($h, 'qa');
@@ -29,6 +29,11 @@ subtest 'a clean finish answers finished and finish_if_clean' => sub {
 
 	my $session = $git->session(control => $h->control);
 	ok(!$session->finished, 'a session that never opened is not finished');
+
+	# A clean tree is not a finish.  The answer says whether the session
+	# finished, and there was no session here to finish.
+	ok(!$session->finish_if_clean,
+		'and finish_if_clean says so over a tree with nothing modified');
 
 	$session->begin;
 	$session->switch($h->slug('qa'));
@@ -87,6 +92,33 @@ subtest 'the session hands back its handle and takes a recorded commit' => sub {
 
 	$session->finish;
 	ok($session->finished, 'and the session finished cleanly afterwards');
+};
+
+subtest 'a session opened a second time answers for itself alone' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	refresh($h, 'a', $h->control, $h->slug('qa'));
+	my $git = $h->git('a');
+
+	# The handle builds the session once and answers with that object
+	# afterwards, so control after a deployment branch is this same session
+	# opened again rather than a second one.
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	$session->finish;
+	is($session->on, $h->slug('qa'), 'the first session names what it stood on');
+
+	$session->begin;
+	ok(!$session->finished,
+		'a second begin takes back the first one\'s finish');
+	is($session->on, undef, 'and the target it stood on');
+	is_deeply([$session->committed_branches], [],
+		'and the branches it committed to');
+
+	$session->finish;
 };
 
 sub exception {
