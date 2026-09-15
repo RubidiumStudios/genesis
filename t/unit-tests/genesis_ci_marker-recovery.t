@@ -177,13 +177,20 @@ subtest 'a walk capped at nothing recovers from the body' => sub {
 };
 
 subtest 'a marker naming another environment is not recovered' => sub {
-	plan tests => 3;
+	plan tests => 7;
 
 	# A pull request body is text a person can edit after Genesis wrote it,
 	# and it is the only place the reader takes a marker from that is not a
 	# commit on the environment's own branch.  A caller that knows which
 	# environment it is asking about says so, and a marker addressed
 	# elsewhere is then no answer at all.
+	#
+	# The bodies below are shaped like the ones the run will hand over.  A
+	# body says more after the marker, because Genesis writes a sentence
+	# above it and a person may add a note below it, and the GitHub API
+	# commonly hands a body back with its lines ending in a carriage return
+	# and a newline.  A marker is therefore rarely the last thing in the
+	# text and rarely followed by a bare newline.
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	init_branch($h, 'qa');
 	my $control = commit_on_control($h,
@@ -191,20 +198,54 @@ subtest 'a marker naming another environment is not recovered' => sub {
 		message => 'change qa',
 		push    => 1,
 	);
+	my $newer = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\nsecond: true\n"},
+		message => 'change qa again',
+		push    => 1,
+	);
 	refresh($h, 'a', $h->slug('qa'));
 
 	my $git   = $h->git('a');
 	my $ref   = 'origin/' . $h->slug('qa');
 	my $short = substr($control, 0, 12);
+	my $late  = substr($newer, 0, 12);
 
 	my ($sha, undef, $source) = Genesis::CI::Marker::newest($git, $ref,
-		recover_from => "[pipeline] control\@$short -> prod", env => 'qa');
-	is($sha, undef, 'a body naming another environment recovers nothing');
-	is($source, undef, 'and the answer says it came from nowhere');
+		env          => 'qa',
+		recover_from => "Carries one control commit.\n\n".
+		                "[pipeline] control\@$short -> qa\n\n".
+		                "Please review before merging.\n",
+	);
+	is($sha, $control, 'a marker with more of the body under it is recovered');
+	is($source, 'pull-request', 'and the answer says the body is where it came from');
 
 	is(Genesis::CI::Marker::newest($git, $ref,
-		recover_from => "[pipeline] control\@$short -> qa", env => 'qa'),
-		$control, 'while the environment the caller named is recovered');
+		env          => 'qa',
+		recover_from => "Carries one control commit.\r\n\r\n".
+		                "[pipeline] control\@$short -> qa\r\n",
+		), $control, 'and so is one in a body whose lines end in a carriage return');
+
+	# Git's own squash lists the newest commit first, so a reader that took
+	# the last marker it could match would answer the older one here.
+	is(Genesis::CI::Marker::newest($git, $ref,
+		env          => 'qa',
+		recover_from => "Squashed commit of the following:\n\n".
+		                "    [pipeline] control\@$late -> qa\n\n".
+		                "    [pipeline] control\@$short -> qa\n",
+		), $newer, 'a body carrying two of them still answers the newer');
+
+	my ($wrong, undef, $none) = Genesis::CI::Marker::newest($git, $ref,
+		env          => 'qa',
+		recover_from => "[pipeline] control\@$short -> prod\n\n".
+		                "Raised against prod by hand.\n",
+	);
+	is($wrong, undef, 'while a body naming another environment recovers nothing');
+	is($none, undef, 'and the answer says it came from nowhere');
+
+	is(Genesis::CI::Marker::newest($git, $ref,
+		env          => 'qa',
+		recover_from => "[pipeline] control\@$short -> qa-west\n",
+		), undef, 'and neither does one naming a name qa is only the start of');
 };
 
 done_testing;
