@@ -1679,10 +1679,14 @@ C<ok =E<gt> 0> with a C<kind>, and a branch the remote does not have is
 returned in C<absent>; callers that want a hard failure --
 C<Genesis::Top::fetch_pipeline_envs> -- raise on the classified result
 themselves. One condition does raise, and it is local rather than remote:
-where C<git for-each-ref> cannot enumerate this clone's own branches, the
-refresh bails naming the repository and git's stderr. Every name would
-otherwise look locally absent and take the forced refspec onto
-C<refs/heads>, which is the overwrite this method exists to prevent.
+where C<git for-each-ref> cannot enumerate a namespace this refresh
+reads, the local branches before the fetch or either namespace after it,
+the refresh bails naming that namespace, the repository, and git's
+stderr. A silently empty read of the local branches would make every
+name look locally absent and take the forced refspec onto C<refs/heads>,
+which is the overwrite this method exists to prevent, and a silently
+empty read after the fetch would report a working refresh as having
+fetched nothing.
 
 B<Examples:>
 
