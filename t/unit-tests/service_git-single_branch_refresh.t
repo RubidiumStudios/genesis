@@ -11,6 +11,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use Test::Exception;
 
 use Genesis;
 use Service::Git;
@@ -75,6 +76,30 @@ subtest 'a branch only on the remote is still created from the remote' => sub {
 	$h->git('a')->fetch_branches([$slug]);
 	is(ref_in($h->a, "refs/heads/$slug"), ref_in($h->r, $slug),
 		'the local ref is created from the remote, which I2 permits');
+};
+
+subtest 'a refresh that reports a failure is a bail, not a fetched' => sub {
+	plan tests => 3;
+
+	my $h    = make_harness(envs => ['qa'], vault => 0);
+	my $slug = $h->slug('qa');
+
+	# A branch R holds and this clone lacks is the one path through
+	# resolve_branch that refreshes anything.  A local ref named for the
+	# slug's first segment makes git refuse to write refs/heads/qa/bosh
+	# under it, so the refresh comes back reporting a failure exactly as
+	# it does for an unreachable remote, and the row can ask what
+	# resolve_branch does with a report it used to throw away.
+	init_branch($h, 'qa');
+	delete_local($h, 'a', $slug);
+	local_branch($h, 'qa');
+
+	my $git = $h->git('a');
+	throws_ok {$git->resolve_branch($slug)} qr/Failed to fetch/,
+		'a failed refresh refuses rather than answering fetched';
+	like($@, qr/origin/, 'and the refusal names the remote it could not get');
+	is(ref_in($h->a, "refs/heads/$slug"), undef,
+		'and no local ref stands for a branch we never got');
 };
 
 done_testing;

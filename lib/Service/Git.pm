@@ -863,7 +863,16 @@ sub resolve_branch {
 	# branch L holds and creates L only where L lacks it.  The removed
 	# single-branch helper forced R onto L for any name it was given,
 	# which is H17.
-	$self->fetch_branches([$branch], $remote);
+	#
+	# That helper raised on a failed fetch, where the refresh reports one
+	# instead, so the report is read here rather than thrown away.  A
+	# swallowed failure would answer 'fetched' for a branch this clone
+	# still lacks, and a caller that reads the answer hands a ref that is
+	# not there to a checkout.
+	my (undef, $result) = $self->fetch_branches([$branch], $remote);
+	bail("Failed to fetch #C{%s} from #C{%s}: %s", $branch, $remote,
+		($result->{err} || $result->{kind} || "rc") =~ s/\s+$//r)
+		unless $result->{ok};
 	return 'fetched';
 }
 

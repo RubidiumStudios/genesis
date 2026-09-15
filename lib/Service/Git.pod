@@ -1457,10 +1457,11 @@ absence is the whole truth and C<absent> is returned without a probe.
 
 The fetch itself goes through C<fetch_branches> with the one name, which
 writes the remote-tracking ref for a branch this clone already holds and
-creates the local ref only where the clone lacks it. A transport failure
-comes back in that method's result rather than as a raise, and the answer
-here is still C<fetched>, so a caller never reads a failed refresh as
-"safe to create".
+creates the local ref only where the clone lacks it. That method reports a
+transport failure in its result rather than raising one, so the result is
+read here and a failed refresh is raised rather than answered. Returning
+C<fetched> for a fetch that did not happen would hand a caller a branch
+name it can neither read nor check out.
 
 B<C<offline> withholds the answer instead of guessing.> Working offline is a
 legitimate reason not to contact the remote, but it is not a reason to
@@ -1504,6 +1505,12 @@ B<Errors:>
 
 Raised via C<remote_branch_exists> when the remote cannot be reached or
 authenticated against. Deliberately not caught: see above.
+
+=item C<"Failed to fetch #C{%s} from #C{%s}: %s">
+
+Raised when the remote confirmed the branch but the refresh that followed
+failed, carrying git's stderr or the classified kind, so a caller never
+reads a failed refresh as a branch it now has.
 
 =back
 

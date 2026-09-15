@@ -332,8 +332,21 @@ sub _propagate_one_pr_env {
 	my $existing_pr = @open ? $open[0] : undef;
 
 	if ($existing_pr) {
-		# count == 1 (or >1, treated as 1): append to existing branch
-		$git->fetch_branches([$pr_branch]) unless $git->branch_exists($pr_branch);
+		# count == 1 (or >1, treated as 1): append to existing branch.
+		#
+		# The refresh runs only where this clone lacks the branch, so the
+		# switch below has nothing to switch to when it fails.  The result
+		# is read rather than discarded, and the failure stops this
+		# environment the way every other failed delivery does, which is a
+		# die the caller turns into a warning and an error entry.
+		unless ($git->branch_exists($pr_branch)) {
+			my (undef, $fetched) = $git->fetch_branches([$pr_branch]);
+			die sprintf("Failed to fetch '%s' from the remote: %s\n",
+				$pr_branch,
+				($fetched->{err} || $fetched->{kind} || 'the fetch failed')
+					=~ s/\s+$//r)
+				unless $fetched->{ok};
+		}
 		$session->switch($pr_branch);
 
 		# Idempotency: skip whole env if HEAD already matches this control_sha
