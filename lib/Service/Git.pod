@@ -1031,6 +1031,13 @@ Maximum number of commits.
 A git format string. Defaults to C<'%H %s'> -- sha and subject -- or to
 C<'%H\x1f%B'> when C<body> is set.
 
+The two options are not meant to be combined. A custom format given
+alongside C<body> is used as it stands, with only the record separator
+appended, so unless it puts a unit separator between the sha and the
+message every record comes back with the whole formatted string in C<sha>
+and an empty C<message>, and nothing warns. A caller that wants records
+passes C<body> alone.
+
 =item C<paths>
 
 Arrayref of git-root-relative paths; only commits touching them are returned.
