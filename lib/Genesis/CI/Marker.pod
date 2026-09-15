@@ -176,6 +176,47 @@ B<Examples:>
   my (undef, $depth) = Genesis::CI::Marker::newest($git, 'qa/bosh');
   # $depth is 2 when two hand commits stand above the marker
 
+=head2 trailers
+
+    my $trailers = Genesis::CI::Marker::trailers($git, $commit);
+
+The two Genesis trailers one commit carries, as a hashref of C<stage> for
+C<Genesis-Stage> and C<release_stage> for C<Genesis-Release-Stage>.
+
+A commit carrying C<Genesis-Stage> is a gate, and the trailer's value is the
+reason, whose hold form reads C<hold: E<lt>reasonE<gt>>.  A commit carrying
+C<Genesis-Release-Stage> releases a gate, and the value names that gate's
+control commit.  What either value means is for the walk that acts on it;
+this returns the value as written.
+
+Git parses the trailer block, so where a trailer may sit and how a folded
+value unfolds are git's rules and not ours.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle.
+
+=item C<$commit>
+
+Any ref naming one commit.
+
+=back
+
+B<Returns:> A hashref carrying only the keys the commit actually has, so a
+commit with neither trailer gives an empty hashref.
+
+B<Examples:>
+
+  Genesis::CI::Marker::trailers($git, $gate);
+  # returns {stage => 'hold: migrate the database'}
+
+  Genesis::CI::Marker::trailers($git, $ordinary);
+  # returns {}
+
 =head1 INTERNAL FUNCTIONS
 
 Every public entry of this module goes above this heading, under
