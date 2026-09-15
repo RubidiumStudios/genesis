@@ -546,6 +546,55 @@ B<Examples:>
   $git->create_branch('prod', 'control');
   # returns $self; prod now exists at control's tip
 
+=head2 set_branch_ref
+
+  $git->set_branch_ref($branch, $ref);
+
+Forces one local branch ref to another ref. This is the write the design
+admits in two cases and no others, which are the pre-flight's reset of a
+branch whose only local commits are ones a re-run reproduces, and the
+session's abort of a branch it committed to. Nothing else may call it, and in
+particular nothing may call it for the control branch, whose committed work is
+never discarded.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The local branch to move.
+
+=item C<$ref>
+
+Where to move it to, which the two callers spell as a remote-tracking ref or
+as a commit.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+A refusal when the branch is the one this working tree is on, since the ref
+and the tree would then disagree. The caller switches away first.
+
+=item *
+
+C<"Failed to move '%s' to '%s'"> -- raised via C<run>'s C<onfailure> when git
+cannot resolve the ref or cannot write the branch.
+
+=back
+
+B<Examples:>
+
+  $git->set_branch_ref('qa/bosh', 'refs/remotes/origin/qa/bosh');
+  # returns $self; qa/bosh now stands where origin/qa/bosh stands
+
 =head2 branch_exists
 
   my $bool = $git->branch_exists($name);

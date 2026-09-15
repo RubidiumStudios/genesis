@@ -276,6 +276,51 @@ sub initial_state {
 		_origin_refusal($action, $outcome, $remote, \@local_only, \@unrelated))
 		if @local_only || @unrelated;
 
+	# Each branch's local-only commits, classified.  A marker means the walk
+	# reproduces the commit, so the branch may be reset; no marker means a
+	# hand edit that belongs on control, so the whole run refuses (D32, D33).
+	my (@reset, @hand);
+	for my $env (@{$opts{envs} // []}) {
+		my $record = $state->{branches}{$env} or next;
+		my $branch = $record->{branch};
+		next if $record->{state} eq 'no-local';
+
+		my @commits = local_only_commits($git, $branch);
+		next unless @commits;
+
+		if (grep {!defined $_->{marker}} @commits) {
+			push @hand, {branch  => $branch,
+			             ahead   => $record->{ahead},
+			             behind  => $record->{behind},
+			             commits => [grep {!defined $_->{marker}} @commits]};
+			next;
+		}
+		push @reset, {env => $env, branch => $branch, commits => \@commits};
+	}
+
+	bail({exitcode => DATAERR}, '%s',
+		_hand_commit_refusal($action, $outcome, $remote, \@hand))
+		if @hand;
+
+	# The first write of the run, and the one forced write onto a deployment
+	# branch that rule 3 of the class table admits beside the session's abort.
+	for my $r (@reset) {
+		my $tracking = sprintf('refs/remotes/%s/%s', $remote, $r->{branch});
+		my $line = sprintf('reset %s to %s/%s, discarding %s that the walk reproduces',
+			$r->{branch}, $remote, $r->{branch}, _commits(scalar @{$r->{commits}}));
+
+		if ($opts{dry_run}) {
+			warning(
+				"#Y{This report assumes the reset of }#C{%s}#Y{ that a real ".
+				"run would make.}  %s",
+				$r->{branch}, $line);
+		} else {
+			$git->set_branch_ref($r->{branch}, $tracking);
+			$state->{branches}{$r->{env}}{reset} = 1;
+		}
+		push @{$state->{events}}, $line;
+	}
+
 	return $state;
 }
 
@@ -357,6 +402,38 @@ sub _unrelated_refusal {
 				"#C{genesis propagate} again.",
 				$_, $remote, $_, $_)
 		} @{$branches || []};
+}
+
+# }}}
+# _hand_commit_refusal - D33's refusal of the whole run {{{
+#
+# Names each branch, each commit, and the two ways out with the command for
+# each, which is what D96 asks of an illegal initial state.  No flag does the
+# operator's half, because under D38 the right friction is to undo by hand.
+sub _hand_commit_refusal {
+	my ($action, $outcome, $remote, $offenders) = @_;
+	return sprintf(
+		"Refusing to %s.  %s\n\n%s\n\n%s  %s",
+		$action,
+		"These branches carry a commit the remote does not have and that ".
+		"carries no propagation marker, so it is a hand edit that belongs on ".
+		"control.",
+		join("\n", map {
+			my $branch = $_->{branch};
+			map {sprintf('    %s  %s  %s', $branch, $_->{short}, $_->{subject})}
+				@{$_->{commits}}
+		} @$offenders),
+		join('  ', map {
+			sprintf(
+				"#C{%s} is ahead of #C{%s/%s} by %s and behind it by %s.  Push ".
+				"it with #C{git push %s %s} if it is meant, or move the change ".
+				"to control and reset the branch with ".
+				"#C{git branch -f %s %s/%s} if it is not.",
+				$_->{branch}, $remote, $_->{branch},
+				_commits($_->{ahead}), _commits($_->{behind}),
+				$remote, $_->{branch}, $_->{branch}, $remote, $_->{branch})
+		} @$offenders),
+		$outcome);
 }
 
 # }}}
