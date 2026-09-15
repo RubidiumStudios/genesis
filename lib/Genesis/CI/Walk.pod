@@ -1,0 +1,438 @@
+=head1 NAME
+
+Genesis::CI::Walk - the per-commit propagation walk and its record
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Walk;
+
+    # What every environment should receive, computed and written nowhere.
+    my $record = Genesis::CI::Walk::plan($top, git => $git);
+
+    # Then, inside the run's session, one commit per control commit.
+    for my $env_record (@{$record->{environments}}) {
+      next unless @{$env_record->{pending}};
+      $session->switch($env_record->{branch});
+      Genesis::CI::Walk::deliver_pending(
+        session => $session,
+        env     => $top->load_env($env_record->{env}),
+        record  => $env_record,
+      );
+    }
+
+=head1 DESCRIPTION
+
+The walk reads durable state and decides what each environment should
+receive.  It reads control on the remote, each deployment branch's newest
+marker, each environment's certified commit in exodus, the applied record,
+and the hold record.  Every routing question is answered out of the tree at
+the commit being routed rather than out of the tree on disk, which is what
+keeps a report reproducible from the repository rather than from whatever the
+operator happened to have checked out.  The topology and the environment files
+are the exception, and they are read off control, which the run stands itself
+on before it asks for a plan.
+
+It writes nothing itself.  The caller delivers what the record marks pending,
+one commit at a time, through the session's single writer, so the one thing
+that touches a deployment branch stays in one place.
+
+Each control commit is routed on its own, in control order, and becomes
+exactly one commit on the deployment branch.  Collapsing everything
+outstanding into a single diff against control's tip made an urgent change to
+one environment wait behind an unrelated earlier change to a shared file, and
+routing per file would have split a commit whose files have to land together.
+The middle of those two is what this module does.
+
+=head1 FUNCTIONS
+
+=head2 plan
+
+    my $record = Genesis::CI::Walk::plan($top, git => $git);
+    my $record = Genesis::CI::Walk::plan($top, git => $git,
+                                         scope => ['qa'], branches => \%b);
+
+The run's canonical record, computed from durable state alone.
+
+It reads the pipeline's applied record, walks the topology in the order
+C<< Genesis::Top->pipeline_topology >> gives it, takes each branch's base
+from the newest marker that branch carries, and routes every control commit
+that stands after it.  Nothing here writes, so C<genesis propagate --dry-run>
+and C<genesis pipeline-status> render one record and can never disagree about
+what a repository is holding.
+
+An environment with no settled branch is recorded and passed over, since only
+C<genesis pipeline-apply> cuts a deployment branch.  An environment that will
+not load is recorded with its reason in C<error>, because one unreadable
+environment is not a reason to stop reading the rest.
+
+Fields a later stage owns are present and null rather than absent, so a
+renderer never has to ask whether a key exists.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the run is standing in.
+
+=item C<git>
+
+Required.  The C<Service::Git> handle every reading is made through.
+
+=item C<scope>
+
+Optional.  An arrayref of environment names to plan.  The DAG order and each
+environment's C<prior_env> and C<depth> come from the whole topology either
+way, so an environment named on its own still reads its ancestor correctly.
+
+=item C<branches>
+
+Optional.  The pre-flight's per-environment branch records, keyed by
+environment name, each carrying the branch it settled and, under a dry run,
+the ref a real run would have moved that branch to.  An environment absent
+from it has no deployment branch on either side.
+
+=item C<refreshed>
+
+Optional, default 1.  Whether the remote-tracking refs this walk reads were
+brought up to date before it ran.
+
+=item C<provider>
+
+Optional.  The pipeline provider that owns propagation here, defaulting to
+the one the configuration names.
+
+=back
+
+B<Returns:> A hashref carrying C<pipeline>, which is the label the
+configuration gives the pipeline or null where it names none, C<provider>,
+C<control>, C<applied>, C<refreshed>, and C<environments>, the last being an
+arrayref of per-environment records in DAG order.  Each of those carries C<env>, C<type>,
+C<branch>, C<prior_env>, C<depth>, C<reading>, C<merged>, C<deployed>,
+C<pending>, C<held>, C<proposed>, C<hold>, C<drifted>, C<pr>, C<manual>,
+C<divergence>, C<discovery>, C<error>, C<outcome>, and C<outcome_detail>.
+
+B<Errors:> Raises a bug where no git handle is given, since every reading
+below is made through one and a walk without it can answer nothing.
+
+B<Examples:>
+
+  my $record = Genesis::CI::Walk::plan($top, git => $git);
+  # returns a record whose environments arrayref is in DAG order, with
+  # each environment's due commits under pending
+
+=head2 control_commits
+
+    my @commits = Genesis::CI::Walk::control_commits($git, $control, $base);
+
+The control commits after C<$base>, oldest first.
+
+Control is linear, so first-parent order is control order, and reversing it
+puts the oldest due commit first, which is the order a delivery has to make
+them in.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The handle to read through.
+
+=item C<$control>
+
+The control branch, or any commit on it.
+
+=item C<$base>
+
+The commit to start after, which is normally the one the branch's newest
+marker names.  Undefined means the whole of control, which is what an
+unseeded branch asks for.
+
+=back
+
+B<Returns:> A list of hashrefs, each with C<sha> and C<subject>, oldest
+first, and an empty list where git could not read the range.
+
+B<Examples:>
+
+  my @due = Genesis::CI::Walk::control_commits($git, 'control', $marker);
+  # returns ({sha => '...', subject => 'Tune qa'}, ...)
+
+=head2 changed_set
+
+    my ($triggering, $carried)
+      = Genesis::CI::Walk::changed_set($git, $env, $commit);
+
+One commit's changed files, filtered to the environment's propagation set as
+that commit's own tree defines it, and split in two.
+
+The set is read from the tree at the commit being delivered and never from
+the working tree, because a restructure moves the prefix that defines it.  A
+triggering path is one whose change means deploy me; a non-triggering path
+has to be current on the deployment branch without its change meaning that.
+A commit whose content here is only non-triggering is not routed at all, and
+its content arrives in the next delivery, since a delivery is a mirror.
+
+A kind that is a directory stands for everything under it, so a commit that
+touches the dev kit or a reaction script is matched by the directory the set
+names rather than being read as a path the set has never heard of.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The handle to read through.
+
+=item C<$env>
+
+The environment whose set the commit is filtered against.
+
+=item C<$commit>
+
+The control commit whose changed files are being read.
+
+=back
+
+B<Returns:> Two arrayrefs, the triggering paths and the non-triggering ones,
+each sorted, and two empty ones where git could not read the commit.
+
+B<Errors:> Raises whatever reading the set at a commit raises, which is a
+commit carrying no kit the environment declares, a tracked list escaping the
+deployment root, and a read with no vault to lend.
+
+B<Examples:>
+
+  my ($files, $carried) = Genesis::CI::Walk::changed_set($git, $env, $sha);
+  # returns (['qa.yml'], ['.genesis/config'])
+
+=head2 undeployed_set
+
+    my @paths
+      = Genesis::CI::Walk::undeployed_set($git, $env, $certified, $upto);
+
+Every file in the environment's propagation set that changed on control
+between its certified commit and the commit under consideration.
+
+An environment that has never certified a commit is holding everything below
+it, so with no certified commit the answer is the whole set rather than the
+empty list, and nothing here ever falls back to control's tip.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The handle to read through.
+
+=item C<$env>
+
+The environment whose set the diff is filtered against.
+
+=item C<$certified>
+
+The control commit that environment last deployed from, or undefined where it
+has deployed nothing.
+
+=item C<$upto>
+
+The control commit the question is being asked about.
+
+=back
+
+B<Returns:> A list of git-root-relative paths, and an empty list where git
+could not read the range.
+
+B<Errors:> Raises whatever reading the set at a commit raises, for the
+reasons L</changed_set> gives.
+
+B<Examples:>
+
+  my @held = Genesis::CI::Walk::undeployed_set($git, $env, undef, $sha);
+  # returns the whole triggering set, because nothing is certified
+
+=head2 walk_env
+
+    Genesis::CI::Walk::walk_env(git => $git, env => $env, record => $rec,
+                                control => $sha, base => $marker,
+                                hold_check => sub { undef });
+
+One environment's walk, from its newest marker to control.
+
+Each due commit is routed on its own, in control order.  The first hold ends
+the delivery for that environment, because a mirror at any later commit would
+carry the held one with it, and every commit after the hold is recorded as
+C<behind-held-commit> so that no routed commit goes unnamed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<git>
+
+The handle to read through.
+
+=item C<env>
+
+The environment being walked.
+
+=item C<record>
+
+That environment's record, which this appends to.
+
+=item C<control>
+
+The control commit the walk runs up to.
+
+=item C<base>
+
+The commit to start after, or undefined for the whole of control.
+
+=item C<hold_check>
+
+A coderef called as C<< $hold_check->($commit, $files) >>, answering a
+hashref where the commit is held and undefined where it is not.
+
+=back
+
+B<Returns:> The record it was given, with C<pending> and C<held> filled in.
+
+B<Examples:>
+
+  Genesis::CI::Walk::walk_env(git => $git, env => $env, record => $rec,
+                              control => $sha, base => undef,
+                              hold_check => sub { undef });
+  # every due commit lands in $rec->{pending}, in control order
+
+=head2 deliver_pending
+
+    Genesis::CI::Walk::deliver_pending(session => $session, env => $env,
+                                       record => $env_record);
+
+Hands each pending commit to the single writer, one commit at a time.
+
+One control commit becomes one commit on the deployment branch, carrying the
+marker that names it and mirroring the set as it stood at that commit.  The
+writer asserts the snapshot invariant on the index before each commit, so the
+assertion runs after every delivery rather than once at the end of the run.
+
+The session has to be standing on the environment's deployment branch already,
+because the writer commits where it finds itself.
+
+B<Parameters:>
+
+=over 4
+
+=item C<session>
+
+The run's open session, standing on the deployment branch.
+
+=item C<env>
+
+The environment being delivered to, which the writer reads its set through.
+
+=item C<record>
+
+That environment's record.  Each entry in C<pending> gains C<commit>,
+C<delivered>, C<removed>, and C<overwrote>.
+
+=item C<dry_run>
+
+Optional.  Where it is true the writer reports what would land and what would
+go and writes nothing at all.
+
+=back
+
+B<Returns:> The record it was given, with C<overwrote> collected across the
+deliveries and C<merged> moved to the last control commit delivered.  A
+preview moves nothing, so under C<dry_run> C<merged> stays where the branch's
+own marker put it.
+
+B<Errors:> Raises whatever the single writer raises, which is an empty
+propagation set, a source commit holding none of it, and either index
+assertion failing.
+
+B<Examples:>
+
+  Genesis::CI::Walk::deliver_pending(session => $session, env => $env,
+                                     record => $env_record);
+  # commits once per pending entry, newest last
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _reading
+
+    my $reading = Genesis::CI::Walk::_reading($marker, $deployed);
+
+Which of the four readings describes a deployment branch.
+
+A branch with no marker has been cut and never delivered to, which is
+C<unseeded>.  A branch whose marker names the control commit the environment
+last deployed from is C<deployed>, and one whose marker has moved past it is
+C<pending-deploy>.  A branch whose deployment could not be read keeps
+C<not-propagated>, because claiming either of the other two would be claiming
+something no durable state said.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$marker>
+
+The control commit the branch's newest marker names, or undefined.
+
+=item C<$deployed>
+
+The environment's last successful deployment as a hashref, or undefined.
+
+=back
+
+B<Returns:> One of the four readings, as a string.
+
+B<Examples:>
+
+  Genesis::CI::Walk::_reading(undef, undef);
+  # returns 'unseeded'
+
+=head2 _load_error
+
+    my $reason = Genesis::CI::Walk::_load_error($err);
+
+A short reason from a load that raised.
+
+The record carries one line per environment, because the report prints it
+beside the environment's name, while the raised text is several decorated
+lines of which the first substantive one says what went wrong.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$err>
+
+Whatever the failed load left in C<$@>.
+
+=back
+
+B<Returns:> The first substantive line, trimmed, or C<'unknown reason'>.
+
+B<Examples:>
+
+  Genesis::CI::Walk::_load_error("\nNo such environment 'qa'\n  at ...\n");
+  # returns "No such environment 'qa'"
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut

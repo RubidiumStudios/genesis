@@ -144,12 +144,11 @@ subtest 'the diff base names what control still has to deliver' => sub {
 	commit_on_control($h,
 		files => {'kit-overrides.yml' => "---\nfrom: control\n"}, push => 1);
 
-	# A dry run, because the writer the walk hands a target to still names
-	# a branch by the environment alone, and what this row is about is
-	# which files the walk finds rather than how it delivers them.
+	# A dry run, because what this row is about is which files the walk
+	# finds rather than what the delivery writes.
 	my (undef, $err) = run_genesis($h, 'propagate', '--dry-run');
 
-	like($err, qr{^\s*qa:\s+1\s+file\s+to\s+propagate}m,
+	like($err, qr{^\s*qa:\s+would deliver 1 commit}m,
 		'the walk names the environment as receiving the change');
 	like($err, qr{kit-overrides\.yml}, 'and names the file control added');
 	unlike($err, qr{No changes to propagate},

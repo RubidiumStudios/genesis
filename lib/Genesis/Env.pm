@@ -1522,6 +1522,23 @@ sub propagation_files {
 # }}}
 # propagation_files_at - the propagation set as it stood at a control commit {{{
 #
+# The at-commit reader of D69, sliced the way propagation_files slices the
+# working-tree one, so a caller that wants the triggering half of D68 at a
+# commit asks for it in the same word at both readers.  The guard is on
+# defined rather than on exists for the reason propagation_files gives.
+sub propagation_files_at {
+	my ($self, $commit, %opts) = @_;
+	my $kinds = $self->_propagation_file_kinds_at($commit, %opts);
+
+	return sort keys %$kinds unless defined $opts{triggering};
+
+	my $want = $opts{triggering} ? 1 : 0;
+	return sort grep {($kinds->{$_} ? 1 : 0) == $want} keys %$kinds;
+}
+
+# }}}
+# _propagation_file_kinds_at - the set at a commit, with each path marked {{{
+#
 # D69 reads the set from the tree at the commit being delivered and never from
 # the working tree, because a restructure moves the prefix that defines the
 # set, and a walk reading today's configuration for every commit would look
@@ -1531,7 +1548,11 @@ sub propagation_files {
 # hierarchy of D79 decides the reactions and the tracked files as it always
 # does.  The blueprint's repository-side fragments are the one kind read on
 # control instead, under D78, because that is where the kit is.
-sub propagation_files_at {
+#
+# Every path carries the mark D68 gives its kind, exactly as the working-tree
+# builder marks them, so the walk can read the set and its triggering half out
+# of one scratch tree rather than writing a second one for the second reading.
+sub _propagation_file_kinds_at {
 	my ($self, $commit, %opts) = @_;
 
 	require Service::Git;
@@ -1539,7 +1560,7 @@ sub propagation_files_at {
 	my $git = $opts{git} || Service::Git->new('.');
 
 	my $prefix = $self->_deployment_root_at($git, $commit);
-	return () unless defined $prefix;
+	return {} unless defined $prefix;
 
 	my %tree = map {$_ => 1} $git->ls_tree($commit, $prefix eq '' ? '.' : $prefix);
 
@@ -1577,7 +1598,7 @@ sub propagation_files_at {
 	# that commit, and bare refuses on a file that is not on disk, so the
 	# empty answer is given here rather than left to a refusal that ends the
 	# walk reading the commit.
-	return () unless -f "$root/.genesis/config"
+	return {} unless -f "$root/.genesis/config"
 	              && -f $root.'/'.$self->name.'.yml';
 
 	# The tree is a reading surface rather than a repository, and the Top is
@@ -1610,8 +1631,11 @@ sub propagation_files_at {
 	# stand at the commit.
 	$files{$_ =~ s{^\./}{}r} = 1 for $env->actual_environment_files;
 
-	# The configuration, the overrides, and the embedded genesis.
-	$files{'.genesis/config'} = 1;
+	# The configuration, the overrides, and the embedded genesis.  The
+	# configuration is non-triggering, since nothing in it reaches the
+	# manifest, and the other two are triggering, which is how the
+	# working-tree builder marks all three.
+	$files{'.genesis/config'} = 0;
 	$files{'kit-overrides.yml'} = 1 if $tree{$prefix.'kit-overrides.yml'};
 	$files{'.genesis/bin/genesis'} = 1 if $tree{$prefix.'.genesis/bin/genesis'};
 
@@ -1656,7 +1680,7 @@ sub propagation_files_at {
 			next unless ref($phase) eq 'ARRAY';
 			for my $action (@$phase) {
 				next unless ref($action) eq 'HASH' && $action->{script};
-				$files{"bin/$action->{script}"} = 1;
+				$files{"bin/$action->{script}"} = 0;
 			}
 		}
 	}
@@ -1698,9 +1722,15 @@ sub propagation_files_at {
 	$files{$_} = 1 for $env->_blueprint_fragments($git);
 
 	# Only what the tree at the commit actually holds travels, and a kind that
-	# is a directory travels whole.
-	my @out = map {"$prefix$_"} keys %files;
-	return sort grep {$tree{$_} || m{/$}} @out;
+	# is a directory travels whole.  Each surviving path keeps the mark its
+	# kind gave it, so one reading answers the whole set and either half of it.
+	my %out;
+	for my $path (keys %files) {
+		my $prefixed = "$prefix$path";
+		next unless $tree{$prefixed} || $prefixed =~ m{/$};
+		$out{$prefixed} = $files{$path};
+	}
+	return \%out;
 }
 
 # }}}
@@ -1965,43 +1995,6 @@ sub _kit_source_at {
 }
 
 # }}}
-
-# }}}
-# propagation_diff - files differing between this env's branch and a control commit, filtered to what it depends on {{{
-sub propagation_diff {
-	my ($self, $target_sha) = @_;
-	$target_sha ||= 'control';
-
-	my @pathspec = $self->propagation_files;
-	return () unless @pathspec;
-
-	my $env_branch = $self->name;
-	my ($diff_out, $rc) = run(
-		{ passfail => 1 },
-		'git', 'diff', '--name-only', "$env_branch..$target_sha", '--', @pathspec
-	);
-	return () if $rc || !$diff_out;
-
-	return grep { /\S/ } split /\n/, $diff_out;
-}
-
-# }}}
-# last_propagated_sha - extract the control SHA from the last propagation commit {{{
-sub last_propagated_sha {
-	my ($self) = @_;
-	my ($log, $rc) = run(
-		{ passfail => 1 },
-		'git', 'log', '--format=%s', $self->name, '--', '.'
-	);
-	return undef if $rc || !$log;
-
-	for my $line (split /\n/, $log) {
-		if ($line =~ /control\@([0-9a-f]+)/) {
-			return $1;
-		}
-	}
-	return undef;
-}
 
 # }}}
 # relate - get hierarchal file relationships with another environment {{{
