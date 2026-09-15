@@ -400,6 +400,59 @@ B<Examples:>
   # Describe a specific pipeline layout
   genesis describe sandbox
 
+=head2 propagate
+
+    genesis propagate
+    genesis propagate --dry-run
+
+Walks the control branch forward from every deployment branch's newest
+marker and routes each control commit on its own, in control order, under
+D34 and D36.
+
+The run takes no argument.  A run that is handed one is a usage error,
+because the C<E<lt>envE<gt>> argument went with the cascade it scoped under
+D36, and a commit held behind an ancestor is released by the next bare run
+rather than by a run aimed at it.
+
+B<Options (via C<get_options>):>
+
+=over 4
+
+=item C<--dry-run>, C<-n>
+
+Report what each environment would receive, per control commit, and write
+nothing.
+
+=item C<--yes>, C<-y>
+
+Publish without asking.  The verified delta for every environment is shown
+either way.  D83 returns the flag with this meaning, and it answers no
+other question.
+
+=item C<--force>
+
+Propagate by hand under a pipeline that owns the work, which D95 makes the
+one way past the provider gate.  At a terminal the operator is still asked
+to confirm, and outside one the refusal stands.
+
+=back
+
+The three options above are the whole table.  C<--commit>, C<--no-push>,
+and C<--no-fetch> are gone, because D44 withdrew the push switch and left
+C<--dry-run> as the only preview, D40 removed the fetch switch once the
+refresh became unconditional, and a caller-chosen source commit is the one
+thing that let the pipeline's run and the operator's run differ.
+
+B<Returns:> Nothing.  The run prints its report as it goes.
+
+B<Examples:>
+
+  # Walk control onto every deployment branch
+  genesis propagate
+
+  # Report what every environment would receive, and write nothing
+  genesis propagate --dry-run
+
 =head1 INTERNAL FUNCTIONS
 
 =head2 INIT_FILE_BODY

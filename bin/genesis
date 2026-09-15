@@ -2122,38 +2122,44 @@ define_command("pipeline-status", {
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_status');
 # }}}
-# genesis propagate - propagate control branch changes to environment branches {{{
+# genesis propagate - walk control onto every deployment branch {{{
+#
+# One run, no argument, three options.  D36 retired the <env> argument with
+# the cascade it scoped, because the walk releases a held commit by itself
+# once a later run finds the ancestor's certified commit advanced.  D44
+# withdrew --no-push and left --dry-run as the only preview, D40 removed
+# --no-fetch because the refresh is unconditional, and D95 added --force as
+# the one way past the provider gate.
 define_command("propagate", {
-	summary => "Propagate changes from the control branch to environment branches.",
-	usage   => "propagate [options] [env]",
+	summary => "Propagate control branch commits to the deployment branches.",
+	usage   => "propagate [options]",
 	description =>
-		"Must be run from the control branch.  Identifies files that have ".
-		"changed since each environment branch was last synced, and copies ".
-		"them to the appropriate environment branches.\n\n".
-		"Without arguments, determines entry points by walking the DAG and ".
-		"finding the first environment that uses each changed file.\n\n".
-		"With an environment name, scopes propagation to that environment's ".
-		"children, sourced from the named env's last-deployed control commit.",
+		"Walks the control branch forward from every deployment branch's ".
+		"newest marker and routes each commit on its own, in control ".
+		"order.  A commit is delivered to an environment when nothing ".
+		"upstream of it is still waiting to deploy the files it touches, ".
+		"and is held with its reason when something is.\n\n".
+		"The run takes no argument.  It switches to the control branch ".
+		"inside its own session and leaves you on the branch you started ".
+		"on.",
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [
 		'dry-run|n' =>
-			"Show what would be propagated without making changes.",
+			"Report what each environment would receive, per control ".
+			"commit, and write nothing.",
 
-		'commit=s' =>
-			"Control branch commit SHA to propagate from.  Defaults to ".
-			"HEAD of the control branch.",
+		'yes|y' =>
+			"Publish without asking.  The verified delta for every ".
+			"environment is shown either way.",
 
-		'no-push' =>
-			"Skip pushing control and env branches to the remote after ".
-			"propagation.  By default, propagated branches are pushed.",
+		'force' =>
+			"Propagate by hand under a pipeline that owns the work.  At a ".
+			"terminal you are still asked to confirm; outside one the ".
+			"refusal stands.",
 	],
-	arguments => [
-		'env?' =>
-			"Environment that was just deployed.  Scopes propagation to ".
-			"its downstream children only.",
-	],
+	arguments => [],
 }, 'Genesis::Commands::Pipelines::propagate');
 # }}}
 # genesis pipeline-describe - human-readable pipeline description {{{
