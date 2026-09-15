@@ -54,7 +54,8 @@ C<$content> to the constructor
 
 =item * B<loaded> - values read from the YAML file on disk
 
-=item * B<default> - values provided by the schema via C<validate()>
+=item * B<default> - values provided by the schema, filled by C<validate()>
+and by C<validate_subtree()>
 
 =back
 
@@ -702,11 +703,17 @@ Validates the block at C<$path> against C<$schema>, filling that schema's
 defaults into the configuration where every other reader will find them,
 and returns the error strings rather than refusing.
 
-It owns the block's defaults outright: whatever a previous call filled
-under C<$path> is dropped before this schema fills its own, so a block
-validated against one schema and then another does not carry the first
-one's defaults into the second one's walk and have them refused there as
-keys nobody declared.
+It owns the defaults it files at I<default> priority under C<$path>:
+whatever a previous call filled there is dropped before this schema fills
+its own, so a block validated against one schema and then another does
+not carry the first one's defaults into the second one's walk and have
+them refused there as keys nobody declared.
+
+A block written on disk as an explicit empty hash is the one shape
+outside that ownership. Its defaults are filled at I<loaded> priority, so
+that the empty hash does not mask them in the merge, and the I<loaded>
+store is never swept here because it also holds what the operator wrote.
+Such a block keeps the fills the first walk gave it.
 
 C<validate> is a method on a whole configuration. This is the entry point
 a module uses when it has been handed one block and owns the rules for
