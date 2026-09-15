@@ -10,6 +10,7 @@ use Genesis::Term;
 use Genesis::Commands;
 use Genesis::Top;
 use Genesis::UI;
+use Genesis::CI::Marker;
 use Encode qw(decode_utf8);
 
 sub create {
@@ -1662,7 +1663,7 @@ sub _apply_pull_propagation {
 	$git->checkout_file($source_sha, $_) for @to_copy;
 	$git->rm(@to_rm) if @to_rm;
 
-	my $msg = sprintf("[pipeline] control\@%s -> %s (pulled)", $sha_short, $env_branch);
+	my $msg = Genesis::CI::Marker::build($sha_short, $env_branch) . ' (pulled)';
 	$git->commit($msg, @to_copy);
 
 	info "  #G{%s}: propagation pull committed.", $env_branch;

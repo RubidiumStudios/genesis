@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use Genesis qw(info warning);
+use Genesis::CI::Marker;
 
 # compute_propagation_targets - determine which envs receive files directly {{{
 sub compute_propagation_targets {
@@ -288,7 +289,7 @@ sub _propagate_one_direct_env {
 	$session->switch($env_name);
 	$git->checkout_file($control_sha, $_) for @to_copy;
 	$git->rm(@to_rm) if @to_rm;
-	my $msg = sprintf("[pipeline] control\@%s -> %s", $short, $env_name);
+	my $msg = Genesis::CI::Marker::build($short, $env_name);
 	$git->commit($msg, @to_copy);
 
 	info "  #G{%s}: propagated %d file%s",
@@ -374,7 +375,7 @@ sub _apply_propagation_commit {
 	my @to_rm   = @{$detail->{deleted} || []};
 	$git->checkout_file($control_sha, $_) for @to_copy;
 	$git->rm(@to_rm) if @to_rm;
-	my $msg = sprintf("[pipeline] control\@%s -> %s", $control_short, $env_name);
+	my $msg = Genesis::CI::Marker::build($control_short, $env_name);
 	$git->commit($msg, @to_copy);
 }
 # }}}
@@ -413,7 +414,7 @@ sub _report_dry_run {
 		info "    #G{M} %s%s", $disp_f, $note;
 	}
 	info "    #R{D} %s", $_ for $git->unprefixed(@to_rm);
-	my $msg = sprintf("[pipeline] control\@%s -> %s", $control_short, $env_name);
+	my $msg = Genesis::CI::Marker::build($control_short, $env_name);
 	info "    #Yi{commit}: %s", $msg;
 	info "    #Yi{PR}: would open %s -> %s", $pr_branch, $env_name
 		if defined $pr_branch;

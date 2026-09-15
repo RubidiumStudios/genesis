@@ -1,0 +1,74 @@
+=head1 NAME
+
+Genesis::CI::Marker - the propagation marker and the Genesis commit trailers
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Marker;
+
+    # Render the subject a delivery commits under.
+    my $subject = Genesis::CI::Marker::build($control_short, 'qa');
+    # '[pipeline] control@a1b2c3d -> qa'
+
+=head1 DESCRIPTION
+
+C<Genesis::CI::Marker> owns the propagation marker, which is the commit
+subject a delivery writes onto a deployment branch to name the control
+commit that branch now mirrors.  The marker is the only durable claim a
+branch makes about its own content, so the string has exactly one place
+where it is written and one place where it is read, and this module is
+both.
+
+=head1 FUNCTIONS
+
+=head2 build
+
+    my $subject = Genesis::CI::Marker::build($control_sha, $env);
+
+Renders the marker subject, C<[pipeline] control@E<lt>shaE<gt> -E<gt>
+E<lt>envE<gt>>.
+
+The sha is written exactly as it is handed over.  Only the caller holds a
+git handle, so only the caller knows which abbreviation git resolved, and a
+builder that abbreviated on its own would have to guess a width.
+
+The environment is its own name and never the deployment slug.  A marker
+speaks for one deployment root because the branch it sits on already does,
+so the slug's second half would say nothing the branch has not said.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$control_sha>
+
+The control commit the delivery mirrors, full or abbreviated, in hex.
+
+=item C<$env>
+
+The receiving environment's name.
+
+=back
+
+B<Returns:> The marker subject as a string.
+
+B<Errors:> Raises a bug when the sha is missing or is not hex, and when the
+environment name is missing or empty.  Both are caller defects rather than
+conditions an operator can cause.
+
+B<Examples:>
+
+  Genesis::CI::Marker::build('a1b2c3d', 'qa');
+  # returns '[pipeline] control@a1b2c3d -> qa'
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut

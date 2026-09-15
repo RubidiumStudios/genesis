@@ -505,11 +505,11 @@ B<Examples:>
   _apply_propagation_commit($git, $env_name, $control_sha, $control_short, $detail);
 
 Checks the changed files out of the control commit, removes the deleted ones,
-and commits with the C<[pipeline] control@E<lt>shaE<gt> -E<gt> E<lt>envE<gt>>
-subject.
+and commits under the subject L<Genesis::CI::Marker/build> renders.
 
-That subject is not cosmetic -- L</_pr_branch_has_control_sha> parses it to
-decide idempotency, so its format is load-bearing.
+The subject is not cosmetic.  It is the branch's only record of the control
+commit it carries, and L<Genesis::CI::Marker/newest> is what reads it back,
+so the format lives in that module rather than here.
 
 B<Returns:> nothing.
 
