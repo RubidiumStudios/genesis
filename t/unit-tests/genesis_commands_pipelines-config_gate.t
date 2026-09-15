@@ -64,14 +64,17 @@ subtest 'a leftover ci directory is ignored and never named' => sub {
 	# than reading the topology off the environment files.
 	my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 	mkdir_or_fail($h->a.'/.genesis/ci');
-	put_file($h->a.'/.genesis/ci/pipeline.yml', "pipeline:\n  name: stale\n");
+	# The pipeline the leftover file names is the row's marker, so it is
+	# spelled as something no other message could say by accident.
+	put_file($h->a.'/.genesis/ci/pipeline.yml',
+		"pipeline:\n  name: leftover-ci-directory-marker\n");
 
 	my ($out, $err) = $h->run_genesis({restore => 0}, 'pipeline-describe');
 	my $said = _unfolded($out, $err);
 
 	unlike($said, qr{\.genesis/ci\b},
 		'the run never names a directory it does not read');
-	unlike($said, qr{stale},
+	unlike($said, qr{leftover-ci-directory-marker},
 		'and nothing inside that directory reaches the run');
 };
 

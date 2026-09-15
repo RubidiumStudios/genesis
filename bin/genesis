@@ -1765,9 +1765,8 @@ define_command("repipe", {
 			"from the pipeline layout name.",
 
 		'config|c=s' =>
-			"Path to the pipeline configuration file, which specifies Git ".
-			"parameters, notification settings, pipeline layouts, etc.\n".
-			"Defaults to 'ci.yml'",
+			"Kept for compatibility, and nothing reads it any more.  The ".
+			"pipeline comes from the pipeline section of .genesis/config.",
 
 		'paused|P' =>
 			"Keep the pipeline paused after repiping.",
@@ -1844,9 +1843,8 @@ define_command("describe", {
 	option_group => Genesis::Commands::REPO_OPTIONS,
 	options => [
 		'config|c=s' =>
-			"Path to the pipeline configuration file, which specifies Git ".
-			"parameters, notification settings, pipeline layouts, etc.\n".
-			"Defaults to 'ci.yml'",
+			"Kept for compatibility, and nothing reads it any more.  The ".
+			"pipeline comes from the pipeline section of .genesis/config.",
 	]
 });
 # }}}
