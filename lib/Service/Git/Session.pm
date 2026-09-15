@@ -361,7 +361,98 @@ sub abort {
 # }}}
 # }}}
 
+### The writer {{{
+
+# apply_files - deliver one control commit onto this session's branch {{{
+#
+# The single writer.  D69 makes a delivery a mirror and not an overlay, so the
+# postcondition is that the branch's tree equals the propagation set as it
+# stood at the delivered control commit, which is I7 stated as this method's
+# contract.  The changed and deleted lists a caller passes are the diff it has
+# already computed: they skip blobs the delivery cannot have moved and they
+# name files in the run's report, and they never decide what is delivered.
+sub apply_files {
+	my ($self, $source_sha, %opts) = @_;
+
+	my $env = $opts{env}
+		or bail("apply_files needs the environment whose set it delivers");
+	my $message = $opts{message}
+		or bail("apply_files needs its caller's commit message, since it builds none");
+
+	my $git    = $self->git;
+	my $branch = $git->current_branch;
+
+	my @set    = $env->propagation_files;
+	my %in_set = map { $_ => 1 } $self->_members_at($source_sha, @set);
+
+	# The mirror's removing half.  Every path the branch holds that the set no
+	# longer holds goes, which is how a leftover init, a root-level file after
+	# a restructure, and a path that dropped out of track_additional_files
+	# leave the branch.  Under D66 the branch belongs to one deployment root,
+	# so nothing else on it is anybody's to keep.
+	#
+	# A removal git refuses is silent, because rm runs under passfail and
+	# hands the handle back whatever git made of it, so nothing here notices a
+	# path that stayed.  The index check M8 adds between these writes and the
+	# commit is what catches that, which is the design's own argument for
+	# asserting the postcondition rather than trusting the sequence.
+	my @on_branch = $git->ls_files;
+	my @stale     = grep { !$in_set{$_} } @on_branch;
+
+	# The diff against the source is the optimisation, so the writer touches
+	# only the paths whose blob differs or that the branch does not hold.
+	my %differs = map { $_ => 1 } $git->diff_names('HEAD', $source_sha, @set);
+	my @to_write = grep { $differs{$_} } sort keys %in_set;
+
+	$git->rm(@stale) if @stale;
+	$git->checkout_file($source_sha, $_) for @to_write;
+
+	$git->commit($message);
+
+	return {
+		commit    => $git->sha('HEAD'),
+		delivered => [@to_write],
+		removed   => [@stale],
+		overwrote => [],
+	};
+}
+
+# }}}
+# }}}
+
 ### Internals {{{
+
+# _members_at - the set's pathspecs as paths one commit's tree holds {{{
+#
+# The set is a list of pathspecs and not a list of files.  A dev kit's source
+# is the directory entry dev/, and a fragment the blueprint names is in the
+# set whether or not anybody has written it yet, so a membership built from
+# the set as it stands would read every real file under dev/ as a path outside
+# the set and would ask git to check out a file the source does not carry.
+#
+# Resolving the pathspecs against the source tree answers both at once, and it
+# is the same expansion the suite's own reader makes before it compares the
+# two.  One listing is read rather than one per entry, because the set is
+# small and a git process per path is not.
+sub _members_at {
+	my ($self, $commit, @set) = @_;
+	# The whole tree is asked for as '.', which is git's own spelling for it,
+	# because ls_tree passes its path straight through and git refuses an
+	# empty pathspec by name rather than reading it as no pathspec at all.
+	my @tracked = $self->git->ls_tree($commit, '.');
+
+	my %covered;
+	for my $entry (@set) {
+		if ($entry =~ m{/$}) {
+			$covered{$_} = 1 for grep { index($_, $entry) == 0 } @tracked;
+		} else {
+			$covered{$entry} = 1 if grep { $_ eq $entry } @tracked;
+		}
+	}
+	return sort keys %covered;
+}
+
+# }}}
 
 # _record_commit - remember a branch this session committed to {{{
 #

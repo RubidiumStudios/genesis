@@ -28,6 +28,11 @@ Clean means what C<< $git->is_clean >> means: no tracked modification and
 nothing staged, with untracked files ignored. A scratch file in the working
 tree blocks no session and no session deletes one.
 
+The session also owns the one writer. C<apply_files> delivers a control commit
+onto the branch the session stands on, as a mirror of the environment's
+propagation set rather than as an overlay on what the branch already held, so
+a path that has left the set leaves the branch with it.
+
 Beside the four verbs the session answers for what it holds, and the commands
 that drive it read those answers rather than asking git themselves. C<git>
 hands back the handle it was built on, C<modified_paths> names the tracked
@@ -466,6 +471,106 @@ B<Examples:>
   $session->abort('the writer could not finish');
   # dies naming that error and the branch we are stuck on, where the return failed
 
+=head2 apply_files($source_sha, %opts)
+
+  my $result = $session->apply_files($source_sha,
+      env     => $env,
+      changed => \@files,
+      deleted => \@files,
+      message => $message);
+
+The single writer. Delivers one control commit onto the branch the session
+stands on, as a mirror of that environment's propagation set as the set stood
+at the delivered commit.
+
+A delivery is a mirror and not an overlay, so the postcondition is that the
+branch's tree equals the set, and a path the set no longer holds is removed
+rather than left standing. The C<changed> and C<deleted> lists are the
+caller's own diff, used to skip blobs that cannot have moved and to name
+files in the report, and they never decide what is delivered.
+
+The set is a list of pathspecs rather than a list of files, since a dev kit's
+source is a directory and a fragment the blueprint names is in the set whether
+or not anybody has written it, so the pathspecs are resolved against the
+source commit's tree before the membership is worked out. What that tree does
+not hold is not delivered and does not keep a path on the branch.
+
+A removal git refuses is silent, because C<< $git->rm >> discards git's
+answer, so nothing in the sequence notices a path that stayed. The index check
+that runs between these writes and the commit is what catches it, which is why
+the postcondition is asserted rather than assumed.
+
+The session must be open and standing on the branch being written, because the
+writer switches nothing itself.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$source_sha>
+
+The control commit being delivered, whose tree the set is read from.
+
+=item C<env>
+
+The environment whose set is delivered. Required.
+
+=item C<message>
+
+The commit message. Required, because the writer builds none of its own, so
+one caller hands it a marker and another hands it an aggregate's subject and
+body.
+
+=item C<changed>, C<deleted>
+
+The caller's diff, optional.
+
+=back
+
+B<Returns:> A hashref with C<commit>, the commit made, C<delivered> and
+C<removed>, the paths written and taken away, and C<overwrote>, the paths
+whose content differed from the source although the delivered commit did not
+change them.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "apply_files needs the environment whose set it delivers" >> -- raised
+where no C<env> is passed, before anything is read or written.
+
+=item *
+
+C<< "apply_files needs its caller's commit message, since it builds none" >>
+-- raised where no C<message> is passed, before anything is read or written.
+
+=item *
+
+C<< "Cannot diff %s against %s in %s" >> -- raised by C<< $git->diff_names >>
+where the source commit is not in this repository. It exits C<DATAERR>.
+
+=item *
+
+C<< "Failed to checkout %s from %s" >> -- raised where a path the source tree
+holds cannot be written into the working tree.
+
+=item *
+
+C<< "Failed to commit" >> -- raised where the commit itself fails.
+
+=back
+
+B<Examples:>
+
+  my $result = $session->apply_files($sha, env => $env,
+      message => Genesis::CI::Marker::build($sha, 'qa'));
+  # returns {commit => $new_sha, delivered => [...], removed => [...], overwrote => []}
+
+  $session->apply_files($sha, message => $message);
+  # raises, because the writer is not told whose set it delivers
+
 =head2 git
 
   my $git = $session->git;
@@ -613,6 +718,53 @@ B<Examples:>
   # returns () after a session that only read, whatever control has done
 
 =head1 INTERNAL METHODS
+
+=head2 _members_at($commit, @set)
+
+  my @members = $session->_members_at($source_sha, @set);
+
+The propagation set's pathspecs as the paths one commit's tree actually holds.
+
+The set is a list of pathspecs and not a list of files. A dev kit's source is
+the directory entry C<dev/>, and a fragment the blueprint names is in the set
+whether or not anybody has written it yet, so a membership built from the set
+as it stands reads every real file under C<dev/> as a path outside the set and
+asks git to check out a file the source does not carry. Resolving the
+pathspecs against the source tree answers both at once, and it is the same
+expansion the suite's own reader makes before it compares the two sides.
+
+One listing is read rather than one per entry, because the set is small and a
+git process per path is not.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$commit>
+
+The commit whose tree the pathspecs are resolved against.
+
+=item C<@set>
+
+The propagation set's pathspecs. An entry ending in a slash is a directory and
+covers every path the tree holds beneath it, and any other entry covers itself
+where the tree holds it and nothing where it does not.
+
+=back
+
+B<Returns:> The covered paths, sorted, git-root-relative.
+
+B<Errors:> None of its own. C<< $git->ls_tree >> answers an unreadable commit
+with an empty listing, and the caller's own writes then have nothing to
+deliver.
+
+B<Examples:>
+
+  my @members = $session->_members_at($sha, 'bosh/dev/', 'bosh/qa.yml');
+  # returns ('bosh/dev/hooks/blueprint', 'bosh/dev/kit.yml', 'bosh/qa.yml')
+
+  my @members = $session->_members_at($sha, 'bosh/ops/gone.yml');
+  # returns (), because the delivered commit does not hold that path
 
 =head2 _record_commit($branch)
 
