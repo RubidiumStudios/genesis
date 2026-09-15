@@ -530,6 +530,12 @@ and before the commit, so a failed check never becomes a commit, and either
 one raises a C<Genesis::CI::RunFailure> of the run-fatal kind, which ends the
 run rather than the environment.
 
+A failed assertion is fatal to the whole run and not to the one environment,
+so C<apply_files> dies with a L<Genesis::CI::RunFailure> rather than returning
+one. The writer records each branch it commits to on the session as it goes,
+which is what lets C<abort> reset every one of them back to its remote-tracking
+ref and leave control alone.
+
 The session must be open and standing on the branch being written, because the
 writer switches nothing itself.
 

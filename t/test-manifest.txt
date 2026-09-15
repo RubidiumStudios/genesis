@@ -248,6 +248,7 @@ unit-tests/service_git_session-index_assertions.t          # the writer checks t
 unit-tests/service_git_session-lifecycle.t                 # begin and finish on a clean run
 unit-tests/service_git_session-lock.t                      # the switch lock, per working tree
 unit-tests/service_git_session-one_door.t                  # every branch change goes through the session
+unit-tests/service_git_session-run_failure.t               # a failed check ends the run and not the environment
 unit-tests/service_git_session-sequencing.t                # sessions are sequential and keyed on the handle
 unit-tests/service_git_session-surface.t                   # the readers the later steps consume
 unit-tests/service_github-pr.t                             # Github PR helpers
