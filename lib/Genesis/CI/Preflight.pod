@@ -212,9 +212,12 @@ ancestor with its counterpart on the remote is the same thing again, found
 after C<pipeline-apply> cut the real branch beside it.  Both refuse.
 
 Every refusal is collected before anything is written, so a run that stops
-here has left nothing partial behind.  An environment with no branch on either
-side is not a refusal; it is awaiting C<pipeline-apply>, which the walk reports
-as that environment's outcome.
+here has left nothing partial behind, and a repository holding a branch of
+each class hears about both in one refusal rather than meeting the second on
+the next run.  An environment with no branch on either side is not a refusal;
+it is awaiting C<pipeline-apply>, which the walk reports as that environment's
+outcome.  Neither is a branch the remote has that this clone lacks, which the
+refresh creates locally before this stage reads it.
 
 The whole pipeline is classified rather than the environments one run happens
 to touch, because the initial state is a property of the repository and not of
@@ -272,18 +275,37 @@ read.
 
 =back
 
-B<Returns:> A hashref of C<refreshed>, C<control>, the divergence record for
-the control branch, C<branches>, a record per environment that has a branch on
-either side, and C<events>, the lines the caller prints.  C<events> is seeded
-from the control record, so the caller prints the whole stage's events once
-and in order.
+B<Returns:> A hashref of four keys.
+
+=over 4
+
+=item C<refreshed>
+
+True once the refresh has run, whether this stage ran it or the caller did.
+
+=item C<control>
+
+The divergence record for the control branch.
+
+=item C<branches>
+
+One record per environment that has a branch on either side, keyed by the
+environment's name.
+
+=item C<events>
+
+The lines the caller prints.  They are seeded from the control record, so the
+caller prints the whole stage's events once and in order.
+
+=back
 
 B<Errors:> Bails at C<DATAERR> for a local deployment branch the remote has
-never had, and for one that shares no ancestor with the remote's.  Both name
-the branch and give the remedy in order, which is to inspect the branch, move
-anything wanted to control, delete the branch, and then run the command the
-case calls for.  Genesis deletes nothing itself.  The refresh and the control
-check raise their own codes where the caller has left them to this stage.
+never had, and for one that shares no ancestor with the remote's.  The two
+classes come back in one refusal, which names every offending branch and gives
+the remedy in order, which is to inspect the branch, move anything wanted to
+control, delete the branch, and then run the command the case calls for.
+Genesis deletes nothing itself.  The refresh and the control check raise their
+own codes where the caller has left them to this stage.
 
 B<Examples:>
 
@@ -348,17 +370,20 @@ B<Examples:>
   Genesis::CI::Preflight::_shares_history($git, 'qa/bosh', 'origin');
   # 0, where the local branch is an orphan of the same name
 
-=head2 _local_only_refusal
+=head2 _origin_refusal
 
-    my $text = Genesis::CI::Preflight::_local_only_refusal(
-        $action, $outcome, $remote, \@offenders);
+    my $text = Genesis::CI::Preflight::_origin_refusal(
+        $action, $outcome, $remote, \@local_only, \@unrelated);
 
-Composes the refusal for deployment branches the remote has never had.
+Frames whichever classes of illegitimate branch the stage found as one
+refusal.
 
-One paragraph per branch, so a run with one offender reads exactly as the
-design quotes it and a run with several names them all.  The act the refusal
-opens with and the sentence it closes with are arguments, because the deploy
-raises the same text in its own words.
+The stage raises at most one refusal, so the act is named once and the closing
+sentence is said once however many branches and however many classes the run
+met.  The local-only paragraphs come first and the unrelated-history
+paragraphs follow, which is the order the two questions are asked in.  The act
+and the closing sentence are arguments, because the deploy raises the same
+text in its own words.
 
 B<Parameters:>
 
@@ -374,11 +399,17 @@ The closing sentence, which says what did not happen.
 
 =item C<$remote>
 
-The remote the branches have no counterpart on.
+The remote the branches were classified against.
 
-=item C<\@offenders>
+=item C<\@local_only>
 
-One hashref per branch, each of C<env> and C<branch>.
+The branches the remote has never had, one hashref each of C<env> and
+C<branch>.  It may be empty.
+
+=item C<\@unrelated>
+
+The names of the branches that share no ancestor with their counterpart.  It
+may be empty.
 
 =back
 
@@ -387,35 +418,73 @@ C<'%s'> format.
 
 B<Examples:>
 
-  Genesis::CI::Preflight::_local_only_refusal(
+  Genesis::CI::Preflight::_origin_refusal(
       'run #C{genesis propagate}', 'Nothing was written.', 'origin',
-      [{env => 'lab', branch => 'lab/bosh'}]);
+      [{env => 'lab', branch => 'lab/bosh'}], []);
   # 'Refusing to run #C{genesis propagate}.  The local branch #C{lab/bosh}
   #  has no counterpart on #C{origin}.  ...  Nothing was written.'
 
-=head2 _unrelated_refusal
+  Genesis::CI::Preflight::_origin_refusal(
+      'run #C{genesis propagate}', 'Nothing was written.', 'origin',
+      [{env => 'lab', branch => 'lab/bosh'}], ['qa/bosh']);
+  # one refusal naming lab/bosh and then qa/bosh, with one opening sentence
+  # and one closing sentence
 
-    my $text = Genesis::CI::Preflight::_unrelated_refusal(
-        $action, $outcome, $remote, \@branches);
+=head2 _local_only_refusal
 
-Composes the refusal for deployment branches that share no ancestor with their
-counterpart on the remote.
+    my @paragraphs = Genesis::CI::Preflight::_local_only_refusal(
+        $remote, \@offenders);
 
-It says that the marker-only reset never applies across unrelated histories,
-whatever the local commits carry, because that is the question an operator
-reaching this refusal is most likely to ask next.
+Composes D48's paragraphs for deployment branches the remote has never had.
+
+One paragraph per branch, so a run with one offender reads exactly as the
+design quotes it and a run with several names them all.  The act the refusal
+opens with and the sentence it closes with belong to C<_origin_refusal>, which
+frames whichever classes the stage found.
 
 B<Parameters:>
 
 =over 4
 
-=item C<$action>
+=item C<$remote>
 
-The act the refusal opens with.
+The remote the branches have no counterpart on.
 
-=item C<$outcome>
+=item C<\@offenders>
 
-The closing sentence, which says what did not happen.
+One hashref per branch, each of C<env> and C<branch>.  It may be empty, and it
+may be C<undef>.
+
+=back
+
+B<Returns:> One paragraph per offending branch, and an empty list where there
+is none.
+
+B<Examples:>
+
+  Genesis::CI::Preflight::_local_only_refusal('origin',
+      [{env => 'lab', branch => 'lab/bosh'}]);
+  # ( 'The local branch #C{lab/bosh} has no counterpart on #C{origin}.  ...' )
+
+  Genesis::CI::Preflight::_local_only_refusal('origin', []);
+  # ()
+
+=head2 _unrelated_refusal
+
+    my @paragraphs = Genesis::CI::Preflight::_unrelated_refusal(
+        $remote, \@branches);
+
+Composes D48's paragraphs for deployment branches that share no ancestor with
+their counterpart on the remote.
+
+It says that the marker-only reset never applies across unrelated histories,
+whatever the local commits carry, because that is the question an operator
+reaching this refusal is most likely to ask next.  Like its neighbour, it
+leaves the opening and the closing sentence to C<_origin_refusal>.
+
+B<Parameters:>
+
+=over 4
 
 =item C<$remote>
 
@@ -423,20 +492,21 @@ The remote whose counterparts the branches share no ancestor with.
 
 =item C<\@branches>
 
-The offending branch names.
+The offending branch names.  It may be empty, and it may be C<undef>.
 
 =back
 
-B<Returns:> The composed refusal, which the caller hands to C<bail> through a
-C<'%s'> format.
+B<Returns:> One paragraph per offending branch, and an empty list where there
+is none.
 
 B<Examples:>
 
-  Genesis::CI::Preflight::_unrelated_refusal(
-      'run #C{genesis propagate}', 'Nothing was written.', 'origin',
-      ['qa/bosh']);
-  # 'Refusing to run #C{genesis propagate}.  The local branch #C{qa/bosh}
-  #  shares no ancestor with #C{origin/qa/bosh}, ...  Nothing was written.'
+  Genesis::CI::Preflight::_unrelated_refusal('origin', ['qa/bosh']);
+  # ( 'The local branch #C{qa/bosh} shares no ancestor with
+  #    #C{origin/qa/bosh}, ...' )
+
+  Genesis::CI::Preflight::_unrelated_refusal('origin', []);
+  # ()
 
 =head2 _commits
 
