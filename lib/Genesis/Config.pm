@@ -381,6 +381,44 @@ sub validate {
 	return 1;
 }
 # }}}
+# validate_subtree - validate one block against a schema {{{
+#
+# Under D105 the module owning a block's shape owns validating it, and
+# validate() above is a method on a whole configuration, so this is how a
+# module asks for the same treatment of the one block it was handed.
+#
+# It fills through _validate_key rather than against a copy, deliberately.
+# The defaults a fragment declares are read back out of the configuration
+# by everything downstream, so a validator handed a detached hash would
+# pass and leave the store with none of them in it.
+#
+# The ignore list is for a key the parent declared and this schema did
+# not, which is the discriminator custom_struct has already checked.
+sub validate_subtree {
+	my ($self, $path, $schema, %opts) = @_;
+
+	my %ignore = map {($_ => 1)} @{$opts{ignore} || []};
+	my %declared = (%$schema, map {($_ => {type => 'any'})} keys %ignore);
+
+	# This owns the block's defaults outright, which is what lets
+	# validate() above stop clearing every default in the configuration
+	# before it walks.  A default filled from the schema that was selected
+	# last time is not a key anybody wrote, so it goes before this schema
+	# fills its own, or the walk below meets it and calls it unknown.  The
+	# scalar guard is clear()'s: nothing is stored under a scalar default,
+	# so walking down to one would turn a removal that does nothing into a
+	# fatal.
+	struct_set_value($self->{default_values}, $path, undef, 1)
+		unless _blocked_by_scalar($self->{default_values}, $path);
+	$self->_prune_empty_parents($self->{default_values}, $path);
+	delete($self->{cache}{$_})
+		for grep {$_ =~ /^\Q$path\E($|[\.\[])/} keys %{$self->{cache}};
+	delete $self->{_contents};
+
+	return $self->_validate_key($path, {type => 'hash', schema => \%declared});
+}
+
+# }}}
 # }}}
 
 ### Instance Private Methods {{{
