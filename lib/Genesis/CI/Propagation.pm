@@ -504,7 +504,7 @@ sub _build_pr_body {
 # }}}
 # _find_or_open_pr - dispatch to create_pr or update_pr based on $existing {{{
 sub _find_or_open_pr {
-	my ($github, $owner_repo, $pr_branch, $env_name, $title, $body, $existing) = @_;
+	my ($github, $owner_repo, $pr_branch, $base_branch, $title, $body, $existing) = @_;
 
 	return $existing
 		? $github->update_pr($owner_repo, $existing->{number},
@@ -513,7 +513,7 @@ sub _find_or_open_pr {
 		)
 		: $github->create_pr($owner_repo,
 			head  => $pr_branch,
-			base  => $env_name,
+			base  => $base_branch,
 			title => $title,
 			body  => $body,
 		);

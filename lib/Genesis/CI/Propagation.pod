@@ -330,9 +330,8 @@ which is what the marker records and what the operator reads.  A target that
 names no C<branch> falls back to C<env>, so a caller that has only the one
 name still works.
 
-The C<env> name is also the local git branch name for the target.
-For C<require_pr =E<gt> 1>, the actual propagation branch is the one
-C<top> composes through C<pr_branch_for>.
+For C<require_pr =E<gt> 1>, the pull request is cut from the branch
+C<top> composes through C<pr_branch_for> and opened against C<branch>.
 
 =item C<control>
 
@@ -629,17 +628,18 @@ B<Examples:>
 
 =head2 _find_or_open_pr
 
-  my $pr = _find_or_open_pr($github, $owner_repo, $pr_branch, $env_name,
+  my $pr = _find_or_open_pr($github, $owner_repo, $pr_branch, $base_branch,
                             $title, $body, $existing);
 
-Updates C<$existing> when supplied, otherwise opens a new pull request.
+Updates C<$existing> when supplied, otherwise opens a new pull request
+from C<$pr_branch> against C<$base_branch>, the deployment branch.
 
 B<Returns:> the pull-request hashref from the GitHub API.
 
 B<Examples:>
 
   my $pr = _find_or_open_pr($gh, 'acme/widgets', 'pr/staging',
-                            'staging', $title, $body, undef);
+                            'staging/bosh', $title, $body, undef);
   # returns the newly created PR; pass $existing to update instead
 
 =head1 LIMITATIONS
