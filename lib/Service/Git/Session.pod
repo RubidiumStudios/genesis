@@ -547,9 +547,12 @@ The environment whose set is delivered. Required.
 
 =item C<message>
 
-The commit message. Required, because the writer builds none of its own, so
-one caller hands it a marker and another hands it an aggregate's subject and
-body.
+The message is required and is used exactly as given, subject and body alike.
+The writer builds no message of its own, so the marker in a direct-mode
+delivery and the subject and body of a PR-mode aggregate are both the
+caller's, and the check that follows reads the marker the caller wrote.
+Nothing here appends, truncates, or reformats, because a body with newlines
+in it is the PR-mode case.
 
 =item C<changed>, C<deleted>
 
