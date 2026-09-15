@@ -220,6 +220,40 @@ subtest 'the remote can be severed and restored' => sub {
 		'and the push works again once the remote is restored');
 };
 
+subtest 'the severed refresh answers the shape the real one answers' => sub {
+	plan tests => 4;
+
+	# The double composes fetch_branches' failure result by hand, because a
+	# severed remote has to reach the caller as a classified result rather
+	# than as a death, which is what the real method does with a remote it
+	# cannot reach.  Written out by hand it can drift, and a key the product
+	# added would leave the double answering a shape the product never
+	# produces while every row built on it still passed.  This row reads both
+	# shapes and holds them to the same keys.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+
+	# The real failure comes from a remote that is not there, which git
+	# ls-remote reports as a return code rather than a death, so the method
+	# classifies it and hands it back.  The read happens before the double is
+	# armed, because Service::Git answers every caller with one instance per
+	# repository and arming re-blesses that instance.
+	set_remotes($h, remotes => {origin => $h->r . '-gone.git'}, fetch => 0);
+	my (undef, $real) = $h->git('a')->fetch_branches([$h->control], 'origin');
+	is($real->{ok}, 0, 'the real method answers a failure rather than dying');
+
+	my $git = fault_git($h);
+	sever_remote($h);
+	my (undef, $severed) = $git->fetch_branches([$h->control], 'origin');
+	restore_remote($h);
+
+	is_deeply([sort keys %$severed], [sort keys %$real],
+		'the double answers on exactly the keys the real method answers on');
+	is($severed->{ok}, 0, 'with ok false, as the real one has it');
+	is($severed->{kind}, 'network',
+		'and the kind the armed text classifies as, read from the product');
+};
+
 subtest 'the session lock is held by a child and dropped with it' => sub {
 	plan tests => 5;
 

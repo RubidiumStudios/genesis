@@ -115,6 +115,12 @@ sub _fault {
 	# unreachable remote would have been unprovable through a whole command.
 	# The real classifier is asked, so the double reports the kind the product
 	# would report for the same stderr rather than a kind of its own.
+	#
+	# The five keys beside it are copied from Service::Git::fetch_branches,
+	# which composes this same shape on both of its failure paths.  A row in
+	# t/unit-tests/harness_propagation-faults.t reads a real failure out of
+	# that sub and holds this answer to the same keys, so a key added there
+	# cannot leave this one answering a shape the product never produces.
 	if ($kind eq 'transport') {
 		require Service::Git;
 		my $err = ($armed->{message} // "the harness severed $step on call $n")."\n";

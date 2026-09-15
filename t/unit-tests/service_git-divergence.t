@@ -118,23 +118,37 @@ subtest 'the unverifiable flag rides on every answer' => sub {
 };
 
 subtest 'the query asks refs and never the network' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $h    = make_harness(envs => ['qa'], vault => 0);
 	my $slug = $h->slug('qa');
 	init_branch($h, 'qa');
 	refresh($h, 'a', $slug);
 
-	sever_remote($h);
+	# The refresh is armed to die here rather than severed, and the
+	# difference is the whole trap.  sever_remote answers a fetch with the
+	# classified failure the real method answers with, which is a result this
+	# query would simply ignore, so a severed remote would let a query that
+	# fetched pass anyway.  A death cannot be ignored, so this arming is
+	# sprung the moment the query reaches the remote.
+	my $git = fault_git($h);
+	fail_on($git, 'fetch_branches', 1, from => 1,
+		message => 'the query reached the remote');
+
 	my $answer = div($h, $slug);
-	restore_remote($h);
 
-	is($answer->{state}, 'in-sync', 'the answer comes back with no remote');
+	is($answer->{state}, 'in-sync', 'the answer comes back with no fetch');
+	is_deeply([map {$_->[0]} step_log($git)], [],
+		'and no watched git step ran at all');
+	reset_steps($git);
 
+	# The sweep is the second half of the claim, and it reads the sub's own
+	# body rather than its behaviour, so it catches a fetch on a path this
+	# fixture never takes.
 	my $src = slurp('lib/Service/Git.pm');
 	my ($body) = $src =~ m{sub resolve_branch \{(.+?)\n\}}s;
 	unlike($body, qr{fetch_branches|remote_branch_exists|ls-remote},
-		'the query neither fetches nor asks the remote');
+		'and the query neither fetches nor asks the remote');
 };
 
 # The sweep asks for the forced form the retired single-branch helper wrote,
