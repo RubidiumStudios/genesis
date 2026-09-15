@@ -8,6 +8,7 @@ use lib 't';
 use helper;
 use Test::More;
 use Test::Deep;
+use Test::Exception;
 
 use Genesis;
 use_ok 'Service::Git';
@@ -213,7 +214,7 @@ subtest 'fetch_branches - a branch already local only updates its tracking ref' 
 	# they contain.  Writing refs/heads for a branch we already have would
 	# discard unpushed commits on it -- a propagation held back for review,
 	# most often.  Only branches we lack are materialised locally.
-	plan tests => 1;
+	plan tests => 2;
 	reset_stub();
 	install_run_stub();
 	override_inspections(current_branch => 'control', default_remote => 'origin');
@@ -222,13 +223,15 @@ subtest 'fetch_branches - a branch already local only updates its tracking ref' 
 	push @run_results, ['', 0, ''];                # fetch
 
 	my $git = make_git();
-	$git->fetch_branches([qw(qa lab)], 'origin');
+	my (undef, $result) = $git->fetch_branches([qw(qa lab)], 'origin');
 
 	cmp_deeply run_argv(2), [
 		'git', 'fetch', 'origin',
 		'+refs/heads/qa:refs/remotes/origin/qa',
 		'+refs/heads/lab:refs/heads/lab',
 	], 'local branch updates tracking only; missing one becomes a local head';
+	cmp_deeply $result->{created}, [qw(lab)],
+		'and created names the one local ref this refresh had to write';
 };
 
 subtest 'fetch_branches - network failure classified' => sub {
@@ -301,17 +304,76 @@ subtest 'fetch_branches - no-op when no remote returns success' => sub {
 	is scalar @run_calls, 0, 'run was never invoked';
 };
 
-subtest 'fetch_branches - no-op when all input is current branch' => sub {
+subtest 'fetch_branches - the checked-out branch is refreshed like any other' => sub {
+	# The refresh used to drop the branch the working tree stood on, and
+	# control is usually that branch, so a run read whatever the clone
+	# already held for it.  A checked-out branch is by definition a local
+	# one, so it takes the tracking refspec and git never has to refuse a
+	# write to the ref HEAD points at.
+	plan tests => 3;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(control));
+	push @run_results, ["control\n", 0, ''];   # for-each-ref: control is local
+	push @run_results, ['', 0, ''];            # fetch
+
+	my $git = make_git();
+	my (undef, $result) = $git->fetch_branches([qw(control)], 'origin');
+
+	cmp_deeply $result->{fetched}, [qw(control)], 'the branch is refreshed, not skipped';
+	cmp_deeply run_argv(2), [
+		'git', 'fetch', 'origin',
+		'+refs/heads/control:refs/remotes/origin/control',
+	], 'and it updates its tracking ref alone';
+	cmp_deeply $result->{created}, [], 'nothing was created for a branch already here';
+};
+
+subtest 'fetch_branches - one name asked for twice is one branch' => sub {
+	# The refresh is handed the control branch and the deployment branches
+	# together, and control can already be in that list, so the caller is
+	# not made to check.  A duplicate left in would be reported twice and
+	# would put the same refspec on the command line twice.
+	plan tests => 3;
+	reset_stub();
+	install_run_stub();
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(control qa));
+	push @run_results, ['', 0, ''];     # for-each-ref: neither is local
+	push @run_results, ['', 0, ''];     # fetch
+
+	my $git = make_git();
+	my (undef, $result) = $git->fetch_branches([qw(control qa control)], 'origin');
+
+	cmp_deeply run_argv(0),
+		[qw(git ls-remote --heads origin refs/heads/control refs/heads/qa)],
+		'the probe asks for each name once';
+	cmp_deeply run_argv(2), [
+		'git', 'fetch', 'origin',
+		'+refs/heads/control:refs/heads/control',
+		'+refs/heads/qa:refs/heads/qa',
+	], 'and the fetch carries one refspec per branch';
+	cmp_deeply $result->{fetched}, [qw(control qa)], 'the report names it once';
+};
+
+subtest 'fetch_branches - a local-head read that failed is raised, not assumed' => sub {
+	# A read that failed and answered an empty set would make every branch
+	# look absent locally, and every one of them would then take the forced
+	# refspec onto refs/heads and discard the unpushed commits this sub
+	# exists to protect.  A clone we cannot enumerate is raised instead.
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(current_branch => 'qa', default_remote => 'origin');
+	override_inspections(current_branch => 'control', default_remote => 'origin');
+	queue_heads(qw(qa));
+	push @run_results, ['', 128, 'fatal: not a git repository'];   # for-each-ref
 
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
 	my $git = make_git();
-	my (undef, $result) = $git->fetch_branches([qw(qa)], 'origin');
-
-	is $result->{ok}, 1, 'ok=1';
-	is scalar @run_calls, 0, 'run not invoked (all branches were current)';
+	throws_ok {$git->fetch_branches([qw(qa)], 'origin')}
+		qr/Failed to list the local branches/,
+		'the failed read refuses rather than answering an empty set';
+	is scalar @run_calls, 2, 'and no fetch followed it';
 };
 
 subtest 'fetch_branches - GIT_TERMINAL_PROMPT=0 when non-interactive' => sub {
