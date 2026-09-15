@@ -126,6 +126,43 @@ sub _newest_of {
 	}
 	return $newest;
 }
+# }}}
+
+# The two trailers D49 gives a control commit, and the keys we answer them
+# under.  Genesis-Stage makes the commit a gate and carries the reason, whose
+# hold form reads "hold: <reason>", and Genesis-Release-Stage releases a gate
+# by naming its control commit.
+my %TRAILERS = (
+	stage         => 'Genesis-Stage',
+	release_stage => 'Genesis-Release-Stage',
+);
+
+# trailers - the two Genesis trailers one commit carries {{{
+#
+# Git parses the trailer block, through the %(trailers) format atom, so the
+# rules about where a trailer may sit and how a folded value unfolds stay
+# git's rather than becoming ours.  Only the keys the commit actually carries
+# come back, so a commit carrying neither gives an empty hashref, and what
+# the value means is left to the walk that acts on it.
+sub trailers {
+	my ($git, $commit) = @_;
+
+	my %found;
+	for my $key (sort keys %TRAILERS) {
+		my ($value) = $git->log_subjects($commit,
+			limit  => 1,
+			format => sprintf('%%(trailers:key=%s,valueonly,unfold,separator=%%x2c)',
+				$TRAILERS{$key}),
+		);
+		next unless defined $value;
+		$value =~ s/\A\s+//;
+		$value =~ s/\s+\z//;
+		next unless length $value;
+		$found{$key} = $value;
+	}
+
+	return \%found;
+}
 
 # }}}
 # _resolved - expand a marker's sha where this repository holds the commit {{{
