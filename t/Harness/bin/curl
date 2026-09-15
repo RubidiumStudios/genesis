@@ -114,6 +114,40 @@ if (!defined $url) {
 		$status = 201;
 		$answer = {number => $number};
 	}
+} elsif ($url =~ m{/repos/[^/]+/[^/]+/rulesets(?:/(\d+))?$}) {
+	my $id = $1;
+	# A ruleset is a repository setting, so a token that may not read the
+	# branch protection may not read or write one of these either, and the
+	# non-admin row meets the same refusal here that it meets there.
+	if (!$state->{admin}) {
+		$status = 403;
+		$answer = {message => 'Resource not accessible by personal access token'};
+	} elsif ($method eq 'GET' || $method eq 'HEAD') {
+		$answer = $state->{rulesets} || [];
+	} else {
+		# A create or a replace lands in the state, so the listing the next
+		# call makes sees what was sent, and a second apply replaces the
+		# ruleset of that name rather than accumulating another beside it.
+		my $sent = {};
+		eval {$sent = $json->decode($body // '{}'); 1} or $sent = {};
+		$state->{rulesets} ||= [];
+		if (defined $id) {
+			for my $set (@{$state->{rulesets}}) {
+				next unless $set->{id} == $id;
+				%$set = (%$sent, id => $id);
+			}
+			$status = 200;
+		} else {
+			$id = scalar(@{$state->{rulesets}}) + 1;
+			push @{$state->{rulesets}}, {%$sent, id => $id};
+			$status = 201;
+		}
+		seek($state_fh, 0, 0);
+		truncate($state_fh, 0);
+		print $state_fh $json->encode($state);
+		close $state_fh;
+		$answer = {id => $id};
+	}
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/branches/(.+)/protection$}) {
 	unless ($state->{admin}) {
 		$status = 403;

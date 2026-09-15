@@ -1238,6 +1238,150 @@ B<Examples:>
   my $pr = $gh->update_pr('genesis-community/genesis', 42, state => 'closed');
   # returns the closed pull request
 
+=head2 rulesets_url
+
+  my $url = $gh->rulesets_url($owner_repo);
+  my $url = $gh->rulesets_url($owner_repo, $id);
+
+Builds the repository rulesets API URL, optionally addressing one ruleset.
+The rulesets API is used in place of the older branch-protection API because
+it is the only form that carries a per-branch merge method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form.
+
+=item C<$id>
+
+B<(optional)> A ruleset id. When given, the URL addresses that ruleset rather
+than the collection.
+
+=back
+
+B<Returns:> The URL string.
+
+B<Errors:> None. The method composes a string and asks nothing of the API.
+
+B<Examples:>
+
+  my $url = $gh->rulesets_url('genesis-community/genesis');
+  # returns 'https://api.github.com/repos/genesis-community/genesis/rulesets'
+
+  my $url = $gh->rulesets_url('genesis-community/genesis', 7);
+  # returns '.../repos/genesis-community/genesis/rulesets/7'
+
+=head2 list_rulesets
+
+  my $sets = $gh->list_rulesets($owner_repo);
+
+Lists the rulesets a repository carries.
+
+A token that may not read them gets an empty list rather than a refusal,
+because a user without admin still applies the pipeline and takes the
+settings that could not be granted as a report.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=back
+
+B<Returns:> An arrayref of ruleset hashrefs as the API returns them, and an
+empty arrayref where the call was refused or the body was not a JSON array.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for list_rulesets"> -- raised via C<bail()>.
+
+=back
+
+B<Examples:>
+
+  my $sets = $gh->list_rulesets('genesis-community/genesis');
+  # returns an arrayref of every ruleset the repository carries
+
+  my ($mine) = grep {$_->{name} eq 'genesis-control'} @$sets;
+  # picks out the one ruleset a caller owns
+
+=head2 set_ruleset
+
+  my ($ok, $reason) = $gh->set_ruleset($owner_repo, %opts);
+
+Creates the named ruleset, or replaces the one of that name where it already
+stands, so a re-run is idempotent and does not accumulate rules.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<%opts>
+
+=over 4
+
+=item C<name>
+
+The ruleset name. Required, and it is also what a replace matches on.
+
+=item C<target>
+
+What the ruleset applies to. Defaults to C<branch>.
+
+=item C<patterns>
+
+An arrayref of branch names. Each is sent as a C<refs/heads/> ref condition.
+
+=item C<rules>
+
+An arrayref of rule hashrefs, each with a C<type> and optional
+C<parameters>.
+
+=back
+
+=back
+
+B<Returns:> C<($ok, $reason)> rather than bailing, so the caller can report
+what it could not grant and carry on. C<$reason> is undefined where C<$ok>
+is true.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for set_ruleset"> and C<"Missing name for set_ruleset">
+-- raised via C<bail()>.
+
+=back
+
+B<Examples:>
+
+  my ($ok, $reason) = $gh->set_ruleset('genesis-community/genesis',
+    name     => 'genesis-qa/bosh',
+    patterns => ['qa/bosh'],
+    rules    => [{type => 'non_fast_forward'}]);
+  # returns (1, undef) once the branch blocks force pushes
+
+  my ($ok, $reason) = $gh->set_ruleset('genesis-community/genesis',
+    name => 'genesis-control', patterns => ['control'], rules => []);
+  # returns (0, 'HTTP 403 - Forbidden') for a token without admin
+
 =head1 SEE ALSO
 
 L<Service::Vault>, L<Service::BOSH>

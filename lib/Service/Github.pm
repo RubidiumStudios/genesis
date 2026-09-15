@@ -642,6 +642,74 @@ sub update_pr {
 }
 
 # }}}
+# rulesets_url - URL for the GitHub repository rulesets API {{{
+#
+#   $gh->rulesets_url('org/repo')       # list and create endpoint
+#   $gh->rulesets_url('org/repo', 7)    # single-ruleset endpoint
+sub rulesets_url {
+	my ($self, $owner_repo, $id) = @_;
+	my $url = sprintf("%s/repos/%s/rulesets", $self->base_url, $owner_repo);
+	$url .= "/$id" if defined $id;
+	return $url;
+}
+
+# }}}
+# list_rulesets - the rulesets a repository carries {{{
+#
+# Answers with an empty list rather than bailing when the token may not
+# read them, because a non-admin still applies the pipeline and takes the
+# missing settings as a report.
+sub list_rulesets {
+	my ($self, $owner_repo) = @_;
+	bail("Missing owner/repo for list_rulesets") unless $owner_repo;
+
+	my ($code, $msg, $data) = curl(
+		"GET", $self->rulesets_url($owner_repo), undef, undef, 0, $self->{creds}
+	);
+	return [] unless $code == 200;
+
+	my $sets = eval {load_json($data)};
+	return ref($sets) eq 'ARRAY' ? $sets : [];
+}
+
+# }}}
+# set_ruleset - create or replace one named ruleset {{{
+#
+# Returns ($ok, $reason) rather than bailing, because D45 has the apply
+# report what it could not grant and carry on.  A ruleset of the same name
+# is replaced, so a re-run is idempotent and does not accumulate rules.
+sub set_ruleset {
+	my ($self, $owner_repo, %opts) = @_;
+	bail("Missing owner/repo for set_ruleset") unless $owner_repo;
+	bail("Missing name for set_ruleset")       unless $opts{name};
+
+	my ($standing) = grep {($_->{name} // '') eq $opts{name}}
+		@{$self->list_rulesets($owner_repo)};
+
+	my $payload = JSON::PP->new->canonical->encode({
+		name        => $opts{name},
+		target      => $opts{target} // 'branch',
+		enforcement => 'active',
+		conditions  => {
+			ref_name => {
+				include => [map {"refs/heads/$_"} @{$opts{patterns} || []}],
+				exclude => [],
+			},
+		},
+		rules => $opts{rules} || [],
+	});
+
+	my ($code, $msg) = curl(
+		($standing ? "PUT" : "POST"),
+		$self->rulesets_url($owner_repo, $standing ? $standing->{id} : undef),
+		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}
+	);
+
+	return (1, undef) if $code == 200 || $code == 201;
+	return (0, sprintf("HTTP %s - %s", $code, $msg));
+}
+
+# }}}
 # }}}
 # }}}
 

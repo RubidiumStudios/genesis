@@ -2792,11 +2792,15 @@ sub run_genesis {
 	# decides, so the token is missing from this command's environment alone
 	# and the run after it carries the token again.  The per-run no_token
 	# option withholds it without arming anything.
-	if ($self->{gh}) {
-		my $armed = delete $self->{gh}{no_token};
-		$env{GITHUB_AUTH_TOKEN} = $self->{gh}{token}
-			unless $opts{no_token} || $armed;
-	}
+	#
+	# The variable is named either way, and run unsets a variable it is
+	# handed as undef, so a run with no double standing carries no token at
+	# all.  Without that a token exported in the operator's own shell would
+	# reach a command under test and send it at the real API, which is the
+	# one thing no row here may do.
+	my $armed = $self->{gh} ? delete $self->{gh}{no_token} : 0;
+	$env{GITHUB_AUTH_TOKEN} =
+		($self->{gh} && !$opts{no_token} && !$armed) ? $self->{gh}{token} : undef;
 
 	# The fault plan reaches a spawned command through the environment, and the
 	# subclass installs itself in the child through PERL5OPT.  The child's own
@@ -3204,8 +3208,8 @@ sub github_double {
 		admin      => defined $opts{admin} ? ($opts{admin} ? 1 : 0) : 1,
 	};
 
-	$self->_gh_write({prs => [], protection => {}, admin => $gh->{admin},
-		domain => $gh->{domain}});
+	$self->_gh_write({prs => [], protection => {}, rulesets => [],
+		admin => $gh->{admin}, domain => $gh->{domain}});
 	helper::put_file($gh->{log}, '');
 
 	_guard_env(
