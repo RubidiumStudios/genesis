@@ -36,24 +36,6 @@ use Service::Git::Session;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# in_root - stand in the deployment root for the rest of the caller's scope
-#
-# Every row here runs from the deployment root, because propagation_files
-# reads the repository through Service::Git->new('.'), and every row has to
-# come back however it leaves.  A bare chdir at the end of the row is not
-# enough, since a failure inside the session skips it and the next row would
-# then start from the harness workdir.  The guard is handed back rather than
-# kept here, so it lets go at the end of the caller's scope.
-#
-# This pair is a verbatim copy of the one in
-# t/unit-tests/service_git_session-apply_files.t, and the lift of both into
-# the harness is landing from another worktree.  Whichever of the two commits
-# second drops its copy and calls the harness's.
-sub in_root {
-	my ($dir) = @_;
-	return ChdirGuard->enter($dir);
-}
-
 # failure_of - the failure where one came back, and undef otherwise
 #
 # A row that came back with something other than the failure class reads
@@ -64,21 +46,6 @@ sub failure_of {
 	return ref($err) eq 'Genesis::CI::RunFailure' ? $err : undef;
 }
 
-{
-	package ChdirGuard;
-
-	sub enter {
-		my ($class, $dir) = @_;
-		my $was = Cwd::getcwd();
-		chdir $dir or die "cannot enter $dir: $!\n";
-		return bless {was => $was}, $class;
-	}
-
-	sub DESTROY {
-		my ($self) = @_;
-		chdir $self->{was} or warn "cannot return to $self->{was}: $!\n";
-	}
-}
 
 sub exception {
 	my ($code) = @_;
@@ -122,7 +89,7 @@ subtest 'the index check refuses a staged file that left its source' => sub {
 	# because Service::Git keeps one instance per repository and fixes its
 	# prefix at that first construction, and a handle with no prefix makes
 	# the set come back deployment-root-relative and match nothing.
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h, root => 'bosh');
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
@@ -207,7 +174,7 @@ subtest 'the mirror removes what the set no longer holds' => sub {
 		push    => 1,
 	);
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h, root => 'bosh');
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
@@ -267,7 +234,7 @@ subtest 'the second assertion fires when the removal is stopped' => sub {
 		push    => 1,
 	);
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h, root => 'bosh');
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
@@ -323,7 +290,7 @@ subtest 'a path that dropped out of the tracked list is removed' => sub {
 	);
 	my $source = stale_set_delivery($h, copy => 'a', file => 'extras/stale.yml');
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h, root => 'bosh');
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
