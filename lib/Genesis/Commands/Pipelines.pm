@@ -383,28 +383,28 @@ sub pipeline_status {
 		$env_state{$env_name} = \%state;
 	}
 
-	# Run entry point algorithm to determine who's blocked
-	my $targets = Genesis::CI::Propagation::compute_propagation_targets(
-		dag_order   => \@dag_order,
-		parent_of   => \%parent_of,
-		env_changed => \%env_changed,
-	);
-
+	# Who is held, and by whom.  An environment is held where an ancestor is
+	# still sitting on a file the environment's own change touches, and the
+	# ancestor named is the nearest one that shares a file, because that is
+	# the deploy the operator is waiting on.  The walk answers the same
+	# question per commit, and this display answers it over the whole diff.
 	for my $env_name (@dag_order) {
 		my $state = $env_state{$env_name};
 		next if $state->{status};  # already resolved (synced, no-branch, error)
 
-		if ($targets->{$env_name}) {
-			$state->{status} = 'pending';
-		} else {
-			# Has changes but not an entry point — blocked by ancestor
-			my $blocker = $parent_of{$env_name};
-			while ($blocker && !$env_changed{$blocker}) {
-				$blocker = $parent_of{$blocker};
+		my %mine = map {$_ => 1} @{$env_changed{$env_name} || []};
+		my ($blocker, %seen);
+		my $ancestor = $parent_of{$env_name};
+		while (defined $ancestor && !$seen{$ancestor}++) {
+			if (grep {$mine{$_}} @{$env_changed{$ancestor} || []}) {
+				$blocker = $ancestor;
+				last;
 			}
-			$state->{status}  = 'blocked';
-			$state->{blocker} = $blocker;
+			$ancestor = $parent_of{$ancestor};
 		}
+
+		$state->{status}  = defined $blocker ? 'blocked' : 'pending';
+		$state->{blocker} = $blocker if defined $blocker;
 	}
 
 	# Pre-fetch open propagation PRs from GitHub if any env uses require_pr.
@@ -688,9 +688,26 @@ sub propagate {
 				next;
 			}
 
+			# What the environment itself waits for, and why each commit
+			# behind it is held.  The qualifier and the per-commit reason are
+			# printed in the forms the design fixes, so that this run, its
+			# dry run, and pipeline-status can never disagree about a word.
+			# It is printed before anything is delivered, because the hold is
+			# what an operator has come to the output for and a run that
+			# delivered to three environments would otherwise bury it.
+			my $qualifier = Genesis::CI::Walk::held_qualifier($env_record);
+			if ($qualifier) {
+				info "  #Y{%s}: %s", $env_name, $qualifier;
+				for my $held (@{$env_record->{held}}) {
+					info "    #Yi{control\@%s} %s",
+						substr($held->{control_commit}, 0, 7), $held->{subject};
+					info "      #Y{H} %s", Genesis::CI::Walk::hold_reason($held);
+				}
+			}
+
 			my @pending = @{$env_record->{pending}};
 			unless (@pending) {
-				info "  #Gi{%s}: nothing due", $env_name;
+				info "  #Gi{%s}: nothing due", $env_name unless $qualifier;
 				next;
 			}
 

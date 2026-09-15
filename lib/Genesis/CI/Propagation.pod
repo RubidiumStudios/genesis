@@ -6,16 +6,7 @@ Genesis::CI::Propagation - DAG-driven propagation of pipeline files between envi
 
     use Genesis::CI::Propagation;
 
-    # Phase 1: compute which envs are direct entry points for propagation
-    my $targets = Genesis::CI::Propagation::compute_propagation_targets(
-        dag_order      => \@ordered_env_names,
-        parent_of      => \%parent_map,
-        env_changed    => \%propagation_diff,
-        env_undeployed => \%deploy_diff,        # optional
-        scope          => \@scope,              # optional
-    );
-
-    # Phase 2: execute the propagation against git + GitHub
+    # Execute the propagation against git + GitHub
     my $result = Genesis::CI::Propagation::propagate_envs(
         git           => $git,
         github        => $github,
@@ -40,28 +31,19 @@ Genesis::CI::Propagation - DAG-driven propagation of pipeline files between envi
 
 =head1 DESCRIPTION
 
-C<Genesis::CI::Propagation> owns the two phases of pipeline propagation:
-
-=over 4
-
-=item *
-
-B<Planning> (C<compute_propagation_targets>) - pure-functional DAG
-analysis.  Given the topology and per-env diffs, decides which
-environments are direct entry points for a propagation event and
-which files each receives.  No git, no IO.
-
-=item *
-
-B<Execution> (C<propagate_envs>) - applies a computed target list to
-a real git working tree and (optionally) the GitHub API.  Implements
-the rolling C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch model with idempotent
+C<Genesis::CI::Propagation> executes pipeline propagation.
+C<propagate_envs> applies a target list to a real git working tree and,
+where a target wants a pull request, to the GitHub API.  It implements the
+rolling C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch model with idempotent
 re-runs, mode-parameterised push behavior, and batched push + PR
 API calls.
 
-=back
+Which environments receive a change is no longer decided here.  Routing is
+per commit and there is one run, so C<Genesis::CI::Walk::plan> visits every
+environment and answers it commit by commit, and
+C<Genesis::CI::Walk::hold_for> answers the ancestor question that is left.
 
-Both phases are provider-agnostic.  Callers parameterise execution
+Execution is provider-agnostic.  Callers parameterise it
 for Manual vs Concourse modes by setting the option flags on
 C<propagate_envs>.  The Manual provider invokes propagate from the
 deploy postlude with C<push_direct_commits =E<gt> 1>; the Concourse
@@ -91,104 +73,11 @@ the hardest to observe in a live pipeline run.
 Separating it from command dispatch is what allows it to be exercised
 directly in tests.
 
-The split within this module follows the same reasoning:
-L</compute_propagation_targets> is pure so the decision can be tested
-without a git tree, and L</propagate_envs> holds everything that touches
-git or the GitHub API.
+L</propagate_envs> holds everything that touches git or the GitHub API, and
+the decision that used to sit beside it is now the walk's, where it is made
+per commit against durable state rather than over one diff.
 
 =head1 FUNCTIONS
-
-=head2 compute_propagation_targets
-
-    my $targets = Genesis::CI::Propagation::compute_propagation_targets(
-        dag_order      => \@dag,
-        parent_of      => \%parents,
-        env_changed    => \%propagation_diff,
-        env_undeployed => \%deploy_diff,    # optional
-        scope          => \@scope,           # optional
-    );
-
-Determines which environments should receive a propagation event
-directly, and which files each receives.  An environment is a
-direct entry point when its propagation diff is non-empty AND none
-of its propagation-diff files overlap with any ancestor's
-undeployed-set.  Descendants of entry-point envs wait for the
-cascade.
-
-Pure function: it performs no git access and no I/O, deciding
-entirely from the topology and diffs it is handed.  Callers are
-responsible for gathering those.
-
-The two diffs answer different questions, and conflating them is
-the mistake this signature is shaped to prevent.  C<env_changed>
-asks "what is on control that this env's branch lacks", and drives
-what gets copied.  C<env_undeployed> asks "what has this env not
-yet B<deployed>" -- its branch may already carry the file while
-exodus still records an older commit -- and is what identifies an
-ancestor sitting on an in-flight propagation.  A file must not
-cascade past an ancestor that has received it but not yet deployed
-it, or commits stop travelling as a unit.
-
-This ancestor-overlap filter is what prevents the
-fast-forward-append cherry-pick problem in C<propagate_envs>: by
-the time a propagation target reaches the rolling
-C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch, it touches files that are
-disjoint from anything already
-queued on the branch from prior propagations.
-
-B<Parameters:>
-
-Named arguments, collected as C<%args>:
-
-=over 4
-
-=item C<dag_order>
-
-Arrayref of environment names in topological order (root first).
-
-=item C<parent_of>
-
-Hashref mapping each env name to its parent env name (or undef for
-roots).
-
-=item C<env_changed>
-
-Hashref mapping each env name to the arrayref of files that should
-be propagated to it (the C<control> versus C<env-branch> diff,
-filtered to dependency files).
-
-=item C<env_undeployed>
-
-Hashref mapping each env name to the files it has on-branch but has
-not yet deployed (from BOSH/exodus).  Used for the ancestor-overlap
-filter.  Defaults to C<env_changed> when omitted, preserving
-single-diff behaviour for callers that aren't deployment-aware.
-
-=item C<scope>
-
-Arrayref of env names to consider.  Defaults to C<dag_order>.
-Useful when the operator restricts propagation to a subset of the
-DAG.
-
-=back
-
-B<Returns:> hashref of C<{ env_name =E<gt> \@files_to_propagate }>.
-
-B<Examples:>
-
-  my $targets = compute_propagation_targets(
-      dag_order   => ['staging', 'prod'],
-      parent_of   => {prod => 'staging'},
-      env_changed => {
-          staging => ['ops/scale.yml'],
-          prod    => ['ops/scale.yml'],
-      },
-  );
-  # returns { staging => ['ops/scale.yml'] }
-  # prod is withheld: its parent staging is an entry point for the
-  # same file, so prod waits for the cascade
-
-Only direct entry-point envs appear in the result.
 
 =head2 propagate_envs
 
@@ -688,10 +577,10 @@ and the env is reported in C<errors>.
 The cherry-pick + force-push recovery path (rebuild
 C<pr/E<lt>envE<gt>> locally from C<E<lt>envE<gt>>, cherry-pick the
 remote's pending commits, append the new propagation, force-push)
-is B<deferred>.  In practice the C<compute_propagation_targets>
-ancestor-overlap filter prevents the non-fast-forward case: a fresh
-propagation reaching C<pr/E<lt>envE<gt>> touches files disjoint
-from anything already queued on the branch.  If real-world usage
+is B<deferred>.  In practice the walk's ancestor hold prevents the
+non-fast-forward case, because a fresh propagation reaching
+C<pr/E<lt>envE<gt>> touches files disjoint from anything already queued on
+the branch.  If real-world usage
 proves the case reachable, the recovery path will be added; until
 then, the failure is caught and surfaced rather than papered over.
 
