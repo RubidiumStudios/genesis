@@ -81,9 +81,12 @@ sub apply {
 	# repository does not have yet.  The record is what every reader below
 	# uses to tell an applied pipeline from one nobody has applied, so the
 	# manual provider writes it too and only the pipeline work is skipped.
+	# A run that prints the pipeline rather than setting it, which is what
+	# --dry-run and --output-dir both do, still records what it applied.
 	_apply_records($top,
 		control_commit => $git->sha($top->control_branch),
 		provider       => $platform,
+		skip_vault     => $opts->{'skip-vault'},
 	);
 
 	# The manual provider has no pipeline to set, which is a stage with
@@ -1449,6 +1452,23 @@ sub _apply_init_branches {
 # a single call.
 sub _apply_records {
 	my ($top, %opts) = @_;
+
+	# The record is written to the vault, and --skip-vault says the operator
+	# has none to write to, so the stage stands aside rather than refusing a
+	# run the flag asked for or dying on a handle that was never built.  The
+	# warning names both the record that went unwritten and the flag that
+	# stopped it, because a missing record is what a later reader meets as a
+	# pipeline nobody has applied.
+	if ($opts{skip_vault}) {
+		warning(
+			"Not writing the applied record at #C{%s}, because ".
+			"#C{--skip-vault} was given and that record lives in the vault.  ".
+			"Until an apply writes it, nothing can tell this pipeline from ".
+			"one nobody has applied.",
+			$top->applied_record_path
+		);
+		return 1;
+	}
 
 	$top->applied_record(
 		control_commit => $opts{control_commit},
