@@ -705,6 +705,51 @@ sub ls_files {
 }
 
 # }}}
+# diff_cached_quiet - does the index match a ref's tree over these paths {{{
+#
+# D82's first assertion, spelled the way the design spells it.  True when the
+# index and the ref agree, which is git's own quiet exit status: nought where
+# they agree and one where they differ.
+#
+# Anything above one is a git that could not take the comparison at all, and
+# it is raised rather than answered, the way diff_names raises.  A source the
+# repository cannot reach is not a mismatch over every path, and a caller
+# handed a false for it would report the whole set as differing and name a
+# difference nobody made.
+sub diff_cached_quiet {
+	my ($self, $ref, @pathspecs) = @_;
+	my @cmd = ('git', 'diff', '--cached', '--quiet', $ref);
+	push @cmd, '--', @pathspecs if @pathspecs;
+	my ($out, $rc, $err) = run({ dir => $self->{root}, stderr => 0 }, @cmd);
+	bail(
+		{exitcode => DATAERR},
+		"Cannot compare the index of #C{%s} against #C{%s}:\n%s\n".
+		"Fetch the missing commit or branch, then try again.",
+		$self->{root}, $ref, ($err // $out // 'git gave no reason')
+	) if $rc > 1;
+	return $rc == 0 ? 1 : 0;
+}
+
+# }}}
+# diff_cached_names - the paths over which the index and a ref differ {{{
+#
+# What a failed first assertion reports, so a run names the difference rather
+# than saying only that there was one.
+sub diff_cached_names {
+	my ($self, $ref, @pathspecs) = @_;
+	my @cmd = ('git', 'diff', '--cached', '--name-only', '-z', $ref);
+	push @cmd, '--', @pathspecs if @pathspecs;
+	my ($out, $rc, $err) = run({ dir => $self->{root}, stderr => 0 }, @cmd);
+	bail(
+		{exitcode => DATAERR},
+		"Cannot compare the index of #C{%s} against #C{%s}:\n%s\n".
+		"Fetch the missing commit or branch, then try again.",
+		$self->{root}, $ref, ($err // $out // 'git gave no reason')
+	) if $rc;
+	return grep { /\S/ } split /\0/, ($out || '');
+}
+
+# }}}
 # log_subjects - return commit lines, or whole messages, for a branch {{{
 #
 # Options:

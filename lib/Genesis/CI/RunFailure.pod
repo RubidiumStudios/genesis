@@ -1,0 +1,217 @@
+=head1 NAME
+
+Genesis::CI::RunFailure - the two classes of failure that end a propagate run
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::RunFailure;
+
+    die Genesis::CI::RunFailure->fatal(
+        message => 'the staged propagation set does not match its source',
+        branch  => 'qa/bosh',
+        source  => $control_sha,
+        paths   => \@differing);
+
+    die Genesis::CI::RunFailure->unsurvivable(
+        message => 'the remote is unreachable',
+        remedy  => 'check the network and run it again');
+
+    my $outcomes = Genesis::CI::RunFailure::abort_outcomes(\@envs, 'dev');
+
+=head1 DESCRIPTION
+
+Two kinds of error end a propagate run rather than one environment, and they
+differ in whether a retry can help.
+
+A run-fatal failure is the writer's own, which is a file it could not write,
+a commit it could not make, or an index check it failed.  Nothing the caller
+could do differently would have helped, so the run exits 1 and the report
+names the branch and the difference.  This is the one bare exit code the
+design writes.
+
+An unsurvivable failure is an error no environment can survive but that a
+retry may fix, such as an unreachable remote, a rejected credential, or a
+host answering with a server error.  The run exits C<TEMPFAIL>, and where the
+cause is known the report names it and the corrective step.
+
+Both abort the same way.  Every branch the session committed to is reset,
+nothing is published, every environment already walked records that nothing
+of its was published, and every environment not yet walked records that it
+was not attempted.
+
+=head1 METHODS
+
+=head2 fatal
+
+    my $failure = Genesis::CI::RunFailure->fatal(%args);
+
+Builds the run-fatal kind.
+
+B<Parameters:>
+
+=over 4
+
+=item C<message>
+
+What went wrong, in the words the report carries.  It defaults to saying that
+the writer could not produce what it was told to produce.
+
+=item C<branch>
+
+The branch the failure happened on.
+
+=item C<source>
+
+The commit the writer was delivering.
+
+=item C<paths>
+
+An arrayref of the paths the failure names.
+
+=back
+
+B<Returns:> The failure, whose C<exit_code> is 1.
+
+B<Examples:>
+
+  my $failure = Genesis::CI::RunFailure->fatal(
+      message => 'the index holds paths outside the propagation set',
+      branch  => 'qa/bosh',
+      source  => 'a1b2c3d',
+      paths   => ['init']);
+  # $failure->kind is 'run-fatal' and $failure->exit_code is 1
+
+=head2 unsurvivable
+
+    my $failure = Genesis::CI::RunFailure->unsurvivable(%args);
+
+Builds the retryable kind.
+
+B<Parameters:>
+
+=over 4
+
+=item C<message>, C<branch>, C<source>, C<paths>
+
+The same four the run-fatal kind takes, with the message defaulting to saying
+that the run cannot continue.
+
+=item C<remedy>
+
+The corrective step to name, which is what an operator does before running it
+again.
+
+=back
+
+B<Returns:> The failure, whose C<exit_code> is C<TEMPFAIL>.
+
+B<Examples:>
+
+  my $failure = Genesis::CI::RunFailure->unsurvivable(
+      message => 'the remote is unreachable',
+      remedy  => 'check the network and run it again');
+  # $failure->kind is 'unsurvivable' and $failure->exit_code is TEMPFAIL
+
+=head2 kind
+
+    my $kind = $failure->kind;
+
+B<Returns:> C<run-fatal> or C<unsurvivable>, which is how a caller tells
+whether a retry can help.
+
+=head2 exit_code
+
+    my $code = $failure->exit_code;
+
+B<Returns:> The status the run exits with, which is 1 for the run-fatal kind
+and C<TEMPFAIL> for the retryable one.
+
+=head2 branch
+
+    my $branch = $failure->branch;
+
+B<Returns:> The branch the failure happened on, or undef where the failure
+names none.
+
+=head2 source
+
+    my $sha = $failure->source;
+
+B<Returns:> The commit the writer was delivering, or undef where the failure
+names none.
+
+=head2 paths
+
+    my @paths = $failure->paths;
+
+B<Returns:> The paths the failure names, which is empty where it names none.
+
+=head2 remedy
+
+    my $remedy = $failure->remedy;
+
+B<Returns:> The corrective step, or undef, since only the retryable kind
+carries one.
+
+=head2 report_line
+
+    my $line = $failure->report_line;
+
+Composes the one line the run's report carries.
+
+B<Returns:> The message, then the branch, the source, the paths, and the
+remedy, each where the failure carries one.
+
+B<Examples:>
+
+  Genesis::CI::RunFailure->fatal(
+      message => 'the index holds paths outside the propagation set',
+      branch  => 'qa/bosh',
+      source  => 'a1b2c3d',
+      paths   => ['init'])->report_line;
+  # returns 'the index holds paths outside the propagation set on qa/bosh
+  # against a1b2c3d: init'
+
+=head2 abort_outcomes
+
+    my $outcomes = Genesis::CI::RunFailure::abort_outcomes(\@envs, $failed);
+
+The outcome word every environment records when a run ends early.  Both
+classes abort the same way, so the words are the same for both, and nothing
+is left out of the report.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\@envs>
+
+Every environment in scope, in the order the run walks them.
+
+=item C<$failed>
+
+The environment the run was walking when it failed, or undef where the run
+failed before it reached one.
+
+=back
+
+B<Returns:> A hashref of environment name to outcome word.
+
+B<Examples:>
+
+  Genesis::CI::RunFailure::abort_outcomes(['dev', 'qa', 'prod'], 'qa');
+  # returns {dev  => 'not published, run aborted',
+  #          qa   => 'not published, run aborted',
+  #          prod => 'not attempted'}
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut

@@ -1,0 +1,116 @@
+package Genesis::CI::RunFailure;
+# The two classes of failure that end a propagate run, under D82.  They differ
+# in whether a retry can help: a run-fatal failure is the writer's own, which
+# nothing the caller could do differently would have fixed, and an unsurvivable
+# failure is an error no environment survives that a retry may fix, the remote
+# being unreachable as the case.  Both abort the run the same way, so both
+# live here.
+use strict;
+use warnings;
+
+use Genesis::Exit qw/TEMPFAIL/;
+
+### Constructors {{{
+
+# fatal - the writer could not produce what it was told to produce {{{
+#
+# It exits a bare 1, which is the one exit the design leaves unnamed, because
+# a fatal system error is Genesis precedent a caller may already test for.
+sub fatal {
+	my ($class, %args) = @_;
+	return bless({
+		kind      => 'run-fatal',
+		exit_code => 1,
+		message   => $args{message}
+			// 'the writer could not produce what it was told to produce',
+		branch    => $args{branch},
+		source    => $args{source},
+		paths     => $args{paths} || [],
+	}, $class);
+}
+
+# }}}
+# unsurvivable - no environment survives it, but a retry may fix it {{{
+sub unsurvivable {
+	my ($class, %args) = @_;
+	return bless({
+		kind      => 'unsurvivable',
+		exit_code => TEMPFAIL,
+		message   => $args{message} // 'the run cannot continue',
+		branch    => $args{branch},
+		source    => $args{source},
+		paths     => $args{paths} || [],
+		remedy    => $args{remedy},
+	}, $class);
+}
+
+# }}}
+# }}}
+
+### Accessors {{{
+
+# kind - which of the two classes this failure is {{{
+sub kind { $_[0]{kind} }
+
+# }}}
+# exit_code - the status the run exits with for this failure {{{
+sub exit_code { $_[0]{exit_code} }
+
+# }}}
+# branch - the branch the failure happened on {{{
+sub branch { $_[0]{branch} }
+
+# }}}
+# source - the commit the writer was delivering {{{
+sub source { $_[0]{source} }
+
+# }}}
+# paths - the paths the failure names {{{
+sub paths { @{$_[0]{paths}} }
+
+# }}}
+# remedy - the corrective step an unsurvivable failure carries {{{
+sub remedy { $_[0]{remedy} }
+
+# }}}
+# }}}
+
+### The report {{{
+
+# report_line - the line the run's report carries, naming the difference {{{
+#
+# Composed once, because the report is where an operator learns what ended
+# the run and a run over several environments has to say which one lost.
+sub report_line {
+	my ($self) = @_;
+	my $line = $self->{message};
+	$line .= sprintf(" on %s", $self->{branch}) if $self->{branch};
+	$line .= sprintf(" against %s", $self->{source}) if $self->{source};
+	$line .= sprintf(": %s", join(', ', @{$self->{paths}})) if @{$self->{paths}};
+	$line .= sprintf(" (%s)", $self->{remedy}) if $self->{remedy};
+	return $line;
+}
+
+# }}}
+# abort_outcomes - what every environment records when a run ends early {{{
+#
+# Both classes abort the same way, so the words are the same for both: an
+# environment the run had already walked records that nothing of its was
+# published, and one it never reached records that it was not attempted.
+# Nothing is left out of the report, which is I8.
+sub abort_outcomes {
+	my ($envs, $failed) = @_;
+	my %outcomes;
+	my $reached = 1;
+	for my $env (@$envs) {
+		$outcomes{$env} = $reached ? 'not published, run aborted' : 'not attempted';
+		$reached = 0 if defined $failed && $env eq $failed;
+	}
+	return \%outcomes;
+}
+
+# }}}
+# }}}
+
+1;
+# vim: fdm=marker:foldlevel=0:noet

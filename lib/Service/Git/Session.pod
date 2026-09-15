@@ -512,9 +512,17 @@ set and the commit do not describe the same repository, which is what a handle
 carrying the wrong deployment prefix produces.
 
 A removal git refuses is silent, because C<< $git->rm >> discards git's
-answer, so nothing in the sequence notices a path that stayed. The index check
-that runs between these writes and the commit is what catches it, which is why
-the postcondition is asserted rather than assumed.
+answer, so nothing in the sequence notices a path that stayed. A refused
+removal is caught by the check that runs between these writes and the commit,
+which is why the postcondition is asserted rather than assumed.
+
+That check is two assertions and not one, because the source tree carries
+every environment's files and no whole-tree comparison is possible. The first
+is that the index matches the source over the set's own paths, and the second
+is that the index holds nothing outside the set. Both run against the index
+and before the commit, so a failed check never becomes a commit, and either
+one raises a C<Genesis::CI::RunFailure> of the run-fatal kind, which ends the
+run rather than the environment.
 
 The session must be open and standing on the branch being written, because the
 writer switches nothing itself.
@@ -585,6 +593,13 @@ git refuses to read the index. It exits C<DATAERR>.
 
 C<< "Cannot diff %s against %s in %s" >> -- raised by C<< $git->diff_names >>
 where the source commit is not in this repository. It exits C<DATAERR>.
+
+=item *
+
+A C<Genesis::CI::RunFailure> of the run-fatal kind, thrown as an object
+rather than raised as a message, where either index assertion fails. Its
+C<report_line> names the branch, the source, and the paths that differed. No
+commit stands when it is thrown, and the caller ends the run on it.
 
 =item *
 
