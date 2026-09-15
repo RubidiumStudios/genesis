@@ -3373,6 +3373,56 @@ sub exodus_base {
 }
 
 # }}}
+# dependency_set - the environment's dependencies, and whether they are whole {{{
+#
+# D26 gives dependency tracking two sources, and the set is the union of
+# them.  The declared source is genesis.pipeline.track_dependencies, which
+# kits need because a hook that calls exodus_lookup never appears in the
+# manifest.  The discovered source is every exodus path in the unevaluated
+# manifest, which vault_paths already returns.  The deployment's own path
+# is excluded, and a member that both sources name counts once.
+#
+# D77 makes this a compile-time read that never refuses.  An environment
+# whose blueprint will not render takes the declared set alone, the warning
+# names what the render could not reach, and the caller marks that
+# environment's discovery incomplete, because a job that cannot render
+# cannot deploy and its missing triggers are moot until it can.
+sub dependency_set {
+	my ($self) = @_;
+
+	my $own = $self->deployment_slug;
+	my %set = map {$_ => 1} $self->_declared_dependencies;
+	delete $set{$own};
+
+	# The render is the one thing here that can fail, so it is the only
+	# thing the eval covers, and the failure is reported rather than raised.
+	my $paths = eval {$self->vault_paths(notify => 0)};
+	if (my $err = $@) {
+		warning(
+			"Could not render #C{%s}, so only its declared dependencies are ".
+			"wired:\n%s\n".
+			"Re-run #C{genesis pipeline-apply} once it renders.",
+			$self->name, fix_wrap($err)
+		);
+		return ([sort keys %set], 0);
+	}
+
+	# A path under the exodus mount names a deployment in its first two
+	# segments, and anything below those is a subpath of that deployment's
+	# record rather than a deployment of its own.  The key a vault path
+	# carries its reference in is cut off with the colon, so a reference
+	# never reaches the slug.
+	my $mount = $self->exodus_mount;
+	for my $path (keys %$paths) {
+		next unless $path =~ m{^\Q$mount\E([^/]+/[^/:]+)};
+		next if $1 eq $own;
+		$set{$1} = 1;
+	}
+
+	return ([sort keys %set], 1);
+}
+
+# }}}
 # pipeline_record_path - the vault path of this environment's compiled pipeline facts {{{
 #
 # Beside the environment's own exodus record, under a pipeline subpath,
@@ -3398,9 +3448,28 @@ sub pipeline_record_path {
 # record somewhere the repository's vault cannot see, and reading through
 # the repository's vault would answer undef and drop that environment out
 # of the walk with nothing said.
+#
+# Called with a field list it writes instead, which is how pipeline-apply
+# records what it compiled, and it returns what it wrote.  The set goes in
+# as one comma-joined value, because an exodus record is flat and a reader
+# that splits one string is simpler than one that reassembles indices.
 sub pipeline_record {
-	my ($self) = @_;
-	my $data = $self->vault->get($self->pipeline_record_path);
+	my ($self, %fields) = @_;
+	my $path = $self->pipeline_record_path;
+
+	if (%fields) {
+		my @deps      = @{$fields{dependencies} || []};
+		my $discovery = $fields{discovery} // 'complete';
+
+		$self->vault->authenticate->set($path,
+			dependencies => join(',', @deps),
+			discovery    => $discovery,
+		);
+
+		return {dependencies => [@deps], discovery => $discovery};
+	}
+
+	my $data = $self->vault->get($path);
 	return undef unless ref($data) eq 'HASH' && keys %$data;
 	return {
 		dependencies => _decode_path_list($data->{dependencies}),
@@ -3445,6 +3514,23 @@ sub _decode_path_list {
 	my $decoded = eval { JSON::PP->new->decode($raw) };
 	return [@$decoded] if ref($decoded) eq 'ARRAY';
 	return [grep {length} split(/\s*,\s*/, $raw)];
+}
+
+# }}}
+# _declared_dependencies - the declared half, normalised to deployment slugs {{{
+#
+# D26 lets an entry be a deployment type at this environment or an
+# <env>/<type> pair somewhere else, so a bare type takes this
+# environment's name and a pair is taken as it was written.  A key holding
+# a single scalar is read as a list of one, because a list of one is what
+# an operator who wrote a scalar meant.
+sub _declared_dependencies {
+	my ($self) = @_;
+
+	my $declared = $self->lookup('genesis.pipeline.track_dependencies', []);
+	$declared = [$declared] unless ref($declared) eq 'ARRAY';
+
+	return map {m{/} ? $_ : sprintf('%s/%s', $self->name, $_)} @$declared;
 }
 
 # }}}

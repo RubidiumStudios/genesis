@@ -1506,6 +1506,44 @@ sub _apply_records {
 	info("  #G{recorded} the applied pipeline at #C{%s}",
 		$top->applied_record_path);
 
+	# One pass over the topology computes each environment's set and writes
+	# it, in the order the walk itself reads, so the report reads top down.
+	# D103 puts each record beside that environment's own exodus record, and
+	# the absence of that subpath is the membership test the walk uses in
+	# place of a roster, so an environment this loop never reaches carries
+	# none and reads as one the applied record does not know.
+	for my $name (@{$top->pipeline_topology->{order}}) {
+		my $env = eval {$top->load_env($name)};
+		my ($deps, $complete) = ([], 0);
+
+		if ($env) {
+			($deps, $complete) = $env->dependency_set;
+		} else {
+			# An environment that will not load is the same case as one
+			# that will not render, which D77 answers with a warning and an
+			# incomplete mark rather than a refusal.  The record is still
+			# written, through a bare environment that resolves the address
+			# on the merged hierarchy with no kit, because an environment
+			# with no record at all reads as one the apply never reached.
+			my $err = $@;
+			$env = Genesis::Env->bare($name, $top);
+			warning(
+				"Could not load #C{%s}, so nothing was discovered for it: ".
+				"%s\n".
+				"Re-run #C{genesis pipeline-apply} once it loads.",
+				$name, _summarize_load_error($err)
+			);
+		}
+
+		$env->pipeline_record(
+			dependencies => $deps,
+			discovery    => ($complete ? 'complete' : 'incomplete'),
+		);
+		info("  #G{recorded} #C{%s} with %d dependenc%s%s",
+			$name, scalar(@$deps), (@$deps == 1 ? 'y' : 'ies'),
+			($complete ? '' : ' #Y{(discovery incomplete)}'));
+	}
+
 	return 1;
 }
 
