@@ -480,20 +480,32 @@ B<Examples:>
       message => $message);
 
 The single writer. Delivers one control commit onto the branch the session
-stands on, as a mirror of that environment's propagation set as the set stood
-at the delivered commit.
+stands on, as a mirror of that environment's propagation set.
 
 A delivery is a mirror and not an overlay, so the postcondition is that the
 branch's tree equals the set, and a path the set no longer holds is removed
 rather than left standing. The C<changed> and C<deleted> lists are the
-caller's own diff, used to skip blobs that cannot have moved and to name
-files in the report, and they never decide what is delivered.
+caller's own diff, meant to skip blobs that cannot have moved and to name
+files in the report, and they never decide what is delivered. Today they are
+accepted and not read at all, and the step that fills C<overwrote> is the one
+that gives them work.
 
 The set is a list of pathspecs rather than a list of files, since a dev kit's
 source is a directory and a fragment the blueprint names is in the set whether
 or not anybody has written it, so the pathspecs are resolved against the
 source commit's tree before the membership is worked out. What that tree does
 not hold is not delivered and does not keep a path on the branch.
+
+The pathspec list itself is still read from the tree the session is standing
+on, which is the deployment branch, and only the membership is resolved at the
+source commit. The step that adds the at-commit reader moves the first read
+too, and until that lands a repository that restructured between the two
+commits is read under the wrong prefix.
+
+An empty set is refused before the index is read, because every path the
+branch holds is outside an empty set and the mirror would take the branch
+bare, and the postcondition would still hold afterwards so nothing downstream
+would notice.
 
 A removal git refuses is silent, because C<< $git->rm >> discards git's
 answer, so nothing in the sequence notices a path that stayed. The index check
@@ -523,14 +535,15 @@ body.
 
 =item C<changed>, C<deleted>
 
-The caller's diff, optional.
+The caller's diff, optional, and not read yet.
 
 =back
 
 B<Returns:> A hashref with C<commit>, the commit made, C<delivered> and
-C<removed>, the paths written and taken away, and C<overwrote>, the paths
-whose content differed from the source although the delivered commit did not
-change them.
+C<removed>, the paths written and taken away, and C<overwrote>, which is meant
+to name the paths whose content differed from the source although the
+delivered commit did not change them and which comes back empty until a later
+step computes it.
 
 B<Errors:>
 
@@ -548,6 +561,17 @@ C<< "apply_files needs its caller's commit message, since it builds none" >>
 
 =item *
 
+C<< "The propagation set of %s is empty" >> -- raised where the environment's
+set comes back empty, naming the environment and the branch. It exits
+C<SOFTWARE>, and the index has not been read when it is raised.
+
+=item *
+
+C<< "Cannot read the index of %s" >> -- raised by C<< $git->ls_files >> where
+git refuses to read the index. It exits C<DATAERR>.
+
+=item *
+
 C<< "Cannot diff %s against %s in %s" >> -- raised by C<< $git->diff_names >>
 where the source commit is not in this repository. It exits C<DATAERR>.
 
@@ -558,7 +582,10 @@ holds cannot be written into the working tree.
 
 =item *
 
-C<< "Failed to commit" >> -- raised where the commit itself fails.
+C<< "Failed to commit" >> -- raised where the commit itself fails, which
+includes a delivery that changes nothing, since git finds nothing staged and
+refuses. An operator meeting this after a delivery that was already current is
+looking at that and not at a broken repository.
 
 =back
 
