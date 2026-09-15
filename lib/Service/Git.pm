@@ -997,15 +997,26 @@ sub remote_url {
 
 # }}}
 # remote_branch_exists - check whether a branch exists on the remote {{{
+#
+# The remote is asked for the fully qualified ref, and the answer is then
+# filtered to the line whose ref is exactly that, because ls-remote matches
+# the tail of a ref at slash boundaries.  A bare name such as qa/bosh is
+# answered by the pull request branch pr/qa/bosh, so a caller deciding
+# whether to create qa/bosh would be told it was already there.
 sub remote_branch_exists {
 	my ($self, $branch, $remote) = @_;
 	$remote //= $self->default_remote;
 	return 0 unless $remote;
 	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
-		'git', 'ls-remote', '--heads', $remote, $branch);
+		'git', 'ls-remote', '--heads', $remote, "refs/heads/$branch");
 	bail("ls-remote against #C{%s} failed: %s",
 		$remote, ($err || $out || "rc=$rc") =~ s/\s+$//r) if $rc;
-	return ($out && $out =~ /\S/) ? 1 : 0;
+
+	for my $line (split /\n/, ($out // '')) {
+		next unless $line =~ m{\srefs/heads/(\S+)\s*$};
+		return 1 if $1 eq $branch;
+	}
+	return 0;
 }
 
 # }}}
