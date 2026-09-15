@@ -24,11 +24,13 @@ use Time::Piece;
 
 # ---- Constants --------------------------------------------------------------
 #
-# Default name of the CI "control" branch -- the branch from which
-# environment branches are cut by 'genesis new' and against which
-# 'genesis deploy' validates its working state.  Captured as a constant
-# (and a config key) so it can change without rippling through the
-# codebase; not currently exposed to end users.
+# Default name of the CI "control" branch -- the branch the environment
+# files live on, and against which 'genesis deploy' validates its working
+# state.  The deployment branches themselves are cut by
+# 'genesis pipeline-apply', and 'genesis propagate' is what delivers
+# control's commits onto them.  Captured as a constant (and a config key)
+# so it can change without rippling through the codebase; not currently
+# exposed to end users.
 use constant DEFAULT_CONTROL_BRANCH  => 'control';
 use constant DEFAULT_PR_PREFIX       => 'pr/';
 use constant CI_PIPELINE_CONTROL_KEY => 'control'; # key in pipeline.branches{} hash for the control branch

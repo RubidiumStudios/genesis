@@ -231,8 +231,8 @@ sub create {
 		}
 	}
 
-	# Git operations: stage, commit, and create an environment branch.
-	# Only when the repository declares a pipeline and --no-commit is not set.
+	# Stage the environment file when the repository declares a pipeline,
+	# and commit it too unless --no-commit is set.
 	my %cli_opts_git = %{get_options()};
 	if ($pipeline_enabled) {
 		my $env_file = $env->file;
