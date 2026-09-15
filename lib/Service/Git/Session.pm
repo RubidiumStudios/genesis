@@ -492,7 +492,13 @@ sub apply_files {
 		);
 	}
 
+	# D32 has abort reset every deployment branch the session committed to,
+	# and the writer is the one method that commits, so it is the one caller
+	# that can tell the session.  Without this line the abort resets only the
+	# branches whose tips moved, and a commit that left a tip where it was
+	# survives it.
 	$git->commit($message);
+	$self->_record_commit($branch);
 
 	return {
 		commit    => $git->sha('HEAD'),
