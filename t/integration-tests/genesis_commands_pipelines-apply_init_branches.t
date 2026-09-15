@@ -14,9 +14,24 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
+use Genesis::Exit;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
+
+# _unfolded - what the run said, put back on one line
+#
+# A run folds what it says to the terminal's width on the way out, so a
+# phrase can arrive with a newline and an indent in the middle of it.  The
+# rows below read what the operator was told rather than where the fold
+# landed, so the two streams are joined and their whitespace is collapsed
+# before anything is matched.  The streams are joined on a newline so that no
+# phrase can match across the seam where one ends and the other begins.
+sub _unfolded {
+	my $said = join("\n", map {$_ // ''} @_);
+	$said =~ s/\s+/ /g;
+	return $said;
+}
 
 # _read_in - one line of git's answer in a repository, or undef where the ref
 # is absent
@@ -58,6 +73,31 @@ subtest 'an environment with no branch gets an orphan init branch' => sub {
 	my $shared = run({dir => $h->r, passfail => 1},
 		'git', 'merge-base', '--is-ancestor', $h->control, 'qa/bosh');
 	ok(!$shared, 'it shares no history with control');
+};
+
+subtest 'a repository with no remote is refused before anything is cut' => sub {
+	# Four rows, and one for the run's own restoration assertion.
+	plan tests => 5;
+
+	# The remote is named in the configuration and absent from the clone,
+	# which is how a repository reaches the stage with nowhere to publish
+	# to.  A repository that names no remote either is turned away earlier
+	# still, by the source-control derivation, and that is a different
+	# refusal about a different thing.
+	my $h = make_harness(envs => ['qa'], source_control => {remote => 'origin'});
+	drop_remotes($h);
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	my $said = _unfolded($out, $err);
+
+	is($exit, Genesis::Exit::CONFIG,
+		'the refusal exits Genesis::Exit::CONFIG, because a missing remote is configuration');
+	like($said, qr/no git remote/,
+		'the refusal names what the repository is missing');
+	like($said, qr/No branch was created/,
+		'and says that nothing was written');
+	is(ref_in($h->a, 'refs/heads/qa/bosh'), undef,
+		'no orphan is left standing behind the refusal');
 };
 
 subtest 'a standing branch is left where it is' => sub {

@@ -69,12 +69,19 @@ sub apply {
 	# the automated ones alone, so the branches are made before the provider
 	# is asked for anything.  A manual repository still delivers through
 	# these branches, and the operator deploys from their own terminal.
+	#
+	# This sits ahead of every exit the compile and the provider stages
+	# make, --dry-run and --output-dir included, so a run that only means to
+	# print still creates and publishes any deployment branch the remote
+	# lacks.  The POD says so where each of those options is described.
 	_apply_init_branches($top, $git);
 
 	# The manual provider has no pipeline to set, which is a stage with
 	# nothing to do rather than a run that failed, so the command says which
-	# stage it skipped and exits 0 with the branch work behind it.
-	if ($top->manual_pipeline) {
+	# stage it skipped and exits 0 with the branch work behind it.  The
+	# provider is the one read above, because the enabled refusal has
+	# already run and nothing between here and there can change the key.
+	if ($platform eq 'manual') {
 		info(
 			"\n#Y{The manual provider has no pipeline to set.}\n\n".
 			"#i{Genesis is your CLI - deploys happen at your terminal, ".
@@ -1329,10 +1336,10 @@ sub _compile_pipeline {
 # _apply_init_branches - create every missing deployment branch {{{
 #
 # D43 makes this command the only creator of a deployment branch, and D42
-# gives the branch its shape: an orphan whose root commit adds a single init
-# file and carries [ci skip], so the pipeline's git resource registers the
-# head as a version and skips the commit.  The first commit it does not skip
-# is the seed the propagate run delivers later.
+# gives the branch its shape, which is an orphan whose root commit adds a
+# single init file and carries [ci skip], so the pipeline's git resource
+# registers the head as a version and skips the commit.  The first commit it
+# does not skip is the seed the propagate run delivers later.
 #
 # Both sides are asked whether the branch is there, because they answer
 # differently and each answer means something.  A branch the remote carries
@@ -1346,6 +1353,22 @@ sub _compile_pipeline {
 # or swallowed.
 sub _apply_init_branches {
 	my ($top, $git) = @_;
+
+	# D31 makes R the home of every deployment branch, so a repository with
+	# nowhere to publish to is turned away before the first branch is
+	# written rather than after it.  Creating one and then failing on the
+	# publish would leave an orphan standing in the clone and would leave
+	# every environment behind the first with nothing at all.  A repository
+	# that names no remote is configuration rather than a crash, so the
+	# refusal carries the configuration code.
+	bail(
+		{exitcode => CONFIG},
+		"Refusing to apply.  This repository has no git remote, so there is ".
+		"nowhere to publish the deployment branches to.\n\n".
+		"Add the remote that carries the pipeline's branches, then run ".
+		"#C{genesis pipeline-apply} again.  No branch was created and no ".
+		"pipeline was set."
+	) unless $git->default_remote;
 
 	# The command names itself and what it has not written yet, because the
 	# refresh defaults its wording to propagate and would otherwise tell the
