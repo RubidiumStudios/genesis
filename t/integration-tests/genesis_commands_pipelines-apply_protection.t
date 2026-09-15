@@ -1,8 +1,8 @@
 #!/usr/bin/env perl
 # Proves T124, T125, T126, and T319: the apply derives the branch protection
 # from decided state, sets rebase as the only merge method on every deployment
-# branch, reports the settings a non-admin cannot grant and continues, and
-# applies no dismiss-stale-approvals setting anywhere.
+# branch it puts in PR mode, reports the settings a non-admin cannot grant and
+# continues, and applies no dismiss-stale-approvals setting anywhere.
 use strict;
 use warnings;
 use utf8;
@@ -125,12 +125,14 @@ subtest 'a pull request is required exactly where the state says so' => sub {
 		'the PR-mode environment requires a pull request before merging');
 
 	my $qa = rule_named(rules_sent($gh, 'qa/bosh'), 'pull_request');
-	is($qa->{parameters}{required_approving_review_count}, 0,
-		'the direct-mode environment requires no review');
+	is($qa, undef,
+		'the direct-mode environment gets no pull request rule, so it can '.
+		'still be pushed to directly');
 
 	my $staging = rule_named(rules_sent($gh, 'staging/bosh'), 'pull_request');
-	is($staging->{parameters}{required_approving_review_count}, 0,
-		'an environment whose require_pr reads no requires no review either');
+	is($staging, undef,
+		'an environment whose require_pr reads no gets no pull request rule '.
+		'either');
 
 	my $control = rule_named(rules_sent($gh, $h->control), 'pull_request');
 	is($control, undef, 'control requires no pull request by default');
@@ -143,13 +145,16 @@ subtest 'a pull request is required exactly where the state says so' => sub {
 		'control requires one when control_requires_pr is true');
 };
 
-subtest 'a deployment branch merges by rebase only' => sub {
+subtest 'a deployment branch in PR mode merges by rebase only' => sub {
 	# Two rows, and one more for the run's own restoration assertion.
 	plan tests => 3;
 
+	# The setting lives inside the pull request rule, which only a PR-mode
+	# branch is given, so the environment here is in PR mode.
 	my $h  = make_harness(envs => ['qa'], github => 1,
 		source_control => {control_requires_pr => 1});
 	my $gh = $h->gh;
+	write_env_file($h, 'qa', pipeline => {require_pr => 'true'});
 
 	run_genesis($h, 'pipeline-apply');
 

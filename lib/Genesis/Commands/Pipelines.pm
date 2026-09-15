@@ -1389,6 +1389,18 @@ sub _apply_init_branches {
 # markers.  Nothing here dismisses a stale approval, because D51 keeps
 # review safety in the mechanism and an approval has to survive the rebuild
 # a later run pushes.
+#
+# allowed_merge_methods is a parameter of GitHub's pull_request rule, and
+# that rule type requires a pull request before merging, so asking for
+# rebase-only on a branch that takes direct pushes would stop them.  D45
+# serves "a PR-only site and a lab that pushes directly" both, so the rule
+# is gated on require_pr the way control's is gated on control_requires_pr.
+# Nothing is lost where it is off: non_fast_forward and
+# required_linear_history already keep history unrewritten and every commit
+# fast-forward on every branch, and the marker rebase-only protects can only
+# be lost by squashing a pull request, which a branch in no PR mode does not
+# have.  D52's recovery covers a pull request opened into such a branch by
+# hand, taking the marker from the pull request's body.
 sub _protection_rules_for {
 	my ($top, $branch, %opts) = @_;
 
@@ -1411,10 +1423,10 @@ sub _protection_rules_for {
 	push @rules, {
 		type       => 'pull_request',
 		parameters => {
-			required_approving_review_count => ($opts{require_pr} ? 1 : 0),
+			required_approving_review_count => 1,
 			allowed_merge_methods           => ['rebase'],
 		},
-	};
+	} if $opts{require_pr};
 
 	return \@rules;
 }
