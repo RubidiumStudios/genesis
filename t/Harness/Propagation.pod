@@ -121,6 +121,10 @@ remote-tracking ref moves with the publish.  A divergence read taken straight
 after therefore reports in-sync with no second refresh, while copy A's refs
 stay where they were until copy A fetches or pushes.
 
+Copy B is given the branch before it commits, the way C<hand_commit> gives it
+one, so a branch that was cut or delivered in copy A can be published onto
+without a fetch of its own.  No remote-tracking ref moves in the giving.
+
 =head2 push_from($h, $copy, @branches)
 
 Pushes each named branch on its own and returns a hashref of branch to 1 or 0.

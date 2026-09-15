@@ -129,9 +129,10 @@ subtest 'the marker resolves against R and outruns a lagging L' => sub {
 		message => 'change qa from the teammate',
 		push    => 1,
 	);
-	# Copy B was cloned before the deployment branch existed and the delivery
-	# went in copy A, so copy B is given the branch before it commits on it.
-	refresh($h, 'b', $h->slug('qa'));
+	# No refresh of copy B stands here.  Copy B was cloned before the
+	# deployment branch existed and the delivery went in copy A, so copy B
+	# has never held the branch, and publish_from_b is now the helper that
+	# gives it one before it commits.
 	publish_from_b($h,
 		branch  => $h->slug('qa'),
 		files   => {'qa.yml' => "---\nkit: dev\nteammate: true\n"},
@@ -143,6 +144,99 @@ subtest 'the marker resolves against R and outruns a lagging L' => sub {
 		"the read from R names the teammate's control commit");
 	is(Genesis::CI::Marker::newest($git, $h->slug('qa')), $control,
 		'while L still names the older one, which is the lag H18 describes');
+};
+
+subtest 'a marker a squash bulleted is still a marker' => sub {
+	plan tests => 2;
+
+	# A squash that collects more than one commit writes each subject as a
+	# bulleted line, so the marker reaches the body with a bullet in front
+	# of it and nothing else about it changed.  The bulleted marker names a
+	# newer control commit than the delivery underneath it, so a reader that
+	# walked past the bullet answers the older one rather than this one.
+	my ($h, $control) = seeded(copy => 'a');
+	my $newer = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\nsecond: true\n"},
+		message => 'change qa again',
+		push    => 1,
+	);
+	squash_merge($h, 'qa',
+		keep_marker => 0,
+		subject     => sprintf(
+			"Merge pull request #9 from pr/qa/bosh\n\n* [pipeline] control@%s -> qa\n",
+			substr($newer, 0, 12)),
+	);
+	refresh($h, 'a', $h->slug('qa'));
+
+	is(Genesis::CI::Marker::newest($h->git('a'), 'origin/' . $h->slug('qa')),
+		$newer, 'the reader takes the bullet off the front of the line');
+	is(Genesis::CI::Marker::in_text("* [pipeline] control\@a1b2c3d -> qa\n"),
+		'a1b2c3d', 'and so does the one regex');
+};
+
+subtest 'the newest marker wins whichever order the squash lists them' => sub {
+	plan tests => 2;
+
+	# The two tools disagree.  GitHub bullets each subject and lists the
+	# newest commit last, and git's own squash indents each subject and
+	# lists the newest first, so a reader that took the marker by position
+	# would answer the older control commit for one of them.
+	{
+		my ($h, $control) = seeded(copy => 'a');
+		my $newer = commit_on_control($h,
+			files   => {'qa.yml' => "---\nkit: dev\nsecond: true\n"},
+			message => 'change qa again',
+			push    => 1,
+		);
+		squash_merge($h, 'qa',
+			keep_marker => 0,
+			subject     => sprintf(
+				"Merge pull request #13 from pr/qa/bosh\n\n".
+				"* [pipeline] control@%s -> qa\n\n* [pipeline] control@%s -> qa\n",
+				substr($control, 0, 12), substr($newer, 0, 12)),
+		);
+		refresh($h, 'a', $h->slug('qa'));
+
+		is(Genesis::CI::Marker::newest($h->git('a'), 'origin/' . $h->slug('qa')),
+			$newer, 'where the merger listed the newest delivery last');
+	}
+
+	{
+		my ($h, $control) = seeded(copy => 'a');
+		my $newer = commit_on_control($h,
+			files   => {'qa.yml' => "---\nkit: dev\nsecond: true\n"},
+			message => 'change qa again',
+			push    => 1,
+		);
+		squash_merge($h, 'qa',
+			keep_marker => 0,
+			subject     => sprintf(
+				"Squashed commit of the following:\n\n".
+				"    [pipeline] control@%s -> qa\n\n    [pipeline] control@%s -> qa\n",
+				substr($newer, 0, 12), substr($control, 0, 12)),
+		);
+		refresh($h, 'a', $h->slug('qa'));
+
+		is(Genesis::CI::Marker::newest($h->git('a'), 'origin/' . $h->slug('qa')),
+			$newer, 'and where it listed the newest delivery first');
+	}
+};
+
+subtest 'the cap on the walk means the number it was given' => sub {
+	plan tests => 2;
+
+	my ($h, $control) = seeded();
+	hand_commit($h, $h->slug('qa'),
+		message => 'raise the instance count for the incident');
+	refresh($h, 'a', $h->slug('qa'));
+
+	my $git = $h->git('a');
+	my $ref = 'origin/' . $h->slug('qa');
+
+	is(Genesis::CI::Marker::newest($git, $ref, limit => 1), undef,
+		'a cap of one reads the hand commit alone and finds no marker');
+	is(Genesis::CI::Marker::newest($git, $ref, limit => 0), undef,
+		'and a cap of nothing reads nothing rather than everything');
 };
 
 subtest 'a branch with no marker anywhere answers nothing' => sub {
