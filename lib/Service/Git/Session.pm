@@ -457,8 +457,9 @@ sub apply_files {
 	my @overwrote = grep {$held{$_} && !$changed{$_}} @to_write;
 
 	# D44 makes the dry run the one preview, and it writes nothing at all, so
-	# nothing is staged, no commit is made, and D82's two assertions never run
-	# because there is no index for them to check.  The preview still reports
+	# nothing is staged, no commit is made, and D82's two assertions never run,
+	# because the sub returns before either is reached with nothing staged
+	# for them to read.  The preview still reports
 	# what would land and what would go, since the mirror is the only thing
 	# that knows either list, and the run's report names both per environment
 	# and per control commit.

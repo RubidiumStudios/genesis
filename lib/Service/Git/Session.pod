@@ -571,7 +571,8 @@ is accepted and not read yet.
 
 When true the writer computes the delivery and writes nothing. No file is
 written or removed, no commit is made, and the two index assertions never
-run, because there is no index to check. The return carries the same
+run, because the writer returns before either is reached with nothing staged
+for them to read. The return carries the same
 C<delivered>, C<removed>, and C<overwrote> lists with C<commit> undef, so a
 preview reports what would land without touching the branch.
 
