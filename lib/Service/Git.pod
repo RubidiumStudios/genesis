@@ -1661,6 +1661,12 @@ B<Examples:>
 
 Whether a branch exists on the remote.
 
+B<The query names the fully qualified ref.> C<ls-remote> matches the tail of
+a ref at slash boundaries, so a bare name such as C<qa/bosh> is answered by
+the pull request branch C<pr/qa/bosh>. The remote is asked for
+C<refs/heads/E<lt>branchE<gt>> and the answer is filtered to the line whose
+ref is exactly that, so only the branch itself can answer for it.
+
 B<A failed lookup bails rather than returning false.> Authentication
 failures, network problems and bad remotes would otherwise be
 indistinguishable from "the branch is not there", and a caller acting on

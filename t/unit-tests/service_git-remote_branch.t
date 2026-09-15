@@ -53,14 +53,19 @@ sub override_default_remote {
 # remote_branch_exists - check if a branch exists on the remote
 # ======================================================================
 #
-# Uses `git ls-remote --heads <remote> <branch>` which returns one
-# line per matching ref on stdout (or empty if not present).  Empty
+# Uses `git ls-remote --heads <remote> refs/heads/<branch>` which returns
+# one line per matching ref on stdout (or empty if not present).  Empty
 # output AND rc=0 means the branch doesn't exist on the remote.
 # Non-zero rc means the ls-remote call itself failed (auth, network,
 # bad remote) and should bail.
+#
+# The query names the fully qualified ref, and the answer is filtered to
+# the line whose ref is exactly that, because ls-remote matches the tail of
+# a ref at slash boundaries and a bare name would be answered by a branch
+# that merely ends with it.
 
 subtest 'remote_branch_exists - true when ls-remote returns a matching ref' => sub {
-	plan tests => 1;
+	plan tests => 2;
 	reset_stub();
 	install_run_stub();
 	override_default_remote('origin');
@@ -73,6 +78,28 @@ subtest 'remote_branch_exists - true when ls-remote returns a matching ref' => s
 	my $git = make_git();
 	ok $git->remote_branch_exists('pr/staging'),
 		'matching ref in ls-remote output => true';
+	is $run_calls[0][5], 'refs/heads/pr/staging',
+		'and the remote was asked for the fully qualified ref';
+};
+
+subtest 'remote_branch_exists - a ref that merely ends with the name is not it' => sub {
+	plan tests => 1;
+	reset_stub();
+	install_run_stub();
+	override_default_remote('origin');
+	# What a remote carrying the pull request branch and no deployment
+	# branch answers.  git matches a pattern against the tail of a ref at
+	# slash boundaries, so this line comes back for a query the deployment
+	# branch cannot answer.
+	push @run_results, [
+		"abc1234567890\trefs/heads/pr/qa/bosh\n",
+		0,
+		''
+	];
+
+	my $git = make_git();
+	ok !$git->remote_branch_exists('qa/bosh'),
+		'pr/qa/bosh does not stand in for qa/bosh';
 };
 
 subtest 'remote_branch_exists - false when ls-remote returns empty' => sub {
