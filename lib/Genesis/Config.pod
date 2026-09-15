@@ -694,6 +694,25 @@ B<Examples:>
     });
     # Returns: 1 if valid, otherwise calls bail()
 
+=head2 validate_subtree
+
+    my @errors = $cfg->validate_subtree($path, $schema, ignore => [...]);
+
+Validates the block at C<$path> against C<$schema>, filling that schema's
+defaults into the configuration where every other reader will find them,
+and returns the error strings rather than refusing.
+
+It owns the block's defaults outright: whatever a previous call filled
+under C<$path> is dropped before this schema fills its own, so a block
+validated against one schema and then another does not carry the first
+one's defaults into the second one's walk and have them refused there as
+keys nobody declared.
+
+C<validate> is a method on a whole configuration. This is the entry point
+a module uses when it has been handed one block and owns the rules for
+it. The C<ignore> list names keys the parent schema declared, which is
+the discriminator a C<custom_struct> has already checked.
+
 =head2 show_diff
 
     $cfg->show_diff;
