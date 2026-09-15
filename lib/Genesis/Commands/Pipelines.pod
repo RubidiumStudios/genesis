@@ -92,7 +92,16 @@ B<Examples:>
     genesis pipeline-apply sandbox
     genesis pipeline-apply --target my-concourse --dry-run
 
-Gives the pipeline its shape on the provider the repository configured.
+Gives the pipeline its shape on every provider. It refuses when
+C<pipeline.enabled> is false or absent, creates each missing deployment
+branch, applies the branch protection, writes the applied record and each
+environment's pipeline record, and sets the pipeline where the provider has
+one. Under the C<manual> provider it does all of that except set a pipeline,
+because deploys happen at the operator's terminal and there is no hosted
+pipeline to set. With C<--dry-run> it reports every one of those steps and
+writes nothing at all, neither a branch, nor a protection setting, nor a
+record.
+
 C<genesis repipe> is the deprecated name for the same command, and it
 warns and then delegates here.
 
@@ -138,8 +147,9 @@ With the branches protected the run records what it applied, which is the
 control commit it read, the provider it applied, and the time. That record
 goes to the pipeline's own address in exodus under every provider, because it
 is what a later reader asks to tell an applied pipeline from one nobody has
-applied. A run that prints the pipeline rather than setting it, which is what
-C<--dry-run> and C<--output-dir> both do, still writes that record.
+applied. An C<--output-dir> run writes the compiled artifacts rather than
+setting the pipeline, and it writes that record as any other run does. A dry
+run reports the record it would write and writes none.
 
 The same stage then walks the pipeline in order and works out each
 environment's dependency set, which is the declared list and the exodus
@@ -187,18 +197,21 @@ to the pipeline's own name, when not specified.
 
 =item C<--dry-run>
 
-Print what would be set and exit without setting it.  Concourse prints the
-pipeline YAML, and GitHub Actions prints each workflow file under its own
-name.  The branch stage and the applied record both run first even here, so a
-dry run still creates and publishes any deployment branch the remote lacks
-and records what it applied before it prints anything.
+Report the whole run and write nothing at all.  Every stage says what it
+would do and then stands aside, so the run names each branch it would create
+or publish, each branch it would protect and the settings it would send,
+the applied record it would write, and each environment's record with the
+dependencies it counted.  No branch is cut, no ruleset is sent, and no
+record is written.  Under an automated provider the compiled pipeline is
+printed as well, which is the Concourse pipeline YAML or each GitHub Actions
+workflow file under its own name.
 
 =item C<--output-dir>
 
 Write the compiled artifacts and C<ast.json> to this directory and exit
-without setting anything.  The branch stage and the applied record both run
-first here as well, so this run also creates and publishes any deployment
-branch the remote lacks and records what it applied before it writes a file.
+without setting anything.  Every stage before the compile still writes, so
+this run creates and publishes any deployment branch the remote lacks,
+applies the protection, and records what it applied before it writes a file.
 
 =item C<--debug-dir>
 
@@ -221,10 +234,11 @@ this flag leaves it unwritten and the run says so.
 =back
 
 B<Returns:> Nothing.  Exits 0 on success, and exits 0 early under
-C<--dry-run> and C<--output-dir> alike, in both cases with the branch stage
-behind it rather than skipped.  Exits 0 under the C<manual> provider, once
-the branch stage has run and the skipped stage has been named.  Exits 86
-when the provider's prerequisites are not met.
+C<--dry-run> and C<--output-dir> alike.  An C<--output-dir> run has the
+branch, protection, and record stages behind it rather than skipped, and a
+dry run has reported all three and written none of them.  Exits 0 under the
+C<manual> provider, once those stages have run and the skipped stage has
+been named.  Exits 86 when the provider's prerequisites are not met.
 
 B<Errors:>
 
@@ -255,9 +269,10 @@ B<Examples:>
   genesis pipeline-apply
   # Returns: exits 0 on success
 
-  # Preview what would be set, without setting it
+  # Preview the whole run, writing nothing
   genesis pipeline-apply --dry-run
-  # Prints: the compiled pipeline to standard output
+  # Prints: every branch, protection, and record it would write, and the
+  # compiled pipeline where the provider has one
 
   # Apply to a named Concourse target
   genesis pipeline-apply --target prod-concourse
@@ -382,6 +397,8 @@ a fresh clone has nothing else there to read.
 
   my $missing = _apply_branch_protection($gh, $owner_repo,
     branches => \@specs);
+  my $missing = _apply_branch_protection($gh, $owner_repo,
+    branches => \@specs, dry_run => 1);
 
 Asks the repository for the protection each branch was derived, sending one
 ruleset per branch and naming it C<genesis-E<lt>branchE<gt>>. The name is what
@@ -396,6 +413,10 @@ able to apply the pipeline and hand that list to whoever holds admin.
 Nothing here derives a rule. The caller has already done that through
 C<_protection_rules_for>, so this function takes the client, the pair, and
 the branches it is to send and reads no environment of its own.
+
+Under C<dry_run> it names each branch and the settings that branch would be
+given, sends nothing, and reports nothing missing, because a repository that
+was never asked has refused nothing.
 
 B<Parameters:>
 
@@ -419,12 +440,18 @@ C<pipeline.source_control.repository> resolves to.
 An arrayref of specs, each a hashref with a C<branch> name and the C<rules>
 arrayref that branch is to carry.
 
+=item C<dry_run>
+
+Whether C<--dry-run> was given, in which case each branch and the settings it
+would be given are named and no ruleset is sent.
+
 =back
 
 =back
 
 B<Returns:> A hashref of branch name to the arrayref of rule types that
-branch could not be granted. It is empty where every branch was protected.
+branch could not be granted. It is empty where every branch was protected,
+and empty under C<dry_run>, where none was asked for.
 
 B<Errors:>
 
@@ -454,9 +481,14 @@ B<Examples:>
   # returns {control => ['non_fast_forward', 'required_linear_history']}
   # for a token without admin, having warned by name
 
+  my $missing = _apply_branch_protection($gh, 'genesis/bosh-deployments',
+    branches => [{branch => 'qa/bosh', rules => $rules}], dry_run => 1);
+  # names qa/bosh and the rule types it would carry, and returns {}
+
 =head2 _apply_init_branches
 
   my $report = _apply_init_branches($top, $git);
+  my $report = _apply_init_branches($top, $git, dry_run => 1);
 
 Creates and publishes the deployment branch for every environment in the
 pipeline that has none, and leaves a branch the remote already carries where
@@ -489,6 +521,11 @@ is created and then published.
 Every publish goes through C<push_append_only>, so no stage here can rewrite
 a branch the remote already carries.
 
+Under C<dry_run> the clone and the remote are asked the same two questions
+and the answers are reported under the same three headings, and nothing is
+created and nothing is pushed. The refusals still stand, because a run that
+cannot publish anywhere is worth saying so whether or not it meant to write.
+
 B<Parameters:>
 
 =over 4
@@ -503,10 +540,22 @@ names the pipeline's environments and composes each deployment slug.
 The C<Service::Git> for the repository, which is where the branches are
 written and from which they are published.
 
+=item C<%opts>
+
+=over 4
+
+=item C<dry_run>
+
+Whether C<--dry-run> was given, in which case each branch is named under the
+heading it would fall to and neither a branch nor a push is made.
+
+=back
+
 =back
 
 B<Returns:> A hashref with three arrayrefs of branch names, which are
-C<created>, C<published>, and C<standing>.
+C<created>, C<published>, and C<standing>. Under C<dry_run> it is the same
+three lists, naming what the run would have done rather than what it did.
 
 B<Errors:>
 
@@ -543,10 +592,14 @@ B<Examples:>
   my $report = _apply_init_branches($top, Service::Git->new('.'));
   # returns {created => ['qa/bosh'], published => [], standing => ['prod/bosh']}
 
+  my $report = _apply_init_branches($top, Service::Git->new('.'), dry_run => 1);
+  # says it would create qa/bosh, cuts nothing, and returns the same report
+
 =head2 _apply_records
 
   _apply_records($top, control_commit => $sha, provider => 'concourse');
   _apply_records($top, %facts, skip_vault => 1);
+  _apply_records($top, %facts, dry_run => 1);
 
 Writes what the apply learned to exodus.
 
@@ -582,9 +635,17 @@ environment no pipeline knows. A failure while recovering from a failure
 still costs one environment rather than the whole run.
 
 It runs under every provider, including the manual one, since the record says
-what was applied rather than what was hosted. It runs on a dry run and on an
-C<--output-dir> run too, both of which print the pipeline rather than setting
-it, so those runs record what they applied as any other run does.
+what was applied rather than what was hosted. It runs on an C<--output-dir>
+run too, which writes the compiled artifacts rather than setting the
+pipeline, so that run records what it applied as any other run does.
+
+Where C<dry_run> is true the whole stage is walked and nothing is written.
+The pass loads each environment and works out its dependency set exactly as
+the writing pass does, so a run that would mark an environment incomplete
+says so, and the branch between the two is at the vault call alone. The
+applied record is named in words rather than by its vault address, for the
+reason the C<skip_vault> warning names it that way, which is that composing
+the address is itself a read that a preview has no reason to make.
 
 Where C<skip_vault> is true there is no vault to write to, so it warns,
 names the record it left unwritten and the flag that stopped it, and answers
@@ -623,9 +684,14 @@ configuration names none.
 Whether C<--skip-vault> was given, in which case nothing is written and the
 run says what it left unwritten.
 
+=item C<dry_run>
+
+Whether C<--dry-run> was given, in which case every record the stage would
+write is named and none of them is written.
+
 =back
 
-B<Returns:> 1, whether it wrote the record or skipped it.
+B<Returns:> 1, whether it wrote the records, previewed them, or skipped them.
 
 B<Errors:>
 
@@ -669,6 +735,10 @@ B<Examples:>
 
   _apply_records($top, %facts, skip_vault => 1);
   # writes nothing, warns that the record went unwritten, and returns 1
+
+  _apply_records($top, %facts, dry_run => 1);
+  # names the applied record and each environment's record with the
+  # dependencies it counted, writes nothing, and returns 1
 
   _apply_records($top, control_commit => 'control', provider => 'manual');
   # raises a bug, because a branch name is not a commit sha

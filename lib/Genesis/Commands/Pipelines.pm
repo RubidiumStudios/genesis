@@ -63,7 +63,16 @@ sub apply {
 	my $platform = $top->pipeline_provider_type // 'manual';
 
 	my $git = Service::Git->new('.');
+
+	# D44 gives the propagate run a preview that writes nothing at all, and a
+	# preview worth reading follows the same rule everywhere.  The flag is
+	# read once here and handed to every stage below, so no stage has to
+	# reach into the options for itself and none of them can disagree about
+	# what a dry run is.
+	my $dry_run = $opts->{'dry-run'} ? 1 : 0;
+
 	info("\n#G{Applying the pipeline} for #C{%s}\n", $top->type);
+	info("#Yi{This is a dry run.  Nothing below is written.}\n") if $dry_run;
 
 	# The apply records the commit it applied from, and Service::Git resolves
 	# a ref through git rev-parse, which folds its own error text into the
@@ -86,10 +95,11 @@ sub apply {
 	# these branches, and the operator deploys from their own terminal.
 	#
 	# This sits ahead of every exit the compile and the provider stages
-	# make, --dry-run and --output-dir included, so a run that only means to
-	# print still creates and publishes any deployment branch the remote
-	# lacks.  The POD says so where each of those options is described.
-	_apply_init_branches($top, $git);
+	# make, --output-dir included, so a run that only means to write the
+	# compiled artifacts out still creates and publishes any deployment
+	# branch the remote lacks.  A dry run reports the same branches and
+	# writes none of them.  The POD says so where each option is described.
+	_apply_init_branches($top, $git, dry_run => $dry_run);
 
 	# D45 asks the repository to enforce what D31 has Genesis observe on its
 	# own side, because Genesis cannot prevent a rewrite it does not perform
@@ -135,6 +145,7 @@ sub apply {
 		_apply_branch_protection(
 			Service::Github->new(org => $gh_owner), $owner_repo,
 			branches => \@branches,
+			dry_run  => $dry_run,
 		);
 	} else {
 		info(
@@ -148,12 +159,14 @@ sub apply {
 	# repository does not have yet.  The record is what every reader below
 	# uses to tell an applied pipeline from one nobody has applied, so the
 	# manual provider writes it too and only the pipeline work is skipped.
-	# A run that prints the pipeline rather than setting it, which is what
-	# --dry-run and --output-dir both do, still records what it applied.
+	# An --output-dir run writes the compiled artifacts rather than setting
+	# the pipeline, and it records what it applied as any other run does.  A
+	# dry run reports the same records and writes none of them.
 	_apply_records($top,
 		control_commit => $git->sha($top->control_branch),
 		provider       => $platform,
 		skip_vault     => $opts->{'skip-vault'},
+		dry_run        => $dry_run,
 	);
 
 	# The manual provider has no pipeline to set, which is a stage with
@@ -1309,8 +1322,12 @@ sub _compile_pipeline {
 # The publish goes through push_append_only, so a tip that would rewrite what
 # the remote already carries is refused by name instead of being force-pushed
 # or swallowed.
+#
+# D44's preview is the same stage asking the same two questions and making
+# neither write, so a dry run reports the branches it would cut and the ones
+# it would publish and leaves the clone and the remote as it found them.
 sub _apply_init_branches {
-	my ($top, $git) = @_;
+	my ($top, $git, %opts) = @_;
 
 	# The derivation behind this bails on its own where it cannot settle a
 	# name, so what comes back here is always a name.  Whether the clone has
@@ -1354,19 +1371,32 @@ sub _apply_init_branches {
 			next;
 		}
 
+		# A dry run branches at the write and nowhere else, so the preview
+		# reads the clone and the remote exactly as the writing run does and
+		# reports the same three answers under the same three headings.  A
+		# preview that called every missing branch a creation would tell the
+		# operator that a branch they already hold is about to be cut.
 		if ($git->branch_exists($branch)) {
-			$git->push_append_only($branch, remote => $remote);
-			info("  #G{published} #C{%s}", $branch);
+			if ($opts{dry_run}) {
+				info("  #Y{would publish} #C{%s}", $branch);
+			} else {
+				$git->push_append_only($branch, remote => $remote);
+				info("  #G{published} #C{%s}", $branch);
+			}
 			push @{$report{published}}, $branch;
 			next;
 		}
 
-		$git->create_orphan_branch($branch,
-			files   => {init => INIT_FILE_BODY},
-			message => sprintf('Initialize %s branch [ci skip]', $branch),
-		);
-		$git->push_append_only($branch, remote => $remote);
-		info("  #G{created} #C{%s}", $branch);
+		if ($opts{dry_run}) {
+			info("  #Y{would create} #C{%s}", $branch);
+		} else {
+			$git->create_orphan_branch($branch,
+				files   => {init => INIT_FILE_BODY},
+				message => sprintf('Initialize %s branch [ci skip]', $branch),
+			);
+			$git->push_append_only($branch, remote => $remote);
+			info("  #G{created} #C{%s}", $branch);
+		}
 		push @{$report{created}}, $branch;
 	}
 
@@ -1440,13 +1470,27 @@ sub _protection_rules_for {
 # reported by name with the settings it needed, and the run carries on.
 #
 # The environment is never read here, because the caller has already derived
-# every rule, so this sub takes the client, the pair, and the branches it is
-# to send and nothing else.
+# every rule, so this sub takes the client, the pair, the branches it is to
+# send, and whether it is to send them at all.  Under D44's preview it names
+# each branch and the settings that branch would be given, and asks the
+# repository for nothing.
 sub _apply_branch_protection {
 	my ($gh, $owner_repo, %opts) = @_;
 
 	my %missing;
 	for my $spec (@{$opts{branches} || []}) {
+		# A dry run sends nothing, and the rules are named rather than
+		# counted, because which settings a branch is about to be given is
+		# the whole of what an operator is previewing here.  Nothing can be
+		# reported missing, since the repository was never asked, so the
+		# preview leaves the missing set empty.
+		if ($opts{dry_run}) {
+			info("  #Y{would protect} #C{%s} with %s",
+				$spec->{branch},
+				join(', ', map {$_->{type}} @{$spec->{rules} || []}));
+			next;
+		}
+
 		my ($ok, $reason) = $gh->set_ruleset($owner_repo,
 			name     => sprintf('genesis-%s', $spec->{branch}),
 			target   => 'branch',
@@ -1520,12 +1564,22 @@ sub _apply_records {
 			: '(undefined)'
 	) unless ($opts{control_commit} // '') =~ m/^[0-9a-f]{40}$/;
 
-	$top->applied_record(
-		control_commit => $opts{control_commit},
-		provider       => $opts{provider},
-	);
-	info("  #G{recorded} the applied pipeline at #C{%s}",
-		$top->applied_record_path);
+	# A dry run branches at the vault call and nowhere else, so the preview
+	# walks the same stage the writing run walks and differs only in what it
+	# does when it gets there.  The record is named in words rather than by
+	# its vault address, for the reason the skip-vault warning names it that
+	# way, which is that composing the address is itself a read and a
+	# preview should not make one to describe a write it is not making.
+	if ($opts{dry_run}) {
+		info("  #Y{would record} the applied pipeline");
+	} else {
+		$top->applied_record(
+			control_commit => $opts{control_commit},
+			provider       => $opts{provider},
+		);
+		info("  #G{recorded} the applied pipeline at #C{%s}",
+			$top->applied_record_path);
+	}
 
 	# One pass over the topology computes each environment's set and writes
 	# it, in the order the walk itself reads, so the report reads top down.
@@ -1585,6 +1639,17 @@ sub _apply_records {
 				"Re-run #C{genesis pipeline-apply} once it loads.",
 				$name, _summarize_load_error($load_err)
 			);
+		}
+
+		# The same branch again, at the same place.  The set was computed
+		# above whichever way this run is going, so a dry run reports the
+		# dependencies it counted and the incomplete mark it would have
+		# written, and only the write itself is withheld.
+		if ($opts{dry_run}) {
+			info("  #Y{would record} #C{%s} with %d dependenc%s%s",
+				$name, scalar(@$deps), (@$deps == 1 ? 'y' : 'ies'),
+				($complete ? '' : ' #Y{(discovery incomplete)}'));
+			next;
 		}
 
 		$env->pipeline_record(
