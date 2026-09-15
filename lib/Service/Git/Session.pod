@@ -505,7 +505,11 @@ commits is read under the wrong prefix.
 An empty set is refused before the index is read, because every path the
 branch holds is outside an empty set and the mirror would take the branch
 bare, and the postcondition would still hold afterwards so nothing downstream
-would notice.
+would notice. A set that is full but whose paths the source tree holds none of
+is refused for the same reason, one step later, since it ends the same way. No
+real control commit holds none of an environment's set, so that state says the
+set and the commit do not describe the same repository, which is what a handle
+carrying the wrong deployment prefix produces.
 
 A removal git refuses is silent, because C<< $git->rm >> discards git's
 answer, so nothing in the sequence notices a path that stayed. The index check
@@ -563,6 +567,13 @@ C<< "apply_files needs its caller's commit message, since it builds none" >>
 
 C<< "The propagation set of %s is empty" >> -- raised where the environment's
 set comes back empty, naming the environment and the branch. It exits
+C<SOFTWARE>, and the index has not been read when it is raised.
+
+=item *
+
+C<< "None of the %d paths in the propagation set of %s is in the tree of %s" >>
+-- raised where the set is full but the source commit's tree holds none of its
+paths, naming the count, the environment, the commit, and the branch. It exits
 C<SOFTWARE>, and the index has not been read when it is raised.
 
 =item *

@@ -405,7 +405,24 @@ sub apply_files {
 		$env->name, $git->current_branch
 	) unless @set;
 
+	# The second door onto the same ending.  A set that is full but whose
+	# paths the source tree holds none of leaves every path on the branch
+	# outside the membership, so the whole branch is staged for removal, the
+	# commit succeeds because a removal is something to commit, and the
+	# postcondition holds over the emptied branch so nothing downstream fires
+	# either.  It is what a handle carrying the wrong prefix produces, since
+	# the set then comes back deployment-root-relative and matches nothing at
+	# the commit.  No real control commit holds none of an environment's set,
+	# so this says the set and the commit do not describe one repository.
 	my %in_set = map { $_ => 1 } $self->_members_at($source_sha, @set);
+	bail({exitcode => SOFTWARE},
+		"None of the %d paths in the propagation set of #C{%s} is in the tree ".
+		"of #C{%s}, so there is nothing to deliver onto #C{%s}.\n\n".
+		"A delivery is a mirror, so delivering nothing would take every file ".
+		"off that branch.  Nothing has been written.\n\n".
+		"The set and the commit do not describe the same repository.",
+		scalar(@set), $env->name, $source_sha, $git->current_branch
+	) unless %in_set;
 
 	# The mirror's removing half.  Every path the branch holds that the set no
 	# longer holds goes, which is how a leftover init, a root-level file after
