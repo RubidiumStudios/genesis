@@ -886,10 +886,23 @@ sub _validate_custom_struct {
 	# discriminator_default rather than default because a schema entry's
 	# default belongs to the key that entry declares, and the parent fills
 	# it before this arm is ever reached, so the two cannot share a name.
-	$self->_update_source('default', "$key.$field",
-			$schema->{discriminator_default})
-		if exists $schema->{discriminator_default}
-		&& ! $self->has("$key.$field");
+	if (exists $schema->{discriminator_default} && ! $self->has("$key.$field")) {
+		# One block shape needs the fill filed higher than the others.  When
+		# the file carried the block as an explicit empty hash, that hash
+		# claims the key in the merge and skips every default underneath it,
+		# so a fill at default priority would be masked and the operator
+		# would meet a refusal naming a null value for a block that has a
+		# default.  It goes in at loaded priority in that one case, which is
+		# the remedy the hash arm of _validate_key uses for the same reason.
+		my $block  = $self->get($key);
+		my $loaded = struct_has($self->{loaded_values}, $key)
+			? struct_lookup($self->{loaded_values}, $key)
+			: undef;
+		my $source = (keys(%$block) == 0 && ref($loaded) eq 'HASH'
+			&& keys(%$loaded) == 0) ? 'loaded' : 'default';
+		$self->_update_source($source, "$key.$field",
+			$schema->{discriminator_default});
+	}
 
 	my $value = $self->get("$key.$field");
 	return ("#R{$key.$field}: unknown value: #ri{".($value // '<null>')."}; ".
@@ -910,7 +923,12 @@ sub _validate_custom_struct {
 	}
 
 	my $method = $entry->{method} || $schema->{method} || 'validate_config';
-	return $entry->{class}->$method($self, $key, $field);
+
+	# A rule that answers with a bare undef or an empty string has said
+	# nothing, and printing one gives the operator a bullet with nothing
+	# after it to read, so nothing empty survives the hand back.
+	return grep {defined($_) && length($_)}
+		$entry->{class}->$method($self, $key, $field);
 }
 
 # }}}

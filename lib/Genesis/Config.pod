@@ -721,7 +721,9 @@ The discriminator's default is spelled apart from C<default> because a
 schema entry's C<default> is the value of the key that entry declares,
 and the parent fills it before this type is reached. A block that must
 exist for its discriminator to be filled declares both, C<< default =>
-{} >> for the block and C<discriminator_default> for the field.
+{} >> for the block and C<discriminator_default> for the field. An
+operator who writes the block out as an explicit empty hash gets the same
+default as one who leaves it out altogether.
 
 C<noun> names what the map holds, for the one sentence an operator can
 meet from here, which is the refusal raised when the module a value
@@ -1354,12 +1356,20 @@ more: no key of the block other than the discriminator is checked here.
 
 The discriminator is filled from C<discriminator_default> first, when the
 schema declares one and the operator wrote nothing, so the match below it
-sees the value every other reader will. A value the map does not hold is
-refused in the words C<enum> uses, with the map's keys sorted. Otherwise
-the entry's module is loaded and its method is called as
-C<< $class->$method($config, $key, $field) >>, where C<$method> is the
-entry's own C<method>, the block's C<method>, or C<validate_config>. What
-that method returns is what this returns, unchanged.
+sees the value every other reader will. The fill is filed at default
+priority, except where the file carried the block as an explicit empty
+hash: that hash claims the key in the merge and masks anything filed
+beneath it, so there the fill is filed at loaded priority instead and the
+block still reaches the module its default names.
+
+A value the map does not hold is refused in the words C<enum> uses, with
+the map's keys sorted. Otherwise the entry's module is loaded and its
+method is called as C<< $class->$method($config, $key, $field) >>, where
+C<$method> is the entry's own C<method>, the block's C<method>, or
+C<validate_config>. What that method returns is what this returns, less
+any answer that is undefined or empty, because a rule that fell through
+its own branches would otherwise give the operator a bullet with nothing
+after it to read.
 
 B<Parameters:>
 
