@@ -34,7 +34,7 @@ subtest 'the manual provider skips the stages it has nothing for' => sub {
 	my $h = make_harness(envs => ['qa'], provider => 'manual');
 
 	my ($out, $err, $exit) = $h->run_genesis({restore => 0}, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, 0,
 		'the manual apply exits 0, because a skipped stage is not a failure');
@@ -43,19 +43,6 @@ subtest 'the manual provider skips the stages it has nothing for' => sub {
 	like($said, qr/manual provider has no pipeline to set/i,
 		'the operator is told which stage was skipped and why');
 };
-
-# _unfolded - what the run said, put back on one line
-#
-# A run folds what it says to the terminal's width on the way out, so a
-# phrase can arrive with a newline and an indent in the middle of it.
-# The rows below read what the operator was told rather than where the
-# fold landed, so the two streams are joined and their whitespace is
-# collapsed before anything is matched.
-sub _unfolded {
-	my $said = join('', map {$_ // ''} @_);
-	$said =~ s/\s+/ /g;
-	return $said;
-}
 
 subtest 'a leftover ci directory is ignored and never named' => sub {
 	plan tests => 2;
@@ -70,7 +57,7 @@ subtest 'a leftover ci directory is ignored and never named' => sub {
 		"pipeline:\n  name: leftover-ci-directory-marker\n");
 
 	my ($out, $err) = $h->run_genesis({restore => 0}, 'pipeline-describe');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	unlike($said, qr{\.genesis/ci\b},
 		'the run never names a directory it does not read');

@@ -344,6 +344,17 @@ itself sees.  The one option is C<copy>, which is C<a> by default.  A commit
 carrying no trailer, and a commit the copy does not hold, each answer an empty
 hashref, so a row proving an absence reads it rather than trapping a death.
 
+=head2 unfolded(@streams)
+
+Returns the streams joined and put back on one line, so a row reads what the
+run said rather than where the terminal wrapped it.  A run folds what it says
+to the terminal's width on its way out, which drops a newline and an indent
+into the middle of a phrase a row is looking for, so every run of whitespace
+collapses to a single space before anything is matched.  The streams are
+joined on a newline, so that no phrase can match across the seam where one
+stream ends and the next begins, and an undefined stream counts as an empty
+one, so a row that captured stderr alone passes what it has.
+
 =head2 init_branch($h, $env, %opts)
 
 Cuts the environment's branch on R as C<pipeline-apply> would, which is an

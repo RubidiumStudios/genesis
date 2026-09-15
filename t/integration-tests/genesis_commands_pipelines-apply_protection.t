@@ -19,19 +19,6 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
-# _unfolded - what the run said, put back on one line
-#
-# A warning is folded to the terminal's width on its way out, so a phrase a
-# row is looking for arrives with a newline and an indent somewhere in the
-# middle of it.  The two streams are joined on a newline, so that no phrase
-# can match across the seam where one ends and the other begins, and their
-# whitespace is collapsed before anything is matched.
-sub _unfolded {
-	my $said = join("\n", map {$_ // ''} @_);
-	$said =~ s/\s+/ /g;
-	return $said;
-}
-
 # rules_sent - the rules the run actually sent for one branch
 #
 # Every row here asserts about what went over the wire rather than about a
@@ -183,7 +170,7 @@ subtest 'a non-admin gets the list and the run carries on' => sub {
 	my $gh = github_double($h, admin => 0);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, 0, 'the run carries on and exits 0');
 	like($said, qr{qa/bosh}, 'the report names the branch');
@@ -217,7 +204,7 @@ subtest 'a run with no token asks the repository for nothing' => sub {
 	my $gh = $h->gh;
 
 	my ($out, $err, $exit) = run_genesis($h, {no_token => 1}, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, 0, 'the run carries on and exits 0');
 	like($said, qr/GITHUB_AUTH_TOKEN/,

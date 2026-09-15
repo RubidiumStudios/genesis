@@ -19,19 +19,6 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
-# _unfolded - what the run said, put back on one line
-#
-# A warning is folded to the terminal's width on its way out, so a phrase a
-# row is looking for arrives with a newline and an indent somewhere in the
-# middle of it.  The two streams are joined on a newline, so that no phrase
-# can match across the seam where one ends and the other begins, and their
-# whitespace is collapsed before anything is matched.
-sub _unfolded {
-	my $said = join("\n", map {$_ // ''} @_);
-	$said =~ s/\s+/ /g;
-	return $said;
-}
-
 subtest 'the set is the union of the declared and the discovered' => sub {
 	# Three rows, and one more for the run's own restoration assertion, which
 	# run_genesis makes unless a row turns it off.
@@ -95,7 +82,7 @@ subtest 'an environment that will not render is warned about, not refused' => su
 	);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, 0, 'the apply carries on and needs no escape flag');
 	# The two halves of what the operator is told arrive from two places.
@@ -129,7 +116,7 @@ subtest 'an environment that will not load keeps its declared set' => sub {
 	);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, 0, 'the apply carries on past an environment it cannot load');
 	like($said, qr{Could not load qa, so only its declared dependencies},
@@ -156,7 +143,7 @@ subtest 'an environment nothing can read at all costs only itself' => sub {
 	write_env_file($h, 'rogue', genesis => {notes => '(( static_ips(0) ))'});
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, 0, 'the apply carries on rather than bailing the whole run');
 	like($said, qr{Could not load rogue, and could not read it bare either},
