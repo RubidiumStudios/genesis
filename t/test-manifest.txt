@@ -197,6 +197,7 @@ unit-tests/genesis_env-ensure_vault_ready_for_exodus.t    # vault unseal before 
 unit-tests/genesis_env_deployment-artifact_chunking.t     # exodus artifact chunking
 unit-tests/genesis_env_deployment-core.t                  # Deployment core
 unit-tests/genesis_env_deploymentmanager-core.t           # DeploymentManager core
+unit-tests/genesis_env_deploymentmanager-git_context.t    # the exodus record's git block
 unit-tests/genesis_env_manifest-core.t                    # Env::Manifest core
 unit-tests/genesis_env_manifestprovider-core.t            # Env::ManifestProvider core
 unit-tests/genesis_env_required_files-core.t              # required-files propagation

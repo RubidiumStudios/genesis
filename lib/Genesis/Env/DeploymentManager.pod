@@ -457,6 +457,12 @@ collects kit metadata, user identity (from C<who -mH> and environment
 variables), and artifact paths. For C<$action eq 'deploy'> it additionally
 includes C<parameters> and a C<manifest.sha2> computed with SHA-256.
 
+On a repository that has a pipeline, the record also carries a C<git> block,
+which is built by C<_git_context()> and holds the branch, the commit the
+deploy stood on, and the control commit that branch's newest marker names.
+The whole read is wrapped in an C<eval> and nothing is recorded when it
+fails, because the git context supplements the record rather than making it.
+
 The C<bosh_target> key is placed at the top level of the base content
 (C<$base-E<gt>{bosh_target}>), consistent with how it is read from Vault and
 how C<synthesize_from_exodus()> constructs it. When C<who -mH> returns no
@@ -487,6 +493,44 @@ B<Examples:>
 
   my $base = $mgr->_base_deployment_content('deploy', 'success');
   print ref($base); # prints 'HASH'
+
+=head2 _git_context
+
+  my $context = Genesis::Env::DeploymentManager::_git_context($git);
+
+The git block of a deployment audit record, which is the branch, the commit
+the deploy stood on, and the control commit that branch's newest marker
+names.
+
+The two hashes are a pair and are recorded together.  C<commit> is the
+deployed commit, which is what actually ran, including the case where an
+operator pushed a hand commit to the branch and deployed it.
+C<control_commit> is the certified commit, which is the control commit whose
+mirror was deployed, and it is read with L<Genesis::CI::Marker/newest>, so a
+hand commit above the marker is skipped and a squash merge's body is still
+read.
+
+C<control_commit> is absent on a branch carrying no marker at all.  Such a
+branch has been delivered nothing, and recording the control branch's tip in
+its place would turn a label into a claim.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle on the repository the deploy is standing in.
+
+=back
+
+B<Returns:> A hashref of C<branch>, C<commit>, and, where a marker stands,
+C<control_commit>.
+
+B<Examples:>
+
+  Genesis::Env::DeploymentManager::_git_context($git);
+  # returns {branch => 'qa/bosh', commit => '...', control_commit => '...'}
 
 =head2 _base_artifacts
 

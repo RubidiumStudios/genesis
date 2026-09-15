@@ -376,35 +376,14 @@ sub _base_deployment_content {
 			bosh          => $ENV{BOSH_USERNAME} || $ENV{BOSH_USER} || $ENV{BOSH_CLIENT} || undef,
 		};
 
-		# Git context for pipeline propagation tracking (CI-only)
+		# The git context for pipeline propagation tracking, on a repository
+		# that has a pipeline.
 		if ($env->top->pipeline_enabled) {
 			eval {
 				require Service::Git;
-				my $git = Service::Git->new('.');
-				$base->{git} = {
-					branch => $git->current_branch,
-					commit => $git->sha('HEAD'),
-				};
-				# Prefer the control commit recorded by the last pipeline propagation
-				# on this branch ([pipeline] control@<sha> in the commit message).
-				my @log = $git->log_subjects($git->current_branch, limit => 20);
-				for my $line (@log) {
-					if ($line =~ /\[pipeline\] control\@([0-9a-f]+)/) {
-						$base->{git}{control_commit} = $git->sha($1);
-						last;
-					}
-				}
-				# Fallback: entrypoint envs (no prior_env) are never the target of
-				# `genesis propagate`, so they never get the [pipeline] control@sha
-				# marker — this is the normal path for them.  Also covers bootstrap
-				# and emergency manual deploys of downstream envs.
-				unless ($base->{git}{control_commit}) {
-					my $control_branch = $env->top->control_branch;
-					my $sha = eval { $git->sha($control_branch) };
-					$base->{git}{control_commit} = $sha if $sha;
-				}
+				$base->{git} = _git_context(Service::Git->new('.'));
 			};
-			# Non-fatal — git context is supplementary
+			# Non-fatal, because the git context is supplementary.
 		}
 
 		$base->{artifacts} = $self->_base_artifacts($action);
@@ -426,6 +405,38 @@ sub _base_deployment_content {
 		}
 	};
 	return $base;
+}
+# }}}
+
+# _git_context - the deployed commit and the certified commit {{{
+#
+# D87 lays the pair side by side.  git.commit is the deployment-branch commit
+# the deploy stood on, which is what actually ran, hatch case included, and
+# git.control_commit is the control commit the branch's newest marker names,
+# which is what the holds and the staleness read.
+#
+# The marker read goes through the one reader, so a squash merge's body is
+# found and a hand commit above the marker is skipped.  There is no fallback
+# to a control tip: a branch with no marker has been delivered nothing, and
+# recording control's tip in its place turns a label into a claim.
+#
+# It is a function rather than a method, and it is the whole of what the
+# record's git key holds, so the pair can be read against a real repository
+# without an environment standing behind it.
+sub _git_context {
+	my ($git) = @_;
+	require Genesis::CI::Marker;
+
+	my $branch  = $git->current_branch;
+	my $context = {
+		branch => $branch,
+		commit => $git->sha('HEAD'),
+	};
+
+	my $control = Genesis::CI::Marker::newest($git, $branch);
+	$context->{control_commit} = $control if defined $control;
+
+	return $context;
 }
 # }}}
 
