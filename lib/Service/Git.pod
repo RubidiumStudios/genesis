@@ -1431,80 +1431,66 @@ B<Examples:>
 
 =head2 resolve_branch
 
-  my $where = $git->resolve_branch($branch);
-  my $where = $git->resolve_branch($branch, $remote);
-  my $where = $git->resolve_branch({offline => 1}, $branch);
+  my $div = $git->resolve_branch($branch);
+  my $div = $git->resolve_branch($branch, remote => 'upstream');
+  my $div = $git->resolve_branch($branch, unverifiable => 1);
 
-Locates a branch, fetching it when only the remote has it. Returns
-C<local>, C<fetched>, C<absent> or C<unverifiable>.
+Reports how the local branch stands against its remote-tracking ref, as one
+hashref:
 
-B<A branch missing from this clone is not a branch that does not exist.>
-The clone may be fresh or stale -- in CI it is always fresh, holding only
-the control branch. Creating the branch in that case forks it from the real
-one: the new branch starts at the wrong commit, and the first push either is
-rejected as a non-fast-forward or, if forced, destroys the deployment anchor
-propagation depends on. So the remote is the authority, and B<only C<absent>
-licenses a caller to create the branch>.
+  { state => 'in-sync', ahead => 0, behind => 0, unverifiable => 0 }
 
-B<An unreachable remote is not absence.> The probe raises rather than
-returning C<absent>, because degrading to "assume it does not exist" is
-exactly the mistake this guards against -- it would create branches whenever
-the network is down. A caller that wants to proceed offline must decide that
-explicitly; it cannot get there by accident.
+C<state> is one of C<in-sync>, C<ahead>, C<behind>, C<diverged>, C<no-local>,
+and C<no-remote>. The first four come from the two counts that
+C<git rev-list --left-right --count> reports, where C<ahead> counts the
+commits the local branch has that the tracking ref lacks and C<behind> counts
+the other way. C<no-remote> means the branch is local only, and C<no-local>
+means the tracking ref alone has it. When neither ref exists the whole record
+is C<undef>, because no state describes a branch that is nowhere.
 
-A repository with no remote configured has no authority to consult, so local
-absence is the whole truth and C<absent> is returned without a probe.
+C<unverifiable> is a flag and not a state. It rides on every answer a caller
+asks for without refreshing first, so a report can say that its counts rest on
+a tracking ref nobody brought up to date.
 
-The fetch itself goes through C<fetch_branches> with the one name, which
-writes the remote-tracking ref for a branch this clone already holds and
-creates the local ref only where the clone lacks it. That method reports a
-transport failure in its result rather than raising one, so the result is
-read here and a failed refresh is raised rather than answered. Returning
-C<fetched> for a fetch that did not happen would hand a caller a branch
-name it can neither read nor check out.
-
-B<C<offline> withholds the answer instead of guessing.> Working offline is a
-legitimate reason not to contact the remote, but it is not a reason to
-assume the branch does not exist. C<offline> therefore yields
-C<unverifiable> -- distinct from C<absent> precisely so a caller cannot
-treat "we did not look" as "there is nothing there". Callers reconcile the
-branches they already have and report the rest as skipped. A branch already
-present locally still resolves to C<local> offline, since nothing needs
-confirming.
+The query reads refs alone. It never fetches and never contacts the remote,
+because the refresh is its own step and an answer that moved refs on its way
+past could not be asked twice about one moment. A caller that wants the remote
+consulted refreshes through L</fetch_branches> and then asks this.
 
 B<Parameters:>
 
 =over 4
 
-=item C<\%opts>
-
-Optional leading hashref. C<offline> suppresses the remote probe, yielding
-C<unverifiable> for any branch not already local.
-
 =item C<$branch>
 
-The branch to locate.
+The branch to report on, spelled the way a deployment branch is spelled and
+with no C<refs/> prefix.
 
-=item C<$remote>
+=item C<remote>
 
-Defaults to C<default_remote>.
+The remote whose tracking refs the branch is measured against. It defaults to
+L</default_remote>, and where the repository has no remote at all every branch
+it holds reads C<no-remote>.
+
+=item C<unverifiable>
+
+Set this where the caller did not refresh before asking, and the flag comes
+back on the answer. It changes neither the state nor either count.
 
 =back
 
-B<Returns:> C<local> when the branch is already in this clone (the remote is
-not consulted); C<fetched> when the remote had it and it has now been
-fetched into a local ref; C<absent> when it exists neither here nor on the
-remote, or when no remote is configured; C<unverifiable> under C<offline>
-when the branch is not already local.
+B<Returns:> A hashref carrying C<state>, C<ahead>, C<behind>, and
+C<unverifiable>, or C<undef> where neither the local branch nor the tracking
+ref exists.
 
 B<Errors:>
 
 =over 4
 
-=item C<"ls-remote against #C{%s} failed: %s">
+=item C<< "Failed to compare '%s' with '%s/%s'" >>
 
-Raised via C<remote_branch_exists> when the remote cannot be reached or
-authenticated against. Deliberately not caught: see above.
+Raised where C<git rev-list> fails on two refs that both exist, which is a
+repository git cannot read rather than a state this reports.
 
 =item C<"Failed to fetch #C{%s} from #C{%s}: %s">
 
@@ -1516,18 +1502,17 @@ reads a failed refresh as a branch it now has.
 
 B<Examples:>
 
-  my $where = $git->resolve_branch('staging');
-  # returns 'local' -- already here, no round trip
+  my $div = $git->resolve_branch('qa/bosh');
+  # returns {state => 'in-sync', ahead => 0, behind => 0, unverifiable => 0}
 
-  my $where = $git->resolve_branch('staging');
-  # returns 'fetched' -- the remote had it; refs/heads/staging now exists
+  my $div = $git->resolve_branch('qa/bosh');
+  # returns {state => 'diverged', ahead => 2, behind => 1, unverifiable => 0}
 
-  if ($git->resolve_branch('brand-new') eq 'absent') {
-      $git->create_branch('brand-new');   # the only safe path to a create
-  }
+  my $div = $git->resolve_branch('qa/bosh', unverifiable => 1);
+  # the same state and the same counts, read off a ref nobody refreshed
 
-  my $where = $git->resolve_branch({offline => 1}, 'brand-new');
-  # returns 'unverifiable' -- reconcile what is here, skip the rest
+  my $div = $git->resolve_branch('nowhere/bosh');
+  # returns undef, because no state describes a branch that is nowhere
 
 =head2 delete_remote_branch
 
@@ -2033,6 +2018,43 @@ B<Examples:>
 
   _classify_remote_error(undef);
   # returns 'unknown'
+
+=head2 _ref_exists
+
+  my $bool = $git->_ref_exists('refs/remotes/origin/qa/bosh');
+
+Whether a fully qualified ref is in this repository.
+
+It asks C<git show-ref --verify>, which answers about the ref it is handed and
+about nothing else. L</branch_exists> cannot answer this question, because it
+runs C<git rev-parse --verify> on a short name, and that name resolves a tag or
+a sha as readily as a branch while reaching no remote-tracking ref at all.
+L</resolve_branch> asks this one about the tracking ref, where both halves of
+that looseness would give a wrong answer.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The ref to look for, fully qualified. A short name is not resolved here, so
+C<qa/bosh> reads false however many refs of that name the repository holds.
+
+=back
+
+B<Returns:> C<1> where the ref is here and C<0> where it is not.
+
+B<Errors:> None. Git's own complaint is suppressed, and a ref that is not here
+is an answer rather than a failure.
+
+B<Examples:>
+
+  $git->_ref_exists('refs/remotes/origin/qa/bosh');
+  # returns 1 once the refresh has written the tracking ref
+
+  $git->_ref_exists('qa/bosh');
+  # returns 0, because the name is not fully qualified
 
 =head2 _provision_ssh_key
 

@@ -838,42 +838,69 @@ sub remote_branch_exists {
 }
 
 # }}}
-# resolve_branch - locate a branch, fetching it if only the remote has it {{{
+# resolve_branch - how a local branch stands against its remote-tracking ref {{{
 #
-# Returns 'local', 'fetched', 'absent' or 'unverifiable'.  Only 'absent'
-# licenses a caller to create the branch.
+#   my $div = $git->resolve_branch($branch);
+#   my $div = $git->resolve_branch($branch, remote => 'origin');
+#   my $div = $git->resolve_branch($branch, unverifiable => 1);
+#
+# Returns one of the six states of the design with both counts and the
+# unverifiable flag:
+#
+#   { state => 'in-sync', ahead => 0, behind => 0, unverifiable => 0 }
+#
+# in-sync, ahead, behind, and diverged come from the two counts that
+# `git rev-list --left-right --count L...T` reports.  no-local and no-remote
+# are the two existence answers, asked before the counts because the query
+# compares two refs and runs only when both exist.  When neither ref exists
+# the whole record is undef, because the design gives that case no state.
+#
+# The query never fetches.  Under D40 the refresh is its own step, so a
+# caller refreshes first and passes unverifiable => 1 when it did not,
+# which is what `genesis pipeline-status --no-refresh` does.
 sub resolve_branch {
-	my ($self, @args) = @_;
-	my $opts = ref($args[0]) eq 'HASH' ? shift @args : {};
-	my ($branch, $remote) = @args;
-	return 'local' if $self->branch_exists($branch);
+	my ($self, $branch, %opts) = @_;
+	my $remote       = exists $opts{remote} ? $opts{remote} : $self->default_remote;
+	my $unverifiable = $opts{unverifiable} ? 1 : 0;
 
-	# Offline withholds the answer rather than guessing at it.
-	return 'unverifiable' if $opts->{offline};
+	my $local    = $self->branch_exists($branch) ? 1 : 0;
+	my $tracking = $remote
+		? $self->_ref_exists("refs/remotes/$remote/$branch")
+		: 0;
 
-	# Nothing to consult: local absence is the whole truth.
-	$remote //= $self->default_remote;
-	return 'absent' unless $remote;
+	return undef unless $local || $tracking;
 
-	# Bails rather than reporting absence when ls-remote fails, so an
-	# unreachable remote never reads as "safe to create".
-	return 'absent' unless $self->remote_branch_exists($branch, $remote);
+	return {state => 'no-remote', ahead => 0, behind => 0, unverifiable => $unverifiable}
+		if $local && !$tracking;
 
-	# One name through the multi-branch refresh, which writes T for a
-	# branch L holds and creates L only where L lacks it.  The removed
-	# single-branch helper forced R onto L for any name it was given,
-	# which is H17.
-	#
-	# That helper raised on a failed fetch, where the refresh reports one
-	# instead, so the report is read here rather than thrown away.  A
-	# swallowed failure would answer 'fetched' for a branch this clone
-	# still lacks, and a caller that reads the answer hands a ref that is
-	# not there to a checkout.
-	my (undef, $result) = $self->fetch_branches([$branch], $remote);
-	bail("Failed to fetch #C{%s} from #C{%s}: %s", $branch, $remote,
-		($result->{err} || $result->{kind} || "rc") =~ s/\s+$//r)
-		unless $result->{ok};
-	return 'fetched';
+	return {state => 'no-local', ahead => 0, behind => 0, unverifiable => $unverifiable}
+		if $tracking && !$local;
+
+	my ($out) = run({dir => $self->{root}, onfailure => "Failed to compare '$branch' with '$remote/$branch'"},
+		'git', 'rev-list', '--left-right', '--count',
+		"refs/heads/$branch...refs/remotes/$remote/$branch");
+	my ($ahead, $behind) = (($out // '') =~ /(\d+)\s+(\d+)/);
+	($ahead, $behind) = (0, 0) unless defined $ahead;
+
+	my $state = ($ahead && $behind) ? 'diverged'
+	          : $ahead              ? 'ahead'
+	          : $behind             ? 'behind'
+	          :                       'in-sync';
+
+	return {
+		state        => $state,
+		ahead        => $ahead + 0,
+		behind       => $behind + 0,
+		unverifiable => $unverifiable,
+	};
+}
+
+# }}}
+# _ref_exists - does this fully qualified ref exist in this repository {{{
+sub _ref_exists {
+	my ($self, $ref) = @_;
+	return run({dir => $self->{root}, passfail => 1},
+		'git', 'show-ref', '--verify', '--quiet', $ref) ? 1 : 0;
 }
 
 # }}}
