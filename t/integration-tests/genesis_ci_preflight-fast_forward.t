@@ -3,6 +3,12 @@
 # before the walk, the diff base stays the local ref, and a teammate's
 # published delivery is no longer invisible to it.
 #
+# The claim about the diff base is made by a pair.  One half shows that a
+# delivery already on the branch is not delivered again, and the other that a
+# change control still holds is named as pending, because a diff taken
+# against a ref that is not there comes back empty and so satisfies the first
+# half on its own.
+#
 # Every phrase is matched across the wrap.  An event line is wrapped to the
 # terminal width before it reaches standard error, so a clause the reader
 # sees on one line can arrive with a newline and an indent inside it.
@@ -22,8 +28,6 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
-use Genesis::Exit;
-use Genesis::Top;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -114,27 +118,105 @@ subtest 'a teammate delivery already on the branch is not delivered twice' => su
 	unlike($err, qr{\Q$qa\E.*propagated}, 'the run reports no delivery for it');
 };
 
-subtest 'an environment with no branch is reported as awaiting the apply' => sub {
+subtest 'the diff base names what control still has to deliver' => sub {
 	# Three rows, and one more for the run's own restoration assertion.
 	plan tests => 4;
 
+	# The positive half of the pair.  The two subtests above prove that a
+	# delivery already on the branch is not delivered again, and a diff
+	# taken against a ref that is not there is empty too, so on its own
+	# that claim holds whether the base names the settled branch or
+	# nothing at all.  Here control carries a change nobody has delivered,
+	# and only a base that names a real ref can find it.
+	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $qa = $h->slug('qa');
+
+	init_branch($h, 'qa');
+	refresh($h, 'a', $qa);
+
+	# The branch is brought level with control first, so the one thing the
+	# walk can find is the commit made after it.  That commit lands a kit
+	# overrides file, which is one of the kinds the propagation set holds
+	# outright; an ops file is in the set only where the kit's blueprint
+	# draws on it, and this kit's does not.
+	deliver($h, 'qa', copy => 'b',
+		control => ref_in($h->a, 'refs/heads/' . $h->control));
+	commit_on_control($h,
+		files => {'kit-overrides.yml' => "---\nfrom: control\n"}, push => 1);
+
+	# A dry run, because the writer the walk hands a target to still names
+	# a branch by the environment alone, and what this row is about is
+	# which files the walk finds rather than how it delivers them.
+	my (undef, $err) = run_genesis($h, 'propagate', '--dry-run');
+
+	like($err, qr{^\s*qa:\s+1\s+file\s+to\s+propagate}m,
+		'the walk names the environment as receiving the change');
+	like($err, qr{kit-overrides\.yml}, 'and names the file control added');
+	unlike($err, qr{No changes to propagate},
+		'so the run does not report an empty pipeline');
+};
+
+subtest 'a dry run assumes the fast-forward and moves nothing' => sub {
+	# Four rows, and one more for the run's own restoration assertion.
+	plan tests => 5;
+
+	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $qa = $h->slug('qa');
+
+	init_branch($h, 'qa');
+	refresh($h, 'a', $qa);
+	my $control = commit_on_control($h,
+		files => {'ops/shared.yml' => "---\nfrom: control\n"}, push => 1);
+	deliver($h, 'qa', control => $control, copy => 'b');
+	refresh($h, 'a', $qa);
+
+	my $before = ref_in($h->a, "refs/heads/$qa");
+
+	my (undef, $err) = run_genesis($h, 'propagate', '--dry-run');
+
+	is(ref_in($h->a, "refs/heads/$qa"), $before,
+		'the dry run left the branch where it stood');
+	is($h->git('a')->resolve_branch($qa)->{state}, 'behind',
+		'so it is still behind the remote');
+	# The warning says only that the fast-forward is assumed.  The sentence
+	# naming the counts is the event line, which the caller prints under
+	# either kind of run, so the warning does not repeat it.
+	like($err, qr/This\s+report\s+assumes\s+the\s+fast-forward\s+of\s+\Q$qa\E\s+that\s+a\s+real\s+run\s+would\s+make/,
+		'and the report says it assumes the fast-forward a real run would make');
+	# A report that assumes the move has to read as though it had been
+	# made, so the diff is taken from the ref a real run would have left
+	# the branch on rather than from the ref it is still standing on.
+	unlike($err, qr{^\s*qa:\s+\d+\s+files?\s+to\s+propagate}m,
+		'and it names nothing as pending that the teammate already delivered');
+};
+
+subtest 'an environment with no branch is reported as awaiting the apply' => sub {
+	# Four rows, and one more for the run's own restoration assertion.
+	plan tests => 5;
+
 	# The kit is here because the walk loads each environment before it
-	# diffs, and an environment whose kit cannot be resolved never reaches
-	# the report this row reads.
-	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0', embed => 1);
+	# reports on it, and an environment whose kit cannot be resolved never
+	# reaches the report these rows read.
+	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $qa = $h->slug('qa');
 
 	# No branch for qa on either side, which is the one state the pre-flight
-	# records nothing for.  The run is a dry run because the creation guard
-	# between the two stages writes nothing under one, so the walk is
-	# reached with the environment still unsettled, which is the case D43
-	# calls awaiting pipeline-apply.
-	my (undef, $err, $exit) = run_genesis($h, 'propagate', '--dry-run', '-y');
+	# records nothing for.  Nothing stands between the two stages now, so a
+	# plain run reaches the walk and the walk says what the environment is
+	# waiting for.
+	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
-	isnt($exit, Genesis::Top->PROPAGATE_NO_BRANCH_EXIT,
-		'the run is not stopped by the creation guard');
-	like($err, qr{Propagating from}, 'and it reaches the walk');
-	like($err, qr{\bqa\b:\s+awaiting\s+\S*genesis\s+pipeline-apply},
-		'where the environment with no branch is reported as awaiting it');
+	is($exit, 0, 'a missing branch does not refuse the run');
+	my @said = ($err =~ m{^\s*qa:\s+awaiting\s+\S*genesis\s+pipeline-apply}mg);
+	is(scalar @said, 1,
+		'the walk reports it as awaiting the apply exactly once');
+	# Cutting the branch belongs to genesis pipeline-apply, and a run that
+	# cut one here would cut it under the environment's own name, which is
+	# the ref the real branch needs.
+	is(ref_in($h->a, "refs/heads/$qa"), undef,
+		'and no deployment branch was created');
+	is(ref_in($h->a, 'refs/heads/qa'), undef,
+		'nor one under the environment\'s own name');
 };
 
 done_testing;

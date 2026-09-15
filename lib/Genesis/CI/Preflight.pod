@@ -245,18 +245,30 @@ the first reset, so a repository holding both never has a branch moved under
 it.
 
 The reset is the run's first write, and it is the one forced write onto a
-deployment branch the design admits outside the session's own abort.  Under
-C<dry_run> nothing is written; the line is reported as an assumption the real
-run would make, so a report never reads as though the branch had already
-moved.
+deployment branch the design admits outside the session's own abort.  It
+settles the branch's record with it, because the branch now stands on its
+tracking ref and the state and the two counts the classification wrote are no
+longer true of it.  Under C<dry_run> nothing is written; the line is reported
+as an assumption the real run would make, so a report never reads as though
+the branch had already moved.
 
 Last of all, a branch that is merely behind its remote-tracking ref is moved
 up to it by fast-forward, which resolves nothing a human would decide and
 which the deploy's own C<--ff-only> is the precedent for.  The divergence is
 asked again rather than read off the record, because a branch this stage has
 just reset stands where its tracking ref does and the record was written
-before that move.  The fast-forward is reported as an event line too, and
-under C<dry_run> it is reported as an assumption and nothing is written.
+before that move.  The fast-forward settles the branch's record too, and it is
+reported as an event line.
+
+Under C<dry_run> neither write is made, and the record of a branch the stage
+would have moved says so instead.  C<assumed> names the ref a real run would
+have left the branch on, and the state and the counts stay as the
+classification wrote them, because nothing moved.  A caller taking a diff base
+off such a record takes C<assumed> where it is set, so a report says what a
+real run would deliver rather than naming files a teammate has already
+delivered.  Each warning says only that the write is assumed, because the
+event line beside it is the one record of what would be done and the caller
+prints it under either kind of run.
 
 Once the stage has run, a deployment branch in scope is C<in-sync> or it has
 no local ref at all.  That is what lets the walk take its diff base from the
@@ -336,8 +348,12 @@ The divergence record for the control branch.
 
 One record per environment that has a branch on either side, keyed by the
 environment's name.  A branch this stage reset carries C<reset> set on its
-record, and one it fast-forwarded carries C<fast_forwarded>, whose
-C<state> is then C<in-sync> and whose C<behind> is 0.
+record and one it fast-forwarded carries C<fast_forwarded>, and either way
+C<state> is then C<in-sync> and both counts are 0, because the branch stands
+on its tracking ref.  Under C<dry_run> no record is settled that way.  The one
+the stage would have moved carries C<assumed>, which is the ref a real run
+would have left the branch on, and its C<state> and counts are the ones the
+classification wrote.
 
 =item C<events>
 
@@ -385,6 +401,13 @@ B<Examples:>
   # $initial->{branches}{qa}{fast_forwarded} is 1, its state is 'in-sync',
   # and $initial->{events} carries
   # 'fast-forwarded qa/bosh to origin/qa/bosh, 1 commit behind'
+
+  my $initial = Genesis::CI::Preflight::initial_state($top, $git,
+      envs => ['qa'], refreshed => $refreshed, control => $control_state,
+      dry_run => 1);
+  # the same repository under a dry run leaves the branch behind, and
+  # $initial->{branches}{qa}{assumed} is 'refs/remotes/origin/qa/bosh',
+  # which is the ref the walk takes its diff base from
 
 =head1 INTERNAL FUNCTIONS
 
@@ -516,8 +539,8 @@ Composes D48's paragraphs for deployment branches the remote has never had.
 
 One paragraph per branch, so a run with one offender reads exactly as the
 design quotes it and a run with several names them all.  The act the refusal
-opens with and the sentence it closes with belong to C<_illegal_state_refusal>, which
-frames whichever classes the stage found.
+opens with and the sentence it closes with belong to
+C<_illegal_state_refusal>, which frames whichever classes the stage found.
 
 B<Parameters:>
 

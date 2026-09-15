@@ -42,9 +42,18 @@ remote-tracking ref.
 That branch is the deployment slug, and it is not behind its remote-tracking
 ref, because the pre-flight has just seen to both.  So a delivery a teammate
 published is already on the branch when the walk diffs, which is what stops
-the walk delivering it a second time.  An environment the pre-flight has no
+the walk delivering it a second time.  Under a dry run the pre-flight moves
+nothing, and the record it leaves names the ref a real run would have left the
+branch on, which is the ref the walk diffs from instead.
+
+Nothing stands between the two stages.  An environment the pre-flight has no
 record for has no branch on either side, and the walk reports it as awaiting
-C<genesis pipeline-apply> rather than passing over it in silence.
+C<genesis pipeline-apply> and carries on, writing nothing for it.  C<propagate>
+used to offer to cut that branch itself, and the branch it cut carried the
+environment's own name rather than the deployment slug, so the offer satisfied
+nothing and left a ref standing exactly where the real branch has to go.
+C<genesis pipeline-apply> is the command the design gives the job of cutting a
+deployment branch, and it is the only one that does it.
 
 =head1 FUNCTIONS
 
@@ -280,175 +289,6 @@ B<Examples:>
 Every key the block resolves is printed, so the report is five rows and
 not two, and both column widths come from those rows.  A repository that
 overrides one of them widens the tier column to hold C<explicit>.
-
-=head2 _missing_env_branches
-
-  my @missing = _missing_env_branches($top, $git, \@scope);
-
-Returns the environments in C<@scope> that have no local branch, in the
-order given.
-
-Kept apart from C<propagate> so the decision can be tested without a
-repository: reaching it in situ needs a working tree, a DAG and a vault.
-
-The branch it asks for is the deployment slug the top composes, not the
-environment's own name.  In a typed repository those are two different refs
-and the name has none, so asking by name refused every run in front of the
-branches C<pipeline-apply> had actually cut, and the walk below was never
-reached.  The environments still come back by name, because that is what the
-authorization and the creator below both take.
-
-B<Returns:> The subset of C<@scope> whose deployment branch is absent; empty
-when all are present.
-
-B<Errors:> None.
-
-B<Examples:>
-
-  my @missing = _missing_env_branches($top, $git, ['mgmt','lab','qa']);
-  # returns ('lab') when only lab/bosh is absent
-
-=head2 _authorize_branch_creation
-
-  _authorize_branch_creation($opts, \@missing, $control);
-
-Decides whether propagation may create the branches it found absent.
-Returns true when authorized and raises otherwise, so callers proceed
-directly to creation.
-
-B<Creating a branch is incidental to propagating, so it is opted into
-rather than assumed.> C<propagate>'s purpose is to move files between
-branches that already exist; making one is a repair it happens to be
-positioned to perform. The operator therefore authorizes it explicitly
-with C<-y>, or by answering a prompt.
-
-B<Outside a controlling terminal it refuses rather than guessing.> There
-is no one to ask, and creating branches unattended is exactly the
-silent, hard-to-notice change this ought not make on its own. The
-refusal names both C<-y> and C<pipeline-prepare>, because an operator
-told only that something is wrong has been given a complaint rather than
-a remedy.
-
-B<The refusal exits with C<Genesis::Top/PROPAGATE_NO_BRANCH_EXIT>>
-rather than the default 1, so a C<deploy> running C<propagate> as a
-subprocess can distinguish "refused, and here is the one-command fix"
-from "propagation actually broke". See L<Genesis::Env/_post_deploy>.
-
-The environment list is printed before the question rather than folded
-into it: approving a list you cannot see is not consent, and
-C<prompt_for_boolean> collapses a multi-line prompt onto its question
-line.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$opts>
-
-The parsed command options. Only C<yes> is consulted.
-
-=item C<\@missing>
-
-Environments whose branches are absent. Named in full in the output.
-
-=item C<$control>
-
-The control branch, named in both the prompt and the refusal as the
-source the new branches would be built from.
-
-=back
-
-B<Returns:> True when creation is authorized. Does not return otherwise.
-
-B<Errors:>
-
-=over 4
-
-=item C<"No branch exists for ...">
-
-Raised with exit code C<PROPAGATE_NO_BRANCH_EXIT> when there is no
-terminal to ask and C<-y> was not given.
-
-=item C<"Aborted - no branches were created.">
-
-Raised when the operator declines the prompt. Continuing would propagate
-against a branch they just refused to create.
-
-=back
-
-B<Examples:>
-
-  _authorize_branch_creation({yes => 1}, ['lab'], 'control');
-  # returns 1 without asking
-
-  _authorize_branch_creation({}, ['lab'], 'control');
-  # prompts when interactive; raises otherwise
-
-=head2 _create_missing_branches
-
-  my @created = _create_missing_branches($top, \@missing, $dry_run);
-
-Builds a branch for each environment, via
-L<Genesis::Env/prepare_branch>.
-
-B<Creating the branch is the propagation for that environment.>
-C<prepare_branch> seeds the new branch with the environment's
-propagation files copied from control HEAD, so the diff computed
-immediately afterwards is empty by construction and the environment
-never appears in the propagation targets. There is no second step.
-
-B<Which is why the caller must push these explicitly.> Receiving no
-propagation commit, a created branch never reaches C<@pushed_branches>
-in L<Genesis::CI::Propagation/propagate_envs>, and would be left local:
-the pipeline would never see it, and the next run would find it
-local-only and proceed quietly. C<propagate> passes the returned names
-as C<push_extra_branches>, which C<--no-push> still suppresses.
-
-Creation is safe to perform implicitly because C<prepare_branch> reads
-existence off two refs that are already here, the local branch and its
-remote-tracking ref, and creates only a branch that is in neither. It
-contacts the remote for nothing. The refresh is what brings the tracking
-refs up to date, and it creates the local ref for a branch the remote
-alone had, so by the time this is asked a branch that exists on the
-remote is here and will not be forked.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$top>
-
-The C<Genesis::Top> used to load each environment.
-
-=item C<\@missing>
-
-Environments to create branches for.
-
-=item C<$dry_run>
-
-Reports what would be created without committing.
-
-=back
-
-B<Returns:> The names created, for the caller to add to the push set.
-
-B<Errors:>
-
-=over 4
-
-=item C<"Could not load ... to create its branch">
-
-Raised when the environment cannot be loaded. Deliberately fatal rather
-than skipped: a skipped environment would leave the branch absent while
-the run reported success, which is the failure this whole path exists to
-end.
-
-=back
-
-B<Examples:>
-
-  my @created = _create_missing_branches($top, ['lab'], 0);
-  # returns ('lab'); refs/heads/lab now exists with a seed commit
 
 =head2 _resolve_propagation_base
 
