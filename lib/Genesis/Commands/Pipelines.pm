@@ -1528,17 +1528,41 @@ sub _apply_records {
 			# Both the declared read and the record write go through a bare
 			# environment, which resolves the whole of genesis.pipeline and
 			# the record's own address on the merged hierarchy with no kit.
-			# The record has to be written either way, because an
-			# environment carrying none at all reads as one the apply never
-			# reached.
-			my $err = $@;
-			$env  = Genesis::Env->bare($name, $top);
-			$deps = [$env->_declared_dependencies];
+			# The record is written even so, because an environment
+			# carrying none at all reads as one the apply never reached.
+			# The recovery is guarded in its turn, because every call it
+			# makes can raise on its own.  An environment whose files will
+			# not merge at all refuses the bare read and the record's
+			# address alike, and a failure while recovering from a failure
+			# should still cost one environment rather than the whole run.
+			# The address is asked for here rather than left to the write,
+			# so that the one thing the write can still raise on is the
+			# vault, which is a failure of the stage and not of this
+			# environment.
+			my $load_err = $@;
+			$env = eval {
+				my $bare = Genesis::Env->bare($name, $top);
+				$deps = [$bare->_declared_dependencies];
+				$bare->pipeline_record_path;
+				$bare;
+			};
+
+			unless ($env) {
+				warning(
+					"Could not load #C{%s}, and could not read it bare ".
+					"either, so nothing was recorded for it: %s\n".
+					"Until an apply records it, the walk reads it as an ".
+					"environment no pipeline knows.",
+					$name, _summarize_load_error($@)
+				);
+				next;
+			}
+
 			warning(
 				"Could not load #C{%s}, so only its declared dependencies ".
 				"are wired: %s\n".
 				"Re-run #C{genesis pipeline-apply} once it loads.",
-				$name, _summarize_load_error($err)
+				$name, _summarize_load_error($load_err)
 			);
 		}
 
