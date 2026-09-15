@@ -79,10 +79,137 @@ B<Examples:>
   Genesis::CI::Preflight::local_only_commits($git, 'prod/bosh');
   # () where every commit on the branch has been pushed
 
+=head2 require_control($top, $git, %opts)
+
+  my $state = Genesis::CI::Preflight::require_control($top, $git,
+      refreshed => $result, command => 'propagate');
+
+Settles the control branch before anything else is read.  Control is where the
+environment files live, so a run that cannot trust it cannot trust a single
+answer it goes on to give, and every command in this stage asks this question
+first.
+
+Three things can be true of control, and each has one answer.  Where the
+remote has the branch and this clone does not, the refresh has already written
+the local ref, and the creation comes back as an event line for the caller to
+print rather than passing in silence.  Where the branch exists nowhere, the
+command refuses, and it creates nothing, because cutting the branch that
+becomes the repository's source of truth is the operator's act and not
+Genesis'.  Where both places have it, the two have to agree, because an
+unpushed control holds commits a deploy on another machine cannot read, since
+a propagation marker names a control commit by its sha alone, and because a
+stale control would propagate state a teammate has already moved past.
+Genesis never moves control in either direction, so both are refusals rather
+than repairs.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+A C<Genesis::Top> on the repository, which is asked for the control branch's
+name.
+
+=item C<$git>
+
+A C<Service::Git> handle on the same repository.
+
+=item C<refreshed>
+
+The result the refresh returned, whose C<created> list is what the event line
+is composed from.  A caller that did not refresh leaves it out.
+
+=item C<command>
+
+The command's name, which the refusal's opening sentence is built from, as in
+"Refusing to run C<genesis propagate>".
+
+=item C<action>
+
+The whole act, for a command that names itself in its own words rather than by
+its invocation.  The deploy passes C<deploy>, so its refusal opens "Refusing
+to deploy".
+
+=item C<outcome>
+
+The refusal's closing sentence, which says what did not happen.  It is
+"Nothing was written." unless the caller says otherwise.
+
+=item C<unverifiable>
+
+Passed through to C<resolve_branch> for a caller that read without refreshing,
+so the divergence it gets back says so.
+
+=item C<on_divergence>
+
+C<refuse> by default, and C<report> for C<genesis pipeline-status>, which
+reports every state and resolves none.  A branch that exists nowhere is
+refused either way, because it leaves the command nothing at all to read.
+
+=back
+
+B<Returns:> A hashref of C<divergence>, the record C<resolve_branch> gives for
+control, and C<events>, the lines the caller prints.  C<events> holds one line
+where the refresh created the local ref, which reads "created control from
+origin/control", and is empty otherwise.
+
+B<Errors:> Bails at C<CONFIG> when the control branch exists neither on the
+remote nor locally, naming the branch and both places and telling the operator
+to create and push it.  Bails at C<DATAERR> when control is ahead, behind,
+diverged, or local only, naming both counts and the one command that fixes it.
+Neither refusal writes anything, and no path here moves control.
+
+B<Examples:>
+
+  my $state = Genesis::CI::Preflight::require_control($top, $git,
+      refreshed => $result, command => 'propagate');
+  info("  #Gi{%s}", $_) for @{$state->{events}};
+  # $state->{divergence} is { state => 'in-sync', ahead => 0,
+  #                           behind => 0, unverifiable => 0 }
+
+  Genesis::CI::Preflight::require_control($top, $git,
+      refreshed     => $result,
+      action        => 'deploy',
+      outcome       => 'Nothing was deployed.',
+      on_divergence => 'report');
+  # refuses a control branch that is nowhere, and reports every other state
+
 =head1 INTERNAL FUNCTIONS
 
 Every public entry of this module goes above this heading, under
 C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
+
+=head2 _commits
+
+    my $phrase = Genesis::CI::Preflight::_commits($n);
+
+Spells a commit count as English, so a refusal reads aloud at one commit as
+well as at four.
+
+A refusal that said "by 1 commits" would be read past rather than read, and
+the sentences around it agree with the number the same way, so the caller asks
+this for the phrase and picks its own verb from the count.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$n>
+
+A count of commits.
+
+=back
+
+B<Returns:> The count and its noun, as in C<1 commit> or C<4 commits>.
+
+B<Examples:>
+
+  Genesis::CI::Preflight::_commits(1);
+  # '1 commit'
+
+  Genesis::CI::Preflight::_commits(4);
+  # '4 commits'
 
 =head1 AUTHOR
 
