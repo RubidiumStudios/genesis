@@ -25,6 +25,7 @@ our @EXPORT = qw/
 	make_harness
 	ref_in tree_of upstream_of counts
 	tip_of remote_sha refs_in branch_of files_at slurp
+	in_set covered_paths in_root
 	branches_on_r fresh_clone clone_copy subjects_of commits_on heads_in
 	reachable_on_r
 	newest_record trailers_of
@@ -41,7 +42,7 @@ our @EXPORT = qw/
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed break_vault restore_vault
 	record_at vault_read_log fixture_preflight fixture_kit
-	fixture_command
+	fixture_command install_compiled_kit
 
 	snapshot_w assert_w_restored assert_snapshot_invariant
 	run_genesis run_genesis_in stand_on
@@ -255,6 +256,79 @@ sub slurp {
 	my ($path) = @_;
 	return undef unless -f $path;
 	return helper::get_file($path);
+}
+
+# }}}
+# in_set - whether a path is one of the paths a reader answered {{{
+#
+# The readers answer lists, and nearly every row about a set asks whether one
+# path is in one of them, so the question is asked here rather than in a copy
+# of the same grep in each file that asks it.
+sub in_set {
+	my ($path, @set) = @_;
+	return scalar(grep {$_ eq $path} @set);
+}
+
+# }}}
+# covered_paths - the tracked paths a list of pathspecs covers at a ref {{{
+#
+# The product names the kit source as a directory, because what it hands git
+# is a pathspec, and the harness names the files a tree actually holds, so the
+# two are compared as the tracked paths each of them covers.  A pathspec entry
+# nothing tracks, such as a fragment the blueprint names before anybody wrote
+# it, covers nothing and drops out of both sides.
+#
+# The ref is named rather than assumed, because a row comparing a reading
+# taken at one commit against the tree of another would otherwise cover its
+# pathspecs against whatever the copy happens to be standing on.
+sub covered_paths {
+	my ($dir, $ref, @pathspec) = @_;
+
+	my @tracked = @{tree_of($dir, $ref)};
+
+	my %covered;
+	for my $entry (@pathspec) {
+		if ($entry =~ m{/$}) {
+			$covered{$_} = 1 for grep {index($_, $entry) == 0} @tracked;
+		} else {
+			$covered{$entry} = 1 if grep {$_ eq $entry} @tracked;
+		}
+	}
+	return sort keys %covered;
+}
+
+# }}}
+# in_root - stand in a copy's deployment root for the rest of the scope {{{
+#
+# Every row that reads a propagation set needs it, because propagation_files
+# and track_additional_files both reach for Service::Git->new('.'), and the
+# handle and the prefix a row gets depend on where the process is standing.
+#
+# The guard is handed back rather than kept, so it lets go at the end of the
+# caller's scope and not at the end of the file, and it steps back in DESTROY
+# rather than at a statement a failure can skip, which is the whole reason it
+# exists.
+sub in_root {
+	my ($self, %opts) = @_;
+	my $root = exists $opts{root} ? $opts{root} : $self->{root};
+	my $dir  = join('/', grep {defined && length} $self->{$opts{copy} // 'a'}, $root);
+	return Harness::Propagation::ChdirGuard->enter($dir);
+}
+
+{
+	package Harness::Propagation::ChdirGuard;
+
+	sub enter {
+		my ($class, $dir) = @_;
+		my $was = Cwd::getcwd();
+		chdir $dir or die "cannot enter $dir: $!\n";
+		return bless {was => $was}, $class;
+	}
+
+	sub DESTROY {
+		my ($self) = @_;
+		chdir $self->{was} or warn "cannot return to $self->{was}: $!\n";
+	}
 }
 
 # }}}
@@ -845,9 +919,27 @@ sub env_path {
 # _write_tree - lay a file set into a copy, removing the undefined paths {{{
 sub _write_tree {
 	my ($self, $dir, $files) = @_;
+
+	# A path this call removes hands its mode to the path this call writes
+	# that ends in the same name, which is what a file moving under or out of
+	# a prefix looks like from here, so an executable travels as one.
+	# put_file writes a file nobody named a mode for as 0644, and a tree
+	# written by a row should not quietly disagree with the tree it copied.
+	my %removed;
+	for my $path (grep {!defined $files->{$_}} keys %$files) {
+		next unless -f "$dir/$path";
+		my $mode = (stat "$dir/$path")[2] & 07777;
+		$removed{$path} = $mode if $mode & 0111;
+	}
+
 	for my $path (sort keys %{$files || {}}) {
 		if (defined $files->{$path}) {
-			helper::put_file("$dir/$path", $files->{$path});
+			my ($from) = grep {
+				"/$path" =~ m{/\Q$_\E$} || "/$_" =~ m{/\Q$path\E$}
+			} sort keys %removed;
+			defined $from
+				? helper::put_file("$dir/$path", $removed{$from}, $files->{$path})
+				: helper::put_file("$dir/$path", $files->{$path});
 			run({dir => $dir}, 'git', 'add', '--', $path);
 		} else {
 			run({dir => $dir, passfail => 1}, 'git', 'rm', '-q', '-f', '--', $path);
@@ -2364,6 +2456,41 @@ sub fixture_kit {
 	}
 
 	return $dir;
+}
+
+# }}}
+
+# install_compiled_kit - put a compiled kit archive in the repository {{{
+#
+# The suite ships compiled kits as archives, and a row that wants an
+# environment naming one by version needs the archive where local_kits looks
+# for it, which is the deployment root's .genesis/kits.  The bytes are copied
+# rather than written, because an archive is not text.
+#
+# The archive is named by its path under the checkout root, and it is
+# committed unless the row says otherwise, so what the row gets is a control
+# branch a command can read rather than a file nothing tracks.
+sub install_compiled_kit {
+	my ($self, $archive, %opts) = @_;
+	my $root = $opts{root} // $self->{root};
+	my $from = $archive =~ m{^/} ? $archive : "$helper::TOPDIR/$archive";
+	die "install_compiled_kit does not know the archive $archive\n"
+		unless -f $from;
+
+	my ($file) = $from =~ m{([^/]+)$};
+	my $rel = join('/', grep {length} $root, '.genesis/kits', $file);
+	my $dir = join('/', grep {length} $self->{a}, $root, '.genesis/kits');
+	helper::mkdir_or_fail($dir) unless -d $dir;
+	run({dir => $self->{base}, onfailure => "Failed to install $file"},
+		'cp', $from, "$dir/$file");
+
+	if (defined $opts{commit} ? $opts{commit} : 1) {
+		run({dir => $self->{a}}, 'git', 'add', '--', $rel);
+		run({dir => $self->{a}, onfailure => "Failed to commit $rel"},
+			'git', 'commit', '-q', '-m', "install the $file kit archive");
+	}
+
+	return $rel;
 }
 
 # }}}
