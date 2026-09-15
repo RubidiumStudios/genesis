@@ -2014,14 +2014,20 @@ define_command("ci-pipeline-run-errand", {
 # }}}
 
 ### Pipeline command suite (Phase B) {{{
-# genesis pipeline-apply - compile and deploy pipeline {{{
+# genesis pipeline-apply - give the pipeline its shape on every provider {{{
 define_command("pipeline-apply", {
 	summary => "Apply the pipeline on the configured provider.",
 	usage   => "pipeline-apply [<pipeline-layout>]",
 	description =>
-		"Compiles the pipeline the repository configures and sets it on the ".
-		"provider that repository chose.  Under the #C{manual} provider there ".
-		"is no pipeline to set, so the command says so and stops.\n".
+		"Gives the pipeline its shape.  It creates each missing deployment ".
+		"branch and publishes it, asks the repository to protect control and ".
+		"every deployment branch, records what it applied and what each ".
+		"environment depends on, and then sets the pipeline on the provider ".
+		"the repository chose.\n".
+		"\n".
+		"Under the #C{manual} provider it does all of that except set a ".
+		"pipeline, because deploys happen at your terminal and there is no ".
+		"hosted pipeline to set.\n".
 		"\n".
 		"The provider is #C{pipeline.provider.type} in #C{.genesis/config}, ".
 		"and the pipeline itself is the #C{pipeline} section of that same ".
@@ -2049,10 +2055,15 @@ define_command("pipeline-apply", {
 			"Leave the pipeline paused after applying.",
 
 		'dry-run|n' =>
-			"Compile and print the pipeline YAML without deploying it.",
+			"Report every step and write nothing at all.  The run names each ".
+			"branch it would create or publish, each branch it would protect ".
+			"and with what, and each record it would write, and it prints the ".
+			"compiled pipeline where the provider has one.  No branch is cut, ".
+			"no protection is sent, and no record is written.",
 
 		'output-dir|o=s' =>
-			"Write compiled artifacts to this directory instead of deploying.",
+			"Write compiled artifacts to this directory instead of deploying.  ".
+			"The branch, protection, and record stages still run.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.  Useful for dry runs ".
