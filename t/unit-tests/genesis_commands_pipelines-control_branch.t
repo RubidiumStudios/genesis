@@ -124,9 +124,11 @@ subtest 'a cascade resolves a base for the env it names and for each child' => s
 		'git', 'rev-parse', 'trunk');
 	chomp $trunk;
 
-	# propagate names an environment branch by the environment alone, so
-	# the two branches are cut here rather than through the harness's
-	# deployment-branch helpers, which spell the longer name.
+	# The propagation base is still read off a branch named by the
+	# environment alone, so the two branches that carry the markers are cut
+	# here rather than through the harness's deployment-branch helpers,
+	# which spell the longer name.  Nothing here can carry both names at
+	# once: git refuses refs/heads/qa/bosh while refs/heads/qa stands.
 	Harness::Propagation::run(
 		{dir => $c->a, onfailure => "Failed to cut $_"},
 		'git', 'branch', $_, 'trunk') for qw/qa prod/;
@@ -143,8 +145,14 @@ subtest 'a cascade resolves a base for the env it names and for each child' => s
 	# source the cascade without a deployment record standing behind qa.
 	# What is under test is where each base is read from, not what
 	# certifies the source, and the harness writes no deployment audit.
+	# The run is authorized to create what it finds absent, because the
+	# guard between the pre-flight and the walk asks for the deployment
+	# slug and no branch here carries that name.  Under a dry run the
+	# authorization writes nothing, so the run reaches the walk and reads
+	# each base off the branch that carries its marker, which is what this
+	# row is about.
 	my (undef, $err) = $c->run_genesis({restore => 0},
-		'propagate', 'qa', '--commit', $trunk, '--dry-run');
+		'propagate', 'qa', '--commit', $trunk, '--dry-run', '-y');
 
 	like $err, qr/Branch qa has 1 manual commit on top of the last propagation/,
 		'the base for the named environment came off its own marker';

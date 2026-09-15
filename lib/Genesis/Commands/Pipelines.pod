@@ -29,6 +29,23 @@ plus C<CURRENT_ENV>/C<GIT_BRANCH>/C<WORKING_DIR>/C<OUT_DIR>/C<CACHE_DIR>
 environment variables no longer applies.  See L<Genesis::Commands> for
 the C<retired> mechanism.
 
+=head2 What C<propagate> diffs against
+
+C<propagate> runs in two stages.  L<Genesis::CI::Preflight> settles the
+initial state first, which refreshes, checks control, refuses a branch with no
+legitimate origin or a hand edit, resets a branch a re-run reproduces, and
+fast-forwards a branch that is merely behind.  The walk then decides what to
+deliver to each environment, and it takes its diff base from the branch the
+pre-flight settled rather than from the environment's own name or from the
+remote-tracking ref.
+
+That branch is the deployment slug, and it is not behind its remote-tracking
+ref, because the pre-flight has just seen to both.  So a delivery a teammate
+published is already on the branch when the walk diffs, which is what stops
+the walk delivering it a second time.  An environment the pre-flight has no
+record for has no branch on either side, and the walk reports it as awaiting
+C<genesis pipeline-apply> rather than passing over it in silence.
+
 =head1 FUNCTIONS
 
 =head2 embed()
@@ -266,7 +283,7 @@ overrides one of them widens the tier column to hold C<explicit>.
 
 =head2 _missing_env_branches
 
-  my @missing = _missing_env_branches($git, \@scope);
+  my @missing = _missing_env_branches($top, $git, \@scope);
 
 Returns the environments in C<@scope> that have no local branch, in the
 order given.
@@ -274,15 +291,22 @@ order given.
 Kept apart from C<propagate> so the decision can be tested without a
 repository: reaching it in situ needs a working tree, a DAG and a vault.
 
-B<Returns:> The subset of C<@scope> lacking a branch; empty when all are
-present.
+The branch it asks for is the deployment slug the top composes, not the
+environment's own name.  In a typed repository those are two different refs
+and the name has none, so asking by name refused every run in front of the
+branches C<pipeline-apply> had actually cut, and the walk below was never
+reached.  The environments still come back by name, because that is what the
+authorization and the creator below both take.
+
+B<Returns:> The subset of C<@scope> whose deployment branch is absent; empty
+when all are present.
 
 B<Errors:> None.
 
 B<Examples:>
 
-  my @missing = _missing_env_branches($git, ['mgmt','lab','qa']);
-  # returns ('lab') when only lab has no branch
+  my @missing = _missing_env_branches($top, $git, ['mgmt','lab','qa']);
+  # returns ('lab') when only lab/bosh is absent
 
 =head2 _authorize_branch_creation
 

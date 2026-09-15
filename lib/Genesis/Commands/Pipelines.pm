@@ -537,7 +537,7 @@ sub propagate {
 	# An absent branch is a broken topology, not an env with nothing to
 	# do: the per-env diff below cannot tell the two apart.
 	my @created;
-	if (my @missing = _missing_env_branches($git, \@scope)) {
+	if (my @missing = _missing_env_branches($top, $git, \@scope)) {
 		_authorize_branch_creation($opts, \@missing, $control);
 		@created = _create_missing_branches($top, \@missing, $dry_run);
 	}
@@ -586,8 +586,23 @@ sub propagate {
 			}
 		}
 
+		# The branch the pre-flight settled, which is the deployment slug
+		# and not the environment's name, and which is not behind its
+		# remote-tracking ref.  So the diff base stays the local ref and a
+		# delivery a teammate published is part of what we diff against
+		# rather than something we deliver a second time (D2, H18).
+		#
+		# An environment the pre-flight has no record for has no branch on
+		# either side, which is D43's awaiting outcome and the walk's to
+		# report, so it is said in a line rather than passed over.
+		my $settled = $initial->{branches}{$env_name};
+		unless ($settled) {
+			info "  #Y{%s}: awaiting #C{genesis pipeline-apply}", $env_name;
+			next;
+		}
+
 		my $diff = $git->diff_files(
-			$env_name, $control_sha, @dep_files
+			$settled->{branch}, $control_sha, @dep_files
 		);
 		if (@{$diff->{all}}) {
 			$env_changed{$env_name}        = $diff->{all};
@@ -762,9 +777,16 @@ sub _summarize_load_error {
 # Kept separate from propagate() so the decision can be tested without a
 # repository: the command needs a working tree, a DAG and a vault before
 # it reaches this point.
+#
+# The branch is named by branch_for, which composes <env>/<type> under D66,
+# rather than by the environment's own name.  In a typed repository those are
+# two different refs, so asking by name made this guard refuse every run in
+# front of the branches pipeline-apply had actually cut, and the walk below
+# it was never reached.  The environments come back by name, because that is
+# what the creator and the authorization below both take.
 sub _missing_env_branches {
-	my ($git, $scope) = @_;
-	return grep {!$git->branch_exists($_)} @$scope;
+	my ($top, $git, $scope) = @_;
+	return grep {!$git->branch_exists($top->branch_for($_))} @$scope;
 }
 
 # }}}

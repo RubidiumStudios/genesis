@@ -244,6 +244,15 @@ refreshes before it reads.  Takes C<copy>, which defaults to C<a>, and
 C<local>, which reads the name given as it stands rather than its
 remote-tracking ref.
 
+=head2 commits_on($dir, $ref)
+
+Returns every commit the ref can reach as a list of shas, newest first, or an
+empty list where the ref is not there.  A row asking whether a teammate's
+delivery survived a run asks whether its sha is still on the branch, and a list
+answers that without the row having to know where on the branch the commit
+sits.  It takes a directory rather than a copy, because a row asks it of R as
+often as of a copy.
+
 =head2 heads_in($h, %opts)
 
 Returns every local head in a copy as a sorted arrayref of C<E<lt>ref nameE<gt>

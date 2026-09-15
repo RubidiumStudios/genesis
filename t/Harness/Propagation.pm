@@ -25,7 +25,8 @@ our @EXPORT = qw/
 	make_harness
 	ref_in tree_of upstream_of counts
 	tip_of remote_sha refs_in branch_of files_at slurp
-	branches_on_r fresh_clone clone_copy subjects_of heads_in reachable_on_r
+	branches_on_r fresh_clone clone_copy subjects_of commits_on heads_in
+	reachable_on_r
 	newest_record trailers_of
 
 	commit_on_control commit_from_b publish_from_b push_from refresh
@@ -349,6 +350,26 @@ sub subjects_of {
 	return () if $rc || !defined $out;
 	chomp $out;
 	return reverse grep {length} split /\n/, $out;
+}
+
+# }}}
+# commits_on - every commit a ref can reach, newest first {{{
+#
+# A row asking whether a teammate's delivery survived a run asks whether its
+# sha is still on the branch, and a list of shas answers that without the row
+# having to know where on the branch the commit sits.  It takes a directory
+# rather than a copy, because a row asks it of R as often as of a copy.
+#
+# The read is stderr-suppressed and its status is checked, the way the readers
+# above it are, so a ref that is not there answers an empty list rather than
+# git's complaint split into shas.
+sub commits_on {
+	my ($dir, $ref) = @_;
+	my ($out, $rc) = run({dir => $dir, stderr => 0},
+		'git', 'rev-list', $ref);
+	return () if $rc || !defined $out;
+	chomp $out;
+	return grep {length} split /\n/, $out;
 }
 
 # }}}
