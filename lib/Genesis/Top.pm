@@ -2585,11 +2585,11 @@ sub _validate_capability_gates {
 	}
 	return 1 unless %env_gates || %repo_gates;
 
-	# The repository-wide keys are read for what the operator wrote and not
+	# The repository-wide key is read for what the operator wrote and not
 	# for what the schema filled, because a gate is about the choice inside
 	# an ability and a default is the provider's own answer rather than
-	# anybody's choice.  is_set reads the loaded and set layers alone; has
-	# would look through the merged contents and cannot tell a filled
+	# anybody's choice.  is_set reads the loaded and set layers alone, and
+	# has would look through the merged contents and cannot tell a filled
 	# default from a written key.  The per-environment half needs no such
 	# care, reading the files themselves, where no default is ever applied.
 	my @errors;

@@ -2968,12 +2968,19 @@ capability is false, naming both the key and the capability.
 
 A capability is what a provider is able to do and a key is the operator's
 choice inside that ability, so a key with no ability behind it cannot mean
-anything. Four of the six capabilities gate a key:
-C<optional_git_triggers> gates C<genesis.pipeline.manual>,
-C<scheduled_jobs> gates C<genesis.pipeline.redeploy_cron>,
-C<per_commit_runs> gates C<pipeline.provider.group_commits>, and
-C<multi_file_output> gates C<pipeline.provider.output_layout>. The other two
-are structural and gate nothing configurable.
+anything. Three of the six capabilities gate a key. C<optional_git_triggers>
+gates C<genesis.pipeline.manual>, C<scheduled_jobs> gates
+C<genesis.pipeline.redeploy_cron>, and C<per_commit_runs> gates
+C<pipeline.provider.group_commits>. C<deployment_locks> and
+C<cross_pipeline_events> are structural and gate nothing configurable.
+
+C<multi_file_output> gates nothing here either. A key that only some
+providers offer is declared by those providers rather than gated centrally,
+so the provider that can emit several files declares
+C<pipeline.provider.output_layout> in its own fragment and the one that
+cannot declares nothing at all. Under such a provider the key is simply not
+a key, and an operator who writes it is refused by name as the configuration
+loads, before any gate is read.
 
 A provider with no compiler class declares no capabilities and is left
 alone, which is the manual provider and, until its own compiler lands, the
@@ -2982,7 +2989,7 @@ against the six names through
 L<Genesis::CI::Compiler::PipelineProvider/declared_capabilities> before any
 gate reads it.
 
-The two repository-wide keys are read for what the operator actually wrote,
+The one repository-wide key is read for what the operator actually wrote,
 through C<< Genesis::Config::is_set >> rather than C<< has >>, because a
 value the schema filled from a provider's own default is nobody's choice
 and cannot be what a refusal is about. The two per-environment keys are

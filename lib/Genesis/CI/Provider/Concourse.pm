@@ -191,11 +191,17 @@ EOF
 # provider_options_schema - schema for pipeline.provider: when type=concourse {{{
 #
 # Keys map directly to the pipeline.provider: sub-keys in .genesis/config.
-# Under D86 this fragment is the only place these keys are declared: Top
-# merges it into the generic provider block at configuration load, and the
-# generic block declares the type alone.  Under D100 that is why target,
-# url, team and insecure live here rather than beside the type, where they
-# sat unread under every other provider.
+# Under D86 this fragment is the only place these keys are declared, and
+# under D105 it is the whole of what the block admits beside the type, so
+# a key that is not here is refused by name as the configuration loads.
+# Under D100 that is why target, url, team and insecure live here rather
+# than beside the type, where they sat unread under every other provider.
+#
+# There is no output_layout here.  Concourse emits one pipeline definition
+# and declares multi_file_output false, and a provider offers that key by
+# declaring it, so the provider that cannot use it declares nothing and an
+# operator who writes it is refused like anybody writing a key nobody
+# declared.
 #
 # pipeline_name is gone, because under D25 and D28 pipeline.name is the one
 # label the compiler and the status commands read, and expose is public
