@@ -1543,7 +1543,18 @@ sub propagation_files_at {
 
 	my %tree = map {$_ => 1} $git->ls_tree($commit, $prefix eq '' ? '.' : $prefix);
 
-	my $root = workdir();
+	# What the deployment root holds at the commit, named as the deployment
+	# root names it.  Every kind below that has to ask whether a path exists
+	# asks this listing, so nothing is answered out of the working tree and
+	# nothing depends on what the scratch tree happens to carry.
+	my @held = map {s{^\Q$prefix\E}{}r} keys %tree;
+
+	require File::Temp;
+	# One scratch tree per call, taken down when the call returns, because a
+	# walk reads a commit for every environment and workdir's directories
+	# stand until the process ends.
+	my $scratch = File::Temp->newdir();
+	my $root    = "$scratch";
 	for my $path (keys %tree) {
 		(my $rel = $path) =~ s{^\Q$prefix\E}{};
 		next unless $rel eq '.genesis/config'
@@ -1559,14 +1570,15 @@ sub propagation_files_at {
 	return () unless -f "$root/.genesis/config"
 	              && -f $root.'/'.$self->name.'.yml';
 
-	# The materialised tree is a reading surface and not a repository, so it
-	# is opened with no vault and with its configuration taken as validated.
-	# Both are about the same thing: D28's repository checks ask whether an
-	# enabled pipeline sits in a git checkout with a remote behind it, which
-	# a scratch directory can never answer yes to, and the command doing the
-	# reading has already had those answers from the repository it runs in.
-	my $top = Genesis::Top->new($root, no_vault => 1, silent_vault_check => 1);
-	$top->{__config_validated} = 1;
+	# The tree is a reading surface rather than a repository, and the Top is
+	# opened over it as one, which is what leaves the vault it has none of
+	# and the configuration checks it cannot answer both alone.
+	#
+	# Opening a Top sets GENESIS_ROOT, and attaching a vault sets
+	# GENESIS_TARGET_VAULT and SAFE_TARGET, so the environment is localised
+	# around the read and this method leaves the process as it found it.
+	local %ENV = %ENV;
+	my $top = Genesis::Top->new($root, materialised_tree => 1);
 	my $env = Genesis::Env->bare($self->name, $top);
 
 	my %files;
@@ -1580,16 +1592,18 @@ sub propagation_files_at {
 	$files{'kit-overrides.yml'} = 1 if $tree{$prefix.'kit-overrides.yml'};
 	$files{'.genesis/bin/genesis'} = 1 if $tree{$prefix.'.genesis/bin/genesis'};
 
-	# The kit source, which is the compiled tarball the environment names or
+	# The kit source, which is the compiled archive the environment names or
 	# the dev directory when it runs a dev kit.  A kit named dev is the dev
-	# directory whatever version stands beside it, which is how
+	# directory whatever version stands beside it, and a version of latest or
+	# no version at all is the newest archive the commit holds, which is how
 	# Genesis::Top::local_kit_version reads the same declaration, so the two
-	# readers name the same source for one environment file.
+	# readers name one source for one environment file.
 	my $kit = $env->lookup('kit', {});
 	$kit = {} unless ref($kit) eq 'HASH';
-	if ($kit->{name} && $kit->{name} ne 'dev' && $kit->{version}) {
-		$files{".genesis/kits/$kit->{name}-$kit->{version}.tar.gz"} = 1;
-	} elsif (grep {m{^\Q$prefix\Edev/}} keys %tree) {
+	if ($kit->{name} && $kit->{name} ne 'dev') {
+		my $source = _kit_source_at($kit->{name}, $kit->{version}, \@held);
+		$files{$source} = 1 if defined $source;
+	} elsif (grep {m{^dev/}} @held) {
 		$files{'dev/'} = 1;
 	}
 
@@ -1606,14 +1620,18 @@ sub propagation_files_at {
 		}
 	}
 
-	# The additional files the environment tracks, resolved against the root
-	# as it stands at the commit.  A bare string is promoted to a one-element
-	# list here as the working-tree reader promotes it, because an operator
-	# who named a single path meant that path in both readings.
+	# The additional files the environment tracks, resolved against the tree
+	# at the commit.  The listing is what a glob expands against, because the
+	# scratch tree holds the configuration and the environment files alone
+	# and an entry such as ops/*.yml would match nothing there, while the
+	# mirror would then take the operator's files off the branch.  A bare
+	# string is promoted to a one-element list here as the working-tree
+	# reader promotes it, because an operator who named a single path meant
+	# that path in both readings.
 	my $tracked = $env->lookup('genesis.pipeline.track_additional_files', []);
 	$tracked = [$tracked] if defined $tracked && !ref $tracked;
 	$files{$_} = 1 for __PACKAGE__->_resolve_track_additional_files(
-		$tracked, $self->name, $root
+		$tracked, $self->name, $root, \@held
 	);
 
 	# The blueprint's repository-side fragments, enumerated on control.
@@ -1633,19 +1651,38 @@ sub propagation_files_at {
 # by where it stands today.  Returns the git-root-relative prefix with its
 # trailing slash, the empty string for a flat repository, or undef where this
 # deployment had no root at that commit.
+#
+# A repository may hold two roots of one deployment type, and listing order
+# decides nothing, so the root standing where this command is standing wins.
+# Where the commit holds several and none of them is that one, the reader
+# says so rather than picking, because a set read under the wrong root is a
+# delivery that takes the branch apart.
 sub _deployment_root_at {
 	my ($self, $git, $commit) = @_;
 
 	my $type = $self->top->type;
+	my @roots;
 	for my $path ($git->ls_tree($commit, '.')) {
 		next unless $path =~ m{^(.*?)\.genesis/config$};
 		my $prefix  = $1;
 		my $content = $git->show_file($commit, $path) // '';
 		my $config  = eval {load_yaml($content)} || {};
 		next unless ($config->{deployment_type} // '') eq $type;
-		return $prefix;
+		push @roots, $prefix;
 	}
-	return undef;
+	return undef  unless @roots;
+	return $roots[0] if @roots == 1;
+
+	my $here = $git->prefix // '';
+	my ($mine) = grep {$_ eq $here} @roots;
+	bail(
+		"The commit #C{%s} holds %d deployment roots of type #C{%s}, at %s, ".
+		"and none of them is the root this command is standing in.\n".
+		"Run the command from the deployment root whose set you mean.",
+		substr($commit, 0, 10), scalar(@roots), $type,
+		join(', ', map {sprintf('#C{%s}', $_ eq '' ? '.' : $_)} @roots)
+	) unless defined $mine;
+	return $mine;
 }
 
 # }}}
@@ -1658,14 +1695,10 @@ sub _deployment_root_at {
 # Factored out of _propagation_file_kinds so the at-commit reader of D69
 # enumerates them the same way.
 #
-# The caller's handle is taken rather than built here, because Service::Git
-# keeps one instance per repository and fixes its prefix at first
-# construction, so a handle built in this sub would answer with whatever
-# prefix the first caller in the process asked for.  Nothing below reads it:
-# it is a parameter so that the prefixing stays with the caller, which is the
-# only place that knows whether it wants git-root-relative paths, and so the
-# prefix is applied exactly once.  The paths come back deployment-root-
-# relative.
+# The paths come back deployment-root-relative and the caller prefixes them,
+# so the prefix is applied exactly once.  The handle is a parameter for that
+# reason and is read by nothing here, which is what keeps this sub from
+# building a second one of its own.
 #
 # An environment carrying no loaded kit is answered all the same, by resolving
 # the kit its file declares, because the at-commit reader is built over
@@ -1743,7 +1776,7 @@ sub track_additional_files {
 # _resolve_track_additional_files - the pure resolution behind it {{{
 # Class method so the resolution can be tested without an Env or Service::Git.
 sub _resolve_track_additional_files {
-	my ($class, $entries, $env_name, $root) = @_;
+	my ($class, $entries, $env_name, $root, $listing) = @_;
 	return () unless ref($entries) eq 'ARRAY' && @$entries;
 	return () unless defined $root && length $root;
 
@@ -1762,10 +1795,18 @@ sub _resolve_track_additional_files {
 		) if $path =~ m{^/} || $path =~ m{^~} || $path =~ m{(?:^|/)\.\.(?:/|$)};
 
 		if ($path =~ m{[*?\[]}) {
-			my @matches = File::Glob::bsd_glob("$root/$path");
-			for my $abs (@matches) {
-				(my $rel = $abs) =~ s{^\Q$root/\E}{};
-				$out{$rel} = 1 if length $rel;
+			# A caller reading a commit hands in the paths that commit
+			# holds, because the tree on disk is not what the set is being
+			# read for and may not hold them at all.
+			if ($listing) {
+				my $re = _glob_regex($path);
+				$out{$_} = 1 for grep {$_ =~ $re} @$listing;
+			} else {
+				my @matches = File::Glob::bsd_glob("$root/$path");
+				for my $abs (@matches) {
+					(my $rel = $abs) =~ s{^\Q$root/\E}{};
+					$out{$rel} = 1 if length $rel;
+				}
 			}
 		} else {
 			$out{$path} = 1;
@@ -1773,6 +1814,84 @@ sub _resolve_track_additional_files {
 	}
 
 	return sort keys %out;
+}
+
+# }}}
+# _glob_regex - one shell glob as a pattern a path list can be matched on {{{
+#
+# The filesystem answers a glob where there is a filesystem to answer it, and
+# a reader working at a commit has a list of paths instead, so the pattern is
+# translated once and the list is matched on it.  The translation keeps the
+# three things a deployment-root-relative glob means, which are that a star
+# and a question mark stop at a directory separator, that a leading dot is
+# matched only where the pattern writes one, and that a brace group is an
+# alternation.
+sub _glob_regex {
+	my ($pattern) = @_;
+
+	my @chars = split //, $pattern;
+	my $re    = '';
+	my $depth = 0;
+	my $fresh = 1; # standing at the start of a path segment
+	while (@chars) {
+		my $c = shift @chars;
+		if ($c eq '*') {
+			$re .= ($fresh ? '(?!\.)' : '') . '[^/]*';
+		} elsif ($c eq '?') {
+			$re .= ($fresh ? '(?!\.)' : '') . '[^/]';
+		} elsif ($c eq '[') {
+			my $class = '';
+			$class .= shift(@chars) while @chars && $chars[0] ne ']';
+			shift @chars;
+			$class =~ s{^!}{^};
+			$re .= length($class) ? "[$class]" : '\[';
+		} elsif ($c eq '{') {
+			$re .= '(?:'; $depth++;
+		} elsif ($c eq '}' && $depth) {
+			$re .= ')'; $depth--;
+		} elsif ($c eq ',' && $depth) {
+			$re .= '|';
+		} else {
+			$re .= quotemeta($c);
+		}
+		$fresh = ($c eq '/');
+	}
+	$re .= ')' while $depth-- > 0;
+
+	return qr/\A$re\z/;
+}
+
+# }}}
+# _kit_source_at - the kit archive a commit holds for a declaration {{{
+#
+# The compiled kit an environment names is one file in the tree, and the
+# version it names may be latest or may be missing altogether, which
+# Genesis::Top::local_kit_version reads as the newest version present.  The
+# same rule is applied here to the paths the commit holds, so the two readers
+# name one archive for one environment file.  The archives are looked for
+# where Genesis keeps them, under .genesis/kits, which is the default a
+# repository has to override to move.
+#
+# Returns the deployment-root-relative path, or undef where the commit holds
+# no archive answering the declaration.
+sub _kit_source_at {
+	my ($name, $version, $held) = @_;
+	return undef unless defined $name && length $name;
+
+	my %archives;
+	for my $path (@{$held || []}) {
+		next unless $path =~ m{
+			^\.genesis/kits/\Q$name\E-
+			(\d+(?:\.\d+(?:\.\d+(?:[.-]rc[.-]?\d+)?)?)?)
+			\.t(?:ar\.)?gz$
+		}x;
+		$archives{$1} = $path;
+	}
+	return undef unless %archives;
+
+	return $archives{$version}
+		if defined $version && length $version && $version ne 'latest';
+	return $archives{(reverse sort by_semver keys %archives)[0]};
 }
 
 # }}}
