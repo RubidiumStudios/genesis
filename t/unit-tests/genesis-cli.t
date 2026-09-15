@@ -29,7 +29,7 @@ subtest 'bin/genesis' => sub {
 };
 
 subtest 'genesis pipeline-prepare' => sub {
-	plan tests => 13;
+	plan tests => 12;
 
 	ok(has_command('pipeline-prepare'), "pipeline-prepare command is registered");
 
@@ -51,8 +51,9 @@ subtest 'genesis pipeline-prepare' => sub {
 
 	my %opts = command_properties('pipeline-prepare')->{options}->@*;
 	ok(exists $opts{'dry-run|n'}, "pipeline-prepare has a dry-run option");
-	ok(exists $opts{'no-fetch'},  "pipeline-prepare has a no-fetch option");
-	is(scalar(keys %opts), 2, "pipeline-prepare has only the two options above");
+	# The refresh is unconditional now, so the seeding command takes no flag
+	# that skips it and the count says there is only the one option left.
+	is(scalar(keys %opts), 1, "pipeline-prepare has only the one option above");
 
 	# No positional environment argument: the env comes from the scope,
 	# not from `pipeline-prepare <env>`, so that it reads the same way as
@@ -81,7 +82,7 @@ subtest 'genesis pipeline-prepare' => sub {
 };
 
 subtest 'genesis propagate' => sub {
-	plan tests => 11;
+	plan tests => 10;
 
 	ok(has_command('propagate'), "propagate command is registered");
 
@@ -103,7 +104,6 @@ subtest 'genesis propagate' => sub {
 	ok(exists $opts{'dry-run|n'}, "propagate has a dry-run option");
 	ok(exists $opts{'commit=s'},  "propagate has a commit option");
 	ok(exists $opts{'no-push'},   "propagate has a no-push option");
-	ok(exists $opts{'no-fetch'},  "propagate has a no-fetch option");
 
 	# -y authorizes creating a branch for an environment that has none.
 	# It follows deploy/terminate/repipe/pipeline-apply rather than
@@ -111,7 +111,7 @@ subtest 'genesis propagate' => sub {
 	ok(exists $opts{'yes|y'},
 		"propagate has the conventional yes option");
 
-	is(scalar(keys %opts), 5, "propagate has only the five options above");
+	is(scalar(keys %opts), 4, "propagate has only the four options above");
 
 	my $args = command_properties('propagate')->{arguments};
 	cmp_deeply($args, ['env?', ignore()],

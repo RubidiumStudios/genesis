@@ -15,7 +15,7 @@ use Genesis::Kit::Provider;
 use Service::Vault::Remote;
 use Service::Vault::None;
 use Genesis::Config;
-use Genesis::Exit qw/CONFIG/;
+use Genesis::Exit qw/CONFIG TEMPFAIL/;
 
 use Cwd ();
 use File::Path qw/rmtree/;
@@ -1405,51 +1405,60 @@ sub pipeline_topology {
 }
 
 # }}}
-# fetch_pipeline_envs - bulk-fetch all pipeline env branches in one round-trip {{{
+# fetch_pipeline_envs - the one refresh, control included {{{
 #
-#   $top->fetch_pipeline_envs($git);
-#   $top->fetch_pipeline_envs($git, include_control => 1);
+#   my $result = $top->fetch_pipeline_envs($git);
+#   my $result = $top->fetch_pipeline_envs($git, command => 'qa deploy',
+#                                                action  => 'deploy',
+#                                                outcome => 'Nothing was deployed.');
 #
-# Calls $git->fetch_branches with the env-name list (and optionally the
-# control branch) so credentials are only prompted once.  No-op where the
-# repository declares no pipeline, no remote is configured, or there are
-# no envs.
+# Brings the remote into the remote-tracking refs for the control branch and
+# for every deployment branch in the pipeline, in one round trip, so
+# credentials are prompted once.  Control is named unconditionally, because a
+# run that never compares control with the remote propagates whatever the
+# clone happens to hold.
 #
-# Returns 1 on success and no-op cases.  Bails on real fetch failure
-# (network / auth / unknown) so the operator can't accidentally act
-# on stale refs.  Operators who genuinely want to work offline pass
-# --no-fetch at the command surface to skip this entirely.
+# The names are deployment branches rather than environment names, under D66,
+# because the branch is what the remote has and an environment name is not a
+# ref on it.  A refresh asking for the name fetched nothing for any
+# environment whose branch carries a type, which is every environment in a
+# typed repository.
+#
+# Returns fetch_branches' result, whose `created` list is what the caller
+# reports the creation of a local ref from.  A failure is fatal here rather
+# than survivable later, because under D40 every pipeline command but
+# pipeline-status refreshes unconditionally, so an unreachable remote is the
+# unsurvivable class and exits TEMPFAIL for the caller to retry.
 sub fetch_pipeline_envs {
 	my ($self, $git, %opts) = @_;
-	return 1 unless $self->pipeline_enabled;
+	return undef unless $self->pipeline_enabled;
 	my $remote = $git->default_remote;
-	return 1 unless $remote;
-	my @names = $self->pipeline_env_names;
-	return 1 unless @names;
-	unshift @names, $self->control_branch if $opts{include_control};
+	return undef unless $remote;
+
+	my $action  = $opts{action}  // sprintf('run #C{genesis %s}', $opts{command} // 'propagate');
+	my $outcome = $opts{outcome} // 'Nothing was written.';
+
+	my @names = ($self->control_branch,
+		map { $self->branch_for($_) } $self->pipeline_env_names);
 
 	my (undef, $result) = $git->fetch_branches(\@names, $remote);
-	return 1 if $result->{ok};
+	return $result if $result->{ok};
 
-	if ($result->{kind} eq 'network') {
-		bail(
-			"Failed to reach #C{%s} when fetching pipeline env branches.\n".
-			"If you're offline, re-run with #C{--no-fetch} to skip the refresh.",
-			$remote
-		);
-	} elsif ($result->{kind} eq 'auth') {
-		bail(
-			"Failed to authenticate to #C{%s} when fetching pipeline env branches.\n".
-			"Resolve the credential issue or re-run with #C{--no-fetch} to skip the refresh.",
-			$remote
-		);
-	} else {
-		bail(
-			"Pipeline env fetch from #C{%s} failed: %s\n".
-			"Re-run with #C{--no-fetch} to skip the refresh if this persists.",
-			$remote, $result->{err} // 'unknown error'
-		);
-	}
+	my $because = $result->{kind} eq 'network'
+		? 'the network or the remote is unreachable'
+		: $result->{kind} eq 'auth'
+		? 'the remote rejected our credentials'
+		: 'the remote failed the request';
+
+	bail({exitcode => TEMPFAIL},
+		"Refusing to %s.  Failed to reach #C{%s} to refresh the pipeline ".
+		"branches, because %s, so nothing this command reads can be shown to ".
+		"be current.\n\n%s\n\n".
+		"Restore access to #C{%s} and run the command again.  %s",
+		$action, $remote, $because,
+		($result->{err} // 'no further detail') =~ s/\s+$//r,
+		$remote, $outcome
+	);
 }
 
 # }}}

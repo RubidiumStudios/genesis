@@ -82,9 +82,9 @@ subtest 'a stale ci.yml beside a version 3 pipeline only warns' => sub {
 		'ci.yml' => "---\npipeline:\n  name: bosh\n",
 	});
 
-	# --no-fetch is the shape that stops soonest once the load has let the
+	# --no-refresh is the shape that stops soonest once the load has let the
 	# command through, so the row proves the load and not the status read.
-	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--no-fetch');
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--no-refresh');
 	like $err, qr/Legacy\s+\S*ci\.yml\s+present alongside a v3/s,
 		'the stale file warns';
 	is $exit, 0, 'the warning is not a refusal';
