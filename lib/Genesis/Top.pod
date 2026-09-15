@@ -2178,6 +2178,14 @@ types, which are required, and what each is for.
 
 Used to validate a loaded config and to drive the upgrade from version 1.
 
+It declares one key a version 2 repository never wrote, which is
+C<pipeline>, with the gate under it and nothing else. L</_validate_config>
+injects that gate at default priority once a version 2 config has loaded,
+so that downstream readers meet one shape whichever version is on disk,
+and nothing clears the defaults between one validation and the next, so a
+schema that did not declare the injection would report it as a key nobody
+wrote and refuse every write the repository can make.
+
 B<Parameters:> None.
 
 B<Returns:> The schema as a hashref, keyed by config field.
@@ -2272,6 +2280,13 @@ A version 3 configuration is validated against L</_repo_config_schema>,
 which carries the C<pipeline> section, so C<genesis E<lt>envE<gt> deploy>
 and C<genesis propagate> meet the same refusal in the same words. A
 refusal exits C<Genesis::Exit::CONFIG>.
+
+A version 2 configuration is validated against
+L</_repo_config_schema_v2>, and then has a version 3 shaped C<pipeline>
+gate injected at default priority, so that downstream readers meet one
+shape whichever version is on disk. The injection is never saved, and the
+version 2 schema declares the key it fills so that a later validation
+does not report it as a key nobody wrote.
 
 This method does not itself refuse a version 2 configuration or a stale
 F<ci.yml>; it records what it found, and two other places act on the
@@ -2374,6 +2389,12 @@ C<version> pinned to C<"3"> and the C<pipeline> section added. The section is
 built by L</_pipeline_config_schema>, so its whole shape is stated in one
 place.
 
+Nothing in the schema is assembled out of the configuration's own values.
+The one block whose shape depends on a value is C<pipeline.provider>,
+which is declared as a C<custom_struct> on its own C<type> and dispatched
+during the walk, so the provider that owns the block's shape is also the
+one that validates it.
+
 The section is named C<pipeline> while the C<Genesis::CI> code namespace is
 deliberately left where it is, because the compiler genuinely is CI. There is
 no C<pipeline.repo.root>, because the git prefix already locates the
@@ -2428,18 +2449,28 @@ declared here, so C<Genesis::Config> refuses an undeclared key by name as the
 configuration loads, for every command rather than only for the pipeline ones.
 
 The block declares C<enabled>, which is the gate and defaults to false, the
-C<provider> hash, which is optional even once the gate is on and whose keys
-L</_provider_options_schema> supplies, and C<name>, which is the pipeline's
-own label in its provider and falls back to the deployment type.
+C<provider> block, which is optional even once the gate is on and whose keys
+the provider named by C<pipeline.provider.type> declares, and C<name>, which
+is the pipeline's own label in its provider and falls back to the deployment
+type.
+
+The C<provider> block is declared as a C<custom_struct> on its own C<type>,
+so the field that decides the block's shape is named where the block is
+declared and nothing reads that field raw to build a schema out of it. The
+provider that owns the shape therefore owns validating it: C<Genesis::Config>
+matches the written type against the map L</_provider_module_map> builds and
+hands the block to that provider's class. The discriminator's default is
+C<manual>, declared under C<discriminator_default> beside the map.
 
 The C<provider> block itself defaults to an empty hash so that the type's own
 default still applies when the operator writes no provider block at all. A
 section that is enabled with no provider block is therefore a manual pipeline
 rather than no pipeline.
 
-C<pipeline.provider.output_layout> is C<single> or C<multiple>, and it
-appears in the merged schema only for a provider that declares the
-C<multi_file_output> capability. It decides the override file's name: the
+C<pipeline.provider.output_layout> is C<single> or C<multiple>, and a
+provider offers it by declaring it, which one that cannot emit several
+files does not, so the key is undeclared under such a provider and is
+refused by name like any other. It decides the override file's name: the
 single form is C<.genesis/pipeline-overrides-E<lt>providerE<gt>.yml>, and
 the multiple form is one file per emitted output, named by that output's
 base name without its extension. The name follows the effective choice
@@ -2505,59 +2536,42 @@ disk, which is L</_repo_config_schema> for version 3 and
 L</_repo_config_schema_v2> for anything older.
 
 It is built afresh on every call rather than read back off the
-C<Genesis::Config>. The configured provider's own fragment is merged into
-the schema as the schema is built -- see L</_provider_options_schema> --
-so a command that writes a new provider type changes the schema its keys
-have to be judged against, and the copy the load left behind is a version
-out of date. Every writer that re-validates before saving asks for this
-one.
+C<Genesis::Config>. Writing a new provider type changes which keys
+C<pipeline.provider> admits, because the block is declared on that type --
+see L</_pipeline_config_schema> -- so the copy the load left behind is a
+version out of date. Every writer that re-validates before saving asks for
+this one.
 
 B<Returns:> A hash reference.
 
-=head2 _provider_options_schema
+=head2 _provider_module_map
 
-    my $schema = $top->_provider_options_schema();
+    my $map = $top->_provider_module_map();
 
-Returns the schema for C<pipeline.provider>, which is the C<type> key
-every provider shares with the configured provider's own
-C<provider_options_schema> merged over it.
+Returns the map C<pipeline.provider> declares, which pairs every registered
+provider type with the class that owns its block and the file that class
+lives in.
 
-The per-provider key table is therefore derived from the provider classes
-rather than hand-listed beside them, and a key no fragment declares is
-refused by name. The C<manual> provider has no class and so no fragment,
-so a provider key written beside C<type: manual> is refused with no
-exception. A provider class that omits its fragment is a bug at load.
+It is built from
+C<< Genesis::CI::Compiler::PipelineProvider->known_providers >> and the
+registry entry behind each one, so the map and every class lookup read one
+list and cannot spell a provider two ways. Under D28 the registry is read
+once here, where the schema's enum and the class lookup used to read it
+twice. Every registered type has a CLI-side class, so the map is total and
+nothing downstream asks whether a provider has a class.
 
-The enum for C<type> is built from
-C<< Genesis::CI::Compiler::PipelineProvider->known_providers >>, so the
-schema and every class lookup read one list and cannot spell a provider
-two ways, and the type defaults to C<manual>. The configured type is read
-straight off the loaded values, because this builds the schema that
-validation is about to run against and there is no validated value yet.
+Each value names the class under C<Genesis::CI::Provider> that declares the
+block's keys and validates it, and the file to require before calling it.
+The requiring and the dispatch belong to C<Genesis::Config>, which reaches
+them through the declaration this map is part of.
 
-B<Returns:> A hash reference of the provider block's declared keys.
-
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"Failed to load CI provider ..."> - raised when the registry names a
-compiler class whose file will not load, which leaves the fragment
-unreadable and the provider's keys undeclared. What the failed C<require>
-said is carried through L<Genesis/without_backtrace>, so the operator reads the
-message without the line it was raised on or the frames behind it. It exits
-C<Genesis::Exit::CONFIG>, like every other refusal the load raises.
-
-=back
+B<Returns:> A hash reference keyed by provider type.
 
 B<Examples:>
 
-    my $schema = $top->_provider_options_schema();
-    # under type: concourse, returns the type key plus target, url, team,
-    # insecure, public, tagged, task, pause_after_set and group_commits
-    # under type: manual, returns the type key alone
+    my $map = $top->_provider_module_map();
+    # {concourse => {class => 'Genesis::CI::Provider::Concourse',
+    #                module => 'Genesis/CI/Provider/Concourse.pm'}, ...}
 
 =head2 _pipeline_env_keys_schema
 
@@ -2927,9 +2941,11 @@ A section that is off is left alone. Otherwise the checks run in this
 order. Both halves of the deployment slug are checked as git ref components
 by L</_validate_slug_components>, first, because they name the branches
 everything else here is about. Then the source-control block is resolved,
-which is where the derivations and their refusals are raised. Then the
-configured provider's own programmatic check runs through
-L</_validate_provider_config>, then the capability gates of
+which is where the derivations and their refusals are raised. The configured
+provider's own rules are not among the checks here: the provider block
+declares the type that decides it, so C<Genesis::Config::validate> has
+already dispatched the block to that provider and gathered what it said with
+every other error. Then come the capability gates of
 L</_validate_capability_gates>, then the manifest store and the kit floors
 of L</_validate_manifest_store>, and then the one exodus mount of
 L</_validate_one_exodus_mount>, which comes after the store because the
@@ -2937,79 +2953,11 @@ mount is where that store keeps the pipeline's applied record. Last, every
 environment the deployment root holds has its C<genesis.pipeline> block
 checked, read merged through L</_merged_env_params>. The refusals
 themselves belong to L</_validate_slug_components>, to L</_source_control>,
-to L</_validate_provider_config>, to L</_validate_capability_gates>, to
+to L</_validate_capability_gates>, to
 L</_validate_manifest_store>, to L</_validate_one_exodus_mount>, and to
 L</_validate_env_pipeline_block>.
 
 B<Returns:> 1.
-
-=head2 _validate_provider_config
-
-    $top->_validate_provider_config();
-
-Runs the configured provider's own C<validate_config> and refuses at
-C<Genesis::Exit::CONFIG> when it returns errors.
-
-Under D105 the provider's own rules are the whole of what its block is
-checked against, rather than the second half of a contract whose first
-half the framework ran. The class is asked for them directly, and its
-default validates the block against the keys that provider declared, so a
-provider with no cross-field rule writes no validation and its block is
-still typed, defaulted, and refused by name where an operator wrote a key
-it does not know. It runs after the generic validation, so every key it
-reads has already been typed and defaulted, and it makes no network call,
-because a load that dialled a provider would make every command wait on
-that provider being up.
-
-The class is handed the configuration object and the dotted path of the
-block it owns, C<pipeline.provider>, along with the name of the key that
-chose it, so it reads what the operator wrote where the operator wrote it.
-Nothing is assembled out of the block first and nothing derived from
-elsewhere is folded in: under D102 the repository the pipeline acts on
-lives in the source-control block, and L</_source_control> has already
-refused a pipeline that cannot name one. The check gathers every error
-string the provider returns, so the refusal names the provider once and
-lists everything wrong with it. An entry that is undefined or empty is
-dropped before that list is built, because a rule that answered with
-nothing would otherwise print an empty bullet.
-
-The provider's class is somebody else's code, so the call is wrapped in an
-C<eval>. A rule that dies is reported as the same
-refusal, naming the provider and carrying what it said, rather than reaching
-the operator as a C<Carp> trace out of the middle of a configuration load.
-What it said goes through L<Genesis/without_backtrace> first, so the frames
-C<Carp::Always> folds in behind a provider's own C<die> do not travel into
-the bullet.
-
-B<Returns:> 1.
-
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"Invalid configuration for the ... provider"> - raised when the
-provider's C<validate_config> returns one or more error strings, which are
-listed under it, one per line, and raised in the same words when the
-provider's own code dies, with what it said as the single entry under it.
-
-=item *
-
-C<"Unknown CI provider type ..."> - raised by
-L<Genesis::CI::Provider/provider_class> when no registry entry holds the
-configured type. The schema's enum normally refuses that first.
-
-=back
-
-B<Examples:>
-
-    $top->_validate_provider_config;
-    # returns 1 where the provider is happy with its configuration
-
-    $top->_validate_provider_config;
-    # exits CONFIG (78) where pipeline.provider.type is concourse and
-    # pipeline.provider.target is unset
 
 =head2 _validate_capability_gates
 

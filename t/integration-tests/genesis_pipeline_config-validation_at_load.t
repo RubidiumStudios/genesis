@@ -93,8 +93,8 @@ subtest 'a stale ci.yml beside a version 3 pipeline only warns' => sub {
 };
 
 subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
-	# Three explicit rows and one for the run's own restoration assertion.
-	plan tests => 4;
+	# Four explicit rows and one for the run's own restoration assertion.
+	plan tests => 5;
 
 	# Concourse needs a fly target and this configuration names none, so
 	# the refusal comes from the provider's own validate_config rather than
@@ -116,8 +116,14 @@ subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
 	});
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
-	like $err, qr/Invalid configuration for the concourse provider/,
-		'the refusal names the provider whose rule failed';
+	like $err, qr/Configuration validation failed/,
+		'the refusal is the one every configuration refusal carries';
+
+	# The provider's rules are not a phase of their own under D105, so what
+	# it says is gathered with every other error rather than announced
+	# under a heading naming the provider a second time.
+	unlike $err, qr/Invalid configuration for the/,
+		"with no second heading in front of the provider's own words";
 	like $err, qr/'target' is required for the Concourse provider/,
 		"and quotes the provider's own words";
 	is $exit, Genesis::Exit::CONFIG, 'and it exits CONFIG by name';

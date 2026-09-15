@@ -1886,6 +1886,24 @@ sub _upgrade_config_to_v2 {
 sub _repo_config_schema_v2 {
 	my ($self) = @_;
 	return {
+		# Declared because _validate_config injects a version 3 shaped
+		# block here at default priority, so that downstream readers meet
+		# one shape whichever version is on disk.  Nothing clears the
+		# defaults between one validation and the next, so a validation
+		# that met the injection undeclared would report it as a key
+		# nobody wrote and refuse every write the repository can make.
+		# Only the gate is declared, because the gate is the whole of
+		# what is injected and the rest of the block means nothing here.
+		pipeline => {
+			type        => 'hash',
+			description => 'The version 3 shaped gate the loader injects',
+			schema => {
+				enabled => {
+					type        => 'boolean',
+					description => 'Whether this repository has a pipeline'
+				},
+			},
+		},
 		deployment_type => {
 			type           => 'string',
 			required       => 1,
@@ -2009,14 +2027,25 @@ sub _pipeline_config_schema {
 				default     => Genesis::Config::FALSE,
 				description => 'Whether this repository has a pipeline'
 			},
-			# The block defaults to an empty hash so that the type below
-			# takes its own default when the operator writes no provider
-			# block at all, which under D15 is a manual pipeline.
+			# D105: the schema for this block is a function of the block's
+			# own type, so the block says so rather than having something
+			# read the type ahead of validation and assemble a schema from
+			# what it found.  D15 keeps its default here, on the
+			# declaration, so an enabled section with no provider block is
+			# still a manual pipeline.
+			# The block still defaults to an empty hash, so that the
+			# discriminator below takes its own default when the operator
+			# writes no provider block at all, which under D15 is a manual
+			# pipeline.
 			provider => {
-				type        => 'hash',
-				default     => {},
-				description => 'The automation that owns the pipeline',
-				schema      => $self->_provider_options_schema(),
+				type                  => 'custom_struct',
+				discriminator         => 'type',
+				default               => {},
+				discriminator_default => 'manual',
+				noun                  => 'CI provider',
+				schema_method         => 'provider_options_schema',
+				description           => 'The automation that owns the pipeline',
+				modules               => $self->_provider_module_map(),
 			},
 			# D66 released the label from the branch, so it names the
 			# provider's pipeline and nothing else, and it is deliberately
@@ -2158,65 +2187,21 @@ sub _current_config_schema {
 }
 
 # }}}
-# _provider_options_schema - the provider block, with its fragment merged {{{
+# _provider_module_map - every provider type, and the class that owns it {{{
 #
-# Under D86 the generic schema declares the one key every provider shares,
-# which is the type, and merges the configured provider's own fragment for
-# the rest, so the per-provider key table is derived from the provider
-# classes instead of being hand-listed beside them.  Under D100 the manual
-# provider has no class and so no fragment, which means a provider key
-# left beside type: manual is an undeclared key and is refused by name,
-# with no exception: the one situation the old ignore provided for was
-# removed when both commands gained --force.
-sub _provider_options_schema {
+# One read of the registry under D28, where the enum and the lookup used
+# to be two.  Every registered type has a CLI class, so the map is total
+# and nothing downstream asks whether a provider has a class.
+sub _provider_module_map {
 	my ($self) = @_;
 
 	require Genesis::CI::Compiler::PipelineProvider;
-	my %schema = (
-		type => {
-			type        => 'enum',
-			values      => [Genesis::CI::Compiler::PipelineProvider->known_providers()],
-			default     => 'manual',
-			description => 'Which automation owns the pipeline'
-		},
-	);
-
-	# The raw read, because the schema is what validation is about to be
-	# run against and there is no validated value to read yet.  The nested
-	# call terminates rather than recursing, because _memoize installs the
-	# configuration object before _validate_config runs, so this read meets
-	# the memo and not the validation still on the stack above it.
-	my $type = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
-	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
-	return \%schema unless $info && $info->{class};
-
-	unless (eval {require $info->{file}; 1}) {  ## no critic
-		# Copied first, because bail's own readers run evals that clear it.
-		my $err = $@;
-		bail({exitcode => CONFIG},
-			"Failed to load CI provider '%s': %s", $type,
-			without_backtrace($err));
+	my %map;
+	for my $type (Genesis::CI::Compiler::PipelineProvider->known_providers) {
+		my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
+		$map{$type} = {class => $info->{cli_class}, module => $info->{cli_file}};
 	}
-
-	my $fragment = $info->{class}->provider_options_schema;
-	for my $key (keys %$fragment) {
-		next if $key eq 'type';
-		$schema{$key} = $fragment->{$key};
-	}
-
-	# D101: output_layout is offered by a provider that declares
-	# multi_file_output and by nobody else, so the merged fragment carries
-	# it only there and the capability gate names it where it does not.
-	if ($info->{class}->capabilities->{multi_file_output}) {
-		$schema{output_layout} = {
-			type        => 'enum',
-			values      => [qw/single multiple/],
-			default     => 'single',
-			description => 'Whether the override file is named per emitted file'
-		};
-	}
-
-	return \%schema;
+	return \%map;
 }
 
 # }}}
@@ -2524,7 +2509,6 @@ sub _validate_pipeline_config {
 	$self->_validate_slug_components;
 
 	$self->_source_control;
-	$self->_validate_provider_config;
 
 	# Before the environment blocks are read for their shape, because a key
 	# with no ability behind it is a fact about the provider rather than
@@ -2553,65 +2537,6 @@ sub _validate_pipeline_config {
 	}
 
 	return 1;
-}
-
-# }}}
-# _validate_provider_config - the provider's rules for its own block {{{
-#
-# Under D105 the provider's rules are the whole of what its block is
-# checked against, so this asks the class for them rather than sorting
-# them into categories of its own.  It runs after
-# Genesis::Config::validate, so every key it reads has been typed and
-# defaulted, it collects error strings rather than bailing per rule, and
-# it makes no network call, because a load that dialled a provider would
-# make every command wait on that provider being up.
-sub _validate_provider_config {
-	my ($self) = @_;
-
-	require Genesis::CI::Provider;
-	my $config = $self->config;
-	my $type   = $config->get('pipeline.provider.type', 'manual') // 'manual';
-	my $class  = Genesis::CI::Provider->provider_class($type);
-
-	# Asked outright, with no branch here on whether the provider has
-	# anything to say.  Under D105 every provider class answers, because
-	# the base gives one the declaration it made as its rules, so a branch
-	# testing for the method would be validation asking whether it had
-	# anything to check.
-	#
-	# The class is handed the configuration and the path of the block it
-	# owns, so it reads what the operator wrote where the operator wrote
-	# it, rather than being handed an object assembled out of the block
-	# with a value derived from somewhere else folded in.  Under D102 the
-	# repository the pipeline acts on lives in the source-control block,
-	# and _source_control above refuses a pipeline that cannot name one,
-	# so no provider rule needs it passed down here.
-	#
-	# The provider's class is somebody else's code, so a rule that dies is
-	# answered with the refusal an operator can act on rather than with a
-	# Carp trace out of the middle of a configuration load.
-	my @errors = eval {
-		$class->validate_config($config, 'pipeline.provider', 'type');
-	};
-	# Copied first, because bail's own readers run evals that clear it.
-	my $caught = $@;
-	if ($caught) {
-		my $said = without_backtrace(decolorize($caught));
-		bail({exitcode => CONFIG},
-			"Invalid configuration for the #C{%s} provider:\n  - %s",
-			$type, $said
-		);
-	}
-
-	# A rule that answers with a bare undef has said nothing, and printing
-	# it would give the operator an empty bullet to read.
-	@errors = grep {defined($_) && length($_)} @errors;
-	return 1 unless @errors;
-
-	bail({exitcode => CONFIG},
-		"Invalid configuration for the #C{%s} provider:\n%s",
-		$type, join("\n", map {"  - $_"} @errors)
-	);
 }
 
 # }}}

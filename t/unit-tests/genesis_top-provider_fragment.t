@@ -1,10 +1,11 @@
 #!perl
-# Proves T36 and T38: the generic pipeline schema merges the configured
-# provider's fragment at load, a key the fragment declares validates with
-# its type, required flag and default, a key no fragment declares is
-# refused by name, a provider class that omits its fragment fails at load,
-# and the manual provider declares an empty fragment so a stray provider
-# key beside it is refused with no exception.
+# Proves T36 and T38: the provider block declares the type that decides it
+# and the block is checked against the fragment that type's provider
+# declares, a key the fragment declares validates with its type, required
+# flag and default, a key no fragment declares is refused by name, a
+# provider class that omits its fragment fails at load, and the manual
+# provider declares an empty fragment so a stray provider key beside it is
+# refused with no exception.
 use strict;
 use warnings;
 use utf8;
@@ -67,18 +68,23 @@ subtest 'one class carries the fragment and the check' => sub {
 		'the compiler class answers with what the CLI class declared';
 };
 
-subtest "the configured provider's fragment is merged at load" => sub {
+subtest "the configured provider's fragment is what the block declares" => sub {
 	plan tests => 5;
 
 	my $top      = load_with($h, concourse());
-	my $provider = $top->_repo_config_schema->{pipeline}{schema}{provider}{schema};
 	my $fragment = Genesis::CI::Concourse->provider_options_schema;
 
-	ok exists $provider->{target},
-		"a key the fragment declares is in the merged schema";
-	is $provider->{team}{default}, $fragment->{team}{default},
+	# The block names the module rather than listing keys, so a reader
+	# asking about one of the block's keys is answered by the provider the
+	# written type selects.  These are the readers that ask: the type
+	# coercion of a write, and the unknown-key check of a removal.
+	ok $top->config->schema_has('pipeline.provider.target'),
+		'a key the fragment declares is one the schema answers for';
+	is $top->config->_schema_for_key('pipeline.provider.team')->{default},
+		$fragment->{team}{default},
 		'with the default the fragment gave it';
-	ok length($provider->{target}{description}),
+	ok length($top->config->_schema_for_key('pipeline.provider.target')
+			->{description}),
 		'and its description, which genesis config renders as help';
 
 	is $top->config->get('pipeline.provider.team'), $fragment->{team}{default},
@@ -128,8 +134,11 @@ MUTE
 		cli_file  => 'Genesis/CI/Provider/Mute.pm',
 	});
 
+	# The refusal is wrapped to the terminal on its way out, so every space
+	# in it is read as a run: which of them the wrap falls on depends on
+	# how deeply the raise is nested.
 	throws_ok {load_with($h, "pipeline:\n  enabled: true\n  provider:\n    type: mute")}
-		qr/must implement\s+provider_options_schema/,
+		qr/must\s+implement\s+provider_options_schema/,
 		'the omission is a bug at load and not a discovery at run time';
 };
 
@@ -299,17 +308,21 @@ subtest 'a provider that will not load is refused without its stack' => sub {
 
 	my $top = load_with($h, concourse());
 
-	# The file is loaded by now, so marking its entry as one that failed is
-	# what makes the next require of it fail the way a broken provider would.
-	local $INC{'Genesis/CI/Compiler/Providers/Concourse.pm'} = undef;
-
+	# Both files are loaded by now, so marking an entry as one that failed
+	# is what makes the next require of it fail the way a broken provider
+	# would.  The two probes name different files because the dispatch
+	# loads the class that owns the block and the gates load the class
+	# that answers for the abilities, and those are not the same class.
 	for my $probe (
-		['_provider_options_schema', 'the schema build'],
-		['_validate_capability_gates', 'the capability gates'],
+		['Genesis/CI/Provider/Concourse.pm',
+			sub {load_with($h, concourse())}, 'the dispatch'],
+		['Genesis/CI/Compiler/Providers/Concourse.pm',
+			sub {$top->_validate_capability_gates}, 'the capability gates'],
 	) {
-		my ($method, $what) = @$probe;
+		my ($file, $run, $what) = @$probe;
+		local $INC{$file} = undef;
 		my $refusal = '';
-		eval {$top->$method; 1} or $refusal = $@;
+		eval {$run->(); 1} or $refusal = $@;
 		(my $flat = Genesis::Term::decolorize($refusal)) =~ s/\s+/ /g;
 
 		like $flat, qr/Failed to load CI provider 'concourse'/,
@@ -331,7 +344,7 @@ subtest 'a provider that will not load is refused without its stack' => sub {
 # A provider's own check runs inside the load, so what it does when it goes
 # wrong is the load's problem rather than the operator's.
 subtest 'a provider that goes wrong is still a configuration refusal' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	put_file('t/tmp/lib/Genesis/CI/Provider/Boom.pm', <<'BOOM');
 package Genesis::CI::Provider::Boom;
@@ -357,12 +370,19 @@ QUIET
 
 	my $refusal = '';
 	eval {load_with($h, automated_config('boom')); 1} or $refusal = $@;
-	like $refusal, qr/Invalid configuration for the boom provider/,
+	like $refusal, qr/Configuration validation failed/,
 		'a provider that dies is reported as the refusal it is';
-	like $refusal, qr/the provider fell over/,
-		'and the operator is told what the provider said';
+	like $refusal, qr/pipeline\.provider: the provider fell over/,
+		'and the operator is told what the provider said, under its key';
 	unlike $refusal, qr/Provider::Boom::validate_config/,
 		'without the frames Carp::Always folded in behind it';
+
+	# Under D105 the provider's rules are not a phase of their own, so
+	# what a provider says is gathered with every other error under the
+	# one sentence a configuration refusal carries, and the wrapper that
+	# announced the provider's half separately is gone.
+	unlike $refusal, qr/Invalid configuration for the/,
+		'and with no second heading of its own in front of it';
 
 	lives_ok {load_with($h, automated_config('quiet'))}
 		'a provider that answers with a bare undef reports no error at all';

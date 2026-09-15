@@ -577,6 +577,31 @@ subtest 'config --unset reads the schema the same run makes true' => sub {
 		"and the run saves what it set");
 };
 
+subtest "swapping the provider takes the old one's defaults with it" => sub {
+	plan tests => 3;
+
+	# The block's shape is a function of its own type, and the defaults a
+	# provider filled belong to that provider.  Nothing empties the whole
+	# default store between one validation and the next, so what keeps a
+	# swap clean is the sweep the block's own path gets when the provider
+	# the new type names validates it.  The block holds nothing but the
+	# type, so every other key under it at the moment of the swap is a
+	# default the departing provider filled.
+	my $dir = concourse_repo('config-swap-provider');
+
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.provider.type', 'github-actions');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, 'the swap goes through');
+	unlike($err, qr/unknown configuration key/,
+		'and no key of the departing provider is left behind to be refused');
+	like(slurp("$dir/.genesis/config"), qr/type:\s*github-actions/,
+		'the new type is saved');
+};
+
 subtest 'config --set-from-file will not overlap --set or --unset' => sub {
 	plan tests => 2;
 

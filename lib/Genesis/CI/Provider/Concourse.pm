@@ -260,8 +260,18 @@ sub validate_config {
 	my @errors = $class->SUPER::validate_config($config, $path, $discriminator);
 
 	my $url = $config->get("$path.url");
+
+	# The key a pipeline cannot run without is asked for once the section
+	# the block sits in is switched on, and not before.  A provider block
+	# is written a key at a time, and under D105 these rules are reached
+	# from the walk rather than from a check that ran behind the gate, so
+	# the gate is read here or a repository is refused for a pipeline
+	# nobody has turned on yet.  The section is the block's own parent,
+	# which is all this class knows about where it sits.
+	my ($section) = $path =~ m{^(.*)\.[^.]+$};
+	my $running = defined($section) ? $config->get("$section.enabled") : 1;
 	push @errors, "'target' is required for the Concourse provider"
-		unless $config->get("$path.target");
+		if $running && !$config->get("$path.target");
 	push @errors, "'url' must begin with http:// or https://"
 		if $url && $url !~ m{^https?://};
 	return @errors;
