@@ -939,19 +939,27 @@ sub _derive_deploy_reason {
 #                   compatibility; may be unused)
 #   $subject_of   — callback: sha => commit subject line
 #
-# Extracts `[pipeline] control@<sha>` markers from the env-branch log
-# lines, flips them into oldest-first order, and produces a reason
-# string made up of the control commit subjects (SHAs are omitted
+# Reads the propagation marker off each env-branch log line through the one
+# reader, flips the control commits it finds into oldest-first order, and
+# produces a reason string made up of their subjects (SHAs are omitted
 # because exodus already records `git.control_commit`).  For a single
 # commit the subject is returned verbatim; for multiple commits a
 # bulleted list is produced.  Returns undef if no markers are found.
+#
+# The lines arrive in git's `%H %s` shape, so the subject begins after the
+# commit's own sha.  The reader is anchored to the start of a line, which is
+# what keeps a sha named in passing from matching, so the leading field comes
+# off before the line is read.
 sub _format_pipeline_reason {
 	my ($log_lines, $short_sha, $subject_of) = @_;
+	require Genesis::CI::Marker;
 
 	my @controls;
 	for my $line (@{$log_lines || []}) {
-		next unless $line =~ /\[pipeline\] control\@([0-9a-f]+)/;
-		push @controls, $1;
+		(my $subject = $line) =~ s/\A\S+[ \t]+//;
+		my $control = Genesis::CI::Marker::in_text($subject);
+		next unless defined $control;
+		push @controls, $control;
 	}
 	return undef unless @controls;
 
@@ -1069,8 +1077,11 @@ sub deploy {
 					"\nManually deploying #C{%s}, which is managed by a Genesis pipeline.\n".
 					"The pipeline is the preferred deploy path — manual deploys bypass\n".
 					"change-detection, propagation gating, and approval gates.\n\n".
-					"The deployment will still record a #C{git.control_commit} so that\n".
-					"cascade propagation continues to work after this deploy.",
+					"The deployment records a #C{git.control_commit} where the branch\n".
+					"carries a propagation marker beneath this commit, so cascade\n".
+					"propagation continues to work after this deploy.  A branch that\n".
+					"has never been propagated to carries no marker, and none is\n".
+					"recorded.",
 					$env->name
 				);
 				unless ($options{yes} || !in_controlling_terminal()) {
