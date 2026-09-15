@@ -859,7 +859,11 @@ sub resolve_branch {
 	# unreachable remote never reads as "safe to create".
 	return 'absent' unless $self->remote_branch_exists($branch, $remote);
 
-	$self->fetch_branch($branch, $remote);
+	# One name through the multi-branch refresh, which writes T for a
+	# branch L holds and creates L only where L lacks it.  The removed
+	# single-branch helper forced R onto L for any name it was given,
+	# which is H17.
+	$self->fetch_branches([$branch], $remote);
 	return 'fetched';
 }
 
@@ -877,23 +881,6 @@ sub delete_remote_branch {
 		'git', 'push', $remote, '--delete', $branch);
 	bail("Failed to delete remote branch #C{%s} on #C{%s}: %s",
 		$branch, $remote, ($err || $out || "rc=$rc") =~ s/\s+$//r) if $rc;
-	return $self;
-}
-
-# }}}
-# fetch_branch - fetch a specific branch from remote into a local ref {{{
-#
-# Uses the forced refspec (+refs/heads/branch:refs/heads/branch) so the
-# local ref is created or updated regardless of fast-forward status.
-# Safe for propagation branches that are written-once and never rebased.
-sub fetch_branch {
-	my ($self, $branch, $remote) = @_;
-	$remote //= $self->default_remote;
-	return $self unless $remote;
-	run({ dir => $self->{root}, onfailure => "Failed to fetch '$branch' from '$remote'" },
-		'git', 'fetch', $remote,
-		"+refs/heads/$branch:refs/heads/$branch");
-	$self->{_branch_cache}{$branch} = 1;
 	return $self;
 }
 

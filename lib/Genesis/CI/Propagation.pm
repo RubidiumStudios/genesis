@@ -333,7 +333,7 @@ sub _propagate_one_pr_env {
 
 	if ($existing_pr) {
 		# count == 1 (or >1, treated as 1): append to existing branch
-		$git->fetch_branch($pr_branch) unless $git->branch_exists($pr_branch);
+		$git->fetch_branches([$pr_branch]) unless $git->branch_exists($pr_branch);
 		$session->switch($pr_branch);
 
 		# Idempotency: skip whole env if HEAD already matches this control_sha

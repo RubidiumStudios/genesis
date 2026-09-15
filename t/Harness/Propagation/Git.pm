@@ -14,7 +14,7 @@ our @ISA = ('Service::Git');
 # refresh takes, so a row names a git step rather than a shell command.
 our @STEPS = qw/
 	checkout checkout_file add rm commit create_branch
-	fetch_branch fetch_branches push delete_remote_branch
+	fetch_branches push delete_remote_branch
 /;
 
 # import - install the subclass over Service::Git for a spawned command {{{
