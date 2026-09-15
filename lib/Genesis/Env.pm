@@ -1618,18 +1618,23 @@ sub prepare_branch {
 	# propagation_files returns git-root-relative paths already
 	my %keep_set = map { $_ => 1 } @keep;
 
-	# The remote decides: creating off HEAD because the branch is missing
-	# locally would fork it from the real one.  Only a branch that is in
-	# neither this clone nor its tracking refs licenses a create, and under
-	# D40 no caller can arrive here without having refreshed, so a branch
-	# with no record is a branch the remote has never had.
+	# Creating off HEAD because the branch is missing locally would fork it
+	# from the real one, so only a branch that is in neither this clone nor
+	# its tracking refs licenses a create.
 	#
-	# Nothing answers 'fetched' or 'unverifiable' any more.  The refresh
-	# creates the local ref from the tracking one, so a branch the remote
-	# alone had is already here by the time this runs, and the refresh is
-	# what reports the creation.  The refresh is also unconditional, so
-	# there is no longer a run that could not tell an absent branch from an
-	# unasked remote.  M9 retires this sub with its last caller.
+	# Nothing answers 'fetched' or 'unverifiable' any more.  The refresh is
+	# unconditional under D40 and it creates a local ref from the tracking
+	# one, so there is no longer a run that could not tell an absent branch
+	# from an unasked remote, and the refresh is what reports the creation.
+	#
+	# What the refresh guarantees is narrower than it reads here.  It fetches
+	# the deployment branches, which it names by slug through branch_for, and
+	# this sub and propagation_diff below it both address a branch by the
+	# environment's own name.  In a typed repository those are two different
+	# refs, so an absent record here says the environment's name has none and
+	# is not yet proof that the remote has never had the branch.  Both
+	# readers are carried for the steps that rewrite them, and M9 retires
+	# this sub with its last caller.
 	my $div = $git->resolve_branch($branch);
 	my $origin = defined($div) ? 'local' : 'absent';
 	my $branch_exists = $origin ne 'absent';
