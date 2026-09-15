@@ -120,8 +120,15 @@ Control and every deployment branch are told to block force pushes and to
 require linear history. A deployment branch is told to require a pull request
 where its own C<genesis.pipeline.require_pr> is true, and control is told to
 require one where C<pipeline.source_control.control_requires_pr> is true. A
-pull request into a deployment branch may only be merged by rebase. Each
-branch gets one ruleset named for it, so a re-run replaces rather than
+pull request into a deployment branch may only be merged by rebase. That
+merge method can only be asked for inside the rule that requires a pull
+request, and that rule would stop a direct push, so a branch whose
+C<require_pr> is false is given no pull request rule at all and can still be
+pushed to directly. Nothing is lost there, because the force-push block and
+the linear-history requirement stand on every branch either way, and the
+marker that rebase-only protects can only be lost by squashing a pull
+request, which a branch in no pull request mode does not have. Each branch
+gets one ruleset named for it, so a re-run replaces rather than
 accumulates. A user whose token cannot grant a setting is told which branch
 and which settings, and the run carries on. A run that carries no
 C<GITHUB_AUTH_TOKEN> skips the stage, names the variable, and carries on as
@@ -775,6 +782,16 @@ request where C<pipeline.source_control.control_requires_pr> is true, whose
 default is false, and it keeps squash or rebase at the merger's choice,
 because a user's pull request into control carries no marker.
 
+The merge method is a parameter of the pull request rule, and that rule type
+requires a pull request before merging, so a deployment branch whose
+C<require_pr> is false is given no pull request rule at all and goes on
+taking direct pushes. Nothing is lost where it is off, because the force-push
+block and the linear-history requirement stand on every branch either way,
+and the marker that rebase-only protects can only be lost by squashing a pull
+request, which a branch in no pull request mode does not have. Where someone
+opens a pull request into such a branch by hand, the recovery that reads the
+marker out of the pull request's body covers it.
+
 No rule dismisses a stale approval anywhere. Review safety lives in the
 mechanism instead, so an approval survives the rebuild a later run pushes.
 
@@ -804,10 +821,11 @@ than the deployment one.
 =item C<require_pr>
 
 True where this deployment branch's own C<genesis.pipeline.require_pr> is
-true. The caller reads it off the pipeline topology, which is the same
-normalised answer the compiled pipeline runs that environment by, so a file
-spelling the key C<false> or C<no> reads as false here too. It is ignored
-under C<control>.
+true, and it decides whether the branch is given a pull request rule at all.
+The caller reads it off the pipeline topology, which is the same normalised
+answer the compiled pipeline runs that environment by, so a file spelling the
+key C<false> or C<no> reads as false here too. It is ignored under
+C<control>.
 
 =back
 
@@ -821,8 +839,11 @@ B<Errors:> None. The derivation reads configuration and composes a list.
 B<Examples:>
 
   my $rules = _protection_rules_for($top, 'qa/bosh');
-  # returns the force-push block, the linear-history requirement, and a
-  # pull request rule needing no review that merges by rebase alone
+  # returns the force-push block and the linear-history requirement, and no
+  # pull request rule, so the branch still takes direct pushes
+
+  my $rules = _protection_rules_for($top, 'qa/bosh', require_pr => 1);
+  # adds a pull request rule needing one review that merges by rebase alone
 
   my $rules = _protection_rules_for($top, 'control', control => 1);
   # returns the force-push block and the linear-history requirement, and
