@@ -114,7 +114,13 @@ With the branches in place the run records what it applied, which is the
 control commit it read, the provider it applied, and the time. That record
 goes to the pipeline's own address in exodus under every provider, because it
 is what a later reader asks to tell an applied pipeline from one nobody has
-applied.
+applied. A run that prints the pipeline rather than setting it, which is what
+C<--dry-run> and C<--output-dir> both do, still writes that record.
+
+Under C<--skip-vault> there is no vault to write it to, so the run warns,
+names the record it left unwritten and the flag that stopped it, and carries
+on. It does not refuse the apply, because the branch work and the compile are
+both worth having without a vault.
 
 The provider then comes from C<pipeline.provider.type>, and an absent type
 reads as the C<manual> provider. The manual provider has no pipeline to set,
@@ -152,15 +158,16 @@ to the pipeline's own name, when not specified.
 
 Print what would be set and exit without setting it.  Concourse prints the
 pipeline YAML, and GitHub Actions prints each workflow file under its own
-name.  The branch stage runs first even here, so a dry run still creates and
-publishes any deployment branch the remote lacks before it prints anything.
+name.  The branch stage and the applied record both run first even here, so a
+dry run still creates and publishes any deployment branch the remote lacks
+and records what it applied before it prints anything.
 
 =item C<--output-dir>
 
 Write the compiled artifacts and C<ast.json> to this directory and exit
-without setting anything.  The branch stage runs first here too, so this
-run also creates and publishes any deployment branch the remote lacks
-before it writes a file.
+without setting anything.  The branch stage and the applied record both run
+first here as well, so this run also creates and publishes any deployment
+branch the remote lacks and records what it applied before it writes a file.
 
 =item C<--debug-dir>
 
@@ -177,7 +184,8 @@ Leave the pipeline paused after applying it instead of unpausing it.
 =item C<--skip-vault>
 
 Build the repository handle without a vault connection, for compiling
-where no vault is running.
+where no vault is running.  The applied record is written to the vault, so
+this flag leaves it unwritten and the run says so.
 
 =back
 
@@ -428,6 +436,7 @@ B<Examples:>
 =head2 _apply_records
 
   _apply_records($top, control_commit => $sha, provider => 'concourse');
+  _apply_records($top, %facts, skip_vault => 1);
 
 Writes what the apply learned to exodus.
 
@@ -439,7 +448,15 @@ environment's own record. Neither this helper nor the command spells either
 address, so the two writers cannot drift apart on where the facts live.
 
 It runs under every provider, including the manual one, since the record says
-what was applied rather than what was hosted.
+what was applied rather than what was hosted. It runs on a dry run and on an
+C<--output-dir> run too, both of which print the pipeline rather than setting
+it, so those runs record what they applied as any other run does.
+
+Where C<skip_vault> is true there is no vault to write to, so it warns,
+names both the record it left unwritten and the flag that stopped it, and
+answers as though it had written one. That is a warning rather than a
+refusal, because the operator asked for a run without a vault and the rest
+of the apply still has work to do.
 
 B<Parameters:>
 
@@ -460,9 +477,14 @@ this run read it.
 The provider the repository is configured for, which is C<manual> where the
 configuration names none.
 
+=item C<skip_vault>
+
+Whether C<--skip-vault> was given, in which case nothing is written and the
+run says what it left unwritten.
+
 =back
 
-B<Returns:> 1.
+B<Returns:> 1, whether it wrote the record or skipped it.
 
 B<Errors:>
 
@@ -487,6 +509,9 @@ B<Examples:>
     control_commit => $git->sha($top->control_branch),
     provider       => 'manual');
   # writes /secret/exodus/_pipelines/bosh and returns 1
+
+  _apply_records($top, %facts, skip_vault => 1);
+  # writes nothing, warns that the record went unwritten, and returns 1
 
 =head2 _compile_pipeline
 

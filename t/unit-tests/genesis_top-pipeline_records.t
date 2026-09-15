@@ -129,6 +129,38 @@ subtest "the environment reads its record through its own vault" => sub {
 	is($record->{discovery}, 'incomplete', 'with the mark beside it');
 };
 
+subtest 'a write with no value for any field refuses before the vault' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	my $top = Genesis::Top->new($h->a);
+
+	# The vault is stood in for by a sub that records being reached and
+	# answers nothing, so a guard that ran after the handle was asked for
+	# would both leave its mark in the ledger and die on an undefined
+	# handle rather than on the sentence this row is looking for.  The
+	# address is composed before the guard runs and composes without a
+	# vault, so nothing in the ledger can come from that.
+	my @reached;
+	no warnings 'redefine';
+	local *Genesis::Top::vault = sub {push @reached, 'vault'; return undef};
+
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	my $wrote = eval {
+		$top->applied_record(control_commit => undef, provider => undef)
+	};
+	my $err = $@;
+
+	is($wrote, undef, 'the write answers nothing');
+	# The sentence is matched along with the field names, because the stack
+	# trace a die carries here repeats the argument list, and a row reading
+	# for the names alone would find them there whatever raised the death.
+	like($err,
+		qr{asked to write the applied record.*control_commit.*provider.*at}s,
+		'and names the three fields it was given no value for');
+	is_deeply(\@reached, [], 'and the vault was never reached');
+};
+
 subtest 'a pipeline with no environment cannot address its record' => sub {
 	plan tests => 3;
 
