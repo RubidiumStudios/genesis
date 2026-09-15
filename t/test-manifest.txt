@@ -312,6 +312,7 @@ integration-tests/genesis_ci_preflight-control.t             # control exists, a
 integration-tests/genesis_ci_preflight-branch_origin.t        # the two refusals for a branch with no legitimate origin
 integration-tests/genesis_ci_preflight-local_commits.t       # the marker-only reset, and the hand-commit refusal
 integration-tests/genesis_ci_preflight-fast_forward.t        # the fast-forward, and the diff base that stays local
+integration-tests/genesis_ci_preflight-invariants.t           # the three invariants, swept across the exit paths
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
