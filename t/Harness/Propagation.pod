@@ -1232,15 +1232,14 @@ copy is worth a paragraph.
 Returns the C<Service::Git> handle for a copy, which defaults to C<a>, and
 hands C<%opts> on to C<Service::Git-E<gt>new>, so a row that wants a handle of
 a shape the harness does not build asks for it here rather than building one
-itself.  C<track_branch> is the option rows ask for.
+itself.
 
-There is one handle per copy however it is asked for, and the options decide
-what that one handle becomes rather than buying a second one.  C<Service::Git>
-keeps a single instance per repository root, and where a later caller asks for
-C<track_branch> it upgrades the instance it already has and answers with that.
-So a row that asks plainly after another row has asked for a tracking handle
-is answered with the tracking handle, and a row that needs a handle which
-restores no branch has to ask before anything else asks otherwise.
+There is one handle per copy however it is asked for.  C<Service::Git> keeps a
+single instance per repository root and answers every caller naming that root
+with it, so two rows holding a handle on the same copy hold the same object,
+and the branch session hanging off it is the same session.  A row that wants
+to switch a branch opens that session and switches through it, because the
+handle refuses a checkout from anywhere else.
 
 =head2 top_for($h, %opts)
 

@@ -772,13 +772,12 @@ sub envs { $_[0]->{envs} }
 # shape the harness does not build asks for it here rather than building one
 # itself, which would be state-building outside the harness.
 #
-# There is one handle per copy however it is asked for, and the options decide
-# what that one handle becomes rather than buying a second.  Service::Git
-# keeps a single instance per repository root, and where a later caller asks
-# for track_branch it upgrades the instance it already has and answers with
-# that, so a caller asking plainly after somebody asked for a tracking handle
-# is answered with the tracking one.  The harness keeps no cache of its own,
-# because a cache in front of a cache can only disagree with it.
+# There is one handle per copy however it is asked for.  Service::Git keeps a
+# single instance per repository root and every caller naming that root is
+# answered with it, so two rows holding a handle on copy A hold the same
+# object and the session on it is the same session.  The harness keeps no
+# cache of its own, because a cache in front of a cache can only disagree
+# with it.
 sub git {
 	my ($self, $copy, %opts) = @_;
 	$copy //= 'a';

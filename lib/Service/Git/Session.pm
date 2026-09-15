@@ -159,11 +159,9 @@ sub switch {
 		or bail("Unable to enter git root %s: %s", $git->root, $!);
 
 	$self->_take_lock($cwd);
-	if ($is_branch) {
-		$git->checkout($target);
-	} else {
-		$git->checkout_detached($target);
-	}
+	$self->_through_the_door(sub {
+		$is_branch ? $git->checkout($target) : $git->checkout_detached($target);
+	});
 	chdir($cwd) if -d $cwd;
 
 	$self->{on} = $target;
@@ -269,6 +267,21 @@ sub abort {
 
 ### Internals {{{
 
+# _through_the_door - let the handle's guarded subs run, briefly {{{
+#
+# The handle refuses a checkout, a detached checkout, or a working-tree
+# reset from outside a session, and this is what a session is from the
+# handle's side: the door is open for exactly as long as one of the verbs
+# is running, and it closes again however that verb ends, because the flag
+# is localised rather than set and cleared.
+sub _through_the_door {
+	my ($self, $code) = @_;
+	my $git = $self->{git};
+	local $git->{_in_session} = 1;
+	return $code->();
+}
+
+# }}}
 # _is_branch - is this target a branch, or a commit {{{
 #
 # A narrower question than branch_exists answers, and it is asked here rather
@@ -521,8 +534,9 @@ sub _restore {
 
 	chdir($git->root)
 		or bail("Unable to enter git root %s: %s", $git->root, $!);
-	$git->checkout($origin->{branch})
-		unless ($git->current_branch // '') eq $origin->{branch};
+	$self->_through_the_door(sub {
+		$git->checkout($origin->{branch});
+	}) unless ($git->current_branch // '') eq $origin->{branch};
 
 	# The directory begin recorded may not exist on the branch we came back
 	# to, and saying so beats landing somewhere the caller did not choose.

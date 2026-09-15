@@ -513,6 +513,43 @@ B<Examples:>
   $session->_register_net;
   # returns $self unchanged on a session that already registered one
 
+=head2 _through_the_door($code)
+
+  $session->_through_the_door(sub { $git->checkout($branch) });
+
+Runs C<$code> with the handle's guard lifted, and lowers it again however that
+code ends.
+
+C<Service::Git> refuses a checkout, a detached checkout, or a working-tree
+reset from outside a session, and this is what a session is from the handle's
+side. The door is open for exactly as long as one of the verbs is running,
+because the flag is localised rather than set and cleared, so a call that dies
+inside leaves it shut behind it. C<switch> and C<_restore> are the only
+callers.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$code>
+
+The code to run with the guard lifted. Called with no arguments.
+
+=back
+
+B<Returns:> Whatever C<$code> returns.
+
+B<Errors:> Raises nothing of its own. Whatever C<$code> raises passes through
+untouched, with the guard already lowered.
+
+B<Examples:>
+
+  $session->_through_the_door(sub { $git->checkout($branch) });
+  # returns the handle, with the guard lowered again
+
+  $git->checkout($branch);
+  # raises, naming the repository, because the door is shut
+
 =head2 _is_branch($name)
 
   my $branch = $session->_is_branch($target);

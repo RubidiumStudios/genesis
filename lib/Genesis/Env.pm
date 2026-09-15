@@ -1651,19 +1651,17 @@ sub prepare_branch {
 	# points at.  For a brand-new branch this is also the branch's HEAD.
 	my $source_sha = $git->sha('HEAD');
 
-	# We're about to swap branches, and the target branch may not have
-	# the deployment subdirectory the user is currently in (multi-deploy
-	# repos: branch was created when only the bosh deployment existed,
-	# now we're adding vault/<env>.yml).  After the checkout, popping
-	# back to a now-vanished cwd would fatal.  Step up to the git root
-	# for the duration of the swap; restore_branch puts us back on a
-	# branch where the original cwd exists again.
-	pushd($git->{root});
+	# The branch we are moving to may not carry the deployment subdirectory
+	# we are standing in, and the session handles that: switch runs from the
+	# repository root, and finish puts us back where begin found us, on a
+	# branch where that directory exists again.
+	my $session = $git->session(control => $self->top->control_branch);
+	$session->begin;
 
 	# Create the branch off the current commit if it didn't exist.
 	$git->create_branch($branch) unless $branch_exists;
 
-	$git->checkout($branch);
+	$session->switch($branch);
 
 	# checkout_file creates any missing parent directories itself, so a
 	# brand-new deployment subdirectory (vault/, jumpbox/, etc.) on a
@@ -1689,11 +1687,7 @@ sub prepare_branch {
 		$git->commit($msg, @to_add);
 	}
 
-	# Switch back to control before popping back to the original cwd —
-	# that cwd lives on control (we just came from there) and may not
-	# exist on the env branch.
-	$git->restore_branch;
-	popd;
+	$session->finish;
 
 	return (\@to_add, \@to_remove, $origin);
 }
@@ -4861,7 +4855,10 @@ sub _post_deploy {
 			my $cgit    = Service::Git->new('.');
 			my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
 			my $current = $cgit->current_branch // '';
-			$cgit->checkout($control) if $current && $current ne $control;
+			# One way, like the deploy's own switch: the child command this
+			# hands off to runs on control and is meant to find us there.
+			# M15 decides what putting us back should mean and moves it.
+			$cgit->checkout_one_way($control) if $current && $current ne $control;
 
 			$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
 			my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';

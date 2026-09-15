@@ -102,20 +102,20 @@ subtest 'the base holds the repositories and one scratch directory' => sub {
 	ok(-d "$h->{base}/tmp", 'and the scratch directory is where they went');
 };
 
-subtest 'one handle per copy, and the options say what it becomes' => sub {
+subtest 'one handle per copy, and one session on each' => sub {
 	plan tests => 4;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
-	my $plain = $h->git('a');
-	ok(!$plain->{_track_branch}, 'a handle asked for plainly restores no branch');
+	my $a = $h->git('a');
+	isa_ok($a, 'Service::Git', 'the handle for a copy');
+	is($h->git('a'), $a, 'asking again answers the handle already there');
 
-	my $tracking = $h->git('a', track_branch => 1);
-	is($tracking, $plain,
-		'asking for a tracking one answers the handle already there');
-	ok($tracking->{_track_branch},
-		'which the option upgraded in place rather than building a second');
-	is($h->git('a'), $tracking,
-		'and asking plainly again answers that same upgraded handle');
+	# Two copies are two repository roots, so they are two handles, and the
+	# session hangs off the handle rather than off the repository, which is
+	# what lets a row drive both copies at once.
+	my $b = $h->git('b');
+	isnt($b, $a, 'the other copy has a handle of its own');
+	isnt($b->session, $a->session, 'and a session of its own with it');
 };
 
 done_testing;
