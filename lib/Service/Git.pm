@@ -636,14 +636,28 @@ sub ls_tree {
 }
 
 # }}}
-# log_subjects - return commit subjects for a branch {{{
+# log_subjects - return commit lines, or whole messages, for a branch {{{
 #
 # Options:
 #   limit  => N       — max number of entries
-#   format => '...'   — custom format (default: %H %s)
+#   format => '...'   — custom format (default: %H %s, or %H\x1f%B with body)
+#   paths  => [...]   — git-root-relative pathspec
+#   body   => 1       — return whole commit messages rather than lines
+#
+# The body walk exists because a squash merge keeps the pull request's title
+# as its subject and pushes the aggregate's message down into the body, so a
+# marker that is plainly on the commit is invisible to a walk over subject
+# lines.  D49 has the marker walk read subjects and bodies alike, and this is
+# the primitive it reads them with.  Records are separated by an ASCII record
+# separator and their two fields by a unit separator, so a commit message may
+# carry any text at all without confusing the split.
 sub log_subjects {
 	my ($self, $branch, %opts) = @_;
-	my $fmt = $opts{format} || '%H %s';
+
+	my $body = $opts{body} ? 1 : 0;
+	my $fmt  = $opts{format} || ($body ? '%H%x1f%B' : '%H %s');
+	$fmt .= '%x1e' if $body;
+
 	my @cmd = ('git', 'log', "--format=$fmt", $branch);
 	push @cmd, "-$opts{limit}" if $opts{limit};
 	# Optional pathspec filter: only commits that touched any of these
@@ -653,8 +667,18 @@ sub log_subjects {
 	if ($opts{paths} && @{$opts{paths}}) {
 		push @cmd, '--', @{$opts{paths}};
 	}
+
 	my ($out) = run({ dir => $self->{root} }, @cmd);
-	return split /\n/, ($out || '');
+	return split /\n/, ($out || '') unless $body;
+
+	my @records;
+	for my $record (split /\x1e/, ($out || '')) {
+		next unless $record =~ /\S/;
+		my ($sha, $message) = split /\x1f/, $record, 2;
+		$sha =~ s/\A\s+//;
+		push @records, {sha => $sha, message => defined $message ? $message : ''};
+	}
+	return @records;
 }
 
 # }}}
