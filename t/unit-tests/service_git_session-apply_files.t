@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Proves T110, T112, and T117: the writer delivers one control commit to
+# Proves T110, T112, T116, and T117: the writer delivers one control commit to
 # qa/bosh as a mirror, so the branch's tree equals the propagation set as it
 # stood at the delivered commit and a path that dropped out of the set is gone
 # from the branch, it names every hand edit it overwrote, and it commits with
@@ -10,6 +10,10 @@
 # run at SOFTWARE before anything is written, because a mirror handed nothing
 # to deliver would take every file off the branch and the check that follows
 # would still be happy about it.
+#
+# The last row is the preview, which computes the whole delivery and then
+# returns before the first write, so it reports what would land and what would
+# go while the branch stays where it was.
 use strict;
 use warnings;
 use utf8;
@@ -453,6 +457,92 @@ subtest 'a set the source commit holds none of is refused' => sub {
 
 	$session->finish;
 	assert_w_restored($w, 'the session restores the working state');
+};
+
+# Proves T116: a dry run writes no file and makes no commit, so the writer's
+# two assertions never run, no branch moves in copy A, and the preview still
+# reports what would land and what would go.
+#
+# The preview is worth more than the absence of a commit, because the run
+# reports per environment and per control commit the files a delivery would
+# land, and the mirror is the only thing that knows either that list or the
+# list of paths that would go.
+subtest 'a dry run writes nothing and checks nothing' => sub {
+	plan tests => 7;
+
+	# The same repository the rows above run against, because the preview has
+	# to read a real set and the blueprint's fragment is the one ops file the
+	# product's own reader puts in it.
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	my $first = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the fragment the blueprint names',
+		push    => 1,
+	);
+	# The init file is kept, so the preview has a removal to report as well as
+	# a write.  A plain delivery takes it off by construction, and the row
+	# would then have nothing to read the removed list against.
+	deliver($h, 'qa', copy => 'a', control => $first, keep => ['init']);
+
+	# One file the set keeps moves between the delivery and the source, so
+	# the preview has a path to name as one that would land.
+	my $source = commit_on_control($h,
+		files   => {'bosh/dev/manifest.yml' => "---\nsimple: moved on\n"},
+		message => 'edit the kit',
+		push    => 1,
+	);
+
+	my $in_root = in_root($h->a . '/bosh');
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+
+	# The fault plan belongs to this harness and to its copy A, and the
+	# handle it arms is the one this row has already built at the deployment
+	# root, so the prefix survives the arming.  A subtest a later step adds
+	# builds a harness of its own and inherits the subclass on that copy
+	# rather than on this one.
+	my $fault = fault_git($h, copy => 'a');
+	reset_steps($fault);
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	my $before = ref_in($h->a, $h->slug('qa'));
+
+	my $result = $session->apply_files($source,
+		env     => $env,
+		dry_run => 1,
+		message => Genesis::CI::Marker::build($source, 'qa'),
+	);
+
+	# The tree and the index are read before the finish, because finish puts
+	# control's working state back and the state this row asks about is the
+	# one the preview left behind.
+	ok($git->is_clean,
+		'the tree and the index are clean, so no check could have run');
+
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
+
+	is($result->{commit}, undef, 'no commit was made');
+	ok(@{$result->{delivered}}, 'the preview still says what would land');
+	is_deeply([sort @{$result->{removed}}], ['init'],
+		'the preview still says what would go');
+
+	is(ref_in($h->a, $h->slug('qa')), $before, 'no branch moved in copy A');
+
+	my @steps = step_log($fault);
+	is_deeply([grep {$_->[0] =~ /^(checkout_file|rm|commit)$/} @steps], [],
+		'no file was written, removed, or committed');
 };
 
 done_testing;

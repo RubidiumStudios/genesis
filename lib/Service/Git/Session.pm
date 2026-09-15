@@ -456,6 +456,26 @@ sub apply_files {
 	my %changed = map {$_ => 1} @{$opts{changed} || []};
 	my @overwrote = grep {$held{$_} && !$changed{$_}} @to_write;
 
+	# D44 makes the dry run the one preview, and it writes nothing at all, so
+	# nothing is staged, no commit is made, and D82's two assertions never run
+	# because there is no index for them to check.  The preview still reports
+	# what would land and what would go, since the mirror is the only thing
+	# that knows either list, and the run's report names both per environment
+	# and per control commit.
+	#
+	# The return sits here rather than at the top of the sub, because the
+	# three lists it carries are worked out above it and the first write is
+	# the line below it.
+	if ($opts{dry_run}) {
+		return {
+			commit    => undef,
+			dry_run   => 1,
+			delivered => [@to_write],
+			removed   => [@stale],
+			overwrote => [@overwrote],
+		};
+	}
+
 	$git->rm(@stale) if @stale;
 	$git->checkout_file($source_sha, $_) for @to_write;
 
