@@ -26,8 +26,10 @@ $ENV{NOCOLOR} = 1;
 # somewhere in the middle of it.  Every row below reads what the operator
 # was told rather than where the fold landed, so each run's two streams
 # are joined and their whitespace collapsed before anything is matched.
+# The streams are joined on a newline so that no phrase can match across
+# the seam where one ends and the other begins.
 sub _unfolded {
-	my $said = join('', map {$_ // ''} @_);
+	my $said = join("\n", map {$_ // ''} @_);
 	$said =~ s/\s+/ /g;
 	return $said;
 }

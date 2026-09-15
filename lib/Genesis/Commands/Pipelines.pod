@@ -6,7 +6,8 @@ Genesis::Commands::Pipelines - Command handlers for Genesis CI/CD pipeline manag
 
   # Registered in bin/genesis via define_command:
   genesis embed
-  genesis pipeline-apply [layout] [--target <fly-target>] [--dry-run] [--yes] [--paused]
+  genesis pipeline-apply [layout] [--config ci.yml] [--target <fly-target>] [--dry-run] [--yes] [--paused] [--output-dir <dir>] [--debug-dir <dir>] [--skip-vault]
+  genesis repipe [layout]   # deprecated; warns and delegates to pipeline-apply
   genesis graph  [layout] [--config ci.yml]
   genesis describe [layout] [--config ci.yml]
 
@@ -90,6 +91,8 @@ B<Examples:>
     genesis pipeline-apply --target my-concourse --dry-run
 
 Gives the pipeline its shape on the provider the repository configured.
+C<genesis repipe> is the deprecated name for the same command, and it
+warns and then delegates here.
 
 It refuses before it reads anything else when C<pipeline.enabled> is false
 or absent, because the command applies a configured pipeline and never
@@ -340,12 +343,20 @@ it, and exiting C<Genesis::Exit/CONFIG>.  A false key and an absent block
 are the same refusal, because the command applies a configured pipeline and
 never enables one.
 
-It reads C<.genesis/config> through C<Genesis::Config> and builds no
-C<Genesis::Top>.  That is deliberate, and it is what puts the refusal ahead
-of the vault.  Building a repository handle opens a vault connection, and a
-repository with no pipeline has no reason to hold a vault it would then be
-asked for.  The key is read the way L<Genesis::Top/pipeline_enabled> reads
-it, so the two cannot answer differently.
+It reads C<.genesis/config> through a bare C<Genesis::Config> and builds
+no C<Genesis::Top> of its own.  That is deliberate, and it is what puts
+the refusal ahead of the vault.  The command's own repository handle,
+built by C<_get_top> a line later, opens a vault connection, and a
+repository with no pipeline has no reason to hold a vault it would then
+be asked for.  The dispatch gate in L<Genesis::Commands> already holds a
+handle built with C<no_vault>, so this is not the first read of the
+repository, only the first one that could ask for a vault.
+
+The read is raw.  It sees neither the schema defaults nor the environment
+overrides that L<Genesis::Top/pipeline_enabled> applies, so the two agree
+only while C<pipeline.enabled> defaults to false and declares no
+environment variable, which is the case today.  A change to either side
+of that has to be made in both places.
 
 B<Parameters:> None.  The repository is the current directory, which is
 where the command's own repository handle is built from.

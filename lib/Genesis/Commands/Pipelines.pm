@@ -41,10 +41,12 @@ sub apply {
 	my $opts = get_options;
 
 	# D64 refuses first, because the command applies a configured pipeline
-	# and never enables one.  The refusal reads .genesis/config and builds
-	# no Genesis::Top, so it lands ahead of the vault connection _get_top
-	# makes.  A repository with no pipeline has no reason to hold a vault,
-	# and bailing on the vault first would name the wrong thing entirely.
+	# and never enables one.  The refusal reads .genesis/config raw and
+	# builds no Genesis::Top of its own, so it lands ahead of the vault
+	# connection _get_top makes.  The dispatch gate already holds a handle
+	# built without a vault, so this is only the first read that could ask
+	# for one.  A repository with no pipeline has no reason to hold a
+	# vault, and bailing on the vault first would name the wrong thing.
 	_refuse_disabled_pipeline();
 
 	my $top = _get_top($opts);
