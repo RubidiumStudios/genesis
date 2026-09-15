@@ -6,8 +6,8 @@
 # configuration refusal, so it carries the named exit code a caller can
 # test for rather than the bare one that means a crash.  And a
 # repository still carrying the .genesis/ci/ directory is compiled from
-# somewhere else entirely, so the run says out loud that the directory
-# is not being read and names the section that is.
+# the pipeline section of .genesis/config alone, so the leftover
+# directory is ignored and the run never names it.
 #
 use strict;
 use warnings;
@@ -44,7 +44,20 @@ subtest 'the manual provider refusal is a configuration refusal' => sub {
 		'the operator is told why there is nothing to do');
 };
 
-subtest 'a leftover ci directory is named at the compile gate' => sub {
+# _unfolded - what the run said, put back on one line
+#
+# A run folds what it says to the terminal's width on the way out, so a
+# phrase can arrive with a newline and an indent in the middle of it.
+# The rows below read what the operator was told rather than where the
+# fold landed, so the two streams are joined and their whitespace is
+# collapsed before anything is matched.
+sub _unfolded {
+	my $said = join('', map {$_ // ''} @_);
+	$said =~ s/\s+/ /g;
+	return $said;
+}
+
+subtest 'a leftover ci directory is ignored and never named' => sub {
 	plan tests => 2;
 
 	# No pipeline section, so the run reaches the compile gate rather
@@ -54,12 +67,12 @@ subtest 'a leftover ci directory is named at the compile gate' => sub {
 	put_file($h->a.'/.genesis/ci/pipeline.yml', "pipeline:\n  name: stale\n");
 
 	my ($out, $err) = $h->run_genesis({restore => 0}, 'pipeline-describe');
-	my $said = ($out // '') . ($err // '');
+	my $said = _unfolded($out, $err);
 
-	like($said, qr{\.genesis/ci/},
-		'the run names the directory it is not reading');
-	like($said, qr{pipeline:},
-		'and points at the section that configures the repository now');
+	unlike($said, qr{\.genesis/ci\b},
+		'the run never names a directory it does not read');
+	unlike($said, qr{stale},
+		'and nothing inside that directory reaches the run');
 };
 
 done_testing;
