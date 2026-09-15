@@ -18,6 +18,7 @@ use Genesis::CI::Marker;
 
 our @EXPORT_OK = qw/
 	plan changed_set route_commit undeployed_set overlap
+	certified_for hold_for hold_reason held_qualifier
 	READINGS HOLD_REASONS
 /;
 
@@ -175,6 +176,165 @@ sub overlap {
 }
 
 # }}}
+# certified_for - one environment's certified commit, or why there is none {{{
+#
+# D60 gives three ways to fail to read a certified commit and none of them is
+# an outage, because an unreachable vault dies at connect_and_validate before
+# any walk.  A with_vault failure is a broken environment and the walk records
+# it as failed.  A readable record with no git.control_commit is an
+# environment the pipeline was never applied to, which is held rather than
+# deployed.  And an environment with no successful deployment at all has
+# certified nothing, which is the state D43 makes hold everything below it.
+#
+# Nothing here ever falls back to control's tip, because that asserts a deploy
+# that did not happen and empties the set that holds the descendants, which is
+# the shape H29 describes.
+sub certified_for {
+	my ($env) = @_;
+
+	my $with_vault = eval {$env->with_vault};
+	return {state => 'unreadable', error => _load_error($@)}
+		unless $with_vault;
+
+	my $deployment = eval {$with_vault->deployments->latest_successful};
+	return {state => 'never-certified'} unless $deployment;
+
+	my $certified = $deployment->lookup('git.control_commit');
+	return {state => 'never-applied'}
+		unless defined $certified && length $certified;
+
+	return {
+		state          => 'certified',
+		control_commit => $certified,
+		commit         => $deployment->lookup('git.commit'),
+		# An audit records when it completed, and a record written before
+		# that field existed says dated instead, so both are read.
+		at             => $deployment->lookup('completed')
+			// $deployment->lookup('dated'),
+	};
+}
+
+# }}}
+# hold_for - the reason one commit is held for one environment, or undef {{{
+#
+# D34: an overlap with any ancestor's undeployed set holds the commit.  D43
+# and D60: an ancestor that has certified nothing holds everything below it,
+# whether or not its own branch already holds the files, which is the closure
+# of H22.  D72: where an overlap is what holds it, the reason also carries the
+# ancestor's own state, so the operator is not left to infer it from another
+# row.  The ancestors are asked nearest first, so the reason names the one
+# closest to the environment.
+sub hold_for {
+	my (%args) = @_;
+
+	my $git      = $args{git};
+	my $commit   = $args{commit};
+	my $files    = $args{files};
+	my $provider = $args{provider};
+
+	for my $ancestor (@{$args{ancestors} || []}) {
+		my $certified = $ancestor->{certified};
+
+		unless ($certified->{state} eq 'certified') {
+			return {
+				reason         => 'ancestor-uncertified',
+				ancestor       => $ancestor->{name},
+				ancestor_state => $certified->{state},
+			};
+		}
+
+		my @undeployed = undeployed_set(
+			$git, $ancestor->{env}, $certified->{control_commit}, $commit
+		);
+		my @hit = overlap($files, \@undeployed);
+		next unless @hit;
+
+		# The key is inert under the manual provider, where an environment
+		# waits for a person rather than for a trigger, so both conditions
+		# are required before the reason reads awaiting its trigger.
+		my $automated = defined $provider && $provider ne 'manual';
+		my $waits_for_trigger = $automated
+			&& $ancestor->{env}->lookup('genesis.pipeline.manual', 0);
+
+		return {
+			reason         => 'ancestor-overlap',
+			ancestor       => $ancestor->{name},
+			ancestor_files => [sort @hit],
+			ancestor_state => $waits_for_trigger
+				? 'awaiting its trigger'
+				: 'awaiting deployment',
+		};
+	}
+
+	return undef;
+}
+
+# }}}
+# }}}
+### The words {{{
+
+# hold_reason - one held commit's reason, in the form the design fixes {{{
+#
+# Publish and outcomes spells these exactly, so that genesis propagate, its
+# dry run, and the routing column of genesis pipeline-status can never
+# disagree about a word.  The overlap form carries the ancestor's own state
+# under D72 and the never-certified form carries no such clause, an
+# environment that has never deployed being already clear about why.
+sub hold_reason {
+	my ($held) = @_;
+
+	my $reason = $held->{reason} // '';
+
+	return sprintf('held by %s (%s), %s %s',
+		$held->{ancestor}, join(', ', @{$held->{ancestor_files} || []}),
+		$held->{ancestor}, $held->{ancestor_state})
+		if $reason eq 'ancestor-overlap';
+
+	if ($reason eq 'ancestor-uncertified') {
+		# An ancestor the run could not read at all is neither certified nor
+		# uncertified, and saying it had never certified a commit would be
+		# stating something no record said.
+		return sprintf('held by %s, which could not be read', $held->{ancestor})
+			if ($held->{ancestor_state} // '') eq 'unreadable';
+		return sprintf('held by %s, which has never certified a commit',
+			$held->{ancestor});
+	}
+
+	return sprintf('held behind control@%s',
+		substr($held->{behind}, 0, 7)) if $reason eq 'behind-held-commit';
+
+	return sprintf('held (%s)', $reason);
+}
+
+# }}}
+# held_qualifier - one environment's own held phrase, or undef {{{
+#
+# D54's qualifier, which says what the environment waits for rather than why
+# any one commit is held.  An environment the pipeline was never applied to
+# waits for that command, one whose environment the run could not read has
+# failed instead, and one holding commits behind an ancestor waits for that
+# ancestor to certify the commit it has not deployed.
+sub held_qualifier {
+	my ($record) = @_;
+
+	my $certified = $record->{certified} // {};
+	return 'held, awaiting pipeline-apply'
+		if ($certified->{state} // '') eq 'never-applied';
+
+	my ($first) = @{$record->{held} || []};
+	return undef unless $first;
+
+	# The commit named is the one the ancestor has not deployed, and the
+	# environment named is the ancestor that must certify it.
+	return sprintf('held, awaiting deployment (%s at control@%s)',
+		$first->{ancestor}, substr($first->{control_commit}, 0, 7))
+		if defined $first->{ancestor};
+
+	return sprintf('held, awaiting deployment (%s at control@%s)',
+		$record->{env}, substr($first->{control_commit}, 0, 7));
+}
+
+# }}}
 # }}}
 ### The walk {{{
 
@@ -282,6 +442,50 @@ sub plan {
 
 	my $branches = $opts{branches} || {};
 
+	# An environment is loaded and its certified commit read at most once a
+	# run, because an ancestor outside the scope is still asked for both and
+	# a topology of any depth would otherwise read the same record once per
+	# descendant.  The load error is kept beside the environment, since the
+	# reader below may ask long after the eval that raised it.
+	my (%env_of, %load_error, %certified_of);
+	my $env_for = sub {
+		my ($name) = @_;
+		unless (exists $env_of{$name}) {
+			$env_of{$name} = eval {$top->load_env($name)};
+			$load_error{$name} = _load_error($@) unless $env_of{$name};
+		}
+		return $env_of{$name};
+	};
+	my $certified_for_env = sub {
+		my ($name) = @_;
+		unless (exists $certified_of{$name}) {
+			my $env = $env_for->($name);
+			$certified_of{$name} = $env ? certified_for($env)
+				: {state => 'unreadable', error => $load_error{$name}};
+		}
+		return $certified_of{$name};
+	};
+
+	# The ancestors of one environment, nearest first, taken from the whole
+	# topology rather than from the scope, so an environment named on its own
+	# is still held by an ancestor the run was not asked about.  The seen
+	# guard is here because a parent map is built from edges and an edge list
+	# that closes a loop would otherwise walk for ever.
+	my $ancestors_of = sub {
+		my ($name) = @_;
+		my (@chain, %seen);
+		my $up = $topo->{parent_of}{$name};
+		while (defined $up && !$seen{$up}++) {
+			push @chain, {
+				name      => $up,
+				env       => $env_for->($up),
+				certified => $certified_for_env->($up),
+			};
+			$up = $topo->{parent_of}{$up};
+		}
+		return \@chain;
+	};
+
 	my $record = {
 		# The pipeline's own label, which is the name the configuration
 		# gives it and not the deployment type.  A repository that names
@@ -307,6 +511,7 @@ sub plan {
 			reading        => 'not-propagated',
 			merged         => undef,
 			deployed       => undef,
+			certified      => undef,
 			pending        => [],
 			held           => [],
 			proposed       => undef,
@@ -331,25 +536,29 @@ sub plan {
 		# and nothing this walk can route a commit onto.
 		next unless $settled;
 
-		my $env = eval {$top->load_env($name)};
+		my $env = $env_for->($name);
 		unless ($env) {
-			$env_record->{error} = _load_error($@);
+			$env_record->{error} = $load_error{$name};
 			next;
 		}
 
 		# The certified commit, which is the control commit the environment's
 		# last successful deployment was made from.  A vault this run cannot
-		# reach leaves it null, and the reading says so rather than claiming
-		# the branch is deployed.
-		my $deployed = eval {
-			my $with = $env->with_vault or return undef;
-			my $dep  = $with->deployments->latest_successful or return undef;
-			return {
-				control_commit => $dep->lookup('git.control_commit'),
-				commit         => $dep->lookup('git.commit'),
-				at             => $dep->lookup('dated'),
-			};
-		};
+		# reach makes the environment failed rather than deployed, and the
+		# two states with no certified commit are kept apart, because one of
+		# them is an environment the pipeline was never applied to.
+		my $certified = $certified_for_env->($name);
+		$env_record->{certified} = $certified;
+		if ($certified->{state} eq 'unreadable') {
+			$env_record->{error} = $certified->{error};
+			next;
+		}
+
+		my $deployed = $certified->{state} eq 'certified' ? {
+			control_commit => $certified->{control_commit},
+			commit         => $certified->{commit},
+			at             => $certified->{at},
+		} : undef;
 		$env_record->{deployed} = $deployed;
 
 		# Under D2 the base is the local ref, which the pre-flight has just
@@ -360,16 +569,35 @@ sub plan {
 		$env_record->{merged}  = $base;
 		$env_record->{reading} = _reading($base, $deployed);
 
+		# D60: an environment whose record carries no certified commit is one
+		# the pipeline was never applied to, and nothing may be delivered to
+		# it until genesis pipeline-apply has run.  It is held rather than
+		# walked, so nothing stands pending for it, and it holds everything
+		# below it through the same reading its descendants take.
+		next if $certified->{state} eq 'never-applied';
+
+		# The one place walk_env's positional question meets the hold
+		# readers.  The ancestors are read once for the environment and the
+		# closure asks them of every commit, because the undeployed set is
+		# the ancestor's set between its certified commit and this one and
+		# so moves with the commit rather than with the environment.
+		my $ancestors = $ancestors_of->($name);
 		walk_env(
 			git        => $git,
 			env        => $env,
 			record     => $env_record,
 			control    => $control_sha,
 			base       => $base,
-			# The one place walk_env's positional question meets the hold
-			# readers.  Nothing holds a commit yet, so every due commit is
-			# pending and the run delivers all of it.
-			hold_check => sub {undef},
+			hold_check => sub {
+				my ($commit, $files) = @_;
+				return hold_for(
+					git       => $git,
+					commit    => $commit->{sha},
+					files     => $files,
+					ancestors => $ancestors,
+					provider  => $record->{provider},
+				);
+			},
 		);
 	}
 

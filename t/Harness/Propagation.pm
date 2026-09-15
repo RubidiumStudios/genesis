@@ -682,6 +682,17 @@ sub make_harness {
 		source_control => $opts{source_control},
 		kit       => $opts{kit},
 		embed     => $opts{embed},
+		# A chained harness names each environment's predecessor as its
+		# prior_env, so the topology has the edges an ancestor hold is
+		# computed from.  It is off by default, because a pipeline whose
+		# environments stand beside one another is what most rows want and
+		# an edge nobody asked for changes every DAG the suite builds.
+		chained   => $opts{chained} // 0,
+		# The shared files every environment declares through
+		# genesis.pipeline.track_additional_files.  The harness lays each one
+		# down on control as it seeds, so the declaration names a file the
+		# repository actually holds.
+		shared    => $opts{tracked} // [],
 		mount     => $opts{exodus_mount} // $DEFAULT_EXODUS_MOUNT,
 	}, __PACKAGE__;
 
@@ -804,7 +815,25 @@ sub _seed_control {
 	# The environment files land through write_env_file and are committed with
 	# the root, so the control branch's first commit is a repository a command
 	# can be run against rather than a deployment root with nothing in it.
-	$self->write_env_file($_, commit => 0) for @{$self->{envs}};
+	#
+	# Each file carries the two declarations the harness was asked for, which
+	# are the predecessor a chained harness names and the shared files every
+	# environment tracks.  They go in here rather than in a commit of their
+	# own, so that a row's first commit is the first thing the walk finds due.
+	my $prior;
+	for my $env (@{$self->{envs}}) {
+		$self->write_env_file($env, commit => 0, pipeline => {
+			($self->{chained} && defined $prior ? (prior_env => $prior) : ()),
+			(@{$self->{shared}}
+				? (track_additional_files => $self->{shared}) : ()),
+		});
+		$prior = $env;
+	}
+
+	# A tracked file is laid down beside the environment files, because a
+	# declaration naming a path the repository does not hold puts nothing in
+	# the set and a row that asked for a shared file would find none.
+	helper::put_file("$root/$_", "---\nshared: 0\n") for @{$self->{shared}};
 
 	run({dir => $self->{a}}, 'git', 'add', '-A');
 	run({dir => $self->{a}, onfailure => "Failed to seed control"},
@@ -2333,13 +2362,48 @@ sub fixture_pipeline_record {
 # is the one form a flat exodus record can carry.
 sub certify {
 	my ($self, $env, %opts) = @_;
-	return $self->_write_record($self->env_path($env, %opts),
+	my $at   = $self->_now($opts{at});
+	my $path = $self->env_path($env, %opts);
+
+	$self->_write_record($path,
 		'git.commit'         => $opts{commit},
 		'git.control_commit' => $opts{control_commit},
-		'dated'              => $self->_now($opts{at}),
+		'dated'              => $at,
 		'state'              => $opts{state} // 'success',
 		'dependencies_read'  => exists $opts{dependencies_read}
 			? join(',', @{$opts{dependencies_read} || []}) : undef,
+	);
+
+	# The same facts as a deployment audit, because the two halves of the
+	# record are read through two different readers.  last_read_dependencies
+	# reads the flat record above at exodus_base, and every reader of the
+	# certified commit goes through Genesis::Env::DeploymentManager, which
+	# enumerates exodus_base/deployments and keys each entry on the compact
+	# timestamp.  A harness that wrote only the flat record left every such
+	# reader answering that the environment had never deployed.
+	#
+	# The audit is written whole rather than left to the reader's own
+	# filling, because a record missing a field is read back as a deprecated
+	# one and the reader says so on standard error for every row that has an
+	# environment.
+	(my $stamp = $at) =~ s/[Z ]?[+-]0000$//;
+	$stamp =~ s/[^0-9]+//g;
+	return $self->_write_record("$path/deployments/$stamp",
+		'action'             => 'deploy',
+		'result'             => $opts{result} // 'success',
+		'completed'          => $at,
+		'genesis_version'    => '3.2.0',
+		'reason'             => 'the harness certified it',
+		'user.shell'         => 'harness',
+		'kit.id'             => 'dev/latest',
+		'kit.name'           => 'dev',
+		'kit.version'        => 'latest',
+		'kit.is_dev'         => 1,
+		'kit.features'       => '',
+		'manifest.type'      => 'unredacted',
+		'manifest.sha2'      => '0' x 64,
+		'git.commit'         => $opts{commit},
+		'git.control_commit' => $opts{control_commit},
 	);
 }
 

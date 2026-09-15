@@ -6,52 +6,6 @@ use warnings;
 use Genesis qw(info warning);
 use Genesis::CI::Marker;
 
-# compute_propagation_targets - determine which envs receive files directly {{{
-sub compute_propagation_targets {
-	my (%args) = @_;
-
-	my @dag_order      = @{$args{dag_order}      || []};
-	my %parent_of      = %{$args{parent_of}      || {}};
-	my %env_changed    = %{$args{env_changed}    || {}};
-	my %env_undeployed = %{$args{env_undeployed} || \%env_changed};
-	my @scope          = @{$args{scope}          || \@dag_order};
-
-	my %in_scope = map { $_ => 1 } @scope;
-
-	my %targets;
-
-	for my $env_name (@scope) {
-		next unless $env_changed{$env_name};
-		next unless @{$env_changed{$env_name}};
-
-		my %my_files = map { $_ => 1 } @{$env_changed{$env_name}};
-
-		# Walk up the DAG checking for overlap with any ancestor's
-		# undeployed set (what the ancestor is still sitting on).
-		my $has_ancestor_overlap = 0;
-		my $ancestor = $parent_of{$env_name};
-		while ($ancestor) {
-			if ($env_undeployed{$ancestor} && @{$env_undeployed{$ancestor}}) {
-				for my $f (@{$env_undeployed{$ancestor}}) {
-					if ($my_files{$f}) {
-						$has_ancestor_overlap = 1;
-						last;
-					}
-				}
-			}
-			last if $has_ancestor_overlap;
-			$ancestor = $parent_of{$ancestor};
-		}
-
-		unless ($has_ancestor_overlap) {
-			$targets{$env_name} = $env_changed{$env_name};
-		}
-	}
-
-	return \%targets;
-}
-
-# }}}
 # propagate_envs - execute propagation to computed targets, batching pushes and PRs to the end {{{
 sub propagate_envs {
 	my (%args) = @_;

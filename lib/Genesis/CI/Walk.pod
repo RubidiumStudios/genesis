@@ -62,8 +62,17 @@ what a repository is holding.
 
 An environment with no settled branch is recorded and passed over, since only
 C<genesis pipeline-apply> cuts a deployment branch.  An environment that will
-not load is recorded with its reason in C<error>, because one unreadable
-environment is not a reason to stop reading the rest.
+not load, or whose vault this run cannot read, is recorded with its reason in
+C<error>, because one unreadable environment is not a reason to stop reading
+the rest.  An environment whose deployment record carries no certified commit
+is one the pipeline was never applied to, so it is held rather than walked
+and nothing stands pending for it.
+
+Each environment's ancestors are read once and asked of every commit it
+routes, through L</hold_for>, so a commit whose files an ancestor has not yet
+deployed is held, and so is every commit after it.  An ancestor outside the
+scope is read all the same, because an environment named on its own is still
+held by the one above it.
 
 Fields a later stage owns are present and null rather than absent, so a
 renderer never has to ask whether a key exists.
@@ -110,7 +119,8 @@ configuration gives the pipeline or null where it names none, C<provider>,
 C<control>, C<applied>, C<refreshed>, and C<environments>, the last being an
 arrayref of per-environment records in DAG order.  Each of those carries C<env>, C<type>,
 C<branch>, C<prior_env>, C<depth>, C<reading>, C<merged>, C<deployed>,
-C<pending>, C<held>, C<proposed>, C<hold>, C<drifted>, C<pr>, C<manual>,
+C<certified>, C<pending>, C<held>, C<proposed>, C<hold>, C<drifted>,
+C<pr>, C<manual>,
 C<divergence>, C<discovery>, C<error>, C<outcome>, and C<outcome_detail>.
 
 B<Errors:> Raises a bug where no git handle is given, since every reading
@@ -339,6 +349,163 @@ B<Examples:>
   my @shared = Genesis::CI::Walk::overlap(['qa.yml', 'dev/'], ['dev/']);
   # returns ('dev/')
 
+=head2 certified_for
+
+    my $certified = Genesis::CI::Walk::certified_for($env);
+
+That environment's certified commit, its deployed commit, and when it
+deployed, or the reason there is none.
+
+Three states have no certified commit and they are kept apart, because each
+means something different to the environments below.  An environment whose
+C<with_vault> fails is broken and the walk records it as failed.  One with a
+readable deployment record carrying no C<git.control_commit> is one the
+pipeline was never applied to.  And one with no successful deployment at all
+has certified nothing.  Nothing here ever falls back to control's tip,
+because that asserts a deploy that did not happen and empties the set that
+holds the descendants.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+The environment whose record is read.
+
+=back
+
+B<Returns:> A hashref carrying C<state>, which is one of C<certified>,
+C<never-certified>, C<never-applied>, and C<unreadable>, with
+C<control_commit>, C<commit>, and C<at> beside it where the state is
+C<certified>, and C<error> where it is C<unreadable>.
+
+B<Examples:>
+
+  my $certified = Genesis::CI::Walk::certified_for($env);
+  # returns {state => 'certified', control_commit => $sha, ...}
+
+  my $fresh = Genesis::CI::Walk::certified_for($undeployed_env);
+  # returns {state => 'never-certified'}
+
+=head2 hold_for
+
+    my $hold = Genesis::CI::Walk::hold_for(git => $git, commit => $sha,
+                                           files => $files,
+                                           ancestors => $ancestors,
+                                           provider => 'manual');
+
+The reason one commit is held for one environment, or undefined when nothing
+holds it.
+
+The ancestors are asked nearest first, so the reason names the one closest to
+the environment.  An ancestor that has certified nothing holds everything
+below it, whether or not its own branch already holds the files, and an
+overlap with an ancestor's undeployed set holds the commit.  Where the
+overlap is what holds it the reason also carries the ancestor's own state, so
+that an operator is not left to infer it from another row.
+
+B<Parameters:>
+
+=over 4
+
+=item C<git>
+
+The handle to read the undeployed set through.
+
+=item C<commit>
+
+The control commit the question is being asked about.
+
+=item C<files>
+
+An arrayref of the commit's triggering paths for this environment.
+
+=item C<ancestors>
+
+An arrayref of the environment's ancestors, nearest first, each a hashref of
+C<name>, C<env>, and the C<certified> record L</certified_for> answers.
+
+=item C<provider>
+
+The pipeline provider that owns propagation here.  Only an automated one lets
+an ancestor's C<genesis.pipeline.manual> read as awaiting its trigger, since
+the key is inert under the manual provider.
+
+=back
+
+B<Returns:> A hashref carrying C<reason> and C<ancestor>, with
+C<ancestor_files> beside them for an overlap and C<ancestor_state> in both
+cases, or undefined where no ancestor holds the commit.
+
+B<Errors:> Raises whatever reading an ancestor's undeployed set raises, for
+the reasons L</undeployed_set> gives.
+
+B<Examples:>
+
+  my $hold = Genesis::CI::Walk::hold_for(git => $git, commit => $sha,
+                                         files => ['ops/shared.yml'],
+                                         ancestors => $ancestors,
+                                         provider => 'manual');
+  # returns {reason => 'ancestor-overlap', ancestor => 'lab', ...}
+
+=head2 hold_reason
+
+    my $words = Genesis::CI::Walk::hold_reason($held);
+
+One held commit's reason, in the form the design fixes.
+
+The words are exact, so that C<genesis propagate>, its dry run, and the
+routing column of C<genesis pipeline-status> can never disagree about one.
+The overlap form carries the ancestor's own state and the never-certified
+form carries no such clause, an environment that has never deployed being
+already clear about why.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$held>
+
+One entry of an environment record's C<held> list.
+
+=back
+
+B<Returns:> The reason as one line of prose.
+
+B<Examples:>
+
+  my $words = Genesis::CI::Walk::hold_reason($held);
+  # returns "held by lab (ops/shared.yml), lab awaiting deployment"
+
+=head2 held_qualifier
+
+    my $words = Genesis::CI::Walk::held_qualifier($env_record);
+
+One environment's own held phrase, or undefined where nothing holds it.
+
+It says what the environment waits for rather than why any one commit is
+held.  An environment the pipeline was never applied to waits for that
+command, and one holding commits behind an ancestor waits for that ancestor
+to certify the commit it has not deployed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+One environment's record, as L</plan> builds it.
+
+=back
+
+B<Returns:> The qualifier as one line of prose, or undefined.
+
+B<Examples:>
+
+  my $words = Genesis::CI::Walk::held_qualifier($env_record);
+  # returns "held, awaiting deployment (lab at control@1a2b3c4)"
+
 =head2 walk_env
 
     Genesis::CI::Walk::walk_env(git => $git, env => $env, record => $rec,
@@ -381,7 +548,8 @@ The commit to start after, or undefined for the whole of control.
 =item C<hold_check>
 
 A coderef called as C<< $hold_check->($commit, $files) >>, answering a
-hashref where the commit is held and undefined where it is not.
+hashref where the commit is held and undefined where it is not.  L</plan>
+passes one that asks the environment's ancestors through L</hold_for>.
 
 =back
 

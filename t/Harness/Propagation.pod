@@ -29,7 +29,19 @@ Builds R, clones copy A and copy B, writes the deployment root through
 C<Genesis::Top-E<gt>create>, and publishes the control branch.  Returns the
 harness object.  Takes C<envs>, C<type>, C<control>, C<pr_prefix>,
 C<provider>, C<mode>, C<root>, C<pipeline>, C<source_control>, C<vault>,
-C<github>, C<kit>, C<embed>, and C<exodus_mount>.
+C<github>, C<kit>, C<embed>, C<chained>, C<tracked>, and C<exodus_mount>.
+
+C<chained> names each environment's predecessor as its
+C<genesis.pipeline.prior_env>, in the order C<envs> gives them, so the
+topology has the edges an ancestor hold is computed from.  It is off by
+default, because a pipeline whose environments stand beside one another is
+what most rows want and an edge nobody asked for changes every DAG the suite
+builds.  C<tracked> is an arrayref of shared files every environment declares
+through C<genesis.pipeline.track_additional_files>, and the harness lays each
+one down on control as it seeds, so the declaration names a file the
+repository actually holds.  Both are written into the environment files
+before the seeding commit, so a row's own first commit is the first thing a
+walk finds due.
 
 C<exodus_mount> names the vault subtree the harness's records hang off, and it
 defaults to C</secret/exodus/>.  A mount below that default is taken, and one
@@ -697,14 +709,25 @@ or C<incomplete> and defaults to C<complete>, and C<type>.
 
 =head2 certify($h, $env, %opts)
 
-Writes the environment's exodus deployment record, so a row can give it a
-certified commit or advance one, and returns its path.  C<commit> is the
-deployment-branch commit the deploy stood on and C<control_commit> is the
-control commit that tip's newest marker names, which are the pair the hatch
-case has to tell apart.  Also takes C<state>, which defaults to C<success>,
-C<type>, C<at>, and C<dependencies_read> as an arrayref of deployment slugs,
-written as one comma-joined value and left out of the record altogether where
-the row does not give it.
+Writes the environment's exodus record and a deployment audit beside it, so a
+row can give it a certified commit or advance one, and returns the audit's
+path.  C<commit> is the deployment-branch commit the deploy stood on and
+C<control_commit> is the control commit that tip's newest marker names, which
+are the pair the hatch case has to tell apart.  Also takes C<state>, which
+defaults to C<success>, C<result>, which is the audit's own and also defaults
+to C<success>, C<type>, C<at>, and C<dependencies_read> as an arrayref of
+deployment slugs, written as one comma-joined value and left out of the
+record altogether where the row does not give it.
+
+The facts are written twice because two readers read them.
+C<Genesis::Env::last_read_dependencies> reads the flat record at
+C<exodus_base>, and every reader of the certified commit goes through
+C<Genesis::Env::DeploymentManager>, which enumerates
+C<exodus_base/deployments> and keys each entry on the compact timestamp.  A
+harness that wrote only the flat record left every such reader answering that
+the environment had never deployed.  The audit is written whole rather than
+left to the reader's own filling, because a record missing a field reads back
+as a deprecated one and the reader says so on standard error.
 
 =head2 fixture_hold($h, $env, %opts)
 

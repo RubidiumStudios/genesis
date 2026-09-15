@@ -40,6 +40,44 @@ sub qa_file {
 		'');
 }
 
+# lab's file, which declares the same reaction.  A script an environment
+# declares as a reaction is non-triggering content of that environment's set,
+# which is what the overlap row below turns on.
+sub lab_reacting {
+	return join("\n",
+		'---',
+		'kit:',
+		'  name:    dev',
+		'  version: latest',
+		'  features: []',
+		'genesis:',
+		'  env: lab',
+		'  reactions:',
+		'    pre-deploy:',
+		'      - script: pre-deploy',
+		'');
+}
+
+# qa's file, which tracks that same script instead of declaring it.  A tracked
+# path is triggering, because an operator names one precisely because the
+# deployment needs it, so the one file is non-triggering for lab and
+# triggering for qa.
+sub qa_tracking {
+	return join("\n",
+		'---',
+		'kit:',
+		'  name:    dev',
+		'  version: latest',
+		'  features: []',
+		'genesis:',
+		'  env: qa',
+		'  pipeline:',
+		'    prior_env: lab',
+		'    track_additional_files:',
+		'    - bin/pre-deploy',
+		'');
+}
+
 subtest 'a non-triggering change is routed nowhere and arrives later' => sub {
 	# Five rather than four, because run_genesis asserts the restoration of
 	# the working state in its own words and that assertion is counted here.
@@ -99,23 +137,33 @@ subtest 'a non-triggering change is routed nowhere and arrives later' => sub {
 subtest 'non-triggering paths add nothing to the overlap' => sub {
 	plan tests => 3;
 
-	my $h = ready_harness(kit => 'omega-v2.7.0');
-	# lab has not deployed this shared non-triggering change.
-	set_repo_config($h, 'pipeline.name', 'shared', commit => 0);
+	# lab comes before qa, so lab's undeployed set is what may hold a commit
+	# for qa, and the row turns on one path being in both environments' sets
+	# with a different mark in each.
+	my $h = ready_harness(kit => 'omega-v2.7.0', chained => 1);
 	commit_on_control($h,
-		files   => {'.genesis/config' => slurp($h->a . '/.genesis/config')},
-		message => 'Adjust the shared config',
+		files => {
+			'lab.yml'        => lab_reacting(),
+			'qa.yml'         => qa_tracking(),
+			'bin/pre-deploy' => "#!/bin/sh\necho pre\n",
+		},
+		message => 'Declare the shared reaction script',
 		push    => 1,
 	);
-	my $leaf = commit_on_control($h,
-		files   => {'qa.yml' => qa_file(3)},
-		message => 'Tune qa',
+
+	# lab has not deployed this change to the script, and the script is a
+	# reaction of lab's, so it is not content lab has to prove before qa may
+	# have it.  Were it counted, qa would be held on the commit that touched
+	# it.
+	my $touched = commit_on_control($h,
+		files   => {'bin/pre-deploy' => "#!/bin/sh\necho pre, and then some\n"},
+		message => 'Adjust the shared reaction script',
 		push    => 1,
 	);
 
 	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
-	is(harness_marker($h, $h->slug('qa')), $leaf,
-		'qa received its own commit despite the uncertified shared config');
+	is(harness_marker($h, $h->slug('qa')), $touched,
+		'qa received the script it tracks despite lab not having deployed it');
 	unlike($err, qr/held by .?lab/, 'no hold was recorded for qa');
 };
 
