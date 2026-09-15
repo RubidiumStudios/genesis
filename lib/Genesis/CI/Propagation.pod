@@ -216,12 +216,19 @@ and PR path based on the target's C<require_pr> flag.  Batches branch
 pushes into a single C<git push> at the end, then makes all PR API
 calls.
 
-The whole run happens inside one branch session, which it opens on the handle
-it was given and closes before the batched push.  Every branch change goes
-through that session's C<switch>, it holds the lock that stops a second
-process switching the same working tree underneath the run, and it is what
-puts the operator back on the branch they started from -- on the way out of a
-run that worked, and on the way out of one that did not.
+The whole run happens inside one branch session, which it asks the handle it
+was given for.  Every branch change goes through that session's C<switch>, it
+holds the lock that stops a second process switching the same working tree
+underneath the run, and it is what puts the operator back on the branch they
+started from -- on the way out of a run that worked, and on the way out of one
+that did not.
+
+The caller may have opened that session already and stood it on control, which
+is what C<genesis propagate> does, and the handle answers with the session it
+is already holding rather than a second one, because I9 allows a working tree
+only one.  So a caller that opened the session is the one that closes it, and
+this closes only a session it opened for itself, which it does before the
+batched push.
 
 A delivery that fails is caught, reported, and ends the loop, and the session
 is what answers the tree it left behind.  A delivery that wrote something
@@ -232,7 +239,8 @@ the run raises rather than returning.  A delivery that failed before it wrote
 anything leaves a clean tree, so the session simply restores and the failure
 comes back in C<errors> for the caller to decide on.
 
-A dry run opens no session.  It reads, prints, and changes no branch.
+A dry run opens no session of its own, and it switches through none the
+caller left open either.  It reads, prints, and changes no branch.
 
 The pull request branch is whatever C<$top-E<gt>pr_branch_for($env)>
 composes, so the name this writes and the name the status command reads

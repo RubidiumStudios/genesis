@@ -118,9 +118,18 @@ sub propagate_envs {
 	# second process switching underneath us, and it is what puts the
 	# operator back on the branch they started this run from.
 	#
-	# A dry run opens none: it reads, prints, and changes no branch.
+	# A dry run of its own opens none: it reads, prints, and changes no
+	# branch.
+	#
+	# The caller may have opened the run's session already and stood it on
+	# control, which is where propagate now starts, and the handle hands
+	# back that same session rather than a second one, because I9 allows a
+	# working tree only one.  So the session that is already open is the one
+	# this walk switches through, and whoever opened it is the one who
+	# closes it.
 	my $session = $git->session(control => $control);
-	$session->begin unless $dry_run;
+	my $ours    = !$dry_run && !$session->active;
+	$session->begin if $ours;
 
 	my $ran = eval {
 
@@ -211,7 +220,7 @@ sub propagate_envs {
 	# has it, and the operator is put back on the branch they started on.
 	unless ($ran) {
 		my $err = $@;
-		$session->abort($err) unless $dry_run;
+		$session->abort($err) if $session->active;
 		die $err;
 	}
 
@@ -221,7 +230,7 @@ sub propagate_envs {
 	# session end, which finish refuses through that same abort, and one
 	# that failed before writing anything is restored here and reported
 	# through the errors below.
-	$session->finish unless $dry_run;
+	$session->finish if $ours;
 
 	# Skip push and PR creation if any target failed — partial state on
 	# remote is worse than no state.  Caller can decide to bail or

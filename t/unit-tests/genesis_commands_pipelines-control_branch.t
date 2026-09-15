@@ -36,14 +36,22 @@ Harness::Propagation::run(
 	{dir => $h->a, onfailure => 'Failed to cut the off-branch'},
 	'git', 'checkout', '-q', '-b', 'elsewhere');
 
-subtest 'propagate refuses by the configured name' => sub {
-	plan tests => 2;
+subtest 'propagate switches to the configured name and comes back' => sub {
+	# D65 took the off-control refusal away, so what this row used to read
+	# out of a refusal it now reads out of the switch.  A run started on
+	# `elsewhere` stands itself on trunk, and a reader that fell back to the
+	# schema default would look for a branch called `control`, find it
+	# neither here nor on the remote, and say so by name.
+	plan tests => 3;
 
+	my $w = snapshot_w($h);
 	my (undef, $err) = $h->run_genesis({restore => 0}, 'propagate');
-	like $err, qr/must be run from the trunk branch/,
-		'the refusal names the branch the repository declared';
-	unlike $err, qr/must be run from the control branch/,
-		'and not the schema default it fell back to';
+
+	unlike $err, qr/must be run from/,
+		'standing off the control branch is a refusal no longer';
+	unlike $err, qr/control branch control/,
+		'the switch read the branch the repository declared, not the default';
+	assert_w_restored($w, 'the operator is back on the branch they ran from');
 };
 
 subtest 'pipeline-status resolves the configured branch head' => sub {

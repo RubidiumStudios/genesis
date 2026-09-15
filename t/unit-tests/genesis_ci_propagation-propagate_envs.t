@@ -201,6 +201,10 @@ sub mock_git {
 		return bless {git => $git, control => $opts{control}}, $class;
 	}
 
+	# The walk asks this before it opens anything, because its caller may
+	# have opened the run's session already and stood it on control.
+	sub active { $_[0]->{active} ? 1 : 0 }
+
 	sub begin {
 		my ($self) = @_;
 		$self->{git}->_record('session_begin');
