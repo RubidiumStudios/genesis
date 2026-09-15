@@ -1009,8 +1009,7 @@ sub _verify_deployed {
 sub pipeline_graph {
 	my ($layout) = @_;
 
-	my $opts = get_options;
-	my $top  = Genesis::Top->new('.');
+	my $top = Genesis::Top->new('.');
 
 	# For env-file topology, build the DAG directly.
 	if ($top->pipeline_enabled) {
@@ -1021,8 +1020,11 @@ sub pipeline_graph {
 		exit 0;
 	}
 
-	# Full compiler path for legacy/multi-file configurations.  There is no
-	# flag to pick a provider, so the legacy branch compiles for Concourse.
+	# A repository that has not enabled a pipeline still has the one
+	# configuration source to read, which is the pipeline section of
+	# .genesis/config, so the whole compiler runs and draws the graph from
+	# what it finds.  Nothing here chooses a provider, so Concourse stands
+	# in for the drawing.
 	my $result   = _compile_pipeline($top, 'concourse');
 	my $ast      = $result->{ast};
 	my $provider = $result->{provider};
@@ -1041,8 +1043,7 @@ sub pipeline_graph {
 sub pipeline_describe {
 	my ($layout) = @_;
 
-	my $opts     = get_options;
-	my $top      = Genesis::Top->new('.');
+	my $top = Genesis::Top->new('.');
 
 	# For env-file topology (manual provider or genesis-config CI),
 	# build the DAG directly without the full compiler/provider chain.
@@ -1057,8 +1058,11 @@ sub pipeline_describe {
 		exit 0;
 	}
 
-	# Full compiler path for legacy/multi-file configurations.  There is no
-	# flag to pick a provider, so the legacy branch compiles for Concourse.
+	# A repository that has not enabled a pipeline still has the one
+	# configuration source to read, which is the pipeline section of
+	# .genesis/config, so the whole compiler runs and the description comes
+	# from what it finds.  Nothing here chooses a provider, so Concourse
+	# stands in for the telling.
 	my $result   = _compile_pipeline($top, 'concourse');
 	my $ast      = $result->{ast};
 	my $provider = $result->{provider};

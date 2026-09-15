@@ -6,7 +6,7 @@ Genesis::Commands::Pipelines - Command handlers for Genesis CI/CD pipeline manag
 
   # Registered in bin/genesis via define_command:
   genesis embed
-  genesis pipeline-apply [layout] [--config ci.yml] [--target <fly-target>] [--dry-run] [--yes] [--paused] [--output-dir <dir>] [--debug-dir <dir>] [--skip-vault]
+  genesis pipeline-apply [layout] [--target <fly-target>] [--dry-run] [--yes] [--paused] [--output-dir <dir>] [--debug-dir <dir>] [--skip-vault]
   genesis repipe [layout]   # deprecated; warns and delegates to pipeline-apply
   genesis graph  [layout] [--config ci.yml]
   genesis describe [layout]
