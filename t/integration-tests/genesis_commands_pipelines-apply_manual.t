@@ -19,19 +19,6 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
-# _unfolded - what the run said, put back on one line
-#
-# A run folds what it says to the terminal's width on the way out, so a
-# phrase a row is looking for arrives with a newline and an indent somewhere
-# in the middle of it.  The two streams are joined on a newline, so that no
-# phrase can match across the seam where one ends and the other begins, and
-# their whitespace is collapsed before anything is matched.
-sub _unfolded {
-	my $said = join("\n", map {$_ // ''} @_);
-	$said =~ s/\s+/ /g;
-	return $said;
-}
-
 subtest 'the manual provider gets everything but a pipeline' => sub {
 	# Seven rows, and one more for the run's own restoration assertion, which
 	# run_genesis makes unless a row turns it off.
@@ -60,7 +47,7 @@ subtest 'the manual provider gets everything but a pipeline' => sub {
 	# host a pipeline, so what this row asks is whether a target was reached
 	# for rather than whether the word was said.  Reaching for one runs fly,
 	# and nothing on the manual path may run it.
-	unlike(_unfolded($out, $err), qr/\bfly\b/i,
+	unlike(unfolded($out, $err), qr/\bfly\b/i,
 		'no Concourse target was contacted');
 };
 
@@ -76,7 +63,7 @@ subtest 'the dry run previews the whole command and writes nothing' => sub {
 	my $gh = github_double($h, admin => 1);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '--dry-run');
-	my $said = _unfolded($out, $err);
+	my $said = unfolded($out, $err);
 
 	is($exit, 0, 'the dry run exits 0');
 	like($said, qr{would create \Qqa/bosh\E},
