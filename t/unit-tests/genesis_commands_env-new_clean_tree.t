@@ -27,7 +27,7 @@ subtest 'an unstaged change is refused before anything is written' => sub {
 	my $dirty = modify_unrelated($h, 'qa.yml');
 
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
-		'new', 'lab', '--no-fetch');
+		'new', 'lab');
 
 	isnt($exit, 0, 'the command refuses');
 	like($err, qr/Working tree has uncommitted changes/,
@@ -46,7 +46,7 @@ subtest 'a staged change is refused too' => sub {
 	my $staged = stage_unrelated($h, 'ops/pending.yml');
 
 	my (undef, $err, $exit) = run_genesis($h, {restore => 0},
-		'new', 'lab', '--no-fetch');
+		'new', 'lab');
 
 	isnt($exit, 0, 'the command refuses');
 	like($err, qr/\Q$staged\E/, 'naming the staged file');
@@ -64,7 +64,7 @@ subtest 'an untracked file is not in the way' => sub {
 	helper::put_file($h->a . '/scratch.txt', "notes to self\n");
 
 	my (undef, $err) = run_genesis($h, {restore => 0},
-		'new', 'lab', '--no-fetch');
+		'new', 'lab');
 
 	unlike($err, qr/Working tree has uncommitted changes/,
 		'the scratch file is not read as uncommitted work');

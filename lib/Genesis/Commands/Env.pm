@@ -116,9 +116,11 @@ sub create {
 			);
 		}
 
-		# Refresh env branches so branch_exists checks and reconciliation
-		# see teammate-created branches that aren't in the local clone yet.
-		$top->fetch_pipeline_envs($git) unless get_options->{'no-fetch'};
+		# Refresh R into T for every branch in scope, control included, before
+		# the first read of any of them (D40).  There is no flag: a branch
+		# check that rested on a stale tracking ref is how this command came
+		# to fork a branch a teammate had already published.
+		$top->fetch_pipeline_envs($git, command => "new $name");
 	}
 
 	# create the environment
@@ -994,21 +996,6 @@ sub deploy {
 	my %options = %{get_options()};
 	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix fix-stemcells/);
 
-	# --pull: explicitly requested, or implied by -F/--fix-checks unless --no-pull.
-	# Remove 'pull' from %options so it is not forwarded to $env->deploy().
-	my $do_pull;
-	if (exists $options{pull}) {
-		$do_pull = delete($options{pull}) ? 1 : 0;
-	} elsif ($options{'fix-checks'}) {
-		$do_pull = 1;
-	} else {
-		$do_pull = 0;
-	}
-
-	# --no-fetch: skip the pre-deploy env-branch refresh (offline use).
-	# Remove from %options so it is not forwarded to $env->deploy().
-	my $no_fetch = delete($options{'no-fetch'}) ? 1 : 0;
-
 	# When CI is configured, switch to the environment's branch and
 	# pull from remote BEFORE loading the env -- otherwise all the
 	# preflight work (cloud-config download, manifest viability,
@@ -1026,11 +1013,13 @@ sub deploy {
 		$branch_name =~ s/\.ya?ml$//;
 		$pipeline_branch = $branch_name;
 
-		# Fetch all pipeline env branches in one round-trip before any
-		# branch-state reads (branch_exists, checkout, pull_ff_only).
-		# This ensures teammate-created branches and propagation commits
-		# are visible before we act on them.
-		$top->fetch_pipeline_envs($pipeline_git) unless $no_fetch;
+		# The deploy refreshes on the same terms as the run, because its
+		# due-commit and drift reads are worthless against a stale
+		# tracking ref (D40).
+		my $refreshed = $top->fetch_pipeline_envs($pipeline_git,
+			command => "$env_name deploy",
+			action  => 'deploy',
+			outcome => 'Nothing was deployed.');
 
 		my $current = $pipeline_git->current_branch // '';
 		if ($current ne $branch_name) {
@@ -1100,33 +1089,11 @@ sub deploy {
 		}
 	}
 
-	# --pull: pull propagated files from the prior env (or control HEAD for
-	# entry points) onto the env branch before deploying.  No-op when the
-	# env branch is already current or when the repository declares none.
-	if ($do_pull && $top->pipeline_enabled && $pipeline_git) {
-		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
-
-		bail(
-			"Environment branch #C{%s} does not exist.\n".
-			"Create it with #C{genesis new %s} on the control branch.",
-			$pipeline_branch, $pipeline_branch
-		) unless $pipeline_git->branch_exists($pipeline_branch);
-
-		# Switch to the env branch.  _pre_deploy will find us already there.
-		if (($pipeline_git->current_branch // '') ne $pipeline_branch) {
-			bail(
-				"Working tree has uncommitted changes.  Commit or stash them\n".
-				"before deploying with --pull."
-			) unless $pipeline_git->is_clean;
-			# The other half of the same one-way move, for the pull, and
-			# M13 moves it with its neighbour above.
-			$pipeline_git->checkout_one_way($pipeline_branch);
-		}
-
-		my $source_sha = _get_source_sha_for_pull($env, $prior, $pipeline_git);
-		_apply_pull_propagation($env, $pipeline_branch, $source_sha, $pipeline_git)
-			if $source_sha;
-	}
+	# --pull is gone with --no-fetch (D40).  It was a second source of truth
+	# beside the refresh: the operator chose whether the branch was brought
+	# up to date, and a deploy that skipped the pull read a branch nobody had
+	# moved.  The refresh above is now the one way the branch gets current,
+	# and M8 retires the two private subs this block was the last caller of.
 
 	my $deployment_files = $env->deployment_cache_path_lookup('existing');
 	if (scalar(keys %$deployment_files)) {

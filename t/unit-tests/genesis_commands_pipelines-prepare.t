@@ -103,62 +103,80 @@ subtest 'an environment outside the pipeline is rejected' => sub {
 };
 
 # ======================================================================
-# The body, under --no-fetch
+# The body, now that the refresh is unconditional
 # ======================================================================
 #
 # Reaching the body takes a working tree, a vault and a git repository,
 # which is why the rows above stop at the scope decision.  The propagation
-# harness builds all three, so the two answers --no-fetch turns on can be
+# harness builds all three, so what the command decides about a branch can be
 # read off the command itself rather than off the mapping behind it.
+#
+# --no-fetch is gone.  Every command refreshes before its first read of a
+# branch (D40), so the question the flag used to raise cannot be asked any
+# more.  A branch that is in neither this clone nor its tracking refs is one
+# the remote has just been asked about and does not have, which is a branch
+# to create rather than a branch to withhold.
 
-subtest 'a branch this clone has is not skipped under --no-fetch' => sub {
-	plan tests => 6;
+subtest 'a branch this clone has is reconciled and not withheld' => sub {
+	# Three rows, and one more for the run's own restoration assertion.
+	plan tests => 4;
 
 	# The embedded genesis is one of the files the propagation set carries,
 	# so the branch has something real on it either way.
 	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0', embed => 1);
 
-	# The branch is this clone's alone, which is the half of --no-fetch that
-	# was answered backwards, because a record comes back for such a branch
-	# and the flag was being read off that record.  The stray file stands for
-	# whatever else the branch has picked up, so the environment has a real
+	# The branch is this clone's alone.  The stray file stands for whatever
+	# else the branch has picked up, so the environment has a real
 	# reconciliation waiting for it rather than nothing to do.
 	local_branch($h, 'qa');
 	hand_commit($h, 'qa', copy => 'a', push => 0,
 		files => {'stray.yml' => "---\nno environment depends on this\n"});
 	stand_on($h, 'control');
 
-	# Both runs are dry, because a dry run reports the answer and stops
-	# there, where a writing run goes on to the reconciliation and dies on
-	# this fixture whatever the flag says.  The answer is decided before
-	# either run parts company with the other, so a dry run is where it can
-	# be read rather than inferred.  Genesis reports on standard error, so
-	# each run's account of itself comes back in the second value.
-	my (undef, $with)    = $h->run_genesis('pipeline-prepare', '-n', '--no-fetch');
-	my (undef, $without) = $h->run_genesis('pipeline-prepare', '-n');
+	# The run is dry, because a dry run reports the answer and stops there,
+	# where a writing run goes on to the reconciliation and dies on this
+	# fixture.  The answer is decided before the two part company, so a dry
+	# run is where it can be read rather than inferred.  Genesis reports on
+	# standard error, so the run's account of itself comes back in the second
+	# value rather than the first.
+	my (undef, $err) = $h->run_genesis('pipeline-prepare', '-n');
 
-	like $with, qr/reconciled\s+\S*qa/,
+	like $err, qr/reconciled\s+\S*qa/,
 		'the run says it would reconcile the branch, and names it';
-	like $with, qr/Would prepare: .*1 reconciled/,
+	like $err, qr/Would prepare: .*1 reconciled/,
 		'and counts it among the environments it would prepare';
-	unlike $with, qr/skipped/,
+	unlike $err, qr/skipped/,
 		'so a branch that is here is not withheld for want of the remote';
-	is scalar($without =~ /reconciled\s+\S*qa/), 1,
-		'which is the same answer the run gives without the flag';
 };
 
-subtest 'a branch in neither place is skipped under --no-fetch' => sub {
-	plan tests => 4;
+subtest 'a branch in neither place is created, the remote having been asked' => sub {
+	# Four rows, and one more for each of the two runs' restoration assertions.
+	plan tests => 6;
 
-	my $h = make_harness(envs => ['lab'], kit => 'omega-v2.7.0');
+	# The embed is the fixture and not the claim: .genesis/bin/genesis is one
+	# of the propagation files every environment carries, so a branch cut
+	# from a control tree that lacks it cannot be seeded at all.
+	my $h = make_harness(envs => ['lab'], kit => 'omega-v2.7.0', embed => 1);
 
-	my (undef, $err) = $h->run_genesis('pipeline-prepare', '--no-fetch');
+	# The answer comes off a dry run, for the reason the row above gives.
+	my (undef, $dry) = $h->run_genesis('pipeline-prepare', '-n');
 
-	like $err, qr/skipped.*lab/s,
-		'a branch that is nowhere is withheld and named';
-	is ref_in($h->a, 'refs/heads/lab'), undef,
-		'and is not created off HEAD without the remote being asked';
-	like $err, qr/1 skipped/, 'the summary counts it';
+	like $dry, qr/created\s+\S*lab/,
+		'a branch that is nowhere is one the run would create';
+	like $dry, qr/Would prepare: .*1 created/,
+		'and counts it among the environments it would prepare';
+	unlike $dry, qr/skipped/,
+		'rather than withholding it for want of the remote';
+
+	# The writing run is here for the ref alone.  It dies on this fixture
+	# once the branch is cut, because this control tree already carries the
+	# whole propagation set and the seed commit then stages nothing, but the
+	# ref is written before that happens and a withheld branch has no ref at
+	# all.
+	$h->run_genesis('pipeline-prepare');
+
+	isnt ref_in($h->a, 'refs/heads/lab'), undef,
+		'and the run writes the local ref';
 };
 
 done_testing;

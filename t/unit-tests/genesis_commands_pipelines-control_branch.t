@@ -138,7 +138,7 @@ subtest 'a cascade resolves a base for the env it names and for each child' => s
 	# What is under test is where each base is read from, not what
 	# certifies the source, and the harness writes no deployment audit.
 	my (undef, $err) = $c->run_genesis({restore => 0},
-		'propagate', 'qa', '--commit', $trunk, '--dry-run', '--no-fetch');
+		'propagate', 'qa', '--commit', $trunk, '--dry-run');
 
 	like $err, qr/Branch qa has 1 manual commit on top of the last propagation/,
 		'the base for the named environment came off its own marker';

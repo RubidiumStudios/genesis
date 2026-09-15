@@ -299,12 +299,6 @@ define_command("create", {
 			"Commit message for the environment commit.  Defaults to ".
 			"#C{Add environment <name>}.  Only applies when a CI ".
 			"provider is configured and #C{--no-commit} is not set.",
-
-		"no-fetch" =>
-			"Skip the pre-create refresh of pipeline environment branches from ".
-			"remote.  By default all env branches are fetched in one round-trip ".
-			"before checking for existing branches.  Use this flag when working ".
-			"offline or when the remote is temporarily unavailable.",
 	],
 	deprecated_options => [
 		"^prefix=s" =>
@@ -531,19 +525,6 @@ define_command("deploy", {
 			"flag to skip that propagation.  Non-manual providers (concourse, ".
 			"github-actions) own their own propagation and are unaffected by ".
 			"this flag.",
-
-		'pull!' =>
-			"Pull propagated files from the prior environment's last successful ".
-			"deploy (or control HEAD for pipeline entry points) onto this ".
-			"environment branch before deploying.  No-op when the environment ".
-			"is already current.  Implied by #y{-F}/#y{--fix-checks}; use ".
-			"#y{--no-pull} to opt out.  No-op for non-pipeline repositories.",
-
-		'no-fetch' =>
-			"Skip the pre-deploy refresh of pipeline environment branches from ".
-			"remote.  By default all env branches are fetched in one round-trip ".
-			"before reading branch state.  Use this flag when working offline or ".
-			"when the remote is temporarily unavailable.",
 	],
 	args => {
 		'reason' =>
@@ -2133,12 +2114,6 @@ define_command("pipeline-prepare", {
 	options => [
 		'dry-run|n' =>
 			"Report what would change without creating branches or commits.",
-
-		'no-fetch' =>
-			"Work offline.  Branches already in this clone are reconciled ".
-			"as usual, but an environment whose branch is missing here is ".
-			"skipped rather than created, since without the remote there is ".
-			"no way to tell a new environment from a stale clone.",
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_prepare');
 # }}}
@@ -2154,11 +2129,12 @@ define_command("pipeline-status", {
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [
-		'no-fetch' =>
-			"Skip the pre-status refresh of pipeline environment branches from ".
-			"remote.  By default all env branches are fetched in one round-trip ".
-			"before reading branch state.  Use this flag when working offline or ".
-			"when the remote is temporarily unavailable.",
+		"no-refresh" =>
+			"Report from the remote-tracking refs this clone already has, ".
+			"without refreshing them first.  Every cell that depends on the ".
+			"remote is marked unverifiable and the header says the report is ".
+			"stale.  This is the only command that takes the option, and it ".
+			"writes nothing either way.",
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_status');
 # }}}
@@ -2193,12 +2169,6 @@ define_command("propagate", {
 		'no-push' =>
 			"Skip pushing control and env branches to the remote after ".
 			"propagation.  By default, propagated branches are pushed.",
-
-		'no-fetch' =>
-			"Skip the pre-propagate refresh of pipeline environment branches ".
-			"from remote.  By default all env branches are fetched in one ".
-			"round-trip before computing diffs.  Use this flag when working ".
-			"offline or when the remote is temporarily unavailable.",
 	],
 	arguments => [
 		'env?' =>

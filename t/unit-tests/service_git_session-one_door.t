@@ -105,12 +105,12 @@ subtest 'nothing outside the session checks a branch out' => sub {
 		'no caller under lib/ or bin/ reaches the checkout directly');
 
 	# The deploy moves onto the environment branch and means to stay there,
-	# twice, once on its own path and once under --pull, and the post-deploy
-	# block moves onto control and hands off to a child.  A session would put
-	# all three back, so they come through the allowance until M13 and M15
-	# decide what they should mean instead.
+	# and the post-deploy block moves onto control and hands off to a child.
+	# A session would put both back, so they come through the allowance until
+	# M13 and M15 decide what they should mean instead.  The third site was
+	# the deploy's --pull, which is gone with the flag.
 	#
-	# The count is pinned and not just the file, because a fourth one-way
+	# The count is pinned and not just the file, because a second one-way
 	# checkout added inside a file that already holds one would otherwise
 	# join the allowance without turning anything red.
 	my %allowed;
@@ -119,8 +119,8 @@ subtest 'nothing outside the session checks a branch out' => sub {
 		$allowed{$file} = $calls if $calls;
 	}
 	is_deeply(\%allowed,
-		{'lib/Genesis/Commands/Env.pm' => 2, 'lib/Genesis/Env.pm' => 1},
-		'and the one-way allowance carries the three sites M13 and M15 move');
+		{'lib/Genesis/Commands/Env.pm' => 1, 'lib/Genesis/Env.pm' => 1},
+		'and the one-way allowance carries the two sites M13 and M15 move');
 };
 
 subtest 'the propagate run drives a session end to end' => sub {
@@ -143,7 +143,7 @@ subtest 'the propagate run drives a session end to end' => sub {
 	# run_genesis asserts for itself that the run left the working state as
 	# it found it, which is the fourth row of this plan.
 	my ($out, $err, $exit) = run_genesis($h,
-		'propagate', '--commit', $control, '--no-fetch');
+		'propagate', '--commit', $control);
 
 	is($exit, 0, 'the run delivered and came back');
 

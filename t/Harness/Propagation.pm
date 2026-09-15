@@ -2679,7 +2679,7 @@ sub fail_on {
 	_with_plan($file, sub {
 		my ($plan) = @_;
 		$plan->{$step} = {n => $n, from => $opts{from} ? 1 : 0,
-			message => $opts{message}};
+			message => $opts{message}, kind => $opts{kind}};
 	});
 	return $git;
 }
@@ -2733,13 +2733,21 @@ sub reset_steps {
 # tells a network failure from an authentication one reads stderr, and a row
 # asserts that the run named the network as the reason.  The after option
 # severs the remote partway through a run, which the unsurvivable rows need.
+#
+# The refresh is severed as a transport failure rather than as a death,
+# because that is what the real method does with a remote it cannot reach:
+# `git ls-remote` comes back with an rc, and fetch_branches turns it into a
+# classified result for the caller to refuse on.  A push and a remote delete
+# do die, so those two keep the death they always had.
 sub sever_remote {
 	my ($self, %opts) = @_;
 	my $git = $self->{"_fault_git_a"} // $self->fault_git;
 	my $message = "fatal: unable to access '$self->{r}': "
 		. "Could not resolve host: the remote is unreachable";
+	fail_on($git, 'fetch_branches', $opts{after} // 1,
+		from => 1, message => $message, kind => 'transport');
 	fail_on($git, $_, $opts{after} // 1, from => 1, message => $message)
-		for qw/fetch_branches push delete_remote_branch/;
+		for qw/push delete_remote_branch/;
 	return $self;
 }
 

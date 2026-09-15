@@ -1620,20 +1620,18 @@ sub prepare_branch {
 
 	# The remote decides: creating off HEAD because the branch is missing
 	# locally would fork it from the real one.  Only a branch that is in
-	# neither this clone nor its tracking refs licenses a create, and a
-	# caller that skipped the refresh cannot tell that case from a stale
-	# clone, so it is told so rather than answered.  The flag is read off
-	# the option rather than off the record, because the one case it speaks
-	# for is the case that has no record to carry it.
+	# neither this clone nor its tracking refs licenses a create, and under
+	# D40 no caller can arrive here without having refreshed, so a branch
+	# with no record is a branch the remote has never had.
 	#
-	# Nothing answers 'fetched' any more.  The refresh creates the local ref
-	# from the tracking one, so a branch the remote alone had is already
-	# here by the time this runs, and the refresh is what reports the
-	# creation.  M9 retires this sub with its last caller.
+	# Nothing answers 'fetched' or 'unverifiable' any more.  The refresh
+	# creates the local ref from the tracking one, so a branch the remote
+	# alone had is already here by the time this runs, and the refresh is
+	# what reports the creation.  The refresh is also unconditional, so
+	# there is no longer a run that could not tell an absent branch from an
+	# unasked remote.  M9 retires this sub with its last caller.
 	my $div = $git->resolve_branch($branch);
-	my $origin = !defined($div) ? ($opts{no_fetch} ? 'unverifiable' : 'absent')
-	           :                  'local';
-	return ([], [], $origin) if $origin eq 'unverifiable';
+	my $origin = defined($div) ? 'local' : 'absent';
 	my $branch_exists = $origin ne 'absent';
 
 	# A branch that doesn't exist yet starts from the current HEAD's tree.

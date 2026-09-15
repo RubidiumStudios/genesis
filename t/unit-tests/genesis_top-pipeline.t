@@ -26,6 +26,10 @@ sub make_ci_top {
 	$top->link_dev_kit('t/src/simple');
 	$top->config->set('pipeline.enabled',       1);
 	$top->config->set('pipeline.provider.type', 'manual');
+	# The deployment type is what the slug's second half is, and the refresh
+	# asks for slugs, so it is named here rather than left as the repository
+	# name and read back as qa/pipeline-test in every expectation below.
+	$top->config->set('deployment_type', 'bosh');
 	return $top;
 }
 
@@ -109,83 +113,85 @@ sub mock_git {
 	}
 }
 
-subtest 'fetch_pipeline_envs - no-op when CI is not configured' => sub {
+subtest 'fetch_pipeline_envs - undef where there is no pipeline' => sub {
 	plan tests => 2;
 
 	my $top = make_top(name => 'fp-no-ci', no_vault => 1);
 	my $git = mock_git(default_remote => 'origin');
 
-	is $top->fetch_pipeline_envs($git), 1, 'returns 1 (success no-op)';
+	is $top->fetch_pipeline_envs($git), undef, 'there is nothing to refresh';
 	is scalar @{$git->{_calls}}, 0, 'fetch_branches not invoked';
 };
 
-subtest 'fetch_pipeline_envs - no-op when no default remote' => sub {
+subtest 'fetch_pipeline_envs - undef where there is no remote' => sub {
 	plan tests => 2;
 
 	my $top = make_ci_top();
 	my $git = mock_git();  # no remote
 
-	is $top->fetch_pipeline_envs($git), 1, 'returns 1';
+	is $top->fetch_pipeline_envs($git), undef, 'there is nowhere to refresh from';
 	is scalar @{$git->{_calls}}, 0, 'fetch_branches not invoked';
 };
 
-subtest 'fetch_pipeline_envs - no-op when no env files exist' => sub {
+subtest 'fetch_pipeline_envs - control is refreshed even with no environments' => sub {
 	plan tests => 2;
 
+	# The old sub returned early on an empty environment list and refreshed
+	# nothing at all, which left control read out of whatever the clone
+	# happened to hold.  Control is the branch every other read is measured
+	# against, so it is refreshed whether or not anything follows it.
 	my $top = make_ci_top();
 	my $git = mock_git(default_remote => 'origin');
 
-	is $top->fetch_pipeline_envs($git), 1, 'returns 1';
-	is scalar @{$git->{_calls}}, 0, 'fetch_branches not invoked with empty list';
+	my $result = $top->fetch_pipeline_envs($git);
+
+	is $result->{ok}, 1, 'the refresh happened and came back ok';
+	is_deeply $git->{_calls}[0]{names}, ['control'],
+		'and control was the one branch it asked for';
 };
 
-subtest 'fetch_pipeline_envs - calls fetch_branches with sorted names + remote' => sub {
-	plan tests => 4;
+subtest 'fetch_pipeline_envs - control leads, and the rest are deployment branches' => sub {
+	plan tests => 3;
 
+	# The names are slugs rather than environment names, under D66.  A
+	# refresh asking for `qa` fetched nothing at all in a typed repository,
+	# because the ref on the remote is `qa/bosh`.
 	my $top = make_ci_top();
 	put_env($top, $_) for qw(qa lab prod);
 	my $git = mock_git(default_remote => 'dev');
 
-	is $top->fetch_pipeline_envs($git), 1, 'returns 1 on success';
+	$top->fetch_pipeline_envs($git);
+
 	is scalar @{$git->{_calls}}, 1, 'fetch_branches called exactly once';
 
 	my $call = $git->{_calls}[0];
-	is_deeply $call->{names}, [qw(lab prod qa)],
-		'names are sorted env list, no control';
+	is_deeply $call->{names}, [qw(control lab/bosh prod/bosh qa/bosh)],
+		'control leads the sorted deployment branches';
 	is $call->{remote}, 'dev',
 		'remote is passed through from default_remote';
 };
 
-subtest 'fetch_pipeline_envs - include_control prepends control to names' => sub {
-	plan tests => 1;
+subtest 'fetch_pipeline_envs - the refresh result is what comes back' => sub {
+	plan tests => 2;
 
+	# The caller reports the creation of a local ref from the `created`
+	# list, so the whole result is handed back rather than a bare success.
 	my $top = make_ci_top();
-	put_env($top, $_) for qw(qa prod);
-	my $git = mock_git(default_remote => 'origin');
+	put_env($top, $_) for qw(qa lab);
+	my $git = mock_git(
+		default_remote => 'origin',
+		result         => { ok => 1, kind => 'success',
+		                    fetched => ['control', 'qa/bosh'],
+		                    created => ['qa/bosh'], absent => ['lab/bosh'] },
+	);
 
-	$top->fetch_pipeline_envs($git, include_control => 1);
+	my $result = $top->fetch_pipeline_envs($git);
 
-	is_deeply $git->{_calls}[0]{names},
-		[qw(control prod qa)],
-		'control is included in the refspec list when requested';
+	is_deeply $result->{created}, ['qa/bosh'],
+		'the created list reaches the caller';
+	is_deeply $result->{absent}, ['lab/bosh'],
+		'and so does the absent one';
 };
-
-# ======================================================================
-# fetch_pipeline_envs - failure-kind routing
-# ======================================================================
-
-# Capture warning/debug calls inside Top so we can assert routing without
-# parsing stderr. warning/debug are imported into Genesis::Top via
-# `use Genesis;`, so the symbols to override live in Genesis::Top.
-sub capture_log {
-	my ($warns, $debugs) = ([], []);
-	no warnings qw(redefine once);
-	# Returning a guard pair so callers can `my ($w, $d, $guard) = capture_log()`.
-	# Since `local *` can't escape its scope, we instead install plain
-	# overrides and rely on the test cleaning up by going out of scope
-	# at end of subtest.  Easier: the caller owns the locals.
-	($warns, $debugs);
-}
 
 subtest 'fetch_pipeline_envs - a branch the remote lacks is not a failure' => sub {
 	plan tests => 1;
@@ -200,15 +206,28 @@ subtest 'fetch_pipeline_envs - a branch the remote lacks is not a failure' => su
 	my $git = mock_git(
 		default_remote => 'origin',
 		result         => { ok => 1, kind => 'success',
-		                    fetched => ['qa'], absent => ['lab'] },
+		                    fetched => ['qa/bosh'], created => [],
+		                    absent => ['lab/bosh'] },
 	);
 
-	is $top->fetch_pipeline_envs($git), 1,
+	is $top->fetch_pipeline_envs($git)->{ok}, 1,
 		'absent branches are reported by fetch_branches, not raised here';
 };
 
-subtest 'fetch_pipeline_envs - network failure bails with --no-fetch hint' => sub {
-	plan tests => 1;
+# ======================================================================
+# fetch_pipeline_envs - the refusal, and the three kinds it tells apart
+# ======================================================================
+#
+# The refusal names the remote, says which of the three kinds it was, quotes
+# git's own message, and closes with what was not done.  It advises no flag,
+# because under D40 there is none to advise: every command but
+# pipeline-status refreshes unconditionally, and a retry is the way out.
+# The exit code the refusal carries is TEMPFAIL, which is read from the
+# product in t/integration-tests/genesis_commands_pipelines-refresh_flags.t,
+# where a whole command runs and its exit status can be asked for.
+
+subtest 'fetch_pipeline_envs - an unreachable remote names the network' => sub {
+	plan tests => 2;
 
 	my $top = make_ci_top();
 	put_env($top, 'qa');
@@ -218,12 +237,20 @@ subtest 'fetch_pipeline_envs - network failure bails with --no-fetch hint' => su
 	);
 
 	throws_ok {
-		$top->fetch_pipeline_envs($git);
-	} qr/Failed to reach.*origin.*--no-fetch/is,
-		'network failure bails with remote name and --no-fetch hint';
+		$top->fetch_pipeline_envs($git, command => 'propagate');
+	} qr/Failed\s+to\s+reach.*origin.*network or the remote is\s+unreachable/is,
+		'the refusal names the remote and the network';
+
+	# The refusal is wrapped to the terminal width before it is raised, so a
+	# phrase that spans the wrap arrives with a newline and an indent inside
+	# it, and every match below allows for that.
+	throws_ok {
+		$top->fetch_pipeline_envs($git, command => 'propagate');
+	} qr/Nothing\s+was\s+written/is,
+		'and closes by saying nothing was written';
 };
 
-subtest 'fetch_pipeline_envs - auth failure bails with --no-fetch hint' => sub {
+subtest 'fetch_pipeline_envs - a rejected credential names the credential' => sub {
 	plan tests => 1;
 
 	my $top = make_ci_top();
@@ -235,11 +262,11 @@ subtest 'fetch_pipeline_envs - auth failure bails with --no-fetch hint' => sub {
 
 	throws_ok {
 		$top->fetch_pipeline_envs($git);
-	} qr/authenticate.*origin.*--no-fetch/is,
-		'auth failure bails with retry guidance and --no-fetch hint';
+	} qr/Failed\s+to\s+reach.*origin.*rejected our\s+credentials/is,
+		'the refusal says the remote rejected us rather than that it was down';
 };
 
-subtest 'fetch_pipeline_envs - unknown failure bails with raw err' => sub {
+subtest 'fetch_pipeline_envs - anything else carries git\'s own message' => sub {
 	plan tests => 1;
 
 	my $top = make_ci_top();
@@ -251,8 +278,32 @@ subtest 'fetch_pipeline_envs - unknown failure bails with raw err' => sub {
 
 	throws_ok {
 		$top->fetch_pipeline_envs($git);
-	} qr/weird transient error.*--no-fetch/is,
-		'unknown failure bails with raw err and --no-fetch hint';
+	} qr/the remote failed the\s+request.*weird transient error/is,
+		'the refusal quotes what git said';
+};
+
+subtest 'fetch_pipeline_envs - the caller names the act and the outcome' => sub {
+	plan tests => 2;
+
+	# The deploy does not "run genesis qa deploy" in its own refusal; it
+	# deploys, and what it failed to do is deploy anything.  Both phrases
+	# come from the caller so one sub can refuse for every command.
+	my $top = make_ci_top();
+	put_env($top, 'qa');
+	my $git = mock_git(
+		default_remote => 'origin',
+		result         => { ok => 0, kind => 'network', err => 'Could not resolve host: ...' },
+	);
+
+	throws_ok {
+		$top->fetch_pipeline_envs($git, action => 'deploy',
+			outcome => 'Nothing was deployed.');
+	} qr/Refusing\s+to\s+deploy/is, 'the act is the caller\'s word';
+
+	throws_ok {
+		$top->fetch_pipeline_envs($git, action => 'deploy',
+			outcome => 'Nothing was deployed.');
+	} qr/Nothing\s+was\s+deployed/is, 'and so is the outcome';
 };
 
 # ======================================================================

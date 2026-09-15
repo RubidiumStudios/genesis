@@ -153,10 +153,13 @@ sub pipeline_status {
 	my %parent_of = %{$topo->{parent_of}};
 	my @dag_order = @{$topo->{order}};
 
-	# Refresh env branch refs from remote before reading status so the
-	# display reflects teammate commits, not just local state.
-	$top->fetch_pipeline_envs($git)
-		unless get_options->{'no-fetch'};
+	# pipeline_status is the one command that reads without refreshing, and
+	# --no-refresh is what says so.  Every T-dependent answer it then gives
+	# carries the unverifiable flag, which M17 renders.
+	my $unverifiable = get_options->{'no-refresh'} ? 1 : 0;
+	my $refreshed = $unverifiable
+		? undef
+		: $top->fetch_pipeline_envs($git, command => 'pipeline-status');
 
 	my $head       = $git->sha($control);
 	my $head_short = $git->sha($head, short => 1);
@@ -408,9 +411,10 @@ sub propagate {
 	my %parent_of = %{$topo->{parent_of}};
 	my @dag_order = @{$topo->{order}};
 
-	# Refresh env branch refs so diff computations see teammate commits.
-	$top->fetch_pipeline_envs($git)
-		unless $opts->{'no-fetch'};
+	# Refresh R into T for every branch in scope, control included, before
+	# the first read of any of them (D40).  There is no flag, because a report
+	# that quietly rested on a stale tracking ref is the thing this removes.
+	my $refreshed = $top->fetch_pipeline_envs($git, command => 'propagate');
 
 	# Resolve the control SHA that will be the source of this propagation.
 	#
@@ -821,8 +825,9 @@ sub pipeline_prepare {
 		"before preparing environment branches."
 	) unless $git->is_clean;
 
-	$top->fetch_pipeline_envs($git)
-		unless $opts->{'no-fetch'};
+	# The seeding command refreshes on the same terms as every other, so the
+	# branch it decides to create is one the remote has been asked about.
+	$top->fetch_pipeline_envs($git, command => 'pipeline-prepare');
 
 	my $topo  = $top->pipeline_topology;
 	my @scope = _prepare_scope($topo, $env_name);
@@ -835,7 +840,7 @@ sub pipeline_prepare {
 	info "\n#G{Preparing environment branches from} #C{%s}%s\n",
 		$control, ($dry_run ? ' #Yi{(dry run)}' : '');
 
-	my ($created, $reconciled, $untouched, $skipped) = (0) x 4;
+	my ($created, $reconciled, $untouched) = (0) x 3;
 	for my $name (@scope) {
 		my $env = eval {$top->load_env($name)};
 		unless ($env) {
@@ -844,19 +849,10 @@ sub pipeline_prepare {
 		}
 
 		my ($added, $removed, $origin) = $env->prepare_branch(
-			dry_run  => $dry_run,
-			no_fetch => $opts->{'no-fetch'},
+			dry_run => $dry_run,
 		);
 
-		if ($origin eq 'unverifiable') {
-			$skipped++;
-			warning(
-				"  #Y{skipped} #C{%s}: no branch here, and #C{--no-fetch} means ".
-				"the remote cannot be checked.\n".
-				"  Creating it blind would fork it from the real branch if one exists.",
-				$name
-			);
-		} elsif ($origin eq 'absent') {
+		if ($origin eq 'absent') {
 			$created++;
 			info "  #G{created} #C{%s} (%d added, %d removed)",
 				$name, scalar(@$added), scalar(@$removed);
@@ -870,19 +866,13 @@ sub pipeline_prepare {
 		}
 	}
 
-	info "\n%s: %d created, %d reconciled, %d already current%s.\n",
+	info "\n%s: %d created, %d reconciled, %d already current.\n",
 		($dry_run ? "Would prepare" : "Prepared"),
-		$created, $reconciled, $untouched,
-		($skipped ? sprintf(", %d skipped", $skipped) : '');
+		$created, $reconciled, $untouched;
 
 	info "Push the new branches with #C{git push --all} to make them ".
 		"visible to the pipeline.\n"
 		if $created && !$dry_run;
-
-	info "Re-run without #C{--no-fetch} to prepare the %d skipped ".
-		"environment%s.\n",
-		$skipped, ($skipped == 1 ? '' : 's')
-		if $skipped;
 
 	return;
 }

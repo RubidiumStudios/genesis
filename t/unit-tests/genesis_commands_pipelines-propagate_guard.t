@@ -3,9 +3,8 @@
 # Propagation must not treat a missing env branch as "nothing to
 # propagate".  The diff it computes is `git diff <env-branch>..<sha>`,
 # which fails and yields an empty list when the branch is absent -- so
-# without a guard, a repository whose branches were never created, or a
-# --no-fetch run against a stale clone, reports success having done
-# nothing.
+# without a guard, a repository whose branches were never created reports
+# success having done nothing.
 #
 use strict;
 use warnings;

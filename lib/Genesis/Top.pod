@@ -1955,20 +1955,26 @@ B<Examples:>
 
 =head2 fetch_pipeline_envs
 
-    $top->fetch_pipeline_envs($git);
-    $top->fetch_pipeline_envs($git, include_control => 1);
+    my $result = $top->fetch_pipeline_envs($git);
+    my $result = $top->fetch_pipeline_envs($git, command => 'qa deploy',
+                                                 action  => 'deploy',
+                                                 outcome => 'Nothing was deployed.');
 
-Refreshes the local branches for every pipeline environment from the remote,
-in a single fetch.
+Refreshes the control branch and every deployment branch of the pipeline in
+one round trip, so credentials are prompted once.  Control is always in the
+list.  Returns the refresh result, whose C<created> list names the local refs
+that had to be made from the remote and whose C<fetched> and C<absent> lists
+name the rest.  Returns C<undef> when the repository has no pipeline or no
+remote.
 
-B<Fetch failures are fatal, and say which kind they were.> A network failure,
-an authentication failure and anything else each get their own message, and
-each names C<--no-fetch> as the way to proceed regardless. Continuing with
-silently stale branches would mean deploying from an out-of-date view of the
-pipeline, which is the failure this exists to prevent.
+The names it asks for are deployment branches rather than environment names,
+composed through L</branch_for>, because the branch is what the remote holds
+and an environment name is not a ref on it.
 
-No-ops -- returning success -- when CI is not configured, when there is no
-remote, or when there are no environments. None of those is an error.
+Every pipeline command calls this before its first read of a branch, and no
+command may skip it.  C<genesis pipeline-status> is the one exception, and it
+reads without refreshing only under its own C<--no-refresh>, which marks every
+answer that depends on the remote as unverifiable.
 
 B<Parameters:>
 
@@ -1982,44 +1988,52 @@ A C<Service::Git> for the repository.
 
 =over 4
 
-=item C<include_control>
+=item C<command>
 
-Also fetch the control branch.
+Names the command in a refusal, as in C<run genesis qa deploy>.  Defaults to
+C<propagate>.
+
+=item C<action>
+
+Replaces the whole "run C<genesis E<lt>commandE<gt>>" phrase, for a command
+that says something else.  The deploy passes C<deploy>, so its refusal opens
+"Refusing to deploy".
+
+=item C<outcome>
+
+The closing sentence of a refusal, which says what was not done.  Defaults to
+C<Nothing was written.>
 
 =back
 
 =back
 
-B<Returns:> 1 on success or when there was nothing to do.
+B<Returns:> The refresh result, carrying C<ok>, C<kind>, C<fetched>,
+C<created>, and C<absent>.  C<undef> where the repository declares no pipeline
+or has no remote, both of which leave nothing to refresh.
 
 B<Errors:>
 
-=over 4
-
-=item *
-
-C<"Failed to reach #C{%s} when fetching pipeline env branches."> -- raised
-via C<bail()> on a network failure, advising C<--no-fetch> when offline.
-
-=item *
-
-C<"Failed to authenticate to #C{%s} when fetching pipeline env branches.">
--- raised via C<bail()> on an authentication failure.
-
-=item *
-
-C<"Pipeline env fetch from #C{%s} failed: %s"> -- raised via C<bail()> for
-anything else, carrying git's own message.
-
-=back
+An unreachable remote, a rejected credential, or a failed request is fatal
+here and exits C<TEMPFAIL>, because every command that calls this refreshes
+unconditionally and a retry is what fixes it.  The refusal names the remote,
+says which of the three kinds it was, quotes git's own message, and closes
+with the caller's C<outcome>.  Only C<genesis pipeline-status> reads without
+refreshing, and it says so in every cell that depends on the remote.
 
 B<Examples:>
 
-    $top->fetch_pipeline_envs($git);
-    # returns 1 with every pipeline env branch refreshed
+    my $result = $top->fetch_pipeline_envs($git, command => 'propagate');
+    # every branch refreshed; $result->{created} names any local ref
+    # this refresh had to make from the remote
 
-    $top->fetch_pipeline_envs($git, include_control => 1);
-    # returns 1, control branch included
+    my $result = $top->fetch_pipeline_envs($git);
+    # returns undef in a repository that declares no pipeline
+
+    $top->fetch_pipeline_envs($git, action  => 'deploy',
+                                    outcome => 'Nothing was deployed.');
+    # with the remote unreachable, exits TEMPFAIL saying
+    # "Refusing to deploy. ... Nothing was deployed."
 
 =head1 INTERNAL METHODS
 
