@@ -400,19 +400,32 @@ sub validate_subtree {
 	my %ignore = map {($_ => 1)} @{$opts{ignore} || []};
 	my %declared = (%$schema, map {($_ => {type => 'any'})} keys %ignore);
 
-	# This owns the block's defaults outright, which is what lets
-	# validate() above stop clearing every default in the configuration
-	# before it walks.  A default filled from the schema that was selected
-	# last time is not a key anybody wrote, so it goes before this schema
-	# fills its own, or the walk below meets it and calls it unknown.  The
-	# scalar guard is clear()'s: nothing is stored under a scalar default,
-	# so walking down to one would turn a removal that does nothing into a
-	# fatal.
+	# This owns the defaults it files at default priority under the path,
+	# which is what lets validate() above stop clearing every default in
+	# the configuration before it walks.  A default filled from the schema
+	# that was selected last time is not a key anybody wrote, so it goes
+	# before this schema fills its own, or the walk below meets it and
+	# calls it unknown.  The scalar guard is clear()'s: nothing is stored
+	# under a scalar default, so walking down to one would turn a removal
+	# that does nothing into a fatal.
+	#
+	# One block shape is outside that ownership.  When the file carries the
+	# block as an explicit empty hash, _validate_key files that block's
+	# defaults at loaded priority instead, because the empty hash would
+	# otherwise mask them in the merge, and the loaded store is not swept
+	# here: it also holds what the operator wrote, and nothing tells the
+	# two apart.  So such a block keeps the fills the first walk gave it,
+	# and a second schema over it meets them.
 	struct_set_value($self->{default_values}, $path, undef, 1)
 		unless _blocked_by_scalar($self->{default_values}, $path);
 	$self->_prune_empty_parents($self->{default_values}, $path);
+	# Swept in both directions, which is what _update_source does for the
+	# same reason.  A cached ancestor is a hash that was flattened when the
+	# default was still in it, so a caller that read pipeline before this
+	# call would go on being handed the default this call just dropped.
 	delete($self->{cache}{$_})
-		for grep {$_ =~ /^\Q$path\E($|[\.\[])/} keys %{$self->{cache}};
+		for grep {$_ =~ /^\Q$path\E($|[\.\[])/ || $path =~ /^\Q$_\E[\.\[]/}
+			keys %{$self->{cache}};
 	delete $self->{_contents};
 
 	return $self->_validate_key($path, {type => 'hash', schema => \%declared});
