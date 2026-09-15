@@ -468,13 +468,15 @@ B<Examples:>
 Checks a branch out and leaves you there. It is C<checkout> with the guard
 lifted for the length of the call, and it is temporary.
 
-Three call sites move onto a branch and mean to stay on it: the deploy
-switches to the environment branch and deploys from there, the same switch
-happens again on the C<--pull> path, and the post-deploy block moves onto
-control and hands off to a child command that expects to find it there. A
-session would put all three back, which is the opposite of what they mean, so
-they come through here until the steps that own them decide what returning
-should mean. Nothing else may use it, and a test names the three.
+Two call sites move onto a branch and mean to stay on it. The deploy switches
+to the environment branch and deploys from there, and the post-deploy block
+moves onto control and hands off to a child command that expects to find it
+there. A session would put both back, which is the opposite of what they
+mean, so they come through here until the steps that own them decide what
+returning should mean. Nothing else may use it, and a test names the two.
+
+There was a third, on the deploy's C<--pull> path, and it went with the flag
+when the refresh became unconditional.
 
 B<Parameters:>
 

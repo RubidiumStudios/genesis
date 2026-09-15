@@ -17,18 +17,22 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
-use Genesis::Exit;
+use Genesis::Exit qw/TEMPFAIL/;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'the old spellings are usage errors with no alias' => sub {
-	# Six rows, and one more for each run's own restoration assertion.
+	# Seven rows, and one more for each run's own restoration assertion.
 	#
-	# The last of the six drives a flag nobody has written yet.  It is here
-	# so that a later step cannot introduce --reconcile quietly: the day it
+	# --no-pull is in the list because Getopt spells the negation of a `pull!`
+	# option that way, so retiring the option retires both halves and both
+	# halves are worth reading from the product.
+	#
+	# The last of the seven drives a flag nobody has written yet.  It is here
+	# so that a later step cannot introduce --reconcile quietly.  The day it
 	# arrives this row goes red and whoever adds it has to say so.
-	plan tests => 12;
+	plan tests => 14;
 
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
@@ -38,6 +42,7 @@ subtest 'the old spellings are usage errors with no alias' => sub {
 	              ['pipeline-prepare', '--no-fetch'],
 	              ['new', 'staging', '--no-fetch'],
 	              ['qa', 'deploy', '--pull'],
+	              ['qa', 'deploy', '--no-pull'],
 	              ['qa', 'deploy', '--reconcile']) {
 		my (undef, undef, $exit) = run_genesis($h, @$argv);
 		is($exit, 2, "@$argv is a usage error");
@@ -109,7 +114,7 @@ subtest 'a run that cannot reach the remote fails at pre-flight' => sub {
 	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 	restore_remote($h);
 
-	is($exit, Genesis::Exit::TEMPFAIL, 'the run exits TEMPFAIL');
+	is($exit, TEMPFAIL, 'the run exits TEMPFAIL');
 	# The refusal is wrapped to the terminal width on its way to stderr, so
 	# every phrase below is matched across whatever whitespace the wrap put
 	# inside it rather than against one unbroken line.
@@ -135,7 +140,7 @@ subtest 'the deploy meets the same refusal' => sub {
 	my (undef, $err, $exit) = run_genesis($h, {restore => 0}, 'qa', 'deploy');
 	restore_remote($h);
 
-	is($exit, Genesis::Exit::TEMPFAIL, 'the deploy exits TEMPFAIL too');
+	is($exit, TEMPFAIL, 'the deploy exits TEMPFAIL too');
 	like($err, qr/Failed\s+to\s+reach/, 'naming the reach as the failure');
 	like($err, qr/Nothing\s+was\s+deployed/, 'and saying nothing was deployed');
 	assert_w_restored($w, 'the refused deploy leaves W alone');
