@@ -657,12 +657,17 @@ sub diff_names {
 
 # }}}
 # ls_tree - list files on a ref under a prefix {{{
+#
+# The listing is NUL-separated, because git quotes and octal-escapes any path
+# holding a byte outside ASCII when it writes one name per line, and a caller
+# comparing those names against a set would read the real path as absent and
+# the quoted one as a stranger.  Under -z the bytes come through as they are.
 sub ls_tree {
 	my ($self, $ref, $path) = @_;
 	$path //= '';
 	my ($out) = run({ dir => $self->{root} },
-		'git', 'ls-tree', '-r', '--name-only', $ref, $path);
-	return grep { /\S/ } split /\n/, ($out || '');
+		'git', 'ls-tree', '-r', '--name-only', '-z', $ref, $path);
+	return grep { /\S/ } split /\0/, ($out || '');
 }
 
 # }}}
@@ -676,13 +681,27 @@ sub ls_tree {
 #
 # The paths come back git-root-relative whatever directory the caller is
 # standing in, because --full-name fixes them to the root, and the run is made
-# from the root so a pathspec is read against the root as well.
+# from the root so a pathspec is read against the root as well.  They are
+# NUL-separated for the reason ls_tree's are.
+#
+# The return code is read rather than thrown away, and stderr is kept apart
+# from stdout, for the reason diff_names gives: a git that refuses the command
+# writes its reason where the paths would be, and no error text matches a real
+# path.  The mirror's removing half is what makes that fatal here.  Every line
+# of a complaint read as an index path lands among the paths the set does not
+# hold, `git rm` is then handed a pathspec matching nothing and fails wholesale
+# under passfail, and every genuine removal is lost with nothing said.
 sub ls_files {
 	my ($self, @pathspecs) = @_;
-	my @cmd = ('git', 'ls-files', '--cached', '--full-name');
+	my @cmd = ('git', 'ls-files', '--cached', '--full-name', '-z');
 	push @cmd, '--', @pathspecs if @pathspecs;
-	my ($out) = run({ dir => $self->{root} }, @cmd);
-	return grep { /\S/ } split /\n/, ($out || '');
+	my ($out, $rc, $err) = run({ dir => $self->{root}, stderr => 0 }, @cmd);
+	bail(
+		{exitcode => DATAERR},
+		"Cannot read the index of #C{%s}:\n%s",
+		$self->{root}, ($err // $out // 'git gave no reason')
+	) if $rc;
+	return grep { /\S/ } split /\0/, ($out || '');
 }
 
 # }}}

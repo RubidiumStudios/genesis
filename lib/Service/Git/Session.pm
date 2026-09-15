@@ -369,8 +369,15 @@ sub abort {
 # postcondition is that the branch's tree equals the propagation set as it
 # stood at the delivered control commit, which is I7 stated as this method's
 # contract.  The changed and deleted lists a caller passes are the diff it has
-# already computed: they skip blobs the delivery cannot have moved and they
-# name files in the run's report, and they never decide what is delivered.
+# already computed, and they are there to skip blobs the delivery cannot have
+# moved and to name files in the run's report.  They never decide what is
+# delivered, and nothing here reads them yet; the step that fills overwrote is
+# the one that gives them work.
+#
+# The set is still read off the tree the session is standing on, which is the
+# deployment branch, and only the membership is resolved at the source commit.
+# The step that adds the at-commit reader moves the first read too, and until
+# it lands a repository that restructured between the two would be read wrong.
 sub apply_files {
 	my ($self, $source_sha, %opts) = @_;
 
@@ -379,10 +386,25 @@ sub apply_files {
 	my $message = $opts{message}
 		or bail("apply_files needs its caller's commit message, since it builds none");
 
-	my $git    = $self->git;
-	my $branch = $git->current_branch;
+	my $git = $self->git;
 
-	my @set    = $env->propagation_files;
+	# An empty set is refused before anything is read off the index, because
+	# every path the branch holds is outside an empty set and the mirror would
+	# strip the branch bare.  The postcondition would still hold afterwards,
+	# so the check that runs before the commit would not fire either, and the
+	# run would report a success over a branch with nothing on it.  No
+	# environment has a legitimately empty set, so an empty one is a reader
+	# that could not answer rather than an answer, which is D82's system
+	# failure and not this environment's.
+	my @set = $env->propagation_files;
+	bail({exitcode => SOFTWARE},
+		"The propagation set of #C{%s} is empty, so there is nothing to ".
+		"deliver onto #C{%s}.\n\n".
+		"A delivery is a mirror, so delivering an empty set would take ".
+		"every file off that branch.  Nothing has been written.",
+		$env->name, $git->current_branch
+	) unless @set;
+
 	my %in_set = map { $_ => 1 } $self->_members_at($source_sha, @set);
 
 	# The mirror's removing half.  Every path the branch holds that the set no

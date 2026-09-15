@@ -1032,7 +1032,9 @@ index holds once it has written, and a reader that walked the working tree
 would answer both questions with the operator's untracked files thrown in.
 
 The paths come back relative to the repository root whatever directory the
-caller is standing in, and a pathspec is read against that root too.
+caller is standing in, and a pathspec is read against that root too. The
+listing is read NUL-separated, so a path holding a byte outside ASCII comes
+back as itself rather than quoted and octal-escaped.
 
 B<Parameters:>
 
@@ -1046,6 +1048,20 @@ listed.
 =back
 
 B<Returns:> The list of paths, in git's own order.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Cannot read the index of %s" >> -- raised where git refuses the read,
+quoting what git said. It exits C<DATAERR>. The status is read rather than
+dropped because git writes its complaint where the paths would be, and a
+caller that took those lines for index paths would hand them to C<rm>, which
+fails on a pathspec matching nothing and loses every genuine removal.
+
+=back
 
 B<Examples:>
 
@@ -1062,6 +1078,9 @@ B<Examples:>
 
 Lists the files present on a ref, recursively.
 
+The listing is read NUL-separated, so a path holding a byte outside ASCII
+comes back as itself rather than quoted and octal-escaped.
+
 B<Parameters:>
 
 =over 4
@@ -1072,7 +1091,9 @@ The ref to list.
 
 =item C<$path>
 
-Optional path to list under. Defaults to the whole tree.
+The path to list under. A caller who wants the whole tree passes C<'.'>, which
+is git's own spelling for it. Leaving it out hands git an empty pathspec,
+which git refuses by name, and the listing then comes back empty.
 
 =back
 
@@ -1082,6 +1103,9 @@ B<Examples:>
 
   my @files = $git->ls_tree('control', 'ops');
   # returns every file under ops/ on the control branch
+
+  my @files = $git->ls_tree('control', '.');
+  # returns every file on the control branch
 
 =head2 log_subjects
 
