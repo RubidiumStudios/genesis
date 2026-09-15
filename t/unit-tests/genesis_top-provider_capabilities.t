@@ -215,7 +215,6 @@ subtest 'the capability declaration is checked at load' => sub {
 package Genesis::CI::Compiler::Providers::Deaf;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'deaf'}
-sub provider_options_schema {return {}}
 1;
 DEAF
 	Genesis::CI::Compiler::PipelineProvider->register_provider('deaf', {
@@ -237,7 +236,6 @@ DEAF
 package Genesis::CI::Compiler::Providers::Lisp;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'lisp'}
-sub provider_options_schema {return {}}
 sub capabilities {
 	return {
 		cross_pipeline_events => 1,

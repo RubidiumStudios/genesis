@@ -13,6 +13,9 @@ use JSON::PP;
 
 ### Provider Constants {{{
 
+# DEFAULT_TEAM is written twice, here and in
+# Genesis::CI::Provider::Concourse, where it is the default the provider
+# fragment declares, so a change to either side has to be made to both.
 use constant {
 	DEFAULT_TEAM            => 'main',
 	DEFAULT_PIPELINE_NAME   => undef,    # falls back to deployment_type from Top

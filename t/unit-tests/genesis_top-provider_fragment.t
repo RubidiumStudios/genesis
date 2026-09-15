@@ -3,8 +3,8 @@
 # provider's fragment at load, a key the fragment declares validates with
 # its type, required flag and default, a key no fragment declares is
 # refused by name, a provider class that omits its fragment fails at load,
-# and the manual provider declares no fragment so a stray provider key
-# beside it is refused with no exception.
+# and the manual provider declares an empty fragment so a stray provider
+# key beside it is refused with no exception.
 use strict;
 use warnings;
 use utf8;
@@ -47,9 +47,14 @@ subtest 'one class carries the fragment and the check' => sub {
 	# compares the compiler class's answer with the CLI class's.
 	require Genesis::CI::Compiler::Providers::Concourse;
 
+	# The resolved code references are compared rather than asking whether
+	# the class can the method at all.  The base declares the method as an
+	# abstract one, so every subclass can it, and a class that declared
+	# nothing whatsoever would satisfy a row that only asked that.
 	for my $type (qw/concourse github-actions manual/) {
 		my $class = Genesis::CI::Provider->provider_class($type);
-		ok $class->can('provider_options_schema'),
+		isnt $class->can('provider_options_schema'),
+			Genesis::CI::Provider->can('provider_options_schema'),
 			"the $type provider declares its own keys";
 	}
 

@@ -9,6 +9,9 @@ use Genesis::UI;
 
 use POSIX qw(mktime);
 
+# The compiler-side class keeps a DEFAULT_TEAM of its own, which it falls
+# back to when it emits a pipeline, so the two are written here and in
+# Genesis::CI::Compiler::Providers::Concourse and have to agree.
 use constant {
 	DEFAULT_TEAM => 'main',
 };
