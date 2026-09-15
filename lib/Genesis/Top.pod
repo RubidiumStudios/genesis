@@ -1788,23 +1788,64 @@ B<Examples:>
 =head2 applied_record
 
     my $record = $top->applied_record();
+    my $record = $top->applied_record(%fields);
 
 The control commit C<pipeline-apply> applied from, with the provider it
 applied and the time it did so.
+
+This method both reads the record and writes it. Called with no arguments it
+reads. Called with a field list it writes those fields to
+L</applied_record_path> and returns what it wrote, so C<pipeline-apply> hands
+the facts to their owner rather than spelling the address itself.
+
+A write that names no time of its own is stamped with the current time in
+C<EXODUS_TIME_FORMAT>, which is the value format the rest of exodus uses, and
+never an ISO one.
 
 Each environment's own compiled facts live elsewhere, under
 C<Genesis::Env::pipeline_record_path>, because a deploy rewrites its
 environment's exodus record every run and would clobber them.
 
-B<Parameters:> None.
+B<Parameters:>
 
-B<Returns:> A hashref of C<control_commit>, C<provider>, and C<at>, or
-C<undef> when the path is absent.
+=over 4
+
+=item C<%fields> (optional)
+
+The fields to write, which are C<control_commit>, C<provider>, and C<at>. A
+field whose value is undefined is left alone rather than written empty, and
+an empty list reads instead of writing.
+
+=back
+
+B<Returns:> A hashref of C<control_commit>, C<provider>, and C<at>. A read
+answers C<undef> where the path is absent, and a write answers the fields it
+wrote.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Genesis::Top::applied_record was asked to write the applied record without
+a value for any of control_commit, provider, or at"> - raised through
+C<Genesis::bug> when a write names fields but gives none of them a value.
+Handing that call on to the vault would fail there instead, and the vault's
+complaint about a missing key would blame the wrong thing.
+
+=back
 
 B<Examples:>
 
     my $record = $top->applied_record();
     # returns undef in a repository pipeline-apply has never run against
+
+    my $record = $top->applied_record(
+      control_commit => $git->sha($top->control_branch),
+      provider       => 'concourse',
+    );
+    # writes the record and returns it, with `at` stamped for us
 
 =head2 pipeline_staleness
 
