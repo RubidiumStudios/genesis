@@ -1073,8 +1073,8 @@ B<Examples:>
 
 =head2 ls_tree
 
-  my @files = $git->ls_tree($ref);
   my @files = $git->ls_tree($ref, $path);
+  my @files = $git->ls_tree($ref, '.');
 
 Lists the files present on a ref, recursively.
 
