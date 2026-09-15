@@ -249,20 +249,32 @@ sub initial_state {
 		# ahead of it and pushes nothing the guard made.
 		push(@local_only, {env => $env, branch => $branch}), next
 			if $div->{state} eq 'no-remote';
+
+		# A branch the remote has and this clone lacks is never asked the
+		# ancestry question.  There is no refs/heads/<branch> for git to
+		# answer it with, and _shares_history reads a ref it cannot resolve
+		# as no shared history, so the branch would be refused with a text
+		# written for a different fault.  Nothing reaches here in that state
+		# today, because the refresh creates the local ref from the tracking
+		# ref before this stage runs, and the refresh is the assumption.
+		# The one command allowed to skip it is `genesis pipeline-status`,
+		# so the step that hands this stage to that command is the step that
+		# has to say what a branch in this state means there.
+		next if $div->{state} eq 'no-local';
+
 		push @unrelated, $branch
 			unless _shares_history($git, $branch, $remote);
 	}
 
-	# Both refusals hand a composed string to a '%s' format, because bail
-	# reads its argument as a format and a commit subject can carry a
-	# percent sign.
+	# One refusal for both classes, because a repository can hold a branch
+	# of each and an operator who fixes the first class only to meet the
+	# second on the next run has been told half of what the stage already
+	# knew.  The composed text goes through a '%s' format, because bail
+	# reads its argument as a format and a branch name or a commit subject
+	# can carry a percent sign.
 	bail({exitcode => DATAERR}, '%s',
-		_local_only_refusal($action, $outcome, $remote, \@local_only))
-		if @local_only;
-
-	bail({exitcode => DATAERR}, '%s',
-		_unrelated_refusal($action, $outcome, $remote, \@unrelated))
-		if @unrelated;
+		_origin_refusal($action, $outcome, $remote, \@local_only, \@unrelated))
+		if @local_only || @unrelated;
 
 	return $state;
 }
@@ -286,16 +298,33 @@ sub _shares_history {
 }
 
 # }}}
+# _origin_refusal - one refusal for both classes of illegitimate branch {{{
+#
+# The stage raises at most one refusal, so the act is named once, the
+# closing sentence is said once, and an operator holding a branch of each
+# class hears about both at the same time.  The local-only paragraphs come
+# first and the unrelated-history paragraphs follow, which is the order the
+# two questions are asked in.  M13 raises the same text in its deploy form,
+# which is why the act and the closing sentence are arguments.
+sub _origin_refusal {
+	my ($action, $outcome, $remote, $local_only, $unrelated) = @_;
+	return sprintf("Refusing to %s.  %s  %s", $action,
+		join('  ',
+			_local_only_refusal($remote, $local_only),
+			_unrelated_refusal($remote, $unrelated)),
+		$outcome);
+}
+
+# }}}
 # _local_only_refusal - D48's text for a branch the remote has never had {{{
 #
 # One paragraph per branch, so the single-branch case reads exactly as the
-# design quotes it and a run with several names them all.  M13 raises the
-# same two texts in their deploy form, which is why the act and the closing
-# sentence are arguments.
+# design quotes it and a run with several names them all.  The act and the
+# closing sentence belong to _origin_refusal, which frames whichever classes
+# the stage found.
 sub _local_only_refusal {
-	my ($action, $outcome, $remote, $offenders) = @_;
-	return sprintf("Refusing to %s.  %s  %s", $action,
-		join('  ', map {
+	my ($remote, $offenders) = @_;
+	return map {
 			sprintf(
 				"The local branch #C{%s} has no counterpart on #C{%s}.  A ".
 				"deployment branch is derived from control and never ".
@@ -307,16 +336,16 @@ sub _local_only_refusal {
 				"#C{genesis pipeline-apply} if the environment #C{%s} is meant ".
 				"to exist.",
 				$_->{branch}, $remote, $_->{branch}, $_->{env})
-		} @$offenders),
-		$outcome);
+		} @{$offenders || []};
 }
 
 # }}}
 # _unrelated_refusal - D48's text for a branch that shares no ancestor {{{
+#
+# One paragraph per branch, framed by _origin_refusal like its neighbour.
 sub _unrelated_refusal {
-	my ($action, $outcome, $remote, $branches) = @_;
-	return sprintf("Refusing to %s.  %s  %s", $action,
-		join('  ', map {
+	my ($remote, $branches) = @_;
+	return map {
 			sprintf(
 				"The local branch #C{%s} shares no ancestor with #C{%s/%s}, ".
 				"which #C{pipeline-apply} created.  The marker-only reset ".
@@ -327,8 +356,7 @@ sub _unrelated_refusal {
 				"the local branch with #C{git branch -D %s}, then run ".
 				"#C{genesis propagate} again.",
 				$_, $remote, $_, $_)
-		} @$branches),
-		$outcome);
+		} @{$branches || []};
 }
 
 # }}}

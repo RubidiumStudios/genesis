@@ -49,7 +49,9 @@ subtest 'a local branch the remote never had refuses the run' => sub {
 	is($exit, Genesis::Exit::DATAERR, 'the run exits DATAERR');
 	like($err, qr/has\s+no\s+counterpart\s+on\s+\S*origin/,
 		'the refusal names why it stopped');
-	like($err, qr/\Q$lab\E/, 'and names the branch');
+	# The slash is where the wrap could fall inside the name, so the row
+	# reads the name the way every other phrase in this file is read.
+	like($err, qr/lab\s*\/\s*bosh/, 'and names the branch');
 	like($err, qr/Genesis\s+deletes\s+nothing/,
 		'and says Genesis deletes nothing');
 	like($err, qr/git\s+branch\s+-D\s+\Q$lab\E.*genesis\s+pipeline-apply/s,
@@ -71,6 +73,10 @@ subtest 'a local branch sharing no ancestor with the remote refuses the run' => 
 	init_branch($h, 'qa');
 	refresh($h, 'a', $qa);
 	my $orphan = unrelated_branch($h, 'qa');
+	# Read before the run, because copy B never receives this branch and a
+	# row that compares the remote against a reading taken afterwards
+	# compares the remote with itself and can never fail.
+	my $before_r = ref_in($h->r, $qa);
 	# An ops file, for the reason the first subtest gives.
 	commit_on_control($h,
 		files   => {'ops/shared.yml' => "---\nfrom: the operator\n"},
@@ -91,8 +97,7 @@ subtest 'a local branch sharing no ancestor with the remote refuses the run' => 
 		'and gives the remedy in order, which ends at propagate');
 	is(ref_in($h->a, "refs/heads/$qa"), $orphan,
 		'the branch was neither reset nor deleted');
-	is(ref_in($h->r, $qa), ref_in($h->b, "refs/heads/$qa") // ref_in($h->r, $qa),
-		'and the remote was not touched');
+	is(ref_in($h->r, $qa), $before_r, 'and the remote was not touched');
 };
 
 subtest 'the reset never applies across unrelated histories' => sub {
@@ -120,6 +125,41 @@ subtest 'the reset never applies across unrelated histories' => sub {
 		'a marker on every local commit does not buy a reset here');
 	like($err, qr/shares\s+no\s+ancestor/,
 		'the unrelated-history refusal is the one that speaks');
+};
+
+subtest 'a branch of each class is named in one refusal' => sub {
+	# Six rows, and one more for the run's own restoration assertion.
+	plan tests => 7;
+
+	my $h   = make_harness(envs => ['qa', 'lab']);
+	my $qa  = $h->slug('qa');
+	my $lab = $h->slug('lab');
+
+	init_branch($h, 'qa');
+	refresh($h, 'a', $qa);
+	# qa/bosh is the unrelated history and lab/bosh is the branch the remote
+	# has never had, so the run meets one branch of each class at once.
+	unrelated_branch($h, 'qa');
+	local_branch_only($h, 'lab');
+	commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nfrom: the operator\n"},
+		message => 'an operator commit to propagate',
+		push    => 1);
+
+	my (undef, $err, $exit) = run_genesis($h, 'propagate');
+
+	is($exit, Genesis::Exit::DATAERR, 'the run exits DATAERR');
+	like($err, qr/has\s+no\s+counterpart\s+on\s+\S*origin/,
+		'the local-only branch is refused');
+	like($err, qr/lab\s*\/\s*bosh/, 'and it is named');
+	like($err, qr{shares\s+no\s+ancestor\s+with\s+\S*origin/\Q$qa\E},
+		'the unrelated history is refused in the same breath');
+	# One refusal rather than two, so the act is named once and the
+	# operator hears about both classes before fixing either.
+	is(scalar(() = $err =~ /Refusing\s+to\s+run/g), 1,
+		'and the run is refused once rather than once per class');
+	is(scalar(() = $err =~ /Nothing\s+was\s+written/g), 1,
+		'with one closing sentence');
 };
 
 done_testing;
