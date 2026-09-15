@@ -110,27 +110,32 @@ subtest 'an environment that will not render is warned about, not refused' => su
 		'its discovery is marked incomplete');
 };
 
-subtest 'an environment that will not load is recorded incomplete too' => sub {
+subtest 'an environment that will not load keeps its declared set' => sub {
 	# Four rows, and one more for the run's own restoration assertion.
 	plan tests => 5;
 
 	# The harness names no kit, so the dev kit the environment file points at
-	# resolves to nothing and the environment will not load at all.  That is
-	# the same case as one that will not render, one step earlier, and it is
-	# answered the same way rather than stopping the run.
+	# resolves to nothing and the environment will not load at all.  A load
+	# failure costs the manifest and nothing else, which is the same loss the
+	# render failure above takes, so the declared half is still read through a
+	# bare environment that needs no kit and only the discovered half is gone.
 	my $h = make_harness(envs => ['qa']);
+	write_env_file($h, 'qa',
+		pipeline => {track_dependencies => ['vault', 'lab/bosh']},
+	);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
 	my $said = _unfolded($out, $err);
 
 	is($exit, 0, 'the apply carries on past an environment it cannot load');
-	like($said, qr{Could not load qa, so nothing was discovered for it},
-		'the warning names the environment and says nothing was discovered');
+	like($said, qr{Could not load qa, so only its declared dependencies},
+		'the warning names the environment and what it fell back to');
 
-	is(secret($h->env_path('qa') . '/pipeline:dependencies'), '',
-		'the record carries an empty set');
+	is(secret($h->env_path('qa') . '/pipeline:dependencies'),
+		'lab/bosh,qa/vault',
+		'the declared half is wired anyway, bare type and pair alike');
 	is(secret($h->env_path('qa') . '/pipeline:discovery'), 'incomplete',
-		'and marks its discovery incomplete, so it is still in the set');
+		'and only the discovery it actually lost is marked incomplete');
 };
 
 subtest 'an environment joins the set at the next apply and not before' => sub {
