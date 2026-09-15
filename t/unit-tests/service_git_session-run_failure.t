@@ -60,6 +60,12 @@ sub in_root {
 # A row that came back with something other than the failure class reads
 # undef here, so the assertions below fail on what they mean rather than
 # dying on a method called against a string.
+#
+# This is a verbatim copy of the one in
+# t/unit-tests/service_git_session-index_assertions.t, and it is the fourth
+# copied helper in this file beside in_root, ChdirGuard, and exception.  The
+# helper rule leaves it here, since it reads no repository state, and we name
+# it so a reviewer counting the copies awaiting the harness lift counts four.
 sub failure_of {
 	my ($err) = @_;
 	return ref($err) eq 'Genesis::CI::RunFailure' ? $err : undef;
@@ -93,7 +99,7 @@ sub exception {
 }
 
 subtest 'the failure ends the run and every branch goes back to T' => sub {
-	plan tests => 8;
+	plan tests => 10;
 
 	# The kit's blueprint names one repository-side fragment, so ops/extra.yml
 	# is in the set for as long as control holds it, and the embedded genesis
@@ -167,8 +173,17 @@ subtest 'the failure ends the run and every branch goes back to T' => sub {
 	my $failure = failure_of($err);
 	is($failure && $failure->exit_code, 1,
 		'the run exits 1, the one bare code the design writes');
-	like($failure ? $failure->report_line : '', qr{dev/bosh},
-		'the report names the branch');
+
+	# The refusal is named as well as the branch.  Both assertions name the
+	# branch they failed on, so a row that read only the branch would pass
+	# whichever of the two had fired, and this row stops the mirror's
+	# removing half, so the one it means is the second.
+	my $line = $failure ? $failure->report_line : '';
+	like($line, qr{index holds paths outside the propagation set},
+		'the second assertion is the one that fired');
+	like($line, qr{dev/bosh}, 'the report names the branch');
+	is_deeply([sort($failure ? $failure->paths : ())], ['init'],
+		'and it names the difference, which is the file the branch was cut with');
 
 	exception(sub {$session->abort('the row has read what it came for')});
 
@@ -260,7 +275,7 @@ subtest 'a commit that left the tip where it was is still reset' => sub {
 };
 
 subtest 'a checkout_file that dies leaves the branch at T and clean' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $h = make_harness(
 		envs => ['qa'], root => 'bosh',
@@ -301,7 +316,13 @@ subtest 'a checkout_file that dies leaves the branch at T and clean' => sub {
 			1;
 		} or $@;
 	};
-	ok($err, 'the delivery failed');
+	# The death is read rather than merely counted, because a refusal raised
+	# anywhere above the write loop would satisfy a bare check that an error
+	# exists, and the row means the write the arming stopped.
+	like($err, qr{the third write dies},
+		'the delivery failed on the write the row armed');
+	is(scalar(grep {$_->[0] eq 'checkout_file'} step_log($fault)), 3,
+		'and it got three writes in before it did');
 
 	exception(sub {$session->abort('the row has read what it came for')});
 	assert_w_restored($w, 'the abort restores the working state');
