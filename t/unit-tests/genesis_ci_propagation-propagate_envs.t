@@ -692,6 +692,82 @@ sub _git_failing_on {
 # because a skipped row is one nobody looks at and the whole reason these
 # exist is that the shapes stayed invisible until a real loss surfaced one of
 # them.  The mark names the step whose commit removes it.
+subtest 'the run opens one session and closes it' => sub {
+	plan tests => 4;
+
+	# The double records the verbs, and this is the row that reads them.
+	# Without it a change that stopped opening a session altogether would
+	# leave every other row in this file green, because a switch that never
+	# happened and a checkout that never happened look the same from here.
+	my $git = mock_git();
+	my $result = propagate_envs_captured(
+		base_args(no_push => 1),
+		git     => $git,
+		github  => undef,
+		targets => [direct_target('staging')],
+	);
+
+	is($result->{propagated}, 1, 'the delivery went through');
+	is(scalar($git->calls('session_begin')), 1, 'the session was opened once');
+	is(scalar($git->calls('session_finish')), 1, 'and closed once');
+	is(scalar($git->calls('session_abort')), 0, 'and never aborted');
+};
+
+subtest 'a die the targets do not catch goes through abort' => sub {
+	plan tests => 3;
+
+	# The loop catches what a delivery throws, reports it, and ends, and
+	# the reporting is inside the run and outside every target's eval.  A
+	# die there stands for any death in the loop's own scaffolding, which
+	# is what the outer eval is there to hold: the session is aborted
+	# rather than left open behind a run that threw.
+	my $git = _git_failing_on('staging');
+	my $err = exception(sub {
+		no warnings 'redefine', 'once';
+		local *Genesis::CI::Propagation::warning = sub {
+			die "reporting the failure failed\n";
+		};
+		propagate_envs_captured(
+			base_args(no_push => 1),
+			git     => $git,
+			github  => undef,
+			targets => [direct_target('staging')],
+		);
+	});
+
+	like($err, qr/reporting the failure failed/, 'the run does not come back');
+	is(scalar($git->calls('session_abort')), 1, 'the session was aborted');
+	is(scalar($git->calls('session_finish')), 0, 'and never finished');
+};
+
+subtest 'a delivery that failed before writing comes back as an error' => sub {
+	plan tests => 4;
+
+	# The other half of H1, against a real session rather than a double.  A
+	# delivery that fails before it writes leaves a clean tree, so the
+	# session restores and the run returns its errors for the caller to
+	# decide on, which is the path that keeps that return reachable.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+
+	my $git = fault_git($h);
+	fail_on($git, 'checkout', 1, message => 'the harness stopped the switch');
+
+	my $w = snapshot_w($h);
+	my $result = propagate_envs_captured(
+		base_args(no_push => 1),
+		git     => $git,
+		github  => undef,
+		targets => [direct_target($h->slug('qa'), changed => ['qa.yml'])],
+	);
+
+	like(($result->{errors} || [])->[0] // '', qr/stopped the switch/,
+		'the run came back with the failure rather than raising');
+	is($result->{propagated}, 0, 'and propagated nothing');
+	is($git->current_branch, $h->control, 'the session put us back');
+	assert_w_restored($w, 'with the working state as it found it');
+};
+
 subtest 'H1: a failed delivery leaves nothing staged' => sub {
 	plan tests => 3;
 

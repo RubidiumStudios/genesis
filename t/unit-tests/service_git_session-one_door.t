@@ -43,14 +43,24 @@ subtest 'track_branch is gone and nothing asks for it' => sub {
 	is_deeply(\@callers, [], 'and nothing under lib/ or bin/ asks for it');
 };
 
-subtest 'restore_branch is gone and nothing calls it' => sub {
-	plan tests => 2;
+subtest 'the two subs the session replaces are gone' => sub {
+	plan tests => 4;
 
 	my $git_pm = get_file('lib/Service/Git.pm');
-	unlike($git_pm, qr/sub restore_branch/, 'the sub is removed');
+	unlike($git_pm, qr/sub restore_branch/, 'restore_branch is removed');
 
 	my @callers = grep {get_file($_) =~ /restore_branch/} sources();
 	is_deeply(\@callers, [], 'and it has no callers left');
+
+	# Discarding a working tree is what abort does now, and it does more
+	# than this method could: it names the files first, it reaches the
+	# index as well as the tree, and it puts back every branch the session
+	# moved.  Leaving the method behind would leave a second way to throw
+	# work away that no session verb opens the door for.
+	unlike($git_pm, qr/sub reset_working_tree/, 'reset_working_tree is removed');
+
+	my @resetters = grep {get_file($_) =~ /reset_working_tree/} sources();
+	is_deeply(\@resetters, [], 'and nothing under lib/ or bin/ names it');
 };
 
 subtest 'DESTROY no longer restores a branch' => sub {
@@ -65,7 +75,7 @@ subtest 'DESTROY no longer restores a branch' => sub {
 };
 
 subtest 'a branch change outside a session dies naming the session' => sub {
-	plan tests => 5;
+	plan tests => 4;
 
 	my $h   = make_harness(envs => ['qa'], vault => 0);
 	init_branch($h, 'qa');
@@ -77,9 +87,6 @@ subtest 'a branch change outside a session dies naming the session' => sub {
 
 	my $detached = exception(sub { $git->checkout_detached($git->sha('HEAD')) });
 	like($detached, qr/session/i, 'and so does a bare detached checkout');
-
-	my $reset = exception(sub { $git->reset_working_tree });
-	like($reset, qr/session/i, 'and so does a bare reset_working_tree');
 
 	my $session = $git->session(control => $h->control);
 	$session->begin;
@@ -93,28 +100,31 @@ subtest 'nothing outside the session checks a branch out' => sub {
 
 	# Every call site that used to switch now goes through the session,
 	# which is what makes the guard above something other than decoration.
-	my @callers;
-	for my $file (sources()) {
-		my $body = get_file($file);
-		push @callers, $file if $body =~ /->checkout\(/
-			|| $body =~ /->reset_working_tree\b/;
-	}
+	my @callers = grep {get_file($_) =~ /->checkout\(/} sources();
 	is_deeply(\@callers, [],
-		'no caller under lib/ or bin/ reaches either entry point directly');
+		'no caller under lib/ or bin/ reaches the checkout directly');
 
 	# The deploy moves onto the environment branch and means to stay there,
-	# and the post-deploy block moves onto control and hands off to a child.
-	# A session would put both back, so the three come through the allowance
-	# until M13 and M15 decide what they should mean instead.  Naming them
-	# here is what keeps a fourth from joining them quietly.
-	my @allowed = grep {get_file($_) =~ /->checkout_one_way\(/} sources();
-	is_deeply(\@allowed,
-		['lib/Genesis/Commands/Env.pm', 'lib/Genesis/Env.pm'],
-		'and the one-way allowance carries only the sites M13 and M15 move');
+	# twice, once on its own path and once under --pull, and the post-deploy
+	# block moves onto control and hands off to a child.  A session would put
+	# all three back, so they come through the allowance until M13 and M15
+	# decide what they should mean instead.
+	#
+	# The count is pinned and not just the file, because a fourth one-way
+	# checkout added inside a file that already holds one would otherwise
+	# join the allowance without turning anything red.
+	my %allowed;
+	for my $file (sources()) {
+		my $calls = () = get_file($file) =~ /->checkout_one_way\(/g;
+		$allowed{$file} = $calls if $calls;
+	}
+	is_deeply(\%allowed,
+		{'lib/Genesis/Commands/Env.pm' => 2, 'lib/Genesis/Env.pm' => 1},
+		'and the one-way allowance carries the three sites M13 and M15 move');
 };
 
 subtest 'the propagate run drives a session end to end' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	# The branch is cut by the environment's own name, because that is what
 	# propagation looks for, and the kit is a real one because the run loads
@@ -136,6 +146,15 @@ subtest 'the propagate run drives a session end to end' => sub {
 		'propagate', '--commit', $control, '--no-fetch');
 
 	is($exit, 0, 'the run delivered and came back');
+
+	# Read on the branch that was written to rather than in the run's own
+	# report, because a run that decided there was nothing to propagate
+	# also exits nought, on control, with a clean tree, and would pass
+	# every other row here having driven no session at all.
+	my ($subject) = $h->git('a')->log_subjects('qa', limit => 1);
+	like($subject, qr/\[pipeline\] control\@/,
+		'and the target branch carries the commit it delivered');
+
 	is($h->git('a')->current_branch, $h->control,
 		'on the branch we started on');
 	ok($h->git('a')->is_clean, 'with a clean tree');

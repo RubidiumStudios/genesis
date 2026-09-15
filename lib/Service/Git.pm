@@ -744,23 +744,6 @@ sub cherry_pick {
 		$sha, ($err || $out || "rc=$rc") =~ s/\s+$//r);
 }
 # }}}
-# reset_working_tree - discard working tree changes, from inside a session {{{
-#
-# Guarded for the same reason checkout is, from the other side: a reset
-# outside a session throws away work that a session would have put back.
-sub reset_working_tree {
-	my ($self) = @_;
-	bail(
-		"A working-tree reset was attempted outside a branch session in ".
-		"#C{%s}.",
-		$self->{root}
-	) unless $self->{_in_session};
-	run({ dir => $self->{root}, passfail => 1 },
-		'git', 'checkout', '--', '.');
-	return $self;
-}
-
-# }}}
 # }}}
 
 ### Remote Operations {{{

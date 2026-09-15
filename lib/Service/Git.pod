@@ -67,12 +67,18 @@ were no changes.
 
 =head2 One door onto a branch change
 
-C<checkout>, C<checkout_detached> and C<reset_working_tree> are reached
-through L<Service::Git::Session> and nowhere else, and a call from outside a
-session dies saying so. That is not a style rule. The session is what records
-where the operator was, takes the lock that stops a second process switching
+C<checkout> and C<checkout_detached> are reached through
+L<Service::Git::Session> and nowhere else, and a call from outside a session
+dies saying so. That is not a style rule. The session is what records where
+the operator was, takes the lock that stops a second process switching
 underneath them, and puts the working tree back on every exit path, and a
 branch change outside one has none of that.
+
+C<reset_working_tree> is gone as well. Discarding a working tree is what
+C<< $session->abort >> is for, and it does more than that method could: it
+names the files before it throws them away, it reaches the index as well as
+the tree, and it puts every branch the session moved back where the remote
+has it.
 
 The C<track_branch> option and C<restore_branch> are gone with it. The branch
 a command returns to is recorded by C<< $session->begin >> on the session
@@ -1240,39 +1246,6 @@ B<Examples:>
 
   $git->cherry_pick($conflicting_sha);
   # aborts the cherry-pick, then bails naming the conflicting files
-
-=head2 reset_working_tree
-
-  $git->reset_working_tree;
-
-Discards working-tree changes to tracked files. Untracked files are left
-alone.
-
-Like C<checkout> it is reached from inside a branch session and nowhere else,
-for the same reason read from the other side: a reset outside a session throws
-away work that a session would have put back, and nobody is left to say what
-went.
-
-B<Parameters:> None.
-
-B<Returns:> C<$self>.
-
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"A working-tree reset was attempted outside a branch session in %s."> --
-raised via C<bail()> where no session is open. C<%s> is the repository root.
-
-=back
-
-B<Examples:>
-
-  $git->reset_working_tree;
-  # returns $self with tracked files back to their committed state,
-  # where a session is open, and raises where one is not
 
 =head2 default_remote
 
