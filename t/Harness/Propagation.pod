@@ -781,9 +781,9 @@ Returns a coderef for one of four shapes of working state, C<restores>,
 C<leaves_branch>, C<leaves_staged>, and C<loses_cwd>, which exercise the
 assertion itself rather than a genesis command.  The one option is C<copy>.
 
-=head2 run_genesis($h, @argv) and run_genesis_in($h, $copy, @argv)
+=head2 run_genesis($h, @argv)
 
-Run a whole genesis command in a copy, taking the W snapshot before it and
+Runs a whole genesis command in a copy, taking the W snapshot before it and
 asserting the restoration after it, and return the output, the error, and the
 exit code, in that order.  The exit code is the one the command really exited
 with, because C<Genesis::run> has already shifted C<$?> and shifting it again
@@ -802,7 +802,14 @@ The fixture binaries the harness writes reach the child through the path this
 run builds and through nothing else, so no helper puts a fixture on the
 parent's own C<PATH> and a run that asks for none sees none.
 
-C<run_genesis_in> is the same run in a named copy.
+=head2 run_genesis_in($h, $copy, @argv)
+
+The same run as C<run_genesis>, with the copy named by position instead of in
+a leading hashref, answering the same three values in the same order.  It
+folds C<$copy> into that hashref and delegates, so every option above holds
+here too and a leading hashref of its own is still read.  A row reaches for it
+where naming the copy outright reads better than a hashref would, as it does
+where a teammate's clone is the one running the command.
 
 =head2 stand_on($h, $branch, %opts)
 
@@ -834,19 +841,38 @@ Arms one named git step to die on its nth call.  C<from> makes every call
 from the nth onward die rather than the nth alone, and C<message> fixes what
 it dies with.
 
-=head2 step_log($git) and reset_steps($git)
+=head2 step_log($git)
 
-Return every intercepted call in order, each an arrayref of the step's name
-and its arguments, and empty the log and the counters between a row's phases.
+Returns every intercepted call in order, each an arrayref of the step's name
+and its arguments.
 
-=head2 sever_remote($h, %opts) and restore_remote($h)
+=head2 reset_steps($git)
 
-Make every remote step fail with the text a real unreachable remote emits,
-and disarm them again.  C<after> severs the remote partway through a run.
+Empties the step log and forgets the counts the armed steps have run up,
+returning the handle it was given.  The log is a file the environment names
+and the counts live in the plan file, so both are cleared where they are kept
+rather than in this process, and a spawned command sees the clearing too.  A
+row reaches for it between its own phases, so what the second phase reads back
+is what that phase caused rather than what the first one left behind.
 
-=head2 hold_session_lock($h, %opts) and release_session_lock($h, $pid, %opts)
+=head2 sever_remote($h, %opts)
 
-Take the switch lock in a child process and release it.  The lock is the
+Makes every remote step fail with the text a real unreachable remote emits,
+which the code that tells a network failure from an authentication one reads
+off stderr.  C<after> severs the remote partway through a run rather than from
+its first call.
+
+=head2 restore_remote($h)
+
+Disarms the three remote steps C<sever_remote> armed, which are
+C<fetch_branches>, C<push>, and C<delete_remote_branch>, and returns the
+harness.  It reads the plan out of the environment and answers without doing
+anything where no plan was ever armed.  A row reaches for it where the remote
+has to come back partway through, so that a later phase can reach it again.
+
+=head2 hold_session_lock($h, %opts)
+
+Takes the switch lock in a child process and answers that child's pid.  The lock is the
 C<flock> on C<genesis-session.lock> in the git directory, and the holder
 writes its pid on the first line and its command on the second for the
 refusal message to read.  Options are C<copy> and C<command>.  C<hard> kills
@@ -872,6 +898,15 @@ Every holder is registered as it is forked, and an C<END> block kills and
 reaps whatever is still registered when the file finishes, so a row that dies
 between forking a holder and releasing it costs the run nothing beyond its own
 failure.
+
+=head2 release_session_lock($h, $pid, %opts)
+
+Signals the holder, waits for it, forgets it, and returns the harness.  The
+signal is C<TERM>, so the holder finishes and lets the lock go on its way out,
+and C<hard> sends C<KILL> instead, which is how a row shows that the kernel
+drops the lock along with the process.  A row reaches for it as soon as it has
+read whatever the held lock was there to prove, because a holder left standing
+sits on the lock for the five minutes it gives itself.
 
 =head2 fork_and_switch($h, $branch, %opts)
 
@@ -1006,14 +1041,23 @@ lose the global identity C<helper::import> wrote it.  A row that reads a shape
 itself puts that same directory first on its own path for the length of the
 row.
 
-=head2 child_recorder($h, %opts) and child_runs($h)
+=head2 child_recorder($h, %opts)
 
 Puts a recording wrapper first on the path of the run under test and points
 C<GENESIS_CALLBACK_BIN> at it, so every genesis child a command spawns is
-logged, and reads those children back in order.  Each run carries its
-arguments, its pid, when it started and ended, its exit, its working
-directory, whether its standard input was a terminal, and what the switch lock
-was doing at its start, at its end, and while it ran.
+logged.  Each run is logged with its arguments, its pid, when it started and
+ended, its exit, its working directory, whether its standard input was a
+terminal, and what the switch lock was doing at its start, at its end, and
+while it ran.
+
+=head2 child_runs($h)
+
+Returns those children back in order, each a hashref of the fields above, and
+an empty list where no recorder was installed or the log is not there yet.
+Every line of the log is one JSON object, so a row that reads nothing back has
+read a file the recorder really wrote rather than met an error.  A row reaches
+for it once the command under test has finished, to ask what that command
+spawned and what the lock was doing around each child.
 
 Each run also carries C<status_lost>, which is false on an ordinary run and
 true where the recorder could not reap its own child, which happens where
@@ -1038,29 +1082,43 @@ the parent's memory would never see one.  The parent's own path is left
 exactly as it was, because C<run_genesis> carries the fixture directory to the
 command under test alone.
 
-=head2 lock_probe($h, %opts), lock_probe_bin, and lock_probe_log($h)
+=head2 lock_probe($h, %opts) and lock_probe_bin($h)
 
-Asks whether the switch lock is held and by whom, without waiting.  The probe
+Ask whether the switch lock is held and by whom, without waiting.  The probe
 answers undef for a free lock and a hashref of C<pid> and C<command> for a held
 one, reading both out of the lock file, where the holder writes its pid on the
 first line and its command on the second.  The one option is C<copy>.
 
-C<lock_probe_bin> is the same probe as a standalone script, so a kit hook or
-any other child can call it with a label of its own, and C<lock_probe_log>
-returns those answers in order, each a hashref of C<label>, C<held>, C<pid>,
-and C<command>.
+C<lock_probe_bin> is the same probe as a standalone script, whose path it
+answers with, so a kit hook or any other child can call it with a label of its
+own and have the answer appended to a log.
 
-=head2 shuttle_spy($h) and shuttle_requests($spy)
+=head2 lock_probe_log($h)
+
+Returns what the standalone probe recorded, in order, each a hashref of
+C<label>, C<held>, C<pid>, and C<command>, and an empty list where no probe
+script was built or its log is not there yet.  Every line of the log is one
+JSON object, the way the child recorder's log is.  A row reaches for it to ask
+what a hook saw of the lock at the moment it ran, which is a question nothing
+in this process can answer for it.
+
+=head2 shuttle_spy($h)
 
 Records what a run put to the shuttle, so a row can tell a run that made no
 request from a run that had nowhere to make one.  Under the manual provider
 there is no backend at all and D23 refuses a file one, which is why that
-difference needs an observer rather than a reading of the tree.
+difference needs an observer rather than a reading of the tree.  The spy names
+its log in C<GENESIS_SHUTTLE_SPY> and lays the file down empty, so a row that
+reads no requests back has read a file the spy really wrote, and it answers
+with the spy a row then reads through.
 
-The spy names its log in C<GENESIS_SHUTTLE_SPY> and lays the file down empty,
-so a row that reads no requests back has read a file the spy really wrote.  A
-request is one JSON object on a line of its own, and C<shuttle_requests>
-returns them decoded and in the order they were made.
+=head2 shuttle_requests($spy)
+
+Returns the requests that spy recorded, decoded and in the order they were
+made, and an empty list where the log is not there.  A request is one JSON
+object on a line of its own.  It takes the spy rather than the harness,
+because that is what names the log, so a row holds the spy it was given and
+reads through it once the run is over.
 
 =head2 fixture_kit($h, %opts)
 
@@ -1120,21 +1178,23 @@ GitHub owner and repo pair.  Any C<@lines> go under the provider at the
 provider's own depth, so a row that wants a target or a team says so in a
 word.
 
-=head2 automation_blocks() and automation_block_lines()
+=head2 automation_blocks()
 
-Answer the three blocks the configuration schema requires of an automated
-provider, which are the shuttle, the vault, and the locker.
-C<automation_blocks> answers them as a list of key and hashref pairs, for a
-file that builds the configuration as a structure, and
-C<automation_block_lines> answers the same thing as YAML lines indented to sit
-under a C<pipeline:> key, for a file that writes the configuration as text.
-Neither answers the C<pipeline:> key itself, so a caller puts the blocks
+Answers the three blocks the configuration schema requires of an automated
+provider, which are the shuttle, the vault, and the locker, as a list of key
+and hashref pairs, for a file that builds its configuration as a structure.
+It does not answer the C<pipeline:> key itself, so a caller puts the blocks
 beside whatever else its own pipeline block holds.
 
-C<automation_block_lines> takes C<without>, an arrayref naming blocks to leave
-out, so a row that proves what the schema refuses of an automation missing one
-of the three builds that shape here rather than writing the lines itself.  The
-lines are rendered off the hash form, so the two answers cannot drift apart.
+=head2 automation_block_lines(%opts)
+
+Answers the same three blocks as YAML lines indented to sit under a
+C<pipeline:> key, for a file that writes its configuration as text, and it
+leaves that key out for the same reason.  The one option is C<without>, an
+arrayref naming blocks to leave out, so a row that proves what the schema
+refuses of an automation missing one of the three builds that shape here
+rather than writing the lines itself.  The lines are rendered off the hash
+form, so the two answers cannot drift apart.
 
 =head2 ready_envs($h, %opts)
 
