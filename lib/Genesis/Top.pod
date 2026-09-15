@@ -1754,8 +1754,10 @@ B<Errors:>
 
 C<"This repository has a pipeline but no environment to resolve
 genesis.exodus_mount from, so the pipeline's own record has no address."> -
-raised (via L</_pipeline_exodus_mount>) when the repository declares a
-pipeline and has no environment to read the mount from.
+raised (via L</_pipeline_exodus_mount>) at C<Genesis::Exit::CONFIG> when the
+repository holds no environment file at all. A repository that declares a
+pipeline, names no pipeline environment, and holds environment files reads
+the mount from one of those and is answered.
 
 =back
 

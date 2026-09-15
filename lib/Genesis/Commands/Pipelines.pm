@@ -534,7 +534,7 @@ sub pipeline_status {
 # (cascade after deploy).  Without it, all envs are candidates and
 # the entry point algorithm determines which receive files.
 #
-# Always sources files from control HEAD (or --commit).
+# Always sources files from control HEAD.
 sub propagate {
 	# D36 retired the <env> argument together with the cascade it scoped,
 	# because one run walks every environment and a commit held behind an
@@ -636,7 +636,7 @@ sub propagate {
 	# exact control state that was CERTIFIED at the ancestor — not
 	# whatever happens to be on HEAD now.  This keeps commits travelling
 	# as a unit down the chain even while control keeps advancing.
-	my $control_sha = $opts->{commit} || $git->sha('HEAD');
+	my $control_sha = $git->sha('HEAD');
 
 	# Determine scope
 	my @scope;
@@ -667,7 +667,7 @@ sub propagate {
 					"Ensure it has been deployed before cascading.",
 					$after_env
 				);
-			} elsif (!$opts->{commit}) {
+			} else {
 				my $dep = $env_v->deployments->latest_successful;
 				bail(
 					"Environment #C{%s} has never been successfully deployed.\n".

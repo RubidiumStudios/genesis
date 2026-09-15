@@ -851,8 +851,11 @@ sub _seed_control {
 # meet them before it reached whatever it came to prove.  The blocks come
 # from automation_blocks, which is the same answer the automated shape
 # writes, and the target says harness because nothing here talks to a real
-# Concourse.  A row that cares what any of them is writes its own through
-# the pipeline hashref, which is set last.
+# Concourse.  They are written before the source-control loop rather than
+# after it, so a row that names an auth type or a committer identity of its
+# own lands on top of them instead of losing to them without a word.  A row
+# that cares what any of the rest is writes its own through the pipeline
+# hashref, which is set last.
 sub _seed_pipeline_section {
 	my ($self, $root) = @_;
 	my $want = $self->{pipeline};
@@ -870,9 +873,6 @@ sub _seed_pipeline_section {
 
 	$config->set('pipeline.enabled' => (ref $want eq 'HASH') ? 1 : ($want ? 1 : 0));
 	$config->set('pipeline.provider.type' => $self->{provider});
-	$config->set("pipeline.source_control.$_" => $sc{$_})
-		for grep {defined $sc{$_}} sort keys %sc;
-
 	unless ($self->{provider} eq 'manual') {
 		$config->set('pipeline.provider.target' => 'harness');
 		$config->set('pipeline.source_control.auth.type' => 'ssh');
@@ -886,6 +886,9 @@ sub _seed_pipeline_section {
 				for sort keys %{$blocks{$block}};
 		}
 	}
+
+	$config->set("pipeline.source_control.$_" => $sc{$_})
+		for grep {defined $sc{$_}} sort keys %sc;
 
 	$config->set("pipeline.$_" => $keys{$_}) for sort keys %keys;
 	$config->save;

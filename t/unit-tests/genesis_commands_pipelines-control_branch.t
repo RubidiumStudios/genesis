@@ -127,12 +127,12 @@ subtest 'the bare run measures every read against the configured branch' => sub 
 	my (undef, $err) = $c->run_genesis({restore => 0},
 		'propagate', '--dry-run');
 
-	like $err, qr/Propagating from trunk \@/,
-		'the run named the configured branch as what it propagates from';
+	unlike $err, qr/Propagating from control \@/,
+		'the run named no branch the schema default would have named';
 	like $err, qr/Propagating from trunk \@ \Q$short\E/,
-		'and sourced the commit that branch actually stands on';
+		'and sourced the commit the configured branch stands on';
 	like $err, qr/qa: awaiting.*prod: awaiting/s,
-		'both environments were read out of the topology trunk carries';
+		'the walk covered both environments, in the order the DAG gives them';
 	unlike $err, qr/must be run from/,
 		'and the branch check was measured against trunk, not the default';
 };
