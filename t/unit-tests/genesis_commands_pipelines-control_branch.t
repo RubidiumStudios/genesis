@@ -113,6 +113,12 @@ subtest 'a cascade resolves a base for the env it names and for each child' => s
 		kit => 'omega-v2.7.0');
 	$c->write_env_file('prod', pipeline => {prior_env => 'qa'});
 
+	# The env file is committed on trunk and the run reads trunk against the
+	# remote before it reads anything else, so the commit is published here.
+	# An unpushed control refuses the run, and what this row is about is
+	# where each propagation base is read from.
+	push_from($c, 'a', 'trunk');
+
 	my ($trunk) = Harness::Propagation::run(
 		{dir => $c->a, onfailure => 'Failed to read trunk'},
 		'git', 'rev-parse', 'trunk');

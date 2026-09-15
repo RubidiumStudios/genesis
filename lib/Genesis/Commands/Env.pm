@@ -11,6 +11,7 @@ use Genesis::Commands;
 use Genesis::Top;
 use Genesis::UI;
 use Genesis::CI::Marker;
+use Genesis::CI::Preflight;
 use Encode qw(decode_utf8);
 
 sub create {
@@ -1020,6 +1021,17 @@ sub deploy {
 			command => "$env_name deploy",
 			action  => 'deploy',
 			outcome => 'Nothing was deployed.');
+
+		# The deploy asks the same first question the run asks, and refuses on
+		# the one answer that leaves it nothing to read.  It reports every
+		# other state rather than refusing on it, because a deploy resolves
+		# nothing about control.
+		my $control_state = Genesis::CI::Preflight::require_control($top, $pipeline_git,
+			refreshed     => $refreshed,
+			action        => 'deploy',
+			outcome       => 'Nothing was deployed.',
+			on_divergence => 'report');
+		info("  #Gi{%s}", $_) for @{$control_state->{events}};
 
 		my $current = $pipeline_git->current_branch // '';
 		if ($current ne $branch_name) {
