@@ -627,7 +627,7 @@ the root commit's tree, and an empty or absent hashref writes an empty tree.
 
 =item C<message>
 
-The commit message the root commit carries.
+The commit message the root commit carries. It is required.
 
 =back
 
@@ -642,6 +642,13 @@ B<Errors:>
 C<"Refusing to recreate the branch %s, which already exists"> -- the branch is
 never moved. A caller that wants to publish a branch it already holds pushes
 it instead.
+
+=item *
+
+C<"create_orphan_branch was called for '%s' with no message"> -- raised via
+C<bug()>, because a caller that leaves the message out is a defect rather
+than an operator's mistake, and the alternative is a root commit with an
+empty message and a warning about an undefined value.
 
 =item *
 
