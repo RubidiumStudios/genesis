@@ -774,11 +774,12 @@ sub _summarize_load_error {
 # }}}
 # pipeline_prepare - create or reconcile environment branches {{{
 #
-# Repairs what propagate refuses to guess about.  Propagation compares
-# each environment against control with `git diff <env-branch>..<sha>`,
-# which fails and yields nothing when the branch is absent, so it bails
-# rather than reporting "nothing to propagate".  This is how the branch
-# gets made.
+# Makes the branch propagate will not make.  Propagation compares each
+# environment against control with `git diff <env-branch>..<sha>`, which
+# yields nothing when the branch is absent, so propagate reports that
+# environment as awaiting its branch and delivers nothing to it.  This is
+# where the branch comes from until M9, which hands the job to
+# genesis pipeline-apply and retires this sub with prepare_branch.
 #
 # `genesis new <env>` is the wrong tool for that: the environment
 # already exists on control, only its branch is missing.

@@ -74,8 +74,8 @@ subtest 'genesis pipeline-prepare' => sub {
 		'$name' => \'pipeline-prepare',
 	}, "pipeline-prepare resolves to the right handler");
 
-	# It repairs what propagate refuses to guess about, so it should be
-	# findable from that bail's wording.
+	# It makes the branch propagate reports as missing, so it should be
+	# findable from that report's wording.
 	like(command_properties('pipeline-prepare')->{description},
 		qr/propagate/i,
 		"pipeline-prepare's description points back at propagate");
@@ -105,11 +105,12 @@ subtest 'genesis propagate' => sub {
 	ok(exists $opts{'commit=s'},  "propagate has a commit option");
 	ok(exists $opts{'no-push'},   "propagate has a no-push option");
 
-	# -y authorizes creating a branch for an environment that has none.
-	# It follows deploy/terminate/repipe/pipeline-apply rather than
-	# inventing a propagate-specific spelling.
+	# -y is accepted and read by nothing.  The deploy passes it to this
+	# command whenever --fix-checks is set, and a propagate that refused
+	# it would turn that deploy into a usage error, so the option is held
+	# until the step that rewrites the deploy's pre-flight.
 	ok(exists $opts{'yes|y'},
-		"propagate has the conventional yes option");
+		"propagate still accepts the yes option the deploy passes it");
 
 	is(scalar(keys %opts), 4, "propagate has only the four options above");
 

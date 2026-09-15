@@ -244,12 +244,11 @@ sub initial_state {
 			assumed        => undef,
 		};
 
-		# The refusal below is correct and the creation guard further down
-		# genesis propagate is what changes: _create_missing_branches still
-		# makes a deployment branch through prepare_branch and never
-		# publishes it, which is exactly the shape refused here.  The guard
-		# retires with prepare_branch, and until it does this stage runs
-		# ahead of it and pushes nothing the guard made.
+		# Nothing downstream of this stage makes a deployment branch any
+		# more, so a branch this clone holds and the remote has never had
+		# is one a person cut, which is what the refusal below says it is.
+		# genesis pipeline-apply is the one command that cuts a deployment
+		# branch, and it publishes what it cuts.
 		push(@local_only, {env => $env, branch => $branch}), next
 			if $div->{state} eq 'no-remote';
 
