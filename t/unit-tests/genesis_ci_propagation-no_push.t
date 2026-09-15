@@ -16,18 +16,25 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 # Minimal git double: records every push so we can assert that --no-push
-# reaches the remote zero times.
+# reaches the remote zero times.  No row here has a target, so the session it
+# hands back is opened and closed and never switches anything.
 {
 	package FakeGit;
 	sub new { bless { pushes => [] }, shift }
 	sub default_remote { 'origin' }
-	sub restore_branch { $_[0] }
-	sub reset_working_tree { $_[0] }
+	sub session { $_[0]->{session} //= FakeSession->new }
 	sub push {
 		my ($self, $remote, @branches) = @_;
 		push @{$self->{pushes}}, [$remote, @branches];
 		return { map { $_ => 1 } @branches };
 	}
+}
+
+{
+	package FakeSession;
+	sub new    { bless {begun => 0, finished => 0}, shift }
+	sub begin  { $_[0]{begun}++;    $_[0] }
+	sub finish { $_[0]{finished}++; $_[0] }
 }
 
 subtest 'no_push suppresses the control branch push' => sub {

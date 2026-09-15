@@ -111,74 +111,108 @@ sub propagate_envs {
 	my @pr_targets;
 	my @errors;
 
-	for my $t (@targets) {
-		my $env_name   = $t->{env};
-		my $require_pr = $t->{require_pr} ? 1 : 0;
-		my $detail     = $t->{detail}
-			|| { changed => [], deleted => [], renamed => {} };
+	# One session for the whole run, rather than a checkout per target and
+	# a restore at the end that a failure halfway through never reached.
+	# Every switch below comes through it, it holds the lock that stops a
+	# second process switching underneath us, and it is what puts the
+	# operator back on the branch they started this run from.
+	#
+	# A dry run opens none: it reads, prints, and changes no branch.
+	my $session = $git->session(control => $control);
+	$session->begin unless $dry_run;
 
-		if ($dry_run) {
-			_report_dry_run($git, $env_name, $pr_branch{$env_name},
-				$detail, $control_short);
+	my $ran = eval {
+
+		for my $t (@targets) {
+			my $env_name   = $t->{env};
+			my $require_pr = $t->{require_pr} ? 1 : 0;
+			my $detail     = $t->{detail}
+				|| { changed => [], deleted => [], renamed => {} };
+
+			if ($dry_run) {
+				_report_dry_run($git, $env_name, $pr_branch{$env_name},
+					$detail, $control_short);
+				$propagated++;
+				next;
+			}
+
+			my $outcome;
+			if ($require_pr) {
+				$outcome = eval {
+					_propagate_one_pr_env(
+						git           => $git,
+						session       => $session,
+						github        => $github,
+						owner_repo    => $owner_repo,
+						top           => $top,
+						env_name      => $env_name,
+						control_sha   => $control_sha,
+						control_short => $control_short,
+						detail        => $detail,
+					);
+				};
+			} else {
+				$outcome = eval {
+					_propagate_one_direct_env(
+						git           => $git,
+						session       => $session,
+						env_name      => $env_name,
+						control_sha   => $control_sha,
+						detail        => $detail,
+						control_short => $control_short,
+					);
+				};
+			}
+			if (my $err = $@) {
+				# Nothing is discarded here.  Whatever the failed delivery
+				# wrote is still in the tree, and the session is what throws
+				# it away, on the way out, with the files named.
+				warning("Propagation to #C{%s} failed: %s",
+					$env_name, $err =~ s/\s+$//r);
+				push @errors, "$env_name: $err";
+				last;
+			}
+
+			if ($outcome->{idempotent_skip}) {
+				push @skipped_idempotent, $env_name;
+				$propagated++;
+				next;
+			}
+
 			$propagated++;
-			next;
+			if ($outcome->{branch}) {
+				my $should_push = $require_pr ? $push_pr_branches : $push_direct_commits;
+				push @pushed_branches, $outcome->{branch} if $should_push;
+			}
+			if ($require_pr && !$outcome->{idempotent_skip}) {
+				push @pr_targets, {
+					env      => $env_name,
+					branch   => $outcome->{branch},
+					detail   => $detail,
+					existing => $outcome->{existing_pr},
+				};
+			}
 		}
+		1;
+	};
 
-		my $outcome;
-		if ($require_pr) {
-			$outcome = eval {
-				_propagate_one_pr_env(
-					git           => $git,
-					github        => $github,
-					owner_repo    => $owner_repo,
-					top           => $top,
-					env_name      => $env_name,
-					control_sha   => $control_sha,
-					control_short => $control_short,
-					detail        => $detail,
-				);
-			};
-		} else {
-			$outcome = eval {
-				_propagate_one_direct_env(
-					git           => $git,
-					env_name      => $env_name,
-					control_sha   => $control_sha,
-					detail        => $detail,
-					control_short => $control_short,
-				);
-			};
-		}
-		if (my $err = $@) {
-			$git->reset_working_tree;
-			warning("Propagation to #C{%s} failed: %s",
-				$env_name, $err =~ s/\s+$//r);
-			push @errors, "$env_name: $err";
-			last;
-		}
-
-		if ($outcome->{idempotent_skip}) {
-			push @skipped_idempotent, $env_name;
-			$propagated++;
-			next;
-		}
-
-		$propagated++;
-		if ($outcome->{branch}) {
-			my $should_push = $require_pr ? $push_pr_branches : $push_direct_commits;
-			push @pushed_branches, $outcome->{branch} if $should_push;
-		}
-		if ($require_pr && !$outcome->{idempotent_skip}) {
-			push @pr_targets, {
-				env      => $env_name,
-				branch   => $outcome->{branch},
-				detail   => $detail,
-				existing => $outcome->{existing_pr},
-			};
-		}
+	# A die that no per-target eval caught is the run as a whole failing.
+	# Abort is what answers it: the partial write is named and discarded,
+	# every branch this session committed to goes back to where the remote
+	# has it, and the operator is put back on the branch they started on.
+	unless ($ran) {
+		my $err = $@;
+		$session->abort($err) unless $dry_run;
+		die $err;
 	}
 
-	$git->restore_branch unless $dry_run;
+	# A delivery that failed leaves the loop above rather than dying out of
+	# it, and finish is where the tree it left behind is answered.  A
+	# delivery that wrote something before it failed is a dirty tree at
+	# session end, which finish refuses through that same abort, and one
+	# that failed before writing anything is restored here and reported
+	# through the errors below.
+	$session->finish unless $dry_run;
 
 	# Skip push and PR creation if any target failed — partial state on
 	# remote is worse than no state.  Caller can decide to bail or
@@ -241,6 +275,7 @@ sub propagate_envs {
 sub _propagate_one_direct_env {
 	my (%a) = @_;
 	my $git         = $a{git};
+	my $session     = $a{session};
 	my $env_name    = $a{env_name};
 	my $control_sha = $a{control_sha};
 	my $detail      = $a{detail};
@@ -250,7 +285,7 @@ sub _propagate_one_direct_env {
 	my @to_rm   = @{$detail->{deleted} || []};
 	my $total   = scalar(@to_copy) + scalar(@to_rm);
 
-	$git->checkout($env_name);
+	$session->switch($env_name);
 	$git->checkout_file($control_sha, $_) for @to_copy;
 	$git->rm(@to_rm) if @to_rm;
 	my $msg = sprintf("[pipeline] control\@%s -> %s", $short, $env_name);
@@ -267,6 +302,7 @@ sub _propagate_one_direct_env {
 sub _propagate_one_pr_env {
 	my (%a) = @_;
 	my $git           = $a{git};
+	my $session       = $a{session};
 	my $github        = $a{github};
 	my $owner_repo    = $a{owner_repo};
 	my $top           = $a{top}
@@ -297,7 +333,7 @@ sub _propagate_one_pr_env {
 	if ($existing_pr) {
 		# count == 1 (or >1, treated as 1): append to existing branch
 		$git->fetch_branch($pr_branch) unless $git->branch_exists($pr_branch);
-		$git->checkout($pr_branch);
+		$session->switch($pr_branch);
 
 		# Idempotency: skip whole env if HEAD already matches this control_sha
 		if (_pr_branch_has_control_sha($git, $pr_branch, $control_short)) {
@@ -316,9 +352,9 @@ sub _propagate_one_pr_env {
 				$env_name, $pr_branch;
 			$git->delete_remote_branch($pr_branch);
 		}
-		$git->checkout($env_name);
+		$session->switch($env_name);
 		$git->create_branch($pr_branch);
-		$git->checkout($pr_branch);
+		$session->switch($pr_branch);
 		_apply_propagation_commit($git, $env_name, $control_sha, $control_short, $detail);
 		info "  #G{%s}: created #C{%s}", $env_name, $pr_branch;
 	}

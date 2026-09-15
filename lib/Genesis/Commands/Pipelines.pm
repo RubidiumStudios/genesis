@@ -381,7 +381,7 @@ sub propagate {
 	bail("CI is not configured for this repository.")
 		unless $top->pipeline_enabled;
 
-	my $git     = Service::Git->new('.', track_branch => !$dry_run);
+	my $git     = Service::Git->new('.');
 	my $control = $top->control_branch;
 
 	bail(
@@ -815,7 +815,7 @@ sub pipeline_prepare {
 	bail("CI is not configured for this repository.")
 		unless $top->pipeline_enabled;
 
-	my $git     = Service::Git->new('.', track_branch => !$dry_run);
+	my $git     = Service::Git->new('.');
 	my $control = $top->control_branch;
 
 	# prepare_branch copies files INTO each env branch from the current

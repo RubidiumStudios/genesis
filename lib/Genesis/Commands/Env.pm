@@ -78,9 +78,7 @@ sub create {
 	my $git;
 	if ($pipeline_enabled) {
 		require Service::Git;
-		# track_branch so that prepare_branch's checkout to the env
-		# branch is restored back to control before we return.
-		$git = Service::Git->new('.', track_branch => 1);
+		$git = Service::Git->new('.');
 
 		# D80: genesis new opens no session, because it writes on the branch
 		# the operator chose and there is nothing to leave.  What it does
@@ -990,7 +988,7 @@ sub deploy {
 	my $pipeline_branch;
 	if ($top->pipeline_enabled) {
 		require Service::Git;
-		$pipeline_git = Service::Git->new('.', track_branch => 1);
+		$pipeline_git = Service::Git->new('.');
 		(my $branch_name = $env_name) =~ s{^.*/}{};
 		$branch_name =~ s/\.ya?ml$//;
 		$pipeline_branch = $branch_name;
@@ -1013,7 +1011,11 @@ sub deploy {
 				$branch_name, $branch_name
 			) unless $pipeline_git->branch_exists($branch_name);
 			info "\nSwitching to environment branch #C{%s}...", $branch_name;
-			$pipeline_git->checkout($branch_name);
+			# One way, and deliberately so: the deploy runs from the
+			# environment branch and the operator is meant to be left
+			# there.  M13 decides what putting them back should mean and
+			# moves this onto the session.
+			$pipeline_git->checkout_one_way($branch_name);
 			# Reload Top now that the working tree is on the env branch
 			$top = Genesis::Top->new('.');
 		}
@@ -1068,10 +1070,6 @@ sub deploy {
 	if ($do_pull && $top->pipeline_enabled && $pipeline_git) {
 		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
 
-		# Upgrade to track_branch so DESTROY returns us to the branch we were
-		# on before the pull (e.g. control), not to the env branch.
-		$pipeline_git = Service::Git->new('.', track_branch => 1);
-
 		bail(
 			"Environment branch #C{%s} does not exist.\n".
 			"Create it with #C{genesis new %s} on the control branch.",
@@ -1084,7 +1082,9 @@ sub deploy {
 				"Working tree has uncommitted changes.  Commit or stash them\n".
 				"before deploying with --pull."
 			) unless $pipeline_git->is_clean;
-			$pipeline_git->checkout($pipeline_branch);
+			# The other half of the same one-way move, for the pull, and
+			# M13 moves it with its neighbour above.
+			$pipeline_git->checkout_one_way($pipeline_branch);
 		}
 
 		my $source_sha = _get_source_sha_for_pull($env, $prior, $pipeline_git);

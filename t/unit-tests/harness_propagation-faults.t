@@ -36,7 +36,9 @@ subtest 'the third checkout_file dies and the first two ran' => sub {
 	my $git = fault_git($h);
 	fail_on($git, 'checkout_file', 3, message => 'the harness stopped here');
 
-	$git->checkout($h->slug('qa'));
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
 	my @wrote;
 	for my $path (qw(qa.yml ops/one.yml ops/two.yml ops/three.yml)) {
 		eval {$git->checkout_file($control, $path); push @wrote, $path; 1}
@@ -52,6 +54,11 @@ subtest 'the third checkout_file dies and the first two ran' => sub {
 
 	is($steps[0][0], 'checkout', 'the checkout before them ran');
 	ok(!(grep {$_->[0] eq 'commit'} @steps), 'no later step of the sequence ran');
+
+	# Two written files are left behind on purpose, so the session is closed
+	# through abort, which discards them and puts us back on control.  It
+	# ends in a death by design, and this row is done with it.
+	eval {$session->abort('the row has what it came for'); 1};
 };
 
 subtest 'no other git step behaves differently' => sub {
@@ -68,12 +75,16 @@ subtest 'no other git step behaves differently' => sub {
 	my $git = fault_git($h);
 	fail_on($git, 'checkout_file', 3);
 
-	$git->checkout($h->slug('qa'));
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
 	ok(eval {$git->checkout_file($control, 'qa.yml'); 1},
 		'a checkout_file below the armed count still runs');
 
 	my ($content) = run({dir => $h->a}, 'git', 'show', ':qa.yml');
 	like($content, qr/kit: dev/, 'and it did the real work');
+
+	eval {$session->abort('the row has what it came for'); 1};
 };
 
 subtest 'a handle taken before the fault faults too' => sub {
@@ -91,9 +102,15 @@ subtest 'a handle taken before the fault faults too' => sub {
 	fault_git($h);
 	fail_on($h->git('a'), 'checkout', 1, message => 'the harness stopped here');
 
-	ok(!eval {$early->checkout($h->slug('qa')); 1},
+	my $session = $early->session(control => $h->control);
+	$session->begin;
+	ok(!eval {$session->switch($h->slug('qa')); 1},
 		'the handle the row already held dies');
 	like($@, qr/the harness stopped here/, 'with the armed message');
+
+	# The switch died before it moved anything, so the tree is clean and
+	# finish closes the session without a word.
+	$session->finish;
 };
 
 subtest 'an armed plan leaves an unaffected command alone' => sub {

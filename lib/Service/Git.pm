@@ -158,6 +158,11 @@ sub _refuse_dubious_ownership {
 
 # }}}
 # new - get or create a Git service instance for a repository {{{
+#
+# One handle per repository root, and no branch tracking of any kind.  The
+# session records its own origin at begin, so the first caller to ask can no
+# longer stamp the branch it happened to be on onto the handle that every
+# other caller shares, which is H16.
 sub new {
 	my ($class, $path, %opts) = @_;
 	$path ||= '.';
@@ -184,33 +189,18 @@ sub new {
 	}
 
 	# Return existing instance for this repo
-	if (my $existing = $_instances{$root}) {
-		# Upgrade to track_branch if requested and not already tracking
-		if ($opts{track_branch} && !$existing->{_track_branch}) {
-			$existing->{_track_branch} = 1;
-			$existing->{_original_branch} //= $existing->current_branch;
-		}
-		return $existing;
-	}
+	return $_instances{$root} if $_instances{$root};
 
 	my ($prefix) = run({}, 'git', '-C', $path, 'rev-parse', '--show-prefix');
 	chomp $prefix if defined $prefix;
 	$prefix //= '';
 
-	my $self = bless {
-		root           => $root,
-		prefix         => $prefix,
-		_branch_cache  => {},
-		_track_branch  => $opts{track_branch} || 0,
-		_original_branch => undef,
+	return $_instances{$root} = bless {
+		root          => $root,
+		prefix        => $prefix,
+		_branch_cache => {},
+		_in_session   => 0,
 	}, $class;
-
-	if ($self->{_track_branch}) {
-		$self->{_original_branch} = $self->current_branch;
-	}
-
-	$_instances{$root} = $self;
-	return $self;
 }
 
 # }}}
@@ -306,13 +296,19 @@ sub current_branch {
 }
 
 # }}}
-# checkout - switch to a branch {{{
+# checkout - switch to a branch, from inside a session {{{
 #
-# Saves the original branch for restore_branch.
+# The one door.  Every branch change in Genesis goes through the session's
+# switch, which is what makes I1 and I9 enforceable rather than hoped for, so
+# a call from anywhere else is a bug and says so.
 sub checkout {
 	my ($self, $branch) = @_;
-	$self->{_original_branch} //= $self->current_branch
-		if $self->{_track_branch};
+	bail(
+		"A branch checkout was attempted outside a branch session in #C{%s}.\n\n".
+		"Every branch change goes through the session, so that the working ".
+		"tree can be put back the way it was found.",
+		$self->{root}
+	) unless $self->{_in_session};
 
 	# The branch being checked out may not carry the directory we are
 	# standing in -- a deployment root that exists only on the branch we are
@@ -344,6 +340,12 @@ sub checkout {
 # checkout that removes the ground under us would leave the caller nowhere.
 sub checkout_detached {
 	my ($self, $commit) = @_;
+	bail(
+		"A detached checkout was attempted outside a branch session in ".
+		"#C{%s}.\n\nEvery branch change goes through the session, so that ".
+		"the working tree can be put back the way it was found.",
+		$self->{root}
+	) unless $self->{_in_session};
 
 	my $cwd = getcwd();
 	chdir($self->{root})
@@ -357,17 +359,22 @@ sub checkout_detached {
 }
 
 # }}}
-# restore_branch - return to the branch we were on before any checkout {{{
-sub restore_branch {
-	my ($self) = @_;
-	return unless $self->{_original_branch};
-	my $current = $self->current_branch;
-	if ($current ne $self->{_original_branch}) {
-		run({ dir => $self->{root}, passfail => 1 },
-			'git', 'checkout', $self->{_original_branch});
-		delete $self->{_current_branch};
-	}
-	return $self;
+# checkout_one_way - the branch change that means to stay there {{{
+#
+# The allowance, and it is temporary.  Three call sites move onto a branch
+# and deliberately stay on it: the deploy switches to the environment branch
+# and deploys from there, and the post-deploy block moves to control and
+# hands off to a child command.  A session would put all three back, which
+# is the opposite of what they mean, and what they should mean instead is
+# decided at M13 and M15, where they move.
+#
+# Until then they come through here rather than through checkout, so the
+# guard on the one door stays a refusal rather than an exception with three
+# unnamed instances, and a sweep can read off exactly who is still outside.
+sub checkout_one_way {
+	my ($self, $branch) = @_;
+	local $self->{_in_session} = 1;
+	return $self->checkout($branch);
 }
 
 # }}}
@@ -737,9 +744,17 @@ sub cherry_pick {
 		$sha, ($err || $out || "rc=$rc") =~ s/\s+$//r);
 }
 # }}}
-# reset_working_tree - discard all working tree changes to tracked files {{{
+# reset_working_tree - discard working tree changes, from inside a session {{{
+#
+# Guarded for the same reason checkout is, from the other side: a reset
+# outside a session throws away work that a session would have put back.
 sub reset_working_tree {
 	my ($self) = @_;
+	bail(
+		"A working-tree reset was attempted outside a branch session in ".
+		"#C{%s}.",
+		$self->{root}
+	) unless $self->{_in_session};
 	run({ dir => $self->{root}, passfail => 1 },
 		'git', 'checkout', '--', '.');
 	return $self;

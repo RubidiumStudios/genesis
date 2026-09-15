@@ -214,6 +214,24 @@ and PR path based on the target's C<require_pr> flag.  Batches branch
 pushes into a single C<git push> at the end, then makes all PR API
 calls.
 
+The whole run happens inside one branch session, which it opens on the handle
+it was given and closes before the batched push.  Every branch change goes
+through that session's C<switch>, it holds the lock that stops a second
+process switching the same working tree underneath the run, and it is what
+puts the operator back on the branch they started from -- on the way out of a
+run that worked, and on the way out of one that did not.
+
+A delivery that fails is caught, reported, and ends the loop, and the session
+is what answers the tree it left behind.  A delivery that wrote something
+before it failed leaves a dirty tree, which C<finish> refuses through
+C<abort>: the files are named, the write is discarded from the tree and the
+index both, every branch the run committed to goes back to its remote tip, and
+the run raises rather than returning.  A delivery that failed before it wrote
+anything leaves a clean tree, so the session simply restores and the failure
+comes back in C<errors> for the caller to decide on.
+
+A dry run opens no session.  It reads, prints, and changes no branch.
+
 The pull request branch is whatever C<$top-E<gt>pr_branch_for($env)>
 composes, so the name this writes and the name the status command reads
 come from one place.  Under the default prefix that is
@@ -366,11 +384,15 @@ B<Returns:> hashref
                                          # first error and skips push + PRs)
     }
 
-The function does not call C<bail> on per-env failures - it
-collects them and returns.  Callers (such as the C<propagate>
-command) decide whether to bail on errors or proceed.  Push and PR
-API blocks are skipped entirely when C<errors> is non-empty, so the
-remote never sees partial state from a failed propagation event.
+The function does not call C<bail> on a per-env failure that left the tree
+clean - it collects the failure and returns.  Callers (such as the
+C<propagate> command) decide whether to bail on errors or proceed.  Push and
+PR API blocks are skipped entirely when C<errors> is non-empty, so the remote
+never sees partial state from a failed propagation event.
+
+A failure that left a partial write behind is not returned at all: the session
+raises as it discards it, because a half-written delivery reported as a value
+is a tree somebody has to clean up by hand.
 
 B<Errors:>
 
@@ -389,6 +411,13 @@ raised before the target loop starts, so it reaches the caller as the
 programming error it is instead of being caught by the per-target
 C<eval> and reported as one environment's failure.  A run whose targets
 are all direct needs no C<top> and never meets it.
+
+=item Whatever the session raises
+
+The session refuses a run that starts on a dirty tree, a run whose working
+tree cannot be switched because another process holds the lock, and a run
+that ends with a partial write in the tree.  Those refusals are raised rather
+than collected, because none of them is one environment's failure.
 
 =back
 

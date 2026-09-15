@@ -8,12 +8,13 @@ Service::Git - Git operations for a deployment repository
 
   # One instance per repository, whatever path you name inside it
   my $git = Service::Git->new('.');
-  my $git = Service::Git->new($path, track_branch => 1);
 
-  # Branches
-  $git->checkout('staging') if $git->branch_exists('staging');
+  # Branches, through the session and nowhere else
+  my $session = $git->session(control => 'control');
+  $session->begin;
   $git->create_branch('prod', 'control');
-  $git->restore_branch;
+  $session->switch('prod');
+  $session->finish;
 
   # Queries
   my $sha   = $git->sha('HEAD', short => 1);
@@ -48,10 +49,10 @@ given, and returns the existing instance when one already exists for that
 root. Two callers naming different subdirectories of the same repository get
 the same object.
 
-That matters because instances carry mutable state -- the branch to restore,
-the branch-existence cache, the resolved default remote. Independent objects
-for one repository would each track a different "original" branch and undo
-each other's work.
+That matters because instances carry mutable state -- the branch-existence
+cache, the resolved default remote, and the one branch session. Independent
+objects for one repository would each hold a session of their own, and two
+sessions in one working tree is exactly what I9 forbids.
 
 =head2 Two path spellings
 
@@ -64,16 +65,28 @@ between the two. Getting this wrong does not error: a pathspec in the wrong
 spelling simply matches nothing, and a diff comes back empty as though there
 were no changes.
 
-=head2 Branch tracking
+=head2 One door onto a branch change
 
-With C<< track_branch => 1 >>, the branch checked out at construction is
-remembered, and C<restore_branch> puts the operator back on it. Commands that
-check out an environment branch to do their work call it so an operator is not
-left somewhere unexpected.
+C<checkout>, C<checkout_detached> and C<reset_working_tree> are reached
+through L<Service::Git::Session> and nowhere else, and a call from outside a
+session dies saying so. That is not a style rule. The session is what records
+where the operator was, takes the lock that stops a second process switching
+underneath them, and puts the working tree back on every exit path, and a
+branch change outside one has none of that.
 
-C<DESTROY> restores nothing. The last-resort net for a command that exits
-partway through belongs to the branch session, which registers it through
-C<at_exit>. See L<Service::Git::Session>.
+The C<track_branch> option and C<restore_branch> are gone with it. The branch
+a command returns to is recorded by C<< $session->begin >> on the session
+itself, rather than stamped onto the shared handle by whichever caller
+happened to ask first. C<DESTROY> restores nothing either: the last-resort net
+for a command that exits partway through belongs to the session, which
+registers it through C<at_exit>.
+
+C<checkout_one_way> is the one exception, and a temporary one. The deploy
+moves onto the environment branch and means to stay there, and the post-deploy
+block moves onto control and hands off to a child command that expects to find
+it there. A session would put both back. Those three call sites come through
+C<checkout_one_way> until the steps that own them decide what returning should
+mean.
 
 =head1 METHODS
 
@@ -81,14 +94,14 @@ C<at_exit>. See L<Service::Git::Session>.
 
   my $git = Service::Git->new;
   my $git = Service::Git->new($path);
-  my $git = Service::Git->new($path, track_branch => 1);
 
 Returns the C<Service::Git> for the repository containing C<$path>, creating
 it on first call and returning the existing instance thereafter.
 
-Requesting C<track_branch> on a repository that already has an untracked
-instance upgrades that instance in place rather than creating a second one,
-recording the current branch as the one to restore.
+It tracks no branch. The branch a command returns to is recorded by
+C<< $session->begin >>, on the session, so the first caller to ask can no
+longer stamp the branch it happened to be on onto the handle that every other
+caller shares.
 
 Also calls L</provision_ci_credentials>, so a process that constructs a
 C<Service::Git> can perform remote operations with credentials supplied
@@ -105,15 +118,8 @@ Any path inside the repository. Defaults to the current directory.
 
 =item C<%opts>
 
-=over 4
-
-=item C<track_branch>
-
-Remember the current branch so C<restore_branch> can return to it. Nothing is
-restored at process exit by this flag. The last-resort net at exit belongs to
-the branch session, which registers it through C<at_exit>.
-
-=back
+Accepted and unused. It is kept so that C<create> can hand its own options
+along without knowing which of them C<new> reads.
 
 =back
 
@@ -333,13 +339,22 @@ B<Examples:>
 
 =head2 checkout
 
-  $git->checkout($branch);
+  $session->switch($branch);   # this is how you get here
 
-Switches to C<$branch>.
+Checks a branch out. It runs from the repository root, because the branch
+being checked out may not carry the directory you are standing in, and returns
+you to that directory only when the checkout kept it.
 
-When tracking is enabled and no original branch has been recorded yet, the
-branch being left is recorded first -- so the first checkout is what
-C<restore_branch> later undoes.
+It is reached through C<< $session->switch >> and nowhere else, and a call
+from outside a session dies saying so. That is not a style rule: the session
+is what records where you were, takes the lock that stops a second process
+switching underneath you, and puts the working tree back on every exit path,
+and a checkout outside one has none of that.
+
+C<restore_branch> and the C<track_branch> option are gone. The branch a
+command returns to is recorded by C<< $session->begin >> on the session
+itself, rather than stamped onto the shared handle by whichever caller asked
+first.
 
 B<Parameters:>
 
@@ -359,6 +374,16 @@ B<Errors:>
 
 =item *
 
+C<"A branch checkout was attempted outside a branch session in %s."> --
+raised via C<bail()> where no session is open. C<%s> is the repository root.
+
+=item *
+
+C<"Unable to enter git root %s: %s"> -- raised where the repository root
+cannot be entered.
+
+=item *
+
 C<"Failed to checkout '%s'"> -- raised via C<run>'s C<onfailure>. C<%s> is
 the branch name.
 
@@ -366,8 +391,11 @@ the branch name.
 
 B<Examples:>
 
-  $git->checkout('staging');
+  $session->switch('staging');
   # returns $self, with HEAD now on staging
+
+  $git->checkout('staging');
+  # raises, naming the repository, because no session is open
 
 =head2 checkout_detached
 
@@ -404,6 +432,11 @@ B<Errors:>
 
 =item *
 
+C<"A detached checkout was attempted outside a branch session in %s."> --
+raised via C<bail()> where no session is open. C<%s> is the repository root.
+
+=item *
+
 C<"Unable to enter git root %s: %s"> -- raised where the repository root
 cannot be entered.
 
@@ -422,25 +455,48 @@ B<Examples:>
   $git->checkout_detached('0000000000000000000000000000000000000000');
   # raises, naming the commit, where the repository does not have it
 
-=head2 restore_branch
+=head2 checkout_one_way
 
-  $git->restore_branch;
+  $git->checkout_one_way($branch);
 
-Returns to the branch recorded when tracking began.
+Checks a branch out and leaves you there. It is C<checkout> with the guard
+lifted for the length of the call, and it is temporary.
 
-No-op when nothing was recorded, or when that branch is already checked out.
-Runs in pass/fail mode: this is cleanup, and a failure here should not mask
-whatever the caller was actually doing.
+Three call sites move onto a branch and mean to stay on it: the deploy
+switches to the environment branch and deploys from there, the same switch
+happens again on the C<--pull> path, and the post-deploy block moves onto
+control and hands off to a child command that expects to find it there. A
+session would put all three back, which is the opposite of what they mean, so
+they come through here until the steps that own them decide what returning
+should mean. Nothing else may use it, and a test names the three.
 
-B<Parameters:> None.
+B<Parameters:>
 
-B<Returns:> C<$self>, or nothing when no original branch was recorded.
+=over 4
+
+=item C<$branch>
+
+The branch to switch to and stay on.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to checkout '%s'"> -- raised via C<run>'s C<onfailure>. C<%s> is
+the branch name.
+
+=back
 
 B<Examples:>
 
-  $git->checkout('staging');
-  $git->restore_branch;
-  # returns to whatever was checked out when tracking began
+  $git->checkout_one_way('staging');
+  # returns $self, standing on staging, with nothing arranged to come back
 
 =head2 create_branch
 
@@ -1192,14 +1248,31 @@ B<Examples:>
 Discards working-tree changes to tracked files. Untracked files are left
 alone.
 
+Like C<checkout> it is reached from inside a branch session and nowhere else,
+for the same reason read from the other side: a reset outside a session throws
+away work that a session would have put back, and nobody is left to say what
+went.
+
 B<Parameters:> None.
 
 B<Returns:> C<$self>.
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"A working-tree reset was attempted outside a branch session in %s."> --
+raised via C<bail()> where no session is open. C<%s> is the repository root.
+
+=back
+
 B<Examples:>
 
   $git->reset_working_tree;
-  # returns $self with tracked files back to their committed state
+  # returns $self with tracked files back to their committed state,
+  # where a session is open, and raises where one is not
 
 =head2 default_remote
 

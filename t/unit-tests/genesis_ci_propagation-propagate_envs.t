@@ -62,7 +62,7 @@ sub mock_git {
 
 	# Mutating ops — record + return $self (chainable) or sensible default
 	for my $m (qw(checkout create_branch checkout_file rm commit fetch_branch
-	             delete_remote_branch reset_working_tree restore_branch)) {
+	             delete_remote_branch)) {
 		*{"${pkg}::${m}"} = sub {
 			my $self = shift;
 			$self->_record($m, @_);
@@ -109,11 +109,64 @@ sub mock_git {
 		my %result = map { $_ => ($self->{_push_results}{$_} // 1) } @branches;
 		\%result;
 	};
+	# The run drives a session now, and this is the one the double hands
+	# it.  Its switch goes through the double's own checkout, because a
+	# switch is the checkout every row below was written against and
+	# nothing about them changed but the door it comes through.
+	*{"${pkg}::session"} = sub {
+		my ($self, %opts) = @_;
+		return $self->{_session} //=
+			Test::Mock::PropEnvs::Session->new($self, %opts);
+	};
+
 	*{"${pkg}::unprefixed"} = sub {
 		my $self = shift;
 		# Identity in the mock (no prefix configured)
 		return wantarray ? @_ : $_[0];
 	};
+}
+
+# =========================================================================
+# Mock Service::Git::Session
+#
+# The four verbs, recorded on the git double so a row can read the whole
+# sequence in one log.  abort dies the way the real one does, because the
+# rows that reach it are asserting that a failed run does not come back.
+# =========================================================================
+{
+	package Test::Mock::PropEnvs::Session;
+
+	sub new {
+		my ($class, $git, %opts) = @_;
+		return bless {git => $git, control => $opts{control}}, $class;
+	}
+
+	sub begin {
+		my ($self) = @_;
+		$self->{git}->_record('session_begin');
+		$self->{active} = 1;
+		return $self;
+	}
+
+	sub switch {
+		my ($self, $target) = @_;
+		$self->{git}->checkout($target);
+		return $self;
+	}
+
+	sub finish {
+		my ($self) = @_;
+		$self->{git}->_record('session_finish');
+		$self->{active} = 0;
+		return $self;
+	}
+
+	sub abort {
+		my ($self, $error) = @_;
+		$self->{git}->_record('session_abort', $error);
+		$self->{active} = 0;
+		die $error;
+	}
 }
 
 # =========================================================================
@@ -633,30 +686,34 @@ sub _git_failing_on {
 	return bless $git, 'Test::Mock::PropEnvs::Git::Failing';
 }
 
-# The three rows below fail against the tree as it stands.  They are marked
-# rather than skipped, because a skipped row is one nobody looks at and the
-# whole reason these exist is that the shapes stayed invisible until a real
-# loss surfaced one of them.  Each mark names the step whose commit removes
-# it.
-TODO: {
-	local $TODO = 'H1 closes at M5, when the session owns the write sequence';
+# Two of the three rows that used to stand here are closed: H1 below, by the
+# session taking the write sequence over, and H2, whose subject is gone with
+# restore_branch.  The one that is still open is marked rather than skipped,
+# because a skipped row is one nobody looks at and the whole reason these
+# exist is that the shapes stayed invisible until a real loss surfaced one of
+# them.  The mark names the step whose commit removes it.
+subtest 'H1: a failed delivery leaves nothing staged' => sub {
+	plan tests => 3;
 
-	subtest 'H1: propagated content is left staged after a failure' => sub {
-		plan tests => 2;
+	# H1 closed at M5, where the session took the write sequence over.  The
+	# delivery writes two files into the index and then dies, and what the
+	# run does with them is the whole point: it does not come back with an
+	# errors list and a dirty tree, it names them, throws them away, and
+	# leaves the operator where they started.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n", 'ops/one.yml' => "---\none: 1\n"},
+		message => 'two files',
+		push    => 1,
+	);
 
-		my $h = make_harness(envs => ['qa'], vault => 0);
-		init_branch($h, 'qa');
-		my $control = commit_on_control($h,
-			files   => {'qa.yml' => "---\nkit: dev\n", 'ops/one.yml' => "---\none: 1\n"},
-			message => 'two files',
-			push    => 1,
-		);
+	my $git = fault_git($h);
+	fail_on($git, 'commit', 1, message => 'the harness stopped before the commit');
 
-		my $git = fault_git($h);
-		fail_on($git, 'commit', 1, message => 'the harness stopped before the commit');
-
-		my $w = snapshot_w($h);
-		my $result = propagate_envs_captured(
+	my $w = snapshot_w($h);
+	my $err = exception(sub {
+		propagate_envs_captured(
 			base_args(
 				control_sha   => $control,
 				control_short => substr($control, 0, 7),
@@ -669,38 +726,17 @@ TODO: {
 					changed => ['qa.yml', 'ops/one.yml']),
 			],
 		);
+	});
 
-		like(
-			($result->{errors} || [])->[0] // '',
-			qr/stopped before the commit/, 'the write sequence failed as armed');
-		assert_w_restored($w, 'H1: the failed delivery left nothing staged');
-	};
-}
+	like($err, qr/qa\.yml/,
+		'the run died naming what the failed delivery had written');
+	like($err, qr/discard/i, 'and saying it was being thrown away');
+	assert_w_restored($w, 'H1: the failed delivery left nothing staged');
+};
 
-TODO: {
-	local $TODO = 'H2 closes at M5, when a failed restore dies loudly';
-
-	subtest 'H2: a failed restore is silent' => sub {
-		plan tests => 2;
-
-		my $h = make_harness(envs => ['qa'], vault => 0);
-		init_branch($h, 'qa');
-
-		my $git = Service::Git->new($h->a, track_branch => 1);
-		$git->checkout($h->slug('qa'));
-		helper::put_file($h->a . '/init', "edited so the restore cannot run\n");
-
-		# The restore cannot run, because the edited file the environment
-		# branch carries would be overwritten by the checkout back.  Today
-		# it returns anyway and says nothing, which is the whole shape.
-		my $returned = eval {$git->restore_branch; 1};
-		my $died     = $@;
-
-		ok(!$returned, 'H2: a restore that could not run dies rather than returning');
-		like($died // '', qr/\Q@{[$h->control]}\E/,
-			'H2: the death names the branch it could not return to');
-	};
-}
+# H2, the silent failed restore, was proved here against restore_branch, and
+# the sub is gone.  Its closure is asserted where the restore now lives, in
+# t/unit-tests/service_git_session-abort.t.
 
 TODO: {
 	local $TODO = 'H3 closes at M10, when the walk reports every environment';
@@ -725,6 +761,16 @@ TODO: {
 			(grep {$_->[1] eq 'prod'} $git->calls('checkout')),
 			'H3: the loop reached the environment after the failure');
 	};
+}
+
+# A run that should not come back, read as the error it raised.  bail dies
+# rather than exits wherever an eval is open, and the ignore switch is
+# cleared so that stays true however the file was invoked.
+sub exception {
+	my ($code) = @_;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	eval { $code->(); 1 } and return '';
+	return $@;
 }
 
 done_testing;
