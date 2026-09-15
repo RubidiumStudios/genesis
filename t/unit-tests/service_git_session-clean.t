@@ -40,8 +40,12 @@ subtest 'an untracked file blocks nothing and survives everything' => sub {
 	eval { $second->abort('the run failed') };
 	ok(-f $h->a . '/scratch.txt', 'an abort does not remove it either');
 
+	# The phrase is spelled out rather than sketched, because a pattern
+	# loose enough to catch four characters between the two words is one
+	# character away from matching is_clean, and a row that matches the
+	# reader the session asks about proves nothing about git clean.
 	my $module = get_file($helper::TOPDIR . '/lib/Service/Git/Session.pm');
-	unlike($module, qr/git.{0,4}clean/,
+	unlike($module, qr/\bgit\s+clean\b/,
 		'because abort never runs git clean, so the discard is tracked only');
 };
 

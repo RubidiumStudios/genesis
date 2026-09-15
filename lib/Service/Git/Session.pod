@@ -28,6 +28,12 @@ Clean means what C<< $git->is_clean >> means: no tracked modification and
 nothing staged, with untracked files ignored. A scratch file in the working
 tree blocks no session and no session deletes one.
 
+Beside the four verbs the session answers for what it holds, and the commands
+that drive it read those answers rather than asking git themselves. C<git>
+hands back the handle it was built on, C<modified_paths> names the tracked
+files that are modified now, C<finish_if_clean> finishes where nothing is, and
+C<finished> says afterwards whether the finish went out the clean door.
+
 Switching is what the switch lock guards, and the lock is a C<flock> on
 F<genesis-session.lock> in the git directory, so it covers one working tree
 and not the repository behind it. C<switch> is the one verb that takes it and
@@ -116,6 +122,11 @@ then records the branch, the HEAD sha, and the current directory.
 The order matters: every refusal above happens before the session writes
 anything at all, so a command that is going to be turned away is turned away
 while the repository is still exactly as the operator left it.
+
+What an earlier session recorded is cleared here rather than at C<finish>,
+which is the tips it switched to, the branches it committed to, and whether it
+finished. The handle hands out one session, so a caller that opens a second
+one would otherwise read the first one's answers.
 
 A last-resort C<abort> is registered through C<< Genesis::Commands::at_exit >>,
 whose hooks run from an C<END> block, so a session still open when the process
@@ -284,11 +295,17 @@ where it started.
 A tracked modification found here is a defect rather than a by-product. The
 deploy writes no git of its own and its cleanup hands the tree back as it
 found it, so what is left is a kit hook that wrote into the repository or a
-deploy that died early. C<finish> sends that through C<abort>, which names the
-files before discarding them and restores the branch, and the error reaches
-the caller so the command can exit on it.
+deploy that died early. C<finish> names the files in the error it raises and
+sends that through C<abort>, which discards them and restores the branch, and
+the error reaches the caller so the command can exit on it. The files are
+listed once, in that error, because C<finish> tells C<abort> it has named them
+already.
 
 Untracked files are ignored here exactly as they are at C<begin>.
+
+The clean path is the only one that sets C<finished>, so a caller that spawns
+a child behind a finished session never spawns one behind a run that was
+aborted.
 
 Calling it on a session that was never opened is a no-op, so a caller may
 finish unconditionally on its way out.
@@ -324,7 +341,34 @@ B<Examples:>
   $session->finish;
   # returns $self unchanged where begin never ran
 
-=head2 abort($error)
+=head2 finish_if_clean
+
+  $session->abort('there were changes') unless $session->finish_if_clean;
+
+Finishes the session and answers true where nothing tracked is modified, and
+answers false without finishing where something is, leaving the session open
+so the caller can name the files through C<modified_paths> and then abort.
+
+M13's deploy asks for the finish this way because it wants to say what
+happened in its own words before it decides what to do, and a death would not
+let it.
+
+B<Parameters:> None.
+
+B<Returns:> True where the session finished, false where it was left open.
+
+B<Errors:> Raises nothing of its own. Whatever C<finish> raises on the clean
+path passes through, which is a restore that did not land.
+
+B<Examples:>
+
+  $session->finish_if_clean;
+  # returns 1 on a clean tree, and the session is finished
+
+  $session->finish_if_clean;
+  # returns 0 over a modified qa.yml, with the session still open
+
+=head2 abort($error, %opts)
 
   $session->abort($@);
 
@@ -341,6 +385,11 @@ remote-tracking ref the operator rebases it by hand.
 C<git clean> is never run, so the discard reaches tracked changes only and an
 untracked file survives.
 
+The discard is read back rather than assumed. Where it failed, the changes are
+still in the tree, every reset and checkout after it would fail over them, so
+nothing further is attempted and the session dies at C<SOFTWARE> naming the
+working tree and the branch it is left standing on.
+
 When the return itself fails the session is stuck, and it dies naming the
 original error, the restore failure, and the branch we are standing on,
 because the alternative is an operator running every later command against the
@@ -355,6 +404,12 @@ B<Parameters:>
 The error the session is being aborted over, which is what the process
 finally dies with. Where it is missing or empty the session says it was
 aborted and dies on that.
+
+=item C<%opts>
+
+Options. C<named> says the caller has already listed the modified files in
+the error it handed us, so the discard makes no announcement of its own and
+the operator is shown that list once. C<finish> passes it.
 
 =back
 
@@ -372,6 +427,14 @@ nothing else.
 
 =item *
 
+C<< "The uncommitted changes in %s could not be discarded, so the working
+tree still holds them and we have left it standing on %s." >> -- raised in
+place of the above where the discard itself failed, which is a defect, so it
+exits C<SOFTWARE>. Nothing is reset and no return is attempted, because both
+would fail over the changes that are still there.
+
+=item *
+
 C<< "We then failed to return to %s: %s  You are standing on %s." >> -- raised
 in place of the above where the return failed. It names the original error,
 the restore failure, and the branch we are stuck on, all three at once.
@@ -385,6 +448,23 @@ B<Examples:>
 
   $session->abort('the writer could not finish');
   # dies naming that error and the branch we are stuck on, where the return failed
+
+=head2 git
+
+  my $git = $session->git;
+
+The C<Service::Git> handle this session was built on. A caller holding the
+session reaches git through it rather than building a second handle, which
+would key a second session on the same working tree.
+
+B<Parameters:> None.
+
+B<Returns:> The handle.
+
+B<Examples:>
+
+  my $git = $session->git;
+  # returns the same handle $git->session was asked of
 
 =head2 active
 
@@ -401,6 +481,29 @@ B<Examples:>
 
   my $open = $session->active;
   # returns 0 on a session that has been built but not begun
+
+=head2 finished
+
+  do_something() if $session->finished;
+
+True only where C<finish> completed its clean path. A session that has not
+opened, one that is still open, and one that went out through C<abort> all
+answer false, and so does one that finished and has since been opened again.
+
+M15's post-deploy child reads it, because D84 makes a finished session the
+precondition for spawning one.
+
+B<Parameters:> None.
+
+B<Returns:> 1 where the session finished cleanly, 0 otherwise.
+
+B<Examples:>
+
+  my $done = $session->finished;
+  # returns 1 after a finish that found the tree clean
+
+  my $done = $session->finished;
+  # returns 0 after an abort, however the abort was reached
 
 =head2 origin
 
@@ -435,14 +538,43 @@ B<Examples:>
   my $target = $session->on;
   # returns 'qa/bosh' after a switch to that branch
 
+=head2 modified_paths
+
+  my $paths = $session->modified_paths;
+
+The tracked paths that are modified or staged right now, sorted, in the words
+C<git status --porcelain> gives them. Untracked files are never listed,
+because D84 says they block nothing.
+
+C<begin>, C<finish>, and C<abort> all read it, so the list an operator is
+shown is the same list wherever they are shown it, and a caller that wants to
+say something of its own about those files says it about the same ones.
+
+B<Parameters:> None.
+
+B<Returns:> An arrayref of paths, empty where nothing tracked is modified.
+
+B<Examples:>
+
+  my $paths = $session->modified_paths;
+  # returns ['qa.yml'] where a hook wrote into that file
+
+  my $paths = $session->modified_paths;
+  # returns [] on a clean tree, whatever untracked files are lying about
+
 =head2 committed_branches
 
   my @moved = $session->committed_branches;
 
 The branches this session committed to, which are those whose tip differs from
-the tip recorded when the session switched to them. The session works this out
-for itself rather than being told, so a writer that commits through the handle
-does not have to report what it wrote.
+the tip recorded when the session switched to them, together with any a caller
+recorded outright through C<_record_commit>. The session works the first half
+out for itself, so a writer that commits through the handle does not have to
+report what it wrote, and the second half covers the commit that leaves a tip
+where it was.
+
+The control branch is never among them, however it got there, because I2 keeps
+committed work on control whole and this is the set C<abort> resets.
 
 B<Parameters:> None.
 
@@ -453,7 +585,44 @@ B<Examples:>
   my @moved = $session->committed_branches;
   # returns ('qa/bosh') after a commit on that branch
 
+  my @moved = $session->committed_branches;
+  # returns () after a session that only read, whatever control has done
+
 =head1 INTERNAL METHODS
+
+=head2 _record_commit($branch)
+
+  $session->_record_commit($branch);
+
+Remembers that this session committed to a branch, so that C<abort> resets it
+even where the tip cannot say so.
+
+C<committed_branches> works the set out for itself by comparing each branch's
+tip against the tip recorded when the session switched to it, and this covers
+the one case that comparison cannot see, which is a commit that leaves the tip
+where it was. M8's writer is the caller, and it says so outright rather than
+relying on the comparison.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch that was committed to. A name that is missing or empty records
+nothing.
+
+=back
+
+B<Returns:> C<$self>, so it chains.
+
+B<Examples:>
+
+  $session->_record_commit('qa/bosh');
+  # returns $self, and committed_branches now names that branch
+
+  $session->_record_commit($session->on);
+  # returns $self unchanged where the session has not switched
 
 =head2 _standing_on
 
