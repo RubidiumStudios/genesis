@@ -143,9 +143,11 @@ so the divergence it gets back says so.
 
 =item C<on_divergence>
 
-C<refuse> by default, and C<report> for C<genesis pipeline-status>, which
-reports every state and resolves none.  A branch that exists nowhere is
-refused either way, because it leaves the command nothing at all to read.
+C<refuse> by default, and C<report> for the two commands that read without
+resolving, which are C<genesis pipeline-status> and the deploy.  Every command
+that writes takes the default, because a divergence on control reaches the
+remote through whatever it writes.  A branch that exists nowhere is refused
+either way, since it leaves the command nothing at all to read.
 
 =back
 
@@ -156,9 +158,16 @@ origin/control", and is empty otherwise.
 
 B<Errors:> Bails at C<CONFIG> when the control branch exists neither on the
 remote nor locally, naming the branch and both places and telling the operator
-to create and push it.  Bails at C<DATAERR> when control is ahead, behind,
-diverged, or local only, naming both counts and the one command that fixes it.
-Neither refusal writes anything, and no path here moves control.
+to create and push it.  Bails at C<DATAERR> for every one of the five states
+the design calls illegal, which are ahead, behind, diverged, local only, and
+remote only, naming what is true of the branch and the one command that fixes
+it.  The remote-only refusal is the one that says the refresh should have
+written the local ref and did not, which is what a working tree standing on an
+unborn control does to it, so it asks for the ref to be written rather than
+reading a staleness out of two counts that are both zero.  Where the
+repository has no remote configured at all, the local-only refusal asks for a
+remote instead of printing a push command with nothing to push to.  No refusal
+writes anything, and no path here moves control.
 
 B<Examples:>
 
@@ -174,6 +183,7 @@ B<Examples:>
       outcome       => 'Nothing was deployed.',
       on_divergence => 'report');
   # refuses a control branch that is nowhere, and reports every other state
+  # back to a caller that resolves nothing
 
 =head1 INTERNAL FUNCTIONS
 

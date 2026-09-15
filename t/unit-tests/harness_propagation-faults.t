@@ -221,7 +221,7 @@ subtest 'the remote can be severed and restored' => sub {
 };
 
 subtest 'the severed refresh answers the shape the real one answers' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	# The double composes fetch_branches' failure result by hand, because a
 	# severed remote has to reach the caller as a classified result rather
@@ -249,6 +249,12 @@ subtest 'the severed refresh answers the shape the real one answers' => sub {
 
 	is_deeply([sort keys %$severed], [sort keys %$real],
 		'the double answers on exactly the keys the real method answers on');
+	# The names alone would not catch a list turning into something else, so
+	# the kind of value under each name is weighed beside it and the three
+	# empty lists have to stay lists.
+	is_deeply([map {ref $severed->{$_}} sort keys %$severed],
+		[map {ref $real->{$_}} sort keys %$real],
+		'and with the same kind of value under each of them');
 	is($severed->{ok}, 0, 'with ok false, as the real one has it');
 	is($severed->{kind}, 'network',
 		'and the kind the armed text classifies as, read from the product');

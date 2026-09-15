@@ -404,6 +404,11 @@ sub propagate {
 	# refreshed makes every later answer worthless (D65, D30).  It stands
 	# ahead of the branch check, since a branch that exists nowhere is not
 	# one the operator can be asked to stand on.
+	#
+	# The refresh brings R into T for every branch in scope, control included,
+	# before the first read of any of them (D40).  There is no flag, because a
+	# report that quietly rested on a stale tracking ref is the thing this
+	# removes.
 	my $refreshed = $top->fetch_pipeline_envs($git, command => 'propagate');
 	# The stage's events are not printed here.  The whole list is printed
 	# once, where the deployment branches are settled, and a line printed
@@ -831,15 +836,19 @@ sub pipeline_prepare {
 	my $control = $top->control_branch;
 
 	# The seeding command asks the same first question, and ahead of the
-	# branch check for the same reason propagate does.  It seeds from control
-	# rather than resolving it, so it reads every other state rather than
-	# refusing on one.
+	# branch check for the same reason propagate does.  It refuses a divergence
+	# as propagate does too, because it is the one command here that writes:
+	# it copies control's HEAD onto each environment branch, commits there, and
+	# then tells the operator to push what it wrote.  Seeded from a control
+	# that is ahead, that push puts content on the remote the remote's own
+	# control has never had, and seeded from one that is behind it writes
+	# commits from stale state that carry no marker, which the next run refuses
+	# by name.
 	my $refreshed = $top->fetch_pipeline_envs($git, command => 'pipeline-prepare');
 	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
-		refreshed     => $refreshed,
-		command       => 'pipeline-prepare',
-		outcome       => 'Nothing was prepared.',
-		on_divergence => 'report');
+		refreshed => $refreshed,
+		command   => 'pipeline-prepare',
+		outcome   => 'Nothing was prepared.');
 	info("  #Gi{%s}", $_) for @{$control_state->{events}};
 
 	# prepare_branch copies files INTO each env branch from the current
