@@ -3917,6 +3917,25 @@ sub deployment_cache_cleanup {
 }
 
 # }}}
+# _copy_cached_files_to_repository - copy cached deploy artifacts into .genesis/manifests {{{
+#
+# Best effort: a file that will not copy is worth a warning, never the
+# deployment.
+sub _copy_cached_files_to_repository {
+	my ($self, @descriptors) = @_;
+	for my $descriptor (@descriptors) {
+		my $cached_file = $self->deployment_cache_path_lookup($descriptor);
+		next unless $cached_file && -f $cached_file;
+		my $file = basename($cached_file);
+		eval {
+			copy_or_fail("$cached_file", $self->path(".genesis/manifests/$file"));
+		};
+		warning("Failed to copy $file to repository: $@") if ($@);
+	}
+	return 1;
+}
+
+# }}}
 # deployment_cache_path_lookup - return the path to a file in the deployment cache {{{
 sub deployment_cache_path_lookup {
 	my ($self, $descriptor) = @_;
@@ -4206,6 +4225,8 @@ sub _deploy_create_env {
 		) if $alternative_state_file && !-f $alternative_state_file;
 	}
 
+	my $recovered = $self->_recovered_create_env_state();
+
 	# Validate manifest consistency
 	if ($last_manifest_path && ($last_manifest->{source}||'') ne 'exodus-deployments') {
 		# Legacy method of storing state files, and possibly manifests
@@ -4244,7 +4265,9 @@ sub _deploy_create_env {
 	if ($last_manifest_path) {
 		bail(
 			"Cannot find state file for previous deployment; cannot proceed with create-env."
-		) unless $last_manifest->{state}{path};
+		) unless $last_manifest->{state}{path}
+		      || $recovered->{state}
+		      || $alternative_state_file;
 
 		if ($last_manifest->{manifest}{source} eq 'repository' && !defined($last_manifest->{manifest_sha1})) {
 			warning(
@@ -4324,14 +4347,22 @@ sub _deploy_create_env {
 	my $state_path = $self->deployment_cache_path_lookup('state');
 	my $store_path = $self->deployment_cache_path_lookup('store');
 
-	if ($alternative_state_file) {
-		copy_or_fail($alternative_state_file, $state_path);
-		notice("Using Custom state file: %s", humanize_path($alternative_state_file));
-	} elsif ($last_manifest->{state}{path}) {
-		copy_or_fail($last_manifest->{state}{path}, $state_path)
+	# An explicitly supplied state file wins, then the state recovered from a
+	# failed attempt, then the state of the last successful deployment.  The
+	# store travels with whichever state we settled on, because the two
+	# describe the same deployment.
+	my ($state_source, $store_source) = ($alternative_state_file, undef);
+	if (!$state_source && $recovered->{state}) {
+		$state_source = $recovered->{state};
+		$store_source = $recovered->{store};
 	}
-	copy_or_fail($last_manifest->{store}{path}, $store_path)
-		if $last_manifest->{store}{path};
+	$state_source //= $last_manifest->{state}{path};
+	$store_source //= $last_manifest->{store}{path};
+
+	notice("Using Custom state file: %s", humanize_path($alternative_state_file))
+		if $alternative_state_file;
+	copy_or_fail($state_source, $state_path) if $state_source;
+	copy_or_fail($store_source, $store_path) if $store_source;
 
 	my @bosh_opts;
 	push @bosh_opts, "--$_" for grep { $opts{$_} } qw/recreate skip-drain/;
@@ -4358,6 +4389,54 @@ sub _deploy_create_env {
 
 	$state->{results} = \@results;
 	return $state->{ok} = !$results[1];
+}
+
+# }}}
+# _recovered_create_env_state - state left behind by a failed create-env attempt {{{
+#
+# `bosh create-env` rewrites the state file as it works, so an attempt that died
+# partway still recorded what it had already changed on the IaaS: the VM it
+# deleted, the stemcell it uploaded, the persistent disk it created.  Genesis
+# archives that state with the failed deployment record, and it is newer than
+# anything the last successful deploy left behind, so it is what the next
+# attempt has to build on.  Starting again from the older state would have bosh
+# delete a VM that is already gone and upload a stemcell that is already there,
+# orphaning one stemcell template on the IaaS for every retry.
+#
+# Returns a hashref of local paths, empty when there is nothing to recover.
+sub _recovered_create_env_state {
+	my ($self) = @_;
+
+	# Repository-mode environments keep their state in .genesis/manifests, and
+	# a failed deploy refreshes it there, so the file on disk is already the
+	# newest one.
+	return {} if $self->manifest_store eq 'repository';
+
+	my $deployment = $self->deployments->latest_with_artifacts(
+		action => 'deploy', artifacts => ['state']
+	);
+	return {} unless $deployment && !$deployment->succeeded;
+
+	my $recovery_path = $self->workpath('recovered-state');
+	mkdir_or_fail($recovery_path) unless -d $recovery_path;
+
+	my @wanted = ('state');
+	push @wanted, 'store' if $deployment->has_artifact('store');
+	my $extracted = $deployment->extract_artifacts_to($recovery_path, @wanted);
+
+	notice(
+		"Recovering the state file from the failed deployment of %s.\n\n".
+		"#C{bosh create-env} updates the state file as it goes, so that file, ".
+		"and not the one from the last successful deployment, is the accurate ".
+		"record of what is currently deployed.",
+		$deployment->timestamp
+	);
+
+	return {
+		state     => $extracted->{state},
+		store     => $extracted->{store},
+		timestamp => $deployment->timestamp,
+	};
 }
 
 # }}}
@@ -4416,15 +4495,17 @@ sub _post_deploy {
 				if -e $state->{cached_redacted_vars_path};
 		};
 		warning("Failed to copy manifest to repository: $@") if ($@);
-		for ('state', 'store') {
-			my $cached_file = $self->deployment_cache_path_lookup($_);
-			next unless -f $cached_file;
-			my $file = basename($cached_file);
-			eval {
-				copy_or_fail("$cached_file", $self->path(".genesis/manifests/$file"));
-			};
-			warning("Failed to copy $file to repository: $@") if ($@);
-		}
+		$self->_copy_cached_files_to_repository('state', 'store');
+
+	} elsif (!$deployment_ok && $self->use_create_env && $manifest_store ne 'exodus' && !$opts{"dry-run"}) {
+		# The deploy failed, but `bosh create-env` rewrites the state file as it
+		# works, so the cached copy is a truer account of what is deployed than
+		# the state the last successful deploy left behind.  Keep it, and the
+		# credentials store beside it, so that the next deploy and the next
+		# terminate both work from it.  The manifest and the vars file stay as
+		# they are, because they still describe the deployment that succeeded.
+		mkdir_or_fail($self->path(".genesis/manifests")) unless -d $self->path(".genesis/manifests");
+		$self->_copy_cached_files_to_repository('state', 'store');
 	}
 
 	# bail out early if the deployment failed;
@@ -5007,7 +5088,20 @@ sub terminate {
 			info(
 				"[[  - >>Using the unredacted manifest, vars and state file from the deployment archive."
 			);
-			my $last_deployment = $self->deployments->latest(action => 'deploy');
+			# A failed `bosh create-env` still updated the state file, so that
+			# attempt holds the newest account of what is deployed.  Take the
+			# whole artifact set from it: its manifest is the one whose
+			# releases and CPI created the resources the state now records, and
+			# `bosh delete-env` has to be handed the two together.
+			my $last_deployment = $self->deployments->latest_with_artifacts(
+				action => 'deploy', artifacts => ['state', 'manifest']
+			) // $self->deployments->latest(action => 'deploy');
+
+			info(
+				"[[  - >>The newest state file comes from the failed deployment of %s; ".
+				"using that deployment's manifest along with it.",
+				$last_deployment->timestamp
+			) if $last_deployment && !$last_deployment->succeeded;
 
 			# If we can't find artifacts, try to fall back to repository files if they exist
 			if (!$last_deployment || !$last_deployment->artifact_types()) {

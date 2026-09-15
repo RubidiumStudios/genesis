@@ -254,6 +254,62 @@ B<Examples:>
   my $last = $mgr->latest(include_failed => 1);
   print $last->lookup('result') if $last;
 
+=head2 latest_with_artifacts
+
+  my $deployment = $mgr->latest_with_artifacts(%options);
+
+Returns the most recent deployment audit that archived every artifact named,
+scanning from newest to oldest. Unlike C<latest()>, this deliberately
+considers failed records.
+
+C<bosh create-env> rewrites the state file as it works, so an attempt that
+died partway still recorded what it had already changed on the IaaS, such as a
+deleted VM, an uploaded stemcell, or a fresh persistent disk. That state is
+newer than the last successful deploy's and it is the only accurate account of
+what is out there, so the next deploy and the next terminate both build on it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<action>
+
+Filter by action type (C<'deploy'> or C<'terminate'>).
+
+=item C<artifacts>
+
+Arrayref of artifact types or filenames that the record must carry. Defaults
+to C<['state']>.
+
+=back
+
+B<Returns:> The most recent matching C<Genesis::Env::Deployment> object, or
+C<undef> if none is found.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Invalid options: ...">
+
+Thrown via C<bug()> for any option other than C<action> or C<artifacts>.
+
+=item C<"At least one artifact must be specified">
+
+Thrown via C<bug()> when C<artifacts> is given as an empty arrayref.
+
+=back
+
+B<Examples:>
+
+  # newest create-env state file, even if the deploy that wrote it failed
+  my $d = $mgr->latest_with_artifacts(action => 'deploy');
+
+  # terminate needs the manifest that goes with that state
+  my $d = $mgr->latest_with_artifacts(
+    action => 'deploy', artifacts => ['state', 'manifest']
+  );
+
 =head2 latest_successful
 
   my $deployment = $mgr->latest_successful(%options);

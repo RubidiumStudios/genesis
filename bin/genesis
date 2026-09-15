@@ -517,12 +517,14 @@ define_command("deploy", {
 			"Override the default number of maximum VMs in flight per instance group.",
 
 		'STATE-FILE-PATH=s' =>
-			"Normally the previously deployment's state file is fetched from exodus ".
-			"deployment audit logs (or .genesis/manifests if not using exodus).  ".
-			"However, it may be necessary to fetch and alter the state file manually,".
-			"specifically in the case of a failed partial deployments.\n\n".
-			"This option will allow you to specify a specfic state file to use for ".
-			"the deploy. You can use the `info` command to retrieve the state file",
+			"Normally the state file is fetched from the exodus deployment audit ".
+			"logs (or .genesis/manifests if not using exodus).  Genesis takes it ".
+			"from the most recent create-env attempt that wrote one, including an ".
+			"attempt that failed, because `bosh create-env` updates the state file ".
+			"as it works.\n\n".
+			"This option lets you deploy from a state file of your own instead, ".
+			"which is what you want when the archived one has to be repaired by ".
+			"hand.  You can use the `info` command to retrieve the state file",
 
 		'no-propagate' =>
 			"On manual-provider pipelines, `genesis deploy` automatically runs ".

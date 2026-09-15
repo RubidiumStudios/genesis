@@ -128,6 +128,38 @@ sub latest {
 }
 # }}}
 
+# latest_with_artifacts - most recent deployment that archived the given artifacts {{{
+#
+# Unlike latest(), this deliberately considers failed records.  `bosh
+# create-env` rewrites the state file as it works, so an attempt that died
+# partway still recorded what it changed on the IaaS -- a deleted VM, an
+# uploaded stemcell, a fresh persistent disk.  That record is newer than the
+# last successful deploy's, and it is the only accurate account of what is out
+# there, so the next deploy and the next terminate have to build on it.
+sub latest_with_artifacts {
+	my ($self, %options) = @_;
+
+	my @invalid_options = grep { !/^(action|artifacts)$/ } keys %options;
+	bug(
+		"Invalid options: %s",
+		join(", ", @invalid_options)
+	) if @invalid_options;
+
+	my @required = @{$options{artifacts} // ['state']};
+	bug("At least one artifact must be specified") unless @required;
+
+	my $deployments = $self->_all();
+	return undef unless $deployments && @$deployments;
+
+	for my $deployment ($deployments->@*) {
+		next if $options{action} && $deployment->lookup('action') ne $options{action};
+		next if grep { !$deployment->has_artifact($_) } @required;
+		return $deployment;
+	}
+	return undef;
+}
+# }}}
+
 # latest_successful - get the latest successful deployment {{{
 sub latest_successful {
 	my ($self, %options) = @_;

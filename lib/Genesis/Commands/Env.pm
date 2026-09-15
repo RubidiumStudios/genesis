@@ -1103,12 +1103,13 @@ sub deploy {
 				"\nThere are cached deployment files in #C{%s} from the previous failed or interrupted deployment:\n%s%s",
 				$cache_dir, $file_list,
 				$deployment_files->{state}
-					? "\n\n[[#Yr{IMPORTANT:} >>The cached files contain a state file, which ".
-					"may contain values necessary to run this deployment successfully.  ".
-					"Please copy it to a safe location, then use the --STATE-FILE-PATH ".
-					"option to use that file instead of a potentially outdated one from ".
-					"a previously successful deployment instead of clearing and ".
-					"continuing with this deployment."
+					? "\n\n[[#Yr{IMPORTANT:} >>The cached files contain a state file.  ".
+					"Genesis already kept the state of the failed attempt and will ".
+					"deploy from it, so clearing the cache loses nothing on its own.  ".
+					"This copy matters when the attempt was interrupted before Genesis ".
+					"could keep it, or when the state has to be edited by hand.  Copy ".
+					"it somewhere safe first, then pass it back with the ".
+					"--STATE-FILE-PATH option."
 					: ""
 			);
 			if (!$options{yes} && in_controlling_terminal()) {

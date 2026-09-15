@@ -642,6 +642,7 @@ sub commit {
 # artifact_types - Return the list of artifact types for this deployment {{{
 sub artifact_types {
 	my ($self) = @_;
+	return () unless $self->{artifacts};
 	my $artifact_map = $self->_artifact_map();
 	my @types = sort keys %$artifact_map;
 	return @types;
@@ -652,9 +653,22 @@ sub artifact_types {
 sub artifact_filenames {
 	my ($self) = @_;
 	# Return the list of artifact filenames for this deployment
+	return () unless $self->{artifacts};
 	my $artifact_map = $self->_artifact_map();
 	my @filenames = sort values %$artifact_map;
 	return @filenames;
+}
+
+# }}}
+# has_artifact - Return true if this deployment carries the named artifact {{{
+sub has_artifact {
+	my ($self, $artifact) = @_;
+
+	bug("Artifact name is required") unless defined($artifact) && length($artifact);
+	return 0 unless $self->{artifacts};
+	return 1 if $self->_is_artifact_type($artifact);
+	return 1 if $self->_is_artifact_filename($artifact);
+	return 0;
 }
 
 # }}}

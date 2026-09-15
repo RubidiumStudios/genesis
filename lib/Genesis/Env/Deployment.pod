@@ -757,6 +757,41 @@ Returns a sorted list of artifact filenames available in this deployment
 
 B<Returns:> Sorted list of filename strings.
 
+=head2 has_artifact($artifact)
+
+Returns true when this deployment carries the named artifact, looked up by
+type name or by filename.  Unlike C<artifact()>, this asks a question rather
+than fetching anything, so it is safe to call on a record that stored no
+artifacts at all.
+
+B<Parameters:>
+
+=over
+
+=item $artifact
+
+The artifact type name (e.g., C<'state'>) or filename
+(e.g., C<'myenv-state.json'>) to look for.
+
+=back
+
+B<Returns:> 1 when the artifact is present, 0 when it is not.
+
+B<Errors:>
+
+=over
+
+=item C<"Artifact name is required">
+
+Thrown via C<bug()> when C<$artifact> is missing or empty.
+
+=back
+
+B<Examples:>
+
+    # Pick the newest deploy that archived a create-env state file
+    my ($recovered) = grep {$_->has_artifact('state')} $env->deployments->all;
+
 =head2 artifact($artifact)
 
 Returns the contents of a specific artifact, looked up by type name or
