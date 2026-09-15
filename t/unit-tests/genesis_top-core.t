@@ -1021,6 +1021,34 @@ subtest '_validate_config returns truthy' => sub {
 	is($result, 1, "_validate_config explicitly returns 1");
 };
 
+subtest 'set_vault takes any vault of the family' => sub {
+	my $tmp = make_test_repo(workdir('set-vault-family'));
+	my $top = Genesis::Top->new($tmp, no_vault => 1);
+
+	# A local vault and a remote one are siblings rather than one being a
+	# kind of the other, and a read served by either is served the same, so
+	# both are taken.  The local one stands in as a double, because what is
+	# proved here is which kinds are taken and not what any of them does.
+	# The remote one is not doubled here, because the repo creation row
+	# above replaces that whole class with a mock and every row after it
+	# inherits the replacement; a real remote vault is borrowed in
+	# t/unit-tests/genesis_env-propagation_files_at.t instead.
+	require Service::Vault::Local;
+	my $local = bless {}, 'Service::Vault::Local';
+	$top->set_vault(vault => $local, session_only => 1);
+	is($top->vault, $local, "a local vault is taken as a remote one is");
+
+	# The absence of a vault is not a vault.  It is what a Top over a
+	# materialised tree holds until something lends it one.
+	my @raised;
+	no warnings qw/once redefine/;
+	local *Genesis::Top::bug = sub {push @raised, [@_]; die "refused\n"};
+	ok(!defined(eval {
+			$top->set_vault(vault => Service::Vault::None->new, session_only => 1)
+		}), "and the absence of a vault is refused");
+	is($top->vault, $local, "which leaves the one it had standing");
+};
+
 subtest 'a Top over a materialised tree reads what it cannot validate' => sub {
 	my $tmp = workdir('materialised-tree');
 	system("mkdir -p $tmp/.genesis");

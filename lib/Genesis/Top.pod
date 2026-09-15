@@ -132,7 +132,9 @@ own and cannot answer the repository questions the configuration checks ask,
 such as whether an enabled pipeline sits in a git checkout with a remote
 behind it, so vault attachment and configuration validation are both skipped
 and C<$ENV{GENESIS_TARGET_VAULT}> and C<$ENV{SAFE_TARGET}> are left alone.
-The caller that materialised the tree has already had those answers from the
+C<$ENV{GENESIS_ROOT}> is still set, as it is for any other Top, so a caller
+that must leave the process as it found it localises that one itself.  The
+caller that materialised the tree has already had those answers from the
 repository it is running in.  L<Genesis::Env/propagation_files_at> is the
 reader this exists for.
 
@@ -561,7 +563,11 @@ C<< config->save() >>, so the change is not persisted to disk.
 
 =item C<vault>
 
-B<(optional)> A C<Service::Vault::Remote> object to set directly.
+B<(optional)> A vault object to set directly.  Any C<Service::Vault>, which
+is a C<Service::Vault::Remote> or a C<Service::Vault::Local>, since a local
+vault serves a read as a remote one does.  A C<Service::Vault::None> is not
+one of them and is refused, because it is the absence of a vault rather than
+a vault.
 
 =item C<session_only>
 
@@ -580,8 +586,8 @@ B<Errors:>
 =item *
 
 C<"Invalid call to Genesis::Top->set_vault"> - raised via C<bug()> when none
-of C<interactive>, C<target>, C<clear>, or a C<vault> object reference is
-provided.
+of C<interactive>, C<target>, C<clear>, or a C<vault> that is a
+C<Service::Vault> is provided.
 
 =back
 

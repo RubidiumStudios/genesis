@@ -5,6 +5,7 @@ use warnings;
 use base 'Genesis::Base';
 
 use Genesis;
+use Scalar::Util ();
 use Genesis::State;
 use Genesis::Term qw/in_controlling_terminal csprintf decolorize/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_choice/;
@@ -856,7 +857,12 @@ sub set_vault {
 		$new_vault = $candidates[0];
 	} elsif ($opts{clear}) {
 		$new_vault = undef;
-	} elsif (ref($opts{vault}) eq "Service::Vault::Remote") {
+	} elsif (Scalar::Util::blessed($opts{vault})
+	         && $opts{vault}->isa('Service::Vault')) {
+		# Any vault of the family, because a local vault serves a read as a
+		# remote one does and the two are siblings rather than one being a
+		# kind of the other.  Service::Vault::None is not one of them, and
+		# it falls through to the refusal below, which is what it is for.
 		$new_vault = $opts{vault}
 	} else {
 		bug "Invalid call to Genesis::Top->set_vault"
