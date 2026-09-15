@@ -65,6 +65,32 @@ subtest 'a marker-only local commit is reset and reported as an event' => sub {
 		'and the branch is no longer behind what the walk then wrote');
 };
 
+subtest 'a dry run reports the reset and moves nothing' => sub {
+	# Three rows, and one more for the run's own restoration assertion.
+	plan tests => 4;
+
+	my $h  = make_harness(envs => ['qa']);
+	my $qa = $h->slug('qa');
+
+	init_branch($h, 'qa');
+	refresh($h, 'a', $qa);
+	my $control = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nfrom: the operator\n"},
+		message => 'an operator commit to propagate',
+		push    => 1);
+	my $stranded = local_only_commit($h, $qa, marker => $control);
+	stand_on($h, $h->control);
+
+	my (undef, $err) = run_genesis($h, 'propagate', '--dry-run');
+
+	is(ref_in($h->a, "refs/heads/$qa"), $stranded,
+		'the dry run left the branch where it stood');
+	is($h->git('a')->resolve_branch($qa)->{state}, 'ahead',
+		'so the stranded commit is still there and still unpublished');
+	like($err, qr/This\s+report\s+assumes\s+the\s+reset\s+of\s+\Q$qa\E/,
+		'and the report says it assumes the reset a real run would make');
+};
+
 subtest 'a hand commit refuses the whole run and writes nothing' => sub {
 	# Nine rows, and one more for the run's own restoration assertion.
 	plan tests => 10;
