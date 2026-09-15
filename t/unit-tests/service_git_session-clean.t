@@ -19,7 +19,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'an untracked file blocks nothing and survives everything' => sub {
-	plan tests => 5;
+	plan tests => 8;
 
 	my $h   = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
@@ -40,12 +40,24 @@ subtest 'an untracked file blocks nothing and survives everything' => sub {
 	eval { $second->abort('the run failed') };
 	ok(-f $h->a . '/scratch.txt', 'an abort does not remove it either');
 
-	# The phrase is spelled out rather than sketched, because a pattern
-	# loose enough to catch four characters between the two words is one
-	# character away from matching is_clean, and a row that matches the
-	# reader the session asks about proves nothing about git clean.
+	# The last row is an unlike, and an unlike that could never match is a
+	# row that guards nothing, so the pattern is weighed on both spellings
+	# before the module is put to it.  Every git call in the module is a
+	# list, which is the spelling a pattern wanting whitespace between the
+	# two words would sail straight past, and the shell string form is
+	# there too because a later call could be written that way.  The gap
+	# allows punctuation alone, which is what keeps the reader the session
+	# asks about out of the match.
+	my $never = qr/\bgit\b\W{0,6}clean\b/;
+	like(q{run({dir => $root, passfail => 1}, 'git', 'clean', '-fd');},
+		$never, 'the pattern catches a git clean spelled as a list');
+	like(q{run({dir => $root}, "git clean -fd");},
+		$never, 'and one spelled as a shell string');
+	unlike(q{return $git->is_clean;},
+		$never, 'and it is not fooled by is_clean');
+
 	my $module = get_file($helper::TOPDIR . '/lib/Service/Git/Session.pm');
-	unlike($module, qr/\bgit\s+clean\b/,
+	unlike($module, $never,
 		'because abort never runs git clean, so the discard is tracked only');
 };
 

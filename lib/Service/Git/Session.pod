@@ -124,9 +124,17 @@ anything at all, so a command that is going to be turned away is turned away
 while the repository is still exactly as the operator left it.
 
 What an earlier session recorded is cleared here rather than at C<finish>,
-which is the tips it switched to, the branches it committed to, and whether it
-finished. The handle hands out one session, so a caller that opens a second
-one would otherwise read the first one's answers.
+which is the target it stood on, the tips it switched to, the branches it
+committed to, and whether it finished. The handle hands out one session, so a
+caller that opens a second one would otherwise read the first one's answers.
+
+Reusing a session is the ordinary way to open a second one, and it carries one
+thing worth knowing. C<< $git->session >> builds the session on the first ask
+and answers with that same object afterwards, ignoring the options it is
+handed on every later call, so the control branch is whatever the first build
+was told and a second C<< session(control => ...) >> naming another branch
+does not change it. Every caller in the tree passes the same control, and one
+that needs a different one asks for a handle on its own working tree.
 
 A last-resort C<abort> is registered through C<< Genesis::Commands::at_exit >>,
 whose hooks run from an C<END> block, so a session still open when the process
@@ -349,13 +357,19 @@ Finishes the session and answers true where nothing tracked is modified, and
 answers false without finishing where something is, leaving the session open
 so the caller can name the files through C<modified_paths> and then abort.
 
+A true answer means the session finished, and it is read back off the session
+rather than assumed from the clean tree. A session that was never opened, and
+one that has already gone out through C<abort>, both have nothing to finish,
+so both answer false over a tree with nothing modified in it.
+
 M13's deploy asks for the finish this way because it wants to say what
 happened in its own words before it decides what to do, and a death would not
 let it.
 
 B<Parameters:> None.
 
-B<Returns:> True where the session finished, false where it was left open.
+B<Returns:> True where the session finished, false where it was left open and
+false where there was no open session to finish.
 
 B<Errors:> Raises nothing of its own. Whatever C<finish> raises on the clean
 path passes through, which is a restore that did not land.
@@ -367,6 +381,9 @@ B<Examples:>
 
   $session->finish_if_clean;
   # returns 0 over a modified qa.yml, with the session still open
+
+  $session->finish_if_clean;
+  # returns 0 where begin never ran, because there was nothing to finish
 
 =head2 abort($error, %opts)
 
@@ -527,7 +544,8 @@ B<Examples:>
   my $target = $session->on;
 
 The branch or commit C<switch> last landed on, and undefined where the session
-has not switched.
+has not switched, which includes a session that has been opened a second time
+and has not switched yet.
 
 B<Parameters:> None.
 
@@ -549,6 +567,12 @@ because D84 says they block nothing.
 C<begin>, C<finish>, and C<abort> all read it, so the list an operator is
 shown is the same list wherever they are shown it, and a caller that wants to
 say something of its own about those files says it about the same ones.
+
+These are porcelain spellings rather than paths, and they are for showing to
+an operator. A rename comes back as C<< old -> new >>, and a path holding a
+space or a non-ASCII byte comes back quoted the way git quotes it, so a caller
+that means to open one of these, or to hand it to git as a pathspec, unquotes
+it and splits the rename form first.
 
 B<Parameters:> None.
 
