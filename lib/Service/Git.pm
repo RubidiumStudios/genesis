@@ -3,7 +3,7 @@ package Service::Git;
 use strict;
 use warnings;
 
-use Genesis qw/run bail debug trace tmpfile mkfile_or_fail/;
+use Genesis qw/run bail bug debug trace tmpfile mkfile_or_fail/;
 use Genesis::Exit qw/CONFIG DATAERR SOFTWARE/;
 use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
@@ -433,13 +433,18 @@ sub create_orphan_branch {
 	bail("Refusing to recreate the branch #C{%s}, which already exists", $branch)
 		if $self->branch_exists($branch);
 
+	# A caller that forgets the message would otherwise write a root commit
+	# with an empty one, and hear about it as a warning about an undefined
+	# value rather than as the argument it left out.
+	bug("create_orphan_branch was called for '%s' with no message", $branch)
+		unless defined($opts{message}) && length($opts{message});
+
 	my $files = $opts{files} || {};
 
-	# The index is named and then taken away again, because git writes the
-	# file itself and an empty one left where the name points is an index
-	# git refuses to read.
+	# tmpfile reserves a name and creates nothing, so the index git writes
+	# here is one it makes for itself and no stale index stands where the
+	# name points.
 	my $index = tmpfile(template => 'genesis-orphan-XXXXXXXX');
-	unlink $index;
 	local $ENV{GIT_INDEX_FILE} = $index;
 
 	for my $path (sort keys %$files) {
