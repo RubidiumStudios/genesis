@@ -176,6 +176,162 @@ sub require_control {
 }
 
 # }}}
+# initial_state - the whole first stage of a propagation run {{{
+#
+#   my $state = Genesis::CI::Preflight::initial_state($top, $git,
+#       envs => \@scope, refreshed => $result, control => $control_state);
+#
+# Runs in the order the design fixes.  The refresh has already happened and
+# control is already settled when the caller passes them in.  Then every
+# deployment branch in scope is classified, every refusal is collected before
+# anything is written, and only after that does the run touch a ref.  A
+# violation is an illegal initial state under D96, so the run stops before it
+# writes and the refusal states the corrective measure beside the branch.
+#
+# The whole DAG is classified rather than the cascade's scope, because the
+# initial state is a property of the repository rather than of the run: a
+# hand-made branch anywhere in the pipeline is a defect the operator should
+# hear about before any run writes anything.
+#
+# Returns:
+#
+#   { refreshed => 1,
+#     control   => $div,
+#     branches  => { $env => { branch, state, ahead, behind, reset,
+#                              fast_forwarded } },
+#     events    => \@lines }
+sub initial_state {
+	my ($top, $git, %opts) = @_;
+
+	my %pass = map {$_ => $opts{$_}} grep {defined $opts{$_}}
+		qw/command action outcome/;
+
+	my $refreshed = $opts{refreshed} // $top->fetch_pipeline_envs($git, %pass);
+	my $control   = $opts{control}
+		// require_control($top, $git, refreshed => $refreshed, %pass);
+
+	my $state = {
+		refreshed => 1,
+		control   => $control->{divergence},
+		branches  => {},
+		events    => [@{$control->{events}}],
+	};
+
+	my $remote  = $git->default_remote // 'the remote';
+	# The act the refusal opens with, spelled the way require_control spells
+	# it, so every refusal this stage raises names the run the same way.
+	my $action  = $opts{action}  // sprintf('run #C{genesis %s}', $opts{command} // 'propagate');
+	my $outcome = $opts{outcome} // 'Nothing was written.';
+
+	my (@local_only, @unrelated);
+	for my $env (@{$opts{envs} // []}) {
+		my $branch = $top->branch_for($env);
+		my $div    = $git->resolve_branch($branch);
+
+		# Neither side has it: the environment is awaiting pipeline-apply
+		# under D43, which is the walk's outcome and not a refusal here.
+		next unless defined $div;
+
+		$state->{branches}{$env} = {
+			branch         => $branch,
+			state          => $div->{state},
+			ahead          => $div->{ahead},
+			behind         => $div->{behind},
+			reset          => 0,
+			fast_forwarded => 0,
+		};
+
+		# The refusal below is correct and the creation guard further down
+		# genesis propagate is what changes: _create_missing_branches still
+		# makes a deployment branch through prepare_branch and never
+		# publishes it, which is exactly the shape refused here.  The guard
+		# retires with prepare_branch, and until it does this stage runs
+		# ahead of it and pushes nothing the guard made.
+		push(@local_only, {env => $env, branch => $branch}), next
+			if $div->{state} eq 'no-remote';
+		push @unrelated, $branch
+			unless _shares_history($git, $branch, $remote);
+	}
+
+	# Both refusals hand a composed string to a '%s' format, because bail
+	# reads its argument as a format and a commit subject can carry a
+	# percent sign.
+	bail({exitcode => DATAERR}, '%s',
+		_local_only_refusal($action, $outcome, $remote, \@local_only))
+		if @local_only;
+
+	bail({exitcode => DATAERR}, '%s',
+		_unrelated_refusal($action, $outcome, $remote, \@unrelated))
+		if @unrelated;
+
+	return $state;
+}
+
+# }}}
+# _shares_history - has this branch a commit in common with its counterpart {{{
+#
+# Asked through run with passfail on and stderr off rather than through
+# Service::Git::merge_base, which folds git's stderr into the value it
+# answers with.  A ref that is not there makes merge-base print to stderr and
+# exit non-zero, and a folded message is a truthy string, so the stage would
+# read a missing ref as a shared ancestor and let the branch through.  The
+# status is the whole answer here, and both of the states that answer no,
+# which are a pair with no common commit and a ref this clone cannot resolve,
+# are states this stage refuses rather than passes over.
+sub _shares_history {
+	my ($git, $branch, $remote) = @_;
+	return run({dir => $git->root, passfail => 1, stderr => 0},
+		'git', 'merge-base', "refs/heads/$branch",
+		"refs/remotes/$remote/$branch") ? 1 : 0;
+}
+
+# }}}
+# _local_only_refusal - D48's text for a branch the remote has never had {{{
+#
+# One paragraph per branch, so the single-branch case reads exactly as the
+# design quotes it and a run with several names them all.  M13 raises the
+# same two texts in their deploy form, which is why the act and the closing
+# sentence are arguments.
+sub _local_only_refusal {
+	my ($action, $outcome, $remote, $offenders) = @_;
+	return sprintf("Refusing to %s.  %s  %s", $action,
+		join('  ', map {
+			sprintf(
+				"The local branch #C{%s} has no counterpart on #C{%s}.  A ".
+				"deployment branch is derived from control and never ".
+				"originates locally, so this branch is a legacy checkout or ".
+				"was created by hand.  Genesis deletes nothing.  Inspect the ".
+				"branch for anything that should live on control and move it ".
+				"there through a commit or a pull request, then delete the ".
+				"branch with #C{git branch -D %s}, then run ".
+				"#C{genesis pipeline-apply} if the environment #C{%s} is meant ".
+				"to exist.",
+				$_->{branch}, $remote, $_->{branch}, $_->{env})
+		} @$offenders),
+		$outcome);
+}
+
+# }}}
+# _unrelated_refusal - D48's text for a branch that shares no ancestor {{{
+sub _unrelated_refusal {
+	my ($action, $outcome, $remote, $branches) = @_;
+	return sprintf("Refusing to %s.  %s  %s", $action,
+		join('  ', map {
+			sprintf(
+				"The local branch #C{%s} shares no ancestor with #C{%s/%s}, ".
+				"which #C{pipeline-apply} created.  The marker-only reset ".
+				"never applies across unrelated histories, whatever the local ".
+				"commits carry, and Genesis deletes nothing.  Inspect the ".
+				"local branch for anything that should live on control and ".
+				"move it there through a commit or a pull request, then delete ".
+				"the local branch with #C{git branch -D %s}, then run ".
+				"#C{genesis propagate} again.",
+				$_, $remote, $_, $_)
+		} @$branches),
+		$outcome);
+}
+
+# }}}
 # _commits - "1 commit" or "4 commits", so a count reads as English {{{
 sub _commits {
 	my ($n) = @_;

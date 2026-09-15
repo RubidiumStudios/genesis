@@ -8,6 +8,9 @@ Genesis::CI::Preflight - the initial state a propagation run may find
 
   my @stranded = Genesis::CI::Preflight::local_only_commits($git, 'qa/bosh');
 
+  my $initial = Genesis::CI::Preflight::initial_state($top, $git,
+      envs => \@dag_order, refreshed => $result, control => $control_state);
+
 =head1 DESCRIPTION
 
 The first stage of a propagation run settles what the repository holds before
@@ -185,10 +188,255 @@ B<Examples:>
   # refuses a control branch that is nowhere, and reports every other state
   # back to a caller that resolves nothing
 
+=head2 initial_state($top, $git, %opts)
+
+  my $state = Genesis::CI::Preflight::initial_state($top, $git,
+      envs => \@dag_order, refreshed => $result, control => $control_state);
+
+Runs the whole first stage of a propagation run and returns what it found:
+
+  { refreshed => 1,
+    control   => $div,
+    branches  => { qa => { branch => 'qa/bosh', state => 'in-sync',
+                           ahead => 0, behind => 0,
+                           reset => 0, fast_forwarded => 0 } },
+    events    => [ 'created control from origin/control' ] }
+
+The refresh and the control check come first, and a caller that has already
+made them passes their answers in rather than having them made twice.  Every
+deployment branch named in C<envs> is then classified, and two classes have no
+legitimate origin.  A branch this clone holds that the remote has never had is
+a legacy checkout or one somebody cut by hand, because a deployment branch is
+derived from control and never originates locally.  A branch that shares no
+ancestor with its counterpart on the remote is the same thing again, found
+after C<pipeline-apply> cut the real branch beside it.  Both refuse.
+
+Every refusal is collected before anything is written, so a run that stops
+here has left nothing partial behind.  An environment with no branch on either
+side is not a refusal; it is awaiting C<pipeline-apply>, which the walk reports
+as that environment's outcome.
+
+The whole pipeline is classified rather than the environments one run happens
+to touch, because the initial state is a property of the repository and not of
+the run.  A hand-made branch anywhere in the pipeline is a defect the operator
+should hear about before anything is written, and the caller passes the whole
+topology in for that reason.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+A C<Genesis::Top> on the repository, which is asked for each environment's
+deployment branch and for the control branch's name.
+
+=item C<$git>
+
+A C<Service::Git> handle on the same repository.
+
+=item C<envs>
+
+The environments to classify, which is the whole topology rather than one
+run's scope.
+
+=item C<refreshed>
+
+The result the refresh returned.  A caller that has not refreshed leaves it
+out and this stage refreshes for itself.
+
+=item C<control>
+
+The record C<require_control> returned.  A caller that has not asked leaves it
+out and this stage asks for itself.
+
+=item C<command>
+
+The command's name, which the refusals' opening sentence is built from, as in
+"Refusing to run C<genesis propagate>".
+
+=item C<action>
+
+The whole act, for a command that names itself in its own words rather than by
+its invocation, which is the option C<require_control> reads by the same name.
+
+=item C<outcome>
+
+The refusals' closing sentence, which says what did not happen.  It is
+"Nothing was written." unless the caller says otherwise.
+
+=item C<dry_run>
+
+True where the run reports and writes nothing, which the stages below this one
+read.
+
+=back
+
+B<Returns:> A hashref of C<refreshed>, C<control>, the divergence record for
+the control branch, C<branches>, a record per environment that has a branch on
+either side, and C<events>, the lines the caller prints.  C<events> is seeded
+from the control record, so the caller prints the whole stage's events once
+and in order.
+
+B<Errors:> Bails at C<DATAERR> for a local deployment branch the remote has
+never had, and for one that shares no ancestor with the remote's.  Both name
+the branch and give the remedy in order, which is to inspect the branch, move
+anything wanted to control, delete the branch, and then run the command the
+case calls for.  Genesis deletes nothing itself.  The refresh and the control
+check raise their own codes where the caller has left them to this stage.
+
+B<Examples:>
+
+  my $initial = Genesis::CI::Preflight::initial_state($top, $git,
+      envs      => \@dag_order,
+      refreshed => $refreshed,
+      control   => $control_state,
+      command   => 'propagate');
+  info("  #Gi{%s}", $_) for @{$initial->{events}};
+  # $initial->{branches}{qa}{state} is 'in-sync'
+
+  Genesis::CI::Preflight::initial_state($top, $git, envs => ['lab']);
+  # refuses at DATAERR where lab/bosh is a branch origin has never had
+
 =head1 INTERNAL FUNCTIONS
 
 Every public entry of this module goes above this heading, under
 C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
+
+=head2 _shares_history
+
+    my $shared = Genesis::CI::Preflight::_shares_history($git, $branch, $remote);
+
+Answers whether a local branch and its counterpart on the remote have a commit
+in common.
+
+The question is asked through C<Genesis::run> with C<passfail> on and C<stderr>
+off rather than through C<Service::Git::merge_base>, which folds git's standard
+error into the value it hands back.  A ref this clone cannot resolve makes
+C<git merge-base> print a message and exit non-zero, and a folded message is a
+truthy string, so a reader that took the value would read a missing ref as a
+shared ancestor and let the branch through.  The command's status is the whole
+answer here, and the two states that answer no, a pair with no common commit
+and a ref that is not there, are both states the stage refuses.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle on the repository to read.
+
+=item C<$branch>
+
+The deployment branch, named as git names it.
+
+=item C<$remote>
+
+The remote whose tracking ref the branch is compared against.
+
+=back
+
+B<Returns:> 1 where the two share a commit, and 0 where they share none or
+where either ref cannot be resolved.
+
+B<Examples:>
+
+  Genesis::CI::Preflight::_shares_history($git, 'qa/bosh', 'origin');
+  # 1, where the branch was cut from origin/qa/bosh
+
+  Genesis::CI::Preflight::_shares_history($git, 'qa/bosh', 'origin');
+  # 0, where the local branch is an orphan of the same name
+
+=head2 _local_only_refusal
+
+    my $text = Genesis::CI::Preflight::_local_only_refusal(
+        $action, $outcome, $remote, \@offenders);
+
+Composes the refusal for deployment branches the remote has never had.
+
+One paragraph per branch, so a run with one offender reads exactly as the
+design quotes it and a run with several names them all.  The act the refusal
+opens with and the sentence it closes with are arguments, because the deploy
+raises the same text in its own words.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$action>
+
+The act the refusal opens with, as in C<run genesis propagate>.
+
+=item C<$outcome>
+
+The closing sentence, which says what did not happen.
+
+=item C<$remote>
+
+The remote the branches have no counterpart on.
+
+=item C<\@offenders>
+
+One hashref per branch, each of C<env> and C<branch>.
+
+=back
+
+B<Returns:> The composed refusal, which the caller hands to C<bail> through a
+C<'%s'> format.
+
+B<Examples:>
+
+  Genesis::CI::Preflight::_local_only_refusal(
+      'run #C{genesis propagate}', 'Nothing was written.', 'origin',
+      [{env => 'lab', branch => 'lab/bosh'}]);
+  # 'Refusing to run #C{genesis propagate}.  The local branch #C{lab/bosh}
+  #  has no counterpart on #C{origin}.  ...  Nothing was written.'
+
+=head2 _unrelated_refusal
+
+    my $text = Genesis::CI::Preflight::_unrelated_refusal(
+        $action, $outcome, $remote, \@branches);
+
+Composes the refusal for deployment branches that share no ancestor with their
+counterpart on the remote.
+
+It says that the marker-only reset never applies across unrelated histories,
+whatever the local commits carry, because that is the question an operator
+reaching this refusal is most likely to ask next.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$action>
+
+The act the refusal opens with.
+
+=item C<$outcome>
+
+The closing sentence, which says what did not happen.
+
+=item C<$remote>
+
+The remote whose counterparts the branches share no ancestor with.
+
+=item C<\@branches>
+
+The offending branch names.
+
+=back
+
+B<Returns:> The composed refusal, which the caller hands to C<bail> through a
+C<'%s'> format.
+
+B<Examples:>
+
+  Genesis::CI::Preflight::_unrelated_refusal(
+      'run #C{genesis propagate}', 'Nothing was written.', 'origin',
+      ['qa/bosh']);
+  # 'Refusing to run #C{genesis propagate}.  The local branch #C{qa/bosh}
+  #  shares no ancestor with #C{origin/qa/bosh}, ...  Nothing was written.'
 
 =head2 _commits
 
