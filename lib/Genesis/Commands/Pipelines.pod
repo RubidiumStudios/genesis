@@ -143,12 +143,15 @@ to the pipeline's own name, when not specified.
 
 Print what would be set and exit without setting it.  Concourse prints the
 pipeline YAML, and GitHub Actions prints each workflow file under its own
-name.
+name.  The branch stage runs first even here, so a dry run still creates and
+publishes any deployment branch the remote lacks before it prints anything.
 
 =item C<--output-dir>
 
 Write the compiled artifacts and C<ast.json> to this directory and exit
-without setting anything.
+without setting anything.  The branch stage runs first here too, so this
+run also creates and publishes any deployment branch the remote lacks
+before it writes a file.
 
 =item C<--debug-dir>
 
@@ -170,16 +173,20 @@ where no vault is running.
 =back
 
 B<Returns:> Nothing.  Exits 0 on success, and exits 0 early under
-C<--dry-run> and C<--output-dir> alike.  Exits 86 when the provider's
-prerequisites are not met.
+C<--dry-run> and C<--output-dir> alike, in both cases with the branch stage
+behind it rather than skipped.  Exits 0 under the C<manual> provider, once
+the branch stage has run and the skipped stage has been named.  Exits 86
+when the provider's prerequisites are not met.
 
 B<Errors:>
 
 Calls C<bail()> with C<Genesis::Exit/CONFIG> when C<pipeline.enabled> is
 false or absent, naming the key and saying that nothing was written.
 
-Calls C<bail()> with C<Genesis::Exit/CONFIG> under the C<manual> provider,
-which has no pipeline to apply, and names the automated providers that do.
+Calls C<bail()> with C<Genesis::Exit/CONFIG> when the repository has no git
+remote, because there is then nowhere to publish a deployment branch to.
+The refusal comes before the first branch is created, so no branch is left
+standing behind it.
 
 Calls C<bail()> with C<"No vault specified or configured."> when no vault
 is configured and C<--skip-vault> was not given.
@@ -328,7 +335,12 @@ pipeline's git resource registers the head as a version and skips the commit.
 The name is the deployment slug, so two deployment roots serving one
 environment get a branch each rather than contending for one ref.
 
-The refresh runs first, so what the remote carries is read from refs this run
+A repository with no git remote is refused before the first branch is
+created, because every deployment branch lives on the remote and a run that
+created one and then failed to publish it would leave an orphan standing in
+the clone and every environment behind the first with nothing.
+
+The refresh runs next, so what the remote carries is read from refs this run
 brought down rather than from whatever the clone happened to hold.
 
 Both the clone and the remote are asked whether the branch is there. A branch
@@ -362,6 +374,12 @@ C<created>, C<published>, and C<standing>.
 B<Errors:>
 
 =over 4
+
+=item *
+
+A refusal at C<CONFIG> when the repository has no git remote, saying that
+there is nowhere to publish the deployment branches to and that no branch was
+created. It is raised before anything is written.
 
 =item *
 

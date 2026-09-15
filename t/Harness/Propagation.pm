@@ -37,7 +37,7 @@ our @EXPORT = qw/
 	diverge move_on_r delete_on_r delete_local
 	rewrite_control rewrite_branch
 	amend_tip local_branch local_branch_only unset_control tag_branch
-	set_remotes set_repo_config move_on_r_at
+	set_remotes drop_remotes set_repo_config move_on_r_at
 
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed break_vault restore_vault
@@ -1823,6 +1823,24 @@ sub set_remotes {
 	}
 
 	return $self->git($copy);
+}
+
+# }}}
+# drop_remotes - take every remote off a copy, so it has none at all {{{
+#
+# A repository that has no remote is a state of its own, and it is not the
+# state sever_remote arms.  There the remote is configured and unreachable,
+# and a command meets a failed fetch.  Here there is nowhere to publish to at
+# all, and a command has to say so before it writes anything.
+#
+# The copy was cloned, so its control branch tracks the origin the clone
+# made, and the upstream goes with the remote.  A branch left tracking a
+# remote that is gone is a state git itself would never leave behind.
+sub drop_remotes {
+	my ($self, %opts) = @_;
+	my $copy = $opts{copy} // 'a';
+	$self->set_remotes(copy => $copy, remotes => {}, upstream => 0);
+	return $self;
 }
 
 # }}}
