@@ -15,6 +15,7 @@ use Test::More;
 
 use Genesis;
 use Genesis::Exit;
+use Genesis::Commands::Pipelines;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
@@ -33,25 +34,11 @@ sub _unfolded {
 	return $said;
 }
 
-# _read_in - one line of git's answer in a repository, or undef where the ref
-# is absent
-#
-# The stderr is captured apart from the output rather than folded into it, so
-# a row running before the branch exists reads nothing back rather than
-# reading git's complaint about the name it asked for.
-sub _read_in {
-	my ($dir, @cmd) = @_;
-	my ($out, $rc) = run({dir => $dir, stderr => 0}, 'git', @cmd);
-	return undef if $rc || !defined $out;
-	chomp $out;
-	return $out;
-}
-
 subtest 'an environment with no branch gets an orphan init branch' => sub {
-	# Six rows, and one more for the run's own restoration assertion, which
+	# Seven rows, and one more for the run's own restoration assertion, which
 	# run_genesis makes unless a row turns it off.  The creation is plumbing,
 	# so a working state that moved would be a defect this row should catch.
-	plan tests => 7;
+	plan tests => 8;
 
 	my $h = make_harness(envs => ['qa']);
 	my (undef, undef, $exit) = run_genesis($h, 'pipeline-apply');
@@ -63,16 +50,41 @@ subtest 'an environment with no branch gets an orphan init branch' => sub {
 	is_deeply(tree_of($h->r, 'qa/bosh'), ['init'],
 		'the init branch holds the init file alone');
 
-	is(_read_in($h->r, 'log', '-1', '--format=%s', 'qa/bosh'),
+	# The bytes and not the shape.  An init file written empty, or written
+	# with the commit message in it, passes every other row in this file,
+	# and the body is the whole reason the file is there, since an operator
+	# who meets the branch in a fresh clone has nothing else to read.
+	is(blob_at($h->r, 'qa/bosh', 'init'),
+		Genesis::Commands::Pipelines::INIT_FILE_BODY(),
+		'the init file carries the body the command writes, byte for byte');
+
+	is(git_in($h->r, 'log', '-1', '--format=%s', 'qa/bosh'),
 		'Initialize qa/bosh branch [ci skip]',
 		'the root commit carries the subject and the [ci skip] marker');
 
-	is(_read_in($h->r, 'log', '-1', '--format=%P', 'qa/bosh'), '',
+	is(git_in($h->r, 'log', '-1', '--format=%P', 'qa/bosh'), '',
 		'the init commit is an orphan root');
 
 	my $shared = run({dir => $h->r, passfail => 1},
 		'git', 'merge-base', '--is-ancestor', $h->control, 'qa/bosh');
 	ok(!$shared, 'it shares no history with control');
+};
+
+subtest 'a branch the clone alone holds is published' => sub {
+	# Four rows, and one for the run's own restoration assertion.
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa']);
+	my $local = init_branch($h, 'qa', push => 0);
+	is(remote_sha($h, 'qa/bosh'), undef, 'R does not carry the branch yet');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	is($exit, 0, 'the apply exits 0');
+
+	is(remote_sha($h, 'qa/bosh'), $local,
+		'R now holds the branch at the tip the clone already had');
+	like(_unfolded($out, $err), qr{published qa/bosh},
+		'and the run reports it as published rather than created');
 };
 
 subtest 'a repository with no remote is refused before anything is cut' => sub {
@@ -125,8 +137,7 @@ subtest 'two roots serving one environment get two branches' => sub {
 	is($first,  0, 'the apply in the bosh root exits 0');
 	is($second, 0, 'the apply in the doomsday root exits 0');
 
-	my @branches = sort split /\n/,
-		(_read_in($h->r, 'for-each-ref', '--format=%(refname:short)', 'refs/heads') // '');
+	my @branches = @{branches_on_r($h)};
 
 	is_deeply([grep {$_ ne $h->control} @branches], ['qa/bosh', 'qa/doomsday'],
 		'each deployment has its own branch, composed from its own type');

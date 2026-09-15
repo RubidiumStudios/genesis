@@ -24,7 +24,7 @@ require helper;
 our @EXPORT = qw/
 	make_harness
 	ref_in tree_of upstream_of counts
-	tip_of remote_sha refs_in branch_of files_at slurp
+	tip_of remote_sha refs_in branch_of git_in blob_at files_at slurp
 	in_set covered_paths in_root
 	branches_on_r fresh_clone clone_copy subjects_of commits_on heads_in
 	reachable_on_r
@@ -228,6 +228,48 @@ sub branch_of {
 	return undef if $rc || !defined $out;
 	chomp $out;
 	return $out;
+}
+
+# }}}
+# git_in - one line of git's answer in a repository, or undef {{{
+#
+# The readers above answer the questions rows ask most often, and a row that
+# wants something else, such as a commit's subject or its parent list, needs
+# somewhere to ask it that is not a copy of the same four lines in each file.
+#
+# The stderr is captured apart from the output rather than folded into it, so
+# a row running before a ref exists reads undef back rather than reading
+# git's complaint about the name it asked for as though it were an answer.
+# The trailing newline goes, because every caller wants the line and not the
+# line break.
+sub git_in {
+	my ($dir, @args) = @_;
+	my ($out, $rc) = run({dir => $dir, stderr => 0}, 'git', @args);
+	return undef if $rc || !defined $out;
+	chomp $out;
+	return $out;
+}
+
+# }}}
+# blob_at - one path's bytes on a ref, exactly as the object holds them {{{
+#
+# files_at reads through Genesis::run, which strips trailing whitespace from
+# everything it hands back, so a row comparing a file against the string the
+# product wrote would be comparing a trimmed copy of it.  git's output is
+# read straight off a pipe here instead and nothing is trimmed, which is what
+# lets a row assert a file's bytes rather than its shape.
+#
+# The tree is asked first, so a ref or a path that is not there answers undef
+# quietly rather than letting git complain to the test's own stderr.
+sub blob_at {
+	my ($dir, $ref, $path) = @_;
+	return undef unless grep {$_ eq $path} @{tree_of($dir, $ref)};
+
+	open(my $pipe, '-|', 'git', '-C', $dir, 'cat-file', 'blob', "$ref:$path")
+		or return undef;
+	my $content = do {local $/; <$pipe>};
+	close $pipe;
+	return $content;
 }
 
 # }}}
