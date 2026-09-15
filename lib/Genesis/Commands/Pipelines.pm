@@ -24,6 +24,11 @@ use File::Basename qw/dirname/;
 use File::Path qw/rmtree/;
 use JSON::PP;
 
+# The init file says who owns the branch, because an operator who finds it
+# in a fresh clone has nothing else to read.
+use constant INIT_FILE_BODY =>
+	"This branch is managed by genesis pipeline-apply.\n";
+
 ### Public Commands {{{
 
 # embed - embed Genesis binary in the repository {{{
@@ -57,24 +62,30 @@ sub apply {
 	# a pipeline the operator enabled and chose a provider for.
 	my $platform = $top->pipeline_provider_type // 'manual';
 
-	# Short-circuit on the 'manual' provider: it has no pipeline to apply
-	# — Genesis is the CLI you run at your terminal, there is no CI to
-	# generate or deploy.
-	if ($platform eq 'manual') {
-		# A provider the repository chose is configuration, so the refusal
-		# carries the configuration code rather than the bare one that
-		# stands for a crash, and a pipeline job can tell the two apart.
-		bail(
-			{exitcode => CONFIG},
-			"Manual provider has no pipeline to apply.\n\n".
+	my $git = Service::Git->new('.');
+	info("\n#G{Applying the pipeline} for #C{%s}\n", $top->type);
+
+	# D43 gives the branch work to every provider and the pipeline work to
+	# the automated ones alone, so the branches are made before the provider
+	# is asked for anything.  A manual repository still delivers through
+	# these branches, and the operator deploys from their own terminal.
+	_apply_init_branches($top, $git);
+
+	# The manual provider has no pipeline to set, which is a stage with
+	# nothing to do rather than a run that failed, so the command says which
+	# stage it skipped and exits 0 with the branch work behind it.
+	if ($top->manual_pipeline) {
+		info(
+			"\n#Y{The manual provider has no pipeline to set.}\n\n".
 			"#i{Genesis is your CLI - deploys happen at your terminal, ".
 			"not in a hosted pipeline.}\n\n".
-			"To use a real CI provider, change #C{pipeline.provider.type} in ".
-			"#C{.genesis/config} to one of: %s, then re-run ".
-			"#C{genesis pipeline-apply}.",
+			"To have Genesis set a pipeline as well, change ".
+			"#C{pipeline.provider.type} in #C{.genesis/config} to one of: %s, ".
+			"then run #C{genesis pipeline-apply} again.",
 			join(', ', map {"#C{$_}"}
 				Genesis::CI::Compiler::PipelineProvider->automated_providers())
 		);
+		exit 0;
 	}
 
 	my $result = _compile_pipeline($top, $platform);
@@ -1312,6 +1323,64 @@ sub _compile_pipeline {
 
 	$result->{provider_cli_opts} = \%provider_cli_opts;
 	return $result;
+}
+
+# }}}
+# _apply_init_branches - create every missing deployment branch {{{
+#
+# D43 makes this command the only creator of a deployment branch, and D42
+# gives the branch its shape: an orphan whose root commit adds a single init
+# file and carries [ci skip], so the pipeline's git resource registers the
+# head as a version and skips the commit.  The first commit it does not skip
+# is the seed the propagate run delivers later.
+#
+# Both sides are asked whether the branch is there, because they answer
+# differently and each answer means something.  A branch the remote carries
+# is left exactly as it stands, whatever the clone holds.  A branch the clone
+# holds and the remote lacks is published rather than refused, since the
+# creation would refuse to recreate it and the operator would be left with a
+# branch that never reaches anybody else.
+#
+# The publish goes through push_append_only, so a tip that would rewrite what
+# the remote already carries is refused by name instead of being force-pushed
+# or swallowed.
+sub _apply_init_branches {
+	my ($top, $git) = @_;
+
+	# The command names itself and what it has not written yet, because the
+	# refresh defaults its wording to propagate and would otherwise tell the
+	# operator to re-run a command they never ran.
+	$top->fetch_pipeline_envs($git,
+		command => 'pipeline-apply',
+		outcome => 'No branch was created and no pipeline was set.');
+
+	my %report = (created => [], published => [], standing => []);
+	for my $name (@{$top->pipeline_topology->{order}}) {
+		my $branch = $top->branch_for($name);
+
+		if ($git->remote_branch_exists($branch)) {
+			info("  #Gi{standing} #C{%s}", $branch);
+			push @{$report{standing}}, $branch;
+			next;
+		}
+
+		if ($git->branch_exists($branch)) {
+			$git->push_append_only($branch);
+			info("  #G{published} #C{%s}", $branch);
+			push @{$report{published}}, $branch;
+			next;
+		}
+
+		$git->create_orphan_branch($branch,
+			files   => {init => INIT_FILE_BODY},
+			message => sprintf('Initialize %s branch [ci skip]', $branch),
+		);
+		$git->push_append_only($branch);
+		info("  #G{created} #C{%s}", $branch);
+		push @{$report{created}}, $branch;
+	}
+
+	return \%report;
 }
 
 # }}}

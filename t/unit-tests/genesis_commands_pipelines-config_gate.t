@@ -1,13 +1,13 @@
 #!perl
 #
-# What pipeline-apply says about a repository's configuration before it
+# What pipeline-apply makes of a repository's configuration before it
 # compiles anything.  Two things happen there.  A repository whose
-# provider is manual has no pipeline to apply, and that refusal is a
-# configuration refusal, so it carries the named exit code a caller can
-# test for rather than the bare one that means a crash.  And a
-# repository still carrying the .genesis/ci/ directory is compiled from
-# the pipeline section of .genesis/config alone, so the leftover
-# directory is ignored and the run never names it.
+# provider is manual has branches to create and no pipeline to set, so
+# the apply does the branch work, says which stage it skipped, and exits
+# 0 rather than refusing.  And a repository still carrying the
+# .genesis/ci/ directory is compiled from the pipeline section of
+# .genesis/config alone, so the leftover directory is ignored and the
+# run never names it.
 #
 use strict;
 use warnings;
@@ -26,22 +26,22 @@ provide_rc();
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-subtest 'the manual provider refusal is a configuration refusal' => sub {
+subtest 'the manual provider skips the stages it has nothing for' => sub {
 	plan tests => 3;
 
 	# The vault is stood up, because the command checks for one before it
-	# reads the provider and the refusal under test is the second of the
-	# two.
+	# reads the provider and the skip under test comes after that.
 	my $h = make_harness(envs => ['qa'], provider => 'manual');
 
-	my (undef, $err, $exit) = $h->run_genesis({restore => 0}, 'pipeline-apply');
+	my ($out, $err, $exit) = $h->run_genesis({restore => 0}, 'pipeline-apply');
+	my $said = _unfolded($out, $err);
 
-	is($exit, CONFIG,
-		'the refusal exits on the configuration code');
-	isnt($exit, 1,
-		'and not the bare one that stands for a crash');
-	like($err, qr/Manual provider has no pipeline to apply/,
-		'the operator is told why there is nothing to do');
+	is($exit, 0,
+		'the manual apply exits 0, because a skipped stage is not a failure');
+	isnt($exit, CONFIG,
+		'and not the configuration code, which would say the run was refused');
+	like($said, qr/manual provider has no pipeline to set/i,
+		'the operator is told which stage was skipped and why');
 };
 
 # _unfolded - what the run said, put back on one line

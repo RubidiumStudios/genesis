@@ -1926,6 +1926,13 @@ sub add_deployment_root {
 		Genesis::Top->create($self->{a}, $type, no_vault => 1, directory => $path);
 	}
 
+	# create writes no pipeline section, here as at the first root, and a
+	# command run in this root reads its provider and its enabled flag out of
+	# this file.  Without the section a row that runs a command in the second
+	# root meets the refusal that turns away a repository with no pipeline,
+	# which is never what a row asking for a second root is after.
+	$self->_seed_pipeline_section("$self->{a}/$path");
+
 	$self->write_env_file($_, root => $path, type => $type, commit => 0)
 		for @{$opts{envs} || []};
 
