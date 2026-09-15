@@ -66,7 +66,7 @@ subtest 'the body walk returns whole messages' => sub {
 };
 
 subtest 'the pathspec scopes both walks' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	commit_on_control($h, files => {'qa.yml'    => "---\nkit: dev\n"},
@@ -84,6 +84,12 @@ subtest 'the pathspec scopes both walks' => sub {
 		'the body walk answers with records under a pathspec too');
 	is(scalar(grep {ref $_ eq 'HASH' && $_->{message} =~ /change something else/} @records), 0,
 		'and so does the body walk');
+
+	# The two assertions above are negations that an empty list satisfies,
+	# so this one says what the walk must return rather than what it must
+	# not, and the row goes red if the pathspec ever drops everything.
+	is(scalar(grep {ref $_ eq 'HASH' && $_->{message} =~ /\Achange qa\n/} @records), 1,
+		'and it keeps the commit that did touch the pathspec');
 };
 
 done_testing;
