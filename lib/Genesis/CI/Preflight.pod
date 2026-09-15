@@ -219,6 +219,22 @@ it is awaiting C<pipeline-apply>, which the walk reports as that environment's
 outcome.  Neither is a branch the remote has that this clone lacks, which the
 refresh creates locally before this stage reads it.
 
+Each branch's local-only commits are then classified, which is the last
+question the stage asks and the only one whose answer it writes.  A commit
+carrying a propagation marker is one a re-run reproduces, so a branch whose
+local-only commits all carry one is reset to its remote-tracking ref and the
+reset is reported as an event line beside the environment rather than as that
+environment's outcome.  A commit carrying no marker is a hand edit that
+belongs on control, so it refuses the whole run.  The refusal is raised before
+the first reset, so a repository holding both never has a branch moved under
+it.
+
+The reset is the run's first write, and it is the one forced write onto a
+deployment branch the design admits outside the session's own abort.  Under
+C<dry_run> nothing is written; the line is reported as an assumption the real
+run would make, so a report never reads as though the branch had already
+moved.
+
 The whole pipeline is classified rather than the environments one run happens
 to touch, because the initial state is a property of the repository and not of
 the run.  A hand-made branch anywhere in the pipeline is a defect the operator
@@ -290,12 +306,14 @@ The divergence record for the control branch.
 =item C<branches>
 
 One record per environment that has a branch on either side, keyed by the
-environment's name.
+environment's name.  A branch this stage reset carries C<reset> set on its
+record.
 
 =item C<events>
 
-The lines the caller prints.  They are seeded from the control record, so the
-caller prints the whole stage's events once and in order.
+The lines the caller prints.  They are seeded from the control record, and
+the reset lines are appended to them, so the caller prints the whole stage's
+events once and in order.
 
 =back
 
@@ -304,7 +322,12 @@ never had, and for one that shares no ancestor with the remote's.  The two
 classes come back in one refusal, which names every offending branch and gives
 the remedy in order, which is to inspect the branch, move anything wanted to
 control, delete the branch, and then run the command the case calls for.
-Genesis deletes nothing itself.  The refresh and the control check raise their
+Genesis deletes nothing itself.  It bails at C<DATAERR> again
+for a branch carrying a local-only commit with no propagation marker, naming
+the branch, every such commit, both counts, and the command for each of the
+two ways out, which are to push the commit or to move the change to control
+and reset the branch.  No option performs either, so the refusal is the whole
+path out.  The refresh and the control check raise their
 own codes where the caller has left them to this stage.
 
 B<Examples:>
@@ -319,6 +342,12 @@ B<Examples:>
 
   Genesis::CI::Preflight::initial_state($top, $git, envs => ['lab']);
   # refuses at DATAERR where lab/bosh is a branch origin has never had
+
+  my $initial = Genesis::CI::Preflight::initial_state($top, $git,
+      envs => ['qa'], refreshed => $refreshed, control => $control_state);
+  # $initial->{branches}{qa}{reset} is 1, and $initial->{events} carries
+  # 'reset qa/bosh to origin/qa/bosh, discarding 1 commit that the walk
+  # reproduces'
 
 =head1 INTERNAL FUNCTIONS
 
@@ -507,6 +536,57 @@ B<Examples:>
 
   Genesis::CI::Preflight::_unrelated_refusal('origin', []);
   # ()
+
+=head2 _hand_commit_refusal
+
+    my $text = Genesis::CI::Preflight::_hand_commit_refusal(
+        $action, $outcome, $remote, \@offenders);
+
+Composes the refusal for deployment branches carrying a local commit that no
+remote has and that carries no propagation marker.
+
+It lists each branch with the short sha and the subject of every markerless
+commit, so the operator can see what has to be dealt with without going to
+look for it, and it then gives both counts and the command for each of the two
+ways out. No flag does the operator's half of either, because the change
+belongs on control and the friction of moving it there by hand is the point.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$action>
+
+The act the refusal opens with.
+
+=item C<$outcome>
+
+The closing sentence, which says what did not happen.
+
+=item C<$remote>
+
+The remote the branches are measured against.
+
+=item C<\@offenders>
+
+One hashref per branch, carrying C<branch>, C<ahead>, C<behind>, and
+C<commits>, where C<commits> holds the markerless commits alone, as
+C<local_only_commits> returns them.
+
+=back
+
+B<Returns:> The composed refusal, which the caller hands to C<bail> through a
+C<'%s'> format.
+
+B<Examples:>
+
+  Genesis::CI::Preflight::_hand_commit_refusal(
+      'run #C{genesis propagate}', 'Nothing was written.', 'origin',
+      [{branch => 'qa/bosh', ahead => 1, behind => 0,
+        commits => [{short => 'a1b2c3d', subject => 'patch it by hand'}]}]);
+  # 'Refusing to run #C{genesis propagate}.  These branches carry a commit
+  #  the remote does not have ...  #C{qa/bosh} is ahead of #C{origin/qa/bosh}
+  #  by 1 commit and behind it by 0 commits.  ...  Nothing was written.'
 
 =head2 _commits
 

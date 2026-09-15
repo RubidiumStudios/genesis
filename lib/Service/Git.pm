@@ -390,6 +390,31 @@ sub create_branch {
 }
 
 # }}}
+# set_branch_ref - force one local branch ref to a ref {{{
+#
+#   $git->set_branch_ref('qa/bosh', 'refs/remotes/origin/qa/bosh');
+#
+# The forced write onto a local branch, which the design admits in two cases
+# only: the pre-flight's reset of a marker-only commit, and the session's
+# abort of a branch it committed to.  It refuses the checked-out branch,
+# because git's own `branch -f` refuses there and a ref that disagreed with
+# the working tree beside it would be worse than a refusal.
+sub set_branch_ref {
+	my ($self, $branch, $ref) = @_;
+
+	bail(
+		"Refusing to force #C{%s}, which is the branch this working tree is ".
+		"on.  Switch away from it first.",
+		$branch
+	) if ($self->current_branch // '') eq $branch;
+
+	run({dir => $self->{root}, onfailure => "Failed to move '$branch' to '$ref'"},
+		'git', 'branch', '-f', $branch, $ref);
+	$self->{_branch_cache}{$branch} = 1;
+	return $self;
+}
+
+# }}}
 # branch_exists - check if a branch exists (cached) {{{
 sub branch_exists {
 	my ($self, $name) = @_;
