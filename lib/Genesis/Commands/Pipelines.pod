@@ -588,9 +588,9 @@ B<Examples:>
     my $session = open_control_session($top, $git);
 
 Begins the run's session and switches it to the control branch, under D65.
-Creates the local ref from the remote-tracking ref where the copy lacks one,
-which I2 permits, and refuses at C<Genesis::Exit::DATAERR> when control
-exists nowhere.
+It asks nothing about the local control ref, because every caller reaches it
+through C<Genesis::CI::Preflight::require_control>, which refuses each state
+in which that ref could be missing.
 
 The run no longer refuses to start off control.  C<finish> returns the
 operator to the branch they stood on, exactly as a deploy that switches to
@@ -599,10 +599,11 @@ stops mattering.  The session comes from the handle rather than being built
 here, because the handle keeps one session per working tree and that is what
 I9 asks for.
 
-The clean-tree refusal that used to stand beside the branch refusal is gone
-with it.  It guarded a run that read the working tree, and it refused a dry
-run that writes nothing, which D44 does not allow.  What is left of it is
-the session's own assertion in C<begin>, which names the files it found.
+The clean-tree refusal that used to stand beside the branch refusal has
+moved rather than gone.  It now lives in the session's own C<begin>, which
+names the files it found, and it applies to a dry run as it does to a
+writing one, because a dry run switches to control like any other run and
+D65 puts the clean assertion on the switch.
 
 B<Returns:> The open session, standing on control.
 

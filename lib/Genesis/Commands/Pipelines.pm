@@ -6,7 +6,7 @@ use warnings;
 use Genesis;
 use Genesis::State;
 use Genesis::Commands;
-use Genesis::Exit qw/CONFIG NOPERM ABORTED DATAERR/;
+use Genesis::Exit qw/CONFIG NOPERM ABORTED/;
 use Genesis::Config;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
@@ -587,11 +587,12 @@ sub propagate {
 	# read the same topology as a run from control, and finish puts the
 	# operator back on the branch they started from.
 	#
-	# The clean-tree refusal that stood here went with the branch refusal.
-	# It guarded a run that read the working tree, and it refused a dry run
-	# that writes nothing, which D44 does not allow.  What is left of it is
-	# the session's own assertion in begin, which names the files it found
-	# and is the same guard stated where D84 puts it.
+	# The clean-tree refusal that stood beside the branch refusal has moved
+	# rather than gone.  It now lives in the session's own begin, which
+	# names the files it found, and it is the same guard stated where D84
+	# puts it.  It applies to a dry run as it does to a writing one, because
+	# a dry run switches to control like any other run and D65 puts the
+	# clean assertion on the switch.
 	my $session = open_control_session($top, $git);
 
 	# A refusal from here on owes the operator their branch back before it
@@ -1211,14 +1212,12 @@ sub assert_provider_gate {
 # standing, because the environment files are read off the working tree and
 # a feature branch carries whichever of them its author happened to touch.
 #
-# Where the copy holds no local ref for control we create it from the
-# remote-tracking ref first, which I2 permits because the branch already
-# exists on the remote and we are inventing nothing.  The refresh writes
-# that ref for itself in the ordinary case, so this is the fallback for a
-# copy the refresh could not write, and it costs one query.
-#
-# Where control exists nowhere the run refuses, since the environment files
-# live on it and nothing can read the topology without it.
+# Nothing here asks whether the local control ref is there, because every
+# caller reaches this sub through Genesis::CI::Preflight::require_control,
+# which refuses each state in which that ref could be missing.  A branch
+# that exists on neither side is refused there as configuration, and one
+# that is on the remote and not in this clone is refused there as data, so
+# by the time the switch below runs the ref is always in hand.
 #
 # The session comes from the handle rather than being built here, because
 # the handle memoises one session per working tree, and that is what makes
@@ -1227,20 +1226,6 @@ sub open_control_session {
 	my ($top, $git) = @_;
 
 	my $control = $top->control_branch;
-
-	unless ($git->branch_exists($control)) {
-		my $remote = $git->default_remote;
-		bail(
-			{exitcode => DATAERR},
-			"The control branch #C{%s} exists neither here nor on #C{%s}.  ".
-			"Every environment file lives on it, so nothing can read the ".
-			"topology without it.  Create it and push it, then run this ".
-			"again.",
-			$control, $remote // 'the remote'
-		) unless $remote && $git->remote_branch_exists($control, $remote);
-		$git->create_branch($control, "$remote/$control");
-	}
-
 	my $session = $git->session(control => $control);
 	$session->begin;
 	$session->switch($control);
