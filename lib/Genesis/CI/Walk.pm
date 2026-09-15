@@ -16,7 +16,10 @@ use Exporter qw/import/;
 use Genesis qw/run bug/;
 use Genesis::CI::Marker;
 
-our @EXPORT_OK = qw/plan changed_set undeployed_set READINGS HOLD_REASONS/;
+our @EXPORT_OK = qw/
+	plan changed_set route_commit undeployed_set overlap
+	READINGS HOLD_REASONS
+/;
 
 # D94 fixes the four readings, and error is the record's own field rather
 # than a fifth reading.
@@ -109,6 +112,26 @@ sub changed_set {
 }
 
 # }}}
+# route_commit - decide whether one commit belongs to one environment {{{
+#
+# D68: only triggering content routes a commit.  A commit whose content for
+# this deployment is only non-triggering is skipped exactly as one that
+# touches nothing in the set is, and it records no outcome, because the next
+# delivery's mirror already carries it.  That holds behind a hold as well as
+# in front of one, so a config change standing behind a held commit is not
+# reported as waiting on anything.  The carried list travels with the routed
+# commit for the report alone, so an operator can see that a script or a
+# config change rode along.
+sub route_commit {
+	my ($git, $env, $commit) = @_;
+
+	my ($triggering, $carried) = changed_set($git, $env, $commit);
+	return undef unless @$triggering;
+
+	return {triggering => $triggering, carried => $carried};
+}
+
+# }}}
 # undeployed_set - what an environment holds or is about to hold {{{
 #
 # Every file in the environment's propagation set that changed on control
@@ -135,6 +158,23 @@ sub undeployed_set {
 }
 
 # }}}
+# overlap - the triggering files an ancestor has not deployed {{{
+#
+# D68 again: a hold exists to stop unproven content reaching a descendant,
+# and a non-triggering path is not content that needs proving, so it never
+# counts here.  Without this rule a shared .genesis/config change would hold
+# every descendant on the commit that touched it.  Both lists arrive
+# triggering already, the commit's from route_commit and the ancestor's from
+# undeployed_set, so the rule is kept by what is handed in rather than by a
+# second filter of its own.
+sub overlap {
+	my ($files, $undeployed) = @_;
+
+	my %undeployed = map {$_ => 1} @$undeployed;
+	return grep {$undeployed{$_}} @$files;
+}
+
+# }}}
 # }}}
 ### The walk {{{
 
@@ -158,7 +198,12 @@ sub walk_env {
 
 	my $held_by;
 	for my $commit (@due) {
-		my ($files, $carried) = changed_set($git, $env, $commit->{sha});
+		# The routing question is asked before the hold is, because a commit
+		# that routes nowhere records no outcome at all and being behind a
+		# hold does not give it one.
+		my $routed = route_commit($git, $env, $commit->{sha});
+		next unless $routed;
+		my $files = $routed->{triggering};
 
 		if ($held_by) {
 			push @{$record->{held}}, {
@@ -170,8 +215,6 @@ sub walk_env {
 			};
 			next;
 		}
-
-		next unless @$files;
 
 		my $hold = $args{hold_check}->($commit, $files);
 		if ($hold) {
@@ -189,7 +232,7 @@ sub walk_env {
 			control_commit => $commit->{sha},
 			subject        => $commit->{subject},
 			files          => $files,
-			carried        => $carried,
+			carried        => $routed->{carried},
 		};
 	}
 
