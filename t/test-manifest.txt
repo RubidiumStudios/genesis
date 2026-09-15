@@ -320,6 +320,7 @@ integration-tests/genesis_commands_pipelines-apply_append_only.t # every push th
 integration-tests/genesis_commands_pipelines-apply_records.t # the apply records the control commit, the provider, and the time it applied
 integration-tests/genesis_commands_pipelines-apply_discovery.t # the apply computes each environment's dependency set, marks an unrenderable one incomplete, and records both beside its exodus record
 integration-tests/genesis_commands_pipelines-apply_protection.t # the apply asks the repository to block force pushes, require linear history, and merge a deployment branch by rebase alone
+integration-tests/genesis_commands_pipelines-apply_orphaned_marker.t # a rewrite of control that drops a commit orphans every marker and every certified commit that named it
 integration-tests/genesis_ci_preflight-control.t             # control exists, and it stands in step with the remote
 integration-tests/genesis_ci_preflight-branch_origin.t        # the two refusals for a branch with no legitimate origin
 integration-tests/genesis_ci_preflight-local_commits.t       # the marker-only reset, and the hand-commit refusal
