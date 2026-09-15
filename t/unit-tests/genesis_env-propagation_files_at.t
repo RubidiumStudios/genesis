@@ -36,14 +36,21 @@ subtest 'the set is read at the delivered commit, not from the working tree' => 
 	# A flat repository: the deployment root is the git root.  The kit moves
 	# with everything else, so the reader has to find it under the new prefix
 	# to name the kit source at all.
+	#
+	# The ops file is the kind whose resolution has to follow the moving
+	# root, and it is tracked by its exact name as well as named by the
+	# kit's blueprint, so both readers name the one file for two reasons and
+	# the tree holds no ops file that only one of them knows about.
 	my $h = make_harness(envs => ['qa'], root => '',
 		kit => 't/src/ops-blueprint');
 	fixture_vault($h);
+	write_env_file($h, 'qa',
+		pipeline => {track_additional_files => ['ops/extra.yml']});
 	init_branch($h, 'qa');
 
 	my $flat = commit_on_control($h,
-		files   => {'kit-overrides.yml' => "---\noverride: yes\n"},
-		message => 'add the kit overrides',
+		files   => {'ops/extra.yml' => "---\nextra: fragment\n"},
+		message => 'add the fragment the blueprint names',
 	);
 	deliver($h, 'qa', copy => 'a', control => $flat);
 
@@ -104,7 +111,8 @@ subtest 'the set is read at the delivered commit, not from the working tree' => 
 subtest 'no rename detection runs' => sub {
 	plan tests => 3;
 
-	my $h = make_harness(envs => ['qa'], root => 'bosh');
+	my $h = make_harness(envs => ['qa'], root => 'bosh',
+		kit => 't/src/ops-blueprint');
 	fixture_vault($h);
 	write_env_file($h, 'qa', root => 'bosh',
 		pipeline => {track_additional_files => ['ops/old.yml']});
@@ -208,6 +216,27 @@ subtest 'a glob in the tracked list expands at the commit' => sub {
 	my $tree = tree_of($h->a, $h->slug('qa'));
 	ok(in_set('bosh/ops/one.yml', @$tree) && in_set('bosh/ops/two.yml', @$tree),
 		'and the delivery carries both onto the branch');
+};
+
+subtest 'the glob translation keeps the corners a shell keeps' => sub {
+	plan tests => 4;
+
+	# A star first in a brace group is still first in its path segment, so
+	# it refuses a leading dot as a star first in the segment does.
+	my $group = Genesis::Env::_glob_regex('ops/{*.yml,*.yaml}');
+	ok('ops/one.yaml' =~ $group,
+		'a brace group matches each of the patterns it holds');
+	ok(!('ops/.hidden.yml' =~ $group),
+		'and a star first in a group still refuses a leading dot');
+
+	# A closing bracket first in a class is that bracket rather than the end
+	# of the class, which is the one place a class does not end where it
+	# looks like it does.
+	my $class = Genesis::Env::_glob_regex('ops/[]x]one.yml');
+	ok('ops/]one.yml' =~ $class,
+		'a bracket first in a class is that bracket');
+	ok(!('ops/one.yml' =~ $class),
+		'and the class still has to match something');
 };
 
 subtest 'a kit at latest is the newest archive the commit holds' => sub {
@@ -343,6 +372,78 @@ subtest 'the fragments are read at the commit, not where the session stands' => 
 
 	ok(in_set('bosh/ops/extra.yml', @{tree_of($h->a, $h->slug('qa'))}),
 		'and the delivery carries it onto the branch under its new prefix');
+};
+
+# raised_by - the arguments a refusal was raised with, or undef
+#
+# bail wraps its message for the terminal before it raises, so reading the
+# message back would rest on where a line break landed.  The arguments the
+# refusal composed are read instead, which is the same shape the repository
+# configuration rows use.
+sub raised_by {
+	my ($code) = @_;
+	my @raised;
+	no warnings qw/once redefine/;
+	local *Genesis::Env::bail = sub {push @raised, [@_]; die "refused\n"};
+	my $answered = eval {$code->(); 1};
+	return ($answered ? undef : $raised[0]);
+}
+
+sub names_in {
+	my ($raised, $pattern) = @_;
+	return scalar(grep {!ref($_) && $_ =~ $pattern} @{$raised || []});
+}
+
+subtest 'a commit that carries no kit is refused' => sub {
+	plan tests => 3;
+
+	# No kit is installed, so the commit holds an environment and its
+	# configuration and nothing to deploy them with.
+	my $h = make_harness(envs => ['qa'], root => 'bosh', vault => 0);
+	my $control = commit_on_control($h,
+		files   => {'bosh/ops/one.yml' => "---\none: yes\n"},
+		message => 'add an ops file and no kit',
+	);
+
+	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh', no_vault => 1);
+	my $env = Genesis::Env->bare('qa', $top);
+
+	my $raised = raised_by(sub {$env->propagation_files_at($control, git => $git)});
+	ok($raised, 'the read refuses rather than answering a set with no kit in it');
+	ok(names_in($raised, qr{declares the kit}),
+		'and the refusal says the environment declares a kit');
+	ok(names_in($raised, qr{\Q@{[substr($control, 0, 10)]}\E}),
+		'and names the commit that does not carry it');
+};
+
+subtest 'a read with no vault to lend refuses by name' => sub {
+	plan tests => 3;
+
+	# The kit is there, so the read gets as far as the hook that names the
+	# fragments, which is the step that wants a vault.
+	my $h = make_harness(envs => ['qa'], root => 'bosh', vault => 0,
+		kit => 't/src/ops-blueprint');
+	my $control = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: fragment\n"},
+		message => 'add the fragment the blueprint names',
+	);
+
+	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
+	# A Top that holds no vault is what a command outside propagation has,
+	# and Service::Vault::None is the absence of a vault rather than a vault
+	# that can be lent to the tree the read writes out.
+	my $top = Genesis::Top->new($h->a . '/bosh', no_vault => 1);
+	my $env = Genesis::Env->bare('qa', $top);
+
+	my $raised = raised_by(sub {$env->propagation_files_at($control, git => $git)});
+	ok($raised, 'the read refuses rather than letting the hook ask for one');
+	ok(names_in($raised, qr{without a vault}),
+		'and the refusal names the read it was for');
+	ok(names_in($raised, qr{Service::Vault::None}),
+		'and says what the command holds instead');
 };
 
 subtest 'a tracked path that fell out of the list is read at the commit' => sub {
