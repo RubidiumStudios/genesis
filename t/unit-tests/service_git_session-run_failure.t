@@ -416,9 +416,13 @@ subtest 'the loss reports nothing it cannot show' => sub {
 	# The arming is read as well as its outcome, so a later change that
 	# stopped reaching the writes at all would fail this row rather than
 	# pass it quietly.
-	ok(scalar(grep {$_->[0] eq 'checkout_file'} step_log($fault)),
-		'the writer did write, and the harness kept the writes from landing');
+	is(scalar(grep {$_->[0] eq 'checkout_file'} step_log($fault)), 6,
+		'the writer wrote all six, and the harness kept every write from landing');
 
+	# These two reads stay green even when the check is disabled, because an
+	# unchecked writer stages nothing here and git commit then records
+	# nothing.  They rule out a commit, and the assertions above are the
+	# ones that tell a caught delivery from an unchecked one.
 	is(ref_in($h->a, 'refs/heads/' . $h->slug('qa')), $before,
 		'no commit stands, so no report of one exists');
 
