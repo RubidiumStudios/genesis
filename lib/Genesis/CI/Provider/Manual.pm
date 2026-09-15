@@ -40,6 +40,17 @@ EOF
 }
 
 # }}}
+# provider_options_schema - manual reads no key of its own {{{
+#
+# Empty rather than absent, under D105.  The refusal D100 asks for falls
+# out of it: a provider key written beside type: manual is a key nothing
+# declares, so it is refused by name like any other undeclared key, and
+# manual needs no special case to get there.
+sub provider_options_schema {
+	return {};
+}
+
+# }}}
 # }}}
 ### Instance Methods {{{
 

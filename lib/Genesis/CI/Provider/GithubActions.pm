@@ -70,6 +70,20 @@ EOF
 }
 
 # }}}
+# provider_options_schema - no provider key of its own yet {{{
+#
+# Empty rather than absent, and empty on purpose rather than by oversight.
+# The two flags this provider takes are ci-github-repo and
+# ci-github-branch, and neither is a provider key: under D102 the
+# repository belongs to the source-control block, and the branch a run
+# triggers on is the control branch that same block names.  So there is
+# nothing for the provider block to declare until this provider's own
+# compiler lands and brings the keys it reads with it.
+sub provider_options_schema {
+	return {};
+}
+
+# }}}
 # }}}
 ### Instance Methods {{{
 

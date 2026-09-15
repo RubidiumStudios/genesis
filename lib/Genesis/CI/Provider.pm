@@ -133,6 +133,23 @@ EOF
 }
 
 # }}}
+# provider_options_schema - the keys this provider reads (abstract) {{{
+#
+# Under D86 this is mandatory and under D105 it stays mandatory, because
+# its readers are pipeline-describe's resolved values, the per-key
+# defaults, the help text, and the post-MVP wizard, and none of those is
+# validation.  Without it the per-provider key table goes back to being
+# hand-listed beside the classes, which is what D86 exists to prevent.
+#
+# It sits here rather than on the compiler base because D105's default
+# validate_config validates against it, and a default cannot reach a
+# declaration in another hierarchy.
+sub provider_options_schema {
+	my ($self) = @_;
+	bug("Subclass '%s' must implement provider_options_schema()", ref($self) || $self);
+}
+
+# }}}
 # }}}
 ### Instance Methods {{{
 
@@ -193,6 +210,12 @@ Genesis::CI::Provider - CI provider factory and base class
 
 Genesis::CI::Provider is the factory and abstract base class for CI provider
 configuration management.  It follows the same pattern as Genesis::Kit::Provider.
+
+A provider class answers for both halves of its configuration block: it
+declares the keys it reads, through C<provider_options_schema>, and it
+validates the block an operator wrote for it, through C<validate_config>.
+The two live together so that the check always has the declaration it is
+checking against.
 
 Concrete subclasses: Concourse, GithubActions, Manual.
 

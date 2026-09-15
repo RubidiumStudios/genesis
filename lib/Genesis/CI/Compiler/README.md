@@ -209,23 +209,33 @@ sub platform_name { ... }
 # Return file extension for generated config
 sub file_extension { ... }
 
-# Declare the keys this provider takes under pipeline.provider, in the
-# shape Top's repository schema uses, so the configuration layer can
-# merge them in and validate them for you.
-sub provider_options_schema { ... }
-
 # Declare what this provider is able to do, as the six booleans the
 # base class names, so a key whose ability the provider lacks is
 # refused at load rather than discovered at run time.
 sub capabilities { ... }
 ```
 
-`provider_options_schema` and `capabilities` are abstract on the base
-class and every provider has to answer both. A class that leaves either
-one out fails when its configuration loads, because the base raises
-rather than guessing: a provider with no declared keys would have every
-key an operator wrote refused by name, and a provider whose abilities
-are unknown cannot have those keys gated at all.
+The keys a provider takes under `pipeline.provider` are declared on its
+matching class under `Genesis::CI::Provider`, which is also the class
+that validates the block an operator wrote, and the compiler base reads
+the declaration from there:
+
+```perl
+package Genesis::CI::Provider::MyPlatform;
+
+# Declare the keys this provider takes under pipeline.provider, in the
+# shape Top's repository schema uses, so the configuration layer can
+# merge them in and validate them for you.
+sub provider_options_schema { ... }
+```
+
+`provider_options_schema` and `capabilities` are both mandatory, each
+abstract on the base class that owns it, and every provider has to
+answer both. A class that leaves either one out fails when its
+configuration loads, because the base raises rather than guessing: a
+provider with no declared keys would have every key an operator wrote
+refused by name, and a provider whose abilities are unknown cannot have
+those keys gated at all.
 
 ### How It Works
 

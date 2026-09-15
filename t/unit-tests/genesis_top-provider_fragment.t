@@ -20,6 +20,7 @@ use Genesis;
 provide_rc();
 use_ok 'Genesis::Top';
 use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::Provider';
 
 # The fragment this file compares the merged schema against.  The load
 # path loads it on its own, but reading it here through a class the file
@@ -35,6 +36,31 @@ sub concourse {
 	my (@lines) = @_;
 	return automated_config('concourse', 'target: ci', @lines);
 }
+
+# Proves that the declaration and the check belong to one class, so the
+# base-class default of D105 has something to validate against, and that
+# the manual provider is in the map like any other.
+subtest 'one class carries the fragment and the check' => sub {
+	plan tests => 5;
+
+	# Named here as well as at the top of this file, because the row below
+	# compares the compiler class's answer with the CLI class's.
+	require Genesis::CI::Compiler::Providers::Concourse;
+
+	for my $type (qw/concourse github-actions manual/) {
+		my $class = Genesis::CI::Provider->provider_class($type);
+		ok $class->can('provider_options_schema'),
+			"the $type provider declares its own keys";
+	}
+
+	is_deeply Genesis::CI::Provider::Manual->provider_options_schema, {},
+		'and the manual provider declares an empty fragment rather than none';
+
+	# The compiler side reads the same declaration rather than a copy.
+	is_deeply Genesis::CI::Concourse->provider_options_schema,
+		Genesis::CI::Provider::Concourse->provider_options_schema,
+		'the compiler class answers with what the CLI class declared';
+};
 
 subtest "the configured provider's fragment is merged at load" => sub {
 	plan tests => 5;
@@ -75,7 +101,14 @@ subtest 'a key no fragment declares is refused by name' => sub {
 subtest 'a provider that omits its fragment fails at load' => sub {
 	plan tests => 1;
 
-	# A provider class with no fragment, registered for this test alone.
+	# A provider whose CLI class declares no fragment, registered for this
+	# test alone.  The omission has to be on the CLI side, because that is
+	# where the declaration lives and where the base raises on its absence.
+	put_file('t/tmp/lib/Genesis/CI/Provider/Mute.pm', <<'MUTECLI');
+package Genesis::CI::Provider::Mute;
+use base 'Genesis::CI::Provider';
+1;
+MUTECLI
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Mute.pm', <<'MUTE');
 package Genesis::CI::Compiler::Providers::Mute;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
@@ -86,8 +119,8 @@ MUTE
 	Genesis::CI::Compiler::PipelineProvider->register_provider('mute', {
 		class     => 'Genesis::CI::Compiler::Providers::Mute',
 		file      => 'Genesis/CI/Compiler/Providers/Mute.pm',
-		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		cli_class => 'Genesis::CI::Provider::Mute',
+		cli_file  => 'Genesis/CI/Provider/Mute.pm',
 	});
 
 	throws_ok {load_with($h, "pipeline:\n  enabled: true\n  provider:\n    type: mute")}
@@ -109,12 +142,14 @@ subtest 'the manual provider admits no provider key' => sub {
 subtest 'a required fragment key is refused by name when it is absent' => sub {
 	plan tests => 2;
 
-	# A provider class whose fragment declares one key it cannot work
-	# without, registered for this test alone.
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Terse.pm', <<'TERSE');
-package Genesis::CI::Compiler::Providers::Terse;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
-sub provider_type {'terse'}
+	# A provider whose fragment declares one key it cannot work without,
+	# registered for this test alone.
+	put_file('t/tmp/lib/Genesis/CI/Provider/Terse.pm', <<'TERSECLI');
+package Genesis::CI::Provider::Terse;
+use base 'Genesis::CI::Provider';
+# The base's new is the factory's, and it refuses to build a subclass, so
+# a CLI-side fixture the load path constructs brings its own.
+sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
 sub provider_options_schema {
 	return {
 		token => {
@@ -124,6 +159,12 @@ sub provider_options_schema {
 		},
 	};
 }
+1;
+TERSECLI
+	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Terse.pm', <<'TERSE');
+package Genesis::CI::Compiler::Providers::Terse;
+use parent 'Genesis::CI::Compiler::PipelineProvider';
+sub provider_type {'terse'}
 # The capability declaration is mandatory beside the fragment, and this
 # file is about the fragment, so the fixture claims every ability and none
 # of what it writes is gated away.
@@ -138,8 +179,8 @@ TERSE
 	Genesis::CI::Compiler::PipelineProvider->register_provider('terse', {
 		class     => 'Genesis::CI::Compiler::Providers::Terse',
 		file      => 'Genesis/CI/Compiler/Providers/Terse.pm',
-		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		cli_class => 'Genesis::CI::Provider::Terse',
+		cli_file  => 'Genesis/CI/Provider/Terse.pm',
 	});
 
 	throws_ok {load_with($h, automated_config('terse'))}
@@ -155,12 +196,19 @@ TERSE
 subtest 'the programmatic check is narrow and runs second' => sub {
 	plan tests => 4;
 
-	# A CLI-side provider class whose validate_config states the one rule
-	# a declaration cannot: target or url, but not neither.
+	# A CLI-side provider class that declares the pair of keys and, in
+	# validate_config, states the one rule a declaration cannot: target or
+	# url, but not neither.
 	put_file('t/tmp/lib/Genesis/CI/Provider/Pair.pm', <<'PAIR');
 package Genesis::CI::Provider::Pair;
 our @CALLS;
 sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
+sub provider_options_schema {
+	return {
+		target => {type => 'string', description => 'One of the pair'},
+		url    => {type => 'string', description => 'The other of the pair'},
+	};
+}
 sub validate_config {
 	my ($self) = @_;
 	push @CALLS, {%$self};
@@ -174,12 +222,6 @@ PAIR
 package Genesis::CI::Compiler::Providers::Pair;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'pair'}
-sub provider_options_schema {
-	return {
-		target => {type => 'string', description => 'One of the pair'},
-		url    => {type => 'string', description => 'The other of the pair'},
-	};
-}
 sub capabilities {
 	return {map {($_ => 1)} qw/cross_pipeline_events deployment_locks
 		multi_file_output optional_git_triggers per_commit_runs
