@@ -190,19 +190,30 @@ TERSE
 		'and the same configuration loads once the key is written';
 };
 
-# Proves T37: the provider's programmatic check runs after the generic
-# validation, returns error strings rather than bailing, and makes no
-# network call.
-subtest 'the programmatic check is narrow and runs second' => sub {
-	plan tests => 4;
+# Proves that the base class default validates the block against the
+# provider's own fragment, that a provider overriding it still gets that
+# pass, and that the two are one call rather than two phases.
+subtest 'the base default validates against the declaration' => sub {
+	plan tests => 5;
 
-	# A CLI-side provider class that declares the pair of keys and, in
-	# validate_config, states the one rule a declaration cannot: target or
-	# url, but not neither.
+	# A provider that writes no validation at all, so everything refused
+	# below it is refused by the default the base gives every provider.
+	put_file('t/tmp/lib/Genesis/CI/Provider/Plain.pm', <<'PLAIN');
+package Genesis::CI::Provider::Plain;
+use base 'Genesis::CI::Provider';
+sub provider_options_schema {
+	return {
+		token => {type => 'string',  required => 1, description => 'Needed'},
+		loud  => {type => 'boolean', default  => Genesis::Config::FALSE(), description => 'Optional'},
+	};
+}
+1;
+PLAIN
+	# And one that has a rule a declaration cannot state, which it adds on
+	# top of the pass it calls up for.
 	put_file('t/tmp/lib/Genesis/CI/Provider/Pair.pm', <<'PAIR');
 package Genesis::CI::Provider::Pair;
-our @CALLS;
-sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
+use base 'Genesis::CI::Provider';
 sub provider_options_schema {
 	return {
 		target => {type => 'string', description => 'One of the pair'},
@@ -210,49 +221,70 @@ sub provider_options_schema {
 	};
 }
 sub validate_config {
-	my ($self) = @_;
-	push @CALLS, {%$self};
-	return ("'target' or 'url' is required for the Pair provider")
-		unless $self->{target} || $self->{url};
-	return ();
+	my ($class, $config, $path, $discriminator) = @_;
+	my @errors = $class->SUPER::validate_config($config, $path, $discriminator);
+	push @errors, "$path: 'target' or 'url' is required for the Pair provider"
+		unless $config->get("$path.target") || $config->get("$path.url");
+	return @errors;
 }
 1;
 PAIR
+	# The compiler half of each fixture, because the merged schema is still
+	# built from the compiler class, which reads the declaration off the
+	# CLI class beside it.  Neither claims an ability, so no key of either
+	# fragment is gated away before the block is read.
+	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Plain.pm', <<'PLAINC');
+package Genesis::CI::Compiler::Providers::Plain;
+use parent 'Genesis::CI::Compiler::PipelineProvider';
+sub provider_type {'plain'}
+sub capabilities {
+	return {map {($_ => 0)} qw/cross_pipeline_events deployment_locks
+		multi_file_output optional_git_triggers per_commit_runs
+		scheduled_jobs/};
+}
+1;
+PLAINC
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Pair.pm', <<'PAIRC');
 package Genesis::CI::Compiler::Providers::Pair;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'pair'}
 sub capabilities {
-	return {map {($_ => 1)} qw/cross_pipeline_events deployment_locks
+	return {map {($_ => 0)} qw/cross_pipeline_events deployment_locks
 		multi_file_output optional_git_triggers per_commit_runs
 		scheduled_jobs/};
 }
 1;
 PAIRC
 	local @INC = ('t/tmp/lib', @INC);
-	Genesis::CI::Compiler::PipelineProvider->register_provider('pair', {
-		class     => 'Genesis::CI::Compiler::Providers::Pair',
-		file      => 'Genesis/CI/Compiler/Providers/Pair.pm',
-		cli_class => 'Genesis::CI::Provider::Pair',
-		cli_file  => 'Genesis/CI/Provider/Pair.pm',
-	});
-
-	throws_ok {load_with($h, automated_config('pair'))}
-		qr/'target' or 'url' is required for the Pair provider/,
-		'the programmatic rule is raised at load';
-	lives_ok {load_with($h, automated_config('pair', 'url: https://ci'))}
-		'and one of the pair satisfies it';
-
-	# It runs second, so the generic refusal wins and the check is never
-	# reached with an undeclared key in hand.
-	{
-		local @Genesis::CI::Provider::Pair::CALLS = ();
-		throws_ok {load_with($h, automated_config('pair', 'nonesuch: 1'))}
-			qr/pipeline\.provider\.nonesuch: unknown configuration key/,
-			'the generic validation refuses first';
-		is scalar(@Genesis::CI::Provider::Pair::CALLS), 0,
-			'so the programmatic check never ran';
+	for my $type (qw/plain pair/) {
+		(my $pkg = ucfirst $type) =~ s/\W//g;
+		Genesis::CI::Compiler::PipelineProvider->register_provider($type, {
+			class     => "Genesis::CI::Compiler::Providers::$pkg",
+			file      => "Genesis/CI/Compiler/Providers/$pkg.pm",
+			cli_class => "Genesis::CI::Provider::$pkg",
+			cli_file  => "Genesis/CI/Provider/$pkg.pm",
+		});
 	}
+
+	throws_ok {load_with($h, automated_config('plain'))}
+		qr/pipeline\.provider: missing required key .*token/,
+		"the fragment's required flag is enforced by the default alone";
+	throws_ok {load_with($h, automated_config('plain', 'nonesuch: 1'))}
+		qr/pipeline\.provider\.nonesuch: unknown configuration key/,
+		'and so is an undeclared key, with no validation written anywhere';
+
+	my $top = load_with($h, automated_config('plain', 'token: abc'));
+	is $top->config->get('pipeline.provider.loud'), Genesis::Config::FALSE(),
+		"and the fragment's default lands where every reader looks for it";
+
+	# The refusal is wrapped to the terminal on its way out, and this one
+	# is long enough to break, so the spaces in it are read as runs.
+	throws_ok {load_with($h, automated_config('pair'))}
+		qr/'target' or 'url' is required\s+for\s+the\s+Pair\s+provider/s,
+		'a provider with a cross-field rule states it and is heard';
+	throws_ok {load_with($h, automated_config('pair', 'nonesuch: 1'))}
+		qr/pipeline\.provider\.nonesuch: unknown configuration key/,
+		'and it still gets the generic pass it called up for';
 };
 
 # Both provider-load refusals interpolate what the failed require said, and

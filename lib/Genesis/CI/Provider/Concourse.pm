@@ -244,23 +244,32 @@ sub provider_options_schema {
 }
 
 # }}}
+# validate_config - target or url, and a url that is one {{{
+#
+# The rules a declaration cannot state, on top of the generic pass the
+# base gives every block.  SUPER first, because the declaration is the
+# floor rather than a subset of what is wanted checked.
+#
+# The two keys are read off the block where the operator wrote them,
+# rather than off an object somebody assembled out of the block first.
+sub validate_config {
+	my ($class, $config, $path, $discriminator) = @_;
+	my @errors = $class->SUPER::validate_config($config, $path, $discriminator);
+
+	my $url = $config->get("$path.url");
+	push @errors, "'target' is required for the Concourse provider"
+		unless $config->get("$path.target");
+	push @errors, "'url' must begin with http:// or https://"
+		if $url && $url !~ m{^https?://};
+	return @errors;
+}
+
+# }}}
 # }}}
 ### Instance Methods {{{
 
 # label - human-readable name for this provider {{{
 sub label { 'Concourse' }
-
-# }}}
-# validate_config - assert required fields are present in stored config {{{
-sub validate_config {
-	my ($self) = @_;
-	my @errors;
-	push @errors, "'target' is required for the Concourse provider"
-		unless $self->{target};
-	push @errors, "'url' must begin with http:// or https://"
-		if $self->{url} && $self->{url} !~ m{^https?://};
-	return @errors;
-}
 
 # }}}
 # config - returns hash for .genesis/config ci.provider section {{{
