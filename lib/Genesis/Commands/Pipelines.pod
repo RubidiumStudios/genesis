@@ -9,7 +9,7 @@ Genesis::Commands::Pipelines - Command handlers for Genesis CI/CD pipeline manag
   genesis pipeline-apply [layout] [--config ci.yml] [--target <fly-target>] [--dry-run] [--yes] [--paused] [--output-dir <dir>] [--debug-dir <dir>] [--skip-vault]
   genesis repipe [layout]   # deprecated; warns and delegates to pipeline-apply
   genesis graph  [layout] [--config ci.yml]
-  genesis describe [layout] [--config ci.yml]
+  genesis describe [layout]
 
 =head1 DESCRIPTION
 
@@ -104,9 +104,9 @@ with no pipeline is turned away before a vault is asked for.
 Where a pipeline is enabled, the provider comes from
 C<pipeline.provider.type> and an absent type reads as the C<manual>
 provider, which has no pipeline to set and is refused in its own words.
-An automated provider is compiled from the C<pipeline:> section of
-C<.genesis/config>, or from the legacy C<ci.yml> where the repository
-still carries one, and the compiled result is then set on the provider.
+An automated provider is compiled from the C<pipeline> section of
+C<.genesis/config>, which is the one configuration source, and the
+compiled result is then set on the provider.
 Concourse has its pipeline uploaded through the C<fly> CLI.  GitHub Actions
 has its workflows written under C<.github/workflows/> for the operator to
 commit.
@@ -126,11 +126,6 @@ of them is given.
 B<Options (via C<get_options>):>
 
 =over 4
-
-=item C<--config> (default: C<ci.yml>)
-
-Path to the legacy CI config file, read only where the repository has no
-C<pipeline:> section to compile from.
 
 =item C<--target>
 
@@ -287,9 +282,11 @@ B<Options (via C<get_options>):>
 
 =over 4
 
-=item C<--config> (default: C<ci.yml>)
+=item C<--config>
 
-Path to the CI config file to parse.
+The option is still accepted, and nothing reads it any more.  The
+description is built from the C<pipeline> section of C<.genesis/config>,
+which is the one configuration source.
 
 =back
 
@@ -304,6 +301,49 @@ B<Examples:>
   genesis describe sandbox
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _compile_pipeline
+
+  my $result = _compile_pipeline($top, $provider_type);
+
+Compiles the pipeline from the C<pipeline> section of C<.genesis/config>,
+which is the one configuration source.  Neither the C<.genesis/ci/>
+directory nor a legacy C<ci.yml> is read, and a repository still carrying
+either one is compiled as though it did not.  The provider type is the one
+the caller read off C<pipeline.provider.type>, and the provider's own
+command-line options are collected from C<get_options> and handed to the
+compiler beside it.
+
+Where C<--debug-dir> is given, the compiler's intermediates are written
+there before the result is returned.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The repository handle to compile from.
+
+=item C<$provider_type>
+
+The provider to generate output for, such as C<concourse> or
+C<github-actions>.
+
+=back
+
+B<Returns:> The compiler's result hash, with the collected provider
+options added to it under C<provider_cli_opts>.
+
+B<Errors:>
+
+Calls C<bail()> through the compiler when the repository has no C<pipeline>
+section to compile, and when the configuration it finds does not validate.
+
+B<Examples:>
+
+  my $result = _compile_pipeline($top, 'concourse');
+  # $result->{output}{'pipeline.yml'} holds the generated pipeline
 
 =head2 _describe_source_control
 

@@ -36,7 +36,6 @@ sub embed {
 # apply - compile and deploy pipeline (replaces genesis repipe) {{{
 sub apply {
 	my ($layout) = @_;
-	option_defaults(config => 'ci.yml');
 
 	my $opts = get_options;
 
@@ -1009,7 +1008,6 @@ sub _verify_deployed {
 # pipeline_graph - write pipeline.md with Mermaid flowchart {{{
 sub pipeline_graph {
 	my ($layout) = @_;
-	option_defaults(config => 'ci.yml');
 
 	my $opts = get_options;
 	my $top  = Genesis::Top->new('.');
@@ -1042,7 +1040,6 @@ sub pipeline_graph {
 # pipeline_describe - human-readable pipeline progression {{{
 sub pipeline_describe {
 	my ($layout) = @_;
-	option_defaults(config => 'ci.yml');
 
 	my $opts     = get_options;
 	my $top      = Genesis::Top->new('.');
@@ -1077,8 +1074,6 @@ sub pipeline_describe {
 # }}}
 # diff - show compiled vs live pipeline delta {{{
 sub diff {
-	option_defaults(config => 'ci.yml');
-
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
 	my $result = _compile_pipeline($top, 'concourse');
@@ -1121,7 +1116,6 @@ sub diff {
 # status - show per-env job health {{{
 sub status {
 	my ($filter_env) = @_;
-	option_defaults(config => 'ci.yml');
 
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
@@ -1181,7 +1175,6 @@ sub status {
 # pause - pause env job or entire pipeline {{{
 sub pause {
 	my ($env) = @_;
-	option_defaults(config => 'ci.yml');
 
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
@@ -1211,7 +1204,6 @@ sub pause {
 # resume - resume env job or entire pipeline {{{
 sub resume {
 	my ($env) = @_;
-	option_defaults(config => 'ci.yml');
 
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
@@ -1280,29 +1272,15 @@ sub describe {
 # }}}
 ### Internal Compiler Helpers {{{
 
-# _compile_pipeline - detect config source and compile; returns result hash {{{
+# _compile_pipeline - compile from the repository configuration {{{
+#
+# D27 leaves one configuration source, which is the pipeline section of
+# .genesis/config, so there is no precedence to work through here and no
+# legacy file to fall back to.  A leftover .genesis/ci/ directory is not
+# read and is not named either, because a directory nothing consults is
+# not worth a line of the operator's attention.
 sub _compile_pipeline {
 	my ($top, $platform) = @_;
-
-	my %compiler_opts = (top => $top);
-
-	# D27 took the .genesis/ci/ directory away, so a repository still
-	# carrying one is compiled from somewhere else entirely.  Saying so
-	# here spares the operator an edit that changes nothing and a hunt
-	# for why.
-	info("Ignoring #C{.genesis/ci/}; see the #C{pipeline:} section of ".
-		"#C{.genesis/config}.")
-		if -d $top->path('.genesis/ci');
-
-	# Priority order, with D27's conventional directory gone:
-	#   1. pipeline: section in .genesis/config  (genesis-config)
-	#   2. Legacy ci.yml / --config file         (backward compat)
-	if (Genesis::CI::Compiler->can_compile_from_genesis_config($top)) {
-		info("Using inline CI configuration from #C{.genesis/config}");
-	} else {
-		$compiler_opts{file} = get_options->{config} || $top->path('ci.yml');
-		info("Using legacy CI configuration from #C{%s}", $compiler_opts{file});
-	}
 
 	# Parse provider-specific CLI flags
 	my %provider_cli_opts;
@@ -1318,7 +1296,7 @@ sub _compile_pipeline {
 		}
 	}
 
-	my $compiler = Genesis::CI::Compiler->new(%compiler_opts);
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
 	my $result   = $compiler->compile(
 		provider      => $platform,
 		provider_opts => \%provider_cli_opts,

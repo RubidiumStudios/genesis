@@ -2019,15 +2019,18 @@ define_command("ci-pipeline-run-errand", {
 ### Pipeline command suite (Phase B) {{{
 # genesis pipeline-apply - compile and deploy pipeline {{{
 define_command("pipeline-apply", {
-	summary => "Compile and deploy the CI/CD pipeline.",
+	summary => "Apply the pipeline on the configured provider.",
 	usage   => "pipeline-apply [<pipeline-layout>]",
 	description =>
-		"Compiles the pipeline configuration and deploys it to the configured ".
-		"CI provider (Concourse by default).  Replaces `genesis repipe` for ".
-		"the new compiler pipeline.\n".
+		"Compiles the pipeline the repository configures and sets it on the ".
+		"provider that repository chose.  Under the #C{manual} provider there ".
+		"is no pipeline to set, so the command says so and stops.\n".
 		"\n".
-		"The provider comes from pipeline.provider.type in .genesis/config, ".
-		"and the pipeline itself from that file's pipeline: section.",
+		"The provider is #C{pipeline.provider.type} in #C{.genesis/config}, ".
+		"and the pipeline itself is the #C{pipeline} section of that same ".
+		"file, which is the one configuration source.  Overrides are merged ".
+		"from #C{.genesis/pipeline-overrides-<provider>.yml}, which sits ".
+		"beside #C{.genesis/config}.",
 	alias          => [qw(pipeline-push)],
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
@@ -2044,9 +2047,6 @@ define_command("pipeline-apply", {
 		'target|t=s' =>
 			"Concourse target name (per `fly targets`).  Defaults to the ".
 			"pipeline name.",
-
-		'config|c=s' =>
-			"Path to the legacy pipeline config file.  Defaults to 'ci.yml'.",
 
 		'paused|P' =>
 			"Leave the pipeline paused after applying.",
@@ -2076,10 +2076,6 @@ define_command("pipeline-graph", {
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
-	options => [
-		'config|c=s' =>
-			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
-	],
 }, 'Genesis::Commands::Pipelines::pipeline_graph');
 # }}}
 # genesis pipeline-prepare - create or reconcile environment branches {{{
@@ -2195,10 +2191,6 @@ define_command("pipeline-describe", {
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
-	options => [
-		'config|c=s' =>
-			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
-	],
 }, 'Genesis::Commands::Pipelines::pipeline_describe');
 # }}}
 # genesis pipeline-diff - show compiled vs live pipeline delta {{{
@@ -2215,9 +2207,6 @@ define_command("pipeline-diff", {
 	options => [
 		'target|t=s' =>
 			"Concourse target name.  Defaults to the pipeline name.",
-
-		'config|c=s' =>
-			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
@@ -2241,9 +2230,6 @@ define_command("pipeline-jobs", {
 		'target|t=s' =>
 			"Concourse target name.  Defaults to the pipeline name.",
 
-		'config|c=s' =>
-			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
-
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
 	],
@@ -2266,9 +2252,6 @@ define_command("pipeline-pause", {
 		'target|t=s' =>
 			"Concourse target name.  Defaults to the pipeline name.",
 
-		'config|c=s' =>
-			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
-
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
 	],
@@ -2290,9 +2273,6 @@ define_command("pipeline-resume", {
 	options => [
 		'target|t=s' =>
 			"Concourse target name.  Defaults to the pipeline name.",
-
-		'config|c=s' =>
-			"Path to legacy pipeline config file.  Defaults to 'ci.yml'.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
