@@ -207,8 +207,11 @@ B<Parameters:>
 
 =item C<$branch_or_commit>
 
-The branch name to check out, or a commit to stand on. A name that is a local
-branch here is treated as a branch and anything else as a commit.
+The branch name to check out, or a commit to stand on. A name this repository
+holds as a local branch, or as a remote-tracking branch of the remote it
+tracks, is treated as a branch, and anything else is treated as a commit. A
+branch that has only been fetched therefore takes the branch path, because
+git's own checkout cuts the local branch for it and the caller means a branch.
 
 =item C<%opts>
 
@@ -451,6 +454,36 @@ B<Examples:>
   # returns ('qa/bosh') after a commit on that branch
 
 =head1 INTERNAL METHODS
+
+=head2 _standing_on
+
+  my $where = $session->_standing_on;
+
+What to call the place we are standing, for a message that has to tell an
+operator where a failed restore left them.
+
+C<< $git->current_branch >> runs C<git rev-parse --abbrev-ref HEAD>, which
+answers the literal string C<HEAD> on a detached HEAD rather than answering
+undefined, so a fallback behind it can never fire and the operator is told
+they are standing on "HEAD", which names nothing they can act on. Standing on
+a commit is a designed state rather than an accident now, so the question is
+asked here instead.
+
+On a branch it answers the branch name. Detached it answers the commit, and it
+names the target C<switch> was handed beside it where the two are not the same,
+because that is the target the caller asked for.
+
+B<Parameters:> None.
+
+B<Returns:> The branch name, or a phrase naming the commit we are detached at.
+
+B<Examples:>
+
+  my $where = $session->_standing_on;
+  # returns 'qa/bosh' on a branch
+
+  my $where = $session->_standing_on;
+  # returns 'a detached HEAD at 9f0d1c2a...' after a switch to a commit
 
 =head2 _register_net
 

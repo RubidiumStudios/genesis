@@ -19,7 +19,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'a session stands on a commit with a detached HEAD' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
@@ -49,6 +49,13 @@ subtest 'a session stands on a commit with a detached HEAD' => sub {
 	is($git->current_branch, 'HEAD',
 		'and HEAD is detached rather than on the branch');
 
+	# Which is why the session asks its own question about where we are
+	# standing: git answers the literal string HEAD here, and an operator
+	# whose restore failed would be told they are standing on "HEAD", which
+	# names nothing they can act on.
+	like($session->_standing_on, qr/\Q$first\E/,
+		'and a failed restore would name the commit rather than HEAD');
+
 	# The deliveries were made in copy B and handed to R, so what copy A
 	# holds of that branch is its remote-tracking ref and not a local one.
 	is($h->tip_of($h->slug('qa'), remote => 1), $second,
@@ -61,7 +68,7 @@ subtest 'a session stands on a commit with a detached HEAD' => sub {
 };
 
 subtest 'finish restores after a commit exactly as after a branch' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
@@ -80,6 +87,11 @@ subtest 'finish restores after a commit exactly as after a branch' => sub {
 	$session->begin;
 	$session->switch($delivered);
 	is($session->on, $delivered, 'the session records what it stands on');
+
+	# The tip table is the set abort resets back to T, so a commit has to
+	# stay out of it: it is not a branch this session could have moved.
+	is_deeply([keys %{$session->{switched}}], [],
+		'and records no tip for it, because a commit is not a branch it moved');
 	$session->finish;
 
 	is($git->current_branch, $h->control, 'we are back on control');
