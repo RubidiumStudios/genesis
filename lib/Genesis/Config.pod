@@ -598,8 +598,11 @@ Each value is a hash reference describing that key's constraints:
 
 B<(required)> The expected type. Supported types are: C<string>, C<number>,
 C<integer>, C<boolean>, C<enum>, C<array>, C<hash>, C<hasharray>, C<semver>,
-C<null>, C<any>, and a literal string in double quotes (e.g., C<'"fixed"'>).
-Multiple types may be joined with C<||> (e.g., C<'string||null'>).
+C<null>, C<opaque>, C<custom_struct>, C<any>, and a literal string in double
+quotes (e.g., C<'"fixed"'>). Multiple types may be joined with C<||>
+(e.g., C<'string||null'>). C<custom_struct> has a section of its own
+below, because a block that declares it names a module rather than a
+shape.
 
 =item C<required>
 
@@ -694,6 +697,49 @@ B<Examples:>
         },
     });
     # Returns: 1 if valid, otherwise calls bail()
+
+=head2 The C<custom_struct> schema type
+
+    block => {
+      type                  => 'custom_struct',
+      discriminator         => 'kind',
+      discriminator_default => 'quiet',
+      modules               => {
+        loud  => {module => 'Probe/Loud.pm', class => 'Probe::Loud'},
+      },
+    }
+
+Declares a block whose shape depends on one of its own values. The
+C<discriminator> names the field that decides,
+C<discriminator_default> is the value that field takes when the operator
+writes none, C<modules> maps each of that field's values to the module
+owning that shape, and C<method> names the method to call on it,
+defaulting to C<validate_config>. An entry in the map may name a
+C<method> of its own, which wins over the one the block declares.
+
+The discriminator's default is spelled apart from C<default> because a
+schema entry's C<default> is the value of the key that entry declares,
+and the parent fills it before this type is reached. A block that must
+exist for its discriminator to be filled declares both, C<< default =>
+{} >> for the block and C<discriminator_default> for the field.
+
+C<noun> names what the map holds, for the one sentence an operator can
+meet from here, which is the refusal raised when the module a value
+selects will not load. It defaults to C<module>, and a block whose
+refusal an operator has already met names what that refusal has always
+called it.
+
+The type validates the discriminator against the map and hands the block
+over. It is a dispatcher and nothing more, so the data dependency is
+declared where a reader can see it rather than performed by a raw read
+inside whatever builds the schema.
+
+A value no entry in the map owns is refused in the words C<enum> uses,
+C<< <path>: unknown value: <value>; expected one of <keys> >>, with the
+map's keys sorted. The module the chosen entry names is loaded with
+C<require>, and a load that fails refuses at C<Genesis::Exit::CONFIG>
+with C<< Failed to load <noun> '<value>': <what it said> >>, cut of its
+backtrace by C<Genesis::without_backtrace>.
 
 =head2 validate_subtree
 
@@ -1235,8 +1281,10 @@ C<"Invalid source '$source' - must be one of: env, set, loaded, default">
 
 Recursively validates the value of C<$key> against a single schema entry.
 Handles all supported types: C<string>, C<number>, C<integer>, C<boolean>,
-C<enum>, C<array>, C<hash>, C<hasharray>, C<semver>, C<null>, C<any>, literal
-string types, and C<||>-joined union types.
+C<enum>, C<array>, C<hash>, C<hasharray>, C<semver>, C<null>, C<opaque>,
+C<custom_struct>, C<any>, literal string types, and C<||>-joined union
+types. A C<custom_struct> entry is passed to
+L</_validate_custom_struct>, which owns the dispatch.
 
 For C<array> and C<boolean> types, normalizes the value in-place via
 C<_update_source()>: booleans are coerced to JSON::PP boolean objects; array
@@ -1293,6 +1341,81 @@ key.
 C<"Cannot normalize key '$key' - no source found"> - raised if a C<boolean>
 or C<array> value needs to be normalized in-place but C<get_source()> returns
 C<undef> for that key.
+
+=back
+
+=head2 _validate_custom_struct
+
+    my @errors = $self->_validate_custom_struct($key, $schema)
+
+Validates the discriminator of a C<custom_struct> block and hands the
+block to the module that owns its shape. It is a dispatcher and nothing
+more: no key of the block other than the discriminator is checked here.
+
+The discriminator is filled from C<discriminator_default> first, when the
+schema declares one and the operator wrote nothing, so the match below it
+sees the value every other reader will. A value the map does not hold is
+refused in the words C<enum> uses, with the map's keys sorted. Otherwise
+the entry's module is loaded and its method is called as
+C<< $class->$method($config, $key, $field) >>, where C<$method> is the
+entry's own C<method>, the block's C<method>, or C<validate_config>. What
+that method returns is what this returns, unchanged.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$key>
+
+The dotted path of the block, used to read the discriminator, to compose
+the refusal, and as the path handed to the owning module.
+
+=item C<$schema>
+
+The schema entry, with at minimum C<discriminator> and C<modules>.
+C<discriminator_default>, C<method>, and C<noun> are optional.
+
+=back
+
+B<Returns:> A list of error strings. An empty list means the block is
+valid.
+
+B<Examples:>
+
+    my @errs = $self->_validate_custom_struct('pipeline.provider', {
+        type          => 'custom_struct',
+        discriminator => 'type',
+        noun          => 'CI provider',
+        modules       => {
+            concourse => {
+                module => 'Genesis/CI/Provider/Concourse.pm',
+                class  => 'Genesis::CI::Provider::Concourse',
+            },
+        },
+    });
+    # Returns: () if the block is valid, or the owning module's errors
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Schema for $key has no discriminator"> - raised via C<bug()> when the
+schema entry names no deciding field.
+
+=item *
+
+C<"Schema for $key has no module map"> - raised via C<bug()> when the
+schema entry declares no C<modules>.
+
+=item *
+
+C<"Failed to load %s '%s': %s"> - raised via C<bail()> at
+C<Genesis::Exit::CONFIG> when the module a value selects will not load.
+The first C<%s> is C<noun>, defaulting to C<module>; the second is the
+discriminator's value; the third is what the load said, cut of its
+backtrace by C<Genesis::without_backtrace>.
 
 =back
 

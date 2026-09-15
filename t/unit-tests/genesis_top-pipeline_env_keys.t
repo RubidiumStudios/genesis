@@ -255,34 +255,34 @@ subtest 'a caught message is cut at the location that ends it' => sub {
 
 	# The one cut, which _first_errors makes to each bullet and which the
 	# provider refusals make to whatever they caught.
-	is Genesis::Top::_without_backtrace(
+	is Genesis::without_backtrace(
 		"Can't locate Nope.pm in \@INC (\@INC entries checked: lib)"
 		." at lib/Genesis/Top.pm line 2128.\n"
 		."\tGenesis::Top::_provider_options_schema() called at x line 9\n"),
 		"Can't locate Nope.pm in \@INC (\@INC entries checked: lib)",
 		'the message stands without the line it was raised on';
 
-	is Genesis::Top::_without_backtrace("the provider fell over\n"),
+	is Genesis::without_backtrace("the provider fell over\n"),
 		'the provider fell over',
 		'a message with nothing behind it is left as it is';
 
-	is Genesis::Top::_without_backtrace("one\ntwo\n"), 'one two',
+	is Genesis::without_backtrace("one\ntwo\n"), 'one two',
 		'and what is left is folded onto a line';
 
-	is Genesis::Top::_without_backtrace(undef), '',
+	is Genesis::without_backtrace(undef), '',
 		'an undefined text answers an empty string';
 
 	# A provider pointing an operator at a file and a line of their own is
 	# an ordinary thing for a validator to do, and the cut is for the
 	# location that ends a message rather than for every one in it.
-	is Genesis::Top::_without_backtrace(
+	is Genesis::without_backtrace(
 		"target is required; see the setting at config.yml line 12"
 		." and fix it\n"),
 		'target is required; see the setting at config.yml line 12'
 		.' and fix it',
 		'a location the message goes on talking past is left alone';
 
-	is Genesis::Top::_without_backtrace(
+	is Genesis::without_backtrace(
 		"target is required; see the setting at config.yml line 12"
 		." and fix it\n at lib/Genesis/CI/Provider/Pair.pm line 7.\n"
 		."\tGenesis::CI::Provider::Pair::validate_config() called at x line 3\n"),
