@@ -98,6 +98,23 @@ sub create {
 			);
 		}
 
+		# Asked here, beside the branch check, and not left to the session
+		# that prepare_branch opens at the end of this command.  By then the
+		# environment file has been written and committed onto control, and
+		# an operator with unrelated work in progress would meet the refusal
+		# halfway through something they cannot undo in one step.  The
+		# wording is the session's, because it is the same refusal arriving
+		# earlier.
+		unless ($git->is_clean) {
+			my $status = $git->status;
+			my @dirty = sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
+			bail(
+				"Working tree has uncommitted changes, and this command ".
+				"switches branches.\n\nCommit or stash them first:\n%s",
+				join("", map {"  - $_\n"} @dirty)
+			);
+		}
+
 		# Refresh env branches so branch_exists checks and reconciliation
 		# see teammate-created branches that aren't in the local clone yet.
 		$top->fetch_pipeline_envs($git) unless get_options->{'no-fetch'};
