@@ -92,7 +92,7 @@ subtest 'a squash, an amend, and a hand commit leave it idempotent' => sub {
 };
 
 subtest 'the propagation base answers through the same reader' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my ($h, $control) = seeded(copy => 'a');
 	my $git = $h->git('a');
@@ -118,6 +118,27 @@ subtest 'the propagation base answers through the same reader' => sub {
 	my (undef, $fallback) = Genesis::Commands::Pipelines::_resolve_propagation_base(
 		$h->slug('prod'), $git, $h->control);
 	is($fallback, 0, 'while the merge-base fallback counts nothing at all');
+
+	{
+		# The squash leaves its marker in the body alone, and the delivery
+		# underneath it carries an older control commit in its subject, so a
+		# resolver reading subject lines answers with the older commit and
+		# only the reader answers with the one the branch now holds.
+		my ($g) = seeded(copy => 'a');
+		my $newer = commit_on_control($g,
+			files   => {'qa.yml' => "---\nkit: dev\nsecond: true\n"},
+			message => 'change qa again',
+			push    => 1,
+		);
+		squash_merge($g, 'qa',
+			control => $newer,
+			subject => 'Merge pull request #7 from pr/qa/bosh',
+		);
+		my ($squashed) = Genesis::Commands::Pipelines::_resolve_propagation_base(
+			$g->slug('qa'), $g->git('a'), $g->control);
+		is($squashed, $newer,
+			'and a squash is read from its body rather than from the subject');
+	}
 };
 
 done_testing;

@@ -442,6 +442,10 @@ sub _pr_branch_has_control_sha {
 
 	my $marker = Genesis::CI::Marker::newest($git, $branch);
 	return 0 unless defined $marker;
+	# The expansion below fires only where the clone does not hold the
+	# commit the marker names, since the reader has expanded it already
+	# everywhere else, and the step that retires the propagate-envs double
+	# may well drop it.
 	$marker = $git->sha($marker) unless $marker =~ /^[0-9a-f]{40}$/;
 	return 0 unless defined $marker && $marker =~ /^[0-9a-f]{40}$/;
 

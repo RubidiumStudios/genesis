@@ -14,6 +14,8 @@ use Harness::Propagation;
 
 use File::Temp ();
 
+our $EMPTY_REPO;
+
 use Test::More;
 use Test::Deep;
 use Test::Output;
@@ -31,6 +33,17 @@ $ENV{NOCOLOR} = 1;
 # Records every method call into $self->{_calls} as [name, @args].
 # Configurable returns via constructor options.
 # =========================================================================
+# A repository of the file's own, with nothing in it.  It is built once and
+# every double shares it, because none of them writes to it and all any of
+# them wants is a place where a sha resolves to nothing.
+sub empty_repo {
+	return $EMPTY_REPO if $EMPTY_REPO;
+	$EMPTY_REPO = File::Temp::tempdir(CLEANUP => 1);
+	Genesis::run({dir => $EMPTY_REPO, onfailure => 'Failed to build the empty repository'},
+		'git', 'init', '-q', '-b', 'control');
+	return $EMPTY_REPO;
+}
+
 sub mock_git {
 	my (%opts) = @_;
 	my $self = bless {
@@ -105,17 +118,21 @@ sub mock_git {
 			0 .. $#subjects;
 	};
 	# The marker reader expands the sha a marker carries, and it asks the
-	# handle where the repository is.  This double has none, so it answers a
-	# directory holding no repository at all, the expansion fails quietly,
-	# and the sha comes back exactly as the marker wrote it.
+	# handle where the repository is.  This double has none, so the file
+	# builds one of its own and leaves it empty.  The expansion then stops
+	# there rather than at whatever repository happens to sit above the
+	# temporary directory, it finds no such commit, and the sha comes back
+	# exactly as the marker wrote it.
 	*{"${pkg}::root"} = sub {
 		my ($self) = @_;
-		return $self->{_root} //= File::Temp::tempdir(CLEANUP => 1);
+		return $self->{_root} //= empty_repo();
 	};
+	# The table answers a full sha and `short` takes its first seven
+	# characters, which is the short sha the fixture was keyed on.
 	*{"${pkg}::sha"} = sub {
 		my ($self, $ref, %opts) = @_;
-		return $self->{_sha}{$ref} if exists $self->{_sha}{$ref};
-		return $ref;
+		my $sha = exists $self->{_sha}{$ref} ? $self->{_sha}{$ref} : $ref;
+		return $opts{short} ? substr($sha, 0, 7) : $sha;
 	};
 	*{"${pkg}::current_branch"} = sub {
 		my $self = shift;

@@ -462,12 +462,15 @@ could fall back to that would be right for every repository.
 
 =back
 
-B<Returns:> Two values. The first is the full control sha the branch was
-last brought up to. The second is a count only on the marker path, where
-it is the number of commits standing on top of the newest marker, and it
-is a literal zero on the merge-base path, where nothing is counted. A
-branch that shares no history with control comes back as C<undef> and
-zero.
+B<Returns:> Two values. The first is the control commit the branch was
+last brought up to, spelled as fully as this repository can spell it. A
+marker naming a commit this clone has never fetched comes back at the
+width the marker wrote it, because a sha the repository cannot reach is
+a sha it cannot expand. The second is a count only on the marker path,
+where it is the number of commits standing on top of the newest marker,
+and it is a literal zero on the merge-base path, where nothing is
+counted. A branch that shares no history with control comes back as
+C<undef> and zero.
 
 B<Errors:> None, in that no input makes it die, and an unresolvable base
 comes back as C<undef>. It does warn: where the newest marker is not the

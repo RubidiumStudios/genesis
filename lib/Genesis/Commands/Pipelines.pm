@@ -682,27 +682,10 @@ sub propagate {
 	exit 0;
 }
 
-# _resolve_propagation_base - the control commit the branch's marker names {{{
+# _summarize_load_error - a short, actionable reason from a load_env failure {{{
 #
-# The marker walk lives in Genesis::CI::Marker, so this asks it rather than
-# scanning subjects with a regex of its own.  The old scan was anchored
-# against a format its caller never passed and it read subject lines alone,
-# so a squash merge that pushed the marker down into the body answered
-# nothing at all.  The walk reads bodies too, and it skips the commits above
-# the marker rather than following them, which is what the warning below
-# counts.
-#
-# The merge-base fallback stays for a branch that has never been delivered
-# to, which is what the callers below still diff against until the walk of
-# M10 gives them the seed.  The control branch is passed in rather than
-# assumed, because the name is configured per repository and every caller
-# has already read it.
-#
-# Returns: ($control_sha_full, $manual_commits_on_top)
-# _summarize_load_error - extract a short, actionable reason from a
-# load_env failure for the pipeline-status display.  bail() output is
-# multi-line and decorated; we strip the noise and keep the first
-# substantive line.
+# For the pipeline-status display.  bail() output is multi-line and
+# decorated; we strip the noise and keep the first substantive line.
 sub _summarize_load_error {
 	my ($err) = @_;
 	return 'unknown reason' unless defined($err) && length($err);
@@ -730,6 +713,7 @@ sub _summarize_load_error {
 	return $reason;
 }
 
+# }}}
 # _missing_env_branches - envs in scope that have no branch {{{
 #
 # Kept separate from propagate() so the decision can be tested without a
@@ -936,6 +920,26 @@ sub _prepare_scope {
 }
 
 # }}}
+# _resolve_propagation_base - the control commit the branch's marker names {{{
+#
+# The marker walk lives in Genesis::CI::Marker, so this asks it rather than
+# scanning subjects with a regex of its own.  The old scan was anchored
+# against a format its caller never passed and it read subject lines alone,
+# so a squash merge that pushed the marker down into the body answered
+# nothing at all.  The walk reads bodies too, and it skips the commits above
+# the marker rather than following them, which is what the warning below
+# counts.
+#
+# The merge-base fallback stays for a branch that has never been delivered
+# to, which is what the callers below still diff against until the walk of
+# M10 gives them the seed.  The control branch is passed in rather than
+# assumed, because the name is configured per repository and every caller
+# has already read it.
+#
+# Returns: ($control_commit, $manual_commits_on_top).  The first value is
+# the commit the marker names, spelled as fully as this repository can spell
+# it, so a marker naming a commit the clone has never fetched comes back at
+# the width the marker wrote it.
 sub _resolve_propagation_base {
 	my ($branch, $git, $control) = @_;
 	$git ||= Service::Git->new('.');
