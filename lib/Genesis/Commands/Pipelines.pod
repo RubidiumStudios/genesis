@@ -122,6 +122,13 @@ is what a later reader asks to tell an applied pipeline from one nobody has
 applied. A run that prints the pipeline rather than setting it, which is what
 C<--dry-run> and C<--output-dir> both do, still writes that record.
 
+The same stage then walks the pipeline in order and works out each
+environment's dependency set, which is the declared list and the exodus
+paths of that environment's own manifest taken together. Each set is written
+beside that environment's exodus record, and an environment that would not
+render or would not load is warned about, marked incomplete, and left behind
+rather than stopping the run.
+
 Under C<--skip-vault> there is no vault to write it to, so the run warns,
 names the record it left unwritten and the flag that stopped it, and carries
 on. It does not refuse the apply, because the branch work and the compile are
@@ -455,6 +462,19 @@ C<applied_record>, and each environment's compiled facts go beside that
 environment's own record. Neither this helper nor the command spells either
 address, so the two writers cannot drift apart on where the facts live.
 
+One pass over the topology follows the applied record. It loads each
+environment, asks it for its dependency set, and writes that set and the
+discovery mark beside the environment's own exodus record, in the order the
+walk itself reads, so the report comes out top down.
+
+An environment that will not load is answered the way one that will not
+render is. It is warned about by name with the reason, its record is written
+with an empty set and its discovery marked incomplete, and the pass carries
+on to the next environment. The record is still written, through a bare
+environment that resolves the address on the merged hierarchy with no kit,
+because an environment carrying no record at all reads as one the apply
+never reached.
+
 It runs under every provider, including the manual one, since the record says
 what was applied rather than what was hosted. It runs on a dry run and on an
 C<--output-dir> run too, both of which print the pipeline rather than setting
@@ -524,6 +544,13 @@ C<Genesis::bug> when neither option carries a value.
 Whatever C<Genesis::Top::applied_record> raises from the vault, which is a
 failed authentication or a failed write.
 
+=item *
+
+Whatever C<Genesis::Env::pipeline_record> raises from the vault on a
+per-environment write, for the same two reasons. A failure to load an
+environment is not among these, because it is warned about rather than
+raised.
+
 =back
 
 B<Examples:>
@@ -531,7 +558,8 @@ B<Examples:>
   _apply_records($top,
     control_commit => $git->sha($top->control_branch),
     provider       => 'manual');
-  # writes /secret/exodus/_pipelines/bosh and returns 1
+  # writes /secret/exodus/_pipelines/bosh, writes a pipeline subpath
+  # beside each environment's exodus record, and returns 1
 
   _apply_records($top, %facts, skip_vault => 1);
   # writes nothing, warns that the record went unwritten, and returns 1
