@@ -114,13 +114,22 @@ sub apply {
 			rules  => _protection_rules_for($top, $top->control_branch,
 				control => 1),
 		});
-		for my $name (@{$top->pipeline_topology->{order}}) {
+
+		# The topology carries a normalised require_pr for every node, put
+		# there from the environment files, and it is the same answer the
+		# compiled pipeline runs that environment by.  Reading it here rather
+		# than looking the key up again keeps the protection and the
+		# propagation on one reader, so a file that spells the key false or
+		# no gets a branch protected in the mode it is actually run in.  The
+		# topology is held once, because building it walks every environment
+		# file.
+		my $topology = $top->pipeline_topology;
+		for my $name (@{$topology->{order}}) {
 			my $branch = $top->branch_for($name);
 			push @branches, {
 				branch => $branch,
 				rules  => _protection_rules_for($top, $branch,
-					require_pr => Genesis::Env->bare($name, $top)
-						->lookup('genesis.pipeline.require_pr', 0)),
+					require_pr => $topology->{nodes}{$name}{require_pr}),
 			};
 		}
 		_apply_branch_protection(
