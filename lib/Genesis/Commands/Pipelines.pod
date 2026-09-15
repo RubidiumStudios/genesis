@@ -803,7 +803,10 @@ than the deployment one.
 =item C<require_pr>
 
 True where this deployment branch's own C<genesis.pipeline.require_pr> is
-true. It is ignored under C<control>.
+true. The caller reads it off the pipeline topology, which is the same
+normalised answer the compiled pipeline runs that environment by, so a file
+spelling the key C<false> or C<no> reads as false here too. It is ignored
+under C<control>.
 
 =back
 

@@ -90,13 +90,19 @@ subtest 'force pushes and non-linear history are blocked everywhere' => sub {
 };
 
 subtest 'a pull request is required exactly where the state says so' => sub {
-	# Four rows, and one more for each of the two runs' restoration
+	# Five rows, and one more for each of the two runs' restoration
 	# assertions.
-	plan tests => 6;
+	plan tests => 7;
 
-	my $h  = make_harness(envs => ['qa', 'prod'], github => 1);
+	my $h  = make_harness(envs => ['qa', 'prod', 'staging'], github => 1);
 	my $gh = $h->gh;
 	write_env_file($h, 'prod', pipeline => {require_pr => 'true'});
+	# The schema takes no as a legal spelling of false, and a reader that
+	# weighed plain Perl truth would read the string as true and protect the
+	# branch in a mode propagation never runs it in.  The quotes are in the
+	# file, so the value reaches the reader as a string rather than as a YAML
+	# boolean.
+	write_env_file($h, 'staging', pipeline => {require_pr => '"no"'});
 
 	run_genesis($h, 'pipeline-apply');
 
@@ -107,6 +113,10 @@ subtest 'a pull request is required exactly where the state says so' => sub {
 	my $qa = rule_named(rules_sent($gh, 'qa/bosh'), 'pull_request');
 	is($qa->{parameters}{required_approving_review_count}, 0,
 		'the direct-mode environment requires no review');
+
+	my $staging = rule_named(rules_sent($gh, 'staging/bosh'), 'pull_request');
+	is($staging->{parameters}{required_approving_review_count}, 0,
+		'an environment whose require_pr reads no requires no review either');
 
 	my $control = rule_named(rules_sent($gh, $h->control), 'pull_request');
 	is($control, undef, 'control requires no pull request by default');
