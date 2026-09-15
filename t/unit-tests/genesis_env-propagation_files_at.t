@@ -292,6 +292,59 @@ subtest 'both readers name the blueprint fragments the same way' => sub {
 		'and the working-tree reader carries it too');
 };
 
+subtest 'the fragments are read at the commit, not where the session stands' => sub {
+	plan tests => 3;
+
+	# The restructure again, and this time the fragment the blueprint names
+	# travels with it.  The branch still holds the flat layout, so the tree
+	# the session stands on has no deployment root at bosh/ at all.
+	my $h = make_harness(envs => ['qa'], root => '',
+		kit => 't/src/ops-blueprint');
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	my $flat = commit_on_control($h,
+		files   => {'ops/extra.yml' => "---\nextra: fragment\n"},
+		message => 'add the fragment the blueprint names',
+	);
+	deliver($h, 'qa', copy => 'a', control => $flat);
+
+	my $held = files_at($h, $flat, copy => 'a');
+	my %moved;
+	$moved{"bosh/$_"} = $held->{$_} for keys %$held;
+	$moved{$_} = undef for keys %$held;
+	my $restructure = commit_on_control($h,
+		files   => {%moved},
+		message => 'move the deployment under bosh',
+	);
+
+	my $in_root = in_root($h, root => 'bosh');
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = Genesis::Env->bare('qa', $top);
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	# This is the state the writer reads its set in, and the kit the
+	# blueprint belongs to is nowhere in this tree.
+	ok(in_set('bosh/ops/extra.yml',
+			$env->propagation_files_at($restructure, git => $git)),
+		'the fragment is named while the session stands on the branch');
+
+	$session->apply_files($restructure,
+		env     => $env,
+		message => Genesis::CI::Marker::build($restructure, 'qa'),
+	);
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
+
+	ok(in_set('bosh/ops/extra.yml', @{tree_of($h->a, $h->slug('qa'))}),
+		'and the delivery carries it onto the branch under its new prefix');
+};
+
 subtest 'a tracked path that fell out of the list is read at the commit' => sub {
 	plan tests => 4;
 
