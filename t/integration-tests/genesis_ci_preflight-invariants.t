@@ -266,11 +266,13 @@ subtest 'one class action leaves the other two classes alone' => sub {
 	is(ref_in($h->r, $h->control), ref_in($h->a, "refs/heads/@{[$h->control]}"),
 		'and control on the remote is where it was');
 	# The walk reads an environment's own deployment record only once it has
-	# loaded the environment, taken its propagation set, found the branch the
-	# pre-flight settled, and diffed that branch against control.  A read
-	# against prod's exodus path is therefore the run saying it judged prod,
-	# rather than skipping it before it decided anything.
-	ok((grep {m{\Q@{[$h->env_path('prod')]}\E}} @{vault_read_log($h)}),
+	# loaded the environment, found the branch the pre-flight settled, and
+	# read the marker that branch carries.  A read under prod's exodus base
+	# is therefore the run saying it judged prod, rather than skipping it
+	# before it decided anything.  The base is matched without its leading
+	# slash, because the deployments reader spells the path without one.
+	(my $prod_base = $h->env_path('prod')) =~ s{^/}{};
+	ok((grep {m{\Q$prod_base\E}} @{vault_read_log($h)}),
 		'and it judged the other environment rather than passing it over');
 	is(ref_in($h->a, "refs/heads/$prod"), $before_prod_now,
 		'which it found nothing due for, and left where it stood');

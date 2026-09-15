@@ -18,6 +18,7 @@ use Genesis::CI::Compiler::PipelineProvider;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
 use Genesis::CI::Propagation;
+use Genesis::CI::Walk;
 use Service::Git;
 use Service::Github;
 use Service::Vault::Remote;
@@ -527,14 +528,15 @@ sub pipeline_status {
 }
 
 # }}}
-# propagate - route control branch changes to environment branches {{{
+# propagate - deliver each due control commit to the branches that want it {{{
 #
-# Must be run from the control branch.  Optional positional argument
-# names an environment whose children should be the propagation scope
-# (cascade after deploy).  Without it, all envs are candidates and
-# the entry point algorithm determines which receive files.
+# The run stands itself on control, refreshes, settles every deployment
+# branch, and then walks control once per environment, from the marker that
+# environment's branch carries to control's own tip.  Each commit that
+# touches the environment's set is delivered on its own, in control order,
+# as one commit on the deployment branch (D34).
 #
-# Always sources files from control HEAD.
+# The run takes no argument and sources control's tip, always.
 sub propagate {
 	# D36 retired the <env> argument together with the cascade it scoped,
 	# because one run walks every environment and a commit held behind an
@@ -544,7 +546,6 @@ sub propagate {
 	# so the cascade the variable feeds is unreachable until the walk
 	# replaces it.
 	command_usage(1) if @_;
-	my ($after_env) = @_;
 
 	my $opts    = get_options;
 	my $dry_run = $opts->{'dry-run'};
@@ -604,9 +605,10 @@ sub propagate {
 	$refuse->("No environments with pipeline metadata found.")
 		unless %{$topo->{nodes}};
 
-	my $nodes     = $topo->{nodes};
-	my %children  = %{$topo->{children}};
-	my %parent_of = %{$topo->{parent_of}};
+	# The DAG order is all this command takes from the topology now.  The
+	# walk reads the nodes, the children, and each environment's parent for
+	# itself, from the same reader, so the record it hands back carries them
+	# and nothing here keeps a second copy.
 	my @dag_order = @{$topo->{order}};
 
 	# The rest of D96's first stage, now that the topology is known.  Every
@@ -625,296 +627,140 @@ sub propagate {
 		dry_run   => $dry_run);
 	info("  #Gi{%s}", $_) for @{$initial->{events}};
 
-	# Resolve the control SHA that will be the source of this propagation.
-	#
-	# Root propagation (no after_env): use control HEAD so freshly-pushed
-	# commits reach the first tier immediately.  This preserves the
-	# "always HEAD" principle that solves the lost-no-op problem.
-	#
-	# Cascade propagation (after_env given): use <after_env>'s last
-	# successfully deployed git.control_commit.  Descendants receive the
-	# exact control state that was CERTIFIED at the ancestor — not
-	# whatever happens to be on HEAD now.  This keeps commits travelling
-	# as a unit down the chain even while control keeps advancing.
-	my $control_sha = $git->sha('HEAD');
-
-	# Determine scope
-	my @scope;
-	if ($after_env) {
-		bail("Environment #C{%s} is not in the pipeline topology.", $after_env)
-			unless $nodes->{$after_env};
-
-		# Verify the after_env has been propagated AND deployed
-		my ($last_sync) = _resolve_propagation_base($after_env, $git, $control);
-		bail(
-			"Environment #C{%s} has never been propagated to.\n".
-			"Run #C{genesis propagate} without arguments first.",
-			$after_env
-		) unless $last_sync;
-
-		my $after_load = eval { $top->load_env($after_env) };
-		if ($after_load) {
-			# Cascade requires a successful deployment with a recorded
-			# git.control_commit.  The env branch being ahead of that
-			# deployment is FINE — cascade intentionally propagates
-			# the certified (last deployed) control state, not whatever
-			# is currently on the env branch.  New changes on control
-			# flow through a fresh root-propagate + deploy cycle.
-			my $env_v = eval { $after_load->with_vault };
-			unless ($env_v) {
-				warning(
-					"Could not verify deployment status for #C{%s} (vault unavailable).\n".
-					"Ensure it has been deployed before cascading.",
-					$after_env
-				);
-			} else {
-				my $dep = $env_v->deployments->latest_successful;
-				bail(
-					"Environment #C{%s} has never been successfully deployed.\n".
-					"Deploy it before cascading to downstream environments.",
-					$after_env
-				) unless $dep;
-
-				my $certified = $dep->lookup('git.control_commit');
-				bail(
-					"Environment #C{%s} has no #C{git.control_commit} in its\n".
-					"last successful deployment (pre-pipeline deploy?).\n".
-					"Cannot propagate safely - redeploy #C{%s} to record it.",
-					$after_env, $after_env
-				) unless $certified;
-
-				$control_sha = $certified;
-			}
-		}
-
-		my %child_set;
-		my @expand = @{$children{$after_env} || []};
-		while (@expand) {
-			my $e = shift @expand;
-			next if $child_set{$e}++;
-			push @expand, @{$children{$e} || []};
-		}
-		@scope = grep { $child_set{$_} } @dag_order;
-		unless (@scope) {
-			info "\n#Yi{Environment %s has no downstream environments - nothing to propagate.}",
-				$after_env;
-			exit 0;
-		}
-	} else {
-		@scope = @dag_order;
-	}
-
-	# Nothing stands between the pre-flight and the walk any more.  An
-	# environment with no deployment branch is reported by the walk as
-	# awaiting genesis pipeline-apply, which is the command the design
-	# gives the job of cutting one, and the run carries on past it without
-	# writing.  propagate used to offer to make the branch itself, and that
-	# offer cut it under the environment's own name rather than under the
-	# deployment slug, so it satisfied nothing and left a ref standing where
-	# the real branch has to go.
+	# D36 retired the cascade, so the run always sources control's own tip.
+	# What each environment receives is decided commit by commit by the
+	# walk, from the marker its own branch carries, rather than by one diff
+	# taken against that tip.  Collapsing everything outstanding into one
+	# diff made an urgent change to one environment wait behind an
+	# unrelated earlier change to a shared file (D34).
+	my $control_sha   = $git->sha('HEAD');
 	my $control_short = $git->sha($control_sha, short => 1);
-	if ($after_env) {
-		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s} #G{(certified by %s)}\n",
-			$control, $control_short, $after_env;
-	} else {
-		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}\n",
-			$control, $control_short;
-	}
 
-	# Build per-env diffs.  Two diffs per env:
-	#   env_changed    — files on control not yet on the env branch
-	#                    (what we'd copy if this env were an entry point)
-	#   env_undeployed — files on control not yet DEPLOYED from this env
-	#                    (branch may have them but exodus shows an older
-	#                    commit).  Used by the entry-point algorithm so
-	#                    descendants don't cascade past an ancestor that
-	#                    has received a change on-branch but not yet
-	#                    deployed it.
-	my (%env_changed, %env_changed_detail, %env_undeployed, %env_skipped_ahead);
-	# The branch the pre-flight settled for each environment, kept so the
-	# targets below carry it and the walk names one branch from the diff it
-	# takes to the commit it writes.
-	my %env_branch;
-	for my $env_name (@scope) {
-		my $env = eval { $top->load_env($env_name) };
-		next unless $env;
+	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}\n",
+		$control, $control_short;
 
-		my @dep_files = $env->propagation_files;
-		next unless @dep_files;
+	# The walk reads durable state and writes nothing at all.  Everything
+	# it decides stands in the record, and the delivery below is the only
+	# thing here that touches a branch.
+	my $record = Genesis::CI::Walk::plan($top,
+		git       => $git,
+		branches  => $initial->{branches},
+		refreshed => $refreshed ? 1 : 0,
+	);
 
-		# Cascade-only safety: if this env's last propagation marker
-		# already references a commit equal-to or descended-from
-		# $control_sha, the env is at-or-ahead of the cascade source.
-		# Propagating now would REGRESS its state to an older commit.
-		# Skip the diff entirely so the env shows up in the summary
-		# as "ahead of cascade source" rather than getting silently
-		# rolled back.
-		if ($after_env) {
-			my ($env_last_sync) = _resolve_propagation_base($env_name, $git, $control);
-			if ($env_last_sync
-				&& $git->is_ancestor($control_sha, $env_last_sync)) {
-				$env_skipped_ahead{$env_name} = $git->sha($env_last_sync, short => 1);
+	my $delivered = 0;
+	my @to_push;
+
+	# One eval around the whole delivery, because a die that no guard
+	# caught is the run as a whole failing, and abort is what answers it
+	# (D32): the partial write is named and discarded, every branch this
+	# session committed to goes back to where the remote has it, and the
+	# operator is put back on the branch they started from.
+	my $ran = eval {
+		# Every environment the run delivers to is loaded here, before the
+		# first switch, because an environment is read off the working tree
+		# and the working tree stands on control only until the first
+		# delivery moves it.  A load made between two deliveries would read
+		# whichever deployment branch the session happened to be standing
+		# on, which carries one environment's files and nobody else's.
+		my %env_of;
+		for my $env_record (@{$record->{environments}}) {
+			next if $env_record->{error};
+			next unless @{$env_record->{pending}};
+			$env_of{$env_record->{env}} = $top->load_env($env_record->{env});
+		}
+
+		for my $env_record (@{$record->{environments}}) {
+			my $env_name = $env_record->{env};
+
+			# D43's awaiting outcome.  genesis pipeline-apply is the one
+			# command that cuts a deployment branch, so the run names that
+			# command and carries on past the environment without writing.
+			unless ($initial->{branches}{$env_name}) {
+				info "  #Y{%s}: awaiting #C{genesis pipeline-apply}", $env_name;
 				next;
 			}
-		}
 
-		# The branch the pre-flight settled, which is the deployment slug
-		# and not the environment's name, and which is not behind its
-		# remote-tracking ref.  So the diff base stays the local ref and a
-		# delivery a teammate published is part of what we diff against
-		# rather than something we deliver a second time (D2, H18).
-		#
-		# An environment the pre-flight has no record for has no branch on
-		# either side, which is D43's awaiting outcome and the walk's to
-		# report, so it is said in a line rather than passed over.
-		my $settled = $initial->{branches}{$env_name};
-		unless ($settled) {
-			info "  #Y{%s}: awaiting #C{genesis pipeline-apply}", $env_name;
-			next;
-		}
+			if ($env_record->{error}) {
+				warning("Could not read #C{%s}: %s",
+					$env_name, $env_record->{error});
+				next;
+			}
 
-		# Under a dry run the stage writes nothing, so a branch it says it
-		# would have reset or fast-forwarded still stands where it stood.
-		# The record names the ref a real run would have left it on, and
-		# the diff is taken from there, so the report says what a real run
-		# would deliver rather than naming files a teammate has already
-		# delivered.
-		$env_branch{$env_name} = $settled->{branch};
+			my @pending = @{$env_record->{pending}};
+			unless (@pending) {
+				info "  #Gi{%s}: nothing due", $env_name;
+				next;
+			}
 
-		my $diff = $git->diff_files(
-			$settled->{assumed} // $settled->{branch}, $control_sha, @dep_files
-		);
-		if (@{$diff->{all}}) {
-			$env_changed{$env_name}        = $diff->{all};
-			$env_changed_detail{$env_name} = $diff;
-		}
-
-		# Compute the undeployed set (for cascade-blocking).
-		#
-		# Anchor is the last-successful deploy's `git.control_commit`
-		# (the control SHA that was propagated when this env last
-		# deployed).  Diff that against control HEAD and filter by
-		# dep_files to get "what's changed on control since this env
-		# last shipped."
-		#
-		# Fallback (no exodus record, vault down, or pre-pipeline
-		# deploy): conservatively treat everything the env would
-		# receive via propagation as undeployed — blocks descendants
-		# from cascading past an env whose state we can't verify.
-		my $last_ctl_sha;
-		my $env_v = eval { $env->with_vault };
-		if ($env_v) {
-			my $dep = eval { $env_v->deployments->latest_successful };
-			$last_ctl_sha = $dep ? ($dep->lookup('git.control_commit') || '') : '';
-		}
-		if ($last_ctl_sha) {
-			my $udiff = $git->diff_files(
-				$last_ctl_sha, $control_sha, @dep_files
+			my $env    = $env_of{$env_name};
+			my $branch = $env_record->{branch};
+			$session->switch($branch);
+			Genesis::CI::Walk::deliver_pending(
+				session => $session,
+				env     => $env,
+				record  => $env_record,
+				dry_run => $dry_run,
 			);
-			$env_undeployed{$env_name} = $udiff->{all} if @{$udiff->{all}};
-		} elsif ($env_changed{$env_name}) {
-			# No deploy history: use the env branch's own pending set
-			$env_undeployed{$env_name} = $env_changed{$env_name};
+
+			info "  #G{%s}: %s %d commit%s onto #C{%s}",
+				$env_name,
+				$dry_run ? 'would deliver' : 'delivered',
+				scalar(@pending), @pending == 1 ? '' : 's', $branch;
+			for my $pending (@pending) {
+				info "    #Gi{control\@%s} %s",
+					substr($pending->{control_commit}, 0, 7),
+					$pending->{subject};
+				info "      #G{M} %s", $_
+					for $git->unprefixed(@{$pending->{delivered} || []});
+				info "      #R{D} %s", $_
+					for $git->unprefixed(@{$pending->{removed} || []});
+				# D33: an overwrite is never silent, and it is named per
+				# file, because the branch was carrying a hand edit that
+				# the mirror has just taken back off it.
+				warning("Overwrote a hand edit on #C{%s}: #C{%s}", $branch, $_)
+					for @{$pending->{overwrote} || []};
+			}
+
+			$delivered += scalar(@pending);
+			push @to_push, $branch unless $dry_run;
 		}
+		1;
+	};
+	unless ($ran) {
+		my $err = $@;
+		$session->abort($err) if $session->active;
+		die $err;
 	}
-
-	# Determine entry points
-	my $env_propagate = Genesis::CI::Propagation::compute_propagation_targets(
-		dag_order      => \@dag_order,
-		parent_of      => \%parent_of,
-		env_changed    => \%env_changed,
-		env_undeployed => \%env_undeployed,
-		scope          => \@scope,
-	);
-
-	# Pre-flight: build GitHub service once for all require_pr envs in scope.
-	# Owner/repo is resolved from the remote URL; credentials are validated
-	# against the API before touching any branches.  A dry run contacts
-	# GitHub for nothing, so it needs no credentials and never gets here.
-	my ($gh_owner, $gh_repo, $github);
-	if (!$dry_run) {
-		my $needs_github = grep {
-			$env_propagate->{$_} && ($nodes->{$_}{require_pr} // 0)
-		} @scope;
-		if ($needs_github) {
-			# Resolved rather than read off whichever remote git lists
-			# first, so the override is honoured and a repository that
-			# carries no pair was already refused by name, at load.
-			($gh_owner, $gh_repo) = split m{/}, $top->source_control_repository, 2;
-
-			$refuse->(
-				"GitHub credentials required for PR-based propagation.\n".
-				"Set the GITHUB_AUTH_TOKEN environment variable."
-			) unless $ENV{GITHUB_AUTH_TOKEN};
-
-			$github = Service::Github->new(org => $gh_owner);
-			my $authed_user = $github->get_authorized_user;
-			$refuse->(
-				"GitHub credentials are invalid or lack sufficient permissions.\n".
-				"Verify GITHUB_AUTH_TOKEN is a valid Personal Access Token."
-			) unless $authed_user;
-		}
-	}
-
-	# Build the propagation target list in DAG order, then delegate
-	# the per-env execution + batched push + PR API calls to the
-	# shared Genesis::CI::Propagation::propagate_envs.
-	my @targets;
-	for my $env_name (@scope) {
-		next unless $env_propagate->{$env_name};
-		push @targets, {
-			env        => $env_name,
-			branch     => $env_branch{$env_name},
-			require_pr => $nodes->{$env_name}{require_pr} // 0,
-			detail     => $env_changed_detail{$env_name} || {
-				changed => $env_propagate->{$env_name},
-				deleted => [],
-				renamed => {},
-			},
-		};
-	}
-
-	my $owner_repo = ($gh_owner && $gh_repo) ? "$gh_owner/$gh_repo" : undef;
-	my $result = Genesis::CI::Propagation::propagate_envs(
-		git           => $git,
-		github        => $github,
-		owner_repo    => $owner_repo,
-		top           => $top,
-		targets       => \@targets,
-		control       => $control,
-		control_sha   => $control_sha,
-		control_short => $control_short,
-		push_direct_commits => 1,    # manual provider
-		push_pr_branches    => 1,
-		create_prs          => 1,
-		dry_run             => $dry_run,
-		push_extra_branches => [@targets ? $control : ()],
-	);
 
 	# The walk is over, so the operator goes back on the branch they started
-	# this run from, before a word of the summary is printed and whether or
-	# not a delivery failed.  Nothing below reads the working tree.
+	# this run from, before a word of the summary is printed.  Nothing below
+	# reads the working tree.
 	$session->finish;
 
-	bail("Propagation aborted due to error.") if @{$result->{errors}};
-	my $propagated = $result->{propagated};
-
-	# Report any envs we deliberately skipped because they were already
-	# at-or-ahead of the cascade source (avoids silent regressions).
-	if (%env_skipped_ahead) {
-		info "";
-		for my $env_name (sort keys %env_skipped_ahead) {
-			info "  #Y{%s}: skipped - already at #C{%s} (more recent %s commit)",
-				$env_name, $env_skipped_ahead{$env_name}, $control;
+	# The push is batched to the end, so a run that failed halfway has put
+	# nothing on the remote, and control goes with the branches because the
+	# markers now on them name commits the remote has to be able to resolve.
+	if (@to_push) {
+		my $remote = $git->default_remote;
+		if ($remote) {
+			my @all = ($control, @to_push);
+			info "\n#G{Pushing} to #C{%s}...", $remote;
+			my $results = $git->push($remote, @all);
+			for my $ref (@all) {
+				if ($results->{$ref}) {
+					info "  #G{%s}: pushed", $ref;
+				} else {
+					warning("Failed to push #C{%s} to #C{%s}.", $ref, $remote);
+				}
+			}
 		}
 	}
 
-	if ($propagated) {
-		info "\n#G{Done.} %s %d environment%s.",
-			$dry_run ? "Would propagate to" : "Propagated to",
-			$propagated, $propagated == 1 ? '' : 's';
-	} elsif (%env_skipped_ahead) {
-		info "\n#Yi{No changes to propagate (downstream envs already up-to-date or ahead).}";
+	if ($delivered) {
+		info "\n#G{Done.} %s %d commit%s.",
+			$dry_run ? 'Would deliver' : 'Delivered',
+			$delivered, $delivered == 1 ? '' : 's';
 	} else {
 		info "\n#Yi{No changes to propagate.}";
 	}
