@@ -5,8 +5,6 @@ use warnings;
 
 use Genesis;
 use Genesis::State;
-use Genesis::Term qw/in_controlling_terminal/;
-use Genesis::UI qw/prompt_for_boolean/;
 use Genesis::Commands;
 use Genesis::Exit qw/CONFIG/;
 use Genesis::Top;
@@ -534,14 +532,14 @@ sub propagate {
 		@scope = @dag_order;
 	}
 
-	# An absent branch is a broken topology, not an env with nothing to
-	# do: the per-env diff below cannot tell the two apart.
-	my @created;
-	if (my @missing = _missing_env_branches($top, $git, \@scope)) {
-		_authorize_branch_creation($opts, \@missing, $control);
-		@created = _create_missing_branches($top, \@missing, $dry_run);
-	}
-
+	# Nothing stands between the pre-flight and the walk any more.  An
+	# environment with no deployment branch is reported by the walk as
+	# awaiting genesis pipeline-apply, which is the command the design
+	# gives the job of cutting one, and the run carries on past it without
+	# writing.  propagate used to offer to make the branch itself, and that
+	# offer cut it under the environment's own name rather than under the
+	# deployment slug, so it satisfied nothing and left a ref standing where
+	# the real branch has to go.
 	my $control_short = $git->sha($control_sha, short => 1);
 	if ($after_env) {
 		info "\n#G{Propagating from} #C{%s} #G{@} #C{%s} #G{(certified by %s)}\n",
@@ -562,8 +560,6 @@ sub propagate {
 	#                    deployed it.
 	my (%env_changed, %env_changed_detail, %env_undeployed, %env_skipped_ahead);
 	for my $env_name (@scope) {
-		# Every env in scope has a branch by now: the guard above either
-		# created it or bailed.
 		my $env = eval { $top->load_env($env_name) };
 		next unless $env;
 
@@ -601,8 +597,14 @@ sub propagate {
 			next;
 		}
 
+		# Under a dry run the stage writes nothing, so a branch it says it
+		# would have reset or fast-forwarded still stands where it stood.
+		# The record names the ref a real run would have left it on, and
+		# the diff is taken from there, so the report says what a real run
+		# would deliver rather than naming files a teammate has already
+		# delivered.
 		my $diff = $git->diff_files(
-			$settled->{branch}, $control_sha, @dep_files
+			$settled->{assumed} // $settled->{branch}, $control_sha, @dep_files
 		);
 		if (@{$diff->{all}}) {
 			$env_changed{$env_name}        = $diff->{all};
@@ -710,9 +712,7 @@ sub propagate {
 		create_prs          => 1,
 		no_push             => $no_push,
 		dry_run             => $dry_run,
-		# A created branch gets no propagation commit, so it never reaches
-		# @pushed_branches and would otherwise stay local.
-		push_extra_branches => [@created, (@targets ? $control : ())],
+		push_extra_branches => [@targets ? $control : ()],
 	);
 
 	bail("Propagation aborted due to error.") if @{$result->{errors}};
@@ -769,84 +769,6 @@ sub _summarize_load_error {
 	# Trim to fit on one terminal row alongside the rest of the row
 	$reason = substr($reason, 0, 80) . '...' if length($reason) > 80;
 	return $reason;
-}
-
-# }}}
-# _missing_env_branches - envs in scope that have no branch {{{
-#
-# Kept separate from propagate() so the decision can be tested without a
-# repository: the command needs a working tree, a DAG and a vault before
-# it reaches this point.
-#
-# The branch is named by branch_for, which composes <env>/<type> under D66,
-# rather than by the environment's own name.  In a typed repository those are
-# two different refs, so asking by name made this guard refuse every run in
-# front of the branches pipeline-apply had actually cut, and the walk below
-# it was never reached.  The environments come back by name, because that is
-# what the creator and the authorization below both take.
-sub _missing_env_branches {
-	my ($top, $git, $scope) = @_;
-	return grep {!$git->branch_exists($top->branch_for($_))} @$scope;
-}
-
-# }}}
-# _authorize_branch_creation - may propagate create the missing branches? {{{
-sub _authorize_branch_creation {
-	my ($opts, $missing, $control) = @_;
-	return 1 if $opts->{yes};
-
-	my $one = (@$missing == 1);
-	my $list = join("\n", map {"  #C{$_}"} @$missing);
-
-	if (in_controlling_terminal()) {
-		info(
-			"\nNo branch exists for %s:\n%s\n\n".
-			"Genesis can create %s from #C{%s} and push %s.",
-			($one ? "this environment" : "these environments"), $list,
-			($one ? "it" : "them"), $control, ($one ? "it" : "them")
-		);
-		return 1 if prompt_for_boolean(
-			sprintf("Create %s now? [y|n]",
-				$one ? "#C{$missing->[0]}" : scalar(@$missing)." environments"),
-			0
-		);
-		bail("Aborted - no branches were created.");
-	}
-
-	bail(
-		{exitcode => Genesis::Top->PROPAGATE_NO_BRANCH_EXIT},
-		"No branch exists for %s:\n%s\n\n".
-		"Propagation compares each environment's branch against %s, so an\n".
-		"absent branch cannot be told apart from one with no changes.\n\n".
-		"Create %s with #C{%s}, or re-run with #C{-y} to create %s now.",
-		($one ? "this environment" : "these environments"), $list, $control,
-		($one ? "it" : "them"),
-		($one ? "genesis $missing->[0] pipeline-prepare"
-		      : "genesis pipeline-prepare"),
-		($one ? "it" : "them")
-	);
-}
-
-# }}}
-# _create_missing_branches - build the branches propagate was refused {{{
-sub _create_missing_branches {
-	my ($top, $missing, $dry_run) = @_;
-
-	my @created;
-	for my $name (@$missing) {
-		my $env = eval {$top->load_env($name)};
-		bail(
-			"Could not load #C{%s} to create its branch:\n%s",
-			$name, ($@ // 'unknown error') =~ s/\s+$//r
-		) unless $env;
-
-		my ($added, $removed) = $env->prepare_branch(dry_run => $dry_run);
-		info "  #G{%s} #C{%s} (%d added, %d removed)",
-			($dry_run ? 'would create' : 'created'),
-			$name, scalar(@$added), scalar(@$removed);
-		push @created, $name;
-	}
-	return @created;
 }
 
 # }}}

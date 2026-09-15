@@ -1,9 +1,9 @@
 #!/usr/bin/env perl
-# Proves the reading half of T1: the fourteen shared readers answer one way
+# Proves the reading half of T1: the fifteen shared readers answer one way
 # about a ref, a tip, a sha on R, a repository's refs, its current branch, a
 # commit's paths, a commit's contents, a file, R's branch list, a clone made
-# now, a branch's last subjects, every local head, whether a commit is
-# reachable on R, and a record set's newest entry.
+# now, a branch's last subjects, every commit a ref reaches, every local head,
+# whether a commit is reachable on R, and a record set's newest entry.
 use strict;
 use warnings;
 use utf8;
@@ -101,10 +101,10 @@ subtest 'the readers answer for what is absent' => sub {
 # Proves the second reading half of T1: the six later readers answer for R's
 # branch list, a fresh clone, a branch's recent subjects, a record set's
 # newest entry, every local head, and whether a commit is reachable on R.
-subtest 'the six later readers answer about the fixture' => sub {
-	# The eleven are the ten rows below and the restoration that the one
-	# run asserts for itself.
-	plan tests => 11;
+subtest 'the seven later readers answer about the fixture' => sub {
+	# The thirteen are the twelve rows below and the restoration that the
+	# one run asserts for itself.
+	plan tests => 13;
 
 	my $h = make_harness(envs => ['lab', 'qa'], vault => 0);
 	init_branch($h, 'lab');
@@ -138,6 +138,17 @@ subtest 'the six later readers answer about the fixture' => sub {
 
 	is_deeply([subjects_of($h, 'no/such/branch', 2)], [],
 		'and a branch nobody has reads back as no subjects at all');
+
+	# commits_on answers with shas rather than subjects, so a row can ask
+	# whether one named commit is still on a branch without knowing where
+	# on the branch it sits.  It is read against what it holds and not only
+	# against itself, because a reader that answered an empty list every
+	# time would pass a comparison of one call against another.
+	my @reached = commits_on($h->a, 'refs/heads/' . $h->control);
+	is($reached[0], $second,
+		'commits_on names the tip first and walks back from it');
+	is_deeply([commits_on($h->a, 'refs/heads/no/such/branch')], [],
+		'and a ref nobody has reads back as no commits at all');
 
 	ok(reachable_on_r($h, $second), 'a pushed commit is reachable on R');
 

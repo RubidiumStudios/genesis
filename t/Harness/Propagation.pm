@@ -1116,6 +1116,12 @@ sub deliver {
 		run({dir => $dir}, 'git', 'read-tree', '--empty');
 	}
 
+	# The mode each path carries on control, so the mirror is a mirror.  A
+	# delivery written at a fixed 100644 flipped the bit on every executable
+	# file the set holds, which a kit's hooks are, and the branch then
+	# differed from control in the one way no row had asked it to.
+	my %mode = $self->_modes_at($dir, $control);
+
 	my $corrupt = $opts{corrupt} || {};
 	my $files   = $opts{files}   || {};
 	for my $path (@set) {
@@ -1132,7 +1138,7 @@ sub deliver {
 		}
 		chomp $blob;
 		run({dir => $dir}, 'git', 'update-index', '--add', '--cacheinfo',
-			"100644,$blob,$path");
+			sprintf('%s,%s,%s', $mode{$path} // '100644', $blob, $path));
 	}
 
 	my ($tree) = run({dir => $dir}, 'git', 'write-tree');
@@ -1155,6 +1161,26 @@ sub deliver {
 	}
 
 	return $sha;
+}
+
+# }}}
+# _modes_at - every path's file mode in one commit's tree {{{
+#
+# A delivery mirrors the set at a control commit, so it has to carry each
+# file's mode across as well as its contents.  Writing every entry at 100644
+# strips the executable bit off a kit's hooks, and the branch then differs
+# from control in a way no row asked for, which shows up as files the walk
+# says it would propagate.
+sub _modes_at {
+	my ($self, $dir, $commit) = @_;
+	my ($listing) = run({dir => $dir}, 'git', 'ls-tree', '-r', $commit);
+	chomp $listing if defined $listing;
+	my %mode;
+	for my $line (split /\n/, ($listing // '')) {
+		next unless $line =~ m{^(\d{6})\s+\S+\s+\S+\t(.+)$};
+		$mode{$2} = $1;
+	}
+	return %mode;
 }
 
 # }}}

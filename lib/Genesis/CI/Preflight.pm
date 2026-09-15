@@ -239,6 +239,9 @@ sub initial_state {
 			behind         => $div->{behind},
 			reset          => 0,
 			fast_forwarded => 0,
+			# The ref a dry run would have moved the branch to, and undef
+			# under a real run, which has moved it already.
+			assumed        => undef,
 		};
 
 		# The refusal below is correct and the creation guard further down
@@ -325,9 +328,23 @@ sub initial_state {
 				"#Y{This report assumes the reset of }#C{%s}#Y{ that a real ".
 				"run would make.}",
 				$r->{branch});
+			# Nothing moved, so the record keeps the state the
+			# classification gave it and names the ref a real run would
+			# have moved the branch to.  A reader that wants the diff base
+			# takes that ref, and the report then says what a real run
+			# would say rather than what this un-moved branch would.
+			$state->{branches}{$r->{env}}{assumed} = $tracking;
 		} else {
 			$git->set_branch_ref($r->{branch}, $tracking);
-			$state->{branches}{$r->{env}}{reset} = 1;
+			# The branch stands on its tracking ref now, so the record is
+			# settled with it.  A caller reading state or either count off
+			# a record the stage has written would otherwise get the value
+			# the classification wrote, which is no longer true.
+			my $record = $state->{branches}{$r->{env}};
+			$record->{reset}  = 1;
+			$record->{state}  = 'in-sync';
+			$record->{ahead}  = 0;
+			$record->{behind} = 0;
 		}
 		push @{$state->{events}}, $line;
 	}
@@ -351,16 +368,23 @@ sub initial_state {
 		my $line = sprintf('fast-forwarded %s to %s/%s, %s behind',
 			$branch, $remote, $branch, _commits($div->{behind}));
 
+		my $tracking = sprintf('refs/remotes/%s/%s', $remote, $branch);
+
+		# The warning says only that the fast-forward is assumed, because
+		# the event line below is the one record of what would be done and
+		# the caller prints it either way, which is the rule the reset
+		# above keeps as well.
 		if ($opts{dry_run}) {
 			warning(
 				"#Y{This report assumes the fast-forward of }#C{%s}#Y{ that a ".
-				"real run would make.}  %s", $branch, $line);
+				"real run would make.}", $branch);
+			$record->{assumed} = $tracking;
 		} else {
-			$git->set_branch_ref($branch, sprintf('refs/remotes/%s/%s', $remote, $branch));
+			$git->set_branch_ref($branch, $tracking);
 			$record->{fast_forwarded} = 1;
+			$record->{state}  = 'in-sync';
+			$record->{behind} = 0;
 		}
-		$record->{state}  = 'in-sync';
-		$record->{behind} = 0;
 		push @{$state->{events}}, $line;
 	}
 

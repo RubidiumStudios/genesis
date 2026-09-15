@@ -31,7 +31,9 @@ subtest 'a marker-only local commit is reset and reported as an event' => sub {
 	# Five rows, and one more for the run's own restoration assertion.
 	plan tests => 6;
 
-	my $h  = make_harness(envs => ['qa']);
+	# The kit is here because the walk loads the environment before it
+	# prints an outcome for it, and the row below reads that outcome column.
+	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -54,20 +56,14 @@ subtest 'a marker-only local commit is reset and reported as an event' => sub {
 
 	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
-	# The run does not end at zero, because the creation guard further down
-	# propagate still asks branch_exists for the environment's name rather
-	# than for its slug and refuses at PROPAGATE_NO_BRANCH_EXIT.  What this
-	# row reads is that the stage above it did not refuse.
 	isnt($exit, Genesis::Exit::DATAERR, 'this stage did not refuse the run');
 	like($err, qr{reset\s+\Q$qa\E\s+to\s+\S*origin/\Q$qa\E},
 		'the reset is reported as an event line');
-	# This row guards a regression it cannot yet catch.  The outcome column
-	# is printed by the walk, and the walk does not run until Task 7.8 moves
-	# the guard off the environment's name, so nothing can match today and
-	# the row cannot fail.  It is kept rather than deferred because the
-	# claim is about where the reset is reported and the file that makes it
-	# is this one; 7.8's review confirms it discriminates once the walk runs.
-	unlike($err, qr{\Q$qa\E\s+reset\b},
+	# The walk's outcome column is the environment's name, a colon, and a
+	# verb, and the environment it names is qa rather than the branch.  The
+	# row forbids a reset appearing there, which is a shape the walk really
+	# could print, so it goes red if the reset were ever made an outcome.
+	unlike($err, qr{^\s*qa:.*\breset\b}mi,
 		'and it is not reported as the environment outcome');
 	isnt(ref_in($h->a, "refs/heads/$qa"), $stranded,
 		'the stranded commit is gone from the branch');
