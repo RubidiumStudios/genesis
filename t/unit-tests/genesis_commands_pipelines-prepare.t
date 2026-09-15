@@ -17,8 +17,12 @@ use warnings;
 
 use lib 'lib';
 use lib 't';
+use helper;
+use Harness::Propagation;
 use Test::More;
 use Test::Exception;
+
+provide_rc();
 
 $ENV{GENESIS_TESTING} = 'yes';
 $ENV{GENESIS_LIB}   ||= 'lib';
@@ -96,6 +100,64 @@ subtest 'an environment outside the pipeline is rejected' => sub {
 		'the offending name appears in the error';
 	throws_ok {scope_for('nope')} qr/pipeline/i,
 		'and it says what it is not part of';
+};
+
+# ======================================================================
+# The body, under --no-fetch
+# ======================================================================
+#
+# Reaching the body takes a working tree, a vault and a git repository,
+# which is why the rows above stop at the scope decision.  The propagation
+# harness builds all three, so the two answers --no-fetch turns on can be
+# read off the command itself rather than off the mapping behind it.
+
+subtest 'a branch this clone has is not skipped under --no-fetch' => sub {
+	plan tests => 6;
+
+	# The embedded genesis is one of the files the propagation set carries,
+	# so the branch has something real on it either way.
+	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0', embed => 1);
+
+	# The branch is this clone's alone, which is the half of --no-fetch that
+	# was answered backwards, because a record comes back for such a branch
+	# and the flag was being read off that record.  The stray file is here to
+	# give the reconciliation something to remove.  What the row reads is the
+	# answer the flag gives and not what the reconciliation then manages,
+	# since prepare_branch takes an empty commit as fatal on this fixture
+	# with the flag and without it alike.
+	local_branch($h, 'qa');
+	hand_commit($h, 'qa', copy => 'a', push => 0,
+		files => {'stray.yml' => "---\nno environment depends on this\n"});
+	stand_on($h, 'control');
+
+	# Genesis reports on standard error, so each run's account of itself
+	# comes back in the second value rather than the first.  What is under
+	# test is the answer the flag gives about a branch that is here, which
+	# is why the two runs are compared on that answer alone.
+	my (undef, $with)    = $h->run_genesis('pipeline-prepare', '--no-fetch');
+	my (undef, $without) = $h->run_genesis('pipeline-prepare');
+
+	unlike $with, qr/skipped/,
+		'a branch that is here is not withheld for want of the remote';
+	unlike $with, qr/no branch here/,
+		'and the run never claims the branch is absent';
+	unlike $with, qr/\d+ skipped/, 'nothing is counted as skipped';
+	unlike $without, qr/skipped/,
+		'which is the same answer the run gives without the flag';
+};
+
+subtest 'a branch in neither place is skipped under --no-fetch' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['lab'], kit => 'omega-v2.7.0');
+
+	my (undef, $err) = $h->run_genesis('pipeline-prepare', '--no-fetch');
+
+	like $err, qr/skipped.*lab/s,
+		'a branch that is nowhere is withheld and named';
+	is ref_in($h->a, 'refs/heads/lab'), undef,
+		'and is not created off HEAD without the remote being asked';
+	like $err, qr/1 skipped/, 'the summary counts it';
 };
 
 done_testing;

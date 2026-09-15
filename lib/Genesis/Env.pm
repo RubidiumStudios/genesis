@@ -1619,14 +1619,20 @@ sub prepare_branch {
 	my %keep_set = map { $_ => 1 } @keep;
 
 	# The remote decides: creating off HEAD because the branch is missing
-	# locally would fork it from the real one.  The refresh has already
-	# created L from T where T alone had the branch, so no-local here means
-	# the caller skipped the refresh.  M8 retires this sub with the writer.
-	my $div = $git->resolve_branch($branch, unverifiable => ($opts{no_fetch} ? 1 : 0));
-	my $origin = !defined($div)                ? 'absent'
-	           : $div->{unverifiable}          ? 'unverifiable'
-	           : $div->{state} eq 'no-local'   ? 'fetched'
-	           :                                 'local';
+	# locally would fork it from the real one.  Only a branch that is in
+	# neither this clone nor its tracking refs licenses a create, and a
+	# caller that skipped the refresh cannot tell that case from a stale
+	# clone, so it is told so rather than answered.  The flag is read off
+	# the option rather than off the record, because the one case it speaks
+	# for is the case that has no record to carry it.
+	#
+	# Nothing answers 'fetched' any more.  The refresh creates the local ref
+	# from the tracking one, so a branch the remote alone had is already
+	# here by the time this runs, and the refresh is what reports the
+	# creation.  M9 retires this sub with its last caller.
+	my $div = $git->resolve_branch($branch);
+	my $origin = !defined($div) ? ($opts{no_fetch} ? 'unverifiable' : 'absent')
+	           :                  'local';
 	return ([], [], $origin) if $origin eq 'unverifiable';
 	my $branch_exists = $origin ne 'absent';
 

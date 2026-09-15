@@ -855,6 +855,13 @@ sub remote_branch_exists {
 # compares two refs and runs only when both exist.  When neither ref exists
 # the whole record is undef, because the design gives that case no state.
 #
+# Both halves are read through _ref_exists, which asks about the named ref
+# and about nothing else.  branch_exists runs `git rev-parse --verify` on a
+# short name, so a tag carrying a branch name would read as the branch, and
+# it memoises, so a handle that asked before a refresh would keep answering
+# no-local after one.  The counts are taken against refs/heads, and a local
+# half that disagreed with them would turn this query into a bail.
+#
 # The query never fetches.  Under D40 the refresh is its own step, so a
 # caller refreshes first and passes unverifiable => 1 when it did not,
 # which is what `genesis pipeline-status --no-refresh` does.
@@ -863,7 +870,7 @@ sub resolve_branch {
 	my $remote       = exists $opts{remote} ? $opts{remote} : $self->default_remote;
 	my $unverifiable = $opts{unverifiable} ? 1 : 0;
 
-	my $local    = $self->branch_exists($branch) ? 1 : 0;
+	my $local    = $self->_ref_exists("refs/heads/$branch");
 	my $tracking = $remote
 		? $self->_ref_exists("refs/remotes/$remote/$branch")
 		: 0;

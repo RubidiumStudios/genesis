@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # Proves T89: the divergence query answers with the six states, both counts,
-# and the unverifiable flag, and only the PR branch keeps a forced refspec.
+# and the unverifiable flag, and the retired forced refspec has not come back.
 use strict;
 use warnings;
 use utf8;
@@ -83,6 +83,26 @@ subtest 'the two existence answers come before the counts' => sub {
 		'a branch neither side has gets no state at all');
 };
 
+subtest 'a tag sharing a branch name is not that branch' => sub {
+	plan tests => 1;
+
+	my $h    = make_harness(envs => ['qa'], vault => 0);
+	my $slug = $h->slug('qa');
+	init_branch($h, 'qa');
+	refresh($h, 'a', $slug);
+
+	delete_local($h, 'a', $slug);
+	tag_branch($h, 'a', $slug, at => "refs/remotes/origin/$slug");
+
+	# A reader built on `git rev-parse --verify` answers about this tag as
+	# readily as about a branch, so it would call the branch local, take the
+	# counts against a head that is not there, and turn a query that
+	# promises to raise nothing into a bail.
+	cmp_deeply(div($h, $slug),
+		{state => 'no-local', ahead => 0, behind => 0, unverifiable => 0},
+		'the tracking ref alone still has the branch');
+};
+
 subtest 'the unverifiable flag rides on every answer' => sub {
 	plan tests => 2;
 
@@ -124,14 +144,14 @@ subtest 'the query asks refs and never the network' => sub {
 # local ref that was not there is not the same write as overwriting a local
 # ref that was.  A sweep that caught both would refuse the creation the design
 # requires and would say nothing more about the overwrite it exists to catch.
-subtest 'only the pull request branch keeps a forced refspec' => sub {
+subtest 'the retired helper\'s forced overwrite has not come back' => sub {
 	plan tests => 1;
 
 	my $src = join('', map { slurp($_) }
 		qw(lib/Service/Git.pm lib/Genesis/CI/Propagation.pm));
 	my @forced = ($src =~ m{(\+refs/heads/[^:\s]+:refs/heads/\$branch)}g);
 	cmp_deeply(\@forced, [],
-		'no forced overwrite of a named local head survives outside the PR path');
+		'no forced overwrite of a named local head is written anywhere');
 };
 
 done_testing;

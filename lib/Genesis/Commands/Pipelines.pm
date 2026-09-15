@@ -835,7 +835,7 @@ sub pipeline_prepare {
 	info "\n#G{Preparing environment branches from} #C{%s}%s\n",
 		$control, ($dry_run ? ' #Yi{(dry run)}' : '');
 
-	my ($created, $fetched, $reconciled, $untouched, $skipped) = (0) x 5;
+	my ($created, $reconciled, $untouched, $skipped) = (0) x 4;
 	for my $name (@scope) {
 		my $env = eval {$top->load_env($name)};
 		unless ($env) {
@@ -860,11 +860,6 @@ sub pipeline_prepare {
 			$created++;
 			info "  #G{created} #C{%s} (%d added, %d removed)",
 				$name, scalar(@$added), scalar(@$removed);
-		} elsif ($origin eq 'fetched') {
-			$fetched++;
-			info "  #C{fetched} #C{%s} #K{from %s} (%d added, %d removed)",
-				$name, $git->default_remote,
-				scalar(@$added), scalar(@$removed);
 		} elsif (@$added || @$removed) {
 			$reconciled++;
 			info "  #Y{reconciled} #C{%s} (%d added, %d removed)",
@@ -875,9 +870,9 @@ sub pipeline_prepare {
 		}
 	}
 
-	info "\n%s: %d created, %d fetched, %d reconciled, %d already current%s.\n",
+	info "\n%s: %d created, %d reconciled, %d already current%s.\n",
 		($dry_run ? "Would prepare" : "Prepared"),
-		$created, $fetched, $reconciled, $untouched,
+		$created, $reconciled, $untouched,
 		($skipped ? sprintf(", %d skipped", $skipped) : '');
 
 	info "Push the new branches with #C{git push --all} to make them ".

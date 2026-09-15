@@ -448,6 +448,14 @@ it was written at.  C<copy> defaults to A and C<at> names the commit to write
 it at, defaulting to wherever that copy is standing.  C<push> defaults off,
 so the branch stays local unless the row asks for it on R.
 
+=head2 tag_branch($h, $copy, $name, %opts)
+
+Writes a tag under the name it is given in the named copy and returns the sha
+it was written at.  C<at> names the ref to tag, defaulting to wherever that
+copy is standing.  A tag carrying a deployment branch's name is how a reader
+built on C<git rev-parse --verify> comes to call a branch local when the branch
+is not there, and that is the state the divergence query has to read past.
+
 =head2 local_branch_only($h, $env, %opts)
 
 Makes the environment's deployment branch in copy A alone, so R has never had
