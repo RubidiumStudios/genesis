@@ -1594,10 +1594,13 @@ sub propagation_files_at {
 	# a reading surface has none of its own, so the caller's vault stands in
 	# for the length of the read.  It is the vault the fragments were always
 	# enumerated through, since propagation establishes one before it reads a
-	# set at all.
+	# set at all.  A local vault is lent as a remote one is; what cannot be
+	# lent is the absence of a vault, and the refusal for that is below,
+	# where it can say which read wanted one.
+	require Scalar::Util;
 	my $vault = eval {$self->top->vault};
-	$top->set_vault(vault => $vault, session_only => 1)
-		if ref($vault) eq 'Service::Vault::Remote';
+	my $lent  = Scalar::Util::blessed($vault) && $vault->isa('Service::Vault');
+	$top->set_vault(vault => $vault, session_only => 1) if $lent;
 
 	my $env = Genesis::Env->bare($self->name, $top);
 
@@ -1620,12 +1623,30 @@ sub propagation_files_at {
 	# readers name one source for one environment file.
 	my $kit = $env->lookup('kit', {});
 	$kit = {} unless ref($kit) eq 'HASH';
+	my $source;
 	if ($kit->{name} && $kit->{name} ne 'dev') {
-		my $source = _kit_source_at($kit->{name}, $kit->{version}, \@held);
-		$files{$source} = 1 if defined $source;
+		$source = _kit_source_at($kit->{name}, $kit->{version}, \@held);
 	} elsif (grep {m{^dev/}} @held) {
-		$files{'dev/'} = 1;
+		$source = 'dev/';
 	}
+
+	# A set without its kit is not a set.  The kit renders the manifest and
+	# names the fragments the merge consumes, and it is a kind of the set in
+	# its own right, so a commit that does not carry the kit the environment
+	# declares cannot be delivered.  Answering the rest of the set would have
+	# the mirror take the kit off the branch, which is the same ending an
+	# answer that reads short always has here.
+	bail(
+		"#C{%s} declares the kit #C{%s}, which the commit #C{%s} does not ".
+		"carry.\n\n".
+		"A deployment branch carries the kit it deploys, so the propagation ".
+		"set cannot be read at a commit that holds none.  Commit the kit ".
+		"under the deployment root, or deliver a commit that does.",
+		$self->name,
+		join('/', grep {defined && length} $kit->{name} // 'dev', $kit->{version}),
+		substr($commit, 0, 10)
+	) unless defined $source;
+	$files{$source} = 1;
 
 	# The reaction scripts, which are non-triggering paths under D68 and which
 	# still have to be current on the branch.
@@ -1653,6 +1674,20 @@ sub propagation_files_at {
 	$files{$_} = 1 for __PACKAGE__->_resolve_track_additional_files(
 		$tracked, $self->name, $root, \@held
 	);
+
+	# The hook that names the fragments asks its environment for a vault, and
+	# the tree has whatever this read could lend it, so a read with nothing
+	# to lend says which read wanted a vault rather than leaving the absent
+	# one to complain that the command should not have needed it.
+	bail(
+		"Cannot read the propagation set of #C{%s} at #C{%s} without a ".
+		"vault.\n\n".
+		"The kit's blueprint hook names the manifest fragments the set ".
+		"carries, and running it reads through a vault.  This command holds ".
+		"#C{%s}, which is not one that can be lent to a tree read out of a ".
+		"commit.",
+		$self->name, substr($commit, 0, 10), (ref($vault) || 'no vault')
+	) unless $lent;
 
 	# The blueprint's repository-side fragments, enumerated over the tree the
 	# commit holds and checked against its listing below.  They are read here
@@ -1714,11 +1749,12 @@ sub _deployment_root_at {
 # _blueprint_fragments - the manifest fragments the blueprint draws from here {{{
 #
 # The kit's blueprint hook is the authority on which repository-side files the
-# merge consumes, and under D78 propagation enumerates them on control, which
-# is where the kit is.  Running the hook needs no BOSH configs, but it does
-# need a reachable vault, which propagation establishes before it gets here.
-# Factored out of _propagation_file_kinds so the at-commit reader of D69
-# enumerates them the same way.
+# merge consumes, and it is run against the tree the environment this is
+# called on stands over, so the working-tree reader names what control holds
+# and the at-commit reader names what the commit held (D78).  Running the hook
+# needs no BOSH configs, but it does need a reachable vault, which propagation
+# establishes before it gets here.  Factored out of _propagation_file_kinds so
+# the two readers enumerate the same way.
 #
 # The paths come back deployment-root-relative and the caller prefixes them,
 # so the prefix is applied exactly once.  The handle is a parameter for that
@@ -1865,7 +1901,12 @@ sub _glob_regex {
 		} elsif ($c eq '?') {
 			$re .= ($fresh ? '(?!\.)' : '') . '[^/]';
 		} elsif ($c eq '[') {
+			# A bracket standing first in the class is that bracket, which
+			# is the one place a class does not end where it looks like it
+			# does.
 			my $class = '';
+			$class .= shift(@chars) if @chars && $chars[0] eq '!';
+			$class .= shift(@chars) if @chars && $chars[0] eq ']';
 			$class .= shift(@chars) while @chars && $chars[0] ne ']';
 			shift @chars;
 			$class =~ s{^!}{^};
@@ -1879,7 +1920,11 @@ sub _glob_regex {
 		} else {
 			$re .= quotemeta($c);
 		}
-		$fresh = ($c eq '/');
+		# A brace or a comma moves nothing along the path, so a star first
+		# in a group is still first in its segment and keeps its guard.
+		$fresh = $c eq '/' ? 1
+		       : $c =~ m{^[{},]$} ? $fresh
+		       : 0;
 	}
 	$re .= ')' while $depth-- > 0;
 
