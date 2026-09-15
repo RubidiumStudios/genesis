@@ -330,10 +330,11 @@ subtest "the writer commits with its caller's message" => sub {
 #
 # No repository produces the state, because _propagation_file_kinds always
 # names the configuration and the embedded genesis, so the row makes the
-# reader answer empty for the length of the closure it passes to bail_from.
-# One call is made inside that closure, and any other call made there would
-# read the same empty answer.  That is a localised glob and not a stand-in
-# environment, so everything below the reader is the production writer.
+# reader answer empty for the length of the block below.  The writer reads
+# its set through propagation_files_at, which is the at-commit reader, so
+# that is the sub the row localises and not the working-tree one beneath it.
+# It is a localised glob and not a stand-in environment, so everything below
+# the reader is the production writer.
 subtest 'an empty set is refused before anything is written' => sub {
 	plan tests => 5;
 
@@ -372,7 +373,7 @@ subtest 'an empty set is refused before anything is written' => sub {
 		# one statement of it, so the reader answers empty for everything
 		# below, and the one call the closure makes is the delivery.
 		no warnings 'redefine';
-		local *Genesis::Env::propagation_files = sub {()};
+		local *Genesis::Env::propagation_files_at = sub {()};
 		$session->apply_files($one,
 			env     => $env,
 			message => Genesis::CI::Marker::build($one, 'qa'),
@@ -400,10 +401,15 @@ subtest 'an empty set is refused before anything is written' => sub {
 # membership, the whole branch is staged for removal, and the commit succeeds
 # because a removal is something to commit.
 #
-# A handle built at the copy root rather than at the deployment root produces
-# the state on its own, which is why the row builds one there.  The set then
-# comes back deployment-root-relative, it looks entirely plausible, and the
-# tree at the source commit holds none of it.
+# No repository produces the state either, now that the at-commit reader
+# finds the deployment root at the commit it is asked about rather than from
+# the handle the caller passes in.  A handle built at the copy root used to
+# make the set come back deployment-root-relative, and the reader now works
+# the prefix out for itself, so that scene answers a set the commit does hold
+# and never reaches the refusal.  The row therefore localises the at-commit
+# reader too, and answers a full set of deployment-root-relative paths, which
+# is the shape a prefix mismatch produced and is the one input the refusal
+# reads.  Everything below the reader is the production writer.
 subtest 'a set the source commit holds none of is refused' => sub {
 	plan tests => 5;
 
@@ -423,12 +429,8 @@ subtest 'a set the source commit holds none of is refused' => sub {
 		push    => 1,
 	);
 
-	# Service::Git keeps one instance per repository and fixes its prefix at
-	# that first construction, so a handle asked for at the copy root here is
-	# the handle propagation_files reaches through Service::Git->new('.')
-	# later, and every path in the set comes back without the bosh/ prefix.
-	my $git = Service::Git->new($h->a);
 	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
 
@@ -439,6 +441,14 @@ subtest 'a set the source commit holds none of is refused' => sub {
 
 	my $tip = ref_in($h->a, 'refs/heads/' . $h->slug('qa'));
 	my ($message, $code) = bail_from(sub {
+		no warnings 'redefine';
+		# The set a handle carrying the wrong prefix answered, which is every
+		# path named as the deployment root names it rather than as the git
+		# root does.  The commit holds each of them under bosh/ and none of
+		# them where the set puts them.
+		local *Genesis::Env::propagation_files_at = sub {
+			qw(.genesis/config .genesis/bin/genesis qa.yml ops/extra.yml)
+		};
 		$session->apply_files($one,
 			env     => $env,
 			message => Genesis::CI::Marker::build($one, 'qa'),
