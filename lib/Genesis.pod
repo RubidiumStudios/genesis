@@ -3102,6 +3102,54 @@ B<Examples:>
     sentence_join('a', 'b', 'c');     # Returns: 'a, b and c'
     sentence_join();                  # Returns: ''
 
+=head2 without_backtrace
+
+    my $message = without_backtrace($@);
+
+A caught message with its trailing C<< at <file> line <n> >> and any
+C<Carp> frames behind it cut away, folded onto one line and trimmed.
+
+A caught C<$@> ends in the file and line it was raised at, and under
+C<Carp::Always> the calling frames follow it, so a refusal that interpolates
+one hands the operator a stack to read instead of a sentence. This is the one
+cut every refusal that quotes something it caught makes to what it caught.
+
+Only a location that ends the message goes. A module is entitled to point an
+operator at a file and a line of its own and go on talking, so a message
+reading C<"see the setting at config.yml line 12 and fix it"> comes back
+whole. The frames are taken first, since C<Carp> writes a tab in front of
+every one of them and that is what tells a frame from a sentence.
+
+Both patterns allow for the wrap. A caught text that has been through
+C<< Genesis::Term::wrap >> carries the wrap's indent in front of every line
+it folded, C<Carp>'s tabbed frames included, and a location near the end of a
+line can be folded across two of them. So the frame pattern takes the spaces
+in front of the tab, and the location pattern takes any whitespace between
+its words. The fold is left until last, because a pattern that ran after it
+would have no newline left to anchor on.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+The caught text, normally C<$@>. An undefined value answers an empty string.
+
+=back
+
+B<Returns:> The message alone, as a single line.
+
+B<Examples:>
+
+    my $message = without_backtrace(
+        "Can't locate Nope.pm in \@INC at lib/Genesis/Top.pm line 2128.\n");
+    # Returns: "Can't locate Nope.pm in \@INC"
+
+    my $message = without_backtrace(
+        "see the setting at config.yml line 12 and fix it\n");
+    # Returns: it whole, because that location ends no message
+
 =head2 get_opts
 
     my %slice = get_opts($hash_ref, @keys);

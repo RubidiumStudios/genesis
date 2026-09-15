@@ -114,6 +114,7 @@ unit-tests/genesis_config-core.t
 unit-tests/genesis_config-document_marker.t      # save writes one --- even when spruce (graft) emits its own
 unit-tests/genesis_config-log_lifespan_schema.t     # global config schema accepts Genesis::Log lifespan grammar
 unit-tests/genesis_config-validate_subtree.t     # a schema applied to one block, filling its defaults where every reader looks
+unit-tests/genesis_config-custom_struct.t     # a block whose shape its own discriminator decides, dispatched to the owning module
 unit-tests/service_credhub-core.t  # Service::Credhub unit tests (constructor, accessors, CRUD operations)
 unit-tests/genesis_commands-core.t  # Genesis::Commands infrastructure (registration, parsing, dispatch deps)
 unit-tests/genesis_commands-feature_compatibility.t  # deploy/info/version renderer helpers for feature opt-in

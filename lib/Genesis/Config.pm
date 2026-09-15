@@ -2,7 +2,7 @@ package Genesis::Config;
 use strict;
 use warnings;
 
-use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff priority_merge flatten unflatten/;
+use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff priority_merge flatten unflatten without_backtrace/;
 use Genesis::Term qw/bullet decolorize/;
 use Genesis::Exit qw/CONFIG/;
 
@@ -851,6 +851,13 @@ sub _validate_key {
 		if (defined($value)) {
 			push @errors, "#R{$key}: expected null, not #ri{".($value ? $value : "<null>")."}";
 		}
+	} elsif ($type eq 'custom_struct') {
+		# D105: a block whose shape is a function of one of its own values
+		# declares that here rather than having a builder read the value
+		# raw and assemble a schema out of it.  This is a dispatcher and
+		# nothing more: it checks the discriminator against the map and
+		# hands the block to the module that owns the shape.
+		push @errors, $self->_validate_custom_struct($key, $schema);
 	} elsif ($type eq 'opaque') {
 		# Passthrough — any value accepted, sub-keys not validated here.
 		# Used for config sections delegated to other modules (see Top::register_config_section).
@@ -862,6 +869,51 @@ sub _validate_key {
 	return @errors;
 }
 
+# }}}
+# _validate_custom_struct - check the discriminator, hand over the rest {{{
+sub _validate_custom_struct {
+	my ($self, $key, $schema) = @_;
+
+	my $field = $schema->{discriminator}
+		or bug "Schema for $key has no discriminator";
+	my $map = $schema->{modules}
+		or bug "Schema for $key has no module map";
+
+	return ("#R{$key}: expected a hash") unless ref($self->get($key)) eq 'HASH';
+
+	# Filled before the match, because D15 gives the provider type a
+	# default and a map has nowhere else to put one.  It is spelled
+	# discriminator_default rather than default because a schema entry's
+	# default belongs to the key that entry declares, and the parent fills
+	# it before this arm is ever reached, so the two cannot share a name.
+	$self->_update_source('default', "$key.$field",
+			$schema->{discriminator_default})
+		if exists $schema->{discriminator_default}
+		&& ! $self->has("$key.$field");
+
+	my $value = $self->get("$key.$field");
+	return ("#R{$key.$field}: unknown value: #ri{".($value // '<null>')."}; ".
+		"expected one of ".join(', ', sort keys %$map))
+		unless defined $value && exists $map->{$value};
+
+	my $entry = $map->{$value};
+	unless (eval {require $entry->{module}; 1}) {  ## no critic
+		# Copied first, because bail's own readers run evals that clear it,
+		# and cut, because the operator reads the refusal and not the line
+		# the require failed on.  The cut is Genesis::without_backtrace,
+		# which moved out of Genesis::Top because the load it trims now
+		# happens here.
+		my $err = $@;
+		bail({exitcode => CONFIG},
+			"Failed to load %s '%s': %s", $schema->{noun} // 'module',
+			$value, without_backtrace($err));
+	}
+
+	my $method = $entry->{method} || $schema->{method} || 'validate_config';
+	return $entry->{class}->$method($self, $key, $field);
+}
+
+# }}}
 sub show_diff {
 
 	# Shows the difference between the current configuration and another

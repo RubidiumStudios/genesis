@@ -2195,7 +2195,7 @@ sub _provider_options_schema {
 		my $err = $@;
 		bail({exitcode => CONFIG},
 			"Failed to load CI provider '%s': %s", $type,
-			_without_backtrace($err));
+			without_backtrace($err));
 	}
 
 	my $fragment = $info->{class}->provider_options_schema;
@@ -2592,7 +2592,7 @@ sub _validate_provider_config {
 	# Copied first, because bail's own readers run evals that clear it.
 	my $caught = $@;
 	if ($caught) {
-		my $said = _without_backtrace(decolorize($caught));
+		my $said = without_backtrace(decolorize($caught));
 		bail({exitcode => CONFIG},
 			"Invalid configuration for the #C{%s} provider:\n  - %s",
 			$type, $said
@@ -2634,7 +2634,7 @@ sub _validate_capability_gates {
 		my $err = $@;
 		bail({exitcode => CONFIG},
 			"Failed to load CI provider '%s': %s", $type,
-			_without_backtrace($err));
+			without_backtrace($err));
 	}
 
 	my $caps  = Genesis::CI::Compiler::PipelineProvider
@@ -2941,42 +2941,6 @@ sub _validate_env_pipeline_block {
 }
 
 # }}}
-# _without_backtrace - a caught message, with what follows it cut {{{
-#
-# A caught $@ ends in the file and line it was raised at, and under
-# Carp::Always the frames behind it follow, so a refusal that interpolates
-# one hands the operator a stack to read instead of a sentence.  This is
-# the one cut every refusal in this file makes to what it caught.
-#
-# Only the location that ends the message goes.  A provider pointing an
-# operator at a file and a line of their own is an ordinary thing for a
-# validator to do, so "see the setting at config.yml line 12 and fix it"
-# has to come back whole, and cutting at the first location anywhere would
-# take the rest of that sentence with it.
-#
-# The frames go first, because Carp writes a tab in front of every one of
-# them and that is what tells a frame from a sentence.  What is left then
-# ends in the location the message was raised at, if it has one at all,
-# and only a location at the end is taken.
-#
-# Both patterns allow for the wrap.  A caught text that has been through
-# Genesis::Term::wrap carries the wrap's indent in front of every line it
-# folded, Carp's tabbed frames included, and a location near the end of a
-# line can be folded across two of them.  So the frame pattern takes the
-# spaces in front of the tab and the location pattern takes any whitespace
-# between its words.  The fold is last, because a pattern that ran after
-# it would have no newline left to anchor on.
-sub _without_backtrace {
-	my ($text) = @_;
-	return '' unless defined $text;
-	$text =~ s/\n[ ]*\t.*\z//s;
-	$text =~ s/\s+at\s+\S+\s+line\s+\d+\.?\s*\z//s;
-	$text =~ s/\s+/ /g;
-	$text =~ s/^\s+|\s+$//g;
-	return $text;
-}
-
-# }}}
 # _first_errors - the bullet lines out of a caught validation bail {{{
 #
 # Genesis::Config::validate bails with the errors already formatted and
@@ -3001,7 +2965,7 @@ sub _first_errors {
 		# Carp::Always folds its backtrace into the bullet it was raised
 		# under, so the error is cut at the first file and line behind it
 		# and the stack stays out of what the operator reads.
-		$part = _without_backtrace($part);
+		$part = without_backtrace($part);
 		next unless length $part;
 		# Anchored to the head of the folded line, because the rewrite is
 		# for the key the error opens with and a value of the operator's
