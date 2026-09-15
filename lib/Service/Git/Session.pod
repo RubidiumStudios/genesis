@@ -506,12 +506,6 @@ or not anybody has written it, so the pathspecs are resolved against the
 source commit's tree before the membership is worked out. What that tree does
 not hold is not delivered and does not keep a path on the branch.
 
-The pathspec list itself is still read from the tree the session is standing
-on, which is the deployment branch, and only the membership is resolved at the
-source commit. The step that adds the at-commit reader moves the first read
-too, and until that lands a repository that restructured between the two
-commits is read under the wrong prefix.
-
 An empty set is refused before the index is read, because every path the
 branch holds is outside an empty set and the mirror would take the branch
 bare, and the postcondition would still hold afterwards so nothing downstream

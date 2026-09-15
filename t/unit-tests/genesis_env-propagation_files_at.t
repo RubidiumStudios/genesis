@@ -2,11 +2,13 @@
 # Proves T111: a control commit moves a flat repository's files under a bosh/
 # deployment root, and the writer reads the set from that commit's tree, so it
 # delivers the moved set under its new prefix, removes the root-level files the
-# branch still held, and runs no rename detection at all.  The tracked list is
-# read at the commit as well, so a path control has taken up again does not
-# ride along with a delivery of the commit that dropped it, and the blueprint's
-# repository-side fragments are enumerated on control by one sub that answers
-# the same way whether or not the environment carries a loaded kit.
+# branch still held, and runs no rename detection at all.  Every kind that asks
+# whether a path exists asks the commit, so a glob in the tracked list expands
+# there, a kit at latest resolves to the archive the commit holds, and a path
+# control has taken up again does not ride along with a delivery of the commit
+# that dropped it.  The blueprint's repository-side fragments are the one kind
+# enumerated on control, by one sub that answers the same way whether or not
+# the environment carries a loaded kit.
 use strict;
 use warnings;
 use utf8;
@@ -18,7 +20,6 @@ use Harness::Propagation;
 
 use Test::More;
 
-use Cwd ();
 use Genesis;
 use Genesis::CI::Marker;
 use Genesis::Env;
@@ -29,26 +30,20 @@ use Service::Git::Session;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-sub in_set {
-	my ($path, @set) = @_;
-	return scalar(grep {$_ eq $path} @set);
-}
-
 subtest 'the set is read at the delivered commit, not from the working tree' => sub {
 	plan tests => 5;
 
-	# A flat repository: the deployment root is the git root.  The ops file
-	# travels because the environment tracks it by name, which is the kind
-	# whose resolution has to follow the root when the root moves.
-	my $h = make_harness(envs => ['qa'], root => '');
+	# A flat repository: the deployment root is the git root.  The kit moves
+	# with everything else, so the reader has to find it under the new prefix
+	# to name the kit source at all.
+	my $h = make_harness(envs => ['qa'], root => '',
+		kit => 't/src/ops-blueprint');
 	fixture_vault($h);
-	write_env_file($h, 'qa',
-		pipeline => {track_additional_files => ['ops/thing.yml']});
 	init_branch($h, 'qa');
 
 	my $flat = commit_on_control($h,
-		files   => {'ops/thing.yml' => "---\nthing: yes\n"},
-		message => 'add an ops file',
+		files   => {'kit-overrides.yml' => "---\noverride: yes\n"},
+		message => 'add the kit overrides',
 	);
 	deliver($h, 'qa', copy => 'a', control => $flat);
 
@@ -69,23 +64,25 @@ subtest 'the set is read at the delivered commit, not from the working tree' => 
 	# construction.  The Top and the environment are built before the session
 	# opens, because a deployment branch is not a repository a Top can be
 	# opened on.
-	my $was = Cwd::getcwd();
-	chdir $h->a . '/bosh'
-		or die "cannot enter the deployment root: $!\n";
+	my $in_root = in_root($h, root => 'bosh');
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = Genesis::Env->bare('qa', $top);
 
+	# The reader names the kit source as a directory, because what it hands
+	# git is a pathspec, so the two sides are compared as the paths each of
+	# them covers in the tree at the commit.
 	my @expected = sort(propagation_set($h, 'qa', at => $restructure, root => 'bosh'));
 	my @at = $env->propagation_files_at($restructure, git => $git);
-	is_deeply([@at], [@expected],
+	is_deeply([covered_paths($h->a, $restructure, @at)], [@expected],
 		'the reader answers with the set as it stood at the commit');
-	ok(!grep({m{^qa\.yml$}} @at), 'the root-level spelling is not in the set');
+	ok(!in_set('qa.yml', @at), 'the root-level spelling is not in the set');
 
 	# The same reader, standing in the same restructured tree, answers the
 	# commit before the restructure with the flat spelling, which is the
 	# reading a prefix taken from today's configuration cannot give.
-	is_deeply([$env->propagation_files_at($flat, git => $git)],
+	is_deeply([covered_paths($h->a, $flat,
+			$env->propagation_files_at($flat, git => $git))],
 		[sort(propagation_set($h, 'qa', at => $flat, root => ''))],
 		'and at the commit before the restructure it answers the flat set');
 
@@ -99,7 +96,6 @@ subtest 'the set is read at the delivered commit, not from the working tree' => 
 	);
 	$session->finish;
 	assert_w_restored($w, 'the session restores the working state');
-	chdir $was or die "cannot return to $was: $!\n";
 
 	is_deeply(tree_of($h->a, $h->slug('qa')), [@expected],
 		'the moved set lands under its new prefix and the root-level files are gone');
@@ -133,9 +129,7 @@ subtest 'no rename detection runs' => sub {
 		message => 'move and edit the ops file',
 	);
 
-	my $was = Cwd::getcwd();
-	chdir $h->a . '/bosh'
-		or die "cannot enter the deployment root: $!\n";
+	my $in_root = in_root($h);
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = Genesis::Env->bare('qa', $top);
@@ -150,12 +144,121 @@ subtest 'no rename detection runs' => sub {
 	);
 	$session->finish;
 	assert_w_restored($w, 'the session restores the working state');
-	chdir $was or die "cannot return to $was: $!\n";
 
 	is_deeply([sort @{$result->{removed}}], ['bosh/ops/old.yml'],
 		'the old path is removed as an ordinary path outside the set');
 	ok(in_set('bosh/ops/new.yml', @{$result->{delivered}}),
 		'and the new path is delivered as an ordinary path inside it');
+};
+
+subtest 'a glob in the tracked list expands at the commit' => sub {
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['qa'], root => 'bosh',
+		kit => 't/src/ops-blueprint');
+	fixture_vault($h);
+	write_env_file($h, 'qa', root => 'bosh',
+		pipeline => {track_additional_files => ['ops/*.yml']});
+	init_branch($h, 'qa');
+
+	my $control = commit_on_control($h,
+		files   => {'bosh/ops/one.yml'   => "---\none: yes\n",
+		            'bosh/ops/two.yml'   => "---\ntwo: yes\n",
+		            'bosh/ops/notes.txt' => "not a fragment\n"},
+		message => 'track the ops files by pattern',
+	);
+
+	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = Genesis::Env->bare('qa', $top);
+
+	my @at = $env->propagation_files_at($control, git => $git);
+	ok(in_set('bosh/ops/one.yml', @at),
+		'the first path the pattern names is in the set');
+	ok(in_set('bosh/ops/two.yml', @at),
+		'and so is the second');
+	ok(!in_set('bosh/ops/notes.txt', @at),
+		'while a path the pattern does not name stays out of it');
+
+	# The two readers expand the same pattern against two different things,
+	# the commit's tree and the working tree, and they have to agree, because
+	# a delivery reading short takes the operator's files off the branch.
+	# The working-tree reading is covered against the commit before the two
+	# are compared, because the set is a list of pathspecs and the blueprint
+	# names a fragment nobody has written, which is in one reading as a
+	# pathspec and in neither as a file.
+	my $loaded = $top->load_env('qa');
+	is_deeply([grep {m{^bosh/ops/}} @at],
+		[grep {m{^bosh/ops/}}
+			covered_paths($h->a, $control, $loaded->propagation_files)],
+		'and the working-tree reader names the same paths');
+
+	my $w = snapshot_w($h);
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	$session->apply_files($control,
+		env     => $env,
+		message => Genesis::CI::Marker::build($control, 'qa'),
+	);
+	$session->finish;
+	assert_w_restored($w, 'the session restores the working state');
+
+	my $tree = tree_of($h->a, $h->slug('qa'));
+	ok(in_set('bosh/ops/one.yml', @$tree) && in_set('bosh/ops/two.yml', @$tree),
+		'and the delivery carries both onto the branch');
+};
+
+subtest 'a kit at latest is the newest archive the commit holds' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], root => 'bosh');
+	fixture_vault($h);
+	install_compiled_kit($h,
+		't/repos/compiled-kit-test/.genesis/kits/compiled-0.0.1.tar.gz');
+	install_compiled_kit($h,
+		't/repos/compiled-kit-test/.genesis/kits/compiled-0.0.2.tar.gz');
+
+	# The environment names the kit by name at latest, which is the spelling
+	# local_kit_version resolves to the newest version it can see.
+	my $control = commit_on_control($h,
+		files   => {'bosh/qa.yml' => <<'EOF'},
+---
+kit:
+  name:     compiled
+  version:  latest
+  features: []
+genesis:
+  env: qa
+EOF
+		message => 'name the compiled kit at latest',
+	);
+
+	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = Genesis::Env->bare('qa', $top);
+
+	my %was = map {$_ => $ENV{$_}}
+		qw/GENESIS_ROOT GENESIS_TARGET_VAULT SAFE_TARGET/;
+	my @at = $env->propagation_files_at($control, git => $git);
+
+	ok(in_set('bosh/.genesis/kits/compiled-0.0.2.tar.gz', @at),
+		'the newest archive the commit holds is the kit source');
+	ok(!in_set('bosh/.genesis/kits/compiled-0.0.1.tar.gz', @at),
+		'and the older one it also holds is not');
+
+	my $loaded = $top->load_env('qa');
+	is_deeply([grep {m{/kits/}} @at],
+		[grep {m{/kits/}} $loaded->propagation_files],
+		'so both readers name one archive for one environment file');
+
+	# The Top a materialised tree is read through sets GENESIS_ROOT, and a
+	# Top that attaches a vault sets two more, so a reader that left any of
+	# them behind would change what every later command in the process reads.
+	is_deeply({map {$_ => $ENV{$_}} keys %was}, {%was},
+		'and the read leaves the process environment as it found it');
 };
 
 subtest 'both readers name the blueprint fragments the same way' => sub {
@@ -171,9 +274,7 @@ subtest 'both readers name the blueprint fragments the same way' => sub {
 		message => 'add the fragment the blueprint names',
 	);
 
-	my $was = Cwd::getcwd();
-	chdir $h->a . '/bosh'
-		or die "cannot enter the deployment root: $!\n";
+	my $in_root = in_root($h);
 	my $git    = Service::Git->new($h->a . '/bosh');
 	my $top    = Genesis::Top->new($h->a . '/bosh');
 	my $bare   = Genesis::Env->bare('qa', $top);
@@ -189,7 +290,6 @@ subtest 'both readers name the blueprint fragments the same way' => sub {
 		'so the at-commit reader carries the fragment');
 	ok(in_set('bosh/ops/extra.yml', $loaded->propagation_files),
 		'and the working-tree reader carries it too');
-	chdir $was or die "cannot return to $was: $!\n";
 };
 
 subtest 'a tracked path that fell out of the list is read at the commit' => sub {
@@ -207,9 +307,7 @@ subtest 'a tracked path that fell out of the list is read at the commit' => sub 
 	write_env_file($h, 'qa', root => 'bosh',
 		pipeline => {track_additional_files => ['ops/tracked.yml']});
 
-	my $was = Cwd::getcwd();
-	chdir $h->a . '/bosh'
-		or die "cannot enter the deployment root: $!\n";
+	my $in_root = in_root($h);
 	my $git    = Service::Git->new($h->a . '/bosh');
 	my $top    = Genesis::Top->new($h->a . '/bosh');
 	my $env    = Genesis::Env->bare('qa', $top);
@@ -230,7 +328,6 @@ subtest 'a tracked path that fell out of the list is read at the commit' => sub 
 	);
 	$session->finish;
 	assert_w_restored($w, 'the session restores the working state');
-	chdir $was or die "cannot return to $was: $!\n";
 
 	ok(!in_set('bosh/ops/tracked.yml', @{tree_of($h->a, $h->slug('qa'))}),
 		'and the delivery removes the path the commit stopped tracking');
