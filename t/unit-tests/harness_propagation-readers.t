@@ -19,6 +19,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use Cwd ();
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -175,6 +176,40 @@ subtest 'the seven later readers answer about the fixture' => sub {
 # clone_copy builds rather than reads, and it is proved here because it is
 # fresh_clone's near neighbour and the two answer the same subject: what a
 # copy cut from R today holds and what it stands on.
+subtest 'the three readers a set comparison is written with' => sub {
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['qa'], root => 'bosh', vault => 0);
+	commit_on_control($h,
+		files   => {'bosh/ops/one.yml' => "---\none: yes\n",
+		            'bosh/ops/two.yml' => "---\ntwo: yes\n"},
+		message => 'add two ops files');
+
+	ok(in_set('bosh/ops/one.yml', @{tree_of($h->a, 'HEAD')}),
+		'in_set finds a path a list holds');
+	ok(!in_set('bosh/ops/three.yml', @{tree_of($h->a, 'HEAD')}),
+		'and answers false for one it does not');
+
+	# A pathspec ending in a slash is a directory and covers what lies under
+	# it, a plain path covers itself where the tree holds it, and a path
+	# nothing tracks covers nothing at all.
+	is_deeply([covered_paths($h->a, 'HEAD', 'bosh/ops/')],
+		['bosh/ops/one.yml', 'bosh/ops/two.yml'],
+		'covered_paths expands a directory into the paths the ref holds');
+	is_deeply([covered_paths($h->a, 'HEAD', 'bosh/ops/one.yml', 'bosh/nothing.yml')],
+		['bosh/ops/one.yml'],
+		'and drops a path the ref does not hold');
+
+	my $was = Cwd::getcwd();
+	{
+		my $in = in_root($h);
+		is(Cwd::abs_path('.'), Cwd::abs_path($h->a . '/bosh'),
+			'in_root stands the process in the deployment root');
+	}
+	is(Cwd::abs_path('.'), Cwd::abs_path($was),
+		'and the guard steps back out when it goes out of scope');
+};
+
 subtest 'a copy cut from R now stands on control and holds only what R reaches' => sub {
 	plan tests => 6;
 

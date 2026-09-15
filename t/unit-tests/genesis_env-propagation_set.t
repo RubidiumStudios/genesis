@@ -20,34 +20,6 @@ use Genesis::Top;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-sub in_set {
-	my ($path, @set) = @_;
-	return scalar(grep {$_ eq $path} @set);
-}
-
-# The product names the kit source as a directory, because what it hands git
-# is a pathspec, and the harness names the files a tree actually holds, so the
-# two are compared as the tracked paths each of them covers.  A pathspec entry
-# nothing tracks, such as a fragment the blueprint names before anybody wrote
-# it, covers nothing and drops out of both sides.
-sub covered_paths {
-	my ($dir, @pathspec) = @_;
-
-	my ($listing) = run({dir => $dir},
-		'git', 'ls-tree', '-r', '--name-only', 'HEAD');
-	my @tracked = split /\n/, ($listing // '');
-
-	my %covered;
-	for my $entry (@pathspec) {
-		if ($entry =~ m{/$}) {
-			$covered{$_} = 1 for grep {index($_, $entry) == 0} @tracked;
-		} else {
-			$covered{$entry} = 1 if grep {$_ eq $entry} @tracked;
-		}
-	}
-	return sort keys %covered;
-}
-
 subtest 'the embedded genesis is the eighth kind and it triggers' => sub {
 	plan tests => 4;
 
@@ -68,7 +40,7 @@ subtest 'the embedded genesis is the eighth kind and it triggers' => sub {
 	ok(!in_set('.genesis/bin/genesis', $env->propagation_files(triggering => 0)),
 		'so it is not among the non-triggering paths');
 
-	is_deeply([covered_paths($h->a, $env->propagation_files)],
+	is_deeply([covered_paths($h->a, 'HEAD', $env->propagation_files)],
 		[propagation_set($h, 'qa')],
 		'and the harness and the product cover the same tracked paths');
 };
@@ -164,14 +136,13 @@ subtest 'a tracked extra path joins the set in one form' => sub {
 	# propagation_files reads the repository through Service::Git->new('.'),
 	# which is the deployment root a command is run from, so the row stands
 	# there rather than in the checkout the suite itself was started from.
-	my $was = Cwd::getcwd();
-	chdir "@{[$h->a]}/bosh" or die "cannot enter the deployment root: $!\n";
+	my $in_root = in_root($h);
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
 	my @set = $env->propagation_files;
 	my @triggering = $env->propagation_files(triggering => 1);
 	my @quiet = $env->propagation_files(triggering => 0);
-	chdir $was or die "cannot return to $was: $!\n";
+	undef $in_root;
 
 	ok(in_set('bosh/ops/qa.yml', @set),
 		'the path resolves against the deployment root and lands git-root-relative');

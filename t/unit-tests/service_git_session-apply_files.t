@@ -37,20 +37,6 @@ use Service::Git::Session;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# in_root - stand in the deployment root for the rest of the enclosing scope
-#
-# The row has to run from the deployment root, because propagation_files reads
-# the repository through Service::Git->new('.'), and it has to come back out
-# however it leaves.  A bare chdir after the session work is not enough: a
-# failure inside the session skips it, and every subtest a later step adds to
-# this file would then start from the harness workdir.  The guard is returned
-# rather than kept here, so it lets go at the end of the caller's scope and not
-# at the end of the file.
-sub in_root {
-	my ($dir) = @_;
-	return ChdirGuard->enter($dir);
-}
-
 # bail_from - the refusal one call raised, and the code it would have exited on
 #
 # A row that weighs an exit code cannot read one out of this process, because
@@ -79,22 +65,6 @@ sub bail_from {
 	my ($format, @rest) = @args;
 
 	return (sprintf($format, @rest), $opts->{exitcode});
-}
-
-{
-	package ChdirGuard;
-
-	sub enter {
-		my ($class, $dir) = @_;
-		my $was = Cwd::getcwd();
-		chdir $dir or die "cannot enter $dir: $!\n";
-		return bless {was => $was}, $class;
-	}
-
-	sub DESTROY {
-		my ($self) = @_;
-		chdir $self->{was} or warn "cannot return to $self->{was}: $!\n";
-	}
 }
 
 subtest 'a delivery mirrors the set at the delivered commit' => sub {
@@ -135,7 +105,10 @@ subtest 'a delivery mirrors the set at the delivered commit' => sub {
 	# which is the deployment root a command is run from, and the Top and the
 	# environment are built before the session opens, because a deployment
 	# branch is not a repository a Top can be opened on.
-	my $in_root = in_root($h->a . '/bosh');
+	# The row has to run from the deployment root, because the reader reaches
+	# the repository through Service::Git->new('.'), and it has to come back
+	# out however it leaves, which is what the harness guard is for.
+	my $in_root = in_root($h);
 	# The handle is built at the deployment root and not at the copy root,
 	# because Service::Git keeps one instance per repository and fixes its
 	# prefix at that first construction.  A handle built at the copy root
@@ -219,7 +192,7 @@ subtest 'a hand edit is overwritten and named' => sub {
 		push    => 1,
 	);
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h);
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
@@ -284,7 +257,7 @@ subtest "the writer commits with its caller's message" => sub {
 		push    => 1,
 	);
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h);
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
@@ -383,7 +356,7 @@ subtest 'an empty set is refused before anything is written' => sub {
 		push    => 1,
 	);
 
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h);
 	my $git = Service::Git->new($h->a . '/bosh');
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
@@ -455,7 +428,7 @@ subtest 'a set the source commit holds none of is refused' => sub {
 	# the handle propagation_files reaches through Service::Git->new('.')
 	# later, and every path in the set comes back without the bosh/ prefix.
 	my $git = Service::Git->new($h->a);
-	my $in_root = in_root($h->a . '/bosh');
+	my $in_root = in_root($h);
 	my $top = Genesis::Top->new($h->a . '/bosh');
 	my $env = $top->load_env('qa');
 

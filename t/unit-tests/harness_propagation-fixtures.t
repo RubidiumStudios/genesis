@@ -140,6 +140,36 @@ subtest "the set is the harness's own read and a delivery mirrors it" => sub {
 
 # Proves T2, the vault half: the fixture answers a read of the certified
 # commit and of the applied record at the two addresses D103 fixes.
+subtest 'a moved file keeps the mode it carried' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	helper::put_file($h->a . '/bin/hook', 0755, "#!/bin/sh\nexit 0\n");
+	run({dir => $h->a}, 'git', 'add', '--', 'bin/hook');
+	run({dir => $h->a, onfailure => 'Failed to commit the hook'},
+		'git', 'commit', '-q', '-m', 'add an executable');
+
+	sub mode_in {
+		my ($dir, $ref, $path) = @_;
+		my ($line) = run({dir => $dir}, 'git', 'ls-tree', $ref, '--', $path);
+		return ($line // '') =~ m{^(\d+)} ? $1 : undef;
+	}
+	is(mode_in($h->a, 'HEAD', 'bin/hook'), '100755',
+		'the file goes in executable');
+
+	# The move is a write and a removal in one call, which is how a row
+	# restructures a repository, and the mode has to travel with it.
+	my ($content) = run({dir => $h->a}, 'git', 'show', 'HEAD:bin/hook');
+	commit_on_control($h,
+		files   => {'bosh/bin/hook' => $content, 'bin/hook' => undef},
+		message => 'move the executable under bosh');
+
+	is(mode_in($h->a, 'HEAD', 'bosh/bin/hook'), '100755',
+		'and it comes out of the move executable still');
+	is(mode_in($h->a, 'HEAD', 'bin/hook'), undef,
+		'while the path it left holds nothing');
+};
+
 subtest 'the fixture answers the two vault addresses' => sub {
 	plan tests => 8;
 
