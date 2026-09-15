@@ -197,10 +197,10 @@ subtest 'fetch_pipeline_envs - a branch the remote lacks is not a failure' => su
 	plan tests => 1;
 
 	# An environment whose branch exists nowhere yet is the ordinary state
-	# of a repository that has not been prepared, and it is what propagate's
-	# missing-branch bail exists to diagnose.  Raising here would preempt
-	# that bail with a raw git error and leave the operator without the
-	# pipeline-prepare hint.
+	# of a repository the apply has not run against, and propagate reports
+	# it as awaiting genesis pipeline-apply.  Raising here would preempt
+	# that report with a raw git error and leave the operator without the
+	# name of the command that cuts the branch.
 	my $top = make_ci_top();
 	put_env($top, $_) for qw(qa lab);
 	my $git = mock_git(
@@ -346,7 +346,7 @@ subtest 'pipeline_topology - every valid env is a node' => sub {
 	plan tests => 2;
 
 	# Envs with no genesis.pipeline block still belong: pipeline-status
-	# reports on them, and pipeline-prepare must give them branches.
+	# reports on them, and pipeline-apply must give them branches.
 	my $top = make_ci_top();
 	put_env($top, $_) for qw(alpha beta);
 

@@ -1902,17 +1902,17 @@ fetched. The rest come back in C<absent>, which is a report and not an
 error.
 
 B<Absence on the remote says nothing about local state.> A branch may exist
-locally and nowhere else -- C<pipeline-prepare> creates env branches before
-anything pushes them. So a branch listed in C<absent> leaves the branch
-cache untouched, and C<branch_exists> continues to answer for it from local
-refs. Only branches actually fetched are recorded as known-to-exist.
+locally and nowhere else, because a person can cut one by hand. So a branch
+listed in C<absent> leaves the branch cache untouched, and C<branch_exists>
+continues to answer for it from local refs. Only branches actually fetched
+are recorded as known-to-exist.
 
 B<Callers use C<absent> to decide whether a branch may be created.> Local
 absence alone is not grounds: the clone may simply be fresh or stale, and
 creating a branch that already exists on the remote forks it from the real
 history. C<absent> is the authoritative answer to "does this branch exist
-anywhere". See C<Genesis::Env::prepare_branch>, which will not create a
-branch the remote already has.
+anywhere", and C<genesis pipeline-apply>, the one command that creates a
+deployment branch, asks the remote before it cuts one.
 
 B<One invocation, so credentials are prompted once> regardless of how many
 branches are listed. Fetching them individually turns a ten-branch refresh

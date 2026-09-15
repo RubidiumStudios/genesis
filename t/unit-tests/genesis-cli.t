@@ -28,59 +28,6 @@ subtest 'bin/genesis' => sub {
 
 };
 
-subtest 'genesis pipeline-prepare' => sub {
-	plan tests => 12;
-
-	ok(has_command('pipeline-prepare'), "pipeline-prepare command is registered");
-
-	is(command_properties('pipeline-prepare')->{function_group},
-		Genesis::Commands::PIPELINE,
-		"pipeline-prepare belongs to the pipeline group, alongside pipeline-status");
-
-	# The scope IS the feature.  A ['repo','env'] command is handed the
-	# environment name by the dispatcher when invoked as
-	# `genesis <env> pipeline-prepare`, and nothing when invoked bare --
-	# which is how repo mode and env mode are told apart without a flag.
-	cmp_deeply(command_properties('pipeline-prepare')->{scope},
-		bag('repo', 'env'),
-		"pipeline-prepare accepts both repo and env scope");
-
-	is(command_properties('pipeline-prepare')->{option_group},
-		Genesis::Commands::REPO_OPTIONS,
-		"pipeline-prepare uses REPO_OPTIONS");
-
-	my %opts = command_properties('pipeline-prepare')->{options}->@*;
-	ok(exists $opts{'dry-run|n'}, "pipeline-prepare has a dry-run option");
-	# The refresh is unconditional now, so the seeding command takes no flag
-	# that skips it and the count says there is only the one option left.
-	is(scalar(keys %opts), 1, "pipeline-prepare has only the one option above");
-
-	# No positional environment argument: the env comes from the scope,
-	# not from `pipeline-prepare <env>`, so that it reads the same way as
-	# every other env-scoped command.
-	my $args = command_properties('pipeline-prepare')->{arguments};
-	ok(!$args || !@$args, "pipeline-prepare takes no positional arguments");
-
-	not_ok(command_properties('pipeline-prepare')->{deprecated},
-		"pipeline-prepare is not deprecated");
-	not_ok(command_properties('pipeline-prepare')->{retired},
-		"pipeline-prepare is not retired");
-
-	my $subref = $Genesis::Commands::RUN{'pipeline-prepare'};
-	is(ref($subref), 'CODE', "pipeline-prepare has a subroutine reference");
-	cmp_deeply(scalar(closed_over($subref)), {
-		'$fn' => \'Genesis::Commands::Pipelines::pipeline_prepare',
-		'$fn_require' => \'Genesis/Commands/Pipelines.pm',
-		'$name' => \'pipeline-prepare',
-	}, "pipeline-prepare resolves to the right handler");
-
-	# It makes the branch propagate reports as missing, so it should be
-	# findable from that report's wording.
-	like(command_properties('pipeline-prepare')->{description},
-		qr/propagate/i,
-		"pipeline-prepare's description points back at propagate");
-};
-
 subtest 'genesis propagate' => sub {
 	plan tests => 10;
 
@@ -105,14 +52,12 @@ subtest 'genesis propagate' => sub {
 	ok(exists $opts{'commit=s'},  "propagate has a commit option");
 	ok(exists $opts{'no-push'},   "propagate has a no-push option");
 
-	# -y is accepted and read by nothing.  The deploy passes it to this
-	# command whenever --fix-checks is set, and a propagate that refused
-	# it would turn that deploy into a usage error, so the option is held
-	# until the step that rewrites the deploy's pre-flight.
-	ok(exists $opts{'yes|y'},
-		"propagate still accepts the yes option the deploy passes it");
+	# -y is gone.  It was accepted and read by nothing, held only because
+	# the deploy passed it whenever --fix-checks was set, and the deploy
+	# passes it no longer, so a run that gives it is a usage error.
+	ok(!exists $opts{'yes|y'}, "propagate no longer accepts a yes option");
 
-	is(scalar(keys %opts), 4, "propagate has only the four options above");
+	is(scalar(keys %opts), 3, "propagate has only the three options above");
 
 	my $args = command_properties('propagate')->{arguments};
 	cmp_deeply($args, ['env?', ignore()],

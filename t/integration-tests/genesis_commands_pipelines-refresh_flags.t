@@ -2,9 +2,6 @@
 # Proves T88, T95, T96, T104, and T317: the refresh is unconditional, the
 # one surviving flag is --no-refresh on pipeline-status, the old spellings
 # are usage errors, and a remote we cannot reach fails at pre-flight.
-#
-# The seeding command is pipeline-prepare at this commit; M9 renames it to
-# pipeline-apply and this row follows the name.
 use strict;
 use warnings;
 use utf8;
@@ -39,7 +36,7 @@ subtest 'the old spellings are usage errors with no alias' => sub {
 
 	for my $argv (['pipeline-status', '--no-fetch'],
 	              ['propagate', '--no-fetch'],
-	              ['pipeline-prepare', '--no-fetch'],
+	              ['pipeline-apply', '--no-fetch'],
 	              ['new', 'staging', '--no-fetch'],
 	              ['qa', 'deploy', '--pull'],
 	              ['qa', 'deploy', '--no-pull'],
@@ -61,7 +58,7 @@ subtest 'only pipeline-status takes the flag that survived' => sub {
 
 	for my $argv (['propagate', '--no-refresh'],
 	              ['qa', 'deploy', '--no-refresh'],
-	              ['pipeline-prepare', '--no-refresh'],
+	              ['pipeline-apply', '--no-refresh'],
 	              ['new', 'staging', '--no-refresh']) {
 		my (undef, undef, $exit) = run_genesis($h, @$argv);
 		is($exit, 2, "@$argv is a usage error");
