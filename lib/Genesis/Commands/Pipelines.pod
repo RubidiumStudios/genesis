@@ -115,6 +115,17 @@ the one C<pipeline.source_control.remote> resolves to, and not whichever
 remote git happens to list first, so a clone with two of them still writes
 where the repository says its branches live.
 
+With the branches in place the run asks the repository to protect them.
+Control and every deployment branch are told to block force pushes and to
+require linear history, a deployment branch is told to require a pull request
+where its own C<genesis.pipeline.require_pr> is true, control where
+C<pipeline.source_control.control_requires_pr> is true, and a pull request
+into a deployment branch may only be merged by rebase. Each branch gets one
+ruleset named for it, so a re-run replaces rather than accumulates. A user
+whose token cannot grant a setting is told which branch and which settings,
+and the run carries on. A run that carries no C<GITHUB_AUTH_TOKEN> skips the
+stage, names the variable, and carries on as well.
+
 With the branches in place the run records what it applied, which is the
 control commit it read, the provider it applied, and the time. That record
 goes to the pipeline's own address in exodus under every provider, because it
@@ -358,6 +369,82 @@ B<Examples:>
 The one line an init commit writes into its C<init> file. It names the
 command that manages the branch, because an operator who meets the branch in
 a fresh clone has nothing else there to read.
+
+=head2 _apply_branch_protection
+
+  my $missing = _apply_branch_protection($gh, $owner_repo,
+    branches => \@specs);
+
+Asks the repository for the protection each branch was derived, sending one
+ruleset per branch and naming it C<genesis-E<lt>branchE<gt>>. The name is what
+a replace matches on, so a re-run replaces the ruleset it wrote last time
+rather than adding another beside it, and an operator reading the repository's
+settings can tell which rules Genesis owns.
+
+A branch the token cannot protect is reported by name with the settings it
+needed, and the run carries on, because a user without admin should still be
+able to apply the pipeline and hand that list to whoever holds admin.
+
+Nothing here derives a rule. The caller has already done that through
+C<_protection_rules_for>, so this function takes the client, the pair, and
+the branches it is to send and reads no environment of its own.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$gh>
+
+The C<Service::Github> client the rulesets are sent through.
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form, which is the pair
+C<pipeline.source_control.repository> resolves to.
+
+=item C<%opts>
+
+=over 4
+
+=item C<branches>
+
+An arrayref of specs, each a hashref with a C<branch> name and the C<rules>
+arrayref that branch is to carry.
+
+=back
+
+=back
+
+B<Returns:> A hashref of branch name to the arrayref of rule types that
+branch could not be granted. It is empty where every branch was protected.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for set_ruleset"> and C<"Missing name for set_ruleset">
+-- raised via C<bail()> through C<Service::Github::set_ruleset>.
+
+=item *
+
+A branch the repository refused raises nothing. It is warned about by name,
+with the reason the API gave and the settings it needed, and the run carries
+on.
+
+=back
+
+B<Examples:>
+
+  my $missing = _apply_branch_protection($gh, 'genesis/bosh-deployments',
+    branches => [{branch => 'qa/bosh', rules => $rules}]);
+  # returns {} once the branch carries its ruleset
+
+  my $missing = _apply_branch_protection($gh, 'genesis/bosh-deployments',
+    branches => [{branch => 'control', rules => $rules}]);
+  # returns {control => ['non_fast_forward', 'required_linear_history']}
+  # for a token without admin, having warned by name
 
 =head2 _apply_init_branches
 
@@ -666,6 +753,76 @@ B<Examples:>
 Every key the block resolves is printed, so the report is five rows and
 not two, and both column widths come from those rows.  A repository that
 overrides one of them widens the tier column to hold C<explicit>.
+
+=head2 _protection_rules_for
+
+  my $rules = _protection_rules_for($top, $branch, control => 1);
+  my $rules = _protection_rules_for($top, $branch, require_pr => 1);
+
+Derives one branch's protection from state the repository has already
+decided, so nothing is configured twice. The derivation is pure and asks the
+API for nothing, which is what lets it be read without a repository.
+
+Control and every deployment branch block force pushes and require linear
+history, which is what makes the append-only rule enforceable rather than a
+convention Genesis observes on its own side.
+
+A deployment branch requires a pull request where C<require_pr> is true, and
+it merges by rebase alone, so a merger never gets the chance to rewrite an
+aggregate commit's message and lose its marker. Control requires a pull
+request where C<pipeline.source_control.control_requires_pr> is true, whose
+default is false, and it keeps squash or rebase at the merger's choice,
+because a user's pull request into control carries no marker.
+
+No rule dismisses a stale approval anywhere. Review safety lives in the
+mechanism instead, so an approval survives the rebuild a later run pushes.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> for the deployment root, which is read for
+C<pipeline.source_control.control_requires_pr> and for nothing else.
+
+=item C<$branch>
+
+The branch the rules are for, which names the derivation rather than
+changing it.
+
+=item C<%opts>
+
+=over 4
+
+=item C<control>
+
+True where the branch is control, which takes the control derivation rather
+than the deployment one.
+
+=item C<require_pr>
+
+True where this deployment branch's own C<genesis.pipeline.require_pr> is
+true. It is ignored under C<control>.
+
+=back
+
+=back
+
+B<Returns:> An arrayref of rule hashrefs, each with a C<type> and, for a
+pull request rule, C<parameters>.
+
+B<Errors:> None. The derivation reads configuration and composes a list.
+
+B<Examples:>
+
+  my $rules = _protection_rules_for($top, 'qa/bosh');
+  # returns the force-push block, the linear-history requirement, and a
+  # pull request rule needing no review that merges by rebase alone
+
+  my $rules = _protection_rules_for($top, 'control', control => 1);
+  # returns the force-push block and the linear-history requirement, and
+  # no pull request rule where control_requires_pr is false
 
 =head2 _refuse_disabled_pipeline
 

@@ -91,6 +91,49 @@ sub apply {
 	# lacks.  The POD says so where each of those options is described.
 	_apply_init_branches($top, $git);
 
+	# D45 asks the repository to enforce what D31 has Genesis observe on its
+	# own side, because Genesis cannot prevent a rewrite it does not perform
+	# and a rewrite that drops a commit leaves every marker naming it
+	# unfetchable.  The stage lands after the branches, since a rule applied
+	# to a branch that does not exist protects nothing.
+	#
+	# The owner and the repository are split off the resolved pair rather
+	# than read off whichever remote git lists first, so the override is
+	# honoured and a repository that carries no pair was already refused by
+	# name, at load.
+	#
+	# A token is what the API answers to, and the propagate path already
+	# refuses without one, so a run that carries none names the variable it
+	# wanted and carries on.  The branches are in place either way, and the
+	# protection is the one stage an operator can apply later.
+	if ($ENV{GITHUB_AUTH_TOKEN}) {
+		my $owner_repo = $top->source_control_repository;
+		my ($gh_owner) = split m{/}, $owner_repo, 2;
+		my @branches = ({
+			branch => $top->control_branch,
+			rules  => _protection_rules_for($top, $top->control_branch,
+				control => 1),
+		});
+		for my $name (@{$top->pipeline_topology->{order}}) {
+			my $branch = $top->branch_for($name);
+			push @branches, {
+				branch => $branch,
+				rules  => _protection_rules_for($top, $branch,
+					require_pr => Genesis::Env->bare($name, $top)
+						->lookup('genesis.pipeline.require_pr', 0)),
+			};
+		}
+		_apply_branch_protection(
+			Service::Github->new(org => $gh_owner), $owner_repo,
+			branches => \@branches,
+		);
+	} else {
+		info(
+			"  #Yi{skipped} the branch protection, because ".
+			"#C{GITHUB_AUTH_TOKEN} is not set"
+		);
+	}
+
 	# D103 records the pipeline's own facts once the branches are in place,
 	# because a record written ahead of them would claim a shape the
 	# repository does not have yet.  The record is what every reader below
@@ -1448,6 +1491,92 @@ sub _apply_init_branches {
 	}
 
 	return \%report;
+}
+
+# }}}
+# _protection_rules_for - derive one branch's protection from decided state {{{
+#
+# D45 derives the protection from state the repository has already decided
+# and one key, so nothing here is configured twice.  Control and every
+# deployment branch block force pushes and require linear history, which is
+# what makes D31's append-only rule enforceable rather than a convention
+# Genesis observes on its own side.  A deployment branch requires a pull
+# request where its require_pr is true, and control where
+# control_requires_pr is true, whose default is false.  D52 makes rebase the
+# only merge method into a deployment branch, so the merger never gets the
+# chance to rewrite the aggregate commit's message and lose its marker,
+# while control keeps squash or rebase because user pull requests carry no
+# markers.  Nothing here dismisses a stale approval, because D51 keeps
+# review safety in the mechanism and an approval has to survive the rebuild
+# a later run pushes.
+sub _protection_rules_for {
+	my ($top, $branch, %opts) = @_;
+
+	my @rules = (
+		{type => 'non_fast_forward'},
+		{type => 'required_linear_history'},
+	);
+
+	if ($opts{control}) {
+		push @rules, {
+			type       => 'pull_request',
+			parameters => {
+				required_approving_review_count => 1,
+				allowed_merge_methods           => ['squash', 'rebase'],
+			},
+		} if $top->config->get('pipeline.source_control.control_requires_pr');
+		return \@rules;
+	}
+
+	push @rules, {
+		type       => 'pull_request',
+		parameters => {
+			required_approving_review_count => ($opts{require_pr} ? 1 : 0),
+			allowed_merge_methods           => ['rebase'],
+		},
+	};
+
+	return \@rules;
+}
+
+# }}}
+# _apply_branch_protection - ask the repository for the protection {{{
+#
+# One ruleset per branch, named for the branch, so a re-run replaces rather
+# than accumulates and an operator reading the repository's settings can
+# tell which rules Genesis owns.  A branch the token cannot protect is
+# reported by name with the settings it needed, and the run carries on.
+#
+# The environment is never read here, because the caller has already derived
+# every rule, so this sub takes the client, the pair, and the branches it is
+# to send and nothing else.
+sub _apply_branch_protection {
+	my ($gh, $owner_repo, %opts) = @_;
+
+	my %missing;
+	for my $spec (@{$opts{branches} || []}) {
+		my ($ok, $reason) = $gh->set_ruleset($owner_repo,
+			name     => sprintf('genesis-%s', $spec->{branch}),
+			target   => 'branch',
+			patterns => [$spec->{branch}],
+			rules    => $spec->{rules},
+		);
+		if ($ok) {
+			info("  #G{protected} #C{%s}", $spec->{branch});
+			next;
+		}
+
+		$missing{$spec->{branch}} = [map {$_->{type}} @{$spec->{rules}}];
+		warning(
+			"Could not protect #C{%s}: %s\n".
+			"  needed: %s\n".
+			"Hand that list to whoever holds admin on the repository.  ".
+			"Everything else was applied.",
+			$spec->{branch}, $reason, join(', ', @{$missing{$spec->{branch}}})
+		);
+	}
+
+	return \%missing;
 }
 
 # }}}
