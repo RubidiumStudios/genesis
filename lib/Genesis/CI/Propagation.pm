@@ -220,7 +220,7 @@ sub propagate_envs {
 	# has it, and the operator is put back on the branch they started on.
 	unless ($ran) {
 		my $err = $@;
-		$session->abort($err) if $session->active;
+		$session->abort($err) unless $dry_run;
 		die $err;
 	}
 
@@ -230,6 +230,11 @@ sub propagate_envs {
 	# session end, which finish refuses through that same abort, and one
 	# that failed before writing anything is restored here and reported
 	# through the errors below.
+	#
+	# Where the caller opened the session, which is every run of genesis
+	# propagate, this finish does not fire and the caller's own finish
+	# answers the tree instead.  Both routes reach the same abort, so the
+	# tree is answered the same way whichever of the two owns the session.
 	$session->finish if $ours;
 
 	# Skip push and PR creation if any target failed — partial state on

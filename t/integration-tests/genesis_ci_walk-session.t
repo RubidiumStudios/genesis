@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 # Proves T157: the run switches to control inside its session, restores the
-# branch the operator stood on, refuses nobody for standing off control, and
-# creates the local control ref from R where the copy lacks one.
+# branch the operator stood on, refuses nobody for standing off control,
+# turns away a copy whose control branch is on the remote alone, and reads
+# the topology control carries even when it only previews.
 use strict;
 use warnings;
 use utf8;
@@ -69,23 +70,61 @@ subtest 'the walk reads control and not the branch it was run from' => sub {
 		'the delivery names the control commit and not the feature branch');
 };
 
-subtest 'a copy with no local control ref creates it from R' => sub {
-	plan tests => 3;
+subtest 'a copy with control only on the remote is turned away' => sub {
+	# Four rather than three, because run_genesis asserts the restoration of
+	# the working state in its own words and that assertion is counted here.
+	plan tests => 4;
 
 	my $h = ready_harness(delivered => [], certified => ['lab'],
 		kit => 'omega-v2.7.0');
 	my $control = $h->control;
-	run({dir => $h->a}, 'git', 'checkout', '-b', 'feature/only');
+	# The local ref goes while the copy stands on it, which leaves control
+	# unborn here and on the remote.  The refresh writes the local ref for a
+	# branch this clone lacks, except for the branch the working tree is
+	# standing on, because git refuses to fetch into the ref HEAD points at,
+	# so this is the shape in which the ref is still missing by the time the
+	# pre-flight asks for it.
 	delete_local($h, 'a', $control);
 
-	my $w = snapshot_w($h);
-	my (undef, undef, $exit) = run_genesis($h, {restore => 0}, 'propagate');
+	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
-	isnt($exit, Genesis::Exit::DATAERR, 'a missing local ref is no refusal');
-	my ($local) = run({dir => $h->a, passfail => 0},
-		'git', 'rev-parse', "refs/heads/$control");
-	ok($local, 'the local control ref now exists');
-	assert_w_restored($w, 'propagate with no local control ref');
+	is($exit, Genesis::Exit::DATAERR,
+		'a control branch this clone lacks is refused as data');
+	like($err, qr/not in this clone/,
+		'the refusal names the clone that lacks the branch');
+	ok(!defined ref_in($h->a, "refs/heads/$control"),
+		'the run wrote no control ref of its own');
+};
+
+subtest 'a dry run reads the topology control carries' => sub {
+	# Three rather than two, because run_genesis asserts the restoration of
+	# the working state in its own words and that assertion is counted here.
+	plan tests => 3;
+
+	my $h = ready_harness(delivered => [], certified => ['lab'],
+		kit => 'omega-v2.7.0');
+	commit_on_control($h,
+		files   => {'qa.yml' => slurp($h->a . '/qa.yml') . "\n# tuned\n"},
+		message => 'Tune qa',
+		push    => 1,
+	);
+	# The feature branch drops the environment file, so qa is in the
+	# topology control carries and in no other.  A dry run that read the
+	# branch the operator stood on would have nothing to say about qa.
+	run({dir => $h->a}, 'git', 'checkout', '-b', 'feature/elsewhere');
+	run({dir => $h->a}, 'git', 'rm', '-q', 'qa.yml');
+	run({dir => $h->a}, 'git', 'commit', '-qm',
+		'remove qa on the feature branch');
+	stand_on($h, 'feature/elsewhere');
+
+	my ($err) = (run_genesis($h, 'propagate', '--dry-run'))[1];
+
+	# Two, because nothing has been delivered to qa, so the seeding commit
+	# is due beside the one this row laid down.
+	like($err, qr{^\s*qa:\s+would deliver 2 commits}m,
+		'the preview names the environment only control knows about');
+	unlike($err, qr/No environments with pipeline metadata found/,
+		'the topology was not read off the feature branch');
 };
 
 done_testing;
