@@ -469,8 +469,9 @@ Exits C<Genesis::Exit/TEMPFAIL> where no ref of the push landed, which is
 D82's unsurvivable failure.  The report names the cause the remote's own
 error gives, which is a refused credential, a server error, or a remote
 nothing could reach, each with its own corrective step.  The same status is
-returned by a run that finished with any environment failed, which is D97's
-partial run.
+returned by a run that finished with any environment C<failed>, C<not
+attempted>, or C<publish rejected>, which is D97's partial run and which
+L</run_status> decides.
 
 B<Examples:>
 
@@ -479,6 +480,48 @@ B<Examples:>
 
   # Report what every environment would receive, and write nothing
   genesis propagate --dry-run
+
+=head2 run_status
+
+    run_status($record);
+
+The exit status D97 gives the propagate run.  Zero when every environment in
+scope ended published or held with its reason, and
+C<Genesis::Exit/TEMPFAIL> when any of them ended C<failed>,
+C<not attempted>, or C<publish rejected>, which the next run repairs.
+
+The whole outcome is matched rather than a phrase cut at its comma, because
+the record carries the bare outcome word in C<outcome> and whatever
+qualifies it in C<outcome_detail>.  C<not published> is deliberately not one
+of the three.  Both paths that write it leave through a status of their own
+before this is reached, an aborted run through C<Genesis::CI::Walk/abort_run>
+and a declined publish at C<Genesis::Exit/ABORTED>.
+
+An environment whose outcome the walk left null reads C<idempotent>, which is
+the same reading L<Genesis::CI::Report/render_run> settles for the report, so
+the status and the report cannot describe one run two ways.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The run's record, as C<Genesis::CI::Walk/plan> composed it, whose
+C<environments> list carries one outcome per environment in scope.
+
+=back
+
+B<Returns:> 0 where no environment ended in one of the three partial
+outcomes, and C<Genesis::Exit/TEMPFAIL> where any of them did.
+
+B<Examples:>
+
+  run_status({environments => [{env => 'qa', outcome => 'propagated'}]});
+  # 0
+
+  run_status({environments => [{env => 'qa', outcome => 'not attempted'}]});
+  # 75, which is Genesis::Exit::TEMPFAIL
 
 =head2 assert_not_disowned
 

@@ -342,6 +342,7 @@ integration-tests/genesis_ci_walk-env_failures.t              # one environment'
 integration-tests/genesis_ci_walk-run_failures.t              # a writer failure and an unreachable remote each end the whole run
 integration-tests/genesis_ci_walk-durable_state.t             # the run is a function of durable state alone, whoever runs it and however often
 integration-tests/genesis_ci_walk-two_roots.t                 # two roots sharing an environment name walk their own branches and land apart
+integration-tests/genesis_ci_walk-exit_codes.t                # the status says which stage the run ended in
 integration-tests/genesis_ci_report-outcomes.t                # one outcome per environment, one line per routed commit, and the overwritten file
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
