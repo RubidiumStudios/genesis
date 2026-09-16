@@ -1383,6 +1383,10 @@ sub _classify_remote_error {
 # push the remote refuses does not die and a caller that took only the ones
 # and zeros would have to guess at the cause.  One branch's quarrel with the
 # remote is not another's, so each failed ref keeps its own text.
+#
+# It carries the ref git named as well, and what git made of it, because the
+# branch a caller asked for and the ref the remote answered about can differ
+# and the name worth reporting is the remote's own.
 sub push {
 	my ($self, %opts) = @_;
 	my $remote = $opts{remote}
@@ -1398,20 +1402,75 @@ sub push {
 # _push_one - push a single ref and report what git did with it {{{
 #
 # The refspec is written out in full, so git is asked for the branch and never
-# for a name it could resolve some other way.
+# for a name it could resolve some other way.  A spec asking for a removal
+# writes the empty source side instead, which is how git is told to take a
+# branch off the remote.
+#
+# The push is asked for its porcelain form, because what the caller reports is
+# the ref git named rather than one the caller composed out of the branch it
+# asked for, and the porcelain line is the only place git says so.
 sub _push_one {
 	my ($self, $remote, $spec) = @_;
 	my $branch = $spec->{branch};
 
-	my $refspec = "refs/heads/$branch:refs/heads/$branch";
-	my (undef, $rc, $err) = run({dir => $self->{root}, stderr => 0},
-		'git', 'push', $remote, $refspec);
+	my $refspec = $spec->{delete}
+		? ":refs/heads/$branch"
+		: "refs/heads/$branch:refs/heads/$branch";
 
-	return {
-		branch => $branch,
-		ok     => $rc ? 0 : 1,
-		reason => $rc ? ($err // '') : '',
+	my ($out, $rc, $err) = run({dir => $self->{root}, stderr => 0},
+		'git', 'push', '--porcelain', $remote, $refspec);
+
+	return _read_push_result($branch, $out, $rc, $err);
+}
+
+# }}}
+# _read_push_result - read one ref's fate out of git push --porcelain {{{
+#
+# D83 has the run name the moved ref from git's own output rather than from a
+# message it composed, so the flag and the ref pair are read here and nowhere
+# else.  The flags are git's own: a space is a fast-forward, a plus is a forced
+# update, a minus is a deletion, a star is a new ref, an equals sign is a ref
+# already up to date, and an exclamation mark is a refusal.
+#
+# A push that never reached the remote prints no porcelain line at all, so a
+# failure with nothing to read falls back to what git wrote to its standard
+# error, which is the sentence the caller's classifier reads.
+sub _read_push_result {
+	my ($branch, $out, $rc, $err) = @_;
+	my %status = (
+		' ' => 'updated', '+' => 'forced',     '-' => 'deleted',
+		'*' => 'created', '=' => 'up-to-date', '!' => 'rejected',
+	);
+
+	my $result = {
+		branch  => $branch,
+		ok      => $rc ? 0 : 1,
+		ref     => undef,
+		status  => undef,
+		reason  => '',
+		summary => '',
 	};
+
+	for my $line (split /\n/, ($out // '')) {
+		next unless $line =~ /^(.)\t([^\t]*)\t(.*)$/;
+		my ($flag, $refpair, $summary) = ($1, $2, $3);
+		# The remote side of the pair, which is the ref the remote holds or
+		# refused.  A deletion writes an empty source side, so the pair still
+		# splits in two and the second half is still the ref that matters.
+		my @sides = split(/:/, $refpair, 2);
+		$result->{ref}     = @sides > 1 ? $sides[1] : $sides[0];
+		$result->{status}  = $status{$flag} // 'rejected';
+		$result->{summary} = $summary;
+		$result->{ok}      = 0 if $flag eq '!';
+		$result->{reason}  = $1 if $summary =~ /\[[^\]]+\]\s*\((.+)\)\s*$/;
+		last;
+	}
+
+	unless ($result->{ok}) {
+		$result->{status} //= 'rejected';
+		$result->{reason} ||= ($err // $out // '') =~ s/\s+$//r;
+	}
+	return $result;
 }
 
 # }}}

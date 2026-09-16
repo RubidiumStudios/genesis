@@ -2126,9 +2126,13 @@ and not a failure.
 =back
 
 B<Returns:> An arrayref of per-ref results in the order the specs were given.
-Each is a hashref carrying C<branch>, C<ok>, and C<reason>. C<ok> is 1 where
-git took the ref and 0 where it did not. C<reason> is git's own standard error
-for a ref it turned down, and the empty string for one that landed.
+Each is a hashref carrying C<branch>, C<ok>, C<ref>, C<status>, C<reason>, and
+C<summary>. C<ok> is 1 where git took the ref and 0 where it did not. C<ref> is
+the remote-side ref git named in its own porcelain line, which is the name a
+caller reports rather than one it composed. C<status> is one of C<created>,
+C<updated>, C<forced>, C<deleted>, C<up-to-date>, or C<rejected>. C<reason> is
+git's own text for a refusal, and the empty string for a ref that landed.
+C<summary> is the rest of the porcelain line.
 
 B<Errors:>
 
@@ -2144,13 +2148,15 @@ when C<remote> is missing.
 B<Examples:>
 
   my $results = $git->push(remote => 'origin', refs => [{branch => 'lab/bosh'}]);
-  # returns [ { branch => 'lab/bosh', ok => 1, reason => '' } ]
+  # returns [ { branch => 'lab/bosh', ok => 1, ref => 'refs/heads/lab/bosh',
+  #             status => 'updated', reason => '', summary => 'abc1234..def5678' } ]
 
   my $results = $git->push(remote => 'origin', refs => [
       {branch => 'staging'}, {branch => 'prod'},
   ]);
-  # returns a result per branch, and the one for prod carries git's own
-  # complaint about prod under reason when only prod was rejected
+  # returns a result per branch, and the one for prod reads status rejected
+  # with git's own words, such as 'fetch first', under reason when only prod
+  # was rejected
 
 =head2 push_append_only
 
@@ -2554,12 +2560,18 @@ Pushes one ref and answers what git did with it.
 
 The refspec is written out in full, as C<refs/heads/NAME:refs/heads/NAME>, so
 git is asked for the branch and never for a name it could resolve some other
-way. Called once per spec by L</push>, which is the only caller.
+way. A spec carrying C<delete> writes the empty source side instead, which is
+how git is told to take the branch off the remote. Called once per spec by
+L</push>, which is the only caller.
+
+The push is asked for its porcelain form, because a caller reports the ref git
+itself named and the porcelain line is the only place git says what that ref
+was. L</_read_push_result> reads the line.
 
 The push is not allowed to die on a ref the remote turned down, because the
 caller reports every ref and a death on the first refusal would withhold the
-rest. Git's standard error is captured instead and handed back under
-C<reason>.
+rest. Git's standard error is captured instead, and it is what the result
+carries where the push printed no porcelain line at all.
 
 B<Parameters:>
 
@@ -2571,12 +2583,13 @@ The remote to push to, by name. L</push> has already required it.
 
 =item C<$spec>
 
-One ref spec. Only C<branch> is read here; C<kind> travels with the spec for
-the caller's own reporting.
+One ref spec. C<branch> and C<delete> are read here; C<kind> travels with the
+spec for the caller's own reporting.
 
 =back
 
-B<Returns:> A hashref carrying C<branch>, C<ok>, and C<reason>.
+B<Returns:> A hashref carrying C<branch>, C<ok>, C<ref>, C<status>, C<reason>,
+and C<summary>, as L</push> documents them.
 
 B<Errors:> None of its own. A remote git cannot reach comes back as C<ok> 0
 with git's words under C<reason>.
@@ -2584,11 +2597,67 @@ with git's words under C<reason>.
 B<Examples:>
 
   $git->_push_one('origin', {branch => 'lab/bosh'});
-  # returns { branch => 'lab/bosh', ok => 1, reason => '' }
+  # returns a result reading status updated and ok 1
 
   $git->_push_one('origin', {branch => 'lab/bosh'});
-  # returns { branch => 'lab/bosh', ok => 0, reason => '... non-fast-forward' }
+  # returns a result reading status rejected, ok 0, and reason 'fetch first'
   #   where the remote turned the ref down
+
+=head2 _read_push_result
+
+  my $result = Service::Git::_read_push_result($branch, $out, $rc, $err);
+
+Reads one ref's fate out of the output of C<git push --porcelain>.
+
+The moved ref a caller reports has to be the one git named rather than one the
+caller composed out of the branch it asked for, so the flag and the ref pair
+are read here and nowhere else. The flags are git's own: a space is a
+fast-forward, a plus is a forced update, a minus is a deletion, a star is a new
+ref, an equals sign is a ref already up to date, and an exclamation mark is a
+refusal.
+
+A push that never reached the remote prints no porcelain line at all, so a
+failure with nothing to read falls back to what git wrote to its standard
+error, which is the sentence a caller's classifier reads.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch the push was asked for, which the result carries back unchanged.
+
+=item C<$out>
+
+What git wrote to standard output, which is where the porcelain lines are.
+
+=item C<$rc>
+
+Git's exit status, which decides C<ok> where no porcelain line was printed.
+
+=item C<$err>
+
+What git wrote to standard error, which is the fallback reason.
+
+=back
+
+B<Returns:> A hashref carrying C<branch>, C<ok>, C<ref>, C<status>, C<reason>,
+and C<summary>, as L</push> documents them.
+
+B<Errors:> None. Output it cannot read leaves C<ref> and C<summary> empty and
+reports git's exit status.
+
+B<Examples:>
+
+  _read_push_result('lab/bosh',
+      "To /tmp/r.git\n=\trefs/heads/lab/bosh:refs/heads/lab/bosh\t[up to date]\n",
+      0, '');
+  # returns a result reading status up-to-date and ok 1
+
+  _read_push_result('lab/bosh', '', 128, 'fatal: not a git repository');
+  # returns a result reading status rejected, ok 0, and git's own sentence
+  #   under reason
 
 =head2 _ref_exists
 

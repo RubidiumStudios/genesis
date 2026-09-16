@@ -558,6 +558,62 @@ B<Examples:>
   $session->discard('qa/bosh');
   # discards the tree, puts qa/bosh back at origin/qa/bosh, stays open
 
+=head2 reset_branch($branch)
+
+  $session->reset_branch('prod/bosh');
+
+Puts one branch back where the remote-tracking ref has it, through the same
+reset C<abort> runs over every branch the session committed to.
+
+A publish the remote refused wants exactly that for the one branch it was
+refused on, because a branch left carrying a commit nobody else can see is the
+state D83 refuses to end a run in. Both paths go through one reset, so the two
+cannot come to disagree about what putting a branch back means.
+
+It is not C<discard>. C<discard> throws the working tree away first and takes
+the branch out of this session's record of what it moved, which is what a
+delivery that died halfway needs. Here the delivery succeeded and only the
+publish was turned down, so the tree is not touched.
+
+Where the branch is the one the repository is standing on, the reset is a hard
+reset rather than a ref write, so the tree and C<HEAD> go back together.
+
+A branch the remote does not carry at all is left alone, since there is
+nothing to put it back to.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to put back.
+
+=back
+
+B<Returns:> The session, so a caller can chain.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "A branch session never resets %s, which is the control branch" >> --
+raised via C<bail()> for the control branch, because I2 keeps committed work
+on control whole.
+
+=item *
+
+C<< "Failed to reset %s" >> -- raised where git refused the reset itself.
+
+=back
+
+B<Examples:>
+
+  $session->reset_branch('prod/bosh');
+  # puts prod/bosh back at origin/prod/bosh and leaves the session open
+
 =head2 apply_files($source_sha, %opts)
 
   my $result = $session->apply_files($source_sha,
