@@ -140,8 +140,8 @@ subtest 'two commits due are two file lists, not one union' => sub {
 };
 
 subtest 'the preview reads the branch it is previewing against' => sub {
-	# Three rows, and one more for the run's own restoration assertion.
-	plan tests => 4;
+	# Four rows, and one more for the run's own restoration assertion.
+	plan tests => 5;
 
 	my $h = ready_harness(envs => ['qa'], kit => 'omega-v2.7.0',
 		tracked => ['ops/shared.yml', 'ops/extra.yml']);
@@ -165,6 +165,9 @@ subtest 'the preview reads the branch it is previewing against' => sub {
 
 	like($preview, qr{^\s+D ops/extra\.yml$}m,
 		'the preview names the path that would leave the branch');
+	ok(scalar(grep {$_ eq 'ops/extra.yml'} @{files_under($preview, $due)}),
+		'beneath the commit that narrowed the set rather than loose in the '.
+		'report');
 	like($preview, qr{^\s+overwrote-hand-edit dev/kit\.yml$}m,
 		'and the hand edit the mirror would take back off it');
 	is_deeply(removed_in($preview), ['ops/extra.yml'],

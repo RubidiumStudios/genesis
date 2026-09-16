@@ -756,16 +756,42 @@ sub mirror_tree {
 	my $index = tmpfile(template => 'genesis-mirror-XXXXXXXX');
 	local $ENV{GIT_INDEX_FILE} = $index;
 
-	run({dir => $self->{root}, stdin => $listing,
-		onfailure => "Failed to stage the mirror of '$source'"},
-		'git', 'update-index', '-z', '--index-info');
+	# The listing reaches git through a file rather than through run's stdin,
+	# which fills a pipe and closes it before the child is spawned.  Nobody
+	# is reading the far end while it fills, so a listing larger than the
+	# pipe will hold stops the write for good, and a set of about nine
+	# hundred files already makes a listing larger than that.  A file has no
+	# such ceiling, and the child reads it at whatever pace it likes.
+	my $feed = tmpfile(template => 'genesis-mirror-in-XXXXXXXX');
+	mkfile_or_fail($feed, $listing);
 
-	my ($tree) = run({dir => $self->{root},
-		onfailure => "Failed to write the mirror tree of '$source'"},
+	run({dir => $self->{root},
+		onfailure => "Failed to stage the mirror of '$source'"},
+		'git update-index -z --index-info < "$1"', $feed);
+	unlink $feed;
+
+	my ($tree, $rc, $err) = run({dir => $self->{root}, stderr => 0},
 		'git', 'write-tree');
 	chomp $tree if defined $tree;
 
 	unlink $index;
+
+	# The status is read and stderr is kept apart, the way ls_tree and
+	# diff_names read theirs, and the answer is read for its shape besides.
+	# write-tree writes the tree it made and nothing beside it, so anything
+	# else standing there is git talking rather than git answering.  Merged
+	# into stdout, a warning about the environment comes back as the head of
+	# the answer, and the preview hands that on as the base of the delivery
+	# after it, which then asks git to diff against a tree nobody wrote.
+	my $said = length($err // '') ? $err
+	         : length($tree // '') ? $tree
+	         : 'git gave no reason';
+	bail(
+		{exitcode => DATAERR},
+		"Cannot write the mirror tree of #C{%s} in #C{%s}:\n%s",
+		$source, $self->{root}, $said
+	) if $rc || !defined($tree) || $tree !~ /^[0-9a-f]{40}$/;
+
 	return $tree;
 }
 

@@ -1167,6 +1167,12 @@ C<git write-tree> always writes.  The listing and the staging are both read
 NUL-separated, so a path holding a byte outside ASCII is staged as itself
 rather than quoted and octal-escaped.
 
+The listing reaches the staging through a temporary file rather than through a
+pipe, so a set may be any size at all.  A pipe filled before the child is
+spawned holds only what a pipe holds, which a set of about nine hundred files
+is already larger than, and the write would stop there with nobody reading the
+far end.
+
 B<Parameters:>
 
 =over 4
@@ -1185,8 +1191,24 @@ of.
 
 B<Returns:> The tree's sha, or undefined where there was nothing to write.
 
-B<Errors:> Raises a bug where no source commit is given, since a mirror is
-taken from one and there is nothing to guess at.
+B<Errors:>
+
+=over 4
+
+=item *
+
+A bug where no source commit is given, since a mirror is taken from one and
+there is nothing to guess at.
+
+=item *
+
+C<< "Cannot write the mirror tree of %s in %s" >> -- raised where C<git
+write-tree> refused the write, or answered with anything other than a
+forty-character sha. Its stderr is read apart from its answer, so a warning
+about the environment is reported as the complaint it is rather than handed
+back as the head of the tree. It exits C<DATAERR>.
+
+=back
 
 B<Examples:>
 
@@ -1299,10 +1321,9 @@ The listing is read NUL-separated, so a path holding a byte outside ASCII
 comes back as itself rather than quoted and octal-escaped.
 
 The exit status is read, the way L</ls_files> and L</diff_names> read theirs.
-git refuses an empty pathspec and a ref it cannot resolve by name, and a
-refusal handed back unread is one sentence split on NULs and answered as
-though it were the paths on that ref, so a caller gets git's own complaint
-standing where a path should be.
+git refuses a ref it cannot resolve by name, and a refusal handed back unread
+is one sentence split on NULs and answered as though it were the paths on that
+ref, so a caller gets git's own complaint standing where a path should be.
 
 B<Parameters:>
 
