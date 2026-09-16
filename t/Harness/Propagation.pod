@@ -1298,6 +1298,13 @@ C<count> of them.  It answers the harness and those commits in list context,
 because the rows that name a commit index into them, and the harness alone in
 scalar context, because the rows that only want the shape say so.
 
+Each commit writes the first environment's own file, for the reason
+C<gated_harness> does.  A row that wants other content passes C<files>, an
+arrayref of one per-commit hashref in the shape C<commit_on_control> takes,
+with at least as many entries as there are commits.  C<count> and C<files>
+are this shape's own and do not ride on into C<make_harness> or
+C<ready_envs>.
+
 =head2 gated_harness(%opts)
 
   my ($h, @shas) = gated_harness();
@@ -1311,7 +1318,8 @@ Each of the four writes the first environment's own file, because a commit
 whose content lies in no environment's propagation set routes nowhere and the
 walk skips it, and every row that stands on this shape asks the walk to route
 all four.  A row that wants other content passes C<files>, an arrayref of one
-per-commit hashref in the shape C<commit_on_control> takes.
+per-commit hashref in the shape C<commit_on_control> takes, with at least four
+entries in it.
 
 =head2 held_harness(%opts)
 

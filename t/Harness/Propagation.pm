@@ -3885,8 +3885,15 @@ sub staged {
 # in scalar context, because the rows that only want the shape say so.
 sub due_harness {
 	my (%opts) = @_;
+	# Both are this shape's own, so neither rides on into make_harness or
+	# ready_envs, where a key nobody there reads is a key nobody there
+	# refuses either.  files says what the run of commits writes, and it goes
+	# to _due rather than to the seeding delivery, which takes a key of the
+	# same name.
+	my $count = delete $opts{count};
+	my $files = delete $opts{files};
 	my $h = ready_harness(%opts, envs => $opts{envs} // ['qa']);
-	my @due = _due($h, $opts{count} // 2);
+	my @due = _due($h, $count // 2, ($files ? (files => $files) : ()));
 	$h->refresh('a');
 	return wantarray ? ($h, @due) : $h;
 }
@@ -3905,6 +3912,9 @@ sub gated_harness {
 	# a key of the same name for the seeding delivery, so it is taken out of
 	# the options before the shape below is built from them.
 	my $files = delete $opts{files};
+	die "gated_harness was given " . scalar(@$files) . " per-commit file "
+	  . "sets under files, and it lays four commits\n"
+		if $files && @$files < 4;
 	my $h = ready_harness(%opts, envs => $opts{envs} // ['qa']);
 	my $env = ($opts{envs} // ['qa'])->[0];
 	my @shas;
@@ -4176,6 +4186,9 @@ sub chain {
 sub _due {
 	my ($h, $n, %opts) = @_;
 	my $env = $opts{env} // $h->{envs}[0];
+	die "_due was given " . scalar(@{$opts{files}}) . " per-commit file sets "
+	  . "under files, and it lays $n commits\n"
+		if $opts{files} && @{$opts{files}} < $n;
 	return map {
 		$h->commit_on_control(
 			files   => $opts{files} ? $opts{files}[$_ - 1]

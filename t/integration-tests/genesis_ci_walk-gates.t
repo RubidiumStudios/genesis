@@ -40,6 +40,26 @@ subtest 'the gate travels with its predecessors and ends the delivery' => sub {
 		'the environment waits on its own certification of the gate');
 };
 
+subtest 'a gate stands until the environment certifies it' => sub {
+	# Three: one row, and one restoration assertion for each of the two runs.
+	plan tests => 3;
+
+	# qa was delivered at the seeding commit and has certified nothing, so
+	# the first run delivers up to the gate and leaves the branch's marker
+	# standing on it.  A second run that read the gate over the range from
+	# that marker would start at the gate itself and so find no gate at all,
+	# and the commit D49 holds would go out on a run nobody deployed
+	# anything between.
+	my ($h, @shas) = gated_harness(stage => 'schema change',
+		kit => 'omega-v2.7.0', certified => []);
+
+	run_genesis($h, {answers => ['y']}, 'propagate');
+	my (undef, $again) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	like($again, qr/\Q@{[substr($shas[3], 0, 7)]}\E.*gate: schema change/s,
+		'the fourth commit is still held on the second run');
+};
+
 subtest 'certification at the gate releases what waits behind it' => sub {
 	plan tests => 4;
 
@@ -66,7 +86,6 @@ subtest 'a revert releases the gate with no deploy' => sub {
 		message => "Revert \"Change the credentials schema\"\n\n".
 		           "This reverts commit $shas[2].",
 		push    => 1);
-	certify($h, 'lab', control_commit => $revert);
 
 	run_genesis($h, {answers => ['y']}, 'propagate');
 	is(harness_marker($h, $h->slug('qa')), $revert,
@@ -75,6 +94,14 @@ subtest 'a revert releases the gate with no deploy' => sub {
 		'the branch moved past the gate with no deploy');
 };
 
+# A release only counts where it sits after the gate it names, and no row
+# here proves the refusal, because the harness cannot cheaply build one.  A
+# trailer has to carry the gate's own sha, a sha is derived from the commit
+# it names, and a commit that stands in front of the gate cannot carry a sha
+# that does not exist yet.  Rewriting control to swap the two afterwards
+# rewrites both shas, so the trailer no longer names the gate at all.  What
+# the guard really answers is a name that resolves to a commit off this
+# range, and the reading it fixes is written into released_gates itself.
 subtest 'a release trailer naming a short hash releases the gate' => sub {
 	plan tests => 3;
 
@@ -87,7 +114,6 @@ subtest 'a release trailer naming a short hash releases the gate' => sub {
 		message  => 'Finish the schema migration',
 		trailers => {'Genesis-Release-Stage' => substr($shas[2], 0, 7)},
 		push     => 1);
-	certify($h, 'lab', control_commit => $release);
 
 	run_genesis($h, {answers => ['y']}, 'propagate');
 	is(harness_marker($h, $h->slug('qa')), $release,
