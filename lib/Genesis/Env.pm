@@ -3372,11 +3372,17 @@ sub pipeline_record {
 # exodus_base like every other record this module keeps there.  The
 # existence question is asked first, because a vault answers an absent path
 # and an empty one alike and a hold with every field blank is still a hold.
+#
+# The vault is asked for outright, the way pipeline_record next door asks
+# for it, and not behind a guard that answers no hold where there is none.
+# The walk delivers on this answer, so an environment whose vault could not
+# be reached has to end that environment rather than read as unheld, which
+# is the one mistake the record exists to stop.
 sub hold_record {
 	my ($self) = @_;
 
 	my $path  = $self->hold_record_path;
-	my $vault = $self->vault or return undef;
+	my $vault = $self->vault;
 	return undef unless $vault->has($path);
 
 	my $data = $vault->get($path);
