@@ -749,6 +749,7 @@ sub propagate {
 			Genesis::CI::Walk::walk_one(
 				session => $session,
 				record  => $env_record,
+				writes  => $dry_run ? 0 : 1,
 				deliver => sub {
 					$session->switch($branch);
 					Genesis::CI::Walk::deliver_pending(

@@ -920,12 +920,22 @@ for C<< Service::Git::Session->discard >> and never for C<abort>, because an
 abort would end the run and leave every environment below this one
 unattempted.
 
+=item C<writes>
+
+Optional, false by default.  True where the caller is delivering, which makes
+the session required: a delivery that died halfway is put back through it,
+and a caller that wrote without one would leave its partial delivery standing
+on the branch with nothing said.  L</plan> and a dry run write nothing and so
+pass neither.
+
 =back
 
 B<Returns:> The record it was given.
 
 B<Errors:> Re-raises a run-fatal or unsurvivable error unchanged, so the
-caller can abort the run on it.
+caller can abort the run on it.  Refuses a call that sets C<writes> and hands
+over no session, which is a defect in the caller rather than a state the run
+can be in.
 
 B<Examples:>
 

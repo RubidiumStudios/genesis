@@ -120,4 +120,24 @@ subtest 'anything else is confined to the environment that raised it' => sub {
 		'and its branch goes back to T while the run walks on');
 };
 
+subtest 'a delivery with no session is refused before it writes' => sub {
+	plan tests => 3;
+
+	# plan walks with no session because it writes nothing, so the session is
+	# optional, and a caller that writes and forgets it would leave a partial
+	# delivery standing on the branch with nothing said.  The omission is
+	# refused here instead.
+	my $record = a_record();
+	my $wrote  = 0;
+
+	my $err = raised_by(record => $record, writes => 1,
+		deliver => sub {$wrote++});
+
+	like("$err", qr/with no session/,
+		'the refusal says what was missing');
+	is($wrote, 0, 'and nothing was delivered before it');
+	is($record->{outcome}, undef,
+		'so the environment records no outcome either');
+};
+
 done_testing;
