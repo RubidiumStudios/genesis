@@ -718,6 +718,58 @@ sub diff_names {
 }
 
 # }}}
+# mirror_tree - the tree a mirror of these paths at this commit makes {{{
+#
+# A delivery is a mirror, so the tree it produces is entirely decided by the
+# commit it delivers and the paths of the set at that commit: every one of
+# them with the blob and the mode the source carries, and nothing beside
+# them.  Nothing about the branch it lands on enters into it.
+#
+# It exists for the preview.  A dry run writes no commit, so the branch does
+# not advance between one previewed delivery and the next, and a second
+# delivery worked out against the branch would report the first delivery's
+# files under it as well.  The preview therefore takes this tree from each
+# delivery and hands it to the one after as its base, so each commit's files
+# are that commit's own.
+#
+# The index is a temporary one that git makes for itself, and the tree is
+# written into the object database unreferenced, the way write-tree always
+# writes one.  Nothing points at it, so it costs a gc and no more.
+#
+# The listing and the staging are both NUL-separated, because git quotes and
+# octal-escapes any path holding a byte outside ASCII when it writes one name
+# per line, and a quoted name staged back is a path nobody has.
+sub mirror_tree {
+	my ($self, $source, @paths) = @_;
+
+	bug("Service::Git::mirror_tree needs the commit the mirror is taken from")
+		unless defined $source && length $source;
+	return undef unless @paths;
+
+	my ($listing) = run({dir => $self->{root}, stderr => 0,
+		onfailure => "Failed to read the tree of '$source'"},
+		'git', 'ls-tree', '-r', '-z', $source, '--', @paths);
+	return undef unless defined $listing && length $listing;
+
+	# tmpfile reserves a name and creates nothing, so the index below is one
+	# git makes for itself and no stale index stands where the name points.
+	my $index = tmpfile(template => 'genesis-mirror-XXXXXXXX');
+	local $ENV{GIT_INDEX_FILE} = $index;
+
+	run({dir => $self->{root}, stdin => $listing,
+		onfailure => "Failed to stage the mirror of '$source'"},
+		'git', 'update-index', '-z', '--index-info');
+
+	my ($tree) = run({dir => $self->{root},
+		onfailure => "Failed to write the mirror tree of '$source'"},
+		'git', 'write-tree');
+	chomp $tree if defined $tree;
+
+	unlink $index;
+	return $tree;
+}
+
+# }}}
 # ls_tree - list files on a ref under a prefix {{{
 #
 # The listing is NUL-separated, because git quotes and octal-escapes any path

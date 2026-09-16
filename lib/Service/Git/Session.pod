@@ -663,8 +663,13 @@ is accepted and not read yet.
 
 =item C<base>
 
-The ref the delivery is worked out against, optional, and the pre-flight's
-C<assumed> ref is what a preview passes. Where it is absent the writer reads
+The ref or tree the delivery is worked out against, optional, and the preview
+is the only caller that passes one.  A run that writes commits the index of
+the branch the session stands on, so an index read off some other ref is one
+the commit could not match, and a C<base> arriving without C<dry_run> is
+therefore raised as a bug before anything is read.  The pre-flight's
+C<assumed> ref is what a preview passes for the first delivery, and the tree
+of the delivery before it for each one after. Where it is absent the writer reads
 the index and diffs against C<HEAD>, which is the branch the session stands
 on and what the commit is made from. Where it is given the writer reads that
 ref's tree and diffs against it instead, so a preview says what a run would
@@ -678,7 +683,10 @@ written or removed, no commit is made, and the two index assertions never
 run, because the writer returns before either is reached with nothing staged
 for them to read. The return carries the same
 C<delivered>, C<removed>, and C<overwrote> lists with C<commit> undef, so a
-preview reports what would land without touching the branch.
+preview reports what would land without touching the branch.  It carries
+C<tree> as well, which is the tree this delivery would have produced, so the
+delivery after it can be worked out against what this one would have left
+behind rather than against a branch that has not moved.
 
 =back
 
@@ -686,8 +694,9 @@ B<Returns:> A hashref with C<commit>, the commit made, C<delivered> and
 C<removed>, the paths written and taken away, and C<overwrote>, the paths the
 branch held whose content differed from the source although the delivered
 commit did not change them. Under C<dry_run> the same three lists come back,
-C<commit> is undef, and the hashref carries C<dry_run> as well, so a caller
-can tell a preview from a delivery.
+C<commit> is undef, and the hashref carries C<dry_run> and C<tree> as well, so
+a caller can tell a preview from a delivery and can hand the next preview the
+tree this one would have made.
 
 B<Errors:>
 
@@ -702,6 +711,12 @@ where no C<env> is passed, before anything is read or written.
 
 C<< "apply_files needs its caller's commit message, since it builds none" >>
 -- raised where no C<message> is passed, before anything is read or written.
+
+=item *
+
+C<< "apply_files was given a base without a dry run..." >> -- raised as a bug
+where C<base> arrives without C<dry_run>, before anything is read or written,
+because a run that writes commits the index of the branch it stands on.
 
 =item *
 

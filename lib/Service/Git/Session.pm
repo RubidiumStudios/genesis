@@ -7,7 +7,7 @@ package Service::Git::Session;
 use strict;
 use warnings;
 
-use Genesis qw/bail run trace/;
+use Genesis qw/bail bug run trace/;
 use Genesis::CI::RunFailure qw/one_line/;
 use Genesis::Exit qw/TEMPFAIL DATAERR SOFTWARE/;
 use Cwd qw/getcwd/;
@@ -464,6 +464,14 @@ sub apply_files {
 	my $message = $opts{message}
 		or bail("apply_files needs its caller's commit message, since it builds none");
 
+	# base belongs to the preview and to nothing else.  A writing run commits
+	# what its index holds, and an index read off some other ref is an index
+	# the commit below would not match, so a caller that names one without
+	# saying it is previewing has asked for a delivery this sub will not make.
+	bug("apply_files was given a base without a dry run, and a run that ".
+		"writes commits the index of the branch it stands on")
+		if $opts{base} && !$opts{dry_run};
+
 	my $git = $self->git;
 
 	# An empty set is refused before anything is read off the index, because
@@ -567,6 +575,11 @@ sub apply_files {
 			delivered => [@to_write],
 			removed   => [@stale],
 			overwrote => [@overwrote],
+			# The tree this delivery would have made, so the delivery after
+			# it can be worked out against what this one would have left
+			# behind.  Nothing moved on the branch, so without it the next
+			# preview reads this one's files as its own.
+			tree      => $git->mirror_tree($source_sha, sort keys %in_set),
 		};
 	}
 
