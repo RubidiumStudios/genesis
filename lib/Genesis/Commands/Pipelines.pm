@@ -869,23 +869,55 @@ sub propagate {
 		info "\n#Yi{No changes to propagate.}";
 	}
 
-	# D97: a run that ended with any environment failed is a partial run,
-	# and it says so in its status, because the next run is the repair and a
-	# caller that cannot tell a partial run from a whole one cannot know to
-	# make it.  Everything the other environments received still stands,
-	# which is what D96 decided a failed environment withholds from them.
-	my @failed = grep {($_->{outcome} // '') eq 'failed'}
-		@{$record->{environments}};
-	if (@failed) {
-		warning("\n%d environment%s failed: %s.  The next run repairs %s.",
-			scalar(@failed), @failed == 1 ? '' : 's',
-			join(', ', map {$_->{env}} @failed),
-			@failed == 1 ? 'it' : 'them');
-		exit TEMPFAIL;
-	}
-	exit 0;
+	# D97's second stage, decided in one place and spent here.  The run's
+	# own status is the only thing a caller reads, so the reading is not
+	# repeated beside the report: the report says which environment ended
+	# which way, and the sentence below says what the whole of that means
+	# for the next run.  It names nobody, because naming an environment
+	# twice sends an operator looking for two different problems.
+	my $status = run_status($record);
+	warning(
+		"\nThe run was partial.  Everything the report says was published ".
+		"still stands, and the next run repairs the rest."
+	) if $status;
+	exit $status;
 }
 
+# run_status - the exit status D97 gives the run's second stage {{{
+#
+# Zero is the run in which every environment ended published or held with
+# its reason.  TEMPFAIL is a partial run, which the next run repairs, and
+# sysexits defines it as a temporary failure with the user invited to retry.
+# The illegal initial state at DATAERR belongs to the first stage and the
+# declined confirmation at ABORTED to the publish, so neither is decided
+# here.
+#
+# The whole outcome is matched, under ruling 22, because the record carries
+# the bare enum word in outcome and the qualifier beside it in
+# outcome_detail.  Cutting a phrase at its comma was what the field split
+# removed the need for, and the two ways an environment comes to read
+# 'not published' both leave through a status of their own before anything
+# here is reached: an aborted run through abort_run, and a declined publish
+# through ABORTED.
+#
+# An outcome the walk left null is idempotent, which is the reading
+# Genesis::CI::Report settles for the report, read the same way here so that
+# a run whose record this sub is handed before the renderer has seen it
+# cannot answer a different status.
+sub run_status {
+	my ($record) = @_;
+
+	my %partial = map {$_ => 1}
+		('failed', 'not attempted', 'publish rejected');
+
+	for my $env (@{$record->{environments}}) {
+		my $outcome = $env->{outcome} // 'idempotent';
+		return TEMPFAIL if $partial{$outcome};
+	}
+	return 0;
+}
+
+# }}}
 # _push_failure - the sentence and the remedy one refused push earns {{{
 #
 # D82 lists the remote unreachable, the credential rejected, and the host
