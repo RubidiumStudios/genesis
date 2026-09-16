@@ -182,8 +182,8 @@ subtest "a provider whose file will not load exits CONFIG" => sub {
 # The bullets an operator reads are built out of a refusal caught inside the
 # load, so what the cut leaves in them is worth one row through a command.
 subtest "an environment block refusal carries no backtrace" => sub {
-	# Four explicit rows and one for the run's own restoration assertion.
-	plan tests => 5;
+	# Five explicit rows and one for the run's own restoration assertion.
+	plan tests => 6;
 
 	# An automated provider, because the manual gate is the operator's
 	# choice inside an ability a manual pipeline does not have, and the
@@ -192,6 +192,14 @@ subtest "an environment block refusal carries no backtrace" => sub {
 	# control branch, and a harness write of a file that is already what it
 	# would write has no commit to make, so this row stands on that write
 	# and adds the environment the refusal is about.
+	#
+	# Asserted rather than assumed, because a reorder of the rows above
+	# would leave a manual provider in force and this row would then be
+	# proving something else while staying green.
+	like blob_at($h->a, $h->control, '.genesis/config'),
+		qr/^\s+type: concourse$/m,
+		'the row above left an automated provider on the control branch';
+
 	write_env_file($h, 'qa', pipeline => {manual => 'maybe'});
 
 	# The frames the cut takes out exist only where something has loaded

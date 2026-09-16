@@ -3091,9 +3091,11 @@ in that class rather than anything an operator wrote.
 
 C<"Failed to load CI provider ..."> - raised through
 L<Genesis::CI::Provider/provider_class> when the registry names a class
-whose file will not compile. An operator meets this at the dispatch inside
+whose file will not compile. It exits 1 and carries the compiler's error
+uncut. An operator meets this at the dispatch inside
 C<Genesis::Config::validate> instead, which loads the same class first and
-refuses there in the terms every configuration refusal carries.
+refuses at C<Genesis::Exit::CONFIG> with the backtrace cut away, in the
+terms every configuration refusal carries.
 
 =back
 

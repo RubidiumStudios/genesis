@@ -43,9 +43,14 @@ my @NAMES = qw/cross_pipeline_events deployment_locks multi_file_output
 # declaration for each of them rather than standing aside for the ones
 # that have no compiler class.
 subtest 'every provider declares its abilities' => sub {
-	plan tests => 4;
+	# One row per registered provider, counted off the registry rather than
+	# written down, because a fourth provider is a fourth row and a written
+	# count would fail the file on the plan instead of on anything it
+	# proves.  The one beyond them is the manual gate below.
+	my @providers = Genesis::CI::Compiler::PipelineProvider->known_providers;
+	plan tests => 1 + scalar(@providers);
 
-	for my $type (Genesis::CI::Compiler::PipelineProvider->known_providers) {
+	for my $type (@providers) {
 		my $class = Genesis::CI::Provider->provider_class($type);
 		lives_ok {
 			Genesis::CI::Compiler::PipelineProvider->declared_capabilities($class)
@@ -147,6 +152,28 @@ subtest 'the declaration carries six names' => sub {
 		'Concourse declares the first five true';
 	ok !$caps->{multi_file_output},
 		'and multi_file_output false, since it emits one file';
+};
+
+# Concourse has a row of its own above and GitHub Actions had none, so
+# nothing pinned the declaration D101 leaves provisional until that
+# provider's compiler class is written.  A change to it should be a
+# deliberate one that comes here and says so.
+subtest 'GitHub Actions declares the file layout and nothing else' => sub {
+	plan tests => 3;
+
+	my $class = Genesis::CI::Provider->provider_class('github-actions');
+	my $caps  = $class->capabilities;
+
+	ok $caps->{multi_file_output},
+		'a workflow directory is several files, so it emits several';
+	is_deeply [grep {$caps->{$_}} sort keys %$caps], ['multi_file_output'],
+		'and the other five are false until its compiler class is written';
+
+	# Declared here rather than gated centrally, because the provider that
+	# can emit several files is the provider that offers the key choosing
+	# between the forms.
+	is $class->provider_options_schema->{output_layout}{default}, 'single',
+		'the layout key it declares defaults to the single form';
 };
 
 subtest 'a capability that is false refuses the key it gates' => sub {
