@@ -44,7 +44,7 @@ our @EXPORT = qw/
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed break_vault restore_vault
 	record_at vault_read_log fixture_preflight fixture_kit
-	fixture_command install_compiled_kit
+	fixture_command install_compiled_kit shimmed_git real_tool
 
 	snapshot_w assert_w_restored assert_snapshot_invariant
 	run_genesis run_genesis_in stand_on
@@ -2353,6 +2353,16 @@ sub _real_tool {
 }
 
 # }}}
+# real_tool - the same answer, for a row that has to ask it too {{{
+#
+# A row that writes a shim of its own, or that only wants to know whether a
+# tool is there at all, asks the same question the harness asks itself, and it
+# has to skip the same directories.  A row reading the path for itself takes
+# whatever sits first on it, which is a fixture directory whenever one is
+# there, and then bakes that fixture into a shim that calls itself.
+sub real_tool { return _real_tool($_[0]) }
+
+# }}}
 # _write_record - write one flat record under a vault path {{{
 sub _write_record {
 	my ($self, $path, %fields) = @_;
@@ -3733,6 +3743,47 @@ sub _path_prefix {
 }
 
 # }}}
+# shimmed_git - a git that answers one subcommand itself and passes the rest on {{{
+#
+# A row reaches an answer the real git will not give on demand by standing a
+# shim first on the path for the length of one call.  The shim answers the
+# subcommand the row names out of the body it is handed, and hands every other
+# command to the git underneath, so the run still does real work on real refs.
+#
+# The body is shell, and it is written inside the `if`, so a body that says
+# nothing about exiting falls out of the block and reaches the real git after
+# whatever it did.  A body that wants to answer on its own says so with an
+# exit of its own.
+#
+# The directory is named git-shim-... under the harness tmp, and the name
+# matters: _real_tool steps over directories named that way, so a wrapper
+# written while a shim sits first on the path still bakes in the git
+# underneath rather than baking in the shim.
+#
+# name gives the directory a fixed last component instead of a random one and
+# answers with an existing one rather than writing it twice, which is how the
+# version fixture keeps one directory per version across a whole run.
+sub shimmed_git {
+	my ($self, %opts) = @_;
+	my $when = $opts{when} or die "shimmed_git needs the subcommand to answer\n";
+	my $body = $opts{body} // '';
+
+	my $dir = "$self->{tmp}/git-shim-"
+		. ($opts{name} // sprintf('%06d', int(rand(1_000_000))));
+	return $dir if $opts{name} && -d $dir;
+
+	helper::mkdir_or_fail($dir);
+	helper::put_file("$dir/git", 0755, <<"EOS");
+#!/usr/bin/env bash
+if [ "\$1" = "$when" ]; then
+$body
+fi
+exec "@{[_real_tool('git')]}" "\$@"
+EOS
+	return $dir;
+}
+
+# }}}
 # _fake_git_dir - a git that reports a chosen version and passes the rest on {{{
 #
 # The prerequisites check asks git for its version through the shell, so a
@@ -3740,21 +3791,11 @@ sub _path_prefix {
 # handed to the real git, so the run still does real work on real refs.
 sub _fake_git_dir {
 	my ($self, $version) = @_;
-	my $dir = "$self->{tmp}/git-$version";
-	return $dir if -d $dir;
-
-	helper::mkdir_or_fail($dir);
-	my ($real) = run({}, 'bash', '-c', 'command -v git');
-	chomp $real;
-	helper::put_file("$dir/git", 0755, <<"EOS");
-#!/usr/bin/env bash
-if [ "\$1" = "--version" ]; then
-  echo "git version $version"
-  exit 0
-fi
-exec "$real" "\$@"
-EOS
-	return $dir;
+	return $self->shimmed_git(
+		when => '--version',
+		body => "  echo \"git version $version\"\n  exit 0",
+		name => $version,
+	);
 }
 
 # }}}

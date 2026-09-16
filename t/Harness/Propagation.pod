@@ -1270,6 +1270,39 @@ environment naming a kit by version reaches for this, because C<local_kits>
 looks in that directory and nowhere else, and the bytes are copied rather than
 written because an archive is not text.
 
+=head2 shimmed_git($h, %opts)
+
+Writes a directory holding a C<git> that answers one named subcommand out of
+the body it is handed and passes every other command to the real git, and
+returns that directory.  A row stands it first on C<PATH> for the length of one
+call, usually through a C<< local $ENV{PATH} >>, and so reaches an answer the
+real git will not give on demand.  The options are C<when>, the first argument
+to match, C<body>, the shell that runs when it matches, and C<name>.
+
+The body is written inside the C<if>, so a body that says nothing about exiting
+falls out of the block and reaches the real git after whatever it did.  That is
+how a row makes git complain on stderr and still answer.  A body that wants to
+answer on its own exits for itself.
+
+C<name> gives the directory a fixed last component instead of a random one and
+answers with an existing directory rather than writing it twice, which is how
+the git-version fixture behind C<< run_genesis >>'s C<git_version> keeps one
+directory per version across a whole run.
+
+The directory is always named C<git-shim-...> under the harness's temporary
+directory, and the name is load-bearing.  C<real_tool> steps over directories
+named that way, so a wrapper written while a shim sits first on the path still
+bakes in the git underneath rather than baking in the shim and calling itself.
+
+=head2 real_tool($name)
+
+Answers the path of the named tool on C<PATH>, skipping the harness's own
+fixture directories.  A row that writes a shim, or that only wants to know
+whether a tool is there at all, has to skip the same directories the harness
+skips.  A row reading C<PATH> for itself takes whatever sits first on it, which
+is a fixture directory whenever one is there.  When nothing on the path matches,
+it answers the bare name, so a caller testing for presence tests with C<-x>.
+
 =head2 skip_on($git, $step, $n, %opts)
 
 Makes the nth call of a named git step return without delegating, so the write
