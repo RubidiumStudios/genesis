@@ -535,8 +535,10 @@ sub apply_files {
 	# that ref the preview names every file that fast-forward is about to
 	# bring as one this commit would land, and every file it would take off
 	# as one this commit would remove.
+	# The whole of that tree, which git spells as the pathspec '.'.  Left
+	# out, the listing goes in with an empty pathspec, which git refuses.
 	my $base      = $opts{base};
-	my @on_branch = $base ? $git->ls_tree($base) : $git->ls_files;
+	my @on_branch = $base ? $git->ls_tree($base, '.') : $git->ls_files;
 	my @stale     = grep { !$in_set{$_} } @on_branch;
 
 	# The diff against the source is the optimisation, so the writer touches

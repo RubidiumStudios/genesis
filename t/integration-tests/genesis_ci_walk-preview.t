@@ -37,6 +37,15 @@ sub files_under {
 	return [sort @files];
 }
 
+# Every path one report says a delivery would take off the branch, read
+# whole, so a line carrying something that is not a path at all is caught
+# rather than passed over by a pattern that only matches one.
+sub removed_in {
+	my ($report) = @_;
+	my @gone = ($report // '') =~ /^\s+D (.+?)\s*$/mg;
+	return [sort @gone];
+}
+
 subtest 'the withdrawn flags are usage errors' => sub {
 	# Two rows, and one more for each run's own restoration assertion.
 	plan tests => 4;
@@ -128,6 +137,38 @@ subtest 'two commits due are two file lists, not one union' => sub {
 	is_deeply([files_under($preview, $one), files_under($preview, $two)],
 		[files_under($real, $one), files_under($real, $two)],
 		'which is what the run then delivers, commit for commit');
+};
+
+subtest 'the preview reads the branch it is previewing against' => sub {
+	# Three rows, and one more for the run's own restoration assertion.
+	plan tests => 4;
+
+	my $h = ready_harness(envs => ['qa'], kit => 'omega-v2.7.0',
+		tracked => ['ops/shared.yml', 'ops/extra.yml']);
+
+	# A hand edit the branch is carrying, on a path the commit below does
+	# not itself change, which is what makes the mirror's overwrite of it an
+	# overwrite rather than a delivery.
+	hand_commit($h, $h->slug('qa'),
+		files   => {'dev/kit.yml' => "---\nname: edited by hand\n"},
+		message => 'Patch the kit in place');
+
+	# The set narrows, so one path the branch holds falls out of it and the
+	# delivery has a real removal to report.
+	my $file = write_env_file($h, 'qa', commit => 0,
+		genesis => {pipeline => {track_additional_files => ['ops/shared.yml']}});
+	my $due = commit_on_control($h,
+		files   => {'qa.yml' => slurp($h->a . '/' . $file)},
+		message => 'Stop tracking the extra ops file', push => 1);
+
+	my (undef, $preview) = run_genesis($h, 'propagate', '--dry-run');
+
+	like($preview, qr{^\s+D ops/extra\.yml$}m,
+		'the preview names the path that would leave the branch');
+	like($preview, qr{^\s+overwrote-hand-edit dev/kit\.yml$}m,
+		'and the hand edit the mirror would take back off it');
+	is_deeply(removed_in($preview), ['ops/extra.yml'],
+		'and names nothing that is not a path on the branch');
 };
 
 done_testing;
