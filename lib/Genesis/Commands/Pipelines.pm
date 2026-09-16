@@ -6,7 +6,7 @@ use warnings;
 use Genesis;
 use Genesis::State;
 use Genesis::Commands;
-use Genesis::Exit qw/CONFIG NOPERM ABORTED TEMPFAIL/;
+use Genesis::Exit qw/CONFIG DATAERR NOPERM ABORTED TEMPFAIL/;
 use Genesis::Config;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
@@ -679,6 +679,7 @@ sub propagate {
 
 	my $delivered = 0;
 	my @publish_specs;
+	my $publish;
 	my $record;
 
 	# The environment the run has reached, which is what the outcome words
@@ -819,9 +820,13 @@ sub propagate {
 		}
 
 		# D96's third stage.  The publish is held to the end of the walk, so
-		# a run that failed halfway has put nothing on the remote, and control
-		# goes with the branches because the markers now on them name commits
-		# the remote has to be able to resolve.
+		# a run that failed halfway has put nothing on the remote.
+		#
+		# The push set is the deployment branches alone.  Control is the run's
+		# input and never its output, which is D30, so what the publish does
+		# with control is read it once more before the first push and refuse
+		# where it has moved.  It is named to the stage for that reading and
+		# for nothing else.
 		#
 		# It is inside the session rather than after it, because a remote that
 		# has gone away is D82's unsurvivable failure and the answer to one
@@ -833,15 +838,13 @@ sub propagate {
 		if (@publish_specs) {
 			my $remote = $git->default_remote;
 			if ($remote) {
-				Genesis::CI::Publish::publish_run(
+				$publish = Genesis::CI::Publish::publish_run(
 					git     => $git,
 					session => $session,
 					remote  => $remote,
+					control => $control,
 					records => $record->{environments},
-					specs   => [
-						{branch => $control, kind => 'control'},
-						@publish_specs,
-					],
+					specs   => \@publish_specs,
 					# D82's two shapes reach one reading.  git push failing to
 					# run at all raises, and a remote nobody can resolve comes
 					# back as a refused push per ref, so a push git named no
@@ -877,6 +880,16 @@ sub propagate {
 		at      => $at,
 		error   => $failure,
 	) unless $ran;
+
+	# D30's in-sync rule, answered a second time by the publish and spent
+	# here.  Control moving under the run leaves every marker the run wrote
+	# naming a commit computed from a tip that has already moved, so the run
+	# refuses rather than publishing it.  Nothing went to the remote and
+	# every branch the run committed to is back where the remote has it, so
+	# the refusal leaves the repository as it found it, and the state that
+	# stopped the run is the repository's own, which is what DATAERR says.
+	$refuse->({exitcode => DATAERR}, '%s', $publish->{refused})
+		if $publish && $publish->{refused};
 
 	# The walk is over, so the operator goes back on the branch they started
 	# this run from, before a word of the summary is printed.  Nothing below

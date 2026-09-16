@@ -12,13 +12,18 @@ Genesis::CI::Publish - the propagate run's third stage, one push per branch
         git     => $git,
         session => $session,
         remote  => 'origin',
+        control => 'control',
         records => $record->{environments},
         specs   => [
-            {branch => 'control',  kind => 'control'},
             {branch => 'lab/bosh', kind => 'deployment', env => 'lab'},
         ],
         unsurvivable => sub {die "the remote answered nothing: $_[1] $_[0]\n"},
     );
+
+    # A control that moved under the run refuses the whole publish, and the
+    # sentence to refuse with comes back for the command to speak.
+    bail({exitcode => DATAERR}, '%s', $publish->{refused})
+        if $publish->{refused};
 
 =head1 DESCRIPTION
 
@@ -26,6 +31,16 @@ The walk decides what is due and the delivery writes it onto the deployment
 branches in the local repository. Everything here is about getting what the
 local repository now holds onto the remote, and saying, per environment, what
 the remote made of it.
+
+The push set is the deployment branches alone. Control is the run's input and
+never its output, which is D30, so what this stage does with control is read
+it once more before the first push. A marker is a bare sha with no ancestry
+link to the deployment branch, so it means something only where the commit it
+names can be fetched from the remote, and a control that moved under the run
+leaves every marker the run wrote naming a commit computed from a tip that has
+already moved. Such a run refuses before its first push, puts every branch it
+committed to back where the remote has it, and hands the caller the sentence
+to refuse with.
 
 Each branch is pushed on its own. A rejection on one branch costs one
 environment one run and nothing else, which is what D83 asks for, and no
@@ -61,12 +76,18 @@ sense the word carries.
         git     => $git,
         session => $session,
         remote  => 'origin',
+        control => 'control',
         records => \@records,
         specs   => \@specs,
     );
 
 Pushes every branch the run committed to, one branch per push, and records
 each push's result as that branch's outcome.
+
+Control is re-checked against the remote before the first push, and a control
+that is behind, ahead, or gone refuses the whole publish. Nothing is pushed,
+every branch the run committed to goes back to where the remote has it, and
+the refusal comes back on C<refused> as the sentence the caller speaks.
 
 A branch the remote refused records C<publish rejected> with C<E<lt>refE<gt>
 moved on R> beside it, is reset to its remote state at once, and the remaining
@@ -85,7 +106,9 @@ B<A remote that refused every branch is not a remote that went away.> What
 the stage reads is whether git named a ref, because a ref comes from git's
 own porcelain line and a push that never reached the remote prints none.
 Reading whether any ref landed instead would give a run whose every branch
-was refused the answer an unreachable remote earns.
+was refused the answer an unreachable remote earns, and that is no corner
+case now that the push set is the deployment branches alone, because a run
+with one environment in it has a single ref to land.
 
 No two branches are published together and none is read together. Every
 deployment branch is an independent mirror at its own marker, routing
@@ -111,18 +134,23 @@ without one records the outcomes and resets nothing.
 The remote to publish to, by name. It falls back to the repository's default
 remote, and a repository with no remote at all publishes nothing.
 
+=item C<control>
+
+The control branch's name, which is the branch re-checked before the first
+push. A call without one pushes without re-checking.
+
 =item C<records>
 
 An arrayref of the walk's per-environment records, which is where an outcome
 is written. A spec whose environment is not among them is pushed and reported
-and writes no outcome, which is what the control branch does.
+and writes no outcome.
 
 =item C<specs>
 
 An arrayref of ref specs, in the order they should be pushed. Each carries
-C<branch>, and may carry C<kind>, which is C<control>, C<deployment>, or
-C<pr>, and C<env>, which names the record the outcome belongs to. An empty
-list publishes nothing.
+C<branch>, and may carry C<kind>, which is C<deployment> or C<pr>, and C<env>,
+which names the record the outcome belongs to. Control is never among them. An
+empty list publishes nothing.
 
 =item C<unsurvivable>
 
@@ -137,10 +165,12 @@ to raise, and the stage returns without recording anything if it does not.
 
 B<Returns:> A hashref carrying C<published> and C<rejected> as arrayrefs of
 branch names, C<declined> as 0 or 1, and C<results> as the per-ref results the
-push answered.
+push answered. A publish the control check refused carries C<refused> as well,
+holding the sentence, with every other key left as it began.
 
-B<Errors:> None of its own. A refusal is an outcome rather than a failure, and
-the one failure the stage meets is raised by the caller's own callback.
+B<Errors:> None of its own. A rejection is an outcome rather than a failure, a
+control that moved is a sentence for the caller to refuse with, and the one
+failure the stage meets is raised by the caller's own callback.
 
 B<Examples:>
 
@@ -148,12 +178,143 @@ B<Examples:>
     # returns the empty result and pushes nothing
 
     publish_run(git => $git, session => $session, remote => 'origin',
-        records => \@records, specs => \@specs);
-    # returns { published => ['control', 'lab/bosh'],
-    #           rejected => ['prod/bosh'], declined => 0, results => [...] }
+        control => 'control', records => \@records, specs => \@specs);
+    # returns { published => ['lab/bosh'], rejected => ['prod/bosh'],
+    #           declined => 0, results => [...] }
     #   where the remote had moved under prod
 
+    publish_run(git => $git, session => $session, remote => 'origin',
+        control => 'control', records => \@records, specs => \@specs);
+    # returns { refused => 'Refusing to publish.  ...', published => [],
+    #           rejected => [], declined => 0, results => [] }
+    #   where a teammate pushed to control during the walk
+
 =head1 INTERNAL FUNCTIONS
+
+=head2 _recheck_control
+
+    my $refused = Genesis::CI::Publish::_recheck_control($git, 'control', 'origin');
+
+Asks D30's in-sync question a second time, immediately before the first push.
+
+The pre-flight asks it once, before the walk, and a walk takes long enough for
+a teammate to push through the middle of it. A marker is a bare sha with no
+ancestry link to the deployment branch, so control moving under the run is the
+one condition that makes every delivery stale. The branch is fetched first, so
+the answer is about what the remote holds now rather than about a tracking ref
+nobody has refreshed since the run began.
+
+Each of the six states the query answers with earns a refusal of its own, as
+does control having gone from both sides, because the step that repairs one
+repairs none of the others. Genesis never moves control, so every refusal
+names the corrective step and leaves control where it was found. The sentence
+is returned rather than printed, because the caller closes the session before
+it speaks and a stage that printed for itself would speak first.
+
+A fetch that could not reach the remote is passed over. The question asked
+here is about control, and a remote that has gone away is D82's question,
+which the push raises for itself, so a failed refresh leaves the reading to
+the tracking ref and the push to say what it finds.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The repository handle the fetch and the query run through.
+
+=item C<$control>
+
+The control branch's name. An undefined or empty name skips the check.
+
+=item C<$remote>
+
+The remote to check against, by name.
+
+=back
+
+B<Returns:> C<undef> where control is in sync, which is the one state that lets
+the push go out, and otherwise the sentence the caller refuses with.
+
+B<Errors:> None of its own. The fetch and the query raise as they do for every
+other caller.
+
+B<Examples:>
+
+    _recheck_control($git, 'control', 'origin');
+    # returns undef, and the push goes out
+
+    _recheck_control($git, 'control', 'origin');
+    # returns 'Refusing to publish.  The control branch control is behind
+    #   origin/control by 1 commit, so everything this run computed is
+    #   stale.  ...' where a teammate pushed during the walk
+
+=head2 _commits
+
+    my $said = Genesis::CI::Publish::_commits(2);
+
+The count of commits and its noun, so the verb around it reads.
+
+A refusal that says "by 1 commits" is read past rather than read, so the number
+governs the noun wherever a refusal names one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$n>
+
+How many commits. An undefined count reads as none.
+
+=back
+
+B<Returns:> The count and its noun, as one string.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _commits(1);
+    # returns '1 commit'
+
+    _commits(3);
+    # returns '3 commits'
+
+=head2 _reset_publish_set
+
+    my $put_back = Genesis::CI::Publish::_reset_publish_set($session);
+
+Puts every branch the run committed to back where the remote has it.
+
+A branch carrying a commit the remote has never seen is the illegal initial
+state D96 names, and a run that refuses before its first push must not leave
+one behind. The set is the session's own, which is the set an abort resets, so
+a refusal here and an abort put back exactly the same work. Control is not in
+it, because I2 keeps committed work on control whole.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$session>
+
+The open branch session, which both answers the set and does the resetting. A
+call without one resets nothing.
+
+=back
+
+B<Returns:> How many branches were put back.
+
+B<Errors:> The session's own reset raises where git refuses it.
+
+B<Examples:>
+
+    _reset_publish_set($session);
+    # returns 2, having put lab/bosh and qa/bosh back at their remote state
+
+    _reset_publish_set(undef);
+    # returns 0
 
 =head2 _spec_for
 
