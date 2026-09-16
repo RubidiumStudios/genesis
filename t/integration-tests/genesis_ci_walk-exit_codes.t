@@ -41,7 +41,7 @@ subtest 'every environment published or held exits 0' => sub {
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 	is($exit, 0, 'the run exits 0');
 	like($err, qr/qa.*propagated/s, 'qa was propagated');
-	like($err, qr/prod.*held/s, 'prod was held with its reason');
+	like($err, qr/^\s*prod: held, \S/m, 'prod was held with its reason');
 };
 
 subtest 'one failed environment exits TEMPFAIL' => sub {
