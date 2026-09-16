@@ -927,6 +927,29 @@ B<Examples:>
     my $spec = $cfg->_schema_for_key('manifest_store');
     # { type => 'enum', values => [...], default => 'exodus', ... }
 
+=head2 _discriminator_entry
+
+    my $entry = $cfg->_discriminator_entry($path, $spec);
+
+Returns the C<modules> entry a C<custom_struct> block's own discriminator
+chooses, or C<undef> when nothing chooses one.
+
+It reads the field the declaration names under C<$path>, falls back to
+C<discriminator_default> where that field has no value, and indexes the map
+with what comes out. Those are the three steps
+L</_validate_custom_struct> and L</_custom_struct_subschema> both take, and
+they are written once so the two cannot come to disagree about which module
+owns a block.
+
+It loads nothing. The two callers part company over a module that will not
+load, since the validator refuses in the operator's terms and the reader
+passes over it in silence, and neither answer is one this can give on their
+behalf.
+
+B<Returns:> The map entry as a hash reference, or C<undef>.
+
+B<Errors:> None.
+
 =head2 _custom_struct_subschema
 
     my $spec = $cfg->_custom_struct_subschema($path, $entry);
@@ -1407,7 +1430,7 @@ The discriminator is filled from C<discriminator_default> first, when the
 schema declares one and the operator wrote nothing, so the match below it
 sees the value every other reader will. The fill is filed at default
 priority, except where the file carried the block as an explicit empty
-hash: that hash claims the key in the merge and masks anything filed
+hash. Such a hash claims the key in the merge and masks anything filed
 beneath it, so there the fill is filed at loaded priority instead and the
 block still reaches the module its default names.
 

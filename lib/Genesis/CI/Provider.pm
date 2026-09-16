@@ -197,6 +197,28 @@ sub validate_config {
 }
 
 # }}}
+# section_enabled - whether the section the block sits in is switched on {{{
+#
+# A provider's own rules run only where the section its block sits in is
+# enabled, and this is where a provider asks.  Before D105 the provider
+# walk sat behind the pipeline gate and never had to ask, and now the
+# rules are reached from the configuration walk instead, which runs
+# whether or not anybody has turned a pipeline on.  An operator writes a
+# provider block a key at a time, so a repository with a pipeline nobody
+# has enabled must not be refused for a key that pipeline would need.
+#
+# The section is the block's own parent, which is all a provider knows
+# about where it sits, and a block with no parent is taken to be running,
+# since there is no section to ask about.
+sub section_enabled {
+	my ($class, $config, $path) = @_;
+
+	my ($section) = ($path // '') =~ m{^(.*)\.[^.]+$};
+	return 1 unless defined $section && length $section;
+	return $config->get("$section.enabled") ? 1 : 0;
+}
+
+# }}}
 # }}}
 ### Instance Methods {{{
 
@@ -262,6 +284,14 @@ keys refused by name. A provider overrides C<validate_config> only for a
 rule a declaration cannot state, such as one key being required when
 another is absent, and an override calls C<SUPER> first, because the
 declaration is the floor rather than a subset of what is wanted checked.
+
+A provider's own rules run only where the section its block sits in is
+enabled, and C<section_enabled> is what a rule asks. The base owns that
+reading so every provider inherits it, because an operator writes a
+provider block a key at a time and a repository whose pipeline nobody has
+turned on must not be refused for a key that pipeline would need. The
+declared keys are checked either way, since a key an operator wrote is
+still a key that has to be one the provider reads.
 
 Concrete subclasses: Concourse, GithubActions, Manual.
 

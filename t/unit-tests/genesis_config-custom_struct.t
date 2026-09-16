@@ -207,4 +207,46 @@ subtest "a defect in a module is not the operator's mistake" => sub {
 		'and it is still reported as the defect it is';
 };
 
+# The reader behind schema_has and set()'s coercion, which is not
+# validation and so may not refuse.  Three ways a block fails to resolve,
+# and all three answer the same: the key reads as one the schema does not
+# declare, and nothing is raised on the way out.
+subtest 'a block that will not resolve reads as an undeclared key' => sub {
+	plan tests => 6;
+
+	# One: the declaration names no method to ask the module for, which
+	# is this file's own schema, since its modules only validate.
+	my $cfg = Genesis::Config->new();
+	$cfg->set('block.kind', 'quiet');
+	$cfg->schema($schema);
+	is $cfg->_schema_for_key('block.kind'), undef,
+		'a block declaring no schema_method resolves to nothing';
+	is $cfg->schema_has('block.kind'), 0,
+		'and the key reads as one the schema does not declare';
+
+	# Two: the discriminator holds a value no map entry owns.  The method
+	# is declared here, so the only thing missing is the entry.
+	my %asks = (%{$schema->{block}}, schema_method => 'options_schema');
+	my $unowned = Genesis::Config->new();
+	$unowned->set('block.kind', 'nonesuch');
+	$unowned->schema({block => {%asks}});
+	is $unowned->_schema_for_key('block.kind'), undef,
+		'a discriminator no entry owns resolves to nothing';
+	is $unowned->schema_has('block.kind'), 0,
+		'and that key reads as undeclared too';
+
+	# Three: an entry naming a file that is not there.  This is the one
+	# path where a reader outside validation could raise, and the eval
+	# around the require is the only thing that stops it.
+	my $missing = Genesis::Config->new();
+	$missing->set('block.kind', 'gone');
+	$missing->schema({block => {%asks, modules => {
+		gone => {module => 'Probe/Gone.pm', class => 'Probe::Gone'},
+	}}});
+	my $raised = '';
+	my $answer = eval {$missing->_schema_for_key('block.kind')} or $raised = $@;
+	is $raised, '', 'a module whose file is not there raises nothing';
+	is $answer, undef, 'and the key resolves to nothing';
+};
+
 done_testing;
