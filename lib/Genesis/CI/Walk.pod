@@ -99,6 +99,14 @@ gate read over the due commits alone would fall behind the base on the very
 next run and stop holding anything, while the environment still waits for the
 deploy that certifies it.
 
+An environment that has certified nothing has no such commit to read from,
+and its marker will not stand in for one, for the same reason: the first run
+delivers up to the gate and leaves the marker on it, so the second run's
+range would start at the gate and find no gate at all.  Its range starts
+where its own walk starts on an unseeded branch, at the commit
+L</_before_introduction> answers, so the gate stands until a certification
+exists.
+
 A propagation hold is applied through L</apply_hold> at the end of each
 environment's walk, once what is due has been computed and before the record
 is handed back, so the caller has nothing left to deliver to a held
@@ -670,6 +678,12 @@ C<RELEASE_STAGE>, and it resolves a short hash through C<rev-parse>, so a
 trailer naming an unambiguous abbreviation releases the gate the full hash
 names.
 
+After is what it says and what it means.  A commit in the range that names
+one at or after itself releases nothing, because a gate constrains what
+follows it and a release standing in front of the gate would lift it before
+it was ever set.  A name the range does not hold is a commit older than the
+range, and the release is after that one by the same reading, so it stands.
+
 B<Parameters:>
 
 =over 4
@@ -680,8 +694,9 @@ The handle to read the messages and resolve the names through.
 
 =item C<@commits>
 
-The commits of the range, each a hashref carrying C<sha>, as
-L</control_commits> answers them.
+The commits of the range, oldest first, each a hashref carrying C<sha>, as
+L</control_commits> answers them.  The order is what says which of two
+commits is the later, control being linear.
 
 =back
 
@@ -1070,6 +1085,51 @@ B<Examples:>
   Genesis::CI::Walk::is_run_fatal("the blueprint hook exited 1\n");       # 0
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _before_introduction
+
+    my $since = Genesis::CI::Walk::_before_introduction($git, $control,
+                                                        $env_file);
+
+The commit a range starts after so that E, the commit that introduced the
+environment's file, is the first commit in it.
+
+An environment control has never carried a file for, and one whose file was
+introduced on control's own first commit, both answer undefined, which
+L</control_commits> reads as the whole of control.  A root commit has no
+parent, and the whole of control is what the caller wants there, because
+control's first commit is where E already is.
+
+Two callers ask it.  L</walk_base> asks for a branch that carries no marker,
+and L</plan> asks for an environment that has certified nothing, because a
+gate range taken from that environment's marker instead would start at the
+gate the last run delivered to and so find no gate at all.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The handle the range is read through.
+
+=item C<$control>
+
+The control commit the walk is reading against.
+
+=item C<$env_file>
+
+The environment's own file, git-prefixed.
+
+=back
+
+B<Returns:> The sha of the commit before E, or undefined where there is
+none.
+
+B<Examples:>
+
+  Genesis::CI::Walk::_before_introduction($git, $sha, 'bosh/qa.yml');
+  # the commit before the one that added bosh/qa.yml
 
 =head2 _reading
 

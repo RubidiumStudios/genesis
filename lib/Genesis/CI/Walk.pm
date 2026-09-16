@@ -107,23 +107,8 @@ sub walk_base {
 	my $marker = Genesis::CI::Marker::newest($git, $args{ref});
 	return ($marker, 'seeded') if defined $marker;
 
-	my $e = introducing_commit($git, $args{control}, $args{env_file});
-	return (undef, 'unseeded') unless defined $e;
-
-	# A root commit has no parent, and the whole of control is then what the
-	# walk wants, because control's first commit is where E already is.
-	my ($parent, $rc) = run(
-		{dir => $git->root, stderr => 0},
-		'git', 'rev-parse', "$e^"
-	);
-	$parent = '' unless defined $parent;
-	chomp $parent;
-	# One line and no more.  Stripping every space out of whatever came back
-	# would turn a surprising answer, such as the several parents of a merge
-	# git was never meant to be asked about here, into one run-on string that
-	# reads as a sha and resolves to nothing.
-	$parent = '' if $parent =~ /\n/;
-	return ((!$rc && length $parent) ? $parent : undef, 'unseeded');
+	return (_before_introduction($git, $args{control}, $args{env_file}),
+		'unseeded');
 }
 
 # }}}
@@ -433,11 +418,24 @@ sub gate_state {
 # gate is visible while the walk is still at the gate.  git's revert body
 # line names the full hash, and Genesis-Release-Stage may name a full or an
 # unambiguous short hash, so we resolve whatever we find through rev-parse.
+#
+# Later is what it says and what it means.  A release only ever sits after
+# the gate it names, so a commit in the range that names one at or after
+# itself releases nothing: a gate constrains what follows it, and a release
+# standing in front of the gate would lift it before it was ever set.  A
+# commit the range does not hold is older than the range, and the release
+# is after that one by the same reading, so it stands.
 sub released_gates {
 	my ($git, @commits) = @_;
 
+	# Control is linear under D31 and the range comes oldest first, so a
+	# commit's place in the list is its place in control order.
+	my %at;
+	$at{$commits[$_]{sha}} = $_ for 0 .. $#commits;
+
 	my %released;
-	for my $commit (@commits) {
+	for my $n (0 .. $#commits) {
+		my $commit = $commits[$n];
 		my ($body, $rc) = run(
 			{dir => $git->root, passfail => 0, stderr => 0},
 			'git', 'log', '--format=%B', '-1', $commit->{sha}
@@ -458,6 +456,7 @@ sub released_gates {
 			);
 			next if $frc || !defined $full;
 			chomp $full;
+			next if defined $at{$full} && $at{$full} >= $n;
 			$released{$full} = 1;
 		}
 	}
@@ -980,9 +979,23 @@ sub plan {
 			# the due commits alone would fall behind the base on the very
 			# next run and stop holding anything, and the environment still
 			# waits for the deploy that certifies it.
+			#
+			# An environment that has certified nothing has no such commit
+			# to read from, and its marker will not do in place of one: the
+			# first run delivers up to the gate and leaves the marker
+			# standing on it, so the second run's range would start at the
+			# gate and find no gate at all, and the commit D49 holds would
+			# go out with nobody having deployed anything between.  Its
+			# range starts where its own walk starts on an unseeded branch,
+			# at the commit before the one that introduced it, so the gate
+			# stands until a certification exists.
 			my $since = $deployed
 				&& $git->is_ancestor($deployed->{control_commit}, $control_sha)
-				? $deployed->{control_commit} : $base;
+				? $deployed->{control_commit}
+				: $certified->{state} eq 'never-certified'
+					? _before_introduction($git, $control_sha,
+						($git->prefixed($env->file))[0])
+					: $base;
 			my @range    = control_commits($git, $control_sha, $since);
 			my $released = released_gates($git, @range);
 
@@ -1103,6 +1116,41 @@ sub _reading {
 	return 'not-propagated' unless defined $certified && length $certified;
 
 	return $marker eq $certified ? 'deployed' : 'pending-deploy';
+}
+
+# }}}
+# _before_introduction - the commit before E, or the whole of control {{{
+#
+# The commit a range starts after so that E is the first commit in it.  An
+# environment control has never carried a file for, and one whose file was
+# introduced on control's own first commit, both answer undefined, which
+# control_commits reads as the whole of control.
+#
+# A root commit has no parent, and the whole of control is then what the
+# caller wants, because control's first commit is where E already is.
+#
+# Two callers ask it.  walk_base asks for a branch that carries no marker,
+# and plan asks for an environment that has certified nothing, because a
+# gate range taken from that environment's marker instead would start at the
+# gate the last run delivered to and so find no gate at all.
+sub _before_introduction {
+	my ($git, $control, $env_file) = @_;
+
+	my $e = introducing_commit($git, $control, $env_file);
+	return undef unless defined $e;
+
+	my ($parent, $rc) = run(
+		{dir => $git->root, stderr => 0},
+		'git', 'rev-parse', "$e^"
+	);
+	$parent = '' unless defined $parent;
+	chomp $parent;
+	# One line and no more.  Stripping every space out of whatever came back
+	# would turn a surprising answer, such as the several parents of a merge
+	# git was never meant to be asked about here, into one run-on string that
+	# reads as a sha and resolves to nothing.
+	$parent = '' if $parent =~ /\n/;
+	return (!$rc && length $parent) ? $parent : undef;
 }
 
 # }}}
