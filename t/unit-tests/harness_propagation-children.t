@@ -148,7 +148,7 @@ subtest 'a skipped git step reports and does not land' => sub {
 	my $git = fault_git($h);
 	my $before = remote_sha($h, $branch);
 	skip_on($git, 'push', 1);
-	$git->push('origin', $branch);
+	$git->push(remote => 'origin', refs => [{branch => $branch}]);
 
 	is(remote_sha($h, $branch), $before, 'R did not move');
 	is(scalar(grep {$_->[0] eq 'push'} step_log($git)), 1,

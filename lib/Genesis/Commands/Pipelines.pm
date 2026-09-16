@@ -833,23 +833,23 @@ sub propagate {
 				# others did not is each of those branches' business, and it
 				# is reported per branch as it always was.
 				#
-				# The answer is read in list context, so the reason git gave
-				# for each ref it refused comes back beside the ones and
-				# zeros.  Without it the classifier below was handed an empty
-				# reason on every push that landed nothing without dying, and
-				# so said the remote was unreachable whatever the remote had
-				# actually answered.
-				my ($results, $errors) = eval {$git->push($remote, @all)};
+				# Each result carries the reason git gave for the ref it
+				# names, beside the one or the zero.  Without it the
+				# classifier below was handed an empty reason on every push
+				# that landed nothing without dying, and so said the remote
+				# was unreachable whatever the remote had actually answered.
+				my $results = eval {$git->push(
+					remote => $remote,
+					refs   => [map {{branch => $_}} @all],
+				)};
 				my $reason = $@;
-				$results ||= {};
-				$errors  ||= {};
-				unless (grep {$results->{$_}} @all) {
+				$results ||= [];
+				unless (grep {$_->{ok}} @$results) {
 					# The first ref that said anything, since the classifier
 					# reads one line.  A death out of the push itself is the
 					# reason where there is one, because it is the whole
 					# command failing rather than one ref being turned down.
-					($reason) = grep {defined && length}
-						map {$errors->{$_}} @all
+					$reason = (grep {length} map {$_->{reason}} @$results)[0]
 						unless defined $reason && length "$reason";
 					my ($message, $remedy) = _push_failure($remote, $reason);
 					die Genesis::CI::RunFailure->unsurvivable(
@@ -858,11 +858,12 @@ sub propagate {
 					);
 				}
 
-				for my $ref (@all) {
-					if ($results->{$ref}) {
-						info "  #G{%s}: pushed", $ref;
+				for my $result (@$results) {
+					if ($result->{ok}) {
+						info "  #G{%s}: pushed", $result->{branch};
 					} else {
-						warning("Failed to push #C{%s} to #C{%s}.", $ref, $remote);
+						warning("Failed to push #C{%s} to #C{%s}.",
+							$result->{branch}, $remote);
 					}
 				}
 			}

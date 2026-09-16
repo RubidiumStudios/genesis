@@ -154,8 +154,9 @@ sub _push_in_child {
 	my ($h, $branch) = @_;
 	return $h->run_in_child(
 		'use Service::Git;
-		 my $r = Service::Git->new($ARGV[0])->push("origin", $ARGV[1]);
-		 print "result:", (defined $r->{$ARGV[1]} ? $r->{$ARGV[1]} : "none"), "\n";',
+		 my $r = Service::Git->new($ARGV[0])->push(
+		 	remote => "origin", refs => [{branch => $ARGV[1]}]);
+		 print "result:", (ref($r) eq "ARRAY" && @$r ? $r->[0]{ok} : "none"), "\n";',
 		$h->a, $branch);
 }
 

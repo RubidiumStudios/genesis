@@ -27,7 +27,7 @@ Service::Git - Git operations for a deployment repository
 
   # Remotes
   my ($self, $result) = $git->fetch_branches(\@branches);
-  my $pushed = $git->push(@branches);
+  my $results = $git->push(remote => 'origin', refs => [{branch => 'qa/bosh'}]);
 
 =head1 DESCRIPTION
 
@@ -2088,56 +2088,69 @@ B<Examples:>
 
 =head2 push
 
-  my $results = $git->push(@branches);
-  my $results = $git->push($remote, @branches);
+  my $results = $git->push(remote => 'origin', refs => [
+      { branch => 'lab/bosh',   kind => 'deployment' },
+      { branch => 'pr/qa/bosh', kind => 'pr' },
+  ]);
 
-Pushes branches, reporting the outcome per branch.
+Pushes each ref on its own and reports what git did with it.
 
-B<The remote argument is detected, not declared.> If the first argument is
-not a known local branch, it is taken to be a remote name. A branch whose
-name collides with a remote's would therefore be misread -- in practice
-branches are not named C<origin>.
+B<The remote is required and given by name.> It used to be detected, by
+asking whether the first argument was a known local branch, which meant a
+branch named after a remote was pushed as a branch and a mistyped remote that
+collided with a branch name went to the default remote instead.
 
-Each branch is pushed separately and a failure does not stop the rest, so a
-partial push is reported rather than aborted midway.
+Each ref is pushed separately, so one ref's rejection does not withhold
+another's push.
 
-B<The reason a refused ref earns comes back beside it.> In list context the
-second value is a hashref of branch name to the standard error git wrote for
-that branch, holding an entry only for the branches that failed. A push the
-remote turns down does not die, so a caller reporting the refusal has nothing
-else to read, and one that took only the ones and zeros would have to guess
-at the cause. Each failed ref keeps its own text, because one branch's quarrel
-with the remote is not another's.
+B<The reason a refused ref earns comes back with it.> A push the remote turns
+down does not die, so a caller reporting the refusal has nothing else to read,
+and one that took only the ones and zeros would have to guess at the cause.
+Each failed ref keeps its own text, because one branch's quarrel with the
+remote is not another's.
 
 B<Parameters:>
 
 =over 4
 
-=item C<@args>
+=item C<remote>
 
-An optional leading remote name followed by the branches to push. The two are
-not distinguished by position but by lookup: the first element is treated as
-a remote only when C<branch_exists> says it is not a local branch. Passing
-branches alone is the common case.
+Required. The remote to push to, by name.
+
+=item C<refs>
+
+An arrayref of specs. Each carries C<branch>, and may carry C<kind>, which is
+C<deployment>, C<pr>, or C<control>. An empty list, or none at all, is a no-op
+and not a failure.
 
 =back
 
-B<Returns:> In scalar context, a hashref of branch name to 1 or 0. In list
-context, that hashref and a second one carrying git's own standard error for
-each branch that failed. Two empty hashrefs, or one in scalar context, when no
-remote is configured.
+B<Returns:> An arrayref of per-ref results in the order the specs were given.
+Each is a hashref carrying C<branch>, C<ok>, and C<reason>. C<ok> is 1 where
+git took the ref and 0 where it did not. C<reason> is git's own standard error
+for a ref it turned down, and the empty string for one that landed.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Service::Git-E<gt>push needs its remote by name"> -- raised via C<bail()>
+when C<remote> is missing.
+
+=back
 
 B<Examples:>
 
-  my $results = $git->push('staging', 'prod');
-  # returns { staging => 1, prod => 1 }
+  my $results = $git->push(remote => 'origin', refs => [{branch => 'lab/bosh'}]);
+  # returns [ { branch => 'lab/bosh', ok => 1, reason => '' } ]
 
-  my $results = $git->push(@branches);
-  # returns { staging => 1, prod => 0 } when only prod was rejected
-
-  my ($results, $errors) = $git->push($remote, @branches);
-  # $errors->{prod} carries git's own complaint about prod, and no key
-  # stands for a branch that landed
+  my $results = $git->push(remote => 'origin', refs => [
+      {branch => 'staging'}, {branch => 'prod'},
+  ]);
+  # returns a result per branch, and the one for prod carries git's own
+  # complaint about prod under reason when only prod was rejected
 
 =head2 push_append_only
 
@@ -2532,6 +2545,50 @@ B<Examples:>
 
   _classify_remote_error(undef);
   # returns 'unknown'
+
+=head2 _push_one
+
+  my $result = $git->_push_one($remote, {branch => 'lab/bosh'});
+
+Pushes one ref and answers what git did with it.
+
+The refspec is written out in full, as C<refs/heads/NAME:refs/heads/NAME>, so
+git is asked for the branch and never for a name it could resolve some other
+way. Called once per spec by L</push>, which is the only caller.
+
+The push is not allowed to die on a ref the remote turned down, because the
+caller reports every ref and a death on the first refusal would withhold the
+rest. Git's standard error is captured instead and handed back under
+C<reason>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote>
+
+The remote to push to, by name. L</push> has already required it.
+
+=item C<$spec>
+
+One ref spec. Only C<branch> is read here; C<kind> travels with the spec for
+the caller's own reporting.
+
+=back
+
+B<Returns:> A hashref carrying C<branch>, C<ok>, and C<reason>.
+
+B<Errors:> None of its own. A remote git cannot reach comes back as C<ok> 0
+with git's words under C<reason>.
+
+B<Examples:>
+
+  $git->_push_one('origin', {branch => 'lab/bosh'});
+  # returns { branch => 'lab/bosh', ok => 1, reason => '' }
+
+  $git->_push_one('origin', {branch => 'lab/bosh'});
+  # returns { branch => 'lab/bosh', ok => 0, reason => '... non-fast-forward' }
+  #   where the remote turned the ref down
 
 =head2 _ref_exists
 

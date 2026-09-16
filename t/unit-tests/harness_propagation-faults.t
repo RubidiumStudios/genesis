@@ -208,7 +208,9 @@ subtest 'the remote can be severed and restored' => sub {
 	my $git = fault_git($h);
 	sever_remote($h);
 
-	ok(!eval {$git->push('origin', $h->control); 1}, 'a push to a severed remote dies');
+	ok(!eval {$git->push(remote => 'origin',
+			refs => [{branch => $h->control}]); 1},
+		'a push to a severed remote dies');
 	like($@, qr/Could not resolve host/,
 		'with the text a real unreachable remote emits');
 	my $remote = $h->r;
@@ -216,7 +218,8 @@ subtest 'the remote can be severed and restored' => sub {
 
 	restore_remote($h);
 	reset_steps($git);
-	ok(eval {$git->push('origin', $h->control); 1},
+	ok(eval {$git->push(remote => 'origin',
+			refs => [{branch => $h->control}]); 1},
 		'and the push works again once the remote is restored');
 };
 
