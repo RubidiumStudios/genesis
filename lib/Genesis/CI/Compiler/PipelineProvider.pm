@@ -12,10 +12,13 @@ use Getopt::Long qw/GetOptionsFromArray/;
 # every "valid types" message read this map, so a provider cannot be
 # spelled one way in the schema and another in the code, which is the
 # drift H26 names.  The manual provider has no compiler class, because
-# under D43 pipeline-apply sets no pipeline for it, and under D100 it has
-# no schema fragment either.  The github-actions provider has no compiler
-# class yet either: the type validates and resolves on the CLI side, and
-# the compiler class arrives with the provider itself.
+# under D43 pipeline-apply sets no pipeline for it, and its CLI class
+# declares an empty fragment, so that D100's refusal of a provider key
+# beside type: manual will fall out of the ordinary rules once the
+# dispatch reads that fragment at load.  The
+# github-actions provider has no compiler class yet either: the type
+# validates and resolves on the CLI side, and the compiler class arrives
+# with the provider itself.
 
 my %_providers = (
 	'concourse' => {
@@ -200,24 +203,24 @@ sub cli_opts_help {
 }
 
 # }}}
-# provider_options_schema - schema for the pipeline.provider: config section {{{
+# provider_options_schema - the CLI class's declaration {{{
 #
-# Returns a hashref whose structure mirrors Top::_repo_config_schema():
+# One declaration per provider under D105, and it lives beside the check
+# that enforces it.  The compiler reads it from there so that the two
+# sides cannot answer differently.
+#
+# The shape is unchanged, a hashref mirroring Top::_repo_config_schema():
 #
 #   {
 #     target => {type => 'string', required => 1, description => '...'},
 #     team   => {type => 'string', default => 'main', description => '...'},
 #     ...
 #   }
-#
-# Under D86 this is the declarative half of the provider configuration
-# contract and it is mandatory: Top merges it into the pipeline schema at
-# configuration load, so a class that omits it has no declared keys and
-# every key an operator writes for it would be refused.  That is a bug at
-# load rather than a discovery at run time, so the base says so.
 sub provider_options_schema {
 	my ($self) = @_;
-	bug("Subclass '%s' must implement provider_options_schema()", ref($self) || $self);
+	require Genesis::CI::Provider;
+	return Genesis::CI::Provider->provider_class($self->provider_type)
+		->provider_options_schema;
 }
 
 # }}}
@@ -257,9 +260,16 @@ my @_capabilities = sort qw/
 #
 # Mandatory for the same reason the fragment is: a provider whose
 # abilities are unknown cannot have its keys gated.
+#
+# The declaration itself lives on the matching class under
+# Genesis::CI::Provider, beside the fragment, and this reads it from
+# there through the same route, so that one class answers for both halves
+# of a provider and the two sides cannot answer differently.
 sub capabilities {
 	my ($self) = @_;
-	bug("Subclass '%s' must implement capabilities()", ref($self) || $self);
+	require Genesis::CI::Provider;
+	return Genesis::CI::Provider->provider_class($self->provider_type)
+		->capabilities;
 }
 
 # }}}
@@ -271,7 +281,7 @@ sub capabilities {
 # the provider class, and the two ways to get it wrong both go unnoticed
 # otherwise.  A misspelled name reads as false and refuses the key it
 # gates as though somebody had meant it to, and a name left out loses its
-# ability with nothing said at all, since two of the six gate no key.
+# ability with nothing said at all, since three of the six gate no key.
 sub declared_capabilities {
 	my ($class, $provider) = @_;
 
@@ -291,14 +301,18 @@ sub declared_capabilities {
 # capability_gates - which configuration key each capability gates {{{
 #
 # Two of the six gate nothing configurable, since deployment_locks and
-# cross_pipeline_events are structural and their absence is D74's "no such
-# capability" outcome rather than a refused key.
+# cross_pipeline_events are structural and their absence is D74's "no
+# such capability" outcome rather than a refused key.
+#
+# multi_file_output gates nothing here either, under D105.  The key it
+# gated, output_layout, is declared by the provider that can use it and
+# by nobody else, so a provider that cannot offers no such key and the
+# refusal is the ordinary undeclared-key refusal.
 sub capability_gates {
 	return {
 		optional_git_triggers => 'genesis.pipeline.manual',
 		scheduled_jobs        => 'genesis.pipeline.redeploy_cron',
 		per_commit_runs       => 'pipeline.provider.group_commits',
-		multi_file_output     => 'pipeline.provider.output_layout',
 	};
 }
 
@@ -755,14 +769,19 @@ Genesis::CI::Compiler::AST and generates platform-specific configuration.
     return { 'pipeline.yml' => 'Pipeline definition' };
   }
 
-  # Mandatory: Genesis::Top merges this into the pipeline.provider
-  # schema at configuration load, so a provider that leaves it out has
-  # no declared keys and every key an operator writes is refused.
-  sub provider_options_schema {
-    return {
-      target => {type => 'string', description => 'Where to set it'},
-    };
-  }
+  # The keys this provider takes under pipeline.provider, and the six
+  # abilities it claims, are declared once, on the matching class under
+  # Genesis::CI::Provider, and the base reads both from there:
+  #
+  #   package Genesis::CI::Provider::MyPlatform;
+  #   sub provider_options_schema {
+  #     return {
+  #       target => {type => 'string', description => 'Where to set it'},
+  #     };
+  #   }
+  #   sub capabilities {
+  #     return {multi_file_output => 1, ...};
+  #   }
 
 =head1 SHARED HELPERS
 

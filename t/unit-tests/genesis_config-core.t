@@ -1115,10 +1115,12 @@ EOF
 	is($c->get('pipeline.provider.team'), 'main',
 		"the first validation fills the nested default");
 
-	# Reading the parent hash warms the value cache for it.  The second
-	# validation starts from no defaults at all, and it decides whether to
-	# fill a sub-key by reading the parent, so a parent the cache still
-	# answers for hides the gap and the default is never filled again.
+	# Reading the parent hash warms the value cache for it, which is where
+	# a second validation reads the parent from when it decides whether a
+	# sub-key still wants filling.  Nothing is dropped between the two
+	# walks now, so what the cache answers and what the stores hold are
+	# the same thing, and the row proves the default survives the round
+	# rather than being filled afresh.
 	my $block = $c->get('pipeline.provider');
 	is($block->{team}, 'main', "and the parent hash carries it");
 

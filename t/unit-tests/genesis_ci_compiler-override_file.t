@@ -4,10 +4,10 @@
 # --platform is refused as an unknown option, a provider that emits
 # several files takes the per-file form under output_layout: multiple, a
 # non-YAML output passes through untouched, and output_layout is refused
-# where multi_file_output is false.  It also proves what the override
-# name does with a directory, what the run says about the naming form it
-# is not reading, how often one merge announces itself, and what a merge
-# spruce refuses exits with.
+# under a provider that declares no such key.  It also proves what the
+# override name does with a directory, what the run says about the naming
+# form it is not reading, how often one merge announces itself, and what a
+# merge spruce refuses exits with.
 use strict;
 use warnings;
 use utf8;
@@ -148,44 +148,64 @@ subtest 'a provider that emits several files takes the per-file form' => sub {
 		'a non-YAML output passes through untouched';
 };
 
-subtest 'the capability gates the key and the key decides the layout' => sub {
+subtest 'the provider offers the key and the key decides the layout' => sub {
 	plan tests => 3;
 
-	# The key is offered only where the capability is true, so with a real
-	# provider that declares multi_file_output false there is no such key
-	# to write and the schema refuses it by name as the configuration
-	# loads, before any programmatic check runs.  The gate that names the
-	# capability beside the key is reachable only through a fragment that
-	# declares the key itself, and genesis_top-provider_capabilities.t
-	# proves it there.
+	# The key is declared by the provider that can emit several files, so
+	# with a real provider that declares multi_file_output false there is
+	# no such key to write and the schema refuses it by name as the
+	# configuration loads, before any programmatic check runs.
 	throws_ok {load_with($h, automated_config('concourse',
 		'target: ci', 'output_layout: multiple'))}
 		qr/pipeline\.provider\.output_layout: unknown configuration key/s,
-		'the key is refused where the capability is false';
+		'the key is refused where the provider declares no such key';
 
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Many.pm', <<'MANY');
-package Genesis::CI::Compiler::Providers::Many;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
-sub provider_type {'many'}
-sub provider_options_schema {return {}}
+	put_file('t/tmp/lib/Genesis/CI/Provider/Many.pm', <<'MANYCLI');
+package Genesis::CI::Provider::Many;
+use base 'Genesis::CI::Provider';
+# The base's new is the factory's, and it refuses to build a subclass, so
+# a CLI-side fixture the load path constructs brings its own.
+sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
+# The block this provider is checked against is the fragment declared
+# here, so a key the operator may write under an ability this provider
+# claims is declared here too, or the check refuses what the schema
+# offered.
+sub provider_options_schema {
+	return {
+		output_layout => {
+			type        => 'enum',
+			values      => [qw/single multiple/],
+			default     => 'single',
+			description => 'Whether the override file is named per emitted file'
+		},
+	};
+}
+# The ability that makes the key worth declaring sits on this class too,
+# because one class answers for both halves of a provider.
 sub capabilities {
 	return {deployment_locks => 1, cross_pipeline_events => 1,
 	        optional_git_triggers => 1, scheduled_jobs => 1,
 	        per_commit_runs => 1, multi_file_output => 1};
 }
 1;
+MANYCLI
+	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Many.pm', <<'MANY');
+package Genesis::CI::Compiler::Providers::Many;
+use parent 'Genesis::CI::Compiler::PipelineProvider';
+sub provider_type {'many'}
+1;
 MANY
 	local @INC = ('t/tmp/lib', @INC);
 	Genesis::CI::Compiler::PipelineProvider->register_provider('many', {
 		class     => 'Genesis::CI::Compiler::Providers::Many',
 		file      => 'Genesis/CI/Compiler/Providers/Many.pm',
-		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		cli_class => 'Genesis::CI::Provider::Many',
+		cli_file  => 'Genesis/CI/Provider/Many.pm',
 	});
 
 	for my $layout (qw/single multiple/) {
 		lives_ok {load_with($h, automated_config('many', "output_layout: $layout"))}
-			"$layout validates where the capability is true";
+			"$layout validates where the provider declares the key";
 	}
 };
 

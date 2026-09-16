@@ -13,6 +13,9 @@ use JSON::PP;
 
 ### Provider Constants {{{
 
+# DEFAULT_TEAM is written twice, here and in
+# Genesis::CI::Provider::Concourse, where it is the default the provider
+# fragment declares, so a change to either side has to be made to both.
 use constant {
 	DEFAULT_TEAM            => 'main',
 	DEFAULT_PIPELINE_NAME   => undef,    # falls back to deployment_type from Top
@@ -169,78 +172,6 @@ sub cli_opts_help {
         input to every deploy task.  Configure uri, branch, path, and auth.
 
 EOF
-}
-
-# }}}
-# provider_options_schema - schema for pipeline.provider: when type=concourse {{{
-#
-# Keys map directly to the pipeline.provider: sub-keys in .genesis/config.
-# Under D86 this fragment is the only place these keys are declared: Top
-# merges it into the generic provider block at configuration load, and the
-# generic block declares the type alone.  Under D100 that is why target,
-# url, team and insecure live here rather than beside the type, where they
-# sat unread under every other provider.
-#
-# pipeline_name is gone, because under D25 and D28 pipeline.name is the one
-# label the compiler and the status commands read, and expose is public
-# under D27 with no alias behind it.
-#
-# NOTE: notification styles, BOSH upgrade locks, and task library are
-# configuration-level features, not provider-level options — they are
-# documented in the cli_opts_help and POD below.
-sub provider_options_schema {
-	return {
-		target   => {type => 'string',  description => 'Fly target alias (fly login -t <target>)'},
-		url      => {type => 'string',  description => 'Concourse API URL, used by fly login'},
-		team     => {type => 'string',  default => DEFAULT_TEAM, description => 'Concourse team name'},
-		insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS certificate verification'},
-
-		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
-		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},
-
-		# The block defaults to an empty hash for the same reason the
-		# provider block itself does: validation only walks into a hash
-		# that is present, so without it the two defaults below are never
-		# reached and never resolve.
-		task     => {
-			type        => 'hash',
-			default     => {},
-			description => 'The image every emitted task runs in',
-			schema => {
-				image   => {type => 'string', default => 'genesiscommunity/concourse', description => 'Task image repository'},
-				version => {type => 'string', default => 'latest', description => 'Task image tag'},
-
-				# ASTBuilder and PipelineDescriptor both read
-				# task.privileged as the list of environments whose deploy
-				# task runs privileged, so the key has to be declared here
-				# or an operator who writes it has the load refuse it by
-				# name.  No default, because an absent list and an empty
-				# one mean the same thing to the readers.
-				privileged => {
-					type        => 'array',
-					subtype     => 'string',
-					envsplit    => ',',
-					description => "Environments whose deploy task runs privileged",
-				},
-			}
-		},
-
-		pause_after_set => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Leave the pipeline paused after fly set-pipeline'},
-		group_commits   => {type => 'boolean', default => Genesis::Config::TRUE, description => 'Deploy the tip of what arrived rather than each commit in turn'},
-	};
-}
-
-# }}}
-# capabilities - Concourse can do all but multi-file output {{{
-sub capabilities {
-	return {
-		deployment_locks      => 1,  # the locker resource
-		cross_pipeline_events => 1,  # the shuttle's request queue and _ran event
-		optional_git_triggers => 1,  # trigger: false on a get
-		scheduled_jobs        => 1,  # the time resource
-		per_commit_runs       => 1,  # version: every
-		multi_file_output     => 0,  # one pipeline definition, and no more
-	};
 }
 
 # }}}

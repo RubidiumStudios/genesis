@@ -4,10 +4,14 @@ use warnings;
 
 use base 'Genesis::CI::Provider';
 use Genesis;
+use Genesis::Config;
 use Genesis::UI;
 
 use POSIX qw(mktime);
 
+# The compiler-side class keeps a DEFAULT_TEAM of its own, which it falls
+# back to when it emits a pipeline, so the two are written here and in
+# Genesis::CI::Compiler::Providers::Concourse and have to agree.
 use constant {
 	DEFAULT_TEAM => 'main',
 };
@@ -184,23 +188,120 @@ EOF
 }
 
 # }}}
+# provider_options_schema - schema for pipeline.provider: when type=concourse {{{
+#
+# Keys map directly to the pipeline.provider: sub-keys in .genesis/config.
+# Under D86 this fragment is the only place these keys are declared, and
+# under D105 it is the whole of what the block admits beside the type, so
+# a key that is not here is refused by name as the configuration loads.
+# Under D100 that is why target, url, team and insecure live here rather
+# than beside the type, where they sat unread under every other provider.
+#
+# There is no output_layout here.  Concourse emits one pipeline definition
+# and declares multi_file_output false, and a provider offers that key by
+# declaring it, so the provider that cannot use it declares nothing and an
+# operator who writes it is refused like anybody writing a key nobody
+# declared.
+#
+# pipeline_name is gone, because under D25 and D28 pipeline.name is the one
+# label the compiler and the status commands read, and expose is public
+# under D27 with no alias behind it.
+#
+# NOTE: notification styles, BOSH upgrade locks, and task library are
+# configuration-level features, not provider-level options — they are
+# documented in the compiler class's cli_opts_help and POD.
+sub provider_options_schema {
+	return {
+		target   => {type => 'string',  description => 'Fly target alias (fly login -t <target>)'},
+		url      => {type => 'string',  description => 'Concourse API URL, used by fly login'},
+		team     => {type => 'string',  default => DEFAULT_TEAM, description => 'Concourse team name'},
+		insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS certificate verification'},
+
+		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
+		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},
+
+		# The block defaults to an empty hash for the same reason the
+		# provider block itself does: validation only walks into a hash
+		# that is present, so without it the two defaults below are never
+		# reached and never resolve.
+		task     => {
+			type        => 'hash',
+			default     => {},
+			description => 'The image every emitted task runs in',
+			schema => {
+				image   => {type => 'string', default => 'genesiscommunity/concourse', description => 'Task image repository'},
+				version => {type => 'string', default => 'latest', description => 'Task image tag'},
+
+				# ASTBuilder and PipelineDescriptor both read
+				# task.privileged as the list of environments whose deploy
+				# task runs privileged, so the key has to be declared here
+				# or an operator who writes it has the load refuse it by
+				# name.  No default, because an absent list and an empty
+				# one mean the same thing to the readers.
+				privileged => {
+					type        => 'array',
+					subtype     => 'string',
+					envsplit    => ',',
+					description => "Environments whose deploy task runs privileged",
+				},
+			}
+		},
+
+		pause_after_set => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Leave the pipeline paused after fly set-pipeline'},
+		group_commits   => {type => 'boolean', default => Genesis::Config::TRUE, description => 'Deploy the tip of what arrived rather than each commit in turn'},
+	};
+}
+
+# }}}
+# capabilities - Concourse can do all but multi-file output {{{
+#
+# D101's six names, declared beside the fragment above, because under
+# D105 one class answers for both halves of a provider and the gates read
+# this from the class the provider map already names.
+sub capabilities {
+	return {
+		deployment_locks      => 1,  # the locker resource
+		cross_pipeline_events => 1,  # the shuttle's request queue and _ran event
+		optional_git_triggers => 1,  # trigger: false on a get
+		scheduled_jobs        => 1,  # the time resource
+		per_commit_runs       => 1,  # version: every
+		multi_file_output     => 0,  # one pipeline definition, and no more
+	};
+}
+
+# }}}
+# validate_config - target or url, and a url that is one {{{
+#
+# The rules a declaration cannot state, on top of the generic pass the
+# base gives every block.  SUPER first, because the declaration is the
+# floor rather than a subset of what is wanted checked.
+#
+# The two keys are read off the block where the operator wrote them,
+# rather than off an object somebody assembled out of the block first.
+sub validate_config {
+	my ($class, $config, $path, $discriminator) = @_;
+	my @errors = $class->SUPER::validate_config($config, $path, $discriminator);
+
+	my $url = $config->get("$path.url");
+
+	# The key a pipeline cannot run without is asked for once the section
+	# the block sits in is switched on, and not before.  The base answers
+	# that question for every provider, so this rule reads the gate the
+	# same way the next provider's rule will.
+	push @errors, "'target' is required for the Concourse provider"
+		if $class->section_enabled($config, $path)
+		&& !$config->get("$path.target");
+	push @errors, "'url' must begin with http:// or https://"
+		if $url && $url !~ m{^https?://};
+	return @errors;
+}
+
+# }}}
 # }}}
 ### Instance Methods {{{
 
 # label - human-readable name for this provider {{{
 sub label { 'Concourse' }
-
-# }}}
-# validate_config - assert required fields are present in stored config {{{
-sub validate_config {
-	my ($self) = @_;
-	my @errors;
-	push @errors, "'target' is required for the Concourse provider"
-		unless $self->{target};
-	push @errors, "'url' must begin with http:// or https://"
-		if $self->{url} && $self->{url} !~ m{^https?://};
-	return @errors;
-}
 
 # }}}
 # config - returns hash for .genesis/config ci.provider section {{{

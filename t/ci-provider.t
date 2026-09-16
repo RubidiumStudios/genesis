@@ -7,7 +7,12 @@ use lib 'lib';
 
 $ENV{GENESIS_TESTING} = "yes";
 $ENV{GENESIS_LIB}     ||= 'lib';
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
 
+use Genesis;
+use Genesis::Term qw/csprintf/;
+use_ok 'Genesis::Config';
 use_ok 'Genesis::CI::Provider';
 use_ok 'Genesis::CI::Provider::Concourse';
 use_ok 'Genesis::CI::Provider::GithubActions';
@@ -366,90 +371,109 @@ subtest 'check_prereqs: Concourse min_fly_version not satisfied' => sub {
 };
 
 ### ============================================================ ###
-### validate_config — per-provider field validation
+### validate_config — the provider's rules for its own block
 ### ============================================================ ###
 
-subtest 'validate_config: Manual always passes' => sub {
-	my $m = Genesis::CI::Provider::Manual->new(type => 'manual');
-	my @errors = $m->validate_config;
-	is scalar @errors, 0, 'Manual has no required fields';
+# Under D105 a provider validates the block where the operator wrote it,
+# so each row below stands a configuration up holding that block and asks
+# the class about it, rather than assembling an object out of the block
+# and asking the object.  The errors come back carrying Genesis's own
+# colour markup, so anything read out of them is rendered first.
+# The section the block sits in is switched on, because a provider asks
+# for the key its pipeline cannot run without once there is a pipeline to
+# run, and a block under a section nobody has turned on is a block an
+# operator is still part way through writing.
+sub provider_block {
+	my (%keys) = @_;
+	my $cfg = Genesis::Config->new();
+	$cfg->set('pipeline.enabled', 1);
+	$cfg->set("pipeline.provider.$_", $keys{$_}) for sort keys %keys;
+	return $cfg;
+}
+
+sub refusals_for {
+	my ($class, %keys) = @_;
+	return map {csprintf('%s', $_)} $class->validate_config(
+		provider_block(%keys), 'pipeline.provider', 'type');
+}
+
+subtest 'validate_config: Manual wants nothing and says nothing' => sub {
+	my @errors = refusals_for('Genesis::CI::Provider::Manual', type => 'manual');
+	is scalar @errors, 0, 'Manual declares no key and requires none';
+};
+
+subtest 'validate_config: Manual refuses a key it never declared' => sub {
+	my @errors = refusals_for('Genesis::CI::Provider::Manual',
+		type => 'manual', target => 'my-ci');
+	is scalar @errors, 1, 'one refusal, written by nobody';
+	like $errors[0], qr/pipeline\.provider\.target: unknown configuration key/,
+		'and it names the key by its whole path';
 };
 
 subtest 'validate_config: Concourse passes with target' => sub {
-	my $p = Genesis::CI::Provider::Concourse->new(
-		type => 'concourse', target => 'my-ci',
-	);
-	my @errors = $p->validate_config;
+	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
+		type => 'concourse', target => 'my-ci');
 	is scalar @errors, 0, 'no errors when target is present';
 };
 
 subtest 'validate_config: Concourse fails without target' => sub {
-	my $p = Genesis::CI::Provider::Concourse->new(type => 'concourse');
-	my @errors = $p->validate_config;
+	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
+		type => 'concourse');
 	ok scalar @errors > 0, 'errors returned when target missing';
 	like $errors[0], qr/target.*required/i, 'error mentions target';
 };
 
 subtest 'validate_config: Concourse passes with target and valid url' => sub {
-	my $p = Genesis::CI::Provider::Concourse->new(
-		type   => 'concourse',
-		target => 'my-ci',
-		url    => 'https://ci.example.com',
-	);
-	my @errors = $p->validate_config;
+	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
+		type => 'concourse', target => 'my-ci', url => 'https://ci.example.com');
 	is scalar @errors, 0, 'no errors with target and valid https url';
 };
 
 subtest 'validate_config: Concourse rejects malformed url' => sub {
-	my $p = Genesis::CI::Provider::Concourse->new(
-		type   => 'concourse',
-		target => 'my-ci',
-		url    => 'not-a-url',
-	);
-	my @errors = $p->validate_config;
+	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
+		type => 'concourse', target => 'my-ci', url => 'not-a-url');
 	ok scalar @errors > 0, 'error returned for malformed url';
 	like $errors[0], qr/url.*http/i, 'error mentions url format';
 };
 
-subtest 'validate_config: GithubActions passes with valid repo' => sub {
-	my $p = Genesis::CI::Provider::GithubActions->new(
-		type => 'github-actions', repo => 'acme/deploy',
-	);
-	my @errors = $p->validate_config;
-	is scalar @errors, 0, 'no errors when repo is valid';
+subtest 'validate_config: Concourse fills the keys it declared' => sub {
+	my $cfg = provider_block(type => 'concourse', target => 'my-ci');
+	my @errors = Genesis::CI::Provider::Concourse->validate_config(
+		$cfg, 'pipeline.provider', 'type');
+	is scalar @errors, 0, 'the block is valid';
+	is $cfg->get('pipeline.provider.team'), 'main',
+		"and the fragment's default landed where every reader looks for it";
 };
 
-subtest 'validate_config: GithubActions fails without repo' => sub {
-	my $p = Genesis::CI::Provider::GithubActions->new(type => 'github-actions');
-	my @errors = $p->validate_config;
-	ok scalar @errors > 0, 'errors returned when repo missing';
-	like $errors[0], qr/repo.*required/i, 'error mentions repo';
+subtest 'validate_config: GithubActions admits no provider key' => sub {
+	my @errors = refusals_for('Genesis::CI::Provider::GithubActions',
+		type => 'github-actions');
+	is scalar @errors, 0, 'an empty fragment asks for nothing';
 };
 
-subtest 'validate_config: GithubActions fails on bad repo format' => sub {
-	my $p = Genesis::CI::Provider::GithubActions->new(
-		type => 'github-actions', repo => 'noslash',
-	);
-	my @errors = $p->validate_config;
-	ok scalar @errors > 0, 'errors returned for bad repo format';
-	like $errors[0], qr/org.repo/i, 'error mentions org/repo format';
+# Under D102 the repository the pipeline acts on lives in the
+# source-control block, so this provider declares no repo key and an
+# operator who writes one is told so by name.
+subtest 'validate_config: GithubActions refuses a repo key' => sub {
+	my @errors = refusals_for('Genesis::CI::Provider::GithubActions',
+		type => 'github-actions', repo => 'acme/deploy');
+	is scalar @errors, 1, 'one refusal';
+	like $errors[0], qr/pipeline\.provider\.repo: unknown configuration key/,
+		'naming the key the provider block does not hold';
 };
 
-subtest 'Provider->new bails when validate_config returns errors' => sub {
-	# Concourse with no target should be rejected by the factory
-	eval { Genesis::CI::Provider->new(type => 'concourse') };
-	like $@, qr/Invalid CI provider configuration/i, 'factory bails on invalid config';
-	like $@, qr/target.*required/i, 'bail message includes field-level error';
+subtest 'Provider->new builds without checking the block' => sub {
+	# Concourse with no target builds, because under D105 what the block
+	# says is asked of the class against the configuration and not of an
+	# object assembled out of it.
+	my $p = Genesis::CI::Provider->new(type => 'concourse');
+	isa_ok $p, 'Genesis::CI::Provider::Concourse',
+		'the factory builds what it was asked for';
 };
 
 subtest 'Provider->new accepts valid Concourse config' => sub {
 	my $p = Genesis::CI::Provider->new(type => 'concourse', target => 'prod');
 	isa_ok $p, 'Genesis::CI::Provider::Concourse', 'valid Concourse config accepted';
-};
-
-subtest 'Provider->new bails on invalid GithubActions config' => sub {
-	eval { Genesis::CI::Provider->new(type => 'github-actions') };
-	like $@, qr/Invalid CI provider configuration/i, 'factory bails on missing repo';
 };
 
 subtest 'Provider->new accepts valid GithubActions config' => sub {

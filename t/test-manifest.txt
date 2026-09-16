@@ -113,6 +113,8 @@ unit-tests/ocfp-show-network.t
 unit-tests/genesis_config-core.t
 unit-tests/genesis_config-document_marker.t      # save writes one --- even when spruce (graft) emits its own
 unit-tests/genesis_config-log_lifespan_schema.t     # global config schema accepts Genesis::Log lifespan grammar
+unit-tests/genesis_config-validate_subtree.t     # a schema applied to one block, filling its defaults where every reader looks
+unit-tests/genesis_config-custom_struct.t     # a block whose shape its own discriminator decides, dispatched to the owning module
 unit-tests/service_credhub-core.t  # Service::Credhub unit tests (constructor, accessors, CRUD operations)
 unit-tests/genesis_commands-core.t  # Genesis::Commands infrastructure (registration, parsing, dispatch deps)
 unit-tests/genesis_commands-feature_compatibility.t  # deploy/info/version renderer helpers for feature opt-in
@@ -275,6 +277,8 @@ unit-tests/genesis_top-pipeline_source_control.t  # the source-control block, it
 unit-tests/genesis_top-pipeline_env_keys.t   # the genesis.pipeline block of an environment file, read merged
 unit-tests/genesis_top-pipeline_blocks.t     # the shuttle, vault, locker and notification blocks of the pipeline section
 unit-tests/genesis_top-pipeline_repo_keys.t  # the pipeline label and the repository-wide recreate key
+unit-tests/genesis_top-shuttle_backends.t    # the shuttle block, declared on the backend that decides its shape
+ci-provider.t                                # the CI provider classes, their fragments, and the rules each states for its own block
 unit-tests/genesis_top-provider_fragment.t   # the configured provider's own schema fragment, merged at load
 unit-tests/genesis_top-provider_capabilities.t  # the six capabilities a provider declares, and the keys they gate
 unit-tests/genesis_top-manifest_store_gate.t # the manifest store and the kit floor, refused at configuration load

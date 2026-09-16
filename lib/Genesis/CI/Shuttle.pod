@@ -1,0 +1,110 @@
+=head1 NAME
+
+Genesis::CI::Shuttle - the object store behind the pipeline's queue and event
+
+=head1 SYNOPSIS
+
+    # Reached through the configuration schema rather than called directly:
+    # pipeline.shuttle declares backend as its discriminator, and the map
+    # sends s3 to Genesis::CI::Shuttle::S3 and gcs to ::GCS.
+
+    my $declared = Genesis::CI::Shuttle::S3->options_schema;
+
+    my @errors = Genesis::CI::Shuttle::S3->validate_config(
+        $config, 'pipeline.shuttle', 'backend');
+
+=head1 DESCRIPTION
+
+Under D23 every environment's request queue and its C<_ran> event live in
+one object store, and never in a directory, because a directory on one
+worker cannot trigger a run in another pipeline. Two backends carry that
+store, S3 and GCS, and they do not read the same keys: S3 takes a region
+and may take a non-default endpoint, and the GCS resource takes neither.
+
+So the block is declared on its backend rather than flat, which is what
+D105 asks of a block whose shape is a function of one of its own values.
+Each backend is a class of its own, it declares the keys it reads through
+C<options_schema>, and this base validates a block against whichever
+declaration the written backend selected. A GCS configuration then has
+nowhere to put a region, and the refusal names the key rather than
+accepting it and dropping it later.
+
+A backend with a rule a declaration cannot state overrides
+C<validate_config> and calls C<SUPER> first, because the declaration is
+the floor rather than a subset of what is wanted checked. Neither backend
+needs one today.
+
+The method is called C<options_schema> rather than
+C<provider_options_schema>, which is the name the same declaration carries
+on L<Genesis::CI::Provider>. The longer name is owed to the D86 readers a
+provider has, which are C<pipeline-describe>'s resolved values, the
+per-key defaults, the help text, and the wizard, and a shuttle backend has
+none of them.
+
+Concrete subclasses: L<Genesis::CI::Shuttle::S3>, L<Genesis::CI::Shuttle::GCS>.
+
+=head1 CLASS METHODS
+
+=head2 options_schema()
+
+    my $declared = Genesis::CI::Shuttle::S3->options_schema;
+
+The keys this backend reads, as a Genesis::Config schema fragment. Abstract
+here: every backend has to answer, because the base validates a block
+against this and a backend that declared nothing would accept every key an
+operator could write.
+
+B<Returns:> a hash reference of key name to schema entry.
+
+B<Errors:> raises a Genesis bug, "Subclass '...' must implement
+options_schema()", when a subclass has not declared one.
+
+B<Examples:>
+
+    # The S3 fragment carries a region; the GCS fragment does not.
+    exists Genesis::CI::Shuttle::S3->options_schema->{region};   # true
+    exists Genesis::CI::Shuttle::GCS->options_schema->{region};  # false
+
+=head2 validate_config($config, $path, $discriminator)
+
+    my @errors = Genesis::CI::Shuttle::GCS->validate_config(
+        $config, 'pipeline.shuttle', 'backend');
+
+Validates the block an operator wrote against this backend's own
+declaration, filling the defaults that declaration carries through the
+configuration itself rather than against a detached copy.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+The L<Genesis::Config> the block sits in.
+
+=item C<$path>
+
+The dotted path of the block, which is C<pipeline.shuttle> for every caller
+Genesis has today.
+
+=item C<$discriminator>
+
+The key the parent declared to choose this class, which this fragment does
+not declare and so must not refuse. It defaults to C<backend>.
+
+=back
+
+B<Returns:> the list of error strings, empty when the block is good.
+
+B<Examples:>
+
+    # A region under gcs comes back as one error naming the key.
+    my @errors = Genesis::CI::Shuttle::GCS->validate_config(
+        $config, 'pipeline.shuttle', 'backend');
+    # ('pipeline.shuttle.region: unknown configuration key: ...')
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Provider>, L<Genesis::Config>, L<Genesis::Top>
+
+=cut

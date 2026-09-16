@@ -28,12 +28,17 @@ my $h = make_harness(envs => ['qa'], pipeline => 1, vault => 0);
 
 # An assert helper: put a genesis.pipeline block on one environment and
 # load, returning the Top or dying with what the load said.
+#
+# The repository names an automated provider, because the keys this file is
+# about are the operator's choices inside abilities a pipeline has, and a
+# manual pipeline declares every ability false.  Under manual the gate
+# refuses the manual flag and the redeploy cron before the schema is
+# reached, so a row asking what the schema makes of a value would never
+# get an answer.
 sub load_env_with {
 	my ($pipeline, %opts) = @_;
 	write_env_file($h, $opts{env} // 'qa', pipeline => $pipeline);
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
+	return load_with($h, automated_config('concourse', 'target: ci'));
 }
 
 subtest 'the manual gate is a declared boolean' => sub {
@@ -255,34 +260,34 @@ subtest 'a caught message is cut at the location that ends it' => sub {
 
 	# The one cut, which _first_errors makes to each bullet and which the
 	# provider refusals make to whatever they caught.
-	is Genesis::Top::_without_backtrace(
+	is Genesis::without_backtrace(
 		"Can't locate Nope.pm in \@INC (\@INC entries checked: lib)"
 		." at lib/Genesis/Top.pm line 2128.\n"
-		."\tGenesis::Top::_provider_options_schema() called at x line 9\n"),
+		."\tGenesis::Config::_validate_custom_struct() called at x line 9\n"),
 		"Can't locate Nope.pm in \@INC (\@INC entries checked: lib)",
 		'the message stands without the line it was raised on';
 
-	is Genesis::Top::_without_backtrace("the provider fell over\n"),
+	is Genesis::without_backtrace("the provider fell over\n"),
 		'the provider fell over',
 		'a message with nothing behind it is left as it is';
 
-	is Genesis::Top::_without_backtrace("one\ntwo\n"), 'one two',
+	is Genesis::without_backtrace("one\ntwo\n"), 'one two',
 		'and what is left is folded onto a line';
 
-	is Genesis::Top::_without_backtrace(undef), '',
+	is Genesis::without_backtrace(undef), '',
 		'an undefined text answers an empty string';
 
 	# A provider pointing an operator at a file and a line of their own is
 	# an ordinary thing for a validator to do, and the cut is for the
 	# location that ends a message rather than for every one in it.
-	is Genesis::Top::_without_backtrace(
+	is Genesis::without_backtrace(
 		"target is required; see the setting at config.yml line 12"
 		." and fix it\n"),
 		'target is required; see the setting at config.yml line 12'
 		.' and fix it',
 		'a location the message goes on talking past is left alone';
 
-	is Genesis::Top::_without_backtrace(
+	is Genesis::without_backtrace(
 		"target is required; see the setting at config.yml line 12"
 		." and fix it\n at lib/Genesis/CI/Provider/Pair.pm line 7.\n"
 		."\tGenesis::CI::Provider::Pair::validate_config() called at x line 3\n"),

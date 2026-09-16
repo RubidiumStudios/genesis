@@ -208,7 +208,12 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 	plan tests => 2;
 
 	# The readers the design allows, and why each one may read the key
-	# rather than ask the accessor:
+	# rather than ask the accessor.  Under D105 the schema builder is no
+	# longer among them: the block declares the field that decides its
+	# shape, so nothing reads the value raw to build a schema out of it.
+	# The capability gates have left it too, because every provider
+	# declares its abilities now, so the gates take the type from the
+	# accessor and read a declaration for whatever it answers.
 	my @allowed = (
 		# It is the accessor, and every caller outside the load-time
 		# validation below reads the provider through it.
@@ -217,20 +222,6 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 		# A schema predicate, which the schema hands the raw config rather
 		# than the Genesis::Top, so there is no object to ask.
 		'lib/Genesis/Top.pm _automated_provider_configured',
-
-		# It builds the schema that validation is about to run against, so
-		# the provider's own keys can be added to it, and there is no
-		# validated value for the accessor to answer with yet.
-		'lib/Genesis/Top.pm _provider_options_schema',
-
-		# It refuses a key whose provider declares no capability behind it,
-		# so it reads the type the operator declared, which is the very
-		# thing it is deciding about.
-		'lib/Genesis/Top.pm _validate_capability_gates',
-
-		# It runs the provider's own validation against the type as
-		# written, for the same reason.
-		'lib/Genesis/Top.pm _validate_provider_config',
 	);
 
 	my @readers = readers_of(qr{pipeline\.provider\.type});
@@ -245,6 +236,32 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 	is(reads_in('lib/Genesis/Top.pm', 'pipeline_provider_type',
 			qr{pipeline\.provider\.type}), 1,
 		'and the accessor reads its own key once');
+};
+
+subtest 'the provider block declares what decides its shape' => sub {
+	plan tests => 5;
+
+	require Genesis::CI::Compiler::PipelineProvider;
+
+	# Any repository at all will do here, and that is as much the row's
+	# point as the declaration is.  The block's schema used to be built
+	# out of whatever this configuration said the provider was, so which
+	# repository it was read from decided what came back.
+	my $top = top_for(make_harness(envs => ['qa'], vault => 0,
+		pipeline => 'none'));
+	my $schema = $top->_repo_config_schema->{pipeline}{schema}{provider};
+
+	is $schema->{type}, 'custom_struct',
+		'the block is declared as one whose own value decides it';
+	is $schema->{discriminator}, 'type',
+		'and it names the field that decides';
+	is $schema->{discriminator_default}, 'manual',
+		"and D15's default sits on the declaration";
+	is_deeply $schema->{default}, {},
+		'beside the empty block that lets that default be reached';
+	is_deeply [sort keys %{$schema->{modules}}],
+		[Genesis::CI::Compiler::PipelineProvider->known_providers],
+		'with a module for every registered provider, so the map is total';
 };
 
 done_testing;

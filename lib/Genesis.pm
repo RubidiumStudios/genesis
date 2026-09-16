@@ -96,6 +96,7 @@ our @EXPORT = qw/
 	pretty_duration
 	ordify
 	count_nouns
+	without_backtrace
 
 	spruce_diff
 
@@ -1680,6 +1681,39 @@ sub sentence_join {
   return '' unless @_;
   return $_[0] if scalar(@_) == 1;
   join(' and ', grep {$_} (join(", ",@_[0...scalar(@_)-2]), @_[scalar(@_)-1]))
+}
+
+# A caught $@ ends in the file and line it was raised at, and under
+# Carp::Always the frames behind it follow, so a refusal that interpolates
+# one hands the operator a stack to read instead of a sentence.  This is
+# the one cut every refusal that quotes something it caught makes.
+#
+# Only the location that ends the message goes.  A module pointing an
+# operator at a file and a line of their own is an ordinary thing for a
+# validator to do, so "see the setting at config.yml line 12 and fix it"
+# has to come back whole, and cutting at the first location anywhere would
+# take the rest of that sentence with it.
+#
+# The frames go first, because Carp writes a tab in front of every one of
+# them and that is what tells a frame from a sentence.  What is left then
+# ends in the location the message was raised at, if it has one at all,
+# and only a location at the end is taken.
+#
+# Both patterns allow for the wrap.  A caught text that has been through
+# Genesis::Term::wrap carries the wrap's indent in front of every line it
+# folded, Carp's tabbed frames included, and a location near the end of a
+# line can be folded across two of them.  So the frame pattern takes the
+# spaces in front of the tab and the location pattern takes any whitespace
+# between its words.  The fold is last, because a pattern that ran after
+# it would have no newline left to anchor on.
+sub without_backtrace {
+	my ($text) = @_;
+	return '' unless defined $text;
+	$text =~ s/\n[ ]*\t.*\z//s;
+	$text =~ s/\s+at\s+\S+\s+line\s+\d+\.?\s*\z//s;
+	$text =~ s/\s+/ /g;
+	$text =~ s/^\s+|\s+$//g;
+	return $text;
 }
 
 sub get_opts {

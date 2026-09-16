@@ -93,8 +93,8 @@ subtest 'a stale ci.yml beside a version 3 pipeline only warns' => sub {
 };
 
 subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
-	# Three explicit rows and one for the run's own restoration assertion.
-	plan tests => 4;
+	# Four explicit rows and one for the run's own restoration assertion.
+	plan tests => 5;
 
 	# Concourse needs a fly target and this configuration names none, so
 	# the refusal comes from the provider's own validate_config rather than
@@ -116,8 +116,14 @@ subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
 	});
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
-	like $err, qr/Invalid configuration for the concourse provider/,
-		'the refusal names the provider whose rule failed';
+	like $err, qr/Configuration validation failed/,
+		'the refusal is the one every configuration refusal carries';
+
+	# The provider's rules are not a phase of their own under D105, so what
+	# it says is gathered with every other error rather than announced
+	# under a heading naming the provider a second time.
+	unlike $err, qr/Invalid configuration for the/,
+		"with no second heading in front of the provider's own words";
 	like $err, qr/'target' is required for the Concourse provider/,
 		"and quotes the provider's own words";
 	is $exit, Genesis::Exit::CONFIG, 'and it exits CONFIG by name';
@@ -149,10 +155,14 @@ subtest "a provider whose file will not load exits CONFIG" => sub {
 	# the module it names marks the provider's file as one that has already
 	# failed, which makes the require inside the load fail the way a broken
 	# provider file would.
+	#
+	# The file is the one holding the class the provider block is
+	# dispatched to, which is also the class the capability gates behind it
+	# read, because one class answers for the whole of a provider.
 	my $shadow = workdir();
 	put_file("$shadow/ShadowProvider.pm", join("\n",
 		'package ShadowProvider;',
-		"\$INC{'Genesis/CI/Compiler/Providers/Concourse.pm'} = undef;",
+		"\$INC{'Genesis/CI/Provider/Concourse.pm'} = undef;",
 		'1;', ''));
 	local $ENV{PERL5OPT} = join(' ',
 		"-I$shadow", '-MShadowProvider', ($ENV{PERL5OPT} // ()));
@@ -172,17 +182,24 @@ subtest "a provider whose file will not load exits CONFIG" => sub {
 # The bullets an operator reads are built out of a refusal caught inside the
 # load, so what the cut leaves in them is worth one row through a command.
 subtest "an environment block refusal carries no backtrace" => sub {
-	# Four explicit rows and one for the run's own restoration assertion.
-	plan tests => 5;
+	# Five explicit rows and one for the run's own restoration assertion.
+	plan tests => 6;
 
-	commit_on_control($h, files => {
-		'.genesis/config' => join("\n",
-			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0',
-			'pipeline:', '  enabled: true',
-			'  source_control:',
-			'    repository: genesis/bosh-deployments', ''),
-	});
+	# An automated provider, because the manual gate is the operator's
+	# choice inside an ability a manual pipeline does not have, and the
+	# capability gates would refuse the key before the schema saw what was
+	# written in it.  The row above left exactly that configuration on the
+	# control branch, and a harness write of a file that is already what it
+	# would write has no commit to make, so this row stands on that write
+	# and adds the environment the refusal is about.
+	#
+	# Asserted rather than assumed, because a reorder of the rows above
+	# would leave a manual provider in force and this row would then be
+	# proving something else while staying green.
+	like blob_at($h->a, $h->control, '.genesis/config'),
+		qr/^\s+type: concourse$/m,
+		'the row above left an automated provider on the control branch';
+
 	write_env_file($h, 'qa', pipeline => {manual => 'maybe'});
 
 	# The frames the cut takes out exist only where something has loaded

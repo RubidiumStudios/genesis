@@ -1340,6 +1340,20 @@ GitHub owner and repo pair.  Any C<@lines> go under the provider at the
 provider's own depth, so a row that wants a target or a team says so in a
 word.
 
+=head2 shuttle($backend, @lines)
+
+Answers the pipeline block of an automated Concourse provider whose shuttle
+block the caller writes, as text.  The named C<$backend> and any C<@lines>
+go under C<pipeline.shuttle> at that block's own depth, and the vault and
+the locker an automation requires are rendered beside it from the same hash
+C<automation_blocks> answers.  C<automated_config> renders one fixed shuttle
+for every caller, so a row proving what a backend admits has nowhere else to
+get a shuttle block of its own.
+
+The provider is Concourse, and its target comes with it, because a row about
+the shuttle is not a row about which automation is in force and must not be
+refused for a key the provider above it is missing.
+
 =head2 automation_blocks()
 
 Answers the three blocks the configuration schema requires of an automated

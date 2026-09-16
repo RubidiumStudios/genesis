@@ -41,6 +41,11 @@ sub compile {
 # One registry under D28, so this is a lookup rather than a fourth map.
 # A type with no compiler class, which manual is, is not a compilable
 # provider and says so.
+#
+# The refusal below outlives the validation-side checks that asked whether
+# a provider had a class, for the reason given beside its twin in
+# Genesis::CI::Compiler::_resolve_provider_class: emitting a pipeline and
+# validating a block are different questions.
 sub _resolve_provider_class {
 	my ($type) = @_;
 
