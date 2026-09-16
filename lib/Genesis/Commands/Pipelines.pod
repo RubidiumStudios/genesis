@@ -435,6 +435,15 @@ B<Options (via C<get_options>):>
 Report what each environment would receive, per control commit, and write
 nothing.
 
+The report announces itself as a preview above its first line, so nobody
+reads it as a run that has happened, and an environment with commits due
+reads C<would propagate> where a run would read C<propagated>.  Everything
+under those two is the run's own report, rendered from the run's own record
+by L<Genesis::CI::Report/render_preview>, so the preview and the run cannot
+disagree about a word.  The files named beneath each control commit are that
+commit's own, worked out against what the commit above it would have left on
+the branch rather than against the branch as the preview found it.
+
 =item C<--yes>, C<-y>
 
 Publish without asking.  The verified delta for every environment is shown

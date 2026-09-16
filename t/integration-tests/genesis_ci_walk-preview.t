@@ -16,6 +16,27 @@ use Test::More;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
+# The files one report names beneath one control commit, which is every
+# written or removed path between that commit's own line and whatever line
+# ends its block.  It reads the output and builds nothing, so it stays beside
+# the rows that use it.
+sub files_under {
+	my ($report, $sha) = @_;
+	my $short = substr($sha, 0, 7);
+
+	my ($in, @files) = (0);
+	for my $line (split /\n/, ($report // '')) {
+		if ($line =~ /^\s+control\@([0-9a-f]{7})\b/) {
+			$in = ($1 eq $short) ? 1 : 0;
+			next;
+		}
+		# An environment's own line ends whatever block stood above it.
+		$in = 0 if $line =~ /^\s{0,3}\S+:\s/;
+		push @files, $2 if $in && $line =~ /^\s+([MD])\s+(\S+)$/;
+	}
+	return [sort @files];
+}
+
 subtest 'the withdrawn flags are usage errors' => sub {
 	# Two rows, and one more for each run's own restoration assertion.
 	plan tests => 4;
@@ -60,8 +81,9 @@ subtest 'the preview names each commit, its files, and its verdict' => sub {
 	my (undef, $err, $exit) = run_genesis($h, 'propagate', '--dry-run');
 
 	is($exit, 0, 'the preview succeeded');
-	like($err, qr/This is a preview\.\s+Nothing will be written\./,
-		'it says it is a preview before it says anything else');
+	like($err,
+		qr/This is a preview\.\s+Nothing will be written\.[\s\S]*?^\s*lab: /m,
+		'it says it is a preview above the first line of the report');
 	like($err, qr/^\s*qa\b/m, 'it names the environment');
 	like($err, qr/^\s*qa:\s*would propagate/m,
 		'an environment with commits due reads would propagate');
@@ -73,11 +95,39 @@ subtest 'the preview names each commit, its files, and its verdict' => sub {
 		'and not a file the fast-forward this preview assumes would bring');
 	unlike($err, qr{^\s+D init$}m,
 		'nor one that fast-forward would take off');
-	like($err, qr/\Q@{[substr($second, 0, 7)]}\E.*held/,
-		'the second reads held with its reason');
+	like($err,
+		qr/\Q@{[substr($second, 0, 7)]}\E[^\n]*held\n\s+H held by lab\b/,
+		'the second reads held with its reason beneath it');
 	is(harness_marker($h, $h->slug('qa')), $tip_before,
 		'the preview wrote nothing');
 	assert_w_restored($w, 'propagate --dry-run');
+};
+
+subtest 'two commits due are two file lists, not one union' => sub {
+	# Three rows, and one more for each of the two runs.
+	plan tests => 5;
+
+	my $h = ready_harness(envs => ['qa'], kit => 'omega-v2.7.0',
+		tracked => ['ops/shared.yml']);
+
+	my $qa_yml = blob_at($h->a, $h->control, 'qa.yml');
+	my $one = commit_on_control($h,
+		files   => {'qa.yml' => $qa_yml . "leaf: 2\n"},
+		message => 'Tune qa', push => 1);
+	my $two = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nshared: 5\n"},
+		message => 'Bump shared ops', push => 1);
+
+	my (undef, $preview) = run_genesis($h, 'propagate', '--dry-run');
+	my (undef, $real) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	is_deeply(files_under($preview, $one), ['qa.yml'],
+		'the first commit names the file it changed and nothing else');
+	is_deeply(files_under($preview, $two), ['ops/shared.yml'],
+		'and the second names its own rather than both');
+	is_deeply([files_under($preview, $one), files_under($preview, $two)],
+		[files_under($real, $one), files_under($real, $two)],
+		'which is what the run then delivers, commit for commit');
 };
 
 done_testing;

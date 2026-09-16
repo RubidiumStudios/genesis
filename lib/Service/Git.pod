@@ -1144,6 +1144,56 @@ B<Examples:>
   my @paths = $git->ls_files('bosh/ops');
   # returns ('bosh/ops/thing.yml')
 
+=head2 mirror_tree
+
+  my $tree = $git->mirror_tree($source_sha, @paths);
+
+The tree a mirror of these paths at this commit would produce.
+
+A delivery is a mirror, so the tree it makes is decided entirely by the commit
+it delivers and the paths of the set at that commit: each of them with the
+blob and the mode the source carries, and nothing beside them.  Nothing about
+the branch the delivery lands on enters into it.
+
+It exists for the preview.  A dry run writes no commit, so the branch does
+not advance between one previewed delivery and the next, and a second delivery
+worked out against the branch would report the first delivery's files under it
+as well.  The preview takes this tree from each delivery and hands it to the
+one after as its base, so each commit's files are that commit's own.
+
+The tree is written into the object database through a temporary index that
+git makes for itself, and nothing points at it afterwards, which is what
+C<git write-tree> always writes.  The listing and the staging are both read
+NUL-separated, so a path holding a byte outside ASCII is staged as itself
+rather than quoted and octal-escaped.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$source_sha>
+
+The commit the mirror is taken from.
+
+=item C<@paths>
+
+The paths of the set at that commit, already resolved.  A call with none
+answers undefined, and so does one whose paths the commit's tree holds none
+of.
+
+=back
+
+B<Returns:> The tree's sha, or undefined where there was nothing to write.
+
+B<Errors:> Raises a bug where no source commit is given, since a mirror is
+taken from one and there is nothing to guess at.
+
+B<Examples:>
+
+  my $tree = $git->mirror_tree($control_sha, 'qa.yml', 'ops/shared.yml');
+  # returns the sha of a tree holding exactly those two paths, as the
+  # control commit carries them
+
 =head2 ls_tree
 
   my @files = $git->ls_tree($ref, $path);

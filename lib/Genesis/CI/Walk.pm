@@ -1219,6 +1219,16 @@ sub deliver_pending {
 	my $env     = $args{env};
 	my $record  = $args{record};
 
+	# The ref each delivery is worked out against, which advances as the
+	# deliveries do.  A writing run leaves it undefined and every delivery
+	# reads the branch it has just committed to.  A preview commits nothing,
+	# so the branch stands still and the base is carried by hand: it starts
+	# at the ref the pre-flight would have moved the branch to, and after
+	# each previewed delivery it becomes the tree that delivery would have
+	# produced.  Without that the second commit's report is the union of
+	# both deliveries and the first commit's files are named twice.
+	my $base = $args{base};
+
 	my @overwrote;
 	for my $pending (@{$record->{pending}}) {
 		my $message = Genesis::CI::Marker::build(
@@ -1231,13 +1241,14 @@ sub deliver_pending {
 			deleted => [],
 			message => $message,
 			($args{dry_run} ? (dry_run => 1) : ()),
-			($args{base} ? (base => $args{base}) : ()),
+			($base ? (base => $base) : ()),
 		);
 		$pending->{commit}    = $result->{commit};
 		$pending->{delivered} = $result->{delivered};
 		$pending->{removed}   = $result->{removed};
 		$pending->{overwrote} = $result->{overwrote};
 		push @overwrote, @{$result->{overwrote} || []};
+		$base = $result->{tree} if $args{dry_run} && $result->{tree};
 	}
 
 	$record->{overwrote} = \@overwrote;
