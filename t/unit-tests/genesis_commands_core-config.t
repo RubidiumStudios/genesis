@@ -25,6 +25,10 @@ require './bin/genesis';
 
 sub config_repo {
 	my ($name, %opts) = @_;
+
+	# Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+	scrub_git_env();
+
 	my $dir = workdir($name);
 
 	# A row that switches the provider type wants the gate off, because an
@@ -623,6 +627,10 @@ subtest 'config --set-from-file reports a file it cannot read' => sub {
 # schema never declares.
 sub v2_repo {
 	my ($name) = @_;
+
+	# Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+	scrub_git_env();
+
 	my $dir = workdir($name);
 
 	mkdir_or_fail("$dir/.genesis");

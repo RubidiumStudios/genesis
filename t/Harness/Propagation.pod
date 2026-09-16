@@ -21,7 +21,52 @@ Every helper that builds repository, vault, or API state lives in this module
 and nowhere else.  A helper that asserts lives beside the test that uses it,
 except for the two invariant assertions, which every row reads through.
 
+The fixtures run git with the temporary directory as the working directory,
+and that is not enough on its own to say which repository a command is about.
+When C<GIT_DIR> is inherited and C<GIT_WORK_TREE> is not, git takes the
+repository from C<GIT_DIR> and the work tree from wherever it is standing, so
+every fixture command reads and writes somebody else's repository while
+looking at the fixture's files.  A long run under an exported C<GIT_DIR> did
+exactly that once and left a shared working tree with an empty index.  So the
+fixtures clear those variables for themselves rather than trusting the
+environment they were handed, through C<scrub_git_env> in
+L<Harness::GitEnv|../GitEnv.pm>, and C<t/unit-tests/harness_propagation-git_env.t>
+holds them to it.
+
 =head1 FUNCTIONS
+
+=head2 scrub_git_env()
+
+Takes git's own variables out of C<%ENV> and answers how many were there.  It
+lives in C<Harness::GitEnv> rather than in C<helper>, because the git double
+is loaded into a spawned genesis child through C<PERL5OPT> and loading
+C<helper> there would print C<helper>'s own notice into that child's output.
+Every other consumer reaches it through C<helper>, which re-exports it, so a
+test file that says C<use helper> already has it.
+
+It clears the seven variables git reads a repository, an index, or an object
+store out of, which are C<GIT_DIR>, C<GIT_WORK_TREE>, C<GIT_INDEX_FILE>,
+C<GIT_OBJECT_DIRECTORY>, C<GIT_ALTERNATE_OBJECT_DIRECTORIES>,
+C<GIT_COMMON_DIR>, and C<GIT_NAMESPACE>.  It clears four more that decide
+which configuration git reads, which are C<GIT_CONFIG_GLOBAL>,
+C<GIT_CONFIG_SYSTEM>, C<GIT_CONFIG_NOSYSTEM>, and C<GIT_CONFIG_COUNT>.
+C<helper::import> already points C<HOME> at the test home and writes a
+deterministic C<.gitconfig> there, and an inherited C<GIT_CONFIG_GLOBAL> would
+override that and hand the operator's own configuration back to the fixtures.
+
+The author and committer pair are deliberately left alone.  A fixture commit
+is signed out of them, C<Service::Git> copies the author pair into the
+committer pair as a handle is built, and the pre-flight rows arm and withhold
+them on purpose.
+
+C<helper::import> calls it as the suite loads, so an environment inherited
+from the operator's shell is gone before any test file runs.  Every fixture
+entry point calls it again on the way in, because a file may arm one of these
+itself after C<helper> has loaded.  It is not called down beside each git
+command, because C<Service::Git> and this harness both set C<GIT_INDEX_FILE>
+through a C<local> of their own for the length of a call, and a scrub reaching
+inside one of those would take away the temporary index that call is standing
+on.
 
 =head2 make_harness(%opts)
 

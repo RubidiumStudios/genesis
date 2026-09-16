@@ -11,6 +11,7 @@ use JSON::PP;
 use POSIX ();
 use Genesis qw/run load_yaml_file/;
 use Service::Git;
+use Harness::GitEnv;
 
 # require rather than use, because helper's import resets HOME and the test
 # file has already run it.  We want the package loaded and nothing else.
@@ -649,6 +650,11 @@ sub unfolded {
 # has published.
 sub make_harness {
 	my (%opts) = @_;
+
+	# Nothing in the environment gets to say which repository the git below
+	# runs against.  This is the harness's one entry point, so a scrub here
+	# covers every helper a row reaches for afterwards.
+	scrub_git_env();
 
 	# Whatever the harness above this one armed in the parent goes back before
 	# the new one arms anything of its own, so no fixture of this harness is

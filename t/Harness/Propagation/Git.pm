@@ -7,6 +7,7 @@ use warnings;
 
 use Fcntl qw/:flock/;
 use JSON::PP;
+use Harness::GitEnv;
 
 our @ISA = ('Service::Git');
 
@@ -30,6 +31,13 @@ our @STEPS = qw/
 sub import {
 	my ($class) = @_;
 	return unless $ENV{GENESIS_HARNESS_GIT_PLAN};
+
+	# This runs in a spawned command, which is where an armed fault shells
+	# out to git of its own.  The parent scrubbed before it built anything,
+	# so there should be nothing left to take, and a child that says so for
+	# itself costs one call and owes the parent nothing.
+	scrub_git_env();
+
 	require Service::Git;
 	no strict 'refs';
 	no warnings 'redefine';

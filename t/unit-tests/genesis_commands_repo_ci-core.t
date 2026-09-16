@@ -40,6 +40,10 @@ provide_rc();
 
 sub make_v3_repo {
 	my ($dir, %opts) = @_;
+
+	# Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+	scrub_git_env();
+
 	my $genesis_dir = "$dir/.genesis";
 	mkdir_or_fail($genesis_dir);
 

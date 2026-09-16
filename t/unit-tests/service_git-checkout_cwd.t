@@ -20,6 +20,9 @@ $ENV{NOCOLOR} = 1;
 # stubbed: the defect being covered is that a checkout removing the current
 # directory left the process with nowhere to return to.
 sub make_repo {
+	# Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+	scrub_git_env();
+
 	my $root = workdir() . '/repo-' . $$ . '-' . int(rand(1_000_000));
 	mkdir_or_fail($root);
 
