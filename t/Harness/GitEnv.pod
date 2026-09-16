@@ -58,7 +58,7 @@ operator's own configuration back to the fixtures.  Clearing the count is
 enough for the numbered key and value pairs, because git reads none of them
 without a count to read them by.
 
-=head2 What it deliberately leaves alone
+=head1 WHAT IT LEAVES ALONE
 
 The author and committer pair, C<GIT_AUTHOR_NAME>, C<GIT_AUTHOR_EMAIL>,
 C<GIT_COMMITTER_NAME>, and C<GIT_COMMITTER_EMAIL>, are never cleared.  A
@@ -86,3 +86,5 @@ C<GIT_CONFIG_GLOBAL> and C<GIT_CONFIG_NOSYSTEM> the same way.  A scrub
 reaching inside one of those scopes would take away the temporary index the
 call is standing on, or the arming the row is testing with.  Entry points sit
 above every one of them.
+
+=cut
