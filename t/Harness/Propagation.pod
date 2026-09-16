@@ -1295,10 +1295,17 @@ scalar context, because the rows that only want the shape say so.
 =head2 gated_harness(%opts)
 
   my ($h, @shas) = gated_harness();
+  my ($h, @shas) = gated_harness(stage => 'schema change');
 
 The walked tree with four control commits, of which the third carries the
 C<Genesis-Stage> trailer that C<stage> names and C<prod> supplies by default.
 It answers in the same two shapes C<due_harness> does.
+
+Each of the four writes the first environment's own file, because a commit
+whose content lies in no environment's propagation set routes nowhere and the
+walk skips it, and every row that stands on this shape asks the walk to route
+all four.  A row that wants other content passes C<files>, an arrayref of one
+per-commit hashref in the shape C<commit_on_control> takes.
 
 =head2 held_harness(%opts)
 
@@ -1401,11 +1408,15 @@ returns the path, for the same reason.  It takes the same two options.
 
 =head2 two_due($h, %opts)
 
-Two undelivered control commits, in order, and their shas.
+Two undelivered control commits, in order, and their shas.  Each writes the
+first environment's own file, for the reason C<gated_harness> does, and
+C<files> takes an arrayref of one per-commit hashref where a row wants other
+content.
 
 =head2 three_due($h, %opts)
 
-Three undelivered control commits, in order, and their shas.
+Three undelivered control commits, in order, and their shas.  It takes the
+same C<files> option, and writes the same file without it.
 
 =head2 three($h, %opts)
 
