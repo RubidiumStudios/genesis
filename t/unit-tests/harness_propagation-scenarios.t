@@ -196,7 +196,7 @@ subtest 'the pair, and one delivery per environment in one line' => sub {
 };
 
 subtest 'the one-line shapes that stand on a scenario' => sub {
-	plan tests => 9;
+	plan tests => 10;
 
 	my $h = ready_harness();
 	is(a_delivery($h, 'qa'), remote_sha($h, $h->slug('qa')),
@@ -214,6 +214,11 @@ subtest 'the one-line shapes that stand on a scenario' => sub {
 	is(scalar(@two), 2, 'two_due lays two control commits');
 	is(harness_marker($due, $due->slug('qa')), $taken,
 		'and the branch has taken neither');
+
+	my $pair = ready_harness(envs => ['lab', 'qa']);
+	my @named = two_due($pair, env => 'qa');
+	ok(files_at($pair, $named[-1])->{'qa.yml'},
+		'two_due writes the environment named rather than the first');
 
 	is(scalar(my @three = three_due(ready_harness(envs => ['qa']))), 3,
 		'three_due lays three');

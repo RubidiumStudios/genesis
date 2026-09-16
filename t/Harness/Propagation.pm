@@ -4163,12 +4163,19 @@ sub chain {
 	} @envs;
 }
 
-# _due lays a run of undelivered control commits, and writes the first
+# _due lays a run of undelivered control commits, and writes one
 # environment's own file on each of them for the reason gated_harness does.
 # A caller that wants other content passes files, one hashref per commit.
+#
+# The environment defaults to the first of the harness's own, which is what a
+# one-environment shape wants, and a row standing several environments up
+# names the one it is asking the walk about.  Without that the commits land
+# on a file that is in no other environment's propagation set, every one of
+# them routes nowhere, and the environment the row argues about has nothing
+# due at all.
 sub _due {
 	my ($h, $n, %opts) = @_;
-	my $env = $h->{envs}[0];
+	my $env = $opts{env} // $h->{envs}[0];
 	return map {
 		$h->commit_on_control(
 			files   => $opts{files} ? $opts{files}[$_ - 1]
