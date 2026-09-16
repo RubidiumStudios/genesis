@@ -25,28 +25,13 @@ use Service::Git;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# A git first on the path that answers write-tree with the body the row wants
-# and passes every other command through to the real one.  The wrapper is how
-# a row reaches an answer git itself will not give on demand.
-my $real_git = (grep {-x $_} map {"$_/git"} split(/:/, $ENV{PATH}))[0];
+# The shim that answers write-tree with the body a row wants, and passes every
+# other command through to the real git, is the harness's `shimmed_git`.  The
+# path is read through the harness resolver here too, so a fixture directory
+# sitting first on it is stepped over rather than mistaken for git.
+my $real_git = real_tool('git');
 plan skip_all => "git is required to exercise Service::Git::mirror_tree"
-	unless $real_git;
-
-sub shimmed_git {
-	my ($body) = @_;
-
-	my $bin = helper::workdir() . sprintf('/shim-%06d', int(rand(1_000_000)));
-	helper::mkdir_or_fail($bin);
-	helper::put_file("$bin/git", <<SH);
-#!/bin/bash
-if [[ "\$1" == "write-tree" ]]; then
-$body
-fi
-exec "$real_git" "\$@"
-SH
-	chmod 0755, "$bin/git" or die "chmod shim git: $!";
-	return $bin;
-}
+	unless -x $real_git;
 
 subtest 'the tree holds the set and nothing beside it' => sub {
 	plan tests => 2;
@@ -73,9 +58,11 @@ subtest 'a warning git writes beside the sha stays out of the answer' => sub {
 	# to the answer rather than only that the answer looked odd.
 	my $clean = $git->mirror_tree($sha, 'qa.yml');
 
-	my $bin = shimmed_git(
-		"\techo \"warning: unable to access '/nowhere/.gitconfig'\" >&2\n" .
-		"\texec \"$real_git\" \"\$\@\"");
+	# The body says nothing about exiting, so it falls out of the block and
+	# reaches the real git after the complaint, which is the shape this row
+	# wants: git complains and still answers.
+	my $bin = shimmed_git($h, when => 'write-tree',
+		body => "  echo \"warning: unable to access '/nowhere/.gitconfig'\" >&2");
 
 	my $tree = do {
 		local $ENV{PATH} = "$bin:$ENV{PATH}";
@@ -96,7 +83,8 @@ subtest 'an answer that is not a sha is refused at DATAERR' => sub {
 
 	# git exits zero and says something that is not a tree, which is the one
 	# shape a read of the status alone cannot catch.
-	my $bin = shimmed_git("\techo 'not a tree at all'\n\texit 0");
+	my $bin = shimmed_git($h, when => 'write-tree',
+		body => "  echo 'not a tree at all'\n  exit 0");
 
 	my ($err, $exit) = bail_from(sub {
 		local $ENV{PATH} = "$bin:$ENV{PATH}";
@@ -135,7 +123,7 @@ subtest 'a set larger than a pipe is staged whole' => sub {
 	# The read runs in a child, because a caller that blocks in write blocks
 	# there for good and no alarm takes it out again.  The parent gives it a
 	# minute and then takes the answer off disk.
-	my $answer = $h->{tmp} . '/mirror-tree-bulk';
+	my $answer = helper::workdir() . '/mirror-tree-bulk';
 	my $pid = fork();
 	die "fork failed: $!\n" unless defined $pid;
 	unless ($pid) {
@@ -155,8 +143,11 @@ subtest 'a set larger than a pipe is staged whole' => sub {
 	}
 	ok($finished, 'the staging finishes rather than blocking on a full pipe');
 
+	# A child that bailed wrote no answer, and Genesis::slurp refuses a file
+	# that is not there rather than answering undefined, which would take the
+	# whole file down instead of failing this row.
 	my $tree = '';
-	if ($finished) {
+	if ($finished && -f $answer) {
 		$tree = slurp($answer) // '';
 		chomp $tree;
 	}

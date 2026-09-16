@@ -783,6 +783,14 @@ sub mirror_tree {
 	# into stdout, a warning about the environment comes back as the head of
 	# the answer, and the preview hands that on as the base of the delivery
 	# after it, which then asks git to diff against a tree nobody wrote.
+	#
+	# The length test is not the sibling chain's ($err // $out // ...) and
+	# must not be simplified into one.  Under stderr => 0 the stderr file is
+	# always created, and slurp reads an empty one as the empty string rather
+	# than as undefined, so a defined-or stops at an $err that says nothing
+	# and the refusal goes out with nothing in it.  The case this guards is
+	# the one that matters here: git exits zero, answers something that is
+	# not a tree, and writes nothing to stderr.
 	my $said = length($err // '') ? $err
 	         : length($tree // '') ? $tree
 	         : 'git gave no reason';
