@@ -649,10 +649,15 @@ sub propagate {
 	# The banner names control's own commit, and reading it here rather than
 	# off HEAD is what keeps the sha the operator reads and the sha the walk
 	# routes from one fact.
+	# The refusal closure goes with it, because this read stands inside the
+	# open session and outside the eval below, so a refusal raised in there
+	# would leave the operator on control with a second error printed on top
+	# of the first.
 	my $state = Genesis::CI::Walk::read_durable_state(
 		top       => $top,
 		git       => $git,
 		refreshed => $refreshed ? 1 : 0,
+		refuse    => $refuse,
 	);
 	my $control_sha   = $state->{control}{commit};
 	my $control_short = $git->sha($control_sha, short => 1);

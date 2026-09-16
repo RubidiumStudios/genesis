@@ -153,7 +153,9 @@ Optional.  The answer L</read_durable_state> already gave, where the caller
 has read it.  C<genesis propagate> prints control's own commit above the walk,
 so it reads the durable state first and hands it in, and the sha the operator
 reads and the sha the walk routes from stay one fact.  A call that leaves it
-out reads the state here.
+out reads the state here.  It may not be given beside C<provider> or
+C<refreshed>, which are the two options that shape a read this call would not
+then make.
 
 =item C<refreshed>
 
@@ -168,8 +170,8 @@ the one the configuration names.
 =back
 
 B<Returns:> A hashref carrying everything L</read_durable_state> answers,
-which is C<pipeline>, C<type>, C<provider>, C<control>, C<applied>,
-C<applied_staleness>, and C<refreshed>, with C<environments> beside it, the
+which is C<pipeline>, C<type>, C<provider>, C<control>, C<applied>, and
+C<refreshed>, with C<environments> beside it, the
 last being an arrayref of per-environment records in DAG order.  Each of those carries C<env>, C<type>,
 C<branch>, C<prior_env>, C<depth>, C<reading>, C<merged>, C<deployed>,
 C<certified>, C<pending>, C<held>, C<proposed>, C<hold>, C<drifted>,
@@ -178,6 +180,10 @@ C<divergence>, C<discovery>, C<error>, C<outcome>, and C<outcome_detail>.
 
 B<Errors:> Raises a bug where no git handle is given, since every reading
 below is made through one and a walk without it can answer nothing.
+
+Raises a bug where C<state> arrives beside C<provider> or C<refreshed>.  The
+state already carries both, so this walk would drop whichever of them the
+caller named without a word, and a caller that set one meant it to be read.
 
 B<Examples:>
 
@@ -263,12 +269,22 @@ B<Returns:> A hashref carrying C<pipeline>, which is the label the
 configuration gives the pipeline or null where it names none, C<type>, which
 is the deployment type the applied record is addressed under, C<provider>,
 C<control>, which carries C<branch> and C<commit>, C<applied>, which is the
-applied record or null where there is none, C<applied_staleness>, which is
-the per-environment staleness that record implies and an empty list where
-there is no record, and C<refreshed>.
+applied record or null where there is none, and C<refreshed>.
+
+The staleness the applied record implies is not among them.  Reading it costs
+a second read of that record and a load of every environment in the pipeline,
+and nothing the walk decides turns on it, so whichever output renders it reads
+it where it renders it.
 
 B<Errors:> Raises a bug where either C<top> or C<git> is missing, since every
 reading is made through one or the other.
+
+Refuses at C<Genesis::Exit::UNAVAILABLE> where the vault answers an error for
+the applied record, naming C<< $top->applied_record_path >>, because the
+record is a whole-run input and a run that guessed at it would decide every
+environment off a value nobody wrote.  An absent record is not that: it is
+legitimately absent until C<genesis pipeline-apply> has run, so it comes back
+null and every environment takes the C<not-propagated> reading.
 
 B<Examples:>
 
@@ -288,9 +304,11 @@ need it would read the other somewhere else.  Reading the hold here is also
 what lets an environment the pipeline was never applied to report the hold
 standing over it, which a reader placed at the end of the walk never reached.
 
-A read that fails for the whole run refuses at C<Genesis::Exit::UNAVAILABLE>,
-naming the input; a read that fails for one environment records that
-environment's outcome and lets the run continue.
+This is a per-environment read, so under D60 it reaches exactly one
+environment.  A hold the vault cannot answer for raises a plain message naming
+the environment and the path, every caller runs inside L</walk_one>, and
+C<walk_one> records that environment C<failed> with the message beneath it and
+lets the run walk on to the next.  Nothing here ends the run.
 
 B<Parameters:>
 
@@ -309,9 +327,11 @@ carrying that environment's hold record or null where none stands.  An
 unreadable certified commit is answered as it stands, with no C<hold> read at
 all, because the environment has already ended.
 
-B<Errors:> Refuses at C<Genesis::Exit::UNAVAILABLE> where the hold record
-cannot be read, naming the environment and the path, because the run delivers
-on that answer and will not guess that there is no hold.
+B<Errors:> Raises a plain message where the hold record cannot be read, naming
+the environment and the path, because the run delivers on that answer and will
+not guess that there is no hold.  It is not a refusal: L</walk_one> catches it,
+records that environment C<failed>, and the run continues, which is what D60
+gives a read that fails for one environment.
 
 B<Examples:>
 
