@@ -83,20 +83,22 @@ subtest 'a broken environment ends itself and the run walks on' => sub {
 		'prod is held because qa answered nothing');
 };
 
-subtest 'a partial delivery is reset and the run continues' => sub {
-	plan tests => 6;
+subtest 'an environment that will not load is reset and the run continues' => sub {
+	plan tests => 7;
 
+	# A refused commit is the writer failing to produce what it was told to
+	# produce, so it ends the run rather than one environment, and the shape
+	# an environment does survive is the one D96 names: an environment that
+	# cannot be loaded.  qa's file names a kit this repository does not hold.
 	my $h = chained_three();
-	my @due;
-	for my $n (1, 2) {
-		push @due, commit_on_control($h,
-			files   => {'qa.yml' => env_file(env => 'qa', prior => 'lab',
-			                                 n => $n)},
-			message => "Tune qa $n", push => 1);
-	}
-
-	my $git = fault_git($h);
-	fail_on($git, 'commit', 2, message => 'qa blew up mid-delivery');
+	my $due = commit_on_control($h,
+		files => {
+			'lab.yml'  => env_file(env => 'lab', n => 3),
+			'qa.yml'   => env_file(env => 'qa', prior => 'lab',
+			                       kit => 'ghost', version => '1.0.0'),
+			'prod.yml' => env_file(env => 'prod', prior => 'qa', n => 3),
+		},
+		message => 'Tune all three', push => 1);
 
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 
@@ -107,10 +109,12 @@ subtest 'a partial delivery is reset and the run continues' => sub {
 	# still whether the reset happened or not.
 	is(harness_marker($h, $h->slug('qa'), copy => 'a'),
 		harness_marker($h, $h->slug('qa'), copy => 'r'),
-		'qa was reset to T, so no partial delivery survived');
-	isnt(harness_marker($h, $h->slug('qa'), copy => 'a'), $due[0],
-		'the first delivery, which did land, went with it');
+		'qa stands where the session found it, so nothing of it survived');
+	isnt(harness_marker($h, $h->slug('qa'), copy => 'a'), $due,
+		'and it received nothing');
 	like($err, qr/qa.*failed/s, 'qa records failed');
+	is(harness_marker($h, $h->slug('lab')), $due,
+		'the environment walked ahead of it kept its delivery');
 	like($err, qr/^\s*prod\b/m, 'the run walked on to prod');
 	isnt($exit, 0, 'the run reports that it was partial');
 };

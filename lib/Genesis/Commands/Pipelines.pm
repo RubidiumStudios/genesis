@@ -18,7 +18,7 @@ use Genesis::CI::Compiler::PipelineProvider;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
 use Genesis::CI::Report;
-use Genesis::CI::RunFailure;
+use Genesis::CI::RunFailure qw/one_line/;
 use Genesis::CI::Walk;
 use Service::Git;
 use Service::Github;
@@ -350,7 +350,7 @@ sub pipeline_status {
 		my $env = eval { $top->load_env($env_name) };
 		unless ($env) {
 			$state{status} = 'error';
-			$state{error}  = _summarize_load_error($@);
+			$state{error}  = one_line($@);
 			$env_state{$env_name} = \%state;
 			next;
 		}
@@ -812,12 +812,13 @@ sub propagate {
 				# is reported per branch as it always was.
 				my $results = eval {$git->push($remote, @all)} || {};
 				my $reason  = $@;
-				die Genesis::CI::RunFailure->unsurvivable(
-					message => sprintf('could not reach the remote %s%s',
-						$remote,
-						$reason ? ': '._summarize_load_error($reason) : ''),
-					remedy  => 'try again once the remote is reachable',
-				) unless grep {$results->{$_}} @all;
+				unless (grep {$results->{$_}} @all) {
+					my ($message, $remedy) = _push_failure($remote, $reason);
+					die Genesis::CI::RunFailure->unsurvivable(
+						message => $message,
+						remedy  => $remedy,
+					);
+				}
 
 				for my $ref (@all) {
 					if ($results->{$ref}) {
@@ -884,35 +885,47 @@ sub propagate {
 	exit 0;
 }
 
-# _summarize_load_error - a short, actionable reason from a load_env failure {{{
+# _push_failure - the sentence and the remedy one refused push earns {{{
 #
-# For the pipeline-status display.  bail() output is multi-line and
-# decorated; we strip the noise and keep the first substantive line.
-sub _summarize_load_error {
-	my ($err) = @_;
-	return 'unknown reason' unless defined($err) && length($err);
+# D82 lists the remote unreachable, the credential rejected, and the host
+# answering with a server error, and says that where the cause is known the
+# report names it.  The three want different things of the operator, so each
+# carries a corrective step of its own and a report that said the remote was
+# unreachable over a rejected credential would send them to the wrong one.
+#
+# The reason is git's own error, read to its first substantive line.  A push
+# that landed nothing without dying carries no reason at all, which is the
+# shape Service::Git::push answers for a remote nobody can resolve, so the
+# unreachable wording is what an unmatched line and an absent one both earn.
+sub _push_failure {
+	my ($remote, $reason) = @_;
 
-	# Strip ANSI color escapes and structural prose
-	$err =~ s/\e\[[0-9;]*m//g;
-	$err =~ s/\[FATAL\]\s*//g;
-	$err =~ s/Environment\s+\S+\s+could not be loaded:\s*//g;
-	$err =~ s/Please fix the above errors and try again\.\s*//g;
+	my $line = ($reason && length "$reason") ? one_line($reason) : '';
 
-	# Take the first non-blank line that looks like a reason
-	my $reason;
-	for my $line (split /\n/, $err) {
-		$line =~ s/^\s*-\s+//;     # bullet prefix
-		$line =~ s/^\s+|\s+$//g;
-		next unless length $line;
-		next if $line =~ /^at \S+ line \d+/;  # perl trace frames
-		$reason = $line;
-		last;
-	}
-	$reason //= 'unknown reason';
+	return (
+		sprintf('%s refused the credential this push offered: %s',
+			$remote, $line),
+		'fix the credential this repository pushes with and run it again'
+	) if $line =~ m{
+		authentication\ failed | permission\ denied |
+		could\ not\ read\ (?:username|password) |
+		terminal\ prompts\ disabled | invalid\ username\ or\ password |
+		\b40[13]\b | unauthorized | forbidden
+	}xi;
 
-	# Trim to fit on one terminal row alongside the rest of the row
-	$reason = substr($reason, 0, 80) . '...' if length($reason) > 80;
-	return $reason;
+	return (
+		sprintf('%s answered with a server error: %s', $remote, $line),
+		'try again once the remote has recovered'
+	) if $line =~ m{
+		\bHTTP\ 5\d\d\b | internal\ server\ error |
+		service\ unavailable | bad\ gateway | gateway\ time-?out
+	}xi;
+
+	return (
+		sprintf('could not reach the remote %s%s',
+			$remote, length($line) ? ": $line" : ''),
+		'try again once the remote is reachable'
+	);
 }
 
 # }}}
@@ -1761,7 +1774,7 @@ sub _apply_records {
 					"either, so nothing was recorded for it: %s\n".
 					"Until an apply records it, the walk reads it as an ".
 					"environment no pipeline knows.",
-					$name, _summarize_load_error($@)
+					$name, one_line($@)
 				);
 				next;
 			}
@@ -1770,7 +1783,7 @@ sub _apply_records {
 				"Could not load #C{%s}, so only its declared dependencies ".
 				"are wired: %s\n".
 				"Re-run #C{genesis pipeline-apply} once it loads.",
-				$name, _summarize_load_error($load_err)
+				$name, one_line($load_err)
 			);
 		}
 

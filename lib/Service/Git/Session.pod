@@ -897,40 +897,6 @@ B<Examples:>
 
 =head1 INTERNAL METHODS
 
-=head2 _one_line($err)
-
-  my $reason = Service::Git::Session::_one_line($@);
-
-The first substantive line of whatever git raised.
-
-A run failure carries one line, because the report prints it beside the
-branch the failure happened on, and a death out of C<run> is several lines of
-which the first is the reason and the rest are the trace around it.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$err>
-
-Whatever was raised. It is read as a string, so an object that stringifies is
-read through that.
-
-=back
-
-B<Returns:> The first line that holds anything but whitespace, trimmed at both
-ends, or C<unknown reason> where there is no such line.
-
-B<Errors:> None.
-
-B<Examples:>
-
-  Service::Git::Session::_one_line("fatal: pathspec 'qa.yml'\n  at Git.pm\n");
-  # returns "fatal: pathspec 'qa.yml'"
-
-  Service::Git::Session::_one_line('');
-  # returns 'unknown reason'
-
 =head2 _members_at($commit, @set)
 
   my @members = $session->_members_at($source_sha, @set);

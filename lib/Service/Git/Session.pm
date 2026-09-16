@@ -8,7 +8,7 @@ use strict;
 use warnings;
 
 use Genesis qw/bail run trace/;
-use Genesis::CI::RunFailure;
+use Genesis::CI::RunFailure qw/one_line/;
 use Genesis::Exit qw/TEMPFAIL DATAERR SOFTWARE/;
 use Cwd qw/getcwd/;
 use Fcntl qw/:flock/;
@@ -568,18 +568,29 @@ sub apply_files {
 	# environment, and the run walks on delivering through a writer that has
 	# already shown it cannot write.
 	#
-	# The assertions below raise the same class for the same reason, and the
-	# commit does not: a commit git refuses is a condition of the branch it
-	# was made on, which is why that one stays confined.
-	my $staged = eval {
-		$git->rm(@stale) if @stale;
-		$git->checkout_file($source_sha, $_) for @to_write;
-		1;
-	};
-	unless ($staged) {
+	# The two halves raise separately, each naming its own paths.  One list
+	# around both would have a refused removal report the paths the delivery
+	# was about to write, which are the paths that are fine, and leave the
+	# path it could not take off the branch unnamed.
+	#
+	# The assertions below and the commit raise the same class for the same
+	# reason: D82 puts a failure to write a file and a failure to make a
+	# commit in one class, and a caller cannot do anything differently about
+	# either.
+	unless (eval {$git->rm(@stale) if @stale; 1}) {
 		# Read off before anything else runs, because every git call below
 		# would otherwise have had its own chance to clear it first.
-		my $reason = _one_line($@);
+		my $reason = one_line($@);
+		die Genesis::CI::RunFailure->fatal(
+			message => "the writer could not take the stale paths off the ".
+			           "branch: $reason",
+			branch  => $git->current_branch,
+			source  => $source_sha,
+			paths   => [@stale],
+		);
+	}
+	unless (eval {$git->checkout_file($source_sha, $_) for @to_write; 1}) {
+		my $reason = one_line($@);
 		die Genesis::CI::RunFailure->fatal(
 			message => "the writer could not stage the propagation set: $reason",
 			branch  => $git->current_branch,
@@ -626,7 +637,16 @@ sub apply_files {
 	# that can tell the session.  Without this line the abort resets only the
 	# branches whose tips moved, and a commit that left a tip where it was
 	# survives it.
-	$git->commit($message);
+	unless (eval {$git->commit($message); 1}) {
+		my $reason = one_line($@);
+		die Genesis::CI::RunFailure->fatal(
+			message => "the writer could not commit the propagation set: ".
+			           $reason,
+			branch  => $branch,
+			source  => $source_sha,
+			paths   => [@to_write],
+		);
+	}
 	$self->_record_commit($branch);
 
 	return {
@@ -642,21 +662,6 @@ sub apply_files {
 
 ### Internals {{{
 
-# _one_line - the first substantive line of whatever git raised {{{
-#
-# A run failure carries one line, because the report prints it beside the
-# branch it happened on, and a death out of run is several lines of which
-# the first is the reason and the rest are the trace around it.
-sub _one_line {
-	my ($err) = @_;
-	return 'unknown reason' unless defined($err) && length("$err");
-	my ($first) = grep {/\S/} split /\n/, "$err";
-	return 'unknown reason' unless defined $first;
-	$first =~ s/^\s+|\s+$//g;
-	return $first;
-}
-
-# }}}
 # _members_at - the set's pathspecs as paths one commit's tree holds {{{
 #
 # The set is a list of pathspecs and not a list of files.  A dev kit's source

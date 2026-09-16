@@ -8,7 +8,46 @@ package Genesis::CI::RunFailure;
 use strict;
 use warnings;
 
+use Exporter qw/import/;
 use Genesis::Exit qw/TEMPFAIL/;
+
+our @EXPORT_OK = qw/one_line/;
+
+### The reason {{{
+
+# one_line - the first substantive line of whatever a failure carried {{{
+#
+# Both the writer's own failures and the command's refusals print one line
+# beside the branch or the environment they happened on, and a death out of
+# run, or out of bail, is several decorated lines of which the first
+# substantive one says what went wrong.  It lives here because both callers
+# are about the messages this class carries, and two subs doing this job in
+# two files is how the two came to strip different things.
+#
+# Nothing is trimmed to a width.  The caller wraps its own output, and a
+# reason cut at a column loses the end of the sentence that names the file.
+sub one_line {
+	my ($err) = @_;
+	return 'unknown reason' unless defined($err) && length("$err");
+
+	my $text = "$err";
+	$text =~ s/\e\[[0-9;]*m//g;
+	$text =~ s/\[FATAL\]\s*//g;
+	$text =~ s/Environment\s+\S+\s+could not be loaded:\s*//g;
+	$text =~ s/Please fix the above errors and try again\.\s*//g;
+
+	for my $line (split /\n/, $text) {
+		$line =~ s/^\s*-\s+//;
+		$line =~ s/^\s+|\s+$//g;
+		next unless length $line;
+		next if $line =~ /^at \S+ line \d+/;
+		return $line;
+	}
+	return 'unknown reason';
+}
+
+# }}}
+# }}}
 
 ### Constructors {{{
 

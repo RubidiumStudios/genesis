@@ -1,7 +1,9 @@
 #!/usr/bin/env perl
-# Proves T165 and T166: a writer failure ends the run at 1 and an
-# unreachable remote ends it at TEMPFAIL, both resetting every committed
-# branch to T, publishing nothing, and reporting the two outcome words.
+# Proves T165 and T166: a writer failure ends the run at 1 and a remote the
+# run cannot publish to ends it at TEMPFAIL, both resetting every committed
+# branch to T, publishing nothing, and reporting the two outcome words.  A
+# refused commit is a writer failure like any other, and the remote's own
+# error decides which of three sentences the report carries.
 use strict;
 use warnings;
 use utf8;
@@ -99,9 +101,9 @@ subtest 'a writer failure ends the run at 1 and resets everything' => sub {
 	is($exit, 1, 'a run-fatal failure exits 1');
 	assert_reset($h, 'lab', due => $due);
 	assert_reset($h, 'qa');
-	like($err, qr/lab.*not published, run aborted/s,
+	like($err, qr/^\s*lab\b.*not published, run aborted/m,
 		'the already-walked environment records not published');
-	like($err, qr/prod.*not attempted/s,
+	like($err, qr/^\s*prod\b.*not attempted/m,
 		'the unreached environment records not attempted');
 	like($err, qr/\Qqa.yml\E/, 'the report names the file it could not write');
 };
@@ -132,6 +134,70 @@ subtest 'an unreachable remote ends the run at TEMPFAIL' => sub {
 	like($err, qr/could not reach|unreachable/i,
 		'the report names the unreachable remote');
 	like($err, qr/try again|retry/i, 'it names the corrective step');
+};
+
+subtest 'a refused commit ends the run at 1 and resets everything' => sub {
+	plan tests => 7;
+
+	my $h   = three_envs();
+	my $due = tune_all_three($h);
+
+	# qa's own commit, which is the second the run makes, because lab is
+	# walked first and each of the three has one file to write.  So lab has
+	# been delivered and committed to when the commit is refused, and prod has
+	# not been reached.
+	my $git = fault_git($h);
+	fail_on($git, 'commit', 2, message => 'could not commit onto qa/bosh');
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	is($exit, 1, 'a refused commit is the writer failing, so the run exits 1');
+	assert_reset($h, 'lab', due => $due);
+	assert_reset($h, 'qa');
+	like($err, qr/^\s*lab\b.*not published, run aborted/m,
+		'the already-walked environment records not published');
+	like($err, qr/^\s*prod\b.*not attempted/m,
+		'the unreached environment records not attempted');
+};
+
+subtest 'a rejected credential is named rather than the network' => sub {
+	plan tests => 4;
+
+	my $h = three_envs();
+	tune_all_three($h);
+
+	# The refresh at the head of the run stands, and the push is armed with
+	# the text git writes when the remote turns the credential down.
+	sever_remote($h, after => 2);
+	fail_on($h->fault_git, 'push', 1, from => 1,
+		message => "fatal: Authentication failed for '@{[$h->r]}'");
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	is($exit, Genesis::Exit::TEMPFAIL, 'an unsurvivable failure exits TEMPFAIL');
+	like($err, qr/credential/i, 'the report names the credential it was refused');
+	unlike($err, qr/could not reach the remote/i,
+		'rather than the wording an unreachable remote earns');
+};
+
+subtest 'a push that lands nothing ends the run the same way' => sub {
+	plan tests => 5;
+
+	my $h   = three_envs();
+	my $due = tune_all_three($h);
+
+	# The production shape.  Service::Git::push never dies: it answers a hash
+	# of ones and zeros, and a remote nobody can resolve is every value zero
+	# with no reason beside it.
+	my $git = fault_git($h);
+	skip_on($git, 'push', 1, return => {});
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	is($exit, Genesis::Exit::TEMPFAIL, 'it is the same unsurvivable failure');
+	like($err, qr/could not reach the remote/i,
+		'and a push with no reason beside it reads as the remote being gone');
+	assert_reset($h, 'lab', due => $due);
 };
 
 done_testing;
