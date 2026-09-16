@@ -457,6 +457,21 @@ thing that let the pipeline's run and the operator's run differ.
 
 B<Returns:> Nothing.  The run prints its report as it goes.
 
+B<Errors:>
+
+Exits 1, which is D82's writer failure, where the writer could not produce
+what it was told to produce: a path it could not take off the branch, a path
+it could not stage, an index that does not match its source, an index holding
+paths outside the propagation set, or a commit the repository refused.
+Nothing is published and every branch the session committed to is reset.
+
+Exits C<Genesis::Exit/TEMPFAIL> where no ref of the push landed, which is
+D82's unsurvivable failure.  The report names the cause the remote's own
+error gives, which is a refused credential, a server error, or a remote
+nothing could reach, each with its own corrective step.  The same status is
+returned by a run that finished with any environment failed, which is D97's
+partial run.
+
 B<Examples:>
 
   # Walk control onto every deployment branch
@@ -1154,6 +1169,48 @@ B<Examples:>
   my $rules = _protection_rules_for($top, 'control', control => 1);
   # returns the force-push block and the linear-history requirement, and
   # no pull request rule where control_requires_pr is false
+
+=head2 _push_failure
+
+    my ($message, $remedy) = _push_failure($remote, $reason);
+
+The sentence and the corrective step one refused push earns.
+
+D82 lists the remote unreachable, the credential rejected, and the host
+answering with a server error, and says that where the cause is known the
+report names it.  The three want different things of the operator, so each
+carries a corrective step of its own, and a report that said the remote was
+unreachable over a rejected credential would send them to the wrong one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote>
+
+The remote the push was made to, which every sentence names.
+
+=item C<$reason>
+
+Whatever the push raised, or the empty string where it landed nothing without
+raising at all.
+
+=back
+
+B<Returns:> Two values, the message the run failure carries and the remedy
+beside it.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _push_failure('origin', 'fatal: Authentication failed');
+  # returns ('origin refused the credential this push offered: ...',
+  #          'fix the credential this repository pushes with and run it again')
+
+  _push_failure('origin', '');
+  # returns ('could not reach the remote origin',
+  #          'try again once the remote is reachable')
 
 =head2 _refuse_disabled_pipeline
 

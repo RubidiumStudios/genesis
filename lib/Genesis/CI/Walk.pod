@@ -1007,7 +1007,10 @@ delivery that died halfway.
 
 A run-fatal or unsurvivable error is re-raised for the caller to abort the
 whole run on, which L</is_run_fatal> is the reader for and L</abort_run> is
-the answer to.
+the answer to.  Every failure of the writer is one of those, a refused commit
+included, because D82 puts a failure to write a file and a failure to make a
+commit in one class and nothing a caller could do differently would have
+helped with either.
 
 B<Parameters:>
 

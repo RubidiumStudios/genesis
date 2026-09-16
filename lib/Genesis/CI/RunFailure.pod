@@ -39,6 +39,52 @@ nothing is published, every environment already walked records that nothing
 of its was published, and every environment not yet walked records that it
 was not attempted.
 
+=head1 FUNCTIONS
+
+=head2 one_line
+
+    my $reason = Genesis::CI::RunFailure::one_line($@);
+
+The first substantive line of whatever a failure carried.
+
+Both the writer's own failures and the command's refusals print one line
+beside the branch or the environment they happened on, and a death out of
+C<run>, or out of C<bail>, is several decorated lines of which the first
+substantive one says what went wrong.  It lives here because both callers are
+about the messages this class carries, and two subs doing this job in two
+files is how the two came to strip different things.
+
+Colour escapes, the C<[FATAL]> marker, the sentence naming the environment
+that could not be loaded, and the closing instruction to fix the errors above
+are all taken off, bullet prefixes are dropped, and Perl's own trace frames
+are skipped.  Nothing is trimmed to a width, because the caller wraps its own
+output and a reason cut at a column loses the end of the sentence that names
+the file.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$err>
+
+Whatever was raised.  It is read as a string, so an object that stringifies
+is read through that.
+
+=back
+
+B<Returns:> The first line that holds anything but whitespace, trimmed at
+both ends, or C<unknown reason> where there is no such line.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  Genesis::CI::RunFailure::one_line("fatal: pathspec 'qa.yml'\n  at Git.pm\n");
+  # returns "fatal: pathspec 'qa.yml'"
+
+  Genesis::CI::RunFailure::one_line('');
+  # returns 'unknown reason'
+
 =head1 METHODS
 
 =head2 fatal
