@@ -131,7 +131,7 @@ subtest 'the bare run measures every read against the configured branch' => sub 
 		'the run named no branch the schema default would have named';
 	like $err, qr/Propagating from trunk \@ \Q$short\E/,
 		'and sourced the commit the configured branch stands on';
-	like $err, qr/qa: awaiting.*prod: awaiting/s,
+	like $err, qr/qa: held, awaiting.*prod: held, awaiting/s,
 		'the walk covered both environments, in the order the DAG gives them';
 	unlike $err, qr/must be run from/,
 		'and the branch check was measured against trunk, not the default';

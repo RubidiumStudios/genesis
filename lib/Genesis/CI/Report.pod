@@ -1,0 +1,314 @@
+=head1 NAME
+
+Genesis::CI::Report - the propagate run's report, on I8's three axes
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Report;
+
+    # The whole of a finished run, once the session has put the operator
+    # back on the branch they started from.
+    Genesis::CI::Report::render_run($record, git => $git, dry_run => 0);
+
+    # An aborted run, where nothing was published and only the
+    # environment axis has anything true to say.
+    Genesis::CI::Report::render_run($record, outcomes_only => 1);
+
+=head1 DESCRIPTION
+
+Every word an operator reads about an outcome is composed here, and
+C<genesis pipeline-status> renders the same record through the same helpers,
+so the two outputs cannot disagree about a phrase.
+
+The report stands on three axes, and every one of them is exhaustive.  Each
+environment in scope carries exactly one outcome, each control commit the
+walk routed to an environment carries one of its own, and each file the
+writer overwrote a hand edit on carries a third.  Nothing is silently
+omitted: an environment with nothing due reads C<idempotent> rather than
+being left out, and a held commit carries the reason somebody has to clear.
+A quiet run and a blocked one have to read differently, which is the whole
+reason the module exists.
+
+The environment axis takes one of seven words, which are C<propagated>,
+C<idempotent>, C<failed>, C<not attempted>, C<held>, C<publish rejected>, and
+C<not published>.  The word stands alone in the record's C<outcome> field and
+whatever qualifies it stands beside it in C<outcome_detail>, so a caller
+deciding what status a run exits with matches one whole word rather than
+cutting a phrase apart.  The commit axis takes C<delivered> or C<held>, and
+the file axis takes C<overwrote-hand-edit>.
+
+A dry run changes two verbs and nothing else.  C<propagated> reads C<would
+propagate> and C<delivered> reads C<would deliver>, because a preview says
+what would happen rather than what did.
+
+=head1 FUNCTIONS
+
+=head2 hold_reason
+
+    my $words = Genesis::CI::Report::hold_reason($held);
+
+One held commit's reason, in the form the design fixes.
+
+The words are exact, so that C<genesis propagate>, its dry run, and the
+routing column of C<genesis pipeline-status> can never disagree about one.
+The overlap form carries the ancestor's own state and the never-certified
+form carries no such clause, an environment that has never deployed being
+already clear about why.  A commit held behind a gate reads C<< gate:
+<reason> >> with the trailer's own text and no held prefix, because the gate
+is a step somebody has to take rather than a state the pipeline works its own
+way out of.  An ancestor this run could not read at all reads C<< held by
+<ancestor>, which could not be read >>, since an ancestor nobody can read is
+neither certified nor uncertified.  A commit standing behind one the run has
+already held reads C<< held behind control@<sha> >>, naming that commit in
+the marker's short form.  A commit stopped by the environment's own
+propagation hold reads C<< held (<reason>) >> carrying the reason somebody
+wrote on the hold record, rather than the word C<on-hold>, because what an
+operator has to clear is that reason and not the state's own name.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$held>
+
+One entry of an environment record's C<held> list.
+
+=back
+
+B<Returns:> The reason as one line of prose.
+
+B<Examples:>
+
+  my $words = Genesis::CI::Report::hold_reason($held);
+  # returns "held by lab (ops/shared.yml), lab awaiting deployment"
+
+=head2 held_qualifier
+
+    my $words = Genesis::CI::Report::held_qualifier($env_record);
+
+What one held environment waits for, or undefined where nothing holds it.
+
+It says what the environment waits for rather than why any one commit is
+held.  An environment the pipeline was never applied to waits for that
+command, one holding commits behind an ancestor waits for that ancestor to
+certify the commit it has not deployed, and one holding commits behind a gate
+waits on its own deployment of the gate, which is the commit the phrase then
+names.
+
+An environment with a propagation hold standing against it reads C<< needs
+clearing (<reason>) >> ahead of any of those, because a hold is a decision
+somebody made for a reason the pipeline cannot see and only a person clears
+it, so it outranks whatever the commits underneath it happen to be waiting
+for.
+
+It answers the qualifier alone rather than the whole phrase.  The bare word
+C<held> is the record's outcome and the qualifier is what stands beside it in
+C<outcome_detail>, and L</render_run> reads the two back into one line, so
+the word is written in one place and spelled in one place.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+One environment's record, as C<Genesis::CI::Walk::plan> builds it.
+
+=back
+
+B<Returns:> The qualifier as one line of prose, or undefined.
+
+B<Examples:>
+
+  my $words = Genesis::CI::Report::held_qualifier($env_record);
+  # returns "awaiting deployment (lab at control@1a2b3c4)"
+
+=head2 hold_detail
+
+    my $words = Genesis::CI::Report::hold_detail($env_record);
+
+What the standing hold is holding, in the three wordings D56 fixes, or
+undefined where no hold stands.
+
+A hold outranks idempotent, so an environment with one standing never reads
+as though it were fine, and this is the line beside L</held_qualifier> that
+says which of the three situations it is in.  Where the hold itself took
+commits it names how many are blocked until the hold is released.  Where
+something else is holding them it says they are blocked for reasons of their
+own and stay blocked while the hold stands.  Where nothing is held at all it
+reads that nothing is due now and that anything becoming due stays blocked.
+
+The count in the first of the three is of the commits the hold itself took,
+and not of everything held, because a commit a gate or an ancestor had
+already stopped is reported under that reason, and counting it there would
+name it twice and send an operator to the wrong command.
+
+The nothing-due wording is answered only where nothing is held either.  The
+report prints this line directly above the commit lines, so an environment
+whose commits a gate is holding would otherwise read that nothing is due and
+then read the commits that are.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+One environment's record, as C<Genesis::CI::Walk::plan> builds it, after
+C<Genesis::CI::Walk::apply_hold> has run over it.
+
+=back
+
+B<Returns:> The detail as one line of prose, or undefined where the record
+carries no C<hold>.
+
+B<Examples:>
+
+  my $words = Genesis::CI::Report::hold_detail($env_record);
+  # returns "2 commits are blocked until this hold is released"
+
+  my $words = Genesis::CI::Report::hold_detail($gated_record);
+  # returns "1 commit is blocked for a reason of its own, and stays blocked
+  #          while this hold stands"
+
+=head2 render_run
+
+    Genesis::CI::Report::render_run($record, git => $git, dry_run => 0);
+
+Prints the run's report, one block per environment.
+
+Every environment in the record gets exactly one outcome line, every routed
+control commit beneath it gets one of its own, and every file the writer
+overwrote a hand edit on gets a third.  An environment with nothing due reads
+C<idempotent> rather than being left out.
+
+Where the record leaves an environment's outcome null, the renderer settles
+it.  A hold that stands writes the bare word C<held> with L</held_qualifier>
+beside it, and an environment with nothing standing at all writes
+C<idempotent>.  The walk computes its record from durable state alone and so
+cannot know either, and settling both here is what lets the run and the
+preview compose the held phrase from one line of code.
+
+The paths beneath a delivered commit are printed as the operator wrote them,
+which needs the C<git> handle to strip whatever deployment root the
+repository is laid out under.  Without one they are printed as the writer
+recorded them.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The run's record, as C<Genesis::CI::Walk::plan> built it and the delivery
+wrote its outcomes into.
+
+=item C<git>
+
+The repository handle, used to print paths as the operator wrote them.
+Optional.
+
+=item C<dry_run>
+
+True where the run delivered nothing, which swaps two verbs.  Optional.
+
+=item C<outcomes_only>
+
+True to print the environment axis alone, which is what an aborted run wants:
+nothing was published, so a pending commit printed as delivered would name a
+delivery the abort has just undone.  Optional.
+
+=back
+
+B<Returns:> True.
+
+B<Errors:>
+
+=over 4
+
+=item C<< ...was handed the outcome '...' for <env>, which is not one of the words I8 fixes >>
+
+An environment's outcome is a word outside the seven the report fixes, which
+means some stage wrote a phrase of its own into a field four stages share.
+
+=back
+
+B<Examples:>
+
+  Genesis::CI::Report::render_run($record, git => $git);
+  #   lab: propagated
+  #     control@1a2b3c4 Tune lab  delivered
+  #       M lab.yml
+  #   qa: held, awaiting deployment (lab at control@1a2b3c4)
+  #     control@1a2b3c4 Tune lab  held
+  #       H held by lab (lab.yml), lab awaiting deployment
+  #   prod: idempotent
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _settle
+
+    Genesis::CI::Report::_settle($env_record);
+
+Fills the outcome an environment's record left null.
+
+A hold that stands writes the bare word C<held> with L</held_qualifier>
+beside it in C<outcome_detail>, and an environment with nothing standing at
+all writes C<idempotent>.  A record that already carries an outcome is left
+exactly as whoever knew wrote it, which is the walk for a failure and the run
+for a delivery.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+One environment's record.
+
+=back
+
+B<Returns:> The same record.
+
+B<Examples:>
+
+  Genesis::CI::Report::_settle($env_record);
+  # $env_record->{outcome} is now 'held' or 'idempotent'
+
+=head2 _paths
+
+    my @paths = Genesis::CI::Report::_paths($git, $pending->{delivered});
+
+One delivery's paths as the operator wrote them.
+
+The writer records repository paths, which carry whatever deployment root the
+repository is laid out under, and an operator reads the paths they committed.
+A caller with no git handle gets them as they stand, and an empty or absent
+list answers the empty list.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The repository handle, or undefined.
+
+=item C<$paths>
+
+An arrayref of repository paths, or undefined.
+
+=back
+
+B<Returns:> The paths as a list.
+
+B<Examples:>
+
+  my @paths = Genesis::CI::Report::_paths($git, ['bosh/qa.yml']);
+  # returns ('qa.yml') where the repository is rooted at bosh/
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Walk>, which builds the record this renders.
+
+=cut

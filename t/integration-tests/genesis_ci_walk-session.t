@@ -97,9 +97,9 @@ subtest 'a copy with control only on the remote is turned away' => sub {
 };
 
 subtest 'a dry run reads the topology control carries' => sub {
-	# Three rather than two, because run_genesis asserts the restoration of
+	# Four rather than three, because run_genesis asserts the restoration of
 	# the working state in its own words and that assertion is counted here.
-	plan tests => 3;
+	plan tests => 4;
 
 	my $h = ready_harness(delivered => [], certified => ['lab'],
 		kit => 'omega-v2.7.0');
@@ -119,10 +119,14 @@ subtest 'a dry run reads the topology control carries' => sub {
 
 	my ($err) = (run_genesis($h, 'propagate', '--dry-run'))[1];
 
-	# Two, because nothing has been delivered to qa, so the seeding commit
-	# is due beside the one this row laid down.
-	like($err, qr{^\s*qa:\s+would deliver 2 commits}m,
+	like($err, qr{^\s*qa:\s+would propagate}m,
 		'the preview names the environment only control knows about');
+	# Two, because nothing has been delivered to qa, so the seeding commit
+	# is due beside the one this row laid down.  The count is taken from qa's
+	# own block, since lab has never been delivered to either.
+	my ($block) = $err =~ /^\s*qa: would propagate\n(.*)\z/ms;
+	is(scalar(() = ($block // '') =~ /would deliver/g), 2,
+		'both of the commits due to it are previewed');
 	unlike($err, qr/No environments with pipeline metadata found/,
 		'the topology was not read off the feature branch');
 };

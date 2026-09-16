@@ -133,11 +133,11 @@ subtest 'every environment in scope ends with an outcome' => sub {
 	for my $env (qw/lab qa prod/) {
 		like($err, qr/^\s*\Q$env\E\b/m, "$env is in the report");
 	}
-	# The fixed outcome words of D96 arrive with the renderer, so what is
-	# asserted here is that none of the three falls silent: every one of them
-	# carries a line saying what became of it.
+	# The renderer fixes the outcome words of D96, and what is asserted here
+	# is that none of the three falls silent: every one of them carries a
+	# line saying what became of it, in one of those words.
 	my @outcome_lines = grep {
-		/^\s*(?:lab|qa|prod):\s.*(?:delivered|would deliver|nothing due|failed|not attempted|held|awaiting)/
+		/^\s*(?:lab|qa|prod):\s.*(?:propagated|would propagate|idempotent|failed|not attempted|held|not published)/
 	} split /\n/, $err;
 	ok(scalar(@outcome_lines) >= 3, 'each of the three carries an outcome');
 };
@@ -162,7 +162,7 @@ subtest 'a blueprint error records failed and the run goes on' => sub {
 
 	like($err, qr/qa.*failed/s, 'qa records failed');
 	like($err, qr/blueprint/i, 'the blueprint\'s own error is carried');
-	like($err, qr/^\s*lab: (?:delivered|would deliver)/m,
+	like($err, qr/^\s*lab: (?:propagated|would propagate)/m,
 		'the run went on and delivered to lab');
 	unlike($err, qr/not yet/i, 'no outcome word reading not yet appears');
 };

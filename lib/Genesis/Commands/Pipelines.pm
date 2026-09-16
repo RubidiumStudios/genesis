@@ -17,6 +17,7 @@ use Genesis::CI::Compiler;
 use Genesis::CI::Compiler::PipelineProvider;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
+use Genesis::CI::Report;
 use Genesis::CI::RunFailure;
 use Genesis::CI::Walk;
 use Service::Git;
@@ -643,7 +644,7 @@ sub propagate {
 	my $control_sha   = $git->sha('HEAD');
 	my $control_short = $git->sha($control_sha, short => 1);
 
-	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}\n",
+	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}",
 		$control, $control_short;
 
 	my $delivered = 0;
@@ -699,8 +700,11 @@ sub propagate {
 			# D43's awaiting outcome.  genesis pipeline-apply is the one
 			# command that cuts a deployment branch, so the run names that
 			# command and carries on past the environment without writing.
+			# It is held rather than failed, because nothing is wrong with
+			# the environment and one command releases it.
 			unless ($initial->{branches}{$env_name}) {
-				info "  #Y{%s}: awaiting #C{genesis pipeline-apply}", $env_name;
+				$env_record->{outcome}        = 'held';
+				$env_record->{outcome_detail} = 'awaiting pipeline-apply';
 				next;
 			}
 
@@ -709,63 +713,29 @@ sub propagate {
 			# outcome, and it is named as one rather than as a warning
 			# standing beside the report, because I8 asks that every
 			# environment in scope end with an outcome and a warning is not
-			# one.
-			if ($env_record->{error}) {
-				info "  #R{%s}: failed, %s",
-					$env_name, $env_record->{error};
-				next;
-			}
+			# one.  The walk wrote failed on the record as it caught the
+			# error, and the report carries the error beneath it.
+			next if $env_record->{error};
 
 			# The pull-request path is not built yet, and this guard goes
 			# with the task that builds it.  Until then a push onto a branch
 			# the repository's own policy says may only ever receive a
 			# proposal is the one half-built stage worth refusing outright.
 			if ($topo->{nodes}{$env_name}{require_pr}) {
-				info "  #Y{%s}: not attempted, because delivery by pull ".
-					"request is not built yet", $env_name;
+				$env_record->{outcome}        = 'not attempted';
+				$env_record->{outcome_detail} =
+					'delivery by pull request is not built yet';
 				next;
 			}
 
-			# What the environment itself waits for, and why each commit
-			# behind it is held.  The qualifier and the per-commit reason are
-			# printed in the forms the design fixes, so that this run, its
-			# dry run, and pipeline-status can never disagree about a word.
-			# It is printed before anything is delivered, because the hold is
-			# what an operator has come to the output for and a run that
-			# delivered to three environments would otherwise bury it.
+			# An environment with nothing pending is left as the walk wrote
+			# it, and the report settles what it reads: a hold that stands
+			# says what the environment waits for, and an environment with
+			# nothing standing at all reads idempotent.  Nothing is decided
+			# here, because a run and a preview that decided it separately
+			# are two outputs that can disagree about a word.
 			my @pending = @{$env_record->{pending}};
-
-			# D54 reads the environment's held outcome as the run delivering
-			# nothing new to it, so an environment with commits pending says
-			# what it received rather than what it waits for.  Each held
-			# commit is named either way, because the per-commit axis of I8
-			# names every routed commit whatever the environment recorded.
-			my $qualifier = @pending ? undef
-				: Genesis::CI::Walk::held_qualifier($env_record);
-			info "  #Y{%s}: %s", $env_name, $qualifier if $qualifier;
-
-			# D56: the standing hold's own line, which says whether anything
-			# is waiting behind it and names the one command that clears it.
-			# The two sit under the qualifier rather than inside it, because
-			# together they run past the width of a terminal and a wrapped
-			# hold is one an operator's eye slides off.
-			if (my $detail = Genesis::CI::Walk::hold_detail($env_record)) {
-				info "    #Y{%s}", $detail;
-				info "    Release it with #C{genesis %s pipeline-release}",
-					$env_name;
-			}
-
-			for my $held (@{$env_record->{held}}) {
-				info "    #Yi{control\@%s} %s",
-					substr($held->{control_commit}, 0, 7), $held->{subject};
-				info "      #Y{H} %s", Genesis::CI::Walk::hold_reason($held);
-			}
-
-			unless (@pending) {
-				info "  #Gi{%s}: nothing due", $env_name
-					unless $qualifier || @{$env_record->{held}};
-				next;
-			}
+			next unless @pending;
 
 			my $env    = $env_of{$env_name};
 			my $branch = $env_record->{branch};
@@ -789,31 +759,9 @@ sub propagate {
 					);
 				},
 			);
-			if (($env_record->{outcome} // '') eq 'failed') {
-				info "  #R{%s}: failed, %s",
-					$env_name, $env_record->{error};
-				next;
-			}
+			next if ($env_record->{outcome} // '') eq 'failed';
 
-			info "  #G{%s}: %s %d commit%s onto #C{%s}",
-				$env_name,
-				$dry_run ? 'would deliver' : 'delivered',
-				scalar(@pending), @pending == 1 ? '' : 's', $branch;
-			for my $pending (@pending) {
-				info "    #Gi{control\@%s} %s",
-					substr($pending->{control_commit}, 0, 7),
-					$pending->{subject};
-				info "      #G{M} %s", $_
-					for $git->unprefixed(@{$pending->{delivered} || []});
-				info "      #R{D} %s", $_
-					for $git->unprefixed(@{$pending->{removed} || []});
-				# D33: an overwrite is never silent, and it is named per
-				# file, because the branch was carrying a hand edit that
-				# the mirror has just taken back off it.
-				warning("Overwrote a hand edit on #C{%s}: #C{%s}", $branch, $_)
-					for @{$pending->{overwrote} || []};
-			}
-
+			$env_record->{outcome} = 'propagated';
 			$delivered += scalar(@pending);
 			push @to_push, $branch unless $dry_run;
 		}
@@ -879,6 +827,16 @@ sub propagate {
 	# this run from, before a word of the summary is printed.  Nothing below
 	# reads the working tree.
 	$session->finish;
+
+	# I8's three axes, printed once the run has finished writing.  Every
+	# environment in scope carries one outcome, every routed control commit
+	# one of its own, and every overwritten hand edit a third.  It is one
+	# call rather than lines scattered through the walk, because
+	# pipeline-status renders the same record through the same helpers and
+	# two outputs composing one phrase twice are two that can disagree.
+	Genesis::CI::Report::render_run($record,
+		git     => $git,
+		dry_run => $dry_run ? 1 : 0);
 
 	if ($delivered) {
 		info "\n#G{Done.} %s %d commit%s.",

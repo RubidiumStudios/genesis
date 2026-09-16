@@ -148,7 +148,7 @@ subtest 'the diff base names what control still has to deliver' => sub {
 	# finds rather than what the delivery writes.
 	my (undef, $err) = run_genesis($h, 'propagate', '--dry-run');
 
-	like($err, qr{^\s*qa:\s+would deliver 1 commit}m,
+	like($err, qr{^\s*qa:\s+would propagate\n\s*control\@\w+[^\n]*would deliver}m,
 		'the walk names the environment as receiving the change');
 	like($err, qr{kit-overrides\.yml}, 'and names the file control added');
 	unlike($err, qr{No changes to propagate},
@@ -206,7 +206,7 @@ subtest 'an environment with no branch is reported as awaiting the apply' => sub
 	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
 	is($exit, 0, 'a missing branch does not refuse the run');
-	my @said = ($err =~ m{^\s*qa:\s+awaiting\s+\S*genesis\s+pipeline-apply}mg);
+	my @said = ($err =~ m{^\s*qa:\s+held,\s+awaiting\s+pipeline-apply}mg);
 	is(scalar @said, 1,
 		'the walk reports it as awaiting the apply exactly once');
 	# Cutting the branch belongs to genesis pipeline-apply, and a run that
