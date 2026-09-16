@@ -17,6 +17,7 @@ Genesis::CI::Publish - the propagate run's third stage, one push per branch
         specs   => [
             {branch => 'lab/bosh', kind => 'deployment', env => 'lab'},
         ],
+        yes          => $opts->{yes},
         unsurvivable => sub {die "the remote answered nothing: $_[1] $_[0]\n"},
     );
 
@@ -41,6 +42,16 @@ leaves every marker the run wrote naming a commit computed from a tip that has
 already moved. Such a run refuses before its first push, puts every branch it
 committed to back where the remote has it, and hands the caller the sentence
 to refuse with.
+
+Everything the push would carry is shown before it goes, and the showing does
+not wait on anyone being there to read it. A dry run followed by a real run
+computes everything twice, and control or exodus can move between the two, so
+the second run may deliver what the operator never previewed. This stage
+computes once, verifies, shows, and asks. At a terminal the delta comes first
+and the operator answers for it, and where there is no controlling terminal
+the same delta goes to the log and the run goes on, so a pipeline job and a
+propagate child print what an operator would have been shown. C<yes>
+suppresses the ask and nothing else.
 
 Each branch is pushed on its own. A rejection on one branch costs one
 environment one run and nothing else, which is what D83 asks for, and no
@@ -79,10 +90,16 @@ sense the word carries.
         control => 'control',
         records => \@records,
         specs   => \@specs,
+        yes     => $yes,
     );
 
 Pushes every branch the run committed to, one branch per push, and records
 each push's result as that branch's outcome.
+
+Every branch's verified delta is shown before the first push goes out, and an
+operator at a controlling terminal is then asked whether to publish. A run
+that is declined pushes nothing and answers C<declined>, and the status such a
+run exits with is the caller's to decide.
 
 Control is re-checked against the remote before the first push, and a control
 that is behind, ahead, or gone refuses the whole publish. Nothing is pushed,
@@ -152,6 +169,11 @@ C<branch>, and may carry C<kind>, which is C<deployment> or C<pr>, and C<env>,
 which names the record the outcome belongs to. Control is never among them. An
 empty list publishes nothing.
 
+=item C<yes>
+
+Answers the ask without putting it, which is what C<--yes> passes. It leaves
+the showing alone, so the delta is printed either way.
+
 =item C<unsurvivable>
 
 A callback invoked where git named no ref at all, with two arguments. The
@@ -166,7 +188,8 @@ to raise, and the stage returns without recording anything if it does not.
 B<Returns:> A hashref carrying C<published> and C<rejected> as arrayrefs of
 branch names, C<declined> as 0 or 1, and C<results> as the per-ref results the
 push answered. A publish the control check refused carries C<refused> as well,
-holding the sentence, with every other key left as it began.
+holding the sentence, with every other key left as it began. A publish the
+operator declined carries C<declined> as 1 and every other key as it began.
 
 B<Errors:> None of its own. A rejection is an outcome rather than a failure, a
 control that moved is a sentence for the caller to refuse with, and the one
@@ -188,6 +211,106 @@ B<Examples:>
     # returns { refused => 'Refusing to publish.  ...', published => [],
     #           rejected => [], declined => 0, results => [] }
     #   where a teammate pushed to control during the walk
+
+=head2 confirm_publish
+
+    my $go = Genesis::CI::Publish::confirm_publish(
+        $git, 'origin', \@specs, yes => $yes,
+    );
+
+Shows every branch's verified delta and then asks whether to publish.
+
+The showing is unconditional. At a terminal it comes before the ask, and where
+there is no controlling terminal it goes to the log and the run proceeds, so a
+pipeline job and a propagate child print the same delta an operator would have
+seen. C<yes> suppresses the ask and nothing else, and it is read before the
+terminal is consulted at all, so a flag that answers the question cannot also
+decide whether the question's subject is printed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The repository handle each delta is read through.
+
+=item C<$remote>
+
+The remote the push would go to, by name. It names the remote-tracking ref
+each delta is measured against.
+
+=item C<$specs>
+
+An arrayref of the ref specs the push would be handed, in the order they would
+go out. Each is shown on a line of its own.
+
+=item C<yes>
+
+Answers the ask without putting it. The showing happens either way.
+
+=back
+
+B<Returns:> 1 to publish, and 0 where the operator declined.
+
+B<Errors:> None of its own. The delta reader and the prompt raise as they do
+for every other caller, and a prompt that reaches the end of standard input
+bails the way every other Genesis prompt does.
+
+B<Examples:>
+
+    confirm_publish($git, 'origin', \@specs, yes => 1);
+    # prints every delta, asks nothing, and returns 1
+
+    confirm_publish($git, 'origin', \@specs);
+    # prints every delta and returns 1 where there is no terminal to ask at
+
+=head2 publish_delta
+
+    my $delta = Genesis::CI::Publish::publish_delta($git, 'origin', $spec);
+
+What one branch's push would carry, read as the range from the
+remote-tracking ref to the local branch.
+
+The range is exactly what the push sends, so it is read from git rather than
+recomposed from the walk's record, and a delta shown to an operator is
+therefore the delta they get. A branch the remote does not hold yet has no
+range to read and reports as new.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The repository handle the range and the diff are read through.
+
+=item C<$remote>
+
+The remote, by name, which names the remote-tracking ref the range starts at.
+
+=item C<$spec>
+
+One ref spec. It carries C<branch>, and a spec carrying C<delete> is a removal
+rather than a range.
+
+=back
+
+B<Returns:> A hashref carrying C<commits> as the subjects in that range,
+C<changed> and C<deleted> as file counts, and C<new_branch> where the remote
+has no such branch yet. A removal reports C<removal> and nothing else.
+
+B<Errors:> None of its own. The queries raise as they do for every other
+caller.
+
+B<Examples:>
+
+    publish_delta($git, 'origin', {branch => 'lab/bosh'});
+    # returns { new_branch => 0, commits => ['3f9a1c2 deliver an op'],
+    #           changed => 1, deleted => 0 }
+
+    publish_delta($git, 'origin', {branch => 'pr/qa/bosh', delete => 1});
+    # returns { removal => 1 }
 
 =head1 INTERNAL FUNCTIONS
 
