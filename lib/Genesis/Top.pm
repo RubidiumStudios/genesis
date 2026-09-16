@@ -1759,6 +1759,10 @@ sub _validate_config {
 		$self->{__has_legacy_ci_yml} = 1
 			if -f $ci_yml && _is_legacy_ci_file($ci_yml);
 
+		# A pipeline block written into a version 2 file is refused here,
+		# before the injection below puts one there itself.
+		$self->_refuse_v2_pipeline;
+
 		# Augment in-memory with v3 defaults so downstream code sees
 		# a uniform v3 shape.  These go into the 'default' layer and
 		# will NOT be persisted to disk on save.
@@ -2033,10 +2037,9 @@ sub _pipeline_config_schema {
 			# what it found.  D15 keeps its default here, on the
 			# declaration, so an enabled section with no provider block is
 			# still a manual pipeline.
-			# The block still defaults to an empty hash, so that the
-			# discriminator below takes its own default when the operator
-			# writes no provider block at all, which under D15 is a manual
-			# pipeline.
+			# The empty hash is what lets that default be reached, because
+			# validation walks into a block that is present and nowhere
+			# else.
 			provider => {
 				type                  => 'custom_struct',
 				discriminator         => 'type',
@@ -2184,6 +2187,34 @@ sub _current_config_schema {
 	return ($self->{__config_disk_version} // 0) >= 3
 		? $self->_repo_config_schema
 		: $self->_repo_config_schema_v2;
+}
+
+# }}}
+# _refuse_v2_pipeline - a pipeline section is version 3 work {{{
+#
+# The version 2 schema declares the pipeline key, because the gate
+# _validate_config injects has to survive the first write, and declaring a
+# key is also what makes it writable.  So the write is refused on its own
+# and the declaration keeps its one job.
+#
+# is_set reads the loaded and set layers alone, so this sees a block
+# somebody wrote into the file and a block a command set in this run, and
+# never the injection, which goes in at default priority.
+#
+# Both callers need it.  The load meets a block that was already on disk,
+# and a command that writes one meets it only after the load has been and
+# gone, so a check in one place alone would let the other through.
+sub _refuse_v2_pipeline {
+	my ($self) = @_;
+
+	return 1 unless ($self->{__config_disk_version} // 0) == 2;
+	bail({exitcode => CONFIG},
+		"A pipeline section belongs to a version 3 repository configuration, ".
+		"and this repository is still version 2.  Migrate ".
+		"#C{.genesis/config} to version 3 first, and the pipeline block ".
+		"becomes one you can write."
+	) if $self->config->is_set('pipeline');
+	return 1;
 }
 
 # }}}

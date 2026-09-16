@@ -86,6 +86,12 @@ sub config {
 		# key away with it, and a check reading the schema from before that
 		# removal would accept keys nothing declares any more and save a
 		# file the next command could not load.
+		#
+		# A version 2 repository declares the pipeline key for the sake of
+		# the gate its load injects, and this run may have written a block
+		# under it.  The load has been and gone by now, so the refusal that
+		# guards the file on the way in is asked again here, on the way out.
+		$top->_refuse_v2_pipeline;
 		$config->validate($top->_current_config_schema) if $config->schema;
 		$config->save;
 		return 0;

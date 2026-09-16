@@ -484,6 +484,40 @@ sub run_config {
 	return (defined $code ? $code : $rc, $err);
 }
 
+subtest "a provider's own rules wait for the section to be turned on" => sub {
+	plan tests => 4;
+
+	# The repository names Concourse and gives it no target, which is the
+	# one key that provider cannot run without.  Nobody has turned the
+	# pipeline on, so the rule has nothing to be about yet, and an operator
+	# building a provider block a key at a time is not refused for a key
+	# the block does not carry so far.
+	my $dir = concourse_repo('config-gate-off');
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.provider.team', 'main');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, 'a disabled pipeline takes a provider key without complaint');
+	unlike($err, qr/'target' is required/,
+		"and the provider's own rule says nothing while the section is off");
+
+	# Turning the section on is what asks the provider to run, and the
+	# refusal that follows is the provider's own sentence rather than
+	# anything the framework composed for it.
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.enabled', 'true');
+	build_command_environment;
+	($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG,
+		'turning the section on is refused, at the configuration exit');
+	like($err, qr/'target' is required for the Concourse provider/,
+		"in the provider's own words");
+};
+
 subtest 'config --unset of the provider type orphans nothing and goes through' => sub {
 	plan tests => 3;
 
@@ -704,6 +738,29 @@ subtest 'config writes on a version 2 repository are not refused' => sub {
 		"for the same reason, on the removal side");
 	unlike(slurp("$dir/.genesis/config"), qr/minimum_version/,
 		"and the key is gone from the saved file");
+};
+
+subtest 'a pipeline section is refused on a version 2 repository' => sub {
+	plan tests => 3;
+
+	# The version 2 schema declares the pipeline key so that the default
+	# the load injects survives the first write.  Declaring a key is also
+	# what makes it writable, so the write is refused on its own, and an
+	# operator who wants a pipeline is told which upgrade gives them one.
+	my $dir = v2_repo('config-v2-pipeline-write');
+
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.enabled', 'true');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG,
+		'the write is refused, at the configuration exit');
+	like($err, qr/pipeline section belongs to a version 3 repository/,
+		'and the refusal says where a pipeline section belongs');
+	unlike(slurp("$dir/.genesis/config"), qr/^pipeline:/m,
+		'with nothing written to the file');
 };
 
 done_testing;

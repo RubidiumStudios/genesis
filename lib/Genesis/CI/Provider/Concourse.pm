@@ -285,16 +285,12 @@ sub validate_config {
 	my $url = $config->get("$path.url");
 
 	# The key a pipeline cannot run without is asked for once the section
-	# the block sits in is switched on, and not before.  A provider block
-	# is written a key at a time, and under D105 these rules are reached
-	# from the walk rather than from a check that ran behind the gate, so
-	# the gate is read here or a repository is refused for a pipeline
-	# nobody has turned on yet.  The section is the block's own parent,
-	# which is all this class knows about where it sits.
-	my ($section) = $path =~ m{^(.*)\.[^.]+$};
-	my $running = defined($section) ? $config->get("$section.enabled") : 1;
+	# the block sits in is switched on, and not before.  The base answers
+	# that question for every provider, so this rule reads the gate the
+	# same way the next provider's rule will.
 	push @errors, "'target' is required for the Concourse provider"
-		if $running && !$config->get("$path.target");
+		if $class->section_enabled($config, $path)
+		&& !$config->get("$path.target");
 	push @errors, "'url' must begin with http:// or https://"
 		if $url && $url !~ m{^https?://};
 	return @errors;

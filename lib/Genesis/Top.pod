@@ -2186,6 +2186,12 @@ and nothing clears the defaults between one validation and the next, so a
 schema that did not declare the injection would report it as a key nobody
 wrote and refuse every write the repository can make.
 
+The key is declared for the injection and refused when anybody writes it.
+Declaring a key is also what makes it writable, so L</_validate_config>
+refuses a C<pipeline> section that the operator wrote or set on a version 2
+repository, naming the migration to version 3, and the injection is filed
+at default priority so the refusal never trips on the loader's own fill.
+
 B<Parameters:> None.
 
 B<Returns:> The schema as a hashref, keyed by config field.
@@ -2544,6 +2550,46 @@ this one.
 
 B<Returns:> A hash reference.
 
+=head2 _refuse_v2_pipeline
+
+    $top->_refuse_v2_pipeline();
+
+Refuses, at C<Genesis::Exit::CONFIG>, a C<pipeline> section on a repository
+whose configuration is still version 2, naming the migration to version 3.
+Answers 1 and does nothing on a repository of any other version.
+
+L</_repo_config_schema_v2> declares the C<pipeline> key so that the gate
+L</_validate_config> injects survives the first write, and declaring a key
+is also what makes it writable. This is what keeps that declaration to its
+one job.
+
+The block is read with C<< Genesis::Config::is_set >>, which reads the
+loaded and set layers alone, so this sees a block somebody wrote into the
+file and a block a command set in this run, and never the injection, which
+is filed at default priority.
+
+Both callers need it. The load meets a block that was already on disk, and
+a command that writes one meets it only after the load has been and gone,
+so a check in one place alone would let the other through.
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"A pipeline section belongs to a version 3 repository configuration ..."> -
+raised when a version 2 repository carries or is given a C<pipeline> block.
+
+=back
+
+B<Examples:>
+
+    $top->_refuse_v2_pipeline;
+    # returns 1 on a version 3 repository, whatever its pipeline says
+
 =head2 _provider_module_map
 
     my $map = $top->_provider_module_map();
@@ -2564,6 +2610,15 @@ Each value names the class under C<Genesis::CI::Provider> that declares the
 block's keys and validates it, and the file to require before calling it.
 The requiring and the dispatch belong to C<Genesis::Config>, which reaches
 them through the declaration this map is part of.
+
+Two refusals elsewhere still ask whether a provider has a compiler class,
+in L<Genesis::CI/_resolve_provider_class> and
+L<Genesis::CI::Compiler/_resolve_provider_class>, and they are not leftovers
+of the validation-side checks that went. Refusing to compile a pipeline for
+a provider Genesis has no compiler for is a question about emitting rather
+than about validating, so a total map of who validates a block says nothing
+about who can emit a pipeline, and those two outlive the checks that asked
+whether validation had anything to check.
 
 B<Returns:> A hash reference keyed by provider type.
 

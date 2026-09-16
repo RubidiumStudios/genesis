@@ -461,6 +461,31 @@ sub _schema_for_key {
 }
 
 # }}}
+# _discriminator_entry - the map entry a block's own value chooses {{{
+#
+# The three steps both the validator and the subschema reader take to get
+# from a block to the module that owns it: read the field the declaration
+# names, fall back to the default the declaration carries, and index the
+# map with what comes out.  Written once, because the two are meant to
+# part company over what they do with a failure and not over what they
+# resolve, and two copies are what would let them drift.
+#
+# It loads nothing.  A module that will not load is refused in the
+# operator's terms by the validator and passed over in silence by the
+# reader, and neither answer is one this can give on their behalf.
+sub _discriminator_entry {
+	my ($self, $path, $spec) = @_;
+
+	my $field = $spec->{discriminator} or return undef;
+	my $map   = $spec->{modules}       or return undef;
+
+	my $value = length($path) ? $self->get("$path.$field") : undef;
+	$value = $spec->{discriminator_default} unless defined $value;
+	return undef unless defined $value && exists $map->{$value};
+	return $map->{$value};
+}
+
+# }}}
 # _custom_struct_subschema - the hash a custom_struct block resolves to {{{
 #
 # For the readers that ask what one key of the block is, which are the
@@ -481,10 +506,7 @@ sub _custom_struct_subschema {
 	my $map    = $spec->{modules}       or return undef;
 	my $method = $spec->{schema_method} or return undef;
 
-	my $value = length($path) ? $self->get("$path.$field") : undef;
-	$value = $spec->{discriminator_default} unless defined $value;
-	my $entry = (defined $value && exists $map->{$value}) ? $map->{$value} : undef;
-	return undef unless $entry;
+	my $entry = $self->_discriminator_entry($path, $spec) or return undef;
 
 	return undef unless eval {require $entry->{module}; 1};  ## no critic
 	my $declared = eval {$entry->{class}->$method} or return undef;
@@ -951,12 +973,16 @@ sub _validate_custom_struct {
 			$schema->{discriminator_default});
 	}
 
+	# Resolved through the one resolver the subschema reader also calls, so
+	# the two cannot come to disagree about which module owns a block.  The
+	# fill above has already happened, so the resolver's own fallback finds
+	# nothing left to do here.
+	my $entry = $self->_discriminator_entry($key, $schema);
 	my $value = $self->get("$key.$field");
 	return ("#R{$key.$field}: unknown value: #ri{".($value // '<null>')."}; ".
 		"expected one of ".join(', ', sort keys %$map))
-		unless defined $value && exists $map->{$value};
+		unless $entry;
 
-	my $entry = $map->{$value};
 	unless (eval {require $entry->{module}; 1}) {  ## no critic
 		# Copied first, because bail's own readers run evals that clear it,
 		# and cut, because the operator reads the refusal and not the line
