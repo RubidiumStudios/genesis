@@ -145,7 +145,15 @@ all.
 
 The map is an option because the walk does not yet read the branch state for
 itself.  L</walk_base> has taken the base out of it, and the rest goes once
-C<read_durable_state> lands.
+the walk reads the branch state through the one reader as well.
+
+=item C<state>
+
+Optional.  The answer L</read_durable_state> already gave, where the caller
+has read it.  C<genesis propagate> prints control's own commit above the walk,
+so it reads the durable state first and hands it in, and the sha the operator
+reads and the sha the walk routes from stay one fact.  A call that leaves it
+out reads the state here.
 
 =item C<refreshed>
 
@@ -159,10 +167,10 @@ the one the configuration names.
 
 =back
 
-B<Returns:> A hashref carrying C<pipeline>, which is the label the
-configuration gives the pipeline or null where it names none, C<provider>,
-C<control>, C<applied>, C<refreshed>, and C<environments>, the last being an
-arrayref of per-environment records in DAG order.  Each of those carries C<env>, C<type>,
+B<Returns:> A hashref carrying everything L</read_durable_state> answers,
+which is C<pipeline>, C<type>, C<provider>, C<control>, C<applied>,
+C<applied_staleness>, and C<refreshed>, with C<environments> beside it, the
+last being an arrayref of per-environment records in DAG order.  Each of those carries C<env>, C<type>,
 C<branch>, C<prior_env>, C<depth>, C<reading>, C<merged>, C<deployed>,
 C<certified>, C<pending>, C<held>, C<proposed>, C<hold>, C<drifted>,
 C<pr>, C<manual>,
@@ -177,6 +185,110 @@ B<Examples:>
                                        branches => $initial->{branches});
   # returns a record whose environments arrayref is in DAG order, with
   # each environment's due commits under pending
+
+=head2 read_durable_state
+
+    my $state = Genesis::CI::Walk::read_durable_state(top => $top,
+                                                      git => $git);
+
+Reads everything I11 allows the run to read, in one place.  The single reader
+is what makes the rule checkable: a caller that wanted to guess a value would
+have to add a reader of its own, and there is only one.
+
+Control is read off the local ref, and that is control on R.  The refresh
+brings R into T before anything is read, and the pre-flight then refuses every
+state in which the local ref and the tracking ref differ, so by the time this
+runs the two name one commit.  Reading the tracking ref here as well would be
+a second reader of one fact.
+
+An applied record that is absent is a reading and not a refusal.  The record
+is legitimately missing until C<genesis pipeline-apply> has run, and the rule
+about an input the run cannot read is a rule about unreadability rather than
+about absence, so every environment takes the C<not-propagated> reading and
+the run reports it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<top>
+
+Required.  The C<Genesis::Top> the run is standing in.
+
+=item C<git>
+
+Required.  The C<Service::Git> handle every reading is made through.
+
+=item C<provider>
+
+Optional.  The pipeline provider that owns propagation here, defaulting to
+the one the configuration names.
+
+=item C<refreshed>
+
+Optional, default 1.  Whether the remote-tracking refs this run reads were
+brought up to date before it ran.
+
+=back
+
+B<Returns:> A hashref carrying C<pipeline>, which is the label the
+configuration gives the pipeline or null where it names none, C<type>, which
+is the deployment type the applied record is addressed under, C<provider>,
+C<control>, which carries C<branch> and C<commit>, C<applied>, which is the
+applied record or null where there is none, C<applied_staleness>, which is
+the per-environment staleness that record implies and an empty list where
+there is no record, and C<refreshed>.
+
+B<Errors:> Raises a bug where either C<top> or C<git> is missing, since every
+reading is made through one or the other.
+
+B<Examples:>
+
+  my $state = Genesis::CI::Walk::read_durable_state(top => $top, git => $git);
+  # returns {pipeline => 'ops', type => 'bosh', control => {...}, ...}
+
+=head2 env_state
+
+    my $durable = Genesis::CI::Walk::env_state(env => $env);
+
+One environment's durable state, which is its certified commit and the hold
+standing over it, or the reason there is none.
+
+The two are read together because they are the two durable facts an
+environment carries, and a caller that read one of them where it happened to
+need it would read the other somewhere else.  Reading the hold here is also
+what lets an environment the pipeline was never applied to report the hold
+standing over it, which a reader placed at the end of the walk never reached.
+
+A read that fails for the whole run refuses at C<Genesis::Exit::UNAVAILABLE>,
+naming the input; a read that fails for one environment records that
+environment's outcome and lets the run continue.
+
+B<Parameters:>
+
+=over 4
+
+=item C<env>
+
+Required.  The environment whose durable state is read.
+
+=back
+
+B<Returns:> Everything L</certified_for> answers, which is C<state> with
+C<control_commit>, C<commit>, and C<at> beside it where the state is
+C<certified> and C<error> where it is C<unreadable>, with C<hold> beside them
+carrying that environment's hold record or null where none stands.  An
+unreadable certified commit is answered as it stands, with no C<hold> read at
+all, because the environment has already ended.
+
+B<Errors:> Refuses at C<Genesis::Exit::UNAVAILABLE> where the hold record
+cannot be read, naming the environment and the path, because the run delivers
+on that answer and will not guess that there is no hold.
+
+B<Examples:>
+
+  my $durable = Genesis::CI::Walk::env_state(env => $env);
+  # returns {state => 'certified', control_commit => $sha, hold => undef, ...}
 
 =head2 introducing_commit
 

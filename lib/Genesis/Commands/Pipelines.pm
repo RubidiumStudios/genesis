@@ -641,8 +641,28 @@ sub propagate {
 	# taken against that tip.  Collapsing everything outstanding into one
 	# diff made an urgent change to one environment wait behind an
 	# unrelated earlier change to a shared file (D34).
-	my $control_sha   = $git->sha('HEAD');
+	# Everything I11 lets the run read, read once and handed to the walk.
+	# The banner names control's own commit, and reading it here rather than
+	# off HEAD is what keeps the sha the operator reads and the sha the walk
+	# routes from one fact.
+	my $state = Genesis::CI::Walk::read_durable_state(
+		top       => $top,
+		git       => $git,
+		refreshed => $refreshed ? 1 : 0,
+	);
+	my $control_sha   = $state->{control}{commit};
 	my $control_short = $git->sha($control_sha, short => 1);
+
+	# D94's fourth reading, said once for the repository.  An applied record
+	# that is absent is legitimately absent until genesis pipeline-apply has
+	# run, so the run reads it rather than refusing over it, and it says
+	# which reading it took, because a reading nobody prints is one the
+	# operator cannot act on.
+	warning(
+		"The pipeline has never been applied to this repository, so every ".
+		"environment reads #C{not-propagated}.  Run #C{genesis ".
+		"pipeline-apply} to record the commit it was applied from."
+	) unless $state->{applied};
 
 	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}",
 		$control, $control_short;
@@ -676,8 +696,8 @@ sub propagate {
 		# thing here that touches a branch.
 		$record = Genesis::CI::Walk::plan($top,
 			git       => $git,
+			state     => $state,
 			branches  => $initial->{branches},
-			refreshed => $refreshed ? 1 : 0,
 		);
 
 		# Every environment the run delivers to is loaded here, before the

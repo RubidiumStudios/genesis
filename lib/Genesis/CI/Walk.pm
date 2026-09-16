@@ -18,9 +18,11 @@ use Genesis qw/run bug bail info/;
 use Genesis::CI::Marker qw/STAGE RELEASE_STAGE/;
 use Genesis::CI::Report;
 use Genesis::CI::RunFailure;
+use Genesis::Exit qw/UNAVAILABLE/;
 
 our @EXPORT_OK = qw/
 	plan changed_set route_commit undeployed_set overlap
+	read_durable_state env_state
 	certified_for hold_for
 	apply_hold
 	gate_state released_gates
@@ -41,6 +43,95 @@ use constant HOLD_REASONS => qw/
 
 ### The readings {{{
 
+# read_durable_state - everything the run is allowed to read, read once {{{
+#
+# I11 names the inputs exactly, and the rule that an input the run cannot
+# read makes it refuse rather than guess is D55's.  Reading them here, in
+# one place, is what makes the rule checkable: a caller that wanted to guess
+# would have to add a reader, and there is only one.
+#
+# Control is read off the local ref, and that is control on R.  The refresh
+# brings R into T for every branch in scope before anything is read, and the
+# pre-flight then refuses every state in which the local ref and the tracking
+# ref differ, so by the time this runs the two name one commit.  Reading the
+# tracking ref here as well would be a second reader of one fact, which is
+# the thing this sub exists to remove.
+#
+# An applied record that is absent is a reading and not a refusal (D94).  The
+# record is legitimately missing until genesis pipeline-apply has run, and
+# D55's rule is about an input the run cannot read rather than about one that
+# is not there yet, so every environment takes the not-propagated reading and
+# the run reports it.
+#
+# The staleness is read through the handle this sub already holds, and it is
+# filed under a key of its own rather than folded into the applied record,
+# because Genesis::Top::pipeline_staleness answers a list of per-environment
+# changes and a record's own three flat fields are a different thing.
+sub read_durable_state {
+	my (%args) = @_;
+
+	my $top = $args{top}
+		or bug("Genesis::CI::Walk::read_durable_state needs a Genesis::Top");
+	my $git = $args{git}
+		or bug("Genesis::CI::Walk::read_durable_state needs a git handle");
+
+	my $control     = $top->control_branch;
+	my $control_sha = $git->sha($control);
+
+	my $applied = $top->applied_record;
+
+	return {
+		# The pipeline's own label, which is the name the configuration
+		# gives it, and the deployment type beside it, which is what the
+		# applied record is addressed under.  A repository that names no
+		# label leaves the first null and the renderer falls back to the
+		# second.
+		pipeline          => $top->config->get('pipeline.name'),
+		type              => $top->type,
+		provider          => $args{provider} // $top->pipeline_provider_type,
+		control           => {branch => $control, commit => $control_sha},
+		applied           => $applied,
+		applied_staleness => $applied ? $top->pipeline_staleness($git) : [],
+		refreshed         => $args{refreshed} // 1,
+	};
+}
+
+# }}}
+# env_state - one environment's durable state, or the refusal it earns {{{
+#
+# D55 and I11: the run refuses naming the input it could not read and never
+# guesses a value in its place.  The distinction D60 draws holds here.  A
+# read that fails for the whole run, such as an exodus mount the run cannot
+# reach at all, refuses; a read that fails for one environment records that
+# environment's outcome and lets the run continue.
+#
+# The certified commit and the hold are read together, because they are the
+# two durable facts an environment carries and a caller that read one of them
+# where it happened to need it would read the other somewhere else.  Reading
+# the hold here is also what lets an environment the pipeline was never
+# applied to report the hold standing over it, which D56 asks for and which a
+# reader placed at the end of the walk never reached.
+sub env_state {
+	my (%args) = @_;
+
+	my $env = $args{env};
+
+	my $certified = certified_for($env);
+	return $certified if $certified->{error};
+
+	my $hold = eval {$env->hold_record};
+	bail(
+		{exitcode => UNAVAILABLE},
+		"Could not read the hold record for #C{%s} at #C{%s}: %s\n\n".
+		"The run reads a hold before it delivers anything, so it will not ".
+		"guess that there is none.  Nothing was written.",
+		$env->name, $env->hold_record_path, $@ =~ s/\s+$//r
+	) if $@;
+
+	return {%$certified, hold => $hold};
+}
+
+# }}}
 # introducing_commit - E, the control commit that introduced an env file {{{
 #
 # Control is linear under D31, so the oldest commit that added the
@@ -745,14 +836,20 @@ sub plan {
 	my $git = $opts{git}
 		or bug("Genesis::CI::Walk::plan needs a git handle to read through");
 
-	my $control     = $top->control_branch;
-	my $control_sha = $git->sha($control);
+	# Everything I11 lets the run read, read once.  A caller that has already
+	# read it hands the answer in, because the command prints control's own
+	# sha above the walk and a second read there would be a second reader of
+	# the fact this sub exists to hold.
+	my $state = $opts{state} || read_durable_state(
+		top       => $top,
+		git       => $git,
+		provider  => $opts{provider},
+		refreshed => $opts{refreshed},
+	);
 
-	# The pipeline's own facts.  A repository whose vault this run cannot
-	# reach leaves the field null rather than ending the run, because every
-	# environment below still has a branch, a marker, and a set, and the
-	# applied record decides nothing the walk routes on.
-	my $applied = eval {$top->applied_record};
+	my $control     = $state->{control}{branch};
+	my $control_sha = $state->{control}{commit};
+	my $applied     = $state->{applied};
 
 	my $topo  = $top->pipeline_topology;
 	my @order = @{$topo->{order}};
@@ -775,7 +872,7 @@ sub plan {
 	# a topology of any depth would otherwise read the same record once per
 	# descendant.  The load error is kept beside the environment, since the
 	# reader below may ask long after the eval that raised it.
-	my (%env_of, %load_error, %certified_of);
+	my (%env_of, %load_error, %durable_of);
 	my $env_for = sub {
 		my ($name) = @_;
 		unless (exists $env_of{$name}) {
@@ -784,14 +881,14 @@ sub plan {
 		}
 		return $env_of{$name};
 	};
-	my $certified_for_env = sub {
+	my $durable_for_env = sub {
 		my ($name) = @_;
-		unless (exists $certified_of{$name}) {
+		unless (exists $durable_of{$name}) {
 			my $env = $env_for->($name);
-			$certified_of{$name} = $env ? certified_for($env)
+			$durable_of{$name} = $env ? env_state(env => $env)
 				: {state => 'unreadable', error => $load_error{$name}};
 		}
-		return $certified_of{$name};
+		return $durable_of{$name};
 	};
 
 	# The ancestors of one environment, nearest first, taken from the whole
@@ -807,24 +904,16 @@ sub plan {
 			push @chain, {
 				name      => $up,
 				env       => $env_for->($up),
-				certified => $certified_for_env->($up),
+				certified => $durable_for_env->($up),
 			};
 			$up = $topo->{parent_of}{$up};
 		}
 		return \@chain;
 	};
 
-	my $record = {
-		# The pipeline's own label, which is the name the configuration
-		# gives it and not the deployment type.  A repository that names
-		# none leaves it null, and the renderer falls back to the type.
-		pipeline     => $top->config->get('pipeline.name'),
-		provider     => $opts{provider} // $top->pipeline_provider_type,
-		control      => {branch => $control, commit => $control_sha},
-		applied      => $applied,
-		refreshed    => $opts{refreshed} // 1,
-		environments => [],
-	};
+	# The record's head is the durable state itself, so the two cannot
+	# describe different repositories.
+	my $record = {%$state, environments => []};
 
 	for my $name (@order) {
 		next unless $in_scope{$name};
@@ -880,11 +969,15 @@ sub plan {
 
 			# The certified commit, which is the control commit the
 			# environment's last successful deployment was made from.  A
+			# This environment's durable state comes through the one reader,
+			# so the hold arrives beside the certified commit rather than
+			# being fetched again lower down.  A
 			# vault this run cannot reach makes the environment failed
 			# rather than deployed, and the two states with no certified
 			# commit are kept apart, because one of them is an environment
 			# the pipeline was never applied to.
-			my $certified = $certified_for_env->($name);
+			my $certified = $durable_for_env->($name);
+			my $hold      = $certified->{hold};
 			$env_record->{certified} = $certified;
 			if ($certified->{state} eq 'unreadable') {
 				$env_record->{error}   = $certified->{error};
@@ -908,7 +1001,16 @@ sub plan {
 			# reading a base costs a walk of control over the environment's
 			# own file and an environment this run will not walk has no use
 			# for the answer.
-			return if $certified->{state} eq 'never-applied';
+			#
+			# The hold is applied before the return, because a hold is
+			# durable state like any other and D56 asks that an environment
+			# with one standing never read as though it were fine.  Nothing
+			# stands pending here, so the hold takes nothing; it says that
+			# anything becoming due later stays blocked.
+			if ($certified->{state} eq 'never-applied') {
+				apply_hold($env_record, $hold);
+				return;
+			}
 
 			# Under D2 the base is the local ref, which the pre-flight has
 			# just settled, and under a dry run it is the ref a real run
@@ -932,7 +1034,11 @@ sub plan {
 			);
 			my $marker = $seeding eq 'seeded' ? $base : undef;
 			$env_record->{merged}  = $marker;
-			$env_record->{reading} = _reading($marker, $deployed);
+			# A repository with no applied record keeps the not-propagated
+			# reading D94 gives it, whatever this branch happens to carry,
+			# because nothing has been applied for a marker to be read
+			# against.
+			$env_record->{reading} = _reading($marker, $deployed) if $applied;
 
 			# The one place walk_env's positional question meets the hold
 			# readers.  The ancestors are read once for the environment and
@@ -1007,7 +1113,7 @@ sub plan {
 			# to show.  A vault that refuses the read ends this environment
 			# rather than answering no hold, because delivering on a hold
 			# nobody could read is the one mistake the record exists to stop.
-			apply_hold($env_record, $env->hold_record);
+			apply_hold($env_record, $hold);
 			return;
 		});
 	}
