@@ -30,19 +30,23 @@ looking at the fixture's files.  A long run under an exported C<GIT_DIR> did
 exactly that once and left a shared working tree with an empty index.  So the
 fixtures clear those variables for themselves rather than trusting the
 environment they were handed, through C<scrub_git_env> in
-L<Harness::GitEnv|../GitEnv.pm>, and C<t/unit-tests/harness_propagation-git_env.t>
-holds them to it.
+L<Harness::GitEnv>, and C<t/unit-tests/harness_propagation-git_env.t> holds
+them to it.
 
 =head1 FUNCTIONS
 
 =head2 scrub_git_env()
 
-Takes git's own variables out of C<%ENV> and answers how many were there.  It
-lives in C<Harness::GitEnv> rather than in C<helper>, because the git double
-is loaded into a spawned genesis child through C<PERL5OPT> and loading
+This harness does not export it, and it is documented here because the
+fixtures depend on it.  It comes from L<Harness::GitEnv>, and C<use helper> is
+how a test file reaches it, since C<helper> imports it and re-exports it along
+with everything else it hands the caller.  A file that does not say C<use
+helper> says C<use Harness::GitEnv> for itself.
+
+It takes git's own variables out of C<%ENV> and answers how many were there.
+It lives in C<Harness::GitEnv> rather than in C<helper> because the git double
+is loaded into a spawned genesis child through C<PERL5OPT>, and loading
 C<helper> there would print C<helper>'s own notice into that child's output.
-Every other consumer reaches it through C<helper>, which re-exports it, so a
-test file that says C<use helper> already has it.
 
 It clears the seven variables git reads a repository, an index, or an object
 store out of, which are C<GIT_DIR>, C<GIT_WORK_TREE>, C<GIT_INDEX_FILE>,

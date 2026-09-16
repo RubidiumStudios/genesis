@@ -1,0 +1,88 @@
+=head1 NAME
+
+Harness::GitEnv - the one place the suite clears git's own variables
+
+=head1 SYNOPSIS
+
+  use lib 't';
+  use Harness::GitEnv;
+
+  sub make_repo {
+      scrub_git_env();
+      ...
+  }
+
+=head1 DESCRIPTION
+
+A fixture builds its repository by running git with its own temporary
+directory as the working directory, and that is not enough on its own to say
+which repository a command is about.  When C<GIT_DIR> is inherited and
+C<GIT_WORK_TREE> is not, git takes the repository from C<GIT_DIR> and the work
+tree from wherever it happens to be standing.  Every fixture command then
+reads and writes somebody else's repository while looking at the fixture's
+files.  A long run under an exported C<GIT_DIR> did exactly that once and left
+a shared working tree with an empty index.
+
+So the fixtures clear those variables for themselves rather than trusting the
+environment they were handed, and they all clear them the same way, here.
+
+The module has no dependency beyond C<Exporter>, and that is deliberate.  The
+git double is loaded into a spawned genesis child through C<PERL5OPT>, so
+whatever it reaches for is loaded in that child too.  Putting the scrub in
+C<helper> would have printed C<helper>'s own load notice into that child's
+output, which several rows read.
+
+C<t/unit-tests/harness_propagation-git_env.t> holds the scrub to all of this.
+One row arms C<GIT_DIR> at a repository of its own and proves a whole harness
+build leaves it untouched, a second proves the git double clears it in the
+child it is loaded into, and a third names every variable in both lists.
+
+=head1 FUNCTIONS
+
+=head2 scrub_git_env()
+
+Deletes git's own variables from C<%ENV> and answers how many of them were
+there.  Exported by default.
+
+It clears the seven that say which repository, index, or object store a
+command is about, which are C<GIT_DIR>, C<GIT_WORK_TREE>, C<GIT_INDEX_FILE>,
+C<GIT_OBJECT_DIRECTORY>, C<GIT_ALTERNATE_OBJECT_DIRECTORIES>,
+C<GIT_COMMON_DIR>, and C<GIT_NAMESPACE>.
+
+It clears four more that say which configuration git reads, which are
+C<GIT_CONFIG_GLOBAL>, C<GIT_CONFIG_SYSTEM>, C<GIT_CONFIG_NOSYSTEM>, and
+C<GIT_CONFIG_COUNT>.  C<helper::import> already points C<HOME> at the test
+home and writes a deterministic C<.gitconfig> there, and an inherited
+C<GIT_CONFIG_GLOBAL> or C<GIT_CONFIG_SYSTEM> overrides that and hands the
+operator's own configuration back to the fixtures.  Clearing the count is
+enough for the numbered key and value pairs, because git reads none of them
+without a count to read them by.
+
+=head2 What it deliberately leaves alone
+
+The author and committer pair, C<GIT_AUTHOR_NAME>, C<GIT_AUTHOR_EMAIL>,
+C<GIT_COMMITTER_NAME>, and C<GIT_COMMITTER_EMAIL>, are never cleared.  A
+fixture commit is signed out of them, C<Service::Git> copies the author pair
+into the committer pair as a handle is built, and
+C<t/unit-tests/service_git-preflight.t> arms and withholds them on purpose in
+its no-identity row.
+
+=head1 WHERE IT IS CALLED
+
+C<helper::import> calls it as the suite loads, so an environment inherited
+from the operator's shell is gone before any test file runs.
+
+Every fixture entry point calls it again on the way in, because a file may arm
+one of these itself after C<helper> has loaded.  Those entry points are
+C<make_harness> in L<Harness::Propagation>, C<import> in
+L<Harness::Propagation::Git>, and the repository builder of each test file
+that builds one for itself.
+
+It is never called down beside an individual git command, and that matters.
+C<Service::Git> sets C<GIT_INDEX_FILE> through a C<local> of its own, the
+harness does the same in three places, and
+C<t/unit-tests/genesis_commands_repo-init_no_commit_identity.t> arms
+C<GIT_CONFIG_GLOBAL> and C<GIT_CONFIG_NOSYSTEM> the same way.  A scrub
+reaching inside one of those scopes would take away the temporary index the
+call is standing on, or the arming the row is testing with.  Entry points sit
+above every one of them.

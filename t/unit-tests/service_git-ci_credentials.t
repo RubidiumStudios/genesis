@@ -9,12 +9,18 @@ use warnings;
 
 use lib 'lib';
 use lib 't';
+use Harness::GitEnv;
 use Test::More;
 use Test::Exception;
 
 $ENV{GENESIS_TESTING} = 'yes';
 $ENV{GENESIS_LIB}   ||= 'lib';
 $ENV{NOCOLOR}         = 1;
+
+# This is the one git-running file that does not say `use helper`, so nothing
+# else here clears what the environment was handed.  Without this the git init
+# below reads and writes whatever repository an inherited GIT_DIR names.
+scrub_git_env();
 
 use_ok 'Service::Git';
 

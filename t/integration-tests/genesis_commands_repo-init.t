@@ -248,6 +248,9 @@ subtest 'execute phase' => sub {
 
 	# ----- Auto-detect subdir mode: inside an enclosing git repo -----
 
+	# Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+	scrub_git_env();
+
 	my $sub = workdir('execute-subdir');
 	pushd($sub);
 	run('git init 2>/dev/null');

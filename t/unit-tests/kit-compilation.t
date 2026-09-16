@@ -26,6 +26,9 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{GIT_EDITOR} = 'true';
 
 sub again {
+	# Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+	scrub_git_env();
+
 	system("rm -rf $kitdir; mkdir -p $kitdir");
 	$cc->scaffold("test");
 
