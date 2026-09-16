@@ -9,6 +9,10 @@ use Genesis::Term qw/in_controlling_terminal/;
 use File::Basename qw/dirname/;
 use Cwd qw/abs_path getcwd/;
 
+# The all-zero object name, which git reads as a ref that is not there.  A
+# lease taken against it asks the remote for a branch it has not got yet.
+use constant NULL_SHA => '0' x 40;
+
 ### Class State {{{
 my %_instances;  # keyed by resolved git root path
 my $_ci_credentials_dir;  # temp dir holding materialised CI credentials
@@ -1414,6 +1418,7 @@ sub push {
 sub _push_one {
 	my ($self, $remote, $spec) = @_;
 	my $branch = $spec->{branch};
+	my $kind   = $spec->{kind} || 'deployment';
 
 	# A spec with no branch would build refs/heads/:refs/heads/, which git
 	# reads as a ref pair of its own and which nobody meant to ask for, so a
@@ -1421,12 +1426,37 @@ sub _push_one {
 	bug("#R{Service::Git->push} was handed a ref spec with no branch name")
 		unless defined $branch && length $branch;
 
+	# D31 lets a pull request branch be rewritten, because it is derived and
+	# private until it merges, and forbids the rewrite on control and on
+	# every deployment branch, whose history is append-only.  The refusal
+	# sits beside the refspec it would otherwise build, because this is the
+	# one place every caller passes through, so Genesis never leaves the
+	# guarantee to the repository's own branch protection.  The words are
+	# push_append_only's own, so an operator who meets this rule on two
+	# commands meets one sentence rather than two.
+	bail(
+		"Refusing to push #C{%s}, because that would rewrite history on ".
+		"#C{%s}.\n\n".
+		"That branch is append-only, so recovery is a new commit that ".
+		"restores the content and never a force push.",
+		$branch, $remote
+	) if exists $spec->{expect} && $kind ne 'pr';
+
 	my $refspec = $spec->{delete}
 		? ":refs/heads/$branch"
 		: "refs/heads/$branch:refs/heads/$branch";
 
+	# A pull request branch takes its lease against the tip the run read, so
+	# the rewrite lands only where nobody has written since, and NULL_SHA
+	# asks for a branch the remote has not got yet.  Every other branch is
+	# pushed plain, which leaves the remote's own non-fast-forward rule to
+	# reject a branch that moved.
+	my @lease = exists $spec->{expect}
+		? ("--force-with-lease=refs/heads/$branch:".($spec->{expect} || NULL_SHA))
+		: ();
+
 	my ($out, $rc, $err) = run({dir => $self->{root}, stderr => 0},
-		'git', 'push', '--porcelain', $remote, $refspec);
+		'git', 'push', '--porcelain', @lease, $remote, $refspec);
 
 	return _read_push_result($branch, $out, $rc, $err);
 }
