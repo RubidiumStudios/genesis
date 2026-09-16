@@ -63,10 +63,16 @@ use constant HOLD_REASONS => qw/
 # is not there yet, so every environment takes the not-propagated reading and
 # the run reports it.
 #
-# The staleness is read through the handle this sub already holds, and it is
-# filed under a key of its own rather than folded into the applied record,
-# because Genesis::Top::pipeline_staleness answers a list of per-environment
-# changes and a record's own three flat fields are a different thing.
+# The staleness is not read here.  Ruling 14 takes it out, because reading it
+# costs a second read of the applied record and a load of every environment in
+# the pipeline, and nothing the walk decides depends on it.  M17 reads it where
+# it renders it.
+#
+# An applied record the vault answers an error for is the whole run's input and
+# not one environment's, so under D55 the run refuses naming the path it could
+# not read.  An absent record is a different thing and stays a reading: D94
+# says the record is legitimately missing until genesis pipeline-apply has run,
+# and every environment then takes the not-propagated reading.
 sub read_durable_state {
 	my (%args) = @_;
 
@@ -78,32 +84,47 @@ sub read_durable_state {
 	my $control     = $top->control_branch;
 	my $control_sha = $git->sha($control);
 
-	my $applied = $top->applied_record;
+	# A caller standing inside a session owes the operator their branch back
+	# before it says why the run stopped, so it hands in a closure that closes
+	# the session and then refuses.  A caller with no session to close leaves
+	# it out and the refusal goes straight out through bail.
+	my $refuse = $args{refuse} || \&bail;
+
+	my $applied = eval {$top->applied_record};
+	$refuse->(
+		{exitcode => UNAVAILABLE},
+		"Could not read the applied record at #C{%s}: %s\n\n".
+		"The run reads which commit the pipeline was applied from before it ".
+		"decides anything, so it will not guess at one.  Nothing was written.",
+		$top->applied_record_path, $@ =~ s/\s+$//r
+	) if $@;
 
 	return {
 		# The pipeline's own label, which is the name the configuration
 		# gives it, and the deployment type beside it, which is what the
 		# applied record is addressed under.  A repository that names no
-		# label leaves the first null and the renderer falls back to the
-		# second.
-		pipeline          => $top->config->get('pipeline.name'),
-		type              => $top->type,
-		provider          => $args{provider} // $top->pipeline_provider_type,
-		control           => {branch => $control, commit => $control_sha},
-		applied           => $applied,
-		applied_staleness => $applied ? $top->pipeline_staleness($git) : [],
-		refreshed         => $args{refreshed} // 1,
+		# label leaves the first null, and M17's renderer chooses which of
+		# the two to print.
+		pipeline  => $top->config->get('pipeline.name'),
+		type      => $top->type,
+		provider  => $args{provider} // $top->pipeline_provider_type,
+		control   => {branch => $control, commit => $control_sha},
+		applied   => $applied,
+		refreshed => $args{refreshed} // 1,
 	};
 }
 
 # }}}
-# env_state - one environment's durable state, or the refusal it earns {{{
+# env_state - one environment's durable state, or the error that ends its turn {{{
 #
-# D55 and I11: the run refuses naming the input it could not read and never
-# guesses a value in its place.  The distinction D60 draws holds here.  A
-# read that fails for the whole run, such as an exodus mount the run cannot
-# reach at all, refuses; a read that fails for one environment records that
-# environment's outcome and lets the run continue.
+# D55 and I11: the run names the input it could not read and never guesses a
+# value in its place.  D60 decides how far the failure reaches, and this is a
+# per-environment read, so it reaches exactly one environment.  The raise is a
+# plain die rather than a refusal, because every caller runs inside walk_one,
+# which records that environment failed with this message beneath it and walks
+# on to the next.  A refusal spelled here could never fire, and one that read
+# as though it might would have a reader believe an unreadable hold ends the
+# run.
 #
 # The certified commit and the hold are read together, because they are the
 # two durable facts an environment carries and a caller that read one of them
@@ -120,11 +141,8 @@ sub env_state {
 	return $certified if $certified->{error};
 
 	my $hold = eval {$env->hold_record};
-	bail(
-		{exitcode => UNAVAILABLE},
-		"Could not read the hold record for #C{%s} at #C{%s}: %s\n\n".
-		"The run reads a hold before it delivers anything, so it will not ".
-		"guess that there is none.  Nothing was written.",
+	die sprintf(
+		"Could not read the hold record for %s at %s: %s\n",
 		$env->name, $env->hold_record_path, $@ =~ s/\s+$//r
 	) if $@;
 
@@ -884,6 +902,15 @@ sub plan {
 	# read it hands the answer in, because the command prints control's own
 	# sha above the walk and a second read there would be a second reader of
 	# the fact this sub exists to hold.
+	#
+	# The two options that shape a read of its own are refused beside a state
+	# that was read already, because the state carries its own provider and
+	# its own refreshed flag and a caller naming either would have handed in
+	# a value this sub then dropped without a word.
+	bug("Genesis::CI::Walk::plan was handed a state and a %s, and the state ".
+		"already carries one, so the %s would be dropped", $_, $_)
+		for grep {exists $opts{$_}} $opts{state} ? qw/provider refreshed/ : ();
+
 	my $state = $opts{state} || read_durable_state(
 		top       => $top,
 		git       => $git,
@@ -1005,13 +1032,14 @@ sub plan {
 
 			# The certified commit, which is the control commit the
 			# environment's last successful deployment was made from.  A
-			# This environment's durable state comes through the one reader,
-			# so the hold arrives beside the certified commit rather than
-			# being fetched again lower down.  A
 			# vault this run cannot reach makes the environment failed
 			# rather than deployed, and the two states with no certified
 			# commit are kept apart, because one of them is an environment
 			# the pipeline was never applied to.
+			#
+			# This environment's durable state comes through the one reader,
+			# so the hold arrives beside the certified commit rather than
+			# being fetched again lower down.
 			my $certified = $durable_for_env->($name);
 			my $hold      = $certified->{hold};
 			$env_record->{certified} = $certified;
@@ -1082,6 +1110,11 @@ sub plan {
 			# set is the ancestor's set between its certified commit and
 			# this one and so moves with the commit rather than with the
 			# environment.
+			# Every ancestor's durable state is read here, its hold record
+			# included, and nothing below reads that hold: only the
+			# ancestor's certified commit is asked for.  An ancestor whose
+			# hold raises therefore ends this environment's turn, so the read
+			# is a cost this line carries rather than a use.
 			my $ancestors = $ancestors_of->($name);
 
 			# D49: the gate this environment has not passed, read over the

@@ -1,8 +1,14 @@
 #!/usr/bin/env perl
-# Proves T140, T141, T142, T143, T144, and T321: a second run writes nothing,
-# a later run releases a hold by itself, the hand run covers the abnormal
-# cases, two copies agree, an unreadable input refuses, and two overlapping
-# runs read only durable state.
+# Proves T140, T141, T142, T143, and T321: a second run writes nothing, a
+# later run releases a hold by itself, the hand run covers the abnormal cases,
+# two copies produce the same trees and the same markers, an absent input is
+# read rather than guessed at, and two overlapping runs read only durable
+# state.
+#
+# T144's other half, which is a whole-run input the vault answers an error for
+# rather than an absence, is not here.  The harness can take a record away and
+# cannot make the vault refuse a read, so the refusal that guards the applied
+# record has no row of its own until a builder for that exists.
 #
 # Genesis accounts for itself on standard error, which is where info writes,
 # so every report a row reads comes out of the second value run_genesis
@@ -63,8 +69,8 @@ sub two_stage {
 }
 
 subtest 'a second run over delivered state writes nothing' => sub {
-	# Three rows, and one for each run's own restoration assertion.
-	plan tests => 5;
+	# Four rows, and one for each run's own restoration assertion.
+	plan tests => 6;
 
 	my $h = two_stage();
 	my $due = commit_on_control($h,
@@ -82,6 +88,14 @@ subtest 'a second run over delivered state writes nothing' => sub {
 	is($exit, 0, 'the second run succeeded');
 	is(harness_marker($h, $h->slug('qa')), $after_first, 'nothing was written');
 	like($err, qr/^\s*qa: idempotent/m, 'every environment records idempotent');
+
+	# The marker standing still says the branch did not move, and this says
+	# the run never asked it to: no commit was made and nothing was pushed.
+	# A run that committed and reset would leave the marker where it was and
+	# pass the row above on its own.
+	my @wrote = grep {$_->[0] eq 'commit' || $_->[0] eq 'push'} step_log($git);
+	is_deeply(\@wrote, [],
+		'and the second run made no commit and pushed nothing');
 };
 
 subtest 'a later run releases a hold with no cascade' => sub {
@@ -142,8 +156,8 @@ subtest 'the hand run covers the three abnormal cases' => sub {
 };
 
 subtest 'two copies and two identities agree' => sub {
-	# Two rows, and one for each run's own restoration assertion.
-	plan tests => 5;
+	# Three rows, and one for each run's own restoration assertion.
+	plan tests => 6;
 
 	my $h = two_stage();
 	my $due = commit_on_control($h,
@@ -167,6 +181,13 @@ subtest 'two copies and two identities agree' => sub {
 	my $from_a = files_at($h, "refs/remotes/origin/$qa", copy => 'a');
 
 	is_deeply($from_a, $from_c, 'the two copies produce the same tree');
+
+	# The markers as well as the trees, because the marker is what the next
+	# run walks from, and two copies that wrote the same files under
+	# different markers would each send the run after them somewhere else.
+	is_deeply(trailers_of($h, "refs/remotes/origin/$qa"),
+		trailers_of($h, "refs/remotes/origin/$qa", copy => $copy),
+		'and the same markers on top of them');
 
 	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
 	like($err, qr/^\s*qa: idempotent/m, 'copy A finds nothing left to do');
