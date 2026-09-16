@@ -1019,6 +1019,15 @@ C<delivered>, C<removed>, and C<overwrote>.
 Optional.  Where it is true the writer reports what would land and what would
 go and writes nothing at all.
 
+=item C<base>
+
+Optional.  The ref the delivery is worked out against, handed to the writer as
+it stands.  A preview passes the C<assumed> ref the pre-flight would have moved
+the branch to, because a dry run makes none of the pre-flight's writes and a
+delivery worked out against the un-moved branch would name every file the
+fast-forward is about to bring as one the commit would land.  A caller that
+writes leaves it out, and the writer then reads the branch it is standing on.
+
 =back
 
 B<Returns:> The record it was given, with C<overwrote> collected across the

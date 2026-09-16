@@ -1220,6 +1220,7 @@ sub deliver_pending {
 			deleted => [],
 			message => $message,
 			($args{dry_run} ? (dry_run => 1) : ()),
+			($args{base} ? (base => $args{base}) : ()),
 		);
 		$pending->{commit}    = $result->{commit};
 		$pending->{delivered} = $result->{delivered};
