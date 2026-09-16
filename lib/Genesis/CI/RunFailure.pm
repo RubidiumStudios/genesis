@@ -105,13 +105,33 @@ sub report_line {
 # never started had published nothing for each of them in turn.
 sub abort_outcomes {
 	my ($envs, $failed) = @_;
-	my %outcomes;
+	my $fields = abort_fields($envs, $failed);
+	return {map {
+		($_ => join(', ', grep {defined}
+			$fields->{$_}{outcome}, $fields->{$_}{detail}))
+	} keys %$fields};
+}
+
+# }}}
+# abort_fields - the same answer as the record's two fields {{{
+#
+# Ruling 22 splits the record's outcome from its qualifier, so the bare enum
+# word Genesis::CI::Report declares stands in outcome and the run's own
+# annotation stands in outcome_detail, and the status a run exits with is
+# decided by matching one whole word rather than by cutting a phrase apart.
+# The phrase an operator reads is composed back from the two, so there is one
+# place that decides and one that spells.
+sub abort_fields {
+	my ($envs, $failed) = @_;
+	my %fields;
 	my $reached = defined $failed ? 1 : 0;
 	for my $env (@$envs) {
-		$outcomes{$env} = $reached ? 'not published, run aborted' : 'not attempted';
+		$fields{$env} = $reached
+			? {outcome => 'not published', detail => 'run aborted'}
+			: {outcome => 'not attempted', detail => undef};
 		$reached = 0 if defined $failed && $env eq $failed;
 	}
-	return \%outcomes;
+	return \%fields;
 }
 
 # }}}

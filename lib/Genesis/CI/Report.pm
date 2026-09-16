@@ -1,0 +1,307 @@
+package Genesis::CI::Report;
+# The propagate run's report.  Every word an operator reads about an outcome
+# is composed here, and pipeline-status renders the same record through the
+# same helpers, so the two outputs cannot disagree about a phrase.  I8 is the
+# rule the file exists for: nothing is silently omitted.
+#
+# The report stands on three axes, and every one of them is exhaustive.  Each
+# environment in scope carries exactly one outcome, each control commit the
+# walk routed to an environment carries one of its own, and each file the
+# writer overwrote a hand edit on carries a third.  An environment with
+# nothing due reads idempotent rather than being left out, which is the whole
+# of I8: a quiet run and a blocked one have to read differently.
+use strict;
+use warnings;
+
+use Exporter qw/import/;
+use Genesis qw/info bug/;
+
+our @EXPORT_OK = qw/
+	held_qualifier hold_reason hold_detail render_run
+	ENV_OUTCOMES COMMIT_OUTCOMES FILE_OUTCOME
+/;
+
+# I8's three axes, as Publish and outcomes fixes the words.  The enum is
+# declared here rather than in the walk, because the walk, the delivery, the
+# abort, and M11's publish all write into one field and a word spelled in
+# four places is a word the four drift apart on.
+use constant ENV_OUTCOMES => (
+	'propagated', 'idempotent', 'failed', 'not attempted',
+	'held', 'publish rejected', 'not published',
+);
+use constant COMMIT_OUTCOMES => ('delivered', 'held');
+use constant FILE_OUTCOME    => 'overwrote-hand-edit';
+
+# The outcome word a dry run reads instead, and the same for the commit axis.
+# A preview says what would happen, and the two verbs are the only words that
+# change.  Task 10.16's render_preview takes the dry-run path over once it
+# lands, and until it does the run's own renderer answers for both.
+my %WOULD = (
+	'propagated' => 'would propagate',
+	'delivered'  => 'would deliver',
+);
+
+# The colour each outcome is printed in, so an operator reads a blocked run
+# off the shape of the output before they read a word of it.
+my %COLOUR = (
+	'propagated'       => 'G',
+	'idempotent'       => 'Gi',
+	'failed'           => 'R',
+	'not attempted'    => 'Y',
+	'held'             => 'Y',
+	'publish rejected' => 'R',
+	'not published'    => 'Y',
+);
+
+### The words {{{
+
+# hold_reason - one held commit's reason, in the form the design fixes {{{
+#
+# Publish and outcomes spells these exactly, so that genesis propagate, its
+# dry run, and the routing column of genesis pipeline-status can never
+# disagree about a word.  The overlap form carries the ancestor's own state
+# under D72 and the never-certified form carries no such clause, an
+# environment that has never deployed being already clear about why.
+sub hold_reason {
+	my ($held) = @_;
+
+	my $reason = $held->{reason} // '';
+
+	return sprintf('held by %s (%s), %s %s',
+		$held->{ancestor}, join(', ', @{$held->{ancestor_files} || []}),
+		$held->{ancestor}, $held->{ancestor_state})
+		if $reason eq 'ancestor-overlap';
+
+	if ($reason eq 'ancestor-uncertified') {
+		# An ancestor the run could not read at all is neither certified nor
+		# uncertified, and saying it had never certified a commit would be
+		# stating something no record said.
+		return sprintf('held by %s, which could not be read', $held->{ancestor})
+			if ($held->{ancestor_state} // '') eq 'unreadable';
+		return sprintf('held by %s, which has never certified a commit',
+			$held->{ancestor});
+	}
+
+	# The gate's form carries the trailer's own text and no held prefix,
+	# because the gate is a step somebody has to take rather than a state
+	# the pipeline works its own way out of.
+	return sprintf('gate: %s', $held->{gate_reason})
+		if $reason eq 'gate-ahead';
+
+	return sprintf('held behind control@%s',
+		substr($held->{behind}, 0, 7)) if $reason eq 'behind-held-commit';
+
+	# D50: the environment's own hold is what holds this commit, and what an
+	# operator has to do about it is the reason somebody wrote on the record,
+	# so the line carries that rather than the word on-hold.
+	return sprintf('held (%s)', $held->{hold_reason})
+		if $reason eq 'on-hold' && defined $held->{hold_reason};
+
+	return sprintf('held (%s)', $reason);
+}
+
+# }}}
+# held_qualifier - what one held environment waits for, or undef {{{
+#
+# D54's qualifier, which says what the environment waits for rather than why
+# any one commit is held.  An environment the pipeline was never applied to
+# waits for that command, one whose environment the run could not read has
+# failed instead, and one holding commits behind an ancestor waits for that
+# ancestor to certify the commit it has not deployed.
+#
+# It answers the qualifier alone and not the whole phrase, because ruling 22
+# puts the bare enum word in the record's outcome and the qualifier beside it
+# in outcome_detail, and the renderer reads the two back into one line.  So
+# the word held is written once, where the outcome is decided.
+sub held_qualifier {
+	my ($record) = @_;
+
+	my $certified = $record->{certified} // {};
+	return 'awaiting pipeline-apply'
+		if ($certified->{state} // '') eq 'never-applied';
+
+	# D50: a hold is a decision somebody made for a reason the pipeline
+	# cannot see, and only a human clears it, so it outranks whatever the
+	# commits underneath it happen to be waiting for.
+	return sprintf('needs clearing (%s)',
+		$record->{hold}{reason} // 'no reason given')
+		if $record->{hold};
+
+	my ($first) = @{$record->{held} || []};
+	return undef unless $first;
+
+	# The environment named is whoever has to certify, which is the ancestor
+	# where an ancestor holds the commit and the environment itself where a
+	# gate does, and the commit named is the one that certification has to
+	# reach, which is the gate itself rather than the commit it holds.
+	return sprintf('awaiting deployment (%s at control@%s)',
+		$first->{ancestor} // $record->{env},
+		substr($first->{gate} // $first->{control_commit}, 0, 7));
+}
+
+# }}}
+# hold_detail - what the standing hold is holding, in D56's three wordings {{{
+#
+# D56 makes a hold outrank idempotent, so an environment with one standing
+# never reads as though it were fine, and this is the line that says which of
+# three situations it is in: a known number of commits are waiting on the
+# hold itself, or something else is holding commits and the hold stands over
+# them, or nothing at all is waiting.
+#
+# The count is of the commits the hold itself took, and not of everything
+# held, because a commit a gate or an ancestor had already stopped is
+# reported under that reason and counting it here would name it twice and
+# send the operator to the wrong command.
+#
+# The nothing-due wording is answered only where nothing is held either.
+# The report prints this line directly above the commit lines, so an
+# environment whose commits a gate is holding would otherwise read that
+# nothing is due and then read the commits that are, which is the one thing
+# the line exists to stop.
+sub hold_detail {
+	my ($record) = @_;
+
+	return undef unless $record->{hold};
+
+	my @held = @{$record->{held} || []};
+	my $blocked = grep {($_->{reason} // '') eq 'on-hold'} @held;
+
+	return sprintf('%d commit%s %s blocked until this hold is released',
+		$blocked, $blocked == 1 ? '' : 's', $blocked == 1 ? 'is' : 'are')
+		if $blocked;
+
+	return 'nothing is due now, and anything that becomes due stays blocked'
+		unless @held;
+
+	# Everything held here is held for a reason of its own, and the hold
+	# stands over all of it, so the line says both: clearing what those
+	# commits wait for releases nothing while the hold is still standing.
+	return sprintf(
+		'%d commit%s %s blocked for %s own, and %s blocked while this hold stands',
+		scalar(@held), @held == 1 ? '' : 's',
+		@held == 1 ? 'is' : 'are',
+		@held == 1 ? 'a reason of its' : 'reasons of their',
+		@held == 1 ? 'stays' : 'stay');
+}
+
+# }}}
+# }}}
+### The report {{{
+
+# render_run - the run's report, one block per environment {{{
+#
+# Every environment in scope gets exactly one outcome line, every routed
+# control commit beneath it gets one of its own, and every overwritten hand
+# edit gets a third.  An environment with nothing due reads idempotent rather
+# than being left out, which is the whole of I8.
+#
+# Ruling 12 puts the default here rather than in the walk.  The walk's record
+# is computed from durable state alone and leaves the outcome null, so where
+# a hold stands the renderer reads the qualifier that says what the
+# environment waits for, and where nothing stands at all it reads idempotent.
+# One line of code composes the held phrase for the run and, once M11's
+# preview lands, for the preview too, which is the whole reason this module
+# exists rather than each output spelling the words itself.
+#
+# outcomes_only is the abort's shape.  A run that ended early published
+# nothing, so the commit axis has nothing true to say and printing a pending
+# commit under it would name a delivery that never happened.
+sub render_run {
+	my ($record, %opts) = @_;
+
+	my $git     = $opts{git};
+	my $dry_run = $opts{dry_run} ? 1 : 0;
+	my %known   = map {$_ => 1} ENV_OUTCOMES;
+
+	info "";
+	for my $env (@{$record->{environments} || []}) {
+		_settle($env);
+		bug("Genesis::CI::Report::render_run was handed the outcome '%s' for ".
+			"%s, which is not one of the words I8 fixes", $env->{outcome},
+			$env->{env}) unless $known{$env->{outcome}};
+
+		my $colour = $COLOUR{$env->{outcome}} // 'Y';
+		my $word   = $dry_run ? ($WOULD{$env->{outcome}} // $env->{outcome})
+		                      : $env->{outcome};
+		info "  #%s{%s}: %s", $colour, $env->{env},
+			join(', ', grep {defined && length} $word, $env->{outcome_detail});
+
+		info "    #R{%s}", $env->{error} if $env->{error};
+		next if $opts{outcomes_only};
+
+		if (my $detail = hold_detail($env)) {
+			info "    #Y{%s}", $detail;
+			info "    Release it with #C{genesis %s pipeline-release}",
+				$env->{env};
+		}
+
+		# The commit axis, in control order: what the environment received
+		# first, and then what it is holding behind it.
+		for my $pending (@{$env->{pending} || []}) {
+			info "    #Gi{control\@%s} %s  %s",
+				substr($pending->{control_commit}, 0, 7),
+				$pending->{subject},
+				$dry_run ? $WOULD{'delivered'} : 'delivered';
+			info "      #G{M} %s", $_ for _paths($git, $pending->{delivered});
+			info "      #R{D} %s", $_ for _paths($git, $pending->{removed});
+
+			# D33: an overwrite is never silent, and it is named per file,
+			# because the branch was carrying a hand edit that the mirror has
+			# just taken back off it.  It is the report's third axis rather
+			# than a warning beside it, since a warning is not an outcome and
+			# I8 asks for one per file.
+			info "      #Y{%s} %s", FILE_OUTCOME, $_
+				for _paths($git, $pending->{overwrote});
+		}
+		for my $held (@{$env->{held} || []}) {
+			info "    #Yi{control\@%s} %s  held",
+				substr($held->{control_commit}, 0, 7), $held->{subject};
+			info "      #Y{H} %s", hold_reason($held);
+		}
+	}
+
+	return 1;
+}
+
+# }}}
+# }}}
+### Internals {{{
+
+# _settle - fill the outcome the record left null {{{
+#
+# Ruling 12 and ruling 22 together: a hold that stands writes the bare word
+# held with its qualifier beside it, and an environment with nothing at all
+# to show writes idempotent.  Everything else was decided by whoever knew,
+# which is the walk for a failure and the run for a delivery.
+sub _settle {
+	my ($env) = @_;
+
+	return $env if defined $env->{outcome};
+
+	if (my $qualifier = held_qualifier($env)) {
+		$env->{outcome}        = 'held';
+		$env->{outcome_detail} = $qualifier;
+	} else {
+		$env->{outcome} = 'idempotent';
+	}
+	return $env;
+}
+
+# }}}
+# _paths - one delivery's paths as the operator wrote them {{{
+#
+# The writer records repository paths, which carry the deployment root a
+# repository may have been laid out under, and an operator reads the paths
+# they committed.  A caller with no git handle gets them as they stand.
+sub _paths {
+	my ($git, $paths) = @_;
+
+	return () unless $paths && @$paths;
+	return $git ? $git->unprefixed(@$paths) : @$paths;
+}
+
+# }}}
+# }}}
+
+1;
+# vim: fdm=marker:foldlevel=0:noet

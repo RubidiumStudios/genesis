@@ -208,6 +208,45 @@ B<Examples:>
   Genesis::CI::RunFailure::abort_outcomes(['dev', 'qa'], undef);
   # returns {dev => 'not attempted', qa => 'not attempted'}
 
+=head2 abort_fields
+
+    my $fields = Genesis::CI::RunFailure::abort_fields(\@envs, $failed);
+
+The same answer as the two fields an environment's record carries.
+
+The bare outcome word C<Genesis::CI::Report> declares stands in C<outcome>
+and the run's own annotation stands beside it in C<detail>, so a caller
+deciding what status the run exits with matches one whole word rather than
+cutting a phrase apart.  L</abort_outcomes> composes its phrase back out of
+these two, so one place decides what an environment records and one place
+spells it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\@envs>
+
+Every environment in scope, in the order the run walks them.
+
+=item C<$failed>
+
+The environment the run was walking when it failed, or undef where the run
+failed before it reached one, in which case every environment records that it
+was not attempted.
+
+=back
+
+B<Returns:> A hashref of environment name to a hashref of C<outcome> and
+C<detail>, where C<detail> is undefined for an environment the run never
+reached.
+
+B<Examples:>
+
+  Genesis::CI::RunFailure::abort_fields(['dev', 'qa'], 'dev');
+  # returns {dev => {outcome => 'not published', detail => 'run aborted'},
+  #          qa  => {outcome => 'not attempted', detail => undef}}
+
 =head1 AUTHOR
 
 Written by the Genesis team.

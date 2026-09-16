@@ -16,11 +16,12 @@ use Exporter qw/import/;
 use Scalar::Util ();
 use Genesis qw/run bug bail info/;
 use Genesis::CI::Marker qw/STAGE RELEASE_STAGE/;
+use Genesis::CI::Report;
 use Genesis::CI::RunFailure;
 
 our @EXPORT_OK = qw/
 	plan changed_set route_commit undeployed_set overlap
-	certified_for hold_for hold_reason held_qualifier hold_detail
+	certified_for hold_for
 	apply_hold
 	gate_state released_gates
 	introducing_commit walk_base
@@ -465,134 +466,6 @@ sub released_gates {
 
 # }}}
 # }}}
-### The words {{{
-
-# hold_reason - one held commit's reason, in the form the design fixes {{{
-#
-# Publish and outcomes spells these exactly, so that genesis propagate, its
-# dry run, and the routing column of genesis pipeline-status can never
-# disagree about a word.  The overlap form carries the ancestor's own state
-# under D72 and the never-certified form carries no such clause, an
-# environment that has never deployed being already clear about why.
-sub hold_reason {
-	my ($held) = @_;
-
-	my $reason = $held->{reason} // '';
-
-	return sprintf('held by %s (%s), %s %s',
-		$held->{ancestor}, join(', ', @{$held->{ancestor_files} || []}),
-		$held->{ancestor}, $held->{ancestor_state})
-		if $reason eq 'ancestor-overlap';
-
-	if ($reason eq 'ancestor-uncertified') {
-		# An ancestor the run could not read at all is neither certified nor
-		# uncertified, and saying it had never certified a commit would be
-		# stating something no record said.
-		return sprintf('held by %s, which could not be read', $held->{ancestor})
-			if ($held->{ancestor_state} // '') eq 'unreadable';
-		return sprintf('held by %s, which has never certified a commit',
-			$held->{ancestor});
-	}
-
-	# The gate's form carries the trailer's own text and no held prefix,
-	# because the gate is a step somebody has to take rather than a state
-	# the pipeline works its own way out of.
-	return sprintf('gate: %s', $held->{gate_reason})
-		if $reason eq 'gate-ahead';
-
-	return sprintf('held behind control@%s',
-		substr($held->{behind}, 0, 7)) if $reason eq 'behind-held-commit';
-
-	# D50: the environment's own hold is what holds this commit, and what an
-	# operator has to do about it is the reason somebody wrote on the record,
-	# so the line carries that rather than the word on-hold.
-	return sprintf('held (%s)', $held->{hold_reason})
-		if $reason eq 'on-hold' && defined $held->{hold_reason};
-
-	return sprintf('held (%s)', $reason);
-}
-
-# }}}
-# held_qualifier - one environment's own held phrase, or undef {{{
-#
-# D54's qualifier, which says what the environment waits for rather than why
-# any one commit is held.  An environment the pipeline was never applied to
-# waits for that command, one whose environment the run could not read has
-# failed instead, and one holding commits behind an ancestor waits for that
-# ancestor to certify the commit it has not deployed.
-sub held_qualifier {
-	my ($record) = @_;
-
-	my $certified = $record->{certified} // {};
-	return 'held, awaiting pipeline-apply'
-		if ($certified->{state} // '') eq 'never-applied';
-
-	# D50: a hold is a decision somebody made for a reason the pipeline
-	# cannot see, and only a human clears it, so it outranks whatever the
-	# commits underneath it happen to be waiting for.
-	return sprintf('held, needs clearing (%s)',
-		$record->{hold}{reason} // 'no reason given')
-		if $record->{hold};
-
-	my ($first) = @{$record->{held} || []};
-	return undef unless $first;
-
-	# The environment named is whoever has to certify, which is the ancestor
-	# where an ancestor holds the commit and the environment itself where a
-	# gate does, and the commit named is the one that certification has to
-	# reach, which is the gate itself rather than the commit it holds.
-	return sprintf('held, awaiting deployment (%s at control@%s)',
-		$first->{ancestor} // $record->{env},
-		substr($first->{gate} // $first->{control_commit}, 0, 7));
-}
-
-# }}}
-# hold_detail - what the standing hold is holding, in D56's three wordings {{{
-#
-# D56 makes a hold outrank idempotent, so an environment with one standing
-# never reads as though it were fine, and this is the line that says which of
-# three situations it is in: a known number of commits are waiting on the
-# hold itself, or something else is holding commits and the hold stands over
-# them, or nothing at all is waiting.
-#
-# The count is of the commits the hold itself took, and not of everything
-# held, because a commit a gate or an ancestor had already stopped is
-# reported under that reason and counting it here would name it twice and
-# send the operator to the wrong command.
-#
-# The nothing-due wording is answered only where nothing is held either.
-# propagate prints this line directly above the commit lines, so an
-# environment whose commits a gate is holding would otherwise read that
-# nothing is due and then read the commits that are, which is the one thing
-# the line exists to stop.
-sub hold_detail {
-	my ($record) = @_;
-
-	return undef unless $record->{hold};
-
-	my @held = @{$record->{held} || []};
-	my $blocked = grep {($_->{reason} // '') eq 'on-hold'} @held;
-
-	return sprintf('%d commit%s %s blocked until this hold is released',
-		$blocked, $blocked == 1 ? '' : 's', $blocked == 1 ? 'is' : 'are')
-		if $blocked;
-
-	return 'nothing is due now, and anything that becomes due stays blocked'
-		unless @held;
-
-	# Everything held here is held for a reason of its own, and the hold
-	# stands over all of it, so the line says both: clearing what those
-	# commits wait for releases nothing while the hold is still standing.
-	return sprintf(
-		'%d commit%s %s blocked for %s own, and %s blocked while this hold stands',
-		scalar(@held), @held == 1 ? '' : 's',
-		@held == 1 ? 'is' : 'are',
-		@held == 1 ? 'a reason of its' : 'reasons of their',
-		@held == 1 ? 'stays' : 'stay');
-}
-
-# }}}
-# }}}
 ### The walk {{{
 
 # walk_env - one environment's walk, from its newest marker to control {{{
@@ -806,19 +679,25 @@ sub abort_run {
 
 	my @envs = $record ? (map {$_->{env}} @{$record->{environments}})
 	                   : @{$args{envs} || []};
-	my $outcomes = Genesis::CI::RunFailure::abort_outcomes(\@envs, $args{at});
+	my $fields = Genesis::CI::RunFailure::abort_fields(\@envs, $args{at});
 
-	if ($record) {
-		$_->{outcome} = $outcomes->{$_->{env}}
-			for @{$record->{environments}};
+	# A run that died before the walk returned has no record to write into,
+	# so one is stood up over the names alone.  The report is rendered from a
+	# record either way, because an abort that printed its own lines is an
+	# abort whose words drift from every other output's.
+	$record ||= {environments => [map {{env => $_}} @envs]};
+	for my $env_record (@{$record->{environments}}) {
+		my $field = $fields->{$env_record->{env}} || {};
+		$env_record->{outcome}        = $field->{outcome};
+		$env_record->{outcome_detail} = $field->{detail};
 	}
 
-	# One line per environment, which is I8 over the axis this stage owns:
-	# a run that ended early still says what became of every environment it
-	# had in scope.  The renderer that will print the whole record lands
-	# with the report, and until it does this is the only place these words
-	# reach an operator.
-	info("  #Y{%s}: %s", $_, $outcomes->{$_}) for @envs;
+	# One line per environment, which is I8 over the axis this stage owns: a
+	# run that ended early still says what became of every environment it had
+	# in scope.  Only that axis is printed, because nothing was published and
+	# a pending commit listed as delivered would name a delivery that the
+	# abort has just undone.
+	Genesis::CI::Report::render_run($record, outcomes_only => 1);
 
 	my $failure = Scalar::Util::blessed($error)
 		&& $error->isa('Genesis::CI::RunFailure') ? $error : undef;

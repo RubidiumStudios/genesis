@@ -707,130 +707,6 @@ B<Examples:>
   my $released = Genesis::CI::Walk::released_gates($git, @commits);
   # returns {$gate_sha => 1} where a later commit reverts the gate
 
-=head2 hold_reason
-
-    my $words = Genesis::CI::Walk::hold_reason($held);
-
-One held commit's reason, in the form the design fixes.
-
-The words are exact, so that C<genesis propagate>, its dry run, and the
-routing column of C<genesis pipeline-status> can never disagree about one.
-The overlap form carries the ancestor's own state and the never-certified
-form carries no such clause, an environment that has never deployed being
-already clear about why.  A commit held behind a gate reads C<< gate:
-<reason> >> with the trailer's own text and no held prefix, because the gate
-is a step somebody has to take rather than a state the pipeline works its own
-way out of.  An ancestor this run could not read at all reads C<< held by
-<ancestor>, which could not be read >>, since an ancestor nobody can read is
-neither certified nor uncertified.  A commit standing behind one the run has
-already held reads C<< held behind control@<sha> >>, naming that commit in
-the marker's short form.  A commit stopped by the environment's own
-propagation hold reads C<< held (<reason>) >> carrying the reason somebody
-wrote on the hold record, rather than the word C<on-hold>, because what an
-operator has to clear is that reason and not the state's own name.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$held>
-
-One entry of an environment record's C<held> list.
-
-=back
-
-B<Returns:> The reason as one line of prose.
-
-B<Examples:>
-
-  my $words = Genesis::CI::Walk::hold_reason($held);
-  # returns "held by lab (ops/shared.yml), lab awaiting deployment"
-
-=head2 held_qualifier
-
-    my $words = Genesis::CI::Walk::held_qualifier($env_record);
-
-One environment's own held phrase, or undefined where nothing holds it.
-
-It says what the environment waits for rather than why any one commit is
-held.  An environment the pipeline was never applied to waits for that
-command, one holding commits behind an ancestor waits for that ancestor to
-certify the commit it has not deployed, and one holding commits behind a gate
-waits on its own deployment of the gate, which is the commit the phrase then
-names.
-
-An environment with a propagation hold standing against it reads C<< held,
-needs clearing (<reason>) >> ahead of any of those, because under D50 a hold
-is a decision somebody made for a reason the pipeline cannot see and only a
-person clears it, so it outranks whatever the commits underneath it happen to
-be waiting for.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$record>
-
-One environment's record, as L</plan> builds it.
-
-=back
-
-B<Returns:> The qualifier as one line of prose, or undefined.
-
-B<Examples:>
-
-  my $words = Genesis::CI::Walk::held_qualifier($env_record);
-  # returns "held, awaiting deployment (lab at control@1a2b3c4)"
-
-=head2 hold_detail
-
-    my $words = Genesis::CI::Walk::hold_detail($env_record);
-
-What the standing hold is holding, in the three wordings D56 fixes, or
-undefined where no hold stands.
-
-D56 makes a hold outrank idempotent, so an environment with one standing
-never reads as though it were fine, and this is the line beside
-L</held_qualifier> that says which of the three situations it is in.  Where
-the hold itself took commits it names how many are blocked until the hold is
-released.  Where something else is holding them it says they are blocked for
-reasons of their own and stay blocked while the hold stands.  Where nothing
-is held at all it reads that nothing is due now and that anything becoming
-due stays blocked.
-
-The count in the first of the three is of the commits the hold itself took,
-and not of everything held, because a commit a gate or an ancestor had
-already stopped is reported under that reason, and counting it there would
-name it twice and send an operator to the wrong command.
-
-The nothing-due wording is answered only where nothing is held either.
-C<propagate> prints this line directly above the commit lines, so an
-environment whose commits a gate is holding would otherwise read that nothing
-is due and then read the commits that are.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$record>
-
-One environment's record, as L</plan> builds it, after L</apply_hold> has run
-over it.
-
-=back
-
-B<Returns:> The detail as one line of prose, or undefined where the record
-carries no C<hold>.
-
-B<Examples:>
-
-  my $words = Genesis::CI::Walk::hold_detail($env_record);
-  # returns "2 commits are blocked until this hold is released"
-
-  my $words = Genesis::CI::Walk::hold_detail($gated_record);
-  # returns "1 commit is blocked for a reason of its own, and stays blocked
-  #          while this hold stands"
-
 =head2 walk_env
 
     Genesis::CI::Walk::walk_env(git => $git, env => $env, record => $rec,
@@ -1114,11 +990,18 @@ which is 1 for a run-fatal failure and C<Genesis::Exit::TEMPFAIL> for an
 unsurvivable one.  Anything that is not one of those two exits 1.
 
 Every environment records an outcome first, in the words
-C<Genesis::CI::RunFailure::abort_outcomes> composes: one the run had reached
-records C<not published, run aborted>, and one it never reached records
-C<not attempted>.  Each is printed on a line of its own, so a run that ended
-early still says what became of every environment it had in scope, which is
-I8 over the axis this stage owns.
+C<Genesis::CI::RunFailure::abort_fields> decides: one the run had reached
+records C<not published> with C<run aborted> beside it, and one it never
+reached records C<not attempted>.  C<Genesis::CI::Report::render_run> then
+prints the environment axis alone, so a run that ended early still says what
+became of every environment it had in scope, which is I8 over the axis this
+stage owns.  Only that axis is printed, because nothing was published and a
+pending commit named as delivered would name a delivery the abort has just
+undone.
+
+A walk that died before it produced a record leaves the names alone to go on,
+and a record is stood up over them so the report is rendered the same way
+either way.
 
 The abort comes last, because it is what resets every branch the session
 committed to back to T and it ends the process on the way out.  A run with
@@ -1147,9 +1030,9 @@ where there is no record.
 =item C<at>
 
 The environment the run had reached.  Everything up to and including it
-records C<not published, run aborted> and everything after it records
-C<not attempted>.  A run that names none died before it reached any, so
-every environment records C<not attempted>.
+records C<not published> and everything after it records C<not attempted>.
+A run that names none died before it reached any, so every environment
+records C<not attempted>.
 
 =item C<error>
 
