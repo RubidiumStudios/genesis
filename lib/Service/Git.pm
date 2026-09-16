@@ -779,8 +779,19 @@ sub mirror_tree {
 sub ls_tree {
 	my ($self, $ref, $path) = @_;
 	$path //= '';
-	my ($out) = run({ dir => $self->{root} },
+	my ($out, $rc, $err) = run({ dir => $self->{root}, stderr => 0 },
 		'git', 'ls-tree', '-r', '--name-only', '-z', $ref, $path);
+	# The status is read, the way ls_files and diff_names read theirs.  git
+	# refuses an empty pathspec and a ref it cannot resolve by name, and a
+	# refusal handed back unread is a sentence split on NULs and answered as
+	# though it were the paths on that ref.  A caller then has git's own
+	# complaint standing where a path should be, which is worse than the
+	# question going unanswered.
+	bail(
+		{exitcode => DATAERR},
+		"Cannot list #C{%s} in #C{%s}:\n%s",
+		$ref, $self->{root}, ($err // $out // 'git gave no reason')
+	) if $rc;
 	return grep { /\S/ } split /\0/, ($out || '');
 }
 

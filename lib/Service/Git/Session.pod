@@ -664,7 +664,11 @@ is accepted and not read yet.
 =item C<base>
 
 The ref or tree the delivery is worked out against, optional, and the preview
-is the only caller that passes one.  A run that writes commits the index of
+is the only caller that passes one.  Its whole tree is listed, so C<removed>
+is the paths that ref holds and the set no longer does, exactly as it is for a
+run reading the index.  A listing git refuses is raised rather than answered,
+because git's own complaint split into lines and read back as paths would have
+the preview report a removal of something nobody has.  A run that writes commits the index of
 the branch the session stands on, so an index read off some other ref is one
 the commit could not match, and a C<base> arriving without C<dry_run> is
 therefore raised as a bug before anything is read.  The pre-flight's
@@ -735,6 +739,12 @@ C<SOFTWARE>, and the index has not been read when it is raised.
 
 C<< "Cannot read the index of %s" >> -- raised by C<< $git->ls_files >> where
 git refuses to read the index. It exits C<DATAERR>.
+
+=item *
+
+C<< "Cannot list %s in %s" >> -- raised by C<< $git->ls_tree >> where git
+refuses to list the C<base> a preview named, which is a ref this repository
+cannot resolve. It exits C<DATAERR>.
 
 =item *
 

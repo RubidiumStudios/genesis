@@ -1204,6 +1204,12 @@ Lists the files present on a ref, recursively.
 The listing is read NUL-separated, so a path holding a byte outside ASCII
 comes back as itself rather than quoted and octal-escaped.
 
+The exit status is read, the way L</ls_files> and L</diff_names> read theirs.
+git refuses an empty pathspec and a ref it cannot resolve by name, and a
+refusal handed back unread is one sentence split on NULs and answered as
+though it were the paths on that ref, so a caller gets git's own complaint
+standing where a path should be.
+
 B<Parameters:>
 
 =over 4
@@ -1216,11 +1222,14 @@ The ref to list.
 
 The path to list under. A caller who wants the whole tree passes C<'.'>, which
 is git's own spelling for it. Leaving it out hands git an empty pathspec,
-which git refuses by name, and the listing then comes back empty.
+which git refuses by name, and the refusal is raised rather than answered.
 
 =back
 
 B<Returns:> The list of paths.
+
+B<Errors:> Bails at C<Genesis::Exit::DATAERR> where git refused the listing,
+naming the ref, the repository, and the reason git gave.
 
 B<Examples:>
 
@@ -1288,6 +1297,12 @@ caller reports when the comparison above comes back false.
 
 The listing is read NUL-separated, so a path holding a byte outside ASCII
 comes back as itself rather than quoted and octal-escaped.
+
+The exit status is read, the way L</ls_files> and L</diff_names> read theirs.
+git refuses an empty pathspec and a ref it cannot resolve by name, and a
+refusal handed back unread is one sentence split on NULs and answered as
+though it were the paths on that ref, so a caller gets git's own complaint
+standing where a path should be.
 
 B<Parameters:>
 
