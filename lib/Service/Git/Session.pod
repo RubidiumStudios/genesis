@@ -503,6 +503,13 @@ It is not C<abort>. C<abort> ends the session and the run with it, so every
 environment below the broken one would go unattempted, which is the shape the
 walk exists to avoid. The run walks on to the next environment instead.
 
+The modified paths are named before they go, in the words C<abort> uses,
+because the same C<git reset --hard> runs here and the evidence has to reach
+the operator either way. A file somebody was working on is gone once the
+reset has run, so a discard that said nothing would leave them no record of
+what it took. An untracked file is named by neither, because neither removes
+one.
+
 Control is never reset here, for the same reason C<abort> leaves it alone:
 committed work on control is never discarded.
 

@@ -412,6 +412,15 @@ sub discard {
 	return $self if defined $self->{control} && $branch eq $self->{control};
 
 	unless ($git->is_clean) {
+		# Named before it goes, in the words abort uses, because this runs
+		# the same reset --hard abort runs and the evidence has to reach the
+		# operator either way: a file somebody was working on is gone once
+		# the reset has run, and a reset that said nothing leaves them no
+		# record of what it took.
+		my @modified = @{$self->modified_paths};
+		Genesis::error("Discarding uncommitted changes in #C{%s}:\n%s",
+			$git->root, join("", map {"  - $_\n"} @modified)) if @modified;
+
 		run({dir => $git->root, passfail => 1},
 			'git', 'reset', '--hard', 'HEAD')
 			or bail({exitcode => SOFTWARE},

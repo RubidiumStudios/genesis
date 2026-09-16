@@ -607,6 +607,17 @@ sub walk_one {
 	my $session = $args{session};
 	my $record  = $args{record};
 
+	# A caller that writes hands the session over, because a delivery that
+	# died halfway is put back through it and there is no other way to reach
+	# the branch.  Taking the session silently would let a caller write
+	# without one and leave a partial delivery standing with nothing said, so
+	# the omission is refused here rather than discovered on the branch.  A
+	# caller that writes nothing, which is plan and a dry run, needs none.
+	bug("Genesis::CI::Walk::walk_one was asked to deliver to %s with no ".
+		"session, so a delivery that died halfway would leave its partial ".
+		"write standing on the branch", $record->{env} // 'an environment')
+		if $args{writes} && !$session;
+
 	my $ok = eval {
 		$args{deliver}->();
 		1;

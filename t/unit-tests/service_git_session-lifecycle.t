@@ -11,6 +11,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use Test::Output;
 use Cwd qw/getcwd abs_path/;
 use Genesis;
 use Service::Git;
@@ -118,6 +119,37 @@ subtest 'a clean tree and index are accepted' => sub {
 	my $session = $git->session(control => $h->control);
 	ok($session->begin, 'begin accepted a clean tree and index');
 	ok($session->active, 'and the session is open');
+	$session->finish;
+};
+
+subtest 'a discard names the paths it is about to throw away' => sub {
+	plan tests => 3;
+
+	# discard runs the same reset --hard abort runs, and the evidence has to
+	# reach the operator either way: a file somebody was working on is gone
+	# once the reset has run, and a reset that said nothing leaves them no
+	# record of what it took.
+	my $h   = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $git = $h->git('a');
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
+
+	# The file is committed onto the branch first, because the change has to
+	# be a tracked one: an untracked file survives a discard under D84 and so
+	# is not evidence a discard owes anybody.
+	$git->checkout_file($session->origin->{head}, 'qa.yml');
+	$git->commit('deliver qa.yml', 'qa.yml');
+	helper::put_file($git->root . '/qa.yml', "---\nedited: in the tree\n");
+	ok(!$git->is_clean, 'the branch is carrying an uncommitted change');
+
+	my $said = stderr_from {$session->discard($h->slug('qa'))};
+	like($said, qr/Discarding uncommitted changes in/,
+		'the discard says what it is about to do');
+	like($said, qr/\bqa\.yml\b/, 'and names the path it throws away');
+
 	$session->finish;
 };
 
