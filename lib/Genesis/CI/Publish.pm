@@ -64,8 +64,10 @@ sub publish_run {
 	unless (grep {$_->{ok}} @$pushes) {
 		my $reason = $died;
 		# The first ref that said anything, since the classifier reads one
-		# line.
-		$reason = (grep {length} map {$_->{reason}} @$pushes)[0]
+		# line.  A result that carries no reason at all is read for what it
+		# is rather than warned about, because the warning would land on the
+		# same stream the run's own report is read from.
+		$reason = (grep {defined && length} map {$_->{reason}} @$pushes)[0]
 			unless defined $reason && length "$reason";
 		$args{unsurvivable}->($reason) if $args{unsurvivable};
 		return $result;

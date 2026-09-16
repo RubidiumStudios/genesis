@@ -2599,9 +2599,9 @@ B<Examples:>
   $git->_push_one('origin', {branch => 'lab/bosh'});
   # returns a result reading status updated and ok 1
 
-  $git->_push_one('origin', {branch => 'lab/bosh'});
-  # returns a result reading status rejected, ok 0, and reason 'fetch first'
-  #   where the remote turned the ref down
+  $git->_push_one('origin', {branch => 'prod/bosh'});
+  # returns a result reading status rejected, ok 0, and reason 'fetch first',
+  #   where somebody else has moved prod/bosh on the remote
 
 =head2 _read_push_result
 

@@ -1389,11 +1389,13 @@ sub _classify_remote_error {
 # and the name worth reporting is the remote's own.
 sub push {
 	my ($self, %opts) = @_;
-	my $remote = $opts{remote}
-		or bail(
-			"#R{Service::Git->push} needs its remote by name, as ".
-			"#C{remote => '<remote>'}"
-		);
+	# Tested for presence rather than for truth, because a remote somebody
+	# named 0 is a remote and not a missing argument.
+	bail(
+		"#R{Service::Git->push} needs its remote by name, as ".
+		"#C{remote => '<remote>'}"
+	) unless defined $opts{remote} && length $opts{remote};
+	my $remote = $opts{remote};
 	my @specs = @{$opts{refs} || []};
 	return [map {$self->_push_one($remote, $_)} @specs];
 }
@@ -1412,6 +1414,12 @@ sub push {
 sub _push_one {
 	my ($self, $remote, $spec) = @_;
 	my $branch = $spec->{branch};
+
+	# A spec with no branch would build refs/heads/:refs/heads/, which git
+	# reads as a ref pair of its own and which nobody meant to ask for, so a
+	# spec that lost its name says so rather than pushing something.
+	bug("#R{Service::Git->push} was handed a ref spec with no branch name")
+		unless defined $branch && length $branch;
 
 	my $refspec = $spec->{delete}
 		? ":refs/heads/$branch"
