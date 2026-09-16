@@ -18,7 +18,7 @@ use Genesis qw/info bug/;
 
 our @EXPORT_OK = qw/
 	held_qualifier hold_reason hold_detail render_run
-	ENV_OUTCOMES COMMIT_OUTCOMES FILE_OUTCOME
+	ENV_OUTCOMES COMMIT_OUTCOMES FILE_OUTCOME AWAITING_APPLY
 /;
 
 # I8's three axes, as Publish and outcomes fixes the words.  The enum is
@@ -31,6 +31,13 @@ use constant ENV_OUTCOMES => (
 );
 use constant COMMIT_OUTCOMES => ('delivered', 'held');
 use constant FILE_OUTCOME    => 'overwrote-hand-edit';
+
+# D54's qualifier for an environment the pipeline has never been applied to.
+# It is declared here because this module owns every word an operator reads
+# about an outcome, and the command that meets the same state before the walk
+# has anything to say writes the record's detail through this name rather than
+# spelling the phrase a second time.
+use constant AWAITING_APPLY => 'awaiting pipeline-apply';
 
 # The outcome word a dry run reads instead, and the same for the commit axis.
 # A preview says what would happen, and the two verbs are the only words that
@@ -117,7 +124,7 @@ sub held_qualifier {
 	my ($record) = @_;
 
 	my $certified = $record->{certified} // {};
-	return 'awaiting pipeline-apply'
+	return AWAITING_APPLY
 		if ($certified->{state} // '') eq 'never-applied';
 
 	# D50: a hold is a decision somebody made for a reason the pipeline
@@ -226,7 +233,12 @@ sub render_run {
 		info "  #%s{%s}: %s", $colour, $env->{env},
 			join(', ', grep {defined && length} $word, $env->{outcome_detail});
 
-		info "    #R{%s}", $env->{error} if $env->{error};
+		# The label is coloured and the message is not.  csprintf tolerates
+		# one level of balanced braces inside a colour span, and an
+		# unbalanced brace in a YAML reader's complaint ends the span early
+		# and moves the characters after it, so the operator reads a message
+		# that is not the one the reader wrote.
+		info "    #R{error}: %s", $env->{error} if $env->{error};
 		next if $opts{outcomes_only};
 
 		if (my $detail = hold_detail($env)) {
@@ -241,7 +253,7 @@ sub render_run {
 			info "    #Gi{control\@%s} %s  %s",
 				substr($pending->{control_commit}, 0, 7),
 				$pending->{subject},
-				$dry_run ? $WOULD{'delivered'} : 'delivered';
+				_commit_word($pending->{outcome} // 'delivered', $dry_run);
 			info "      #G{M} %s", $_ for _paths($git, $pending->{delivered});
 			info "      #R{D} %s", $_ for _paths($git, $pending->{removed});
 
@@ -254,8 +266,9 @@ sub render_run {
 				for _paths($git, $pending->{overwrote});
 		}
 		for my $held (@{$env->{held} || []}) {
-			info "    #Yi{control\@%s} %s  held",
-				substr($held->{control_commit}, 0, 7), $held->{subject};
+			info "    #Yi{control\@%s} %s  %s",
+				substr($held->{control_commit}, 0, 7), $held->{subject},
+				_commit_word($held->{outcome} // 'held', $dry_run);
 			info "      #Y{H} %s", hold_reason($held);
 		}
 	}
@@ -285,6 +298,29 @@ sub _settle {
 		$env->{outcome} = 'idempotent';
 	}
 	return $env;
+}
+
+# }}}
+# _commit_word - one routed commit's outcome, checked against the enum {{{
+#
+# The commit axis reads its words out of COMMIT_OUTCOMES the way the
+# environment axis reads its own out of ENV_OUTCOMES, so the enum is
+# load-bearing on all three axes rather than on one of them.  A word from
+# outside it is a defect in whoever wrote the record, and the guard says so by
+# name rather than printing it.
+#
+# The word is taken off the record with a default beside it, because nothing
+# writes one yet and the axis still has to have a reader that can be handed
+# the wrong thing.
+sub _commit_word {
+	my ($outcome, $dry_run) = @_;
+
+	my %known = map {$_ => 1} COMMIT_OUTCOMES;
+	bug("Genesis::CI::Report::render_run was handed the commit outcome ".
+		"'%s', which is not one of the words I8 fixes", $outcome)
+		unless defined $outcome && $known{$outcome};
+
+	return $dry_run ? ($WOULD{$outcome} // $outcome) : $outcome;
 }
 
 # }}}

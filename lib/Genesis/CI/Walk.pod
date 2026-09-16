@@ -1068,8 +1068,9 @@ unattempted.
 Optional, false by default.  True where the caller is delivering, which makes
 the session required: a delivery that died halfway is put back through it,
 and a caller that wrote without one would leave its partial delivery standing
-on the branch with nothing said.  L</plan> and a dry run write nothing and so
-pass neither.
+on the branch with nothing said.  A dry run walks the same path and writes
+nothing, so it passes the session and C<writes> false; only L</plan>, which
+never reaches a branch at all, passes neither.
 
 =back
 
