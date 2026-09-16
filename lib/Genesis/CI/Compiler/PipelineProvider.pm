@@ -260,9 +260,16 @@ my @_capabilities = sort qw/
 #
 # Mandatory for the same reason the fragment is: a provider whose
 # abilities are unknown cannot have its keys gated.
+#
+# The declaration itself lives on the matching class under
+# Genesis::CI::Provider, beside the fragment, and this reads it from
+# there through the same route, so that one class answers for both halves
+# of a provider and the two sides cannot answer differently.
 sub capabilities {
 	my ($self) = @_;
-	bug("Subclass '%s' must implement capabilities()", ref($self) || $self);
+	require Genesis::CI::Provider;
+	return Genesis::CI::Provider->provider_class($self->provider_type)
+		->capabilities;
 }
 
 # }}}
@@ -762,15 +769,18 @@ Genesis::CI::Compiler::AST and generates platform-specific configuration.
     return { 'pipeline.yml' => 'Pipeline definition' };
   }
 
-  # The keys this provider takes under pipeline.provider are declared
-  # once, on the matching class under Genesis::CI::Provider, and the
-  # base reads them from there:
+  # The keys this provider takes under pipeline.provider, and the six
+  # abilities it claims, are declared once, on the matching class under
+  # Genesis::CI::Provider, and the base reads both from there:
   #
   #   package Genesis::CI::Provider::MyPlatform;
   #   sub provider_options_schema {
   #     return {
   #       target => {type => 'string', description => 'Where to set it'},
   #     };
+  #   }
+  #   sub capabilities {
+  #     return {multi_file_output => 1, ...};
   #   }
 
 =head1 SHARED HELPERS

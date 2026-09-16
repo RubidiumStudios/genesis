@@ -2549,25 +2549,18 @@ sub _validate_pipeline_config {
 sub _validate_capability_gates {
 	my ($self) = @_;
 
+	# Every provider declares its abilities under D105, so there is a
+	# declaration to gate against for each of them and nothing here asks
+	# whether a provider has a class.  The type comes through the accessor
+	# rather than off the key, because the gates are reached only from
+	# _validate_pipeline_config, which has already returned for a
+	# repository with no pipeline, so the accessor always has an answer.
 	require Genesis::CI::Compiler::PipelineProvider;
-	my $type = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
-	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
-
-	# A provider with no compiler class declares no capabilities, which is
-	# manual under D100 and github-actions until its own compiler lands.
-	# There is no declaration to gate against, so nothing is refused.
-	return 1 unless $info && $info->{class};
-
-	unless (eval {require $info->{file}; 1}) {  ## no critic
-		# Copied first, because bail's own readers run evals that clear it.
-		my $err = $@;
-		bail({exitcode => CONFIG},
-			"Failed to load CI provider '%s': %s", $type,
-			without_backtrace($err));
-	}
-
+	require Genesis::CI::Provider;
+	my $type  = $self->pipeline_provider_type;
+	my $class = Genesis::CI::Provider->provider_class($type);
 	my $caps  = Genesis::CI::Compiler::PipelineProvider
-		->declared_capabilities($info->{class});
+		->declared_capabilities($class);
 	my $gates = Genesis::CI::Compiler::PipelineProvider->capability_gates;
 
 	# The gates that are going to fire are separated by where their key

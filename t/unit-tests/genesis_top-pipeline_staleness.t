@@ -87,7 +87,10 @@ subtest 'a changed pipeline-defining path names its environment' => sub {
 	certify($h, $_, control_commit => $applied, dependencies_read => [])
 		for qw/lab prod/;
 
-	write_env_file($h, 'prod', pipeline => {redeploy_cron => '0 3 * * *'});
+	# Any pipeline key the schema declares will move the file, and this one
+	# is gated by no capability, so the row stands whatever provider the
+	# repository names.
+	write_env_file($h, 'prod', pipeline => {require_pr => 'true'});
 
 	my $changes = staleness_for($h);
 	is(scalar(@$changes), 1, 'one environment changed');

@@ -253,6 +253,23 @@ sub provider_options_schema {
 }
 
 # }}}
+# capabilities - Concourse can do all but multi-file output {{{
+#
+# D101's six names, declared beside the fragment above, because under
+# D105 one class answers for both halves of a provider and the gates read
+# this from the class the provider map already names.
+sub capabilities {
+	return {
+		deployment_locks      => 1,  # the locker resource
+		cross_pipeline_events => 1,  # the shuttle's request queue and _ran event
+		optional_git_triggers => 1,  # trigger: false on a get
+		scheduled_jobs        => 1,  # the time resource
+		per_commit_runs       => 1,  # version: every
+		multi_file_output     => 0,  # one pipeline definition, and no more
+	};
+}
+
+# }}}
 # validate_config - target or url, and a url that is one {{{
 #
 # The rules a declaration cannot state, on top of the generic pass the

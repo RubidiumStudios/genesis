@@ -51,6 +51,19 @@ sub provider_options_schema {
 }
 
 # }}}
+# capabilities - a manual pipeline can do none of the six {{{
+#
+# D101's declaration, answered honestly.  Manual runs no jobs at all, so
+# every ability is false and every key one of them gates is refused at
+# load naming both, which is better than the block standing aside because
+# there was nothing to read.
+sub capabilities {
+	return {map {($_ => 0)} qw/cross_pipeline_events deployment_locks
+		multi_file_output optional_git_triggers per_commit_runs
+		scheduled_jobs/};
+}
+
+# }}}
 # }}}
 ### Instance Methods {{{
 

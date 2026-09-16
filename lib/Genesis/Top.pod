@@ -2982,12 +2982,18 @@ cannot declares nothing at all. Under such a provider the key is simply not
 a key, and an operator who writes it is refused by name as the configuration
 loads, before any gate is read.
 
-A provider with no compiler class declares no capabilities and is left
-alone, which is the manual provider and, until its own compiler lands, the
-github-actions one. Every other provider has its declaration checked
-against the six names through
+Every provider declares its abilities, so every gate here has a declaration
+to read and nothing asks whether a provider has a compiler class. The
+manual provider declares all six false, which is why a key it gates is
+refused rather than quietly accepted. Each declaration is checked against
+the six names through
 L<Genesis::CI::Compiler::PipelineProvider/declared_capabilities> before any
 gate reads it.
+
+The type comes from L</pipeline_provider_type> rather than off the key, and
+the declaration comes from the class
+L<Genesis::CI::Provider/provider_class> names for it, which is the class the
+provider block was already dispatched to.
 
 The one repository-wide key is read for what the operator actually wrote,
 through C<< Genesis::Config::is_set >> rather than C<< has >>, because a
@@ -3012,19 +3018,18 @@ and the environment as well where the key lives in an environment file.
 
 =item *
 
-C<"Failed to load CI provider ..."> - raised when the registry names a
-compiler class whose file will not compile. The schema build normally meets
-that first. What the failed C<require> said is carried through
-L<Genesis/without_backtrace>, so the operator reads the message without the line it
-was raised on or the frames behind it. It exits C<Genesis::Exit::CONFIG>,
-like every other refusal the load raises.
-
-=item *
-
 C<"CI provider ... declares the capabilities ..."> - raised through
 L<Genesis::CI::Compiler::PipelineProvider/declared_capabilities> when the
 provider class answers anything but exactly the six names, which is a bug
 in that class rather than anything an operator wrote.
+
+=item *
+
+C<"Failed to load CI provider ..."> - raised through
+L<Genesis::CI::Provider/provider_class> when the registry names a class
+whose file will not compile. An operator meets this at the dispatch inside
+C<Genesis::Config::validate> instead, which loads the same class first and
+refuses there in the terms every configuration refusal carries.
 
 =back
 

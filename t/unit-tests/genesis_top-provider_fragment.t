@@ -173,12 +173,6 @@ sub provider_options_schema {
 		},
 	};
 }
-1;
-TERSECLI
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Terse.pm', <<'TERSE');
-package Genesis::CI::Compiler::Providers::Terse;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
-sub provider_type {'terse'}
 # The capability declaration is mandatory beside the fragment, and this
 # file is about the fragment, so the fixture claims every ability and none
 # of what it writes is gated away.
@@ -187,6 +181,12 @@ sub capabilities {
 		multi_file_output optional_git_triggers per_commit_runs
 		scheduled_jobs/};
 }
+1;
+TERSECLI
+	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Terse.pm', <<'TERSE');
+package Genesis::CI::Compiler::Providers::Terse;
+use parent 'Genesis::CI::Compiler::PipelineProvider';
+sub provider_type {'terse'}
 1;
 TERSE
 	local @INC = ('t/tmp/lib', @INC);
@@ -221,6 +221,12 @@ sub provider_options_schema {
 		loud  => {type => 'boolean', default  => Genesis::Config::FALSE(), description => 'Optional'},
 	};
 }
+# Plain claims nothing, which is the ordinary case these rows are about.
+sub capabilities {
+	return {map {($_ => 0)} qw/cross_pipeline_events deployment_locks
+		multi_file_output optional_git_triggers per_commit_runs
+		scheduled_jobs/};
+}
 1;
 PLAIN
 	# And one that has a rule a declaration cannot state, which it adds on
@@ -249,34 +255,30 @@ sub validate_config {
 		unless $config->get("$path.target") || $config->get("$path.url");
 	return @errors;
 }
+# Pair claims every ability, so a key an ability offers is declared in
+# the fragment above and read back through the same walk as every other
+# key of the block.
+sub capabilities {
+	return {map {($_ => 1)} qw/cross_pipeline_events deployment_locks
+		multi_file_output optional_git_triggers per_commit_runs
+		scheduled_jobs/};
+}
 1;
 PAIR
-	# The compiler half of each fixture, because the capabilities are
-	# declared there while the fragment is declared on the CLI class
-	# beside it.  Plain claims nothing, which is the ordinary case these
-	# rows are about.  Pair claims every ability, so a key an ability
-	# offers is declared in its fragment and read back through the same
-	# walk as every other key of the block.
+	# The compiler half of each fixture, which the registry names for a
+	# provider that can be compiled.  Both halves of what a provider
+	# declares, the fragment and the capabilities, sit on the CLI class
+	# above, so there is nothing for these two to say beyond their type.
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Plain.pm', <<'PLAINC');
 package Genesis::CI::Compiler::Providers::Plain;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'plain'}
-sub capabilities {
-	return {map {($_ => 0)} qw/cross_pipeline_events deployment_locks
-		multi_file_output optional_git_triggers per_commit_runs
-		scheduled_jobs/};
-}
 1;
 PLAINC
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Pair.pm', <<'PAIRC');
 package Genesis::CI::Compiler::Providers::Pair;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'pair'}
-sub capabilities {
-	return {map {($_ => 1)} qw/cross_pipeline_events deployment_locks
-		multi_file_output optional_git_triggers per_commit_runs
-		scheduled_jobs/};
-}
 1;
 PAIRC
 	local @INC = ('t/tmp/lib', @INC);
@@ -337,41 +339,32 @@ PAIRC
 # Both provider-load refusals interpolate what the failed require said, and
 # under Carp::Always that is the message plus the frames behind it.
 subtest 'a provider that will not load is refused without its stack' => sub {
-	plan tests => 4;
+	plan tests => 2;
 
-	my $top = load_with($h, concourse());
+	# The file is loaded by now, so marking its entry as one that failed is
+	# what makes the next require of it fail the way a broken provider
+	# would.  One probe rather than two: the class that owns the block is
+	# the class that answers for the abilities as well, so the dispatch is
+	# where a provider that will not load is met, and the capability gates
+	# behind it ask a class the dispatch has already brought in.
+	local $INC{'Genesis/CI/Provider/Concourse.pm'} = undef;
+	my $refusal = '';
+	eval {load_with($h, concourse()); 1} or $refusal = $@;
+	(my $flat = Genesis::Term::decolorize($refusal)) =~ s/\s+/ /g;
 
-	# Both files are loaded by now, so marking an entry as one that failed
-	# is what makes the next require of it fail the way a broken provider
-	# would.  The two probes name different files because the dispatch
-	# loads the class that owns the block and the gates load the class
-	# that answers for the abilities, and those are not the same class.
-	for my $probe (
-		['Genesis/CI/Provider/Concourse.pm',
-			sub {load_with($h, concourse())}, 'the dispatch'],
-		['Genesis/CI/Compiler/Providers/Concourse.pm',
-			sub {$top->_validate_capability_gates}, 'the capability gates'],
-	) {
-		my ($file, $run, $what) = @$probe;
-		local $INC{$file} = undef;
-		my $refusal = '';
-		eval {$run->(); 1} or $refusal = $@;
-		(my $flat = Genesis::Term::decolorize($refusal)) =~ s/\s+/ /g;
+	like $flat, qr/Failed to load CI provider 'concourse'/,
+		'the dispatch names the provider whose file would not load';
 
-		like $flat, qr/Failed to load CI provider 'concourse'/,
-			"$what names the provider whose file would not load";
-
-		# Carp::Always appends bail's own frames to the refusal as well, and
-		# those start at bail's raise site in Genesis.pm, so what bail was
-		# handed is everything between the heading and that.  Reading the
-		# whole refusal would find a file and a line either way.
-		my ($said) = $flat =~
-			m{provider 'concourse': (.*?)(?: at \S*Genesis\.pm line \d+|$)};
-		$said //= '';
-		$said =~ s/^\s+|\s+$//g;
-		unlike $said, qr/ at \S+ line \d+/,
-			"and $what hands the message over with no location in it";
-	}
+	# Carp::Always appends bail's own frames to the refusal as well, and
+	# those start at bail's raise site in Genesis.pm, so what bail was
+	# handed is everything between the heading and that.  Reading the
+	# whole refusal would find a file and a line either way.
+	my ($said) = $flat =~
+		m{provider 'concourse': (.*?)(?: at \S*Genesis\.pm line \d+|$)};
+	$said //= '';
+	$said =~ s/^\s+|\s+$//g;
+	unlike $said, qr/ at \S+ line \d+/,
+		'and it hands the message over with no location in it';
 };
 
 # A provider's own check runs inside the load, so what it does when it goes
@@ -385,10 +378,17 @@ sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
 sub validate_config {die "the provider fell over\n"}
 1;
 BOOM
+	# Quiet is the one of the pair whose load runs to the end, so it is
+	# the one that reaches the capability gates and has to answer them.
 	put_file('t/tmp/lib/Genesis/CI/Provider/Quiet.pm', <<'QUIET');
 package Genesis::CI::Provider::Quiet;
 sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
 sub validate_config {return (undef)}
+sub capabilities {
+	return {map {($_ => 0)} qw/cross_pipeline_events deployment_locks
+		multi_file_output optional_git_triggers per_commit_runs
+		scheduled_jobs/};
+}
 1;
 QUIET
 	local @INC = ('t/tmp/lib', @INC);

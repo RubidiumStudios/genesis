@@ -70,22 +70,36 @@ EOF
 }
 
 # }}}
-# provider_options_schema - no provider key of its own yet {{{
+# capabilities - what a workflow can do, as far as D101 has fixed it {{{
 #
-# Empty rather than absent, and empty on purpose rather than by oversight.
-# The two flags this provider takes are ci-github-repo and
-# ci-github-branch, and neither is a provider key: under D102 the
-# repository belongs to the source-control block, and the branch a run
-# triggers on is the control branch that same block names.  So there is
-# nothing for the provider block to declare until this provider's own
-# compiler lands and brings the keys it reads with it.
+# D101 gives GitHub Actions multi_file_output true, because a workflow
+# directory is several files and D67's override name follows them.  The
+# other five it leaves to be read off the provider when its compiler
+# class is written, so they are false here and the refusal is the
+# conservative one: a key this provider cannot honour is refused now
+# rather than accepted and dropped when the pipeline is emitted.
+sub capabilities {
+	return {multi_file_output => 1,
+		map {($_ => 0)} qw/cross_pipeline_events deployment_locks
+			optional_git_triggers per_commit_runs scheduled_jobs/};
+}
+
+# }}}
+# provider_options_schema - the one key a workflow offers {{{
 #
-# output_layout is among the keys that wait on it.  A provider offers that
-# key by declaring it here, and this one claims no ability to emit several
-# files while it has no compiler class to declare one, so it declares no
-# such key either.
+# Empty until now, because D102 put this provider's two CLI flags in the
+# source-control block.  Under D105 and D101 the provider that can emit
+# several files is the provider that declares the key choosing between
+# the forms, so declaring multi_file_output above means declaring this.
 sub provider_options_schema {
-	return {};
+	return {
+		output_layout => {
+			type        => 'enum',
+			values      => [qw/single multiple/],
+			default     => 'single',
+			description => 'Whether the override file is named per emitted file'
+		},
+	};
 }
 
 # }}}
