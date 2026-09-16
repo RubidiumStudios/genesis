@@ -29,7 +29,7 @@ subtest 'a fixture build never reaches the repository GIT_DIR names' => sub {
 	# escape lands here and nowhere a person would miss it.
 	#
 	# It has a work tree and a remote, and it is not bare, because that is the
-	# shape that did the damage: git takes the repository from GIT_DIR and
+	# shape that did the damage.  Git takes the repository from GIT_DIR and
 	# the work tree from wherever it is standing, and the commits land with
 	# nothing refusing anywhere along the way.  A bare throwaway turns the
 	# work-tree commands away on its own, and one with no remote turns the
@@ -89,7 +89,7 @@ subtest 'the git double clears it in the child it is loaded into' => sub {
 		'-e', 'print exists $ENV{GIT_DIR} ? "kept" : "gone"');
 
 	is($rc, 0, 'the double loads in a child of its own');
-	is($said, 'gone', 'and the GIT_DIR it was handed is gone by the time it runs');
+	is($said, 'gone', 'and the GIT_DIR it was handed is gone');
 };
 
 subtest 'the scrub clears what git reads a repository out of' => sub {
