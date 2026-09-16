@@ -7,7 +7,10 @@ Genesis::CI::Walk - the per-commit propagation walk and its record
     use Genesis::CI::Walk;
 
     # What every environment should receive, computed and written nowhere.
-    my $record = Genesis::CI::Walk::plan($top, git => $git);
+    # The branches map is the pre-flight's own initial_state record, and
+    # nothing routes for an environment the map does not name.
+    my $record = Genesis::CI::Walk::plan($top, git => $git,
+                                         branches => $initial->{branches});
 
     # Then, inside the run's session, one commit per control commit.
     for my $env_record (@{$record->{environments}}) {
@@ -47,9 +50,10 @@ The middle of those two is what this module does.
 
 =head2 plan
 
-    my $record = Genesis::CI::Walk::plan($top, git => $git);
     my $record = Genesis::CI::Walk::plan($top, git => $git,
-                                         scope => ['qa'], branches => \%b);
+                                         branches => $initial->{branches});
+    my $record = Genesis::CI::Walk::plan($top, git => $git, scope => ['qa'],
+                                         branches => $initial->{branches});
 
 The run's canonical record, computed from durable state alone.
 
@@ -97,10 +101,17 @@ way, so an environment named on its own still reads its ancestor correctly.
 
 =item C<branches>
 
-Optional.  The pre-flight's per-environment branch records, keyed by
-environment name, each carrying the branch it settled and, under a dry run,
-the ref a real run would have moved that branch to.  An environment absent
-from it has no deployment branch on either side.
+Optional.  C<Genesis::CI::Preflight::initial_state>'s own C<branches> record,
+keyed by environment name, each entry carrying the branch it settled and,
+under a dry run, the ref a real run would have moved that branch to.  An
+environment absent from it has no deployment branch on either side, so it is
+recorded and passed over as awaiting C<genesis pipeline-apply> and nothing
+routes for it.  A call that leaves the map out therefore routes nothing at
+all.
+
+The map is an option because the walk does not yet read the state for
+itself.  Once C<walk_base> and C<read_durable_state> land the reading moves
+into them and the option goes.
 
 =item C<refreshed>
 
@@ -128,7 +139,8 @@ below is made through one and a walk without it can answer nothing.
 
 B<Examples:>
 
-  my $record = Genesis::CI::Walk::plan($top, git => $git);
+  my $record = Genesis::CI::Walk::plan($top, git => $git,
+                                       branches => $initial->{branches});
   # returns a record whose environments arrayref is in DAG order, with
   # each environment's due commits under pending
 

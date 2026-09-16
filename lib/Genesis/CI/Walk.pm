@@ -92,10 +92,16 @@ sub changed_set {
 	return ([], []) if $rc || !$out;
 
 	# A kind that is a directory stands for everything under it, which is
-	# how the dev kit and the reaction scripts join the set, so a path is
-	# in the set where the set names it or where the set names a directory
-	# it lies in.  Without that a commit touching the kit routes to nobody,
-	# and the kit is the one kind a pipeline exists to prove in lab first.
+	# how the dev kit joins the set, so a path is in the set where the set
+	# names it or where the set names a directory it lies in.  Without that
+	# a commit touching the kit routes to nobody, and the kit is the one
+	# kind a pipeline exists to prove in lab first.  A reaction script is
+	# not one of these: it joins the set as the explicit path bin/<script>
+	# the environment declares.
+	#
+	# Service::Git::Session::_members_at makes the same expansion from the
+	# other end, resolving the set's directory entries against a commit's
+	# tree, so a change to either of the two goes looking for its twin.
 	my @dirs = grep {m{/$}} keys %$kinds;
 
 	my (@hit, @carried_hit);
@@ -103,7 +109,12 @@ sub changed_set {
 		next unless $path =~ /\S/;
 		my $mark = $kinds->{$path};
 		unless (defined $mark) {
-			my ($dir) = grep {index($path, $_) == 0} @dirs;
+			# The longest entry that contains the path, rather than the first
+			# a hash happens to answer with, because a set naming both a
+			# directory and one below it would otherwise mark a path by
+			# whichever of the two came out of the hash first.
+			my ($dir) = sort {length($b) <=> length($a)}
+				grep {index($path, $_) == 0} @dirs;
 			next unless defined $dir;
 			$mark = $kinds->{$dir};
 		}

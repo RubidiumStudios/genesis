@@ -688,6 +688,16 @@ sub propagate {
 				next;
 			}
 
+			# The pull-request path is not built yet, and this guard goes
+			# with the task that builds it.  Until then a push onto a branch
+			# the repository's own policy says may only ever receive a
+			# proposal is the one half-built stage worth refusing outright.
+			if ($topo->{nodes}{$env_name}{require_pr}) {
+				info "  #Y{%s}: not attempted, because delivery by pull ".
+					"request is not built yet", $env_name;
+				next;
+			}
+
 			# What the environment itself waits for, and why each commit
 			# behind it is held.  The qualifier and the per-commit reason are
 			# printed in the forms the design fixes, so that this run, its
@@ -747,7 +757,12 @@ sub propagate {
 	};
 	unless ($ran) {
 		my $err = $@;
-		$session->abort($err) if $session->active;
+		# The abort prints the reason it was given, and a run failure arrives
+		# as an object, which prints as a hash address unless its message is
+		# taken off it first.
+		$session->abort(
+			ref($err) && $err->can('message') ? $err->message : $err
+		) if $session->active;
 		die $err;
 	}
 

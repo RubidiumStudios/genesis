@@ -32,28 +32,28 @@ plus C<CURRENT_ENV>/C<GIT_BRANCH>/C<WORKING_DIR>/C<OUT_DIR>/C<CACHE_DIR>
 environment variables no longer applies.  See L<Genesis::Commands> for
 the C<retired> mechanism.
 
-=head2 What C<propagate> diffs against
+=head2 Where C<propagate> starts each environment
 
 C<propagate> runs in two stages.  L<Genesis::CI::Preflight> settles the
 initial state first, which refreshes, checks control, refuses a branch with no
 legitimate origin or a hand edit, resets a branch a re-run reproduces, and
 fast-forwards a branch that is merely behind.  The walk then decides what to
-deliver to each environment, and it takes its diff base from the branch the
-pre-flight settled rather than from the environment's own name or from the
-remote-tracking ref.
+deliver to each environment, and it starts from the newest marker on the
+branch the pre-flight settled rather than from the environment's own name or
+from the remote-tracking ref.
 
 That branch is the deployment slug, and it is not behind its remote-tracking
 ref, because the pre-flight has just seen to both.  So a delivery a teammate
-published is already on the branch when the walk diffs, which is what stops
-the walk delivering it a second time.  Under a dry run the pre-flight moves
-nothing, and the record it leaves names the ref a real run would have left the
-branch on, which is the ref the walk diffs from instead.
+published is already on the branch when the walk reads its marker, which is
+what stops the walk delivering it a second time.  Under a dry run the
+pre-flight moves nothing, and the record it leaves names the ref a real run
+would have left the branch on, which is the ref the walk reads instead.
 
-The branch the walk diffs from is the branch it writes to.  Each target it
-hands to L<Genesis::CI::Propagation/propagate_envs> carries that branch, so
-the delivery is committed onto it, a pull request is cut from it and opened
-against it, and it is what gets pushed.  The environment's own name stays
-what the marker records and what the operator reads.
+The branch the walk reads from is the branch it writes to.  It hands each
+pending commit to the session's single writer, one delivery per control
+commit, on the branch the pre-flight settled, so every delivery is committed
+onto that branch and it is what gets pushed.  The environment's own name
+stays what the marker records and what the operator reads.
 
 Nothing stands between the two stages.  An environment the pre-flight has no
 record for has no branch on either side, and the walk reports it as awaiting

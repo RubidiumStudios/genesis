@@ -108,4 +108,28 @@ subtest 'the snapshot invariant holds after every delivered commit' => sub {
 	}
 };
 
+subtest 'an environment that takes a pull request is passed over' => sub {
+	plan tests => 3;
+
+	# pr mode writes genesis.pipeline.require_pr on the environment file,
+	# which is the per-environment key that says a delivery has to arrive as
+	# a proposal rather than as a push.
+	my $h = ready_harness(envs => ['qa'], mode => 'pr',
+		kit => 'omega-v2.7.0');
+	# The kit is triggering content of every environment's set, so the
+	# commit routes to qa without the environment file being rewritten and
+	# the require_pr declaration lost with it.
+	my $due = commit_on_control($h,
+		files   => {'dev/notes.txt' => "a note beside the kit\n"},
+		message => 'Note something beside the kit',
+		push    => 1,
+	);
+
+	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
+	isnt(harness_marker($h, $h->slug('qa')), $due,
+		'nothing reached the deployment branch');
+	like($err, qr/qa: not attempted/,
+		'the environment is named and the run says why');
+};
+
 done_testing;
