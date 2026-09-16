@@ -5256,9 +5256,12 @@ sub _post_deploy {
 						"Pushing #C{%s} deploy artifacts to #C{%s}...",
 						$branch, $remote
 					);
-					my $results = $git->push($remote, $branch);
+					my $results = $git->push(
+						remote => $remote,
+						refs   => [{branch => $branch, kind => 'deployment'}],
+					);
 					bail("Failed to push %s to %s after deploy", $branch, $remote)
-						unless $results->{$branch};
+						unless $results->[0]{ok};
 				}
 			}
 		}

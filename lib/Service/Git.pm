@@ -1362,37 +1362,56 @@ sub _classify_remote_error {
 }
 
 # }}}
-# push - push branches to a remote {{{
+# push - push refs to a remote, one push per ref {{{
 #
-#   $git->push(@branches);              # push to default remote
-#   $git->push($remote, @branches);     # push to specific remote
+#   my $results = $git->push(remote => 'origin', refs => [
+#       { branch => 'lab/bosh',   kind => 'deployment' },
+#       { branch => 'pr/qa/bosh', kind => 'pr' },
+#   ]);
 #
-# Returns a hashref of branch => success (1/0).  In list context the errors
-# come back beside it, keyed the same way, which is how a caller reporting a
-# refused push names the cause git gave rather than guessing at one.
+# The remote is required and named, under D83.  Deciding it by asking whether
+# a local branch of that name exists is H4, because a repository carrying a
+# branch called origin published that branch along with the rest, and a
+# mistyped remote that collided with a branch name went to the default remote
+# instead of the one the caller meant.
 #
-# The push does not die on a ref the remote turned down, and it never did, so
-# the reason was thrown away with git's stderr and every caller that wanted to
-# say why had nothing to read.  Each failed ref keeps its own stderr, because
-# one branch's quarrel with the remote is not another's.
+# Each ref is pushed on its own, so no ref's rejection withholds another's
+# push, which is the third stage of D96.
+#
+# Returns an arrayref of per-ref results, in the order the specs were given.
+# A result carries the reason git gave for a ref it turned down, because a
+# push the remote refuses does not die and a caller that took only the ones
+# and zeros would have to guess at the cause.  One branch's quarrel with the
+# remote is not another's, so each failed ref keeps its own text.
 sub push {
-	my ($self, @args) = @_;
-	# If first arg looks like a remote name (not a branch we know), use it
-	my $remote;
-	if (@args && !$self->branch_exists($args[0])) {
-		$remote = shift @args;
-	}
-	$remote ||= $self->default_remote;
-	return wantarray ? ({}, {}) : {} unless $remote;
+	my ($self, %opts) = @_;
+	my $remote = $opts{remote}
+		or bail(
+			"#R{Service::Git->push} needs its remote by name, as ".
+			"#C{remote => '<remote>'}"
+		);
+	my @specs = @{$opts{refs} || []};
+	return [map {$self->_push_one($remote, $_)} @specs];
+}
 
-	my (%results, %errors);
-	for my $branch (@args) {
-		my (undef, $rc, $err) = run({ dir => $self->{root}, stderr => 0 },
-			'git', 'push', $remote, $branch);
-		$results{$branch} = $rc ? 0 : 1;
-		$errors{$branch}  = $err // '' if $rc;
-	}
-	return wantarray ? (\%results, \%errors) : \%results;
+# }}}
+# _push_one - push a single ref and report what git did with it {{{
+#
+# The refspec is written out in full, so git is asked for the branch and never
+# for a name it could resolve some other way.
+sub _push_one {
+	my ($self, $remote, $spec) = @_;
+	my $branch = $spec->{branch};
+
+	my $refspec = "refs/heads/$branch:refs/heads/$branch";
+	my (undef, $rc, $err) = run({dir => $self->{root}, stderr => 0},
+		'git', 'push', $remote, $refspec);
+
+	return {
+		branch => $branch,
+		ok     => $rc ? 0 : 1,
+		reason => $rc ? ($err // '') : '',
+	};
 }
 
 # }}}

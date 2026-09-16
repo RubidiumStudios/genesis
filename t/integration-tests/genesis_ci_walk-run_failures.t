@@ -214,11 +214,12 @@ subtest 'a push that lands nothing ends the run the same way' => sub {
 	my $h   = three_envs();
 	my $due = tune_all_three($h);
 
-	# The production shape.  Service::Git::push never dies: it answers a hash
-	# of ones and zeros, and a remote nobody can resolve is every value zero
-	# with no reason beside it.
+	# The production shape.  Service::Git::push never dies: it answers one
+	# result per ref, and a remote nobody can resolve is every ref refused
+	# with no reason beside it.  An answer carrying no result at all stands
+	# for that, because the guard reads whether any ref landed.
 	my $git = fault_git($h);
-	skip_on($git, 'push', 1, return => {});
+	skip_on($git, 'push', 1, return => []);
 
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 
