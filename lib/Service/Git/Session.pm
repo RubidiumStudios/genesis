@@ -152,15 +152,18 @@ sub begin {
 		cwd    => getcwd(),
 	};
 
-	# The process stands on the repository root for the length of the
-	# session.  A switch to a deployment branch removes whatever that branch
-	# does not carry, and a process left standing in a directory that is
-	# gone resolves every later relative path against nothing, which reaches
-	# an operator as a wall of warnings from the path humaniser rather than
-	# as anything they can act on.  The operator's own shell is untouched by
-	# a child's chdir, every run inside the session resolves from the root
-	# anyway, and finish and abort put the process back through _restore
-	# wherever the directory it started in is still there.
+	# begin stands the process on the repository root.  A switch to a
+	# deployment branch removes whatever that branch does not carry, and a
+	# process left standing in a directory that is gone resolves every later
+	# relative path against nothing, which reaches an operator as a wall of
+	# warnings from the path humaniser rather than as anything they can act
+	# on.  The operator's own shell is untouched by a child's chdir, and
+	# every run inside the session resolves from the root anyway.
+	#
+	# The process does not stay there for the length of the session.  switch
+	# puts it back in the directory recorded just above, and finish and abort
+	# put it back through _restore, each of them wherever that directory is
+	# still there and each of them leaving it on the root where it is not.
 	my $root = $git->root;
 	if ($self->{origin}{cwd} ne $root
 			&& index($self->{origin}{cwd}, "$root/") == 0) {
@@ -225,12 +228,12 @@ sub switch {
 	my $cwd = getcwd();
 
 	# What we owe the caller afterwards is the directory begin recorded, and
-	# not the one we are standing in.  begin stands the session on the root
-	# for the length of it, so reading the current directory here would hand
-	# every switch that root back and the caller would never see their own
-	# directory again.  begin records it before it marks the session active,
-	# so a switch that got past the check above always has one, and finish
-	# and abort come back to that same directory through _restore.
+	# not the one we are standing in.  begin stood the process on the root,
+	# so reading the current directory here would hand every switch that root
+	# back and the caller would never see their own directory again.  begin
+	# records it before it marks the session active, so a switch that got
+	# past the check above always has one, and finish and abort come back to
+	# that same directory through _restore.
 	my $restore = $self->{origin}{cwd};
 
 	chdir($git->root)

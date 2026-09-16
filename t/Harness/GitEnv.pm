@@ -38,6 +38,13 @@ our @EXPORT = qw/scrub_git_env/;
 # commit is signed out of them, Service::Git copies the author pair into the
 # committer pair as a handle is built, and the pre-flight rows arm and
 # withhold them deliberately.
+#
+# The configuration four carry the same warning from the other direction.
+# t/unit-tests/genesis_commands_repo-init_no_commit_identity.t arms
+# GIT_CONFIG_GLOBAL and GIT_CONFIG_NOSYSTEM on purpose, with a local, so that
+# a row can watch git find no identity at all.  A scrub called deeper than an
+# entry point, inside a scope like that one, would take the arming away and
+# the row would quietly stop testing what it says it tests.
 our @VARS = qw/
 	GIT_DIR
 	GIT_WORK_TREE

@@ -27,13 +27,24 @@ subtest 'a fixture build never reaches the repository GIT_DIR names' => sub {
 
 	# A throwaway of our own, in this test's own temporary directory, so an
 	# escape lands here and nowhere a person would miss it.
-	my $victim = workdir() . '/victim-' . $$ . '.git';
+	#
+	# It has a work tree and a remote, and it is not bare, because that is the
+	# shape that did the damage: git takes the repository from GIT_DIR and
+	# the work tree from wherever it is standing, and the commits land with
+	# nothing refusing anywhere along the way.  A bare throwaway turns the
+	# work-tree commands away on its own, and one with no remote turns the
+	# push away, so in either of those the count below would be proving git's
+	# own refusal rather than proving the scrub.
+	my $victim_remote = workdir() . '/victim-remote-' . $$ . '.git';
+	my $victim        = workdir() . '/victim-' . $$;
+	run({onfailure => "Failed to build the throwaway remote"},
+		'git', 'init', '-q', '--bare', $victim_remote);
 	run({onfailure => "Failed to build the throwaway"},
-		'git', 'init', '-q', '--bare', $victim);
+		'git', 'clone', '-q', $victim_remote, $victim);
 
 	my $h;
 	{
-		local $ENV{GIT_DIR} = $victim;
+		local $ENV{GIT_DIR} = "$victim/.git";
 		$h = make_harness(envs => ['qa'], vault => 0);
 		init_branch($h, 'qa');
 	}
@@ -46,6 +57,39 @@ subtest 'a fixture build never reaches the repository GIT_DIR names' => sub {
 
 	ok(scalar(commits_on($h->a, $h->control)) > 0,
 		'while the fixture repository took them, so the build did happen');
+};
+
+subtest 'the git double clears it in the child it is loaded into' => sub {
+	# The row above reaches the scrub through make_harness, which would go on
+	# passing if every other call site were dropped.  This one reaches it
+	# through a second entry point instead, so dropping that call is noticed
+	# here rather than in whatever run inherits a GIT_DIR next.
+	#
+	# The double installs itself over Service::Git as it loads, so it is
+	# exercised in a child rather than in this process.  That is also where
+	# it really runs, since a row that spawns a command reaches it through
+	# PERL5OPT and never through an object.
+	plan tests => 2;
+
+	my $plan = workdir() . '/git-double-plan.json';
+	helper::put_file($plan, "{}\n");
+
+	my $elsewhere = workdir() . '/not-ours-' . $$;
+	run({onfailure => "Failed to build the second throwaway"},
+		'git', 'init', '-q', $elsewhere);
+
+	my ($said, $rc) = run({stderr => 0,
+			env => {
+				GENESIS_HARNESS_GIT_PLAN => $plan,
+				GIT_DIR                  => "$elsewhere/.git",
+			}},
+		'perl',
+		'-I' . $helper::TOPDIR . '/t', '-I' . $helper::TOPDIR . '/lib',
+		'-MHarness::Propagation::Git',
+		'-e', 'print exists $ENV{GIT_DIR} ? "kept" : "gone"');
+
+	is($rc, 0, 'the double loads in a child of its own');
+	is($said, 'gone', 'and the GIT_DIR it was handed is gone by the time it runs');
 };
 
 subtest 'the scrub clears what git reads a repository out of' => sub {

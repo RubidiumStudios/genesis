@@ -41,6 +41,9 @@ my $tmp = workdir("KIT_COMPILER");
 #   name - kit name passed to scaffold()         (default: "test")
 
 sub init_kit_repo {
+    # Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+    scrub_git_env();
+
     my (%opts) = @_;
     my $kitdir = $opts{dir}  || "$tmp/test-genesis-kit";
     my $name   = $opts{name} || "test";
