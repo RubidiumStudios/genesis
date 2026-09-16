@@ -845,6 +845,10 @@ sub propagate {
 					control => $control,
 					records => $record->{environments},
 					specs   => \@publish_specs,
+					# D83's ask.  The delta every push would carry is
+					# shown either way, and this answers the question
+					# that follows it.
+					yes     => $opts->{yes},
 					# D82's two shapes reach one reading.  git push failing to
 					# run at all raises, and a remote nobody can resolve comes
 					# back as a refused push per ref, so a push git named no

@@ -13,13 +13,24 @@ package Genesis::CI::Publish;
 # and never its output, so what the stage does with control is read it once
 # more before the first push, and a control that has moved refuses the whole
 # publish.
+#
+# Everything the push would carry is shown before it goes, and the showing is
+# not conditional on anyone being there to read it.  D83 computes once,
+# verifies, shows, and asks, because a dry run followed by a real run computes
+# everything twice and control or exodus can move between the two, so the
+# second run may deliver what the operator never previewed.  At a terminal the
+# showing comes before the ask, and where there is no terminal it goes to the
+# log, so the pipeline's job and the propagate child print the delta an
+# operator would have seen.  -y answers the ask and nothing else.
 use strict;
 use warnings;
 
 use Exporter qw/import/;
 use Genesis qw/info warning/;
+use Genesis::Term qw/in_controlling_terminal/;
+use Genesis::UI qw/prompt_for_boolean/;
 
-our @EXPORT_OK = qw/publish_run/;
+our @EXPORT_OK = qw/publish_run confirm_publish publish_delta/;
 
 ### The stage {{{
 
@@ -38,6 +49,10 @@ our @EXPORT_OK = qw/publish_run/;
 # The bare enum word goes into outcome and everything qualifying it into
 # outcome_detail, because the run's status and the report both match the whole
 # of that field against the seven words I8 fixes.
+#
+# The delta every push would carry is shown before the first one goes out, and
+# an operator at a terminal is then asked.  A run that is declined pushes
+# nothing and says so on declined.
 #
 # Returns { published => \@branches, rejected => \@branches, declined => 0,
 # results => \@results }, with refused carrying the sentence where control
@@ -65,6 +80,16 @@ sub publish_run {
 	if (my $refused = _recheck_control($git, $args{control}, $remote)) {
 		$result->{refused} = $refused;
 		_reset_publish_set($session);
+		return $result;
+	}
+
+	# D83's ask, and the showing that does not wait on it.  The delta is
+	# read from git rather than recomposed from the walk's record, so what
+	# an operator is shown is what the push sends and not what the run
+	# meant to send.  A decline pushes nothing, and the status the run
+	# exits with is the caller's to decide.
+	unless (confirm_publish($git, $remote, \@specs, yes => $args{yes})) {
+		$result->{declined} = 1;
 		return $result;
 	}
 
@@ -148,6 +173,76 @@ sub publish_run {
 	}
 
 	return $result;
+}
+
+# }}}
+# confirm_publish - show every branch's verified delta, then ask {{{
+#
+# D83 has the showing unconditional and the ask conditional.  At a terminal the
+# delta comes first and the operator answers for it, and where there is no
+# controlling terminal the same delta goes to the log and the run goes on, so
+# the pipeline's job and the propagate child print what an operator would have
+# been shown.  -y suppresses the ask and nothing else, which is why it is read
+# before the terminal is consulted at all.
+sub confirm_publish {
+	my ($git, $remote, $specs, %opts) = @_;
+
+	info "\n#G{This run wrote} #C{%d} branch%s:",
+		scalar(@$specs), @$specs == 1 ? '' : 'es';
+	for my $spec (@$specs) {
+		my $delta = publish_delta($git, $remote, $spec);
+		if ($delta->{removal}) {
+			info "\n  #C{%s}: to be removed from #C{%s}, nothing is due",
+				$spec->{branch}, $remote;
+			next;
+		}
+		info "\n  #C{%s}: %d commit%s, %d file%s changed, %d removed%s",
+			$spec->{branch},
+			scalar(@{$delta->{commits}}),
+			@{$delta->{commits}} == 1 ? '' : 's',
+			$delta->{changed}, $delta->{changed} == 1 ? '' : 's',
+			$delta->{deleted},
+			$delta->{new_branch}
+				? ", on a branch #C{$remote} does not hold yet" : '';
+		info "      %s", $_ for @{$delta->{commits}};
+	}
+
+	return 1 if $opts{yes};
+	return 1 unless in_controlling_terminal();
+	return prompt_for_boolean("Publish these branches? [y|n]", 1) ? 1 : 0;
+}
+
+# }}}
+# publish_delta - what one branch's push would carry {{{
+#
+# The verified delta is the range from the remote-tracking ref to the local
+# branch, which is exactly what the push sends, so it is read from git rather
+# than recomposed from the walk's record.  A branch the remote does not hold
+# yet has no range to read and reports as new.
+sub publish_delta {
+	my ($git, $remote, $spec) = @_;
+	my $branch = $spec->{branch};
+	return {removal => 1} if $spec->{delete};
+
+	# resolve_branch is the tree's one reader of where a branch stands
+	# against its remote, and no-remote is its word for a branch only the
+	# local repository has.  It answers nothing at all where neither side
+	# holds the name, which is the same case for this purpose.
+	my $state = $git->resolve_branch($branch, remote => $remote);
+	return {new_branch => 1, commits => [], changed => 0, deleted => 0}
+		unless $state && $state->{state} ne 'no-remote';
+
+	my $tracking = "refs/remotes/$remote/$branch";
+	my @commits  = $git->log_subjects("$tracking..refs/heads/$branch",
+		format => '%h %s');
+	my $diff = $git->diff_files($tracking, "refs/heads/$branch");
+
+	return {
+		new_branch => 0,
+		commits    => \@commits,
+		changed    => scalar(@{$diff->{changed}}),
+		deleted    => scalar(@{$diff->{deleted}}),
+	};
 }
 
 # }}}

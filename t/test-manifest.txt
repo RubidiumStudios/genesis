@@ -174,6 +174,7 @@ unit-tests/genesis_ci_walk-base.t                   # where a walk starts, seede
 unit-tests/genesis_ci_walk-run_ending.t             # which errors end the run and which end one environment
 unit-tests/genesis_ci_runfailure-one_line.t         # one line out of a failure, and the width a caller may ask it to fit
 unit-tests/genesis_ci_report-render_run.t           # an error prints whole, and the commit axis reads the enum
+unit-tests/genesis_ci_publish-confirm.t             # the delta is shown three ways, and -y answers the ask alone
 unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
 unit-tests/genesis_ci_compiler-override_file.t      # the override file beside .genesis/config, and its name
 unit-tests/helper-tree_readers.t                    # the shared readers and guards in t/helper.pm
@@ -356,6 +357,7 @@ integration-tests/genesis_ci_report-outcomes.t                # one outcome per 
 integration-tests/genesis_ci_publish-outcomes.t               # one push per branch, and a refused branch's rejection as its outcome
 integration-tests/genesis_ci_publish-independence.t           # a partial publish leaves every branch true, and the next run converges
 integration-tests/genesis_ci_publish-control.t                # control is re-checked before the first push, and never pushed
+integration-tests/genesis_ci_publish-confirm.t                # the verified delta is shown whether or not there is anyone to ask
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc

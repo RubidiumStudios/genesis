@@ -404,6 +404,7 @@ B<Examples:>
 
     genesis propagate
     genesis propagate --dry-run
+    genesis propagate --yes
 
 Walks the control branch forward from every deployment branch's newest
 marker and routes each control commit on its own, in control order, under
@@ -433,6 +434,13 @@ itself named beside it, and the branch goes back to where the remote has it at
 once, so the run leaves behind no local commit nobody else can see.  Every
 other branch is published regardless of where the refusal fell.  See
 L<Genesis::CI::Publish/publish_run>.
+
+Before any of that goes out, the run shows what each push would carry, read as
+the range the push sends rather than as the walk's own record of it.  At a
+terminal the operator is then asked whether to publish, and where there is no
+controlling terminal the same delta goes to the log and the run publishes, so
+the pipeline's job and a propagate child print what an operator would have
+seen.  C<--yes> answers the question and leaves the showing alone.
 
 B<Options (via C<get_options>):>
 
