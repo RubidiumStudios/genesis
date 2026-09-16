@@ -2181,6 +2181,7 @@ sub write_env_file {
 	my $path   = "$prefix$name.yml";
 	my %genesis  = %{$opts{genesis}  || {}};
 	my %pipeline = %{$opts{pipeline} || {}};
+	my %params   = %{$opts{params}   || {}};
 	$pipeline{require_pr} = 'true'
 		if $self->{mode} eq 'pr' && !$opts{site};
 	# One file carries one pipeline key, so entries handed in under genesis
@@ -2208,6 +2209,13 @@ sub write_env_file {
 		# in nested under genesis.
 		$body .= _yaml_pair($_, $pipeline{$_}, 2, 'pipeline')
 			for sort keys %pipeline;
+	}
+	# A top-level block of its own rather than a key under genesis, because
+	# params is where a kit's own values live and a row that wants a delta
+	# the walk can route wants one the environment file legitimately holds.
+	if (%params) {
+		$body .= "params:\n";
+		$body .= _yaml_pair($_, $params{$_}, 1, 'params') for sort keys %params;
 	}
 
 	helper::put_file("$self->{a}/$path", $body);

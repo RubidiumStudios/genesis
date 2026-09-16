@@ -246,6 +246,12 @@ B<Errors:>
 An environment's outcome is a word outside the seven the report fixes, which
 means some stage wrote a phrase of its own into a field four stages share.
 
+=item C<< ...was handed the commit outcome '...', which is not one of the words I8 fixes >>
+
+A routed commit's outcome is a word outside the two the report fixes.  The
+guard sits in L</_commit_word>, which this sub calls once per routed commit,
+so the commit axis reaches a caller here exactly as the environment axis does.
+
 =back
 
 B<Examples:>
@@ -368,7 +374,9 @@ B<Parameters:>
 
 =item C<$outcome>
 
-The word the record carries for this commit.
+The word for this commit.  The record may carry one, and where it carries none
+the renderer reads C<delivered>, until the publish stage writes one per
+commit.
 
 =item C<$preview>
 

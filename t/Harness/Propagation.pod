@@ -657,8 +657,8 @@ kit here.
 
 Writes an environment file on control and returns its git-root-relative path.
 C<site> writes it at a level of the hierarchy rather than at the leaf.  Also
-takes C<root>, C<genesis> and C<pipeline> as hashrefs merged into the file,
-and C<commit>, which defaults on.  C<type> is taken for symmetry with the
+takes C<root>, C<genesis>, C<pipeline> and C<params> as hashrefs merged into
+the file, and C<commit>, which defaults on.  C<type> is taken for symmetry with the
 helpers that compose a slug and is not written into the file, because nothing
 in the file body names a deployment type.
 
@@ -679,6 +679,12 @@ cannot fold at all, and that is refused by name rather than written out as a
 second C<pipeline:> key.  The C<genesis> key is written wherever anything is
 to be nested under it, so a site file carrying C<genesis> or C<pipeline>
 entries is a file a YAML reader will load.
+
+C<params> writes a top-level C<params> block, which is where a kit's own
+values live, so a row that wants a commit the walk routes as a delta to one
+environment changes a value the file legitimately holds rather than composing
+a body of its own beside the test.  Its values render by the same rules as
+the other two hashrefs'.
 
 A harness declared in pr mode adds C<require_pr> to the C<pipeline> block of
 every environment file it writes, so a row asks for pr mode once rather than

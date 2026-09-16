@@ -133,6 +133,11 @@ Optional.  An arrayref of environment names to plan.  The DAG order and each
 environment's C<prior_env> and C<depth> come from the whole topology either
 way, so an environment named on its own still reads its ancestor correctly.
 
+An absent scope and an empty arrayref both plan every environment, which is
+what C<genesis propagate> asks for under D36.  The empty arrayref once meant
+no environment at all, so a caller that narrows by building a list says what
+it means when the list comes out empty rather than handing one in.
+
 =item C<branches>
 
 Optional.  C<Genesis::CI::Preflight::initial_state>'s own C<branches> record,
@@ -199,19 +204,35 @@ B<Examples:>
                                                           scope => ['qa']);
 
 The environments this run walks, in DAG order, each with its deployment
-branch and its pull request branch composed through C<< $top->branch_for >>
-and C<< $top->pr_branch_for >>, and with its C<prior_env> and its depth.
-Under D66 the branch is per deployment, so two roots sharing an environment
-name walk their own branches and read their own markers.  The topology the
-list was built from comes back beside it, because the caller reads each
-environment's children and its nodes out of the same answer.
+branch composed through C<< $top->branch_for >>, and with its C<prior_env> and
+its depth.  Under D66 the branch is per deployment, so two roots sharing an
+environment name walk their own branches and read their own markers.
+
+The pull request branch is not composed here, because nothing reads it and
+the collision C<< $top->pr_branch_for >> can refuse would be raised inside the
+run's open session, where a refusal exits differently than it means to.  The
+stage that delivers by pull request composes it and has the pre-flight refuse
+the collision ahead of the session.
+
+The topology the list was built from comes back beside it.  L</plan> reads
+C<parent_of> out of it and nothing else, and C<genesis propagate> builds a
+topology of its own for the rest, so the whole answer is returned rather than
+the one field because the caller that wants more of it is the one this sub
+does not know about.
 
 The one option is C<scope>, an arrayref of environment names.  Where it is
-absent or empty every environment the topology gives comes back, which is
-what C<genesis propagate> asks for under D36.  Where it names environments,
-only those come back, still in DAG order and still carrying the C<prior_env>
-and the depth the whole topology gives them, so a narrowed read is a subset
-of the same answer and never a different one.
+absent, and where it is an empty arrayref, every environment the topology
+gives comes back, which is what C<genesis propagate> asks for under D36.  The
+empty arrayref once meant no environment at all, so a caller that narrows by
+building a list says what it means when the list comes out empty rather than
+handing one in.  Where it names environments, only those come back, still in
+DAG order and still carrying the C<prior_env> and the depth the whole topology
+gives them, so a narrowed read is a subset of the same answer and never a
+different one.
+
+B<Errors:> Raises a bug through C<< $top->branch_for >> where the topology
+gives a name that is not a string, or an empty one, since a branch cannot be
+composed from either.
 
 B<Examples:>
 
