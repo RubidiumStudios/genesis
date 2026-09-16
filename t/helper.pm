@@ -30,6 +30,7 @@ BEGIN {
 use open ':std', ':encoding(UTF-8)';
 
 use lib 't';
+use Harness::GitEnv;
 use Mock;
 use MockWrapper;
 use Test::More;
@@ -98,6 +99,12 @@ sub import {
 	$ENV{HOME} = "${TOPDIR}/t/tmp/home";
 	$ENV{GENESIS_TOPDIR} = $TOPDIR;
 	$ENV{PATH} = "${TOPDIR}/bin:$ENV{PATH}";
+
+	# Nothing the operator exported gets to say which repository a fixture
+	# runs against, or which configuration file git reads on the way in.  It
+	# is cleared again at each fixture entry point, because a file may arm
+	# one of these itself after helper has loaded.
+	scrub_git_env();
 
 	# helper resets $ENV{HOME} to a fresh test home, so any global
 	# git identity from the host or CI image is no longer visible.

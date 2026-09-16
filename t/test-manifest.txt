@@ -190,6 +190,7 @@ unit-tests/harness_propagation-shaping.t            # the repository shapes the 
 unit-tests/harness_propagation-records.t            # the record reader, the read log, and the shapes
 unit-tests/harness_propagation-children.t           # the child, the lock, the shuttle, and the kits
 unit-tests/harness_propagation-scenarios.t          # the scenarios the step files share
+unit-tests/harness_propagation-git_env.t            # a fixture build never reaches an inherited GIT_DIR
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

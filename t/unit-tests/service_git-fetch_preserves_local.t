@@ -18,6 +18,9 @@ $ENV{NOCOLOR} = 1;
 # Real repositories and a real remote: the defect is in the refspec handed to
 # git fetch, which a stubbed run() cannot exercise.
 sub make_pair {
+	# Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+	scrub_git_env();
+
 	my $base = workdir() . '/fp-' . $$ . '-' . int(rand(1_000_000));
 	mkdir_or_fail($base);
 	my $origin = "$base/origin.git";

@@ -34,6 +34,10 @@ $ENV{NOCOLOR} = 1;
 # instantiate Top against it.
 sub make_repo {
 	my (%o) = @_;
+
+	# Harness::GitEnv, so no inherited GIT_DIR aims this at another repository.
+	scrub_git_env();
+
 	my $tmp = workdir($o{name} || 'ci-yml-soft-gate');
 	system("rm -rf $tmp && mkdir -p $tmp/.genesis") == 0
 		or die "make_repo setup failed";
