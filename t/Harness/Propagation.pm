@@ -2315,9 +2315,9 @@ sub _write_record {
 # EXODUS_TIME_FORMAT under D58, which is the value form.  A path never carries
 # one of these, and the two forms are kept apart on purpose.
 sub _now {
-	my ($self, $at) = @_;
+	my ($self, $at, $offset) = @_;
 	return $at if defined $at;
-	my @t = localtime(time);
+	my @t = localtime(time + ($offset // 0));
 	return POSIX::strftime('%Y-%m-%d %H:%M:%S %z', @t);
 }
 
@@ -2362,7 +2362,13 @@ sub fixture_pipeline_record {
 # is the one form a flat exodus record can carry.
 sub certify {
 	my ($self, $env, %opts) = @_;
-	my $at   = $self->_now($opts{at});
+	# The audit below is written at a path keyed on the compact timestamp, so
+	# two certifications inside one second would write one audit and the
+	# second would take the first's place, leaving the environment reading as
+	# though it had deployed once.  The harness counts its own certifications
+	# and moves the clock on by one second for each, and it does so only
+	# where the row named no time, so a row that pinned one still gets it.
+	my $at   = $self->_now($opts{at}, $self->{certifications}++);
 	my $path = $self->env_path($env, %opts);
 
 	$self->_write_record($path,

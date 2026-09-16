@@ -21,7 +21,7 @@ subtest 'the gate travels with its predecessors and ends the delivery' => sub {
 	# run_genesis asserts the restoration of the working state in its own
 	# words and those assertions are counted here.  Every subtest in this
 	# file is counted the same way.
-	plan tests => 4;
+	plan tests => 5;
 
 	my ($h, @shas) = gated_harness(stage => 'schema change', kit => 'omega-v2.7.0');
 
@@ -31,7 +31,12 @@ subtest 'the gate travels with its predecessors and ends the delivery' => sub {
 		'the delivery ends at the gate itself');
 	like($err, qr/\Q@{[substr($shas[3], 0, 7)]}\E.*gate: schema change/s,
 		'the fourth commit is held with the gate\'s reason');
-	like($err, qr/held, awaiting deployment \(qa at control\@[0-9a-f]+\)/,
+
+	# The qualifier is the environment's own held reading, which under D54 is
+	# the run delivering nothing new to it, so it is read off a second run
+	# that finds the gate already delivered and the commit behind it held.
+	my (undef, $again) = run_genesis($h, {answers => ['y']}, 'propagate');
+	like($again, qr/held, awaiting deployment \(qa at control\@[0-9a-f]+\)/,
 		'the environment waits on its own certification of the gate');
 };
 

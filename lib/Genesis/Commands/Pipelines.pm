@@ -17,7 +17,6 @@ use Genesis::CI::Compiler;
 use Genesis::CI::Compiler::PipelineProvider;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
-use Genesis::CI::Propagation;
 use Genesis::CI::Walk;
 use Service::Git;
 use Service::Github;
@@ -392,11 +391,14 @@ sub pipeline_status {
 		my $state = $env_state{$env_name};
 		next if $state->{status};  # already resolved (synced, no-branch, error)
 
-		my %mine = map {$_ => 1} @{$env_changed{$env_name} || []};
 		my ($blocker, %seen);
 		my $ancestor = $parent_of{$env_name};
 		while (defined $ancestor && !$seen{$ancestor}++) {
-			if (grep {$mine{$_}} @{$env_changed{$ancestor} || []}) {
+			# The same rule the walk holds a commit by, asked here of the
+			# whole diff rather than of one commit, so the two can never
+			# disagree about what counts as an overlap.
+			if (Genesis::CI::Walk::overlap($env_changed{$ancestor} || [],
+					$env_changed{$env_name} || [])) {
 				$blocker = $ancestor;
 				last;
 			}
@@ -720,19 +722,25 @@ sub propagate {
 			# It is printed before anything is delivered, because the hold is
 			# what an operator has come to the output for and a run that
 			# delivered to three environments would otherwise bury it.
-			my $qualifier = Genesis::CI::Walk::held_qualifier($env_record);
-			if ($qualifier) {
-				info "  #Y{%s}: %s", $env_name, $qualifier;
-				for my $held (@{$env_record->{held}}) {
-					info "    #Yi{control\@%s} %s",
-						substr($held->{control_commit}, 0, 7), $held->{subject};
-					info "      #Y{H} %s", Genesis::CI::Walk::hold_reason($held);
-				}
+			my @pending = @{$env_record->{pending}};
+
+			# D54 reads the environment's held outcome as the run delivering
+			# nothing new to it, so an environment with commits pending says
+			# what it received rather than what it waits for.  Each held
+			# commit is named either way, because the per-commit axis of I8
+			# names every routed commit whatever the environment recorded.
+			my $qualifier = @pending ? undef
+				: Genesis::CI::Walk::held_qualifier($env_record);
+			info "  #Y{%s}: %s", $env_name, $qualifier if $qualifier;
+			for my $held (@{$env_record->{held}}) {
+				info "    #Yi{control\@%s} %s",
+					substr($held->{control_commit}, 0, 7), $held->{subject};
+				info "      #Y{H} %s", Genesis::CI::Walk::hold_reason($held);
 			}
 
-			my @pending = @{$env_record->{pending}};
 			unless (@pending) {
-				info "  #Gi{%s}: nothing due", $env_name unless $qualifier;
+				info "  #Gi{%s}: nothing due", $env_name
+					unless $qualifier || @{$env_record->{held}};
 				next;
 			}
 
