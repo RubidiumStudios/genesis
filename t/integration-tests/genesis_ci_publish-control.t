@@ -54,7 +54,11 @@ subtest 'a control that moved during the walk refuses the publish' => sub {
 	my ($out, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 	my $said = unfolded($out, $err);
 
-	is($exit, Genesis::Exit::DATAERR, 'the run refuses on its own input');
+	# D106 puts this at the temporary status rather than the data one,
+	# because another clone moved control and nothing the operator wrote is
+	# wrong.  That a re-run then succeeds is T339's row, not this one.
+	is($exit, Genesis::Exit::TEMPFAIL,
+		'the run refuses, and a re-run will succeed');
 	like($said, qr/is behind .* so everything this run computed is stale/,
 		'and it names behind as stale');
 
