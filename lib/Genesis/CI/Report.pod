@@ -8,7 +8,11 @@ Genesis::CI::Report - the propagate run's report, on I8's three axes
 
     # The whole of a finished run, once the session has put the operator
     # back on the branch they started from.
-    Genesis::CI::Report::render_run($record, git => $git, dry_run => 0);
+    Genesis::CI::Report::render_run($record, git => $git);
+
+    # What --dry-run prints, which is the same report in two verbs of its
+    # own, over a record nothing was written from.
+    Genesis::CI::Report::render_preview($record, git => $git);
 
     # An aborted run, where nothing was published and only the
     # environment axis has anything true to say.
@@ -37,9 +41,12 @@ deciding what status a run exits with matches one whole word rather than
 cutting a phrase apart.  The commit axis takes C<delivered> or C<held>, and
 the file axis takes C<overwrote-hand-edit>.
 
-A dry run changes two verbs and nothing else.  C<propagated> reads C<would
+A preview changes two verbs and nothing else.  C<propagated> reads C<would
 propagate> and C<delivered> reads C<would deliver>, because a preview says
-what would happen rather than what did.
+what would happen rather than what did.  The environment's verb is written
+into the record by L</render_preview>, which is the only thing that knows the
+run did not happen, and the commit's is composed as the line is printed,
+because nothing writes a per-commit outcome until the publish does.
 
 The module also declares C<AWAITING_APPLY>, which is the qualifier an
 environment the pipeline has never been applied to carries.  It is a constant
@@ -214,9 +221,11 @@ wrote its outcomes into.
 The repository handle, used to print paths as the operator wrote them.
 Optional.
 
-=item C<dry_run>
+=item C<preview>
 
-True where the run delivered nothing, which swaps two verbs.  Optional.
+True where L</render_preview> is rendering, which lets the environment axis
+take C<would propagate> and turns the commit axis's verb over.  A caller other
+than the preview leaves it out.  Optional.
 
 =item C<outcomes_only>
 
@@ -249,6 +258,65 @@ B<Examples:>
   #     control@1a2b3c4 Tune lab  held
   #       H held by lab (lab.yml), lab awaiting deployment
   #   prod: idempotent
+
+=head2 render_preview
+
+    Genesis::CI::Report::render_preview($record, git => $git);
+
+C<--dry-run>'s report, under D44.
+
+It names, per environment and per control commit, the files that would land
+and whether each commit would be delivered or held and why, and it writes
+nothing.  It renders the record the run renders, through L</render_run>, so
+the preview and the run cannot disagree about a word, and the held forms read
+as C<genesis pipeline-status>'s do under D54.
+
+A banner goes out before the first line of the report, because an operator
+who reads the report first and the banner afterwards has already believed it.
+
+One verb is written into the record here rather than composed by the
+renderer.  An environment with commits due would have propagated had this been
+a run, and the preview is the only thing that knows it was not, so the word
+goes in where that is known.  Everything else the record leaves null is
+settled by L</render_run> under ruling 12, so the run and the preview compose
+the held phrase from one line of code.
+
+The two loud warnings D44 asks for, for a control branch that is C<ahead> and
+for a marker-only local commit the pre-flight would reset, arrive with the
+publish at M11.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The run's record, as C<Genesis::CI::Walk::plan> built it.  A preview delivers
+nothing, so every environment's outcome is null but for the ones the walk
+itself decided.
+
+=item C<%opts>
+
+Everything L</render_run> takes, handed down as it stands, so a preview prints
+its paths as the operator wrote them exactly as the run does.
+
+=back
+
+B<Returns:> True.
+
+B<Errors:> Raises whatever L</render_run> raises.
+
+B<Examples:>
+
+  Genesis::CI::Report::render_preview($record, git => $git);
+  #   This is a preview.  Nothing will be written.
+  #
+  #   lab: would propagate
+  #     control@1a2b3c4 Tune lab  would deliver
+  #       M lab.yml
+  #   qa: held, awaiting deployment (lab at control@1a2b3c4)
+  #     control@1a2b3c4 Tune lab  held
+  #       H held by lab (lab.yml), lab awaiting deployment
 
 =head1 INTERNAL FUNCTIONS
 
@@ -291,7 +359,7 @@ printed.
 The commit axis reads its words out of the enum the way the environment axis
 reads its own, so the enum is load-bearing on all three axes rather than on
 one of them.  A word from outside it is a defect in whoever wrote the record,
-and the guard names it rather than printing it.  Under a dry run C<delivered>
+and the guard names it rather than printing it.  Under a preview C<delivered>
 reads C<would deliver>, and C<held> reads as it stands.
 
 B<Parameters:>
@@ -302,7 +370,7 @@ B<Parameters:>
 
 The word the record carries for this commit.
 
-=item C<$dry_run>
+=item C<$preview>
 
 True where the caller is previewing.
 

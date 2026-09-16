@@ -17,7 +17,7 @@ use Exporter qw/import/;
 use Genesis qw/info bug/;
 
 our @EXPORT_OK = qw/
-	held_qualifier hold_reason hold_detail render_run
+	held_qualifier hold_reason hold_detail render_run render_preview
 	ENV_OUTCOMES COMMIT_OUTCOMES FILE_OUTCOME AWAITING_APPLY
 /;
 
@@ -39,14 +39,18 @@ use constant FILE_OUTCOME    => 'overwrote-hand-edit';
 # spelling the phrase a second time.
 use constant AWAITING_APPLY => 'awaiting pipeline-apply';
 
-# The outcome word a dry run reads instead, and the same for the commit axis.
-# A preview says what would happen, and the two verbs are the only words that
-# change.  Task 10.16's render_preview takes the dry-run path over once it
-# lands, and until it does the run's own renderer answers for both.
-my %WOULD = (
-	'propagated' => 'would propagate',
-	'delivered'  => 'would deliver',
-);
+# The two verbs a preview changes, which are the only words that differ
+# between what a run did and what a preview says would happen.  They are
+# named rather than spelled where they are wanted, because the environment's
+# verb is written in one sub and read in another and a phrase spelled twice
+# is a phrase the two spellings drift apart on.
+#
+# The environment's verb is written into the record by render_preview, since
+# the preview is the only thing that knows the run did not happen, and the
+# commit's is composed at print time, since nothing writes a per-commit
+# outcome until the publish does.
+use constant WOULD_PROPAGATE => 'would propagate';
+use constant WOULD_DELIVER   => 'would deliver';
 
 # The colour each outcome is printed in, so an operator reads a blocked run
 # off the shape of the output before they read a word of it.
@@ -58,6 +62,10 @@ my %COLOUR = (
 	'held'             => 'Y',
 	'publish rejected' => 'R',
 	'not published'    => 'Y',
+	# A preview's propagating environment reads as the run's would, because
+	# the shape of the output is what an operator takes a blocked run off
+	# and a preview that greyed its good news would read as a blocked one.
+	WOULD_PROPAGATE() => 'G',
 );
 
 ### The words {{{
@@ -213,12 +221,19 @@ sub hold_detail {
 # outcomes_only is the abort's shape.  A run that ended early published
 # nothing, so the commit axis has nothing true to say and printing a pending
 # commit under it would name a delivery that never happened.
+#
+# preview is what L</render_preview> hands down, and it does two things.  It
+# lets the guard below take the one word a preview adds to the environment
+# axis, and it turns the commit axis's own verb over.  Everything else reads
+# the same either way, because a preview differs from a run in two verbs and
+# in nothing at all besides.
 sub render_run {
 	my ($record, %opts) = @_;
 
 	my $git     = $opts{git};
-	my $dry_run = $opts{dry_run} ? 1 : 0;
+	my $preview = $opts{preview} ? 1 : 0;
 	my %known   = map {$_ => 1} ENV_OUTCOMES;
+	$known{+WOULD_PROPAGATE} = 1 if $preview;
 
 	info "";
 	for my $env (@{$record->{environments} || []}) {
@@ -228,10 +243,9 @@ sub render_run {
 			$env->{env}) unless $known{$env->{outcome}};
 
 		my $colour = $COLOUR{$env->{outcome}} // 'Y';
-		my $word   = $dry_run ? ($WOULD{$env->{outcome}} // $env->{outcome})
-		                      : $env->{outcome};
 		info "  #%s{%s}: %s", $colour, $env->{env},
-			join(', ', grep {defined && length} $word, $env->{outcome_detail});
+			join(', ', grep {defined && length}
+				$env->{outcome}, $env->{outcome_detail});
 
 		# The label is coloured and the message is not.  csprintf tolerates
 		# one level of balanced braces inside a colour span, and an
@@ -253,7 +267,7 @@ sub render_run {
 			info "    #Gi{control\@%s} %s  %s",
 				substr($pending->{control_commit}, 0, 7),
 				$pending->{subject},
-				_commit_word($pending->{outcome} // 'delivered', $dry_run);
+				_commit_word($pending->{outcome} // 'delivered', $preview);
 			info "      #G{M} %s", $_ for _paths($git, $pending->{delivered});
 			info "      #R{D} %s", $_ for _paths($git, $pending->{removed});
 
@@ -268,12 +282,43 @@ sub render_run {
 		for my $held (@{$env->{held} || []}) {
 			info "    #Yi{control\@%s} %s  %s",
 				substr($held->{control_commit}, 0, 7), $held->{subject},
-				_commit_word($held->{outcome} // 'held', $dry_run);
+				_commit_word($held->{outcome} // 'held', $preview);
 			info "      #Y{H} %s", hold_reason($held);
 		}
 	}
 
 	return 1;
+}
+
+# }}}
+# render_preview - the preview's report, which is the run's own {{{
+#
+# D44 leaves --dry-run as the only preview, and it reports, per environment
+# and per control commit, the files that would land and whether each commit
+# would be delivered or held and why, and writes nothing.  It is the same
+# record and the same renderer the run uses, because two renderers drift and
+# the held forms have to read word for word as pipeline-status's do under
+# D54.
+#
+# One verb is written here rather than composed by the renderer.  An
+# environment with commits due would have propagated had this been a run, and
+# the preview is the only thing that knows it was not, so the word goes in
+# where that is known.  Ruling 12 leaves the rest with render_run: a hold
+# that stands and an environment with nothing at all to show are both settled
+# out of the record there, so the run and the preview say those words in one
+# place.
+sub render_preview {
+	my ($record, %opts) = @_;
+
+	# Said before a line of the report, because an operator who reads the
+	# report first and the banner afterwards has already believed it.
+	info "\n#Yi{This is a preview.  Nothing will be written.}";
+
+	for my $env (@{$record->{environments} || []}) {
+		$env->{outcome} //= WOULD_PROPAGATE if @{$env->{pending} || []};
+	}
+
+	return render_run($record, %opts, preview => 1);
 }
 
 # }}}
@@ -313,14 +358,15 @@ sub _settle {
 # writes one yet and the axis still has to have a reader that can be handed
 # the wrong thing.
 sub _commit_word {
-	my ($outcome, $dry_run) = @_;
+	my ($outcome, $preview) = @_;
 
 	my %known = map {$_ => 1} COMMIT_OUTCOMES;
 	bug("Genesis::CI::Report::render_run was handed the commit outcome ".
 		"'%s', which is not one of the words I8 fixes", $outcome)
 		unless defined $outcome && $known{$outcome};
 
-	return $dry_run ? ($WOULD{$outcome} // $outcome) : $outcome;
+	return WOULD_DELIVER if $preview && $outcome eq 'delivered';
+	return $outcome;
 }
 
 # }}}
