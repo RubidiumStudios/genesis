@@ -1007,7 +1007,7 @@ sub _command_line {
 # A ref write rather than a switch, so it takes no lock and needs no
 # checkout.  The control branch never reaches here, because
 # committed_branches is the set this session moved and it filters that name
-# out of it.
+# out of it, and reset_branch refuses it in its own right.
 sub _reset_to_remote {
 	my ($self, $branch) = @_;
 	my $git    = $self->{git};

@@ -55,21 +55,35 @@ sub publish_run {
 	$pushes ||= [];
 	$result->{results} = $pushes;
 
-	# D82's unsurvivable remote.  A push where not one ref landed is the
-	# remote being gone rather than any branch's own quarrel with it, so
-	# nothing below runs: no environment is given an outcome it would have
-	# to take back, and the run as a whole ends instead.  The classifier
-	# that turns git's words into a remedy belongs beside the run, so the
-	# caller raises it and this stage only says which reason to raise it on.
-	unless (grep {$_->{ok}} @$pushes) {
-		my $reason = $died;
+	# D82's unsurvivable remote.  A push the remote answered about on no ref
+	# at all is the remote being gone rather than any branch's own quarrel
+	# with it, so nothing below runs.  No environment is given an outcome it
+	# would have to take back, and the run as a whole ends instead.  The
+	# classifier that turns git's words into a remedy belongs beside the run,
+	# so the caller raises it and this stage only says which reason to raise
+	# it on.
+	#
+	# What is read is whether git named a ref, because a ref is filled in
+	# from git's own porcelain line and a push that never reached the remote
+	# prints none.  Reading whether any ref landed instead would make a
+	# remote that refused every branch indistinguishable from one nobody
+	# could reach, and the two earn different answers.
+	unless (grep {$_->{ok} || defined $_->{ref}} @$pushes) {
+		my ($reason, $stderr) = ($died, '');
 		# The first ref that said anything, since the classifier reads one
-		# line.  A result that carries no reason at all is read for what it
-		# is rather than warned about, because the warning would land on the
-		# same stream the run's own report is read from.
-		$reason = (grep {defined && length} map {$_->{reason}} @$pushes)[0]
-			unless defined $reason && length "$reason";
-		$args{unsurvivable}->($reason) if $args{unsurvivable};
+		# line, and both of the things it said, because the phrases that name
+		# a class live in git's hint text rather than in the short phrase the
+		# porcelain line carries.  A result that said nothing at all is read
+		# for what it is rather than warned about, because the warning would
+		# land on the same stream the run's own report is read from.
+		unless (defined $reason && length "$reason") {
+			my ($said) = grep {
+				(defined $_->{stderr} && length $_->{stderr}) ||
+				(defined $_->{reason} && length $_->{reason})
+			} @$pushes;
+			($reason, $stderr) = ($said->{reason}, $said->{stderr}) if $said;
+		}
+		$args{unsurvivable}->($reason, $stderr) if $args{unsurvivable};
 		return $result;
 	}
 

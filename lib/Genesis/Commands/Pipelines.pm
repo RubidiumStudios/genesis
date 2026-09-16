@@ -824,8 +824,8 @@ sub propagate {
 		# the remote has to be able to resolve.
 		#
 		# It is inside the session rather than after it, because a remote that
-		# has gone away is D82's unsurvivable failure and the answer to one is
-		# the abort: a run that could publish nothing leaves nothing
+		# has gone away is D82's unsurvivable failure and the answer to one
+		# is the abort.  A run that could publish nothing leaves nothing
 		# half-delivered in L either, and the next run redoes the whole of it.
 		# A session already finished has nothing left to reset, and a branch
 		# the remote refused is put back through the session for the same
@@ -850,8 +850,9 @@ sub propagate {
 					# classified here, beside the run, because the remedy each
 					# class earns is the run's to offer and not the stage's.
 					unsurvivable => sub {
-						my ($reason) = @_;
-						my ($message, $remedy) = _push_failure($remote, $reason);
+						my ($reason, $stderr) = @_;
+						my ($message, $remedy) =
+							_push_failure($remote, $reason, $stderr);
 						die Genesis::CI::RunFailure->unsurvivable(
 							message => $message,
 							remedy  => $remedy,
@@ -967,9 +968,15 @@ sub run_status {
 # answered nothing at all still carries no reason, and the unreachable wording
 # is what an unmatched line and an absent one both earn.
 sub _push_failure {
-	my ($remote, $reason) = @_;
+	my ($remote, $reason, $stderr) = @_;
 
-	my $line = ($reason && length "$reason") ? one_line($reason) : '';
+	# What git wrote to its standard error is read first, because the phrases
+	# that name a class below, such as an authentication that failed, live in
+	# the hint text git prints beside a refusal and not in the short phrase
+	# the porcelain line carries in its parentheses.  The short phrase is
+	# read where there is no hint text, so a refusal still names itself.
+	my $said = (defined $stderr && length "$stderr") ? $stderr : $reason;
+	my $line = ($said && length "$said") ? one_line($said) : '';
 
 	return (
 		sprintf('%s refused the credential this push offered: %s',

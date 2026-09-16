@@ -17,7 +17,7 @@ Genesis::CI::Publish - the propagate run's third stage, one push per branch
             {branch => 'control',  kind => 'control'},
             {branch => 'lab/bosh', kind => 'deployment', env => 'lab'},
         ],
-        unsurvivable => sub {die "the remote answered nothing: $_[0]\n"},
+        unsurvivable => sub {die "the remote answered nothing: $_[1] $_[0]\n"},
     );
 
 =head1 DESCRIPTION
@@ -74,11 +74,18 @@ branches are pushed anyway. A branch that landed records nothing of its own,
 because the walk has already written what the environment did, and its pending
 commits each read C<delivered>.
 
-A push where not one ref landed is the remote being gone rather than any
-branch's own quarrel with it, so nothing is recorded and the C<unsurvivable>
-callback is invoked with git's own words instead. The classifier that turns
-those words into a remedy lives beside the run, so the caller raises the
-failure and this stage only says which reason to raise it on.
+A push the remote answered about on no ref at all is the remote being gone
+rather than any branch's own quarrel with it, so nothing is recorded and the
+C<unsurvivable> callback is invoked with git's own words instead. The
+classifier that turns those words into a remedy lives beside the run, so the
+caller raises the failure and this stage only says which reason to raise it
+on.
+
+B<A remote that refused every branch is not a remote that went away.> What
+the stage reads is whether git named a ref, because a ref comes from git's
+own porcelain line and a push that never reached the remote prints none.
+Reading whether any ref landed instead would give a run whose every branch
+was refused the answer an unreachable remote earns.
 
 B<Parameters:>
 
@@ -113,7 +120,11 @@ list publishes nothing.
 
 =item C<unsurvivable>
 
-A callback invoked with git's reason where not one ref landed. It is expected
+A callback invoked where git named no ref at all, with two arguments. The
+first is git's reason, which is the short phrase from a porcelain line or the
+whole of what git said where there was no such line, and the second is git's
+standard error, which is where a hint naming the class of the failure lives
+and which is the empty string where git wrote nothing there. It is expected
 to raise, and the stage returns without recording anything if it does not.
 
 =back
