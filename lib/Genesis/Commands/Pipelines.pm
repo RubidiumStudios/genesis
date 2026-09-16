@@ -941,10 +941,11 @@ sub propagate {
 # here is reached: an aborted run through abort_run, and a declined publish
 # through ABORTED.
 #
-# An outcome the walk left null is idempotent, which is the reading
-# Genesis::CI::Report settles for the report, read the same way here so that
-# a run whose record this sub is handed before the renderer has seen it
-# cannot answer a different status.
+# An outcome the walk left null is none of the three whichever way the report
+# settles it.  Genesis::CI::Report settles one to held where a hold stands
+# and to idempotent where nothing does, and neither is a partial word, so a
+# record this sub is handed before the renderer has seen it and the same
+# record after it answer one status.
 sub run_status {
 	my ($record) = @_;
 
