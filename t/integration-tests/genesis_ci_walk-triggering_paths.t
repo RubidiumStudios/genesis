@@ -184,6 +184,12 @@ subtest 'the embedded genesis is triggering content of its own' => sub {
 };
 
 subtest 'a restructure reads each commit\'s own tree' => sub {
+	# Five: three assertions and the restoration one each of the two runs
+	# makes.  The second run starts inside bosh/, because that is where an
+	# operator stands after the restructure and it is the one directory that
+	# checking out a pre-restructure deployment branch takes away underneath
+	# them.  What the session does about that is proved in
+	# t/unit-tests/service_git_session-lifecycle.t.
 	plan tests => 5;
 
 	my $h = ready_harness(kit => 'omega-v2.7.0');

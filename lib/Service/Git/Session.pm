@@ -151,6 +151,22 @@ sub begin {
 		head   => $git->sha('HEAD'),
 		cwd    => getcwd(),
 	};
+
+	# The process stands on the repository root for the length of the
+	# session.  A switch to a deployment branch removes whatever that branch
+	# does not carry, and a process left standing in a directory that is
+	# gone resolves every later relative path against nothing, which reaches
+	# an operator as a wall of warnings from the path humaniser rather than
+	# as anything they can act on.  The operator's own shell is untouched by
+	# a child's chdir, every run inside the session resolves from the root
+	# anyway, and finish and abort put the process back through _restore
+	# wherever the directory it started in is still there.
+	my $root = $git->root;
+	if ($self->{origin}{cwd} ne $root
+			&& index($self->{origin}{cwd}, "$root/") == 0) {
+		chdir($root)
+			or bail("Unable to enter git root %s: %s", $root, $!);
+	}
 	# Everything the last session recorded is cleared here rather than at
 	# finish, because the handle hands out one session and a caller that
 	# opens a second one would otherwise read the first one's answers: a

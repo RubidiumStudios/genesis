@@ -646,11 +646,23 @@ sub propagate {
 	# The walk reads durable state and writes nothing at all.  Everything
 	# it decides stands in the record, and the delivery below is the only
 	# thing here that touches a branch.
-	my $record = Genesis::CI::Walk::plan($top,
-		git       => $git,
-		branches  => $initial->{branches},
-		refreshed => $refreshed ? 1 : 0,
-	);
+	my $record = eval {
+		Genesis::CI::Walk::plan($top,
+			git       => $git,
+			branches  => $initial->{branches},
+			refreshed => $refreshed ? 1 : 0,
+		);
+	};
+	# A walk that cannot read what it needs ends the run before anything has
+	# been written, and it arrives as a run failure object carrying the line
+	# that says which reading failed and the status D82 gives it.  Nothing
+	# has been switched yet, so the refusal closes the session and speaks.
+	unless ($record) {
+		my $err = $@;
+		my $fatal = ref($err) && $err->isa('Genesis::CI::RunFailure');
+		$refuse->({exitcode => $fatal ? $err->exit_code : 1},
+			"%s", $fatal ? $err->report_line : $err);
+	}
 
 	my $delivered = 0;
 	my @to_push;
