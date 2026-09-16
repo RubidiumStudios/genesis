@@ -1473,6 +1473,13 @@ sub _push_one {
 # A push that never reached the remote prints no porcelain line at all, so a
 # failure with nothing to read falls back to what git wrote to its standard
 # error, which is the sentence the caller's classifier reads.
+#
+# That standard error is carried on its own as well, and whole, because the
+# porcelain line's parenthetical is a short phrase such as "fetch first" and
+# the words that name a failure's class live in the hint text beside it.  The
+# reason stays the short phrase wherever git printed one, so a caller that
+# wants the phrase and a caller that wants the whole of it each have their
+# own field to read.
 sub _read_push_result {
 	my ($branch, $out, $rc, $err) = @_;
 	my %status = (
@@ -1486,6 +1493,7 @@ sub _read_push_result {
 		ref     => undef,
 		status  => undef,
 		reason  => '',
+		stderr  => ($err // '') =~ s/\s+$//r,
 		summary => '',
 	};
 

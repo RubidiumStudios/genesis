@@ -1249,7 +1249,7 @@ B<Examples:>
 
 =head2 _push_failure
 
-    my ($message, $remedy) = _push_failure($remote, $reason);
+    my ($message, $remedy) = _push_failure($remote, $reason, $stderr);
 
 The sentence and the corrective step one refused push earns.
 
@@ -1272,6 +1272,13 @@ The remote the push was made to, which every sentence names.
 Whatever the push raised, or the empty string where it landed nothing without
 raising at all.
 
+=item C<$stderr>
+
+The whole of what git wrote to its standard error, which is read before
+C<$reason> because the phrases that name a class live in git's hint text and
+not in the short phrase a porcelain line carries. Optional, and the empty
+string or C<undef> falls back to C<$reason>.
+
 =back
 
 B<Returns:> Two values, the message the run failure carries and the remedy
@@ -1284,6 +1291,10 @@ B<Examples:>
   _push_failure('origin', 'fatal: Authentication failed');
   # returns ('origin refused the credential this push offered: ...',
   #          'fix the credential this repository pushes with and run it again')
+
+  _push_failure('origin', 'fetch first', 'fatal: Authentication failed');
+  # returns the same pair, because the hint text is read before the phrase
+  #   the porcelain line carried
 
   _push_failure('origin', '');
   # returns ('could not reach the remote origin',

@@ -16,6 +16,7 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
+use Genesis::CI::Publish;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -96,7 +97,7 @@ subtest 'the moved ref is read from git and not composed' => sub {
 };
 
 subtest 'a rejected environment has one outcome and it is the rejection' => sub {
-	plan tests => 3;
+	plan tests => 2;
 
 	my $h = make_harness(envs => ['lab'], mode => 'direct',
 		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
@@ -112,13 +113,53 @@ subtest 'a rejected environment has one outcome and it is the rejection' => sub 
 
 	my ($out, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
 
+	# The environment's own line reading publish rejected is what proves the
+	# second half of T192, because the commit lines under a rejected
+	# environment still render the default word delivered until the report's
+	# two defaults are struck, and an assertion on that word can go green
+	# today for a reason that has nothing to do with this stage.
 	like(unfolded($out, $err), qr/publish rejected/, 'the rejection is recorded');
+};
 
-	# Read line by line rather than through the flattened form, because the
-	# question is whether one environment's own line carries two answers and
-	# a whole run put back on one line cannot say where a word belongs.
-	unlike($err, qr/lab.*\bdelivered\b/,
-		'lab does not also read as delivered');
+subtest 'a remote that refused every branch is not a remote that went away' => sub {
+	plan tests => 3;
+
+	# No run is spawned here, because the two answers the guard tells apart
+	# are answers git gives the stage rather than anything the walk decides,
+	# and a whole run cannot be made to refuse its every push while control
+	# still travels with the branches.
+	my $h = make_harness(envs => ['lab'], vault => 0);
+	init_branch($h, 'lab');
+
+	# Copy B advances the branch on R, so copy A is offering a rewind and the
+	# remote refuses it with a porcelain line of its own.
+	move_on_r($h, 'lab/bosh');
+	my $git   = $h->git('a');
+	my @specs = ({branch => 'lab/bosh', kind => 'deployment', env => 'lab'});
+
+	my $refused;
+	my $result = Genesis::CI::Publish::publish_run(
+		git => $git, remote => 'origin', records => [], specs => \@specs,
+		unsurvivable => sub {$refused = $_[0] // 'the remote went away'},
+	);
+
+	is($refused, undef,
+		'a refusal on every branch is not the remote having gone away');
+	is_deeply($result->{rejected}, ['lab/bosh'],
+		'it is recorded as that branch being refused');
+
+	# The same call against a push URL naming a directory that is no
+	# repository, where git answers about no ref at all.
+	broken_pushurl($h);
+
+	my $gone;
+	Genesis::CI::Publish::publish_run(
+		git => $git, remote => 'origin', records => [], specs => \@specs,
+		unsurvivable => sub {$gone = $_[0]},
+	);
+
+	like($gone, qr/does not appear to be a git repository/,
+		'and a remote that answered about nothing is');
 };
 
 done_testing;

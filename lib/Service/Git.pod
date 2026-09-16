@@ -2137,13 +2137,21 @@ at all, is a no-op and not a failure.
 =back
 
 B<Returns:> An arrayref of per-ref results in the order the specs were given.
-Each is a hashref carrying C<branch>, C<ok>, C<ref>, C<status>, C<reason>, and
-C<summary>. C<ok> is 1 where git took the ref and 0 where it did not. C<ref> is
-the remote-side ref git named in its own porcelain line, which is the name a
-caller reports rather than one it composed. C<status> is one of C<created>,
-C<updated>, C<forced>, C<deleted>, C<up-to-date>, or C<rejected>. C<reason> is
-git's own text for a refusal, and the empty string for a ref that landed.
-C<summary> is the rest of the porcelain line.
+Each is a hashref carrying C<branch>, C<ok>, C<ref>, C<status>, C<reason>,
+C<stderr>, and C<summary>. C<ok> is 1 where git took the ref and 0 where it did
+not. C<ref> is the remote-side ref git named in its own porcelain line, which
+is the name a caller reports rather than one it composed. C<status> is one of
+C<created>, C<updated>, C<forced>, C<deleted>, C<up-to-date>, or C<rejected>.
+C<reason> is git's own text for a refusal, and the empty string for a ref that
+landed. C<stderr> is the whole of what git wrote to its standard error, and it
+is the empty string where git wrote nothing there. C<summary> is the rest of
+the porcelain line.
+
+B<C<reason> and C<stderr> are not the same text.> C<reason> is the short
+phrase in the porcelain line's parentheses, such as C<fetch first>, and
+C<stderr> is everything git said beside it, which is where a hint naming the
+class of a failure lives. A caller classifying a failure reads C<stderr>
+first and C<reason> where C<stderr> is empty.
 
 B<Errors:>
 
@@ -2153,6 +2161,12 @@ B<Errors:>
 
 C<"Service::Git-E<gt>push needs its remote by name"> -- raised via C<bail()>
 when C<remote> is missing.
+
+=item *
+
+C<"Service::Git-E<gt>push was handed a ref spec with no branch name"> --
+raised via C<bug()> in L</_push_one> when a spec carries no branch to build a
+refspec from.
 
 =item *
 
@@ -2623,7 +2637,7 @@ class the rule is strictest about.
 =back
 
 B<Returns:> A hashref carrying C<branch>, C<ok>, C<ref>, C<status>, C<reason>,
-and C<summary>, as L</push> documents them.
+C<stderr>, and C<summary>, as L</push> documents them.
 
 B<Errors:>
 
@@ -2675,6 +2689,10 @@ A push that never reached the remote prints no porcelain line at all, so a
 failure with nothing to read falls back to what git wrote to its standard
 error, which is the sentence a caller's classifier reads.
 
+That standard error is carried whole under C<stderr> as well, whether or not
+a porcelain line was printed, so C<reason> can stay the short phrase and a
+caller that wants everything git said still has it.
+
 B<Parameters:>
 
 =over 4
@@ -2698,7 +2716,7 @@ What git wrote to standard error, which is the fallback reason.
 =back
 
 B<Returns:> A hashref carrying C<branch>, C<ok>, C<ref>, C<status>, C<reason>,
-and C<summary>, as L</push> documents them.
+C<stderr>, and C<summary>, as L</push> documents them.
 
 B<Errors:> None. Output it cannot read leaves C<ref> and C<summary> empty and
 reports git's exit status.
