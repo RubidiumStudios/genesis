@@ -439,79 +439,14 @@ sub _validate_multi_file {
 	# Validate integrations section
 	$self->_validate_integrations_section($parsed->{integrations});
 
-	# Validate provider options section (ci.provider: or provider-config/concourse.yml)
-	$self->_validate_provider_section($parsed->{provider})
-		if $parsed->{provider};
+	# The provider block is validated at configuration load under D28, by
+	# the provider that owns it under D105, so there is nothing to check
+	# again here.  A second walk of the same fragment could only agree
+	# with the first or be wrong about it, and it had its own wording for
+	# both refusals, which is two sentences for one mistake.
 
 	# Cross-reference validation
 	$self->_validate_cross_references($parsed);
-}
-
-# }}}
-# _validate_provider_section - validate ci.provider: options against provider schema {{{
-#
-# Called when a 'provider' key is present in the parsed config (inline in
-# .genesis/config or as provider-config/concourse.yml).  Loads the named
-# provider class and validates subkeys against its provider_options_schema().
-sub _validate_provider_section {
-	my ($self, $provider) = @_;
-
-	unless (ref($provider) eq 'HASH') {
-		$self->_error("'provider' section must be a hash");
-		return;
-	}
-
-	my $type = $provider->{type};
-	unless ($type) {
-		$self->_error("'provider.type' is required");
-		return;
-	}
-
-	# Load provider class to get its schema
-	require Genesis::CI::Compiler::PipelineProvider;
-	my %known = map { $_ => 1 } Genesis::CI::Compiler::PipelineProvider->known_providers();
-	unless ($known{$type}) {
-		$self->_error(sprintf(
-			"'provider.type' is '%s', which is not a known CI provider.  Valid types: %s",
-			$type, join(', ', sort keys %known)
-		));
-		return;
-	}
-
-	# Dynamically load provider to get its schema
-	my $provider_info;
-	eval {
-		require Genesis::CI::Compiler;
-		$provider_info = Genesis::CI::Compiler->_resolve_provider_class($type);
-		require $provider_info->{file};  ## no critic
-	};
-	if ($@) {
-		$self->_warn("Could not load provider '$type' for schema validation: $@");
-		return;
-	}
-
-	my $schema = $provider_info->{class}->provider_options_schema();
-
-	# Check required keys
-	for my $key (sort keys %$schema) {
-		my $spec = $schema->{$key};
-		next unless $spec->{required};
-		$self->_error(sprintf("'provider.%s' is required for provider type '%s'", $key, $type))
-			unless defined $provider->{$key};
-	}
-
-	# Check unknown keys.  The type is the one key every provider shares, so
-	# under D86 the generic schema declares it and no fragment does; reading
-	# a fragment alone would report the type itself as unrecognised.
-	for my $key (sort keys %$provider) {
-		next if $key eq 'type';
-		unless (exists $schema->{$key}) {
-			$self->_error(sprintf(
-				"'provider.%s' is not a recognized option for provider type '%s'.  Valid options: %s",
-				$key, $type, join(', ', sort keys %$schema)
-			));
-		}
-	}
 }
 
 # }}}

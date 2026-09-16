@@ -10,6 +10,7 @@ use utf8;
 
 use lib 'lib';
 use lib 't';
+use Genesis;
 use Test::More;
 use Test::Output;
 use File::Temp qw/tempdir/;
@@ -102,6 +103,24 @@ subtest 'pipeline.public still decides the visibility' => sub {
 		'pipeline.public exposes the pipeline when nothing above it says otherwise';
 	like $flown->(undef), qr/hide-pipeline/,
 		'and the built-in default hides it';
+};
+
+subtest 'the provider block is not checked a second time' => sub {
+	plan tests => 2;
+
+	require Genesis::CI::Compiler::Validator;
+	ok !Genesis::CI::Compiler::Validator->can('_validate_provider_section'),
+		'the validator keeps no copy of the provider check';
+
+	# D28 validated the block at load, so what reaches the compiler has
+	# already met the provider's own rules and cannot fail them here.  One
+	# reader of the fragment is left on the compiler side, and it is the
+	# base class reading the CLI class's declaration through.
+	my @found = grep {
+		grep {m/provider_options_schema/} split(/\n/, slurp($_) // '')
+	} glob('lib/Genesis/CI/Compiler/*.pm');
+	is_deeply [@found], ['lib/Genesis/CI/Compiler/PipelineProvider.pm'],
+		'and the fragment is read on the compiler side in one place';
 };
 
 done_testing;
