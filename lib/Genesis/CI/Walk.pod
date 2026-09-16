@@ -1007,7 +1007,8 @@ environment's fragments are enumerated belongs to the same class as a
 delivery that died halfway.
 
 A run-fatal or unsurvivable error is re-raised for the caller to abort the
-whole run on, which L</is_run_fatal> is the reader for.
+whole run on, which L</is_run_fatal> is the reader for and L</abort_run> is
+the answer to.
 
 B<Parameters:>
 
@@ -1083,6 +1084,84 @@ B<Examples:>
   Genesis::CI::Walk::is_run_fatal(Genesis::CI::RunFailure->fatal);        # 1
   Genesis::CI::Walk::is_run_fatal(Genesis::CI::RunFailure->unsurvivable); # 1
   Genesis::CI::Walk::is_run_fatal("the blueprint hook exited 1\n");       # 0
+
+=head2 abort_run
+
+    Genesis::CI::Walk::abort_run(
+      session => $session,
+      record  => $record,
+      envs    => \@dag_order,
+      at      => $env_name,
+      error   => $err);
+
+Ends the run under either of D82's two classes.  It never returns.
+
+Both classes abort the same way and differ only in the status they exit
+with.  The status is read off the failure rather than decided here, because
+C<Genesis::CI::RunFailure> already carries the one D82 gives each class,
+which is 1 for a run-fatal failure and C<Genesis::Exit::TEMPFAIL> for an
+unsurvivable one.  Anything that is not one of those two exits 1.
+
+Every environment records an outcome first, in the words
+C<Genesis::CI::RunFailure::abort_outcomes> composes: one the run had reached
+records C<not published, run aborted>, and one it never reached records
+C<not attempted>.  Each is printed on a line of its own, so a run that ended
+early still says what became of every environment it had in scope, which is
+I8 over the axis this stage owns.
+
+The abort comes last, because it is what resets every branch the session
+committed to back to T and it ends the process on the way out.  A run with
+no session open, or one whose session has already gone out through its own
+abort, says the same thing and exits the same way without one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<session>
+
+The open session, or C<undef>.  An inactive session is left alone.
+
+=item C<record>
+
+The run's record, whose environments take the outcome words.  A walk that
+died before it produced one passes C<undef>, and the names then come from
+C<envs>.
+
+=item C<envs>
+
+The environment names, in the order the run would have walked them, used
+where there is no record.
+
+=item C<at>
+
+The environment the run had reached.  Everything up to and including it
+records C<not published, run aborted> and everything after it records
+C<not attempted>.  A run that names none died before it reached any, so
+every environment records C<not attempted>.
+
+=item C<error>
+
+Whatever was raised.  A C<Genesis::CI::RunFailure> carries its own report
+line and status, and anything else is printed as it stands and exits 1.
+
+=back
+
+B<Returns:> Nothing.  It exits.
+
+B<Examples:>
+
+  Genesis::CI::Walk::abort_run(
+    session => $session,
+    record  => $record,
+    at      => 'qa',
+    error   => Genesis::CI::RunFailure->unsurvivable(
+      message => 'could not reach the remote origin',
+      remedy  => 'try again once the remote is reachable'));
+  # lab: not published, run aborted
+  # qa:  not published, run aborted
+  # prod: not attempted
+  # then resets lab and qa to T and exits 75
 
 =head1 INTERNAL FUNCTIONS
 

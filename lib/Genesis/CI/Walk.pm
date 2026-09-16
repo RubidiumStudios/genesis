@@ -14,7 +14,7 @@ use warnings;
 
 use Exporter qw/import/;
 use Scalar::Util ();
-use Genesis qw/run bug/;
+use Genesis qw/run bug bail info/;
 use Genesis::CI::Marker qw/STAGE RELEASE_STAGE/;
 use Genesis::CI::RunFailure;
 
@@ -24,7 +24,7 @@ our @EXPORT_OK = qw/
 	apply_hold
 	gate_state released_gates
 	introducing_commit walk_base
-	walk_one is_run_fatal
+	walk_one is_run_fatal abort_run
 	READINGS HOLD_REASONS
 /;
 
@@ -755,6 +755,67 @@ sub is_run_fatal {
 
 	my $kind = $error->kind // '';
 	return ($kind eq 'run-fatal' || $kind eq 'unsurvivable') ? 1 : 0;
+}
+
+# }}}
+# abort_run - end the run, reset every committed branch, and say why {{{
+#
+# D82 and D96: both classes that end a run abort the same way, and they
+# differ only in the status they exit with.  Run-fatal is the writer's own
+# failure and exits 1, because no retry helps.  Unsurvivable is an error a
+# retry may fix, and exits Genesis::Exit::TEMPFAIL, which sysexits calls a
+# temporary failure with a failed connection as its example.  The status is
+# read off the failure rather than decided here, because Genesis::CI::RunFailure
+# already carries the one D82 gives each class.
+#
+# The outcome words come from that same class, for the reason D54 gives: an
+# environment the run had reached records that nothing of its was published
+# and one it never reached records that it was not attempted, and a phrase
+# living in two places is a phrase the two drift apart on.
+#
+# The abort is the last thing that happens, because it is what resets every
+# branch this session committed to back to T and it ends the process on the
+# way out.  The per-environment lines are printed above it, so the operator
+# reads what became of each environment before they read why the run
+# stopped.
+sub abort_run {
+	my (%args) = @_;
+
+	my $session = $args{session};
+	my $record  = $args{record};
+	my $error   = $args{error};
+
+	my @envs = $record ? (map {$_->{env}} @{$record->{environments}})
+	                   : @{$args{envs} || []};
+	my $outcomes = Genesis::CI::RunFailure::abort_outcomes(\@envs, $args{at});
+
+	if ($record) {
+		$_->{outcome} = $outcomes->{$_->{env}}
+			for @{$record->{environments}};
+	}
+
+	# One line per environment, which is I8 over the axis this stage owns:
+	# a run that ended early still says what became of every environment it
+	# had in scope.  The renderer that will print the whole record lands
+	# with the report, and until it does this is the only place these words
+	# reach an operator.
+	info("  #Y{%s}: %s", $_, $outcomes->{$_}) for @envs;
+
+	my $failure = Scalar::Util::blessed($error)
+		&& $error->isa('Genesis::CI::RunFailure') ? $error : undef;
+	my $message = sprintf(
+		"%s\n\nNothing was published, and every branch this run committed ".
+		"to has been reset.",
+		($failure ? $failure->report_line : "$error") =~ s/\s+$//r
+	);
+	my $status = $failure ? $failure->exit_code : 1;
+
+	$session->abort($message, exitcode => $status)
+		if $session && $session->active;
+
+	# No session, or one that has already gone out through its own abort.
+	# There is nothing left to reset, and the reason still has to be said.
+	bail({exitcode => $status}, "%s", $message);
 }
 
 # }}}

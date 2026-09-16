@@ -372,7 +372,14 @@ sub abort {
 		$self->_standing_on
 	) if $restore_error;
 
-	bail("%s", $error);
+	# The status the caller asked for, which is how the two classes of run
+	# failure under D82 leave through the one abort and still exit
+	# differently.  A caller that asks for none exits 1, which is what bail
+	# does with an undefined code and what every caller before this option
+	# existed already got.  The two refusals above keep SOFTWARE whatever
+	# was asked for, because a tree nobody could put back is a defect in
+	# Genesis rather than the failure the run was reporting.
+	bail({exitcode => $opts{exitcode}}, "%s", $error);
 }
 
 # }}}
@@ -543,8 +550,34 @@ sub apply_files {
 		};
 	}
 
-	$git->rm(@stale) if @stale;
-	$git->checkout_file($source_sha, $_) for @to_write;
+	# D82's first class, raised where the writer meets it.  A path this
+	# delivery could not take off the branch or could not put into the index
+	# is the writer failing to produce what it was told to produce, and
+	# nothing a caller could do differently would have helped, so it ends the
+	# run rather than the environment.  Without this the same die reaches the
+	# per-environment guard as a plain string, is confined to one
+	# environment, and the run walks on delivering through a writer that has
+	# already shown it cannot write.
+	#
+	# The assertions below raise the same class for the same reason, and the
+	# commit does not: a commit git refuses is a condition of the branch it
+	# was made on, which is why that one stays confined.
+	my $staged = eval {
+		$git->rm(@stale) if @stale;
+		$git->checkout_file($source_sha, $_) for @to_write;
+		1;
+	};
+	unless ($staged) {
+		# Read off before anything else runs, because every git call below
+		# would otherwise have had its own chance to clear it first.
+		my $reason = _one_line($@);
+		die Genesis::CI::RunFailure->fatal(
+			message => "the writer could not stage the propagation set: $reason",
+			branch  => $git->current_branch,
+			source  => $source_sha,
+			paths   => [@to_write],
+		);
+	}
 
 	# D82 checks the postcondition on the index, before the commit, so a
 	# failed check never becomes a commit.  It is two assertions and not one,
@@ -600,6 +633,21 @@ sub apply_files {
 
 ### Internals {{{
 
+# _one_line - the first substantive line of whatever git raised {{{
+#
+# A run failure carries one line, because the report prints it beside the
+# branch it happened on, and a death out of run is several lines of which
+# the first is the reason and the rest are the trace around it.
+sub _one_line {
+	my ($err) = @_;
+	return 'unknown reason' unless defined($err) && length("$err");
+	my ($first) = grep {/\S/} split /\n/, "$err";
+	return 'unknown reason' unless defined $first;
+	$first =~ s/^\s+|\s+$//g;
+	return $first;
+}
+
+# }}}
 # _members_at - the set's pathspecs as paths one commit's tree holds {{{
 #
 # The set is a list of pathspecs and not a list of files.  A dev kit's source
