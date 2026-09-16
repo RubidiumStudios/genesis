@@ -174,20 +174,27 @@ subtest 'two copies and two identities agree' => sub {
 	my $copy = clone_copy($h);
 	run_genesis_in($h, $copy, {answers => ['y']}, 'propagate');
 	my $from_c = files_at($h, "refs/remotes/origin/$qa", copy => $copy);
+	# Read off R, which is the remote both copies published to, while this
+	# copy's delivery is still the one standing there.  The roll-back below
+	# takes it away again.
+	my $marker_c = harness_marker($h, "refs/heads/$qa", copy => 'r');
 
 	run({dir => $h->r}, 'git', 'update-ref', "refs/heads/$qa", $before);
 	refresh($h, 'a');
 	run_genesis($h, {answers => ['y']}, 'propagate');
-	my $from_a = files_at($h, "refs/remotes/origin/$qa", copy => 'a');
+	my $from_a   = files_at($h, "refs/remotes/origin/$qa", copy => 'a');
+	my $marker_a = harness_marker($h, "refs/heads/$qa", copy => 'r');
 
 	is_deeply($from_a, $from_c, 'the two copies produce the same tree');
 
 	# The markers as well as the trees, because the marker is what the next
 	# run walks from, and two copies that wrote the same files under
 	# different markers would each send the run after them somewhere else.
-	is_deeply(trailers_of($h, "refs/remotes/origin/$qa"),
-		trailers_of($h, "refs/remotes/origin/$qa", copy => $copy),
-		'and the same markers on top of them');
+	# It is the marker and not the trailers, because the marker is the
+	# commit subject Genesis::CI::Marker::build renders and a delivery
+	# carries no trailer block at all, so a comparison of trailers is two
+	# empty hashes and a row that cannot fail.
+	is($marker_a, $marker_c, 'and the same markers on top of them');
 
 	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
 	like($err, qr/^\s*qa: idempotent/m, 'copy A finds nothing left to do');
