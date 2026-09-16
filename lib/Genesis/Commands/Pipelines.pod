@@ -409,6 +409,13 @@ Walks the control branch forward from every deployment branch's newest
 marker and routes each control commit on its own, in control order, under
 D34 and D36.
 
+A branch that has never been delivered to carries no marker, and the walk
+starts at the commit that introduced the environment instead, under D61.
+That commit is routed, held, and delivered exactly as every commit after it
+is, so a new environment receives its own history rather than one baseline
+taken from control's tip.  There is no separate seeding step, and the run
+cuts no branches: C<genesis pipeline-apply> is the one command that does.
+
 The run takes no argument.  A run that is handed one is a usage error,
 because the C<E<lt>envE<gt>> argument went with the cascade it scoped under
 D36, and a commit held behind an ancestor is released by the next bare run
