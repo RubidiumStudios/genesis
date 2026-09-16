@@ -11,7 +11,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
-use Cwd qw/getcwd/;
+use Cwd qw/getcwd abs_path/;
 use Genesis;
 use Service::Git;
 use_ok 'Service::Git::Session';
@@ -46,6 +46,31 @@ subtest 'a clean run leaves working state exactly as it found it' => sub {
 	$session->finish;
 	ok(!$session->active, 'the session is closed');
 	assert_w_restored($w, 'branch, HEAD, cwd, tree, and index are all back');
+};
+
+subtest 'the session stands the process on the repository root' => sub {
+	plan tests => 3;
+
+	# A checkout removes whatever the branch it moves to does not carry, so a
+	# process left standing below the root can find itself in a directory
+	# that is no longer there, and everything it resolves relative to that
+	# directory afterwards resolves against nothing.
+	my $h    = make_harness(envs => ['qa'], root => 'bosh');
+	my $git  = $h->git('a');
+	my $here = getcwd();
+	my $root = abs_path($git->root);
+	my $below = abs_path($h->a . '/bosh');
+
+	chdir($below) or die "cannot enter the deployment root: $!\n";
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	is(getcwd(), $root, 'begin stood the process on the repository root');
+	is(abs_path($session->origin->{cwd}), $below,
+		'and recorded the directory the operator started in');
+
+	$session->finish;
+	is(getcwd(), $below, 'finish put the process back in that directory');
+	chdir($here) or die "cannot return to $here: $!\n";
 };
 
 subtest 'begin refuses over a tracked modification' => sub {

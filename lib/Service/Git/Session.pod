@@ -130,6 +130,14 @@ The order matters: every refusal above happens before the session writes
 anything at all, so a command that is going to be turned away is turned away
 while the repository is still exactly as the operator left it.
 
+It then stands the process on the repository root for the length of the
+session, where the directory it was started in lies below that root. A switch
+to another branch removes whatever that branch does not carry, and a process
+left standing in a directory that is gone resolves every later relative path
+against nothing. The operator's own shell is unaffected by a child's change
+of directory, and C<finish> and C<abort> put the process back in the recorded
+directory whenever it is still there.
+
 What an earlier session recorded is cleared here rather than at C<finish>,
 which is the target it stood on, the tips it switched to, the branches it
 committed to, and whether it finished. The handle hands out one session, so a

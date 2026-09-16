@@ -45,8 +45,9 @@ It writes nothing itself.  The caller delivers what the record marks pending,
 one commit at a time, through the session's single writer, so the one thing
 that touches a deployment branch stays in one place.
 
-Each control commit is routed on its own, in control order, and becomes
-exactly one commit on the deployment branch.  Collapsing everything
+Each control commit that routes to an environment becomes exactly one commit
+on its deployment branch, and it is routed on its own, in control
+order.  Collapsing everything
 outstanding into a single diff against control's tip made an urgent change to
 one environment wait behind an unrelated earlier change to a shared file, and
 routing per file would have split a commit whose files have to land together.
@@ -297,8 +298,7 @@ The set is read from the tree at the commit being delivered and never from
 the working tree, because a restructure moves the prefix that defines it.  A
 triggering path is one whose change means deploy me; a non-triggering path
 has to be current on the deployment branch without its change meaning that.
-A commit whose content here is only non-triggering is not routed at all, and
-its content arrives in the next delivery, since a delivery is a mirror.
+What the split then decides is L</route_commit>'s to say.
 
 A kind that is a directory stands for everything under it, so a commit that
 touches the dev kit or a reaction script is matched by the directory the set
@@ -340,14 +340,15 @@ B<Examples:>
 
 Whether one control commit belongs to one environment, and what of it does.
 
-Only triggering content routes a commit, under D68.  A commit whose content
-for this deployment is only non-triggering is skipped exactly as one that
-touches nothing in the set is, and it records no outcome, because the next
-delivery is a mirror and carries that content with it.  That holds behind a
-hold as well as in front of one, so a configuration change standing behind a
-held commit is not reported as waiting on anything.  The non-triggering paths
-come back beside the triggering ones so that the report can say a script or a
-configuration change rode along.
+Only triggering content routes a commit, under D68.  L</changed_set> makes
+the split, and a commit whose content for this deployment falls wholly on the
+non-triggering side is skipped exactly as one that touches nothing in the set
+is, and it records no outcome, because the next delivery is a mirror and
+carries that content with it.  That holds behind a hold as well as in front
+of one, so a configuration change standing behind a held commit is not
+reported as waiting on anything.  The non-triggering paths come back beside
+the triggering ones so that the report can say a script or a configuration
+change rode along.
 
 B<Parameters:>
 
@@ -395,6 +396,11 @@ An environment that has never certified a commit is holding everything below
 it, so with no certified commit the answer is the whole set rather than the
 empty list, and nothing here ever falls back to control's tip.
 
+A range git will not resolve ends the run rather than answering an empty
+list.  An environment can certify a commit this clone has never fetched, or
+one a rewritten control no longer carries, and reading that as an ancestor
+with nothing outstanding would drop the very hold the range was read for.
+
 B<Parameters:>
 
 =over 4
@@ -418,11 +424,13 @@ The control commit the question is being asked about.
 
 =back
 
-B<Returns:> A list of git-root-relative paths, and an empty list where git
-could not read the range.
+B<Returns:> A list of git-root-relative paths, and an empty list where the
+range resolved and nothing in the set changed across it.
 
-B<Errors:> Raises whatever reading the set at a commit raises, for the
-reasons L</changed_set> gives.
+B<Errors:> Raises a C<Genesis::CI::RunFailure> of the run-fatal kind, naming
+the environment and the range, where git cannot resolve the range.  It also
+raises whatever reading the set at a commit raises, for the reasons
+L</changed_set> gives.
 
 B<Examples:>
 

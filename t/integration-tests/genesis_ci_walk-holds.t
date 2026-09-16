@@ -135,6 +135,30 @@ subtest 'an ancestor with no control_commit in its record holds too' => sub {
 		'lab was delivered nothing in its place');
 };
 
+subtest 'a certified commit the repository lacks stops the run' => sub {
+	plan tests => 4;
+
+	my $h = chained_harness();
+	# A record naming a commit no repository here holds, which is what a
+	# rewritten control or a clone that never fetched the certified commit
+	# leaves behind.  The range the hold is read over cannot resolve, and an
+	# unreadable range is not an ancestor with nothing undeployed.
+	certify($h, 'lab', commit => 'deadbeef',
+		control_commit => '0' x 39 . '1');
+	my $due = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nshared: 8\n"},
+		message => 'Bump shared ops',
+		push    => 1,
+	);
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	isnt($exit, 0, 'the run refused rather than delivering');
+	like($err, qr/0{39}1/, 'the refusal names the commit that would not resolve');
+	isnt(harness_marker($h, $h->slug('qa')), $due,
+		'nothing was delivered to qa behind the unreadable hold');
+};
+
 subtest 'the hold reason carries the ancestor\'s own state' => sub {
 	# Six: three rows, and one restoration assertion for each of the three
 	# runs the row makes.

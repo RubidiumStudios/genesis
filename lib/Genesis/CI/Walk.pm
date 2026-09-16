@@ -15,6 +15,7 @@ use warnings;
 use Exporter qw/import/;
 use Genesis qw/run bug/;
 use Genesis::CI::Marker;
+use Genesis::CI::RunFailure;
 
 our @EXPORT_OK = qw/
 	plan changed_set route_commit undeployed_set overlap
@@ -137,9 +138,8 @@ sub control_commits {
 # from the working tree, because a restructure moves the prefix that defines
 # the set.  D68: the set divides into triggering paths, whose change means
 # deploy me, and non-triggering ones, which must be current on the branch
-# without meaning that.  A commit whose content here is only non-triggering
-# is not routed at all, and its content arrives in the next delivery's
-# snapshot, since a delivery is a mirror and control is linear.
+# without meaning that.  What the split then decides is route_commit's to
+# say.
 #
 # The marked set is read once and split here rather than asked for twice,
 # because each reading writes the deployment root out into a scratch tree and
@@ -196,12 +196,13 @@ sub changed_set {
 # }}}
 # route_commit - decide whether one commit belongs to one environment {{{
 #
-# D68: only triggering content routes a commit.  A commit whose content for
-# this deployment is only non-triggering is skipped exactly as one that
-# touches nothing in the set is, and it records no outcome, because the next
-# delivery's mirror already carries it.  That holds behind a hold as well as
-# in front of one, so a config change standing behind a held commit is not
-# reported as waiting on anything.  The carried list travels with the routed
+# D68: only triggering content routes a commit.  changed_set makes the split,
+# and a commit whose content for this deployment falls wholly on the
+# non-triggering side is skipped exactly as one that touches nothing in the
+# set is, and it records no outcome, because the next delivery's mirror
+# already carries it.  That holds behind a hold as well as in front of one,
+# so a config change standing behind a held commit is not reported as
+# waiting on anything.  The carried list travels with the routed
 # commit for the report alone, so an operator can see that a script or a
 # config change rode along.
 sub route_commit {
@@ -234,7 +235,21 @@ sub undeployed_set {
 		{dir => $git->root, stderr => 0},
 		'git', 'diff', '--name-only', "$certified..$upto"
 	);
-	return () if $rc || !$out;
+
+	# A range git will not resolve is an input this run cannot read, and it
+	# is not an ancestor with nothing undeployed.  Answering the empty list
+	# drops the hold the range was being read for, and the descendant then
+	# receives content nothing above it has ever deployed, so the run ends
+	# here and names the range instead.  A clone that never fetched the
+	# certified commit and a control branch that was rewritten under one
+	# both arrive this way.
+	die Genesis::CI::RunFailure->fatal(
+		message => sprintf(
+			"%s has certified a commit this repository cannot resolve, so ".
+			"what it has left undeployed cannot be read over %s..%s",
+			$env->name, $certified, $upto)
+	) if $rc;
+	return () unless defined($out) && length($out);
 
 	return grep {$in_set{$_}} grep {/\S/} split /\n/, $out;
 }

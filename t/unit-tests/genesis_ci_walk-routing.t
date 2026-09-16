@@ -28,7 +28,6 @@ $ENV{NOCOLOR} = 1;
 # left, and every row lays its own commits on top of that.
 sub fixture {
 	my $h = make_harness(envs => ['qa'], root => '', kit => 'omega-v2.7.0');
-	fixture_vault($h);
 
 	my $git = Service::Git->new($h->a);
 	my $top = Genesis::Top->new($h->a);
