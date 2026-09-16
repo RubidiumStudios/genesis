@@ -497,13 +497,24 @@ and it comes back null with every environment taking the C<not-propagated>
 reading.  The refusal closes the session first, so the operator is back on
 the branch they started from before they read why the run stopped.
 
+Exits C<Genesis::Exit/DATAERR> where the control branch moved between the
+start of the run and its first push.  The run re-checks control against the
+remote there, because a marker names a control commit by its sha alone and a
+control somebody has pushed to leaves every marker the run wrote naming a
+commit computed from a tip that has already moved.  Nothing is pushed, every
+branch the run committed to goes back to where the remote has it, and the
+refusal names the step that repairs control.  The status is the data one
+because what stopped the run is the state of the repository the run reads.
+
 Exits C<Genesis::Exit/TEMPFAIL> where no ref of the push landed, which is
-D82's unsurvivable failure.  The report names the cause the remote's own
-error gives, which is a refused credential, a server error, or a remote
-nothing could reach, each with its own corrective step.  The same status is
-returned by a run that finished with any environment C<failed>, C<not
-attempted>, or C<publish rejected>, which is D97's partial run and which
-L</run_status> decides.
+D82's unsurvivable failure.  The push set is the deployment branches alone,
+so not one ref landing is the remote being gone rather than any branch's own
+quarrel with it, and control is the input the run re-checks rather than a ref
+it publishes.  The report names the cause the remote's own error gives, which
+is a refused credential, a server error, or a remote nothing could reach, each
+with its own corrective step.  The same status is returned by a run that
+finished with any environment C<failed>, C<not attempted>, or C<publish
+rejected>, which is D97's partial run and which L</run_status> decides.
 
 B<Examples:>
 

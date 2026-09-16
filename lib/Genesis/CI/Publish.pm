@@ -8,6 +8,11 @@ package Genesis::CI::Publish;
 # environment one run and nothing else.  No push's result withholds another's,
 # which is the third stage of D96, and each result is that branch's outcome
 # rather than a warning printed beside a success.
+#
+# The push set is the deployment branches alone.  Control is the run's input
+# and never its output, so what the stage does with control is read it once
+# more before the first push, and a control that has moved refuses the whole
+# publish.
 use strict;
 use warnings;
 
@@ -20,6 +25,11 @@ our @EXPORT_OK = qw/publish_run/;
 
 # publish_run - push every branch the run committed to, one at a time {{{
 #
+# Control is re-checked before the first push, and a control that has moved
+# refuses the publish, puts every branch the run committed to back where the
+# remote has it, and answers the refusal as a sentence for the command to
+# speak.
+#
 # A branch the remote refuses records the rejection as that environment's one
 # outcome and goes straight back to where T has it, so the run ends with no
 # local commit nobody else can see, and every other branch is published
@@ -30,7 +40,8 @@ our @EXPORT_OK = qw/publish_run/;
 # of that field against the seven words I8 fixes.
 #
 # Returns { published => \@branches, rejected => \@branches, declined => 0,
-# results => \@results }.
+# results => \@results }, with refused carrying the sentence where control
+# moved and nothing was pushed at all.
 sub publish_run {
 	my (%args) = @_;
 	my $git     = $args{git};
@@ -43,6 +54,19 @@ sub publish_run {
 		published => [], rejected => [], declined => 0, results => [],
 	};
 	return $result unless @specs && $remote;
+
+	# D30's in-sync rule, asked a second time.  The pre-flight asked it once
+	# before the walk, and a walk takes long enough for a teammate to push
+	# through the middle of it, so the last thing the run does before its
+	# first push is ask again.  A control that has moved refuses, and the
+	# refusal comes back as a sentence rather than as an exit, because the
+	# command owes the operator their branch back before it says why the run
+	# stopped.
+	if (my $refused = _recheck_control($git, $args{control}, $remote)) {
+		$result->{refused} = $refused;
+		_reset_publish_set($session);
+		return $result;
+	}
 
 	info "\n#G{Publishing} to #C{%s}...", $remote;
 
@@ -67,7 +91,10 @@ sub publish_run {
 	# from git's own porcelain line and a push that never reached the remote
 	# prints none.  Reading whether any ref landed instead would make a
 	# remote that refused every branch indistinguishable from one nobody
-	# could reach, and the two earn different answers.
+	# could reach, and the two earn different answers.  That matters all the
+	# more now that the push set is the deployment branches alone, because a
+	# run with one environment in it has a single ref to land, and the only
+	# ref there was is then the refused one.
 	unless (grep {$_->{ok} || defined $_->{ref}} @$pushes) {
 		my ($reason, $stderr) = ($died, '');
 		# The first ref that said anything, since the classifier reads one
@@ -111,8 +138,7 @@ sub publish_run {
 		# At once, rather than at the end of the run, because everything
 		# after this point can still fail and a branch put back only on the
 		# way out is a branch left standing wherever the run stopped.
-		$session->reset_branch($pushed->{branch})
-			if $session && ($spec->{kind} // '') ne 'control';
+		$session->reset_branch($pushed->{branch}) if $session;
 
 		push @{$result->{rejected}}, $pushed->{branch};
 		warning("  #R{%s}: publish rejected, %s moved on R (%s)",
@@ -129,6 +155,107 @@ sub publish_run {
 
 ### INTERNAL {{{
 
+# _recheck_control - D30's in-sync rule, asked once more before the first push {{{
+#
+# A marker is a bare sha with no ancestry link to the deployment branch, so it
+# means something only where the commit it names can be fetched from the
+# remote, and the deploy that reads it may run on another machine.  Control
+# moving under the run is therefore the one condition that makes every
+# delivery stale, and it is the one the pre-flight cannot settle for good,
+# because it asks before the walk and the walk takes time.
+#
+# Genesis never moves control, so each refusal names the corrective step and
+# leaves control where the operator's teammate put it.  The sentence is
+# returned rather than printed, because the command closes the session before
+# it speaks and a stage that printed for itself would speak first.
+#
+# A fetch that could not reach the remote is passed over here.  The question
+# this asks is about control and the answer to a remote that has gone away is
+# D82's, which the push below raises for itself, so a failed refresh leaves
+# the reading to the tracking ref and the push to say what it finds.
+sub _recheck_control {
+	my ($git, $control, $remote) = @_;
+	return undef unless $git && defined $control && length $control;
+
+	$git->fetch_branches([$control], $remote);
+	my $state = $git->resolve_branch($control, remote => $remote);
+	return undef if $state && $state->{state} eq 'in-sync';
+
+	# The query has six answers and a seventh silence, and in-sync above is
+	# the only one that lets the push go out.  Each of the rest earns words
+	# of its own, because the step that repairs one repairs none of the
+	# others and an operator told to rebase a branch the remote has never
+	# had gets nowhere.
+	my $named    = $remote // 'the remote';
+	my $tracking = sprintf('%s/%s', $named, $control);
+	my $what     = $state ? $state->{state} : 'gone';
+
+	my ($said, $remedy);
+	if ($what eq 'gone') {
+		$said = sprintf("is neither here nor on #C{%s} any more, and the ".
+		                "environment files live on it", $named);
+		$remedy = "Put it back";
+	} elsif ($what eq 'no-remote') {
+		$said = sprintf("is here and no longer on #C{%s}, so nothing it ".
+		                "holds can be read by a deploy on another machine",
+		                $named);
+		$remedy = sprintf("Push it with #C{git push %s %s}", $named, $control);
+	} elsif ($what eq 'no-local') {
+		$said = "has gone from this repository since the run started";
+		$remedy = sprintf("Write the ref with #C{git checkout -B %s %s}",
+		                  $control, $tracking);
+	} elsif ($what eq 'ahead') {
+		$said = sprintf("carries %s that are not on #C{%s}, which are ".
+		                "unpushed", _commits($state->{ahead}), $tracking);
+		$remedy = sprintf("Push them with #C{git push %s %s}", $named, $control);
+	} elsif ($what eq 'behind') {
+		$said = sprintf("is behind #C{%s} by %s, so everything this run ".
+		                "computed is stale", $tracking, _commits($state->{behind}));
+		$remedy = sprintf("Rebase it with #C{git pull --rebase %s %s}",
+		                  $named, $control);
+	} else {
+		$said = sprintf("is ahead of #C{%s} by %s and behind it by %s, so it ".
+		                "is both unpushed and stale", $tracking,
+		                _commits($state->{ahead}), _commits($state->{behind}));
+		$remedy = sprintf("Rebase with #C{git pull --rebase %s %s} and push ".
+		                  "with #C{git push %s %s}",
+		                  $named, $control, $named, $control);
+	}
+
+	return sprintf(
+		"Refusing to publish.  The control branch #C{%s} %s.  Genesis never ".
+		"moves control.  Nothing was pushed, and every branch this run wrote ".
+		"has been put back.  %s, then run #C{genesis propagate} again.",
+		$control, $said, $remedy
+	);
+}
+
+# }}}
+# _commits - the count and its noun, so the verb around it reads {{{
+sub _commits {
+	my ($n) = @_;
+	$n = 0 unless defined $n;
+	return sprintf('%d commit%s', $n, $n == 1 ? '' : 's');
+}
+
+# }}}
+# _reset_publish_set - put every branch the run committed to back at T {{{
+#
+# A branch carrying a commit the remote has never seen is the illegal initial
+# state D96 names, and a run that refuses before its first push must not leave
+# one behind.  The set is the session's own, which is the set an abort resets,
+# so a refusal here and an abort put back exactly the same work.  Control is
+# not in it, because I2 keeps committed work on control whole.
+sub _reset_publish_set {
+	my ($session) = @_;
+	return 0 unless $session;
+
+	my @branches = $session->committed_branches;
+	$session->reset_branch($_) for @branches;
+	return scalar(@branches);
+}
+
+# }}}
 # _spec_for - the ref spec a push result belongs to {{{
 sub _spec_for {
 	my ($specs, $branch) = @_;
