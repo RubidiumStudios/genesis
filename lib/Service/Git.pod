@@ -2103,6 +2103,14 @@ collided with a branch name went to the default remote instead.
 Each ref is pushed separately, so one ref's rejection does not withhold
 another's push.
 
+B<A lease is refused on control and on every deployment branch.> History on
+those two classes is append-only, so recovery there is a new commit that
+restores the content and never a rewrite. Every branch of either class goes
+out on a plain refspec, which leaves the remote's own non-fast-forward rule
+to reject a branch that has moved since the run read it. Only a C<pr> ref may
+carry C<expect>, because a pull request branch is derived and private until
+it merges.
+
 B<The reason a refused ref earns comes back with it.> A push the remote turns
 down does not die, so a caller reporting the refusal has nothing else to read,
 and one that took only the ones and zeros would have to guess at the cause.
@@ -2120,8 +2128,11 @@ Required. The remote to push to, by name.
 =item C<refs>
 
 An arrayref of specs. Each carries C<branch>, and may carry C<kind>, which is
-C<deployment>, C<pr>, or C<control>. An empty list, or none at all, is a no-op
-and not a failure.
+C<deployment>, C<pr>, or C<control> and which reads as C<deployment> where a
+spec leaves it out. A spec may also carry C<expect>, the tip a
+C<--force-with-lease> is taken against, which only a C<pr> ref may have, and
+C<delete>, which pushes the deletion refspec instead. An empty list, or none
+at all, is a no-op and not a failure.
 
 =back
 
@@ -2143,6 +2154,12 @@ B<Errors:>
 C<"Service::Git-E<gt>push needs its remote by name"> -- raised via C<bail()>
 when C<remote> is missing.
 
+=item *
+
+C<"Refusing to push BRANCH, because that would rewrite history on REMOTE">
+-- raised via C<bail()> in L</_push_one> when a C<deployment> or C<control>
+ref asks for a lease.
+
 =back
 
 B<Examples:>
@@ -2157,6 +2174,12 @@ B<Examples:>
   # returns a result per branch, and the one for prod reads status rejected
   # with git's own words, such as 'fetch first', under reason when only prod
   # was rejected
+
+  $git->push(remote => 'origin', refs => [
+      {branch => 'prod/bosh', kind => 'deployment', expect => $tip},
+  ]);
+  # raises, because a deployment branch is append-only and may not take a
+  # lease
 
 =head2 push_append_only
 
@@ -2568,6 +2591,16 @@ The push is asked for its porcelain form, because a caller reports the ref git
 itself named and the porcelain line is the only place git says what that ref
 was. L</_read_push_result> reads the line.
 
+The class rule lives here, beside the refspec it would otherwise build,
+because every caller passes through this sub. A spec carrying C<expect> asks
+for a C<--force-with-lease>, and asking for one on a C<deployment> or a
+C<control> ref is refused rather than quietly pushed plain, so Genesis never
+leaves the append-only guarantee to the repository's own branch protection.
+The refusal is worded as L</push_append_only> words it, so one rule an
+operator can meet on two commands reads as one sentence. A C<pr> ref may take
+the lease, and C<NULL_SHA> under C<expect> asks for a branch the remote has
+not got yet.
+
 The push is not allowed to die on a ref the remote turned down, because the
 caller reports every ref and a death on the first refusal would withhold the
 rest. Git's standard error is captured instead, and it is what the result
@@ -2583,16 +2616,33 @@ The remote to push to, by name. L</push> has already required it.
 
 =item C<$spec>
 
-One ref spec. C<branch> and C<delete> are read here; C<kind> travels with the
-spec for the caller's own reporting.
+One ref spec. C<branch>, C<kind>, C<expect>, and C<delete> are all read here.
+C<kind> reads as C<deployment> where the spec leaves it out, which is the
+class the rule is strictest about.
 
 =back
 
 B<Returns:> A hashref carrying C<branch>, C<ok>, C<ref>, C<status>, C<reason>,
 and C<summary>, as L</push> documents them.
 
-B<Errors:> None of its own. A remote git cannot reach comes back as C<ok> 0
-with git's words under C<reason>.
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Service::Git-E<gt>push was handed a ref spec with no branch name"> --
+raised via C<bug()> when the spec carries no branch to build a refspec from.
+
+=item *
+
+C<"Refusing to push BRANCH, because that would rewrite history on REMOTE">
+-- raised via C<bail()> when a spec of any class but C<pr> carries C<expect>.
+
+=back
+
+A remote git cannot reach raises nothing. It comes back as C<ok> 0 with git's
+words under C<reason>.
 
 B<Examples:>
 
@@ -2602,6 +2652,11 @@ B<Examples:>
   $git->_push_one('origin', {branch => 'prod/bosh'});
   # returns a result reading status rejected, ok 0, and reason 'fetch first',
   #   where somebody else has moved prod/bosh on the remote
+
+  $git->_push_one('origin', {branch => 'pr/qa/bosh', kind => 'pr',
+                             expect => Service::Git::NULL_SHA});
+  # pushes with --force-with-lease against the null sha, and returns a result
+  #   reading status created where the remote has not got the branch yet
 
 =head2 _read_push_result
 
