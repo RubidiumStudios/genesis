@@ -19,6 +19,13 @@ branch makes about its own content, so the string has exactly one place
 where it is written and one place where it is read, and this module is
 both.
 
+It owns the two trailers a control commit may carry as well, which are
+C<Genesis-Stage>, the gate, and C<Genesis-Release-Stage>, which releases one.
+L</trailers> answers them under the keys C<stage> and C<release_stage>, and
+the module exports those two key names as the constants C<STAGE> and
+C<RELEASE_STAGE>, so that a reader of a trailer spells the name this module
+owns rather than one of its own.
+
 =head1 FUNCTIONS
 
 =head2 build

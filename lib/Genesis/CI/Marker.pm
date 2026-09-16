@@ -3,7 +3,10 @@ package Genesis::CI::Marker;
 use strict;
 use warnings;
 
+use Exporter qw/import/;
 use Genesis qw/bug run/;
+
+our @EXPORT_OK = qw/STAGE RELEASE_STAGE/;
 
 # The propagation marker, in one place.  D34 fixes it as the subject
 # "[pipeline] control@<sha> -> <env>" on a deployment-branch commit, naming
@@ -19,9 +22,19 @@ our $PREFIX = '[pipeline] control@';
 # by naming its control commit.  It sits here beside the prefix, because both
 # are module-level constants and a reader of this file looks for them in one
 # place.
+#
+# The keys are constants rather than bare words, because every other module
+# that reads a trailer has to spell one of them and a second module guessing
+# at the wire name is how the two come to disagree.  The walk reads the gate
+# through them, and pipeline-status reads the same two.
+use constant {
+	STAGE         => 'stage',
+	RELEASE_STAGE => 'release_stage',
+};
+
 my %TRAILERS = (
-	stage         => 'Genesis-Stage',
-	release_stage => 'Genesis-Release-Stage',
+	STAGE()         => 'Genesis-Stage',
+	RELEASE_STAGE() => 'Genesis-Release-Stage',
 );
 
 # build - render the marker subject for one delivery {{{

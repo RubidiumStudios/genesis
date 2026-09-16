@@ -88,6 +88,14 @@ deployed is held, and so is every commit after it.  An ancestor outside the
 scope is read all the same, because an environment named on its own is still
 held by the one above it.
 
+The gate is read once for each environment as well, through L</gate_state>
+and L</released_gates>, over the range from that environment's own certified
+commit to control's tip rather than over the commits the walk finds due.  A
+branch already delivered up to a gate is walked from the gate itself, so a
+gate read over the due commits alone would fall behind the base on the very
+next run and stop holding anything, while the environment still waits for the
+deploy that certifies it.
+
 Fields a later stage owns are present and null rather than absent, so a
 renderer never has to ask whether a key exists.
 
@@ -572,6 +580,94 @@ B<Examples:>
                                          provider => 'manual');
   # returns {reason => 'ancestor-overlap', ancestor => 'lab', ...}
 
+=head2 gate_state
+
+    my $gate = Genesis::CI::Walk::gate_state(git => $git, commit => $sha,
+                                             certified => $certified,
+                                             released => $released);
+
+Whether the commit under consideration is a gate the environment has not yet
+passed, or undefined where it is not.
+
+A gate is a control commit carrying a C<Genesis-Stage> trailer, and it
+constrains only what follows it, so it travels with the commits already ahead
+of it and ends the delivery.  Three things release it.  The environment's own
+certified commit reaching or passing it releases it, a later commit that
+reverts it releases it with no deploy, and so does a C<Genesis-Release-Stage>
+trailer naming it.  The trailer is read under the key
+C<Genesis::CI::Marker> answers it by, which that module exports as C<STAGE>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<git>
+
+The handle to read the trailer and the ancestry through.
+
+=item C<commit>
+
+The control commit the question is being asked about.
+
+=item C<certified>
+
+The control commit the environment last deployed from, or undefined where it
+has deployed nothing.  A gate at or behind it has been passed.
+
+=item C<released>
+
+The hashref L</released_gates> answers, keyed on the full sha of every gate a
+later commit has released.
+
+=back
+
+B<Returns:> A hashref carrying C<reason>, which is always C<gate-ahead>,
+C<gate>, the gate's own commit, and C<gate_reason>, the trailer's text with
+any C<hold:> prefix taken off it.  Undefined where the commit is no gate or
+where the gate has been passed or released.
+
+B<Examples:>
+
+  my $gate = Genesis::CI::Walk::gate_state(git => $git, commit => $sha,
+                                           certified => undef,
+                                           released => {});
+  # returns {reason => 'gate-ahead', gate => $sha, gate_reason => 'schema change'}
+
+=head2 released_gates
+
+    my $released = Genesis::CI::Walk::released_gates($git, @commits);
+
+The gates any commit in the range has released, read once so that a release
+sitting after a gate is visible while the walk is still at the gate.
+
+It accepts git's own revert body line and the C<Genesis-Release-Stage>
+trailer, which C<Genesis::CI::Marker> exports the key for as
+C<RELEASE_STAGE>, and it resolves a short hash through C<rev-parse>, so a
+trailer naming an unambiguous abbreviation releases the gate the full hash
+names.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The handle to read the messages and resolve the names through.
+
+=item C<@commits>
+
+The commits of the range, each a hashref carrying C<sha>, as
+L</control_commits> answers them.
+
+=back
+
+B<Returns:> A hashref keyed on the full sha of every released gate.
+
+B<Examples:>
+
+  my $released = Genesis::CI::Walk::released_gates($git, @commits);
+  # returns {$gate_sha => 1} where a later commit reverts the gate
+
 =head2 hold_reason
 
     my $words = Genesis::CI::Walk::hold_reason($held);
@@ -582,7 +678,10 @@ The words are exact, so that C<genesis propagate>, its dry run, and the
 routing column of C<genesis pipeline-status> can never disagree about one.
 The overlap form carries the ancestor's own state and the never-certified
 form carries no such clause, an environment that has never deployed being
-already clear about why.
+already clear about why.  A commit held behind a gate reads C<< gate:
+<reason> >> with the trailer's own text and no held prefix, because the gate
+is a step somebody has to take rather than a state the pipeline works its own
+way out of.
 
 B<Parameters:>
 
@@ -609,8 +708,10 @@ One environment's own held phrase, or undefined where nothing holds it.
 
 It says what the environment waits for rather than why any one commit is
 held.  An environment the pipeline was never applied to waits for that
-command, and one holding commits behind an ancestor waits for that ancestor
-to certify the commit it has not deployed.
+command, one holding commits behind an ancestor waits for that ancestor to
+certify the commit it has not deployed, and one holding commits behind a gate
+waits on its own deployment of the gate, which is the commit the phrase then
+names.
 
 B<Parameters:>
 
@@ -644,6 +745,12 @@ for that environment, because a mirror at any later commit would carry the
 held one with it, and every routed commit after the hold is recorded as
 C<behind-held-commit> so that no routed commit goes unnamed.
 
+A gate ends the delivery the other way about.  It travels with the commits
+already ahead of it, so a commit at or before the gate is delivered, and
+every commit after it is held with the gate's own reason rather than behind
+the commit in front of it, because the gate is the one thing an operator can
+clear.
+
 B<Parameters:>
 
 =over 4
@@ -667,6 +774,12 @@ The control commit the walk runs up to.
 =item C<base>
 
 The commit to start after, or undefined for the whole of control.
+
+=item C<gate>
+
+Optional.  The gate the environment has not passed, as L</gate_state> answers
+it.  Every commit after it is held with its reason, and where it is undefined
+nothing is gated.
 
 =item C<hold_check>
 

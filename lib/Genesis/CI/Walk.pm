@@ -14,12 +14,13 @@ use warnings;
 
 use Exporter qw/import/;
 use Genesis qw/run bug/;
-use Genesis::CI::Marker;
+use Genesis::CI::Marker qw/STAGE RELEASE_STAGE/;
 use Genesis::CI::RunFailure;
 
 our @EXPORT_OK = qw/
 	plan changed_set route_commit undeployed_set overlap
 	certified_for hold_for hold_reason held_qualifier
+	gate_state released_gates
 	introducing_commit walk_base
 	READINGS HOLD_REASONS
 /;
@@ -366,6 +367,81 @@ sub hold_for {
 }
 
 # }}}
+# gate_state - the gate the walk is standing behind, if any {{{
+#
+# D49: a Genesis-Stage trailer makes a commit a gate.  A gate constrains only
+# what follows it, so it travels with the commits already ahead of it and
+# ends the delivery.  Three things release it.  The environment's own
+# certified commit reaching or passing it releases it; a later commit that
+# reverts it, recognised from git's own body line or from an explicit
+# Genesis-Release-Stage trailer, releases it with no deploy at all.
+#
+# The trailer is read under the key Genesis::CI::Marker answers it by rather
+# than under its wire name, because the module owns that mapping and a second
+# spelling here is how the two come to disagree.
+sub gate_state {
+	my (%args) = @_;
+
+	my $git       = $args{git};
+	my $certified = $args{certified};
+	my $released  = $args{released};
+	my $commit    = $args{commit};
+
+	my $trailers = Genesis::CI::Marker::trailers($git, $commit);
+	my $stage = $trailers->{+STAGE};
+	return undef unless defined $stage && length $stage;
+
+	return undef if $released && $released->{$commit};
+	return undef if defined $certified && length $certified
+		&& $git->is_ancestor($commit, $certified);
+
+	# hold: <reason> is the gate that also sets a propagation hold once the
+	# gated commit is deployed, under D50.  The gate half behaves the same.
+	my $reason = $stage;
+	$reason =~ s/^hold:\s*//;
+
+	return {reason => 'gate-ahead', gate => $commit, gate_reason => $reason};
+}
+
+# }}}
+# released_gates - the gates a later control commit has released {{{
+#
+# Read once over the whole walk range, so that a release sitting after the
+# gate is visible while the walk is still at the gate.  git's revert body
+# line names the full hash, and Genesis-Release-Stage may name a full or an
+# unambiguous short hash, so we resolve whatever we find through rev-parse.
+sub released_gates {
+	my ($git, @commits) = @_;
+
+	my %released;
+	for my $commit (@commits) {
+		my ($body, $rc) = run(
+			{dir => $git->root, passfail => 0, stderr => 0},
+			'git', 'log', '--format=%B', '-1', $commit->{sha}
+		);
+		next if $rc || !defined $body;
+
+		my @named;
+		push @named, $1 while $body =~ /This reverts commit ([0-9a-f]{7,40})/g;
+
+		my $trailers = Genesis::CI::Marker::trailers($git, $commit->{sha});
+		push @named, $trailers->{+RELEASE_STAGE}
+			if defined $trailers->{+RELEASE_STAGE};
+
+		for my $name (@named) {
+			my ($full, $frc) = run(
+				{dir => $git->root, passfail => 0, stderr => 0},
+				'git', 'rev-parse', $name
+			);
+			next if $frc || !defined $full;
+			chomp $full;
+			$released{$full} = 1;
+		}
+	}
+	return \%released;
+}
+
+# }}}
 # }}}
 ### The words {{{
 
@@ -395,6 +471,12 @@ sub hold_reason {
 		return sprintf('held by %s, which has never certified a commit',
 			$held->{ancestor});
 	}
+
+	# The gate's form carries the trailer's own text and no held prefix,
+	# because the gate is a step somebody has to take rather than a state
+	# the pipeline works its own way out of.
+	return sprintf('gate: %s', $held->{gate_reason})
+		if $reason eq 'gate-ahead';
 
 	return sprintf('held behind control@%s',
 		substr($held->{behind}, 0, 7)) if $reason eq 'behind-held-commit';
@@ -426,8 +508,11 @@ sub held_qualifier {
 		$first->{ancestor}, substr($first->{control_commit}, 0, 7))
 		if defined $first->{ancestor};
 
+	# A gate is certified by the environment itself, and the commit it has
+	# to be certified at is the gate rather than the commit the gate holds.
 	return sprintf('held, awaiting deployment (%s at control@%s)',
-		$record->{env}, substr($first->{control_commit}, 0, 7));
+		$record->{env},
+		substr($first->{gate} // $first->{control_commit}, 0, 7));
 }
 
 # }}}
@@ -451,6 +536,7 @@ sub walk_env {
 
 	my $base = $args{base};
 	my @due  = control_commits($git, $control, $base);
+	my $gate = $args{gate};
 
 	my $held_by;
 	for my $commit (@due) {
@@ -468,6 +554,22 @@ sub walk_env {
 				files          => $files,
 				reason         => 'behind-held-commit',
 				behind         => $held_by,
+			};
+			next;
+		}
+
+		# D49 and D56: the gate travels with the commits already ahead of it,
+		# so a commit at or before it is delivered and the delivery ends
+		# there.  Everything after it carries the gate's own reason rather
+		# than behind-held-commit, because the gate is the one thing an
+		# operator can clear and naming the commit in front of it instead
+		# would send them to the wrong place.
+		if ($gate && !$git->is_ancestor($commit->{sha}, $gate->{gate})) {
+			push @{$record->{held}}, {
+				%$gate,
+				control_commit => $commit->{sha},
+				subject        => $commit->{subject},
+				files          => $files,
 			};
 			next;
 		}
@@ -692,12 +794,40 @@ sub plan {
 		# the ancestor's set between its certified commit and this one and
 		# so moves with the commit rather than with the environment.
 		my $ancestors = $ancestors_of->($name);
+
+		# D49: the gate this environment has not passed, read over the range
+		# from its own certified commit to control's tip rather than over the
+		# walk's own range.  A branch already delivered up to a gate is
+		# walked from the gate itself, so a gate read over the due commits
+		# alone would fall behind the base on the very next run and stop
+		# holding anything, and the environment still waits for the deploy
+		# that certifies it.
+		my $since = $deployed
+			&& $git->is_ancestor($deployed->{control_commit}, $control_sha)
+			? $deployed->{control_commit} : $base;
+		my @range    = control_commits($git, $control_sha, $since);
+		my $released = released_gates($git, @range);
+
+		# The oldest unreleased gate in the range, because a second gate
+		# behind the first is reached only once the first is cleared.
+		my $gate;
+		for my $commit (@range) {
+			$gate = gate_state(
+				git       => $git,
+				commit    => $commit->{sha},
+				certified => $deployed ? $deployed->{control_commit} : undef,
+				released  => $released,
+			);
+			last if $gate;
+		}
+
 		walk_env(
 			git        => $git,
 			env        => $env,
 			record     => $env_record,
 			control    => $control_sha,
 			base       => $base,
+			gate       => $gate,
 			hold_check => sub {
 				my ($commit, $files) = @_;
 				return hold_for(
