@@ -185,7 +185,7 @@ subtest 'a dry run assumes the fast-forward and moves nothing' => sub {
 	# A report that assumes the move has to read as though it had been
 	# made, so the diff is taken from the ref a real run would have left
 	# the branch on rather than from the ref it is still standing on.
-	unlike($err, qr{^\s*qa:\s+\d+\s+files?\s+to\s+propagate}m,
+	unlike($err, qr{^\s*qa:\s+would deliver}m,
 		'and it names nothing as pending that the teammate already delivered');
 };
 

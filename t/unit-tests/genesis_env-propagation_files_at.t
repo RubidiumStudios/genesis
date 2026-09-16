@@ -487,4 +487,45 @@ subtest 'a tracked path that fell out of the list is read at the commit' => sub 
 		'and the delivery removes the path the commit stopped tracking');
 };
 
+subtest 'the non-triggering half is read at the commit too' => sub {
+	# The working-tree reader has a row of the same shape, and the two files
+	# that cover the split read as one story only if the reader at a commit
+	# answers the same two kinds.
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh',
+		kit => 't/src/ops-blueprint');
+	# write_env_file renders a hash of scalars and flat lists and no deeper,
+	# and a reaction is a list of maps, so this one file is written by hand.
+	put_file($h->a . '/qa.yml', <<'EOF');
+---
+kit:
+  name:    dev
+  version: latest
+  features: []
+genesis:
+  env: qa
+  reactions:
+    post-deploy:
+      - script: notify
+EOF
+	put_file($h->a . '/bin/notify', "#!/bin/sh\nexit 0\n");
+	run({dir => $h->a}, 'git', 'add', '-A');
+	run({dir => $h->a, onfailure => 'Failed to declare the reaction'},
+		'git', 'commit', '-q', '-m', 'declare a post-deploy reaction');
+
+	my $git   = Service::Git->new($h->a);
+	my $sha   = $git->sha($h->control);
+	my $top   = Genesis::Top->new($h->a);
+	my $env   = Genesis::Env->bare('qa', $top);
+	my @quiet = $env->propagation_files_at($sha, git => $git, triggering => 0);
+
+	ok(in_set('.genesis/config', @quiet),
+		'.genesis/config is non-triggering at the commit as well');
+	ok(in_set('bin/notify', @quiet),
+		'and so is the reaction script the commit declares');
+	is_deeply([sort @quiet], ['.genesis/config', 'bin/notify'],
+		'and the non-triggering half names those two and nothing else');
+};
+
 done_testing;

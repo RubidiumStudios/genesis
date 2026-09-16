@@ -546,6 +546,10 @@ sub apply_files {
 # is the same expansion the suite's own reader makes before it compares the
 # two.  One listing is read rather than one per entry, because the set is
 # small and a git process per path is not.
+#
+# Genesis::CI::Walk::changed_set makes the same expansion from the other end,
+# matching a changed path against the directory entries the set names, so a
+# change to either of the two goes looking for its twin.
 sub _members_at {
 	my ($self, $commit, @set) = @_;
 	# The whole tree is asked for as '.', which is git's own spelling for it,
