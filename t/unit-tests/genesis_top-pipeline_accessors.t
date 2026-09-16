@@ -211,6 +211,9 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 	# rather than ask the accessor.  Under D105 the schema builder is no
 	# longer among them: the block declares the field that decides its
 	# shape, so nothing reads the value raw to build a schema out of it.
+	# The capability gates have left it too, because every provider
+	# declares its abilities now, so the gates take the type from the
+	# accessor and read a declaration for whatever it answers.
 	my @allowed = (
 		# It is the accessor, and every caller outside the load-time
 		# validation below reads the provider through it.
@@ -219,11 +222,6 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 		# A schema predicate, which the schema hands the raw config rather
 		# than the Genesis::Top, so there is no object to ask.
 		'lib/Genesis/Top.pm _automated_provider_configured',
-
-		# It refuses a key whose provider declares no capability behind it,
-		# so it reads the type the operator declared, which is the very
-		# thing it is deciding about.
-		'lib/Genesis/Top.pm _validate_capability_gates',
 	);
 
 	my @readers = readers_of(qr{pipeline\.provider\.type});

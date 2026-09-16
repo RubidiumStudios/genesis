@@ -180,17 +180,19 @@ sub provider_options_schema {
 		},
 	};
 }
+# The ability that makes the key worth declaring sits on this class too,
+# because one class answers for both halves of a provider.
+sub capabilities {
+	return {deployment_locks => 1, cross_pipeline_events => 1,
+	        optional_git_triggers => 1, scheduled_jobs => 1,
+	        per_commit_runs => 1, multi_file_output => 1};
+}
 1;
 MANYCLI
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Many.pm', <<'MANY');
 package Genesis::CI::Compiler::Providers::Many;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'many'}
-sub capabilities {
-	return {deployment_locks => 1, cross_pipeline_events => 1,
-	        optional_git_triggers => 1, scheduled_jobs => 1,
-	        per_commit_runs => 1, multi_file_output => 1};
-}
 1;
 MANY
 	local @INC = ('t/tmp/lib', @INC);

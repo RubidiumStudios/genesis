@@ -155,10 +155,14 @@ subtest "a provider whose file will not load exits CONFIG" => sub {
 	# the module it names marks the provider's file as one that has already
 	# failed, which makes the require inside the load fail the way a broken
 	# provider file would.
+	#
+	# The file is the one holding the class the provider block is
+	# dispatched to, which is also the class the capability gates behind it
+	# read, because one class answers for the whole of a provider.
 	my $shadow = workdir();
 	put_file("$shadow/ShadowProvider.pm", join("\n",
 		'package ShadowProvider;',
-		"\$INC{'Genesis/CI/Compiler/Providers/Concourse.pm'} = undef;",
+		"\$INC{'Genesis/CI/Provider/Concourse.pm'} = undef;",
 		'1;', ''));
 	local $ENV{PERL5OPT} = join(' ',
 		"-I$shadow", '-MShadowProvider', ($ENV{PERL5OPT} // ()));
@@ -181,14 +185,13 @@ subtest "an environment block refusal carries no backtrace" => sub {
 	# Four explicit rows and one for the run's own restoration assertion.
 	plan tests => 5;
 
-	commit_on_control($h, files => {
-		'.genesis/config' => join("\n",
-			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0',
-			'pipeline:', '  enabled: true',
-			'  source_control:',
-			'    repository: genesis/bosh-deployments', ''),
-	});
+	# An automated provider, because the manual gate is the operator's
+	# choice inside an ability a manual pipeline does not have, and the
+	# capability gates would refuse the key before the schema saw what was
+	# written in it.  The row above left exactly that configuration on the
+	# control branch, and a harness write of a file that is already what it
+	# would write has no commit to make, so this row stands on that write
+	# and adds the environment the refusal is about.
 	write_env_file($h, 'qa', pipeline => {manual => 'maybe'});
 
 	# The frames the cut takes out exist only where something has loaded

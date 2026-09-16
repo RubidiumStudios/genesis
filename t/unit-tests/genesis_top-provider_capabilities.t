@@ -36,14 +36,38 @@ my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 my @NAMES = qw/cross_pipeline_events deployment_locks multi_file_output
                optional_git_triggers per_commit_runs scheduled_jobs/;
 
+# First, because it asks the registry what it holds and every row below
+# registers a fixture of its own into it.
+#
+# Proves that every provider declares its abilities, so the gates read a
+# declaration for each of them rather than standing aside for the ones
+# that have no compiler class.
+subtest 'every provider declares its abilities' => sub {
+	plan tests => 4;
+
+	for my $type (Genesis::CI::Compiler::PipelineProvider->known_providers) {
+		my $class = Genesis::CI::Provider->provider_class($type);
+		lives_ok {
+			Genesis::CI::Compiler::PipelineProvider->declared_capabilities($class)
+		} "the $type provider answers the capability contract";
+	}
+
+	# Manual can do none of the six, and saying so is what makes the gate
+	# refuse a key rather than stand aside from it.
+	write_env_file($h, 'qa', pipeline => {redeploy_cron => "'0 4 * * *'"});
+	throws_ok {load_with($h, automated_config('manual'))}
+		qr/genesis\.pipeline\.redeploy_cron.*manual.*scheduled_jobs/s,
+		'a manual pipeline refuses a scheduled redeploy, naming the capability';
+};
+
 # An assert helper: write the pair of classes a provider takes, with
 # capabilities that are the six defaults with the named ones overridden,
-# register them, and answer with the type.  The compiler-side class carries
-# the capabilities and the CLI-side class carries the fragment, which is
-# where every provider declares one.  That fragment declares group_commits
-# itself, because a key no fragment declares is refused as unknown before
-# any gate is read, so a gate row needs its key declared to reach the gate
-# at all.
+# register them, and answer with the type.  The CLI-side class carries
+# both halves, the fragment and the capabilities, because under D105 one
+# class answers for a provider and the compiler-side class reads the
+# declaration from it.  That fragment declares group_commits itself,
+# because a key no fragment declares is refused as unknown before any gate
+# is read, so a gate row needs its key declared to reach the gate at all.
 #
 # The layout key is declared only where the fixture claims it can emit
 # several files, which is how a provider declares it.  A fixture that
@@ -82,6 +106,7 @@ use base 'Genesis::CI::Provider';
 # The base's new is the factory's, and it refuses to build a subclass, so
 # a CLI-side fixture the load path constructs brings its own.
 sub new {my (\$c, %cfg) = \@_; bless {%cfg}, \$c}
+sub capabilities {return {$decl}}
 sub provider_options_schema {
 	return {
 		group_commits => {
@@ -96,7 +121,6 @@ CAPCLI
 package $pkg;
 use parent 'Genesis::CI::Compiler::PipelineProvider';
 sub provider_type {'$type'}
-sub capabilities {return {$decl}}
 1;
 CAP
 	Genesis::CI::Compiler::PipelineProvider->register_provider($type, {
@@ -111,6 +135,9 @@ CAP
 subtest 'the declaration carries six names' => sub {
 	plan tests => 3;
 
+	# Asked of the compiler-side class, which reads the declaration off
+	# the CLI class beside it, so the row pins the declaration and the
+	# route to it at once.
 	my $caps = Genesis::CI::Concourse->capabilities;
 	is_deeply [sort keys %$caps], [@NAMES],
 		'the six names D101 fixes, and no others';
@@ -219,14 +246,16 @@ subtest 'a capability that is true admits the key it gates' => sub {
 	lives_ok {load_with($h, automated_config($defaulted))}
 		'a key nobody wrote, filled from the fragment, trips no gate';
 
-	# A provider with no compiler class declares no capabilities at all, so
-	# there is nothing to gate against and nothing to refuse.  The
-	# source-control block is still named, because the repository cannot be
-	# derived from the harness's filesystem remote whatever the provider is.
-	# The qa environment was left silent by the row above and stays that
-	# way, so this row stands on the write that row made.
+	# The manual provider declares all six false, so every gate has a
+	# declaration to read and every one of them fires on a key somebody
+	# wrote.  Nobody wrote one here, so the load passes on the strength of
+	# what the environment says rather than on the provider being skipped.
+	# The source-control block is still named, because the repository
+	# cannot be derived from the harness's filesystem remote whatever the
+	# provider is.  The qa environment was left silent by the row above and
+	# stays that way, so this row stands on the write that row made.
 	lives_ok {load_with($h, automated_config('manual'))}
-		'and a provider with no class is left alone';
+		'and a provider that can do nothing refuses nothing unwritten';
 };
 
 subtest 'the capability declaration is checked at load' => sub {
@@ -237,17 +266,15 @@ subtest 'the capability declaration is checked at load' => sub {
 	# A provider class with a fragment but no capability declaration,
 	# registered for this test alone.  The base makes both abstract, so the
 	# omission is a bug at load rather than a discovery at run time.
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Deaf.pm', <<'DEAF');
-package Genesis::CI::Compiler::Providers::Deaf;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
-sub provider_type {'deaf'}
+	put_file('t/tmp/lib/Genesis/CI/Provider/Deaf.pm', <<'DEAF');
+package Genesis::CI::Provider::Deaf;
+use base 'Genesis::CI::Provider';
+sub provider_options_schema {return {}}
 1;
 DEAF
 	Genesis::CI::Compiler::PipelineProvider->register_provider('deaf', {
-		class     => 'Genesis::CI::Compiler::Providers::Deaf',
-		file      => 'Genesis/CI/Compiler/Providers/Deaf.pm',
-		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		cli_class => 'Genesis::CI::Provider::Deaf',
+		cli_file  => 'Genesis/CI/Provider/Deaf.pm',
 	});
 
 	throws_ok {load_with($h, automated_config('deaf'))}
@@ -258,10 +285,10 @@ DEAF
 	# unchecked, the misspelling reads as false and refuses group_commits
 	# as though somebody had meant it to, and the ability the name was
 	# meant to carry is lost with nothing said about it.
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Lisp.pm', <<'LISP');
-package Genesis::CI::Compiler::Providers::Lisp;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
-sub provider_type {'lisp'}
+	put_file('t/tmp/lib/Genesis/CI/Provider/Lisp.pm', <<'LISP');
+package Genesis::CI::Provider::Lisp;
+use base 'Genesis::CI::Provider';
+sub provider_options_schema {return {}}
 sub capabilities {
 	return {
 		cross_pipeline_events => 1,
@@ -275,14 +302,12 @@ sub capabilities {
 1;
 LISP
 	Genesis::CI::Compiler::PipelineProvider->register_provider('lisp', {
-		class     => 'Genesis::CI::Compiler::Providers::Lisp',
-		file      => 'Genesis/CI/Compiler/Providers/Lisp.pm',
-		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
+		cli_class => 'Genesis::CI::Provider::Lisp',
+		cli_file  => 'Genesis/CI/Provider/Lisp.pm',
 	});
 
 	throws_ok {load_with($h, automated_config('lisp'))}
-		qr/Providers::Lisp.*per_commit_run\b.*per_commit_runs/s,
+		qr/Provider::Lisp.*per_commit_run\b.*per_commit_runs/s,
 		'a name that is not one of the six is a bug naming the class';
 };
 

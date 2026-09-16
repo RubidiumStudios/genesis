@@ -25,7 +25,12 @@ $ENV{NOCOLOR} = 1;
 
 my $LEAF = 'lmelt-vsphere-canwest-1-mgmt';
 my $SITE = 'lmelt-vsphere-canwest';
-my $CRON = '0 3 * * *';
+# A per-environment pipeline key the site file carries and the leaf
+# does not.  It is a key no capability gates, because these rows are
+# about where a value is found rather than about what a provider can
+# do with it, and the harness leaves the repository on the manual
+# provider, which can do none of the six.
+my $TRACKED = ['ops/<env>.yml'];
 
 subtest 'an environment can be read without a deployment' => sub {
 	plan tests => 5;
@@ -79,7 +84,7 @@ subtest 'the merged read finds an inherited key the leaf lacks' => sub {
 	plan tests => 3;
 
 	my $h   = inherited_harness(envs => [$LEAF], type => 'bosh', vault => 0,
-		site => $SITE, pipeline_keys => {redeploy_cron => $CRON},
+		site => $SITE, pipeline_keys => {track_additional_files => $TRACKED},
 		leaf_keys => {prior_env => 'lmelt-vsphere-canwest-1-lab'});
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
 
@@ -89,11 +94,11 @@ subtest 'the merged read finds an inherited key the leaf lacks' => sub {
 	my $leaf_only = Genesis::CI::Compiler::ASTBuilder::_read_genesis_pipeline_keys(
 		$top->path("$LEAF.yml")
 	);
-	is($leaf_only->{redeploy_cron}, undef,
+	is($leaf_only->{track_additional_files}, undef,
 		'the leaf-only reader finds the inherited key absent, with no error');
 
 	my $env = Genesis::Env->bare($LEAF, $top);
-	is($env->lookup('genesis.pipeline.redeploy_cron'), $CRON,
+	is_deeply(scalar($env->lookup('genesis.pipeline.track_additional_files')), $TRACKED,
 		'the merged read returns the site file value');
 	is($env->lookup('genesis.pipeline.prior_env'),
 		'lmelt-vsphere-canwest-1-lab',
@@ -104,7 +109,7 @@ subtest 'the merged read is the same from either branch' => sub {
 	plan tests => 4;
 
 	my $h = inherited_harness(envs => [$LEAF], type => 'bosh', vault => 0,
-		site => $SITE, pipeline_keys => {redeploy_cron => $CRON},
+		site => $SITE, pipeline_keys => {track_additional_files => $TRACKED},
 		leaf_keys => {prior_env => 'lmelt-vsphere-canwest-1-lab'});
 
 	# The delivery was published from copy B, so copy A knows the deployment
@@ -118,7 +123,7 @@ subtest 'the merged read is the same from either branch' => sub {
 		my $top = Genesis::Top->new($h->a, no_vault => 1);
 		my $env = Genesis::Env->bare($LEAF, $top);
 
-		is($env->lookup('genesis.pipeline.redeploy_cron'), $CRON,
+		is_deeply(scalar($env->lookup('genesis.pipeline.track_additional_files')), $TRACKED,
 			"the site file's value is found while standing on $branch");
 		ok(!defined($env->{kit}), "with no kit loaded on $branch");
 	}

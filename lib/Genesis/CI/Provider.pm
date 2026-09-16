@@ -148,6 +148,19 @@ sub provider_options_schema {
 }
 
 # }}}
+# capabilities - what this provider can do, as six booleans (abstract) {{{
+#
+# D101's six names, declared beside the fragment under D105 so that one
+# class answers for both halves of a provider.  Mandatory for the same
+# reason the fragment is: a provider whose abilities are unknown cannot
+# have its keys gated, and the gate that stood aside for it accepted a
+# key the provider can never honour.
+sub capabilities {
+	my ($self) = @_;
+	bug("Subclass '%s' must implement capabilities()", ref($self) || $self);
+}
+
+# }}}
 # validate_config - the provider's rules for its own block {{{
 #
 # Under D105 the provider owns validating the block an operator wrote for
@@ -227,9 +240,19 @@ Genesis::CI::Provider is the factory and abstract base class for CI provider
 configuration management.  It follows the same pattern as Genesis::Kit::Provider.
 
 A provider class declares the keys it reads, through
-C<provider_options_schema>, and validates the block an operator wrote for
-it, through C<validate_config>. The two live together so that the check
-always has the declaration it is checking against.
+C<provider_options_schema>, declares what it is able to do, through
+C<capabilities>, and validates the block an operator wrote for it, through
+C<validate_config>. The three live together so that the check always has
+the declaration it is checking against, and so that one class answers for
+the whole of a provider.
+
+C<capabilities> answers with the six booleans
+L<Genesis::CI::Compiler::PipelineProvider> names, and every provider has to
+answer, including the ones Genesis cannot yet compile a pipeline for. A
+provider that can do none of them says so rather than staying silent,
+because a key gated on an ability nobody declared would otherwise be
+accepted and then dropped. The compiler-side class reads this declaration
+from here rather than keeping one of its own.
 
 Validating that block is the provider's own job and not the framework's,
 and the base does it by validating the block against the keys that

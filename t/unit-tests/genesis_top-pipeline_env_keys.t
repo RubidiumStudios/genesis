@@ -28,12 +28,17 @@ my $h = make_harness(envs => ['qa'], pipeline => 1, vault => 0);
 
 # An assert helper: put a genesis.pipeline block on one environment and
 # load, returning the Top or dying with what the load said.
+#
+# The repository names an automated provider, because the keys this file is
+# about are the operator's choices inside abilities a pipeline has, and a
+# manual pipeline declares every ability false.  Under manual the gate
+# refuses the manual flag and the redeploy cron before the schema is
+# reached, so a row asking what the schema makes of a value would never
+# get an answer.
 sub load_env_with {
 	my ($pipeline, %opts) = @_;
 	write_env_file($h, $opts{env} // 'qa', pipeline => $pipeline);
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return $top;
+	return load_with($h, automated_config('concourse', 'target: ci'));
 }
 
 subtest 'the manual gate is a declared boolean' => sub {

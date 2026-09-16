@@ -25,6 +25,11 @@ $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 1, vault => 0);
 
+# The environment files below carry genesis.pipeline.require_pr, which is
+# there only to put a pipeline block on the file.  It is a key no
+# capability gates, so the rows stand on the manual provider the harness
+# leaves in place, which declares every ability false.
+
 # The deployment type is the one thing these rows vary, so the load goes
 # through the harness loader and names the type in the call, and the block
 # below is the configuration every row here shares.
@@ -68,7 +73,7 @@ subtest 'every environment name is checked too' => sub {
 	# working tree and taken out again below, so the row that follows sees
 	# a repository whose names are all well formed again.
 	my $path = write_env_file($h, 'qa..bad',
-		pipeline => {manual => 'false'}, commit => 0);
+		pipeline => {require_pr => 'false'}, commit => 0);
 
 	throws_ok {load_with_type('bosh')}
 		qr{environment name\s+qa\.\.bad\s+.*is\s+not\s+a\s+git\s+ref\s+component}s,
@@ -88,10 +93,10 @@ subtest 'one exodus mount serves the whole pipeline' => sub {
 
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => '/secret/exodus/'},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 	write_env_file($h, 'prod',
 		genesis => {exodus_mount => '/other/exodus/'},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 
 	my $refusal = '';
 	eval {load_with_type('bosh'); 1} or $refusal = $@;
@@ -109,7 +114,7 @@ subtest 'one exodus mount serves the whole pipeline' => sub {
 
 	write_env_file($h, 'prod',
 		genesis => {exodus_mount => '/secret/exodus/'},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 	lives_ok {load_with_type('bosh')} 'one shared mount passes';
 
 	# An environment that names no exodus mount derives one from its secrets
@@ -119,19 +124,19 @@ subtest 'one exodus mount serves the whole pipeline' => sub {
 	# names in full, or the two are two mounts and the load is refused.
 	write_env_file($h, 'qa',
 		genesis => {secrets_mount => 'foo'},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 	write_env_file($h, 'prod',
 		genesis => {exodus_mount => '/foo/exodus/'},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 	lives_ok {load_with_type('bosh')}
 		'a derived mount meets a named one, so the two are one mount';
 
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => '/secret/exodus/'},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 	write_env_file($h, 'prod',
 		genesis => {exodus_mount => '/secret/exodus/'},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 };
 
 subtest 'an empty exodus mount is the mount it names' => sub {
@@ -143,7 +148,7 @@ subtest 'an empty exodus mount is the mount it names' => sub {
 	# above, so only qa changes here and the commit has a delta to carry.
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => "''"},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 
 	my $refusal = '';
 	eval {load_with_type('bosh'); 1} or $refusal = $@;
@@ -154,7 +159,7 @@ subtest 'an empty exodus mount is the mount it names' => sub {
 
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => '/secret/exodus/'},
-		pipeline => {manual => 'false'});
+		pipeline => {require_pr => 'false'});
 	lives_ok {load_with_type('bosh')} 'and one shared mount passes again';
 };
 
