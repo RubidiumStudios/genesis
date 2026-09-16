@@ -284,7 +284,12 @@ subtest 'a checkout_file that dies leaves the branch at T and clean' => sub {
 	# The death is read rather than merely counted, because a refusal raised
 	# anywhere above the write loop would satisfy a bare check that an error
 	# exists, and the row means the write the arming stopped.
-	like($err, qr{the third write dies},
+	#
+	# It arrives as D82's run-fatal class rather than as git's own string,
+	# because a path the writer could not put into the index is the writer
+	# failing to produce what it was told to produce, and the line the class
+	# composes is what carries git's reason, so that is what is read.
+	like(ref($err) ? $err->report_line : $err, qr{the third write dies},
 		'the delivery failed on the write the row armed');
 	is(scalar(grep {$_->[0] eq 'checkout_file'} step_log($fault)), 3,
 		'and it got three writes in before it did');

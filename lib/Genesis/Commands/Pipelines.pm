@@ -17,6 +17,7 @@ use Genesis::CI::Compiler;
 use Genesis::CI::Compiler::PipelineProvider;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
+use Genesis::CI::RunFailure;
 use Genesis::CI::Walk;
 use Service::Git;
 use Service::Github;
@@ -645,36 +646,39 @@ sub propagate {
 	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}\n",
 		$control, $control_short;
 
-	# The walk reads durable state and writes nothing at all.  Everything
-	# it decides stands in the record, and the delivery below is the only
-	# thing here that touches a branch.
-	my $record = eval {
-		Genesis::CI::Walk::plan($top,
+	my $delivered = 0;
+	my @to_push;
+	my $record;
+
+	# The environment the run has reached, which is what the outcome words
+	# are split on when the run ends early: everything up to and including
+	# it records that nothing of its was published, and everything after it
+	# records that it was not attempted.  It stays where the last turn of
+	# the loop left it, so a failure raised once every environment has been
+	# walked names the last of them and leaves nobody reading unattempted.
+	my $at;
+
+	# One eval around the walk, the whole delivery, and the push, because a
+	# die that no guard caught is the run as a whole failing, and abort is
+	# what answers it (D32): the partial write is named and discarded, every
+	# branch this session committed to goes back to where the remote has it,
+	# and the operator is put back on the branch they started from.
+	#
+	# The walk is inside it rather than in an eval of its own.  A walk that
+	# cannot read what it needs ends the run exactly as a delivery that
+	# cannot write does, under the same two classes of D82, and two evals
+	# reading the same error two ways is how the two come to disagree about
+	# a status.
+	my $ran = eval {
+		# The walk reads durable state and writes nothing at all.  Everything
+		# it decides stands in the record, and the delivery below is the only
+		# thing here that touches a branch.
+		$record = Genesis::CI::Walk::plan($top,
 			git       => $git,
 			branches  => $initial->{branches},
 			refreshed => $refreshed ? 1 : 0,
 		);
-	};
-	# A walk that cannot read what it needs ends the run before anything has
-	# been written, and it arrives as a run failure object carrying the line
-	# that says which reading failed and the status D82 gives it.  Nothing
-	# has been switched yet, so the refusal closes the session and speaks.
-	unless ($record) {
-		my $err = $@;
-		my $fatal = ref($err) && $err->isa('Genesis::CI::RunFailure');
-		$refuse->({exitcode => $fatal ? $err->exit_code : 1},
-			"%s", $fatal ? $err->report_line : $err);
-	}
 
-	my $delivered = 0;
-	my @to_push;
-
-	# One eval around the whole delivery, because a die that no guard
-	# caught is the run as a whole failing, and abort is what answers it
-	# (D32): the partial write is named and discarded, every branch this
-	# session committed to goes back to where the remote has it, and the
-	# operator is put back on the branch they started from.
-	my $ran = eval {
 		# Every environment the run delivers to is loaded here, before the
 		# first switch, because an environment is read off the working tree
 		# and the working tree stands on control only until the first
@@ -690,6 +694,7 @@ sub propagate {
 
 		for my $env_record (@{$record->{environments}}) {
 			my $env_name = $env_record->{env};
+			$at = $env_name;
 
 			# D43's awaiting outcome.  genesis pipeline-apply is the one
 			# command that cuts a deployment branch, so the run names that
@@ -812,42 +817,68 @@ sub propagate {
 			$delivered += scalar(@pending);
 			push @to_push, $branch unless $dry_run;
 		}
+
+		# The push is batched to the end of the walk, so a run that failed
+		# halfway has put nothing on the remote, and control goes with the
+		# branches because the markers now on them name commits the remote
+		# has to be able to resolve.
+		#
+		# It is inside the session rather than after it, because a remote
+		# that has gone away is D82's unsurvivable failure and the answer to
+		# one is the abort: a run that could publish nothing leaves nothing
+		# half-delivered in L either, and the next run redoes the whole of
+		# it.  A session already finished has nothing left to reset.
+		if (@to_push) {
+			my $remote = $git->default_remote;
+			if ($remote) {
+				my @all = ($control, @to_push);
+				info "\n#G{Pushing} to #C{%s}...", $remote;
+
+				# Two shapes reach the same reading.  git push failing to run
+				# at all raises, and a remote nobody can resolve comes back
+				# as a refused push per ref, so a push where not one ref
+				# landed is the remote being gone rather than any branch's
+				# own quarrel with it.  A run where some refs landed and
+				# others did not is each of those branches' business, and it
+				# is reported per branch as it always was.
+				my $results = eval {$git->push($remote, @all)} || {};
+				my $reason  = $@;
+				die Genesis::CI::RunFailure->unsurvivable(
+					message => sprintf('could not reach the remote %s%s',
+						$remote,
+						$reason ? ': '._summarize_load_error($reason) : ''),
+					remedy  => 'try again once the remote is reachable',
+				) unless grep {$results->{$_}} @all;
+
+				for my $ref (@all) {
+					if ($results->{$ref}) {
+						info "  #G{%s}: pushed", $ref;
+					} else {
+						warning("Failed to push #C{%s} to #C{%s}.", $ref, $remote);
+					}
+				}
+			}
+		}
 		1;
 	};
-	unless ($ran) {
-		my $err = $@;
-		# The abort prints the reason it was given, and a run failure arrives
-		# as an object, which prints as a hash address unless its message is
-		# taken off it first.
-		$session->abort(
-			ref($err) && $err->can('message') ? $err->message : $err
-		) if $session->active;
-		die $err;
-	}
+	my $failure = $@;
+
+	# D82's two classes, which are the errors no environment survives.  Both
+	# abort the same way and differ only in the status they exit with, and
+	# both leave through here, because everything an environment could
+	# survive was answered inside the walk and never reached this eval.
+	Genesis::CI::Walk::abort_run(
+		session => $session,
+		record  => $record,
+		envs    => \@dag_order,
+		at      => $at,
+		error   => $failure,
+	) unless $ran;
 
 	# The walk is over, so the operator goes back on the branch they started
 	# this run from, before a word of the summary is printed.  Nothing below
 	# reads the working tree.
 	$session->finish;
-
-	# The push is batched to the end, so a run that failed halfway has put
-	# nothing on the remote, and control goes with the branches because the
-	# markers now on them name commits the remote has to be able to resolve.
-	if (@to_push) {
-		my $remote = $git->default_remote;
-		if ($remote) {
-			my @all = ($control, @to_push);
-			info "\n#G{Pushing} to #C{%s}...", $remote;
-			my $results = $git->push($remote, @all);
-			for my $ref (@all) {
-				if ($results->{$ref}) {
-					info "  #G{%s}: pushed", $ref;
-				} else {
-					warning("Failed to push #C{%s} to #C{%s}.", $ref, $remote);
-				}
-			}
-		}
-	}
 
 	if ($delivered) {
 		info "\n#G{Done.} %s %d commit%s.",
