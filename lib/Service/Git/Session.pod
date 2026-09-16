@@ -481,6 +481,63 @@ B<Examples:>
   $session->abort('the writer could not finish');
   # dies naming that error and the branch we are stuck on, where the return failed
 
+=head2 discard($branch)
+
+  $session->discard($env_record->{branch});
+
+Puts one branch back at its remote-tracking ref and leaves the session open,
+which is what D96's second stage asks for when an error is confined to one
+environment. The tree and the index are discarded first, because a delivery
+that died between the checkout and the commit leaves both holding the source
+and every later switch would fail over them, and the branch then goes back to
+T so that nothing of the partial delivery survives.
+
+It is not C<abort>. C<abort> ends the session and the run with it, so every
+environment below the broken one would go unattempted, which is the shape the
+walk exists to avoid. The run walks on to the next environment instead.
+
+Control is never reset here, for the same reason C<abort> leaves it alone:
+committed work on control is never discarded.
+
+The branch also leaves this session's record of what it moved, so an C<abort>
+later in the run does not reset a branch that has already been put back.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to put back. An undefined or empty name, and the control branch,
+are no-ops.
+
+=back
+
+B<Returns:> The session, so a caller can chain.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "A branch was discarded with no session open in %s." >> -- raised where
+the session is not open, since there is nothing to discard against.
+
+=item *
+
+C<< "The uncommitted changes in %s could not be discarded after %s failed, so
+the working tree still holds them." >> -- raised at C<SOFTWARE> where the
+discard itself failed, since every later switch would fail over the changes
+that are still there.
+
+=back
+
+B<Examples:>
+
+  $session->discard('qa/bosh');
+  # discards the tree, puts qa/bosh back at origin/qa/bosh, stays open
+
 =head2 apply_files($source_sha, %opts)
 
   my $result = $session->apply_files($source_sha,

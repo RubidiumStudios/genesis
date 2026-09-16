@@ -6,7 +6,7 @@ use warnings;
 use Genesis;
 use Genesis::State;
 use Genesis::Commands;
-use Genesis::Exit qw/CONFIG NOPERM ABORTED/;
+use Genesis::Exit qw/CONFIG NOPERM ABORTED TEMPFAIL/;
 use Genesis::Config;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
@@ -699,9 +699,15 @@ sub propagate {
 				next;
 			}
 
+			# D96's second stage as the walk already resolved it.  An error
+			# the walk confined to this environment is this environment's
+			# outcome, and it is named as one rather than as a warning
+			# standing beside the report, because I8 asks that every
+			# environment in scope end with an outcome and a warning is not
+			# one.
 			if ($env_record->{error}) {
-				warning("Could not read #C{%s}: %s",
-					$env_name, $env_record->{error});
+				info "  #R{%s}: failed, %s",
+					$env_name, $env_record->{error};
 				next;
 			}
 
@@ -758,13 +764,31 @@ sub propagate {
 
 			my $env    = $env_of{$env_name};
 			my $branch = $env_record->{branch};
-			$session->switch($branch);
-			Genesis::CI::Walk::deliver_pending(
+
+			# D96's second stage.  A delivery that dies halfway ends this
+			# environment and nothing else: the branch goes back to T so
+			# that no part of the delivery survives, the environment records
+			# failed, and the run walks on to the next one.  A run-fatal or
+			# unsurvivable failure is not caught, and it reaches the run's
+			# own eval below, which aborts everything.
+			Genesis::CI::Walk::walk_one(
 				session => $session,
-				env     => $env,
 				record  => $env_record,
-				dry_run => $dry_run,
+				deliver => sub {
+					$session->switch($branch);
+					Genesis::CI::Walk::deliver_pending(
+						session => $session,
+						env     => $env,
+						record  => $env_record,
+						dry_run => $dry_run,
+					);
+				},
 			);
+			if (($env_record->{outcome} // '') eq 'failed') {
+				info "  #R{%s}: failed, %s",
+					$env_name, $env_record->{error};
+				next;
+			}
 
 			info "  #G{%s}: %s %d commit%s onto #C{%s}",
 				$env_name,
@@ -831,6 +855,21 @@ sub propagate {
 			$delivered, $delivered == 1 ? '' : 's';
 	} else {
 		info "\n#Yi{No changes to propagate.}";
+	}
+
+	# D97: a run that ended with any environment failed is a partial run,
+	# and it says so in its status, because the next run is the repair and a
+	# caller that cannot tell a partial run from a whole one cannot know to
+	# make it.  Everything the other environments received still stands,
+	# which is what D96 decided a failed environment withholds from them.
+	my @failed = grep {($_->{outcome} // '') eq 'failed'}
+		@{$record->{environments}};
+	if (@failed) {
+		warning("\n%d environment%s failed: %s.  The next run repairs %s.",
+			scalar(@failed), @failed == 1 ? '' : 's',
+			join(', ', map {$_->{env}} @failed),
+			@failed == 1 ? 'it' : 'them');
+		exit TEMPFAIL;
 	}
 	exit 0;
 }

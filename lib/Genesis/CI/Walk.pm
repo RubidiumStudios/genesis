@@ -13,6 +13,7 @@ use strict;
 use warnings;
 
 use Exporter qw/import/;
+use Scalar::Util ();
 use Genesis qw/run bug/;
 use Genesis::CI::Marker qw/STAGE RELEASE_STAGE/;
 use Genesis::CI::RunFailure;
@@ -23,6 +24,7 @@ our @EXPORT_OK = qw/
 	apply_hold
 	gate_state released_gates
 	introducing_commit walk_base
+	walk_one is_run_fatal
 	READINGS HOLD_REASONS
 /;
 
@@ -686,6 +688,77 @@ sub apply_hold {
 }
 
 # }}}
+# walk_one - walk and deliver to one environment, ending at its own error {{{
+#
+# D96's second stage.  An error confined to one environment ends that
+# environment and nothing else: its branch goes back to T so that nothing of
+# a partial delivery survives in L, it records failed with the error it
+# raised, and the run walks on.  This is the closure of H3, where the
+# baseline's loop recorded the first error and stopped, leaving every
+# environment after it neither attempted nor reported.
+#
+# One sub stands around both halves of an environment's turn, because D78
+# puts a blueprint that raises while the run enumerates one environment's
+# fragments in the same class as a delivery that died halfway, and D60 puts
+# a with_vault or a load_env failure there too.  An environment that ends
+# any of those three ways records the one outcome.
+#
+# The session is handed in only where something may have been written, and
+# what it is asked for is the per-branch discard rather than abort: abort
+# ends the session and the run with it, which would leave every environment
+# below this one unattempted, which is the shape this sub exists to stop.
+#
+# A run-fatal or unsurvivable error is not caught here.  It propagates to
+# the caller, which aborts the whole run.
+sub walk_one {
+	my (%args) = @_;
+
+	my $session = $args{session};
+	my $record  = $args{record};
+
+	my $ok = eval {
+		$args{deliver}->();
+		1;
+	};
+	return $record if $ok;
+
+	my $error = $@;
+	die $error if is_run_fatal($error);
+	$error = $error->message
+		if Scalar::Util::blessed($error) && $error->can('message');
+
+	$session->discard($record->{branch}) if $session;
+	$record->{error}   = _load_error($error);
+	$record->{outcome} = 'failed';
+	$record->{pending} = [];
+	return $record;
+}
+
+# }}}
+# is_run_fatal - does this error end the run rather than the environment? {{{
+#
+# D82's two classes.  Run-fatal is the writer's own failure, where nothing a
+# caller could do differently would help.  Unsurvivable is an error no
+# environment can survive but a retry may fix, the remote unreachable being
+# the case.  Both end the run, and both are raised as Genesis::CI::RunFailure,
+# whose two constructors bless one package and tell the two apart through the
+# kind they set.  So the kind is what is read here.  A test against a package
+# name of each class's own would answer false for every failure the writer
+# raises, because no such package exists.
+#
+# Everything else is confined to the environment that raised it, which is
+# what walk_one does with the answer.
+sub is_run_fatal {
+	my ($error) = @_;
+
+	return 0 unless Scalar::Util::blessed($error)
+		&& $error->isa('Genesis::CI::RunFailure');
+
+	my $kind = $error->kind // '';
+	return ($kind eq 'run-fatal' || $kind eq 'unsurvivable') ? 1 : 0;
+}
+
+# }}}
 # plan - the run's canonical record, computed from durable state alone {{{
 #
 # The composition.  It reads the applied record, walks the topology in the
@@ -817,127 +890,143 @@ sub plan {
 		};
 		push @{$record->{environments}}, $env_record;
 
-		# An environment the pre-flight has no branch record for has no
-		# deployment branch on either side, which is D43's awaiting outcome
-		# and nothing this walk can route a commit onto.
-		next unless $settled;
+		# D96's second stage stands around the walk as it stands around the
+		# delivery, because a blueprint that raises while this environment's
+		# fragments are enumerated is D78's error and ends this environment
+		# alone.  No session is handed over, since the walk writes nothing
+		# and there is no branch to put back.
+		walk_one(record => $env_record, deliver => sub {
 
-		my $env = $env_for->($name);
-		unless ($env) {
-			$env_record->{error} = $load_error{$name};
-			next;
-		}
+			# An environment the pre-flight has no branch record for has no
+			# deployment branch on either side, which is D43's awaiting
+			# outcome and nothing this walk can route a commit onto.
+			return unless $settled;
 
-		# The certified commit, which is the control commit the environment's
-		# last successful deployment was made from.  A vault this run cannot
-		# reach makes the environment failed rather than deployed, and the
-		# two states with no certified commit are kept apart, because one of
-		# them is an environment the pipeline was never applied to.
-		my $certified = $certified_for_env->($name);
-		$env_record->{certified} = $certified;
-		if ($certified->{state} eq 'unreadable') {
-			$env_record->{error} = $certified->{error};
-			next;
-		}
+			my $env = $env_for->($name);
+			unless ($env) {
+				$env_record->{error}   = $load_error{$name};
+				$env_record->{outcome} = 'failed';
+				return;
+			}
 
-		my $deployed = $certified->{state} eq 'certified' ? {
-			control_commit => $certified->{control_commit},
-			commit         => $certified->{commit},
-			at             => $certified->{at},
-		} : undef;
-		$env_record->{deployed} = $deployed;
+			# The certified commit, which is the control commit the
+			# environment's last successful deployment was made from.  A
+			# vault this run cannot reach makes the environment failed
+			# rather than deployed, and the two states with no certified
+			# commit are kept apart, because one of them is an environment
+			# the pipeline was never applied to.
+			my $certified = $certified_for_env->($name);
+			$env_record->{certified} = $certified;
+			if ($certified->{state} eq 'unreadable') {
+				$env_record->{error}   = $certified->{error};
+				$env_record->{outcome} = 'failed';
+				return;
+			}
 
-		# D60: an environment whose record carries no certified commit is one
-		# the pipeline was never applied to, and nothing may be delivered to
-		# it until genesis pipeline-apply has run.  It is held rather than
-		# walked, so nothing stands pending for it, and it holds everything
-		# below it through the same reading its descendants take.  It stands
-		# ahead of the base, because reading a base costs a walk of control
-		# over the environment's own file and an environment this run will
-		# not walk has no use for the answer.
-		next if $certified->{state} eq 'never-applied';
+			my $deployed = $certified->{state} eq 'certified' ? {
+				control_commit => $certified->{control_commit},
+				commit         => $certified->{commit},
+				at             => $certified->{at},
+			} : undef;
+			$env_record->{deployed} = $deployed;
 
-		# Under D2 the base is the local ref, which the pre-flight has just
-		# settled, and under a dry run it is the ref a real run would have
-		# moved that branch to.  What the walk starts from is the marker that
-		# ref carries, or, where it carries none, the commit before the one
-		# that introduced the environment (D61).
-		#
-		# The marker is taken back out of the answer rather than read a
-		# second time, because an unseeded branch's base is a commit on
-		# control and merged is a fact about what the branch has received.
-		my $ref = $settled->{assumed} // $settled->{branch};
-		my ($base, $seeding) = walk_base(
-			git      => $git,
-			ref      => $ref,
-			control  => $control_sha,
-			# In list context, because prefixed answers a list and asking it
-			# for one path in scalar context answers how many it has.
-			env_file => ($git->prefixed($env->file))[0],
-		);
-		my $marker = $seeding eq 'seeded' ? $base : undef;
-		$env_record->{merged}  = $marker;
-		$env_record->{reading} = _reading($marker, $deployed);
+			# D60: an environment whose record carries no certified commit
+			# is one the pipeline was never applied to, and nothing may be
+			# delivered to it until genesis pipeline-apply has run.  It is
+			# held rather than walked, so nothing stands pending for it, and
+			# it holds everything below it through the same reading its
+			# descendants take.  It stands ahead of the base, because
+			# reading a base costs a walk of control over the environment's
+			# own file and an environment this run will not walk has no use
+			# for the answer.
+			return if $certified->{state} eq 'never-applied';
 
-		# The one place walk_env's positional question meets the hold
-		# readers.  The ancestors are read once for the environment and the
-		# closure asks them of every commit, because the undeployed set is
-		# the ancestor's set between its certified commit and this one and
-		# so moves with the commit rather than with the environment.
-		my $ancestors = $ancestors_of->($name);
-
-		# D49: the gate this environment has not passed, read over the range
-		# from its own certified commit to control's tip rather than over the
-		# walk's own range.  A branch already delivered up to a gate is
-		# walked from the gate itself, so a gate read over the due commits
-		# alone would fall behind the base on the very next run and stop
-		# holding anything, and the environment still waits for the deploy
-		# that certifies it.
-		my $since = $deployed
-			&& $git->is_ancestor($deployed->{control_commit}, $control_sha)
-			? $deployed->{control_commit} : $base;
-		my @range    = control_commits($git, $control_sha, $since);
-		my $released = released_gates($git, @range);
-
-		# The oldest unreleased gate in the range, because a second gate
-		# behind the first is reached only once the first is cleared.
-		my $gate;
-		for my $commit (@range) {
-			$gate = gate_state(
-				git       => $git,
-				commit    => $commit->{sha},
-				certified => $deployed ? $deployed->{control_commit} : undef,
-				released  => $released,
+			# Under D2 the base is the local ref, which the pre-flight has
+			# just settled, and under a dry run it is the ref a real run
+			# would have moved that branch to.  What the walk starts from is
+			# the marker that ref carries, or, where it carries none, the
+			# commit before the one that introduced the environment (D61).
+			#
+			# The marker is taken back out of the answer rather than read a
+			# second time, because an unseeded branch's base is a commit on
+			# control and merged is a fact about what the branch has
+			# received.
+			my $ref = $settled->{assumed} // $settled->{branch};
+			my ($base, $seeding) = walk_base(
+				git      => $git,
+				ref      => $ref,
+				control  => $control_sha,
+				# In list context, because prefixed answers a list and
+				# asking it for one path in scalar context answers how many
+				# it has.
+				env_file => ($git->prefixed($env->file))[0],
 			);
-			last if $gate;
-		}
+			my $marker = $seeding eq 'seeded' ? $base : undef;
+			$env_record->{merged}  = $marker;
+			$env_record->{reading} = _reading($marker, $deployed);
 
-		walk_env(
-			git        => $git,
-			env        => $env,
-			record     => $env_record,
-			control    => $control_sha,
-			base       => $base,
-			gate       => $gate,
-			hold_check => sub {
-				my ($commit, $files) = @_;
-				return hold_for(
+			# The one place walk_env's positional question meets the hold
+			# readers.  The ancestors are read once for the environment and
+			# the closure asks them of every commit, because the undeployed
+			# set is the ancestor's set between its certified commit and
+			# this one and so moves with the commit rather than with the
+			# environment.
+			my $ancestors = $ancestors_of->($name);
+
+			# D49: the gate this environment has not passed, read over the
+			# range from its own certified commit to control's tip rather
+			# than over the walk's own range.  A branch already delivered up
+			# to a gate is walked from the gate itself, so a gate read over
+			# the due commits alone would fall behind the base on the very
+			# next run and stop holding anything, and the environment still
+			# waits for the deploy that certifies it.
+			my $since = $deployed
+				&& $git->is_ancestor($deployed->{control_commit}, $control_sha)
+				? $deployed->{control_commit} : $base;
+			my @range    = control_commits($git, $control_sha, $since);
+			my $released = released_gates($git, @range);
+
+			# The oldest unreleased gate in the range, because a second gate
+			# behind the first is reached only once the first is cleared.
+			my $gate;
+			for my $commit (@range) {
+				$gate = gate_state(
 					git       => $git,
 					commit    => $commit->{sha},
-					files     => $files,
-					ancestors => $ancestors,
-					provider  => $record->{provider},
+					certified => $deployed ? $deployed->{control_commit} : undef,
+					released  => $released,
 				);
-			},
-		);
+				last if $gate;
+			}
 
-		# D50: the hold is a fact about the walk and not about the branch, so
-		# it is applied once the walk has computed what is due, which is what
-		# leaves the preview and the report something to show.  A vault that
-		# refuses the read ends the run rather than answering no hold,
-		# because delivering on a hold nobody could read is the one mistake
-		# the record exists to stop.
-		apply_hold($env_record, $env->hold_record);
+			walk_env(
+				git        => $git,
+				env        => $env,
+				record     => $env_record,
+				control    => $control_sha,
+				base       => $base,
+				gate       => $gate,
+				hold_check => sub {
+					my ($commit, $files) = @_;
+					return hold_for(
+						git       => $git,
+						commit    => $commit->{sha},
+						files     => $files,
+						ancestors => $ancestors,
+						provider  => $record->{provider},
+					);
+				},
+			);
+
+			# D50: the hold is a fact about the walk and not about the
+			# branch, so it is applied once the walk has computed what is
+			# due, which is what leaves the preview and the report something
+			# to show.  A vault that refuses the read ends this environment
+			# rather than answering no hold, because delivering on a hold
+			# nobody could read is the one mistake the record exists to stop.
+			apply_hold($env_record, $env->hold_record);
+			return;
+		});
 	}
 
 	return $record;
