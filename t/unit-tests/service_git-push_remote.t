@@ -32,7 +32,7 @@ subtest 'a branch named for the remote is not published as one' => sub {
 	fixture_pipeline_record($h, 'lab', dependencies => [], discovery => 'complete');
 	certify($h, 'lab', control_commit => ref_in($h->a, 'refs/heads/'.$h->control));
 
-	# The shape H4 names: a local branch whose name is the remote's.
+	# H4 names one shape, which is a local branch whose name is the remote's.
 	local_branch($h, 'origin');
 
 	commit_on_control($h,
