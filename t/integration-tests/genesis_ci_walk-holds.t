@@ -81,9 +81,9 @@ subtest 'a hold stops the delivery and holds everything after it' => sub {
 
 	is(harness_marker($h, $h->slug('qa')), $first,
 		'only the first commit was delivered');
-	like($err, qr/\Q@{[substr($second, 0, 7)]}\E.*held/s,
+	like($err, qr/control\@\Q@{[substr($second, 0, 7)]}\E[^\n]*\n\s*H held by lab \(ops\/shared\.yml\)/,
 		'the second is held');
-	like($err, qr/\Q@{[substr($third, 0, 7)]}\E.*held/s,
+	like($err, qr/control\@\Q@{[substr($third, 0, 7)]}\E[^\n]*\n\s*H held behind control\@\Q@{[substr($second, 0, 7)]}\E/,
 		'the third is held behind the second');
 	unlike("$out$err", qr/entry point/i, 'the retired term appears nowhere');
 };

@@ -729,6 +729,12 @@ the environment had never deployed.  The audit is written whole rather than
 left to the reader's own filling, because a record missing a field reads back
 as a deprecated one and the reader says so on standard error.
 
+That audit path is keyed on the compact timestamp, so two certifications
+inside one second would write one audit and the second would take the first's
+place.  The harness counts its own certifications and moves the clock on by
+one second for each of them, and it does so only where the row named no
+C<at>, so a row that pinned a time still gets exactly the one it asked for.
+
 =head2 fixture_hold($h, $env, %opts)
 
 Writes the hold record with C<reason>, C<user>, C<hostname>, and C<at> and

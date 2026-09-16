@@ -681,7 +681,11 @@ form carries no such clause, an environment that has never deployed being
 already clear about why.  A commit held behind a gate reads C<< gate:
 <reason> >> with the trailer's own text and no held prefix, because the gate
 is a step somebody has to take rather than a state the pipeline works its own
-way out of.
+way out of.  An ancestor this run could not read at all reads C<< held by
+<ancestor>, which could not be read >>, since an ancestor nobody can read is
+neither certified nor uncertified.  A commit standing behind one the run has
+already held reads C<< held behind control@<sha> >>, naming that commit in
+the marker's short form.
 
 B<Parameters:>
 

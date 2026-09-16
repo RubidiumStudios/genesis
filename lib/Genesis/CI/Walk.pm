@@ -502,16 +502,12 @@ sub held_qualifier {
 	my ($first) = @{$record->{held} || []};
 	return undef unless $first;
 
-	# The commit named is the one the ancestor has not deployed, and the
-	# environment named is the ancestor that must certify it.
+	# The environment named is whoever has to certify, which is the ancestor
+	# where an ancestor holds the commit and the environment itself where a
+	# gate does, and the commit named is the one that certification has to
+	# reach, which is the gate itself rather than the commit it holds.
 	return sprintf('held, awaiting deployment (%s at control@%s)',
-		$first->{ancestor}, substr($first->{control_commit}, 0, 7))
-		if defined $first->{ancestor};
-
-	# A gate is certified by the environment itself, and the commit it has
-	# to be certified at is the gate rather than the commit the gate holds.
-	return sprintf('held, awaiting deployment (%s at control@%s)',
-		$record->{env},
+		$first->{ancestor} // $record->{env},
 		substr($first->{gate} // $first->{control_commit}, 0, 7));
 }
 
