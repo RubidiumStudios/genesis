@@ -21,7 +21,7 @@ use Genesis::CI::RunFailure;
 use Genesis::Exit qw/UNAVAILABLE/;
 
 our @EXPORT_OK = qw/
-	plan changed_set route_commit undeployed_set overlap
+	plan scope_for changed_set route_commit undeployed_set overlap
 	read_durable_state env_state
 	certified_for hold_for
 	apply_hold
@@ -819,6 +819,50 @@ sub abort_run {
 }
 
 # }}}
+# scope_for - the environments this run walks, with their branches {{{
+#
+# D66: the branch is per deployment, not per environment, so every name here
+# is composed through branch_for and two roots sharing an environment name
+# never contend on one branch.  Genesis::Top already roots at the deployment
+# root the command stands in, so a run walks one root's environments and the
+# marker walk needs no pathspec, which closes H32 by construction.
+#
+# The type is read off the accessor rather than out of the configuration key
+# it reads, because one fact answered through two readers is how the two come
+# to disagree.
+sub scope_for {
+	my ($top, %opts) = @_;
+
+	my $topology = $top->pipeline_topology;
+	my @scope;
+	my %depth;
+
+	# The walk's scope option narrows which environments come back and
+	# nothing else.  Depth and prior_env are computed over the whole
+	# topology first, so an environment asked for on its own still reads
+	# the ancestor it inherits from, which is what pipeline-status needs.
+	my %wanted;
+	%wanted = map {$_ => 1} @{$opts{scope}}
+		if $opts{scope} && @{$opts{scope}};
+
+	for my $name (@{$topology->{order}}) {
+		my $prior = $topology->{parent_of}{$name};
+		$depth{$name} = defined $prior ? ($depth{$prior} // 0) + 1 : 0;
+		next if %wanted && !$wanted{$name};
+		push @scope, {
+			env       => $name,
+			type      => $top->type,
+			branch    => $top->branch_for($name),
+			pr_branch => $top->pr_branch_for($name),
+			prior_env => $prior,
+			depth     => $depth{$name},
+		};
+	}
+
+	return \@scope, $topology;
+}
+
+# }}}
 # plan - the run's canonical record, computed from durable state alone {{{
 #
 # The composition.  It reads the applied record, walks the topology in the
@@ -851,19 +895,11 @@ sub plan {
 	my $control_sha = $state->{control}{commit};
 	my $applied     = $state->{applied};
 
-	my $topo  = $top->pipeline_topology;
-	my @order = @{$topo->{order}};
-
-	my %in_scope = map {$_ => 1} @{$opts{scope} || \@order};
-
-	# The depth each environment sits at, taken from the whole topology and
-	# not from the scope, so an environment named on its own still reads the
-	# depth the pipeline gives it.
-	my %depth;
-	for my $name (@order) {
-		my $parent = $topo->{parent_of}{$name};
-		$depth{$name} = defined $parent ? ($depth{$parent} // 0) + 1 : 0;
-	}
+	# The environments this run walks, each already carrying the branch its
+	# own deployment slug names and the place it sits in the DAG.  One sub
+	# builds the list and narrows it, so a run that was handed a scope and a
+	# run that was not read the same answer over the environments they share.
+	my ($scope, $topo) = scope_for($top, scope => $opts{scope});
 
 	my $branches = $opts{branches} || {};
 
@@ -915,16 +951,16 @@ sub plan {
 	# describe different repositories.
 	my $record = {%$state, environments => []};
 
-	for my $name (@order) {
-		next unless $in_scope{$name};
+	for my $entry (@$scope) {
+		my $name = $entry->{env};
 
 		my $settled = $branches->{$name};
 		my $env_record = {
 			env            => $name,
-			type           => $top->type,
-			branch         => $settled ? $settled->{branch} : $top->branch_for($name),
-			prior_env      => $topo->{parent_of}{$name},
-			depth          => $depth{$name},
+			type           => $entry->{type},
+			branch         => $settled ? $settled->{branch} : $entry->{branch},
+			prior_env      => $entry->{prior_env},
+			depth          => $entry->{depth},
 			reading        => 'not-propagated',
 			merged         => undef,
 			deployed       => undef,
