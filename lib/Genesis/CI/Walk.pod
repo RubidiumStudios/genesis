@@ -96,6 +96,11 @@ gate read over the due commits alone would fall behind the base on the very
 next run and stop holding anything, while the environment still waits for the
 deploy that certifies it.
 
+A propagation hold is applied through L</apply_hold> at the end of each
+environment's walk, once what is due has been computed and before the record
+is handed back, so the caller has nothing left to deliver to a held
+environment and the preview still has what waits behind the hold to show.
+
 Fields a later stage owns are present and null rather than absent, so a
 renderer never has to ask whether a key exists.
 
@@ -685,7 +690,10 @@ way out of.  An ancestor this run could not read at all reads C<< held by
 <ancestor>, which could not be read >>, since an ancestor nobody can read is
 neither certified nor uncertified.  A commit standing behind one the run has
 already held reads C<< held behind control@<sha> >>, naming that commit in
-the marker's short form.
+the marker's short form.  A commit stopped by the environment's own
+propagation hold reads C<< held (<reason>) >> carrying the reason somebody
+wrote on the hold record, rather than the word C<on-hold>, because what an
+operator has to clear is that reason and not the state's own name.
 
 B<Parameters:>
 
@@ -717,6 +725,12 @@ certify the commit it has not deployed, and one holding commits behind a gate
 waits on its own deployment of the gate, which is the commit the phrase then
 names.
 
+An environment with a propagation hold standing against it reads C<< held,
+needs clearing (<reason>) >> ahead of any of those, because under D50 a hold
+is a decision somebody made for a reason the pipeline cannot see and only a
+person clears it, so it outranks whatever the commits underneath it happen to
+be waiting for.
+
 B<Parameters:>
 
 =over 4
@@ -733,6 +747,44 @@ B<Examples:>
 
   my $words = Genesis::CI::Walk::held_qualifier($env_record);
   # returns "held, awaiting deployment (lab at control@1a2b3c4)"
+
+=head2 hold_detail
+
+    my $words = Genesis::CI::Walk::hold_detail($env_record);
+
+What the standing hold is holding, in the two wordings D56 fixes, or
+undefined where no hold stands.
+
+D56 makes a hold outrank idempotent, so an environment with one standing
+never reads as though it were fine, and this is the line beside
+L</held_qualifier> that says which of the two situations it is in.  Where
+nothing is due behind the hold it reads that nothing is due now and that
+anything becoming due stays blocked, and where something is it names how many
+commits are blocked until the hold is released.
+
+The count is of the commits the hold itself took, and not of everything held,
+because a commit a gate or an ancestor had already stopped is reported under
+that reason, and counting it here would name it twice and send an operator to
+the wrong command.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+One environment's record, as L</plan> builds it, after L</apply_hold> has run
+over it.
+
+=back
+
+B<Returns:> The detail as one line of prose, or undefined where the record
+carries no C<hold>.
+
+B<Examples:>
+
+  my $words = Genesis::CI::Walk::hold_detail($env_record);
+  # returns "2 commits are blocked until this hold is released"
 
 =head2 walk_env
 
@@ -801,6 +853,53 @@ B<Examples:>
                               control => $sha, base => undef,
                               hold_check => sub { undef });
   # every due commit lands in $rec->{pending}, in control order
+
+=head2 apply_hold
+
+    Genesis::CI::Walk::apply_hold($env_record, $env->hold_record);
+
+Stops delivery for a held environment and says why.
+
+Under D50, while a propagation hold stands the run delivers nothing new to
+that environment and opens or updates no pull request, in either mode, while
+everything already on the deployment branch stays deployable.  The walk still
+computes what is due, which is what lets C<genesis propagate --dry-run> show
+what waits behind the hold.
+
+Every pending commit moves into the record's C<held> list with the reason
+C<on-hold> and the hold's own reason beside it, rather than being discarded,
+so the preview and the report have something to list.  They go on the front
+of that list, because everything the walk had already held stands after the
+last commit that was still pending, and a report whose commits are out of
+control order is one nobody can read against the log.
+
+It runs at the end of each environment's walk inside L</plan>, once
+L</walk_env> has computed what is due and before the caller reads the record,
+so nothing downstream can deliver a commit the hold has taken.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+One environment's record, as L</plan> builds it.
+
+=item C<$hold>
+
+That environment's hold record, as C<< Genesis::Env->hold_record >> answers
+it, or undefined where no hold stands, in which case the record comes back
+untouched.
+
+=back
+
+B<Returns:> The record it was given, with C<hold> set, C<pending> emptied,
+and every entry that was pending moved to the front of C<held>.
+
+B<Examples:>
+
+  Genesis::CI::Walk::apply_hold($env_record, $env->hold_record);
+  # $env_record->{pending} is now empty and $env_record->{hold} is set
 
 =head2 deliver_pending
 
