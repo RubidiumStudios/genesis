@@ -196,9 +196,14 @@ subtest 'the remote\'s own error is what the report names' => sub {
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 
 	is($exit, Genesis::Exit::TEMPFAIL, 'an unsurvivable failure exits TEMPFAIL');
-	# The message is wrapped to the terminal width before it is printed, so
-	# the sentence is read across the wrap rather than along one line.
-	like($err, qr/could not reach the remote.*does not appear to be a git repository/s,
+	# The message is wrapped to the terminal width before it is printed, and
+	# where the wrap falls moves with the length of the harness's temporary
+	# path, so a break can land between two words of the sentence.  The
+	# whitespace is flattened and the sentence read along one line, rather
+	# than the row resting on a temporary directory being as long as the
+	# one this suite happens to get.
+	(my $flat = $err) =~ s/\s+/ /g;
+	like($flat, qr/could not reach the remote.*does not appear to be a git repository/,
 		'the unreachable wording carries git\'s own error');
 	like($err, qr/\Q$path\E/, 'which names the path git could not read');
 };
