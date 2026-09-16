@@ -792,7 +792,13 @@ sub propagate {
 			);
 			next if ($env_record->{outcome} // '') eq 'failed';
 
-			$env_record->{outcome} = 'propagated';
+			# A preview leaves the outcome where the walk left it, which is
+			# null, and the preview's own renderer writes the verb that says
+			# this would have propagated.  Writing propagated here under a
+			# dry run put a fact about a run that never happened into the
+			# record, and every reader of that field then had to know which
+			# kind of run had filled it.
+			$env_record->{outcome} = 'propagated' unless $dry_run;
 			$delivered += scalar(@pending);
 			push @to_push, $branch unless $dry_run;
 		}
@@ -882,9 +888,13 @@ sub propagate {
 	# call rather than lines scattered through the walk, because
 	# pipeline-status renders the same record through the same helpers and
 	# two outputs composing one phrase twice are two that can disagree.
-	Genesis::CI::Report::render_run($record,
-		git     => $git,
-		dry_run => $dry_run ? 1 : 0);
+	# D44's preview and the run's own report are one report, composed from
+	# one record by one renderer, so the two cannot disagree about a word.
+	# The preview enters through its own sub because it has a banner and one
+	# verb of its own, and everything under those is the run's.
+	$dry_run
+		? Genesis::CI::Report::render_preview($record, git => $git)
+		: Genesis::CI::Report::render_run($record, git => $git);
 
 	if ($delivered) {
 		info "\n#G{Done.} %s %d commit%s.",
