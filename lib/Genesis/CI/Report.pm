@@ -214,9 +214,9 @@ sub hold_detail {
 # is computed from durable state alone and leaves the outcome null, so where
 # a hold stands the renderer reads the qualifier that says what the
 # environment waits for, and where nothing stands at all it reads idempotent.
-# One line of code composes the held phrase for the run and, once M11's
-# preview lands, for the preview too, which is the whole reason this module
-# exists rather than each output spelling the words itself.
+# One line of code composes the held phrase for the run and for the preview
+# alike, which is the whole reason this module exists rather than each output
+# spelling the words itself.
 #
 # outcomes_only is the abort's shape.  A run that ended early published
 # nothing, so the commit axis has nothing true to say and printing a pending
