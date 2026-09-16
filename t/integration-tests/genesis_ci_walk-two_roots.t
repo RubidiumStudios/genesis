@@ -19,15 +19,6 @@ $ENV{NOCOLOR} = 1;
 
 my $ENV_NAME = 'lmelt-vsphere-canwest-1-mgmt';
 
-# An environment file in the shape write_env_file writes, with one parameter
-# changed, so a commit on control is a delta the walk can route.  It composes
-# a string and builds no state, so it stays beside the rows that read it.
-sub tuned_env_file {
-	my ($n) = @_;
-	return "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n"
-	     . "genesis:\n  env: $ENV_NAME\nparams:\n  tuned: $n\n";
-}
-
 subtest 'each root walks the branch its own slug names' => sub {
 	# Six rows, and one restoration assertion for each of the two runs.
 	plan tests => 8;
@@ -43,11 +34,22 @@ subtest 'each root walks the branch its own slug names' => sub {
 	my $vault_slug = $h->slug($ENV_NAME, type => 'vault');
 	isnt($bosh_slug, $vault_slug, 'the two slugs differ');
 
+	# The file the harness writes, with one parameter changed, so a commit on
+	# control is a delta the walk can route.  It is written through the
+	# harness's own writer and read back off control, because a body composed
+	# beside the test is a second copy of that writer's and the two drift.
+	my $tuned = sub {
+		my ($root, $n) = @_;
+		my $path = write_env_file($h, $ENV_NAME, root => $root,
+			commit => 0, params => {tuned => $n});
+		return slurp($h->a . "/$path");
+	};
+
 	my $bosh_due = commit_on_control($h,
-		files   => {"bosh/$ENV_NAME.yml" => tuned_env_file(1)},
+		files   => {"bosh/$ENV_NAME.yml" => $tuned->('bosh', 1)},
 		message => 'Tune the bosh deployment', push => 1);
 	my $vault_due = commit_on_control($h,
-		files   => {"vault/$ENV_NAME.yml" => tuned_env_file(1)},
+		files   => {"vault/$ENV_NAME.yml" => $tuned->('vault', 1)},
 		message => 'Tune the vault deployment', push => 1);
 
 	run_genesis($h, {answers => ['y'], dir => 'bosh'}, 'propagate');

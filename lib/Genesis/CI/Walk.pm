@@ -848,6 +848,13 @@ sub abort_run {
 # The type is read off the accessor rather than out of the configuration key
 # it reads, because one fact answered through two readers is how the two come
 # to disagree.
+#
+# The pull request branch is not composed here.  Nothing reads it, composing
+# it rebuilds the unmemoized topology once per environment, and the collision
+# it can refuse would be raised inside the run's own eval and its open
+# session, where the refusal dies as a string and the named CONFIG exit
+# becomes a bare 1.  The stage that delivers by pull request composes it, with
+# the collision refused in the pre-flight ahead of the session.
 sub scope_for {
 	my ($top, %opts) = @_;
 
@@ -871,7 +878,6 @@ sub scope_for {
 			env       => $name,
 			type      => $top->type,
 			branch    => $top->branch_for($name),
-			pr_branch => $top->pr_branch_for($name),
 			prior_env => $prior,
 			depth     => $depth{$name},
 		};
