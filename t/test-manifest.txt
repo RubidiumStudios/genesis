@@ -335,7 +335,7 @@ integration-tests/genesis_ci_walk-session.t                   # the run switches
 integration-tests/genesis_ci_walk-delivery.t                  # each due control commit arrives as its own delivery, in control order
 integration-tests/genesis_ci_walk-triggering_paths.t          # only triggering content routes a commit, and the mirror carries the rest
 integration-tests/genesis_ci_walk-holds.t                     # an ancestor's undeployed set holds a commit, and everything after it
-integration-tests/genesis_ci_walk-seed.t                       # an unseeded branch is walked from the commit that introduced it
+integration-tests/genesis_ci_walk-seed.t                      # an unseeded branch is walked from the commit that introduced it
 integration-tests/genesis_ci_walk-gates.t                     # a gate travels with the commits already due, and three things release it
 integration-tests/genesis_ci_walk-hold_record.t               # a hold record stops delivery in both modes while the branch stays deployable
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
