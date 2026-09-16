@@ -73,7 +73,7 @@ subtest 'a scenario can be narrowed to some environments' => sub {
 };
 
 subtest 'the two scenarios that carry commits answer in both contexts' => sub {
-	plan tests => 8;
+	plan tests => 9;
 
 	my ($gated, @shas) = gated_harness();
 	is(scalar(@shas), 4, 'gated_harness lays four control commits');
@@ -87,6 +87,12 @@ subtest 'the two scenarios that carry commits answer in both contexts' => sub {
 	# four of them.
 	like(files_at($gated, $shas[3])->{'qa.yml'}, qr/n: 4/,
 		'and each of them writes the first environment\'s own file');
+	# The option is read here and nowhere below, because the delivery the
+	# shape seeds itself with takes a files option of its own.
+	my ($named, @custom) = gated_harness(
+		files => [map {+{"ops/change-$_.yml" => "---\nn: $_\n"}} 1 .. 4]);
+	like(files_at($named, $custom[0])->{'ops/change-1.yml'}, qr/n: 1/,
+		'while the files option names what they write instead');
 
 	my $alone = gated_harness();
 	isa_ok($alone, 'Harness::Propagation',

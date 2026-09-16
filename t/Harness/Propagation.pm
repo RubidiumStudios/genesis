@@ -3895,13 +3895,17 @@ sub due_harness {
 # arrayref of one per-commit hashref in the shape commit_on_control takes.
 sub gated_harness {
 	my (%opts) = @_;
+	# The files option names what these four commits write, and deliver takes
+	# a key of the same name for the seeding delivery, so it is taken out of
+	# the options before the shape below is built from them.
+	my $files = delete $opts{files};
 	my $h = ready_harness(%opts, envs => $opts{envs} // ['qa']);
 	my $env = ($opts{envs} // ['qa'])->[0];
 	my @shas;
 	for my $n (1 .. 4) {
 		push @shas, $h->commit_on_control(
-			files    => $opts{files} ? $opts{files}[$n - 1]
-			                        : {"$env.yml" => _env_body($env, $n)},
+			files    => $files ? $files->[$n - 1]
+			                   : {"$env.yml" => _env_body($env, $n)},
 			message  => "A change on control, $n",
 			($n == 3 ? (trailers => {'Genesis-Stage' => $opts{stage} // 'prod'}) : ()),
 			push     => 1,
@@ -4171,13 +4175,17 @@ sub _due {
 
 # _env_body - the environment file the commit-laying shapes write {{{
 #
-# It stays a loadable environment, because the run that walks these commits
-# loads the environment off control's tip, and it carries a counter, because
-# a commit needs a delta to make and two commits writing one body would leave
-# the second with nothing to commit.
+# The same body write_env_file lays down, with a counter beside it.  It has
+# to stay a valid environment file, because a run reads the topology out of
+# these files and Genesis::Env::is_valid_env_file reads the kit's name and
+# version out of a block mapping, so a flow mapping of the same two keys
+# leaves the repository with no environments at all.  The counter is there
+# because a commit needs a delta to make, and two commits writing one body
+# would leave the second with nothing to commit.
 sub _env_body {
 	my ($env, $n) = @_;
-	return "---\nkit: {name: dev}\ngenesis: {env: $env}\nn: $n\n";
+	return "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n"
+	     . "genesis:\n  env: $env\nn: $n\n";
 }
 
 # }}}
