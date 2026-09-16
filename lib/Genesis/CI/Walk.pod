@@ -186,6 +186,34 @@ B<Examples:>
   # returns a record whose environments arrayref is in DAG order, with
   # each environment's due commits under pending
 
+=head2 scope_for
+
+    my ($scope, $topology) = Genesis::CI::Walk::scope_for($top);
+    my ($scope, $topology) = Genesis::CI::Walk::scope_for($top,
+                                                          scope => ['qa']);
+
+The environments this run walks, in DAG order, each with its deployment
+branch and its pull request branch composed through C<< $top->branch_for >>
+and C<< $top->pr_branch_for >>, and with its C<prior_env> and its depth.
+Under D66 the branch is per deployment, so two roots sharing an environment
+name walk their own branches and read their own markers.  The topology the
+list was built from comes back beside it, because the caller reads each
+environment's children and its nodes out of the same answer.
+
+The one option is C<scope>, an arrayref of environment names.  Where it is
+absent or empty every environment the topology gives comes back, which is
+what C<genesis propagate> asks for under D36.  Where it names environments,
+only those come back, still in DAG order and still carrying the C<prior_env>
+and the depth the whole topology gives them, so a narrowed read is a subset
+of the same answer and never a different one.
+
+B<Examples:>
+
+  my ($scope) = Genesis::CI::Walk::scope_for($top, scope => ['qa']);
+  # returns one entry for qa, whose branch is qa/bosh in a bosh root and
+  # qa/vault in the vault root beside it, and whose prior_env and depth are
+  # the ones the whole pipeline gives it
+
 =head2 read_durable_state
 
     my $state = Genesis::CI::Walk::read_durable_state(top => $top,

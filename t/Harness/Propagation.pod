@@ -628,10 +628,16 @@ row that wants the count to start again calls C<reset_steps> first.
 
 Adds a second deployment root to the same repository, so a row can build two
 roots that share an environment name, and returns its repository-relative
-path.  Takes C<type>, which is required, C<envs>, and C<path>, which defaults
-to the type.  C<Genesis::Top-E<gt>create> is told the directory to write, so
-the second root lands where it belongs with no scratch directory and no move;
-only the first root, which has to sit at copy A's own git root, needs that.
+path.  Takes C<type>, which is required, C<envs>, C<path>, which defaults to
+the type, and C<kit>, which names the dev kit this root's environments are
+loaded through and falls back to the kit the harness itself was declared with.
+C<Genesis::Top-E<gt>create> is told the directory to write, so the second root
+lands where it belongs with no scratch directory and no move; only the first
+root, which has to sit at copy A's own git root, needs that.
+
+A root with no kit loads no environment at all, so a row that runs a whole
+command in the second root and wants it to read anything but a failure names a
+kit here.
 
 =head2 write_env_file($h, $env, %opts)
 

@@ -937,9 +937,13 @@ sub _seed_pipeline_section {
 # so a row can name a kit the suite already ships elsewhere, such as
 # t/src/ops-blueprint, rather than a copy of it written for these rows alone.
 # A bare name still resolves under t/kits/.
+# The name is taken as an argument as well as off the harness, because a
+# second deployment root is a root of its own and its environments are loaded
+# through its own dev kit.  A caller that names none falls back to the kit the
+# harness was declared with, which is what the first root installs.
 sub _install_kit {
-	my ($self, $root) = @_;
-	my $name = $self->{kit} or return $self;
+	my ($self, $root, $kit) = @_;
+	my $name = $kit // $self->{kit} or return $self;
 
 	my $from = $name =~ m{/}
 		? "$helper::TOPDIR/$name"
@@ -2095,6 +2099,13 @@ sub add_deployment_root {
 	# root meets the refusal that turns away a repository with no pipeline,
 	# which is never what a row asking for a second root is after.
 	$self->_seed_pipeline_section("$self->{a}/$path");
+
+	# The dev kit this root's environments are loaded through.  A root with
+	# none loads no environment at all, so a row that runs a whole command in
+	# it reads every environment as failed, and the kit goes in ahead of the
+	# commit below so that it is part of the control branch as the first
+	# root's is.
+	$self->_install_kit("$self->{a}/$path", $opts{kit});
 
 	$self->write_env_file($_, root => $path, type => $type, commit => 0)
 		for @{$opts{envs} || []};
