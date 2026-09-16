@@ -350,7 +350,11 @@ sub pipeline_status {
 		my $env = eval { $top->load_env($env_name) };
 		unless ($env) {
 			$state{status} = 'error';
-			$state{error}  = one_line($@);
+			# The one caller with a column to print into.  The row below
+			# puts the reason at the end of a fixed table, so a reason
+			# longer than a terminal line wraps the table apart and the
+			# wrapped half reads as a row of its own.
+			$state{error}  = one_line($@, width => 80);
 			$env_state{$env_name} = \%state;
 			next;
 		}
@@ -811,9 +815,25 @@ sub propagate {
 				# own quarrel with it.  A run where some refs landed and
 				# others did not is each of those branches' business, and it
 				# is reported per branch as it always was.
-				my $results = eval {$git->push($remote, @all)} || {};
-				my $reason  = $@;
+				#
+				# The answer is read in list context, so the reason git gave
+				# for each ref it refused comes back beside the ones and
+				# zeros.  Without it the classifier below was handed an empty
+				# reason on every push that landed nothing without dying, and
+				# so said the remote was unreachable whatever the remote had
+				# actually answered.
+				my ($results, $errors) = eval {$git->push($remote, @all)};
+				my $reason = $@;
+				$results ||= {};
+				$errors  ||= {};
 				unless (grep {$results->{$_}} @all) {
+					# The first ref that said anything, since the classifier
+					# reads one line.  A death out of the push itself is the
+					# reason where there is one, because it is the whole
+					# command failing rather than one ref being turned down.
+					($reason) = grep {defined && length}
+						map {$errors->{$_}} @all
+						unless defined $reason && length "$reason";
 					my ($message, $remedy) = _push_failure($remote, $reason);
 					die Genesis::CI::RunFailure->unsurvivable(
 						message => $message,
@@ -926,10 +946,11 @@ sub run_status {
 # carries a corrective step of its own and a report that said the remote was
 # unreachable over a rejected credential would send them to the wrong one.
 #
-# The reason is git's own error, read to its first substantive line.  A push
-# that landed nothing without dying carries no reason at all, which is the
-# shape Service::Git::push answers for a remote nobody can resolve, so the
-# unreachable wording is what an unmatched line and an absent one both earn.
+# The reason is git's own error, read to its first substantive line.
+# Service::Git::push hands that error back per refused ref, so a push the
+# remote turned down arrives here carrying what the remote said.  A push that
+# answered nothing at all still carries no reason, and the unreachable wording
+# is what an unmatched line and an absent one both earn.
 sub _push_failure {
 	my ($remote, $reason) = @_;
 

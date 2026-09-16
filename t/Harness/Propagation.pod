@@ -602,6 +602,20 @@ configured and unreachable and a command meets a failed fetch.  Here there is
 nowhere to publish to, and a row reaches for this to prove that a command says
 so before it writes anything.
 
+=head2 broken_pushurl($h, %opts)
+
+Points a copy's remote at a directory that is not a git repository for pushes
+alone, returning that directory's path.  C<copy> defaults to A and C<remote>
+to origin.  git takes the push URL from C<remote.E<lt>nameE<gt>.pushurl> where
+one is set and the fetch URL from C<remote.E<lt>nameE<gt>.url>, so every read
+the run makes still works and the one write fails with git's own complaint
+that the path does not appear to be a git repository.
+
+This is the shape a row reaches for when it wants the push's own error text.
+C<sever_remote> takes the refresh at the head of a run with it and
+C<drop_remotes> leaves the command with nowhere to publish and its own words
+for that, so neither of those ever reaches the push.
+
 =head2 set_repo_config($h, $key, $value, %opts)
 
 Writes one key into the deployment root's C<.genesis/config> and commits it on

@@ -24,10 +24,14 @@ our @EXPORT_OK = qw/one_line/;
 # are about the messages this class carries, and two subs doing this job in
 # two files is how the two came to strip different things.
 #
-# Nothing is trimmed to a width.  The caller wraps its own output, and a
+# A caller printing a line of its own is given the sentence whole, because a
 # reason cut at a column loses the end of the sentence that names the file.
+# A caller printing into a column says so through width, and gets the reason
+# cut there with the cut marked, because a long reason inside a table wraps
+# the table apart and the row below it reads as the reason's continuation.
+# The status table is the one caller with a width to give.
 sub one_line {
-	my ($err) = @_;
+	my ($err, %opts) = @_;
 	return 'unknown reason' unless defined($err) && length("$err");
 
 	my $text = "$err";
@@ -41,9 +45,22 @@ sub one_line {
 		$line =~ s/^\s+|\s+$//g;
 		next unless length $line;
 		next if $line =~ /^at \S+ line \d+/;
-		return $line;
+		return _fit($line, $opts{width});
 	}
 	return 'unknown reason';
+}
+
+# }}}
+# _fit - one reason at the width a caller asked for, with the cut marked {{{
+#
+# The mark is what tells a reader that the sentence goes on, so a trim that
+# ended at the width and said nothing would have them act on half a path.
+sub _fit {
+	my ($line, $width) = @_;
+
+	return $line unless defined $width && $width > 0;
+	return $line unless length($line) > $width;
+	return substr($line, 0, $width) . '...';
 }
 
 # }}}

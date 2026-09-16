@@ -13,6 +13,8 @@ use Harness::Propagation;
 
 use Test::More;
 
+use Genesis::Exit;
+
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
@@ -83,22 +85,40 @@ subtest 'a broken environment ends itself and the run walks on' => sub {
 		'prod is held because qa answered nothing');
 };
 
-subtest 'an environment that will not load is reset and the run continues' => sub {
-	plan tests => 7;
+subtest 'a failure after a delivery puts the branch back and walks on' => sub {
+	plan tests => 6;
 
-	# A refused commit is the writer failing to produce what it was told to
-	# produce, so it ends the run rather than one environment, and the shape
-	# an environment does survive is the one D96 names: an environment that
-	# cannot be loaded.  qa's file names a kit this repository does not hold.
-	my $h = chained_three();
-	my $due = commit_on_control($h,
-		files => {
-			'lab.yml'  => env_file(env => 'lab', n => 3),
-			'qa.yml'   => env_file(env => 'qa', prior => 'lab',
-			                       kit => 'ghost', version => '1.0.0'),
-			'prod.yml' => env_file(env => 'prod', prior => 'qa', n => 3),
-		},
-		message => 'Tune all three', push => 1);
+	# Two commits are due to qa and the second delivery refuses, so the
+	# environment fails with one commit of its own already standing on the
+	# branch, which is the shape the reset exists for.  The walk reads the
+	# same propagation set at the same commit that the delivery reads, so
+	# every error a real repository can raise in a delivery has already
+	# ended the environment during the walk with nothing written.  The one
+	# refusal that is left is the writer failing to read the index, which
+	# refuses with a plain message rather than with the run-ending class, so
+	# the environment survives it and the run walks on.
+	#
+	# qa comes first and prod follows it, and only the shared ops file
+	# changes, so prod is held behind qa's undeployed set and makes no
+	# delivery of its own.  That leaves the two deliveries of the run qa's,
+	# and the index is read twice per delivery, so the third read is the one
+	# that belongs to qa's second commit.
+	my $h = ready_harness(
+		envs    => ['qa', 'prod'],
+		kit     => 'omega-v2.7.0',
+		chained => 1,
+		tracked => ['ops/shared.yml'],
+	);
+	my $first = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nshared: 1\n"},
+		message => 'Bump shared ops', push => 1);
+	commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nshared: 2\n"},
+		message => 'Bump shared ops again', push => 1);
+
+	my $git = fault_git($h);
+	fail_on($git, 'ls_files', 3,
+		message => 'could not read the index of qa/bosh');
 
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 
@@ -110,13 +130,11 @@ subtest 'an environment that will not load is reset and the run continues' => su
 	is(harness_marker($h, $h->slug('qa'), copy => 'a'),
 		harness_marker($h, $h->slug('qa'), copy => 'r'),
 		'qa stands where the session found it, so nothing of it survived');
-	isnt(harness_marker($h, $h->slug('qa'), copy => 'a'), $due,
-		'and it received nothing');
+	isnt(harness_marker($h, $h->slug('qa'), copy => 'a'), $first,
+		'and the delivery it had already taken went with the rest');
 	like($err, qr/qa.*failed/s, 'qa records failed');
-	is(harness_marker($h, $h->slug('lab')), $due,
-		'the environment walked ahead of it kept its delivery');
 	like($err, qr/^\s*prod\b/m, 'the run walked on to prod');
-	isnt($exit, 0, 'the run reports that it was partial');
+	is($exit, Genesis::Exit::TEMPFAIL, 'the run reports that it was partial');
 };
 
 subtest 'every environment in scope ends with an outcome' => sub {

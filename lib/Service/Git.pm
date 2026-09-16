@@ -1270,7 +1270,14 @@ sub _classify_remote_error {
 #   $git->push(@branches);              # push to default remote
 #   $git->push($remote, @branches);     # push to specific remote
 #
-# Returns a hashref of branch => success (1/0).
+# Returns a hashref of branch => success (1/0).  In list context the errors
+# come back beside it, keyed the same way, which is how a caller reporting a
+# refused push names the cause git gave rather than guessing at one.
+#
+# The push does not die on a ref the remote turned down, and it never did, so
+# the reason was thrown away with git's stderr and every caller that wanted to
+# say why had nothing to read.  Each failed ref keeps its own stderr, because
+# one branch's quarrel with the remote is not another's.
 sub push {
 	my ($self, @args) = @_;
 	# If first arg looks like a remote name (not a branch we know), use it
@@ -1279,15 +1286,16 @@ sub push {
 		$remote = shift @args;
 	}
 	$remote ||= $self->default_remote;
-	return {} unless $remote;
+	return wantarray ? ({}, {}) : {} unless $remote;
 
-	my %results;
+	my (%results, %errors);
 	for my $branch (@args) {
-		my $ok = run({ dir => $self->{root}, passfail => 1 },
+		my (undef, $rc, $err) = run({ dir => $self->{root}, stderr => 0 },
 			'git', 'push', $remote, $branch);
-		$results{$branch} = $ok ? 1 : 0;
+		$results{$branch} = $rc ? 0 : 1;
+		$errors{$branch}  = $err // '' if $rc;
 	}
-	return \%results;
+	return wantarray ? (\%results, \%errors) : \%results;
 }
 
 # }}}

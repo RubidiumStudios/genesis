@@ -180,6 +180,29 @@ subtest 'a rejected credential is named rather than the network' => sub {
 		'rather than the wording an unreachable remote earns');
 };
 
+subtest 'the remote\'s own error is what the report names' => sub {
+	plan tests => 4;
+
+	my $h = three_envs();
+	tune_all_three($h);
+
+	# Nothing is armed on git here.  The remote answers every read this run
+	# makes and refuses the one write, because its push URL names a
+	# directory that is not a repository, so what the report carries is the
+	# sentence git itself wrote rather than one composed out of an empty
+	# reason.
+	my $path = broken_pushurl($h);
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	is($exit, Genesis::Exit::TEMPFAIL, 'an unsurvivable failure exits TEMPFAIL');
+	# The message is wrapped to the terminal width before it is printed, so
+	# the sentence is read across the wrap rather than along one line.
+	like($err, qr/could not reach the remote.*does not appear to be a git repository/s,
+		'the unreachable wording carries git\'s own error');
+	like($err, qr/\Q$path\E/, 'which names the path git could not read');
+};
+
 subtest 'a push that lands nothing ends the run the same way' => sub {
 	plan tests => 5;
 

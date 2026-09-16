@@ -44,6 +44,7 @@ was not attempted.
 =head2 one_line
 
     my $reason = Genesis::CI::RunFailure::one_line($@);
+    my $reason = Genesis::CI::RunFailure::one_line($@, width => 80);
 
 The first substantive line of whatever a failure carried.
 
@@ -57,9 +58,15 @@ files is how the two came to strip different things.
 Colour escapes, the C<[FATAL]> marker, the sentence naming the environment
 that could not be loaded, and the closing instruction to fix the errors above
 are all taken off, bullet prefixes are dropped, and Perl's own trace frames
-are skipped.  Nothing is trimmed to a width, because the caller wraps its own
-output and a reason cut at a column loses the end of the sentence that names
-the file.
+are skipped.  A caller that names no width is given the sentence whole,
+because a caller printing a line of its own wraps that line itself and a
+reason cut at a column loses the end of the sentence that names the file.
+
+A caller printing into a column says so through C<width>, and the reason comes
+back cut there with C<...> marking the cut.  The one caller with a width to
+give is C<genesis pipeline-status>, whose reason sits at the end of a fixed
+table: a long one wraps the table apart and the wrapped half reads as a row of
+its own.
 
 B<Parameters:>
 
@@ -70,10 +77,17 @@ B<Parameters:>
 Whatever was raised.  It is read as a string, so an object that stringifies
 is read through that.
 
+=item C<width>
+
+The column count the reason has to fit, optional.  A reason longer than it
+comes back cut at that many characters with C<...> after it, and a reason that
+fits, or a call that names no width, comes back whole.
+
 =back
 
 B<Returns:> The first line that holds anything but whitespace, trimmed at
-both ends, or C<unknown reason> where there is no such line.
+both ends and cut to C<width> where one was given, or C<unknown reason> where
+there is no such line.
 
 B<Errors:> None.
 
@@ -82,8 +96,49 @@ B<Examples:>
   Genesis::CI::RunFailure::one_line("fatal: pathspec 'qa.yml'\n  at Git.pm\n");
   # returns "fatal: pathspec 'qa.yml'"
 
+  Genesis::CI::RunFailure::one_line($long_reason, width => 80);
+  # returns the first 80 characters of it, with '...' marking the cut
+
   Genesis::CI::RunFailure::one_line('');
   # returns 'unknown reason'
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _fit
+
+    my $shown = _fit($line, $width);
+
+One line cut to a width, with C<...> marking the cut.  A width that is
+undefined or not positive, and a line already short enough, both come back
+unchanged.  The mark is what tells a reader that the sentence goes on, so a
+trim that ended at the width and said nothing would have them act on half a
+path.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$line>
+
+The line to fit, already stripped and trimmed.
+
+=item C<$width>
+
+The column count to fit it in, or undefined for no trim at all.
+
+=back
+
+B<Returns:> The line, whole or cut.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _fit('a short reason', 80);
+  # returns 'a short reason'
+
+  _fit('x' x 100, 80);
+  # returns 80 x's followed by '...'
 
 =head1 METHODS
 
