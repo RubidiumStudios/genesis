@@ -101,8 +101,7 @@ B<Examples:>
     # A region under gcs comes back as one error naming the key.
     my @errors = Genesis::CI::Shuttle::GCS->validate_config(
         $config, 'pipeline.shuttle', 'backend');
-    # ('pipeline.shuttle.region: unknown configuration key: expected one
-    #   of auth, bucket, image, image_tag')
+    # ('pipeline.shuttle.region: unknown configuration key: ...')
 
 =head1 SEE ALSO
 

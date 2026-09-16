@@ -1,8 +1,9 @@
 #!perl
-# Proves that the shuttle block is declared on its backend: each backend
-# admits the keys it reads and refuses the keys it does not, so a GCS
-# configuration cannot carry a region, and the keys the compiler actually
-# reads are the keys the fragment declares.
+# Proves that the shuttle block is declared on its backend.  Each backend
+# admits the keys it declares and refuses the rest, so a GCS configuration
+# cannot carry a region.  The credentials the compiler reads out of the
+# block are left exactly where they are, because how one vault reference
+# becomes two S3 keys or one GCS key is the emitter rewrite's question.
 use strict;
 use warnings;
 use utf8;

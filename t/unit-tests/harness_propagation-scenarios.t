@@ -279,6 +279,42 @@ subtest 'the automation blocks answer in both forms' => sub {
 		'and a named block can be left out, for a row about what is missing');
 };
 
+subtest 'the shuttle shape writes the backend block a row hands it' => sub {
+	plan tests => 3;
+
+	# The part of an automated block that does not change between the two
+	# rows below, written once so each row says only what its backend
+	# changes.
+	my @preamble = ('pipeline:', '  enabled: true',
+		'  source_control:',
+		'    repository: genesis/bosh-deployments',
+		'    auth:', '      type: ssh', '      vault: secret/ci/git',
+		'    identity:', '      name: Genesis CI',
+		'      email: ci@genesis.example.com',
+		'  provider:', '    type: concourse', '    target: ci');
+	my @rest = ('  vault:', '    url: https://vault.example.com',
+		'  locker:', '    url: https://locker.example.com');
+
+	is_deeply([split(/\n/, shuttle('gcs', 'bucket: sig'))],
+		[@preamble, '  shuttle:', '    backend: gcs', '    bucket: sig',
+		 @rest],
+		'the backend and the given lines sit under the shuttle key');
+
+	is_deeply([split(/\n/, shuttle('s3', 'bucket: sig', 'region: us-east-1',
+		'endpoint: https://minio.internal'))],
+		[@preamble, '  shuttle:', '    backend: s3', '    bucket: sig',
+		 '    region: us-east-1', '    endpoint: https://minio.internal',
+		 @rest],
+		'and every line a row hands over keeps the order it was given in');
+
+	# The one block this builder leaves out of the three is the shuttle,
+	# which is the whole reason it exists, so a row's own block is the only
+	# one the answer carries.
+	is(scalar(grep {$_ eq '  shuttle:'}
+			split(/\n/, shuttle('gcs', 'bucket: sig'))),
+		1, 'the defaulted shuttle is left out, so only the written one is there');
+};
+
 subtest 'the automated shape carries what an automation requires' => sub {
 	plan tests => 6;
 
