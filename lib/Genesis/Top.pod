@@ -2498,9 +2498,18 @@ every deployment's request queue and its C<_ran> event, and it is required
 wherever an automation has to do the work unattended, which is again what
 L</_automated_provider_configured> decides. Its C<backend> is C<s3> or C<gcs>
 and never a directory, because a directory on one worker cannot trigger
-across pipelines, and its C<bucket> is required beside it. The C<region>,
-C<endpoint>, and C<auth> keys are optional, and the resource C<image> and
-C<image_tag> carry defaults.
+across pipelines.
+
+The shuttle is declared on that backend rather than flat, so each backend
+declares the keys it reads and a key the other backend uses is refused by
+name. L<Genesis::CI::Shuttle::S3> declares C<bucket>, which is required,
+C<region>, C<endpoint>, and C<auth>, and the resource C<image> and
+C<image_tag> with their defaults. L<Genesis::CI::Shuttle::GCS> declares
+C<bucket>, C<auth>, C<image>, and C<image_tag>, and neither a region nor an
+endpoint, because the GCS resource reads neither. A shuttle block written
+with no backend at all is refused as an unknown backend naming the two an
+operator may write, since there is no sensible default between two object
+stores and the map is what the value is now checked against.
 
 C<vault> is the vault a pipeline task writes exodus through. Its C<url> is
 required, and C<namespace>, C<auth>, and C<options> are optional. It is

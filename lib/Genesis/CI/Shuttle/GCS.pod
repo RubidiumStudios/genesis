@@ -1,0 +1,49 @@
+=head1 NAME
+
+Genesis::CI::Shuttle::GCS - the keys a GCS shuttle block reads
+
+=head1 SYNOPSIS
+
+    my $declared = Genesis::CI::Shuttle::GCS->options_schema;
+
+    # Selected by the configuration, not constructed:
+    #   pipeline:
+    #     shuttle:
+    #       backend: gcs
+    #       bucket:  genesis-signals
+    #       auth:    secret/ci/gcs
+
+=head1 DESCRIPTION
+
+One of the two backends L<Genesis::CI::Shuttle> dispatches to, selected by
+C<backend: gcs> under C<pipeline.shuttle>. It declares the keys the GCS
+shuttle resource reads and inherits its validation from the base, having no
+rule a declaration cannot state.
+
+There is no region here and no endpoint, because the GCS resource takes
+neither. That is the whole of what D105 asked for on this block: while the
+block was flat, a GCS configuration could carry a region that nothing would
+ever read, and it was accepted. It is now refused by name.
+
+C<auth> is the vault reference to this backend's credentials, the same key
+S3 declares and reads differently. How one reference becomes the JSON key
+the emitted resource takes is the emitter's question, filed as FWT-1153,
+and not this file's.
+
+=head1 CLASS METHODS
+
+=head2 options_schema()
+
+    my $declared = Genesis::CI::Shuttle::GCS->options_schema;
+
+The four keys a GCS shuttle block may carry: C<bucket>, which is required,
+C<auth>, and C<image> and C<image_tag>, which default to the community
+shuttle resource at C<latest>.
+
+B<Returns:> a hash reference of key name to schema entry.
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Shuttle>, L<Genesis::CI::Shuttle::S3>
+
+=cut

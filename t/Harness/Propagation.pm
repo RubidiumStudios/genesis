@@ -57,6 +57,7 @@ our @EXPORT = qw/
 	gh_protection gh_unreachable gh_reachable gh_no_token gh_calls
 
 	automation_blocks automation_block_lines load_with automated_config
+	shuttle
 
 	ready_envs ready_harness seeded_harness staged due_harness gated_harness
 	held_harness held_prod tracked_harness two_env_harness inherited_harness
@@ -3697,7 +3698,43 @@ sub load_with {
 # wants a target or a team on the provider says so in a word.
 sub automated_config {
 	my ($type, @lines) = @_;
-	return join("\n", 'pipeline:', '  enabled: true',
+	return join("\n", _automation_preamble($type, @lines),
+		automation_block_lines());
+}
+
+# }}}
+# shuttle - an automated pipeline whose shuttle block a row writes {{{
+#
+# automated_config renders one fixed shuttle for every caller, and a row that
+# proves what a backend admits has to write that block itself.  So this is
+# automated_config with one of its three automation blocks written out
+# instead of defaulted: the backend is named, the given lines go under
+# pipeline.shuttle beside it, and the vault and the locker an automation
+# requires are still rendered from the one hash they come from.
+#
+# The provider is concourse because the shuttle is only required where a
+# provider is automated, and a row about the shuttle is not a row about
+# which automation is in force.  Its target comes with it, that being a key
+# Concourse requires of its own block, so a row about the shuttle is not
+# refused for something the provider above it is missing.
+sub shuttle {
+	my ($backend, @lines) = @_;
+	return join("\n", _automation_preamble('concourse', 'target: ci'),
+		'  shuttle:', "    backend: $backend",
+		(map {"    $_"} @lines),
+		automation_block_lines(without => ['shuttle']));
+}
+
+# }}}
+# _automation_preamble - the part of an automated block before the three {{{
+#
+# The enabled flag, the source control, and the provider, which both callers
+# above want and neither wants to spell out twice.  Kept private, because a
+# configuration with no shuttle, no vault, and no locker is not a fixture any
+# row should be reaching for.
+sub _automation_preamble {
+	my ($type, @lines) = @_;
+	return ('pipeline:', '  enabled: true',
 		'  source_control:',
 		'    repository: genesis/bosh-deployments',
 		'    auth:',
@@ -3707,8 +3744,7 @@ sub automated_config {
 		'      name: Genesis CI',
 		'      email: ci@genesis.example.com',
 		'  provider:', "    type: $type",
-		(map {"    $_"} @lines),
-		automation_block_lines());
+		(map {"    $_"} @lines));
 }
 
 # }}}

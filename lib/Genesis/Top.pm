@@ -2111,22 +2111,27 @@ sub _pipeline_config_schema {
 				}
 			},
 
-			# D23: one backend for every environment's request queue and
-			# _ran event, and never a directory, because a directory on one
-			# worker cannot trigger across pipelines.
+			# D23 fixes the backend and refuses a directory, and D105 makes
+			# the block say that its backend decides its shape, so a GCS
+			# configuration can no longer carry a region that nothing will
+			# ever read.
+			#
+			# There is no discriminator_default, because the block has never
+			# had one: the backend is required today and there is no sensible
+			# default between two object stores.  A block written with no
+			# backend at all is refused as an unknown value naming the two an
+			# operator may write, rather than as a missing required key.
 			shuttle => {
-				type        => 'hash',
-				required    => \&_automated_provider_configured,
-				description => "The object store behind every deployment's queue and event",
-				schema => {
-					backend   => {type => 'enum', values => [qw/s3 gcs/], required => 1, description => 'Which object store, and never a directory'},
-					bucket    => {type => 'string', required => 1, description => 'The bucket the resources live in'},
-					region    => {type => 'string', description => 'The bucket region'},
-					endpoint  => {type => 'string', description => 'A non-default endpoint'},
-					auth      => {type => 'string', description => 'Vault reference for the credentials'},
-					image     => {type => 'string', default => 'cfcommunity/shuttle-resource', description => 'The resource image'},
-					image_tag => {type => 'string', default => 'latest', description => 'The resource image tag'},
-				}
+				type          => 'custom_struct',
+				discriminator => 'backend',
+				noun          => 'shuttle backend',
+				schema_method => 'options_schema',
+				required      => \&_automated_provider_configured,
+				description   => "The object store behind every deployment's queue and event",
+				modules => {
+					s3  => {class => 'Genesis::CI::Shuttle::S3',  module => 'Genesis/CI/Shuttle/S3.pm'},
+					gcs => {class => 'Genesis::CI::Shuttle::GCS', module => 'Genesis/CI/Shuttle/GCS.pm'},
+				},
 			},
 
 			# D17 and D27: the vault a pipeline task writes exodus through.
