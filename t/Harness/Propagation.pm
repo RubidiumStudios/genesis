@@ -3887,13 +3887,21 @@ sub due_harness {
 
 # gated_harness lays four control commits, of which the third carries the
 # Genesis-Stage trailer, and answers in the same two shapes due_harness does.
+#
+# Each of the four writes the first environment's own file, because a commit
+# whose content lies in no environment's propagation set routes nowhere and
+# the walk skips it, and every row that stands on this shape asks the walk to
+# route all four.  A row that wants otherwise passes files, which is an
+# arrayref of one per-commit hashref in the shape commit_on_control takes.
 sub gated_harness {
 	my (%opts) = @_;
 	my $h = ready_harness(%opts, envs => $opts{envs} // ['qa']);
+	my $env = ($opts{envs} // ['qa'])->[0];
 	my @shas;
 	for my $n (1 .. 4) {
 		push @shas, $h->commit_on_control(
-			files    => {"change-$n.yml" => "---\nn: $n\n"},
+			files    => $opts{files} ? $opts{files}[$n - 1]
+			                        : {"$env.yml" => _env_body($env, $n)},
 			message  => "A change on control, $n",
 			($n == 3 ? (trailers => {'Genesis-Stage' => $opts{stage} // 'prod'}) : ()),
 			push     => 1,
@@ -4145,16 +4153,34 @@ sub chain {
 	} @envs;
 }
 
+# _due lays a run of undelivered control commits, and writes the first
+# environment's own file on each of them for the reason gated_harness does.
+# A caller that wants other content passes files, one hashref per commit.
 sub _due {
 	my ($h, $n, %opts) = @_;
+	my $env = $h->{envs}[0];
 	return map {
 		$h->commit_on_control(
-			files   => {"due-$_.yml" => "---\nn: $_\n"},
+			files   => $opts{files} ? $opts{files}[$_ - 1]
+			                       : {"$env.yml" => _env_body($env, $_)},
 			message => "A change due to propagate, $_",
 			push    => 1,
 		)
 	} 1 .. $n;
 }
+
+# _env_body - the environment file the commit-laying shapes write {{{
+#
+# It stays a loadable environment, because the run that walks these commits
+# loads the environment off control's tip, and it carries a counter, because
+# a commit needs a delta to make and two commits writing one body would leave
+# the second with nothing to commit.
+sub _env_body {
+	my ($env, $n) = @_;
+	return "---\nkit: {name: dev}\ngenesis: {env: $env}\nn: $n\n";
+}
+
+# }}}
 
 sub gated {
 	my ($h, %opts) = @_;

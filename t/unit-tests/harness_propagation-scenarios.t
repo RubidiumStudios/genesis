@@ -73,7 +73,7 @@ subtest 'a scenario can be narrowed to some environments' => sub {
 };
 
 subtest 'the two scenarios that carry commits answer in both contexts' => sub {
-	plan tests => 6;
+	plan tests => 8;
 
 	my ($gated, @shas) = gated_harness();
 	is(scalar(@shas), 4, 'gated_harness lays four control commits');
@@ -81,6 +81,12 @@ subtest 'the two scenarios that carry commits answer in both contexts' => sub {
 		'and the third of them carries the gate');
 	is_deeply(trailers_of($gated, $shas[0]), {},
 		'while a commit carrying none reads back empty');
+	# The file each commit writes is the first environment's own, because a
+	# commit whose content is in no environment's propagation set routes
+	# nowhere and every row standing on this shape asks the walk to route all
+	# four of them.
+	like(files_at($gated, $shas[3])->{'qa.yml'}, qr/n: 4/,
+		'and each of them writes the first environment\'s own file');
 
 	my $alone = gated_harness();
 	isa_ok($alone, 'Harness::Propagation',
@@ -88,6 +94,8 @@ subtest 'the two scenarios that carry commits answer in both contexts' => sub {
 
 	my ($due, @due) = due_harness();
 	is(scalar(@due), 2, 'due_harness stands two commits up');
+	like(files_at($due, $due[1])->{'qa.yml'}, qr/n: 2/,
+		'and its commits write that file too');
 	isa_ok(scalar(due_harness()), 'Harness::Propagation',
 		'and answers the harness alone in scalar context');
 };
