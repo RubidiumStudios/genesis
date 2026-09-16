@@ -182,22 +182,27 @@ subtest 'the layout key is offered by the provider that can use it' => sub {
 
 	local @INC = ('t/tmp/lib', @INC);
 
-	# A provider that can emit several files declares the key.  Its class
-	# is reached through the registry, which is how every reader of a
-	# fragment reaches one.
-	my $multi  = provider_with(multi_file_output => 1);
-	my $schema = Genesis::CI::Provider->provider_class($multi)
-		->provider_options_schema;
-	is $schema->{output_layout}{type}, 'enum',
-		'a multi-file provider declares the layout key in its own fragment';
-	is $schema->{output_layout}{default}, 'single',
-		'with the default D67 gives it';
+	# A provider that can emit several files declares the key, so the block
+	# admits what an operator writes there and fills the fragment's default
+	# where nobody wrote anything.  Both reads go through a loaded
+	# configuration, because a read of the class's declaration would only
+	# be reading back the fixture this file wrote a moment ago.
+	my $multi = provider_with(multi_file_output => 1);
+	my $top   = load_with($h, automated_config($multi));
+	is $top->config->get('pipeline.provider.output_layout'), 'single',
+		'the layout key reads back the default D67 gives it';
+	$top = load_with($h, automated_config($multi, 'output_layout: multiple'));
+	is $top->config->get('pipeline.provider.output_layout'), 'multiple',
+		'and reads back what an operator wrote over that default';
 
-	# One that cannot declares nothing, so the key is simply not a key.
-	my $solo = provider_with(multi_file_output => 0);
-	throws_ok {load_with($h, automated_config($solo, 'output_layout: multiple'))}
-		qr/pipeline\.provider\.output_layout: unknown configuration key/,
-		'and a provider that emits one file offers no such key at all';
+	# The refusal a provider that emits one file gives is the ordinary
+	# undeclared-key refusal, which the Concourse row in
+	# t/unit-tests/genesis_ci_compiler-override_file.t states against a
+	# real provider.  What is left to say here is that no gate stands
+	# between the capability and the key any more.
+	ok !exists Genesis::CI::Compiler::PipelineProvider
+			->capability_gates->{multi_file_output},
+		"the layout key is nobody's gate any more";
 };
 
 subtest 'the gated key is read out of the merged hierarchy' => sub {

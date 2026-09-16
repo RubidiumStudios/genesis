@@ -281,7 +281,7 @@ sub capabilities {
 # the provider class, and the two ways to get it wrong both go unnoticed
 # otherwise.  A misspelled name reads as false and refuses the key it
 # gates as though somebody had meant it to, and a name left out loses its
-# ability with nothing said at all, since two of the six gate no key.
+# ability with nothing said at all, since three of the six gate no key.
 sub declared_capabilities {
 	my ($class, $provider) = @_;
 
