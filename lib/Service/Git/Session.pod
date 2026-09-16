@@ -130,13 +130,15 @@ The order matters: every refusal above happens before the session writes
 anything at all, so a command that is going to be turned away is turned away
 while the repository is still exactly as the operator left it.
 
-It then stands the process on the repository root for the length of the
-session, where the directory it was started in lies below that root. A switch
-to another branch removes whatever that branch does not carry, and a process
-left standing in a directory that is gone resolves every later relative path
-against nothing. The operator's own shell is unaffected by a child's change
-of directory, and C<finish> and C<abort> put the process back in the recorded
-directory whenever it is still there.
+It then stands the process on the repository root, where the directory it was
+started in lies below that root. A switch to another branch removes whatever
+that branch does not carry, and a process left standing in a directory that is
+gone resolves every later relative path against nothing. C<switch> puts the
+process back in the recorded directory whenever the checkout kept it, and
+leaves it on the root whenever the checkout took it away. The operator's own
+shell is unaffected by a child's change of directory, and C<finish> and
+C<abort> put the process back in the recorded directory whenever it is still
+there.
 
 What an earlier session recorded is cleared here rather than at C<finish>,
 which is the target it stood on, the tips it switched to, the branches it
@@ -202,9 +204,13 @@ B<Examples:>
   $session->switch($record->{git}{commit}, record => $env->exodus_base);
 
 Takes a branch name or a commit. It changes to the repository root, takes the
-switch lock, checks the target out, and returns to the original directory when
-the checkout kept it. The run happens from the root because the branch being
-checked out may not carry the directory we are standing in.
+switch lock, checks the target out, and returns to the directory C<begin>
+recorded when the checkout kept it, staying on the root when it did not. The
+recorded directory is the one it comes back to rather than whichever one the
+process happens to be standing in, because C<begin> has already stood the
+session on the root and reading the current one here would hand that root back
+every time. The run happens from the root because the branch being checked out
+may not carry the directory we are standing in.
 
 A branch is checked out as a branch. A commit is checked out detached, and
 C<finish> restores the branch C<begin> recorded either way, so a detached HEAD

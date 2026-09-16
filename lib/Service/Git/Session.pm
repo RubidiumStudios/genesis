@@ -188,8 +188,8 @@ sub begin {
 # switch - change to a branch or stand on a commit {{{
 #
 # Runs from the repository root, because the branch being checked out may
-# not carry the directory we are standing in, and returns to that directory
-# only if the checkout kept it.
+# not carry the directory we are standing in, and returns to the directory
+# begin recorded only if the checkout kept it.
 #
 # The lock is taken here and nowhere else, because D46 has it guard
 # switching alone: a command that never switches never touches it, so a kit
@@ -220,7 +220,19 @@ sub switch {
 	my $is_branch = $self->_is_branch($target);
 	$self->_verify_reachable($target, $opts{record}) unless $is_branch;
 
+	# The lock is handed the directory this switch was called in, because a
+	# refusal is an exit and I1 has an exit stand where its call came from.
 	my $cwd = getcwd();
+
+	# What we owe the caller afterwards is the directory begin recorded, and
+	# not the one we are standing in.  begin stands the session on the root
+	# for the length of it, so reading the current directory here would hand
+	# every switch that root back and the caller would never see their own
+	# directory again.  begin records it before it marks the session active,
+	# so a switch that got past the check above always has one, and finish
+	# and abort come back to that same directory through _restore.
+	my $restore = $self->{origin}{cwd};
+
 	chdir($git->root)
 		or bail("Unable to enter git root %s: %s", $git->root, $!);
 
@@ -228,7 +240,11 @@ sub switch {
 	$self->_through_the_door(sub {
 		$is_branch ? $git->checkout($target) : $git->checkout_detached($target);
 	});
-	chdir($cwd) if -d $cwd;
+
+	# Only where the checkout kept it.  A branch that does not carry that
+	# directory takes it away mid-checkout, and standing on the root beats
+	# standing in a directory that is gone.
+	chdir($restore) if -d $restore;
 
 	$self->{on} = $target;
 	$self->{switched}{$target} //= eval { $git->sha($target) } if $is_branch;
