@@ -514,11 +514,14 @@ branch the run committed to goes back to where the remote has it, and the
 refusal names the step that repairs control.  The status is the data one
 because what stopped the run is the state of the repository the run reads.
 
-Exits C<Genesis::Exit/TEMPFAIL> where no ref of the push landed, which is
-D82's unsurvivable failure.  The push set is the deployment branches alone,
-so not one ref landing is the remote being gone rather than any branch's own
-quarrel with it, and control is the input the run re-checks rather than a ref
-it publishes.  The report names the cause the remote's own error gives, which
+Exits C<Genesis::Exit/TEMPFAIL> where the remote answered about no ref at
+all, which is D82's unsurvivable failure.  A remote that turned a ref down
+named that ref in its own porcelain line, and a remote nobody could reach
+named nothing, so the question is whether the remote answered rather than
+whether any ref landed.  The push set is the deployment branches alone, and a
+run with one environment in it has one ref to land, so a refusal of that one
+ref is that branch's own quarrel rather than the remote being gone.  The
+report names the cause the remote's own error gives, which
 is a refused credential, a server error, or a remote nothing could reach, each
 with its own corrective step.  The same status is returned by a run that
 finished with any environment C<failed>, C<not attempted>, or C<publish
