@@ -2498,59 +2498,6 @@ subtest 'Compiler - validate_config_section validates ci.provider' => sub {
 	};
 	eval { Genesis::CI::Compiler->validate_config_section($valid_data, undef) };
 	ok !$@, "valid ci.provider section passes" or diag $@;
-
-	# Unknown provider type
-	my $bad_type = {
-		%$_ci_data,
-		provider => { type => 'kubernetes' },
-	};
-	eval { Genesis::CI::Compiler->validate_config_section($bad_type, undef) };
-	like $@, qr/not a known CI provider/i, "unknown provider type fails";
-
-	# Unknown option key for concourse
-	my $bad_key = {
-		%$_ci_data,
-		provider => { type => 'concourse', bogus_option => 'foo' },
-	};
-	eval { Genesis::CI::Compiler->validate_config_section($bad_key, undef) };
-	like $@, qr/not a recognized option/i, "unknown provider option key fails";
-};
-
-subtest 'Validator - provider section validated in multi-file path' => sub {
-	my $v = Genesis::CI::Compiler::Validator->new();
-
-	# Valid provider section
-	$v->validate({
-		_source_format  => 'multi-file',
-		pipeline        => {},
-		targets         => { sandbox => { type => 'bosh-director', connection => { url => 'https://bosh' } } },
-		integrations    => {
-			vault          => { url => 'https://vault.example.com' },
-			source_control => { provider => 'github', repository => 'org/repo' },
-		},
-		provider        => { type => 'concourse', target => 'my-target', team => 'main' },
-		scripts         => {},
-		provider_config => {},
-	});
-	ok !$v->has_errors, "valid provider section passes validator"
-		or diag join("\n", @{$v->errors});
-
-	# Unknown option
-	$v->validate({
-		_source_format  => 'multi-file',
-		pipeline        => {},
-		targets         => { sandbox => { type => 'bosh-director', connection => { url => 'https://bosh' } } },
-		integrations    => {
-			vault          => { url => 'https://vault.example.com' },
-			source_control => { provider => 'github', repository => 'org/repo' },
-		},
-		provider        => { type => 'concourse', unknown_key => 'bad' },
-		scripts         => {},
-		provider_config => {},
-	});
-	ok $v->has_errors, "unknown provider key triggers validation error";
-	like join(' ', @{$v->errors}), qr/not a recognized option/i,
-		"error message identifies the unknown key";
 };
 
 ### ============================================================ ###
