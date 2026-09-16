@@ -65,6 +65,75 @@ sub fixture {
 	});
 }
 
+# The same repository with prod's file moved under a directory after it was
+# added, which is what a repository that restructures its deployment root
+# leaves behind.  The move carries the content across unchanged, so git's
+# similarity heuristic has the easiest case there is to see.
+sub moved_fixture {
+	my $h = make_harness(envs => ['lab'], root => '', kit => 'omega-v2.7.0');
+	my $git  = Service::Git->new($h->a);
+	my $body = env_file(env => 'prod', prior => 'lab');
+
+	my $add = commit_on_control($h,
+		files   => {'prod.yml' => $body},
+		message => 'Add prod', push => 1);
+	my $moved = commit_on_control($h,
+		files   => {'prod.yml' => undef, 'deployments/prod.yml' => $body},
+		message => 'Move the deployments under a root', push => 1);
+	my $tuned = commit_on_control($h,
+		files   => {'deployments/prod.yml' =>
+			env_file(env => 'prod', prior => 'lab', leaf => 2)},
+		message => 'Tune prod', push => 1);
+	refresh($h, 'a');
+
+	return ($h, $git, {add => $add, moved => $moved, tuned => $tuned,
+		control => $git->sha($h->control)});
+}
+
+# A repository that retired an environment and brought it back, which is the
+# shape the oldest-add rule exists for.
+sub readd_fixture {
+	my $h = make_harness(envs => ['lab'], root => '', kit => 'omega-v2.7.0');
+	my $git  = Service::Git->new($h->a);
+	my $body = env_file(env => 'prod', prior => 'lab');
+
+	my $first = commit_on_control($h,
+		files   => {'prod.yml' => $body},
+		message => 'Add prod', push => 1);
+	commit_on_control($h,
+		files   => {'prod.yml' => undef},
+		message => 'Retire prod', push => 1);
+	my $again = commit_on_control($h,
+		files   => {'prod.yml' => $body},
+		message => 'Bring prod back', push => 1);
+	refresh($h, 'a');
+
+	return ($h, $git, {first => $first, again => $again,
+		control => $git->sha($h->control)});
+}
+
+# The unseeded shape again, this time under a deployment root, so a row can
+# hand walk_base the prefixed path plan hands it and read the same answer.
+sub rooted_fixture {
+	my $h = make_harness(envs => ['lab', 'qa'], root => 'deployments',
+		kit => 'omega-v2.7.0');
+	my $git = Service::Git->new($h->a);
+
+	my $tune = commit_on_control($h,
+		files   => {'deployments/lab.yml' =>
+			slurp($h->a . '/deployments/lab.yml') . "# tuned\n"},
+		message => 'Tune lab', push => 1);
+	my $e = commit_on_control($h,
+		files   => {'deployments/prod.yml' =>
+			env_file(env => 'prod', prior => 'qa')},
+		message => 'Add prod', push => 1);
+	init_branch($h, 'prod');
+	refresh($h, 'a');
+
+	return ($h, $git, {tune => $tune, e => $e,
+		control => $git->sha($h->control)});
+}
+
 subtest 'control names the commit that introduced an environment' => sub {
 	plan tests => 3;
 
@@ -76,6 +145,31 @@ subtest 'control names the commit that introduced an environment' => sub {
 		$at->{seed}, 'an environment seeded with the repository names its root');
 	is(Genesis::CI::Walk::introducing_commit($git, $at->{control}, 'nope.yml'),
 		undef, 'a file control never carried has no introducing commit');
+};
+
+subtest 'a moved environment file still names its original add' => sub {
+	plan tests => 2;
+
+	my ($h, $git, $at) = moved_fixture();
+
+	is(Genesis::CI::Walk::introducing_commit($git, $at->{control},
+		'deployments/prod.yml'), $at->{add},
+		'the introduction is the first add and not the restructure');
+	isnt(Genesis::CI::Walk::introducing_commit($git, $at->{control},
+		'deployments/prod.yml'), $at->{moved},
+		'so no routing commit between the two falls outside the walk');
+};
+
+subtest 'a file added, removed, and added again names the first add' => sub {
+	plan tests => 2;
+
+	my ($h, $git, $at) = readd_fixture();
+
+	is(Genesis::CI::Walk::introducing_commit($git, $at->{control}, 'prod.yml'),
+		$at->{first},
+		'the environment belongs to control from the oldest add onward');
+	isnt(Genesis::CI::Walk::introducing_commit($git, $at->{control}, 'prod.yml'),
+		$at->{again}, 'and not from the one that brought it back');
 };
 
 subtest 'a branch with a marker is walked from that marker' => sub {
@@ -125,6 +219,25 @@ subtest 'an environment introduced at the root is walked from nothing' => sub {
 	);
 	is($base, undef, 'a root commit has no parent to stand the walk on');
 	is($state, 'unseeded', 'and the branch still reads as unseeded');
+};
+
+subtest 'a deployment root changes no answer the base rests on' => sub {
+	plan tests => 2;
+
+	my ($h, $git, $at) = rooted_fixture();
+
+	# plan hands walk_base the path prefixed with the deployment root,
+	# because the environment names its file relative to that root and every
+	# reading here is made through the git root.
+	my ($base, $state) = Genesis::CI::Walk::walk_base(
+		git      => $git,
+		ref      => 'refs/remotes/origin/' . $h->slug('prod'),
+		control  => $at->{control},
+		env_file => 'deployments/prod.yml',
+	);
+	is($base, $at->{tune},
+		'the base is the commit before the one that added prod, as bare');
+	is($state, 'unseeded', 'and the branch reads as unseeded');
 };
 
 done_testing;

@@ -36,7 +36,7 @@ sub env_file {
 }
 
 subtest 'the walk starts at E and the first delivery deletes init' => sub {
-	# Five rather than four, because run_genesis asserts the restoration of
+	# Six rather than five, because run_genesis asserts the restoration of
 	# the working state in its own words and that assertion is counted here.
 	plan tests => 6;
 
@@ -83,6 +83,48 @@ subtest 'the walk starts at E and the first delivery deletes init' => sub {
 	ok(!(grep {$_ eq 'init'} @files), 'the first delivery deleted init');
 	is(harness_marker($h, $h->slug('qa')), $later,
 		'the branch ends at the newest due commit');
+};
+
+subtest 'the walk starts at E and reaches back no further' => sub {
+	# Four rather than three, for the restoration assertion the run makes.
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['lab'], kit => 'omega-v2.7.0');
+	my $seed = $h->git('a')->sha($h->control);
+	fixture_applied($h, control => $seed);
+	fixture_pipeline_record($h, 'lab');
+	init_branch($h, 'lab');
+	deliver($h, 'lab', control => $seed);
+
+	# A gated commit on the kit source, which is a file every environment's
+	# propagation set carries, laid before qa existed on control at all.  The
+	# gate is what makes the base observable: a commit from before E routes to
+	# qa nowhere, since qa's own file is not in that commit's tree, but a gate
+	# read over qa's range holds the very commit that introduced qa.  So a
+	# walk that fell back to the whole of control delivers qa nothing.
+	commit_on_control($h,
+		files    => {'dev/notes.txt' => "a note beside the kit\n"},
+		message  => 'Note something in the kit',
+		trailers => {'Genesis-Stage' => 'schema change'},
+		push     => 1);
+
+	my $e = commit_on_control($h,
+		files   => {'qa.yml' => env_file(env => 'qa', prior => 'lab')},
+		message => 'Add qa', push => 1);
+	fixture_pipeline_record($h, 'qa');
+	init_branch($h, 'qa');
+
+	# lab is certified at the newest commit, so nothing it has left
+	# undeployed holds qa and qa's own commit is free to travel.
+	certify($h, 'lab', control_commit => $e);
+	refresh($h, 'a');
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+	is($exit, 0, 'the run succeeded');
+	is(harness_marker($h, $h->slug('qa')), $e,
+		'the commit that introduced qa reached its branch');
+	unlike($err, qr/gate: schema change/,
+		'and no gate from before qa existed was read over its range');
 };
 
 subtest 'E is holdable, and its environment holds its own descendants' => sub {

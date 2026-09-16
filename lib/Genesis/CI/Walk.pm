@@ -50,13 +50,27 @@ use constant HOLD_REASONS => qw/
 # caller reads that as a branch to walk from the whole of control rather than
 # as a failure, because the same answer comes back for an environment whose
 # file was introduced on the very first commit.
+#
+# --follow walks the path back through the renames it has been through, so a
+# repository that has moved its deployment root answers the original add
+# rather than the restructure, and no routing commit between the two falls
+# outside the walk.  Rename detection is git's similarity heuristic rather
+# than a recorded fact, and a move that changed nothing about the file's
+# content always clears it, which is what a restructure is.
+#
+# -M100% is what keeps the heuristic to that.  git turns copy detection on
+# inside --follow and will not let a caller turn it off, and environment
+# files are near enough identical to one another that the default threshold
+# reads a brand new one as a copy of the environment beside it and answers
+# the commit that added that one instead.  Requiring an exact match leaves
+# only the move this is here for.
 sub introducing_commit {
 	my ($git, $control, $env_file) = @_;
 
 	my ($out, $rc) = run(
 		{dir => $git->root, stderr => 0},
-		'git', 'log', '--first-parent', '--diff-filter=A', '--format=%H',
-		$control, '--', $env_file
+		'git', 'log', '--follow', '-M100%', '--first-parent',
+		'--diff-filter=A', '--format=%H', $control, '--', $env_file
 	);
 	return undef if $rc || !defined($out) || !length($out);
 
@@ -101,7 +115,12 @@ sub walk_base {
 		'git', 'rev-parse', "$e^"
 	);
 	$parent = '' unless defined $parent;
-	$parent =~ s/\s+//g;
+	chomp $parent;
+	# One line and no more.  Stripping every space out of whatever came back
+	# would turn a surprising answer, such as the several parents of a merge
+	# git was never meant to be asked about here, into one run-on string that
+	# reads as a sha and resolves to nothing.
+	$parent = '' if $parent =~ /\n/;
 	return ((!$rc && length $parent) ? $parent : undef, 'unseeded');
 }
 
@@ -112,7 +131,8 @@ sub walk_base {
 # --reverse gives us the oldest due commit first.  An undefined base means
 # the whole of control, which is what walk_base answers for a branch with no
 # marker whose environment was introduced on control's own first commit,
-# since there is no commit before that one to start after.
+# since there is no commit before that one to start after, and for one whose
+# environment control has never carried a file for at all.
 sub control_commits {
 	my ($git, $control, $base) = @_;
 
@@ -827,6 +847,16 @@ sub plan {
 		} : undef;
 		$env_record->{deployed} = $deployed;
 
+		# D60: an environment whose record carries no certified commit is one
+		# the pipeline was never applied to, and nothing may be delivered to
+		# it until genesis pipeline-apply has run.  It is held rather than
+		# walked, so nothing stands pending for it, and it holds everything
+		# below it through the same reading its descendants take.  It stands
+		# ahead of the base, because reading a base costs a walk of control
+		# over the environment's own file and an environment this run will
+		# not walk has no use for the answer.
+		next if $certified->{state} eq 'never-applied';
+
 		# Under D2 the base is the local ref, which the pre-flight has just
 		# settled, and under a dry run it is the ref a real run would have
 		# moved that branch to.  What the walk starts from is the marker that
@@ -848,13 +878,6 @@ sub plan {
 		my $marker = $seeding eq 'seeded' ? $base : undef;
 		$env_record->{merged}  = $marker;
 		$env_record->{reading} = _reading($marker, $deployed);
-
-		# D60: an environment whose record carries no certified commit is one
-		# the pipeline was never applied to, and nothing may be delivered to
-		# it until genesis pipeline-apply has run.  It is held rather than
-		# walked, so nothing stands pending for it, and it holds everything
-		# below it through the same reading its descendants take.
-		next if $certified->{state} eq 'never-applied';
 
 		# The one place walk_env's positional question meets the hold
 		# readers.  The ancestors are read once for the environment and the

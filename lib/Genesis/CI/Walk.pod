@@ -80,7 +80,10 @@ not load, or whose vault this run cannot read, is recorded with its reason in
 C<error>, because one unreadable environment is not a reason to stop reading
 the rest.  An environment whose deployment record carries no certified commit
 is one the pipeline was never applied to, so it is held rather than walked
-and nothing stands pending for it.
+and nothing stands pending for it.  Its base is never read, since reading one
+costs a walk of control over that environment's own file and an environment
+this run will not walk has no use for the answer, so its C<merged> stays null
+and its reading stays C<not-propagated>.
 
 Each environment's ancestors are read once and asked of every commit it
 routes, through L</hold_for>, so a commit whose files an ancestor has not yet
@@ -178,6 +181,18 @@ added the file is it.  A file that was added, removed, and added again
 belongs to the environment from the first of the three onward, so the oldest
 add is what comes back rather than the newest.
 
+The path is followed back through the renames it has been through, so a
+repository that has moved its deployment root answers the commit that first
+added the file rather than the restructure that moved it, and no routing
+commit between the two falls outside the walk.  Rename detection is git's
+similarity heuristic rather than a recorded fact, and only an exact match
+counts here, which a move that changed nothing about the file's content
+always is.  The threshold is exact rather than the default because git turns
+copy detection on inside its own rename following and will not let a caller
+turn it off, and environment files resemble one another closely enough that
+a looser threshold reads a brand new one as a copy of the environment beside
+it.
+
 B<Parameters:>
 
 =over 4
@@ -250,8 +265,12 @@ The environment's own file, named relative to the git root.
 =back
 
 B<Returns:> Two values, the commit to walk from and one of C<seeded> or
-C<unseeded>.  The commit is undefined where the branch carries no marker and
-E is control's own first commit, which asks for the whole of control.
+C<unseeded>.  The commit comes back undefined two ways.  One is a branch with
+no marker whose environment was introduced on control's own first commit,
+since there is no commit before that one to stand the walk on.  The other is
+a branch with no marker whose environment control has never carried a file
+for at all, so there is no introducing commit to stand it on either.  The
+caller reads both the same way, as the whole of control.
 
 B<Examples:>
 
