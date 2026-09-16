@@ -57,12 +57,6 @@ use constant HOLD_REASONS => qw/
 # tracking ref here as well would be a second reader of one fact, which is
 # the thing this sub exists to remove.
 #
-# An applied record that is absent is a reading and not a refusal (D94).  The
-# record is legitimately missing until genesis pipeline-apply has run, and
-# D55's rule is about an input the run cannot read rather than about one that
-# is not there yet, so every environment takes the not-propagated reading and
-# the run reports it.
-#
 # The staleness is not read here.  Ruling 14 takes it out, because reading it
 # costs a second read of the applied record and a load of every environment in
 # the pipeline, and nothing the walk decides depends on it.  M17 reads it where
@@ -91,13 +85,19 @@ sub read_durable_state {
 	my $refuse = $args{refuse} || \&bail;
 
 	my $applied = eval {$top->applied_record};
+	# The reason is taken off $@ on the line after the eval, before anything
+	# else runs.  applied_record_path traces through Genesis::Log, whose
+	# formatter evals, so a $@ read from inside the same argument list is
+	# whatever that logging eval left behind and the refusal named the path
+	# with an empty reason beside it.
+	my $failure = $@;
 	$refuse->(
 		{exitcode => UNAVAILABLE},
 		"Could not read the applied record at #C{%s}: %s\n\n".
 		"The run reads which commit the pipeline was applied from before it ".
 		"decides anything, so it will not guess at one.  Nothing was written.",
-		$top->applied_record_path, $@ =~ s/\s+$//r
-	) if $@;
+		$top->applied_record_path, $failure =~ s/\s+$//r
+	) if $failure;
 
 	return {
 		# The pipeline's own label, which is the name the configuration
@@ -141,10 +141,15 @@ sub env_state {
 	return $certified if $certified->{error};
 
 	my $hold = eval {$env->hold_record};
+	# Read off before hold_record_path runs, for the reason
+	# read_durable_state's own guard gives: that reader traces, tracing
+	# evals, and a $@ read inside the argument list is the tracing's rather
+	# than the failure's.
+	my $failure = $@;
 	die sprintf(
 		"Could not read the hold record for %s at %s: %s\n",
-		$env->name, $env->hold_record_path, $@ =~ s/\s+$//r
-	) if $@;
+		$env->name, $env->hold_record_path, $failure =~ s/\s+$//r
+	) if $failure;
 
 	return {%$certified, hold => $hold};
 }

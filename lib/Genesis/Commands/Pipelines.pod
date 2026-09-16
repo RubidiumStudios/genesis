@@ -471,6 +471,15 @@ the commit or a control branch somebody rewrote under it. Whichever of them
 ends the run, nothing is published and every branch the session committed to
 is reset.
 
+Exits C<Genesis::Exit/UNAVAILABLE> where the vault answers an error for the
+applied record, naming the path it could not read.  The record says which
+commit the pipeline was applied from, which is a whole-run input rather than
+one environment's, so a run that could not read it refuses ahead of the walk
+under D55 and writes nothing.  A record that is merely absent is not that,
+and it comes back null with every environment taking the C<not-propagated>
+reading.  The refusal closes the session first, so the operator is back on
+the branch they started from before they read why the run stopped.
+
 Exits C<Genesis::Exit/TEMPFAIL> where no ref of the push landed, which is
 D82's unsurvivable failure.  The report names the cause the remote's own
 error gives, which is a refused credential, a server error, or a remote

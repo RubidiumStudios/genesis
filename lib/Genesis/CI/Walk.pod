@@ -284,6 +284,13 @@ the one the configuration names.
 Optional, default 1.  Whether the remote-tracking refs this run reads were
 brought up to date before it ran.
 
+=item C<refuse>
+
+Optional, defaulting to C<bail>.  How the refusal below is raised.  A caller
+standing inside a session owes the operator their branch back before it says
+why the run stopped, so it hands in a closure that closes the session and then
+bails, and a caller with no session to close leaves it out.
+
 =back
 
 B<Returns:> A hashref carrying C<pipeline>, which is the label the
