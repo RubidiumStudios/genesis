@@ -890,9 +890,15 @@ sub propagate {
 	# naming a commit computed from a tip that has already moved, so the run
 	# refuses rather than publishing it.  Nothing went to the remote and
 	# every branch the run committed to is back where the remote has it, so
-	# the refusal leaves the repository as it found it, and the state that
-	# stopped the run is the repository's own, which is what DATAERR says.
-	$refuse->({exitcode => DATAERR}, '%s', $publish->{refused})
+	# the refusal leaves the repository as it found it.
+	#
+	# D106 puts the status at TEMPFAIL, because a code says whether an
+	# unaided retry fixes the condition.  Nothing the operator wrote is
+	# wrong here.  Another clone moved control while this run was walking,
+	# and the next run refreshes and walks from what is there now, so it
+	# succeeds with nobody doing anything first.  That is the rejected push
+	# this refusal resembles, which is the same event on a different ref.
+	$refuse->({exitcode => TEMPFAIL}, '%s', $publish->{refused})
 		if $publish && $publish->{refused};
 
 	# The walk is over, so the operator goes back on the branch they started
@@ -941,9 +947,13 @@ sub propagate {
 # Zero is the run in which every environment ended published or held with
 # its reason.  TEMPFAIL is a partial run, which the next run repairs, and
 # sysexits defines it as a temporary failure with the user invited to retry.
-# The illegal initial state at DATAERR belongs to the first stage and the
-# declined confirmation at ABORTED to the publish, so neither is decided
-# here.
+#
+# Three exits leave before this sub is reached and none of them is decided
+# here.  The illegal initial state at DATAERR belongs to the first stage,
+# because only a person can clear it.  The declined confirmation at ABORTED
+# belongs to the publish.  So does the pre-publish re-check of control,
+# which D106 puts at TEMPFAIL, the same code for the same reason a partial
+# run earns it, which is that the next run repairs the condition unaided.
 #
 # The whole outcome is matched, under ruling 22, because the record carries
 # the bare enum word in outcome and the qualifier beside it in

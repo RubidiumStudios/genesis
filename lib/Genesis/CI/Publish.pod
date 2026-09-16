@@ -23,7 +23,7 @@ Genesis::CI::Publish - the propagate run's third stage, one push per branch
 
     # A control that moved under the run refuses the whole publish, and the
     # sentence to refuse with comes back for the command to speak.
-    bail({exitcode => DATAERR}, '%s', $publish->{refused})
+    bail({exitcode => TEMPFAIL}, '%s', $publish->{refused})
         if $publish->{refused};
 
 =head1 DESCRIPTION
