@@ -732,6 +732,18 @@ sub propagate {
 			my $qualifier = @pending ? undef
 				: Genesis::CI::Walk::held_qualifier($env_record);
 			info "  #Y{%s}: %s", $env_name, $qualifier if $qualifier;
+
+			# D56: the standing hold's own line, which says whether anything
+			# is waiting behind it and names the one command that clears it.
+			# The two sit under the qualifier rather than inside it, because
+			# together they run past the width of a terminal and a wrapped
+			# hold is one an operator's eye slides off.
+			if (my $detail = Genesis::CI::Walk::hold_detail($env_record)) {
+				info "    #Y{%s}", $detail;
+				info "    Release it with #C{genesis %s pipeline-release}",
+					$env_name;
+			}
+
 			for my $held (@{$env_record->{held}}) {
 				info "    #Yi{control\@%s} %s",
 					substr($held->{control_commit}, 0, 7), $held->{subject};

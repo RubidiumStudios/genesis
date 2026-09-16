@@ -19,7 +19,8 @@ use Genesis::CI::RunFailure;
 
 our @EXPORT_OK = qw/
 	plan changed_set route_commit undeployed_set overlap
-	certified_for hold_for hold_reason held_qualifier
+	certified_for hold_for hold_reason held_qualifier hold_detail
+	apply_hold
 	gate_state released_gates
 	introducing_commit walk_base
 	READINGS HOLD_REASONS
@@ -481,6 +482,12 @@ sub hold_reason {
 	return sprintf('held behind control@%s',
 		substr($held->{behind}, 0, 7)) if $reason eq 'behind-held-commit';
 
+	# D50: the environment's own hold is what holds this commit, and what an
+	# operator has to do about it is the reason somebody wrote on the record,
+	# so the line carries that rather than the word on-hold.
+	return sprintf('held (%s)', $held->{hold_reason})
+		if $reason eq 'on-hold' && defined $held->{hold_reason};
+
 	return sprintf('held (%s)', $reason);
 }
 
@@ -499,6 +506,13 @@ sub held_qualifier {
 	return 'held, awaiting pipeline-apply'
 		if ($certified->{state} // '') eq 'never-applied';
 
+	# D50: a hold is a decision somebody made for a reason the pipeline
+	# cannot see, and only a human clears it, so it outranks whatever the
+	# commits underneath it happen to be waiting for.
+	return sprintf('held, needs clearing (%s)',
+		$record->{hold}{reason} // 'no reason given')
+		if $record->{hold};
+
 	my ($first) = @{$record->{held} || []};
 	return undef unless $first;
 
@@ -509,6 +523,32 @@ sub held_qualifier {
 	return sprintf('held, awaiting deployment (%s at control@%s)',
 		$first->{ancestor} // $record->{env},
 		substr($first->{gate} // $first->{control_commit}, 0, 7));
+}
+
+# }}}
+# hold_detail - what the standing hold is holding, in D56's two wordings {{{
+#
+# D56 makes a hold outrank idempotent, so an environment with one standing
+# never reads as though it were fine, and this is the line that says which of
+# the two situations it is in: nothing is due behind the hold yet, or a
+# known number of commits are.
+#
+# The count is of the commits the hold itself took, and not of everything
+# held, because a commit a gate or an ancestor had already stopped is
+# reported under that reason and counting it here would name it twice and
+# send the operator to the wrong command.
+sub hold_detail {
+	my ($record) = @_;
+
+	return undef unless $record->{hold};
+
+	my $blocked = grep {($_->{reason} // '') eq 'on-hold'}
+		@{$record->{held} || []};
+	return 'nothing is due now, and anything that becomes due stays blocked'
+		unless $blocked;
+
+	return sprintf('%d commit%s %s blocked until this hold is released',
+		$blocked, $blocked == 1 ? '' : 's', $blocked == 1 ? 'is' : 'are');
 }
 
 # }}}
@@ -589,6 +629,38 @@ sub walk_env {
 			carried        => $routed->{carried},
 		};
 	}
+
+	return $record;
+}
+
+# }}}
+# apply_hold - stop delivery for a held environment and say why {{{
+#
+# D50: while the hold stands the run delivers nothing new and opens or
+# updates no pull request, in either mode, but the walk still computes what
+# is due so that --dry-run can show it.  D56: the hold outranks idempotent,
+# because I8 exists so nothing is silently omitted and idempotent reads as
+# though the environment were fine.
+#
+# The pending entries move into the held list rather than being discarded,
+# which is what leaves the preview and the report something to list, and the
+# environment's own reason travels with each of them so that a commit line
+# says what somebody has to clear.  They go on the front of that list,
+# because everything the walk had already held stands after the last commit
+# that was still pending, and a report whose commits are out of control
+# order is one an operator cannot read against the log.
+sub apply_hold {
+	my ($record, $hold) = @_;
+
+	return $record unless $hold;
+
+	$record->{hold} = $hold;
+	unshift @{$record->{held}}, map {{
+		%$_,
+		reason      => 'on-hold',
+		hold_reason => $hold->{reason},
+	}} @{$record->{pending}};
+	$record->{pending} = [];
 
 	return $record;
 }
@@ -835,6 +907,14 @@ sub plan {
 				);
 			},
 		);
+
+		# D50: the hold is a fact about the walk and not about the branch, so
+		# it is applied once the walk has computed what is due, which is what
+		# leaves the preview and the report something to show.  A vault that
+		# refuses the read ends the run rather than answering no hold,
+		# because delivering on a hold nobody could read is the one mistake
+		# the record exists to stop.
+		apply_hold($env_record, $env->hold_record);
 	}
 
 	return $record;

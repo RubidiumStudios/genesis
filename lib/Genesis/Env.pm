@@ -3359,6 +3359,48 @@ sub pipeline_record {
 }
 
 # }}}
+# hold_record - the propagation hold standing against this environment {{{
+#
+# D50 and D53: a per-environment record beside the deployments, carrying a
+# reason, who set it, where, and when, and nothing else.  Undef when the
+# path is absent.  Only the reader lives here: pipeline-hold and
+# pipeline-release write and delete it, and both sit outside the MVP under
+# D59, while the walk has to honour the record from the day it can exist.
+#
+# The read goes through this environment's own vault, for the reason
+# pipeline_record reads through it, since the hold addresses under
+# exodus_base like every other record this module keeps there.  The
+# existence question is asked first, because a vault answers an absent path
+# and an empty one alike and a hold with every field blank is still a hold.
+sub hold_record {
+	my ($self) = @_;
+
+	my $path  = $self->hold_record_path;
+	my $vault = $self->vault or return undef;
+	return undef unless $vault->has($path);
+
+	my $data = $vault->get($path);
+	return undef unless ref($data) eq 'HASH';
+	return {
+		reason   => $data->{reason},
+		user     => $data->{user},
+		hostname => $data->{hostname},
+		at       => $data->{at},
+	};
+}
+
+# }}}
+# hold_record_path - where that record lives {{{
+#
+# Beside the environment's own exodus record, under a hold subpath, for the
+# reason pipeline_record_path sits beside it: a deploy rewrites the record
+# itself and must not be able to clear a hold by doing so.
+sub hold_record_path {
+	my ($self) = @_;
+	return $self->exodus_base . '/hold';
+}
+
+# }}}
 # last_read_dependencies - the dependency set this environment's last deploy read {{{
 #
 # The fact half of the staleness comparison.  Every deploy records the
