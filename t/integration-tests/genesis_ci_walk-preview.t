@@ -32,8 +32,8 @@ subtest 'the withdrawn flags are usage errors' => sub {
 };
 
 subtest 'the preview names each commit, its files, and its verdict' => sub {
-	# Nine rows, and one more for the run's own restoration assertion.
-	plan tests => 10;
+	# Eleven rows, and one more for the run's own restoration assertion.
+	plan tests => 12;
 
 	my $h = ready_harness(envs => ['lab', 'qa'], kit => 'omega-v2.7.0',
 		chained => 1, tracked => ['ops/shared.yml']);
@@ -69,6 +69,10 @@ subtest 'the preview names each commit, its files, and its verdict' => sub {
 		'the first commit reads would deliver');
 	like($err, qr/\Q@{[substr($first, 0, 7)]}\E[\s\S]*?\Qqa.yml\E/,
 		'the files that would land are named');
+	unlike($err, qr{^\s+M dev/kit\.yml$}m,
+		'and not a file the fast-forward this preview assumes would bring');
+	unlike($err, qr{^\s+D init$}m,
+		'nor one that fast-forward would take off');
 	like($err, qr/\Q@{[substr($second, 0, 7)]}\E.*held/,
 		'the second reads held with its reason');
 	is(harness_marker($h, $h->slug('qa')), $tip_before,

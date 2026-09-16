@@ -787,6 +787,12 @@ sub propagate {
 						env     => $env,
 						record  => $env_record,
 						dry_run => $dry_run,
+						# The ref the pre-flight would have moved this
+						# branch to, which it sets under a dry run alone
+						# because a dry run makes none of its writes.  The
+						# walk already takes its base from it, and the
+						# delivery is the other reader that wants one.
+						base    => $initial->{branches}{$env_name}{assumed},
 					);
 				},
 			);

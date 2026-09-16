@@ -518,12 +518,23 @@ sub apply_files {
 	# path that stayed.  A refused removal is caught by the check below
 	# instead, which is the design's own argument for asserting the
 	# postcondition rather than trusting the sequence.
-	my @on_branch = $git->ls_files;
+	# What the branch holds, and the two readers that answer it.  A run reads
+	# the index, because the index is what the commit below is made from.  A
+	# preview reads a tree instead, because the ref it is asked about is one
+	# no run has checked out: under D44 a dry run makes none of the pre-flight
+	# writes, so the branch still stands where the fast-forward found it and
+	# the pre-flight hands down the ref it would have moved it to.  Without
+	# that ref the preview names every file that fast-forward is about to
+	# bring as one this commit would land, and every file it would take off
+	# as one this commit would remove.
+	my $base      = $opts{base};
+	my @on_branch = $base ? $git->ls_tree($base) : $git->ls_files;
 	my @stale     = grep { !$in_set{$_} } @on_branch;
 
 	# The diff against the source is the optimisation, so the writer touches
 	# only the paths whose blob differs or that the branch does not hold.
-	my %differs = map { $_ => 1 } $git->diff_names('HEAD', $source_sha, @set);
+	my %differs = map { $_ => 1 }
+		$git->diff_names($base // 'HEAD', $source_sha, @set);
 	my @to_write = grep { $differs{$_} } sort keys %in_set;
 
 	# D33 says an overwrite is never silent.  A path the mirror overwrote that
