@@ -375,8 +375,9 @@ B<Parameters:>
 =item C<$outcome>
 
 The word for this commit.  The record may carry one, and where it carries none
-the renderer reads C<delivered>, until the publish stage writes one per
-commit.
+the renderer reads the default its axis carries, which is C<delivered> for a
+commit under C<pending> and C<held> for one under C<held>.  Both defaults go
+once the publish stage writes a word per commit.
 
 =item C<$preview>
 

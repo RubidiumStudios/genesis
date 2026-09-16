@@ -370,6 +370,26 @@ subtest 'an arrayref renders as a YAML list at either depth' => sub {
 	is($merged->{genesis}{pipeline}{auto}, 1, 'with the genesis key above them');
 };
 
+# params is the block a kit's own values live in, and it is where a row that
+# wants a commit the walk routes as a delta changes a value, so the writer has
+# to put it at the top level of the file rather than under genesis.
+subtest 'params is written as a top-level block' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $path = write_env_file($h, 'qa',
+		params => {tuned => 3, label => 'first'}, commit => 0);
+
+	my $body = slurp($h->a . '/' . $path);
+	like($body, qr/^params:\n/m, 'the block sits at the top level');
+	like($body, qr/^  tuned: 3$/m, 'and carries the value it was given');
+
+	my ($env, $rc) = load_yaml_file($h->a . '/' . $path);
+	is($rc, 0, 'the file parses');
+	is_deeply($env->{params}, {tuned => 3, label => 'first'},
+		'and params reads back as the hash it was given');
+};
+
 # Proves the setup half of T118: a delivery can be left carrying a path that
 # has since fallen out of the tracked set.
 subtest 'a delivery whose tracked set has since shrunk' => sub {

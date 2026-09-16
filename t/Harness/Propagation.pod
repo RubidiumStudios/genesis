@@ -658,9 +658,9 @@ kit here.
 Writes an environment file on control and returns its git-root-relative path.
 C<site> writes it at a level of the hierarchy rather than at the leaf.  Also
 takes C<root>, C<genesis>, C<pipeline> and C<params> as hashrefs merged into
-the file, and C<commit>, which defaults on.  C<type> is taken for symmetry with the
-helpers that compose a slug and is not written into the file, because nothing
-in the file body names a deployment type.
+the file, and C<commit>, which defaults on.  C<type> is taken for symmetry
+with the helpers that compose a slug and is not written into the file,
+because nothing in the file body names a deployment type.
 
 A value in either hashref that is an arrayref renders as a YAML list rather
 than a scalar, because C<genesis.pipeline.track_dependencies> and its

@@ -356,7 +356,9 @@ sub _settle {
 #
 # The word is taken off the record with a default beside it, because nothing
 # writes one yet and the axis still has to have a reader that can be handed
-# the wrong thing.
+# the wrong thing.  The default is the caller's rather than this sub's, and
+# there are two of them: a commit under pending reads delivered and one under
+# held reads held.  Both go once the publish stage writes a word per commit.
 sub _commit_word {
 	my ($outcome, $preview) = @_;
 
