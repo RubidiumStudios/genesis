@@ -786,20 +786,27 @@ B<Examples:>
 
     my $words = Genesis::CI::Walk::hold_detail($env_record);
 
-What the standing hold is holding, in the two wordings D56 fixes, or
+What the standing hold is holding, in the three wordings D56 fixes, or
 undefined where no hold stands.
 
 D56 makes a hold outrank idempotent, so an environment with one standing
 never reads as though it were fine, and this is the line beside
-L</held_qualifier> that says which of the two situations it is in.  Where
-nothing is due behind the hold it reads that nothing is due now and that
-anything becoming due stays blocked, and where something is it names how many
-commits are blocked until the hold is released.
+L</held_qualifier> that says which of the three situations it is in.  Where
+the hold itself took commits it names how many are blocked until the hold is
+released.  Where something else is holding them it says they are blocked for
+reasons of their own and stay blocked while the hold stands.  Where nothing
+is held at all it reads that nothing is due now and that anything becoming
+due stays blocked.
 
-The count is of the commits the hold itself took, and not of everything held,
-because a commit a gate or an ancestor had already stopped is reported under
-that reason, and counting it here would name it twice and send an operator to
-the wrong command.
+The count in the first of the three is of the commits the hold itself took,
+and not of everything held, because a commit a gate or an ancestor had
+already stopped is reported under that reason, and counting it there would
+name it twice and send an operator to the wrong command.
+
+The nothing-due wording is answered only where nothing is held either.
+C<propagate> prints this line directly above the commit lines, so an
+environment whose commits a gate is holding would otherwise read that nothing
+is due and then read the commits that are.
 
 B<Parameters:>
 
@@ -819,6 +826,10 @@ B<Examples:>
 
   my $words = Genesis::CI::Walk::hold_detail($env_record);
   # returns "2 commits are blocked until this hold is released"
+
+  my $words = Genesis::CI::Walk::hold_detail($gated_record);
+  # returns "1 commit is blocked for a reason of its own, and stays blocked
+  #          while this hold stands"
 
 =head2 walk_env
 

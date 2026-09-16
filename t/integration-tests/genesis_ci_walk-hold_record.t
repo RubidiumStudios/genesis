@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # Proves T151 and T153: a hold record stops delivery in both modes while the
 # branch stays deployable, --dry-run still lists what waits, and the hold
-# outranks idempotent with the two detail wordings.
+# outranks idempotent with the three detail wordings.
 use strict;
 use warnings;
 use utf8;
@@ -51,6 +51,13 @@ subtest 'a hold stops delivery in direct mode' => sub {
 subtest 'a hold stops a pull request being opened or updated' => sub {
 	plan tests => 3;
 
+	# This row guards the pull-request path until that path exists.  The walk
+	# does not reach the hold in PR mode today, because propagate prints
+	# "not attempted, because delivery by pull request is not built yet" and
+	# carries on past the environment before it reads the hold, so what the
+	# rows below hold true of is a run that opened nothing because it opened
+	# nothing at all.  They say what the hold must go on meaning once the
+	# path lands.
 	my $h = held(mode => 'pr', github => 1);
 	my $gh = github_double($h);
 	two_due($h, env => 'qa');
@@ -71,6 +78,11 @@ subtest 'a hold stops a pull request being opened or updated' => sub {
 subtest 'the preview still shows what waits behind the hold' => sub {
 	plan tests => 3;
 
+	# D50 keeps the walk computing what is due while the hold stands, so the
+	# preview lists the same commits whether they are pending or held, and
+	# the two rows below name the commits rather than the list they are in
+	# for exactly that reason.
+
 	my $h = held();
 	my @due = two_due($h, env => 'qa');
 
@@ -85,6 +97,9 @@ subtest 'the hold outranks idempotent, with two detail wordings' => sub {
 	my $nothing_due = held();
 	my (undef, $quiet) = run_genesis($nothing_due, {answers => ['y']},
 		'propagate');
+	# Nothing on the walk's path prints that word today, so this row guards
+	# D56 against a later stage teaching it one: a held environment must
+	# never read as though it were fine.
 	unlike($quiet, qr/qa.*idempotent/, 'a held environment never reads idempotent');
 	like($quiet,
 		qr/nothing is due now, and anything that becomes due stays blocked/,
@@ -96,6 +111,32 @@ subtest 'the hold outranks idempotent, with two detail wordings' => sub {
 	like($loud, qr/2 commits are blocked until this hold is released/,
 		'the count is named');
 	like($loud, qr/genesis qa pipeline-release/, 'the command is named');
+};
+
+subtest 'a hold over commits another reason holds says so' => sub {
+	# Three: one row, and one restoration assertion for each of the two runs.
+	plan tests => 3;
+
+	# The first run delivers up to the gate and leaves qa's marker standing
+	# on it, so the second run has one commit due and the gate falls on it.
+	# Nothing is pending behind the hold, and the held list is not empty, and
+	# the nothing-due wording would tell the operator that nothing is due
+	# directly above the commit line saying one thing is.
+	my ($h) = gated_harness(stage => 'schema change', kit => 'omega-v2.7.0');
+	run_genesis($h, {answers => ['y']}, 'propagate');
+	fixture_hold($h, 'qa', reason => 'waiting on the DBA');
+
+	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	# The line is longer than the eighty columns these rows run at, so the
+	# report wraps it and a literal match would miss on wherever the break
+	# fell.  Every run of spaces in the expected words is matched as any
+	# whitespace instead, which reads the line whole however it is wrapped.
+	my $words = '1 commit is blocked for a reason of its own, and stays '
+	          . 'blocked while this hold stands';
+	(my $wrapped = quotemeta $words) =~ s/(?:\\ )+/\\s+/g;
+	like($err, qr/$wrapped/,
+		'the commit another reason holds is named as such');
 };
 
 done_testing;

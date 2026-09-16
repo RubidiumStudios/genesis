@@ -547,29 +547,48 @@ sub held_qualifier {
 }
 
 # }}}
-# hold_detail - what the standing hold is holding, in D56's two wordings {{{
+# hold_detail - what the standing hold is holding, in D56's three wordings {{{
 #
 # D56 makes a hold outrank idempotent, so an environment with one standing
 # never reads as though it were fine, and this is the line that says which of
-# the two situations it is in: nothing is due behind the hold yet, or a
-# known number of commits are.
+# three situations it is in: a known number of commits are waiting on the
+# hold itself, or something else is holding commits and the hold stands over
+# them, or nothing at all is waiting.
 #
 # The count is of the commits the hold itself took, and not of everything
 # held, because a commit a gate or an ancestor had already stopped is
 # reported under that reason and counting it here would name it twice and
 # send the operator to the wrong command.
+#
+# The nothing-due wording is answered only where nothing is held either.
+# propagate prints this line directly above the commit lines, so an
+# environment whose commits a gate is holding would otherwise read that
+# nothing is due and then read the commits that are, which is the one thing
+# the line exists to stop.
 sub hold_detail {
 	my ($record) = @_;
 
 	return undef unless $record->{hold};
 
-	my $blocked = grep {($_->{reason} // '') eq 'on-hold'}
-		@{$record->{held} || []};
-	return 'nothing is due now, and anything that becomes due stays blocked'
-		unless $blocked;
+	my @held = @{$record->{held} || []};
+	my $blocked = grep {($_->{reason} // '') eq 'on-hold'} @held;
 
 	return sprintf('%d commit%s %s blocked until this hold is released',
-		$blocked, $blocked == 1 ? '' : 's', $blocked == 1 ? 'is' : 'are');
+		$blocked, $blocked == 1 ? '' : 's', $blocked == 1 ? 'is' : 'are')
+		if $blocked;
+
+	return 'nothing is due now, and anything that becomes due stays blocked'
+		unless @held;
+
+	# Everything held here is held for a reason of its own, and the hold
+	# stands over all of it, so the line says both: clearing what those
+	# commits wait for releases nothing while the hold is still standing.
+	return sprintf(
+		'%d commit%s %s blocked for %s own, and %s blocked while this hold stands',
+		scalar(@held), @held == 1 ? '' : 's',
+		@held == 1 ? 'is' : 'are',
+		@held == 1 ? 'a reason of its' : 'reasons of their',
+		@held == 1 ? 'stays' : 'stay');
 }
 
 # }}}

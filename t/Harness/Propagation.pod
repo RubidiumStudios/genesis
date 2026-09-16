@@ -1422,15 +1422,17 @@ returns the path, for the same reason.  It takes the same two options.
 
 =head2 two_due($h, %opts)
 
-Two undelivered control commits, in order, and their shas.  Each writes the
-first environment's own file, for the reason C<gated_harness> does, and
-C<files> takes an arrayref of one per-commit hashref where a row wants other
-content.
+Two undelivered control commits, in order, and their shas.  Each writes one
+environment's own file, for the reason C<gated_harness> does, and that
+environment is the one C<env> names, or the harness's first where the call
+names none.  C<files> takes an arrayref of one per-commit hashref where a row
+wants other content.
 
 =head2 three_due($h, %opts)
 
 Three undelivered control commits, in order, and their shas.  It takes the
-same C<files> option, and writes the same file without it.
+same C<env> and C<files> options, and without them writes the first
+environment's own file as C<two_due> does.
 
 =head2 three($h, %opts)
 
