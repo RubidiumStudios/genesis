@@ -17,6 +17,7 @@ use Genesis::CI::Compiler;
 use Genesis::CI::Compiler::PipelineProvider;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
+use Genesis::CI::Publish;
 use Genesis::CI::Report;
 use Genesis::CI::RunFailure qw/one_line/;
 use Genesis::CI::Walk;
@@ -677,7 +678,7 @@ sub propagate {
 		$control, $control_short;
 
 	my $delivered = 0;
-	my @to_push;
+	my @publish_specs;
 	my $record;
 
 	# The environment the run has reached, which is what the outcome words
@@ -806,66 +807,57 @@ sub propagate {
 			# kind of run had filled it.
 			$env_record->{outcome} = 'propagated' unless $dry_run;
 			$delivered += scalar(@pending);
-			push @to_push, $branch unless $dry_run;
+			# The publish set carries specs rather than names, because the
+			# stage that spends it reports per environment and a bare
+			# branch name leaves it deriving the environment back out of
+			# the slug.
+			push @publish_specs, {
+				branch => $branch,
+				kind   => 'deployment',
+				env    => $env_name,
+			} unless $dry_run;
 		}
 
-		# The push is batched to the end of the walk, so a run that failed
-		# halfway has put nothing on the remote, and control goes with the
-		# branches because the markers now on them name commits the remote
-		# has to be able to resolve.
+		# D96's third stage.  The publish is held to the end of the walk, so
+		# a run that failed halfway has put nothing on the remote, and control
+		# goes with the branches because the markers now on them name commits
+		# the remote has to be able to resolve.
 		#
-		# It is inside the session rather than after it, because a remote
-		# that has gone away is D82's unsurvivable failure and the answer to
-		# one is the abort: a run that could publish nothing leaves nothing
-		# half-delivered in L either, and the next run redoes the whole of
-		# it.  A session already finished has nothing left to reset.
-		if (@to_push) {
+		# It is inside the session rather than after it, because a remote that
+		# has gone away is D82's unsurvivable failure and the answer to one is
+		# the abort: a run that could publish nothing leaves nothing
+		# half-delivered in L either, and the next run redoes the whole of it.
+		# A session already finished has nothing left to reset, and a branch
+		# the remote refused is put back through the session for the same
+		# reason.
+		if (@publish_specs) {
 			my $remote = $git->default_remote;
 			if ($remote) {
-				my @all = ($control, @to_push);
-				info "\n#G{Pushing} to #C{%s}...", $remote;
-
-				# Two shapes reach the same reading.  git push failing to run
-				# at all raises, and a remote nobody can resolve comes back
-				# as a refused push per ref, so a push where not one ref
-				# landed is the remote being gone rather than any branch's
-				# own quarrel with it.  A run where some refs landed and
-				# others did not is each of those branches' business, and it
-				# is reported per branch as it always was.
-				#
-				# Each result carries the reason git gave for the ref it
-				# names, beside the one or the zero.  Without it the
-				# classifier below was handed an empty reason on every push
-				# that landed nothing without dying, and so said the remote
-				# was unreachable whatever the remote had actually answered.
-				my $results = eval {$git->push(
-					remote => $remote,
-					refs   => [map {{branch => $_}} @all],
-				)};
-				my $reason = $@;
-				$results ||= [];
-				unless (grep {$_->{ok}} @$results) {
-					# The first ref that said anything, since the classifier
-					# reads one line.  A death out of the push itself is the
-					# reason where there is one, because it is the whole
-					# command failing rather than one ref being turned down.
-					$reason = (grep {length} map {$_->{reason}} @$results)[0]
-						unless defined $reason && length "$reason";
-					my ($message, $remedy) = _push_failure($remote, $reason);
-					die Genesis::CI::RunFailure->unsurvivable(
-						message => $message,
-						remedy  => $remedy,
-					);
-				}
-
-				for my $result (@$results) {
-					if ($result->{ok}) {
-						info "  #G{%s}: pushed", $result->{branch};
-					} else {
-						warning("Failed to push #C{%s} to #C{%s}.",
-							$result->{branch}, $remote);
-					}
-				}
+				Genesis::CI::Publish::publish_run(
+					git     => $git,
+					session => $session,
+					remote  => $remote,
+					records => $record->{environments},
+					specs   => [
+						{branch => $control, kind => 'control'},
+						@publish_specs,
+					],
+					# D82's two shapes reach one reading.  git push failing to
+					# run at all raises, and a remote nobody can resolve comes
+					# back as a refused push per ref, so a push where not one
+					# ref landed is the remote being gone rather than any
+					# branch's own quarrel with it.  The words git wrote are
+					# classified here, beside the run, because the remedy each
+					# class earns is the run's to offer and not the stage's.
+					unsurvivable => sub {
+						my ($reason) = @_;
+						my ($message, $remedy) = _push_failure($remote, $reason);
+						die Genesis::CI::RunFailure->unsurvivable(
+							message => $message,
+							remedy  => $remedy,
+						);
+					},
+				);
 			}
 		}
 		1;

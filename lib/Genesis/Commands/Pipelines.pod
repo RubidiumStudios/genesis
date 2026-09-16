@@ -426,6 +426,14 @@ own session under D65, walks from there, and puts the operator back on the
 branch they were standing on, so nobody has to move before running it.  See
 L</open_control_session>.
 
+Every branch the run committed to is published at the end of the walk, one
+branch per push, so a branch the remote refuses costs one environment one run
+and nothing else.  That environment reads C<publish rejected> with the ref git
+itself named beside it, and the branch goes back to where the remote has it at
+once, so the run leaves behind no local commit nobody else can see.  Every
+other branch is published regardless of where the refusal fell.  See
+L<Genesis::CI::Publish/publish_run>.
+
 B<Options (via C<get_options>):>
 
 =over 4

@@ -461,6 +461,25 @@ sub discard {
 }
 
 # }}}
+# reset_branch - put one branch back where the remote has it {{{
+#
+# The abort resets every branch a session committed to, and a publish that the
+# remote refused wants the same thing for the one branch it was refused on,
+# because a branch left carrying a commit nobody else can see is the state D83
+# refuses to end a run in.  Both go through the same reset, so the two cannot
+# come to disagree about what putting a branch back means.
+#
+# Control never reaches it.  I2 keeps committed work on control whole, and the
+# abort's own set filters that name out, so a caller asking for it here is
+# asking for the one branch no session resets.
+sub reset_branch {
+	my ($self, $branch) = @_;
+	bail("A branch session never resets #C{%s}, which is the control branch",
+		$branch) if defined $self->{control} && $branch eq $self->{control};
+	return $self->_reset_to_remote($branch);
+}
+
+# }}}
 # }}}
 
 ### The writer {{{

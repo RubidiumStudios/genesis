@@ -1,0 +1,258 @@
+=head1 NAME
+
+Genesis::CI::Publish - the propagate run's third stage, one push per branch
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Publish;
+
+    # Every branch the run committed to, pushed on its own, with each
+    # push's result recorded as that branch's outcome.
+    my $publish = Genesis::CI::Publish::publish_run(
+        git     => $git,
+        session => $session,
+        remote  => 'origin',
+        records => $record->{environments},
+        specs   => [
+            {branch => 'control',  kind => 'control'},
+            {branch => 'lab/bosh', kind => 'deployment', env => 'lab'},
+        ],
+        unsurvivable => sub {die "the remote answered nothing: $_[0]\n"},
+    );
+
+=head1 DESCRIPTION
+
+The walk decides what is due and the delivery writes it onto the deployment
+branches in the local repository. Everything here is about getting what the
+local repository now holds onto the remote, and saying, per environment, what
+the remote made of it.
+
+Each branch is pushed on its own. A rejection on one branch costs one
+environment one run and nothing else, which is what D83 asks for, and no
+push's result withholds another's, which is the third stage of D96. The
+branches after a refused one go out regardless of where the refusal fell.
+
+A push the remote refused is that environment's outcome and not a warning
+printed beside a success. The record reads C<publish rejected> in the bare
+word I8 fixes, with the moved ref standing beside it in the detail, because
+the run's exit status and the report both match the whole of the outcome field
+against seven words and a phrase written into it would match none of them.
+
+The ref named in that detail is the one git printed in its own porcelain line,
+rather than one composed here out of the branch the push asked for. Where a
+teammate has moved a branch under the run, the two can differ, and the name
+worth telling an operator is the one the remote actually refused.
+
+A refused branch goes back to its remote state at once, through the session,
+so the run ends with no local commit nobody else can see. It is the same reset
+the abort runs over every branch a session committed to, so the two cannot
+come to disagree about what putting a branch back means.
+
+The commit axis of I8 is written here too. Every commit an environment
+actually got onto the remote reads C<delivered>, and the commits of an
+environment that was refused are left null, because they are delivered in no
+sense the word carries.
+
+=head1 FUNCTIONS
+
+=head2 publish_run
+
+    my $publish = Genesis::CI::Publish::publish_run(
+        git     => $git,
+        session => $session,
+        remote  => 'origin',
+        records => \@records,
+        specs   => \@specs,
+    );
+
+Pushes every branch the run committed to, one branch per push, and records
+each push's result as that branch's outcome.
+
+A branch the remote refused records C<publish rejected> with C<E<lt>refE<gt>
+moved on R> beside it, is reset to its remote state at once, and the remaining
+branches are pushed anyway. A branch that landed records nothing of its own,
+because the walk has already written what the environment did, and its pending
+commits each read C<delivered>.
+
+A push where not one ref landed is the remote being gone rather than any
+branch's own quarrel with it, so nothing is recorded and the C<unsurvivable>
+callback is invoked with git's own words instead. The classifier that turns
+those words into a remedy lives beside the run, so the caller raises the
+failure and this stage only says which reason to raise it on.
+
+B<Parameters:>
+
+=over 4
+
+=item C<git>
+
+The repository handle the push runs through.
+
+=item C<session>
+
+The open branch session, through which a refused branch is reset. A call
+without one records the outcomes and resets nothing.
+
+=item C<remote>
+
+The remote to publish to, by name. It falls back to the repository's default
+remote, and a repository with no remote at all publishes nothing.
+
+=item C<records>
+
+An arrayref of the walk's per-environment records, which is where an outcome
+is written. A spec whose environment is not among them is pushed and reported
+and writes no outcome, which is what the control branch does.
+
+=item C<specs>
+
+An arrayref of ref specs, in the order they should be pushed. Each carries
+C<branch>, and may carry C<kind>, which is C<control>, C<deployment>, or
+C<pr>, and C<env>, which names the record the outcome belongs to. An empty
+list publishes nothing.
+
+=item C<unsurvivable>
+
+A callback invoked with git's reason where not one ref landed. It is expected
+to raise, and the stage returns without recording anything if it does not.
+
+=back
+
+B<Returns:> A hashref carrying C<published> and C<rejected> as arrayrefs of
+branch names, C<declined> as 0 or 1, and C<results> as the per-ref results the
+push answered.
+
+B<Errors:> None of its own. A refusal is an outcome rather than a failure, and
+the one failure the stage meets is raised by the caller's own callback.
+
+B<Examples:>
+
+    publish_run(git => $git, specs => []);
+    # returns the empty result and pushes nothing
+
+    publish_run(git => $git, session => $session, remote => 'origin',
+        records => \@records, specs => \@specs);
+    # returns { published => ['control', 'lab/bosh'],
+    #           rejected => ['prod/bosh'], declined => 0, results => [...] }
+    #   where the remote had moved under prod
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _spec_for
+
+    my $spec = Genesis::CI::Publish::_spec_for(\@specs, 'lab/bosh');
+
+The ref spec a push result belongs to.
+
+The push answers one result per ref and the result carries the branch it was
+asked for, so the spec is found by that name rather than by position, and a
+push that answered in some other order is read correctly anyway.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$specs>
+
+An arrayref of the specs the push was handed.
+
+=item C<$branch>
+
+The branch a result names.
+
+=back
+
+B<Returns:> The spec, or an empty hashref where no spec carries that branch.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _spec_for([{branch => 'lab/bosh', env => 'lab'}], 'lab/bosh');
+    # returns { branch => 'lab/bosh', env => 'lab' }
+
+    _spec_for([], 'lab/bosh');
+    # returns {}
+
+=head2 _record_for
+
+    my $rec = Genesis::CI::Publish::_record_for(\@records, 'lab');
+
+The walk's record for an environment.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$records>
+
+An arrayref of the walk's per-environment records.
+
+=item C<$env>
+
+The environment's name, or undefined for a spec that belongs to no
+environment, such as the control branch.
+
+=back
+
+B<Returns:> The record, or C<undef> where there is none.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _record_for([{env => 'lab'}], 'lab');
+    # returns { env => 'lab' }
+
+    _record_for([{env => 'lab'}], undef);
+    # returns undef
+
+=head2 _mark_delivered
+
+    Genesis::CI::Publish::_mark_delivered($record);
+
+Writes the commit axis of I8 for an environment that published.
+
+The report's per-commit word defaults to C<delivered>, and the publish is what
+the enum names as the writer of it, so the word is written here for every
+commit an environment actually got onto the remote. A refused environment's
+commits are left null.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$rec>
+
+One environment's record, or C<undef>, which is a no-op.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _mark_delivered({pending => [{subject => 'tune lab'}]});
+    # leaves outcome delivered on the pending commit
+
+    _mark_delivered(undef);
+    # does nothing
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Walk>, which builds the record this stage writes into, and
+L<Genesis::CI::Report>, which fixes the words it writes.
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut
