@@ -19,6 +19,7 @@ use Genesis::CI::Marker;
 our @EXPORT_OK = qw/
 	plan changed_set route_commit undeployed_set overlap
 	certified_for hold_for hold_reason held_qualifier
+	introducing_commit walk_base
 	READINGS HOLD_REASONS
 /;
 
@@ -34,12 +35,81 @@ use constant HOLD_REASONS => qw/
 
 ### The readings {{{
 
+# introducing_commit - E, the control commit that introduced an env file {{{
+#
+# Control is linear under D31, so the oldest commit that added the
+# environment's own file names E exactly, and --diff-filter=A over that path
+# is that question asked directly.  The newest add is not the answer, because
+# a file that was added, removed, and added again belongs to the environment
+# from the first of the three onward.
+#
+# An environment control has never carried has no introducing commit, and the
+# caller reads that as a branch to walk from the whole of control rather than
+# as a failure, because the same answer comes back for an environment whose
+# file was introduced on the very first commit.
+sub introducing_commit {
+	my ($git, $control, $env_file) = @_;
+
+	my ($out, $rc) = run(
+		{dir => $git->root, stderr => 0},
+		'git', 'log', '--first-parent', '--diff-filter=A', '--format=%H',
+		$control, '--', $env_file
+	);
+	return undef if $rc || !defined($out) || !length($out);
+
+	my @adds = grep {/\S/} split /\n/, $out;
+	return undef unless @adds;
+	return $adds[-1];
+}
+
+# }}}
+# walk_base - where one environment's walk starts {{{
+#
+# The newest marker the branch carries, and for a branch that carries none
+# the commit before E, so that E is the first commit routed and is holdable
+# like any other commit under D61.  An init-only orphan branch shares no
+# history with control, so there is nothing on it for the marker walk to
+# read, and starting from the tip instead would collapse every commit since
+# the environment was added into one baseline and skip all of their holds.
+#
+# The base and the marker are two different facts and only one of them comes
+# back as the base, which is why the reading comes back beside it.  An
+# unseeded branch has merged nothing, and a caller that took its base for a
+# marker would report a branch standing on a commit it has never carried.
+#
+# The ref is the one the pre-flight settled rather than a remote-tracking ref
+# composed here, because D2 makes the local ref the base every reader takes
+# and a dry run hands over the ref a real run would have moved the branch to.
+sub walk_base {
+	my (%args) = @_;
+
+	my $git = $args{git};
+
+	my $marker = Genesis::CI::Marker::newest($git, $args{ref});
+	return ($marker, 'seeded') if defined $marker;
+
+	my $e = introducing_commit($git, $args{control}, $args{env_file});
+	return (undef, 'unseeded') unless defined $e;
+
+	# A root commit has no parent, and the whole of control is then what the
+	# walk wants, because control's first commit is where E already is.
+	my ($parent, $rc) = run(
+		{dir => $git->root, stderr => 0},
+		'git', 'rev-parse', "$e^"
+	);
+	$parent = '' unless defined $parent;
+	$parent =~ s/\s+//g;
+	return ((!$rc && length $parent) ? $parent : undef, 'unseeded');
+}
+
+# }}}
 # control_commits - the control commits after a base, oldest first {{{
 #
 # Control is linear under D31, so first-parent order is control order and
 # --reverse gives us the oldest due commit first.  An undefined base means
-# the whole of control, which only happens for an unseeded branch whose E
-# the caller has not resolved yet.
+# the whole of control, which is what walk_base answers for a branch with no
+# marker whose environment was introduced on control's own first commit,
+# since there is no commit before that one to start after.
 sub control_commits {
 	my ($git, $control, $base) = @_;
 
@@ -574,11 +644,25 @@ sub plan {
 
 		# Under D2 the base is the local ref, which the pre-flight has just
 		# settled, and under a dry run it is the ref a real run would have
-		# moved that branch to.
-		my $ref  = $settled->{assumed} // $settled->{branch};
-		my $base = Genesis::CI::Marker::newest($git, $ref);
-		$env_record->{merged}  = $base;
-		$env_record->{reading} = _reading($base, $deployed);
+		# moved that branch to.  What the walk starts from is the marker that
+		# ref carries, or, where it carries none, the commit before the one
+		# that introduced the environment (D61).
+		#
+		# The marker is taken back out of the answer rather than read a
+		# second time, because an unseeded branch's base is a commit on
+		# control and merged is a fact about what the branch has received.
+		my $ref = $settled->{assumed} // $settled->{branch};
+		my ($base, $seeding) = walk_base(
+			git      => $git,
+			ref      => $ref,
+			control  => $control_sha,
+			# In list context, because prefixed answers a list and asking it
+			# for one path in scalar context answers how many it has.
+			env_file => ($git->prefixed($env->file))[0],
+		);
+		my $marker = $seeding eq 'seeded' ? $base : undef;
+		$env_record->{merged}  = $marker;
+		$env_record->{reading} = _reading($marker, $deployed);
 
 		# D60: an environment whose record carries no certified commit is one
 		# the pipeline was never applied to, and nothing may be delivered to

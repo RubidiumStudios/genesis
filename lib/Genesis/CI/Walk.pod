@@ -35,6 +35,12 @@ operator happened to have checked out.  The topology and the environment files
 are the exception, and they are read off control, which the run stands itself
 on before it asks for a plan.
 
+A deployment branch that has never been delivered to carries no marker and
+shares no history with control, so there is nothing on it to walk from.  The
+walk starts at the commit that introduced the environment instead, and that
+commit is routed, delivered, and held exactly as every commit after it is.
+There is no separate seeding step, and nothing here ever cuts a branch.
+
 It writes nothing itself.  The caller delivers what the record marks pending,
 one commit at a time, through the session's single writer, so the one thing
 that touches a deployment branch stays in one place.
@@ -59,9 +65,12 @@ The run's canonical record, computed from durable state alone.
 
 It reads the pipeline's applied record, walks the topology in the order
 C<< Genesis::Top->pipeline_topology >> gives it, takes each branch's base
-from the newest marker that branch carries, and routes every control commit
-that stands after it.  Nothing here writes, so C<genesis propagate --dry-run>
-and C<genesis pipeline-status> render one record and can never disagree about
+from L</walk_base>, and routes every control commit that stands after it.  A
+branch that has been delivered to is walked from the newest marker it
+carries, and one that has never been delivered to from the commit that
+introduced the environment, so that commit is routed and held like any
+other.  Nothing here writes, so C<genesis propagate --dry-run> and
+C<genesis pipeline-status> render one record and can never disagree about
 what a repository is holding.
 
 An environment with no settled branch is recorded and passed over, since only
@@ -109,9 +118,9 @@ recorded and passed over as awaiting C<genesis pipeline-apply> and nothing
 routes for it.  A call that leaves the map out therefore routes nothing at
 all.
 
-The map is an option because the walk does not yet read the state for
-itself.  Once C<walk_base> and C<read_durable_state> land the reading moves
-into them and the option goes.
+The map is an option because the walk does not yet read the branch state for
+itself.  L</walk_base> has taken the base out of it, and the rest goes once
+C<read_durable_state> lands.
 
 =item C<refreshed>
 
@@ -144,6 +153,99 @@ B<Examples:>
   # returns a record whose environments arrayref is in DAG order, with
   # each environment's due commits under pending
 
+=head2 introducing_commit
+
+    my $e = Genesis::CI::Walk::introducing_commit($git, $control, 'qa.yml');
+
+E, the control commit that added that environment's own file.
+
+Control is linear, so the question has one answer, and the oldest commit that
+added the file is it.  A file that was added, removed, and added again
+belongs to the environment from the first of the three onward, so the oldest
+add is what comes back rather than the newest.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The handle to read through.
+
+=item C<$control>
+
+The control branch, or any commit on it.
+
+=item C<$env_file>
+
+The environment's own file, named relative to the git root.
+
+=back
+
+B<Returns:> The forty-character sha of the commit that added the file, or
+undefined where control has never carried it.
+
+B<Examples:>
+
+  my $e = Genesis::CI::Walk::introducing_commit($git, $sha, 'prod.yml');
+  # returns the sha of the commit whose subject is 'Add prod'
+
+=head2 walk_base
+
+    my ($base, $reading) = Genesis::CI::Walk::walk_base(
+      git => $git, ref => $ref, control => $sha, env_file => 'qa.yml');
+
+Where one environment's walk starts, and whether its branch has ever been
+delivered to.
+
+A branch that carries a marker is walked from it.  A branch that carries none
+is an init-only orphan that shares no history with control, so there is
+nothing on it for the marker walk to read, and the walk starts at the commit
+that introduced the environment instead.  The base that comes back for such a
+branch is the commit before that one, so that E itself is the first commit
+routed and is holdable like any other.  Seeding from control's tip instead
+would collapse every commit since the environment was added into one baseline
+and skip all of their holds, and a new environment could then receive shared
+files that nothing upstream had deployed.
+
+The base and the branch's marker are two different facts.  Only the base
+comes back as the base, and the reading beside it is what tells a caller
+whether it may also read that base as the commit the branch has merged.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The handle to read through.
+
+=item C<$ref>
+
+The deployment branch's ref, which is the local one the pre-flight settled,
+or under a dry run the ref a real run would have moved it to.
+
+=item C<$control>
+
+The control branch, or any commit on it, which is where E is looked for.
+
+=item C<$env_file>
+
+The environment's own file, named relative to the git root.
+
+=back
+
+B<Returns:> Two values, the commit to walk from and one of C<seeded> or
+C<unseeded>.  The commit is undefined where the branch carries no marker and
+E is control's own first commit, which asks for the whole of control.
+
+B<Examples:>
+
+  my ($base, $reading) = Genesis::CI::Walk::walk_base(
+    git => $git, ref => 'refs/heads/bosh/qa',
+    control => $sha, env_file => 'qa.yml');
+  # returns ($marker, 'seeded') for a branch that has been delivered to
+
 =head2 control_commits
 
     my @commits = Genesis::CI::Walk::control_commits($git, $control, $base);
@@ -169,8 +271,9 @@ The control branch, or any commit on it.
 =item C<$base>
 
 The commit to start after, which is normally the one the branch's newest
-marker names.  Undefined means the whole of control, which is what an
-unseeded branch asks for.
+marker names.  Undefined means the whole of control, which is what
+L</walk_base> answers for a branch with no marker whose environment was
+introduced on control's own first commit.
 
 =back
 

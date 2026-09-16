@@ -532,9 +532,12 @@ sub pipeline_status {
 #
 # The run stands itself on control, refreshes, settles every deployment
 # branch, and then walks control once per environment, from the marker that
-# environment's branch carries to control's own tip.  Each commit that
-# touches the environment's set is delivered on its own, in control order,
-# as one commit on the deployment branch (D34).
+# environment's branch carries to control's own tip.  A branch that carries
+# no marker has never been delivered to, and it is walked from the commit
+# that introduced the environment instead (D61), which is routed and held
+# like any other.  Each commit that touches the environment's set is
+# delivered on its own, in control order, as one commit on the deployment
+# branch (D34).
 #
 # The run takes no argument and sources control's tip, always.
 sub propagate {
