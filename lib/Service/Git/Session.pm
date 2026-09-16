@@ -376,6 +376,56 @@ sub abort {
 }
 
 # }}}
+# discard - put one branch back at T, and leave the session open {{{
+#
+# D96's second stage.  An error confined to one environment resets that
+# environment's branch to T so that nothing of a partial delivery survives,
+# and the run then walks on to the next environment, which is why this is
+# not abort: abort ends the session and the run with it, and every
+# environment below the broken one would go unattempted, which is the very
+# shape H3 names.
+#
+# It reaches what abort reaches for one branch and nothing else.  The tree
+# and the index go first, because a delivery that died between the checkout
+# and the commit leaves both holding the source, and a later switch would
+# fail over them.  Control is never reset here, for the reason
+# committed_branches filters it out of abort's set: committed work on
+# control in L is never discarded, which is I2.
+#
+# The branch leaves this session's own record of what it moved, because the
+# branch is back where the remote has it and an abort later in the run would
+# otherwise reset a branch that has already been put back.
+sub discard {
+	my ($self, $branch) = @_;
+	my $git = $self->{git};
+
+	bail("A branch was discarded with no session open in #C{%s}.", $git->root)
+		unless $self->{active};
+	return $self unless defined $branch && length $branch;
+	return $self if defined $self->{control} && $branch eq $self->{control};
+
+	unless ($git->is_clean) {
+		run({dir => $git->root, passfail => 1},
+			'git', 'reset', '--hard', 'HEAD')
+			or bail({exitcode => SOFTWARE},
+				"The uncommitted changes in #C{%s} could not be discarded ".
+				"after #C{%s} failed, so the working tree still holds them.\n\n".
+				"Put the working tree back by hand before running anything ".
+				"else here.",
+				$git->root, $branch);
+	}
+
+	$self->_reset_to_remote($branch);
+
+	delete $self->{committed}{$branch};
+	$self->{switched}{$branch} = eval {$git->sha($branch)}
+		if exists $self->{switched}{$branch};
+
+	trace("Service::Git::Session: discarded %s", $branch);
+	return $self;
+}
+
+# }}}
 # }}}
 
 ### The writer {{{

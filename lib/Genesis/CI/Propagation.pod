@@ -1,384 +1,68 @@
 =head1 NAME
 
-Genesis::CI::Propagation - DAG-driven propagation of pipeline files between environment branches
+Genesis::CI::Propagation - the pull request half of pipeline propagation
 
 =head1 SYNOPSIS
 
     use Genesis::CI::Propagation;
 
-    # Execute the propagation against git + GitHub
-    my $result = Genesis::CI::Propagation::propagate_envs(
-        git           => $git,
-        github        => $github,
-        owner_repo    => 'acme/widgets',
-        targets       => [
-            { env => 'staging', branch => 'staging/bosh',
-              require_pr => 0, detail => {...} },
-            { env => 'preprod', branch => 'preprod/bosh',
-              require_pr => 1, detail => {...} },
-        ],
-        control       => 'control',
-        control_sha   => $sha,
-        control_short => substr($sha, 0, 7),
-
-        push_direct_commits => 1,   # manual provider
-        push_pr_branches    => 1,
-        create_prs          => 1,
-        no_push             => 0,
-        dry_run             => 0,
-        push_extra_branches => ['control'],
-    );
+    # The rolling pr/<env>/<type> branch, its idempotency check, and the
+    # body and dispatch a proposal is opened with.  Nothing here is public
+    # yet: the command that will call them arrives with the pull request
+    # path itself.
 
 =head1 DESCRIPTION
 
-C<Genesis::CI::Propagation> executes pipeline propagation.
-C<propagate_envs> applies a target list to a real git working tree and,
-where a target wants a pull request, to the GitHub API.  It implements the
-rolling C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch model with idempotent
-re-runs, mode-parameterised push behavior, and batched push + PR
-API calls.
+C<Genesis::CI::Propagation> holds what is left of the module that used to
+execute pipeline propagation, which is the rolling
+C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch model, its idempotent re-run check,
+and the helpers that compose a pull request body and dispatch it at the
+GitHub API.
 
-Which environments receive a change is no longer decided here.  Routing is
-per commit and there is one run, so C<Genesis::CI::Walk::plan> visits every
-environment and answers it commit by commit, and
-C<Genesis::CI::Walk::hold_for> answers the ancestor question that is left.
+Everything else it held has gone.  C<propagate_envs> applied a target list to
+a real git working tree in one loop that recorded the first error and stopped,
+which left every environment after that one neither attempted nor reported,
+and its C<no_push> master switch went with the flag it served.  What replaced
+it is a walk: C<Genesis::CI::Walk::plan> visits every environment and answers
+it commit by commit against durable state, C<Genesis::CI::Walk::walk_one>
+confines an error to the environment that raised it, C<Service::Git::Session>
+is the one writer, and the publish pushes each branch on its own.
 
-Execution is provider-agnostic.  Callers parameterise it
-for Manual vs Concourse modes by setting the option flags on
-C<propagate_envs>.  The Manual provider invokes propagate from the
-deploy postlude with C<push_direct_commits =E<gt> 1>; the Concourse
-provider's per-env pipeline task invokes it with
-C<push_direct_commits =E<gt> 0> (because the concourse C<put> step
-on the env's git resource handles direct-mode pushes, while
-C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branches and PR creation still go through
-genesis because there is no concourse resource for creating GitHub
-pull requests).
+The direct path went with that loop, because a delivery onto an environment's
+own branch is what the walk and the single writer now do.  The pull request
+path has no replacement yet, so the helpers below stand until the command
+that opens a proposal is built on them.
 
 =head1 DESIGN CONSIDERATIONS
 
 =head2 Why this is a module and not part of the pipelines command
 
 Propagation began inside C<Genesis::Commands::Pipelines> and was extracted
-here for two reasons.
+here because two callers needed the same execution path, which were the
+C<genesis propagate> command and the Manual provider's auto-trigger at the
+end of a deploy.  Leaving the logic in a command module would have meant the
+provider either shelling out to a command or keeping a second copy.
+
+The rolling-branch decision, which is whether an existing pull request
+already carries the change, is the part most likely to be wrong and the
+hardest to observe in a live pipeline run.  Separating it from command
+dispatch is what allows it to be exercised directly in tests, and it is the
+reason this module outlived the loop it was extracted with.
 
-Two callers need the same execution path: the C<genesis propagate> command,
-and the Manual provider's auto-trigger at the end of a deploy.  Leaving the
-logic in a command module would have meant the provider either shelling out
-to a command or keeping a second copy.
-
-The rolling-branch decision -- direct commit versus a
-C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch, and whether an existing PR
-already carries the change -- is the part most likely to be wrong and
-the hardest to observe in a live pipeline run.
-Separating it from command dispatch is what allows it to be exercised
-directly in tests.
-
-L</propagate_envs> holds everything that touches git or the GitHub API, and
-the decision that used to sit beside it is now the walk's, where it is made
-per commit against durable state rather than over one diff.
-
-=head1 FUNCTIONS
-
-=head2 propagate_envs
-
-    my $result = Genesis::CI::Propagation::propagate_envs(
-        git                 => $git,
-        github              => $github,
-        owner_repo          => 'acme/widgets',
-        top                 => $top,
-        targets             => \@targets,
-        control             => 'control',
-        control_sha         => $sha,
-        control_short       => $short,
-        push_direct_commits => 1,
-        push_pr_branches    => 1,
-        create_prs          => 1,
-        no_push             => 0,
-        dry_run             => 0,
-        push_extra_branches => ['control'],
-    );
-
-Executes the propagation against the live git working tree and
-optionally the GitHub API.  Iterates the targets; for each, dispatches
-to a direct-to-env-branch commit path or a rolling pull request branch
-and PR path based on the target's C<require_pr> flag.  Batches branch
-pushes into a single C<git push> at the end, then makes all PR API
-calls.
-
-The whole run happens inside one branch session, which it asks the handle it
-was given for.  Every branch change goes through that session's C<switch>, it
-holds the lock that stops a second process switching the same working tree
-underneath the run, and it is what puts the operator back on the branch they
-started from -- on the way out of a run that worked, and on the way out of one
-that did not.
-
-The caller may have opened that session already and stood it on control, which
-is what C<genesis propagate> does, and the handle answers with the session it
-is already holding rather than a second one, because I9 allows a working tree
-only one.  So a caller that opened the session is the one that closes it, and
-this closes only a session it opened for itself, which it does before the
-batched push.
-
-A delivery that fails is caught, reported, and ends the loop, and the session
-is what answers the tree it left behind.  A delivery that wrote something
-before it failed leaves a dirty tree, which C<finish> refuses through
-C<abort>: the files are named, the write is discarded from the tree and the
-index both, every branch the run committed to goes back to its remote tip, and
-the run raises rather than returning.  A delivery that failed before it wrote
-anything leaves a clean tree, so the session simply restores and the failure
-comes back in C<errors> for the caller to decide on.
-
-This walk opens and closes no session of its own on a dry run, and it moves
-no branch.  The run it belongs to does switch, because the command stands
-itself on control before the walk is called, and it does that on a dry run
-as on any other.
-
-The pull request branch is whatever C<$top-E<gt>pr_branch_for($env)>
-composes, so the name this writes and the name the status command reads
-come from one place.  Under the default prefix that is
-C<pr/E<lt>envE<gt>/E<lt>typeE<gt>>, and the examples below spell it
-C<pr/E<lt>envE<gt>> for brevity.
-
-The rolling-branch decision tree (PR mode):
-
-=over 4
-
-=item *
-
-Query open PRs from GitHub, with the base the env branch and the head
-the branch C<pr_branch_for> composed.
-
-=item *
-
-B<Count 0> - clean any stale remote C<pr/E<lt>envE<gt>>, branch
-from C<E<lt>envE<gt>>, apply propagation commit, queue for push +
-C<create_pr>.
-
-=item *
-
-B<Count 1> - fetch C<pr/E<lt>envE<gt>> if missing locally, check
-out, check idempotency marker.  If the latest commit subject
-already references this C<control_short>, full-skip the env (no
-commit, no push, no PR update; env counted as
-C<skipped_idempotent>).  Otherwise append the propagation commit,
-queue for push + C<update_pr>.
-
-=item *
-
-B<Count E<gt> 1> - warn and use the first PR.  Treated as Count 1.
-Unreachable in practice because GitHub enforces (head, base)
-uniqueness for open PRs.
-
-=back
-
-B<Parameters:>
-
-Named arguments, collected as C<%args>:
-
-=over 4
-
-=item C<git>
-
-A C<Service::Git> instance pointing at the working tree.  Required.
-
-=item C<top>
-
-A C<Genesis::Top> for the repository.  It composes every pull request
-branch, so it is required when any target has C<require_pr =E<gt> 1> and
-unused otherwise.
-
-The names are composed for all such targets before the first target is
-touched, and outside the per-target C<eval>.  Composing a name is what
-refuses a prefix that collides with a branch name, and that refusal has
-to reach the caller rather than be caught and reported as a per-env
-propagation failure.  The dry run reads the same names, so C<dry_run>
-prints the branch the real run would open and meets the same refusal.
-
-=item C<github>
-
-A C<Service::Github> instance with credentials authorised for the
-target repository.  Required when any target has C<require_pr =E<gt> 1>
-and C<no_push> is false; optional otherwise (PR-mode targets under
-C<no_push> still run their local-branch work).
-
-=item C<owner_repo>
-
-The C<"owner/name"> string for the GitHub repository.  Required
-when C<github> is supplied.
-
-=item C<targets>
-
-Arrayref of target hashes.  Each:
-
-    {
-        env        => 'staging',
-        branch     => 'staging/bosh',
-        require_pr => 0|1,
-        detail     => {
-            changed => [...],     # files to copy from control_sha
-            deleted => [...],     # files to remove
-            renamed => {...},     # old_path => new_path
-        },
-    }
-
-C<branch> is the environment's deployment branch, which is the deployment
-slug and not the environment's own name, and it is the branch the delivery
-is committed onto, the branch a pull request is cut from and opened against,
-and the branch that is pushed.  C<env> stays the environment's own name,
-which is what the marker records and what the operator reads.  A target that
-names no C<branch> falls back to C<env>, so a caller that has only the one
-name still works.
-
-For C<require_pr =E<gt> 1>, the pull request is cut from the branch
-C<top> composes through C<pr_branch_for> and opened against C<branch>.
-
-=item C<control>
-
-The control branch name (typically C<"control">).  Used for the PR
-body and as the default value of C<push_extra_branches>.
-
-=item C<control_sha>, C<control_short>
-
-The full and short SHA of the source commit being propagated.  The
-short SHA appears in the commit subject's idempotency marker:
-C<[pipeline] control@E<lt>shortE<gt> -E<gt> E<lt>envE<gt>>.
-
-=item C<push_direct_commits> (default 1)
-
-Whether to queue direct-to-C<E<lt>envE<gt>> commits for the
-batched push.  Manual provider sets to 1.  Concourse provider sets
-to 0, since concourse's C<put> step on the env's git resource is
-what lands direct-mode commits upstream.
-
-=item C<push_pr_branches> (default 1)
-
-Whether to queue C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branches for the
-batched push.
-Always 1 in current usage: concourse cannot push these branches
-itself (no PR resource), and manual operators rely on this to make
-the PR visible.
-
-=item C<create_prs> (default 1)
-
-Whether to call C<create_pr> / C<update_pr> against the GitHub API.
-
-=item C<no_push> (default 0)
-
-Master kill switch.  When true, forces C<push_direct_commits>,
-C<push_pr_branches>, and C<create_prs> all to 0 regardless of their
-explicit values.  Local git operations (commits, branch creation,
-checkout) still happen, allowing inspection workflows.
-
-=item C<dry_run> (default 0)
-
-When true, reports what would happen without touching git or the
-GitHub API.  Each target counts as C<propagated> in the result.
-
-=item C<push_extra_branches> (default C<[]>)
-
-Arrayref of additional branches to include in the batched push.
-The Manual provider typically passes C<[$control]> so that any new
-control commits land on the remote alongside the propagated branches.
-
-=back
-
-B<Returns:> hashref
-
-    {
-        propagated         => N,         # envs that successfully propagated
-                                         # (includes skipped_idempotent)
-        skipped_idempotent => [envs],    # envs whose pr/<env>/<type> HEAD already
-                                         # matched this control_sha
-        errors             => [strings], # per-env failures (loop bails on
-                                         # first error and skips push + PRs)
-    }
-
-The function does not call C<bail> on a per-env failure that left the tree
-clean - it collects the failure and returns.  Callers (such as the
-C<propagate> command) decide whether to bail on errors or proceed.  Push and
-PR API blocks are skipped entirely when C<errors> is non-empty, so the remote
-never sees partial state from a failed propagation event.
-
-A failure that left a partial write behind is not returned at all: the session
-raises as it discards it, because a half-written delivery reported as a value
-is a tree somebody has to clean up by hand.
-
-B<Errors:>
-
-=over 4
-
-=item C<"propagate_envs: 'git' is required">
-
-Dies when C<git> is absent.  This is a programming error rather than a
-per-env failure, so it is thrown rather than collected into C<errors>
--- without a working tree there is nothing to iterate.
-
-=item C<"propagate_envs: 'top' is required to name a pull request branch">
-
-Dies when a target asks for a pull request and C<top> is absent.  It is
-raised before the target loop starts, so it reaches the caller as the
-programming error it is instead of being caught by the per-target
-C<eval> and reported as one environment's failure.  A run whose targets
-are all direct needs no C<top> and never meets it.
-
-=item Whatever the session raises
-
-The session refuses a run that starts on a dirty tree, a run whose working
-tree cannot be switched because another process holds the lock, and a run
-that ends with a partial write in the tree.  Those refusals are raised rather
-than collected, because none of them is one environment's failure.
-
-=back
-
-B<Examples:>
-
-  my $result = propagate_envs(
-      git           => $git,
-      targets       => \@targets,
-      control       => 'control',
-      control_sha   => $sha,
-      control_short => $short,
-      dry_run       => 1,
-  );
-  # returns { propagated => 3, skipped_idempotent => [], errors => [] }
 
 =head1 INTERNAL FUNCTIONS
 
 These are internal to the implementation.  They may change without notice
 and should not be called directly.
 
-=head2 _propagate_one_direct_env
-
-  _propagate_one_direct_env(%args);
-
-Applies one target's propagation straight onto its own branch, for targets
-without C<require_pr>.  Takes C<git>, C<session>, C<env_name>, C<branch>,
-C<control_sha>, C<control_short> and C<detail>.
-
-The switch and the returned name take C<branch>, which is the deployment
-slug, and the marker and the line the operator reads take C<env_name>,
-because a marker names the environment it delivered to.  C<branch> falls
-back to C<env_name> where the caller names none.
-
-B<Returns:> a hashref whose C<branch> is the branch the commit was applied
-to, which the caller pushes.
-
-B<Examples:>
-
-  _propagate_one_direct_env(
-      git => $git, session => $session,
-      env_name => 'staging', branch => 'staging/bosh',
-      control_sha => $sha, control_short => $short, detail => $detail,
-  );
-  # commits onto staging/bosh and answers { branch => 'staging/bosh' }
-
 =head2 _propagate_one_pr_env
 
   _propagate_one_pr_env(%args);
 
 Applies one target's propagation onto a rolling pull request branch and
-resolves what to do with its pull request.  Takes the same arguments as
-L</_propagate_one_direct_env> plus C<top>, C<github>, and C<owner_repo>.
+resolves what to do with its pull request.  Takes C<git>, C<session>,
+C<env_name>, C<branch>, C<control_sha>, C<control_short>, and C<detail>,
+plus C<top>, C<github>, and C<owner_repo>.
 
 C<branch> is the deployment branch the pull request is cut from and opened
 against, so a fresh pull request branch forks from the slug and the pull
@@ -392,9 +76,9 @@ collision with a deployment branch is refused.  C<top> is required, and
 the sub dies when it is absent, because a pull request branch cannot be
 named without it.
 
-This is where the decision tree documented under L</propagate_envs> lives:
-count open PRs, then branch fresh, append to the existing one, or full-skip
-when the branch already carries this control SHA.
+This is where the rolling-branch decision tree lives: count open pull
+requests, then branch fresh, append to the existing one, or skip outright
+where the branch already carries this control SHA.
 
 B<Returns:> a result hashref describing what was queued for the batched push
 and PR phase.
@@ -407,12 +91,10 @@ B<Errors:>
 
 Dies when C<top> is absent.  A pull request branch is named through the
 top and nowhere else, so a caller that reaches this path without one has
-a programming error rather than a per-env failure.  Reached through
-L</propagate_envs> it never fires, because that function raises the same
-requirement before its target loop and outside the C<eval> that wraps
-each target.  This guard answers a direct caller, and it does sit inside
-that C<eval>, so were it ever to fire there it would be collected into
-C<errors> as an environment's failure.
+a programming error rather than a per-environment failure.  The caller
+that will build the pull request path is expected to raise the same
+requirement before it reaches here, so this guard answers a direct caller
+rather than that one.
 
 =item C<"Failed to fetch '%s' from the remote: %s">
 
@@ -461,28 +143,6 @@ B<Examples:>
 
   _render_detail_lines($git, $detail);
   # writes one line per changed, deleted or renamed file
-
-=head2 _report_dry_run
-
-  _report_dry_run($git, $env_name, $pr_branch, $detail, $control_short);
-
-Reports what a propagation would do without performing it.
-
-The third argument is the pull request branch this target would open, or
-undef for a target that propagates directly.  It arrives already composed
-rather than being built here, so a dry run names the branch the real run
-would open even under a prefix that is not the default, and a prefix that
-cannot be used is refused before the dry run prints a plan.
-
-B<Returns:> nothing; output goes to the log.
-
-B<Examples:>
-
-  _report_dry_run($git, 'staging', undef, $detail, 'a1b2c3d');
-  # prints "staging: 3 files to propagate" and the per-file lines
-
-  _report_dry_run($git, 'staging', 'pr/staging/bosh', $detail, 'a1b2c3d');
-  # adds "PR: would open pr/staging/bosh -> staging"
 
 =head2 _pr_branch_has_control_sha
 
@@ -551,20 +211,19 @@ C<require_pr =E<gt> 1>, the caller must supply a C<Service::Github>
 instance and the C<owner_repo> resolves to a GitHub C<owner/name>
 slug.  Adding another forge would require a parallel
 C<Service::E<lt>ForgeE<gt>> with the same C<open_prs / create_pr /
-update_pr> surface, plus a dispatch layer in C<propagate_envs>.
+update_pr> surface, plus a dispatch layer in front of L</_find_or_open_pr>.
 
 =head2 Single-repo working tree only
 
-C<propagate_envs> assumes the C<Service::Git> instance points at a
-single working tree where all target env branches can be checked
-out.  This is the Manual mode shape.
+These helpers assume the C<Service::Git> instance points at a single working
+tree where every environment's branch can be checked out, which is the
+Manual mode shape and the shape the session is keyed on.
 
-The Concourse mode shape - one git workspace per env branch,
-provided as a separate job input - is B<not yet wired>.  When that
-work lands, callers will resolve workspace paths via convention or
-environment variables and invoke C<propagate_envs> once per env
-target, each with a distinct C<git> handle.  The interface is
-stable for that change; only the caller layer changes.
+The Concourse mode shape, which is one git workspace per environment branch
+provided as a separate job input, is B<not yet wired>.  When that work lands,
+callers will resolve workspace paths by convention or through environment
+variables and reach these helpers once per environment, each with a git
+handle of its own.
 
 =head2 Fast-forward-only push for C<pr/E<lt>envE<gt>> branches
 
@@ -572,7 +231,7 @@ When the count=1 case appends a new commit to an existing
 C<pr/E<lt>envE<gt>> branch, the push is a plain
 C<git push origin pr/E<lt>envE<gt>>.  If the remote has commits
 that the local branch does not (non-fast-forward), the push fails
-and the env is reported in C<errors>.
+and that environment records the failure as its own outcome.
 
 The cherry-pick + force-push recovery path (rebuild
 C<pr/E<lt>envE<gt>> locally from C<E<lt>envE<gt>>, cherry-pick the
@@ -583,20 +242,6 @@ C<pr/E<lt>envE<gt>> touches files disjoint from anything already queued on
 the branch.  If real-world usage
 proves the case reachable, the recovery path will be added; until
 then, the failure is caught and surfaced rather than papered over.
-
-=head2 C<--no-push> semantics are master-kill-switch
-
-C<no_push =E<gt> 1> currently allows read-only network operations
-(C<open_prs> queries the GitHub API, and C<fetch_branches>
-contacts the remote for the one pull request branch) but skips
-all writes.  Local C<pr/E<lt>envE<gt>> branches are left with the
-propagation commit applied; mixing C<no_push> runs with normal
-runs may require manual local-branch cleanup.
-
-The alternative interpretation - skip all network including reads,
-so the decision tree degrades to "always create local branch from
-C<E<lt>envE<gt>>" - is still under review.  If preferred, it would
-be a single guard at the top of C<_propagate_one_pr_env>.
 
 =head2 Manifest store under C<require_pr> is broken
 

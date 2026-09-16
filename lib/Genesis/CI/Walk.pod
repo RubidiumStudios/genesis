@@ -974,6 +974,101 @@ B<Examples:>
                                      record => $env_record);
   # commits once per pending entry, newest last
 
+=head2 walk_one
+
+    Genesis::CI::Walk::walk_one(record => $env_record, deliver => $code);
+    Genesis::CI::Walk::walk_one(session => $session, record => $env_record,
+                                deliver => $code);
+
+Walks and delivers to one environment, ending at that environment's own
+error.
+
+Under D96 and D60, an error confined to one environment ends that environment
+and nothing else.  Its branch goes back to T so that nothing of a partial
+delivery survives, it records C<failed> with the error it raised, and the run
+walks on to the next environment.  The same call stands around the walk and
+around the delivery, because under D78 a blueprint that raises while one
+environment's fragments are enumerated belongs to the same class as a
+delivery that died halfway.
+
+A run-fatal or unsurvivable error is re-raised for the caller to abort the
+whole run on, which L</is_run_fatal> is the reader for.
+
+B<Parameters:>
+
+=over 4
+
+=item C<record>
+
+One environment's record, as L</plan> builds it.  On a confined error it
+gains C<error> and an C<outcome> of C<failed>, and its C<pending> list is
+emptied.
+
+=item C<deliver>
+
+The code to run for this environment.  Anything it raises that is not
+run-fatal ends this environment alone.
+
+=item C<session>
+
+Optional.  The run's open session, handed over only where something may have
+been written, since that is what the branch is put back from.  It is asked
+for C<< Service::Git::Session->discard >> and never for C<abort>, because an
+abort would end the run and leave every environment below this one
+unattempted.
+
+=back
+
+B<Returns:> The record it was given.
+
+B<Errors:> Re-raises a run-fatal or unsurvivable error unchanged, so the
+caller can abort the run on it.
+
+B<Examples:>
+
+  Genesis::CI::Walk::walk_one(session => $session, record => $env_record,
+      deliver => sub {
+          $session->switch($env_record->{branch});
+          Genesis::CI::Walk::deliver_pending(session => $session,
+              env => $env, record => $env_record);
+      });
+  # a delivery that dies halfway resets the branch and records failed
+
+=head2 is_run_fatal
+
+    my $bool = Genesis::CI::Walk::is_run_fatal($error);
+
+Whether an error ends the run rather than the environment, under D82's two
+classes.
+
+Run-fatal is the writer's own failure, where nothing a caller could do
+differently would have helped.  Unsurvivable is an error no environment
+survives that a retry may fix, the remote being unreachable as the case.
+Both end the run, and both are raised as C<Genesis::CI::RunFailure>, whose
+two constructors bless one package and tell the two apart through the C<kind>
+they set, so the kind is what is read here.  Everything else is confined to
+the environment that raised it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$error>
+
+Whatever was raised.  Anything that is not a blessed C<Genesis::CI::RunFailure>
+is not run-fatal.
+
+=back
+
+B<Returns:> 1 where the error ends the run, and 0 where it ends one
+environment.
+
+B<Examples:>
+
+  Genesis::CI::Walk::is_run_fatal(Genesis::CI::RunFailure->fatal);        # 1
+  Genesis::CI::Walk::is_run_fatal(Genesis::CI::RunFailure->unsurvivable); # 1
+  Genesis::CI::Walk::is_run_fatal("the blueprint hook exited 1\n");       # 0
+
 =head1 INTERNAL FUNCTIONS
 
 =head2 _reading
