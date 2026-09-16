@@ -51,7 +51,14 @@ read a copy before it armed a fault still meets the fault.
 =head1 STEPS
 
 C<checkout>, C<checkout_file>, C<add>, C<rm>, C<commit>, C<create_branch>,
-C<fetch_branches>, C<push>, and C<delete_remote_branch>.
+C<ls_files>, C<fetch_branches>, C<push>, and C<delete_remote_branch>.
+
+C<ls_files> is the one reader in that list.  The writer asks it what the
+branch holds before it stages anything and again when it checks that the
+index holds nothing outside the propagation set, so it runs twice per
+delivery, and it refuses with a plain message rather than with the run-fatal
+class.  That is what a row arms to shape a failure one environment survives
+while the deliveries already made stand on its branch.
 
 Some of these steps call others, and the wrappers catch the inner call as
 readily as the outer one.  C<< $git->commit($message, @files) >> stages the

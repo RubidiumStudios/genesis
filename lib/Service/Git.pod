@@ -2015,6 +2015,14 @@ branches are not named C<origin>.
 Each branch is pushed separately and a failure does not stop the rest, so a
 partial push is reported rather than aborted midway.
 
+B<The reason a refused ref earns comes back beside it.> In list context the
+second value is a hashref of branch name to the standard error git wrote for
+that branch, holding an entry only for the branches that failed. A push the
+remote turns down does not die, so a caller reporting the refusal has nothing
+else to read, and one that took only the ones and zeros would have to guess
+at the cause. Each failed ref keeps its own text, because one branch's quarrel
+with the remote is not another's.
+
 B<Parameters:>
 
 =over 4
@@ -2028,8 +2036,10 @@ branches alone is the common case.
 
 =back
 
-B<Returns:> A hashref of branch name to 1 or 0. Empty hashref when no remote
-is configured.
+B<Returns:> In scalar context, a hashref of branch name to 1 or 0. In list
+context, that hashref and a second one carrying git's own standard error for
+each branch that failed. Two empty hashrefs, or one in scalar context, when no
+remote is configured.
 
 B<Examples:>
 
@@ -2038,6 +2048,10 @@ B<Examples:>
 
   my $results = $git->push(@branches);
   # returns { staging => 1, prod => 0 } when only prod was rejected
+
+  my ($results, $errors) = $git->push($remote, @branches);
+  # $errors->{prod} carries git's own complaint about prod, and no key
+  # stands for a branch that landed
 
 =head2 push_append_only
 

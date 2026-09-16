@@ -459,11 +459,17 @@ B<Returns:> Nothing.  The run prints its report as it goes.
 
 B<Errors:>
 
-Exits 1, which is D82's writer failure, where the writer could not produce
-what it was told to produce: a path it could not take off the branch, a path
-it could not stage, an index that does not match its source, an index holding
-paths outside the propagation set, or a commit the repository refused.
-Nothing is published and every branch the session committed to is reset.
+Exits 1, which is D82's run-fatal class, where nothing the caller could do
+differently would have helped. Most of these are the writer failing to produce
+what it was told to produce, which is a path it could not take off the branch,
+a path it could not stage, an index that does not match its source, an index
+holding paths outside the propagation set, or a commit the repository refused.
+The walk raises one of its own as well, where an environment has certified a
+control commit this repository cannot resolve and what that environment has
+left undeployed therefore cannot be read, which is a clone that never fetched
+the commit or a control branch somebody rewrote under it. Whichever of them
+ends the run, nothing is published and every branch the session committed to
+is reset.
 
 Exits C<Genesis::Exit/TEMPFAIL> where no ref of the push landed, which is
 D82's unsurvivable failure.  The report names the cause the remote's own

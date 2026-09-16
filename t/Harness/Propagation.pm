@@ -37,7 +37,8 @@ our @EXPORT = qw/
 	diverge move_on_r delete_on_r delete_local
 	rewrite_control rewrite_branch
 	amend_tip local_branch local_branch_only unset_control tag_branch
-	set_remotes second_remote drop_remotes set_repo_config move_on_r_at
+	set_remotes second_remote drop_remotes broken_pushurl
+	set_repo_config move_on_r_at
 
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed break_vault restore_vault
@@ -1990,6 +1991,37 @@ sub drop_remotes {
 	my $copy = $opts{copy} // 'a';
 	$self->set_remotes(copy => $copy, remotes => {}, upstream => 0);
 	return $self;
+}
+
+# }}}
+# broken_pushurl - a remote that answers a read and refuses every write {{{
+#
+# A row that wants to read git's own complaint about a push needs a remote
+# that is still there for everything the run does before the push.  Severing
+# the remote takes the refresh at the head of the run with it, and dropping
+# it leaves the command with nowhere to publish and its own words for that,
+# so neither shape reaches the push at all.
+#
+# git reads the push URL out of remote.<name>.pushurl where one is set and
+# the fetch URL out of remote.<name>.url, so a pushurl naming an ordinary
+# directory leaves every read of the run working and fails the one write.
+#
+# The directory is made rather than merely named, because git says a path
+# does not appear to be a git repository whether the path exists or not, and
+# a row reading that sentence should be reading it about something that is
+# really there.
+sub broken_pushurl {
+	my ($self, %opts) = @_;
+	my $copy   = $opts{copy}   // 'a';
+	my $remote = $opts{remote} // 'origin';
+	my $path   = "$self->{tmp}/not-a-repository";
+
+	helper::mkdir_or_fail($path) unless -d $path;
+	run({dir => $self->{$copy},
+			onfailure => "Failed to point the $remote push at $path"},
+		'git', 'config', "remote.$remote.pushurl", $path);
+
+	return $path;
 }
 
 # }}}

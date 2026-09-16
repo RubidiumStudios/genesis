@@ -611,11 +611,15 @@ The writes themselves are raised as that same class and for the same reason.
 A path this delivery could not take off the branch, or could not put into
 the index, is the writer failing to produce what it was told to produce, and
 nothing a caller could do differently would have helped, so it ends the run
-under D82 rather than the environment. The commit is the one step of the
-sequence that does not, because a commit git refuses is a condition of the
-branch it was made on. The writer records each branch it commits to on the session as it goes,
-which is what lets C<abort> reset every one of them back to its remote-tracking
-ref and leave control alone.
+under D82 rather than the environment. The commit goes the same way. A commit
+git refuses is the writer failing at the last step of the sequence it was told
+to carry out, so it raises the run-fatal C<Genesis::CI::RunFailure> carrying
+the branch, the source commit, and the paths the delivery was staging, exactly
+as the two halves of the staging do.
+
+The writer records each branch it commits to on the session as it goes, which
+is what lets C<abort> reset every one of them back to its remote-tracking ref
+and leave control alone.
 
 A dry run is the one preview, and it returns once it has worked the delivery
 out and before it writes anything, so neither assertion is reached and the
@@ -716,17 +720,27 @@ commit stands when it is thrown, and the caller ends the run on it.
 
 =item *
 
-A C<Genesis::CI::RunFailure> of the run-fatal kind, where a path could not
-be taken off the branch or could not be written into the index. Its
-C<report_line> carries git's own first line, the branch, the source, and the
-paths the delivery was staging.
+A C<Genesis::CI::RunFailure> of the run-fatal kind, where a path could not be
+taken off the branch. Its C<report_line> carries git's own first line, the
+branch, the source, and the stale paths the removal was taking off.
 
 =item *
 
-C<< "Failed to commit" >> -- raised where the commit itself fails, which
-includes a delivery that changes nothing, since git finds nothing staged and
-refuses. An operator meeting this after a delivery that was already current is
-looking at that and not at a broken repository.
+A C<Genesis::CI::RunFailure> of the run-fatal kind, where a path could not be
+written into the index. Its C<report_line> carries git's own first line, the
+branch, the source, and the paths the delivery was staging. It is a raise of
+its own and not the one above, because a removal that reports the paths a
+delivery was about to write names the paths that are fine and leaves the one
+it could not take off the branch unnamed.
+
+=item *
+
+A C<Genesis::CI::RunFailure> of the run-fatal kind, where the commit itself
+fails, which includes a delivery that changes nothing, since git finds nothing
+staged and refuses. Its C<report_line> carries git's own first line, the
+branch, the source, and the paths the delivery staged. An operator meeting
+this after a delivery that was already current is looking at that and not at a
+broken repository.
 
 =back
 

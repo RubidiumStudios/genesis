@@ -12,8 +12,13 @@ our @ISA = ('Service::Git');
 
 # The steps a row can arm.  Every one is a method the write sequence or the
 # refresh takes, so a row names a git step rather than a shell command.
+#
+# ls_files is the one reader among them.  The writer asks it what the branch
+# holds before it stages anything and again for the postcondition, and it
+# refuses with a plain message rather than with the run-fatal class, so it is
+# the step a row arms to shape a failure one environment survives.
 our @STEPS = qw/
-	checkout checkout_file add rm commit create_branch
+	checkout checkout_file add rm commit create_branch ls_files
 	fetch_branches push delete_remote_branch
 /;
 
