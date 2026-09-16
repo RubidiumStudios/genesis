@@ -724,7 +724,8 @@ sub propagate {
 			# the environment and one command releases it.
 			unless ($initial->{branches}{$env_name}) {
 				$env_record->{outcome}        = 'held';
-				$env_record->{outcome_detail} = 'awaiting pipeline-apply';
+				$env_record->{outcome_detail} =
+					Genesis::CI::Report::AWAITING_APPLY;
 				next;
 			}
 

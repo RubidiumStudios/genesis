@@ -41,6 +41,12 @@ A dry run changes two verbs and nothing else.  C<propagated> reads C<would
 propagate> and C<delivered> reads C<would deliver>, because a preview says
 what would happen rather than what did.
 
+The module also declares C<AWAITING_APPLY>, which is the qualifier an
+environment the pipeline has never been applied to carries.  It is a constant
+rather than a phrase each caller spells, because C<genesis propagate> meets
+that state before the walk has anything to say about the environment and
+writes the record's detail through this name.
+
 =head1 FUNCTIONS
 
 =head2 hold_reason
@@ -275,6 +281,42 @@ B<Examples:>
   Genesis::CI::Report::_settle($env_record);
   # $env_record->{outcome} is now 'held' or 'idempotent'
 
+=head2 _commit_word
+
+    my $word = Genesis::CI::Report::_commit_word('delivered', 0);
+
+One routed commit's outcome, checked against C<COMMIT_OUTCOMES> before it is
+printed.
+
+The commit axis reads its words out of the enum the way the environment axis
+reads its own, so the enum is load-bearing on all three axes rather than on
+one of them.  A word from outside it is a defect in whoever wrote the record,
+and the guard names it rather than printing it.  Under a dry run C<delivered>
+reads C<would deliver>, and C<held> reads as it stands.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$outcome>
+
+The word the record carries for this commit.
+
+=item C<$dry_run>
+
+True where the caller is previewing.
+
+=back
+
+B<Returns:> The word to print.
+
+B<Errors:> Raises a bug where the word is not one of C<COMMIT_OUTCOMES>.
+
+B<Examples:>
+
+  my $word = Genesis::CI::Report::_commit_word('delivered', 1);
+  # returns 'would deliver'
+
 =head2 _paths
 
     my @paths = Genesis::CI::Report::_paths($git, $pending->{delivered});
@@ -310,5 +352,15 @@ B<Examples:>
 =head1 SEE ALSO
 
 L<Genesis::CI::Walk>, which builds the record this renders.
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
 
 =cut

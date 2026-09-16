@@ -119,8 +119,8 @@ subtest 'a teammate delivery already on the branch is not delivered twice' => su
 };
 
 subtest 'the diff base names what control still has to deliver' => sub {
-	# Three rows, and one more for the run's own restoration assertion.
-	plan tests => 4;
+	# Four rows, and one more for the run's own restoration assertion.
+	plan tests => 5;
 
 	# The positive half of the pair.  The two subtests above prove that a
 	# delivery already on the branch is not delivered again, and a diff
@@ -148,8 +148,15 @@ subtest 'the diff base names what control still has to deliver' => sub {
 	# finds rather than what the delivery writes.
 	my (undef, $err) = run_genesis($h, 'propagate', '--dry-run');
 
-	like($err, qr{^\s*qa:\s+would propagate\n\s*control\@\w+[^\n]*would deliver}m,
+	like($err, qr{^\s*qa:\s+would propagate}m,
 		'the walk names the environment as receiving the change');
+	# qa's own block, counted rather than matched.  A pattern that finds one
+	# would-deliver line finds it in a block of two just as readily, and what
+	# this row is about is that the base named the settled branch and so
+	# found the one commit standing after it.
+	my ($block) = $err =~ /^\s*qa: would propagate\n(.*)\z/ms;
+	is(scalar(() = ($block // '') =~ /would deliver/g), 1,
+		'exactly one commit is due to it');
 	like($err, qr{kit-overrides\.yml}, 'and names the file control added');
 	unlike($err, qr{No changes to propagate},
 		'so the run does not report an empty pipeline');

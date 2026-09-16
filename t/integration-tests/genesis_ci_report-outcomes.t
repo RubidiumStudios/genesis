@@ -33,38 +33,6 @@ sub env_file {
 	return join("\n", @lines, '');
 }
 
-# The pipeline these rows stand on, which is a chain of environments where
-# only some of them have ever been applied.  ready_harness gives every
-# environment a branch, and a row here wants one that has none, so the
-# fixtures are laid by hand over the subset the row names under ready.
-sub report_harness {
-	my (%opts) = @_;
-	my @envs  = @{$opts{envs}};
-	my @ready = @{$opts{ready} // \@envs};
-
-	my $h = make_harness(
-		kit     => 'omega-v2.7.0',
-		chained => 1,
-		tracked => ['ops/shared.yml'],
-		envs    => \@envs,
-	);
-
-	# Ruling 24: the applied record carries a sha, and the harness's control
-	# accessor answers the branch's name, so the sha is read off it here.
-	my $control = $h->git('a')->sha($h->control);
-	fixture_applied($h, control => $control);
-
-	for my $env (@ready) {
-		init_branch($h, $env);
-		fixture_pipeline_record($h, $env);
-		deliver($h, $env, control => $control);
-		certify($h, $env, control_commit => $control);
-	}
-	$h->refresh('a', $h->control, map {$h->slug($_)} @ready);
-
-	return $h;
-}
-
 subtest 'three holds print three exact forms' => sub {
 	# Five rather than four, because run_genesis asserts the restoration of
 	# the working state in its own words and that assertion is counted here.
@@ -73,10 +41,12 @@ subtest 'three holds print three exact forms' => sub {
 	# lab leads the chain, qa follows it, prod follows qa, and dev has never
 	# been applied at all.  So qa waits on lab, prod is held by a hold
 	# somebody wrote, and dev waits on the command that cuts its branch.
-	my $h = report_harness(
-		envs  => ['lab', 'qa', 'prod', 'dev'],
-		ready => ['lab', 'qa', 'prod'],
-	);
+	my $h = make_harness(kit => 'omega-v2.7.0', chained => 1,
+		tracked => ['ops/shared.yml'],
+		envs    => ['lab', 'qa', 'prod', 'dev']);
+	# Every environment but dev, which is left with no branch at all so that
+	# it reads as one the pipeline has never been applied to.
+	$h->ready_envs(envs => ['lab', 'qa', 'prod']);
 	fixture_hold($h, 'prod', reason => 'waiting on the DBA');
 	commit_on_control($h,
 		files => {
@@ -99,7 +69,10 @@ subtest 'three holds print three exact forms' => sub {
 subtest 'five environments, five outcomes, none omitted' => sub {
 	plan tests => 7;
 
-	my $h = report_harness(envs => ['lab', 'qa', 'prod', 'dev', 'sandbox']);
+	my $h = make_harness(kit => 'omega-v2.7.0', chained => 1,
+		tracked => ['ops/shared.yml'],
+		envs    => ['lab', 'qa', 'prod', 'dev', 'sandbox']);
+	$h->ready_envs;
 	commit_on_control($h,
 		files   => {'lab.yml' => env_file(env => 'lab', leaf => 6)},
 		message => 'Tune lab', push => 1);
@@ -117,7 +90,9 @@ subtest 'five environments, five outcomes, none omitted' => sub {
 subtest 'four routed commits, four lines, delivered or held' => sub {
 	plan tests => 6;
 
-	my $h = report_harness(envs => ['lab', 'qa']);
+	my $h = make_harness(kit => 'omega-v2.7.0', chained => 1,
+		tracked => ['ops/shared.yml'], envs => ['lab', 'qa']);
+	$h->ready_envs;
 
 	my @due;
 	for my $n (1, 2) {
@@ -148,7 +123,9 @@ subtest 'four routed commits, four lines, delivered or held' => sub {
 subtest 'an overwritten hand edit is named beside its commit' => sub {
 	plan tests => 3;
 
-	my $h = report_harness(envs => ['lab', 'qa']);
+	my $h = make_harness(kit => 'omega-v2.7.0', chained => 1,
+		tracked => ['ops/shared.yml'], envs => ['lab', 'qa']);
+	$h->ready_envs;
 
 	hand_commit($h, $h->slug('qa'),
 		files   => {'ops/shared.yml' => "---\nshared: edited by hand\n"},
