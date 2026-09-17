@@ -339,7 +339,7 @@ C<provider_opts> the resolved provider options.
 
 =back
 
-B<Returns:> the new provider.
+B<Returns:> the new compiler.
 
 B<Examples:>
 

@@ -1234,12 +1234,12 @@ sub pipeline_graph {
 	# in for the drawing.
 	# The drawing is an emitted artefact, so it comes off the compiler.
 	my $result   = _compile_pipeline($top, 'concourse');
-	my $ast      = $result->{ast};
 	my $compiler = $result->{compiler};
 
-	my $md = $compiler->can('graph_md')
-		? $compiler->graph_md()
-		: _ast_to_mermaid_md($ast);
+	# A compile hands back a compiler and every compiler that emits a
+	# Concourse pipeline defines graph_md, so there is nothing here to
+	# ask about first.
+	my $md = $compiler->graph_md();
 
 	mkfile_or_fail('pipeline.md', $md);
 	info("Wrote #C{pipeline.md}");
@@ -1277,11 +1277,10 @@ sub pipeline_describe {
 	my $ast      = $result->{ast};
 	my $compiler = $result->{compiler};
 
-	if ($compiler->can('generate_description')) {
-		$compiler->generate_description($ast);
-	} else {
-		_describe_ast($ast, 'concourse');
-	}
+	# A compile hands back a compiler and every compiler that emits a
+	# Concourse pipeline defines generate_description, so there is
+	# nothing here to ask about first.
+	$compiler->generate_description($ast);
 	exit 0;
 }
 

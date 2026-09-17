@@ -189,7 +189,12 @@ subtest 'the namespace holds modules and nothing at its root' => sub {
 
 	# A deleted module with a live caller fails at load rather than at
 	# run time, and a caller nothing in the suite loads reports nothing
-	# at all, so the row reads the tree.
+	# at all, so the row reads the tree.  Both load forms are read, and
+	# both quote styles of each, because a use or a require is the shape
+	# that fails at load and the row would have said nothing about any
+	# of them.  The scan is line-based, so a quoted mention inside a
+	# string reads as a caller too, which is the conservative side of
+	# wrong for a row about a module that is meant to be gone.
 	my @files;
 	find(sub {push @files, $File::Find::name if -f && /\.(pm|t)$/}, 'lib', 't');
 	push @files, 'bin/genesis';
@@ -201,8 +206,8 @@ subtest 'the namespace holds modules and nothing at its root' => sub {
 			next if $line =~ /^\s*#/;
 			push @callers, "$file:$."
 				if $line =~ /\bGenesis::CI\s*->\s*(new|compile)\b/
-				|| $line =~ /\buse\s+parent\b.*'Genesis::CI'/
-				|| $line =~ /\brequire\s+Genesis::CI\s*;/;
+				|| $line =~ /\buse\s+(?:base|parent)\b.*['"]Genesis::CI['"]/
+				|| $line =~ /\b(?:use|require)\s+Genesis::CI\s*;/;
 		}
 		close $fh;
 	}
