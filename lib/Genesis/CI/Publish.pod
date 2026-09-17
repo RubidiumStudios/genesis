@@ -244,6 +244,13 @@ seen. C<yes> suppresses the ask and nothing else, and it is read before the
 terminal is consulted at all, so a flag that answers the question cannot also
 decide whether the question's subject is printed.
 
+Each line carries the branch, the number of commits the push would send, the
+number of files it would change, and the number it would remove. A branch the
+remote does not hold yet is said to be new on that remote, and its counts are
+its whole history rather than a range, because that is what the push carries.
+The commit subjects are printed under a branch that has a range to read and
+not under a new one, whose history is as long as the repository's.
+
 B<Parameters:>
 
 =over 4
@@ -291,8 +298,14 @@ remote-tracking ref to the local branch.
 
 The range is exactly what the push sends, so it is read from git rather than
 recomposed from the walk's record, and a delta shown to an operator is
-therefore the delta they get. A branch the remote does not hold yet has no
-range to read and reports as new.
+therefore the delta they get.
+
+A branch the remote does not hold yet has no range to read, and it is the push
+that carries the most rather than the least, so its delivery is its whole
+history. The commits are counted over the branch itself and the files are
+every path its tip holds, which is what a diff against the empty tree would
+name. Reporting one of those as an empty delta said the opposite of the truth
+about it.
 
 B<Parameters:>
 
@@ -313,18 +326,31 @@ rather than a range.
 
 =back
 
-B<Returns:> A hashref carrying C<commits> as the subjects in that range,
-C<changed> and C<deleted> as file counts, and C<new_branch> where the remote
-has no such branch yet. A removal reports C<removal> and nothing else.
+B<Returns:> A hashref carrying C<count> as the number of commits the push
+would send, C<commits> as their subjects, C<changed> and C<deleted> as file
+counts, and C<new_branch> where the remote has no such branch yet. A new
+branch carries its counts and an empty C<commits>, because its history is as
+long as the repository's and the showing is a sentence rather than a log. A
+removal reports C<removal> and nothing else.
 
-B<Errors:> None of its own. The queries raise as they do for every other
-caller.
+B<Errors:> Raises a bug where the branch is one the remote holds and this
+repository does not, naming the branch and the remote, because the publish set
+is the branches the run committed to and every one of them has a local ref. A
+branch with none in it is a caller's mistake rather than a state to read a
+range over, and the range reads would answer it with zeros. Otherwise none of
+its own, and the queries raise as they do for every other caller.
 
 B<Examples:>
 
     publish_delta($git, 'origin', {branch => 'lab/bosh'});
-    # returns { new_branch => 0, commits => ['3f9a1c2 deliver an op'],
+    # returns { new_branch => 0, count => 1,
+    #           commits => ['3f9a1c2 deliver an op'],
     #           changed => 1, deleted => 0 }
+
+    publish_delta($git, 'origin', {branch => 'dev/bosh'});
+    # on a branch origin has never held, returns
+    # { new_branch => 1, count => 12, commits => [], changed => 8,
+    #   deleted => 0 }
 
     publish_delta($git, 'origin', {branch => 'pr/qa/bosh', delete => 1});
     # returns { removal => 1 }

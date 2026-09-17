@@ -26,7 +26,7 @@ use strict;
 use warnings;
 
 use Exporter qw/import/;
-use Genesis qw/info warning/;
+use Genesis qw/bug info warning/;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
 
@@ -210,10 +210,12 @@ sub confirm_publish {
 				$spec->{branch}, $remote;
 			next;
 		}
+		# The count is the delta's own rather than the length of the list
+		# beneath it, because a branch the remote has never held carries its
+		# whole history and prints no line per commit.
 		info "\n  #C{%s}: %d commit%s, %d file%s changed, %d removed%s",
 			$spec->{branch},
-			scalar(@{$delta->{commits}}),
-			@{$delta->{commits}} == 1 ? '' : 's',
+			$delta->{count}, $delta->{count} == 1 ? '' : 's',
 			$delta->{changed}, $delta->{changed} == 1 ? '' : 's',
 			$delta->{deleted},
 			$delta->{new_branch}
@@ -231,8 +233,14 @@ sub confirm_publish {
 #
 # The verified delta is the range from the remote-tracking ref to the local
 # branch, which is exactly what the push sends, so it is read from git rather
-# than recomposed from the walk's record.  A branch the remote does not hold
-# yet has no range to read and reports as new.
+# than recomposed from the walk's record.
+#
+# A branch the remote does not hold yet has no range to read, and it is the
+# push that carries the most rather than the least, so its delivery is its
+# whole history: every commit the branch reaches, and every path its tip
+# holds, which is what a diff against the empty tree would name.  The showing
+# exists so an operator sees what the push sends, and a new branch reported as
+# an empty delta said the opposite of the truth about it.
 sub publish_delta {
 	my ($git, $remote, $spec) = @_;
 	my $branch = $spec->{branch};
@@ -243,8 +251,32 @@ sub publish_delta {
 	# local repository has.  It answers nothing at all where neither side
 	# holds the name, which is the same case for this purpose.
 	my $state = $git->resolve_branch($branch, remote => $remote);
-	return {new_branch => 1, commits => [], changed => 0, deleted => 0}
-		unless $state && $state->{state} ne 'no-remote';
+
+	# The publish set is the branches the run committed to, so every branch
+	# this is asked about has a local ref.  One the remote holds and this
+	# repository does not is a programming error rather than a state to read
+	# a range over, and the two range reads below would answer it with zeros,
+	# because the left side of each names a ref that is not there.
+	bug("publish_delta was asked for the branch #C{%s}, which #C{%s} holds ".
+	    "and this repository does not",
+	    $branch, $remote // 'the remote')
+		if $state && $state->{state} eq 'no-local';
+
+	unless ($state && $state->{state} ne 'no-remote') {
+		# The commits are counted rather than listed, because a new branch
+		# reaches as far back as the repository does and the showing is a
+		# sentence rather than a log.
+		my @history = $git->log_subjects("refs/heads/$branch", format => '%H');
+		# The pathspec is the root, because ls_tree refuses an empty one.
+		my @paths   = $git->ls_tree("refs/heads/$branch", '.');
+		return {
+			new_branch => 1,
+			commits    => [],
+			count      => scalar(@history),
+			changed    => scalar(@paths),
+			deleted    => 0,
+		};
+	}
 
 	my $tracking = "refs/remotes/$remote/$branch";
 	my @commits  = $git->log_subjects("$tracking..refs/heads/$branch",
@@ -254,6 +286,7 @@ sub publish_delta {
 	return {
 		new_branch => 0,
 		commits    => \@commits,
+		count      => scalar(@commits),
 		changed    => scalar(@{$diff->{changed}}),
 		deleted    => scalar(@{$diff->{deleted}}),
 	};
