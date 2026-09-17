@@ -190,8 +190,11 @@ that environment's deployment branch.
 
 Every pipeline-aware command declares one branch class at its registration,
 beside its scope and its function group. The class is one of two constants
-this module exports as values, C<PRE_DEPLOY> and C<DEPLOYED_STATE>, and it
-is read from C<command_properties($cmd)-E<gt>{branch_class}>.
+this module defines, C<PRE_DEPLOY> and C<DEPLOYED_STATE>. Neither is
+exported, so a registration names the one it wants in full, as
+C<Genesis::Commands::PRE_DEPLOY>, which is what every registration in
+F<bin/genesis> does. The value is read back from
+C<command_properties($cmd)-E<gt>{branch_class}>.
 
     define_command("propagate", {
         ...

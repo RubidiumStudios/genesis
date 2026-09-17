@@ -900,6 +900,48 @@ subtest 'retired command - surfaced by help --all (parallel to DEPRECATED)' => s
 		"retired commands are surfaced under --all");
 };
 
+subtest 'define_command - a misspelled branch class is rejected' => sub {
+	reset_commands_state();
+
+	# The row pins the first of the two branch-class guards in
+	# define_command, the one that compares the declared class with
+	# PRE_DEPLOY and with DEPLOYED_STATE and calls bug when it matches
+	# neither.  It cannot be shown red first: the guard and the attribute
+	# arrived together, and a tree without the guard has no attribute for a
+	# registration to misspell.  What it catches is a guard relaxed to a
+	# truth test, which would let 'pre_deploy' through to a gate that reads
+	# it, finds it equal to neither class, and refuses nothing at all.
+	quietly {
+		throws_ok {
+			define_command('misclassed-cmd', {
+				summary      => 'A command with a class nobody defined',
+				branch_class => 'pre_deploy',
+			}, sub { })
+		} qr/branch class/i,
+			'define_command dies when the declared class is not one of the two';
+	};
+};
+
+subtest 'define_command - a branch target with no class is rejected' => sub {
+	reset_commands_state();
+
+	# The row pins the second guard, the one that calls bug when
+	# branch_target is set and branch_class is not.  A target says which
+	# branch a command switches to inside its own session, and the gate
+	# reads it only for a command it is already gating, so a target declared
+	# without a class is an exemption from a gate that was never going to
+	# run.  This row catches a guard dropped as redundant.
+	quietly {
+		throws_ok {
+			define_command('targeted-cmd', {
+				summary       => 'A command that exempts itself from nothing',
+				branch_target => 'control',
+			}, sub { })
+		} qr/branch target without a branch class/i,
+			'define_command dies when a branch target carries no class';
+	};
+};
+
 subtest 'define_command - retired + deprecated together is rejected' => sub {
 	reset_commands_state();
 

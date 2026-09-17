@@ -602,6 +602,11 @@ sub append_options { # {{{
 # cannot drift apart.
 sub _branch_class_marker {
 	my ($cmd) = @_;
+	# Asked through exists, because reading a key of %PROPS for a name this
+	# module has never registered would give that name an empty registration
+	# of its own, and a later `defined $PROPS{$name}` would then answer for a
+	# command nobody declared.
+	return '' unless defined($cmd) && exists($PROPS{$cmd});
 	my $class = $PROPS{$cmd}{branch_class} or return '';
 	return " #Ci{[control]}"    if $class eq PRE_DEPLOY;
 	return " #Mi{[env branch]}" if $class eq DEPLOYED_STATE;
@@ -719,10 +724,23 @@ sub command_help { # {{{
 				my @aliases = grep {defined($_)} ($PROPS{$cmd}{alias}, @{$PROPS{$cmd}{aliases}||[]});
 				$summary .= " #G{(alias".(@aliases > 1 ? 'es' : '').": ".join(', ',@aliases).")}";
 			}
-			$summary .= _branch_class_marker($cmd);
-			$out .= wrap(
-				$summary, terminal_width, $label, $cmd_width+3+$scope_width, $cont_prefix
-			)."\n";
+			# The marker goes on after the wrap, so that it lands on the
+			# line the command's own name is on.  Appended to the summary
+			# beforehand it travelled with the last words of the summary,
+			# and at an ordinary width four of the ten marked commands
+			# carried it onto a continuation line, where it names no command
+			# and a reader scanning the left column cannot tell whose it is.
+			# The wrap is given the room the marker will take, so the line it
+			# lands on still fits the terminal.
+			my $marker = _branch_class_marker($cmd);
+			my $entry = wrap(
+				$summary, terminal_width - csize($marker), $label,
+				$cmd_width+3+$scope_width, $cont_prefix
+			);
+			if (length($marker)) {
+				$entry =~ s/\n/$marker\n/ or $entry .= $marker;
+			}
+			$out .= $entry."\n";
 		}
 	}
 
