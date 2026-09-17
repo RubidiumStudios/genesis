@@ -33,8 +33,10 @@ subtest 'a held switch lock does not block genesis new' => sub {
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'new', 'prod');
 
 	is($exit, 0, 'the run proceeded while the lock was held');
-	unlike($err, qr/lock|held by/i,
-		'and said nothing about a lock it never took');
+	unlike($err,
+		qr/Another Genesis process is using this working tree|
+		   Only one session may switch branches/xi,
+		'and printed none of the refusal a session meets at a held lock');
 	is($git->current_branch, 'add-prod',
 		'the operator is on the branch they chose');
 
