@@ -928,6 +928,14 @@ sub propagate {
 		info "\n#Yi{No changes to propagate.}";
 	}
 
+	# D97's decline, which is the one status the publish decides rather than
+	# the run's second stage.  It is the number every shell user reads as
+	# the person having stopped it, and it is spent here rather than beside
+	# the ask so the operator reads the report of what the run wrote before
+	# they read the status of the run they stopped.  Every branch that work
+	# went onto is already back where the remote has it.
+	exit ABORTED if $publish && $publish->{declined};
+
 	# D97's second stage, decided in one place and spent here.  The run's
 	# own status is the only thing a caller reads, so the reading is not
 	# repeated beside the report: the report says which environment ended

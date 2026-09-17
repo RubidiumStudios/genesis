@@ -53,6 +53,13 @@ the same delta goes to the log and the run goes on, so a pipeline job and a
 propagate child print what an operator would have been shown. C<yes>
 suppresses the ask and nothing else.
 
+A run the operator declines takes the path a refused control takes. Nothing is
+pushed, every branch the run committed to goes back to where the remote has
+it, and each environment records C<not published> with the decline standing
+beside it, so the run leaves the repository as it found it and says of every
+environment that it was written, verified, and held here by the person who was
+asked.
+
 Each branch is pushed on its own. A rejection on one branch costs one
 environment one run and nothing else, which is what D83 asks for, and no
 push's result withholds another's, which is the third stage of D96. The
@@ -98,8 +105,10 @@ each push's result as that branch's outcome.
 
 Every branch's verified delta is shown before the first push goes out, and an
 operator at a controlling terminal is then asked whether to publish. A run
-that is declined pushes nothing and answers C<declined>, and the status such a
-run exits with is the caller's to decide.
+that is declined pushes nothing, puts every branch it committed to back where
+the remote has it, records each environment as C<not published> with
+C<operator declined> beside it, and answers C<declined>. The status such a run
+exits with is the caller's to decide.
 
 Control is re-checked against the remote before the first push, and a control
 that is behind, ahead, or gone refuses the whole publish. Nothing is pushed,
@@ -189,7 +198,8 @@ B<Returns:> A hashref carrying C<published> and C<rejected> as arrayrefs of
 branch names, C<declined> as 0 or 1, and C<results> as the per-ref results the
 push answered. A publish the control check refused carries C<refused> as well,
 holding the sentence, with every other key left as it began. A publish the
-operator declined carries C<declined> as 1 and every other key as it began.
+operator declined carries C<declined> as 1 and every other key as it began,
+having reset the branches and written the outcomes first.
 
 B<Errors:> None of its own. A rejection is an outcome rather than a failure, a
 control that moved is a sentence for the caller to refuse with, and the one
@@ -211,6 +221,13 @@ B<Examples:>
     # returns { refused => 'Refusing to publish.  ...', published => [],
     #           rejected => [], declined => 0, results => [] }
     #   where a teammate pushed to control during the walk
+
+    publish_run(git => $git, session => $session, remote => 'origin',
+        control => 'control', records => \@records, specs => \@specs);
+    # returns { published => [], rejected => [], declined => 1,
+    #           results => [] }
+    #   where the operator answered no, with every branch back at its
+    #   remote state and every record reading 'not published'
 
 =head2 confirm_publish
 
@@ -411,10 +428,11 @@ B<Examples:>
 Puts every branch the run committed to back where the remote has it.
 
 A branch carrying a commit the remote has never seen is the illegal initial
-state D96 names, and a run that refuses before its first push must not leave
-one behind. The set is the session's own, which is the set an abort resets, so
-a refusal here and an abort put back exactly the same work. Control is not in
-it, because I2 keeps committed work on control whole.
+state D96 names, and a run that stops before its first push must not leave one
+behind. Both such runs come through here, which are the one a moved control
+refuses and the one the operator declined, and the set is the session's own,
+which is the set an abort resets, so all three put back exactly the same work.
+Control is not in it, because I2 keeps committed work on control whole.
 
 B<Parameters:>
 

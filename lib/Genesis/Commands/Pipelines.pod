@@ -442,6 +442,12 @@ controlling terminal the same delta goes to the log and the run publishes, so
 the pipeline's job and a propagate child print what an operator would have
 seen.  C<--yes> answers the question and leaves the showing alone.
 
+An operator who answers no stops the run there.  Nothing is pushed, every
+branch the run committed to goes back to where the remote has it, and every
+environment reads C<not published> with C<operator declined> beside it, so
+the report says of each one that it was written, verified, and held here by
+the person who was asked.
+
 B<Options (via C<get_options>):>
 
 =over 4
@@ -515,6 +521,14 @@ refusal names the step that repairs control.  The status is the temporary one
 under D106, because nothing the operator wrote is wrong.  Another clone moved
 control while this run was walking, and the next run refreshes and walks from
 what is there now, so it succeeds with nobody doing anything first.
+
+Exits C<Genesis::Exit/ABORTED> where the operator was asked whether to publish
+and answered no, which is D97's one number for a run a person stopped.
+Nothing is pushed, every branch the run committed to goes back to where the
+remote has it, and the report names every environment as C<not published>
+with the decline beside it.  The run is reported in full before the status is
+spent, so the operator reads what the run wrote and then reads that it went
+nowhere.
 
 Exits C<Genesis::Exit/TEMPFAIL> where the remote answered about no ref at
 all, which is D82's unsurvivable failure.  A remote that turned a ref down
