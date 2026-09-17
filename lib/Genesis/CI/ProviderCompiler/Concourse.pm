@@ -2,9 +2,9 @@ package Genesis::CI::ProviderCompiler::Concourse;
 use v5.20;
 use warnings;
 
-# Genesis::CI was the second parent, and it is deleted in this step's
-# sixth task, its trait having had one implementer since March 2026 and
-# no caller at all.  The compiler base is the only parent now.
+# Genesis::CI was the second parent, and it is gone.  Its trait had had
+# one implementer since March 2026 and no caller at all, so the compiler
+# base is the only parent now.
 use parent 'Genesis::CI::ProviderCompiler';
 
 use Genesis;
@@ -32,7 +32,12 @@ use constant {
 # }}}
 ### Class Methods {{{
 
-# init - initialize Concourse provider (trait interface path) {{{
+# init - build a compiler from a configuration file rather than an AST {{{
+#
+# The factory that called this is gone and nothing in the tree calls it
+# now.  It stands because parse reads the configuration this blesses, and
+# parse is the only thing that sets the config key deploy insists on, so
+# taking it away would take deploy's path with it.
 sub init {
 	my ($class, %opts) = @_;
 
