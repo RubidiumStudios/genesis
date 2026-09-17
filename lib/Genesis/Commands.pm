@@ -91,6 +91,13 @@ use constant { # {{{
 	DEPLOYED_STATE => 'deployed-state',
 }; # }}}
 
+# The branch a command says it goes to of its own accord, which exempts it
+# from the gate.  Control is the only one, because it is the only target the
+# gate compares against, and a declaration naming anything else would exempt
+# a command from nothing while reading as though it had.
+use constant BRANCH_TARGETS => ('control'); # {{{
+# }}}
+
 our @global_options = ( # {{{
 	[
 		"help|h" =>
@@ -205,6 +212,17 @@ sub define_command { # {{{
 	) if defined($PROPS{$name}{branch_target})
 		&& !defined($PROPS{$name}{branch_class});
 
+	# A target the gate never compares against would silently gate the
+	# command it was meant to exempt, which is the same failure the class
+	# check above rules out.  Control is the only target the gate reads
+	# today; a step that teaches it a second one adds that name here.
+	bug(
+		"Command #C{$name} declares the branch target #y{%s}; ".
+		"the only target is #y{%s}.",
+		$PROPS{$name}{branch_target}, join('#y{, }', BRANCH_TARGETS)
+	) if defined($PROPS{$name}{branch_target})
+		&& !grep {$_ eq $PROPS{$name}{branch_target}} BRANCH_TARGETS;
+
 	# extended_handlers implies option_passthrough: the main parser
 	# must leave unrecognised flags in @args for the handlers to claim.
 	if ($PROPS{$name}{extended_handlers}) {
@@ -301,6 +319,40 @@ sub run_command { # {{{
 	exit 0
 } # }}}
 
+# _gate_context - the Top and the git handle the two gates read {{{
+#
+# Both gates ask the same two questions of the same directory, and loading a
+# Top is not free of consequence: it names GENESIS_ROOT, GENESIS_TARGET_VAULT
+# and SAFE_TARGET in the environment, and the memo behind Service::Vault
+# answers every later caller with whatever the first load chose.  Loading it
+# twice for the four commands that meet both gates is therefore two
+# announcements of one thing, so the answer is built once and kept.
+#
+# It is kept per directory rather than per process, because a caller that
+# runs a gate against one repository and then against another wants each
+# repository's own answer and gets it.
+#
+# Each load has its own eval.  A directory that is no repository at all
+# still has a Top the first gate can refuse from, and the git handle bails
+# on its own when there is no repository root, so a failure there hands back
+# undef and the branch-class gate stands aside rather than speaking before
+# the command's own refusal.
+{
+	my %CONTEXT;
+	sub _gate_context {
+		my $dir = getcwd();
+		return @{$CONTEXT{$dir}} if $CONTEXT{$dir};
+
+		require Genesis::Top;
+		require Service::Git;
+		my $top = eval { Genesis::Top->new('.', no_vault => 1) };
+		my $git = $top ? eval { Service::Git->new('.') } : undef;
+
+		$CONTEXT{$dir} = [$top, $git];
+		return @{$CONTEXT{$dir}};
+	}
+} # }}}
+
 # _gate_pipeline_on_legacy_ci_yml - refuse PIPELINE-group commands in a repo still carrying a legacy ci.yml {{{
 sub _gate_pipeline_on_legacy_ci_yml {
 	# Only PIPELINE-group commands need the gate.
@@ -311,8 +363,7 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	# Top from.  Commands like `help`, `version`, `ping` don't.
 	return unless has_scope('repo', 'env');
 
-	require Genesis::Top;
-	my $top = eval { Genesis::Top->new('.', no_vault => 1) };
+	my ($top) = _gate_context();
 	return unless $top;                 # if Top load itself failed
 	return unless $top->has_legacy_ci_yml;
 
@@ -337,23 +388,22 @@ sub _gate_pipeline_on_legacy_ci_yml {
 sub _gate_branch_class {
 	my $class = command_properties()->{branch_class} or return;
 
+	# propagate switches to control inside the session it already has, so
+	# the gate leaves it where it stands (D65, D81).  The exemption is read
+	# before anything is loaded, because loading a Top names the root and
+	# the vault target in the environment and a command the gate never gates
+	# should not be handed those as a side effect.
+	return if (command_properties()->{branch_target} // '') eq 'control';
+
 	# Only meaningful when the command has a repository to read a Top from.
 	return unless has_scope('repo', 'env');
 
-	require Genesis::Top;
-	my $top = eval { Genesis::Top->new('.', no_vault => 1) };
-	return unless $top;
+	my ($top, $git) = _gate_context();
+	return unless $top && $git;
 
 	# Outside a pipeline every command behaves as it always has, on any
 	# branch, which is D80's last sentence and D81's silent premise.
 	return unless $top->pipeline_enabled;
-
-	# propagate switches to control inside the session it already has, so
-	# the gate leaves it where it stands (D65, D81).
-	return if (command_properties()->{branch_target} // '') eq 'control';
-
-	require Service::Git;
-	my $git = Service::Git->new('.');
 
 	# Two pre-deploy commands make no network call of their own, and the
 	# gate makes none for them either.  pipeline-status says so with

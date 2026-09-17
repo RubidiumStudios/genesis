@@ -942,6 +942,40 @@ subtest 'define_command - a branch target with no class is rejected' => sub {
 	};
 };
 
+subtest 'define_command - a branch target nobody reads is rejected' => sub {
+	reset_commands_state();
+
+	# The third guard.  The gate compares a declared target with control
+	# and with nothing else, so a command declaring any other target is
+	# exempt from nothing while its registration reads as though it had
+	# exempted itself.  A target spelt 'main' by a repository whose control
+	# branch happens to be main is the way that arrives in practice, and it
+	# would be gated as an ordinary pre-deploy command and refused on the
+	# branch it goes to of its own accord.
+	quietly {
+		throws_ok {
+			define_command('mistargeted-cmd', {
+				summary       => 'A command aimed at a branch the gate never reads',
+				branch_class  => Genesis::Commands::PRE_DEPLOY(),
+				branch_target => 'main',
+			}, sub { })
+		} qr/branch target/i,
+			'define_command dies when the declared target is not control';
+	};
+
+	# The one legal target still registers, so the guard refuses a value
+	# rather than the attribute.
+	quietly {
+		lives_ok {
+			define_command('targeted-ok-cmd', {
+				summary       => 'A command that takes itself to control',
+				branch_class  => Genesis::Commands::PRE_DEPLOY(),
+				branch_target => 'control',
+			}, sub { })
+		} 'define_command accepts control as a branch target';
+	};
+};
+
 subtest 'define_command - retired + deprecated together is rejected' => sub {
 	reset_commands_state();
 

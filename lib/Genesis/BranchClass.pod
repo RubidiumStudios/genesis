@@ -74,6 +74,14 @@ a deployment branch's name is the deployment slug and nothing else.
 A branch that matches none of them is C<feature>, and so is an undefined
 branch, since a caller holding no name has nothing derived in its hand.
 
+The environment names are read once and the three branch names are composed
+from that one list, because the list is rebuilt from the deployment root's
+environment files every time it is asked for. The pull request prefix is
+joined here rather than through C<< $top->pr_branch_for >> for that reason,
+so a prefix that collides with a deployment branch or with control is
+refused by the commands that create the branch and not by this
+classification.
+
 B<Parameters:>
 
 =over 4
