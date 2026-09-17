@@ -319,7 +319,8 @@ to C<undef>.
 control branch, which C<create> alone declares.  It decides whether the
 C<control_requires_pr> refusal applies, because D45 is about a commit that
 cannot reach control through a pull request and most pre-deploy commands
-make none.  Defaults to C<undef>.
+make none.  It is declared only alongside C<branch_class =E<gt> PRE_DEPLOY>,
+since that is the one gate that reads it.  Defaults to C<undef>.
 
 =item C<option_require_order> - Boolean.  When true, option parsing stops
 at the first non-option argument.  Defaults to false.
@@ -390,6 +391,14 @@ Raised via C<bug> when C<branch_class> is set to anything but
 C<PRE_DEPLOY> or C<DEPLOYED_STATE>.  A misspelled class would gate
 nothing and say nothing, which is the failure a single declaration
 exists to rule out.
+
+=item C<"Command %s declares that it commits on control without the pre-deploy branch class.">
+
+Raised via C<bug> when C<commits> is true and C<branch_class> is anything
+but C<PRE_DEPLOY>.  Only the pre-deploy assertion asks whether a command
+commits on control, so the attribute anywhere else is read by nobody and
+reads as though the command had been exempted from the
+C<control_requires_pr> refusal when it was never subject to it.
 
 =item C<"Command %s declares a branch target without a branch class.">
 

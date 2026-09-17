@@ -150,14 +150,29 @@ sub permitted_feature_branch {
 	#
 	# A missing ref is two states, and they want different exits.  Control
 	# may be somewhere and not here, which a fetch fixes, or it may be
-	# nowhere at all, which nothing but creating it fixes.  resolve_branch
-	# answers which, exactly as Genesis::CI::Preflight::require_control
-	# asks it, and that is where the twin of the sentence below lives.  The
-	# two are composed apart because this one is raised before a command
-	# names itself, so it carries neither require_control's "Refusing to
-	# ..." opening nor its closing sentence about what was written.
+	# nowhere at all, which nothing but creating it fixes.
+	#
+	# resolve_branch answers first, exactly as
+	# Genesis::CI::Preflight::require_control asks it, and that is where
+	# the twin of the CONFIG sentence below lives.  The two are composed
+	# apart because this one is raised before a command names itself, so
+	# it carries neither require_control's "Refusing to ..." opening nor
+	# its closing sentence about what was written.
+	#
+	# Where it answers nothing the remote is asked as well, because
+	# resolve_branch reads local refs alone and a single-branch clone
+	# holds neither ref for a control the remote has.  Told "exists
+	# neither" it would be told to create a branch that is already there.
+	# Only a remote that lacks control too earns that sentence, and a
+	# repository with no remote configured gets it because
+	# remote_branch_exists answers 0 for one.  An ls-remote that fails
+	# bails in remote_branch_exists' own words, which is left alone: a
+	# remote nobody can reach is not a remote that lacks the branch, and
+	# the refresh above has already tolerated whatever it was.
 	unless ($git->branch_exists($control_ref)) {
 		my $named = $remote // 'the remote';
+		my $elsewhere = defined $git->resolve_branch($top->control_branch)
+			|| $git->remote_branch_exists($top->control_branch, $remote);
 
 		bail({exitcode => CONFIG},
 			"The control branch #C{%s} exists neither on #C{%s} nor ".
@@ -167,12 +182,9 @@ sub permitted_feature_branch {
 			"repository or as the migration describes for a move to v3, ".
 			"push it, then run the command again.",
 			$top->control_branch, $named
-		) unless defined $git->resolve_branch($top->control_branch);
+		) unless $elsewhere;
 
-		# Control is here or on the remote, so the remedy is a fetch.  A
-		# repository with no remote never reaches this arm, because with
-		# no remote the ref asked about above is the local branch itself
-		# and resolve_branch has already answered for it.
+		# Control is here or on the remote, so the remedy is a fetch.
 		return (
 			0,
 			sprintf(
