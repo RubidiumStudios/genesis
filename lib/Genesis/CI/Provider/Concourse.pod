@@ -162,6 +162,21 @@ The keys an operator may write under C<pipeline.provider> beside
 C<type: concourse>, each with its type, its default where it has one, and
 the description C<genesis config> renders as help.
 
+The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>,
+C<public>, C<tagged>, C<task>, C<pause_after_set>, and C<group_commits>.
+
+C<team> is where the Concourse team's default lives, and it is the only
+home that default has. The class that emits the pipeline resolves the
+team through C<provider_option>, which reads the operator's block and
+falls back to what is declared here, so no second copy of C<main> stands
+anywhere.
+
+C<min_fly_version> is the floor C<check_prereqs> enforces. It has no
+default, because a repository that names no floor wants any C<fly> that
+is present. It was readable on the object and settable only from Perl
+until it was declared here, so an operator who wrote the key was refused
+by name and the version check had nothing to enforce.
+
 The C<task> block declares C<image>, C<version>, and C<privileged>, and
 it defaults to an empty hash for the same reason the provider block
 itself does: validation only walks into a hash that is present, so
@@ -173,6 +188,7 @@ B<Examples:>
 
     my $schema = Genesis::CI::Provider::Concourse->provider_options_schema;
     $schema->{team}{default};                  # 'main'
+    $schema->{min_fly_version}{type};          # 'string'
     $schema->{task}{schema}{privileged}{type}; # 'array'
 
 =head2 capabilities()
@@ -280,12 +296,19 @@ B<Examples:>
 
 =head2 check_prereqs()
 
-Whether C<fly> is on the PATH, and whether it is new enough where the
-provider was built with a minimum version. A version is compared field by
-field rather than as a string, so 10 sorts above 9.
+Whether C<fly> is on the PATH, and whether it meets the floor the
+repository declares as C<pipeline.provider.min_fly_version>. A repository
+that declares no floor is asking only that C<fly> be there. A version is
+compared field by field rather than as a string, so 10 sorts above 9.
+
+This is the only answer to the question. The class that emits the
+pipeline kept a copy that asked whether C<fly> was on the path and
+nothing more, and that copy was the one a command reached, so the floor
+never ran. It is gone, and the command asks the provider.
 
 B<Returns:> 1 when C<fly> is present and new enough, or 0 with the reason
-already reported.
+already reported. A refusal names both the version it wanted and the
+version it found.
 
 B<Examples:>
 

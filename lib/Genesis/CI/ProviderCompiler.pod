@@ -173,19 +173,11 @@ B<Examples:>
 
 =head1 METHODS - PROVIDER OPTIONS
 
-=head2 check_prereqs()
-
-Whether the toolchain this provider needs is on the PATH. The base
-answers yes, because a provider with nothing to check needs no method of
-its own, and a concrete overrides it to look for its own CLI and to say
-what is missing.
-
-B<Returns:> 1 when the toolchain is present, or 0 with the reason already
-reported.
-
-B<Examples:>
-
-    exit 86 unless $compiler->check_prereqs;
+This class no longer answers whether a toolchain is present. It carried a
+C<check_prereqs> that said yes to everything, and a concrete overrode it
+with a check weaker than the provider's own, so the weaker answer was the
+one a command got. The question belongs to the provider, and
+L<Genesis::CI::Provider/check_prereqs> is where it is asked.
 
 =head2 cli_opts()
 

@@ -210,19 +210,12 @@ B<Examples:>
 
     $compiler->file_extension;   # '.yml'
 
-=head2 check_prereqs()
-
-Whether the C<fly> CLI is on the PATH. When it is not, the reason is
-reported with the two ways to install it, because a pipeline cannot be set
-without it and an operator who has never installed C<fly> has no reason to
-know where it comes from.
-
-B<Returns:> 1 when C<fly> is present, and 0 with the reason reported when
-it is not.
-
-B<Examples:>
-
-    exit 86 unless $compiler->check_prereqs;
+This class no longer answers whether C<fly> is there. Its copy asked only
+whether C<fly> was on the path, while the provider's asks for a version
+too, and the weaker copy was the live one because a command called it on
+whatever the compile handed back. The question goes to
+L<Genesis::CI::Provider::Concourse/check_prereqs> now, which also enforces
+the floor a repository declares as C<pipeline.provider.min_fly_version>.
 
 =head2 cli_opts()
 
@@ -272,6 +265,13 @@ declared.
 
 The schema comes from the provider this compiler holds, which is why this
 is an instance method: a class method has no provider to ask.
+
+The Concourse team's default arrives this way, and this is the only way
+it arrives. This class once held a C<DEFAULT_TEAM> of its own and both
+copies had to be kept in step by hand. Every reader of the team here goes
+through C<provider_option>, which reads the operator's block and falls
+back to what the provider's schema declares, so the team a pipeline is
+set under and the team the declaration names are the same value.
 
 B<Returns:> a hash reference of key name to default value.
 
@@ -396,6 +396,11 @@ C<target> is the C<fly> target and is required, C<team> the Concourse
 team, C<pipeline_name> the name to set it under, C<pause_after_set>,
 C<expose>, and C<insecure> the switches of the same names, C<dry-run> to
 print rather than set, and C<yes> to skip the confirmation.
+
+An option the caller leaves out is resolved through C<provider_option>,
+so the team falls back to the operator's block and then to the default
+the provider's schema declares, and nothing here reads a second copy of
+that default.
 
 =back
 

@@ -159,6 +159,24 @@ sub _parse_genesis_config {
 		$parsed{env_dir} = $self->{top} ? $self->{top}->path() : '.';
 	}
 
+	# The pipeline's own name, which the v3 schema declares as pipeline.name
+	# and describes as falling back to the deployment type.  Nothing carried
+	# it this far, so the AST every command reads the name off carried none
+	# and a repository configured entirely from .genesis/config was refused
+	# before any provider was asked for anything.  The fallback is the one
+	# the Concourse deploy already resolves the name by, so the name a
+	# pipeline is set under and the name the AST holds are the same name.
+	#
+	# The block is copied rather than written into, because it comes off the
+	# configuration the caller still holds and a parse should not change what
+	# it read.
+	$parsed{pipeline} = {%{$parsed{pipeline}}};
+	$parsed{pipeline}{metadata} = {
+		%{$parsed{pipeline}{metadata} || {}},
+	};
+	$parsed{pipeline}{metadata}{name} //= $data->{name}
+		// ($self->{top} ? $self->{top}->type : undef);
+
 	$parsed{_source_format} = 'genesis-config';
 	$parsed{_source_path}   = $self->{top}
 		? $self->{top}->path('.genesis/config')
