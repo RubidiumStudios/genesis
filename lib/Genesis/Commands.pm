@@ -79,7 +79,16 @@ use constant { # {{{
 	BLANK_OPTIONS => 0,
 	BASE_OPTIONS  => 1,
 	REPO_OPTIONS  => 2,
-	ENV_OPTIONS   => 3
+	ENV_OPTIONS   => 3,
+
+	# Branch classes (D81)
+	#
+	# Every pipeline-aware command belongs to one of these two, declared at
+	# its registration beside its scope and group.  The one declaration
+	# drives the refusal off a forbidden branch and the marker in the help
+	# listing, so the two can never disagree about what a command expects.
+	PRE_DEPLOY     => 'pre-deploy',
+	DEPLOYED_STATE => 'deployed-state',
 }; # }}}
 
 our @global_options = ( # {{{
@@ -174,10 +183,27 @@ sub define_command { # {{{
 		no_vault           => 0,
 		function_group     => GENESIS,
 		option_group       => BASE_OPTIONS,
-		option_passthrough => 0
+		option_passthrough => 0,
+		branch_class       => undef,
+		branch_target      => undef,
 	};
 
 	$PROPS{$name} = {%$default_props, %$props};
+
+	# A misspelled class would silently gate nothing, which is the failure
+	# mode D81's single declaration exists to rule out, so it is a bug.
+	bug(
+		"Command #C{$name} declares the branch class #y{%s}; ".
+		"the only classes are #y{%s} and #y{%s}.",
+		$PROPS{$name}{branch_class}, PRE_DEPLOY, DEPLOYED_STATE
+	) if defined($PROPS{$name}{branch_class})
+		&& $PROPS{$name}{branch_class} ne PRE_DEPLOY
+		&& $PROPS{$name}{branch_class} ne DEPLOYED_STATE;
+
+	bug(
+		"Command #C{$name} declares a branch target without a branch class."
+	) if defined($PROPS{$name}{branch_target})
+		&& !defined($PROPS{$name}{branch_class});
 
 	# extended_handlers implies option_passthrough: the main parser
 	# must leave unrecognised flags in @args for the handlers to claim.
@@ -524,6 +550,22 @@ sub append_options { # {{{
 	return $COMMAND_OPTIONS;
 } # }}}
 
+# _branch_class_marker - the help marker for a command's declared class {{{
+#
+# D81 asks that an operator reading `genesis help` sees which commands
+# expect control and which expect an environment.  The marker is computed
+# from the same property the gate reads, so the listing and the refusal
+# cannot drift apart.
+sub _branch_class_marker {
+	my ($cmd) = @_;
+	my $class = $PROPS{$cmd}{branch_class} or return '';
+	return " #Ci{[control]}"    if $class eq PRE_DEPLOY;
+	return " #Mi{[env branch]}" if $class eq DEPLOYED_STATE;
+	return '';
+}
+
+# }}}
+
 sub command_help { # {{{
 	my ($msg, $rc) = @_;
 	$rc = $msg ? 1 : 0 unless defined($rc);
@@ -633,6 +675,7 @@ sub command_help { # {{{
 				my @aliases = grep {defined($_)} ($PROPS{$cmd}{alias}, @{$PROPS{$cmd}{aliases}||[]});
 				$summary .= " #G{(alias".(@aliases > 1 ? 'es' : '').": ".join(', ',@aliases).")}";
 			}
+			$summary .= _branch_class_marker($cmd);
 			$out .= wrap(
 				$summary, terminal_width, $label, $cmd_width+3+$scope_width, $cont_prefix
 			)."\n";
