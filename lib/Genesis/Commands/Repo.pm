@@ -209,6 +209,23 @@ sub _repo_init_validate {
 		my $enclosing_git = Service::Git->new('.');
 		my $branch = $enclosing_git->current_branch;
 		if (!defined($branch) || $branch ne $control_branch) {
+			# A repository with nothing committed yet is one an operator
+			# can easily be standing in here, and current_branch names no
+			# branch there.  symbolic-ref still answers before the first
+			# commit, so the name is read through that and the phrase says
+			# the branch has no commits yet, in the words a session uses
+			# for the same state.  An operator standing on an unborn
+			# control is then told what the repository is missing rather
+			# than told they are not on control, which they are.  Only a
+			# HEAD that names no branch at all is left with <no branch>.
+			my $standing_on = $branch;
+			unless (defined $standing_on) {
+				my $unborn = $enclosing_git->_checked_out_branch;
+				$standing_on = defined $unborn
+					? "$unborn, which has no commits yet"
+					: '<no branch>';
+			}
+
 			bail(
 				"Configuring a CI provider requires the enclosing git ".
 				"repository to be on a branch named #C{%s}, but it is ".
@@ -219,15 +236,7 @@ sub _repo_init_validate {
 				"  or, if it doesn't exist yet:\n\n".
 				"    git checkout -b %s\n",
 				$control_branch,
-				# A repository with nothing committed yet is one an
-				# operator can easily be standing in here, and
-				# current_branch names no branch there, so the name
-				# is read through symbolic-ref instead, which still
-				# answers before the first commit.  The operator is
-				# then told which unborn branch they are on rather
-				# than that they are on none.
-				$branch // $enclosing_git->_checked_out_branch
-					// '<no branch>',
+				$standing_on,
 				$control_branch,
 				$control_branch,
 				$control_branch

@@ -32,10 +32,16 @@ subtest 'a held switch lock does not block genesis new' => sub {
 
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'new', 'prod');
 
+	# The two sentences a session raises at a held lock, held in one
+	# alternation.  It is spelled without /x, because /x would discard the
+	# spaces inside both of them and leave two run-together words that
+	# nothing can match, and an unlike that cannot match passes on a run
+	# that printed the whole refusal.
+	my $refusal = 'Another Genesis process is using this working tree|'.
+		'Only one session may switch branches';
+
 	is($exit, 0, 'the run proceeded while the lock was held');
-	unlike($err,
-		qr/Another Genesis process is using this working tree|
-		   Only one session may switch branches/xi,
+	unlike($err, qr/$refusal/i,
 		'and printed none of the refusal a session meets at a held lock');
 	is($git->current_branch, 'add-prod',
 		'the operator is on the branch they chose');
