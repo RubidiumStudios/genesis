@@ -12,6 +12,13 @@ use Genesis::UI;
 use JSON::PP;
 
 # bosh - provide a wrapper around the bosh command {{{
+#
+# Returns the status it would once have exited with, because it is a
+# deployed-state command and it runs inside the branch session the gate
+# opened.  A command that exits under that gate never reaches the finish,
+# so the session is still open when the process ends and the last-resort
+# net puts the branch back instead.  The dispatcher exits with what this
+# returns, once the session is closed.
 sub bosh {
 	append_options(redact => ! -t STDOUT);
 
@@ -29,7 +36,7 @@ sub bosh {
 				"\n".
 				"This will set the BOSH environment variables in the current shell"
 			);
-			exit 1;
+			return 1;
 		}
 		my %bosh_envs = $bosh->environment_variables
 			unless in_controlling_terminal;
@@ -38,10 +45,10 @@ sub bosh {
 			output 'export %s="%s"', $_, $escaped_value;
 		}
 		info "Exported environmental variables for BOSH director %s", $bosh->{alias};
-		exit 0;
+		return 0;
 	} else {
 		my ($out, $rc) = $bosh->execute({interactive => 1, dir => $ENV{GENESIS_ORIGINATING_DIR}}, @_);
-		exit $rc;
+		return $rc;
 	}
 }
 

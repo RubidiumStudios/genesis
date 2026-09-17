@@ -292,6 +292,12 @@ sub information {
 	}
 
 	info "$out\n#c{%s}\n", "=" x terminal_width;
+
+	# A deployed-state command hands its status back rather than exiting,
+	# so the branch session the gate opened closes before the process does
+	# and the dispatcher exits with what is returned here.  Nothing above
+	# fails without bailing, so a return at all is a run that succeeded.
+	return 0;
 }
 
 sub lookup {

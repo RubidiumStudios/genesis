@@ -105,6 +105,12 @@ C<T>) are stripped before matching.
 
 =back
 
+B<Returns:> C<0>.  C<info> declares C<DEPLOYED_STATE>, so it runs inside the
+branch session the gate opened and hands its status back rather than exiting
+with it, and C<run_command> exits on what it returns once that session is
+closed.  Nothing in the function fails without bailing, so a return at all is
+a run that succeeded.
+
 B<Errors:>
 
 =over 4

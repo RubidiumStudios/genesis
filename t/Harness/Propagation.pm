@@ -42,7 +42,7 @@ our @EXPORT = qw/
 	set_repo_config move_on_r_at
 
 	fixture_vault fixture_applied fixture_pipeline_record certify
-	fixture_hold fixture_proposed break_vault restore_vault
+	fixture_hold fixture_proposed fixture_director break_vault restore_vault
 	record_at vault_read_log fixture_preflight fixture_kit
 	fixture_command install_compiled_kit shimmed_git real_tool
 	fixture_fly
@@ -2509,6 +2509,35 @@ sub fixture_proposed {
 		number         => $opts{pr} // $opts{number},
 		url            => $opts{url},
 		at             => $self->_now($opts{at}),
+	);
+}
+
+# }}}
+# fixture_director - the exodus a BOSH director is reached through {{{
+#
+# A row that runs one of the BOSH commands needs an environment Genesis can
+# build a director out of, and the five keys below are what
+# Service::BOSH::Director::from_exodus validates before it will build one.
+# The record sits beside the deployment record certify writes, at the
+# environment's own exodus path, because that is where a create-env director
+# publishes its own connection details and where --self reads them from.
+#
+# kit_name is bosh rather than dev, because from_exodus refuses a record
+# whose kit is not a director unless the record says otherwise, and a row
+# that wanted to say otherwise would be saying it in three places.
+#
+# Nothing here is reachable: the url names an address no test dials, and the
+# commands under test are driven through the fake bosh on
+# GENESIS_BOSH_COMMAND rather than over the wire.
+sub fixture_director {
+	my ($self, $env, %opts) = @_;
+	return $self->_write_record($self->env_path($env, %opts),
+		url            => $opts{url}      // 'https://10.0.0.4:25555',
+		admin_username => $opts{username} // 'admin',
+		admin_password => $opts{password} // 'harness-director-password',
+		ca_cert        => $opts{ca_cert}
+			// "-----BEGIN CERTIFICATE-----\nharness\n-----END CERTIFICATE-----\n",
+		kit_name       => $opts{kit_name} // 'bosh',
 	);
 }
 
