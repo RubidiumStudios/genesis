@@ -1146,6 +1146,19 @@ to standard error instead. The exit status is saved and put back around the
 whole of it, because the git the abort shells out to would otherwise overwrite
 the code the command chose.
 
+B<The notice is printed on a zero exit alone.> A process already exiting
+non-zero has told the operator why it stopped, and a command that refuses
+inside a session exits before C<finish> is reached, so the notice would land
+underneath the refusal and bury it. On such a run the branch goes back and
+nothing is said. On a zero exit nobody has explained anything, and the notice
+is the only account of why the branch moved.
+
+The silence covers an abort that did what it came for and nothing else. One
+that could not discard the changes, or could not return to the branch C<begin>
+recorded, leaves the operator standing somewhere they did not ask to be, and
+it says so whatever the exit status. The branch is read back and compared
+against the recorded one to tell the two apart.
+
 B<Parameters:> None.
 
 B<Returns:> C<$self>, so it chains.

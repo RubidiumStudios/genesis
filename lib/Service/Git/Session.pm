@@ -919,7 +919,26 @@ sub _register_net {
 		} or do {
 			my $err = $@ || 'the restore failed';
 			$err =~ s/\s+$//;
-			print STDERR "\n$err\n";
+
+			# A process already exiting non-zero has told the operator why
+			# it stopped, and the notice explains nothing they asked
+			# about: a command that refuses inside a session exits before
+			# finish is reached, and a second sentence underneath the
+			# refusal buries it.  So the branch goes back and nothing is
+			# said.  On a zero exit nobody has explained anything, and the
+			# notice is the only account of why the branch moved.
+			#
+			# The silence is only for an abort that did what it came for.
+			# One that could not discard, or could not return, leaves the
+			# operator standing somewhere they did not ask to be, and that
+			# is worth saying whatever the status, so the branch is read
+			# back and compared against the one begin recorded.
+			my $restored = eval {
+				($me->{git}->current_branch // '')
+					eq ($me->{origin}{branch} // "\0")
+			} ? 1 : 0;
+
+			print STDERR "\n$err\n" unless $status && $restored;
 		};
 
 		$? = $status;
