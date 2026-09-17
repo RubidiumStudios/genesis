@@ -528,7 +528,10 @@ B<Errors:> raises "Genesis knows the '...' provider but has no compiler
 for it yet...", at C<Genesis::Exit::CONFIG>, when C<required> is passed
 and the registry names no compiling class. The refusal comes from
 L<Genesis::CI::ProviderRegistry>, so it reads the same wherever a
-compiler is asked for.
+compiler is asked for. A call that passes no C<ast> raises a C<bug()>
+from L<Genesis::CI::ProviderCompiler/new>, naming this method as the
+route, because a compiler blessed over an undefined AST fails later and
+less helpfully.
 
 B<Examples:>
 

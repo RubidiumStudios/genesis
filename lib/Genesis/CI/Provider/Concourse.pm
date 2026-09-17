@@ -13,7 +13,7 @@ use POSIX qw(mktime);
 # key's default.  The class that emits the pipeline kept a second copy
 # and fell back to it when it compiled, and a comment above each asked a
 # reader to keep the two in step, which is a rule nothing enforced.  It
-# reads the team off the provider it holds now.
+# resolves the team through the fragment below now.
 use constant {
 	DEFAULT_TEAM => 'main',
 };
@@ -317,11 +317,6 @@ sub label { 'Concourse' }
 
 # }}}
 # team - the Concourse team, read and written {{{
-#
-# The one DEFAULT_TEAM lives here, beside the fragment that declares it
-# as the key's default.  The compiler used to keep a second copy and the
-# comment above each said the two had to agree, which is a rule nothing
-# enforced.
 sub team {
 	my ($self, $value) = @_;
 	$self->{team} = $value if defined $value;

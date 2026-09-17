@@ -117,7 +117,7 @@ subtest 'pipeline.public still decides the visibility' => sub {
 };
 
 subtest 'the provider block is not checked a second time' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	require Genesis::CI::Compiler::Validator;
 	ok !Genesis::CI::Compiler::Validator->can('_validate_provider_section'),
@@ -130,10 +130,19 @@ subtest 'the provider block is not checked a second time' => sub {
 	# file on the compiler side names the declaration at all.
 	# Comment lines are skipped, because the base says in prose where the
 	# forwarder went and why, and saying so is not reading anything.
+	my @swept = glob('lib/Genesis/CI/Compiler/*.pm lib/Genesis/CI/ProviderCompiler.pm');
+
+	# The sweep is satisfied by an empty answer, and a glob that matches
+	# nothing gives that answer, so a family that moved out from under
+	# this row would read as a clean sweep rather than as a broken one.
+	# What the sweep read is asserted first, so that never happens
+	# quietly.
+	ok scalar(@swept), 'the sweep read the compiler side at all';
+
 	my @found = grep {
 		grep {!m/^\s*#/ && m/provider_options_schema/}
 			split(/\n/, slurp($_) // '')
-	} glob('lib/Genesis/CI/Compiler/*.pm lib/Genesis/CI/ProviderCompiler.pm');
+	} @swept;
 	is_deeply [@found], [],
 		'and no file on the compiler side reads the fragment';
 };
