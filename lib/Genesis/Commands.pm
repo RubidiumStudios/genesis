@@ -314,8 +314,15 @@ sub run_command { # {{{
 		warning({label => "DEPRECATED"}, $msg);
 	}
 	_gate_pipeline_on_legacy_ci_yml();
-	_gate_branch_class();
-	$RUN{$COMMAND}(@COMMAND_ARGS);
+
+	# The branch gate is handed the command rather than returning to it,
+	# because a deployed-state command reads inside a branch session and
+	# that session has to close where the function returns.  A session
+	# closed from an exit hook closes too late: the session hangs its own
+	# last-resort net on END when it opens, a hook registered after that
+	# one runs after it, and a bail out of END replaces the status the
+	# command chose with 1.
+	_gate_branch_class(sub {$RUN{$COMMAND}(@COMMAND_ARGS)});
 	exit 0
 } # }}}
 
@@ -337,6 +344,15 @@ sub run_command { # {{{
 # on its own when there is no repository root, so a failure there hands back
 # undef and the branch-class gate stands aside rather than speaking before
 # the command's own refusal.
+#
+# A directory is only a stable key while the tree in it holds still, and the
+# deployed-state switch moves it: it checks out the environment's branch in
+# this same process, so the repository configuration and the environment
+# files under that directory become another branch's.  A Top kept from
+# before the switch would answer for the branch the operator stood on, so
+# _reset_gate_context drops what is kept and the next caller loads the tree
+# as it now is.  _gate_deployed_state calls it on both sides of the command,
+# once after the switch and once after the session restores.
 {
 	my %CONTEXT;
 	sub _gate_context {
@@ -350,6 +366,11 @@ sub run_command { # {{{
 
 		$CONTEXT{$dir} = [$top, $git];
 		return @{$CONTEXT{$dir}};
+	}
+
+	sub _reset_gate_context {
+		%CONTEXT = ();
+		return;
 	}
 } # }}}
 
@@ -380,100 +401,151 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	);
 } # }}}
 
-# _gate_branch_class - run a command's declared class before the command {{{
+# _gate_branch_class - run a command under its declared class {{{
 #
 # D81 puts the class at the registration so that one declaration drives both
 # the refusal and the help marker, which means the enforcement belongs here,
 # beside the legacy ci.yml gate, and not inside each command.
+#
+# The command's own function comes in as $fn and every path here runs it.  A
+# pre-deploy command is refused before it runs or runs where it stands, and a
+# deployed-state command runs inside a branch session, which is why the gate
+# runs the function rather than returning to a caller that would.
 sub _gate_branch_class {
-	my $class = command_properties()->{branch_class} or return;
+	my ($fn) = @_;
+
+	my $class = command_properties()->{branch_class};
+	return $fn->() unless $class;
 
 	# propagate switches to control inside the session it already has, so
 	# the gate leaves it where it stands (D65, D81).  The exemption is read
 	# before anything is loaded, because loading a Top names the root and
 	# the vault target in the environment and a command the gate never gates
 	# should not be handed those as a side effect.
-	return if (command_properties()->{branch_target} // '') eq 'control';
+	return $fn->() if (command_properties()->{branch_target} // '') eq 'control';
 
 	# Only meaningful when the command has a repository to read a Top from.
-	return unless has_scope('repo', 'env');
+	return $fn->() unless has_scope('repo', 'env');
 
+	# One root and one handle, built once and read by both arms.  The
+	# pre-deploy assertion classifies the branch through the handle and the
+	# deployed-state switch opens its session on it, and two handles onto
+	# one working tree would key two sessions, which is what I9 forbids.
 	my ($top, $git) = _gate_context();
-	return unless $top && $git;
+	return $fn->() unless $top && $git;
 
 	# Outside a pipeline every command behaves as it always has, on any
 	# branch, which is D80's last sentence and D81's silent premise.
-	return unless $top->pipeline_enabled;
+	return $fn->() unless $top->pipeline_enabled;
 
-	# Two pre-deploy commands make no network call of their own, and the
-	# gate makes none for them either.  pipeline-status says so with
-	# --no-refresh (D40).  pipeline-describe resolves the repository's own
-	# configuration out of files, so it holds no ref a refresh could make
-	# current, and a fetch would refuse offline what the command can always
-	# answer from disk.  Both are read here rather than in the assertion,
-	# because the option and the command are the gate's to know.
-	#
-	# The two names sit in the gate for now.  D81 would rather a
-	# registration declared that it needs no refresh, the way it declares
-	# its class, and the step that gives registrations such an attribute
-	# moves these names onto it, M17 for pipeline-status.
-	my $refresh = get_options()->{'no-refresh'} ? 0 : 1;
-	$refresh = 0 if is_equivalent_command($COMMAND, 'pipeline-describe');
+	if ($class eq PRE_DEPLOY) {
+		# Two pre-deploy commands make no network call of their own, and
+		# the gate makes none for them either.  pipeline-status says so
+		# with --no-refresh (D40).  pipeline-describe resolves the
+		# repository's own configuration out of files, so it holds no ref
+		# a refresh could make current, and a fetch would refuse offline
+		# what the command can always answer from disk.  Both are read
+		# here rather than in the assertion, because the option and the
+		# command are the gate's to know.
+		#
+		# The two names sit in the gate for now.  D81 would rather a
+		# registration declared that it needs no refresh, the way it
+		# declares its class, and the step that gives registrations such
+		# an attribute moves these names onto it, M17 for pipeline-status.
+		my $refresh = get_options()->{'no-refresh'} ? 0 : 1;
+		$refresh = 0 if is_equivalent_command($COMMAND, 'pipeline-describe');
 
-	# genesis new is about to add an environment whose name may be the
-	# branch it stands on, and that collision is one the gate cannot see
-	# from the branch alone, so the name the command was given goes down
-	# with it.
-	my $adding;
-	$adding = $COMMAND_ARGS[0] if is_equivalent_command(create => $COMMAND)
-		&& defined($COMMAND_ARGS[0]);
-	$adding =~ s/\.yml$// if defined $adding;
+		# genesis new is about to add an environment whose name may be the
+		# branch it stands on, and that collision is one the gate cannot
+		# see from the branch alone, so the name the command was given
+		# goes down with it.
+		my $adding;
+		$adding = $COMMAND_ARGS[0] if is_equivalent_command(create => $COMMAND)
+			&& defined($COMMAND_ARGS[0]);
+		$adding =~ s/\.yml$// if defined $adding;
 
-	require Genesis::BranchClass;
-	return Genesis::BranchClass::assert_pre_deploy($top, $git,
-		refresh => $refresh, adding => $adding)
-		if $class eq PRE_DEPLOY;
+		require Genesis::BranchClass;
+		Genesis::BranchClass::assert_pre_deploy($top, $git,
+			refresh => $refresh, adding => $adding);
+		return $fn->();
+	}
 
-	return _gate_deployed_state($top, $git)
+	return _gate_deployed_state($top, $git, $fn)
 		if $class eq DEPLOYED_STATE;
 
-	return;
+	return $fn->();
 } # }}}
 
-# _gate_deployed_state - switch to the environment's branch in a session {{{
+# _gate_deployed_state - run a command on the environment's branch {{{
 #
 # D81: a deployed-state command operates on what an environment is running
-# or is about to run, so it switches to <env>/<type> inside a session,
-# because that branch holds exactly what was delivered and the hooks need a
-# working tree.  The session is opened here rather than inside each command,
-# so that deploy, info, and the bosh subcommands share one switch.
+# or is about to run, so it reads <env>/<type> inside a session, because
+# that branch holds exactly what was delivered and the hooks need a working
+# tree.  The session is opened here rather than inside each command, so that
+# deploy, info, and the bosh subcommands share one switch.
 sub _gate_deployed_state {
-	my ($top, $git) = @_;
+	my ($top, $git, $fn) = @_;
 
 	# An operator may name the environment by a path, so the leading
 	# directories and the suffix both come off, which is what the deploy
 	# does to the same argument in Genesis::Commands::Env::deploy.  Two
 	# derivations of one name are two chances to disagree, so this one is
-	# written to match the one M13 will retire.
+	# written to match the one M13 will retire.  set_top_path has already
+	# turned a path resolving to a file into its basename by the time this
+	# runs, so the directory half earns its place by keeping the two
+	# derivations identical rather than by the work it does here.
 	my $name = $COMMAND_ARGS[0];
-	return unless defined($name) && length($name);
+	return $fn->() unless defined($name) && length($name);
 	$name =~ s{^.*/}{};
 	$name =~ s/\.ya?ml$//;
+
+	# The branch tip.  D87 has a deployed-state command default to the
+	# commit the environment last deployed, and M14 supplies that commit
+	# through deployed_target; until it does, the tip is what the session
+	# stands on.
+	my $branch = $top->branch_for($name);
+
+	# An environment that has never been delivered has no branch to read,
+	# and switching to a name nothing resolves refuses at DATAERR with a
+	# sentence about a commit rewritten on the remote.  Every clause of
+	# that is wrong for an environment that simply has not deployed yet,
+	# so the command runs where it stands and says in its own words that
+	# there is no deployment to report.  Both halves the switch would ask
+	# about are asked here, because git's own checkout makes a local branch
+	# out of one it has only fetched and the switch knows that too.
+	my $remote = $git->default_remote;
+	return $fn->() unless $git->branch_exists($branch)
+		|| ($remote && $git->branch_exists("$remote/$branch"));
 
 	require Service::Git::Session;
 	my $session = $git->session(control => $top->control_branch);
 	$session->begin;
-	$session->switch($top->branch_for($name));
+	$session->switch($branch);
 
-	# finish restores the branch begin recorded and releases the switch
-	# lock.  A command that died leaves a non-zero status, and abort is
-	# what discards whatever it left behind before returning.
-	at_exit(sub {
-		my ($status) = @_;
-		$status ? $session->abort : $session->finish;
-	});
+	# The directory now holds another branch's files, so the root the gate
+	# kept is dropped.  The $top and $git above are the gate's own and go
+	# no further than this sub, but _gate_context hands its answer to
+	# whoever asks next, and after the switch that answer would describe
+	# the branch the operator came from.  The command loads its own root
+	# from the tree it is standing on.
+	_reset_gate_context();
 
-	return $session;
+	# The command runs inside the session and the session closes where the
+	# function returns.  Nothing here is left to an exit hook.  The session
+	# hangs its own last-resort net on END when it opens, so a hook
+	# registered afterwards runs second and finds the session already
+	# aborted, and a bail out of END replaces the status the command chose
+	# with 1.  A command that refuses therefore exits with its own code and
+	# the net puts the working tree back, which is the job the net exists
+	# for.
+	my @result = $fn->();
+	$session->finish;
+
+	# The tree has moved back, so what was loaded on the environment's
+	# branch is dropped in its turn.
+	_reset_gate_context();
+
+	return wantarray ? @result : $result[0];
 } # }}}
 
 sub has_command { # {{{

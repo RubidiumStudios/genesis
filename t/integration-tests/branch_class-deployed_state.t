@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # Proves T324: a deployed-state command switches to the environment's own
-# branch inside a session for its read, and finish returns the operator to
-# the branch they stood on.
+# branch inside a session for its read, the session closes where the command
+# returns, and the operator is left on the branch they stood on.
 use strict;
 use warnings;
 use utf8;
@@ -11,6 +11,7 @@ use lib 't';
 use helper;
 use Harness::Propagation;
 
+use Fcntl qw/:flock/;
 use Test::More;
 
 # make_harness runs fixture_vault itself unless the row says vault => 0, so
@@ -43,7 +44,23 @@ deliver($h, 'qa', control => $control, files => {'qa.yml' => $delivered});
 refresh($h, 'a');
 certify($h, 'qa', control_commit => $control);
 
-subtest 'info reads the environment branch and returns' => sub {
+# The switch lock is per working tree and it is never unlinked, so the
+# question a row can ask of it afterwards is whether anybody still holds it.
+my $lock_path = $git->git_dir . '/genesis-session.lock';
+
+# An assertion rather than a state builder, so it lives here beside the row
+# that reads it rather than in the harness.
+sub lock_is_free {
+	my ($name) = @_;
+	local $Test::Builder::Level = $Test::Builder::Level + 1;
+	open(my $fh, '+>>', $lock_path) or return fail("$name (cannot open the lock)");
+	my $free = flock($fh, LOCK_EX | LOCK_NB) ? 1 : 0;
+	flock($fh, LOCK_UN) if $free;
+	close $fh;
+	return ok($free, $name);
+}
+
+subtest 'info reads the environment branch and closes the session' => sub {
 	stand_on($h, $h->control);
 
 	my ($out, $err, $exit) = run_genesis($h, 'qa', 'info');
@@ -53,8 +70,20 @@ subtest 'info reads the environment branch and returns' => sub {
 		'the read saw the file the deployment branch carries');
 	unlike("$out$err", qr/marker:\s*control/,
 		'and not the one control carries');
-	is($git->current_branch, $h->control,
-		'the operator is back on the branch they stood on');
+
+	# The session's own net aborts a session that is still open when the
+	# process exits, and says so.  A gate that leaves the closing to an
+	# exit hook is a gate whose every successful run meets the net, so
+	# this row fails against one and passes only where the gate closed the
+	# session itself.
+	unlike("$out$err", qr/branch session still open/,
+		'the session was closed by the command rather than by the net');
+
+	# Green on arrival, because the kernel drops a flock when its holder
+	# exits whatever the run did.  It catches a gate that hands the session
+	# to something outliving the command, which would leave a live holder
+	# named in the lock file.
+	lock_is_free('the switch lock is free again');
 };
 
 subtest 'the switch happens from a feature branch too' => sub {
@@ -66,19 +95,74 @@ subtest 'the switch happens from a feature branch too' => sub {
 	is($exit, 0, 'the read succeeded');
 	like("$out$err", qr/marker:\s*delivered/,
 		'it still read the deployment branch');
-	is($git->current_branch, 'reading',
-		'and finish returned the operator to the feature branch');
 };
 
 subtest 'a deployed-state command is not gated as pre-deploy' => sub {
 	# Standing on the deployment branch itself is not a refusal for this
-	# class, because that is exactly where the command belongs.
+	# class, because that is exactly where the command belongs.  The first
+	# two rows are green on arrival, since this command succeeded here
+	# before the class existed; the refusal row catches a gate that handed
+	# info to assert_pre_deploy, whose refusal says "is a deployment
+	# branch", and the marker row catches a switch that is not a no-op
+	# when the tree already stands where it is going.
 	stand_on($h, $h->slug('qa'));
 	my ($out, $err, $exit) = run_genesis($h, 'qa', 'info');
 
 	is($exit, 0, 'no pre-deploy refusal was raised');
 	unlike($err, qr/deployment branch/i,
 		'and the pre-deploy condition was never evaluated');
+	like("$out$err", qr/marker:\s*delivered/,
+		'the read still saw the deployment branch');
+};
+
+subtest 'a refusal inside the command keeps its own exit code' => sub {
+	stand_on($h, $h->control);
+
+	# Two arguments too many, which information refuses with its usage
+	# error.  The refusal is raised inside the command, with the session
+	# open, so the code it exits is the code the whole run should carry.
+	# A gate that closes its session from an exit hook loses it: the hook
+	# bails after the command has already chosen 2, and the run ends 255.
+	#
+	# The usage code stands in for the DATAERR the class will one day
+	# refuse with, because no refusal inside info carries a named exit
+	# code today and any code that is neither 0 nor 1 proves the point.
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'info', 'one', 'two');
+
+	is($exit, 2, 'the command\'s own usage code survived the session');
+	like("$out$err", qr/Usage:/,
+		'and the operator was shown the usage the command raised');
+};
+
+subtest 'an environment that was never delivered is not switched' => sub {
+	# staging has a file on control and no deployment branch, which is
+	# every environment between genesis new and its first deploy.
+	write_env_file($h, 'staging', params => {marker => 'control'}, commit => 0);
+	my $staging = helper::get_file($h->a . '/staging.yml');
+	commit_on_control($h,
+		files => {'staging.yml' => $staging},
+		message => 'Add staging on control', push => 1);
+	stand_on($h, $h->control);
+
+	my ($out, $err, $exit) = run_genesis($h, 'staging', 'info');
+
+	like("$out$err", qr/No record of deployment found/,
+		'the command said what it has always said');
+	unlike("$out$err", qr/not in this repository/,
+		'and met no refusal about a commit the repository lacks');
+	is($exit, 0, 'and exited as it did before the class existed');
+};
+
+subtest 'a command with no environment opens no session' => sub {
+	stand_on($h, $h->control);
+
+	my ($out, $err, $exit) = run_genesis($h, 'info');
+
+	is($exit, 2, 'the usage error is what the operator gets');
+	unlike("$out$err", qr/file an issue/i,
+		'rather than a bug report about an undefined name');
+	unlike("$out$err", qr/branch session still open/,
+		'and no session was opened to be aborted');
 };
 
 done_testing;
