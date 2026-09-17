@@ -1431,16 +1431,11 @@ sub _push_one {
 	# every deployment branch, whose history is append-only.  The refusal
 	# sits beside the refspec it would otherwise build, because this is the
 	# one place every caller passes through, so Genesis never leaves the
-	# guarantee to the repository's own branch protection.  The words are
-	# push_append_only's own, so an operator who meets this rule on two
-	# commands meets one sentence rather than two.
-	bail(
-		"Refusing to push #C{%s}, because that would rewrite history on ".
-		"#C{%s}.\n\n".
-		"That branch is append-only, so recovery is a new commit that ".
-		"restores the content and never a force push.",
-		$branch, $remote
-	) if exists $spec->{expect} && $kind ne 'pr';
+	# guarantee to the repository's own branch protection.  The refusal
+	# itself is _refuse_rewrite, which push_append_only raises as well, so
+	# an operator who meets this rule on two commands meets one sentence.
+	_refuse_rewrite($branch, $remote)
+		if exists $spec->{expect} && $kind ne 'pr';
 
 	my $refspec = $spec->{delete}
 		? ":refs/heads/$branch"
@@ -1520,6 +1515,25 @@ sub _read_push_result {
 }
 
 # }}}
+# _refuse_rewrite - the one refusal both append-only paths raise {{{
+#
+# D31 makes control and every deployment branch append-only on R, and two
+# commands enforce that.  pipeline-apply checks the ancestry before it pushes,
+# and the publish refuses a lease before it builds a refspec.  The sentence
+# lives here so the two cannot come to word the same rule differently, since
+# an operator can meet it on either command.
+sub _refuse_rewrite {
+	my ($branch, $remote) = @_;
+	bail(
+		"Refusing to push #C{%s}, because that would rewrite history on ".
+		"#C{%s}.\n\n".
+		"That branch is append-only, so recovery is a new commit that ".
+		"restores the content and never a force push.",
+		$branch, $remote
+	);
+}
+
+# }}}
 # push_append_only - publish a branch without ever rewriting its history {{{
 #
 # D31 makes control and every deployment branch append-only on R, so the
@@ -1552,13 +1566,8 @@ sub push_append_only {
 		last;
 	}
 
-	bail(
-		"Refusing to push #C{%s}, because that would rewrite history on ".
-		"#C{%s}.\n\n".
-		"That branch is append-only, so recovery is a new commit that ".
-		"restores the content and never a force push.",
-		$branch, $remote
-	) if $previous && !$self->is_ancestor($previous, $local);
+	_refuse_rewrite($branch, $remote)
+		if $previous && !$self->is_ancestor($previous, $local);
 
 	run({dir => $self->{root},
 		onfailure => "Failed to push '$branch' to '$remote'"},
