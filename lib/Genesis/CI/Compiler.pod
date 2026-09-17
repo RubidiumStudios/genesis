@@ -12,7 +12,8 @@ Genesis::CI::Compiler - the CI pipeline compilation orchestrator
 
     # The result carries both halves of the provider.
     $result->{provider}->check_prereqs;       # is the toolchain there?
-    $result->{compiler}->deploy(%opts);       # set the pipeline
+    $result->{compiler}->graph_md;            # a flowchart of the pipeline
+    $result->{output}{'pipeline.yml'};        # what the compiler emitted
 
     # Ask whether a named directory holds a compilable pipeline.
     if (Genesis::CI::Compiler->can_compile($some_dir)) {
@@ -104,6 +105,11 @@ C<graph_md>, C<generate_description>, and the resolved options that
 C<provider_option> reads. C<ast> is the platform-agnostic tree, C<output>
 maps each emitted file name to its contents, and C<parsed> is the
 configuration as the parser read it.
+
+C<deploy> is the one of those a caller cannot reach from here yet. It
+wants the configuration that C<Genesis::CI::ProviderCompiler::Concourse>
+sets in C<parse>, and a compiler this method built has none, so it
+refuses with "Must call parse() before deploy()" before it sets anything.
 
 A provider the registry knows but has no compiler for is refused here
 rather than answered with nothing, because a run that reached this stage
@@ -350,11 +356,13 @@ B<Returns:> a hash reference of the same shape, with every mergeable file
 merged and every other file as it was.
 
 B<Errors:> raises a Genesis bug, "The compiler has no Genesis::Top", when
-the object was built without one. A temporary file it cannot write raises
-"Cannot write temporary override base ...", and a spruce merge that
-returns non-zero raises "Failed to apply ...: spruce merge returned
-non-zero" at C<Genesis::Exit::CONFIG>, the override being the operator's
-own file.
+the object was built without one. The temporary file each merge is based
+on can fail at three steps and refuses by name at each of them, with
+"Cannot write temporary override base ...", "Cannot write to temporary
+override base ...", and "Cannot flush temporary override base ...". A
+spruce merge that returns non-zero raises "Failed to apply ...: spruce
+merge returned non-zero" at C<Genesis::Exit::CONFIG>, the override being
+the operator's own file.
 
 B<Examples:>
 
