@@ -31,6 +31,11 @@ the pull request branch, and the artifacts branch are all derived, and a
 hand commit made on one of them is overwritten by the next propagate run.
 That is the one rule the refusal below enforces.
 
+Where the repository requires a pull request into control, the control
+branch is refused too, and the feature branch is the only place left to
+stand. That expectation follows C<control_requires_pr>, the key that
+already decides the branch protection, rather than a switch of its own.
+
 =head1 FUNCTIONS
 
 Nothing is exported. Every function is called by its full name, because
@@ -251,6 +256,12 @@ The refresh runs above the classification, so a run the gate goes on to
 refuse has refreshed control by the time it refuses. Where a command ends
 therefore says nothing about whether it refreshed.
 
+Standing on control is itself a refusal where C<$top-E<gt>control_requires_pr>
+is true, at C<Genesis::Exit::DATAERR>, because the protection that key
+derives blocks a direct push and a commit made on control then has no way
+to reach control through a pull request. The refusal names the key, so an
+operator can see which setting moved the expectation onto a feature branch.
+
 A detached HEAD is allowed through, because it is neither control nor
 derived and neither remedy the predicate offers can be carried out on it. A
 repository that has lost its control branch is repaired by the pre-flight,
@@ -295,6 +306,12 @@ command changes what will be delivered.>
 I<add-prod does not descend from the tip of control, and this command
 changes what will be delivered.> The remedy follows, and the exit is
 C<Genesis::Exit::DATAERR>.
+
+=item Refuses control where a pull request is required.
+
+I<control requires a pull request, so this command expects to run on a
+feature branch.> The key and the checkout that cuts the branch follow, and
+the exit is C<Genesis::Exit::DATAERR>.
 
 =item Refuses a remote it cannot reach.
 
