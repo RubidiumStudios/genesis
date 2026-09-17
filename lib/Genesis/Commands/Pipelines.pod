@@ -488,6 +488,48 @@ thing that let the pipeline's run and the operator's run differ.
 
 B<Returns:> Nothing.  The run prints its report as it goes.
 
+B<Exit status:>
+
+Under D97 the status says what the run as a whole came to, so a caller that
+reads nothing else can still tell a run that landed everything from one that
+landed part of it.  Every number below is named in L<Genesis::Exit>, and the
+paragraphs under B<Errors:> say what raises each of them.
+
+=over 4
+
+=item *
+
+0, where every environment in scope was published or held with its reason.
+
+=item *
+
+C<Genesis::Exit/TEMPFAIL> (75), a partial run, where any environment was left
+C<failed>, C<not attempted>, or C<publish rejected>, where control moved
+before the first push, or where the remote answered about no ref at all.  The
+next run repairs it, and nobody has to do anything first.
+
+=item *
+
+C<Genesis::Exit/ABORTED> (130), the run the operator declined when they were
+asked whether to publish.
+
+=item *
+
+C<Genesis::Exit/DATAERR> (65), an illegal initial state the first stage
+refused before anything was written.
+
+=item *
+
+C<Genesis::Exit/UNAVAILABLE> (69), where the vault answered an error for the
+applied record, which the run reads ahead of the walk.
+
+=item *
+
+1, the fatal system error of D82, where nothing the caller could have done
+differently would have helped.
+
+=back
+
 B<Errors:>
 
 Exits 1, which is D82's run-fatal class, where nothing the caller could do
