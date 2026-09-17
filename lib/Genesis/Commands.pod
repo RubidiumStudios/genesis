@@ -1696,6 +1696,12 @@ command promises to make no network call, so the flag is read here, where the
 options are, rather than in the assertion, which has no business knowing
 which command declared it.
 
+The name a command is about to add goes down with it as C<< adding => ... >>.
+C<genesis new> takes that name as its first argument, and a feature branch
+named for it could never stand beside the deployment branch the name will
+need, so the gate reads the argument here and the predicate compares it
+there.
+
 Returns early -- allowing the command through -- in five cases: the command
 declares no class; it has no repo or env scope, so there is no
 C<Genesis::Top> to read; the C<Top> could not be loaded; the repository has
@@ -1712,9 +1718,10 @@ B<Errors:>
 =item The refusals belong to C<Genesis::BranchClass::assert_pre_deploy>.
 
 This function raises none of its own.  The branch refusal names the branch,
-the class it belongs to, and the checkout that fixes it, and it exits
-C<Genesis::Exit::DATAERR>.  A remote that cannot be reached for the refresh
-exits C<Genesis::Exit::TEMPFAIL>.
+the class it belongs to or the condition it failed, and the checkout,
+rebase, or rename that fixes it, and it exits C<Genesis::Exit::DATAERR>.  A
+remote that cannot be reached for the refresh exits
+C<Genesis::Exit::TEMPFAIL>.
 
 =back
 
@@ -1722,7 +1729,9 @@ B<Examples:>
 
   _gate_branch_class();
   # no return value; bails when a pre-deploy command stands on a
-  # deployment, pull request, or artifacts branch
+  # deployment, pull request, or artifacts branch, on a feature branch
+  # that does not descend from control's tip, or on one named for an
+  # environment
 
 =head2 _parse_two_pass
 

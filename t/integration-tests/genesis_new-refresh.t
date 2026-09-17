@@ -106,8 +106,13 @@ subtest 'the command touches no deployment branch' => sub {
 };
 
 subtest 'it writes and commits on a feature branch too' => sub {
+	# The branch is cut from the refreshed tip rather than from copy A's
+	# own control ref, which the rows above committed to and which the
+	# teammate's published commit is missing from.  A feature branch that
+	# does not carry what control carries is refused, and this row is
+	# about where the command writes rather than about that refusal.
 	my $feature = 'add-prod6';
-	$git->create_branch($feature, $h->control);
+	$git->create_branch($feature, 'refs/remotes/origin/' . $h->control);
 	stand_on($h, $feature);
 
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'new', 'prod6');

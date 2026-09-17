@@ -365,8 +365,18 @@ sub _gate_branch_class {
 	my $refresh = get_options()->{'no-refresh'} ? 0 : 1;
 	$refresh = 0 if is_equivalent_command($COMMAND, 'pipeline-describe');
 
+	# genesis new is about to add an environment whose name may be the
+	# branch it stands on, and that collision is one the gate cannot see
+	# from the branch alone, so the name the command was given goes down
+	# with it.
+	my $adding;
+	$adding = $COMMAND_ARGS[0] if is_equivalent_command(create => $COMMAND)
+		&& defined($COMMAND_ARGS[0]);
+	$adding =~ s/\.yml$// if defined $adding;
+
 	require Genesis::BranchClass;
-	Genesis::BranchClass::assert_pre_deploy($top, $git, refresh => $refresh)
+	Genesis::BranchClass::assert_pre_deploy($top, $git,
+		refresh => $refresh, adding => $adding)
 		if $class eq PRE_DEPLOY;
 
 	return;

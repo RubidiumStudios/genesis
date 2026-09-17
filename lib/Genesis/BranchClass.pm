@@ -87,6 +87,67 @@ sub refresh_control {
 
 ### The pre-deploy assertion {{{
 
+# permitted_feature_branch - the three conditions of D81 {{{
+#
+# Returns a true first value when all three hold.  Otherwise it returns
+# false with the condition that failed and the fix for it, so the caller
+# writes one bail and the reasons stay here.  The one option is `adding`,
+# the environment name the command is about to create, because a branch may
+# collide with a name that does not exist yet.
+sub permitted_feature_branch {
+	my ($top, $git, $branch, %opts) = @_;
+
+	# It descends from control's tip as observed through T after a refresh,
+	# so it carries every environment file control has and a check for an
+	# existing environment is sound.
+	my $remote = $git->default_remote;
+	my $control_tip = $remote
+		? $git->sha('refs/remotes/' . $remote . '/' . $top->control_branch)
+		: $git->sha($top->control_branch);
+	return (
+		0,
+		sprintf(
+			"#C{%s} does not descend from the tip of #C{%s}",
+			$branch, $top->control_branch
+		),
+		sprintf(
+			"Rebase it onto the refreshed tip:\n\n    git rebase %s/%s\n",
+			$remote // 'origin', $top->control_branch
+		)
+	) unless $git->is_ancestor($control_tip, 'HEAD');
+
+	# Its name is not an environment's name, existing or being added, since
+	# a branch named prod2 occupies refs/heads/prod2 and pipeline-apply
+	# could then never create prod2/bosh (D66).
+	#
+	# The lookup is what finds the collision, and the key it matches on is
+	# an environment name, so the name handed to deployment_slug_for comes
+	# out of the lookup rather than out of the branch.  The two happen to
+	# be the same string in this one case, but the accessor takes an
+	# environment name and bugs out on anything else, so it is handed one
+	# by name and not by coincidence.
+	my %names = map {($_ => 1)} $top->pipeline_env_names;
+	$names{$opts{adding}} = 1 if defined($opts{adding}) && length($opts{adding});
+	if ($names{$branch}) {
+		my $env_name = $branch;
+		return (
+			0,
+			sprintf(
+				"#C{%s} is named for an environment, so #C{%s} could never be ".
+				"created beside it",
+				$branch, $top->deployment_slug_for($env_name)
+			),
+			sprintf(
+				"Rename the feature branch:\n\n    git branch -m %s add-%s\n",
+				$branch, $branch
+			)
+		);
+	}
+
+	return (1);
+}
+
+# }}}
 # assert_pre_deploy - refuse a pre-deploy command off a permitted branch {{{
 #
 # D81: a pre-deploy command runs on control or on a permitted feature
@@ -129,7 +190,21 @@ sub assert_pre_deploy {
 		$branch, $derived{$class}, $top->control_branch
 	) if exists $derived{$class};
 
-	return 1;
+	# The detached HEAD the comment above let through is let through here
+	# too.  It is no branch, so neither remedy the predicate offers can be
+	# carried out on it, and the two landed behaviours that own the state
+	# still speak for it.
+	return 1 if !defined($branch) || $branch eq 'HEAD';
+
+	my ($ok, $reason, $remedy) = permitted_feature_branch(
+		$top, $git, $branch, adding => $opts{adding}
+	);
+	return 1 if $ok;
+
+	bail({exitcode => Genesis::Exit::DATAERR()},
+		"%s, and this command changes what will be delivered.\n\n%s",
+		$reason, $remedy
+	);
 }
 
 # }}}
