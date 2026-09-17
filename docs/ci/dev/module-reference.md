@@ -415,8 +415,6 @@ BOSH lock and deployment lock resources.
 
 `_task_config(...)` — deploy/show-changes task config with all env vars.
 
-`_cache_task_config(...)` — cache generation task config.
-
 `_errand_config(...)` — errand execution task config.
 
 `_notification_step($ast, $message)` — slack/email notification plan step.

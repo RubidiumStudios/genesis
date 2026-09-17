@@ -478,10 +478,9 @@ subtest 'ASTBuilder - no auto-population without explicit triggers/resources' =>
 # and hands back the builder that reads it.  Only this file has that
 # subject, so it sits beside the rows that use it.
 sub builder_for {
-	my ($h) = @_;
+	my ($h, %opts) = @_;
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	$top->config;
-	return Genesis::CI::Compiler::ASTBuilder->new(top => $top);
+	return Genesis::CI::Compiler::ASTBuilder->new(top => $top, %opts);
 }
 
 subtest 'ASTBuilder - _build_from_env_files: basic linear chain' => sub {
@@ -567,8 +566,10 @@ subtest 'ASTBuilder - _build_from_env_files: entrypoint with no pipeline block i
 };
 
 subtest 'ASTBuilder - _build_from_env_files: non-existent dir returns empty' => sub {
-	my $h = make_harness(envs => ['lab'], pipeline => 0, vault => 0);
-	my ($nodes, $edges) = builder_for($h)
+	# No repository here.  The directory is opened before the top is
+	# ever consulted, so this row is about that guard and a harness
+	# would stand three git repositories up for nothing.
+	my ($nodes, $edges) = Genesis::CI::Compiler::ASTBuilder->new
 		->_build_from_env_files('/does/not/exist/xyz');
 	is scalar(keys %$nodes), 0, "no nodes for missing dir";
 	is scalar(@$edges),      0, "no edges for missing dir";
@@ -608,8 +609,7 @@ subtest 'ASTBuilder - legacy nodes enriched with gate flags from env files' => s
 	$h->write_env_file('prod',    pipeline => {require_pr => 'true',
 	                                           manual     => 'true'});
 
-	my $builder = builder_for($h);
-	$builder->{env_dir} = $h->a;
+	my $builder = builder_for($h, env_dir => $h->a);
 	my $parsed = {
 		_source_format => 'legacy',
 		_source_path   => 'ci.yml',
@@ -1114,13 +1114,14 @@ subtest 'Concourse - native generation from modern AST' => sub {
 	like $output, qr/slack-notification/, "slack notification resource type present";
 
 	# Verify environment-specific resources.  Branch propagation renamed
-	# the per-environment resource from <alias>-changes to <alias>-branch.
-	like $output, qr/sandbox-branch/, "sandbox-branch resource present";
-	like $output, qr/preprod-changes/, "preprod-changes resource present";
-	like $output, qr/preprod-cache/, "preprod-cache resource present (triggered env)";
+	# the per-environment resource from <alias>-changes to <alias>-branch,
+	# and the branch is the only one the emitter declares for either
+	# environment now.
+	like $output, qr/name: sandbox-branch/, "sandbox-branch resource declared";
+	like $output, qr/name: preprod-branch/, "preprod-branch resource declared";
 
 	# Verify BOSH config resources.  They are emitted only where
-	# track_bosh_configs asks for them, which the configuration below does.
+	# track_bosh_configs asks for them, which the configuration above does.
 	like $output, qr/sandbox-cloud-config/, "sandbox-cloud-config resource present";
 	like $output, qr/sandbox-runtime-config/, "sandbox-runtime-config resource present";
 
@@ -2095,9 +2096,17 @@ subtest 'Compiler - can_compile_from_genesis_config: detects pipeline: in config
 		"returns false when top->config has no pipeline: key");
 };
 
-subtest 'Compiler - validate_config_section: accepts valid ci structure' => sub {
+subtest 'Compiler - validate_config_section takes a hash and refuses the rest' => sub {
+	# The method checks the shape and nothing else, because under D105
+	# the per-key rules belong to the configuration schema.  A row that
+	# hands in a hash and asserts nothing was thrown cannot fail, so the
+	# refusal below is what makes this one discriminate.
 	eval { Genesis::CI::Compiler->validate_config_section($_pipeline_data, undef) };
-	ok !$@, "valid ci structure passes without error" or diag $@;
+	ok !$@, "a hash passes" or diag $@;
+
+	eval { Genesis::CI::Compiler->validate_config_section('a scalar', undef) };
+	like $@, qr/must be a hash/,
+		"and a section that is not a hash is refused by name";
 };
 
 subtest 'Parser - genesis-config: produces correct normalized structure' => sub {
@@ -2406,16 +2415,6 @@ subtest 'ProviderCompiler - parse_cli_opts two-pass extraction' => sub {
 	ok grep { $_ eq '--other-flag' } @argv, "unknown flag left in argv";
 };
 
-subtest 'Compiler - validate_config_section validates ci.provider' => sub {
-	# Valid with a correct provider section
-	my $valid_data = {
-		%$_pipeline_data,
-		provider => { type => 'concourse', target => 'my-target' },
-	};
-	eval { Genesis::CI::Compiler->validate_config_section($valid_data, undef) };
-	ok !$@, "valid ci.provider section passes" or diag $@;
-};
-
 ### ============================================================ ###
 ### Concourse insecure option
 ### ============================================================ ###
@@ -2532,10 +2531,6 @@ subtest 'ProviderCompiler - provider_config keeps boolean false when non-default
 };
 
 ### ============================================================ ###
-### validate_config_section: source_control must be a hash
-### ============================================================ ###
-
-### ============================================================ ###
 ### Parser: flat-format vault/source_control normalization
 ### ============================================================ ###
 
@@ -2610,27 +2605,6 @@ subtest 'Validator - pipeline section with metadata but no workflows is valid' =
 	ok !$v->has_errors,
 		"pipeline with name/branches but no workflows passes validation (env-file topology)"
 		or diag join("\n", @{$v->errors});
-};
-
-subtest 'Validator - validate_config_section: accepts flat-format source_control' => sub {
-	my $flat = {
-		targets        => { sandbox => { type => 'bosh-director', connection => { url => 'u' } } },
-		source_control => { provider => 'github', repository => 'org/repo' },
-		# no integrations: key at all
-	};
-	eval { Genesis::CI::Compiler->validate_config_section($flat, undef) };
-	ok !$@, "flat ci.source_control accepted by validate_config_section" or diag $@;
-};
-
-subtest 'Compiler - validate_config_section: accepts hash source_control' => sub {
-	my $good = {
-		%$_pipeline_data,
-		integrations => {
-			source_control => { provider => 'github', repository => 'org/repo' },
-		},
-	};
-	eval { Genesis::CI::Compiler->validate_config_section($good, undef) };
-	ok !$@, "hash source_control passes validation" or diag $@;
 };
 
 done_testing;
