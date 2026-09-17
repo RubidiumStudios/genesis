@@ -844,9 +844,10 @@ sub propagate {
 					],
 					# D82's two shapes reach one reading.  git push failing to
 					# run at all raises, and a remote nobody can resolve comes
-					# back as a refused push per ref, so a push where not one
-					# ref landed is the remote being gone rather than any
-					# branch's own quarrel with it.  The words git wrote are
+					# back as a refused push per ref, so a push git named no
+					# ref on at all is the remote being gone, where a push git
+					# did name refs on is those branches' own quarrel with it
+					# however many of them it refused.  The words git wrote are
 					# classified here, beside the run, because the remedy each
 					# class earns is the run's to offer and not the stage's.
 					unsurvivable => sub {
@@ -962,11 +963,12 @@ sub run_status {
 # carries a corrective step of its own and a report that said the remote was
 # unreachable over a rejected credential would send them to the wrong one.
 #
-# The reason is git's own error, read to its first substantive line.
-# Service::Git::push hands that error back per refused ref, so a push the
-# remote turned down arrives here carrying what the remote said.  A push that
-# answered nothing at all still carries no reason, and the unreachable wording
-# is what an unmatched line and an absent one both earn.
+# Two of git's own words arrive here rather than one.  What git wrote to its
+# standard error is classified first, because the phrases that name a class
+# live in the hint text git prints beside a refusal, and the short reason off
+# the porcelain line is read after it, where there was no standard error to
+# read.  A push that answered nothing at all carries neither, and the
+# unreachable wording is what an unmatched line and an absent one both earn.
 sub _push_failure {
 	my ($remote, $reason, $stderr) = @_;
 
