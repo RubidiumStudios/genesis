@@ -213,6 +213,17 @@ sub define_command { # {{{
 	) if defined($PROPS{$name}{branch_target})
 		&& !defined($PROPS{$name}{branch_class});
 
+	# A commit declared outside the pre-deploy class is read by nobody.
+	# Only the pre-deploy assertion asks the question, so the attribute on
+	# any other registration reads as though the command had been exempted
+	# from the control_requires_pr refusal when it was never subject to it.
+	bug(
+		"Command #C{$name} declares that it commits on control without ".
+		"the #y{%s} branch class.",
+		PRE_DEPLOY
+	) if $PROPS{$name}{commits}
+		&& ($PROPS{$name}{branch_class} // '') ne PRE_DEPLOY;
+
 	# A target the gate never compares against would silently gate the
 	# command it was meant to exempt, which is the same failure the class
 	# check above rules out.  Control is the only target the gate reads

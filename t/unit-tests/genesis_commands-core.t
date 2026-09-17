@@ -976,6 +976,52 @@ subtest 'define_command - a branch target nobody reads is rejected' => sub {
 	};
 };
 
+subtest 'define_command - a commit outside the class is rejected' => sub {
+	reset_commands_state();
+
+	# Only the pre-deploy assertion asks whether a command commits on
+	# control, so the attribute on any other registration is read by
+	# nobody.  A command that declared it outside the class would read as
+	# though it had been exempted from the control_requires_pr refusal
+	# while never being subject to it, which is the same failure the
+	# target guards above rule out.
+	quietly {
+		throws_ok {
+			define_command('committing-cmd', {
+				summary => 'A command that commits where nobody asks',
+				commits => 1,
+			}, sub { })
+		} qr/commits on control without/i,
+			'define_command dies when a commit carries no pre-deploy class';
+	};
+
+	# The deployed-state class is a class, and still the wrong one: that
+	# gate opens a session and asks nothing about commits, so the guard
+	# refuses the pairing rather than the bare absence of a class.
+	quietly {
+		throws_ok {
+			define_command('committing-deployed-cmd', {
+				summary      => 'A command that commits under the other class',
+				branch_class => Genesis::Commands::DEPLOYED_STATE(),
+				commits      => 1,
+			}, sub { })
+		} qr/commits on control without/i,
+			'define_command dies when a commit carries the other class';
+	};
+
+	# The pairing the gate reads still registers, so the guard refuses a
+	# combination rather than the attribute.
+	quietly {
+		lives_ok {
+			define_command('committing-ok-cmd', {
+				summary      => 'A command that commits on control',
+				branch_class => Genesis::Commands::PRE_DEPLOY(),
+				commits      => 1,
+			}, sub { })
+		} 'define_command accepts a commit declared with the pre-deploy class';
+	};
+};
+
 subtest 'define_command - retired + deprecated together is rejected' => sub {
 	reset_commands_state();
 

@@ -222,15 +222,31 @@ so the ref really can be missing by the time the predicate runs. That case
 is answered before the descent question is asked, and a missing ref is two
 states rather than one.
 
-C<resolve_branch> says which, asked exactly as
-C<Genesis::CI::Preflight::require_control> asks it. Where control is
-somewhere and not here, the predicate returns the condition that it has not
-been fetched, with a C<git fetch> for a remedy, and the caller refuses at
-C<Genesis::Exit::DATAERR>. Where control is nowhere at all, the predicate
-bails itself, at C<Genesis::Exit::CONFIG>, with the sentence
+C<resolve_branch> is asked first, exactly as
+C<Genesis::CI::Preflight::require_control> asks it. Where it reports any
+state at all, control is here and the remote has lost it, and the predicate
+returns the condition that control has not been fetched with a C<git fetch>
+for a remedy, which the caller refuses at C<Genesis::Exit::DATAERR>.
+
+Where it reports nothing, the remote is asked as well, through
+C<remote_branch_exists>. C<resolve_branch> reads local refs alone, and a
+single-branch clone holds neither ref for a control its origin has, so
+local refs cannot tell that clone apart from a repository with no control
+at all. A remote that holds control earns the same C<DATAERR> refusal and
+the same fetch, because a fetch is what fixes it.
+
+Only a remote that lacks control too earns the other refusal. Then the
+predicate bails itself, at C<Genesis::Exit::CONFIG>, with the sentence
 C<require_control> prints for the same state and the words C<the remote>
-standing in when no remote is configured. Nothing but creating control
-fixes that, so it is not the same refusal as the one a fetch answers.
+standing in when no remote is configured, which is also the answer a
+repository with no remote gets, since C<remote_branch_exists> reports 0 for
+one. Nothing but creating control fixes that state, so it is not the
+refusal a fetch answers.
+
+An C<ls-remote> that fails bails in C<remote_branch_exists>' own words,
+which is left as it is. A remote nobody can reach is not a remote that
+lacks the branch, and the refresh above has already tolerated whatever
+stopped it.
 
 B<Parameters:>
 
