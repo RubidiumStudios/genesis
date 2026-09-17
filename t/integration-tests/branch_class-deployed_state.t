@@ -132,6 +132,14 @@ subtest 'a refusal inside the command keeps its own exit code' => sub {
 	is($exit, 2, 'the command\'s own usage code survived the session');
 	like("$out$err", qr/Usage:/,
 		'and the operator was shown the usage the command raised');
+
+	# The command exits before finish is reached, so the session's net
+	# restores the tree.  On a run that is already ending non-zero the
+	# command has said why it stopped, and a second sentence about a
+	# session the operator never knew they had buries the refusal above
+	# it, so the net puts the branch back and says nothing.
+	unlike("$out$err", qr/branch session still open/,
+		'and no unrelated sentence followed the refusal');
 };
 
 subtest 'an environment that was never delivered is not switched' => sub {
