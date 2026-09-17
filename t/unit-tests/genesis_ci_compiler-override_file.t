@@ -30,7 +30,8 @@ use Genesis::Exit qw/CONFIG/;
 provide_rc();
 use_ok 'Genesis::Top';
 use_ok 'Genesis::CI::Compiler';
-use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::ProviderCompiler';
+use_ok 'Genesis::CI::ProviderRegistry';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -191,12 +192,12 @@ sub capabilities {
 MANYCLI
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Many.pm', <<'MANY');
 package Genesis::CI::Compiler::Providers::Many;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
+use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'many'}
 1;
 MANY
 	local @INC = ('t/tmp/lib', @INC);
-	Genesis::CI::Compiler::PipelineProvider->register_provider('many', {
+	Genesis::CI::ProviderRegistry->register_provider('many', {
 		class     => 'Genesis::CI::Compiler::Providers::Many',
 		file      => 'Genesis/CI/Compiler/Providers/Many.pm',
 		cli_class => 'Genesis::CI::Provider::Many',

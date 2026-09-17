@@ -58,9 +58,9 @@ subtest 'the code namespace is unchanged' => sub {
 	plan tests => 3;
 
 	for my $module (qw/Genesis::CI::Compiler Genesis::CI::Propagation
-	                   Genesis::CI::Compiler::PipelineProvider/) {
+	                   Genesis::CI::ProviderCompiler/) {
 		(my $path = "$module.pm") =~ s{::}{/}g;
-		ok -f "lib/$path", "$module still lives where it did";
+		ok -f "lib/$path", "$module is on disk at the path its name derives";
 	}
 };
 

@@ -18,15 +18,14 @@ use Test::Exception;
 use Genesis;
 provide_rc();
 use_ok 'Genesis::Top';
-use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::ProviderCompiler';
 use_ok 'Genesis::CI::Provider';
+use_ok 'Genesis::CI::ProviderRegistry';
 
-# The Concourse compiler class comes in through the registry's own file
-# entry rather than by package name, because nothing has pulled that file
-# in yet and the package it declares is named differently from the file it
-# lives in.
-require_ok Genesis::CI::Compiler::PipelineProvider
-	->provider_info('concourse')->{file};
+# The Concourse compiler class comes in by name, because the package it
+# declares is the path it lives at now.  Nothing has pulled the file in
+# yet, and the rows below ask the class what it declares.
+require_ok 'Genesis::CI::ProviderCompiler::Concourse';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -47,13 +46,13 @@ subtest 'every provider declares its abilities' => sub {
 	# written down, because a fourth provider is a fourth row and a written
 	# count would fail the file on the plan instead of on anything it
 	# proves.  The one beyond them is the manual gate below.
-	my @providers = Genesis::CI::Compiler::PipelineProvider->known_providers;
+	my @providers = Genesis::CI::ProviderRegistry->known_providers;
 	plan tests => 1 + scalar(@providers);
 
 	for my $type (@providers) {
 		my $class = Genesis::CI::Provider->provider_class($type);
 		lives_ok {
-			Genesis::CI::Compiler::PipelineProvider->declared_capabilities($class)
+			Genesis::CI::Provider->declared_capabilities($class)
 		} "the $type provider answers the capability contract";
 	}
 
@@ -124,11 +123,11 @@ sub provider_options_schema {
 CAPCLI
 	put_file("t/tmp/lib/$rel", <<"CAP");
 package $pkg;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
+use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'$type'}
 1;
 CAP
-	Genesis::CI::Compiler::PipelineProvider->register_provider($type, {
+	Genesis::CI::ProviderRegistry->register_provider($type, {
 		class     => $pkg,
 		file      => $rel,
 		cli_class => $cli_pkg,
@@ -143,7 +142,7 @@ subtest 'the declaration carries six names' => sub {
 	# Asked of the compiler-side class, which reads the declaration off
 	# the CLI class beside it, so the row pins the declaration and the
 	# route to it at once.
-	my $caps = Genesis::CI::Concourse->capabilities;
+	my $caps = Genesis::CI::ProviderCompiler::Concourse->capabilities;
 	is_deeply [sort keys %$caps], [@NAMES],
 		'the six names D101 fixes, and no others';
 	is_deeply [grep {$caps->{$_}} sort keys %$caps],
@@ -227,8 +226,7 @@ subtest 'the layout key is offered by the provider that can use it' => sub {
 	# t/unit-tests/genesis_ci_compiler-override_file.t states against a
 	# real provider.  What is left to say here is that no gate stands
 	# between the capability and the key any more.
-	ok !exists Genesis::CI::Compiler::PipelineProvider
-			->capability_gates->{multi_file_output},
+	ok !exists Genesis::CI::Provider->capability_gates->{multi_file_output},
 		"the layout key is nobody's gate any more";
 };
 
@@ -304,7 +302,7 @@ use base 'Genesis::CI::Provider';
 sub provider_options_schema {return {}}
 1;
 DEAF
-	Genesis::CI::Compiler::PipelineProvider->register_provider('deaf', {
+	Genesis::CI::ProviderRegistry->register_provider('deaf', {
 		cli_class => 'Genesis::CI::Provider::Deaf',
 		cli_file  => 'Genesis/CI/Provider/Deaf.pm',
 	});
@@ -333,7 +331,7 @@ sub capabilities {
 }
 1;
 LISP
-	Genesis::CI::Compiler::PipelineProvider->register_provider('lisp', {
+	Genesis::CI::ProviderRegistry->register_provider('lisp', {
 		cli_class => 'Genesis::CI::Provider::Lisp',
 		cli_file  => 'Genesis/CI/Provider/Lisp.pm',
 	});

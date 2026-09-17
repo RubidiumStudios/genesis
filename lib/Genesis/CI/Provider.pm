@@ -158,6 +158,71 @@ sub capabilities {
 }
 
 # }}}
+# The six names D101 fixes, held in one place so that the declaration
+# above and the contract check below cannot drift.  The gate map beneath
+# them still spells the names it gates as literals, so a seventh
+# capability has to be added there by hand, and nothing here will say so
+# if it is not.
+#
+# Sorted here rather than at the comparison, because the check below asks
+# whether two sorted lists are the same text and a name written in the
+# obvious place rather than in alphabetical order would otherwise fail
+# every provider in the tree.
+my @_capabilities = sort qw/
+	cross_pipeline_events deployment_locks multi_file_output
+	optional_git_triggers per_commit_runs scheduled_jobs
+/;
+
+# declared_capabilities - one provider class's declaration, checked {{{
+#
+# The contract behind capabilities(), asked once at configuration load
+# where the gates read it, rather than trusted afresh at every gate.  A
+# declaration that answers anything but exactly the six names is a bug in
+# the provider class, and the two ways to get it wrong both go unnoticed
+# otherwise.  A misspelled name reads as false and refuses the key it
+# gates as though somebody had meant it to, and a name left out loses its
+# ability with nothing said at all, since three of the six gate no key.
+#
+# It sits here, beside the declaration it checks, rather than on the
+# compiler base.  A capability is what a provider can do, which is
+# neither about emitting anything nor about which providers exist, and
+# leaving the check on the compiler side left Genesis::Top reaching into
+# the compiler family to ask a provider what it is able to do.
+sub declared_capabilities {
+	my ($class, $provider) = @_;
+
+	my $caps = $provider->capabilities;
+	bug("CI provider '%s' must answer capabilities() with a hash reference",
+		$provider) unless ref($caps) eq 'HASH';
+
+	my @declared = sort keys %$caps;
+	bug("CI provider '%s' declares the capabilities %s, and the six are %s",
+		$provider, join(', ', @declared), join(', ', @_capabilities))
+		unless join("\0", @declared) eq join("\0", @_capabilities);
+
+	return $caps;
+}
+
+# }}}
+# capability_gates - which configuration key each capability gates {{{
+#
+# Two of the six gate nothing configurable, since deployment_locks and
+# cross_pipeline_events are structural and their absence is D74's "no
+# such capability" outcome rather than a refused key.
+#
+# multi_file_output gates nothing here either, under D105.  The key it
+# gated, output_layout, is declared by the provider that can use it and
+# by nobody else, so a provider that cannot offers no such key and the
+# refusal is the ordinary undeclared-key refusal.
+sub capability_gates {
+	return {
+		optional_git_triggers => 'genesis.pipeline.manual',
+		scheduled_jobs        => 'genesis.pipeline.redeploy_cron',
+		per_commit_runs       => 'pipeline.provider.group_commits',
+	};
+}
+
+# }}}
 # validate_config - the provider's rules for its own block {{{
 #
 # Under D105 the provider owns validating the block an operator wrote for
@@ -260,74 +325,4 @@ sub interactive_wizard {
 # }}}
 
 1;
-
-=head1 NAME
-
-Genesis::CI::Provider - CI provider factory and base class
-
-=head1 DESCRIPTION
-
-Genesis::CI::Provider is the factory and abstract base class for CI provider
-configuration management.  It follows the same pattern as Genesis::Kit::Provider.
-
-A provider class declares the keys it reads, through
-C<provider_options_schema>, declares what it is able to do, through
-C<capabilities>, and validates the block an operator wrote for it, through
-C<validate_config>. The three live together so that the check always has
-the declaration it is checking against, and so that one class answers for
-the whole of a provider.
-
-C<capabilities> answers with the six booleans D101 names, and every
-provider has to answer, including the ones Genesis cannot yet compile a
-pipeline for. A
-provider that can do none of them says so rather than staying silent,
-because a key gated on an ability nobody declared would otherwise be
-accepted and then dropped. The compiler-side class reads this declaration
-from here rather than keeping one of its own.
-
-Every provider carries the type it was registered under, and C<type> is
-what reads it. The constructor sets it, because the constructor is where
-the type is known: the only other place to read one from is C<config>,
-which answers a hash, and a hash has no order to index into.
-
-Validating that block is the provider's own job and not the framework's,
-and the base does it by validating the block against the keys that
-provider declared, so an ordinary provider writes no validation at all
-and still gets its types checked, its defaults filled, and its unknown
-keys refused by name. A provider overrides C<validate_config> only for a
-rule a declaration cannot state, such as one key being required when
-another is absent, and an override calls C<SUPER> first, because the
-declaration is the floor rather than a subset of what is wanted checked.
-
-A provider's own rules run only where the section its block sits in is
-enabled, and C<section_enabled> is what a rule asks. The base owns that
-reading so every provider inherits it, because an operator writes a
-provider block a key at a time and a repository whose pipeline nobody has
-turned on must not be refused for a key that pipeline would need. The
-declared keys are checked either way, since a key an operator wrote is
-still a key that has to be one the provider reads.
-
-Concrete subclasses: Concourse, GithubActions, Manual.
-
-=head1 SYNOPSIS
-
-  # Parse CLI opts (two-pass: --ci-provider first, then provider-specific)
-  my %ci_opts;
-  Genesis::CI::Provider->parse_opts(\@ARGV, \%ci_opts);
-
-  # Build provider object from CLI opts
-  my $provider = Genesis::CI::Provider->init(%ci_opts);
-
-  # Get config hash for .genesis/config ci.provider section
-  my %cfg = $provider->config();
-
-  # Reconstruct from stored config
-  my $provider = Genesis::CI::Provider->new(type => 'concourse', target => 'prod');
-
-=head1 SEE ALSO
-
-Genesis::Kit::Provider, Genesis::CI::ProviderRegistry
-
-=cut
-
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1

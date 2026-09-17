@@ -2109,7 +2109,7 @@ generation, locker integration, auto-update, notification wiring, etc.
 
 =head1 SEE ALSO
 
-Genesis::CI::Compiler::AST, Genesis::CI::Compiler::PipelineProvider
+Genesis::CI::Compiler::AST, Genesis::CI::ProviderCompiler
 
 =cut
 

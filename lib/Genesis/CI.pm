@@ -158,8 +158,8 @@ Optional: C<graphviz>, C<describe>.
 
 =head1 SEE ALSO
 
-Genesis::CI::Concourse, Genesis::CI::GithubActions, Genesis::CI::Legacy,
-Genesis::CI::Compiler
+Genesis::CI::ProviderCompiler::Concourse, Genesis::CI::GithubActions,
+Genesis::CI::Legacy, Genesis::CI::Compiler
 
 =cut
 

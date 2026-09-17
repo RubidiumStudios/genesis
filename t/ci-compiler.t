@@ -33,12 +33,9 @@ sub _debug_write {
 use_ok 'Genesis::CI::Compiler::AST';
 use_ok 'Genesis::CI::Compiler::ASTBuilder';
 use_ok 'Genesis::CI::Compiler::Validator';
-use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::ProviderCompiler';
+use_ok 'Genesis::CI::ProviderCompiler::Concourse';
 use_ok 'Genesis::CI::Compiler';
-
-# Load providers via file path (not package name)
-eval { require 'Genesis/CI/Compiler/Providers/Concourse.pm' };
-ok !$@, "loaded Concourse provider" or diag $@;
 
 
 ### ============================================================ ###
@@ -967,19 +964,19 @@ subtest 'Validator - valid multi-file config' => sub {
 };
 
 ### ============================================================ ###
-### PipelineProvider Base Class Tests
+### ProviderCompiler Base Class Tests
 ### ============================================================ ###
 
-subtest 'PipelineProvider - cannot instantiate base class' => sub {
-	eval { Genesis::CI::Compiler::PipelineProvider->new() };
+subtest 'ProviderCompiler - cannot instantiate base class' => sub {
+	eval { Genesis::CI::ProviderCompiler->new() };
 	like $@, qr/Cannot instantiate.*directly/,
-		"PipelineProvider->new() refuses direct instantiation";
+		"ProviderCompiler->new() refuses direct instantiation";
 };
 
-subtest 'PipelineProvider - topological sort' => sub {
+subtest 'ProviderCompiler - topological sort' => sub {
 	# Use the Concourse provider (subclass) to access shared helper
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 
 	my $graph = {
 		nodes => {
@@ -1002,9 +999,9 @@ subtest 'PipelineProvider - topological sort' => sub {
 	ok $idx{c} < $idx{d}, "c comes before d";
 };
 
-subtest 'PipelineProvider - matches_pattern' => sub {
+subtest 'ProviderCompiler - matches_pattern' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 
 	ok $provider->matches_pattern('us-west-sandbox', 'us-west-*'), "glob * matches";
 	ok $provider->matches_pattern('us-west-sandbox', '*-sandbox'), "leading * matches";
@@ -1014,9 +1011,9 @@ subtest 'PipelineProvider - matches_pattern' => sub {
 	ok !$provider->matches_pattern('abbc', 'a?c'), "? doesn't match two chars";
 };
 
-subtest 'PipelineProvider - git_uri' => sub {
+subtest 'ProviderCompiler - git_uri' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 
 	is $provider->git_uri({ provider => 'github', repository => 'org/repo' }),
 		'git@github.com:org/repo.git', "github provider builds SSH URI";
@@ -1028,9 +1025,9 @@ subtest 'PipelineProvider - git_uri' => sub {
 		'https://custom.git/repo.git', "custom URI is returned as-is";
 };
 
-subtest 'PipelineProvider - dump_yaml' => sub {
+subtest 'ProviderCompiler - dump_yaml' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 
 	my $yaml = $provider->dump_yaml({
 		name => 'test',
@@ -1145,7 +1142,7 @@ subtest 'Concourse - native generation from modern AST' => sub {
 		},
 	);
 
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	my $output = $provider->generate_from_ast($ast);
 
 	_debug_write('concourse-pipeline.yml', $output // '');
@@ -1279,7 +1276,7 @@ subtest 'PipelineDescriptor - _unwrap_ref' => sub {
 
 subtest 'Concourse - output_files' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 
 	my $files = $provider->output_files;
 	is_deeply $files, { 'pipeline.yml' => 'Concourse pipeline definition' },
@@ -1309,7 +1306,7 @@ subtest 'Concourse - generate_from_ast routes to native for non-legacy' => sub {
 		},
 	);
 
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	my $output = $provider->generate_from_ast($ast);
 
 	_debug_write('concourse-minimal.yml', $output // '');
@@ -1376,7 +1373,7 @@ subtest 'Concourse - locker resources generated when locker configured' => sub {
 		},
 	);
 
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	my $output = $provider->generate_from_ast($ast);
 
 	_debug_write('concourse-locker.yml', $output // '');
@@ -1430,7 +1427,7 @@ subtest 'Concourse - locker skips bosh-lock for create-env' => sub {
 		},
 	);
 
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	my $output = $provider->generate_from_ast($ast);
 
 	_debug_write('concourse-create-env-locker.yml', $output // '');
@@ -1486,7 +1483,7 @@ subtest 'Concourse - auto-update job generated' => sub {
 		},
 	);
 
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	my $output = $provider->generate_from_ast($ast);
 
 	_debug_write('concourse-autoupdate.yml', $output // '');
@@ -1556,7 +1553,7 @@ subtest 'Concourse - grouped notifications' => sub {
 		},
 	);
 
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	my $output = $provider->generate_from_ast($ast);
 
 	_debug_write('concourse-grouped.yml', $output // '');
@@ -1614,7 +1611,7 @@ subtest 'Concourse - custom groups' => sub {
 		},
 	);
 
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	my $output = $provider->generate_from_ast($ast);
 
 	_debug_write('concourse-custom-groups.yml', $output // '');
@@ -1668,7 +1665,7 @@ subtest 'Concourse - OCFP config name support' => sub {
 		},
 	);
 
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	my $output = $provider->generate_from_ast($ast);
 
 	_debug_write('concourse-ocfp.yml', $output // '');
@@ -2339,16 +2336,16 @@ subtest 'Top - register_config_section stores handler' => sub {
 ### Phase E Provider Options System Tests
 ### ============================================================ ###
 
-subtest 'PipelineProvider - known_providers lists registered types' => sub {
-	my @providers = Genesis::CI::Compiler::PipelineProvider->known_providers();
+subtest 'ProviderCompiler - known_providers lists registered types' => sub {
+	my @providers = Genesis::CI::ProviderRegistry->known_providers();
 	ok scalar(@providers) >= 1, "at least one provider registered";
 	ok grep { $_ eq 'concourse' } @providers, "concourse is registered";
 };
 
-subtest 'PipelineProvider - base class cli_opts returns empty list' => sub {
+subtest 'ProviderCompiler - base class cli_opts returns empty list' => sub {
 	# We cannot call cli_opts on the abstract base directly (bug guard),
 	# so we test via the Concourse subclass and verify the pattern instead.
-	my @opts = Genesis::CI::Concourse->cli_opts();
+	my @opts = Genesis::CI::ProviderCompiler::Concourse->cli_opts();
 	ok scalar(@opts) > 0, "Concourse declares at least one CLI opt";
 	ok grep { $_ eq 'ci-target=s' } @opts, "ci-target=s declared";
 	ok grep { $_ eq 'ci-team=s'   } @opts, "ci-team=s declared";
@@ -2357,7 +2354,7 @@ subtest 'PipelineProvider - base class cli_opts returns empty list' => sub {
 };
 
 subtest 'Concourse - cli_opts_help contains required option documentation' => sub {
-	my $help = Genesis::CI::Concourse->cli_opts_help(valid_types => ['concourse']);
+	my $help = Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(valid_types => ['concourse']);
 	ok length($help) > 0,                          "help text is non-empty";
 	like $help, qr/--ci-target/,                   "documents --ci-target";
 	like $help, qr/--ci-team/,                     "documents --ci-team";
@@ -2370,12 +2367,12 @@ subtest 'Concourse - cli_opts_help contains required option documentation' => su
 };
 
 subtest 'Concourse - cli_opts_help hidden when type not in valid_types' => sub {
-	my $help = Genesis::CI::Concourse->cli_opts_help(valid_types => ['github-actions']);
+	my $help = Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(valid_types => ['github-actions']);
 	is $help, '', "help empty when concourse not in valid_types";
 };
 
 subtest 'Concourse - provider_options_schema has correct structure' => sub {
-	my $schema = Genesis::CI::Concourse->provider_options_schema();
+	my $schema = Genesis::CI::ProviderCompiler::Concourse->provider_options_schema();
 	ok ref($schema) eq 'HASH',            "schema is a hash";
 	ok !exists $schema->{type},           "'type' is the generic block's key, not this one's";
 	ok exists $schema->{target},          "'target' key present";
@@ -2386,7 +2383,7 @@ subtest 'Concourse - provider_options_schema has correct structure' => sub {
 };
 
 subtest 'Concourse - provider_options_defaults returns expected defaults' => sub {
-	my $defaults = Genesis::CI::Concourse->provider_options_defaults();
+	my $defaults = Genesis::CI::ProviderCompiler::Concourse->provider_options_defaults();
 	ok ref($defaults) eq 'HASH',          "defaults is a hash";
 	is $defaults->{team},            'main', "team default is 'main'";
 	is $defaults->{public},          0,      "public default is false";
@@ -2396,7 +2393,7 @@ subtest 'Concourse - provider_options_defaults returns expected defaults' => sub
 subtest 'Concourse - provider_config omits default values' => sub {
 	# Only non-defaults should appear in config output
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => {
 			type   => 'concourse',
@@ -2415,7 +2412,7 @@ subtest 'Concourse - provider_config omits default values' => sub {
 
 subtest 'Concourse - provider_config includes non-default values' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => {
 			type            => 'concourse',
@@ -2430,7 +2427,7 @@ subtest 'Concourse - provider_config includes non-default values' => sub {
 
 subtest 'Concourse - provider_option applies defaults when not set' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 
 	is $provider->provider_option('team'),   'main', "team defaults to 'main'";
 	is $provider->provider_option('public'),  0,     "public defaults to 0";
@@ -2439,7 +2436,7 @@ subtest 'Concourse - provider_option applies defaults when not set' => sub {
 
 subtest 'Concourse - provider_option prefers stored opts over defaults' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => { team => 'custom-team' },
 	);
@@ -2449,7 +2446,7 @@ subtest 'Concourse - provider_option prefers stored opts over defaults' => sub {
 
 subtest 'Concourse - describe_provider returns structured hash' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => {
 			target => 'prod-concourse',
@@ -2468,20 +2465,20 @@ subtest 'Concourse - describe_provider returns structured hash' => sub {
 	is $info{Team},   'genesis',        "Team value correct";
 };
 
-subtest 'PipelineProvider - all_cli_opts_help covers all providers' => sub {
-	my $help = Genesis::CI::Compiler::PipelineProvider->all_cli_opts_help();
+subtest 'ProviderCompiler - all_cli_opts_help covers all providers' => sub {
+	my $help = Genesis::CI::ProviderCompiler->all_cli_opts_help();
 	like $help, qr/CI PROVIDER OPTIONS/,   "contains header";
 	like $help, qr/--ci-provider/,         "documents --ci-provider";
 	like $help, qr/concourse/,             "mentions concourse";
 	like $help, qr/--ci-target/,           "includes Concourse-specific flag";
 };
 
-subtest 'PipelineProvider - parse_cli_opts two-pass extraction' => sub {
+subtest 'ProviderCompiler - parse_cli_opts two-pass extraction' => sub {
 	# Simulate argv that includes a provider-specific flag
 	my @argv = ('--ci-target', 'my-fly-target', '--ci-team', 'ops', '--other-flag');
 	my %opts;
 
-	Genesis::CI::Compiler::PipelineProvider->parse_cli_opts(
+	Genesis::CI::ProviderCompiler->parse_cli_opts(
 		\@argv, \%opts, 'concourse'
 	);
 
@@ -2501,10 +2498,10 @@ subtest 'Compiler - validate_config_section validates ci.provider' => sub {
 };
 
 ### ============================================================ ###
-### PipelineProvider - check_prereqs
+### ProviderCompiler - check_prereqs
 ### ============================================================ ###
 
-subtest 'PipelineProvider - base class check_prereqs returns 1' => sub {
+subtest 'ProviderCompiler - base class check_prereqs returns 1' => sub {
 	# Base class has no prereqs; GHA provider inherits this no-op default.
 	eval { require 'Genesis/CI/Compiler/Providers/GithubActions.pm' };
 	if ($@) {
@@ -2522,10 +2519,10 @@ subtest 'PipelineProvider - base class check_prereqs returns 1' => sub {
 		top => undef,
 		provider_opts => {},
 	);
-	ok $gha->check_prereqs(), 'GithubActions PipelineProvider check_prereqs returns 1';
+	ok $gha->check_prereqs(), 'GithubActions ProviderCompiler check_prereqs returns 1';
 };
 
-subtest 'PipelineProvider::Concourse - check_prereqs returns 1 when fly present' => sub {
+subtest 'ProviderCompiler::Concourse - check_prereqs returns 1 when fly present' => sub {
 	my $fly = `which fly 2>/dev/null`;
 	chomp $fly;
 	unless ($fly) {
@@ -2539,11 +2536,11 @@ subtest 'PipelineProvider::Concourse - check_prereqs returns 1 when fly present'
 		targets      => {},
 		workflows    => {},
 	);
-	my $p = Genesis::CI::Concourse->new(ast => $ast, top => undef, provider_opts => {});
+	my $p = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast, top => undef, provider_opts => {});
 	ok $p->check_prereqs(), 'check_prereqs returns 1 when fly is present';
 };
 
-subtest 'PipelineProvider::Concourse - check_prereqs returns 0 when fly absent' => sub {
+subtest 'ProviderCompiler::Concourse - check_prereqs returns 0 when fly absent' => sub {
 	local $ENV{PATH} = '/nonexistent';
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata     => { name => 'test', version => '2.0', source => 'modern' },
@@ -2552,7 +2549,7 @@ subtest 'PipelineProvider::Concourse - check_prereqs returns 0 when fly absent' 
 		targets      => {},
 		workflows    => {},
 	);
-	my $p = Genesis::CI::Concourse->new(ast => $ast, top => undef, provider_opts => {});
+	my $p = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast, top => undef, provider_opts => {});
 	my $result = $p->check_prereqs();
 	ok !$result, 'check_prereqs returns 0 when fly is not in PATH';
 };
@@ -2562,7 +2559,7 @@ subtest 'PipelineProvider::Concourse - check_prereqs returns 0 when fly absent' 
 ### ============================================================ ###
 
 subtest 'Concourse - insecure in provider_options_schema' => sub {
-	my $schema = Genesis::CI::Concourse->provider_options_schema();
+	my $schema = Genesis::CI::ProviderCompiler::Concourse->provider_options_schema();
 	ok exists $schema->{insecure},              "'insecure' key present in schema";
 	is $schema->{insecure}{type}, 'boolean',    "insecure type is boolean";
 	ok !$schema->{insecure}{required},          "insecure is not required";
@@ -2570,19 +2567,19 @@ subtest 'Concourse - insecure in provider_options_schema' => sub {
 };
 
 subtest 'Concourse - insecure in provider_options_defaults' => sub {
-	my $defaults = Genesis::CI::Concourse->provider_options_defaults();
+	my $defaults = Genesis::CI::ProviderCompiler::Concourse->provider_options_defaults();
 	ok exists $defaults->{insecure},  "insecure present in defaults";
 	is $defaults->{insecure}, 0,      "insecure default is 0 (false)";
 };
 
 subtest 'Concourse - ci-insecure declared in cli_opts' => sub {
-	my @opts = Genesis::CI::Concourse->cli_opts();
+	my @opts = Genesis::CI::ProviderCompiler::Concourse->cli_opts();
 	ok grep { $_ eq 'ci-insecure' } @opts, "ci-insecure declared (boolean flag)";
 };
 
 subtest 'Concourse - insecure omitted from provider_config when default (false)' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => { type => 'concourse', target => 't', insecure => 0 },
 	);
@@ -2592,7 +2589,7 @@ subtest 'Concourse - insecure omitted from provider_config when default (false)'
 
 subtest 'Concourse - insecure included in provider_config when true' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => { type => 'concourse', target => 't', insecure => 1 },
 	);
@@ -2602,13 +2599,13 @@ subtest 'Concourse - insecure included in provider_config when true' => sub {
 
 subtest 'Concourse - provider_option insecure defaults to 0' => sub {
 	my $ast      = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 	is $provider->provider_option('insecure'), 0, "insecure defaults to 0";
 };
 
 subtest 'Concourse - describe_provider includes Insecure field' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => { target => 'myci', insecure => 1 },
 	);
@@ -2622,7 +2619,7 @@ subtest 'Concourse - describe_provider includes Insecure field' => sub {
 ### ============================================================ ###
 
 subtest 'Concourse - normalize_provider_opts remaps ci-pause to pause_after_set' => sub {
-	my $normalized = Genesis::CI::Concourse->normalize_provider_opts({
+	my $normalized = Genesis::CI::ProviderCompiler::Concourse->normalize_provider_opts({
 		'ci-pause' => 1,
 	});
 	ok !exists $normalized->{pause},          "raw 'pause' key not present after remap";
@@ -2630,7 +2627,7 @@ subtest 'Concourse - normalize_provider_opts remaps ci-pause to pause_after_set'
 };
 
 subtest 'Concourse - normalize_provider_opts does not remap if pause_after_set already set' => sub {
-	my $normalized = Genesis::CI::Concourse->normalize_provider_opts({
+	my $normalized = Genesis::CI::ProviderCompiler::Concourse->normalize_provider_opts({
 		'ci-pause'       => 0,
 		'pause_after_set' => 1,
 	});
@@ -2639,7 +2636,7 @@ subtest 'Concourse - normalize_provider_opts does not remap if pause_after_set a
 };
 
 subtest 'Concourse - normalize_provider_opts handles full CLI key set' => sub {
-	my $normalized = Genesis::CI::Concourse->normalize_provider_opts({
+	my $normalized = Genesis::CI::ProviderCompiler::Concourse->normalize_provider_opts({
 		'ci-target'        => 'myci',
 		'ci-team'          => 'platform',
 		'ci-pipeline-name' => 'cf-deploy',
@@ -2657,12 +2654,12 @@ subtest 'Concourse - normalize_provider_opts handles full CLI key set' => sub {
 };
 
 ### ============================================================ ###
-### provider_config boolean comparison (PipelineProvider)
+### provider_config boolean comparison (ProviderCompiler)
 ### ============================================================ ###
 
-subtest 'PipelineProvider - provider_config skips undef opts' => sub {
+subtest 'ProviderCompiler - provider_config skips undef opts' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => { type => 'concourse', team => undef },
 	);
@@ -2670,11 +2667,11 @@ subtest 'PipelineProvider - provider_config skips undef opts' => sub {
 	ok !exists $config->{team}, "undef opt not included in provider_config";
 };
 
-subtest 'PipelineProvider - provider_config keeps boolean false when non-default' => sub {
+subtest 'ProviderCompiler - provider_config keeps boolean false when non-default' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
 	# public default is 0; setting public=>0 explicitly should still omit it
 	# insecure default is 0; setting insecure=>1 should include it
-	my $provider = Genesis::CI::Concourse->new(
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
 		ast           => $ast,
 		provider_opts => { type => 'concourse', public => 0, insecure => 1 },
 	);

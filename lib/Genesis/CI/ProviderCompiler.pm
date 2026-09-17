@@ -1,4 +1,4 @@
-package Genesis::CI::Compiler::PipelineProvider;
+package Genesis::CI::ProviderCompiler;
 use strict;
 use warnings;
 
@@ -7,30 +7,28 @@ use Genesis::CI::ProviderRegistry;
 use JSON::PP;
 use Getopt::Long qw/GetOptionsFromArray/;
 
-### Provider Registry {{{
-#
-# The registry moved to Genesis::CI::ProviderRegistry under D108,
-# because it is about every provider rather than about compiling one,
-# and because the provider family used to reach in here to find its own
-# classes.  These four stay as delegations while the callers move.
-
-sub known_providers     {Genesis::CI::ProviderRegistry->known_providers}
-sub provider_info       {shift; Genesis::CI::ProviderRegistry->provider_info(@_)}
-sub automated_providers {Genesis::CI::ProviderRegistry->automated_providers}
-sub register_provider   {shift; Genesis::CI::ProviderRegistry->register_provider(@_)}
-
-# }}}
 ### Constructor {{{
 
-# new - create a new provider instance {{{
+# new - build a compiler for one provider {{{
+#
+# Under D108 a compiler holds the provider it emits for rather than a
+# copy of that provider's settings, so DEFAULT_TEAM and check_prereqs
+# have one home each and a change on the provider is visible here with
+# nothing rebuilt.  A caller reaches this through
+# $provider->compiler(ast => $ast) rather than calling it directly.
+#
+# The concrete used to define its own new and drop everything but ast,
+# top, and provider_opts, which would have thrown the provider away on
+# the way in.  It inherits this one now.
 sub new {
 	my ($class, %opts) = @_;
 
-	bug("Cannot instantiate Genesis::CI::Compiler::PipelineProvider directly; ".
+	bug("Cannot instantiate Genesis::CI::ProviderCompiler directly; ".
 		"use a subclass instead")
 		if $class eq __PACKAGE__;
 
 	return bless({
+		provider      => $opts{provider},
 		ast           => $opts{ast},
 		top           => $opts{top},
 		provider_opts => $opts{provider_opts} || {},
@@ -143,21 +141,6 @@ sub provider_options_schema {
 }
 
 # }}}
-# The six names D101 fixes, held in one place so that the declaration
-# below and the contract check beside it cannot drift.  The gate map at
-# the foot of this section still spells the names it gates as literals,
-# so a seventh capability has to be added there by hand, and nothing
-# here will say so if it is not.
-#
-# Sorted here rather than at the comparison, because the check below asks
-# whether two sorted lists are the same text and a name written in the
-# obvious place rather than in alphabetical order would otherwise fail
-# every provider in the tree.
-my @_capabilities = sort qw/
-	cross_pipeline_events deployment_locks multi_file_output
-	optional_git_triggers per_commit_runs scheduled_jobs
-/;
-
 # capabilities - what this provider can do, as six booleans {{{
 #
 # D101's declaration, and the companion to provider_options_schema.  A
@@ -189,50 +172,6 @@ sub capabilities {
 	require Genesis::CI::Provider;
 	return Genesis::CI::Provider->provider_class($self->provider_type)
 		->capabilities;
-}
-
-# }}}
-# declared_capabilities - one provider class's declaration, checked {{{
-#
-# The contract behind capabilities(), asked once at configuration load
-# where the gates read it, rather than trusted afresh at every gate.  A
-# declaration that answers anything but exactly the six names is a bug in
-# the provider class, and the two ways to get it wrong both go unnoticed
-# otherwise.  A misspelled name reads as false and refuses the key it
-# gates as though somebody had meant it to, and a name left out loses its
-# ability with nothing said at all, since three of the six gate no key.
-sub declared_capabilities {
-	my ($class, $provider) = @_;
-
-	my $caps = $provider->capabilities;
-	bug("CI provider '%s' must answer capabilities() with a hash reference",
-		$provider) unless ref($caps) eq 'HASH';
-
-	my @declared = sort keys %$caps;
-	bug("CI provider '%s' declares the capabilities %s, and the six are %s",
-		$provider, join(', ', @declared), join(', ', @_capabilities))
-		unless join("\0", @declared) eq join("\0", @_capabilities);
-
-	return $caps;
-}
-
-# }}}
-# capability_gates - which configuration key each capability gates {{{
-#
-# Two of the six gate nothing configurable, since deployment_locks and
-# cross_pipeline_events are structural and their absence is D74's "no
-# such capability" outcome rather than a refused key.
-#
-# multi_file_output gates nothing here either, under D105.  The key it
-# gated, output_layout, is declared by the provider that can use it and
-# by nobody else, so a provider that cannot offers no such key and the
-# refusal is the ordinary undeclared-key refusal.
-sub capability_gates {
-	return {
-		optional_git_triggers => 'genesis.pipeline.manual',
-		scheduled_jobs        => 'genesis.pipeline.redeploy_cron',
-		per_commit_runs       => 'pipeline.provider.group_commits',
-	};
 }
 
 # }}}
@@ -309,7 +248,7 @@ sub describe_provider {
 # parse_cli_opts - two-pass CLI option parsing (mirrors Kit::Provider::parse_opts) {{{
 #
 # Usage:
-#   Genesis::CI::Compiler::PipelineProvider->parse_cli_opts(
+#   Genesis::CI::ProviderCompiler->parse_cli_opts(
 #       \@ARGV,           # args array (modified in place)
 #       \%opts,           # options hash (populated in place)
 #       $provider_type,   # optional: already-known provider type
@@ -395,7 +334,8 @@ sub normalize_provider_opts {
 # hardcoding provider-specific names.
 sub cli_opt_keys {
 	my ($class, $provider_type) = @_;
-	my $info = $class->provider_info($provider_type) or return ();
+	my $info = Genesis::CI::ProviderRegistry->provider_info($provider_type)
+		or return ();
 	# A type with no compiler class, which manual is, has no flags to name.
 	return () unless $info->{file};
 	eval { require $info->{file} }  ## no critic
@@ -413,13 +353,13 @@ sub all_cli_opts_help {
 
 	# Every type is named where the types are enumerated, and only the ones
 	# with a compiler class are asked for help text, because manual has none.
-	$config{valid_types} ||= [known_providers()];
+	$config{valid_types} ||= [Genesis::CI::ProviderRegistry->known_providers];
 
 	my $provider_help = join('',
 		map  { $_->{class}->cli_opts_help(%config) }
 		grep { $_->{file} && eval { require $_->{file}; 1 } }  ## no critic
 		map  { Genesis::CI::ProviderRegistry->provider_info($_) }
-		known_providers()
+		Genesis::CI::ProviderRegistry->known_providers
 	);
 
 	return <<EOF;
@@ -427,7 +367,7 @@ CI PROVIDER OPTIONS
 
   --ci-provider <type>  (optional, defaults to "manual")
       The CI provider to use for pipeline generation and deployment.
-      Available types: ${\ join(', ', known_providers()) }
+      Available types: ${\ join(', ', Genesis::CI::ProviderRegistry->known_providers) }
 
 $provider_help
 EOF
@@ -446,6 +386,16 @@ sub ast {
 # top - get stored Genesis::Top object {{{
 sub top {
 	return $_[0]->{top};
+}
+
+# }}}
+# provider - the provider this compiler emits for {{{
+#
+# The object rather than a copy of it, which is the whole of D108's
+# composition.  A copy passes every assertion about a value at build
+# time and drifts the moment the provider changes.
+sub provider {
+	return $_[0]->{provider};
 }
 
 # }}}
@@ -663,74 +613,4 @@ sub _yaml_scalar {
 # }}}
 
 1;
-
-=head1 NAME
-
-Genesis::CI::Compiler::PipelineProvider - Abstract base class for CI providers
-
-=head1 DESCRIPTION
-
-Genesis::CI::Compiler::PipelineProvider is the abstract base class for CI
-platform providers in the compiler pipeline. Each provider takes a
-Genesis::CI::Compiler::AST and generates platform-specific configuration.
-
-=head1 SYNOPSIS
-
-  package Genesis::CI::Compiler::Providers::MyPlatform;
-  use parent 'Genesis::CI::Compiler::PipelineProvider';
-
-  sub platform_name { "My Platform" }
-
-  sub generate_from_ast {
-    my ($self, $ast) = @_;
-    # Generate platform-specific output
-    return { 'pipeline.yml' => $yaml_string };
-  }
-
-  sub output_files {
-    return { 'pipeline.yml' => 'Pipeline definition' };
-  }
-
-  # The keys this provider takes under pipeline.provider, and the six
-  # abilities it claims, are declared once, on the matching class under
-  # Genesis::CI::Provider, and the base reads both from there:
-  #
-  #   package Genesis::CI::Provider::MyPlatform;
-  #   sub provider_options_schema {
-  #     return {
-  #       target => {type => 'string', description => 'Where to set it'},
-  #     };
-  #   }
-  #   sub capabilities {
-  #     return {multi_file_output => 1, ...};
-  #   }
-
-=head1 SHARED HELPERS
-
-=head2 dump_yaml($data)
-
-Serialize a Perl data structure to YAML string.
-
-=head2 git_uri($source_control)
-
-Build a git URI from source control configuration.
-
-=head2 secret_ref($ref)
-
-Format a secret reference for this platform. Default: C<(($ref))>.
-
-=head2 topological_sort($graph)
-
-Perform topological sort on a workflow graph. Bails on cycles.
-
-=head2 matches_pattern($name, $pattern)
-
-Check if a name matches a glob pattern (C<*> and C<?>).
-
-=head1 SEE ALSO
-
-Genesis::CI::Compiler::AST, Genesis::CI::Concourse, Genesis::CI::GithubActions
-
-=cut
-
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

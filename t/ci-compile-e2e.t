@@ -191,8 +191,8 @@ subtest 'Concourse provider generates YAML' => sub {
 	$ast->set_pipeline($descriptor->describe());
 
 	# Load Concourse provider
-	require Genesis::CI::Compiler::Providers::Concourse;
-	my $provider = Genesis::CI::Concourse->new(ast => $ast);
+	require Genesis::CI::ProviderCompiler::Concourse;
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
 
 	my $yaml = $provider->generate_from_ast($ast);
 	ok($yaml, 'generate_from_ast returned output');

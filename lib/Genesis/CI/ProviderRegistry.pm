@@ -22,25 +22,22 @@ use Genesis::Exit qw/CONFIG/;
 # provider has none yet either: the type validates and resolves on the
 # CLI side, and its compiling class arrives with the provider itself.
 #
-# The concourse entry writes its compiler class and that class's path
-# out longhand, because Genesis::CI::Concourse sits at a path its
-# package does not derive.  The next task retires that package and the
-# entry drops both keys.
+# An entry says the classes and nothing else.  Every package under lib
+# now derives its own path, so a path written beside a class would be a
+# second spelling of the same fact, and the two could disagree.  The
+# concourse entry carried both because Genesis::CI::Concourse sat at a
+# path its package did not derive, which D108's rename put right.
 
 my %_providers = (
 	'concourse' => {
-		class     => 'Genesis::CI::Concourse',
-		file      => 'Genesis/CI/Compiler/Providers/Concourse.pm',
+		class     => 'Genesis::CI::ProviderCompiler::Concourse',
 		cli_class => 'Genesis::CI::Provider::Concourse',
-		cli_file  => 'Genesis/CI/Provider/Concourse.pm',
 	},
 	'github-actions' => {
 		cli_class => 'Genesis::CI::Provider::GithubActions',
-		cli_file  => 'Genesis/CI/Provider/GithubActions.pm',
 	},
 	'manual' => {
 		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
 	},
 );
 
@@ -54,7 +51,10 @@ sub known_providers {
 #
 # The entry's class and file name the compiling class, which the manual
 # and github-actions providers do not have, and cli_class and cli_file
-# name the class the CLI builds, which every type has.
+# name the class the CLI builds, which every type has.  Each path is
+# worked out from the class beside it rather than stored, so a caller
+# that wants a path to require still gets one and no entry can name a
+# path its class does not derive.
 #
 # A shallow copy rather than the registry's own hash reference, because
 # a caller that writes into what it was given would otherwise rewrite
@@ -63,7 +63,11 @@ sub known_providers {
 sub provider_info {
 	my ($class, $type) = @_;
 	return undef unless defined $type && exists $_providers{$type};
-	return {%{$_providers{$type}}};
+
+	my %info = %{$_providers{$type}};
+	$info{file}     //= _path_of($info{class})     if $info{class};
+	$info{cli_file} //= _path_of($info{cli_class}) if $info{cli_class};
+	return \%info;
 }
 
 # }}}
@@ -81,13 +85,15 @@ sub automated_providers {
 # For tests that stand a provider class up and for a future out-of-tree
 # provider.  The registry is otherwise fixed at compile time.
 #
-# Three guards, unchanged from the map's old home.  A missing name would
-# register the entry under the empty string, where nothing could look it
-# up.  A name already registered is refused rather than replaced, since
-# replacing the real concourse entry would leave the enum saying one
-# thing and the lookup doing another.  An entry with no cli_class is
-# refused because every type has a CLI class and a resolver that finds
-# none behaves like manual instead of saying so.
+# Four guards.  A missing name would register the entry under the empty
+# string, where nothing could look it up.  A name already registered is
+# refused rather than replaced, since replacing the real concourse entry
+# would leave the enum saying one thing and the lookup doing another.  An
+# entry with no cli_class is refused because every type has a CLI class
+# and a resolver that finds none behaves like manual instead of saying
+# so.  And a path that disagrees with the class beside it is refused
+# rather than honoured, because that disagreement is the mismatch D108's
+# rename removed from lib and there is no reason to let one back in.
 sub register_provider {
 	my ($class, $type, $info) = @_;
 
@@ -97,6 +103,15 @@ sub register_provider {
 		if exists $_providers{$type};
 	bug("CI provider '%s' must be registered with a cli_class", $type)
 		unless ref($info) eq 'HASH' && $info->{cli_class};
+
+	for my $pair ([qw/file class/], [qw/cli_file cli_class/]) {
+		my ($path_key, $class_key) = @$pair;
+		next unless $info->{$path_key} && $info->{$class_key};
+		bug("CI provider '%s' registers a %s of '%s', which does not match ".
+			"its %s '%s'", $type, $path_key, $info->{$path_key},
+			$class_key, $info->{$class_key})
+			unless $info->{$path_key} eq _path_of($info->{$class_key});
+	}
 
 	$_providers{$type} = $info;
 	return 1;
@@ -147,6 +162,17 @@ sub compiler_class {
 # }}}
 ### Internal Helpers {{{
 
+# _path_of - the file path a package name derives {{{
+#
+# The one place that turns a class into something require can take, so
+# an entry names its classes and the registry works the rest out.
+sub _path_of {
+	my ($package) = @_;
+	(my $path = $package) =~ s{::}{/}g;
+	return "$path.pm";
+}
+
+# }}}
 # _unknown - the refusal for a type the registry does not hold {{{
 sub _unknown {
 	my ($type) = @_;

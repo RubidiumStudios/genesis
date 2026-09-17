@@ -1,0 +1,617 @@
+=head1 NAME
+
+Genesis::CI::ProviderCompiler::Concourse - the compiler that emits Concourse pipelines
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::ProviderCompiler::Concourse;
+
+    # Through the compiler, which is how a pipeline is built today.
+    my $compiler = Genesis::CI::ProviderCompiler::Concourse->new(
+        provider => $provider,
+        ast      => $ast,
+        top      => $top,
+    );
+    my $yaml = $compiler->generate_from_ast($ast);
+
+    # Through the older entry point, which parses a file first.
+    my $ci = Genesis::CI::ProviderCompiler::Concourse->init(
+        file => 'ci.yml', top => $top, layout => 'default');
+    $ci->parse;
+    my $pipeline = $ci->generate;
+    $ci->deploy(target => 'prod', yes => 1);
+
+=head1 DESCRIPTION
+
+The Concourse half of the compiler family. It turns a compiled
+L<Genesis::CI::Compiler::AST> into Concourse pipeline YAML and sets that
+pipeline with the C<fly> CLI. Everything it inherits is on
+L<Genesis::CI::ProviderCompiler>, and the keys an operator writes for it
+are declared on L<Genesis::CI::Provider::Concourse>, which is the same
+provider's other half.
+
+There are two ways in, and they meet in the middle. A caller with an AST
+already built calls C</generate_from_ast>, which is the compiler path. A
+caller with a configuration file calls C</init> and then C</parse>, which
+builds the AST first and then emits from it. Either way the emitter is
+L<Genesis::CI::Compiler::PipelineDescriptor> for a modern AST, and
+L<Genesis::CI::Legacy> for one built from a legacy F<ci.yml>.
+
+The native pipeline compiler produces fully-resolved Concourse YAML. The
+sections below document every first-class feature.
+
+=head2 Deployment propagation
+
+Environments form a directed graph; each env's git branch is updated after its
+upstream deploys successfully.  The graph is derived from C<genesis.pipeline.prior_env>
+keys in each environment YAML file, or from explicit C<stages:> declarations in
+C<pipeline.yml>.
+
+=head2 Notification styles (C<integrations.slack.style>)
+
+Four styles control what gets notified, when, and how.
+
+  integrations:
+    slack:
+      webhook:  ((slack-webhook))
+      channel:  '#deployments'
+      style:    grouped       # per-env | grouped | minimal | none
+
+B<per-env> (default). A C<notify-E<lt>envE<gt>-E<lt>typeE<gt>-changes> job is
+created for every non-auto environment.  The deploy job depends on the notify
+job, so deployment is gated on operator acknowledgement.
+
+B<grouped>. The same notify jobs as C<per-env>, collected into a
+separate C<notifications> Concourse group.  Deploy jobs do not depend on them.
+
+B<minimal>. No notify jobs.  Slack notifications fire only on failure via the
+C<on_failure> hook.  Success is silent.
+
+B<none>. No Slack resource, no notify jobs, no hooks.  The
+C<slack-notification> resource type is also omitted from the pipeline.
+
+=head3 mentions_on_failure
+
+A list of Slack handles prepended to failure notification text only:
+
+  slack:
+    mentions_on_failure:
+      - '@sre-oncall'
+
+=head3 per_env_overrides
+
+Override C<channel> and/or C<mentions_on_failure> for a specific environment:
+
+  slack:
+    channel: '#deployments'
+    per_env_overrides:
+      prod:
+        channel: '#prod-critical'
+        mentions_on_failure:
+          - '@prod-sre'
+
+=head2 BOSH upgrade locks (C<genesis.pipeline.locks.bosh_upgrade>)
+
+When a child deployment's YAML declares C<genesis.bosh_env: E<lt>directorE<gt>> and
+the named director is also in the pipeline, Genesis wires a shared upgrade lock:
+
+=over 4
+
+=item Director, which emits C<E<lt>aliasE<gt>-bosh-lock> as a named Concourse locker
+resource (C<lock_name: E<lt>aliasE<gt>-bosh-upgrade>).  Its deploy job acquires
+the lock before upgrading.
+
+=item Child, which acquires the director's shared C<bosh-lock> before deploying,
+blocking any concurrent director upgrade.  No own bosh-lock resource is emitted.
+
+=item Standalone, which acquires a per-env C<bosh-lock> by BOSH URL (legacy behaviour
+for envs whose director is not in the same pipeline).
+
+=back
+
+Requires a C<locker:> integration.  Opt out per-env:
+
+  genesis:
+    pipeline:
+      locks:
+        bosh_upgrade: false
+
+=head2 Redeploy lane (C<genesis.pipeline.redeploy>)
+
+A separate C<redeploy-E<lt>envE<gt>> job redeploys without change detection or
+cache promotion.  Three trigger modes:
+
+B<manual>. The operator triggers via Concourse UI or C<fly trigger-job>.
+
+B<cron>. A C<time> resource triggers within a daily window
+(C<redeploy_cron_start> / C<redeploy_cron_stop>, default 04:00 to 05:00 UTC).
+
+B<signal>. It triggers off the environment's C<E<lt>envE<gt>-signal> resource
+(version C<{status: success}>).  Requires C<status_signal> to be configured.
+
+=head2 Deployment status signals (C<configuration.status_signal>)
+
+Every deploy and redeploy job emits C<on_success>, C<on_failure>, C<on_abort>,
+and C<on_error> put steps to a per-environment C<E<lt>envE<gt>-signal> resource
+backed by C<cfcommunity/shuttle-resource>.  Supported backends: C<file>, C<s3>,
+C<gcs>.
+
+  configuration:
+    status_signal:
+      backend: s3
+      bucket:  my-genesis-signals
+      region:  us-east-1
+      access_key_id:     ((aws-access-key))
+      secret_access_key: ((aws-secret-key))
+
+Per-env backend or prefix override in the env YAML:
+
+  genesis:
+    pipeline:
+      status_signal: gcs
+      signal_prefix: my-pipeline/prod
+
+Disable for a specific env:
+
+  genesis:
+    pipeline:
+      status_signal: false
+
+=head2 Task library (C<configuration.task_library>)
+
+Declare an external git repository of custom task files.  Genesis emits a
+C<tasks> git resource, adds a non-triggering C<get: tasks> step to every deploy
+and redeploy job, and passes the library as an input to every running task.
+
+  configuration:
+    task_library:
+      uri:           https://github.com/org/pipeline-tasks.git
+      branch:        main              # optional, default 'main'
+      path:          tasks             # optional subdirectory within the repo
+      resource_name: tasks             # optional resource name, default 'tasks'
+      auth:
+        type:        ssh-key           # or 'token'
+        private_key: ((library-key))   # for ssh-key
+        # or, instead of the key:
+        password: ((library-token))    # for token (username defaults to x-oauth-basic)
+
+The C<GENESIS_TASK_LIBRARY_PATH> environment variable is set in each task to the
+resolved path (C<E<lt>resource_nameE<gt>> or C<E<lt>resource_nameE<gt>/E<lt>pathE<gt>>).
+
+=head1 METHODS - PROVIDER OPTIONS
+
+=head2 provider_type()
+
+The type the registry knows this compiler by.
+
+B<Returns:> C<'concourse'>.
+
+B<Examples:>
+
+    $compiler->provider_type;    # 'concourse'
+
+=head2 platform_name()
+
+The platform's name as a person writes it.
+
+B<Returns:> C<'Concourse'>.
+
+B<Examples:>
+
+    $compiler->platform_name;    # 'Concourse'
+
+=head2 file_extension()
+
+The extension the emitted pipeline file takes.
+
+B<Returns:> C<'.yml'>.
+
+B<Examples:>
+
+    $compiler->file_extension;   # '.yml'
+
+=head2 check_prereqs()
+
+Whether the C<fly> CLI is on the PATH. When it is not, the reason is
+reported with the two ways to install it, because a pipeline cannot be set
+without it and an operator who has never installed C<fly> has no reason to
+know where it comes from.
+
+B<Returns:> 1 when C<fly> is present, and 0 with the reason reported when
+it is not.
+
+B<Examples:>
+
+    exit 86 unless $compiler->check_prereqs;
+
+=head2 cli_opts()
+
+The Getopt::Long specifications for Concourse's deploy-time flags, each
+prefixed C<ci-> so that none of them collides with a top-level Genesis
+option.
+
+B<Returns:> the specifications, as a list.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::Concourse->cli_opts;
+    # ('ci-target=s', 'ci-team=s', 'ci-pipeline-name=s',
+    #  'ci-pause', 'ci-expose', 'ci-insecure')
+
+=head2 cli_opts_help(%config)
+
+The help text for those flags, followed by the Concourse-specific
+sections of C<pipeline.provider> a person setting one up needs to know
+about.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+C<valid_types> narrows the help. Text is returned only where C<concourse>
+is among the types asked for.
+
+=back
+
+B<Returns:> the help text, as a string.
+
+B<Examples:>
+
+    print Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(
+        valid_types => ['concourse']);
+
+=head2 provider_options_defaults()
+
+The default each Concourse option takes, read off the declared schema
+rather than listed again beside it. A key whose default the schema
+declares is a key whose default this answers with, so the two cannot
+drift, and a nested block states its defaults where its own sub-keys are
+declared.
+
+B<Returns:> a hash reference of key name to default value.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::Concourse->provider_options_defaults;
+    # {team => 'main', pause_after_set => 0, ...}
+
+=head2 normalize_provider_opts($opts)
+
+Command-line keys converted to configuration keys, with one remapping the
+base cannot make. The flag is C<--ci-pause> and the configuration key is
+C<pause_after_set>, so the converted C<pause> is renamed here, and a
+caller that wrote C<pause_after_set> itself keeps what it wrote.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$opts>
+
+The options to convert, as a hash reference.
+
+=back
+
+B<Returns:> a new hash reference, keyed the configuration way.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::Concourse->normalize_provider_opts(
+        {'ci-pause' => 1});
+    # {pause_after_set => 1}
+
+=head2 describe_provider()
+
+A description of this provider for a person to read, which is the target,
+the team, the pipeline name, and whether they are enough to deploy with.
+Once C</parse> has run there is an AST to read as well, so the
+description also carries the notification style, the task library, and
+whether BOSH upgrade locks are wired.
+
+B<Returns:> the description, as a list of key and value pairs, where
+C<extras> names the extra fields and their order.
+
+B<Examples:>
+
+    my %described = $compiler->describe_provider;
+    $described{Target};    # 'prod', or '(not set)'
+
+=head1 METHODS - COMPILING AND DEPLOYING
+
+=head2 init(%opts)
+
+Builds a Concourse provider from a configuration file rather than from an
+AST, which is the path C<genesis repipe> takes. Nothing is read here; the
+reading is C</parse>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+C<file> is the configuration to read, C<top> the deployment repository,
+C<layout> the pipeline layout, C<platform> the requested platform, and
+C<provider_opts> the resolved provider options.
+
+=back
+
+B<Returns:> the new provider.
+
+B<Examples:>
+
+    my $ci = Genesis::CI::ProviderCompiler::Concourse->init(
+        file => 'ci.yml', top => $top, layout => 'default');
+
+=head2 parse()
+
+Reads and validates the configuration C</init> was given, and builds the
+AST to emit from. A legacy platform delegates to L<Genesis::CI::Legacy>;
+everything else runs the parser, the validator, script discovery, and the
+AST builder in turn.
+
+B<Returns:> the provider, with its AST and configuration populated.
+
+B<Errors:> raises "Pipeline configuration is invalid:" followed by every
+refusal the validator found, one per line, so that an operator fixes them
+in one pass rather than one at a time.
+
+B<Examples:>
+
+    $ci->parse;
+    my $ast = $ci->ast;
+
+=head2 generate()
+
+The Concourse YAML for the configuration C</parse> read.
+
+B<Returns:> the pipeline YAML, as a string.
+
+B<Errors:> raises "Must call parse() before generate()" when nothing has
+been read yet, and "No AST available; call parse() first" when the read
+produced none.
+
+B<Examples:>
+
+    my $yaml = $ci->parse->generate;
+
+=head2 deploy(%opts)
+
+Sets the pipeline on a Concourse with the C<fly> CLI, and then pauses,
+unpauses, exposes, or hides it according to what was asked for. A dry run
+prints what would be set and stops.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+C<target> is the C<fly> target and is required, C<team> the Concourse
+team, C<pipeline_name> the name to set it under, C<pause_after_set>,
+C<expose>, and C<insecure> the switches of the same names, C<dry-run> to
+print rather than set, and C<yes> to skip the confirmation.
+
+=back
+
+B<Returns:> 1.
+
+B<Errors:> raises "Must call parse() before deploy()" when nothing has
+been read, "No Concourse target specified" when neither the options nor
+the configuration name one, "Cannot determine pipeline name" when nothing
+names the pipeline, and a message naming the C<fly> subcommand that
+failed when one does.
+
+B<Examples:>
+
+    $ci->deploy(target => 'prod', yes => 1);
+
+    # Print the pipeline and the fly invocation without setting anything.
+    $ci->deploy(target => 'prod', 'dry-run' => 1);
+
+=head2 generate_from_ast($ast)
+
+The compiler path's emitter. An AST built from a legacy F<ci.yml> is
+bridged to L<Genesis::CI::Legacy>, and every other AST is emitted
+natively through L<Genesis::CI::Compiler::PipelineDescriptor>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ast>
+
+The L<Genesis::CI::Compiler::AST> to emit from.
+
+=back
+
+B<Returns:> the pipeline YAML, as a string.
+
+B<Examples:>
+
+    my $yaml = $compiler->generate_from_ast($ast);
+
+=head2 output_files()
+
+What the emitter writes, which for Concourse is one file.
+
+B<Returns:> C<< {'pipeline.yml' => 'Concourse pipeline definition'} >>.
+
+B<Examples:>
+
+    $compiler->output_files;
+    # {'pipeline.yml' => 'Concourse pipeline definition'}
+
+=head1 METHODS - DESCRIBING A PIPELINE
+
+=head2 graph_md()
+
+The F<pipeline.md> a compile writes, which is a Markdown document around
+a Mermaid flowchart of the environments and the order they deploy in.
+Director environments are marked as such.
+
+B<Returns:> the Markdown, as a string.
+
+B<Errors:> raises "Must call parse() before graph_md()" when nothing has
+been read yet, and "No AST available; call parse() first" when the read
+produced none.
+
+B<Examples:>
+
+    mkfile_or_fail('pipeline.md', $ci->parse->graph_md);
+
+=head2 describe()
+
+The pipeline described for a person, one line per environment, annotated
+with its gate mode, its redeploy mode, and its signal backend.
+
+B<Returns:> the description, as a string.
+
+B<Errors:> raises "Must call parse() before describe()" when nothing has
+been read yet, and "No AST available; call parse() first" when the read
+produced none.
+
+B<Examples:>
+
+    print $ci->parse->describe;
+
+=head2 generate_description()
+
+The same description C</describe> answers. It is the name the older entry
+point calls it by, kept so that both callers reach one implementation.
+
+B<Returns:> the description, as a string.
+
+B<Examples:>
+
+    print $ci->generate_description;
+
+=head1 METHODS - ACCESSORS
+
+=head2 config()
+
+The parsed configuration C</parse> read.
+
+B<Returns:> the configuration, as a hash reference, or C<undef> before
+C</parse> has run.
+
+B<Examples:>
+
+    $ci->config->{pipeline}{name};
+
+=head2 top()
+
+The deployment repository this provider was built with.
+
+B<Returns:> the L<Genesis::Top>, or C<undef>.
+
+B<Examples:>
+
+    my $top = $ci->top;
+
+=head2 layout()
+
+The pipeline layout this provider was built with.
+
+B<Returns:> the layout name, or C<undef>.
+
+B<Examples:>
+
+    $ci->layout;    # 'default'
+
+=head1 INTERNAL METHODS
+
+=head2 _generate_from_legacy_ast($ast)
+
+The bridge for an AST built out of a legacy F<ci.yml>, which carries the
+raw pipeline the legacy parser produced. It hands that pipeline back to
+L<Genesis::CI::Legacy> rather than re-deriving it, because the legacy
+emitter is what those repositories were written against.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ast>
+
+The legacy-sourced AST.
+
+=back
+
+B<Returns:> the pipeline YAML, as a string.
+
+B<Examples:>
+
+    my $yaml = $self->_generate_from_legacy_ast($ast);
+
+=head2 _generate_native($ast)
+
+The native emitter, which resolves the pipeline if nothing has resolved
+it yet and then renders the descriptor's YAML.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ast>
+
+The AST to emit from.
+
+=back
+
+B<Returns:> the pipeline YAML, as a string.
+
+B<Examples:>
+
+    my $yaml = $self->_generate_native($ast);
+
+=head2 _ensure_pipeline_resolved()
+
+Resolves the AST's pipeline through
+L<Genesis::CI::Compiler::PipelineDescriptor> unless something has
+resolved it already. It is idempotent on purpose, because both the
+emitter and the description want a resolved pipeline and either may run
+first.
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+    $self->_ensure_pipeline_resolved;
+
+=head2 _yaml_bool($bool, $default)
+
+A configuration value read as a Concourse boolean, where an undefined
+value takes the default rather than reading as false. It exists because a
+key an operator never wrote and a key they wrote as C<false> mean
+different things, and Perl's own truth test cannot tell them apart.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$bool>
+
+The value read, which may be C<undef>.
+
+=item C<$default>
+
+What an absent value means. It defaults to false.
+
+=back
+
+B<Returns:> 1 or 0.
+
+B<Examples:>
+
+    _yaml_bool(undef, 1);    # 1
+    _yaml_bool(0, 1);        # 0
+
+=head1 SEE ALSO
+
+L<Genesis::CI::ProviderCompiler>, L<Genesis::CI::Provider::Concourse>,
+L<Genesis::CI::Compiler::PipelineDescriptor>, L<Genesis::CI::Legacy>
+
+=cut

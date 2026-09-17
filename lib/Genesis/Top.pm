@@ -2601,13 +2601,12 @@ sub _validate_capability_gates {
 	# rather than off the key, because the gates are reached only from
 	# _validate_pipeline_config, which has already returned for a
 	# repository with no pipeline, so the accessor always has an answer.
-	require Genesis::CI::Compiler::PipelineProvider;
+	require Genesis::CI::Provider;
 	require Genesis::CI::ProviderRegistry;
 	my $type  = $self->pipeline_provider_type;
 	my $class = Genesis::CI::ProviderRegistry->provider_class($type);
-	my $caps  = Genesis::CI::Compiler::PipelineProvider
-		->declared_capabilities($class);
-	my $gates = Genesis::CI::Compiler::PipelineProvider->capability_gates;
+	my $caps  = Genesis::CI::Provider->declared_capabilities($class);
+	my $gates = Genesis::CI::Provider->capability_gates;
 
 	# The gates that are going to fire are separated by where their key
 	# lives before anything is read, so the environment files are walked

@@ -35,12 +35,9 @@ Genesis::CI::Compiler::AST                    # No .pod; pipeline rework pending
 Genesis::CI::Compiler::ASTBuilder             # No .pod; pipeline rework pending
 Genesis::CI::Compiler::Parser                 # No .pod; pipeline rework pending
 Genesis::CI::Compiler::PipelineDescriptor     # No .pod; pipeline rework pending
-Genesis::CI::Compiler::PipelineProvider       # No .pod; pipeline rework pending
-Genesis::CI::Compiler::Providers::Concourse   # No .pod; pipeline rework pending
 Genesis::CI::Compiler::ScriptDiscovery        # No .pod; pipeline rework pending
 Genesis::CI::Compiler::Validator              # No .pod; pipeline rework pending
 Genesis::CI::Layout                           # No .pod; pipeline rework pending
-Genesis::CI::Provider                         # No .pod; pipeline rework pending
 Genesis::CI::Provider::Concourse              # No .pod; pipeline rework pending
 Genesis::CI::Provider::GithubActions          # No .pod; pipeline rework pending
 Genesis::CI::Provider::Manual                 # No .pod; pipeline rework pending

@@ -356,7 +356,7 @@ the generic pipeline and should not be accessed by providers directly.
 =head1 SEE ALSO
 
 Genesis::CI::Compiler::ASTBuilder, Genesis::CI::Compiler::PipelineDescriptor,
-Genesis::CI::Compiler::PipelineProvider
+Genesis::CI::ProviderCompiler
 
 =cut
 

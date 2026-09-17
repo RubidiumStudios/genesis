@@ -98,8 +98,8 @@ sub render {
 	return JSON::PP->new->pretty->canonical->encode($data)
 		if $format eq 'json';
 
-	require Genesis::CI::Compiler::PipelineProvider;
-	return Genesis::CI::Compiler::PipelineProvider->dump_yaml($data);
+	require Genesis::CI::ProviderCompiler;
+	return Genesis::CI::ProviderCompiler->dump_yaml($data);
 }
 
 # }}}
