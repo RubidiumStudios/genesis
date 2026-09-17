@@ -34,9 +34,16 @@ and which one is decided by what the sentence does.
     that entry, so writing the same thing as a comment above the
     method is writing it twice, and the two will drift.
 
-  - **It justifies why the code changed, or why it is this way
-    rather than another** -- it belongs in the commit message, where
-    `git blame` will surface it beside the line it explains.
+  - **It justifies why the code changed** -- it belongs in the commit
+    message, where `git blame` will surface it beside the line it
+    explains.
+
+  - **It is a constraint a later editor must respect, because undoing
+    it reintroduces a defect** -- it belongs in the `=head2` too, not
+    only in the commit.  A commit message records history and may
+    safely rot; a constraint nobody can find in the readable code or
+    POD is a constraint that gets undone.  Say what breaks, and name
+    the callers that depend on it.
 
   - **It names the method in one line** -- that is the fold header
     the method already carries:
