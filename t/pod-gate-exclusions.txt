@@ -30,7 +30,6 @@ Genesis::Env::Secrets::Store::Credhub         # Zero-byte .pm reserving the name
 # these entries as the rework lands -- the count printed on every run
 # is the reminder.
 Genesis::CI                                   # No .pod; pipeline rework pending
-Genesis::CI::Compiler                         # No .pod; pipeline rework pending
 Genesis::CI::Compiler::AST                    # No .pod; pipeline rework pending
 Genesis::CI::Compiler::ASTBuilder             # No .pod; pipeline rework pending
 Genesis::CI::Compiler::Parser                 # No .pod; pipeline rework pending

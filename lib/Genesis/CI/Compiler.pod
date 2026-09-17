@@ -1,0 +1,413 @@
+=head1 NAME
+
+Genesis::CI::Compiler - the CI pipeline compilation orchestrator
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Compiler;
+
+    # Compile from the pipeline: section of .genesis/config.
+    my $result = Genesis::CI::Compiler->new(top => $top)
+        ->compile(provider => 'concourse');
+
+    # The result carries both halves of the provider.
+    $result->{provider}->check_prereqs;       # is the toolchain there?
+    $result->{compiler}->deploy(%opts);       # set the pipeline
+
+    # Ask whether a named directory holds a compilable pipeline.
+    if (Genesis::CI::Compiler->can_compile($some_dir)) {
+        ...
+    }
+
+=head1 DESCRIPTION
+
+The compiler runs a repository's pipeline configuration through seven
+stages and hands back what they produced. A parser loads the
+configuration, a validator checks its structure and its cross-references,
+a script discovery pass finds the scripts the configuration names, an AST
+builder turns all of it into a platform-agnostic tree, a pipeline
+descriptor resolves the generic pipeline out of that tree, the provider's
+compiler emits the platform-specific artefact, and any override file the
+operator wrote is merged over the top of it.
+
+Under D108 a provider is one class, and the compiler that emits its
+artefact is a component that class owns. So the sixth stage builds a
+L<Genesis::CI::Provider> out of the parsed C<pipeline.provider> block and
+asks that provider for its compiler, rather than resolving a compiling
+class out of the registry and building it alone. Both objects come back
+from C<compile>, because the two answer different questions. Whether the
+toolchain a pipeline needs is installed is the provider's question, and
+what the emitted pipeline looks like is its compiler's. They used to be
+one object, and one of them was answering for the other.
+
+This module also owns the C<pipeline> section of F<.genesis/config>. It
+registers itself with L<Genesis::Top> at load time, so the shape check
+that the configuration schema cannot state runs here.
+
+=head1 CONSTRUCTOR
+
+=head2 new(%opts)
+
+    my $compiler = Genesis::CI::Compiler->new(top => $top);
+
+Builds a compiler over one repository. It builds and nothing more, so a
+repository with no pipeline configuration is not refused until C<compile>
+runs and the parser looks for one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+Named options. C<top> is the L<Genesis::Top> the run is against, and
+every stage that reads the repository reads it through that object.
+C<ci_dir> names a directory holding F<pipeline.yml> and its neighbours,
+C<file> names a legacy F<ci.yml> to parse instead, and C<env_dir> names
+where the environment files live when they are not where C<top> says.
+All four may be omitted, and the parser then works from the C<pipeline>
+section of F<.genesis/config>.
+
+=back
+
+B<Returns:> the new object.
+
+B<Examples:>
+
+    # The modern form, reading .genesis/config.
+    Genesis::CI::Compiler->new(top => $top);
+
+    # The legacy form, reading a ci.yml the caller names.
+    Genesis::CI::Compiler->new(file => 'ci.yml', top => $top);
+
+=head1 METHODS
+
+=head2 compile(%opts)
+
+    my $result = $compiler->compile(provider => 'concourse');
+    # { ast => ..., output => ..., provider => ..., compiler => ...,
+    #   parsed => ... }
+
+Runs every stage and returns what they produced. The caller names the
+provider type to compile for, and that name wins over whatever type the
+C<pipeline.provider> block declares, because the caller is the one that
+asked.
+
+The result carries five keys, and two of them are the provider written in
+its two halves. C<provider> is the L<Genesis::CI::Provider> built out of
+the parsed block, and it is what a caller reads to ask whether the
+toolchain is present, which is C<check_prereqs>. C<compiler> is the
+L<Genesis::CI::ProviderCompiler> that provider handed out, holding the
+provider itself rather than a copy of its settings, and it is what a
+caller reads for anything it emits or sets, which is C<deploy>,
+C<graph_md>, C<generate_description>, and the resolved options that
+C<provider_option> reads. C<ast> is the platform-agnostic tree, C<output>
+maps each emitted file name to its contents, and C<parsed> is the
+configuration as the parser read it.
+
+A provider the registry knows but has no compiler for is refused here
+rather than answered with nothing, because a run that reached this stage
+has an artefact to emit.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+Named options. C<provider> is the provider type to compile for and is
+required. C<provider_opts> carries options the caller collected from the
+command line, in their C<ci-*> prefixed and hyphenated spelling, which
+are normalised to the block's own spelling and merged over the block.
+
+=back
+
+B<Returns:> a hash reference carrying C<ast>, C<output>, C<provider>,
+C<compiler>, and C<parsed>.
+
+B<Errors:> raises "Missing required 'provider' parameter for compile()"
+when no type is named, and "Pipeline configuration is invalid" after
+printing each of the validator's errors. The parser, the registry, and
+the override merge raise their own refusals through this call as well.
+
+B<Examples:>
+
+    # The prerequisites check is the provider's half.
+    my $result = $compiler->compile(provider => 'concourse');
+    $result->{provider}->check_prereqs or exit 86;
+
+    # Everything emitted is the compiler's half.
+    $result->{compiler}->deploy(target => 'ci', yes => 1);
+
+    # A command-line override, in its CLI spelling, wins over the block.
+    $compiler->compile(
+        provider      => 'concourse',
+        provider_opts => {'ci-target' => 'staging'},
+    );
+
+=head2 can_compile($ci_dir)
+
+    Genesis::CI::Compiler->can_compile('ci');   # 1 or 0
+
+Whether a named directory holds a F<pipeline.yml>. D27 took the
+conventional directory name away, so there is no name to fall back on and
+the caller says which directory it means. A caller that names none is
+asking about nowhere, and the answer is no.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ci_dir>
+
+The directory to ask about, which may be C<undef>.
+
+=back
+
+B<Returns:> true when the directory is there and holds F<pipeline.yml>,
+and false otherwise.
+
+B<Examples:>
+
+    Genesis::CI::Compiler->can_compile(undef);    # 0, nowhere to look
+
+=head2 can_compile_from_env_files($ci_dir)
+
+    Genesis::CI::Compiler->can_compile_from_env_files('ci');   # 1 or 0
+
+Whether a named directory is built for the env-file topology, where the
+support files are present and the topology comes from the
+C<genesis.pipeline.*> keys of the environment files rather than from a
+F<pipeline.yml>. The directory qualifies when it holds both F<targets.yml>
+and F<integrations.yml> and holds no F<pipeline.yml>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ci_dir>
+
+The directory to ask about, which may be C<undef>.
+
+=back
+
+B<Returns:> true when the directory has that shape, and false otherwise.
+
+B<Examples:>
+
+    # A directory with a pipeline.yml is the other topology, not this one.
+    Genesis::CI::Compiler->can_compile_from_env_files('ci');   # 0
+
+=head2 can_compile_from_genesis_config($top)
+
+    Genesis::CI::Compiler->can_compile_from_genesis_config($top);
+
+Whether the repository carries its pipeline configuration inline, in the
+C<pipeline> section of F<.genesis/config>, rather than in files beside it.
+The section is named C<pipeline> under D18, so the read is by that name
+and there is no alias for its old spelling.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The L<Genesis::Top> to ask, which may be C<undef>.
+
+=back
+
+B<Returns:> 1 when the section is there, and 0 otherwise.
+
+B<Examples:>
+
+    # A Top that cannot answer for a config is answered no rather than
+    # being allowed to raise.
+    Genesis::CI::Compiler->can_compile_from_genesis_config(undef);   # 0
+
+=head2 validate_config_section($data, $top)
+
+    Genesis::CI::Compiler->validate_config_section($data, $top);
+
+The owner check for the C<pipeline> section, which L<Genesis::Top> calls
+while it validates F<.genesis/config>. Under D86 the declarative half of
+the validation runs in Top, which merges this provider's fragment into the
+schema before L<Genesis::Config> sees it, so there is no per-key loop
+here. What is left is the shape check the schema cannot state.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The section's value, which may be C<undef> when the configuration carries
+no C<pipeline> section at all.
+
+=item C<$top>
+
+The L<Genesis::Top> the configuration belongs to.
+
+=back
+
+B<Returns:> 1 when the section is a hash, and nothing when there is no
+section to check.
+
+B<Errors:> raises "'pipeline' configuration in .genesis/config must be a
+hash" for a section of any other shape.
+
+B<Examples:>
+
+    # A missing section is not an invalid one.
+    Genesis::CI::Compiler->validate_config_section(undef, $top);   # ()
+
+    Genesis::CI::Compiler->validate_config_section(['a'], $top);
+    # 'pipeline' configuration in .genesis/config must be a hash
+
+=head2 override_file_names($provider_type, $output_names, $layout)
+
+    Genesis::CI::Compiler->override_file_names('concourse',
+        ['pipeline.yml'], 'single');
+    # ('.genesis/pipeline-overrides-concourse.yml')
+
+The override files a run may merge, named for the provider and for the
+output layout in force. D27 put the override beside F<.genesis/config> and
+took the old CI subdirectory away, because a file whose name says what it
+is needs no subdirectory to say it again. D67 generalised the name for a
+provider that emits more than one file, which takes one override per
+emitted file named after that file's base name, because it would have
+nothing to merge a single override onto. Under D101 the form follows the
+effective output layout rather than the capability, so a multi-file
+provider set to C<single> takes the single form.
+
+The whole output name goes into the override name, directory and all, with
+the separators flattened to dashes so the result is still one path
+segment. Dropping the directory would let a provider that emits
+F<qa/deploy.yml> and F<prod/deploy.yml> merge both against the same
+override file, and nothing in the run would say so.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$provider_type>
+
+The provider type the run is compiling for, which goes into every name.
+
+=item C<$output_names>
+
+The emitted file names, as an array reference. It is read only under the
+multiple layout.
+
+=item C<$layout>
+
+The effective output layout, either C<single> or C<multiple>. An undefined
+layout is read as C<single>.
+
+=back
+
+B<Returns:> the override paths, relative to the repository root, as a
+list. The single form returns one name whatever was emitted, and the
+multiple form returns one per emitted file, in the order they were given.
+
+B<Examples:>
+
+    # One override per emitted file, with the directory flattened in.
+    Genesis::CI::Compiler->override_file_names('concourse',
+        ['qa/deploy.yml', 'prod/deploy.yml'], 'multiple');
+    # ('.genesis/pipeline-overrides-concourse-qa-deploy.yml',
+    #  '.genesis/pipeline-overrides-concourse-prod-deploy.yml')
+
+=head1 INTERNAL METHODS
+
+=head2 _apply_provider_overrides($output, $provider_type)
+
+Merges the override files over the emitted output and returns what came
+out. The merge itself is verbatim YAML merged over the generated output
+after compilation, and an output that is not YAML passes through
+untouched. Only the files the layout names are read, and only where they
+are on disk.
+
+Under the single layout one override covers every emitted file, so the
+notice that names it belongs to the run rather than to each file in it.
+Under the multiple layout each file gets its own notice.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$output>
+
+The emitted files, as a hash reference mapping each name to its contents.
+
+=item C<$provider_type>
+
+The provider type the run compiled for, which names the override files.
+
+=back
+
+B<Returns:> a hash reference of the same shape, with every mergeable file
+merged and every other file as it was.
+
+B<Errors:> raises a Genesis bug, "The compiler has no Genesis::Top", when
+the object was built without one. A temporary file it cannot write raises
+"Cannot write temporary override base ...", and a spruce merge that
+returns non-zero raises "Failed to apply ...: spruce merge returned
+non-zero" at C<Genesis::Exit::CONFIG>, the override being the operator's
+own file.
+
+B<Examples:>
+
+    # Nothing to merge, so the output comes back as it went in.
+    $compiler->_apply_provider_overrides({'pipeline.yml' => $yaml},
+        'concourse');
+
+=head2 _report_unread_overrides($top, $provider_type, $files, $layout, $override_for)
+
+Names the override file the layout is passing over. The two naming forms
+are a layout apart, so an operator who writes one of them and then changes
+C<output_layout> loses the merge with nothing said. Wherever the name the
+layout reads is absent and the other form's file is on disk, this says so,
+because a silent skip looks exactly like a merge that had nothing to add.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The L<Genesis::Top>, which the paths are resolved and shortened against.
+
+=item C<$provider_type>
+
+The provider type the run compiled for.
+
+=item C<$files>
+
+The emitted file names, as an array reference.
+
+=item C<$layout>
+
+The output layout in force, which the warning names.
+
+=item C<$override_for>
+
+The path each emitted file reads its override from, as a hash reference.
+
+=back
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+    # Silent when every override the layout names is on disk.
+    $compiler->_report_unread_overrides($top, 'concourse',
+        ['pipeline.yml'], 'single', \%override_for);
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Provider>, L<Genesis::CI::ProviderCompiler>,
+L<Genesis::CI::ProviderRegistry>, L<Genesis::CI::Compiler::Parser>,
+L<Genesis::CI::Compiler::AST>, L<Genesis::Top>
+
+=cut

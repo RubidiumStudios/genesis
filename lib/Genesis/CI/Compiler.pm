@@ -95,17 +95,21 @@ sub compile {
 	);
 	$ast->set_pipeline($descriptor->describe());
 
-	# Stage 6: Load and run provider
-	# Stage 6 continued: generate platform-specific output
+	# Stage 6: build the provider and ask it for its compiler
+	#
+	# D108: one class answers for a provider, and the compiler that
+	# emits its artefact is a component that class owns.  The compile
+	# used to resolve a compiler class out of the registry and build it
+	# directly, so nothing in a run ever held a Genesis::CI::Provider
+	# and the command that asked for check_prereqs was handed the
+	# compiler-side copy instead.
 	info("Generating %s pipeline...", $provider_type);
-	require Genesis::CI::ProviderRegistry;
-	my $provider_class =
-		Genesis::CI::ProviderRegistry->compiler_class($provider_type);
 
-	# Extract provider options from parsed config (pipeline.provider: section)
-	# and merge with any caller-supplied opts.  Normalize caller opts from their
-	# CLI form (ci-* prefixed, hyphenated) to config/schema form (unprefixed, underscored)
-	# so that provider_option() and provider_config() always see consistent keys.
+	# Provider options come from the parsed pipeline.provider: block and
+	# from any caller-supplied opts, normalised from their CLI form
+	# (ci-* prefixed, hyphenated) to config form (unprefixed,
+	# underscored) so that provider_option() and provider_config() see
+	# consistent keys.
 	require Genesis::CI::ProviderCompiler;
 	my $provider_opts = {
 		%{ $parsed->{provider} || {} },
@@ -114,19 +118,32 @@ sub compile {
 		) },
 	};
 
-	my $provider = $provider_class->new(
+	# The type the caller asked to compile for wins over the type the
+	# block declares, because the caller is the one that named it and a
+	# block that disagrees would otherwise pick the class silently.
+	require Genesis::CI::Provider;
+	my $provider = Genesis::CI::Provider->new(
+		%$provider_opts, type => $provider_type
+	);
+
+	# required, because a run that reached this stage has an artefact to
+	# emit, so a provider with no compiler is the registry's refusal
+	# rather than an undef to trip over one line later.
+	my $compiler = $provider->compiler(
 		ast           => $ast,
 		top           => $self->{top},
 		provider_opts => $provider_opts,
+		required      => 1,
 	);
-	my $raw_output = $provider->generate_from_ast($ast);
+	my $raw_output = $compiler->generate_from_ast($ast);
 
-	# Wrap raw output into file map using provider's output_files manifest
+	# Wrap raw output into file map using the compiler's output_files
+	# manifest, the emitted artefact being the compiler's half.
 	my $output;
 	if (ref($raw_output) eq 'HASH') {
 		$output = $raw_output;
 	} else {
-		my $files = $provider->output_files || {};
+		my $files = $compiler->output_files || {};
 		my @filenames = keys %$files;
 		my $filename = @filenames ? $filenames[0] : 'pipeline.yml';
 		$output = { $filename => $raw_output };
@@ -135,10 +152,14 @@ sub compile {
 	# Stage 7: Apply provider-specific overrides (optional)
 	$output = $self->_apply_provider_overrides($output, $provider_type);
 
+	# Both halves go back, so a caller that wants an emitted artefact
+	# reads compiler and a caller that wants to know whether the
+	# toolchain is there reads provider.
 	return {
 		ast      => $ast,
 		output   => $output,
 		provider => $provider,
+		compiler => $compiler,
 		parsed   => $parsed,
 	};
 }
@@ -360,44 +381,5 @@ sub _report_unread_overrides {
 
 1;
 
-=head1 NAME
-
-Genesis::CI::Compiler - CI pipeline compilation orchestrator
-
-=head1 DESCRIPTION
-
-Genesis::CI::Compiler orchestrates the full compilation pipeline:
-
-  1. Parser    - Load configuration files (legacy or multi-file)
-  2. Validator - Validate structure, cross-references, semantics
-  3. ScriptDiscovery - Find and parse script metadata
-  4. ASTBuilder - Construct platform-agnostic AST
-  5. PipelineDescriptor - Resolve generic pipeline from source AST
-  6. Provider  - Generate platform-specific output from AST
-  7. Overrides - Deep-merge pipeline-overrides-<provider>.yml if present
-
-=head1 SYNOPSIS
-
-  # Compile from the pipeline: section of .genesis/config
-  my $result = Genesis::CI::Compiler->new(
-    top => $top_obj,
-  )->compile(provider => 'concourse');
-
-  # Compile from legacy ci.yml
-  my $result = Genesis::CI::Compiler->new(
-    file => 'ci.yml',
-    top  => $top_obj,
-  )->compile(provider => 'concourse');
-
-  # Check whether a named directory holds a compilable pipeline
-  if (Genesis::CI::Compiler->can_compile($some_dir)) {
-    # Use compiler pipeline
-  }
-
-=head1 SEE ALSO
-
-Genesis::CI, Genesis::CI::Compiler::Parser, Genesis::CI::Compiler::AST
-
-=cut
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
