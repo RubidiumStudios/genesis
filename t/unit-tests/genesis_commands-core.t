@@ -995,9 +995,10 @@ subtest 'define_command - a commit outside the class is rejected' => sub {
 			'define_command dies when a commit carries no pre-deploy class';
 	};
 
-	# The deployed-state class is a class, and still the wrong one: that
-	# gate opens a session and asks nothing about commits, so the guard
-	# refuses the pairing rather than the bare absence of a class.
+	# The deployed-state class is a class, and still the wrong one,
+	# because that gate opens a session and asks nothing about commits, so
+	# the guard refuses the pairing rather than the bare absence of a
+	# class.
 	quietly {
 		throws_ok {
 			define_command('committing-deployed-cmd', {

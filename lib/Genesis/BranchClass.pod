@@ -196,7 +196,9 @@ be delivered. Three conditions hold together.
 
 It descends from the tip of the control branch as observed through the
 remote-tracking ref after a refresh, so it carries every environment file
-control has.
+control has. The rebase offered as the remedy names
+C<< <remote>/<control> >>, or the control branch on its own where no
+remote is configured and the tip was read off the local branch.
 
 =item *
 
@@ -234,6 +236,11 @@ single-branch clone holds neither ref for a control its origin has, so
 local refs cannot tell that clone apart from a repository with no control
 at all. A remote that holds control earns the same C<DATAERR> refusal and
 the same fetch, because a fetch is what fixes it.
+
+The remote is asked only where C<refresh> allowed it. A caller that
+promised to make no network call has none made for it here either, and the
+refusal that says control is nowhere rests on having asked, so with the
+question unasked the arm returns the fetch remedy instead.
 
 Only a remote that lacks control too earns the other refusal. Then the
 predicate bails itself, at C<Genesis::Exit::CONFIG>, with the sentence
@@ -274,6 +281,12 @@ C<adding> is the environment name the command is about to create, which
 C<genesis new> is given as its argument. A branch may collide with a name
 the repository does not carry yet, and this is how the predicate hears
 about one.
+
+C<refresh> says whether the caller allowed a network call, and it defaults
+to true. A command that promised to make none, which is C<pipeline-status>
+under C<--no-refresh> and C<pipeline-describe>, passes 0, and then the
+remote is never asked and the missing-ref arm returns the fetch remedy
+rather than bailing at C<Genesis::Exit::CONFIG>.
 
 =back
 
@@ -331,9 +344,9 @@ which setting moved the expectation onto a feature branch.
 It is asked of the command and not of the class. D45 speaks of a commit,
 and most pre-deploy commands make none on control, so C<pipeline-apply>,
 C<pipeline-status>, C<pipeline-describe>, and the secrets commands all run
-there as before. C<pipeline-apply> matters most: it is the command that
-applies the protection this key derives, and a refusal that caught it would
-leave an operator no way to turn the protection on.
+there as before. C<pipeline-apply> matters most, because it is the command
+that applies the protection this key derives, and a refusal that caught it
+would leave an operator no way to turn the protection on.
 
 A detached HEAD is allowed through, because it is neither control nor
 derived and neither remedy the predicate offers can be carried out on it. A

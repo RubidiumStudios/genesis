@@ -211,12 +211,12 @@ subtest 'a detached HEAD behind control is let through' => sub {
 };
 
 subtest 'a clone that has never fetched control is told so' => sub {
-	# The single-branch clone: origin holds control, and this clone holds
-	# neither the local branch nor the remote-tracking ref.  resolve_branch
-	# reads local refs alone, so it answers nothing here, and the remote is
-	# what settles that control is somewhere and that a fetch is the
-	# remedy.  Told it exists nowhere, an operator would be sent to create
-	# a branch that is already on the remote.
+	# This is the single-branch clone, where origin holds control and this
+	# clone holds neither the local branch nor the remote-tracking ref.
+	# resolve_branch reads local refs alone, so it answers nothing here,
+	# and the remote is what settles that control is somewhere and that a
+	# fetch is the remedy.  Told it exists nowhere, an operator would be
+	# sent to create a branch that is already on the remote.
 	#
 	# The refresh above the predicate stands aside, because a clone with no
 	# local control branch is the pre-flight's repair to make and to
@@ -254,6 +254,7 @@ subtest 'a control that lives in this clone alone is refused too' => sub {
 	# has to go from R as well as from the tracking ref, because the
 	# refresh fetches whenever the local branch is here and a control the
 	# remote still held would simply come back.
+	my $control_sha = $git->sha($h->control);
 	$git->create_branch('add-prod7', 'refs/remotes/origin/' . $h->control);
 	stand_on($h, 'add-prod7');
 	delete_on_r($h, $h->control);
@@ -268,12 +269,16 @@ subtest 'a control that lives in this clone alone is refused too' => sub {
 		'and with the same condition, since control is not nowhere');
 
 	# R takes control back from the copy that still holds it, and the
-	# tracking ref comes back with the fetch.  The restoration is asserted
-	# rather than assumed, because the row below stands on it.
+	# tracking ref comes back with the fetch.  Both are measured against
+	# the commit this row found control on rather than against each other,
+	# because ref_in answers undef for a ref that is absent and two absent
+	# refs would agree.
 	push_from($h, 'a', $h->control);
 	refresh($h, 'a', $h->control);
-	is(ref_in($h->a, 'refs/remotes/origin/' . $h->control),
-		ref_in($h->r, 'refs/heads/' . $h->control),
+	is_deeply([
+			ref_in($h->a, 'refs/remotes/origin/' . $h->control),
+			ref_in($h->r, 'refs/heads/' . $h->control),
+		], [$control_sha, $control_sha],
 		'and the refs this row dropped are back where it found them');
 };
 
@@ -302,7 +307,8 @@ subtest 'a clone with control nowhere is refused at CONFIG' => sub {
 	unlike($err . $out, qr/git fetch/,
 		'and offers no fetch, because there is nothing anywhere to fetch');
 
-	# All three refs go back, so this file leaves the clone as it found it.
+	# All three refs go back, so nothing below this row reads a clone it
+	# narrowed.
 	$git->create_branch($h->control, $control_sha);
 	push_from($h, 'a', $h->control);
 	refresh($h, 'a', $h->control);
@@ -313,6 +319,95 @@ subtest 'a clone with control nowhere is refused at CONFIG' => sub {
 		], [$control_sha, $control_sha, $control_sha],
 		'and all three refs this row dropped are back at the commit it '.
 		'found them on');
+};
+
+subtest 'a command that promised no fetch is told to fetch' => sub {
+	# pipeline-describe answers out of the repository's own files, so the
+	# gate allows it no refresh, and the predicate below the gate may ask
+	# the remote no more than the gate did.  Control is in neither ref
+	# here and the remote's address is one nothing can reach, so a
+	# predicate that asked would die in ls-remote's own words instead of
+	# refusing with the fetch this clone really does need.
+	my $control_sha = $git->sha($h->control);
+	$git->create_branch('add-prod9', 'refs/remotes/origin/' . $h->control);
+	stand_on($h, 'add-prod9');
+	delete_local($h, 'a', $h->control);
+	Genesis::run({dir => $h->a, onfailure => 'could not drop the ref'},
+		'git', 'update-ref', '-d', 'refs/remotes/origin/' . $h->control);
+	Genesis::run({dir => $h->a, onfailure => 'could not move the remote'},
+		'git', 'remote', 'set-url', 'origin', $h->r . '-is-not-here');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-describe');
+	my $said = unfolded($out, $err);
+
+	is($exit, Genesis::Exit::DATAERR(),
+		'the run is refused at DATAERR');
+	like($said, qr/has not been fetched/i,
+		'the refusal says control has not arrived in this clone');
+	like($said, qr/git fetch/,
+		'and the remedy is the fetch that brings it');
+	unlike($said, qr/ls-remote/,
+		'and the remote was never asked, because no refresh was allowed');
+
+	# The remote's address and both refs go back, so the row below reads
+	# the clone this one was handed.
+	Genesis::run({dir => $h->a, onfailure => 'could not restore the remote'},
+		'git', 'remote', 'set-url', 'origin', $h->r);
+	$git->create_branch($h->control, $control_sha);
+	refresh($h, 'a', $h->control);
+	is_deeply([
+			ref_in($h->a, 'refs/heads/' . $h->control),
+			ref_in($h->a, 'refs/remotes/origin/' . $h->control),
+		], [$control_sha, $control_sha],
+		'and the refs this row dropped are back where it found them');
+};
+
+subtest 'a repository with no remote names the bare control branch' => sub {
+	# With no remote configured the predicate reads control's tip off the
+	# local branch, so the rebase it offers has no remote to prefix and
+	# names the branch itself.  The feature branch is cut from the tip and
+	# control is moved on afterwards, so the branch really is behind what
+	# it is measured against.
+	#
+	# The remote is named in the repository's own configuration first,
+	# because source_control.remote is otherwise derived from the one
+	# configured remote, and a repository with none is refused for that
+	# before it ever reaches a branch class.
+	my $control_sha = $git->sha($h->control);
+	stand_on($h, $h->control);
+	set_repo_config($h, 'pipeline.source_control.remote', 'origin');
+	$git->create_branch('add-prod10', $h->control);
+	helper::put_file($h->a . '/notes10.txt', "a commit on control\n");
+	Genesis::run({dir => $h->a, onfailure => 'could not stage the file'},
+		'git', 'add', '--', 'notes10.txt');
+	Genesis::run({dir => $h->a, onfailure => 'could not move control on'},
+		'git', 'commit', '-q', '-m', 'Move control on');
+	stand_on($h, 'add-prod10');
+	Genesis::run({dir => $h->a, onfailure => 'could not drop the remote'},
+		'git', 'remote', 'remove', 'origin');
+
+	my ($out, $err, $exit) = run_genesis($h, 'new', 'prod10', '--no-commit');
+	my $said = unfolded($out, $err);
+	my $remedy = 'git rebase ' . $h->control;
+
+	is($exit, Genesis::Exit::DATAERR(),
+		'the stale feature branch is refused');
+	like($said, qr/does not descend/i,
+		'on the descent condition');
+	like($said, qr/\Q$remedy\E/,
+		'and the remedy names the control branch itself');
+	unlike($said, qr{git rebase \S*origin/},
+		'rather than a remote-tracking ref there is no remote for');
+
+	# The remote and control's tip go back, so this file leaves the clone
+	# as it found it.
+	Genesis::run({dir => $h->a, onfailure => 'could not restore the remote'},
+		'git', 'remote', 'add', 'origin', $h->r);
+	Genesis::run({dir => $h->a, onfailure => 'could not put control back'},
+		'git', 'branch', '-q', '-f', $h->control, $control_sha);
+	refresh($h, 'a', $h->control);
+	is(ref_in($h->a, 'refs/heads/' . $h->control), $control_sha,
+		'and control is back on the commit this row found it on');
 };
 
 done_testing;

@@ -129,9 +129,11 @@ sub refresh_control {
 #
 # Returns a true first value when all three hold.  Otherwise it returns
 # false with the condition that failed and the fix for it, so the caller
-# writes one bail and the reasons stay here.  The one option is `adding`,
-# the environment name the command is about to create, because a branch may
-# collide with a name that does not exist yet.
+# writes one bail and the reasons stay here.  It takes two options.
+# `adding` is the environment name the command is about to create, because
+# a branch may collide with a name that does not exist yet, and `refresh`
+# says whether the caller allowed a network call, because a caller that
+# allowed none gets no ls-remote made on its behalf.
 sub permitted_feature_branch {
 	my ($top, $git, $branch, %opts) = @_;
 
@@ -161,18 +163,29 @@ sub permitted_feature_branch {
 	#
 	# Where it answers nothing the remote is asked as well, because
 	# resolve_branch reads local refs alone and a single-branch clone
-	# holds neither ref for a control the remote has.  Told "exists
-	# neither" it would be told to create a branch that is already there.
-	# Only a remote that lacks control too earns that sentence, and a
-	# repository with no remote configured gets it because
+	# holds neither ref for a control the remote has.  A caller told
+	# "exists neither" would then be told to create a branch that is
+	# already there.  Only a remote that lacks control too earns that
+	# sentence, and a repository with no remote configured gets it because
 	# remote_branch_exists answers 0 for one.  An ls-remote that fails
-	# bails in remote_branch_exists' own words, which is left alone: a
-	# remote nobody can reach is not a remote that lacks the branch, and
-	# the refresh above has already tolerated whatever it was.
+	# bails in remote_branch_exists' own words, which is left alone,
+	# because a remote nobody can reach is not a remote that lacks the
+	# branch and the refresh above has already tolerated whatever it was.
+	#
+	# The remote is asked only where the caller allowed a refresh.  A
+	# command that promised to make no network call, which is
+	# pipeline-status under --no-refresh and pipeline-describe, may not
+	# have one made on its behalf down here, and the CONFIG sentence rests
+	# on having asked.  With the question unasked the fetch remedy is what
+	# this arm returns, because a fetch is what a clone missing the ref
+	# needs whether or not the remote turns out to have it.
 	unless ($git->branch_exists($control_ref)) {
 		my $named = $remote // 'the remote';
-		my $elsewhere = defined $git->resolve_branch($top->control_branch)
-			|| $git->remote_branch_exists($top->control_branch, $remote);
+		my $refresh = defined($opts{refresh}) ? $opts{refresh} : 1;
+		my $elsewhere = defined $git->resolve_branch($top->control_branch);
+		$elsewhere ||= $refresh
+			? $git->remote_branch_exists($top->control_branch, $remote)
+			: 1;
 
 		bail({exitcode => CONFIG},
 			"The control branch #C{%s} exists neither on #C{%s} nor ".
@@ -214,8 +227,10 @@ sub permitted_feature_branch {
 			$branch, $top->control_branch
 		),
 		sprintf(
-			"Rebase it onto the refreshed tip:\n\n    git rebase %s/%s\n",
-			$remote // 'origin', $top->control_branch
+			"Rebase it onto the refreshed tip:\n\n    git rebase %s\n",
+			$remote
+				? $remote . '/' . $top->control_branch
+				: $top->control_branch
 		)
 	) unless $git->is_ancestor($control_tip, $branch);
 
@@ -326,7 +341,8 @@ sub assert_pre_deploy {
 	return 1 if !defined($branch) || $branch eq 'HEAD';
 
 	my ($ok, $reason, $remedy) = permitted_feature_branch(
-		$top, $git, $branch, adding => $opts{adding}
+		$top, $git, $branch,
+		adding => $opts{adding}, refresh => $opts{refresh}
 	);
 	return 1 if $ok;
 
