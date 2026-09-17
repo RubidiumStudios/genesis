@@ -27,10 +27,11 @@ use Genesis::CI::Publish;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
-# One repository for all three subtests, because none of them writes to it.
+# One repository for all four subtests, because none of them writes to it.
 # The lab branch carries a commit the remote has never seen and the qa branch
 # carries none, so every showing below has both a delta with something in it
-# and a delta with nothing to compare against.
+# and a delta with nothing to compare against.  The dev branch is one this
+# clone made and never published, which is the shape the fourth subtest reads.
 my $h = make_harness(envs => ['lab', 'qa'], mode => 'direct', vault => 0);
 init_branch($h, 'lab');
 init_branch($h, 'qa');
@@ -38,6 +39,7 @@ local_only_commit($h, 'lab/bosh',
 	files   => {'ops/shared.yml' => "---\nops: twelve\n"},
 	message => 'share an op with lab',
 );
+local_branch_only($h, 'dev');
 
 my $git   = $h->git('a');
 my @specs = (
@@ -119,6 +121,31 @@ subtest 'with no terminal the delta goes to the log and the run proceeds' => sub
 		'the delta reached the log');
 	unlike($said, qr{Publish these branches\?}, 'and nothing was asked');
 	is($unread, "n\n", 'and nothing was read from standard input');
+};
+
+subtest 'a branch the remote has never held shows its whole delivery' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::CI::Publish::in_controlling_terminal = sub {0};
+
+	# The counts the branch really carries, read from the repository rather
+	# than written down here, because a number a row hard-codes is one that
+	# says nothing once the fixture's own history changes under it.
+	my $commits = scalar commits_on($h->a, 'refs/heads/dev/bosh');
+	my $files   = scalar @{tree_of($h->a, 'refs/heads/dev/bosh')};
+
+	my ($out, $err) = output_from {
+		Genesis::CI::Publish::confirm_publish($git, 'origin',
+			[{branch => 'dev/bosh', kind => 'deployment', env => 'dev'}])
+	};
+	my $said = unfolded($out, $err);
+
+	cmp_ok($commits, '>', 0, 'the branch carries commits to deliver');
+	cmp_ok($files, '>', 0, 'and files to deliver with them');
+	like($said, qr{dev/bosh: $commits commits, $files files changed, 0 removed},
+		'the whole of what the push would carry is counted');
+	like($said, qr{on a branch origin does not hold yet},
+		'and the branch is said to be new on the remote');
 };
 
 done_testing;
