@@ -87,6 +87,12 @@ own porcelain line and a push that never reached the remote prints none.
 Reading whether any ref landed instead would give a run whose every branch
 was refused the answer an unreachable remote earns.
 
+No two branches are published together and none is read together. Every
+deployment branch is an independent mirror at its own marker, routing
+between environments reads the deployment records rather than another
+branch, and a run that lands one branch and not another leaves a state in
+which every marker is true and which the next run converges.
+
 B<Parameters:>
 
 =over 4
