@@ -18,6 +18,10 @@ Genesis::CI::Report - the propagate run's report, on I8's three axes
     # environment axis has anything true to say.
     Genesis::CI::Report::render_run($record, outcomes_only => 1);
 
+    # The caveats a preview carries, which render_preview says for
+    # itself once the banner has gone out.
+    Genesis::CI::Report::preview_warnings($record);
+
 =head1 DESCRIPTION
 
 Every word an operator reads about an outcome is composed here, and
@@ -287,9 +291,9 @@ goes in where that is known.  Everything else the record leaves null is
 settled by L</render_run> under ruling 12, so the run and the preview compose
 the held phrase from one line of code.
 
-The two loud warnings D44 asks for, for a control branch that is C<ahead> and
-for a marker-only local commit the pre-flight would reset, arrive with the
-publish at M11.
+The two loud warnings D44 asks for go out between the banner and the first
+environment, through L</preview_warnings>, so that an operator has met both
+caveats before they read a line the caveats are about.
 
 B<Parameters:>
 
@@ -323,6 +327,60 @@ B<Examples:>
   #   qa: held, awaiting deployment (lab at control@1a2b3c4)
   #     control@1a2b3c4 Tune lab  held
   #       H held by lab (lab.yml), lab awaiting deployment
+
+=head2 preview_warnings
+
+    Genesis::CI::Report::preview_warnings($record);
+
+Warns, under the preview's banner and above its first environment, in the two
+cases D44 names where the preview's answer rests on something it did not do.
+
+A control branch that is ahead of its remote is refused by a real run until
+it has been pushed, so the preview says its result assumes that push.  A
+deployment branch whose local commits all carry a marker is reset to the
+remote by the pre-flight before a real run walks, so the preview says its
+result assumes that reset.  What the reset would discard is the pre-flight's
+own event line, printed under either kind of run, so the caveat leaves the
+count where it was already said once.
+
+Neither warning says anything about the files the report goes on to name.  A
+preview threads each delivery's tree forward into the next, so those lists
+are already true of the branch as the reset would leave it.
+
+The caveats are read off the record rather than worked out here.  The run has
+already asked git both questions, once to decide whether to refuse the
+control branch and once to decide whether to reset a deployment branch, and a
+renderer that asked them again would be a second reader of a settled fact.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The run's record.  Its C<warnings> key holds a list of caveats, each a hashref
+with a C<kind> of C<unpushed-control> or C<unreset-branch>, the C<branch> the
+caveat is about, and the C<remote> it is measured against.  A record with no
+C<warnings> key warns about nothing, which is every run that is not a
+preview.
+
+=back
+
+B<Returns:> True.
+
+B<Errors:> Raises a bug where a caveat carries a C<kind> that is neither of
+the two, because a caveat nobody can print is a defect in whoever wrote the
+record rather than something to pass over in silence.
+
+B<Examples:>
+
+  Genesis::CI::Report::preview_warnings({warnings => [
+      {kind => 'unpushed-control', branch => 'control', remote => 'origin'},
+  ]});
+  #   This preview assumes the commit on control is pushed.
+  #   It is ahead of origin/control, and a real run refuses to propagate
+  #   until you push it, so what follows is what would happen once you
+  #   have.
 
 =head1 INTERNAL FUNCTIONS
 

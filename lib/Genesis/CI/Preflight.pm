@@ -138,6 +138,15 @@ sub require_control {
 		$outcome
 	) if $div->{state} eq 'no-local';
 
+	# D44's preview refuses nothing it can warn about instead, so a caller
+	# that is only going to report says so here.  A control branch that is
+	# ahead of its remote is the one divergence a preview can still answer,
+	# because everything the preview reads is on control itself and all the
+	# push settles is whether another machine could resolve the markers a
+	# real run would write.  Staleness is not like that, so behind and
+	# diverged are refused here as they are for a run that writes.
+	return $state if $opts{permit_ahead} && $div->{state} eq 'ahead';
+
 	# The number governs the verb in every one of these, because a refusal
 	# that reads "by 1 commit, which are unpublished" is read past rather
 	# than read.
@@ -240,8 +249,12 @@ sub initial_state {
 			reset          => 0,
 			fast_forwarded => 0,
 			# The ref a dry run would have moved the branch to, and undef
-			# under a real run, which has moved it already.
-			assumed        => undef,
+			# under a real run, which has moved it already, with the name
+			# of the move beside it.  The stage makes two, and they differ
+			# in what they cost the branch, so a reader that cares which
+			# one it was asks rather than inferring it from the counts.
+			assumed      => undef,
+			assumed_move => undef,
 		};
 
 		# Nothing downstream of this stage makes a deployment branch any
@@ -319,21 +332,22 @@ sub initial_state {
 		my $line = sprintf('reset %s to %s/%s, discarding %s that the walk reproduces',
 			$r->{branch}, $remote, $r->{branch}, _commits(scalar @{$r->{commits}}));
 
-		# The warning says only that the reset is assumed, because the event
-		# line below is the one record of what would be done and the caller
-		# prints it either way.  A warning that carried the line as well said
-		# the same sentence twice in a report.
+		# The assumption is recorded rather than warned about here, because
+		# D44 says it under the preview's own banner and a caveat printed
+		# above that banner is one the operator meets before they have been
+		# told they are reading a preview.  The event line below is printed
+		# either way, so nothing about the reset goes unsaid.
 		if ($opts{dry_run}) {
-			warning(
-				"#Y{This report assumes the reset of }#C{%s}#Y{ that a real ".
-				"run would make.}",
-				$r->{branch});
 			# Nothing moved, so the record keeps the state the
 			# classification gave it and names the ref a real run would
 			# have moved the branch to.  A reader that wants the diff base
 			# takes that ref, and the report then says what a real run
-			# would say rather than what this un-moved branch would.
-			$state->{branches}{$r->{env}}{assumed} = $tracking;
+			# would say rather than what this un-moved branch would.  The
+			# move's name goes with it, because the caveat the report says
+			# is about the reset and the fast-forward below sets assumed
+			# without discarding anything.
+			$state->{branches}{$r->{env}}{assumed}      = $tracking;
+			$state->{branches}{$r->{env}}{assumed_move} = 'reset';
 		} else {
 			$git->set_branch_ref($r->{branch}, $tracking);
 			# The branch stands on its tracking ref now, so the record is
@@ -378,7 +392,8 @@ sub initial_state {
 			warning(
 				"#Y{This report assumes the fast-forward of }#C{%s}#Y{ that a ".
 				"real run would make.}", $branch);
-			$record->{assumed} = $tracking;
+			$record->{assumed}      = $tracking;
+			$record->{assumed_move} = 'fast-forward';
 		} else {
 			$git->set_branch_ref($branch, $tracking);
 			$record->{fast_forwarded} = 1;

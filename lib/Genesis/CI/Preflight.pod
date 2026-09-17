@@ -167,6 +167,17 @@ that writes takes the default, because a divergence on control reaches the
 remote through whatever it writes.  A branch that exists nowhere is refused
 either way, since it leaves the command nothing at all to read.
 
+=item C<permit_ahead>
+
+Returns rather than refusing where control is C<ahead> of its remote, which
+is what C<genesis propagate --dry-run> passes under D44.  A preview refuses
+nothing it can warn about instead, and it warns about this one under its own
+banner.  Everything the preview reads is on control itself, and all the push
+settles is whether another machine could resolve the markers a real run
+would write, so C<ahead> is the one divergence a preview can still answer.
+Staleness is not like that, so C<behind> and C<diverged> are refused with it
+set as they are without it.
+
 =back
 
 B<Returns:> A hashref of C<divergence>, the record C<resolve_branch> gives for
@@ -203,6 +214,13 @@ B<Examples:>
   # refuses a control branch that is nowhere, and reports every other state
   # back to a caller that resolves nothing
 
+  Genesis::CI::Preflight::require_control($top, $git,
+      refreshed    => $result,
+      command      => 'propagate',
+      permit_ahead => 1);
+  # returns where control is ahead, for the preview to warn about, and
+  # refuses behind and diverged as it does for a run that writes
+
 =head2 initial_state($top, $git, %opts)
 
   my $state = Genesis::CI::Preflight::initial_state($top, $git,
@@ -214,7 +232,8 @@ Runs the whole first stage of a propagation run and returns what it found:
     control   => $div,
     branches  => { qa => { branch => 'qa/bosh', state => 'in-sync',
                            ahead => 0, behind => 0,
-                           reset => 0, fast_forwarded => 0 } },
+                           reset => 0, fast_forwarded => 0,
+                           assumed => undef, assumed_move => undef } },
     events    => [ 'created control from origin/control' ] }
 
 The refresh and the control check come first, and a caller that has already
@@ -266,9 +285,17 @@ have left the branch on, and the state and the counts stay as the
 classification wrote them, because nothing moved.  A caller taking a diff base
 off such a record takes C<assumed> where it is set, so a report says what a
 real run would deliver rather than naming files a teammate has already
-delivered.  Each warning says only that the write is assumed, because the
-event line beside it is the one record of what would be done and the caller
-prints it under either kind of run.
+delivered.  C<assumed_move> names which of the stage's two moves it was,
+C<reset> or C<fast-forward>, so a caller that cares which one the branch
+escaped asks rather than inferring it from the counts.
+
+The reset's assumption is not warned about here.  D44 says it under the
+preview's own banner, through C<Genesis::CI::Report::preview_warnings>, and a
+caveat printed above that banner is one the operator meets before they have
+been told they are reading a preview.  The fast-forward keeps its own warning,
+because D44 names the reset and the unpushed control and nothing else.  The
+event line beside either move is printed under both kinds of run, so nothing
+about what would be done goes unsaid.
 
 Once the stage has run, a deployment branch in scope is C<in-sync> or it has
 no local ref at all.  That is what lets the walk take its diff base from the
@@ -353,7 +380,8 @@ C<state> is then C<in-sync> and both counts are 0, because the branch stands
 on its tracking ref.  Under C<dry_run> no record is settled that way.  The one
 the stage would have moved carries C<assumed>, which is the ref a real run
 would have left the branch on, and its C<state> and counts are the ones the
-classification wrote.
+classification wrote, with C<assumed_move> beside it naming which move it
+escaped, C<reset> or C<fast-forward>.
 
 =item C<events>
 

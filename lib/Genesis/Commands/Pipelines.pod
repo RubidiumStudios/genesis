@@ -469,6 +469,16 @@ disagree about a word.  The files named beneath each control commit are that
 commit's own, worked out against what the commit above it would have left on
 the branch rather than against the branch as the preview found it.
 
+A preview refuses nothing it can warn about instead, so it runs where a
+control branch is ahead of its remote and says under its banner that its
+answer assumes the push a real run would have demanded first.  It says the
+same of a deployment branch the pre-flight would have reset, because that
+reset is a write the preview did not make.  Both caveats go out through
+L<Genesis::CI::Report/preview_warnings>, between the banner and the first
+environment.  Every other divergence on control is refused for a preview as
+it is for a run, because a stale control makes the topology the preview
+reports on the wrong one.
+
 =item C<--yes>, C<-y>
 
 Publish without asking.  The verified delta for every environment is shown
@@ -1242,6 +1252,66 @@ B<Examples:>
 Every key the block resolves is printed, so the report is five rows and
 not two, and both column widths come from those rows.  A repository that
 overrides one of them widens the tier column to hold C<explicit>.
+
+=head2 _preview_warnings
+
+  my $caveats = _preview_warnings($git, $control, $control_state, $initial,
+      \@dag_order);
+
+Gathers D44's two caveats for a preview, off the records the run's first two
+stages already settled.
+
+Control being C<ahead> of its remote is what C<require_control> would have
+refused had this been a run that writes, and a deployment branch carrying an
+assumed reset is one the pre-flight would have moved to its tracking ref
+before the walk.  Neither is asked of git a second time here.
+
+The reset is told from the fast-forward by the name the pre-flight left on
+the record.  The second caveat is about the reset alone, because a
+fast-forward discards nothing the preview would otherwise have reported.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle, asked only for the default remote's name.
+
+=item C<$control>
+
+The control branch's name, which the first caveat is about.
+
+=item C<$control_state>
+
+The record C<Genesis::CI::Preflight::require_control> returned, whose
+C<divergence> says whether control is ahead.
+
+=item C<$initial>
+
+The record C<Genesis::CI::Preflight::initial_state> returned, whose
+C<branches> say which branches carry an assumed reset.
+
+=item C<$order>
+
+The environments in DAG order, so the caveats are listed in the order the
+report names the environments in.
+
+=back
+
+B<Returns:> An arrayref of caveats, in the shape
+L<Genesis::CI::Report/preview_warnings> reads, empty where the preview rests
+on nothing it did not do.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _preview_warnings($git, 'control', $control_state, $initial, ['qa']);
+  # [ { kind => 'unpushed-control', branch => 'control',
+  #     remote => 'origin' },
+  #   { kind => 'unreset-branch', branch => 'qa/bosh',
+  #     remote => 'origin' } ]
 
 =head2 _protection_rules_for
 

@@ -14,10 +14,11 @@ use strict;
 use warnings;
 
 use Exporter qw/import/;
-use Genesis qw/info bug/;
+use Genesis qw/info warning bug/;
 
 our @EXPORT_OK = qw/
 	held_qualifier hold_reason hold_detail render_run render_preview
+	preview_warnings
 	ENV_OUTCOMES COMMIT_OUTCOMES FILE_OUTCOME AWAITING_APPLY
 /;
 
@@ -314,11 +315,72 @@ sub render_preview {
 	# report first and the banner afterwards has already believed it.
 	info "\n#Yi{This is a preview.  Nothing will be written.}";
 
+	# Said under the banner and above the first environment, because a
+	# caveat printed beneath the whole report is one the operator reads
+	# after they have already believed the report.
+	preview_warnings($record);
+
 	for my $env (@{$record->{environments} || []}) {
 		$env->{outcome} //= WOULD_PROPAGATE if @{$env->{pending} || []};
 	}
 
 	return render_run($record, %opts, preview => 1);
+}
+
+# }}}
+# preview_warnings - the two cases a preview's answer rests on {{{
+#
+# D44 gives the preview two loud warnings, because in each case its answer
+# rests on something the preview deliberately did not do.  A control branch
+# that is ahead of its remote is refused by a real run under D30 until it has
+# been pushed, and a deployment branch whose local commits all carry a marker
+# is reset to the remote by the pre-flight under D32 before the walk begins.
+#
+# The warnings are read off the record rather than worked out here.  The run
+# has already asked git both questions, once to decide whether to refuse and
+# once to decide whether to reset, and a renderer that asked them again would
+# be a second reader of a fact the run has settled.
+#
+# Neither warning says anything about the files the report goes on to name.
+# A preview threads each delivery's tree forward into the next, so the file
+# lists are true of the branch as the reset would leave it, and a caveat over
+# them would teach an operator to distrust a correct answer.
+sub preview_warnings {
+	my ($record) = @_;
+
+	for my $caveat (@{$record->{warnings} || []}) {
+		my $kind = $caveat->{kind} // '';
+
+		if ($kind eq 'unpushed-control') {
+			warning(
+				"#Y{This preview assumes the commit on }#C{%s}#Y{ is pushed.}\n".
+				"It is ahead of #C{%s/%s}, and a real run refuses to propagate ".
+				"until you push it, so what follows is what would happen once ".
+				"you have.",
+				$caveat->{branch}, $caveat->{remote}, $caveat->{branch}
+			);
+			next;
+		}
+
+		if ($kind eq 'unreset-branch') {
+			# What the reset would discard is the pre-flight's own event
+			# line, which the run prints under either kind of run, so the
+			# caveat says what the preview rests on and leaves the count
+			# where it was already said once.
+			warning(
+				"#Y{This preview assumes }#C{%s}#Y{ is reset first.}\n".
+				"A real run resets it to #C{%s/%s} before it walks, so what ".
+				"follows is what would happen once that reset has run.",
+				$caveat->{branch}, $caveat->{remote}, $caveat->{branch}
+			);
+			next;
+		}
+
+		bug("Genesis::CI::Report::preview_warnings was handed the warning ".
+			"'%s', which is neither of the two D44 names", $kind);
+	}
+
+	return 1;
 }
 
 # }}}
