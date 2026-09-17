@@ -302,6 +302,41 @@ sub type {
 }
 
 # }}}
+# compiler - the compiler that emits this provider's artefact {{{
+#
+# D108's composition, from the provider's side.  A provider hands its
+# compiler out and the compiler holds the provider, which is what gives
+# DEFAULT_TEAM and check_prereqs one home each rather than two.
+#
+# A provider with no artefact to emit answers with nothing, which is
+# what manual does honestly and what github-actions does until its
+# compiler lands.  That is better than an abstract method left
+# unimplemented, because a caller can ask any provider this question and
+# read the answer rather than trapping a bug().
+#
+# A caller that needs a compiler rather than merely asking whether there
+# is one passes required, and the registry refuses with the message
+# b98d60f1 kept: emitting a pipeline and validating a block are
+# different questions, and a provider may answer the second while having
+# nothing to answer the first with.
+sub compiler {
+	my ($self, %opts) = @_;
+
+	require Genesis::CI::ProviderRegistry;
+	my $type = $self->type;
+	my $info = Genesis::CI::ProviderRegistry->provider_info($type);
+	return undef unless $opts{required} || ($info && $info->{class});
+
+	my $class = Genesis::CI::ProviderRegistry->compiler_class($type);
+	return $class->new(
+		provider      => $self,
+		ast           => $opts{ast},
+		top           => $opts{top},
+		provider_opts => $opts{provider_opts} || {},
+	);
+}
+
+# }}}
 # config - returns hash for .genesis/config ci.provider section (abstract) {{{
 sub config {
 	my ($self) = @_;

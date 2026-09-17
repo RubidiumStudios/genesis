@@ -130,13 +130,16 @@ sub _provider_output {
 
 	# The registry refuses both ways, naming a type it does not hold and
 	# telling a type it holds that nothing compiles for it, so there is no
-	# second refusal to write here.
-	require Genesis::CI::ProviderRegistry;
-	my $compiler_class = Genesis::CI::ProviderRegistry->compiler_class($platform);
+	# second refusal to write here.  Asking the provider for its compiler
+	# is what reaches that second refusal, through required.
 
-	# No 'top': a stored AST carries no repository, so providers that need
-	# repo state (the legacy Concourse bridge) are out of reach here.
-	my $output = $compiler_class->new(ast => $ast, provider_opts => {})
+	# No 'top': a stored AST carries no repository, so providers that
+	# need repo state, which the legacy Concourse bridge does, are out of
+	# reach here.  The provider is built from its type alone, because a
+	# stored AST carries no configured block either.
+	require Genesis::CI::Provider;
+	my $provider = Genesis::CI::Provider->new(type => $platform);
+	my $output   = $provider->compiler(ast => $ast, required => 1)
 		->generate_from_ast($ast);
 
 	return ref($output) eq 'HASH' ? $output : {'pipeline.yml' => $output};

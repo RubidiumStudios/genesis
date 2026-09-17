@@ -16,11 +16,11 @@ use JSON::PP;
 
 ### Provider Constants {{{
 
-# DEFAULT_TEAM is written twice, here and in
+# There is no DEFAULT_TEAM here.  It was written twice, here and in
 # Genesis::CI::Provider::Concourse, where it is the default the provider
-# fragment declares, so a change to either side has to be made to both.
+# fragment declares, and a comment above each asked a reader to keep the
+# two in step.  The team is read off the provider this compiler holds.
 use constant {
-	DEFAULT_TEAM            => 'main',
 	DEFAULT_PIPELINE_NAME   => undef,    # falls back to deployment_type from Top
 	DEFAULT_EXPOSE          => 0,
 	DEFAULT_PAUSE_AFTER_SET => 0,
@@ -165,9 +165,12 @@ EOF
 # cannot drift: a key whose default the fragment declares is a key whose
 # default this answers with, and a nested block states its defaults where
 # its own sub-keys are declared.
+#
+# The fragment comes from the provider this compiler holds, which is why
+# this is an instance method: a class method has no provider to ask.
 sub provider_options_defaults {
-	my ($class) = @_;
-	my $schema  = $class->provider_options_schema();
+	my ($self) = @_;
+	my $schema = $self->provider->provider_options_schema;
 	return {
 		map  {($_ => $schema->{$_}{default})}
 		grep {exists $schema->{$_}{default}} keys %$schema
@@ -196,7 +199,7 @@ sub describe_provider {
 	my ($self) = @_;
 
 	my $target    = $self->provider_option('target')        || '(not set)';
-	my $team      = $self->provider_option('team')          || DEFAULT_TEAM;
+	my $team      = $self->provider_option('team')          || $self->provider->team;
 	my $pipe_name = $self->provider_option('pipeline_name') || '(deployment type)';
 	my $expose    = $self->provider_option('expose')    ? 'yes' : 'no';
 	my $paused    = $self->provider_option('pause_after_set') ? 'yes' : 'no';
@@ -348,7 +351,7 @@ sub deploy {
 	# Team: call-site override > provider_opts > default
 	my $team = $opts{team}
 		// $self->provider_option('team')
-		// DEFAULT_TEAM;
+		// $self->provider->team;
 
 	# Pipeline name: call-site override > provider_opts > config name > deployment_type
 	my $pipeline_name = $opts{pipeline_name}

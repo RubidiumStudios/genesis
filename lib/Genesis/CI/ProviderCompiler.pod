@@ -12,8 +12,8 @@ Genesis::CI::ProviderCompiler - the base every CI provider's compiler is built o
     sub generate_from_ast {my ($self, $ast) = @_; ...}
     sub output_files      {return {'pipeline.yml' => 'Pipeline definition'}}
 
-    # And on the caller's side:
-    my $compiler = Genesis::CI::ProviderCompiler::MyPlatform->new(ast => $ast);
+    # And on the caller's side, where the provider hands its own out:
+    my $compiler = $provider->compiler(ast => $ast);
     my $output   = $compiler->generate_from_ast($ast);
 
 =head1 DESCRIPTION
@@ -39,11 +39,11 @@ run time.
 
 The rest of what a concrete inherits is in two groups. The provider
 options are the flags an operator writes on the command line and the keys
-they write under C<pipeline.provider>, and the base reads the declaration
-of those keys from the CLI class beside it so that the two sides cannot
-answer differently. The shared helpers are the small pieces every emitter
-wants, which are a YAML serializer, a git URI, a secret reference, a
-topological sort, and a glob match.
+they write under C<pipeline.provider>, and a compiler reads the
+declaration of those keys off the provider it holds, so that the two
+sides cannot answer differently. The shared helpers are the small pieces
+every emitter wants, which are a YAML serializer, a git URI, a secret
+reference, a topological sort, and a glob match.
 
 What a provider can do is declared on the CLI class and checked there,
 under L<Genesis::CI::Provider/declared_capabilities>. Nothing here answers
@@ -86,7 +86,11 @@ B<Returns:> the new compiler.
 
 B<Errors:> raises a Genesis bug, "Cannot instantiate
 Genesis::CI::ProviderCompiler directly; use a subclass instead", when the
-class asked is the base itself.
+class asked is the base itself, or "A compiler needs the AST it emits
+from; build it with $provider->compiler(ast => $ast)", when no C<ast> is
+handed in. The concrete's deleted constructor carried that second
+refusal, and a compiler blessed over an undefined AST fails much later
+and says far less about why.
 
 B<Examples:>
 
@@ -219,44 +223,30 @@ B<Examples:>
     print Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(
         valid_types => ['concourse']);
 
-=head2 provider_options_schema()
-
-The keys an operator may write under C<pipeline.provider> for this
-provider, declared once under D105 on the CLI class beside the check that
-enforces them. This reads that declaration through, so the compiler side
-and the operator's side cannot answer differently.
-
-B<Returns:> a hash reference of key name to its declaration.
-
-B<Examples:>
-
-    my $schema = $compiler->provider_options_schema;
-    $schema->{team}{default};    # 'main'
-
-=head2 capabilities()
-
-What this provider is able to do, as the six booleans D101 names. Like
-the schema, the declaration lives on the CLI class and this reads it from
-there, so one class answers for both halves of a provider.
-
-B<Returns:> a hash reference of capability name to a boolean.
-
-B<Examples:>
-
-    $compiler->capabilities->{multi_file_output};   # 0, for Concourse
-
 =head2 provider_options_defaults()
 
 The value each provider option takes when the operator writes none. The
-keys match the schema's. A default is not written back into the saved
-configuration, so a repository records only what somebody chose.
+keys match those the held provider declares. A default is not written back
+into the saved configuration, so a repository records only what somebody
+chose.
+
+It is an instance method, because the declaration is read off the
+provider this compiler holds and a class has no provider to ask. The base
+declares nothing of its own and answers with an empty hash.
+
+There are no C<provider_options_schema> or C<capabilities> entries here
+any more. Each was a forwarder that resolved the CLI class through the
+registry all over again so that a compiler could answer for a provider's
+own declaration. A compiler that holds its provider asks that provider,
+which is one hop rather than a class resolution, and which cannot answer
+differently from the class that declared it.
 
 B<Returns:> a hash reference of key name to default value.
 
 B<Examples:>
 
-    Genesis::CI::ProviderCompiler::Concourse->provider_options_defaults;
-    # {team => 'main', pause => 0, ...}
+    $compiler->provider_options_defaults;
+    # {team => 'main', insecure => 0, ...}
 
 =head2 provider_config()
 
