@@ -579,7 +579,7 @@ Where the branch is the one the repository is standing on, the reset is a hard
 reset rather than a ref write, so the tree and C<HEAD> go back together.
 
 A branch the remote does not carry at all is left alone, since there is
-nothing to put it back to.
+nothing to put it back to, and the answer says which of the two happened.
 
 B<Parameters:>
 
@@ -591,7 +591,8 @@ The branch to put back.
 
 =back
 
-B<Returns:> The session, so a caller can chain.
+B<Returns:> 1 where the branch was put back, and 0 where the remote has no
+tracking ref for it.
 
 B<Errors:>
 
@@ -612,7 +613,11 @@ C<< "Failed to reset %s" >> -- raised where git refused the reset itself.
 B<Examples:>
 
   $session->reset_branch('prod/bosh');
-  # puts prod/bosh back at origin/prod/bosh and leaves the session open
+  # returns 1, puts prod/bosh back at origin/prod/bosh, and leaves the session
+  # open
+
+  $session->reset_branch('prod/bosh');
+  # returns 0, and leaves the branch alone, where the remote has never had it
 
 =head2 apply_files($source_sha, %opts)
 
@@ -1392,7 +1397,9 @@ branch we are standing on, where a hard reset is what puts the tree and HEAD
 back together.
 
 A repository with no remote, or a branch with no remote-tracking ref, is left
-exactly as it is, since there is no C<T> to go back to.
+exactly as it is, since there is no C<T> to go back to, and the answer says so.
+A caller that promised every branch it hands here has a tracking ref has no
+other way to find out that one of them did not.
 
 The control branch never reaches here, because C<committed_branches> is the
 set this session moved and that accessor filters control out of it.
@@ -1407,7 +1414,8 @@ The deployment branch to put back.
 
 =back
 
-B<Returns:> C<$self>, so it chains.
+B<Returns:> 1 where the branch was moved, and 0 where the repository has no
+remote or the branch has no remote-tracking ref to go back to.
 
 B<Errors:>
 
@@ -1423,10 +1431,11 @@ itself failed. C<%s> is the branch name.
 B<Examples:>
 
   $session->_reset_to_remote('qa/bosh');
-  # returns $self, with qa/bosh sitting back at origin/qa/bosh
+  # returns 1, with qa/bosh sitting back at origin/qa/bosh
 
   $session->_reset_to_remote('qa/bosh');
-  # returns $self unchanged where there is no remote-tracking ref to go back to
+  # returns 0, and leaves the branch alone, where there is no remote-tracking
+  # ref to go back to
 
 =head2 _restore
 

@@ -1008,16 +1008,21 @@ sub _command_line {
 # checkout.  The control branch never reaches here, because
 # committed_branches is the set this session moved and it filters that name
 # out of it, and reset_branch refuses it in its own right.
+#
+# The answer says whether the branch was moved.  A repository with no remote,
+# and a branch the remote has never had, both leave the branch exactly as it
+# is, and a caller that promised every branch it hands here has a tracking ref
+# has no other way to find out that one of them did not.
 sub _reset_to_remote {
 	my ($self, $branch) = @_;
 	my $git    = $self->{git};
-	my $remote = $git->default_remote or return $self;
+	my $remote = $git->default_remote or return 0;
 	my $t      = "refs/remotes/$remote/$branch";
 
 	my ($tip) = run({ dir => $git->root, passfail => 0 },
 		'git', 'rev-parse', '--verify', '--quiet', $t);
 	chomp $tip if defined $tip;
-	return $self unless $tip;
+	return 0 unless $tip;
 
 	# On the branch itself a ref write alone would leave the tree ahead of
 	# HEAD, so a hard reset is what puts the two back together.
@@ -1029,7 +1034,7 @@ sub _reset_to_remote {
 			'git', 'update-ref', "refs/heads/$branch", $tip);
 	}
 	trace("Service::Git::Session: reset %s to %s", $branch, $t);
-	return $self;
+	return 1;
 }
 
 # }}}

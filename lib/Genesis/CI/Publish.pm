@@ -91,11 +91,12 @@ sub publish_run {
 	# meant to send.  A decline pushes nothing, and the status the run
 	# exits with is the caller's to decide.
 	#
-	# It takes the path the refusal above takes, because a branch carrying a
-	# commit the remote has never seen is the illegal initial state D96
-	# names and a run the operator stopped must not leave one behind.  Each
-	# environment then says it was written, verified, and not published,
-	# with the reason beside the word rather than inside it.
+	# A run the operator declines takes the path a refused control takes,
+	# because a branch carrying a commit the remote has never seen is the
+	# illegal initial state D96 names and a run the operator stopped must
+	# not leave one behind.  Each environment then says it was written,
+	# verified, and not published, with the reason beside the word rather
+	# than inside it.
 	unless (confirm_publish($git, $remote, \@specs, yes => $args{yes})) {
 		$result->{declined} = 1;
 		_reset_publish_set($session);
@@ -387,15 +388,24 @@ sub _commits {
 # state D96 names, and a run that stops before its first push must not leave
 # one behind.  Both such runs come through here, which are the one a moved
 # control refuses and the one the operator declined, and the set is the
-# session's own, which is the set an abort resets, so all three put back
-# exactly the same work.  Control is not in it, because I2 keeps committed
-# work on control whole.
+# session's own, which is the set an abort resets, so those two and the
+# abort put back exactly the same work.  Control is not in it, because I2
+# keeps committed work on control whole.
 sub _reset_publish_set {
 	my ($session) = @_;
 	return 0 unless $session;
 
+	# The pre-flight refuses a deployment branch the remote has never had
+	# before the walk starts, so a branch in this set without a tracking ref
+	# is a state the code promised cannot happen.  Leaving the run's commit
+	# on it in silence is the illegal state D96 names, and the count below
+	# would claim a branch was put back that is still carrying it.
 	my @branches = $session->committed_branches;
-	$session->reset_branch($_) for @branches;
+	for my $branch (@branches) {
+		bug("The branch #C{%s} has no remote-tracking ref, so the commit ".
+		    "this run left on it cannot be put back.", $branch)
+			unless $session->reset_branch($branch);
+	}
 	return scalar(@branches);
 }
 

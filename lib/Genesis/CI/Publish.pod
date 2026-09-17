@@ -457,8 +457,9 @@ A branch carrying a commit the remote has never seen is the illegal initial
 state D96 names, and a run that stops before its first push must not leave one
 behind. Both such runs come through here, which are the one a moved control
 refuses and the one the operator declined, and the set is the session's own,
-which is the set an abort resets, so all three put back exactly the same work.
-Control is not in it, because I2 keeps committed work on control whole.
+which is the set an abort resets, so those two and the abort put back exactly
+the same work. Control is not in it, because I2 keeps committed work on
+control whole.
 
 B<Parameters:>
 
@@ -473,7 +474,23 @@ call without one resets nothing.
 
 B<Returns:> How many branches were put back.
 
-B<Errors:> The session's own reset raises where git refuses it.
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "The branch %s has no remote-tracking ref, so the commit this run left on
+it cannot be put back." >> -- raised via C<bug()> where the session answers
+that it did not move a branch. The pre-flight refuses a deployment branch the
+remote has never had before the walk starts, so this is a state the code
+promised cannot happen.
+
+=item *
+
+The session's own reset raises where git refuses it.
+
+=back
 
 B<Examples:>
 
