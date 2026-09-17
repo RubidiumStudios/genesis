@@ -1130,8 +1130,13 @@ subtest 'Concourse - native generation from modern AST' => sub {
 	like $output, qr/preprod-cf/, "preprod deploy job present";
 	like $output, qr/notify-preprod-cf-changes/, "preprod notify job present (non-auto env)";
 
-	# Verify task configuration references.  The deploy task runs the
-	# genesis CLI itself rather than the ci-pipeline-deploy script.
+	# Verify task configuration references.  The deploy task's run path is
+	# the genesis binary embedded in the repository and its only argument
+	# is ci-pipeline-deploy, so the work the task does is that command's
+	# rather than an ordinary genesis deploy.  That command is retired
+	# now, and bin/genesis keeps it registered only so dispatch refuses it
+	# by name, so a pipeline emitted this way fails loudly instead of
+	# deploying.
 	like $output, qr/task: bosh-deploy/, "deploy task present";
 
 	# Verify vault references
