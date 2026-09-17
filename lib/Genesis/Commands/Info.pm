@@ -95,7 +95,12 @@ sub information {
 
 	if (my $artifact = get_options->{'print-artifact'}) {
 		# If the user specified an artifact to print, we will print it
-		# and exit.
+		# and be done.  The return is what ends the run rather than an
+		# exit, because info declares DEPLOYED_STATE and the gate has a
+		# branch session open around this call.  An exit from here would
+		# leave that session for the last-resort net to find, and the
+		# operator would be told about a session they never asked for
+		# underneath the artifact they did ask for.
 		my $artifact_content = $deployment->artifact($artifact);
 		bail(
 			"Artifact '%s' not found in deployment %s.  Please confirm the artifact exists.",
@@ -113,12 +118,15 @@ sub information {
 			$target_msg
 		);
 		output {raw => 1}, $artifact_content;
-		exit 0;
+		return 0;
 	}
 
 	if (my $path = get_options->{'fetch-artifacts-to'}) {
 		# If the user specified a path to fetch artifacts to, we will
-		# fetch all artifacts and write them to the specified path.
+		# fetch all artifacts and write them to the specified path.  Both
+		# ways out of this block return for the same reason the print
+		# above does, and the one that could not fetch returns the same
+		# 1 it used to exit with, so the shell sees no change.
 		my @artifact_types = $deployment->artifact_types;
 		bail(
 			"Deployment #%d has no artifacts to fetch.",
@@ -156,11 +164,11 @@ sub information {
 				info("done: #C{%s}", humanize_path($file));
 			} else {
 				error("failed to fetch artifact type '%s' for deployment #%d", $artifact_type, $deployment->sequence);
-				exit 1;
+				return 1;
 			}
 		}
 		success("\nDone!\n");
-		exit 0;
+		return 0;
 	}
 
 	my $unknown = csprintf("#YI{unknown}");
@@ -295,8 +303,9 @@ sub information {
 
 	# A deployed-state command hands its status back rather than exiting,
 	# so the branch session the gate opened closes before the process does
-	# and the dispatcher exits with what is returned here.  Nothing above
-	# fails without bailing, so a return at all is a run that succeeded.
+	# and the dispatcher exits with what is returned here.  Everything
+	# between the top of the sub and this line either bails or falls
+	# through, so reaching this return is a run that did what it was asked.
 	return 0;
 }
 

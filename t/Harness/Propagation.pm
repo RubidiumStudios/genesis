@@ -2379,6 +2379,42 @@ sub _write_record {
 }
 
 # }}}
+# _artifact_blob - the archive a deployment audit carries its artifacts in {{{
+#
+# The read side takes the audit's artifacts field as one base64 string,
+# decodes it, gunzips it, and reads a tar out of what comes back, so a row
+# that wants a deployment with artifacts has to hand over exactly that shape.
+#
+# No artifact map is put in the archive.  Without one the reader derives the
+# types from the filenames it finds, which is the older of the two shapes it
+# supports and the one that spares a caller having to know how the map is
+# spelled, so a row asks for a file and names the type that file implies.
+#
+# The encoding is unwrapped, because the value travels as a single safe set
+# argument and the line breaks the default encoding inserts would come back
+# in the value.
+sub _artifact_blob {
+	my ($self, $files) = @_;
+	return undef unless $files && keys %$files;
+
+	require Archive::Tar;
+	require IO::Compress::Gzip;
+	require MIME::Base64;
+
+	my $tar = Archive::Tar->new;
+	$tar->add_data($_, $files->{$_}) for sort keys %$files;
+
+	my $gzipped = '';
+	open(my $fh, '>', \$gzipped)
+		or die "the harness could not open a handle to build the artifacts\n";
+	$tar->write(IO::Compress::Gzip->new(
+		$fh, Level => 9, Append => 0, AutoClose => 1
+	)) or die "the harness could not compress the artifacts\n";
+
+	return MIME::Base64::encode_base64($gzipped, '');
+}
+
+# }}}
 # _now - the one timestamp form a record's value takes {{{
 #
 # EXODUS_TIME_FORMAT under D58, which is the value form.  A path never carries
@@ -2429,6 +2465,12 @@ sub fixture_pipeline_record {
 # dependencies_read is the fact half of the staleness comparison under D77, and
 # it is written as one comma-joined value rather than as a list, because that
 # is the one form a flat exodus record can carry.
+#
+# artifacts belongs to the audit rather than to the flat record, because that
+# is where the reader looks for it, and it is taken as a hash of filename to
+# contents so a row says what the deploy saved rather than how the field
+# stores it.  A row that names none gets an audit with no artifacts field at
+# all, which is every deployment the harness wrote before this.
 sub certify {
 	my ($self, $env, %opts) = @_;
 	# The audit below is written at a path keyed on the compact timestamp, so
@@ -2464,6 +2506,7 @@ sub certify {
 	(my $stamp = $at) =~ s/[Z ]?[+-]0000$//;
 	$stamp =~ s/[^0-9]+//g;
 	return $self->_write_record("$path/deployments/$stamp",
+		'artifacts'          => $self->_artifact_blob($opts{artifacts}),
 		'action'             => 'deploy',
 		'result'             => $opts{result} // 'success',
 		'completed'          => $at,
