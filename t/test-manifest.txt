@@ -286,6 +286,7 @@ unit-tests/genesis_top-pipeline_blocks.t     # the shuttle, vault, locker and no
 unit-tests/genesis_top-pipeline_repo_keys.t  # the pipeline label and the repository-wide recreate key
 unit-tests/genesis_top-shuttle_backends.t    # the shuttle block, declared on the backend that decides its shape
 ci-provider.t                                # the CI provider classes, their fragments, and the rules each states for its own block
+ci-compiler.t                                # the AST, its builder, the validator, and the pipeline the Concourse compiler emits
 unit-tests/genesis_top-provider_fragment.t   # the configured provider's own schema fragment, merged at load
 unit-tests/genesis_top-provider_capabilities.t  # the six capabilities a provider declares, and the keys they gate
 unit-tests/genesis_top-manifest_store_gate.t # the manifest store and the kit floor, refused at configuration load

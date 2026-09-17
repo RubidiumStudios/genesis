@@ -281,8 +281,8 @@ subtest 'the registry refuses a bad entry rather than taking it' => sub {
 	# compiler-side class is a different matter: manual has none by design.
 	throws_ok {
 		Genesis::CI::ProviderRegistry->register_provider('nocli', {
-			class => 'Genesis::CI::Compiler::Providers::NoCli',
-			file  => 'Genesis/CI/Compiler/Providers/NoCli.pm',
+			class => 'Genesis::CI::ProviderCompiler::NoCli',
+			file  => 'Genesis/CI/ProviderCompiler/NoCli.pm',
 		})
 	} qr/must\s+be\s+registered\s+with\s+a\s+cli_class/s,
 		'an entry with no CLI class is refused';
@@ -290,6 +290,17 @@ subtest 'the registry refuses a bad entry rather than taking it' => sub {
 	is_deeply [Genesis::CI::ProviderRegistry->known_providers],
 		[@before],
 		'and neither refusal left anything behind in the registry';
+};
+
+# The compiler's own test file asked this, where the manifest never ran
+# it.  It reads what the registry answers rather than the whole list, so
+# it is bound by none of the ordering the first subtest is.
+subtest 'the registry lists the types registered at runtime' => sub {
+	plan tests => 2;
+
+	my @providers = Genesis::CI::ProviderRegistry->known_providers();
+	ok scalar(@providers) >= 1, "at least one provider registered";
+	ok grep { $_ eq 'concourse' } @providers, "concourse is registered";
 };
 
 done_testing;

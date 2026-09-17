@@ -85,7 +85,7 @@ sub provider_with {
 	my (%caps) = @_;
 	my $defaulted = delete $caps{defaulted};
 	my $type     = 'cap'.++$seq;
-	my $pkg      = "Genesis::CI::Compiler::Providers::Cap$seq";
+	my $pkg      = "Genesis::CI::ProviderCompiler::Cap$seq";
 	my $rel      = ($pkg =~ s{::}{/}gr).'.pm';
 	my $cli_pkg  = "Genesis::CI::Provider::Cap$seq";
 	my $cli_rel  = ($cli_pkg =~ s{::}{/}gr).'.pm';
