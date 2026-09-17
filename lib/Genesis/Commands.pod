@@ -228,8 +228,20 @@ was delivered rather than what is coming, and it writes no git of its own.
 
 The session is opened by the gate, not by the command, so that every
 deployed-state command switches the same way and takes the same switch
-lock. An exit hook returns the operator to the branch they stood on, calling
-C<finish> after a clean run and C<abort> after a failed one.
+lock. The gate runs the command inside that session and closes it where the
+command returns, so an ordinary run is back on the operator's own branch
+before the process exits. A command that refuses exits with its own code,
+and the session's own last-resort net puts the working tree back.
+
+The branch the session stands on is the deployment branch's tip. D87 has a
+deployed-state command default to the commit the environment last deployed,
+and M14 supplies that commit through C<deployed_target>; until it does, the
+tip is what is read.
+
+An environment with no deployment branch is not switched at all. That is
+every environment between C<genesis new> and its first deploy, and the
+command runs where it stands and reports in its own words that there is
+nothing deployed to read.
 
 =head1 FUNCTIONS
 
@@ -502,15 +514,18 @@ Dispatches execution to the closure registered for the current command.
 If the command has a C<retired> property, C<run_command> bails with the
 retirement message and never invokes the function.  Otherwise, prints
 a deprecation warning if the command has a C<deprecated> property, then
-runs the two gates that stand in front of every command, then calls the
-registered function with C<@COMMAND_ARGS> and exits with status 0 on
-success.
+runs the two gates that stand in front of every command, which between them
+call the registered function with C<@COMMAND_ARGS>, and exits with status 0
+on success.
 
-The gates run in order.  C<_gate_pipeline_on_legacy_ci_yml> refuses a
-pipeline command in a repository that still carries a legacy F<ci.yml>, and
-C<_gate_branch_class> enforces the branch class the command declared at its
-registration.  Either one can bail, and neither returns a value the dispatch
-reads.
+Two gates stand between the dispatch and the function.
+C<_gate_pipeline_on_legacy_ci_yml> refuses a pipeline command in a
+repository still carrying a legacy F<ci.yml>, and it either bails or
+returns.  C<_gate_branch_class> is handed the function rather than
+returning to it, because a deployed-state command is run inside a branch
+session that the gate opens and closes around it.  The function is
+therefore called from inside the branch gate on every path, and
+C<run_command> calls it nowhere itself.
 
 If the current command has no registered handler, prints an error via
 C<command_help> and exits with status 1.
@@ -1690,6 +1705,15 @@ handle bails on its own where there is no repository root, so a failure
 there hands back C<undef> and the branch-class gate stands aside rather
 than speaking before the command's own refusal.
 
+A directory is only a stable key while the tree in it holds still, and the
+deployed-state switch moves it.  C<_gate_deployed_state> checks out the
+environment's branch in this same process, so the repository configuration
+and the environment files under that directory become another branch's, and
+a C<Top> kept from before the switch would answer for the branch the
+operator stood on.  C<_reset_gate_context> drops what is kept, and
+C<_gate_deployed_state> calls it on both sides of the command, once after
+the switch and once after the session restores.
+
 B<Returns:> the C<Genesis::Top> and the C<Service::Git> handle, either of
 which may be C<undef>.
 
@@ -1700,6 +1724,27 @@ B<Examples:>
 
   my ($top, $git) = _gate_context();
   # Returns: (undef, undef)  (the directory is no deployment root)
+
+=head2 _reset_gate_context
+
+  _reset_gate_context();
+
+Drops every pair C<_gate_context> is keeping, so the next caller loads the
+directory as it now is.
+
+It is called where the tree under a directory changes beneath the memo,
+which today is the deployed-state switch and nothing else.  Clearing every
+directory rather than the one that moved costs a reload the next caller was
+going to pay for anyway, and it spares this function from having to know
+which directory the switch moved.
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+  $session->switch($branch);
+  _reset_gate_context();
+  # the next _gate_context() reads the environment's branch
 
 =head2 _gate_pipeline_on_legacy_ci_yml
 
@@ -1740,10 +1785,10 @@ B<Examples:>
 
 =head2 _gate_branch_class
 
-  _gate_branch_class();
+  my @out = _gate_branch_class($fn);
 
 Enforces the branch class a command declared at its registration, running in
-C<run_command> just after the legacy F<ci.yml> gate and before the command's
+C<run_command> just after the legacy F<ci.yml> gate, and runs the command's
 own function.
 
 The class lives at the registration so that one declaration drives both the
@@ -1775,12 +1820,12 @@ named for it could never stand beside the deployment branch the name will
 need, so the gate reads the argument here and the predicate compares it
 there.
 
-Returns early -- allowing the command through -- in five cases: the command
-declares no class; it declares C<branch_target =E<gt> 'control'>, which
-C<propagate> does because it switches to control inside its own session; it
-has no repo or env scope, so there is no C<Genesis::Top> to read; the
-C<Top> or the git handle could not be loaded; or the repository has no
-pipeline enabled, where every command behaves as it always has.
+Runs the function where it stands -- gating nothing -- in five cases: the
+command declares no class; it declares C<branch_target =E<gt> 'control'>,
+which C<propagate> does because it switches to control inside its own
+session; it has no repo or env scope, so there is no C<Genesis::Top> to
+read; the C<Top> or the git handle could not be loaded; or the repository
+has no pipeline enabled, where every command behaves as it always has.
 
 The target is read before anything is loaded.  Loading a C<Genesis::Top>
 names the deployment root and the vault target in the environment, and a
@@ -1790,7 +1835,19 @@ The C<Top> and the git handle both come from C<_gate_context>, which the
 legacy F<ci.yml> gate reads too, so the four commands that meet both gates
 are loaded once.
 
-B<Returns:> nothing.  Bails when the gate refuses.
+B<Parameters:>
+
+=over 4
+
+=item C<$fn>
+
+The command's own function, as a code reference taking no arguments.  Every
+path through the gate calls it exactly once, except a pre-deploy refusal,
+which bails before it is reached.
+
+=back
+
+B<Returns:> whatever C<$fn> returned.
 
 B<Errors:>
 
@@ -1808,18 +1865,19 @@ C<Genesis::Exit::TEMPFAIL>.
 
 B<Examples:>
 
-  _gate_branch_class();
-  # no return value; bails when a pre-deploy command stands on a
-  # deployment, pull request, or artifacts branch, on a feature branch
+  _gate_branch_class(sub {$RUN{$COMMAND}(@COMMAND_ARGS)});
+  # runs the command, or bails first when a pre-deploy command stands on
+  # a deployment, pull request, or artifacts branch, on a feature branch
   # that does not descend from control's tip, or on one named for an
   # environment
 
 =head2 _gate_deployed_state
 
-  my $session = _gate_deployed_state($top, $git);
+  my @out = _gate_deployed_state($top, $git, $fn);
 
-Opens a branch session on C<$git> and switches it to the deployment branch
-of the environment the command was given, which is C<< <env>/<type> >>.
+Runs a deployed-state command inside a branch session standing on the
+deployment branch of the environment the command was given, which is
+C<< <env>/<type> >>.
 
 The switch lives here rather than inside each command, so that every
 deployed-state command reaches the same branch by the same path and takes
@@ -1827,15 +1885,33 @@ the same switch lock.  The branch holds exactly what was delivered, and the
 kit's hooks need a working tree, which is why the command reads a checkout
 rather than a tree object.
 
+B<The branch's tip is what the session stands on.>  D87 has C<info> and the
+C<bosh> subcommands default to the commit the environment last deployed,
+which is the exodus C<git.commit>, and a tip may carry a delivery that has
+not deployed.  M14 supplies that commit through C<deployed_target>, and
+until it lands the tip is read in its place.
+
 The environment name is taken from the first command argument, with any
 leading directories and any C<.yml> or C<.yaml> suffix removed, because an
 operator may name an environment by its path.  A command called with no
-argument at all switches nothing and returns.
+argument at all switches nothing and runs where it stands, so the command
+raises its own usage error rather than meeting a bug report about an
+undefined name.
 
-An exit hook registered through C<at_exit> closes the session once the
-command is done.  A clean run calls C<finish>, which restores the branch
-C<begin> recorded and releases the switch lock, and a run that died calls
-C<abort>, which discards what the command left behind first.
+An environment whose deployment branch does not exist is not switched
+either.  Both the local branch and the remote-tracking one are asked about,
+because git's own checkout makes a local branch out of one it has only
+fetched.  Where neither is there the command runs where it stands, which is
+what every environment between C<genesis new> and its first deploy needs:
+C<info> then prints its own sentence about there being no record of a
+deployment, rather than a refusal about a commit rewritten on the remote.
+
+The session closes here, where the function returns, and nothing about it
+is left to an exit hook.  C<begin> hangs the session's own last-resort net
+on C<END>, so a hook registered after it runs second and finds the session
+already aborted, and a C<bail> out of C<END> replaces the status the command
+chose with 1.  A command that refuses therefore exits with its own code and
+the net puts the working tree back, which is the job the net exists for.
 
 B<Parameters:>
 
@@ -1844,25 +1920,38 @@ B<Parameters:>
 =item C<$top>
 
 The C<Genesis::Top> the gate loaded, read for the control branch the
-session is told never to reset and for the deployment branch to switch to.
+session is told never to reset and for the deployment branch to stand on.
 
 =item C<$git>
 
 The C<Service::Git> handle on the working tree, which hands out the one
 session that tree may have open.
 
+=item C<$fn>
+
+The command's own function, as a code reference taking no arguments.  Every
+path calls it exactly once, inside the session where there is one to open.
+
 =back
 
-B<Returns:> the open C<Service::Git::Session>, or nothing when the command
-was given no environment to switch to.
+B<Returns:> whatever C<$fn> returned.
+
+B<Errors:> this function raises none of its own, and four things it calls
+can end the command before it runs.  C<begin> refuses a session opened
+while another is still open, refuses a working tree carrying tracked or
+staged changes, and runs C<preflight>, which refuses a repository with no
+commits, no committed identity, or an ownership git declines to trust.
+C<switch> refuses at C<Genesis::Exit::TEMPFAIL> where another process holds
+the switch lock.
 
 B<Examples:>
 
-  _gate_deployed_state($top, $git);
-  # `genesis qa info` is switched to qa/bosh and returned afterwards
+  _gate_deployed_state($top, $git, $fn);
+  # `genesis qa info` reads qa/bosh and is returned to control
 
-  _gate_deployed_state($top, $git);
-  # `genesis envs/qa.yml info` strips the path and switches to qa/bosh
+  _gate_deployed_state($top, $git, $fn);
+  # `genesis staging info` runs where it stands, because staging has
+  # never been delivered and has no branch to read
 
 =head2 _parse_two_pass
 
