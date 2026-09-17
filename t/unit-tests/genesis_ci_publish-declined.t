@@ -17,6 +17,7 @@ use lib 't';
 use helper;
 use Harness::Propagation;
 
+use Test::Exception;
 use Test::More;
 use Test::Output;
 
@@ -91,6 +92,8 @@ subtest 'a no resets every branch and publishes nothing' => sub {
 	$session->finish;
 
 	is($result->{declined}, 1, 'the run reads as one the operator stopped');
+	# A regression guard for state the decline's early return must not
+	# touch, green before the fix as well as after it.
 	is_deeply($result->{published}, [],
 		'and it published nothing on its way out');
 
@@ -113,8 +116,46 @@ subtest 'a no resets every branch and publishes nothing' => sub {
 			"$rec->{env} records why it was not published");
 	}
 
+	# The other regression guard, and the one ruling 30's report defaults
+	# want: a pending commit left with no outcome of its own is what stops
+	# the report calling it delivered.
 	is($records->[0]{pending}[0]{outcome}, undef,
 		'and a commit that never reached R is delivered in no sense');
+};
+
+subtest 'a publish-set branch the remote never had is a defect' => sub {
+	plan tests => 1;
+
+	my $h = make_harness(envs => ['lab'], mode => 'direct', vault => 0);
+
+	# The branch is cut in this clone alone and never published, which is
+	# the state the pre-flight refuses before the walk starts, so a session
+	# that has committed to one cannot arise from a real run.  It is cut
+	# before the control commit below, so the delivery onto it has a file to
+	# carry and the commit moves the tip.
+	local_branch_only($h, 'lab');
+
+	my $control = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nops: fifteen\n"},
+		message => 'share an op with every environment',
+		push    => 1,
+	);
+
+	my $git     = $h->git('a');
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('lab'));
+	$git->checkout_file($control, 'ops/shared.yml');
+	$git->commit('deliver ops/shared.yml to lab', 'ops/shared.yml');
+
+	# Named rather than passed over, because a reset that put nothing back
+	# would leave the run's own commit on a branch nobody else can see while
+	# the count still said the branch was put back.
+	throws_ok {Genesis::CI::Publish::_reset_publish_set($session)}
+		qr/\Q@{[$h->slug('lab')]}\E.*no remote-tracking ref/s,
+		'the branch with no tracking ref is named as a bug in Genesis';
+
+	$session->finish;
 };
 
 done_testing;
