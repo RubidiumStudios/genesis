@@ -35,8 +35,17 @@ my @COMPILER_FAMILY = (
 # not on disk answers empty, so a family that moved out from under this
 # file would read as a clean sweep rather than as a broken one.  The
 # roots are asserted once, here, so that never happens quietly.
-is scalar(grep {-e} @COMPILER_FAMILY), scalar(@COMPILER_FAMILY),
-	'every root the sweeps read is on disk';
+#
+# A missing root stops the file rather than failing one row, because
+# every row after it would pass on an empty sweep and a reader would have
+# six green rows and one red one to explain.  The one red one is the
+# whole story, so it is the only one told.
+{
+	my @missing = grep {!-e} @COMPILER_FAMILY;
+	BAIL_OUT(sprintf('the compiler family has moved: %s is not on disk',
+		join(', ', @missing))) if @missing;
+	pass 'every root the sweeps read is on disk';
+}
 
 # An assertion helper, beside the test that uses it.  It reads each file
 # whole and reports the subs named, because a sub's name and its body
