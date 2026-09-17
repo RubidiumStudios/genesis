@@ -1110,8 +1110,8 @@ operator where a failed restore left them.
 
 C<< $git->current_branch >> runs C<git rev-parse --abbrev-ref HEAD>, which
 answers the literal string C<HEAD> on a detached HEAD rather than answering
-undefined, so a fallback behind it can never fire and the operator is told
-they are standing on "HEAD", which names nothing they can act on. Standing on
+undefined, so a fallback behind it never fires for that state and the operator
+is told they are standing on "HEAD", which names nothing they can act on. Standing on
 a commit is a designed state rather than an accident now, so the question is
 asked here instead.
 

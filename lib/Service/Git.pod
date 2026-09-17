@@ -331,12 +331,15 @@ B<Examples:>
 
   my $branch = $git->current_branch;
 
-The name of the branch at HEAD.
+The name of the branch at HEAD, or nothing where HEAD names no branch.
 
 B<Parameters:> None.
 
 B<Returns:> The branch name. On a detached HEAD git reports C<HEAD>, and that
-is what comes back.
+is what comes back, which is how a caller tells a detached HEAD from a branch.
+On an unborn HEAD git fails, and the answer is C<undef> rather than the
+complaint git wrote while failing, so a caller that prints or compares this
+answer has to allow an undefined one.
 
 B<Examples:>
 
@@ -2873,10 +2876,10 @@ B<Examples:>
 The branch C<HEAD> points at, whether or not it has a commit on it yet.
 
 L</current_branch> cannot answer this. It runs C<git rev-parse --abbrev-ref
-HEAD>, which fails on an unborn branch and prints the literal string C<HEAD>,
-so a fresh orphan checkout reads as though it were standing on a branch of that
-name. C<git symbolic-ref> names the branch in that state, and it says nothing at
-all on a detached C<HEAD>, which is what tells the two cases apart.
+HEAD>, which fails on an unborn branch, so a fresh orphan checkout reads as
+C<undef> there and the branch it stands on goes unnamed. C<git symbolic-ref>
+names the branch in that state, and it says nothing at all on a detached
+C<HEAD>, which is what tells the two cases apart.
 
 L</fetch_branches> asks it because git refuses to fetch into the ref C<HEAD>
 points at, and an unborn branch is the one checked-out branch

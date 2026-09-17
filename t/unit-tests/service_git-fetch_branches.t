@@ -451,9 +451,9 @@ subtest 'fetch_branches - the report is read off the refs, not off the probe' =>
 
 subtest '_checked_out_branch - symbolic-ref, because rev-parse cannot say' => sub {
 	# current_branch runs `git rev-parse --abbrev-ref HEAD`, which fails on
-	# an unborn branch and prints the literal string HEAD, so it cannot name
-	# the branch a fresh orphan checkout stands on.  symbolic-ref names it,
-	# and says nothing at all on a detached HEAD.
+	# an unborn branch, so current_branch answers undefined there and cannot
+	# name the branch a fresh orphan checkout stands on.  symbolic-ref names
+	# it, and says nothing at all on a detached HEAD.
 	plan tests => 3;
 	reset_stub();
 	install_run_stub();
