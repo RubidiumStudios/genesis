@@ -322,8 +322,16 @@ sub run_command { # {{{
 	# last-resort net on END when it opens, a hook registered after that
 	# one runs after it, and a bail out of END replaces the status the
 	# command chose with 1.
-	_gate_branch_class(sub {$RUN{$COMMAND}(@COMMAND_ARGS)});
-	exit 0
+	my $status = _gate_branch_class(sub {$RUN{$COMMAND}(@COMMAND_ARGS)});
+
+	# A deployed-state command returns its status rather than exiting with
+	# it, for the same reason: an exit from inside the command leaves the
+	# session open behind it.  So the status arrives here as a value and
+	# the process exits on it, once the gate has closed the session.  Every
+	# command outside the class exits zero on a normal return, as it always
+	# has, because nothing else promises to return a status at all.
+	exit((command_properties()->{branch_class} // '') eq DEPLOYED_STATE
+		? ($status // 0) : 0);
 } # }}}
 
 # _gate_context - the Top and the git handle the two gates read {{{

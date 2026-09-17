@@ -527,10 +527,19 @@ session that the gate opens and closes around it.  The function is
 therefore called from inside the branch gate on every path, and
 C<run_command> calls it nowhere itself.
 
+A command declaring C<DEPLOYED_STATE> returns the status it should exit
+with instead of exiting on it, because an exit from inside the session
+leaves the session open behind it and the branch is then put back by the
+session's last-resort net rather than by its C<finish>.  C<run_command>
+exits on what such a function returned, after the gate has closed the
+session.  Every other command exits zero on a normal return, as it always
+has, since nothing outside the class promises a status at all.
+
 If the current command has no registered handler, prints an error via
 C<command_help> and exits with status 1.
 
-B<Returns:> Does not return -- calls C<exit 0> on success.
+B<Returns:> Does not return -- calls C<exit> on success, with the status a
+C<DEPLOYED_STATE> function returned, and with zero for every other command.
 
 B<Errors:>
 

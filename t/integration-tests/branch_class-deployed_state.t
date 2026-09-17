@@ -173,4 +173,34 @@ subtest 'a command with no environment opens no session' => sub {
 		'and no session was opened to be aborted');
 };
 
+subtest 'a bosh command returns rather than exiting' => sub {
+	# A harness of its own, because the kit has to name itself bosh for the
+	# environment to be a director, and the other rows read a kit that is
+	# deliberately nothing of the sort.
+	my $b = make_harness(envs => ['qa'], type => 'bosh');
+	fixture_kit($b, name => 'bosh', hooks => {blueprint => "echo manifest.yml\n"});
+
+	my $at = $b->git('a')->sha($b->control);
+	deliver($b, 'qa', control => $at);
+	refresh($b, 'a');
+	certify($b, 'qa', control_commit => $at);
+	fixture_director($b, 'qa');
+
+	# The bosh on GENESIS_BOSH_COMMAND for the length of this row, so the
+	# command under test reaches a director that answers and exits zero
+	# without anything being dialled.
+	helper::fake_bosh("echo 'ran:' \"\$\@\"\nexit 0\n");
+
+	stand_on($b, $b->control);
+	my ($out, $err, $exit) = run_genesis($b, 'qa', 'bosh', 'vms');
+
+	is($exit, 0, 'the run exits on what the command returned');
+	like("$out$err", qr/ran:\s*vms/,
+		'and the bosh command it was given actually ran');
+	unlike("$out$err", qr/branch session still open/,
+		'the session was closed before the process ended');
+	is($b->git('a')->current_branch, $b->control,
+		'and the operator is back on the branch they stood on');
+};
+
 done_testing;

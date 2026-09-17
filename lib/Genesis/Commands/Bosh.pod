@@ -51,7 +51,7 @@ Supports two modes of operation:
 =item Normal passthrough mode
 
 Executes C<bosh @bosh_args> interactively against the environment's BOSH
-director.  Exit code propagates directly to the shell.
+director, and returns the code that command exited with.
 
 =item C<--connect> mode
 
@@ -63,11 +63,18 @@ C<eval>.  This mode must be invoked as:
 
 If C<--connect> is used but the command is running in a controlling terminal
 (i.e., not under C<eval>), an error is printed explaining the required
-invocation and the process exits with status 1.
+invocation and the function returns 1.
 
 =back
 
 Output is automatically redacted when stdout is not a TTY.
+
+B<Every path returns rather than exiting.>  C<bosh> declares
+C<DEPLOYED_STATE>, so it runs inside the branch session
+C<Genesis::Commands::_gate_deployed_state> opened for it, and a command that
+exits from in there never reaches the C<finish> that closes the session.  The
+status travels back to C<run_command> as a value, and the process exits on it
+once the session is closed.
 
 B<Parameters:>
 
@@ -85,8 +92,10 @@ is required; the function calls C<command_usage(1)> if C<@_> is empty.
 
 =back
 
-B<Returns:> Does not return.  Calls C<exit> with the BOSH command's exit code,
-or C<exit 0> after exporting environment variables in C<--connect> mode.
+B<Returns:> the status the run should exit with, which is the BOSH command's
+own exit code in passthrough mode, C<0> after exporting the environment
+variables in C<--connect> mode, and C<1> where C<--connect> was asked for
+from a controlling terminal.
 
 B<Examples:>
 
