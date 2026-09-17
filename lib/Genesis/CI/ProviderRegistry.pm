@@ -52,9 +52,11 @@ sub known_providers {
 # The entry's class and file name the compiling class, which the manual
 # and github-actions providers do not have, and cli_class and cli_file
 # name the class the CLI builds, which every type has.  Each path is
-# worked out from the class beside it rather than stored, so a caller
-# that wants a path to require still gets one and no entry can name a
-# path its class does not derive.
+# always worked out from the class beside it rather than read from the
+# entry, so a caller that wants a path to require still gets one and no
+# entry can name a path its class does not derive.  A stored path is
+# never honoured in preference, because register_provider refuses one
+# that disagrees and a path that agrees says nothing new.
 #
 # A shallow copy rather than the registry's own hash reference, because
 # a caller that writes into what it was given would otherwise rewrite
@@ -65,8 +67,8 @@ sub provider_info {
 	return undef unless defined $type && exists $_providers{$type};
 
 	my %info = %{$_providers{$type}};
-	$info{file}     //= _path_of($info{class})     if $info{class};
-	$info{cli_file} //= _path_of($info{cli_class}) if $info{cli_class};
+	$info{file}     = _path_of($info{class})     if $info{class};
+	$info{cli_file} = _path_of($info{cli_class}) if $info{cli_class};
 	return \%info;
 }
 
