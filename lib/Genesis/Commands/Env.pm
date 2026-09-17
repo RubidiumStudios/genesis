@@ -73,9 +73,9 @@ sub create {
 	# check version prereqs
 	$kit->check_prereqs() or exit 86;
 
-	# Pipeline-aware repos require new environments to be created on the
-	# control branch so the topology is visible to pipeline tooling and
-	# the environment branch can be cut from the right point.
+	# Under a pipeline the branch class gate has already refreshed control
+	# into T and refused a derived branch, so create has nothing left to
+	# check about the branch it stands on (D40, D41, D81).
 	my $pipeline_enabled = $top->pipeline_enabled;
 	my $git;
 	if ($pipeline_enabled) {
@@ -87,23 +87,9 @@ sub create {
 		# share with begin is the pre-flight, so H20 closes for it too.
 		$git->preflight;
 
-		my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-		my $branch = $git->current_branch;
-		if (!defined($branch) || $branch ne $control) {
-			bail(
-				"Creating environments requires being on the #C{%s} branch, ".
-				"but you are currently on #C{%s}.\n\n".
-				"    git checkout %s\n",
-				$control,
-				$branch // '<detached HEAD>',
-				$control
-			);
-		}
-
-		# Asked here, beside the branch check, and before anything is
-		# written.  The command commits the environment file, and a commit
-		# takes everything the index already holds, so an operator with
-		# unrelated work in progress would otherwise find it swept into the
+		# The command commits the environment file, and a commit takes
+		# everything the index already holds, so an operator with unrelated
+		# work in progress would otherwise find it swept into the
 		# environment's own commit and have to undo a commit to get it back.
 		unless ($git->is_clean) {
 			my $status = $git->status;
@@ -114,12 +100,6 @@ sub create {
 				join("", map {"  - $_\n"} @dirty)
 			);
 		}
-
-		# Refresh R into T for every branch in scope, control included, before
-		# the first read of any of them (D40).  There is no flag: a branch
-		# check that rested on a stale tracking ref is how this command came
-		# to fork a branch a teammate had already published.
-		$top->fetch_pipeline_envs($git, command => "new $name");
 	}
 
 	# create the environment
@@ -252,29 +232,14 @@ sub create {
 			# nothing else, so this command writes the environment file on
 			# the branch the operator is standing on and touches no
 			# deployment branch.  The environment reaches its branch when a
-			# propagate run delivers this commit onto it.
+			# propagate run delivers this commit onto it, and the shape of
+			# the pipeline that carries it is the apply's to write (D43).
 			info(
 				"#C{%s} reaches its deployment branch when the next ".
 				"#C{genesis propagate} run delivers this commit.  The branch ".
 				"itself is created by #C{genesis pipeline-apply}.",
 				$name
 			);
-
-			# For automated CI providers, the pipeline needs to be
-			# rebuilt to include a job for the new environment branch.
-			if (!$top->manual_pipeline) {
-				if (in_controlling_terminal) {
-					if (prompt_for_boolean(
-						"Rebuild the CI pipeline to include #C{$name}? [y|n]", "y"
-					)) {
-						info "Rebuilding pipeline...";
-						# TODO: call genesis repipe equivalent
-						warning("Automated pipeline rebuild not yet implemented.  Run #C{genesis repipe} manually.");
-					}
-				} else {
-					info "Run #C{genesis repipe} to update the pipeline with the new environment.";
-				}
-			}
 		}
 	}
 
