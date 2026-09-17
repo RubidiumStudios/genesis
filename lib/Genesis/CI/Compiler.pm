@@ -231,9 +231,6 @@ sub validate_config_section {
 }
 
 # }}}
-# }}}
-### Internal Methods {{{
-
 # override_file_names - the override files this run may merge {{{
 #
 # D27 put the override beside .genesis/config and took the old CI
@@ -266,6 +263,9 @@ sub override_file_names {
 }
 
 # }}}
+# }}}
+### Internal Methods {{{
+
 # _apply_provider_overrides - merge the override files over the output {{{
 #
 # The merge is unchanged: verbatim YAML merged over the generated output
@@ -380,6 +380,4 @@ sub _report_unread_overrides {
 # }}}
 
 1;
-
-
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

@@ -107,9 +107,9 @@ subtest 'the compile hands back the provider beside its compiler' => sub {
 		->compile(provider => 'concourse');
 
 	isa_ok $result->{provider}, 'Genesis::CI::Provider::Concourse',
-		'the result carries the provider';
+		"the result's provider";
 	isa_ok $result->{compiler}, 'Genesis::CI::ProviderCompiler::Concourse',
-		'and the compiler beside it';
+		"the result's compiler";
 
 	# The assertion the row exists for.  A compile that built the
 	# provider and then resolved the compiler class itself returns both

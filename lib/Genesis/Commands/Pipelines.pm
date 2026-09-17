@@ -2338,14 +2338,14 @@ sub _concourse_fly_flags {
 	# provider_option reads them through the provider it holds.  Both
 	# derivations below move together, because the second one becomes the
 	# -k flag and a rewrite that took only the first would drop it for
-	# four commands.
+	# four commands.  A compile hands back a compiler and every compiler
+	# inherits provider_option from Genesis::CI::ProviderCompiler, so
+	# there is nothing here to ask about first.
 	my $compiler = $result->{compiler};
 	my $target   = $opts->{target}
-		// ($compiler->can('provider_option')
-			? $compiler->provider_option('target') : undef)
+		// $compiler->provider_option('target')
 		// $name;
-	my $insecure = $compiler->can('provider_option')
-		? ($compiler->provider_option('insecure') // 0) : 0;
+	my $insecure = $compiler->provider_option('insecure') // 0;
 	my $k_flag   = $insecure ? ' -k' : '';
 	return ($target, $k_flag);
 }
