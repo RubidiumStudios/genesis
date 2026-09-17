@@ -2121,79 +2121,6 @@ sub _dump_debug_artifacts {
 }
 
 # }}}
-# _ast_to_mermaid_md - generate pipeline.md Mermaid content from a bare AST {{{
-sub _ast_to_mermaid_md {
-	my ($ast) = @_;
-
-	my $name  = $ast->metadata->{name} || 'genesis-pipeline';
-	my @lines = ("flowchart LR");
-
-	for my $wf_name ($ast->workflow_names) {
-		my $wf = $ast->workflows->{$wf_name};
-		next unless $wf->{graph};
-
-		my $nodes = $wf->{graph}{nodes} || {};
-		my $edges = $wf->{graph}{edges} || [];
-
-		my %in_any_edge;
-		for my $edge (@$edges) {
-			$in_any_edge{$edge->{from}} = 1;
-			$in_any_edge{$edge->{to}}   = 1;
-		}
-
-		for my $edge (@$edges) {
-			my $from = $nodes->{$edge->{from}}{alias} || $edge->{from};
-			my $to   = $nodes->{$edge->{to}}{alias}   || $edge->{to};
-			($from) =~ s/[^a-zA-Z0-9_]/_/g;
-			($to)   =~ s/[^a-zA-Z0-9_]/_/g;
-			push @lines, "  $from --> $to";
-		}
-
-		for my $n (sort keys %$nodes) {
-			next if $in_any_edge{$n};
-			my $alias = $nodes->{$n}{alias} || $n;
-			($alias) =~ s/[^a-zA-Z0-9_]/_/g;
-			push @lines, "  $alias";
-		}
-	}
-
-	my $mermaid = join("\n", @lines) . "\n";
-	return "# Pipeline: $name\n\n\`\`\`mermaid\n${mermaid}\`\`\`\n";
-}
-
-# }}}
-# _topology_to_mermaid_md - mermaid flowchart from nodes+edges {{{
-sub _topology_to_mermaid_md {
-	my ($top, $nodes, $edges) = @_;
-
-	my $name  = $top->config->get('pipeline.name') || $top->type;
-	my @lines = (
-		"---",
-		"config:",
-		"  flowchart:",
-		"    useMaxWidth: false",
-		"---",
-		"flowchart TD",
-	);
-
-	# Declare nodes with explicit labels so names aren't truncated
-	my %declared;
-	for my $n (sort keys %$nodes) {
-		my $label = $nodes->{$n}{alias} || $n;
-		(my $id = $n) =~ s/[^a-zA-Z0-9_]/_/g;
-		push @lines, "  ${id}[\"$label\"]";
-		$declared{$n} = $id;
-	}
-
-	for my $edge (@$edges) {
-		push @lines, "  $declared{$edge->{from}} --> $declared{$edge->{to}}";
-	}
-
-	my $mermaid = join("\n", @lines) . "\n";
-	return "# Pipeline: $name\n\n\`\`\`mermaid\n${mermaid}\`\`\`\n";
-}
-
-# }}}
 # _describe_source_control - print each source-control value and its tier {{{
 #
 # D29 has pipeline-describe open with the resolved source-control values,
@@ -2275,54 +2202,6 @@ sub _describe_topology {
 	for my $root (@roots) {
 		$print_tree->($root, '  ');
 	}
-	output "";
-}
-
-# }}}
-# _describe_ast - human-readable AST description {{{
-sub _describe_ast {
-	my ($ast, $platform) = @_;
-
-	output "#G{Pipeline}: #C{%s}", $ast->metadata->{name} || '(unnamed)';
-	output "  #Yi{Platform}: %s", $platform;
-	output "  #Yi{Source}:   %s", $ast->metadata->{source} || 'unknown';
-	output "";
-
-	my $integrations = $ast->integrations || {};
-	if (my $sc = $integrations->{source_control}) {
-		output "#G{Source Control}:";
-		output "  Provider:   %s", $sc->{provider}   || 'unknown';
-		output "  Repository: %s", $sc->{repository} || 'unknown';
-	}
-
-	my @targets = $ast->target_names;
-	if (@targets) {
-		output "";
-		output "#G{Targets}: (%d)", scalar @targets;
-		output "  - #C{%s}", $_ for sort @targets;
-	}
-
-	my @workflows = $ast->workflow_names;
-	if (@workflows) {
-		output "";
-		output "#G{Workflows}: (%d)", scalar @workflows;
-		for my $wf_name (sort @workflows) {
-			my $wf = $ast->workflows->{$wf_name};
-			output "  #Yi{%s} (%s)", $wf_name, $wf->{type} || 'deployment';
-
-			if ($wf->{graph} && $wf->{graph}{nodes}) {
-				my $nodes = $wf->{graph}{nodes};
-				my $edges = $wf->{graph}{edges} || [];
-				output "    Stages: %s", join(' -> ',
-					map { $_->{alias} || $_->{genesis_env} || $_->{stage_name} }
-					map { $nodes->{$_} }
-					sort keys %$nodes
-				);
-				output "    Edges:  %d", scalar @$edges;
-			}
-		}
-	}
-
 	output "";
 }
 

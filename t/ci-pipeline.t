@@ -205,66 +205,6 @@ YAML
 	chdir($orig);
 };
 
-subtest 'Commands::Pipelines - _ast_to_mermaid_md generates valid Mermaid markdown' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new(
-		metadata  => { name => 'test-pipeline' },
-		workflows => {
-			default => {
-				name  => 'default',
-				type  => 'deployment',
-				graph => {
-					nodes => {
-						sandbox => { alias => 'sandbox', stage_name => 'sandbox' },
-						preprod => { alias => 'preprod', stage_name => 'preprod' },
-						prod    => { alias => 'prod',    stage_name => 'prod'    },
-					},
-					edges => [
-						{ from => 'sandbox', to => 'preprod' },
-						{ from => 'preprod', to => 'prod'    },
-					],
-				},
-			},
-		},
-	);
-
-	my $md = Genesis::Commands::Pipelines::_ast_to_mermaid_md($ast);
-
-	like $md, qr/^# Pipeline: test-pipeline/m, "H1 heading present";
-	like $md, qr/```mermaid/,                  "mermaid fence open";
-	like $md, qr/flowchart LR/,                "flowchart LR directive";
-	like $md, qr/sandbox.*preprod/s,            "sandbox -> preprod edge";
-	like $md, qr/preprod.*prod/s,               "preprod -> prod edge";
-	like $md, qr/```/,                          "mermaid fence close";
-};
-
-subtest 'Commands::Pipelines - _describe_ast does not die' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new(
-		metadata     => { name => 'test-pipeline', source => 'multi-file' },
-		integrations => {
-			source_control => { provider => 'github', repository => 'org/repo' },
-		},
-		targets   => {
-			sandbox => { type => 'bosh-director' },
-			preprod => { type => 'bosh-director' },
-		},
-		workflows => {
-			default => {
-				type  => 'deployment',
-				graph => {
-					nodes => {
-						sandbox => { alias => 'sandbox', stage_name => 'sandbox' },
-						preprod => { alias => 'preprod', stage_name => 'preprod' },
-					},
-					edges => [ { from => 'sandbox', to => 'preprod' } ],
-				},
-			},
-		},
-	);
-
-	eval { Genesis::Commands::Pipelines::_describe_ast($ast, 'concourse') };
-	ok !$@, "_describe_ast does not die: $@";
-};
-
 subtest 'Commands::Pipelines - _job_status_label returns expected labels' => sub {
 	is Genesis::Commands::Pipelines::_job_status_label({ paused => 1 }),
 		'paused', "paused job returns 'paused'";
