@@ -302,16 +302,21 @@ B<Examples:>
 
 Whether C<fly> is on the PATH, and whether it meets the floor the
 repository declares as C<pipeline.provider.min_fly_version>. A repository
-that declares no floor is asking only that C<fly> be there. A version is
-compared field by field rather than as a string, so 10 sorts above 9.
+that declares no floor is asking only that C<fly> be there.
 
 A floor is enforced or it is refused, and never quietly neither. A
-C<fly --version> that does not answer with three dotted numbers is
-refused by name, quoting what it said instead, because a version that
-cannot be read cannot be checked. A floor written C<v7.9.0>, which is
-how a Concourse release names itself, loses the C<v> before the
-comparison: split on the dots alone, that leading letter made the major
-number read as zero and every C<fly> on earth cleared the floor.
+C<fly --version> this cannot read as a version is refused by name,
+quoting what it said instead, because a version that cannot be read
+cannot be checked against anything.
+
+What it can read, and how the two are compared, is L<Genesis/new_enough>
+and L<Genesis/semver>, which is how every other version in Genesis is
+read. So 10 sorts above 9 rather than beside it, a floor written
+C<v7.9.0> means what a Concourse release means when it names itself that
+way, and a release candidate sorts below the release it is a candidate
+for. A hand-rolled split did none of those three: the leading letter
+made the major number read as zero, every C<fly> on earth cleared the
+floor, and Perl warned about a non-numeric string on the way past.
 
 This is the only answer to the question. The class that emits the
 pipeline kept a copy that asked whether C<fly> was on the path and

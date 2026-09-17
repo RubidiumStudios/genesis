@@ -223,4 +223,60 @@ subtest 'the namespace holds modules and nothing at its root' => sub {
 		'and the namespace holds the fourteen modules the step leaves it');
 };
 
+subtest 'the pages name no class the namespace no longer holds' => sub {
+	plan tests => 2;
+
+	# Nothing gates prose, so a rename falsifies a page in silence and
+	# the page stays wrong until somebody happens to read it.  That is
+	# how the compiler README came to describe a factory and a trait
+	# that had both been gone for months.  This row reads the two places
+	# that describe the compiler family and says so loudly instead.
+	my @PAGE_ROOTS = ('lib/Genesis/CI/Compiler/README.md', 'docs/ci');
+	is_deeply([grep {!-e} @PAGE_ROOTS], [],
+		'both roots the page sweep reads are on disk');
+
+	# Where a page has to say a retired name as history, its exact
+	# sentence goes here, keyed by the page, so an exclusion names what
+	# it excuses rather than silencing a whole file.  Nothing is
+	# excluded today: the two sentences recorded as deliberate history,
+	# in architecture.md and legacy-bridge.md, describe the old
+	# arrangement in prose without naming a class, so neither trips a
+	# pattern below.
+	my %history;
+
+	# The caller sweep in the subtest above reads every .pm and .t under
+	# lib and t a line at a time, so a pattern written out whole here
+	# would read as a caller of the very module that sweep asserts is
+	# gone.  Each one is composed from the namespace instead, which is
+	# what a line-based sweep costs for being the conservative kind.
+	my $ns = 'Genesis' . '::CI';
+	my @retired = (
+		"${ns}::Concourse",
+		'Compiler::PipelineProvider',
+		'Compiler/Providers/',
+		"${ns}::GithubActions",
+		"use $ns;",
+		"$ns->new",
+	);
+
+	my @pages = grep {-f} @PAGE_ROOTS;
+	find(sub {push @pages, $File::Find::name if -f && /\.md$/},
+		grep {-d} @PAGE_ROOTS);
+
+	my @named;
+	for my $page (sort @pages) {
+		open my $fh, '<', $page or die "cannot read $page: $!\n";
+		while (defined(my $line = <$fh>)) {
+			chomp $line;
+			next if grep {$_ eq $line} @{$history{$page} || []};
+			push @named, "$page:$.: $line"
+				if grep {index($line, $_) >= 0} @retired;
+		}
+		close $fh;
+	}
+	is_deeply(\@named, [],
+		'no page names a class the compiler family no longer holds')
+		or diag(join("\n", map {"  $_"} @named));
+};
+
 done_testing;

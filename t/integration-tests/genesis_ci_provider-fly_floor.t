@@ -141,8 +141,34 @@ subtest 'a floor written with a leading v is the same floor' => sub {
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
 	is($exit, 86, 'the prerequisites refusal exits 86');
-	like(flatten($err), qr/requires fly >= v?7\.9\.0/,
-		'and it names the floor the repository declared');
+
+	# The floor is echoed as the repository wrote it, v and all, so the
+	# pattern names that rendering exactly.  Admitting an optional v
+	# would pass whether the message kept it or dropped it, and the
+	# stripping this row is about would go unsaid either way.
+	like(flatten($err), qr/requires fly >= v7\.9\.0 but found 7\.4\.0/,
+		'and it names the floor the repository declared, as written');
+};
+
+subtest 'a release candidate floor is read the way Genesis reads versions' => sub {
+	# Three rows, and one more for the run's own restoration assertion.
+	plan tests => 4;
+
+	# 7.9.0 is newer than 7.9.0-rc.1, so this run carries past the
+	# check.  A comparison that split on the dots had nothing to say
+	# about the suffix and warned about a non-numeric string on its way
+	# to saying it, which is the warning the third row reads for.
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	compilable_pipeline($h);
+	$h->set_repo_config('pipeline.provider.min_fly_version', '7.9.0-rc.1');
+	fixture_fly($h, version => '7.9.0');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	my $said = flatten($err);
+
+	isnt($exit, 86, 'the prerequisites check does not refuse');
+	unlike($said, qr/requires fly/, 'and nothing is said about a fly version');
+	unlike($said, qr/isn't numeric/, 'and no comparison warns on its way past');
 };
 
 # The compiler family the second row below sweeps.  A root that is not on

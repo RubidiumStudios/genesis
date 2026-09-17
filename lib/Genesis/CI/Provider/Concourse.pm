@@ -125,7 +125,7 @@ sub check_prereqs {
 		# enforced, and a check that carried on past an unreadable
 		# version line enforced nothing while saying nothing either.  So
 		# the refusal names what it read instead.
-		unless ($ver_out =~ /^v?(\d+)\.(\d+)\.(\d+)/) {
+		unless (semver($ver_out)) {
 			error(
 				"Concourse CI provider could not read a fly version from ".
 				"#C{fly --version}, which said #C{%s}.\n".
@@ -136,25 +136,19 @@ sub check_prereqs {
 			);
 			return 0;
 		}
-		my @got = ($1+0, $2+0, $3+0);
 
-		# A Concourse release names itself v7.9.0, so a repository that
-		# copies that name into the key means the floor it says it
-		# means.  Split on the dots alone, the leading v made the major
-		# number read as zero and every fly on earth cleared it.
-		(my $floor = $self->{min_fly_version}) =~ s/^v//i;
-		my @min = map { $_ + 0 } split(/\./, $floor, 3);
-		push @min, 0 while @min < 3;
-		for my $i (0..2) {
-			if ($got[$i] < ($min[$i]//0)) {
-				error(
-					"Concourse CI provider requires fly >= %s but found %s.\n".
-					"  Upgrade fly from your Concourse server.",
-					$self->{min_fly_version}, $ver_out
-				);
-				return 0;
-			}
-			last if $got[$i] > ($min[$i]//0);
+		# One comparison, and it is the one the rest of Genesis uses.
+		# A hand-rolled split read a leading v as a major number of
+		# zero, so every fly on earth cleared a floor written v7.9.0,
+		# and it warned about a non-numeric string on the way past.  It
+		# had nothing to say about a release candidate either.
+		unless (new_enough($ver_out, $self->{min_fly_version})) {
+			error(
+				"Concourse CI provider requires fly >= %s but found %s.\n".
+				"  Upgrade fly from your Concourse server.",
+				$self->{min_fly_version}, $ver_out
+			);
+			return 0;
 		}
 	}
 

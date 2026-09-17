@@ -176,11 +176,6 @@ The task has an `ensure` block that pushes the git output directory.
 
 Errand tasks follow the deploy task for non-create-env environments.
 
-The cache task uses `_cache_task_config()` to run `ci-generate-cache`.
-
-After the cache task, the job pushes or gets cache resources for any
-downstream environments (controlled by `will_trigger`).
-
 Lock acquisition happens before the resource gets, and lock release
 happens in an `ensure` block around the entire `do` sequence. This ensures
 locks are released even on failure.
