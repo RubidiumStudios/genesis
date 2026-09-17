@@ -36,6 +36,12 @@ sub enabled_pipeline {
 		'  source_control:', '    repository: genesis/bosh-deployments');
 }
 
+# This subtest and the two below it name the three registered types
+# literally, so all three run before the subtest that registers zeppelin.
+# The registry is process-wide and register_provider has no counterpart
+# that takes an entry out again, so a fourth type registered anywhere
+# above them would still be there when they ran and every literal list
+# would be one type short.
 subtest 'the registry is consulted by both families and owned by neither' => sub {
 	plan tests => 6;
 
