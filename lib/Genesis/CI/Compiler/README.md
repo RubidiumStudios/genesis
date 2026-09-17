@@ -1,722 +1,203 @@
-# Genesis CI System Architecture
+# The Genesis CI compiler and the classes around it
 
 ## Overview
 
-Genesis provides a CI/CD pipeline system that generates and deploys pipelines for continuous deployment of BOSH environments. This document explains the evolution from the monolithic Legacy system to the new trait-based multi-platform architecture.
+This directory holds the stages that turn CI configuration into a pipeline AST, and `Genesis::CI::Compiler` one level above it runs those stages in order. The classes that turn an AST into a platform's own artefact do not live in here, because a provider is a thing in its own right and the compiler that emits for it is a component that provider owns.
+
+Three classes carry that arrangement, and every run through the system consults all three.
+
+| Class | What it answers for |
+|-------|---------------------|
+| `Genesis::CI::Provider` | The provider a repository is configured for. It declares the keys the `pipeline.provider` block may hold, declares what the provider is able to do, validates the block an operator wrote, and says whether the toolchain is present. |
+| `Genesis::CI::ProviderCompiler` | The artefact that provider emits. It holds the provider it emits for and turns a resolved AST into one or more files. |
+| `Genesis::CI::ProviderRegistry` | Which class answers for a type, on either side. Both families ask it, and it is the only map of types to classes in the tree. |
+
+A provider hands out its compiler, and the compiler holds the provider that handed it out. That is the whole of the relationship, and it is what gives the toolchain check and the Concourse team default one home each rather than two.
 
 ```mermaid
 graph LR
-    A[ci.yml] --> B[Genesis::CI Factory]
-    B -->|type: concourse| C[Concourse Provider]
-    B -->|type: github-actions| D[GitHub Actions Provider]
-    B -->|type: legacy| E[Legacy System]
-    
-    C --> F[Concourse YAML]
-    D --> G[GitHub Actions Workflow]
-    E --> F
-    
-    F -->|fly CLI| H[Concourse]
-    G -->|git commit| I[GitHub Actions]
-    
-    style B fill:#181825,stroke:#fff,stroke-width:4px
-    style C fill:#14532d,stroke:#fff,stroke-width:2px
-    style D fill:#164e63,stroke:#fff,stroke-width:2px
-    style E fill:#3f2e13,stroke:#fff,stroke-width:2px
+    REG[Genesis::CI::ProviderRegistry]
+    PROV[Genesis::CI::Provider]
+    COMP[Genesis::CI::ProviderCompiler]
+
+    PROV -->|"which class for this type"| REG
+    COMP -->|"which class for this type"| REG
+    PROV -->|"compiler(ast => $ast)"| COMP
+    COMP -->|"provider()"| PROV
 ```
 
----
+## The registry
 
-## The Legacy System (Original)
+`Genesis::CI::ProviderRegistry` holds one entry per provider type. An entry names the class the CLI builds under `cli_class`, and, where the provider has an artefact to emit, the class that emits it under `class`. An entry names its classes and nothing else, because every package under `lib` derives its own file path, and a path written beside a class would be a second spelling of the same fact that could disagree with the first.
 
-### What It Was
+Three types are registered today.
 
-`Genesis::CI::Legacy` was a monolithic Perl module (~1600 lines) that generated Concourse CI pipeline YAML configurations. It was the **only** CI platform supported by Genesis.
+- The `concourse` type has both halves, so it validates a block and emits a pipeline.
 
-### What It Did
+- The `github-actions` type has a CLI class and no compiling class yet. The type validates and resolves, and the class that emits for it arrives with the provider itself.
 
-The Legacy system handled the complete Concourse pipeline generation workflow:
+- The `manual` type has a CLI class and no compiling class, because a manual pipeline is one Genesis never sets.
 
-1. **Configuration Parsing** (`validate_pipeline()`)
-   - Loaded `ci.yml` configuration files
-   - Validated required fields (vault, git, boshes, notifications)
-   - Normalized git authentication (SSH keys vs username/password)
-   - Applied defaults (branches, commit authors, registry settings)
+Four subs read the map.
 
-2. **Pipeline Generation** (`generate_pipeline_concourse_yaml()`)
-   - Generated Concourse pipeline YAML with:
-     - Git resources for code checkout
-     - Vault authentication via AppRole
-     - BOSH director configurations
-     - Deployment jobs with dependency chains
-     - Notification resources (Slack, Email)
-     - Locker resources for deployment coordination
-   - Supported complex layouts with environment progression (dev → staging → prod)
-   - Handled auto-triggering vs manual deployments
-   - Generated inline or grouped notifications
+- `known_providers` answers every registered type, sorted. The configuration schema's enum, every class lookup, and every message that lists the valid types all read this, so a provider cannot be spelled one way in the schema and another in the code.
 
-3. **Additional Features**
-   - `generate_pipeline_graphviz_source()` - Visualize pipeline as DOT graph
-   - `generate_pipeline_human_description()` - Human-readable pipeline summary
+- `provider_info` answers one entry as a shallow copy, with each file path worked out from the class beside it.
 
-### How It Worked
+- `automated_providers` answers every type that is not `manual`, so no caller writes that exclusion by hand.
 
-```perl
-# Single entry point
-use Genesis::CI::Legacy;
+- `register_provider` adds an entry at run time, for a test that stands a class up and for a provider that ships outside the tree.
 
-# Parse configuration
-my ($pipeline, $layout) = Genesis::CI::Legacy::parse('ci.yml', $top, 'default');
+Two subs resolve a type to a loaded class. `provider_class` answers the CLI class and `compiler_class` answers the compiling one. A type the registry does not hold is refused, and so is a type that has no compiling class, because emitting a pipeline and validating a block are different questions and a provider may answer the second while having nothing to answer the first with. Both refusals exit `CONFIG`, since a repository whose configured provider Genesis cannot compile for is a repository the operator can put right.
 
-# Generate Concourse YAML
-my $yaml = Genesis::CI::Legacy::generate_pipeline_concourse_yaml($pipeline, $top);
+## The provider contract
 
-# Output directly used by fly CLI
-```
-
-**Workflow:**
-```mermaid
-flowchart TD
-    A[ci.yml] --> B[validate_pipeline]
-    B --> C[Normalize Config]
-    C --> D[validate vault/git/boshes]
-    D --> E[apply defaults]
-    E --> F[generate_pipeline_concourse_yaml]
-    F --> G[Generate Resources]
-    F --> H[Generate Jobs]
-    F --> I[Generate Notifications]
-    G --> J[Concourse YAML]
-    H --> J
-    I --> J
-    J --> K[fly set-pipeline]
-    
-    style B fill:#ff9,stroke:#333,stroke-width:2px
-    style F fill:#ff9,stroke:#333,stroke-width:2px
-    style J fill:#9f9,stroke:#333,stroke-width:2px
-```
-
-### Limitations
-
-1. **Tightly Coupled to Concourse** - All logic assumed Concourse primitives (resources, jobs, tasks)
-2. **Monolithic** - Single 1600-line file with no separation of concerns
-3. **No Extensibility** - Adding GitHub Actions would require duplicating/forking the entire codebase
-4. **Hard to Test** - Concourse-specific YAML generation intertwined with validation logic
-5. **No Abstraction** - Git config, Vault config, notifications all baked into Concourse YAML generation
-
----
-
-## The New Trait-Based System
-
-### Architecture Philosophy
-
-The new system uses a **trait pattern** (like `Genesis::Hook`, `Genesis::Secret`, `Genesis::Kit::Provider`) where:
-- A **factory** (`Genesis::CI`) instantiates the appropriate provider
-- Each **provider** is a complete, self-contained implementation
-- Providers implement a **contract** (trait interface) but share **no code**
-- No branching logic (e.g., `if concourse { } elsif github-actions { }`)
-
-### Structure
-
-```
-lib/Genesis/
-├── CI.pm                      # Factory + trait interface definition
-├── CI/
-│   ├── Legacy.pm              # Original monolithic implementation (KEPT)
-│   ├── Concourse.pm           # New Concourse provider (delegates to Legacy for now)
-│   └── GithubActions.pm       # New GitHub Actions provider
-```
-
-```mermaid
-classDiagram
-    class Genesis_CI {
-        <<Factory>>
-        +new(type, file, top) Provider
-    }
-    
-    class TraitInterface {
-        <<Interface>>
-        +init()
-        +parse()
-        +generate()
-        +deploy()
-        +platform_name()
-        +file_extension()
-    }
-    
-    class Concourse {
-        -file
-        -top
-        -config
-        +init()
-        +parse()
-        +generate() String
-        +deploy()
-        +graphviz() String
-        +describe()
-    }
-    
-    class GithubActions {
-        -file
-        -top
-        -config
-        +init()
-        +parse()
-        +generate() String
-        +deploy()
-    }
-    
-    class Legacy {
-        <<Monolithic>>
-        +parse()
-        +generate_pipeline_concourse_yaml()
-        +generate_pipeline_graphviz_source()
-    }
-    
-    Genesis_CI --> TraitInterface : defines
-    TraitInterface <|.. Concourse : implements
-    TraitInterface <|.. GithubActions : implements
-    Concourse ..> Legacy : delegates to (temporary)
-    
-    style Genesis_CI fill:#181825,stroke:#fff,stroke-width:2px
-    style TraitInterface fill:#1e293b,stroke:#fff,stroke-width:2px
-    style Concourse fill:#14532d,stroke:#fff,stroke-width:2px
-    style GithubActions fill:#164e63,stroke:#fff,stroke-width:2px
-    style Legacy fill:#3f2e13,stroke:#fff,stroke-width:2px
-```
-
-### CI Provider Contract
-
-All providers must implement:
-
-```perl
-package Genesis::CI::<Platform>;
-use parent 'Genesis::CI', 'Genesis::CI::Compiler::PipelineProvider';
-
-# Initialize provider instance
-sub init { ... }
-
-# Parse and validate configuration
-sub parse { ... }
-
-# Generate platform-specific pipeline/workflow
-sub generate { ... }
-
-# Deploy/upload to CI platform
-sub deploy { ... }
-
-# Return human-readable platform name
-sub platform_name { ... }
-
-# Return file extension for generated config
-sub file_extension { ... }
-```
-
-The keys a provider takes under `pipeline.provider` and the abilities it
-claims are both declared on its matching class under
-`Genesis::CI::Provider`, which is also the class that validates the block
-an operator wrote, and the compiler base reads both declarations from
-there:
+A provider class lives under `Genesis::CI::Provider` and declares two things that the configuration layer reads before anything is compiled.
 
 ```perl
 package Genesis::CI::Provider::MyPlatform;
+use parent 'Genesis::CI::Provider';
 
-# Declare the keys this provider takes under pipeline.provider, in the
-# shape Top's repository schema uses, so the configuration layer can
-# merge them in and validate them for you.
+# The keys this provider takes under pipeline.provider, in the shape
+# Top's repository schema uses, so the configuration layer can merge
+# them in and validate them for you.
 sub provider_options_schema { ... }
 
-# Declare what this provider is able to do, as the six booleans the
-# compiler base names, so a key whose ability the provider lacks is
-# refused at load rather than discovered at run time.
+# What this provider is able to do, as the six booleans the base names,
+# so a key whose ability the provider lacks is refused at load rather
+# than discovered at run time.
 sub capabilities { ... }
 ```
 
-`provider_options_schema` and `capabilities` are both mandatory, both
-abstract on `Genesis::CI::Provider`, and every provider has to answer
-both. A provider fails at configuration load if it leaves either one out,
-because the base raises rather than guessing: a provider with no declared
-keys would have every key an operator wrote refused by name, and a
-provider whose abilities are unknown cannot have those keys gated at all.
+`provider_options_schema` and `capabilities` are both mandatory and both abstract on the base, so every provider has to answer both. A provider that leaves either one out fails at configuration load, because the base raises rather than guessing. A provider with no declared keys would have every key an operator wrote refused by name, and a provider whose abilities are unknown cannot have those keys gated at all.
 
-### How It Works
+A provider also answers `check_prereqs`, which says whether the toolchain the provider needs is present. The base answers yes, which is the honest answer for a provider that needs no tool, and the Concourse provider overrides it to look for `fly` and to enforce the floor a repository declares as `pipeline.provider.min_fly_version`. A floor that cannot be compared against is a floor that is not enforced, so a `fly --version` that does not yield three dotted integers is refused by name rather than passed over.
 
-#### 1. Factory Pattern
+`type` answers the registered type the provider was built under. It is set where the type is known rather than worked out later, because the only other place to read a type from is the configuration hash, and Perl randomises a hash's order once per process.
+
+`compiler` hands out the compiler that emits this provider's artefact. A provider with nothing to emit answers with nothing, which is what `manual` does honestly and what `github-actions` does until its compiler lands. A caller that needs a compiler rather than merely asking whether there is one passes `required`, and then the registry's refusal is what comes back instead of an undefined value to trip over one line later.
+
+## The compiler contract
+
+A compiling class lives under `Genesis::CI::ProviderCompiler` and overrides four methods.
+
+| Method | What it must do |
+|--------|-----------------|
+| `platform_name` | Answer a human-readable name for the platform, which appears in log messages and error output. |
+| `provider_type` | Answer the canonical type string, which is the same string the registry keys the entry under. |
+| `generate_from_ast` | Take a fully resolved AST and answer either one string or a hash of file names to contents. |
+| `output_files` | Answer a hash describing the files this class writes, keyed by file name. |
+
+The base builds every compiler, and the concrete class does not define a constructor of its own. A caller reaches the constructor through `$provider->compiler(ast => $ast)` rather than calling it directly, and a call that names no AST is refused by name, because a compiler blessed over an undefined AST fails much later and says far less about why.
+
+Once built, a compiler can be asked for the provider it emits for.
 
 ```perl
-use Genesis::CI;
+my $provider = Genesis::CI::Provider->new(type => 'concourse', %block);
+my $compiler = $provider->compiler(ast => $ast, top => $top);
 
-# Factory returns the appropriate provider
-my $ci = Genesis::CI->new(
-    type => 'concourse',      # or 'github-actions'
-    file => 'ci.yml',
-    top  => $top_obj,
-);
+$compiler->provider;                  # the provider above
+$compiler->provider_option('team');   # 'main', from the fragment's default
+$compiler->output_files;              # { 'pipeline.yml' => '...' }
 ```
 
-**No branching in user code!** The factory handles instantiation.
+The team default has one home, which is the default the Concourse fragment's schema declares, and `provider_option` is how the compiler reads it. The compiler asks what the repository's block says rather than what the CLI's provider object holds. A key an operator wrote with no value after it is the operator declining to choose rather than choosing nothing, so a bare `team:` still resolves to what the fragment declares.
+
+The base also carries the helpers a provider is likely to want, which are `dump_yaml`, `git_uri`, `secret_ref`, `topological_sort`, and `matches_pattern`.
+
+## How a run reaches all three
+
+`Genesis::CI::Compiler::compile` runs the parse, the validation, the script discovery, the AST build, and the descriptor resolution, and then builds the provider and asks it for its compiler.
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant Factory as Genesis::CI
-    participant Concourse as Genesis::CI::Concourse
-    participant GHA as Genesis::CI::GithubActions
-    
-    User->>Factory: new(type: 'concourse', ...)
-    Factory->>Factory: require Genesis::CI::Concourse
-    Factory->>Concourse: init(...)
-    Concourse-->>Factory: instance
-    Factory-->>User: Concourse instance
-    
-    User->>Factory: new(type: 'github-actions', ...)
-    Factory->>Factory: require Genesis::CI::GithubActions
-    Factory->>GHA: init(...)
-    GHA-->>Factory: instance
-    Factory-->>User: GithubActions instance
-    
-    Note over Factory: Factory handles instantiation<br/>No branching in user code!
+    participant Cmd as Genesis::Commands::Pipelines
+    participant Comp as Genesis::CI::Compiler
+    participant Prov as Genesis::CI::Provider
+    participant Reg as Genesis::CI::ProviderRegistry
+    participant PC as ProviderCompiler::Concourse
+
+    Cmd->>Comp: compile(provider => 'concourse')
+    Comp->>Comp: parse, validate, discover, build AST, describe
+    Comp->>Prov: new(type => 'concourse', %block)
+    Prov->>Reg: provider_class('concourse')
+    Reg-->>Prov: Genesis::CI::Provider::Concourse
+    Comp->>Prov: compiler(ast => $ast, required => 1)
+    Prov->>Reg: compiler_class('concourse')
+    Reg-->>Prov: ProviderCompiler::Concourse
+    Prov->>PC: new(provider => $self, ast => $ast)
+    PC-->>Comp: compiler
+    Comp->>PC: generate_from_ast($ast)
+    PC-->>Comp: pipeline YAML
+    Comp-->>Cmd: ast, output, provider, compiler, parsed
 ```
 
-#### 2. Provider Independence
+The type the caller asked to compile for wins over the type the block declares, because the caller is the one that named it and a block that disagrees would otherwise pick the class silently.
 
-Each provider is **completely self-contained**:
-
-##### Concourse Provider
-```perl
-package Genesis::CI::Concourse;
-use parent 'Genesis::CI';
-
-sub init {
-    # Concourse-specific initialization
-}
-
-sub parse {
-    # Delegates to Legacy for now
-    Genesis::CI::Legacy::parse(...)
-}
-
-sub generate {
-    # Generates Concourse YAML
-    Genesis::CI::Legacy::generate_pipeline_concourse_yaml(...)
-}
-
-sub deploy {
-    # Uses fly CLI to upload pipeline
-    # fly -t <target> set-pipeline ...
-}
-```
-
-##### GitHub Actions Provider
-```perl
-package Genesis::CI::GithubActions;
-use parent 'Genesis::CI';
-
-sub init {
-    # GitHub Actions-specific initialization
-}
-
-sub parse {
-    # Parses ci.yml for GitHub Actions
-    # Validates GitHub-specific requirements
-}
-
-sub generate {
-    # Generates .github/workflows/*.yml
-    # Uses GitHub Actions syntax (on:, jobs:, steps:)
-}
-
-sub deploy {
-    # Writes workflow file to .github/workflows/
-    # (No CLI upload needed for GitHub Actions)
-}
-```
-
-**Key Point**: These two providers **share no code**. Each owns its entire implementation.
-
-### Usage Examples
-
-#### Legacy Mode (Backward Compatible)
-```bash
-# Uses Genesis::CI::Legacy directly
-genesis repipe
-genesis repipe --config ci.yml --target prod
-```
-
-#### New Concourse Provider
-```bash
-# Uses Genesis::CI::Concourse (delegates to Legacy internally)
-genesis repipe --platform concourse
-```
-
-#### GitHub Actions Provider
-```bash
-# Uses Genesis::CI::GithubActions
-genesis repipe --platform github-actions
-
-# Generates .github/workflows/<pipeline-name>.yml
-```
-
-### Command Integration
-
-`Genesis::Commands::Pipelines` routes to the appropriate provider:
+Both halves come back in the result, so a caller that wants an emitted artefact reads `compiler` and a caller that wants to know whether the toolchain is there reads `provider`.
 
 ```perl
-sub repipe {
-    my $platform = get_options->{platform} || 'legacy';
-    
-    if ($platform eq 'legacy') {
-        # Use Legacy directly (backward compatibility)
-        Genesis::CI::Legacy::parse(...);
-        Genesis::CI::Legacy::generate_pipeline_concourse_yaml(...);
-    } else {
-        # Use trait-based system
-        my $ci = Genesis::CI->new(type => $platform, ...);
-        $ci->parse();
-        $ci->deploy(...);
-    }
-}
+my $result   = Genesis::CI::Compiler->new(top => $top)->compile(provider => 'concourse');
+my $provider = $result->{provider};
+my $compiler = $result->{compiler};
+
+$provider->check_prereqs or exit 86;
+$compiler->deploy(%deploy_opts);
 ```
 
----
+## Adding a provider
 
-## Comparison
+A new platform takes one class on each side and one registry entry.
 
-| Aspect | Legacy System | New Trait System |
-|--------|---------------|------------------|
-| **Platforms** | Concourse only | Concourse, GitHub Actions, (extensible) |
-| **Architecture** | Monolithic | Trait-based with factory |
-| **Code Sharing** | N/A (single platform) | None (each provider self-contained) |
-| **Extensibility** | Fork/duplicate code | Implement trait interface |
-| **Testability** | Difficult (large monolith) | Easy (isolated providers) |
-| **Lines of Code** | ~1600 in one file | ~200 (factory) + ~200-300 per provider |
-| **Branching Logic** | N/A | **None** (polymorphism via traits) |
-| **Backward Compat** | Default | Maintained via `--platform legacy` |
-
----
-
-## Benefits of the New System
-
-### 1. **Separation of Concerns**
-Each provider handles only its platform's logic. No Concourse code in GitHub Actions provider, and vice versa.
-
-### 2. **No Branching**
-```perl
-# BAD (old shared abstraction approach with branching)
-sub generate_git_resource {
-    if ($platform eq 'concourse') {
-        return concourse_git_resource();
-    } elsif ($platform eq 'github-actions') {
-        return github_actions_checkout();
-    }
-}
-
-# GOOD (trait pattern - each provider implements independently)
-# Genesis::CI::Concourse
-sub generate { ... generates Concourse YAML ... }
-
-# Genesis::CI::GithubActions  
-sub generate { ... generates GitHub Actions YAML ... }
-```
-
-### 3. **Easy to Extend**
-Adding a new CI platform (e.g., GitLab CI, Jenkins):
+First, write the provider class at the path its package name derives, and give it the two declarations the contract above names.
 
 ```perl
-package Genesis::CI::GitlabCI;
-use parent 'Genesis::CI';
+package Genesis::CI::Provider::MyPlatform;
+use parent 'Genesis::CI::Provider';
 
-sub init { ... }
-sub parse { ... }
-sub generate { ... }      # Generate .gitlab-ci.yml
-sub deploy { ... }        # Push to GitLab
-sub platform_name { "GitLab CI" }
-sub file_extension { ".yml" }
+sub provider_options_schema { ... }
+sub capabilities            { ... }
+sub validate_config         { ... }
+sub check_prereqs           { ... }
 ```
 
-Register in factory:
-```perl
-# In Genesis::CI::new()
-elsif ($type eq 'gitlab-ci') {
-    require Genesis::CI::GitlabCI;
-    return Genesis::CI::GitlabCI->init(%opts);
-}
-```
-
-```mermaid
-graph TB
-    A[ci.yml] --> B{Genesis::CI Factory}
-    
-    B -->|type: concourse| C[Concourse Provider]
-    B -->|type: github-actions| D[GitHub Actions Provider]
-    B -->|type: gitlab-ci| E[GitLab CI Provider]
-    B -->|type: jenkins| F[Jenkins Provider]
-    B -->|type: custom| G[Custom Provider]
-    
-    C --> C1[parse<br/>generate<br/>deploy]
-    D --> D1[parse<br/>generate<br/>deploy]
-    E --> E1[parse<br/>generate<br/>deploy]
-    F --> F1[parse<br/>generate<br/>deploy]
-    G --> G1[parse<br/>generate<br/>deploy]
-    
-    C1 --> H1[fly CLI]
-    D1 --> H2[.github/workflows/]
-    E1 --> H3[.gitlab-ci.yml]
-    F1 --> H4[Jenkinsfile]
-    G1 --> H5[Custom Output]
-    
-    style B fill:#181825,stroke:#fff,stroke-width:4px
-    style C fill:#14532d,stroke:#fff,stroke-width:2px
-    style D fill:#164e63,stroke:#fff,stroke-width:2px
-    style E fill:#1e293b,stroke:#fff,stroke-width:2px,stroke-dasharray: 5 5
-    style F fill:#3f2e13,stroke:#fff,stroke-width:2px,stroke-dasharray: 5 5
-    style G fill:#eab308,stroke:#fff,stroke-width:2px,stroke-dasharray: 5 5
-```
-
-### 4. **Testable**
-Each provider can be tested independently:
-```perl
-# Test Concourse provider
-my $ci = Genesis::CI->new(type => 'concourse', ...);
-$ci->parse();
-my $yaml = $ci->generate();
-# Assert YAML contains expected Concourse resources
-
-# Test GitHub Actions provider  
-my $gh = Genesis::CI->new(type => 'github-actions', ...);
-$gh->parse();
-my $workflow = $gh->generate();
-# Assert workflow contains expected GHA jobs
-```
-
-### 5. **Follows Genesis Patterns**
-Matches existing Genesis architecture:
-- `Genesis::Hook` → `Genesis::Hook::{Blueprint,Check,PostDeploy}`
-- `Genesis::Secret` → `Genesis::Secret::{SSH,RSA,X509}`
-- `Genesis::Kit::Provider` → `Genesis::Kit::Provider::{Github,GenesisCommunity}`
-- `Genesis::CI` → `Genesis::CI::{Concourse,GithubActions}`
-
-```mermaid
-graph TD
-    subgraph "Genesis Trait Pattern (Established)"
-        A1[Genesis::Hook] --> A2[Blueprint]
-        A1 --> A3[Check]
-        A1 --> A4[PostDeploy]
-        
-        B1[Genesis::Secret] --> B2[SSH]
-        B1 --> B3[RSA]
-        B1 --> B4[X509]
-        
-        C1[Genesis::Kit::Provider] --> C2[Github]
-        C1 --> C3[GenesisCommunity]
-    end
-    
-    subgraph "New CI System (Same Pattern)"
-        D1[Genesis::CI] --> D2[Concourse]
-        D1 --> D3[GithubActions]
-        D1 --> D4[Future Providers...]
-    end
-    
-    style A1 fill:#9cf
-    style B1 fill:#9cf
-    style C1 fill:#9cf
-    style D1 fill:#f9f
-    style D2 fill:#9f9
-    style D3 fill:#9f9
-    style D4 fill:#9f9,stroke-dasharray: 5 5
-```
-
----
-
-## Migration Path
-
-```mermaid
-timeline
-    title Genesis CI Evolution
-    
-    Phase 1 (Current) : Backward Compatibility ✅
-                      : Legacy system unchanged
-                      : Default: genesis repipe uses Legacy
-                      : No breaking changes
-    
-    Phase 2 (Current) : New Providers Opt-In ✅
-                      : --platform concourse available
-                      : --platform github-actions available
-                      : Users can test new system
-    
-    Phase 3 (Future) : Refactor Concourse Provider
-                     : Extract Legacy into Concourse class
-                     : Remove delegation
-                     : Full feature parity
-    
-    Phase 4 (Future) : Deprecate Legacy
-                     : Show deprecation warnings
-                     : Default to --platform concourse
-                     : Remove Legacy.pm eventually
-```
-
-### Phase 1: **Backward Compatibility** ✅
-- Legacy system remains unchanged
-- Default behavior unchanged (`genesis repipe` uses Legacy)
-- No breaking changes
-
-### Phase 2: **New Providers Opt-In** ✅
-```bash
-# Users can try new providers
-genesis repipe --platform concourse     # Uses new trait system
-genesis repipe --platform github-actions
-```
-
-### Phase 3: **Refactor Concourse Provider** (Future)
-Currently, `Genesis::CI::Concourse` delegates to `Legacy`:
-```perl
-sub generate {
-    return Genesis::CI::Legacy::generate_pipeline_concourse_yaml(...);
-}
-```
-
-Future: Extract Legacy logic into Concourse provider directly:
-```perl
-sub generate {
-    # Self-contained Concourse YAML generation
-    # No dependency on Legacy
-}
-```
-
-### Phase 4: **Deprecate Legacy** (Future)
-Once Concourse provider is fully refactored:
-```bash
-# Legacy mode shows deprecation warning
-genesis repipe  # WARN: Using legacy mode, consider --platform concourse
-
-# Eventually becomes alias
-genesis repipe  # Automatically uses --platform concourse
-```
-
----
-
-## Configuration Format
-
-The `ci.yml` format remains largely compatible, with optional platform-specific sections:
-
-```yaml
-pipeline:
-  name: my-deployment-pipeline
-  platform: concourse  # Optional: concourse | github-actions (default: concourse)
-  
-  # Platform-agnostic configuration
-  vault:
-    url: https://vault.example.com
-    namespace: deployments
-  
-  git:
-    owner: my-org
-    repo: my-deployments
-    branch: main
-    private_key: ((git-private-key))
-  
-  slack:
-    webhook: ((slack-webhook))
-    channel: "#deployments"
-  
-  boshes:
-    dev:
-      url: https://bosh-dev.example.com
-      username: admin
-      password: ((bosh-password))
-      alias: dev
-  
-  # Platform-specific overrides (optional)
-  concourse:
-    public: true
-    task:
-      image: starkandwayne/genesis
-      version: latest
-  
-  github-actions:
-    runs-on: ubuntu-latest
-    concurrency:
-      group: deployments
-      cancel-in-progress: false
-```
-
----
-
-## Developer Guide
-
-### Adding a New CI Platform
-
-1. **Create Provider Class**
-```perl
-package Genesis::CI::MyPlatform;
-use v5.20;
-use warnings;
-use parent 'Genesis::CI';
-
-sub init {
-    my ($class, %opts) = @_;
-    return bless({ file => $opts{file}, top => $opts{top} }, $class);
-}
-
-sub parse {
-    my ($self) = @_;
-    # Parse ci.yml for your platform
-    # Validate platform-specific requirements
-}
-
-sub generate {
-    my ($self) = @_;
-    # Generate platform-specific config (YAML, JSON, etc.)
-}
-
-sub deploy {
-    my ($self, %opts) = @_;
-    # Upload/activate pipeline on platform
-}
-
-sub platform_name { "My Platform" }
-sub file_extension { ".yml" }
-
-1;
-```
-
-2. **Register in Factory**
-```perl
-# In lib/Genesis/CI.pm
-sub new {
-    # ...
-    elsif ($type eq 'my-platform') {
-        require Genesis::CI::MyPlatform;
-        return Genesis::CI::MyPlatform->init(%opts);
-    }
-}
-```
-
-3. **Test**
-```perl
-my $ci = Genesis::CI->new(type => 'my-platform', file => 'ci.yml', top => $top);
-$ci->parse();
-my $config = $ci->generate();
-# Assert config is valid for your platform
-```
-
-4. **Use**
-```bash
-genesis repipe --platform my-platform
-```
-
-### Testing Providers
+Second, write the compiling class, again at the path its package name derives, and override the four methods the compiler contract names.
 
 ```perl
-# Test Concourse provider matches Legacy output
-my $legacy_yaml = Genesis::CI::Legacy::generate_pipeline_concourse_yaml(...);
-my $ci = Genesis::CI->new(type => 'concourse', ...);
-$ci->parse();
-my $new_yaml = $ci->generate();
-is($new_yaml, $legacy_yaml, "Concourse provider matches Legacy");
+package Genesis::CI::ProviderCompiler::MyPlatform;
+use parent 'Genesis::CI::ProviderCompiler';
 
-# Test GitHub Actions generates valid workflow
-my $gh = Genesis::CI->new(type => 'github-actions', ...);
-$gh->parse();
-my $workflow = load_yaml($gh->generate());
-ok($workflow->{jobs}, "Workflow has jobs");
-ok($workflow->{on}, "Workflow has triggers");
+sub platform_name     { "My Platform" }
+sub provider_type     { 'my-platform' }
+sub generate_from_ast { ... }
+sub output_files      { { 'pipeline.yml' => 'My Platform pipeline' } }
 ```
+
+Third, add one entry to `%_providers` in `Genesis::CI::ProviderRegistry`.
+
+```perl
+'my-platform' => {
+    class     => 'Genesis::CI::ProviderCompiler::MyPlatform',
+    cli_class => 'Genesis::CI::Provider::MyPlatform',
+},
+```
+
+There is no second place to register it. The schema's enum, the class lookups, and the valid-types messages all read this one map, so an entry added here is an entry every reader sees.
+
+A provider that ships outside the tree calls `register_provider` at run time instead, which takes the same shape and refuses four things. A missing name would register the entry where nothing could look it up. A name already registered is refused rather than replaced, since replacing a real entry would leave the enum saying one thing and the lookup doing another. An entry with no `cli_class` is refused, because every type has a CLI class and a resolver that finds none behaves like `manual` instead of saying so. And a file path that disagrees with the class beside it is refused rather than honoured.
+
+## The legacy generator
+
+`Genesis::CI::Legacy` is the original Concourse generator, and it is still in the tree and still reached. It parses a `ci.yml` file, evaluates spruce operators, and builds Concourse pipeline YAML by string concatenation.
+
+The Concourse compiling class bridges to it rather than duplicating it. When the ASTBuilder reads a legacy `ci.yml`, it keeps the raw pipeline data in the AST's provider configuration, and `generate_from_ast` reconstructs the structure the legacy generator expects and delegates. A legacy configuration therefore produces the same output whichever route it takes. An AST that carries no legacy marker is serialized natively from the generic pipeline the descriptor resolved.
+
+See [the legacy bridge](../../../../docs/ci/dev/legacy-bridge.md) for how the reconstruction works in detail.
+
+## A known defect
+
+Four methods on the Concourse compiling class refuse unless `parse` has populated the object's `config` key, and `parse` is the route a compiler built from a configuration file takes. A compiler built on the compile path never has that key, because the constructor blesses only the provider, the AST, the `Genesis::Top` object, and the provider options.
+
+The methods are `generate`, `deploy`, `graph_md`, and `describe`, with `generate_description` reaching the last of them through an alias. So `genesis pipeline-apply`, `genesis pipeline-graph`, and `genesis pipeline-describe` all reach a "Must call parse() before ..." refusal under the Concourse provider once the compile has finished. The defect predates the composition described above and is not caused by it. It wants a ticket of its own, and nothing here cures it.
+
+Reading `provider_option`, `output_files`, or the `output` hash the compile returns works from a compile-built compiler, because none of those reads the `config` key.

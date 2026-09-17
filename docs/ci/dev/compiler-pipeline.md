@@ -15,7 +15,7 @@ flowchart LR
     C --> D[ScriptDiscovery]
     D --> E[ASTBuilder]
     E --> F[PipelineDescriptor]
-    F --> G[Provider]
+    F --> G[Provider's Compiler]
     G --> H[Platform YAML]
 
     style B fill:#e1f5fe
@@ -297,23 +297,25 @@ custom or default pipeline groups, and graphviz/description output.
 See [AST and PipelineDescriptor](ast-and-descriptor.md) for detailed
 coverage of the two-layer design.
 
-## Stage 6: Provider
+## Stage 6: The Provider's Compiler
 
-**Module:** Provider-specific (e.g., `Genesis::CI::Concourse`)
+**Module:** Platform-specific (for example
+`Genesis::CI::ProviderCompiler::Concourse`)
 
 **Input:** AST with populated generic pipeline
 
 **Output:** Platform-specific YAML string(s)
 
-The provider is the final stage. It takes the fully-resolved generic
-pipeline from the AST and serializes it to the platform's native format.
-For Concourse, this means emitting YAML with `groups`, `resources`,
-`resource_types`, and `jobs` at the top level. For GitHub Actions, this
-means emitting workflow YAML with `name`, `on`, and `jobs`.
+The compiler is the final stage. The orchestrator builds the provider the
+run was asked for, asks that provider for its compiler, and hands the
+compiler the AST. The compiler takes the fully resolved generic pipeline and
+serializes it to the platform's native format. For Concourse, that means
+emitting YAML with `groups`, `resources`, `resource_types`, and `jobs` at
+the top level.
 
-Providers are intentionally thin. All Genesis-specific logic lives in
-PipelineDescriptor, so providers only need to serialize the generic
-pipeline to their platform's format.
+A compiler is intentionally thin. All Genesis-specific logic lives in
+PipelineDescriptor, so a compiler only needs to serialize the generic
+pipeline to its platform's format.
 
 The `Genesis::CI::Compiler` orchestrator calls `compile()` which runs
 all six stages and returns:
@@ -323,9 +325,12 @@ all six stages and returns:
   ast      => $ast_object,
   output   => { 'pipeline.yml' => $yaml_string },
   provider => $provider_object,
+  compiler => $compiler_object,
   parsed   => $parsed_config,
 }
 ```
 
-The command layer then decides what to do with the output: deploy it via
-`fly`, write it to a directory, or print it to stdout.
+Both halves come back, so the command layer can ask the provider whether the
+toolchain is present and ask the compiler to emit. It then decides what to do
+with the output, which is to deploy it through `fly`, write it to a
+directory, or print it to stdout.

@@ -5,42 +5,57 @@ purpose, its public API, and its relationships with other modules. Modules
 are listed in dependency order: foundational modules first, then the
 modules that depend on them.
 
-## Genesis::CI
+## Genesis::CI::ProviderRegistry
 
-**File:** `lib/Genesis/CI.pm`
+**File:** `lib/Genesis/CI/ProviderRegistry.pm`
 
-**Purpose:** Factory class and trait interface definition. Serves as the
-central dispatch point for constructing CI providers and as the abstract
-base class defining the trait interface that all providers must implement.
+**Purpose:** The one map of provider types to classes. It sits in neither
+family because both consult it. The provider side asks which class answers
+for a type, and the compiler side asks which class emits for one. An entry
+names its classes and nothing else, because every package under `lib`
+derives its own file path, so a path written beside a class would be a
+second spelling of the same fact.
 
 **Public API:**
 
-`Genesis::CI->new(type => $type, %opts)` is the factory method. It
-resolves `$type` to a provider class, loads the provider module with
-`require`, and calls `$provider_class->init(%opts)`. Valid types are
-`concourse` and `github-actions`. Returns a provider instance.
+`known_providers()` — every registered type, sorted. The configuration
+schema's enum, every class lookup, and every valid-types message read this,
+so a provider cannot be spelled one way in the schema and another in the
+code.
 
-`Genesis::CI->compile(%opts)` is a convenience method that creates a
-`Genesis::CI::Compiler` and runs `compile()`. Accepts the same options
-as `Compiler->new()` and `Compiler->compile()`. Returns the compiler
-result hashref.
+`provider_info($type)` — one entry as a shallow copy, or undef. `cli_class`
+and `cli_file` name the class the CLI builds, which every type has. `class`
+and `file` name the compiling class, which the manual and GitHub Actions
+providers do not have. Each path is worked out from the class beside it
+rather than read from the entry.
 
-**Trait Interface (abstract, must be overridden):**
+`automated_providers()` — every type that is not `manual`, so no caller
+writes that exclusion by hand.
 
-`init(%opts)` — class method, constructs provider instance.
-`parse()` — loads and validates configuration.
-`generate()` — produces platform-specific output.
-`deploy(%opts)` — uploads/writes output to the CI platform.
-`platform_name()` — returns human-readable platform name string.
-`file_extension()` — returns file extension string.
-`graphviz()` — optional, generates DOT source.
-`describe()` — optional, generates human-readable description.
+`register_provider($type, $info)` — adds an entry at run time, for a test
+that stands a class up and for a provider shipping outside the tree. Refuses
+a missing name, a name already registered, an entry with no `cli_class`, and
+a file path that disagrees with the class beside it.
+
+`provider_class($type)` — the CLI class for a type, loaded.
+
+`compiler_class($type)` — the compiling class for a type, loaded. Refuses a
+type that has no compiling class, because emitting a pipeline and validating
+a block are different questions and a provider may answer the second while
+having nothing to answer the first with.
+
+Both resolvers exit `CONFIG` on a type the registry does not hold, since a
+repository whose configured provider Genesis cannot compile for is a
+repository the operator can put right.
 
 **Internal:**
 
-`_resolve_provider_class($type)` maps a type string to a hashref with
-`class` and `file` keys. The class is the Perl package name and the file
-is the path for `require`.
+`_path_of($package)` — the file path a package name derives. This is the one
+place that turns a class into something `require` can take.
+
+`_unknown($type)` — the refusal for a type the registry does not hold.
+
+**Dependencies:** `Genesis`, `Genesis::Exit`.
 
 ---
 
@@ -89,17 +104,24 @@ caller that names neither `ci_dir` nor `file` is asking for the
 `pipeline:` section of `.genesis/config`, which the parser reads through
 that object.
 
-`$compiler->compile(provider => $type)` — runs all stages. `$type` is
-`concourse` or `github-actions`. Returns:
+`$compiler->compile(provider => $type)` — runs all stages. `$type` is any
+registered type that has a compiling class. The type the caller names wins
+over the type the block declares, because the caller is the one that named it
+and a block that disagrees would otherwise pick the class silently. Returns:
 
 ```perl
 {
     ast      => $ast_object,
     output   => { filename => $content, ... },
     provider => $provider_object,
+    compiler => $compiler_object,
     parsed   => $parsed_hashref,
 }
 ```
+
+Both halves come back, so a caller that wants an emitted artefact reads
+`compiler` and a caller that wants to know whether the toolchain is there
+reads `provider`.
 
 **Class Methods:**
 
@@ -122,7 +144,14 @@ configuration validation.
 
 **Internal:**
 
-`_resolve_provider_class($type)` — identical to `Genesis::CI`'s version.
+`_apply_provider_overrides($output, $type)` — merges the override files over
+the emitted output.
+
+`_report_unread_overrides(...)` — names an override file the layout is
+passing over.
+
+There is no resolver here. `compile()` builds a `Genesis::CI::Provider` and
+asks it for its compiler, and the class lookup behind both is the registry's.
 
 ---
 
@@ -413,21 +442,149 @@ workflow type.
 
 ---
 
-## Genesis::CI::Compiler::PipelineProvider
+## Genesis::CI::Provider
 
-**File:** `lib/Genesis/CI/Compiler/PipelineProvider.pm`
+**File:** `lib/Genesis/CI/Provider.pm`
 
-**Purpose:** Abstract base class for CI platform providers. Defines the
-compiler interface and provides shared helper methods.
+**Purpose:** Abstract base class for CI providers. A provider answers for the
+configuration block an operator wrote, for what the platform is able to do,
+and for whether the toolchain is present. It also hands out the compiler that
+emits its artefact.
+
+**Class Methods:**
+
+`new(type => $type, %config)` — builds the provider class the registry names
+for `$type`, defaulting to `manual`. It builds and nothing more, because the
+rules for a block are asked of the class against the configuration the block
+sits in.
+
+`init(%opts)` — the same, from parsed CLI options rather than a config block.
+
+`provider_class($type)` — a one-line delegation to the registry.
+
+`parse_opts($args, $ci_opts)` — two-pass extraction of `--ci-provider` and
+then the provider-specific flags.
+
+**Abstract Methods (must override):**
+
+`provider_options_schema()` — the keys this provider takes under
+`pipeline.provider`, in the shape Top's repository schema uses. A key's
+default is declared here and nowhere else.
+
+`capabilities()` — what this provider is able to do, as six booleans.
+
+`config()` — the hash written back to the `pipeline.provider` section.
+
+`interactive_wizard($top)` — prompts an operator through the block.
+
+**Instance Methods:**
+
+`type()` — the registered type this provider was built under, set where the
+type is known rather than derived by indexing a hash.
+
+`compiler(%opts)` — the compiler that emits this provider's artefact, built
+with the provider held inside it. Takes `ast`, `top`, `provider_opts`, and
+`required`. Answers undef for a provider with nothing to emit unless
+`required` is passed, in which case the registry's refusal comes back
+instead.
+
+`check_prereqs()` — whether the toolchain is present. The base answers true,
+which is the honest answer for a provider that needs no tool.
+
+`validate_config($config, $top)` — the provider's own rules for its block, on
+top of the generic pass the declaration gives it.
+
+`declared_capabilities()` — one provider class's declaration, checked against
+the six names the base holds.
+
+`capability_gates()` — which configuration key each capability gates.
+
+`section_enabled()`, `label()` — whether the section is switched on, and the
+human-readable name.
+
+---
+
+## Genesis::CI::Provider::Concourse
+
+**File:** `lib/Genesis/CI/Provider/Concourse.pm`
+
+**Purpose:** The Concourse provider. Declares the `pipeline.provider` keys
+Concourse takes, validates them, and checks for the `fly` CLI.
+
+**Inherits:** `Genesis::CI::Provider`
+
+**Notable Methods:**
+
+`provider_options_schema()` — declares `target`, `url`, `team`, `insecure`,
+`min_fly_version`, and the rest. The one `DEFAULT_TEAM` lives here, as the
+`team` key's declared default, and the compiler reads it back through
+`provider_option('team')`.
+
+`check_prereqs()` — looks for `fly` on the `PATH` and, when the repository
+declares `min_fly_version`, enforces that floor. A `fly --version` that does
+not yield three dotted integers is refused by name, because a floor that
+cannot be compared against is a floor that is not enforced. A leading `v` on
+the declared floor is stripped before the comparison.
+
+`validate_config($config, $top)` — requires a `target` or a `url`, and
+requires that a `url` is one.
+
+`team()` — the team this provider object holds, for the CLI's own use.
+
+`interactive_wizard($top)` — prompts for target, URL, team, and the rest.
+
+**Internal:**
+
+`_load_fly_targets()`, `_derive_target_name()`, `_token_expired()` — read the
+operator's `fly` targets file.
+
+---
+
+## Genesis::CI::ProviderCompiler
+
+**File:** `lib/Genesis/CI/ProviderCompiler.pm`
+
+**Purpose:** Abstract base class for the classes that emit a platform's
+artefact. A compiler holds the provider it emits for rather than a copy of
+that provider's settings, so a change on the provider is visible here with
+nothing rebuilt.
+
+**Constructor:**
+
+`new(provider => $p, ast => $ast, top => $top, provider_opts => $o)` — a
+caller reaches this through `$provider->compiler(ast => $ast)` rather than
+calling it directly. Refuses a direct instantiation of the base, and refuses
+a call that names no AST, because a compiler blessed over an undefined AST
+fails much later and says far less about why.
 
 **Abstract Methods (must override):**
 
 `platform_name()` — return platform name string.
+`provider_type()` — return the canonical type string.
 `generate_from_ast($ast)` — generate platform-specific output.
 `output_files()` — describe generated files.
 
-**Helper Methods:**
+**Provider Options:**
 
+`provider_option($key)` — one option, with the fragment's declared default
+behind it. A key written with no value is the operator declining to choose,
+so it still resolves to the default.
+
+`provider_options_defaults()` — the defaults, read off the held provider's
+schema rather than listed again beside it.
+
+`provider_config()` — the stored options, excluding anything still at its
+default.
+
+`cli_opts()`, `cli_opts_help()`, `parse_cli_opts(...)`, `cli_opt_keys($type)`,
+`normalize_provider_opts($opts)`, and `cli_key_to_config_key($key)` — the
+deploy-time flag plumbing.
+
+`describe_provider()` — a structured self-description for display.
+
+**Accessors and Helpers:**
+
+`provider()` — the provider this compiler was built by.
 `ast()` — returns stored AST.
 `top()` — returns stored `Genesis::Top`.
 `dump_yaml($data)` — serializes Perl data to YAML string.
@@ -436,91 +593,65 @@ compiler interface and provides shared helper methods.
 `topological_sort($graph)` — topological sort on workflow graph.
 `matches_pattern($name, $pattern)` — glob pattern matching.
 
+Nothing here answers for a toolchain. That question goes to the provider.
+
 ---
 
-## Genesis::CI::Concourse
+## Genesis::CI::ProviderCompiler::Concourse
 
-**File:** `lib/Genesis/CI/Compiler/Providers/Concourse.pm`
+**File:** `lib/Genesis/CI/ProviderCompiler/Concourse.pm`
 
-**Purpose:** Concourse CI provider. Implements both the trait interface
-and the compiler interface. Handles the legacy bridge for backward
-compatibility.
+**Purpose:** The Concourse compiler. Emits Concourse pipeline YAML from an
+AST, and carries the legacy bridge for backward compatibility.
 
-**Inherits:** `Genesis::CI`, `Genesis::CI::Compiler::PipelineProvider`
+**Inherits:** `Genesis::CI::ProviderCompiler`
 
 **Compiler Interface:**
 
-`generate_from_ast($ast)` — checks for legacy marker and delegates to
+`generate_from_ast($ast)` — checks for the legacy marker and delegates to
 either `_generate_from_legacy_ast()` or `_generate_native()`.
 
 `output_files()` — returns `{ 'pipeline.yml' => '...' }`.
 
-**Trait Interface:**
+`platform_name()`, `provider_type()`, and `file_extension()` — the platform's
+name, the string `concourse`, and `.yml`.
 
-`init(%opts)` — constructs instance with file, top, layout, platform.
+**Built From a Configuration File:**
 
-`parse()` — routes to Legacy::parse (for platform=legacy) or runs
-compiler pipeline stages.
+`init(%opts)` — builds a compiler from a configuration file rather than from
+an AST, which is the only route that populates the `config` key.
 
-`generate()` — routes to Legacy generation or `generate_from_ast()`.
+`parse()` — loads and validates the Concourse configuration, and is what sets
+`config`.
 
-`deploy(%opts)` — uploads pipeline via fly CLI. Supports dry-run, yes,
-paused options. Handles pause/set-pipeline/unpause/expose cycle.
+`generate()`, `deploy(%opts)`, `graph_md()`, `describe()`, and
+`generate_description()` all refuse unless `parse()` has run. See the known
+defect below.
 
-**Concourse-Specific:**
-
-`graphviz()` — DOT source via Legacy or AST.
-
-`describe()` — human description via Legacy or AST.
+`deploy(%opts)` uploads the pipeline through the `fly` CLI, supports dry-run,
+yes, and paused options, and handles the pause, set-pipeline, unpause, and
+expose cycle.
 
 **Internal:**
 
-`_generate_from_legacy_ast($ast)` — reconstructs `$P` hashref from AST
-legacy data and delegates to `Legacy::generate_pipeline_concourse_yaml`.
+`_generate_from_legacy_ast($ast)` — reconstructs the `$P` hashref from the
+AST's legacy data and delegates to
+`Legacy::generate_pipeline_concourse_yaml`.
 
-`_generate_native($ast)` — serializes generic pipeline to YAML.
+`_generate_native($ast)` — serializes the generic pipeline to YAML.
 
 `_ensure_pipeline_resolved()` — runs PipelineDescriptor if needed.
 
----
+**A known defect:**
 
-## Genesis::CI::GithubActions
-
-**File:** `lib/Genesis/CI/Compiler/Providers/GithubActions.pm`
-
-**Purpose:** GitHub Actions provider. Generates workflow YAML for GitHub's
-CI platform.
-
-**Inherits:** `Genesis::CI`, `Genesis::CI::Compiler::PipelineProvider`
-
-**Dependencies:** `YAML::PP` (external dependency, unlike Concourse which
-uses the built-in serializer).
-
-**Compiler Interface:**
-
-`generate_from_ast($ast)` — reads source representation directly (not
-the generic pipeline) and builds GitHub Actions workflow structure with
-`on` triggers, `jobs` with `steps`, and `needs` dependencies.
-
-`output_files()` — returns `{ "$name.yml" => '...' }`.
-
-**Trait Interface:**
-
-`init(%opts)`, `parse()`, `generate()`, `deploy(%opts)` — self-contained
-implementations that do not use Legacy.
-
-**Internal:**
-
-`_normalize_git_config()` — sets defaults and parses owner/repo from URI.
-
-`_normalize_vault_config()` — placeholder for vault config normalization.
-
-`_determine_environments()` — extracts sorted environment names from
-boshes config.
-
-`_generate_triggers()` — builds workflow `on` section.
-
-`_generate_jobs()` — builds job definitions with `_generate_steps_for_env`.
+The five methods above guard on the `config` key, and a compiler built on the
+compile path never has it, because the constructor blesses only the provider,
+the AST, the `Genesis::Top` object, and the provider options. So
+`genesis pipeline-apply`, `genesis pipeline-graph`, and
+`genesis pipeline-describe` all reach a "Must call parse() before ..."
+refusal under the Concourse provider once the compile has finished. Reading
+`provider_option`, `output_files`, or the `output` hash the compile returns
+works, because none of those reads that key.
 
 ---
 
