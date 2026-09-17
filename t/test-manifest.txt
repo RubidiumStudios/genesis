@@ -372,6 +372,7 @@ integration-tests/genesis_pipelines-describe_source_control.t  # the derived sou
 integration-tests/branch_class-pre_deploy_refusal.t           # a pre-deploy command refuses off a deployment, pull request, or artifacts branch
 integration-tests/branch_class-deployed_state.t               # a deployed-state command reads the environment's own branch
 integration-tests/genesis_new-no_session.t                    # genesis new opens no session, takes no switch lock, and restores no branch
+integration-tests/genesis_new-preflight.t                     # genesis new and a branch session run one pre-flight, so a broken repository reads the same way for both
 integration-tests/genesis_new-refresh.t                       # genesis new refreshes control alone and touches no deployment branch
 integration-tests/genesis_new-index_check.t                    # genesis new refuses a staged index, ignores an unstaged edit, and skips both under --no-commit
 integration-tests/branch_class-feature_branch.t               # a feature branch is permitted only when it descends from control and is named for no environment
