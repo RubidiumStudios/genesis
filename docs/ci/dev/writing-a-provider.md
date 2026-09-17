@@ -1,34 +1,30 @@
 # Writing a Provider
 
-A provider translates the generic pipeline from the AST into
-platform-specific CI/CD configuration. This document explains how to create
-a new provider by walking through the abstract interface, the available
-helpers, and the patterns used by the existing Concourse and GitHub Actions
-providers.
+A provider is the class that answers for one CI platform, and the compiler it hands out is the class that translates the generic pipeline from the AST into that platform's own configuration. This document explains how to write both, by walking through the two contracts, the available helpers, and the patterns the Concourse provider and its compiler follow.
 
-## Provider Base Class
+## The Two Classes
 
-All providers inherit from `Genesis::CI::Compiler::PipelineProvider`, which
-defines the abstract interface and provides shared helper methods. A
-provider must also inherit from `Genesis::CI` to participate in the factory
-system.
+A platform takes one class on each side, and each class inherits from one base.
+
+| Class | Base | What it answers for |
+|-------|------|---------------------|
+| `Genesis::CI::Provider::MyPlatform` | `Genesis::CI::Provider` | The configuration block, the capabilities, and the toolchain |
+| `Genesis::CI::ProviderCompiler::MyPlatform` | `Genesis::CI::ProviderCompiler` | The artefact emitted from an AST |
+
+The provider hands out the compiler and the compiler holds the provider that handed it out. Neither class inherits from the other, and neither one is reached except through `Genesis::CI::ProviderRegistry`.
 
 ```perl
-package Genesis::CI::MyPlatform;
-use parent 'Genesis::CI', 'Genesis::CI::Compiler::PipelineProvider';
+package Genesis::CI::ProviderCompiler::MyPlatform;
+use parent 'Genesis::CI::ProviderCompiler';
 
 use Genesis;
 ```
 
-The dual inheritance gives you two interfaces. The `PipelineProvider` parent
-provides the compiler pipeline interface (what the compiler calls). The
-`Genesis::CI` parent provides the trait interface (what factory-constructed
-instances expose). You need both because the factory system and the
-compiler pipeline are separate entry points.
+Every package under `lib` sits at the path its name derives, so the file above is `lib/Genesis/CI/ProviderCompiler/MyPlatform.pm` and its provider is `lib/Genesis/CI/Provider/MyPlatform.pm`. The registry works the path out from the class name, so there is no path to write down anywhere.
 
-## Required Methods
+## Required Compiler Methods
 
-You must implement three methods from PipelineProvider:
+You must implement four methods from `Genesis::CI::ProviderCompiler`.
 
 ### platform_name
 
@@ -37,6 +33,16 @@ messages and error output.
 
 ```perl
 sub platform_name { return "My Platform" }
+```
+
+### provider_type
+
+Returns the canonical type string, which is the same string the registry
+keys your entry under and the same string an operator writes as
+`pipeline.provider.type`.
+
+```perl
+sub provider_type { 'my-platform' }
 ```
 
 ### generate_from_ast
@@ -68,8 +74,11 @@ sub generate_from_ast {
 }
 ```
 
-If your platform produces multiple files (like GitHub Actions, which
-creates one workflow file per pipeline), return a hashref:
+If your platform produces several files rather than one, return a hashref
+instead, and declare `multi_file_output` as true on the provider. That
+capability gates no key of its own, because the key it would gate is
+declared by the provider that can use it and by nobody else, so a provider
+that cannot simply offers no such key:
 
 ```perl
 return {
@@ -80,7 +89,7 @@ return {
 
 ### output_files
 
-Returns a hashref describing what files your provider generates. The keys
+Returns a hashref describing what files your compiler writes. The keys
 are filenames and the values are human-readable descriptions.
 
 ```perl
@@ -89,114 +98,125 @@ sub output_files {
 }
 ```
 
-## Required Trait Methods
+## Required Provider Methods
 
-You must also implement these methods from the `Genesis::CI` trait interface
-for the factory path:
+The provider class answers for the configuration block and the toolchain. Two of its methods are abstract on the base, so a provider that leaves either one out fails at configuration load rather than at run time.
 
-### init
+### provider_options_schema
 
-Class method that creates a new instance from user-provided options. Called
-by `Genesis::CI->new(type => 'my-platform', ...)`.
+Declares the keys your provider takes under `pipeline.provider`, in the shape
+Top's repository schema uses, so the configuration layer can merge them in
+and validate them for you. A key's `default` is declared here and nowhere
+else, because the compiler reads it back through `provider_option`.
 
 ```perl
-sub init {
-    my ($class, %opts) = @_;
-    return bless({
-        file   => $opts{file},
-        top    => $opts{top},
-        config => undef,
-    }, $class);
+sub provider_options_schema {
+    return {
+        target => {type => 'string', description => 'The platform target'},
+        team   => {type => 'string', default => 'main', description => 'Team name'},
+    };
 }
 ```
 
-### parse, generate, deploy
+### capabilities
 
-Instance methods for the trait interface pipeline. `parse()` loads and
-validates configuration. `generate()` produces output. `deploy()` pushes
-the output to the CI platform.
+Declares what your provider is able to do, as the six booleans the base
+names, so a key whose ability your provider lacks is refused at load rather
+than discovered at run time.
 
 ```perl
-sub parse {
+sub capabilities {
+    return {
+        deployment_locks      => 1,
+        cross_pipeline_events => 1,
+        optional_git_triggers => 1,
+        scheduled_jobs        => 1,
+        per_commit_runs       => 1,
+        multi_file_output     => 0,
+    };
+}
+```
+
+All six names have to be present, and the base checks the declaration against
+its own list, so a name misspelled or left out is caught rather than read as
+a no.
+
+### validate_config
+
+Applies your provider's own rules to the block an operator wrote. The base
+declares the shape and this is where anything the shape cannot express goes.
+
+### check_prereqs
+
+Answers whether the toolchain your provider needs is present, returning true
+when it is and calling `error()` and returning false when it is not. The base
+answers true, which is the honest answer for a provider that needs no tool,
+so override this only when there is a tool to look for.
+
+```perl
+sub check_prereqs {
     my ($self) = @_;
-    # Load config, build AST
-    return $self;
-}
-
-sub generate {
-    my ($self) = @_;
-    # Return platform-specific YAML
-}
-
-sub deploy {
-    my ($self, %opts) = @_;
-    # Upload to CI platform or write files
+    my ($path) = run({stderr => 0}, 'type -p myplatform');
+    chomp($path //= '');
+    return 1 if $path;
+    error("The my-platform provider requires the #C{myplatform} CLI.");
+    return 0;
 }
 ```
 
-### file_extension
+A floor that cannot be compared against is a floor that is not enforced, so
+if you check a version, refuse by name when the tool prints something you
+cannot read rather than carrying on past it.
 
-Returns the file extension for generated configuration.
+## Construction
+
+You do not write a constructor on the compiler side. The base builds every
+compiler, and a caller reaches it through the provider.
 
 ```perl
-sub file_extension { return ".yml" }
+my $provider = Genesis::CI::Provider->new(type => 'my-platform', %block);
+my $compiler = $provider->compiler(ast => $ast, top => $top);
 ```
 
-## Constructor for Compiler Path
-
-The compiler pipeline constructs providers differently than the factory.
-It passes an AST object directly. Your `new()` should handle this:
-
-```perl
-sub new {
-    my ($class, %opts) = @_;
-
-    if ($opts{ast}) {
-        return bless({
-            ast => $opts{ast},
-            top => $opts{top},
-        }, $class);
-    }
-
-    bug("Use Genesis::CI->new(...) for trait construction, ".
-        "or pass ast => \$ast for compiler construction");
-}
-```
+The base blesses the provider, the AST, the `Genesis::Top` object, and the
+provider options, and it refuses a call that names no AST, because a compiler
+blessed over an undefined AST fails much later and says far less about why.
+Your compiler can ask for the provider that built it at any time with
+`$self->provider`.
 
 ## Registering Your Provider
 
-Providers are registered in two places. First, in `Genesis::CI` at
-`_resolve_provider_class()`:
+There is one registry and one entry. Add it to `%_providers` in
+`Genesis::CI::ProviderRegistry`.
 
 ```perl
-my %providers = (
-    'concourse'      => { class => 'Genesis::CI::Concourse',      file => 'Genesis/CI/Compiler/Providers/Concourse.pm' },
-    'github-actions' => { class => 'Genesis::CI::GithubActions',   file => 'Genesis/CI/Compiler/Providers/GithubActions.pm' },
-    'my-platform'    => { class => 'Genesis::CI::MyPlatform',      file => 'Genesis/CI/Compiler/Providers/MyPlatform.pm' },
-);
+'my-platform' => {
+    class     => 'Genesis::CI::ProviderCompiler::MyPlatform',
+    cli_class => 'Genesis::CI::Provider::MyPlatform',
+},
 ```
 
-Second, in `Genesis::CI::Compiler` at `_resolve_provider_class()` (which
-has its own identical copy of this map):
+An entry names its classes and nothing else. The registry works each file
+path out from the class beside it, so a path written here would be a second
+spelling of the same fact, and the two could disagree. Leave `class` out
+entirely if your platform has nothing to emit, which is what the manual
+provider does.
 
-```perl
-my %providers = (
-    'concourse'      => { class => 'Genesis::CI::Concourse',      file => 'Genesis/CI/Compiler/Providers/Concourse.pm' },
-    'github-actions' => { class => 'Genesis::CI::GithubActions',   file => 'Genesis/CI/Compiler/Providers/GithubActions.pm' },
-    'my-platform'    => { class => 'Genesis::CI::MyPlatform',      file => 'Genesis/CI/Compiler/Providers/MyPlatform.pm' },
-);
-```
-Here GitHub Actions is provided as a secondary example
+The schema's enum, every class lookup, and every message that lists the valid
+types all read this one map, so an entry added here is an entry every reader
+sees. There is no second place to register it.
 
-
-Note that the class name uses a short form (e.g., `Genesis::CI::Concourse`)
-while the file path uses the providers subdirectory
-(`Genesis/CI/Compiler/Providers/Concourse.pm`). The file is loaded with
-`eval { require $file }` at runtime.
+A provider shipping outside the tree calls `register_provider` at run time
+instead, which takes the same shape and refuses four things. A missing name
+would register the entry where nothing could look it up. A name already
+registered is refused rather than replaced. An entry with no `cli_class` is
+refused, because a resolver that finds none behaves like `manual` instead of
+saying so. And a file path that disagrees with the class beside it is refused
+rather than honoured.
 
 ## Available Helpers
 
-The `PipelineProvider` base class provides several helpers you can use:
+The `ProviderCompiler` base class provides several helpers you can use:
 
 ### dump_yaml
 
@@ -210,9 +230,10 @@ my $yaml = $self->dump_yaml($data_structure);
 ```
 
 Be aware that this serializer sorts hash keys alphabetically, uses
-two-space indentation, and does not produce flow-style collections. If you
-need a more capable serializer, the GitHub Actions provider uses `YAML::PP`
-directly, but this introduces an external dependency.
+two-space indentation, and does not produce flow-style collections. A
+compiler that needs a more capable serializer can use `YAML::PP` directly,
+but that introduces an external dependency the rest of the tree does not
+carry.
 
 ### git_uri
 
@@ -260,19 +281,20 @@ if ($self->matches_pattern('us-sandbox', '*-sandbox')) { ... }
 
 ## Accessing Source Data
 
-While providers should primarily read the generic pipeline (via
+While a compiler should primarily read the generic pipeline (via
 `$ast->resource_types`, `$ast->pipeline_resources`, `$ast->jobs`,
-`$ast->groups`), there are cases where you need source data. For example,
-the GitHub Actions provider reads `$ast->integrations` to set up vault
-authentication steps and `$ast->metadata` to name the workflow.
+`$ast->groups`), there are cases where you need source data. A compiler
+that has to set up its own vault authentication steps reads
+`$ast->integrations`, and one that has to name its output reads
+`$ast->metadata`.
 
 The source accessors are: `$ast->branches`, `$ast->integrations`,
 `$ast->targets`, `$ast->workflows`, `$ast->configuration`,
 `$ast->provider_config`.
 
-## Example: The Concourse Provider
+## Example: The Concourse Compiler
 
-The Concourse provider in `_generate_native()` is a minimal serializer:
+The Concourse compiler in `_generate_native()` is a minimal serializer:
 
 ```perl
 sub _generate_native {
@@ -293,18 +315,20 @@ It reads the four generic pipeline arrays and dumps them to YAML. The
 PipelineDescriptor if the generic pipeline has not been built yet.
 
 The `generate_from_ast()` method in Concourse also has the legacy bridge
-path for backward compatibility, but for new providers you would not
-need that.
+path for backward compatibility, but a new compiler would not need that.
 
 ## Testing Your Provider
 
-Place your provider file at
-`lib/Genesis/CI/Compiler/Providers/MyPlatform.pm`. Test it by running:
+Place the two files at the paths their package names derive, which are
+`lib/Genesis/CI/Provider/MyPlatform.pm` and
+`lib/Genesis/CI/ProviderCompiler/MyPlatform.pm`. There is no `--platform`
+flag to select a provider with, so set `pipeline.provider.type` to
+`my-platform` in `.genesis/config` and run:
 
 ```bash
-genesis repipe --platform my-platform --dry-run
+genesis pipeline-apply --dry-run
 ```
 
 Use `--debug-dir` to inspect intermediate artifacts and verify that your
-provider receives the expected AST data. Use `--output-dir` to write all
+compiler receives the expected AST data. Use `--output-dir` to write all
 generated files to disk for manual review.

@@ -35,27 +35,30 @@ description of the pipeline to stdout.
 
 ## When Legacy is Used Directly
 
-The legacy module is called directly (bypassing the compiler entirely) when
-an operator runs `genesis repipe` without the `--platform` flag. In
-`Genesis::Commands::Pipelines::repipe()`, the code checks for the
-`platform` option. When it is absent, execution falls through to:
+The legacy module is called directly, bypassing the compiler entirely, by the
+deprecated `genesis graph`. In `Genesis::Commands::Pipelines::graph()` the
+code reads `ci.yml` and asks Legacy for DOT source:
 
 ```perl
 (my $pipeline, $layout) = Genesis::CI::Legacy::parse(get_options->{config}, $top, $layout);
-my $yaml = Genesis::CI::Legacy::generate_pipeline_concourse_yaml($pipeline, $top);
+my $dot = Genesis::CI::Legacy::generate_pipeline_graphviz_source($pipeline);
 ```
 
-This is the production code path that has been in use for years. The same
-pattern applies to `graph()` and `describe()`.
+There is no longer a `--platform` flag to route on, and the other deprecated
+commands delegate to their successors rather than calling Legacy. `repipe`
+delegates to `apply`, and `describe` delegates to `pipeline_describe`. Every
+route but the one above reaches Legacy through the bridge below rather than
+directly.
 
 ## When the Bridge is Activated
 
 The bridge is activated when all of these conditions are true:
 
-1. The operator uses `--platform concourse` (activating the compiler pipeline)
+1. The repository is configured for the Concourse provider, so the compiler
+   pipeline runs and hands its AST to the Concourse compiler
 2. The configuration source is a legacy `ci.yml` file, rather than the
    `pipeline:` section of `.genesis/config`
-3. The Concourse provider's `generate_from_ast()` is called
+3. The Concourse compiler's `generate_from_ast()` is called
 
 Under these conditions, the Parser reads `ci.yml` and normalizes it into
 the multi-file structure. The ASTBuilder preserves the raw legacy data in
@@ -67,8 +70,8 @@ $provider_config->{concourse} = {
 };
 ```
 
-When `Genesis::CI::Concourse::generate_from_ast()` runs, it checks for this
-marker:
+When `Genesis::CI::ProviderCompiler::Concourse::generate_from_ast()` runs, it
+checks for this marker:
 
 ```perl
 if ($source eq 'legacy'
@@ -118,11 +121,11 @@ legacy path.
 flowchart TD
     A[ci.yml] --> B{Which path?}
 
-    B -->|"genesis repipe<br/>(no --platform)"| C[Legacy::parse]
+    B -->|"genesis graph"| C[Legacy::parse]
     C --> D[Legacy::generate_pipeline_concourse_yaml]
     D --> E[Concourse YAML]
 
-    B -->|"genesis repipe<br/>--platform concourse"| F[Compiler::Parser]
+    B -->|"every other<br/>pipeline command"| F[Compiler::Parser]
     F -->|"preserves _legacy_raw"| G[Compiler::Validator]
     G --> H[ScriptDiscovery]
     H --> I[ASTBuilder]
@@ -163,18 +166,18 @@ sub _generate_native {
 }
 ```
 
-The `_ensure_pipeline_resolved()` method checks whether the generic
-pipeline has been built. If not (which can happen when the Concourse
-provider is used via the trait interface rather than the compiler), it
-creates a PipelineDescriptor and runs `describe()` to populate the AST's
-generic pipeline.
+The `_ensure_pipeline_resolved()` method checks whether the generic pipeline
+has been built. If it has not, which can happen when the Concourse compiler
+is built from a configuration file rather than handed an AST, it creates a
+PipelineDescriptor and runs `describe()` to populate the AST's generic
+pipeline.
 
-## Trait Interface Legacy Mode
+## The File-Built Legacy Mode
 
-The Concourse provider's trait interface methods (`parse()`, `generate()`,
-`graphviz()`, `describe()`) also have a legacy delegation path. When the
-provider is constructed with `_platform => 'legacy'` (via the `platform`
-option), the trait methods delegate directly to `Legacy.pm` functions:
+The Concourse compiler's file-built methods, which are `parse()`,
+`generate()`, `graph_md()`, and `describe()`, also have a legacy delegation
+path. When the compiler is built through `init()` with a `platform` of
+`legacy`, those methods delegate directly to `Legacy.pm` functions:
 
 ```perl
 sub parse {
@@ -191,11 +194,17 @@ sub parse {
 }
 ```
 
-This means there are two distinct ways legacy code is reached: the bridge
-path (compiler → AST → reconstructed $P → Legacy) and the trait path
-(provider.parse() → Legacy::parse() directly). The bridge path preserves
-the compiler's intermediates for debugging. The trait path is a shortcut
-that skips the compiler entirely.
+There are therefore two distinct ways legacy code is reached. The bridge path
+runs the compiler, builds an AST, reconstructs the `$P` hashref, and calls
+Legacy, so it preserves the compiler's intermediates for debugging. The
+file-built path calls `Legacy::parse()` directly and skips the compiler
+entirely.
+
+Nothing in the tree calls `init()` any more, since the factory that used to
+is gone and there is no `--platform` flag to ask for legacy mode with. The
+constructor and the delegation both stand because `parse()` is the only thing
+that sets the `config` key that `generate()` and `deploy()` insist on, so
+removing them would take that path with them.
 
 ## Why the Bridge Exists
 

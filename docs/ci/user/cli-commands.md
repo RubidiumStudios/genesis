@@ -187,13 +187,13 @@ The errand name is specified by the `ERRAND_NAME` environment variable.
 
 ```mermaid
 flowchart TD
-    A[genesis repipe] --> H[Genesis::CI::Compiler::Parser]
+    A[genesis pipeline-apply] --> H[Genesis::CI::Compiler::Parser]
     H --> I[Genesis::CI::Compiler::Validator]
     I --> J[Genesis::CI::Compiler::ASTBuilder]
     J --> K[Genesis::CI::Compiler::PipelineDescriptor]
     K --> L{pipeline.provider.type}
-    L -->|concourse| M[Genesis::CI::Concourse]
-    L -->|github-actions| N[Genesis::CI::GithubActions]
-    M --> G[fly set-pipeline]
-    N --> O[Write .github/workflows/]
+    L -->|concourse| M[Genesis::CI::Provider::Concourse]
+    L -->|manual| P[Nothing to set]
+    M --> Q[ProviderCompiler::Concourse]
+    Q --> G[fly set-pipeline]
 ```
