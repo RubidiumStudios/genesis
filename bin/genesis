@@ -214,6 +214,7 @@ define_command("create", {
 		"another path, create the new environment, then move back the secrets you ".
 		"need to keep.",
 	function_group => Genesis::Commands::ENVIRONMENT,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope => [qw/repo env/],
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	arguments => [
@@ -652,6 +653,7 @@ define_command("bosh", {
 		"the target is ambiguous.  If you don't specify either, it will prompt you ".
 		"to choose one if in a controlling terminal, or fail if not.",
 	function_group => Genesis::Commands::BOSH,
+	branch_class   => Genesis::Commands::DEPLOYED_STATE,
 	scope => 'env',
 	option_group => Genesis::Commands::REPO_OPTIONS,
 	option_passthrough => 1,
@@ -862,6 +864,7 @@ define_command("info", {
 	description =>
 		"Get details for the current deployment of the given environment.",
 	function_group => Genesis::Commands::INFO,
+	branch_class   => Genesis::Commands::DEPLOYED_STATE,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
@@ -1079,6 +1082,7 @@ define_command("check-secrets", {
 		"present and exits with 0.  A list of secret paths can be specified, ".
 		"otherwise all secrets specified by the kit will be checked.",
 	function_group => Genesis::Commands::ENVIRONMENT,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
@@ -1110,6 +1114,7 @@ define_command("secrets", {
 		"can be a full or partial path, a property expression, or a regular ".
 		"expression.",
 	function_group => Genesis::Commands::ENVIRONMENT,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
@@ -1137,6 +1142,7 @@ define_command("add-secrets", {
 		"generate credentials after upgrading kits.   A list of secret paths can ".
 		"be specified, or it applies to all secrets if no path is specified.",
 	function_group => Genesis::Commands::ENVIRONMENT,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
@@ -1163,6 +1169,7 @@ define_command("rotate-secrets", {
 	usage => '<env> rotate-secrets [<options...>] [<path1> <...pathN>]',
 	aliases => ['rot','rs','regen'],
 	function_group => Genesis::Commands::ENVIRONMENT,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope => 'env',
 	description =>
 		"Regenerate secrets for your deployment. If any secrets are marked by the ".
@@ -1236,6 +1243,7 @@ define_command("remove-secrets", {
 		"on the command line to further limit the scope of what will be removed ".
 		"(all generated secrets if no path is specified).",
 	function_group => Genesis::Commands::ENVIRONMENT,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
@@ -2043,6 +2051,7 @@ define_command("pipeline-apply", {
 		"beside #C{.genesis/config}.",
 	alias          => [qw(pipeline-push)],
 	function_group => Genesis::Commands::PIPELINE,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	arguments      => [
@@ -2110,6 +2119,7 @@ define_command("pipeline-status", {
 		"DAG: last sync point, number of pending changes, and whether the ".
 		"environment is blocked by an ancestor that needs propagation first.",
 	function_group => Genesis::Commands::PIPELINE,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [
@@ -2143,6 +2153,8 @@ define_command("propagate", {
 		"inside its own session and leaves you on the branch you started ".
 		"on.",
 	function_group => Genesis::Commands::PIPELINE,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	branch_target  => 'control',
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [
@@ -2170,6 +2182,7 @@ define_command("pipeline-describe", {
 		"Compiles the pipeline and prints an ordered environment progression ".
 		"with gate and trigger annotations.  Replaces `genesis describe`.",
 	function_group => Genesis::Commands::PIPELINE,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 }, 'Genesis::Commands::Pipelines::pipeline_describe');

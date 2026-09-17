@@ -167,6 +167,55 @@ may interact with a BOSH director.
 
 =back
 
+B<Branch-Class Constants>
+
+Each constant is the value of the C<branch_class> property in
+C<define_command>, and the two are the only legal values it takes.
+
+=over 4
+
+=item C<PRE_DEPLOY> (C<'pre-deploy'>)
+
+The command changes what will be delivered, so it belongs on the control
+branch or on a permitted feature branch.
+
+=item C<DEPLOYED_STATE> (C<'deployed-state'>)
+
+The command operates on what an environment is running, so it belongs on
+that environment's deployment branch.
+
+=back
+
+=head2 Branch classes
+
+Every pipeline-aware command declares one branch class at its registration,
+beside its scope and its function group. The class is one of two constants
+this module exports as values, C<PRE_DEPLOY> and C<DEPLOYED_STATE>, and it
+is read from C<command_properties($cmd)-E<gt>{branch_class}>.
+
+    define_command("propagate", {
+        ...
+        branch_class  => Genesis::Commands::PRE_DEPLOY,
+        branch_target => 'control',
+    });
+
+A pre-deploy command changes what will be delivered, so it runs on the
+control branch or on a permitted feature branch and refuses elsewhere. A
+deployed-state command operates on what an environment is running, so it
+switches to that environment's deployment branch inside a session. A
+command that declares no class is not gated at all.
+
+C<deploy> declares no class yet. It makes a switch of its own, which is
+deliberately one way, and it declares C<DEPLOYED_STATE> when that switch is
+retired.
+
+C<branch_target> is optional and is declared by C<propagate> alone. It says
+that the command switches to control inside the session it already holds,
+so the gate leaves it where it stands.
+
+The same property drives the marker the help listing prints beside each
+command, so the listing and the refusal always agree.
+
 =head1 FUNCTIONS
 
 =head2 define_command
@@ -218,6 +267,16 @@ Controls which global options are available.  Defaults to C<BASE_OPTIONS>.
 =item C<option_passthrough> - Boolean.  When true, unknown options are
 passed through to the command rather than causing an error.  Defaults to
 C<0>.
+
+=item C<branch_class> - The branch class the command belongs to, either
+C<PRE_DEPLOY> or C<DEPLOYED_STATE>.  It drives both the refusal off a
+forbidden branch and the marker the help listing prints, so the two can
+never disagree.  Defaults to C<undef>, which leaves the command ungated.
+
+=item C<branch_target> - The branch the command switches to inside its own
+session, declared only alongside a C<branch_class>.  C<propagate> is the
+one command that declares it, with the value C<'control'>.  Defaults to
+C<undef>.
 
 =item C<option_require_order> - Boolean.  When true, option parsing stops
 at the first non-option argument.  Defaults to false.
@@ -281,6 +340,19 @@ the C<retired> and C<deprecated> properties.  The two are mutually
 exclusive -- C<retired>'s refuse-to-run always trumps C<deprecated>'s
 warn-and-run, so declaring both leaves the intent ambiguous.  Remove
 C<deprecated> once the command has been retired.
+
+=item C<"Command %s declares the branch class %s; the only classes are pre-deploy and deployed-state.">
+
+Raised via C<bug> when C<branch_class> is set to anything but
+C<PRE_DEPLOY> or C<DEPLOYED_STATE>.  A misspelled class would gate
+nothing and say nothing, which is the failure a single declaration
+exists to rule out.
+
+=item C<"Command %s declares a branch target without a branch class.">
+
+Raised via C<bug> when C<branch_target> is set and C<branch_class> is
+not.  A target names where an already-classed command takes itself, so
+it means nothing on its own.
 
 =back
 
@@ -1526,6 +1598,42 @@ B<Examples:>
 
   _safe_drives_openbao();
   # Returns: 1  (safe vdev/perf-improvements/d6a138d, read as 1.20.1)
+
+=head2 _branch_class_marker
+
+  my $marker = _branch_class_marker($cmd);
+
+Returns the help-listing marker for a command's declared branch class.
+
+The marker is read from the same C<branch_class> property the branch gate
+reads, so the listing an operator sees and the refusal the command raises
+cannot drift apart.  A command that declares no class gets no marker,
+which is how the listing shows that nothing gates it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$cmd>
+
+The canonical command name.
+
+=back
+
+B<Returns:> the marker string, which leads with a space so it appends
+straight onto a summary, or the empty string when the command declares no
+branch class.
+
+B<Examples:>
+
+  _branch_class_marker('propagate');
+  # Returns: " #Ci{[control]}"
+
+  _branch_class_marker('info');
+  # Returns: " #Mi{[env branch]}"
+
+  _branch_class_marker('version');
+  # Returns: ""
 
 =head2 _gate_pipeline_on_legacy_ci_yml
 

@@ -124,6 +124,7 @@ unit-tests/genesis_exit-codes.t  # Genesis::Exit holds the named codes, and noth
 unit-tests/genesis_commands-git_forms.t  # the two git forms the declared floor puts off limits stay out of the tree
 unit-tests/pack-arguments.t                   # pack's argument validation and usage text
 unit-tests/genesis-cli.t                              # bin/genesis loads; cross-command definition sanity
+unit-tests/genesis_branchclass-declaration.t          # every pipeline-aware registration declares one branch class
 unit-tests/genesis_core-cli.t                         # Commands::Core CLI registration (config)
 unit-tests/genesis_env-cli.t                          # Commands::Env CLI registration (terminate)
 unit-tests/genesis_repo-cli.t                         # Commands::Repo CLI registration (repo-init)
