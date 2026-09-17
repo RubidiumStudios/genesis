@@ -158,22 +158,97 @@ B<Examples:>
   Genesis::BranchClass::refresh_control($top, $git);
   # Exits 75  (the remote is unreachable)
 
+=head2 permitted_feature_branch($top, $git, $branch, %opts)
+
+Answers whether a feature branch may carry a command that changes what will
+be delivered. Three conditions hold together.
+
+=over 4
+
+=item *
+
+It descends from the tip of the control branch as observed through the
+remote-tracking ref after a refresh, so it carries every environment file
+control has.
+
+=item *
+
+It is not a deployment, pull request, or artifacts branch, which
+C<classify_branch> has already settled before this is called.
+
+=item *
+
+Its name is not an environment's name, existing or being added, because a
+branch named C<prod2> occupies C<refs/heads/prod2> and the deployment
+branch C<prod2/bosh> could never be created beside it.
+
+=back
+
+Returns a single true value when all three hold, and otherwise returns
+false with the condition that failed and the remedy for it, so the caller
+writes one refusal and the reasons stay here.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the deployment root was loaded as.
+
+=item C<$git>
+
+The C<Service::Git> handle on the repository the command is running in.
+
+=item C<$branch>
+
+The branch the working tree is standing on, as a string.
+
+=item C<%opts>
+
+C<adding> is the environment name the command is about to create, which
+C<genesis new> is given as its argument. A branch may collide with a name
+the repository does not carry yet, and this is how the predicate hears
+about one.
+
+=back
+
+B<Returns:> C<(1)> when the branch is permitted, and C<(0, $reason,
+$remedy)> when it is not.
+
+B<Examples:>
+
+  Genesis::BranchClass::permitted_feature_branch($top, $git, 'add-prod',
+    adding => 'prod');
+  # Returns: (1)
+
+  Genesis::BranchClass::permitted_feature_branch($top, $git, 'prod2',
+    adding => 'prod2');
+  # Returns: (0, 'prod2 is named for an environment, so prod2/bosh could
+  #               never be created beside it',
+  #              "Rename the feature branch:\n\n    git branch -m prod2
+  #               add-prod2\n")
+
 =head2 assert_pre_deploy($top, $git, %opts)
 
 Refreshes the control branch through C<refresh_control>, then refuses when
 the current branch is derived, naming the branch, the class it belongs to,
-and the checkout that fixes it, and exiting C<Genesis::Exit::DATAERR>. It
-switches nothing, on a refusal or otherwise.
+and the checkout that fixes it, and exiting C<Genesis::Exit::DATAERR>. A
+branch that is none of the derived three goes to
+C<permitted_feature_branch>, and a refusal from there names the condition
+that failed and the remedy for it at the same exit. It switches nothing, on
+a refusal or otherwise.
 
 The refresh runs above the classification, so a run the gate goes on to
 refuse has refreshed control by the time it refuses. Where a command ends
 therefore says nothing about whether it refreshed.
 
 A detached HEAD is allowed through, because it is neither control nor
-derived. A repository that has lost its control branch is repaired by the
-pre-flight, which re-creates it from the remote, and a clone that never had
-one is refused by the apply at C<Genesis::Exit::CONFIG>. A refusal raised
-here would speak before either of them and say less.
+derived and neither remedy the predicate offers can be carried out on it. A
+repository that has lost its control branch is repaired by the pre-flight,
+which re-creates it from the remote, and a clone that never had one is
+refused by the apply at C<Genesis::Exit::CONFIG>. A refusal raised here
+would speak before either of them and say less.
 
 B<Parameters:>
 
@@ -191,8 +266,8 @@ The C<Service::Git> handle on the repository the command is running in.
 
 C<refresh> is read, and C<refresh =E<gt> 0> skips the refresh for the one
 command that promises no network call, which is C<pipeline-status> under
-C<--no-refresh>. The rest is reserved for the conditions a permitted feature
-branch has to meet, and none of those are read yet.
+C<--no-refresh>. C<adding> is the environment name the command is about to
+create, and it is passed straight to C<permitted_feature_branch>.
 
 =back
 
@@ -206,6 +281,12 @@ B<Errors:>
 
 I<qa/bosh is a deployment branch, which holds what was delivered, and this
 command changes what will be delivered.>
+
+=item Refuses a feature branch that fails one of the three conditions.
+
+I<add-prod does not descend from the tip of control, and this command
+changes what will be delivered.> The remedy follows, and the exit is
+C<Genesis::Exit::DATAERR>.
 
 =item Refuses a remote it cannot reach.
 
