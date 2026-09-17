@@ -1,0 +1,150 @@
+=head1 NAME
+
+Genesis::BranchClass - which branch a pipeline-aware command belongs on
+
+=head1 SYNOPSIS
+
+    require Genesis::BranchClass;
+
+    my $class = Genesis::BranchClass::classify_branch($top, 'qa/bosh');
+    # 'deployment'
+
+    Genesis::BranchClass::assert_pre_deploy($top, $git);
+    # bails at DATAERR unless the current branch may be written on
+
+=head1 DESCRIPTION
+
+Under D81 every pipeline-aware command declares one of two branch classes
+at its registration. This module answers the questions that declaration
+raises, which are what class of branch the repository is standing on and
+whether a pre-deploy command may run from it.
+
+A pre-deploy command changes what will be delivered, so it belongs on the
+control branch or on a feature branch cut from it. The deployment branch,
+the pull request branch, and the artifacts branch are all derived, and a
+hand commit made on one of them is overwritten by the next propagate run.
+That is the one rule the refusal below enforces.
+
+=head1 FUNCTIONS
+
+Nothing is exported. Every function is called by its full name, because
+the gate that calls them is the only caller and one qualified call reads
+better than an import nobody else uses.
+
+=head2 artifacts_branch_for($top, $env_name)
+
+Returns the artifacts branch of a deployment, which is C<artifacts/>
+joined onto the deployment slug, so C<qa> of a C<bosh> root reads
+C<artifacts/qa/bosh>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the deployment root was loaded as.
+
+=item C<$env_name>
+
+The environment's name, as a string.
+
+=back
+
+B<Returns:> the branch name.
+
+B<Examples:>
+
+  Genesis::BranchClass::artifacts_branch_for($top, 'qa');
+  # Returns: 'artifacts/qa/bosh'
+
+=head2 classify_branch($top, $branch)
+
+Returns one of C<control>, C<deployment>, C<pr>, C<artifacts>, or
+C<feature>. The three derived classes are computed from the environments
+the repository knows about rather than matched against a pattern, because
+a deployment branch's name is the deployment slug and nothing else.
+
+A branch that matches none of them is C<feature>, and so is an undefined
+branch, since a caller holding no name has nothing derived in its hand.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the deployment root was loaded as.
+
+=item C<$branch>
+
+The branch name to classify, or undef.
+
+=back
+
+B<Returns:> the class, as one of the five strings above.
+
+B<Examples:>
+
+  Genesis::BranchClass::classify_branch($top, 'control');
+  # Returns: 'control'
+
+  Genesis::BranchClass::classify_branch($top, 'pr/qa/bosh');
+  # Returns: 'pr'
+
+  Genesis::BranchClass::classify_branch($top, 'wes/try-a-thing');
+  # Returns: 'feature'
+
+=head2 assert_pre_deploy($top, $git, %opts)
+
+Refuses when the current branch is derived, naming the branch, the class it
+belongs to, and the checkout that fixes it, and exiting
+C<Genesis::Exit::DATAERR>. It switches nothing, on a refusal or otherwise.
+
+A detached HEAD is allowed through, because it is neither control nor
+derived. A repository that has lost its control branch is repaired by the
+pre-flight, which re-creates it from the remote, and a clone that never had
+one is refused by the apply at C<Genesis::Exit::CONFIG>. A refusal raised
+here would speak before either of them and say less.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the deployment root was loaded as.
+
+=item C<$git>
+
+The C<Service::Git> handle on the repository the command is running in.
+
+=item C<%opts>
+
+Reserved for the conditions a permitted feature branch has to meet. None
+are read yet.
+
+=back
+
+B<Returns:> 1 when the command may run. Anything else exits.
+
+B<Errors:>
+
+=over 4
+
+=item Refuses a derived branch.
+
+I<qa/bosh is a deployment branch, which holds what was delivered, and this
+command changes what will be delivered.>
+
+=back
+
+B<Examples:>
+
+  Genesis::BranchClass::assert_pre_deploy($top, $git);
+  # Returns: 1  (standing on control)
+
+  Genesis::BranchClass::assert_pre_deploy($top, $git);
+  # Exits 65  (standing on artifacts/qa/bosh)
+
+=cut
