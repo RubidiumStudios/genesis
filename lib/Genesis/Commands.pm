@@ -430,11 +430,50 @@ sub _gate_branch_class {
 	$adding =~ s/\.yml$// if defined $adding;
 
 	require Genesis::BranchClass;
-	Genesis::BranchClass::assert_pre_deploy($top, $git,
+	return Genesis::BranchClass::assert_pre_deploy($top, $git,
 		refresh => $refresh, adding => $adding)
 		if $class eq PRE_DEPLOY;
 
+	return _gate_deployed_state($top, $git)
+		if $class eq DEPLOYED_STATE;
+
 	return;
+} # }}}
+
+# _gate_deployed_state - switch to the environment's branch in a session {{{
+#
+# D81: a deployed-state command operates on what an environment is running
+# or is about to run, so it switches to <env>/<type> inside a session,
+# because that branch holds exactly what was delivered and the hooks need a
+# working tree.  The session is opened here rather than inside each command,
+# so that deploy, info, and the bosh subcommands share one switch.
+sub _gate_deployed_state {
+	my ($top, $git) = @_;
+
+	# An operator may name the environment by a path, so the leading
+	# directories and the suffix both come off, which is what the deploy
+	# does to the same argument in Genesis::Commands::Env::deploy.  Two
+	# derivations of one name are two chances to disagree, so this one is
+	# written to match the one M13 will retire.
+	my $name = $COMMAND_ARGS[0];
+	return unless defined($name) && length($name);
+	$name =~ s{^.*/}{};
+	$name =~ s/\.ya?ml$//;
+
+	require Service::Git::Session;
+	my $session = $git->session(control => $top->control_branch);
+	$session->begin;
+	$session->switch($top->branch_for($name));
+
+	# finish restores the branch begin recorded and releases the switch
+	# lock.  A command that died leaves a non-zero status, and abort is
+	# what discards whatever it left behind before returning.
+	at_exit(sub {
+		my ($status) = @_;
+		$status ? $session->abort : $session->finish;
+	});
+
+	return $session;
 } # }}}
 
 sub has_command { # {{{
