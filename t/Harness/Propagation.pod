@@ -844,7 +844,7 @@ deployment record C<certify> writes, because that is where a create-env
 director publishes its connection details and where C<--self> reads them
 from.  C<url> defaults to C<https://10.0.0.4:25555>, C<username> to
 C<admin>, C<password> to C<harness-director-password>, C<ca_cert> to a
-one-line placeholder certificate, and C<kit_name> to C<bosh>, which is what
+placeholder certificate, and C<kit_name> to C<bosh>, which is what
 C<from_exodus> wants to see before it will build a director at all.  The
 address it names is one no row dials, because the commands under test are
 driven through the fake C<bosh> on C<GENESIS_BOSH_COMMAND> rather than over

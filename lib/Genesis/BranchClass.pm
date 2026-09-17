@@ -170,7 +170,7 @@ sub permitted_feature_branch {
 	# remote_branch_exists answers 0 for one.  An ls-remote that fails
 	# bails in remote_branch_exists' own words, which is left alone,
 	# because a remote nobody can reach is not a remote that lacks the
-	# branch and the refresh above has already tolerated whatever it was.
+	# branch, and the refresh above has already tolerated whatever it was.
 	#
 	# The remote is asked only where the caller allowed a refresh.  A
 	# command that promised to make no network call, which is

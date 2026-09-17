@@ -294,7 +294,7 @@ sub _assert_clean_index {
 		# The index column is the first character of the two.  A space
 		# means the change is unstaged, and a question mark means the path
 		# is untracked.
-		substr($status->{$_} // '', 0, 1) !~ /^[ ?]$/
+		substr($status->{$_} // '', 0, 1) !~ /[ ?]/
 	} keys %$status;
 	return 1 unless @staged;
 

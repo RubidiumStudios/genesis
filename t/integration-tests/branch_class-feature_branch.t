@@ -178,9 +178,7 @@ subtest 'control_requires_pr moves the expectation to a feature branch' => sub {
 		'and says nothing about the key');
 
 	# --no-commit left the environment file staged, so the index is put
-	# back here.  A row below rebases, and a rebase refuses over a dirty
-	# index, so a leftover here would stop a red run at this row instead of
-	# letting it report every one of them.
+	# back here, and the rows below read the clone this row was handed.
 	Genesis::run({dir => $h->a}, 'git', 'reset', '-q');
 	unlink $h->a . '/prod5.yml';
 };
@@ -399,8 +397,9 @@ subtest 'a repository with no remote names the bare control branch' => sub {
 	unlike($said, qr{git rebase \S*origin/},
 		'rather than a remote-tracking ref there is no remote for');
 
-	# The remote and control's tip go back, so this file leaves the clone
-	# as it found it.
+	# The remote goes back, and so does control's tip, which lands on the
+	# commit before the one that wrote the remote key.  The add-prod10
+	# branch stays behind, and it carries that key.
 	Genesis::run({dir => $h->a, onfailure => 'could not restore the remote'},
 		'git', 'remote', 'add', 'origin', $h->r);
 	Genesis::run({dir => $h->a, onfailure => 'could not put control back'},
