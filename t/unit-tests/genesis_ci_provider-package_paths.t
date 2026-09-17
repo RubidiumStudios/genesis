@@ -178,4 +178,43 @@ subtest 'the concrete compiler takes the base constructor' => sub {
 		or diag(join("\n", map {"  $_"} @found));
 };
 
+subtest 'the namespace holds modules and nothing at its root' => sub {
+	plan tests => 3;
+
+	# Genesis::CI:: stays as a namespace, as Genesis::Hook:: does,
+	# holding the modules beneath it with no module at its root.
+	ok !-f 'lib/Genesis/CI.pm',
+		'there is no module at the root of the namespace';
+
+	# A deleted module with a live caller fails at load rather than at
+	# run time, and a caller nothing in the suite loads reports nothing
+	# at all, so the row reads the tree.
+	my @files;
+	find(sub {push @files, $File::Find::name if -f && /\.(pm|t)$/}, 'lib', 't');
+	push @files, 'bin/genesis';
+
+	my @callers;
+	for my $file (sort @files) {
+		open my $fh, '<', $file or die "cannot read $file: $!\n";
+		while (my $line = <$fh>) {
+			next if $line =~ /^\s*#/;
+			push @callers, "$file:$."
+				if $line =~ /\bGenesis::CI\s*->\s*(new|compile)\b/
+				|| $line =~ /\buse\s+parent\b.*'Genesis::CI'/
+				|| $line =~ /\brequire\s+Genesis::CI\s*;/;
+		}
+		close $fh;
+	}
+	is_deeply(\@callers, [],
+		'and nothing calls the factory or inherits the trait')
+		or diag(join("\n", map {"  $_"} @callers));
+
+	is_deeply([sort map {s{^lib/Genesis/CI/}{}r} glob('lib/Genesis/CI/*.pm')],
+		[sort qw/Compiler.pm Layout.pm Legacy.pm Marker.pm Preflight.pm
+		         Propagation.pm Provider.pm ProviderCompiler.pm
+		         ProviderRegistry.pm Publish.pm Report.pm RunFailure.pm
+		         Shuttle.pm Walk.pm/],
+		'and the namespace holds the fourteen modules the step leaves it');
+};
+
 done_testing;

@@ -59,8 +59,8 @@ subtest 'a module with no .pod at all' => sub {
 subtest 'unparseable POD fails the module' => sub {
 	# The reference validator reports syntax separately from its failure
 	# count, so a module with unparseable POD can read as passing --
-	# Store::Credhub and Compiler::Providers::Concourse both do.  One
-	# verdict, or the gate lets exactly the worst cases through.
+	# Store::Credhub does.  One verdict, or the gate lets exactly the
+	# worst cases through.
 	my $r = check_module("$FIXTURES/BadSyntax.pm");
 
 	ok(!$r->{ok}, "does not pass despite every sub being documented");
@@ -144,7 +144,8 @@ subtest 'exclusion manifest' => sub {
 	my $x = load_exclusions('t/pod-gate-exclusions.txt');
 
 	is($x->{'UUID::Tiny'}{kind}, 'vendored',   "vendored entry read");
-	is($x->{'Genesis::CI'}{kind}, 'deferred',  "deferred entry read");
+	is($x->{'Genesis::CI::Compiler::AST'}{kind}, 'deferred',
+		"deferred entry read");
 	is($x->{'Genesis::Env::Secrets::Store::Credhub'}{kind}, 'placeholder',
 		"placeholder entry read");
 	like($x->{'UUID::Tiny'}{reason}, qr/\S/, "reasons are captured");

@@ -1878,22 +1878,6 @@ subtest 'PipelineDescriptor - _locker_resources' => sub {
 };
 
 ### ============================================================ ###
-### CI.pm Factory - resolver
-### ============================================================ ###
-
-subtest 'CI factory - _resolve_provider_class' => sub {
-	require Genesis::CI;
-
-	my $concourse = Genesis::CI::_resolve_provider_class('concourse');
-	is ref($concourse), 'HASH', "resolver returns hashref";
-	is $concourse->{class}, 'Genesis::CI::Concourse', "concourse class correct";
-	like $concourse->{file}, qr{Concourse\.pm$}, "concourse file path correct";
-
-	eval { Genesis::CI::_resolve_provider_class('bogus') };
-	like $@, qr/Unknown CI provider/, "unknown provider type bails";
-};
-
-### ============================================================ ###
 ### Compiler - resolver
 ### ============================================================ ###
 

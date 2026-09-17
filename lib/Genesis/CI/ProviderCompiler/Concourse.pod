@@ -6,12 +6,8 @@ Genesis::CI::ProviderCompiler::Concourse - the compiler that emits Concourse pip
 
     use Genesis::CI::ProviderCompiler::Concourse;
 
-    # Through the compiler, which is how a pipeline is built today.
-    my $compiler = Genesis::CI::ProviderCompiler::Concourse->new(
-        provider => $provider,
-        ast      => $ast,
-        top      => $top,
-    );
+    # Through the provider, which is how a pipeline is built today.
+    my $compiler = $provider->compiler(ast => $ast, top => $top);
     my $yaml = $compiler->generate_from_ast($ast);
 
     # Through the older entry point, which parses a file first.
@@ -325,9 +321,11 @@ B<Examples:>
 
 =head2 init(%opts)
 
-Builds a Concourse provider from a configuration file rather than from an
-AST, which is the path C<genesis repipe> takes. Nothing is read here; the
-reading is C</parse>.
+Builds a Concourse compiler from a configuration file rather than from an
+AST. Nothing is read here; the reading is C</parse>. The factory that
+used to call this is gone and no command reaches it today, but C</parse>
+reads what it blesses and C</deploy> has no configuration without
+C</parse>, so the route stands.
 
 B<Parameters:>
 
