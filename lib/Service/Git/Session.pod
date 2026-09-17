@@ -1156,8 +1156,11 @@ is the only account of why the branch moved.
 The silence covers an abort that did what it came for and nothing else. One
 that could not discard the changes, or could not return to the branch C<begin>
 recorded, leaves the operator standing somewhere they did not ask to be, and
-it says so whatever the exit status. The branch is read back and compared
-against the recorded one to tell the two apart.
+it says so whatever the exit status. C<abort> records which of the two it was
+before it throws, and the hook reads that answer rather than inferring one.
+Reading the branch instead would call a discard that failed in a session that
+never switched a success, and a restore whose checkout landed but whose return
+to the recorded directory did not.
 
 B<Parameters:> None.
 
