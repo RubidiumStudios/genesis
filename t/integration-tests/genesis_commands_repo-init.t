@@ -265,6 +265,45 @@ subtest 'the control-branch refusal names an unborn branch' => sub {
 	popd;
 };
 
+subtest 'the control-branch refusal names an unborn control' => sub {
+	plan tests => 2;
+
+	require Genesis::Commands::Repo;
+	delete $ENV{GENESIS_IGNORE_EVAL};       # let bail() die instead of exit
+	$ENV{GIT_AUTHOR_NAME}     = 'Test User';
+	$ENV{GIT_AUTHOR_EMAIL}    = 'test@example.com';
+	$ENV{GIT_COMMITTER_NAME}  = 'Test User';
+	$ENV{GIT_COMMITTER_EMAIL} = 'test@example.com';
+
+	# The branch here is control, and it has no commit on it, so the check
+	# refuses a repository whose branch is the one it asks for.  That is
+	# the refusal it should raise, because a CI configuration needs a
+	# commit to stand on, but the operator has to be told which of the two
+	# conditions they met, and being told they are not on control when
+	# they are on control tells them nothing they can act on.
+	my $unborn = workdir('validate-unborn-control');
+	run({dir => $unborn, onfailure => 'could not build the unborn control'},
+		'git', 'init', '-q', '-b', 'control');
+
+	my $uc_devkit = workdir('validate-unborn-control-devkit');
+	mkfile_or_fail("$uc_devkit/kit.yml",
+		"name: validate-unborn-control-devkit\nversion: 0.0.1\n");
+
+	pushd($unborn);
+	prepare_command('repo-init', '-l', $uc_devkit, '--skip-vault',
+		'--with-ci', 'my-bosh');
+	build_command_environment;
+
+	my $err;
+	eval {run_validate(); 1} or $err = $@;
+	like($err // '', qr/\Qcontrol, which has no commits yet\E/,
+		'the refusal says the branch it asks for has no commits yet');
+	unlike($err // '', qr/<no branch>/,
+		'rather than saying the repository is on none');
+
+	popd;
+};
+
 # ---------------------------------------------------------------------------
 # Phase 4: execute phase -- _repo_init_execute against real workdirs
 # ---------------------------------------------------------------------------
