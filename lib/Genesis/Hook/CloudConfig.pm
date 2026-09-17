@@ -851,7 +851,8 @@ sub _validate_override_schema {
 	my @valid_types = qw(vm_type vm_extension disk_type network);
 	my @valid_type_defaults = map { $_ . '_defaults' } @valid_types;
 	my @valid_types_plural = map { _plural_of($_) } @valid_types;
-	my @valid_matching_types = map { "matching_$_" } @valid_types_plural;
+	# TODO: admit matching_networks once the subnet lookups apply it
+	my @valid_matching_types = map { "matching_$_" } grep { $_ ne 'networks' } @valid_types_plural;
 	my @valid_root_keys = (
 		@valid_type_defaults,
 		@valid_types_plural,
@@ -860,9 +861,15 @@ sub _validate_override_schema {
 
 	my @errors = ();
 
+	push(@errors, sprintf(
+		"#y{%s.matching_networks} is not yet supported; use ".
+		"networks.<target>.subnet_defaults or networks.<target>.subnets.<subnet> instead",
+		$overrides_base
+	)) if exists $config->{matching_networks};
+
 	# Validate root keys
 	my @invalid_root_keys = ();
-	for my $key (keys %$config) {
+	for my $key (grep { $_ ne 'matching_networks' } keys %$config) {
 		push(@invalid_root_keys, $key) unless in_array($key, @valid_root_keys);
 	}
 	push(@errors, sprintf(
@@ -1154,31 +1161,10 @@ sub _get_network_subnet_property {
 
 	my $value = $fields->{$property};
 	for my $source_path (@sources) {
-		if ($source_path =~ /\.matching_networks$/) {
-			# WIP: unreachable until matching_networks joins @sources above
-			my $match_rules = $self->env->lookup($source_path, []);
-			if (ref($match_rules) eq 'ARRAY' && scalar(@$match_rules)) {
-				my $idx = 0;
-				foreach my $rule (@$match_rules) {
-					$idx++;
-					next unless ref($rule) eq 'HASH';
-					my $overrides = $self->_evaluate_matching_rule(
-						$target,
-						$rule,
-						flatten({name => $target, subnet_id => $subnet_id, subnet => { %$fields, $property => $value}}),
-					);
-					if (exists $overrides->{subnet}{$property}) {
-						$value = $overrides->{subnet}{$property};
-						$source = "$source_path (matching rule #$idx)";
-					}
-				}
-			}
-		} else {
-			my ($override, $found) = $self->env->lookup($source_path);
-			if (defined($found)) {
-				$value = $override;
-				$source = $source_path;
-			}
+		my ($override, $found) = $self->env->lookup($source_path);
+		if (defined($found)) {
+			$value = $override;
+			$source = $source_path;
 		}
 	}
 
@@ -1205,31 +1191,10 @@ sub _network_cloud_properties_for_iaas {
 	push @sources, "$overrides_base.networks.$target.subnets.$subnet_id.cloud_properties";
 
 	for my $source_path (@sources) {
-		if ($source_path =~ /\.matching_networks$/) {
-			# WIP: unreachable until matching_networks joins @sources above
-			my $match_rules = $self->env->lookup($source_path, []);
-			if (ref($match_rules) eq 'ARRAY' && scalar(@$match_rules)) {
-				my $idx = 0;
-				foreach my $rule (@$match_rules) {
-					$idx++;
-					next unless ref($rule) eq 'HASH';
-					my $overrides = $self->_evaluate_matching_rule(
-						$target,
-						$rule,
-						flatten({name => $target, subnet_id => $subnet_id, subnet => { %$fields, cloud_properties => $config}}),
-					);
-					if (exists $overrides->{subnet}{cloud_properties}) {
-						$config = {%$config, $overrides->{subnet}{cloud_properties}->%*};
-						$source = "$source_path (matching rule #$idx)";
-					}
-				}
-			}
-		} else {
-			my ($override, $found) = $self->env->lookup($source_path);
-			if (defined($found)) {
-				$config = {%$config, flatten($override)->%*};
-				$source = $source_path;
-			}
+		my ($override, $found) = $self->env->lookup($source_path);
+		if (defined($found)) {
+			$config = {%$config, flatten($override)->%*};
+			$source = $source_path;
 		}
 	}
 
@@ -1391,14 +1356,6 @@ sub _validate_definition {
 	) unless !defined($maps{cloud_properties_for_iaas}) || ref($maps{cloud_properties_for_iaas}) eq 'HASH';
 
 	return 1;
-}
-
-# }}}
-# _bosh_exodus_lookup - Returns the value for a given path in the bosh exodus data {{{
-sub _bosh_exodus_lookup {
-	my ($self, $path) = @_;
-	return undef if $self->env->use_create_env;
-	return $self->env->director_exodus_lookup("$path");
 }
 
 # }}}

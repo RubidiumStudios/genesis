@@ -1635,11 +1635,21 @@ contain C<conditions> arrays and C<properties> hashrefs; and that no
 meta-keys (C<< <based-on> >>, C<< <explicit-name> >>) appear in defaults or
 rule properties.
 
+C<matching_networks> is refused with its own message. The subnet lookups do
+not apply matching rules yet, so accepting the key would let an environment
+carry rules that silently do nothing; the message names the two network
+overrides that do work. Lift the refusal when the lookups apply the rules.
+
 B<Returns:> C<1> if valid, or throws if errors are found.
 
 B<Errors:>
 
 =over 4
+
+=item C<"%s.matching_networks is not yet supported; use networks.<target>.subnet_defaults or networks.<target>.subnets.<subnet> instead">
+
+Collected when the section carries a C<matching_networks> key. C<%s> is the
+overrides base path. Reported through the error below.
 
 =item C<"Errors found in cloud config overrides:\n%s">
 
@@ -2110,31 +2120,6 @@ B<Examples:>
         common => { instance_type => 't3.medium' }
     );
     # Returns: 1 if maps are valid
-
-=head2 _bosh_exodus_lookup
-
-    my $value = $self->_bosh_exodus_lookup($path);
-
-Returns the value at C<$path> in the deploying BOSH director's exodus data.
-Returns C<undef> immediately for create-env environments (which have no
-director exodus).
-
-B<Parameters:>
-
-=over 4
-
-=item C<$path>
-
-The exodus data path to look up (e.g., C<'/network'>).
-
-=back
-
-B<Returns:> The value at the exodus path, or C<undef> for create-env environments.
-
-B<Examples:>
-
-    my $data = $self->_bosh_exodus_lookup('/network');
-    # Returns: { azs => {...}, subnets => {...} }
 
 =head2 _get_subnet_ranges
 

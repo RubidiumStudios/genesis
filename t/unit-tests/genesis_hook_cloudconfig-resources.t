@@ -477,7 +477,7 @@ subtest 'vm_extension_definition' => sub {
 # 4. override processing
 # ===========================================================================
 subtest 'override processing' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	# 4a. vm_type_defaults override merges into all vm_type definitions
 	subtest 'vm_type_defaults are merged into vm_type definitions' => sub {
@@ -584,6 +584,31 @@ subtest 'override processing' => sub {
 		);
 		is($small->{cloud_properties}{'instance_type'}, 'm1.small',
 			'matching_vm_types override does not apply when condition does not match');
+	};
+
+	# 4d. matching_networks is refused until it is implemented, so an env file
+	# carrying rules that would silently do nothing fails at hook init
+	subtest 'matching_networks is rejected by the override schema' => sub {
+		plan tests => 1;
+
+		my $env = mock_env(
+			config => {
+				params => { cloud_config_prefix => 'test-env.test' },
+				'bosh-configs' => {
+					cloud => {
+						matching_networks => [
+							{
+								conditions => [ { 'az' => 'az3' } ],
+								properties => { 'dns' => ['10.4.0.2'] },
+							},
+						],
+					},
+				},
+			},
+		);
+		throws_ok { Genesis::Hook::CloudConfig::Bosh->init(env => $env) }
+			qr/bosh-configs\.cloud\.matching_networks is not yet supported.*subnet_defaults/s,
+			'init refuses an env file carrying matching_networks and names the working overrides';
 	};
 };
 

@@ -445,8 +445,13 @@ Overrides are applied in this specific order:
 vm_type_defaults, vm_types, matching_vm_types
 vm_extension_defaults, vm_extensions, matching_vm_extensions
 disk_type_defaults, disk_types, matching_disk_types
-network_defaults, networks, matching_networks
+network_defaults, networks
 ```
+
+`matching_networks` is reserved and currently rejected: subnet properties are
+resolved through `network_defaults.subnets`, `networks.<target>.subnet_defaults`
+and `networks.<target>.subnets.<subnet>` only, and an environment carrying
+`matching_networks` fails validation rather than silently ignoring the rules.
 
 ### Resource Naming Implementation
 
