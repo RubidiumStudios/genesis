@@ -1683,8 +1683,15 @@ own function.
 The class lives at the registration so that one declaration drives both the
 help marker and the refusal, which is why the enforcement sits here rather
 than inside each command.  A C<pre-deploy> command is handed to
-C<Genesis::BranchClass::assert_pre_deploy>, which refuses a derived branch
-at C<Genesis::Exit::DATAERR>.
+C<Genesis::BranchClass::assert_pre_deploy>, which refreshes the control
+branch from the remote and then refuses a derived branch at
+C<Genesis::Exit::DATAERR>.
+
+The refresh is passed along as C<< refresh => 0 >> when the running command
+carries C<--no-refresh>, which C<pipeline-status> alone declares.  That
+command promises to make no network call, so the flag is read here, where the
+options are, rather than in the assertion, which has no business knowing
+which command declared it.
 
 Returns early -- allowing the command through -- in five cases: the command
 declares no class; it has no repo or env scope, so there is no
@@ -1701,9 +1708,10 @@ B<Errors:>
 
 =item The refusals belong to C<Genesis::BranchClass::assert_pre_deploy>.
 
-This function raises none of its own.  It names the branch, the class it
-belongs to, and the checkout that fixes it, and it exits
-C<Genesis::Exit::DATAERR>.
+This function raises none of its own.  The branch refusal names the branch,
+the class it belongs to, and the checkout that fixes it, and it exits
+C<Genesis::Exit::DATAERR>.  A remote that cannot be reached for the refresh
+exits C<Genesis::Exit::TEMPFAIL>.
 
 =back
 

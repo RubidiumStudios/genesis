@@ -10,7 +10,8 @@ Genesis::BranchClass - which branch a pipeline-aware command belongs on
     # 'deployment'
 
     Genesis::BranchClass::assert_pre_deploy($top, $git);
-    # bails at DATAERR unless the current branch may be written on
+    # refreshes control, then bails at DATAERR unless the current branch
+    # may be written on
 
 =head1 DESCRIPTION
 
@@ -18,6 +19,11 @@ Under D81 every pipeline-aware command declares one of two branch classes
 at its registration. This module answers the questions that declaration
 raises, which are what class of branch the repository is standing on and
 whether a pre-deploy command may run from it.
+
+Every pre-deploy command also brings the control branch in from the remote
+before it reads anything, because the question the assertion answers is
+asked of the remote's tip and not of whatever this clone last happened to
+fetch.
 
 A pre-deploy command changes what will be delivered, so it belongs on the
 control branch or on a feature branch cut from it. The deployment branch,
@@ -95,11 +101,73 @@ B<Examples:>
   Genesis::BranchClass::classify_branch($top, 'wes/try-a-thing');
   # Returns: 'feature'
 
+=head2 refresh_control($top, $git)
+
+Brings the control branch from the remote into the repository's
+remote-tracking refs, and bails at C<Genesis::Exit::TEMPFAIL> naming the
+remote when it cannot. Every pre-deploy command runs it at pre-flight,
+because the descent condition is read through the remote-tracking ref and a
+stale one would let a feature branch cut from an older control tip pass a
+check it should fail.
+
+Only the control branch is fetched. A deployment branch's tip answers a
+question no pre-deploy command asks, and fetching one is what let a
+branch-exists check read a ref that is now derived.
+
+A repository with no remote has nothing to refresh, and the function says so
+by returning rather than by refusing. So does a clone that has no local
+control branch, because materialising one is a repair, the pre-flight owns
+it, and the pre-flight reports the creation as it makes it. A fetch here
+would take that repair silently.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the deployment root was loaded as.
+
+=item C<$git>
+
+The C<Service::Git> handle on the repository the command is running in.
+
+=back
+
+B<Returns:> 1 when the refs are current, or when there is no remote to ask.
+Anything else exits.
+
+B<Errors:>
+
+=over 4
+
+=item Refuses a remote it cannot reach.
+
+I<Could not reach origin to refresh the control branch.> The remote's own
+words follow, taken from the C<err> key of the fetch result, and the exit is
+C<Genesis::Exit::TEMPFAIL>, because a remote nobody can reach is a condition
+a re-run fixes rather than input a person must correct.
+
+=back
+
+B<Examples:>
+
+  Genesis::BranchClass::refresh_control($top, $git);
+  # Returns: 1  (refs/remotes/origin/control now holds the remote's tip)
+
+  Genesis::BranchClass::refresh_control($top, $git);
+  # Exits 75  (the remote is unreachable)
+
 =head2 assert_pre_deploy($top, $git, %opts)
 
-Refuses when the current branch is derived, naming the branch, the class it
-belongs to, and the checkout that fixes it, and exiting
-C<Genesis::Exit::DATAERR>. It switches nothing, on a refusal or otherwise.
+Refreshes the control branch through C<refresh_control>, then refuses when
+the current branch is derived, naming the branch, the class it belongs to,
+and the checkout that fixes it, and exiting C<Genesis::Exit::DATAERR>. It
+switches nothing, on a refusal or otherwise.
+
+The refresh runs above the classification, so a run the gate goes on to
+refuse has refreshed control by the time it refuses. Where a command ends
+therefore says nothing about whether it refreshed.
 
 A detached HEAD is allowed through, because it is neither control nor
 derived. A repository that has lost its control branch is repaired by the
@@ -121,8 +189,10 @@ The C<Service::Git> handle on the repository the command is running in.
 
 =item C<%opts>
 
-Reserved for the conditions a permitted feature branch has to meet. None
-are read yet.
+C<refresh> is read, and C<refresh =E<gt> 0> skips the refresh for the one
+command that promises no network call, which is C<pipeline-status> under
+C<--no-refresh>. The rest is reserved for the conditions a permitted feature
+branch has to meet, and none of those are read yet.
 
 =back
 
@@ -136,6 +206,10 @@ B<Errors:>
 
 I<qa/bosh is a deployment branch, which holds what was delivered, and this
 command changes what will be delivered.>
+
+=item Refuses a remote it cannot reach.
+
+Raised through C<refresh_control>, at C<Genesis::Exit::TEMPFAIL>.
 
 =back
 

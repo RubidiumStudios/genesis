@@ -355,8 +355,18 @@ sub _gate_branch_class {
 	require Service::Git;
 	my $git = Service::Git->new('.');
 
+	# Two pre-deploy commands make no network call of their own, and the
+	# gate makes none for them either.  pipeline-status says so with
+	# --no-refresh (D40).  pipeline-describe resolves the repository's own
+	# configuration out of files, so it holds no ref a refresh could make
+	# current, and a fetch would refuse offline what the command can always
+	# answer from disk.  Both are read here rather than in the assertion,
+	# because the option and the command are the gate's to know.
+	my $refresh = get_options()->{'no-refresh'} ? 0 : 1;
+	$refresh = 0 if is_equivalent_command($COMMAND, 'pipeline-describe');
+
 	require Genesis::BranchClass;
-	Genesis::BranchClass::assert_pre_deploy($top, $git)
+	Genesis::BranchClass::assert_pre_deploy($top, $git, refresh => $refresh)
 		if $class eq PRE_DEPLOY;
 
 	return;
