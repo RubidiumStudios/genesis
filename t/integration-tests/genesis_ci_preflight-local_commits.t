@@ -93,10 +93,13 @@ subtest 'a dry run reports the reset and moves nothing' => sub {
 		'the dry run left the branch where it stood');
 	is($h->git('a')->resolve_branch($qa)->{state}, 'ahead',
 		'so the stranded commit is still there and still unpublished');
-	# The warning says only that the reset is assumed.  The sentence naming
+	# The caveat says only that the reset is assumed.  The sentence naming
 	# what would be discarded is the event line, which the caller prints
-	# under either kind of run, so the warning does not repeat it.
-	like($err, qr/This\s+report\s+assumes\s+the\s+reset\s+of\s+\Q$qa\E\s+that\s+a\s+real\s+run\s+would\s+make/,
+	# under either kind of run, so the caveat does not repeat it.  It is
+	# said by the report under the preview's own banner rather than by this
+	# stage, because an operator meets a caveat printed above that banner
+	# before they have been told they are reading a preview.
+	like($err, qr/This\s+preview\s+assumes\s+\Q$qa\E\s+is\s+reset\s+first/,
 		'and the report says it assumes the reset a real run would make');
 };
 

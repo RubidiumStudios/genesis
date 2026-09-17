@@ -590,8 +590,16 @@ sub propagate {
 	# The stage's events are not printed here.  The whole list is printed
 	# once, where the deployment branches are settled, and a line printed
 	# twice is worse than a line printed late.
+	#
+	# A preview is let past a control branch that is ahead of its remote,
+	# and warns under its own banner that its answer assumes the push, which
+	# is D44's first caveat.  Every other divergence is refused here for a
+	# preview as it is for a run, because a stale control makes the topology
+	# the preview reports on the wrong one.
 	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
-		refreshed => $refreshed, command => 'propagate');
+		refreshed    => $refreshed,
+		command      => 'propagate',
+		permit_ahead => $dry_run ? 1 : 0);
 
 	# The run stands itself on control rather than asking the operator to,
 	# which is D65.  Everything below reads the environment files off the
@@ -916,6 +924,17 @@ sub propagate {
 	# one record by one renderer, so the two cannot disagree about a word.
 	# The preview enters through its own sub because it has a banner and one
 	# verb of its own, and everything under those is the run's.
+	#
+	# D44's two caveats, gathered here and said by the report.  The run has
+	# already asked git both questions, once to decide whether to refuse the
+	# control branch and once to decide whether to reset a deployment
+	# branch, so the answers are read off what those two stages settled
+	# rather than asked again.  The renderer prints them under its banner,
+	# which is the only place a caveat about a preview can stand and still
+	# be read before the report it is about.
+	$record->{warnings} = _preview_warnings($git, $control, $control_state,
+		$initial, \@dag_order) if $dry_run && $record;
+
 	$dry_run
 		? Genesis::CI::Report::render_preview($record, git => $git)
 		: Genesis::CI::Report::render_run($record, git => $git);
@@ -960,6 +979,45 @@ sub propagate {
 	exit $status;
 }
 
+# _preview_warnings - the two things a preview's answer rests on {{{
+#
+# D44 names two, and each is a fact one of the run's first two stages has
+# already settled.  Control being ahead of its remote is what require_control
+# would have refused had this been a run that writes, and a deployment branch
+# with an assumed reset is one the pre-flight would have moved to its tracking
+# ref before the walk.  Both come off those records rather than out of a
+# second pair of git reads.
+#
+# The pre-flight makes two assumed moves and names each on the record it
+# leaves, so the reset is picked out by its name rather than inferred.  D44's
+# second caveat is about the reset alone, because a fast-forward discards
+# nothing the preview would otherwise have reported.
+sub _preview_warnings {
+	my ($git, $control, $control_state, $initial, $order) = @_;
+
+	my $remote = $git->default_remote;
+	my @caveats;
+
+	push @caveats, {
+		kind   => 'unpushed-control',
+		branch => $control,
+		remote => $remote,
+	} if (($control_state->{divergence} || {})->{state} // '') eq 'ahead';
+
+	for my $env (@$order) {
+		my $branch = $initial->{branches}{$env} or next;
+		next unless ($branch->{assumed_move} // '') eq 'reset';
+		push @caveats, {
+			kind   => 'unreset-branch',
+			branch => $branch->{branch},
+			remote => $remote,
+		};
+	}
+
+	return \@caveats;
+}
+
+# }}}
 # run_status - the exit status D97 gives the run's second stage {{{
 #
 # Zero is the run in which every environment ended published or held with
