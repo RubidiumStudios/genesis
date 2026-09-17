@@ -38,7 +38,7 @@ subtest 'Genesis refuses to rewrite history on either protected class' => sub {
 			# catchable where the ignore flag is unset.
 			local $ENV{GENESIS_IGNORE_EVAL} = '';
 			eval { $git->push(remote => 'origin', refs => [$spec]) };
-			$err = $@ // '';
+			$err = $@;
 		}
 		like(unfolded($err),
 			qr/Refusing to push \Q$spec->{branch}\E, because that would rewrite history/,
