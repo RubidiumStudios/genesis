@@ -80,11 +80,19 @@ subtest 'an unreachable remote fails at pre-flight naming the network' => sub {
 
 	is($exit, Genesis::Exit::TEMPFAIL(),
 		'the run failed at TEMPFAIL, which a re-run can fix');
-	like($err, qr/could not reach|unreachable|network/i,
-		'the failure names the network');
+	like($err, qr/the network or the remote is unreachable/i,
+		'the failure names the class of remote error it was, '.
+		'and not every remote error there is');
 	ok(!-f $h->a . '/prod4.yml',
 		'and it failed before writing anything');
 	restore_remote($h);
+
+	# There is one row here and not three.  The refusal reads the kind the
+	# fetch result carries, and the harness can provoke the network kind
+	# alone: sever_remote injects "Could not resolve host", and nothing in
+	# it makes a remote reject credentials or fail for a reason the
+	# classifier cannot name.  An auth row wants a fixture the harness does
+	# not have, and it is named as a gap rather than faked here.
 };
 
 subtest 'the command touches no deployment branch' => sub {

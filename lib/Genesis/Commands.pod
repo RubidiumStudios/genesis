@@ -1741,11 +1741,19 @@ C<Genesis::BranchClass::assert_pre_deploy>, which refreshes the control
 branch from the remote and then refuses a derived branch at
 C<Genesis::Exit::DATAERR>.
 
-The refresh is passed along as C<< refresh => 0 >> when the running command
-carries C<--no-refresh>, which C<pipeline-status> alone declares.  That
-command promises to make no network call, so the flag is read here, where the
-options are, rather than in the assertion, which has no business knowing
-which command declared it.
+The refresh is passed along as C<< refresh => 0 >> for the two commands that
+make no network call of their own.  C<pipeline-status> says so with
+C<--no-refresh>, which it alone declares.  C<pipeline-describe> resolves the
+repository's own configuration out of files, so it holds no ref a refresh
+could make current, and a fetch would refuse offline what the command can
+always answer from disk.  Both are read here, where the options and the
+command name are, rather than in the assertion, which has no business knowing
+which command declared what.
+
+The two names sit in the gate for now.  D81 would rather a registration
+declared that it needs no refresh, the way it declares its class, and the
+step that gives registrations such an attribute moves these names onto it,
+M17 for C<pipeline-status>.
 
 The name a command is about to add goes down with it as C<< adding => ... >>.
 C<genesis new> takes that name as its first argument, and a feature branch

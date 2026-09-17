@@ -412,6 +412,11 @@ sub _gate_branch_class {
 	# current, and a fetch would refuse offline what the command can always
 	# answer from disk.  Both are read here rather than in the assertion,
 	# because the option and the command are the gate's to know.
+	#
+	# The two names sit in the gate for now.  D81 would rather a
+	# registration declared that it needs no refresh, the way it declares
+	# its class, and the step that gives registrations such an attribute
+	# moves these names onto it, M17 for pipeline-status.
 	my $refresh = get_options()->{'no-refresh'} ? 0 : 1;
 	$refresh = 0 if is_equivalent_command($COMMAND, 'pipeline-describe');
 

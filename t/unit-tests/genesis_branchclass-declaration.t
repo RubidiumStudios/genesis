@@ -101,4 +101,24 @@ subtest 'the marker and the refusal read one attribute' => sub {
 	}
 };
 
+subtest 'the marker stays on the command line at an ordinary width' => sub {
+	# The rows above pin the width at 999, where no summary folds, so they
+	# would pass against an implementation that appends the marker to the
+	# summary before the wrap.  That implementation is the one this row
+	# catches: at an ordinary width the marker travelled with the last
+	# words of the summary onto a continuation line, where it names no
+	# command and the left column cannot say whose it is.  The row is green
+	# on arrival, because the marker is already put on after the wrap.
+	local $ENV{GENESIS_OUTPUT_COLUMNS} = 100;
+	my $help = stderr_from { exits_zero { Genesis::Commands::command_help() } };
+
+	for my $cmd (sort keys %expected) {
+		my $marker = $expected{$cmd} eq Genesis::Commands::PRE_DEPLOY
+			? '[control]'
+			: '[env branch]';
+		like($help, qr/^[A-Z ]*\Q$cmd\E\s{2,}[^\n]*\Q$marker\E/m,
+			"${cmd}'s marker is on its own first line at 100 columns");
+	}
+};
+
 done_testing;
