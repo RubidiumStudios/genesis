@@ -12,6 +12,7 @@ use Genesis::Top;
 use Genesis::UI;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
+use Genesis::Exit qw/DATAERR/;
 use Encode qw(decode_utf8);
 
 sub create {
@@ -88,18 +89,12 @@ sub create {
 		$git->preflight;
 
 		# The command commits the environment file, and a commit takes
-		# everything the index already holds, so an operator with unrelated
-		# work in progress would otherwise find it swept into the
-		# environment's own commit and have to undo a commit to get it back.
-		unless ($git->is_clean) {
-			my $status = $git->status;
-			my @dirty = sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
-			bail(
-				"Working tree has uncommitted changes, and this command ".
-				"commits.\n\nCommit or stash them first:\n%s",
-				join("", map {"  - $_\n"} @dirty)
-			);
-		}
+		# everything the index already holds, so an operator with staged
+		# work of their own would otherwise find it swept into the
+		# environment's own commit and have to undo a commit to get it
+		# back.  Under --no-commit there is no commit for anything to be
+		# swept into, so the check is skipped (D80).
+		_assert_clean_index($git) unless get_options->{'no-commit'};
 	}
 
 	# create the environment
@@ -283,6 +278,37 @@ sub create {
 	}
 }
 
+# _assert_clean_index - refuse a commit that would sweep in staged work {{{
+#
+# D80: a session asserts a clean tree and a clean index, because its abort
+# has to discard only what it wrote.  This command discards nothing, and its
+# one real risk is a commit that carries somebody else's staged change, so
+# the check is on the index alone.  An unstaged edit is left where it is,
+# because it never enters the commit and refusing it would protect nothing
+# (I3).
+sub _assert_clean_index {
+	my ($git) = @_;
+
+	my $status = $git->status;
+	my @staged = sort grep {
+		# The index column is the first character of the two.  A space
+		# means the change is unstaged, and a question mark means the path
+		# is untracked.
+		substr($status->{$_} // '', 0, 1) !~ /^[ ?]$/
+	} keys %$status;
+	return 1 unless @staged;
+
+	bail(
+		{exitcode => DATAERR},
+		"There are staged changes in this repository, and this command ".
+		"makes a commit, so they would be swept into it:\n\n%s\n".
+		"Commit them, unstage them with #C{git reset}, or run with ".
+		"#C{--no-commit} to stage the environment file and stop there.\n",
+		join('', map {"    $_\n"} @staged)
+	);
+}
+
+# }}}
 sub edit {
 	option_defaults(
 		editor => $ENV{EDITOR} || 'vim',
