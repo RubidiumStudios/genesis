@@ -1108,20 +1108,24 @@ B<Examples:>
 What to call the place we are standing, for a message that has to tell an
 operator where a failed restore left them.
 
-C<< $git->current_branch >> runs C<git rev-parse --abbrev-ref HEAD>, which
-answers the literal string C<HEAD> on a detached HEAD rather than answering
-undefined, so a fallback behind it never fires for that state and the operator
-is told they are standing on "HEAD", which names nothing they can act on. Standing on
-a commit is a designed state rather than an accident now, so the question is
-asked here instead.
+C<< $git->current_branch >> answers the literal string C<HEAD> on a detached
+HEAD, and it answers undefined wherever git itself failed, which in a
+repository with no commits is what an unborn HEAD does. Neither answer names a
+place an operator can act on, so both of them fall through to the fallback
+here and the fallback names each state for itself. Standing on a commit is a
+designed state rather than an accident now, which is why the question is worth
+asking again.
 
 On a branch it answers the branch name. Detached it answers the commit, and it
 names the target C<switch> was handed beside it where the two are not the same,
-because that is the target the caller asked for.
+because that is the target the caller asked for. On an unborn HEAD it reads the
+branch through C<git symbolic-ref>, which answers there, and says that the
+branch has no commits yet.
 
 B<Parameters:> None.
 
-B<Returns:> The branch name, or a phrase naming the commit we are detached at.
+B<Returns:> The branch name, a phrase naming the commit we are detached at, or
+a phrase naming the unborn branch we are standing on.
 
 B<Examples:>
 
@@ -1130,6 +1134,9 @@ B<Examples:>
 
   my $where = $session->_standing_on;
   # returns 'a detached HEAD at 9f0d1c2a...' after a switch to a commit
+
+  my $where = $session->_standing_on;
+  # returns 'main, which has no commits yet' where nothing is committed
 
 =head2 _register_net
 

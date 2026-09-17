@@ -146,6 +146,32 @@ subtest 'a commit the refresh cannot reach is refused at DATAERR' => sub {
 	$session->finish;
 };
 
+subtest 'an unborn HEAD is named as the branch it is, not as a commit' => sub {
+	plan tests => 3;
+
+	# No caller reaches this today, because begin refuses a repository with
+	# no commits before a session exists, so the row asks the sub itself.
+	# What it asks about is the answer an operator would read if a later
+	# caller ever did get here, and the fallback is the only thing between
+	# them and git's own fatal about a commit that cannot be read.
+	my $h    = make_harness(envs => ['qa']);
+	my $path = fixture_preflight($h, 'no_commits');
+	my $git  = Service::Git->new($path);
+
+	my ($named) = run({dir => $path},
+		'git', 'symbolic-ref', '--short', 'HEAD');
+	chomp $named;
+
+	my $where = $git->session(control => $h->control)->_standing_on;
+
+	like($where, qr/\Q$named\E/,
+		'the phrase names the branch HEAD points at');
+	like($where, qr/no commits/,
+		'and says that the branch has none yet');
+	unlike($where, qr/detached|fatal|ambiguous argument/,
+		"rather than calling it detached or handing back git's complaint");
+};
+
 # One local helper, because an assertion helper lives beside its test.  bail
 # dies rather than exits whenever it is reached from inside an eval, which a
 # test file always is, so there is no exit code in this process to read.  The
