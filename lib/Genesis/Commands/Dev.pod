@@ -296,13 +296,19 @@ B<Examples:>
 
 =head2 _provider_output
 
-Resolves and instantiates a provider, then runs C<generate_from_ast>.
-Normalizes a scalar return into a C<< { 'pipeline.yml' => $content } >>
-hash so callers see one shape.
+Builds a provider from the platform name and asks it for its compiler,
+then runs C<generate_from_ast>.  Normalizes a scalar return into a
+C<< { 'pipeline.yml' => $content } >> hash so callers see one shape.
 
-Constructs the provider without a C<top>.  A stored AST carries no
-repository, so provider paths that require repo state are unavailable
-here -- see L</LIMITATIONS>.
+Asking the provider is what reaches the refusal for a type that has no
+compiler yet, through C<required>, and it is also the only way the
+compiler can read the declared keys, since under D108 it reads them off
+the provider it holds.
+
+The provider is built from its type alone, because a stored AST carries
+no configured block, and the compiler is built without a C<top>, because
+a stored AST carries no repository either.  Provider paths that require
+repo state are therefore unavailable here -- see L</LIMITATIONS>.
 
 B<Errors:>
 

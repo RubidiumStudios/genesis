@@ -63,17 +63,19 @@ subtest 'one class carries the fragment and the check' => sub {
 	is_deeply Genesis::CI::Provider::Manual->provider_options_schema, {},
 		'and the manual provider declares an empty fragment rather than none';
 
-	# The compiler side reads the same declaration rather than a copy.
-	is_deeply(Genesis::CI::ProviderCompiler::Concourse->provider_options_schema,
-		Genesis::CI::Provider::Concourse->provider_options_schema,
-		'the compiler class answers with what the CLI class declared');
+	# The compiler side keeps no declaration at all, neither a copy nor a
+	# forwarder to the real one.  A compiler reads the fragment off the
+	# provider it holds, so the class that declares it is the only class
+	# that answers for it.
+	ok !Genesis::CI::ProviderCompiler::Concourse->can('provider_options_schema'),
+		'and the compiler class answers for no declaration of its own';
 };
 
 subtest "the configured provider's fragment is what the block declares" => sub {
 	plan tests => 5;
 
 	my $top      = load_with($h, concourse());
-	my $fragment = Genesis::CI::ProviderCompiler::Concourse->provider_options_schema;
+	my $fragment = Genesis::CI::Provider::Concourse->provider_options_schema;
 
 	# The block names the module rather than listing keys, so a reader
 	# asking about one of the block's keys is answered by the provider the

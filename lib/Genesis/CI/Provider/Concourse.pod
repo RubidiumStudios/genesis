@@ -1,0 +1,394 @@
+=head1 NAME
+
+Genesis::CI::Provider::Concourse - the Concourse CI provider
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Provider;
+
+    # From the command line, or from what a repository stored.
+    my $provider = Genesis::CI::Provider->init(
+        'ci-provider' => 'concourse', 'ci-target' => 'prod');
+    my $stored   = Genesis::CI::Provider->new(
+        type => 'concourse', target => 'prod', team => 'platform');
+
+    $stored->team;               # 'platform'
+    my %config = $stored->config;
+
+    # The compiler that emits for this provider, holding the provider.
+    my $compiler = $stored->compiler(ast => $ast);
+
+=head1 DESCRIPTION
+
+Manages Concourse configuration in the C<ci.provider> section of
+F<.genesis/config>. This is the operator's half of the provider: it reads
+the command line, talks to C<fly>, declares the keys an operator may
+write, says what Concourse is able to do, and validates the block written
+for it. The other half, which turns a compiled pipeline into Concourse
+YAML, is L<Genesis::CI::ProviderCompiler::Concourse>, and a provider
+hands its own compiler out through L<Genesis::CI::Provider/compiler>.
+
+The one C<DEFAULT_TEAM> lives here, beside the declaration that names it
+as the C<team> key's default, and C</team> is what reads it. The
+compiling class kept a second copy and fell back to it when it compiled,
+with a comment above each asking a reader to keep the two in step, which
+is a rule nothing enforced. The compiler reads the team off the provider
+it holds now, so there is one constant and one place it is written.
+
+A target may be named in two ways. An existing C<fly> target is named
+with C<--ci-target> alone, and its URL, team, and TLS setting are read
+out of F<~/.flyrc>. A new target wants C<--ci-url> and C<--ci-team>, and
+C<--ci-target> then only overrides the name, which is otherwise derived
+from the two. Giving both forms for a target that already exists is
+refused rather than silently resolved one way.
+
+Under D86 the declaration is the only place these keys are named, and
+under D105 it is the whole of what the block admits beside the type, so a
+key that is not declared is refused by name as the configuration loads.
+Under D100 that is why C<target>, C<url>, C<team>, and C<insecure> are
+declared here rather than beside the type, where they sat unread under
+every other provider.
+
+Two keys are deliberately absent. There is no C<output_layout>, because
+Concourse emits one pipeline definition and declares
+C<multi_file_output> false, and a provider offers that key by declaring
+it. There is no C<pipeline_name> either, because under D25 and D28
+C<pipeline.name> is the one label the compiler and the status commands
+read, and C<expose> is C<public> under D27 with no alias behind it.
+
+Notification styles, BOSH upgrade locks, and the task library are
+configuration-level features rather than provider options. They are
+documented with the compiler, in
+L<Genesis::CI::ProviderCompiler::Concourse>.
+
+=head1 CLASS METHODS - BUILDING A PROVIDER
+
+=head2 init(%opts)
+
+Builds this provider from parsed command-line options, in the two modes
+the description gives. An existing C<fly> target is read out of
+F<~/.flyrc>, and a new one is built from the URL and the team.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+C<ci-target> names a target, C<ci-url> and C<ci-team> describe a new one,
+and C<ci-insecure> skips TLS verification.
+
+=back
+
+B<Returns:> the provider.
+
+B<Errors:> bails with "Target '...' already exists in ~/.flyrc" when
+C<ci-target> names an existing target and a new target's flags are given
+with it, and with "Concourse CI provider requires --ci-target (existing
+fly target) or --ci-url and --ci-team (new target)" when neither form is
+complete.
+
+B<Examples:>
+
+    my $provider = Genesis::CI::Provider::Concourse->init(
+        'ci-url' => 'https://ci.example.com', 'ci-team' => 'platform');
+    $provider->{target};    # 'ci/platform', derived from the two
+
+=head2 new(%config)
+
+Builds this provider from what a repository stored under
+C<pipeline.provider>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+C<target>, C<url>, C<team>, and C<insecure> are the stored settings, and
+C<min_fly_version> is the C<fly> version C</check_prereqs> insists on.
+C<team> defaults to C<main>.
+
+=back
+
+B<Returns:> the provider.
+
+B<Examples:>
+
+    my $provider = Genesis::CI::Provider->new(
+        type => 'concourse', target => 'prod');
+
+=head1 CLASS METHODS - COMMAND LINE
+
+=head2 opts()
+
+The Getopt::Long specifications for this provider's own flags.
+
+B<Returns:> the specifications, as a list.
+
+B<Examples:>
+
+    Genesis::CI::Provider::Concourse->opts;
+    # ('ci-target=s', 'ci-url=s', 'ci-team=s', 'ci-insecure')
+
+=head2 opts_help(%config)
+
+This provider's section of a usage message, one block per flag, with the
+two ways of naming a target set out separately. It returns nothing at all
+unless C<concourse> is among the types the caller asked about.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+C<valid_types> names the provider types the help is being assembled for.
+
+=back
+
+B<Returns:> the help text, as a string, or the empty string.
+
+B<Examples:>
+
+    print Genesis::CI::Provider::Concourse->opts_help(
+        valid_types => ['concourse']);
+
+=head1 CLASS METHODS - THE DECLARATION
+
+=head2 provider_options_schema()
+
+The keys an operator may write under C<pipeline.provider> beside
+C<type: concourse>, each with its type, its default where it has one, and
+the description C<genesis config> renders as help.
+
+The C<task> block declares C<image>, C<version>, and C<privileged>, and
+it defaults to an empty hash for the same reason the provider block
+itself does: validation only walks into a hash that is present, so
+without that default the sub-keys are never reached and never resolve.
+
+B<Returns:> a hash reference of key name to its declaration.
+
+B<Examples:>
+
+    my $schema = Genesis::CI::Provider::Concourse->provider_options_schema;
+    $schema->{team}{default};                  # 'main'
+    $schema->{task}{schema}{privileged}{type}; # 'array'
+
+=head2 capabilities()
+
+D101's six names. Concourse declares the first five true and
+C<multi_file_output> false, since it emits one pipeline definition and no
+more.
+
+B<Returns:> a hash reference of the six capability names to booleans.
+
+B<Examples:>
+
+    Genesis::CI::Provider::Concourse->capabilities->{deployment_locks};  # 1
+
+=head1 CLASS METHODS - VALIDATION
+
+=head2 validate_config($config, $path, $discriminator)
+
+This provider's own rules for its block, which are the two a declaration
+cannot state, on top of the generic pass the base gives every block.
+C<SUPER> runs first, because the declaration is the floor rather than a
+subset of what is wanted checked.
+
+A target is required, and it is asked for only once the section the block
+sits in is switched on, which the base answers for every provider. A URL,
+where one is written, has to begin with C<http://> or C<https://>. Both
+keys are read off the block where the operator wrote them rather than off
+an object assembled out of the block first.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+The configuration the block sits in.
+
+=item C<$path>
+
+The block's path, such as C<pipeline.provider>.
+
+=item C<$discriminator>
+
+The key the parent declared to choose this class, which no declaration
+names and which is therefore left alone.
+
+=back
+
+B<Returns:> the refusals found, as a list of strings.
+
+B<Examples:>
+
+    my @errors = Genesis::CI::Provider::Concourse->validate_config(
+        $config, 'pipeline.provider');
+    # ("'target' is required for the Concourse provider")
+
+=head1 INSTANCE METHODS
+
+=head2 label()
+
+This provider's name as a person reads it.
+
+B<Returns:> the label, as a string.
+
+B<Examples:>
+
+    $provider->label;    # 'Concourse'
+
+=head2 team($value)
+
+The Concourse team, read and written. This is the one home for the team,
+and the compiler reads it through the provider it holds rather than
+keeping a second copy with a default of its own.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+The team to set. Left out, the team is read rather than written.
+
+=back
+
+B<Returns:> the team, as a string, falling back to C<main>.
+
+B<Examples:>
+
+    $provider->team;               # 'main'
+    $provider->team('platform');   # 'platform', and set
+
+=head2 config()
+
+What goes back into the C<ci.provider> section of F<.genesis/config>. The
+team is written only where it differs from the default, and the insecure
+flag only where it is set, so a repository records what somebody chose
+rather than what it was given.
+
+B<Returns:> the settings, as a list of key and value pairs.
+
+B<Examples:>
+
+    my %stored = $provider->config;
+    # (type => 'concourse', target => 'prod', team => 'platform')
+
+=head2 check_prereqs()
+
+Whether C<fly> is on the PATH, and whether it is new enough where the
+provider was built with a minimum version. A version is compared field by
+field rather than as a string, so 10 sorts above 9.
+
+B<Returns:> 1 when C<fly> is present and new enough, or 0 with the reason
+already reported.
+
+B<Examples:>
+
+    exit 86 unless $provider->check_prereqs;
+
+=head2 interactive_wizard($top)
+
+Prompts the operator to choose an existing C<fly> target or to describe a
+new one. Existing targets are listed with their URL, team, and TLS
+setting, and one whose token has expired is logged in again before it is
+used. Describing a new one runs C<fly login> against it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment repository being configured.
+
+=back
+
+B<Returns:> the provider, configured.
+
+B<Errors:> bails with "A Concourse URL is required." when the operator
+gives no usable URL for a new target, and with "fly login failed for
+target '...'" when the login itself fails.
+
+B<Examples:>
+
+    $provider = $provider->interactive_wizard($top);
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _load_fly_targets()
+
+Every C<fly> target a person could choose, merged from what C<fly
+targets> prints and what F<~/.flyrc> records. The table gives the name,
+the URL, the team, and the expiry, and the file gives the TLS setting,
+which the table does not carry.
+
+B<Returns:> the targets, as a list of hash references.
+
+B<Examples:>
+
+    my @targets = _load_fly_targets();
+    $targets[0]{expired};    # 1, where its token has run out
+
+=head2 _derive_target_name($url, $team)
+
+A target name worked out from a URL and a team, so that an operator who
+describes a new target does not have to name it as well. The name is the
+host's first label, with the team appended where the team is not C<main>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$url>
+
+The Concourse server's URL.
+
+=item C<$team>
+
+The team the target logs in as.
+
+=back
+
+B<Returns:> the derived name, as a string.
+
+B<Examples:>
+
+    _derive_target_name('https://ci.example.com', 'main');      # 'ci'
+    _derive_target_name('https://ci.example.com', 'platform');  # 'ci/platform'
+
+=head2 _token_expired($expiry_str)
+
+Whether an expiry C<fly targets> printed has already passed. The string
+is read as UTC, and anything that does not parse is taken as not expired,
+since refusing to use a target because its expiry was spelled unexpectedly
+is worse than trying it and being told to log in.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$expiry_str>
+
+The expiry as C<fly targets> prints it, such as
+C<"Sat, 08 Feb 2025 18:53:16 UTC">.
+
+=back
+
+B<Returns:> 1 when the expiry is in the past, and 0 otherwise.
+
+B<Examples:>
+
+    _token_expired('Sat, 08 Feb 2025 18:53:16 UTC');    # 1
+    _token_expired('');                                 # 0
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Provider>, L<Genesis::CI::ProviderCompiler::Concourse>,
+L<Genesis::CI::ProviderRegistry>
+
+=cut

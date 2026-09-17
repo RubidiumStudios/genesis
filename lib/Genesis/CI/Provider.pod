@@ -486,6 +486,58 @@ B<Examples:>
 
     $provider->type;    # 'concourse'
 
+=head2 compiler(%opts)
+
+The compiler that emits this provider's artefact, built over the AST it
+is handed and holding this provider. It is D108's composition read from
+the provider's side, and it is what gives C<DEFAULT_TEAM> and
+C</check_prereqs> one home each rather than two. A compiler holds the
+provider itself rather than a copy of its settings, so a change made to
+the provider afterwards is visible without anything being rebuilt.
+
+A provider with no artefact to emit answers with C<undef>, which is what
+C<manual> does honestly and what C<github-actions> does until its
+compiler lands. That is better than an abstract method left
+unimplemented, because a caller may ask any provider this question and
+read the answer rather than trapping a bug.
+
+A caller that needs a compiler rather than merely asking whether there is
+one passes C<required>, and the registry refuses instead of answering
+C<undef>. Emitting a pipeline and validating a block are different
+questions, and a provider may legitimately answer the second while having
+nothing to answer the first with.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+C<ast> is the AST the compiler emits from, and every caller passes one.
+C<top> is the deployment repository, for the provider paths that read
+repo state. C<provider_opts> is the resolved provider options, which
+defaults to an empty hash. C<required> makes the absence of a compiler a
+refusal rather than an C<undef>.
+
+=back
+
+B<Returns:> the compiler, or C<undef> where the provider has none and
+C<required> was not asked for.
+
+B<Errors:> raises "Genesis knows the '...' provider but has no compiler
+for it yet...", at C<Genesis::Exit::CONFIG>, when C<required> is passed
+and the registry names no compiling class. The refusal comes from
+L<Genesis::CI::ProviderRegistry>, so it reads the same wherever a
+compiler is asked for.
+
+B<Examples:>
+
+    my $compiler = $provider->compiler(ast => $ast, top => $top);
+
+    # A provider with nothing to emit, asked either way.
+    $manual->compiler(ast => $ast);                  # undef
+    $manual->compiler(ast => $ast, required => 1);   # refuses
+
 =head2 check_prereqs()
 
 Whether the toolchain this provider needs is on the PATH. The base

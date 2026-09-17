@@ -1,0 +1,188 @@
+=head1 NAME
+
+Genesis::CI::Provider::Manual - the provider for a repository whose pipeline nobody automates
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Provider;
+
+    my $provider = Genesis::CI::Provider->new(type => 'manual');
+    my %stored   = $provider->config;    # (type => 'manual')
+
+    # There is nothing to emit, so there is no compiler to emit it.
+    $provider->compiler(ast => $ast);    # undef
+
+=head1 DESCRIPTION
+
+A no-op CI provider for repositories that manage their pipelines
+manually. Genesis scaffolds the repository as it does for any other
+provider, and then leaves the pipeline alone. It takes no options of its
+own and stores only C<< type => 'manual' >> in F<.genesis/config>.
+
+It is the default. A repository that says nothing about a CI provider
+gets this one, which is why it has to be a real provider rather than an
+absence: every reader that asks a repository what its provider can do,
+what keys it declares, or what it emits is answered here rather than
+having to check first whether there is a provider at all.
+
+The declaration is empty rather than absent, under D105, and the refusal
+D100 asks for falls out of that. A provider key written beside
+C<type: manual> is a key nothing declares, so it is refused by name like
+any other undeclared key, and this provider needs no special case to get
+there.
+
+C</capabilities> answers all six of D101's names false, honestly. Manual
+runs no jobs at all, so every key one of those abilities gates is refused
+at load naming both the key and the ability, which is better than the
+block standing aside because there was nothing to read.
+
+This provider has no compiling class, so
+L<Genesis::CI::Provider/compiler> answers with C<undef> unless a caller
+asks for one it cannot do without. Under D43 C<pipeline-apply> sets no
+pipeline here, so there is nothing for a compiler to emit.
+
+=head1 CLASS METHODS - BUILDING A PROVIDER
+
+=head2 init(%opts)
+
+Builds this provider from parsed command-line options, which it ignores,
+since there are none to read.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+The parsed CI options. Accepted and not read.
+
+=back
+
+B<Returns:> the provider.
+
+B<Examples:>
+
+    my $provider = Genesis::CI::Provider::Manual->init(%ci_opts);
+
+=head2 new(%config)
+
+Builds this provider from what a repository stored, which is the type and
+nothing else.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+The stored block. Only C<type> is read, and it defaults to C<manual>.
+
+=back
+
+B<Returns:> the provider.
+
+B<Examples:>
+
+    my $provider = Genesis::CI::Provider->new(type => 'manual');
+
+=head1 CLASS METHODS - COMMAND LINE
+
+=head2 opts_help(%config)
+
+This provider's section of a usage message, which says that choosing it
+turns automated pipeline management off. It returns nothing at all unless
+C<manual> is among the types the caller asked about.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+C<valid_types> names the provider types the help is being assembled for.
+
+=back
+
+B<Returns:> the help text, as a string, or the empty string.
+
+B<Examples:>
+
+    print Genesis::CI::Provider::Manual->opts_help(
+        valid_types => ['manual']);
+
+=head1 CLASS METHODS - THE DECLARATION
+
+=head2 provider_options_schema()
+
+The keys an operator may write under C<pipeline.provider> beside
+C<type: manual>, of which there are none.
+
+It is an empty declaration rather than a missing one, so that the
+ordinary undeclared-key refusal covers this provider like any other.
+
+B<Returns:> an empty hash reference.
+
+B<Examples:>
+
+    Genesis::CI::Provider::Manual->provider_options_schema;    # {}
+
+=head2 capabilities()
+
+D101's six names, all false. A manual pipeline runs no jobs, so it can do
+none of the six, and every key one of them gates is refused at load.
+
+B<Returns:> a hash reference of the six capability names to 0.
+
+B<Examples:>
+
+    Genesis::CI::Provider::Manual->capabilities->{scheduled_jobs};    # 0
+
+=head1 INSTANCE METHODS
+
+=head2 label()
+
+This provider's name as a person reads it.
+
+B<Returns:> the label, as a string.
+
+B<Examples:>
+
+    $provider->label;    # 'Manual'
+
+=head2 config()
+
+What goes back into the C<ci.provider> section of F<.genesis/config>,
+which is the type and nothing else.
+
+B<Returns:> the settings, as a list of key and value pairs.
+
+B<Examples:>
+
+    my %stored = $provider->config;    # (type => 'manual')
+
+=head2 interactive_wizard()
+
+There is nothing to ask, so nothing is asked and a fresh provider is
+handed back.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment repository being configured. Accepted and not read.
+
+=back
+
+B<Returns:> the provider.
+
+B<Examples:>
+
+    $provider = $provider->interactive_wizard($top);
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Provider>, L<Genesis::CI::ProviderRegistry>
+
+=cut

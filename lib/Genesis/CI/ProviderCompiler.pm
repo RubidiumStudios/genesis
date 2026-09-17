@@ -27,6 +27,14 @@ sub new {
 		"use a subclass instead")
 		if $class eq __PACKAGE__;
 
+	# The concrete's deleted constructor carried this refusal, and it is
+	# worth keeping: a compiler blessed over an undefined AST fails much
+	# later and says far less about why, so the route that always has one
+	# is named here.
+	bug("A compiler needs the AST it emits from; ".
+		"build it with \$provider->compiler(ast => \$ast)")
+		unless $opts{ast};
+
 	return bless({
 		provider      => $opts{provider},
 		ast           => $opts{ast},
@@ -120,66 +128,28 @@ sub cli_opts_help {
 }
 
 # }}}
-# provider_options_schema - the CLI class's declaration {{{
+# where provider_options_schema and capabilities went {{{
 #
-# One declaration per provider under D105, and it lives beside the check
-# that enforces it.  The compiler reads it from there so that the two
-# sides cannot answer differently.
+# Both were forwarders on this class, and each resolved the CLI class
+# through the registry all over again so that a compiler could answer
+# for a provider's own declaration.  A compiler that holds its provider
+# asks that provider instead:
 #
-# The shape is unchanged, a hashref mirroring Top::_repo_config_schema():
+#   $self->provider->provider_options_schema
+#   $self->provider->capabilities
 #
-#   {
-#     target => {type => 'string', required => 1, description => '...'},
-#     team   => {type => 'string', default => 'main', description => '...'},
-#     ...
-#   }
-sub provider_options_schema {
-	my ($self) = @_;
-	require Genesis::CI::Provider;
-	return Genesis::CI::Provider->provider_class($self->provider_type)
-		->provider_options_schema;
-}
-
-# }}}
-# capabilities - what this provider can do, as six booleans {{{
-#
-# D101's declaration, and the companion to provider_options_schema.  A
-# capability says what the provider is able to do; a configuration key is
-# the operator's choice inside that ability, and a key whose capability is
-# false is refused at load naming both.  The six names are the abilities
-# rather than any provider's spelling of them:
-#
-#   deployment_locks       serialise jobs against a named BOSH deployment's
-#                          lock pool, with D22's reader-writer semantics
-#   cross_pipeline_events  signal at a distance, so a job in one pipeline
-#                          causes a run in another
-#   optional_git_triggers  emit a branch input that does not fire on a git
-#                          change
-#   scheduled_jobs         run a job on a schedule
-#   per_commit_runs        run once per input version rather than only on
-#                          the newest
-#   multi_file_output      emit more than one file
-#
-# Mandatory for the same reason the fragment is: a provider whose
-# abilities are unknown cannot have its keys gated.
-#
-# The declaration itself lives on the matching class under
-# Genesis::CI::Provider, beside the fragment, and this reads it from
-# there through the same route, so that one class answers for both halves
-# of a provider and the two sides cannot answer differently.
-sub capabilities {
-	my ($self) = @_;
-	require Genesis::CI::Provider;
-	return Genesis::CI::Provider->provider_class($self->provider_type)
-		->capabilities;
-}
-
+# which is one hop rather than a class resolution, and which cannot
+# answer differently from the class that declared it.
 # }}}
 # provider_options_defaults - default values for provider options {{{
 #
-# Returns a flat hashref of key => default_value.  Keys match those in
-# provider_options_schema().  Values here are NOT included in the config()
+# Returns a flat hashref of key => default_value.  Keys match those the
+# held provider declares.  Values here are NOT included in the config()
 # output — only explicitly-set non-default values are saved.
+#
+# An instance method rather than a class method, because the declaration
+# is read off the provider this compiler holds and a class has no
+# provider to ask.  The base declares nothing of its own, as it did.
 sub provider_options_defaults {
 	return {};
 }

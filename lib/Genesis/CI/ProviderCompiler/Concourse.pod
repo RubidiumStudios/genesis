@@ -270,11 +270,14 @@ declares is a key whose default this answers with, so the two cannot
 drift, and a nested block states its defaults where its own sub-keys are
 declared.
 
+The schema comes from the provider this compiler holds, which is why this
+is an instance method: a class method has no provider to ask.
+
 B<Returns:> a hash reference of key name to default value.
 
 B<Examples:>
 
-    Genesis::CI::ProviderCompiler::Concourse->provider_options_defaults;
+    $compiler->provider_options_defaults;
     # {team => 'main', pause_after_set => 0, ...}
 
 =head2 normalize_provider_opts($opts)

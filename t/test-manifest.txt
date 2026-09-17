@@ -155,6 +155,7 @@ unit-tests/genesis_hook_cloudconfig-resources.t # Resource (vm/disk type) handli
 # CI pipeline-descriptor tests
 unit-tests/genesis_ci_provider_registry-core.t            # the one provider registry and its enum
 unit-tests/genesis_ci_provider-package_paths.t            # every package derives its path, and the registry derives one too
+unit-tests/genesis_ci_provider-compiler_accessor.t        # a provider hands out its compiler, which holds the provider
 unit-tests/genesis_ci_pipeline_descriptor-auto-update.t   # auto-update pipeline descriptor
 unit-tests/genesis_ci_pipeline_descriptor-bosh-configs.t  # bosh-configs descriptor
 unit-tests/genesis_ci_pipeline_descriptor-deploy_task.t   # plain-CLI deploy task + env branch

@@ -139,10 +139,11 @@ CAP
 subtest 'the declaration carries six names' => sub {
 	plan tests => 3;
 
-	# Asked of the compiler-side class, which reads the declaration off
-	# the CLI class beside it, so the row pins the declaration and the
-	# route to it at once.
-	my $caps = Genesis::CI::ProviderCompiler::Concourse->capabilities;
+	# Asked of the provider class that declares it.  The compiler side
+	# used to answer through a forwarder of its own, and under D108 a
+	# compiler asks the provider it holds, so the class that declares the
+	# six is the only one to ask.
+	my $caps = Genesis::CI::Provider->provider_class('concourse')->capabilities;
 	is_deeply [sort keys %$caps], [@NAMES],
 		'the six names D101 fixes, and no others';
 	is_deeply [grep {$caps->{$_}} sort keys %$caps],

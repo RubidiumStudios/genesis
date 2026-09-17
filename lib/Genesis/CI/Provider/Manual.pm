@@ -89,15 +89,4 @@ sub interactive_wizard {
 
 1;
 
-=head1 NAME
-
-Genesis::CI::Provider::Manual - Manual (no-automation) CI provider for Genesis repo-init
-
-=head1 DESCRIPTION
-
-A no-op CI provider for repositories that manage their pipelines manually.
-Takes no additional options and stores only C<< type => 'manual' >> in config.
-
-=cut
-
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1

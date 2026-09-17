@@ -174,23 +174,4 @@ sub interactive_wizard {
 
 1;
 
-=head1 NAME
-
-Genesis::CI::Provider::GithubActions - GitHub Actions CI provider for Genesis repo-init
-
-=head1 DESCRIPTION
-
-Manages GitHub Actions-specific CI configuration in .genesis/config ci.provider.
-
-=head1 SYNOPSIS
-
-  my $p = Genesis::CI::Provider::GithubActions->init(
-    'ci-github-repo'   => 'myorg/my-deployment',
-    'ci-github-branch' => 'main',
-  );
-  my %cfg = $p->config;
-  # { type => 'github-actions', repo => 'myorg/my-deployment' }
-
-=cut
-
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1

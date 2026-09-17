@@ -9,9 +9,11 @@ use Genesis::UI;
 
 use POSIX qw(mktime);
 
-# The class that emits the pipeline keeps a DEFAULT_TEAM of its own, which
-# it falls back to when it compiles, so the constant is written in two
-# places and the two have to agree.
+# The one DEFAULT_TEAM, here beside the fragment that declares it as the
+# key's default.  The class that emits the pipeline kept a second copy
+# and fell back to it when it compiled, and a comment above each asked a
+# reader to keep the two in step, which is a rule nothing enforced.  It
+# reads the team off the provider it holds now.
 use constant {
 	DEFAULT_TEAM => 'main',
 };
@@ -305,6 +307,19 @@ sub validate_config {
 sub label { 'Concourse' }
 
 # }}}
+# team - the Concourse team, read and written {{{
+#
+# The one DEFAULT_TEAM lives here, beside the fragment that declares it
+# as the key's default.  The compiler used to keep a second copy and the
+# comment above each said the two had to agree, which is a rule nothing
+# enforced.
+sub team {
+	my ($self, $value) = @_;
+	$self->{team} = $value if defined $value;
+	return $self->{team} // DEFAULT_TEAM;
+}
+
+# }}}
 # config - returns hash for .genesis/config ci.provider section {{{
 sub config {
 	my ($self) = @_;
@@ -485,25 +500,5 @@ sub _token_expired {
 # }}}
 
 1;
-
-=head1 NAME
-
-Genesis::CI::Provider::Concourse - Concourse CI provider for Genesis repo-init
-
-=head1 DESCRIPTION
-
-Manages Concourse-specific CI configuration in .genesis/config ci.provider.
-
-=head1 SYNOPSIS
-
-  my $p = Genesis::CI::Provider::Concourse->init(
-    'ci-target'   => 'prod',
-    'ci-team'     => 'platform',
-    'ci-insecure' => 0,
-  );
-  my %cfg = $p->config;
-  # { type => 'concourse', target => 'prod', team => 'platform' }
-
-=cut
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1

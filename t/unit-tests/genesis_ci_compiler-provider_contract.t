@@ -50,7 +50,12 @@ subtest 'the task block declares privileged beside image and version' => sub {
 	# ASTBuilder and PipelineDescriptor both read
 	# pipeline.provider.task.privileged, so the nested schema has to
 	# declare it or the load refuses the key by name.
-	my $schema = Genesis::CI::ProviderCompiler::Concourse->provider_options_schema();
+	#
+	# Asked of the provider that declares it, since the compiler side no
+	# longer answers for a declaration it does not own.
+	require Genesis::CI::Provider;
+	my $schema = Genesis::CI::Provider->provider_class('concourse')
+		->provider_options_schema();
 	ok exists $schema->{task}{schema}{privileged},
 		'privileged is declared in the nested task schema';
 	is $schema->{task}{schema}{privileged}{type}, 'array',
@@ -83,11 +88,17 @@ subtest 'pipeline.public still decides the visibility' => sub {
 		workflows    => {},
 	);
 
+	# Built through the provider, because the compiler reads the team and
+	# the declared keys off the provider it holds and a compiler built
+	# with none has nothing to read them from.
+	require Genesis::CI::Provider;
+
 	my $flown = sub {
 		my ($public) = @_;
 		unlink $log;
-		my $p = Genesis::CI::ProviderCompiler::Concourse->new(
-			ast => $ast, top => undef, provider_opts => {});
+		my $provider = Genesis::CI::Provider->new(
+			type => 'concourse', target => 'ci');
+		my $p = $provider->compiler(ast => $ast);
 		$p->{config} = {
 			pipeline => {
 				name => 'test',
@@ -113,14 +124,18 @@ subtest 'the provider block is not checked a second time' => sub {
 		'the validator keeps no copy of the provider check';
 
 	# D28 validated the block at load, so what reaches the compiler has
-	# already met the provider's own rules and cannot fail them here.  One
-	# reader of the fragment is left on the compiler side, and it is the
-	# base class reading the CLI class's declaration through.
+	# already met the provider's own rules and cannot fail them here.  The
+	# base used to read the CLI class's declaration through a forwarder of
+	# its own, and under D108 a compiler asks the provider it holds, so no
+	# file on the compiler side names the declaration at all.
+	# Comment lines are skipped, because the base says in prose where the
+	# forwarder went and why, and saying so is not reading anything.
 	my @found = grep {
-		grep {m/provider_options_schema/} split(/\n/, slurp($_) // '')
+		grep {!m/^\s*#/ && m/provider_options_schema/}
+			split(/\n/, slurp($_) // '')
 	} glob('lib/Genesis/CI/Compiler/*.pm lib/Genesis/CI/ProviderCompiler.pm');
-	is_deeply [@found], ['lib/Genesis/CI/ProviderCompiler.pm'],
-		'and the fragment is read on the compiler side in one place';
+	is_deeply [@found], [],
+		'and no file on the compiler side reads the fragment';
 };
 
 done_testing;

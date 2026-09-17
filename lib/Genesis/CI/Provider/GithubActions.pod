@@ -1,0 +1,236 @@
+=head1 NAME
+
+Genesis::CI::Provider::GithubActions - the GitHub Actions CI provider
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Provider;
+
+    my $provider = Genesis::CI::Provider->init(
+        'ci-provider'      => 'github-actions',
+        'ci-github-repo'   => 'myorg/my-deployment',
+        'ci-github-branch' => 'main',
+    );
+    my %stored = $provider->config;
+    # (type => 'github-actions', repo => 'myorg/my-deployment')
+
+=head1 DESCRIPTION
+
+Manages GitHub Actions configuration in the C<ci.provider> section of
+F<.genesis/config>. It is a whole provider on the operator's side: the
+type validates, the class resolves, the keys it declares are checked, and
+the abilities it declares gate the keys they gate.
+
+What it has no half of yet is a compiler. That class was removed in March
+2026 and it arrives back with the provider itself, so
+L<Genesis::CI::Provider/compiler> answers with C<undef> here, and a
+caller that cannot do without one is refused by name rather than handed
+something that would emit nothing.
+
+D101 gives this provider C<multi_file_output> true, because a workflow
+directory is several files and D67's override name follows them. The
+other five it leaves to be read off the provider when the compiler is
+written, so they are false for now and the refusal is the conservative
+one: a key this provider cannot honour is refused as the configuration
+loads rather than accepted and then dropped when the pipeline is emitted.
+
+The declaration follows from that. Under D105 and D101 the provider that
+can emit several files is the provider that declares the key choosing
+between the forms, so C</provider_options_schema> declares
+C<output_layout> and nothing else.
+
+This provider states no validation rule of its own, so the base's default
+is what runs, and under D105 that validates the block against the
+declaration above and refuses anything else by name. The two rules that
+used to stand here both spoke of the repository. Under D102 the
+repository a pipeline acts on lives in
+C<pipeline.source_control.repository> rather than in the provider block,
+so the declaration names no such key and an operator has nowhere to write
+one. Those rules worked only because the caller resolved the source
+control first and handed the value in, and the dispatch now runs before
+any of that is derived. L<Genesis::Top> already refuses a pipeline whose
+repository cannot be named, in the operator's own terms, so nothing an
+operator relied on went with them.
+
+=head1 CLASS METHODS - BUILDING A PROVIDER
+
+=head2 init(%opts)
+
+Builds this provider from parsed command-line options. The repository is
+required and the branch defaults to C<main>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+C<ci-github-repo> is the repository, in C<org/repo> form, and
+C<ci-github-branch> is the branch that workflow dispatch events and
+pushes fire runs on.
+
+=back
+
+B<Returns:> the provider.
+
+B<Errors:> bails with "GitHub Actions CI provider requires
+--ci-github-repo (format: org/repo)" when no repository is given, and
+with "--ci-github-repo must be in 'org/repo' format" when the one given
+is not two path segments.
+
+B<Examples:>
+
+    my $provider = Genesis::CI::Provider::GithubActions->init(
+        'ci-github-repo' => 'myorg/my-deployment');
+
+=head2 new(%config)
+
+Builds this provider from what a repository stored under
+C<pipeline.provider>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+C<repo> is the repository and C<branch> is the branch, which defaults to
+C<main>. C<type> defaults to C<github-actions>.
+
+=back
+
+B<Returns:> the provider.
+
+B<Examples:>
+
+    my $provider = Genesis::CI::Provider->new(
+        type => 'github-actions', repo => 'myorg/my-deployment');
+
+=head1 CLASS METHODS - COMMAND LINE
+
+=head2 opts()
+
+The Getopt::Long specifications for this provider's own flags, which are
+the repository and the branch.
+
+B<Returns:> the specifications, as a list.
+
+B<Examples:>
+
+    Genesis::CI::Provider::GithubActions->opts;
+    # ('ci-github-repo=s', 'ci-github-branch=s')
+
+=head2 opts_help(%config)
+
+This provider's section of a usage message, one block per flag. It
+returns nothing at all unless C<github-actions> is among the types the
+caller asked about.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+C<valid_types> names the provider types the help is being assembled for.
+
+=back
+
+B<Returns:> the help text, as a string, or the empty string.
+
+B<Examples:>
+
+    print Genesis::CI::Provider::GithubActions->opts_help(
+        valid_types => ['github-actions']);
+
+=head1 CLASS METHODS - THE DECLARATION
+
+=head2 capabilities()
+
+D101's six names. C<multi_file_output> is true, because a workflow
+directory is several files, and the other five are false until the
+compiler is written and their answers can be read off it.
+
+B<Returns:> a hash reference of the six capability names to booleans.
+
+B<Examples:>
+
+    Genesis::CI::Provider::GithubActions->capabilities;
+    # {multi_file_output => 1, scheduled_jobs => 0, ...}
+
+=head2 provider_options_schema()
+
+The one key an operator may write under C<pipeline.provider> beside
+C<type: github-actions>, which is C<output_layout>, choosing between one
+emitted file and several. The provider that can emit several is the
+provider that offers the key, so it is declared here and nowhere else.
+
+B<Returns:> a hash reference of key name to its declaration.
+
+B<Examples:>
+
+    Genesis::CI::Provider::GithubActions
+        ->provider_options_schema->{output_layout}{default};    # 'single'
+
+=head1 INSTANCE METHODS
+
+=head2 label()
+
+This provider's name as a person reads it.
+
+B<Returns:> the label, as a string.
+
+B<Examples:>
+
+    $provider->label;    # 'GitHub Actions'
+
+=head2 config()
+
+What goes back into the C<ci.provider> section of F<.genesis/config>. The
+branch is written only where it differs from the default, so a repository
+records what somebody chose rather than what it was given.
+
+B<Returns:> the settings, as a list of key and value pairs.
+
+B<Examples:>
+
+    my %stored = $provider->config;
+    # (type => 'github-actions', repo => 'myorg/my-deployment')
+
+=head2 interactive_wizard($top, %opts)
+
+Prompts the operator for the repository and the branch, asking only about
+what the options did not already settle.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment repository being configured.
+
+=item C<%opts>
+
+Answers given ahead of the prompts. C<ci-github-repo> and
+C<ci-github-branch> each skip their question when present.
+
+=back
+
+B<Returns:> the provider, configured.
+
+B<Errors:> bails with "GitHub Actions CI provider requires a repository"
+when the operator answers nothing, and with "Repository must be in
+'org/repo' format" when the answer is not two path segments.
+
+B<Examples:>
+
+    $provider = $provider->interactive_wizard($top,
+        'ci-github-repo' => 'myorg/my-deployment');
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Provider>, L<Genesis::CI::ProviderRegistry>,
+L<Genesis::Top>
+
+=cut
