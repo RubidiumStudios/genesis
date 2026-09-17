@@ -84,16 +84,39 @@ sub refresh_control {
 	my (undef, $result) = $git->fetch_branches([$control], $remote);
 	return 1 if $result->{ok};
 
+	# The result says which class of failure it was, and the three of them
+	# ask different things of the operator.  One sentence for all of them
+	# told somebody whose credentials had expired to go and check their
+	# network.  The kinds are the ones _classify_remote_error fills.
+	#
+	# Every kind exits TEMPFAIL, which is what fetch_pipeline_envs does
+	# with the same three in Genesis::Top.  A remote that will not answer
+	# is a condition a re-run fixes once the operator has dealt with it,
+	# rather than input they have to correct.
+	my $kind = $result->{kind} // 'unknown';
+	my ($because, $remedy) =
+		  $kind eq 'network' ? (
+			'the network or the remote is unreachable',
+			'Check the network and try again.'
+		) : $kind eq 'auth' ? (
+			'the remote rejected our credentials',
+			sprintf('Restore your access to #C{%s} and try again.', $remote)
+		) : (
+			'the remote failed the request',
+			'Try again, and read what the remote said below.'
+		);
+
 	# The remote's own words come back under err, which is the key
 	# fetch_branches fills.  There is no message key, so a caller reading one
 	# would print nothing and the operator would be told the fetch failed
 	# without being told why.
 	bail({exitcode => TEMPFAIL},
-		"Could not reach #C{%s} to refresh the #C{%s} branch.\n\n".
+		"Could not reach #C{%s} to refresh the #C{%s} branch, because %s.".
+		"\n\n".
 		"This command reads control's tip to decide whether the branch you ".
 		"are on carries every environment, so it cannot run against stale ".
-		"refs.  Check the network and try again.\n\n%s",
-		$remote, $control, $result->{err} // ''
+		"refs.  %s\n\n%s",
+		$remote, $control, $because, $remedy, $result->{err} // ''
 	);
 }
 
@@ -112,13 +135,36 @@ sub refresh_control {
 sub permitted_feature_branch {
 	my ($top, $git, $branch, %opts) = @_;
 
+	my $remote = $git->default_remote;
+	my $control_ref = $remote
+		? 'refs/remotes/' . $remote . '/' . $top->control_branch
+		: $top->control_branch;
+
+	# The tip is read off a ref, and a clone that has never fetched control
+	# holds none.  Left unchecked, the descent question below is asked of
+	# nothing, answered no, and the operator is told to rebase onto a tip
+	# that does not exist here.  The refresh above stands aside for such a
+	# clone, because materialising control is the pre-flight's repair to
+	# make and to report, so the ref really can still be missing by now.
+	my $from = $remote ? sprintf(' from #C{%s}', $remote) : '';
+	return (
+		0,
+		sprintf(
+			"#C{%s} has not been fetched%s, so there is no tip for #C{%s} ".
+			"to be measured against",
+			$top->control_branch, $from, $branch
+		),
+		sprintf(
+			"Fetch it, and cut the branch from what arrives:\n\n".
+			"    git fetch %s %s\n",
+			$remote // 'origin', $top->control_branch
+		)
+	) unless $git->branch_exists($control_ref);
+
 	# It descends from control's tip as observed through T after a refresh,
 	# so it carries every environment file control has and a check for an
 	# existing environment is sound.
-	my $remote = $git->default_remote;
-	my $control_tip = $remote
-		? $git->sha('refs/remotes/' . $remote . '/' . $top->control_branch)
-		: $git->sha($top->control_branch);
+	my $control_tip = $git->sha($control_ref);
 	return (
 		0,
 		sprintf(

@@ -178,4 +178,30 @@ subtest 'control_requires_pr moves the expectation to a feature branch' => sub {
 		'and says nothing about the key');
 };
 
+subtest 'a clone that has never fetched control is told so' => sub {
+	# This row narrows the clone and puts nothing back, so it stands last.
+	# The branch is cut while the remote-tracking ref is still here, and
+	# both control refs go afterwards, which leaves the tree standing on a
+	# feature branch with no tip to be measured against.
+	#
+	# The refresh stands aside for a clone with no local control branch,
+	# because materialising one is the pre-flight's repair to report, so
+	# the predicate below is genuinely handed nothing.
+	$git->create_branch('add-prod6', 'refs/remotes/origin/' . $h->control);
+	stand_on($h, 'add-prod6');
+	delete_local($h, 'a', $h->control);
+	Genesis::run({dir => $h->a, onfailure => 'could not drop the ref'},
+		'git', 'update-ref', '-d', 'refs/remotes/origin/' . $h->control);
+
+	my ($out, $err, $exit) = run_genesis($h, 'new', 'prod6', '--no-commit');
+
+	is($exit, Genesis::Exit::DATAERR(),
+		'the run is refused');
+	like($err . $out, qr/has not been fetched/i,
+		'the refusal says control has never arrived here');
+	unlike($err . $out, qr/does not descend/i,
+		'and does not say the branch fails to descend from a tip nobody '.
+		'in this clone has');
+};
+
 done_testing;

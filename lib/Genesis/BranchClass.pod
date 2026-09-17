@@ -20,10 +20,14 @@ at its registration. This module answers the questions that declaration
 raises, which are what class of branch the repository is standing on and
 whether a pre-deploy command may run from it.
 
-Every pre-deploy command also brings the control branch in from the remote
-before it reads anything, because the question the assertion answers is
-asked of the remote's tip and not of whatever this clone last happened to
-fetch.
+Nearly every pre-deploy command also brings the control branch in from the
+remote before it reads anything, because the question the assertion answers
+is asked of the remote's tip and not of whatever this clone last happened to
+fetch. Three do not. C<pipeline-status> under C<--no-refresh> and
+C<pipeline-describe> both answer from disk and promise no network call, and
+C<propagate> never reaches the assertion at all, because the gate returns
+above it for the one command that switches to control inside its own
+session.
 
 A pre-deploy command changes what will be delivered, so it belongs on the
 control branch or on a feature branch cut from it. The deployment branch,
@@ -118,10 +122,12 @@ B<Examples:>
 
 Brings the control branch from the remote into the repository's
 remote-tracking refs, and bails at C<Genesis::Exit::TEMPFAIL> naming the
-remote when it cannot. Every pre-deploy command runs it at pre-flight,
-because the descent condition is read through the remote-tracking ref and a
-stale one would let a feature branch cut from an older control tip pass a
-check it should fail.
+remote when it cannot. Every pre-deploy command that reaches the assertion
+runs it at pre-flight, because the descent condition is read through the
+remote-tracking ref and a stale one would let a feature branch cut from an
+older control tip pass a check it should fail. The gate withholds it from
+C<pipeline-status> under C<--no-refresh> and from C<pipeline-describe>,
+which answer from disk, and C<propagate> never gets this far.
 
 Only the control branch is fetched. A deployment branch's tip answers a
 question no pre-deploy command asks, and fetching one is what let a
@@ -156,10 +162,18 @@ B<Errors:>
 
 =item Refuses a remote it cannot reach.
 
-I<Could not reach origin to refresh the control branch.> The remote's own
-words follow, taken from the C<err> key of the fetch result, and the exit is
-C<Genesis::Exit::TEMPFAIL>, because a remote nobody can reach is a condition
-a re-run fixes rather than input a person must correct.
+I<Could not reach origin to refresh the control branch, because the network
+or the remote is unreachable.> The reason and the remedy come from the
+C<kind> the fetch result carries, which is one of C<network>, C<auth>, and
+C<unknown>: an unreachable network is checked, a rejected credential is
+restored, and a request the remote failed for some other reason is read out
+of what the remote said. The remote's own words follow either way, taken
+from the C<err> key of the same result.
+
+Every kind exits C<Genesis::Exit::TEMPFAIL>, which is what
+C<Genesis::Top::fetch_pipeline_envs> does with the same three, because a
+remote nobody can reach is a condition a re-run fixes rather than input a
+person must correct.
 
 =back
 
@@ -200,6 +214,14 @@ branch C<prod2/bosh> could never be created beside it.
 Returns a single true value when all three hold, and otherwise returns
 false with the condition that failed and the remedy for it, so the caller
 writes one refusal and the reasons stay here.
+
+The first condition needs a ref to read the tip off, and a clone that has
+never fetched control holds none. That case is answered before the descent
+question is asked, and it says the control branch has not been fetched
+rather than that the branch fails to descend from it. C<refresh_control>
+stands aside for a clone with no local control branch, leaving the repair
+to the pre-flight, so the ref can still be missing by the time the
+predicate runs.
 
 B<Parameters:>
 

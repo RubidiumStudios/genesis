@@ -154,4 +154,26 @@ subtest 'control is permitted' => sub {
 	ok(-f $h->a . '/prod.yml', 'and writes the environment file');
 };
 
+subtest 'the refresh runs above the classification' => sub {
+	# A branch the gate is about to refuse is refreshed all the same, so
+	# where a command ends says nothing about whether it fetched.  The
+	# teammate moves control on R behind this clone's back, and the run is
+	# made from the deployment branch every row above is refused from.
+	#
+	# This row stands last, because the control commit it leaves on R is
+	# one copy A's own control ref does not carry.
+	move_on_r($h, $h->control);
+	my $control_t_before = $git->sha('refs/remotes/origin/' . $h->control);
+
+	stand_on($h, $h->slug('qa'));
+
+	my ($out, $err, $exit) = run_genesis($h, 'new', 'prod2', '--no-commit');
+
+	is($exit, Genesis::Exit::DATAERR(),
+		'the deployment branch is refused');
+	isnt($git->sha('refs/remotes/origin/' . $h->control), $control_t_before,
+		'and control moved in T anyway, so the refresh ran above the '.
+		'classification');
+};
+
 done_testing;
