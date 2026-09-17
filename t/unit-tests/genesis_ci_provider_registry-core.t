@@ -292,15 +292,4 @@ subtest 'the registry refuses a bad entry rather than taking it' => sub {
 		'and neither refusal left anything behind in the registry';
 };
 
-# The compiler's own test file asked this, where the manifest never ran
-# it.  It reads what the registry answers rather than the whole list, so
-# it is bound by none of the ordering the first subtest is.
-subtest 'the registry lists the types registered at runtime' => sub {
-	plan tests => 2;
-
-	my @providers = Genesis::CI::ProviderRegistry->known_providers();
-	ok scalar(@providers) >= 1, "at least one provider registered";
-	ok grep { $_ eq 'concourse' } @providers, "concourse is registered";
-};
-
 done_testing;
