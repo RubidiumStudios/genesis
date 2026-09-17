@@ -25,7 +25,8 @@ use_ok 'Genesis::CI::Compiler::Parser';
 
 # Stands in for Genesis::Config and Genesis::Top: the parser asks the
 # config whether a key is there and then for its value, and asks the top
-# for the path it would name as the source.
+# for the path it would name as the source and for the deployment type
+# the pipeline's name falls back to.
 {
 	package MockConfig;
 	sub new { my ($class, %data) = @_; return bless {data => \%data}, $class }
@@ -36,10 +37,11 @@ use_ok 'Genesis::CI::Compiler::Parser';
 	package MockTop;
 	sub new {
 		my ($class, %opts) = @_;
-		return bless {config => $opts{config}, base => $opts{base} || '/fake'},
-			$class;
+		return bless {config => $opts{config}, base => $opts{base} || '/fake',
+			type => $opts{type} || 'bosh'}, $class;
 	}
 	sub config { $_[0]->{config} }
+	sub type   { $_[0]->{type} }
 	sub path {
 		my ($self, $rel) = @_;
 		return defined $rel ? "$self->{base}/$rel" : $self->{base};
@@ -57,7 +59,7 @@ my $SECTION = {
 };
 
 subtest 'a pipeline section is the one the parser reads' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $top = MockTop->new(config => MockConfig->new(pipeline => $SECTION));
 
@@ -71,6 +73,12 @@ subtest 'a pipeline section is the one the parser reads' => sub {
 		'naming .genesis/config as where the configuration came from');
 	is($parsed->{integrations}{vault}{url}, 'https://vault.example.com',
 		"and the section's own integrations came through");
+
+	# The section names no pipeline of its own, so the name falls back to
+	# the deployment type, which is what the schema says pipeline.name
+	# does and what the AST every command reads the name off carries.
+	is($parsed->{pipeline}{metadata}{name}, 'bosh',
+		'and the pipeline is named after the deployment type');
 };
 
 subtest 'a section still spelled ci is not read' => sub {

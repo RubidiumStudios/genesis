@@ -19,7 +19,9 @@ use JSON::PP;
 # There is no DEFAULT_TEAM here.  It was written twice, here and in
 # Genesis::CI::Provider::Concourse, where it is the default the provider
 # fragment declares, and a comment above each asked a reader to keep the
-# two in step.  The team is read off the provider this compiler holds.
+# two in step.  The team is resolved through provider_option now, which
+# reads the operator's block and falls back to that fragment's default,
+# so this class neither holds the value nor knows what it is.
 use constant {
 	DEFAULT_PIPELINE_NAME   => undef,    # falls back to deployment_type from Top
 	DEFAULT_EXPOSE          => 0,
@@ -58,26 +60,13 @@ sub init {
 sub provider_type { 'concourse' }
 
 # }}}
-# check_prereqs - returns 1 if fly is in PATH, 0 + error() if not {{{
-sub check_prereqs {
-	my ($self) = @_;
-
-	my ($fly_path) = run({ stderr => 0 }, 'type -p fly');
-	chomp($fly_path //= '');
-	unless ($fly_path) {
-		error(
-			"Cannot deploy Concourse pipeline: the #C{fly} CLI was not found in ".
-			"your PATH.\n".
-			"  Install it from your Concourse server:\n".
-			"    #C{<concourse-url>/api/v1/cli?arch=amd64&platform=<linux|darwin|windows>}\n".
-			"  Or log in via the Concourse UI and download fly from the bottom-right icon.",
-		);
-		return 0;
-	}
-
-	return 1;
-}
-
+# check_prereqs is gone from this class {{{
+#
+# Under D108 a provider answers for its toolchain, and this class's copy
+# asked only whether fly was on the path while the provider's asked for a
+# version too.  The weaker one was the live one, because the command
+# called it on whatever the compile handed back.
+#
 # }}}
 # cli_opts - Getopt::Long specs for deploy-time command-line flags {{{
 #
@@ -199,7 +188,7 @@ sub describe_provider {
 	my ($self) = @_;
 
 	my $target    = $self->provider_option('target')        || '(not set)';
-	my $team      = $self->provider_option('team')          || $self->provider->team;
+	my $team      = $self->provider_option('team');
 	my $pipe_name = $self->provider_option('pipeline_name') || '(deployment type)';
 	my $expose    = $self->provider_option('expose')    ? 'yes' : 'no';
 	my $paused    = $self->provider_option('pause_after_set') ? 'yes' : 'no';
@@ -348,10 +337,14 @@ sub deploy {
 	bail("No Concourse target specified.  Use --ci-target or set pipeline.provider.target in .genesis/config")
 		unless $target;
 
-	# Team: call-site override > provider_opts > default
+	# Team: call-site override > the resolved option
+	#
+	# There is no third tier.  provider_option falls back to the defaults
+	# the provider's own fragment declares, and team is one of them, so a
+	# repository that names no team is already answered DEFAULT_TEAM by
+	# the line above and an arm below it could never run.
 	my $team = $opts{team}
-		// $self->provider_option('team')
-		// $self->provider->team;
+		// $self->provider_option('team');
 
 	# Pipeline name: call-site override > provider_opts > config name > deployment_type
 	my $pipeline_name = $opts{pipeline_name}

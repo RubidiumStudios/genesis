@@ -220,6 +220,15 @@ sub provider_options_schema {
 		team     => {type => 'string',  default => DEFAULT_TEAM, description => 'Concourse team name'},
 		insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS certificate verification'},
 
+		# The floor check_prereqs enforces, declared so that a
+		# repository can set it.  It was readable on the object and
+		# settable only from Perl, so under D105 an operator who wrote
+		# the key was refused by name and the version check had nothing
+		# to enforce.  No default: a repository that names no floor
+		# wants any fly that is present, which is what the check does
+		# when the key is absent.
+		min_fly_version => {type => 'string', description => 'Lowest fly version this pipeline may be set with'},
+
 		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
 		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},
 

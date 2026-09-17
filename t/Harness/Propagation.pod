@@ -1307,6 +1307,26 @@ skips.  A row reading C<PATH> for itself takes whatever sits first on it, which
 is a fixture directory whenever one is there.  When nothing on the path matches,
 it answers the bare name, so a caller testing for presence tests with C<-x>.
 
+=head2 fixture_fly($h, %opts)
+
+Puts a C<fly> of a chosen version first on the path for every run the harness
+spawns afterwards, and answers the path it wrote it to.  The Concourse
+provider asks the shell whether C<fly> is there and then asks C<fly> for its
+version, so a row that drives the declared floor needs a C<fly> that answers
+the version the row chose.  The shim answers every other call rather than
+handing it on, because no row here talks to a real Concourse.
+
+The options are C<version>, the version the shim reports, and C<absent>.  A
+call that names neither dies, since a fixture that stands nothing up and takes
+nothing away is a row that meant to say something else.
+
+C<absent> takes the C<fly> away instead of standing one up.  It removes the
+shim and drops every directory on the path that holds a real C<fly>, because
+an operator with C<fly> installed would otherwise have a row about not having
+one answered by their own binary.  The path goes back the way every other
+fixture variable does, when the next harness is built and again when the file
+ends.
+
 =head2 skip_on($git, $step, $n, %opts)
 
 Makes the nth call of a named git step return without delegating, so the write
@@ -1339,6 +1359,21 @@ derived, because copy A is cloned from a filesystem path whose URL carries no
 GitHub owner and repo pair.  Any C<@lines> go under the provider at the
 provider's own depth, so a row that wants a target or a team says so in a
 word.
+
+=head2 compilable_pipeline($h, %opts)
+
+Writes the one key a compile still wants of a harness repository, which is the
+pipeline's name, commits it, and answers the harness.  A row that drives one of
+the commands that compiles has to get through the compile before it reaches
+what it came for, and a pipeline the compiler cannot name is one it refuses.
+C<make_harness> writes the provider block and the three automation blocks, and
+the environment files give the workflow its shape, so the name is all that is
+left and no row should have to know that it is.
+
+The one option is C<name>, which defaults to the harness's own deployment type.
+That is what the schema says C<pipeline.name> falls back to, so a row that does
+not care what the pipeline is called gets the name the repository would have
+had anyway.
 
 =head2 shuttle($backend, @lines)
 

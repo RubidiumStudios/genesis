@@ -541,7 +541,14 @@ B<Examples:>
 =head2 check_prereqs()
 
 Whether the toolchain this provider needs is on the PATH. The base
-answers yes, and a provider with a CLI of its own overrides it.
+answers yes, because a provider with no toolchain has nothing to look
+for, and a provider that has one overrides this to look for its own CLI
+and to say what is missing.
+
+This family is where the question is asked and answered. No class on the
+compiler side declares it, so a command that holds both halves has only
+one place to ask, and the answer cannot depend on which half it happened
+to be handed.
 
 B<Returns:> 1 when the toolchain is present, or 0 with the reason already
 reported.

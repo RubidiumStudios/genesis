@@ -78,14 +78,13 @@ sub output_files {
 
 # }}}
 # }}}
-### Prerequisite Checking {{{
-
-# check_prereqs - returns 1 if toolchain is present, 0 + error() if not {{{
-sub check_prereqs {
-	return 1;
-}
-
-# }}}
+### Prerequisite Checking is the provider's {{{
+#
+# Nothing here answers for a toolchain any more.  This class carried a
+# default that said yes to everything, and the Concourse compiler
+# overrode it with a check weaker than the provider's, so under D108 the
+# question goes to the provider and the answer comes back from one place.
+#
 # }}}
 ### Provider Options Contract {{{
 # These methods define the provider options system, modelled after

@@ -45,6 +45,7 @@ our @EXPORT = qw/
 	fixture_hold fixture_proposed break_vault restore_vault
 	record_at vault_read_log fixture_preflight fixture_kit
 	fixture_command install_compiled_kit shimmed_git real_tool
+	fixture_fly
 
 	snapshot_w assert_w_restored assert_snapshot_invariant
 	run_genesis run_genesis_in stand_on
@@ -59,7 +60,7 @@ our @EXPORT = qw/
 	gh_protection gh_unreachable gh_reachable gh_no_token gh_calls
 
 	automation_blocks automation_block_lines load_with automated_config
-	shuttle
+	compilable_pipeline shuttle
 
 	ready_envs ready_harness seeded_harness staged due_harness gated_harness
 	held_harness held_prod tracked_harness two_env_harness inherited_harness
@@ -3800,6 +3801,51 @@ sub _fake_git_dir {
 }
 
 # }}}
+# fixture_fly - a fly of a chosen version on the path, or none at all {{{
+#
+# The Concourse provider asks the shell whether fly is there and then asks
+# fly for its version, so a row that drives the declared floor needs a fly
+# that answers a version the row chose.  The shim goes into the fixture bin
+# directory _path_prefix already names, which is the directory a spawned
+# command sees first and the parent's own path never does.
+#
+# It answers every other call rather than handing it on, because no row here
+# talks to a real Concourse and a fly that reached one would be doing work
+# nobody asked for.
+#
+# absent takes the fly away instead of standing one up.  The shim is removed,
+# and every directory on the parent's path that holds a real fly goes with
+# it, because an operator who has fly installed would otherwise have a row
+# about not having one answered by their own binary.  The path is put back by
+# the same guard that puts every other fixture variable back.
+sub fixture_fly {
+	my ($self, %opts) = @_;
+
+	my $bin = "$self->{tmp}/bin";
+	helper::mkdir_or_fail($bin) unless -d $bin;
+	my $path = "$bin/fly";
+
+	if ($opts{absent}) {
+		unlink $path;
+		_guard_env(PATH => join(':',
+			grep {!-x "$_/fly"} split(/:/, ($ENV{PATH} // ''))));
+		return $path;
+	}
+
+	my $version = $opts{version}
+		or die "fixture_fly needs a version, or absent => 1\n";
+
+	helper::put_file($path, 0755, <<"EOS");
+#!/usr/bin/env bash
+if [ "\$1" = "--version" ]; then
+	echo "$version"
+fi
+exit 0
+EOS
+	return $path;
+}
+
+# }}}
 
 # ready_envs - the five things every walking row needs first {{{
 #
@@ -3898,6 +3944,26 @@ sub automated_config {
 	my ($type, @lines) = @_;
 	return join("\n", _automation_preamble($type, @lines),
 		automation_block_lines());
+}
+
+# }}}
+# compilable_pipeline - the repository a compile will get all the way through {{{
+#
+# A row that drives one of the commands that compiles has to get past the
+# compile before it reaches what it came for, and a pipeline the compiler
+# cannot name is one it refuses.  make_harness writes the provider block and
+# the three automation blocks, and the environment files give the workflow
+# its shape, so the name is the one piece left and no row should have to know
+# that it is.
+#
+# The name defaults to the harness's own deployment type, which is what the
+# schema says pipeline.name falls back to, so a row that does not care what
+# the pipeline is called gets the name the repository would have anyway.
+sub compilable_pipeline {
+	my ($self, %opts) = @_;
+	$self->set_repo_config('pipeline.name', $opts{name} // $self->{type},
+		%opts);
+	return $self;
 }
 
 # }}}
