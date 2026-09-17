@@ -190,16 +190,16 @@ sub capabilities {
 }
 1;
 MANYCLI
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Many.pm', <<'MANY');
-package Genesis::CI::Compiler::Providers::Many;
+	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Many.pm', <<'MANY');
+package Genesis::CI::ProviderCompiler::Many;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'many'}
 1;
 MANY
 	local @INC = ('t/tmp/lib', @INC);
 	Genesis::CI::ProviderRegistry->register_provider('many', {
-		class     => 'Genesis::CI::Compiler::Providers::Many',
-		file      => 'Genesis/CI/Compiler/Providers/Many.pm',
+		class     => 'Genesis::CI::ProviderCompiler::Many',
+		file      => 'Genesis/CI/ProviderCompiler/Many.pm',
 		cli_class => 'Genesis::CI::Provider::Many',
 		cli_file  => 'Genesis/CI/Provider/Many.pm',
 	});

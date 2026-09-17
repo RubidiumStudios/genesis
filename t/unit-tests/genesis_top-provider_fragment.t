@@ -126,16 +126,16 @@ package Genesis::CI::Provider::Mute;
 use base 'Genesis::CI::Provider';
 1;
 MUTECLI
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Mute.pm', <<'MUTE');
-package Genesis::CI::Compiler::Providers::Mute;
+	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Mute.pm', <<'MUTE');
+package Genesis::CI::ProviderCompiler::Mute;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'mute'}
 1;
 MUTE
 	local @INC = ('t/tmp/lib', @INC);
 	Genesis::CI::ProviderRegistry->register_provider('mute', {
-		class     => 'Genesis::CI::Compiler::Providers::Mute',
-		file      => 'Genesis/CI/Compiler/Providers/Mute.pm',
+		class     => 'Genesis::CI::ProviderCompiler::Mute',
+		file      => 'Genesis/CI/ProviderCompiler/Mute.pm',
 		cli_class => 'Genesis::CI::Provider::Mute',
 		cli_file  => 'Genesis/CI/Provider/Mute.pm',
 	});
@@ -189,16 +189,16 @@ sub capabilities {
 }
 1;
 TERSECLI
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Terse.pm', <<'TERSE');
-package Genesis::CI::Compiler::Providers::Terse;
+	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Terse.pm', <<'TERSE');
+package Genesis::CI::ProviderCompiler::Terse;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'terse'}
 1;
 TERSE
 	local @INC = ('t/tmp/lib', @INC);
 	Genesis::CI::ProviderRegistry->register_provider('terse', {
-		class     => 'Genesis::CI::Compiler::Providers::Terse',
-		file      => 'Genesis/CI/Compiler/Providers/Terse.pm',
+		class     => 'Genesis::CI::ProviderCompiler::Terse',
+		file      => 'Genesis/CI/ProviderCompiler/Terse.pm',
 		cli_class => 'Genesis::CI::Provider::Terse',
 		cli_file  => 'Genesis/CI/Provider/Terse.pm',
 	});
@@ -275,14 +275,14 @@ PAIR
 	# provider that can be compiled.  Both halves of what a provider
 	# declares, the fragment and the capabilities, sit on the CLI class
 	# above, so there is nothing for these two to say beyond their type.
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Plain.pm', <<'PLAINC');
-package Genesis::CI::Compiler::Providers::Plain;
+	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Plain.pm', <<'PLAINC');
+package Genesis::CI::ProviderCompiler::Plain;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'plain'}
 1;
 PLAINC
-	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Pair.pm', <<'PAIRC');
-package Genesis::CI::Compiler::Providers::Pair;
+	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Pair.pm', <<'PAIRC');
+package Genesis::CI::ProviderCompiler::Pair;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'pair'}
 1;
@@ -291,8 +291,8 @@ PAIRC
 	for my $type (qw/plain pair/) {
 		(my $pkg = ucfirst $type) =~ s/\W//g;
 		Genesis::CI::ProviderRegistry->register_provider($type, {
-			class     => "Genesis::CI::Compiler::Providers::$pkg",
-			file      => "Genesis/CI/Compiler/Providers/$pkg.pm",
+			class     => "Genesis::CI::ProviderCompiler::$pkg",
+			file      => "Genesis/CI/ProviderCompiler/$pkg.pm",
 			cli_class => "Genesis::CI::Provider::$pkg",
 			cli_file  => "Genesis/CI/Provider/$pkg.pm",
 		});

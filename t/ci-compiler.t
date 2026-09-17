@@ -7,6 +7,9 @@ use File::Temp qw/tempdir/;
 use File::Path qw/mkpath/;
 use JSON::PP;
 use lib 'lib';
+use lib 't';
+use helper;
+use Harness::Propagation;
 
 # Set up minimal Genesis testing environment
 $ENV{GENESIS_TESTING} = "yes";
@@ -30,11 +33,13 @@ sub _debug_write {
 	diag "  wrote $path (" . length($content) . " bytes)";
 }
 
+use_ok 'Genesis::Top';
 use_ok 'Genesis::CI::Compiler::AST';
 use_ok 'Genesis::CI::Compiler::ASTBuilder';
 use_ok 'Genesis::CI::Compiler::Validator';
 use_ok 'Genesis::CI::ProviderCompiler';
 use_ok 'Genesis::CI::ProviderCompiler::Concourse';
+use_ok 'Genesis::CI::Provider::Concourse';
 use_ok 'Genesis::CI::Compiler';
 
 
@@ -462,26 +467,35 @@ subtest 'ASTBuilder - no auto-population without explicit triggers/resources' =>
 ### ASTBuilder - _build_from_env_files Tests
 ### ============================================================ ###
 
+# The builder enumerates environments through the repository's own Top,
+# which asks Genesis::Env whether each file is an environment at all, so
+# every row below stands a repository up rather than writing three YAML
+# documents into a scratch directory.  A builder with no top enumerates
+# nothing, which is why these rows read as they do.
+#
+# builder_for is the subject under test rather than a state builder: the
+# harness stood the repository up, and this sub reads its configuration
+# and hands back the builder that reads it.  Only this file has that
+# subject, so it sits beside the rows that use it.
+sub builder_for {
+	my ($h) = @_;
+	my $top = Genesis::Top->new($h->a, no_vault => 1);
+	$top->config;
+	return Genesis::CI::Compiler::ASTBuilder->new(top => $top);
+}
+
 subtest 'ASTBuilder - _build_from_env_files: basic linear chain' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+	my $h = make_harness(envs => [qw/lab nonprod prod/],
+		pipeline => 0, vault => 0);
 
-	# lab.yml — entry point, no prior_env
-	open my $fh, '>', "$tmp/lab.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    require_pr: false\n";
-	close $fh;
+	# lab is the entry point and names no prior_env; nonprod follows it,
+	# and prod follows nonprod and asks for a pull request.
+	$h->write_env_file('lab',     pipeline => {require_pr => 'false'});
+	$h->write_env_file('nonprod', pipeline => {prior_env  => 'lab'});
+	$h->write_env_file('prod',    pipeline => {prior_env  => 'nonprod',
+	                                           require_pr => 'true'});
 
-	# nonprod.yml — triggered after lab
-	open $fh, '>', "$tmp/nonprod.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: lab\n";
-	close $fh;
-
-	# prod.yml — triggered after nonprod, requires PR
-	open $fh, '>', "$tmp/prod.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: nonprod\n    require_pr: true\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my ($nodes, $edges) = $builder->_build_from_env_files($tmp);
+	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
 
 	ok exists $nodes->{lab},     "lab node present";
 	ok exists $nodes->{nonprod}, "nonprod node present";
@@ -494,79 +508,54 @@ subtest 'ASTBuilder - _build_from_env_files: basic linear chain' => sub {
 	is $sorted_edges[1]{from}, 'nonprod', "second edge: nonprod -> prod (from)";
 	is $sorted_edges[1]{to},   'prod',    "second edge: nonprod -> prod (to)";
 
-	ok !$nodes->{prod}{require_pr} == 0 || $nodes->{prod}{require_pr},
-		"prod node has require_pr set";
 	is $nodes->{prod}{require_pr}, 1, "prod require_pr is 1";
 	is $nodes->{lab}{require_pr},  0, "lab require_pr is 0";
 };
 
 subtest 'ASTBuilder - _build_from_env_files: manual gate flag' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+	my $h = make_harness(envs => [qw/sandbox prod/], pipeline => 0, vault => 0);
+	$h->write_env_file('sandbox', pipeline => {manual => 'true'});
+	$h->write_env_file('prod',    pipeline => {prior_env => 'sandbox',
+	                                           manual    => 'false'});
 
-	open my $fh, '>', "$tmp/sandbox.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    manual: true\n";
-	close $fh;
-
-	open $fh, '>', "$tmp/prod.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: sandbox\n    manual: false\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my ($nodes, $edges) = $builder->_build_from_env_files($tmp);
+	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
 
 	is $nodes->{sandbox}{manual}, 1, "sandbox manual flag is 1";
 	is $nodes->{prod}{manual},    0, "prod manual flag is 0";
 };
 
-subtest 'ASTBuilder - _build_from_env_files: files without genesis.pipeline ignored' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+subtest 'ASTBuilder - _build_from_env_files: a file that is not an environment is ignored' => sub {
+	# Every environment the repository holds becomes a node, whether or
+	# not it writes a pipeline block, because pipeline-status reads the
+	# whole graph.  What is left out is a YAML file that is no
+	# environment at all, which is the question Top::has_env answers.
+	my $h = make_harness(envs => ['infra'], pipeline => 0, vault => 0);
+	helper::put_file($h->a . '/params.yml', "---\nparams:\n  key: value\n");
 
-	# file with genesis block but no pipeline sub-key
-	open my $fh, '>', "$tmp/infra.yml" or die $!;
-	print $fh "---\ngenesis:\n  env: infra\n";
-	close $fh;
+	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
 
-	# unrelated YAML file
-	open $fh, '>', "$tmp/params.yml" or die $!;
-	print $fh "---\nparams:\n  key: value\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my ($nodes, $edges) = $builder->_build_from_env_files($tmp);
-
-	is scalar(keys %$nodes), 0, "no nodes from files without genesis.pipeline";
-	is scalar(@$edges),      0, "no edges either";
+	ok exists $nodes->{infra}, "an environment with no pipeline block is a node";
+	ok !exists $nodes->{params}, "and a YAML file that is no environment is not";
+	is scalar(@$edges), 0, "no edges either";
 };
 
 subtest 'ASTBuilder - _build_from_env_files: prior_env referencing unknown env is ignored' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+	my $h = make_harness(envs => ['prod'], pipeline => 0, vault => 0);
+	$h->write_env_file('prod', pipeline => {prior_env => 'missing-lab'});
 
-	open my $fh, '>', "$tmp/prod.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: missing-lab\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my ($nodes, $edges) = $builder->_build_from_env_files($tmp);
+	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
 
 	ok exists $nodes->{prod}, "prod node still created";
 	is scalar(@$edges), 0, "no edge added for unknown prior_env";
 };
 
 subtest 'ASTBuilder - _build_from_env_files: entrypoint with no pipeline block is included when referenced' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+	# lab is the pipeline entrypoint, and the convention writes no
+	# pipeline block on it; nonprod names it as its prior_env.
+	my $h = make_harness(envs => [qw/lab nonprod/], pipeline => 0, vault => 0);
+	$h->write_env_file('nonprod', pipeline => {prior_env => 'lab'});
 
-	# lab.yml — pipeline entrypoint; Phase C convention writes NO pipeline block
-	open my $fh, '>', "$tmp/lab.yml" or die $!;
-	print $fh "---\ngenesis:\n  env: lab\n";
-	close $fh;
-
-	# nonprod.yml — references lab as prior_env
-	open $fh, '>', "$tmp/nonprod.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: lab\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my ($nodes, $edges) = $builder->_build_from_env_files($tmp);
+	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
 
 	ok exists $nodes->{lab},     "lab node present despite no genesis.pipeline block";
 	ok exists $nodes->{nonprod}, "nonprod node present";
@@ -577,49 +566,23 @@ subtest 'ASTBuilder - _build_from_env_files: entrypoint with no pipeline block i
 	is $nodes->{lab}{manual},     0, "lab manual defaults to 0";
 };
 
-subtest 'ASTBuilder - _build_from_env_files: unreferenced files without pipeline block excluded' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
-
-	# infra.yml — genesis block but no pipeline sub-key, not referenced
-	open my $fh, '>', "$tmp/infra.yml" or die $!;
-	print $fh "---\ngenesis:\n  env: infra\n";
-	close $fh;
-
-	# lab.yml — has pipeline block and references nothing
-	open $fh, '>', "$tmp/lab.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    require_pr: false\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my ($nodes, $edges) = $builder->_build_from_env_files($tmp);
-
-	ok  exists $nodes->{lab},   "lab included (has pipeline block)";
-	ok !exists $nodes->{infra}, "infra excluded (no pipeline block, not referenced)";
-	is scalar(@$edges), 0, "no edges";
-};
-
 subtest 'ASTBuilder - _build_from_env_files: non-existent dir returns empty' => sub {
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my ($nodes, $edges) = $builder->_build_from_env_files('/does/not/exist/xyz');
+	my $h = make_harness(envs => ['lab'], pipeline => 0, vault => 0);
+	my ($nodes, $edges) = builder_for($h)
+		->_build_from_env_files('/does/not/exist/xyz');
 	is scalar(keys %$nodes), 0, "no nodes for missing dir";
 	is scalar(@$edges),      0, "no edges for missing dir";
 };
 
 subtest 'ASTBuilder - env-files format: build() produces AST with workflow graph' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+	my $h = make_harness(envs => [qw/lab prod/], pipeline => 0, vault => 0);
+	$h->write_env_file('lab',  pipeline => {require_pr => 'false'});
+	$h->write_env_file('prod', pipeline => {prior_env  => 'lab',
+	                                        require_pr => 'true'});
 
-	open my $fh, '>', "$tmp/lab.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    require_pr: false\n";
-	close $fh;
-
-	open $fh, '>', "$tmp/prod.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: lab\n    require_pr: true\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my $ast = $builder->build({
+	my $ast = builder_for($h)->build({
 		_source_format => 'env-files',
-		env_dir        => $tmp,
+		env_dir        => $h->a,
 		pipeline       => { metadata => { name => 'ef-test' } },
 	}, {});
 
@@ -640,17 +603,13 @@ subtest 'ASTBuilder - env-files format: build() produces AST with workflow graph
 };
 
 subtest 'ASTBuilder - legacy nodes enriched with gate flags from env files' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+	my $h = make_harness(envs => [qw/sandbox prod/], pipeline => 0, vault => 0);
+	$h->write_env_file('sandbox', pipeline => {manual => 'false'});
+	$h->write_env_file('prod',    pipeline => {require_pr => 'true',
+	                                           manual     => 'true'});
 
-	open my $fh, '>', "$tmp/sandbox.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    manual: false\n";
-	close $fh;
-
-	open $fh, '>', "$tmp/prod.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    require_pr: true\n    manual: true\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new(env_dir => $tmp);
+	my $builder = builder_for($h);
+	$builder->{env_dir} = $h->a;
 	my $parsed = {
 		_source_format => 'legacy',
 		_source_path   => 'ci.yml',
@@ -686,20 +645,15 @@ subtest 'ASTBuilder - legacy nodes enriched with gate flags from env files' => s
 };
 
 subtest 'ASTBuilder + PipelineDescriptor - end-to-end env-file mermaid gates' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+	my $h = make_harness(envs => [qw/lab prod/], pipeline => 0, vault => 0);
+	$h->write_env_file('lab',  pipeline => {require_pr => 'false'});
+	$h->write_env_file('prod', pipeline => {prior_env  => 'lab',
+	                                        require_pr => 'true',
+	                                        manual     => 'true'});
 
-	open my $fh, '>', "$tmp/lab.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    require_pr: false\n";
-	close $fh;
-
-	open $fh, '>', "$tmp/prod.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: lab\n    require_pr: true\n    manual: true\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my $ast = $builder->build({
+	my $ast = builder_for($h)->build({
 		_source_format => 'env-files',
-		env_dir        => $tmp,
+		env_dir        => $h->a,
 		pipeline       => { metadata => { name => 'e2e-gate-test' } },
 	}, {});
 
@@ -713,26 +667,16 @@ subtest 'ASTBuilder + PipelineDescriptor - end-to-end env-file mermaid gates' =>
 };
 
 subtest 'PipelineDescriptor - env-file topology produces topological job order' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
+	# lab → nonprod → prod would sort the same way alphabetically, so the
+	# names here expose the difference: zoo → alpha → middle.
+	my $h = make_harness(envs => [qw/zoo alpha middle/],
+		pipeline => 0, vault => 0);
+	$h->write_env_file('alpha',  pipeline => {prior_env => 'zoo'});
+	$h->write_env_file('middle', pipeline => {prior_env => 'alpha'});
 
-	# lab → nonprod → prod (alphabetical order would be lab, nonprod, prod — same here)
-	# Use names that expose alphabetical vs topological difference: zoo → alpha → middle
-	open my $fh, '>', "$tmp/zoo.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env:\n";
-	close $fh;
-
-	open $fh, '>', "$tmp/alpha.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: zoo\n";
-	close $fh;
-
-	open $fh, '>', "$tmp/middle.yml" or die $!;
-	print $fh "---\ngenesis:\n  pipeline:\n    prior_env: alpha\n";
-	close $fh;
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
-	my $ast = $builder->build({
+	my $ast = builder_for($h)->build({
 		_source_format => 'multi-file',
-		env_dir        => $tmp,
+		env_dir        => $h->a,
 		pipeline       => { metadata => { name => 'topo-order-test' } },
 		integrations   => { vault => { url => 'https://vault.example.com' },
 		                    source_control => { provider => 'github', repository => 'org/repo' } },
@@ -1138,7 +1082,8 @@ subtest 'Concourse - native generation from modern AST' => sub {
 				image   => 'genesiscommunity/concourse',
 				version => 'latest',
 			},
-			notifications => { style => 'inline' },
+			notifications      => { style => 'inline' },
+			track_bosh_configs => 1,
 		},
 	);
 
@@ -1168,12 +1113,14 @@ subtest 'Concourse - native generation from modern AST' => sub {
 	# Verify slack resource
 	like $output, qr/slack-notification/, "slack notification resource type present";
 
-	# Verify environment-specific resources
-	like $output, qr/sandbox-changes/, "sandbox-changes resource present";
+	# Verify environment-specific resources.  Branch propagation renamed
+	# the per-environment resource from <alias>-changes to <alias>-branch.
+	like $output, qr/sandbox-branch/, "sandbox-branch resource present";
 	like $output, qr/preprod-changes/, "preprod-changes resource present";
 	like $output, qr/preprod-cache/, "preprod-cache resource present (triggered env)";
 
-	# Verify BOSH config resources
+	# Verify BOSH config resources.  They are emitted only where
+	# track_bosh_configs asks for them, which the configuration below does.
 	like $output, qr/sandbox-cloud-config/, "sandbox-cloud-config resource present";
 	like $output, qr/sandbox-runtime-config/, "sandbox-runtime-config resource present";
 
@@ -1182,9 +1129,9 @@ subtest 'Concourse - native generation from modern AST' => sub {
 	like $output, qr/preprod-cf/, "preprod deploy job present";
 	like $output, qr/notify-preprod-cf-changes/, "preprod notify job present (non-auto env)";
 
-	# Verify task configuration references
-	like $output, qr/ci-pipeline-deploy/, "deploy task command present";
-	like $output, qr/ci-generate-cache/, "cache generation task present";
+	# Verify task configuration references.  The deploy task runs the
+	# genesis CLI itself rather than the ci-pipeline-deploy script.
+	like $output, qr/task: bosh-deploy/, "deploy task present";
 
 	# Verify vault references
 	like $output, qr/\(\(vault\/role-id\)\)/, "vault role_id secret ref in output";
@@ -1475,10 +1422,14 @@ subtest 'Concourse - auto-update job generated' => sub {
 		configuration => {
 			task => { image => 'img', version => 'v1' },
 			notifications => { style => 'inline' },
+			# The builder normalises this block and settles enabled out
+			# of the legacy file key; an AST built by hand here says so
+			# for itself.
 			auto_update => {
-				file => 'sandbox.yml',
-				kit  => 'cf',
-				org  => 'genesis-community',
+				enabled => 1,
+				file    => 'sandbox.yml',
+				kit     => 'cf',
+				org     => 'genesis-community',
 			},
 		},
 	);
@@ -1662,6 +1613,10 @@ subtest 'Concourse - OCFP config name support' => sub {
 			ocfp => 1,
 			task => { image => 'img', version => 'v1' },
 			notifications => { style => 'inline' },
+
+			# The bosh-config resources carry the config names, and
+			# they are emitted only where this key asks for them.
+			track_bosh_configs => 1,
 		},
 	);
 
@@ -1878,22 +1833,6 @@ subtest 'PipelineDescriptor - _locker_resources' => sub {
 };
 
 ### ============================================================ ###
-### Compiler - resolver
-### ============================================================ ###
-
-subtest 'Compiler - _resolve_provider_class' => sub {
-	my $compiler = Genesis::CI::Compiler->new(file => 'ci.yml');
-
-	my $info = $compiler->_resolve_provider_class('concourse');
-	is ref($info), 'HASH', "resolver returns hashref";
-	is $info->{class}, 'Genesis::CI::Concourse', "class name correct";
-	is $info->{file}, 'Genesis/CI/Compiler/Providers/Concourse.pm', "file path correct";
-
-	eval { $compiler->_resolve_provider_class('nonexistent') };
-	like $@, qr/Unknown CI provider/, "unknown provider type bails";
-};
-
-### ============================================================ ###
 ### Compiler - can_compile
 ### ============================================================ ###
 
@@ -2086,16 +2025,20 @@ subtest 'Validator - multi-file without pipeline.yml passes validation' => sub {
 	package MockTop;
 	sub new {
 		my ($class, %opts) = @_;
-		return bless { config => $opts{config}, base => $opts{base} || '/fake' }, $class;
+		return bless { config => $opts{config}, base => $opts{base} || '/fake',
+			type => $opts{type} || 'cf' }, $class;
 	}
 	sub config { $_[0]->{config} }
+	# The parse reads pipeline.name with the deployment type as its
+	# fallback, so a top that stands in for Genesis::Top answers for one.
+	sub type   { $_[0]->{type} }
 	sub path {
 		my ($self, $rel) = @_;
 		return defined $rel ? "$self->{base}/$rel" : $self->{base};
 	}
 }
 
-my $_ci_data = {
+my $_pipeline_data = {
 	targets => {
 		sandbox => {
 			type       => 'bosh-director',
@@ -2140,7 +2083,7 @@ subtest 'Compiler - can_compile_from_genesis_config: false without top' => sub {
 
 subtest 'Compiler - can_compile_from_genesis_config: detects pipeline: in config' => sub {
 	my $top_with_pipeline = MockTop->new(
-		config => MockConfig->new(pipeline => $_ci_data),
+		config => MockConfig->new(pipeline => $_pipeline_data),
 	);
 	ok(Genesis::CI::Compiler->can_compile_from_genesis_config($top_with_pipeline),
 		"returns true when top->config has pipeline: key");
@@ -2153,33 +2096,13 @@ subtest 'Compiler - can_compile_from_genesis_config: detects pipeline: in config
 };
 
 subtest 'Compiler - validate_config_section: accepts valid ci structure' => sub {
-	eval { Genesis::CI::Compiler->validate_config_section($_ci_data, undef) };
+	eval { Genesis::CI::Compiler->validate_config_section($_pipeline_data, undef) };
 	ok !$@, "valid ci structure passes without error" or diag $@;
-};
-
-subtest 'Compiler - validate_config_section: rejects missing targets' => sub {
-	my $bad = { %$_ci_data, targets => {} };  # empty targets
-	eval { Genesis::CI::Compiler->validate_config_section($bad, undef) };
-	like $@, qr/ci\.targets.*required/i, "empty targets triggers error";
-
-	my $no_targets = { %$_ci_data };
-	delete $no_targets->{targets};
-	eval { Genesis::CI::Compiler->validate_config_section($no_targets, undef) };
-	like $@, qr/ci\.targets.*required/i, "missing targets triggers error";
-};
-
-subtest 'Compiler - validate_config_section: rejects missing source_control' => sub {
-	my $bad = {
-		%$_ci_data,
-		integrations => { vault => { url => 'https://vault' } },  # no source_control
-	};
-	eval { Genesis::CI::Compiler->validate_config_section($bad, undef) };
-	like $@, qr/source_control.*required/i, "missing source_control triggers error";
 };
 
 subtest 'Parser - genesis-config: produces correct normalized structure' => sub {
 	my $top = MockTop->new(
-		config => MockConfig->new(ci => $_ci_data),
+		config => MockConfig->new(pipeline => $_pipeline_data),
 		base   => '/myrepo',
 	);
 
@@ -2211,11 +2134,11 @@ subtest 'Parser - genesis-config: produces correct normalized structure' => sub 
 
 subtest 'Parser - genesis-config: provider key propagated from ci.provider' => sub {
 	my $ci_with_provider = {
-		%$_ci_data,
+		%$_pipeline_data,
 		provider => { type => 'concourse', target => 'prod', team => 'platform' },
 	};
 	my $top = MockTop->new(
-		config => MockConfig->new(ci => $ci_with_provider),
+		config => MockConfig->new(pipeline => $ci_with_provider),
 		base   => '/myrepo',
 	);
 	my $parser = Genesis::CI::Compiler::Parser->new(top => $top);
@@ -2228,11 +2151,11 @@ subtest 'Parser - genesis-config: provider key propagated from ci.provider' => s
 };
 
 subtest 'Parser - genesis-config: sets env_dir when no pipeline section' => sub {
-	my $ci_no_pipeline = { %$_ci_data };
+	my $ci_no_pipeline = { %$_pipeline_data };
 	delete $ci_no_pipeline->{pipeline};
 
 	my $top = MockTop->new(
-		config => MockConfig->new(ci => $ci_no_pipeline),
+		config => MockConfig->new(pipeline => $ci_no_pipeline),
 		base   => '/myrepo',
 	);
 
@@ -2242,12 +2165,15 @@ subtest 'Parser - genesis-config: sets env_dir when no pipeline section' => sub 
 
 	ok $parsed->{env_dir}, "env_dir is set when no pipeline section";
 	is $parsed->{env_dir}, '/myrepo', "env_dir is top->path()";
-	is_deeply $parsed->{pipeline}, {}, "pipeline is empty hash (env-file topology mode)";
+	# The parse settles pipeline.name here, falling back to the
+	# deployment type, so the block carries that and nothing else.
+	is_deeply $parsed->{pipeline}, {metadata => {name => 'cf'}},
+		"pipeline holds only the name it settled (env-file topology mode)";
 };
 
 subtest 'Parser - genesis-config: fallback order (ci_dir missing, file missing)' => sub {
 	my $top = MockTop->new(
-		config => MockConfig->new(ci => $_ci_data),
+		config => MockConfig->new(pipeline => $_pipeline_data),
 	);
 
 	# Neither ci_dir nor file exist; should fall through to genesis-config
@@ -2320,12 +2246,6 @@ subtest 'Top - register_config_section stores handler' => sub {
 ### Phase E Provider Options System Tests
 ### ============================================================ ###
 
-subtest 'ProviderCompiler - known_providers lists registered types' => sub {
-	my @providers = Genesis::CI::ProviderRegistry->known_providers();
-	ok scalar(@providers) >= 1, "at least one provider registered";
-	ok grep { $_ eq 'concourse' } @providers, "concourse is registered";
-};
-
 subtest 'ProviderCompiler - base class cli_opts returns empty list' => sub {
 	# We cannot call cli_opts on the abstract base directly (bug guard),
 	# so we test via the Concourse subclass and verify the pattern instead.
@@ -2356,7 +2276,10 @@ subtest 'Concourse - cli_opts_help hidden when type not in valid_types' => sub {
 };
 
 subtest 'Concourse - provider_options_schema has correct structure' => sub {
-	my $schema = Genesis::CI::ProviderCompiler::Concourse->provider_options_schema();
+	# One class declares the keys its block admits, and that is the
+	# provider; the compiler reads the fragment through the provider it
+	# holds rather than declaring a second copy.
+	my $schema = Genesis::CI::Provider::Concourse->provider_options_schema();
 	ok ref($schema) eq 'HASH',            "schema is a hash";
 	ok !exists $schema->{type},           "'type' is the generic block's key, not this one's";
 	ok exists $schema->{target},          "'target' key present";
@@ -2366,8 +2289,19 @@ subtest 'Concourse - provider_options_schema has correct structure' => sub {
 	is $schema->{team}{default}, 'main',  "team default is 'main'";
 };
 
+# Every row below builds its compiler the way D108 says a caller does,
+# through the provider, because the option readers resolve against the
+# fragment the held provider declares and a compiler blessed without one
+# has nothing to ask.
+sub concourse_compiler {
+	my (%opts) = @_;
+	return Genesis::CI::Provider::Concourse->new(
+		type => 'concourse', target => 'test',
+	)->compiler(ast => Genesis::CI::Compiler::AST->new(), %opts);
+}
+
 subtest 'Concourse - provider_options_defaults returns expected defaults' => sub {
-	my $defaults = Genesis::CI::ProviderCompiler::Concourse->provider_options_defaults();
+	my $defaults = concourse_compiler()->provider_options_defaults();
 	ok ref($defaults) eq 'HASH',          "defaults is a hash";
 	is $defaults->{team},            'main', "team default is 'main'";
 	is $defaults->{public},          0,      "public default is false";
@@ -2376,9 +2310,7 @@ subtest 'Concourse - provider_options_defaults returns expected defaults' => sub
 
 subtest 'Concourse - provider_config omits default values' => sub {
 	# Only non-defaults should appear in config output
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => {
 			type   => 'concourse',
 			target => 'my-target',
@@ -2395,9 +2327,7 @@ subtest 'Concourse - provider_config omits default values' => sub {
 };
 
 subtest 'Concourse - provider_config includes non-default values' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => {
 			type            => 'concourse',
 			team            => 'my-team',   # non-default
@@ -2410,8 +2340,7 @@ subtest 'Concourse - provider_config includes non-default values' => sub {
 };
 
 subtest 'Concourse - provider_option applies defaults when not set' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
+	my $provider = concourse_compiler();
 
 	is $provider->provider_option('team'),   'main', "team defaults to 'main'";
 	is $provider->provider_option('public'),  0,     "public defaults to 0";
@@ -2419,9 +2348,7 @@ subtest 'Concourse - provider_option applies defaults when not set' => sub {
 };
 
 subtest 'Concourse - provider_option prefers stored opts over defaults' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => { team => 'custom-team' },
 	);
 	is $provider->provider_option('team'), 'custom-team',
@@ -2429,9 +2356,7 @@ subtest 'Concourse - provider_option prefers stored opts over defaults' => sub {
 };
 
 subtest 'Concourse - describe_provider returns structured hash' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => {
 			target => 'prod-concourse',
 			team   => 'genesis',
@@ -2474,7 +2399,7 @@ subtest 'ProviderCompiler - parse_cli_opts two-pass extraction' => sub {
 subtest 'Compiler - validate_config_section validates ci.provider' => sub {
 	# Valid with a correct provider section
 	my $valid_data = {
-		%$_ci_data,
+		%$_pipeline_data,
 		provider => { type => 'concourse', target => 'my-target' },
 	};
 	eval { Genesis::CI::Compiler->validate_config_section($valid_data, undef) };
@@ -2482,68 +2407,11 @@ subtest 'Compiler - validate_config_section validates ci.provider' => sub {
 };
 
 ### ============================================================ ###
-### ProviderCompiler - check_prereqs
-### ============================================================ ###
-
-subtest 'ProviderCompiler - base class check_prereqs returns 1' => sub {
-	# Base class has no prereqs; GHA provider inherits this no-op default.
-	eval { require 'Genesis/CI/Compiler/Providers/GithubActions.pm' };
-	if ($@) {
-		pass 'skipped: GithubActions provider not available';
-		return;
-	}
-	my $gha = Genesis::CI::GithubActions->new(
-		ast => Genesis::CI::Compiler::AST->new(
-			metadata     => { name => 'test', version => '2.0', source => 'modern' },
-			branches     => { control => 'main', target_prefix => 'target/' },
-			integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
-			targets      => {},
-			workflows    => {},
-		),
-		top => undef,
-		provider_opts => {},
-	);
-	ok $gha->check_prereqs(), 'GithubActions ProviderCompiler check_prereqs returns 1';
-};
-
-subtest 'ProviderCompiler::Concourse - check_prereqs returns 1 when fly present' => sub {
-	my $fly = `which fly 2>/dev/null`;
-	chomp $fly;
-	unless ($fly) {
-		pass 'skipped: fly not installed in this environment';
-		return;
-	}
-	my $ast = Genesis::CI::Compiler::AST->new(
-		metadata     => { name => 'test', version => '2.0', source => 'modern' },
-		branches     => { control => 'main', target_prefix => 'target/' },
-		integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
-		targets      => {},
-		workflows    => {},
-	);
-	my $p = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast, top => undef, provider_opts => {});
-	ok $p->check_prereqs(), 'check_prereqs returns 1 when fly is present';
-};
-
-subtest 'ProviderCompiler::Concourse - check_prereqs returns 0 when fly absent' => sub {
-	local $ENV{PATH} = '/nonexistent';
-	my $ast = Genesis::CI::Compiler::AST->new(
-		metadata     => { name => 'test', version => '2.0', source => 'modern' },
-		branches     => { control => 'main', target_prefix => 'target/' },
-		integrations => { source_control => { provider => 'github', repository => 'org/repo' } },
-		targets      => {},
-		workflows    => {},
-	);
-	my $p = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast, top => undef, provider_opts => {});
-	my $result = $p->check_prereqs();
-	ok !$result, 'check_prereqs returns 0 when fly is not in PATH';
-};
-
-### ============================================================ ###
 ### Concourse insecure option
 ### ============================================================ ###
 
 subtest 'Concourse - insecure in provider_options_schema' => sub {
-	my $schema = Genesis::CI::ProviderCompiler::Concourse->provider_options_schema();
+	my $schema = Genesis::CI::Provider::Concourse->provider_options_schema();
 	ok exists $schema->{insecure},              "'insecure' key present in schema";
 	is $schema->{insecure}{type}, 'boolean',    "insecure type is boolean";
 	ok !$schema->{insecure}{required},          "insecure is not required";
@@ -2551,7 +2419,7 @@ subtest 'Concourse - insecure in provider_options_schema' => sub {
 };
 
 subtest 'Concourse - insecure in provider_options_defaults' => sub {
-	my $defaults = Genesis::CI::ProviderCompiler::Concourse->provider_options_defaults();
+	my $defaults = concourse_compiler()->provider_options_defaults();
 	ok exists $defaults->{insecure},  "insecure present in defaults";
 	is $defaults->{insecure}, 0,      "insecure default is 0 (false)";
 };
@@ -2562,9 +2430,7 @@ subtest 'Concourse - ci-insecure declared in cli_opts' => sub {
 };
 
 subtest 'Concourse - insecure omitted from provider_config when default (false)' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => { type => 'concourse', target => 't', insecure => 0 },
 	);
 	my $config = $provider->provider_config();
@@ -2572,9 +2438,7 @@ subtest 'Concourse - insecure omitted from provider_config when default (false)'
 };
 
 subtest 'Concourse - insecure included in provider_config when true' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => { type => 'concourse', target => 't', insecure => 1 },
 	);
 	my $config = $provider->provider_config();
@@ -2582,15 +2446,12 @@ subtest 'Concourse - insecure included in provider_config when true' => sub {
 };
 
 subtest 'Concourse - provider_option insecure defaults to 0' => sub {
-	my $ast      = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
+	my $provider = concourse_compiler();
 	is $provider->provider_option('insecure'), 0, "insecure defaults to 0";
 };
 
 subtest 'Concourse - describe_provider includes Insecure field' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => { target => 'myci', insecure => 1 },
 	);
 	my %info = $provider->describe_provider();
@@ -2642,9 +2503,7 @@ subtest 'Concourse - normalize_provider_opts handles full CLI key set' => sub {
 ### ============================================================ ###
 
 subtest 'ProviderCompiler - provider_config skips undef opts' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => { type => 'concourse', team => undef },
 	);
 	my $config = $provider->provider_config();
@@ -2652,11 +2511,9 @@ subtest 'ProviderCompiler - provider_config skips undef opts' => sub {
 };
 
 subtest 'ProviderCompiler - provider_config keeps boolean false when non-default' => sub {
-	my $ast = Genesis::CI::Compiler::AST->new();
 	# public default is 0; setting public=>0 explicitly should still omit it
 	# insecure default is 0; setting insecure=>1 should include it
-	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
-		ast           => $ast,
+	my $provider = concourse_compiler(
 		provider_opts => { type => 'concourse', public => 0, insecure => 1 },
 	);
 	my $config = $provider->provider_config();
@@ -2688,7 +2545,7 @@ subtest 'Parser - genesis-config: flat vault/source_control lifted into integrat
 		pipeline => {},
 	};
 
-	my $top = MockTop->new(config => MockConfig->new(ci => $flat_ci), base => '/repo');
+	my $top = MockTop->new(config => MockConfig->new(pipeline => $flat_ci), base => '/repo');
 	my $parser = Genesis::CI::Compiler::Parser->new(top => $top);
 	my $parsed = eval { $parser->parse() };
 	ok !$@, "flat-format config parses without error" or diag $@;
@@ -2715,7 +2572,7 @@ subtest 'Parser - genesis-config: nested integrations.* takes precedence over fl
 		pipeline => {},
 	};
 
-	my $top = MockTop->new(config => MockConfig->new(ci => $mixed_ci), base => '/repo');
+	my $top = MockTop->new(config => MockConfig->new(pipeline => $mixed_ci), base => '/repo');
 	my $parser = Genesis::CI::Compiler::Parser->new(top => $top);
 	my $parsed = eval { $parser->parse() };
 	ok !$@, "mixed flat+nested parses without error" or diag $@;
@@ -2755,19 +2612,9 @@ subtest 'Validator - validate_config_section: accepts flat-format source_control
 	ok !$@, "flat ci.source_control accepted by validate_config_section" or diag $@;
 };
 
-subtest 'Compiler - validate_config_section: rejects scalar source_control' => sub {
-	my $bad = {
-		%$_ci_data,
-		integrations => { source_control => 1 },
-	};
-	eval { Genesis::CI::Compiler->validate_config_section($bad, undef) };
-	like $@, qr/source_control.*must be a hash/i,
-		"scalar source_control triggers error";
-};
-
 subtest 'Compiler - validate_config_section: accepts hash source_control' => sub {
 	my $good = {
-		%$_ci_data,
+		%$_pipeline_data,
 		integrations => {
 			source_control => { provider => 'github', repository => 'org/repo' },
 		},

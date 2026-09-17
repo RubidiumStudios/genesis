@@ -2,8 +2,13 @@
 use strict;
 use warnings;
 
-use Test::More;
 use lib 'lib';
+use lib 't';
+use helper;
+use Harness::Propagation;
+use Test::More;
+use Test::Output;
+use File::Basename qw/dirname/;
 
 $ENV{GENESIS_TESTING} = "yes";
 $ENV{GENESIS_LIB}     ||= 'lib';
@@ -301,6 +306,22 @@ subtest 'Manual->label' => sub {
 ### check_prereqs
 ### ============================================================ ###
 
+# The fixture rather than whatever fly the machine has, so the rows run
+# everywhere and assert a version rather than skipping.  Three of the four
+# Concourse rows below skipped unless a real fly happened to be installed,
+# which means the version check has been covered by rows that usually did
+# not execute.  One harness serves all four, because the fixture is a file
+# each row rewrites rather than state a row has to stand up again.
+my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
+
+# check_prereqs runs in this process rather than in a child the harness
+# arranges a path for, so the directory the fixture sits in goes first on
+# the path for the length of the call.
+sub on_path {
+	my ($fly) = @_;
+	return join(':', dirname($fly), $ENV{PATH} // '');
+}
+
 subtest 'check_prereqs: base Provider always returns 1' => sub {
 	# Base class has no prereqs; all three concrete providers inherit this
 	# as a no-op default except where they override it.
@@ -314,60 +335,57 @@ subtest 'check_prereqs: base Provider always returns 1' => sub {
 };
 
 subtest 'check_prereqs: Concourse returns 1 when fly is in PATH' => sub {
-	# Only run if fly is actually installed in this environment.
-	my $fly = `which fly 2>/dev/null`;
-	chomp $fly;
-	if ($fly) {
-		my $p = Genesis::CI::Provider::Concourse->new(
-			type => 'concourse', target => 'test'
-		);
-		ok $p->check_prereqs(), 'check_prereqs returns 1 when fly is present';
-	} else {
-		pass 'skipped: fly not installed in this environment';
-	}
-};
+	local $ENV{PATH} = on_path(fixture_fly($h, version => '7.11.2'));
 
-subtest 'check_prereqs: Concourse returns 0 when fly is absent' => sub {
-	# Temporarily shadow PATH so fly cannot be found.
-	local $ENV{PATH} = '/nonexistent';
 	my $p = Genesis::CI::Provider::Concourse->new(
 		type => 'concourse', target => 'test'
 	);
-	my $result = $p->check_prereqs();
+	ok $p->check_prereqs(), 'check_prereqs returns 1 when fly is present';
+};
+
+subtest 'check_prereqs: Concourse returns 0 when fly is absent' => sub {
+	# The fixture takes its own fly away and takes every directory
+	# holding one off the path, so the row asks the question a machine
+	# with no fly asks.
+	fixture_fly($h, absent => 1);
+
+	my $p = Genesis::CI::Provider::Concourse->new(
+		type => 'concourse', target => 'test'
+	);
+	my ($said, $result) = ('', undef);
+	$said = stderr_from {$result = $p->check_prereqs()};
 	ok !$result, 'check_prereqs returns 0 when fly is not in PATH';
+	like($said, qr/requires the .?fly.? CLI but it was not found/,
+		'and it says which CLI it wanted');
 };
 
 subtest 'check_prereqs: Concourse min_fly_version satisfied' => sub {
-	my $fly = `which fly 2>/dev/null`;
-	chomp $fly;
-	unless ($fly) {
-		pass 'skipped: fly not installed in this environment';
-		return;
-	}
-	# Require a minimum of 0.0.1 — any real fly version will satisfy this.
-	my $p = Genesis::CI::Provider::Concourse->new(
-		type           => 'concourse',
-		target         => 'test',
-		min_fly_version => '0.0.1',
-	);
-	ok $p->check_prereqs(), 'check_prereqs passes with trivially low min version';
-};
+	local $ENV{PATH} = on_path(fixture_fly($h, version => '7.11.2'));
 
-subtest 'check_prereqs: Concourse min_fly_version not satisfied' => sub {
-	my $fly = `which fly 2>/dev/null`;
-	chomp $fly;
-	unless ($fly) {
-		pass 'skipped: fly not installed in this environment';
-		return;
-	}
-	# Require an impossibly high minimum — should fail.
 	my $p = Genesis::CI::Provider::Concourse->new(
 		type            => 'concourse',
 		target          => 'test',
-		min_fly_version => '9999.0.0',
+		min_fly_version => '7.9.0',
 	);
-	my $result = $p->check_prereqs();
-	ok !$result, 'check_prereqs returns 0 when fly version too old';
+	my ($said, $result) = ('', undef);
+	$said = stderr_from {$result = $p->check_prereqs()};
+	ok $result, 'check_prereqs answers yes when fly meets the floor';
+	unlike($said, qr/requires fly/, 'and says nothing about a version');
+};
+
+subtest 'check_prereqs: Concourse min_fly_version not satisfied' => sub {
+	local $ENV{PATH} = on_path(fixture_fly($h, version => '7.4.0'));
+
+	my $p = Genesis::CI::Provider::Concourse->new(
+		type            => 'concourse',
+		target          => 'test',
+		min_fly_version => '7.9.0',
+	);
+	my ($said, $result) = ('', undef);
+	$said = stderr_from {$result = $p->check_prereqs()};
+	ok !$result, 'check_prereqs answers no when fly is below the floor';
+	like($said, qr/requires fly >= 7\.9\.0/, 'it names the floor');
+	like($said, qr/found 7\.4\.0/, 'and the version it found');
 };
 
 ### ============================================================ ###
