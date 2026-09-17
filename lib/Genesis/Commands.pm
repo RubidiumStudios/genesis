@@ -296,6 +296,7 @@ sub run_command { # {{{
 		warning({label => "DEPRECATED"}, $msg);
 	}
 	_gate_pipeline_on_legacy_ci_yml();
+	_gate_branch_class();
 	$RUN{$COMMAND}(@COMMAND_ARGS);
 	exit 0
 } # }}}
@@ -326,6 +327,39 @@ sub _gate_pipeline_on_legacy_ci_yml {
 		"  3. Remove ci.yml (#g{git rm ci.yml}).\n\n".
 		"That restores pipeline commands."
 	);
+} # }}}
+
+# _gate_branch_class - run a command's declared class before the command {{{
+#
+# D81 puts the class at the registration so that one declaration drives both
+# the refusal and the help marker, which means the enforcement belongs here,
+# beside the legacy ci.yml gate, and not inside each command.
+sub _gate_branch_class {
+	my $class = command_properties()->{branch_class} or return;
+
+	# Only meaningful when the command has a repository to read a Top from.
+	return unless has_scope('repo', 'env');
+
+	require Genesis::Top;
+	my $top = eval { Genesis::Top->new('.', no_vault => 1) };
+	return unless $top;
+
+	# Outside a pipeline every command behaves as it always has, on any
+	# branch, which is D80's last sentence and D81's silent premise.
+	return unless $top->pipeline_enabled;
+
+	# propagate switches to control inside the session it already has, so
+	# the gate leaves it where it stands (D65, D81).
+	return if (command_properties()->{branch_target} // '') eq 'control';
+
+	require Service::Git;
+	my $git = Service::Git->new('.');
+
+	require Genesis::BranchClass;
+	Genesis::BranchClass::assert_pre_deploy($top, $git)
+		if $class eq PRE_DEPLOY;
+
+	return;
 } # }}}
 
 sub has_command { # {{{

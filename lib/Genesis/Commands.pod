@@ -1672,6 +1672,47 @@ B<Examples:>
   _gate_pipeline_on_legacy_ci_yml();
   # no return value; bails if a legacy ci.yml blocks a pipeline command
 
+=head2 _gate_branch_class
+
+  _gate_branch_class();
+
+Enforces the branch class a command declared at its registration, running in
+C<run_command> just after the legacy F<ci.yml> gate and before the command's
+own function.
+
+The class lives at the registration so that one declaration drives both the
+help marker and the refusal, which is why the enforcement sits here rather
+than inside each command.  A C<pre-deploy> command is handed to
+C<Genesis::BranchClass::assert_pre_deploy>, which refuses a derived branch
+at C<Genesis::Exit::DATAERR>.
+
+Returns early -- allowing the command through -- in five cases: the command
+declares no class; it has no repo or env scope, so there is no
+C<Genesis::Top> to read; the C<Top> could not be loaded; the repository has
+no pipeline enabled, where every command behaves as it always has; or the
+command declares C<branch_target =E<gt> 'control'>, which C<propagate> does
+because it switches to control inside its own session.
+
+B<Returns:> nothing.  Bails when the gate refuses.
+
+B<Errors:>
+
+=over 4
+
+=item The refusals belong to C<Genesis::BranchClass::assert_pre_deploy>.
+
+This function raises none of its own.  It names the branch, the class it
+belongs to, and the checkout that fixes it, and it exits
+C<Genesis::Exit::DATAERR>.
+
+=back
+
+B<Examples:>
+
+  _gate_branch_class();
+  # no return value; bails when a pre-deploy command stands on a
+  # deployment, pull request, or artifacts branch
+
 =head2 _parse_two_pass
 
   my $ok = _parse_two_pass($args, \@specs, $order);
