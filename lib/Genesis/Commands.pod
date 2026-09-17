@@ -515,8 +515,8 @@ If the command has a C<retired> property, C<run_command> bails with the
 retirement message and never invokes the function.  Otherwise, prints
 a deprecation warning if the command has a C<deprecated> property, then
 runs the two gates that stand in front of every command, which between them
-call the registered function with C<@COMMAND_ARGS>, and exits with status 0
-on success.
+call the registered function with C<@COMMAND_ARGS>, and exits on the status
+that function chose.
 
 Two gates stand between the dispatch and the function.
 C<_gate_pipeline_on_legacy_ci_yml> refuses a pipeline command in a

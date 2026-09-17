@@ -42,7 +42,14 @@ my $control = commit_on_control($h,
 (my $delivered = $on_control) =~ s/marker: control/marker: delivered/;
 deliver($h, 'qa', control => $control, files => {'qa.yml' => $delivered});
 refresh($h, 'a');
-certify($h, 'qa', control_commit => $control);
+# The audit carries an artifact, because the two option paths through
+# information read one and refuse before they reach the branch session
+# otherwise.  The file is named after the environment, which is how the
+# reader decides it is the manifest, and its body is a sentence no other
+# fixture writes so a row can tell it from the environment file.
+certify($h, 'qa', control_commit => $control, artifacts => {
+	'qa.yml' => "artifact: the-manifest-the-deploy-saved\n",
+});
 
 # The switch lock is per working tree and it is never unlinked, so the
 # question a row can ask of it afterwards is whether anybody still holds it.
@@ -171,6 +178,46 @@ subtest 'a command with no environment opens no session' => sub {
 		'rather than a bug report about an undefined name');
 	unlike("$out$err", qr/branch session still open/,
 		'and no session was opened to be aborted');
+};
+
+subtest 'printing an artifact returns rather than exiting' => sub {
+	stand_on($h, $h->control);
+
+	# --print-artifact printed and exited, from inside the session the gate
+	# had already opened, so finish was never reached and the net found the
+	# session open on the way out.  The exit was zero, which is the one
+	# status the net's silence does not cover, so the notice landed under
+	# the artifact.  The row fails against that and passes only where the
+	# command returns and lets the gate close the session.
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'info',
+		'--print-artifact', 'manifest');
+
+	is($exit, 0, 'the print succeeded');
+	like("$out$err", qr/artifact:\s*the-manifest-the-deploy-saved/,
+		'and the artifact the deployment carries was printed');
+	unlike("$out$err", qr/branch session still open/,
+		'the session was closed by the command rather than by the net');
+	is($git->current_branch, $h->control,
+		'and the operator is back on the branch they stood on');
+};
+
+subtest 'fetching artifacts returns rather than exiting' => sub {
+	stand_on($h, $h->control);
+
+	# Outside the repository on purpose: the fetch writes the files where it
+	# is pointed, and pointing it into the working tree would leave litter
+	# in a tree the session is about to ask questions of.
+	my $into = helper::workdir('fetched-artifacts');
+
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'info',
+		'--fetch-artifacts-to', $into);
+
+	is($exit, 0, 'the fetch succeeded');
+	ok(-f "$into/qa.yml", 'and the artifact was written where it was sent');
+	unlike("$out$err", qr/branch session still open/,
+		'the session was closed by the command rather than by the net');
+	is($git->current_branch, $h->control,
+		'and the operator is back on the branch they stood on');
 };
 
 subtest 'a bosh command returns rather than exiting' => sub {

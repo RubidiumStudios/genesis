@@ -794,6 +794,16 @@ to C<success>, C<type>, C<at>, and C<dependencies_read> as an arrayref of
 deployment slugs, written as one comma-joined value and left out of the
 record altogether where the row does not give it.
 
+C<artifacts> gives the deployment artifacts the audit carries, as a hashref of
+filename to contents, so a row that needs a deployment with something to fetch
+or print says what the deploy saved rather than how the field stores it.  The
+harness packs them into the base64-gzipped archive the reader expects and
+writes it on the audit, where the reader looks for it, and it leaves no
+artifacts field at all on an audit whose row named none.  No artifact map goes
+into the archive, so the reader derives each type from its filename, which
+means a file named after the environment is the C<manifest> and one named
+C<< <env>.vars >> is the C<vars>.
+
 The facts are written twice because two readers read them.
 C<Genesis::Env::last_read_dependencies> reads the flat record at
 C<exodus_base>, and every reader of the certified commit goes through

@@ -82,9 +82,9 @@ back to a synthesized record from current exodus data if no audit log entry
 exists.
 
 When the C<--print-artifact> option is set, retrieves and prints a single
-named artifact from the deployment, then exits.  When C<--fetch-artifacts-to>
-is set, downloads deployment artifacts to the specified directory and exits.
-When
+named artifact from the deployment and returns there.  When
+C<--fetch-artifacts-to> is set, downloads deployment artifacts to the
+specified directory and returns there.  When
 C<--history> is set, appends the full deployment history to the output.  When
 the kit defines an C<info> hook and neither C<$timestamp> nor C<--history> is
 active, the hook is invoked after the standard output block.
@@ -105,11 +105,12 @@ C<T>) are stripped before matching.
 
 =back
 
-B<Returns:> C<0>.  C<info> declares C<DEPLOYED_STATE>, so it runs inside the
-branch session the gate opened and hands its status back rather than exiting
-with it, and C<run_command> exits on what it returns once that session is
-closed.  Nothing in the function fails without bailing, so a return at all is
-a run that succeeded.
+B<Returns:> C<0>, or C<1> where C<--fetch-artifacts-to> could not fetch one
+of the artifact types it found.  C<info> declares C<DEPLOYED_STATE>, so it
+runs inside the branch session the gate opened and hands its status back
+rather than exiting with it, and C<run_command> exits on what it returns once
+that session is closed.  Every other way the function can fail bails instead
+of returning, so C<0> is a run that did what it was asked.
 
 B<Errors:>
 
