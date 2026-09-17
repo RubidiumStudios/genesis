@@ -60,8 +60,11 @@ subtest 'one class carries the fragment and the check' => sub {
 			"the $type provider declares its own keys";
 	}
 
-	is_deeply Genesis::CI::Provider::Manual->provider_options_schema, {},
-		'and the manual provider declares an empty fragment rather than none';
+	# Parenthesised, because Perl reads a loaded class name in the first
+	# position of a list operator as an indirect object call, and the loop
+	# above has just loaded this one.
+	is_deeply(Genesis::CI::Provider::Manual->provider_options_schema, {},
+		'and the manual provider declares an empty fragment rather than none');
 
 	# The compiler side keeps no declaration at all, neither a copy nor a
 	# forwarder to the real one.  A compiler reads the fragment off the

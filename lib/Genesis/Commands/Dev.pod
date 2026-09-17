@@ -81,11 +81,10 @@ C<pipeline-apply --debug-dir> and read F<01-parsed.json> instead.
 
 =head2 Why the house YAML serializer
 
-C<--format yaml> renders through
-C<Genesis::CI::ProviderCompiler::dump_yaml>, the same serializer
-the providers use.  A different YAML encoder would produce cosmetic
-differences (key order, quoting, flow style) that show up as diff noise
-and obscure the emitter change being reviewed.
+C<--format yaml> renders through C<Genesis::CI::ProviderCompiler::dump_yaml>,
+the same serializer the providers use.  A different YAML encoder would
+produce cosmetic differences (key order, quoting, flow style) that show up
+as diff noise and obscure the emitter change being reviewed.
 
 =head1 FUNCTIONS
 

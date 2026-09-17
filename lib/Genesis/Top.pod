@@ -3054,12 +3054,11 @@ a key, and an operator who writes it is refused by name as the configuration
 loads, before any gate is read.
 
 Every provider declares its abilities, so every gate here has a declaration
-to read and nothing asks whether a provider has a compiler class. The
-manual provider declares all six false, which is why a key it gates is
-refused rather than quietly accepted. Each declaration is checked against
-the six names through
-L<Genesis::CI::Provider/declared_capabilities> before any
-gate reads it.
+to read and nothing asks whether a provider has a compiler class. The manual
+provider declares all six false, which is why a key it gates is refused
+rather than quietly accepted. Each declaration is checked against the six
+names through L<Genesis::CI::Provider/declared_capabilities> before any gate
+reads it.
 
 The type comes from L</pipeline_provider_type> rather than off the key, and
 the declaration comes from the class
@@ -3090,9 +3089,9 @@ and the environment as well where the key lives in an environment file.
 =item *
 
 C<"CI provider ... declares the capabilities ..."> - raised through
-L<Genesis::CI::Provider/declared_capabilities> when the
-provider class answers anything but exactly the six names, which is a bug
-in that class rather than anything an operator wrote.
+L<Genesis::CI::Provider/declared_capabilities> when the provider class
+answers anything but exactly the six names, which is a bug in that class
+rather than anything an operator wrote.
 
 =item *
 

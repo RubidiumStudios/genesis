@@ -31,6 +31,13 @@ my @COMPILER_FAMILY = (
 	'lib/Genesis/CI/ProviderCompiler',
 );
 
+# Every sweep below is satisfied by an empty answer, and a root that is
+# not on disk answers empty, so a family that moved out from under this
+# file would read as a clean sweep rather than as a broken one.  The
+# roots are asserted once, here, so that never happens quietly.
+is scalar(grep {-e} @COMPILER_FAMILY), scalar(@COMPILER_FAMILY),
+	'every root the sweeps read is on disk';
+
 # An assertion helper, beside the test that uses it.  It reads each file
 # whole and reports the subs named, because a sub's name and its body
 # are what these rows are about and neither is spread over a boundary a
@@ -39,8 +46,9 @@ sub subs_named_in {
 	my ($where, @names) = @_;
 	my $names = join('|', @names);
 
-	# A root that is not there yet contributes nothing rather than dying,
-	# so the rows below fail on what they assert rather than on a stat.
+	# A root that is not there contributes nothing rather than dying, so
+	# the rows below fail on what they assert rather than on a stat.  The
+	# row above this sub is what makes sure that never happens silently.
 	my @roots = grep {-e} (ref($where) eq 'ARRAY' ? @$where : $where);
 	return () unless @roots;
 
@@ -57,6 +65,17 @@ sub subs_named_in {
 		close $fh;
 	}
 	return @found;
+}
+
+# The same sweep reduced to the files alone, each named once.  A row
+# whose subject is which files define a sub says so with a path, because
+# a line number is a second fact the row never asked about and one that
+# any edit above the sub moves.
+sub files_naming_subs {
+	my ($where, @names) = @_;
+	my %seen;
+	return grep {!$seen{$_}++}
+		map  {(split /:/, $_)[0]} subs_named_in($where, @names);
 }
 
 subtest 'every package under lib derives its own path' => sub {
@@ -144,8 +163,8 @@ subtest 'the concrete compiler takes the base constructor' => sub {
 	# Its own new blessed ast, top, and provider_opts and dropped
 	# everything else, so a provider handed in would have vanished and
 	# T343 could not be written.
-	my @found = subs_named_in(\@COMPILER_FAMILY, 'new');
-	is_deeply(\@found, ['lib/Genesis/CI/ProviderCompiler.pm:23: new'],
+	my @found = files_naming_subs(\@COMPILER_FAMILY, 'new');
+	is_deeply(\@found, ['lib/Genesis/CI/ProviderCompiler.pm'],
 		'only the base defines a constructor')
 		or diag(join("\n", map {"  $_"} @found));
 };

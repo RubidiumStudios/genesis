@@ -36,12 +36,20 @@ sub enabled_pipeline {
 		'  source_control:', '    repository: genesis/bosh-deployments');
 }
 
-# This subtest and the two below it name the three registered types
-# literally, so all three run before the subtest that registers zeppelin.
-# The registry is process-wide and register_provider has no counterpart
-# that takes an entry out again, so a fourth type registered anywhere
-# above them would still be there when they ran and every literal list
-# would be one type short.
+# Only this subtest enumerates the registry, and it does so twice: it
+# compares known_providers with the three types written out, and
+# automated_providers with the two of those that are not manual.  Both
+# rows are one type short the moment a fourth is registered, so this
+# subtest has to run before the one that registers zeppelin.
+#
+# The two subtests after it are not bound by that order.  The refusal
+# subtest builds the list it expects out of the registry, as its own
+# comment says, and the type-accessor subtest names concourse and manual
+# only to construct providers with, which a fourth type leaves alone.
+#
+# Order matters at all because the registry is process-wide and
+# register_provider has no counterpart that takes an entry out again, so
+# a type registered anywhere above would still be there when this ran.
 subtest 'the registry is consulted by both families and owned by neither' => sub {
 	plan tests => 6;
 
