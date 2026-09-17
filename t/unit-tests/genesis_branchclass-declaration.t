@@ -72,15 +72,22 @@ subtest 'every declared class is marked in the help listing' => sub {
 	# the stream the listing never reaches.
 	my $help = stderr_from { exits_zero { Genesis::Commands::command_help() } };
 
+	# Each row is anchored to the command column of its own entry, which is
+	# the scope icons, the command name, and the gap before its summary.  A
+	# word boundary is not enough: a hyphen is a non-word character, so
+	# \bsecrets\b matches inside check-secrets and rotate-secrets, and the
+	# secrets row was satisfied by whichever of those lines carried a marker.
+	# The icon field is upper-case letters and spaces, so nothing of a longer
+	# command's name can be mistaken for the field in front of a shorter one.
 	for my $cmd (sort keys %expected) {
 		my $marker = $expected{$cmd} eq Genesis::Commands::PRE_DEPLOY
 			? '[control]'
 			: '[env branch]';
-		like($help, qr/\b\Q$cmd\E\b[^\n]*\Q$marker\E/,
+		like($help, qr/^[A-Z ]*\Q$cmd\E\s{2,}[^\n]*\Q$marker\E/m,
 			"the help entry for $cmd carries the $marker marker");
 	}
 
-	unlike($help, qr/\bversion\b[^\n]*\[(?:control|env branch)\]/,
+	unlike($help, qr/^[A-Z ]*version\s{2,}[^\n]*\[(?:control|env branch)\]/m,
 		'a command with no class carries no marker');
 };
 

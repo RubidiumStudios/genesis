@@ -28,49 +28,6 @@ subtest 'bin/genesis' => sub {
 
 };
 
-subtest 'genesis propagate' => sub {
-	plan tests => 11;
-
-	ok(has_command('propagate'), "propagate command is registered");
-
-	is(command_properties('propagate')->{function_group},
-		Genesis::Commands::PIPELINE,
-		"propagate belongs to the pipeline group");
-
-	# Repo scope only: one run walks every environment in the repository,
-	# so there is nothing for env scope to scope it to.
-	is(command_properties('propagate')->{scope}, 'repo',
-		"propagate is repo-scoped");
-
-	is(command_properties('propagate')->{option_group},
-		Genesis::Commands::REPO_OPTIONS,
-		"propagate uses REPO_OPTIONS");
-
-	my %opts = command_properties('propagate')->{options}->@*;
-	ok(exists $opts{'dry-run|n'}, "propagate has a dry-run option");
-
-	# -y is back, with a new meaning under D83.  It was retired when the
-	# only thing that passed it was the deploy, and it returns as the
-	# publish preview's pre-approval, which is the one question it answers
-	# and the provider gate is not it.
-	ok(exists $opts{'yes|y'},     "propagate has a yes option");
-
-	ok(exists $opts{'force'},     "propagate has a force option");
-
-	# The commit override and the push switch are gone.  Both let a caller
-	# change what the run did, and a run the pipeline and the operator can
-	# both make has to be the same run either way.
-	ok(!exists $opts{'commit=s'},
-		"propagate no longer accepts a commit option");
-	ok(!exists $opts{'no-push'},
-		"propagate no longer accepts a no-push option");
-
-	is(scalar(keys %opts), 3, "propagate has only the three options above");
-
-	my $args = command_properties('propagate')->{arguments};
-	cmp_deeply($args, [], "propagate takes no positional arguments");
-};
-
 # Proves T323: one sweep reads the whole flag-carrying surface, so each
 # command asserts the options its registration declares and the class
 # marker it carries, and the retired seeding command is absent.
@@ -86,10 +43,21 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			# the ancestry check back on a stale tracking ref.
 			absent  => [qw/no-fetch no-refresh/],
 		},
+		# propagate is the one command in the sweep whose whole registration
+		# is read, rather than its flags alone.  D36 retired its argument,
+		# D44 and D40 retired three of its flags, and D83 gave -y a new
+		# meaning, so an option or an argument that came back would be a
+		# decision reversed and not a flag added.  The four keys below are
+		# read only where a command declares them.
 		'propagate' => {
-			class   => Genesis::Commands::PRE_DEPLOY,
-			options => [qw/dry-run|n yes|y force/],
-			absent  => [qw/no-fetch no-refresh no-push commit=s/],
+			class        => Genesis::Commands::PRE_DEPLOY,
+			options      => [qw/dry-run|n yes|y force/],
+			absent       => [qw/no-fetch no-refresh no-push commit=s/],
+			exactly      => 3,
+			arguments    => [],
+			scope        => 'repo',
+			group        => Genesis::Commands::PIPELINE,
+			option_group => Genesis::Commands::REPO_OPTIONS,
 		},
 		'pipeline-status' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
@@ -117,6 +85,24 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			for @{$surface{$cmd}{absent}};
 		is(command_properties($cmd)->{branch_class}, $surface{$cmd}{class},
 			"$cmd carries the $surface{$cmd}{class} marker");
+
+		is(scalar(keys %opts), $surface{$cmd}{exactly},
+			"$cmd declares only the options read above")
+			if exists $surface{$cmd}{exactly};
+		cmp_deeply(command_properties($cmd)->{arguments},
+			$surface{$cmd}{arguments},
+			"$cmd takes the positional arguments it declares")
+			if exists $surface{$cmd}{arguments};
+		is(command_properties($cmd)->{scope}, $surface{$cmd}{scope},
+			"$cmd is $surface{$cmd}{scope}-scoped")
+			if exists $surface{$cmd}{scope};
+		is(command_properties($cmd)->{function_group}, $surface{$cmd}{group},
+			"$cmd belongs to the group it declares")
+			if exists $surface{$cmd}{group};
+		is(command_properties($cmd)->{option_group},
+			$surface{$cmd}{option_group},
+			"$cmd takes the option group it declares")
+			if exists $surface{$cmd}{option_group};
 	}
 
 	# The seeding command is retired under D41, so it is not part of the
