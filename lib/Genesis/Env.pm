@@ -5199,71 +5199,32 @@ sub _post_deploy {
 	# Remove exodus-only manifest files
 	$self->_remove_repository_manifest_copies;
 
-	# CI-configured branch finalization: commit + push the deploy's
-	# manifest artifacts on the env branch, then run the auto-cascade
-	# (manual-provider only).  Non-manual providers (concourse, gha)
-	# own their own cascade, so we skip the cascade in those cases
-	# but still commit + push the manifest.
+	# CI-configured branch finalization: check the working tree the deploy
+	# leaves behind on the env branch, then run the auto-cascade
+	# (manual-provider only).  Non-manual providers (concourse, gha) own
+	# their own cascade, so we skip the cascade in those cases.
 	if ($self->top->pipeline_enabled) {
 		my $git    = $state->{pipeline_git};
 		my $branch = $state->{pipeline_branch};
 
+		# Under D35 nothing here commits or pushes, and under D63 the
+		# redacted manifest reaches its artifacts branch through the
+		# propagate run rather than through a commit the deploy makes.  The
+		# diff stays, because D84 turns it into the session's clean
+		# assertion at this step's last task.
 		if ($deployment_ok && $git && $branch) {
-			my $pre = $state->{pre_deploy_unclean} || {};
+			my $pre    = $state->{pre_deploy_unclean} || {};
 			my $prefix = $git->prefix // '';
-			# prefixed() returns a list; force scalar/list-ctx assignment
-			# so we get the path string, not the element count.
-			my ($manifests_subpath) = $git->prefixed('.genesis/manifests');
+			my $post   = $git->status($prefix || '.');
+			my @modified = grep {
+				!exists($pre->{$_}) || $pre->{$_} ne $post->{$_}
+			} sort keys %$post;
 
-			# Diff post-deploy working tree against the pre-deploy baseline.
-			my $post = $git->status($prefix || '.');
-			my (@new_manifests, @other);
-			for my $path (sort keys %$post) {
-				my $code = $post->{$path};
-				# Skip files already in this state pre-deploy.
-				next if exists($pre->{$path}) && $pre->{$path} eq $code;
-				if ($path =~ m{^\Q$manifests_subpath\E(?:/|$)}) {
-					push @new_manifests, $path;
-				} else {
-					push @other, sprintf("%s %s", $code, $path);
-				}
-			}
-
-			if (@other) {
-				warning(
-					"Deploy left unexpected working-tree changes outside #C{%s/}:\n%s\n\n".
-					"These are not being committed.  Review and clean up manually.",
-					$manifests_subpath,
-					join("\n", map {"  $_"} @other)
-				);
-			}
-
-			if (@new_manifests) {
-				$git->add($manifests_subpath);
-
-				my $sha_short = $git->sha('HEAD', short => 1) // '<unknown>';
-				my $msg = sprintf("[deploy] %s @ %s", $self->name, $sha_short);
-				$git->commit($msg);
-
-				if (my $remote = $git->default_remote) {
-					$self->notify(
-						"Rebasing #C{%s} onto #C{%s/%s} before push...",
-						$branch, $remote, $branch
-					);
-					$git->pull_rebase($branch, $remote);
-
-					$self->notify(
-						"Pushing #C{%s} deploy artifacts to #C{%s}...",
-						$branch, $remote
-					);
-					my $results = $git->push(
-						remote => $remote,
-						refs   => [{branch => $branch, kind => 'deployment'}],
-					);
-					bail("Failed to push %s to %s after deploy", $branch, $remote)
-						unless $results->[0]{ok};
-				}
-			}
+			warning(
+				"Deploy left unexpected working-tree changes:\n%s\n\n".
+				"These are not being committed.  Review and clean up manually.",
+				join("\n", map {"  $_"} @modified)
+			) if @modified;
 		}
 
 		# Auto-cascade propagation (manual-provider only).

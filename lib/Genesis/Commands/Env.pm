@@ -1570,92 +1570,10 @@ sub _assert_prior_env_deployed {
 }
 
 # }}}
-# _get_source_sha_for_pull - determine the control SHA to use for a --pull {{{
-#
-# Entry-point envs (no prior_env): returns control HEAD so the env
-# gets the latest committed control content.
-#
-# Downstream envs: returns the git.control_commit from the prior_env's
-# last successful deployment — the certified control state that was in
-# effect when the predecessor last shipped.  Falls back to control HEAD
-# with a warning when no record is found.
-sub _get_source_sha_for_pull {
-	my ($env, $prior_name, $git) = @_;
-
-	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-
-	unless ($prior_name) {
-		# Entry point: pull from control HEAD.
-		return $git->sha($control);
-	}
-
-	# Access the prior env's last successful deployment directly via vault.
-	my $prior_deploys = $env->exodus_mount . $prior_name . '/' . $env->type . '/deployments';
-	my $deploys = eval { $env->vault->get_path($prior_deploys) };
-
-	if ($deploys && ref($deploys) eq 'HASH') {
-		for my $ts (sort { $b cmp $a } keys %$deploys) {
-			my $entry = $deploys->{$ts};
-			next unless ref($entry) eq 'HASH';
-			my $result = $entry->{result} // '';
-			next unless $result eq 'success' || $result eq 'post-failed';
-
-			# get_path unflattens vault data: git.control_commit → {git}{control_commit}
-			my $ctl = (ref($entry->{git}) eq 'HASH') ? $entry->{git}{control_commit} : undef;
-			return $ctl if $ctl;
-		}
-	}
-
-	warning(
-		"Prior environment #C{%s} has no #C{git.control_commit} in its\n".
-		"last successful deployment.  Falling back to control HEAD for pull.",
-		$prior_name
-	);
-	return $git->sha($control);
-}
-
-# }}}
-# _apply_pull_propagation - pull propagated files from source_sha onto env branch {{{
-#
-# Diffs the propagation files between the env branch and the source SHA.
-# If there are changes, checks out the updated files from source_sha,
-# removes any deleted files, and commits with a [pipeline] control@<sha>
-# (pulled) marker.  Notifies and returns without committing when the env
-# branch is already current.
-sub _apply_pull_propagation {
-	my ($env, $env_branch, $source_sha, $git) = @_;
-
-	my @dep_files = $env->propagation_files;
-	unless (@dep_files) {
-		info "  #Yi{%s}: no propagation files defined — nothing to pull.", $env_branch;
-		return;
-	}
-
-	my $diff = $git->diff_files($env_branch, $source_sha, @dep_files);
-	my @to_copy = @{$diff->{changed}};
-	my @to_rm   = @{$diff->{deleted}};
-
-	unless (@to_copy || @to_rm) {
-		info "  #Yi{%s}: already current — no propagation changes to pull.", $env_branch;
-		return;
-	}
-
-	my $total     = scalar(@to_copy) + scalar(@to_rm);
-	my $sha_short = $git->sha($source_sha, short => 1) // substr($source_sha, 0, 8);
-
-	info "  #C{%s}: pulling %d file%s from control\@%s",
-		$env_branch, $total, $total == 1 ? '' : 's', $sha_short;
-
-	$git->checkout_file($source_sha, $_) for @to_copy;
-	$git->rm(@to_rm) if @to_rm;
-
-	my $msg = Genesis::CI::Marker::build($sha_short, $env_branch) . ' (pulled)';
-	$git->commit($msg, @to_copy);
-
-	info "  #G{%s}: propagation pull committed.", $env_branch;
-}
-
-# }}}
+# The two subs that resolved a source commit and copied the predecessor's
+# state onto the branch are gone.  D35 withdraws the step outright rather
+# than renaming it, so what the predecessor certified reaches this branch
+# through the propagate run, in control order, under D34.
 sub terminate {
 	my ($env, $reason, @extras) = @_;
 	command_usage(1) if @extras || !defined($env);
