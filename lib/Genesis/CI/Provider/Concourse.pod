@@ -175,7 +175,11 @@ C<min_fly_version> is the floor C<check_prereqs> enforces. It has no
 default, because a repository that names no floor wants any C<fly> that
 is present. It was readable on the object and settable only from Perl
 until it was declared here, so an operator who wrote the key was refused
-by name and the version check had nothing to enforce.
+by name and the version check had nothing to enforce. It is declared as
+a version rather than as a string, so a value the check could not
+compare against is refused as the configuration loads rather than
+enforcing nothing later; a leading C<v> is admitted and stripped before
+the comparison.
 
 The C<task> block declares C<image>, C<version>, and C<privileged>, and
 it defaults to an empty hash for the same reason the provider block
@@ -188,7 +192,7 @@ B<Examples:>
 
     my $schema = Genesis::CI::Provider::Concourse->provider_options_schema;
     $schema->{team}{default};                  # 'main'
-    $schema->{min_fly_version}{type};          # 'string'
+    $schema->{min_fly_version}{type};          # 'semver'
     $schema->{task}{schema}{privileged}{type}; # 'array'
 
 =head2 capabilities()
@@ -300,6 +304,14 @@ Whether C<fly> is on the PATH, and whether it meets the floor the
 repository declares as C<pipeline.provider.min_fly_version>. A repository
 that declares no floor is asking only that C<fly> be there. A version is
 compared field by field rather than as a string, so 10 sorts above 9.
+
+A floor is enforced or it is refused, and never quietly neither. A
+C<fly --version> that does not answer with three dotted numbers is
+refused by name, quoting what it said instead, because a version that
+cannot be read cannot be checked. A floor written C<v7.9.0>, which is
+how a Concourse release names itself, loses the C<v> before the
+comparison: split on the dots alone, that leading letter made the major
+number read as zero and every C<fly> on earth cleared the floor.
 
 This is the only answer to the question. The class that emits the
 pipeline kept a copy that asked whether C<fly> was on the path and

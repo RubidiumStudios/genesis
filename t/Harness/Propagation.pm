@@ -3825,11 +3825,14 @@ sub fixture_fly {
 	helper::mkdir_or_fail($bin) unless -d $bin;
 	my $path = "$bin/fly";
 
+	# Nothing comes back from this arm, because there is no fly to hand a
+	# path to and a caller that put the returned path on its own path
+	# would put the one file this just took away back within reach.
 	if ($opts{absent}) {
 		unlink $path;
 		_guard_env(PATH => join(':',
 			grep {!-x "$_/fly"} split(/:/, ($ENV{PATH} // ''))));
-		return $path;
+		return;
 	}
 
 	my $version = $opts{version}
@@ -3961,8 +3964,8 @@ sub automated_config {
 # the pipeline is called gets the name the repository would have anyway.
 sub compilable_pipeline {
 	my ($self, %opts) = @_;
-	$self->set_repo_config('pipeline.name', $opts{name} // $self->{type},
-		%opts);
+	my $name = delete $opts{name};
+	$self->set_repo_config('pipeline.name', $name // $self->{type}, %opts);
 	return $self;
 }
 

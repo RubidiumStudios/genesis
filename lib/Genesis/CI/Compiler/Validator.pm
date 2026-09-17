@@ -459,8 +459,12 @@ sub _validate_pipeline_section {
 		return;
 	}
 
-	# Empty pipeline section means env-file-topology mode (no pipeline.yml).
-	# Topology is derived from genesis.pipeline.* in env files; nothing to validate here.
+	# An empty pipeline section means env-file-topology mode, where the
+	# topology comes from genesis.pipeline.* in the environment files and
+	# there is nothing here to validate.  Only a configuration directory
+	# with no pipeline.yml in it still arrives empty: a repository
+	# configured inline carries the name its parse settled, so its block
+	# holds that name and reaches the rules below.
 	return unless %$pipeline;
 
 	# Metadata

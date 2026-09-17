@@ -120,21 +120,41 @@ sub check_prereqs {
 	if ($self->{min_fly_version}) {
 		my ($ver_out) = run({ stderr => 0 }, 'fly --version');
 		chomp($ver_out //= '');
-		if ($ver_out && $ver_out =~ /^(\d+)\.(\d+)\.(\d+)/) {
-			my @got = ($1+0, $2+0, $3+0);
-			my @min = map { $_ + 0 } split(/\./, $self->{min_fly_version}, 3);
-			push @min, 0 while @min < 3;
-			for my $i (0..2) {
-				if ($got[$i] < ($min[$i]//0)) {
-					error(
-						"Concourse CI provider requires fly >= %s but found %s.\n".
-						"  Upgrade fly from your Concourse server.",
-						$self->{min_fly_version}, $ver_out
-					);
-					return 0;
-				}
-				last if $got[$i] > ($min[$i]//0);
+
+		# A floor that cannot be compared against is a floor that is not
+		# enforced, and a check that carried on past an unreadable
+		# version line enforced nothing while saying nothing either.  So
+		# the refusal names what it read instead.
+		unless ($ver_out =~ /^v?(\d+)\.(\d+)\.(\d+)/) {
+			error(
+				"Concourse CI provider could not read a fly version from ".
+				"#C{fly --version}, which said #C{%s}.\n".
+				"  This pipeline declares a minimum of #C{%s}, and a ".
+				"version that cannot be read cannot be checked against it.",
+				($ver_out eq '' ? '(nothing)' : $ver_out),
+				$self->{min_fly_version}
+			);
+			return 0;
+		}
+		my @got = ($1+0, $2+0, $3+0);
+
+		# A Concourse release names itself v7.9.0, so a repository that
+		# copies that name into the key means the floor it says it
+		# means.  Split on the dots alone, the leading v made the major
+		# number read as zero and every fly on earth cleared it.
+		(my $floor = $self->{min_fly_version}) =~ s/^v//i;
+		my @min = map { $_ + 0 } split(/\./, $floor, 3);
+		push @min, 0 while @min < 3;
+		for my $i (0..2) {
+			if ($got[$i] < ($min[$i]//0)) {
+				error(
+					"Concourse CI provider requires fly >= %s but found %s.\n".
+					"  Upgrade fly from your Concourse server.",
+					$self->{min_fly_version}, $ver_out
+				);
+				return 0;
 			}
+			last if $got[$i] > ($min[$i]//0);
 		}
 	}
 
@@ -227,7 +247,13 @@ sub provider_options_schema {
 		# to enforce.  No default: a repository that names no floor
 		# wants any fly that is present, which is what the check does
 		# when the key is absent.
-		min_fly_version => {type => 'string', description => 'Lowest fly version this pipeline may be set with'},
+		#
+		# Declared as a version rather than as a string, so a value the
+		# check cannot compare against is refused as the configuration
+		# loads rather than silently enforcing nothing later.  A leading
+		# v is admitted here and stripped before the comparison, because
+		# that is how a Concourse release names itself.
+		min_fly_version => {type => 'semver', description => 'Lowest fly version this pipeline may be set with'},
 
 		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
 		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},

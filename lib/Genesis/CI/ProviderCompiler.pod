@@ -46,9 +46,13 @@ every emitter wants, which are a YAML serializer, a git URI, a secret
 reference, a topological sort, and a glob match.
 
 What a provider can do is declared on the CLI class and checked there,
-under L<Genesis::CI::Provider/declared_capabilities>. Nothing here answers
-for which providers exist either. That is L<Genesis::CI::ProviderRegistry>,
-which both families consult.
+under L<Genesis::CI::Provider/declared_capabilities>. Whether that
+provider's toolchain is present is asked there too, under
+L<Genesis::CI::Provider/check_prereqs>. This class carried a
+C<check_prereqs> that said yes to everything, and a concrete overrode it
+with a check weaker than the provider's own, so the weaker answer was the
+one a command got. Nothing here answers for which providers exist either.
+That is L<Genesis::CI::ProviderRegistry>, which both families consult.
 
 =head1 CONSTRUCTOR
 
@@ -173,12 +177,6 @@ B<Examples:>
 
 =head1 METHODS - PROVIDER OPTIONS
 
-This class no longer answers whether a toolchain is present. It carried a
-C<check_prereqs> that said yes to everything, and a concrete overrode it
-with a check weaker than the provider's own, so the weaker answer was the
-one a command got. The question belongs to the provider, and
-L<Genesis::CI::Provider/check_prereqs> is where it is asked.
-
 =head2 cli_opts()
 
 The Getopt::Long specifications for this provider's deploy-time flags.
@@ -258,6 +256,10 @@ B<Examples:>
 One provider option, falling back to the declared default when the
 operator wrote nothing, and to C<undef> when nothing declares the key at
 all.
+
+A key written with no value after it falls back too. Such a key is the
+operator declining to choose rather than choosing nothing, so a bare
+C<team:> resolves to C<main> exactly as an absent C<team> does.
 
 B<Parameters:>
 

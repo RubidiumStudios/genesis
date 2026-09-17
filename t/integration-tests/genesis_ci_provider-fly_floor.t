@@ -108,8 +108,57 @@ subtest 'an absent fly is still refused, by the same check' => sub {
 		'and it is the provider-side message');
 };
 
+subtest 'a fly whose version cannot be read is refused' => sub {
+	# Two rows, and one more for the run's own restoration assertion.
+	plan tests => 3;
+
+	# A floor nothing can be compared against is a floor that is not
+	# enforced, and a check that carried on regardless enforced nothing
+	# while reporting nothing.
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	compilable_pipeline($h);
+	$h->set_repo_config('pipeline.provider.min_fly_version', '7.9.0');
+	fixture_fly($h, version => 'fly (development)');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	is($exit, 86, 'the prerequisites refusal exits 86');
+	like(flatten($err), qr/could not read a fly version from/,
+		'and the refusal names what it read instead of a version');
+};
+
+subtest 'a floor written with a leading v is the same floor' => sub {
+	# Two rows, and one more for the run's own restoration assertion.
+	plan tests => 3;
+
+	# v7.9.0 is how a Concourse release names itself, so a repository
+	# that copies the name into the key means the floor it says it
+	# means.  Split on the dots alone it read as major zero, and every
+	# fly on earth cleared it.
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	compilable_pipeline($h);
+	$h->set_repo_config('pipeline.provider.min_fly_version', 'v7.9.0');
+	fixture_fly($h, version => '7.4.0');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	is($exit, 86, 'the prerequisites refusal exits 86');
+	like(flatten($err), qr/requires fly >= v?7\.9\.0/,
+		'and it names the floor the repository declared');
+};
+
+# The compiler family the second row below sweeps.  A root that is not on
+# disk contributes nothing, so an empty answer from a family that moved
+# reads exactly like an empty answer from one that is there, which is why
+# the row asserts the roots before it trusts the sweep.
+my @COMPILER_ROOTS = (
+	'lib/Genesis/CI/ProviderCompiler.pm',
+	'lib/Genesis/CI/ProviderCompiler',
+);
+
 subtest 'no second check_prereqs stands on any class the command can be handed' => sub {
-	plan tests => 2;
+	plan tests => 3;
+
+	is_deeply([grep {!-e} @COMPILER_ROOTS], [],
+		'both roots the compiler sweep reads are on disk');
 
 	# The provider family keeps two, which are the base's default at
 	# lib/Genesis/CI/Provider.pm and the Concourse override in the
@@ -120,8 +169,7 @@ subtest 'no second check_prereqs stands on any class the command can be handed' 
 		['lib/Genesis/CI/Provider.pm', 'lib/Genesis/CI/Provider/Concourse.pm'],
 		'the base declares the default and Concourse overrides it');
 
-	is_deeply([defining_check_prereqs('lib/Genesis/CI/ProviderCompiler.pm',
-	                                  'lib/Genesis/CI/ProviderCompiler')],
+	is_deeply([defining_check_prereqs(@COMPILER_ROOTS)],
 		[],
 		'and no compiler class answers the question at all');
 };

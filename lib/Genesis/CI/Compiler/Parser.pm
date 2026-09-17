@@ -174,8 +174,13 @@ sub _parse_genesis_config {
 	$parsed{pipeline}{metadata} = {
 		%{$parsed{pipeline}{metadata} || {}},
 	};
-	$parsed{pipeline}{metadata}{name} //= $data->{name}
+	# Set only where there is something to set.  Assigning the fallback
+	# unconditionally left a name key holding undef whenever neither the
+	# section nor the top had a name to give, and a key that is there and
+	# empty reads differently from a key that was never written.
+	my $name = $parsed{pipeline}{metadata}{name} // $data->{name}
 		// ($self->{top} ? $self->{top}->type : undef);
+	$parsed{pipeline}{metadata}{name} = $name if defined $name;
 
 	$parsed{_source_format} = 'genesis-config';
 	$parsed{_source_path}   = $self->{top}
