@@ -278,8 +278,9 @@ never disagree.  Defaults to C<undef>, which leaves the command ungated.
 
 =item C<branch_target> - The branch the command switches to inside its own
 session, declared only alongside a C<branch_class>.  C<propagate> is the
-one command that declares it, with the value C<'control'>.  Defaults to
-C<undef>.
+one command that declares it, and C<'control'> is the one value it may
+take, because that is the only target the gate compares against.  Defaults
+to C<undef>.
 
 =item C<option_require_order> - Boolean.  When true, option parsing stops
 at the first non-option argument.  Defaults to false.
@@ -356,6 +357,13 @@ exists to rule out.
 Raised via C<bug> when C<branch_target> is set and C<branch_class> is
 not.  A target names where an already-classed command takes itself, so
 it means nothing on its own.
+
+=item C<"Command %s declares the branch target %s; the only target is control.">
+
+Raised via C<bug> when C<branch_target> is set to anything but
+C<'control'>.  A target the gate never compares against would exempt the
+command from nothing while reading as though it had, which is the same
+failure the class check rules out.
 
 =back
 
@@ -482,8 +490,15 @@ Dispatches execution to the closure registered for the current command.
 If the command has a C<retired> property, C<run_command> bails with the
 retirement message and never invokes the function.  Otherwise, prints
 a deprecation warning if the command has a C<deprecated> property, then
-calls the registered function with C<@COMMAND_ARGS> and exits with
-status 0 on success.
+runs the two gates that stand in front of every command, then calls the
+registered function with C<@COMMAND_ARGS> and exits with status 0 on
+success.
+
+The gates run in order.  C<_gate_pipeline_on_legacy_ci_yml> refuses a
+pipeline command in a repository that still carries a legacy F<ci.yml>, and
+C<_gate_branch_class> enforces the branch class the command declared at its
+registration.  Either one can bail, and neither returns a value the dispatch
+reads.
 
 If the current command has no registered handler, prints an error via
 C<command_help> and exits with status 1.
@@ -1638,6 +1653,42 @@ B<Examples:>
   _branch_class_marker('version');
   # Returns: ""
 
+=head2 _gate_context
+
+  my ($top, $git) = _gate_context();
+
+Loads the C<Genesis::Top> and the C<Service::Git> handle for the current
+directory, once, and answers every later caller in that directory with the
+same pair.
+
+Both gates that run in front of a command ask the same two questions of the
+same directory.  Loading a C<Top> is not free of consequence -- it names
+C<GENESIS_ROOT>, C<GENESIS_TARGET_VAULT> and C<SAFE_TARGET> in the
+environment, and the memo behind C<Service::Vault> answers every later
+caller with whatever the first load chose -- so loading it twice for the
+four commands that meet both gates announces one thing twice.
+
+The answer is kept per directory rather than per process, so a caller that
+runs a gate against one repository and then against another gets each
+repository's own answer.
+
+Each load has its own C<eval>. A directory that is no repository at all
+still yields whatever C<Top> the first gate can refuse from, and the git
+handle bails on its own where there is no repository root, so a failure
+there hands back C<undef> and the branch-class gate stands aside rather
+than speaking before the command's own refusal.
+
+B<Returns:> the C<Genesis::Top> and the C<Service::Git> handle, either of
+which may be C<undef>.
+
+B<Examples:>
+
+  my ($top, $git) = _gate_context();
+  # Returns: (Genesis::Top, Service::Git)
+
+  my ($top, $git) = _gate_context();
+  # Returns: (undef, undef)  (the directory is no deployment root)
+
 =head2 _gate_pipeline_on_legacy_ci_yml
 
   _gate_pipeline_on_legacy_ci_yml();
@@ -1703,11 +1754,19 @@ need, so the gate reads the argument here and the predicate compares it
 there.
 
 Returns early -- allowing the command through -- in five cases: the command
-declares no class; it has no repo or env scope, so there is no
-C<Genesis::Top> to read; the C<Top> could not be loaded; the repository has
-no pipeline enabled, where every command behaves as it always has; or the
-command declares C<branch_target =E<gt> 'control'>, which C<propagate> does
-because it switches to control inside its own session.
+declares no class; it declares C<branch_target =E<gt> 'control'>, which
+C<propagate> does because it switches to control inside its own session; it
+has no repo or env scope, so there is no C<Genesis::Top> to read; the
+C<Top> or the git handle could not be loaded; or the repository has no
+pipeline enabled, where every command behaves as it always has.
+
+The target is read before anything is loaded.  Loading a C<Genesis::Top>
+names the deployment root and the vault target in the environment, and a
+command this gate never gates should not be handed those on its way past.
+
+The C<Top> and the git handle both come from C<_gate_context>, which the
+legacy F<ci.yml> gate reads too, so the four commands that meet both gates
+are loaded once.
 
 B<Returns:> nothing.  Bails when the gate refuses.
 

@@ -4,7 +4,7 @@ use strict;
 use warnings;
 
 use Genesis;
-use Genesis::Exit;
+use Genesis::Exit qw/DATAERR TEMPFAIL/;
 
 ### Branch naming {{{
 
@@ -30,9 +30,24 @@ sub classify_branch {
 	return 'feature' unless defined $branch;
 	return 'control' if $branch eq $top->control_branch;
 
+	# The names are read once and the three branches are composed from that
+	# one list.  pr_branch_for reads the same list again on every call, and
+	# the list is rebuilt from the environment files each time it is asked
+	# for, so calling it per environment walked the deployment root once per
+	# environment to answer one question about one branch.
+	#
+	# The prefix is joined here rather than through pr_branch_for for that
+	# reason alone.  What pr_branch_for adds beyond the join is a refusal of
+	# a prefix that collides with a deployment branch or with control, and
+	# that refusal belongs to the commands that create the branch, not to a
+	# classification that only wants to know what it is looking at.  The
+	# artifacts branch still goes through its own composer, which reads the
+	# list nowhere and costs nothing.
+	my $pr_prefix = $top->pr_prefix;
 	for my $env ($top->pipeline_env_names) {
-		return 'deployment' if $branch eq $top->branch_for($env);
-		return 'pr'         if $branch eq $top->pr_branch_for($env);
+		my $slug = $top->branch_for($env);
+		return 'deployment' if $branch eq $slug;
+		return 'pr'         if $branch eq $pr_prefix . $slug;
 		return 'artifacts'  if $branch eq artifacts_branch_for($top, $env);
 	}
 
@@ -73,7 +88,7 @@ sub refresh_control {
 	# fetch_branches fills.  There is no message key, so a caller reading one
 	# would print nothing and the operator would be told the fetch failed
 	# without being told why.
-	bail({exitcode => Genesis::Exit::TEMPFAIL()},
+	bail({exitcode => TEMPFAIL},
 		"Could not reach #C{%s} to refresh the #C{%s} branch.\n\n".
 		"This command reads control's tip to decide whether the branch you ".
 		"are on carries every environment, so it cannot run against stale ".
@@ -182,7 +197,7 @@ sub assert_pre_deploy {
 		artifacts  => "an artifacts branch, which a deploy writes to",
 	);
 
-	bail({exitcode => Genesis::Exit::DATAERR()},
+	bail({exitcode => DATAERR},
 		"#C{%s} is %s, and this command changes what will be delivered.\n\n".
 		"Derived branches never carry a hand commit.  Move to the control ".
 		"branch, or to a feature branch cut from it:\n\n".
@@ -201,7 +216,7 @@ sub assert_pre_deploy {
 	);
 	return 1 if $ok;
 
-	bail({exitcode => Genesis::Exit::DATAERR()},
+	bail({exitcode => DATAERR},
 		"%s, and this command changes what will be delivered.\n\n%s",
 		$reason, $remedy
 	);
