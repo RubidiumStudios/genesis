@@ -1540,6 +1540,26 @@ B<Examples:>
     my $branch = $top->control_branch();
     # returns 'control' unless the repository configured otherwise
 
+=head2 control_requires_pr
+
+    my $needs_pr = $top->control_requires_pr();
+
+Whether control accepts a direct push. It decides the branch protection
+C<pipeline-apply> applies to the control branch, and under D45 it also
+decides whether a command that commits on control expects to run on a
+feature branch instead. There is no second key for the expectation, so a
+site that turns the protection on gets the expectation with it.
+
+B<Parameters:> None.
+
+B<Returns:> 1 where C<pipeline.source_control.control_requires_pr> is set,
+and 0 otherwise, which is what the key defaults to.
+
+B<Examples:>
+
+    my $needs_pr = $top->control_requires_pr();
+    # returns 0 unless the repository configured otherwise
+
 =head2 pr_prefix
 
     my $prefix = $top->pr_prefix();

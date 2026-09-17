@@ -140,4 +140,42 @@ subtest 'propagate switches to control rather than refusing' => sub {
 		'so the topology was read from control');
 };
 
+subtest 'control_requires_pr moves the expectation to a feature branch' => sub {
+	# Proves T201: when control_requires_pr is set, genesis new expects a
+	# feature branch and says so, naming the key, while the feature branch
+	# itself proceeds.
+	#
+	# The key is committed on control and then published, because the branch
+	# below is cut from the remote-tracking ref and a key that never left
+	# copy A would not be on it.  Without the push the second half proves
+	# nothing about whether the code reads the key there.
+	stand_on($h, $h->control);
+	set_repo_config($h, 'pipeline.source_control.control_requires_pr', 1);
+	push_from($h, 'a', $h->control);
+	refresh($h, 'a', $h->control);
+
+	my ($out, $err, $exit) = run_genesis($h, 'new', 'prod5', '--no-commit');
+
+	is($exit, Genesis::Exit::DATAERR(),
+		'the run on control is refused rather than warned');
+	like($err . $out, qr/feature branch/i,
+		'the refusal says a feature branch is expected');
+	like($err . $out, qr/control_requires_pr/,
+		'and names the key that decided it');
+
+	# add-prod and prod are both taken by the first row of this file, which
+	# shares one harness and one fixture vault with every row below it, so
+	# the branch and the environment are named afresh here.  Re-using prod
+	# would meet the secrets that row already wrote, and genesis new asks
+	# before it removes them.
+	$git->create_branch('add-prod5', 'refs/remotes/origin/' . $h->control);
+	stand_on($h, 'add-prod5');
+	($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'new', 'prod5', '--no-commit');
+
+	is($exit, 0, 'the run on the feature branch proceeds');
+	unlike($err . $out, qr/control_requires_pr/,
+		'and says nothing about the key');
+};
+
 done_testing;

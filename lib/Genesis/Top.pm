@@ -1131,6 +1131,19 @@ sub control_branch {
 }
 
 # }}}
+# control_requires_pr - the one reader of the key D45 derives from {{{
+#
+# It decides the branch protection pipeline-apply applies to control, and
+# under D45 it also decides whether a command that commits on control
+# expects a feature branch instead.  One key, two readings of it, so a
+# site that turns the protection on never has to find a second switch.
+sub control_requires_pr {
+	my ($self) = @_;
+	return $self->config->get('pipeline.source_control.control_requires_pr', 0)
+		? 1 : 0;
+}
+
+# }}}
 # pr_prefix - the prefix every pull request branch carries {{{
 #
 # The one reader of pipeline.source_control.pr_prefix, defaulting to

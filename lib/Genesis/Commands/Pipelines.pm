@@ -1790,7 +1790,7 @@ sub _protection_rules_for {
 				required_approving_review_count => 1,
 				allowed_merge_methods           => ['squash', 'rebase'],
 			},
-		} if $top->config->get('pipeline.source_control.control_requires_pr');
+		} if $top->control_requires_pr;
 		return \@rules;
 	}
 

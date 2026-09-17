@@ -189,7 +189,24 @@ sub assert_pre_deploy {
 	# raised here would speak before either of them and say less.
 	my $branch = $git->current_branch;
 	my $class = classify_branch($top, $branch);
-	return 1 if $class eq 'control';
+	if ($class eq 'control') {
+		# D45: where control requires a pull request, every command that
+		# commits on control expects a feature branch instead, because a
+		# commit made here has no way to reach control through a pull
+		# request.  The expectation follows the key that already decides
+		# the protection, so there is no second key to set.
+		bail({exitcode => DATAERR},
+			"#C{%s} requires a pull request, so this command expects to run ".
+			"on a feature branch.\n\n".
+			"#C{pipeline.source_control.control_requires_pr} is set, and the ".
+			"branch protection it derives blocks a direct push.  Cut a ".
+			"feature branch and open a pull request:\n\n".
+			"    git checkout -b add-<something> %s\n",
+			$top->control_branch, $top->control_branch
+		) if $top->control_requires_pr;
+
+		return 1;
+	}
 
 	my %derived = (
 		deployment => "a deployment branch, which holds what was delivered",
