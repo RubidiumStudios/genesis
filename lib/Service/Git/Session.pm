@@ -237,6 +237,22 @@ sub switch {
 	# repository does not have is refused with the working tree still
 	# exactly as the operator left it.
 	my $is_branch = $self->_is_branch($target);
+
+	# D51's derived branch.  A pull request branch is rebuilt from the
+	# deployment branch on every run, so the first run for an environment
+	# asks to stand on a name neither side holds, and create_from is what
+	# the caller says to cut it from.  The absence is recorded here, before
+	# the branch exists, because what the reset owes such a branch is the
+	# absence and a branch already cut reads exactly like one that stood
+	# before the run.  The cut itself waits for the lock below.
+	my $cut = ($is_branch || !defined $opts{create_from})
+		? undef : $opts{create_from};
+	if (defined $cut) {
+		$self->{switched}{$target} = undef
+			unless exists $self->{switched}{$target};
+		$is_branch = 1;
+	}
+
 	$self->_verify_reachable($target, $opts{record}) unless $is_branch;
 
 	# The lock is handed the directory this switch was called in, because a
@@ -256,6 +272,7 @@ sub switch {
 		or bail("Unable to enter git root %s: %s", $git->root, $!);
 
 	$self->_take_lock($cwd);
+	$git->create_branch($target, $cut) if defined $cut;
 	$self->_through_the_door(sub {
 		$is_branch ? $git->checkout($target) : $git->checkout_detached($target);
 	});
@@ -266,7 +283,12 @@ sub switch {
 	chdir($restore) if -d $restore;
 
 	$self->{on} = $target;
-	$self->{switched}{$target} //= eval { $git->sha($target) } if $is_branch;
+	# Recorded whether or not the branch exists, so a branch this run created
+	# is distinguishable from one that stood before it.  The old form used //=
+	# on the value, so an absent branch recorded nothing and the two cases
+	# read alike afterwards.
+	$self->{switched}{$target} = eval { $git->sha($target) }
+		if $is_branch && !exists $self->{switched}{$target};
 	return $self;
 }
 
@@ -502,6 +524,50 @@ sub reset_branch {
 	bail("A branch session never resets #C{%s}, which is the control branch",
 		$branch) if defined $self->{control} && $branch eq $self->{control};
 	return $self->_reset_to_remote($branch);
+}
+
+# }}}
+# restore_branch - put one branch back where this run found it {{{
+#
+# reset_branch puts a branch back at T, which is right for every branch the
+# remote has.  A pull request branch may be one this run cut itself, and T has
+# nothing to put it back to, so what the run found is the absence and putting
+# it back is deleting it.  The session recorded which of the two it was at the
+# switch, so nothing here has to guess.
+#
+# The answer says what happened, so a caller that promised every branch it
+# hands here was either tracked or created by this run can tell the two apart.
+sub restore_branch {
+	my ($self, $branch) = @_;
+	my $git = $self->{git};
+
+	bail("A branch session never restores #C{%s}, which is the control branch",
+		$branch) if defined $self->{control} && $branch eq $self->{control};
+
+	return 'reset' if $self->_reset_to_remote($branch);
+
+	# The remote has no tip for it, so the tip this session read at the
+	# switch is the only thing there is to put it back to.  A hard reset is
+	# what puts the tree back with the ref where we are standing on the
+	# branch, and set_branch_ref refuses that case by name.
+	my $found = $self->{switched}{$branch};
+	if (defined $found) {
+		($git->current_branch // '') eq $branch
+			? $git->reset_hard($found)
+			: $git->set_branch_ref($branch, $found);
+		return 'reset';
+	}
+
+	# Neither the remote nor this run's own record has a tip for it, so the
+	# branch is one this run created and putting it back is taking it off.
+	# git will not delete the branch the tree stands on, and the run may have
+	# stopped while standing on this one, so the session steps back to the
+	# branch it began on before the ref goes.
+	$self->switch($self->{origin}{branch})
+		if $self->{active} && $self->{origin}
+		&& ($git->current_branch // '') eq $branch;
+	$git->delete_branch($branch) if $git->branch_exists($branch);
+	return 'deleted';
 }
 
 # }}}

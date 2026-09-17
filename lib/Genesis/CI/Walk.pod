@@ -182,6 +182,10 @@ C<branch>, C<prior_env>, C<depth>, C<reading>, C<merged>, C<deployed>,
 C<certified>, C<pending>, C<held>, C<proposed>, C<hold>, C<drifted>,
 C<pr>, C<manual>,
 C<divergence>, C<discovery>, C<error>, C<outcome>, and C<outcome_detail>.
+C<pr> is a hashref carrying the pull request branch under C<branch> for an
+environment whose policy asks for a pull request, and C<undef> for every
+other, so a reader can tell which environments deliver that way without
+asking the topology again.
 
 B<Errors:> Raises a bug where no git handle is given, since every reading
 below is made through one and a walk without it can answer nothing.
@@ -208,11 +212,16 @@ branch composed through C<< $top->branch_for >>, and with its C<prior_env> and
 its depth.  Under D66 the branch is per deployment, so two roots sharing an
 environment name walk their own branches and read their own markers.
 
-The pull request branch is not composed here, because nothing reads it and
-the collision C<< $top->pr_branch_for >> can refuse would be raised inside the
-run's open session, where a refusal exits differently than it means to.  The
-stage that delivers by pull request composes it and has the pre-flight refuse
-the collision ahead of the session.
+An environment whose own C<genesis.pipeline.require_pr> is true carries its
+pull request branch beside the deployment branch, under C<pr_branch>, composed
+through C<< $top->pr_branch_for >> so the two names cannot disagree about
+which deployment a branch belongs to.  Every other environment's C<pr_branch>
+is C<undef>, because composing one rebuilds the unmemoized topology and
+nothing would read the answer.
+
+The collision C<< $top->pr_branch_for >> can refuse is asked for in the
+pre-flight, ahead of the session, so its C<CONFIG> exit survives rather than
+dying as a string inside the run's own eval.
 
 The topology the list was built from comes back beside it.  L</plan> reads
 C<parent_of> out of it and nothing else, and C<genesis propagate> builds a
@@ -234,12 +243,19 @@ B<Errors:> Raises a bug through C<< $top->branch_for >> where the topology
 gives a name that is not a string, or an empty one, since a branch cannot be
 composed from either.
 
+Exits C<CONFIG> through C<< $top->pr_branch_for >> where the pull request
+prefix makes a name that collides with a deployment branch or with control.
+
 B<Examples:>
 
   my ($scope) = Genesis::CI::Walk::scope_for($top, scope => ['qa']);
   # returns one entry for qa, whose branch is qa/bosh in a bosh root and
   # qa/vault in the vault root beside it, and whose prior_env and depth are
   # the ones the whole pipeline gives it
+
+  my ($scope) = Genesis::CI::Walk::scope_for($top, scope => ['prod']);
+  # $scope->[0]{pr_branch} is pr/prod/bosh where prod requires a pull
+  # request, and undef where it does not
 
 =head2 read_durable_state
 

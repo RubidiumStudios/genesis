@@ -17,7 +17,6 @@ use lib 't';
 use helper;
 use Harness::Propagation;
 
-use Test::Exception;
 use Test::More;
 use Test::Output;
 
@@ -123,8 +122,12 @@ subtest 'a no resets every branch and publishes nothing' => sub {
 		'and a commit that never reached R is delivered in no sense');
 };
 
-subtest 'a publish-set branch the remote never had is a defect' => sub {
-	plan tests => 1;
+# The reset used to raise a bug over a branch with no tracking ref, because
+# nothing could put one back.  The session records each branch's pre-run tip
+# now, so there is something to put every branch back to and the restore does
+# it rather than refusing.
+subtest 'a publish-set branch the remote never had goes back where it was' => sub {
+	plan tests => 2;
 
 	my $h = make_harness(envs => ['lab'], mode => 'direct', vault => 0);
 
@@ -145,15 +148,17 @@ subtest 'a publish-set branch the remote never had is a defect' => sub {
 	my $session = $git->session(control => $h->control);
 	$session->begin;
 	$session->switch($h->slug('lab'));
+	my $found = $git->sha('HEAD');
 	$git->checkout_file($control, 'ops/shared.yml');
 	$git->commit('deliver ops/shared.yml to lab', 'ops/shared.yml');
 
-	# Named rather than passed over, because a reset that put nothing back
-	# would leave the run's own commit on a branch nobody else can see while
-	# the count still said the branch was put back.
-	throws_ok {Genesis::CI::Publish::_reset_publish_set($session)}
-		qr/\Q@{[$h->slug('lab')]}\E.*no remote-tracking ref/s,
-		'the branch with no tracking ref is named as a bug in Genesis';
+	# Counted and then read off the branch itself, because a reset that put
+	# nothing back would leave the run's own commit on a branch nobody else
+	# can see while the count still said the branch was put back.
+	is(Genesis::CI::Publish::_reset_publish_set($session), 1,
+		'the branch is in the set the reset puts back');
+	is($git->sha($h->slug('lab')), $found,
+		'and it is back at the tip this run found it at');
 
 	$session->finish;
 };

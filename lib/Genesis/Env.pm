@@ -3411,44 +3411,68 @@ sub hold_record_path {
 }
 
 # }}}
-# proposed_record - the open pull request this environment is waiting on {{{
+# proposed_record_path - where the proposed record lives {{{
 #
-# Four fields and no more, which are the control commit the pull request
-# proposes, its number, its url, and when the record was written (D57).  The
-# deploy's due-commits warning reads this rather than asking GitHub, so a
-# warning costs no API call and works with no token at all.
-#
-# The read is shaped exactly like hold_record next door, and for the same
-# reason.  A vault answers an absent path and an empty one alike, so the
-# existence question is asked first, and the read goes through this
-# environment's own vault because the record addresses under exodus_base like
-# every other record this module keeps there.
-sub proposed_record {
+# A sibling of deployments and hold, under this environment's own exodus
+# base, so one environment's records travel together and a read costs no
+# client.
+sub proposed_record_path {
 	my ($self) = @_;
-
-	my $path  = $self->proposed_record_path;
-	my $vault = $self->vault;
-	return undef unless $vault->has($path);
-
-	my $data = $vault->get($path);
-	return undef unless ref($data) eq 'HASH';
-	return {
-		control_commit => $data->{control_commit},
-		number         => $data->{number},
-		url            => $data->{url},
-		at             => $data->{at},
-	};
+	return $self->exodus_base.'/proposed';
 }
 
 # }}}
-# proposed_record_path - where that record lives {{{
+# proposed_record - the open pull request this environment is waiting on {{{
 #
-# A sibling of the deployment records and of the hold, under this
-# environment's own exodus base, so one environment's records travel together
-# and a read costs no client of any kind.
-sub proposed_record_path {
+# Four fields and no more, which are the control commit the pull request
+# proposes, its number, its url, and when it was written (D57).  The deploy's
+# due-commits warning reads this rather than asking GitHub, so a warning
+# costs no API call and works with no token at all.
+sub proposed_record {
 	my ($self) = @_;
-	return $self->exodus_base . '/proposed';
+	my $record = eval { $self->vault->get_path($self->proposed_record_path) };
+	return undef unless $record && ref($record) eq 'HASH';
+	return {map {($_ => $record->{$_})} qw/control_commit number url at/};
+}
+
+# }}}
+# set_proposed - write the proposed record for the pull request we opened {{{
+#
+# The caller gives the control commit the aggregate's marker names, the pull
+# request's number, and its URL.  D58 fixes at as a value in
+# EXODUS_TIME_FORMAT, and the path carries no timestamp of its own, because
+# one proposal stands at a time and a path that grew an entry per proposal
+# would be a set nobody reads the newest of.
+sub set_proposed {
+	my ($self, %rec) = @_;
+
+	bail(
+		"Cannot write the proposed record for #C{%s} without a control commit",
+		$self->name
+	) unless $rec{control_commit};
+	bail(
+		"Cannot write the proposed record for #C{%s} without a pull request ".
+		"number", $self->name
+	) unless defined $rec{number};
+
+	$self->vault->set_path($self->proposed_record_path, {
+		control_commit => $rec{control_commit},
+		number         => $rec{number},
+		url            => $rec{url} // '',
+		at             => $rec{at} || Time::Piece->new->strftime(EXODUS_TIME_FORMAT),
+	});
+	return $self;
+}
+
+# }}}
+# clear_proposed - delete the record when the pull request merges {{{
+#
+# Once the aggregate lands on the deployment branch its marker says what is
+# pending, so the pointer has nothing left to point at.
+sub clear_proposed {
+	my ($self) = @_;
+	$self->vault->clear($self->proposed_record_path);
+	return $self;
 }
 
 # }}}

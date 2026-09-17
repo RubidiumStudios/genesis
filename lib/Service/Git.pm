@@ -351,6 +351,21 @@ sub checkout {
 }
 
 # }}}
+# reset_hard - put the checked-out branch's tree, index, and tip at a ref {{{
+#
+# The pull request branch is derived state, rebuilt from the deployment branch
+# on every run under D51, so the arm needs one call that moves all three at
+# once.  It runs from the repository root, because the ref being reset to may
+# not carry the directory we are standing in.
+sub reset_hard {
+	my ($self, $ref) = @_;
+	run({dir => $self->{root}, onfailure => "Failed to reset to '$ref'"},
+		'git', 'reset', '--hard', $ref);
+	delete $self->{_branch_cache};
+	return $self;
+}
+
+# }}}
 # checkout_detached - stand on a commit rather than on a branch {{{
 #
 # Separate from checkout rather than folded into it, because the two are
@@ -1292,6 +1307,22 @@ sub delete_remote_branch {
 }
 
 # }}}
+# delete_branch - delete a local branch, forcibly {{{
+#
+# The pull request branch is derived state and is rebuilt from the deployment
+# branch on every run, so a local ref is never worth preserving, and one the
+# remote no longer carries is exactly what breaks the next cycle.
+sub delete_branch {
+	my ($self, $branch) = @_;
+	return $self if ($self->current_branch // '') eq $branch;
+	run({dir => $self->{root},
+			onfailure => "Failed to delete local branch '$branch'"},
+		'git', 'branch', '-D', $branch);
+	delete $self->{_branch_cache}{$branch};
+	return $self;
+}
+
+# }}}
 # fetch_branches - refresh branches from a remote in one call {{{
 #
 # The one refresh.  It brings the remote into the remote-tracking refs for
@@ -1382,8 +1413,15 @@ sub fetch_branches {
 		} @present;
 
 		# Absent on the remote says nothing about local state, so only
-		# fetched branches are cached.
-		$self->{_branch_cache}{$_} = 1 for @fetched;
+		# fetched branches are cached.  The tracking name is cached beside
+		# the branch's own, because branch_exists remembers the answer it
+		# gave and a caller that asked for origin/<branch> before this
+		# fetch would otherwise be handed that miss for the rest of the
+		# run.
+		for my $name (@fetched) {
+			$self->{_branch_cache}{$name} = 1;
+			delete $self->{_branch_cache}{"$remote/$name"};
+		}
 	}
 
 	return wantarray

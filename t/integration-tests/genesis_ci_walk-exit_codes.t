@@ -60,20 +60,29 @@ subtest 'one failed environment exits TEMPFAIL' => sub {
 };
 
 subtest 'an environment the run never attempted exits TEMPFAIL' => sub {
-	plan tests => 3;
+	plan tests => 2;
 
-	# qa asks for delivery by pull request, which is the one stage of the
-	# publish the run does not build yet, so the run reaches qa, writes
-	# nothing for it, and records that it was not attempted.  Nothing about
-	# qa is broken and no other environment lost anything, so the status is
-	# the only place the run can say that it was partial.
-	my $h = ready_harness(envs => ['lab', 'qa'], kit => 'omega-v2.7.0');
-	write_env_file($h, 'qa', pipeline => {require_pr => 'true'});
-	push_from($h, 'a', $h->control);
+	# The record is composed here rather than driven out of a run.  The one
+	# run that ended normally with an environment recorded as not attempted
+	# was the one that met the pull request guard, and that guard has gone
+	# with the arm that replaced it, so the word is written by the abort
+	# alone now, for the environments a run that ended early never reached.
+	# An abort spends its own status, so the mapping this row is about is
+	# the one thing a run can no longer show, and the sub that decides it is
+	# asked directly.  The abort's own two statuses are proved end to end in
+	# t/integration-tests/genesis_ci_walk-run_failures.t.
+	require Genesis::Commands::Pipelines;
 
-	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
-	is($exit, Genesis::Exit::TEMPFAIL, 'the run exits TEMPFAIL');
-	like($err, qr/qa: not attempted/, 'qa records that it was not attempted');
+	is(Genesis::Commands::Pipelines::run_status({environments => [
+		{env => 'lab', outcome => 'propagated'},
+		{env => 'qa',  outcome => 'not attempted'},
+	]}), Genesis::Exit::TEMPFAIL,
+		'a run carrying an environment it never attempted is partial');
+
+	is(Genesis::Commands::Pipelines::run_status({environments => [
+		{env => 'lab', outcome => 'propagated'},
+		{env => 'qa',  outcome => 'idempotent'},
+	]}), 0, 'and one where every environment ended well is not');
 };
 
 done_testing;

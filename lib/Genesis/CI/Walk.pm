@@ -854,12 +854,14 @@ sub abort_run {
 # it reads, because one fact answered through two readers is how the two come
 # to disagree.
 #
-# The pull request branch is not composed here.  Nothing reads it, composing
-# it rebuilds the unmemoized topology once per environment, and the collision
-# it can refuse would be raised inside the run's own eval and its open
-# session, where the refusal dies as a string and the named CONFIG exit
-# becomes a bare 1.  The stage that delivers by pull request composes it, with
-# the collision refused in the pre-flight ahead of the session.
+# D66 and D71: the pull request branch is the prefix joined onto the same
+# deployment slug, so the two names cannot disagree about which deployment a
+# branch belongs to.  It is composed here now that the arm that delivers onto
+# it exists, and only for an environment whose policy asks for one, because
+# composing it rebuilds the unmemoized topology once per environment.  The
+# collision pr_branch_for refuses is asked for in the pre-flight, ahead of the
+# session, so its CONFIG exit survives rather than dying as a string inside
+# the run's own eval.
 sub scope_for {
 	my ($top, %opts) = @_;
 
@@ -883,6 +885,8 @@ sub scope_for {
 			env       => $name,
 			type      => $top->type,
 			branch    => $top->branch_for($name),
+			pr_branch => $topology->{nodes}{$name}{require_pr}
+				? $top->pr_branch_for($name) : undef,
 			prior_env => $prior,
 			depth     => $depth{$name},
 		};
@@ -1008,7 +1012,13 @@ sub plan {
 			proposed       => undef,
 			hold           => undef,
 			drifted        => undef,
-			pr             => undef,
+			# Seeded from the scope's own composition rather than carrying
+			# a second name for one branch.  The field already stood here
+			# and already read null, and seeding it is what lets the arm
+			# and the client read which environments would deliver into a
+			# pull request without anybody adding a key to the record.
+			pr             => $entry->{pr_branch}
+				? {branch => $entry->{pr_branch}} : undef,
 			manual         => undef,
 			divergence     => $settled ? {
 				state  => $settled->{state},

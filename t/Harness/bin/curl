@@ -84,9 +84,10 @@ if (!defined $url) {
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls/(\d+)/reviews$}) {
 	my ($pr) = grep {$_->{number} == $1} @{$state->{prs} || []};
 	$answer = $pr ? ($pr->{reviews} || []) : [];
-} elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls(?:\?|$)}) {
+} elsif ($url =~ m{/repos/([^/]+/[^/]+)/pulls(?:\?|$)}) {
 	# The collection is anchored, so a request for one pull request's reviews
 	# reaches the branch above rather than reading as a listing.
+	my $owner_repo = $1;
 	if ($method eq 'GET' || $method eq 'HEAD') {
 		my $want = $url =~ /state=(\w+)/ ? $1 : 'open';
 		$answer = [grep {$want eq 'all' || $_->{state} eq $want} @{$state->{prs} || []}];
@@ -96,6 +97,11 @@ if (!defined $url) {
 		my $sent = {};
 		eval {$sent = $json->decode($body // '{}'); 1} or $sent = {};
 		my $number = scalar(@{$state->{prs} || []}) + 1;
+		# The url is composed from the pair the request named rather than
+		# from anything the state carries, so the answer names the same
+		# repository the caller asked about however it was configured.
+		my $html_url = sprintf('https://%s/%s/pull/%d',
+			$state->{domain} // 'github.test', $owner_repo, $number);
 		push @{$state->{prs}}, {
 			number  => $number,
 			state   => 'open',
@@ -104,6 +110,7 @@ if (!defined $url) {
 			base    => {ref => $sent->{base} // ''},
 			title   => $sent->{title} // '',
 			body    => $sent->{body}  // '',
+			html_url   => $html_url,
 			created_at => '2026-09-13T00:00:00Z',
 			reviews => [],
 		};
@@ -112,7 +119,7 @@ if (!defined $url) {
 		print $state_fh $json->encode($state);
 		close $state_fh;
 		$status = 201;
-		$answer = {number => $number};
+		$answer = {number => $number, html_url => $html_url};
 	}
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/rulesets(?:/(\d+))?$}) {
 	my $id = $1;

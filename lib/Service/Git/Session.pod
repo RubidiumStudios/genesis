@@ -240,7 +240,17 @@ anything, since the directory we exit in is the one we came in on.
 The tip of the target is recorded the first time the session lands on a
 branch, so C<committed_branches> can say afterwards which branches this session
 moved. A commit is not recorded, because it is not a branch this session could
-have moved.
+have moved. The absence of a tip is recorded as well as a tip, so a branch
+this run cut is distinguishable afterwards from one that stood before it, and
+C<restore_branch> reads which of the two it was.
+
+C<create_from> is what lets a caller stand on a derived branch that exists
+nowhere yet. A pull request branch is rebuilt from the deployment branch on
+every run, so the first run for an environment asks for a name neither side
+holds, and the session cuts it under the switch lock rather than having the
+caller cut it and then ask to stand on it. The absence is recorded before the
+cut, because a branch already cut reads exactly like one that stood before the
+run.
 
 B<Parameters:>
 
@@ -258,7 +268,9 @@ git's own checkout cuts the local branch for it and the caller means a branch.
 
 Options. C<record> names the record the commit came from, which is the exodus
 path where the caller is following C<git.commit>, and it is what the refusal
-quotes back so the operator knows which record is wrong.
+quotes back so the operator knows which record is wrong. C<create_from> names
+the ref to cut the branch from where neither this repository nor the remote
+holds it, and it is ignored where either of them does.
 
 =back
 
@@ -308,6 +320,9 @@ B<Examples:>
 
   $session->switch($dropped_sha, record => '/secret/exodus/qa/bosh');
   # exits DATAERR naming both, where the branch was rewritten on the remote
+
+  $session->switch('pr/qa/bosh', create_from => 'qa/bosh');
+  # cuts pr/qa/bosh from qa/bosh and stands on it, where nobody holds it yet
 
 =head2 finish
 
@@ -619,6 +634,66 @@ B<Examples:>
 
   $session->reset_branch('prod/bosh');
   # returns 0, and leaves the branch alone, where the remote has never had it
+
+=head2 restore_branch($branch)
+
+  my $moved = $session->restore_branch('pr/qa/bosh');
+
+Puts one branch back where this run found it, which is C<T> for a branch the
+remote has and no branch at all for one this run created. Returns C<reset> or
+C<deleted>.
+
+C<reset_branch> puts a branch back at C<T>, which is right for every branch
+the remote has. A pull request branch may be one this run cut itself, and
+C<T> has nothing to put it back to, so what the run found is the absence and
+putting it back is deleting it. The session recorded which of the two it was
+at the switch, so nothing here has to guess.
+
+Where the remote has no tip but this session recorded one, the branch goes
+back to what the session read, which is a hard reset where we are standing on
+it and a ref write where we are not.
+
+Where the branch is the one the repository is standing on and it has to go,
+the session steps back to the branch it began on first, because git will not
+delete the branch the tree stands on.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to put back.
+
+=back
+
+B<Returns:> C<reset> where the branch was put back at a tip, and C<deleted>
+where it was one this run created and has been taken off.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "A branch session never restores %s, which is the control branch" >> --
+raised via C<bail()> for the control branch, because I2 keeps committed work
+on control whole.
+
+=item *
+
+Whatever the reset, the ref write, or the delete raises.
+
+=back
+
+B<Examples:>
+
+  $session->restore_branch('prod/bosh');
+  # returns 'reset', with prod/bosh back at origin/prod/bosh
+
+  $session->restore_branch('pr/qa/bosh');
+  # returns 'deleted', where this run cut the branch and the remote never
+  # held it
 
 =head2 apply_files($source_sha, %opts)
 
