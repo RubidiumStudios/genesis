@@ -246,7 +246,11 @@ sub apply {
 	}
 
 	if ($platform eq 'concourse') {
+		# The prerequisites check is the provider's, under D108, and the
+		# emitting is the compiler's.  They were one object and one of
+		# them was answering for the other.
 		my $provider = $result->{provider};
+		my $compiler = $result->{compiler};
 
 		if ($opts->{'dry-run'}) {
 			my $yaml = $output->{'pipeline.yml'}
@@ -257,12 +261,12 @@ sub apply {
 
 		$provider->check_prereqs() or exit 86;
 
-		my %deploy_opts = %{ $provider->normalize_provider_opts(
+		my %deploy_opts = %{ $compiler->normalize_provider_opts(
 			$result->{provider_cli_opts} || {}
 		) };
 		$deploy_opts{target}          //= $opts->{target} // $layout // $name;
 		$deploy_opts{pause_after_set} //= $opts->{paused};
-		$provider->deploy(%deploy_opts, yes => $opts->{yes});
+		$compiler->deploy(%deploy_opts, yes => $opts->{yes});
 
 	} elsif ($platform eq 'github-actions') {
 		if ($opts->{'dry-run'}) {
@@ -1228,12 +1232,13 @@ sub pipeline_graph {
 	# what it finds there, and the parser refuses a repository that has no
 	# pipeline section at all.  Nothing here chooses a provider, so Concourse stands
 	# in for the drawing.
+	# The drawing is an emitted artefact, so it comes off the compiler.
 	my $result   = _compile_pipeline($top, 'concourse');
 	my $ast      = $result->{ast};
-	my $provider = $result->{provider};
+	my $compiler = $result->{compiler};
 
-	my $md = $provider->can('graph_md')
-		? $provider->graph_md()
+	my $md = $compiler->can('graph_md')
+		? $compiler->graph_md()
 		: _ast_to_mermaid_md($ast);
 
 	mkfile_or_fail('pipeline.md', $md);
@@ -1266,12 +1271,14 @@ sub pipeline_describe {
 	# from what it finds there, and the parser refuses a repository that
 	# has no pipeline section at all.  Nothing here chooses a provider, so Concourse
 	# stands in for the telling.
+	# The telling is an emitted artefact too, so it comes off the
+	# compiler rather than off the provider beside it.
 	my $result   = _compile_pipeline($top, 'concourse');
 	my $ast      = $result->{ast};
-	my $provider = $result->{provider};
+	my $compiler = $result->{compiler};
 
-	if ($provider->can('generate_description')) {
-		$provider->generate_description($ast);
+	if ($compiler->can('generate_description')) {
+		$compiler->generate_description($ast);
 	} else {
 		_describe_ast($ast, 'concourse');
 	}
@@ -2327,12 +2334,18 @@ sub _describe_ast {
 # k_flag is ' -k' when insecure is set, '' otherwise.
 sub _concourse_fly_flags {
 	my ($result, $opts, $name) = @_;
-	my $provider = $result->{provider};
+	# The resolved options are the compiler's, which is where
+	# provider_option reads them through the provider it holds.  Both
+	# derivations below move together, because the second one becomes the
+	# -k flag and a rewrite that took only the first would drop it for
+	# four commands.
+	my $compiler = $result->{compiler};
 	my $target   = $opts->{target}
-		// ($provider->can('provider_option') ? $provider->provider_option('target') : undef)
+		// ($compiler->can('provider_option')
+			? $compiler->provider_option('target') : undef)
 		// $name;
-	my $insecure = $provider->can('provider_option')
-		? ($provider->provider_option('insecure') // 0) : 0;
+	my $insecure = $compiler->can('provider_option')
+		? ($compiler->provider_option('insecure') // 0) : 0;
 	my $k_flag   = $insecure ? ' -k' : '';
 	return ($target, $k_flag);
 }

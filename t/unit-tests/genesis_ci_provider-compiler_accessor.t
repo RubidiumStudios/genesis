@@ -96,4 +96,32 @@ subtest 'a provider with nothing to emit answers with nothing' => sub {
 		'and a caller that requires one is told why there is none';
 };
 
+subtest 'the compile hands back the provider beside its compiler' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['qa'], provider => 'concourse', vault => 0);
+	my $top = load_with($h,
+		automated_config('concourse', 'target: ci', 'team: platform'));
+
+	my $result = Genesis::CI::Compiler->new(top => $top)
+		->compile(provider => 'concourse');
+
+	isa_ok $result->{provider}, 'Genesis::CI::Provider::Concourse',
+		'the result carries the provider';
+	isa_ok $result->{compiler}, 'Genesis::CI::ProviderCompiler::Concourse',
+		'and the compiler beside it';
+
+	# The assertion the row exists for.  A compile that built the
+	# provider and then resolved the compiler class itself returns both
+	# objects and passes every check above, with the two unrelated.
+	is $result->{compiler}->provider, $result->{provider},
+		'and the compiler holds the provider the result carries';
+
+	# The provider is built out of the block the operator wrote, not out
+	# of defaults, which is what lets a repository declare a floor for
+	# the prerequisites check to enforce.
+	is $result->{provider}->team, 'platform',
+		'the provider reads the configured block';
+};
+
 done_testing;
