@@ -631,8 +631,9 @@ B<Parameters:>
 =item C<@networks>
 
 One or more network target names (the target portion, not the fully qualified
-name). Each name is expanded via C<name_for('net', $_)> before the claim is
-removed.
+name). Each is released under both its bare form and its
+C<name_for('net', $_)> form, since a kit may have claimed under either; see
+C<update_network>.
 
 =back
 
@@ -778,20 +779,30 @@ C<$target>. Clears any pre-existing claims for the network before recording
 new ones. Skips claim recording for greedy networks (those with the
 C<greedy_subnets> option set).
 
+Claims are keyed by the network name that reaches the cloud config, which
+is C<< $config->{name} >>, falling back to C<name_for('net', $target)>. The
+two differ whenever a kit passes a C<name_prefix> to C<network_definition>,
+including an empty one. Releases before this keyed the claim by the
+C<name_for> form regardless, so that key is cleared here as well and the
+claim is rewritten under the real name. Both OCFP subnet models adopt a
+claim found under either key as their own. Keying by C<name_for> alone
+again would make a network's existing claim look foreign on the next
+deploy: it would be subtracted from the available pool and requested a
+second time, failing with C<"Not enough available IPs">.
+
 B<Parameters:>
 
 =over 4
 
 =item C<$target>
 
-The network target name. The fully qualified network name is derived via
-C<name_for('net', $target)>.
+The network target name, used for the fallback key and the legacy key.
 
 =item C<\%config>
 
 The network definition hashref produced by C<network_definition>. Its
-C<subnets> array is iterated to extract subnet names, ranges, and reserved
-ranges for allocation tracking.
+C<name> is the claim key, and its C<subnets> array is iterated to extract
+subnet names, ranges, and reserved ranges for allocation tracking.
 
 =item C<%options>
 
@@ -1652,6 +1663,14 @@ Supports C<< <based-on> >> inheritance (deep-merging from an existing entry)
 and deferred processing to resolve ordering dependencies. Network additions
 are not currently supported and will throw.
 
+An override is an addition only when nothing in C<%config> already carries
+its name. A kit may register an entry under the bare target name rather
+than the C<name_for> form (C<network_definition> with an empty
+C<name_prefix> does this for names a release hardcodes), so an entry named
+either C<name_for($prefix, $target)> or C<$target> counts as present.
+Matching on the prefixed form alone would turn such an override into a
+second entry under the bare name.
+
 B<Parameters:>
 
 =over 4
@@ -1980,8 +1999,21 @@ B<Examples:>
     my $config = $self->_process_config_overrides($type, $target, \%config);
 
 Evaluates deferred values (C<CODE> refs and C<LookupRef> objects) in the
-config, then applies environment defaults, conditional matching rules, and
-specific overrides from C<bosh-configs.cloud> in that order.
+config, then applies overrides from the environment file in this order,
+later sources winning:
+
+=over 4
+
+=item 1. C<< bosh-configs.cloud.<type>_defaults >>
+
+=item 2. C<< bosh-configs.cloud.matching_<type>s >>, each rule evaluated by
+C<_evaluate_matching_rule>
+
+=item 3. C<< bosh-configs.cloud.<type>s.<target> >>
+
+=back
+
+Overrides carried in the director's exodus data are not yet implemented.
 
 B<Parameters:>
 
@@ -2549,6 +2581,16 @@ Logical Subnet Amalgamation (LSA) hashref. Validates that all subnets have
 the same range and gateway, deduplicates AZs and DNS servers, and calculates
 merged reserved and static ranges. Returns C<undef> if all IPs in the range
 are reserved.
+
+A child carries either a single C<az> or an C<azs> list, depending on which
+branch of C<_subnet_definition> built it, and the merged C<azs> is the union
+of whichever each child has. Reading C<az> alone contributes an C<undef>
+for a child built through the C<azs> branch.
+
+Cloud properties are taken from the first child by sorted name once every
+child has been shown to agree, and an empty hash is left off the result
+rather than emitted, matching what C<_subnet_definition> does when the IaaS
+branch resolves to nothing.
 
 B<Parameters:>
 

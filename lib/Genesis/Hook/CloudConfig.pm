@@ -25,26 +25,21 @@ use constant {
 
 # }}}
 
-# OCFP reserved-ip target aliases {{{
-# Core-side safety net for kit renames whose bloc carve data still keys
-# reserved-ips under the old name (eg openbao inheriting vault's).
-# Prefer declaring aliases on the kit itself via
-# ocfp_reserved_ip_target_aliases so the rename story stays with the kit.
-# Values may be a scalar name or an arrayref of names.
+# OCFP reserved-ip target aliases - core fallback for renamed kits without an override {{{
 my %OCFP_RESERVED_IP_TARGET_ALIASES = (
 	openbao => 'vault',
 );
 
 # }}}
 # _as_list - normalize scalar-or-arrayref into a list {{{
-# _is_neighbour_annotation - true when a <target>_ip_<suffix> key records the
-# address immediately before or after <target>_ip {{{
-#
-# An OCFP carve written under scheme_version 2 stores the neighbouring address
-# on either side of a single reservation: `_a` is the one below `<target>_ip`
-# and `_b` the one above.  Those keys are still ignored for allocation, because
-# the neighbour belongs to another target, but they are deliberate rather than
-# malformed and do not deserve a warning on every lookup.
+sub _as_list {
+	my ($v) = @_;
+	return () unless defined $v;
+	return ref($v) eq 'ARRAY' ? @$v : ($v);
+}
+
+# }}}
+# _is_neighbour_annotation - true when <target>_ip_a/_b records the address either side of <target>_ip {{{
 sub _is_neighbour_annotation {
 	my ($key, $value, $anchor) = @_;
 	return 0 unless defined($value) && defined($anchor);
@@ -56,17 +51,7 @@ sub _is_neighbour_annotation {
 }
 
 # }}}
-
-sub _as_list {
-	my ($v) = @_;
-	return () unless defined $v;
-	return ref($v) eq 'ARRAY' ? @$v : ($v);
-}
-
-# }}}
 # ocfp_reserved_ip_target_aliases - kit hook returning alias target names {{{
-# Returns a scalar or arrayref of alias target names for $target; the base
-# class returns nothing.
 sub ocfp_reserved_ip_target_aliases {
 	my ($self, $target) = @_;
 	return;
@@ -91,11 +76,8 @@ sub init {
 	my $purpose = $opts{purpose} // $ENV{GENESIS_CLOUD_CONFIG_SUBTYPE};
 	my $basename = $opts{basename} // join('.', $env->name, $env->type);
 	my $id = join('@', $purpose ? ($basename, $purpose) : ($basename));
-
-	# Set the AZ prefix for the environment (if needed)
 	my $az_prefix = $env->name . '-z';
 
-	# Return cached object if it exists
 	return $cloud_configs{$id} if ($cloud_configs{$id});
 
 	my $obj = $class->SUPER::init(
@@ -111,8 +93,6 @@ sub init {
 	if ($env->is_ocfp) {
 		$obj->{ocfp_config} = $env->ocfp_config_lookup(['net','vpc']);
 	}
-
-	# Validate the override schema
 	$obj->_validate_override_schema();
 
 	return $cloud_configs{$id} = $obj;
@@ -122,24 +102,19 @@ sub init {
 # done - Marks the CloudConfig hook as completed, and sets the contents {{{
 sub done {
 	my ($self, $contents) = @_;
-
-	# Validate that we received a proper config hashref
 	bail(
 		"CloudConfig hook must return a hashref containing the cloud config - got %s",
 		ref($contents) || 'scalar value'
 	) unless ref($contents) eq 'HASH';
 
-	# Check validity of the network config, upgrading multiple subnets using a
-	# single CIDR range into a Logical Subnet Amalgamation (LSA) definition if
-	# needed.
-
+	# Strip subnet names and fold same-range subnets into LSAs for BOSH.
 	# RISK: This will change the network config, so if any hook perform method
 	#       does stuff with the network config after calling `done`, the subnets
 	#       will have been converted to LSAs, and the hook will not be able to
 	#       access the original subnets.
 	$self->_process_network_subnets($contents->{networks});
 
-	# Force name to be sorted first
+	# The sort tokens pin name first and cloud_properties last in the YAML
 	my $sort_name_first = FIRST_SORT_TOKEN.'name'.FIRST_SORT_TOKEN;
 	my $sort_cloud_properties_last = LAST_SORT_TOKEN.'cloud_properties'.LAST_SORT_TOKEN;
 
@@ -169,7 +144,7 @@ sub done {
 # results - Returns the contents of the cloud config {{{
 sub results {
 	trace('called results before hook completed') unless $_[0]->completed;
-	return undef unless $_[0]->completed; # Should this be an error?
+	return undef unless $_[0]->completed;
 	return wantarray
 		? ($_[0]->{contents}, $_[0]->{network})
 		: {config => $_[0]->{contents}, network => $_[0]->{network}};
@@ -180,7 +155,6 @@ sub results {
 sub _can_build_cloud_config {
 	my ($class, $env) = @_;
 	!($env->use_create_env);
-
 }
 
 # }}}
@@ -248,10 +222,6 @@ sub build_cloud_config {
 # build_cpi_azs - Builds the cpi-specific AZs for the environment {{{
 sub build_cpi_azs {
 	my ($self, %options) = @_;
-	# This will build the cpi-specific AZs for environments that have a custom CPI
-	# enabled.  Each AZ will be a shadow of the parent's base AZs but will use
-	# the deployment names and the deployment's CPI.
-
 	return () unless $self->env->cpi_enabled;
 
 	my $parent_azs = $self->get_available_azs;
@@ -275,10 +245,6 @@ sub build_cpi_azs {
 # cpi_name_for_az - Returns the CPI name to inject for a given AZ {{{
 sub cpi_name_for_az {
 	my ($self, $az_key, $az_data) = @_;
-
-	# Override point for kits that route AZs to different CPIs (eg a single
-	# director serving multiple IaaSes).  $az_key is the AZ's key as returned
-	# by get_available_azs; $az_data is its data hashref.
 	return $self->cpi_name;
 }
 
@@ -296,8 +262,7 @@ sub relinquish_networks {
 	my ($self, @networks) = @_;
 	my $network = $self->network;
 	for my $target (@networks) {
-		# Kits can name a network without the prefix (see update_network), so
-		# both the bare and the prefixed key are released.
+		# Both keys: a kit may have claimed under either (see update_network)
 		my @keys = ($target, $self->name_for('net', $target));
 		delete(@{$network->{subnets}{$_}{claims}}{@keys})
 			for keys %{ $network->{subnets} };
@@ -307,7 +272,6 @@ sub relinquish_networks {
 # }}}
 # network_definition - Returns the definition for a given network {{{
 sub network_definition {
-
 	my ($self, $target, %rules) = @_;
 	my $strategy = delete($rules{strategy}) // 'generic';
 	my $name_prefix = delete($rules{name_prefix});
@@ -324,14 +288,14 @@ sub network_definition {
 
 	# FIXME: Should this just die if the strategy does not match?
 	if (($strategy eq 'ocfp') xor $self->env->is_ocfp) {
-		# This is an ocfp deployment, but the network is not an ocfp network (or vice versa)
+		# ocfp network on a non-ocfp deployment, or vice versa
 		return ();
 	}
 
-	# This allows kit-provided strategies to be provided.
+	# Kit hooks may supply their own strategy builder
 	my $strategy_method = "_build_${strategy}_network_definition";
 	if ($self->can($strategy_method)) {
-		# $config is passed by reference, so it can get modified
+		# The builder fills $config in place; its return value is not used
 		$self->$strategy_method($target, $config, %rules);
 	} else {
 		bail(
@@ -340,8 +304,6 @@ sub network_definition {
 		);
 	}
 
-	#TODO: Before we return, we must store a local copy in the object for
-	#reference to build other parts of the cloud config.
 	$self->update_network($target, $config, %rules);
 
 	return $config;
@@ -351,8 +313,6 @@ sub network_definition {
 # _build_generic_network_definition - Builds a generic network definition {{{
 sub _build_generic_network_definition {
 	my ($self, $target, $config, %options) = @_;
-	# This is the generic network definition, which is used for classic Genesis deployments
-	# that do not use OCFP, and do not have any special network requirements.
 	bug(
 		"Generic network definition building is not yet implemented"
 	);
@@ -361,7 +321,6 @@ sub _build_generic_network_definition {
 # }}}
 # _available_ocfp_network_models - Returns the available OCFP network models {{{
 sub _available_ocfp_network_models {
-	# Overridable in hook files to allow kits to provide their own
 	return qw(dynamic_subnets subnets greedy_subnets);
 }
 
@@ -369,14 +328,8 @@ sub _available_ocfp_network_models {
 # _build_ocfp_network_definition - Builds an OCFP network definition {{{
 sub _build_ocfp_network_definition {
 	my ($self, $target, $config, %options) = @_;
-	# This is the OCFP network definition, which is used for OCFP deployments.
-
 	my $strategy = 'ocfp';
 
-	# OCFP supports dynamic subnets as a network model substrategy, and may
-	# support others in the future.  Lets make sure we only have one (although
-	# we could support multiple (ie for VIP networks), it would be a bit more
-	# complex).
 	my @requested_network_models = grep {exists $options{$_}} $self->_available_ocfp_network_models;
 	bail(
 		'Network definition for %s can only have one network model, but found %d: %s',
@@ -394,20 +347,15 @@ sub _build_ocfp_network_definition {
 		$requested_network_models[0]
 	) unless $self->can($network_model_builder);
 
-	# Call the network model builder to build the network definition
 	return $self->$network_model_builder(
 		$target, $config, %options
 	);
 }
 
 # }}}
-# _build_ocfp_network_model_greedy - Builds an OCFP network definition with greedy allocation {{{
+# _build_ocfp_network_model_greedy_subnets - Builds an OCFP network definition with greedy allocation {{{
 sub _build_ocfp_network_model_greedy_subnets {
 	my ($self, $target, $config, %options) = @_;
-	# OCFP greedy network model consumes all the available IPs in the available CIDR range
-	# for the network, and does not reserve any IPs for static allocations.  This is useful
-	# for preallating large networks and allowing the BOSH director to allocate
-	# IPs as needed, without worrying about static allocations.
 	my $strategy = 'ocfp:greedy_subnets';
 	my $definition = $options{greedy_subnets};
 	my $network_id = $config->{name};
@@ -473,10 +421,6 @@ sub _build_ocfp_network_model_dynamic_subnets {
 	my ($self, $target, $config, %options) = @_;
 
 	my $definition = $options{dynamic_subnets};
-
-	# See the POD for the mgmt/.0-.31 vs ocfp/.32-.last split, the
-	# reserved-/available-offsets keys, and Logical Subnet Amalgamation.
-
 	my $strategy = 'ocfp:dynamic_subnets';
 	my $network_id = $config->{name};
 	my $subnets = $self->_filter_subnets($definition->{subnets});
@@ -533,11 +477,11 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			? sprintf("allocation.size of %s", $allocation->{size})
 			: "no allocation given";
 	}
-	my $statics = $allocation->{statics} // 0; # Does not include the reserved ips based on network name (ie bosh_ip, vault_a, vault_b, etc)
+	my $statics = $allocation->{statics} // 0; # Excludes the reserved-ips keyed by target name
 	$statics = 2**(32 - $1) if $statics =~ m#^/(\d+)$#;
 
 	# Get existing allocations from exodus data
-	my $existing_allocations = $self->_get_existing_allocations(); # Different for director and non-drector deployments; prototyping in director
+	my $existing_allocations = $self->_get_existing_allocations();
 	# A claim recorded by an earlier release under the prefixed name is ours too.
 	my @own_claim_keys = ($network_id, $self->name_for('net', $target));
 
@@ -625,10 +569,8 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		if ($full_range->size > $reserved->size) {
 			push @{$config->{subnets}}, $subnet_config;
 		} elsif ($allocated_range->size || $static_range->size) {
-			# Every address in the subnet is still reserved even though this
-			# network was handed addresses, so those addresses cannot lie inside
-			# the subnet's range.  They came from an exodus claim recorded for
-			# this network or from the target's reserved-ips records.
+			# Still fully reserved despite being handed addresses, so those
+			# addresses (a claim or a reserved-ips record) lie outside the subnet
 			my $outside = IPv4->new($allocated_range)->add($static_range)->simplify;
 			warning(
 				"Dropping subnet #C{%s} from network #C{%s}: the %d address%s ".
@@ -641,9 +583,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 				$subnet->{cidr_block}, $target, $subnet_name, $network_id
 			);
 		} else {
-			# Nothing was allocated to this network in this subnet and no
-			# reserved-ips records for the target land inside it, so every
-			# address would be reserved.
+			# Nothing allocated here and no reserved-ips record lands inside
 			warning(
 				"Dropping subnet #C{%s} from network #C{%s}: it would have no ".
 				"usable addresses.  The subnet range %s holds %d addresses, with ".
@@ -666,7 +606,6 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		}
 	}
 
-
 	return 1;
 }
 
@@ -686,22 +625,14 @@ sub network {
 sub update_network {
 	my ($self, $target, $config, %options) = @_;
 
-	# Claims are keyed by the network name that ends up in the cloud config.
-	# Kits may pass a name_prefix (including an empty one), so that name is not
-	# always the prefixed form name_for produces.  Earlier releases keyed the
-	# claim by the prefixed form regardless, so both keys are cleared here and
-	# the claim is rewritten under the real name.
+	# Keyed by the name that reaches the cloud config; the legacy prefixed key
+	# is cleared too so an older claim is adopted, not orphaned (see POD)
 	my $network = $config->{name} // $self->name_for('net', $target);
 	my @stale_keys = grep {$_ ne $network} ($self->name_for('net', $target));
-
-	# clear out any existing allocations for this network
 	delete(@{$_->{claims}}{$network, @stale_keys}) for (values %{$self->network->{subnets}});
 
-  	# Don't record claims for greedy networks - they consume all available IPs
-  	# without specific allocations and don't need claims tracking
-  	return if exists($options{greedy_subnets});
+	return if exists($options{greedy_subnets}); # greedy networks record no claims
 
-	# Calculate and store the new allocations
 	for my $subnet (@{$config->{subnets}}) {
 		my $subnet_id = $subnet->{name};
 		my $range     = $subnet->{range};
@@ -764,9 +695,6 @@ sub az_cloud_properties {
 	my $encoded = $self->network->{azs}{$base_az}{cloud_properties};
 	return {} unless defined($encoded) && length($encoded);
 
-	# The director stores each AZ's cloud properties as a JSON string.  Decoding
-	# hands the caller a fresh structure every time, so a kit can extend the
-	# result for its own AZ entries without touching the shared network data.
 	my $json = JSON::PP->new;
 	$encoded = $json->encode($encoded) if ref($encoded) eq 'HASH';
 	my $cloud_properties = eval {$json->decode($encoded)};
@@ -791,22 +719,20 @@ sub _find_az_key {
 		$self->env->bosh->alias
 	) unless keys %{$self->network->{azs}};
 
-	# This code is autoviving the azs hash, so we need to check for the key
 	my $azs = $self->network->{azs};
 	return $az if exists $azs->{$az};
 
-	# Find the key whose AZ carries the given az as its rendered name
+	# By rendered name
 	my ($base_az) = grep {
 		($azs->{$_}{name}//'') eq $az
 	} sort keys %$azs;
 
-	# Check if its a cpi-specific az
+	# By cpi-specific name
 	($base_az) = grep {
 		($azs->{$_}{for_cpi}{$self->cpi_name}//'') eq $az
 	} sort keys %$azs if !$base_az && $self->cpi_enabled;
 
-	# Accept the short form of a rendered name (z2 for <env>-z2), matched on
-	# the AZ index so it holds whatever prefix the director rendered with.
+	# By short form zN, matched on index so any rendered prefix holds
 	if (!$base_az && $az =~ m/^z([0-9]+)$/) {
 		my $idx = $1;
 		($base_az) = grep {
@@ -825,7 +751,6 @@ sub _find_az_key {
 
 # }}}
 # get_available_azs - Returns the available AZs for network namespace {{{
-#
 sub get_available_azs {
 	return $_[0]->network->{azs};
 }
@@ -883,14 +808,10 @@ sub vm_type_definition {
 # }}}
 # vm_extension_definition - Returns the definition for a given vm extension {{{
 # FIXME: We want prefixes for vm extensions (name_for('vmx', $name)), but we will
-# need to update any existing references to them in deployments.	For now, we just use the name as-is.
+# need to update any existing references to them in deployments.  For now, we
+# just use the name as-is.
 sub vm_extension_definition {
 	my ($self, $name, $data) = @_;
-
-	# vm extensions are handled a bit differently, since they may not
-	# have cloud properties for the IaaS, in which case we do not include
-	# them in the cloud config.  They also only have cloud properties, so
-	# the `cloud_properties_for_iaas` key is optional.
 
 	my $_data = $data->{cloud_properties_for_iaas} // $data;
 	my ($cloud_properties, $found) = $self->_cloud_properties_for_iaas( %$_data);
@@ -917,9 +838,8 @@ sub disk_type_definition {
 
 # }}}
 # }}}
-#
-# Private Methods {{{
 
+# Private Methods {{{
 # _validate_override_schema - Validates the structure of bosh-configs override definitions {{{
 sub _validate_override_schema {
 	my ($self) = @_;
@@ -1036,12 +956,9 @@ sub _validate_override_schema {
 }
 
 # }}}
-
 # _add_extended_cloud_config - Adds extended cloud config from environment to the given config {{{
 sub _add_extended_cloud_config {
 	my ($self, $config) = @_;
-	# This will add any extended cloud config from the environment to the given config.
-	# It will also add any additional cloud properties for the IaaS.
 	my $extended_config = $self->env->lookup($self->overrides_base, {});
 	my @groups = grep {$_ !~ m/(^matching_|_defaults$)/} keys %$extended_config;
 	for my $group_label (@groups) {
@@ -1064,13 +981,10 @@ sub _add_extended_cloud_config {
 		my @targets = (keys %{$extended_config->{$group_label}});
 		my %defered_targets = ();
 		while (my $target = shift @targets) {
-			# First we need to check if we've already processed this target
 			my $defn = $extended_config->{$group_label}{$target} // {};
 			my $explicit_name = delete($defn->{'<explicit-name>'});
 			my $name = ($explicit_name || $type_mapping{$type}{explicit_name}) ? $target : $self->name_for($prefix, $target);
-			# A kit may register an entry under its bare target name (network_definition
-			# with an empty name_prefix does this for names a release hardcodes), so an
-			# override keyed by that target is a match, not an addition.
+			# Bare target matches too: a kit may register under that name (see POD)
 			next if (exists $config->{$group_label} && grep { $_->{name} eq $name || $_->{name} eq $target } @{$config->{$group_label}});
 
 			# Additional networks aren't supported yet
@@ -1142,8 +1056,6 @@ sub _config_definition {
 
 	%config = $self->_process_config_overrides($type, $target, \%config)->%*;
 
-	# After any overrides, we need to make sure there is a configuration to set
-	# Return an empty list if there is no configuration.
 	delete($config{cloud_properties}) if (
 		exists $config{cloud_properties} && ! keys %{$config{cloud_properties}}
 	);
@@ -1158,7 +1070,7 @@ sub _subnet_definition {
 	my ($self, $target, $subnet_id, $fields, $strategy) = @_;
 
 	my $base_config = {
-		name => $subnet_id, # Not actually a valid property, but we need it for reference?
+		name => $subnet_id, # stripped again by _process_network_subnets
 		range => $self->_get_network_subnet_property(
 			$target, $subnet_id, $fields, 'range'
 		),
@@ -1221,8 +1133,6 @@ sub _subnet_definition {
 		);
 	}
 
-	# After any overrides, we need to make sure there is a configuration to set
-	# Return an empty list if there is no configuration.
 	delete($base_config->{cloud_properties}) unless keys %{$base_config->{cloud_properties}};
 	return $base_config;
 }
@@ -1240,17 +1150,12 @@ sub _get_network_subnet_property {
 		# TODO: push @sources, "$overrides_base.matching_networks";
 		push @sources, "$overrides_base.networks.$target.subnet_defaults.$property";
 	}
-
-	# Check for explicit overrides from the environment, and the bosh exodus data
 	push @sources, "$overrides_base.networks.$target.subnets.$subnet_id.$property";
 
 	my $value = $fields->{$property};
 	for my $source_path (@sources) {
 		if ($source_path =~ /\.matching_networks$/) {
-			# This will have to be handles differently, since we need to check
-			# each rule to see if it matches the target network, and will only
-			# retrieve the subnet_defaults property.  The following is WIP and
-			# may not be the final implementation.
+			# WIP: unreachable until matching_networks joins @sources above
 			my $match_rules = $self->env->lookup($source_path, []);
 			if (ref($match_rules) eq 'ARRAY' && scalar(@$match_rules)) {
 				my $idx = 0;
@@ -1294,21 +1199,14 @@ sub _network_cloud_properties_for_iaas {
 	my $source = 'cloud-config definition';
 	my @sources = ();
 	my $overrides_base = $self->overrides_base;
-
-	# First, we check for any defaults
 	push @sources, "$overrides_base.network_defaults.subnets.cloud_properties";
 	# TODO: push @sources, "$overrides_base.matching_networks";
 	push @sources, "$overrides_base.networks.$target.subnet_defaults.cloud_properties";
-
-	# Check for explicit overrides from the environment, and the bosh exodus data
 	push @sources, "$overrides_base.networks.$target.subnets.$subnet_id.cloud_properties";
 
 	for my $source_path (@sources) {
 		if ($source_path =~ /\.matching_networks$/) {
-			# This will have to be handles differently, since we need to check
-			# each rule to see if it matches the target network, and will only
-			# retrieve the subnet_defaults property.  The following is WIP and
-			# may not be the final implementation.
+			# WIP: unreachable until matching_networks joins @sources above
 			my $match_rules = $self->env->lookup($source_path, []);
 			if (ref($match_rules) eq 'ARRAY' && scalar(@$match_rules)) {
 				my $idx = 0;
@@ -1335,8 +1233,7 @@ sub _network_cloud_properties_for_iaas {
 		}
 	}
 
-	# Short-circuit if there are no overrides
-	return $config if $source eq 'cloud-config definition';
+	return $config if $source eq 'cloud-config definition'; # no overrides
 
 	my $flat_config = flatten($config);
 	for my $key (keys %$flat_config) {
@@ -1363,49 +1260,34 @@ sub _cloud_properties_for_iaas {
 # }}}
 # _process_config_overrides - Applies overrides to a given config based on the environment and bosh {{{
 sub _process_config_overrides {
-	# BREAKING CHANGE: The path is no longer allowed, the full config must be passed in.
 	my ($self, $type, $target, $config) = @_;
 
 	# FIXME: What do we do if the config is not a hashref?  Is this possible?
 	$config = flatten($config);
 
-	# First, we step through all the items and evaluate any deferred values (ie Ref objects, or subroutines)
+	# Resolve deferred values (coderefs and LookupRefs) first
 	for my $key (keys %$config) {
 		my $value = $config->{$key};
 		if (ref($value) eq 'CODE') {
-			# This is a subroutine, so we call it to get the value
 			$config->{$key} = $value->($self, $type, $target, $key, unflatten($config));
 		} elsif (ref($value) eq 'Genesis::Hook::CloudConfig::LookupRef') {
-			# This is a lookup referrence, with optional defaults
 			$config->{$key} = $value->resolve($self->env->params);
 		}
 	}
+	$config = flatten(unflatten($config)); # a deferred value may have returned a structure
 
-	# Reflatten in case any of the above returned nested structures
-	$config = flatten(unflatten($config));
-
-	# Next, we apply any overrides from the environment (TODO: or bosh exodus data)
 	my $plural_type = _plural_of($type);
-
 	my $overrides_base = $self->overrides_base;
-	#Locations for
-	# the overides are:
-	# - environment file: ($path is $basepath.$subpath)
-	#  - ${overrides_base}.${type}_defaults.${path}
-	#  - ${overrides_base}.matching_${type}s.$name.${path}
-	#  - ${overrides_base}.${type}s.$name.${path}
-	# - exodus:
-	#   /secret/<bosh-env-name>/<bosh-type>/configs/cloud/${type}/${path} TODO:  This is not implemented yet
 
-	# Step 0: Get it from exodus if it exists -- TODO
+	# TODO: exodus overrides under <bosh-exodus>/configs/cloud/${type} are not implemented
 
-	# Step 1: Apply environment defaults
+	# Step 1: environment defaults
 	my $overrides = $self->env->lookup("${overrides_base}.${type}_defaults");
 	if ($overrides && ref($overrides) eq 'HASH' && scalar(keys %$overrides)) {
-		$config = { %$config, flatten($overrides)->%* }; # Merge defaults into config
+		$config = { %$config, flatten($overrides)->%* };
 	}
 
-	# Step 2: Apply any conditional overrides
+	# Step 2: conditional overrides
 	my $match_rules = $self->env->lookup("${overrides_base}.matching_${plural_type}", []);
 	if (ref($match_rules) eq 'ARRAY' && scalar(@$match_rules)) {
 		foreach my $rule (@$match_rules) {
@@ -1413,16 +1295,16 @@ sub _process_config_overrides {
 			my $overrides = $self->_evaluate_matching_rule(
 				$target,
 				$rule,
-				$config, # This is flattened already
+				$config,
 			);
 			$config = { %$config, flatten($overrides)->%* } if keys %$overrides;
 		}
 	}
 
-	# Step 3: Apply specific overrides
+	# Step 3: specific overrides
 	$overrides = $self->env->lookup("${overrides_base}.${plural_type}.$target");
 	if ($overrides && ref($overrides) eq 'HASH' && scalar(keys %$overrides)) {
-		$config = { %$config, flatten($overrides)->%* }; # Merge overrides into config
+		$config = { %$config, flatten($overrides)->%* };
 	}
 	return unflatten($config);
 }
@@ -1431,15 +1313,12 @@ sub _process_config_overrides {
 # _evaluate_matching_rule - Evaluates matching rule's conditions for config overrides {{{
 sub _evaluate_matching_rule {
 	my ($self, $target, $rule, $config) = @_;
-	# config is expected to be flattened already.
 
-	# Evaluate conditions (OR between conditions, AND within each condition)
+	# $config is already flat; OR between condition sets, AND within one
 	my $conditions = $rule->{conditions};
 	my $criteria_met = 0;
 	foreach my $condition_set (@$conditions) {
-		next unless ref($condition_set) eq 'HASH'; # Skip invalid condition sets
-
-		# Flatten the condition set to ensure all fields are single-level keys
+		next unless ref($condition_set) eq 'HASH';
 		$condition_set = flatten($condition_set);
 
 		my $failed_match = 0;
@@ -1447,45 +1326,39 @@ sub _evaluate_matching_rule {
 			my $patterns = $condition_set->{$field};
 			my $field_matches = 0;
 
-			# Convert all patterns to array for uniform processing
 			$patterns = [$patterns] unless ref($patterns) eq 'ARRAY';
 			for my $test (@$patterns) {
 				my $field_value = struct_lookup($config, $field);
 				if (!defined($field_value)) {
-					# Null pattern matches undefined, which is okay if that's what we're looking for
-					next unless !defined($test);
+					next unless !defined($test); # only a null pattern matches undef
 					$field_matches = 1;
 					last;
 				}
 
 				if (defined($test) && $test =~ /^(?:([!=])~)?\/(.+)\/([gimsx]*)$/) {
-					# Regex pattern - check if the field value matches
 					my ($op, $regex, $flags) = ($1, $2, $3);
 					$op //= '=';
 					my $compiled_regex = $flags ? qr/(?$flags)$regex/ : qr/$regex/;
 					my $re_match = $field_value =~ /$compiled_regex/;
-					if (($op eq '!') eq !$re_match) { # Either '!' and doesn't match, or '=' and matches
+					if (($op eq '!') eq !$re_match) { # '!' and no match, or '=' and match
 						$field_matches = 1;
 						last;
 					}
 				} elsif (defined($test) && $field_value eq $test) {
-					# Literal string comparison
 					$field_matches = 1;
 					last;
 				}
 			}
 			$failed_match = 1 unless $field_matches;
-			last if $failed_match; # No need to check further fields in this condition set
+			last if $failed_match;
 		}
 
 		if (!$failed_match) {
-			# If nothing failed, the OR criteria is met for this condition set
-			$criteria_met = 1	;
+			$criteria_met = 1;
 			last;
 		}
 	}
 
-	# If this condition matched, we have a match (OR between conditions)
 	return {} unless $criteria_met;
 	return $rule->{properties} // {};
 }
@@ -1495,7 +1368,6 @@ sub _evaluate_matching_rule {
 sub _validate_definition {
 	my ($self, $type, $target, %maps) = @_;
 
-	# Vaidate that %maps contains the only common and cloud_properties_for_iaas keys
 	my @extra_keys = grep {$_ !~ m/^(common|cloud_properties_for_iaas)$/} keys %maps;
 	$self->env->kit->kit_bug(
 		"Unexpected Cloud Config keys in %s %s in %s: %s\n".
@@ -1503,7 +1375,6 @@ sub _validate_definition {
 		$target, $self->env->kit->id, $type, join(", ", @extra_keys)
 	) if @extra_keys;
 
-	# Make sure we have at least one of common and cloud_properties_for_iaas keys
 	$self->env->kit->kit_bug(
 		"No Cloud Config definition for common or cloud_properties_for_iaas for %s %s in %s",
 		$target, $self->env->kit->id
@@ -1527,15 +1398,11 @@ sub _validate_definition {
 sub _bosh_exodus_lookup {
 	my ($self, $path) = @_;
 	return undef if $self->env->use_create_env;
-
-	# This will return the value for a given path in the exodus data for the bosh
-	# director that is deploying the environment. This will be used to get the
-	# overrides if present.
 	return $self->env->director_exodus_lookup("$path");
 }
 
 # }}}
-# _subnet_ranges - Returns the reserved and available IP ranges for a given subnet {{{
+# _get_subnet_ranges - Returns the available and reserved IP ranges for a given subnet {{{
 sub _get_subnet_ranges {
 	my ($self, $subnet) = @_;
 	my $range = IPv4->new($subnet->{cidr_block});
@@ -1549,6 +1416,9 @@ sub _get_subnet_ranges {
 
 	my $explicit_availabiliy = scalar(@available_ip_pairs) > 0;
 	my $explicit_reserved    = scalar(@reserved_ip_pairs) > 0;
+
+	# Defaults when the subnet declares nothing: the whole range is available,
+	# and the first five addresses and the last one are reserved
 	@available_ip_pairs = ($range->start->address, $range->end->address)
 		unless @reserved_ip_pairs || @available_ip_pairs;
 	@reserved_ip_pairs = (
@@ -1556,7 +1426,6 @@ sub _get_subnet_ranges {
 		$range->end->address,   $range->end->address,
 	) unless @reserved_ip_pairs;
 
-	# We only need reserved or available, with available being the default
 	my $reserved_range = IPv4->new();
 	$reserved_range += [splice(@reserved_ip_pairs, 0, 2)]
 		while @reserved_ip_pairs;
@@ -1565,6 +1434,7 @@ sub _get_subnet_ranges {
 	$available_range += [splice(@available_ip_pairs, 0, 2)]
 		while @available_ip_pairs;
 
+	# Explicit availability reserves everything else
 	if ($explicit_availabiliy) {
 		$reserved_range += ($range - $available_range);
 	}
@@ -1572,7 +1442,6 @@ sub _get_subnet_ranges {
 	$available_range = $range unless $available_range > 0;
 	$available_range -= $reserved_range if $reserved_range > 0;
 
-	# Reserve everything not explicitly available
 	return ($available_range->simplify, $reserved_range->simplify);
 }
 
@@ -1607,7 +1476,7 @@ sub _calculate_subnet_allocation {
 	if ($needed < 0) {
 		# We remove from the highest end of the existing allocation.
 		my $new_span = IPv4->range($existing)->slice(0,$existing->size+$needed);
-		# See if we removed enough to handle the negatie need.
+		# See if we removed enough to handle the negative need.
 		$needed = $existing->size - $new_span->size + $needed;
 		bug(
 			"Negative IP allocation for network '%s' allocation - not enough allocated IPs to remove",
@@ -1651,11 +1520,8 @@ sub _get_reserved_allocation {
 	my ($self, $target, $subnet) = @_;
 	my $reserved_ips = $subnet->{'reserved-ips'} // {};
 
-	# Resolution order: target itself, then aliases.  Aliases come from
-	# ocfp_reserved_ip_target_aliases when the kit returns defined
-	# (kit owns the story, including opting out with []); otherwise
-	# fall through to %OCFP_RESERVED_IP_TARGET_ALIASES.  Applied
-	# independently to each of the three lookup mechanisms below.
+	# A defined kit answer owns the aliases (an empty list opts out);
+	# the module map is the fallback.  Target first, then aliases, per lookup.
 	my $kit_aliases = $self->ocfp_reserved_ip_target_aliases($target);
 	my @aliases = defined($kit_aliases)
 		? _as_list($kit_aliases)
@@ -1676,26 +1542,12 @@ sub _get_reserved_allocation {
 		last;
 	}
 
-	# Anchored: the key belongs to this target only when it starts with the
-	# target's name.  Unanchored, `ocfp_bosh_ip` answers for `bosh` and its
-	# neighbour's address lands in this target's static range.  The name is
-	# quoted because a target may carry regex metacharacters.
+	# Anchored and quoted: ocfp_bosh_ip must not answer for bosh
 	for my $candidate (@candidates) {
 		my @ip_keys = grep {$_ =~ m/^\Q${candidate}\E_ip/} keys %$reserved_ips;
 
-		# `_ip` names a single value and `_a`/`_b` a range; a target declares
-		# one form or the other.  `<target>_ip_a` is neither, and the
-		# bracket-pair loop above never sees it -- it looks for
-		# `<target>_a` -- so it would silently widen this allocation.
-		#
-		# One shape of `<target>_ip_a`/`_b` is not a mistake, though: an OCFP
-		# carve written under scheme_version 2 records the address either side
-		# of `<target>_ip` as context, so `_a` holds its predecessor and `_b`
-		# its successor.  Those neighbours belong to whatever sits next to the
-		# target in a densely packed run -- vault_ip_a is the director's
-		# address, bosh_ip_b is vault's -- so dropping them is right, and
-		# saying so on every call is noise.  Warn only about the keys we cannot
-		# read that way.
+		# <target>_ip_a/_b beside <target>_ip are scheme_version 2 neighbour
+		# notes, not reservations; any other _ip_<x> key is malformed and named
 		my @malformed = grep {$_ =~ m/_ip_[a-z]$/} @ip_keys;
 		if (@malformed) {
 			my $anchor = $reserved_ips->{$candidate."_ip"};
@@ -1781,13 +1633,8 @@ sub _process_network_subnets {
 	my ($self, $networks) = @_;
 	return unless ref($networks) eq 'ARRAY';
 
-	# This will make the subnets in the networks be compatible with BOSH's expectations for
-	# network definitions in cloud config.  To do this, we will:
-	# - Remove the `name` property from the subnets, as BOSH does not use it.
-	# - Transform any subnets that have the same CIDR range into a Logical Subnet Amalgamation (LSA).
-
 	for my $network (@$networks) {
-		next if ($network->{type}//'') eq 'vip'; # Skip VIP networks
+		next if ($network->{type}//'') eq 'vip';
 		bail(
 			"Network definition is not a hashref: %s", $network
 		) unless ref($network) eq 'HASH' && exists $network->{subnets};
@@ -1799,27 +1646,24 @@ sub _process_network_subnets {
 		my @lsa_subnets = ();
 		my %processed_ranges = ();
 
-		# Process subnets in original order to maintain ordering
+		# Walk in original order so the output keeps it
 		for my $subnet (@$subnets) {
 			my $range = $subnet->{range};
-			next if $processed_ranges{$range}; # Skip if we already processed this range
+			next if $processed_ranges{$range};
 
 			$processed_ranges{$range} = 1;
 			my @subnet_configs = @{$subnets_by_range{$range}};
 
 			if (@subnet_configs > 1) {
-				# Build a logical subnet amalgamation (LSA) for this range
 				my $lsa = $self->_build_logical_subnet_amalgamation(
 					$network->{name}, \@subnet_configs
 				);
 				push @lsa_subnets, $lsa if $lsa;
 			} else {
-				# Single subnet, remove the name and keep it as is
 				delete($subnet_configs[0]->{name});
 				push @lsa_subnets, $subnet_configs[0];
 			}
 		}
-		# Replace the subnets with the LSAs
 		$network->{subnets} = \@lsa_subnets;
 	}
 	return 1;
@@ -1828,14 +1672,11 @@ sub _process_network_subnets {
 # _build_logical_subnet_amalgamation - Builds a logical subnet amalgamation for subnets with the same range {{{
 sub _build_logical_subnet_amalgamation {
 	my ($self, $target, $subnet_configs) = @_;
-
-	# Short-circuit if only one subnet
 	return $subnet_configs->[0] unless ref($subnet_configs) eq 'ARRAY' && @$subnet_configs > 1;
 
 	my @subnet_names = sort map {$_->{name}} @$subnet_configs;
 	my %subnet_configs_hash = map {$_->{name} => $_} @$subnet_configs;
 
-	# Validate that all subnets have the same range and gateway
 	my (%ranges, %gateways) = ();
 	for my $subnet_name (@subnet_names) {
 		push @{ $ranges{$subnet_configs_hash{$subnet_name}->{range}} }, $subnet_name;
@@ -1853,16 +1694,13 @@ sub _build_logical_subnet_amalgamation {
 	my ($range) = keys %ranges;
 	my ($gateway) = keys %gateways;
 
-	# Deduplicate and merge AZs and DNS entries.  A child carries either a
-	# single `az` or an `azs` list, depending on which branch of
-	# _subnet_definition built it, so take whichever one it has rather than
-	# reading `az` alone and contributing an undef for the other shape.
+	# A child carries az or azs depending on which _subnet_definition branch
+	# built it; reading az alone contributes an undef for the other shape
 	my @azs = uniq sort grep {defined} map {
 		$_->{azs} ? $_->{azs}->@* : $_->{az}
 	} @$subnet_configs;
 	my @dns_servers = uniq sort map { @{$_->{dns} // []} } @$subnet_configs;
 
-	# Build amalgamated configuration
 	my $lsa_config = {
 		range => $range,
 		gateway => $gateway,
@@ -1870,36 +1708,20 @@ sub _build_logical_subnet_amalgamation {
 		dns => \@dns_servers,
 	};
 
-	# Calculate amalgamated reserved ranges - easiest way to do this is to
-	# convert reserved ranges into available ranges for each subnet,
-	# add them together, then subtract from the full range.
-
+	# Merged reserved = the range minus the union of each child's available
 	my $range_span = IPv4->span($range);
 	my $reserved = $range_span - IPv4->new(
 		map {$range_span - IPv4->new($_->{reserved}->@*)} @$subnet_configs
 	);
 	$lsa_config->{reserved} = [map {"$_"} $reserved->spans];
 
-	# Calculate amalgamated static ranges - these should be unique across
-	# all subnets, so we can just merge them together and simplify.
+	# Statics are unique across children, so concatenation is the merge
 	$lsa_config->{static} = [
 		map {($_->{static}->@*)} grep {$_->{static}} @$subnet_configs
 	];
 
-	# Cloud properties describe the wire, exactly as the range and the gateway
-	# do, so the children have to agree on them.  A BOSH subnet carries one
-	# cloud_properties hash and BOSH applies no per-AZ constraint inside a
-	# subnet, so once the children are merged there is no way to say that one
-	# AZ sits on one bridge and another AZ sits on a different one.  Taking the
-	# first child's properties would quietly attach the other AZ's VMs to the
-	# wrong network, and that surfaces as intermittent connectivity days after
-	# the deploy rather than as a failed upload, so stop here instead.
-	#
-	# Compare on flattened keys so the message can name the exact leaf that
-	# differs, including one element of a list.  flatten() returns an empty
-	# hash for both a missing cloud_properties key and an empty one, which is
-	# what we want, because _subnet_definition deletes the key when the IaaS
-	# branch resolves to nothing.
+	# Children must agree on cloud properties (one hash serves every AZ in a
+	# BOSH subnet); compared flat so the message can name the differing leaf
 	my %flat_cloud_properties = map {
 		$_ => flatten($subnet_configs_hash{$_}{cloud_properties} // {})
 	} @subnet_names;
@@ -1938,15 +1760,10 @@ sub _build_logical_subnet_amalgamation {
 		$target, join("\n", @cloud_property_differences), $self->overrides_base
 	) if @cloud_property_differences;
 
-	# Every child agrees by this point, so any of them will serve; read the
-	# first by sorted name, matching the ordering the range and gateway checks
-	# above already use.  An empty hash is left off entirely, the same way
-	# _subnet_definition drops the key when the IaaS branch resolves to
-	# nothing, so the merge does not invent a property BOSH never asked for.
+	# All children agree; take the first by name, and leave an empty hash off
 	$lsa_config->{cloud_properties} = $subnet_configs_hash{$subnet_names[0]}{cloud_properties}
 		if keys %{$flat_cloud_properties{$subnet_names[0]}};
 
-	# Check if LSA has any available IPs (not all reserved)
 	return $range_span->size > $reserved->size ? $lsa_config : undef;
 }
 
@@ -1954,9 +1771,6 @@ sub _build_logical_subnet_amalgamation {
 # _standardized_subnet_cidr - Returns a standardized CIDR range for a given subnet {{{
 sub _standardized_subnet_cidr {
 	my ($self, $subnet, $name, $target) = @_;
-	# Standardize the range using IPv4 library for consistent CIDR expression
-	# Range must be one cohesive CIDR block.
-
 	my $range = IPv4->new($subnet->{cidr_block});
 	my @spans = $range->spans;
 	bail(
