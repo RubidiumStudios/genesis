@@ -65,6 +65,28 @@ subtest 'one class per pipeline-aware registration' => sub {
 		'deploy declares no branch class until M13 retires its own switch');
 };
 
+subtest 'only the command that commits on control declares it' => sub {
+	# D45's refusal is about a commit that cannot reach control through a
+	# pull request, so it is asked of the command and not of the class.
+	# Every other pre-deploy command runs on control as before:
+	# pipeline-apply writes to the provider, and refusing it would leave
+	# an operator no way to turn on the very protection the key derives.
+	is(command_properties('create')->{commits}, 1,
+		'create declares that it commits on control');
+
+	my @commits = sort grep {
+		command_properties($_)->{commits}
+	} Genesis::Commands::commands();
+	is_deeply(\@commits, ['create'],
+		'and it is the only command in the tree that declares it');
+
+	for my $cmd (qw/pipeline-apply pipeline-status pipeline-describe
+	                check-secrets rotate-secrets propagate/) {
+		ok(!defined(command_properties($cmd)->{commits}),
+			"$cmd declares no commit on control");
+	}
+};
+
 subtest 'every declared class is marked in the help listing' => sub {
 	# command_help writes through Genesis::info, which the logger sends to
 	# STDERR, and it ends in exit, so the listing is read off STDERR with

@@ -215,6 +215,7 @@ define_command("create", {
 		"need to keep.",
 	function_group => Genesis::Commands::ENVIRONMENT,
 	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	commits        => 1,
 	scope => [qw/repo env/],
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	arguments => [

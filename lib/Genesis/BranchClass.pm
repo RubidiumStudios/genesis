@@ -4,7 +4,7 @@ use strict;
 use warnings;
 
 use Genesis;
-use Genesis::Exit qw/DATAERR TEMPFAIL/;
+use Genesis::Exit qw/CONFIG DATAERR TEMPFAIL/;
 
 ### Branch naming {{{
 
@@ -143,23 +143,50 @@ sub permitted_feature_branch {
 	# The tip is read off a ref, and a clone that has never fetched control
 	# holds none.  Left unchecked, the descent question below is asked of
 	# nothing, answered no, and the operator is told to rebase onto a tip
-	# that does not exist here.  The refresh above stands aside for such a
-	# clone, because materialising control is the pre-flight's repair to
-	# make and to report, so the ref really can still be missing by now.
-	my $from = $remote ? sprintf(' from #C{%s}', $remote) : '';
-	return (
-		0,
-		sprintf(
-			"#C{%s} has not been fetched%s, so there is no tip for #C{%s} ".
-			"to be measured against",
-			$top->control_branch, $from, $branch
-		),
-		sprintf(
-			"Fetch it, and cut the branch from what arrives:\n\n".
-			"    git fetch %s %s\n",
-			$remote // 'origin', $top->control_branch
-		)
-	) unless $git->branch_exists($control_ref);
+	# that does not exist here.  The refresh above stands aside for a clone
+	# with no local control branch, because materialising one is the
+	# pre-flight's repair to make and to report, so the ref really can
+	# still be missing by now.
+	#
+	# A missing ref is two states, and they want different exits.  Control
+	# may be somewhere and not here, which a fetch fixes, or it may be
+	# nowhere at all, which nothing but creating it fixes.  resolve_branch
+	# answers which, exactly as Genesis::CI::Preflight::require_control
+	# asks it, and that is where the twin of the sentence below lives.  The
+	# two are composed apart because this one is raised before a command
+	# names itself, so it carries neither require_control's "Refusing to
+	# ..." opening nor its closing sentence about what was written.
+	unless ($git->branch_exists($control_ref)) {
+		my $named = $remote // 'the remote';
+
+		bail({exitcode => CONFIG},
+			"The control branch #C{%s} exists neither on #C{%s} nor ".
+			"locally, and the environment files live on it, so nothing can ".
+			"read the topology.\n\n".
+			"Create it by hand, with the repository scaffold for a new ".
+			"repository or as the migration describes for a move to v3, ".
+			"push it, then run the command again.",
+			$top->control_branch, $named
+		) unless defined $git->resolve_branch($top->control_branch);
+
+		# Control is here or on the remote, so the remedy is a fetch.  A
+		# repository with no remote never reaches this arm, because with
+		# no remote the ref asked about above is the local branch itself
+		# and resolve_branch has already answered for it.
+		return (
+			0,
+			sprintf(
+				"#C{%s} has not been fetched from #C{%s}, so there is no ".
+				"tip for #C{%s} to be measured against",
+				$top->control_branch, $named, $branch
+			),
+			sprintf(
+				"Fetch it, and cut the branch from what arrives:\n\n".
+				"    git fetch %s %s\n",
+				$named, $top->control_branch
+			)
+		);
+	}
 
 	# It descends from control's tip as observed through T after a refresh,
 	# so it carries every environment file control has and a check for an
@@ -223,8 +250,9 @@ sub assert_pre_deploy {
 	# branch the gate is about to refuse as well as on one it permits, so
 	# where a command ends says nothing about whether it refreshed.
 	#
-	# The caller passes refresh => 0 for the one command that promises no
-	# network call, which is pipeline-status under --no-refresh (D40).
+	# The caller passes refresh => 0 for the two commands that promise no
+	# network call, which are pipeline-status under --no-refresh (D40) and
+	# pipeline-describe, which answers from the repository's own files.
 	refresh_control($top, $git)
 		unless defined($opts{refresh}) && !$opts{refresh};
 
@@ -236,11 +264,19 @@ sub assert_pre_deploy {
 	my $branch = $git->current_branch;
 	my $class = classify_branch($top, $branch);
 	if ($class eq 'control') {
-		# D45: where control requires a pull request, every command that
+		# D45: where control requires a pull request, a command that
 		# commits on control expects a feature branch instead, because a
 		# commit made here has no way to reach control through a pull
 		# request.  The expectation follows the key that already decides
 		# the protection, so there is no second key to set.
+		#
+		# It is asked of the command and not of the class.  D45 is about
+		# a commit, and most pre-deploy commands make none on control:
+		# pipeline-apply is the command that applies the very protection
+		# this key derives, and refusing it here would leave an operator
+		# no way to turn the protection on.  The caller passes commits
+		# from the registration, and create is the only command that
+		# declares it today.
 		bail({exitcode => DATAERR},
 			"#C{%s} requires a pull request, so this command expects to run ".
 			"on a feature branch.\n\n".
@@ -249,7 +285,7 @@ sub assert_pre_deploy {
 			"feature branch and open a pull request:\n\n".
 			"    git checkout -b add-<something> %s\n",
 			$top->control_branch, $top->control_branch
-		) if $top->control_requires_pr;
+		) if $opts{commits} && $top->control_requires_pr;
 
 		return 1;
 	}

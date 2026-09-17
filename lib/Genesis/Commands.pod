@@ -216,6 +216,15 @@ C<branch_target> is optional and is declared by C<propagate> alone. It says
 that the command switches to control inside the session it already holds,
 so the gate leaves it where it stands.
 
+C<commits> is optional and is declared by C<create> alone. It says that the
+command makes a commit on control, which is what decides whether a
+repository requiring a pull request into control refuses the command there.
+Most pre-deploy commands commit nothing: C<pipeline-apply> writes to the
+provider, C<pipeline-status> and C<pipeline-describe> only read, and the
+secrets commands write to the vault. C<pipeline-apply> is the command that
+applies the protection the key derives, so a refusal that caught it would
+leave an operator no way to turn the protection on.
+
 The same property drives the marker the help listing prints beside each
 command, so the listing and the refusal always agree.
 
@@ -305,6 +314,12 @@ session, declared only alongside a C<branch_class>.  C<propagate> is the
 one command that declares it, and C<'control'> is the one value it may
 take, because that is the only target the gate compares against.  Defaults
 to C<undef>.
+
+=item C<commits> - Boolean.  True where the command makes a commit on the
+control branch, which C<create> alone declares.  It decides whether the
+C<control_requires_pr> refusal applies, because D45 is about a commit that
+cannot reach control through a pull request and most pre-deploy commands
+make none.  Defaults to C<undef>.
 
 =item C<option_require_order> - Boolean.  When true, option parsing stops
 at the first non-option argument.  Defaults to false.
@@ -1822,6 +1837,11 @@ The two names sit in the gate for now.  D81 would rather a registration
 declared that it needs no refresh, the way it declares its class, and the
 step that gives registrations such an attribute moves these names onto it,
 M17 for C<pipeline-status>.
+
+Whether the command commits on control goes down as C<< commits => ... >>,
+read straight off the registration. The C<control_requires_pr> refusal is
+asked of that rather than of the class, and M17's attribute pattern absorbs
+the declaration later the way it absorbs the two refresh exemptions above.
 
 The name a command is about to add goes down with it as C<< adding => ... >>.
 C<genesis new> takes that name as its first argument, and a feature branch
