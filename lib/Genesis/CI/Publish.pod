@@ -333,12 +333,22 @@ branch carries its counts and an empty C<commits>, because its history is as
 long as the repository's and the showing is a sentence rather than a log. A
 removal reports C<removal> and nothing else.
 
-B<Errors:> Raises a bug where the branch is one the remote holds and this
-repository does not, naming the branch and the remote, because the publish set
-is the branches the run committed to and every one of them has a local ref. A
-branch with none in it is a caller's mistake rather than a state to read a
-range over, and the range reads would answer it with zeros. Otherwise none of
-its own, and the queries raise as they do for every other caller.
+B<Errors:> Raises a bug where the branch has no local ref, naming the branch
+and the remote. There are two such branches, and each is refused in its own
+words, because the step that would put one right puts the other nowhere. One
+is the branch the remote holds and this repository does not, and the other is
+the branch neither side holds at all. The publish set is the branches the run
+committed to, so every one of them has a local ref, and a branch with none in
+it is a caller's mistake rather than a state to read a range over.
+
+Neither would survive the reads the sub would otherwise make, and the way each
+fails is worse than the refusal. The listing checks git's status and bails with
+a sentence about listing a ref, which stops the run over a caller's mistake as
+though the repository were at fault. The log walk checks none, and it runs
+under the default that folds git's standard error in with its output, so the
+three lines of git's fatal message would come back as three commits and be
+printed as their subjects. Otherwise none of its own, and the queries raise as
+they do for every other caller.
 
 B<Examples:>
 

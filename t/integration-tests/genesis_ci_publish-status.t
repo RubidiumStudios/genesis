@@ -20,10 +20,10 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'a clean publish exits zero' => sub {
-	# Two rather than one, because run_genesis asserts the restoration of the
+	# Three rather than two, because run_genesis asserts the restoration of the
 	# working state in its own words and that assertion is counted here.  Both
 	# subtests in this file are counted the same way.
-	plan tests => 2;
+	plan tests => 3;
 
 	my $h = ready_harness(envs => ['lab', 'qa'], mode => 'direct',
 		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
@@ -33,8 +33,14 @@ subtest 'a clean publish exits zero' => sub {
 		push    => 1,
 	);
 
-	my (undef, undef, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+	my ($out, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 	is($exit, 0, 'every branch landed, so the run is clean');
+
+	# The status is read against a run that really published something, because
+	# a fixture with nothing due would exit zero as well and say nothing about
+	# whether a clean publish is what the zero stands for.
+	like(unfolded($out, $err), qr/qa.*propagated/,
+		'and the report says an environment was propagated');
 };
 
 subtest 'a single rejection makes the whole run a partial one' => sub {
