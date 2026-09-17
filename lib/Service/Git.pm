@@ -290,13 +290,32 @@ sub session {
 ### Branch Operations {{{
 
 # current_branch - name of HEAD branch (cached, invalidated on checkout) {{{
+#
+# A name or nothing.  On an unborn HEAD git prints the literal string HEAD,
+# writes a three-line fatal to standard error, and exits non-zero, so a
+# reader that ignored the return code and merged that stream into its answer
+# handed git's own complaint back as though it were a branch name.  It then
+# reached an operator spliced into whichever refusal had asked the question,
+# which is how the pre-deploy gate came to tell a repository with no commits
+# to rebase onto the tip of control.  The return code decides here, standard
+# error is left where it is, and a HEAD that names no branch answers
+# undefined.
+#
+# A detached HEAD is not that state.  git succeeds there and says HEAD, and
+# that is what comes back, because the session's _standing_on tells a
+# detached HEAD from a branch by exactly that answer.
 sub current_branch {
 	my ($self) = @_;
-	my ($branch) = run({ dir => $self->{root} },
+	my ($out, $rc) = run({ dir => $self->{root}, stderr => 0 },
 		'git', 'rev-parse', '--abbrev-ref', 'HEAD');
-	chomp $branch if defined $branch;
-	$self->{_current_branch} = $branch;
-	return $branch;
+
+	my $branch;
+	unless ($rc) {
+		chomp($branch = $out // '');
+		undef $branch unless length $branch;
+	}
+
+	return $self->{_current_branch} = $branch;
 }
 
 # }}}
@@ -1222,10 +1241,10 @@ sub _ref_names {
 # _checked_out_branch - the branch HEAD points at, born or not {{{
 #
 # current_branch reads `git rev-parse --abbrev-ref HEAD`, which fails on an
-# unborn branch and answers the literal string HEAD, so it cannot name the
-# branch a fresh orphan checkout is standing on.  symbolic-ref names that
-# branch, and it answers nothing at all on a detached HEAD, which tells the
-# two cases apart.
+# unborn branch, so it answers undefined there and cannot name the branch a
+# fresh orphan checkout is standing on.  symbolic-ref names that branch, and
+# it answers nothing at all on a detached HEAD, which tells the two cases
+# apart.
 sub _checked_out_branch {
 	my ($self) = @_;
 	my ($out, $rc) = run({dir => $self->{root}, stderr => 0},

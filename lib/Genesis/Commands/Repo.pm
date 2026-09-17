@@ -219,7 +219,12 @@ sub _repo_init_validate {
 				"  or, if it doesn't exist yet:\n\n".
 				"    git checkout -b %s\n",
 				$control_branch,
-				$branch // '<detached HEAD>',
+				# A repository with nothing committed yet is one an
+				# operator can easily be standing in here, and
+				# current_branch names no branch there, so the
+				# fallback says that rather than naming a state the
+				# repository is not in.
+				$branch // '<no branch>',
 				$control_branch,
 				$control_branch,
 				$control_branch

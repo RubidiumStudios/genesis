@@ -866,8 +866,9 @@ sub _verify_reachable {
 #
 # current_branch runs `git rev-parse --abbrev-ref HEAD`, which answers the
 # literal string HEAD on a detached HEAD rather than answering undefined, so
-# a fallback behind it can never fire and an operator whose restore failed is
-# told they are standing on "HEAD", which names nothing they can act on.
+# a fallback behind it never fires for that state and an operator whose
+# restore failed is told they are standing on "HEAD", which names nothing
+# they can act on.
 #
 # Since D94 a detached HEAD is a designed state rather than an accident, so
 # the question is asked here instead.  The commit is the thing the operator

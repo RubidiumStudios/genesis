@@ -292,6 +292,15 @@ sub assert_pre_deploy {
 	# clone that never had it is the apply's to refuse at CONFIG.  A refusal
 	# raised here would speak before either of them and say less.
 	my $branch = $git->current_branch;
+
+	# A HEAD that names no branch is the pre-flight's to refuse, and it
+	# refuses it by saying the repository has no commits and naming the
+	# commit that fixes that, so the gate stands aside and lets the command
+	# reach it.  There is no branch here to measure against control's tip,
+	# and a gate that measured anyway would tell an operator with nothing
+	# committed to rebase.
+	return 1 unless defined $branch;
+
 	my $class = classify_branch($top, $branch);
 	if ($class eq 'control') {
 		# D45: where control requires a pull request, a command that

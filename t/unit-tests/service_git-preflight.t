@@ -121,6 +121,35 @@ subtest 'a repository with no commits' => sub {
 	is($exit, DATAERR, "it exits DATAERR, since the repository's state is the input");
 };
 
+subtest 'current_branch names no branch where HEAD names none' => sub {
+	plan tests => 3;
+
+	# The pre-deploy gate asks for the branch before the pre-flight has had
+	# its say, so what current_branch answers on the shape above decides
+	# which of the two an operator hears from.  git prints the literal
+	# string HEAD and a fatal and exits non-zero here, and a reader that
+	# merged that stream into its answer handed the fatal on as a branch
+	# name, which arrived spliced into the gate's own refusal about a tip
+	# nothing descends from.  The row catches that reader.
+	my $h    = make_harness(envs => ['qa']);
+	my $path = fixture_preflight($h, 'no_commits');
+	my $git  = Service::Git->new($path);
+
+	my $branch = $git->current_branch;
+	ok(!defined $branch, 'an unborn HEAD answers undefined');
+	unlike($branch // '', qr/fatal|ambiguous argument/,
+		"and git's own complaint is not handed back as a name");
+
+	# A detached HEAD is the state the answer HEAD belongs to, and the
+	# session's _standing_on tells the two apart by exactly that, so the
+	# row holds the answer that case still gets.
+	my $on = $h->git('a');
+	run({dir => $h->a, onfailure => 'Failed to detach HEAD'},
+		'git', 'checkout', '-q', '--detach');
+	is($on->current_branch, 'HEAD',
+		'while a detached HEAD still answers HEAD, as git says it');
+};
+
 subtest 'a healthy working tree passes and returns the handle' => sub {
 	plan tests => 2;
 

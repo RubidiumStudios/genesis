@@ -52,6 +52,12 @@ my @cases = (
 		# row reads the same whichever of the two the tree raises.  The
 		# classification itself is held at the unit level, by the two
 		# safe.directory rows in t/unit-tests/service_git-preflight.t.
+		#
+		# The alternation is to be narrowed to safe.directory alone when
+		# the carry item from Task 5.1's second fix round lands, which is
+		# the one that has Genesis::Top stop pre-checking
+		# is_inside_work_tree and swallowing git's dubious-ownership
+		# reason.  Whoever closes that item narrows this matcher with it.
 		name    => 'a working tree git refuses to touch',
 		kind    => 'safe_directory',
 		matches => qr/safe\.directory|is not a git checkout/i,
@@ -70,17 +76,17 @@ for my $case (@cases) {
 		fixture_preflight($h, $case->{kind}, copy => 'a');
 
 		# Catches a genesis new that classifies a broken repository on its
-		# own: the two callers would each name the condition their own way,
-		# and an operator would fix one repository twice.
+		# own.  The two callers would each name the condition their own
+		# way, and an operator would fix one repository twice.
 		my ($out, $err, $exit) = run_genesis($h, 'new', 'prod', '--no-commit');
 		isnt($exit, 0, 'genesis new failed');
-		like($err, $case->{matches}, 'and named the fix');
+		like($err, $case->{matches}, 'and named the condition');
 
 		# A command that does open a session fails in the same helper, so
 		# the two texts are the same string and not two spellings of it.
 		my ($sout, $serr, $sexit) = run_genesis($h, 'qa', 'info');
 		isnt($sexit, 0, 'the session caller failed too');
-		like($serr, $case->{matches}, 'and named the same fix');
+		like($serr, $case->{matches}, 'and named the same condition');
 
 		# The discriminator.  Two callers classifying a broken repository
 		# on their own would each print a line, and the two lines would
@@ -96,39 +102,46 @@ for my $case (@cases) {
 	};
 }
 
-subtest 'a session reaches the pre-flight where HEAD resolves to nothing' => sub {
-	# The third shape the pre-flight classifies is a repository with no
-	# commits, and only the session caller can be read on it.  genesis new
-	# never reaches the helper there, because the pre-deploy gate asks
-	# Service::Git::current_branch for the branch it is about to classify,
-	# and on an unborn HEAD `git rev-parse --abbrev-ref HEAD` hands back
-	# git's own complaint rather than a name, so the gate refuses at
-	# DATAERR with a sentence about a branch that does not descend from
-	# control.  That is a refusal this row would be asserting instead of
-	# the one it is about, so it asserts the caller that does reach the
-	# helper and leaves the other half to the unit rows in
-	# t/unit-tests/service_git-preflight.t.
+subtest 'both callers fail on a repository with no commits' => sub {
+	# The third shape the pre-flight classifies, and it is built here
+	# rather than through the harness.  fixture_preflight refuses to build
+	# it in a copy, because both copies carry the seeding commit, and the
+	# repository it builds beside the harness is no deployment root and can
+	# hold no delivered branch, so no whole command can run in one.  An
+	# orphan checkout is the same state read through the same question,
+	# because HEAD resolves to nothing there, which is what the pre-flight
+	# asks git and classifies the failure of.
+	my $matches = qr/no commits/i;
+
 	my $h = make_harness(envs => ['qa'], type => 'bosh',
 		kit => 'omega-v2.7.0');
 	init_branch($h, 'qa');
 	refresh($h, 'a');
-
-	# fixture_preflight refuses to build this shape in a copy, because both
-	# copies carry the seeding commit, and the repository it builds beside
-	# the harness is no deployment root and can hold no delivered branch,
-	# so no whole command can run in one.  An orphan checkout is the same
-	# state read through the same question: HEAD resolves to nothing, which
-	# is what the pre-flight asks git and classifies the failure of.
 	run({dir => $h->a, onfailure => 'Failed to stand on an unborn branch'},
 		'git', 'checkout', '-q', '--orphan', 'unborn');
 
-	# Catches a session whose begin skipped the pre-flight: the operator
+	# Catches a gate that classifies the branch before the pre-flight has
+	# had its say.  There is no branch here to measure against control's
+	# tip, and a gate that measured anyway told an operator with nothing
+	# committed to rebase.
+	my ($out, $err, $exit) = run_genesis($h, 'new', 'prod', '--no-commit');
+	isnt($exit, 0, 'genesis new failed');
+	like($err, $matches, 'and named the condition');
+
+	# Catches a session whose begin skipped the pre-flight.  The operator
 	# would meet the empty repository at the commit instead, which is the
 	# late generic failure D80 moved the classification ahead of.
-	my ($out, $err, $exit) = run_genesis($h, 'qa', 'info');
-	isnt($exit, 0, 'the session caller failed');
-	like($err, qr/no commits/i, 'and named the empty repository');
-	like($err, qr/git commit/, 'and named the fix as a command to run');
+	my ($sout, $serr, $sexit) = run_genesis($h, 'qa', 'info');
+	isnt($sexit, 0, 'the session caller failed too');
+	like($serr, $matches, 'and named the same condition');
+
+	my ($new_line)  = grep {$_ =~ $matches} split /\n/, $err;
+	my ($sess_line) = grep {$_ =~ $matches} split /\n/, $serr;
+	is($new_line, $sess_line,
+		'both callers printed the same line from the same helper');
+	is($sexit, $exit, 'and both exited on the same code');
+
+	like($err, qr/git commit/, 'and the fix is a command to run');
 };
 
 done_testing;
