@@ -118,8 +118,8 @@ sub latest {
 	my @required = @{$options{artifacts} // []};
 	bug("At least one artifact must be specified") if exists $options{artifacts} && !@required;
 
-	# A record archived after a failure can hold newer state than the last
-	# success, so asking for artifacts admits failed records.
+	# Asking for artifacts admits failed records: a failed create-env's state
+	# file is newer than the last success's.  Narrowing this strands recovery.
 	my $include_failed = $options{include_failed} || @required;
 
 	my $deployments = $self->_all();

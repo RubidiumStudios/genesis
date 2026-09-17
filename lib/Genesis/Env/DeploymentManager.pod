@@ -242,10 +242,19 @@ If true, failed deployments are included in the search. Default: false.
 =item C<artifacts>
 
 Arrayref of artifact types or filenames the record must carry, such as
-C<['state']> or C<['state', 'manifest']>. Naming artifacts implies
-C<include_failed>, because a record archived after a failed attempt can hold
-newer state than the last success: C<bosh create-env> rewrites the state file
-as it works, so a deploy that died partway still recorded what it changed.
+C<['state']> or C<['state', 'manifest']>.
+
+Naming artifacts implies C<include_failed>, and this is a constraint, not a
+convenience. C<bosh create-env> rewrites the state file as it works, so an
+attempt that died partway has already recorded what it changed on the IaaS:
+the VM it deleted, the stemcell it uploaded, the disk it created. That record
+is newer than the last successful deploy's and is the only accurate account of
+what is out there. The create-env recovery path and C<terminate> both call
+C<latest(artifacts => ...)> to find it. If artifacts ever stopped admitting
+failed records, both would silently fall back to the last success and every
+retry would start from stale state, deleting a VM already gone and uploading
+the stemcell again, leaving one orphaned template per attempt. Do not narrow
+this without moving those callers to C<include_failed =E<gt> 1> explicitly.
 
 =back
 
