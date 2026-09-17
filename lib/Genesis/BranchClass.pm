@@ -346,8 +346,9 @@ sub assert_pre_deploy {
 	# The detached HEAD the comment above let through is let through here
 	# too.  It is no branch, so neither remedy the predicate offers can be
 	# carried out on it, and the two landed behaviours that own the state
-	# still speak for it.
-	return 1 if !defined($branch) || $branch eq 'HEAD';
+	# still speak for it.  A HEAD that names no branch at all never reaches
+	# this far, because the early return above owns that case.
+	return 1 if $branch eq 'HEAD';
 
 	my ($ok, $reason, $remedy) = permitted_feature_branch(
 		$top, $git, $branch,

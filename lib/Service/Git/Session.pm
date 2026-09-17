@@ -864,22 +864,36 @@ sub _verify_reachable {
 # }}}
 # _standing_on - what to call the place a failed restore left us {{{
 #
-# current_branch runs `git rev-parse --abbrev-ref HEAD`, which answers the
-# literal string HEAD on a detached HEAD rather than answering undefined, so
-# a fallback behind it never fires for that state and an operator whose
-# restore failed is told they are standing on "HEAD", which names nothing
-# they can act on.
+# current_branch answers the literal string HEAD on a detached HEAD, and it
+# answers undefined wherever git itself failed, which in a repository with
+# no commits is what an unborn HEAD does.  Neither answer names a place an
+# operator whose restore failed can act on, so both of them fall through to
+# the fallback below and the fallback names each state for itself.
 #
 # Since D94 a detached HEAD is a designed state rather than an accident, so
 # the question is asked here instead.  The commit is the thing the operator
-# can act on, and the target the session last switched to is named beside it
-# where the two are not the same, because that is the target they asked for.
+# can act on there, and the target the session last switched to is named
+# beside it where the two are not the same, because that is the target they
+# asked for.
 sub _standing_on {
 	my ($self) = @_;
 	my $git    = $self->{git};
 
 	my $branch = $git->current_branch;
 	return $branch if defined $branch && length $branch && $branch ne 'HEAD';
+
+	# An unborn HEAD is what the undefined answer comes from, and it is not
+	# a detached one, because the branch is there and it is the commit that
+	# is missing.  symbolic-ref still names that branch, so the operator is
+	# told which branch they are standing on.  Asking for the commit
+	# instead would hand them git's own fatal, since rev-parse writes that
+	# to standard error and prints the word HEAD, and the reader below
+	# merges the two.
+	unless (defined $branch) {
+		my $unborn = $git->_checked_out_branch;
+		return sprintf("%s, which has no commits yet", $unborn)
+			if defined $unborn;
+	}
 
 	my $head = eval { $git->sha('HEAD') };
 	return 'a detached HEAD' unless $head;

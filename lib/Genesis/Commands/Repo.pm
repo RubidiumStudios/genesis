@@ -221,10 +221,13 @@ sub _repo_init_validate {
 				$control_branch,
 				# A repository with nothing committed yet is one an
 				# operator can easily be standing in here, and
-				# current_branch names no branch there, so the
-				# fallback says that rather than naming a state the
-				# repository is not in.
-				$branch // '<no branch>',
+				# current_branch names no branch there, so the name
+				# is read through symbolic-ref instead, which still
+				# answers before the first commit.  The operator is
+				# then told which unborn branch they are on rather
+				# than that they are on none.
+				$branch // $enclosing_git->_checked_out_branch
+					// '<no branch>',
 				$control_branch,
 				$control_branch,
 				$control_branch

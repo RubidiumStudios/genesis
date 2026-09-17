@@ -226,6 +226,45 @@ subtest 'validate phase' => sub {
 	popd;
 };
 
+subtest 'the control-branch refusal names an unborn branch' => sub {
+	plan tests => 2;
+
+	require Genesis::Commands::Repo;
+	delete $ENV{GENESIS_IGNORE_EVAL};       # let bail() die instead of exit
+	$ENV{GIT_AUTHOR_NAME}     = 'Test User';
+	$ENV{GIT_AUTHOR_EMAIL}    = 'test@example.com';
+	$ENV{GIT_COMMITTER_NAME}  = 'Test User';
+	$ENV{GIT_COMMITTER_EMAIL} = 'test@example.com';
+
+	# An operator who has just run `git init` is standing on a branch with
+	# no commit on it, which is a state this check can easily meet, because
+	# the repository it reads is the one enclosing the new subdirectory.
+	# git names that branch through symbolic-ref and refuses to name it
+	# through rev-parse, so the refusal reads it through the one that
+	# answers and tells the operator which branch they are on.
+	my $unborn = workdir('validate-unborn');
+	run({dir => $unborn, onfailure => 'could not build the unborn repository'},
+		'git', 'init', '-q', '-b', 'not-control');
+
+	my $ub_devkit = workdir('validate-unborn-devkit');
+	mkfile_or_fail("$ub_devkit/kit.yml",
+		"name: validate-unborn-devkit\nversion: 0.0.1\n");
+
+	pushd($unborn);
+	prepare_command('repo-init', '-l', $ub_devkit, '--skip-vault',
+		'--with-ci', 'my-bosh');
+	build_command_environment;
+
+	my $err;
+	eval {run_validate(); 1} or $err = $@;
+	like($err // '', qr/not-control/,
+		'the refusal names the unborn branch the repository is on');
+	unlike($err // '', qr/<no branch>/,
+		'rather than saying the repository is on none');
+
+	popd;
+};
+
 # ---------------------------------------------------------------------------
 # Phase 4: execute phase -- _repo_init_execute against real workdirs
 # ---------------------------------------------------------------------------
