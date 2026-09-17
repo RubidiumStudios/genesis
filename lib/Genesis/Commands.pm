@@ -193,6 +193,7 @@ sub define_command { # {{{
 		option_passthrough => 0,
 		branch_class       => undef,
 		branch_target      => undef,
+		commits            => undef,
 	};
 
 	$PROPS{$name} = {%$default_props, %$props};
@@ -463,6 +464,14 @@ sub _gate_branch_class {
 		my $refresh = get_options()->{'no-refresh'} ? 0 : 1;
 		$refresh = 0 if is_equivalent_command($COMMAND, 'pipeline-describe');
 
+		# Whether the command commits goes down too.  D45 speaks of a
+		# commit that cannot reach control through a pull request, and
+		# most pre-deploy commands make none: pipeline-apply writes to
+		# the provider, pipeline-status and pipeline-describe only read,
+		# and the secrets commands write to the vault.  Only create
+		# declares it today, and M17's attribute pattern absorbs the
+		# declaration later the way it absorbs the refresh exemptions.
+		#
 		# genesis new is about to add an environment whose name may be the
 		# branch it stands on, and that collision is one the gate cannot
 		# see from the branch alone, so the name the command was given
@@ -474,7 +483,8 @@ sub _gate_branch_class {
 
 		require Genesis::BranchClass;
 		Genesis::BranchClass::assert_pre_deploy($top, $git,
-			refresh => $refresh, adding => $adding);
+			refresh => $refresh, adding => $adding,
+			commits => command_properties()->{commits});
 		return $fn->();
 	}
 

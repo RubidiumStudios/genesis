@@ -216,12 +216,21 @@ false with the condition that failed and the remedy for it, so the caller
 writes one refusal and the reasons stay here.
 
 The first condition needs a ref to read the tip off, and a clone that has
-never fetched control holds none. That case is answered before the descent
-question is asked, and it says the control branch has not been fetched
-rather than that the branch fails to descend from it. C<refresh_control>
-stands aside for a clone with no local control branch, leaving the repair
-to the pre-flight, so the ref can still be missing by the time the
-predicate runs.
+never fetched control holds none. C<refresh_control> stands aside for a
+clone with no local control branch, leaving the repair to the pre-flight,
+so the ref really can be missing by the time the predicate runs. That case
+is answered before the descent question is asked, and a missing ref is two
+states rather than one.
+
+C<resolve_branch> says which, asked exactly as
+C<Genesis::CI::Preflight::require_control> asks it. Where control is
+somewhere and not here, the predicate returns the condition that it has not
+been fetched, with a C<git fetch> for a remedy, and the caller refuses at
+C<Genesis::Exit::DATAERR>. Where control is nowhere at all, the predicate
+bails itself, at C<Genesis::Exit::CONFIG>, with the sentence
+C<require_control> prints for the same state and the words C<the remote>
+standing in when no remote is configured. Nothing but creating control
+fixes that, so it is not the same refusal as the one a fetch answers.
 
 B<Parameters:>
 
@@ -249,7 +258,21 @@ about one.
 =back
 
 B<Returns:> C<(1)> when the branch is permitted, and C<(0, $reason,
-$remedy)> when it is not.
+$remedy)> when it is not. It exits rather than returning in one case.
+
+B<Errors:>
+
+=over 4
+
+=item Refuses a repository that has no control branch anywhere.
+
+I<The control branch control exists neither on origin nor locally, and the
+environment files live on it, so nothing can read the topology.> The exit is
+C<Genesis::Exit::CONFIG>, which is where the pre-flight refuses the same
+state, and the twin of this sentence is in
+C<Genesis::CI::Preflight::require_control>.
+
+=back
 
 B<Examples:>
 
@@ -278,11 +301,19 @@ The refresh runs above the classification, so a run the gate goes on to
 refuse has refreshed control by the time it refuses. Where a command ends
 therefore says nothing about whether it refreshed.
 
-Standing on control is itself a refusal where C<$top-E<gt>control_requires_pr>
-is true, at C<Genesis::Exit::DATAERR>, because the protection that key
-derives blocks a direct push and a commit made on control then has no way
-to reach control through a pull request. The refusal names the key, so an
-operator can see which setting moved the expectation onto a feature branch.
+Standing on control is itself a refusal for a command that passes
+C<commits =E<gt> 1> where C<$top-E<gt>control_requires_pr> is true, at
+C<Genesis::Exit::DATAERR>, because the protection that key derives blocks a
+direct push and a commit made on control then has no way to reach control
+through a pull request. The refusal names the key, so an operator can see
+which setting moved the expectation onto a feature branch.
+
+It is asked of the command and not of the class. D45 speaks of a commit,
+and most pre-deploy commands make none on control, so C<pipeline-apply>,
+C<pipeline-status>, C<pipeline-describe>, and the secrets commands all run
+there as before. C<pipeline-apply> matters most: it is the command that
+applies the protection this key derives, and a refusal that caught it would
+leave an operator no way to turn the protection on.
 
 A detached HEAD is allowed through, because it is neither control nor
 derived and neither remedy the predicate offers can be carried out on it. A
@@ -305,10 +336,13 @@ The C<Service::Git> handle on the repository the command is running in.
 
 =item C<%opts>
 
-C<refresh> is read, and C<refresh =E<gt> 0> skips the refresh for the one
-command that promises no network call, which is C<pipeline-status> under
-C<--no-refresh>. C<adding> is the environment name the command is about to
-create, and it is passed straight to C<permitted_feature_branch>.
+C<refresh> is read, and C<refresh =E<gt> 0> skips the refresh for the two
+commands that promise no network call, which are C<pipeline-status> under
+C<--no-refresh> and C<pipeline-describe>, which answers out of the
+repository's own files. C<commits> says whether the command makes a commit
+on control, which only the C<control_requires_pr> refusal below reads.
+C<adding> is the environment name the command is about to create, and it is
+passed straight to C<permitted_feature_branch>.
 
 =back
 
@@ -329,11 +363,13 @@ I<add-prod does not descend from the tip of control, and this command
 changes what will be delivered.> The remedy follows, and the exit is
 C<Genesis::Exit::DATAERR>.
 
-=item Refuses control where a pull request is required.
+=item Refuses control where a pull request is required, for a command that
+commits there.
 
 I<control requires a pull request, so this command expects to run on a
 feature branch.> The key and the checkout that cuts the branch follow, and
-the exit is C<Genesis::Exit::DATAERR>.
+the exit is C<Genesis::Exit::DATAERR>. A command that passes no
+C<commits> is not refused.
 
 =item Refuses a remote it cannot reach.
 

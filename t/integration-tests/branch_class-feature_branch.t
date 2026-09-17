@@ -179,17 +179,16 @@ subtest 'control_requires_pr moves the expectation to a feature branch' => sub {
 };
 
 subtest 'a clone that has never fetched control is told so' => sub {
-	# This row narrows the clone and puts nothing back, so it stands last.
-	# The branch is cut while the remote-tracking ref is still here, and
-	# both control refs go afterwards, which leaves the tree standing on a
-	# feature branch with no tip to be measured against.
+	# The tip is read off the remote-tracking ref, and this row takes that
+	# ref away.  Control goes from R as well, because the refresh above
+	# the predicate fetches whenever the local branch is here, and a
+	# control the remote still held would simply come back.
 	#
-	# The refresh stands aside for a clone with no local control branch,
-	# because materialising one is the pre-flight's repair to report, so
-	# the predicate below is genuinely handed nothing.
+	# Everything this row drops is put back at the end of it, so the row
+	# below reads the clone the rows above left behind.
 	$git->create_branch('add-prod6', 'refs/remotes/origin/' . $h->control);
 	stand_on($h, 'add-prod6');
-	delete_local($h, 'a', $h->control);
+	delete_on_r($h, $h->control);
 	Genesis::run({dir => $h->a, onfailure => 'could not drop the ref'},
 		'git', 'update-ref', '-d', 'refs/remotes/origin/' . $h->control);
 
@@ -202,6 +201,53 @@ subtest 'a clone that has never fetched control is told so' => sub {
 	unlike($err . $out, qr/does not descend/i,
 		'and does not say the branch fails to descend from a tip nobody '.
 		'in this clone has');
+
+	# R takes control back from the copy that still holds it, and the
+	# tracking ref comes back with the fetch.  The restoration is asserted
+	# rather than assumed, because the row below and the file's own
+	# invariant both stand on it.
+	push_from($h, 'a', $h->control);
+	refresh($h, 'a', $h->control);
+	is(ref_in($h->a, 'refs/remotes/origin/' . $h->control),
+		ref_in($h->r, 'refs/heads/' . $h->control),
+		'and the refs this row dropped are back where it found them');
+};
+
+subtest 'a clone with control nowhere is refused at CONFIG' => sub {
+	# Neither place the predicate can look has control, so there is
+	# nothing to fetch and nothing for the branch to be measured against.
+	# That state belongs to the pre-flight, which creates control from the
+	# remote, and to the apply, which declines a clone that never had one.
+	# This gate speaks before either of them, so it says the sentence the
+	# pre-flight says and exits where the pre-flight exits.
+	my $control_sha = $git->sha($h->control);
+	$git->create_branch('add-prod7', 'refs/remotes/origin/' . $h->control);
+	stand_on($h, 'add-prod7');
+	delete_on_r($h, $h->control);
+	delete_local($h, 'a', $h->control);
+	Genesis::run({dir => $h->a, onfailure => 'could not drop the ref'},
+		'git', 'update-ref', '-d', 'refs/remotes/origin/' . $h->control);
+
+	my ($out, $err, $exit) = run_genesis($h, 'new', 'prod7', '--no-commit');
+
+	is($exit, Genesis::Exit::CONFIG(),
+		'the run is refused at CONFIG, where the pre-flight refuses it');
+	like($err . $out, qr/exists\s+neither\s+on\s+\S*origin\S*\s+nor\s+locally/,
+		'and names the branch and both of the places it is not in');
+	unlike($err . $out, qr/git fetch/,
+		'and offers no fetch, because there is nothing anywhere to fetch');
+
+	# All three refs go back, so this file leaves the clone as it found it.
+	$git->create_branch($h->control, $control_sha);
+	push_from($h, 'a', $h->control);
+	refresh($h, 'a', $h->control);
+	is_deeply([
+			ref_in($h->a, 'refs/heads/' . $h->control),
+			ref_in($h->a, 'refs/remotes/origin/' . $h->control),
+			ref_in($h->r, 'refs/heads/' . $h->control),
+		], [$control_sha, $control_sha, $control_sha],
+		'and all three refs this row dropped are back at the commit it '.
+		'found them on');
 };
 
 done_testing;
