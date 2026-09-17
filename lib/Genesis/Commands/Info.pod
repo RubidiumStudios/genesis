@@ -109,8 +109,9 @@ B<Returns:> C<0>, or C<1> where C<--fetch-artifacts-to> could not fetch one
 of the artifact types it found.  C<info> declares C<DEPLOYED_STATE>, so it
 runs inside the branch session the gate opened and hands its status back
 rather than exiting with it, and C<run_command> exits on what it returns once
-that session is closed.  Every other way the function can fail bails instead
-of returning, so C<0> is a run that did what it was asked.
+that session is closed.  A call with the wrong number of arguments exits 2
+through C<command_usage>, and every other way the function can fail bails
+instead of returning, so C<0> is a run that did what it was asked.
 
 B<Errors:>
 

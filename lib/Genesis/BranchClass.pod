@@ -262,7 +262,11 @@ The C<Service::Git> handle on the repository the command is running in.
 
 =item C<$branch>
 
-The branch the working tree is standing on, as a string.
+The branch to answer for, as a string. Its tip is what the descent
+condition measures and its name is what the refusals are composed from, so
+the predicate speaks of this branch rather than of whatever C<HEAD> happens
+to resolve to. Every caller in the tree passes the branch the working tree
+is standing on, which is the one case where the two are the same.
 
 =item C<%opts>
 

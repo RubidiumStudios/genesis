@@ -19,21 +19,12 @@ use Genesis::Exit;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# said - a refusal's own sentence, however the terminal folded it {{{
-#
 # A bare fragment like "deployment branch" is carried by a refusal that
-# names the right class in the wrong sentence, so each row below matches
-# the whole sentence instead.  The text arrives wrapped at the width above,
-# and a fold is a newline where the sentence has a space, so every run of
-# whitespace in the expected text matches any run of whitespace in the
-# refusal.
-sub said {
-	my ($sentence) = @_;
-	my $pattern = join('\s+', map {quotemeta} split(' ', $sentence));
-	return qr/$pattern/;
-}
-
-# }}}
+# names the right class in the wrong sentence, so each row below matches the
+# whole sentence instead.  The text arrives wrapped at the width above, and
+# a fold is a newline where the sentence has a space, so every refusal is
+# read back through the harness's unfolded, which puts what a run said onto
+# one line before anything is matched against it.
 
 # The kit is the one the suite ships whose new hook writes the environment
 # file the command asks for, because create bails when it finds no kit and
@@ -66,12 +57,14 @@ subtest 'genesis new refuses from a deployment branch' => sub {
 
 	is($exit, Genesis::Exit::DATAERR(),
 		'the refusal exits DATAERR');
-	like($err, said(sprintf(
-			'%s is a deployment branch, which holds what was delivered, '.
-			'and this command changes what will be delivered.',
-			$h->slug('qa'))),
+	my $sentence = sprintf(
+		'%s is a deployment branch, which holds what was delivered, '.
+		'and this command changes what will be delivered.',
+		$h->slug('qa'));
+	like(unfolded($err), qr/\Q$sentence\E/,
 		'the refusal names the branch, its class, and what it would change');
-	like($err, said('git checkout ' . $h->control),
+	my $remedy = 'git checkout ' . $h->control;
+	like(unfolded($err), qr/\Q$remedy\E/,
 		'and the remedy is the checkout that fixes it');
 	ok(!-f $h->a . '/prod.yml',
 		'no environment file was written');
@@ -84,10 +77,11 @@ subtest 'a secrets command refuses from the same branch' => sub {
 
 	is($exit, Genesis::Exit::DATAERR(),
 		'the second pre-deploy command refuses the same way');
-	like($err, said(sprintf(
-			'%s is a deployment branch, which holds what was delivered, '.
-			'and this command changes what will be delivered.',
-			$h->slug('qa'))),
+	my $sentence = sprintf(
+		'%s is a deployment branch, which holds what was delivered, '.
+		'and this command changes what will be delivered.',
+		$h->slug('qa'));
+	like(unfolded($err), qr/\Q$sentence\E/,
 		'and refuses in the same sentence');
 };
 
@@ -98,12 +92,14 @@ subtest 'genesis new refuses from a pull request branch' => sub {
 
 	is($exit, Genesis::Exit::DATAERR(),
 		'a pull request branch refuses too');
-	like($err, said(sprintf(
-			'%s is a pull request branch, which a propagate run rewrites, '.
-			'and this command changes what will be delivered.',
-			$h->pr_branch('qa'))),
+	my $sentence = sprintf(
+		'%s is a pull request branch, which a propagate run rewrites, '.
+		'and this command changes what will be delivered.',
+		$h->pr_branch('qa'));
+	like(unfolded($err), qr/\Q$sentence\E/,
 		'the refusal names the pull request branch and its class');
-	like($err, said('git checkout ' . $h->control),
+	my $remedy = 'git checkout ' . $h->control;
+	like(unfolded($err), qr/\Q$remedy\E/,
 		'and the remedy is the checkout that fixes it');
 	ok(!-f $h->a . '/prod.yml',
 		'no environment file was written');
@@ -116,12 +112,14 @@ subtest 'genesis new refuses from an artifacts branch' => sub {
 
 	is($exit, Genesis::Exit::DATAERR(),
 		'an artifacts branch refuses too');
-	like($err, said(sprintf(
-			'artifacts/%s is an artifacts branch, which a deploy writes to, '.
-			'and this command changes what will be delivered.',
-			$h->slug('qa'))),
+	my $sentence = sprintf(
+		'artifacts/%s is an artifacts branch, which a deploy writes to, '.
+		'and this command changes what will be delivered.',
+		$h->slug('qa'));
+	like(unfolded($err), qr/\Q$sentence\E/,
 		'the refusal names the artifacts branch and its class');
-	like($err, said('git checkout ' . $h->control),
+	my $remedy = 'git checkout ' . $h->control;
+	like(unfolded($err), qr/\Q$remedy\E/,
 		'and the remedy is the checkout that fixes it');
 	ok(!-f $h->a . '/prod.yml',
 		'no environment file was written');
@@ -137,7 +135,7 @@ subtest 'propagate is exempt, and runs from a deployment branch' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '--dry-run');
 
 	is($exit, 0, 'propagate runs where every other pre-deploy command is refused');
-	unlike($err, said('is a deployment branch'),
+	unlike(unfolded($err), qr/\Qis a deployment branch\E/,
 		'and no branch refusal was raised against it');
 };
 

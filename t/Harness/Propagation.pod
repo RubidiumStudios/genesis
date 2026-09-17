@@ -835,6 +835,21 @@ and the rows that open one call it, and C<number> is taken as an alias for a
 caller that has the record's own spelling to hand.  Also takes C<control>,
 C<url>, C<type>, and C<at>.
 
+=head2 fixture_director($h, $env, %opts)
+
+Writes the exodus record a BOSH director is reached through, as the five
+fields C<Service::BOSH::Director::from_exodus> validates, and returns its
+path.  The record sits at the environment's own exodus path, beside the
+deployment record C<certify> writes, because that is where a create-env
+director publishes its connection details and where C<--self> reads them
+from.  C<url> defaults to C<https://10.0.0.4:25555>, C<username> to
+C<admin>, C<password> to C<harness-director-password>, C<ca_cert> to a
+one-line placeholder certificate, and C<kit_name> to C<bosh>, which is what
+C<from_exodus> wants to see before it will build a director at all.  The
+address it names is one no row dials, because the commands under test are
+driven through the fake C<bosh> on C<GENESIS_BOSH_COMMAND> rather than over
+the wire.
+
 =head2 break_vault($h, %opts)
 
 Moves records aside so a read of them refuses, so a row can assert that an
