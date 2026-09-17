@@ -19,6 +19,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use Test::Exception;
 use Test::Output;
 
 use Genesis;
@@ -27,7 +28,7 @@ use Genesis::CI::Publish;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
-# One repository for all four subtests, because none of them writes to it.
+# One repository for all five subtests, because none of them writes to it.
 # The lab branch carries a commit the remote has never seen and the qa branch
 # carries none, so every showing below has both a delta with something in it
 # and a delta with nothing to compare against.  The dev branch is one this
@@ -140,12 +141,34 @@ subtest 'a branch the remote has never held shows its whole delivery' => sub {
 	};
 	my $said = unfolded($out, $err);
 
+	# The endings follow the counts the way the sentence under test does, so
+	# a fixture that came to carry one commit or one file would still be read
+	# against the words the showing would really print.
+	my $commit_word = $commits == 1 ? 'commit' : 'commits';
+	my $file_word   = $files == 1   ? 'file'   : 'files';
+
 	cmp_ok($commits, '>', 0, 'the branch carries commits to deliver');
 	cmp_ok($files, '>', 0, 'and files to deliver with them');
-	like($said, qr{dev/bosh: $commits commits, $files files changed, 0 removed},
+	like($said,
+		qr{dev/bosh: $commits $commit_word, $files $file_word changed, 0 removed},
 		'the whole of what the push would carry is counted');
 	like($said, qr{on a branch origin does not hold yet},
 		'and the branch is said to be new on the remote');
+};
+
+subtest 'a branch neither side holds is refused by name' => sub {
+	plan tests => 1;
+
+	# The publish set is the branches the run committed to, so the one caller
+	# cannot reach this.  The sub is public, though, and the reads it would
+	# otherwise make are worse than a refusal. The listing bails with a
+	# sentence about listing a ref, and the log walk folds git's standard
+	# error in with its output and counts the fatal message as commits.
+	throws_ok {
+		Genesis::CI::Publish::publish_delta($git, 'origin',
+			{branch => 'nowhere/bosh'})
+	} qr{publish_delta was asked for the branch nowhere/bosh, which neither this repository nor origin holds},
+		'the branch is named, and so is the mistake';
 };
 
 done_testing;

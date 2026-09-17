@@ -250,20 +250,37 @@ sub publish_delta {
 	# resolve_branch is the tree's one reader of where a branch stands
 	# against its remote, and no-remote is its word for a branch only the
 	# local repository has.  It answers nothing at all where neither side
-	# holds the name, which is the same case for this purpose.
+	# holds the name, which is a different case and is refused below.
 	my $state = $git->resolve_branch($branch, remote => $remote);
 
 	# The publish set is the branches the run committed to, so every branch
-	# this is asked about has a local ref.  One the remote holds and this
-	# repository does not is a programming error rather than a state to read
-	# a range over, and the two range reads below would answer it with zeros,
-	# because the left side of each names a ref that is not there.
+	# this is asked about has a local ref.  Two of the reader's answers say
+	# there is none, which are no-local, where the remote holds the name and
+	# this repository does not, and silence, where neither side holds it.
+	# Both are a caller's mistake rather than a state to read a range over,
+	# and each is refused by name, because the step that would put one right
+	# puts the other nowhere.
+	#
+	# Neither survives the reads below, and the way each fails is worse than
+	# a refusal.  ls_tree checks git's status and bails with a sentence about
+	# listing a ref, which stops the run over a caller's mistake as though
+	# the repository were at fault.  log_subjects checks none, and it runs
+	# under the default that folds git's standard error in with its output,
+	# so the three lines of git's fatal message would come back as three
+	# commits and be printed as their subjects.
+	bug("publish_delta was asked for the branch #C{%s}, which neither this ".
+	    "repository nor #C{%s} holds",
+	    $branch, $remote // 'the remote')
+		unless $state;
+
 	bug("publish_delta was asked for the branch #C{%s}, which #C{%s} holds ".
 	    "and this repository does not",
 	    $branch, $remote // 'the remote')
-		if $state && $state->{state} eq 'no-local';
+		if $state->{state} eq 'no-local';
 
-	unless ($state && $state->{state} ne 'no-remote') {
+	# Only no-remote reaches here, the two answers with no local ref in them
+	# having been refused above and every other one having a range to read.
+	if ($state->{state} eq 'no-remote') {
 		# The commits are counted rather than listed, because a new branch
 		# reaches as far back as the repository does and the showing is a
 		# sentence rather than a log.
