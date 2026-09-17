@@ -219,6 +219,18 @@ so the gate leaves it where it stands.
 The same property drives the marker the help listing prints beside each
 command, so the listing and the refusal always agree.
 
+=head2 The deployed-state switch
+
+A command whose registration declares C<DEPLOYED_STATE> is run inside a
+branch session that has already switched to the environment's deployment
+branch, C<< <env>/<type> >>. The command therefore reads and renders what
+was delivered rather than what is coming, and it writes no git of its own.
+
+The session is opened by the gate, not by the command, so that every
+deployed-state command switches the same way and takes the same switch
+lock. An exit hook returns the operator to the branch they stood on, calling
+C<finish> after a clean run and C<abort> after a failed one.
+
 =head1 FUNCTIONS
 
 =head2 define_command
@@ -1739,7 +1751,9 @@ help marker and the refusal, which is why the enforcement sits here rather
 than inside each command.  A C<pre-deploy> command is handed to
 C<Genesis::BranchClass::assert_pre_deploy>, which refreshes the control
 branch from the remote and then refuses a derived branch at
-C<Genesis::Exit::DATAERR>.
+C<Genesis::Exit::DATAERR>.  A C<deployed-state> command is handed to
+C<_gate_deployed_state>, which opens the session the command reads inside
+rather than refusing anything.
 
 The refresh is passed along as C<< refresh => 0 >> for the two commands that
 make no network call of their own.  C<pipeline-status> says so with
@@ -1799,6 +1813,56 @@ B<Examples:>
   # deployment, pull request, or artifacts branch, on a feature branch
   # that does not descend from control's tip, or on one named for an
   # environment
+
+=head2 _gate_deployed_state
+
+  my $session = _gate_deployed_state($top, $git);
+
+Opens a branch session on C<$git> and switches it to the deployment branch
+of the environment the command was given, which is C<< <env>/<type> >>.
+
+The switch lives here rather than inside each command, so that every
+deployed-state command reaches the same branch by the same path and takes
+the same switch lock.  The branch holds exactly what was delivered, and the
+kit's hooks need a working tree, which is why the command reads a checkout
+rather than a tree object.
+
+The environment name is taken from the first command argument, with any
+leading directories and any C<.yml> or C<.yaml> suffix removed, because an
+operator may name an environment by its path.  A command called with no
+argument at all switches nothing and returns.
+
+An exit hook registered through C<at_exit> closes the session once the
+command is done.  A clean run calls C<finish>, which restores the branch
+C<begin> recorded and releases the switch lock, and a run that died calls
+C<abort>, which discards what the command left behind first.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the gate loaded, read for the control branch the
+session is told never to reset and for the deployment branch to switch to.
+
+=item C<$git>
+
+The C<Service::Git> handle on the working tree, which hands out the one
+session that tree may have open.
+
+=back
+
+B<Returns:> the open C<Service::Git::Session>, or nothing when the command
+was given no environment to switch to.
+
+B<Examples:>
+
+  _gate_deployed_state($top, $git);
+  # `genesis qa info` is switched to qa/bosh and returned afterwards
+
+  _gate_deployed_state($top, $git);
+  # `genesis envs/qa.yml info` strips the path and switches to qa/bosh
 
 =head2 _parse_two_pass
 
