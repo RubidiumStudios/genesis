@@ -142,7 +142,8 @@ there.
 
 What an earlier session recorded is cleared here rather than at C<finish>,
 which is the target it stood on, the tips it switched to, the branches it
-committed to, and whether it finished. The handle hands out one session, so a
+committed to, whether it finished, and whether its abort put everything
+back cleanly. The handle hands out one session, so a
 caller that opens a second one would otherwise read the first one's answers.
 
 Reusing a session is the ordinary way to open a second one, and it carries one

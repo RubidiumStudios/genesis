@@ -202,7 +202,10 @@ sub permitted_feature_branch {
 
 	# It descends from control's tip as observed through T after a refresh,
 	# so it carries every environment file control has and a check for an
-	# existing environment is sound.
+	# existing environment is sound.  The tip is measured against the branch
+	# the caller named rather than against HEAD, because that branch is the
+	# one the refusals below speak of and the two are only the same while
+	# the caller is asking about the branch it is standing on.
 	my $control_tip = $git->sha($control_ref);
 	return (
 		0,
@@ -214,7 +217,7 @@ sub permitted_feature_branch {
 			"Rebase it onto the refreshed tip:\n\n    git rebase %s/%s\n",
 			$remote // 'origin', $top->control_branch
 		)
-	) unless $git->is_ancestor($control_tip, 'HEAD');
+	) unless $git->is_ancestor($control_tip, $branch);
 
 	# Its name is not an environment's name, existing or being added, since
 	# a branch named prod2 occupies refs/heads/prod2 and pipeline-apply

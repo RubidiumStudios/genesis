@@ -176,6 +176,38 @@ subtest 'control_requires_pr moves the expectation to a feature branch' => sub {
 	is($exit, 0, 'the run on the feature branch proceeds');
 	unlike($err . $out, qr/control_requires_pr/,
 		'and says nothing about the key');
+
+	# --no-commit left the environment file staged, so the index is put
+	# back here.  A row below rebases, and a rebase refuses over a dirty
+	# index, so a leftover here would stop a red run at this row instead of
+	# letting it report every one of them.
+	Genesis::run({dir => $h->a}, 'git', 'reset', '-q');
+	unlink $h->a . '/prod5.yml';
+};
+
+subtest 'a detached HEAD behind control is let through' => sub {
+	# The guard above the predicate is what this row reads.  A detached
+	# HEAD is no branch, so neither remedy the predicate offers could be
+	# carried out on it, and the pre-flight and the apply own the state
+	# instead.  The commit stood on is one control has moved past, so a run
+	# that reached the predicate would be refused on the descent condition,
+	# and that is what makes the guard provable here.
+	Genesis::run({dir => $h->a, onfailure => 'could not detach HEAD'},
+		'git', 'checkout', '-q', '--detach',
+		'refs/remotes/origin/' . $h->control . '~1');
+
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'new', 'prod9', '--no-commit');
+
+	is($exit, 0, 'the run on a detached HEAD is let through');
+	unlike(unfolded($out, $err), qr/does not descend/i,
+		'and is not refused on the descent condition');
+
+	# The index and the branch both go back, so the rows below read the
+	# clone this row was handed.
+	Genesis::run({dir => $h->a}, 'git', 'reset', '-q');
+	unlink $h->a . '/prod9.yml';
+	stand_on($h, 'add-prod5');
 };
 
 subtest 'a clone that has never fetched control is told so' => sub {
