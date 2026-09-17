@@ -106,10 +106,10 @@ sub compile {
 	# and merge with any caller-supplied opts.  Normalize caller opts from their
 	# CLI form (ci-* prefixed, hyphenated) to config/schema form (unprefixed, underscored)
 	# so that provider_option() and provider_config() always see consistent keys.
-	require Genesis::CI::Compiler::PipelineProvider;
+	require Genesis::CI::ProviderCompiler;
 	my $provider_opts = {
 		%{ $parsed->{provider} || {} },
-		%{ Genesis::CI::Compiler::PipelineProvider->normalize_provider_opts(
+		%{ Genesis::CI::ProviderCompiler->normalize_provider_opts(
 			$opts{provider_opts} || {}
 		) },
 	};

@@ -241,7 +241,7 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 subtest 'the provider block declares what decides its shape' => sub {
 	plan tests => 5;
 
-	require Genesis::CI::Compiler::PipelineProvider;
+	require Genesis::CI::ProviderRegistry;
 
 	# Any repository at all will do here, and that is as much the row's
 	# point as the declaration is.  The block's schema used to be built
@@ -260,7 +260,7 @@ subtest 'the provider block declares what decides its shape' => sub {
 	is_deeply $schema->{default}, {},
 		'beside the empty block that lets that default be reached';
 	is_deeply [sort keys %{$schema->{modules}}],
-		[Genesis::CI::Compiler::PipelineProvider->known_providers],
+		[Genesis::CI::ProviderRegistry->known_providers],
 		'with a module for every registered provider, so the map is total';
 };
 

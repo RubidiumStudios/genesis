@@ -14,7 +14,7 @@ use Genesis::Top;
 use Genesis::Env;
 use Genesis::CI::Legacy qw//;
 use Genesis::CI::Compiler;
-use Genesis::CI::Compiler::PipelineProvider;
+use Genesis::CI::ProviderCompiler;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
 use Genesis::CI::ProviderRegistry;
@@ -1609,12 +1609,12 @@ sub _compile_pipeline {
 	# Parse provider-specific CLI flags
 	my %provider_cli_opts;
 	{
-		require Genesis::CI::Compiler::PipelineProvider;
+		require Genesis::CI::ProviderCompiler;
 		my @argv = ();
-		Genesis::CI::Compiler::PipelineProvider->parse_cli_opts(
+		Genesis::CI::ProviderCompiler->parse_cli_opts(
 			\@argv, \%provider_cli_opts, $platform
 		);
-		for my $key (Genesis::CI::Compiler::PipelineProvider->cli_opt_keys($platform)) {
+		for my $key (Genesis::CI::ProviderCompiler->cli_opt_keys($platform)) {
 			$provider_cli_opts{$key} = get_options->{$key}
 				if defined get_options->{$key};
 		}

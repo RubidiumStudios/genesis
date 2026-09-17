@@ -55,14 +55,20 @@ subtest 'the registry is consulted by both families and owned by neither' => sub
 		'Genesis::CI::Provider::Concourse',
 		'resolving a provider class answers the CLI class';
 	is Genesis::CI::ProviderRegistry->compiler_class('concourse'),
-		'Genesis::CI::Concourse',
+		'Genesis::CI::ProviderCompiler::Concourse',
 		'resolving a compiler class answers the compiling class';
 
 	# The inversion D108 removes.  A %INC check would answer whatever the
 	# rows above it happened to load first, so the row reads the source
-	# instead, which no load order can defeat: the provider family names
-	# no compiler module anywhere, and neither does the registry both
-	# families consult.
+	# instead, which no load order can defeat: nothing in the provider
+	# family, and nothing in the registry both families consult, loads a
+	# compiler module or calls one.
+	#
+	# What the registry writes down is a different matter.  Its map says
+	# which class compiles for which type, because being that map is the
+	# whole of its job, and a class named in a hash is a value rather than
+	# a dependency.  The dependency is a load or a call, so that is what
+	# the row looks for.
 	my @naming;
 	for my $file ('lib/Genesis/CI/ProviderRegistry.pm',
 	              'lib/Genesis/CI/Provider.pm',
@@ -70,12 +76,13 @@ subtest 'the registry is consulted by both families and owned by neither' => sub
 		open my $fh, '<', $file or die "cannot read $file: $!\n";
 		while (my $line = <$fh>) {
 			push @naming, "$file:$."
-				if $line =~ /Genesis::CI::(Compiler|ProviderCompiler)\b/;
+				if $line =~ /\b(?:use|require)\s+Genesis::CI::(?:Compiler|ProviderCompiler)\b/
+				|| $line =~ /Genesis::CI::(?:Compiler|ProviderCompiler)\b[\w:]*\s*->/;
 		}
 		close $fh;
 	}
 	is_deeply(\@naming, [],
-		'nothing in the provider family or the registry names a compiler module')
+		'nothing in the provider family or the registry loads or calls a compiler module')
 		or diag(join("\n", map {"  $_"} @naming));
 };
 
@@ -175,7 +182,7 @@ subtest 'one resolver answers for every caller' => sub {
 	plan tests => 6;
 
 	my $info = Genesis::CI::ProviderRegistry->provider_info('concourse');
-	is $info->{class}, 'Genesis::CI::Concourse',
+	is $info->{class}, 'Genesis::CI::ProviderCompiler::Concourse',
 		'the compiler class comes from the registry';
 	is $info->{cli_class}, 'Genesis::CI::Provider::Concourse',
 		'the CLI class comes from the same entry';

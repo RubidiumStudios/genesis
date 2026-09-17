@@ -1,0 +1,506 @@
+=head1 NAME
+
+Genesis::CI::Provider - the CI provider factory and the base every provider answers on
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::Provider;
+
+    # Parse CLI opts, two-pass: --ci-provider first, then the provider's own.
+    my %ci_opts;
+    Genesis::CI::Provider->parse_opts(\@ARGV, \%ci_opts);
+
+    # Build a provider from those opts, or from what a repository stored.
+    my $provider = Genesis::CI::Provider->init(%ci_opts);
+    my $stored   = Genesis::CI::Provider->new(
+        type => 'concourse', target => 'prod');
+
+    # What goes back into the pipeline.provider section.
+    my %config = $stored->config;
+
+=head1 DESCRIPTION
+
+Genesis::CI::Provider is the factory and abstract base class for CI
+provider configuration management. It follows the same pattern as
+L<Genesis::Kit::Provider>.
+
+A provider class declares the keys it reads, through
+C</provider_options_schema>, declares what it is able to do, through
+C</capabilities>, and validates the block an operator wrote for it,
+through C</validate_config>. The three live together so that the check
+always has the declaration it is checking against, and so that one class
+answers for the whole of a provider.
+
+C</capabilities> answers with the six booleans D101 names, and every
+provider has to answer, including the ones Genesis cannot yet compile a
+pipeline for. A provider that can do none of them says so rather than
+staying silent, because a key gated on an ability nobody declared would
+otherwise be accepted and then dropped. The compiler-side class,
+L<Genesis::CI::ProviderCompiler>, reads this declaration from here rather
+than keeping one of its own.
+
+The contract behind that declaration is here too. C</declared_capabilities>
+checks one provider class's answer against the six names once, at
+configuration load, where the gates read it, and C</capability_gates> says
+which configuration key each ability gates. Both sit beside the abstract
+they check rather than on the compiler base, because what a provider can
+do is neither about emitting anything nor about which providers exist, and
+leaving them there left L<Genesis::Top> reaching into the compiler family
+to ask a provider what it is able to do.
+
+Every provider carries the type it was registered under, and C</type> is
+what reads it. The constructor sets it, because the constructor is where
+the type is known: the only other place to read one from is C</config>,
+which answers a hash, and a hash has no order to index into.
+
+Validating that block is the provider's own job and not the framework's,
+and the base does it by validating the block against the keys that
+provider declared, so an ordinary provider writes no validation at all and
+still gets its types checked, its defaults filled, and its unknown keys
+refused by name. A provider overrides C</validate_config> only for a rule
+a declaration cannot state, such as one key being required when another is
+absent, and an override calls C<SUPER> first, because the declaration is
+the floor rather than a subset of what is wanted checked.
+
+A provider's own rules run only where the section its block sits in is
+enabled, and C</section_enabled> is what a rule asks. The base owns that
+reading so every provider inherits it, because an operator writes a
+provider block a key at a time and a repository whose pipeline nobody has
+turned on must not be refused for a key that pipeline would need. The
+declared keys are checked either way, since a key an operator wrote is
+still a key that has to be one the provider reads.
+
+Concrete subclasses: Concourse, GithubActions, Manual.
+
+=head1 CLASS METHODS - BUILDING A PROVIDER
+
+=head2 provider_class($type)
+
+The class that answers for a provider type, with its file loaded. The
+lookup itself is L<Genesis::CI::ProviderRegistry>'s, which both families
+consult, so this holds no list of its own.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$type>
+
+The provider type to resolve.
+
+=back
+
+B<Returns:> the class name, with the class loaded.
+
+B<Errors:> raises "Unknown CI provider type '...'. Valid types: ...", at
+C<Genesis::Exit::CONFIG>, for a type the registry does not hold.
+
+B<Examples:>
+
+    Genesis::CI::Provider->provider_class('concourse');
+    # 'Genesis::CI::Provider::Concourse'
+
+=head2 new(%config)
+
+Builds a provider out of what a repository stored under
+C<pipeline.provider>. The C<type> key chooses the class, and it defaults
+to C<manual>.
+
+It builds and nothing more. Under D105 the rules for a provider's block
+are asked of the class, against the configuration the block sits in, so a
+check here would be asking an object assembled out of that block what the
+block says, one step further from what the operator wrote and one phase
+away from every other configuration refusal.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+The stored block, C<type> included.
+
+=back
+
+B<Returns:> an instance of the provider's own class.
+
+B<Errors:> raises a Genesis bug, "...->new is calling
+Genesis::CI::Provider->new illegally", when a subclass reaches the
+factory instead of building itself.
+
+B<Examples:>
+
+    my $provider = Genesis::CI::Provider->new(
+        type => 'concourse', target => 'prod');
+
+=head2 init(%opts)
+
+Builds a provider out of parsed command-line options, where
+C<--ci-provider> chooses the class and defaults to C<manual>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+The parsed options, C<ci-provider> included.
+
+=back
+
+B<Returns:> an instance of the provider's own class.
+
+B<Errors:> raises a Genesis bug, "...->init is calling
+Genesis::CI::Provider->init illegally", when a subclass reaches the
+factory instead of building itself.
+
+B<Examples:>
+
+    my $provider = Genesis::CI::Provider->init(%ci_opts);
+
+=head1 CLASS METHODS - COMMAND LINE
+
+=head2 parse_opts($args, $ci_opts)
+
+Reads CI options off a command line, in two passes. The first finds
+C<--ci-provider>, and the second asks that provider's class for the flags
+it declares and parses those. Arguments that are neither are put back, and
+reading stops at the first C<-->.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$args>
+
+The argument list, as an array reference. What is left unparsed is put
+back into it.
+
+=item C<$ci_opts>
+
+The options hash to populate, as a hash reference.
+
+=back
+
+B<Returns:> 1.
+
+B<Examples:>
+
+    my %ci_opts;
+    Genesis::CI::Provider->parse_opts(\@ARGV, \%ci_opts);
+    $ci_opts{'ci-provider'};    # 'concourse'
+
+=head2 opts_slot()
+
+The key this handler's parsed options are filed under in the command
+options.
+
+B<Returns:> the slot name, as a string.
+
+B<Examples:>
+
+    Genesis::CI::Provider->opts_slot;    # 'ci_provider'
+
+=head2 opts()
+
+The Getopt::Long specifications this class declares. The base declares
+none, and each provider adds its own.
+
+B<Returns:> the specifications, as a list.
+
+B<Examples:>
+
+    my @specs = Genesis::CI::Provider::Concourse->opts;
+
+=head2 opts_help(%config)
+
+The CI section of a usage message, which is the shared C<--ci-provider>
+flag with the valid types named, and then each provider's own help text
+beneath it. The types and the help both come from the registry, so this
+text cannot name a provider the schema's enum does not hold.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+Passed through to each provider. C<type_default_msg> and C<valid_types>
+are filled in when the caller leaves them out.
+
+=back
+
+B<Returns:> the help text, as a string.
+
+B<Errors:> raises a Genesis bug, "...->opts_help is calling
+Genesis::CI::Provider->opts_help illegally", when a subclass reaches the
+aggregate instead of writing its own.
+
+B<Examples:>
+
+    print Genesis::CI::Provider->opts_help;
+
+=head1 ABSTRACT METHODS
+
+=head2 provider_options_schema()
+
+The keys an operator may write under C<pipeline.provider> for this
+provider. Mandatory under D86 and still mandatory under D105, because its
+readers are C<pipeline-describe>'s resolved values, the per-key defaults,
+the help text, and the wizard, and none of those is validation. Without it
+the per-key table goes back to being hand-listed beside the classes, which
+is what D86 exists to prevent.
+
+It is declared here rather than on the compiler base because D105's
+default C</validate_config> validates against it, and a default cannot
+reach a declaration in another hierarchy.
+
+B<Returns:> a hash reference of key name to its declaration.
+
+B<Errors:> raises a Genesis bug, "Subclass '...' must implement
+provider_options_schema()".
+
+B<Examples:>
+
+    my $schema = Genesis::CI::Provider::Concourse->provider_options_schema;
+    $schema->{target}{required};    # 1
+
+=head2 capabilities()
+
+What this provider is able to do, as the six booleans D101 names,
+declared beside the schema so that one class answers for both halves of a
+provider. Mandatory for the same reason the schema is: a provider whose
+abilities are unknown cannot have its keys gated, and a gate that stood
+aside for it accepted a key the provider can never honour.
+
+B<Returns:> a hash reference of capability name to a boolean.
+
+B<Errors:> raises a Genesis bug, "Subclass '...' must implement
+capabilities()".
+
+B<Examples:>
+
+    Genesis::CI::Provider::Concourse->capabilities->{scheduled_jobs};   # 1
+
+=head2 config()
+
+The provider's own settings as they go back into the C<ci.provider>
+section of F<.genesis/config>.
+
+B<Returns:> the settings, as a list of key and value pairs.
+
+B<Errors:> raises a Genesis bug, "Abstract Method: ... class must define
+'config'".
+
+B<Examples:>
+
+    my %stored = $provider->config;
+
+=head2 interactive_wizard()
+
+Prompts the operator for this provider's settings. A provider with
+nothing to ask writes none.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment repository being configured.
+
+=back
+
+B<Returns:> the provider, configured.
+
+B<Errors:> raises a Genesis bug, "Abstract Method: ... class must define
+'interactive_wizard'".
+
+B<Examples:>
+
+    $provider->interactive_wizard($top);
+
+=head1 CLASS METHODS - THE CAPABILITY CONTRACT
+
+=head2 declared_capabilities($provider)
+
+One provider class's capability declaration, checked against the six
+names D101 fixes and handed back. It is asked once at configuration load,
+where the gates read it, rather than trusted afresh at every gate.
+
+A declaration that answers anything but exactly the six is a bug in the
+provider class, and both ways of getting it wrong go unnoticed otherwise.
+A misspelled name reads as false and refuses the key it gates as though
+somebody had meant it to, and a name left out loses its ability with
+nothing said at all, since three of the six gate no key.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$provider>
+
+The provider class to ask.
+
+=back
+
+B<Returns:> the declaration, as a hash reference of the six names to
+booleans.
+
+B<Errors:> raises a Genesis bug, "CI provider '...' must answer
+capabilities() with a hash reference", or "CI provider '...' declares the
+capabilities ..., and the six are ...", which names the class and both
+lists.
+
+B<Examples:>
+
+    my $caps = Genesis::CI::Provider->declared_capabilities(
+        'Genesis::CI::Provider::Concourse');
+    $caps->{multi_file_output};    # 0
+
+=head2 capability_gates()
+
+Which configuration key each capability gates, for the three of the six
+that gate one.
+
+Two of them gate nothing configurable, since C<deployment_locks> and
+C<cross_pipeline_events> are structural and their absence is D74's "no
+such capability" outcome rather than a refused key. C<multi_file_output>
+gates nothing here either, under D105: the key it used to gate,
+C<output_layout>, is declared by the provider that can use it and by
+nobody else, so a provider that cannot offers no such key and the refusal
+is the ordinary undeclared-key one.
+
+B<Returns:> a hash reference of capability name to the configuration key
+it gates.
+
+B<Examples:>
+
+    Genesis::CI::Provider->capability_gates->{scheduled_jobs};
+    # 'genesis.pipeline.redeploy_cron'
+
+=head1 CLASS METHODS - VALIDATION
+
+=head2 validate_config($config, $path, $discriminator)
+
+The provider's rules for its own block. The default validates the block
+against this provider's own C</provider_options_schema>, so a provider
+with no cross-field rule writes no validation whatsoever and still gets
+the generic pass, its type checks, its defaults, and the error text every
+other block gets. Because the default reads the same declaration the
+schema is, the two cannot drift apart in the ordinary case.
+
+No network call is made from here. Every command loads the
+configuration, and a check that dialled the provider would make every
+command wait on that provider being up.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+The configuration the block sits in.
+
+=item C<$path>
+
+The block's path, such as C<pipeline.provider>.
+
+=item C<$discriminator>
+
+The key the parent declared to choose this class, which no schema
+declares and which is therefore left alone. It defaults to C<type>.
+
+=back
+
+B<Returns:> what C<validate_subtree> answers, which is the refusals found.
+
+B<Examples:>
+
+    # An override calls SUPER first, because the declaration is the
+    # floor rather than a subset of what is wanted checked.
+    my @errors = $class->SUPER::validate_config($config, $path, $disc);
+
+=head2 section_enabled($config, $path)
+
+Whether the section a provider's block sits in is switched on, which is
+what a provider's own rule asks before it refuses anything.
+
+Before D105 the provider walk sat behind the pipeline gate and never had
+to ask. The rules are reached from the configuration walk now, which runs
+whether or not anybody has turned a pipeline on, and an operator writes a
+provider block a key at a time, so a repository with a pipeline nobody has
+enabled must not be refused for a key that pipeline would need.
+
+The section is the block's own parent, which is all a provider knows about
+where it sits, and a block with no parent is taken to be running, since
+there is no section to ask about.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+The configuration to read.
+
+=item C<$path>
+
+The block's path, whose parent is the section.
+
+=back
+
+B<Returns:> 1 when the section is enabled or there is no section to ask
+about, and 0 otherwise.
+
+B<Examples:>
+
+    return () unless $class->section_enabled($config, $path);
+
+=head1 INSTANCE METHODS
+
+=head2 label()
+
+The provider's name as a person reads it, which the base answers
+generically for a provider that sets none.
+
+B<Returns:> the label, as a string.
+
+B<Examples:>
+
+    $provider->label;    # 'Concourse'
+
+=head2 type()
+
+The registered type this provider was built under.
+
+It is set where the type is known rather than worked out later. The only
+other place a type could be read from is C</config>, which answers a hash,
+and Perl randomises a hash's order once per process, so indexing into that
+list gives the right answer for C<manual> and a coin toss for everything
+else.
+
+B<Returns:> the type, as a string.
+
+B<Examples:>
+
+    $provider->type;    # 'concourse'
+
+=head2 check_prereqs()
+
+Whether the toolchain this provider needs is on the PATH. The base
+answers yes, and a provider with a CLI of its own overrides it.
+
+B<Returns:> 1 when the toolchain is present, or 0 with the reason already
+reported.
+
+B<Examples:>
+
+    exit 86 unless $provider->check_prereqs;
+
+=head1 SEE ALSO
+
+L<Genesis::CI::ProviderRegistry>, L<Genesis::CI::ProviderCompiler>,
+L<Genesis::Kit::Provider>, L<Genesis::Top>
+
+=cut

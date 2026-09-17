@@ -20,13 +20,12 @@ $ENV{GENESIS_TESTING} = 'yes';
 $ENV{GENESIS_LIB}   ||= 'lib';
 
 use_ok 'Genesis::CI::Compiler::AST';
-use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::ProviderCompiler';
 use_ok 'Genesis::CI::ProviderRegistry';
 
-# The provider classes load by file path rather than by package name,
-# because the package a provider file declares is not its path.
-eval {require 'Genesis/CI/Compiler/Providers/Concourse.pm'};  ## no critic
-ok !$@, 'loaded the Concourse provider' or diag $@;
+# The Concourse compiler loads by the name it declares, because the
+# package it declares and the path it sits at agree now.
+use_ok 'Genesis::CI::ProviderCompiler::Concourse';
 
 subtest 'a registry lookup answers a copy of the entry' => sub {
 	plan tests => 2;
@@ -51,7 +50,7 @@ subtest 'the task block declares privileged beside image and version' => sub {
 	# ASTBuilder and PipelineDescriptor both read
 	# pipeline.provider.task.privileged, so the nested schema has to
 	# declare it or the load refuses the key by name.
-	my $schema = Genesis::CI::Concourse->provider_options_schema();
+	my $schema = Genesis::CI::ProviderCompiler::Concourse->provider_options_schema();
 	ok exists $schema->{task}{schema}{privileged},
 		'privileged is declared in the nested task schema';
 	is $schema->{task}{schema}{privileged}{type}, 'array',
@@ -87,7 +86,7 @@ subtest 'pipeline.public still decides the visibility' => sub {
 	my $flown = sub {
 		my ($public) = @_;
 		unlink $log;
-		my $p = Genesis::CI::Concourse->new(
+		my $p = Genesis::CI::ProviderCompiler::Concourse->new(
 			ast => $ast, top => undef, provider_opts => {});
 		$p->{config} = {
 			pipeline => {
@@ -119,8 +118,8 @@ subtest 'the provider block is not checked a second time' => sub {
 	# base class reading the CLI class's declaration through.
 	my @found = grep {
 		grep {m/provider_options_schema/} split(/\n/, slurp($_) // '')
-	} glob('lib/Genesis/CI/Compiler/*.pm');
-	is_deeply [@found], ['lib/Genesis/CI/Compiler/PipelineProvider.pm'],
+	} glob('lib/Genesis/CI/Compiler/*.pm lib/Genesis/CI/ProviderCompiler.pm');
+	is_deeply [@found], ['lib/Genesis/CI/ProviderCompiler.pm'],
 		'and the fragment is read on the compiler side in one place';
 };
 

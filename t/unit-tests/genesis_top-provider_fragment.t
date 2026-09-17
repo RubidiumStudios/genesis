@@ -20,13 +20,14 @@ use Test::Exception;
 use Genesis;
 provide_rc();
 use_ok 'Genesis::Top';
-use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::ProviderCompiler';
 use_ok 'Genesis::CI::Provider';
+use_ok 'Genesis::CI::ProviderRegistry';
 
 # The fragment this file compares the merged schema against.  The load
 # path loads it on its own, but reading it here through a class the file
 # never pulled in would report a merge that failed as a missing method.
-require Genesis::CI::Compiler::Providers::Concourse;
+require Genesis::CI::ProviderCompiler::Concourse;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -46,7 +47,7 @@ subtest 'one class carries the fragment and the check' => sub {
 
 	# Named here as well as at the top of this file, because the row below
 	# compares the compiler class's answer with the CLI class's.
-	require Genesis::CI::Compiler::Providers::Concourse;
+	require Genesis::CI::ProviderCompiler::Concourse;
 
 	# The resolved code references are compared rather than asking whether
 	# the class can the method at all.  The base declares the method as an
@@ -63,16 +64,16 @@ subtest 'one class carries the fragment and the check' => sub {
 		'and the manual provider declares an empty fragment rather than none';
 
 	# The compiler side reads the same declaration rather than a copy.
-	is_deeply Genesis::CI::Concourse->provider_options_schema,
+	is_deeply(Genesis::CI::ProviderCompiler::Concourse->provider_options_schema,
 		Genesis::CI::Provider::Concourse->provider_options_schema,
-		'the compiler class answers with what the CLI class declared';
+		'the compiler class answers with what the CLI class declared');
 };
 
 subtest "the configured provider's fragment is what the block declares" => sub {
 	plan tests => 5;
 
 	my $top      = load_with($h, concourse());
-	my $fragment = Genesis::CI::Concourse->provider_options_schema;
+	my $fragment = Genesis::CI::ProviderCompiler::Concourse->provider_options_schema;
 
 	# The block names the module rather than listing keys, so a reader
 	# asking about one of the block's keys is answered by the provider the
@@ -122,12 +123,12 @@ use base 'Genesis::CI::Provider';
 MUTECLI
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Mute.pm', <<'MUTE');
 package Genesis::CI::Compiler::Providers::Mute;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
+use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'mute'}
 1;
 MUTE
 	local @INC = ('t/tmp/lib', @INC);
-	Genesis::CI::Compiler::PipelineProvider->register_provider('mute', {
+	Genesis::CI::ProviderRegistry->register_provider('mute', {
 		class     => 'Genesis::CI::Compiler::Providers::Mute',
 		file      => 'Genesis/CI/Compiler/Providers/Mute.pm',
 		cli_class => 'Genesis::CI::Provider::Mute',
@@ -185,12 +186,12 @@ sub capabilities {
 TERSECLI
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Terse.pm', <<'TERSE');
 package Genesis::CI::Compiler::Providers::Terse;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
+use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'terse'}
 1;
 TERSE
 	local @INC = ('t/tmp/lib', @INC);
-	Genesis::CI::Compiler::PipelineProvider->register_provider('terse', {
+	Genesis::CI::ProviderRegistry->register_provider('terse', {
 		class     => 'Genesis::CI::Compiler::Providers::Terse',
 		file      => 'Genesis/CI/Compiler/Providers/Terse.pm',
 		cli_class => 'Genesis::CI::Provider::Terse',
@@ -271,20 +272,20 @@ PAIR
 	# above, so there is nothing for these two to say beyond their type.
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Plain.pm', <<'PLAINC');
 package Genesis::CI::Compiler::Providers::Plain;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
+use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'plain'}
 1;
 PLAINC
 	put_file('t/tmp/lib/Genesis/CI/Compiler/Providers/Pair.pm', <<'PAIRC');
 package Genesis::CI::Compiler::Providers::Pair;
-use parent 'Genesis::CI::Compiler::PipelineProvider';
+use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'pair'}
 1;
 PAIRC
 	local @INC = ('t/tmp/lib', @INC);
 	for my $type (qw/plain pair/) {
 		(my $pkg = ucfirst $type) =~ s/\W//g;
-		Genesis::CI::Compiler::PipelineProvider->register_provider($type, {
+		Genesis::CI::ProviderRegistry->register_provider($type, {
 			class     => "Genesis::CI::Compiler::Providers::$pkg",
 			file      => "Genesis/CI/Compiler/Providers/$pkg.pm",
 			cli_class => "Genesis::CI::Provider::$pkg",
@@ -392,11 +393,11 @@ sub capabilities {
 1;
 QUIET
 	local @INC = ('t/tmp/lib', @INC);
-	Genesis::CI::Compiler::PipelineProvider->register_provider('boom', {
+	Genesis::CI::ProviderRegistry->register_provider('boom', {
 		cli_class => 'Genesis::CI::Provider::Boom',
 		cli_file  => 'Genesis/CI/Provider/Boom.pm',
 	});
-	Genesis::CI::Compiler::PipelineProvider->register_provider('quiet', {
+	Genesis::CI::ProviderRegistry->register_provider('quiet', {
 		cli_class => 'Genesis::CI::Provider::Quiet',
 		cli_file  => 'Genesis/CI/Provider/Quiet.pm',
 	});

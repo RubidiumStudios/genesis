@@ -1,0 +1,703 @@
+=head1 NAME
+
+Genesis::CI::ProviderCompiler - the base every CI provider's compiler is built on
+
+=head1 SYNOPSIS
+
+    package Genesis::CI::ProviderCompiler::MyPlatform;
+    use parent 'Genesis::CI::ProviderCompiler';
+
+    sub platform_name     {'My Platform'}
+    sub provider_type     {'my-platform'}
+    sub generate_from_ast {my ($self, $ast) = @_; ...}
+    sub output_files      {return {'pipeline.yml' => 'Pipeline definition'}}
+
+    # And on the caller's side:
+    my $compiler = Genesis::CI::ProviderCompiler::MyPlatform->new(ast => $ast);
+    my $output   = $compiler->generate_from_ast($ast);
+
+=head1 DESCRIPTION
+
+A CI provider is written in two halves. One half talks to the operator,
+declares the keys the provider reads, and says what the provider is able
+to do, and that half is a class under L<Genesis::CI::Provider>. The other
+half turns a compiled L<Genesis::CI::Compiler::AST> into whatever that
+platform calls a pipeline, and this is the base that half is built on.
+
+Under D108 a compiler holds the provider it emits for rather than a copy
+of that provider's settings. The constructor takes the provider, C</provider>
+answers with it, and a change on the provider is visible here with nothing
+rebuilt. That composition is why the constructor lives on the base alone:
+a concrete that defined its own would bless the keys it knew about and
+drop the provider on the way in.
+
+Four methods are the contract a concrete has to answer, and they are
+C</platform_name>, C</provider_type>, C</generate_from_ast>, and
+C</output_files>. The base raises a bug for each of them, so a concrete
+that leaves one out is a defect in that class rather than a surprise at
+run time.
+
+The rest of what a concrete inherits is in two groups. The provider
+options are the flags an operator writes on the command line and the keys
+they write under C<pipeline.provider>, and the base reads the declaration
+of those keys from the CLI class beside it so that the two sides cannot
+answer differently. The shared helpers are the small pieces every emitter
+wants, which are a YAML serializer, a git URI, a secret reference, a
+topological sort, and a glob match.
+
+What a provider can do is declared on the CLI class and checked there,
+under L<Genesis::CI::Provider/declared_capabilities>. Nothing here answers
+for which providers exist either. That is L<Genesis::CI::ProviderRegistry>,
+which both families consult.
+
+=head1 CONSTRUCTOR
+
+=head2 new(%opts)
+
+    my $compiler = Genesis::CI::ProviderCompiler::Concourse->new(
+        provider => $provider,
+        ast      => $ast,
+        top      => $top,
+    );
+
+Builds a compiler for one provider. The base cannot be built directly,
+because it has no C<generate_from_ast> of its own to call.
+
+A concrete inherits this rather than writing one, so that every key a
+caller passes reaches the object. The Concourse class used to define its
+own, which blessed C<ast>, C<top>, and C<provider_opts> and dropped
+everything else, and a provider handed to it would have vanished
+silently.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%opts>
+
+C<provider> is the provider this compiler emits for, C<ast> is the
+compiled pipeline to emit from, C<top> is the deployment repository, and
+C<provider_opts> is the hash of resolved provider options, which defaults
+to an empty hash.
+
+=back
+
+B<Returns:> the new compiler.
+
+B<Errors:> raises a Genesis bug, "Cannot instantiate
+Genesis::CI::ProviderCompiler directly; use a subclass instead", when the
+class asked is the base itself.
+
+B<Examples:>
+
+    # The usual route is through the provider, which passes itself in.
+    my $compiler = $provider->compiler(ast => $ast);
+
+=head1 ABSTRACT METHODS
+
+Every concrete answers these four. The base raises a bug for each, so an
+omission is found the first time anything asks.
+
+=head2 platform_name()
+
+The platform's name as a person writes it, such as C<Concourse>. It is
+what a message about the pipeline names.
+
+B<Returns:> the name, as a string.
+
+B<Errors:> raises a Genesis bug, "Subclass '...' must implement
+platform_name()".
+
+B<Examples:>
+
+    $compiler->platform_name;    # 'Concourse'
+
+=head2 provider_type()
+
+The canonical type string the registry knows this provider by, such as
+C<concourse>. It is the same spelling an operator writes under
+C<pipeline.provider.type>.
+
+B<Returns:> the type, as a string.
+
+B<Errors:> raises a Genesis bug, "Subclass '...' must implement
+provider_type()".
+
+B<Examples:>
+
+    $compiler->provider_type;    # 'concourse'
+
+=head2 generate_from_ast($ast)
+
+The emitter. It turns a compiled AST into whatever the platform reads,
+which for a single-file platform is a string and for a multi-file one is
+a hash of file name to content.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ast>
+
+The L<Genesis::CI::Compiler::AST> to emit from.
+
+=back
+
+B<Returns:> the platform's output.
+
+B<Errors:> raises a Genesis bug, "Subclass '...' must implement
+generate_from_ast()".
+
+B<Examples:>
+
+    my $yaml = $compiler->generate_from_ast($ast);
+
+=head2 output_files()
+
+What the emitter writes, as a map from file name to a line describing it.
+A caller reads this to say what a compile produced without running one.
+
+B<Returns:> a hash reference of file name to description.
+
+B<Errors:> raises a Genesis bug, "Subclass '...' must implement
+output_files()".
+
+B<Examples:>
+
+    $compiler->output_files;
+    # {'pipeline.yml' => 'Concourse pipeline definition'}
+
+=head1 METHODS - PROVIDER OPTIONS
+
+=head2 check_prereqs()
+
+Whether the toolchain this provider needs is on the PATH. The base
+answers yes, because a provider with nothing to check needs no method of
+its own, and a concrete overrides it to look for its own CLI and to say
+what is missing.
+
+B<Returns:> 1 when the toolchain is present, or 0 with the reason already
+reported.
+
+B<Examples:>
+
+    exit 86 unless $compiler->check_prereqs;
+
+=head2 cli_opts()
+
+The Getopt::Long specifications for this provider's deploy-time flags.
+Every one of them is prefixed C<ci-> so that a provider's flag cannot
+collide with a top-level Genesis option. The base declares none.
+
+B<Returns:> the specifications, as a list.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::Concourse->cli_opts;
+    # ('ci-target=s', 'ci-team=s', 'ci-pause', 'ci-expose')
+
+=head2 cli_opts_help(%config)
+
+The help text for this provider's flags, one block per option, in the
+shape the kit providers use. The base has no flags and so returns an
+empty string.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+C<valid_types> narrows the help to the provider types named in it.
+
+=back
+
+B<Returns:> the help text, as a string.
+
+B<Examples:>
+
+    print Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(
+        valid_types => ['concourse']);
+
+=head2 provider_options_schema()
+
+The keys an operator may write under C<pipeline.provider> for this
+provider, declared once under D105 on the CLI class beside the check that
+enforces them. This reads that declaration through, so the compiler side
+and the operator's side cannot answer differently.
+
+B<Returns:> a hash reference of key name to its declaration.
+
+B<Examples:>
+
+    my $schema = $compiler->provider_options_schema;
+    $schema->{team}{default};    # 'main'
+
+=head2 capabilities()
+
+What this provider is able to do, as the six booleans D101 names. Like
+the schema, the declaration lives on the CLI class and this reads it from
+there, so one class answers for both halves of a provider.
+
+B<Returns:> a hash reference of capability name to a boolean.
+
+B<Examples:>
+
+    $compiler->capabilities->{multi_file_output};   # 0, for Concourse
+
+=head2 provider_options_defaults()
+
+The value each provider option takes when the operator writes none. The
+keys match the schema's. A default is not written back into the saved
+configuration, so a repository records only what somebody chose.
+
+B<Returns:> a hash reference of key name to default value.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::Concourse->provider_options_defaults;
+    # {team => 'main', pause => 0, ...}
+
+=head2 provider_config()
+
+This compiler's provider options as they round-trip through the
+C<pipeline.provider> section, which is the type plus every explicitly set
+value that differs from its default.
+
+B<Returns:> a hash reference, always carrying C<type>.
+
+B<Examples:>
+
+    $compiler->provider_config;
+    # {type => 'concourse', target => 'prod'}
+
+=head2 provider_option($key)
+
+One provider option, falling back to the declared default when the
+operator wrote nothing, and to C<undef> when nothing declares the key at
+all.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$key>
+
+The option's name in its configuration spelling, so C<team> rather than
+C<ci-team>.
+
+=back
+
+B<Returns:> the value, or C<undef>.
+
+B<Examples:>
+
+    $compiler->provider_option('team');       # 'main', from the default
+    $compiler->provider_option('nonesuch');   # undef
+
+=head2 describe_provider()
+
+A description of this compiler's provider for a person to read, which is
+the type, the platform's name, the extra fields worth showing and their
+order, and whether the provider is ready to use. A concrete overrides it
+to add its own fields.
+
+B<Returns:> the description, as a list of key and value pairs.
+
+B<Examples:>
+
+    my %described = $compiler->describe_provider;
+    $described{label};     # 'Concourse'
+
+=head1 CLASS METHODS - COMMAND LINE
+
+=head2 parse_cli_opts($args, $opts, $provider_type)
+
+Reads this provider's flags off a command line, in two passes. The first
+finds C<--ci-provider> unless the caller already knows the type, and the
+second loads that provider's compiling class and parses the flags it
+declares. Arguments that are neither are put back.
+
+A type with no compiling class, which C<manual> is, contributes no flags
+and is not an error.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$args>
+
+The argument list, as an array reference. It is read up to the first
+C<--> and what is left unparsed is put back into it.
+
+=item C<$opts>
+
+The options hash to populate, as a hash reference.
+
+=item C<$provider_type>
+
+The provider type, when the caller already knows it. Optional.
+
+=back
+
+B<Returns:> 1.
+
+B<Errors:> raises "Failed to load CI provider '...'" when the registry
+names a file that will not compile.
+
+B<Examples:>
+
+    my %opts;
+    Genesis::CI::ProviderCompiler->parse_cli_opts(\@ARGV, \%opts);
+    $opts{'ci-target'};
+
+=head2 cli_key_to_config_key($key)
+
+The configuration spelling of a command-line key, which is the key with
+its C<ci-> prefix taken off and its hyphens turned into underscores. A key
+that is already in configuration form comes back unchanged.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$key>
+
+The key to convert.
+
+=back
+
+B<Returns:> the converted key, as a string.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler->cli_key_to_config_key('ci-pipeline-name');
+    # 'pipeline_name'
+
+=head2 normalize_provider_opts($opts)
+
+A whole hash of command-line keys converted to configuration keys, so
+that C</provider_option> and C</provider_config> always read one
+spelling.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$opts>
+
+The options to convert, as a hash reference. C<undef> is taken as empty.
+
+=back
+
+B<Returns:> a new hash reference, keyed the configuration way.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler->normalize_provider_opts(
+        {'ci-team' => 'ops'});
+    # {team => 'ops'}
+
+=head2 cli_opt_keys($provider_type)
+
+The bare key names a provider's flags parse into, with the Getopt::Long
+type suffixes stripped. The commands layer reads this to copy the flags
+that matter without writing any provider's names down.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$provider_type>
+
+The provider type to ask. A type the registry does not hold, or one with
+no compiling class, contributes no keys.
+
+=back
+
+B<Returns:> the key names, as a list.
+
+B<Errors:> raises "Failed to load CI provider '...'" when the registry
+names a file that will not compile.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler->cli_opt_keys('concourse');
+    # ('ci-target', 'ci-team', 'ci-pause', 'ci-expose')
+
+    Genesis::CI::ProviderCompiler->cli_opt_keys('manual');
+    # ()
+
+=head2 all_cli_opts_help(%config)
+
+The whole CI section of a usage message, which is the shared
+C<--ci-provider> flag and then each provider's own help text beneath it.
+The types come from the registry, so this cannot name a provider the
+schema does not hold.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%config>
+
+Passed through to each provider's C</cli_opts_help>. C<valid_types>
+defaults to every registered type.
+
+=back
+
+B<Returns:> the help text, as a string.
+
+B<Examples:>
+
+    print Genesis::CI::ProviderCompiler->all_cli_opts_help;
+
+=head1 METHODS - SHARED HELPERS
+
+=head2 ast()
+
+The AST this compiler was built with.
+
+B<Returns:> the L<Genesis::CI::Compiler::AST>, or C<undef>.
+
+B<Examples:>
+
+    my $ast = $compiler->ast;
+
+=head2 top()
+
+The deployment repository this compiler was built with.
+
+B<Returns:> the L<Genesis::Top>, or C<undef>.
+
+B<Examples:>
+
+    my $top = $compiler->top;
+
+=head2 provider()
+
+The provider this compiler emits for. The object rather than a copy of
+it, which is the whole of D108's composition: a copy passes every
+assertion about a value at build time and drifts the moment the provider
+changes.
+
+B<Returns:> the L<Genesis::CI::Provider> subclass instance, or C<undef>.
+
+B<Examples:>
+
+    my $team = $compiler->provider->provider_option('team');
+
+=head2 dump_yaml($data)
+
+A data structure serialized to YAML, through the house serializer rather
+than an outside one. Every emitter and C<genesis dev> use this same code,
+so a diff between two renderings is about the pipeline rather than about
+key order or quoting.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The structure to serialize.
+
+=back
+
+B<Returns:> the YAML, as a string.
+
+B<Examples:>
+
+    print $compiler->dump_yaml({jobs => [{name => 'deploy'}]});
+
+=head2 git_uri($source_control)
+
+The clone URI a source control declaration describes. GitHub and GitLab
+are spelled as SSH URIs from the repository name, an explicit C<uri> is
+taken as written, and anything else falls back to the repository name
+itself.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$source_control>
+
+The declaration, as a hash reference. Omitted, it is read off the AST's
+integrations.
+
+=back
+
+B<Returns:> the URI, as a string.
+
+B<Examples:>
+
+    $compiler->git_uri({provider => 'github', repository => 'org/repo'});
+    # 'git@github.com:org/repo.git'
+
+=head2 secret_ref($ref)
+
+A secret reference in the platform's own spelling. The base writes
+Concourse's double parentheses, and a platform that spells them
+differently overrides this.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The reference, either a string or a hash carrying C<secret_ref>.
+
+=back
+
+B<Returns:> the formatted reference, or C<undef> when handed C<undef>.
+
+B<Examples:>
+
+    $compiler->secret_ref('vault-token');          # '((vault-token))'
+    $compiler->secret_ref({secret_ref => 'tok'});  # '((tok))'
+
+=head2 topological_sort($graph)
+
+A workflow graph's nodes in dependency order. The nodes are walked in
+sorted order, so the same graph always sorts the same way and a
+regenerated pipeline does not churn.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$graph>
+
+The graph, as a hash reference carrying C<nodes> and C<edges>.
+
+=back
+
+B<Returns:> the node names, in order, as a list.
+
+B<Errors:> raises "Cycle detected in workflow graph at node '...'", which
+names the node the walk came back to.
+
+B<Examples:>
+
+    $compiler->topological_sort({
+        nodes => {a => 1, b => 1},
+        edges => [{from => 'a', to => 'b'}],
+    });
+    # ('a', 'b')
+
+=head2 matches_pattern($name, $pattern)
+
+Whether a name matches a glob pattern, where C<*> stands for any run of
+characters and C<?> for one. Everything else in the pattern is matched
+literally.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The name to test.
+
+=item C<$pattern>
+
+The glob pattern to test it against.
+
+=back
+
+B<Returns:> true when the whole name matches.
+
+B<Examples:>
+
+    $compiler->matches_pattern('ocfp-prod', 'ocfp-*');   # true
+    $compiler->matches_pattern('prod', 'ocfp-*');        # false
+
+=head1 INTERNAL METHODS
+
+=head2 _to_yaml($data, $indent)
+
+The serializer behind C</dump_yaml>. It is written here rather than taken
+from a YAML library because Genesis cannot assume one is installed, and
+the output it needs is the small subset a pipeline file uses.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The structure to serialize.
+
+=item C<$indent>
+
+The nesting depth, in two-space steps. It defaults to none.
+
+=back
+
+B<Returns:> the YAML, as a string with no trailing newline.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::_to_yaml({name => 'deploy'}, 0);
+    # 'name: deploy'
+
+=head2 _to_yaml_array($data, $indent)
+
+The array half of the serializer, kept apart because a list item and a
+hash key indent differently and mixing the two rules in one sub is how
+the indentation used to go wrong.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The list to serialize, as an array reference.
+
+=item C<$indent>
+
+The nesting depth, in two-space steps.
+
+=back
+
+B<Returns:> the YAML, as a string with no trailing newline.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::_to_yaml_array(['a', 'b'], 0);
+    # "- a\n- b"
+
+=head2 _yaml_scalar($val)
+
+One scalar in its YAML spelling. A JSON::PP boolean is written as C<true>
+or C<false>, a number is written bare, a string that could be read as a
+number or as a boolean is quoted so that it reads back as a string, and a
+string with newlines in it becomes a literal block.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$val>
+
+The value to format.
+
+=back
+
+B<Returns:> the formatted scalar, as a string.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::_yaml_scalar('yes');   # '"yes"'
+    Genesis::CI::ProviderCompiler::_yaml_scalar(42);      # '42'
+
+=head1 SEE ALSO
+
+L<Genesis::CI::ProviderCompiler::Concourse>, L<Genesis::CI::Provider>,
+L<Genesis::CI::ProviderRegistry>, L<Genesis::CI::Compiler>,
+L<Genesis::CI::Compiler::AST>
+
+=cut

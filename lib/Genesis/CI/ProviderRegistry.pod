@@ -66,6 +66,11 @@ the path to require for it, which the manual and github-actions providers
 do not have, and C<cli_class> and C<cli_file> name the class the CLI
 builds, which every type has.
 
+A registration says the classes and the lookup works each path out from
+the class beside it, because every package under F<lib> derives its own
+path and a path written down as well would be a second spelling of the
+same fact.
+
 The answer is a shallow copy rather than the registry's own hash
 reference. A caller that wrote into what it was given would otherwise
 rewrite the registry for the rest of the process, and the next lookup of
@@ -108,21 +113,23 @@ B<Returns:> the type names, as a sorted list.
 =head2 register_provider($type, $info)
 
     Genesis::CI::ProviderRegistry->register_provider('zeppelin',
-        {cli_class => 'Genesis::CI::Provider::Zeppelin',
-         cli_file  => 'Genesis/CI/Provider/Zeppelin.pm'});
+        {cli_class => 'Genesis::CI::Provider::Zeppelin'});
 
 Adds an entry at run time, for a test that stands a provider class up and
 for a future out-of-tree provider. The registry is otherwise fixed at
 compile time, and nothing takes an entry out again.
 
-Three guards, because a registry that quietly accepted any of these would
+Four guards, because a registry that quietly accepted any of these would
 be the drift the one registry exists to prevent. An entry with no name
 would land under the empty string, where nothing could look it up. A name
 already registered is refused rather than replaced, since replacing the
 real concourse entry would leave the enum saying one thing and the lookup
 doing another. An entry with no C<cli_class> is refused because every type
 has a CLI class, and a resolution that found none would behave like manual
-instead of saying so.
+instead of saying so. And an entry that writes a path down alongside a
+class the path does not derive is refused, because that disagreement is
+the mismatch D108 took out of F<lib> and there is no reason to let one
+back in.
 
 B<Parameters:>
 
@@ -134,24 +141,26 @@ The name to register the entry under.
 
 =item C<$info>
 
-The entry, as a hash reference. It must carry C<cli_class> and
-C<cli_file>, and it may carry C<class> and C<file> when something compiles
-a pipeline for the type.
+The entry, as a hash reference. It must carry C<cli_class>, and it may
+carry C<class> when something compiles a pipeline for the type. A caller
+that writes C<cli_file> or C<file> as well must write the path its class
+derives.
 
 =back
 
 B<Returns:> 1.
 
 B<Errors:> raises a Genesis bug, "A CI provider must be registered under a
-name", "CI provider '...' is already registered", or "CI provider '...'
-must be registered with a cli_class", and leaves the registry as it was.
+name", "CI provider '...' is already registered", "CI provider '...' must
+be registered with a cli_class", or "CI provider '...' registers a
+cli_file of '...', which does not match its cli_class '...'", and leaves
+the registry as it was.
 
 B<Examples:>
 
     # Refused, and the registry is unchanged afterwards.
     Genesis::CI::ProviderRegistry->register_provider('concourse',
-        {cli_class => 'Genesis::CI::Provider::Manual',
-         cli_file  => 'Genesis/CI/Provider/Manual.pm'});
+        {cli_class => 'Genesis::CI::Provider::Manual'});
     # bug: CI provider 'concourse' is already registered
 
 =head2 provider_class($type)
@@ -193,7 +202,7 @@ B<Examples:>
 =head2 compiler_class($type)
 
     my $class = Genesis::CI::ProviderRegistry->compiler_class('concourse');
-    # 'Genesis::CI::Concourse'
+    # 'Genesis::CI::ProviderCompiler::Concourse'
 
 The class that compiles a pipeline for a type, with its file loaded. Not
 every registered type has one, and a type that has none is told so rather
@@ -229,6 +238,30 @@ B<Examples:>
     # provider lands.
 
 =head1 INTERNAL METHODS
+
+=head2 _path_of($package)
+
+The file path a package name derives, which is the name with its colons
+turned into slashes and F<.pm> on the end. It is the one place that turns
+a class into something C<require> can take, so an entry names its classes
+and the registry works the rest out.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$package>
+
+The package name to derive a path from.
+
+=back
+
+B<Returns:> the path, as a string.
+
+B<Examples:>
+
+    Genesis::CI::ProviderRegistry::_path_of('Genesis::CI::Provider::Manual');
+    # 'Genesis/CI/Provider/Manual.pm'
 
 =head2 _unknown($type)
 
