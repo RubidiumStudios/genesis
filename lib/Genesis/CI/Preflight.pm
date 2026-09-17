@@ -253,8 +253,12 @@ sub initial_state {
 			# of the move beside it.  The stage makes two, and they differ
 			# in what they cost the branch, so a reader that cares which
 			# one it was asks rather than inferring it from the counts.
-			assumed      => undef,
-			assumed_move => undef,
+			# The reset's own count rides with them, because the caveat the
+			# preview says about it names the number and the only other
+			# place that number is said is above the banner.
+			assumed         => undef,
+			assumed_move    => undef,
+			assumed_commits => undef,
 		};
 
 		# Nothing downstream of this stage makes a deployment branch any
@@ -345,9 +349,12 @@ sub initial_state {
 			# would say rather than what this un-moved branch would.  The
 			# move's name goes with it, because the caveat the report says
 			# is about the reset and the fast-forward below sets assumed
-			# without discarding anything.
-			$state->{branches}{$r->{env}}{assumed}      = $tracking;
-			$state->{branches}{$r->{env}}{assumed_move} = 'reset';
+			# without discarding anything, and the count goes with both,
+			# because the caveat names it.
+			$state->{branches}{$r->{env}}{assumed}         = $tracking;
+			$state->{branches}{$r->{env}}{assumed_move}    = 'reset';
+			$state->{branches}{$r->{env}}{assumed_commits} =
+				scalar @{$r->{commits}};
 		} else {
 			$git->set_branch_ref($r->{branch}, $tracking);
 			# The branch stands on its tracking ref now, so the record is
@@ -386,12 +393,17 @@ sub initial_state {
 
 		# The warning says only that the fast-forward is assumed, because
 		# the event line below is the one record of what would be done and
-		# the caller prints it either way, which is the rule the reset
-		# above keeps as well.
+		# the caller prints it either way.
+		#
+		# It is said here rather than under the preview's banner, where the
+		# reset's caveat moved to, because D44 names two caveats and a
+		# fast-forward is neither.  It takes their sentence shape all the
+		# same, so an operator who meets all three reads one kind of
+		# sentence rather than two.
 		if ($opts{dry_run}) {
 			warning(
-				"#Y{This report assumes the fast-forward of }#C{%s}#Y{ that a ".
-				"real run would make.}", $branch);
+				"#Y{This preview assumes }#C{%s}#Y{ is fast-forwarded first.}",
+				$branch);
 			$record->{assumed}      = $tracking;
 			$record->{assumed_move} = 'fast-forward';
 		} else {

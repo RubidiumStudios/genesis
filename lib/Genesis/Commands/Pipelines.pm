@@ -992,25 +992,35 @@ sub propagate {
 # leaves, so the reset is picked out by its name rather than inferred.  D44's
 # second caveat is about the reset alone, because a fast-forward discards
 # nothing the preview would otherwise have reported.
+#
+# Each caveat carries its own count, which the renderer says the noun and the
+# verb of.  Both numbers were read once already, one by the control check and
+# one by the classification, so neither is asked of git again here.
 sub _preview_warnings {
 	my ($git, $control, $control_state, $initial, $order) = @_;
 
-	my $remote = $git->default_remote;
+	# A repository with no remote configured has no name to print, and the
+	# words that stand in for one belong in prose, which is how the
+	# pre-flight's own refusals spell it.
+	my $remote = $git->default_remote // 'the remote';
 	my @caveats;
 
+	my $divergence = $control_state->{divergence} || {};
 	push @caveats, {
-		kind   => 'unpushed-control',
-		branch => $control,
-		remote => $remote,
-	} if (($control_state->{divergence} || {})->{state} // '') eq 'ahead';
+		kind    => 'unpushed-control',
+		branch  => $control,
+		remote  => $remote,
+		commits => $divergence->{ahead} || 1,
+	} if ($divergence->{state} // '') eq 'ahead';
 
 	for my $env (@$order) {
 		my $branch = $initial->{branches}{$env} or next;
 		next unless ($branch->{assumed_move} // '') eq 'reset';
 		push @caveats, {
-			kind   => 'unreset-branch',
-			branch => $branch->{branch},
-			remote => $remote,
+			kind    => 'unreset-branch',
+			branch  => $branch->{branch},
+			remote  => $remote,
+			commits => $branch->{assumed_commits} || 1,
 		};
 	}
 

@@ -18,7 +18,6 @@ use Genesis qw/info warning bug/;
 
 our @EXPORT_OK = qw/
 	held_qualifier hold_reason hold_detail render_run render_preview
-	preview_warnings
 	ENV_OUTCOMES COMMIT_OUTCOMES FILE_OUTCOME AWAITING_APPLY
 /;
 
@@ -336,10 +335,15 @@ sub render_preview {
 # been pushed, and a deployment branch whose local commits all carry a marker
 # is reset to the remote by the pre-flight under D32 before the walk begins.
 #
-# The warnings are read off the record rather than worked out here.  The run
-# has already asked git both questions, once to decide whether to refuse and
-# once to decide whether to reset, and a renderer that asked them again would
-# be a second reader of a fact the run has settled.
+# The warnings are read off the record rather than worked out here, counts
+# and all.  The run has already asked git both questions, once to decide
+# whether to refuse and once to decide whether to reset, and a renderer that
+# asked them again would be a second reader of a fact the run has settled.
+#
+# Each caveat names how many commits it is about, and the number governs the
+# noun and the verb, because the only other place either count is said is the
+# pre-flight's event line, which stands above the banner where an operator has
+# not yet been told they are reading a preview.
 #
 # Neither warning says anything about the files the report goes on to name.
 # A preview threads each delivery's tree forward into the next, so the file
@@ -352,26 +356,29 @@ sub preview_warnings {
 		my $kind = $caveat->{kind} // '';
 
 		if ($kind eq 'unpushed-control') {
+			my $n = $caveat->{commits} // 1;
 			warning(
-				"#Y{This preview assumes the commit on }#C{%s}#Y{ is pushed.}\n".
+				"#Y{This preview assumes %s on }#C{%s}#Y{ %s pushed.}\n".
 				"It is ahead of #C{%s/%s}, and a real run refuses to propagate ".
-				"until you push it, so what follows is what would happen once ".
+				"until you push %s, so what follows is what would happen once ".
 				"you have.",
-				$caveat->{branch}, $caveat->{remote}, $caveat->{branch}
+				$n == 1 ? 'the commit' : sprintf('the %d commits', $n),
+				$caveat->{branch},
+				$n == 1 ? 'is' : 'are',
+				$caveat->{remote}, $caveat->{branch},
+				$n == 1 ? 'it' : 'them'
 			);
 			next;
 		}
 
 		if ($kind eq 'unreset-branch') {
-			# What the reset would discard is the pre-flight's own event
-			# line, which the run prints under either kind of run, so the
-			# caveat says what the preview rests on and leaves the count
-			# where it was already said once.
 			warning(
 				"#Y{This preview assumes }#C{%s}#Y{ is reset first.}\n".
-				"A real run resets it to #C{%s/%s} before it walks, so what ".
-				"follows is what would happen once that reset has run.",
-				$caveat->{branch}, $caveat->{remote}, $caveat->{branch}
+				"A real run resets it to #C{%s/%s} before it walks, ".
+				"discarding %s, so what follows is what would happen once ".
+				"that reset has run.",
+				$caveat->{branch}, $caveat->{remote}, $caveat->{branch},
+				_commits($caveat->{commits} // 1)
 			);
 			next;
 		}
@@ -431,6 +438,19 @@ sub _commit_word {
 
 	return WOULD_DELIVER if $preview && $outcome eq 'delivered';
 	return $outcome;
+}
+
+# }}}
+# _commits - a count of commits with the noun agreeing {{{
+#
+# Genesis::CI::Preflight carries the same three lines for its refusals and its
+# event lines.  The shape is mirrored rather than shared, because the one that
+# is there is private to that module and a renderer reaching across for it
+# would be reading another stage's internals to print a noun.
+sub _commits {
+	my ($n) = @_;
+
+	return sprintf('%d commit%s', $n, $n == 1 ? '' : 's');
 }
 
 # }}}

@@ -186,8 +186,10 @@ subtest 'a dry run assumes the fast-forward and moves nothing' => sub {
 		'so it is still behind the remote');
 	# The warning says only that the fast-forward is assumed.  The sentence
 	# naming the counts is the event line, which the caller prints under
-	# either kind of run, so the warning does not repeat it.
-	like($err, qr/This\s+report\s+assumes\s+the\s+fast-forward\s+of\s+\Q$qa\E\s+that\s+a\s+real\s+run\s+would\s+make/,
+	# either kind of run, so the warning does not repeat it.  It takes the
+	# shape the preview's own two caveats take, so an operator reading all
+	# three reads one kind of sentence.
+	like($err, qr/This\s+preview\s+assumes\s+\Q$qa\E\s+is\s+fast-forwarded\s+first/,
 		'and the report says it assumes the fast-forward a real run would make');
 	# A report that assumes the move has to read as though it had been
 	# made, so the diff is taken from the ref a real run would have left

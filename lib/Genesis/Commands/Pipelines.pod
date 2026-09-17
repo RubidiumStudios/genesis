@@ -1270,13 +1270,19 @@ The reset is told from the fast-forward by the name the pre-flight left on
 the record.  The second caveat is about the reset alone, because a
 fast-forward discards nothing the preview would otherwise have reported.
 
+Each caveat carries its own count, which the renderer says the noun and the
+verb of.  Both numbers were read once already, one by the control check and
+one by the classification, so neither is asked of git again here.
+
 B<Parameters:>
 
 =over 4
 
 =item C<$git>
 
-A C<Service::Git> handle, asked only for the default remote's name.
+A C<Service::Git> handle, asked only for the default remote's name.  A
+repository with no remote configured has none to print, so the caveats say
+"the remote" instead, which is how the pre-flight's own refusals spell it.
 
 =item C<$control>
 

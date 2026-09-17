@@ -233,7 +233,8 @@ Runs the whole first stage of a propagation run and returns what it found:
     branches  => { qa => { branch => 'qa/bosh', state => 'in-sync',
                            ahead => 0, behind => 0,
                            reset => 0, fast_forwarded => 0,
-                           assumed => undef, assumed_move => undef } },
+                           assumed => undef, assumed_move => undef,
+                           assumed_commits => undef } },
     events    => [ 'created control from origin/control' ] }
 
 The refresh and the control check come first, and a caller that has already
@@ -287,13 +288,17 @@ off such a record takes C<assumed> where it is set, so a report says what a
 real run would deliver rather than naming files a teammate has already
 delivered.  C<assumed_move> names which of the stage's two moves it was,
 C<reset> or C<fast-forward>, so a caller that cares which one the branch
-escaped asks rather than inferring it from the counts.
+escaped asks rather than inferring it from the counts, and
+C<assumed_commits> says how many local commits a reset would discard.  A
+fast-forward discards nothing, so it leaves that count unset.
 
 The reset's assumption is not warned about here.  D44 says it under the
 preview's own banner, through C<Genesis::CI::Report::preview_warnings>, and a
 caveat printed above that banner is one the operator meets before they have
 been told they are reading a preview.  The fast-forward keeps its own warning,
-because D44 names the reset and the unpushed control and nothing else.  The
+because D44 names the reset and the unpushed control and nothing else, and it
+takes the caveats' sentence shape, "This preview assumes ... is fast-forwarded
+first", so an operator who meets all three reads one kind of sentence.  The
 event line beside either move is printed under both kinds of run, so nothing
 about what would be done goes unsaid.
 
@@ -381,7 +386,8 @@ on its tracking ref.  Under C<dry_run> no record is settled that way.  The one
 the stage would have moved carries C<assumed>, which is the ref a real run
 would have left the branch on, and its C<state> and counts are the ones the
 classification wrote, with C<assumed_move> beside it naming which move it
-escaped, C<reset> or C<fast-forward>.
+escaped, C<reset> or C<fast-forward>, and C<assumed_commits> saying how many
+commits a reset would discard.
 
 =item C<events>
 
