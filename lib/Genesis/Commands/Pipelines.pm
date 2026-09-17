@@ -17,6 +17,7 @@ use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
 use Genesis::CI::ProviderRegistry;
 use Genesis::CI::Publish;
+use Genesis::CI::PullRequest;
 use Genesis::CI::Report;
 use Genesis::CI::RunFailure qw/one_line/;
 use Genesis::CI::Walk;
@@ -622,6 +623,21 @@ sub propagate {
 	# puts it.  It applies to a dry run as it does to a writing one, because
 	# a dry run switches to control like any other run and D65 puts the
 	# clean assertion on the switch.
+
+	# The pull request branch of every environment is named once, before the
+	# session opens, because pr_branch_for refuses a prefix that collides
+	# with a deployment branch or with control and that refusal exits CONFIG.
+	# Raised below the switch it would die inside the run's own eval, where
+	# the named exit becomes a bare 1 and the operator is told nothing about
+	# the key they have to change.
+	#
+	# The topology is read once for the whole loop rather than once per
+	# environment, because building it walks every environment file.
+	my $pr_topology = $top->pipeline_topology;
+	$top->pr_branch_for($_) for grep {
+		$pr_topology->{nodes}{$_}{require_pr}
+	} @{$pr_topology->{order}};
+
 	my $session = open_control_session($top, $git);
 
 	# A refusal from here on owes the operator their branch back before it
@@ -694,6 +710,27 @@ sub propagate {
 	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}",
 		$control, $control_short;
 
+	# The run's one GitHub client, built where any environment in the
+	# pipeline would deliver into a pull request and left undefined
+	# otherwise, so a repository that has no such environment makes no API
+	# call and needs no token.  The pair the client targets is the one the
+	# source-control block resolves, so an override is honoured rather than
+	# whichever remote git happens to list first, and a pair it cannot
+	# resolve was refused by name at configuration load.
+	my ($github, $owner_repo);
+	if (grep {$topo->{nodes}{$_}{require_pr}} @dag_order) {
+		$owner_repo = $top->source_control_repository;
+		my ($gh_owner) = split m{/}, $owner_repo, 2;
+		$github = Service::Github->new(org => $gh_owner)
+			if $ENV{GITHUB_AUTH_TOKEN};
+		warning(
+			"#C{GITHUB_AUTH_TOKEN} is not set, so no pull request is opened ".
+			"for the environments whose policy asks for one.  Their branches ".
+			"are still written and published, and the next run with a token ".
+			"opens the pull requests."
+		) unless $github;
+	}
+
 	my $delivered = 0;
 	my @publish_specs;
 	my $publish;
@@ -737,7 +774,12 @@ sub propagate {
 		my %env_of;
 		for my $env_record (@{$record->{environments}}) {
 			next if $env_record->{error};
-			next unless @{$env_record->{pending}};
+			# An environment that delivers into a pull request is loaded
+			# whether or not anything is due for it, because the arm is
+			# asked either way and a branch or a proposed record left over
+			# from a pull request that has since merged is its to retire.
+			next unless @{$env_record->{pending}}
+				|| $topo->{nodes}{$env_record->{env}}{require_pr};
 			$env_of{$env_record->{env}} = $top->load_env($env_record->{env});
 		}
 
@@ -766,14 +808,39 @@ sub propagate {
 			# error, and the report carries the error beneath it.
 			next if $env_record->{error};
 
-			# The pull-request path is not built yet, and this guard goes
-			# with the task that builds it.  Until then a push onto a branch
-			# the repository's own policy says may only ever receive a
-			# proposal is the one half-built stage worth refusing outright.
+			# D51's arm.  An environment whose repository policy says its
+			# branch may only receive a proposal takes its delivery on the
+			# pull request branch, and the commits it is given are the same
+			# ones the direct arm would have delivered.
 			if ($topo->{nodes}{$env_name}{require_pr}) {
-				$env_record->{outcome}        = 'not attempted';
-				$env_record->{outcome_detail} =
-					'delivery by pull request is not built yet';
+				my @pending = @{$env_record->{pending}};
+
+				# The arm is asked even where nothing is due, because a
+				# branch and a proposed record left over from a pull request
+				# that has since merged are its to retire.
+				my $env = $env_of{$env_name} ||= $top->load_env($env_name);
+				Genesis::CI::Walk::walk_one(
+					session => $session,
+					record  => $env_record,
+					writes  => $dry_run ? 0 : 1,
+					deliver => sub {
+						my $word = Genesis::CI::PullRequest::deliver(
+							$session, $env_record,
+							env     => $env,
+							commits => \@pending,
+						);
+						$env_record->{outcome} = $word if defined $word;
+					},
+				);
+				next if ($env_record->{outcome} // '') eq 'failed';
+
+				$delivered += scalar(@pending)
+					if ($env_record->{outcome} // '') eq 'propagated';
+				push @publish_specs, {
+					branch => $env_record->{pr}{branch},
+					kind   => 'pr',
+					env    => $env_name,
+				} if !$dry_run && ($env_record->{pr}{action} // '') eq 'rebuild';
 				next;
 			}
 
@@ -884,6 +951,23 @@ sub propagate {
 						);
 					},
 				);
+			}
+		}
+
+		# The pull request is opened or updated once its branch is on the
+		# remote, because GitHub opens one from a branch the remote holds,
+		# and a run whose push was refused has nothing to open one from.
+		# The proposed record is written here for the same reason: it points
+		# at a pull request, and until the branch publishes there is none to
+		# point at.
+		if ($github && $owner_repo && $publish) {
+			my %published = map {($_ => 1)} @{$publish->{published} || []};
+			for my $env_record (@{$record->{environments}}) {
+				next unless $env_record->{pr};
+				next unless $published{$env_record->{pr}{branch} // ''};
+				Genesis::CI::PullRequest::sync_pull_request(
+					$github, $owner_repo, $env_record,
+					env => $env_of{$env_record->{env}});
 			}
 		}
 		1;

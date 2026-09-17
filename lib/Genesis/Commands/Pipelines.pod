@@ -435,6 +435,25 @@ own session under D65, walks from there, and puts the operator back on the
 branch they were standing on, so nobody has to move before running it.  See
 L</open_control_session>.
 
+An environment whose own C<genesis.pipeline.require_pr> is true takes its
+delivery on the pull request branch instead, as one aggregate commit above
+the deployment branch, and the run opens or updates the pull request from
+there once that branch has published.  It then writes its own pointer to the
+pull request at the environment's proposed record, so the readers that ask
+what an environment is waiting on need no GitHub token.  See
+L<Genesis::CI::PullRequest>.
+
+The pull request branch of every such environment is named before the session
+opens, because a prefix that collides with a deployment branch or with control
+is refused at C<CONFIG> and a refusal raised under the open session would
+exit as a bare 1 instead.  The run therefore stops on a colliding prefix with
+the operator still on the branch they started from and no call made to the
+API.
+
+A run with no C<GITHUB_AUTH_TOKEN> still writes and publishes those branches
+and says so, because the branches are the delivery and the pull request is
+what the next run with a token opens on top of it.
+
 Every branch the run committed to is published at the end of the walk, one
 branch per push, so a branch the remote refuses costs one environment one run
 and nothing else.  That environment reads C<publish rejected> with the ref git

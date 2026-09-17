@@ -1,0 +1,229 @@
+=head1 NAME
+
+Genesis::CI::PullRequest - the pull request arm of the propagate run
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::PullRequest;
+
+    # Inside the run's open session, for one environment whose policy says
+    # its branch may only ever receive a proposal.
+    my $word = Genesis::CI::PullRequest::deliver($session, $env_record,
+        env     => $env,
+        commits => \@pending);
+
+    # Once the branch has published, and not before.
+    Genesis::CI::PullRequest::sync_pull_request($github, 'acme/deployments',
+        $env_record, env => $env);
+
+=head1 DESCRIPTION
+
+An environment in pull request mode takes its propagation on
+C<< <pr_prefix><env>/<type> >> as one aggregate commit, and a pull request
+from there into C<< <env>/<type> >>. This module owns that aggregate, the
+rule that reads what a reviewer decided, and the proposed record's lifecycle.
+
+The pull request branch is derived state under D51. It is rebuilt from the
+deployment branch on every run rather than appended to, so what stands on it
+is always exactly one commit above the branch the pull request is opened
+against, and a run that is declined or aborted can put the branch back
+without having to work out which commits on it were its own.
+
+Nothing here opens a session. The arm writes inside the run's own session,
+because the run owes the operator their branch back whatever happens and a
+second session could not promise that.
+
+C<deliver> is never imported. The test harness exports a helper of the same
+name that the rows in this area also call, so the two are kept apart by
+always naming this one in full.
+
+=head1 FUNCTIONS
+
+=head2 align_with_remote($git, $branch)
+
+    my $aligned = Genesis::CI::PullRequest::align_with_remote($git,
+        'pr/qa/bosh');
+
+Brings the local pull request branch level with what the remote carries, and
+says whether the remote carried it at all.
+
+The discard report reads what is about to be destroyed, and what is about to
+be destroyed is what the remote carries, so the local ref has to be level
+with the remote before it is read. The run's own refresh fetches control and
+the deployment branches alone, because those are the branches the pre-flight
+classifies, so the pull request branch is fetched here, by the arm that is
+about to stand on it.
+
+The reset is a hard one and moves the checked-out branch, so the caller is
+already standing on the branch it names.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The repository handle.
+
+=item C<$branch>
+
+The pull request branch.
+
+=back
+
+B<Returns:> 1 where the remote carried the branch and the local ref is now
+level with it, and 0 where the remote has no such branch or the repository
+has no remote at all.
+
+B<Errors:> Whatever the fetch or the reset raises.
+
+B<Examples:>
+
+    align_with_remote($git, 'pr/qa/bosh');
+    # returns 1, with the checked-out branch now at origin/pr/qa/bosh
+
+    align_with_remote($git, 'pr/prod/bosh');
+    # returns 0, and touches nothing, where the remote has never had it
+
+=head2 deliver($session, $record, %opts)
+
+    my $word = Genesis::CI::PullRequest::deliver($session, $record,
+        env     => $env,
+        commits => \@pending);
+
+Delivers one environment's due commits onto its pull request branch as one
+aggregate commit and returns that environment's outcome word, or C<undef>
+where the report is to settle the environment itself.
+
+The session is already open, and the branch is rebuilt from the deployment
+branch on every run, because it is derived state. The switch cuts the branch
+where neither this repository nor the remote holds it, and the session
+records the absence so a run that is declined or aborted can take it off
+again.
+
+The single writer is called once, at the newest due commit's source. D69
+makes a delivery a mirror, so the mirror of the newest commit is the whole
+aggregate's tree, and the writer's own index assertions run against that same
+commit.
+
+What the publish and the pull request sync read afterwards is left on
+C<< $record->{pr} >>: the action, the control commit the aggregate names, the
+title and the body, and the commit that was written.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$session>
+
+The run's open branch session, which is what the switch and the write go
+through.
+
+=item C<$record>
+
+The walk's per-environment record. Its C<pr> is the pull request object the
+walk composed, and its C<branch> is the deployment branch the aggregate is
+built from and the pull request is opened against.
+
+=item C<%opts>
+
+C<env> is the L<Genesis::Env> whose propagation set the writer reads, and
+C<commits> is the arrayref of due control commits, oldest first.
+
+=back
+
+B<Returns:> C<propagated> where an aggregate was written, C<idempotent> where
+nothing was due, and C<undef> where the report is to settle the environment
+itself.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Genesis::CI::PullRequest::deliver was handed %s, which the walk composed
+no pull request branch for" >> -- raised via C<bug()> where the record has no
+C<pr>, because an environment reaching this arm without one is a walk that
+disagrees with the dispatch about which environments deliver this way.
+
+=item *
+
+Whatever the switch, the reset, or the single writer raises.
+
+=back
+
+B<Examples:>
+
+    deliver($session, $record, env => $env, commits => \@pending);
+    # returns 'propagated', with one aggregate commit on pr/qa/bosh
+
+    deliver($session, $record, env => $env, commits => []);
+    # returns 'idempotent', having written nothing
+
+=head2 sync_pull_request($github, $owner_repo, $record, %opts)
+
+    my $pr = Genesis::CI::PullRequest::sync_pull_request($github,
+        'acme/deployments', $record, env => $env);
+
+Opens the environment's pull request or updates the open one with the title
+and the body the aggregate produced, then writes the proposed record from
+what the API answered.
+
+It runs after the branch has published, because a pull request is opened from
+a branch the remote holds and a run whose push was refused has nothing to open
+one from. The proposed record is written here for the same reason: it points
+at a pull request, and until the branch publishes there is none to point at.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$github>
+
+The run's L<Service::Github> client.
+
+=item C<$owner_repo>
+
+The C<owner/repo> pair the source-control block resolves.
+
+=item C<$record>
+
+The walk's per-environment record, whose C<pr> the arm has already filled in.
+
+=item C<%opts>
+
+C<env> is the L<Genesis::Env> whose proposed record is written.
+
+=back
+
+B<Returns:> The record's own C<pr>, now carrying the number and the url the
+API answered with, or C<undef> where the environment has no pull request
+object or the arm did not rebuild its branch.
+
+B<Errors:> Whatever L<Service::Github> raises on the create or the update, and
+whatever the proposed record's write raises.
+
+B<Examples:>
+
+    sync_pull_request($github, 'acme/deployments', $record, env => $env);
+    # returns the pr, whose number and url are the API's own, and writes
+    # them to $env->proposed_record_path
+
+    sync_pull_request($github, 'acme/deployments', $record, env => $env);
+    # returns undef, where nothing was rebuilt and there is nothing to open
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Walk>, L<Genesis::CI::Publish>, L<Genesis::CI::Marker>,
+L<Service::Github>, L<Service::Git::Session>, L<Genesis::Env>
+
+=head1 AUTHOR
+
+Genesis Project
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) Genesis Project. All rights reserved.
+
+=cut

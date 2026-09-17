@@ -3950,6 +3950,12 @@ sub _gh_change {
 #
 # An environment names the two branches the propagation flow would have used,
 # so a row that cares about neither says env and no more.
+#
+# Every pull request the double holds carries an html_url, because that is
+# what a run writes into the proposed record and what a row reads back out of
+# it.  It is composed from the repository the double was stood up for, which
+# is the same shape the fixture curl composes for a pull request it creates
+# itself, so a declared one and a created one read alike.
 sub gh_pull_request {
 	my ($gh, %opts) = @_;
 	my $self = $gh->{harness};
@@ -3965,6 +3971,8 @@ sub gh_pull_request {
 			base    => {ref => $opts{base} // ($env ? $self->slug($env)      : '')},
 			title   => $opts{title} // '',
 			body    => $opts{body}  // '',
+			html_url => $opts{url} // sprintf('https://%s/%s/pull/%d',
+				$gh->{domain}, $gh->{repository}, $number),
 			created_at => $opts{at} // '2026-09-13T00:00:00Z',
 			reviews => [($opts{review} && $opts{review} ne 'none') ? {
 				state       => uc($opts{review}),

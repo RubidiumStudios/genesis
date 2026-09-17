@@ -108,8 +108,8 @@ subtest 'the snapshot invariant holds after every delivered commit' => sub {
 	}
 };
 
-subtest 'an environment that takes a pull request is passed over' => sub {
-	plan tests => 3;
+subtest 'an environment that takes a pull request is delivered onto its own branch' => sub {
+	plan tests => 4;
 
 	# pr mode writes genesis.pipeline.require_pr on the environment file,
 	# which is the per-environment key that says a delivery has to arrive as
@@ -128,8 +128,10 @@ subtest 'an environment that takes a pull request is passed over' => sub {
 	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
 	isnt(harness_marker($h, $h->slug('qa')), $due,
 		'nothing reached the deployment branch');
-	like($err, qr/qa: not attempted/,
-		'the environment is named and the run says why');
+	is(harness_marker($h, $h->pr_branch('qa'), copy => 'r'), $due,
+		'and the pull request branch carries the aggregate instead');
+	like($err, qr/qa: propagated/,
+		'the environment reads as delivered rather than passed over');
 };
 
 done_testing;

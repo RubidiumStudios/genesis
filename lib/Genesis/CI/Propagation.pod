@@ -6,18 +6,18 @@ Genesis::CI::Propagation - the pull request half of pipeline propagation
 
     use Genesis::CI::Propagation;
 
-    # The rolling pr/<env>/<type> branch, its idempotency check, and the
-    # body and dispatch a proposal is opened with.  Nothing here is public
-    # yet: the command that will call them arrives with the pull request
-    # path itself.
+    # The idempotency check for a rolling pr/<env>/<type> branch, the commit
+    # it is written with, and the body and dispatch a proposal was opened
+    # with.  Nothing here is public: what is left is what other test files
+    # still reach for by name.
 
 =head1 DESCRIPTION
 
 C<Genesis::CI::Propagation> holds what is left of the module that used to
-execute pipeline propagation, which is the rolling
-C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch model, its idempotent re-run check,
-and the helpers that compose a pull request body and dispatch it at the
-GitHub API.
+execute pipeline propagation, which is the idempotent re-run check for a
+rolling C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch, the commit that branch was
+written with, and the helpers that compose a pull request body and dispatch
+it at the GitHub API.
 
 Everything else it held has gone.  C<propagate_envs> applied a target list to
 a real git working tree in one loop that recorded the first error and stopped,
@@ -30,8 +30,11 @@ is the one writer, and the publish pushes each branch on its own.
 
 The direct path went with that loop, because a delivery onto an environment's
 own branch is what the walk and the single writer now do.  The pull request
-path has no replacement yet, so the helpers below stand until the command
-that opens a proposal is built on them.
+path has gone the same way: L<Genesis::CI::PullRequest> owns the aggregate
+commit, the pull request, and the proposed record, and the arm and the
+per-file lines that used to stand here went with it.  What is left is what
+other test files still reach for by name, and retiring the module outright
+would take three of them with it.
 
 =head1 DESIGN CONSIDERATIONS
 
@@ -44,9 +47,9 @@ end of a deploy.  Leaving the logic in a command module would have meant the
 provider either shelling out to a command or keeping a second copy.
 
 The rolling-branch decision, which is whether an existing pull request
-already carries the change, is the part most likely to be wrong and the
+already carries the change, was the part most likely to be wrong and the
 hardest to observe in a live pipeline run.  Separating it from command
-dispatch is what allows it to be exercised directly in tests, and it is the
+dispatch is what allowed it to be exercised directly in tests, and it is the
 reason this module outlived the loop it was extracted with.
 
 
@@ -54,62 +57,6 @@ reason this module outlived the loop it was extracted with.
 
 These are internal to the implementation.  They may change without notice
 and should not be called directly.
-
-=head2 _propagate_one_pr_env
-
-  _propagate_one_pr_env(%args);
-
-Applies one target's propagation onto a rolling pull request branch and
-resolves what to do with its pull request.  Takes C<git>, C<session>,
-C<env_name>, C<branch>, C<control_sha>, C<control_short>, and C<detail>,
-plus C<top>, C<github>, and C<owner_repo>.
-
-C<branch> is the deployment branch the pull request is cut from and opened
-against, so a fresh pull request branch forks from the slug and the pull
-request's base is the slug, rather than a ref named for the environment that
-a typed repository does not have.
-
-The branch is named by asking C<top> for
-C<pr_branch_for($env_name)> rather than by composing a name here, so
-there is one place a pull request branch is named and one place the
-collision with a deployment branch is refused.  C<top> is required, and
-the sub dies when it is absent, because a pull request branch cannot be
-named without it.
-
-This is where the rolling-branch decision tree lives: count open pull
-requests, then branch fresh, append to the existing one, or skip outright
-where the branch already carries this control SHA.
-
-B<Returns:> a result hashref describing what was queued for the batched push
-and PR phase.
-
-B<Errors:>
-
-=over 4
-
-=item C<"_propagate_one_pr_env: 'top' is required">
-
-Dies when C<top> is absent.  A pull request branch is named through the
-top and nowhere else, so a caller that reaches this path without one has
-a programming error rather than a per-environment failure.  The caller
-that will build the pull request path is expected to raise the same
-requirement before it reaches here, so this guard answers a direct caller
-rather than that one.
-
-=item C<"Failed to fetch '%s' from the remote: %s">
-
-Dies when the refresh of an open pull request branch reports a failure.
-That refresh runs only where this clone lacks the branch, so the switch
-that follows it would have nothing to switch to.  It sits inside the
-per-target C<eval>, so it stops this environment and comes back in
-C<errors> rather than ending the run.
-
-=back
-
-B<Examples:>
-
-  my $r = _propagate_one_pr_env(git => $git, github => $gh, top => $top, ...);
-  # returns a hashref noting the queued branch and PR action
 
 =head2 _apply_propagation_commit
 
@@ -128,21 +75,6 @@ B<Examples:>
 
   _apply_propagation_commit($git, 'staging', $sha, 'a1b2c3d', $detail);
   # no return value; commits "[pipeline] control@a1b2c3d -> staging"
-
-=head2 _render_detail_lines
-
-  _render_detail_lines($git, $detail);
-
-Prints the per-file lines describing a propagation, resolving renames back to
-their original path so a rename reads as one line rather than an unrelated
-add and delete.  Paths are shown git-prefix-stripped.
-
-B<Returns:> nothing; output goes to the log.
-
-B<Examples:>
-
-  _render_detail_lines($git, $detail);
-  # writes one line per changed, deleted or renamed file
 
 =head2 _pr_branch_has_control_sha
 

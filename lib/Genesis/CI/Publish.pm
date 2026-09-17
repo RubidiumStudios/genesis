@@ -412,17 +412,12 @@ sub _reset_publish_set {
 	my ($session) = @_;
 	return 0 unless $session;
 
-	# The pre-flight refuses a deployment branch the remote has never had
-	# before the walk starts, so a branch in this set without a tracking ref
-	# is a state the code promised cannot happen.  Leaving the run's commit
-	# on it in silence is the illegal state D96 names, and the count below
-	# would claim a branch was put back that is still carrying it.
+	# A deployment branch the remote has never had is refused in the
+	# pre-flight, so every one of those goes back to T.  A pull request
+	# branch may be one this run cut itself, and the session recorded that,
+	# so putting it back is deleting it rather than a state nobody can undo.
 	my @branches = $session->committed_branches;
-	for my $branch (@branches) {
-		bug("The branch #C{%s} has no remote-tracking ref, so the commit ".
-		    "this run left on it cannot be put back.", $branch)
-			unless $session->reset_branch($branch);
-	}
+	$session->restore_branch($_) for @branches;
 	return scalar(@branches);
 }
 

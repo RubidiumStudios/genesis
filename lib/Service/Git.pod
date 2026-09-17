@@ -406,6 +406,44 @@ B<Examples:>
   $git->checkout('staging');
   # raises, naming the repository, because no session is open
 
+=head2 reset_hard
+
+  $git->reset_hard($ref);
+
+Puts the checked-out branch's tree, index, and tip at C<$ref>. Used for
+derived branches, which are rebuilt on every run.
+
+It runs from the repository root, because the ref being reset to may not
+carry the directory the caller is standing in.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+Anything git resolves to a commit: a branch, a tracking ref, or a sha.
+
+=back
+
+B<Returns:> C<$self>, so the call chains.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to reset to '%s'"> -- raised via C<run>'s C<onfailure>. C<%s> is
+the ref.
+
+=back
+
+B<Examples:>
+
+  $git->reset_hard('qa/bosh');
+  # the checked-out pull request branch now carries qa/bosh's tree and tip
+
 =head2 checkout_detached
 
   $git->checkout_detached($sha);
@@ -1961,6 +1999,49 @@ B<Examples:>
 
   $git->delete_remote_branch('old-env');
   # returns $self
+
+=head2 delete_branch
+
+  $git->delete_branch($branch);
+
+Deletes a local branch forcibly, and does nothing when it is the branch
+currently checked out.
+
+The force is deliberate. A pull request branch is derived state, rebuilt
+from the deployment branch on every run, so a local ref is never worth
+preserving and one the remote no longer carries is exactly what breaks the
+next cycle.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The local branch to delete.
+
+=back
+
+B<Returns:> C<$self>, so the call chains.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to delete local branch '%s'"> -- raised via C<run>'s C<onfailure>.
+C<%s> is the branch name.
+
+=back
+
+B<Examples:>
+
+  $git->delete_branch('pr/qa/bosh');
+  # returns $self, with the local ref gone
+
+  $git->delete_branch($git->current_branch);
+  # returns $self, having done nothing
 
 =head2 fetch_branches
 

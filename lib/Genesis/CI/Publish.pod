@@ -461,7 +461,7 @@ B<Examples:>
 
     my $put_back = Genesis::CI::Publish::_reset_publish_set($session);
 
-Puts every branch the run committed to back where the remote has it.
+Puts every branch the run committed to back where this run found it.
 
 A branch carrying a commit the remote has never seen is the illegal initial
 state D96 names, and a run that stops before its first push must not leave one
@@ -470,6 +470,13 @@ refuses and the one the operator declined, and the set is the session's own,
 which is the set an abort resets, so those two and the abort put back exactly
 the same work. Control is not in it, because I2 keeps committed work on
 control whole.
+
+A deployment branch the remote has never had is refused in the pre-flight, so
+every one of those goes back to C<T>. A pull request branch may be one this
+run cut itself, and the session recorded that at the switch, so putting it
+back is deleting it rather than a state nobody can undo. The restore answers
+which of the two it did, and the count below is the size of the set either
+way.
 
 B<Parameters:>
 
@@ -490,15 +497,13 @@ B<Errors:>
 
 =item *
 
-C<< "The branch %s has no remote-tracking ref, so the commit this run left on
-it cannot be put back." >> -- raised via C<bug()> where the session answers
-that it did not move a branch. The pre-flight refuses a deployment branch the
-remote has never had before the walk starts, so this is a state the code
-promised cannot happen.
+C<< "A branch session never restores %s, which is the control branch" >> --
+raised by the session for control, which is never in this set.
 
 =item *
 
-The session's own reset raises where git refuses it.
+The session's own restore raises where git refuses the reset, the ref write,
+or the delete.
 
 =back
 
