@@ -35,6 +35,7 @@ sub new {
 	my ($class, %config) = @_;
 	bless({
 		label  => 'GitHub Actions',
+		type   => $config{type} || 'github-actions',
 		repo   => $config{repo},
 		branch => $config{branch} || DEFAULT_BRANCH,
 	}, $class);

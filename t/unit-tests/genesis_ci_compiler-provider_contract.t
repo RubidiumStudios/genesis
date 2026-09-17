@@ -21,6 +21,7 @@ $ENV{GENESIS_LIB}   ||= 'lib';
 
 use_ok 'Genesis::CI::Compiler::AST';
 use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::ProviderRegistry';
 
 # The provider classes load by file path rather than by package name,
 # because the package a provider file declares is not its path.
@@ -34,12 +35,12 @@ subtest 'a registry lookup answers a copy of the entry' => sub {
 	# rewrite the registry for the rest of the process, because the next
 	# file in the same run would then resolve the real provider to
 	# whatever the writer put there.
-	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
+	my $info = Genesis::CI::ProviderRegistry->provider_info('concourse');
 	is $info->{cli_class}, 'Genesis::CI::Provider::Concourse',
 		'the entry answers the registered CLI class';
 
 	$info->{cli_class} = 'Genesis::CI::Provider::Fixture';
-	my $again = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
+	my $again = Genesis::CI::ProviderRegistry->provider_info('concourse');
 	is $again->{cli_class}, 'Genesis::CI::Provider::Concourse',
 		'writing into the answer leaves the registry as it was';
 };

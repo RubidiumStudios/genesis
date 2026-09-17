@@ -2610,9 +2610,9 @@ provider type with the class that owns its block and the file that class
 lives in.
 
 It is built from
-C<< Genesis::CI::Compiler::PipelineProvider->known_providers >> and the
-registry entry behind each one, so the map and every class lookup read one
-list and cannot spell a provider two ways. Under D28 the registry is read
+C<< Genesis::CI::ProviderRegistry->known_providers >> and the registry
+entry behind each one, so the map and every class lookup read one list and
+cannot spell a provider two ways. Under D28 the registry is read
 once here, where the schema's enum and the class lookup used to read it
 twice. Every registered type has a CLI-side class, so the map is total and
 nothing downstream asks whether a provider has a class.
@@ -2622,13 +2622,12 @@ block's keys and validates it, and the file to require before calling it.
 The requiring and the dispatch belong to C<Genesis::Config>, which reaches
 them through the declaration this map is part of.
 
-Two refusals elsewhere still ask whether a provider has a compiler class,
-in L<Genesis::CI/_resolve_provider_class> and
-L<Genesis::CI::Compiler/_resolve_provider_class>, and they are not leftovers
-of the validation-side checks that went. Refusing to compile a pipeline for
+One refusal elsewhere still asks whether a provider has a class that
+compiles for it, in L<Genesis::CI::ProviderRegistry/compiler_class>, and it
+is not a leftover of the validation-side checks that went. Refusing to compile a pipeline for
 a provider Genesis has no compiler for is a question about emitting rather
 than about validating, so a total map of who validates a block says nothing
-about who can emit a pipeline, and those two outlive the checks that asked
+about who can emit a pipeline, and that one outlives the checks that asked
 whether validation had anything to check.
 
 B<Returns:> A hash reference keyed by provider type.
@@ -3064,8 +3063,8 @@ gate reads it.
 
 The type comes from L</pipeline_provider_type> rather than off the key, and
 the declaration comes from the class
-L<Genesis::CI::Provider/provider_class> names for it, which is the class the
-provider block was already dispatched to.
+L<Genesis::CI::ProviderRegistry/provider_class> names for it, which is the
+class the provider block was already dispatched to.
 
 The one repository-wide key is read for what the operator actually wrote,
 through C<< Genesis::Config::is_set >> rather than C<< has >>, because a
@@ -3098,8 +3097,8 @@ in that class rather than anything an operator wrote.
 =item *
 
 C<"Failed to load CI provider ..."> - raised through
-L<Genesis::CI::Provider/provider_class> when the registry names a class
-whose file will not compile. It exits 1 and carries the compiler's error
+L<Genesis::CI::ProviderRegistry/provider_class> when the registry names a
+class whose file will not compile. It exits 1 and carries the compiler's error
 uncut. An operator meets this at the dispatch inside
 C<Genesis::Config::validate> instead, which loads the same class first and
 refuses at C<Genesis::Exit::CONFIG> with the backtrace cut away, in the

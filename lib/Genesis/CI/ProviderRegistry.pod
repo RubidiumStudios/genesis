@@ -1,0 +1,265 @@
+=head1 NAME
+
+Genesis::CI::ProviderRegistry - the one registry of CI provider types
+
+=head1 SYNOPSIS
+
+    use Genesis::CI::ProviderRegistry;
+
+    # Every type Genesis knows, and the entry behind one of them.
+    my @types = Genesis::CI::ProviderRegistry->known_providers;
+    my $info  = Genesis::CI::ProviderRegistry->provider_info('concourse');
+
+    # The two resolutions, each loading the class it names.
+    my $cli      = Genesis::CI::ProviderRegistry->provider_class('concourse');
+    my $compiler = Genesis::CI::ProviderRegistry->compiler_class('concourse');
+
+=head1 DESCRIPTION
+
+A CI provider is written in two halves. One half talks to the operator,
+declares the keys the provider reads, and validates the block written for
+it, and that half is a class under L<Genesis::CI::Provider>. The other
+half emits the pipeline, and that half is a class of its own. This module
+holds the one map from a provider type to both of them.
+
+It sits in neither family because both families consult it. The provider
+side asks which class answers for a type, and the compiling side asks
+which class emits for one. Before D108 the map lived in a compiler module
+and the provider family reached into that module to find itself, so the
+provider family depended on the compiler family, which is backwards. The
+registry lifted out here rather than being renamed in place, because a
+rename would have carried that dependency along with it.
+
+Under D28 the schema's C<pipeline.provider> enum, every class lookup, and
+every "valid types" message read this one map, so a provider cannot be
+spelled one way in the schema and another in the code. Two of the three
+registered types name no compiling class: C<manual> has none by design,
+since under D43 C<pipeline-apply> sets no pipeline for it, and
+C<github-actions> has none yet, so the type validates and resolves on the
+CLI side and its emitter arrives with the provider itself. Asking for a
+compiling class either of them does not have is refused rather than
+answered with C<undef>, because emitting a pipeline and validating a block
+are different questions and a provider may answer the second while having
+nothing to answer the first with.
+
+=head1 CLASS METHODS
+
+=head2 known_providers()
+
+    my @types = Genesis::CI::ProviderRegistry->known_providers;
+    # ('concourse', 'github-actions', 'manual')
+
+Every registered provider type, sorted. This is the list the schema's enum
+is built from and the list every refusal names, so nothing anywhere writes
+the types out by hand.
+
+B<Returns:> the type names, as a sorted list.
+
+=head2 provider_info($type)
+
+    my $info = Genesis::CI::ProviderRegistry->provider_info('concourse');
+    # { class => ..., file => ..., cli_class => ..., cli_file => ... }
+
+One registry entry, or C<undef> for a type the registry does not hold. The
+entry's C<class> and C<file> name the class that compiles the pipeline and
+the path to require for it, which the manual and github-actions providers
+do not have, and C<cli_class> and C<cli_file> name the class the CLI
+builds, which every type has.
+
+The answer is a shallow copy rather than the registry's own hash
+reference. A caller that wrote into what it was given would otherwise
+rewrite the registry for the rest of the process, and the next lookup of
+the same type would answer whatever that caller had put there.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$type>
+
+The provider type to look up.
+
+=back
+
+B<Returns:> a hash reference, or C<undef> when the type is not registered.
+
+B<Examples:>
+
+    # A type with no compiling class still has a CLI class.
+    my $info = Genesis::CI::ProviderRegistry->provider_info('manual');
+    exists $info->{class};      # false
+    $info->{cli_class};         # 'Genesis::CI::Provider::Manual'
+
+    # A type nobody registered answers undef rather than raising.
+    Genesis::CI::ProviderRegistry->provider_info('jenkins');   # undef
+
+=head2 automated_providers()
+
+    my @types = Genesis::CI::ProviderRegistry->automated_providers;
+    # ('concourse', 'github-actions')
+
+Every registered type but C<manual>, which is what a check for a key that
+only means something under an automated pipeline reads. It is built out of
+the registry so that no caller writes "not manual" by hand and then drifts
+from the list when a provider is added.
+
+B<Returns:> the type names, as a sorted list.
+
+=head2 register_provider($type, $info)
+
+    Genesis::CI::ProviderRegistry->register_provider('zeppelin',
+        {cli_class => 'Genesis::CI::Provider::Zeppelin',
+         cli_file  => 'Genesis/CI/Provider/Zeppelin.pm'});
+
+Adds an entry at run time, for a test that stands a provider class up and
+for a future out-of-tree provider. The registry is otherwise fixed at
+compile time, and nothing takes an entry out again.
+
+Three guards, because a registry that quietly accepted any of these would
+be the drift the one registry exists to prevent. An entry with no name
+would land under the empty string, where nothing could look it up. A name
+already registered is refused rather than replaced, since replacing the
+real concourse entry would leave the enum saying one thing and the lookup
+doing another. An entry with no C<cli_class> is refused because every type
+has a CLI class, and a resolution that found none would behave like manual
+instead of saying so.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$type>
+
+The name to register the entry under.
+
+=item C<$info>
+
+The entry, as a hash reference. It must carry C<cli_class> and
+C<cli_file>, and it may carry C<class> and C<file> when something compiles
+a pipeline for the type.
+
+=back
+
+B<Returns:> 1.
+
+B<Errors:> raises a Genesis bug, "A CI provider must be registered under a
+name", "CI provider '...' is already registered", or "CI provider '...'
+must be registered with a cli_class", and leaves the registry as it was.
+
+B<Examples:>
+
+    # Refused, and the registry is unchanged afterwards.
+    Genesis::CI::ProviderRegistry->register_provider('concourse',
+        {cli_class => 'Genesis::CI::Provider::Manual',
+         cli_file  => 'Genesis/CI/Provider/Manual.pm'});
+    # bug: CI provider 'concourse' is already registered
+
+=head2 provider_class($type)
+
+    my $class = Genesis::CI::ProviderRegistry->provider_class('concourse');
+    # 'Genesis::CI::Provider::Concourse'
+
+The class that answers for a type on the operator's side, with its file
+loaded. This is the lookup the provider family used to make by reaching
+into a compiler module, which is the dependency D108 removes.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$type>
+
+The provider type to resolve. Every registered type has one.
+
+=back
+
+B<Returns:> the class name, with the class loaded.
+
+B<Errors:> raises "Unknown CI provider type '...'. Valid types: ...", at
+C<Genesis::Exit::CONFIG>, for a type the registry does not hold, and
+"Failed to load CI provider '...'" when the entry names a file that will
+not compile.
+
+B<Examples:>
+
+    # Resolving loads the class, so the caller may call it straight away.
+    Genesis::CI::ProviderRegistry->provider_class('manual')->new;
+
+    # A type nobody registered is refused, and the refusal names the
+    # types the registry does hold.
+    Genesis::CI::ProviderRegistry->provider_class('jenkins');
+    # Unknown CI provider type 'jenkins'. Valid types: concourse, ...
+
+=head2 compiler_class($type)
+
+    my $class = Genesis::CI::ProviderRegistry->compiler_class('concourse');
+    # 'Genesis::CI::Concourse'
+
+The class that compiles a pipeline for a type, with its file loaded. Not
+every registered type has one, and a type that has none is told so rather
+than answered with C<undef>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$type>
+
+The provider type to resolve.
+
+=back
+
+B<Returns:> the class name, with the class loaded.
+
+B<Errors:> raises "Unknown CI provider type '...'. Valid types: ..." for a
+type the registry does not hold, and "Genesis knows the '...' provider but
+has no compiler for it yet" for one it holds that nothing compiles for.
+Both exit at C<Genesis::Exit::CONFIG>, because a repository whose
+configured provider Genesis cannot compile for is a repository the
+operator can put right. A file that will not compile raises "Failed to
+load CI provider '...'" instead.
+
+B<Examples:>
+
+    # Refused rather than answered with undef, so a caller cannot read
+    # the absence as "no pipeline wanted".
+    Genesis::CI::ProviderRegistry->compiler_class('github-actions');
+    # Genesis knows the 'github-actions' provider but has no compiler
+    # for it yet, so there is no pipeline to compile until that
+    # provider lands.
+
+=head1 INTERNAL METHODS
+
+=head2 _unknown($type)
+
+The refusal for a type the registry does not hold, written once because
+both resolutions raise it and their wording has to stay the same. An
+undefined type is named as C<< <undefined> >> rather than left blank, so a
+caller that lost the type on the way in reads as having done so.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$type>
+
+The type that was asked for, which may be C<undef>.
+
+=back
+
+B<Returns:> nothing; it never returns.
+
+B<Errors:> raises "Unknown CI provider type '...'. Valid types: ...", at
+C<Genesis::Exit::CONFIG>, carrying every type the registry holds.
+
+B<Examples:>
+
+    Genesis::CI::ProviderRegistry::_unknown('jenkins');
+    # Unknown CI provider type 'jenkins'. Valid types: concourse,
+    # github-actions, manual
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Provider>, L<Genesis::CI::Compiler>, L<Genesis::Top>
+
+=cut

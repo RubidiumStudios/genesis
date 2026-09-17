@@ -3,103 +3,22 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::CI::ProviderRegistry;
 use JSON::PP;
 use Getopt::Long qw/GetOptionsFromArray/;
 
 ### Provider Registry {{{
 #
-# The one registry.  Under D28 the schema's enum, every class lookup, and
-# every "valid types" message read this map, so a provider cannot be
-# spelled one way in the schema and another in the code, which is the
-# drift H26 names.  The manual provider has no compiler class, because
-# under D43 pipeline-apply sets no pipeline for it, and its CLI class
-# declares an empty fragment, so that D100's refusal of a provider key
-# beside type: manual will fall out of the ordinary rules once the
-# dispatch reads that fragment at load.  The
-# github-actions provider has no compiler class yet either: the type
-# validates and resolves on the CLI side, and the compiler class arrives
-# with the provider itself.
+# The registry moved to Genesis::CI::ProviderRegistry under D108,
+# because it is about every provider rather than about compiling one,
+# and because the provider family used to reach in here to find its own
+# classes.  These four stay as delegations while the callers move.
 
-my %_providers = (
-	'concourse' => {
-		class     => 'Genesis::CI::Concourse',
-		file      => 'Genesis/CI/Compiler/Providers/Concourse.pm',
-		cli_class => 'Genesis::CI::Provider::Concourse',
-		cli_file  => 'Genesis/CI/Provider/Concourse.pm',
-	},
-	'github-actions' => {
-		cli_class => 'Genesis::CI::Provider::GithubActions',
-		cli_file  => 'Genesis/CI/Provider/GithubActions.pm',
-	},
-	'manual' => {
-		cli_class => 'Genesis::CI::Provider::Manual',
-		cli_file  => 'Genesis/CI/Provider/Manual.pm',
-	},
-);
+sub known_providers     {Genesis::CI::ProviderRegistry->known_providers}
+sub provider_info       {shift; Genesis::CI::ProviderRegistry->provider_info(@_)}
+sub automated_providers {Genesis::CI::ProviderRegistry->automated_providers}
+sub register_provider   {shift; Genesis::CI::ProviderRegistry->register_provider(@_)}
 
-# known_providers - return list of known provider type strings {{{
-sub known_providers {
-	return sort keys %_providers;
-}
-
-# }}}
-# provider_info - return one registry entry, or undef {{{
-#
-# The entry's class and file name the compiler-side class, which the
-# manual and github-actions providers do not have, and cli_class and
-# cli_file name the class the CLI builds, which every type has.
-#
-# A shallow copy rather than the registry's own hash reference, because a
-# caller that writes into what it was given would otherwise rewrite the
-# registry for the rest of the process, and a later lookup of the same
-# type would answer whatever the writer put there.
-sub provider_info {
-	my ($class, $type) = @_;
-	return undef unless defined $type && exists $_providers{$type};
-	return {%{$_providers{$type}}};
-}
-
-# }}}
-# automated_providers - the types that are not manual {{{
-#
-# The list a required-under-an-automated-provider check reads, so no
-# caller writes "not manual" by hand.
-sub automated_providers {
-	return grep {$_ ne 'manual'} known_providers();
-}
-
-# }}}
-# register_provider - add a registry entry at run time {{{
-#
-# For tests that stand a provider class up and for a future out-of-tree
-# provider.  The registry is otherwise fixed at compile time.
-#
-# Three guards, because a registry that quietly accepts any of these
-# mistakes is the drift H26 names.  A missing name is refused because the
-# assignment would otherwise register the entry under the empty string,
-# where nothing could ever look it up.  A name already registered is
-# refused rather than replaced, since replacing the real concourse entry
-# for the rest of the process would leave the enum saying one thing and
-# the class lookup doing another.  An entry with no cli_class is refused
-# because every type has a CLI-side class and a resolver that finds none
-# behaves like manual instead of saying so; the compiler-side class is a
-# different matter, being legitimately absent for manual and, until its
-# compiler lands, for github-actions.
-sub register_provider {
-	my ($class, $type, $info) = @_;
-
-	bug("A CI provider must be registered under a name")
-		unless defined $type && length $type;
-	bug("CI provider '%s' is already registered", $type)
-		if exists $_providers{$type};
-	bug("CI provider '%s' must be registered with a cli_class", $type)
-		unless ref($info) eq 'HASH' && $info->{cli_class};
-
-	$_providers{$type} = $info;
-	return 1;
-}
-
-# }}}
 # }}}
 ### Constructor {{{
 
@@ -421,8 +340,10 @@ sub parse_cli_opts {
 
 	# Pass 2: load provider and parse provider-specific flags.  A type with
 	# no compiler class, which manual is, contributes no flags.
-	if ($provider_type && $_providers{$provider_type} && $_providers{$provider_type}{file}) {
-		my $info = $_providers{$provider_type};
+	my $info = $provider_type
+		? Genesis::CI::ProviderRegistry->provider_info($provider_type)
+		: undef;
+	if ($info && $info->{file}) {
 		eval { require $info->{file} }  ## no critic
 			or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
 
@@ -495,8 +416,9 @@ sub all_cli_opts_help {
 	$config{valid_types} ||= [known_providers()];
 
 	my $provider_help = join('',
-		map  { $_providers{$_}{class}->cli_opts_help(%config) }
-		grep { $_providers{$_}{file} && eval { require $_providers{$_}{file}; 1 } }  ## no critic
+		map  { $_->{class}->cli_opts_help(%config) }
+		grep { $_->{file} && eval { require $_->{file}; 1 } }  ## no critic
+		map  { Genesis::CI::ProviderRegistry->provider_info($_) }
 		known_providers()
 	);
 

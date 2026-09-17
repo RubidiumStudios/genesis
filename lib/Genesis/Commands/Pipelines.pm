@@ -17,6 +17,7 @@ use Genesis::CI::Compiler;
 use Genesis::CI::Compiler::PipelineProvider;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
+use Genesis::CI::ProviderRegistry;
 use Genesis::CI::Publish;
 use Genesis::CI::Report;
 use Genesis::CI::RunFailure qw/one_line/;
@@ -217,7 +218,7 @@ sub apply {
 			"#C{pipeline.provider.type} in #C{.genesis/config} to one of: %s, ".
 			"then run #C{genesis pipeline-apply} again.",
 			join(', ', map {"#C{$_}"}
-				Genesis::CI::Compiler::PipelineProvider->automated_providers())
+				Genesis::CI::ProviderRegistry->automated_providers())
 		);
 		exit 0;
 	}

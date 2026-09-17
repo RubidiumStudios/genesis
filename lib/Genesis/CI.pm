@@ -16,11 +16,8 @@ sub new {
 	my $type = $opts{type}
 		or bail("Missing required 'type' parameter for Genesis::CI->new()");
 
-	my $provider_info = _resolve_provider_class($type);
-	eval { require $provider_info->{file} } ## no critic
-		or bail("Failed to load CI provider '%s': %s", $type, $@);
-
-	return $provider_info->{class}->init(%opts);
+	require Genesis::CI::ProviderRegistry;
+	return Genesis::CI::ProviderRegistry->compiler_class($type)->init(%opts);
 }
 
 # }}}
@@ -33,35 +30,6 @@ sub compile {
 
 	require Genesis::CI::Compiler;
 	return Genesis::CI::Compiler->new(%opts)->compile(%opts);
-}
-
-# }}}
-# _resolve_provider_class - the registry entry for a provider type {{{
-#
-# One registry under D28, so this is a lookup rather than a fourth map.
-# A type with no compiler class, which manual is, is not a compilable
-# provider and says so.
-#
-# The refusal below outlives the validation-side checks that asked whether
-# a provider had a class, for the reason given beside its twin in
-# Genesis::CI::Compiler::_resolve_provider_class: emitting a pipeline and
-# validating a block are different questions.
-sub _resolve_provider_class {
-	my ($type) = @_;
-
-	require Genesis::CI::Compiler::PipelineProvider;
-	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
-	bail(
-		"Unknown CI provider type '%s'. Valid types: %s", $type // '<undefined>',
-		join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers())
-	) unless $info;
-
-	bail(
-		"Genesis knows the '%s' provider but has no compiler for it yet, so ".
-		"there is no pipeline to compile until that provider lands.", $type
-	) unless $info->{class};
-
-	return $info;
 }
 
 # }}}
