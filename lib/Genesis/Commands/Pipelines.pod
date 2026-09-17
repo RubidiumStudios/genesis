@@ -446,7 +446,10 @@ An operator who answers no stops the run there.  Nothing is pushed, every
 branch the run committed to goes back to where the remote has it, and every
 environment reads C<not published> with C<operator declined> beside it, so
 the report says of each one that it was written, verified, and held here by
-the person who was asked.
+the person who was asked.  The run closes by saying that the publish was
+declined and that every branch is back where the remote has it, rather than
+by counting a delivery, because the count the walk kept is true of the
+working tree and false of the remote once the branches have been put back.
 
 B<Options (via C<get_options>):>
 

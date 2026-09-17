@@ -920,7 +920,17 @@ sub propagate {
 		? Genesis::CI::Report::render_preview($record, git => $git)
 		: Genesis::CI::Report::render_run($record, git => $git);
 
-	if ($delivered) {
+	# The decline is read before the count, because a run the operator
+	# stopped wrote its branches and then put every one of them back, so the
+	# walk's counter is true of the working tree and false of the remote.  A
+	# delivered count standing directly above a report that says nothing was
+	# published is the one number in the run that contradicts everything
+	# under it, and the operator who stopped the run is the last person who
+	# should have to work out which of the two to believe.
+	if ($publish && $publish->{declined}) {
+		info "\n#Yi{The publish was declined.  Every branch is back where ".
+		     "the remote has it.}";
+	} elsif ($delivered) {
 		info "\n#G{Done.} %s %d commit%s.",
 			$dry_run ? 'Would deliver' : 'Delivered',
 			$delivered, $delivered == 1 ? '' : 's';
