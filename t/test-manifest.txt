@@ -361,6 +361,7 @@ integration-tests/genesis_ci_publish-independence.t           # a partial publis
 integration-tests/genesis_ci_publish-control.t                # control is re-checked before the first push, and never pushed
 integration-tests/genesis_ci_publish-confirm.t                # the verified delta is shown whether or not there is anyone to ask
 integration-tests/genesis_ci_publish-status.t                 # a clean publish exits zero and a rejected branch makes the run partial
+integration-tests/genesis_ci_publish-retry_code.t             # the exit code says whether an unaided retry fixes the refusal
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
