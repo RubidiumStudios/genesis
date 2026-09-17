@@ -93,7 +93,12 @@ subtest 'a switching command refuses the same unstaged edit' => sub {
 
 	my ($out, $err, $exit) = run_genesis($h, 'qa', 'info');
 
+	my $refusal = 'Working tree has uncommitted changes, and this command '.
+		'switches branches';
+
 	isnt($exit, 0, 'the switching command refused');
+	like(unfolded($err), qr/\Q$refusal\E/,
+		'on the clean-tree condition rather than on anything else');
 	like(unfolded($err), qr/\Q$edited\E/, 'naming the modified file');
 
 	Genesis::run({dir => $h->a}, 'git', 'checkout', '--', $edited);
