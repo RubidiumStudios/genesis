@@ -1,9 +1,6 @@
 # Architecture Overview
 
-The Genesis CI system has two parallel code paths for generating deployment
-pipelines: a legacy path and a modern compiler pipeline. Both paths are
-active in the codebase and serve different entry points. Understanding
-how they coexist is essential before modifying any part of the system.
+The Genesis CI system has two parallel code paths for generating deployment pipelines: a legacy path and a modern compiler pipeline. Both paths are active in the codebase and serve different entry points. Understanding how they coexist is essential before modifying any part of the system.
 
 ## Two Code Paths
 
@@ -93,8 +90,7 @@ All CI modules live under `lib/Genesis/CI/` in the Genesis CLI repository, and e
 
 The GitHub Actions and manual providers have no compiling class. A manual pipeline is one Genesis never sets, and the class that emits for GitHub Actions arrives with the provider itself.
 
-The command handler is at `lib/Genesis/Commands/Pipelines.pm` and the CLI
-command definitions are in `bin/genesis`.
+The command handler is at `lib/Genesis/Commands/Pipelines.pm` and the CLI command definitions are in `bin/genesis`.
 
 ## Entry Points
 
@@ -104,28 +100,26 @@ The primary entry point is `Genesis::Commands::Pipelines::apply()`, called when 
 
 The second entry point is `Genesis::CI::Legacy` directly, which the deprecated `graph()` calls to produce DOT source from a `ci.yml` file.
 
-A provider object is never built by a command on its own. `Genesis::CI::Compiler::compile` builds it, and the command reads it back out of the result alongside the compiler.
+No pipeline command builds a provider object of its own. `Genesis::CI::Compiler::compile` builds it, and the command reads it back out of the result alongside the compiler. The one command that does build its own is `genesis dev-pipeline-compile`, which calls `Genesis::CI::Provider->new` on a type alone and asks that provider for its compiler, because it emits from a stored AST that carries neither a repository nor a configured block.
 
 ## Data Flow
 
-Configuration data flows through the system in a single direction, being
-progressively transformed at each stage:
+Configuration data flows through the system in a single direction, and it is progressively transformed at each stage.
 
-```
-YAML files
-  → parsed config (Perl hashref with normalized structure)
-    → validated config (same hashref, errors collected)
-      → scripts metadata (hashref of script_id → metadata)
-        → AST source representation (Genesis-specific: targets, integrations, workflows)
-          → AST generic pipeline (platform-agnostic: resource_types, resources, jobs, groups)
-            → provider output (platform-specific YAML strings)
+```mermaid
+flowchart TD
+    A[YAML files]
+    B["parsed config<br/>a hashref with normalized structure"]
+    C["validated config<br/>the same hashref, errors collected"]
+    D["scripts metadata<br/>script_id to metadata"]
+    E["AST source representation<br/>targets, integrations, and workflows"]
+    F["AST generic pipeline<br/>resource_types, resources, jobs, and groups"]
+    G["emitted output<br/>platform-specific YAML strings"]
+
+    A --> B --> C --> D --> E --> F --> G
 ```
 
-Each transformation is performed by a dedicated module. The AST is the
-central data structure and it has two layers: a source representation
-that holds Genesis-specific concepts, and a generic pipeline that holds
-fully-resolved CI primitives. The PipelineDescriptor is the boundary
-module that converts from one layer to the other.
+Each transformation is performed by a dedicated module. The AST is the central data structure and it has two layers. One is a source representation holding Genesis-specific concepts, and the other is a generic pipeline holding fully resolved CI primitives. The PipelineDescriptor is the boundary module that converts from one layer to the other.
 
 ## One Class per Provider, with Its Compiler as a Component
 
@@ -148,19 +142,8 @@ See [Writing a Provider](writing-a-provider.md) for the full contract on both si
 
 ## Concourse Legacy Bridge
 
-The Concourse compiler has a special bridge mechanism for legacy-sourced
-ASTs. When the compiler pipeline processes a `ci.yml` file, the parser
-normalizes it into the multi-file structure, but the ASTBuilder preserves
-the raw legacy data in `$ast->provider_config->{concourse}{_legacy_pipeline_raw}`.
+The Concourse compiler has a special bridge mechanism for legacy-sourced ASTs. When the compiler pipeline processes a `ci.yml` file, the parser normalizes it into the multi-file structure, but the ASTBuilder preserves the raw legacy data in `$ast->provider_config->{concourse}{_legacy_pipeline_raw}`.
 
-When `Genesis::CI::ProviderCompiler::Concourse::generate_from_ast()` detects
-this legacy marker and a `$self->{top}` object is available, it calls
-`_generate_from_legacy_ast()` which reconstructs the original `$P` hashref
-that `Legacy::generate_pipeline_concourse_yaml()` expects and delegates
-to it. This ensures that legacy configurations produce bit-identical output
-regardless of whether they go through the compiler pipeline or the direct
-legacy path.
+When `Genesis::CI::ProviderCompiler::Concourse::generate_from_ast()` detects this legacy marker and a `$self->{top}` object is available, it calls `_generate_from_legacy_ast()` which reconstructs the original `$P` hashref that `Legacy::generate_pipeline_concourse_yaml()` expects and delegates to it. This ensures that legacy configurations produce bit-identical output regardless of whether they go through the compiler pipeline or the direct legacy path.
 
-For non-legacy ASTs (from the `pipeline:` section of `.genesis/config`),
-the Concourse compiler calls `_generate_native()` which serializes the
-generic pipeline from `PipelineDescriptor` directly to YAML.
+For non-legacy ASTs (from the `pipeline:` section of `.genesis/config`), the Concourse compiler calls `_generate_native()` which serializes the generic pipeline from `PipelineDescriptor` directly to YAML.
