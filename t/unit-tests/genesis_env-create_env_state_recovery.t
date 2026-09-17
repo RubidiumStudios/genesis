@@ -89,8 +89,8 @@ subtest 'has_artifact answers without fetching anything' => sub {
 };
 
 # ===========================================================================
-subtest 'latest_with_artifacts prefers the newest attempt that archived one' => sub {
-	plan tests => 8;
+subtest 'latest(artifacts => ...) prefers the newest attempt that archived them' => sub {
+	plan tests => 9;
 
 	my $failed = make_record(
 		timestamp => '20260101130000', result => 'failed',
@@ -102,11 +102,11 @@ subtest 'latest_with_artifacts prefers the newest attempt that archived one' => 
 	);
 	my $mgr = make_manager($failed, $succeeded);
 
-	is($mgr->latest_with_artifacts(action => 'deploy'), $failed,
+	is($mgr->latest(action => 'deploy', artifacts => ['state']), $failed,
 		'the failed attempt wins, because its state file is the newer one');
 	is($mgr->latest, $succeeded,
-		'latest() still skips the failure, so the manifest diff stays honest');
-	is($mgr->latest_with_artifacts(action => 'deploy', artifacts => ['state', 'manifest']),
+		'latest() with no artifacts still skips the failure, so the manifest diff stays honest');
+	is($mgr->latest(action => 'deploy', artifacts => ['state', 'manifest']),
 		$failed, 'the manifest that pairs with that state comes from the same record');
 
 	# A failure that never got as far as archiving a state file must not
@@ -115,23 +115,28 @@ subtest 'latest_with_artifacts prefers the newest attempt that archived one' => 
 		timestamp => '20260101140000', result => 'failed',
 		artifacts => {manifest => "---\nname: nostate\n"},
 	);
-	is(make_manager($stateless, $succeeded)->latest_with_artifacts(action => 'deploy'),
+	is(make_manager($stateless, $succeeded)->latest(action => 'deploy', artifacts => ['state']),
 		$succeeded, 'a failure with no state file is passed over');
 
 	my $terminated = make_record(
 		timestamp => '20260101150000', action => 'terminate', result => 'failed',
 		artifacts => {state => '{"vm":"gone"}'},
 	);
-	is(make_manager($terminated, $succeeded)->latest_with_artifacts(action => 'deploy'),
+	is(make_manager($terminated, $succeeded)->latest(action => 'deploy', artifacts => ['state']),
 		$succeeded, 'the action filter keeps terminations out of the deploy search');
-	is(make_manager($terminated, $succeeded)->latest_with_artifacts(action => 'terminate'),
+	is(make_manager($terminated, $succeeded)->latest(action => 'terminate', artifacts => ['state']),
 		$terminated, 'and finds them when they are what was asked for');
 
-	is(make_manager()->latest_with_artifacts(action => 'deploy'), undef,
+	is(make_manager()->latest(action => 'deploy', artifacts => ['state']), undef,
 		'no records at all means nothing to recover');
 
-	throws_ok {$mgr->latest_with_artifacts(bogus => 1)} qr/Invalid options: bogus/,
-		'an unknown option is a bug, not a silent pass';
+	# Asking for artifacts is what admits failed records; a caller that wants
+	# a failed record without naming an artifact still has to say so.
+	is($mgr->latest(action => 'deploy', include_failed => 1), $failed,
+		'include_failed alone still admits the failure, as before');
+
+	throws_ok {$mgr->latest(artifacts => [])} qr/At least one artifact/,
+		'an empty artifact list is a bug, not a match-everything';
 };
 
 # ===========================================================================

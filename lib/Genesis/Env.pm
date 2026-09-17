@@ -4442,7 +4442,7 @@ sub _recovered_create_env_state {
 	# newest one.
 	return {} if $self->manifest_store eq 'repository';
 
-	my $deployment = $self->deployments->latest_with_artifacts(
+	my $deployment = $self->deployments->latest(
 		action => 'deploy', artifacts => ['state']
 	);
 	return {} unless $deployment && !$deployment->succeeded;
@@ -5123,7 +5123,7 @@ sub terminate {
 			# whole artifact set from it: its manifest is the one whose
 			# releases and CPI created the resources the state now records, and
 			# `bosh delete-env` has to be handed the two together.
-			my $last_deployment = $self->deployments->latest_with_artifacts(
+			my $last_deployment = $self->deployments->latest(
 				action => 'deploy', artifacts => ['state', 'manifest']
 			) // $self->deployments->latest(action => 'deploy');
 

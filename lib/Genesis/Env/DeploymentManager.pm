@@ -112,47 +112,23 @@ sub at {
 }
 # }}}
 
-# latest - get most recent deployment audit {{{
+# latest - most recent deployment audit, optionally one carrying named artifacts {{{
 sub latest {
 	my ($self, %options) = @_;
+	my @required = @{$options{artifacts} // []};
+	bug("At least one artifact must be specified") if exists $options{artifacts} && !@required;
+
+	# A record archived after a failure can hold newer state than the last
+	# success, so asking for artifacts admits failed records.
+	my $include_failed = $options{include_failed} || @required;
+
 	my $deployments = $self->_all();
 	return undef unless $deployments && @$deployments;
 
 	for my $deployment ($deployments->@*) {
 		next if $options{action} && $deployment->lookup('action') ne $options{action};
 		next if $options{result} && $deployment->lookup('result') ne $options{result};
-		next if !$options{include_failed} && $deployment->lookup('result') eq $deployment->action_failed;
-		return $deployment;
-	}
-	return undef;
-}
-# }}}
-
-# latest_with_artifacts - most recent deployment that archived the given artifacts {{{
-#
-# Unlike latest(), this deliberately considers failed records.  `bosh
-# create-env` rewrites the state file as it works, so an attempt that died
-# partway still recorded what it changed on the IaaS -- a deleted VM, an
-# uploaded stemcell, a fresh persistent disk.  That record is newer than the
-# last successful deploy's, and it is the only accurate account of what is out
-# there, so the next deploy and the next terminate have to build on it.
-sub latest_with_artifacts {
-	my ($self, %options) = @_;
-
-	my @invalid_options = grep { !/^(action|artifacts)$/ } keys %options;
-	bug(
-		"Invalid options: %s",
-		join(", ", @invalid_options)
-	) if @invalid_options;
-
-	my @required = @{$options{artifacts} // ['state']};
-	bug("At least one artifact must be specified") unless @required;
-
-	my $deployments = $self->_all();
-	return undef unless $deployments && @$deployments;
-
-	for my $deployment ($deployments->@*) {
-		next if $options{action} && $deployment->lookup('action') ne $options{action};
+		next if !$include_failed && $deployment->lookup('result') eq $deployment->action_failed;
 		next if grep { !$deployment->has_artifact($_) } @required;
 		return $deployment;
 	}
