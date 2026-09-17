@@ -52,7 +52,9 @@ our @EXPORT_OK = qw/publish_run confirm_publish publish_delta/;
 #
 # The delta every push would carry is shown before the first one goes out, and
 # an operator at a terminal is then asked.  A run that is declined pushes
-# nothing and says so on declined.
+# nothing, puts every branch it committed to back where the remote has it,
+# records each environment as not published with the decline beside the word,
+# and says so on declined.
 #
 # Returns { published => \@branches, rejected => \@branches, declined => 0,
 # results => \@results }, with refused carrying the sentence where control
@@ -88,8 +90,20 @@ sub publish_run {
 	# an operator is shown is what the push sends and not what the run
 	# meant to send.  A decline pushes nothing, and the status the run
 	# exits with is the caller's to decide.
+	#
+	# It takes the path the refusal above takes, because a branch carrying a
+	# commit the remote has never seen is the illegal initial state D96
+	# names and a run the operator stopped must not leave one behind.  Each
+	# environment then says it was written, verified, and not published,
+	# with the reason beside the word rather than inside it.
 	unless (confirm_publish($git, $remote, \@specs, yes => $args{yes})) {
 		$result->{declined} = 1;
+		_reset_publish_set($session);
+		for my $spec (@specs) {
+			my $rec = _record_for($records, $spec->{env}) or next;
+			$rec->{outcome}        = 'not published';
+			$rec->{outcome_detail} = 'operator declined';
+		}
 		return $result;
 	}
 
@@ -337,10 +351,12 @@ sub _commits {
 # _reset_publish_set - put every branch the run committed to back at T {{{
 #
 # A branch carrying a commit the remote has never seen is the illegal initial
-# state D96 names, and a run that refuses before its first push must not leave
-# one behind.  The set is the session's own, which is the set an abort resets,
-# so a refusal here and an abort put back exactly the same work.  Control is
-# not in it, because I2 keeps committed work on control whole.
+# state D96 names, and a run that stops before its first push must not leave
+# one behind.  Both such runs come through here, which are the one a moved
+# control refuses and the one the operator declined, and the set is the
+# session's own, which is the set an abort resets, so all three put back
+# exactly the same work.  Control is not in it, because I2 keeps committed
+# work on control whole.
 sub _reset_publish_set {
 	my ($session) = @_;
 	return 0 unless $session;
