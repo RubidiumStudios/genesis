@@ -34,6 +34,7 @@ sub new {
 		switched  => {},
 		committed => {},
 		lock      => undef,
+		aborted_clean => 0,
 	}, $class;
 }
 
@@ -176,11 +177,12 @@ sub begin {
 	# session still open would say it had finished, one that had not
 	# switched would name the branch the last one stood on, and an abort
 	# would reset a branch an earlier session wrote.
-	$self->{active}    = 1;
-	$self->{finished}  = 0;
-	$self->{on}        = undef;
-	$self->{switched}  = {};
-	$self->{committed} = {};
+	$self->{active}        = 1;
+	$self->{finished}      = 0;
+	$self->{on}            = undef;
+	$self->{switched}      = {};
+	$self->{committed}     = {};
+	$self->{aborted_clean} = 0;
 	$self->_register_net;
 
 	trace("Service::Git::Session: began on %s", $self->{origin}{branch});
@@ -364,6 +366,15 @@ sub abort {
 	};
 
 	$self->_release_lock;
+
+	# What the abort managed, recorded before it throws.  Every path out of
+	# here is a bail, so a caller that needs the answer has nowhere else to
+	# read it, and the net is exactly that caller: it drops its notice on a
+	# run that was already failing, but only where the abort did what it
+	# came for.  Asking the branch instead would answer yes to a discard
+	# that failed in a session that never switched, and to a restore whose
+	# checkout landed but whose return to the recorded directory did not.
+	$self->{aborted_clean} = ($discard_error || $restore_error) ? 0 : 1;
 
 	# Said before the restore failure below, because where both are true
 	# this one is why: nothing could be put back over changes that could
@@ -931,14 +942,9 @@ sub _register_net {
 			# The silence is only for an abort that did what it came for.
 			# One that could not discard, or could not return, leaves the
 			# operator standing somewhere they did not ask to be, and that
-			# is worth saying whatever the status, so the branch is read
-			# back and compared against the one begin recorded.
-			my $restored = eval {
-				($me->{git}->current_branch // '')
-					eq ($me->{origin}{branch} // "\0")
-			} ? 1 : 0;
-
-			print STDERR "\n$err\n" unless $status && $restored;
+			# is worth saying whatever the status, so the abort's own
+			# answer is what the silence turns on.
+			print STDERR "\n$err\n" unless $status && $me->{aborted_clean};
 		};
 
 		$? = $status;
