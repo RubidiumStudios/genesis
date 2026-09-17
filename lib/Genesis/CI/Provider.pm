@@ -9,23 +9,15 @@ use Getopt::Long qw/GetOptionsFromArray/;
 
 # provider_class - load and return the CLI class for a provider type {{{
 #
-# The one place a type becomes a class on this side, reading the registry
-# in Genesis::CI::Compiler::PipelineProvider so the valid list is the same
-# list the schema's enum is built from.
+# A type becomes a class in Genesis::CI::ProviderRegistry, which owns the
+# lookup under D108 and which both families consult, so this is a
+# delegation and holds no list of its own.  It stays here while the
+# callers outside this file move onto the registry.
 sub provider_class {
 	my ($class, $type) = @_;
 
-	require Genesis::CI::Compiler::PipelineProvider;
-	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
-	bail(
-		"Unknown CI provider type '%s'. Valid types: %s", $type // '<undefined>',
-		join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers())
-	) unless $info;
-
-	eval { require $info->{cli_file} }  ## no critic
-		or bail("Failed to load CI provider '%s': %s", $type, $@);
-
-	return $info->{cli_class};
+	require Genesis::CI::ProviderRegistry;
+	return Genesis::CI::ProviderRegistry->provider_class($type);
 }
 
 # }}}
@@ -42,7 +34,8 @@ sub new {
 		if $class ne __PACKAGE__;
 
 	my $type = $config{type} || 'manual';
-	return $class->provider_class($type)->new(%config);
+	require Genesis::CI::ProviderRegistry;
+	return Genesis::CI::ProviderRegistry->provider_class($type)->new(%config);
 }
 
 # }}}
@@ -53,7 +46,8 @@ sub init {
 		if $class ne __PACKAGE__;
 
 	my $type = $opts{'ci-provider'} || 'manual';
-	return $class->provider_class($type)->init(%opts);
+	require Genesis::CI::ProviderRegistry;
+	return Genesis::CI::ProviderRegistry->provider_class($type)->init(%opts);
 }
 
 # }}}
@@ -74,7 +68,9 @@ sub parse_opts {
 
 	# Second pass: extract provider-specific flags, through the same
 	# registry lookup, so this reads no third list of valid types.
-	my @extra_opts = $class->provider_class($type || 'manual')->opts();
+	require Genesis::CI::ProviderRegistry;
+	my @extra_opts = Genesis::CI::ProviderRegistry
+		->provider_class($type || 'manual')->opts();
 
 	GetOptionsFromArray($opt_args, $ci_opts, @extra_opts) if @extra_opts;
 
@@ -101,8 +97,8 @@ sub opts_help {
 	bug("%s->opts_help is calling %s->opts_help illegally", $class, __PACKAGE__)
 		if $class ne __PACKAGE__;
 
-	require Genesis::CI::Compiler::PipelineProvider;
-	my @types = Genesis::CI::Compiler::PipelineProvider->known_providers();
+	require Genesis::CI::ProviderRegistry;
+	my @types = Genesis::CI::ProviderRegistry->known_providers();
 
 	$config{type_default_msg} ||= '(optional, defaults to "manual")';
 	$config{valid_types}      ||= [@types];
@@ -111,7 +107,8 @@ sub opts_help {
 	# text cannot name a provider the schema's enum does not hold.
 	my $type_list     = join(', ', @types);
 	my $provider_help = join('',
-		map {$class->provider_class($_)->opts_help(%config)} @types
+		map {Genesis::CI::ProviderRegistry->provider_class($_)->opts_help(%config)}
+			@types
 	);
 
 	<<EOF;
@@ -228,6 +225,18 @@ sub label {
 }
 
 # }}}
+# type - the registered type this provider was built under {{{
+#
+# Set where the type is known rather than worked out later.  The only
+# other place a type could be read from is config, which answers a hash,
+# and Perl randomises a hash's order once per process, so indexing into
+# that list gives the right answer for manual and a coin toss for
+# everything else.
+sub type {
+	return $_[0]->{type};
+}
+
+# }}}
 # config - returns hash for .genesis/config ci.provider section (abstract) {{{
 sub config {
 	my ($self) = @_;
@@ -268,13 +277,18 @@ C<validate_config>. The three live together so that the check always has
 the declaration it is checking against, and so that one class answers for
 the whole of a provider.
 
-C<capabilities> answers with the six booleans
-L<Genesis::CI::Compiler::PipelineProvider> names, and every provider has to
-answer, including the ones Genesis cannot yet compile a pipeline for. A
+C<capabilities> answers with the six booleans D101 names, and every
+provider has to answer, including the ones Genesis cannot yet compile a
+pipeline for. A
 provider that can do none of them says so rather than staying silent,
 because a key gated on an ability nobody declared would otherwise be
 accepted and then dropped. The compiler-side class reads this declaration
 from here rather than keeping one of its own.
+
+Every provider carries the type it was registered under, and C<type> is
+what reads it. The constructor sets it, because the constructor is where
+the type is known: the only other place to read one from is C<config>,
+which answers a hash, and a hash has no order to index into.
 
 Validating that block is the provider's own job and not the framework's,
 and the base does it by validating the block against the keys that
@@ -312,7 +326,7 @@ Concrete subclasses: Concourse, GithubActions, Manual.
 
 =head1 SEE ALSO
 
-Genesis::Kit::Provider, Genesis::CI::Compiler
+Genesis::Kit::Provider, Genesis::CI::ProviderRegistry
 
 =cut
 

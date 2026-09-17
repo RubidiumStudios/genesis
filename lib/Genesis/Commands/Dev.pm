@@ -128,19 +128,15 @@ sub _source_data {
 sub _provider_output {
 	my ($ast, $platform) = @_;
 
-	require Genesis::CI::Compiler;
-	my $info = eval {Genesis::CI::Compiler->_resolve_provider_class($platform)};
-	bail(
-		"Unknown CI provider #C{%s}.  Valid types: %s",
-		$platform, join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers())
-	) if $@ || !$info;
-
-	eval {require $info->{file}} ## no critic
-		or bail("Failed to load CI provider '%s': %s", $platform, $@);
+	# The registry refuses both ways, naming a type it does not hold and
+	# telling a type it holds that nothing compiles for it, so there is no
+	# second refusal to write here.
+	require Genesis::CI::ProviderRegistry;
+	my $compiler_class = Genesis::CI::ProviderRegistry->compiler_class($platform);
 
 	# No 'top': a stored AST carries no repository, so providers that need
 	# repo state (the legacy Concourse bridge) are out of reach here.
-	my $output = $info->{class}->new(ast => $ast, provider_opts => {})
+	my $output = $compiler_class->new(ast => $ast, provider_opts => {})
 		->generate_from_ast($ast);
 
 	return ref($output) eq 'HASH' ? $output : {'pipeline.yml' => $output};

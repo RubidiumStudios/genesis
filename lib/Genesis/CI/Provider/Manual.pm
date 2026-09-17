@@ -17,7 +17,7 @@ sub init {
 # new - create a Manual provider {{{
 sub new {
 	my ($class, %config) = @_;
-	bless({ label => 'Manual' }, $class);
+	bless({label => 'Manual', type => $config{type} || 'manual'}, $class);
 }
 
 # }}}

@@ -98,9 +98,9 @@ sub compile {
 	# Stage 6: Load and run provider
 	# Stage 6 continued: generate platform-specific output
 	info("Generating %s pipeline...", $provider_type);
-	my $provider_info = $self->_resolve_provider_class($provider_type);
-	eval { require $provider_info->{file} } ## no critic
-		or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
+	require Genesis::CI::ProviderRegistry;
+	my $provider_class =
+		Genesis::CI::ProviderRegistry->compiler_class($provider_type);
 
 	# Extract provider options from parsed config (pipeline.provider: section)
 	# and merge with any caller-supplied opts.  Normalize caller opts from their
@@ -114,7 +114,7 @@ sub compile {
 		) },
 	};
 
-	my $provider = $provider_info->{class}->new(
+	my $provider = $provider_class->new(
 		ast           => $ast,
 		top           => $self->{top},
 		provider_opts => $provider_opts,
@@ -353,37 +353,6 @@ sub _report_unread_overrides {
 	}
 
 	return;
-}
-
-# }}}
-# _resolve_provider_class - the registry entry for a provider type {{{
-#
-# One registry under D28, so this is a lookup rather than a second map.
-# A type with no compiler class, which manual and github-actions both are
-# today, is not a compilable provider and says so.
-#
-# The refusal below is not a leftover of the checks that asked whether a
-# provider had a class at all.  Those asked whether there was anything to
-# validate, and every provider answers for its own block now, so they are
-# gone.  This asks whether Genesis can emit a pipeline for the provider,
-# which is a different question with an answer of its own, and a total map
-# of who validates a block says nothing about who can emit one.
-sub _resolve_provider_class {
-	my ($self, $type) = @_;
-
-	require Genesis::CI::Compiler::PipelineProvider;
-	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
-	bail(
-		"Unknown CI provider type '%s'. Valid types: %s", $type // '<undefined>',
-		join(', ', Genesis::CI::Compiler::PipelineProvider->known_providers())
-	) unless $info;
-
-	bail(
-		"Genesis knows the '%s' provider but has no compiler for it yet, so ".
-		"there is no pipeline to compile until that provider lands.", $type
-	) unless $info->{class};
-
-	return $info;
 }
 
 # }}}

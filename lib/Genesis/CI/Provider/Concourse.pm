@@ -9,9 +9,9 @@ use Genesis::UI;
 
 use POSIX qw(mktime);
 
-# The compiler-side class keeps a DEFAULT_TEAM of its own, which it falls
-# back to when it emits a pipeline, so the two are written here and in
-# Genesis::CI::Compiler::Providers::Concourse and have to agree.
+# The class that emits the pipeline keeps a DEFAULT_TEAM of its own, which
+# it falls back to when it compiles, so the constant is written in two
+# places and the two have to agree.
 use constant {
 	DEFAULT_TEAM => 'main',
 };
@@ -90,6 +90,7 @@ sub new {
 	$class = ref($class) || $class;
 	bless({
 		label           => 'Concourse',
+		type            => $config{type} || 'concourse',
 		target          => $config{target},
 		url             => $config{url},
 		team            => $config{team}            || DEFAULT_TEAM,

@@ -2241,10 +2241,10 @@ sub _refuse_v2_pipeline {
 sub _provider_module_map {
 	my ($self) = @_;
 
-	require Genesis::CI::Compiler::PipelineProvider;
+	require Genesis::CI::ProviderRegistry;
 	my %map;
-	for my $type (Genesis::CI::Compiler::PipelineProvider->known_providers) {
-		my $info = Genesis::CI::Compiler::PipelineProvider->provider_info($type);
+	for my $type (Genesis::CI::ProviderRegistry->known_providers) {
+		my $info = Genesis::CI::ProviderRegistry->provider_info($type);
 		$map{$type} = {class => $info->{cli_class}, module => $info->{cli_file}};
 	}
 	return \%map;
@@ -2602,9 +2602,9 @@ sub _validate_capability_gates {
 	# _validate_pipeline_config, which has already returned for a
 	# repository with no pipeline, so the accessor always has an answer.
 	require Genesis::CI::Compiler::PipelineProvider;
-	require Genesis::CI::Provider;
+	require Genesis::CI::ProviderRegistry;
 	my $type  = $self->pipeline_provider_type;
-	my $class = Genesis::CI::Provider->provider_class($type);
+	my $class = Genesis::CI::ProviderRegistry->provider_class($type);
 	my $caps  = Genesis::CI::Compiler::PipelineProvider
 		->declared_capabilities($class);
 	my $gates = Genesis::CI::Compiler::PipelineProvider->capability_gates;

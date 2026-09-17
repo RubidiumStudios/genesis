@@ -17,7 +17,7 @@ use Test::Exception;
 use Genesis;
 provide_rc();
 use_ok 'Genesis::Top';
-use_ok 'Genesis::CI::Compiler::PipelineProvider';
+use_ok 'Genesis::CI::ProviderRegistry';
 use_ok 'Genesis::CI::Provider';
 use_ok 'Genesis::CI::Compiler';
 
@@ -36,10 +36,96 @@ sub enabled_pipeline {
 		'  source_control:', '    repository: genesis/bosh-deployments');
 }
 
+subtest 'the registry is consulted by both families and owned by neither' => sub {
+	plan tests => 6;
+
+	# The three the registry answers for every caller, asserted on the
+	# module itself rather than through whatever happens to inherit it.
+	is_deeply [Genesis::CI::ProviderRegistry->known_providers],
+		[qw/concourse github-actions manual/],
+		'the registry holds the three types';
+	is Genesis::CI::ProviderRegistry->provider_info('concourse')->{cli_class},
+		'Genesis::CI::Provider::Concourse',
+		'an entry names the CLI class';
+	is_deeply [Genesis::CI::ProviderRegistry->automated_providers],
+		[qw/concourse github-actions/],
+		'and the automated list is every type but manual';
+
+	is Genesis::CI::ProviderRegistry->provider_class('concourse'),
+		'Genesis::CI::Provider::Concourse',
+		'resolving a provider class answers the CLI class';
+	is Genesis::CI::ProviderRegistry->compiler_class('concourse'),
+		'Genesis::CI::Concourse',
+		'resolving a compiler class answers the compiling class';
+
+	# The inversion D108 removes.  A %INC check would answer whatever the
+	# rows above it happened to load first, so the row reads the source
+	# instead, which no load order can defeat: the provider family names
+	# no compiler module anywhere, and neither does the registry both
+	# families consult.
+	my @naming;
+	for my $file ('lib/Genesis/CI/ProviderRegistry.pm',
+	              'lib/Genesis/CI/Provider.pm',
+	              glob('lib/Genesis/CI/Provider/*.pm')) {
+		open my $fh, '<', $file or die "cannot read $file: $!\n";
+		while (my $line = <$fh>) {
+			push @naming, "$file:$."
+				if $line =~ /Genesis::CI::(Compiler|ProviderCompiler)\b/;
+		}
+		close $fh;
+	}
+	is_deeply(\@naming, [],
+		'nothing in the provider family or the registry names a compiler module')
+		or diag(join("\n", map {"  $_"} @naming));
+};
+
+subtest 'the registry carries the refusal Genesis::CI kept' => sub {
+	plan tests => 3;
+
+	# b98d60f1 kept this refusal deliberately, because emitting a
+	# pipeline and validating a block are different questions and a
+	# provider may answer the second while having nothing to answer the
+	# first with.  It outlives the file it was written in.
+	throws_ok {Genesis::CI::ProviderRegistry->compiler_class('github-actions')}
+		qr/knows\s+the\s+'github-actions'\s+provider\s+but\s+has\s+no\s+compiler/s,
+		'a known type with no compiler class is told it has no compiler';
+
+	throws_ok {Genesis::CI::ProviderRegistry->compiler_class('jenkins')}
+		qr/Unknown\s+CI\s+provider\s+type\s+'jenkins'/s,
+		'a type the registry does not hold is named in the refusal';
+
+	# The list is built out of the registry rather than written out, so
+	# the row proves the refusal carries the types the registry holds
+	# and no others, wherever a type another row registers happens to
+	# sort.  The separator tolerates a wrap, because the refusal is
+	# wrapped to the terminal width before anything reads it.
+	my $types = join(',\s+', map {quotemeta}
+		Genesis::CI::ProviderRegistry->known_providers);
+	throws_ok {Genesis::CI::ProviderRegistry->compiler_class('jenkins')}
+		qr/Valid\s+types:\s+$types(?!,)/s,
+		'and the refusal carries every type the registry holds';
+};
+
+subtest 'a provider carries the type it was registered under' => sub {
+	plan tests => 3;
+
+	# config answers a hash, and Perl randomises a hash's order once per
+	# process, so a type read by indexing into that list is right for
+	# manual, whose hash holds one pair, and a coin toss for anything
+	# else.  The type is set where it is known, which is the constructor
+	# the registry resolves for.
+	is Genesis::CI::Provider->new(type => 'concourse', target => 'ci')->type,
+		'concourse', 'a Concourse provider knows it is concourse';
+	is Genesis::CI::Provider->new(type => 'manual')->type,
+		'manual', 'and a manual one knows it is manual';
+	is Genesis::CI::Provider->new()->type,
+		'manual', 'and the default carries the type it defaulted to';
+};
+
 subtest 'the two spellings cannot drift' => sub {
 	plan tests => 6;
 
-	my @known = Genesis::CI::Compiler::PipelineProvider->known_providers;
+	my @known = Genesis::CI::ProviderRegistry->known_providers;
 	is_deeply [@known], [qw/concourse github-actions manual/],
 		'the registry holds the three types';
 
@@ -72,7 +158,7 @@ subtest 'the two spellings cannot drift' => sub {
 	# nothing takes an entry out of it again, so every row below this one
 	# reads the registry for what it expects rather than naming the three
 	# types the process started with.
-	Genesis::CI::Compiler::PipelineProvider->register_provider('zeppelin',
+	Genesis::CI::ProviderRegistry->register_provider('zeppelin',
 		{cli_class => 'Genesis::CI::Provider::Manual',
 		 cli_file  => 'Genesis/CI/Provider/Manual.pm'});
 
@@ -81,14 +167,14 @@ subtest 'the two spellings cannot drift' => sub {
 	ok scalar(grep {$_ eq 'zeppelin'} @$after),
 		'a type registered here is in the map the next load built';
 	is_deeply $after,
-		[Genesis::CI::Compiler::PipelineProvider->known_providers],
+		[Genesis::CI::ProviderRegistry->known_providers],
 		'and the map is still the whole registry and nothing else';
 };
 
 subtest 'one resolver answers for every caller' => sub {
 	plan tests => 6;
 
-	my $info = Genesis::CI::Compiler::PipelineProvider->provider_info('concourse');
+	my $info = Genesis::CI::ProviderRegistry->provider_info('concourse');
 	is $info->{class}, 'Genesis::CI::Concourse',
 		'the compiler class comes from the registry';
 	is $info->{cli_class}, 'Genesis::CI::Provider::Concourse',
@@ -101,14 +187,14 @@ subtest 'one resolver answers for every caller' => sub {
 	# The compiler's class resolution has two refusals rather than one, so a
 	# type the registry holds is never reported as one it does not.
 	throws_ok {
-		Genesis::CI::Compiler->_resolve_provider_class('github-actions')
+		Genesis::CI::ProviderRegistry->compiler_class('github-actions')
 	} qr/knows\s+the\s+'github-actions'\s+provider\s+but\s+has\s+no\s+compiler/s,
 		'a known type with no compiler class is told it has no compiler';
 
 	# The list alone would be satisfied by a refusal that lost the type on
 	# its way out, so the row reads the type it asked about as well.
 	throws_ok {
-		Genesis::CI::Compiler->_resolve_provider_class('jenkins')
+		Genesis::CI::ProviderRegistry->compiler_class('jenkins')
 	} qr/Unknown\s+CI\s+provider\s+type\s+'jenkins'/s,
 		'a type the registry does not hold is named in the refusal';
 	# The list is built out of the registry rather than written out, so the
@@ -118,9 +204,9 @@ subtest 'one resolver answers for every caller' => sub {
 	# to the terminal width before anything reads it, and the lookahead
 	# rejects a list that runs on past the one the registry answers.
 	my $types = join(',\s+', map {quotemeta}
-		Genesis::CI::Compiler::PipelineProvider->known_providers);
+		Genesis::CI::ProviderRegistry->known_providers);
 	throws_ok {
-		Genesis::CI::Compiler->_resolve_provider_class('jenkins')
+		Genesis::CI::ProviderRegistry->compiler_class('jenkins')
 	} qr/Valid\s+types:\s+$types(?!,)/s,
 		'and the refusal carries every type the registry holds and no others';
 };
@@ -145,12 +231,12 @@ subtest 'the registry refuses a bad entry rather than taking it' => sub {
 	# Read before the two refusals rather than written out, because the row
 	# below is about what a refusal leaves behind and not about which types
 	# happen to be registered by the time it runs.
-	my @before = Genesis::CI::Compiler::PipelineProvider->known_providers;
+	my @before = Genesis::CI::ProviderRegistry->known_providers;
 
 	# Without a name the entry would land under the empty string, where
 	# nothing could ever look it up again.
 	throws_ok {
-		Genesis::CI::Compiler::PipelineProvider->register_provider(undef, {
+		Genesis::CI::ProviderRegistry->register_provider(undef, {
 			cli_class => 'Genesis::CI::Provider::Manual',
 			cli_file  => 'Genesis/CI/Provider/Manual.pm',
 		})
@@ -162,7 +248,7 @@ subtest 'the registry refuses a bad entry rather than taking it' => sub {
 	# saying one thing and the class lookup doing another, which is exactly
 	# the drift the one registry exists to prevent.
 	throws_ok {
-		Genesis::CI::Compiler::PipelineProvider->register_provider('concourse', {
+		Genesis::CI::ProviderRegistry->register_provider('concourse', {
 			cli_class => 'Genesis::CI::Provider::Manual',
 			cli_file  => 'Genesis/CI/Provider/Manual.pm',
 		})
@@ -173,14 +259,14 @@ subtest 'the registry refuses a bad entry rather than taking it' => sub {
 	# nothing and behaves like manual instead of saying it is broken.  The
 	# compiler-side class is a different matter: manual has none by design.
 	throws_ok {
-		Genesis::CI::Compiler::PipelineProvider->register_provider('nocli', {
+		Genesis::CI::ProviderRegistry->register_provider('nocli', {
 			class => 'Genesis::CI::Compiler::Providers::NoCli',
 			file  => 'Genesis/CI/Compiler/Providers/NoCli.pm',
 		})
 	} qr/must\s+be\s+registered\s+with\s+a\s+cli_class/s,
 		'an entry with no CLI class is refused';
 
-	is_deeply [Genesis::CI::Compiler::PipelineProvider->known_providers],
+	is_deeply [Genesis::CI::ProviderRegistry->known_providers],
 		[@before],
 		'and neither refusal left anything behind in the registry';
 };

@@ -308,11 +308,17 @@ B<Errors:>
 
 =over 4
 
-=item C<"Unknown CI provider %s.  Valid types: %s">
+=item C<"Unknown CI provider type '%s'. Valid types: %s">
 
-Bails when the platform name does not resolve to a provider class.  The
-valid list comes from C<< PipelineProvider->known_providers >>, so it
-stays correct as providers are added.
+Bails when the platform name is not a type the registry holds.  The valid
+list comes from C<< Genesis::CI::ProviderRegistry->known_providers >>, so
+it stays correct as providers are added.
+
+=item C<"Genesis knows the '%s' provider but has no compiler for it yet...">
+
+Bails when the registry holds the type but names no class that compiles
+for it, which is the case for C<manual> and, until its emitter lands, for
+C<github-actions>.
 
 =item C<"Failed to load CI provider '%s': %s">
 
@@ -350,14 +356,6 @@ output depends on C<ci.provider.*> settings, or on C<--ci-*> CLI flags,
 will render with provider defaults rather than the repository's
 configuration.  Provider-option plumbing is deferred until an emitter
 change actually needs it.
-
-=item Reaches into a private resolver
-
-C<_provider_output> calls
-C<< Genesis::CI::Compiler->_resolve_provider_class >>, which is private by
-convention.  It is used rather than a local provider-name table so that
-the set of valid providers has exactly one definition; the coupling should
-be revisited if that resolver is ever promoted to a public API.
 
 =item No C<parsed> stage
 
