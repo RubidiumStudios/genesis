@@ -176,11 +176,18 @@ sub provider_config {
 
 # }}}
 # provider_option - get a single provider option, applying defaults {{{
+#
+# The stored value wins where there is one, and definedness is what says
+# so.  A key an operator wrote with no value after it is the operator
+# declining to choose rather than choosing nothing, so a bare "team:"
+# still resolves to what the fragment declares.  Read on presence
+# instead, the key was there and the value was undef, and the default
+# below was never reached.
 sub provider_option {
 	my ($self, $key) = @_;
 	my $opts     = $self->{provider_opts} || {};
 	my $defaults = $self->provider_options_defaults();
-	return exists $opts->{$key}     ? $opts->{$key}
+	return defined $opts->{$key}    ? $opts->{$key}
 	     : exists $defaults->{$key} ? $defaults->{$key}
 	     : undef;
 }

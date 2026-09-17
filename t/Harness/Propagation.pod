@@ -1310,7 +1310,9 @@ it answers the bare name, so a caller testing for presence tests with C<-x>.
 =head2 fixture_fly($h, %opts)
 
 Puts a C<fly> of a chosen version first on the path for every run the harness
-spawns afterwards, and answers the path it wrote it to.  The Concourse
+spawns afterwards, and answers the path it wrote it to.  A row that calls the
+library in this process rather than spawning a run puts the directory that
+path sits in first on its own path for the length of the call.  The Concourse
 provider asks the shell whether C<fly> is there and then asks C<fly> for its
 version, so a row that drives the declared floor needs a C<fly> that answers
 the version the row chose.  The shim answers every other call rather than
@@ -1325,7 +1327,9 @@ shim and drops every directory on the path that holds a real C<fly>, because
 an operator with C<fly> installed would otherwise have a row about not having
 one answered by their own binary.  The path goes back the way every other
 fixture variable does, when the next harness is built and again when the file
-ends.
+ends.  This arm answers nothing, because there is no C<fly> to name and a
+caller that put the answer on its own path would put the file this took away
+back within reach.
 
 =head2 skip_on($git, $step, $n, %opts)
 

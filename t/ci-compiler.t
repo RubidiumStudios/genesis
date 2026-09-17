@@ -2355,6 +2355,16 @@ subtest 'Concourse - provider_option prefers stored opts over defaults' => sub {
 		"stored team overrides default";
 };
 
+subtest 'Concourse - provider_option takes the default for a null value' => sub {
+	# A key written with no value is the operator declining to choose
+	# rather than choosing nothing, so the fragment's default still
+	# answers.  Reading on presence rather than on definedness made a
+	# bare "team:" resolve to nothing at all.
+	my $provider = concourse_compiler(provider_opts => {team => undef});
+	is $provider->provider_option('team'), 'main',
+		"a null team resolves to the fragment's default";
+};
+
 subtest 'Concourse - describe_provider returns structured hash' => sub {
 	my $provider = concourse_compiler(
 		provider_opts => {

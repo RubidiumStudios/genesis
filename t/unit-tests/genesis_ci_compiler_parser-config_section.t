@@ -81,6 +81,22 @@ subtest 'a pipeline section is the one the parser reads' => sub {
 		'and the pipeline is named after the deployment type');
 };
 
+subtest 'a pipeline that names itself keeps the name it wrote' => sub {
+	plan tests => 1;
+
+	# The row above answers for a section that names no pipeline of its
+	# own.  A section that does name one keeps that name, which is the
+	# half of the rule a fallback row alone cannot tell apart: both
+	# would pass against a parse that read the key and against one that
+	# ignored it, whenever the name and the deployment type agree.
+	my $top = MockTop->new(config => MockConfig->new(
+		pipeline => {%$SECTION, name => 'west-deployments'}));
+
+	my $parsed = Genesis::CI::Compiler::Parser->new(top => $top)->parse;
+	is($parsed->{pipeline}{metadata}{name}, 'west-deployments',
+		'the name the section wrote is the name the AST carries');
+};
+
 subtest 'a section still spelled ci is not read' => sub {
 	plan tests => 3;
 
