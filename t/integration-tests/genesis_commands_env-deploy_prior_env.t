@@ -72,13 +72,19 @@ subtest 'the predecessor is named by a site file, and read before the load' => s
 	unlike(unfolded($err), qr/director/i,
 		'and it refused before the environment was loaded or a director dialled');
 
-	# The other half of T226, asserted rather than left to follow from the
-	# row above.  It is a guard: the read is made through Genesis::Env->bare,
-	# which loads no kit, so nothing said here can name one and the row is
-	# green on arrival.  What it catches is the read moved onto a loaded
-	# environment in a repository whose kit cannot be resolved, where Genesis
-	# answers in its own words about a dev kit and the operator hears about
-	# the kit rather than about the predecessor they deployed out of order.
+	# The other half of T226, written down rather than left to follow from
+	# the row above.  It states a contract this fixture cannot falsify, and
+	# that is worth saying plainly: the read is made through
+	# Genesis::Env->bare, which loads no kit, and this subtest installs a kit
+	# that resolves, so a read moved onto a loaded environment here would
+	# answer about the director it cannot reach and never about a dev kit.
+	# No wrong implementation of this task turns this row red.
+	#
+	# The row that would prove it instead takes fixture_kit away and asserts
+	# the absence of "dev kit" against a kit that cannot resolve.  That trade
+	# weakens the sibling row about the director, which would then pass for a
+	# read made either side of the load, so the contract is stated here and
+	# proved nowhere.
 	unlike(unfolded($err), qr/dev kit/i,
 		'and no kit stood behind the read that found it');
 };

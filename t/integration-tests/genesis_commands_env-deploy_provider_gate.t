@@ -54,6 +54,15 @@ subtest 'an automated provider refuses without --force' => sub {
 	like($said, qr/pipeline/, 'it names the pipeline that owns the deploy');
 	like($said, qr/locks?\b/, 'and the locks a CLI deploy cannot take');
 
+	# An absence guard, green on arrival, and stated as one.  No wrong
+	# implementation of this task makes it red: this fixture stands up no
+	# director, so a deploy with no gate at all dies at the environment load
+	# well before anything is written, and a deploy that reaches its end
+	# writes no git either, which is the general fact
+	# genesis_commands_env-deploy_no_git_write.t owns.  What it catches is a
+	# later step that gives the deploy a commit or a push of its own, landing
+	# on a path a refusal must never reach.
+	#
 	# The switch is not among these.  The branch class stands the tree on
 	# <env>/<type> before the command runs at all and puts it back after, so
 	# a checkout here says nothing about the gate.  What the refusal has to
@@ -117,12 +126,28 @@ subtest 'the locks the gate stands for are taken nowhere' => sub {
 	# a CLI deploy run beside a pipeline job while each believed it held
 	# something.  The gate exists because there is no lock to take, so the
 	# absence is the claim.
-	plan tests => 2;
+	plan tests => 3;
 
-	ok(!-e 'lib/Service/Locker.pm',
+	# Every path here is named from the checkout root rather than from the
+	# current directory.  The harness chdirs in several places, and a
+	# relative read taken from the wrong directory finds no file, which
+	# would make both halves of this pass having read nothing at all.
+	my $root = $helper::TOPDIR;
+	ok(!-e "$root/lib/Service/Locker.pm",
 		'no locker client exists under lib/Service/');
-	my $read = join('', map {helper::get_file($_) // ''}
-		grep {-e $_} qw(lib/Genesis/Commands/Env.pm lib/Genesis/Env.pm));
+
+	# The deploy's own path, which is the command, the environment, and the
+	# pre-flight gates the command now asks through.  The legacy v2 emitter
+	# does name pipeline.locker and is deliberately not in this list: it is
+	# not on the deploy's path and it is not what this row is about.
+	my @path = map {"$root/$_"} qw(
+		lib/Genesis/Commands/Env.pm
+		lib/Genesis/Env.pm
+		lib/Genesis/CI/Preflight.pm
+	);
+	my $read = join('', map {helper::get_file($_) // ''} grep {-e $_} @path);
+	is(scalar(grep {-e $_} @path), scalar(@path),
+		'the deploy path was found where this reads for it');
 	unlike($read, qr/pipeline\.locker/,
 		'and nothing on the deploy path reads pipeline.locker');
 };

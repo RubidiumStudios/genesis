@@ -1480,11 +1480,19 @@ sub _task_config {
 	}
 
 	my %params = (
-		# Two live consumers, both of which the pipeline needs: Service::BOSH
-		# preserves HTTPS_PROXY only when it is set (a proxied network cannot
-		# reach its director otherwise), and deploy reads it to tell a CI run
-		# from an operator at a terminal.
+		# One live consumer, and the pipeline needs it: Service::BOSH
+		# preserves HTTPS_PROXY only when it is set, and a proxied network
+		# cannot reach its director otherwise.  The deploy used to read it
+		# as well, to tell a CI run from an operator at a terminal, and that
+		# read is gone; the variable below is how a job says so now.
 		GENESIS_HONOR_ENV => 1,
+		# This command is the pipeline running, not an operator at a
+		# terminal.  Every pre-flight gate a job has to pass reads it: the
+		# provider gate lets the job deploy what it refuses at a terminal,
+		# and the disowned-pipeline refusal tells a job from an operator
+		# mid-teardown.  Nothing else in the product sets it, so a compiled
+		# job whose task environment lacks it meets its own pipeline's gate.
+		GENESIS_PIPELINE_TASK => 1,
 		CI_NO_REDACT     => $config->{unredacted} || 0,
 		CURRENT_ENV      => $env,
 		GIT_BRANCH       => $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main',

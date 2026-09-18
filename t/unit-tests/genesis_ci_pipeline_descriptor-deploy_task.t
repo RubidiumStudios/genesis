@@ -179,14 +179,35 @@ subtest 'GENESIS_HONOR_ENV survives the shim retirement' => sub {
 
 	# It reads as a shim-era var but is not one.  Service::BOSH strips
 	# HTTPS_PROXY/https_proxy from the environment unless it is set, which
-	# would cut a proxied network's pipeline off from its director; and
-	# Genesis::Commands::Env treats its absence as "an operator ran this at
-	# a terminal", warning on every pipeline deploy without it.
+	# would cut a proxied network's pipeline off from its director.  It had
+	# a second consumer, the deploy telling a CI run from an operator at a
+	# terminal, and that read is gone: the job says what it is through
+	# GENESIS_PIPELINE_TASK, which the subtest below reads.
 	my $params = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh")
 		->{config}{params};
 
 	ok $params->{GENESIS_HONOR_ENV},
 		'GENESIS_HONOR_ENV is still passed to the deploy task';
+};
+
+subtest 'the task says it is the pipeline running, not an operator' => sub {
+	plan tests => 1;
+
+	# Every pre-flight gate a pipeline's own job has to pass reads
+	# GENESIS_PIPELINE_TASK: the provider gate lets the job deploy what it
+	# refuses at a terminal, and the disowned-pipeline refusal tells a job
+	# from an operator mid-teardown.  Nothing else in the product sets it,
+	# so without it here every deploy job of a compiled pipeline refuses at
+	# NOPERM, telling the pipeline that the pipeline owns the deploy.
+	#
+	# It is set in the task configuration every genesis task shares, so the
+	# notification job's show-changes task carries it as well.  This AST
+	# emits no such job, which is why only the deploy task is read.
+	my $params = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh")
+		->{config}{params};
+
+	ok $params->{GENESIS_PIPELINE_TASK},
+		'GENESIS_PIPELINE_TASK is passed to the deploy task';
 };
 
 # =========================================================================
