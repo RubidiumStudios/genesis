@@ -84,7 +84,7 @@ genesis pipeline-hold "freezing the fleet for the audit"
 
 The reason is required. With an environment named it holds that one, and without one it holds every environment in the deployment root. While the hold stands, `genesis propagate` delivers nothing new to the environment and opens or updates no pull request, and everything already on the deployment branch stays deployable. The run's report and `genesis pipeline-status` both show `held, needs clearing` with the reason, whether or not anything is due.
 
-A control commit can set the same hold for itself with a `Genesis-Stage: hold: <reason>` trailer, and the run writes the record when it delivers that commit, so the deploy of it finds the hold already standing.
+A control commit can set the same hold for itself with a `Genesis-Stage: hold: <reason>` trailer, and the run writes the record when it delivers that commit, so the deploy of it finds the hold already standing. A commit whose gate the control branch has since released is delivered as an ordinary commit and sets no hold, because the reason travels with the gate and a released gate carries none.
 
 ## genesis pipeline-release
 
@@ -96,10 +96,6 @@ genesis pipeline-release
 ```
 
 Releasing is a human act. No deploy clears a hold, and no flag does either. The record is deleted outright and no released-by fields are kept, so the release lives in the command's log line.
-
-## What landed after the MVP
-
-These two commands are the first entries on this list, and they arrived after the MVP rather than with it. The MVP shipped the propagation hold's record path, the outcome words that carry a hold's qualifier, and the readers that report one, and it shipped no way to set or clear a hold by hand. Nothing above the commands was rebuilt when they arrived.
 
 ## genesis graph (deprecated)
 
@@ -162,6 +158,10 @@ Ran inside a Concourse task after a successful deployment to generate a cache of
 ### genesis ci-pipeline-run-errand
 
 Ran inside a Concourse task to execute a BOSH errand after deployment. The errand name came from the `ERRAND_NAME` environment variable.
+
+## What landed after the MVP
+
+These two commands are the first entries on this list, and they arrived after the MVP rather than with it. The MVP shipped the propagation hold's record path, the outcome words that carry a hold's qualifier, and the readers that report one, and it shipped no way to set or clear a hold by hand. Nothing above the commands was rebuilt when they arrived.
 
 ## Code Path Summary
 

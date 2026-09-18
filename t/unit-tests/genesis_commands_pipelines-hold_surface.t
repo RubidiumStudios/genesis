@@ -51,7 +51,13 @@ subtest 'both commands take the pipeline group refusal' => sub {
 		my $h = make_harness(envs => ['prod'], pipeline => 0);
 		fixture_applied($h, control => $h->git('a')->sha($h->control));
 
-		my ($out, $err, $exit) = run_genesis($h, 'prod', $command, 'a reason');
+		# The hold requires a reason and the release takes none, so each
+		# command is run with the arguments it takes.  Handing the release a
+		# reason would leave the row resting on the refusal coming before
+		# the argument shape is read, which is not what its name claims.
+		my @reason = $command eq 'pipeline-hold' ? ('a reason') : ();
+
+		my ($out, $err, $exit) = run_genesis($h, 'prod', $command, @reason);
 		is($exit, Genesis::Exit::CONFIG, "$command exits CONFIG on a disowned pipeline");
 		like(unfolded($out, $err), qr/pipeline\.enabled/,
 			"$command names the key the refusal turns on");
@@ -84,6 +90,12 @@ subtest 'the points the earlier steps left reachable resolve' => sub {
 	# and that sentence is evidence for this row rather than against it.
 	# What the row refuses is the phrase in code, which is the shape a
 	# second renderer would take.
+	#
+	# So the row refuses the phrase in code outside comment-shaped lines
+	# rather than in code full stop.  A line of a here-document or a quoted
+	# block beginning with a hash is invisible to it, and nothing in the
+	# file takes that shape today.  Stripping every hash instead would cut
+	# into the colour markup, which is written as #C{...} inside strings.
 	my $pipelines = get_file('lib/Genesis/Commands/Pipelines.pm');
 	$pipelines =~ s/^\s*#.*$//mg;
 	unlike($pipelines, qr/needs clearing/,
