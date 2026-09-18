@@ -437,9 +437,10 @@ is reported at all.
 The header names the control commit the pipeline was applied from.  Where the
 pipeline-defining paths have changed since, it says so, names each changed
 environment with the reason the staleness query gave for it, and names
-C<genesis pipeline-apply> as the command that fixes it.  Each environment's
-row carries the discovery mark the apply wrote for it, which is null for an
-environment the applied pipeline does not know.
+C<genesis pipeline-apply> as the command that fixes it.  The record carries
+each environment's discovery mark, the one the apply wrote for it, which is
+null for an environment the applied pipeline does not know.  It reaches
+C<--json> alone; no line of the tree prints it.
 
 The command moves no branch and writes nothing to vault.  It asks the
 pre-flight for its branch records read-only, so a branch a run would have
@@ -473,9 +474,18 @@ Read the refs as they stand, without fetching first.
 
 =back
 
-B<Returns:> Exits 0 after printing, or C<CONFIG> where the configuration
-disowns a live pipeline.  See L<Genesis::CI::Status> for the record's shape
-and its two renderings.
+There is one state the report cannot describe, and it ends the command rather
+than appearing in it.  The staleness query diffs the applied commit against
+control, and a clone that does not hold the applied commit cannot be asked for
+that diff, so the command exits at C<DATAERR> naming the commit to fetch.  A
+force-pushed control and an applied commit this clone never fetched both reach
+it that way.
+
+B<Returns:> Exits 0 after printing, C<CONFIG> where the configuration disowns
+a live pipeline, C<UNAVAILABLE> where vault cannot be reached, or C<DATAERR>
+where this clone does not hold the applied commit the staleness query has to
+diff against.  See L<Genesis::CI::Status> for the record's shape and its two
+renderings.
 
 B<Examples:>
 
