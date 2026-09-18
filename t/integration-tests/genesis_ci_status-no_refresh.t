@@ -271,4 +271,36 @@ subtest 'the breach report rests on refs nobody refreshed' => sub {
 		'and the reading is marked as one no refresh stands behind');
 };
 
+subtest 'an environment with no branch rests on refs nobody refreshed' => sub {
+	# Three assertions and one restoration for each of the two commands.
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['lab'], kit => 'omega-v2.7.0',
+		tracked => ['ops/shared.yml']);
+	fixture_vault($h);
+	# No branch is cut for lab, on either side, which is the repository
+	# genesis pipeline-apply has not reached.  Unrefreshed, that reading
+	# cannot be told from a clone that has simply never fetched a branch a
+	# teammate applied an hour ago, so the wait is marked rather than said
+	# flat, and an operator sent to pipeline-apply on a stale report would
+	# be sent to a command that changes nothing.
+	my $c = commit_on_control($h,
+		files => {'ops/shared.yml' => "---\none\n"}, push => 1);
+	fixture_applied($h, control => $c);
+	fixture_pipeline_record($h, 'lab');
+	refresh($h, 'a');
+
+	my ($tree) = run_genesis($h, 'pipeline-status', '--no-refresh');
+	like(env_line($tree, 'lab'),
+		qr/held, awaiting pipeline-apply \[unverifiable\]/,
+		'the wait carries the word the stale form marks it with');
+
+	my ($json) = run_genesis($h, 'pipeline-status', '--no-refresh', '--json');
+	my $row = decode_json($json || '{}')->{environments}[0];
+	is($row->{certified}{state}, 'no-branch',
+		'the state itself stands, so the wait is still worded by one sub');
+	ok($row->{certified}{unverifiable},
+		'and the record carries the mark the tree read it off');
+};
+
 done_testing;

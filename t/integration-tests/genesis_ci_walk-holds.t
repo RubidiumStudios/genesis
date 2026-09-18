@@ -164,6 +164,61 @@ subtest 'an ancestor with no control_commit in its record holds too' => sub {
 		'lab was delivered nothing in its place');
 };
 
+subtest 'an environment with no branch anywhere waits for the apply' => sub {
+	# Two assertions and one restoration for each of the two runs.
+	plan tests => 6;
+
+	# The branch goes from R, from copy A's own refs, and from the
+	# remote-tracking ref that would put it back, which leaves the
+	# repository as genesis pipeline-apply has not reached it: nothing cut a
+	# branch for lab, so there is no ref to read a marker off and nothing to
+	# deliver onto.
+	my $unbranch = sub {
+		my ($h) = @_;
+		my $branch = $h->slug('lab');
+		delete_on_r($h, $branch);
+		delete_local($h, 'a', $branch);
+		run({dir => $h->a, onfailure => "Failed to drop the tracking ref"},
+			'git', 'update-ref', '-d', "refs/remotes/origin/$branch");
+		return $branch;
+	};
+
+	my $h = chained_harness(envs => ['lab']);
+	$unbranch->($h);
+	commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nshared: 9\n"},
+		message => 'Bump shared ops',
+		push    => 1,
+	);
+
+	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	like($err, qr/held, awaiting pipeline-apply/,
+		'the run says the environment waits for the apply that cuts it');
+	unlike($err, qr/\blab: (?:delivered|would deliver)\b/,
+		'and nothing was delivered to an environment with no branch');
+
+	# D56 ranks a standing hold ahead of the apply, and an environment can
+	# be in both states at once, so the row that reads the branch has to
+	# read the hold first.  The run would otherwise send an operator to a
+	# command that changes nothing while the hold still stands.
+	my $held = chained_harness(envs => ['lab']);
+	$unbranch->($held);
+	fixture_hold($held, 'lab', reason => 'vsphere maintenance');
+	commit_on_control($held,
+		files   => {'ops/shared.yml' => "---\nshared: 9\n"},
+		message => 'Bump shared ops',
+		push    => 1,
+	);
+
+	my (undef, $held_err) = run_genesis($held, {answers => ['y']}, 'propagate');
+
+	like($held_err, qr/held, needs clearing \(vsphere maintenance\)/,
+		'a hold standing against it outranks the apply');
+	unlike($held_err, qr/awaiting pipeline-apply/,
+		'and the apply is not offered while the hold stands');
+};
+
 subtest 'a certified commit the repository lacks stops the run' => sub {
 	plan tests => 4;
 

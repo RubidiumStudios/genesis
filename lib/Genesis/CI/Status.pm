@@ -155,22 +155,15 @@ sub status_records {
 	# so the snapshot the drift is measured against is the snapshot every
 	# other column of the row was read from.
 	for my $row (@{$record->{environments}}) {
-		next if $row->{error};
-		my $settled = $initial->{branches}{$row->{env}};
+		# Every row carries the seed annotation, false where the row is not
+		# a pending one and false where there was no branch to count it
+		# over, so --json emits one shape for the field whatever the row
+		# reads and no consumer meets the key missing.  It is set before the
+		# two exits below for that reason.
+		$row->{seeded} = JSON::PP::false;
 
-		# D43: an environment with no deployment branch on either side is
-		# one genesis pipeline-apply has not cut a branch for, and what it
-		# waits for is that command.  The walk leaves the row bare, because
-		# there is nothing to route a commit onto and no ref to read a
-		# marker off, so the reading is put here, where the record is
-		# filled, and it is put under the certification cell rather than
-		# worded beside it, because that is where Genesis::CI::Report looks
-		# for it and the run and this command then say the wait in one
-		# wording.
-		unless ($settled) {
-			$row->{certified} = {state => 'never-applied'};
-			next;
-		}
+		next if $row->{error};
+		my $settled = $initial->{branches}{$row->{env}} or next;
 
 		# The ref the walk routed this environment from, which under this
 		# command is the ref a real run would have moved the branch to
@@ -183,9 +176,10 @@ sub status_records {
 
 		# D91 keeps seeded an annotation on the pending reading rather than
 		# a fifth reading of its own, so only a pending row is asked and
-		# every other row costs nothing.  It is written as the encoder's own
-		# boolean, as the walk's manual marker is, so --json emits one shape
-		# for the field whatever the row reads.
+		# every other row costs nothing, which is a whole git process and a
+		# list of fifty commits.  It is written as the encoder's own boolean,
+		# as the walk's manual marker is, so --json emits one shape for the
+		# field whatever the row reads.
 		$row->{seeded} = (($row->{reading} // '') eq 'pending-deploy'
 			&& _seeded($git, $ref)) ? JSON::PP::true : JSON::PP::false;
 	}
@@ -225,6 +219,18 @@ sub _mark_unverifiable {
 		# reading was withheld where none was ever taken.
 		next if $row->{error};
 		$row->{divergence}{state} = UNVERIFIABLE;
+
+		# The branchless reading rests on the same refs the divergence cell
+		# does, because it is the absence of a branch record and nothing
+		# else, and unrefreshed it cannot tell an environment nobody has
+		# applied from one a teammate applied an hour ago.  It is marked
+		# rather than withheld, because the wait is still the likelier
+		# reading of the two and an operator who cannot tell them apart has
+		# to be told which one they are holding.  The state is left standing
+		# so that the wait is still worded by the one sub that owns it.
+		$row->{certified}{unverifiable} = JSON::PP::true
+			if ($row->{certified} || {})->{state} &&
+			   $row->{certified}{state} eq 'no-branch';
 	}
 	return $record;
 }
@@ -286,9 +292,12 @@ sub unfetchable_markers {
 #
 # D61 makes the seed the branch's first delivery, and nothing about the
 # reading tells it apart from the tenth, so the annotation is answered off the
-# branch's own history, which carries one marked commit and no more.  The walk
-# stops as soon as it has seen a second marked commit, so a long branch costs
-# no more than a short one.
+# branch's own history, which carries one marked commit and no more.
+#
+# What bounds the cost is the fifty-commit limit, since log_subjects runs git
+# and builds the whole list before the loop begins.  Returning at the second
+# marked commit saves the iteration below it and no git work at all, and it is
+# there so that the answer is decided at the first commit that decides it.
 #
 # Genesis::CI::Marker owns the marker's vocabulary here as it does in
 # _newest_unmarked, so nothing spells the prefix a second time.
@@ -541,7 +550,14 @@ sub compose_phrase {
 	# person set or the topology imposed and nothing moves until it is
 	# cleared.
 	if (my $qualifier = held_qualifier($row)) {
-		push @phrase, [on_ice => sprintf('held, %s', $qualifier)];
+		# The word rides in brackets after the wait it qualifies, as the
+		# routing summary's does, and the component keeps its own class,
+		# because a component marked wrong would leave worst_class answering
+		# wrong for the whole row.  What is marked is the certification cell,
+		# which the stale form marks where the wait rests on a refresh.
+		push @phrase, [on_ice => sprintf('held, %s%s', $qualifier,
+			($row->{certified} || {})->{unverifiable}
+				? sprintf(' [%s]', UNVERIFIABLE) : '')];
 		# Why this one commit is held, which is a different question from
 		# what the environment waits for, and the answer carries the
 		# ancestor's own state so an operator is not left to infer it from

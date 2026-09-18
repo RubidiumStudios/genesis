@@ -183,9 +183,15 @@ sub held_qualifier {
 		$record->{hold}{reason} // 'no reason given')
 		if $record->{hold};
 
+	# D43's wait, in one wording for the two states that share it.  An
+	# environment whose record carries no certified commit waits for the
+	# apply to write one, and an environment with no deployment branch on
+	# either side waits for the apply to cut it.  Both are answered here so
+	# that the run and genesis pipeline-status cannot word the wait apart.
 	my $certified = $record->{certified} // {};
+	my $state     = $certified->{state} // '';
 	return AWAITING_APPLY
-		if ($certified->{state} // '') eq 'never-applied';
+		if $state eq 'never-applied' || $state eq 'no-branch';
 
 	my ($first) = @{$record->{held} || []};
 	return undef unless $first;

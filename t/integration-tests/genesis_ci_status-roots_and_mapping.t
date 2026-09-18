@@ -101,7 +101,7 @@ subtest 'every line of the mapping table has its reading' => sub {
 			my ($h) = @_;
 			commit_on_control($h, files => {'ops/shared.yml' => "---\none\n"}, push => 1);
 		 }, reading => 'not-propagated', routing => qr/awaiting pipeline-apply/,
-		    divergence => undef},
+		    divergence => undef, certified => 'no-branch'},
 
 		{name => 'the init commit alone', build => sub {
 			my ($h) = @_;
@@ -145,7 +145,7 @@ subtest 'every line of the mapping table has its reading' => sub {
 			fixture_applied($h, control => $c2);
 			fixture_pipeline_record($h, 'env');
 		 }, reading => 'pending-deploy', routing => qr/awaiting deployment/,
-		    divergence => 'in-sync'},
+		    divergence => 'in-sync', seeded => 0},
 
 		{name => 'the seed, annotated on pending', build => sub {
 			my ($h) = @_;
@@ -161,12 +161,16 @@ subtest 'every line of the mapping table has its reading' => sub {
 			deliver($h, 'env', copy => 'a', control => $c1);
 			fixture_applied($h, control => $c1);
 			fixture_pipeline_record($h, 'env');
-		 }, reading => 'pending-deploy', routing => qr/seeded/, divergence => 'in-sync'},
+		 }, reading => 'pending-deploy', routing => qr/seeded/,
+		    divergence => 'in-sync', seeded => 1},
 	);
 
-	# Three assertions per line, and one restoration for each of the two
-	# commands each line runs.
-	plan tests => scalar(@lines) * 5;
+	# Three assertions per line, one more for the seed annotation every row
+	# carries whatever it reads, one more for each line that names a
+	# certification state, and one restoration for each of the two commands
+	# each line runs.
+	my $states = grep {exists $_->{certified}} @lines;
+	plan tests => scalar(@lines) * 6 + $states;
 
 	for my $line (@lines) {
 		my $h = make_harness(envs => ['env'], kit => 'omega-v2.7.0',
@@ -181,6 +185,14 @@ subtest 'every line of the mapping table has its reading' => sub {
 		is($row->{reading}, $line->{reading}, "$line->{name}: the reading");
 		is($row->{divergence} ? $row->{divergence}{state} : undef,
 			$line->{divergence}, "$line->{name}: the divergence");
+		# Read as a field rather than as a word in the tree, because the
+		# shape --json emits is what a consumer reads and a row carrying
+		# the key only sometimes would hand one an undefined value.
+		is($row->{seeded} ? 1 : 0, $line->{seeded} ? 1 : 0,
+			"$line->{name}: the seed annotation");
+		is($row->{certified}{state}, $line->{certified},
+			"$line->{name}: the certification state")
+			if exists $line->{certified};
 
 		my ($tree) = run_genesis($h, 'pipeline-status');
 		like(unfolded($tree), $line->{routing}, "$line->{name}: the routing result")

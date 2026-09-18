@@ -1117,11 +1117,6 @@ sub plan {
 		# and there is no branch to put back.
 		walk_one(record => $env_record, deliver => sub {
 
-			# An environment the pre-flight has no branch record for has no
-			# deployment branch on either side, which is D43's awaiting
-			# outcome and nothing this walk can route a commit onto.
-			return unless $settled;
-
 			my $env = $env_for->($name);
 			unless ($env) {
 				$env_record->{error}   = $load_error{$name};
@@ -1196,6 +1191,31 @@ sub plan {
 			if ($certified->{state} eq 'unreadable') {
 				$env_record->{error}   = $certified->{error};
 				$env_record->{outcome} = 'failed';
+				return;
+			}
+
+			# D43: an environment the pre-flight has no branch record for has
+			# no deployment branch on either side, so genesis pipeline-apply
+			# has not cut one for it and what it waits for is that command.
+			# There is nothing here to route a commit onto and no ref to
+			# read a marker off, so the walk ends this environment's turn.
+			#
+			# The state is a word of its own rather than never-applied.  That
+			# one is a reading of the environment's vault record, and this
+			# one is a reading of the refs, and two situations sharing one
+			# word would leave a reader of the record unable to tell which of
+			# them they were holding.  Genesis::CI::Report ranks the two
+			# together, so both commands say the wait in one wording.
+			#
+			# It stands below the durable read rather than at the top of the
+			# turn, so that a standing hold is on the record before the turn
+			# closes.  D56 ranks a hold ahead of the apply, and an
+			# environment can be in both states at once, so a branchless
+			# environment with a hold standing against it has to read as
+			# needing that hold cleared.
+			unless ($settled) {
+				$env_record->{certified} = {state => 'no-branch'};
+				apply_hold($env_record, $hold);
 				return;
 			}
 
