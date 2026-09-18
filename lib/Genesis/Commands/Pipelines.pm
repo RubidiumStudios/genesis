@@ -372,7 +372,7 @@ sub pipeline_hold {
 	if (@args == 2) {
 		($env_name, $reason) = @args;
 	} elsif (@args == 1) {
-		(my $named = $args[0]) =~ s/\.ya?ml$//;
+		(my $named = $args[0]) =~ s/\.yml$//;
 		if (length($named) && -f $top->path("$named.yml")) {
 			$env_name = $args[0];
 		} else {
@@ -382,10 +382,13 @@ sub pipeline_hold {
 
 	# set_top_path hands the prefix on as the basename of the file it
 	# resolved, suffix and all, and an operator may have written the suffix
-	# themselves in either form.  It comes off once here, so the record's
-	# address and the sentence the operator reads name one environment
-	# however the environment was written on the command line.
-	$env_name =~ s/\.ya?ml$// if defined $env_name;
+	# themselves.  It comes off once here, so the record's address and the
+	# sentence the operator reads name one environment however the
+	# environment was written on the command line.  Only `.yml` comes off,
+	# because `.yml` is the one suffix the rest of Genesis reads an
+	# environment file by, and a strip that took more than the existence
+	# test below tries would read a file it never found as a reason.
+	$env_name =~ s/\.yml$// if defined $env_name;
 
 	command_usage(1, "A propagation hold needs a reason.")
 		unless defined($reason) && $reason =~ /\S/;
@@ -435,7 +438,7 @@ sub pipeline_release {
 	) if @args > 1;
 
 	my $env_name = $args[0];
-	$env_name =~ s/\.ya?ml$// if defined $env_name;
+	$env_name =~ s/\.yml$// if defined $env_name;
 
 	my $who = sprintf('%s@%s',
 		($ENV{USER} // 'unknown'), Sys::Hostname::hostname());
@@ -2123,6 +2126,9 @@ sub _refuse_disabled_pipeline {
 # pipeline_topology answers every field empty where the pipeline is disabled or
 # where no environment file declares one, so an empty order is the one state
 # worth a sentence: a command that silently held nothing would read as success.
+# The sentence names both causes, because the two are indistinguishable from
+# here and an operator whose pipeline is switched off would otherwise be sent
+# to read their environment files.
 sub _root_environments {
 	my ($top) = @_;
 
@@ -2130,7 +2136,9 @@ sub _root_environments {
 	bail(
 		{exitcode => CONFIG},
 		"No environments with pipeline metadata were found in this ".
-		"deployment root."
+		"deployment root.  Either #C{pipeline.enabled} is false in ".
+		"#C{.genesis/config}, or no environment file here declares a ".
+		"#C{genesis.pipeline} block."
 	) unless @envs;
 	return @envs;
 }
