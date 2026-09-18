@@ -603,7 +603,6 @@ sub propagate {
 		}
 	}
 
-	my $delivered = 0;
 	my @publish_specs;
 	my $publish;
 	my $record;
@@ -729,20 +728,6 @@ sub propagate {
 				);
 				next if ($env_record->{outcome} // '') eq 'failed';
 
-				# What this environment delivered, or would.  A preview's
-				# arm answers nothing where it would have propagated, and
-				# the renderer settles such an environment off its pending
-				# list, so the count is read off that same list and the
-				# number under the report cannot disagree with the word in
-				# it.  An environment the arm froze has its pending list
-				# emptied, and one it retired had nothing in it to begin
-				# with, so neither is counted as one that would deliver.
-				if ($dry_run) {
-					$delivered += scalar @{$env_record->{pending} || []}
-						unless defined $env_record->{outcome};
-				} elsif (($env_record->{outcome} // '') eq 'propagated') {
-					$delivered += scalar(@pending);
-				}
 				# D51's lease.  The expected tip is the one the arm read
 				# before it rewrote anything, and the key is carried even
 				# where it is undef, because _push_one reads it with exists
@@ -805,7 +790,6 @@ sub propagate {
 			# record, and every reader of that field then had to know which
 			# kind of run had filled it.
 			$env_record->{outcome} = 'propagated' unless $dry_run;
-			$delivered += scalar(@pending);
 			# The publish set carries specs rather than names, because the
 			# stage that spends it reports per environment and a bare
 			# branch name leaves it deriving the environment back out of
@@ -956,12 +940,32 @@ sub propagate {
 		: Genesis::CI::Report::render_run($record, git => $git);
 
 	# The decline is read before the count, because a run the operator
-	# stopped wrote its branches and then put every one of them back, so the
-	# walk's counter is true of the working tree and false of the remote.  A
-	# delivered count standing directly above a report that says nothing was
-	# published is the one number in the run that contradicts everything
-	# under it, and the operator who stopped the run is the last person who
-	# should have to work out which of the two to believe.
+	# stopped wrote its branches and then put every one of them back, and
+	# what that earns is the sentence saying so rather than a count of
+	# nothing.  A delivered count standing directly above a report that says
+	# nothing was published is the one number in the run that contradicts
+	# everything under it, and the operator who stopped the run is the last
+	# person who should have to work out which of the two to believe.
+	#
+	# The count is read off the record here, once the publish has settled
+	# every environment's outcome, so a branch the remote refused
+	# contributes none of its commits.  Counting them where the walk routed
+	# them said the run had delivered work the remote never took, directly
+	# under a report saying it had not.
+	#
+	# A preview settles no outcome at all, because it publishes nothing and
+	# routes into a record it then throws away, so what it counts is what it
+	# routed, which is every environment the walk left an outcome off.
+	my $delivered = 0;
+	my $due       = 0;
+	for my $env (@{$record->{environments} || []}) {
+		my $routed = scalar @{$env->{pending} || []};
+		$due += $routed;
+		$delivered += $routed if $dry_run
+			? !defined $env->{outcome}
+			: ($env->{outcome} // '') eq 'propagated';
+	}
+
 	if ($publish && $publish->{declined}) {
 		info "\n#Yi{The publish was declined.  Every branch is back where ".
 		     "the remote has it.}";
@@ -969,7 +973,10 @@ sub propagate {
 		info "\n#G{Done.} %s %d commit%s.",
 			$dry_run ? 'Would deliver' : 'Delivered',
 			$delivered, $delivered == 1 ? '' : 's';
-	} else {
+	} elsif (!$due) {
+		# A run that had something due and published none of it has said so
+		# per environment already, and a line reading no changes on top of
+		# that would be the second thing the operator has to choose between.
 		info "\n#Yi{No changes to propagate.}";
 	}
 

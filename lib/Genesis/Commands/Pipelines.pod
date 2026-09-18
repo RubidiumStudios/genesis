@@ -595,8 +595,15 @@ environment reads C<not published> with C<operator declined> beside it, so
 the report says of each one that it was written, verified, and held here by
 the person who was asked.  The run closes by saying that the publish was
 declined and that every branch is back where the remote has it, rather than
-by counting a delivery, because the count the walk kept is true of the
-working tree and false of the remote once the branches have been put back.
+by counting a delivery, because a run that was stopped delivered nothing and
+a count of nothing says less than the sentence does.
+
+The line the run ends on counts the commits it published, which is the
+commits of the environments whose outcome is C<propagated>.  A branch the
+remote refused contributes none, and a run that had work due and published
+none of it ends on the per-environment outcomes rather than on a count.  A
+preview publishes nothing and settles no outcome, so what it counts is what
+it routed.
 
 B<Options (via C<get_options>):>
 

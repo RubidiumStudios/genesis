@@ -54,9 +54,9 @@ sub env_line {
 }
 
 subtest 'the stale form marks every cell that rests on a refresh' => sub {
-	# Ten assertions, one of which is this row's own restoration, and one
+	# Eleven assertions, one of which is this row's own restoration, and one
 	# more for the restoration run_genesis asserts on the second command.
-	plan tests => 11;
+	plan tests => 12;
 
 	my $h = make_harness(envs => ['lab'], kit => 'omega-v2.7.0',
 		tracked => ['ops/shared.yml', 'ops/extra.yml']);
@@ -81,6 +81,13 @@ subtest 'the stale form marks every cell that rests on a refresh' => sub {
 	# The remote-tracking ref as this clone holds it going in, which is the
 	# one ref a fetch would move and the one the row below compares against.
 	my $tracking = $h->git('a')->sha('refs/remotes/origin/' . $h->control);
+	# The capture has to be a commit for the comparison below to say
+	# anything.  A ref this clone does not hold answers nothing here and
+	# nothing after the command either, so the two readings would agree with
+	# each other over a ref that was never there and the row would pass
+	# without having watched a fetch at all.
+	like($tracking, qr/^[0-9a-f]{40}$/,
+		'the tracking ref going in is a commit this clone holds');
 
 	my $before = snapshot_w($h);
 	my ($out, $err, $exit) = run_genesis($h,
