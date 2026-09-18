@@ -250,7 +250,9 @@ there, and an operator part way through tearing a pipeline down has a reason
 to be running one, so it warns and carries on.  Inside a pipeline job, which
 Genesis recognises by C<GENESIS_PIPELINE_TASK> in the environment, the answer
 is a refusal whatever the caller asked for, because nobody there reads a
-warning and a job never deploys what its own configuration disowns.
+warning and a job never acts on what its own configuration disowns.  What a
+job must not do is said in the caller's own words, through C<in_job>, since
+the sub cannot know which command it is standing in for.
 
 Every message names the control commit the pipeline was applied from, the
 time it was applied, and both remedies, which are to set
@@ -277,6 +279,14 @@ C<propagate> unless the caller says otherwise.
 
 The refusal's closing sentence, which says what did not happen.  It is
 "Nothing was written." unless the caller says otherwise.
+
+=item C<in_job>
+
+The sentence the refusal inside a pipeline job makes about what a job must
+not do.  Only the caller knows what it was about to do, so only the caller
+can say it: C<genesis E<lt>envE<gt> deploy> passes "A job never deploys what
+its own configuration disowns."  The default, "A job never acts on what its
+own configuration disowns.", names no command and fits every caller.
 
 =item C<locally>
 
