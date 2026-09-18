@@ -651,8 +651,8 @@ A marker naming a commit this clone has never fetched falls under the same
 C<0>. L<Genesis::CI::Marker/newest> hands such a marker back at the width the
 delivery wrote it, which cannot equal a full sha, so the branch reads
 unsettled and the run propagates again. That is the safe direction to be
-wrong in, and it is what the predicate this sub replaced did too: a branch
-this clone cannot name is one it should rebuild rather than skip.
+wrong in, and it is what the predicate this sub replaced did too, because a
+branch this clone cannot name is one it should rebuild rather than skip.
 
 B<Examples:>
 

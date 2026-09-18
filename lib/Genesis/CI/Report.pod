@@ -500,10 +500,10 @@ for a delivery.
 
 The qualifier is assigned rather than appended through L</note_detail>, and
 that is right here, because nothing an environment reaching this sub can be
-carrying was written into the field already.  The one writer that appends before the
-report runs is the pull request arm's discard region, and an environment that
-reaches that region has an outcome by the time the arm returns, while a freeze
-returns above it and writes nothing there at all.
+carrying was written into the field already.  The one writer that appends
+before the report runs is the pull request arm's discard region, and an
+environment that reaches that region has an outcome by the time the arm
+returns, while a freeze returns above it and writes nothing there at all.
 
 B<Parameters:>
 
