@@ -565,7 +565,14 @@ The refusals' closing sentence, which says what did not happen.  It is
 =item C<dry_run>
 
 True where the run reports and writes nothing, which the stages below this one
-read.
+read.  The stage then also says, under the caveats' own sentence shape, that
+its answer assumes a fast-forward nobody has made.
+
+=item C<read_only>
+
+True where the caller only ever reports, as C<genesis pipeline-status> does.
+The stage moves no branch, exactly as under C<dry_run>, and says nothing about
+a preview, because nobody is about to make the run those caveats are about.
 
 =back
 
@@ -587,7 +594,8 @@ One record per environment that has a branch on either side, keyed by the
 environment's name.  A branch this stage reset carries C<reset> set on its
 record and one it fast-forwarded carries C<fast_forwarded>, and either way
 C<state> is then C<in-sync> and both counts are 0, because the branch stands
-on its tracking ref.  Under C<dry_run> no record is settled that way.  The one
+on its tracking ref.  Under C<dry_run> or C<read_only> no record is settled
+that way.  The one
 the stage would have moved carries C<assumed>, which is the ref a real run
 would have left the branch on, and its C<state> and counts are the ones the
 classification wrote, with C<assumed_move> beside it naming which move it
