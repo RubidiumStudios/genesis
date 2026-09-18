@@ -5216,7 +5216,15 @@ sub _post_deploy {
 			my $pre    = $state->{pre_deploy_unclean} || {};
 			my $prefix = $git->prefix // '';
 			my $post   = $git->status($prefix || '.');
+			# Under the repository and hybrid stores the rendered manifest
+			# and its neighbours are Genesis's own writes under D14, so they
+			# are left out of a warning whose subject is what wrote into the
+			# repository without being asked to (D35).  Under the exodus
+			# store they are already gone and the filter matches nothing.
+			my $legacy = $self->manifest_store ne 'exodus';
 			my @modified = grep {
+				!($legacy && m{(?:^|/)\.genesis/manifests/})
+			} grep {
 				!exists($pre->{$_}) || $pre->{$_} ne $post->{$_}
 			} sort keys %$post;
 

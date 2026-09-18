@@ -4,6 +4,13 @@
 # guard now that the writer it reproduced is gone; and T228, the sweep of the
 # retired routing sense of "entry point" from the files this step touches.
 #
+# T210 and T238 arrived a task late.  Two walls stood in front of them: the
+# deploy switched to a branch named for the environment alone while every
+# branch the harness builds is <env>/<type>, which git will not let stand
+# beside it, and no deploy in this suite reached its end, because the harness
+# stood up no BOSH for one to reach.  The task that declares the deploy's
+# branch class removes both.
+#
 # Both deploys run with --no-propagate.  The auto-cascade hands off to a
 # child genesis propagate, which is a command that writes to the deployment
 # branches on purpose and which M15 owns, so a row about what the deploy
