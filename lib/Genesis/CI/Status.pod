@@ -22,13 +22,17 @@ state a run would refuse is described here rather than refused.
 
 The refresh it does by default is not nothing, though.  It materialises a
 local ref for every pipeline branch the remote already holds and this clone
-lacks, which is why the events it hands back can say that control was created
-from the remote.  Those refs come from the remote rather than from anything
-this module decided, and C<refresh> set false leaves them alone.
+lacks.  Only control's creation is raised as an event; the rest are made in
+silence.  Those refs come from the remote rather than from anything this
+module decided, and C<refresh> set false leaves them alone.
 
-The events are handed back on the record rather than printed.  A module that
-wrote to a terminal mid-computation would be no use to a caller that wanted
-the record alone, so the caller prints them.
+The events are handed to the caller rather than printed.  A module that wrote
+to a terminal mid-computation would be no use to a caller that wanted the
+record alone, so C<on_events> is called with them the moment the control check
+answers, which is before the walk runs.  That ordering matters: a walk that
+refuses would otherwise end the command with the control ref the refresh
+created unaccounted for.  The same lines stay on the record under C<events>
+for a caller that would rather read them afterwards.
 
 The one axis the walk leaves to this module is the snapshot, which is what a
 deployment branch holds beyond the commit propagation last wrote on it.
@@ -86,6 +90,12 @@ It defaults to true.
 
 The environments to read, passed through to the walk.  Undefined reads every
 environment the deployment root has.
+
+=item C<on_events>
+
+A code reference called with the control check's event lines as soon as it has
+them, which is before the walk runs.  A caller that names none is told nothing
+as it goes and reads C<events> off the record instead.
 
 =back
 

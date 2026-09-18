@@ -305,15 +305,17 @@ sub pipeline_status {
 	my $git     = Service::Git->new('.');
 	my $refresh = get_options->{'no-refresh'} ? 0 : 1;
 
+	# The refresh's events are said as the read model raises them, which is
+	# before the walk runs, so a walk that refuses below still leaves the
+	# operator an account of the control ref the refresh created.  They go to
+	# standard error, because standard output carries the report alone and a
+	# consumer reading the JSON off that stream should find nothing else on
+	# it.
 	my $record = Genesis::CI::Status::status_records($top,
-		git     => $git,
-		refresh => $refresh,
+		git       => $git,
+		refresh   => $refresh,
+		on_events => sub { info("  #Gi{%s}", $_) for @_ },
 	);
-
-	# The events the record came back with, said on standard error before the
-	# report, because standard output carries the report alone and a consumer
-	# reading the JSON off that stream should find nothing else on it.
-	info("  #Gi{%s}", $_) for @{$record->{events} || []};
 
 	# The rendered text goes through a '%s' format, because output reads its
 	# first argument as one and both a commit subject and a JSON string can
