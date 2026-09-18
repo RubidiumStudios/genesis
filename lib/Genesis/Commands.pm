@@ -231,6 +231,19 @@ sub define_command { # {{{
 	) if defined($PROPS{$name}{branch_target})
 		&& !defined($PROPS{$name}{branch_class});
 
+	# A misspelt target reads as the tip, because that is what the resolver
+	# makes of every word that is not #y{deployed}, so the command would take
+	# the commit its author declared it did not mean and nothing downstream
+	# could tell the typo from a deliberate #y{tip}.  The registration is the
+	# only place that can catch it, which is the same reason the class above
+	# is checked here.
+	bug(
+		"Command #C{$name} declares the default target #y{%s}; ".
+		"the only targets are #y{%s} and #y{%s}.",
+		$PROPS{$name}{default_target}, 'tip', 'deployed'
+	) if ($PROPS{$name}{default_target} // 'tip') ne 'tip'
+		&& $PROPS{$name}{default_target} ne 'deployed';
+
 	# A commit declared outside the pre-deploy class is read by nobody.
 	# Only the pre-deploy assertion asks the question, so the attribute on
 	# any other registration reads as though the command had been exempted
@@ -568,9 +581,9 @@ sub deployed_target {
 	# one and a flagged run under no pipeline is refused before it pays for
 	# one.
 	#
-	# The root the gate keeps carries no vault: it is loaded with no_vault
-	# so that reading a command's class announces no vault target, which is
-	# a side effect a gate has no business having.  The record is in the
+	# The root the gate keeps carries no vault, because it is loaded with
+	# no_vault so that reading a command's class announces no vault target,
+	# which is a side effect a gate has no business having.  The record is in the
 	# vault, so it is read through a root loaded again with the vault the
 	# repository configures, which is the root the command itself is about
 	# to load a moment later and is paid for only by a run that named the
@@ -582,14 +595,14 @@ sub deployed_target {
 	# An environment that has never deployed successfully names no commit,
 	# and neither does a record written before the field existed, so both
 	# take the tip, which is where they stood before the flags existed.  A
-	# flagged run is not refused for it: the operator asked for the deployed
-	# commit of an environment that has none, and the command's own reading
-	# of an undeployed environment says more than a refusal here could.
+	# flagged run is not refused for it, because the operator asked for the
+	# deployed commit of an environment that has none, and the command's own
+	# reading of an undeployed environment says more than a refusal could.
 	my $record = $env->deployed_record;
 	return undef unless $record && $record->{git} && $record->{git}{commit};
 
 	# The path the commit was read from goes back beside it, because D94 has
-	# the refusal name the record as well as the commit: the record is the
+	# the refusal name the record as well as the commit.  The record is the
 	# input, and an operator told only which commit is missing is not told
 	# which of their records to go and correct.  It is answered here rather
 	# than worked out again by the caller, because this environment is the
@@ -643,13 +656,13 @@ sub _gate_branch_class {
 	#
 	# The name derivation lives here rather than in _gate_deployed_state,
 	# for the reason the comment there gave, which is that two derivations
-	# of one name are two chances to disagree, and now two callers want it.  An operator may
-	# name the environment by a path, so the leading directories and the
-	# suffix both come off, which is what the deploy does to the same
-	# argument in Genesis::Commands::Env::deploy.  set_top_path has already
-	# turned a path resolving to a file into its basename by the time this
-	# runs, so the directory half earns its place by keeping the two
-	# derivations identical rather than by the work it does here.
+	# of one name are two chances to disagree, and now two callers want it.
+	# An operator may name the environment by a path, so the leading
+	# directories and the suffix both come off, which is what the deploy does
+	# to the same argument in Genesis::Commands::Env::deploy.  set_top_path
+	# has already turned a path resolving to a file into its basename by the
+	# time this runs, so the directory half earns its place by keeping the
+	# two derivations identical rather than by the work it does here.
 	#
 	# The record the target came out of comes back with it, in list context,
 	# so that a commit the repository cannot reach is refused by the name of
@@ -765,7 +778,16 @@ sub _gate_deployed_state {
 	# refusal this class must never meet is the one that says a branch "is a
 	# deployment branch".  Saying it here would answer that row with our own
 	# line.
-	if (($git->current_branch // '') eq $branch) {
+	#
+	# It yields to a resolved target.  A run that named a flag, or whose
+	# registration means the deployed commit, asked for one commit and not
+	# for another, and the branch the operator happens to be standing on is
+	# no answer to that, because the tip of the branch is where they are
+	# standing while the deployed commit is what they asked for.  So the arm is for the
+	# runs that mean the tip, which is every run that resolved no target, and
+	# a plain deploy is one of them, which is what leaves I3's edit in place
+	# deployable from the branch itself.
+	if (!defined($opts{target}) && ($git->current_branch // '') eq $branch) {
 		info(
 			"Already standing on #C{%s}, so no branch change is made and this ".
 			"runs on the working tree as it stands.",
