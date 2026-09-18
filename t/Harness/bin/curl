@@ -81,7 +81,11 @@ my $status = 200;
 if (!defined $url) {
 	$status = 404;
 	$answer = {message => 'No url was given to the fixture curl'};
-} elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls/(\d+)/reviews$}) {
+} elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls/(\d+)/reviews(?:\?|$)}) {
+	# The route takes a query string, because the reader asks for
+	# reviews?per_page=100 and a route anchored on reviews alone would let
+	# that request fall through to the listing below, which answers an empty
+	# array and a 200 and collapses every state to unreviewed.
 	my ($pr) = grep {$_->{number} == $1} @{$state->{prs} || []};
 	$answer = $pr ? ($pr->{reviews} || []) : [];
 } elsif ($url =~ m{/repos/([^/]+/[^/]+)/pulls(?:\?|$)}) {

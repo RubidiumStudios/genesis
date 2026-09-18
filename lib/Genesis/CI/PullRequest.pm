@@ -54,9 +54,18 @@ sub deliver {
 	my $env     = $opts{env};
 	my $git     = $session->git;
 	my $commits = $opts{commits} || [];
+	my $state   = $opts{state};
 	my $pr      = $record->{pr}
 		or bug("Genesis::CI::PullRequest::deliver was handed %s, which the ".
 		       "walk composed no pull request branch for", $record->{env});
+
+	# What the reader answered about the pull request, carried onto the
+	# record before any arm is taken, so the publish, the sync, and the
+	# report all read one answer rather than asking the API again.
+	$pr->{state}      = $state ? $state->{state}      : undef;
+	$pr->{number}     = $state ? $state->{number}     : undef;
+	$pr->{url}        = $state ? $state->{url}        : undef;
+	$pr->{superseded} = $state ? $state->{superseded} : [];
 
 	return 'idempotent' unless @$commits;
 
@@ -86,6 +95,88 @@ sub deliver {
 	$record->{overwrote}  = $written->{overwrote};
 
 	return 'propagated';
+}
+
+# }}}
+# pr_state - the pull request and what a reviewer decided about it {{{
+#
+# Answers the state as one of none, unreviewed, approved, changes requested,
+# and closed unmerged, which are the four arms of D51 plus the case where
+# there is no pull request at all.  merged carries the merged pull requests,
+# which D52's recovery reads, rejected carries the closed-unmerged ones
+# themselves so the body can quote one, and superseded carries their numbers
+# for the title.  An API that cannot answer is not a fifth state but a
+# refusal, under D55.
+#
+# The record it is handed needs three fields and no more, which are the
+# environment's name, its deployment branch, and its pull request branch, so
+# the run can read every environment's state before the walk has composed a
+# record of its own.
+sub pr_state {
+	my ($github, $owner_repo, $record, %opts) = @_;
+
+	my ($open, $closed);
+	eval {
+		$open   = $github->open_prs($owner_repo,
+			$record->{branch}, $record->{pr}{branch});
+		$closed = $github->closed_prs($owner_repo,
+			$record->{branch}, $record->{pr}{branch});
+		1;
+	} or refuse_unreadable($record->{env}, $@, %opts);
+
+	if (@$open > 1) {
+		warning(
+			"Several pull requests are open for #C{%s} from #C{%s}, which are ".
+			"%s. Acting on #%d by its review state and leaving the rest alone.",
+			$record->{env}, $record->{pr}{branch},
+			join(', ', map {'#'.$_->{number}} @$open), $open->[0]{number}
+		);
+	}
+
+	my @merged   = grep { $_->{merged_at} } @$closed;
+	my @rejected = grep { !$_->{merged_at} } @$closed;
+
+	my $pr = @$open ? $open->[0] : undef;
+	my $state = !$pr          ? (@rejected ? 'closed unmerged' : 'none')
+	          : $pr->{review} ? $pr->{review}{state}
+	          :                 'unreviewed';
+
+	return {
+		state      => $state,
+		number     => $pr ? $pr->{number}   : undef,
+		url        => $pr ? $pr->{html_url} : undef,
+		title      => $pr ? $pr->{title}    : undef,
+		body       => $pr ? $pr->{body}     : undef,
+		review     => $pr ? $pr->{review}   : undef,
+		rejected   => \@rejected,
+		superseded => [map {$_->{number}} @rejected],
+		merged     => \@merged,
+	};
+}
+
+# }}}
+# refuse_unreadable - the one refusal D55 specifies, naming the input {{{
+#
+# The refusal is whole-run, because a run that cannot read what a reviewer
+# decided cannot know what it would do with any pull request branch, and D98
+# gives it UNAVAILABLE (69) since the API is the service it could not reach.
+# Genesis::Exit declares codes and no subs, so it is raised through bail with
+# a named code, the way every other refusal in the tree is.
+#
+# A caller inside an open session hands its own refusal closure in, so the
+# operator is put back on the branch they started from before they are told
+# why the run stopped.  A caller with no session leaves it out and the bail
+# below speaks for itself.
+sub refuse_unreadable {
+	my ($env, $why, %opts) = @_;
+	$why =~ s/\s+$// if defined $why;
+	($opts{refuse} || \&bail)->(
+		{exitcode => Genesis::Exit::UNAVAILABLE},
+		"Could not read the review state of #C{%s}'s pull request from ".
+		"GitHub, so this run refuses rather than guess what to do with its ".
+		"pull request branch.\n%s\n\nRetry once the API answers again.",
+		$env, $why // 'the API did not answer'
+	);
 }
 
 # }}}

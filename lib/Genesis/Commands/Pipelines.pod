@@ -454,6 +454,12 @@ A run with no C<GITHUB_AUTH_TOKEN> still writes and publishes those branches
 and says so, because the branches are the delivery and the pull request is
 what the next run with a token opens on top of it.
 
+What a reviewer decided about each of those pull requests is read once, before
+the walk, because it is what decides whether the run rebuilds a pull request
+branch or leaves it alone.  A run that cannot read it refuses the whole walk
+at C<UNAVAILABLE> rather than guess, under D55, and it refuses ahead of the
+first delivery so nothing has to be undone afterwards.
+
 Every branch the run committed to is published at the end of the walk, one
 branch per push, so a branch the remote refuses costs one environment one run
 and nothing else.  That environment reads C<publish rejected> with the ref git
@@ -561,7 +567,8 @@ refused before anything was written.
 =item *
 
 C<Genesis::Exit/UNAVAILABLE> (69), where the vault answered an error for the
-applied record, which the run reads ahead of the walk.
+applied record, or GitHub could not say what a reviewer decided about a pull
+request, both of which the run reads ahead of the walk.
 
 =item *
 
@@ -592,6 +599,13 @@ under D55 and writes nothing.  A record that is merely absent is not that,
 and it comes back null with every environment taking the C<not-propagated>
 reading.  The refusal closes the session first, so the operator is back on
 the branch they started from before they read why the run stopped.
+
+Exits C<Genesis::Exit/UNAVAILABLE> as well where GitHub could not say what a
+reviewer decided about an environment's pull request, naming the review state
+as the input it could not read and telling the operator to retry once the API
+answers.  That reading decides what the run would do with a pull request
+branch, so a run that cannot take it refuses whole rather than act on one
+environment and guess at the next.  This refusal closes the session too.
 
 Exits C<Genesis::Exit/TEMPFAIL> where the control branch moved between the
 start of the run and its first push.  The run re-checks control against the

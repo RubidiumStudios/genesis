@@ -731,6 +731,33 @@ sub propagate {
 		) unless $github;
 	}
 
+	# D55's refusal, read once for the whole run and ahead of it.  What a
+	# reviewer decided is what decides whether an environment's pull request
+	# branch is rebuilt or frozen, so a run that cannot read it cannot know
+	# what it would do with any of them, and it refuses rather than guess.
+	#
+	# The read stands here rather than beside the arm for two reasons.  The
+	# refusal is whole-run, so it has to happen before the first environment
+	# is written; and a refusal raised inside the eval below comes back out
+	# of the abort as a bare 1, where D98 gives this one UNAVAILABLE.  It
+	# goes through the run's own refusal closure, so the operator is put back
+	# on the branch they started from before they are told why it stopped.
+	#
+	# The two branch names are composed from the same accessors the walk
+	# composes its record from, so the state read here and the record the arm
+	# is handed cannot disagree about which branches an environment owns.
+	my %pr_state_of;
+	if ($github && $owner_repo) {
+		for my $env_name (grep {$topo->{nodes}{$_}{require_pr}} @dag_order) {
+			$pr_state_of{$env_name} = Genesis::CI::PullRequest::pr_state(
+				$github, $owner_repo, {
+					env    => $env_name,
+					branch => $top->branch_for($env_name),
+					pr     => {branch => $top->pr_branch_for($env_name)},
+				}, refuse => $refuse);
+		}
+	}
+
 	my $delivered = 0;
 	my @publish_specs;
 	my $publish;
@@ -824,10 +851,15 @@ sub propagate {
 					record  => $env_record,
 					writes  => $dry_run ? 0 : 1,
 					deliver => sub {
+						# The state the pre-flight read, handed to the arm
+						# rather than fetched here, so the arm takes its
+						# decision from the same answer the refusal above
+						# already stood on.
 						my $word = Genesis::CI::PullRequest::deliver(
 							$session, $env_record,
 							env     => $env,
 							commits => \@pending,
+							state   => $pr_state_of{$env_name},
 						);
 						$env_record->{outcome} = $word if defined $word;
 					},
