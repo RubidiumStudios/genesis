@@ -125,7 +125,7 @@ subtest 'a repeated run is idempotent by marker and tree' => sub {
 	run_genesis($h, 'propagate', '-y');
 
 	refresh($h, 'a', $pr);
-	my $settled      = $git->sha("origin/$pr");
+	my $tip_before   = $git->sha("origin/$pr");
 	my $calls_before = scalar gh_calls($gh);
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
@@ -136,7 +136,7 @@ subtest 'a repeated run is idempotent by marker and tree' => sub {
 		or diag($said);
 
 	refresh($h, 'a', $pr);
-	is($git->sha("origin/$pr"), $settled, 'nothing was pushed');
+	is($git->sha("origin/$pr"), $tip_before, 'nothing was pushed');
 
 	# The calls the first run made are behind us, so the slice is what the
 	# second run sent and the pull request it opened is not counted again.
@@ -160,21 +160,54 @@ subtest 'a repeated run is idempotent by marker and tree' => sub {
 
 # Proves T276: the three shapes that broke idempotency by commit subject, each
 # answered by the marker walk.
+#
+# The first shape is the one that goes through settled.  The aggregate's own
+# subject is rewritten and its marker pushed into the body, which is what a
+# merge does to a message, so the control commit is still due, the whole arm
+# runs, and the run reads idempotent only because settled compared the marker
+# on R's copy of the branch against the tree the writer had just built.  The
+# other two shapes are end-to-end guards for the hazard rather than tests of
+# that sub: the hand edit goes through the discard report, and the coincidence
+# goes through the walk's base reader and the marker's own rule about what
+# counts as a marker at all.
 subtest 'the three subject-match shapes give the right answer now' => sub {
 	plan tests => 10;
 
-	# A squash: the tip's subject is the merger's and the marker is in the
-	# body alone.  The subject match re-propagated; the walk does not.
+	# A rewritten subject on the aggregate itself, which is what a squash
+	# merge does to a message: the subject a reader would walk is the
+	# merger's and the marker is pushed down into the body.  The subject
+	# match re-propagated on it, and this is the shape that reaches settled
+	# to say the walk does not.
+	#
+	# The rewrite is made on the pull request branch rather than by merging
+	# onto the deployment branch, and that matters.  A squash merge copies
+	# the aggregate's tree onto the deployment branch, so the rebuild's
+	# mirror has nothing to write, the single writer refuses an empty commit,
+	# and the run aborts before settled is ever asked.  Amending the
+	# aggregate in place leaves the deployment branch where it was, so the
+	# rebuild is a real commit, and R's copy of the branch still names the
+	# control commit in its body and still holds the tree the rebuild
+	# produces.  Both halves of settled then agree and the environment reads
+	# idempotent.  The discard report stays silent, because the one commit
+	# above the deployment branch is the aggregate and its body still carries
+	# a marker.
 	my $squashed = ready(kit => 'omega-v2.7.0');
+	my $squashed_pr = $squashed->pr_branch('prod');
 	due_commit($squashed, 'prod', params => {instances => 2},
 		message => 'Raise the cf instance count');
 	run_genesis($squashed, 'propagate', '-y');
-	squash_merge($squashed, 'prod', subject => 'Merge pull request #1');
+	amend_tip($squashed, $squashed_pr, copy => 'b',
+		subject => 'Merge pull request #1');
+
+	# Here so that a run which decides to push is refused for a reason of its
+	# own rather than by a lease taken against what this clone last saw.  The
+	# row expects no push at all, and this keeps a failure legible.
+	refresh($squashed, 'a', $squashed_pr);
 
 	my ($sq_out, $sq_err) = run_genesis($squashed, 'propagate', '-y');
 	my $squash_said = unfolded($sq_out, $sq_err);
-	like($squash_said, qr/prod: idempotent/, 'a squash does not re-propagate')
-		or diag($squash_said);
+	like($squash_said, qr/prod: idempotent/,
+		'a rewritten subject does not re-propagate') or diag($squash_said);
 	unlike($squash_said, qr/prod: propagated/, 'and nothing is delivered again')
 		or diag($squash_said);
 
