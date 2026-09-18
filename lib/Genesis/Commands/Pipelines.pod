@@ -533,6 +533,25 @@ B<Returns:> 0 on success; refuses a disowned pipeline through
 C<assert_not_disowned>, and bails with C<CONFIG> where the deployment root
 declares no pipeline environments.
 
+=head2 pipeline_release(@args)
+
+    genesis prod pipeline-release
+    genesis pipeline-release
+
+Deletes the propagation hold record for an environment, or for every
+environment in the deployment root where no environment is named, read in DAG
+order through L</_root_environments>.  The only argument the command takes is
+the environment, so a call carrying more than one is a usage error.  No
+released-by fields are written, and the release is logged with the identity of
+whoever ran it.  Where no hold stands, it says so rather than claiming a
+release.
+
+Releasing is a human act, so no deploy and no flag reaches this command.
+
+B<Returns:> 0 on success; refuses a disowned pipeline through
+C<assert_not_disowned>, and bails with C<CONFIG> where the deployment root
+declares no pipeline environments.
+
 =head2 propagate
 
     genesis propagate

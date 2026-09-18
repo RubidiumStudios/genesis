@@ -29,6 +29,7 @@ use Service::Vault::Remote;
 use File::Basename qw/dirname/;
 use File::Path qw/rmtree/;
 use JSON::PP;
+use Sys::Hostname ();
 
 # The init file says who owns the branch, because an operator who finds it
 # in a fresh clone has nothing else to read.
@@ -397,6 +398,68 @@ sub pipeline_hold {
 			"Release it with #C{genesis %s pipeline-release}.",
 			$name, $reason, $name
 		);
+	}
+	return 0;
+}
+
+# }}}
+# pipeline_release - clear the propagation hold on one environment or the root {{{
+#
+# D53 has the release delete the record and keep no released-by fields, because
+# the release's identity is its own log line, so we say who ran it here and
+# write nothing about them to vault.  D50 makes this the only way a hold is
+# cleared, which is why no deploy and no flag reaches this sub.
+#
+# The argument is read the way pipeline_hold reads its own, and there is
+# nothing to tell apart here, because the only argument this command takes is
+# the environment: one argument names an environment and no argument is the
+# whole deployment root.  The suffix comes off for the reason it comes off
+# there, since set_top_path hands the prefix on as the basename of the file it
+# resolved and an operator may have written the suffix themselves.
+#
+# D64's refusal of a disowned pipeline belongs to the group and not to us, as
+# it does for the hold, and the legacy gate runs before we are reached, so
+# there is no third refusal here on pipeline.enabled.
+sub pipeline_release {
+	my @args = @_;
+	my $opts = get_options();
+	my $top  = _get_top($opts);
+
+	assert_not_disowned($top, 'pipeline-release');
+
+	command_usage(1,
+		"A propagation release takes one environment at most.  Run ".
+		"#C{genesis <env> pipeline-release} to release one environment, or ".
+		"#C{genesis pipeline-release} to release every environment in the ".
+		"deployment root."
+	) if @args > 1;
+
+	my $env_name = $args[0];
+	$env_name =~ s/\.ya?ml$// if defined $env_name;
+
+	my $who = sprintf('%s@%s',
+		($ENV{USER} // 'unknown'), Sys::Hostname::hostname());
+
+	for my $name (defined($env_name) ? ($env_name) : _root_environments($top)) {
+		my $env = Genesis::Env->bare($name, $top)->with_vault;
+
+		# The record is read before it is deleted, because the line below says
+		# what had been standing and for how long, and after the delete there
+		# is nothing left to say it from.
+		my $record = $env->hold_record;
+		unless ($env->clear_hold) {
+			info("No propagation hold stands on #C{%s}.", $name);
+			next;
+		}
+		info("Released the propagation hold on #C{%s}, by #M{%s}.",
+			$name, $who);
+
+		# clear_hold answers a path whose contents it could not read as
+		# cleared, and that is the one state hold_record answers nothing for,
+		# so the sentence that quotes the record is written only where there
+		# is a record to write it from.
+		info("It had been held since %s: %s", $record->{at}, $record->{reason})
+			if $record;
 	}
 	return 0;
 }
