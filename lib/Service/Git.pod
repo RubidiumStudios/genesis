@@ -900,12 +900,16 @@ B<Examples:>
 
   my $bool = $git->commit_exists($sha);
 
-Whether any ref in this repository still reaches the commit. The question is
-reachability and not existence, because a commit the remote has dropped stays
-here as a loose object until git collects it, and what a caller wants to know
-is whether a fresh clone could fetch it.
+Whether a remote-tracking ref still reaches the commit, which is whether a
+fresh clone of the remote could fetch it. The question is reachability and
+not existence, because a commit the remote has dropped stays here as a loose
+object until git collects it.
 
-Local branches and remote-tracking refs both count as refs that reach it. The
+Only C<refs/remotes/> counts. A local branch goes on reaching a commit the
+remote has dropped, since a refresh moves the tracking refs and leaves a
+local branch where it stands, so counting local heads would answer yes in
+exactly the clone an operator runs the reader in. The refresh has just made
+the tracking refs current, so what they reach is what the remote holds. The
 object question is asked first, through C<holds_commit>, because git refuses
 to answer the reachability question about a name it cannot resolve at all,
 and a name that is not a hexadecimal sha is answered no rather than asked
@@ -927,7 +931,8 @@ undefined, is not a sha, or names no object here.
 B<Examples:>
 
   my $bool = $git->commit_exists($marker_sha);
-  # returns 0 after a force-push dropped that commit from every branch
+  # returns 0 after a force-push dropped that commit from the remote,
+  # even while this clone's own control branch still reaches it
 
   my $bool = $git->commit_exists('HEAD');
   # returns 0 -- the reader takes a sha, not a ref name

@@ -242,8 +242,6 @@ subtest 'the breach report rests on refs nobody refreshed' => sub {
 
 	rewrite_control($h, drop => $c2);
 	refresh($h, 'a');
-	run({dir => $h->a, onfailure => 'Failed to catch copy A up with the rewrite'},
-		'git', 'reset', '--hard', sprintf('origin/%s', $h->control));
 
 	# The breach is real here, and it is read entirely off remote-tracking
 	# refs.  Under this flag those refs are whatever the clone last fetched,
