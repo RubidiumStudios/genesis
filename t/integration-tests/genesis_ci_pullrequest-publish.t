@@ -4,10 +4,13 @@
 # then has that one push rejected while every other branch publishes, and a
 # branch the remote has never had is pushed against the empty object name.
 #
-# T261's second half rides here as well.  Both rows below propagate twice over
-# a branch R already carries, which is the rewrite the expected tip exists to
-# permit, and neither of them could reach its own subject if that second push
-# were refused as a non-fast-forward.
+# Both rows below propagate twice over a branch R already carries, which is
+# the rewrite the expected tip exists to permit, and neither of them could
+# reach its own subject if that second push were refused as a
+# non-fast-forward.  That is the condition T261's second half stands on rather
+# than the clause itself, which is asserted in
+# genesis_ci_pullrequest-title.t, so no row here reads a marker, a title, or a
+# supersedes list.
 use strict;
 use warnings;
 use utf8;
