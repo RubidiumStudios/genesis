@@ -33,7 +33,7 @@ our @EXPORT = qw/
 
 	commit_on_control commit_from_b publish_from_b push_from refresh
 	init_branch deliver propagation_set edited_file harness_marker
-	add_deployment_root write_env_file due_commit
+	add_deployment_root write_env_file due_commit patch_calls
 	hand_commit local_only_commit squash_merge unrelated_branch
 	diverge move_on_r delete_on_r delete_local
 	rewrite_control rewrite_branch
@@ -2290,6 +2290,17 @@ sub due_commit {
 		trailers => $opts{trailers},
 		push     => defined $opts{push} ? $opts{push} : 1,
 	);
+}
+
+# }}}
+# patch_calls - every PATCH a run sent, oldest first {{{
+#
+# A row that asserts on a pull request the run updated wants the url it named
+# as well as the body it carried, and both of those are on the call record
+# rather than in the double's stored state, so the whole record comes back.
+sub patch_calls {
+	my ($gh) = @_;
+	return grep {($_->{method} // '') eq 'PATCH'} gh_calls($gh);
 }
 
 # }}}

@@ -780,6 +780,21 @@ Takes C<params>, which is handed to C<write_env_file> and is what makes each
 commit a different one, C<message>, C<trailers>, which is how a row lays a
 gate, and C<push>, which defaults on.
 
+=head2 patch_calls($gh)
+
+    my ($call) = patch_calls($gh);
+    like($call->{url}, qr{/pulls/7$}, 'the update named the right one');
+
+Returns every C<PATCH> the run sent, oldest first, as C<gh_calls> recorded
+them.  A row asserting on a pull request the run updated wants the url it
+named as well as the body it carried, so the whole call record comes back
+rather than the body alone.
+
+The calls are read off the log rather than off the state the double holds, so
+what a row asserts is what the run actually sent.  A run that sent no C<PATCH>
+answers an empty list, which is how a row says that a pull request was left
+alone.
+
 =head2 fixture_vault($h)
 
 Spins the suite's own local vault through C<helper::vault_start> and points the

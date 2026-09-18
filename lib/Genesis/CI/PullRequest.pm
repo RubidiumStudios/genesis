@@ -147,6 +147,12 @@ sub review_paragraph {
 	my $quoted = join("\n", map {"> $_"} split /\n/, $review->{body});
 	my ($date) = ($review->{at} // '') =~ /^(\d{4}-\d{2}-\d{2})/;
 
+	# The default is load-bearing rather than a convenience.  deliver passes
+	# this same string explicitly for the changes-requested rebuild, and
+	# supersedes_paragraph below passes no opening at all and takes the
+	# default, so the two paragraphs read alike and are told apart by the
+	# prefix.  An edit to either the default or that call site has to
+	# remember the other.
 	return sprintf("%s%s on #%d by %s%s:\n%s",
 		$opts{prefix} // '',
 		$opts{opening} // 'Changes were requested',
