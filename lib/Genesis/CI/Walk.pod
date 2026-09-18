@@ -214,11 +214,14 @@ because this is where the environment is loaded.  A marker this walk took from
 a merged pull request rather than from the branch is reported beside the
 environment's outcome and nowhere else, so the record gains no field for it.
 
-C<manual> is 1 where the environment declares
+C<manual> is the encoder's own boolean, true where the environment declares
 C<genesis.pipeline.manual> under an automated provider, which says a person
-rather than a trigger starts its deploy, and 0 where it does not or where the
-provider is manual and the declaration is inert.  It stays null for an
-environment this walk never loaded.
+rather than a trigger starts its deploy, and false where it does not or where
+the provider is manual or unnamed and the declaration is inert.  It stays null
+for an environment this walk never loaded.  C<divergence> carries C<state>,
+C<ahead>, and C<behind> from the pre-flight's branch record, with C<unrelated>
+beside them, which the three states cannot say on their own, because an orphan
+branch and an ordinary divergence both hold the name on both sides.
 
 B<Errors:> Raises a bug where no git handle is given, since every reading
 below is made through one and a walk without it can answer nothing.
@@ -1360,6 +1363,34 @@ B<Examples:>
   # then resets lab and qa to T and exits 75
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _automated
+
+    my $automated = Genesis::CI::Walk::_automated($provider);
+
+Whether a provider triggers a deploy without a person.  Two readers ask it,
+the hold reason that says an ancestor awaits its trigger and the environment
+row's own manual marker, and one answer keeps them from disagreeing about what
+C<genesis.pipeline.manual> means.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$provider>
+
+The provider name, or undef where none is known.
+
+=back
+
+B<Returns:> 1 for a provider that is named and is not C<manual>, and 0
+otherwise.  A provider nobody named is not automated, since nothing then
+exists to do the triggering.
+
+B<Examples:>
+
+    Genesis::CI::Walk::_automated('concourse');  # 1
+    Genesis::CI::Walk::_automated(undef);        # 0
 
 =head2 _before_introduction
 

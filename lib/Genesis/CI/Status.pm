@@ -277,8 +277,21 @@ sub compose_phrase {
 	my @pending = @{$row->{pending} || []};
 	push @phrase, [in_flight => sprintf('%d pending', scalar @pending)]
 		if @pending;
+	# A branch no run may start from is described rather than refused, so the
+	# row says which state it is in and what the operator does about it.  The
+	# remedy is one sentence, because the whole of it is the refusal's own
+	# paragraph and a tree line has room for the act rather than the argument.
+	if (my $div = $row->{divergence}) {
+		push @phrase, [wrong => 'unrelated [no ancestor in common with the '.
+			'remote\'s; move anything wanted to control and delete it]']
+			if $div->{unrelated};
+		push @phrase, [wrong => 'local only [the remote has no such branch; '.
+			'move anything wanted to control and delete it]']
+			if ($div->{state} // '') eq 'no-remote';
+	}
+
 	if (my $drift = $row->{drifted}) {
-		push @phrase, [wrong => sprintf('drifted [%s differs]',
+		push @phrase, [wrong => sprintf('drifted [%s differs: hand commit]',
 			join(', ', @{$drift->{files}}))];
 	}
 	push @phrase, [inert => '[manual]'] if $row->{manual};

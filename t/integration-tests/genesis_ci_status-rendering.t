@@ -32,6 +32,12 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 # reads one encoding rather than whichever one the machine happens to have.
 $ENV{TERM} = 'xterm';
 
+sub env_row {
+	my ($record, $name) = @_;
+	my ($row) = grep { $_->{env} eq $name } @{$record->{environments}};
+	return $row;
+}
+
 sub plain {
 	# The line with every SGR sequence taken out, which is what the words of
 	# a row are asserted against.  A colour escape ends in the letter m, so a
@@ -72,8 +78,8 @@ sub declare_manual {
 }
 
 subtest 'one row carries deployed, drifted, and [manual]' => sub {
-	# Six assertions and one restoration.
-	plan tests => 7;
+	# Seven assertions and one restoration.
+	plan tests => 8;
 
 	delete local $ENV{NOCOLOR};
 	my $h = make_harness(envs => ['lab'], provider => 'concourse',
@@ -92,18 +98,23 @@ subtest 'one row carries deployed, drifted, and [manual]' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
 	is($exit, 0, 'the command exits zero');
 
-	my ($row) = grep { plain($_) =~ /\blab\b/ } split(/\n/, $out);
+	my ($row) = grep { plain($_) =~ /^\s+lab\b/ } split(/\n/, $out);
 	my $words = plain($row);
-	like($words, qr/deployed; drifted \[ops\/shared\.yml differs\]/,
+	like($words, qr/deployed; drifted \[ops\/shared\.yml differs: hand commit\]/,
 		'the drift detail sits in brackets after the word it qualifies');
 	like($words, qr/\[manual\]\s*$/, '[manual] trails the phrase as a marker');
 
 	my @classes = classes_in($row);
 	is($classes[0], 'R', "the row's name takes the worst class present, which is red");
+	# A guard.  The record task already gave each component its own class, so
+	# green stood on this word before the drift did, and the row would pass
+	# against it.  It is here because the worst-class rule above only means
+	# something if the components beside it kept their own colours.
 	ok(scalar(grep { $_ eq 'G' } @classes),
 		'the settled word deployed keeps its own green');
 	ok(scalar(grep { $_ eq 'K' } @classes),
 		"[manual] keeps its own dim class rather than the row's");
+	is($err, '', 'and the report says nothing on standard error');
 };
 
 subtest 'the five classes map onto the markup Genesis::Term already has' => sub {
@@ -124,8 +135,8 @@ subtest 'the five classes map onto the markup Genesis::Term already has' => sub 
 };
 
 subtest 'a hand commit nobody published is reported rather than refused' => sub {
-	# Three assertions and one restoration.
-	plan tests => 4;
+	# Five assertions and one restoration.
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['lab'], provider => 'manual',
 		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
@@ -157,7 +168,75 @@ subtest 'a hand commit nobody published is reported rather than refused' => sub 
 	is_deeply($row->{drifted}{files}, ['ops/shared.yml'],
 		'the drift names every file that differs from the snapshot');
 	is($row->{drifted}{commit}, $by_hand,
-		'and it names the hand commit that changed them');
+		'and it names the newest hand commit above the snapshot');
+	is($err, '', 'and the refusal it used to raise is not on standard error');
+	like($out, qr/"manual"\s*:\s*false/,
+		"the manual flag is the encoder's own boolean rather than a number");
+};
+
+subtest 'a branch the remote has never had reads as local only' => sub {
+	# Four assertions and one restoration for each of the two commands.
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['lab'], provider => 'manual',
+		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
+	fixture_vault($h);
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
+	fixture_pipeline_record($h, 'lab');
+
+	# A deployment branch is derived from control and never originates
+	# locally, so one this clone holds and the remote has never had was cut
+	# by a person.  No run may start from it, and the report says so rather
+	# than refusing to describe the repository at all.
+	local_branch_only($h, 'lab');
+	refresh($h, 'a');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--json');
+	is($exit, 0, 'the report describes the state rather than refusing it');
+
+	my $row = env_row(decode_json($out), 'lab');
+	is($row->{divergence}{state}, 'no-remote',
+		'the record carries the state the pre-flight classified');
+
+	my ($tree) = run_genesis($h, 'pipeline-status');
+	my ($line) = grep { plain($_) =~ /^\s+lab\b/ } split(/\n/, $tree);
+	like(plain($line), qr/local only \[the remote has no such branch; [^\]]+\]/,
+		'the line names the state and the remedy in one sentence');
+	unlike(plain($line), qr/unrelated/,
+		'and it is not read as a branch with an unrelated history');
+};
+
+subtest 'a branch sharing no ancestor with the remote reads as unrelated' => sub {
+	# Four assertions and one restoration for each of the two commands.
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['lab'], provider => 'manual',
+		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
+	fixture_vault($h);
+	init_branch($h, 'lab');
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
+	fixture_pipeline_record($h, 'lab');
+
+	# Both sides hold the name and neither holds a commit the other does, so
+	# no divergence state tells this apart from an ordinary one.  The
+	# pre-flight asked the ancestry question and the record carries its
+	# answer.
+	unrelated_branch($h, 'lab');
+	refresh($h, 'a');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--json');
+	is($exit, 0, 'the report describes the state rather than refusing it');
+
+	my $row = env_row(decode_json($out), 'lab');
+	is($row->{divergence}{unrelated}, 1,
+		'the record says the two histories share nothing');
+
+	my ($tree) = run_genesis($h, 'pipeline-status');
+	my ($line) = grep { plain($_) =~ /^\s+lab\b/ } split(/\n/, $tree);
+	like(plain($line), qr/unrelated \[no ancestor in common with the remote's; [^\]]+\]/,
+		'the line names the state and the remedy in one sentence');
+	unlike(plain($line), qr/local only/,
+		'and it is not read as a branch the remote has never had');
 };
 
 done_testing;
