@@ -36,11 +36,10 @@ are not left on the record as well, because the record is the shape D91 fixes
 and C<--json> emits it whole.
 
 The one axis the walk leaves to this module is the snapshot, which is what a
-deployment branch holds beyond the commit propagation last wrote on it.  Two
-smaller readings are left here as well, because both are answered off a branch
-the walk has already named rather than off anything the walk computes: whether
-a pending branch's delivered history is its first delivery alone, and what an
-environment with no branch on either side is waiting for.
+deployment branch holds beyond the commit propagation last wrote on it.  One
+smaller reading is left here as well, because it is answered off a branch the
+walk has already named rather than off anything the walk computes, which is
+whether a pending branch's delivered history is its first delivery alone.
 
 A command runs in one deployment root, so there is one record and one
 rendering of it.  A repository with a second deployment root is read by
@@ -84,17 +83,18 @@ Each row also carries C<seeded>, which is true where the branch's delivered
 history is its first delivery alone.  It is an annotation on the
 C<pending-deploy> reading rather than a reading of its own, because the seed
 is a delivery like any other and only the branch's own history tells it from
-the tenth, so a row reading anything else carries it false.  It is counted
-over the same ref the drift is measured against, and the count stops at the
-second marked commit, so a long branch costs no more to read than a short one.
+the tenth, so a row reading anything else carries it false, and so does a row
+that failed to load and a row with no branch to count it over.  It is counted
+over the same ref the drift is measured against, and it is asked of a pending
+row alone, so every other row costs no git work at all.
 
 An environment with no deployment branch on either side is one
-C<genesis pipeline-apply> has not cut a branch for.  The walk leaves such a
-row bare, since there is nothing to route a commit onto, and this function
-fills its certification cell with the C<never-applied> state so that the row
-says what it waits for in the wording
-L<Genesis::CI::Report/held_qualifier> gives every other environment in that
-state.
+C<genesis pipeline-apply> has not cut a branch for.  The walk closes that row
+itself, with the certification state C<no-branch>, so the reading reaches both
+this command and C<genesis propagate> and neither has a copy of the wording.
+Under C<refresh> false that state rests on remote-tracking refs nobody
+refreshed, so the cell is marked and the rendered wait carries
+C<[unverifiable]> after it.
 
 The record carries the applied pipeline record at the top with C<stale>,
 C<stale_envs>, and C<stale_because> beside it, read through
@@ -353,16 +353,15 @@ annotation where the row carries one, the routing summary, the branch's own
 state where no run may start from it, the snapshot flag, the hold, and
 C<[manual]>.  The seed reads C<seeded> and stands directly after the
 certification word, because it qualifies that word rather than standing beside
-it, and it takes the in-flight class the pending reading beside it takes.  Detail belongs in square brackets after the
-word it qualifies, so a branch carrying a hand edit reads
-C<drifted [ops/shared.yml differs: hand commit]>, and the trailing C<[manual]>
-is a marker
-rather than detail, which its own dim class tells apart.  A branch the remote
-has never had and one that shares no ancestor with the remote's each read as
-what they are with the operator's remedy in the brackets, because a report
-that only refused to describe them would leave the repository unexplained.  An
-environment that failed to load carries its error alone, because nothing else
-the row holds was read.
+it, and it takes the in-flight class the pending reading beside it takes.
+Detail belongs in square brackets after the word it qualifies, so a branch
+carrying a hand edit reads C<drifted [ops/shared.yml differs: hand commit]>,
+and the trailing C<[manual]> is a marker rather than detail, which its own dim
+class tells apart.  A branch the remote has never had and one that shares no
+ancestor with the remote's each read as what they are with the operator's
+remedy in the brackets, because a report that only refused to describe them
+would leave the repository unexplained.  An environment that failed to load
+carries its error alone, because nothing else the row holds was read.
 
 A held environment carries the word C<held> and then the qualifier the
 propagation run records for it, which is one of C<needs clearing> with the
@@ -382,6 +381,12 @@ carries the qualifier alone and no commit reason after it, so the row reads
 C<held, needs clearing (vsphere maintenance)> and stops there.  The walk
 stamps every commit the hold takes with the hold's own text, so the reason
 would otherwise print what somebody wrote on the record twice in one line.
+
+A row whose certification cell is marked carries C<[unverifiable]> after the
+wait, so C<held, awaiting pipeline-apply [unverifiable]> is what an
+environment with no branch reads under C<--no-refresh>.  The mark is read off
+the cell rather than off the C<stale> option, so one place decides it and the
+tree and C<--json> cannot come to disagree.
 
 Under C<stale> the routing summary carries C<[unverifiable]> after the count,
 because that is the component the refresh decides, and it keeps its own class,
@@ -461,6 +466,15 @@ breach report leave it, so the three fills agree about such a row.  Nothing
 about it was read, and a divergence cell carrying the word would say a reading
 had been withheld where none was ever taken.
 
+An environment whose certification state is C<no-branch> also has that cell
+marked, under C<unverifiable> beside the state.  The reading is the absence of
+a branch record and nothing else, so it rests on the same refs the divergence
+cell does, and unrefreshed it cannot tell an environment nobody has applied
+from one a teammate applied an hour ago.  The state is left standing rather
+than replaced, so the wait is still worded by
+L<Genesis::CI::Report/held_qualifier>, and C</compose_phrase> reads the mark
+and writes C<[unverifiable]> after the wait.
+
 Nothing else on the record is touched.  A phrase component marked with a class
 of the wrong kind would leave C</worst_class> answering wrong for every row, so
 the colour an operator reads a stale report by would carry no information at
@@ -492,10 +506,11 @@ Answers whether a branch's delivered history is its first delivery alone,
 which is the seed of D61.  Nothing about the reading tells a first delivery
 apart from a tenth, so the question is put to the branch's own history, which
 carries one marked commit and no more where the branch has been delivered to
-once.  The walk stops as soon as it has seen a second marked commit, so a long
-branch costs no more to read than a short one.  L<Genesis::CI::Marker> owns
-the marker's vocabulary and says which control commits a message names, so
-nothing here spells the prefix.
+once.  What bounds the cost is the fifty-commit limit it asks for, since
+L<Service::Git/log_subjects> runs git and builds the whole list before the
+loop begins; returning at the second marked commit saves the iteration below
+it and no git work.  L<Genesis::CI::Marker> owns the marker's vocabulary and
+says which control commits a message names, so nothing here spells the prefix.
 
 B<Parameters:>
 
@@ -509,8 +524,10 @@ The L<Service::Git> to walk through.
 
 The ref to walk, which its caller takes from the row the walk routed, so the
 history the seed is counted over is the one the reading was read from.  The
-fifty newest commits are read, which is further back than any branch holding
-its first delivery alone.
+fifty newest commits are read, and that is a window of commits rather than of
+deliveries: a branch whose earlier delivery sits further back than the window
+and which carries one marked commit inside it reads as the seed, which takes
+about fifty hand commits between two deliveries.
 
 =back
 

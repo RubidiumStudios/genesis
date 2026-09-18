@@ -229,6 +229,14 @@ C<ahead>, and C<behind> from the pre-flight's branch record, with C<unrelated>
 beside them, which the three states cannot say on their own, because an orphan
 branch and an ordinary divergence both hold the name on both sides.
 C<unrelated> is the encoder's own boolean, as C<manual> is.
+C<certified> carries what L</certified_for> answered for the environment, and
+for an environment whose deployment branch neither side holds it carries the
+state C<no-branch> instead, which is a reading of the refs rather than of a
+vault record.  That row is closed as soon as it is read, since there is no ref
+to read a marker off and nothing to deliver onto, and what it waits for is
+C<genesis pipeline-apply> cutting the branch.  A standing hold is read before
+the row closes, so an environment in both states reads as needing the hold
+cleared, which is the ranking L<Genesis::CI::Report/held_qualifier> fixes.
 
 C<discovery> is the mark the apply wrote for an environment the pipeline
 knows, which says where it could not render a manifest, and it is undef for
@@ -808,7 +816,10 @@ The environment whose record is read.
 B<Returns:> A hashref carrying C<state>, which is one of C<certified>,
 C<never-certified>, C<never-applied>, and C<unreadable>, with
 C<control_commit>, C<commit>, and C<at> beside it where the state is
-C<certified>, and C<error> where it is C<unreadable>.
+C<certified>, and C<error> where it is C<unreadable>.  It never answers
+C<no-branch>, which L</plan> writes onto the record for an environment whose
+deployment branch neither side holds, because that state is read off the refs
+and this function reads a vault record.
 
 B<Examples:>
 
