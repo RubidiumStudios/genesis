@@ -527,7 +527,8 @@ because the hold is a fact about the walk and not about the branch.
 
 A second deployment root in the same repository is untouched, even where it
 carries an environment of the same name, because the two roots have their own
-topologies and their own Exodus paths.
+topologies and their own Exodus paths.  That holds whichever root the command
+is run from, so a hold taken in a nested root covers that root alone.
 
 B<Parameters:>
 
@@ -573,6 +574,11 @@ the environment, so a call carrying more than one is a usage error.  No
 released-by fields are written, and the release is logged with the identity of
 whoever ran it.  Where no hold stands, it says so rather than claiming a
 release.
+
+A second deployment root in the same repository is untouched, even where it
+carries an environment of the same name, because the two roots have their own
+topologies and their own Exodus paths.  That holds whichever root the command
+is run from, so a release standing in a nested root clears that root alone.
 
 Releasing is a human act, so no deploy and no flag reaches this command.
 
@@ -1720,6 +1726,12 @@ The deployment root's environments in DAG order, off
 C<< $top->pipeline_topology >>, which both no-argument forms walk.  Bails with
 C<CONFIG> where the order is empty, since a command that held nothing and said
 nothing would read as a success.
+
+The unit is the deployment root and not the repository, because under D66 two
+roots in one repository may carry the same environment name, and a command
+that enumerated the repository would hold the wrong C<prod>.  The topology
+this reads is the one the propagate walk reads, so the run and the two
+commands never disagree about what a root holds.
 
 B<Parameters:>
 
