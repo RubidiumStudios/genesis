@@ -257,6 +257,12 @@ command decides the outcome.  Every held component takes the on-ice class,
 because a hold is something a person set or the topology imposed and nothing
 is moving until it is cleared.
 
+Where the standing hold is itself what took the held commit, the phrase
+carries the qualifier alone and no commit reason after it, so the row reads
+C<held, needs clearing (vsphere maintenance)> and stops there.  The walk
+stamps every commit the hold takes with the hold's own text, so the reason
+would otherwise print what somebody wrote on the record twice in one line.
+
 B<Parameters:>
 
 =over 4
