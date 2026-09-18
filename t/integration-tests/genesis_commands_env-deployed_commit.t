@@ -313,4 +313,83 @@ subtest 'an unreachable deployed commit refuses by name' => sub {
 	assert_w_restored($before, 'the refusal left working state alone');
 };
 
+# Proves T243's remaining half, which is that the branch the operator is
+# standing on does not decide the question once a target has been resolved.
+# A command that named a flag, or whose registration declares the deployed
+# commit, stands on that commit even from the deployment branch itself, and
+# the arm that switches nothing is for the runs that mean the tip.
+#
+# What the rows catch: an implementation that kept the standing-on-the-branch
+# arm ahead of the resolved target, which answers --as-deployed out of the
+# working tree and so reads whatever the operator happened to have checked
+# out, while saying in its own line that it made no branch change at all.
+subtest 'a branch the operator stands on does not decide the target' => sub {
+	plan tests => 4;
+
+	# The marker line is the discriminator, as it is above: each hook prints
+	# the one the tree it ran in carries, so the output says which version of
+	# the file the command read.
+	my $deployed_env = <<'YAML';
+---
+kit:
+  name:     dev
+  version:  latest
+  features: []
+genesis:
+  env:      qa
+  bosh_env: deployed-director
+params:
+  marker: the-deployed-version
+YAML
+	my $tip_env = <<'YAML';
+---
+kit:
+  name:     dev
+  version:  latest
+  features: []
+genesis:
+  env:      qa
+  bosh_env: coming-director
+params:
+  marker: the-coming-version
+YAML
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh');
+
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => $deployed_env},
+		message => 'the certified content',
+		push    => 1,
+	);
+	init_branch($h, 'qa');
+	my $deployed = deliver($h, 'qa', control => $control);
+	certify($h, 'qa', commit => $deployed, control_commit => $control);
+
+	my $later = commit_on_control($h,
+		files   => {'qa.yml' => $tip_env},
+		message => 'the undeployed content',
+		push    => 1,
+	);
+	deliver($h, 'qa', control => $later);
+	refresh($h, 'a');
+
+	fixture_bosh($h,
+		envs  => ['qa', 'deployed-director', 'coming-director'],
+		hooks => {
+			info => qq{grep '^  marker:' "\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml"\n},
+		},
+	);
+
+	# The operator is standing on the deployment branch itself, which is the
+	# arm that opens no session at all where the run targets the tip.
+	stand_on($h, 'qa/bosh');
+
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'info', '--as-deployed');
+	is($exit, 0, 'the flagged read succeeds from the deployment branch');
+	like("$out$err", qr/marker:\s*the-deployed-version/,
+		'the flag is answered from the deployed commit, not the tree stood on');
+	unlike("$out$err", qr/marker:\s*the-coming-version/,
+		'so the branch tip the operator was standing on is not what it read');
+};
+
 done_testing;

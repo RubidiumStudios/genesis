@@ -261,7 +261,10 @@ A command already standing on the branch it would switch to opens no session
 and takes no switch lock, because a session exists to leave a branch and come
 back and there is nothing here to leave. So a deploy run from the
 environment's own branch tolerates an edit in place, which is how an operator
-tests a change without committing it first.
+tests a change without committing it first. That arm yields to a resolved
+target, because a run that asked for the deployed commit asked for one commit
+and the branch it is standing on is a different one, so the flags are
+answered from the deployment branch as they are answered from anywhere else.
 
 An environment with no deployment branch is not switched at all. That is
 every environment between C<genesis new> and its first deploy, and the
@@ -491,6 +494,14 @@ Raised via C<bug> when C<branch_fast_forward> is true and C<branch_class> is
 anything but C<DEPLOYED_STATE>.  Only the deployed-state gate asks whether a
 command may move the branch, so the attribute anywhere else is read by nobody
 and reads as though the command moved a ref it never touches.
+
+=item C<"Command %s declares the default target %s; the only targets are tip and deployed.">
+
+Raised via C<bug> when C<default_target> is set to anything but C<'tip'> or
+C<'deployed'>.  The resolver reads every other word as the tip, so a
+misspelling would take the command to the commit its registration says it
+does not mean, and nothing after the registration can tell that typo from a
+deliberate C<'tip'>.
 
 =item C<"Command %s declares a branch target without a branch class.">
 
@@ -2257,7 +2268,8 @@ the command raises its own usage error rather than meeting a bug report
 about an undefined name.
 
 A command already standing on the branch it would switch to is not switched
-either, and it opens no session at all.  It says so in one C<info> line
+either, so long as the run resolved no target, and it opens no session at
+all.  It says so in one C<info> line
 before it runs, the way the two arms below do, and that line calls the branch
 by name rather than calling it a deployment branch, because the phrase belongs
 to the pre-deploy refusal this class must never meet and a row reads this
@@ -2266,7 +2278,10 @@ rather than the class, so a command that is already where it would be going
 takes no switch lock and asserts no cleanliness, since a session exists to
 leave a branch and come back and there is nothing here to leave.  That is
 what lets an operator edit a file on the deployment branch and deploy it in
-place, which is the qualifier I3 carries.
+place, which is the qualifier I3 carries, since a plain C<deploy> resolves no
+target.  A run that did resolve one passes through this arm and stands on
+that commit, because the tip of the branch the operator happens to be on is
+no answer to a request for the commit the environment is running.
 
 An environment whose deployment branch does not exist is not switched
 either.  Both the local branch and the remote-tracking one are asked about,

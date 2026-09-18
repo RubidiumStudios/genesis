@@ -16,6 +16,7 @@ use helper;
 use Test::More;
 use Test::Output;
 use Test::Exit;
+use Test::Exception;
 
 use Genesis::Commands;
 
@@ -205,6 +206,48 @@ subtest 'the marker stays on the command line at an ordinary width' => sub {
 		like($help, qr/^[A-Z ]*\Q$cmd\E\s{2,}[^\n]*\Q$marker\E/m,
 			"${cmd}'s marker is on its own first line at 100 columns");
 	}
+};
+
+subtest 'a default target the registration misspells is a bug' => sub {
+	# The attributes beside it are each guarded where they are declared,
+	# because nothing downstream can tell a typo from a deliberate word: a
+	# misspelt target reads as the tip, and the command then takes the commit
+	# it was declared not to take without anything saying so.
+	#
+	# This subtest is last in the file, because define_command fills the
+	# registration table before it reads the declaration, so the refused
+	# command is left in the table the sweeps above walk.
+	quietly {
+		throws_ok {
+			define_command('mistyped-target-cmd', {
+				summary        => 'A command that means a commit nobody can read',
+				branch_class   => Genesis::Commands::DEPLOYED_STATE,
+				default_target => 'deploved',
+			}, sub { })
+		} qr/default target/i,
+			'define_command dies on a target that is neither of the two words';
+	};
+
+	# The two words it does read still register, so the guard refuses the
+	# value rather than the attribute.
+	quietly {
+		lives_ok {
+			define_command('deployed-target-cmd', {
+				summary        => 'A command that means the deployed commit',
+				branch_class   => Genesis::Commands::DEPLOYED_STATE,
+				default_target => 'deployed',
+			}, sub { })
+		} 'define_command accepts the deployed target';
+	};
+	quietly {
+		lives_ok {
+			define_command('tip-target-cmd', {
+				summary        => 'A command that means the branch tip',
+				branch_class   => Genesis::Commands::DEPLOYED_STATE,
+				default_target => 'tip',
+			}, sub { })
+		} 'define_command accepts the tip target';
+	};
 };
 
 done_testing;
