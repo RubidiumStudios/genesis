@@ -590,6 +590,20 @@ sub is_ancestor {
 }
 
 # }}}
+# holds_commit - does this repository have the commit object at all {{{
+#
+# The narrower of the two questions, and the one a reader asks before it asks
+# git for anything that has to walk the commit.  A diff against a commit this
+# clone never fetched fails outright, so a caller that would rather report
+# what it cannot read than end on git's own error asks here first.
+sub holds_commit {
+	my ($self, $sha) = @_;
+	return 0 unless defined $sha && $sha =~ /^[0-9a-f]{4,40}$/;
+	return run({dir => $self->{root}, passfail => 1},
+		'git', 'cat-file', '-e', "$sha^{commit}") ? 1 : 0;
+}
+
+# }}}
 # commit_exists - does any ref in this repository still reach this commit {{{
 #
 # The question a propagation marker raises is whether a fresh clone could
@@ -599,12 +613,12 @@ sub is_ancestor {
 # those could never report the breach H30 names.
 sub commit_exists {
 	my ($self, $sha) = @_;
-	return 0 unless defined $sha && $sha =~ /^[0-9a-f]{4,40}$/;
 
 	# Asked first, because git refuses to answer the reachability question
-	# about a name it cannot resolve to an object at all.
-	return 0 unless run({dir => $self->{root}, passfail => 1},
-		'git', 'cat-file', '-e', "$sha^{commit}");
+	# about a name it cannot resolve to an object at all.  It is the object
+	# question, so it is asked through the reader that owns it rather than
+	# spelled a second time here.
+	return 0 unless $self->holds_commit($sha);
 
 	my ($out) = run({dir => $self->{root}, stderr => 0},
 		'git', 'branch', '--all', '--contains', $sha);

@@ -112,11 +112,18 @@ sub status_records {
 		branches  => $initial->{branches},
 		scope     => $opts{scope},
 		refreshed => $refresh ? 1 : 0,
+		# The walk's own refusals close by saying what was written, which is
+		# the account a run owes and no account at all to somebody who asked
+		# for a report.  This caller writes nothing and has nothing to
+		# report, so it says that instead.
+		outcome   => 'No report was produced.',
 	);
 
-	# The same lines on the record, for a caller that reads them afterwards
-	# rather than as they happen.
-	$record->{events} = $control->{events};
+	# The walk writes the flag as a number, so it is made the encoder's own
+	# boolean here and the marking below writes the same kind.  --json then
+	# emits one shape for the field whichever form of the command wrote the
+	# record, which is what D91 asks of every field it fixes.
+	$record->{refreshed} = $record->{refreshed} ? JSON::PP::true : JSON::PP::false;
 
 	# D43's staleness, asked through the one query Genesis::Top gives it, so
 	# the deploy pre-flight, the propagate pre-flight, and this command
@@ -124,11 +131,21 @@ sub status_records {
 	# an arrayref of env and reason pairs, and the reasons are its own two
 	# words rather than any filename, so the two lists below run in step and
 	# the renderer reads the pair at one index.
+	#
+	# The query diffs the applied commit against control, and git refuses a
+	# diff against an object this clone does not have, so a clone that never
+	# fetched the commit the pipeline was applied from ended the whole report
+	# on that refusal.  A command that reports and resolves nothing says what
+	# it cannot read instead: the three fields are left null, which is one
+	# more reading than a boolean carries, and both renderers say the
+	# staleness is unverifiable.
 	if (my $applied = $record->{applied}) {
-		my $changes = $top->pipeline_staleness($git);
-		$applied->{stale}         = @$changes ? JSON::PP::true : JSON::PP::false;
-		$applied->{stale_envs}    = [map {$_->{env}} @$changes];
-		$applied->{stale_because} = [map {$_->{reason}} @$changes];
+		if ($git->holds_commit($applied->{control_commit})) {
+			my $changes = $top->pipeline_staleness($git);
+			$applied->{stale}         = @$changes ? JSON::PP::true : JSON::PP::false;
+			$applied->{stale_envs}    = [map {$_->{env}} @$changes];
+			$applied->{stale_because} = [map {$_->{reason}} @$changes];
+		}
 	}
 
 	# The walk leaves drifted null for this command to fill, and the fill
@@ -146,6 +163,34 @@ sub status_records {
 
 	$record->{breaches} = [unfetchable_markers($record, $git)];
 
+	# Last, so that everything the record carries has been filled before the
+	# stale form goes over it.
+	$record = _mark_unverifiable($record) unless $refresh;
+
+	return $record;
+}
+
+# }}}
+# _mark_unverifiable - every value that rests on a refresh nobody ran {{{
+#
+# D40 keeps one --no-refresh, on this command alone, and it yields a
+# read-only report with every cell that rests on the remote-tracking refs
+# marked unverifiable.  The divergence cell is set through its state rather
+# than replaced by a string, so --json emits one shape for that field
+# whichever form of the command wrote it, and a row that had no divergence at
+# all gains the same shape with the same word in it.
+#
+# The word goes no further than that.  Marking each phrase component with a
+# class of the wrong kind would make worst_class answer wrong for every row,
+# so the colour an operator reads a stale report by would carry no
+# information at all.  What the renderers add is the header, the bracket on
+# the routing summary, and the qualifier on the breach line, each of which
+# says the reading rather than replacing it.
+sub _mark_unverifiable {
+	my ($record) = @_;
+	$record->{refreshed} = JSON::PP::false;
+	$record->{environments}[$_]{divergence}{state} = UNVERIFIABLE
+		for 0 .. $#{$record->{environments}};
 	return $record;
 }
 
@@ -273,6 +318,10 @@ sub render_tree {
 	# Directly under the pipeline header, so the operator reads that the
 	# report rests on a stale pipeline before they read a row.
 	push @out, _applied_line($record) if $record->{applied};
+	# Above the columns, because an operator has to read that the report is
+	# stale before they read a row of it.
+	push @out, csprintf("  #R{the report is stale, because no refresh ran; every cell marked %s rests on one}",
+		UNVERIFIABLE) if $opts{stale};
 	push @out, '';
 
 	my $width = 0;
@@ -302,9 +351,16 @@ sub render_tree {
 	# Beneath the table, because a breach is about the repository rather than
 	# about one row of it, and an operator reading the rows should meet it
 	# after the environment it names rather than in the middle of the report.
+	#
+	# The whole reading rests on the remote-tracking refs, so under the stale
+	# form it is qualified rather than withheld.  A commit propagated an hour
+	# ago and never fetched reads here exactly like one the remote dropped,
+	# and an operator who cannot tell the two apart needs to be told which
+	# reading they are holding.
 	for my $breach (@{$record->{breaches} || []}) {
-		push @out, csprintf("  #R{%s's marker names control@%s, which the remote no longer holds}",
-			$breach->{env}, _short($breach->{control_commit}));
+		push @out, csprintf("  #R{%s's marker names control@%s, which the remote no longer holds%s}",
+			$breach->{env}, _short($breach->{control_commit}),
+			$opts{stale} ? sprintf(' [%s]', UNVERIFIABLE) : '');
 	}
 
 	push @out, '';
@@ -323,6 +379,15 @@ sub _applied_line {
 	my $applied = $record->{applied} or return ();
 
 	my $line = csprintf("  #Yi{applied at} #C{%s}", _short($applied->{control_commit}));
+
+	# Null rather than false is the reading status_records leaves where this
+	# clone does not hold the commit the pipeline was applied from, since the
+	# query that answers the staleness cannot be asked about a commit git
+	# does not have.  The remedy is the fetch that brings it, said in one
+	# clause, because a report is not the place to argue the case.
+	return $line.csprintf("  #R{[stale: %s]}  this clone does not hold that commit",
+		UNVERIFIABLE) unless defined $applied->{stale};
+
 	return $line unless $applied->{stale};
 
 	my @changed = @{$applied->{stale_envs} || []};
@@ -355,13 +420,26 @@ sub compose_phrase {
 
 	my @phrase = ($word{$row->{reading}} || [wrong => 'unknown reading']);
 	my @pending = @{$row->{pending} || []};
-	push @phrase, [in_flight => sprintf('%d pending', scalar @pending)]
+	# The routing summary is the component that rests on the refresh, so it
+	# is the component the stale form marks.  The word rides in brackets
+	# after the words it qualifies and the component keeps its own class,
+	# because a component marked wrong would leave worst_class answering
+	# wrong for the whole row.
+	push @phrase, [in_flight => sprintf('%d pending%s', scalar @pending,
+		$opts{stale} ? sprintf(' [%s]', UNVERIFIABLE) : '')]
 		if @pending;
 	# A branch no run may start from is described rather than refused, so the
 	# row says which state it is in and what the operator does about it.  The
 	# remedy is one sentence, because the whole of it is the refusal's own
 	# paragraph and a tree line has room for the act rather than the argument.
-	if (my $div = $row->{divergence}) {
+	#
+	# Neither remedy is offered by a stale report.  Both readings rest on the
+	# remote-tracking refs, and unrefreshed they cannot tell a branch nobody
+	# published from one a teammate pushed an hour ago.  Telling an operator
+	# to delete the second is worse than telling them nothing, so the stale
+	# form says nothing here and the divergence cell carries the word
+	# instead.
+	if (my $div = $opts{stale} ? undef : $row->{divergence}) {
 		push @phrase, [wrong => 'unrelated [no ancestor in common with the '.
 			'remote\'s; move anything wanted to control and delete it]']
 			if $div->{unrelated};

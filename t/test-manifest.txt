@@ -369,6 +369,7 @@ integration-tests/genesis_ci_status-applied.t                 # the stale header
 integration-tests/genesis_ci_status-breach.t                  # a marker naming a control commit no ref still reaches, reported by environment and by sha
 integration-tests/genesis_ci_status-drift.t                   # both axes reported at once, and every drifted file named beside the hand commit
 integration-tests/genesis_ci_status-held.t                    # the held qualifier and the routing reason in the words the propagation run prints
+integration-tests/genesis_ci_status-no_refresh.t              # the stale form, its marking, and the registration attribute the branch-class gate reads
 integration-tests/genesis_ci_status-record.t                  # one canonical record per environment, emitted as JSON and rendered as the tree
 integration-tests/genesis_ci_status-rendering.t               # detail in brackets, each component in its own colour, and the row in the worst one
 integration-tests/genesis_ci_report-outcomes.t                # one outcome per environment, one line per routed commit, and the overwritten file

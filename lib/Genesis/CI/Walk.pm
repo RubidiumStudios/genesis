@@ -93,12 +93,17 @@ sub read_durable_state {
 	# whatever that logging eval left behind and the refusal named the path
 	# with an empty reason beside it.
 	my $failure = $@;
+	# The closing sentence comes from the caller, because a run that writes
+	# and a command that only reports owe the operator different accounts of
+	# where they stopped.  "Nothing was written" says nothing to somebody who
+	# asked for a report and never expected a write.
 	$refuse->(
 		{exitcode => UNAVAILABLE},
 		"Could not read the applied record at #C{%s}: %s\n\n".
 		"The run reads which commit the pipeline was applied from before it ".
-		"decides anything, so it will not guess at one.  Nothing was written.",
-		$top->applied_record_path, $failure =~ s/\s+$//r
+		"decides anything, so it will not guess at one.  %s",
+		$top->applied_record_path, $failure =~ s/\s+$//r,
+		$args{outcome} // 'Nothing was written.'
 	) if $failure;
 
 	return {
@@ -995,6 +1000,7 @@ sub plan {
 		git       => $git,
 		provider  => $opts{provider},
 		refreshed => $opts{refreshed},
+		outcome   => $opts{outcome},
 	);
 
 	my $control     = $state->{control}{branch};

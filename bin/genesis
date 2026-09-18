@@ -2161,15 +2161,21 @@ define_command("pipeline-status", {
 		"disagree about what is held and why.  The command writes nothing.",
 	function_group => Genesis::Commands::PIPELINE,
 	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	# D81 keeps every fact about a command's branch handling here, so the
+	# branch-class gate reads this rather than carrying the command's name.
+	# The operator may skip this command's refresh, and --no-refresh below is
+	# how they say so; the gate then makes none on the command's behalf.
+	refresh        => 'optional',
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [
 		"no-refresh" =>
 			"Report from the remote-tracking refs this clone already has, ".
-			"without refreshing them first.  Every cell that depends on the ".
-			"remote is marked unverifiable and the header says the report is ".
-			"stale.  This is the only command that takes the option, and it ".
-			"writes nothing either way.",
+			"without refreshing them first.  The header then says the report ".
+			"is stale, the routing summary and the divergence cell are ".
+			"marked unverifiable, and every reading that rests on those refs ".
+			"alone is qualified where it is printed.  This is the only ".
+			"command that takes the option, and it writes nothing either way.",
 
 		'json' =>
 			"Emit the canonical status record instead of the tree.  The tree ".
@@ -2228,6 +2234,12 @@ define_command("pipeline-describe", {
 		"with gate and trigger annotations.  Replaces `genesis describe`.",
 	function_group => Genesis::Commands::PIPELINE,
 	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	# It resolves the repository's own configuration out of files, so it
+	# holds no ref a refresh could make current and a fetch would refuse
+	# offline what it can always answer from disk.  There is no flag, because
+	# there is nothing for an operator to choose: the declaration is the
+	# choice, and the branch-class gate reads it.
+	refresh        => 'never',
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 }, 'Genesis::Commands::Pipelines::pipeline_describe');

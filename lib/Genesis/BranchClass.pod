@@ -25,9 +25,10 @@ remote before it reads anything, because the question the assertion answers
 is asked of the remote's tip and not of whatever this clone last happened to
 fetch. Three do not. C<pipeline-status> under C<--no-refresh> and
 C<pipeline-describe> both answer from disk and promise no network call, and
-C<propagate> never reaches the assertion at all, because the gate returns
-above it for the one command that switches to control inside its own
-session.
+each says so through the C<refresh> attribute at its own registration rather
+than by being named here or in the gate. C<propagate> never reaches the
+assertion at all, because the gate returns above it for the one command that
+switches to control inside its own session.
 
 A pre-deploy command changes what will be delivered, so it belongs on the
 control branch or on a feature branch cut from it. The deployment branch,
@@ -334,6 +335,16 @@ The refresh runs above the classification, so a run the gate goes on to
 refuse has refreshed control by the time it refuses. Where a command ends
 therefore says nothing about whether it refreshed.
 
+Its one option that decides that is C<refresh>, which the gate passes as
+false for a command whose registration declares a refresh mode: C<< refresh
+=E<gt> 'optional' >> given C<--no-refresh>, which is C<pipeline-status>, and
+C<< refresh =E<gt> 'never' >>, which is C<pipeline-describe>. Nothing else
+may skip it, because the descent condition below is read through the
+remote-tracking ref and a stale one would let a feature branch cut from an
+older control tip pass a check it should fail. The declaration is read at
+the registration rather than from a list of command names, so the gate, the
+help text, and the command's own reading cannot drift apart.
+
 Standing on control is itself a refusal for a command that passes
 C<commits =E<gt> 1> where C<$top-E<gt>control_requires_pr> is true, at
 C<Genesis::Exit::DATAERR>, because the protection that key derives blocks a
@@ -369,9 +380,9 @@ The C<Service::Git> handle on the repository the command is running in.
 
 =item C<%opts>
 
-C<refresh> is read, and C<refresh =E<gt> 0> skips the refresh for the two
-commands that promise no network call, which are C<pipeline-status> under
-C<--no-refresh> and C<pipeline-describe>, which answers out of the
+C<refresh> is read, and C<refresh =E<gt> 0> skips the refresh for a command
+whose registration declares a refresh mode, which is C<pipeline-status>
+under C<--no-refresh> and C<pipeline-describe>, which answers out of the
 repository's own files. C<commits> says whether the command makes a commit
 on control, which only the C<control_requires_pr> refusal below reads.
 C<adding> is the environment name the command is about to create, and it is

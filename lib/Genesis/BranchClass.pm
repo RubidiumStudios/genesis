@@ -280,9 +280,11 @@ sub assert_pre_deploy {
 	# branch the gate is about to refuse as well as on one it permits, so
 	# where a command ends says nothing about whether it refreshed.
 	#
-	# The caller passes refresh => 0 for the two commands that promise no
-	# network call, which are pipeline-status under --no-refresh (D40) and
-	# pipeline-describe, which answers from the repository's own files.
+	# The caller passes refresh => 0 for a command whose registration
+	# declares that its refresh is the operator's to skip or that it never
+	# makes one, which is pipeline-status under --no-refresh (D40) and
+	# pipeline-describe, which answers from the repository's own files.  The
+	# gate reads that declaration; nothing here knows either command's name.
 	refresh_control($top, $git)
 		unless defined($opts{refresh}) && !$opts{refresh};
 
