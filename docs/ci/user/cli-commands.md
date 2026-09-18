@@ -73,6 +73,34 @@ genesis pipeline-apply --debug-dir ./stages --skip-vault
 
 The provider is whichever type `pipeline.provider.type` names. Concourse is the only one Genesis can compile for today. The `github-actions` type validates and resolves on the CLI side, but it has no compiling class yet, so a repository set to it is told so rather than being given a pipeline. The `manual` type has no pipeline to set at all, and the command says which stage it skipped and exits successfully.
 
+## genesis pipeline-hold
+
+Holds propagation to an environment until somebody releases it.
+
+```
+genesis prod pipeline-hold "waiting on the capacity report"
+genesis pipeline-hold "freezing the fleet for the audit"
+```
+
+The reason is required. With an environment named it holds that one, and without one it holds every environment in the deployment root. While the hold stands, `genesis propagate` delivers nothing new to the environment and opens or updates no pull request, and everything already on the deployment branch stays deployable. The run's report and `genesis pipeline-status` both show `held, needs clearing` with the reason, whether or not anything is due.
+
+A control commit can set the same hold for itself with a `Genesis-Stage: hold: <reason>` trailer, and the run writes the record when it delivers that commit, so the deploy of it finds the hold already standing.
+
+## genesis pipeline-release
+
+Clears the hold, so the next `genesis propagate` delivers to the environment again.
+
+```
+genesis prod pipeline-release
+genesis pipeline-release
+```
+
+Releasing is a human act. No deploy clears a hold, and no flag does either. The record is deleted outright and no released-by fields are kept, so the release lives in the command's log line.
+
+## What landed after the MVP
+
+These two commands are the first entries on this list, and they arrived after the MVP rather than with it. The MVP shipped the propagation hold's record path, the outcome words that carry a hold's qualifier, and the readers that report one, and it shipped no way to set or clear a hold by hand. Nothing above the commands was rebuilt when they arrived.
+
 ## genesis graph (deprecated)
 
 The `graph` command generates a Graphviz DOT representation of your pipeline topology. Pipe the output through a Graphviz renderer to produce an image. It warns that it is deprecated, and it is the one command left that calls the legacy generator directly.
