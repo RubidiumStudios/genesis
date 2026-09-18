@@ -417,18 +417,22 @@ sub create_branch {
 #
 #   $git->set_branch_ref('qa/bosh', 'refs/remotes/origin/qa/bosh');
 #
-# The forced write onto a local branch, which the design admits in two cases
-# only: the pre-flight's reset of a marker-only commit, and the session's
-# abort of a branch it committed to.  It refuses the checked-out branch,
+# The forced write onto a local branch, which the design admits in three
+# cases only: the pre-flight's reset of a marker-only commit, the session's
+# abort of a branch it committed to, and the branch gate's fast-forward of a
+# deployment branch this clone holds behind its counterpart, made for a
+# command whose registration declares branch_fast_forward and for no other.
+# The third discards nothing, its caller having asked resolve_branch first
+# and moving only on behind.  It refuses the checked-out branch,
 # because git's own `branch -f` refuses there and a ref that disagreed with
 # the working tree beside it would be worse than a refusal.
 sub set_branch_ref {
 	my ($self, $branch, $ref) = @_;
 
 	# SOFTWARE, because a caller that asks to move the branch the tree is
-	# standing on has a defect in it.  The two callers the design admits
-	# both know where they are standing, so an operator cannot provoke this
-	# by anything they type.
+	# standing on has a defect in it.  Every caller the design admits knows
+	# where it is standing, so an operator cannot provoke this by anything
+	# they type.
 	bail(
 		{exitcode => SOFTWARE},
 		"Refusing to force #C{%s}, which is the branch this working tree is ".
