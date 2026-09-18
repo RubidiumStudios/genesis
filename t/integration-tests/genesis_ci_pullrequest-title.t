@@ -21,8 +21,8 @@
 # The first row's open pull request is declared on the double and its branch is
 # not on R, which is the shape the harness's own with_open_pr builds.  The
 # earlier run's title and proposed record are what the marker has to move off.
-# A run rebuilding a branch R already carries needs the lease that Task 16.11
-# puts on the publish spec, and until that lands such a push is rejected as a
+# A run rebuilding a branch R already carries needs the lease the publish spec
+# carries, and a push that went without one would be rejected as a
 # non-fast-forward before any of this is reached.
 #
 # The due commits are laid through the environment file at the deployment root
@@ -44,13 +44,6 @@ use Genesis;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
-
-# Every PATCH a run sent, oldest first, as the call log recorded it, so a row
-# can read the url it named as well as the body it carried.
-sub patch_calls {
-	my ($gh) = @_;
-	return grep {($_->{method} // '') eq 'PATCH'} gh_calls($gh);
-}
 
 subtest 'an unreviewed pull request is rebuilt and retitled' => sub {
 	plan tests => 10;
@@ -158,12 +151,12 @@ subtest 'several open pull requests warn and the first decides' => sub {
 # request that follows it, and there is nowhere else to read it from.
 #
 # The leftover is on the branch this clone still carries and not on the branch
-# R carries.  A rebuild of a branch R holds is pushed without a lease until
-# Task 16.11 puts one on the publish spec, git refuses it as a
-# non-fast-forward, and the environment records that its publish was rejected
-# before any of the title or the body is reached.
+# R carries.  A rebuild of a branch R holds goes under the lease the publish
+# spec carries, and one pushed without a lease would be refused as a
+# non-fast-forward, with the environment recording that its publish was
+# rejected before any of the title or the body is reached.
 subtest 'a new pull request supersedes the closed attempts' => sub {
-	plan tests => 9;
+	plan tests => 10;
 
 	my $h   = ready(kit => 'omega-v2.7.0');
 	my $gh  = $h->{gh};
@@ -232,6 +225,19 @@ subtest 'a new pull request supersedes the closed attempts' => sub {
 	# list is built from would otherwise be caught on one axis only.
 	unlike($opened->{body}, qr/#$merged\b/,
 		'and the body names the merged one no more than the title does');
+
+	# The other half of the pairing the changes-requested row makes, which
+	# asserts that its own body supersedes nothing.  The words themselves are
+	# in this body, carried in after the Supersedes prefix the superseding
+	# path puts in front of them, so the assertion is anchored to the start of
+	# a line, where only a rebuild answering a reviewer opens on them.
+	#
+	# A guard, and green on arrival: one renderer writes both paragraphs and
+	# the prefix is what tells them apart, so this is what would catch a
+	# superseding body that had lost its prefix and begun reading as a plain
+	# answer to a review.
+	unlike($opened->{body}, qr/^Changes were requested/m,
+		'and never opens the way a body answering a reviewer opens');
 
 	# A guard rather than a row that starts red: the reset that drops what the
 	# branch carried landed with the arm itself, and T262 asks that a

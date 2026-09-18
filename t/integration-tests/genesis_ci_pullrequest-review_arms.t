@@ -6,8 +6,8 @@
 # T265 has a pull request whose reviewer asked for changes rebuilt with the fix
 # that answers them, pushed, and its new body naming that review.
 #
-# The row needs a pull request branch that R already carries and a reviewer who
-# has approved what is on it, so the first run is what builds and publishes
+# T264's row needs a pull request branch that R already carries and a reviewer
+# who has approved what is on it, so the first run is what builds and publishes
 # that branch.  The pull request that run opens is unreviewed, and the double
 # has no way to add a review to a pull request it already holds, so the row
 # closes that one and declares the approved one in its place.  Leaving both
@@ -50,13 +50,6 @@ use Genesis;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
-
-# Every PATCH a run sent, oldest first, as the call log recorded it, so a row
-# can read the url it named as well as the body it carried.
-sub patch_calls {
-	my ($gh) = @_;
-	return grep {($_->{method} // '') eq 'PATCH'} gh_calls($gh);
-}
 
 subtest 'an approved pull request freezes' => sub {
 	plan tests => 11;
@@ -189,9 +182,9 @@ subtest 'a gate ahead of the freeze keeps the merge qualifier' => sub {
 # The pull request is declared on the double and its branch is not yet on R,
 # which is the shape the harness's own with_open_pr builds and the shape the
 # first row of genesis_ci_pullrequest-title.t takes.  A run that rebuilds a
-# branch R already carries needs the lease Task 16.11 puts on the publish
-# spec, and until that lands such a push is refused as a non-fast-forward
-# before any body is composed.  What the reviewer asked for is therefore a
+# branch R already carries needs the lease the publish spec carries, and a
+# push that went without one would be refused as a non-fast-forward before any
+# body is composed.  What the reviewer asked for is therefore a
 # fixture on the API side and the branch R gains is this run's own.
 #
 # Two of the seven assertions start red, which are the two that read the
@@ -251,6 +244,11 @@ subtest 'changes requested rebuilds and names the review' => sub {
 	# The two paragraphs come off one renderer, so the one thing that could
 	# tell them apart in a body is the opening sentence each caller gives it.
 	# A rebuild that answers a reviewer never supersedes anything.
+	#
+	# A guard, and green on arrival: the supersedes paragraph is composed only
+	# where the state is closed unmerged, which this row's state is not, so
+	# nothing here has ever put that word in the body.  It is what would catch
+	# a renderer that started writing both openings into one body.
 	unlike($patch->{body}, qr/Supersedes/,
 		'without the opening a superseding body would have used');
 
