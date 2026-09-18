@@ -5267,48 +5267,57 @@ sub _post_deploy {
 	# Remove exodus-only manifest files
 	$self->_remove_repository_manifest_copies;
 
-	# CI-configured branch finalization: check the working tree the deploy
+	# Genesis-driven fallback for older bosh kits whose post-deploy hook
+	# doesn't know how to consume inline director-cpi declarations.
+	$self->_upload_director_cpi_if_necessary;
+
+	# Run post-deploy hook
+	$self->run_hook(
+		'post-deploy',
+		rc => $state->{results}[1],
+		data => $state->{predeploy_data},
+		interactive => !$noprompt,
+		flags => $opt_flags,
+	) if $self->has_hook('post-deploy');
+
+	# CI-configured branch finalization: assert the working tree the deploy
 	# leaves behind on the env branch, then run the auto-cascade
 	# (manual-provider only).  Non-manual providers (concourse, gha) own
 	# their own cascade, so we skip the cascade in those cases.
+	#
+	# It sits after the kit's post-deploy hook rather than before it, because
+	# the assertion is about what the whole deploy left behind and that hook
+	# is the last thing the deploy runs.  The cascade moves with it, and it
+	# has to: the assertion is the child's precondition, so the finish comes
+	# first, and the hook now runs on the environment's branch instead of on
+	# the control branch the cascade's one-way checkout used to leave it.
 	if ($self->top->pipeline_enabled) {
-		my $git    = $state->{pipeline_git};
-		my $branch = $state->{pipeline_branch};
 
-		# Under D35 nothing here commits or pushes, and under D63 the
-		# redacted manifest reaches its artifacts branch through the
-		# propagate run rather than through a commit the deploy makes.  The
-		# diff stays, because D84 turns it into the session's clean
-		# assertion at this step's last task.
-		if ($deployment_ok && $git && $branch) {
-			my $pre    = $state->{pre_deploy_unclean} || {};
-			my $prefix = $git->prefix // '';
-			my $post   = $git->status($prefix || '.');
-			# Under the repository and hybrid stores the rendered manifest
-			# and its neighbours are Genesis's own writes under D14, so they
-			# are left out of a warning whose subject is what wrote into the
-			# repository without being asked to (D35).  Under the exodus
-			# store they are already gone and the filter matches nothing.
-			#
-			# The fact is read off the variable that decided the write rather
-			# than off the accessor.  manifest_store answers repository
-			# outright for an environment below minimum_version 3.1.0,
-			# whatever the configuration says, so on such an environment
-			# configured for exodus the legacy write never runs and the
-			# accessor would nonetheless drop a path under .genesis/manifests/
-			# that really is a kit hook's.
-			my $legacy = $manifest_store ne 'exodus';
-			my @modified = grep {
-				!($legacy && m{(?:^|/)\.genesis/manifests/})
-			} grep {
-				!exists($pre->{$_}) || $pre->{$_} ne $post->{$_}
-			} sort keys %$post;
-
-			warning(
-				"Deploy left unexpected working-tree changes:\n%s\n\n".
-				"These are not being committed.  Review and clean up manually.",
-				join("\n", map {"  $_"} @modified)
-			) if @modified;
+		# D84.  Clean means no tracked modification and nothing staged;
+		# untracked files are ignored, so an operator's scratch file blocks
+		# nothing and no session deletes it.  A tracked modification here is
+		# a defect, a kit hook that wrote into the repository or a deploy
+		# that died before its cleanup, so abort names the files before it
+		# discards them and restores the branch.  The deploy itself
+		# succeeded, BOSH deployed and the record is written, and the
+		# command still exits non-zero, because a kit that writes into the
+		# repository should be loud and nobody should redeploy believing
+		# this failed.
+		if (my $session = $opts{session}) {
+			unless ($session->finish_if_clean) {
+				my @modified = @{$session->modified_paths};
+				$session->abort(sprintf(
+					"%s deployed and its deployment record is written, so the ".
+					"environment is running and nothing needs redeploying.\n\n".
+					"The deploy left %s modified in the repository, which ".
+					"Genesis does not write and has now discarded:\n%s\n\n".
+					"That is the kit's doing.  Report it against %s.  ".
+					"Downstream propagation was withheld; run ".
+					"`genesis propagate` when the tree is sound.",
+					$self->name, count_nouns(scalar(@modified), 'file'),
+					join("\n", map {"  - $_"} @modified), $self->kit->id
+				), named => 1, exitcode => Genesis::Exit::SOFTWARE);
+			}
 		}
 
 		# Auto-cascade propagation (manual-provider only).
@@ -5345,19 +5354,6 @@ sub _post_deploy {
 			) if $rc != 0;
 		}
 	}
-
-	# Genesis-driven fallback for older bosh kits whose post-deploy hook
-	# doesn't know how to consume inline director-cpi declarations.
-	$self->_upload_director_cpi_if_necessary;
-
-	# Run post-deploy hook
-	$self->run_hook(
-		'post-deploy',
-		rc => $state->{results}[1],
-		data => $state->{predeploy_data},
-		interactive => !$noprompt,
-		flags => $opt_flags,
-	) if $self->has_hook('post-deploy');
 
 	# Clean up deployment state
 	delete $self->{deployment_state};

@@ -1856,7 +1856,13 @@ sub deploy {
 		"Preflight checks failed; deployment operation halted."
 	) unless $ok;
 
-	$ok = $env->deploy(%options, network_map => $network_map, reason => $reason);
+	# The session goes to _post_deploy, which finishes it when the tree is
+	# clean and aborts naming the files when it is not.  Nothing else on this
+	# path finishes it, so the assertion cannot be skipped by an early
+	# return, and the gate's own exit hook finds a session that is already
+	# closed, on which finish is a no-op.
+	$ok = $env->deploy(%options, network_map => $network_map, reason => $reason,
+		session => $preflight && $preflight->{session});
 
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;
@@ -2009,9 +2015,10 @@ sub _warn_commits_due {
 	# the failure left behind.
 	if (my $error = $record->{error}) {
 		warning(
-			"\nCould not tell what is due to #C{%s}: %s\n\nThe deploy goes ".
-			"ahead with what the branch carries.  Run #C{genesis propagate} ".
-			"once the reason above is settled.",
+			"\nCould not tell what is due to #C{%s}: %s\n\nThe pre-flight goes ".
+			"on from here, and the deploy proper will meet the same fault if ".
+			"that is what it was.  Run #C{genesis propagate} once the reason ".
+			"above is settled.",
 			$env->name, $error
 		);
 		return [];
