@@ -1096,6 +1096,18 @@ sub plan {
 				return;
 			}
 
+			# Whether a person rather than a trigger starts this
+			# environment's deploy.  It is read here, off the environment
+			# already in hand, because nothing below holds one and a reader
+			# that asked later would load every environment a second time.
+			# The key is inert under the manual provider, where every deploy
+			# waits for a person anyway, and the ancestor hold reads it under
+			# that same condition, so the two cannot come to disagree about
+			# what the declaration means.
+			$env_record->{manual} =
+				(($state->{provider} // '') ne 'manual'
+					&& $env->lookup('genesis.pipeline.manual', 0)) ? 1 : 0;
+
 			# The certified commit, which is the control commit the
 			# environment's last successful deployment was made from.  A
 			# vault this run cannot reach makes the environment failed

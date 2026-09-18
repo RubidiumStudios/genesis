@@ -366,6 +366,7 @@ integration-tests/genesis_ci_walk-two_roots.t                 # two roots sharin
 integration-tests/genesis_ci_walk-exit_codes.t                # the status says which stage the run ended in
 integration-tests/genesis_ci_walk-preview.t                   # the withdrawn flags are refused, and the preview names each commit, its files, and its verdict
 integration-tests/genesis_ci_status-record.t                  # one canonical record per environment, emitted as JSON and rendered as the tree
+integration-tests/genesis_ci_status-rendering.t               # detail in brackets, each component in its own colour, and the row in the worst one
 integration-tests/genesis_ci_report-outcomes.t                # one outcome per environment, one line per routed commit, and the overwritten file
 integration-tests/genesis_ci_report-preview_warnings.t        # the preview warns where its answer rests on a push or a reset it did not make
 integration-tests/genesis_ci_publish-outcomes.t               # one push per branch, and a refused branch's rejection as its outcome
