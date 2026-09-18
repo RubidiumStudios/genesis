@@ -509,8 +509,9 @@ carries one marked commit and no more where the branch has been delivered to
 once.  What bounds the cost is the fifty-commit limit it asks for, since
 L<Service::Git/log_subjects> runs git and builds the whole list before the
 loop begins.  Returning at the second marked commit saves the iteration below
-it and no git work at all.  L<Genesis::CI::Marker> owns the marker's vocabulary and
-says which control commits a message names, so nothing here spells the prefix.
+it and no git work at all.  L<Genesis::CI::Marker> owns the marker's
+vocabulary and says which control commits a message names, so nothing here
+spells the prefix.
 
 B<Parameters:>
 
