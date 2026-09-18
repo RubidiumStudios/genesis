@@ -534,6 +534,11 @@ carries an environment of the same name, because the two roots have their own
 topologies and their own Exodus paths.  That holds whichever root the command
 is run from, so a hold taken in a nested root covers that root alone.
 
+This is a documented operator command, and its reference entry lives in
+F<docs/ci/user/cli-commands.md>.  It and C<pipeline_release> arrived after the
+MVP rather than with it, and that same file carries the list of what landed
+when.
+
 B<Parameters:>
 
 =over 4
@@ -589,6 +594,10 @@ topologies and their own Exodus paths.  That holds whichever root the command
 is run from, so a release standing in a nested root clears that root alone.
 
 Releasing is a human act, so no deploy and no flag reaches this command.
+
+This is a documented operator command, and its reference entry sits beside the
+hold's in F<docs/ci/user/cli-commands.md>, which is where the list of what
+landed after the MVP is kept.
 
 B<Parameters:>
 
