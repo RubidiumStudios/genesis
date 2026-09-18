@@ -435,6 +435,7 @@ integration-tests/genesis_env-check_workflow.t       # Pre-deployment validation
 integration-tests/genesis_env-secrets_workflow.t     # Secrets lifecycle workflow
 integration-tests/genesis_env-bosh_config_workflow.t # BOSH config management workflow
 integration-tests/genesis_env-feature_compatibility.t # effective_min_version + audit capture + `genesis version` augmentation
+integration-tests/genesis_env-hold_record.t          # the propagation hold record's writers, and the deploy it survives
 # Scaffold for can_build_cloud_configs strategy matrix; semantics pending design
 #integration-tests/genesis_env-cloud_config_creation.t
 # Tests needing rebuild - concepts preserved, need to test actual Genesis methods

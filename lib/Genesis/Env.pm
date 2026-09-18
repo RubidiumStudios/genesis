@@ -36,6 +36,7 @@ use IO::Uncompress::Gunzip qw/gunzip $GunzipError/;
 use JSON::PP qw/encode_json decode_json/;
 use MIME::Base64 qw/encode_base64 decode_base64/;
 use POSIX qw/strftime/;
+use Sys::Hostname ();
 use Time::Piece;
 use Time::Seconds;
 use Time::HiRes qw/gettimeofday/;
@@ -3367,9 +3368,9 @@ sub pipeline_record {
 #
 # D50 and D53: a per-environment record beside the deployments, carrying a
 # reason, who set it, where, and when, and nothing else.  Undef when the
-# path is absent.  Only the reader lives here: pipeline-hold and
-# pipeline-release write and delete it, and both sit outside the MVP under
-# D59, while the walk has to honour the record from the day it can exist.
+# path is absent.  set_hold below writes it and clear_hold deletes it, and
+# pipeline-hold and pipeline-release are the two commands that call them,
+# while the walk has to honour the record from the day it can exist.
 #
 # The read goes through this environment's own vault, for the reason
 # pipeline_record reads through it, since the hold addresses under
@@ -3397,6 +3398,54 @@ sub hold_record {
 		hostname => $data->{hostname},
 		at       => $data->{at},
 	};
+}
+
+# }}}
+# set_hold - write the propagation hold record {{{
+#
+# D50 makes the hold a per-environment record carrying a reason, who set it,
+# and when, and D53 fixes those four fields and nothing else.  The user and the
+# hostname take the shape the director's network claim lock writes, so the two
+# identity fields read the same way wherever Genesis records who did something.
+# Under D58 a time held as a value is EXODUS_TIME_FORMAT, and the short numeric
+# form belongs to a time that is part of a path, which this record has none of.
+# The path is cleared before the write so a replacing hold cannot leave a key
+# of the hold it replaced standing beside it.
+sub set_hold {
+	my ($self, %rec) = @_;
+
+	bail(
+		"Cannot set a propagation hold on #C{%s} without a reason.",
+		$self->name
+	) unless defined($rec{reason}) && $rec{reason} =~ /\S/;
+
+	$self->vault->authenticate unless $self->vault->authenticated;
+	$self->vault->clear($self->hold_record_path);
+	$self->vault->set(
+		$self->hold_record_path,
+		reason   => $rec{reason},
+		user     => $rec{user}     // ($ENV{USER} // 'unknown'),
+		hostname => $rec{hostname} // Sys::Hostname::hostname(),
+		at       => $rec{at}       // Time::Piece->new->strftime(EXODUS_TIME_FORMAT),
+	);
+	return $self->hold_record_path;
+}
+
+# }}}
+# clear_hold - delete the propagation hold record {{{
+#
+# D53 has the release delete the record and keep no released-by fields, because
+# a cleared hold has no audit value once the next hold replaces it, and the
+# release's identity is its own log line.  It returns 1 where a record stood
+# and 0 where none did, so `pipeline-release` can say which it did rather than
+# claiming to have released a hold nobody set.
+sub clear_hold {
+	my ($self) = @_;
+
+	$self->vault->authenticate unless $self->vault->authenticated;
+	return 0 unless $self->hold_record;
+	$self->vault->clear($self->hold_record_path);
+	return 1;
 }
 
 # }}}
