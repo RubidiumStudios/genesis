@@ -1246,15 +1246,29 @@ sub _deploy_preflight {
 	# are doing.  -y means stop asking questions and must never mean accept
 	# an unlocked deploy, so nothing here reads it.
 	#
-	# It is the last gate rather than the first, because every refusal above
-	# is one no acknowledgement can settle: an operator who types the phrase
-	# past a branch that carries no repository still has nothing to deploy.
-	# The gate is the one question --force is an answer to, so it is asked
-	# once everything that is not negotiable has passed.
+	# It sits after the predecessor's record and before the warnings, which
+	# makes it the last of the gates rather than the first.  Every refusal
+	# above it is one no acknowledgement can settle: an operator who types
+	# the phrase past a branch that carries no repository still has nothing
+	# to deploy.  This gate is the one question --force is an answer to, so
+	# it is asked once everything that is not negotiable has passed, and the
+	# warnings that follow it are things to know rather than things to
+	# settle.
 	Genesis::CI::Preflight::assert_provider_gate($top, $options,
 		owns        => 'deploys of this environment',
 		outcome     => 'Nothing was deployed.',
 		acknowledge => 'I accept the risk');
+
+	# 8.  The warnings, in the order the design fixes, and this is the first
+	# of them.  It runs ahead of the others because what is stale decides
+	# which environments and which branches the rest of the pre-flight is
+	# talking about: an operator told that a branch is behind wants to know
+	# first that the pipeline watching it no longer matches control.
+	#
+	# It is asked in void context because nothing below reads the count.  The
+	# sub answers one anyway, for the two callers the query's other readers
+	# will be, and its POD says so.
+	_warn_stale_pipeline($top, $git);
 
 	return {
 		git     => $git,
@@ -1869,6 +1883,42 @@ sub _assert_prior_env_deployed {
 		"was deployed.",
 		$env->name, $prior_name, $prior_name
 	);
+}
+
+# }}}
+# _warn_stale_pipeline - the first of the pre-flight's warnings, under D43 {{{
+#
+# The deploy computes no diff of its own.  pipeline_staleness is the one
+# staleness query (D103), and it reads three things: the commit the applied
+# record names, a git path diff from that commit to control over each
+# environment's own defining paths, and each environment's compiled
+# dependency set against the set its last deployment recorded reading, which
+# is D77's fact standing where the compile had only a prediction.  The
+# propagate pre-flight and pipeline-status ask the same sub the same
+# question, and it takes the git handle because a path diff is a git
+# question.
+#
+# What comes back is one entry per changed environment, naming the
+# environment and the reason it changed, and the warning prints the reason
+# the query gave rather than deciding one of its own.  A repository with no
+# pipeline, and one the apply has never run against, both answer nothing, so
+# no guard is needed here for either.
+sub _warn_stale_pipeline {
+	my ($top, $git) = @_;
+
+	my $changed = $top->pipeline_staleness($git);
+	return 0 unless $changed && @$changed;
+
+	warning(
+		"\nThe pipeline is stale.  Control has changed the shape of %s since ".
+		"#C{genesis pipeline-apply} last applied it:\n%s\n\nRun #C{genesis ".
+		"pipeline-apply} to bring the pipeline back into step with control.",
+		count_nouns(scalar(@$changed), 'environment'),
+		join("\n",
+			map {sprintf("  - #C{%s}: %s", $_->{env}, $_->{reason})} @$changed)
+	);
+
+	return scalar(@$changed);
 }
 
 # }}}

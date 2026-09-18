@@ -390,6 +390,7 @@ integration-tests/genesis_commands_env-deploy_control_and_disowned.t  # control 
 integration-tests/genesis_commands_env-deploy_branch_classes.t  # the deployment branch is classified before the deploy, and four states refuse
 integration-tests/genesis_commands_env-deploy_prior_env.t  # the predecessor's record is read once, through the merged hierarchy
 integration-tests/genesis_commands_env-deploy_provider_gate.t  # an automated provider's pipeline owns the deploy, and --force is the only way past
+integration-tests/genesis_commands_env-deploy_stale_pipeline.t  # the stale-pipeline warning names the changed environments and the apply
 integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests
