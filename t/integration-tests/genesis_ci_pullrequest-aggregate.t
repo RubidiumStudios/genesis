@@ -121,7 +121,7 @@ subtest 'two due commits become one aggregate' => sub {
 # in no propagation set, so a commit written there would route nowhere and
 # leave nothing due.
 subtest 'a gate ends the aggregate and holds what follows' => sub {
-	plan tests => 8;
+	plan tests => 9;
 
 	my $h  = ready(kit => 'omega-v2.7.0');
 	my $pr = $h->pr_branch('prod');
@@ -157,6 +157,13 @@ subtest 'a gate ends the aggregate and holds what follows' => sub {
 
 	refresh($h, 'a', $pr);
 	is(harness_marker($h, "origin/$pr"), $gate, 'the aggregate ends at the gate');
+
+	# The message says where the aggregate ends and the tree says what it
+	# delivered, and D69 makes a delivery a mirror, so the branch carries the
+	# set as it stood at the gate and not at the commit held behind it.
+	is_deeply(tree_of($h->a, "origin/$pr"),
+		[sort($h->propagation_set('prod', at => $gate))],
+		"and its tree is this environment's set at the gate");
 
 	my ($body) = run({dir => $h->a}, 'git', 'log', '-1', '--format=%b',
 		"origin/$pr");
@@ -206,6 +213,118 @@ subtest "control's own first commit is summarised too" => sub {
 		'the body carries an entry for the first commit');
 	like($body, qr/prod\.yml\s+\|\s+\d+ \+/,
 		'summarised against nothing, which is what it was added to');
+};
+
+# A gate need not be a commit this environment receives.  gate_state reads the
+# trailer over every control commit in range, whatever it touched, so a commit
+# that changes nothing in this environment's propagation set still holds every
+# commit after it while never becoming a pending entry of its own.  That is the
+# ordinary shape once several environments share one control branch, and the
+# aggregate then ends before the gate rather than at it.
+#
+# The row is not green on arrival.  The paragraph was decided by whether the
+# newest commit delivered carried the gate's own marks, and here no delivered
+# commit does, so the body said nothing about the gate at all while the report
+# beneath it listed a commit held for one.
+subtest 'a gate this environment never receives still ends the aggregate' => sub {
+	plan tests => 6;
+
+	my $h  = ready(kit => 'omega-v2.7.0');
+	my $pr = $h->pr_branch('prod');
+
+	my $path = $h->write_env_file('prod', params => {instances => 2},
+		commit => 0);
+	my $first = commit_on_control($h,
+		files   => {$path => slurp($h->a."/$path")},
+		message => 'Raise the cf instance count',
+		push    => 1,
+	);
+
+	# docs/ is in no kind any propagation set is built from, so this commit
+	# routes to nobody and the walk records it nowhere, while the trailer on
+	# it still gates everything that follows.
+	commit_on_control($h,
+		files    => {'docs/runbook.md' => "Rotate the signing key by hand.\n"},
+		message  => 'Write down the signing key rotation',
+		trailers => {'Genesis-Stage' =>
+			'rotate the uaa signing key by hand first'},
+		push     => 1,
+	);
+
+	$path = $h->write_env_file('prod', params => {instances => 3},
+		commit => 0);
+	my $after = commit_on_control($h,
+		files   => {$path => slurp($h->a."/$path")},
+		message => 'Raise the cf instance count again',
+		push    => 1,
+	);
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, 0, 'the run succeeded');
+
+	refresh($h, 'a', $pr);
+	is(harness_marker($h, "origin/$pr"), $first,
+		'the aggregate ends at the last commit ahead of the gate');
+
+	my ($body) = run({dir => $h->a}, 'git', 'log', '-1', '--format=%b',
+		"origin/$pr");
+	like($body,
+		qr/^Gate: rotate the uaa signing key by hand first\./m,
+		'the body carries the gate line all the same');
+	like($body, qr/Holding 1 later commit for prod until this deploys\./,
+		'and says what waits behind it');
+
+	my $said = unfolded($out, $err);
+	like($said,
+		qr/control\@\Q@{[substr($after, 0, 7)]}\E Raise the cf instance count again\s+held/,
+		'the later commit is recorded held');
+};
+
+# The other end of the count.  A gate standing on control's own tip holds
+# nothing behind it, and the line names the gate without going on to say that
+# nought commits are waiting.
+#
+# This row is coverage rather than a discriminator, and I am saying so plainly.
+# The branch it covers had none, and it reads the gate off the delivered
+# commit's own marks, which is the half of the rule the row above cannot
+# reach.  Dropping that half turns this row red, which is what binds it.
+subtest 'a gate with nothing behind it names itself and stops' => sub {
+	plan tests => 5;
+
+	my $h  = ready(kit => 'omega-v2.7.0');
+	my $pr = $h->pr_branch('prod');
+
+	my $path = $h->write_env_file('prod', params => {instances => 2},
+		commit => 0);
+	commit_on_control($h,
+		files   => {$path => slurp($h->a."/$path")},
+		message => 'Raise the cf instance count',
+		push    => 1,
+	);
+
+	$path = $h->write_env_file('prod',
+		params => {instances => 2, signing => 'rotated'}, commit => 0);
+	my $gate = commit_on_control($h,
+		files    => {$path => slurp($h->a."/$path")},
+		message  => 'Rotate the uaa signing key',
+		trailers => {'Genesis-Stage' =>
+			'deploy this before anything else lands'},
+		push     => 1,
+	);
+
+	my (undef, undef, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, 0, 'the run succeeded');
+
+	refresh($h, 'a', $pr);
+	is(harness_marker($h, "origin/$pr"), $gate,
+		'the aggregate ends at the gate, which is control\'s own tip');
+
+	my ($body) = run({dir => $h->a}, 'git', 'log', '-1', '--format=%b',
+		"origin/$pr");
+	like($body, qr/^Gate: deploy this before anything else lands\.\s*$/m,
+		'the body names the gate');
+	unlike($body, qr/Holding/,
+		'and says nothing about commits waiting, because none are');
 };
 
 done_testing;

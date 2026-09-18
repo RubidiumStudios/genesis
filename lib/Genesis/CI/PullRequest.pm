@@ -123,7 +123,7 @@ sub aggregate_message {
 # yet.
 sub gate_line {
 	my ($commit, $held) = @_;
-	my $reason = $commit->{gate_reason};
+	my $reason = $commit->{gate_reason} // '';
 	$reason =~ s/\s+$//;
 	$reason =~ s/\.$//;
 	return sprintf('Gate: %s.', $reason) unless $held->{count};
@@ -178,13 +178,33 @@ sub deliver {
 	my $source  = $newest->{control_commit};
 	my %body;
 
-	# A gate ends the delivery, so the walk has already trimmed the list to
-	# the gate.  Where the newest commit it handed us is one, the body says so
-	# and names how many of that environment's commits wait behind it.
-	$body{gate} = gate_line($newest, {
-		count => scalar @{$record->{held} || []},
+	# A gate ends the delivery, so the walk has already trimmed the list to it.
+	# What the paragraph is decided by is the environment's gate state as the
+	# walk left it on the record, and not whether the newest commit delivered
+	# is itself the gate.  gate_state reads the trailer over every control
+	# commit in range whatever it touched, so a gate that changes nothing in
+	# this environment's propagation set holds every commit after it while
+	# never becoming a pending entry at all, which is the ordinary shape once
+	# several environments share one control branch.  The aggregate then ends
+	# before the gate rather than at it, and the body still owes a reviewer the
+	# reason it stops there.
+	#
+	# The count is of what this gate holds for this environment and not of
+	# everything held, for the reason Genesis::CI::Report::hold_detail gives
+	# about its own count: a commit stopped for another reason is reported
+	# under that reason, and counting it here would name it twice.
+	#
+	# The delivered commits are asked only where the gate holds nothing, which
+	# is a gate standing on control's own tip.  There is no held entry to read
+	# it off then, and the gate's own pending entry carries the marks.
+	my @gated = grep {($_->{reason} // '') eq 'gate-ahead'}
+		@{$record->{held} || []};
+	my ($gate) = @gated;
+	($gate) = grep {$_->{gate}} @$commits unless $gate;
+	$body{gate} = gate_line($gate, {
+		count => scalar @gated,
 		env   => $record->{env},
-	}) if $newest->{gate};
+	}) if $gate;
 
 	my $message = aggregate_message($git, $env, $commits, %body);
 	my $written = $session->apply_files($source,

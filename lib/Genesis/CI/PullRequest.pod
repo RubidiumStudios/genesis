@@ -179,9 +179,9 @@ B<Examples:>
     my $line = Genesis::CI::PullRequest::gate_line($newest,
         {count => 2, env => 'prod'});
 
-The one paragraph an aggregate's body carries when its newest commit is a
-gate, naming the reason the C<Genesis-Stage> trailer gave and how many of
-that environment's commits are held behind it.
+The one paragraph an aggregate's body carries when a gate ends the delivery,
+naming the reason the C<Genesis-Stage> trailer gave and how many of that
+environment's commits are held behind it.
 
 D49, as it was corrected on 2026-09-09, has a gate constrain only what
 follows it. So the gate travels with the commits already ahead of it and ends
@@ -204,8 +204,9 @@ B<Parameters:>
 
 =item C<$commit>
 
-The pending entry for the gate itself, which is the newest commit the
-aggregate carries. Its C<gate_reason> is the text the trailer gave.
+Any entry the walk marked with this gate, whose C<gate_reason> is the text
+the trailer gave. That is one of the entries the gate holds where it holds
+anything, and the gate's own pending entry where it does not.
 
 =item C<$held>
 
@@ -253,9 +254,17 @@ The message it writes is what C<aggregate_message> composes, so the one
 commit says which control commits it carries and what each of them changed,
 and the pull request opened from it carries that same body.
 
-Where the newest commit is a gate, the body closes with the paragraph
+Where a gate ends the delivery, the body closes with the paragraph
 C<gate_line> composes, which names the reason the trailer gave and how many
 of that environment's commits are held behind it.
+
+Which gate that is comes off the walk's record rather than off the newest
+commit delivered. C<Genesis::CI::Walk::gate_state> reads the trailer over
+every control commit in range whatever it touched, so a gate that changes
+nothing in this environment's propagation set holds every commit after it
+while never becoming a pending entry at all, and the aggregate then ends
+before the gate rather than at it. The count is of what this gate holds for
+this environment, so a commit stopped for another reason is not named twice.
 
 What the publish and the pull request sync read afterwards is left on
 C<< $record->{pr} >>: the action, the control commit the aggregate names, the
