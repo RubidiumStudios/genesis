@@ -1761,6 +1761,52 @@ B<Examples:>
   my @envs = _root_environments($top);
   # ('lab', 'qa', 'prod'), in the order the walk reads them
 
+=head2 _write_trailer_holds($top, $run)
+
+Writes the propagation hold record for each environment whose delivery in this
+run carried a commit with a hold trailer and whose push the remote accepted.
+It runs after the publish and before the report, so the deploy of the gated
+commit finds the hold already standing.  An environment whose push was
+rejected delivered nothing and takes no hold.
+
+The reason is never parsed here.  C<Genesis::CI::Walk::gate_state> is the one
+reader of the stage trailer, and it answers C<hold_reason> for the hold form
+alone, so this sub asks it about each delivered commit and writes what it is
+told.  Where one run delivers two gated commits to one environment, the newest
+wins, because that is the hold the operator is being asked to clear.
+
+The record it writes is the vault one and not the run's own.  It sets
+C<hold_set> on the environment's record so the report can say a hold was set,
+and it leaves C<hold> alone, since filling that would make one report call the
+same environment delivered and held in the same breath.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> for the deployment root the run is standing in.
+
+=item C<$run>
+
+The walk's run record, carrying C<environments>, with C<published> set from
+the publish result's arrayref of branch names and C<git> set from the handle
+the run walked with.
+
+=back
+
+B<Returns:> arrayref of the Exodus slugs it wrote a hold for.
+
+B<Errors:> Bails through C<< Genesis::Env->set_hold >> where the vault refuses
+the write.
+
+B<Examples:>
+
+  _write_trailer_holds($top, $record);
+  # ['prod/bosh'], and $record->{environments}[1]{hold_set} now carries
+  # the reason the trailer gave
+
 =head1 SEE ALSO
 
 L<Genesis::CI::Legacy>, L<Genesis::Top>, L<Genesis::Env>,

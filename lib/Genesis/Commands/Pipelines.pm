@@ -1016,6 +1016,13 @@ sub propagate {
 						);
 					},
 				);
+
+				# The two halves _write_trailer_holds reads, put on the
+				# record where the publish settles them, so the writer
+				# takes one record rather than three arguments that can
+				# come to disagree about one run.
+				$record->{published} = $publish->{published} || [];
+				$record->{git}       = $git;
 			}
 		}
 
@@ -1071,6 +1078,13 @@ sub propagate {
 	# this run from, before a word of the summary is printed.  Nothing below
 	# reads the working tree.
 	$session->finish;
+
+	# D53's sequence, spent here.  A commit that carries a hold trailer sets
+	# the hold as it is delivered rather than as it is deployed, so the write
+	# goes after the publish, which is what settles whether the delivery
+	# landed, and before the report, which says what this run did.  A preview
+	# publishes nothing and so writes nothing here either.
+	_write_trailer_holds($top, $record) if $publish && $record;
 
 	# I8's three axes, printed once the run has finished writing.  Every
 	# environment in scope carries one outcome, every routed control commit
@@ -1164,6 +1178,54 @@ sub propagate {
 	exit $status;
 }
 
+# _write_trailer_holds - set the holds this run's deliveries carried {{{
+#
+# D53 makes propagate the hold record's writer and puts the write at delivery
+# rather than at the deploy's exodus write, which closes the window between the
+# BOSH step and that write.  D83 publishes one branch at a time and D99 pins the
+# consequence, so an environment whose push the remote refused was reset to T,
+# delivered nothing, and takes no hold.
+#
+# The reason is never parsed here.  gate_state is the one reader of the stage
+# trailer, and it answers hold_reason for the hold form alone, so this sub asks
+# it about each delivered commit and writes what it is told.  Where one run
+# delivers two gated commits to the same environment, the newest wins, since it
+# is the hold the operator is being asked to clear.
+#
+# The record written here is the vault one and not the run's.  held_qualifier
+# answers needs clearing off $record->{hold}, so filling that field would make
+# this run's report call one environment delivered and held at once.  The run
+# says what it did, under hold_set, and the next run reads the hold.
+sub _write_trailer_holds {
+	my ($top, $run) = @_;
+
+	my %published = map {$_ => 1} @{$run->{published} || []};
+	my $git = $run->{git};
+	my @set;
+
+	for my $record (@{$run->{environments} || []}) {
+		next unless $published{$record->{branch} // ''};
+
+		my $reason;
+		for my $entry (@{$record->{pending} || []}) {
+			next unless ($entry->{outcome} // '') eq 'delivered';
+			my $gate = Genesis::CI::Walk::gate_state(
+				git => $git, commit => $entry->{control_commit});
+			$reason = $gate->{hold_reason}
+				if $gate && defined $gate->{hold_reason};
+		}
+		next unless defined $reason;
+
+		my $env = Genesis::Env->bare($record->{env}, $top)->with_vault;
+		$env->set_hold(reason => $reason);
+		$record->{hold_set} = $reason;
+		push @set, $env->exodus_slug;
+	}
+
+	return \@set;
+}
+
+# }}}
 # _preview_warnings - the two things a preview's answer rests on {{{
 #
 # D44 names two, and each is a fact one of the run's first two stages has

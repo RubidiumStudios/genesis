@@ -354,6 +354,18 @@ sub render_run {
 				$env->{env};
 		}
 
+		# D53 puts a trailer's hold after the delivery, so an environment
+		# that took one on this run reads as delivered with one line saying
+		# so beneath it.  It is not held_qualifier's held, needs clearing,
+		# which is what the next run reads off the record this one wrote:
+		# a report says what this run did, and this run delivered.
+		if (my $reason = $env->{hold_set}) {
+			info "    #Y{a hold was set by the commit just delivered}: %s",
+				$reason;
+			info "    Release it with #C{genesis %s pipeline-release}",
+				$env->{env};
+		}
+
 		# The commit axis, in control order: what the environment received
 		# first, and then what it is holding behind it.
 		for my $pending (@{$env->{pending} || []}) {

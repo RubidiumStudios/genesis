@@ -327,6 +327,13 @@ C<idempotent>.  The walk computes its record from durable state alone and so
 cannot know either, and settling both here is what lets the run and the
 preview compose the held phrase from one line of code.
 
+An environment whose delivery in this run carried a commit with a hold trailer
+gets one added line beneath its outcome, saying that a hold was set and giving
+the reason, since the environment was delivered to on this run and is held
+from the next one.  The line is read off the record's C<hold_set> field, which
+the run writes as it writes the hold, and it is not L</held_qualifier>'s
+C<held, needs clearing>, which is what the next run reads.
+
 The paths beneath a delivered commit are printed as the operator wrote them,
 which needs the C<git> handle to strip whatever deployment root the
 repository is laid out under.  Without one they are printed as the writer

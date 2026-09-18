@@ -544,11 +544,22 @@ sub gate_state {
 		&& $git->is_ancestor($commit, $certified);
 
 	# hold: <reason> is the gate that also sets a propagation hold once the
-	# gated commit is deployed, under D50.  The gate half behaves the same.
+	# gated commit is delivered, under D50.  The gate half behaves the same,
+	# so gate_reason carries the text whichever form it arrived in, and
+	# hold_reason is present only for the hold form.  A caller telling the
+	# two apart reads a key rather than parsing the trailer again, and the
+	# strip happens here and nowhere else, because this is the one sub that
+	# reads the stage.
+	my $hold;
 	my $reason = $stage;
-	$reason =~ s/^hold:\s*//;
+	$hold = 1 if $reason =~ s/^hold:\s*//;
 
-	return {reason => 'gate-ahead', gate => $commit, gate_reason => $reason};
+	return {
+		reason      => 'gate-ahead',
+		gate        => $commit,
+		gate_reason => $reason,
+		($hold && length $reason ? (hold_reason => $reason) : ()),
+	};
 }
 
 # }}}
