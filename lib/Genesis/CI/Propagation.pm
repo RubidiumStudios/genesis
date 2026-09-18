@@ -51,39 +51,5 @@ sub _pr_branch_has_control_sha {
 	return $marker eq $control ? 1 : 0;
 }
 # }}}
-# _build_pr_body - generic PR body for rolling pr/<env>/<type> branches {{{
-#
-# Rolling branches accumulate commits across propagation events; per-
-# propagation file detail lives in the commit history.  The body is a
-# stable signpost, not a per-event diff.
-sub _build_pr_body {
-	my ($env_name, $control) = @_;
-	$control //= 'control';
-	return join("\n",
-		"Aggregates pending propagations from `$control` to `$env_name`.",
-		"",
-		"See commit history for per-propagation details — each commit",
-		"subject carries the source control SHA and the affected files",
-		"are visible in the commit diff.",
-	);
-}
-# }}}
-# _find_or_open_pr - dispatch to create_pr or update_pr based on $existing {{{
-sub _find_or_open_pr {
-	my ($github, $owner_repo, $pr_branch, $base_branch, $title, $body, $existing) = @_;
-
-	return $existing
-		? $github->update_pr($owner_repo, $existing->{number},
-			title => $title,
-			body  => $body,
-		)
-		: $github->create_pr($owner_repo,
-			head  => $pr_branch,
-			base  => $base_branch,
-			title => $title,
-			body  => $body,
-		);
-}
-# }}}
 
 1;

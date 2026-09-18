@@ -322,7 +322,7 @@ subtest 'update_pr' => sub {
 };
 
 # ============================================================
-# find_or_open_pr (via create vs update logic)
+# open vs update dispatch (what sync_pull_request chooses between)
 # ============================================================
 
 subtest 'idempotency: open new PR when none exists' => sub {
@@ -334,7 +334,8 @@ subtest 'idempotency: open new PR when none exists' => sub {
 	queue_curl_response(200, 'OK', encode_json([]), '');
 	queue_curl_response(201, 'Created', encode_json(make_pr(number => 5)), '');
 
-	# Call list_prs then create_pr manually (simulates _find_or_open_pr logic)
+	# Call list_prs then create_pr by hand, which is the open half of the
+	# dispatch Genesis::CI::PullRequest::sync_pull_request makes.
 	my $prs = $gh->list_prs('org/repo', head => 'propagate/env/abc', base => 'env');
 	my ($existing) = grep { $_->{head}{ref} eq 'propagate/env/abc' } @$prs;
 	ok(!$existing, 'no existing PR found');
@@ -378,10 +379,10 @@ subtest 'idempotency: update existing PR when head matches' => sub {
 };
 
 # ============================================================
-# _find_or_open_pr: pre-passed existing skips list_prs call
+# a number already in hand skips the list_prs call
 # ============================================================
 
-subtest '_find_or_open_pr: pre-passed existing skips list_prs' => sub {
+subtest 'a number already in hand skips list_prs' => sub {
 	plan tests => 3;
 	reset_mocks();
 	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
@@ -390,7 +391,8 @@ subtest '_find_or_open_pr: pre-passed existing skips list_prs' => sub {
 	# Only one curl call should be made (update_pr PATCH), no list_prs GET
 	queue_curl_response(200, 'OK', encode_json(make_pr(number => 7, title => 'updated')), '');
 
-	# Simulate what _find_or_open_pr does when $existing is pre-passed
+	# The update half of that dispatch, taken where the caller already holds
+	# the pull request's number and has nothing to look up.
 	my $pr = $gh->update_pr('org/repo', $existing->{number},
 		title => 'updated title',
 		body  => 'updated body',

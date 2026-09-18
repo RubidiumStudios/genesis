@@ -88,6 +88,32 @@ if (!defined $url) {
 	# array and a 200 and collapses every state to unreviewed.
 	my ($pr) = grep {$_->{number} == $1} @{$state->{prs} || []};
 	$answer = $pr ? ($pr->{reviews} || []) : [];
+} elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls/(\d+)$} && $method eq 'PATCH') {
+	# An update of one open pull request, which is what a run takes for an
+	# environment whose pull request is already open.  Without this route the
+	# request falls through every branch below and is answered an empty array
+	# and a 200, which the caller reads as a hash and dies on.
+	#
+	# The title and the body land in the state file, so a row can read back
+	# what the run left the pull request saying rather than only what it sent,
+	# and the answer is the changed pull request whole, because the caller
+	# reads its number and its html_url off what it is handed.
+	my $number = $1;
+	my ($pr) = grep {$_->{number} == $number} @{$state->{prs} || []};
+	if (!$pr) {
+		$status = 404;
+		$answer = {message => 'Not Found'};
+	} else {
+		my $sent = {};
+		eval {$sent = $json->decode($body // '{}'); 1} or $sent = {};
+		$pr->{$_} = $sent->{$_} for grep {defined $sent->{$_}}
+			qw/title body state/;
+		seek($state_fh, 0, 0);
+		truncate($state_fh, 0);
+		print $state_fh $json->encode($state);
+		close $state_fh;
+		$answer = $pr;
+	}
 } elsif ($url =~ m{/repos/([^/]+/[^/]+)/pulls(?:\?|$)}) {
 	# The collection is anchored, so a request for one pull request's reviews
 	# reaches the branch above rather than reading as a listing.

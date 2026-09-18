@@ -324,6 +324,26 @@ sub refuse_unreadable {
 }
 
 # }}}
+# title_for - the aggregate's subject, with the supersedes list where there is one {{{
+#
+# D49 puts the marker in the title as well as in the subject, so a squash merge
+# keeps it, and the supersedes-title rule of D12 names every closed-unmerged
+# attempt by number, because a number survives a closed pull request and a
+# deleted branch where a branch name does not.
+#
+# The title is composed on every sync rather than only on the open, which is
+# what displaces FWT-1099's criterion that an open pull request keeps the title
+# it was opened with.  A title left alone names whatever control commit the
+# first proposal carried, and a rebuilt branch proposing a newer one would then
+# be described by a marker that is no longer true of it.
+sub title_for {
+	my ($subject, $superseded) = @_;
+	return $subject unless $superseded && @$superseded;
+	return sprintf('%s (supersedes %s)',
+		$subject, join(', ', map {"#$_"} @$superseded));
+}
+
+# }}}
 # sync_pull_request - open or update the pull request, after its branch is up {{{
 #
 # It runs after the publish and not inside the arm, because GitHub opens a
@@ -336,6 +356,8 @@ sub sync_pull_request {
 
 	my $pr = $record->{pr} or return undef;
 	return undef unless ($pr->{action} // '') eq 'rebuild';
+
+	$pr->{title} = title_for($pr->{title}, $pr->{superseded});
 
 	my $answer = $pr->{number}
 		? $github->update_pr($owner_repo, $pr->{number},
