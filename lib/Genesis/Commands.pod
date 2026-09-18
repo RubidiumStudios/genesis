@@ -186,6 +186,20 @@ that environment's deployment branch.
 
 =back
 
+B<The Deployed-Commit Help Sentence>
+
+=over 4
+
+=item C<DEPLOYED_TARGET_HELP>
+
+The single help sentence printed by both C<--redeploy> and C<--as-deployed>.
+The two flags select the same thing, the environment's deployed commit, so
+they describe it in one place and cannot drift apart. Like the branch-class
+constants above it is not exported, and every registration in F<bin/genesis>
+names it in full as C<Genesis::Commands::DEPLOYED_TARGET_HELP>.
+
+=back
+
 =head2 Branch classes
 
 Every pipeline-aware command declares one branch class at its registration,
@@ -890,6 +904,74 @@ B<Examples:>
 
   Genesis::Commands::branch_carries_repository($top, $git, 'qa/bosh');
   # Returns: 0 for a branch still holding the init commit alone
+
+=head2 deployed_target
+
+  my $commit = Genesis::Commands::deployed_target($name, $top);
+
+Returns the commit this run targets, or C<undef> when the run targets the tip
+of the deployment branch. A command declares its default target at
+registration with C<default_target>, which is C<tip> unless it says
+C<deployed>, and either C<--redeploy> or C<--as-deployed> selects the
+deployed commit regardless. When a flag is given while the repository's
+pipeline is not enabled, this bails with C<Genesis::Exit::CONFIG>, because
+the branch session that makes a detached checkout safe opens only under a
+pipeline. The branch-class gate is the one caller, and it asks before it
+switches, so no command resolves its own target.
+
+It takes the environment's name and the deployment root rather than a
+C<Genesis::Env>, because the gate asks this of every classified command and
+C<genesis new> names an environment whose file it is about to write. An
+environment built above the question, merely so the flags could be read,
+would refuse that run over a missing file that is missing exactly as
+intended, so the reader of the deployed record builds its own below the
+question instead.
+
+Neither this nor C<DEPLOYED_TARGET_HELP> is exported. The gate is the only
+caller and every registration in F<bin/genesis> names the constant in full,
+so an export would put two names in every importer's namespace that nothing
+reads.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The environment name, with any leading directories and any C<.yml> or
+C<.yaml> suffix already stripped by the caller.
+
+=item C<$top>
+
+The C<Genesis::Top> for the deployment root the command is running in.
+
+=back
+
+B<Returns:> the commit the run targets, or C<undef> where it targets the tip
+of the deployment branch, which is every run that named neither flag and
+every command whose registration declares no C<deployed> default.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Refusing to target the deployed commit for ...">
+
+Raised via C<bail> at C<Genesis::Exit::CONFIG> when either flag is given in
+a repository whose pipeline is not enabled. Without a pipeline there is no
+branch session to assert the tree clean, to hold the switch lock, or to put
+the operator back on the branch they started from, so the run is refused
+rather than left detached in a tree nobody asserted.
+
+=back
+
+B<Examples:>
+
+  Genesis::Commands::deployed_target('qa', $top);
+  # Returns: undef, in `genesis qa deploy` with no flag
+
+  Genesis::Commands::deployed_target('qa', $top);
+  # Exits CONFIG, in `genesis qa deploy --redeploy` with the pipeline off
 
 =head2 get_options
 

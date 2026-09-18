@@ -459,6 +459,8 @@ define_command("deploy", {
 	branch_fast_forward => 1,
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
+		'redeploy' => Genesis::Commands::DEPLOYED_TARGET_HELP,
+
 		'dry-run|n' =>
 			"Build the manifest and validate it against the current state of the ".
 			"BOSH director for this deployment, but doesn't change anything.",
@@ -682,6 +684,8 @@ define_command("bosh", {
 	option_passthrough => 1,
 	option_require_order => 1,
 	options => [
+		'as-deployed' => Genesis::Commands::DEPLOYED_TARGET_HELP,
+
 		"self|A|?as-director" =>
 			"Run the bosh command against this deployment as a bosh director.  This ".
 			"is only applicable if the environment is a bosh deployment that doesn't ".
@@ -891,6 +895,8 @@ define_command("info", {
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
+		'as-deployed' => Genesis::Commands::DEPLOYED_TARGET_HELP,
+
 		'history|H' =>
 			"Print the deployment history for the environment, if available.  ",
 		'print-artifact|p=s' =>
@@ -1109,6 +1115,8 @@ define_command("check-secrets", {
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
+		'as-deployed' => Genesis::Commands::DEPLOYED_TARGET_HELP,
+
 		'verbose|v' =>
 			"List each item, not just failures and warnings.",
 
@@ -1169,6 +1177,8 @@ define_command("add-secrets", {
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
+		'as-deployed' => Genesis::Commands::DEPLOYED_TARGET_HELP,
+
 		"verbose|v" =>
 			"List each item as it is processed.",
 		"~import|import-from-credhub" =>
@@ -1200,6 +1210,8 @@ define_command("rotate-secrets", {
 		"specified, or it applies to all secrets if no path is specified.\n",
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
+		'as-deployed' => Genesis::Commands::DEPLOYED_TARGET_HELP,
+
 		'verbose|v' =>
 			"List each item as it is processed, not just failures and warnings.",
 
@@ -1270,6 +1282,8 @@ define_command("remove-secrets", {
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
+		'as-deployed' => Genesis::Commands::DEPLOYED_TARGET_HELP,
+
 		'verbose|v' =>
 			"List each item as it is processed, not just failures and warnings.",
 

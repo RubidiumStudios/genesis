@@ -40,7 +40,7 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		# deploy is not a command to give a one-letter break-glass to.
 		'deploy' => {
 			class        => Genesis::Commands::DEPLOYED_STATE,
-			options      => [qw/dry-run|n yes|y no-propagate force/],
+			options      => [qw/dry-run|n yes|y no-propagate force redeploy/],
 			absent       => [qw/pull no-fetch no-refresh/],
 			fast_forward => 1,
 		},
@@ -53,12 +53,12 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		# set it declares is not the set it accepts.
 		'info' => {
 			class   => Genesis::Commands::DEPLOYED_STATE,
-			options => [],
+			options => [qw/as-deployed/],
 			absent  => [qw/no-fetch no-refresh/],
 		},
 		'bosh' => {
 			class   => Genesis::Commands::DEPLOYED_STATE,
-			options => [],
+			options => [qw/as-deployed/],
 			absent  => [qw/no-fetch no-refresh/],
 		},
 		'create' => {
@@ -99,6 +99,28 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			class   => Genesis::Commands::PRE_DEPLOY,
 			options => [],
 			absent  => [qw/no-fetch no-refresh/],
+		},
+		# The four secrets commands are in the sweep for one flag apiece.
+		# D87 gives the deployed commit exactly two selections, and this is
+		# the spelling six of the seven commands take, so a step that gave
+		# one of them a third spelling of its own is what these rows catch.
+		# Their other flags are not swept, because what they declare is a
+		# matter for the secrets surface and not for this one.
+		'check-secrets' => {
+			class   => Genesis::Commands::PRE_DEPLOY,
+			options => [qw/as-deployed/],
+		},
+		'add-secrets' => {
+			class   => Genesis::Commands::PRE_DEPLOY,
+			options => [qw/as-deployed/],
+		},
+		'rotate-secrets' => {
+			class   => Genesis::Commands::PRE_DEPLOY,
+			options => [qw/as-deployed/],
+		},
+		'remove-secrets' => {
+			class   => Genesis::Commands::PRE_DEPLOY,
+			options => [qw/as-deployed/],
 		},
 	);
 
