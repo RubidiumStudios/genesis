@@ -21,6 +21,19 @@
 # What the run says is read off standard error, where the report is written,
 # and the patterns cross the fold the way the hold rows in
 # genesis_ci_walk-holds.t do, so each one names the axis it is asserting.
+#
+# Four of the freeze row's assertions are guards rather than its red, and they
+# are the branch on R not moving, the environment never being propagated, the
+# run touching the pull request not at all, and the proposed record standing
+# still.  All four were green before the freeze existed, and every one of them
+# for the same wrong reason: an unfrozen run rebuilds the branch and pushes it,
+# the push of a branch R already carries is sent without a lease, and git
+# refuses it as a non-fast-forward, so the environment's publish is rejected
+# before any of the four is reached.  What carries the row's red is the other
+# half, which is the exit status, the environment's own line, the held commit,
+# and its reason.  The four become discriminating once Task 16.11 puts expect
+# on the publish spec, because the run will then have left the branch alone
+# rather than been refused, and the row is worth re-reading then.
 use strict;
 use warnings;
 use utf8;
@@ -45,29 +58,14 @@ sub patch_calls {
 	return grep {($_->{method} // '') eq 'PATCH'} gh_calls($gh);
 }
 
-# One due control commit, written through the harness and committed by hand,
-# because the run reads require_pr out of that very file and a body composed
-# here that dropped the key would take the whole arm with it, while the
-# harness's own commit carries a message the rows below cannot name.
-sub due_commit {
-	my ($h, %opts) = @_;
-	my $path = $h->write_env_file('prod', params => $opts{params},
-		commit => 0);
-	return commit_on_control($h,
-		files   => {$path => slurp($h->a."/$path")},
-		message => $opts{message},
-		push    => 1,
-	);
-}
-
 subtest 'an approved pull request freezes' => sub {
-	plan tests => 10;
+	plan tests => 11;
 
 	my $h   = ready(kit => 'omega-v2.7.0');
 	my $gh  = $h->{gh};
 	my $pr  = $h->pr_branch('prod');
 
-	my $proposed = due_commit($h, params => {instances => 2},
+	my $proposed = due_commit($h, 'prod', params => {instances => 2},
 		message => 'Raise the cf instance count');
 	run_genesis($h, 'propagate', '-y');
 	refresh($h, 'a', $pr);
@@ -83,20 +81,33 @@ subtest 'an approved pull request freezes' => sub {
 		base => $h->slug('prod'), review => 'approved', reviewer => 'dbell');
 	fixture_proposed($h, 'prod', control => $proposed, pr => $number);
 
-	my $later = due_commit($h, params => {instances => 3},
+	my $later = due_commit($h, 'prod', params => {instances => 3},
 		message => 'Raise it again');
 
 	# How much of the call log belongs to the run that stood the fixture up,
 	# so what is counted below is what the frozen run itself sent.
 	my $already = scalar(() = gh_calls($gh));
 
+	# What this clone holds for the pull request branch before the run, which
+	# is the one thing a read of R cannot say: the arm answers ahead of
+	# deliver's switch, so no local branch is cut or moved either.
+	my $local_before = ref_in($h->a, "refs/heads/$pr") // '(none)';
+
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 	is($exit, 0, 'the run succeeded');
 	is(remote_sha($h, $pr), $frozen_at, 'the branch on R did not move');
 
+	# Not claimed as red on arrival.  restore_branch puts every publish-set
+	# branch back at its pre-run tip, so an unfrozen run's local branch may
+	# well have been restored before this read, and what the assertion is here
+	# for is to keep saying what it says once the four guards above become
+	# discriminating.
+	is(ref_in($h->a, "refs/heads/$pr") // '(none)', $local_before,
+		'and this clone\'s own copy of it is where it was too');
+
 	like($err, qr/^\s*prod: held, awaiting merge \(#$number\)$/m,
 		'the environment is recorded held, awaiting merge with the number');
-	like($err, qr/control\@\Q@{[substr($later, 0, 7)]}\E[^\n]*\bheld\b/,
+	like($err, qr/control\@\Q@{[substr($later, 0, 7)]}\E[^\n]*\sheld\s*$/m,
 		'the new due commit is held');
 	like($err, qr/control\@\Q@{[substr($later, 0, 7)]}\E[^\n]*\n\s*H awaiting merge \(#$number\)/,
 		'and its reason names the merge it is waiting for');
@@ -108,6 +119,67 @@ subtest 'an approved pull request freezes' => sub {
 	is(scalar @writes, 0, 'the run touched the pull request not at all');
 	is(record_at($h, $h->env_path('prod').'/proposed')->{control_commit},
 		$proposed, 'and left the proposed record naming what is open');
+};
+
+# A frozen environment that was already holding something for another reason
+# still waits for its merge and for nothing else.
+#
+# The walk sends every commit from the first hold backwards to held and
+# everything ahead of it to pending, so an environment with a gate in range
+# reaches the arm with held already full, and the freeze appends its own
+# entries behind what is there.  A qualifier that read the front of that list
+# would name the gate and send the operator to certify a deployment, while
+# what releases this environment is the merge nobody has made.
+#
+# Three commits stand on control.  The first is deliverable, the second
+# carries a Genesis-Stage trailer and is the gate, and the third sits behind
+# it.  A delivery runs up to and including its gate, so the first two are
+# pending and the third is held as gate-ahead, which is the entry that stands
+# at the front of the list before the arm is ever called.
+subtest 'a gate ahead of the freeze keeps the merge qualifier' => sub {
+	plan tests => 6;
+
+	my $h  = ready(kit => 'omega-v2.7.0');
+	my $gh = $h->{gh};
+	my $pr = $h->pr_branch('prod');
+
+	my $due = due_commit($h, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+	due_commit($h, 'prod',
+		params   => {instances => 2, signing => 'rotated'},
+		message  => 'Rotate the uaa signing key',
+		trailers => {'Genesis-Stage' =>
+			'rotate the uaa signing key before anything after it'});
+	due_commit($h, 'prod', params => {instances => 3, signing => 'rotated'},
+		message => 'Raise the cf instance count again');
+
+	my $number = gh_pull_request($gh, env => 'prod', head => $pr,
+		base => $h->slug('prod'), review => 'approved', reviewer => 'dbell');
+	fixture_proposed($h, 'prod', control => $due, pr => $number);
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+
+	# A guard rather than a row that starts red: everything below is read off
+	# a run that got as far as the report.
+	is($exit, 0, 'the run succeeded');
+
+	# A guard, and the one that gives the row its teeth.  Nothing below
+	# discriminates unless the held list really does carry the gate ahead of
+	# what the freeze appended, and this is what says it does.
+	my $said = unfolded($out, $err);
+	like($said, qr/gate: rotate the uaa signing key before anything after it/,
+		'the gate is held, with the reason the trailer gave');
+
+	like($err, qr/^\s*prod: held, awaiting merge \(#$number\)$/m,
+		'the environment waits for its merge');
+	unlike($said, qr/awaiting deployment/,
+		'rather than for the deployment the gate at the front of the list '.
+		'would have named');
+
+	# The per-commit axis is read on its own entry and never on the front of
+	# the list, so it says the same thing here that it says with no gate.
+	like($err, qr/control\@\Q@{[substr($due, 0, 7)]}\E[^\n]*\n\s*H awaiting merge \(#$number\)/,
+		'and the commit the freeze holds still names that merge');
 };
 
 # Proves T265: a pull request whose reviewer asked for changes is rebuilt with
@@ -136,7 +208,7 @@ subtest 'changes requested rebuilds and names the review' => sub {
 	# What the reviewer read: one due control commit, a pull request open on
 	# the branch that proposes it, and a review asking for a change with the
 	# reason written out.
-	my $proposed = due_commit($h, params => {instances => 2},
+	my $proposed = due_commit($h, 'prod', params => {instances => 2},
 		message => 'Raise the cf instance count');
 
 	my $number = gh_pull_request($gh, env => 'prod', head => $pr,
@@ -146,7 +218,7 @@ subtest 'changes requested rebuilds and names the review' => sub {
 	fixture_proposed($h, 'prod', control => $proposed, pr => $number);
 
 	# The answer to the review, landing on control the way every fix does.
-	my $fix = due_commit($h, params => {instances => 1},
+	my $fix = due_commit($h, 'prod', params => {instances => 1},
 		message => 'Hold the instance count at one');
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');

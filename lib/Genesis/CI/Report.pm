@@ -117,6 +117,12 @@ sub hold_reason {
 	# D51: an approved pull request is frozen, so what holds this commit is
 	# the merge nobody has made yet, and the number is what an operator acts
 	# on.  The enum already carries the reason and this is its wording.
+	#
+	# An entry carrying the reason and no number falls through to the bare
+	# wording at the foot of the sub, which reads held (awaiting-merge),
+	# rather than printing an empty number under a warning.  Nothing in the
+	# tree writes one: Genesis::CI::PullRequest::freeze is the only producer
+	# of this reason and it always writes the pull request's number.
 	return sprintf('awaiting merge (#%d)', $held->{number})
 		if $reason eq 'awaiting-merge' && defined $held->{number};
 
@@ -156,10 +162,24 @@ sub held_qualifier {
 
 	# The same fact on the environment axis.  An environment whose pull
 	# request is approved waits for the merge rather than for an ancestor to
-	# certify anything, so it is read before the ancestor wording below.
-	return sprintf('awaiting merge (#%d)', $first->{number})
-		if ($first->{reason} // '') eq 'awaiting-merge'
-		&& defined $first->{number};
+	# certify anything, so it outranks the ancestor wording below.
+	#
+	# The entry is picked out by its reason and not off the front of the
+	# list, because the walk sends every commit from the first hold backwards
+	# to held, so an environment with a gate or an ancestor hold in range
+	# arrives here with that list already full and the freeze's own entries
+	# appended behind it.  Reading the front would then name a deployment and
+	# send an operator to certify something, while what releases the
+	# environment is the merge nobody has made.
+	#
+	# An entry carrying the reason and no number falls through to the wording
+	# below rather than printing an empty number under a warning.  Nothing in
+	# the tree writes one: Genesis::CI::PullRequest::freeze is the only
+	# producer of this reason and it always writes the pull request's number.
+	my ($frozen) = grep {($_->{reason} // '') eq 'awaiting-merge'}
+		@{$record->{held}};
+	return sprintf('awaiting merge (#%d)', $frozen->{number})
+		if $frozen && defined $frozen->{number};
 
 	# The environment named is whoever has to certify, which is the ancestor
 	# where an ancestor holds the commit and the environment itself where a
