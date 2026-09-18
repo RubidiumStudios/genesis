@@ -427,10 +427,16 @@ B<Examples:>
   $session->abort($@);
 
 Discards whatever the session wrote and did not commit, naming the modified
-files first so the evidence reaches the operator, resets every deployment
-branch the session committed to back to its remote-tracking ref, returns to
-the branch C<begin> recorded, releases the lock, verifies the result, and then
+files first so the evidence reaches the operator, puts every deployment branch
+the session committed to back where it stood before the run, returns to the
+branch C<begin> recorded, releases the lock, verifies the result, and then
 dies with the error it was given.
+
+Each of those branches goes back through L</restore_branch($branch)>, so a
+branch the remote holds returns to the remote's tip, a branch it does not
+returns to the tip this session read at the switch, and a branch this run
+created is deleted. A declined publish puts a branch back through the same
+verb, so the two ways a run can end leave the repository in one state.
 
 Control is never reset and its local ref is never force-written, because
 committed work on control is never discarded. Where control is behind its
@@ -654,8 +660,11 @@ back to what the session read, which is a hard reset where we are standing on
 it and a ref write where we are not.
 
 Where the branch is the one the repository is standing on and it has to go,
-the session steps back to the branch it began on first, because git will not
-delete the branch the tree stands on.
+the session checks out the branch it began on first, because git will not
+delete the branch the tree stands on. That step back is a checkout rather than
+a switch and asks nothing about the session still being open, so a branch this
+run cut is taken off on an abort exactly as it is on a decline. A session begun
+on a detached HEAD has no branch to step back to, and the step is skipped.
 
 B<Parameters:>
 

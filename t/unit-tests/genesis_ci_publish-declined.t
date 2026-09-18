@@ -163,4 +163,42 @@ subtest 'a publish-set branch the remote never had goes back where it was' => su
 	$session->finish;
 };
 
+# The third case of the restore, which neither row above reaches: a branch
+# this run cut, that the remote has never held and that the session recorded
+# no tip for.  There is nothing to put such a branch back to, so putting it
+# back is taking it off, and the tree has to step off it first because git
+# will not delete the branch it stands on.
+subtest 'a branch the run cut is taken off again on a decline' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(envs => ['lab'], mode => 'pr', vault => 0);
+	init_branch($h, 'lab');
+
+	my $control = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nops: sixteen\n"},
+		message => 'share an op with every environment',
+		push    => 1,
+	);
+
+	my $git     = $h->git('a');
+	my $cut     = $h->pr_branch('lab');
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($cut, create_from => $h->slug('lab'));
+	$git->checkout_file($control, 'ops/shared.yml');
+	$git->commit('deliver ops/shared.yml to the pull request branch',
+		'ops/shared.yml');
+
+	ok($git->branch_exists($cut), 'the run cut the branch and stands on it');
+	ok(!ref_in($h->a, "refs/remotes/origin/$cut"),
+		'and the remote has never held it');
+
+	is(Genesis::CI::Publish::_reset_publish_set($session), 1,
+		'the branch is in the set the reset puts back');
+	ok(!$git->branch_exists($cut),
+		'and putting it back took it off, because nobody held it before');
+
+	$session->finish;
+};
+
 done_testing;

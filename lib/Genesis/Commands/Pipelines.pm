@@ -633,6 +633,14 @@ sub propagate {
 	#
 	# The topology is read once for the whole loop rather than once per
 	# environment, because building it walks every environment file.
+	#
+	# This reading is the working tree's, and a run started from a feature
+	# branch reads that branch's environment files rather than control's, so
+	# the same question is asked a second time below once the session has
+	# stood the run on control.  Neither reading is redundant: the first is
+	# what keeps the exit named for a repository whose control is checked
+	# out, and the second is what catches a collision that exists only in
+	# control's files.
 	my $pr_topology = $top->pipeline_topology;
 	$top->pr_branch_for($_) for grep {
 		$pr_topology->{nodes}{$_}{require_pr}
@@ -656,6 +664,17 @@ sub propagate {
 	# itself, from the same reader, so the record it hands back carries them
 	# and nothing here keeps a second copy.
 	my @dag_order = @{$topo->{order}};
+
+	# The collision, asked again on control's own files.  The pre-session
+	# reading above answers about whatever branch the operator was standing
+	# on, so a prefix that collides only in control's files would otherwise
+	# reach pr_branch_for inside the walk, where its named exit becomes a
+	# bare 1.  The refusal goes through the closure, which closes the session
+	# first, so the operator is back on their branch and the exit survives.
+	for my $env_name (grep {$topo->{nodes}{$_}{require_pr}} @dag_order) {
+		eval {$top->pr_branch_for($env_name); 1}
+			or $refuse->({exitcode => CONFIG}, "%s", ($@ // '') =~ s/\s+$//r);
+	}
 
 	# The rest of D96's first stage, now that the topology is known.  Every
 	# refusal below is collected before anything is written, so a run that
@@ -720,6 +739,18 @@ sub propagate {
 	my ($github, $owner_repo);
 	if (grep {$topo->{nodes}{$_}{require_pr}} @dag_order) {
 		$owner_repo = $top->source_control_repository;
+		# Named rather than split.  A pair that never resolved is an
+		# owner and a repository this run has no way to guess, and
+		# splitting undef says so as an uninitialized-value warning in
+		# the middle of a run instead of as the key to write.
+		$refuse->(
+			{exitcode => CONFIG},
+			"This repository delivers into pull requests, and #C{%s} is ".
+			"not set and could not be derived from any git remote.\n\n".
+			"Set it to the #C{owner/repo} pair the pull requests are ".
+			"opened against.",
+			'pipeline.source_control.repository'
+		) unless defined $owner_repo && length $owner_repo;
 		my ($gh_owner) = split m{/}, $owner_repo, 2;
 		$github = Service::Github->new(org => $gh_owner)
 			if $ENV{GITHUB_AUTH_TOKEN};
@@ -861,7 +892,17 @@ sub propagate {
 							commits => \@pending,
 							state   => $pr_state_of{$env_name},
 						);
-						$env_record->{outcome} = $word if defined $word;
+						# An environment with a hold standing over it is
+						# left for the report to settle, which writes
+						# held with the qualifier that says what it
+						# waits for.  The arm answers idempotent for
+						# anything with nothing due, and a word written
+						# here takes _settle's first return and the
+						# qualifier with it.
+						$env_record->{outcome} = $word
+							if defined $word && !(
+								$word eq 'idempotent'
+								&& @{$env_record->{held} || []});
 					},
 				);
 				next if ($env_record->{outcome} // '') eq 'failed';

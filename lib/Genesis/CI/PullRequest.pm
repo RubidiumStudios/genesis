@@ -25,12 +25,19 @@ our @EXPORT_OK = qw/client_for_run pr_state sync_pull_request/;
 # before it is read.  The refresh fetches control and the deployment branches
 # alone, because those are the branches the pre-flight classifies, so the pull
 # request branch is fetched here, by the arm that is about to stand on it.
+#
+# The fetch runs every time, and not only where the tracking ref is missing.
+# This sub is the only thing that ever writes that ref, so from the second run
+# for an environment onward the ref is present and holds the previous run's
+# tip, and a fetch skipped over it would reset the branch to yesterday's value
+# and read yesterday's discard report.  branch_exists is asked afterwards for
+# the one thing it can still answer, which is whether the remote has the
+# branch at all.
 sub align_with_remote {
 	my ($git, $branch) = @_;
 	my $remote = $git->default_remote or return 0;
 
-	$git->fetch_branches([$branch], $remote)
-		unless $git->branch_exists("$remote/$branch");
+	$git->fetch_branches([$branch], $remote);
 	return 0 unless $git->branch_exists("$remote/$branch");
 
 	$git->reset_hard("$remote/$branch");

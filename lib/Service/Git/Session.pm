@@ -349,11 +349,13 @@ sub finish_if_clean {
 # abort - discard, reset, restore, verify, and die {{{
 #
 # D32 fixes what it reaches: every deployment branch this session committed
-# to goes back to T, and control is never touched, because committed work on
-# control in L is never discarded.  The discard reaches the index as well as
-# the tree, which is H1, and it names the modified files before it throws
-# them away so the evidence reaches the operator.  Nothing here removes an
-# untracked file, so an operator's scratch file survives under D84.
+# to goes back to where it stood before the run, and control is never touched,
+# because committed work on control in L is never discarded.  A branch this
+# run itself created is put back by being deleted, which is what derived state
+# is owed.  The discard reaches the index as well as the tree, which is H1,
+# and it names the modified files before it throws them away so the evidence
+# reaches the operator.  Nothing here removes an untracked file, so an
+# operator's scratch file survives under D84.
 sub abort {
 	my ($self, $error, %opts) = @_;
 	my $git = $self->{git};
@@ -393,7 +395,24 @@ sub abort {
 			die "the discard failed\n";
 		}
 
-		$self->_reset_to_remote($_) for @reset;
+		# Every branch this session wrote goes back through the same
+		# restore a declined publish goes through, so the three cases end
+		# alike whichever way the run ended: a branch the remote holds
+		# goes back to the remote's tip, a branch it does not goes back
+		# to the tip this session read at the switch, and a branch this
+		# run created is deleted.  The restore steps the tree off such a
+		# branch itself, because git will not delete the one it stands
+		# on.
+		#
+		# Control never reaches the restore, which refuses it by name.
+		# committed_branches has already filtered it out, so the arm
+		# below is the guard for a set that somehow carries it rather
+		# than a path the abort takes.
+		for my $branch (@reset) {
+			defined $self->{control} && $branch eq $self->{control}
+				? $self->_reset_to_remote($branch)
+				: $self->restore_branch($branch);
+		}
 		$self->_restore;
 		1;
 	} or do {
@@ -500,8 +519,14 @@ sub discard {
 	$self->_reset_to_remote($branch);
 
 	delete $self->{committed}{$branch};
+	# A recorded absence is left as it is.  What the reset owes a branch
+	# this run cut is that absence, and writing the branch's current tip
+	# over it here would turn a branch nobody held into one that stood
+	# before the run, which the abort would then put back rather than take
+	# off.
 	$self->{switched}{$branch} = eval {$git->sha($branch)}
-		if exists $self->{switched}{$branch};
+		if exists $self->{switched}{$branch}
+		&& defined $self->{switched}{$branch};
 
 	trace("Service::Git::Session: discarded %s", $branch);
 	return $self;
@@ -563,8 +588,15 @@ sub restore_branch {
 	# git will not delete the branch the tree stands on, and the run may have
 	# stopped while standing on this one, so the session steps back to the
 	# branch it began on before the ref goes.
-	$self->switch($self->{origin}{branch})
-		if $self->{active} && $self->{origin}
+	#
+	# The step back is a checkout rather than a switch, and it asks nothing
+	# about the session being open.  An abort clears that flag before it puts
+	# any branch back, so a switch here would be refused on exactly the path
+	# that most needs the step, and the delete would then answer for a branch
+	# still standing.  A session begun on a detached HEAD has no branch to
+	# step back to, and the guard reads the recorded name for that.
+	$self->_through_the_door(sub {$git->checkout($self->{origin}{branch})})
+		if $self->{origin} && defined $self->{origin}{branch}
 		&& ($git->current_branch // '') eq $branch;
 	$git->delete_branch($branch) if $git->branch_exists($branch);
 	return 'deleted';
