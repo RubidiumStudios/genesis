@@ -2279,6 +2279,33 @@ define_command("pipeline-hold", {
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_hold');
 # }}}
+# genesis pipeline-release - release a propagation hold {{{
+define_command("pipeline-release", {
+	summary => "Release the propagation hold on an environment.",
+	usage   => "pipeline-release [<env>]",
+	description =>
+		"Deletes the propagation hold record for an environment, so the ".
+		"next #C{genesis propagate} delivers to it again.\n".
+		"\n".
+		"Releasing is a human act.  No deploy and no flag clears a hold, ".
+		"and #C{-y} answers nothing here, because there is no prompt.  The ".
+		"record is deleted outright and no released-by fields are kept, so ".
+		"the release lives in this command's log line and nowhere else.\n".
+		"\n".
+		"Run as #C{genesis <env> pipeline-release} it releases that one ".
+		"environment; run as #C{genesis pipeline-release} it releases every ".
+		"environment in the deployment root.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => ['repo','env'],
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	arguments => [
+		'env?' =>
+			"Environment to release.  Without it, every environment in the ".
+			"deployment root is released.",
+	],
+}, 'Genesis::Commands::Pipelines::pipeline_release');
+# }}}
 # genesis pipeline-diff - show compiled vs live pipeline delta {{{
 define_command("pipeline-diff", {
 	summary => "Show the diff between compiled and live pipeline.",

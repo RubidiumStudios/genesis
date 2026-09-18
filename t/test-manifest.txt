@@ -347,6 +347,7 @@ integration-tests/genesis_commands_pipelines-apply_orphaned_marker.t # a rewrite
 integration-tests/genesis_commands_pipelines-apply_creation_only.t # branch creation belongs to the apply alone, so pipeline-prepare is gone and genesis new cuts no branch
 integration-tests/genesis_commands_pipelines-apply_manual.t  # the manual provider gets every stage but the pipeline, and a dry run previews them all and writes nothing
 integration-tests/genesis_commands_pipelines-hold.t          # pipeline-hold records the hold, and the walk stops delivering behind it
+integration-tests/genesis_commands_pipelines-release.t       # pipeline-release deletes the record, and nothing else clears a hold
 integration-tests/genesis_ci_preflight-control.t             # control exists, and it stands in step with the remote
 integration-tests/genesis_ci_preflight-branch_origin.t        # the two refusals for a branch with no legitimate origin
 integration-tests/genesis_ci_preflight-local_commits.t       # the marker-only reset, and the hand-commit refusal
