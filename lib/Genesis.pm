@@ -96,6 +96,7 @@ our @EXPORT = qw/
 	pretty_duration
 	ordify
 	count_nouns
+	bail_text
 	without_backtrace
 
 	spruce_diff
@@ -1706,6 +1707,34 @@ sub sentence_join {
 # spaces in front of the tab and the location pattern takes any whitespace
 # between its words.  The fold is last, because a pattern that ran after
 # it would have no newline left to anchor on.
+# bail_text - what a bail said inside an eval, ready to be quoted once
+#
+# Inside an eval bail dies with its message already coloured, already wrapped
+# to the terminal, and already prefixed [FATAL] on every line it folded.  A
+# caller that catches one and interpolates it whole into a refusal of its own
+# hands the operator a banner in the middle of a paragraph and two wrap widths
+# in one message, so the colour and the prefix come off here and the hard wrap
+# inside each paragraph is undone, which leaves the outer refusal one
+# paragraph per paragraph to wrap once for itself.
+#
+# The blank lines stay, because they are the caught message's own structure
+# rather than the wrap's, and a refusal that ran its paragraphs together would
+# lose the shape its author gave it.
+sub bail_text {
+	my ($text) = @_;
+	return '' unless defined $text;
+
+	$text =~ s/\e\[[0-9;]*m//g;
+	my @said;
+	for my $paragraph (split /\n[ \t]*\n/, $text) {
+		my @lines = grep {/\S/}
+			map {s/^\s*(?:\[FATAL\]\s*)?//r =~ s/\s+$//r}
+			split /\n/, $paragraph;
+		push @said, join(' ', @lines) if @lines;
+	}
+	return join("\n\n", @said);
+}
+
 sub without_backtrace {
 	my ($text) = @_;
 	return '' unless defined $text;

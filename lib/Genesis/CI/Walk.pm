@@ -769,10 +769,19 @@ sub walk_one {
 	# which is exactly the branch a half-written delivery leaves standing.
 	# The restore knows that case and takes such a branch off, stepping the
 	# tree off it first.
+	#
+	# Only a branch this session actually switched to.  The walk composes the
+	# pull request branch's name for every environment whose policy asks for
+	# one, whether or not the arm ever stood on it, and an environment that
+	# died before the switch has that name on its record with nothing of this
+	# run's on the branch.  Handing the restore one of those would take off a
+	# local branch somebody else made, since the restore's own last arm reads
+	# a branch with no remote tip and no recorded tip as one this run cut.
 	if ($session) {
 		$session->discard($record->{branch});
 		$session->restore_branch($record->{pr}{branch})
-			if $record->{pr} && $record->{pr}{branch};
+			if $record->{pr} && $record->{pr}{branch}
+			&& $session->switched_to($record->{pr}{branch});
 	}
 	$record->{error}   = _load_error($error);
 	$record->{outcome} = 'failed';
@@ -907,6 +916,11 @@ sub scope_for {
 	%wanted = map {$_ => 1} @{$opts{scope}}
 		if $opts{scope} && @{$opts{scope}};
 
+	# The names the pull request branch's own refusal compares against, taken
+	# from the topology this sub already holds, because composing that name
+	# would otherwise build one topology per environment.
+	my @names = keys %{$topology->{nodes}};
+
 	for my $name (@{$topology->{order}}) {
 		my $prior = $topology->{parent_of}{$name};
 		$depth{$name} = defined $prior ? ($depth{$prior} // 0) + 1 : 0;
@@ -916,7 +930,7 @@ sub scope_for {
 			type      => $top->type,
 			branch    => $top->branch_for($name),
 			pr_branch => $topology->{nodes}{$name}{require_pr}
-				? $top->pr_branch_for($name) : undef,
+				? $top->pr_branch_for($name, envs => \@names) : undef,
 			prior_env => $prior,
 			depth     => $depth{$name},
 		};

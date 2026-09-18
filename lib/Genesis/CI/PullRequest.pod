@@ -125,6 +125,10 @@ today's configuration would name files the delivery did not move.
 The sha of each commit is read under the name the walk writes on a pending
 entry, which is C<control_commit>.
 
+Each entry's summary is taken of the commit itself rather than between it and
+its parent, because control's own first commit has no parent and an
+environment introduced there has that commit due on its first run.
+
 B<Parameters:>
 
 =over 4
@@ -154,8 +158,8 @@ that order, where the caller has one.
 B<Returns:> The whole message as one string, ending in a single newline.
 
 B<Errors:> Whatever the marker builder raises for a sha or an environment it
-will not accept, and whatever C<< $git->diff_stat >> raises for a commit the
-repository cannot summarise.
+will not accept, and whatever C<< $git->commit_stat >> raises for a commit
+the repository cannot summarise.
 
 B<Examples:>
 

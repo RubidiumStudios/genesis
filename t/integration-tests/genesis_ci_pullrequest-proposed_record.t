@@ -88,4 +88,42 @@ subtest 'a colliding pull request prefix refuses before the session opens' => su
 	is(scalar(gh_calls($h->{gh})), 0, 'and no call was made to the API');
 };
 
+# The same collision, carried only by control's own files.  The run reads the
+# working tree's environment files before it opens a session, so a repository
+# whose checked-out branch does not hold the colliding environment gets past
+# that first reading and meets the second one, which is asked on control once
+# the session has stood the run there.  That refusal is caught and re-raised
+# through the run's own closure, so it is the one that quoted a message
+# already wrapped and already bannered and put a second banner on top of it.
+subtest 'a collision only control carries refuses with one banner' => sub {
+	plan tests => 6;
+
+	my $h = ready(kit => 'omega-v2.7.0', envs => ['lab', 'pr-lab']);
+	$h->set_repo_config('pipeline.source_control.pr_prefix', 'pr-');
+	$h->push_from('a', $h->control);
+
+	# The operator's own branch, which drops the environment whose deployment
+	# branch the prefix would collide with, so the pre-session reading finds
+	# no collision and control's reading still does.  The branch is cut with
+	# git itself rather than through the handle, because every checkout the
+	# handle makes is refused outside a branch session.
+	my $env_file = join('/', grep {length} $h->{root}, 'pr-lab.yml');
+	run({dir => $h->a}, 'git', 'checkout', '-q', '-b', 'tidy-the-pipeline');
+	run({dir => $h->a, onfailure => "Failed to remove $env_file"},
+		'git', 'rm', '-q', '--', $env_file);
+	run({dir => $h->a, onfailure => 'Failed to retire pr-lab'},
+		'git', 'commit', '-q', '-m', 'Retire the pr-lab environment');
+	$h->refresh('a');
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, Genesis::Exit::CONFIG, 'the run exits CONFIG');
+	like($err, qr/pull request branch for/i,
+		'naming the branch it would have used');
+	like($err, qr/pr_prefix/, 'and the key to change');
+	unlike(unfolded($out, $err), qr/\[FATAL\][\s\S]*\[FATAL\]/,
+		'with the refusal quoted once rather than bannered twice');
+	is($h->git('a')->current_branch, 'tidy-the-pipeline',
+		'the operator is left on the branch they started from');
+};
+
 done_testing;

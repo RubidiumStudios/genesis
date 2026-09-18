@@ -624,4 +624,53 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 		'no file was written, removed, or committed');
 };
 
+# The writer records every branch it commits to, so that a commit which left
+# a tip where it was is still in the set an abort resets.  The restore is the
+# other end of that record.  Once it has put a branch back there is nothing
+# left for an abort to do about it, and for a branch this run cut the second
+# pass would answer for a delete it never made, so the restore takes the
+# branch off the set the way discard already does.
+subtest 'the restore takes a branch off the committed set' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	# The branch is cut at the seeded tip of control, so it already carries
+	# the set and the delivery below has something of its own to write.
+	my $base = ref_in($h->a, 'refs/heads/' . $h->control);
+	deliver($h, 'qa', copy => 'a', control => $base);
+
+	my $due = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the ops file the blueprint names',
+		push    => 1,
+	);
+
+	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = $top->load_env('qa');
+
+	my $branch  = $h->slug('qa');
+	my $session = $git->session;
+	$session->begin;
+	$session->switch($branch);
+	$session->apply_files($due, env => $env,
+		message => Genesis::CI::Marker::build($due, 'qa'));
+
+	ok(grep({$_ eq $branch} $session->committed_branches),
+		'the writer put the branch in the set an abort would reset');
+	is($session->restore_branch($branch), 'reset',
+		'the restore puts it back where the remote has it');
+	ok(!grep({$_ eq $branch} $session->committed_branches),
+		'and it is off that set afterwards');
+
+	$session->finish;
+};
+
 done_testing;

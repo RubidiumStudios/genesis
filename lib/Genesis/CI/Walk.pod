@@ -1162,6 +1162,15 @@ C<< Service::Git::Session->restore_branch >>, because the discard puts a
 branch back to the remote's tip and a branch this run cut has no tip there to
 go back to.
 
+Only a pull request branch the session actually switched to.  The walk
+composes that name for every environment whose policy asks for one, whether
+or not the arm ever stood on it, so an environment that died before the
+switch carries the name on its record with nothing of this run's on the
+branch.  The restore reads a branch with no remote tip and no recorded tip as
+one this run cut, so handing it one of those would take off a local branch
+somebody else made, and C<< Service::Git::Session->switched_to >> is asked
+before the restore for that reason.
+
 =item C<writes>
 
 Optional, false by default.  True where the caller is delivering, which makes

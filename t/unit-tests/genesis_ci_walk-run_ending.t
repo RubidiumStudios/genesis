@@ -26,17 +26,34 @@ $ENV{NOCOLOR} = 1;
 # discard at all.  walk_one asks a session for that and for nothing else.
 {
 	package Recording::Session;
-	sub new     {bless {discarded => []}, shift}
+	sub new {
+		my ($class, %opts) = @_;
+		return bless {
+			discarded => [],
+			restored  => [],
+			switched  => {map {($_ => 1)} @{$opts{switched} || []}},
+		}, $class;
+	}
 	sub discard {
 		my ($self, $branch) = @_;
 		push @{$self->{discarded}}, $branch;
 		return $self;
+	}
+	sub restore_branch {
+		my ($self, $branch) = @_;
+		push @{$self->{restored}}, $branch;
+		return 'reset';
+	}
+	sub switched_to {
+		my ($self, $branch) = @_;
+		return (defined $branch && $self->{switched}{$branch}) ? 1 : 0;
 	}
 }
 
 # One environment's record as plan builds it, far enough along that a row can
 # see whether walk_one wrote an outcome onto it.
 sub a_record {
+	my (%opts) = @_;
 	return {
 		env     => 'qa',
 		branch  => 'qa/bosh',
@@ -44,6 +61,7 @@ sub a_record {
 		held    => [],
 		error   => undef,
 		outcome => undef,
+		%opts,
 	};
 }
 
@@ -138,6 +156,35 @@ subtest 'a delivery with no session is refused before it writes' => sub {
 	is($wrote, 0, 'and nothing was delivered before it');
 	is($record->{outcome}, undef,
 		'so the environment records no outcome either');
+};
+
+subtest 'only a pull request branch this run stood on goes back' => sub {
+	plan tests => 4;
+
+	# The arm switches to the pull request branch before it writes, so a
+	# delivery that died halfway leaves its partial write there and that is
+	# the branch the restore exists for.
+	my $stood = Recording::Session->new(switched => ['pr/qa/bosh']);
+	my $one   = a_record(pr => {branch => 'pr/qa/bosh'});
+	raised_by(session => $stood, record => $one,
+		deliver => sub {die "the blueprint hook exited 1\n"});
+	is_deeply($stood->{restored}, ['pr/qa/bosh'],
+		'the branch the arm stood on goes back through the restore');
+
+	# An environment that died before the arm switched carries the branch
+	# name on its record all the same, because the walk composes the name
+	# whether or not anything is delivered.  The restore takes off a branch
+	# neither the remote nor the session has a tip for, so handing it one
+	# this run never cut would delete a branch somebody else made.
+	my $never = Recording::Session->new;
+	my $two   = a_record(pr => {branch => 'pr/qa/bosh'});
+	raised_by(session => $never, record => $two,
+		deliver => sub {die "the environment could not be loaded\n"});
+	is_deeply($never->{restored}, [],
+		'a branch this run never stood on is left where it is');
+	is_deeply($never->{discarded}, ['qa/bosh'],
+		'while the deployment branch still goes back');
+	is($two->{outcome}, 'failed', 'and the environment records failed');
 };
 
 done_testing;

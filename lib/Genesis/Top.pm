@@ -1054,9 +1054,17 @@ sub branch_for {
 # is against the composed branch names.  Refusing the collision belongs
 # here, in the one place a pull request branch is named, rather than in
 # each caller.
+#
+# The names to compare against are the caller's to pass where it already
+# holds them.  pipeline_env_names memoises nothing and builds the whole
+# topology, which walks every environment file, so a run asking about each
+# pull request environment in turn paid for one entire topology per ask.
+# Every such caller already has one in hand and passes its environment
+# names through envs.
 sub pr_branch_for {
-	my ($self, $env_name) = @_;
+	my ($self, $env_name, %opts) = @_;
 	my $branch = $self->pr_prefix . $self->deployment_slug_for($env_name);
+	my @envs   = $opts{envs} ? @{$opts{envs}} : $self->pipeline_env_names;
 
 	bail(
 		{exitcode => CONFIG},
@@ -1065,7 +1073,7 @@ sub pr_branch_for {
 		"Change #C{pipeline.source_control.pr_prefix} to a prefix no ".
 		"environment name begins with.",
 		$env_name, $branch, $_
-	) for grep {$branch eq $self->branch_for($_)} $self->pipeline_env_names;
+	) for grep {$branch eq $self->branch_for($_)} @envs;
 
 	bail(
 		{exitcode => CONFIG},

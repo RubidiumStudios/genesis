@@ -181,4 +181,31 @@ subtest 'a gate ends the aggregate and holds what follows' => sub {
 		'with the gate as its reason, in the words the trailer gave');
 };
 
+# A control commit with no parent is a commit like any other, and the entry
+# the body carries for it is the one git cannot take against a parent that
+# does not exist.  changed_set already passes --root for the same reason.
+#
+# The branch is cut and never delivered to, so it carries no marker and the
+# walk runs from the commit before the one that introduced the environment.
+# The harness introduces every environment in control's first commit, so there
+# is no such commit and the whole of control is due, that first commit
+# included.
+subtest "control's own first commit is summarised too" => sub {
+	plan tests => 4;
+
+	my $h  = ready(kit => 'omega-v2.7.0', delivered => [], certified => []);
+	my $pr = $h->pr_branch('prod');
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, 0, 'the run succeeded');
+
+	refresh($h, 'a', $pr);
+	my ($body) = run({dir => $h->a}, 'git', 'log', '-1', '--format=%b',
+		"origin/$pr");
+	like($body, qr/seed the control branch/,
+		'the body carries an entry for the first commit');
+	like($body, qr/prod\.yml\s+\|\s+\d+ \+/,
+		'summarised against nothing, which is what it was added to');
+};
+
 done_testing;

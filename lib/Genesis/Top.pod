@@ -879,12 +879,13 @@ B<Examples:>
 =head2 pr_branch_for
 
     my $branch = $top->pr_branch_for($env_name);
+    my $branch = $top->pr_branch_for($env_name, envs => \@names);
 
 The pull request branch for an environment name, which is L</pr_prefix>
 joined onto its slug.
 
-There is no second argument, because the prefix is configuration rather than
-a caller's choice.
+The prefix is configuration rather than a caller's choice, so no caller
+passes one.
 
 The join can produce a name another branch already owns, and that is refused
 here rather than in each caller, so this is the one place a pull request
@@ -892,7 +893,28 @@ branch is named and the one place the collision is caught. Both the prefix
 and the deployment type append, so the type cancels on both sides and the
 comparison is against the composed branch names.
 
-B<Parameters:> The environment's name, as a string.
+The names that comparison is made against are the caller's to pass where it
+already holds them. L</pipeline_env_names> memoises nothing and builds the
+whole topology, which walks every environment file, so a run asking about
+each of its pull request environments in turn paid for one entire topology
+per ask. A caller with a topology in hand passes its environment names
+through C<envs> instead, and the answer is the same either way.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env_name>
+
+The environment's name, as a string.
+
+=item C<envs>
+
+Optional. The environment names to compare the composed branch against, as
+an arrayref. Defaults to L</pipeline_env_names>, which builds a topology of
+its own.
+
+=back
 
 B<Returns:> The branch name, such as C<pr/qa/bosh>.
 
@@ -932,6 +954,9 @@ B<Examples:>
 
     my $branch = $top->pr_branch_for('qa');
     # returns 'pr/qa/bosh' under the default prefix
+
+    my $branch = $top->pr_branch_for('qa', envs => ['qa', 'prod']);
+    # the same answer, with no topology built to reach it
 
     # with pr_prefix 'pr-' and an environment named pr-lab
     my $branch = $top->pr_branch_for('lab');

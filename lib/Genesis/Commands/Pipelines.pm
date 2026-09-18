@@ -442,9 +442,14 @@ sub pipeline_status {
 			# eval below, because that eval is there to let missing
 			# credentials and a failed API call degrade quietly, and
 			# a prefix that collides with a branch name is neither.
+			# The names go in with each ask for the reason propagate's own
+			# two checks pass them: naming a pull request branch compares it
+			# against every deployment branch in the pipeline, and this map
+			# would otherwise build one whole topology per environment.
+			my @names = keys %$nodes;
 			my %pr_branch_env = map {
-				($top->pr_branch_for($_) => $_)
-			} keys %$nodes;
+				($top->pr_branch_for($_, envs => \@names) => $_)
+			} @names;
 			eval {
 				my $prs = $github->list_prs($repository, state => 'open');
 				for my $pr (@$prs) {
@@ -641,8 +646,14 @@ sub propagate {
 	# what keeps the exit named for a repository whose control is checked
 	# out, and the second is what catches a collision that exists only in
 	# control's files.
+	#
+	# The environment names go in with each ask, because the refusal compares
+	# the composed branch against every deployment branch in the pipeline and
+	# would otherwise build a topology of its own for each environment it is
+	# asked about.
 	my $pr_topology = $top->pipeline_topology;
-	$top->pr_branch_for($_) for grep {
+	my @pr_names    = keys %{$pr_topology->{nodes}};
+	$top->pr_branch_for($_, envs => \@pr_names) for grep {
 		$pr_topology->{nodes}{$_}{require_pr}
 	} @{$pr_topology->{order}};
 
@@ -671,9 +682,21 @@ sub propagate {
 	# reach pr_branch_for inside the walk, where its named exit becomes a
 	# bare 1.  The refusal goes through the closure, which closes the session
 	# first, so the operator is back on their branch and the exit survives.
+	#
+	# What it composes is kept, because the pre-flight below wants the same
+	# names and asking a second time rebuilds the topology once per
+	# environment.  The message it caught is quoted through bail_text: a bail
+	# raised inside an eval arrives already bannered and already wrapped, and
+	# re-raising it whole put a second [FATAL] in the middle of a paragraph.
+	my %pr_branch_of;
+	my @control_names = keys %{$topo->{nodes}};
 	for my $env_name (grep {$topo->{nodes}{$_}{require_pr}} @dag_order) {
-		eval {$top->pr_branch_for($env_name); 1}
-			or $refuse->({exitcode => CONFIG}, "%s", ($@ // '') =~ s/\s+$//r);
+		my $pr_branch = eval {
+			$top->pr_branch_for($env_name, envs => \@control_names)
+		};
+		$refuse->({exitcode => CONFIG}, "%s", bail_text($@))
+			unless defined $pr_branch;
+		$pr_branch_of{$env_name} = $pr_branch;
 	}
 
 	# The rest of D96's first stage, now that the topology is known.  Every
@@ -784,7 +807,7 @@ sub propagate {
 				$github, $owner_repo, {
 					env    => $env_name,
 					branch => $top->branch_for($env_name),
-					pr     => {branch => $top->pr_branch_for($env_name)},
+					pr     => {branch => $pr_branch_of{$env_name}},
 				}, refuse => $refuse);
 		}
 	}
