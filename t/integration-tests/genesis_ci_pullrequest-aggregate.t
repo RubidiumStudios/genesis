@@ -105,4 +105,80 @@ subtest 'two due commits become one aggregate' => sub {
 	is($payload->{title}, $subject, 'and the title is its subject');
 };
 
+# Proves T260: a gate travels with the commits ahead of it and ends the
+# delivery, the body names what waits, and the later commit is held.
+#
+# The row is not green on arrival.  The walk already trims the due list to the
+# gate and records the commit after it as gate-ahead, so the aggregate stops
+# in the right place and the report already says why that one commit waits.
+# What is missing is the paragraph: nothing in the aggregate's body says the
+# delivery stopped at a gate, and nothing on the delivered entry even says
+# which of the two commits the gate is, so the arm has no reading of the
+# trailer to compose one from.
+#
+# The three due commits are laid through the environment file at the
+# deployment root for the reason the row above records: a path under prod/ is
+# in no propagation set, so a commit written there would route nowhere and
+# leave nothing due.
+subtest 'a gate ends the aggregate and holds what follows' => sub {
+	plan tests => 8;
+
+	my $h  = ready(kit => 'omega-v2.7.0');
+	my $pr = $h->pr_branch('prod');
+
+	my $path = $h->write_env_file('prod', params => {instances => 2},
+		commit => 0);
+	commit_on_control($h,
+		files   => {$path => slurp($h->a."/$path")},
+		message => 'Raise the cf instance count',
+		push    => 1,
+	);
+
+	$path = $h->write_env_file('prod',
+		params => {instances => 2, signing => 'rotated'}, commit => 0);
+	my $gate = commit_on_control($h,
+		files    => {$path => slurp($h->a."/$path")},
+		message  => 'Rotate the uaa signing key',
+		trailers => {'Genesis-Stage' =>
+			'rotate the uaa signing key before anything after it'},
+		push     => 1,
+	);
+
+	$path = $h->write_env_file('prod',
+		params => {instances => 3, signing => 'rotated'}, commit => 0);
+	my $after = commit_on_control($h,
+		files   => {$path => slurp($h->a."/$path")},
+		message => 'Raise the cf instance count again',
+		push    => 1,
+	);
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, 0, 'the run succeeded');
+
+	refresh($h, 'a', $pr);
+	is(harness_marker($h, "origin/$pr"), $gate, 'the aggregate ends at the gate');
+
+	my ($body) = run({dir => $h->a}, 'git', 'log', '-1', '--format=%b',
+		"origin/$pr");
+	like($body, qr/Carries 2 control commits:/,
+		'it carries the gate and the one ahead of it');
+	like($body,
+		qr/^Gate: rotate the uaa signing key before anything after it\./m,
+		'the body carries the gate line');
+	like($body, qr/Holding 1 later commit for prod until this deploys\./,
+		'and says what waits behind it');
+
+	# The report is written to standard error and folded to the terminal
+	# width on its way out, so both phrases are read off the run put back on
+	# one line rather than off whichever column the fold landed in.
+	my $said = unfolded($out, $err);
+	my $short_after = substr($after, 0, 7);
+	like($said,
+		qr/control\@\Q$short_after\E Raise the cf instance count again\s+held/,
+		'the later commit is recorded held');
+	like($said,
+		qr/gate: rotate the uaa signing key before anything after it/,
+		'with the gate as its reason, in the words the trailer gave');
+};
+
 done_testing;

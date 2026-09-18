@@ -649,7 +649,20 @@ sub walk_env {
 			next;
 		}
 
+		# The gate is delivered, and it is the last commit that is, so its own
+		# pending entry says which gate governs it and what the trailer asked
+		# for.  A held entry carries the same two keys under the same meaning,
+		# and the gate's entry names itself because the gate a commit is
+		# governed by, where that commit is the gate, is the commit itself.
+		# The arm that composes the aggregate's body reads the reason here
+		# rather than parsing the trailer a second time, which is how the walk
+		# and the body would come to disagree about what is being waited on.
+		my %gated = ($gate && $commit->{sha} eq $gate->{gate})
+			? (gate => $gate->{gate}, gate_reason => $gate->{gate_reason})
+			: ();
+
 		push @{$record->{pending}}, {
+			%gated,
 			control_commit => $commit->{sha},
 			subject        => $commit->{subject},
 			files          => $files,

@@ -932,6 +932,15 @@ every commit after it is held with the gate's own reason rather than behind
 the commit in front of it, because the gate is the one thing an operator can
 clear.
 
+The gate's own entry stays pending and carries C<gate> and C<gate_reason>
+beside the keys every pending entry has, under the same meaning a held entry
+gives them: the gate governing this commit, and the text its trailer asked
+for.  The gate names itself there, the gate governing a gate being the
+commit itself.  The arm that composes a pull request's aggregate reads the
+reason off that entry rather than parsing the trailer a second time, which is
+how the walk and the body would otherwise come to disagree about what is
+being waited on.
+
 B<Parameters:>
 
 =over 4
