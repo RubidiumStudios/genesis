@@ -431,6 +431,12 @@ subtest 'pagination: two-page list with Link header' => sub {
 # Returns an arrayref.  Filter by head is the GitHub API filter when
 # provided (server-side), with a defensive grep on the response (in
 # case the API surfaces unrelated results).
+#
+# Every pull request that survives the filter is then asked for its
+# reviews, because D51 has the caller act on what a reviewer decided and
+# open_prs attaches that rather than leaving each caller to fetch it.  So
+# each row below queues one reviews response per surviving pull request,
+# after the listing response.
 # ======================================================================
 
 subtest 'open_prs - lists all open PRs against base when head omitted' => sub {
@@ -443,6 +449,7 @@ subtest 'open_prs - lists all open PRs against base when head omitted' => sub {
 		make_pr(number => 3, head_ref => 'feat/banner',  base_ref => 'staging'),
 	);
 	queue_curl_response(200, 'OK', encode_json(\@prs), '');
+	queue_curl_response(200, 'OK', encode_json([]), '') for 1 .. 3;
 
 	my $result = $gh->open_prs('org/repo', 'staging');
 	is(scalar(@$result), 3, 'returns all open PRs against staging');
@@ -461,6 +468,7 @@ subtest 'open_prs - filters to head when provided' => sub {
 		make_pr(number => 2, head_ref => 'hotfix/asap', base_ref => 'staging'),
 	);
 	queue_curl_response(200, 'OK', encode_json(\@prs), '');
+	queue_curl_response(200, 'OK', encode_json([]), '');
 
 	my $result = $gh->open_prs('org/repo', 'staging', 'pr/staging');
 	is(scalar(@$result), 1, 'only the head=pr/staging PR survives the filter');

@@ -543,6 +543,57 @@ sub list_prs {
 }
 
 # }}}
+# pr_reviews - the reviews on one pull request, oldest first {{{
+#
+# What a reviewer decided is what decides whether the run rebuilds a pull
+# request branch or freezes it (D51), so it is read before the arm touches the
+# branch.  The API answers every review in submission order, and the caller
+# takes the newest decisive one, because a comment-only review neither
+# approves nor asks for changes.
+sub pr_reviews {
+	my ($self, $owner_repo, $number) = @_;
+	bail("Missing owner/repo for pr_reviews") unless $owner_repo;
+	bail("Missing PR number for pr_reviews")  unless defined $number;
+
+	my $url = $self->pulls_url($owner_repo, $number) . '/reviews?per_page=100';
+	my ($code, $msg, $data) = curl("GET", $url, undef, undef, 0, $self->{creds});
+	bail(
+		"Failed to read the review state of pull request #%d for #C{%s}: ".
+		"HTTP %s - %s", $number, $owner_repo, $code, $msg
+	) unless $code == 200;
+
+	my $reviews;
+	eval { $reviews = load_json($data); 1 }
+		or bail("Failed to parse the review list from GitHub: %s", $@);
+	return ref($reviews) eq 'ARRAY' ? $reviews : [];
+}
+
+# }}}
+# closed_prs - the closed pull requests for a branch, merged and unmerged {{{
+#
+# The supersedes list of D49 names the closed-unmerged attempts and quotes
+# whoever asked for the change, and D52's recovery reads a merged one's body,
+# so all three come from here.  Each entry carries the same decisive review
+# open_prs attaches, because the paragraph that quotes a rejection reads it off
+# a pull request that is closed by then.
+sub closed_prs {
+	my ($self, $owner_repo, $base, $head) = @_;
+	bail("Missing owner/repo for closed_prs") unless $owner_repo;
+	bail("Missing base branch for closed_prs")
+		unless defined $base && length $base;
+
+	my %opts = (state => 'closed', base => $base);
+	$opts{head} = $head if defined $head && length $head;
+
+	my $prs = $self->list_prs($owner_repo, %opts);
+	$prs = [ grep { ($_->{head}{ref} // '') eq $head } @$prs ]
+		if defined $head && length $head;
+
+	$self->_attach_review($owner_repo, $_) for @$prs;
+	return $prs;
+}
+
+# }}}
 # open_prs - list open PRs against a base branch (head optional) {{{
 #
 # Semantic wrapper around list_prs for the rolling-branch PR
@@ -555,7 +606,8 @@ sub list_prs {
 # Returns an arrayref.  When $head is provided the server-side
 # filter is applied AND a defensive grep filters the response (in
 # case the API surfaces unrelated results from pagination edge cases
-# or fork heads).
+# or fork heads).  Every entry that comes back carries merged_at and
+# the newest decisive review, which is what D51 has the caller act on.
 sub open_prs {
 	my ($self, $owner_repo, $base, $head) = @_;
 	bail("Missing owner/repo for open_prs") unless $owner_repo;
@@ -565,12 +617,41 @@ sub open_prs {
 	$opts{head} = $head if defined $head && length $head;
 
 	my $prs = $self->list_prs($owner_repo, %opts);
-	return $prs unless defined $head && length $head;
-
 	# Defensive: ensure every returned PR actually has head=$head.
 	# Pagination, fork heads, or future API changes could surface
 	# unrelated PRs; this grep keeps the contract tight.
-	return [ grep { ($_->{head}{ref} // '') eq $head } @$prs ];
+	$prs = [ grep { ($_->{head}{ref} // '') eq $head } @$prs ]
+		if defined $head && length $head;
+
+	$self->_attach_review($owner_repo, $_) for @$prs;
+	return $prs;
+}
+
+# }}}
+# _attach_review - merged_at and the newest decisive review, on one entry {{{
+#
+# D51 has the run act on what a reviewer decided, so the wrapper attaches it
+# rather than leaving each caller to fetch it, and D52's recovery needs
+# merged_at, which the list endpoint gives on every entry.  A COMMENTED or a
+# DISMISSED review is neither an approval nor a request for changes, so it
+# never decides an arm.
+sub _attach_review {
+	my ($self, $owner_repo, $pr) = @_;
+
+	$pr->{merged_at} //= undef;
+	my $decisive;
+	for my $r (@{$self->pr_reviews($owner_repo, $pr->{number})}) {
+		my $state = uc($r->{state} // '');
+		next unless $state eq 'APPROVED' || $state eq 'CHANGES_REQUESTED';
+		$decisive = {
+			state    => $state eq 'APPROVED' ? 'approved' : 'changes requested',
+			reviewer => $r->{user}{login},
+			body     => $r->{body} // '',
+			at       => $r->{submitted_at},
+		};
+	}
+	$pr->{review} = $decisive;
+	return $pr;
 }
 
 # }}}

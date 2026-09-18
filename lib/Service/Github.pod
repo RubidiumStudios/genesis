@@ -1051,6 +1051,127 @@ B<Examples:>
     state => 'all', base => 'main');
   # returns every pull request targeting main, open or closed
 
+=head2 pr_reviews
+
+  my $reviews = $gh->pr_reviews($owner_repo, $number);
+
+The reviews on one pull request, oldest first, each as the API gives it.
+
+A caller takes the newest review that approved or asked for changes, because a
+comment-only review decides nothing. The whole page is asked for at once, so
+one pull request costs one call however many people looked at it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<$number>
+
+The pull request number. Required.
+
+=back
+
+B<Returns:> An arrayref of review hashrefs, empty where nobody has reviewed.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for pr_reviews"> -- raised via C<bail()>.
+
+=item *
+
+C<"Missing PR number for pr_reviews"> -- raised via C<bail()>.
+
+=item *
+
+C<"Failed to read the review state of pull request #%d for #C{%s}: HTTP %s -
+%s"> -- raised via C<bail()> on any non-200 response.
+
+=item *
+
+C<"Failed to parse the review list from GitHub: %s"> -- raised via C<bail()>
+when the body is not valid JSON.
+
+=back
+
+B<Examples:>
+
+  my $reviews = $gh->pr_reviews('genesis-community/genesis', 42);
+  # returns [{state => 'APPROVED', user => {login => 'dbell'}, ...}]
+
+  my $reviews = $gh->pr_reviews('genesis-community/genesis', 43);
+  # returns [], where nobody has reviewed it yet
+
+=head2 closed_prs
+
+  my $prs = $gh->closed_prs($owner_repo, $base);
+  my $prs = $gh->closed_prs($owner_repo, $base, $head);
+
+The closed pull requests targeting C<$base>, optionally narrowed to those from
+C<$head>, merged and unmerged alike.
+
+Each entry carries C<merged_at>, which is C<undef> for a pull request closed
+without merging, and the same C<review> hashref C<open_prs> attaches. That is
+what tells a merged proposal from a rejected one: the supersedes list names
+the rejected attempts and quotes whoever asked for the change, while the
+recovery reads a merged one's body.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<$base>
+
+The base branch. Required.
+
+=item C<$head>
+
+B<(optional)> The head branch. Pass the bare name.
+
+=back
+
+B<Returns:> An arrayref of pull request hashrefs, each with C<merged_at> and
+C<review>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for closed_prs"> -- raised via C<bail()>.
+
+=item *
+
+C<"Missing base branch for closed_prs"> -- raised via C<bail()> when C<$base>
+is undefined or empty.
+
+=item *
+
+Whatever C<list_prs> and C<pr_reviews> raise.
+
+=back
+
+B<Examples:>
+
+  my $prs = $gh->closed_prs('genesis-community/genesis', 'prod/bosh');
+  # returns every closed pull request that targeted prod/bosh
+
+  my $prs = $gh->closed_prs('genesis-community/genesis', 'prod/bosh',
+    'pr/prod/bosh');
+  # returns only the attempts made from the pull request branch
+
 =head2 open_prs
 
   my $prs = $gh->open_prs($owner_repo, $base);
@@ -1064,6 +1185,12 @@ each returned pull request really does have that head branch. GitHub's own
 C<head> filter is trusted for the query but not for the answer -- pagination,
 fork heads, or an API change could surface unrelated pull requests, and a
 caller acting on the wrong one would push to the wrong branch.
+
+Every pull request that comes back also carries C<merged_at> and a C<review>
+hashref of C<state>, C<reviewer>, C<body>, and C<at>, where C<state> is
+C<approved> or C<changes requested>. C<review> is C<undef> where no review
+decided anything, which is what a comment-only review leaves behind. Reading
+them costs one further call per pull request returned.
 
 B<Parameters:>
 
@@ -1098,6 +1225,10 @@ C<"Missing owner/repo for open_prs"> -- raised via C<bail()>.
 C<"Missing base branch for open_prs"> -- raised via C<bail()> when C<$base>
 is undefined or empty.
 
+=item *
+
+Whatever C<list_prs> and C<pr_reviews> raise.
+
 =back
 
 B<Examples:>
@@ -1106,7 +1237,8 @@ B<Examples:>
   # returns every open pull request targeting main
 
   my $prs = $gh->open_prs('genesis-community/genesis', 'main', 'my-feature');
-  # returns only those from my-feature, verified head-side
+  # returns only those from my-feature, verified head-side, each carrying
+  # what a reviewer decided about it
 
 =head2 create_pr
 
@@ -1381,6 +1513,48 @@ B<Examples:>
   my ($ok, $reason) = $gh->set_ruleset('genesis-community/genesis',
     name => 'genesis-control', patterns => ['control'], rules => []);
   # returns (0, 'HTTP 403 - Forbidden') for a token without admin
+
+=head1 INTERNAL METHODS
+
+=head2 _attach_review
+
+  $gh->_attach_review($owner_repo, $pr);
+
+Puts C<merged_at> and the newest decisive review on one pull request hashref,
+in place, and returns the same hashref.
+
+Both list wrappers call it, so a caller reads what a reviewer decided off the
+pull request itself rather than fetching it. C<merged_at> comes from the list
+endpoint, which gives it on every entry, and the review comes from
+C<pr_reviews>. A C<COMMENTED> or C<DISMISSED> review decides nothing and is
+passed over, so C<review> is C<undef> where nobody approved or asked for
+changes.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<$pr>
+
+The pull request hashref to annotate, as the list endpoint gave it. Required.
+
+=back
+
+B<Returns:> The same hashref, now carrying C<merged_at> and C<review>.
+
+B<Errors:> Whatever C<pr_reviews> raises.
+
+B<Examples:>
+
+  $gh->_attach_review('genesis-community/genesis', $pr);
+  # $pr->{review} is now {state => 'approved', reviewer => 'dbell', ...}
+
+  $gh->_attach_review('genesis-community/genesis', $pr);
+  # $pr->{review} is undef, where the only review was a comment
 
 =head1 SEE ALSO
 

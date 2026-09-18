@@ -6,11 +6,17 @@ Genesis::CI::PullRequest - the pull request arm of the propagate run
 
     use Genesis::CI::PullRequest;
 
+    # Before the run writes anything, for every environment that delivers
+    # into a pull request.  A run that cannot read this refuses.
+    my $state = Genesis::CI::PullRequest::pr_state($github,
+        'acme/deployments', $env_record, refuse => $refuse);
+
     # Inside the run's open session, for one environment whose policy says
     # its branch may only ever receive a proposal.
     my $word = Genesis::CI::PullRequest::deliver($session, $env_record,
         env     => $env,
-        commits => \@pending);
+        commits => \@pending,
+        state   => $state);
 
     # Once the branch has published, and not before.
     Genesis::CI::PullRequest::sync_pull_request($github, 'acme/deployments',
@@ -89,7 +95,8 @@ B<Examples:>
 
     my $word = Genesis::CI::PullRequest::deliver($session, $record,
         env     => $env,
-        commits => \@pending);
+        commits => \@pending,
+        state   => $state);
 
 Delivers one environment's due commits onto its pull request branch as one
 aggregate commit and returns that environment's outcome word, or C<undef>
@@ -127,8 +134,11 @@ built from and the pull request is opened against.
 
 =item C<%opts>
 
-C<env> is the L<Genesis::Env> whose propagation set the writer reads, and
-C<commits> is the arrayref of due control commits, oldest first.
+C<env> is the L<Genesis::Env> whose propagation set the writer reads,
+C<commits> is the arrayref of due control commits, oldest first, and C<state>
+is what C<pr_state> answered for this environment, which the caller read
+before the run began and hands in rather than having the arm ask the API
+again.
 
 =back
 
@@ -160,6 +170,115 @@ B<Examples:>
 
     deliver($session, $record, env => $env, commits => []);
     # returns 'idempotent', having written nothing
+
+=head2 pr_state($github, $owner_repo, $record, %opts)
+
+    my $state = Genesis::CI::PullRequest::pr_state($github,
+        'acme/deployments', {
+            env    => 'prod',
+            branch => 'prod/bosh',
+            pr     => {branch => 'pr/prod/bosh'},
+        }, refuse => $refuse);
+
+Reads the environment's pull request and what a reviewer decided about it, and
+returns a hashref of C<state>, C<number>, C<url>, C<title>, C<body>,
+C<review>, C<rejected>, C<superseded>, and C<merged>. C<state> is one of
+C<none>, C<unreviewed>, C<approved>, C<changes requested>, and C<closed
+unmerged>.
+
+C<merged> carries the merged pull requests, which the recovery reads;
+C<rejected> carries the closed-unmerged ones themselves, so a commit body can
+quote one; and C<superseded> carries their numbers, which is what the
+aggregate's title names. Where more than one pull request is open from the
+same branch, the oldest is the one acted on and a warning names the rest.
+
+When the API cannot answer, this is not a fifth state but a refusal. The whole
+run stops, naming the review state as the input it could not read, and exits
+C<UNAVAILABLE>, because a run that cannot read what a reviewer decided cannot
+know what it would do with any pull request branch.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$github>
+
+The run's L<Service::Github> client.
+
+=item C<$owner_repo>
+
+The C<owner/repo> pair the source-control block resolves.
+
+=item C<$record>
+
+A hashref naming the environment, under C<env>; its deployment branch, under
+C<branch>; and its pull request branch, under C<< pr->{branch} >>. The walk's
+own per-environment record carries all three, and so does a hashref composed
+from L<Genesis::Top>'s two branch accessors, which is how the run reads every
+environment's state before the walk has composed anything.
+
+=item C<%opts>
+
+C<refuse> is the caller's own refusal closure, which a caller inside an open
+session passes so the operator is put back on their branch before they are
+told why the run stopped. A caller with no session leaves it out.
+
+=back
+
+B<Returns:> A hashref of the nine fields above.
+
+B<Errors:> The refusal described above, and whatever the two GitHub readers
+raise for a reason other than an unanswerable API.
+
+B<Examples:>
+
+    pr_state($github, 'acme/deployments', $record);
+    # returns {state => 'approved', number => 42, ...}
+
+    pr_state($github, 'acme/deployments', $record);
+    # returns {state => 'none', number => undef, superseded => [], ...}
+
+=head2 refuse_unreadable($env, $why, %opts)
+
+    Genesis::CI::PullRequest::refuse_unreadable('prod', $@,
+        refuse => $refuse);
+
+Stops the run because the review state could not be read, naming the
+environment, quoting what the API said, and telling the operator to retry once
+it answers again.
+
+The refusal is whole-run rather than per environment, and it exits
+C<UNAVAILABLE> (69), because the API is the service that could not be reached.
+L<Genesis::Exit> declares codes and no subs, so the exit is named through
+C<bail>, the way every other refusal in the tree names one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+The environment whose pull request could not be read.
+
+=item C<$why>
+
+What the reader said, usually C<$@>. Trailing whitespace is trimmed.
+
+=item C<%opts>
+
+C<refuse> is the caller's own refusal closure, used in place of C<bail> where
+the caller has a session to close first.
+
+=back
+
+B<Returns:> Nothing. It does not return.
+
+B<Errors:> The refusal itself, at C<UNAVAILABLE>.
+
+B<Examples:>
+
+    refuse_unreadable('prod', "HTTP 599 - curl failed\n");
+    # exits 69, having said what it could not read and what fixes it
 
 =head2 sync_pull_request($github, $owner_repo, $record, %opts)
 
