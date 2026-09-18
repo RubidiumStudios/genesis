@@ -228,6 +228,52 @@ sub freeze {
 }
 
 # }}}
+# forget_lost_branch - the refs left over from a branch R no longer has {{{
+#
+# R is authoritative for whether the pull request branch exists, because the
+# branch is derived state this run publishes and nobody else keeps.  A branch
+# somebody removed there leaves two refs behind in the clone, the local one and
+# the remote-tracking one, and both of them say R still has it until something
+# asks R.  The tracking ref is the one that costs, because the expected tip is
+# read off it and a lease against a value R has not got is refused on this run
+# and on every run after it.
+#
+# So R is asked first, before the tip is read, and where the answer is that the
+# branch is gone both refs go with it.  The local ref goes too, because it is
+# derived from a branch that no longer exists and the next creation would
+# otherwise meet a name that is already taken, which is the second-cycle
+# failure this closes.  The switch below cuts the branch again from the
+# deployment branch, which is where it comes from every run anyway.
+#
+# R is asked by ls-remote and not by a fetch, which matters.  A fetch would
+# bring the tracking ref up to date, and the expected tip read just below is
+# the one thing in the run that has to be read off a ref nobody refreshed,
+# because it is what catches a teammate who moved the branch after this run
+# read it.  The probe answers the existence question without touching a ref,
+# which is the whole of what is wanted here.
+#
+# It answers whether R has lost the branch, and a preview gets that answer
+# with neither ref taken off, because a ref removed is a write like any other.
+# An ls-remote that could not be run says nothing about the branch, and an
+# unreachable remote is the publish's to answer, so nothing is taken off on
+# the strength of a probe that failed.
+sub forget_lost_branch {
+	my ($git, $branch, %opts) = @_;
+	my $remote = $git->default_remote or return 0;
+	return 0 unless $git->branch_exists("$remote/$branch")
+		|| $git->branch_exists($branch);
+
+	my $on_remote = eval {$git->remote_branch_exists($branch, $remote)};
+	return 0 unless defined $on_remote;
+	return 0 if $on_remote;
+	return 1 if $opts{dry_run};
+
+	$git->forget_branch($branch, $remote);
+	$git->delete_branch($branch) if $git->branch_exists($branch);
+	return 1;
+}
+
+# }}}
 # expected_tip - the value on R the publish will push against {{{
 #
 # D51 reads it at the run's refresh and nowhere else, because reading it again
@@ -365,11 +411,28 @@ sub deliver {
 	$pr->{url}        = $state ? $state->{url}        : undef;
 	$pr->{superseded} = $state ? $state->{superseded} : [];
 
+	# R is asked about the branch before its tip is read, because a branch R
+	# has lost leaves refs behind that would otherwise be read as R's own.
+	forget_lost_branch($git, $pr->{branch}, dry_run => $opts{dry_run});
+
 	# Recorded above everything the arm writes, so the value the publish is
 	# handed is the one the rest of the arm reasoned from, and not the one the
 	# arm's own rewrite leaves behind.
 	$pr->{expected} = expected_tip($git, $pr->{branch});
 
+	# Nothing is due, so the branch has nothing left to say and the whole of it
+	# is retired, the proposed record with it.  The guard asks about the two
+	# refs and the record rather than about what a reviewer decided, because a
+	# merge and a rejection both end here and both leave the same three things
+	# standing.  R's copy is asked for through the expected tip, which is the
+	# value expected_tip has just read off that very ref.
+	return retire_branch($session, $record, env => $env,
+		dry_run  => $opts{dry_run},
+		rejected => ($state ? $state->{rejected} : []))
+		if !@$commits && (
+			$git->branch_exists($pr->{branch})
+			|| defined $pr->{expected}
+			|| $env->proposed_record);
 	return 'idempotent' unless @$commits;
 
 	# The approved arm, which answers undef, so the report settles the
@@ -381,6 +444,16 @@ sub deliver {
 	# every reader here takes.
 	return freeze($record, $commits)
 		if ($pr->{state} // '') eq 'approved';
+
+	# A preview writes nothing, and everything below this line writes, because
+	# the switch cuts a branch, the reset moves one, and the single writer
+	# commits.  So the arm stops here and answers nothing, and the report
+	# settles the environment as one that would propagate, which is the answer
+	# the direct arm's preview gives and for the reason its own comment states.
+	# A word written here would put a fact about a run that never happened onto
+	# the record, and every reader of that field would then have to know which
+	# kind of run had filled it.
+	return undef if $opts{dry_run};
 
 	# The switch cuts the branch where neither side holds it, because it is
 	# derived state and the deployment branch is what it is derived from, and
@@ -491,6 +564,83 @@ sub deliver {
 	$record->{overwrote}  = $written->{overwrote};
 
 	return 'propagated';
+}
+
+# }}}
+# retire_branch - the nothing-due delete, and the stale local ref with it {{{
+#
+# A rejection leaves no persistent state, and so does a merge, so once nothing
+# is due the branch has nothing to say and goes from R and from L together with
+# any closed attempt's branch (D51).  The local half also answers the
+# second-cycle failure, where a local ref R no longer carries made the next
+# creation die.
+#
+# The local refs go now, because nothing later in the run reads one and a
+# leftover is what breaks the next cycle.  The remote refs go through the
+# publish, one push each, under D83, so what is written onto the record here
+# is the list the spec producer reads rather than the removal itself.
+#
+# A preview marks the same branches and takes none of them off, because a run
+# given --dry-run owes the operator the report and none of the writes under it.
+sub retire_branch {
+	my ($session, $record, %opts) = @_;
+
+	my $git    = $session->git;
+	my $pr     = $record->{pr};
+	my $remote = $git->default_remote;
+
+	# A closed attempt that sat on a branch of its own goes with this one,
+	# because D51 leaves no persistent state behind a rejection either.  The
+	# environment's own branch is named first and filtered out of the rest, so
+	# an attempt that sat on it is not asked for twice.
+	my @branches = ($pr->{branch});
+	push @branches, map {$_->{head}{ref}}
+		grep {($_->{head}{ref} // '') ne $pr->{branch}}
+		@{$opts{rejected} || []};
+
+	$pr->{action} = 'delete';
+	$pr->{retire} = [grep {$remote && $git->branch_exists("$remote/$_")}
+		@branches];
+
+	return 'idempotent' if $opts{dry_run};
+
+	$git->delete_branch($_) for grep {$git->branch_exists($_)} @branches;
+
+	$opts{env}->clear_proposed if $opts{env}->proposed_record;
+	return 'idempotent';
+}
+
+# }}}
+# _nothing_due_specs - the branches this run removes from R {{{
+#
+# D51 removes a pull request environment's branch when nothing is due for it,
+# and D83 makes that removal its own push, so it joins the publish set as a
+# deletion spec rather than happening inside the walk.  The spec is the shape
+# Service::Git::push already understands, which is a delete refspec leased
+# against the tip the refresh read, so a branch somebody moved since then
+# refuses its own deletion and records why.
+sub _nothing_due_specs {
+	my (%args) = @_;
+	my $git     = $args{git};
+	my $records = $args{records} || [];
+	my $remote  = $git->default_remote;
+
+	my @specs;
+	for my $record (@$records) {
+		my $pr = $record->{pr} or next;
+		next unless ($pr->{action} // '') eq 'delete';
+		for my $branch (@{$pr->{retire} || []}) {
+			push @specs, {
+				branch => $branch,
+				kind   => 'pr',
+				env    => $record->{env},
+				delete => 1,
+				expect => ($remote && $git->branch_exists("$remote/$branch"))
+					? $git->rev_parse("$remote/$branch") : undef,
+			};
+		}
+	}
+	return @specs;
 }
 
 # }}}

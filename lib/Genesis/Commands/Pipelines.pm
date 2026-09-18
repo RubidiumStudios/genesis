@@ -914,6 +914,11 @@ sub propagate {
 							env     => $env,
 							commits => \@pending,
 							state   => $pr_state_of{$env_name},
+							# A preview reads everything the run reads and
+							# writes none of it, so the arm is told which
+							# kind of run it is in rather than left to
+							# cut a branch and commit onto it under one.
+							dry_run => $dry_run,
 						);
 						# An environment with a hold standing over it is
 						# left for the report to settle, which writes
@@ -930,8 +935,20 @@ sub propagate {
 				);
 				next if ($env_record->{outcome} // '') eq 'failed';
 
-				$delivered += scalar(@pending)
-					if ($env_record->{outcome} // '') eq 'propagated';
+				# What this environment delivered, or would.  A preview's
+				# arm answers nothing where it would have propagated, and
+				# the renderer settles such an environment off its pending
+				# list, so the count is read off that same list and the
+				# number under the report cannot disagree with the word in
+				# it.  An environment the arm froze has its pending list
+				# emptied, and one it retired had nothing in it to begin
+				# with, so neither is counted as one that would deliver.
+				if ($dry_run) {
+					$delivered += scalar @{$env_record->{pending} || []}
+						unless defined $env_record->{outcome};
+				} elsif (($env_record->{outcome} // '') eq 'propagated') {
+					$delivered += scalar(@pending);
+				}
 				# D51's lease.  The expected tip is the one the arm read
 				# before it rewrote anything, and the key is carried even
 				# where it is undef, because _push_one reads it with exists
@@ -1005,6 +1022,15 @@ sub propagate {
 				env    => $env_name,
 			} unless $dry_run;
 		}
+
+		# D51's removals, which are the pull request branches this run
+		# retires.  They are gathered once the walk is over rather than beside
+		# each arm, because a removal is a push like any other and D83 has
+		# every push wait for the whole walk to finish.
+		push @publish_specs, Genesis::CI::PullRequest::_nothing_due_specs(
+			git     => $git,
+			records => $record->{environments},
+		) unless $dry_run;
 
 		# D96's third stage.  The publish is held to the end of the walk, so
 		# a run that failed halfway has put nothing on the remote.

@@ -140,37 +140,51 @@ subtest 'remote_branch_exists - bails on ls-remote failure' => sub {
 };
 
 # ======================================================================
-# delete_remote_branch - delete a branch on the remote
+# delete_remote_branch - remove a branch from the remote
 # ======================================================================
 #
-# Uses `git push <remote> --delete <branch>`.  Returns $self on
-# success.  On failure (e.g. branch already gone, permission denied),
-# bails with the git error visible -- caller can wrap in eval if a
-# best-effort cleanup is desired.
+# The removal goes through the same one-ref push every other ref takes, so
+# what comes back is a push result and a remote that turns the deletion down
+# is a result with ok set to 0 rather than an error.  The caller records that
+# refusal as the environment's outcome, which it could not do if the removal
+# took the whole run down with it.
 
-subtest 'delete_remote_branch - success returns $self' => sub {
-	plan tests => 2;
+sub keep_args {
+	my ($call) = @_;
+	return grep {ref($_) ne 'HASH' && $_ ne 'git' && $_ ne 'push'} @$call;
+}
+
+subtest 'delete_remote_branch - the deletion goes as a one-ref push' => sub {
+	plan tests => 4;
 	reset_stub();
 	install_run_stub();
 	override_default_remote('origin');
-	push @run_results, ['', 0, ''];
+	push @run_results, ["-\t:refs/heads/pr/staging\t[deleted]\n", 0, ''];
 
 	my $git = make_git();
-	my $returned = $git->delete_remote_branch('pr/staging');
-	is $returned, $git, 'returns $self on successful delete';
+	my $result = $git->delete_remote_branch('pr/staging');
+	is $result->{ok}, 1, 'the result says the remote took it';
+	is $result->{status}, 'deleted', 'and read the deletion off the porcelain';
+	is $result->{ref}, 'refs/heads/pr/staging', 'naming the ref git named';
 
-	# Confirm we called: git push origin --delete pr/staging
-	my $expected = ['origin', '--delete', 'pr/staging'];
-	my $matched = 0;
-	for my $call (@run_calls) {
-		my @flat = @$call;
-		my @keep = grep { ref($_) ne 'HASH' && $_ ne 'git' && $_ ne 'push' } @flat;
-		if (join(' ', @keep) eq join(' ', @$expected)) {
-			$matched = 1;
-			last;
-		}
-	}
-	ok $matched, 'git push origin --delete pr/staging was invoked';
+	is join(' ', keep_args($run_calls[0])),
+		'--porcelain origin :refs/heads/pr/staging',
+		'the empty source side is what asks the remote to take the branch off';
+};
+
+subtest 'delete_remote_branch - a tip leases the removal' => sub {
+	plan tests => 1;
+	reset_stub();
+	install_run_stub();
+	override_default_remote('origin');
+	push @run_results, ["-\t:refs/heads/pr/staging\t[deleted]\n", 0, ''];
+
+	my $git = make_git();
+	$git->delete_remote_branch('pr/staging', expect => 'c0ffee1');
+	is join(' ', keep_args($run_calls[0])),
+		'--porcelain --force-with-lease=refs/heads/pr/staging:c0ffee1 '.
+		'origin :refs/heads/pr/staging',
+		'so a branch somebody moved refuses its own deletion';
 };
 
 subtest 'delete_remote_branch - no-op when no remote configured' => sub {
@@ -181,23 +195,26 @@ subtest 'delete_remote_branch - no-op when no remote configured' => sub {
 
 	my $git = make_git();
 	my $returned = $git->delete_remote_branch('pr/staging');
-	is $returned, $git, 'returns $self even with no remote';
+	is $returned, undef, 'answers undef where there is no remote';
 	is scalar(@run_calls), 0,
 		'no git command issued when there is no remote';
 };
 
-subtest 'delete_remote_branch - bails on push failure' => sub {
-	plan tests => 1;
+subtest 'delete_remote_branch - a refusal is a result, not a death' => sub {
+	plan tests => 3;
 	reset_stub();
 	install_run_stub();
 	override_default_remote('origin');
 	push @run_results, ['', 1, 'remote: error: unable to delete'];
 
 	my $git = make_git();
-	throws_ok {
-		$git->delete_remote_branch('pr/staging');
-	} qr/delete|remote/i,
-		'push --delete failure bails with the git error';
+	my $result;
+	lives_ok {
+		$result = $git->delete_remote_branch('pr/staging');
+	} 'the removal the remote turned down does not bail';
+	is $result->{ok}, 0, 'and comes back refused';
+	like $result->{stderr}, qr/unable to delete/,
+		'carrying what the remote said about it';
 };
 
 # ======================================================================

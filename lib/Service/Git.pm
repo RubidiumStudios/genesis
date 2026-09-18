@@ -1328,20 +1328,26 @@ sub _checked_out_branch {
 }
 
 # }}}
-# delete_remote_branch - delete a branch on the remote {{{
+# delete_remote_branch - remove a branch from the remote {{{
 #
-# Uses `git push <remote> --delete <branch>`.  Returns $self on
-# success or when no remote is configured (no-op).  Bails on push
-# failure with the underlying git error.
+#   my $result = $git->delete_remote_branch('pr/qa/bosh');
+#   my $result = $git->delete_remote_branch('pr/qa/bosh', expect => $tip);
+#
+# Pushes the deletion refspec through the same one-ref push every other ref
+# goes through, so the removal is read the same way and a refusal is a result
+# rather than a bail.  Under D97 a rejected deletion is the environment's
+# outcome, which is why nothing dies here.
 sub delete_remote_branch {
-	my ($self, $branch, $remote) = @_;
-	$remote //= $self->default_remote;
-	return $self unless $remote;
-	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
-		'git', 'push', $remote, '--delete', $branch);
-	bail("Failed to delete remote branch #C{%s} on #C{%s}: %s",
-		$branch, $remote, ($err || $out || "rc=$rc") =~ s/\s+$//r) if $rc;
-	return $self;
+	my ($self, $branch, %opts) = @_;
+	my $remote = $opts{remote} // $self->default_remote;
+	return undef unless $remote;
+
+	return $self->_push_one($remote, {
+		branch => $branch,
+		kind   => 'pr',
+		delete => 1,
+		(exists $opts{expect} ? (expect => $opts{expect}) : ()),
+	});
 }
 
 # }}}
@@ -1357,6 +1363,31 @@ sub delete_branch {
 			onfailure => "Failed to delete local branch '$branch'"},
 		'git', 'branch', '-D', $branch);
 	delete $self->{_branch_cache}{$branch};
+	return $self;
+}
+
+# }}}
+# forget_branch - drop the remote-tracking ref for a branch the remote lost {{{
+#
+# fetch_branches never prunes, because the local-only commit query reads the
+# tracking refs a prune would delete, so a branch the remote no longer carries
+# leaves its tracking ref standing and every reader of that ref is told the
+# remote still has it.  One reader pays for that, which is the lease, because a
+# push leased against a value the remote has not got is refused, and it stays
+# refused on every run afterwards.
+#
+# So the removal is one ref, named by a caller that has just asked the remote
+# and been told the branch is gone, rather than a prune of everything.
+sub forget_branch {
+	my ($self, $branch, $remote) = @_;
+	$remote //= $self->default_remote;
+	return $self unless $remote;
+	return $self unless $self->branch_exists("$remote/$branch");
+
+	run({dir => $self->{root},
+			onfailure => "Failed to forget the remote-tracking ref for '$branch'"},
+		'git', 'update-ref', '-d', "refs/remotes/$remote/$branch");
+	delete $self->{_branch_cache}{"$remote/$branch"};
 	return $self;
 }
 

@@ -331,6 +331,68 @@ B<Examples:>
     #         'Supersedes #8, closed without merging: ' .
     #         'https://github.test/o/r/pull/8.'
 
+=head2 forget_lost_branch($git, $branch [, %opts])
+
+    my $lost = Genesis::CI::PullRequest::forget_lost_branch($git,
+        'pr/qa/bosh');
+
+Asks the remote about the pull request branch and answers whether the remote
+has lost it, taking the leftover refs off where it has.
+
+The remote is authoritative for whether this branch exists, because the branch
+is derived state this run publishes and nobody else keeps. A branch somebody
+removed there leaves two refs behind in the clone, the local one and the
+remote-tracking one, and both of them say the remote still has it until
+something asks. The tracking ref is the one that costs, because the expected
+tip is read off it and a lease against a value the remote has not got is
+refused on this run and on every run after it.
+
+So the local ref and the tracking ref both go, and the arm then cuts the
+branch again from the deployment branch, which is where it comes from every
+run anyway. The local ref is what made the next cycle's creation meet a name
+that was already taken, and this is what closes that.
+
+The remote is asked by C<ls-remote> and not by a fetch, which matters. A fetch
+would bring the tracking ref up to date, and the expected tip read just after
+this is the one value in the run that has to come off a ref nobody refreshed,
+because that is what catches a teammate who moved the branch after the run
+read it. The probe answers the existence question without touching a ref. A
+probe that could not be run says nothing about the branch and takes nothing
+off, because an unreachable remote is the publish's to answer.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The repository the refs are read and removed in.
+
+=item C<$branch>
+
+The pull request branch to ask about.
+
+=item C<%opts>
+
+C<dry_run> gets the same answer with neither ref taken off, because a ref
+removed is a write like any other.
+
+=back
+
+B<Returns:> 1 where the remote has lost the branch, and 0 where it still has
+it, where neither ref is here to be lost, where there is no remote, and where
+the probe failed.
+
+B<Errors:> Whatever the tracking-ref removal or the local deletion raises.
+
+B<Examples:>
+
+    forget_lost_branch($git, 'pr/qa/bosh');
+    # returns 1, with the local ref and origin/pr/qa/bosh both gone
+
+    forget_lost_branch($git, 'pr/qa/bosh', dry_run => 1);
+    # returns 1, with both refs still standing
+
 =head2 expected_tip($git, $pr_branch)
 
     my $expected = Genesis::CI::PullRequest::expected_tip($git, 'pr/prod/bosh');
@@ -614,10 +676,21 @@ where neither this repository nor the remote holds it, and the session
 records the absence so a run that is declined or aborted can take it off
 again.
 
+An environment with nothing due takes C<retire_branch> instead, ahead of
+everything below, where the branch still stands on either side or a proposed
+record still points at a proposal. R's copy is asked for through the expected
+tip, which is the value this arm has just read off that very ref.
+
 An environment whose pull request a reviewer has approved takes C<freeze>
 instead, ahead of everything below, so nothing is built and nothing is
 pushed. That state is read off C<< $record->{pr} >> for the reason the
 supersedes paragraph's is.
+
+A run given C<dry_run> stops above the switch and answers C<undef>, because
+everything below that line writes and a preview writes nothing. The report
+then settles the environment as one that would propagate, which is the answer
+the direct arm's preview gives, and no word about a run that never happened
+reaches the record.
 
 The single writer is called once, at the newest due commit's source. D69
 makes a delivery a mirror, so the mirror of the newest commit is the whole
@@ -684,16 +757,17 @@ built from and the pull request is opened against.
 =item C<%opts>
 
 C<env> is the L<Genesis::Env> whose propagation set the writer reads,
-C<commits> is the arrayref of due control commits, oldest first, and C<state>
+C<commits> is the arrayref of due control commits, oldest first, C<state>
 is what C<pr_state> answered for this environment, which the caller read
 before the run began and hands in rather than having the arm ask the API
-again.
+again, and C<dry_run> says this is a preview, which reads everything a run
+reads and writes none of it.
 
 =back
 
 B<Returns:> C<propagated> where an aggregate was written, C<idempotent> where
 nothing was due, and C<undef> where the report is to settle the environment
-itself.
+itself, which is a freeze and a preview.
 
 B<Errors:>
 
@@ -727,6 +801,59 @@ B<Examples:>
     deliver($session, $record, env => $env, commits => \@pending,
         state => {state => 'approved', number => 42});
     # returns undef, having frozen the branch and held every due commit
+
+=head2 retire_branch($session, $record [, %opts])
+
+    my $word = Genesis::CI::PullRequest::retire_branch($session, $record,
+        env      => $env,
+        rejected => $state->{rejected});
+
+Deletes the environment's pull request branch locally and marks it for
+deletion on the remote, takes any closed attempt's branch with it, and deletes
+the proposed record. Called when nothing is due for the environment, which is
+the case after the pull request merges or after a rejection.
+
+A rejection leaves no persistent state, and neither does a merge, so a branch
+with nothing due has nothing left to say. The local refs go now, because
+nothing later in the run reads one and a leftover is what made the next
+cycle's branch creation die on a name that already existed. The remote refs go
+through the publish instead, one push each, so what this writes onto the
+record is the list C<_nothing_due_specs> reads rather than the removal itself.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$session>
+
+The run's open branch session, which the local deletions go through.
+
+=item C<$record>
+
+The walk's per-environment record. Its C<pr> is the pull request object, whose
+C<action> is set to C<delete> and whose C<retire> becomes the list of branches
+the remote still carries.
+
+=item C<%opts>
+
+C<env> is the L<Genesis::Env> whose proposed record is deleted, C<rejected> is
+the arrayref of closed-unmerged pull requests, whose head branches go with the
+environment's own, and C<dry_run> marks the same branches and takes none of
+them off.
+
+=back
+
+B<Returns:> C<idempotent>, always.
+
+B<Examples:>
+
+    retire_branch($session, $record, env => $env, rejected => []);
+    # returns 'idempotent', with pr/qa/bosh gone from the clone, listed
+    # under $record->{pr}{retire}, and the proposed record deleted
+
+    retire_branch($session, $record, env => $env, dry_run => 1);
+    # returns 'idempotent', having listed the same branches and deleted
+    # nothing at all
 
 =head2 pr_state($github, $owner_repo, $record, %opts)
 
@@ -964,6 +1091,42 @@ B<Examples:>
 
     sync_pull_request($github, 'acme/deployments', $record, env => $env);
     # returns undef, where nothing was rebuilt and there is nothing to open
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _nothing_due_specs(%args)
+
+    my @specs = Genesis::CI::PullRequest::_nothing_due_specs(
+        git => $git, records => $record->{environments});
+
+Returns the deletion push specs for the branches this run retires, each leased
+against the tip the refresh read, so a branch somebody moved refuses its own
+deletion and records why.
+
+A removal is a push like any other, so it joins the publish set rather than
+happening inside the walk, and the spec is the shape C<Service::Git::push>
+already understands.
+
+B<Parameters:>
+
+=over 4
+
+=item C<%args>
+
+C<git> is the repository the tips are read from, and C<records> is the
+arrayref of per-environment records, of which the ones whose C<pr> carries the
+action C<delete> are the ones read.
+
+=back
+
+B<Returns:> A list of specs, each carrying C<branch>, C<kind>, C<env>,
+C<delete>, and C<expect>. The list is empty where nothing was retired.
+
+B<Examples:>
+
+    _nothing_due_specs(git => $git, records => $envs);
+    # returns ({branch => 'pr/qa/bosh', kind => 'pr', env => 'qa',
+    #           delete => 1, expect => '9f1c...'})
 
 =head1 SEE ALSO
 
