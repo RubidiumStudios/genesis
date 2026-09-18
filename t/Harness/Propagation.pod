@@ -1206,6 +1206,13 @@ A pull request created through the double lands in that state file, so a
 listing taken after the create sees what was made, and a request for one
 pull request's reviews answers its reviews rather than the collection.
 
+An update of one pull request lands there too.  A C<PATCH> on a single pull
+request writes the title, the body, and the state it was sent, and answers
+that pull request whole, so a row can read back what the run left the pull
+request saying as well as what it sent, and the caller gets the number and the
+C<html_url> it reads off the answer.  A C<PATCH> naming a pull request the
+double does not hold is answered 404.
+
 The double answers the repository rulesets endpoints as well, which are a
 listing, a create, and a replace.  It refuses all three with a 403 where
 C<admin> is false, which is the same refusal it gives the branch protection

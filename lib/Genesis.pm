@@ -857,10 +857,14 @@ sub curl {
 
 	bug("No url provided to Genesis::curl") unless $url;
 	bug("No method provided to Genesis::curl") unless $method;
+	# PATCH is on the list because GitHub updates one resource with it and
+	# nothing else, so an update of an open pull request had no method to go
+	# out under and was refused here before it ever reached the API.
 	bail(
-		"Invalid method '%s' provided to Genesis::curl.  Must be one of GET, POST, PUT, DELETE, HEAD",
+		"Invalid method '%s' provided to Genesis::curl.  Must be one of GET, ".
+		"POST, PUT, PATCH, DELETE, HEAD",
 		$method
-	) unless !ref($method) && $method =~ m/^(GET|POST|PUT|DELETE|HEAD)$/i;
+	) unless !ref($method) && $method =~ m/^(GET|POST|PUT|PATCH|DELETE|HEAD)$/i;
 
 	my $header_opt = "";
 	my @flags = ("-X", $method);

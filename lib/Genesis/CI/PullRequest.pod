@@ -454,6 +454,52 @@ B<Examples:>
     refuse_unreadable('prod', "HTTP 599 - curl failed\n");
     # exits 69, having said what it could not read and what fixes it
 
+=head2 title_for($subject, $superseded)
+
+    my $title = Genesis::CI::PullRequest::title_for($subject, [7, 9]);
+
+Returns the pull request's title, which is the aggregate commit's subject,
+with C<(supersedes #a, #b)> appended when there are closed-unmerged attempts
+to name.
+
+D49 puts the marker in the title as well as in the subject, so a squash merge
+keeps it. The supersedes list is named by number rather than by branch, under
+D12, because a number survives a closed pull request and a deleted branch
+where a branch name does not.
+
+The title is composed on every sync and not only when the pull request is
+opened, which is what displaces FWT-1099's criterion that an open pull request
+keeps the title it was opened with. A title left alone names whatever control
+commit the first proposal carried, and a branch since rebuilt on a newer one
+would then be described by a marker that is no longer true of it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$subject>
+
+The aggregate commit's subject line, which is the marker naming the newest
+control commit the pull request proposes.
+
+=item C<$superseded>
+
+An arrayref of the numbers of the closed-unmerged pull requests this one
+supersedes, which C<pr_state> answers under the same name. An empty arrayref
+and C<undef> both mean there are none.
+
+=back
+
+B<Returns:> The title as one string.
+
+B<Examples:>
+
+    title_for('[pipeline] control@a1b2c3d -> prod', []);
+    # returns '[pipeline] control@a1b2c3d -> prod'
+
+    title_for('[pipeline] control@a1b2c3d -> prod', [7, 9]);
+    # returns '[pipeline] control@a1b2c3d -> prod (supersedes #7, #9)'
+
 =head2 sync_pull_request($github, $owner_repo, $record, %opts)
 
     my $pr = Genesis::CI::PullRequest::sync_pull_request($github,
@@ -467,6 +513,10 @@ It runs after the branch has published, because a pull request is opened from
 a branch the remote holds and a run whose push was refused has nothing to open
 one from. The proposed record is written here for the same reason: it points
 at a pull request, and until the branch publishes there is none to point at.
+
+The title goes through C<title_for> on the update as well as on the open, so a
+pull request that is already open is retitled to the marker the branch now
+carries rather than keeping the one it was opened with.
 
 B<Parameters:>
 
