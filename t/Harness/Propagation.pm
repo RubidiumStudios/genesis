@@ -2851,14 +2851,13 @@ EOS
 
 	# The operator's own clone is left holding the branch as the apply cut
 	# it, because init_branch writes the root commit in copy A and every
-	# delivery after that is published from the teammate's copy.  A branch
-	# carrying one init file carries no repository, so the gate leaves the
-	# command where it stands and the deploy never reads the branch at all.
-	# Genesis fast-forwards that branch itself, but only after it has loaded
-	# the root, and the step that moves the fast-forward in front of the
-	# switch is M13's own Task 13.5.  Until then the fixture hands the deploy
-	# the branch an operator who had pulled would be standing on.  A row that
-	# wants the branch left behind says catch_up => 0.
+	# delivery after that is published from the teammate's copy.  Genesis
+	# fast-forwards such a branch itself now, in the gate and ahead of the
+	# switch, so a row that leaves it stale still reaches a deploy that reads
+	# the branch.  The catch-up stays because most rows are about something
+	# else and want the branch already current, so that what they prove is
+	# not read through a ref move Genesis made on the way past.  A row whose
+	# subject is the stale clone says catch_up => 0.
 	$self->_catch_up($_) for (defined $opts{catch_up} && !$opts{catch_up})
 		? () : @envs;
 

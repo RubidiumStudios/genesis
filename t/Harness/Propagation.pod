@@ -929,11 +929,13 @@ another.
 It also catches copy A's deployment branches up to what R carries, where that
 is a fast-forward.  C<init_branch> writes the branch's root commit in copy A
 and every delivery after it is published from the teammate's copy, so the
-operator's own clone holds a branch carrying one init file and no repository
-at all, and the gate leaves a command where it stands rather than switching
-onto one of those.  Genesis fast-forwards that branch itself, but only after
-it has loaded the root.  A row that wants the branch left behind passes
-C<catch_up =E<gt> 0>.
+operator's own clone holds a branch carrying one init file while the remote
+carries the deliveries.  Genesis fast-forwards such a branch itself, in the
+branch gate and ahead of its switch, so a stale clone reaches a command that
+reads the branch.  The catch-up stays because most rows are about something
+else and want the branch already current, rather than reading what they prove
+through a ref move Genesis made on the way past.  A row whose subject is the
+stale clone passes C<catch_up =E<gt> 0>.
 
 The catch-up is a ref write, so it dies where copy A is already standing on
 the branch it would move.  A ref write leaves the working tree and the index

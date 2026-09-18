@@ -652,6 +652,32 @@ sub _gate_deployed_state {
 	my $session = $git->session(control => $top->control_branch);
 	$session->begin;
 
+	# The operator's own copy of the branch may sit behind what the remote
+	# has delivered, and that is a clone nobody has pulled rather than an
+	# environment awaiting a delivery.  The branch is brought up to its
+	# counterpart before anything below asks what it carries, because a
+	# branch still holding the init commit answers that question with a no
+	# and the command then reports, or refuses, about a state the operator is
+	# one pull away from not being in.
+	#
+	# The ref is written rather than pulled, because the working tree is not
+	# standing on this branch -- the arm above returned where it was -- and a
+	# pull merges into the branch the tree holds, which here is control.  The
+	# move is made on the one state that promises it is a fast-forward, so it
+	# creates and discards nothing, which is the one ref move D35's span
+	# allows.  Nothing is fetched: the refresh is its own step under D40, and
+	# the tracking ref is read as the last refresh left it.
+	if ($remote) {
+		my $behind = $git->resolve_branch($branch, remote => $remote);
+		if ($behind && $behind->{state} eq 'behind') {
+			info(
+				"Fast-forwarding #C{%s} to #C{%s/%s}, %d commit%s behind.",
+				$branch, $remote, $branch, $behind->{behind},
+				$behind->{behind} == 1 ? '' : 's');
+			$git->set_branch_ref($branch, "refs/remotes/$remote/$branch");
+		}
+	}
+
 	# A branch that pipeline-apply cut and no propagate run has delivered to
 	# carries its init file and nothing else, so there is no repository on it
 	# to read and the switch would leave the command looking at a tree with
