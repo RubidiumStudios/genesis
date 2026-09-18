@@ -846,9 +846,55 @@ from.  C<url> defaults to C<https://10.0.0.4:25555>, C<username> to
 C<admin>, C<password> to C<harness-director-password>, C<ca_cert> to a
 placeholder certificate, and C<kit_name> to C<bosh>, which is what
 C<from_exodus> wants to see before it will build a director at all.  The
-address it names is one no row dials, because the commands under test are
+default address is one no row dials, because the commands under test are
 driven through the fake C<bosh> on C<GENESIS_BOSH_COMMAND> rather than over
-the wire.
+the wire.  C<fixture_bosh> is the one caller that points the C<url> at
+something real, because the director's status dials the address before it
+runs a single C<bosh> command.
+
+=head2 fixture_bosh($h, %opts)
+
+Stands up the three things a deploy has to reach before it finishes, so a row
+can assert what a deploy did rather than only what it refused, and returns the
+harness.
+
+The first is a C<bosh> on C<GENESIS_BOSH_COMMAND>.  It answers C<env>,
+C<configs>, and C<config> with the tables C<Service::BOSH::Director> reads,
+answers C<deploy> with a success line, hands C<interpolate> to the real
+C<bosh>, and answers everything else with an empty table, so a reader that
+walks the rows of one answer never reads a config row as a stemcell.  Setting
+C<GENESIS_HARNESS_BOSH_FAILS> in the parent makes the C<deploy> call print
+five lines of task output and exit non-zero, which is what the deploy's own
+failure path reads to tell a refusal from a cancellation, so a row can watch
+the bail path without breaking anything else the deploy asks for.
+
+The second is a listener.  C<Service::BOSH::Director::status> dials the host
+and the port of the C<url> in the exodus record before it runs any C<bosh> at
+all, so a record naming an address nothing answers on refuses with a timeout
+however good the script is.  The listener is a loopback socket that accepts
+and echoes, which is all the connect check asks of it, and every environment's
+C<fixture_director> record is written with its port.  It is held on the
+harness, so it outlives the call and stops when the harness goes.
+
+The third is a kit, installed through C<fixture_kit>, whose C<blueprint> hook
+writes the manifest it names, so the merge has a file to read.  C<manifest>
+gives that file a body of the row's own, C<hooks> adds hooks beside the
+blueprint, and C<kit =E<gt> 0> installs no kit at all, which is what a row
+bringing its own kit passes so that two dev kits are not written over one
+another.
+
+It also catches copy A's deployment branches up to what R carries, where that
+is a fast-forward.  C<init_branch> writes the branch's root commit in copy A
+and every delivery after it is published from the teammate's copy, so the
+operator's own clone holds a branch carrying one init file and no repository
+at all, and the gate leaves a command where it stands rather than switching
+onto one of those.  Genesis fast-forwards that branch itself, but only after
+it has loaded the root.  A row that wants the branch left behind passes
+C<catch_up =E<gt> 0>.
+
+C<envs> is an arrayref naming the environments to write director records and
+catch up, and it defaults to every environment the harness declares.  Every
+other option is passed through to C<fixture_director> and C<fixture_kit>.
 
 =head2 break_vault($h, %opts)
 
@@ -948,6 +994,12 @@ send it at the real API.
 The fixture binaries the harness writes reach the child through the path this
 run builds and through nothing else, so no helper puts a fixture on the
 parent's own C<PATH> and a run that asks for none sees none.
+
+Where C<fixture_bosh> has run, C<GENESIS_BOSH_COMMAND> and
+C<GENESIS_HARNESS_BOSH_FAILS> are named in the child's environment as well,
+the way the fault plan's variables are, so a row arms the failure by setting
+it in the parent and the command under test reads it out of the environment
+it was handed.
 
 =head2 run_genesis_in($h, $copy, @argv)
 
