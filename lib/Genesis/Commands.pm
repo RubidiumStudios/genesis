@@ -98,6 +98,20 @@ use constant { # {{{
 use constant BRANCH_TARGETS => ('control'); # {{{
 # }}}
 
+# DEPLOYED_TARGET_HELP - the one sentence both deployed-commit flags print {{{
+#
+# D87 gives the deployed commit two selections and forbids a third spelling,
+# so the two declarations read from one constant rather than each carrying
+# its own wording.
+use constant DEPLOYED_TARGET_HELP =>
+	"Target the deployed commit, which is the commit recorded in this ".
+	"environment's last successful deployment and so the version it is ".
+	"actually running, rather than the tip of its deployment branch.  The ".
+	"commit is checked out detached inside the branch session, and the ".
+	"branch you started on is restored when the command finishes.";
+
+# }}}
+
 our @global_options = ( # {{{
 	[
 		"help|h" =>
@@ -508,6 +522,52 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	);
 } # }}}
 
+# deployed_target - resolve the commit this run targets, or undef for the tip {{{
+#
+# Under D87 a deployed-state command declares its default target at its
+# registration, and the two flags select the deployed commit where the default
+# does not.  Under D88 both flags refuse when the pipeline is not enabled,
+# because the session that makes a detached checkout safe opens only under a
+# pipeline, which is H38.
+#
+# The name and the root come in rather than an environment object, because the
+# gate asks this of every classified command and genesis new names an
+# environment whose file it is about to write.  An environment built to ask a
+# question about flags would refuse that run over a file that is missing
+# exactly as intended, so the reader of the deployed record builds one where
+# it needs one, below this question rather than above it.
+sub deployed_target {
+	my ($name, $top) = @_;
+	my $props = command_properties();
+
+	my $flagged = has_option('redeploy') || has_option('as-deployed');
+	my $wanted  = $flagged || (($props->{default_target} // 'tip') eq 'deployed');
+	return undef unless $wanted;
+
+	unless ($top->pipeline_enabled) {
+		return undef unless $flagged;
+		bail(
+			{exitcode => CONFIG},
+			"Refusing to target the deployed commit for #C{%s}.\n\n".
+			"The deployed commit is recorded in every repository, but the ".
+			"branch session that makes checking it out safe opens only under a ".
+			"pipeline, so there is nothing here to assert the tree clean, to ".
+			"hold the switch lock, or to put you back where you started.\n\n".
+			"Set #C{pipeline.enabled: true} in #C{.genesis/config} to use this ".
+			"flag, or run the command without it.  Nothing was changed.",
+			$name
+		);
+	}
+
+	# Reading the record and answering the commit is D87's other half.  The
+	# bare environment that reader needs is built here, below the question
+	# and below the refusal, so that a run which named no flag never builds
+	# one and a flagged run under no pipeline is refused before it pays for
+	# one.  Until that reader lands every run targets the tip, which is what
+	# it targeted before the flags existed.
+	return undef;
+} # }}}
+
 # _gate_branch_class - run a command under its declared class {{{
 #
 # D81 puts the class at the registration so that one declaration drives both
@@ -540,6 +600,29 @@ sub _gate_branch_class {
 	# one working tree would key two sessions, which is what I9 forbids.
 	my ($top, $git) = _gate_context();
 	return $fn->() unless $top && $git;
+
+	# D88: the two deployed-commit flags refuse where no session opens, so
+	# the resolver is asked above the return that leaves every other command
+	# alone with the pipeline off.  It answers undef for every run that did
+	# not ask for the deployed commit, and nothing names the answer yet,
+	# because resolving the commit is D87's other half; the refusal is what
+	# this call earns its place with today.
+	#
+	# The name derivation lives here rather than in _gate_deployed_state,
+	# for the reason the comment there gave: two derivations of one name are
+	# two chances to disagree, and now two callers want it.  An operator may
+	# name the environment by a path, so the leading directories and the
+	# suffix both come off, which is what the deploy does to the same
+	# argument in Genesis::Commands::Env::deploy.  set_top_path has already
+	# turned a path resolving to a file into its basename by the time this
+	# runs, so the directory half earns its place by keeping the two
+	# derivations identical rather than by the work it does here.
+	my $name = $COMMAND_ARGS[0];
+	if (defined($name) && length($name)) {
+		$name =~ s{^.*/}{};
+		$name =~ s/\.ya?ml$//;
+		deployed_target($name, $top);
+	}
 
 	# Outside a pipeline every command behaves as it always has, on any
 	# branch, which is D80's last sentence and D81's silent premise.
@@ -586,7 +669,7 @@ sub _gate_branch_class {
 		return $fn->();
 	}
 
-	return _gate_deployed_state($top, $git, $fn)
+	return _gate_deployed_state($top, $git, $fn, $name)
 		if $class eq DEPLOYED_STATE;
 
 	return $fn->();
@@ -600,20 +683,13 @@ sub _gate_branch_class {
 # tree.  The session is opened here rather than inside each command, so that
 # deploy, info, and the bosh subcommands share one switch.
 sub _gate_deployed_state {
-	my ($top, $git, $fn) = @_;
+	my ($top, $git, $fn, $name) = @_;
 
-	# An operator may name the environment by a path, so the leading
-	# directories and the suffix both come off, which is what the deploy
-	# does to the same argument in Genesis::Commands::Env::deploy.  Two
-	# derivations of one name are two chances to disagree, so this one is
-	# written to match the one M13 will retire.  set_top_path has already
-	# turned a path resolving to a file into its basename by the time this
-	# runs, so the directory half earns its place by keeping the two
-	# derivations identical rather than by the work it does here.
-	my $name = $COMMAND_ARGS[0];
+	# The name is derived once, in _gate_branch_class, and comes down here
+	# already stripped of its leading directories and its suffix.  The
+	# deployed-commit resolver wants the same name off the same argument,
+	# and two derivations of one name are two chances to disagree.
 	return $fn->() unless defined($name) && length($name);
-	$name =~ s{^.*/}{};
-	$name =~ s/\.ya?ml$//;
 
 	# The branch tip.  D87 has a deployed-state command default to the
 	# commit the environment last deployed, and M14 supplies that commit
