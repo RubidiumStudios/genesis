@@ -319,6 +319,19 @@ sub deliver {
 	$body{supersedes} = supersedes_paragraph($state->{rejected})
 		if ($pr->{state} // '') eq 'closed unmerged';
 
+	# D56: a rebuild that answers a reviewer says so, in the same shape a
+	# superseding body quotes a rejection, so a reviewer opening the pull
+	# request again reads their own words above the aggregate that answers
+	# them.  One renderer writes both, and the opening sentence is the only
+	# thing this call site gives it.
+	#
+	# The state is read off the record for the reason the two guards above
+	# carry: the answer is undef for a run given no token at all, and the
+	# record already holds the one copy every reader here takes.
+	$body{review} = review_paragraph($state->{number}, $state->{review},
+		opening => 'Changes were requested')
+		if ($pr->{state} // '') eq 'changes requested';
+
 	my $message = aggregate_message($git, $env, $commits, %body);
 	my $written = $session->apply_files($source,
 		env     => $env,
