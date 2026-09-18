@@ -546,10 +546,15 @@ sub gate_state {
 	# hold: <reason> is the gate that also sets a propagation hold once the
 	# gated commit is delivered, under D50.  The gate half behaves the same,
 	# so gate_reason carries the text whichever form it arrived in, and
-	# hold_reason is present only for the hold form.  A caller telling the
-	# two apart reads a key rather than parsing the trailer again, and the
-	# strip happens here and nowhere else, because this is the one sub that
-	# reads the stage.
+	# hold_trailer_reason is present only for the hold form.  A caller
+	# telling the two apart reads a key rather than parsing the trailer
+	# again, and the strip happens here and nowhere else, because this is
+	# the one sub that reads the stage.
+	#
+	# The key says trailer outright, because apply_hold writes hold_reason
+	# on entries of the same list and means the standing hold record's own
+	# reason by it.  Two meanings under one name on one list is a wrong
+	# report line waiting for the first reader who forgets to check reason.
 	my $hold;
 	my $reason = $stage;
 	$hold = 1 if $reason =~ s/^hold:\s*//;
@@ -558,7 +563,7 @@ sub gate_state {
 		reason      => 'gate-ahead',
 		gate        => $commit,
 		gate_reason => $reason,
-		($hold && length $reason ? (hold_reason => $reason) : ()),
+		($hold && length $reason ? (hold_trailer_reason => $reason) : ()),
 	};
 }
 
@@ -697,12 +702,23 @@ sub walk_env {
 			? (gate => $gate->{gate}, gate_reason => $gate->{gate_reason})
 			: ();
 
+		# D53: the gate's own commit is delivered, and where its trailer
+		# carries the hold form the reason rides out on the entry.  The
+		# question has already been asked about this commit once, above,
+		# with the released set in hand, so the writer downstream reads the
+		# answer rather than reading the trailer a second time.  A second
+		# reading without that set holds an environment over a gate the
+		# control branch itself has already taken back.
 		push @{$record->{pending}}, {
 			%gated,
 			control_commit => $commit->{sha},
 			subject        => $commit->{subject},
 			files          => $files,
 			carried        => $routed->{carried},
+			($gate && $commit->{sha} eq $gate->{gate}
+				&& defined $gate->{hold_trailer_reason}
+				? (hold_trailer_reason => $gate->{hold_trailer_reason})
+				: ()),
 		};
 	}
 

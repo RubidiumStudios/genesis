@@ -935,10 +935,15 @@ trailer naming it.  The trailer is read under the key
 C<Genesis::CI::Marker> answers it by, which that module exports as C<STAGE>.
 
 The hold form of the trailer, C<hold: E<lt>reasonE<gt>>, behaves as a gate in
-every respect, and the hashref carries C<hold_reason> beside C<gate_reason>
-for it, so a caller that has to tell the two forms apart reads a key rather
-than parsing the trailer a second time.  C<gate_reason> carries the text with
-the prefix taken off in either form.
+every respect, and the hashref carries C<hold_trailer_reason> beside
+C<gate_reason> for it, so a caller that has to tell the two forms apart reads
+a key rather than parsing the trailer a second time.  C<gate_reason> carries
+the text with the prefix taken off in either form.
+
+The key names the trailer outright because L</apply_hold> writes
+C<hold_reason> on entries of the same list, meaning the standing hold
+record's own reason by it.  One name for two things on one list is a wrong
+report line waiting for the first reader who forgets to check C<reason>.
 
 B<Parameters:>
 
@@ -967,9 +972,9 @@ later commit has released.
 B<Returns:> A hashref carrying C<reason>, which is always C<gate-ahead>,
 C<gate>, the gate's own commit, and C<gate_reason>, the trailer's text with
 any C<hold:> prefix taken off it.  A gate written in the hold form carries
-C<hold_reason> as well, holding that same text, and a plain gate carries no
-such key at all.  Undefined where the commit is no gate or where the gate has
-been passed or released.
+C<hold_trailer_reason> as well, holding that same text, and a plain gate
+carries no such key at all.  Undefined where the commit is no gate or where
+the gate has been passed or released.
 
 B<Examples:>
 
@@ -981,7 +986,7 @@ B<Examples:>
   # the same commit, where the trailer read `hold: run the capacity report`
   # returns {reason => 'gate-ahead', gate => $sha,
   #          gate_reason => 'run the capacity report',
-  #          hold_reason => 'run the capacity report'}
+  #          hold_trailer_reason => 'run the capacity report'}
 
 =head2 released_gates
 
@@ -1059,6 +1064,14 @@ the gate holds.  Either way it takes the trailer's words from the walk rather
 than parsing them a second time, which is how the walk and the aggregate's
 body would otherwise come to disagree about what is being waited on.
 
+Where the gate was written in the hold form, the gate's own commit is
+delivered with C<hold_trailer_reason> on its pending entry, carrying the
+trailer's text.  That is what C<Genesis::Commands::Pipelines> reads to write
+the hold once the push has landed, and it is there so that the trailer is
+read once, here, with the released gates in hand.  A reader asking
+L</gate_state> a second time from downstream, without that set, would hold an
+environment over a gate the control branch has already reverted.
+
 B<Parameters:>
 
 =over 4
@@ -1098,6 +1111,8 @@ passes one that asks the environment's ancestors through L</hold_for>.
 =back
 
 B<Returns:> The record it was given, with C<pending> and C<held> filled in.
+The pending entry for a gate written in the hold form also carries
+C<hold_trailer_reason>.
 
 B<Examples:>
 

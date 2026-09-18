@@ -1017,12 +1017,13 @@ sub propagate {
 					},
 				);
 
-				# The two halves _write_trailer_holds reads, put on the
-				# record where the publish settles them, so the writer
-				# takes one record rather than three arguments that can
-				# come to disagree about one run.
+				# What _write_trailer_holds reads, put on the record where
+				# the publish settles it, so the writer takes one record
+				# rather than arguments that can come to disagree about one
+				# run.  It is all the writer needs, because the trailer's
+				# own reason rides out on the delivered entry the walk
+				# wrote.
 				$record->{published} = $publish->{published} || [];
-				$record->{git}       = $git;
 			}
 		}
 
@@ -1084,7 +1085,7 @@ sub propagate {
 	# goes after the publish, which is what settles whether the delivery
 	# landed, and before the report, which says what this run did.  A preview
 	# publishes nothing and so writes nothing here either.
-	_write_trailer_holds($top, $record) if $publish && $record;
+	_write_trailer_holds($top, $record) if $publish;
 
 	# I8's three axes, printed once the run has finished writing.  Every
 	# environment in scope carries one outcome, every routed control commit
@@ -1186,11 +1187,18 @@ sub propagate {
 # consequence, so an environment whose push the remote refused was reset to T,
 # delivered nothing, and takes no hold.
 #
-# The reason is never parsed here.  gate_state is the one reader of the stage
-# trailer, and it answers hold_reason for the hold form alone, so this sub asks
-# it about each delivered commit and writes what it is told.  Where one run
-# delivers two gated commits to the same environment, the newest wins, since it
-# is the hold the operator is being asked to clear.
+# The trailer is never read here, and it is never read twice.  gate_state is
+# the one reader of the stage, and the walk asks it about each commit with the
+# released set in hand, so the reason the hold form carries rides out on the
+# delivered entry under hold_trailer_reason and this sub reads that.  Asking
+# again from here, with a different set of arguments, is how one trailer comes
+# to mean one thing to the walk and another to the writer: a gate the control
+# branch has already reverted is delivered as an ordinary commit and would
+# still have set a hold nothing on control accounts for.
+#
+# At most one entry per environment can carry the reason, because the walk
+# delivers at most one unreleased gate to an environment in a run, so the
+# assignment in the loop settles rather than competes.
 #
 # The record written here is the vault one and not the run's.  held_qualifier
 # answers needs clearing off $record->{hold}, so filling that field would make
@@ -1200,25 +1208,22 @@ sub _write_trailer_holds {
 	my ($top, $run) = @_;
 
 	my %published = map {$_ => 1} @{$run->{published} || []};
-	my $git = $run->{git};
 	my @set;
 
-	for my $record (@{$run->{environments} || []}) {
-		next unless $published{$record->{branch} // ''};
+	for my $env_record (@{$run->{environments} || []}) {
+		next unless $published{$env_record->{branch} // ''};
 
 		my $reason;
-		for my $entry (@{$record->{pending} || []}) {
+		for my $entry (@{$env_record->{pending} || []}) {
 			next unless ($entry->{outcome} // '') eq 'delivered';
-			my $gate = Genesis::CI::Walk::gate_state(
-				git => $git, commit => $entry->{control_commit});
-			$reason = $gate->{hold_reason}
-				if $gate && defined $gate->{hold_reason};
+			$reason = $entry->{hold_trailer_reason}
+				if defined $entry->{hold_trailer_reason};
 		}
 		next unless defined $reason;
 
-		my $env = Genesis::Env->bare($record->{env}, $top)->with_vault;
+		my $env = Genesis::Env->bare($env_record->{env}, $top)->with_vault;
 		$env->set_hold(reason => $reason);
-		$record->{hold_set} = $reason;
+		$env_record->{hold_set} = $reason;
 		push @set, $env->exodus_slug;
 	}
 

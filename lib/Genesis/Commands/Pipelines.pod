@@ -1778,11 +1778,18 @@ It runs after the publish and before the report, so the deploy of the gated
 commit finds the hold already standing.  An environment whose push was
 rejected delivered nothing and takes no hold.
 
-The reason is never parsed here.  C<Genesis::CI::Walk::gate_state> is the one
-reader of the stage trailer, and it answers C<hold_reason> for the hold form
-alone, so this sub asks it about each delivered commit and writes what it is
-told.  Where one run delivers two gated commits to one environment, the newest
-wins, because that is the hold the operator is being asked to clear.
+The trailer is never read here, and it is never read twice.
+C<Genesis::CI::Walk::gate_state> is the one reader of the stage, and the walk
+asks it about each commit with the released gates in hand, so the reason the
+hold form carries rides out on the delivered entry under
+C<hold_trailer_reason> and this sub reads that.  Asking again from here, with
+a different set of arguments, is how one trailer comes to mean one thing to
+the walk and another to the writer: a gate the control branch has already
+reverted is delivered as an ordinary commit and would still set a hold that
+nothing on control accounts for.
+
+At most one entry per environment can carry the reason, because the walk
+delivers at most one unreleased gate to an environment in a run.
 
 The record it writes is the vault one and not the run's own.  It sets
 C<hold_set> on the environment's record so the report can say a hold was set,
@@ -1800,8 +1807,7 @@ The C<Genesis::Top> for the deployment root the run is standing in.
 =item C<$run>
 
 The walk's run record, carrying C<environments>, with C<published> set from
-the publish result's arrayref of branch names and C<git> set from the handle
-the run walked with.
+the publish result's arrayref of branch names.
 
 =back
 
