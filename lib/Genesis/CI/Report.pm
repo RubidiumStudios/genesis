@@ -137,13 +137,14 @@ sub hold_reason {
 # held_qualifier - what one held environment waits for, or undef {{{
 #
 # D54's qualifier, which says what the environment waits for rather than why
-# any one commit is held.  An environment the pipeline was never applied to
-# waits for that command, and so does one with no deployment branch on either
-# side, which is the same wait read off a different absence.  One whose
-# environment the run could not read has failed instead, and one holding
-# commits behind an ancestor waits for that ancestor to certify the commit it
-# has not deployed.  One whose pull request a reviewer approved waits for that
-# merge and for nothing else.
+# any one commit is held.  An environment with no deployment branch on either
+# side waits for the apply that cuts one, one with a hold standing against it
+# waits for somebody to clear it, one the pipeline was never applied to waits
+# for that command, one whose environment the run could not read has failed
+# instead, one whose pull request a reviewer approved waits for that merge and
+# for nothing else, and one holding commits behind an ancestor waits for that
+# ancestor to certify the commit it has not deployed.  They are answered in
+# that order.
 #
 # It answers the qualifier alone and not the whole phrase, because ruling 22
 # puts the bare enum word in the record's outcome and the qualifier beside it
@@ -165,16 +166,26 @@ sub held_qualifier {
 	# certified state for this to answer over.
 	return AWAITING_APPLY unless defined $record->{certified};
 
-	my $certified = $record->{certified};
-	return AWAITING_APPLY
-		if ($certified->{state} // '') eq 'never-applied';
-
 	# D50: a hold is a decision somebody made for a reason the pipeline
 	# cannot see, and only a human clears it, so it outranks whatever the
 	# commits underneath it happen to be waiting for.
+	#
+	# D56 puts it ahead of the never-applied answer below as well.  Both
+	# states are read for every environment, so an environment can be in both
+	# at once and the two commands would rank them apart if either ranked
+	# them for itself.  The hold wins, because the apply is a command the
+	# operator may run at once and the hold is a decision standing in front
+	# of it: an environment that reads as awaiting the apply while a hold
+	# stands sends them to a command that would change nothing.  Clearing the
+	# hold leaves the apply as what the environment waits for, and the line
+	# beside this one says so meanwhile.
 	return sprintf('needs clearing (%s)',
 		$record->{hold}{reason} // 'no reason given')
 		if $record->{hold};
+
+	my $certified = $record->{certified} // {};
+	return AWAITING_APPLY
+		if ($certified->{state} // '') eq 'never-applied';
 
 	my ($first) = @{$record->{held} || []};
 	return undef unless $first;

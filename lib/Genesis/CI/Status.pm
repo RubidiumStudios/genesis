@@ -16,9 +16,11 @@ use Genesis::Term qw/csprintf/;
 use Genesis::CI::Walk ();
 use Genesis::CI::Preflight ();
 # Genesis::CI::Report owns every word an operator reads about an outcome, so
-# the phrase the never-applied reading carries is read from the constant
-# rather than spelled a second time here.
-use Genesis::CI::Report qw/AWAITING_APPLY/;
+# the held qualifier and the per-commit hold reason are rendered by the same
+# two subs the propagation run's own report calls rather than by a second pair
+# here, which is the one thing that could make the two commands disagree about
+# a phrase.
+use Genesis::CI::Report qw/held_qualifier hold_reason/;
 # Genesis::CI::Marker owns the marker's vocabulary, so the snapshot reader
 # below asks it which control commits a message names rather than spelling the
 # prefix a second time.
@@ -278,7 +280,12 @@ sub compose_phrase {
 		'deployed'       => [settled   => 'deployed'],
 		'pending-deploy' => [in_flight => 'awaiting deployment'],
 		'unseeded'       => [settled   => 'unseeded'],
-		'not-propagated' => [inert     => sprintf('not propagated, %s', AWAITING_APPLY)],
+		# The reading says what was read and nothing about what the
+		# environment waits for.  What it waits for is the held qualifier
+		# below, which answers awaiting pipeline-apply for the environment
+		# the pipeline was never applied to, so the phrase carries that
+		# wording once and a hold can stand ahead of it.
+		'not-propagated' => [inert     => 'not propagated'],
 	);
 
 	my @phrase = ($word{$row->{reading}} || [wrong => 'unknown reading']);
@@ -302,6 +309,25 @@ sub compose_phrase {
 		push @phrase, [wrong => sprintf('drifted [%s differs: hand commit]',
 			join(', ', @{$drift->{files}}))];
 	}
+	# The hold sits where the design's order puts it, after the snapshot flag
+	# and before the marker, because a marker says how the environment is
+	# driven and a hold says what it is waiting for, and an operator reads
+	# the waiting first.  The qualifier answers what the environment waits
+	# for and the word held is written here, where this command decides the
+	# outcome, exactly as the run writes it where it decides its own.  Every
+	# held component takes the on-ice class, because a hold is something a
+	# person set or the topology imposed and nothing moves until it is
+	# cleared.
+	if (my $qualifier = held_qualifier($row)) {
+		push @phrase, [on_ice => sprintf('held, %s', $qualifier)];
+		# Why this one commit is held, which is a different question from
+		# what the environment waits for, and the answer carries the
+		# ancestor's own state so an operator is not left to infer it from
+		# another row.
+		push @phrase, [on_ice => hold_reason($row->{held}[0])]
+			if @{$row->{held} || []};
+	}
+
 	push @phrase, [inert => '[manual]'] if $row->{manual};
 	return @phrase;
 }
