@@ -16,40 +16,5 @@ sub _apply_propagation_commit {
 	$git->commit($msg, @to_copy);
 }
 # }}}
-# _pr_branch_has_control_sha - idempotency check for pr/<env>/<type> {{{
-#
-# Asks the one reader for the branch's newest marker and compares the commit
-# it names with the one being propagated.  The old form matched the tip's
-# subject, so a squash, an amend, or an edited subject re-propagated and a
-# coincidental short sha suppressed a real propagation, which is H7.  M16
-# replaces the check outright with the marker walk on both branches.
-#
-# The two sides are compared as full shas, because a marker spells its commit
-# at whatever width the delivery abbreviated it to and only a full sha makes
-# two spellings of one commit compare equal.  The reader expands the marker
-# already where this clone holds the commit, so the expansion below is for
-# the side it could not reach, and a side that will not come back as forty
-# hex digits is a commit this clone cannot name.  The check then says the
-# branch is not idempotent rather than guessing, and the caller propagates
-# again, which is the safe way to be wrong.
-sub _pr_branch_has_control_sha {
-	my ($git, $branch, $control_short) = @_;
-	return 0 unless $git->branch_exists($branch);
-
-	my $marker = Genesis::CI::Marker::newest($git, $branch);
-	return 0 unless defined $marker;
-	# The expansion below fires only where the clone does not hold the
-	# commit the marker names, since the reader has expanded it already
-	# everywhere else, and the step that retires the propagate-envs double
-	# may well drop it.
-	$marker = $git->sha($marker) unless $marker =~ /^[0-9a-f]{40}$/;
-	return 0 unless defined $marker && $marker =~ /^[0-9a-f]{40}$/;
-
-	my $control = $git->sha($control_short);
-	return 0 unless defined $control && $control =~ /^[0-9a-f]{40}$/;
-
-	return $marker eq $control ? 1 : 0;
-}
-# }}}
 
 1;

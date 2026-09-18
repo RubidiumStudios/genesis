@@ -180,7 +180,6 @@ unit-tests/genesis_ci_report-render_run.t           # an error prints whole, and
 unit-tests/genesis_ci_publish-confirm.t             # the delta is shown three ways, and -y answers the ask alone
 unit-tests/genesis_ci_publish-recheck_control.t     # every refusal the pre-publish control check raises
 unit-tests/genesis_ci_publish-declined.t            # a no at the ask resets every branch and publishes nothing
-unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
 unit-tests/genesis_ci_preflight-disowned.t          # the disowned pipeline's arms, each caller wording its own refusal
 unit-tests/genesis_ci_preflight-deploy_gate.t       # the typed acknowledgement --yes cannot answer, and the terminal rule
 unit-tests/genesis_ci_compiler-override_file.t      # the override file beside .genesis/config, and its name

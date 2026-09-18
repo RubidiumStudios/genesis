@@ -12,6 +12,13 @@
 # Both due commits are laid through due_commit, which writes the environment
 # file at the deployment root, because that file is the only thing a commit
 # can touch that routes to this environment at all.
+#
+# The two rows below it prove T270 and T276, which are the other side of the
+# same rebuild: what a run does when the branch it would build is the branch
+# that is already there.  D48 answers that with the marker walk on both
+# branches and a comparison of the two trees, so a squash, an amended
+# subject, and a coincidental short hash in somebody else's subject each get
+# the answer the tip's subject could not give.
 use strict;
 use warnings;
 use utf8;
@@ -88,6 +95,135 @@ subtest 'the rebuild reports what it discards' => sub {
 	# A guard, for the reason the exit row above gives.
 	is(harness_marker($h, "origin/$pr"), $git->sha($h->control),
 		'with the branch rebuilt at the newest due commit');
+};
+
+
+# Proves T270: a repeated run with nothing changed pushes nothing and touches
+# no pull request, and a branch whose tip subject was rewritten by a merge
+# still reads its marker from the body.
+subtest 'a repeated run is idempotent by marker and tree' => sub {
+	plan tests => 9;
+
+	my $h   = ready(kit => 'omega-v2.7.0');
+	my $gh  = $h->{gh};
+	my $git = $h->git('a');
+	my $pr  = $h->pr_branch('prod');
+
+	due_commit($h, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+
+	# The first run opens the pull request itself, through sync_pull_request,
+	# so the row opens none of its own.  A second one on the same head and
+	# base is a pull request the product never made, and the write count
+	# below would read it as this run's work.
+	run_genesis($h, 'propagate', '-y');
+
+	refresh($h, 'a', $pr);
+	my $settled      = $git->sha("origin/$pr");
+	my $calls_before = scalar gh_calls($gh);
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, 0, 'the second run succeeded');
+
+	my $said = unfolded($out, $err);
+	like($said, qr/prod: idempotent/, 'the environment is recorded idempotent')
+		or diag($said);
+
+	refresh($h, 'a', $pr);
+	is($git->sha("origin/$pr"), $settled, 'nothing was pushed');
+
+	# The calls the first run made are behind us, so the slice is what the
+	# second run sent and the pull request it opened is not counted again.
+	my @calls  = gh_calls($gh);
+	my @writes = grep {($_->{method} // 'GET') ne 'GET'}
+		@calls[$calls_before .. $#calls];
+	is(scalar @writes, 0, 'and no pull request was touched');
+	cmp_ok(scalar @calls, '>', $calls_before, 'though the state was read');
+
+	# A merge that rewrites the subject keeps the marker in the body, so the
+	# walk still finds it where a subject match would not.
+	my $h2  = ready(kit => 'omega-v2.7.0');
+	my $due = due_commit($h2, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+	run_genesis($h2, 'propagate', '-y');
+	squash_merge($h2, 'prod', subject => 'Merge the proposal', keep_marker => 1);
+	refresh($h2, 'a', $h2->slug('prod'));
+	is(harness_marker($h2, 'origin/'.$h2->slug('prod')), $due,
+		'a rewritten subject still reads its marker from the body');
+};
+
+# Proves T276: the three shapes that broke idempotency by commit subject, each
+# answered by the marker walk.
+subtest 'the three subject-match shapes give the right answer now' => sub {
+	plan tests => 10;
+
+	# A squash: the tip's subject is the merger's and the marker is in the
+	# body alone.  The subject match re-propagated; the walk does not.
+	my $squashed = ready(kit => 'omega-v2.7.0');
+	due_commit($squashed, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+	run_genesis($squashed, 'propagate', '-y');
+	squash_merge($squashed, 'prod', subject => 'Merge pull request #1');
+
+	my ($sq_out, $sq_err) = run_genesis($squashed, 'propagate', '-y');
+	my $squash_said = unfolded($sq_out, $sq_err);
+	like($squash_said, qr/prod: idempotent/, 'a squash does not re-propagate')
+		or diag($squash_said);
+	unlike($squash_said, qr/prod: propagated/, 'and nothing is delivered again')
+		or diag($squash_said);
+
+	# A hand edit on the pull request branch itself, which is a divergence to
+	# report and rebuild rather than a state to skip.
+	my $edited    = ready(kit => 'omega-v2.7.0');
+	my $edited_pr = $edited->pr_branch('prod');
+	due_commit($edited, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+	run_genesis($edited, 'propagate', '-y');
+	hand_commit($edited, $edited_pr, copy => 'b',
+		files => {'prod/note.md' => "a note\n"}, message => 'tidy up');
+
+	# The publish leases the branch against the tip this clone last saw, and
+	# the run's own refresh fetches control and the deployment branches and
+	# no pull request branch, so the clone is shown the hand commit here.
+	# Without it the push is refused once and the row reads a refusal where
+	# it means to read a rebuild.
+	refresh($edited, 'a', $edited_pr);
+
+	my ($ed_out, $ed_err) = run_genesis($edited, 'propagate', '-y');
+	my $edited_said = unfolded($ed_out, $ed_err);
+	like($edited_said, qr/did not write/,
+		'an edited branch is discarded and rebuilt rather than skipped')
+		or diag($edited_said);
+	unlike($edited_said, qr/prod: idempotent/, 'and never reads as settled')
+		or diag($edited_said);
+
+	# A coincidental short hash in an unrelated subject, which suppressed a
+	# real propagation at the baseline.  The subject is not marker-shaped,
+	# because one that was would be a marker by the reader's own rule.
+	my $coincidence = ready(kit => 'omega-v2.7.0');
+	my $co_pr       = $coincidence->pr_branch('prod');
+	my $due         = due_commit($coincidence, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+	my $short       = $coincidence->git('a')->sha($due, short => 1);
+
+	# A hand commit is made on a branch that already stands somewhere, so the
+	# branch is cut first, off the deployment branch, which is where the
+	# product opens it.
+	local_branch($coincidence, $co_pr,
+		at => $coincidence->slug('prod'), push => 1);
+	hand_commit($coincidence, $co_pr, copy => 'b',
+		files   => {'prod/note.md' => "a note\n"},
+		message => "see $short for the context of this change");
+
+	# Here for the reason the refresh in the shape above carries: the clone
+	# has to have seen the branch move before the publish leases it.
+	refresh($coincidence, 'a', $co_pr);
+
+	my ($co_out, $co_err) = run_genesis($coincidence, 'propagate', '-y');
+	my $coincidence_said = unfolded($co_out, $co_err);
+	like($coincidence_said, qr/prod: propagated/,
+		'a coincidental short hash no longer suppresses a real propagation')
+		or diag($coincidence_said);
 };
 
 done_testing;

@@ -310,6 +310,32 @@ sub note_detail {
 }
 
 # }}}
+# settled - true when the rebuilt branch equals R's by marker and by tree {{{
+#
+# D48 makes idempotency the marker walk on both branches, so the question is
+# not what the tip's subject says but which control commit the newest marker
+# on each branch names, and whether the tree we would write is the tree that
+# is already there.  A squash, an amend, and a rewritten subject all keep the
+# marker in the body, and a coincidental short hash in somebody else's subject
+# is not a marker at all.
+#
+# The remote is asked for by name rather than spelled origin, for the reason
+# expected_tip gives: align_with_remote has just read the same ref through the
+# same accessor, and the two must not disagree about which remote R is.  A
+# clone with no remote has no branch on R to be settled against, which is the
+# first push rather than a repeat of one.
+sub settled {
+	my ($git, $pr_branch, $newest, $tree) = @_;
+	my $remote = $git->default_remote or return 0;
+	return 0 unless $git->branch_exists("$remote/$pr_branch");
+
+	my $marker = Genesis::CI::Marker::newest($git, "$remote/$pr_branch");
+	return 0 unless $marker && $marker eq $newest;
+
+	return $git->rev_parse("$remote/$pr_branch^{tree}") eq $tree ? 1 : 0;
+}
+
+# }}}
 # deliver - the pull request arm for one environment {{{
 #
 # The branch carries exactly one commit above the deployment branch, so the
@@ -440,6 +466,22 @@ sub deliver {
 		message => $message,
 		changed => [map {@{$_->{files} || []}} @$commits],
 	);
+
+	# The writer has built what we would publish, so the comparison is
+	# between two trees rather than between two guesses about them.  A branch
+	# we have just reported a discard on is never settled, because the
+	# discard is the thing that makes it differ, and a run that skipped it
+	# would leave the hand commits standing under a sentence saying they were
+	# discarded.  The local branch goes back to what R carries, so the
+	# aggregate the writer built above survives nowhere.
+	my $remote = $git->default_remote;
+	if (!$pr->{discarded}
+		&& settled($git, $pr->{branch}, $source,
+			$git->rev_parse($written->{commit}.'^{tree}'))) {
+		$git->reset_hard("$remote/$pr->{branch}");
+		$pr->{action} = 'idempotent';
+		return 'idempotent';
+	}
 
 	$pr->{action}         = 'rebuild';
 	$pr->{control_commit} = $source;

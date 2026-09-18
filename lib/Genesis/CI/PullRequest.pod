@@ -550,6 +550,68 @@ B<Examples:>
     # $record->{outcome_detail} reads 'what it already said; and something
     # else'
 
+=head2 settled($git, $pr_branch, $newest, $tree)
+
+    my $bool = Genesis::CI::PullRequest::settled($git, $pr_branch,
+        $newest_due_sha, $tree);
+
+Returns true when the pull request branch on the remote already carries the
+newest due control commit as its marker and holds the same tree the rebuild
+would write, which is what makes a repeated run push nothing and touch no
+pull request.
+
+D48 makes idempotency the marker walk on both branches rather than a match on
+the tip's subject. The subject broke three ways. A squash or an amend rewrote
+it and re-propagated, an edited subject re-propagated, and a short hash that
+happened to appear in somebody else's subject suppressed a real propagation.
+The marker reader walks subjects and bodies alike and skips commits carrying
+no marker, so all three read correctly here.
+
+The marker alone is not enough. A branch can name the right control commit
+and still hold a different tree, because the propagation set may have moved
+or a file may have been changed under it, so the tree the writer has just
+built is compared against the tree the branch carries and only a branch that
+matches on both is settled.
+
+The remote is asked for by name rather than spelled C<origin>, for the reason
+C<expected_tip> gives: C<align_with_remote> reads the same ref through the
+same accessor a few lines above, and the two must not disagree about which
+remote R is.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The run's git handle, standing on the repository the branch lives in.
+
+=item C<$pr_branch>
+
+The pull request branch's local name. The remote's copy of it is what is
+read, because R is what a push would move.
+
+=item C<$newest>
+
+The newest due control commit's sha, which is what the marker on a settled
+branch names.
+
+=item C<$tree>
+
+The tree the rebuild would write, read off the commit the single writer has
+already built.
+
+=back
+
+B<Returns:> C<1> or C<0>. C<0> where the clone has no remote, where R does not
+have the branch, where the branch carries no marker at all, where its newest
+marker names another commit, or where the trees differ.
+
+B<Examples:>
+
+    settled($git, 'pr/qa/bosh', $newest, $tree);
+    # returns 1 when R's pr/qa/bosh names $newest and holds $tree
+
 =head2 deliver($session, $record, %opts)
 
     my $word = Genesis::CI::PullRequest::deliver($session, $record,
@@ -608,6 +670,13 @@ superseding body uses, given a different opening sentence, so no second body
 in this module quotes a reviewer. That state is read off C<< $record->{pr} >>
 for the same reason the supersedes paragraph's is.
 
+Once the writer has built the aggregate, the branch is asked whether it is
+settled, which C<settled> answers from the marker on R's copy of it and from
+the two trees. A branch that is settled has the run reset it back to what R
+carries, and the environment reads C<idempotent>, so nothing is pushed and no
+pull request is touched. A branch this run has just reported a discard on is
+never settled, because the discard is the thing that makes it differ.
+
 What the publish and the pull request sync read afterwards is left on
 C<< $record->{pr} >>: the action, the control commit the aggregate names, the
 title and the body, and the commit that was written.
@@ -665,6 +734,10 @@ B<Examples:>
 
     deliver($session, $record, env => $env, commits => []);
     # returns 'idempotent', having written nothing
+
+    deliver($session, $record, env => $env, commits => \@pending);
+    # returns 'idempotent' again on a repeat, where R's branch already
+    # names the newest due commit and holds the same tree
 
     deliver($session, $record, env => $env, commits => \@pending,
         state => {state => 'approved', number => 42});
