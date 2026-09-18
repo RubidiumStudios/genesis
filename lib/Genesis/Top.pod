@@ -1864,8 +1864,30 @@ C<.genesis/config> and every file of each environment's hierarchy, which is
 what the pipeline's definition is made of. And each environment's compiled
 dependency set is compared with the set its last deploy recorded reading.
 
+The roster it walks, and the environment files it compares, both come from
+control rather than from the working tree the caller is standing in. That
+matters to one caller. The propagate pre-flight and C<pipeline-status> stand
+on control, so for them the tree and the ref say the same thing, but the
+deploy stands on a deployment branch, which carries one environment's
+hierarchy and no sibling's. Read from that tree the roster would be a list of
+one, and an environment added to control since the apply would be invisible
+to every deploy, which is the case D43's own example is about.
+
+Only this comparison reads control's tree that way. L</pipeline_topology>
+and L</pipeline_env_names> still answer for the tree in front of them,
+because the branch class, the propagation walk, and the pipeline commands all
+read them and every one of those wants that tree.
+
+The environment files come from C<potential_environment_files>, which is pure
+name derivation and touches no disk, so a defining path that exists only on
+control is compared rather than skipped. What that gives up is explicitly
+inherited files, which are named inside file contents and so need a tree to
+be found at all.
+
 A repository C<pipeline-apply> has never run against reports nothing, because
-there is no commit to be stale against.
+there is no commit to be stale against. So does a control branch this clone
+holds no deployment root on, which is a question about control the caller's
+own control check has already asked.
 
 A repository with no pipeline reports nothing as well, and it answers before
 the applied record's address is composed. The deploy pre-flight asks this on
@@ -1896,6 +1918,10 @@ B<Examples:>
 
     my $changes = $top->pipeline_staleness($git);
     # returns [] where the pipeline is current
+
+    my $changes = $top->pipeline_staleness($git);
+    # returns [{env => 'staging', reason => 'configuration-changed'}]
+    # for a deploy standing on qa/bosh, which carries no staging.yml
 
 =head2 has_legacy_ci_yml
 
@@ -2104,6 +2130,54 @@ B<Examples:>
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _topology_at
+
+    my ($topology, $at) = $top->_topology_at($git, 'control');
+
+The pipeline's environments as one ref holds them, and the C<Genesis::Top>
+they were read through.
+
+The deployment root's configuration and environment files are written out of
+the ref into a scratch tree, and a C<Genesis::Top> is opened over that tree as
+a materialised one, so what comes back is what L</pipeline_topology> would
+answer for a clone standing on that ref. Nothing else under the root is
+written out: no kit hook runs against this tree, so the kit source would be
+extraction paid for and never read.
+
+L</pipeline_staleness> is the only caller, and it reads its environments
+through the C<Genesis::Top> that comes back, so the scratch directory is held
+on that object rather than taken down when this returns.
+
+Opening a C<Genesis::Top> sets C<GENESIS_ROOT>, so the caller localises the
+environment around this call and around the reads it makes afterwards.
+
+B<Parameters:> A C<Service::Git> for the repository, and the ref to read.
+
+B<Returns:> The topology and the C<Genesis::Top>, or the empty list where the
+ref carries no deployment root.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Failed to read the deployment root at <ref>" >> - raised when
+C<git archive> cannot write the ref's configuration and environment files
+out.
+
+=item *
+
+C<< "Failed to write out the deployment root at <ref>" >> - raised when the
+archive cannot be unpacked into the scratch tree.
+
+=back
+
+B<Examples:>
+
+    my ($topology, $at) = $top->_topology_at($git, $top->control_branch);
+    # returns control's whole roster, whatever branch this clone is on
 
 =head2 _strongbox_for_config
 

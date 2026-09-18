@@ -1360,13 +1360,54 @@ sub pipeline_staleness {
 		$applied->{control_commit}, $self->control_branch
 	);
 
-	my @changes;
-	for my $name ($self->pipeline_env_names) {
-		my $env = Genesis::Env->bare($name, $self);
+	# The roster and the environment files come from control rather than from
+	# the working tree, because two of this comparison's three inputs used to
+	# be read out of whatever tree the caller was standing in while only the
+	# diff was read from refs.  The propagate pre-flight and pipeline-status
+	# stand on control, so the two agreed and the mismatch never showed.  The
+	# deploy is the first caller that asks from somewhere else: it stands on
+	# a deployment branch, which carries one environment's hierarchy, so the
+	# roster was a list of one and an environment added to control since the
+	# apply was invisible to it.
+	#
+	# Only this comparison reads control's tree.  pipeline_topology and
+	# pipeline_env_names still read the working tree, because the branch
+	# class, the walk, and the pipeline commands all read them and every one
+	# of those wants the tree in front of it.
+	#
+	# The nothing answer is for a control branch this clone cannot read a
+	# deployment root out of at all, which is a question about control that
+	# the caller's own control check has already asked.
+	#
+	# Opening a Top sets GENESIS_ROOT and lending it a vault sets the vault's
+	# own variables, so the whole read is localised and this query leaves the
+	# process as it found it.
+	local %ENV = %ENV;
+	my ($topology, $at) = $self->_topology_at($git, $self->control_branch);
+	return [] unless $topology;
 
+	# The environments' own records are read through the vault this
+	# repository has, lent to the materialised tree, which carries none of
+	# its own.  Both halves of the dependency comparison then address under
+	# one vault, which is the whole point of reading them together.
+	my $vault = eval {$self->vault};
+	$at->set_vault(vault => $vault, session_only => 1)
+		if Scalar::Util::blessed($vault) && $vault->isa('Service::Vault');
+
+	my @changes;
+	for my $name (sort keys %{$topology->{nodes}}) {
+		my $env = Genesis::Env->bare($name, $at);
+
+		# The names an environment's hierarchy could hold rather than the
+		# ones a tree happens to carry, because a defining path that exists
+		# only on control has to be compared rather than skipped.  It is
+		# pure name derivation and reads no disk, which is what lets it
+		# answer for an environment this clone is not standing on.  What it
+		# gives up is explicitly inherited files, which need file contents
+		# and so need a tree whichever way this is read.
 		my @defining = $git->prefixed(
 			'.genesis/config',
-			map {s{^\./}{}r} $env->actual_environment_files
+			map {s{^\./}{}r} $env->potential_environment_files
 		);
 		if (grep {$changed{$_}} @defining) {
 			push @changes, {env => $name, reason => 'configuration-changed'};
@@ -1381,6 +1422,59 @@ sub pipeline_staleness {
 	}
 
 	return \@changes;
+}
+
+# }}}
+# _topology_at - the pipeline's environments as one ref holds them {{{
+#
+# The configuration and the environment files of the deployment root are
+# written out of the ref into a scratch tree, and a Genesis::Top is opened
+# over that tree as a reading surface, so the topology comes back exactly as
+# pipeline_topology would answer it for a clone standing on the ref.  The
+# archive carries the bytes git holds, which is what
+# Genesis::Env::_propagation_file_kinds_at does for the same reason.
+#
+# Nothing but the configuration and the environment files is written out.  No
+# kit hook runs against this tree, so the kit source and everything else under
+# the root would be extraction paid for and never read.
+#
+# The scratch directory is held on the Top it belongs to, because the caller
+# reads environments out of that Top and a directory taken down when this sub
+# returns would leave every one of those reads looking at nothing.
+#
+# Returns the topology and the Top, or nothing at all where the ref carries no
+# deployment root to read.
+sub _topology_at {
+	my ($self, $git, $ref) = @_;
+
+	my $prefix = ($git->prefixed(''))[0] // '';
+	my %tree   = map {($_ => 1)} $git->ls_tree($ref, $prefix eq '' ? '.' : $prefix);
+
+	my $config = $prefix.'.genesis/config';
+	return () unless $tree{$config};
+	my @want = grep {
+		$_ eq $config || m{^\Q$prefix\E[^/]+\.ya?ml$}
+	} sort keys %tree;
+
+	require File::Temp;
+	my $scratch = File::Temp->newdir();
+	my $root    = "$scratch";
+	my $archive = File::Temp->new(SUFFIX => '.tar');
+	run({dir => $git->root,
+		onfailure => "Failed to read the deployment root at $ref"},
+		'git', 'archive', '--format=tar', '-o', "$archive", $ref, @want);
+	my $depth = ($prefix =~ tr{/}{});
+	run({dir => $root,
+		onfailure => "Failed to write out the deployment root at $ref"},
+		'tar', '-x', '-f', "$archive",
+		($depth ? ('--strip-components', $depth) : ()));
+
+	# Opening a Top sets GENESIS_ROOT, and the caller localises the
+	# environment around this call and around every read it makes through the
+	# Top that comes back.
+	my $at = Genesis::Top->new($root, materialised_tree => 1);
+	$at->{__scratch_tree} = $scratch;
+	return ($at->pipeline_topology, $at);
 }
 
 # }}}

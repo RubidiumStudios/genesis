@@ -1260,14 +1260,14 @@ sub _deploy_preflight {
 		acknowledge => 'I accept the risk');
 
 	# 8.  The warnings, in the order the design fixes, and this is the first
-	# of them.  It runs ahead of the others because what is stale decides
-	# which environments and which branches the rest of the pre-flight is
-	# talking about: an operator told that a branch is behind wants to know
-	# first that the pipeline watching it no longer matches control.
+	# of them.  It runs ahead of the due-commits warning below because what
+	# is stale decides which environments and which branches that warning is
+	# talking about: an operator told that commits are due to a branch wants
+	# to know first that the pipeline watching it no longer matches control.
 	#
 	# It is asked in void context because nothing below reads the count.  The
-	# sub answers one anyway, for the two callers the query's other readers
-	# will be, and its POD says so.
+	# sub answers one anyway, for the propagate pre-flight and
+	# pipeline-status, which ask the same query, and its POD says so.
 	_warn_stale_pipeline($top, $git);
 
 	# 9.  What control carries that has not reached this branch, and the one

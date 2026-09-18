@@ -56,10 +56,10 @@ subtest 'a pipeline-defining path changed since the apply warns' => sub {
 	# it on control alone: the branch still carries the file as the delivery
 	# left it, so the change is one only a reader of control can see.  The
 	# body is written through the harness rather than by hand, so what lands
-	# on control is a file Genesis can still read, and params carries the
-	# change because it names nothing the pipeline reads and so cannot pass
-	# for a second reason the warning might be firing on.
-	write_env_file($h, 'qa', params => {shape => 'changed'});
+	# on control is a file Genesis can still read, and the change is made to
+	# the genesis.pipeline block, which is what D43 counts as defining the
+	# pipeline's shape.
+	write_env_file($h, 'qa', pipeline => {require_pr => 'true'});
 	push_from($h, 'a', $h->control);
 
 	my (undef, $err, $exit) = run_genesis($h,
@@ -99,11 +99,45 @@ subtest 'a compiled dependency set the last deploy never read warns' => sub {
 		or diag("what the deploy said:\n$err");
 };
 
+subtest 'a sibling changed only on control is named as well' => sub {
+	plan tests => 3;
+
+	# The brief's own row, which could not stand while the staleness query
+	# took its roster from the working tree.  A deploy stands on the
+	# deployment branch, which carries the deploying environment's hierarchy
+	# and no sibling's, so staging's file is nowhere in front of this command
+	# and a roster read from that tree held one name.  The roster now comes
+	# from control, and this is what that buys: D43 asks the deploy to name
+	# the environments that changed, and staging is one of them.
+	#
+	# bosh => 1 stands the director and the kit up before the seeding, which
+	# is what lets the deploy reach its end and what lets the walk read a
+	# propagation set at the commit below.
+	my $h = ready_harness(envs => ['qa', 'staging'], bosh => 1);
+
+	# The change lands on staging's own file, so nothing is due to qa: the
+	# commit routes to staging alone, and this row is about the roster.
+	write_env_file($h, 'staging', pipeline => {require_pr => 'true'});
+	push_from($h, 'a', $h->control);
+
+	my (undef, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+
+	is($exit, 0, 'the deploy proceeded past the warning');
+	like(unfolded($err), qr/\bstaging: configuration-changed\b/,
+		'and the warning names the sibling this branch does not carry')
+		or diag("what the deploy said:\n$err");
+};
+
 subtest 'an applied pipeline that nothing has changed warns nothing' => sub {
 	plan tests => 3;
 
-	# The same shape as the first subtest with its one change left out, so
-	# what separates the two is the change and not the fixtures.
+	# Green on arrival, and disclosed as the pair to the first subtest: the
+	# same shape with its one change left out, so what separates the two is
+	# the change and not the fixtures.  What it catches is a warning that
+	# fires whenever a pipeline is applied at all, which is the wrong
+	# implementation nearest to hand here, since the staleness query would
+	# then never be asked and every deploy would be told to run the apply.
 	my $h = seeded_harness();
 	fixture_bosh($h);
 
