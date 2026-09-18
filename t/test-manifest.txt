@@ -372,6 +372,7 @@ integration-tests/genesis_ci_publish-control.t                # control is re-ch
 integration-tests/genesis_ci_publish-confirm.t                # the verified delta is shown whether or not there is anyone to ask
 integration-tests/genesis_ci_publish-status.t                 # a clean publish exits zero and a rejected branch makes the run partial
 integration-tests/genesis_ci_publish-retry_code.t             # the exit code says whether an unaided retry fixes the refusal
+integration-tests/genesis_ci_pullrequest-align.t              # the pull request branch is levelled with what the remote carries now
 integration-tests/genesis_ci_pullrequest-proposed_record.t    # a run that opens a pull request writes the run's own pointer to it
 integration-tests/genesis_ci_pullrequest-review_state.t       # what a reviewer decided, and the refusal when it cannot be read
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from

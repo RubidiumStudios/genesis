@@ -223,6 +223,45 @@ subtest 'abort resets every branch it committed to and leaves control alone' => 
 	ok($git->is_clean, 'with a clean tree');
 };
 
+subtest 'abort takes off a branch this run cut' => sub {
+	plan tests => 4;
+
+	# A pull request branch is derived state: the run cuts it from the
+	# deployment branch where neither side holds it, and an abort owes it
+	# the absence it found rather than a reset to some tip.  A branch left
+	# standing here is a half-written derived branch nobody asked for, and
+	# the next run reads it as work somebody else did.
+	my $h = make_harness(envs => ['qa'], mode => 'pr');
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+
+	my $git    = $h->git('a');
+	my $cut    = $h->pr_branch('qa');
+	my $qa_t   = $git->sha('refs/remotes/origin/' . $h->slug('qa'));
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	$session->switch($cut, create_from => $h->slug('qa'));
+	$git->checkout_file($control, 'qa.yml');
+	$git->commit('deliver to the pull request branch', 'qa.yml');
+
+	# The abort runs with the tree standing on the branch it is about to
+	# take off, which is where a delivery that died halfway leaves it.
+	exception(sub { $session->abort('the run failed') });
+
+	ok(!$git->branch_exists($cut),
+		'the branch this run cut is gone, because nobody held it before');
+	is($git->sha($h->slug('qa')), $qa_t,
+		'the deployment branch it was cut from is back at its remote tip');
+	is($git->current_branch, $h->control, 'and we are back on control');
+	ok($git->is_clean, 'with a clean tree');
+};
+
 subtest 'control behind its remote-tracking ref is still left alone' => sub {
 	plan tests => 3;
 

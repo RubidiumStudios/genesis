@@ -60,6 +60,11 @@ the deployment branches alone, because those are the branches the pre-flight
 classifies, so the pull request branch is fetched here, by the arm that is
 about to stand on it.
 
+The fetch runs on every call. This is the only thing that writes that
+remote-tracking ref, so from the second run for an environment onward the ref
+holds the previous run's tip, and a fetch skipped over a ref that is merely
+present would reset the branch to yesterday's value.
+
 The reset is a hard one and moves the checked-out branch, so the caller is
 already standing on the branch it names.
 

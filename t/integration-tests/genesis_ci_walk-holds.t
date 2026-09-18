@@ -34,6 +34,7 @@ sub env_file {
 	);
 	push @lines, "    prior_env: $opts{prior}" if $opts{prior};
 	push @lines, '    manual: true' if $opts{manual};
+	push @lines, '    require_pr: true' if $opts{require_pr};
 	push @lines, '    track_additional_files:', '    - ops/shared.yml';
 	push @lines, "leaf: $opts{leaf}" if defined $opts{leaf};
 	return join("\n", @lines, '');
@@ -109,6 +110,34 @@ subtest 'an ancestor that has certified nothing holds everything' => sub {
 		'the never-certified form is exact');
 	like($err, qr/held, awaiting deployment \(lab at control\@[0-9a-f]+\)/,
 		'the environment qualifier names lab and the commit');
+};
+
+subtest 'a held pull request environment reads held and not idempotent' => sub {
+	plan tests => 4;
+
+	# qa delivers into a pull request and lab has certified nothing, so
+	# everything qa would take is held and its pending list is empty.  The
+	# arm answers idempotent for any environment with nothing due, and a
+	# word written onto the record from there is the first thing the
+	# report's own settling reads, which takes the qualifier with it.
+	my $h = chained_harness(certified => ['qa']);
+
+	my $due = commit_on_control($h,
+		files   => {'qa.yml' => env_file(env => 'qa', prior => 'lab',
+			require_pr => 1, leaf => 11)},
+		message => 'Tune qa behind an ancestor that has deployed nothing',
+		push    => 1,
+	);
+
+	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
+	my $said = unfolded($err);
+
+	isnt(harness_marker($h, $h->pr_branch('qa')), $due,
+		'qa received nothing, because everything it would take is held');
+	unlike($said, qr/qa:\s*idempotent/,
+		'and it is not recorded as an environment with nothing to do');
+	like($said, qr/held, awaiting deployment \(lab at control\@[0-9a-f]+\)/,
+		'the qualifier names what it is waiting for');
 };
 
 subtest 'an ancestor with no control_commit in its record holds too' => sub {

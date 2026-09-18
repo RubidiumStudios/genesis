@@ -712,6 +712,10 @@ sub apply_hold {
 # what it is asked for is the per-branch discard rather than abort: abort
 # ends the session and the run with it, which would leave every environment
 # below this one unattempted, which is the shape this sub exists to stop.
+# An environment that delivers into a pull request writes on that branch and
+# not on the deployment branch, so its pull request branch is discarded too,
+# because a discard that named the deployment branch alone would put back the
+# branch nothing was written to and leave the half-written one standing.
 #
 # A run-fatal or unsurvivable error is not caught here.  It propagates to
 # the caller, which aborts the whole run.
@@ -743,7 +747,11 @@ sub walk_one {
 	$error = $error->message
 		if Scalar::Util::blessed($error) && $error->can('message');
 
-	$session->discard($record->{branch}) if $session;
+	if ($session) {
+		$session->discard($record->{branch});
+		$session->discard($record->{pr}{branch})
+			if $record->{pr} && $record->{pr}{branch};
+	}
 	$record->{error}   = _load_error($error);
 	$record->{outcome} = 'failed';
 	$record->{pending} = [];
