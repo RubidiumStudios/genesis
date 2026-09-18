@@ -665,14 +665,6 @@ sub propagate {
 			my $env_name = $env_record->{env};
 			$at = $env_name;
 
-			# D43's awaiting outcome.  genesis pipeline-apply is the one
-			# command that cuts a deployment branch, so the run carries on
-			# past the environment without writing, and the report says what
-			# it is waiting for.  Nothing is decided here, because a run and
-			# a preview that decided it separately are two outputs that can
-			# disagree about a word.
-			next unless $initial->{branches}{$env_name};
-
 			# D96's second stage as the walk already resolved it.  An error
 			# the walk confined to this environment is this environment's
 			# outcome, and it is named as one rather than as a warning
@@ -680,7 +672,24 @@ sub propagate {
 			# environment in scope end with an outcome and a warning is not
 			# one.  The walk wrote failed on the record as it caught the
 			# error, and the report carries the error beneath it.
+			#
+			# It is read ahead of the branchless check below, because an
+			# environment can be in both states at once and only one of the
+			# two answers is worth printing.  The walk loads the environment
+			# before it decides anything else, so an environment with no
+			# branch that also fails to load arrives here failed, with the
+			# error under it, and the wait for the apply written over that
+			# would send an operator to a command that reads the same file
+			# and fails on it again.
 			next if $env_record->{error};
+
+			# D43's awaiting outcome.  genesis pipeline-apply is the one
+			# command that cuts a deployment branch, so the run carries on
+			# past the environment without writing, and the report says what
+			# it is waiting for.  Nothing is decided here, because a run and
+			# a preview that decided it separately are two outputs that can
+			# disagree about a word.
+			next unless $initial->{branches}{$env_name};
 
 			# D51's arm.  An environment whose repository policy says its
 			# branch may only receive a proposal takes its delivery on the

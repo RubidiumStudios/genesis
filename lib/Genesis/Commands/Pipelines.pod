@@ -59,8 +59,12 @@ Nothing stands between the two stages.  An environment the pre-flight has no
 record for has no branch on either side, so the run carries on past it without
 writing anything, and the report composes the phrase that says it is awaiting
 C<genesis pipeline-apply> through the same sub every other held environment
-reads its own wait from.  C<propagate> used to offer to cut that branch itself,
-and the branch it cut carried the environment's own name rather than the
+reads its own wait from.  An environment the run could not read at all reads
+C<failed> instead, with the error under it, and it reads that way whether or
+not a branch was ever cut for it, because the wait for the apply written over a
+load failure would send an operator to a command that reads the same file and
+fails on it again.  C<propagate> used to offer to cut that branch itself, and
+the branch it cut carried the environment's own name rather than the
 deployment slug, so the offer satisfied nothing and left a ref standing exactly
 where the real branch has to go.
 C<genesis pipeline-apply> is the command the design gives the job of cutting a

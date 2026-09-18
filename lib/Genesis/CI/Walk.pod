@@ -234,7 +234,10 @@ for an environment whose deployment branch neither side holds it carries the
 state C<no-branch> instead, which is a reading of the refs rather than of a
 vault record.  That row is closed as soon as it is read, since there is no ref
 to read a marker off and nothing to deliver onto, and what it waits for is
-C<genesis pipeline-apply> cutting the branch.  A standing hold is read before
+C<genesis pipeline-apply> cutting the branch.  C<deployed> is filled from that
+same read before the row closes, so an environment somebody deployed by hand
+before the pipeline reached it still names the control commit it was deployed
+from.  A standing hold is read before
 the row closes, so an environment in both states reads as needing the hold
 cleared, which is the ranking L<Genesis::CI::Report/held_qualifier> fixes.
 
