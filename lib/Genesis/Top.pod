@@ -1878,6 +1878,13 @@ and L</pipeline_env_names> still answer for the tree in front of them,
 because the branch class, the propagation walk, and the pipeline commands all
 read them and every one of those wants that tree.
 
+Both halves read the local control branch, and the same one: the diff takes
+its far side from L</control_branch> and the roster is read at that same ref.
+Neither reads the remote-tracking ref. A commit made on control and not yet
+pushed is part of what this repository calls control, so a roster read from
+the remote would describe a different commit from the one the diff compares
+against, and the two halves would disagree about what the pipeline is.
+
 The environment files come from C<potential_environment_files>, which is pure
 name derivation and touches no disk, so a defining path that exists only on
 control is compared rather than skipped. What that gives up is explicitly
@@ -2147,7 +2154,10 @@ extraction paid for and never read.
 
 L</pipeline_staleness> is the only caller, and it reads its environments
 through the C<Genesis::Top> that comes back, so the scratch directory is held
-on that object rather than taken down when this returns.
+on that object rather than taken down when this returns. It passes
+L</control_branch>, which is the local branch and the same ref its own diff
+compares against. The ref is an argument rather than a fixed name so that a
+later caller can ask the same question of another one.
 
 Opening a C<Genesis::Top> sets C<GENESIS_ROOT>, so the caller localises the
 environment around this call and around the reads it makes afterwards.
