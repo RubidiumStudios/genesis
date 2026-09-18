@@ -131,6 +131,12 @@ environment for its propagation set would load the kit through a vault this
 caller has not connected to, and the branch's own history answers the same
 question without one.
 
+This reading is independent of the certification axis, and neither is derived
+from the other.  An environment may be C<pending-deploy> and drifted at the
+same time, because a branch can carry markers nothing has deployed and a hand
+edit above them, and the record says both rather than whichever of the two it
+looked at first.
+
 B<Parameters:>
 
 =over 4
