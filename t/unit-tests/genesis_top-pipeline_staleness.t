@@ -99,6 +99,37 @@ subtest 'a changed pipeline-defining path names its environment' => sub {
 		'with the reason the caller prints');
 };
 
+subtest 'the roster comes from control, not from the tree in front of us' => sub {
+	plan tests => 3;
+
+	# The deploy asks this query standing on a deployment branch, which the
+	# branch class put it on and which carries one environment's hierarchy
+	# and no sibling's.  Read out of that tree, the roster is a list of one
+	# and an environment that changed only on control is invisible, which is
+	# the whole of what D43 asks this query to name.
+	#
+	# bosh is passed for the catch-up alone: a delivery is published from the
+	# teammate's copy, so the operator's own branch stands at the commit the
+	# apply cut until something brings it forward, and a checkout of that
+	# commit is a tree with no deployment root in it at all.
+	my $h = ready_harness(envs => ['lab', 'prod'], type => 'bosh', bosh => 1);
+
+	# Any pipeline key the schema declares moves the file, as the row above
+	# uses it.  It lands on control alone, and the branch below still carries
+	# its own hierarchy as the delivery left it.
+	write_env_file($h, 'prod', pipeline => {require_pr => 'true'});
+	push_from($h, 'a', $h->control);
+	stand_on($h, $h->slug('lab'));
+
+	my $changes = staleness_for($h);
+	is(scalar(@$changes), 1, 'one environment changed')
+		or diag(explain $changes);
+	is($changes->[0]{env}, 'prod',
+		'and it is the sibling whose file this branch does not carry');
+	is($changes->[0]{reason}, 'configuration-changed',
+		'with the reason the caller prints');
+};
+
 subtest 'a compiled set that differs from the last-read set is stale' => sub {
 	plan tests => 2;
 
