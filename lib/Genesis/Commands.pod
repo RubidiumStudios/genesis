@@ -167,6 +167,13 @@ may interact with a BOSH director.
 
 =back
 
+B<Refresh-Mode Constants>
+
+C<REFRESH_MODES> is the list of values the C<refresh> property in
+C<define_command> may take, which are C<'optional'> and C<'never'>.  It is
+the list the registration is checked against, so a misspelled mode is a bug
+rather than a command quietly refreshed as though it had declared nothing.
+
 B<Branch-Class Constants>
 
 Each constant is the value of the C<branch_class> property in
@@ -225,6 +232,18 @@ command that declares no class is not gated at all.
 C<branch_target> is optional and is declared by C<propagate> alone. It says
 that the command switches to control inside the session it already holds,
 so the gate leaves it where it stands.
+
+C<refresh> is optional and says what the command wants of the refresh the
+gate would otherwise make on its behalf, which D40 has every pipeline command
+take before it reads anything. C<'optional'> is a refresh the operator may
+skip, which they do with C<--no-refresh>, and the gate makes it wherever they
+did not; C<pipeline-status> declares it. C<'never'> is a command that answers
+out of the repository's own files, holds no ref a refresh could make current,
+and offers no flag to ask with, so the gate makes none for it at all;
+C<pipeline-describe> declares it. A command that declares nothing is
+refreshed as it always was. The declaration sits here so that the gate reads
+one fact rather than carrying a list of command names that would drift from
+the help text and from the command's own reading.
 
 C<commits> is optional and is declared by C<create> alone. It says that the
 command makes a commit on control, which is what decides whether a
@@ -423,6 +442,14 @@ C<--as-deployed> select the deployed commit where the default does not.
 The gate reads it through L</deployed_target>, which resolves the commit and
 hands it to the branch session.  Defaults to C<'tip'>.
 
+=item C<refresh> - What the command wants of the branch-class gate's
+refresh, either C<'optional'>, which the operator skips with
+C<--no-refresh>, or C<'never'>, which makes none at all.
+C<pipeline-status> declares the first and C<pipeline-describe> the second.
+It is declared only alongside C<branch_class =E<gt> PRE_DEPLOY>, since that
+is the one gate that reads it.  Defaults to C<undef>, which is refreshed as
+every other pre-deploy command is.
+
 =item C<option_require_order> - Boolean.  When true, option parsing stops
 at the first non-option argument.  Defaults to false.
 
@@ -515,6 +542,20 @@ C<'deployed'>.  The resolver reads every other word as the tip, so a
 misspelling would take the command to the commit its registration says it
 does not mean, and nothing after the registration can tell that typo from a
 deliberate C<'tip'>.
+
+=item C<"Command %s declares the refresh mode %s; the only modes are optional and never.">
+
+Raised via C<bug> when C<refresh> is set to anything but C<'optional'> or
+C<'never'>.  A mode the gate never compares against leaves the command
+refreshed as though it had declared nothing, which is the same silent
+failure the class check rules out.
+
+=item C<"Command %s declares a refresh mode without the pre-deploy branch class.">
+
+Raised via C<bug> when C<refresh> is set and C<branch_class> is anything
+but C<PRE_DEPLOY>.  Only the pre-deploy arm of the gate refreshes, so the
+attribute anywhere else is read by nobody and reads as though the command
+had been exempted from a fetch it was never subject to.
 
 =item C<"Command %s declares a branch target without a branch class.">
 

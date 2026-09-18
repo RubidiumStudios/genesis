@@ -194,6 +194,12 @@ brought up to date before it ran.
 Optional.  The pipeline provider that owns propagation here, defaulting to
 the one the configuration names.
 
+=item C<outcome>
+
+Optional.  Passed to L</read_durable_state> as the sentence its refusal
+closes with, for a caller whose command writes nothing and so owes the
+operator a different account of where it stopped.
+
 =back
 
 B<Returns:> A hashref carrying everything L</read_durable_state> answers,
@@ -355,6 +361,14 @@ Optional, defaulting to C<bail>.  How the refusal below is raised.  A caller
 standing inside a session owes the operator their branch back before it says
 why the run stopped, so it hands in a closure that closes the session and then
 bails, and a caller with no session to close leaves it out.
+
+=item C<outcome>
+
+Optional, defaulting to C<Nothing was written.>  The sentence the refusal
+below closes with.  A run that writes and a command that only reports owe the
+operator different accounts of where they stopped, and "nothing was written"
+says nothing at all to somebody who asked for a report and never expected a
+write, so C<pipeline-status> hands in its own.
 
 =back
 

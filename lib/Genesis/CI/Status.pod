@@ -31,8 +31,9 @@ to a terminal mid-computation would be no use to a caller that wanted the
 record alone, so C<on_events> is called with them the moment the control check
 answers, which is before the walk runs.  That ordering matters: a walk that
 refuses would otherwise end the command with the control ref the refresh
-created unaccounted for.  The same lines stay on the record under C<events>
-for a caller that would rather read them afterwards.
+created unaccounted for.  That one channel is the whole of it, and the lines
+are not left on the record as well, because the record is the shape D91 fixes
+and C<--json> emits it whole.
 
 The one axis the walk leaves to this module is the snapshot, which is what a
 deployment branch holds beyond the commit propagation last wrote on it.
@@ -81,6 +82,23 @@ The record also carries C</unfetchable_markers>' answer under C<breaches>,
 which is every environment whose marker names a control commit no ref in this
 repository still reaches.
 
+The staleness is asked only where this clone holds the commit the pipeline was
+applied from.  The query diffs that commit against control, and git refuses a
+diff against an object it does not have, so a clone that never fetched it
+would have ended the whole report on that refusal.  Where it is missing the
+three fields are left null, which is a reading a boolean cannot carry, and
+both renderers say the staleness is unverifiable.
+
+When C<refresh> is false the command reads the remote-tracking refs as they
+stand, writes nothing, and marks every value that rests on a refresh with the
+constant C<UNVERIFIABLE>.  The record's C<refreshed> is then false, each
+environment's divergence state reads C<unverifiable>, the routing summary
+carries the word in brackets, the breach line is qualified with it, the two
+divergence remedies are withheld because neither can be told from its opposite
+against an unrefreshed ref, and the tree prints a header saying the report is
+stale.  This is the one escape the refresh invariant names, and it exists on
+C<pipeline-status> alone.
+
 B<Parameters:>
 
 =over 4
@@ -108,13 +126,14 @@ environment the deployment root has.
 
 A code reference called with the control check's event lines as soon as it has
 them, which is before the walk runs.  A caller that names none is told nothing
-as it goes and reads C<events> off the record instead.
+as it goes, because the lines are handed over this one channel and are not
+left on the record: the record is the shape D91 fixes, and C<--json> emits it
+whole.
 
 =back
 
 B<Returns:> the record, as a hash reference, in the shape
-L<Genesis::CI::Walk/plan> answers with, with C<events> beside it, which is the
-lines the control check raised for the caller to print.
+L<Genesis::CI::Walk/plan> answers with.
 
 B<Examples:>
 
@@ -253,6 +272,13 @@ Beneath the table comes one red line per breach the record carries, because a
 marker naming a commit the remote no longer holds is a fact about the
 repository rather than a column of one row.
 
+Under C<stale> the tree opens with a line saying the report is stale because
+no refresh ran, above the column heads, since an operator has to read that
+before they read a row.  The same option qualifies each breach line with the
+word, because the breach is read entirely off the remote-tracking refs and
+unrefreshed a commit propagated an hour ago and never fetched reads exactly
+like one the remote has dropped.
+
 B<Parameters:>
 
 =over 4
@@ -312,6 +338,15 @@ C<held, needs clearing (vsphere maintenance)> and stops there.  The walk
 stamps every commit the hold takes with the hold's own text, so the reason
 would otherwise print what somebody wrote on the record twice in one line.
 
+Under C<stale> the routing summary carries C<[unverifiable]> after the count,
+because that is the component the refresh decides, and it keeps its own class,
+since a component marked wrong would leave C<worst_class> answering wrong for
+the whole row.  The two divergence remedies are withheld instead of marked.
+Both rest on the remote-tracking refs, and unrefreshed neither can tell a
+branch nobody published from one a teammate pushed an hour ago; telling an
+operator to delete the second would be worse than telling them nothing.  What
+says so is the divergence cell, which carries the word as its state.
+
 B<Parameters:>
 
 =over 4
@@ -361,6 +396,43 @@ B<Examples:>
   # 'in_flight'
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _mark_unverifiable($record)
+
+  $record = Genesis::CI::Status::_mark_unverifiable($record);
+
+Marks the values that rest on a refresh nobody ran, which is what C<--no-refresh>
+asks for.  It sets C<refreshed> false and writes C<UNVERIFIABLE> into each
+environment's divergence state, and it runs last, once everything the record
+carries has been filled.
+
+The state is set through the divergence hash rather than by replacing it with
+a string, so C<--json> emits one shape for that field whichever form of the
+command wrote the record, and an environment that had no divergence at all
+gains the same shape with the same word in it.
+
+Nothing else on the record is touched.  A phrase component marked with a class
+of the wrong kind would leave C</worst_class> answering wrong for every row, so
+the colour an operator reads a stale report by would carry no information at
+all.  What the renderers add instead is the stale header, the bracket on the
+routing summary, and the qualifier on the breach line.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The record C</status_records> has finished filling.
+
+=back
+
+B<Returns:> the same record, marked in place.
+
+B<Examples:>
+
+  my $record = Genesis::CI::Status::_mark_unverifiable($record);
+  # $record->{environments}[0]{divergence}{state} eq 'unverifiable'
 
 =head2 _newest_unmarked($git, $branch)
 
@@ -437,6 +509,11 @@ changed environment with the reason the staleness query gave for it and the
 command that fixes it.  It reads the fields C</status_records> wrote and asks
 no question of its own, so the header and C<--json> cannot come to disagree
 about whether the pipeline is stale.
+
+Where C<stale> is null rather than false, the staleness was never read,
+because this clone does not hold the commit the pipeline was applied from.
+The line then reads C<[stale: unverifiable]> with the reason in one clause,
+which is the one reading the query cannot be asked for.
 
 B<Parameters:>
 

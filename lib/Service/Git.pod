@@ -865,6 +865,37 @@ B<Examples:>
   my $bool = $git->is_ancestor($sha, $sha);
   # returns 1 -- a commit is its own ancestor
 
+=head2 holds_commit
+
+  my $bool = $git->holds_commit($sha);
+
+Whether this repository has the commit object at all. It is the narrower of
+the two questions and the one to ask before asking git for anything that has
+to walk the commit, since a diff against a commit this clone never fetched
+fails outright and a caller that would rather report what it cannot read than
+end on git's own error has to know first.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$sha>
+
+The commit to ask about, as a full or abbreviated sha.
+
+=back
+
+B<Returns:> 1 or 0. Returns 0 rather than erroring where the argument is
+undefined, is not a sha, or names no object here.
+
+B<Examples:>
+
+  my $bool = $git->holds_commit($applied_commit);
+  # returns 0 in a clone that has never fetched that commit
+
+  my $bool = $git->holds_commit($dropped_sha);
+  # returns 1 while the dropped commit is still a loose object here
+
 =head2 commit_exists
 
   my $bool = $git->commit_exists($sha);
@@ -874,10 +905,11 @@ reachability and not existence, because a commit the remote has dropped stays
 here as a loose object until git collects it, and what a caller wants to know
 is whether a fresh clone could fetch it.
 
-Local branches and remote-tracking refs both count as refs that reach it. A
-name that is not a hexadecimal sha is answered no rather than asked about,
-since git refuses to answer the reachability question about a name it cannot
-resolve at all.
+Local branches and remote-tracking refs both count as refs that reach it. The
+object question is asked first, through C<holds_commit>, because git refuses
+to answer the reachability question about a name it cannot resolve at all,
+and a name that is not a hexadecimal sha is answered no rather than asked
+about.
 
 B<Parameters:>
 

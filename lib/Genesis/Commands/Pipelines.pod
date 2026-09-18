@@ -454,7 +454,8 @@ A reachable vault is required, and the command refuses at C<UNAVAILABLE>
 without one rather than reporting.  The reading comes from the same walk
 C<genesis propagate> uses, and that walk reads the applied record before it
 decides anything, so a vault it cannot reach ends the command there, naming
-the path it could not read.  A vault that answers but has no record for one
+the path it could not read and saying that no report was produced, which is
+the account this command owes where a run would say what it had written.  A vault that answers but has no record for one
 environment is the other case, and that environment alone reads as failed.
 Either way the report never guesses at a certified commit, which would be the
 disagreement between the report and the run this read model exists to end.
@@ -470,22 +471,26 @@ record, so nothing is computed twice.
 
 =item C<--no-refresh>
 
-Read the refs as they stand, without fetching first.
+Read the refs as they stand, without fetching first.  The header then says
+the report is stale, the routing summary and the divergence cell carry the
+word C<unverifiable>, the breach line is qualified with it, and the two
+divergence remedies are withheld, because unrefreshed neither can be told
+from its opposite.  The branch-class gate makes no fetch either: the
+registration declares that this command's refresh is the operator's to skip,
+and the gate reads that declaration.
 
 =back
 
-There is one state the report cannot describe, and it ends the command rather
-than appearing in it.  The staleness query diffs the applied commit against
-control, and a clone that does not hold the applied commit cannot be asked for
-that diff, so the command exits at C<DATAERR> naming the commit to fetch.  A
-force-pushed control and an applied commit this clone never fetched both reach
-it that way.
+The staleness the header reports is the one reading that rests on a commit
+rather than on a ref.  The query diffs the applied commit against control,
+and a clone that does not hold that commit cannot be asked for the diff, so
+the header says the staleness is unverifiable and names what is missing
+rather than ending the report.  A force-pushed control and an applied commit
+this clone never fetched both read that way.
 
 B<Returns:> Exits 0 after printing, C<CONFIG> where the configuration disowns
-a live pipeline, C<UNAVAILABLE> where vault cannot be reached, or C<DATAERR>
-where this clone does not hold the applied commit the staleness query has to
-diff against.  See L<Genesis::CI::Status> for the record's shape and its two
-renderings.
+a live pipeline, or C<UNAVAILABLE> where vault cannot be reached.  See
+L<Genesis::CI::Status> for the record's shape and its two renderings.
 
 B<Examples:>
 

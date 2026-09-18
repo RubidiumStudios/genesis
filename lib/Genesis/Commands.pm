@@ -112,6 +112,21 @@ use constant DEPLOYED_TARGET_HELP =>
 
 # }}}
 
+# What a command says about the refresh the branch-class gate would otherwise
+# make on its behalf.  D40 has every pipeline command refresh before it reads
+# anything, and D81 keeps every fact about a command's branch handling at its
+# registration, so the two commands that read and resolve nothing say so here
+# rather than being named inside the gate.
+#
+# `optional` is a refresh the operator may skip, which they do with
+# --no-refresh, and the gate makes it wherever they did not.  `never` is a
+# command that answers out of the repository's own files, holds no ref a
+# refresh could make current, and offers no flag to ask with, so the gate
+# makes none for it at all.  A command that declares nothing is refreshed as
+# it always was.
+use constant REFRESH_MODES => ('optional', 'never'); # {{{
+# }}}
+
 our @global_options = ( # {{{
 	[
 		"help|h" =>
@@ -212,6 +227,7 @@ sub define_command { # {{{
 		branch_target      => undef,
 		branch_fast_forward => 0,
 		commits            => undef,
+		refresh            => undef,
 	};
 
 	$PROPS{$name} = {%$default_props, %$props};
@@ -278,6 +294,26 @@ sub define_command { # {{{
 		$PROPS{$name}{branch_target}, join('#y{, }', BRANCH_TARGETS)
 	) if defined($PROPS{$name}{branch_target})
 		&& !grep {$_ eq $PROPS{$name}{branch_target}} BRANCH_TARGETS;
+
+	# A refresh mode the gate never compares against would leave the command
+	# refreshed as though it had declared nothing, which is the same silent
+	# failure the class check above rules out.
+	bug(
+		"Command #C{$name} declares the refresh mode #y{%s}; ".
+		"the only modes are #y{%s}.",
+		$PROPS{$name}{refresh}, join('#y{ and }', REFRESH_MODES)
+	) if defined($PROPS{$name}{refresh})
+		&& !grep {$_ eq $PROPS{$name}{refresh}} REFRESH_MODES;
+
+	# A refresh declared outside the pre-deploy class is read by nobody, so
+	# the attribute on any other registration reads as though the command had
+	# been exempted from a fetch it was never subject to.
+	bug(
+		"Command #C{$name} declares a refresh mode without the #y{%s} ".
+		"branch class.",
+		PRE_DEPLOY
+	) if defined($PROPS{$name}{refresh})
+		&& ($PROPS{$name}{branch_class} // '') ne PRE_DEPLOY;
 
 	# extended_handlers implies option_passthrough: the main parser
 	# must leave unrecognised flags in @args for the handlers to claim.
@@ -727,28 +763,32 @@ sub _gate_branch_class {
 
 	if ($class eq PRE_DEPLOY) {
 		# Two pre-deploy commands make no network call of their own, and
-		# the gate makes none for them either.  pipeline-status says so
-		# with --no-refresh (D40).  pipeline-describe resolves the
-		# repository's own configuration out of files, so it holds no ref
-		# a refresh could make current, and a fetch would refuse offline
-		# what the command can always answer from disk.  Both are read
-		# here rather than in the assertion, because the option and the
-		# command are the gate's to know.
+		# the gate makes none for them either.  Each says so at its own
+		# registration rather than by name here, because a list of command
+		# names inside the gate is the second declaration D81 exists to
+		# prevent: it drifts from the help text, from the command's own
+		# reading, and from whatever the next such command declares.
 		#
-		# The two names sit in the gate for now.  D81 would rather a
-		# registration declared that it needs no refresh, the way it
-		# declares its class, and the step that gives registrations such
-		# an attribute moves these names onto it, M17 for pipeline-status.
-		my $refresh = get_options()->{'no-refresh'} ? 0 : 1;
-		$refresh = 0 if is_equivalent_command($COMMAND, 'pipeline-describe');
+		# pipeline-status declares an optional refresh, which is one the
+		# operator skips with --no-refresh and which the gate makes
+		# wherever they did not.  pipeline-describe declares that it never
+		# refreshes, because it answers out of the repository's own files
+		# and a fetch would refuse offline what it can always read from
+		# disk.  The option is still the gate's to read, since the
+		# registration says the refresh may be skipped and the flag is how
+		# an operator says to skip it.
+		my $mode = command_properties()->{refresh} // '';
+		my $refresh = $mode eq 'never' ? 0
+		            : $mode eq 'optional' && get_options()->{'no-refresh'} ? 0
+		            : 1;
 
 		# Whether the command commits goes down too.  D45 speaks of a
 		# commit that cannot reach control through a pull request, and
 		# most pre-deploy commands make none: pipeline-apply writes to
 		# the provider, pipeline-status and pipeline-describe only read,
 		# and the secrets commands write to the vault.  Only create
-		# declares it today, and M17's attribute pattern absorbs the
-		# declaration later the way it absorbs the refresh exemptions.
+		# declares it today, and it is read off the registration for
+		# the same reason the refresh mode above it is.
 		#
 		# genesis new is about to add an environment whose name may be the
 		# branch it stands on, and that collision is one the gate cannot
