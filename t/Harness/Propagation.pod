@@ -981,7 +981,9 @@ The refusal is armed in a file the recording C<safe> consults on each call,
 since the command under test runs in a child and a variable set in the parent
 would have to be threaded through every runner to reach it.  A path is matched
 at itself and below itself, so breaking an environment's exodus base breaks
-the deployment record written under it too.  C<restore_vault> disarms it.
+the deployment record written under it too, and a C<move> is matched at both
+ends, so a move whose destination lands under a refused path refuses as well.
+C<restore_vault> disarms it.
 
 =head2 restore_vault($h)
 

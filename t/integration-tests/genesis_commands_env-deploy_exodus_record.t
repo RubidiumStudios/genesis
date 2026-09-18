@@ -5,8 +5,8 @@
 # exiting UNAVAILABLE.
 #
 # Every run passes --no-propagate, for the reason the due-commits and drifted
-# files give: the auto-cascade hands off to a child genesis propagate that a
-# later step owns and that fails today, and a row about what the deploy
+# files give, because the auto-cascade hands off to a child genesis propagate
+# that a later step owns and that fails today, and a row about what the deploy
 # recorded should not be reading the child's failure as the deploy's.
 use strict;
 use warnings;
@@ -37,7 +37,7 @@ sub env_body {
 }
 
 subtest 'the recorded dependency set is what the deploy actually read' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $h = tracked_harness(qw/lab ops/);
 	# This environment's director is named for the environment, so the
@@ -46,7 +46,8 @@ subtest 'the recorded dependency set is what the deploy actually read' => sub {
 	# read here and written back below, so the second deploy can still find
 	# the director the first one deployed to.
 	my $director = record_at($h, $h->env_path('qa'));
-	my (undef, $err, $exit) = run_genesis($h,
+	my ($err, $exit);
+	(undef, $err, $exit) = run_genesis($h,
 		'qa', 'deploy', '--no-propagate', '-y', 'r');
 	is($exit, 0, 'the first deploy succeeded')
 		or diag("what the deploy said:\n$err");
@@ -67,7 +68,14 @@ subtest 'the recorded dependency set is what the deploy actually read' => sub {
 		message => 'stop tracking a prerequisite');
 	refresh($h, 'a', $h->control, $h->slug('qa'));
 	fixture_director($h, 'qa', url => $director->{url});
-	run_genesis($h, 'qa', 'deploy', '--no-propagate', '-y', 'r');
+	(undef, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+	# Green when it was written, because this deploy already succeeded
+	# unasserted.  It stays as a guard against a later step breaking the
+	# second deploy, which the row below would otherwise report as a wrong
+	# dependency set rather than as a deploy that never ran.
+	is($exit, 0, 'the second deploy succeeded')
+		or diag("what the deploy said:\n$err");
 
 	$flat = record_at($h, $h->env_path('qa'));
 	is_deeply([split(/\s*,\s*/, $flat->{dependencies_read} // '')],
@@ -76,19 +84,35 @@ subtest 'the recorded dependency set is what the deploy actually read' => sub {
 };
 
 subtest 'the two timestamp forms stay apart' => sub {
-	plan tests => 4;
+	# Every row here was green when it was written, and the subtest stays as
+	# a guard rather than as a proof of anything this task wrote.  What it
+	# catches is a later step writing a time held as a value in the path's
+	# short numeric form, or an entry name in the value's form, or an ISO
+	# form anywhere, which is the one distinction D58 exists to keep.
+	#
+	# The plan is six rather than four, because the record and the times it
+	# holds are now asserted before their form is judged.  A record that
+	# carried neither time would otherwise pass the two form rows having
+	# read nothing, and a missing record would die in the map rather than
+	# fail.
+	plan tests => 6;
 
 	my $h = tracked_harness();
 	run_genesis($h, 'qa', 'deploy', '--no-propagate', '-y', 'r');
 
-	my $record = newest_record($h, $h->env_path('qa').'/deployments');
+	my $set    = $h->env_path('qa').'/deployments';
+	my $record = newest_record($h, $set);
+	isnt($record, undef, 'the deploy wrote a record to read');
 	my @times = grep {defined} map {$record->{$_}} qw/dated completed/;
+	ok(scalar(@times), 'and the record holds at least one time as a value');
 
-	my ($dated) = reverse sort @{record_keys($h, $h->env_path('qa').'/deployments')};
+	my ($dated) = reverse sort @{record_keys($h, $set)};
 	like($dated, qr/^\d{14}$/,
 		'the timestamp in the path is the short numeric UTC form');
 
-	my @bad = grep {$_ !~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [-+]\d{4}$/} @times;
+	my @bad = grep {
+		$_ !~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [-+]\d{4}$/
+	} @times;
 	is_deeply(\@bad, [], 'every time held as a value is in EXODUS_TIME_FORMAT');
 
 	my @iso = grep {$_ =~ /T\d{2}:\d{2}:\d{2}/} @times;
@@ -112,7 +136,14 @@ subtest 'a failed exodus write after BOSH deployed names its own code' => sub {
 
 	is($exit, Genesis::Exit::UNAVAILABLE, 'it exits UNAVAILABLE')
 		or diag("what the deploy said:\n$err");
-	like(unfolded($out.$err), qr/deployed/i, 'it reports the deployment as done');
+	# The row below and the last row of this subtest were green when they
+	# were written, because the message they replaced already said
+	# "deployed" and already named the vault.  They stay as guards against a
+	# later step dropping either half from a message whose whole job is to
+	# carry both facts at once.  The row between them is the one carrying
+	# D98's own words, and it was red.
+	like(unfolded($out.$err), qr/deployed/i,
+		'it reports the deployment as done');
 	like(unfolded($err), qr/record was not written/i,
 		'it says the record was not written');
 	like(unfolded($err), qr/vault/i, 'and what to do about it');

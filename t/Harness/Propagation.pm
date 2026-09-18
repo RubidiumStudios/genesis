@@ -2356,14 +2356,20 @@ case "\$1" in
 	get|read|export) echo "\$2" >> "$self->{vault_log}" ;;
 	set|rm|delete|move)
 		if [ -s "$self->{vault_refuse}" ]; then
+			# A move is refused by either end, because a move whose
+			# destination lands under a refused path writes there just as
+			# surely as a set does.
 			while IFS= read -r refused; do
 				[ -n "\$refused" ] || continue
-				case "\$2" in
-					"\$refused"|"\$refused"/*)
-						echo >&2 "the harness vault refuses to write \$2"
-						exit 1
-						;;
-				esac
+				for addressed in "\$2" "\$3"; do
+					[ -n "\$addressed" ] || continue
+					case "\$addressed" in
+						"\$refused"|"\$refused"/*)
+							echo >&2 "the harness vault refuses to write \$addressed"
+							exit 1
+							;;
+					esac
+				done
 			done < "$self->{vault_refuse}"
 		fi
 		;;
@@ -4681,9 +4687,9 @@ sub tracked_harness {
 	# walk reads it.
 	$h->push_from('a', $h->control);
 	# The director, the fake bosh, and the kit, in the order ready_harness
-	# stands them in and for the reasons it gives: a row about what a deploy
-	# records has to be able to deploy, and every control commit the delivery
-	# routes has to carry the kit.
+	# stands them in and for the reasons it gives, because a row about what a
+	# deploy records has to be able to deploy and every control commit the
+	# delivery routes has to carry the kit.
 	$h->fixture_bosh(commit => 1, catch_up => 0);
 	$h->ready_envs;
 	$h->_catch_up($_) for @{$h->{envs}};
