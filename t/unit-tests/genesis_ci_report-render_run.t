@@ -79,7 +79,7 @@ subtest 'an error message prints whole whatever braces it carries' => sub {
 };
 
 subtest 'the commit axis takes its words from the enum' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $commit = {
 		control_commit => 'abcdef1234567890abcdef1234567890abcdef12',
@@ -94,7 +94,13 @@ subtest 'the commit axis takes its words from the enum' => sub {
 	# A commit nothing wrote a word onto is one that went nowhere, and the
 	# axis says nothing about it rather than reading it the word for the one
 	# thing that did not happen to it.
-	my ($bare) = rendered(a_record(pending => [$commit]));
+	#
+	# The error is captured and weighed as it is on either side of this,
+	# because a render that raised would leave the text short of the word
+	# and the assertion under it would read that as the word being absent
+	# by design.
+	my ($bare, $bare_died) = rendered(a_record(pending => [$commit]));
+	is($bare_died, undef, 'a commit with no word of its own renders');
 	unlike($bare, qr/\bdelivered\b/,
 		'and a commit with no word of its own is not called delivered');
 
