@@ -460,11 +460,12 @@ sub preview_warnings {
 # which is the walk for a failure and the run for a delivery.
 #
 # The qualifier is assigned here rather than appended through note_detail,
-# and that is right: nothing an environment reaching this sub can be carrying
-# was written into the field already.  The one writer that appends before the
-# report runs is the pull request arm's discard region, and an environment
-# that reaches it has an outcome by the time the arm returns, while a freeze
-# returns above the discard region and writes nothing there at all.
+# and that is right, because nothing an environment reaching this sub can be
+# carrying was written into the field already.  The one writer that appends
+# before the report runs is the pull request arm's discard region, and an
+# environment that reaches it has an outcome by the time the arm returns,
+# while a freeze returns above the discard region and writes nothing there at
+# all.
 sub _settle {
 	my ($env) = @_;
 
