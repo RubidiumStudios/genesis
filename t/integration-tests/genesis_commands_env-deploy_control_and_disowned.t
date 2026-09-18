@@ -1,8 +1,13 @@
 #!/usr/bin/env perl
 # Proves T221, the control-nowhere refusal at CONFIG, which arrives green and
 # guards the refusal require_control already makes; T219, the disowned
-# pipeline's local warning, which -y does not change; and T220, the same state
-# inside a job, which errors before BOSH at CONFIG.
+# pipeline's local warning, after which the deploy goes on to deploy; and
+# T220, the same state inside a job, which errors before BOSH at CONFIG.
+#
+# That -y changes nothing about the warning is proved in
+# t/unit-tests/genesis_ci_preflight-disowned.t, which drives the sub with
+# each caller's option set.  It was proved here by running the whole deploy
+# twice, which cost ten seconds to say the same thing a second time.
 #
 # Every message is read through unfolded, because Genesis wraps what it says
 # to the terminal width on its way out and a phrase a row looks for can
