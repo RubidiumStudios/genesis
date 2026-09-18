@@ -199,10 +199,12 @@ subtest 'every line of the mapping table has its reading' => sub {
 		# Read as a field rather than as a word in the tree, because the
 		# shape --json emits is what a consumer reads and a row carrying
 		# the key only sometimes would hand one an undefined value.  The
-		# key is asserted before the value, and only the expectation is
-		# normalised, because a row that had dropped the key altogether
-		# would answer false to a test that normalised both sides and pass
-		# every line that expects no seed.
+		# key is asserted first and the value after it, with both sides
+		# normalised, because the record carries the encoder's own boolean
+		# and the line beside it carries a digit.  What that normalisation
+		# would otherwise swallow is a row that had dropped the key
+		# altogether, which answers false and would pass every line
+		# expecting no seed, and the assertion above is what catches it.
 		ok(exists $row->{seeded},
 			"$line->{name}: the seed annotation is on the row");
 		is($row->{seeded} ? 1 : 0, $line->{seeded} ? 1 : 0,

@@ -113,6 +113,14 @@ subtest 'a branchless environment that fails to load stays failed' => sub {
 	my ($out, $err) = run_genesis($h, 'propagate', '-y');
 	my $said = unfolded($out, $err);
 
+	# The first two of these four are the row's own, and they were red
+	# before the run read the error ahead of the missing branch.  The last
+	# two arrived green and stand as guards.  The error line printed under
+	# the bare word held as well, so the third says the error survives the
+	# reordering rather than that the reordering put it there.  The fourth
+	# was true because an environment that fails to load has nothing
+	# pending to count, and it says the count stays honest about a row whose
+	# outcome no longer passes through the branchless block.
 	like($said, qr/lab: failed/,
 		'the environment the run could not read reads failed');
 	unlike($said, qr/lab: held/,
