@@ -59,8 +59,8 @@ sub env_line {
 }
 
 subtest 'two undeployed markers and a hand commit read on both axes' => sub {
-	# Four assertions and one restoration for each of the two commands.
-	plan tests => 6;
+	# Five assertions and one restoration for each of the two commands.
+	plan tests => 7;
 
 	my $h = make_harness(envs => ['lab'], provider => 'manual',
 		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
@@ -78,14 +78,21 @@ subtest 'two undeployed markers and a hand commit read on both axes' => sub {
 	my $c3 = commit_on_control($h, files => {'ops/shared.yml' => "---\nthree\n"}, push => 1);
 	deliver($h, 'lab', control => $c3);
 
-	fixture_applied($h, control => $c3);
+	# A fourth control commit nobody delivered, so the routing summary has a
+	# commit to count and the phrase carries the word pending.  Without one
+	# the word appears nowhere in the line and the doubled-pending assertion
+	# below would pass against any renderer at all.
+	my $c4 = commit_on_control($h, files => {'ops/shared.yml' => "---\nfour\n"}, push => 1);
+
+	fixture_applied($h, control => $c4);
 	fixture_pipeline_record($h, 'lab');
 	my $hand = hand_commit($h, $h->slug('lab'),
 		files => {'ops/shared.yml' => "---\nby hand\n"});
 	refresh($h, 'a');
 
-	my ($json) = run_genesis($h, 'pipeline-status', '--json');
+	my ($json, $err) = run_genesis($h, 'pipeline-status', '--json');
 	my $row = env_row(decode_json($json), 'lab');
+	is($err, '', 'the report says nothing on standard error');
 
 	# A guard.  The certification axis was read from the walk's own record
 	# when the read model landed, so this word stood before the snapshot axis
@@ -105,6 +112,12 @@ subtest 'two undeployed markers and a hand commit read on both axes' => sub {
 	# other.  They stand because T277's whole claim is about the pair, and an
 	# edit that let either word displace the other would break here and
 	# nowhere else.
+	#
+	# The second one catches a narrower thing than the first.  Only the
+	# routing summary writes the word pending, and it writes it once for the
+	# undelivered commit above, so what this assertion refuses is a renderer
+	# that wrote the word a second time out of the certification axis, whose
+	# own word is awaiting deployment.
 	like($line, qr/awaiting deployment.*drifted/,
 		'the tree prints both readings on the one row');
 	unlike($line, qr/\bpending\b.*\bpending\b/,
@@ -112,8 +125,8 @@ subtest 'two undeployed markers and a hand commit read on both axes' => sub {
 };
 
 subtest 'the drifted cell names every file that differs' => sub {
-	# Three assertions and one restoration for each of the two commands.
-	plan tests => 5;
+	# Four assertions and one restoration for each of the two commands.
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['lab'], provider => 'manual',
 		kit => 'omega-v2.7.0',
@@ -134,16 +147,20 @@ subtest 'the drifted cell names every file that differs' => sub {
 	});
 	refresh($h, 'a');
 
-	my ($json) = run_genesis($h, 'pipeline-status', '--json');
+	my ($json, $err) = run_genesis($h, 'pipeline-status', '--json');
 	my $row = env_row(decode_json($json), 'lab');
+	is($err, '', 'the report says nothing on standard error');
 
 	is_deeply([sort @{$row->{drifted}{files}}], ['ops/extra.yml', 'ops/shared.yml'],
 		'both changed files are named');
 	is($row->{drifted}{commit}, $hand, 'the hand commit that changed them is named');
 
 	my ($tree) = run_genesis($h, 'pipeline-status');
-	# The detail reads as T281 and the design's canonical sample quote it,
-	# which is the wording the snapshot-flag task's repairs landed.
+	# Half novel and half a guard.  The two files joined into one bracket is
+	# T283's own claim and nothing else asserts it, while the wording round
+	# them, which reads differs: hand commit, is the one the snapshot-flag
+	# task's repairs landed and is green on arrival.  It reads as T281 and
+	# the design's canonical sample quote it.
 	like(env_line($tree, 'lab'),
 		qr/drifted \[ops\/extra\.yml, ops\/shared\.yml differs: hand commit\]/,
 		'the tree lists both files in the one bracket');
