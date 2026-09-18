@@ -46,45 +46,51 @@ subtest 'control existing nowhere refuses the deploy' => sub {
 	is($exit, Genesis::Exit::CONFIG, 'it exits CONFIG');
 	like($said, qr/Refusing to deploy\./, 'it says refusing to deploy');
 	like($said, qr/exists neither on \S+ nor locally/, 'it says control is nowhere');
-	like($said, qr/\Q@{[$h->control]}\E/, 'it names the configured branch');
+	# Anchored to the phrase the refusal puts the name in, because the
+	# branch is called control and the word appears in half the sentences a
+	# deploy prints, so a bare match on the name would pass against output
+	# that never named the branch at all.
+	like($said, qr/control branch \Q@{[$h->control]}\E exists/,
+		'it names the configured branch');
 	like($said, qr/Nothing was deployed\./, 'it says nothing was deployed');
 };
 
 subtest 'a disowned pipeline warns locally and deploys anyway' => sub {
-	plan tests => 10;
+	# One deploy, not two.  That -y changes nothing about the warning is
+	# proved where the words are, by driving the sub with both option sets
+	# in t/unit-tests/genesis_ci_preflight-disowned.t, and a second
+	# whole-deploy run costs ten seconds to prove the same thing twice.
+	plan tests => 5;
 
-	for my $argv (['-y'], []) {
-		my $h = seeded_harness(applied => 0);
-		my $applied = $h->git('a')->sha($h->control);
-		fixture_applied($h, control => $applied, at => '2026-09-12 14:02:11 -0400');
-		# The deploy has to reach its end for the warning to have been a
-		# warning rather than a refusal, so it needs a director, a bosh, and
-		# a kit whose blueprint writes a manifest.  It is called before the
-		# configuration is disowned, because it catches copy A's deployment
-		# branch up to what R carries and that read is the pipeline's.
-		fixture_bosh($h);
-		# .genesis/config is YAML and the deploy reads it off a commit, so
-		# the key is written through Genesis::Config and committed rather
-		# than appended in git-config's own syntax into an untracked edit.
-		set_repo_config($h, 'pipeline.enabled', 0);
+	my $h = seeded_harness(applied => 0);
+	my $applied = $h->git('a')->sha($h->control);
+	fixture_applied($h, control => $applied, at => '2026-09-12 14:02:11 -0400');
+	# The deploy has to reach its end for the warning to have been a warning
+	# rather than a refusal, so it needs a director, a bosh, and a kit whose
+	# blueprint writes a manifest.  It is called before the configuration is
+	# disowned, because it catches copy A's deployment branch up to what R
+	# carries and that read is the pipeline's.
+	fixture_bosh($h);
+	# .genesis/config is YAML and the deploy reads it off a commit, so the
+	# key is written through Genesis::Config and committed rather than
+	# appended in git-config's own syntax into an untracked edit.
+	set_repo_config($h, 'pipeline.enabled', 0);
 
-		my ($out, $err, $exit) = run_genesis($h,
-			'qa', 'deploy', @$argv, 'a reason');
-		my $said = unfolded($err);
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'deploy', '-y', 'a reason');
+	my $said = unfolded($err);
 
-		is($exit, 0, 'the deploy went ahead');
-		# The patterns carry no delimiter around a name Genesis marks up
-		# with #C{}, because NOCOLOR renders the markup away and a pattern
-		# that expected the colour would be reading the escape rather than
-		# the sentence.
-		like($said, qr/pipeline is disabled in \.genesis\/config/,
-			'the warning names the configuration');
-		like($said, qr/applied it from control\@\Q@{[substr($applied,0,8)]}\E/,
-			'and the applied record with its commit');
-		like($said,
-			qr/Set pipeline\.enabled: true again, or tear the pipeline down by hand/,
-			'and gives the two remedies');
-	}
+	is($exit, 0, 'the deploy went ahead');
+	# The patterns carry no delimiter around a name Genesis marks up with
+	# #C{}, because NOCOLOR renders the markup away and a pattern that
+	# expected the colour would be reading the escape rather than the
+	# sentence.
+	like($said, qr/pipeline is disabled in \.genesis\/config/,
+		'the warning names the configuration');
+	like($said, qr/applied it from control\@\Q@{[substr($applied,0,8)]}\E/,
+		'and the applied record with its commit');
+	like($said,
+		qr/Set pipeline\.enabled: true again, or tear the pipeline down by hand/,
+		'and gives the two remedies');
 };
 
 subtest 'a disowned pipeline inside a job errors before BOSH' => sub {
@@ -109,6 +115,11 @@ subtest 'a disowned pipeline inside a job errors before BOSH' => sub {
 	like($said, qr/A job never deploys what its own configuration disowns\./,
 		'it gives the reason');
 	like($said, qr/Nothing was deployed\./, 'it says nothing was deployed');
+	# A forward guard rather than a discriminator.  A deploy with the
+	# pipeline disabled is never switched by the gate, so this holds whether
+	# or not the refusal is made, and what it catches is a later step that
+	# moves the switch ahead of this check and deploys a branch its own
+	# configuration disowns.
 	is_deeply([grep {$_->[0] eq 'checkout'} step_log($h->git('a'))], [],
 		'it refused before it switched, so before it touched BOSH');
 };

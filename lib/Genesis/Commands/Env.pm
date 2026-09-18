@@ -1019,6 +1019,7 @@ sub deploy {
 	Genesis::CI::Preflight::assert_not_disowned($top,
 		command => "$env_name deploy",
 		outcome => 'Nothing was deployed.',
+		in_job  => 'A job never deploys what its own configuration disowns.',
 		locally => 'warn');
 
 	my $pipeline_git;

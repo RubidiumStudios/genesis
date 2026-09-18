@@ -206,8 +206,11 @@ sub require_control {
 # asked for, because nobody there reads a warning and a job never deploys
 # what its own configuration disowns (D27).
 #
-# command and outcome give the refusal the caller's own words, so one state
-# is described in one sentence however the operator arrived at it.
+# command, outcome, and in_job give the refusal the caller's own words, so
+# one state is described in one sentence however the operator arrived at it.
+# in_job is the caller's alone, because only the caller knows what it was
+# about to do, and a propagate run told that a job never deploys is being
+# told about a command it is not.  Its default says neither.
 sub assert_not_disowned {
 	my ($top, %opts) = @_;
 
@@ -216,6 +219,8 @@ sub assert_not_disowned {
 
 	my $command = $opts{command} // 'propagate';
 	my $outcome = $opts{outcome} // 'Nothing was written.';
+	my $in_job  = $opts{in_job}
+		// 'A job never acts on what its own configuration disowns.';
 	my $sha     = $applied->{control_commit} // '<unknown>';
 	my $at      = $applied->{at} // '<unknown>';
 
@@ -223,11 +228,10 @@ sub assert_not_disowned {
 		"Refusing to run #C{genesis %s}.  #C{GENESIS_PIPELINE_TASK} is set, so ".
 		"this runs inside the pipeline's own job, and the pipeline is disabled ".
 		"in #C{.genesis/config} while the applied record says ".
-		"#C{pipeline-apply} applied it from control\@%s at %s.  A job never ".
-		"deploys what its own configuration disowns.  Set ".
+		"#C{pipeline-apply} applied it from control\@%s at %s.  %s  Set ".
 		"#C{pipeline.enabled: true} again, or tear the pipeline down by hand, ".
 		"which has no command yet.  %s",
-		$command, $sha, $at, $outcome
+		$command, $sha, $at, $in_job, $outcome
 	) if $ENV{GENESIS_PIPELINE_TASK};
 
 	bail({exitcode => CONFIG},
