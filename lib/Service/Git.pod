@@ -865,6 +865,41 @@ B<Examples:>
   my $bool = $git->is_ancestor($sha, $sha);
   # returns 1 -- a commit is its own ancestor
 
+=head2 commit_exists
+
+  my $bool = $git->commit_exists($sha);
+
+Whether any ref in this repository still reaches the commit. The question is
+reachability and not existence, because a commit the remote has dropped stays
+here as a loose object until git collects it, and what a caller wants to know
+is whether a fresh clone could fetch it.
+
+Local branches and remote-tracking refs both count as refs that reach it. A
+name that is not a hexadecimal sha is answered no rather than asked about,
+since git refuses to answer the reachability question about a name it cannot
+resolve at all.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$sha>
+
+The commit to ask about, as a full or abbreviated sha.
+
+=back
+
+B<Returns:> 1 or 0. Returns 0 rather than erroring where the argument is
+undefined, is not a sha, or names no object here.
+
+B<Examples:>
+
+  my $bool = $git->commit_exists($marker_sha);
+  # returns 0 after a force-push dropped that commit from every branch
+
+  my $bool = $git->commit_exists('HEAD');
+  # returns 0 -- the reader takes a sha, not a ref name
+
 =head2 is_clean
 
   my $bool = $git->is_clean;

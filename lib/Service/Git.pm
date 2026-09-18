@@ -590,6 +590,28 @@ sub is_ancestor {
 }
 
 # }}}
+# commit_exists - does any ref in this repository still reach this commit {{{
+#
+# The question a propagation marker raises is whether a fresh clone could
+# fetch the commit the marker names, so it is about reachability rather than
+# about the object.  A commit the remote has dropped stays here as a loose
+# object until git collects it, and a reader that answered yes for one of
+# those could never report the breach H30 names.
+sub commit_exists {
+	my ($self, $sha) = @_;
+	return 0 unless defined $sha && $sha =~ /^[0-9a-f]{4,40}$/;
+
+	# Asked first, because git refuses to answer the reachability question
+	# about a name it cannot resolve to an object at all.
+	return 0 unless run({dir => $self->{root}, passfail => 1},
+		'git', 'cat-file', '-e', "$sha^{commit}");
+
+	my ($out) = run({dir => $self->{root}, stderr => 0},
+		'git', 'branch', '--all', '--contains', $sha);
+	return ($out // '') =~ /\S/ ? 1 : 0;
+}
+
+# }}}
 # is_clean - true if working tree has no modified/staged/conflicted files {{{
 #
 # Ignores untracked files — they don't affect branch switching.
