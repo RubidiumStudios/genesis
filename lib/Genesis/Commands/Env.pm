@@ -1108,6 +1108,20 @@ sub _deploy_preflight {
 	$name =~ s/\.ya?ml$//;
 	my $branch = $top->branch_for($name);
 
+	# Which commit this run is about, resolved once for the two steps that
+	# ask.  D87 has --redeploy select the commit the last successful
+	# deployment recorded, and the gate has already stood the working tree on
+	# it, detached, inside the session.  Step 5 asks whether this deploy is
+	# reading the branch at all, and the notice in step 8 tells the operator
+	# which of the two commits the run is about.
+	#
+	# The resolver reads one record and answers the same value it answered
+	# the gate, so asking it again here costs one vault read and cannot
+	# disagree with the commit the tree is standing on.  It is asked in
+	# scalar context, because the record path beside it is the gate's to
+	# name in its own refusal and nothing here has a use for it.
+	my $target = Genesis::Commands::deployed_target($name, $top);
+
 	# 1.  The one refresh, control included, which M7 already freed of
 	# --no-fetch on this command under D40.  The deploy's own reads are
 	# worthless against a stale tracking ref.
@@ -1187,7 +1201,16 @@ sub _deploy_preflight {
 	# deploy that is not standing there is one the branch-class gate declined
 	# to switch: the root it read is control's, whatever the branch carries
 	# now, so the commit it would record is not the commit it would deploy.
-	unless ($on_branch
+	#
+	# A run that resolved a target is the exception, and it is an exception
+	# to the premise rather than to the rule.  Such a run is standing on the
+	# branch's own history, at the commit it was told to deploy, because the
+	# gate checked that commit out detached inside the session, so the root
+	# it read is the branch's and the commit it records is the commit it
+	# deploys.  What it is not standing on is the branch name, and asking for
+	# the name alone would refuse every redeploy as a branch carrying no
+	# repository.
+	unless (($on_branch || defined($target))
 			&& Genesis::Commands::branch_carries_repository($top, $git, $branch)) {
 		my $remote = $git->default_remote // 'origin';
 
@@ -1260,7 +1283,23 @@ sub _deploy_preflight {
 		outcome     => 'Nothing was deployed.',
 		acknowledge => 'I accept the risk');
 
-	# 8.  The warnings, in the order the design fixes, and this is the first
+	# 8.  What this run is about, said before anything is said about the
+	# branch, because every warning below it describes the tip and an
+	# operator has to know first that the tip is not what is being deployed.
+	# D87 has --redeploy select the deployed commit, and an operator standing
+	# on a branch whose tip holds something else needs to be told which of
+	# the two this run is about before it starts.  A run that resolved no
+	# target is deploying the tip, as every deploy did before the flag
+	# existed, and says nothing here.
+	if (defined $target) {
+		info(
+			"\nRedeploying #C{%s} at its deployed commit #C{%s}, which is what ".
+			"it is running, rather than the tip of #C{%s}.",
+			$name, $target, $branch
+		);
+	}
+
+	# 9.  The warnings, in the order the design fixes, and this is the first
 	# of them.  It runs ahead of the due-commits warning below because what
 	# is stale decides which environments and which branches that warning is
 	# talking about: an operator told that commits are due to a branch wants
@@ -1271,7 +1310,7 @@ sub _deploy_preflight {
 	# pipeline-status, which ask the same query, and its POD says so.
 	_warn_stale_pipeline($top, $git);
 
-	# 9.  What control carries that has not reached this branch, and the one
+	# 10.  What control carries that has not reached this branch, and the one
 	# prompt --yes answers.  The deploy computes none of it: the walk is the
 	# propagate run's own computation, run read-only and narrowed to this
 	# environment through the option it already has, so the two commands
@@ -1304,7 +1343,7 @@ sub _deploy_preflight {
 
 	my $due = _warn_commits_due($bare, $due_record);
 
-	# 10.  The last of the warnings, and the only one about the branch itself
+	# 11.  The last of the warnings, and the only one about the branch itself
 	# rather than about what has not reached it.  It runs after the other two
 	# because a branch that has drifted is a smaller thing to know than a
 	# pipeline that no longer matches control, and it runs before the prompt
