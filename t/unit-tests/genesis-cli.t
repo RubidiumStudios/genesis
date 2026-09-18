@@ -34,14 +34,13 @@ subtest 'bin/genesis' => sub {
 subtest 'the flag-carrying pipeline surface' => sub {
 
 	my %surface = (
-		# The deploy joins the sweep with the class it now declares.  Its
-		# --force is not read here, because the deploy carries no such flag
-		# yet: the step that gives the provider gate its typed
-		# acknowledgement is the one that adds it, and a row reading it now
-		# would be red for that step rather than for this one.
+		# The deploy joins the sweep with the class it now declares, and with
+		# the --force the provider gate reads.  The flag takes no short form,
+		# because -f is what every other command spells force with and a
+		# deploy is not a command to give a one-letter break-glass to.
 		'deploy' => {
 			class        => Genesis::Commands::DEPLOYED_STATE,
-			options      => [qw/dry-run|n yes|y no-propagate/],
+			options      => [qw/dry-run|n yes|y no-propagate force/],
 			absent       => [qw/pull no-fetch no-refresh/],
 			fast_forward => 1,
 		},

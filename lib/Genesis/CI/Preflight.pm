@@ -13,7 +13,13 @@ use Genesis::CI::Marker;
 # imported rather than named in full, because Genesis::Exit exports nothing
 # by default and a fully qualified constant in a package nobody has loaded
 # is a bareword that dies where it stands.
-use Genesis::Exit qw/CONFIG DATAERR TEMPFAIL/;
+use Genesis::Exit qw/ABORTED CONFIG DATAERR NOPERM TEMPFAIL/;
+
+# The gate below asks the operator a question, and the two modules that own
+# asking are imported by the names it calls rather than in full, so the
+# terminal read can be localised by a row that has no terminal to offer.
+use Genesis::Term qw/in_controlling_terminal/;
+use Genesis::UI qw/prompt_for_boolean prompt_for_line/;
 
 # local_only_commits - the commits a branch holds and no remote has {{{
 #
@@ -253,6 +259,91 @@ sub assert_not_disowned {
 		$sha, $at
 	);
 	return $applied;
+}
+
+# }}}
+# assert_provider_gate - the break-glass past a pipeline that owns the work {{{
+#
+#   Genesis::CI::Preflight::assert_provider_gate($top, $options,
+#       owns        => 'deploys of this environment',
+#       outcome     => 'Nothing was deployed.',
+#       acknowledge => 'I accept the risk');
+#
+# D95 for the propagate run and D73 for the deploy, which are one rule with
+# two sentences.  Under an automated provider the pipeline owns the work, so
+# a bare command refuses and --force is the only way past.  With the flag at
+# a terminal the operator acknowledges once; outside a terminal the refusal
+# stands, because an acknowledgement nobody reads is not one and the
+# pipeline's own job sets GENESIS_PIPELINE_TASK and never reaches here.  -y
+# answers no part of this, which is why nothing below reads it.
+#
+# Three things come from the caller.  owns is the sentence about what the
+# pipeline owns, outcome is the closing words, and acknowledge is the phrase
+# an operator types.  A caller that names no phrase is asked a yes-or-no
+# question instead, which is what the propagate run has always asked.
+# dry_run passes with the warning alone, which the propagate run uses because
+# a preview writes nothing.
+#
+# H33 closes here rather than with a lock, and H34 is named rather than
+# closed: nothing in the tree is a locker client, and the acknowledgement
+# says outright that no shuttle event is written for this command, so an
+# operator who takes the break-glass knows the dependents are not woken.
+sub assert_provider_gate {
+	my ($top, $opts, %how) = @_;
+
+	my $provider = $top->pipeline_provider_type;
+	return 1 unless defined $provider && $provider ne 'manual';
+	return 1 if $ENV{GENESIS_PIPELINE_TASK};
+
+	my $owns    = $how{owns}    // 'propagation for this repository';
+	my $outcome = $how{outcome} // 'Nothing was written.';
+	my $warning = sprintf(
+		"The #C{%s} pipeline owns %s.  Running it by hand does the pipeline's ".
+		"work without taking any of the pipeline's locks, so the pipeline has ".
+		"no way to see you.",
+		$provider, $owns
+	);
+
+	if ($how{dry_run}) {
+		warning($warning);
+		return 1;
+	}
+
+	bail({exitcode => NOPERM},
+		"%s\n\nRun it with #C{--force} at a terminal if you mean to.  %s",
+		$warning, $outcome
+	) unless $opts->{force};
+
+	bail({exitcode => NOPERM},
+		"%s\n\n#C{--force} needs a terminal, because the acknowledgement ".
+		"cannot be given without one.  %s",
+		$warning, $outcome
+	) unless in_controlling_terminal();
+
+	warning($warning);
+
+	unless ($how{acknowledge}) {
+		bail({exitcode => ABORTED}, "Aborted at your request.  %s", $outcome)
+			unless prompt_for_boolean("Proceed anyway? [y|n]", 0);
+		return 1;
+	}
+
+	# The phrase is typed rather than answered, because a question that takes
+	# a keystroke is one an operator can answer without having read it.  The
+	# default is the empty string, which is what makes a bare Enter an answer
+	# the gate can refuse rather than a prompt that asks again.
+	my $answer = prompt_for_line(
+		"\nPause the pipeline and wait for quiescence before continuing.\n".
+		"The environment being deployed, its director, and every pipeline\n".
+		"that deploys to that director should all be quiet first.  Note\n".
+		"that no shuttle event is written for this command, so nothing\n".
+		"fans out to the deployments that read this one.",
+		sprintf("Type '%s' to continue", $how{acknowledge}), ''
+	);
+	bail({exitcode => ABORTED}, "Aborted.  %s", $outcome)
+		unless ($answer // '') eq $how{acknowledge};
+
+	return 1;
 }
 
 # }}}

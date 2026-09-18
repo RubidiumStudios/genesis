@@ -1241,6 +1241,21 @@ sub _deploy_preflight {
 	my $prior_record = _prior_env_record($bare, $prior);
 	_assert_prior_env_deployed($bare, $prior, $prior_record) if $prior;
 
+	# 7.  D73.  The deploy's words for a gate the propagate run also meets,
+	# and the typed acknowledgement is what makes the operator read what they
+	# are doing.  -y means stop asking questions and must never mean accept
+	# an unlocked deploy, so nothing here reads it.
+	#
+	# It is the last gate rather than the first, because every refusal above
+	# is one no acknowledgement can settle: an operator who types the phrase
+	# past a branch that carries no repository still has nothing to deploy.
+	# The gate is the one question --force is an answer to, so it is asked
+	# once everything that is not negotiable has passed.
+	Genesis::CI::Preflight::assert_provider_gate($top, $options,
+		owns        => 'deploys of this environment',
+		outcome     => 'Nothing was deployed.',
+		acknowledge => 'I accept the risk');
+
 	return {
 		git     => $git,
 		branch  => $branch,
@@ -1314,45 +1329,15 @@ sub deploy {
 	$options{'disable-reactions'} = ! delete($options{reactions});
 	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
-	# CI-only checks for pipeline-managed environments.
+	# Everything a pipeline deploy asks, it asks in the pre-flight above.
+	# The last check to leave here was the warning about deploying by hand
+	# what a pipeline manages, which spoke only where a predecessor was
+	# named, said nothing about the locks it was warning of, and put its
+	# question behind --yes.  The provider gate replaces it under D73: it
+	# refuses rather than warns, it asks for an acknowledgement --yes cannot
+	# answer, and it is asked before the environment is loaded rather than
+	# after.
 	#
-	# The predecessor invariant is not among them any more.  It reads a
-	# configuration key and one exodus record, and both are read in the
-	# pre-flight above, before the environment is loaded and before a
-	# director is dialled, so an operator who deployed out of order is told
-	# so rather than told about whatever the loading of an environment they
-	# may not deploy ran into first.
-	if ($top->pipeline_enabled) {
-		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
-		if ($prior) {
-			# Warn when manually deploying outside of a pipeline job.
-			# GENESIS_HONOR_ENV is set by ci-pipeline-deploy; its absence
-			# means we are running at a terminal, not inside Concourse.
-			# Skip the warning when the configured provider is 'manual' --
-			# in that mode the operator IS the pipeline, so the warning
-			# is just noise.
-			my $provider_type = $top->pipeline_provider_type // '';
-			if ($provider_type ne 'manual' && !$ENV{GENESIS_HONOR_ENV}) {
-				warning(
-					"\nManually deploying #C{%s}, which is managed by a Genesis pipeline.\n".
-					"The pipeline is the preferred deploy path — manual deploys bypass\n".
-					"change-detection, propagation gating, and approval gates.\n\n".
-					"The deployment records a #C{git.control_commit} where the branch\n".
-					"carries a propagation marker beneath this commit, so cascade\n".
-					"propagation continues to work after this deploy.  A branch that\n".
-					"has never been propagated to carries no marker, and none is\n".
-					"recorded.",
-					$env->name
-				);
-				unless ($options{yes} || !in_controlling_terminal()) {
-					prompt_for_boolean(
-						"Continue with manual deploy? [y|n]", 0
-					) || bail("Aborted.");
-				}
-			}
-		}
-	}
-
 	# --pull is gone with --no-fetch (D40).  It was a second source of truth
 	# beside the refresh: the operator chose whether the branch was brought
 	# up to date, and a deploy that skipped the pull read a branch nobody had
