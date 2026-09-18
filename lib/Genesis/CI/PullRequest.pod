@@ -170,6 +170,59 @@ B<Examples:>
     #         "a1b2c3d Rotate the uaa signing key\n" .
     #         " prod.yml | 1 +\n 1 file changed, 1 insertion(+)\n"
 
+=head2 gate_line($commit, $held)
+
+    my $line = Genesis::CI::PullRequest::gate_line($newest,
+        {count => 2, env => 'prod'});
+
+The one paragraph an aggregate's body carries when its newest commit is a
+gate, naming the reason the C<Genesis-Stage> trailer gave and how many of
+that environment's commits are held behind it.
+
+D49, as it was corrected on 2026-09-09, has a gate constrain only what
+follows it. So the gate travels with the commits already ahead of it and ends
+the delivery there, and this line is what tells a reviewer why the pull
+request stops where it does.
+
+The reason is read under C<gate_reason>, which is the name the walk writes it
+by on every entry the gate governs. C<gate> beside it is the gate's own
+commit, and a line that printed that would name a sha where the trailer wrote
+a sentence.
+
+A gate standing on control's own tip holds nothing, and the sentence about
+what waits is left off there rather than said of nought commits. The gate is
+still named, because the reviewer is being asked to deploy it before anything
+later lands, and that is true whether or not anything later exists yet.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$commit>
+
+The pending entry for the gate itself, which is the newest commit the
+aggregate carries. Its C<gate_reason> is the text the trailer gave.
+
+=item C<$held>
+
+C<count> is how many of the environment's commits wait behind the gate, and
+C<env> is the environment they wait for.
+
+=back
+
+B<Returns:> The paragraph as one string, with no trailing newline.
+
+B<Examples:>
+
+    gate_line({gate_reason => 'rotate the signing key first'},
+              {count => 1, env => 'prod'});
+    # returns 'Gate: rotate the signing key first. Holding 1 later ' .
+    #         'commit for prod until this deploys.'
+
+    gate_line({gate_reason => 'rotate the signing key first.'},
+              {count => 0, env => 'prod'});
+    # returns 'Gate: rotate the signing key first.'
+
 =head2 deliver($session, $record, %opts)
 
     my $word = Genesis::CI::PullRequest::deliver($session, $record,
@@ -195,6 +248,10 @@ commit.
 The message it writes is what C<aggregate_message> composes, so the one
 commit says which control commits it carries and what each of them changed,
 and the pull request opened from it carries that same body.
+
+Where the newest commit is a gate, the body closes with the paragraph
+C<gate_line> composes, which names the reason the trailer gave and how many
+of that environment's commits are held behind it.
 
 What the publish and the pull request sync read afterwards is left on
 C<< $record->{pr} >>: the action, the control commit the aggregate names, the

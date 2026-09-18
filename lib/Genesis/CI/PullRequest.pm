@@ -102,6 +102,35 @@ sub aggregate_message {
 }
 
 # }}}
+# gate_line - the paragraph the body carries when the aggregate is a gate {{{
+#
+# D49 as corrected on 2026-09-09 has a gate constrain only what follows it, so
+# the aggregate runs up to and including the gate and the commits after it are
+# held.  The line names the reason the trailer gave and how many wait, so a
+# reviewer can see why the pull request stops where it does.
+#
+# The reason is read under gate_reason, which is the name the walk writes it
+# by on the entry it gates; gate beside it is the gate's own commit, and a
+# line that printed that would name a sha where the trailer wrote a sentence.
+#
+# A gate standing on control's own tip holds nothing, and the sentence about
+# what waits is left off there rather than said of nought commits.  The gate
+# is still named, because the reviewer is being asked to deploy this before
+# anything later lands and that is true whether or not anything later exists
+# yet.
+sub gate_line {
+	my ($commit, $held) = @_;
+	my $reason = $commit->{gate_reason};
+	$reason =~ s/\s+$//;
+	$reason =~ s/\.$//;
+	return sprintf('Gate: %s.', $reason) unless $held->{count};
+	return sprintf(
+		"Gate: %s. Holding %d later commit%s for %s until this deploys.",
+		$reason, $held->{count}, $held->{count} == 1 ? '' : 's', $held->{env}
+	);
+}
+
+# }}}
 # deliver - the pull request arm for one environment {{{
 #
 # The branch carries exactly one commit above the deployment branch, so the
@@ -145,6 +174,15 @@ sub deliver {
 	my $newest  = $commits->[-1];
 	my $source  = $newest->{control_commit};
 	my %body;
+
+	# A gate ends the delivery, so the walk has already trimmed the list to
+	# the gate.  Where the newest commit it handed us is one, the body says so
+	# and names how many of that environment's commits wait behind it.
+	$body{gate} = gate_line($newest, {
+		count => scalar @{$record->{held} || []},
+		env   => $record->{env},
+	}) if $newest->{gate};
+
 	my $message = aggregate_message($git, $env, $commits, %body);
 	my $written = $session->apply_files($source,
 		env     => $env,
