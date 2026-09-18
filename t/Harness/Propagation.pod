@@ -903,6 +903,13 @@ onto one of those.  Genesis fast-forwards that branch itself, but only after
 it has loaded the root.  A row that wants the branch left behind passes
 C<catch_up =E<gt> 0>.
 
+The catch-up is a ref write, so it dies where copy A is already standing on
+the branch it would move.  A ref write leaves the working tree and the index
+where they were, and the next commit made from there records the removal of
+everything the branch had gained, which is the mistake C<move_on_r> already
+carries a comment about.  A row that wants both calls C<fixture_bosh> before
+it calls C<stand_on>.
+
 C<envs> is an arrayref naming the environments to write director records and
 catch up, and it defaults to every environment the harness declares.  Every
 other option is passed through to C<fixture_director> and C<fixture_kit>.

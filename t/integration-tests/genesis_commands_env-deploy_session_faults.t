@@ -131,7 +131,9 @@ subtest 'an interrupt between the switch and BOSH restores what it can' => sub {
 	my $h = seeded_harness();
 	fixture_bosh($h);
 	stand_on($h, $h->control);
-	$ENV{GENESIS_HARNESS_SIGINT_BEFORE_BOSH} = 1;
+	# Scoped rather than set and deleted, so a death below cannot leave the
+	# signal armed for a later row in this file.
+	local $ENV{GENESIS_HARNESS_SIGINT_BEFORE_BOSH} = 1;
 
 	my $w = snapshot_w($h);
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
@@ -139,7 +141,6 @@ subtest 'an interrupt between the switch and BOSH restores what it can' => sub {
 	isnt($exit, 0, 'the failure is reported');
 
 	assert_w_restored($w, 'the signal path');
-	delete $ENV{GENESIS_HARNESS_SIGINT_BEFORE_BOSH};
 };
 
 done_testing;

@@ -254,6 +254,13 @@ every environment between C<genesis new> and its first deploy, and the
 command runs where it stands and reports in its own words that there is
 nothing deployed to read.
 
+Each of those two arms says which one it took, in one line, before the
+command runs. A command reading the deployment branch and a command reading
+whatever the operator is standing on answer different questions, and the
+answer alone does not say which was asked. The line states the fact and
+nothing more; refusing on either state belongs to each command's own
+classification of it.
+
 A branch that C<genesis pipeline-apply> cut and no C<genesis propagate> run
 has delivered to is not switched onto either. It carries its init file and
 nothing else, so there is no repository on it to read, and a command switched
@@ -2005,6 +2012,21 @@ branch is asked for the deployment root's C<.genesis/config>, and where it
 does not carry it the session closes without having moved anything and the
 command runs where it stands.
 
+Both of those arms print one C<info> line naming the branch that was not
+read and why, before the command runs.  The line is a statement and not a
+refusal: whether either state should stop a command is each command's own
+question, and the deploy's classification of it answers differently from
+C<info>'s.
+
+The deployment root is compared against the git root with both paths
+resolved, because a root reached through a symlink, or named as F</var>
+where git answers F</private/var>, is one directory under two spellings and
+a comparison of the spellings would ask the branch for its C<.genesis/config>
+at the repository root instead.  That answers "carries no repository" for a
+branch that carries it, and the command then runs unswitched with nothing
+saying why.  A deployment root genuinely outside the repository is a defect
+rather than an operator error, so it bails.
+
 That question is asked after C<begin> and not before it.  It runs a git
 command of its own, and C<begin> is where the pre-flight classifies the
 failures a git command otherwise hides, so asking first would answer a
@@ -2054,7 +2076,9 @@ commits, no committed identity, or an ownership git declines to trust.
 C<switch> refuses at C<Genesis::Exit::TEMPFAIL> where another process holds
 the switch lock.  C<ls_tree>, which is what asks the branch whether it
 carries a repository, refuses at C<Genesis::Exit::DATAERR> where git cannot
-resolve the ref.
+resolve the ref.  This function itself bails in one case, which is a
+deployment root that resolves to somewhere outside the repository, because
+there is then no path on the branch to read it from.
 
 B<Examples:>
 

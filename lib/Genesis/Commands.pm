@@ -563,9 +563,21 @@ sub _gate_deployed_state {
 	# there is no deployment to report.  Both halves the switch would ask
 	# about are asked here, because git's own checkout makes a local branch
 	# out of one it has only fetched and the switch knows that too.
+	#
+	# It says which arm it took before it runs, because a command that reads
+	# the branch and a command that reads wherever the operator is standing
+	# answer different questions and an operator cannot tell the two apart
+	# from the answer alone.  Saying so is all that happens here: the
+	# refusals belong to each command's own classification of the state.
 	my $remote = $git->default_remote;
-	return $fn->() unless $git->branch_exists($branch)
-		|| ($remote && $git->branch_exists("$remote/$branch"));
+	unless ($git->branch_exists($branch)
+			|| ($remote && $git->branch_exists("$remote/$branch"))) {
+		info(
+			"Not reading the deployment branch #C{%s}: it does not exist yet, ".
+			"so this runs on #C{%s}.",
+			$branch, $git->current_branch // 'the current commit');
+		return $fn->();
+	}
 
 	require Service::Git::Session;
 	my $session = $git->session(control => $top->control_branch);
@@ -591,13 +603,34 @@ sub _gate_deployed_state {
 	# for the reason the checkout prefers it, and the deployment root is
 	# named as a path under the git root, which is empty where the two are
 	# the same directory.
-	my $root = $git->root;
+	#
+	# Both paths are resolved the same way before they are compared.  A
+	# deployment root reached through a symlink, or named as /var where git
+	# answers /private/var, is the same directory under two spellings, and a
+	# comparison made on the spellings would ask the branch for a
+	# .genesis/config at the repository root instead.  That answers "this
+	# branch carries no repository" for a branch that carries it perfectly
+	# well, and the command then runs unswitched without anybody being able
+	# to see why.  A root that really is outside the repository is a defect
+	# rather than something an operator did, so it is said outright.
+	my $root = Cwd::realpath($git->root) // $git->root;
 	my $read = $git->branch_exists($branch) ? $branch : "$remote/$branch";
-	my $under_root = $top->path;
-	$under_root = index($under_root, "$root/") == 0
-		? substr($under_root, length($root) + 1) : '';
+	my $path = Cwd::realpath($top->path) // $top->path;
+	my $under_root = '';
+	if ($path ne $root) {
+		bail(
+			"The deployment root #C{%s} is not inside the repository at ".
+			"#C{%s},\nso there is no path on #C{%s} to read it from.",
+			$top->path, $git->root, $branch
+		) unless index($path, "$root/") == 0;
+		$under_root = substr($path, length($root) + 1);
+	}
 	unless ($git->ls_tree($read,
 			join('/', grep {length} $under_root, '.genesis/config'))) {
+		info(
+			"Not reading the deployment branch #C{%s}: it carries no ".
+			"repository yet, so this runs on #C{%s}.",
+			$branch, $git->current_branch // 'the current commit');
 		$session->finish;
 		return $fn->();
 	}
