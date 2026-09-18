@@ -3419,16 +3419,17 @@ sub set_hold {
 		$self->name
 	) unless defined($rec{reason}) && $rec{reason} =~ /\S/;
 
+	my $path = $self->hold_record_path;
 	$self->vault->authenticate unless $self->vault->authenticated;
-	$self->vault->clear($self->hold_record_path);
+	$self->vault->clear($path);
 	$self->vault->set(
-		$self->hold_record_path,
+		$path,
 		reason   => $rec{reason},
 		user     => $rec{user}     // ($ENV{USER} // 'unknown'),
 		hostname => $rec{hostname} // Sys::Hostname::hostname(),
 		at       => $rec{at}       // Time::Piece->new->strftime(EXODUS_TIME_FORMAT),
 	);
-	return $self->hold_record_path;
+	return $path;
 }
 
 # }}}
@@ -3439,12 +3440,19 @@ sub set_hold {
 # release's identity is its own log line.  It returns 1 where a record stood
 # and 0 where none did, so `pipeline-release` can say which it did rather than
 # claiming to have released a hold nobody set.
+#
+# The question is whether the path stands, and not whether hold_record can make
+# sense of what is at it.  hold_record answers undef both for an absent path
+# and for one whose contents it cannot read, and guarding on that would leave
+# an unreadable record in place while telling the operator there was nothing to
+# release, which is the one state a release most has to be able to clear.
 sub clear_hold {
 	my ($self) = @_;
 
+	my $path = $self->hold_record_path;
 	$self->vault->authenticate unless $self->vault->authenticated;
-	return 0 unless $self->hold_record;
-	$self->vault->clear($self->hold_record_path);
+	return 0 unless $self->vault->has($path);
+	$self->vault->clear($path);
 	return 1;
 }
 
