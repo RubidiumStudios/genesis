@@ -144,6 +144,8 @@ sub status_records {
 			$settled->{assumed} // $settled->{branch});
 	}
 
+	$record->{breaches} = [unfetchable_markers($record, $git)];
+
 	return $record;
 }
 
@@ -172,6 +174,25 @@ sub drift_for {
 	return undef unless @files;
 
 	return {files => \@files, commit => $hand};
+}
+
+# }}}
+# unfetchable_markers - the H30 breach report {{{
+#
+# A marker is a bare sha with no ancestry link to the branch, because
+# propagation copies files and never commits, so it means something only while
+# a ref still reaches the commit.  D31 closes the hazard through the branch
+# protection; a rewrite that got past it is reported here by name, because
+# nothing else in the command would notice.
+sub unfetchable_markers {
+	my ($record, $git) = @_;
+	my @breaches;
+	for my $row (@{$record->{environments}}) {
+		my $sha = $row->{merged} or next;
+		next if $git->commit_exists($sha);
+		push @breaches, {env => $row->{env}, control_commit => $sha};
+	}
+	return @breaches;
 }
 
 # }}}
@@ -276,6 +297,14 @@ sub render_tree {
 			_short($row->{deployed} ? $row->{deployed}{control_commit} : undef) // '-',
 			$CLASS_MARKUP{$class}, $CLASS_GLYPH{$class},
 			join('; ', map { csprintf("#%s{%s}", $CLASS_MARKUP{$_->[0]}, $_->[1]) } @phrase));
+	}
+
+	# Beneath the table, because a breach is about the repository rather than
+	# about one row of it, and an operator reading the rows should meet it
+	# after the environment it names rather than in the middle of the report.
+	for my $breach (@{$record->{breaches} || []}) {
+		push @out, csprintf("  #R{%s's marker names control@%s, which the remote no longer holds}",
+			$breach->{env}, _short($breach->{control_commit}));
 	}
 
 	push @out, '';

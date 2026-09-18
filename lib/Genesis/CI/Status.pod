@@ -77,6 +77,10 @@ C<configuration-changed> and C<dependencies-changed>, and never a path.  The
 two lists run in step, so the environment and the reason for it sit at one
 index.
 
+The record also carries C</unfetchable_markers>' answer under C<breaches>,
+which is every environment whose marker names a control commit no ref in this
+repository still reaches.
+
 B<Parameters:>
 
 =over 4
@@ -169,6 +173,47 @@ B<Examples:>
   my $drift = Genesis::CI::Status::drift_for($git, 'lab/bosh');
   # {files => ['ops/shared.yml'], commit => 'e91c0aa...'}
 
+=head2 unfetchable_markers($record, $git)
+
+  my @breaches = Genesis::CI::Status::unfetchable_markers($record, $git);
+
+Returns one hash reference of C<env> and C<control_commit> for each
+environment whose newest marker names a control commit no ref in this
+repository reaches.  A marker is a bare sha with no ancestry link to the
+branch it sits on, because propagation copies files and never commits, so it
+means something only while a ref still reaches the commit.  The branch
+protection should make that impossible, so a breach that got past it is
+reported by name rather than left for the next propagation to trip over.  The
+tree prints one red line per breach beneath the table, and the record carries
+them under C<breaches>.
+
+The reading is reachability rather than presence, through
+L<Service::Git/commit_exists>, because a commit the remote has dropped stays
+in this clone as a loose object until git collects it and a reader that
+answered yes for one of those could never report a breach at all.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The record the walk answered with, whose C<environments> carry the markers.
+
+=item C<$git>
+
+The L<Service::Git> to ask about reachability.
+
+=back
+
+B<Returns:> the breaches, as a list of hash references, which is empty for an
+append-only control.
+
+B<Examples:>
+
+  my @breaches = Genesis::CI::Status::unfetchable_markers($record, $git);
+  # ({env => 'lab', control_commit => '47de8d3...'})
+
 =head2 render_json($record)
 
   print Genesis::CI::Status::render_json($record);
@@ -203,6 +248,10 @@ environment in DAG order, each indented to its depth and carrying its branch
 column, its deploy column, and its composed phrase.  The header names the
 pipeline by the label the configuration gives it, and by the deployment type
 where a repository names no label.
+
+Beneath the table comes one red line per breach the record carries, because a
+marker naming a commit the remote no longer holds is a fact about the
+repository rather than a column of one row.
 
 B<Parameters:>
 
