@@ -93,10 +93,17 @@ subtest 'the rebuild reports what it discards' => sub {
 	# through the harness's own reader rather than pinned to a literal file
 	# name at the repository root, so a deployment root laid in a
 	# subdirectory moves the guard with it instead of going red beside it.
+	#
+	# The set itself has to be non-empty for the guard to mean anything.  A
+	# reader that answered nothing would leave nothing missing, and the row
+	# would read as green while asserting about no file at all.  Both halves
+	# go in the one ok, so saying it costs no assertion.
 	my %kept    = map {($_ => 1)} @files;
-	my @missing = grep {!$kept{$_}} propagation_set($h, 'prod');
-	ok(!@missing, 'and the set itself is still there')
-		or diag("missing from the branch: @missing");
+	my @set     = propagation_set($h, 'prod');
+	my @missing = grep {!$kept{$_}} @set;
+	ok(@set && !@missing, 'and the set itself is still there')
+		or diag(@set ? "missing from the branch: @missing"
+		             : 'the propagation set came back empty');
 
 	# A guard, for the reason the exit row above gives.
 	is(harness_marker($h, "origin/$pr"), $git->sha($h->control),

@@ -238,6 +238,13 @@ a refused push is the sentence naming the work the rebuild threw away. A line
 that is undefined or empty is ignored, and the qualifiers already standing
 are kept in the order they were written, separated by a semicolon.
 
+That order is a contract rather than an accident of scheduling. A record's
+qualifiers appear in the order their writers run, so the delivery's sentence
+about what the rebuild discarded stands ahead of the publish's sentence about
+what the remote made of the push, and a run that says both says them in that
+order. A caller that moves one writer ahead of another changes what an
+operator reads, and should expect the rows that pin the line to say so.
+
 It lives here rather than beside either writer, because L</render_run> is what
 reads the field and a rule about how the field is filled belongs beside the
 thing that prints it.
@@ -492,8 +499,8 @@ exactly as whoever knew wrote it, which is the walk for a failure and the run
 for a delivery.
 
 The qualifier is assigned rather than appended through L</note_detail>, and
-that is right here: nothing an environment reaching this sub can be carrying
-was written into the field already.  The one writer that appends before the
+that is right here, because nothing an environment reaching this sub can be
+carrying was written into the field already.  The one writer that appends before the
 report runs is the pull request arm's discard region, and an environment that
 reaches that region has an outcome by the time the arm returns, while a freeze
 returns above it and writes nothing there at all.
