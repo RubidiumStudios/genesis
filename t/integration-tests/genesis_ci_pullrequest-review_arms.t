@@ -179,31 +179,44 @@ subtest 'a gate ahead of the freeze keeps the merge qualifier' => sub {
 # the fix that answers them, pushed, and its new body names that review, with
 # the reviewer, the date, and the words they wrote.
 #
-# The pull request is declared on the double and its branch is not yet on R,
-# which is the shape the harness's own with_open_pr builds and the shape the
-# first row of genesis_ci_pullrequest-title.t takes.  A run that rebuilds a
-# branch R already carries needs the lease the publish spec carries, and a
-# push that went without one would be refused as a non-fast-forward before any
-# body is composed.  What the reviewer asked for is therefore a
-# fixture on the API side and the branch R gains is this run's own.
+# The row takes the two-run form over a published branch, which is what a
+# reviewer actually reads.  The first run builds the branch, publishes it, and
+# opens a pull request of its own, and the second run rebuilds that very
+# branch with the fix.  The rewrite lands because the publish spec now pushes
+# against the tip the run read, so a branch R already carries is no longer
+# refused as a non-fast-forward.
+#
+# The pull request the first run opened is unreviewed, and the double has no
+# way to add a review to a pull request it already holds, so the row closes
+# that one and declares the reviewed one in its place, the way the freeze row
+# above does.  Leaving both open would put the several-pull-requests warning
+# in the middle of a row about a rebuild.
 #
 # Two of the seven assertions start red, which are the two that read the
 # quoted review off the body the run sent.  The other five are guards, each
 # marked where it stands, because the rebuild, the push, and the update all
 # landed with the arm itself.
 subtest 'changes requested rebuilds and names the review' => sub {
-	plan tests => 8;
+	plan tests => 9;
 
 	my $h  = ready(kit => 'omega-v2.7.0');
 	my $gh = $h->{gh};
 	my $pr = $h->pr_branch('prod');
 
-	# What the reviewer read: one due control commit, a pull request open on
-	# the branch that proposes it, and a review asking for a change with the
-	# reason written out.
+	# What the reviewer read: one due control commit, and the run that puts
+	# the branch proposing it on R.
 	my $proposed = due_commit($h, 'prod', params => {instances => 2},
 		message => 'Raise the cf instance count');
+	run_genesis($h, 'propagate', '-y');
+	refresh($h, 'a', $pr);
 
+	# The pull request that run opened, taken off the pointer the run wrote
+	# rather than guessed at, and closed so that the reviewed one below is the
+	# only one open on the branch.
+	my $opened = record_at($h, $h->env_path('prod').'/proposed')->{number};
+	gh_close_pr($gh, $opened, merged => 0);
+
+	# The review itself, asking for a change with the reason written out.
 	my $number = gh_pull_request($gh, env => 'prod', head => $pr,
 		base => $h->slug('prod'), review => 'changes_requested',
 		reviewer => 'dbell', at => '2026-09-12T14:05:00Z',
@@ -221,8 +234,10 @@ subtest 'changes requested rebuilds and names the review' => sub {
 	is($exit, 0, 'the run succeeded');
 
 	# A guard for the same reason: the rebuild and its push are the arm's own
-	# work, which landed with Task 16.1, and T265 asks that the fix be what
-	# the branch on R now carries, so the clause is read here beside the rest.
+	# work, and T265 asks that the fix be what the branch on R now carries, so
+	# the clause is read here beside the rest.  It says more than it did
+	# before the branch was published, because the second push had to beat a
+	# tip R already held to get there.
 	refresh($h, 'a', $pr);
 	is(harness_marker($h, "origin/$pr"), $fix,
 		'the branch on R was rebuilt at the fix');
