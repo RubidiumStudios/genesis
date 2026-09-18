@@ -218,8 +218,14 @@ sub status_records {
 sub _mark_unverifiable {
 	my ($record) = @_;
 	$record->{refreshed} = JSON::PP::false;
-	$record->{environments}[$_]{divergence}{state} = UNVERIFIABLE
-		for 0 .. $#{$record->{environments}};
+	for my $row (@{$record->{environments}}) {
+		# A row that failed to load is left alone, as the drift fill and the
+		# breach report leave it.  Nothing about that row was read, so a
+		# divergence cell saying the reading is unverifiable would claim a
+		# reading was withheld where none was ever taken.
+		next if $row->{error};
+		$row->{divergence}{state} = UNVERIFIABLE;
+	}
 	return $record;
 }
 

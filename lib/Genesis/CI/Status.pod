@@ -103,7 +103,10 @@ pre-flight, and the propagate pre-flight all ask the same query.
 C<stale_because> holds that query's own reasons, which are
 C<configuration-changed> and C<dependencies-changed>, and never a path.  The
 two lists run in step, so the environment and the reason for it sit at one
-index.
+index.  All three are null where the staleness was never asked, because this
+clone does not hold the commit the pipeline was applied from, and both
+renderers read that null as unverifiable rather than as a pipeline that is
+not stale.
 
 The record also carries C</unfetchable_markers>' answer under C<breaches>,
 which is every environment whose marker names a control commit no ref in this
@@ -452,6 +455,11 @@ The state is set through the divergence hash rather than by replacing it with
 a string, so C<--json> emits one shape for that field whichever form of the
 command wrote the record, and an environment that had no divergence at all
 gains the same shape with the same word in it.
+
+An environment that failed to load is left alone, as the drift fill and the
+breach report leave it, so the three fills agree about such a row.  Nothing
+about it was read, and a divergence cell carrying the word would say a reading
+had been withheld where none was ever taken.
 
 Nothing else on the record is touched.  A phrase component marked with a class
 of the wrong kind would leave C</worst_class> answering wrong for every row, so

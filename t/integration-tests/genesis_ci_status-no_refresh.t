@@ -54,9 +54,9 @@ sub env_line {
 }
 
 subtest 'the stale form marks every cell that rests on a refresh' => sub {
-	# Seven assertions, one of which is this row's own restoration, and one
+	# Ten assertions, one of which is this row's own restoration, and one
 	# more for the restoration run_genesis asserts on the second command.
-	plan tests => 9;
+	plan tests => 11;
 
 	my $h = make_harness(envs => ['lab'], kit => 'omega-v2.7.0',
 		tracked => ['ops/shared.yml', 'ops/extra.yml']);
@@ -78,25 +78,39 @@ subtest 'the stale form marks every cell that rests on a refresh' => sub {
 	# branch-class gate is the one that would fetch it.
 	my $ahead = move_on_r($h, $h->control);
 
+	# The remote-tracking ref as this clone holds it going in, which is the
+	# one ref a fetch would move and the one the row below compares against.
+	my $tracking = $h->git('a')->sha('refs/remotes/origin/' . $h->control);
+
 	my $before = snapshot_w($h);
 	my ($out, $err, $exit) = run_genesis($h,
 		{restore => 0}, 'pipeline-status', '--no-refresh');
 	# A guard.  Every assertion below it reads standard output, and a
 	# command that had come to refuse the flag would print nothing there and
-	# fail all four for a reason that had nothing to do with the marking.
+	# fail each of them for a reason that had nothing to do with the marking.
 	is($exit, 0, 'the stale form still reports');
+	is($err, '', 'and says nothing on standard error');
 	assert_w_restored($before, 'the stale form leaves working state alone');
 
 	like(plain($out), qr/the report is stale/, 'a header says the report is stale');
 	like(env_line($out, 'lab'), qr/1 pending \[unverifiable\]/,
 		'the routing summary, which is the cell that rests on a refresh, carries the word');
-	# A guard, and the one the whole flag rests on.  It is green wherever the
-	# gate and the command both hold their fetch back, and it goes red the
-	# day either of them makes one, which is the failure no other row here
-	# could see: every assertion above it would still pass against a report
-	# that had quietly fetched.
-	unlike(plain($out), qr/\Q@{[substr($ahead, 0, 7)]}\E/,
-		'nothing fetched the commit, so neither the gate nor the command saw it');
+	# The one the whole flag rests on, and it is read off the ref rather than
+	# off the report.  A fetch moves the remote-tracking ref alone for a
+	# branch this clone already holds, and every word of the report is read
+	# from the local branch, so a gate or a command that fetched under the
+	# flag would leave the whole of the output standing and show up nowhere
+	# in it.  Nothing else in the suite can see that fetch: the restoration
+	# assertion reads the branch, HEAD, the working directory, the status,
+	# and the index, and no ref under refs/remotes.
+	is($h->git('a')->sha('refs/remotes/origin/' . $h->control), $tracking,
+		'neither the gate nor the command fetched, so the tracking ref stands');
+	# A guard on the fixture.  The teammate's commit has to be somewhere this
+	# clone could reach it for the row above to mean anything, and a move
+	# that quietly landed on the tracking ref would leave that row green over
+	# a comparison of a commit against itself.
+	isnt($tracking, $ahead,
+		'and the commit a teammate made on R was never this clone\'s to read');
 
 	my ($json) = run_genesis($h, 'pipeline-status', '--no-refresh', '--json');
 	my $record = decode_json($json || '{}');
@@ -194,8 +208,8 @@ subtest 'a remedy that rests on the tracking refs is not offered stale' => sub {
 };
 
 subtest 'a commit this clone never fetched is not read as a fact' => sub {
-	# Three assertions and one restoration for each of the two commands.
-	plan tests => 5;
+	# Four assertions and one restoration for each of the two commands.
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['lab'], kit => 'omega-v2.7.0',
 		tracked => ['ops/shared.yml']);
@@ -216,6 +230,7 @@ subtest 'a commit this clone never fetched is not read as a fact' => sub {
 
 	my ($tree, $err, $exit) = run_genesis($h, 'pipeline-status', '--no-refresh');
 	is($exit, 0, 'the report is produced rather than ended');
+	is($err, '', 'and says nothing on standard error');
 	like(plain($tree), qr/\[stale: unverifiable\]/,
 		'and the applied line says the staleness could not be read');
 
