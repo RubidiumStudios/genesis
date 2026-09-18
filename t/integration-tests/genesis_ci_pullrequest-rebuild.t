@@ -89,8 +89,14 @@ subtest 'the rebuild reports what it discards' => sub {
 	# A guard, for the reason the exit row above gives.
 	ok(!(grep {m{^prod/}} @files), 'the rebuild discarded them');
 
-	# A guard, for the reason the exit row above gives.
-	ok((grep {$_ eq 'prod.yml'} @files), 'and the set itself is still there');
+	# A guard, for the reason the exit row above gives.  The set is read
+	# through the harness's own reader rather than pinned to a literal file
+	# name at the repository root, so a deployment root laid in a
+	# subdirectory moves the guard with it instead of going red beside it.
+	my %kept    = map {($_ => 1)} @files;
+	my @missing = grep {!$kept{$_}} propagation_set($h, 'prod');
+	ok(!@missing, 'and the set itself is still there')
+		or diag("missing from the branch: @missing");
 
 	# A guard, for the reason the exit row above gives.
 	is(harness_marker($h, "origin/$pr"), $git->sha($h->control),
@@ -224,6 +230,61 @@ subtest 'the three subject-match shapes give the right answer now' => sub {
 	like($coincidence_said, qr/prod: propagated/,
 		'a coincidental short hash no longer suppresses a real propagation')
 		or diag($coincidence_said);
+};
+
+# Proves that the discard sentence survives a publish the remote refuses.
+# Ruling 42 names the run: a hand push followed by the next propagate, where
+# the clone has not seen the branch move, the lease is taken against what it
+# last saw, and the push is turned down.  The refresh the rows above call
+# after a hand commit is deliberately absent here, because the refusal is the
+# thing being proved.
+#
+# Two writers then want the environment's outcome_detail, the delivery's
+# discard sentence and the publish's own "moved on R", and the qualifier is
+# appended rather than assigned so the run says both.  One commit is pushed
+# by hand rather than two, so the sentence renders in its singular form.
+subtest 'a refused publish keeps the discard sentence' => sub {
+	plan tests => 6;
+
+	my $h   = ready(kit => 'omega-v2.7.0');
+	my $git = $h->git('a');
+	my $pr  = $h->pr_branch('prod');
+
+	due_commit($h, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+
+	# The first run opens the pull request and leaves the aggregate on the
+	# branch, which is what the hand commit lands on top of.
+	run_genesis($h, 'propagate', '-y');
+
+	hand_commit($h, $pr, copy => 'b',
+		files   => {'prod/extra.yml' => "---\nextra: yes\n"},
+		message => 'a teammate edits the proposal');
+
+	my ($out, $err) = run_genesis($h, 'propagate', '-y');
+	my $said = unfolded($out, $err);
+	# One pattern for the whole line, because what the row is about is the
+	# two qualifiers standing together in the order they were written, and
+	# two patterns read separately would pass on a line carrying either.
+	my $both = join('',
+		"prod: publish rejected, ",
+		"1 commit on \Q$pr\E that this run did not write, ",
+		"by [^;]+, discarded by the rebuild; ",
+		"\Q$pr\E moved on R");
+	like($said, qr/$both/,
+		'the refused run says what it discarded and what refused it')
+		or diag($said);
+
+	# The run above fetched the branch on its way to the discard report, so
+	# this run reads its lease off what R actually carries and the push lands.
+	my ($out2, $err2) = run_genesis($h, 'propagate', '-y');
+	my $said2 = unfolded($out2, $err2);
+	like($said2, qr/prod: propagated/, 'and the next run lands the rebuild')
+		or diag($said2);
+
+	refresh($h, 'a', $pr);
+	is(harness_marker($h, "origin/$pr"), $git->sha($h->control),
+		'with R carrying the aggregate at the newest due commit');
 };
 
 done_testing;

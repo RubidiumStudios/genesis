@@ -448,6 +448,12 @@ branch level with R, and the deployment branch's local ref is the one the
 delivery is about to be made from, so reading C<origin/> on one side and the
 working ref on the other would compare two different moments.
 
+The range is walked once. C<Service::Git::log_subjects> splits a record into
+the sha and everything after the first unit separator, so a format that puts
+the author between the sha and the body hands the author back at the head of
+the message and the message behind it, and one call answers all three fields.
+The authors are kept as a set, because nothing reads a count per author.
+
 B<Parameters:>
 
 =over 4
@@ -488,6 +494,11 @@ beside the environment's outcome. The count is pluralised and the authors are
 joined with commas, so the operator reads how much work is going and whose it
 was.
 
+The C<by> clause is rendered only where there is a name to put in it. git
+refuses an empty author, so a report with no names at all is not something an
+operator will meet, but the reader counts a commit whose author it could not
+read and a clause composed unconditionally would render C<by ,> on one.
+
 B<Parameters:>
 
 =over 4
@@ -513,42 +524,9 @@ B<Examples:>
     # returns '2 commits on pr/prod/bosh that this run did not write, by
     # A Teammate, discarded by the rebuild'
 
-=head2 note_detail($record, $line)
-
-    Genesis::CI::PullRequest::note_detail($record, $line);
-
-Appends one qualifier to the environment's C<outcome_detail>, so a run with
-more than one thing to say there says all of them.
-
-I8 puts the bare enum word in C<outcome> and everything qualifying it in
-C<outcome_detail>, and C<Genesis::CI::Report::render_run> joins the two with a
-comma. This arm has more than one qualifier to write, so a second writer that
-assigned the field would drop whichever line was written first. A line that is
-undefined or empty is ignored, and the qualifiers already standing are kept in
-the order they were written, separated by a semicolon.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$record>
-
-The walk's per-environment record, whose C<outcome_detail> is appended to in
-place.
-
-=item C<$line>
-
-The qualifier to add. An undefined or empty line leaves the record alone.
-
-=back
-
-B<Returns:> the record, so a caller may chain.
-
-B<Examples:>
-
-    note_detail($record, 'and something else');
-    # $record->{outcome_detail} reads 'what it already said; and something
-    # else'
+    discard_line('pr/prod/bosh', {count => 1, authors => []});
+    # returns '1 commit on pr/prod/bosh that this run did not write,
+    # discarded by the rebuild'
 
 =head2 settled($git, $pr_branch, $newest, $tree)
 

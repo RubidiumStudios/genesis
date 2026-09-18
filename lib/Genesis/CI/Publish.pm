@@ -27,6 +27,7 @@ use warnings;
 
 use Exporter qw/import/;
 use Genesis qw/bug info warning/;
+use Genesis::CI::Report qw/note_detail/;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
 
@@ -102,8 +103,11 @@ sub publish_run {
 		_reset_publish_set($session);
 		for my $spec (@specs) {
 			my $rec = _record_for($records, $spec->{env}) or next;
-			$rec->{outcome}        = 'not published';
-			$rec->{outcome_detail} = 'operator declined';
+			$rec->{outcome} = 'not published';
+			# Appended, because the delivery may already have written what
+			# the rebuild discarded on this environment and a decline that
+			# assigned the field would take that sentence down with it.
+			note_detail($rec, 'operator declined');
 		}
 		return $result;
 	}
@@ -171,8 +175,12 @@ sub publish_run {
 		$moved =~ s{^refs/heads/}{};
 
 		if ($rec) {
-			$rec->{outcome}        = 'publish rejected';
-			$rec->{outcome_detail} = sprintf('%s moved on R', $moved);
+			$rec->{outcome} = 'publish rejected';
+			# Appended, for the reason the decline above gives.  This is the
+			# run ruling 42 describes, a hand push followed by the next
+			# propagate, which is exactly the run whose delivery has a
+			# discard sentence standing in the field already.
+			note_detail($rec, sprintf('%s moved on R', $moved));
 		}
 
 		# At once, rather than at the end of the run, because everything

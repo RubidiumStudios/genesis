@@ -66,7 +66,12 @@ subtest 'a branch moved on R has its own push rejected' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 	my $said = unfolded($out, $err);
 
-	like($said, qr/prod: publish rejected, \Q$pr\E moved on R/,
+	# The commit copy B pushed carries no marker, so the arm's discard report
+	# names it and the publish's own qualifier is appended behind that one
+	# rather than written over it.  The pattern allows what stands between
+	# the two, and stops at the colon that would start another environment's
+	# line, so it cannot read the phrase off a neighbour.
+	like($said, qr/prod: publish rejected,[^:]*\Q$pr\E moved on R/,
 		'prod records publish rejected, naming the moved ref');
 	like($said, qr/qa: propagated/, 'while qa publishes');
 	isnt($exit, 0, 'and the run reports the partial result');
