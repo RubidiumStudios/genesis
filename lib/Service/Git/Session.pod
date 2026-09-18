@@ -673,11 +673,15 @@ a switch and asks nothing about the session still being open, so a branch this
 run cut is taken off on an abort exactly as it is on a decline. A session begun
 on a detached HEAD has no branch to step back to, and the step is skipped.
 
-The branch then leaves the set L</committed_branches> answers, exactly as
-C<discard> takes it off. An abort running afterwards has no business
-revisiting a branch that is already back where the run found it, and for a
-branch this run cut the second pass would answer C<deleted> for a delete it
-never made.
+The branch then leaves the recorded half of what L</committed_branches>
+answers, exactly as C<discard> takes it off. That set is the union of the
+branches the session recorded a commit on and the branches whose tip has moved
+since the switch, and only the first of the two is dropped here. A branch left
+standing at a tip other than the one the session read is still answered through
+the second half, because nothing here writes that half and only the tip itself
+decides it. An abort running afterwards has no business revisiting a branch
+that is already back where the run found it, and for a branch this run cut the
+second pass would answer C<deleted> for a delete it never made.
 
 It restores what the session recorded, so a caller holding a branch name it
 may never have switched to asks L</switched_to($branch)> first. A branch with no

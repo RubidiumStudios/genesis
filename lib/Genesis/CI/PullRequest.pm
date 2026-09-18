@@ -197,6 +197,12 @@ sub deliver {
 	# The delivered commits are asked only where the gate holds nothing, which
 	# is a gate standing on control's own tip.  There is no held entry to read
 	# it off then, and the gate's own pending entry carries the marks.
+	#
+	# The first gate-ahead entry is the only gate there is to read.  The walk
+	# takes the oldest unreleased gate in the range and stops at it
+	# (Genesis::CI::Walk.pm ~1212-1222), because a second gate behind the
+	# first is reached only once the first is cleared, so one walk of one
+	# environment marks its entries with one gate and never two.
 	my @gated = grep {($_->{reason} // '') eq 'gate-ahead'}
 		@{$record->{held} || []};
 	my ($gate) = @gated;
