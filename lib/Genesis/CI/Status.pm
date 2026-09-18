@@ -232,9 +232,15 @@ sub drift_for {
 sub unfetchable_markers {
 	my ($record, $git) = @_;
 	my @breaches;
+	# One answer per sha, because a rewrite that dropped a commit dropped it
+	# for every environment whose marker names it, and the reading costs two
+	# git processes each time it is asked.
+	my %reaches;
 	for my $row (@{$record->{environments}}) {
+		next if $row->{error};
 		my $sha = $row->{merged} or next;
-		next if $git->commit_exists($sha);
+		$reaches{$sha} //= $git->commit_exists($sha);
+		next if $reaches{$sha};
 		push @breaches, {env => $row->{env}, control_commit => $sha};
 	}
 	return @breaches;
@@ -333,9 +339,19 @@ sub render_tree {
 	push @out, csprintf("  %s  #u{%-7s}  #u{%-7s}  #u{%s}",
 		' ' x $width, 'branch', 'deploy', 'status');
 
+	# The environments a breach names, read once before the rows, so each row
+	# can take the class the breach puts on it.  The record already names
+	# them, so there is no new field for the renderer to read.
+	my %breached = map {($_->{env} => 1)} @{$record->{breaches} || []};
+
 	for my $row (@{$record->{environments}}) {
 		my @phrase = compose_phrase($row, stale => $opts{stale});
-		my $class  = worst_class(@phrase);
+		# The glyph and the name take the worst thing on the row, and a
+		# marker naming a commit nothing can fetch is worse than anything
+		# the phrase carries.  It is forced here rather than composed as a
+		# component, because the breach is written out in full beneath the
+		# table and a phrase that said it as well would say it twice.
+		my $class  = $breached{$row->{env}} ? 'wrong' : worst_class(@phrase);
 		my $name   = sprintf("%s%s%s",
 			'  ' x $row->{depth}, $row->{env},
 			' ' x ($width - ($row->{depth} * 2) - length($row->{env})));

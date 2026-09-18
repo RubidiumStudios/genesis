@@ -604,13 +604,17 @@ sub holds_commit {
 }
 
 # }}}
-# commit_exists - does any ref in this repository still reach this commit {{{
+# commit_exists - does a remote-tracking ref still reach this commit {{{
 #
 # The question a propagation marker raises is whether a fresh clone could
 # fetch the commit the marker names, so it is about reachability rather than
-# about the object.  A commit the remote has dropped stays here as a loose
-# object until git collects it, and a reader that answered yes for one of
-# those could never report the breach H30 names.
+# about the object, and about what the remote holds rather than about what
+# this clone happens to.  A commit the remote has dropped stays here as a
+# loose object until git collects it, and the local branch that wrote it goes
+# on reaching it, because a refresh moves the remote-tracking refs and leaves
+# a local branch where it stands.  A reader that counted either would answer
+# yes in exactly the clone an operator runs this command in, and could never
+# report the breach H30 names.
 sub commit_exists {
 	my ($self, $sha) = @_;
 
@@ -620,8 +624,10 @@ sub commit_exists {
 	# spelled a second time here.
 	return 0 unless $self->holds_commit($sha);
 
+	# The remote-tracking refs alone, and the refresh has just made them
+	# current, so what they reach is what the remote holds.
 	my ($out) = run({dir => $self->{root}, stderr => 0},
-		'git', 'branch', '--all', '--contains', $sha);
+		'git', 'branch', '--remotes', '--contains', $sha);
 	return ($out // '') =~ /\S/ ? 1 : 0;
 }
 
