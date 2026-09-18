@@ -40,16 +40,20 @@ my $LEAF = 'us-east-qa';
 my $SITE = 'us-east';
 
 subtest 'the predecessor is named by a site file, and read before the load' => sub {
-	plan tests => 5;
+	plan tests => 7;
 
-	# The site file is written before the seeding is finished, so the
-	# delivery that follows carries it onto the deployment branch.  A key
+	# inherited_harness is this shape by name: it writes the pipeline keys at
+	# a site file rather than at the leaf, which is the merged read D79 asks
+	# for, and it writes them before the seeding is finished so the delivery
+	# that follows carries the file onto the deployment branch.  A key
 	# written after the delivery would sit on control alone, and the deploy
 	# reads the file the branch it stands on carries.
-	my $h = make_harness(envs => ['lab', $LEAF]);
-	write_env_file($h, $LEAF, site => $SITE, pipeline => {prior_env => 'lab'});
-	push_from($h, 'a', $h->control);
-	ready_envs($h, certified => [$LEAF]);
+	my $h = inherited_harness(
+		envs          => ['lab', $LEAF],
+		site          => $SITE,
+		pipeline_keys => {prior_env => 'lab'},
+		certified     => [$LEAF],
+	);
 	# The kit alone, without the director fixture_bosh puts up beside it, so
 	# the one thing this deploy cannot do is reach a director.  A check made
 	# after the environment is loaded meets that first and says so.
@@ -63,8 +67,20 @@ subtest 'the predecessor is named by a site file, and read before the load' => s
 	like(unfolded($err), qr/never been successfully deployed/,
 		'so the check read the key the site file carries');
 	like(unfolded($err), qr/\blab\b/, 'naming the predecessor it names');
+	like(unfolded($err), qr/\Q$LEAF\E/,
+		'and naming the environment it refused to deploy');
 	unlike(unfolded($err), qr/director/i,
 		'and it refused before the environment was loaded or a director dialled');
+
+	# The other half of T226, asserted rather than left to follow from the
+	# row above.  It is a guard: the read is made through Genesis::Env->bare,
+	# which loads no kit, so nothing said here can name one and the row is
+	# green on arrival.  What it catches is the read moved onto a loaded
+	# environment in a repository whose kit cannot be resolved, where Genesis
+	# answers in its own words about a dev kit and the operator hears about
+	# the kit rather than about the predecessor they deployed out of order.
+	unlike(unfolded($err), qr/dev kit/i,
+		'and no kit stood behind the read that found it');
 };
 
 subtest "the predecessor's record is read once, before the environment loads" => sub {
@@ -116,14 +132,30 @@ subtest 'the three prior-env cases, with L unchanged on each' => sub {
 		my $h = two_env_harness(chained => 1, certified => ['qa']);
 		my $control = tip_of($h, $h->control);
 
-		# result, not state: _prior_env_record reads the deployment audit,
-		# and certify's state option writes the flat record beside it.
+		# Both of these cases are guards, green on arrival, and each is
+		# written for the wrong implementation it catches.
+		#
+		# post-failed: result, not state.  _prior_env_record reads the
+		# deployment audit, where certify writes result, and certify's state
+		# option writes the flat record beside it, where it writes success
+		# whatever the audit says.  So a check reading the flat record's
+		# state passes this fixture and this row would not catch it.  What it
+		# does catch is a filter narrowed to result eq 'success': the entry
+		# would be skipped, the predecessor would read as never deployed, and
+		# a deploy the design lets through would refuse at DATAERR.
 		certify($h, 'lab', result => 'post-failed', control_commit => $control)
 			if $case eq 'post-failed';
-		# A predecessor that deployed and certified nothing.  Under D43 it
-		# holds everything below it and the due set is empty, which is a
-		# state this check passes rather than one it refuses; a check that
-		# asked which commit the predecessor certified would refuse here.
+		# no control: a predecessor that deployed and certified nothing.
+		# Under D43 it holds everything below it and the due set is empty,
+		# which is a state this check passes rather than one it refuses.
+		# What this catches is a check that asked which commit the
+		# predecessor certified rather than whether it had deployed at all,
+		# which would refuse here.
+		#
+		# The two warning rows of the brief's subtest for this state, that
+		# the warning names the holding ancestor and says nothing is due, are
+		# Task 13.9's: _warn_commits_due does not exist yet, so a row here
+		# would be reading a warning nothing prints.
 		certify($h, 'lab', control_commit => undef) if $case eq 'no control';
 
 		fixture_bosh($h);
