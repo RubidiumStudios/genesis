@@ -12,7 +12,7 @@ use Genesis::Top;
 use Genesis::UI;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
-use Genesis::Exit qw/DATAERR/;
+use Genesis::Exit qw/ABORTED DATAERR/;
 use Encode qw(decode_utf8);
 
 sub create {
@@ -1270,6 +1270,34 @@ sub _deploy_preflight {
 	# will be, and its POD says so.
 	_warn_stale_pipeline($top, $git);
 
+	# 9.  What control carries that has not reached this branch, and the one
+	# prompt --yes answers.  The deploy computes none of it: the walk is the
+	# propagate run's own computation, run read-only and narrowed to this
+	# environment through the option it already has, so the two commands
+	# cannot disagree about what is due.  The deploy calls no read-only sub
+	# of its own here, because a second such sub would be a second thing to
+	# keep in step with the first.
+	#
+	# It prints after the staleness warning, because what is stale decides
+	# which branches the due set is talking about.
+	#
+	# The branch record is composed here rather than taken from
+	# Genesis::CI::Preflight::initial_state, which resets and fast-forwards
+	# the branches it classifies and so is no read for a deploy to make.  The
+	# walk reads the ref off this record and nothing else off it, so the one
+	# field it reads is the one field given, and the classification four
+	# steps above is where the branch was already resolved.
+	require Genesis::CI::Walk;
+	my $walk = Genesis::CI::Walk::plan($top,
+		git      => $git,
+		scope    => [$name],
+		branches => {$name => {branch => $branch}},
+	);
+	my ($due_record) = @{$walk->{environments}};
+
+	my $due = _warn_commits_due($bare, $due_record);
+	_confirm_commits_due($name, $due, $options);
+
 	return {
 		git     => $git,
 		branch  => $branch,
@@ -1277,6 +1305,7 @@ sub _deploy_preflight {
 		action  => $action,
 		bare    => $bare,
 		prior   => $prior_record,
+		due     => $due,
 	};
 }
 
@@ -1919,6 +1948,81 @@ sub _warn_stale_pipeline {
 	);
 
 	return scalar(@$changed);
+}
+
+# }}}
+# _warn_commits_due - the second of the pre-flight's warnings, under D35 {{{
+#
+# The due set is the walk's own computation, run read-only for one
+# environment, so the deploy and the propagate run read the same durable
+# state and cannot disagree about what is due.  A predecessor that has never
+# certified a commit holds everything below it (D43), so the set is empty and
+# we name the ancestor that holds it rather than report that we cannot tell.
+# There is one remedy, and it is genesis propagate (D37).
+#
+# The holding ancestor is named off the hold's own reason, where the walk put
+# it, rather than off any read of our own, for the reason the stale warning
+# prints the staleness query's reason: two readers deciding one fact is how
+# the two come to disagree about it.
+sub _warn_commits_due {
+	my ($env, $record) = @_;
+
+	my ($uncertified) = grep {
+		($_->{reason} // '') eq 'ancestor-uncertified'
+	} @{$record->{held} || []};
+	if ($uncertified) {
+		warning(
+			"\nNothing is due to #C{%s}.  Its ancestor #C{%s} has certified no ".
+			"control commit, so it holds everything below it until it deploys.",
+			$env->name, $uncertified->{ancestor}
+		);
+		return [];
+	}
+
+	my @due = @{$record->{pending} || []};
+	return [] unless @due;
+
+	# The proposed record is read here rather than above, because an
+	# environment with nothing due has nothing a pull request could be
+	# proposing and a read made there would be a vault call every deploy
+	# paid for and no deploy used.
+	my $proposed = $env->proposed_record;
+	warning(
+		"\n%s due to #C{%s} and not yet on #C{%s}:\n%s\n%s\nRun #C{genesis ".
+		"propagate} to deliver %s.",
+		count_nouns(scalar(@due), 'commit'), $env->name, $env->deployment_slug,
+		join("\n", map {
+			sprintf("  - control@%s  %s",
+				substr($_->{control_commit}, 0, 8), $_->{subject})
+		} @due),
+		$proposed ? sprintf("\nPR #%s proposes control@%s, not yet merged.\n",
+			$proposed->{number}, substr($proposed->{control_commit}, 0, 8)) : '',
+		scalar(@due) == 1 ? 'it' : 'them'
+	);
+	return \@due;
+}
+
+# }}}
+# _confirm_commits_due - the one prompt -y answers on this path {{{
+#
+# Outside a controlling terminal we warn and proceed, because a deploy must
+# not stop to ask where nobody can answer, which is the opposite of the
+# provider gate's rule for the opposite reason: the gate refuses where it
+# cannot ask, and this one carries on.  A deploy past a due commit is a thing
+# an operator may legitimately want, and a deploy past an unlocked pipeline
+# is not.
+#
+# It is its own sub so that the terminal half can be driven directly, no
+# spawned command having a terminal to answer from.
+sub _confirm_commits_due {
+	my ($env_name, $due, $options) = @_;
+
+	return 1 unless $due && @$due;
+	return 1 if $options->{yes};
+	return 1 unless in_controlling_terminal();
+
+	return 1 if prompt_for_boolean("Deploy #C{$env_name} anyway? [y|n]", 0);
+	bail({exitcode => ABORTED}, "Aborted.  Nothing was deployed.");
 }
 
 # }}}

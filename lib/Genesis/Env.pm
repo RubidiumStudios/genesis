@@ -3407,6 +3407,47 @@ sub hold_record_path {
 }
 
 # }}}
+# proposed_record - the open pull request this environment is waiting on {{{
+#
+# Four fields and no more, which are the control commit the pull request
+# proposes, its number, its url, and when the record was written (D57).  The
+# deploy's due-commits warning reads this rather than asking GitHub, so a
+# warning costs no API call and works with no token at all.
+#
+# The read is shaped exactly like hold_record next door, and for the same
+# reason.  A vault answers an absent path and an empty one alike, so the
+# existence question is asked first, and the read goes through this
+# environment's own vault because the record addresses under exodus_base like
+# every other record this module keeps there.
+sub proposed_record {
+	my ($self) = @_;
+
+	my $path  = $self->proposed_record_path;
+	my $vault = $self->vault;
+	return undef unless $vault->has($path);
+
+	my $data = $vault->get($path);
+	return undef unless ref($data) eq 'HASH';
+	return {
+		control_commit => $data->{control_commit},
+		number         => $data->{number},
+		url            => $data->{url},
+		at             => $data->{at},
+	};
+}
+
+# }}}
+# proposed_record_path - where that record lives {{{
+#
+# A sibling of the deployment records and of the hold, under this
+# environment's own exodus base, so one environment's records travel together
+# and a read costs no client of any kind.
+sub proposed_record_path {
+	my ($self) = @_;
+	return $self->exodus_base . '/proposed';
+}
+
+# }}}
 # last_read_dependencies - the dependency set this environment's last deploy read {{{
 #
 # The fact half of the staleness comparison.  Every deploy records the
