@@ -326,7 +326,10 @@ Required.  The C<Service::Git> handle every reading is made through.
 =item C<provider>
 
 Optional.  The pipeline provider that owns propagation here, defaulting to
-the one the configuration names.
+the one the configuration names, and to C<manual> where it names none, which
+is what no provider means: nothing triggers a deploy but a person.  It is
+defaulted here and nowhere else, so no reader of the record has to default it
+again or print a blank where a word belongs.
 
 =item C<refreshed>
 

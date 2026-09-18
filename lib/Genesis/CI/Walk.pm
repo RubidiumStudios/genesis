@@ -108,7 +108,12 @@ sub read_durable_state {
 		# the two to print.
 		pipeline  => $top->config->get('pipeline.name'),
 		type      => $top->type,
-		provider  => $args{provider} // $top->pipeline_provider_type,
+		# Defaulted here and nowhere else.  The accessor answers undef for a
+		# repository whose pipeline is switched off, and every reader of this
+		# field would then have to default it for itself or print a blank
+		# where a word belongs.  Manual is what no provider means: nothing
+		# triggers a deploy but a person.
+		provider  => $args{provider} // $top->pipeline_provider_type // 'manual',
 		control   => {branch => $control, commit => $control_sha},
 		applied   => $applied,
 		refreshed => $args{refreshed} // 1,

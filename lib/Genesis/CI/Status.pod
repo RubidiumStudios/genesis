@@ -15,10 +15,20 @@ Genesis::CI::Status - The pipeline-status read model
 Builds the canonical status record for one deployment root and renders it
 either as the indented tree or as JSON.  The module computes nothing about
 routing itself; it calls the propagation walk and reads the walk's own
-per-environment record.  It writes nothing, to git or to vault, and it asks
-the pre-flight for its branch records read-only, so a branch a run would have
-fast-forwarded stands exactly where it stood and a branch in a state a run
-would refuse is described here rather than refused.
+per-environment record.  It moves no branch and writes nothing to vault, and
+it asks the pre-flight for its branch records read-only, so a branch a run
+would have fast-forwarded stands exactly where it stood and a branch in a
+state a run would refuse is described here rather than refused.
+
+The refresh it does by default is not nothing, though.  It materialises a
+local ref for every pipeline branch the remote already holds and this clone
+lacks, which is why the events it hands back can say that control was created
+from the remote.  Those refs come from the remote rather than from anything
+this module decided, and C<refresh> set false leaves them alone.
+
+The events are handed back on the record rather than printed.  A module that
+wrote to a terminal mid-computation would be no use to a caller that wanted
+the record alone, so the caller prints them.
 
 The one axis the walk leaves to this module is the snapshot, which is what a
 deployment branch holds beyond the commit propagation last wrote on it.
@@ -80,7 +90,8 @@ environment the deployment root has.
 =back
 
 B<Returns:> the record, as a hash reference, in the shape
-L<Genesis::CI::Walk/plan> answers with.
+L<Genesis::CI::Walk/plan> answers with, with C<events> beside it, which is the
+lines the control check raised for the caller to print.
 
 B<Examples:>
 
@@ -288,11 +299,14 @@ B<Examples:>
 
   my $plain = Genesis::CI::Status::_jsonable($record);
 
-Copies a structure with every object in it written out as the text it prints
-as.  A deployment's timestamp reaches the record as a L<Time::Piece>, and an
-encoder handed an object of any kind raises rather than guessing at one, so
-each is written as its own string and the encoder's booleans alone go through
-untouched.
+Copies a structure with every object in it written out as text.  An encoder
+handed an object of any kind raises rather than guessing at one, so each is
+written as its own string and the encoder's booleans alone go through
+untouched.  A deployment's timestamp reaches the record as a L<Time::Piece>,
+and it is written in the form vault holds it in, C<EXODUS_TIME_FORMAT>, rather
+than in the ctime form L<Time::Piece> stringifies to.  This output is the one
+a machine reads, and a consumer comparing a timestamp against the stored
+record has to get the same string back, timezone included.
 
 B<Parameters:>
 
@@ -309,7 +323,7 @@ B<Returns:> a copy of the structure with no blessed reference left in it.
 B<Examples:>
 
   my $plain = Genesis::CI::Status::_jsonable({at => Time::Piece->new});
-  # {at => 'Fri Sep 18 03:48:52 2026'}
+  # {at => '2026-09-18 03:48:52 +0000'}
 
 =head2 _short($sha)
 

@@ -75,18 +75,6 @@ sub status_records {
 		unverifiable  => $refresh ? 0 : 1,
 		on_divergence => 'report');
 
-	# The one event this command has to account for, said here rather than by
-	# the caller, because it goes to standard error and the caller's one
-	# stream is the record itself.  The refresh created the local control ref
-	# from the remote, which moved a ref the operator did not, and this line
-	# is the only account of it they get.
-	#
-	# The stage's own event lines below are not said, because it moves no
-	# branch for this command and a line reading "fast-forwarded" over a
-	# branch that stands where it stood would be an account of a write nobody
-	# made.  What those branches are is in the record's divergence cell.
-	info("  #Gi{%s}", $_) for @{$control->{events}};
-
 	# The stage is asked read-only, because this command reports and writes
 	# nothing.  A branch the stage would have reset or fast-forwarded keeps
 	# its own ref and carries the ref a real run would have moved it to,
@@ -105,6 +93,20 @@ sub status_records {
 		scope     => $opts{scope},
 		refreshed => $refresh ? 1 : 0,
 	);
+
+	# The events the control check raised, carried on the record for the
+	# caller to print.  The refresh creates the local control ref from the
+	# remote where this clone lacks it, which moves a ref the operator did
+	# not, and that line is the only account of it they get.  It is handed
+	# back rather than said here, because this module computes a record and a
+	# module that wrote to a terminal mid-computation would be no use to a
+	# caller that wanted the record alone.
+	#
+	# The stage's own event lines are not carried, because it moves no branch
+	# for this caller and a line reading "fast-forwarded" over a branch that
+	# stands where it stood would be an account of a write nobody made.  What
+	# those branches are is in the record's divergence cell.
+	$record->{events} = $control->{events};
 
 	# The walk leaves drifted null for this command to fill, and the fill
 	# reads git off the branch the walk already named.  The ref is the one
@@ -185,20 +187,28 @@ sub render_json {
 # A deployment's timestamp reaches the record as a Time::Piece, because that
 # is what the exodus reader answers with, and an encoder handed an object of
 # any kind raises rather than guessing at one.  So each object is written as
-# the text it prints as, which for that one is the date an operator would read
-# anyway.  The record itself is left alone, since a caller may still be
-# holding it.
+# text, and the timestamp is written in the form vault holds it in rather than
+# in the ctime form Time::Piece stringifies to, because this output is the one
+# a machine reads and a reader comparing it against the stored record has to
+# get the same string back, timezone and all.  The record itself is left
+# alone, since a caller may still be holding it.
 sub _jsonable {
 	my ($value) = @_;
 
 	return $value unless ref $value;
+
+	# The encoder writes its own booleans back as true and false, so they are
+	# the one blessed thing that goes through untouched.  It is asked first,
+	# because a guard for a blessed scalar standing below the container arms
+	# reads as though nothing could reach it.
+	return $value if ref($value) eq 'JSON::PP::Boolean';
+	return $value->strftime(EXODUS_TIME_FORMAT)
+		if ref($value) eq 'Time::Piece';
+
 	return [map {_jsonable($_)} @$value] if ref $value eq 'ARRAY';
 	return {map {($_ => _jsonable($value->{$_}))} keys %$value}
 		if ref $value eq 'HASH';
 
-	# The encoder writes its own booleans back as true and false, so they are
-	# the one blessed thing that goes through untouched.
-	return $value if ref($value) eq 'JSON::PP::Boolean';
 	return "$value";
 }
 
