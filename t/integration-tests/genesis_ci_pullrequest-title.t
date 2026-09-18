@@ -178,7 +178,7 @@ subtest 'several open pull requests warn and the first decides' => sub {
 # non-fast-forward, and the environment records that its publish was rejected
 # before any of the title or the body is reached.
 subtest 'a new pull request supersedes the closed attempts' => sub {
-	plan tests => 8;
+	plan tests => 9;
 
 	my $h   = ready(kit => 'omega-v2.7.0');
 	my $gh  = $h->{gh};
@@ -210,6 +210,10 @@ subtest 'a new pull request supersedes the closed attempts' => sub {
 		message => 'Raise the cf instance count');
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+
+	# A guard rather than a row that starts red: the arm that opens a pull
+	# request landed with Task 16.1, and the exit is read here because
+	# everything below it is read off a run that got as far as the create.
 	is($exit, 0, 'the run succeeded');
 
 	my ($create) = grep {($_->{method} // '') eq 'POST'} gh_calls($gh);
@@ -236,6 +240,13 @@ subtest 'a new pull request supersedes the closed attempts' => sub {
 		'and quotes the words the API gave');
 	like($opened->{body}, qr{#$bare, closed without merging: https?://\S+/pull/$bare},
 		'and links the attempt that carried no text');
+
+	# The title is checked for the merged number above, and the body is
+	# checked for it here.  The body is composed from the rejected list
+	# alone, so this holds by construction today, and a change to what that
+	# list is built from would otherwise be caught on one axis only.
+	unlike($opened->{body}, qr/#$merged\b/,
+		'and the body names the merged one no more than the title does');
 
 	# A guard rather than a row that starts red: the reset that drops what the
 	# branch carried landed with the arm itself, and T262 asks that a

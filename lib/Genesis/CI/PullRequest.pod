@@ -298,6 +298,11 @@ paragraph names every attempt, and it quotes the one that said why.
 A merged pull request is never a prior attempt, and C<pr_state> never puts one
 in the list this reads, so a merged pull request is never named here either.
 
+An attempt the API answered with no C<html_url> is named without the colon and
+the link, rather than ending the sentence on a colon with nothing after it.
+Nothing reaches that, since every pull request GitHub answers carries the
+field, so it stands for one that has gone missing.
+
 B<Parameters:>
 
 =over 4

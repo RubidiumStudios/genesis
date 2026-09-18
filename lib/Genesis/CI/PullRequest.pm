@@ -174,9 +174,19 @@ sub supersedes_paragraph {
 	push @parts, review_paragraph($reviewed->{number}, $reviewed->{review},
 		prefix => sprintf('Supersedes #%d. ', $reviewed->{number}))
 		if $reviewed;
+	# An attempt the API answered with no html_url takes the sentence without
+	# the colon, rather than ending it on a colon with nothing after it.  No
+	# row reaches this branch: the GitHub double carries html_url on every
+	# pull request it holds and GitHub itself answers one on every pull
+	# request there is, so it stands for a field that has gone missing rather
+	# than for a shape anything produces.
 	push @parts, sprintf('Supersedes %s.',
-		join(', ', map {sprintf('#%d, closed without merging: %s',
-			$_->{number}, $_->{html_url} // '')} @bare))
+		join(', ', map {
+			$_->{html_url}
+				? sprintf('#%d, closed without merging: %s',
+					$_->{number}, $_->{html_url})
+				: sprintf('#%d, closed without merging', $_->{number})
+		} @bare))
 		if @bare;
 
 	return join("\n\n", @parts);
