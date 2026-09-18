@@ -170,9 +170,9 @@ subtest 'an environment with no branch anywhere waits for the apply' => sub {
 
 	# The branch goes from R, from copy A's own refs, and from the
 	# remote-tracking ref that would put it back, which leaves the
-	# repository as genesis pipeline-apply has not reached it: nothing cut a
-	# branch for lab, so there is no ref to read a marker off and nothing to
-	# deliver onto.
+	# repository as genesis pipeline-apply has not reached it.  Nothing cut
+	# a branch for lab, so there is no ref to read a marker off and nothing
+	# to deliver onto.
 	my $unbranch = sub {
 		my ($h) = @_;
 		my $branch = $h->slug('lab');

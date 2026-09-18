@@ -1194,6 +1194,20 @@ sub plan {
 				return;
 			}
 
+			# The deploy cell comes off the read above, and it is filled
+			# before the branchless arm below returns, because an
+			# environment somebody deployed by hand before the pipeline
+			# reached it has a deploy commit and no branch at once.  An arm
+			# that answered the wait and dropped the read it had already
+			# taken left that environment's deploy column empty in a report
+			# whose whole subject is where each environment stands.
+			my $deployed = $certified->{state} eq 'certified' ? {
+				control_commit => $certified->{control_commit},
+				commit         => $certified->{commit},
+				at             => $certified->{at},
+			} : undef;
+			$env_record->{deployed} = $deployed;
+
 			# D43: an environment the pre-flight has no branch record for has
 			# no deployment branch on either side, so genesis pipeline-apply
 			# has not cut one for it and what it waits for is that command.
@@ -1218,13 +1232,6 @@ sub plan {
 				apply_hold($env_record, $hold);
 				return;
 			}
-
-			my $deployed = $certified->{state} eq 'certified' ? {
-				control_commit => $certified->{control_commit},
-				commit         => $certified->{commit},
-				at             => $certified->{at},
-			} : undef;
-			$env_record->{deployed} = $deployed;
 
 			# D60: an environment whose record carries no certified commit
 			# is one the pipeline was never applied to, and nothing may be

@@ -508,8 +508,8 @@ apart from a tenth, so the question is put to the branch's own history, which
 carries one marked commit and no more where the branch has been delivered to
 once.  What bounds the cost is the fifty-commit limit it asks for, since
 L<Service::Git/log_subjects> runs git and builds the whole list before the
-loop begins; returning at the second marked commit saves the iteration below
-it and no git work.  L<Genesis::CI::Marker> owns the marker's vocabulary and
+loop begins.  Returning at the second marked commit saves the iteration below
+it and no git work at all.  L<Genesis::CI::Marker> owns the marker's vocabulary and
 says which control commits a message names, so nothing here spells the prefix.
 
 B<Parameters:>
@@ -525,9 +525,9 @@ The L<Service::Git> to walk through.
 The ref to walk, which its caller takes from the row the walk routed, so the
 history the seed is counted over is the one the reading was read from.  The
 fifty newest commits are read, and that is a window of commits rather than of
-deliveries: a branch whose earlier delivery sits further back than the window
-and which carries one marked commit inside it reads as the seed, which takes
-about fifty hand commits between two deliveries.
+deliveries.  A branch whose earlier delivery sits further back than the window
+and which carries one marked commit inside it reads as the seed, and that
+takes about fifty hand commits between two deliveries.
 
 =back
 

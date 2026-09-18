@@ -99,9 +99,18 @@ subtest 'every line of the mapping table has its reading' => sub {
 	my @lines = (
 		{name => 'no branch anywhere', build => sub {
 			my ($h) = @_;
-			commit_on_control($h, files => {'ops/shared.yml' => "---\none\n"}, push => 1);
+			my $c = commit_on_control($h,
+				files => {'ops/shared.yml' => "---\none\n"}, push => 1);
+			# Deployed once, with no branch ever cut for it, which is the
+			# environment somebody deployed by hand before the pipeline
+			# reached it.  The wait is still the apply, and the deploy
+			# column still has a commit to name, so the row is the one that
+			# says the arm answering the wait carries the durable read it
+			# took rather than dropping it.
+			certify($h, 'env', control_commit => $c);
+			return $c;
 		 }, reading => 'not-propagated', routing => qr/awaiting pipeline-apply/,
-		    divergence => undef, certified => 'no-branch'},
+		    divergence => undef, certified => 'no-branch', deployed => 1},
 
 		{name => 'the init commit alone', build => sub {
 			my ($h) = @_;
@@ -165,18 +174,20 @@ subtest 'every line of the mapping table has its reading' => sub {
 		    divergence => 'in-sync', seeded => 1},
 	);
 
-	# Three assertions per line, one more for the seed annotation every row
+	# Three assertions per line, two more for the seed annotation every row
 	# carries whatever it reads, one more for each line that names a
-	# certification state, and one restoration for each of the two commands
-	# each line runs.
-	my $states = grep {exists $_->{certified}} @lines;
-	plan tests => scalar(@lines) * 6 + $states;
+	# certification state, one more for each line that names a deploy
+	# commit, and one restoration for each of the two commands each line
+	# runs.
+	my $states  = grep {exists $_->{certified}} @lines;
+	my $deploys = grep {$_->{deployed}} @lines;
+	plan tests => scalar(@lines) * 7 + $states + $deploys;
 
 	for my $line (@lines) {
 		my $h = make_harness(envs => ['env'], kit => 'omega-v2.7.0',
 			tracked => ['ops/shared.yml']);
 		fixture_vault($h);
-		$line->{build}->($h);
+		my $deployed = $line->{build}->($h);
 		refresh($h, 'a');
 
 		my ($json) = run_genesis($h, 'pipeline-status', '--json');
@@ -187,12 +198,24 @@ subtest 'every line of the mapping table has its reading' => sub {
 			$line->{divergence}, "$line->{name}: the divergence");
 		# Read as a field rather than as a word in the tree, because the
 		# shape --json emits is what a consumer reads and a row carrying
-		# the key only sometimes would hand one an undefined value.
+		# the key only sometimes would hand one an undefined value.  The
+		# key is asserted before the value, and only the expectation is
+		# normalised, because a row that had dropped the key altogether
+		# would answer false to a test that normalised both sides and pass
+		# every line that expects no seed.
+		ok(exists $row->{seeded},
+			"$line->{name}: the seed annotation is on the row");
 		is($row->{seeded} ? 1 : 0, $line->{seeded} ? 1 : 0,
 			"$line->{name}: the seed annotation");
 		is($row->{certified}{state}, $line->{certified},
 			"$line->{name}: the certification state")
 			if exists $line->{certified};
+		# The deploy commit comes off the same durable read the wait is
+		# answered from, so an arm that answers the wait and drops the read
+		# leaves this cell empty on a row that has one to show.
+		is($row->{deployed} && $row->{deployed}{control_commit}, $deployed,
+			"$line->{name}: the deploy commit the record names")
+			if $line->{deployed};
 
 		my ($tree) = run_genesis($h, 'pipeline-status');
 		like(unfolded($tree), $line->{routing}, "$line->{name}: the routing result")
