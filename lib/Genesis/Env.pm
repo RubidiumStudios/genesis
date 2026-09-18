@@ -11,6 +11,7 @@ use Genesis::State qw/envset under_test in_callback/;
 use Genesis::Term qw/csprintf wrap fix_wrap decolorize in_controlling_terminal bullet/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_line prompt_for_choice new_prompt_for_choice/;
 use Genesis::Commands qw/current_command known_commands/;
+use Genesis::Exit qw/UNAVAILABLE/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
 
@@ -2191,6 +2192,9 @@ sub exodus_lookup {
 	my ($self, $key, $default,$for) = @_;
 	$key //= '.';
 	$for ||= $self->exodus_slug;
+	# D77: the fact half of the staleness comparison.  A read of this
+	# environment's own record is not a dependency, so it is not counted.
+	$self->note_dependency_read($for) unless $for eq $self->exodus_slug;
 	my $path =  $self->exodus_mount().$for;
 	debug "Checking if $path path exists...";
 	return $default unless $self->vault->has($path);
@@ -3466,6 +3470,29 @@ sub last_read_dependencies {
 	my $data = $self->vault->get($self->exodus_base);
 	return [] unless ref($data) eq 'HASH';
 	return _decode_path_list($data->{dependencies_read});
+}
+
+# }}}
+# note_dependency_read, dependencies_read - the set this run read {{{
+#
+# D77 records the set the deploy read rather than the set the compile
+# predicted, because an environment whose blueprint could not render at apply
+# time takes its declared set alone and is marked incomplete, and its first
+# real deploy is what tells the truth.  The staleness query compares the
+# compiled set against this one, which is what wires such an environment in.
+#
+# Deployment slugs, because that is what the compiled half holds and what
+# last_read_dependencies decodes, and the two are the two sides of one
+# comparison.
+sub note_dependency_read {
+	my ($self, $slug) = @_;
+	$self->{__dependencies_read}{$slug} = 1 if defined $slug && length $slug;
+	return $self;
+}
+
+sub dependencies_read {
+	my ($self) = @_;
+	return [sort keys %{$self->{__dependencies_read} || {}}];
 }
 
 # }}}
@@ -5448,12 +5475,32 @@ sub update_deployment_exodus {
 	my $info_msg = '';
 	if ($action eq 'deploy') {
 		if (Genesis::Env::Deployment::is_a_successful_result($result)) {
+			# D77 records the set this run read, and the reads exodus_lookup
+			# made are already noted, because they are the reads no manifest
+			# shows.  The rest of the set is asked for here, because this run
+			# rendered the blueprint that the compile may not have been able
+			# to render, so what this run resolved is the fact the compile
+			# could only predict.
+			my $tracking = $self->top->pipeline_enabled;
+			if ($tracking) {
+				my ($resolved) = $self->dependency_set;
+				$self->note_dependency_read($_) for @$resolved;
+			}
+
 			# if a successful deploy, generate the exodus data from the manifest using
 			# $self->extract_manifest_exodus, as well as the standard deployment exodus
 			# data
 			$exodus = {
 				$self->extract_manifest_exodus->%*,
+				# D58 keeps the two time forms apart, and every time written
+				# here is a value, so EXODUS_TIME_FORMAT and never the short
+				# form, which belongs to a path.
 				completed => $timestamp,
+				# D77.  One comma-joined value, which is the one form a flat
+				# record carries.
+				($tracking ? (
+					dependencies_read => join(',', @{$self->dependencies_read}),
+				) : ()),
 			};
 
 			$exodus = {
@@ -5558,19 +5605,20 @@ sub update_deployment_exodus {
 		if defined $deploy_sequence && !@errors;
 
 	if (@errors) {
-		my $error_msg = join("\n", @errors);
-		bail(
-			"#R{Failed to export %s metadata.}\n\nError(s):%s\n\n".
-			"Environment was still successfully %s, but metadata used by addons and ".
-			"other kits is outdated.\n%s",
+		# D98: BOSH has already deployed by the time we get here, so a vault
+		# that has gone away leaves an environment that is running and a
+		# record that does not say so, and the operator needs both facts in
+		# one message.  That is H37, and UNAVAILABLE is what it costs.
+		bail({exitcode => UNAVAILABLE},
+			"#C{%s} %s, but its deployment record was not written:%s\n\n".
+			"The environment is running.  Restore the vault at #C{%s} and run ".
+			"#C{genesis %s info} to confirm what is recorded, then %s only if ".
+			"the record is still missing.",
 			$self->{name},
-			join("\n[[  - >>", '', @errors),
 			$action eq 'deploy' ? 'deployed' : 'terminated',
-			$action eq 'deploy'
-				? "\nThis may be resolved by deploying again, or it may be a permissions issue while trying to ".
-					"write to vault path '".$self->exodus_base."'\n"
-				: "\nThis may be resolved by terminating again, or it may be a permissions issue while trying to ".
-					"write to vault path '".$self->exodus_base."'\n"
+			join("\n[[  - >>", '', @errors),
+			$self->vault->url, $self->{name},
+			$action eq 'deploy' ? 'redeploy' : 'terminate again'
 		);
 	}
 

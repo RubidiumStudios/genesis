@@ -1,0 +1,124 @@
+#!/usr/bin/env perl
+# Proves T225, the recorded dependency set being what the deploy actually
+# read, which shrinks when a prerequisite goes; T330, the two timestamp forms
+# staying apart; and T327, the failed exodus write after BOSH deployed
+# exiting UNAVAILABLE.
+#
+# Every run passes --no-propagate, for the reason the due-commits and drifted
+# files give: the auto-cascade hands off to a child genesis propagate that a
+# later step owns and that fails today, and a row about what the deploy
+# recorded should not be reading the child's failure as the deploy's.
+use strict;
+use warnings;
+use utf8;
+
+use lib 'lib';
+use lib 't';
+use helper;
+use Harness::Propagation;
+
+use Test::More;
+
+use Genesis;
+use Genesis::Exit;
+
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
+
+# The environment file as the tracked tree writes it, with the prerequisite
+# list the row wants.  A row that drops a prerequisite has to put the whole
+# file back on the deployment branch, because that branch is what the deploy
+# reads, and this keeps the two writes saying the same thing but for the list.
+sub env_body {
+	my ($h, @prereqs) = @_;
+	return "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n"
+	     . "genesis:\n  env: qa\n  pipeline:\n    track_dependencies:\n"
+	     . join('', map {"      - " . $h->slug($_) . "\n"} @prereqs);
+}
+
+subtest 'the recorded dependency set is what the deploy actually read' => sub {
+	plan tests => 5;
+
+	my $h = tracked_harness(qw/lab ops/);
+	# This environment's director is named for the environment, so the
+	# director fixture and the environment's own exodus record share one
+	# path and a deploy's record write replaces the credentials.  They are
+	# read here and written back below, so the second deploy can still find
+	# the director the first one deployed to.
+	my $director = record_at($h, $h->env_path('qa'));
+	my (undef, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+	is($exit, 0, 'the first deploy succeeded')
+		or diag("what the deploy said:\n$err");
+
+	# The set lives on the flat record at the environment's exodus base,
+	# which is what last_read_dependencies reads and what the staleness
+	# query compares the compiled set against.
+	my $flat = record_at($h, $h->env_path('qa'));
+	is_deeply([sort split(/\s*,\s*/, $flat->{dependencies_read} // '')],
+		[sort ($h->slug('lab'), $h->slug('ops'))],
+		'it recorded both prerequisites it read, as deployment slugs');
+
+	# The file goes on the deployment branch by hand, because that branch is
+	# what the deploy reads and a rewrite on control alone would not reach
+	# it until a propagate had routed it there.
+	hand_commit($h, $h->slug('qa'),
+		files   => {edited_file($h, 'qa') => env_body($h, 'lab')},
+		message => 'stop tracking a prerequisite');
+	refresh($h, 'a', $h->control, $h->slug('qa'));
+	fixture_director($h, 'qa', url => $director->{url});
+	run_genesis($h, 'qa', 'deploy', '--no-propagate', '-y', 'r');
+
+	$flat = record_at($h, $h->env_path('qa'));
+	is_deeply([split(/\s*,\s*/, $flat->{dependencies_read} // '')],
+		[$h->slug('lab')],
+		'and the second deploy recorded the smaller set');
+};
+
+subtest 'the two timestamp forms stay apart' => sub {
+	plan tests => 4;
+
+	my $h = tracked_harness();
+	run_genesis($h, 'qa', 'deploy', '--no-propagate', '-y', 'r');
+
+	my $record = newest_record($h, $h->env_path('qa').'/deployments');
+	my @times = grep {defined} map {$record->{$_}} qw/dated completed/;
+
+	my ($dated) = reverse sort @{record_keys($h, $h->env_path('qa').'/deployments')};
+	like($dated, qr/^\d{14}$/,
+		'the timestamp in the path is the short numeric UTC form');
+
+	my @bad = grep {$_ !~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [-+]\d{4}$/} @times;
+	is_deeply(\@bad, [], 'every time held as a value is in EXODUS_TIME_FORMAT');
+
+	my @iso = grep {$_ =~ /T\d{2}:\d{2}:\d{2}/} @times;
+	is_deeply(\@iso, [], 'and no value carries an ISO form');
+};
+
+subtest 'a failed exodus write after BOSH deployed names its own code' => sub {
+	plan tests => 4;
+
+	my $h = tracked_harness();
+	# The writes are refused and the reads go on answering, because a deploy
+	# whose vault stopped reading refuses long before BOSH, and this row is
+	# about the write that fails once BOSH has deployed.
+	break_vault_writes($h, $h->env_path('qa'));
+
+	# restore => 0 and no assertion, because the deploy leaves through a
+	# refusal and its cache stays in the tree behind it, so there is nothing
+	# to assert back.
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+
+	is($exit, Genesis::Exit::UNAVAILABLE, 'it exits UNAVAILABLE')
+		or diag("what the deploy said:\n$err");
+	like(unfolded($out.$err), qr/deployed/i, 'it reports the deployment as done');
+	like(unfolded($err), qr/record was not written/i,
+		'it says the record was not written');
+	like(unfolded($err), qr/vault/i, 'and what to do about it');
+	restore_vault($h);
+};
+
+done_testing;
+
+# vim: ts=2 sw=2 sts=2 noet

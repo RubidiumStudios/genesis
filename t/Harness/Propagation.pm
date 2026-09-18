@@ -43,8 +43,8 @@ our @EXPORT = qw/
 
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed fixture_director fixture_bosh
-	break_vault restore_vault
-	record_at vault_read_log fixture_preflight fixture_kit
+	break_vault break_vault_writes restore_vault
+	record_at record_keys vault_read_log fixture_preflight fixture_kit
 	fixture_command install_compiled_kit shimmed_git real_tool
 	fixture_fly
 
@@ -2339,15 +2339,34 @@ sub fixture_vault {
 	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
 		_real_safe(), 'rm', '-rf', $self->exodus_mount);
 
-	$self->{vault_log} = "$self->{tmp}/vault-reads.log";
+	$self->{vault_log}    = "$self->{tmp}/vault-reads.log";
+	$self->{vault_refuse} = "$self->{tmp}/vault-refused-writes";
 	my $bin = "$self->{tmp}/bin";
 	helper::mkdir_or_fail($bin) unless -d $bin;
 	helper::put_file("$bin/safe", 0755, <<"EOS");
 #!/usr/bin/env bash
 # Records a read and hands the call on to the real safe.  Only a wrapper on
 # the path can see what a spawned genesis child reads.
+#
+# A write at or below a path break_vault_writes named is refused here rather
+# than handed on, which is the one way a row can make a vault write fail while
+# every read still answers.  Nothing writes the refusal file until a row arms
+# it, so an unarmed harness pays one file test and hands the call straight on.
 case "\$1" in
 	get|read|export) echo "\$2" >> "$self->{vault_log}" ;;
+	set|rm|delete|move)
+		if [ -s "$self->{vault_refuse}" ]; then
+			while IFS= read -r refused; do
+				[ -n "\$refused" ] || continue
+				case "\$2" in
+					"\$refused"|"\$refused"/*)
+						echo >&2 "the harness vault refuses to write \$2"
+						exit 1
+						;;
+				esac
+			done < "$self->{vault_refuse}"
+		fi
+		;;
 esac
 exec "@{[_real_safe()]}" "\$@"
 EOS
@@ -2946,11 +2965,33 @@ sub break_vault {
 }
 
 # }}}
+# break_vault_writes - make every write at or below a path refuse {{{
+#
+# break_vault moves a record aside, which makes a read answer nothing and
+# leaves a write to the same path perfectly able to land.  A row about a write
+# that fails needs the other half, and it needs the reads to go on answering,
+# because a deploy whose vault stopped reading never reaches the write at all.
+#
+# The refusal is armed in a file the recording wrapper consults on each call,
+# because the command under test runs in a child and a variable set here would
+# have to be threaded through every runner to reach it.  restore_vault
+# disarms it, so a row that breaks and restores in one fixture reads as one
+# pair whichever half it broke.
+sub break_vault_writes {
+	my ($self, @paths) = @_;
+	$self->fixture_vault;
+	helper::put_file($self->{vault_refuse},
+		join('', map {"$_\n"} @paths));
+	return $self;
+}
+
+# }}}
 # restore_vault - put back what break_vault moved aside {{{
 sub restore_vault {
 	my ($self) = @_;
 	die "restore_vault needs a vault fixture, and this harness has none\n"
 		unless $self->{vault_target};
+	helper::put_file($self->{vault_refuse}, '') if $self->{vault_refuse};
 	for my $pair (@{delete($self->{broken}) || []}) {
 		my ($said, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
 				stderr => 0},
@@ -2981,6 +3022,25 @@ sub record_at {
 	my ($self, $path) = @_;
 	my $exported = $self->_exported($path) or return undef;
 	return $exported->{_export_key($path)};
+}
+
+# }}}
+# record_keys - what the entries of a record set are called {{{
+#
+# A record set's entries sit one level under the set's own path, each named
+# for when it happened, and a row that asserts on the form of that name has to
+# read the name rather than the record.  newest_record answers one entry's
+# contents off the same export, and this answers what the entries are called,
+# so the two together say everything a row can ask of a set.
+#
+# The answer is sorted and holds the entry names alone, without the path above
+# them, and a path with no entries under it answers an empty list rather than
+# undef, because a set with nothing in it is a set.
+sub record_keys {
+	my ($self, $path) = @_;
+	my $exported = $self->_exported($path) or return [];
+	my $key = _export_key($path);
+	return [sort map {m{^\Q$key\E/([^/]+)$} ? $1 : ()} keys %$exported];
 }
 
 # }}}
@@ -4610,13 +4670,24 @@ sub tracked_harness {
 	my (@prereqs) = @_;
 	@prereqs = ('lab') unless @prereqs;
 	my $h = make_harness(envs => [@prereqs, 'qa']);
-	$h->write_env_file('qa', genesis => {
+	# The key goes in the pipeline block, because
+	# genesis.pipeline.track_dependencies is where _declared_dependencies
+	# reads it, and a list written a level above that is a list nothing ever
+	# reads.
+	$h->write_env_file('qa', pipeline => {
 		track_dependencies => [map {$h->slug($_)} @prereqs]});
 	# write_env_file commits in copy A and pushes nothing, and the commit a
 	# delivery's marker names has to be on R, so control goes up before the
 	# walk reads it.
 	$h->push_from('a', $h->control);
-	return $h->ready_envs;
+	# The director, the fake bosh, and the kit, in the order ready_harness
+	# stands them in and for the reasons it gives: a row about what a deploy
+	# records has to be able to deploy, and every control commit the delivery
+	# routes has to carry the kit.
+	$h->fixture_bosh(commit => 1, catch_up => 0);
+	$h->ready_envs;
+	$h->_catch_up($_) for @{$h->{envs}};
+	return $h;
 }
 
 sub two_env_harness {

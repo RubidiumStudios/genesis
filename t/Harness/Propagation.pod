@@ -968,12 +968,28 @@ is checked, and one that fails is refused by name and says what C<safe> said,
 because a move nobody looked at leaves the row asserting against a vault
 nothing changed.
 
+=head2 break_vault_writes($h, @paths)
+
+Makes every C<safe> write at or below each path refuse, while every read goes
+on answering.  C<break_vault> moves a record aside, which stops a read and
+leaves a write to the same path perfectly able to land, and a row about a
+write that fails needs the other half of that.  The reads have to go on
+answering, because a deploy whose vault stopped reading never reaches its
+write at all.
+
+The refusal is armed in a file the recording C<safe> consults on each call,
+since the command under test runs in a child and a variable set in the parent
+would have to be threaded through every runner to reach it.  A path is matched
+at itself and below itself, so breaking an environment's exodus base breaks
+the deployment record written under it too.  C<restore_vault> disarms it.
+
 =head2 restore_vault($h)
 
-Puts back everything C<break_vault> moved aside, so the same row can assert the
-run succeeding once its input is readable again.  It refuses a harness with no
-vault fixture for the reason C<break_vault> does, and it checks each move back
-and refuses a failed one by name for the same reason again.
+Puts back everything C<break_vault> moved aside and disarms whatever
+C<break_vault_writes> refused, so the same row can assert the run succeeding
+once its vault answers again.  It refuses a harness with no vault fixture for
+the reason C<break_vault> does, and it checks each move back and refuses a
+failed one by name for the same reason again.
 
 =head2 snapshot_w($h, %opts)
 
@@ -1267,6 +1283,19 @@ nothing of its own answers undef even where its children hold something.
 The read is made on the parent's own path, which the recording C<safe> is
 deliberately kept off, so a row that reads a record in order to assert on it
 never counts as one of the reads the run under test made.
+
+=head2 record_keys($h, $path)
+
+What the entries of a record set are called, sorted, as an arrayref.  A set's
+entries sit one level under the set's own path, each named for when it
+happened, and a row that asserts on the form of that name has to read the name
+rather than the record.  C<newest_record> answers one entry's contents off the
+same export and this answers what the entries are called, so the two together
+say everything a row can ask of a set.
+
+The names come back without the path above them, and a path with no entries
+under it answers an empty arrayref rather than undef, because a set with
+nothing in it is still a set.
 
 =head2 vault_read_log($h)
 
@@ -1647,11 +1676,19 @@ C<delivered> and C<certified> take a list back where a row wants one.
 
   my $h = tracked_harness(qw/lab ops/);
 
-A tree whose C<qa> environment tracks the prerequisites the call names.  They
-arrive positionally, because every call reads as a list of environment names
-and an options hash around two of them would say nothing the list does not.
-The environment file it writes is published before the walk reads it, because
-the commit a delivery's marker names has to be one R holds.
+A tree whose C<qa> environment tracks the prerequisites the call names, and
+that a deploy can run in.  They arrive positionally, because every call reads
+as a list of environment names and an options hash around two of them would
+say nothing the list does not.  The list is written at
+C<genesis.pipeline.track_dependencies>, which is where the declared half of
+the dependency set is read from.  The environment file is published before the
+walk reads it, because the commit a delivery's marker names has to be one R
+holds.
+
+The director, the fake C<bosh>, and the kit are stood up in the order
+C<ready_harness> stands them in and for the reasons it gives, so a row about
+what a deploy records can deploy and every control commit the delivery routes
+carries the kit.
 
 =head2 two_env_harness(%opts)
 
