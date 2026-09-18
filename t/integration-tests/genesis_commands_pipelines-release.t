@@ -19,22 +19,12 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# The kit goes with every shape, since a row that loads an environment needs
-# one on disk, and prod is delivered and certified at the seeding commit
-# because a branch carrying no marker is walked from the commit that
-# introduced the environment.  The wrapper is the hold file's, and both files
-# move onto one harness helper in the commit that follows this one.
-sub held {
-	return held_prod(kit => 'omega-v2.7.0',
-		delivered => ['prod'], certified => ['prod'], @_);
-}
-
 subtest 'the release deletes the record and keeps no fields' => sub {
 	# Five rows, one of which is this row's own restoration assertion, and
 	# one more for the hold run, which asserts its restoration for itself.
 	plan tests => 6;
 
-	my $h    = held();
+	my $h    = held_prod_delivered();
 	run_genesis($h, 'prod', 'pipeline-hold', 'waiting on the capacity report');
 	my $path = $h->env_path('prod').'/hold';
 	have_secret "$path:reason";
@@ -59,7 +49,7 @@ subtest 'the release is logged with the identity that ran it' => sub {
 	# assertions.
 	plan tests => 4;
 
-	my $h = held();
+	my $h = held_prod_delivered();
 	run_genesis($h, 'prod', 'pipeline-hold', 'waiting on the capacity report');
 
 	# The identity is read back out of the record the hold wrote, because
@@ -78,7 +68,7 @@ subtest 'releasing where nothing stands says so' => sub {
 	# Two rows, and one more for the run's own restoration assertion.
 	plan tests => 3;
 
-	my $h = held();
+	my $h = held_prod_delivered();
 
 	my ($out, $err, $exit) = run_genesis($h, 'prod', 'pipeline-release');
 	is($exit, 0, 'the command succeeded');
@@ -101,7 +91,7 @@ subtest 'more than one environment is a usage error' => sub {
 	# true if the refusal moved after the delete.
 	plan tests => 5;
 
-	my $h = held();
+	my $h = held_prod_delivered();
 	run_genesis($h, 'prod', 'pipeline-hold', 'waiting on the capacity report');
 
 	my ($out, $err, $exit) = run_genesis($h,

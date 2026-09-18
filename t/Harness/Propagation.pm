@@ -29,7 +29,7 @@ our @EXPORT = qw/
 	in_set covered_paths in_root
 	branches_on_r fresh_clone clone_copy subjects_of commits_on heads_in
 	reachable_on_r
-	newest_record trailers_of unfolded
+	newest_record trailers_of unfolded env_body
 
 	commit_on_control commit_from_b publish_from_b push_from refresh
 	init_branch deliver propagation_set edited_file harness_marker
@@ -64,7 +64,8 @@ our @EXPORT = qw/
 	compilable_pipeline shuttle
 
 	ready_envs ready_harness seeded_harness staged due_harness gated_harness
-	held_harness held_prod deployable_prod tracked_harness two_env_harness
+	held_harness held_prod held_prod_delivered deployable_prod
+	tracked_harness two_env_harness
 	inherited_harness
 	ready with_open_pr two_roots a_delivery seeded two_due three_due three
 	chain gated proposed automated top_for
@@ -4782,7 +4783,7 @@ sub gated_harness {
 	for my $n (1 .. 4) {
 		push @shas, $h->commit_on_control(
 			files    => $files ? $files->[$n - 1]
-			                   : {"$env.yml" => _env_body($env, $n)},
+			                   : {"$env.yml" => env_body($env, $n)},
 			message  => "A change on control, $n",
 			($n == 3 ? (trailers => {'Genesis-Stage' => $opts{stage} // 'prod'}) : ()),
 			push     => 1,
@@ -4807,6 +4808,21 @@ sub held_prod {
 	return ready_harness(%opts, envs => $opts{envs} // ['prod'],
 		delivered => $opts{delivered} // [],
 		certified => $opts{certified} // []);
+}
+
+# held_prod_delivered is the same tree with prod already delivered to and
+# certified at the seeding commit, and with a kit on disk.  The hold rows want
+# it because they count what a hold is blocking, and a branch carrying no
+# marker is walked from the commit that introduced the environment, which puts
+# the seeding commit in every count.  The kit goes with it because a run that
+# walks an environment loads it.
+#
+# It stands beside held_prod rather than changing it, since held_prod's own
+# POD promises a tree delivered to nowhere and other rows read it that way.
+sub held_prod_delivered {
+	my (%opts) = @_;
+	return held_prod(kit => 'omega-v2.7.0',
+		delivered => ['prod'], certified => ['prod'], %opts);
 }
 
 # deployable_prod is held_prod with everything a spawned `genesis deploy`
@@ -5134,14 +5150,14 @@ sub _due {
 	return map {
 		$h->commit_on_control(
 			files   => $opts{files} ? $opts{files}[$_ - 1]
-			                       : {"$env.yml" => _env_body($env, $_)},
+			                       : {"$env.yml" => env_body($env, $_)},
 			message => "A change due to propagate, $_",
 			push    => 1,
 		)
 	} 1 .. $n;
 }
 
-# _env_body - the environment file the commit-laying shapes write {{{
+# env_body - the environment file the commit-laying shapes write {{{
 #
 # The same body write_env_file lays down, with a counter beside it.  It has
 # to stay a valid environment file, because a run reads the topology out of
@@ -5150,7 +5166,11 @@ sub _due {
 # leaves the repository with no environments at all.  The counter is there
 # because a commit needs a delta to make, and two commits writing one body
 # would leave the second with nothing to commit.
-sub _env_body {
+#
+# It is exported, because a row that lays its own commits on control needs
+# the same body and a copy of it written in a test file is a copy that can
+# fall out of step with the one the shapes here write.
+sub env_body {
 	my ($env, $n) = @_;
 	return "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n"
 	     . "genesis:\n  env: $env\nn: $n\n";

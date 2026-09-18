@@ -529,9 +529,37 @@ A second deployment root in the same repository is untouched, even where it
 carries an environment of the same name, because the two roots have their own
 topologies and their own Exodus paths.
 
-B<Returns:> 0 on success; refuses a disowned pipeline through
-C<assert_not_disowned>, and bails with C<CONFIG> where the deployment root
-declares no pipeline environments.
+B<Parameters:>
+
+=over 4
+
+=item C<@args>
+
+The environment and the reason, in that order.  A single argument is read
+against the deployment root, as described above, and the C<.yml> suffix comes
+off an environment written with one.
+
+=back
+
+B<Returns:> 0 on success.
+
+B<Errors:>
+
+Calls C<command_usage()>, which exits 2, where no reason was given and where
+more than two arguments were, which is what an unquoted reason of several
+words arrives as.
+
+Refuses a disowned pipeline through C<assert_not_disowned>, and bails with
+C<Genesis::Exit/CONFIG> through L</_root_environments> where the deployment
+root declares no pipeline environments.
+
+B<Examples:>
+
+  # Hold one environment
+  genesis prod pipeline-hold "waiting on the capacity report"
+
+  # Hold every environment in the deployment root
+  genesis pipeline-hold "freezing the fleet for the audit"
 
 =head2 pipeline_release(@args)
 
@@ -548,9 +576,36 @@ release.
 
 Releasing is a human act, so no deploy and no flag reaches this command.
 
-B<Returns:> 0 on success; refuses a disowned pipeline through
-C<assert_not_disowned>, and bails with C<CONFIG> where the deployment root
-declares no pipeline environments.
+B<Parameters:>
+
+=over 4
+
+=item C<@args>
+
+The environment, and nothing else.  Without one, every environment in the
+deployment root is released, and the C<.yml> suffix comes off an environment
+written with one.
+
+=back
+
+B<Returns:> 0 on success.
+
+B<Errors:>
+
+Calls C<command_usage()>, which exits 2, where more than one argument was
+given, since the environment is the only argument this command takes.
+
+Refuses a disowned pipeline through C<assert_not_disowned>, and bails with
+C<Genesis::Exit/CONFIG> through L</_root_environments> where the deployment
+root declares no pipeline environments.
+
+B<Examples:>
+
+  # Release one environment
+  genesis prod pipeline-release
+
+  # Release every environment in the deployment root
+  genesis pipeline-release
 
 =head2 propagate
 

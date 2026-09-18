@@ -416,6 +416,18 @@ joined on a newline, so that no phrase can match across the seam where one
 stream ends and the next begins, and an undefined stream counts as an empty
 one, so a row that captured stderr alone passes what it has.
 
+=head2 env_body($env, $n)
+
+  commit_on_control($h, files => {'prod.yml' => env_body('prod', 1)});
+
+Returns the environment file body the commit-laying shapes write, which is the
+one C<write_env_file> lays down with a counter beside it.  A row laying its own
+commits on control calls this rather than writing the body out, because the
+body has to stay a valid environment file: a run reads the topology out of
+these files, and an environment whose kit is not a block mapping drops out of
+the root the walk enumerates.  The counter is what gives each commit a delta to
+make.
+
 =head2 init_branch($h, $env, %opts)
 
 Cuts the environment's branch on R as C<pipeline-apply> would, which is an
@@ -1785,6 +1797,22 @@ The single-environment C<prod> tree the hold rows stand on, walked and cut but
 neither delivered nor certified.  It writes no hold of its own, because every
 one of those rows writes the hold through the command it is testing, and
 C<delivered> and C<certified> take a list back where a row wants one.
+
+=head2 held_prod_delivered(%opts)
+
+  my $h = held_prod_delivered();
+  my $h = held_prod_delivered(mode => 'pr', github => 1);
+
+C<held_prod> with the kit C<omega-v2.7.0> on disk and C<prod> delivered to and
+certified at the seeding commit, which is the shape the hold and release rows
+want.  Those rows count what a hold is blocking, and a branch carrying no
+marker is walked from the commit that introduced the environment, so the
+seeding commit would otherwise land in every count.  The kit goes with it
+because a run that walks an environment loads it.
+
+Everything the caller passes rides through and overrides these three, and
+C<held_prod>'s own defaults are untouched, since other rows read that tree as
+one delivered to nowhere.
 
 =head2 deployable_prod(%opts)
 
