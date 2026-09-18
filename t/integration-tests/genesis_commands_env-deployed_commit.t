@@ -8,6 +8,10 @@
 # not enabled, each naming the recorded deployed commit and the session that
 # opens only under a pipeline, and each writes nothing.
 #
+# Proves T245: a record naming a commit the repository can no longer reach is
+# refused by name at Genesis::Exit::DATAERR, naming the record as well as the
+# commit, with nothing deployed and the working tree left as it was.
+#
 # What the rows catch: an implementation that declared the two flags and left
 # them inert, which exits 0 rather than CONFIG; one that refused with a bare
 # usage error, which exits 2 and names neither the record nor the session; one
@@ -255,6 +259,58 @@ YAML
 	run_genesis($s, 'qa', 'rotate-secrets', '-y');
 	ok(record_at($s, '/secret/qa/bosh/auth/cf/uaa'),
 		'the secrets family stays pre-deploy without the flag');
+};
+
+# Proves T245: a record naming a commit a rewritten branch no longer reaches
+# refuses by name at Genesis::Exit::DATAERR, with nothing deployed.
+#
+# What the rows catch: an implementation that switched first and discovered
+# the missing commit afterwards, which leaves the tree detached and fails the
+# restoration row; one that refused without the record path, which names the
+# commit and leaves the operator no record to go and look at; and one that
+# checked reachability before the refresh, which would refuse a commit that is
+# merely unfetched and so would refuse the ordinary case too.
+subtest 'an unreachable deployed commit refuses by name' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+
+	# Two deliveries, because the rewrite below takes the second one out and
+	# the branch has to be left carrying a repository: a branch holding its
+	# init commit alone is the arm that never switches at all, and a row
+	# standing on it would read that arm's refusal instead of this one.
+	my $earlier = commit_on_control($h,
+		files   => {'ops/base.yml' => "---\nversion: zero\n"},
+		message => 'the content delivered before it',
+		push    => 1,
+	);
+	init_branch($h, 'qa');
+	deliver($h, 'qa', control => $earlier);
+
+	my $control = commit_on_control($h,
+		files   => {'ops/base.yml' => "---\nversion: one\n"},
+		message => 'the content that was deployed',
+		push    => 1,
+	);
+	my $deployed = deliver($h, 'qa', control => $control);
+	certify($h, 'qa', commit => $deployed, control_commit => $control);
+
+	# The teammate rewrites the deployment branch on R, so the commit the
+	# record names is no longer reachable once copy A refreshes.
+	rewrite_branch($h, 'qa/bosh', drop => $deployed);
+	refresh($h, 'a');
+
+	stand_on($h, $h->control);
+	my $before = snapshot_w($h);
+
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'qa', 'deploy', '--redeploy');
+
+	is($exit, Genesis::Exit::DATAERR, 'the redeploy exits DATAERR');
+	like($err, qr/\Q$deployed\E/, 'the refusal names the commit');
+	like($err, qr{/secret/exodus/qa/bosh/deployments},
+		'the refusal names the record the commit came from');
+	unlike($out, qr/bosh deploy/i, 'nothing was deployed');
+	assert_w_restored($before, 'the refusal left working state alone');
 };
 
 done_testing;

@@ -916,6 +916,7 @@ B<Examples:>
 =head2 deployed_target
 
   my $commit = Genesis::Commands::deployed_target($name, $top);
+  my ($commit, $record) = Genesis::Commands::deployed_target($name, $top);
 
 Returns the commit this run targets, or C<undef> when the run targets the tip
 of the deployment branch. A command declares its default target at
@@ -942,6 +943,13 @@ the repository configures, which is the root the command is about to load
 for itself a moment later, and only a run that named the deployed commit
 pays for it.
 
+In list context the path that record was read from comes back beside the
+commit, which is the environment's exodus base with C</deployments> on the
+end.  The branch session refuses a commit the repository cannot reach and
+names the record in the refusal, so the path has to travel with the commit,
+and it is answered here because this is where the record was read.  In scalar
+context the commit alone comes back, exactly as it did before.
+
 Neither this nor C<DEPLOYED_TARGET_HELP> is exported. The gate is the only
 caller and every registration in F<bin/genesis> names the constant in full,
 so an export would put two names in every importer's namespace that nothing
@@ -964,7 +972,9 @@ The C<Genesis::Top> for the deployment root the command is running in.
 
 B<Returns:> the commit the run targets, or C<undef> where it targets the tip
 of the deployment branch, which is every run that named neither flag and
-every command whose registration declares no C<deployed> default.
+every command whose registration declares no C<deployed> default.  In list
+context, that commit and the vault path of the record it was read from, as a
+two-element list.
 
 B<Errors:>
 
@@ -987,6 +997,9 @@ B<Examples:>
 
   Genesis::Commands::deployed_target('qa', $top);
   # Exits CONFIG, in `genesis qa deploy --redeploy` with the pipeline off
+
+  my ($commit, $record) = Genesis::Commands::deployed_target('qa', $top);
+  # Returns: the recorded commit, and /secret/exodus/qa/bosh/deployments
 
 =head2 get_options
 
@@ -2110,6 +2123,14 @@ C<pre-deploy> by class, and C<--as-deployed> is the operator saying which of
 the two questions they are asking, so the flag is read before the class and
 the class is only the default answer.
 
+The record that commit was read from goes down beside it, because the session
+refuses a commit the repository cannot reach and names the record in the
+refusal.  C<deployed_target> answers both in list context, and the gate asks
+in list context for that reason: it is the one caller that knows which record
+answered this run, and an environment built here merely to work the path out
+again would announce a vault target on behalf of a command the gate never
+gates.
+
 The refresh is passed along as C<< refresh => 0 >> for the two commands that
 make no network call of their own.  C<pipeline-status> says so with
 C<--no-refresh>, which it alone declares.  C<pipeline-describe> resolves the
@@ -2326,6 +2347,15 @@ C<.yaml> suffix already stripped by the caller.
 Optional.  The commit the session stands on, as C<deployed_target> resolved
 it.  Absent, or C<undef>, the session stands on the branch's tip.
 
+=item C<< record => $path >>
+
+Optional.  The vault path of the record that commit was read from, which
+C<deployed_target> answers beside it.  It is handed to C<switch> so that a
+commit this repository cannot reach is refused by the name of the record an
+operator has to go and correct, as well as by the name of the commit.  A run
+standing on the branch tip carries none, because a branch is not read out of
+a record.
+
 =back
 
 B<Returns:> whatever C<$fn> returned.
@@ -2336,9 +2366,11 @@ while another is still open, refuses a working tree carrying tracked or
 staged changes, and runs C<preflight>, which refuses a repository with no
 commits, no committed identity, or an ownership git declines to trust.
 C<switch> refuses at C<Genesis::Exit::TEMPFAIL> where another process holds
-the switch lock.  C<ls_tree>, which is what asks the branch whether it
-carries a repository, refuses at C<Genesis::Exit::DATAERR> where git cannot
-resolve the ref.  This function itself bails in one case, which is a
+the switch lock, and at C<Genesis::Exit::DATAERR> where the target is a
+commit this repository does not hold, naming the commit and the record it
+came from before anything has moved.  C<ls_tree>, which is what asks the
+branch whether it carries a repository, refuses at C<Genesis::Exit::DATAERR>
+where git cannot resolve the ref.  This function itself bails in one case, which is a
 deployment root that resolves to somewhere outside the repository, because
 there is then no path on the branch to read it from.
 
