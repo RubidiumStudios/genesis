@@ -2244,6 +2244,41 @@ define_command("pipeline-describe", {
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 }, 'Genesis::Commands::Pipelines::pipeline_describe');
 # }}}
+# genesis pipeline-hold - hold propagation to an environment {{{
+define_command("pipeline-hold", {
+	summary => "Hold propagation to an environment until it is released.",
+	usage   => "pipeline-hold [<env>] \"<reason>\"",
+	description =>
+		"Records a propagation hold for an environment, with the reason ".
+		"you give it.  While the hold stands, #C{genesis propagate} ".
+		"delivers nothing new to that environment and opens or updates no ".
+		"pull request, and everything already on its deployment branch ".
+		"stays deployable.\n".
+		"\n".
+		"The reason is required, and it is what the run's report and ".
+		"#C{genesis pipeline-status} show beside the environment, so write ".
+		"the sentence you would want to read a week from now.\n".
+		"\n".
+		"Run as #C{genesis <env> pipeline-hold \"<reason>\"} it holds that ".
+		"one environment; run as #C{genesis pipeline-hold \"<reason>\"} it ".
+		"holds every environment in the deployment root.\n".
+		"\n".
+		"Only #C{genesis pipeline-release} clears a hold.  No deploy and no ".
+		"flag clears one.",
+	function_group => Genesis::Commands::PIPELINE,
+	scope          => ['repo','env'],
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	option_group   => Genesis::Commands::REPO_OPTIONS,
+	arguments => [
+		'env?' =>
+			"Environment to hold.  Without it, every environment in the ".
+			"deployment root is held.",
+
+		'reason' =>
+			"Why propagation is being held.  Required.",
+	],
+}, 'Genesis::Commands::Pipelines::pipeline_hold');
+# }}}
 # genesis pipeline-diff - show compiled vs live pipeline delta {{{
 define_command("pipeline-diff", {
 	summary => "Show the diff between compiled and live pipeline.",

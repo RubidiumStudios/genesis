@@ -504,6 +504,35 @@ B<Examples:>
   # The record the tree renders, for a script to read
   genesis pipeline-status --json
 
+=head2 pipeline_hold(@args)
+
+    genesis prod pipeline-hold "waiting on the capacity report"
+    genesis pipeline-hold "freezing the fleet for the audit"
+
+Records a propagation hold for an environment.  With two arguments the first
+is the environment and the second the reason.  A single argument is read
+against the deployment root, the way the CLI itself read the C<< <env> >>
+prefix: where a file of that name sits there it is the environment and the
+reason is missing, and otherwise it is a reason covering every environment in
+the deployment root, in DAG order from C<< $top->pipeline_topology >>, which
+is the enumeration the propagate walk reads too.  The reason is required, and
+a call without one is a usage error, as is a call carrying more than two
+arguments, which is what an unquoted reason of several words looks like.
+
+While a hold stands, C<genesis propagate> delivers nothing new to the
+environment and opens or updates no pull request, in either mode, and the
+environment's outcome reads C<held, needs clearing> with the reason whether or
+not anything is due.  The deployment branch stays deployable throughout,
+because the hold is a fact about the walk and not about the branch.
+
+A second deployment root in the same repository is untouched, even where it
+carries an environment of the same name, because the two roots have their own
+topologies and their own Exodus paths.
+
+B<Returns:> 0 on success; refuses a disowned pipeline through
+C<assert_not_disowned>, and bails with C<CONFIG> where the deployment root
+declares no pipeline environments.
+
 =head2 propagate
 
     genesis propagate
@@ -1610,6 +1639,33 @@ B<Examples:>
   my ($sha, $depth) = _resolve_propagation_base('qa', $git, 'trunk');
   # returns the sha from qa's newest [pipeline] marker, and 0
   # returns the merge base with trunk, and 0, when qa has no marker
+
+=head2 _root_environments($top)
+
+The deployment root's environments in DAG order, off
+C<< $top->pipeline_topology >>, which both no-argument forms walk.  Bails with
+C<CONFIG> where the order is empty, since a command that held nothing and said
+nothing would read as a success.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> for the deployment root the command is running in.
+
+=back
+
+B<Returns:> list of environment names.
+
+B<Errors:> Bails with C<CONFIG> where the root declares no pipeline
+environments at all.
+
+B<Examples:>
+
+  my @envs = _root_environments($top);
+  # ('lab', 'qa', 'prod'), in the order the walk reads them
 
 =head1 SEE ALSO
 
