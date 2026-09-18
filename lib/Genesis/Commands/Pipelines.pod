@@ -431,15 +431,17 @@ pre-flight for its branch records read-only, so a branch a run would have
 fast-forwarded stands where it stood and the report reads the ref that run
 would have left it on.  The refresh it does first does write: it materialises
 a local ref for every pipeline branch the remote already holds and this clone
-lacks, and it says so on standard error as it goes.
+lacks.  Only one of those refs is announced, control's, and the rest are made
+in silence.
 
-A reachable vault is required.  The reading comes from the same walk
-C<genesis propagate> uses, and that walk reads the applied record and every
-environment's certified commit out of exodus, so a repository whose vault
-cannot be reached is reported as a row of unreadable environments rather than
-as a row of blank deploy columns.  That is the point: a status that guessed at
-a certified commit would be the disagreement between the report and the run
-this read model exists to end.
+A reachable vault is required, and the command refuses at C<UNAVAILABLE>
+without one rather than reporting.  The reading comes from the same walk
+C<genesis propagate> uses, and that walk reads the applied record before it
+decides anything, so a vault it cannot reach ends the command there, naming
+the path it could not read.  A vault that answers but has no record for one
+environment is the other case, and that environment alone reads as failed.
+Either way the report never guesses at a certified commit, which would be the
+disagreement between the report and the run this read model exists to end.
 
 B<Options (via C<get_options>):>
 

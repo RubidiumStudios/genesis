@@ -2,7 +2,9 @@ package Genesis::CI::Status;
 # The pipeline-status read model of D91.  One canonical record for the
 # deployment root the command runs in, computed from the walk the propagate
 # run uses, rendered either as the indented tree or as the JSON --json emits.
-# This module writes nothing.
+# It moves no branch and writes nothing to vault.  The refresh it does by
+# default materialises local refs the remote already holds, and it hands its
+# events to the caller rather than printing them.
 use strict;
 use warnings;
 
@@ -75,6 +77,22 @@ sub status_records {
 		unverifiable  => $refresh ? 0 : 1,
 		on_divergence => 'report');
 
+	# The events the control check raised, handed to the caller the moment
+	# they exist rather than on the record at the end.  The refresh creates
+	# the local control ref from the remote where this clone lacks it, which
+	# moves a ref the operator did not, and a walk that refuses below would
+	# otherwise end the command with that move unaccounted for.  They go to
+	# the caller rather than to a terminal, because this module computes a
+	# record and one that wrote to a terminal mid-computation would be no use
+	# to a caller that wanted the record alone.
+	#
+	# The stage's own event lines are not raised, because it moves no branch
+	# for this caller and a line reading "fast-forwarded" over a branch that
+	# stands where it stood would be an account of a write nobody made.  What
+	# those branches are is in the record's divergence cell.
+	$opts{on_events}->(@{$control->{events}})
+		if $opts{on_events} && @{$control->{events}};
+
 	# The stage is asked read-only, because this command reports and writes
 	# nothing.  A branch the stage would have reset or fast-forwarded keeps
 	# its own ref and carries the ref a real run would have moved it to,
@@ -94,18 +112,8 @@ sub status_records {
 		refreshed => $refresh ? 1 : 0,
 	);
 
-	# The events the control check raised, carried on the record for the
-	# caller to print.  The refresh creates the local control ref from the
-	# remote where this clone lacks it, which moves a ref the operator did
-	# not, and that line is the only account of it they get.  It is handed
-	# back rather than said here, because this module computes a record and a
-	# module that wrote to a terminal mid-computation would be no use to a
-	# caller that wanted the record alone.
-	#
-	# The stage's own event lines are not carried, because it moves no branch
-	# for this caller and a line reading "fast-forwarded" over a branch that
-	# stands where it stood would be an account of a write nobody made.  What
-	# those branches are is in the record's divergence cell.
+	# The same lines on the record, for a caller that reads them afterwards
+	# rather than as they happen.
 	$record->{events} = $control->{events};
 
 	# The walk leaves drifted null for this command to fill, and the fill
