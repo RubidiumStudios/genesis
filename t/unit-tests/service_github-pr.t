@@ -513,6 +513,106 @@ subtest 'open_prs - includes head filter in GET URL when provided' => sub {
 		'GET URL includes owner-prefixed head=org:pr/staging';
 };
 
+# ======================================================================
+# pr_reviews - the reviews on one pull request, oldest first
+# ----------------------------------------------------------------------
+# The integration rows reach this method down the happy path alone, so
+# the two argument refusals, the non-200 refusal, and the fallback that
+# answers an empty list where the API gives something that is not one
+# are all covered here and nowhere else.
+# ======================================================================
+
+subtest 'pr_reviews - refuses without an owner/repo or a number' => sub {
+	plan tests => 2;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+
+	throws_ok {$gh->pr_reviews(undef, 7)} qr/Missing owner\/repo/,
+		'a missing owner/repo is named';
+	throws_ok {$gh->pr_reviews('org/repo', undef)} qr/Missing PR number/,
+		'and so is a missing number';
+};
+
+subtest 'pr_reviews - refuses a status that is not 200' => sub {
+	plan tests => 1;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+	queue_curl_response(404, 'Not Found', '', '');
+
+	throws_ok {$gh->pr_reviews('org/repo', 7)}
+		qr/Failed to read the review state of pull request #7/,
+		'the refusal names the pull request it could not read';
+};
+
+subtest 'pr_reviews - answers the list, and an empty one for a non-list' => sub {
+	plan tests => 4;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+	queue_curl_response(200, 'OK', encode_json([
+		{state => 'COMMENTED', user => {login => 'ann'}, body => 'a thought'},
+		{state => 'APPROVED',  user => {login => 'bob'}, body => 'ship it'},
+	]), '');
+
+	my $reviews = $gh->pr_reviews('org/repo', 7);
+	is(scalar(@$reviews), 2, 'every review comes back');
+	is($reviews->[0]{user}{login}, 'ann',
+		'in the order the API gave them, which is oldest first');
+	like($curl_calls[0][1], qr{/pulls/7/reviews\?per_page=100},
+		'read from the reviews endpoint, a page at a time');
+
+	# GitHub answers an object rather than a list for some error shapes,
+	# and a caller iterating that would die on a hash.
+	reset_mocks();
+	queue_curl_response(200, 'OK', encode_json({message => 'Not Found'}), '');
+	is_deeply($gh->pr_reviews('org/repo', 7), [],
+		'an answer that is not a list reads as no reviews');
+};
+
+# ======================================================================
+# closed_prs - the closed pull requests for a branch
+# ----------------------------------------------------------------------
+# The supersedes list, the rejection text, and the recovery all read
+# this, and the double the integration rows use filters on state alone,
+# so the head filter below is exercised nowhere else.
+# ======================================================================
+
+subtest 'closed_prs - refuses without an owner/repo or a base' => sub {
+	plan tests => 2;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+
+	throws_ok {$gh->closed_prs(undef, 'staging')} qr/Missing owner\/repo/,
+		'a missing owner/repo is named';
+	throws_ok {$gh->closed_prs('org/repo', '')} qr/Missing base branch/,
+		'and so is a missing base branch';
+};
+
+subtest 'closed_prs - asks for the closed ones and filters to head' => sub {
+	plan tests => 4;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+	my @prs = (
+		make_pr(number => 4, state => 'closed',
+			head_ref => 'pr/staging',  base_ref => 'staging'),
+		make_pr(number => 5, state => 'closed',
+			head_ref => 'hotfix/asap', base_ref => 'staging'),
+	);
+	$prs[0]{merged_at} = '2026-09-01T00:00:00Z';
+	queue_curl_response(200, 'OK', encode_json(\@prs), '');
+	queue_curl_response(200, 'OK', encode_json([
+		{state => 'CHANGES_REQUESTED', user => {login => 'ann'},
+		 body => 'not yet', submitted_at => '2026-09-01T00:00:00Z'},
+	]), '');
+
+	my $result = $gh->closed_prs('org/repo', 'staging', 'pr/staging');
+	like($curl_calls[0][1], qr/state=closed/, 'the listing asks for closed');
+	is(scalar(@$result), 1, 'only the pull request from this head survives');
+	is($result->[0]{merged_at}, '2026-09-01T00:00:00Z',
+		'and it carries merged_at, which the recovery reads');
+	is($result->[0]{review}{state}, 'changes requested',
+		'and the decisive review, which the rejection text quotes');
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet

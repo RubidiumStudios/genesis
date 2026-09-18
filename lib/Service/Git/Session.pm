@@ -377,6 +377,7 @@ sub abort {
 	my @reset = $self->committed_branches;
 	my $discard_error;
 	my $restore_error;
+	my @restore_errors;
 	eval {
 		chdir($git->root)
 			or die sprintf("unable to enter the git root %s: %s\n",
@@ -408,17 +409,31 @@ sub abort {
 		# committed_branches has already filtered it out, so the arm
 		# below is the guard for a set that somehow carries it rather
 		# than a path the abort takes.
+		#
+		# Each branch goes back inside an eval of its own, and so does
+		# the return to the operator's branch, because the two halves
+		# answer for different things and one of them failing is no
+		# reason to skip the other.  Run as one, a failed return would
+		# leave every branch at the run's tip, and a failed reset would
+		# leave the operator standing on a branch they never chose.
+		# Every error that is raised is collected and reported.
 		for my $branch (@reset) {
-			defined $self->{control} && $branch eq $self->{control}
-				? $self->_reset_to_remote($branch)
-				: $self->restore_branch($branch);
+			eval {
+				defined $self->{control} && $branch eq $self->{control}
+					? $self->_reset_to_remote($branch)
+					: $self->restore_branch($branch);
+				1;
+			} or push @restore_errors, $@;
 		}
-		$self->_restore;
+		eval {$self->_restore; 1} or push @restore_errors, $@;
 		1;
 	} or do {
-		$restore_error = $@ || 'the restore failed for an unknown reason';
-		$restore_error =~ s/\s+$//;
+		push @restore_errors, $@ || 'the restore failed for an unknown reason';
 	};
+
+	if (@restore_errors) {
+		$restore_error = join("\n", map {s/\s+$//r} grep {/\S/} @restore_errors);
+	}
 
 	$self->_release_lock;
 

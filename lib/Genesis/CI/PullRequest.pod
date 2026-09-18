@@ -273,12 +273,21 @@ C<merged> carries the merged pull requests, which the recovery reads;
 C<rejected> carries the closed-unmerged ones themselves, so a commit body can
 quote one; and C<superseded> carries their numbers, which is what the
 aggregate's title names. Where more than one pull request is open from the
-same branch, the oldest is the one acted on and a warning names the rest.
+same branch, the one the API lists first is acted on and a warning names the
+rest. GitHub's listing answers newest first, so that is the newest of them.
 
-When the API cannot answer, this is not a fifth state but a refusal. The whole
+When either reader fails, this is not a fifth state but a refusal. The whole
 run stops, naming the review state as the input it could not read, and exits
 C<UNAVAILABLE>, because a run that cannot read what a reviewer decided cannot
 know what it would do with any pull request branch.
+
+Every failure of the two readers refuses that way, and none of them is passed
+through. A token the API rejects, a repository that has been renamed, a rate
+limit, and an API nobody can reach all arrive here as one refusal, because
+the readers raise their own already-worded message and the code behind it
+cannot be told from the message cheaply. The refusal therefore quotes what
+the reader said and leaves the operator to read it, rather than claiming a
+retry is what will help.
 
 B<Parameters:>
 
@@ -310,8 +319,8 @@ told why the run stopped. A caller with no session leaves it out.
 
 B<Returns:> A hashref of the nine fields above.
 
-B<Errors:> The refusal described above, and whatever the two GitHub readers
-raise for a reason other than an unanswerable API.
+B<Errors:> The refusal described above, which is what every failure of the
+two GitHub readers becomes. Nothing they raise is passed through.
 
 B<Examples:>
 
@@ -327,13 +336,25 @@ B<Examples:>
         refuse => $refuse);
 
 Stops the run because the review state could not be read, naming the
-environment, quoting what the API said, and telling the operator to retry once
-it answers again.
+environment and quoting what the reader said.
 
 The refusal is whole-run rather than per environment, and it exits
-C<UNAVAILABLE> (69), because the API is the service that could not be reached.
-L<Genesis::Exit> declares codes and no subs, so the exit is named through
-C<bail>, the way every other refusal in the tree names one.
+C<UNAVAILABLE> (69), because the API is the service the run could not get an
+answer out of. L<Genesis::Exit> declares codes and no subs, so the exit is
+named through C<bail>, the way every other refusal in the tree names one.
+
+It does not tell the operator to retry. Every failure of the two readers
+arrives here, a rejected token and a renamed repository among them, and a
+retry helps none of those. What the reader said is quoted instead, and that
+is what says whether waiting or fixing something is the answer.
+
+The quoted text is stripped of the wrapping the reader's own C<bail> put on
+it. Inside an eval that C<bail> dies with its message already wrapped to the
+terminal and already prefixed C<[FATAL]> on every line, and interpolating
+that into a second refusal would give the operator a banner in the middle of
+a paragraph and two different wrap widths. The prefix, the colour, and the
+hard wrap within each paragraph all go, so the refusal wraps the whole thing
+once.
 
 B<Parameters:>
 

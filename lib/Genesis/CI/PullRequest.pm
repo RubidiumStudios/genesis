@@ -189,6 +189,10 @@ sub pr_state {
 		1;
 	} or refuse_unreadable($record->{env}, $@, %opts);
 
+	# The one the listing puts first, which GitHub orders newest first, so the
+	# run acts on the most recent attempt.  The order is the API's rather than
+	# anything asserted here, and the warning names the rest so an operator
+	# who meant a different one can close the others.
 	if (@$open > 1) {
 		warning(
 			"Several pull requests are open for #C{%s} from #C{%s}, which are ".
@@ -232,15 +236,42 @@ sub pr_state {
 # operator is put back on the branch they started from before they are told
 # why the run stopped.  A caller with no session leaves it out and the bail
 # below speaks for itself.
+#
+# Every failure of the two readers arrives here and none is passed through.
+# They raise their own already-worded message and the status behind it can
+# only be read back out of that text, so the refusal quotes what the reader
+# said rather than sorting a rejected token from an unreachable API and
+# claiming a retry is the answer.  A retry helps some of these and not
+# others, and the quoted line is what says which.
+#
+# The quote is stripped of the reader's own wrapping first.  Inside an eval
+# bail dies with its message already wrapped to the terminal and already
+# prefixed [FATAL] on every line, so interpolating it whole would give the
+# operator a banner in the middle of a paragraph and two wrap widths in one
+# message.  The prefix and the colour go, and so does the hard wrap inside
+# each paragraph, which leaves the outer refusal one paragraph per paragraph
+# to wrap once.  The blank lines stay, because they are the reader's own
+# structure rather than the wrap's.
 sub refuse_unreadable {
 	my ($env, $why, %opts) = @_;
-	$why =~ s/\s+$// if defined $why;
+
+	my @said;
+	if (defined $why) {
+		$why =~ s/\e\[[0-9;]*m//g;
+		for my $paragraph (split /\n[ \t]*\n/, $why) {
+			my @lines = grep {/\S/}
+				map {s/^\s*(?:\[FATAL\]\s*)?//r =~ s/\s+$//r}
+				split /\n/, $paragraph;
+			push @said, join(' ', @lines) if @lines;
+		}
+	}
+
 	($opts{refuse} || \&bail)->(
 		{exitcode => Genesis::Exit::UNAVAILABLE},
 		"Could not read the review state of #C{%s}'s pull request from ".
 		"GitHub, so this run refuses rather than guess what to do with its ".
-		"pull request branch.\n%s\n\nRetry once the API answers again.",
-		$env, $why // 'the API did not answer'
+		"pull request branch.\n\n%s",
+		$env, (@said ? join("\n\n", @said) : 'The API did not answer.')
 	);
 }
 
