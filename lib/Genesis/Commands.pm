@@ -346,6 +346,18 @@ sub run_command { # {{{
 		? ($status // 0) : 0);
 } # }}}
 
+# branch_session - the session the deployed-state gate opened, if any {{{
+#
+# A command reaches the gate's session through this rather than through
+# $git->session, because that builds a fresh session on a handle that never
+# opened one and a fresh session answers finish_if_clean false for a tree
+# that is perfectly clean.  Undef means the gate opened none, which is a
+# command outside the pipeline surface, a pre-deploy command, or a
+# deployed-state command whose environment has no deployment branch it can read.
+our $BRANCH_SESSION;
+sub branch_session { $BRANCH_SESSION }
+
+# }}}
 # _gate_context - the Top and the git handle the two gates read {{{
 #
 # Both gates ask the same two questions of the same directory, and loading a
@@ -549,6 +561,39 @@ sub _gate_deployed_state {
 	require Service::Git::Session;
 	my $session = $git->session(control => $top->control_branch);
 	$session->begin;
+
+	# A branch that pipeline-apply cut and no propagate run has delivered to
+	# carries its init file and nothing else, so there is no repository on it
+	# to read and the switch would leave the command looking at a tree with
+	# no configuration in it.  That is the same state as having no branch at
+	# all, and it is answered the same way: the session closes without having
+	# moved anything and the command runs where it stands, where it says in
+	# its own words that there is nothing deployed.  The repository
+	# configuration is what is asked about, because every delivery mirrors it
+	# and nothing else on the branch is guaranteed.
+	#
+	# The question is asked after begin rather than before it, because it
+	# runs a git command of its own and begin is where the pre-flight
+	# classifies the failures a git command otherwise hides (D80).  Asked
+	# first, a repository git declines to trust would answer with the
+	# listing's complaint instead of the pre-flight's sentence.
+	#
+	# What the branch holds is read off the local ref where there is one,
+	# for the reason the checkout prefers it, and the deployment root is
+	# named as a path under the git root, which is empty where the two are
+	# the same directory.
+	my $root = $git->root;
+	my $read = $git->branch_exists($branch) ? $branch : "$remote/$branch";
+	my $under_root = $top->path;
+	$under_root = index($under_root, "$root/") == 0
+		? substr($under_root, length($root) + 1) : '';
+	unless ($git->ls_tree($read,
+			join('/', grep {length} $under_root, '.genesis/config'))) {
+		$session->finish;
+		return $fn->();
+	}
+
+	$BRANCH_SESSION = $session;
 	$session->switch($branch);
 
 	# The directory now holds another branch's files, so the root the gate
@@ -569,6 +614,7 @@ sub _gate_deployed_state {
 	# for.
 	my @result = $fn->();
 	$session->finish;
+	$BRANCH_SESSION = undef;
 
 	# The tree has moved back, so what was loaded on the environment's
 	# branch is dropped in its turn.

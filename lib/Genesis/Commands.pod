@@ -208,10 +208,6 @@ deployed-state command operates on what an environment is running, so it
 switches to that environment's deployment branch inside a session. A
 command that declares no class is not gated at all.
 
-C<deploy> declares no class yet. It makes a switch of its own, which is
-deliberately one way, and it declares C<DEPLOYED_STATE> when that switch is
-retired.
-
 C<branch_target> is optional and is declared by C<propagate> alone. It says
 that the command switches to control inside the session it already holds,
 so the gate leaves it where it stands.
@@ -251,6 +247,21 @@ An environment with no deployment branch is not switched at all. That is
 every environment between C<genesis new> and its first deploy, and the
 command runs where it stands and reports in its own words that there is
 nothing deployed to read.
+
+A branch that C<genesis pipeline-apply> cut and no C<genesis propagate> run
+has delivered to is not switched onto either. It carries its init file and
+nothing else, so there is no repository on it to read, and a command switched
+onto it would be looking at a tree with no configuration in it and would say
+so rather than saying what was really wrong. The question asked is whether
+the branch carries the deployment root's own C<.genesis/config>, because
+every delivery mirrors that file and nothing else on the branch is
+guaranteed.
+
+C<branch_session> answers the session the gate opened for this command, or
+C<undef> where it opened none. A command reads it rather than asking the git
+handle for a session, because C<< $git->session >> builds a fresh one on a
+handle that never opened any, and a fresh session answers
+C<finish_if_clean> false for a tree that is perfectly clean.
 
 =head1 FUNCTIONS
 
@@ -717,6 +728,33 @@ B<Examples:>
 
   my $props = command_properties('deploy');
   # Returns: { summary => '...', scope => 'env', ... }
+
+=head2 branch_session
+
+  my $session = Genesis::Commands::branch_session();
+
+Returns the branch session the deployed-state gate opened for this command,
+or C<undef> where it opened none.
+
+A command reads the session through this rather than through
+C<< $git->session >>, because that builds a fresh session on a handle that
+never opened one, and a fresh session answers C<finish_if_clean> false for a
+tree that is perfectly clean, so a command could not tell the gate's session
+apart from one it had just made itself.
+
+C<undef> means the gate opened no session, which is a command outside the
+pipeline surface, a pre-deploy command, or a deployed-state command whose
+environment has no deployment branch it can read.
+
+B<Returns:> the C<Service::Git::Session> the gate opened, or C<undef>.
+
+B<Examples:>
+
+  my $session = Genesis::Commands::branch_session();
+  # Returns: the session `genesis qa deploy` is running inside
+
+  my $session = Genesis::Commands::branch_session();
+  # Returns: undef, in `genesis version`
 
 =head2 get_options
 
@@ -1944,6 +1982,26 @@ what every environment between C<genesis new> and its first deploy needs:
 C<info> then prints its own sentence about there being no record of a
 deployment, rather than a refusal about a commit rewritten on the remote.
 
+A branch that carries no repository is not switched onto.  C<pipeline-apply>
+cuts a deployment branch as an orphan whose root commit adds one init file,
+and until a propagate run delivers to it there is nothing on it a command can
+read.  Switching onto it left the command loading a root out of a tree with
+no configuration in it and reporting a repository that is not there, so the
+branch is asked for the deployment root's C<.genesis/config>, and where it
+does not carry it the session closes without having moved anything and the
+command runs where it stands.
+
+That question is asked after C<begin> and not before it.  It runs a git
+command of its own, and C<begin> is where the pre-flight classifies the
+failures a git command otherwise hides, so asking first would answer a
+repository git declines to trust with the listing's complaint instead of the
+pre-flight's sentence.
+
+The session opened here is kept in C<$BRANCH_SESSION> and read back through
+C<branch_session>, so a command reaches the gate's own session rather than
+building a second one on the same handle.  It is cleared where the session
+closes.
+
 The session closes here, where the function returns, and nothing about it
 is left to an exit hook.  C<begin> hangs the session's own last-resort net
 on C<END>, so a hook registered after it runs second and finds the session
@@ -1980,7 +2038,9 @@ while another is still open, refuses a working tree carrying tracked or
 staged changes, and runs C<preflight>, which refuses a repository with no
 commits, no committed identity, or an ownership git declines to trust.
 C<switch> refuses at C<Genesis::Exit::TEMPFAIL> where another process holds
-the switch lock.
+the switch lock.  C<ls_tree>, which is what asks the branch whether it
+carries a repository, refuses at C<Genesis::Exit::DATAERR> where git cannot
+resolve the ref.
 
 B<Examples:>
 
@@ -1990,6 +2050,10 @@ B<Examples:>
   _gate_deployed_state($top, $git, $fn);
   # `genesis staging info` runs where it stands, because staging has
   # never been delivered and has no branch to read
+
+  _gate_deployed_state($top, $git, $fn);
+  # `genesis qa deploy` runs where it stands, because qa/bosh was cut by
+  # pipeline-apply and carries no repository to read yet
 
 =head2 _parse_two_pass
 

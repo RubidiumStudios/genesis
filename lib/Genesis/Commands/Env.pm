@@ -986,21 +986,28 @@ sub deploy {
 	my %options = %{get_options()};
 	my @invalid_create_env_opts = grep {$options{$_}} (qw/fix fix-stemcells/);
 
-	# When CI is configured, switch to the environment's branch and
-	# pull from remote BEFORE loading the env -- otherwise all the
-	# preflight work (cloud-config download, manifest viability,
-	# secret checks, stemcell checks) would run against whatever
-	# branch the operator happened to be on.  The post-deploy git
-	# work (commit + push manifest artifacts, auto-cascade) runs in
-	# Genesis::Env::_post_deploy after the deploy itself.
+	# The pre-flight reads run on the environment's own branch, because the
+	# cloud-config download, the manifest viability check, the secret checks,
+	# and the stemcell checks all read the files that branch carries.  The
+	# switch belongs to the branch class (D81, D80) rather than to the
+	# command, so by the time this runs the gate has already opened the
+	# session, asserted a clean tree and index as is_clean means it, taken
+	# the switch lock, and stood the working tree on <env>/<type>.
+	#
+	# Top is therefore the one built on that branch and is never rebuilt
+	# from '.' partway through.  A root rebuilt after a checkout is a root
+	# built out of whatever the checkout left behind, which is how a deploy
+	# the checkout had moved out from under came to report a repository that
+	# is not there rather than the problem in front of it (H10).
 	my $top = Genesis::Top->new('.');
 	my $pipeline_git;
 	my $pipeline_branch;
 	if ($top->pipeline_enabled) {
 		require Service::Git;
 		$pipeline_git = Service::Git->new('.');
-		(my $branch_name = $env_name) =~ s{^.*/}{};
-		$branch_name =~ s/\.ya?ml$//;
+		(my $name = $env_name) =~ s{^.*/}{};
+		$name =~ s/\.ya?ml$//;
+		my $branch_name = $top->branch_for($name);
 		$pipeline_branch = $branch_name;
 
 		# The deploy refreshes on the same terms as the run, because its
@@ -1021,27 +1028,6 @@ sub deploy {
 			outcome       => 'Nothing was deployed.',
 			on_divergence => 'report');
 		info("  #Gi{%s}", $_) for @{$control_state->{events}};
-
-		my $current = $pipeline_git->current_branch // '';
-		if ($current ne $branch_name) {
-			bail(
-				"Working tree has uncommitted changes.  Commit or stash them\n".
-				"before deploying."
-			) unless $pipeline_git->is_clean;
-			bail(
-				"Environment branch #C{%s} does not exist.\n".
-				"Create it with #C{genesis pipeline-apply} on the control branch.",
-				$branch_name
-			) unless $pipeline_git->branch_exists($branch_name);
-			info "\nSwitching to environment branch #C{%s}...", $branch_name;
-			# One way, and deliberately so: the deploy runs from the
-			# environment branch and the operator is meant to be left
-			# there.  M13 decides what putting them back should mean and
-			# moves this onto the session.
-			$pipeline_git->checkout_one_way($branch_name);
-			# Reload Top now that the working tree is on the env branch
-			$top = Genesis::Top->new('.');
-		}
 
 		if (my $remote = $pipeline_git->default_remote) {
 			info "Pulling latest #C{%s} from #C{%s}...", $branch_name, $remote;
@@ -1534,7 +1520,12 @@ sub deploy {
 
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;
-		exit 0;
+		# The status is handed back rather than exited with, because the
+		# deploy declares DEPLOYED_STATE and the gate holds a branch session
+		# open around this call.  An exit here would leave that session for
+		# the last-resort net to find, and the operator would be told about
+		# a session they never asked for under the deployment they did.
+		return 0;
 	} else {
 		bail "[#M{%s}] #R{Deployment Failed}", $env->name;
 	}

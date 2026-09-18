@@ -444,6 +444,10 @@ define_command("deploy", {
 		"a create-env environment.",
 	function_group => Genesis::Commands::ENVIRONMENT,
 	scope => 'env',
+	# D81: the deploy operates on what the environment is running, so it
+	# reads and renders the deployment branch.  The gate opens the session
+	# and makes the switch; this command makes none of its own.
+	branch_class   => Genesis::Commands::DEPLOYED_STATE,
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
 		'dry-run|n' =>

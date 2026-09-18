@@ -104,11 +104,13 @@ subtest 'nothing outside the session checks a branch out' => sub {
 	is_deeply(\@callers, [],
 		'no caller under lib/ or bin/ reaches the checkout directly');
 
-	# The deploy moves onto the environment branch and means to stay there,
-	# and the post-deploy block moves onto control and hands off to a child.
-	# A session would put both back, so they come through the allowance until
-	# M13 and M15 decide what they should mean instead.  The third site was
-	# the deploy's --pull, which is gone with the flag.
+	# The post-deploy block moves onto control and hands off to a child
+	# command that expects to find it there, and a session would put it
+	# back, so that one site comes through the allowance until M15 decides
+	# what returning should mean.  The deploy's own site is gone: it
+	# declares a branch class and switches inside the session the gate
+	# opens.  The site before that was the deploy's --pull, which went with
+	# the flag.
 	#
 	# The count is pinned and not just the file, because a second one-way
 	# checkout added inside a file that already holds one would otherwise
@@ -119,8 +121,8 @@ subtest 'nothing outside the session checks a branch out' => sub {
 		$allowed{$file} = $calls if $calls;
 	}
 	is_deeply(\%allowed,
-		{'lib/Genesis/Commands/Env.pm' => 1, 'lib/Genesis/Env.pm' => 1},
-		'and the one-way allowance carries the two sites M13 and M15 move');
+		{'lib/Genesis/Env.pm' => 1},
+		'and the one-way allowance carries the one site M15 still moves');
 };
 
 subtest 'the propagate run drives a session end to end' => sub {

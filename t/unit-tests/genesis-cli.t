@@ -33,8 +33,17 @@ subtest 'bin/genesis' => sub {
 # marker it carries, and the retired seeding command is absent.
 subtest 'the flag-carrying pipeline surface' => sub {
 
-	# deploy is not in the sweep, because it declares no class until M13.
 	my %surface = (
+		# The deploy joins the sweep with the class it now declares.  Its
+		# --force is not read here, because the deploy carries no such flag
+		# yet: the step that gives the provider gate its typed
+		# acknowledgement is the one that adds it, and a row reading it now
+		# would be red for that step rather than for this one.
+		'deploy' => {
+			class   => Genesis::Commands::DEPLOYED_STATE,
+			options => [qw/dry-run|n yes|y no-propagate/],
+			absent  => [qw/pull no-fetch no-refresh/],
+		},
 		'create' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
 			options => [qw/prior-env=s require-pr manual no-commit reason=s/],

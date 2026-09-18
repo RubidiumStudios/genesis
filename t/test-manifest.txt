@@ -382,6 +382,7 @@ integration-tests/service_vault_local-concurrent_create.t  # Concurrent local va
 integration-tests/genesis_env-core.t         # Comprehensive env operations (loading, manifest, deployment)
 integration-tests/genesis_commands_env-deploy.t  # CLI/UX surface for `genesis deploy` (reactions, orchestration)
 integration-tests/genesis_commands_env-deploy_no_git_write.t  # a deploy writes no git, and the retired routing term is gone
+integration-tests/genesis_commands_env-deploy_session.t  # the deploy switches inside the gate's session and working state comes back
 integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests
