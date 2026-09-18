@@ -473,13 +473,13 @@ EOF
 		subtest "existing network definition from director" => sub {
 			plan tests => 11;
 
-			my $allocations = $cc_hook->_get_existing_allocations();
+			my $allocations = $cc_hook->get_allocated_networks;
 			cmp_deeply([keys %$allocations], ['test-env-mgmt.bosh.net-compilation'], 'Just the director\'s compilation network is allocated');
 			cmp_deeply([keys %{$allocations->{'test-env-mgmt.bosh.net-compilation'}}], ['ocfp-1'], 'The director\'s compilation network only uses "ocfp-1" subnet');
-			my $compilation_range = $allocations->{'test-env-mgmt.bosh.net-compilation'}{'ocfp-1'};
-			isa_ok($compilation_range, 'IPv4::Span', 'Compilation range is an IPv4::Span');
-			is($compilation_range->size, 4, 'Compilation range is 4 addresses');
-			is($compilation_range->range, '10.0.1.37-10.0.1.40', 'Compilation range is correct');
+			my $compilation = $allocations->{'test-env-mgmt.bosh.net-compilation'}{'ocfp-1'};
+			ok(defined $compilation->{az}, 'Compilation allocation carries its subnet AZ');
+			is(IPv4->new($compilation->{allocated})->size, 4, 'Compilation range is 4 addresses');
+			is($compilation->{allocated}, '10.0.1.37-10.0.1.40', 'Compilation range is correct');
 
 			cmp_deeply([sort keys %{$cc_hook->_filter_subnets}], ['ocfp-0', 'ocfp-1', 'ocfp-2'], 'All subnets are available when unfilitered');
 			cmp_deeply([sort keys %{$cc_hook->_filter_subnets(['ocfp-0', 'ocfp-2', 'ocfp-4'])}], ['ocfp-0', 'ocfp-2'], 'Subnets can be filtered by multiple strings, and return only the matching ones');

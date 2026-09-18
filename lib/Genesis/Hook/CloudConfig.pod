@@ -2147,21 +2147,6 @@ B<Examples:>
     my ($available, $reserved) = $self->_get_subnet_ranges($subnet);
     # Returns: (IPv4 range of available IPs, IPv4 range of reserved IPs)
 
-=head2 _get_existing_allocations
-
-    my $allocations = $self->_get_existing_allocations;
-
-Reads the current subnet claim records from the network data and returns them
-as a hashref mapping network names to per-subnet C<IPv4> range objects.
-
-B<Returns:> A hashref of the form
-C<{ $network => { $subnet => IPv4 object } }>.
-
-B<Examples:>
-
-    my $allocs = $self->_get_existing_allocations;
-    # Returns: { 'env.bosh.net-deployment' => { 'ocfp-a' => IPv4 object } }
-
 =head2 _calculate_subnet_allocation
 
     my $range = $self->_calculate_subnet_allocation(

@@ -548,24 +548,23 @@ subtest 'dynamic_subnets - subnet named exactly the prefix is selected' => sub {
 # ---------------------------------------------------------------------------
 # Allocation Tracking
 # ---------------------------------------------------------------------------
-subtest '_get_existing_allocations - reflects director compilation claim' => sub {
-	plan tests => 5;
+subtest 'get_allocated_networks - reflects director compilation claim before any build' => sub {
+	plan tests => 4;
 
 	my $env  = make_deploy_env();
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
-	my $allocs = $hook->_get_existing_allocations();
-	is(ref($allocs), 'HASH', '_get_existing_allocations() returns a hashref');
+	my $allocs = $hook->get_allocated_networks;
+	is(ref($allocs), 'HASH', 'get_allocated_networks() returns a hashref');
 
 	cmp_deeply([keys %$allocs], ['test-env-mgmt.bosh.net-compilation'],
-		'_get_existing_allocations() shows only director compilation network is allocated');
+		'get_allocated_networks() shows only director compilation network is allocated');
 
 	cmp_deeply([keys %{$allocs->{'test-env-mgmt.bosh.net-compilation'}}], ['ocfp-1'],
 		'director compilation allocation is on ocfp-1 only');
 
-	my $span = $allocs->{'test-env-mgmt.bosh.net-compilation'}{'ocfp-1'};
-	isa_ok($span, 'IPv4::Span', 'allocation value is an IPv4::Span');
-	is($span->range, '10.0.1.37-10.0.1.40',
+	is($allocs->{'test-env-mgmt.bosh.net-compilation'}{'ocfp-1'}{allocated},
+		'10.0.1.37-10.0.1.40',
 		'compilation allocation range is 10.0.1.37-10.0.1.40');
 };
 
@@ -665,7 +664,7 @@ subtest 'update_network - records allocations for named network' => sub {
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 
 	# Start: no bosh claims yet
-	my $allocs_before = $hook->_get_existing_allocations();
+	my $allocs_before = $hook->get_allocated_networks;
 	ok(!exists $allocs_before->{$hook->basename.'.net-bosh'},
 		'no bosh network claim before network_definition is called');
 
@@ -1394,7 +1393,7 @@ subtest 'update_network - a name_prefix claim replaces the legacy spelling' => s
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
 	my $legacy = $hook->basename.'.net-bosh';
 
-	ok(exists $hook->_get_existing_allocations()->{$legacy},
+	ok(exists $hook->get_allocated_networks->{$legacy},
 		'the legacy claim is on the director before the deploy');
 
 	expect_bosh_drop { $hook->network_definition('bosh',

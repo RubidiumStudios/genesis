@@ -371,7 +371,7 @@ sub _build_ocfp_network_model_greedy_subnets {
 	) unless @ocfp_subnet_names;
 
 	# Get existing allocations from exodus data
-	my $existing_allocations = $self->_get_existing_allocations();
+	my $existing_allocations = $self->get_allocated_networks;
 	# A claim recorded by an earlier release under the prefixed name is ours too.
 	my @own_claim_keys = ($network_id, $self->name_for('net', $target));
 	for my $subnet_name (@ocfp_subnet_names) {
@@ -383,14 +383,14 @@ sub _build_ocfp_network_model_greedy_subnets {
 		# target network
 		for my $claiming_network (keys %$existing_allocations) {
 			next if grep {$_ eq $claiming_network} @own_claim_keys;
-			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name};
+			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name}{allocated};
 			$available -= $alloc if ($alloc);
 		}
 
 		# Find any existing allocations, but ignore those explicitly reserved
 		my $existing = IPv4->new();
 		for my $key (@own_claim_keys) {
-			my $claim = $existing_allocations->{$key}{$subnet_name};
+			my $claim = $existing_allocations->{$key}{$subnet_name}{allocated};
 			$existing += $claim if $claim;
 		}
 		$existing -= $reserved if $existing && $reserved;
@@ -481,7 +481,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 	$statics = 2**(32 - $1) if $statics =~ m#^/(\d+)$#;
 
 	# Get existing allocations from exodus data
-	my $existing_allocations = $self->_get_existing_allocations();
+	my $existing_allocations = $self->get_allocated_networks;
 	# A claim recorded by an earlier release under the prefixed name is ours too.
 	my @own_claim_keys = ($network_id, $self->name_for('net', $target));
 
@@ -497,7 +497,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		# target network
 		for my $claiming_network (keys %$existing_allocations) {
 			next if grep {$_ eq $claiming_network} @own_claim_keys;
-			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name};
+			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name}{allocated};
 			$available -= $alloc if ($alloc);
 		}
 		my $other_claims_size = $unclaimed_size - $available->size;
@@ -505,7 +505,7 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		# Find any existing allocations, but ignore those explicitly reserved
 		my $existing = IPv4->new();
 		for my $key (@own_claim_keys) {
-			my $claim = $existing_allocations->{$key}{$subnet_name};
+			my $claim = $existing_allocations->{$key}{$subnet_name}{allocated};
 			$existing += $claim if $claim;
 		}
 		$existing -= $reserved if $existing && $reserved;
@@ -647,13 +647,13 @@ sub update_network {
 # get_allocated_networks - Returns the allocated networks for the environment {{{
 sub get_allocated_networks {
 	my ($self) = @_;
+	my $subnets = $self->network->{subnets};
 	my $network_allocations = {};
-	for my $subnet (keys %{$self->network->{subnets}}) {
-		my $subnet_az = $self->network->{subnets}{$subnet}{az};
-		for my $network (keys %{$self->network->{subnets}{$subnet}{claims}}) {
+	for my $subnet (keys %$subnets) {
+		for my $network (keys %{$subnets->{$subnet}{claims}}) {
 			$network_allocations->{$network}{$subnet} = {
-				allocated => $self->network->{subnets}{$subnet}{claims}{$network},
-				az => $subnet_az
+				allocated => $subnets->{$subnet}{claims}{$network},
+				az => $subnets->{$subnet}{az}
 			};
 		}
 	}
@@ -1400,23 +1400,6 @@ sub _get_subnet_ranges {
 	$available_range -= $reserved_range if $reserved_range > 0;
 
 	return ($available_range->simplify, $reserved_range->simplify);
-}
-
-# }}}
-# _get_existing_allocations - Returns the existing allocations for a given network {{{
-sub _get_existing_allocations {
-	my ($self) = @_;
-	my $data = $self->network;
-
-	my $ranges = {};
-	for my $subnet (keys %{$data->{subnets}}) {
-		for my $network (keys %{$data->{subnets}{$subnet}{claims}}) {
-			$ranges->{$network}{$subnet} = IPv4->new(
-				$data->{subnets}{$subnet}{claims}{$network}
-			);
-		}
-	}
-	return $ranges;
 }
 
 # }}}
