@@ -228,6 +228,104 @@ B<Examples:>
               {count => 0, env => 'prod'});
     # returns 'Gate: rotate the signing key first.'
 
+=head2 review_paragraph($number, $review [, %opts])
+
+    my $said = Genesis::CI::PullRequest::review_paragraph(7, $review,
+        opening => 'Changes were requested');
+
+Returns the paragraph that quotes a reviewer, with the pull request's number,
+the reviewer, the date, and the review's own text quoted. C<opening> and
+C<prefix> give the caller its own opening sentence. Returns C<undef> when the
+review carried no text.
+
+Two bodies quote a reviewer and they are the same paragraph. D49 has a
+superseding body carry the rejection text of the attempt it replaces, and D56
+has a rebuild that answers a request for changes name the review it answers.
+One renderer writes both, so the quoting cannot drift apart between them.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$number>
+
+The number of the pull request the review was left on, which is the attempt
+being superseded for D49 and the pull request being rebuilt for D56.
+
+=item C<$review>
+
+The decisive review C<pr_state> carried, whose C<body> is the reviewer's own
+text, C<reviewer> their login, and C<at> the time they submitted it. The date
+is taken off the front of C<at> and left out where there is none.
+
+=item C<%opts>
+
+C<opening> is the sentence the paragraph opens on, and defaults to C<Changes
+were requested>. C<prefix> is put in front of that opening, which is where the
+superseding body says which attempt it is talking about.
+
+=back
+
+B<Returns:> The paragraph as one string, the opening sentence on its own line
+and the reviewer's text quoted beneath it, or C<undef> where the review
+carried no text to quote.
+
+B<Examples:>
+
+    review_paragraph(7, {reviewer => 'dbell', body => 'Not yet.',
+                         at => '2026-09-13T00:00:00Z'});
+    # returns "Changes were requested on #7 by dbell on 2026-09-13:\n" .
+    #         '> Not yet.'
+
+    review_paragraph(7, {reviewer => 'dbell', body => ''});
+    # returns undef
+
+=head2 supersedes_paragraph($rejected)
+
+    my $said = Genesis::CI::PullRequest::supersedes_paragraph(
+        $state->{rejected});
+
+Returns the closing paragraph the body of a superseding pull request carries,
+which quotes the reviewer and their words where the API gave one and otherwise
+names the closed pull requests and links to them. Returns C<undef> when
+nothing was closed without merging.
+
+A rejection deliberately leaves nothing behind. The pull request is closed,
+its branch is rebuilt in place because it is derived state, and the only place
+the chain of attempts can be recorded is the pull request that follows. So the
+paragraph names every attempt, and it quotes the one that said why.
+
+A merged pull request is never a prior attempt, and C<pr_state> never puts one
+in the list this reads, so a merged pull request is never named here either.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$rejected>
+
+The closed-unmerged pull requests C<pr_state> answered under C<rejected>, each
+with its C<number>, its C<html_url>, and the decisive C<review> where one was
+left.
+
+=back
+
+B<Returns:> The paragraph as one string, or C<undef> where nothing was closed
+without merging.
+
+B<Examples:>
+
+    supersedes_paragraph([
+        {number => 7, html_url => 'https://github.test/o/r/pull/7',
+         review => {reviewer => 'dbell', body => 'Not yet.',
+                    at => '2026-09-13T00:00:00Z'}},
+        {number => 8, html_url => 'https://github.test/o/r/pull/8'},
+    ]);
+    # returns "Supersedes #7. Changes were requested on #7 by dbell on " .
+    #         "2026-09-13:\n> Not yet.\n\n" .
+    #         'Supersedes #8, closed without merging: ' .
+    #         'https://github.test/o/r/pull/8.'
+
 =head2 deliver($session, $record, %opts)
 
     my $word = Genesis::CI::PullRequest::deliver($session, $record,
@@ -265,6 +363,13 @@ nothing in this environment's propagation set holds every commit after it
 while never becoming a pending entry at all, and the aggregate then ends
 before the gate rather than at it. The count is of what this gate holds for
 this environment, so a commit stopped for another reason is not named twice.
+
+Where every pull request the environment has had was closed without merging,
+the body closes with the paragraph C<supersedes_paragraph> composes, which
+names each of those attempts and quotes whoever asked for the change. That
+state is read off C<< $record->{pr} >> rather than off C<state> itself,
+because a run given no token at all is handed no state and the record already
+carries the one copy every reader here takes.
 
 What the publish and the pull request sync read afterwards is left on
 C<< $record->{pr} >>: the action, the control commit the aggregate names, the
