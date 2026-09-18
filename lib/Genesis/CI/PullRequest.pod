@@ -585,6 +585,13 @@ B<Returns:> C<1> or C<0>. C<0> where the clone has no remote, where R does not
 have the branch, where the branch carries no marker at all, where its newest
 marker names another commit, or where the trees differ.
 
+A marker naming a commit this clone has never fetched falls under the same
+C<0>. L<Genesis::CI::Marker/newest> hands such a marker back at the width the
+delivery wrote it, which cannot equal a full sha, so the branch reads
+unsettled and the run propagates again. That is the safe direction to be
+wrong in, and it is what the predicate this sub replaced did too: a branch
+this clone cannot name is one it should rebuild rather than skip.
+
 B<Examples:>
 
     settled($git, 'pr/qa/bosh', $newest, $tree);

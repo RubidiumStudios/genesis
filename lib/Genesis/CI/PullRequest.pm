@@ -474,10 +474,10 @@ sub deliver {
 	# would leave the hand commits standing under a sentence saying they were
 	# discarded.  The local branch goes back to what R carries, so the
 	# aggregate the writer built above survives nowhere.
-	my $remote = $git->default_remote;
 	if (!$pr->{discarded}
 		&& settled($git, $pr->{branch}, $source,
 			$git->rev_parse($written->{commit}.'^{tree}'))) {
+		my $remote = $git->default_remote;
 		$git->reset_hard("$remote/$pr->{branch}");
 		$pr->{action} = 'idempotent';
 		return 'idempotent';
