@@ -575,7 +575,7 @@ sub propagate {
 	# to say about which provider owns the propagation.  A repository that
 	# never had a pipeline passes both and meets the pre-flight, which is
 	# where a repository with nothing configured belongs.
-	assert_not_disowned($top, 'propagate');
+	Genesis::CI::Preflight::assert_not_disowned($top, command => 'propagate');
 	assert_provider_gate($top, $opts);
 
 	my $git     = Service::Git->new('.');
@@ -1446,37 +1446,6 @@ sub resume {
 # }}}
 ### Refusals {{{
 
-# assert_not_disowned - refuse a pipeline the configuration has disowned {{{
-#
-# D64: where pipeline-apply has left an applied record while pipeline.enabled
-# reads false, the configuration disowns a pipeline that is still live, still
-# watching its branches, and still deploying.  The command refuses and names
-# the two remedies.  The check needs the record and not just the key, because
-# a repository that never had a pipeline has neither, and that repository is
-# not disowning anything: it falls through to the pre-flight, which has its
-# own words for a repository with no pipeline at all.
-sub assert_not_disowned {
-	my ($top, $command) = @_;
-
-	return 1 if $top->pipeline_enabled;
-
-	my $applied = $top->applied_record or return 1;
-
-	bail(
-		{exitcode => CONFIG},
-		"Refusing to run #C{genesis %s}.  The pipeline is disabled in ".
-		"#C{.genesis/config}, but the applied record says ".
-		"#C{pipeline-apply} applied it from control\@%s at %s, so the ".
-		"configuration disowns a pipeline that is still live, still ".
-		"watching its branches, and still deploying.  Set ".
-		"#C{pipeline.enabled: true} again, or tear the pipeline down by ".
-		"hand, which has no command yet.  Nothing was written.",
-		$command, $applied->{control_commit} // '<unknown>',
-		$applied->{at} // '<unknown>'
-	);
-}
-
-# }}}
 # assert_provider_gate - the propagate run's break-glass past the pipeline {{{
 #
 # D95: under an automated provider the pipeline owns propagation, so a bare
