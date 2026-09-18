@@ -62,6 +62,12 @@ subtest 'the warning names both due commits, and says nothing when none are' => 
 	my (undef, $err2, undef) = run_genesis($h,
 		'qa', 'deploy', '--no-propagate', '-y', 'r');
 
+	# This row was green before the warning existed, nothing printing at all,
+	# and it stays as the pair to the three above it: what it catches is a
+	# warning that fires on every deploy, naming the branch's whole pending
+	# set or an empty one, which would be right in the rows above and wrong
+	# here.
+	#
 	# The phrase is the warning's own opening, rather than the bare word due,
 	# because the commit subjects this harness lays carry that word too and a
 	# looser pattern would read one of them as the warning.
