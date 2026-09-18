@@ -934,6 +934,12 @@ reverts it releases it with no deploy, and so does a C<Genesis-Release-Stage>
 trailer naming it.  The trailer is read under the key
 C<Genesis::CI::Marker> answers it by, which that module exports as C<STAGE>.
 
+The hold form of the trailer, C<hold: E<lt>reasonE<gt>>, behaves as a gate in
+every respect, and the hashref carries C<hold_reason> beside C<gate_reason>
+for it, so a caller that has to tell the two forms apart reads a key rather
+than parsing the trailer a second time.  C<gate_reason> carries the text with
+the prefix taken off in either form.
+
 B<Parameters:>
 
 =over 4
@@ -960,8 +966,10 @@ later commit has released.
 
 B<Returns:> A hashref carrying C<reason>, which is always C<gate-ahead>,
 C<gate>, the gate's own commit, and C<gate_reason>, the trailer's text with
-any C<hold:> prefix taken off it.  Undefined where the commit is no gate or
-where the gate has been passed or released.
+any C<hold:> prefix taken off it.  A gate written in the hold form carries
+C<hold_reason> as well, holding that same text, and a plain gate carries no
+such key at all.  Undefined where the commit is no gate or where the gate has
+been passed or released.
 
 B<Examples:>
 
@@ -969,6 +977,11 @@ B<Examples:>
                                            certified => undef,
                                            released => {});
   # returns {reason => 'gate-ahead', gate => $sha, gate_reason => 'schema change'}
+
+  # the same commit, where the trailer read `hold: run the capacity report`
+  # returns {reason => 'gate-ahead', gate => $sha,
+  #          gate_reason => 'run the capacity report',
+  #          hold_reason => 'run the capacity report'}
 
 =head2 released_gates
 
