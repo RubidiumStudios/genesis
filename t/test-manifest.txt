@@ -386,6 +386,7 @@ integration-tests/genesis_commands_env-deploy_no_git_write.t  # a deploy writes 
 integration-tests/genesis_commands_env-deploy_session.t  # the deploy switches inside the gate's session and working state comes back
 integration-tests/genesis_commands_env-deploy_session_faults.t  # the cleanliness refusal, the unswitched deploy, the failed restore, and the signal
 integration-tests/genesis_commands_env-deploy_control_and_disowned.t  # control nowhere refuses, and a disowned pipeline warns locally and refuses in a job
+integration-tests/genesis_commands_env-deploy_branch_classes.t  # the deployment branch is classified before the deploy, and four states refuse
 integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests
