@@ -10,11 +10,23 @@
 # and the hooks it is given are merged over the blueprint it writes itself, so
 # the deploy still renders a manifest and still reaches its end.
 #
-# Neither run passes --no-propagate, which every other deploy file does pass.
-# The auto-cascade is the subject of the second row: the abort leaves before
-# it, so the child that M15 owns is never spawned, and a run that had opted
-# out of the cascade could not tell that apart from a cascade that was never
-# reached.
+# Neither run passes --no-propagate, which every other deploy file does pass,
+# because the auto-cascade is the subject of the second row.  The abort leaves
+# before the cascade, so the child that M15 owns is never spawned, and a run
+# that had opted out of the cascade could not tell that apart from a cascade
+# that was never reached.
+#
+# Two rows of the first subtest arrive green, and they are the third, which
+# reads the modified file's name out of the abort, and the fourth, which
+# reads the modification back as discarded.  The gate already called finish
+# after the command returned and finish already aborted on a dirty tree, so
+# the baseline did name the file and did discard it.  What it did not do is
+# exit anything but 1, and it ran after the cascade had already handed off,
+# which is what the first and the second subtest's second row drive.  The two
+# green rows stay as guards: the third catches an abort that discards the
+# files without saying which, leaving an operator with no idea what was
+# thrown away, and the fourth catches an abort that names them and keeps
+# them, which is the warning this task replaced.
 use strict;
 use warnings;
 use utf8;

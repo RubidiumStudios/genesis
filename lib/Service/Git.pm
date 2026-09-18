@@ -697,8 +697,9 @@ sub pull_rebase {
 # that refuses the command writes its reason where the file names would
 # be, no line of that reason matches any of the three statuses this loop
 # tests, and the answer would be an empty changed list and an empty
-# deleted list, which every caller reads as nothing having changed.  A drift warning that has
-# gone silent is the one answer this reader must never give.
+# deleted list, which every caller reads as nothing having changed.  A
+# drift warning that has gone silent is the one answer this reader must
+# never give.
 sub diff_files {
 	my ($self, $from, $to, @pathspecs) = @_;
 	my @cmd = ('git', 'diff', '--name-status', $from, $to);
