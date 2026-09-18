@@ -1,0 +1,147 @@
+#!/usr/bin/env perl
+# Proves T233, the refusal on a tracked modification before the first write;
+# T234, the unswitched deploy that opens no session and tolerates the edit;
+# T231, the failed restore that dies naming what it could not restore; and
+# T232, the SIGINT between the switch and the BOSH step.
+#
+# Three of the four arrive green, the session and the gate having landed at
+# M5 and M12.  T234 is the one that drives code, and what it drives is D80's
+# "will switch" trigger in the gate.
+#
+# The first two rows make the same edit to the same file and differ only in
+# the branch the operator is standing on, because that is the whole of what
+# D80 settles: a deploy from control is about to leave the branch and refuses
+# to carry an uncommitted change across, and a deploy from the environment's
+# own branch is leaving nothing and has no reason to object.
+#
+# Every row here calls fixture_bosh, even the two whose deploys never reach a
+# director.  It is the builder that catches the operator's own copy of the
+# deployment branch up to what the remote carries, and a branch still sitting
+# at the commit pipeline-apply cut carries no repository, which the gate
+# declines to switch onto.  Without it the first row would be asserting a
+# refusal that never ran.
+use strict;
+use warnings;
+use utf8;
+
+use lib 'lib';
+use lib 't';
+use helper;
+use Harness::Propagation;
+
+use Test::More;
+
+use Genesis;
+
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
+
+# The one file both of the first two rows edit.  It is asked of the
+# propagation set rather than spelled out, so a row cannot come to be editing
+# a file the deploy never looks at, and .genesis/config is passed over because
+# the set holds it too and an edit there takes the deployment root with it.
+sub edited_file {
+	my ($h, $env) = @_;
+	my ($file) = grep {$_ eq "$env.yml"} propagation_set($h, $env);
+	return $file;
+}
+
+subtest 'a switching deploy refuses on a tracked modification' => sub {
+	# Green on arrival.  It catches a deploy that keeps a cleanliness check
+	# of its own, which bailed with a message naming no file.
+	plan tests => 4;
+
+	my $h = seeded_harness();
+	fixture_bosh($h);
+	stand_on($h, $h->control);
+
+	# Armed with nothing planned, because the step log the last row of this
+	# subtest reads is only written where fault_git has armed it.
+	fault_git($h);
+
+	my $edited = edited_file($h, 'qa');
+	mkfile_or_fail($h->a.'/'.$edited,
+		slurp($h->a.'/'.$edited)."# edited in place\n");
+
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'deploy', '-y', 'a reason');
+
+	isnt($exit, 0, 'the deploy refused');
+	like($err, qr{\Q$edited\E}, 'and named the modified file');
+	my @writes = grep {$_->[0] =~ /^(checkout|commit|push)$/} step_log($h->git('a'));
+	is_deeply(\@writes, [], 'it refused before its first write');
+};
+
+subtest 'an unswitched deploy opens no session and keeps the edit' => sub {
+	plan tests => 4;
+
+	my $h = seeded_harness();
+	fixture_bosh($h);
+	stand_on($h, $h->slug('qa'));
+
+	my $edited = edited_file($h, 'qa');
+	my $body = slurp($h->a.'/'.$edited)."# edited in place\n";
+	mkfile_or_fail($h->a.'/'.$edited, $body);
+
+	# --no-propagate for the reason the rows in the neighbouring files give:
+	# the auto-cascade hands off to a child genesis propagate, which writes
+	# to deployment branches on purpose and which M15 owns, and a row about
+	# what this deploy did should not be reading the child's work as its own.
+	my ($out, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
+
+	is($exit, 0, 'the deploy succeeded');
+	is(slurp($h->a.'/'.$edited), $body,
+		'the file is as the operator wrote it');
+	ok(!-e $h->a.'/.git/genesis-session.lock',
+		'no session opened, so no switch lock was taken');
+};
+
+subtest 'a restore that cannot run dies naming what it could not restore' => sub {
+	# Green on arrival.  It catches a restore run under passfail with its
+	# exit swallowed, which leaves the operator on the wrong branch quietly.
+	# The run ends somewhere else on purpose, so it asserts nothing back.
+	plan tests => 3;
+
+	my $h = seeded_harness();
+	fixture_bosh($h);
+	stand_on($h, $h->control);
+	my $git = fault_git($h);
+
+	# The switch is the first checkout of the run and the restore is the
+	# second, and everything from the second onward is made to report and not
+	# land.  A fault that died here would die in the checkout's own words and
+	# the session would never reach the sentence this row is about, and
+	# skipping from the second call rather than at it leaves the row reading
+	# the same sentence if a later step ever checks something out in between.
+	skip_on($git, 'checkout', 2, from => 1);
+
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
+
+	isnt($exit, 0, 'the command failed loudly');
+	like($err, qr/Failed to return to/, 'and said so in the session\'s words');
+	like($err, qr/\Q@{[$h->control]}\E/, 'naming the branch it could not return to');
+};
+
+subtest 'an interrupt between the switch and BOSH restores what it can' => sub {
+	# Green on arrival.  It catches a session whose signal handler was never
+	# installed, which would leave the operator on the deployment branch.
+	plan tests => 2;
+
+	my $h = seeded_harness();
+	fixture_bosh($h);
+	stand_on($h, $h->control);
+	$ENV{GENESIS_HARNESS_SIGINT_BEFORE_BOSH} = 1;
+
+	my $w = snapshot_w($h);
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
+	isnt($exit, 0, 'the failure is reported');
+
+	assert_w_restored($w, 'the signal path');
+	delete $ENV{GENESIS_HARNESS_SIGINT_BEFORE_BOSH};
+};
+
+done_testing;
+
+# vim: ts=2 sw=2 sts=2 noet

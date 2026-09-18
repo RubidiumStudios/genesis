@@ -243,6 +243,12 @@ deployed-state command default to the commit the environment last deployed,
 and M14 supplies that commit through C<deployed_target>; until it does, the
 tip is what is read.
 
+A command already standing on the branch it would switch to opens no session
+and takes no switch lock, because a session exists to leave a branch and come
+back and there is nothing here to leave. So a deploy run from the
+environment's own branch tolerates an edit in place, which is how an operator
+tests a change without committing it first.
+
 An environment with no deployment branch is not switched at all. That is
 every environment between C<genesis new> and its first deploy, and the
 command runs where it stands and reports in its own words that there is
@@ -1974,6 +1980,14 @@ argument at all switches nothing and runs where it stands, so the command
 raises its own usage error rather than meeting a bug report about an
 undefined name.
 
+A command already standing on the branch it would switch to is not switched
+either, and it opens no session at all.  D80 makes the trigger the switch
+rather than the class, so a command that is already where it would be going
+takes no switch lock and asserts no cleanliness, since a session exists to
+leave a branch and come back and there is nothing here to leave.  That is
+what lets an operator edit a file on the deployment branch and deploy it in
+place, which is the qualifier I3 carries.
+
 An environment whose deployment branch does not exist is not switched
 either.  Both the local branch and the remote-tracking one are asked about,
 because git's own checkout makes a local branch out of one it has only
@@ -2054,6 +2068,10 @@ B<Examples:>
   _gate_deployed_state($top, $git, $fn);
   # `genesis qa deploy` runs where it stands, because qa/bosh was cut by
   # pipeline-apply and carries no repository to read yet
+
+  _gate_deployed_state($top, $git, $fn);
+  # `genesis qa deploy` run from qa/bosh opens no session at all, so the
+  # operator's uncommitted edit is deployed rather than refused
 
 =head2 _parse_two_pass
 

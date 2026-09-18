@@ -2599,7 +2599,10 @@ sub fixture_director {
 # walking the rows of one answer never reads a config row as a stemcell.
 # GENESIS_HARNESS_BOSH_FAILS makes the deploy call exit non-zero instead, so
 # a row can watch the bail path without breaking anything else the deploy
-# asks the director for.  interpolate is handed to the real bosh, because a
+# asks the director for.  GENESIS_HARNESS_SIGINT_BEFORE_BOSH raises SIGINT in
+# the genesis process at the same point instead, so a row can watch the signal
+# path, which is the window between the gate's switch and the first thing the
+# director is asked to do.  interpolate is handed to the real bosh, because a
 # manifest carrying BOSH variables is resolved by running it and no fake
 # answer would resolve anything.
 #
@@ -2674,6 +2677,30 @@ done
 
 case "\$subcommand" in
 deploy)
+  if [ -n "\${GENESIS_HARNESS_SIGINT_BEFORE_BOSH:-}" ]; then
+    # The interrupt a row wants is the one that arrives after the gate has
+    # switched and before the director has been asked for anything, and this
+    # is that moment: the deploy has reached its BOSH call and no deployment
+    # has begun.  The signal goes to the genesis process rather than to this
+    # one, because the session and its handler live there, and this script is
+    # reached through a shell whose own parent may or may not be genesis, so
+    # the parents are walked until one of them is running it.
+    pid=\$PPID
+    while [ -n "\$pid" ] && [ "\$pid" != "0" ] && [ "\$pid" != "1" ]; do
+      case "\$(ps -o command= -p "\$pid" 2>/dev/null)" in
+        *bin/genesis*) kill -INT "\$pid"; break ;;
+      esac
+      pid=\$(ps -o ppid= -p "\$pid" 2>/dev/null | tr -d ' ')
+    done
+    # Held open afterwards, so the deploy is interrupted rather than told the
+    # director refused: an exit here would reach genesis as an ordinary
+    # failure and might be read before the signal is taken.  The wait happens
+    # with this script's own output closed, so the command's captured output
+    # ends when genesis does and nothing waits on a process genesis has left.
+    exec >/dev/null 2>&1
+    sleep 5
+    exit 1
+  fi
   if [ -n "\${GENESIS_HARNESS_BOSH_FAILS:-}" ]; then
     # Five lines of output before the refusal, because the failure path
     # reads the last five lines of what bosh said to decide whether the
@@ -3312,6 +3339,8 @@ sub run_genesis {
 	if ($self->{bosh}) {
 		$env{GENESIS_BOSH_COMMAND}         = $self->{bosh}{command};
 		$env{GENESIS_HARNESS_BOSH_FAILS}   = $ENV{GENESIS_HARNESS_BOSH_FAILS};
+		$env{GENESIS_HARNESS_SIGINT_BEFORE_BOSH} =
+			$ENV{GENESIS_HARNESS_SIGINT_BEFORE_BOSH};
 	}
 
 	if ($self->{fault}) {

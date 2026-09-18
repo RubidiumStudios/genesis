@@ -546,6 +546,15 @@ sub _gate_deployed_state {
 	# stands on.
 	my $branch = $top->branch_for($name);
 
+	# D80 settles the trigger as "will switch", so a command already standing
+	# on the branch it would switch to opens no session, takes no switch
+	# lock, and asserts no cleanliness.  A session exists to leave a branch
+	# and come back, and there is nothing here to leave.  That is what lets
+	# an operator edit a file on the deployment branch and deploy it in
+	# place, which is the qualifier I3 carries and the one thing they need in
+	# order to test a change before committing it.
+	return $fn->() if ($git->current_branch // '') eq $branch;
+
 	# An environment that has never been delivered has no branch to read,
 	# and switching to a name nothing resolves refuses at DATAERR with a
 	# sentence about a commit rewritten on the remote.  Every clause of
