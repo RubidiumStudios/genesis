@@ -1051,6 +1051,22 @@ Optional paths to limit the diff to, relative to the git root.
 B<Returns:> A hashref with keys C<changed> (added, modified or type-changed),
 C<deleted>, C<renamed> (old path to new), and C<all> (changed plus deleted).
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Cannot diff <from> against <to> in <root>" >> - raised with the
+C<Genesis::Exit::DATAERR> exit code when git cannot take the diff, because a
+ref names nothing the local repository holds. The refusal is the one
+L</diff_names> makes and it is made for the same reason: no line of git's
+complaint matches any status this reader parses, so an unchecked read would
+answer an empty C<changed> list and an empty C<deleted> list, and every
+caller reads that as nothing having changed.
+
+=back
+
 B<Examples:>
 
   my $diff = $git->diff_files('staging', $sha, @paths);

@@ -1320,6 +1320,13 @@ sub _deploy_preflight {
 	# kit off the branch and connects to nothing, and the deploy loads the
 	# same environment a step later, so a repository whose kit cannot be
 	# loaded fails here rather than there and says the same thing either way.
+	#
+	# That second load is the same work done twice, and the cost is named
+	# rather than hidden: load_env memoises nothing, so the deploy proper
+	# pays for a full merge of the environment hierarchy and a full kit
+	# resolution again a step below.  Carrying the loaded environment out in
+	# the answer would spare it, and the keys of that answer are fixed, so
+	# sparing it belongs to whichever step may widen them.
 	my $drifted = _warn_drifted($top->load_env($name), $git);
 
 	# The one prompt --yes answers, asked once every warning has printed.
