@@ -397,6 +397,7 @@ integration-tests/genesis_commands_env-deploy_due_commits.t  # the due-commits w
 integration-tests/genesis_commands_env-deploy_drifted.t  # the drifted warning names the files and deploys anyway, over the two-hash record
 integration-tests/genesis_commands_env-deploy_exodus_record.t  # the dependency set a deploy records, the two timestamp forms, and a failed record write
 integration-tests/genesis_commands_env-deploy_finish.t  # a kit hook that dirties the repository aborts at finish and exits non-zero
+integration-tests/genesis_commands_env-deploy_journey.t  # new, pipeline-apply, propagate, and deploy walked as one journey
 integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests
