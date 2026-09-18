@@ -619,8 +619,10 @@ sub restore_branch {
 		}
 	}
 
-	# The branch leaves the committed set once it is back where the run found
-	# it, exactly as discard takes it off.  An abort running afterwards has no
+	# The branch leaves the recorded half of the committed set once it is back
+	# where the run found it, exactly as discard takes it off.  The moved-tip
+	# half committed_branches unions in is not written here and cannot be:
+	# only the tip itself decides it.  An abort running afterwards has no
 	# business revisiting a branch that is already put back, and for a branch
 	# this run cut the second pass would answer 'deleted' for a delete it never
 	# made.
