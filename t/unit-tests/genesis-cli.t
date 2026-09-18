@@ -40,9 +40,27 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		# acknowledgement is the one that adds it, and a row reading it now
 		# would be red for that step rather than for this one.
 		'deploy' => {
+			class        => Genesis::Commands::DEPLOYED_STATE,
+			options      => [qw/dry-run|n yes|y no-propagate/],
+			absent       => [qw/pull no-fetch no-refresh/],
+			fast_forward => 1,
+		},
+		# The other two commands of the deployed-state class are here for
+		# one attribute apiece.  They share the deploy's gate, and the gate
+		# moves a ref for the command that declares the move, so a step that
+		# gave either of them the attribute would have a read writing to the
+		# repository it was asked to read.  Their flags are not swept: the
+		# bosh command passes its options through to the bosh cli, so the
+		# set it declares is not the set it accepts.
+		'info' => {
 			class   => Genesis::Commands::DEPLOYED_STATE,
-			options => [qw/dry-run|n yes|y no-propagate/],
-			absent  => [qw/pull no-fetch no-refresh/],
+			options => [],
+			absent  => [qw/no-fetch no-refresh/],
+		},
+		'bosh' => {
+			class   => Genesis::Commands::DEPLOYED_STATE,
+			options => [],
+			absent  => [qw/no-fetch no-refresh/],
 		},
 		'create' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
@@ -94,6 +112,14 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			for @{$surface{$cmd}{absent}};
 		is(command_properties($cmd)->{branch_class}, $surface{$cmd}{class},
 			"$cmd carries the $surface{$cmd}{class} marker");
+		# Read for every command in the sweep rather than where it is
+		# declared, because the fact worth pinning is which one command
+		# moves a ref and not that the deploy does.
+		is(command_properties($cmd)->{branch_fast_forward} ? 1 : 0,
+			$surface{$cmd}{fast_forward} // 0,
+			$surface{$cmd}{fast_forward}
+				? "$cmd brings its deployment branch forward"
+				: "$cmd moves no ref of its own");
 
 		is(scalar(keys %opts), $surface{$cmd}{exactly},
 			"$cmd declares only the options read above")

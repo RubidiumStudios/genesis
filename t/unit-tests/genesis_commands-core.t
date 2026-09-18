@@ -1023,6 +1023,58 @@ subtest 'define_command - a commit outside the class is rejected' => sub {
 	};
 };
 
+subtest 'define_command - a fast-forward outside the class is rejected' => sub {
+	reset_commands_state();
+
+	# The gate reads branch_fast_forward only for a command it is already
+	# gating under the deployed-state class, so the attribute on any other
+	# registration is read by nobody while the registration reads as though
+	# the command moved a ref it never touches.  A command declaring it with
+	# no class at all is how that arrives: the author means "this one brings
+	# its branch forward" and the gate never runs.
+	#
+	# Like the guards above it, this one cannot be shown red first: the
+	# guard and the attribute arrived together, and a tree without the guard
+	# has no attribute for a registration to misdeclare.  What it catches is
+	# the guard relaxed or dropped, which lets the misdeclaration through.
+	quietly {
+		throws_ok {
+			define_command('forwarding-cmd', {
+				summary             => 'A command that moves a ref nobody gates',
+				branch_fast_forward => 1,
+			}, sub { })
+		} qr/fast-forwards its deployment branch without/i,
+			'define_command dies when a fast-forward carries no class';
+	};
+
+	# The pre-deploy class is a class and still the wrong one, because that
+	# gate switches to control and asks nothing about a deployment branch,
+	# so the guard refuses the pairing rather than the bare absence of a
+	# class.
+	quietly {
+		throws_ok {
+			define_command('forwarding-pre-cmd', {
+				summary             => 'A command that moves a ref under the other class',
+				branch_class        => Genesis::Commands::PRE_DEPLOY(),
+				branch_fast_forward => 1,
+			}, sub { })
+		} qr/fast-forwards its deployment branch without/i,
+			'define_command dies when a fast-forward carries the other class';
+	};
+
+	# The pairing the gate reads still registers, so the guard refuses a
+	# combination rather than the attribute.
+	quietly {
+		lives_ok {
+			define_command('forwarding-ok-cmd', {
+				summary             => 'A command that brings its branch forward',
+				branch_class        => Genesis::Commands::DEPLOYED_STATE(),
+				branch_fast_forward => 1,
+			}, sub { })
+		} 'define_command accepts a fast-forward declared with the deployed-state class';
+	};
+};
+
 subtest 'define_command - retired + deprecated together is rejected' => sub {
 	reset_commands_state();
 

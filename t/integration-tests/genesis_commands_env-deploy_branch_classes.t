@@ -57,11 +57,17 @@ subtest 'behind fast-forwards, ahead and diverged refuse' => sub {
 	refresh($behind, 'a', $behind->control, $slug);
 	my $target = tip_of($behind, $slug, remote => 1);
 
+	# The operator is standing on control, so the move this row reads is the
+	# gate's, made on the way to the switch because the deploy's
+	# registration declares it.  The deploy's own move, which is the one
+	# made for an operator already standing on the branch, is read by the
+	# last subtest in this file.
+	#
 	# Green on arrival, and a guard rather than a discriminator: the deploy
-	# already pulled --ff-only unconditionally.  What it catches is a
-	# classification that refuses a branch that is merely behind, or that
-	# resets it to the tracking ref instead of fast-forwarding it, which
-	# would discard a commit a deploy may never discard.
+	# already pulled --ff-only unconditionally.  What it catches is a branch
+	# merely behind being refused, or being reset to the tracking ref
+	# instead of fast-forwarded, which would discard a commit a deploy may
+	# never discard.
 	my (undef, undef, $exit) = run_genesis($behind,
 		'qa', 'deploy', '--no-propagate', '-y', 'r');
 	is($exit, 0, 'a behind branch deploys');
@@ -212,10 +218,12 @@ subtest 'a stale clone deploys the branch, and a read moves no ref' => sub {
 	# The branch is the working tree a command reads, and the checkout stands
 	# that tree on the commit the local ref names, so the branch has to be
 	# brought up before the switch or the deploy is stood on the init commit.
-	# The deploy's registration declares that move and no other command in
-	# the class does, which is what the two halves of this row read: the
-	# deploy fast-forwards and reads the delivered file, and info leaves the
-	# ref exactly where it found it and says why it read where it stands.
+	# The move here is therefore the gate's, made ahead of the switch for a
+	# command whose registration declares it, and the deploy's registration
+	# is the only one that does.  That is what the two halves of this row
+	# read: the gate brings the branch forward for the deploy, which then
+	# reads the delivered file, and it moves nothing for info, which says
+	# why it read where it stands.
 	#
 	# The environment file is the discriminator for both.  Control and the
 	# branch disagree about it, and the kit's hooks print whichever the
@@ -296,6 +304,69 @@ subtest 'the divergence refusal prints before the prior-env one' => sub {
 	# about the divergence only on the run after that.
 	unlike(unfolded($err), qr/never been successfully deployed/,
 		'and the prior-env refusal did not');
+};
+
+subtest "a deploy from the branch makes the move the gate did not" => sub {
+	plan tests => 4;
+
+	# The gate returns before it moves anything where the operator is
+	# already standing on the deployment branch, under D80, so the deploy's
+	# own fast-forward is the one that runs and this is the only state that
+	# reaches it.  The branch has to carry a repository before the run, or
+	# the command would meet the refusal about a branch with no deployment
+	# root rather than the delivery behind it, so the clone is brought up to
+	# a first delivery and only then left behind a second.
+	#
+	# Green on arrival and a guard: the deploy's own pull landed with the
+	# classification.  What it catches is that pull being dropped now that
+	# the gate has one of its own, which would leave an operator standing on
+	# their deployment branch deploying the delivery before the one waiting
+	# for them, and recording it as the commit they shipped.
+	my $h    = seeded_harness();
+	my $slug = $h->slug('qa');
+
+	# The environment file is the discriminator, and the blueprint prints
+	# whichever of the two deliveries the deploy read.
+	write_env_file($h, 'qa', params => {marker => 'first'}, commit => 0);
+	my $body = helper::get_file($h->a . '/qa.yml');
+	my $one  = commit_on_control($h,
+		files   => {'qa.yml' => $body},
+		message => 'mark qa first',
+		push    => 1);
+	deliver($h, 'qa', control => $one);
+	refresh($h, 'a', $h->control, $slug);
+	fixture_bosh($h, hooks => {
+		blueprint =>
+			"grep '^  marker:' \"\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml\" >&2\n"
+			. "cat > manifest.yml <<'MANIFEST'\n---\nharness: deployed\nMANIFEST\n"
+			. "echo manifest.yml\n"});
+
+	# The second delivery, which this clone has fetched and not pulled.
+	(my $next = $body) =~ s/marker: first/marker: second/;
+	my $two = commit_on_control($h,
+		files   => {'qa.yml' => $next},
+		message => 'mark qa second',
+		push    => 1);
+	deliver($h, 'qa', control => $two);
+	refresh($h, 'a', $h->control, $slug);
+	stand_on($h, $slug);
+
+	my $target = tip_of($h, $slug, remote => 1);
+
+	# restore => 0 and no restoration assertion, because the whole subject
+	# of the row is a ref this run is meant to move: the branch the operator
+	# is standing on ends the run at its counterpart rather than where it
+	# started.
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+
+	is($exit, 0, 'the deploy ran from the branch the operator stood on');
+	like("$out$err", qr/marker:\s*second/,
+		'reading the delivery this clone had not pulled');
+	unlike("$out$err", qr/marker:\s*first/,
+		'and not the one it was standing on');
+	is(tip_of($h, $slug), $target,
+		"and the deploy's own fast-forward moved L to T");
 };
 
 done_testing;

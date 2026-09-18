@@ -69,6 +69,30 @@ subtest 'one class per pipeline-aware registration' => sub {
 		'deploy declares the deployed-state branch class');
 };
 
+subtest 'only the command that deploys fast-forwards its branch' => sub {
+	# The gate's one write is declared rather than assumed, so a command
+	# that reads the deployment branch cannot acquire a ref move by sharing
+	# a gate with one that deploys.  The three commands of the class are
+	# read one by one and then swept, because the sweep alone would pass
+	# for a tree where the property had moved from the deploy to another of
+	# them, and the per-command rows alone would pass for a tree that had
+	# given it to a command outside the class as well.  Green on arrival,
+	# the declaration having landed with the gate's arm that reads it, and a
+	# guard against an edit that moves it or hands it round.
+	ok(command_properties('deploy')->{branch_fast_forward},
+		'deploy declares that it brings its deployment branch forward');
+	ok(!command_properties('info')->{branch_fast_forward},
+		'info declares no such move, because a read moves no ref');
+	ok(!command_properties('bosh')->{branch_fast_forward},
+		'and neither do the bosh subcommands');
+
+	my @forwards = sort grep {
+		command_properties($_)->{branch_fast_forward}
+	} Genesis::Commands::commands();
+	is_deeply(\@forwards, ['deploy'],
+		'and it is the only command in the tree that declares it');
+};
+
 subtest 'only the command that commits on control declares it' => sub {
 	# D45's refusal is about a commit that cannot reach control through a
 	# pull request, so it is asked of the command and not of the class.
