@@ -2851,14 +2851,15 @@ EOS
 
 	# The operator's own clone is left holding the branch as the apply cut
 	# it, because init_branch writes the root commit in copy A and every
-	# delivery after that is published from the teammate's copy.  A branch
-	# carrying one init file carries no repository, so the gate leaves the
-	# command where it stands and a deploy from there is refused, in words
-	# that name the pull, because the branch is the working tree the command
-	# reads and no command in that class moves a ref to bring it forward.
-	# The catch-up is therefore what an operator who had pulled would have
-	# done, and every row that is about something else wants it.  A row whose
-	# subject is the stale clone says catch_up => 0.
+	# delivery after that is published from the teammate's copy.  The gate
+	# brings such a branch forward itself for a command that declares
+	# branch_fast_forward, which the deploy does and nothing else does, so a
+	# stale clone deploys while a read of the same branch is answered from
+	# where the operator stands and says how far behind it is.  The catch-up
+	# is what an operator who had pulled would have done, and every row that
+	# is about something else wants it, rather than reading what it proves
+	# through a ref move Genesis made on the way past.  A row whose subject
+	# is the stale clone says catch_up => 0.
 	$self->_catch_up($_) for (defined $opts{catch_up} && !$opts{catch_up})
 		? () : @envs;
 

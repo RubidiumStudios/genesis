@@ -4,14 +4,16 @@
 # at DATAERR under both providers; and T329, the divergence refusal printing
 # before the prior-env one.
 #
-# Two subtests are about a branch with no repository on it, which the gate
-# declines to switch onto, and they are two different states that answer alike
-# from the local ref.  The fourth is an environment nothing has been delivered
-# to on either side, which waits for a propagation.  The fifth is a clone
-# nobody has pulled since the apply cut the branch, which waits for a pull,
-# and it reads the remedy rather than the propagation that cannot help it.
-# Without either, a deploy runs from wherever the operator is standing and
-# certifies a commit no propagation routed anywhere.
+# Two subtests are about a branch with no repository on it, which answer alike
+# from the local ref and are not alike at all.  The fourth is an environment
+# nothing has been delivered to on either side: the gate declines to switch
+# onto it and the deploy refuses, naming the propagation.  The fifth is a
+# clone nobody has pulled since the apply cut the branch, which the gate
+# brings forward for the deploy alone, so the deploy reads the delivered file
+# while a read of the same branch leaves the ref where it found it.  Without
+# the first, a deploy runs from wherever the operator is standing and
+# certifies a commit no propagation routed anywhere; without the second, an
+# operator one fetch away from a deploy is sent to a command that cannot help.
 #
 # Every row calls fixture_bosh where the branch has to carry a repository,
 # because a seeded harness leaves the operator's own copy of the deployment
@@ -173,9 +175,10 @@ subtest 'a branch carrying no repository is awaiting its first delivery' => sub 
 	# commit and so does its counterpart.  That is the arm of the gate that
 	# declines to switch, and a classification that read the state alone
 	# would call it in-sync and deploy from control.  A clone merely behind a
-	# delivery is the subtest below, which is refused in words of its own;
-	# what is refused here is an environment nothing has been routed to yet,
-	# and what it is told to run is the propagation.
+	# delivery is the subtest below, and that one deploys, the gate having
+	# brought the branch forward for it; what is refused here is an
+	# environment nothing has been routed to yet, on either side, and what it
+	# is told to run is the propagation.
 	#
 	# There is no fixture_bosh here, because the branch carrying nothing is
 	# the whole of the state and the deploy never reaches a director.
@@ -197,38 +200,68 @@ subtest 'a branch carrying no repository is awaiting its first delivery' => sub 
 	like(unfolded($err), qr/Nothing was deployed\./, 'and nothing was deployed');
 };
 
-subtest 'a stale clone is sent to the pull, not to the propagation' => sub {
-	plan tests => 6;
+subtest 'a stale clone deploys the branch, and a read moves no ref' => sub {
+	plan tests => 8;
 
 	# The operator's own copy of the branch sits where pipeline-apply cut it
-	# while the remote carries a delivery, which is a clone nobody has pulled
-	# rather than an environment awaiting one.  catch_up => 0 leaves it that
-	# way, which is the state every other row in this file has the builder
-	# catch up for it.
+	# while the remote carries the deliveries, which is a clone nobody has
+	# pulled rather than an environment awaiting a delivery.  catch_up => 0
+	# leaves it that way, which is the state every other row in this file has
+	# the builder catch up for it.
 	#
-	# The two states answer the same way from the local ref, and the branch is
-	# the working tree the command reads, so Genesis cannot read this one
-	# without moving a ref and the gate moves none: every other deployed-state
-	# command reads, and a read moves no ref.  What the deploy owes the
-	# operator here is therefore the remedy that works, which is the pull.
-	# Nothing is deleted and nothing is moved.
+	# The branch is the working tree a command reads, and the checkout stands
+	# that tree on the commit the local ref names, so the branch has to be
+	# brought up before the switch or the deploy is stood on the init commit.
+	# The deploy's registration declares that move and no other command in
+	# the class does, which is what the two halves of this row read: the
+	# deploy fast-forwards and reads the delivered file, and info leaves the
+	# ref exactly where it found it and says why it read where it stands.
+	#
+	# The environment file is the discriminator for both.  Control and the
+	# branch disagree about it, and the kit's hooks print whichever the
+	# command was reading.
 	my $h    = seeded_harness();
 	my $slug = $h->slug('qa');
-	my $before = tip_of($h, $slug);
-	fixture_bosh($h, catch_up => 0);
+	write_env_file($h, 'qa', params => {marker => 'control'}, commit => 0);
+	# The file is written uncommitted and commit_on_control makes the commit
+	# out of the set it is handed, so the body is read back and handed to it.
+	my $on_control = helper::get_file($h->a . '/qa.yml');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => $on_control},
+		message => 'mark qa on control',
+		push    => 1);
+	(my $delivered = $on_control) =~ s/marker: control/marker: delivered/;
+	deliver($h, 'qa', control => $control, files => {'qa.yml' => $delivered});
+	refresh($h, 'a', $h->control, $slug);
+	fixture_bosh($h, catch_up => 0, hooks => {
+		info      => "grep '^  marker:' \"\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml\"\n",
+		blueprint =>
+			"grep '^  marker:' \"\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml\" >&2\n"
+			. "cat > manifest.yml <<'MANIFEST'\n---\nharness: deployed\nMANIFEST\n"
+			. "echo manifest.yml\n"});
 	stand_on($h, $h->control);
 
-	my (undef, $err, $exit) = run_genesis($h,
+	my $stale  = tip_of($h, $slug);
+	my $target = tip_of($h, $slug, remote => 1);
+
+	# The read runs first, while the ref it must not move is still the stale
+	# one.  Run after the deploy it would have nothing left to leave alone.
+	my ($iout, $ierr) = run_genesis($h, 'qa', 'info');
+	is(tip_of($h, $slug), $stale, 'a read of the same branch moves no ref');
+	like(unfolded($iout, $ierr),
+		qr/holds it \d+ commits? behind origin\/\Q$slug\E/,
+		'and says how far behind the branch it read past stands');
+
+	my ($out, $err, $exit) = run_genesis($h,
 		'qa', 'deploy', '--no-propagate', '-y', 'r');
 
-	is($exit, Genesis::Exit::DATAERR, 'the stale clone is refused');
-	like(unfolded($err), qr/has not pulled it/,
-		'saying the delivery is on the remote and unpulled');
-	like(unfolded($err), qr/git fetch origin \Q$slug\E:\Q$slug\E/,
-		'and naming the pull as the remedy');
-	unlike(unfolded($err), qr/Refusing to deploy\..*genesis propagate/,
-		'rather than a propagation that would find nothing due');
-	is(tip_of($h, $slug), $before, 'and the branch was left where it was');
+	is($exit, 0, 'the stale clone deploys');
+	like("$out$err", qr/marker:\s*delivered/,
+		'reading the environment file the deployment branch carries');
+	unlike("$out$err", qr/marker:\s*control/,
+		'and not the one control carries');
+	is(tip_of($h, $slug), $target,
+		'and the branch was fast-forwarded to its counterpart');
 };
 
 subtest 'the divergence refusal prints before the prior-env one' => sub {

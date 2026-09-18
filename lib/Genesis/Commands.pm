@@ -193,6 +193,7 @@ sub define_command { # {{{
 		option_passthrough => 0,
 		branch_class       => undef,
 		branch_target      => undef,
+		branch_fast_forward => 0,
 		commits            => undef,
 	};
 
@@ -223,6 +224,19 @@ sub define_command { # {{{
 		PRE_DEPLOY
 	) if $PROPS{$name}{commits}
 		&& ($PROPS{$name}{branch_class} // '') ne PRE_DEPLOY;
+
+	# The fast-forward is the gate's one write, and it is declared rather
+	# than assumed, so that a command which only reads the deployment branch
+	# cannot acquire a ref move by sharing a gate with one that deploys.
+	# Declared outside the class the gate switches for, it would be read by
+	# nobody and would read as though the command moved a ref it never
+	# touches.
+	bug(
+		"Command #C{$name} declares that it fast-forwards its deployment ".
+		"branch without the #y{%s} branch class.",
+		DEPLOYED_STATE
+	) if $PROPS{$name}{branch_fast_forward}
+		&& ($PROPS{$name}{branch_class} // '') ne DEPLOYED_STATE;
 
 	# A target the gate never compares against would silently gate the
 	# command it was meant to exempt, which is the same failure the class
@@ -671,28 +685,54 @@ sub _gate_deployed_state {
 	# moved anything and the command runs where it stands, where it says in
 	# its own words that there is nothing deployed.
 	#
+	# An environment awaiting its first delivery and a clone nobody has
+	# pulled since the apply cut the branch look alike from the local ref,
+	# and they are not alike at all: the second has a delivery waiting for it
+	# on the remote.  The distance between the two refs is what tells them
+	# apart, and it is read here for both the move below and the line that
+	# stands in its place where no move is made.
+	my $d = $remote
+		? $git->resolve_branch($branch, remote => $remote) : undef;
+	my $behind = ($d && $d->{state} eq 'behind') ? $d->{behind} : 0;
+
+	# The one ref the gate moves, and only for a command that declares it.
+	# A command that reads the deployment branch answers a question about
+	# what was delivered and has no business moving anything, so it must not
+	# acquire a ref move by sharing a gate with a command that deploys; the
+	# registration says which is which (D81's single declaration).
+	#
+	# The move is made before the question below, because the branch is the
+	# working tree the command reads: the checkout stands the tree on the
+	# commit the local ref names, so a clone that has not pulled would be
+	# stood on the init commit and asked to deploy from it.  It is made on
+	# the one state that promises a fast-forward, so it creates and discards
+	# nothing, which is the ref move D35's span allows and the one the
+	# deploy's own --ff-only pull was the precedent for (D5).  Nothing is
+	# fetched: the refresh is its own step under D40.
+	if ($behind && command_properties()->{branch_fast_forward}) {
+		info(
+			"Fast-forwarding #C{%s} to #C{%s/%s}, %s behind.",
+			$branch, $remote, $branch, Genesis::count_nouns($behind, 'commit'));
+		$git->set_branch_ref($branch, "refs/remotes/$remote/$branch");
+		$behind = 0;
+	}
+
 	# The question is asked after begin rather than before it, because it
 	# runs a git command of its own and begin is where the pre-flight
 	# classifies the failures a git command otherwise hides (D80).  Asked
 	# first, a repository git declines to trust would answer with the
 	# listing's complaint instead of the pre-flight's sentence.
 	unless (branch_carries_repository($top, $git, $branch)) {
-		# An environment awaiting its first delivery and a clone nobody has
-		# pulled since the apply cut the branch look alike from the local ref,
-		# and they are not alike at all: the second has a delivery waiting for
-		# it on the remote.  The counts say which one this is, so an operator
-		# reads whether they are waiting for a propagation or for a pull.  No
-		# ref is moved either way, because the commands in this class read and
-		# a read moves no ref; the one ref move belongs to the deploy.
-		my $d = $remote
-			? $git->resolve_branch($branch, remote => $remote) : undef;
+		# Where no move was made, the distance goes into the line instead, so
+		# an operator reads whether they are waiting for a propagation or for
+		# a pull of their own.
 		info(
 			"Not reading the deployment branch #C{%s}: it carries no ".
 			"repository yet%s, so this runs on #C{%s}.",
 			$branch,
-			($d && $d->{state} eq 'behind')
+			$behind
 				? sprintf(" and this clone holds it %s behind #C{%s/%s}",
-				          Genesis::count_nouns($d->{behind}, 'commit'),
+				          Genesis::count_nouns($behind, 'commit'),
 				          $remote, $branch)
 				: '',
 			$git->current_branch // 'the current commit');

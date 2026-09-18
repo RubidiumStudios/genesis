@@ -447,7 +447,16 @@ define_command("deploy", {
 	# D81: the deploy operates on what the environment is running, so it
 	# reads and renders the deployment branch.  The gate opens the session
 	# and makes the switch; this command makes none of its own.
-	branch_class   => Genesis::Commands::DEPLOYED_STATE,
+	#
+	# The deploy is the one command in the class that brings the branch
+	# forward.  A clone that has not pulled holds the branch where the apply
+	# cut it, and the checkout would stand the deploy on that commit, so the
+	# gate fast-forwards the branch to its counterpart first, which is the
+	# one ref move D35's span allows and the move the deploy's own --ff-only
+	# pull made before the switch belonged to the gate (D5).  Every other
+	# deployed-state command reads, and a read moves no ref.
+	branch_class        => Genesis::Commands::DEPLOYED_STATE,
+	branch_fast_forward => 1,
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [
 		'dry-run|n' =>

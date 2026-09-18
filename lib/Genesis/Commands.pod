@@ -277,14 +277,27 @@ gate only declines to switch, and a command that went on to read whatever the
 operator was standing on would deploy or report from the wrong place
 entirely.
 
-Two states answer that question the same way, and the line the gate prints
-says which one this is. An environment nothing has been delivered to waits
-for a propagation. A clone nobody has pulled since the apply cut the branch
-holds the init commit while the remote holds every delivery, and that one
-waits for a pull, so the line names how far behind its counterpart the branch
-stands. No ref is moved for either: the branch is the working tree the
-command reads, and bringing it forward is a write, which every command in
-this class but the deploy has no business making.
+Two states answer that question the same way and are not alike at all. An
+environment nothing has been delivered to waits for a propagation. A clone
+nobody has pulled since the apply cut the branch holds the init commit while
+the remote holds every delivery, and it waits only for the branch to be
+brought forward.
+
+So the gate fast-forwards a branch this clone holds behind its
+remote-tracking ref, before it asks what the branch carries and before it
+switches, for a command whose registration declares C<branch_fast_forward>
+and for no other. That is C<genesis deploy> today. The branch is the working
+tree a command reads, and the checkout stands that tree on the commit the
+local ref names, so a command that acts on the branch needs it current, while
+a command that only reads it has no business moving a ref. The move is made
+on the one state that promises a fast-forward, so it creates and discards
+nothing, and nothing is fetched, because the refresh is its own step under
+D40.
+
+Where no move is made, the line the gate prints names how far behind its
+counterpart the branch stands, so an operator of C<genesis info> or the
+C<bosh> subcommands reads why what they are looking at is not the delivered
+branch.
 
 C<branch_session> answers the session the gate opened for this command, or
 C<undef> where it opened none. A command reads it rather than asking the git
@@ -361,6 +374,16 @@ C<control_requires_pr> refusal applies, because D45 is about a commit that
 cannot reach control through a pull request and most pre-deploy commands
 make none.  It is declared only alongside C<branch_class =E<gt> PRE_DEPLOY>,
 since that is the one gate that reads it.  Defaults to C<undef>.
+
+=item C<branch_fast_forward> - Boolean.  True where the gate may bring the
+environment's deployment branch up to its remote-tracking ref before it
+switches onto it, which C<deploy> alone declares.  A clone that has not
+pulled holds the branch where C<genesis pipeline-apply> cut it, and the
+checkout stands the working tree on the commit the local ref names, so a
+command that acts on the branch needs it brought forward first while a
+command that reads it has no business moving anything.  It is declared only
+alongside C<branch_class =E<gt> DEPLOYED_STATE>, since that is the one gate
+that reads it.  Defaults to false.
 
 =item C<option_require_order> - Boolean.  When true, option parsing stops
 at the first non-option argument.  Defaults to false.
@@ -439,6 +462,13 @@ but C<PRE_DEPLOY>.  Only the pre-deploy assertion asks whether a command
 commits on control, so the attribute anywhere else is read by nobody and
 reads as though the command had been exempted from the
 C<control_requires_pr> refusal when it was never subject to it.
+
+=item C<"Command %s declares that it fast-forwards its deployment branch without the deployed-state branch class.">
+
+Raised via C<bug> when C<branch_fast_forward> is true and C<branch_class> is
+anything but C<DEPLOYED_STATE>.  Only the deployed-state gate asks whether a
+command may move the branch, so the attribute anywhere else is read by nobody
+and reads as though the command moved a ref it never touches.
 
 =item C<"Command %s declares a branch target without a branch class.">
 
@@ -810,9 +840,10 @@ local ref rather than the tracking ref, because a checkout takes the working
 tree to the commit the local ref names and the tree is what a command then
 reads: answered off the tracking ref, a branch this clone holds at the init
 commit would pass, and the command would be stood on an empty tree by an
-answer saying it had a repository on it. Nothing is written and nothing is
-fetched, so the one ref move a stale clone needs is left to the command that
-deploys.
+answer saying it had a repository on it. A clone that has not pulled is
+brought forward before the question is asked rather than answered around,
+and only for a command that declares C<branch_fast_forward>. This function
+writes nothing and fetches nothing.
 
 The deployment root is named as a path under the git root, and both paths are
 resolved through C<Cwd::realpath> before they are compared, so a root
