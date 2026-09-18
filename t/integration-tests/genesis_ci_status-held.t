@@ -54,21 +54,26 @@ sub env_line {
 }
 
 subtest "the held qualifiers print in the run's words" => sub {
-	# Four assertions and one restoration.
-	plan tests => 5;
+	# Five assertions and one restoration.
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['lab', 'prod', 'sandbox', 'dev'],
 		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
 	fixture_vault($h);
 
-	# prod and sandbox both follow lab, so one ancestor holds them both and
-	# the qualifier names the same environment in each row.  The tracked list
-	# is written again because the file is only in an environment's
-	# propagation set where that environment declares it.
-	write_env_file($h, $_, pipeline => {
+	# prod follows lab, so an ancestor holds its commit and the qualifier
+	# names that ancestor.  The tracked list is written again because the
+	# file is only in an environment's propagation set where that
+	# environment declares it.
+	#
+	# sandbox keeps the file the harness seeded, which declares the same
+	# tracked list and names no predecessor, so the hold somebody set is the
+	# only thing holding its commit.  That is the state where the hold's own
+	# text could reach the row twice, and the row below refuses it.
+	write_env_file($h, 'prod', pipeline => {
 		prior_env              => 'lab',
 		track_additional_files => ['ops/shared.yml'],
-	}) for qw/prod sandbox/;
+	});
 	init_branch($h, $_) for qw/lab prod sandbox dev/;
 
 	my $c1 = commit_on_control($h,
@@ -90,6 +95,11 @@ subtest "the held qualifiers print in the run's words" => sub {
 	refresh($h, 'a');
 
 	my ($out, undef, $exit) = run_genesis($h, 'pipeline-status');
+	# A guard.  The command has exited zero over a held environment since the
+	# read model landed, so nothing in the tree can fail this today.  It
+	# stands because every assertion below reads a rendered row, and a
+	# command that had come to refuse a hold would leave them all matching
+	# against an empty string and saying so for the wrong reason.
 	is($exit, 0, 'the command exits zero');
 
 	like(env_line($out, 'prod'),
@@ -98,6 +108,13 @@ subtest "the held qualifiers print in the run's words" => sub {
 	like(env_line($out, 'sandbox'),
 		qr/held, needs clearing \(vsphere maintenance\)/,
 		'sandbox shows needs clearing with the reason somebody wrote');
+	# The hold stamps its own text onto every commit it takes, so a phrase
+	# that rendered the per-commit reason beside the qualifier would print
+	# what somebody wrote on the record twice in one row.  The environment
+	# waits for one thing, and the row says it once.
+	unlike(env_line($out, 'sandbox'),
+		qr/\(vsphere maintenance\).*\(vsphere maintenance\)/,
+		'and says it once rather than beside every commit the hold took');
 	like(env_line($out, 'dev'), qr/held, awaiting pipeline-apply/,
 		'dev shows awaiting pipeline-apply');
 };

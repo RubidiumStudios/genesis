@@ -177,8 +177,8 @@ sub held_qualifier {
 	# operator may run at once and the hold is a decision standing in front
 	# of it: an environment that reads as awaiting the apply while a hold
 	# stands sends them to a command that would change nothing.  Clearing the
-	# hold leaves the apply as what the environment waits for, and the line
-	# beside this one says so meanwhile.
+	# hold leaves the apply as what the environment waits for, and
+	# hold_detail says meanwhile what the hold is holding.
 	return sprintf('needs clearing (%s)',
 		$record->{hold}{reason} // 'no reason given')
 		if $record->{hold};

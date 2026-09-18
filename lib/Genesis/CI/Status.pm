@@ -360,8 +360,16 @@ sub compose_phrase {
 		# what the environment waits for, and the answer carries the
 		# ancestor's own state so an operator is not left to infer it from
 		# another row.
-		push @phrase, [on_ice => hold_reason($row->{held}[0])]
-			if @{$row->{held} || []};
+		#
+		# Where the standing hold is what took the commit, the two questions
+		# have one answer.  apply_hold stamps every commit it takes with the
+		# hold's own text, so this component would print what somebody wrote
+		# on the record a second time, in the same brackets, on the same
+		# line.  The environment waits for one thing and the row says it
+		# once.
+		my ($first) = @{$row->{held} || []};
+		push @phrase, [on_ice => hold_reason($first)]
+			if $first && ($first->{reason} // '') ne 'on-hold';
 	}
 
 	push @phrase, [inert => '[manual]'] if $row->{manual};
