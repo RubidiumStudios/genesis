@@ -3520,6 +3520,35 @@ sub dependencies_read {
 }
 
 # }}}
+# deployed_record - the newest successful deployment record, or undef {{{
+#
+# D87 names the deployed commit as exodus git.commit and the certified commit
+# as git.control_commit, both in the last successful record.  The manager
+# already answers that record and already counts post-failed as successful,
+# through is_a_successful_result, because a post-failed deploy landed on BOSH
+# and the environment is running.  So this is a name for the four fields the
+# README's table fixes and not a second read of the set.
+#
+# An environment with no record at all, and one whose vault cannot be reached,
+# both answer undef here rather than raising, because the one caller is the
+# branch-class gate and a gate that bailed would refuse a command over a
+# question the command itself is about to answer better.
+sub deployed_record {
+	my ($self) = @_;
+	my $deployment = eval { $self->with_vault->deployments->latest_successful }
+		or return undef;
+
+	return {
+		git => {
+			commit         => $deployment->lookup('git.commit'),
+			control_commit => $deployment->lookup('git.control_commit'),
+		},
+		state => $deployment->lookup('state'),
+		dated => $deployment->lookup('dated'),
+	};
+}
+
+# }}}
 # _decode_path_list - read a vault field holding a list of deployment slugs {{{
 #
 # A vault field is a string, so a list reaches it in one of two forms.  An

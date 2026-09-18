@@ -679,6 +679,7 @@ define_command("bosh", {
 		"to choose one if in a controlling terminal, or fail if not.",
 	function_group => Genesis::Commands::BOSH,
 	branch_class   => Genesis::Commands::DEPLOYED_STATE,
+	default_target => 'deployed',
 	scope => 'env',
 	option_group => Genesis::Commands::REPO_OPTIONS,
 	option_passthrough => 1,
@@ -892,6 +893,7 @@ define_command("info", {
 		"Get details for the current deployment of the given environment.",
 	function_group => Genesis::Commands::INFO,
 	branch_class   => Genesis::Commands::DEPLOYED_STATE,
+	default_target => 'deployed',
 	scope => 'env',
 	option_group => Genesis::Commands::ENV_OPTIONS,
 	options => [

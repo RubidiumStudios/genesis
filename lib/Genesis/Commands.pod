@@ -399,6 +399,14 @@ command that reads it has no business moving anything.  It is declared only
 alongside C<branch_class =E<gt> DEPLOYED_STATE>, since that is the one gate
 that reads it.  Defaults to false.
 
+=item C<default_target> - Either C<'tip'> or C<'deployed'>, declared at
+registration beside the branch class.  It says which commit the command
+means when no flag is given, so C<info> and the C<bosh> subcommands report
+on the running deployment without being asked to, while C<--redeploy> and
+C<--as-deployed> select the deployed commit where the default does not.
+The gate reads it through L</deployed_target>, which resolves the commit and
+hands it to the branch session.  Defaults to C<'tip'>.
+
 =item C<option_require_order> - Boolean.  When true, option parsing stops
 at the first non-option argument.  Defaults to false.
 
@@ -926,6 +934,13 @@ environment built above the question, merely so the flags could be read,
 would refuse that run over a missing file that is missing exactly as
 intended, so the reader of the deployed record builds its own below the
 question instead.
+
+The record is in the vault, and the root the gate keeps carries none: it is
+loaded with C<< no_vault => 1 >> so that reading a command's class announces
+no vault target. The read therefore loads the same root again with the vault
+the repository configures, which is the root the command is about to load
+for itself a moment later, and only a run that named the deployed commit
+pays for it.
 
 Neither this nor C<DEPLOYED_TARGET_HELP> is exported. The gate is the only
 caller and every registration in F<bin/genesis> names the constant in full,
@@ -2088,6 +2103,13 @@ C<Genesis::Exit::DATAERR>.  A C<deployed-state> command is handed to
 C<_gate_deployed_state>, which opens the session the command reads inside
 rather than refusing anything.
 
+A run that resolved a deployed commit is handed to C<_gate_deployed_state>
+as well, whatever class its registration declares, and the resolved commit
+goes down with it.  That is how the secrets family opts in: it is
+C<pre-deploy> by class, and C<--as-deployed> is the operator saying which of
+the two questions they are asking, so the flag is read before the class and
+the class is only the default answer.
+
 The refresh is passed along as C<< refresh => 0 >> for the two commands that
 make no network call of their own.  C<pipeline-status> says so with
 C<--no-refresh>, which it alone declares.  C<pipeline-describe> resolves the
@@ -2178,11 +2200,18 @@ the same switch lock.  The branch holds exactly what was delivered, and the
 kit's hooks need a working tree, which is why the command reads a checkout
 rather than a tree object.
 
-B<The branch's tip is what the session stands on.>  D87 has C<info> and the
-C<bosh> subcommands default to the commit the environment last deployed,
-which is the exodus C<git.commit>, and a tip may carry a delivery that has
-not deployed.  M14 supplies that commit through C<deployed_target>, and
-until it lands the tip is read in its place.
+B<The commit the session stands on is the caller's to choose.>  D94 gives
+both deployed-commit flags one code path, which is a switch on a commit
+rather than on a branch, so a run that resolved one is handed it as
+C<< target => ... >> and the session checks it out detached. A run that
+resolved none stands on the branch's tip, as every run did before the flags
+existed. Either way C<finish> restores the branch the operator started on.
+
+Every question below is still asked of the branch and not of the commit:
+whether the branch exists, whether it carries a repository, and how far
+behind the remote this clone holds it. The commit the run targets lies on
+that branch, so a branch there is nothing to read on is a branch there is no
+deployed commit to stand on either.
 
 The environment name is taken from the first command argument, with any
 leading directories and any C<.yml> or C<.yaml> suffix removed, because an
@@ -2271,6 +2300,11 @@ session that tree may have open.
 
 The command's own function, as a code reference taking no arguments.  Every
 path calls it exactly once, inside the session where there is one to open.
+
+=item C<< target => $commit >>
+
+Optional.  The commit the session stands on, as C<deployed_target> resolved
+it.  Absent, or C<undef>, the session stands on the branch's tip.
 
 =back
 
