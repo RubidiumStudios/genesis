@@ -33,7 +33,7 @@ our @EXPORT = qw/
 
 	commit_on_control commit_from_b publish_from_b push_from refresh
 	init_branch deliver propagation_set edited_file harness_marker
-	add_deployment_root write_env_file
+	add_deployment_root write_env_file due_commit
 	hand_commit local_only_commit squash_merge unrelated_branch
 	diverge move_on_r delete_on_r delete_local
 	rewrite_control rewrite_branch
@@ -2258,6 +2258,38 @@ sub write_env_file {
 	}
 
 	return $path;
+}
+
+# }}}
+# due_commit - one control commit the walk will route to an environment {{{
+#
+# A row in pull request mode needs a control commit that is due, and the only
+# file that routes to an environment is that environment's own file at the
+# deployment root.  A path under the environment's name is in no propagation
+# set, so a commit written there routes nowhere and leaves the row with
+# nothing due at all.
+#
+# The file is written without a commit of its own and committed by hand
+# afterwards, for two reasons.  The run reads genesis.pipeline.require_pr out
+# of that very file, so a body a row composed itself and dropped the key from
+# would take the whole pull request arm with it; and write_env_file's own
+# commit carries a message of its own choosing, which a row asserting on a
+# subject cannot name.
+#
+# Trailers are passed through, so a row lays a gate by giving this a
+# Genesis-Stage trailer rather than by writing the file and the commit itself.
+sub due_commit {
+	my ($self, $env, %opts) = @_;
+
+	my $path = $self->write_env_file($env,
+		params => $opts{params}, commit => 0);
+
+	return $self->commit_on_control(
+		files    => {$path => slurp($self->{a}."/$path")},
+		message  => $opts{message},
+		trailers => $opts{trailers},
+		push     => defined $opts{push} ? $opts{push} : 1,
+	);
 }
 
 # }}}

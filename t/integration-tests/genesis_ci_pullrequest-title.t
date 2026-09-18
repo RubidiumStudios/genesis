@@ -52,21 +52,6 @@ sub patch_calls {
 	return grep {($_->{method} // '') eq 'PATCH'} gh_calls($gh);
 }
 
-# One due control commit, written through the harness and committed by hand,
-# because the run reads require_pr out of that very file and a body composed
-# here that dropped the key would take the whole arm with it, while the
-# harness's own commit carries a message the rows below cannot name.
-sub due_commit {
-	my ($h, %opts) = @_;
-	my $path = $h->write_env_file('prod', params => $opts{params},
-		commit => 0);
-	return commit_on_control($h,
-		files   => {$path => slurp($h->a."/$path")},
-		message => $opts{message},
-		push    => 1,
-	);
-}
-
 subtest 'an unreviewed pull request is rebuilt and retitled' => sub {
 	plan tests => 10;
 
@@ -91,9 +76,9 @@ subtest 'an unreviewed pull request is rebuilt and retitled' => sub {
 	);
 	$h->fixture_proposed('prod', pr => $number, control => $earlier);
 
-	my $first = due_commit($h, params => {instances => 2},
+	my $first = due_commit($h, 'prod', params => {instances => 2},
 		message => 'Raise the cf instance count');
-	my $second = due_commit($h, params => {instances => 3},
+	my $second = due_commit($h, 'prod', params => {instances => 3},
 		message => 'Raise it again');
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
@@ -144,7 +129,7 @@ subtest 'several open pull requests warn and the first decides' => sub {
 	my $newer = gh_pull_request($gh, env => 'prod', head => $pr,
 		base => $h->slug('prod'), review => 'none');
 
-	due_commit($h, params => {instances => 2},
+	due_commit($h, 'prod', params => {instances => 2},
 		message => 'Raise the cf instance count');
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
@@ -206,7 +191,7 @@ subtest 'a new pull request supersedes the closed attempts' => sub {
 		message => 'a leftover from an attempt');
 	$h->stand_on($h->control);
 
-	due_commit($h, params => {instances => 2},
+	due_commit($h, 'prod', params => {instances => 2},
 		message => 'Raise the cf instance count');
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');

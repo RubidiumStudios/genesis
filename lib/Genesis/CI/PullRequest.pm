@@ -210,7 +210,7 @@ sub freeze {
 	$pr->{action} = 'freeze';
 
 	push @{$record->{held}}, {
-		control_commit => $_->{control_commit} // $_->{sha},
+		control_commit => $_->{control_commit},
 		subject        => $_->{subject},
 		reason         => 'awaiting-merge',
 		number         => $pr->{number},

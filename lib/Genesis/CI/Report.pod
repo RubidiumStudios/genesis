@@ -84,7 +84,11 @@ wrote on the hold record, rather than the word C<on-hold>, because what an
 operator has to clear is that reason and not the state's own name.  A commit
 held because the environment's pull request has been approved and frozen
 reads C<< awaiting merge (#<number>) >>, naming the pull request an operator
-merges to release it.
+merges to release it.  An entry carrying that reason and no number falls
+through to the bare C<< held (<reason>) >> form rather than printing an empty
+number, which nothing in the tree produces:
+C<Genesis::CI::PullRequest::freeze> is the only writer of the reason and it
+always writes the number beside it.
 
 B<Parameters:>
 
@@ -103,8 +107,11 @@ B<Examples:>
   my $words = Genesis::CI::Report::hold_reason($held);
   # returns "held by lab (ops/shared.yml), lab awaiting deployment"
 
-  # and, for a commit an approved pull request froze:
+  hold_reason({reason => 'awaiting-merge', number => 42});
   # returns "awaiting merge (#42)"
+
+  hold_reason({reason => 'awaiting-merge'});
+  # returns "held (awaiting-merge)"
 
 =head2 held_qualifier
 
@@ -119,8 +126,18 @@ certify the commit it has not deployed, and one holding commits behind a gate
 waits on its own deployment of the gate, which is the commit the phrase then
 names.  An environment whose pull request a reviewer has approved reads C<<
 awaiting merge (#<number>) >> and waits for that merge rather than for
-anybody to certify anything, so that wording is read ahead of the ancestor
-one.
+anybody to certify anything, so that wording outranks the ancestor one.
+
+The frozen entry is picked out of the C<held> list by its reason rather than
+taken off the front of it.  The walk sends every commit from the first hold
+backwards to C<held>, so an environment with a gate or an ancestor hold in
+range arrives with that list already full and the freeze's own entries behind
+what is there, and reading the front would name a deployment while what
+releases the environment is the merge.  An entry carrying the reason and no
+number falls through to the ancestor wording rather than printing an empty
+number, which nothing in the tree produces:
+C<Genesis::CI::PullRequest::freeze> is the only writer of the reason and it
+always writes the number beside it.
 
 An environment with a propagation hold standing against it reads C<< needs
 clearing (<reason>) >> ahead of any of those, because a hold is a decision
@@ -150,8 +167,11 @@ B<Examples:>
   my $words = Genesis::CI::Report::held_qualifier($env_record);
   # returns "awaiting deployment (lab at control@1a2b3c4)"
 
-  # and, for an environment whose pull request is approved:
-  # returns "awaiting merge (#42)"
+  held_qualifier({env => 'prod', held => [
+      {reason => 'gate-ahead', gate => '9fc836c0...'},
+      {reason => 'awaiting-merge', number => 42},
+  ]});
+  # returns "awaiting merge (#42)", the gate at the front notwithstanding
 
 =head2 hold_detail
 

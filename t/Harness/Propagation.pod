@@ -757,6 +757,29 @@ A harness declared in pr mode adds C<require_pr> to the C<pipeline> block of
 every environment file it writes, so a row asks for pr mode once rather than
 naming the key on every environment.
 
+=head2 due_commit($h, $env, %opts)
+
+    my $sha = due_commit($h, 'prod',
+        params  => {instances => 2},
+        message => 'Raise the cf instance count');
+
+Writes one control commit that the walk will route to that environment, and
+returns its sha.  It changes the environment's own file at the deployment
+root, because that file is the one thing in this environment's propagation
+set that a row can move: a path under the environment's name is in no set at
+all, so a commit written there routes nowhere and leaves the row with nothing
+due.
+
+The file is written without a commit of its own and committed by hand
+afterwards.  The run reads C<genesis.pipeline.require_pr> out of that very
+file, so a body a row composed itself and dropped the key from would take the
+whole pull request arm with it, and C<write_env_file>'s own commit carries a
+message of its own choosing, which a row asserting on a subject cannot name.
+
+Takes C<params>, which is handed to C<write_env_file> and is what makes each
+commit a different one, C<message>, C<trailers>, which is how a row lays a
+gate, and C<push>, which defaults on.
+
 =head2 fixture_vault($h)
 
 Spins the suite's own local vault through C<helper::vault_start> and points the
