@@ -331,6 +331,51 @@ B<Examples:>
     #         'Supersedes #8, closed without merging: ' .
     #         'https://github.test/o/r/pull/8.'
 
+=head2 expected_tip($git, $pr_branch)
+
+    my $expected = Genesis::CI::PullRequest::expected_tip($git, 'pr/prod/bosh');
+
+Returns the pull request branch's value on the remote as the run's refresh
+read it, or C<undef> when the remote does not carry the branch. The publish
+pushes against this value, so a branch someone moved since the refresh has its
+own push rejected and no other branch in the run is affected.
+
+It is read before the arm fetches the branch and rewrites it, because a read
+taken afterwards would name the value this run is about to overwrite, and the
+lease would then be against a teammate's commit rather than against the one
+the run reasoned from. That is the whole window D51 asks the expected tip to
+close.
+
+The C<undef> is the answer for a branch the remote has never had, and it is
+carried onto the push spec as C<expect> all the same, because
+C<Service::Git::_push_one> reads that key with C<exists> and turns the C<undef>
+into C<Service::Git::NULL_SHA>. A spec that dropped the key instead would be
+pushed with no lease at all.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The C<Service::Git> handle onto the operator's repository. Its default remote
+is what R is read through, and a repository with no remote answers C<undef>,
+since there is nothing to publish to and so nothing to lease against.
+
+=item C<$pr_branch>
+
+The pull request branch's name, without a remote on the front of it.
+
+=back
+
+B<Returns:> the full sha the remote-tracking ref names, or C<undef>.
+
+B<Examples:>
+
+    expected_tip($git, 'pr/prod/bosh');
+    # returns 'd1f65205d4b31d65dc81864dfc0f56a73b6bd74c' where the remote
+    # carries the branch, and undef where it does not
+
 =head2 freeze($record, $commits)
 
     my $word = Genesis::CI::PullRequest::freeze($record, \@pending);

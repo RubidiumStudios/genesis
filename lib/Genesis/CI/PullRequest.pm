@@ -221,6 +221,27 @@ sub freeze {
 }
 
 # }}}
+# expected_tip - the value on R the publish will push against {{{
+#
+# D51 reads it at the run's refresh and nowhere else, because reading it again
+# at the push would close no window at all.  What the arm does next is fetch
+# the branch and rewrite it, so a read taken after that would name the value
+# this run is about to overwrite and would lease the branch against whatever a
+# teammate had just put there.
+#
+# An absent branch has no expected tip, which is how the publish tells a first
+# push from a rewrite, and _push_one turns that undef into the empty object
+# name.  The remote is asked for by name rather than spelled origin, because
+# align_with_remote a few lines above reads the same ref through the same
+# accessor and the two must not disagree about which remote R is.
+sub expected_tip {
+	my ($git, $pr_branch) = @_;
+	my $remote = $git->default_remote or return undef;
+	return undef unless $git->branch_exists("$remote/$pr_branch");
+	return $git->rev_parse("$remote/$pr_branch");
+}
+
+# }}}
 # deliver - the pull request arm for one environment {{{
 #
 # The branch carries exactly one commit above the deployment branch, so the
@@ -249,6 +270,11 @@ sub deliver {
 	$pr->{number}     = $state ? $state->{number}     : undef;
 	$pr->{url}        = $state ? $state->{url}        : undef;
 	$pr->{superseded} = $state ? $state->{superseded} : [];
+
+	# Recorded above everything the arm writes, so the value the publish is
+	# handed is the one the rest of the arm reasoned from, and not the one the
+	# arm's own rewrite leaves behind.
+	$pr->{expected} = expected_tip($git, $pr->{branch});
 
 	return 'idempotent' unless @$commits;
 

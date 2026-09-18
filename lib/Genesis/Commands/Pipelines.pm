@@ -932,10 +932,17 @@ sub propagate {
 
 				$delivered += scalar(@pending)
 					if ($env_record->{outcome} // '') eq 'propagated';
+				# D51's lease.  The expected tip is the one the arm read
+				# before it rewrote anything, and the key is carried even
+				# where it is undef, because _push_one reads it with exists
+				# and a spec that dropped it would be pushed with no lease
+				# at all.  An undef there is a branch the remote has never
+				# had, which leases the empty object name.
 				push @publish_specs, {
 					branch => $env_record->{pr}{branch},
 					kind   => 'pr',
 					env    => $env_name,
+					expect => $env_record->{pr}{expected},
 				} if !$dry_run && ($env_record->{pr}{action} // '') eq 'rebuild';
 				next;
 			}

@@ -89,10 +89,19 @@ sub _record {
 
 # }}}
 # _as_text - one argument as the log holds it {{{
+#
+# A plain hash is carried through key by key rather than stringified, because
+# push takes its refs as a list of specs and a row that wants to know what one
+# branch was leased against has nowhere else to read it.  A key the caller left
+# out stays out, and a key whose value is undef stays undef, so a row can tell
+# a spec that named no expected tip from one that named none deliberately.
+# Anything blessed still stringifies, since it is an object and not a record.
 sub _as_text {
 	my ($arg) = @_;
 	return undef unless defined $arg;
 	return [map {_as_text($_)} @$arg] if ref($arg) eq 'ARRAY';
+	return {map {($_ => _as_text($arg->{$_}))} keys %$arg}
+		if ref($arg) eq 'HASH';
 	return "$arg";
 }
 
