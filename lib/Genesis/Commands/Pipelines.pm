@@ -356,11 +356,6 @@ sub pipeline_hold {
 
 	assert_not_disowned($top, 'pipeline-hold');
 
-	command_usage(1,
-		"A propagation hold takes an environment and a reason, and a reason ".
-		"of more than one word has to be quoted."
-	) if @args > 2;
-
 	# Both `genesis <env> pipeline-hold` and `genesis pipeline-hold
 	# "<reason>"` arrive here carrying one argument, and only the repository
 	# can tell the two apart.  The CLI read the prefix as an environment
@@ -368,6 +363,13 @@ sub pipeline_hold {
 	# question is asked here and the two never disagree about what the
 	# operator named.  An environment with nothing after it is the missing
 	# reason the refusal below names.
+	#
+	# A call carrying more than two arguments, which is what an unquoted
+	# reason of several words arrives as, matches neither form and leaves
+	# both names undefined, so it reaches that same refusal.  There is no
+	# separate refusal for the arity, because one that answered with the same
+	# code and the same usage block would differ only in its sentence, and
+	# the sentence below names the quoting for whichever call arrives.
 	my ($env_name, $reason);
 	if (@args == 2) {
 		($env_name, $reason) = @args;
@@ -375,6 +377,18 @@ sub pipeline_hold {
 		(my $named = $args[0]) =~ s/\.yml$//;
 		if (length($named) && -f $top->path("$named.yml")) {
 			$env_name = $args[0];
+
+		# A lone argument that names a file this root holds but cannot
+		# resolve as an environment is a mistyped environment and not a
+		# reason.  Reading it as one would hold every environment in the
+		# root and write the filename in as the reason, which is the worst
+		# of the three things it could do, so it is refused by name.
+		} elsif (-f $top->path($args[0])) {
+			command_usage(1, sprintf(
+				"#C{%s} is a file in this deployment root, not a reason, and ".
+				"it is not an environment either, since Genesis reads an ".
+				"environment out of #C{<env>.yml}.", $args[0]
+			));
 		} else {
 			$reason = $args[0];
 		}
@@ -390,8 +404,10 @@ sub pipeline_hold {
 	# test below tries would read a file it never found as a reason.
 	$env_name =~ s/\.yml$// if defined $env_name;
 
-	command_usage(1, "A propagation hold needs a reason.")
-		unless defined($reason) && $reason =~ /\S/;
+	command_usage(1,
+		"A propagation hold needs a reason, and a reason of more than one ".
+		"word has to be quoted."
+	) unless defined($reason) && $reason =~ /\S/;
 
 	for my $name (defined($env_name) ? ($env_name) : _root_environments($top)) {
 		my $env = Genesis::Env->bare($name, $top)->with_vault;
