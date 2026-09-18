@@ -1223,11 +1223,31 @@ sub _deploy_preflight {
 		);
 	}
 
+	# 6.  D79: every genesis.pipeline.* key the pre-flight reads comes from
+	# the merged environment hierarchy and never from the leaf file alone, so
+	# a predecessor named on a site file is seen by the check that refuses on
+	# it.  bare runs the name and file-existence checks and nothing else, so
+	# lookup resolves through the hierarchy with no kit loaded and nothing
+	# connected, and the read is made here rather than after the environment
+	# is loaded, where a repository the deploy cannot reach a director for
+	# would answer with the director's complaint instead of this refusal.
+	#
+	# The record is read once and handed to the check.  Two readers want it,
+	# the check for the fact that the predecessor deployed at all and the
+	# due computation for the commit it certified, and one read serves both
+	# (FWT-1141).
+	my $bare         = Genesis::Env->bare($name, $top);
+	my $prior        = $bare->lookup('genesis.pipeline.prior_env', '');
+	my $prior_record = _prior_env_record($bare, $prior);
+	_assert_prior_env_deployed($bare, $prior, $prior_record) if $prior;
+
 	return {
 		git     => $git,
 		branch  => $branch,
 		session => $session,
 		action  => $action,
+		bare    => $bare,
+		prior   => $prior_record,
 	};
 }
 
@@ -1295,15 +1315,16 @@ sub deploy {
 	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
 	# CI-only checks for pipeline-managed environments.
+	#
+	# The predecessor invariant is not among them any more.  It reads a
+	# configuration key and one exodus record, and both are read in the
+	# pre-flight above, before the environment is loaded and before a
+	# director is dialled, so an operator who deployed out of order is told
+	# so rather than told about whatever the loading of an environment they
+	# may not deploy ran into first.
 	if ($top->pipeline_enabled) {
 		my $prior = eval { $env->lookup('genesis.pipeline.prior_env', '') } // '';
 		if ($prior) {
-			# Hard invariant (no --yes override): the pipeline predecessor must
-			# have been successfully deployed at least once.  Without this guard
-			# a deploy could proceed past an env that skipped its predecessor,
-			# leaving the pipeline DAG in an inconsistent state.
-			_assert_prior_env_deployed($env, $prior);
-
 			# Warn when manually deploying outside of a pipeline job.
 			# GENESIS_HONOR_ENV is set by ci-pipeline-deploy; its absence
 			# means we are running at a terminal, not inside Concourse.
@@ -1787,31 +1808,61 @@ sub deploy {
 	}
 }
 
-# _assert_prior_env_deployed - hard invariant: prior_env must have a successful deploy {{{
+# _prior_env_record - the one read of the predecessor's exodus record {{{
 #
-# Bails unconditionally (no --yes override) when the prior_env has never
-# produced a successful deployment.  Called from deploy() when CI is
-# configured and genesis.pipeline.prior_env is set.
-sub _assert_prior_env_deployed {
+# Two readers want this record, the prior-env check for the fact that the
+# predecessor deployed at all and the due computation for the commit it
+# certified, so the design gives both one read (FWT-1141).  A post-failed
+# result counts, because the BOSH deploy itself succeeded and the environment
+# is running.
+#
+# The read is of the deployment audits under the predecessor's own exodus
+# base, keyed on the compact timestamp, which is the set every reader of a
+# certified commit goes through.  The flat record beside them holds the same
+# facts under different names and is the staleness comparison's half.
+#
+# The read is wrapped in an eval, so a predecessor whose history cannot be
+# read at all is answered the same way as one that never deployed, and the
+# check that reads this answer is where that refusal is worded.
+sub _prior_env_record {
 	my ($env, $prior_name) = @_;
+	return undef unless $prior_name;
 
-	# exodus_mount already ends with '/'; construct the deployments path directly.
-	my $prior_deploys = $env->exodus_mount . $prior_name . '/' . $env->type . '/deployments';
-	my $deploys = eval { $env->vault->get_path($prior_deploys) };
+	# exodus_mount already ends with '/', so the path is composed directly.
+	my $path = $env->exodus_mount.$prior_name.'/'.$env->type.'/deployments';
+	my $deploys = eval { $env->vault->get_path($path) };
+	return undef unless $deploys && ref($deploys) eq 'HASH';
 
-	if ($deploys && ref($deploys) eq 'HASH') {
-		for my $entry (values %$deploys) {
-			next unless ref($entry) eq 'HASH';
-			my $result = $entry->{result} // '';
-			# 'post-failed' means the BOSH deploy itself succeeded; env is running.
-			return if $result eq 'success' || $result eq 'post-failed';
-		}
+	# Newest first, the entry names being the compact timestamps the deploy
+	# writes, so the record answered is the predecessor's latest deployment
+	# that reached the director rather than whichever one a hash happened to
+	# hand back first.
+	for my $at (sort {$b cmp $a} keys %$deploys) {
+		my $entry = $deploys->{$at};
+		next unless ref($entry) eq 'HASH';
+		my $result = $entry->{result} // '';
+		next unless $result eq 'success' || $result eq 'post-failed';
+		return {at => $at, result => $result, git => $entry->{git} || {}};
 	}
+	return undef;
+}
 
-	bail(
-		"Cannot deploy #C{%s}: its pipeline predecessor #C{%s} has\n".
-		"never been successfully deployed.\n\n".
-		"Deploy #C{%s} first, then retry.",
+# }}}
+# _assert_prior_env_deployed - the predecessor must have deployed at all {{{
+#
+# A hard invariant with no --yes override.  It judges the record
+# _prior_env_record already read rather than reading again, and it asks only
+# whether the predecessor has ever deployed; which commit it certified is the
+# due computation's question, and a predecessor that never certified one holds
+# everything below it under D43 rather than failing this check.
+sub _assert_prior_env_deployed {
+	my ($env, $prior_name, $record) = @_;
+	return 1 if $record;
+
+	bail({exitcode => DATAERR},
+		"Cannot deploy #C{%s}: its pipeline predecessor #C{%s} has never been ".
+		"successfully deployed.\n\nDeploy #C{%s} first, then retry.  Nothing ".
+		"was deployed.",
 		$env->name, $prior_name, $prior_name
 	);
 }
