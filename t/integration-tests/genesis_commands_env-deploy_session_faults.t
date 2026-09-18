@@ -36,22 +36,6 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# The one file both of the first two rows edit.  It is asked of the
-# propagation set rather than spelled out, so a row cannot come to be editing
-# a file the deploy never looks at, and .genesis/config is passed over because
-# the set holds it too and an edit there takes the deployment root with it.
-# The last segment is what is matched, because propagation_set prefixes every
-# path with the deployment root where the harness has one, and a match on the
-# whole path would answer nothing there and leave both rows writing to a name
-# that is half empty.
-sub edited_file {
-	my ($h, $env) = @_;
-	my ($file) = grep {m{(?:^|/)\Q$env\E\.yml$}} propagation_set($h, $env);
-	die "the propagation set for $env carries no $env.yml to edit\n"
-		unless defined $file;
-	return $file;
-}
-
 subtest 'a switching deploy refuses on a tracked modification' => sub {
 	# Green on arrival.  It catches a deploy that keeps a cleanliness check
 	# of its own, which bailed with a message naming no file.

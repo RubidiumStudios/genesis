@@ -1068,16 +1068,19 @@ sub deploy {
 		if (!Genesis::Commands::branch_session()
 				&& ($pipeline_git->current_branch // '') ne $branch_name) {
 			unless ($pipeline_git->is_clean) {
-				# The list is filtered the way the session's own
-				# modified_paths filters it, so an operator refused here and
-				# an operator refused by the session are shown one list.
-				my $status = $pipeline_git->status;
-				my @modified =
-					sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
+				# The list comes from the session's own reader, so an
+				# operator refused here and an operator refused by the
+				# session are shown one list rather than two that have to be
+				# kept in step by hand.  The module is required here because
+				# the arm with no deployment branch returns before the gate
+				# has loaded it.
+				require Service::Git::Session;
+				my $modified =
+					Service::Git::Session::modified_paths_of($pipeline_git);
 				bail(
 					"Working tree has uncommitted changes.  Commit or stash them\n".
 					"before deploying:\n%s",
-					join("", map {"  - $_\n"} @modified)
+					join("", map {"  - $_\n"} @$modified)
 				);
 			}
 		}

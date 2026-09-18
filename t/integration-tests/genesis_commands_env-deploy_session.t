@@ -182,7 +182,10 @@ subtest 'a deploy that opens no session still refuses a dirty tree' => sub {
 	# last assertion reads.
 	my $git = fault_git($h);
 
-	my ($edited) = grep {$_ eq 'qa.yml'} propagation_set($h, 'qa');
+	# The harness picks the file, so this row and the two in the faults file
+	# edit the same one, and a harness with a deployment root still answers
+	# rather than leaving the row writing to a name that is half empty.
+	my $edited = edited_file($h, 'qa');
 	my $body = slurp($h->a.'/'.$edited)."# edited in place\n";
 	mkfile_or_fail($h->a.'/'.$edited, $body);
 

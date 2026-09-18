@@ -80,7 +80,21 @@ sub on { $_[0]->{on} }
 # operator is shown is the same list wherever they are shown it.
 sub modified_paths {
 	my ($self) = @_;
-	my $status = $self->{git}->status;
+	return modified_paths_of($self->{git});
+}
+
+# }}}
+# modified_paths_of - the same list, for a caller holding only a handle {{{
+#
+# The deploy asserts D84's precondition itself on the two arms of the gate
+# that open no session, so it has a handle and no session to ask, and the
+# list it names has to be the list the session would have named: one state
+# described twice is a state an operator fixes twice.  It is a plain
+# function rather than a method, called by its full name, because there is
+# no session for it to be a method on.
+sub modified_paths_of {
+	my ($git) = @_;
+	my $status = $git->status;
 	return [sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status];
 }
 
