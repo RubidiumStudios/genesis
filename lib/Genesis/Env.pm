@@ -4826,10 +4826,15 @@ sub _pre_deploy {
 	# used to snapshot the working tree so that _post_deploy could diff
 	# against it and name what the deploy had written, and _post_deploy now
 	# asks the session whether the tree is clean instead, which needs no
-	# snapshot.  The switch onto the deployment branch happens earlier still,
-	# in the session Genesis::Commands::Env::deploy opens, so everything
-	# below runs on the env-branch view whether the repository has a pipeline
-	# or not.
+	# snapshot.  The switch onto the deployment branch happens earlier
+	# still, in the session the gate opens for a command that declares a
+	# branch class, which is _gate_deployed_state in Genesis::Commands, and
+	# the deploy's pre-flight reaches that session through
+	# Genesis::Commands::branch_session rather than opening one of its own.
+	# Where the repository has a pipeline, everything below therefore runs
+	# on the env-branch view.  Where it has none there is no deployment
+	# branch to switch to and nothing switches, and everything below runs
+	# on the branch the operator was already standing on.
 
 	# Generate and store the deployment manifest (pruned and unpruned versions)
 	my $pruned_deploy_manifest = $self->manifest_provider->deployment(subset=>'pruned',notify=>1);

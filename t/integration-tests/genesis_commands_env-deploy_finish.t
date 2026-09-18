@@ -22,9 +22,12 @@
 # after the command returned and finish already aborted on a dirty tree, so
 # the baseline did name the file and did discard it.  What it did not do is
 # exit anything but 1, and it ran after the cascade had already handed off,
-# which is what the first and the second subtest's second row drive.  The two
-# green rows stay as guards: the third catches an abort that discards the
-# files without saying which, leaving an operator with no idea what was
+# which is what the first subtest's first row and the second subtest's third
+# row drive.  Those are counted as the test output numbers them, where the
+# restoration assertion run_genesis makes is the row that comes first.
+#
+# The two green rows stay as guards: the third catches an abort that discards
+# the files without saying which, leaving an operator with no idea what was
 # thrown away, and the fourth catches an abort that names them and keeps
 # them, which is the warning this task replaced.
 use strict;

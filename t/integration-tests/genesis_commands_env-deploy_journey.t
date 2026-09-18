@@ -10,6 +10,12 @@
 # of working state.  What the snapshot covers is every command after the
 # environment exists, which is the whole of the journey that promises to put
 # the operator back where it found them.
+#
+# There are twelve rows here and the brief's sketch asks for eleven.  The
+# extra one is the silence row after the final deploy.  T325 says that deploy
+# proceeds with no warning it should not have, and no row the sketch lists
+# reads what it said, so the sketch does not assert the half of T325 its own
+# prose names.
 use strict;
 use warnings;
 use utf8;
@@ -28,7 +34,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'from genesis new to a deployed record' => sub {
-	plan tests => 11;
+	plan tests => 12;
 
 	# No environment exists yet, which is where the journey starts, and the
 	# director, the fake bosh, and the kit go in before anything runs,
@@ -85,12 +91,31 @@ EOS
 	is($exit, 0, 'the deploy proceeded')
 		or diag("what the deploy said:\n$err");
 
+	# The other half of T325, which is that the deploy proceeds with no
+	# warning it should not have.  Two warnings a deploy of this shape can
+	# print are wrong here, and this row reads the sentence each of them
+	# opens with.  Nothing is due to the branch, because the propagate above
+	# delivered every commit control carries, and nothing has drifted,
+	# because the branch still mirrors the snapshot that propagate left on
+	# it.
+	#
+	# The row would be green against a library that had never learned to
+	# print either warning, so it guards rather than proves, and it stays
+	# for the reason the due-commits and drifted files each keep a silence
+	# row of their own, which is that a warning firing on every deploy would
+	# be right in those files and wrong here, and nothing else in this
+	# journey would notice.  The two patterns are those files' own.
+	unlike(unfolded($err), qr/commits? due to|differs from the snapshot/,
+		'saying nothing was due and nothing had drifted')
+		or diag("what the deploy said:\n$err");
+
 	my $record = newest_record($h, $h->env_path('qa').'/deployments');
 	is($record->{git}{control_commit}, harness_marker($h, $h->slug('qa')),
 		"the record names the control commit the branch's marker carries");
 
 	assert_w_restored($w, 'the whole journey');
-	assert_snapshot_invariant($h, 'qa', name => 'the seeded branch mirrors control');
+	assert_snapshot_invariant($h, 'qa',
+		name => 'the seeded branch mirrors control');
 };
 
 done_testing;
