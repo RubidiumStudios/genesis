@@ -118,6 +118,19 @@ sub status_records {
 	# rather than as they happen.
 	$record->{events} = $control->{events};
 
+	# D43's staleness, asked through the one query Genesis::Top gives it, so
+	# the deploy pre-flight, the propagate pre-flight, and this command
+	# cannot disagree about whether the pipeline is stale.  The query answers
+	# an arrayref of env and reason pairs, and the reasons are its own two
+	# words rather than any filename, so the two lists below run in step and
+	# the renderer reads the pair at one index.
+	if (my $applied = $record->{applied}) {
+		my $changes = $top->pipeline_staleness($git);
+		$applied->{stale}         = @$changes ? JSON::PP::true : JSON::PP::false;
+		$applied->{stale_envs}    = [map {$_->{env}} @$changes];
+		$applied->{stale_because} = [map {$_->{reason}} @$changes];
+	}
+
 	# The walk leaves drifted null for this command to fill, and the fill
 	# reads git off the branch the walk already named.  The ref is the one
 	# the walk routed from, which under this command is the ref a real run
@@ -236,6 +249,9 @@ sub render_tree {
 	push @out, csprintf("\n#G{Pipeline}: #C{%s}  #Yi{provider}: %s  #Yi{control}: #C{%s}#Yi{\@}#C{%s}",
 		$record->{pipeline} // $record->{type}, $record->{provider},
 		$record->{control}{branch}, _short($record->{control}{commit}));
+	# Directly under the pipeline header, so the operator reads that the
+	# report rests on a stale pipeline before they read a row.
+	push @out, _applied_line($record) if $record->{applied};
 	push @out, '';
 
 	my $width = 0;
@@ -264,6 +280,26 @@ sub render_tree {
 
 	push @out, '';
 	return join("\n", @out)."\n";
+}
+
+# }}}
+# _applied_line - the header that says the pipeline is stale {{{
+#
+# D43 detects staleness by a path comparison that needs no fly, and
+# Genesis::Top gives it one method, so we ask that method rather than diffing
+# here.  The line names each changed environment with the reason the query
+# gave for it, and the command that fixes it.
+sub _applied_line {
+	my ($record) = @_;
+	my $applied = $record->{applied} or return ();
+
+	my $line = csprintf("  #Yi{applied at} #C{%s}", _short($applied->{control_commit}));
+	return $line unless $applied->{stale};
+
+	my @changed = @{$applied->{stale_envs} || []};
+	my @reasons = @{$applied->{stale_because} || []};
+	return $line.csprintf("  #R{[stale: %s]}  run #C{genesis pipeline-apply}",
+		join(', ', map {sprintf('%s %s', $changed[$_], $reasons[$_])} 0 .. $#changed));
 }
 
 # }}}

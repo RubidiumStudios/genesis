@@ -296,11 +296,18 @@ sub apply {
 #
 # D91's read model.  The command refreshes unless --no-refresh under D40,
 # computes the deployment root's record from the walk, and renders it as JSON
-# or as the tree.  It writes nothing.  The D64 refusal goes in above this, in
-# a later step, where the record it reads is already being read.
+# or as the tree.  It writes nothing.
 sub pipeline_status {
 
 	my $top = Genesis::Top->new('.');
+
+	# D64: an applied record standing while pipeline.enabled is false means
+	# the configuration disowns a pipeline that is still live, still watching
+	# its branches, and still deploying.  Every pipeline command refuses that
+	# repository, this one included, and it refuses above everything else, so
+	# nothing of the report reaches standard output ahead of the refusal.
+	Genesis::CI::Preflight::assert_not_disowned($top,
+		command => 'pipeline-status');
 
 	my $git     = Service::Git->new('.');
 	my $refresh = get_options->{'no-refresh'} ? 0 : 1;

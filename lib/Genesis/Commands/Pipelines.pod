@@ -426,6 +426,21 @@ commands can never disagree about what is held and why.
 A repository with a second deployment root is read by running the command in
 that root, as every other pipeline command reads one.
 
+The one thing the command refuses is a disowned pipeline.  An applied record
+standing while C<pipeline.enabled> is false means the configuration disowns a
+pipeline that is still live, still watching its branches, and still deploying,
+so the command refuses at C<CONFIG> with the two remedies beside it, as every
+other pipeline command does.  The refusal stands above everything else, so
+nothing of the report reaches standard output ahead of it and no environment
+is reported at all.
+
+The header names the control commit the pipeline was applied from.  Where the
+pipeline-defining paths have changed since, it says so, names each changed
+environment with the reason the staleness query gave for it, and names
+C<genesis pipeline-apply> as the command that fixes it.  Each environment's
+row carries the discovery mark the apply wrote for it, which is null for an
+environment the applied pipeline does not know.
+
 The command moves no branch and writes nothing to vault.  It asks the
 pre-flight for its branch records read-only, so a branch a run would have
 fast-forwarded stands where it stood and the report reads the ref that run
@@ -458,8 +473,9 @@ Read the refs as they stand, without fetching first.
 
 =back
 
-B<Returns:> Exits 0 after printing.  See L<Genesis::CI::Status> for the
-record's shape and its two renderings.
+B<Returns:> Exits 0 after printing, or C<CONFIG> where the configuration
+disowns a live pipeline.  See L<Genesis::CI::Status> for the record's shape
+and its two renderings.
 
 B<Examples:>
 

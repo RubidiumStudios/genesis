@@ -1123,6 +1123,24 @@ sub plan {
 				return;
 			}
 
+			# D77's mark, which says where the apply could not render a
+			# manifest for this environment.  It belongs to an environment
+			# the applied pipeline knows, and an environment it does not
+			# know has no pipeline subpath at all and carries null rather
+			# than a mark, because the reading is about discovery and not
+			# about membership.
+			#
+			# It is read here, off the environment already in hand, for the
+			# reason the marker below is: a reader that asked later would
+			# load every environment a second time and take a second exodus
+			# reading for each of them.  A vault this run cannot reach is
+			# the certified commit's refusal to raise a few lines down,
+			# where the environment ends as failed, so the mark is asked for
+			# without a guard of its own.
+			my $pipeline_record = eval {$env->pipeline_record};
+			$env_record->{discovery} = $pipeline_record
+				? $pipeline_record->{discovery} : undef;
+
 			# Whether a person rather than a trigger starts this
 			# environment's deploy.  It is read here, off the environment
 			# already in hand, because nothing below holds one and a reader

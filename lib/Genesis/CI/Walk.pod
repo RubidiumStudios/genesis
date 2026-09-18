@@ -224,6 +224,13 @@ beside them, which the three states cannot say on their own, because an orphan
 branch and an ordinary divergence both hold the name on both sides.
 C<unrelated> is the encoder's own boolean, as C<manual> is.
 
+C<discovery> is the mark the apply wrote for an environment the pipeline
+knows, which says where it could not render a manifest, and it is undef for
+an environment the pipeline does not know, since such an environment has no
+pipeline record at all.  It is read off the environment this walk has already
+loaded, so the mark costs no second load and no second reading of vault, and
+it stays null for an environment the walk never loaded.
+
 B<Errors:> Raises a bug where no git handle is given, since every reading
 below is made through one and a walk without it can answer nothing.
 

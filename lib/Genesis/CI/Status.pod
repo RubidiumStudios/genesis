@@ -68,6 +68,15 @@ environment from, so the snapshot the drift is measured against is the one
 every other column of the row was read from.  A row that failed to load is
 left alone, since there is nothing to compare.
 
+The record carries the applied pipeline record at the top with C<stale>,
+C<stale_envs>, and C<stale_because> beside it, read through
+L<Genesis::Top/pipeline_staleness> so that this command, the deploy
+pre-flight, and the propagate pre-flight all ask the same query.
+C<stale_because> holds that query's own reasons, which are
+C<configuration-changed> and C<dependencies-changed>, and never a path.  The
+two lists run in step, so the environment and the reason for it sit at one
+index.
+
 B<Parameters:>
 
 =over 4
@@ -362,6 +371,35 @@ B<Examples:>
 
   my $plain = Genesis::CI::Status::_jsonable({at => Time::Piece->new});
   # {at => '2026-09-18 03:48:52 +0000'}
+
+=head2 _applied_line($record)
+
+  my $line = Genesis::CI::Status::_applied_line($record);
+
+Renders the one header line that says which control commit the pipeline was
+applied from, and, where the pipeline has gone stale since, names every
+changed environment with the reason the staleness query gave for it and the
+command that fixes it.  It reads the fields C</status_records> wrote and asks
+no question of its own, so the header and C<--json> cannot come to disagree
+about whether the pipeline is stale.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The record C</status_records> answered with.
+
+=back
+
+B<Returns:> the line, or the empty list where the repository has no applied
+record and there is nothing to say about one.
+
+B<Examples:>
+
+  my $line = Genesis::CI::Status::_applied_line($record);
+  # '  applied at 6084166  [stale: dev configuration-changed]  run genesis pipeline-apply'
 
 =head2 _short($sha)
 
