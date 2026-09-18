@@ -713,9 +713,11 @@ sub apply_hold {
 # ends the session and the run with it, which would leave every environment
 # below this one unattempted, which is the shape this sub exists to stop.
 # An environment that delivers into a pull request writes on that branch and
-# not on the deployment branch, so its pull request branch is discarded too,
+# not on the deployment branch, so its pull request branch is put back too,
 # because a discard that named the deployment branch alone would put back the
-# branch nothing was written to and leave the half-written one standing.
+# branch nothing was written to and leave the half-written one standing.  That
+# branch goes back through the restore rather than the discard, since the run
+# may have cut it and the remote has no tip to put a cut branch back to.
 #
 # A run-fatal or unsurvivable error is not caught here.  It propagates to
 # the caller, which aborts the whole run.
@@ -747,9 +749,16 @@ sub walk_one {
 	$error = $error->message
 		if Scalar::Util::blessed($error) && $error->can('message');
 
+	# The deployment branch goes back through the discard, which cleans the
+	# tree and the index on its way.  The pull request branch goes back
+	# through the restore instead, because the discard puts a branch back to
+	# the remote's tip and the remote has no tip for a branch this run cut,
+	# which is exactly the branch a half-written delivery leaves standing.
+	# The restore knows that case and takes such a branch off, stepping the
+	# tree off it first.
 	if ($session) {
 		$session->discard($record->{branch});
-		$session->discard($record->{pr}{branch})
+		$session->restore_branch($record->{pr}{branch})
 			if $record->{pr} && $record->{pr}{branch};
 	}
 	$record->{error}   = _load_error($error);

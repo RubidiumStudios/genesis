@@ -1,9 +1,9 @@
 #!/usr/bin/env perl
 # Proves T269: an unreachable GitHub API refuses the whole run, names what it
-# could not read, writes nothing, and exits Genesis::Exit::UNAVAILABLE.  The
-# second subtest proves the double answers the reviews route, without which
-# every state below collapses to unreviewed and three arms of D51 cannot be
-# driven at all.
+# could not read, quotes the reader in the reader's own words, writes nothing,
+# and exits Genesis::Exit::UNAVAILABLE.  The second subtest proves the double
+# answers the reviews route, without which every state below collapses to
+# unreviewed and three arms of D51 cannot be driven at all.
 use strict;
 use warnings;
 use utf8;
@@ -24,7 +24,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'an unreadable review state refuses the run and writes nothing' => sub {
-	plan tests => 9;
+	plan tests => 10;
 
 	my $h  = ready(kit => 'omega-v2.7.0', envs => ['qa', 'prod']);
 	my $gh = $h->{gh};
@@ -59,7 +59,14 @@ subtest 'an unreadable review state refuses the run and writes nothing' => sub {
 	like($said, qr/review state/i, 'it names the review state');
 	like($said, qr/could not read|unreachable/i,
 		'and says it could not read it');
-	like($said, qr/retry/i, 'and says what fixes it');
+	# Not "retry once the API answers again".  Every failure of the two
+	# readers arrives at this one refusal, a rejected token and a renamed
+	# repository among them, and a retry helps none of those.  What the
+	# reader said is quoted instead, and that is what says which it was.
+	like($said, qr/Failed to list pull requests/,
+		'and quotes what the reader itself said');
+	unlike($said, qr/\[FATAL\][\s\S]*\[FATAL\]/,
+		'with the quote stripped of its own banner rather than nested');
 	# The refusal stands ahead of the walk, so nothing was written and there
 	# was nothing to undo.  A run that read the state inside its own walk
 	# would deliver both environments first and come back through the abort,

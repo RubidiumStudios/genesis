@@ -262,6 +262,60 @@ subtest 'abort takes off a branch this run cut' => sub {
 	ok($git->is_clean, 'with a clean tree');
 };
 
+subtest 'a branch that cannot go back does not strand the operator' => sub {
+	plan tests => 4;
+
+	# The abort answers for two different things: the branches this run
+	# wrote, and the branch the operator started on.  Run as one attempt,
+	# whichever of them fails first takes the other with it, and the half
+	# that failed decides which kind of mess is left.  Here the branch
+	# restore is the half that fails, and the operator must still be put
+	# back rather than left standing on a branch this run cut.
+	my $cwd = getcwd();
+
+	my $h = make_harness(envs => ['qa'], mode => 'pr');
+	init_branch($h, 'qa');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => "---\nkit: dev\n"},
+		message => 'change qa',
+		push    => 1,
+	);
+
+	my $git = fault_git($h, copy => 'a');
+	my $cut = $h->pr_branch('qa');
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	$session->switch($cut, create_from => $h->slug('qa'));
+	$git->checkout_file($control, 'qa.yml');
+	$git->commit('deliver to the pull request branch', 'qa.yml');
+
+	# The tree stands on the branch the restore is about to take off, so
+	# the restore has to step off it first, and that step is the checkout
+	# the fault below breaks.  The counter is reset because the switches
+	# above have already spent several checkouts of their own.
+	#
+	# That one call is armed and no later one is, because the return to the
+	# operator's branch is a checkout too and this row is about the return
+	# surviving a branch restore that failed.  Arming from the first call
+	# onward would break the return as well and prove nothing.
+	reset_steps($git);
+	fail_on($git, 'checkout', 1, message => 'the branch is in the way');
+
+	my $err = exception(sub {$session->abort('the writer could not finish')});
+
+	is($git->current_branch, $h->control,
+		'the operator is back on the branch they started from');
+	like($err, qr/the writer could not finish/,
+		'the error names what the run failed at');
+	like($err, qr/the branch is in the way/,
+		'and the branch restore that failed beside it');
+	ok(!$session->active, 'the session is closed either way');
+
+	chdir($cwd) or die "cannot return to $cwd: $!\n";
+};
+
 subtest 'control behind its remote-tracking ref is still left alone' => sub {
 	plan tests => 3;
 

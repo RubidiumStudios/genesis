@@ -450,8 +450,15 @@ still in the tree, every reset and checkout after it would fail over them, so
 nothing further is attempted and the session dies at C<SOFTWARE> naming the
 working tree and the branch it is left standing on.
 
+Each branch is put back inside an eval of its own, and so is the return to
+the branch C<begin> recorded. The two halves answer for different things, and
+one of them failing is no reason to skip the other: run as one, a failed
+return would leave every branch at the run's tip, and a failed reset would
+leave the operator standing on a branch they never chose. Every error raised
+across the two is collected, and all of them are reported together.
+
 When the return itself fails the session is stuck, and it dies naming the
-original error, the restore failure, and the branch we are standing on,
+original error, the restore failures, and the branch we are standing on,
 because the alternative is an operator running every later command against the
 wrong branch with nothing having been raised.
 
