@@ -693,11 +693,11 @@ sub pull_rebase {
 # diff_files - structured diff between two refs, filtered by pathspecs {{{
 #
 # The return code is read and stderr is kept apart from stdout, for the
-# reason diff_names gives below and with the same refusal: a git that
-# refuses the command writes its reason where the file names would be, no
-# line of that reason matches any of the three statuses this loop tests, and
-# the answer would be an empty changed list and an empty deleted list, which
-# every caller reads as nothing having changed.  A drift warning that has
+# reason diff_names gives below and with the same refusal, because a git
+# that refuses the command writes its reason where the file names would
+# be, no line of that reason matches any of the three statuses this loop
+# tests, and the answer would be an empty changed list and an empty
+# deleted list, which every caller reads as nothing having changed.  A drift warning that has
 # gone silent is the one answer this reader must never give.
 sub diff_files {
 	my ($self, $from, $to, @pathspecs) = @_;

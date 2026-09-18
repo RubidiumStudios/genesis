@@ -1322,9 +1322,9 @@ sub _deploy_preflight {
 	# loaded fails here rather than there and says the same thing either way.
 	#
 	# That second load is the same work done twice, and the cost is named
-	# rather than hidden: load_env memoises nothing, so the deploy proper
-	# pays for a full merge of the environment hierarchy and a full kit
-	# resolution again a step below.  Carrying the loaded environment out in
+	# rather than hidden, because load_env memoises nothing and the deploy
+	# proper pays for a full merge of the environment hierarchy and a full
+	# kit resolution again a step below.  Carrying the loaded environment out in
 	# the answer would spare it, and the keys of that answer are fixed, so
 	# sparing it belongs to whichever step may widen them.
 	my $drifted = _warn_drifted($top->load_env($name), $git);

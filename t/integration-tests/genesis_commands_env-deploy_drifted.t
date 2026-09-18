@@ -130,8 +130,9 @@ subtest 'a hand commit that deletes a set member is named too' => sub {
 	# dev/ pathspec that a deploy does not need, and the hand commit removes
 	# it, so git reports the deletion under the directory the set names.
 	#
-	# Five rows rather than four: run_genesis takes the snapshot and asserts
-	# the working state came back, and that assertion is one of the plan.
+	# Five rows rather than four, because run_genesis takes the snapshot and
+	# asserts the working state came back, and that assertion is one of the
+	# plan.
 	plan tests => 5;
 
 	my $h = ready_harness(envs => ['qa'],

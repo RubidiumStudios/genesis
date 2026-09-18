@@ -103,7 +103,7 @@ subtest 'the two timestamp forms stay apart' => sub {
 	my $set    = $h->env_path('qa').'/deployments';
 	my $record = newest_record($h, $set);
 	isnt($record, undef, 'the deploy wrote a record to read');
-	my @times = grep {defined} map {$record->{$_}} qw/dated completed/;
+	my @times = grep {defined} map {$record->{$_}} qw/started completed/;
 	ok(scalar(@times), 'and the record holds at least one time as a value');
 
 	my ($dated) = reverse sort @{record_keys($h, $set)};

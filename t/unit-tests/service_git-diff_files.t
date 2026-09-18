@@ -6,6 +6,12 @@
 # deleted list.  Every caller reads that as nothing having changed, which on
 # the drift warning of D33 is a hatch that has gone silent.
 #
+# The first subtest was green when it was written, the classification it
+# reads having been there all along.  It earns its place by pinning that
+# classification, which is what the second subtest's refusal protects: a
+# reader that answered an empty diff would satisfy neither, and a reader
+# that refused everything would satisfy only the second.
+#
 # The callers are the deploy's drifted warning at
 # lib/Genesis/Commands/Env.pm, the publish at lib/Genesis/CI/Publish.pm, and
 # the pipelines command at lib/Genesis/Commands/Pipelines.pm.  None of them
@@ -56,7 +62,7 @@ subtest 'a diff git can take classifies what changed and what went' => sub {
 		'and all holds both of them');
 };
 
-subtest 'a diff git refuses is refused by name rather than read as clean' => sub {
+subtest 'a diff git refuses is named rather than read as clean' => sub {
 	plan tests => 2;
 
 	my $h   = make_harness(envs => ['qa'], vault => 0);
