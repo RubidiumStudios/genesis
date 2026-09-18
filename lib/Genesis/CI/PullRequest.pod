@@ -428,6 +428,14 @@ state is read off C<< $record->{pr} >> rather than off C<state> itself,
 because a run given no token at all is handed no state and the record already
 carries the one copy every reader here takes.
 
+Where a reviewer asked for changes and the fix has landed on control, the body
+closes with the paragraph C<review_paragraph> composes, opening on C<Changes
+were requested>, so a reviewer who comes back to a rebuilt branch reads their
+own words above the aggregate that answers them. It is the renderer the
+superseding body uses, given a different opening sentence, so no second body
+in this module quotes a reviewer. That state is read off C<< $record->{pr} >>
+for the same reason the supersedes paragraph's is.
+
 What the publish and the pull request sync read afterwards is left on
 C<< $record->{pr} >>: the action, the control commit the aggregate names, the
 title and the body, and the commit that was written.
